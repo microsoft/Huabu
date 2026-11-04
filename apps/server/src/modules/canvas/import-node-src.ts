@@ -45,6 +45,7 @@ import {
   toPhysicalRel,
 } from '../agent/tools/handlers/fs-sandbox.js';
 import { extractYoutubeVideoId } from '../preprocessing/loaders/youtube-id.js';
+import { outboundFetch } from '../security/outbound.js';
 import { space } from '../storage/index.js';
 
 const log = getLogger('canvas.import-node-src');
@@ -361,7 +362,7 @@ async function downloadToArtifact(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), DOWNLOAD_TIMEOUT_MS);
   try {
-    const res = await fetch(url, {
+    const res = await outboundFetch(url, {
       signal: controller.signal,
       redirect: 'follow',
     });

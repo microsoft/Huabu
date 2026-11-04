@@ -37,7 +37,10 @@ import { resolveImageUrl, MAX_INLINE_IMAGE_BYTES } from './image-inlining.js';
 import { escapeXmlAttr, escapeXmlText } from './node-element.js';
 import { InkVisualPreparationError } from './required-ink-visuals.js';
 import { isRasterizableImageMime } from '../../../../utils/mime.js';
-import { ARTIFACT_URL_REGEX } from '../../../artifact/utils.js';
+import {
+  ARTIFACT_URL_REGEX,
+  assertArtifactSourceReadable,
+} from '../../../artifact/utils.js';
 import { space } from '../../../storage/index.js';
 
 import type { AgentInputPart } from '@agenetes/protocol';
@@ -242,6 +245,7 @@ export async function buildAttachmentParts(
             resolvedFilename = att.url;
           }
           if (resolvedCanvasId && resolvedFilename) {
+            await assertArtifactSourceReadable(resolvedCanvasId);
             try {
               const bytes =
                 await space(resolvedCanvasId).artifacts.read(resolvedFilename);

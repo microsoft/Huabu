@@ -32,7 +32,10 @@ import { loadAgent } from '../../prompt/index.js';
 import { personalSettingsOwner } from '../identity/personal-settings.js';
 import { getStructuredStore } from '../storage/index.js';
 import { canvasAcpNamespace } from '../workspace/paths.js';
-import { acquireWorkspaceOperationLease } from '../workspace.js';
+import {
+  acquireWorkspaceOperationLease,
+  getWorkspaceHandle,
+} from '../workspace.js';
 
 import type {
   RealizedExternalAgentThread,
@@ -263,6 +266,7 @@ export interface ExternalAgentThreadTarget {
 }
 
 interface ActiveAgentInvocation {
+  workspaceId?: string;
   requestId?: string;
   canvasId?: string;
   abortController: AbortController;
@@ -275,6 +279,7 @@ interface ActiveAgentInvocation {
 }
 
 interface PendingAgentPreparation {
+  workspaceId?: string;
   requestId?: string;
   canvasId?: string;
   abortController: AbortController;
@@ -317,16 +322,28 @@ export class AgentThreadService {
     private readonly dependencies: AgentThreadServiceDependencies = DEFAULT_DEPENDENCIES,
   ) {}
 
+  private currentInvocation(
+    threadId: string,
+  ): ActiveAgentInvocation | undefined {
+    const active = this.activeInvocations.get(threadId);
+    return active?.workspaceId === getWorkspaceHandle()?.workspaceId
+      ? active
+      : undefined;
+  }
+
   private isRequestStopped(
     threadId: string,
     canvasId: string | undefined,
     requestId: string,
   ): boolean {
+    const workspaceId = getWorkspaceHandle()?.workspaceId;
     return (
       this.stoppedRequests.has(
-        JSON.stringify([canvasId, threadId, requestId]),
+        JSON.stringify([workspaceId, canvasId, threadId, requestId]),
       ) ||
-      this.stoppedRequests.has(JSON.stringify([undefined, threadId, requestId]))
+      this.stoppedRequests.has(
+        JSON.stringify([workspaceId, undefined, threadId, requestId]),
+      )
     );
   }
 
@@ -339,6 +356,7 @@ export class AgentThreadService {
     finish: () => void;
   } {
     const preparation: PendingAgentPreparation = {
+      workspaceId: getWorkspaceHandle()?.workspaceId,
       requestId,
       canvasId,
       abortController: new AbortController(),
@@ -451,6 +469,7 @@ export class AgentThreadService {
       resolveTurnStarted = resolve;
     });
     const active: ActiveAgentInvocation = {
+      workspaceId: getWorkspaceHandle()?.workspaceId,
       requestId: options.requestId,
       canvasId: options.canvasId,
       abortController,
@@ -757,7 +776,7 @@ export class AgentThreadService {
   }
 
   stop(threadId: string): boolean {
-    const active = this.activeInvocations.get(threadId);
+    const active = this.currentInvocation(threadId);
     if (active?.outcome || active?.phase === 'settled') return false;
     const controller = active?.abortController;
     if (!controller || controller.signal.aborted) return false;
@@ -770,18 +789,22 @@ export class AgentThreadService {
     canvasId?: string,
     requestId?: string,
   ): Promise<StopThreadResponse> {
+    const workspaceId = getWorkspaceHandle()?.workspaceId;
     if (requestId) {
-      this.stoppedRequests.add(JSON.stringify([canvasId, threadId, requestId]));
+      this.stoppedRequests.add(
+        JSON.stringify([workspaceId, canvasId, threadId, requestId]),
+      );
     }
     const pending = [...(this.pendingPreparations.get(threadId) ?? [])].filter(
       (preparation) =>
+        preparation.workspaceId === workspaceId &&
         !preparation.abortController.signal.aborted &&
         (requestId === undefined || preparation.requestId === requestId) &&
         (canvasId === undefined || preparation.canvasId === canvasId),
     );
     for (const preparation of pending) preparation.abortController.abort();
 
-    const active = this.activeInvocations.get(threadId);
+    const active = this.currentInvocation(threadId);
     if (
       active &&
       (!active.abortController.signal.aborted || requestId !== undefined) &&
@@ -837,7 +860,7 @@ export class AgentThreadService {
   }
 
   isActive(threadId: string, canvasId?: string): boolean {
-    const active = this.activeInvocations.get(threadId);
+    const active = this.currentInvocation(threadId);
     if (!active) return false;
     return active.canvasId === canvasId;
   }
@@ -846,7 +869,7 @@ export class AgentThreadService {
     threadId: string,
     canvasId?: string,
   ): Promise<boolean> {
-    const active = this.activeInvocations.get(threadId);
+    const active = this.currentInvocation(threadId);
     if (!active || (canvasId !== undefined && active.canvasId !== canvasId)) {
       return false;
     }

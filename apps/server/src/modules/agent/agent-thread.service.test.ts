@@ -17,6 +17,7 @@ import {
   externalBindingFromWorkloadSpec,
   spacePromptFromWorkloadSpec,
 } from './agent-thread.service.js';
+import { runInWorkspace } from '../workspace/context.js';
 
 import type { AcpHandle, AcpWorkloadSpec } from './agenetes/drivers.js';
 import type {
@@ -1689,6 +1690,56 @@ it('does not stop an invocation owned by another Canvas', async () => {
 
   releaseGate();
   await draining;
+});
+
+it('keeps stop tracking and readiness inside the invocation Workspace', async () => {
+  const harness = createHarness({ target: null, agentTarget: null });
+  const inWorkspace = <T>(workspaceId: string, operation: () => T) =>
+    runInWorkspace(
+      { handle: { workspaceId, name: workspaceId }, path: null },
+      operation,
+    );
+  const invocation = await inWorkspace('workspace-a', () =>
+    harness.service.invoke({
+      ...invocationOptions(),
+      requestBinding: { kind: 'internal' },
+      fixedTarget: null,
+      agentTarget: null,
+    }),
+  );
+  const preparation = inWorkspace('workspace-a', () =>
+    harness.service.beginPreparation('thread-a', 'canvas-a', 'request-a'),
+  );
+  try {
+    await inWorkspace('workspace-b', async () => {
+      expect(harness.service.isActive('thread-a', 'canvas-a')).toBe(false);
+      expect(
+        await harness.service.waitForTurnStart('thread-a', 'canvas-a'),
+      ).toBe(false);
+      expect(harness.service.stop('thread-a')).toBe(false);
+      expect(
+        await harness.service.stopAndWait('thread-a', 'canvas-a', 'request-a'),
+      ).toMatchObject({ stopped: false, acceptance: null });
+    });
+    expect(invocation.signal.aborted).toBe(false);
+    expect(preparation.signal.aborted).toBe(false);
+    const delayed = inWorkspace('workspace-a', () =>
+      harness.service.beginPreparation('thread-a', 'canvas-a', 'request-a'),
+    );
+    expect(delayed.signal.aborted).toBe(false);
+    delayed.finish();
+    await inWorkspace('workspace-a', async () => {
+      expect(harness.service.isActive('thread-a', 'canvas-a')).toBe(true);
+      expect(
+        await harness.service.stopAndWait('thread-a', 'canvas-a'),
+      ).toMatchObject({ stopped: true });
+    });
+    expect(invocation.signal.aborted).toBe(true);
+    expect(preparation.signal.aborted).toBe(true);
+  } finally {
+    preparation.finish();
+    await inWorkspace('workspace-a', () => invocation.dispose());
+  }
 });
 
 it('stops pending preparation before durable invocation starts', async () => {

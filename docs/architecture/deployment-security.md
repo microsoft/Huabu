@@ -124,6 +124,8 @@ In Bubble mode each request runs in its caller's own current Workspace, so sever
 
 An agent run keeps the Workspace it started in: its reachback URL is `/api/rfs/w/<workspaceId>/<canvasId>`, and the RFS routes under that prefix run in that Workspace whatever its starter or the process does later.
 
+Conversation stop controls, pending preparations, readiness checks, and delayed-request stop fences also belong to the run's Workspace. Matching Space and thread ids in another Workspace do not confer control. Image and file attachments require read access to their source Space before any artifact bytes enter a prompt. Member image inlining and imported-media downloads use the same public-network transport as preprocessing, including connection-time checks on redirect targets.
+
 ### Personal settings
 
 In Bubble mode a member's calls run in their own settings namespace (`modules/identity/personal-settings.ts`), carried through the request and the agent runs it starts. The secret store keeps their model keys, OAuth credentials and connected-service keys under ids of their own, and gives them no fallback to the deployment's environment variables, which are the operator's. Their model settings live under `<data>/people/<key>/`, and their agent defaults are fixed to Built-In without a personal defaults file. `/api/agent/defaults` is read-only for members. `/api/llm`, `/api/integrations`, `/api/services` and Ink OCR settings change the caller's own settings for a member and the deployment's for an administrator; the deployment's connection token and access password are never anyone's personal ones. A member with no model configured is told to add one in Settings.

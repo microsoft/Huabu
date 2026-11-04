@@ -17,6 +17,15 @@ const log = getLogger('artifact');
 // shared package directly.
 export { ARTIFACT_URL_REGEX, artifactApiPath } from '@huabu/shared';
 
+/** Authorize the source Space before any artifact bytes enter a prompt. */
+export async function assertArtifactSourceReadable(
+  canvasId: string,
+): Promise<void> {
+  const access = callerAccess();
+  if (access && !(await access.can('read', { type: 'space', id: canvasId })))
+    throw new Error('Artifact source Space is not readable');
+}
+
 /**
  * Resolve an artifact image URL to a base64 data URL.
  *
@@ -56,9 +65,7 @@ export async function resolveArtifactImageUrl(
 
   if (!canvasId || !filename) return url;
 
-  const access = callerAccess();
-  if (access && !(await access.can('read', { type: 'space', id: canvasId })))
-    throw new Error('Artifact source Space is not readable');
+  await assertArtifactSourceReadable(canvasId);
 
   try {
     const buffer = await space(canvasId).artifacts.read(filename);

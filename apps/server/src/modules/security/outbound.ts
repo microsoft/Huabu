@@ -7,6 +7,8 @@ import { BlockList, isIP } from 'node:net';
 
 import { Agent, buildConnector, fetch as undiciFetch } from 'undici';
 
+import { personalSettingsOwner } from '../identity/personal-settings.js';
+
 import type { LookupAddress, LookupOptions } from 'node:dns';
 
 /**
@@ -99,10 +101,11 @@ export function withPublicNetworkOnly<T>(operation: () => Promise<T>) {
 }
 
 export function isPublicNetworkOnly(): boolean {
-  return scope.getStore() === true;
+  // Member work also reaches this transport outside the preprocessing pipeline.
+  return scope.getStore() === true || personalSettingsOwner() !== null;
 }
 
-/** `fetch`, restricted to public addresses inside {@link withPublicNetworkOnly}. */
+/** `fetch`, restricted for members and inside {@link withPublicNetworkOnly}. */
 export const outboundFetch: typeof fetch = (input, init) =>
   isPublicNetworkOnly()
     ? (undiciFetch(input as never, {
