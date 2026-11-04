@@ -122,12 +122,14 @@ export async function host(options: { revalidationIntervalMs?: number } = {}) {
 
 /**
  * The scenarios, for one storage backend. `tmp` is a scratch directory the
- * backend's setup owns; a folder path a member must not be able to adopt.
+ * backend's setup owns; on Disk any user may adopt a folder in it.
  */
 export function describeSeveralPeople(
   backend: string,
   scratch: () => string,
 ): void {
+  // Only Disk keeps Workspaces as folders a person can open by path.
+  const folders = backend === 'Disk';
   describe(`several people on one Server (${backend})`, () => {
     it('allows concurrent first-request writes after personal Workspace provisioning', async () => {
       const { call, spacesOf } = await host();
@@ -173,16 +175,17 @@ export function describeSeveralPeople(
         200,
       );
 
-      // Members never learn where the Server keeps their folder.
+      // Where Workspaces are folders, everyone sees and may open them.
       const info = (await call('carol', 'GET', '/api/workspace')).body;
       expect(info).toMatchObject({
-        path: null,
         capabilities: {
           canChangeWorkspace: true,
           nativePicker: false,
           namedWorkspaces: true,
+          folderWorkspaces: folders,
         },
       });
+      expect(typeof info.path).toBe(folders ? 'string' : 'object');
     });
 
     it('switches only its caller, among Workspaces they may enter', async () => {
@@ -195,7 +198,8 @@ export function describeSeveralPeople(
         name: 'Side project',
       });
       expect(made.status).toBe(201);
-      expect(made.body).toMatchObject({ name: 'Side project', path: null });
+      expect(made.body.name).toBe('Side project');
+      expect(made.body.path === null).toBe(!folders);
       const listed = (await call('carol', 'GET', '/api/workspaces'))
         .body as Array<{
         workspaceId: string;
@@ -226,14 +230,43 @@ export function describeSeveralPeople(
       }
       expect(await workspaceOf('dave')).toBe(daveWs);
 
-      // Folder operations stay with the administrator.
-      expect(
-        (
-          await call('carol', 'POST', '/api/workspaces', {
-            path: join(scratch(), 'elsewhere'),
-          })
-        ).status,
-      ).toBe(400);
+      // On Disk a folder becomes its opener's Workspace; elsewhere there are
+      // no Server folders to open.
+      const opened = await call('carol', 'POST', '/api/workspaces', {
+        path: join(scratch(), 'elsewhere'),
+        name: 'Elsewhere',
+      });
+      if (folders) {
+        expect(opened.status).toBe(201);
+        expect(opened.body).toMatchObject({
+          name: 'Elsewhere',
+          path: join(scratch(), 'elsewhere'),
+        });
+        expect(
+          (
+            await call(
+              'carol',
+              'POST',
+              `/api/workspaces/${opened.body.workspaceId}/activate`,
+            )
+          ).status,
+        ).toBe(200);
+        expect(await workspaceOf('carol')).toBe(opened.body.workspaceId);
+        expect(
+          (
+            await call(
+              'dave',
+              'POST',
+              `/api/workspaces/${opened.body.workspaceId}/activate`,
+            )
+          ).status,
+        ).toBe(404);
+      } else {
+        expect(opened.status).toBe(409);
+        expect(opened.body.code).toBe('STORAGE_CAPABILITY_UNAVAILABLE');
+      }
+      // Probing arbitrary Server paths and moving the process-wide Workspace
+      // stay with local and administrator callers.
       expect(
         (
           await call('carol', 'POST', '/api/workspace/validate-path', {

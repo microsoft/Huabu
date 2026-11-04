@@ -720,6 +720,8 @@
     "intro": "Choose a Home folder to store your Spaces, notes, and artifacts.",
     "folder": "Home folder",
     "pathPlaceholder": "Type an absolute path, then press Enter",
+    "openFolder": "Open a folder",
+    "openFolderButton": "Open",
     "recent": "Recent Home folders",
     "removeRecent": "Remove from recent",
     "path": "Path: {{path}}",

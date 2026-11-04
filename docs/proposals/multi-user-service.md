@@ -56,7 +56,7 @@ This replaces #237's model. Huabu checks four capabilities, and the same names a
 | `huabu.read`   | Seeing and opening the Workspace or Space, every `GET`, search, live streams.                                                              |
 | `huabu.write`  | Editing Spaces and creating them. From PR B, also running agents and conversations in them.                                                |
 | `huabu.manage` | Renaming and deleting it, changing a Space's parent, granting roles on it. On a Workspace, also its memory, Skills and Workspace settings. |
-| `huabu.admin`  | System target only: deployment, Canary, folder Workspaces on the Server's filesystem, and People administration (PR B).                    |
+| `huabu.admin`  | System target only: deployment, Canary, moving the process-wide Workspace, and People administration (PR B).                               |
 
 Roles:
 
@@ -80,7 +80,7 @@ Roles:
 ### Workspaces for members
 
 - **Personal Workspace.** On a member's first admitted request with no readable Workspace, Huabu creates "<name>'s Workspace" and grants them `huabu.workspace.owner` on it, under a per-principal lock so two first requests create one.
-- **Management.** `GET /api/workspaces` lists the Workspaces a caller can read. Any member may create one. Activating needs `huabu.read`; rename and delete need `huabu.manage`. Folder picking and path validation need `huabu.admin`, because they reach the Server's filesystem. On Disk storage, a member's new Workspace goes under the data directory.
+- **Management.** `GET /api/workspaces` lists the Workspaces a caller can read. Any member may create one. Activating needs `huabu.read`; rename and delete need `huabu.manage`. On Disk storage, a member's new Workspace goes under the data directory, and any user may also open a Server folder by path as a Workspace of their own, with no further guard: Disk is a debugging setup, not a deployment for strangers. Postgres/Azure and SQLite storage have no Workspace folders and refuse every path. Native folder dialogs, path probing and moving the process-wide Workspace stay with local and administrator callers on localhost.
 - **System owner.** A system owner can reach every Workspace through Bubble's system-owner rule, and has a current Workspace like anyone else.
 
 ### Agents in PR A

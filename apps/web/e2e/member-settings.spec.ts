@@ -241,5 +241,68 @@ test('Bubble administrators see People in the current Settings navigation', asyn
       exact: true,
     }),
   ).toBeVisible();
+  await expect(
+    dialog.getByRole('button', { name: en.people.resetDevices, exact: true }),
+  ).toHaveCount(2);
   await page.screenshot({ path: testInfo.outputPath('people-settings.png') });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.screenshot({
+    path: testInfo.outputPath('people-settings-mobile.png'),
+  });
+});
+
+test('Bubble users open a Server folder as a Workspace where Workspaces are folders', async ({
+  page,
+}, testInfo) => {
+  await page.route('**/api/identity', (route) =>
+    route.fulfill({ json: member }),
+  );
+  const workspace = {
+    workspaceId: '11111111-1111-4111-8111-111111111111',
+    name: "Carol's Workspace",
+    path: '/srv/huabu/data/people/carol',
+    active: true,
+  };
+  const opened: unknown[] = [];
+  await page.route('**/api/workspace', (route) =>
+    route.fulfill({
+      json: {
+        mode: 'free',
+        configured: true,
+        workspaceId: workspace.workspaceId,
+        path: workspace.path,
+        name: workspace.name,
+        worldCanvasId: 'world',
+        capabilities: {
+          canChangeWorkspace: true,
+          nativePicker: false,
+          namedWorkspaces: true,
+          folderWorkspaces: true,
+          canCreateSpaces: true,
+        },
+      },
+    }),
+  );
+  await page.route('**/api/workspaces', (route) => {
+    if (route.request().method() === 'POST') {
+      opened.push(route.request().postDataJSON());
+      return route.fulfill({ status: 500, json: { message: 'Stop here' } });
+    }
+    return route.fulfill({ json: [workspace] });
+  });
+  await page.goto('/setup');
+  const folder = page.getByLabel(en.workspace.openFolder, { exact: true });
+  await expect(folder).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath('setup-folders.png') });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.screenshot({
+    path: testInfo.outputPath('setup-folders-mobile.png'),
+  });
+  await page.evaluate(() => document.documentElement.classList.add('dark'));
+  await page.screenshot({
+    path: testInfo.outputPath('setup-folders-mobile-dark.png'),
+  });
+  await folder.fill('/srv/notes');
+  await folder.press('Enter');
+  await expect.poll(() => opened).toEqual([{ path: '/srv/notes' }]);
 });

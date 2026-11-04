@@ -720,6 +720,8 @@
     "intro": "选择一个 Home 文件夹来保存你的 Space、笔记和产物。",
     "folder": "Home 文件夹",
     "pathPlaceholder": "输入绝对路径，然后按 Enter",
+    "openFolder": "打开文件夹",
+    "openFolderButton": "打开",
     "recent": "最近的 Home 文件夹",
     "removeRecent": "从最近列表中移除",
     "path": "路径：{{path}}",
