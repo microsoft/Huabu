@@ -78,6 +78,7 @@ vi.mock('../workspace/paths.js', () => ({
 }));
 
 import agentRoutes from './agent.route.js';
+import { AgentThreadResolutionError } from './agent-thread-resolver.js';
 import { InkAgentModeError } from './ink-response.js';
 import { setRequestIdentity } from '../identity/request.js';
 import { registerSpaceAccess } from '../security/space-access.js';
@@ -187,6 +188,49 @@ describe('POST /agent', () => {
         'mine',
         undefined,
       );
+    } finally {
+      await app.close();
+    }
+  });
+  it('stops a turn whose Question node no longer resolves', async () => {
+    const app = Fastify();
+    app.addHook('onRequest', async (request) => {
+      setRequestIdentity(request, {
+        principal: { principalId: 'carol', kind: 'user' },
+        member: true,
+        owner: false,
+        access: {
+          can: async (_level, resource) => resource.id === 'mine',
+          claim: async () => {},
+          workspaces: async () => 'all',
+        },
+      });
+    });
+    registerSpaceAccess(app);
+    await app.register(agentRoutes, { prefix: '/api/agent' });
+    mocks.resolveExternalTarget.mockRejectedValue(
+      new AgentThreadResolutionError('duplicate_thread', 'Duplicated'),
+    );
+    mocks.stopAndWait.mockResolvedValue({ stopped: true, acceptance: null });
+    try {
+      const stop = await app.inject({
+        method: 'POST',
+        url: '/api/agent/stop/thread-a?canvasId=mine',
+        payload: {},
+      });
+      expect(stop.statusCode).toBe(200);
+      expect(mocks.stopAndWait).toHaveBeenCalledWith(
+        'thread-a',
+        'mine',
+        undefined,
+      );
+      const start = await app.inject({
+        method: 'POST',
+        url: '/api/agent',
+        payload: { canvasId: 'mine', threadId: 'thread-a' },
+      });
+      expect(start.statusCode).toBe(409);
+      expect(start.json()).toMatchObject({ code: 'duplicate_thread' });
     } finally {
       await app.close();
     }

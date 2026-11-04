@@ -230,6 +230,9 @@ const agentRoutes: FastifyPluginAsync = async (
         });
     } catch (error) {
       if (error instanceof AgentThreadResolutionError) {
+        // Stopping starts nothing: a Question node that no longer resolves
+        // (duplicated, emptied, rebound) must not keep its turn running.
+        if (request.routeOptions.url?.endsWith('/stop/:threadId')) return;
         return reply
           .code(error.code === 'canvas_not_found' ? 404 : 409)
           .send({ message: error.message, code: error.code });
