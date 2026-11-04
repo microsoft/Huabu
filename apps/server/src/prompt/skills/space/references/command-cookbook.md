@@ -12,7 +12,7 @@ Composed `space_commands` sequences for common user intents. When a step needs t
 | Brainstorm from a source               | `CREATE_NODES` (multiple ideas) `⇒` `CONNECT_NODES` (each → source)                                                                             |
 | Merge / synthesize                     | `read("nodes/<filename>.md")` for inputs → `CREATE_NODES` (synthesised note) `⇒` `DELETE_NODES` (originals) + `CONNECT_NODES` (link to context) |
 | Restyle a cluster                      | `MERGE_NODE_DATA` with `style.accent` on each member (one call)                                                                                 |
-| Tidy a row of nodes                    | `ALIGN_NODES` (axis) → `DISTRIBUTE_NODES` (one call)                                                                                            |
+| Spread a crowded cluster apart        | `DISTRIBUTE_NODES` (≥3 nodes) → inspect final geometry                                                                  |
 | Convert a frame back to siblings       | `DISSOLVE_FRAME`                                                                                                                                |
 | Move a node into a frame               | `SET_NODE_PARENT { nodeId, parentId }`                                                                                                          |
 | Detach a node from its frame           | `SET_NODE_PARENT { nodeId, parentId: null } `                                                                                                   |
@@ -25,7 +25,7 @@ Goal: turn one node into a fan of related ideas.
 1. `read("nodes/<filename>.md")` if you need its actual content.
 2. Create call — `CREATE_NODES`: N idea nodes with explicit positions placed in a fan around the source. Same `style.accent` so they read as a group. Read the assigned ids back from `results[].nodes`.
 3. Follow-up call — `CONNECT_NODES`: one edge per idea, source → idea, using the ids from step 2. Use `direction: "forward"` if the cause→effect direction is obvious.
-4. Optional polish: `ALIGN_NODES` if the fan should sit on a clean line, then `DISTRIBUTE_NODES` (can ride along with step 3).
+4. Optional polish: `ALIGN_NODES` if the fan should sit on a clean line.
 
 ## Recipe: merge / synthesise N notes into one
 
@@ -45,14 +45,10 @@ Goal: take a loose group of nodes and put them in a frame with a meaningful titl
 3. Follow-up call — `SET_NODE_PARENT` with all member `nodeIds` and the returned `parentId`. The engine preserves their absolute positions and fits the Hug Frame around them, including its responsive title inset and padding. Do not calculate these insets or overwrite the fitted geometry. For a new row, column, or grid arrangement, use `SET_FRAME_LAYOUT` as described in [Layout Recipes](./layout-recipes.md#structured-frame-layout-column--row--grid).
 4. Optional: `MERGE_NODE_DATA` to give every member the same `style.accent` for visual cohesion with the frame (can ride along with step 3, since members already exist).
 
-## Recipe: tidy a row / column
+## Recipe: spread a crowded cluster apart
 
-Goal: pixel-perfect alignment after manual placement.
-
-Single call:
-
-1. `ALIGN_NODES` — pick the axis (`top`, `middle-h`, `bottom`, `left`, `center-v`, `right`) that makes the row read straight.
-2. `DISTRIBUTE_NODES` — only meaningful for ≥3 nodes; pick the same axis as the alignment.
+1. Inspect the cluster, then call `DISTRIBUTE_NODES` on the nodes allowed to move.
+2. Check the resulting layout against nearby nodes. For exact equal gaps in a free layout, calculate positions and use `SET_NODE_GEOMETRY` instead.
 
 ## Recipe: redirect / rewire a connection
 

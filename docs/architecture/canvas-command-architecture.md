@@ -106,6 +106,7 @@ Same-parent move validation treats both a persisted `null` parent and an absent 
 - `SET_NODE_PARENT` rejects invalid targets, non-Container parents, or cycles. Frames are the only persistent Container type; `spacePreview` nodes may be Frame children but cannot own children.
 - `CONNECT_NODES` rejects the command (`applied: false`, `reason: 'invalid-target'`) when any edge endpoint is not a live node — it never silently drops the edge.
 - `ALIGN_NODES` aligns provided nodes without relying on selection.
+- `DISTRIBUTE_NODES` means "Spread apart", not equal spacing. It requires at least three IDs and uses `spreadNodes` with a 24px gap within each parent group; unlisted nodes are not obstacles. The command name remains unchanged for compatibility.
 
 Every `CanvasCommand`:
 
