@@ -239,9 +239,10 @@ export async function getAcpThreadCachedMeta(
 export async function respondAcpPermission(
   threadId: string,
   decision: AcpPermissionDecisionRequest,
+  canvasId: string,
 ): Promise<AcpPermissionDecisionResponse> {
   return apiFetch<AcpPermissionDecisionResponse>(
-    routes.acpThreadPermission(threadId),
+    routes.acpThreadPermission(threadId, canvasId),
     {
       method: 'POST',
       json: decision,

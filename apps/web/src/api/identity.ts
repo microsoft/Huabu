@@ -110,7 +110,7 @@ export async function signOut(
   const { forgetTokens, providerSignOutUrl, heldAuthenticator } =
     await import('../utils/oidcLogin');
   const signedInAuthenticator = heldAuthenticator();
-  forgetTokens();
+  forgetTokens({ keepProvider: true });
   await Promise.allSettled([...adoptions]);
   try {
     await endSession();
@@ -118,6 +118,7 @@ export async function signOut(
     signingOut = false;
     throw error;
   }
+  forgetTokens();
   if (options.providerSignOut) {
     const authenticators = signedInAuthenticator
       ? []

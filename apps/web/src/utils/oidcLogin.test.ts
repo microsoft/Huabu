@@ -112,37 +112,54 @@ describe('session renewal', () => {
     expect(heldAuthenticator()).toBeNull();
   });
 
-  it('logs out the selected provider when multiple providers are configured', async () => {
-    const assign = vi
-      .spyOn(window.location, 'assign')
-      .mockImplementation(() => {});
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-        if (init?.method === 'DELETE')
-          return new Response(null, { status: 204 });
-        if (String(input).includes('/bubble/'))
+  it.each([false, true])(
+    'logs out the selected provider with multiple providers (retry=%s)',
+    async (retry) => {
+      const assign = vi
+        .spyOn(window.location, 'assign')
+        .mockImplementation(() => {});
+      let deleteAttempts = 0;
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+          if (init?.method === 'DELETE') {
+            deleteAttempts += 1;
+            return new Response(null, {
+              status: retry && deleteAttempts === 1 ? 503 : 204,
+            });
+          }
+          if (String(input).includes('/bubble/'))
+            return Response.json({
+              authenticators: [
+                ENTRA,
+                { ...ENTRA, driver: 'auth0', issuer: 'https://auth0.example' },
+              ],
+            });
+          if (String(input).endsWith('openid-configuration'))
+            return Response.json({
+              token_endpoint: 'https://login.example/token',
+              end_session_endpoint: 'https://login.example/logout',
+            });
           return Response.json({
-            authenticators: [
-              ENTRA,
-              { ...ENTRA, driver: 'auth0', issuer: 'https://auth0.example' },
-            ],
+            access_token: 'initial',
+            refresh_token: 'r1',
           });
-        if (String(input).endsWith('openid-configuration'))
-          return Response.json({
-            token_endpoint: 'https://login.example/token',
-            end_session_endpoint: 'https://login.example/logout',
-          });
-        return Response.json({ access_token: 'initial', refresh_token: 'r1' });
-      }),
-    );
-    await holdRefreshToken();
-    await signOut({ providerSignOut: true });
-    expect(assign).toHaveBeenCalledWith(
-      expect.stringContaining('https://login.example/logout?'),
-    );
-    expect(heldAuthenticator()).toBeNull();
-  });
+        }),
+      );
+      await holdRefreshToken();
+      if (retry) {
+        await expect(signOut({ providerSignOut: true })).rejects.toThrow();
+        expect(await refreshTokens()).toBeNull();
+        expect(heldAuthenticator()).toEqual(ENTRA);
+        expect(assign).not.toHaveBeenCalled();
+      }
+      await signOut({ providerSignOut: true });
+      expect(assign).toHaveBeenCalledWith(
+        expect.stringContaining('https://login.example/logout?'),
+      );
+      expect(heldAuthenticator()).toBeNull();
+    },
+  );
 });
 
 describe('signing in again in a popup', () => {

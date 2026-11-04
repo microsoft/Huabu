@@ -441,6 +441,14 @@ export type AcpProfileCapabilitiesResponse = z.infer<
   typeof acpProfileCapabilitiesResponseSchema
 >;
 
+/** Owning Space; required for permission answers in Bubble mode. */
+export const acpPermissionDecisionQuerySchema = z.object({
+  canvasId: z.string().min(1).optional(),
+});
+export type AcpPermissionDecisionQuery = z.infer<
+  typeof acpPermissionDecisionQuerySchema
+>;
+
 /** Schema mirror of {@link AcpPermissionDecisionRequest}. */
 export const acpPermissionDecisionSchema = z.object({
   requestId: z.string().min(1),

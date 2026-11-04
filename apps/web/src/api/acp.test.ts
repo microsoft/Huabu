@@ -7,10 +7,26 @@ import { ApiError } from './_client';
 import {
   listAcpAgentClis,
   loadAcpProfileCapabilities,
+  respondAcpPermission,
   updateAcpProfile,
 } from './acp';
 
 afterEach(() => vi.unstubAllGlobals());
+
+it('answers permissions in the owning Space and encodes both identities', async () => {
+  const fetch = vi.fn().mockResolvedValue(Response.json({ resolved: true }));
+  vi.stubGlobal('fetch', fetch);
+  const decision = { requestId: 'pending', optionId: 'allow' };
+  expect(await respondAcpPermission('thread/#1', decision, 'space/#2')).toEqual(
+    { resolved: true },
+  );
+  expect(fetch).toHaveBeenCalledExactlyOnceWith(
+    expect.stringMatching(
+      /\/acp\/threads\/thread%2F%231\/permission\?canvasId=space%2F%232$/,
+    ),
+    expect.objectContaining({ method: 'POST', body: JSON.stringify(decision) }),
+  );
+});
 
 describe('ACP Profile editing API', () => {
   it('reuses a Profile capability cache without a POST', async () => {

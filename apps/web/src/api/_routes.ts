@@ -199,8 +199,8 @@ export const routes = {
     const params = qs.length ? `?${qs.join('&')}` : '';
     return `/acp/threads/${enc(threadId)}/cached-meta${params}`;
   },
-  acpThreadPermission: (threadId: string) =>
-    `/acp/threads/${enc(threadId)}/permission`,
+  acpThreadPermission: (threadId: string, canvasId: string) =>
+    `/acp/threads/${enc(threadId)}/permission?canvasId=${enc(canvasId)}`,
   acpThreadMode: (threadId: string) => `/acp/threads/${enc(threadId)}/mode`,
   acpThreadModel: (threadId: string) => `/acp/threads/${enc(threadId)}/model`,
   acpThreadConfigOption: (threadId: string) =>

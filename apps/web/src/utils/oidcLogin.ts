@@ -320,14 +320,18 @@ export function heldAuthenticator(): InteractiveAuthenticator | null {
 }
 
 /** Forget the refresh token, as signing out must. */
-export function forgetTokens(): void {
+export function forgetTokens({
+  keepProvider = false,
+}: { keepProvider?: boolean } = {}): void {
   tokenGeneration += 1;
   held = null;
-  signedInAuthenticator = null;
-  try {
-    sessionStorage.removeItem(PROVIDER_KEY);
-  } catch {
-    /* Storage may be disabled. */
+  if (!keepProvider) {
+    signedInAuthenticator = null;
+    try {
+      sessionStorage.removeItem(PROVIDER_KEY);
+    } catch {
+      /* Storage may be disabled. */
+    }
   }
   refreshing = null;
 }

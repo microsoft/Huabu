@@ -5,16 +5,20 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { mountAgenetes as mountAgentRuntime } from '@agenetes/agenetes';
 import {
   getAgentProfileRegistry,
   getAgentletGateway,
   mountAgenetes,
   resolveConnectedAgentletId,
 } from '@agenetes/agentlet-host';
+import { agentSpecSchema } from '@agenetes/protocol';
+import { defineDriver } from '@agenetes/runtime';
 import { PROTOCOL_VERSION } from '@agentlet/protocol';
 import { InMemoryBubbleStore } from '@octostaff/bubble';
 import Fastify from 'fastify';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { z } from 'zod';
 
 import {
   agentReachbackEnvironment,
@@ -39,10 +43,18 @@ import {
 import connectionRoutes from '../agent/acp/connection-token.route.js';
 import deviceFilesRoutes from '../agent/acp/device-files.route.js';
 import profilesRoutes from '../agent/acp/profiles.route.js';
+import threadsRoutes from '../agent/acp/threads.route.js';
+import { agenetes } from '../agent/agenetes/index.js';
 import defaultsRoutes from '../agent/agent-defaults.route.js';
 import { registerSpaceAccess } from '../security/space-access.js';
+import { createSpace } from '../storage/index.js';
+import { mountTestWorkspace } from '../storage/testing.js';
+import { runInWorkspace } from '../workspace/context.js';
+import { canvasAcpNamespace } from '../workspace/paths.js';
+import { getWorkspaceHandle } from '../workspace.js';
 
 import type { ResourceDirectory } from './service.js';
+import type { WorkspaceScope } from '../workspace/context.js';
 import type { FastifyInstance } from 'fastify';
 
 let tmp: string;
@@ -57,6 +69,7 @@ beforeEach(() => {
 afterEach(async () => {
   await app?.close();
   vi.unstubAllEnvs();
+  vi.restoreAllMocks();
   _resetConnectionTokenForTests();
   rmSync(tmp, { recursive: true, force: true });
 });
@@ -65,13 +78,21 @@ const headers = (id: string) => ({
   authorization: 'Bearer master',
   'x-bubble-principal-id': id,
 });
-async function host(admin: boolean) {
+async function host(
+  admin: boolean,
+  scope: WorkspaceScope = {
+    handle: { workspaceId: 'w1', name: 'Shared' },
+    path: null,
+  },
+) {
   const store = new InMemoryBubbleStore();
-  const scope = { handle: { workspaceId: 'w1', name: 'Shared' }, path: null };
   const resources: ResourceDirectory = {
     workspaceExists: async () => true,
-    spaceParent: async () => ({ type: 'workspace', id: 'w1' }),
-    workspaceOfSpace: async () => 'w1',
+    spaceParent: async () => ({
+      type: 'workspace',
+      id: scope.handle.workspaceId,
+    }),
+    workspaceOfSpace: async () => scope.handle.workspaceId,
     openWorkspace: async () => scope,
     defaultWorkspace: async () => scope,
     lockedWorkspace: async () => scope,
@@ -100,7 +121,7 @@ async function host(admin: boolean) {
       grantedByPrincipalId: null,
     });
     await store.grants.add({
-      target: { type: 'huabu.workspace', id: 'w1' },
+      target: { type: 'huabu.workspace', id: scope.handle.workspaceId },
       principalId: id,
       role: 'huabu.workspace.owner',
       grantedByPrincipalId: null,
@@ -126,6 +147,7 @@ async function host(admin: boolean) {
   app.register(connectionRoutes, { prefix: '/api/acp' });
   app.register(deviceFilesRoutes, { prefix: '/api/acp' });
   app.register(defaultsRoutes, { prefix: '/api/agent/defaults' });
+  app.register(threadsRoutes, { prefix: '/api/acp' });
   app.get('/api/rfs/w/:workspaceId/:canvasId/probe', async (request) => ({
     principalId: getRequestIdentity(request)?.principal.principalId,
     settingsOwner: personalSettingsOwner(),
@@ -138,6 +160,96 @@ async function host(admin: boolean) {
     });
   return { store, service: bubble.service, as };
 }
+
+it.each([false, true])(
+  'authorizes permission answers through the query Space and canonical private device (admin=%s)',
+  async (admin) => {
+    const opened = await mountTestWorkspace({
+      structured: { kind: 'disk' },
+      blobs: { kind: 'disk' },
+    });
+    const handle = getWorkspaceHandle();
+    if (!handle) throw new Error('No test Workspace');
+    const scope: WorkspaceScope = {
+      handle,
+      path: opened.workspacePath,
+    };
+    const answer = vi.fn().mockResolvedValue({ ok: true });
+    const runtime = mountAgentRuntime({
+      drivers: {
+        external: defineDriver({
+          schemaVersion: 1,
+          workloadTypes: ['Deployment'],
+          specSchema: agentSpecSchema.extend({ agentletId: z.string() }),
+          stateSchema: z.object({}),
+          initialState: () => ({}),
+          create: () =>
+            ({
+              capabilities: {},
+              async *run() {},
+              control: answer,
+              close() {},
+            }) as never,
+        }),
+      },
+    });
+    vi.spyOn(agenetes, 'record').mockImplementation((...args) =>
+      runtime.record(...args),
+    );
+    vi.spyOn(agenetes, 'get').mockImplementation((...args) =>
+      runtime.get(...args),
+    );
+    const namespace = await runInWorkspace(scope, async () => {
+      await createSpace('shared', 'Shared');
+      await createSpace('other', 'Other');
+      return canvasAcpNamespace('shared');
+    });
+    try {
+      const h = await host(admin, scope);
+      await authenticateUserAgentlet(h.service)(
+        'alice-device',
+        await h.as('alice', ownDeviceCredential),
+      );
+      await runtime.create({
+        kind: 'external',
+        workloadType: 'Deployment',
+        namespace,
+        threadId: 'alice-thread',
+        spec: { agentletId: 'alice-device' },
+      });
+      const decide = (user: string, query = '', extra = {}) =>
+        app.inject({
+          method: 'POST',
+          url: `/api/acp/threads/alice-thread/permission${query}`,
+          headers: headers(user),
+          payload: { requestId: 'pending', optionId: 'allow', ...extra },
+        });
+      expect((await decide('bob', '', { canvasId: 'shared' })).statusCode).toBe(
+        400,
+      );
+      expect(answer).not.toHaveBeenCalled();
+      expect((await decide('bob', '?canvasId=shared')).statusCode).toBe(403);
+      expect(answer).not.toHaveBeenCalled();
+      expect((await decide('alice', '?canvasId=other')).statusCode).toBe(404);
+      expect(answer).not.toHaveBeenCalled();
+      expect(
+        (await decide('alice', '?canvasId=shared&canvasId=other')).statusCode,
+      ).toBe(400);
+      expect(answer).not.toHaveBeenCalled();
+      expect((await decide('alice', '?canvasId=shared')).json()).toEqual({
+        resolved: true,
+      });
+      expect(answer).toHaveBeenCalledExactlyOnceWith({
+        type: 'answer_permission',
+        data: { requestId: 'pending', decision: { optionId: 'allow' } },
+      });
+    } finally {
+      await runtime.close('alice-thread', namespace);
+      await app?.close();
+      await opened.close();
+    }
+  },
+);
 
 it.each([false, true])(
   'keeps devices, profiles and defaults private for two users (admin=%s)',

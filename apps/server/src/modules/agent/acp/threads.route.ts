@@ -8,6 +8,7 @@ import {
 } from '@agenetes/agentlet-host';
 
 import {
+  acpPermissionDecisionQuerySchema,
   acpPermissionDecisionSchema,
   acpThreadCachedMetaQuerySchema,
   setAcpSessionConfigOptionRequestSchema,
@@ -25,6 +26,7 @@ import {
   rememberProfileSessionPreference,
 } from './profile-session-preferences.js';
 import { requireOwnAgentlet } from '../../identity/agent-credentials.js';
+import { personalSettingsOwner } from '../../identity/personal-settings.js';
 import { canvasAcpNamespace } from '../../workspace/paths.js';
 import { agenetes } from '../agenetes/index.js';
 
@@ -321,12 +323,26 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
     // `permission_request` emitted during an in-flight `session/prompt`),
     // so a live handle for this thread is the precondition. `get` never
     // spawns one (I9.3): a missing handle is a dead-session 404.
-    const { canvasId } = request.query as { canvasId?: string };
+    const query = acpPermissionDecisionQuerySchema.safeParse(request.query);
+    const personal = personalSettingsOwner() !== null;
+    if (!query.success || (personal && !query.data.canvasId)) {
+      return reply.status(400).send({
+        message: 'A valid Space query is required',
+        code: 'validation_failed',
+      });
+    }
+    const { canvasId } = query.data;
     const namespace = canvasId ? canvasAcpNamespace(canvasId) : undefined;
     const record = namespace
       ? await agenetes.record(namespace, threadId)
       : undefined;
     const agentletId = resolveThreadAgentletId(record);
+    if (personal && !agentletId) {
+      return reply.status(404).send({
+        message: 'No ACP session for this thread',
+        code: 'session_not_found',
+      });
+    }
     if (agentletId) requireOwnAgentlet(agentletId);
     const handle = agenetes.get(threadId, namespace);
     if (!handle) {
