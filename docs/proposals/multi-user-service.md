@@ -125,6 +125,15 @@ Bubble mode accepts user-owned remote devices and does not supervise an unowned 
 - Agent invocation rechecks the final binding under the turn lease. External realization and controls authorize the canonical device even when using a persisted binding or a cached handle.
 - Session refresh shares one in-flight token exchange, retains the selected provider for logout, and discards a refresh that finishes after sign-out. Popup failures reach the existing sign-in error alert. Recovery uses main's save drain to retry retained sidecar failures while keeping its conflict and restoration guards.
 
+### Shared Spaces
+
+A run, its pending preparations and stop requests belong to their Workspace and Space, not to whoever started them: anyone who may use the Space sees a turn running, may stop it (external agents still need their device owner), and Space moves and deletes refuse while it runs. Memory passes on one Space are serialized whoever schedules them, and a coalesced follow-up runs in its latest requester's settings. Identical preprocessing requests for one Space are coalesced across its viewers.
+
+### Deferred
+
+- **More member model providers.** Members can use OpenAI-compatible, Azure OpenAI Responses and Anthropic Messages providers. Google (Gemini, Vertex), Bedrock and Mistral adapters bring their own HTTP transport and cannot honor the public-network guard, so they stay hidden until each is routed through it.
+- **Sessions across reload.** Refresh tokens stay in page memory; a reload after the access token expires signs in again, usually silently through the provider's own session.
+
 ### Grant administration
 
 `/api/people`, and a People tab for system owners, list principals, admit and revoke `member`, and give or remove Workspace roles. Revocation applies on the next request, and to open streams within 30 seconds.
