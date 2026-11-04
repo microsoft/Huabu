@@ -11,6 +11,7 @@ import { migrateSpaceGrants, openBubbleIdentity } from './bubble.js';
 import { registerIdentity } from './http.js';
 import { createMemoryWorkspacePreferences } from './preferences.js';
 import { getRequestIdentity } from './request.js';
+import agentDefaultsRoutes from '../agent/agent-defaults.route.js';
 import { isOwnerRequest } from '../security/owner.js';
 import { registerSpaceAccess } from '../security/space-access.js';
 import { getWorkspaceHandle } from '../workspace.js';
@@ -141,6 +142,7 @@ async function host(
   });
   void app.register(bubble.plugin, { prefix: '/bubble' });
   registerSpaceAccess(app);
+  app.register(agentDefaultsRoutes, { prefix: '/api/agent/defaults' });
   app.get('/', { config: { identity: 'shell' } }, async () => 'shell');
   app.get('/api/data', async () => ({ private: true }));
   app.get('/api/workspace', async () => ({
@@ -221,6 +223,29 @@ function connects(
 }
 
 describe('Bubble identity', () => {
+  it.each(['/api/agent/defaults', '/api/agent/defaults/'])(
+    'lets a member read fixed defaults without a Space at %s',
+    async (url) => {
+      const { app, store } = await host();
+      await grant(store, 'carol', 'member');
+      const response = await app.inject({ url, headers: as('carol') });
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toEqual({
+        defaults: { profileId: 'huabu', functionalModel: '' },
+        selectionState: 'available',
+        modelCapability: 'supported',
+      });
+      const write = await app.inject({
+        method: 'PUT',
+        url,
+        headers: as('carol'),
+        payload: { profileId: 'huabu', functionalModel: '' },
+      });
+      expect(write.statusCode).toBe(403);
+      expect(write.json().code).toBe('ADMIN_REQUIRED');
+    },
+  );
+
   it('admits the provisioned owner by master key, and other principals only as themselves', async () => {
     const { app } = await host();
     const identity = await app.inject({
@@ -854,3 +879,34 @@ it('retains the old Workspace grant if adding the replacement role fails and pro
     )?.workspaces,
   ).toEqual([{ workspaceId: 'w1', role: 'owner' }]);
 });
+
+it.each(['viewer', null] as const)(
+  'serializes concurrent Workspace role replacements ending in %s',
+  async (role) => {
+    const store = new InMemoryBubbleStore();
+    const { service, plugin } = await openBubbleIdentity({
+      store,
+      authenticator: AUTHENTICATORS,
+      preferences: createMemoryWorkspacePreferences(),
+      resources: directory(),
+    });
+    const app = Fastify();
+    servers.push(app);
+    await app.register(plugin);
+    await app.ready();
+    await store.principals.upsert({ principalId: 'erin', kind: 'user' });
+    const target = { type: 'huabu.workspace', id: 'w1' } as const;
+    await grant(store, 'erin', 'huabu.workspace.editor', target);
+
+    await Promise.all([
+      service.people.setWorkspaceRole('erin', 'w1', 'owner', 'admin'),
+      service.people.setWorkspaceRole('erin', 'w1', role, 'admin'),
+    ]);
+
+    expect(
+      (await store.grants.list({ target, principalId: 'erin' })).map(
+        (grant) => grant.role,
+      ),
+    ).toEqual(role ? ['huabu.workspace.viewer'] : []);
+  },
+);

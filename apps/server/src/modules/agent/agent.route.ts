@@ -441,6 +441,14 @@ const agentRoutes: FastifyPluginAsync = async (
     if (!parsedQuery.success) {
       return reply.code(400).send({ message: 'Invalid query parameters' });
     }
+    if (
+      !parsedQuery.data.canvasId &&
+      getRequestIdentity(request)?.owner === false
+    )
+      return reply.code(400).send({
+        message: 'A conversation is addressed through its query Space',
+        code: 'SPACE_ACCESS_AMBIGUOUS',
+      });
     return reply.send(
       await agentThreadService.stopAndWait(
         threadId,

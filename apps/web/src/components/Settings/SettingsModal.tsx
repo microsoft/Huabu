@@ -89,9 +89,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const loadDeploymentReadiness = useDeploymentReadinessStore((s) => s.load);
   const requestedTab = useSettingsUiStore((s) => s.requestedTab);
   const clearRequestedTab = useSettingsUiStore((s) => s.clearRequestedTab);
-  const [activeTab, setActiveTab] = useState<SettingsTab>(
+  const [selectedTab, setSelectedTab] = useState<SettingsTab>(
     member ? 'agentSettings' : TABS[0].id,
   );
+  const targetTab = (isOpen && requestedTab) || selectedTab;
+  const activeTab =
+    member && (targetTab === 'agent' || targetTab === 'people')
+      ? 'agentSettings'
+      : targetTab;
   const isAgentTab = activeTab === 'agentSettings' || activeTab === 'builtIn';
   const [externalAgentsNavigation, setExternalAgentsNavigation] =
     useState<ExternalAgentsNavigation | null>(null);
@@ -113,22 +118,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   // the tab the user last viewed.
   useEffect(() => {
     if (isOpen && requestedTab) {
-      setActiveTab(
-        member && (requestedTab === 'agent' || requestedTab === 'people')
-          ? 'agentSettings'
-          : requestedTab,
-      );
+      setSelectedTab(activeTab);
       clearRequestedTab();
     }
-  }, [isOpen, requestedTab, member, clearRequestedTab]);
+  }, [isOpen, requestedTab, activeTab, clearRequestedTab]);
 
   useEffect(() => {
-    if (member && (activeTab === 'agent' || activeTab === 'people'))
-      setActiveTab('agentSettings');
-  }, [member, activeTab]);
-
-  useEffect(() => {
-    if (!isOpen && activeTab === 'builtIn') setActiveTab('agentSettings');
+    if (!isOpen && activeTab === 'builtIn') setSelectedTab('agentSettings');
   }, [isOpen, activeTab]);
 
   useEffect(() => {
@@ -139,16 +135,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   // Load each registry only when its owning tab is visible.
   useEffect(() => {
     if (!isOpen) return;
-    const targetTab =
-      member && (requestedTab === 'agent' || requestedTab === 'people')
-        ? 'agentSettings'
-        : (requestedTab ?? activeTab);
-    if (!member && (targetTab === 'agent' || targetTab === 'agentSettings'))
+    if (!member && (activeTab === 'agent' || activeTab === 'agentSettings'))
       void acpInit();
-    if (targetTab === 'builtIn' || (targetTab === 'agentSettings' && member)) {
+    if (activeTab === 'builtIn' || (activeTab === 'agentSettings' && member)) {
       void llmInit();
     }
-  }, [isOpen, requestedTab, activeTab, member, llmInit, acpInit]);
+  }, [isOpen, activeTab, member, llmInit, acpInit]);
 
   // Close on Escape.
   useEffect(() => {
@@ -236,7 +228,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 variant="ghost"
                 tone="neutral"
                 size="md"
-                onClick={() => setActiveTab(id)}
+                onClick={() => setSelectedTab(id)}
                 aria-current={active ? 'page' : undefined}
                 className={`focus-visible:outline-info min-h-8 w-full justify-center gap-2 rounded-md px-2 py-0 text-center text-[13px] focus-visible:outline-2 focus-visible:outline-offset-2 sm:justify-start sm:text-left ${
                   active
@@ -275,7 +267,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   title={t('settings.backToAgents')}
                   onClick={
                     activeTab === 'builtIn'
-                      ? () => setActiveTab('agentSettings')
+                      ? () => setSelectedTab('agentSettings')
                       : externalAgentsNavigation?.onBack
                   }
                 >
@@ -352,7 +344,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         variant="outline"
                         size="field"
                         aria-label={t('settings.builtInPiConfigure')}
-                        onClick={() => setActiveTab('builtIn')}
+                        onClick={() => setSelectedTab('builtIn')}
                       >
                         {t('settings.configure')}
                       </Button>

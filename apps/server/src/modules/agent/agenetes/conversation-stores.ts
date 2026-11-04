@@ -155,9 +155,14 @@ export const conversationThreadStore: ThreadStore = {
       ),
     ),
   get: (namespace, threadId) =>
-    inNamespace(namespace, (current, backing) =>
-      backing.threads.get(current, threadId),
-    ),
+    inNamespace(namespace, async (current, backing) => {
+      const record = await backing.threads.get(current, threadId);
+      // Recovered records may predate stable ownership or a Space rename.
+      // Their storage port has already verified the current Workspace.
+      return record && current.name
+        ? { ...record, spec: { ...record.spec, namespace: current } }
+        : record;
+    }),
   list: (namespace) =>
     inNamespace(namespace, (current, backing) => backing.threads.list(current)),
   delete: (namespace, threadId) =>

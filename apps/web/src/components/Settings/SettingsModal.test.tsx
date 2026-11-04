@@ -11,7 +11,7 @@ import { useIdentityStore } from '../../store/identityStore';
 import type { ExternalAgentsNavigation } from './agent-profiles/ExternalAgentsSettings';
 import type { Root } from 'react-dom/client';
 
-type RequestedTab = 'builtIn' | 'services' | 'agent' | null;
+type RequestedTab = 'builtIn' | 'services' | 'agent' | 'people' | null;
 
 const mocks = vi.hoisted(() => ({
   init: vi.fn(),
@@ -126,7 +126,7 @@ beforeEach(() => {
   root = createRoot(container);
 });
 
-it.each([null, 'agent'] as const)(
+it.each([null, 'agent', 'people'] as const)(
   'shows members their Built-In settings without loading external agent registries (requested: %s)',
   async (requestedTab) => {
     useIdentityStore.setState({
@@ -154,6 +154,35 @@ it.each([null, 'agent'] as const)(
     expect(mocks.llmInit).toHaveBeenCalled();
   },
 );
+
+it('resolves a retained administrator tab immediately when the caller becomes a member', async () => {
+  await renderModal();
+  expect(
+    container.querySelector('[data-testid="profile-management"]'),
+  ).not.toBeNull();
+  vi.clearAllMocks();
+  await act(async () => {
+    useIdentityStore.setState({
+      identity: {
+        provider: 'bubble',
+        principal: { principalId: 'carol', kind: 'user' },
+        member: true,
+        owner: false,
+      },
+    });
+  });
+  expect(
+    container.querySelector('[data-testid="built-in-settings"]'),
+  ).not.toBeNull();
+  expect(
+    container.querySelector('[data-testid="profile-management"]'),
+  ).toBeNull();
+  expect(findTab('settings.agentSettings').getAttribute('aria-current')).toBe(
+    'page',
+  );
+  expect(mocks.llmInit).toHaveBeenCalledOnce();
+  expect(mocks.init).not.toHaveBeenCalled();
+});
 
 afterEach(() => {
   act(() => root.unmount());

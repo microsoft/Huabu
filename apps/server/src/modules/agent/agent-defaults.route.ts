@@ -14,8 +14,7 @@ import {
 
 import { getProfileSchemaCache } from './acp/profile-schema-cache.js';
 import { getAgentDefaults, setAgentDefaults } from './agent-defaults.js';
-import { personalSettingsOwner } from '../identity/personal-settings.js';
-import { canChangeOwnSettings } from '../security/owner.js';
+import { canChangeOwnSettings, isOwnerRequest } from '../security/owner.js';
 
 import type {
   AgentDefaults,
@@ -94,6 +93,11 @@ const agentDefaultsRoutes: FastifyPluginAsync = async (app) => {
     '/',
     { prefixTrailingSlash: 'both' },
     async (request, reply) => {
+      if (!isOwnerRequest(request))
+        return reply.code(403).send({
+          message: 'Utility Agent defaults require administrator authorization',
+          code: 'ADMIN_REQUIRED',
+        });
       const parsed = agentDefaultsSchema.safeParse(request.body);
       if (!parsed.success) {
         return reply.status(400).send({
@@ -102,14 +106,6 @@ const agentDefaultsRoutes: FastifyPluginAsync = async (app) => {
           code: 'validation_failed',
         });
       }
-      if (
-        personalSettingsOwner() &&
-        parsed.data.profileId !== HUABU_AGENT_PROFILE_ID
-      )
-        return reply.code(403).send({
-          message: 'Members use the Built-In agent',
-          code: 'AGENT_ACCESS_REQUIRED',
-        });
       if (
         parsed.data.profileId !== null &&
         parsed.data.profileId !== HUABU_AGENT_PROFILE_ID

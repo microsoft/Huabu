@@ -257,7 +257,7 @@ describe('owner-only Agent defaults', () => {
   });
 });
 
-it.each(['existing-external', 'unknown-external', null])(
+it.each(['huabu', 'existing-external', 'unknown-external', null])(
   'refuses member selection %s before inspecting operator profiles or writing settings',
   async (profileId) => {
     const { openPersonalSettings, useCaller } =
@@ -276,12 +276,40 @@ it.each(['existing-external', 'unknown-external', null])(
       const response = await app.inject({
         method: 'PUT',
         url,
+        remoteAddress: '192.0.2.10',
         payload: { profileId, functionalModel: '' },
       });
       expect(response.statusCode).toBe(403);
-      expect(response.json().code).toBe('AGENT_ACCESS_REQUIRED');
+      expect(response.json().code).toBe('ADMIN_REQUIRED');
     });
     expect(mocks.getProfile).not.toHaveBeenCalled();
     expect(mocks.set).not.toHaveBeenCalled();
   },
 );
+
+it('allows a member to read fixed defaults without exposing administrator controls', async () => {
+  const { openPersonalSettings, useCaller } =
+    await import('../identity/personal-settings.js');
+  mocks.get.mockReturnValue({ profileId: 'huabu', functionalModel: '' });
+  await openPersonalSettings(async () => {
+    useCaller({
+      principal: { principalId: 'carol', kind: 'user' },
+      member: true,
+      owner: false,
+      access: {
+        can: async () => true,
+        claim: async () => {},
+        workspaces: async () => [],
+      },
+    });
+    const response = await app.inject({ url, remoteAddress: '192.0.2.10' });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      defaults: { profileId: 'huabu', functionalModel: '' },
+      selectionState: 'available',
+      modelCapability: 'supported',
+    });
+  });
+  expect(mocks.set).not.toHaveBeenCalled();
+  expect(mocks.getProfile).not.toHaveBeenCalled();
+});

@@ -41,7 +41,11 @@ import type {
   PersistedTurn,
   ThreadRecord,
 } from '@agenetes/agenetes';
-import type { AgentStateSnapshot, WorkloadSpec } from '@agenetes/protocol';
+import type {
+  AgentStateSnapshot,
+  Namespace,
+  WorkloadSpec,
+} from '@agenetes/protocol';
 import type { AgentHandle } from '@agenetes/runtime';
 
 let profile: StorageProfile;
@@ -67,13 +71,16 @@ async function openWithSpace(): Promise<MountedTestStorage> {
   return opened;
 }
 
-function threadRecord(threadId = THREAD_ID): ThreadRecord {
+function threadRecord(
+  threadId = THREAD_ID,
+  namespace: Namespace = { name: CANVAS_ID },
+): ThreadRecord {
   return {
     driverSchemaVersion: 1,
     spec: {
       kind: 'internal',
       threadId,
-      namespace: { name: CANVAS_ID },
+      namespace,
     } as unknown as WorkloadSpec,
     state: { status: 'idle' } as unknown as AgentStateSnapshot,
   };
@@ -587,7 +594,7 @@ describe.each(
 
     await conversationThreadStore.upsert(namespace, THREAD_ID, threadRecord());
     expect(await conversationThreadStore.get(namespace, THREAD_ID)).toEqual(
-      threadRecord(),
+      threadRecord(THREAD_ID, namespace),
     );
     expect(await conversationThreadStore.list(namespace)).toHaveLength(1);
 
@@ -800,7 +807,7 @@ describe.each(
     // exist rather than the in-memory defaults.
     const after = canvasAcpNamespace(CANVAS_ID);
     expect(await conversationThreadStore.get(after, THREAD_ID)).toEqual(
-      threadRecord(),
+      threadRecord(THREAD_ID, after),
     );
     expect(await conversationEventLogStore.maxSeq(after, THREAD_ID)).toBe(2);
     expect(

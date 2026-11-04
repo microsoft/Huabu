@@ -120,7 +120,7 @@ Per-run credentials for external agents remain the way to open them to members l
 A Bubble member's calls run in a personal settings namespace (`modules/identity/personal-settings.ts`), which also carries their access to the agent tools.
 
 - **Secrets.** The secret store namespaces their model keys, OAuth credentials and connected-service keys, with no fallback to the deployment's environment.
-- **Settings files.** Model settings and agent defaults live under `<data>/people/<key>/`.
+- **Settings files.** Model settings live under `<data>/people/<key>/`. Members use fixed Built-In agent defaults; the deployment's agent defaults remain administrator-owned.
 - **Routes.** Members may change their own settings; the deployment's stay with administrators. Settings shows a member only Built-In setup and services.
 
 ### Integration after #356 merged (2026-11-03)

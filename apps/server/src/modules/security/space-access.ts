@@ -120,7 +120,10 @@ export function registerSpaceAccess(app: FastifyInstance): void {
     if (
       !identity.owner &&
       !canvasId &&
-      (threadId || route === '/api/agent' || route.startsWith('/api/agent/'))
+      (threadId ||
+        ((route === '/api/agent' || route.startsWith('/api/agent/')) &&
+          route !== '/api/agent/defaults' &&
+          route !== '/api/agent/defaults/'))
     )
       return reply.code(400).send({
         message: 'A conversation is addressed through its Space',

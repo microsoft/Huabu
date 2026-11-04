@@ -20,6 +20,7 @@ import { withWorkspaceStateReports } from './workspace-driver.js';
 import {
   closeStorage,
   createSpace,
+  getStructuredStore,
   openWorkspace,
   resetStorageCache,
 } from '../../storage/index.js';
@@ -54,7 +55,7 @@ afterEach(async () => {
 });
 
 it.each([false, true])(
-  'persists out-of-request state reports and drains a turn (request-scoped: %s)',
+  'persists out-of-request reports and turns across a Space rename (request-scoped: %s)',
   async (scoped) => {
     const canvasId = 'canvas-reports';
     const threadId = 'thread-reports';
@@ -110,6 +111,7 @@ it.each([false, true])(
         spec: {},
       }),
     );
+    let activeNamespace = namespace;
     try {
       expect(currentWorkspaceScope()).toBeUndefined();
       // The Gateway's event emitter was created outside the request chain.
@@ -126,12 +128,51 @@ it.each([false, true])(
       expect(
         (await inOwner(() => instance.history(namespace, threadId))).turns,
       ).toHaveLength(1);
+      expect(
+        (
+          await inOwner(() =>
+            getStructuredStore()
+              .spaces()
+              .rename({ canvasId, title: 'Renamed Space' }),
+          )
+        ).ok,
+      ).toBe(true);
+      activeNamespace = inOwner(() => canvasAcpNamespace(canvasId));
+      expect(activeNamespace.storage?.root).not.toBe(namespace.storage?.root);
+      expect(inOwner(() => instance.get(threadId, activeNamespace))).toBe(
+        handle,
+      );
+      expect(
+        await inOwner(() =>
+          instance.create({
+            kind: 'test',
+            workloadType: 'Deployment',
+            threadId,
+            namespace: activeNamespace,
+            spec: {},
+          }),
+        ),
+      ).toBe(handle);
+      gateway.emit('state', { driverState: { count: 43 } });
+      expect(
+        (await inOwner(() => instance.record(activeNamespace, threadId)))
+          ?.state,
+      ).toMatchObject({ driverState: { count: 43 } });
+      await inOwner(async () => {
+        for await (const _event of handle.run(null, {})) {
+          // Drain the turn after the directory move.
+        }
+      });
+      expect(
+        (await inOwner(() => instance.history(activeNamespace, threadId)))
+          .turns,
+      ).toHaveLength(2);
       if (scoped)
         expect(
           await conversationThreadStore.get(processNamespace, threadId),
         ).toBeUndefined();
     } finally {
-      await inOwner(() => instance.close(threadId));
+      await inOwner(() => instance.close(threadId, activeNamespace));
     }
   },
 );

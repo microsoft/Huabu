@@ -202,7 +202,9 @@ export function createAgentRuntime(drivers: DriverMap): AgentRuntime {
       namespace &&
       entry.namespace &&
       (entry.namespace.name !== namespace.name ||
-        entry.namespace.storage?.root !== namespace.storage?.root)
+        entry.namespace.ownerId !== namespace.ownerId ||
+        (!namespace.ownerId &&
+          entry.namespace.storage?.root !== namespace.storage?.root))
     )
       throw new AgenetesError(
         'invalid_workload',

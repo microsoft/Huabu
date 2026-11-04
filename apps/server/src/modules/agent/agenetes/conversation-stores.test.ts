@@ -28,7 +28,7 @@ import {
   conversationThreadStore,
   conversationTurnStore,
 } from './conversation-stores.js';
-import { conversationTables } from './sqlite-stores.js';
+import { conversationTables, SqliteThreadStore } from './sqlite-stores.js';
 import { DiskStructuredStore } from '../../storage/backends/disk/structured-store.js';
 import {
   composeStorage,
@@ -253,6 +253,22 @@ it('refuses a named Disk conversation that has no directory', async () => {
   await expect(async () =>
     conversationTurnStore.page(namespace, 'thread-1', { limit: 1 }),
   ).rejects.toThrow(refusal);
+});
+
+it('recovers older stored namespaces with their current Workspace ownership', async () => {
+  const opened = await mount(SQLITE_PROFILE);
+  await opened.storage.structured
+    .spaces()
+    .create({ canvasId: CANVAS_ID, title: 'Recovery' });
+  const namespace = canvasAcpNamespace(CANVAS_ID);
+  const legacy = threadRecord('legacy');
+  expect(legacy.spec.namespace).not.toHaveProperty('ownerId');
+  await new SqliteThreadStore().upsert(namespace, 'thread-1', legacy);
+
+  const recovered = await conversationThreadStore.get(namespace, 'thread-1');
+  expect(recovered?.state).toEqual(legacy.state);
+  expect(namespace.ownerId).toBeTruthy();
+  expect(recovered?.spec.namespace).toEqual(namespace);
 });
 
 it('asks again on every call, so a profile change takes effect between two reads', async () => {

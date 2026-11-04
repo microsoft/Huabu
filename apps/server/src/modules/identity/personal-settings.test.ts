@@ -1,9 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -246,7 +246,7 @@ describe('personal settings', () => {
     ).toBe('machine');
   });
 
-  it('gives a member the Built-In agent by default, whatever the deployment picks', async () => {
+  it('uses fixed member defaults without reading personal or deployment defaults files', async () => {
     const scope = await import('./personal-settings.js');
     const defaults = await import('../agent/agent-defaults.js');
     defaults.setAgentDefaults({
@@ -254,12 +254,22 @@ describe('personal settings', () => {
       functionalModel: '',
     });
     expect(defaults.getAgentDefaults().profileId).toBe('external-x');
-    expect(
-      scope.openPersonalSettings(() => {
-        scope.useCaller(person('carol'));
-        return defaults.getAgentDefaults().profileId;
-      }),
-    ).toBe('huabu');
+    scope.openPersonalSettings(() => {
+      scope.useCaller(person('carol'));
+      const personalFile = scope.settingsFilePath('agent-defaults.json');
+      mkdirSync(dirname(personalFile), { recursive: true });
+      writeFileSync(personalFile, 'invalid personal defaults');
+      writeFileSync(
+        join(tmp, 'agent-defaults.json'),
+        'invalid deployment defaults',
+      );
+      expect(defaults.getAgentDefaults()).toEqual({
+        profileId: 'huabu',
+        functionalModel: '',
+      });
+      expect(defaults.requireDefaultAgentProfileId()).toBe('huabu');
+    });
+    expect(() => defaults.getAgentDefaults()).toThrow('malformed JSON');
   });
 });
 

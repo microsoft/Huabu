@@ -18,6 +18,7 @@ import {
 
 import { identityPrincipalSchema } from '@huabu/shared';
 
+import { createKeyedMutex } from '../../utils/keyed-mutex.js';
 import { getLogger } from '../../utils/logger.js';
 import { getWorkspaceHandle } from '../workspace.js';
 import { IdentityError } from './service.js';
@@ -71,6 +72,7 @@ const WORKSPACE_ROLE = {
 /** People administration over Bubble's principal and grant tables. */
 function bubblePeople(store: BubbleStore): PeopleDirectory {
   const SYSTEM = { type: 'system' } as const;
+  const withWorkspaceGrantLock = createKeyedMutex();
   const roleOf = (role: string): WorkspaceRole | null =>
     (Object.keys(WORKSPACE_ROLE) as WorkspaceRole[]).find(
       (key) => WORKSPACE_ROLE[key] === role,
@@ -134,21 +136,26 @@ function bubblePeople(store: BubbleStore): PeopleDirectory {
         for (const row of current) await store.grants.remove(row.grantId);
       return true;
     },
-    async setWorkspaceRole(principalId, workspaceId, role, by) {
-      if (!(await store.principals.get(principalId))) return false;
-      const target = { type: TARGET.workspace, id: workspaceId };
-      const rows = await store.grants.list({ target, principalId });
-      if (role && !rows.some((row) => row.role === WORKSPACE_ROLE[role]))
-        await store.grants.add({
-          target,
-          principalId,
-          role: WORKSPACE_ROLE[role],
-          grantedByPrincipalId: by,
-        });
-      for (const row of rows)
-        if (roleOf(row.role) && row.role !== (role && WORKSPACE_ROLE[role]))
-          await store.grants.remove(row.grantId);
-      return true;
+    setWorkspaceRole(principalId, workspaceId, role, by) {
+      return withWorkspaceGrantLock(
+        JSON.stringify([principalId, workspaceId]),
+        async () => {
+          if (!(await store.principals.get(principalId))) return false;
+          const target = { type: TARGET.workspace, id: workspaceId };
+          const rows = await store.grants.list({ target, principalId });
+          if (role && !rows.some((row) => row.role === WORKSPACE_ROLE[role]))
+            await store.grants.add({
+              target,
+              principalId,
+              role: WORKSPACE_ROLE[role],
+              grantedByPrincipalId: by,
+            });
+          for (const row of rows)
+            if (roleOf(row.role) && row.role !== (role && WORKSPACE_ROLE[role]))
+              await store.grants.remove(row.grantId);
+          return true;
+        },
+      );
     },
   };
 }

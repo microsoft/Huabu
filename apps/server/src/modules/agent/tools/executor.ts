@@ -73,10 +73,7 @@ import {
   callerAccess,
   personalSettingsOwner,
 } from '../../identity/personal-settings.js';
-import {
-  acquireWorkspaceOperationLease,
-  getWorkspaceHandle,
-} from '../../workspace.js';
+import { acquireWorkspaceOperationLease } from '../../workspace.js';
 
 import type { AgentToolResult } from '@earendil-works/pi-agent-core';
 import type { NodeOrigin } from '@huabu/shared';
@@ -263,28 +260,7 @@ export async function executeTool(
       );
 
     case 'fs_write':
-      {
-        // Workspace memory and Skills steer every agent in the Workspace, so
-        // changing them is the Workspace's managers'. A Space's own memory is
-        // checked like any other write to that Space.
-        const access = callerAccess();
-        const workspaceId = getWorkspaceHandle()?.workspaceId;
-        const target = (args as { path?: unknown }).path;
-        if (
-          access &&
-          typeof target === 'string' &&
-          target.replace(/^\.?\//, '') !== 'memory/space.md' &&
-          !(
-            workspaceId &&
-            (await access.can('manage', { type: 'workspace', id: workspaceId }))
-          )
-        )
-          throw new Error(
-            'Changing Workspace memory or Skills needs manage access to the Workspace',
-          );
-      }
-      // falls through
-      // canvasId is conditionally needed (only for memory/canvas.md);
+      // canvasId is conditionally needed (only for memory/space.md);
       // the handler enforces that. Pass it through when present so the
       // handler can resolve canvas-scoped paths, but do not require it
       // here — workspace and skill writes have no canvas binding.

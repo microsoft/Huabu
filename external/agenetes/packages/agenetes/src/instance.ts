@@ -774,6 +774,9 @@ export function createAgenetesInstance(
   const api: Agenetes = {
     async create(rawSpec: WorkloadSpec): Promise<AgentHandle> {
       const incoming = validateSpec(rawSpec);
+      // Check the caller's ownership before a persisted spec takes precedence.
+      if (incoming.spec.workloadType === 'Deployment')
+        runtime.get(incoming.spec.threadId, incoming.spec.namespace);
       // A persisted same-thread spec is authoritative across restart,
       // preserving reuse-ignores-spec semantics when no live handle exists.
       const rawPrior = incoming.spec.threadId

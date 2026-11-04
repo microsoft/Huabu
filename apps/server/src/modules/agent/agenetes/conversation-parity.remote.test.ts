@@ -12,9 +12,9 @@
  * provisions and compares the whole observable trace, cursors included.
  *
  * The trace is also asserted against fixed expectations, so the comparison
- * cannot pass by having both adapters agree on the wrong answer. Only the
- * event timestamps are dropped — they are wall-clock, and the only thing in
- * the trace that is allowed to differ between two runs.
+ * cannot pass by having both adapters agree on the wrong answer. Wall-clock
+ * event timestamps are dropped; each fixture's Workspace id is normalized
+ * after verifying ownership.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -150,9 +150,22 @@ async function observe(profile: StorageProfile) {
     // is what a restarted server would see.
     await opened.reopen();
 
+    function recordForComparison(record: ThreadRecord | undefined) {
+      if (!record) return record;
+      expect(record.spec.namespace).toEqual(ns);
+      return {
+        ...record,
+        spec: {
+          ...record.spec,
+          namespace: { ...ns, ownerId: 'test-workspace' },
+        },
+      };
+    }
     const written = {
-      record: await conversationThreadStore.get(ns, THREAD_ID),
-      list: await conversationThreadStore.list(ns),
+      record: recordForComparison(
+        await conversationThreadStore.get(ns, THREAD_ID),
+      ),
+      list: (await conversationThreadStore.list(ns)).map(recordForComparison),
       maxSeq: await conversationEventLogStore.maxSeq(ns, THREAD_ID),
       records: withoutTimestamps(
         (await conversationEventLogStore.readRecords(

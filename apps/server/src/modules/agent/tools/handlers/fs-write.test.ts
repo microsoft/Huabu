@@ -17,15 +17,19 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { handleFsWrite } from './fs-write.js';
+import {
+  openPersonalSettings,
+  useCaller,
+} from '../../../identity/personal-settings.js';
 import { createSpace, space } from '../../../storage/index.js';
 import {
   userSkillsDir,
   workspaceMemoryPath,
 } from '../../../workspace/paths.js';
-import { setWorkspacePath } from '../../../workspace.js';
+import { getWorkspaceHandle, setWorkspacePath } from '../../../workspace.js';
 
 /** Where Disk places the Space memory blob. */
 function memoryBlobFile(canvasId: string): string {
@@ -126,6 +130,85 @@ describe('handleFsWrite — path routing', () => {
 });
 
 // ─── Overwrite mode ────────────────────────────────────────────────────────
+
+describe('handleFsWrite — caller access', () => {
+  it.each(['memory/user.md', 'skills/test-skill/SKILL.md'])(
+    'requires Workspace manage access for %s before writing',
+    async (path) => {
+      const can = vi.fn(async () => false);
+      await openPersonalSettings(async () => {
+        useCaller({
+          principal: { principalId: 'carol', kind: 'user' },
+          member: true,
+          owner: false,
+          access: { can, claim: async () => {}, workspaces: async () => [] },
+        });
+        await expect(
+          handleFsWrite({ path, mode: 'overwrite', body: 'forbidden' }),
+        ).rejects.toThrow('manage access to the Workspace');
+      });
+      expect(can).toHaveBeenCalledWith('manage', {
+        type: 'workspace',
+        id: getWorkspaceHandle()?.workspaceId,
+      });
+      expect(existsSync(workspaceMemoryPath())).toBe(false);
+      expect(existsSync(join(userSkillsDir(), 'test-skill', 'SKILL.md'))).toBe(
+        false,
+      );
+    },
+  );
+
+  it('writes Space memory without Workspace manage access', async () => {
+    const can = vi.fn(async () => false);
+    await openPersonalSettings(async () => {
+      useCaller({
+        principal: { principalId: 'carol', kind: 'user' },
+        member: true,
+        owner: false,
+        access: { can, claim: async () => {}, workspaces: async () => [] },
+      });
+      const result = parse(
+        await handleFsWrite({
+          path: join('memory', 'space.md'),
+          mode: 'overwrite',
+          body: 'Space briefing',
+          canvasId,
+        }),
+      );
+      expect(result.ok).toBe(true);
+    });
+    expect(can).not.toHaveBeenCalled();
+    expect(readFileSync(memoryBlobFile(canvasId), 'utf8')).toBe(
+      'Space briefing\n',
+    );
+  });
+
+  it('allows a Workspace manager to write Workspace memory', async () => {
+    await openPersonalSettings(async () => {
+      useCaller({
+        principal: { principalId: 'carol', kind: 'user' },
+        member: true,
+        owner: false,
+        access: {
+          can: async () => true,
+          claim: async () => {},
+          workspaces: async () => [],
+        },
+      });
+      const result = parse(
+        await handleFsWrite({
+          path: 'memory/user.md',
+          mode: 'overwrite',
+          body: 'Shared briefing',
+        }),
+      );
+      expect(result.ok).toBe(true);
+    });
+    expect(readFileSync(workspaceMemoryPath(), 'utf8')).toBe(
+      'Shared briefing\n',
+    );
+  });
+});
 
 describe('handleFsWrite — overwrite', () => {
   it('creates workspace memory with trailing newline', async () => {

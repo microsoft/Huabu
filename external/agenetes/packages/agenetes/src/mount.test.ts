@@ -108,3 +108,75 @@ it('reserves the namespace across concurrent deployment creation', async () => {
     'rejected',
   ]);
 });
+
+it.each([undefined, { root: '/same-root' }])(
+  'refuses a live thread from another owner even with the same name and storage %j',
+  async (storage) => {
+    const instance = mountAgenetes({ drivers: { external: driver } });
+    const namespace = { name: 'same-space', ownerId: 'workspace-a', storage };
+    const spec = {
+      kind: 'external',
+      workloadType: 'Deployment' as const,
+      namespace,
+      threadId: 'same-thread',
+      spec: {},
+    };
+    const handle = await instance.create(spec);
+    const other = { ...namespace, ownerId: 'workspace-b' };
+    await expect(
+      instance.create({ ...spec, namespace: other }),
+    ).rejects.toThrow('another namespace');
+    expect(() => instance.get(spec.threadId, other)).toThrow(
+      'another namespace',
+    );
+    await expect(instance.close(spec.threadId, other)).rejects.toThrow(
+      'another namespace',
+    );
+    expect(instance.get(spec.threadId, namespace)).toBe(handle);
+    await instance.close(spec.threadId, namespace);
+  },
+);
+
+it('keeps a live thread accessible when its owner moves namespace storage', async () => {
+  const instance = mountAgenetes({ drivers: { external: driver } });
+  const namespace = {
+    name: 'same-space',
+    ownerId: 'workspace-a',
+    storage: { root: '/before' },
+  };
+  const spec = {
+    kind: 'external',
+    workloadType: 'Deployment' as const,
+    namespace,
+    threadId: 'same-thread',
+    spec: {},
+  };
+  const handle = await instance.create(spec);
+  const moved = { ...namespace, storage: { root: '/after' } };
+  expect(instance.get(spec.threadId, moved)).toBe(handle);
+  expect(await instance.create({ ...spec, namespace: moved })).toBe(handle);
+  await instance.close(spec.threadId, moved);
+  expect(instance.get(spec.threadId, moved)).toBeUndefined();
+});
+
+it('retains storage isolation for namespaces without a stable owner', async () => {
+  const instance = mountAgenetes({ drivers: { external: driver } });
+  const namespace = { name: 'same-space', storage: { root: '/first' } };
+  const spec = {
+    kind: 'external',
+    workloadType: 'Deployment' as const,
+    namespace,
+    threadId: 'legacy-thread',
+    spec: {},
+  };
+  await instance.create(spec);
+  const other = { ...namespace, storage: { root: '/second' } };
+  await expect(instance.create({ ...spec, namespace: other })).rejects.toThrow(
+    'another namespace',
+  );
+  expect(() => instance.get(spec.threadId, other)).toThrow('another namespace');
+  await expect(instance.close(spec.threadId, other)).rejects.toThrow(
+    'another namespace',
+  );
+  await instance.close(spec.threadId, namespace);
+});

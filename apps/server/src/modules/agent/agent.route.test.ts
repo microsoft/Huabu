@@ -80,6 +80,7 @@ vi.mock('../workspace/paths.js', () => ({
 import agentRoutes from './agent.route.js';
 import { InkAgentModeError } from './ink-response.js';
 import { setRequestIdentity } from '../identity/request.js';
+import { registerSpaceAccess } from '../security/space-access.js';
 
 import type { AgentStreamEvent, ChatEnvelope } from '@huabu/shared';
 
@@ -137,12 +138,13 @@ describe('POST /agent', () => {
         member: true,
         owner: request.headers['x-owner'] === 'yes',
         access: {
-          can: async () => true,
+          can: async (_level, resource) => resource.id === 'mine',
           claim: async () => {},
           workspaces: async () => 'all',
         },
       });
     });
+    registerSpaceAccess(app);
     await app.register(agentRoutes, { prefix: '/api/agent' });
     mocks.resolveExternalTarget.mockResolvedValue({
       binding: { kind: 'external' },
@@ -168,6 +170,21 @@ describe('POST /agent', () => {
       mocks.record.mockResolvedValue(null);
       expect((await app.inject(request)).statusCode).toBe(200);
       expect(mocks.stopAndWait).toHaveBeenCalledTimes(2);
+      expect(
+        (
+          await app.inject({
+            method: 'POST',
+            url: '/api/agent/stop/thread-a',
+            payload: { canvasId: 'mine' },
+          })
+        ).statusCode,
+      ).toBe(400);
+      expect(mocks.stopAndWait).toHaveBeenCalledTimes(2);
+      expect(mocks.stopAndWait).toHaveBeenLastCalledWith(
+        'thread-a',
+        'mine',
+        undefined,
+      );
     } finally {
       await app.close();
     }
