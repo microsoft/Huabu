@@ -2,7 +2,10 @@
 // Licensed under the MIT license.
 
 import { acpSessionRegistry } from '@agenetes/acp-driver';
-import { resolveConnectedAgentletId } from '@agenetes/agentlet-host';
+import {
+  getAgentProfileRegistry,
+  resolveConnectedAgentletId,
+} from '@agenetes/agentlet-host';
 
 import {
   acpPermissionDecisionSchema,
@@ -21,6 +24,7 @@ import {
   rememberProfileConfigPreference,
   rememberProfileSessionPreference,
 } from './profile-session-preferences.js';
+import { requireOwnAgentlet } from '../../identity/agent-credentials.js';
 import { canvasAcpNamespace } from '../../workspace/paths.js';
 import { agenetes } from '../agenetes/index.js';
 
@@ -248,6 +252,7 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
         }
       : undefined;
     const agentletId = resolveThreadAgentletId(record);
+    if (agentletId) requireOwnAgentlet(agentletId);
     const live = agentletId
       ? acpSessionRegistry.get(agentletId, threadId)
       : undefined;
@@ -271,6 +276,10 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
       };
     }
     if (profileId) {
+      if (!getAgentProfileRegistry()?.getProfile(profileId))
+        return reply
+          .code(404)
+          .send({ message: 'Agent Profile is unavailable' });
       const profileCache = getProfileSchemaCache(profileId);
       if (
         profileCache &&
@@ -312,7 +321,14 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
     // `permission_request` emitted during an in-flight `session/prompt`),
     // so a live handle for this thread is the precondition. `get` never
     // spawns one (I9.3): a missing handle is a dead-session 404.
-    const handle = agenetes.get(threadId);
+    const { canvasId } = request.query as { canvasId?: string };
+    const namespace = canvasId ? canvasAcpNamespace(canvasId) : undefined;
+    const record = namespace
+      ? await agenetes.record(namespace, threadId)
+      : undefined;
+    const agentletId = resolveThreadAgentletId(record);
+    if (agentletId) requireOwnAgentlet(agentletId);
+    const handle = agenetes.get(threadId, namespace);
     if (!handle) {
       return reply.status(404).send({
         message: 'No ACP session for this thread',

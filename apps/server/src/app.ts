@@ -42,6 +42,10 @@ import canvasRoutes from './modules/canvas/canvas.route.js';
 import { resetExternalNoteSessions } from './modules/canvas/external-watcher.js';
 import externalNoteRoutes from './modules/canvas/external.route.js';
 import syncRoutes from './modules/canvas/sync.route.js';
+import {
+  authenticateUserAgentlet,
+  canUseAgentlet,
+} from './modules/identity/agent-credentials.js';
 import { createIdentity, registerIdentity } from './modules/identity/index.js';
 import peopleRoutes from './modules/identity/people.route.js';
 import integrationsRoutes from './modules/integrations/integrations.route.js';
@@ -198,14 +202,13 @@ app.register(workspaceScopedRoutes(rfsRoutes), {
 
 // ── External agent (ACP) transport host ───────────────────────────────
 // Mount the Agenetes agentlet transport host (`@agenetes/agentlet-host`).
-// It mounts the stateless Gateway, forks & supervises the agentlet daemon,
-// and authenticates connections against the host-injected connection token.
-// The daemon owns the agent worker pool; the server tells it which agent CLI
-// to spawn (per user profile). The token is revealed only by the explicit
-// owner-only no-store copy action and is never part of ordinary read models.
+// It mounts the Gateway and authenticates private user devices in Bubble mode.
+// Local mode also supervises the implicit user's local agentlet daemon.
+// The daemon owns the agent worker pool; the server selects a caller-owned
+// Profile. Device credentials are revealed only by an explicit no-store action.
 //
 // L1 owns all deployment-layout knowledge and injects it downward:
-// the global connection token, the data directory, and the resolved
+// authentication, device ownership, the data directory, and the resolved
 // absolute daemon entry path.
 //
 // Legacy migration: older builds persisted an `enabled` flag + shared
@@ -233,6 +236,13 @@ if (!daemonRuntime.artifacts.serviceSdkEntry) {
 }
 const agentletGateway = mountAgenetes(app, {
   connectionToken: getConnectionToken(),
+  canAccessAgentlet: canUseAgentlet,
+  ...(identity.service.provider === 'bubble'
+    ? {
+        authenticate: authenticateUserAgentlet(identity.service),
+        supervise: false,
+      }
+    : {}),
   dataDir: getDataDir(),
   daemonEntryPath: daemonRuntime.artifacts.daemonEntry ?? '',
   bootstrapEnv: daemonRuntime.bootstrapEnv,
@@ -248,8 +258,16 @@ const agentletGateway = mountAgenetes(app, {
   hostEnvPrefix: 'HUABU_',
   hostEnvAllowlist: [],
   profiles: {
-    storageDir: join(getDataDir(), 'agent-profiles'),
-    legacyStorageDir: join(getDataDir(), 'agent-team'),
+    storageDir: join(
+      getDataDir(),
+      identity.service.provider === 'bubble'
+        ? 'user-agent-profiles'
+        : 'agent-profiles',
+    ),
+    canAccess: (profile) => canUseAgentlet(profile.agentletId),
+    ...(identity.service.provider === 'local'
+      ? { legacyStorageDir: join(getDataDir(), 'agent-team') }
+      : {}),
     legacyCommandProfiles: [],
   },
 });

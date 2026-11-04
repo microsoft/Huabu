@@ -22,7 +22,9 @@ vi.mock('../../../connection-token.js', () => ({
 vi.mock('./runtime-config.js', () => ({
   getExternalAgentRuntimeConfig: () => ({ maxAgents: 7 }),
 }));
-vi.mock('../../security/owner.js', () => ({ isOwnerRequest: mocks.isOwner }));
+vi.mock('../../security/owner.js', () => ({
+  canChangeOwnSettings: mocks.isOwner,
+}));
 
 let app: FastifyInstance | undefined;
 async function setup() {
@@ -121,7 +123,10 @@ describe('explicit owner-only connection copy', () => {
       expect(response.headers['cache-control']).toBe('no-store');
       expect(response.headers.pragma).toBe('no-cache');
       expect(response.json().source).toBe('managed');
-      expect(mocks.buildCommand).toHaveBeenCalledWith({ ...payload, format });
+      expect(mocks.buildCommand).toHaveBeenCalledWith(
+        { ...payload, format },
+        { token: mocks.getToken.mock.results.at(-1)?.value, source: 'managed' },
+      );
     },
   );
   it.each([

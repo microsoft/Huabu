@@ -601,7 +601,7 @@
     "agentletLocalAccessSetup": "The server listens only on loopback. For remote access, stop the server, run pnpm run setup, then restart it.",
     "agentletDesktopLocalAccess": "The built-in desktop server is local-only. For remote access, configure and start a standalone server, then connect the desktop to it.",
     "agentletCheckConnection": "Check the connection in Huabu",
-    "agentletCheckConnectionDescription": "Keep the terminal running, then return to Agent settings in Huabu. The device appears under Connected devices, and supported Agents found on it are added to the Agent list automatically.",
+    "agentletCheckConnectionDescription": "Keep the terminal running, then return to Devices and Agents in Huabu. Your connected device and its supported Agents appear there automatically.",
     "agentletOtherConnectionOptions": "Other connection options",
     "agentletTargetShell": "Shell",
     "agentletShellPosix": "Bash / Zsh (macOS, Linux, WSL)",

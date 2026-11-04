@@ -736,6 +736,7 @@ describe('ordinary Profile catalog routes', () => {
 
 it('returns no operator daemon metadata in the member catalog', async () => {
   const server = await setup();
+  mocks.registry.listProfiles.mockReturnValue([]);
   const { openPersonalSettings, useCaller } =
     await import('../../identity/personal-settings.js');
   const response = await openPersonalSettings(async () => {
@@ -758,5 +759,5 @@ it('returns no operator daemon metadata in the member catalog', async () => {
     agentlet: { online: false },
   });
   expect(response.json().agentlet).toEqual({ online: false });
-  expect(mocks.registry.listProfiles).not.toHaveBeenCalled();
+  expect(mocks.registry.listProfiles).toHaveBeenCalled();
 });

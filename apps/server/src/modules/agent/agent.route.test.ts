@@ -130,7 +130,7 @@ afterEach(() => {
 });
 
 describe('POST /agent', () => {
-  it('refuses member control of an external thread in a writable Space before stopping it', async () => {
+  it('refuses unavailable external bindings for members and administrators before stopping', async () => {
     const app = Fastify();
     app.addHook('onRequest', async (request) => {
       setRequestIdentity(request, {
@@ -161,11 +161,13 @@ describe('POST /agent', () => {
       expect(
         (await app.inject({ ...request, headers: { 'x-owner': 'yes' } }))
           .statusCode,
-      ).toBe(200);
-      expect(mocks.stopAndWait).toHaveBeenCalledOnce();
+      ).toBe(403);
+      expect(mocks.stopAndWait).not.toHaveBeenCalled();
       mocks.resolveExternalTarget.mockResolvedValue(null);
-      mocks.record.mockResolvedValue({ spec: { kind: 'external' } });
-      expect((await app.inject(request)).statusCode).toBe(403);
+      mocks.record.mockResolvedValue({
+        spec: { kind: 'external', spec: { agentletId: 'device-a' } },
+      });
+      expect((await app.inject(request)).statusCode).toBe(200);
       expect(mocks.stopAndWait).toHaveBeenCalledOnce();
       mocks.record.mockResolvedValue(null);
       expect((await app.inject(request)).statusCode).toBe(200);

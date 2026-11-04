@@ -601,7 +601,7 @@
     "agentletLocalAccessSetup": "当前服务器仅监听本机。如需远程访问，请停止服务器，运行 pnpm run setup 后重新启动。",
     "agentletDesktopLocalAccess": "桌面内置服务器仅限本机访问。如需远程访问，请配置并启动独立服务器，再让桌面连接该服务器。",
     "agentletCheckConnection": "返回 Huabu 确认连接",
-    "agentletCheckConnectionDescription": "保持该终端运行，返回 Huabu 的 Agent 设置。连接成功后，设备会显示在“已连接设备”中，检测到的可用 Agent 会自动添加到列表。",
+    "agentletCheckConnectionDescription": "保持该终端运行，返回 Huabu 的“设备与 Agent”。连接成功后，你的设备及其支持的 Agent 会自动显示在那里。",
     "agentletOtherConnectionOptions": "其他连接方式",
     "agentletTargetShell": "终端类型",
     "agentletShellPosix": "Bash / Zsh（macOS、Linux、WSL）",

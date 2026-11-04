@@ -266,6 +266,7 @@ export interface ExternalAgentThreadTarget {
 }
 
 interface ActiveAgentInvocation {
+  ownerId: string | null;
   workspaceId?: string;
   requestId?: string;
   canvasId?: string;
@@ -279,6 +280,7 @@ interface ActiveAgentInvocation {
 }
 
 interface PendingAgentPreparation {
+  ownerId: string | null;
   workspaceId?: string;
   requestId?: string;
   canvasId?: string;
@@ -326,7 +328,8 @@ export class AgentThreadService {
     threadId: string,
   ): ActiveAgentInvocation | undefined {
     const active = this.activeInvocations.get(threadId);
-    return active?.workspaceId === getWorkspaceHandle()?.workspaceId
+    return active?.ownerId === personalSettingsOwner() &&
+      active?.workspaceId === getWorkspaceHandle()?.workspaceId
       ? active
       : undefined;
   }
@@ -339,10 +342,22 @@ export class AgentThreadService {
     const workspaceId = getWorkspaceHandle()?.workspaceId;
     return (
       this.stoppedRequests.has(
-        JSON.stringify([workspaceId, canvasId, threadId, requestId]),
+        JSON.stringify([
+          personalSettingsOwner(),
+          workspaceId,
+          canvasId,
+          threadId,
+          requestId,
+        ]),
       ) ||
       this.stoppedRequests.has(
-        JSON.stringify([workspaceId, undefined, threadId, requestId]),
+        JSON.stringify([
+          personalSettingsOwner(),
+          workspaceId,
+          undefined,
+          threadId,
+          requestId,
+        ]),
       )
     );
   }
@@ -356,6 +371,7 @@ export class AgentThreadService {
     finish: () => void;
   } {
     const preparation: PendingAgentPreparation = {
+      ownerId: personalSettingsOwner(),
       workspaceId: getWorkspaceHandle()?.workspaceId,
       requestId,
       canvasId,
@@ -469,6 +485,7 @@ export class AgentThreadService {
       resolveTurnStarted = resolve;
     });
     const active: ActiveAgentInvocation = {
+      ownerId: personalSettingsOwner(),
       workspaceId: getWorkspaceHandle()?.workspaceId,
       requestId: options.requestId,
       canvasId: options.canvasId,
@@ -619,8 +636,6 @@ export class AgentThreadService {
             options.threadId,
           )) ?? binding;
       }
-      if (binding.kind === 'external' && personalSettingsOwner())
-        throw new Error('External agents are available to administrators only');
       if (!signal.aborted && typeof options.envelope === 'function') {
         envelope = await options.envelope();
       }
@@ -792,11 +807,18 @@ export class AgentThreadService {
     const workspaceId = getWorkspaceHandle()?.workspaceId;
     if (requestId) {
       this.stoppedRequests.add(
-        JSON.stringify([workspaceId, canvasId, threadId, requestId]),
+        JSON.stringify([
+          personalSettingsOwner(),
+          workspaceId,
+          canvasId,
+          threadId,
+          requestId,
+        ]),
       );
     }
     const pending = [...(this.pendingPreparations.get(threadId) ?? [])].filter(
       (preparation) =>
+        preparation.ownerId === personalSettingsOwner() &&
         preparation.workspaceId === workspaceId &&
         !preparation.abortController.signal.aborted &&
         (requestId === undefined || preparation.requestId === requestId) &&

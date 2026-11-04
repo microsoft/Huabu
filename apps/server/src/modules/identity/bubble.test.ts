@@ -224,7 +224,7 @@ function connects(
 
 describe('Bubble identity', () => {
   it.each(['/api/agent/defaults', '/api/agent/defaults/'])(
-    'lets a member read fixed defaults without a Space at %s',
+    'lets a member read and change personal defaults without a Space at %s',
     async (url) => {
       const { app, store } = await host();
       await grant(store, 'carol', 'member');
@@ -241,8 +241,8 @@ describe('Bubble identity', () => {
         headers: as('carol'),
         payload: { profileId: 'huabu', functionalModel: '' },
       });
-      expect(write.statusCode).toBe(403);
-      expect(write.json().code).toBe('ADMIN_REQUIRED');
+      expect(write.statusCode).toBe(200);
+      expect(write.json().defaults.profileId).toBe('huabu');
     },
   );
 
@@ -730,7 +730,7 @@ describe('Bubble identity', () => {
       url: '/api/identity/session',
       headers: { authorization: 'Bearer machine-secret' },
     });
-    expect(refused.statusCode).toBe(400);
+    expect(refused.statusCode).toBe(401);
 
     const started = await app.inject({
       method: 'POST',

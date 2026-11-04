@@ -3,6 +3,7 @@
 
 import { timingSafeEqual } from 'node:crypto';
 
+import { readAgentCredential } from './agent-credentials.js';
 import { openPersonalSettings, useCaller } from './personal-settings.js';
 import {
   getRequestAuthorizations,
@@ -13,13 +14,11 @@ import {
 import { IdentityError, UNRESTRICTED_ACCESS } from './service.js';
 import { isPublicRfsSkillBootstrapRequest } from '../remote_fs/public-skill.js';
 import { isLoopbackRequest } from '../security/peer.js';
-import { openWorkspace } from '../storage/index.js';
 import {
   fillWorkspaceScope,
   openWorkspaceScope,
   runInWorkspace,
 } from '../workspace/context.js';
-import { getProcessWorkspaceHandle } from '../workspace.js';
 
 import type { IdentityCredentials, IdentityService } from './service.js';
 import type { IdentityResponse } from '@huabu/shared';
@@ -123,23 +122,19 @@ export function registerIdentity(
     )
       return;
 
-    // Existing machine reachback remains available. Whether it is also an
-    // owner is the provider's call: local mode keeps its loopback rule, and in
-    // Bubble mode a daemon is never a human owner.
+    // Local machine reachback keeps its existing owner and loopback rules.
+    // Bubble admits only user credentials and scoped reachback below.
     const machineToken = options.getConnectionToken();
     const supplied = Buffer.from(authorization ?? '');
     const expected = machineToken
       ? Buffer.from(`Bearer ${machineToken}`)
       : undefined;
     if (
+      service.provider !== 'bubble' &&
       expected &&
       supplied.length === expected.length &&
       timingSafeEqual(supplied, expected)
     ) {
-      if (service.provider === 'bubble') {
-        const workspace = getProcessWorkspaceHandle();
-        if (workspace) fillWorkspaceScope(await openWorkspace(workspace));
-      }
       setRequestIdentity(request, {
         principal: { principalId: 'huabu-agentlet', kind: 'bot' },
         member: true,
@@ -157,6 +152,27 @@ export function registerIdentity(
         return Array.isArray(value) ? value[0] : value;
       },
     };
+    const agentClaims =
+      service.provider === 'bubble'
+        ? readAgentCredential(authorization?.match(/^Bearer (\S+)$/)?.[1] ?? '')
+        : null;
+    const resolveIdentity = async () => {
+      if (!agentClaims) return service.authenticate(credentials);
+      const params = request.params as {
+        workspaceId?: string;
+        canvasId?: string;
+      };
+      if (
+        agentClaims.aud !== 'rfs' ||
+        !request.routeOptions.url?.startsWith('/api/rfs/w/') ||
+        params.workspaceId !== agentClaims.workspaceId ||
+        params.canvasId !== agentClaims.canvasId
+      )
+        return null;
+      return (
+        (await service.resolvePrincipal?.(agentClaims.principalId)) ?? null
+      );
+    };
     // Without a login the RFS surface still requires the machine token.
     // Basic-authenticated owners retain their current access.
     if (service.credentialFree && request.url.startsWith('/api/rfs/'))
@@ -165,7 +181,7 @@ export function registerIdentity(
         code: 'IDENTITY_REQUIRED',
       });
     try {
-      const identity = await service.authenticate(credentials);
+      const identity = await resolveIdentity();
       if (!identity) {
         return reply
           .header('WWW-Authenticate', service.challenge)
@@ -231,8 +247,7 @@ export function registerIdentity(
         const timer = setInterval(() => {
           if (closed || checking) return;
           checking = true;
-          void service
-            .authenticate(credentials)
+          void resolveIdentity()
             .then(async (current) => {
               if (
                 !closed &&

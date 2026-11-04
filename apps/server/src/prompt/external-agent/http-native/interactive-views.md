@@ -2,7 +2,7 @@
 
 Use an Interactive View when the user needs a durable application-like surface inside the Huabu Canvas. The renderer is untrusted HTML; Huabu owns persistence, live data, navigation, and Agent delivery through a capability bridge.
 
-Do not embed `AGENTLET_TOKEN`, `HUABU_RFS_URL`, API routes, thread IDs, filesystem credentials, or secrets in HTML. Do not call Huabu APIs from the iframe. The iframe may invoke only actions declared when the View is created.
+Do not embed `HUABU_RFS_TOKEN`, `HUABU_RFS_URL`, API routes, thread IDs, filesystem credentials, or secrets in HTML. Do not call Huabu APIs from the iframe. The iframe may invoke only actions declared when the View is created.
 
 ## 1. Discover an existing View
 

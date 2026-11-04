@@ -1,9 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -218,10 +218,8 @@ describe('personal settings', () => {
     );
     expect(as(person('dave'), () => store.getSecret(tavily))).toBe('dave-key');
     expect(as(null, () => store.getSecret(tavily))).toBe('operator-env-key');
-    // An administrator uses the deployment's.
-    expect(as(person('admin', true), () => store.getSecret(tavily))).toBe(
-      'operator-env-key',
-    );
+    // Administrators have personal credentials too.
+    expect(as(person('admin', true), () => store.getSecret(tavily))).toBeNull();
 
     // Settings files go under the member's own directory.
     expect(as(person('carol'), () => scope.settingsFilePath('x.json'))).toMatch(
@@ -246,30 +244,35 @@ describe('personal settings', () => {
     ).toBe('machine');
   });
 
-  it('uses fixed member defaults without reading personal or deployment defaults files', async () => {
+  it('persists independent Agent defaults for members and administrators', async () => {
     const scope = await import('./personal-settings.js');
     const defaults = await import('../agent/agent-defaults.js');
     defaults.setAgentDefaults({
-      profileId: 'external-x',
+      profileId: 'legacy-external',
       functionalModel: '',
     });
-    expect(defaults.getAgentDefaults().profileId).toBe('external-x');
-    scope.openPersonalSettings(() => {
-      scope.useCaller(person('carol'));
-      const personalFile = scope.settingsFilePath('agent-defaults.json');
-      mkdirSync(dirname(personalFile), { recursive: true });
-      writeFileSync(personalFile, 'invalid personal defaults');
-      writeFileSync(
-        join(tmp, 'agent-defaults.json'),
-        'invalid deployment defaults',
-      );
-      expect(defaults.getAgentDefaults()).toEqual({
-        profileId: 'huabu',
-        functionalModel: '',
-      });
-      expect(defaults.requireDefaultAgentProfileId()).toBe('huabu');
-    });
-    expect(() => defaults.getAgentDefaults()).toThrow('malformed JSON');
+    for (const owner of [false, true]) {
+      for (const id of ['carol', 'dave']) {
+        scope.openPersonalSettings(() => {
+          scope.useCaller(person(`${id}-${owner}`, owner));
+          expect(defaults.getAgentDefaults().profileId).toBe('huabu');
+          defaults.setAgentDefaults({
+            profileId: `${id}-agent`,
+            functionalModel: `${id}-model`,
+          });
+        });
+      }
+      for (const id of ['carol', 'dave']) {
+        scope.openPersonalSettings(() => {
+          scope.useCaller(person(`${id}-${owner}`, owner));
+          expect(defaults.getAgentDefaults()).toEqual({
+            profileId: `${id}-agent`,
+            functionalModel: `${id}-model`,
+          });
+        });
+      }
+    }
+    expect(defaults.getAgentDefaults().profileId).toBe('legacy-external');
   });
 });
 

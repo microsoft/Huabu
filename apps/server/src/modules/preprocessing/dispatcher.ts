@@ -14,8 +14,10 @@ import { isLabelProtected } from './label-policy.js';
 import { runPipeline, type PipelineDeps } from './pipeline.js';
 import { getProfile } from './profiles.js';
 import { ProviderManager } from './provider-manager.js';
+import { personalSettingsOwner } from '../identity/personal-settings.js';
 import { withPublicNetworkOnly } from '../security/outbound.js';
 import { space, getStructuredStore } from '../storage/index.js';
+import { getWorkspaceHandle } from '../workspace.js';
 
 import type {
   Capability,
@@ -107,6 +109,8 @@ function stableHash(input: string): string {
 function dedupeKey(request: PreprocessNodeRequest): string {
   const o = request.options;
   return [
+    personalSettingsOwner() ?? '',
+    getWorkspaceHandle()?.workspaceId ?? '',
     request.canvasId,
     request.nodeId,
     request.nodeType,

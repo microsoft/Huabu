@@ -30,6 +30,7 @@ vi.mock('@agenetes/acp-driver', () => ({
 }));
 
 vi.mock('@agenetes/agentlet-host', () => ({
+  getAgentProfileRegistry: () => ({ getProfile: (id: string) => ({ id }) }),
   resolveConnectedAgentletId: (agentletId: string) =>
     agentletId === 'legacy-host' ? 'device-uuid' : agentletId,
 }));

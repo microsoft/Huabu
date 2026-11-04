@@ -29,20 +29,6 @@ declare module 'fastify' {
 type Fields = Record<string, unknown> | undefined;
 
 /**
- * External agents act through the shared machine credential, which reaches
- * every Space, on the operator's machines and under the operator's logins, so
- * a member may not run or steer one. RFS is that credential's own surface: it
- * launches agents and Task Runs and leases shared service credentials, and
- * the web app never calls it. The change-review routes configure the
- * deployment. A member runs the Built-In agent instead, through `/api/agent`,
- * in their own access and with their own model keys. Matched by route
- * pattern, not URL spelling.
- */
-const ADMIN_AGENT_ROUTES = ['/api/acp', '/api/agent-change-review', '/api/rfs'];
-/** The one external-agent route a member reads: it lists only Built-In. */
-const MEMBER_AGENT_LISTING = '/api/acp/profiles';
-
-/**
  * The one value a request gives for `field` across its route parameters,
  * query and body: `undefined` when absent, `null` when the sources disagree or
  * the value is not a single id, so a handler can never read a different
@@ -69,7 +55,7 @@ function single(
  * The Space is the `canvasId` route parameter, query field or body field,
  * which must agree wherever more than one is given; a route that moves
  * content between Spaces also names the other one in its body. Conversations
- * use the caller's Space access; external agents require an administrator. The
+ * use the caller's Space access; external agent adapters also check device ownership. The
  * identity provider decides each check, and each granted check is recorded so
  * a long-lived response is closed once it no longer holds. Unrestricted
  * callers, the local owner and the machine credential, skip the guard
@@ -102,19 +88,6 @@ export function registerSpaceAccess(app: FastifyInstance): void {
         code: 'SPACE_ACCESS_AMBIGUOUS',
       });
     const route = request.routeOptions.url ?? '';
-    if (
-      !identity.owner &&
-      !(request.method === 'GET' && route === MEMBER_AGENT_LISTING) &&
-      (request.routeOptions.config?.invokesAgent ||
-        ADMIN_AGENT_ROUTES.some(
-          (prefix) => route === prefix || route.startsWith(`${prefix}/`),
-        ))
-    ) {
-      return reply.code(403).send({
-        message: 'External agents and their settings require an administrator',
-        code: 'AGENT_ACCESS_REQUIRED',
-      });
-    }
     // A conversation lives in a Space, and is reached only through one the
     // caller may use.
     if (

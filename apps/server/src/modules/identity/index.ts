@@ -61,6 +61,8 @@ export function createIdentity(
       ...(config.providerSignOut ? { providerSignOut: true } : {}),
       authenticate: async (credentials) =>
         (await (opening ??= open())).service.authenticate(credentials),
+      resolvePrincipal: async (principalId) =>
+        (await (opening ??= open())).service.resolvePrincipal!(principalId),
       // Present from the start so routes can tell Bubble mode by it; each call
       // opens Bubble on demand like every other member here.
       people: {

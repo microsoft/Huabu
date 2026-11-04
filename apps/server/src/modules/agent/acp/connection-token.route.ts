@@ -9,11 +9,11 @@ import {
 import { getExternalAgentRuntimeConfig } from './runtime-config.js';
 import {
   buildAgentletConnectionCommand,
-  getConnectionToken,
   InvalidAgentletConnectionEnvFileError,
   InvalidAgentletConnectionOriginError,
 } from '../../../connection-token.js';
-import { isOwnerRequest } from '../../security/owner.js';
+import { ownDeviceCredential } from '../../identity/agent-credentials.js';
+import { canChangeOwnSettings } from '../../security/owner.js';
 
 import type {
   AgentletConnectionCommandRequest,
@@ -24,7 +24,7 @@ import type { FastifyPluginAsync } from 'fastify';
 
 const connectionTokenRoutes: FastifyPluginAsync = async (app) => {
   app.post('/connection-credentials', async (request, reply) => {
-    if (!isOwnerRequest(request)) {
+    if (!canChangeOwnSettings(request)) {
       return reply.status(403).send({
         message: 'Forbidden: device connection requires owner authorization',
       });
@@ -39,7 +39,7 @@ const connectionTokenRoutes: FastifyPluginAsync = async (app) => {
       .header('Cache-Control', 'no-store')
       .header('Pragma', 'no-cache')
       .send({
-        token: getConnectionToken(),
+        token: ownDeviceCredential(),
         maxAgents: getExternalAgentRuntimeConfig().maxAgents,
       });
   });
@@ -48,7 +48,7 @@ const connectionTokenRoutes: FastifyPluginAsync = async (app) => {
     Body: AgentletConnectionCommandRequest;
     Reply: ApiResult<AgentletConnectionCommandResponse>;
   }>('/connection-command', async (request, reply) => {
-    if (!isOwnerRequest(request)) {
+    if (!canChangeOwnSettings(request)) {
       return reply.status(403).send({
         message: 'Forbidden: connection command requires owner authorization',
       });
@@ -68,7 +68,10 @@ const connectionTokenRoutes: FastifyPluginAsync = async (app) => {
         .send({ message: 'Browser origin does not match request origin' });
     }
     try {
-      const response = buildAgentletConnectionCommand(parsed.data);
+      const response = buildAgentletConnectionCommand(parsed.data, {
+        token: ownDeviceCredential(),
+        source: 'managed',
+      });
       return reply
         .header('Cache-Control', 'no-store')
         .header('Pragma', 'no-cache')

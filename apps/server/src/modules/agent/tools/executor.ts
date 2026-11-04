@@ -69,20 +69,11 @@ import {
 } from './handlers/task.js';
 import { handleWebSearch, type WebSearchArgs } from './handlers/web-search.js';
 import { resolveWorldReadCanvasId } from '../../canvas/world-target-access.js';
-import {
-  callerAccess,
-  personalSettingsOwner,
-} from '../../identity/personal-settings.js';
+import { callerAccess } from '../../identity/personal-settings.js';
 import { acquireWorkspaceOperationLease } from '../../workspace.js';
 
 import type { AgentToolResult } from '@earendil-works/pi-agent-core';
 import type { NodeOrigin } from '@huabu/shared';
-
-const TASK_TOOLS: ReadonlySet<string> = new Set([
-  'create_task',
-  'start_task_run',
-  'complete_task_run',
-]);
 
 /**
  * Per-request context every handler call receives.
@@ -168,17 +159,6 @@ export async function executeTool(
       lease.release();
     }
   };
-
-  // Task Runs start agents through the shared machine credential, which
-  // reaches every Space; a member's run may not.
-  if (
-    TASK_TOOLS.has(name) &&
-    callerAccess() &&
-    personalSettingsOwner() !== null
-  )
-    throw new Error(
-      `${name} is not available to this agent: Task Runs are the administrators'`,
-    );
 
   switch (name) {
     case 'report_ink_intent':

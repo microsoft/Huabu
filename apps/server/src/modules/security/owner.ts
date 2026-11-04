@@ -12,8 +12,8 @@ export function isOwnerRequest(request: FastifyRequest): boolean {
 }
 
 /**
- * Whether the caller may change the settings this call reads: an owner the
- * deployment's, a Bubble member their own personal ones (model keys, agent
+ * Whether the caller may change the settings this call reads: the local owner
+ * their own, every admitted Bubble user their own personal ones (model keys, agent
  * defaults, connected credentials).
  */
 export function canChangeOwnSettings(request: FastifyRequest): boolean {

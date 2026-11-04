@@ -14,7 +14,7 @@ import {
 
 import { getProfileSchemaCache } from './acp/profile-schema-cache.js';
 import { getAgentDefaults, setAgentDefaults } from './agent-defaults.js';
-import { canChangeOwnSettings, isOwnerRequest } from '../security/owner.js';
+import { canChangeOwnSettings } from '../security/owner.js';
 
 import type {
   AgentDefaults,
@@ -93,11 +93,6 @@ const agentDefaultsRoutes: FastifyPluginAsync = async (app) => {
     '/',
     { prefixTrailingSlash: 'both' },
     async (request, reply) => {
-      if (!isOwnerRequest(request))
-        return reply.code(403).send({
-          message: 'Utility Agent defaults require administrator authorization',
-          code: 'ADMIN_REQUIRED',
-        });
       const parsed = agentDefaultsSchema.safeParse(request.body);
       if (!parsed.success) {
         return reply.status(400).send({

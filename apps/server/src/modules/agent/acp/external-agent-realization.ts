@@ -8,6 +8,7 @@ import {
 } from '@agenetes/acp-driver';
 import { resolveConnectedAgentletId } from '@agenetes/agentlet-host';
 
+import { requireOwnAgentlet } from '../../identity/agent-credentials.js';
 import { canvasAcpNamespace } from '../../workspace/paths.js';
 import {
   acpRuntimePolicy,
@@ -239,6 +240,8 @@ export class ExternalAgentRealizationService {
     }
     try {
       const realized = await pending;
+      if (realized.spec.spec.agentletId)
+        requireOwnAgentlet(realized.spec.spec.agentletId);
       this.validateRequest(realized, options);
       return realized;
     } finally {
@@ -250,6 +253,8 @@ export class ExternalAgentRealizationService {
     realized: RealizedExternalAgentThread,
     logger: FastifyBaseLogger,
   ): Promise<AcpSessionEntry> {
+    if (realized.spec.spec.agentletId)
+      requireOwnAgentlet(realized.spec.spec.agentletId);
     return this.dependencies.ensureSession(realized, logger);
   }
 
@@ -315,6 +320,7 @@ export class ExternalAgentRealizationService {
         );
       }
       const spec = record.spec as AcpWorkloadSpec;
+      if (spec.spec.agentletId) requireOwnAgentlet(spec.spec.agentletId);
       validateRequestedExecution(spec, options);
       const binding = bindingFromSpec(spec);
       const realized = {

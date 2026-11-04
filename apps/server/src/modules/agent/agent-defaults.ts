@@ -2,15 +2,16 @@
 // Licensed under the MIT license.
 
 import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 
 import { resolveConnectedAgentletId } from '@agenetes/agentlet-host';
 
 import { agentDefaultsSchema } from '@huabu/shared';
 
-import { getDataDir } from '../../data-dir.js';
 import { atomicWriteJson } from '../../utils/fs.js';
-import { personalSettingsOwner } from '../identity/personal-settings.js';
+import {
+  personalSettingsOwner,
+  settingsFilePath,
+} from '../identity/personal-settings.js';
 
 import type { AgentDefaults, AgentProfileView } from '@huabu/shared';
 
@@ -36,7 +37,7 @@ interface AgentDefaultsStorage {
 }
 
 function configPath(): string {
-  return join(getDataDir(), 'agent-defaults.json');
+  return settingsFilePath('agent-defaults.json');
 }
 
 const diskStorage: AgentDefaultsStorage = {
@@ -69,7 +70,11 @@ export class AgentDefaultsService {
   }
 
   private parseDefaults(stored: unknown): AgentDefaults {
-    if (stored === undefined) return { profileId: null, functionalModel: '' };
+    if (stored === undefined)
+      return {
+        profileId: personalSettingsOwner() ? 'huabu' : null,
+        functionalModel: '',
+      };
     const parsed = agentDefaultsSchema.safeParse(stored);
     if (!parsed.success) {
       throw new AgentDefaultsError(
@@ -128,17 +133,9 @@ export class AgentDefaultsService {
 }
 
 const service = new AgentDefaultsService();
-/**
- * A member's own defaults always pick the Built-In agent: external agents run
- * on the operator's machines under the operator's logins, so they stay the
- * administrators'.
- */
-export const getAgentDefaults = (): AgentDefaults =>
-  personalSettingsOwner()
-    ? { profileId: 'huabu', functionalModel: '' }
-    : service.getAgentDefaults();
+export const getAgentDefaults = (): AgentDefaults => service.getAgentDefaults();
 export const requireDefaultAgentProfileId = (): string =>
-  personalSettingsOwner() ? 'huabu' : service.requireDefaultAgentProfileId();
+  service.requireDefaultAgentProfileId();
 export const setAgentDefaults = (config: AgentDefaults): AgentDefaults =>
   service.setAgentDefaults(config);
 export const initializeAgentDefaults = (

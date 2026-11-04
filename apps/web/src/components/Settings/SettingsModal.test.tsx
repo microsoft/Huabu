@@ -127,7 +127,7 @@ beforeEach(() => {
 });
 
 it.each([null, 'agent', 'people'] as const)(
-  'shows members their Built-In settings without loading external agent registries (requested: %s)',
+  'gives members private agent controls and excludes People (requested: %s)',
   async (requestedTab) => {
     useIdentityStore.setState({
       identity: {
@@ -142,20 +142,21 @@ it.each([null, 'agent', 'people'] as const)(
       root.render(<SettingsModal isOpen onClose={() => {}} />),
     );
     expect(
-      container.querySelector('[data-testid="built-in-settings"]'),
+      container.querySelector(
+        requestedTab === 'people'
+          ? '[data-testid="agent-defaults"]'
+          : '[data-testid="profile-management"]',
+      ),
     ).not.toBeNull();
-    expect(
-      container.querySelector('[data-testid="profile-management"]'),
-    ).toBeNull();
-    expect(container.textContent).not.toContain('settings.devicesAndAgents');
+    expect(container.textContent).toContain('settings.devicesAndAgents');
     expect(container.textContent).not.toContain('settings.people');
-    expect(mocks.init).not.toHaveBeenCalled();
+    expect(mocks.init).toHaveBeenCalled();
     expect(mocks.load).not.toHaveBeenCalled();
-    expect(mocks.llmInit).toHaveBeenCalled();
+    expect(mocks.llmInit).not.toHaveBeenCalled();
   },
 );
 
-it('resolves a retained administrator tab immediately when the caller becomes a member', async () => {
+it('retains the Devices and Agents tab when the caller becomes a member', async () => {
   await renderModal();
   expect(
     container.querySelector('[data-testid="profile-management"]'),
@@ -172,15 +173,12 @@ it('resolves a retained administrator tab immediately when the caller becomes a 
     });
   });
   expect(
-    container.querySelector('[data-testid="built-in-settings"]'),
+    container.querySelector('[data-testid="profile-management"]'),
   ).not.toBeNull();
   expect(
-    container.querySelector('[data-testid="profile-management"]'),
-  ).toBeNull();
-  expect(findTab('settings.agentSettings').getAttribute('aria-current')).toBe(
-    'page',
-  );
-  expect(mocks.llmInit).toHaveBeenCalledOnce();
+    findTab('settings.devicesAndAgents').getAttribute('aria-current'),
+  ).toBe('page');
+  expect(mocks.llmInit).not.toHaveBeenCalled();
   expect(mocks.init).not.toHaveBeenCalled();
 });
 

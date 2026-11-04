@@ -12,7 +12,7 @@ const member = {
   owner: false,
 };
 
-test('member settings use the Built-In tab and show popup failures without leaving the app', async ({
+test('members configure their own devices and Built-In settings and recover from popup failures', async ({
   page,
 }, testInfo) => {
   let expired = false;
@@ -47,7 +47,7 @@ test('member settings use the Built-In tab and show popup failures without leavi
   });
   await expect(
     dialog.getByRole('heading', {
-      name: en.settings.agentSettings,
+      name: en.settings.devicesAndAgents,
       exact: true,
     }),
   ).toBeVisible();
@@ -56,12 +56,12 @@ test('member settings use the Built-In tab and show popup failures without leavi
       name: en.settings.devicesAndAgents,
       exact: true,
     }),
-  ).toHaveCount(0);
+  ).toBeVisible();
   await expect(
     dialog.getByRole('button', { name: en.settings.people, exact: true }),
   ).toHaveCount(0);
   await expect(
-    dialog.getByText(en.settings.chatModel, { exact: true }),
+    dialog.getByRole('button', { name: en.settings.addDevice, exact: true }),
   ).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath('member-settings.png') });
   await page.setViewportSize({ width: 390, height: 844 });
@@ -69,6 +69,31 @@ test('member settings use the Built-In tab and show popup failures without leavi
     path: testInfo.outputPath('member-settings-mobile.png'),
   });
   await page.setViewportSize({ width: 1280, height: 800 });
+  await dialog
+    .getByRole('button', { name: en.settings.addDevice, exact: true })
+    .click();
+  await expect(
+    dialog.getByRole('button', {
+      name: en.settings.agentletCommandCopy,
+      exact: true,
+    }),
+  ).toBeVisible();
+  await page.screenshot({
+    path: testInfo.outputPath('member-connect-device.png'),
+  });
+  await dialog
+    .getByRole('button', { name: en.settings.agentSettings, exact: true })
+    .click();
+  await dialog
+    .getByRole('button', { name: en.settings.builtInPi, exact: true })
+    .click();
+  await dialog
+    .getByRole('button', { name: en.settings.builtInPiConfigure, exact: true })
+    .click();
+  await expect(
+    dialog.getByText(en.settings.chatModel, { exact: true }),
+  ).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath('member-built-in.png') });
   await dialog
     .getByRole('button', { name: en.actions.close, exact: true })
     .click();

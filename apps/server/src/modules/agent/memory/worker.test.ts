@@ -11,6 +11,11 @@ import { getAgentDefaults } from '../agent-defaults.js';
 import { runAnalysisPass } from './analyzer.js';
 import { markAnalyzed } from './trigger.js';
 import { _waitForIdle, schedule } from './worker.js';
+import {
+  openPersonalSettings,
+  useCaller,
+  personalSettingsOwner,
+} from '../../identity/personal-settings.js';
 
 import type { MemoryLogger } from './index.js';
 
@@ -36,6 +41,39 @@ beforeEach(async () => {
 });
 
 describe('memory worker outcomes', () => {
+  it("keeps concurrent work on the same Space in each user's settings scope", async () => {
+    const seen: (string | null)[] = [];
+    let finish!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    vi.mocked(runAnalysisPass).mockImplementation(async () => {
+      seen.push(personalSettingsOwner());
+      await gate;
+      return { status: 'completed', results: [] };
+    });
+    for (const principalId of ['alice', 'bob']) {
+      openPersonalSettings(() => {
+        useCaller({
+          principal: { principalId, kind: 'user' },
+          member: true,
+          owner: true,
+          access: {
+            can: async () => true,
+            claim: async () => {},
+            workspaces: async () => 'all',
+          },
+        });
+        schedule('shared-space', logger());
+      });
+    }
+    try {
+      await vi.waitFor(() => expect(seen).toEqual(['alice', 'bob']));
+    } finally {
+      finish();
+      await _waitForIdle();
+    }
+  });
   it.each([null, 'external'])(
     'does not start the legacy curator with default %s',
     async (profileId) => {

@@ -58,7 +58,8 @@ import {
 } from '../agent/conversation/envelope.js';
 import { buildHistoryFromTurns } from '../agent/conversation/transcript/history.js';
 import { getLLMModel } from '../agent/llm.js';
-import { personalSettingsOwner } from '../identity/personal-settings.js';
+import { requireOwnAgentlet } from '../identity/agent-credentials.js';
+import { resolveProfileSnapshot } from './acp/profile-snapshot.js';
 import { getRequestIdentity } from '../identity/request.js';
 import { canvasAcpNamespace } from '../workspace/paths.js';
 
@@ -194,12 +195,7 @@ const agentRoutes: FastifyPluginAsync = async (
   // the Question binding and persisted driver before any mutation runs.
   fastify.addHook('preHandler', async (request, reply) => {
     const identity = getRequestIdentity(request);
-    if (
-      !identity ||
-      identity.owner ||
-      request.method === 'GET' ||
-      request.method === 'HEAD'
-    )
+    if (!identity || request.method === 'GET' || request.method === 'HEAD')
       return;
     const params = request.params as { threadId?: string };
     const body = request.body as
@@ -214,15 +210,24 @@ const agentRoutes: FastifyPluginAsync = async (
         canvasAcpNamespace(canvasId),
         threadId,
       );
+      if (record?.spec.kind === EXTERNAL_DRIVER_KIND) {
+        const agentletId = (record.spec.spec as { agentletId?: string })
+          .agentletId;
+        if (agentletId) requireOwnAgentlet(agentletId);
+      }
+      const target = await agentThreadService.resolveExternalTarget(
+        canvasId,
+        threadId,
+      );
       if (
-        record?.spec.kind === EXTERNAL_DRIVER_KIND ||
-        (await agentThreadService.resolveExternalTarget(canvasId, threadId))
-      ) {
+        target &&
+        !resolveProfileSnapshot(target.binding.profileId) &&
+        !record
+      )
         return reply.code(403).send({
-          message: 'External agents are available to administrators only',
+          message: 'Agent is unavailable to this user',
           code: 'AGENT_ACCESS_REQUIRED',
         });
-      }
     } catch (error) {
       if (error instanceof AgentThreadResolutionError) {
         return reply
@@ -816,14 +821,7 @@ const agentRoutes: FastifyPluginAsync = async (
       agentTarget,
       fixedTarget,
     });
-    // External agents run on the operator's machines under the operator's
-    // logins and reach every Space through the shared machine credential, so
-    // a member runs the Built-In agent, with their own model keys.
-    if (effectiveBinding?.kind === 'external' && personalSettingsOwner())
-      return reply.code(403).send({
-        message: 'External agents are available to administrators only',
-        code: 'AGENT_ACCESS_REQUIRED',
-      });
+    // Profile selection and canonical realization enforce private device ownership.
     if (effectiveBinding?.kind === 'external') {
       request.log.info(
         {

@@ -4,11 +4,11 @@
 /**
  * Whose settings a call reads and writes.
  *
- * The deployment's settings, model keys and connected credentials belong to
- * its administrators. In Bubble mode every member has their own instead: a
+ * In Bubble mode every admitted user, including administrators, has their own
+ * settings, model keys and connected credentials: a
  * call made for a member, and everything it starts (an agent run included),
  * runs in that member's personal settings namespace, and the secret store and
- * settings files answer from it. Local mode, administrators and the machine
+ * settings files answer from it. Local mode and the machine
  * credential never open one, so they read the deployment's, exactly as before.
  */
 
@@ -39,12 +39,12 @@ export function openPersonalSettings<T>(fn: () => T): T {
 
 /**
  * Record who the call this runs inside is for: a member's own settings and
- * access, or an administrator's access over the deployment's settings.
+ * access, including administrators.
  */
 export function useCaller(identity: ResolvedIdentity): void {
   const slot = storage.getStore();
   if (!slot) throw new Error('No settings scope is open for this call');
-  const personal = identity.member && !identity.owner;
+  const personal = identity.member;
   const principalId = personal ? identity.principal.principalId : null;
   if (slot.principalId && slot.principalId !== principalId)
     throw new Error('This call already runs as another person');

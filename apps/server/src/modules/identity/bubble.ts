@@ -11,7 +11,6 @@ import {
 } from '@octostaff/bubble/postgres';
 import {
   authenticateBubbleRequest,
-  bubbleAuthContextToPrincipal,
   BubbleErrorCode,
   isBubbleProtocolError,
 } from '@octostaff/sdk';
@@ -33,6 +32,7 @@ import type {
   IdentityService,
   PeopleDirectory,
   ResourceDirectory,
+  ResolvedIdentity,
 } from './service.js';
 import type { WorkspaceRole } from '@huabu/shared';
 import type {
@@ -369,12 +369,88 @@ export async function openBubbleIdentity(options: {
     }
   }
   const { identity } = runtime.application;
+  const resolvePrincipal = async (
+    principalId: string,
+  ): Promise<ResolvedIdentity | null> => {
+    const principal = await store.principals.get(principalId);
+    if (!principal || principal.disabledAt) return null;
+    const admission = runtime.policy.scoped();
+    const admin = await admission.can(ADMIN, principalId, {
+      type: 'system',
+    });
+    const member = await admission.can(USE, principalId, {
+      type: 'system',
+    });
+    // Resource checks start after Workspace selection, which can grant
+    // ownership during provisioning (including a racing first request).
+    // Cache that fresh policy until this request claims another resource.
+    let policy: ReturnType<typeof runtime.policy.scoped> | undefined;
+    // A Space is the one of that id in the Workspace this call runs in.
+    const target = (resource: HuabuResource) => {
+      if (resource.type === 'workspace')
+        return { type: TARGET.workspace, id: resource.id };
+      const workspaceId = getWorkspaceHandle()?.workspaceId;
+      return workspaceId
+        ? {
+            type: TARGET.space,
+            id: spaceTargetId(workspaceId, resource.id),
+          }
+        : null;
+    };
+    return {
+      principal: identityPrincipalSchema.parse(principal),
+      member,
+      owner: admin,
+      access: {
+        can: async (level, resource) => {
+          const resolved = target(resource);
+          return resolved
+            ? (policy ??= runtime.policy.scoped()).can(
+                CAPABILITY[level],
+                principalId,
+                resolved,
+              )
+            : false;
+        },
+        claim: async (resource) => {
+          const resolved = target(resource);
+          if (!resolved)
+            throw new Error('A Space is claimed inside a Workspace');
+          await store.grants.add({
+            target: resolved,
+            principalId,
+            role:
+              resource.type === 'space' ? SPACE_OWNER : WORKSPACE_ROLE.owner,
+            grantedByPrincipalId: principalId,
+          });
+          policy = undefined;
+        },
+        // A Space shared on its own makes its Workspace enterable; what
+        // the caller sees there is still decided Space by Space.
+        workspaces: async () => {
+          if (admin) return 'all';
+          const ids = new Set<string>();
+          for (const grant of await store.grants.list({ principalId })) {
+            const granted = grant.target;
+            if (!('id' in granted)) continue;
+            if (granted.type === TARGET.workspace) ids.add(granted.id);
+            if (granted.type === TARGET.space) {
+              const space = parseSpaceTargetId(granted.id);
+              if (space) ids.add(space.workspaceId);
+            }
+          }
+          return [...ids];
+        },
+      },
+    };
+  };
 
   return {
     service: {
       provider: 'bubble',
       challenge: 'Bearer realm="Huabu"',
       people: bubblePeople(store),
+      resolvePrincipal,
       selectWorkspace: (identity) =>
         selectRequestWorkspace(identity, preferences, options.resources),
       chooseWorkspace: (identity, workspaceId) =>
@@ -398,82 +474,7 @@ export async function openBubbleIdentity(options: {
           });
           // Registration binds (issuer, subject) and refuses disabled accounts.
           const registered = await identity.register(auth, 'http');
-          const whoami = await identity.whoAmIFor(
-            { actorPrincipalId: registered.principalId },
-            bubbleAuthContextToPrincipal(registered),
-          );
-          const { principalId } = registered;
-          const admission = runtime.policy.scoped();
-          const admin = await admission.can(ADMIN, principalId, {
-            type: 'system',
-          });
-          const member = await admission.can(USE, principalId, {
-            type: 'system',
-          });
-          // Resource checks start after Workspace selection, which can grant
-          // ownership during provisioning (including a racing first request).
-          // Cache that fresh policy until this request claims another resource.
-          let policy: ReturnType<typeof runtime.policy.scoped> | undefined;
-          // A Space is the one of that id in the Workspace this call runs in.
-          const target = (resource: HuabuResource) => {
-            if (resource.type === 'workspace')
-              return { type: TARGET.workspace, id: resource.id };
-            const workspaceId = getWorkspaceHandle()?.workspaceId;
-            return workspaceId
-              ? {
-                  type: TARGET.space,
-                  id: spaceTargetId(workspaceId, resource.id),
-                }
-              : null;
-          };
-          return {
-            principal: identityPrincipalSchema.parse(whoami.principal),
-            member,
-            owner: admin,
-            access: {
-              can: async (level, resource) => {
-                const resolved = target(resource);
-                return resolved
-                  ? (policy ??= runtime.policy.scoped()).can(
-                      CAPABILITY[level],
-                      principalId,
-                      resolved,
-                    )
-                  : false;
-              },
-              claim: async (resource) => {
-                const resolved = target(resource);
-                if (!resolved)
-                  throw new Error('A Space is claimed inside a Workspace');
-                await store.grants.add({
-                  target: resolved,
-                  principalId,
-                  role:
-                    resource.type === 'space'
-                      ? SPACE_OWNER
-                      : WORKSPACE_ROLE.owner,
-                  grantedByPrincipalId: principalId,
-                });
-                policy = undefined;
-              },
-              // A Space shared on its own makes its Workspace enterable; what
-              // the caller sees there is still decided Space by Space.
-              workspaces: async () => {
-                if (admin) return 'all';
-                const ids = new Set<string>();
-                for (const grant of await store.grants.list({ principalId })) {
-                  const granted = grant.target;
-                  if (!('id' in granted)) continue;
-                  if (granted.type === TARGET.workspace) ids.add(granted.id);
-                  if (granted.type === TARGET.space) {
-                    const space = parseSpaceTargetId(granted.id);
-                    if (space) ids.add(space.workspaceId);
-                  }
-                }
-                return [...ids];
-              },
-            },
-          };
+          return resolvePrincipal(registered.principalId);
         } catch (error) {
           if (isBubbleProtocolError(error)) {
             if (error.code === BubbleErrorCode.Unauthenticated) return null;

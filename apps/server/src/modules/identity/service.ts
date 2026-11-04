@@ -124,6 +124,8 @@ export interface IdentityService {
   authenticate(
     credentials: IdentityCredentials,
   ): Promise<ResolvedIdentity | null>;
+  /** Resolve a previously enrolled device owner, rechecking account and grants. */
+  resolvePrincipal?(principalId: string): Promise<ResolvedIdentity | null>;
   /**
    * Whether the machine credential also carries owner authority. Local mode
    * keeps its loopback rule for it; without this the machine is never an owner.

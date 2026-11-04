@@ -258,10 +258,15 @@ describe('owner-only Agent defaults', () => {
 });
 
 it.each(['huabu', 'existing-external', 'unknown-external', null])(
-  'refuses member selection %s before inspecting operator profiles or writing settings',
+  'lets a member select %s only when available in their profile registry',
   async (profileId) => {
     const { openPersonalSettings, useCaller } =
       await import('../identity/personal-settings.js');
+    mocks.getProfile.mockImplementation((id) =>
+      id === 'existing-external'
+        ? { id, launch: { kind: 'acp-command' } }
+        : undefined,
+    );
     await openPersonalSettings(async () => {
       useCaller({
         principal: { principalId: 'carol', kind: 'user' },
@@ -279,11 +284,13 @@ it.each(['huabu', 'existing-external', 'unknown-external', null])(
         remoteAddress: '192.0.2.10',
         payload: { profileId, functionalModel: '' },
       });
-      expect(response.statusCode).toBe(403);
-      expect(response.json().code).toBe('ADMIN_REQUIRED');
+      expect(response.statusCode).toBe(
+        profileId === 'unknown-external' ? 400 : 200,
+      );
     });
-    expect(mocks.getProfile).not.toHaveBeenCalled();
-    expect(mocks.set).not.toHaveBeenCalled();
+    if (profileId === 'unknown-external')
+      expect(mocks.set).not.toHaveBeenCalled();
+    else expect(mocks.set).toHaveBeenCalledOnce();
   },
 );
 

@@ -2,7 +2,7 @@
 // Licensed under the MIT license.
 
 /**
- * Memory worker — per-canvas single-flight scheduler.
+ * Memory worker — single-flight scheduler per user, Workspace and Space.
  *
  * Public surface: {@link schedule}. The route calls it via
  * {@link import('./index.js').enqueue} after the op-counter crosses
@@ -11,7 +11,7 @@
  *
  * Concurrency model:
  *
- *   - At most one analysis pass per canvas at any moment. If a
+ *   - At most one analysis pass per user, Workspace and Space at any moment. If a
  *     second `schedule(canvasId)` arrives while one is already
  *     running, we set a `pending` flag rather than queueing — the
  *     in-flight pass will already cover the new ops, and at most
@@ -30,6 +30,8 @@
 
 import { runAnalysisPass } from './analyzer.js';
 import { markAnalyzed } from './trigger.js';
+import { personalSettingsOwner } from '../../identity/personal-settings.js';
+import { getWorkspaceHandle } from '../../workspace.js';
 import { getAgentDefaults } from '../agent-defaults.js';
 
 import type { MemoryLogger } from './index.js';
@@ -54,8 +56,13 @@ const pending = new Set<string>();
  * Returns synchronously. The actual work runs after the next tick.
  */
 export function schedule(canvasId: string, logger?: MemoryLogger): void {
-  if (running.has(canvasId)) {
-    pending.add(canvasId);
+  const key = JSON.stringify([
+    personalSettingsOwner(),
+    getWorkspaceHandle()?.workspaceId,
+    canvasId,
+  ]);
+  if (running.has(key)) {
+    pending.add(key);
     return;
   }
   // Wrap the worker in a Promise we can dedupe against. `setImmediate`
@@ -66,10 +73,10 @@ export function schedule(canvasId: string, logger?: MemoryLogger): void {
       runOnce(canvasId, logger).finally(resolve);
     });
   });
-  running.set(canvasId, task);
+  running.set(key, task);
   task.finally(() => {
-    running.delete(canvasId);
-    if (pending.delete(canvasId)) {
+    running.delete(key);
+    if (pending.delete(key)) {
       schedule(canvasId, logger);
     }
   });

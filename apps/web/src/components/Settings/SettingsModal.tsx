@@ -75,28 +75,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 }) => {
   const { t } = useTranslation();
   const identity = useIdentityStore((s) => s.identity);
-  // A Bubble member configures only their own models and credentials; the
-  // deployment, its external agents and its people are the administrators'.
-  const member = identity?.provider === 'bubble' && !identity.owner;
+  const admin = identity?.owner === true;
   const tabs =
-    identity?.provider === 'bubble' && identity.owner
-      ? [...TABS, PEOPLE_TAB]
-      : member
-        ? TABS.filter((tab) => tab.id !== 'agent')
-        : TABS;
+    identity?.provider === 'bubble' && admin ? [...TABS, PEOPLE_TAB] : TABS;
   const llmInit = useLLMStore((s) => s.init);
   const acpInit = useAcpProfilesStore((s) => s.init);
   const loadDeploymentReadiness = useDeploymentReadinessStore((s) => s.load);
   const requestedTab = useSettingsUiStore((s) => s.requestedTab);
   const clearRequestedTab = useSettingsUiStore((s) => s.clearRequestedTab);
-  const [selectedTab, setSelectedTab] = useState<SettingsTab>(
-    member ? 'agentSettings' : TABS[0].id,
-  );
+  const [selectedTab, setSelectedTab] = useState<SettingsTab>(TABS[0].id);
   const targetTab = (isOpen && requestedTab) || selectedTab;
   const activeTab =
-    member && (targetTab === 'agent' || targetTab === 'people')
-      ? 'agentSettings'
-      : targetTab;
+    !admin && targetTab === 'people' ? 'agentSettings' : targetTab;
   const isAgentTab = activeTab === 'agentSettings' || activeTab === 'builtIn';
   const [externalAgentsNavigation, setExternalAgentsNavigation] =
     useState<ExternalAgentsNavigation | null>(null);
@@ -128,19 +118,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   }, [isOpen, activeTab]);
 
   useEffect(() => {
-    if (!isOpen || member) return;
+    if (!isOpen || !admin) return;
     void loadDeploymentReadiness();
-  }, [isOpen, member, loadDeploymentReadiness]);
+  }, [isOpen, admin, loadDeploymentReadiness]);
 
   // Load each registry only when its owning tab is visible.
   useEffect(() => {
     if (!isOpen) return;
-    if (!member && (activeTab === 'agent' || activeTab === 'agentSettings'))
-      void acpInit();
-    if (activeTab === 'builtIn' || (activeTab === 'agentSettings' && member)) {
+    if (activeTab === 'agent' || activeTab === 'agentSettings') void acpInit();
+    if (activeTab === 'builtIn') {
       void llmInit();
     }
-  }, [isOpen, activeTab, member, llmInit, acpInit]);
+  }, [isOpen, activeTab, admin, llmInit, acpInit]);
 
   // Close on Escape.
   useEffect(() => {
@@ -296,20 +285,20 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </header>
 
           <div className="min-h-0 flex-1 overflow-y-auto px-4 pt-0 pb-4 sm:px-5">
-            {!member && <DeploymentReadinessNotice />}
+            {admin && <DeploymentReadinessNotice />}
             {activeTab === 'general' && (
               <SettingSection>
                 <GeneralSettings />
               </SettingSection>
             )}
-            {activeTab === 'agent' && !member && (
+            {activeTab === 'agent' && (
               <ExternalAgentsSettings
                 onNavigationChange={handleExternalAgentsNavigationChange}
               />
             )}
             {activeTab === 'people' && identity?.owner && <PeopleSettings />}
             {isAgentTab &&
-              (activeTab === 'builtIn' || member ? (
+              (activeTab === 'builtIn' ? (
                 <LLMSettings />
               ) : (
                 <>

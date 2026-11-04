@@ -160,7 +160,7 @@ describe('Space access', () => {
     expect((await titles('', { canvasId: ['mine'] })).statusCode).toBe(400);
   });
 
-  it('lets a member use the Built-In agent in their Spaces, and keeps external agents to administrators', async () => {
+  it('authorizes member agent operations by Space while device ownership is enforced by agent services', async () => {
     const { app } = host();
     const as = (owner: 'yes' | 'no') => ({ 'x-owner': owner });
     const member = async (request: {
@@ -187,17 +187,15 @@ describe('Space access', () => {
       404,
     );
     expect(await member({ url: '/api/agent/history/t1' })).toBe(400);
-    // Listing agents shows them Built-In; changing profiles does not.
+    // Profile routes enforce device ownership separately from Space access.
     expect(await member({ url: '/api/acp/profiles' })).toBe(200);
     for (const request of [
       { method: 'POST', url: '/api/acp/profiles' },
       { method: 'POST', url: '/api/acp/threads/t1/permission?canvasId=mine' },
-      // The machine credential's own surface: agent launches, Task Runs and
-      // shared service credentials.
       { method: 'POST', url: '/api/rfs/mine/services/web-search/lease' },
       { method: 'POST', url: '/api/interactive-views/mine/n1/actions/a1' },
     ] as const) {
-      expect(await member(request)).toBe(403);
+      expect(await member(request)).toBe(200);
     }
     expect(
       (

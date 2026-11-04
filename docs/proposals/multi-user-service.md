@@ -1,7 +1,7 @@
 # Multi-User Service
 
 Status: In-Progress — PR A (#356) merged, PR B (#357) implemented for review
-Last updated: 2026-11-03
+Last updated: 2026-11-04
 
 Follows PR #237 (Bubble identity and per-user Space access) toward issue #228. PR A (#356) is merged; PR B (#357) now targets `main`. Together these pull requests take one Huabu Server from "several people sign in and each edits their own Spaces in one shared Workspace" to a service several people can use day to day: each person has their own Workspaces, uses agents in them, and an operator admits people without scripts.
 
@@ -11,14 +11,14 @@ Nothing changes in local mode (`HUABU_IDENTITY_PROVIDER=local`). Desktop and sin
 
 After both PRs, in Bubble mode:
 
-| Outcome                                                                                                                                                                          | PR  |
-| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --- |
-| Each admitted person gets a personal Workspace on first sign-in and can create, rename, switch and delete Workspaces they own.                                                   | A   |
-| Two people work in different Workspaces at the same time. One person switching never moves another person.                                                                       | A   |
-| Members run the Built-In agent and conversations, with their own model keys. It reaches only what the person who started it may reach. External agents stay with administrators. | B   |
-| Connected credentials and service leases are per person. One person's agent never uses another's GitHub token or service key.                                                    | B   |
-| A system owner admits members, revokes them and grants Workspace ownership from Settings.                                                                                        | B   |
-| A session that expires mid-edit is renewed without leaving the page, so unsaved edits survive. Sign-out can end the provider session too.                                        | B   |
+| Outcome                                                                                                                                                                | PR  |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --- |
+| Each admitted person gets a personal Workspace on first sign-in and can create, rename, switch and delete Workspaces they own.                                         | A   |
+| Two people work in different Workspaces at the same time. One person switching never moves another person.                                                             | A   |
+| Every user configures their own Built-In agent and connects private external agents. Runs have the starter’s permissions; administrators use the same ownership model. | B   |
+| Connected credentials and service leases are per person. One person's agent never uses another's GitHub token or service key.                                          | B   |
+| A system owner admits members, revokes them and grants Workspace ownership from Settings.                                                                              | B   |
+| A session that expires mid-edit is renewed without leaving the page, so unsaved edits survive. Sign-out can end the provider session too.                              | B   |
 
 Out of scope for both: sharing a Workspace or Space between people beyond operator grants, quotas and billing, and Desktop as a multi-user client.
 
@@ -97,7 +97,7 @@ Agents stay owner-only for members, as in #237. Each run now carries its Workspa
 
 - **Moving existing Spaces.** The new hierarchy picker and bring-existing-Space flow reuse `PATCH /api/canvas/:canvasId/parent`. The route retains PR A's `manage` requirement on the moved Space and `write` on its destination. Placement now travels in the request body's optional `position`; the detachment ownership callback remains under the hierarchy lock.
 - **Authoritative conversation snapshots.** A stream captures its admitted Workspace and restores it for reads triggered by Canvas publisher callbacks, which can arrive outside the observing request or in another request's scope. Local mode retains the existing process-Workspace change check.
-- **Connected devices, profile grouping and file browsing.** These remain deployment-wide, owner-only features in PR A. The stateless filesystem proxy has no Workspace namespace and is selected by device id. PR B keeps them administrator-only; member profile discovery returns Built-In alone and an empty device list. Opening device/profile discovery and arbitrary filesystem access later needs explicit principal authorization; a Workspace or Space grant alone does not authorize a connected device's files. The per-person Workspace design itself is unchanged.
+- **Connected devices, profile grouping and file browsing.** PR A retained the legacy owner-only surface. PR B gives every user private devices and Profiles, with the same ownership checks for administrators and members.
 
 ### Proof
 
@@ -105,30 +105,22 @@ The Postgres suite runs two principals in two Workspaces concurrently: creates, 
 
 ## PR B — Members use agents, and the service is administrable
 
-### Members run the Built-In agent
+### Private agents and settings for every user
 
-The first design gave each external agent run its own RFS token. Agentlet hands every agent process the daemon's own machine token (`AGENTLET_TOKEN`) by design, and refuses a session that sets it. So a member's external agent would hold an unrestricted credential beside any run token, and a prompt-injected agent could use it. External agents also run on the operator's machines under the operator's own CLI logins, so they cannot honour per-person keys either. So:
+Every admitted Bubble user, including a system administrator, has the same personal settings scope. Model configuration, API keys, OAuth, service credentials, Utility Agent selection, change-review preferences and external runtime settings belong to that principal. They have no fallback to another user's settings or the server environment. A new user's default Agent is Built-In Pi; they may choose one of their own external Profiles instead.
 
-- **Members run the Built-In agent.** It runs in-process, never calls RFS, and its tools execute in the request's Workspace and caller scope. `/api/agent` and conversations are open to members through a Space they may use.
-- **Its tools check the starter.** A World conversation reads another Space only if the starter may read it. Workspace memory and Skills change only with `huabu.manage` on the Workspace. The Task Run tools are refused, because Task Runs launch external agents through the machine credential.
-- **External agents stay with administrators.** That covers `/api/acp`, RFS, change-review configuration, Interactive View actions and an external binding on `/api/agent`. A member's agent listing shows Built-In alone.
+Each user obtains a signed device connection credential from the existing connection-command or connection-credentials route. It authenticates only the Agentlet transport. The Gateway records immutable device ownership on first authenticated attachment and refuses another user's attempt to reconnect that identity. Profiles inherit their device's ownership. Listings, direct profile lookups, edits, deletion, CLI discovery, file browsing, placement resolution and conversation controls enforce that ownership without an administrator bypass. Hostname fallback cannot redirect a run onto another owner's device, including during background recovery. There is no sharing mechanism.
 
-Per-run credentials for external agents remain the way to open them to members later, and need Agentlet to stop giving agent processes the daemon token.
+Agentlet may continue giving a worker its device transport credential: it does not authorize Huabu HTTP or RFS access. The existing ACP runtime environment hook injects a separate signed `HUABU_RFS_TOKEN` immediately before launch, without persisting it in the workload. It names the device owner, Workspace, Space and conversation. HTTP accepts it only on that Workspace and Space's RFS routes and re-resolves the owner's account and current grants. Modified claims, use as a device credential, another Space, ordinary settings APIs and disabled owners are refused. Tool execution uses the owner's personal settings and resource access.
 
-### Personal settings
-
-A Bubble member's calls run in a personal settings namespace (`modules/identity/personal-settings.ts`), which also carries their access to the agent tools.
-
-- **Secrets.** The secret store namespaces their model keys, OAuth credentials and connected-service keys, with no fallback to the deployment's environment.
-- **Settings files.** Model settings live under `<data>/people/<key>/`. Members use fixed Built-In agent defaults; the deployment's agent defaults remain administrator-owned.
-- **Routes.** Members may change their own settings; the deployment's stay with administrators. Settings shows a member only Built-In setup and services.
+Bubble mode accepts user-owned remote devices and does not supervise an unowned server-local Agentlet. Existing global Profiles are retained for local mode and are not automatically assigned to any Bubble user; Bubble uses a separate user Profile registry. Existing users reconnect devices with their own connection command and configure their own settings. The instance signing key, database, network binding and identity-provider configuration remain server infrastructure. Local mode retains its one implicit user's existing storage and device behavior.
 
 ### Integration after #356 merged (2026-11-03)
 
-- The member settings UI follows main's separate **Devices and Agents** and **Agent settings** tabs. Members see their Built-In configuration under Agent settings, Services and General; administrators also see People. Member deep links to the external-agent tab land in their own settings.
+- Every user sees the existing Devices and Agents, Agent settings, Services and General tabs. Only system administrators additionally see People and deployment readiness.
 - OCR never imports deployment legacy files or environment credentials for a member. Pending model OAuth flows, pi-ai runtime Models collections and live OpenAI discovery caches belong to the settings owner. Member pi-ai authentication also excludes ambient environment and file credentials.
 - Live Deployment handles retain their namespace in the runtime cache; creation checks it before persistence, and scoped lookups and closes reject another namespace. Members must address a Space even for a new conversation. Artifact inlining checks read access to the source Space. Member model transport excludes deployment environment options, uses public-network connection checks for DNS and redirect hops, and uses SSE to keep streaming on that guarded transport. Providers whose upstream adapters cannot honor a custom transport are unavailable to members.
-- Agent invocation rechecks the final binding under the turn lease. Agent mutation routes check both the Question binding and persisted external driver before allowing a member to stop or steer a thread. External agents and connected devices stay with administrators.
+- Agent invocation rechecks the final binding under the turn lease. External realization and controls authorize the canonical device even when using a persisted binding or a cached handle.
 - Session refresh shares one in-flight token exchange, retains the selected provider for logout, and discards a refresh that finishes after sign-out. Popup failures reach the existing sign-in error alert. Recovery uses main's save drain to retry retained sidecar failures while keeping its conflict and restoration guards.
 
 ### Grant administration
@@ -143,7 +135,7 @@ A Bubble member's calls run in a personal settings namespace (`modules/identity/
 
 ### Proof
 
-Earlier verification used a dev Server in Bubble mode, with Postgres content and Bubble records, running two members whose model settings point at a local OpenAI-compatible mock that records each request's key. Each member's Built-In agent answered using only their own key. Member model endpoints now require public targets; the local mock described here predates that guard. A member is refused in another member's Space, for an external binding and on `/api/acp`. The People tab admits people and gives Workspace roles. Renewal and the popup are unit-tested. They were not tried against real Auth0 or Entra.
+Earlier verification exercised two members using their own Built-In model keys. Current regression coverage additionally uses real Bubble admission, profile storage and Gateway WebSocket connections for two members and two administrators; it verifies private discovery, credentials, direct access refusals, hostname placement, reconnection, scoped callbacks and disabled accounts. Paid external providers are not part of deterministic verification.
 
 ## Settled decisions
 
@@ -152,7 +144,7 @@ Confirmed 2026-10-28:
 1. **Current Workspace per person, not per tab.** A Workspace in every URL was rejected as a much larger web and API change for a rare need.
 2. **Workspace-qualified Space grants,** with an in-place migration of #237's grants, rather than relying on unique Space ids. Space grants stay so that one Space can be shared later. #237's roles are replaced by the model above.
 3. **Automatic personal Workspace on first sign-in,** rather than no Workspace until an operator grants one.
-4. **Per-person model keys** in PR B, rather than every member's agents using the operator's keys. Members therefore run the Built-In agent; external agents, which use the operator's CLI logins, stay with administrators.
+4. **Per-person ownership throughout PR B**, including administrators: private model keys, settings, devices, external Profiles and scoped agent callbacks.
 
 ## Code entry points
 
