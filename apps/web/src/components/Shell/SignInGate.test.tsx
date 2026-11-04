@@ -298,6 +298,69 @@ describe('SignInGate', () => {
     ).toEqual(['auth.signOut']);
   });
 
+  it.each([false, true])(
+    "ends a refused account's provider session only where the Server does (%s)",
+    async (providerSignOut) => {
+      routes['GET /api/identity'] = () =>
+        json(
+          {
+            code: 'IDENTITY_FORBIDDEN',
+            ...(providerSignOut ? { providerSignOut } : {}),
+          },
+          403,
+        );
+      routes['DELETE /api/identity/session'] = () => json({}, 503);
+      routes['GET /bubble/v1/auth/authenticators'] = () =>
+        json({ authenticators: [] });
+      await mount();
+      await act(async () => container.querySelector('button')?.click());
+      for (let i = 0; i < 5; i++) await act(async () => {});
+      // The Server refused the sign-out, so nothing left the page either way;
+      // with provider sign-out on, the provider is looked up only after that.
+      expect(container.textContent).toContain('auth.signOutFailed');
+      expect(calls.map((call) => call.url)).not.toContain(
+        '/bubble/v1/auth/authenticators',
+      );
+      routes['DELETE /api/identity/session'] = () =>
+        new Response(null, { status: 204 });
+      const assign = vi.fn();
+      vi.stubGlobal('location', { ...window.location, assign });
+      await act(async () => container.querySelector('button')?.click());
+      for (let i = 0; i < 5; i++) await act(async () => {});
+      expect(
+        calls.some((call) => call.url === '/bubble/v1/auth/authenticators'),
+      ).toBe(providerSignOut);
+      expect(assign).toHaveBeenCalledWith('/');
+    },
+  );
+
+  it('rechecks a running app on its own while the Server is unreachable', async () => {
+    routes['GET /api/identity'] = () => json(MEMBER);
+    await mount();
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      routes['GET /api/identity'] = () => {
+        throw new TypeError('Failed to fetch');
+      };
+      routes['GET /bubble/v1/auth/authenticators'] = () =>
+        json({ authenticators: [ENTRA] });
+      await act(async () =>
+        window.dispatchEvent(new Event(AUTH_REQUIRED_EVENT)),
+      );
+      for (let i = 0; i < 5; i++) await act(async () => {});
+      // Covered, with a usable sign-in method though none was listed before.
+      expect(container.textContent).toContain('auth.signInTitle');
+      expect(container.textContent).toContain('auth.continueWith');
+
+      routes['GET /api/identity'] = () => json(MEMBER);
+      await act(async () => vi.advanceTimersByTime(2_000));
+      for (let i = 0; i < 5; i++) await act(async () => {});
+      expect(container.textContent).toBe('app');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('falls back to the app when sign-in discovery fails', async () => {
     routes['GET /api/identity'] = () => json({}, 401);
     routes['GET /bubble/v1/auth/authenticators'] = () =>

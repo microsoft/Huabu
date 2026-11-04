@@ -44,7 +44,11 @@ type GateState =
     }
   | { kind: 'noAccess'; identity: IdentityResponse }
   /** The provider refused the account itself, such as a disabled one. */
-  | { kind: 'denied' };
+  | { kind: 'denied'; providerSignOut: boolean };
+
+/** Bounds for rechecking a running app's session while the Server is unreachable. */
+const RECHECK_MIN_MS = 2_000;
+const RECHECK_MAX_MS = 30_000;
 
 /**
  * The session is an HttpOnly cookie for this origin, which an API on any
@@ -85,6 +89,23 @@ export function SignInGate({ children }: { children: ReactNode }) {
   const renewing = useRef(false);
   const knownAuthenticators = useRef<InteractiveAuthenticator[]>([]);
   const renewalTimer = useRef<number | undefined>(undefined);
+  const recheckTimer = useRef<number | undefined>(undefined);
+  const recheckDelay = useRef(RECHECK_MIN_MS);
+
+  /**
+   * The Server could not say who is calling (a restart or a network blip), so
+   * the cover stays up; ask again with backoff instead of waiting for a 401
+   * that a stalled app never makes. Sign-in methods are fetched again too,
+   * for a page that started from a session cookie and never listed them.
+   */
+  const recheckLater = useCallback(() => {
+    window.clearTimeout(recheckTimer.current);
+    recheckTimer.current = window.setTimeout(
+      () => window.dispatchEvent(new Event(AUTH_REQUIRED_EVENT)),
+      recheckDelay.current,
+    );
+    recheckDelay.current = Math.min(recheckDelay.current * 2, RECHECK_MAX_MS);
+  }, []);
 
   /**
    * Hand fresh tokens to the Server, and renew them a minute before they
@@ -104,7 +125,13 @@ export function SignInGate({ children }: { children: ReactNode }) {
         Math.min((expiresIn - 60) * 1000, 2 ** 31 - 1),
       );
   }, []);
-  useEffect(() => () => window.clearTimeout(renewalTimer.current), []);
+  useEffect(
+    () => () => {
+      window.clearTimeout(renewalTimer.current);
+      window.clearTimeout(recheckTimer.current);
+    },
+    [],
+  );
 
   const check = useCallback(
     async (loginError?: string) => {
@@ -123,24 +150,37 @@ export function SignInGate({ children }: { children: ReactNode }) {
       try {
         identity = await getIdentity();
       } catch (error) {
+        if (error instanceof IdentityDeniedError) {
+          settle({ kind: 'denied', providerSignOut: error.providerSignOut });
+          return;
+        }
         // A running Bubble app stays covered until its principal is verified.
         // Local deployments keep their existing connection-error handling.
-        settle(
-          error instanceof IdentityDeniedError
-            ? { kind: 'denied' }
-            : appStarted.current &&
-                useIdentityStore.getState().identity?.provider === 'bubble'
-              ? {
-                  kind: 'signIn',
-                  authenticators: knownAuthenticators.current,
-                  error:
-                    loginError ??
-                    (error instanceof Error ? error.message : String(error)),
-                }
-              : { kind: 'ready' },
-        );
+        if (
+          !appStarted.current ||
+          useIdentityStore.getState().identity?.provider !== 'bubble'
+        ) {
+          settle({ kind: 'ready' });
+          return;
+        }
+        recheckLater();
+        if (knownAuthenticators.current.length === 0) {
+          const listed = await listInteractiveAuthenticators().catch(
+            () => null,
+          );
+          if (listed) knownAuthenticators.current = listed;
+        }
+        settle({
+          kind: 'signIn',
+          authenticators: knownAuthenticators.current,
+          error:
+            loginError ??
+            (error instanceof Error ? error.message : String(error)),
+        });
         return;
       }
+      window.clearTimeout(recheckTimer.current);
+      recheckDelay.current = RECHECK_MIN_MS;
       if (identity) {
         if (run !== latestCheck.current) return false;
         const principal = identity.principal.principalId;
@@ -165,6 +205,7 @@ export function SignInGate({ children }: { children: ReactNode }) {
       try {
         authenticators = await listInteractiveAuthenticators();
       } catch {
+        if (appStarted.current) recheckLater();
         settle(
           appStarted.current
             ? {
@@ -199,7 +240,7 @@ export function SignInGate({ children }: { children: ReactNode }) {
         unsavedEdits,
       });
     },
-    [setIdentity],
+    [setIdentity, recheckLater],
   );
 
   useEffect(() => {
@@ -394,7 +435,7 @@ export function SignInScreen({
                 providerSignOut:
                   state.kind === 'noAccess'
                     ? state.identity.providerSignOut
-                    : true,
+                    : state.providerSignOut,
               }).catch(() => setSignOutFailed(true));
             }}
           >

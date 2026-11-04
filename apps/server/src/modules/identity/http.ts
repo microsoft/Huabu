@@ -275,9 +275,17 @@ export function registerIdentity(
       }
     } catch (error) {
       if (!(error instanceof IdentityError)) throw error;
-      return reply
-        .code(error.statusCode)
-        .send({ message: error.message, code: error.code });
+      return reply.code(error.statusCode).send({
+        message: error.message,
+        code: error.code,
+        // A refused account signs out of the provider to switch accounts,
+        // when the deployment ends provider sessions at all.
+        ...(identityRoute &&
+        error.code === 'IDENTITY_FORBIDDEN' &&
+        service.providerSignOut
+          ? { providerSignOut: true }
+          : {}),
+      });
     }
   });
   app.get<{ Reply: IdentityResponse }>(

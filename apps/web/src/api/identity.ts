@@ -18,7 +18,10 @@ export interface InteractiveAuthenticator {
 
 /** The identity provider refused this account outright, such as a disabled one. */
 export class IdentityDeniedError extends Error {
-  constructor() {
+  constructor(
+    /** Signing out also ends the provider's session, so another account can sign in. */
+    readonly providerSignOut = false,
+  ) {
     super('Identity access denied');
   }
 }
@@ -27,7 +30,12 @@ export class IdentityDeniedError extends Error {
 export async function getIdentity(): Promise<IdentityResponse | null> {
   const response = await fetch(`${API_CONFIG.API_URL}/identity`);
   if (response.status === 401) return null;
-  if (response.status === 403) throw new IdentityDeniedError();
+  if (response.status === 403) {
+    const body = (await response.json().catch(() => null)) as {
+      providerSignOut?: unknown;
+    } | null;
+    throw new IdentityDeniedError(body?.providerSignOut === true);
+  }
   if (!response.ok)
     throw new Error(`Identity request failed: ${response.status}`);
   return (await response.json()) as IdentityResponse;
