@@ -175,7 +175,6 @@ export function registerOpCounterHook(app: FastifyInstance): void {
   // ── Stage 1: onResponse for ordinary endpoints ───────────────────────────
   app.addHook('onResponse', async (request, reply) => {
     if (!MUTATING_METHODS.has(request.method)) return;
-    if (!(await mayScheduleMemory(request))) return;
     if (reply.statusCode < 200 || reply.statusCode >= 400) return;
 
     const url = request.url;
@@ -188,6 +187,8 @@ export function registerOpCounterHook(app: FastifyInstance): void {
 
     const canvasId = extractCanvasIdFromUrl(url);
     if (!canvasId) return;
+    // Checked last: in Bubble mode it is a policy lookup.
+    if (!(await mayScheduleMemory(request))) return;
 
     // Fire-and-forget: the bump is internally serialized per canvas
     // (see trigger.ts:stateLock), and `safeBump` swallows its own
@@ -206,12 +207,12 @@ export function registerOpCounterHook(app: FastifyInstance): void {
   // safer than under-counting for the memory worker.
   app.addHook('preHandler', async (request) => {
     if (request.method !== 'POST') return;
-    if (!(await mayScheduleMemory(request))) return;
     const url = request.url;
     if (url !== '/api/agent' && !url.startsWith('/api/agent?')) return;
 
     const canvasId = extractCanvasIdFromAgentBody(request);
     if (!canvasId) return;
+    if (!(await mayScheduleMemory(request))) return;
 
     // Same fire-and-forget rationale as Stage 1 — adding an `await`
     // here would block the agent request waiting for state.json IO.

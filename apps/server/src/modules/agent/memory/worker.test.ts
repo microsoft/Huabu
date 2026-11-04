@@ -41,7 +41,7 @@ beforeEach(async () => {
 });
 
 describe('memory worker outcomes', () => {
-  it("keeps concurrent work on the same Space in each user's settings scope", async () => {
+  it("serializes passes on a shared Space, each in its scheduler's settings scope", async () => {
     const seen: (string | null)[] = [];
     let finish!: () => void;
     const gate = new Promise<void>((resolve) => {
@@ -68,6 +68,11 @@ describe('memory worker outcomes', () => {
       });
     }
     try {
+      // Bob's request waits for Alice's pass, which rewrites the same memory.
+      await vi.waitFor(() => expect(seen).toEqual(['alice']));
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(seen).toEqual(['alice']);
+      finish();
       await vi.waitFor(() => expect(seen).toEqual(['alice', 'bob']));
     } finally {
       finish();

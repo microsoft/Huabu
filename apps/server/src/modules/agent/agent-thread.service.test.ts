@@ -1696,77 +1696,105 @@ it('does not stop an invocation owned by another Canvas', async () => {
   await draining;
 });
 
-it.each(['Workspace', 'user'])(
-  'keeps stop tracking and readiness inside the invocation %s',
-  async (boundary) => {
-    const harness = createHarness({ target: null, agentTarget: null });
-    const inWorkspace = <T>(id: string, operation: () => T): T => {
-      if (boundary === 'user')
-        return openPersonalSettings(() => {
-          useCaller({
-            principal: { principalId: id, kind: 'user' },
-            member: true,
-            owner: true,
-            access: {
-              can: async () => true,
-              claim: async () => {},
-              workspaces: async () => 'all',
-            },
-          });
-          return operation();
-        });
-      return runInWorkspace(
-        { handle: { workspaceId: id, name: id }, path: null },
-        operation,
-      );
-    };
-    const invocation = await inWorkspace('workspace-a', () =>
-      harness.service.invoke({
-        ...invocationOptions(),
-        requestBinding: { kind: 'internal' },
-        fixedTarget: null,
-        agentTarget: null,
-      }),
+it('keeps stop tracking and readiness inside the invocation Workspace', async () => {
+  const harness = createHarness({ target: null, agentTarget: null });
+  const inWorkspace = <T>(id: string, operation: () => T): T =>
+    runInWorkspace(
+      { handle: { workspaceId: id, name: id }, path: null },
+      operation,
     );
-    const preparation = inWorkspace('workspace-a', () =>
+  const invocation = await inWorkspace('workspace-a', () =>
+    harness.service.invoke({
+      ...invocationOptions(),
+      requestBinding: { kind: 'internal' },
+      fixedTarget: null,
+      agentTarget: null,
+    }),
+  );
+  const preparation = inWorkspace('workspace-a', () =>
+    harness.service.beginPreparation('thread-a', 'canvas-a', 'request-a'),
+  );
+  try {
+    await inWorkspace('workspace-b', async () => {
+      expect(harness.service.isActive('thread-a', 'canvas-a')).toBe(false);
+      expect(
+        await harness.service.waitForTurnStart('thread-a', 'canvas-a'),
+      ).toBe(false);
+      expect(harness.service.stop('thread-a')).toBe(false);
+      expect(
+        await harness.service.stopAndWait('thread-a', 'canvas-a', 'request-a'),
+      ).toMatchObject({ stopped: false, acceptance: null });
+    });
+    expect(invocation.signal.aborted).toBe(false);
+    expect(preparation.signal.aborted).toBe(false);
+    const delayed = inWorkspace('workspace-a', () =>
       harness.service.beginPreparation('thread-a', 'canvas-a', 'request-a'),
     );
-    try {
-      await inWorkspace('workspace-b', async () => {
-        expect(harness.service.isActive('thread-a', 'canvas-a')).toBe(false);
-        expect(
-          await harness.service.waitForTurnStart('thread-a', 'canvas-a'),
-        ).toBe(false);
-        expect(harness.service.stop('thread-a')).toBe(false);
-        expect(
-          await harness.service.stopAndWait(
-            'thread-a',
-            'canvas-a',
-            'request-a',
-          ),
-        ).toMatchObject({ stopped: false, acceptance: null });
+    expect(delayed.signal.aborted).toBe(false);
+    delayed.finish();
+    await inWorkspace('workspace-a', async () => {
+      expect(harness.service.isActive('thread-a', 'canvas-a')).toBe(true);
+      expect(
+        await harness.service.stopAndWait('thread-a', 'canvas-a'),
+      ).toMatchObject({ stopped: true });
+    });
+    expect(invocation.signal.aborted).toBe(true);
+    expect(preparation.signal.aborted).toBe(true);
+  } finally {
+    preparation.finish();
+    await inWorkspace('workspace-a', () => invocation.dispose());
+  }
+});
+
+it('shares a run with everyone who uses its Space', async () => {
+  const harness = createHarness({ target: null, agentTarget: null });
+  const as = <T>(principalId: string, operation: () => T): T =>
+    openPersonalSettings(() => {
+      useCaller({
+        principal: { principalId, kind: 'user' },
+        member: true,
+        owner: false,
+        access: {
+          can: async () => true,
+          claim: async () => {},
+          workspaces: async () => 'all',
+        },
       });
-      expect(invocation.signal.aborted).toBe(false);
-      expect(preparation.signal.aborted).toBe(false);
-      const delayed = inWorkspace('workspace-a', () =>
-        harness.service.beginPreparation('thread-a', 'canvas-a', 'request-a'),
-      );
-      expect(delayed.signal.aborted).toBe(false);
-      delayed.finish();
-      await inWorkspace('workspace-a', async () => {
-        expect(harness.service.isActive('thread-a', 'canvas-a')).toBe(true);
-        expect(
-          await harness.service.stopAndWait('thread-a', 'canvas-a'),
-        ).toMatchObject({ stopped: true });
-      });
-      expect(invocation.signal.aborted).toBe(true);
-      expect(preparation.signal.aborted).toBe(true);
-    } finally {
-      preparation.finish();
-      await inWorkspace('workspace-a', () => invocation.dispose());
-    }
-  },
-);
+      return operation();
+    });
+  const invocation = await as('alice', () =>
+    harness.service.invoke({
+      ...invocationOptions(),
+      requestBinding: { kind: 'internal' },
+      fixedTarget: null,
+      agentTarget: null,
+    }),
+  );
+  const preparation = as('alice', () =>
+    harness.service.beginPreparation('thread-a', 'canvas-a', 'request-a'),
+  );
+  try {
+    await as('bob', async () => {
+      // Space moves and deletes refuse while it runs, whoever asks.
+      expect(harness.service.isActive('thread-a', 'canvas-a')).toBe(true);
+      await harness.service.stopAndWait('thread-a', 'canvas-a', 'request-a');
+      expect(
+        await harness.service.stopAndWait('thread-a', 'canvas-a'),
+      ).toMatchObject({ stopped: true });
+    });
+    expect(invocation.signal.aborted).toBe(true);
+    expect(preparation.signal.aborted).toBe(true);
+    // A delayed POST for the stopped request is fenced for its starter too.
+    const delayed = as('alice', () =>
+      harness.service.beginPreparation('thread-a', 'canvas-a', 'request-a'),
+    );
+    expect(delayed.signal.aborted).toBe(true);
+    delayed.finish();
+  } finally {
+    preparation.finish();
+    await as('alice', () => invocation.dispose());
+  }
+});
 
 it('stops pending preparation before durable invocation starts', async () => {
   const harness = createHarness({ target: null, agentTarget: null });

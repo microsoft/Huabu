@@ -2,7 +2,7 @@
 // Licensed under the MIT license.
 
 /**
- * Memory worker — single-flight scheduler per user, Workspace and Space.
+ * Memory worker — single-flight scheduler per Workspace and Space.
  *
  * Public surface: {@link schedule}. The route calls it via
  * {@link import('./index.js').enqueue} after the op-counter crosses
@@ -11,7 +11,8 @@
  *
  * Concurrency model:
  *
- *   - At most one analysis pass per user, Workspace and Space at any moment. If a
+ *   - At most one analysis pass per Workspace and Space at any moment, whoever
+ *     scheduled it: passes rewrite the Space's shared memory and Skills. If a
  *     second `schedule(canvasId)` arrives while one is already
  *     running, we set a `pending` flag rather than queueing — the
  *     in-flight pass will already cover the new ops, and at most
@@ -28,9 +29,10 @@
  * context assembly + the `runAgent` call + tool-result aggregation.
  */
 
+import { AsyncLocalStorage } from 'node:async_hooks';
+
 import { runAnalysisPass } from './analyzer.js';
 import { markAnalyzed } from './trigger.js';
-import { personalSettingsOwner } from '../../identity/personal-settings.js';
 import { getWorkspaceHandle } from '../../workspace.js';
 import { getAgentDefaults } from '../agent-defaults.js';
 
@@ -46,9 +48,10 @@ const running = new Map<string, Promise<void>>();
 /**
  * Canvases that asked to run while another pass was in flight. We
  * coalesce: at most one follow-up per canvas, regardless of how many
- * `schedule` calls arrive in between.
+ * `schedule` calls arrive in between. The follow-up runs in the scope of
+ * the latest of them, so it uses that person's settings and Workspace.
  */
-const pending = new Set<string>();
+const pending = new Map<string, () => void>();
 
 /**
  * Schedule an analysis pass for `canvasId`.
@@ -56,13 +59,10 @@ const pending = new Set<string>();
  * Returns synchronously. The actual work runs after the next tick.
  */
 export function schedule(canvasId: string, logger?: MemoryLogger): void {
-  const key = JSON.stringify([
-    personalSettingsOwner(),
-    getWorkspaceHandle()?.workspaceId,
-    canvasId,
-  ]);
+  const key = JSON.stringify([getWorkspaceHandle()?.workspaceId, canvasId]);
   if (running.has(key)) {
-    pending.add(key);
+    const inScope = AsyncLocalStorage.snapshot();
+    pending.set(key, () => inScope(() => schedule(canvasId, logger)));
     return;
   }
   // Wrap the worker in a Promise we can dedupe against. `setImmediate`
@@ -76,9 +76,9 @@ export function schedule(canvasId: string, logger?: MemoryLogger): void {
   running.set(key, task);
   task.finally(() => {
     running.delete(key);
-    if (pending.delete(key)) {
-      schedule(canvasId, logger);
-    }
+    const followUp = pending.get(key);
+    pending.delete(key);
+    followUp?.();
   });
 }
 

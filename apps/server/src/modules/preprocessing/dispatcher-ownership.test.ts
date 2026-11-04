@@ -14,7 +14,7 @@ import {
 } from '../identity/personal-settings.js';
 import { mountTestWorkspace } from '../storage/testing.js';
 
-it('coalesces repeated preprocessing only within the same user', async () => {
+it('coalesces repeated preprocessing of a shared Space across its users', async () => {
   const opened = await mountTestWorkspace({
     structured: { kind: 'disk' },
     blobs: { kind: 'disk' },
@@ -54,13 +54,16 @@ it('coalesces repeated preprocessing only within the same user', async () => {
     });
   const runs = [preprocess('alice'), preprocess('alice'), preprocess('bob')];
   try {
-    await vi.waitFor(() => expect(seen).toEqual(['alice', 'bob']));
+    // Every viewer's tab asks after the same broadcast edit; one run serves
+    // them all, rather than one per person racing to patch the same node.
+    await vi.waitFor(() => expect(seen).toEqual(['alice']));
     release();
     const results = await Promise.all(runs);
+    expect(seen).toEqual(['alice']);
     expect(results.map((result) => result.patch.label)).toEqual([
       'alice title',
       'alice title',
-      'bob title',
+      'alice title',
     ]);
     expect(results.every((result) => result.success)).toBe(true);
   } finally {

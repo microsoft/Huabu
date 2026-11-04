@@ -29,7 +29,6 @@ import { planSkillDispatch } from './skill-model-routing.js';
 import { resolveSpacePrompt } from './space-instruction-frames.js';
 import { acquireAgentTurn, waitForAgentTurnRelease } from './turn-lease.js';
 import { loadAgent } from '../../prompt/index.js';
-import { personalSettingsOwner } from '../identity/personal-settings.js';
 import { getStructuredStore } from '../storage/index.js';
 import { canvasAcpNamespace } from '../workspace/paths.js';
 import {
@@ -265,8 +264,12 @@ export interface ExternalAgentThreadTarget {
   fixedTarget: FixedAgentNodeTarget | null;
 }
 
+/**
+ * A run belongs to its Workspace and Space, not to the person who started it:
+ * whoever may use the Space sees it running, and Space moves and deletes
+ * refuse while it does. Routes authorize the Space before reaching these.
+ */
 interface ActiveAgentInvocation {
-  ownerId: string | null;
   workspaceId?: string;
   requestId?: string;
   canvasId?: string;
@@ -280,7 +283,6 @@ interface ActiveAgentInvocation {
 }
 
 interface PendingAgentPreparation {
-  ownerId: string | null;
   workspaceId?: string;
   requestId?: string;
   canvasId?: string;
@@ -328,8 +330,7 @@ export class AgentThreadService {
     threadId: string,
   ): ActiveAgentInvocation | undefined {
     const active = this.activeInvocations.get(threadId);
-    return active?.ownerId === personalSettingsOwner() &&
-      active?.workspaceId === getWorkspaceHandle()?.workspaceId
+    return active?.workspaceId === getWorkspaceHandle()?.workspaceId
       ? active
       : undefined;
   }
@@ -342,22 +343,10 @@ export class AgentThreadService {
     const workspaceId = getWorkspaceHandle()?.workspaceId;
     return (
       this.stoppedRequests.has(
-        JSON.stringify([
-          personalSettingsOwner(),
-          workspaceId,
-          canvasId,
-          threadId,
-          requestId,
-        ]),
+        JSON.stringify([workspaceId, canvasId, threadId, requestId]),
       ) ||
       this.stoppedRequests.has(
-        JSON.stringify([
-          personalSettingsOwner(),
-          workspaceId,
-          undefined,
-          threadId,
-          requestId,
-        ]),
+        JSON.stringify([workspaceId, undefined, threadId, requestId]),
       )
     );
   }
@@ -371,7 +360,6 @@ export class AgentThreadService {
     finish: () => void;
   } {
     const preparation: PendingAgentPreparation = {
-      ownerId: personalSettingsOwner(),
       workspaceId: getWorkspaceHandle()?.workspaceId,
       requestId,
       canvasId,
@@ -485,7 +473,6 @@ export class AgentThreadService {
       resolveTurnStarted = resolve;
     });
     const active: ActiveAgentInvocation = {
-      ownerId: personalSettingsOwner(),
       workspaceId: getWorkspaceHandle()?.workspaceId,
       requestId: options.requestId,
       canvasId: options.canvasId,
@@ -807,18 +794,11 @@ export class AgentThreadService {
     const workspaceId = getWorkspaceHandle()?.workspaceId;
     if (requestId) {
       this.stoppedRequests.add(
-        JSON.stringify([
-          personalSettingsOwner(),
-          workspaceId,
-          canvasId,
-          threadId,
-          requestId,
-        ]),
+        JSON.stringify([workspaceId, canvasId, threadId, requestId]),
       );
     }
     const pending = [...(this.pendingPreparations.get(threadId) ?? [])].filter(
       (preparation) =>
-        preparation.ownerId === personalSettingsOwner() &&
         preparation.workspaceId === workspaceId &&
         !preparation.abortController.signal.aborted &&
         (requestId === undefined || preparation.requestId === requestId) &&
