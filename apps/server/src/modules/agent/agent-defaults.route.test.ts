@@ -256,3 +256,32 @@ describe('owner-only Agent defaults', () => {
     expect(response.json().message).toContain('Invalid Agent defaults file');
   });
 });
+
+it.each(['existing-external', 'unknown-external', null])(
+  'refuses member selection %s before inspecting operator profiles or writing settings',
+  async (profileId) => {
+    const { openPersonalSettings, useCaller } =
+      await import('../identity/personal-settings.js');
+    await openPersonalSettings(async () => {
+      useCaller({
+        principal: { principalId: 'carol', kind: 'user' },
+        member: true,
+        owner: false,
+        access: {
+          can: async () => true,
+          claim: async () => {},
+          workspaces: async () => [],
+        },
+      });
+      const response = await app.inject({
+        method: 'PUT',
+        url,
+        payload: { profileId, functionalModel: '' },
+      });
+      expect(response.statusCode).toBe(403);
+      expect(response.json().code).toBe('AGENT_ACCESS_REQUIRED');
+    });
+    expect(mocks.getProfile).not.toHaveBeenCalled();
+    expect(mocks.set).not.toHaveBeenCalled();
+  },
+);

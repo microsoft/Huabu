@@ -120,7 +120,7 @@ export interface Agenetes {
    * (I9.3). A missing handle is a precondition failure (e.g. a control
    * write on a dead thread), not a lazy spawn.
    */
-  get(threadId: string): AgentHandle | undefined;
+  get(threadId: string, namespace?: Namespace): AgentHandle | undefined;
   /**
    * Tear the live handle down and evict it from the live table (I9.3).
    * A driver teardown failure keeps the handle and its persistence/notification
@@ -128,7 +128,7 @@ export interface Agenetes {
    * Queued state writes are drained before the call settles, so a `record`
    * read after it observes every report the closed handle made.
    */
-  close(threadId: string): Promise<void>;
+  close(threadId: string, namespace?: Namespace): Promise<void>;
   /**
    * Read one durable thread record by `(namespace, threadId)` (I9.4),
    * independent of whether a handle is live.
@@ -688,6 +688,10 @@ export function createAgenetesInstance(
     initialState: AgentStateSnapshot,
     hostMetadata?: Record<string, unknown>,
   ): Promise<AgentHandle> => {
+    // Lifecycle calls are serialized. Refuse another namespace's live id
+    // before writing a durable alias; the runtime owns that handle's scope.
+    if (targetSpec.workloadType === 'Deployment')
+      runtime.get(targetSpec.threadId, targetSpec.namespace);
     // Persist the initial record before the handle exists: realization now
     // awaits, and an up-report must never overwrite initialization.
     const isTransientJob =
@@ -748,13 +752,17 @@ export function createAgenetesInstance(
         },
       });
     } else {
-      const wasLive = runtime.get(targetSpec.threadId) !== undefined;
-      handle = runtime.getOrCreate(targetSpec.threadId, () =>
-        decorateForLogging(
-          driver.create(targetSpec, context),
-          targetSpec.namespace,
-          targetSpec.threadId,
-        ),
+      const wasLive =
+        runtime.get(targetSpec.threadId, targetSpec.namespace) !== undefined;
+      handle = runtime.getOrCreate(
+        targetSpec.threadId,
+        () =>
+          decorateForLogging(
+            driver.create(targetSpec, context),
+            targetSpec.namespace,
+            targetSpec.threadId,
+          ),
+        targetSpec.namespace,
       );
       needsUpReport = !wasLive;
     }
@@ -1054,12 +1062,12 @@ export function createAgenetesInstance(
         throw error;
       }
     },
-    get(threadId: string): AgentHandle | undefined {
-      return runtime.get(threadId);
+    get(threadId: string, namespace?: Namespace): AgentHandle | undefined {
+      return runtime.get(threadId, namespace);
     },
-    async close(threadId: string): Promise<void> {
+    async close(threadId: string, namespace?: Namespace): Promise<void> {
       // Keep persistence and notifications wired if driver teardown fails.
-      await runtime.close(threadId);
+      await runtime.close(threadId, namespace);
       try {
         // A snapshot reported during teardown is still this thread's. Persist
         // and deliver it before either notification scope ends — tearing the
@@ -1286,6 +1294,7 @@ export function createAgenetesInstance(
     create: (spec) => serialize(() => api.create(spec)),
     fork: (source, target) => serialize(() => api.fork(source, target)),
     rehome: (source, target) => serialize(() => api.rehome(source, target)),
-    close: (threadId) => serialize(() => api.close(threadId)),
+    close: (threadId, namespace) =>
+      serialize(() => api.close(threadId, namespace)),
   };
 }

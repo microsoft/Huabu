@@ -29,6 +29,7 @@ import { planSkillDispatch } from './skill-model-routing.js';
 import { resolveSpacePrompt } from './space-instruction-frames.js';
 import { acquireAgentTurn, waitForAgentTurnRelease } from './turn-lease.js';
 import { loadAgent } from '../../prompt/index.js';
+import { personalSettingsOwner } from '../identity/personal-settings.js';
 import { getStructuredStore } from '../storage/index.js';
 import { canvasAcpNamespace } from '../workspace/paths.js';
 import { acquireWorkspaceOperationLease } from '../workspace.js';
@@ -96,7 +97,7 @@ interface AgentThreadServiceDependencies {
   failLifecycle: typeof agentNodeLifecycle.error;
   runExternal: typeof runAcpAgent;
   runInternal: typeof runAgent;
-  closeHandle: (threadId: string) => void | Promise<void>;
+  closeHandle: (threadId: string, canvasId?: string) => void | Promise<void>;
   confirmBinding?: typeof agentNodeBinding.confirm;
 }
 
@@ -190,7 +191,8 @@ const DEFAULT_DEPENDENCIES: AgentThreadServiceDependencies = {
   failLifecycle: (...args) => agentNodeLifecycle.error(...args),
   runExternal: runAcpAgent,
   runInternal: runAgent,
-  closeHandle: async (threadId) => await agenetes.close(threadId),
+  closeHandle: async (threadId, canvasId) =>
+    await agenetes.close(threadId, canvasAcpNamespace(canvasId ?? '')),
   confirmBinding: (...args) => agentNodeBinding.confirm(...args),
 };
 
@@ -598,6 +600,8 @@ export class AgentThreadService {
             options.threadId,
           )) ?? binding;
       }
+      if (binding.kind === 'external' && personalSettingsOwner())
+        throw new Error('External agents are available to administrators only');
       if (!signal.aborted && typeof options.envelope === 'function') {
         envelope = await options.envelope();
       }
@@ -948,7 +952,7 @@ export class AgentThreadService {
 
     const skillDispatch = planSkillDispatch(options.envelope.skills.resolved);
     if (skillDispatch.closeLiveHandle) {
-      await this.dependencies.closeHandle(options.threadId);
+      await this.dependencies.closeHandle(options.threadId, options.canvasId);
     }
     const runsSkillAuthoring = skillDispatch.closeLiveHandle;
     return yield* this.dependencies.runInternal({

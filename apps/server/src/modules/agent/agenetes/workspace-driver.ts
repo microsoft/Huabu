@@ -4,6 +4,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 
 import { currentWorkspaceScope } from '../../workspace/context.js';
+import { getWorkspaceHandle } from '../../workspace.js';
 
 import type { AgentStateSnapshot } from '@agenetes/protocol';
 import type { MountedAgentDriver } from '@agenetes/runtime';
@@ -22,10 +23,13 @@ export function withWorkspaceStateReports(
       const handle = driver.create(workload, context);
       // Local mode keeps its process-active Workspace and original handle.
       if (!currentWorkspaceScope() || !handle.onState) return handle;
+      const workspaceId = getWorkspaceHandle()?.workspaceId;
       const onState = handle.onState.bind(handle);
       const inCreator = AsyncLocalStorage.snapshot();
       return new Proxy(handle, {
         get(target, property) {
+          if (getWorkspaceHandle()?.workspaceId !== workspaceId)
+            throw new Error('Agent handle belongs to another Workspace');
           if (property === 'onState')
             return (listener: (snapshot: AgentStateSnapshot) => void) =>
               onState((snapshot) => inCreator(listener, snapshot));

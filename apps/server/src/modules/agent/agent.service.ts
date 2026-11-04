@@ -355,7 +355,7 @@ export async function* runAgent(
   const deploymentThreadId = threadId ?? '';
   const liveHandle =
     workloadType === 'Deployment'
-      ? agenetes.get(deploymentThreadId)
+      ? agenetes.get(deploymentThreadId, namespace)
       : undefined;
   const durableRecord =
     workloadType === 'Deployment'

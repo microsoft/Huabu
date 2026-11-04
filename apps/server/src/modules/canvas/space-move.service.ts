@@ -592,7 +592,10 @@ async function moveCanvasSelectionUnlocked(
             for (const move of threadMoves) {
               phase = 'agent-close';
               try {
-                await agenetes.close(move.threadId);
+                await agenetes.close(
+                  move.threadId,
+                  canvasAcpNamespace(sourceCanvasId),
+                );
               } catch (error) {
                 throw new SpaceMoveError('MOVE_AGENT_CLOSE_FAILED', 500, {
                   cause: error,

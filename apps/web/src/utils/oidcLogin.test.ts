@@ -220,3 +220,75 @@ describe('signing in again in a popup', () => {
     await expect(signInWithPopup(ENTRA)).rejects.toThrow(/blocked/);
   });
 });
+
+describe('renewal failures', () => {
+  it('retains the refresh token after a network failure but drops an invalid grant', async () => {
+    let mode = 'login';
+    const tokenFetch = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).endsWith('openid-configuration'))
+        return Response.json({ token_endpoint: 'https://login.example/t' });
+      if (mode === 'network') throw new TypeError('Failed to fetch');
+      if (mode === 'rejected')
+        return Response.json({ error: 'invalid_grant' }, { status: 400 });
+      return Response.json({ access_token: 'fresh', refresh_token: 'refresh' });
+    });
+    vi.stubGlobal('fetch', tokenFetch);
+    await holdRefreshToken();
+    mode = 'network';
+    expect(await refreshTokens()).toBeNull();
+    mode = 'recovered';
+    expect(await refreshTokens()).toEqual({ accessToken: 'fresh' });
+    mode = 'rejected';
+    expect(await refreshTokens()).toBeNull();
+    tokenFetch.mockClear();
+    expect(await refreshTokens()).toBeNull();
+    expect(tokenFetch).not.toHaveBeenCalled();
+  });
+
+  it('does not request offline_access for an unconfigured generic OIDC provider', async () => {
+    const popup = { closed: false, location: { href: '' }, close: vi.fn() };
+    vi.spyOn(window, 'open').mockReturnValue(popup as unknown as Window);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) =>
+        String(input).endsWith('openid-configuration')
+          ? Response.json({ token_endpoint: 'https://login.example/t' })
+          : Response.json({ access_token: 'fresh' }),
+      ),
+    );
+    const signingIn = signInWithPopup({
+      ...ENTRA,
+      driver: 'generic-oidc',
+      scopes: [],
+    });
+    await vi.waitFor(() => expect(popup.location.href).not.toBe(''));
+    const url = new URL(popup.location.href);
+    expect(url.searchParams.get('scope')).toBe('openid profile');
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        origin: window.location.origin,
+        data: {
+          type: 'huabu.oidc.popup',
+          state: url.searchParams.get('state'),
+          code: 'code',
+        },
+      }),
+    );
+    await signingIn;
+    expect(popup.close).toHaveBeenCalledOnce();
+  });
+
+  it('leaves a callback popup open until the opener consumes its message', async () => {
+    const postMessage = vi.fn();
+    vi.stubGlobal('opener', { postMessage });
+    const close = vi.spyOn(window, 'close');
+    window.history.replaceState(
+      null,
+      '',
+      '/auth/callback?state=popup.expected&code=ok',
+    );
+    expect(await completeLogin()).toBeNull();
+    expect(postMessage).toHaveBeenCalledOnce();
+    expect(close).not.toHaveBeenCalled();
+  });
+});

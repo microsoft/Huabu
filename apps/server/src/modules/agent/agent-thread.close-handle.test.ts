@@ -106,6 +106,7 @@ function harness() {
 function invoke(service: AgentThreadService, authoring: boolean) {
   return service.invoke({
     threadId: 'thread-a',
+    canvasId: 'canvas-a',
     content: 'Write a skill',
     mode: 'ask',
     envelope: envelope(authoring),
@@ -122,6 +123,7 @@ describe('AgentThreadService skill-authoring dispatch', () => {
     const first = invocation.events.next();
     await settleQueues();
     expect(h.order).toEqual(['close-started']);
+    expect(h.closeHandle).toHaveBeenCalledWith('thread-a', 'canvas-a');
     expect(h.runInternal).not.toHaveBeenCalled();
 
     h.finishClose();

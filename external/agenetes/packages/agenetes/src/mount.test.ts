@@ -53,3 +53,58 @@ describe('mountAgenetes static driver map', () => {
     expect(instance).not.toHaveProperty('build');
   });
 });
+
+// A guessed thread id must not alias another namespace's live deployment,
+// including when the attacker's namespace is the first to realize after boot.
+it.each([
+  ['carol', 'erin'],
+  ['erin', 'carol'],
+])(
+  'refuses cross-namespace reuse from %s to %s before persisting an alias',
+  async (first, second) => {
+    const instance = mountAgenetes({ drivers: { external: driver } });
+    const spec = {
+      kind: 'external',
+      workloadType: 'Deployment' as const,
+      namespace: { name: first },
+      threadId: 'shared-id',
+      spec: {},
+    };
+    const handle = await instance.create(spec);
+    await expect(
+      instance.create({ ...spec, namespace: { name: second } }),
+    ).rejects.toThrow('another namespace');
+    expect(
+      await instance.record({ name: second }, 'shared-id'),
+    ).toBeUndefined();
+    expect(instance.get('shared-id', { name: first })).toBe(handle);
+    expect(() => instance.get('shared-id', { name: second })).toThrow(
+      'another namespace',
+    );
+    await expect(instance.close('shared-id', { name: second })).rejects.toThrow(
+      'another namespace',
+    );
+    expect(await instance.create(spec)).toBe(handle);
+    await instance.close('shared-id', { name: first });
+    expect(
+      await instance.create({ ...spec, namespace: { name: second } }),
+    ).not.toBe(handle);
+  },
+);
+
+it('reserves the namespace across concurrent deployment creation', async () => {
+  const instance = mountAgenetes({ drivers: { external: driver } });
+  const spec = {
+    kind: 'external',
+    workloadType: 'Deployment' as const,
+    threadId: 'racing-id',
+    spec: {},
+  };
+  const results = await Promise.allSettled(
+    ['a', 'b'].map((name) => instance.create({ ...spec, namespace: { name } })),
+  );
+  expect(results.map((r) => r.status).sort()).toEqual([
+    'fulfilled',
+    'rejected',
+  ]);
+});

@@ -385,3 +385,45 @@ describe('pi per-thread selection', () => {
     expect(snapshots.at(-1)?.driverState.reasoningEffort).toBe('high');
   });
 });
+
+it('uses the host transport policy for real provider streaming', async () => {
+  const { getModel } = await import('@earendil-works/pi-ai/compat');
+  const model = {
+    ...getModel('openai', 'gpt-4o-mini'),
+    api: 'openai-completions' as const,
+  };
+  const transport = vi.fn(
+    async () =>
+      new Response(
+        [
+          'data: {"id":"test","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"role":"assistant","content":"hello"},"finish_reason":null}]}',
+          'data: {"id":"test","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}',
+          'data: [DONE]',
+        ].join('\n\n') + '\n\n',
+        { headers: { 'Content-Type': 'text/event-stream' } },
+      ),
+  );
+  const ports: PiDriverPorts = {
+    resolveModel: async () => model,
+    getApiKey: async () => 'member-key',
+    resolveTools: async () => [],
+    streamOptions: () => ({ fetch: transport, env: {}, transport: 'sse' }),
+  };
+  const handle = piDriverFactory({ ports }).create(
+    { ...spec, spec: { recipe: spec.spec.recipe } },
+    { recovery: { authorizeHistoryLoad: vi.fn() } },
+  );
+  const seen = [];
+  for await (const event of handle.run(
+    { type: 'user_text', content: 'hello' },
+    {},
+  ))
+    seen.push(event);
+  expect(transport).toHaveBeenCalledOnce();
+  expect(seen).toContainEqual({
+    type: 'text_delta',
+    data: { content: 'hello' },
+  });
+  expect(seen.some((event) => event.type === 'error')).toBe(false);
+  await handle.close();
+});

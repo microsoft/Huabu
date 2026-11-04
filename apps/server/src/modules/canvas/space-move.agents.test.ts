@@ -288,7 +288,10 @@ forEachProductProfile((profile, label) => {
         );
         const result = await move();
         expect(result.movedConversationCount).toBe(1);
-        expect(agenetes.close).toHaveBeenCalledExactlyOnceWith(THREAD);
+        expect(agenetes.close).toHaveBeenCalledExactlyOnceWith(
+          THREAD,
+          expect.objectContaining({ name: SOURCE }),
+        );
         const closeOrder = vi.mocked(agenetes.close).mock
           .invocationCallOrder[0];
         const rehomeOrder = vi.mocked(agenetes.rehome).mock

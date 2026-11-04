@@ -733,3 +733,30 @@ describe('ordinary Profile catalog routes', () => {
     expect(mocks.registry.patchProfile).not.toHaveBeenCalled();
   });
 });
+
+it('returns no operator daemon metadata in the member catalog', async () => {
+  const server = await setup();
+  const { openPersonalSettings, useCaller } =
+    await import('../../identity/personal-settings.js');
+  const response = await openPersonalSettings(async () => {
+    useCaller({
+      principal: { principalId: 'carol', kind: 'user' },
+      member: true,
+      owner: false,
+      access: {
+        can: async () => true,
+        claim: async () => {},
+        workspaces: async () => [],
+      },
+    });
+    return server.inject('/api/acp/profiles');
+  });
+  expect(response.statusCode).toBe(200);
+  expect(response.json()).toMatchObject({
+    profiles: [],
+    connectedDevices: [],
+    agentlet: { online: false },
+  });
+  expect(response.json().agentlet).toEqual({ online: false });
+  expect(mocks.registry.listProfiles).not.toHaveBeenCalled();
+});

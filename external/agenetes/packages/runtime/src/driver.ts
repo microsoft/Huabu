@@ -7,6 +7,7 @@ import type {
   AgentStateSnapshot,
   AgentStreamEvent,
   AgentSubmission,
+  Namespace,
   WorkloadSpec,
   WorkloadType,
 } from '@agenetes/protocol';
@@ -178,27 +179,51 @@ export function defineDriver<
 export interface AgentRuntime {
   resolve(kind: string): MountedAgentDriver | undefined;
   readonly kinds: readonly string[];
-  get(threadId: string): AgentHandle | undefined;
-  getOrCreate(threadId: string, createHandle: () => AgentHandle): AgentHandle;
-  close(threadId: string): Promise<void>;
+  get(threadId: string, namespace?: Namespace): AgentHandle | undefined;
+  getOrCreate(
+    threadId: string,
+    createHandle: () => AgentHandle,
+    namespace?: Namespace,
+  ): AgentHandle;
+  close(threadId: string, namespace?: Namespace): Promise<void>;
 }
 
 export function createAgentRuntime(drivers: DriverMap): AgentRuntime {
-  const handles = new Map<string, AgentHandle>();
+  // Namespace ownership lives with the cached handle. Lifecycle callers check
+  // it before persisting a new thread record as well as when reusing a handle.
+  const handles = new Map<
+    string,
+    { handle: AgentHandle; namespace?: Namespace }
+  >();
+  const lookup = (threadId: string, namespace?: Namespace) => {
+    const entry = handles.get(threadId);
+    if (
+      entry &&
+      namespace &&
+      entry.namespace &&
+      (entry.namespace.name !== namespace.name ||
+        entry.namespace.storage?.root !== namespace.storage?.root)
+    )
+      throw new AgenetesError(
+        'invalid_workload',
+        'Thread is live in another namespace',
+      );
+    return entry?.handle;
+  };
   const kinds = Object.keys(drivers);
   return {
     resolve: (kind) => drivers[kind],
     kinds,
-    get: (threadId) => handles.get(threadId),
-    getOrCreate(threadId, createHandle) {
-      const existing = handles.get(threadId);
+    get: lookup,
+    getOrCreate(threadId, createHandle, namespace) {
+      const existing = lookup(threadId, namespace);
       if (existing) return existing;
       const created = createHandle();
-      handles.set(threadId, created);
+      handles.set(threadId, { handle: created, namespace });
       return created;
     },
-    async close(threadId) {
-      const handle = handles.get(threadId);
+    async close(threadId, namespace) {
+      const handle = lookup(threadId, namespace);
       if (!handle) return;
       await handle.close();
       handles.delete(threadId);

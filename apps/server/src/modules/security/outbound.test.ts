@@ -81,3 +81,24 @@ describe('public-network-only outbound fetch', () => {
     expect(inside).not.toContain('secret');
   });
 });
+
+it('applies the same connection-time guard to member model discovery and inference transport', async () => {
+  const { openPersonalSettings, useCaller } =
+    await import('../identity/personal-settings.js');
+  const { memberModelFetch } = await import('../agent/llm.js');
+  const url = `http://localhost:${port}/hop`;
+  expect((await memberModelFetch(url)).status).toBe(200);
+  await openPersonalSettings(async () => {
+    useCaller({
+      principal: { principalId: 'carol', kind: 'user' },
+      member: true,
+      owner: false,
+      access: {
+        can: async () => true,
+        claim: async () => {},
+        workspaces: async () => [],
+      },
+    });
+    await expect(memberModelFetch(url)).rejects.toThrow();
+  });
+});

@@ -31,6 +31,7 @@ beforeEach(() => {
   process.env.HUABU_DATA_DIR = tmp;
   process.env.TAVILY_API_KEY = 'operator-env-key';
   delete process.env.HUABU_SECRET_KEY;
+  vi.restoreAllMocks();
   vi.resetModules();
 });
 afterEach(() => {
@@ -169,7 +170,10 @@ describe('personal settings', () => {
         return Response.json({ data: [{ id: `gpt-${owner}` }] });
       },
     );
-    vi.stubGlobal('fetch', fetchMock);
+    vi.spyOn(
+      await import('../security/outbound.js'),
+      'outboundFetch',
+    ).mockImplementation(fetchMock);
     try {
       const [carol, dave] = await Promise.all([
         as('carol', () => llm.getModelsForProviderLive('openai')),
@@ -256,5 +260,77 @@ describe('personal settings', () => {
         return defaults.getAgentDefaults().profileId;
       }),
     ).toBe('huabu');
+  });
+});
+
+it('does not expose Azure deployment names or endpoints from the operator environment', async () => {
+  vi.stubEnv('AZURE_OPENAI_API_ENDPOINT', 'https://operator.azure.example');
+  vi.stubEnv('AZURE_OPENAI_API_DEPLOYMENT_NAME', 'operator-deployment');
+  const scope = await import('./personal-settings.js');
+  const store = await import('../../security/secret-store.js');
+  const llm = await import('../agent/llm.js');
+  await store.initializeSecretStore();
+  try {
+    await scope.openPersonalSettings(async () => {
+      scope.useCaller(person('carol'));
+      expect(llm.getModelsForProvider('azure-openai')).toEqual([]);
+      await llm.setLLMConfig({
+        provider: 'azure-openai',
+        model: 'carol-model',
+        apiKey: 'carol-key',
+      });
+      expect(llm.getLLMModel().baseUrl).not.toContain('operator');
+      expect(llm.getModelsForProvider('azure-openai').map((m) => m.id)).toEqual(
+        ['carol-model'],
+      );
+    });
+  } finally {
+    vi.unstubAllEnvs();
+  }
+});
+
+it('denies artifact source access before reading or returning its bytes', async () => {
+  const scope = await import('./personal-settings.js');
+  const { resolveArtifactImageUrl } = await import('../artifact/utils.js');
+  await scope.openPersonalSettings(async () => {
+    scope.useCaller({
+      ...person('carol'),
+      access: {
+        can: async () => false,
+        claim: async () => {},
+        workspaces: async () => [],
+      },
+    });
+    await expect(
+      resolveArtifactImageUrl('/api/canvas/secret/artifact/a.png', 'mine'),
+    ).rejects.toThrow('not readable');
+    await expect(resolveArtifactImageUrl('a.png', 'secret')).rejects.toThrow(
+      'not readable',
+    );
+  });
+});
+
+it('offers members only provider adapters that can honor the guarded transport', async () => {
+  const scope = await import('./personal-settings.js');
+  const llm = await import('../agent/llm.js');
+  expect(
+    llm
+      .getAvailableProviders()
+      .some((provider) => provider.api === 'bedrock-converse-stream'),
+  ).toBe(true);
+  scope.openPersonalSettings(() => {
+    scope.useCaller(person('carol'));
+    const providers = llm.getAvailableProviders();
+    expect(providers.some((provider) => provider.id === 'openai')).toBe(true);
+    expect(
+      providers.some((provider) =>
+        [
+          'bedrock-converse-stream',
+          'google-generative-ai',
+          'google-vertex',
+        ].includes(provider.api),
+      ),
+    ).toBe(false);
+    expect(llm.getModelsForProvider('amazon-bedrock')).toEqual([]);
   });
 });

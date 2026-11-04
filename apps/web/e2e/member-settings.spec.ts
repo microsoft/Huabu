@@ -72,6 +72,8 @@ test('member settings use the Built-In tab and show popup failures without leavi
   await dialog
     .getByRole('button', { name: en.actions.close, exact: true })
     .click();
+  const previousFocus = page.locator('button:visible').first();
+  await previousFocus.focus();
   expired = true;
   await page.evaluate(async () => {
     window.open = () => null;
@@ -83,6 +85,12 @@ test('member settings use the Built-In tab and show popup failures without leavi
     name: /Continue with Microsoft Entra ID/,
   });
   await expect(signIn).toBeVisible();
+  await expect(signIn).toBeFocused();
+  for (let i = 0; i < 4; i++) {
+    await page.keyboard.press('Tab');
+    await expect(signIn).toBeFocused();
+  }
+  await expect(page.locator('[inert]').first()).toHaveAttribute('inert', '');
   await signIn.click();
   await expect(
     page
@@ -91,6 +99,22 @@ test('member settings use the Built-In tab and show popup failures without leavi
   ).toBeVisible();
   await expect(signIn).toBeEnabled();
   await page.screenshot({ path: testInfo.outputPath('popup-error.png') });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.screenshot({
+    path: testInfo.outputPath('popup-error-mobile.png'),
+  });
+  await page.evaluate(() => document.documentElement.classList.add('dark'));
+  await page.screenshot({
+    path: testInfo.outputPath('popup-error-mobile-dark.png'),
+  });
+  expired = false;
+  await page.evaluate(async () => {
+    const load = (path: string) => import(/* @vite-ignore */ path);
+    const { AUTH_REQUIRED_EVENT } = await load('/src/api/_client.ts');
+    window.dispatchEvent(new Event(AUTH_REQUIRED_EVENT));
+  });
+  await expect(signIn).toHaveCount(0);
+  await expect(previousFocus).toBeFocused();
 });
 
 test('Bubble administrators see People in the current Settings navigation', async ({

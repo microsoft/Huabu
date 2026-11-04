@@ -1745,3 +1745,36 @@ it('stops pending preparation together with an active turn', async () => {
   await draining;
   preparation.finish();
 });
+
+it('rechecks the final external binding under the lease for a member', async () => {
+  const { openPersonalSettings, useCaller } =
+    await import('../identity/personal-settings.js');
+  const h = createHarness({
+    target: null,
+    agentTarget: { ...SELECTABLE_TARGET, agentBinding: TARGET.agentBinding },
+  });
+  await openPersonalSettings(async () => {
+    useCaller({
+      principal: { principalId: 'carol', kind: 'user' },
+      member: true,
+      owner: false,
+      access: {
+        can: async () => true,
+        claim: async () => {},
+        workspaces: async () => [],
+      },
+    });
+    await expect(
+      h.service.invoke({
+        canvasId: 'canvas-a',
+        threadId: 'thread-a',
+        content: 'hello',
+        envelope: ENVELOPE,
+        mode: 'ask',
+        logger,
+      }),
+    ).rejects.toThrow('administrators only');
+  });
+  expect(h.realizeExternal).not.toHaveBeenCalled();
+  expect(h.release).toHaveBeenCalled();
+});

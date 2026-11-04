@@ -153,7 +153,9 @@ async function dispatchBuiltinControl(
       code: 'not_builtin',
     };
   }
-  const handle = agenetes.get(threadId) ?? (await agenetes.create(record.spec));
+  const handle =
+    agenetes.get(threadId, record.spec.namespace) ??
+    (await agenetes.create(record.spec));
   const ack = await handle.control(msg);
   if (!ack.ok) {
     return {

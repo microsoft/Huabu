@@ -93,8 +93,12 @@ function bubblePeople(store: BubbleStore): PeopleDirectory {
             grant.target.type === TARGET.workspace &&
             'id' in grant.target &&
             role
-          )
-            workspaces.set(grant.target.id, role);
+          ) {
+            const prior = workspaces.get(grant.target.id);
+            const rank = { viewer: 0, editor: 1, owner: 2 };
+            if (!prior || rank[role] > rank[prior])
+              workspaces.set(grant.target.id, role);
+          }
         }
         return {
           principal: identityPrincipalSchema.parse({
@@ -134,9 +138,6 @@ function bubblePeople(store: BubbleStore): PeopleDirectory {
       if (!(await store.principals.get(principalId))) return false;
       const target = { type: TARGET.workspace, id: workspaceId };
       const rows = await store.grants.list({ target, principalId });
-      for (const row of rows)
-        if (roleOf(row.role) && row.role !== (role && WORKSPACE_ROLE[role]))
-          await store.grants.remove(row.grantId);
       if (role && !rows.some((row) => row.role === WORKSPACE_ROLE[role]))
         await store.grants.add({
           target,
@@ -144,6 +145,9 @@ function bubblePeople(store: BubbleStore): PeopleDirectory {
           role: WORKSPACE_ROLE[role],
           grantedByPrincipalId: by,
         });
+      for (const row of rows)
+        if (roleOf(row.role) && row.role !== (role && WORKSPACE_ROLE[role]))
+          await store.grants.remove(row.grantId);
       return true;
     },
   };

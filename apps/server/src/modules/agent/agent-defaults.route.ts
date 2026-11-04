@@ -14,6 +14,7 @@ import {
 
 import { getProfileSchemaCache } from './acp/profile-schema-cache.js';
 import { getAgentDefaults, setAgentDefaults } from './agent-defaults.js';
+import { personalSettingsOwner } from '../identity/personal-settings.js';
 import { canChangeOwnSettings } from '../security/owner.js';
 
 import type {
@@ -101,6 +102,14 @@ const agentDefaultsRoutes: FastifyPluginAsync = async (app) => {
           code: 'validation_failed',
         });
       }
+      if (
+        personalSettingsOwner() &&
+        parsed.data.profileId !== HUABU_AGENT_PROFILE_ID
+      )
+        return reply.code(403).send({
+          message: 'Members use the Built-In agent',
+          code: 'AGENT_ACCESS_REQUIRED',
+        });
       if (
         parsed.data.profileId !== null &&
         parsed.data.profileId !== HUABU_AGENT_PROFILE_ID

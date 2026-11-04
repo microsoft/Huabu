@@ -12,6 +12,9 @@ import type { InteractiveAuthenticator } from '../api/identity';
  */
 
 const PENDING_KEY = 'huabu.oidc.pending';
+const PROVIDER_KEY = 'huabu.oidc.provider';
+
+class GrantRejectedError extends Error {}
 /** A login run in a popup reports back to its opener instead of finishing. */
 const POPUP_STATE_PREFIX = 'popup.';
 const POPUP_MESSAGE = 'huabu.oidc.popup';
@@ -79,7 +82,9 @@ async function authorizationUrl(
         ...authenticator.scopes,
         'openid',
         'profile',
-        'offline_access',
+        ...(['entra', 'auth0'].includes(authenticator.driver)
+          ? ['offline_access']
+          : []),
       ]),
     ].join(' '),
     state,
@@ -123,14 +128,20 @@ async function requestTokens(
     refresh_token?: string;
     expires_in?: number;
     error_description?: string;
+    error?: string;
   };
   if (!response.ok || !token.access_token)
-    throw new Error(
+    throw new (token.error === 'invalid_grant' ? GrantRejectedError : Error)(
       token.error_description ?? 'Sign-in could not be completed',
     );
   // Providers that rotate refresh tokens send a new one with each use.
   if (generation === tokenGeneration) {
     signedInAuthenticator = authenticator;
+    try {
+      sessionStorage.setItem(PROVIDER_KEY, JSON.stringify(authenticator));
+    } catch {
+      /* Storage may be disabled. */
+    }
     if (token.refresh_token)
       held = { authenticator, refreshToken: token.refresh_token };
     else if (grant.grant_type === 'authorization_code') held = null;
@@ -194,7 +205,8 @@ export async function completeLogin(): Promise<SignedInTokens | null> {
       },
       window.location.origin,
     );
-    window.close();
+    // The opener closes us after consuming the message. Closing here races
+    // its closed-window poll and can discard a successful login.
     return null;
   }
   const raw = sessionStorage.getItem(PENDING_KEY);
@@ -250,6 +262,7 @@ export async function signInWithPopup(
       )
         return;
       cleanup();
+      popup.close?.();
       if (data.code) resolve(data.code);
       else reject(new Error(data.error ?? 'Sign-in could not be completed'));
     };
@@ -278,8 +291,8 @@ export function refreshTokens(): Promise<SignedInTokens | null> {
         refresh_token: current.refreshToken,
       });
       return generation === tokenGeneration ? tokens : null;
-    } catch {
-      if (held === current) held = null;
+    } catch (error) {
+      if (error instanceof GrantRejectedError && held === current) held = null;
       return null;
     } finally {
       if (generation === tokenGeneration) refreshing = null;
@@ -291,7 +304,19 @@ export function refreshTokens(): Promise<SignedInTokens | null> {
 
 /** The provider this page signed in with, retained until sign-out. */
 export function heldAuthenticator(): InteractiveAuthenticator | null {
-  return signedInAuthenticator;
+  if (signedInAuthenticator) return signedInAuthenticator;
+  try {
+    const raw = sessionStorage.getItem(PROVIDER_KEY);
+    if (!raw) return null;
+    const provider = JSON.parse(raw) as InteractiveAuthenticator;
+    return typeof provider.driver === 'string' &&
+      typeof provider.issuer === 'string' &&
+      typeof provider.clientId === 'string'
+      ? provider
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Forget the refresh token, as signing out must. */
@@ -299,6 +324,11 @@ export function forgetTokens(): void {
   tokenGeneration += 1;
   held = null;
   signedInAuthenticator = null;
+  try {
+    sessionStorage.removeItem(PROVIDER_KEY);
+  } catch {
+    /* Storage may be disabled. */
+  }
   refreshing = null;
 }
 

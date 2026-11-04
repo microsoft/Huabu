@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto';
 
 import { InMemoryBubbleStore } from '@octostaff/bubble';
 import Fastify from 'fastify';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { migrateSpaceGrants, openBubbleIdentity } from './bubble.js';
 import { registerIdentity } from './http.js';
@@ -817,4 +817,40 @@ describe('Bubble identity', () => {
     expect(await connects(port, '/api/acp/agent', 'ok')).toBe(true);
     expect(await connects(port, '/bubble/v1/ws')).toBe(true);
   });
+});
+
+it('retains the old Workspace grant if adding the replacement role fails and projects the strongest role', async () => {
+  const store = new InMemoryBubbleStore();
+  const { service, plugin } = await openBubbleIdentity({
+    store,
+    authenticator: AUTHENTICATORS,
+    preferences: createMemoryWorkspacePreferences(),
+    resources: directory(),
+  });
+  const app = Fastify();
+  servers.push(app);
+  await app.register(plugin);
+  await app.ready();
+  await store.principals.upsert({ principalId: 'erin', kind: 'user' });
+  const target = { type: 'huabu.workspace', id: 'w1' } as const;
+  await grant(store, 'erin', 'huabu.workspace.editor', target);
+  const add = vi
+    .spyOn(store.grants, 'add')
+    .mockRejectedValueOnce(new Error('store unavailable'));
+  await expect(
+    service.people.setWorkspaceRole('erin', 'w1', 'owner', 'admin'),
+  ).rejects.toThrow('store unavailable');
+  expect(
+    (await store.grants.list({ target, principalId: 'erin' })).map(
+      (g) => g.role,
+    ),
+  ).toEqual(['huabu.workspace.editor']);
+  add.mockRestore();
+  await grant(store, 'erin', 'huabu.workspace.owner', target);
+  await grant(store, 'erin', 'huabu.workspace.viewer', target);
+  expect(
+    (await service.people.list()).find(
+      (p) => p.principal.principalId === 'erin',
+    )?.workspaces,
+  ).toEqual([{ workspaceId: 'w1', role: 'owner' }]);
 });

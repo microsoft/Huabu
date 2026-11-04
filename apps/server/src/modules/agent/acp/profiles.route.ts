@@ -231,7 +231,7 @@ const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
           selectableProfileIds: [HUABU_AGENT_PROFILE_ID],
           connectedDevices: [],
           folderPickerAgentletId: null,
-          agentlet: getDaemonSupervisor().getStatus(),
+          agentlet: { online: false },
           agentDefaults: getAgentDefaults(),
         };
       if (denyRemote(request, reply)) return;

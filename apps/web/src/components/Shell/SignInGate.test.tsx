@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SignInGate } from './SignInGate';
 import { AUTH_REQUIRED_EVENT } from '../../api/_client';
 import { useIdentityStore } from '../../store/identityStore';
+import * as oidc from '../../utils/oidcLogin';
 import { forgetTokens } from '../../utils/oidcLogin';
 
 // The brand animation draws on a canvas the test DOM does not provide.
@@ -73,6 +74,7 @@ beforeEach(() => {
   document.body.appendChild(container);
   root = createRoot(container);
   useIdentityStore.setState({ identity: null });
+  oidc.forgetTokens();
   sessionStorage.clear();
   window.history.replaceState(null, '', '/spaces');
 });
@@ -94,6 +96,11 @@ it('shows a blocked-popup error over the running app and permits retry', async (
   for (let i = 0; i < 5; i++) await act(async () => {});
   vi.spyOn(window, 'open').mockReturnValue(null);
   await act(async () => container.querySelector('button')?.click());
+  for (let i = 0; i < 5; i++) await act(async () => {});
+  expect(container.textContent).toContain(
+    'The browser blocked the sign-in window',
+  );
+  await act(async () => window.dispatchEvent(new Event(AUTH_REQUIRED_EVENT)));
   for (let i = 0; i < 5; i++) await act(async () => {});
   expect(container.textContent).toContain(
     'The browser blocked the sign-in window',
@@ -398,4 +405,104 @@ describe('SignInGate', () => {
     await mount();
     expect(calls.map((call) => call.url)).toEqual(['/api/identity']);
   });
+});
+
+it('reloads on an account change without resuming the old app or replaying edits', async () => {
+  routes['GET /api/identity'] = () => json(MEMBER);
+  await mount();
+  routes['GET /api/identity'] = () => json({}, 401);
+  routes['GET /bubble/v1/auth/authenticators'] = () =>
+    json({ authenticators: [ENTRA] });
+  await act(async () => window.dispatchEvent(new Event(AUTH_REQUIRED_EVENT)));
+  for (let i = 0; i < 5; i++) await act(async () => {});
+  const reload = vi
+    .spyOn(window.location, 'reload')
+    .mockImplementation(() => {});
+  vi.spyOn(oidc, 'signInWithPopup').mockResolvedValue({
+    accessToken: 'dave-token',
+  });
+  routes['POST /api/identity/session'] = () => {
+    routes['GET /api/identity'] = () =>
+      json({
+        ...MEMBER,
+        principal: { ...MEMBER.principal, principalId: 'dave' },
+      });
+    return new Response(null, { status: 204 });
+  };
+  resend.mockClear();
+  await act(async () => container.querySelector('button')?.click());
+  for (let i = 0; i < 5; i++) await act(async () => {});
+  expect(reload).toHaveBeenCalledOnce();
+  expect(resend).not.toHaveBeenCalled();
+  expect(useIdentityStore.getState().identity?.principal.principalId).toBe(
+    'carol',
+  );
+  expect(container.textContent).not.toContain('app');
+});
+
+it('bounds renewal delays and stops when the Server rejects renewed tokens', async () => {
+  sessionStorage.setItem(
+    'huabu.oidc.pending',
+    JSON.stringify({
+      state: 'expected',
+      verifier: 'v',
+      authenticator: ENTRA,
+      returnTo: '/spaces',
+    }),
+  );
+  window.history.replaceState(null, '', '/auth/callback?code=c&state=expected');
+  routes[
+    'GET https://login.example/tenant/v2.0/.well-known/openid-configuration'
+  ] = () => json({ token_endpoint: 'https://login.example/token' });
+  routes['POST https://login.example/token'] = () =>
+    json({
+      access_token: 'fresh',
+      refresh_token: 'refresh',
+      expires_in: 2592000,
+    });
+  routes['POST /api/identity/session'] = () =>
+    new Response(null, { status: 204 });
+  routes['GET /api/identity'] = () => json(MEMBER);
+  const timer = vi.spyOn(window, 'setTimeout');
+  await mount();
+  expect(timer.mock.calls.some(([, delay]) => delay === 2 ** 31 - 1)).toBe(
+    true,
+  );
+  routes['POST /api/identity/session'] = () =>
+    json({ code: 'IDENTITY_REQUIRED' }, 401);
+  routes['GET /api/identity'] = () => json({}, 401);
+  routes['GET /bubble/v1/auth/authenticators'] = () =>
+    json({ authenticators: [ENTRA] });
+  await act(async () => window.dispatchEvent(new Event(AUTH_REQUIRED_EVENT)));
+  for (let i = 0; i < 15; i++) await act(async () => {});
+  expect(calls.filter((c) => c.url === '/api/identity/session')).toHaveLength(
+    2,
+  );
+  expect(container.textContent).toContain('Sign-in was not accepted');
+});
+
+it('keeps renewal blocked when the adopted session identity cannot be verified', async () => {
+  routes['GET /api/identity'] = () => json(MEMBER);
+  await mount();
+  routes['GET /api/identity'] = () => json({}, 401);
+  routes['GET /bubble/v1/auth/authenticators'] = () =>
+    json({ authenticators: [ENTRA] });
+  await act(async () => window.dispatchEvent(new Event(AUTH_REQUIRED_EVENT)));
+  for (let i = 0; i < 5; i++) await act(async () => {});
+  vi.spyOn(oidc, 'signInWithPopup').mockResolvedValue({
+    accessToken: 'unknown-account',
+  });
+  routes['POST /api/identity/session'] = () => {
+    routes['GET /api/identity'] = () => {
+      throw new Error('Identity service unavailable');
+    };
+    return new Response(null, { status: 204 });
+  };
+  resend.mockClear();
+  await act(async () => container.querySelector('button')?.click());
+  for (let i = 0; i < 5; i++) await act(async () => {});
+  expect(container.querySelector('[role="dialog"]')).not.toBeNull();
+  expect(container.querySelector('[inert]')).not.toBeNull();
+  expect(container.textContent).toContain('Identity service unavailable');
+  expect(resend).not.toHaveBeenCalled();
 });

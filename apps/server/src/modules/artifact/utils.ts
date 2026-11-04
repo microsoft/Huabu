@@ -7,6 +7,7 @@ import { ARTIFACT_URL_REGEX } from '@huabu/shared';
 
 import { getLogger } from '../../utils/logger.js';
 import { IMAGE_MIME_MAP } from '../../utils/mime.js';
+import { callerAccess } from '../identity/personal-settings.js';
 import { space } from '../storage/index.js';
 
 const log = getLogger('artifact');
@@ -54,6 +55,10 @@ export async function resolveArtifactImageUrl(
   }
 
   if (!canvasId || !filename) return url;
+
+  const access = callerAccess();
+  if (access && !(await access.can('read', { type: 'space', id: canvasId })))
+    throw new Error('Artifact source Space is not readable');
 
   try {
     const buffer = await space(canvasId).artifacts.read(filename);

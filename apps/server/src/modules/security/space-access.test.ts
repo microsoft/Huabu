@@ -320,3 +320,14 @@ describe('Space access', () => {
     expect(claimed).toEqual(['created']);
   });
 });
+
+it('requires a Space even for a brand new member conversation without a thread id', async () => {
+  const { app } = host();
+  const result = await app.inject({
+    method: 'POST',
+    url: '/api/agent',
+    payload: { content: 'hello' },
+  });
+  expect(result.statusCode).toBe(400);
+  expect(result.json().code).toBe('SPACE_ACCESS_AMBIGUOUS');
+});

@@ -127,7 +127,8 @@ A Bubble member's calls run in a personal settings namespace (`modules/identity/
 
 - The member settings UI follows main's separate **Devices and Agents** and **Agent settings** tabs. Members see their Built-In configuration under Agent settings, Services and General; administrators also see People. Member deep links to the external-agent tab land in their own settings.
 - OCR never imports deployment legacy files or environment credentials for a member. Pending model OAuth flows, pi-ai runtime Models collections and live OpenAI discovery caches belong to the settings owner. Member pi-ai authentication also excludes ambient environment and file credentials.
-- Agent mutation routes check both the Question binding and persisted external driver before allowing a member to stop or steer a thread. External agents and connected devices stay with administrators.
+- Live Deployment handles retain their namespace in the runtime cache; creation checks it before persistence, and scoped lookups and closes reject another namespace. Members must address a Space even for a new conversation. Artifact inlining checks read access to the source Space. Member model transport excludes deployment environment options, uses public-network connection checks for DNS and redirect hops, and uses SSE to keep streaming on that guarded transport. Providers whose upstream adapters cannot honor a custom transport are unavailable to members.
+- Agent invocation rechecks the final binding under the turn lease. Agent mutation routes check both the Question binding and persisted external driver before allowing a member to stop or steer a thread. External agents and connected devices stay with administrators.
 - Session refresh shares one in-flight token exchange, retains the selected provider for logout, and discards a refresh that finishes after sign-out. Popup failures reach the existing sign-in error alert. Recovery uses main's save drain to retry retained sidecar failures while keeping its conflict and restoration guards.
 
 ### Grant administration
@@ -136,13 +137,13 @@ A Bubble member's calls run in a personal settings namespace (`modules/identity/
 
 ### Session lifecycle
 
-- **Refresh.** Sign-in requests `offline_access`. The page holds the refresh token in memory only, and renews the session before expiry and on a 401.
-- **Re-sign-in in a popup.** When renewal is impossible, the sign-in screen opens over the running app and signs in through a popup, then resends the refused saves.
-- **Provider logout.** `HUABU_SIGN_OUT_PROVIDER=true` makes sign-out also end the provider session through `end_session_endpoint`.
+- **Refresh.** Auth0 and Entra sign-in request `offline_access`; generic OIDC uses the configured scopes. The page holds the refresh token in memory only, and renews the session before expiry and on a 401. Timer delays are bounded, transient network failures retain the refresh token, and rejected session adoptions do not broadcast another renewal event.
+- **Re-sign-in in a popup.** When renewal is impossible, the sign-in screen opens over the running app and signs in through a popup, then resends the refused saves only after verifying the original principal. Another account forces a reload before cached data or pending edits can be reused. The overlay traps focus, makes the background inert, and restores focus on recovery.
+- **Provider logout.** `HUABU_SIGN_OUT_PROVIDER=true` makes sign-out also end the provider session through `end_session_endpoint`. The non-secret provider selection survives page reload in session storage; refresh tokens do not. Logout blocks new session adoptions and waits for existing ones before clearing the cookie.
 
 ### Proof
 
-A dev Server in Bubble mode, with Postgres content and Bubble records, runs two members whose model settings point at a local OpenAI-compatible mock that records each request's key. Each member's Built-In agent answers using only their own key. A member is refused in another member's Space, for an external binding and on `/api/acp`. The People tab admits people and gives Workspace roles. Renewal and the popup are unit-tested. They were not tried against real Auth0 or Entra.
+Earlier verification used a dev Server in Bubble mode, with Postgres content and Bubble records, running two members whose model settings point at a local OpenAI-compatible mock that records each request's key. Each member's Built-In agent answered using only their own key. Member model endpoints now require public targets; the local mock described here predates that guard. A member is refused in another member's Space, for an external binding and on `/api/acp`. The People tab admits people and gives Workspace roles. Renewal and the popup are unit-tested. They were not tried against real Auth0 or Entra.
 
 ## Settled decisions
 

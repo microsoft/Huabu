@@ -69,13 +69,29 @@ export async function listInteractiveAuthenticators(): Promise<
   );
 }
 
+// Logout owns the final cookie write. Token exchanges may finish later, but
+// cannot start a session once sign-out has begun.
+let signingOut = false;
+const adoptions = new Set<Promise<void>>();
+
 /** Hand an access token to the Server, which keeps it in an HttpOnly cookie. */
-export async function startSession(accessToken: string): Promise<void> {
-  await apiFetch<void>('/identity/session', {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${accessToken}` },
-    fallbackMessage: 'Sign-in was not accepted',
-  });
+export function startSession(accessToken: string): Promise<void> {
+  if (signingOut) return Promise.reject(new Error('Sign-out is in progress'));
+  const adoption = (async () => {
+    // Session rejection is handled by the gate; broadcasting another 401 here
+    // would recursively start another renewal.
+    const response = await fetch(`${API_CONFIG.API_URL}/identity/session`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!response.ok) throw new Error('Sign-in was not accepted');
+  })();
+  adoptions.add(adoption);
+  void adoption.then(
+    () => adoptions.delete(adoption),
+    () => adoptions.delete(adoption),
+  );
+  return adoption;
 }
 
 export async function endSession(): Promise<void> {
@@ -90,15 +106,22 @@ export async function endSession(): Promise<void> {
 export async function signOut(
   options: { providerSignOut?: boolean } = {},
 ): Promise<void> {
-  await endSession();
+  signingOut = true;
   const { forgetTokens, providerSignOutUrl, heldAuthenticator } =
     await import('../utils/oidcLogin');
   const signedInAuthenticator = heldAuthenticator();
   forgetTokens();
-  // The provider's own session would otherwise sign the next person straight
-  // back in as this one, which matters on a shared computer.
+  await Promise.allSettled([...adoptions]);
+  try {
+    await endSession();
+  } catch (error) {
+    signingOut = false;
+    throw error;
+  }
   if (options.providerSignOut) {
-    const authenticators = (await listInteractiveAuthenticators()) ?? [];
+    const authenticators = signedInAuthenticator
+      ? []
+      : ((await listInteractiveAuthenticators().catch(() => null)) ?? []);
     const authenticator =
       signedInAuthenticator ??
       (authenticators.length === 1 ? authenticators[0] : null);

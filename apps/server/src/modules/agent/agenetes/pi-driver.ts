@@ -16,8 +16,10 @@
 import { MODEL_ROLES } from '@huabu/shared';
 
 import { materializeHuabuHistory } from './history-replay.js';
+import { personalSettingsOwner } from '../../identity/personal-settings.js';
 import {
   ensureApiKeyForRole,
+  memberModelFetch,
   resolveModelByIdAsync,
   resolveModelForRoleAsync,
 } from '../llm.js';
@@ -96,6 +98,10 @@ function assertHostModelRef(ref: PiModelRef): void {
 }
 
 export const huabuPiDriverPorts = {
+  streamOptions: () =>
+    personalSettingsOwner()
+      ? { fetch: memberModelFetch, env: {}, transport: 'sse' }
+      : {},
   async resolveModel(ref, ctx) {
     assertHostModelRef(ref);
     const host = getHuabuHostContext(ctx);

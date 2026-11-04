@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+import { FloatingFocusManager, useFloating } from '@floating-ui/react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -79,6 +80,10 @@ export function SignInGate({ children }: { children: ReactNode }) {
   const callback = useRef<Promise<string | undefined>>(undefined);
   // Once the app has run, a lapsed session can strand its unsaved edits.
   const appStarted = useRef(false);
+  const originalPrincipal = useRef<string | null>(null);
+  const accountChanged = useRef(false);
+  const renewing = useRef(false);
+  const knownAuthenticators = useRef<InteractiveAuthenticator[]>([]);
   const renewalTimer = useRef<number | undefined>(undefined);
 
   /**
@@ -88,49 +93,91 @@ export function SignInGate({ children }: { children: ReactNode }) {
   const adopt = useCallback(async (tokens: SignedInTokens) => {
     await startSession(tokens.accessToken);
     window.clearTimeout(renewalTimer.current);
-    if (tokens.expiresIn && tokens.expiresIn > 90)
+    const expiresIn = tokens.expiresIn;
+    if (
+      typeof expiresIn === 'number' &&
+      Number.isFinite(expiresIn) &&
+      expiresIn > 90
+    )
       renewalTimer.current = window.setTimeout(
-        () => void refreshTokens().then((next) => next && adopt(next)),
-        (tokens.expiresIn - 60) * 1000,
+        () => window.dispatchEvent(new Event(AUTH_REQUIRED_EVENT)),
+        Math.min((expiresIn - 60) * 1000, 2 ** 31 - 1),
       );
   }, []);
   useEffect(() => () => window.clearTimeout(renewalTimer.current), []);
 
   const check = useCallback(
     async (loginError?: string) => {
+      if (accountChanged.current) return false;
       const run = ++latestCheck.current;
       const settle = (next: GateState) => {
         if (run !== latestCheck.current) return;
         if (next.kind === 'ready') appStarted.current = true;
-        setState(next);
+        setState((prior) =>
+          next.kind === 'signIn' && prior.kind === 'signIn' && !loginError
+            ? { ...next, error: next.error ?? prior.error }
+            : next,
+        );
       };
       let identity: IdentityResponse | null;
       try {
         identity = await getIdentity();
       } catch (error) {
-        // An unreachable Server is the app's own error to report, as before.
+        // A running Bubble app stays covered until its principal is verified.
+        // Local deployments keep their existing connection-error handling.
         settle(
           error instanceof IdentityDeniedError
             ? { kind: 'denied' }
-            : { kind: 'ready' },
+            : appStarted.current &&
+                useIdentityStore.getState().identity?.provider === 'bubble'
+              ? {
+                  kind: 'signIn',
+                  authenticators: knownAuthenticators.current,
+                  error:
+                    loginError ??
+                    (error instanceof Error ? error.message : String(error)),
+                }
+              : { kind: 'ready' },
         );
         return;
       }
       if (identity) {
-        if (run !== latestCheck.current) return;
+        if (run !== latestCheck.current) return false;
+        const principal = identity.principal.principalId;
+        if (
+          originalPrincipal.current &&
+          originalPrincipal.current !== principal
+        ) {
+          accountChanged.current = true;
+          window.clearTimeout(renewalTimer.current);
+          setState({ kind: 'checking' });
+          window.location.reload();
+          return false;
+        }
+        originalPrincipal.current = principal;
         setIdentity(identity);
         settle(
           identity.member ? { kind: 'ready' } : { kind: 'noAccess', identity },
         );
-        return;
+        return identity.member;
       }
       let authenticators: InteractiveAuthenticator[] | null;
       try {
         authenticators = await listInteractiveAuthenticators();
       } catch {
-        settle({ kind: 'ready' });
+        settle(
+          appStarted.current
+            ? {
+                kind: 'signIn',
+                authenticators: knownAuthenticators.current,
+                error: loginError,
+              }
+            : { kind: 'ready' },
+        );
         return;
       }
+      if (authenticators && run === latestCheck.current)
+        knownAuthenticators.current = authenticators;
       // Without Bubble a login prompt belongs to the browser (Basic Auth).
       if (!authenticators) {
         settle({ kind: 'ready' });
@@ -171,19 +218,31 @@ export function SignInGate({ children }: { children: ReactNode }) {
   useEffect(() => {
     // A lapsed session renews in place when this page holds a refresh token;
     // whatever it refused is then sent again.
-    const recheck = () =>
+    const recheck = () => {
+      if (renewing.current || accountChanged.current) return;
+      renewing.current = true;
       void (async () => {
-        const tokens = appStarted.current ? await refreshTokens() : null;
-        if (tokens) {
-          try {
-            await adopt(tokens);
-            await resend();
-          } catch {
-            // Fall through to the sign-in check below.
+        try {
+          const tokens = appStarted.current ? await refreshTokens() : null;
+          if (tokens) {
+            try {
+              await adopt(tokens);
+              if (await check()) await resend();
+              return;
+            } catch (error) {
+              await check(
+                error instanceof Error ? error.message : String(error),
+              );
+              return;
+            }
           }
+          renewing.current = false;
+          await check();
+        } finally {
+          renewing.current = false;
         }
-        await check();
       })();
+    };
     window.addEventListener(AUTH_REQUIRED_EVENT, recheck);
     return () => window.removeEventListener(AUTH_REQUIRED_EVENT, recheck);
   }, [check, adopt]);
@@ -193,8 +252,7 @@ export function SignInGate({ children }: { children: ReactNode }) {
     async (authenticator: InteractiveAuthenticator) => {
       try {
         await adopt(await signInWithPopup(authenticator));
-        await check();
-        await resend();
+        if (await check()) await resend();
       } catch (error) {
         await check(error instanceof Error ? error.message : String(error));
       }
@@ -202,16 +260,34 @@ export function SignInGate({ children }: { children: ReactNode }) {
     [adopt, check],
   );
 
-  if (state.kind === 'ready') return <>{children}</>;
+  const overlay = state.kind === 'signIn' && appStarted.current;
+  const { refs, context } = useFloating({ open: overlay });
   if (state.kind === 'checking') return <WorkspaceLoadingScreen />;
-  // The app keeps running under a lapsed session, so its edits survive.
-  if (state.kind === 'signIn' && appStarted.current)
+  if (state.kind === 'ready' || (appStarted.current && state.kind === 'signIn'))
     return (
       <>
-        {children}
-        <div className="bg-bg-default/95 fixed inset-0 z-[1000]">
-          <SignInScreen state={state} onSignIn={signInInPlace} />
+        <div className="contents" inert={overlay}>
+          {children}
         </div>
+        {overlay && state.kind === 'signIn' && (
+          <FloatingFocusManager
+            context={context}
+            restoreFocus
+            outsideElementsInert
+            closeOnFocusOut={false}
+          >
+            <div
+              ref={refs.setFloating}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="session-sign-in-title"
+              tabIndex={-1}
+              className="bg-bg-default/95 fixed inset-0 z-[1000]"
+            >
+              <SignInScreen state={state} onSignIn={signInInPlace} />
+            </div>
+          </FloatingFocusManager>
+        )}
       </>
     );
   return <SignInScreen state={state} />;
@@ -261,7 +337,12 @@ export function SignInScreen({
             alt={APP_NAME}
             className="mx-auto mb-4 h-16 w-16"
           />
-          <h1 className="text-fg-default text-2xl font-bold">{title}</h1>
+          <h1
+            id="session-sign-in-title"
+            className="text-fg-default text-2xl font-bold"
+          >
+            {title}
+          </h1>
           <p className="text-fg-subtle mt-2 text-sm">{intro}</p>
         </div>
 
@@ -309,7 +390,12 @@ export function SignInScreen({
             className="w-full"
             onClick={() => {
               setSignOutFailed(false);
-              void signOut().catch(() => setSignOutFailed(true));
+              void signOut({
+                providerSignOut:
+                  state.kind === 'noAccess'
+                    ? state.identity.providerSignOut
+                    : true,
+              }).catch(() => setSignOutFailed(true));
             }}
           >
             {t('auth.signOut')}

@@ -117,7 +117,11 @@ export function registerSpaceAccess(app: FastifyInstance): void {
     }
     // A conversation lives in a Space, and is reached only through one the
     // caller may use.
-    if (!identity.owner && threadId && !canvasId)
+    if (
+      !identity.owner &&
+      !canvasId &&
+      (threadId || route === '/api/agent' || route.startsWith('/api/agent/'))
+    )
       return reply.code(400).send({
         message: 'A conversation is addressed through its Space',
         code: 'SPACE_ACCESS_AMBIGUOUS',

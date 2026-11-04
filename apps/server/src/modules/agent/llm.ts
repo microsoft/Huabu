@@ -55,6 +55,7 @@ import {
   personalSettingsOwner,
   settingsFilePath,
 } from '../identity/personal-settings.js';
+import { outboundFetch, withPublicNetworkOnly } from '../security/outbound.js';
 
 import type {
   Api,
@@ -80,6 +81,16 @@ import type {
 const log = getLogger('llm');
 
 // ==================== Provider Catalog ====================
+
+// These adapters honor the per-call fetch policy. Others use their own SDK
+// transport (or reject custom fetch) and cannot serve member-configured URLs.
+const MEMBER_MODEL_APIS = new Set([
+  'openai-completions',
+  'openai-responses',
+  'openai-codex-responses',
+  'azure-openai-responses',
+  'anthropic-messages',
+]);
 
 /** Read a built-in provider's model catalog from pi-ai's registry. */
 function getProviderModels(providerId: KnownProvider): Model<Api>[] {
@@ -192,7 +203,9 @@ function buildProviderCatalog(): LLMProviderInfo[] {
 let _providerCatalog: LLMProviderInfo[] | null = null;
 function getProviderCatalog(): LLMProviderInfo[] {
   if (!_providerCatalog) _providerCatalog = buildProviderCatalog();
-  return _providerCatalog;
+  return personalSettingsOwner()
+    ? _providerCatalog.filter((provider) => MEMBER_MODEL_APIS.has(provider.api))
+    : _providerCatalog;
 }
 
 // ==================== Persisted Config ====================
@@ -523,7 +536,20 @@ async function resolveApiKeyAsync(providerId: string): Promise<string | null> {
 
 /** Build a Model object for the active configuration. */
 function buildModel(cfg: PersistedConfig): Model<Api> {
+  const model = buildProviderModel(cfg);
+  if (personalSettingsOwner() && !MEMBER_MODEL_APIS.has(model.api))
+    throw new Error(
+      'This model provider does not support restricted member network transport',
+    );
+  return model;
+}
+
+function buildProviderModel(cfg: PersistedConfig): Model<Api> {
   const providerInfo = getProviderCatalog().find((p) => p.id === cfg.provider);
+  if (personalSettingsOwner() && !providerInfo)
+    throw new Error(
+      'This model provider does not support restricted member network transport',
+    );
 
   // Try to get from pi-ai built-in registry first
   if (providerInfo?.builtIn) {
@@ -565,7 +591,11 @@ function buildModel(cfg: PersistedConfig): Model<Api> {
   // Azure: fall back to legacy env var endpoint when no persisted baseUrl.
   // pi-ai's `normalizeAzureBaseUrl` will append `/openai/v1` as needed, so
   // we deliberately pass the raw endpoint without our own `/openai` suffix.
-  if (cfg.provider === 'azure-openai' && !cfg.baseUrl) {
+  if (
+    cfg.provider === 'azure-openai' &&
+    !cfg.baseUrl &&
+    !personalSettingsOwner()
+  ) {
     const endpoint = process.env.AZURE_OPENAI_API_ENDPOINT;
     if (endpoint) {
       baseUrl = endpoint.replace(/\/+$/, '');
@@ -677,7 +707,9 @@ export function getModelsForProvider(providerId: string): LLMModelInfo[] {
 
   // Azure: list the configured deployment as the only model
   if (providerId === 'azure-openai') {
-    const deployment = process.env.AZURE_OPENAI_API_DEPLOYMENT_NAME;
+    const deployment = personalSettingsOwner()
+      ? undefined
+      : process.env.AZURE_OPENAI_API_DEPLOYMENT_NAME;
     if (deployment) {
       return [
         {
@@ -828,7 +860,7 @@ async function fetchOpenAIModelIdsUncached(): Promise<string[] | null> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 8000);
   try {
-    const res = await fetch(`${baseUrl}/models`, {
+    const res = await memberModelFetch(`${baseUrl}/models`, {
       method: 'GET',
       headers: {
         Authorization: `Bearer ${apiKey}`,
@@ -1725,5 +1757,14 @@ export async function llmComplete(context: Context, options?: LLMCallOptions) {
     apiKey,
     ...getProviderSpecificOptions(cfg),
     ...streamOptions,
+    ...(personalSettingsOwner()
+      ? { fetch: memberModelFetch, env: {}, transport: 'sse' }
+      : {}),
   });
 }
+
+/** Member model traffic uses the connection-time DNS and redirect guard. */
+export const memberModelFetch: typeof fetch = (input, init) =>
+  personalSettingsOwner()
+    ? withPublicNetworkOnly(() => outboundFetch(input, init))
+    : fetch(input, init);
