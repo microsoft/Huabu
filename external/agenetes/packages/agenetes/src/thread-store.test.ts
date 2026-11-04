@@ -81,6 +81,26 @@ const writeStore = (namespace: Namespace, value: unknown): void => {
 };
 
 describe('FileThreadStore agenetes-v2 durable backing', () => {
+  it('persists stable ownership while binding storage from the current namespace', () => {
+    const namespace = { ...ns('owned'), ownerId: 'workspace-a' };
+    const original = {
+      ...record('thread'),
+      spec: { ...spec('thread'), namespace },
+    };
+    new FileThreadStore().upsert(namespace, 'thread', original);
+    const persisted = JSON.parse(
+      readFileSync(path.join(namespace.storage!.root, 'threads.json'), 'utf8'),
+    );
+    expect(persisted.records.thread.spec.namespace).toEqual({
+      name: namespace.name,
+      ownerId: 'workspace-a',
+    });
+    const reread = new FileThreadStore().get(
+      { ...namespace, ownerId: 'workspace-b' },
+      'thread',
+    );
+    expect(reread).toEqual(original);
+  });
   it.each(['constructor', '__proto__', 'toString'])(
     'treats prototype-like thread ID %s as an ordinary stored record',
     (threadId) => {

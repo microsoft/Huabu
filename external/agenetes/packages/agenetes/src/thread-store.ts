@@ -127,6 +127,9 @@ export class FileThreadStore implements ThreadStore {
         ...parsedSpec.data,
         namespace: {
           name: parsedSpec.data.namespace.name,
+          ...('ownerId' in parsedSpec.data.namespace
+            ? { ownerId: parsedSpec.data.namespace.ownerId }
+            : {}),
           ...(namespace.storage ? { storage: namespace.storage } : {}),
         },
       },
@@ -150,7 +153,12 @@ export class FileThreadStore implements ThreadStore {
           ...record,
           spec: {
             ...record.spec,
-            namespace: { name: record.spec.namespace.name },
+            namespace: {
+              name: record.spec.namespace.name,
+              ...('ownerId' in record.spec.namespace
+                ? { ownerId: record.spec.namespace.ownerId }
+                : {}),
+            },
           },
         },
       ]),
