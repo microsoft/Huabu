@@ -2,8 +2,10 @@
 // Licensed under the MIT license.
 
 import { createHmac, timingSafeEqual } from 'node:crypto';
+import { statSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { getAgentletGateway } from '@agenetes/agentlet-host';
 import { z } from 'zod';
 
 import { personalSettingsOwner } from './personal-settings.js';
@@ -13,14 +15,24 @@ import { atomicWriteJson, readJsonStrict } from '../../utils/fs.js';
 
 import type { IdentityService } from './service.js';
 
+/**
+ * Every credential names its owner's credential version: resetting it revokes
+ * that person's device and reachback credentials, and nobody else's.
+ */
+const version = z.number().int().nonnegative();
 const claimsSchema = z.discriminatedUnion('aud', [
   z
-    .object({ aud: z.literal('device'), principalId: z.string().min(1) })
+    .object({
+      aud: z.literal('device'),
+      principalId: z.string().min(1),
+      v: version,
+    })
     .strict(),
   z
     .object({
       aud: z.literal('rfs'),
       principalId: z.string().min(1),
+      v: version,
       workspaceId: z.string().min(1),
       canvasId: z.string().min(1),
       threadId: z.string().min(1),
@@ -31,19 +43,87 @@ type Claims = z.infer<typeof claimsSchema>;
 export type AgentReachback = Extract<Claims, { aud: 'rfs' }>;
 const PREFIX = 'huabu-agent.v1.';
 const ownersSchema = z.record(z.string(), z.string().min(1));
+const versionsSchema = z.record(z.string(), version);
 
 function ownersPath(): string {
   return join(getDataDir(), 'agentlet-owners.json');
 }
 
+function versionsPath(): string {
+  return join(getDataDir(), 'agent-credential-versions.json');
+}
+
+const parsed = new Map<string, { stamp: string; value: unknown }>();
+
+/**
+ * A durable map, parsed again only when its file changes. Ownership checks
+ * run once per device and Profile on every listing; a write replaces the file
+ * by rename, so its stamp changes with it.
+ */
+function readMap<T extends Record<string, unknown>>(
+  file: string,
+  schema: z.ZodType<T>,
+): T {
+  let stamp: string;
+  try {
+    const stat = statSync(file);
+    stamp = `${stat.ino}:${stat.mtimeMs}:${stat.size}`;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    parsed.delete(file);
+    return {} as T;
+  }
+  const cached = parsed.get(file);
+  if (cached?.stamp === stamp) return cached.value as T;
+  const value = schema.parse(readJsonStrict(file) ?? {});
+  parsed.set(file, { stamp, value });
+  return value;
+}
+
+function writeMap(file: string, value: Record<string, unknown>): void {
+  atomicWriteJson(file, value);
+  parsed.delete(file);
+}
+
 /** Device ownership is durable and never changes on reconnect or role changes. */
 export function agentletOwner(agentletId: string): string | null {
-  const owners = ownersSchema.parse(readJsonStrict(ownersPath()) ?? {});
+  const owners = readMap(ownersPath(), ownersSchema);
   return Object.hasOwn(owners, agentletId) ? owners[agentletId] : null;
 }
 
-function sign(claims: Claims): string {
-  const payload = Buffer.from(JSON.stringify(claims)).toString('base64url');
+function credentialVersion(principalId: string): number {
+  const versions = readMap(versionsPath(), versionsSchema);
+  return Object.hasOwn(versions, principalId) ? versions[principalId] : 0;
+}
+
+/**
+ * Revoke every device and reachback credential `principalId` holds, and
+ * disconnect their devices and running agents. They reconnect with a new
+ * connection command; nobody else's devices are affected.
+ */
+export function resetAgentCredentials(principalId: string): void {
+  const versions = readMap(versionsPath(), versionsSchema);
+  writeMap(versionsPath(), {
+    ...versions,
+    [principalId]: credentialVersion(principalId) + 1,
+  });
+  const gateway = getAgentletGateway();
+  for (const connection of [
+    ...(gateway?.getSessions() ?? []),
+    ...(gateway?.getAgentlets() ?? []),
+  ])
+    if (agentletOwner(connection.agentletId) === principalId)
+      connection.disconnect('Device credentials were reset');
+}
+
+type Unsigned = {
+  [A in Claims['aud']]: Omit<Extract<Claims, { aud: A }>, 'v'>;
+}[Claims['aud']];
+
+function sign(claims: Unsigned): string {
+  const payload = Buffer.from(
+    JSON.stringify({ ...claims, v: credentialVersion(claims.principalId) }),
+  ).toString('base64url');
   const message = PREFIX + payload;
   const signature = createHmac('sha256', getConnectionToken())
     .update(message)
@@ -67,10 +147,13 @@ export function readAgentCredential(token: string): Claims | null {
   )
     return null;
   try {
-    const parsed = claimsSchema.safeParse(
+    const claims = claimsSchema.safeParse(
       JSON.parse(Buffer.from(payload, 'base64url').toString()),
     );
-    return parsed.success ? parsed.data : null;
+    return claims.success &&
+      claims.data.v === credentialVersion(claims.data.principalId)
+      ? claims.data
+      : null;
   } catch {
     return null;
   }
@@ -117,14 +200,14 @@ export function authenticateUserAgentlet(service: IdentityService) {
       throw new Error('User device credential required');
     const identity = await service.resolvePrincipal?.(claims.principalId);
     if (!identity?.member) throw new Error('Device owner is not admitted');
-    const owners = ownersSchema.parse(readJsonStrict(ownersPath()) ?? {});
+    const owners = readMap(ownersPath(), ownersSchema);
     if (
       Object.hasOwn(owners, agentletId) &&
       owners[agentletId] !== claims.principalId
     )
       throw new Error('Device belongs to another user');
     if (!Object.hasOwn(owners, agentletId))
-      atomicWriteJson(ownersPath(), {
+      writeMap(ownersPath(), {
         ...owners,
         [agentletId]: claims.principalId,
       });

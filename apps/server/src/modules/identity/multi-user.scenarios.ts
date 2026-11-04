@@ -735,6 +735,13 @@ export function describeSeveralPeople(
       expect(await spacesOf('erin')).not.toContain('plan');
       await admit('erin', false);
       expect((await call('erin', 'GET', '/api/canvas')).status).toBe(403);
+
+      // A revoked person's devices can still be cut off; only by an admin.
+      const reset = (by: string, principalId: string) =>
+        call(by, 'POST', `/api/people/${principalId}/agent-credentials/reset`);
+      expect((await reset('carol', 'erin')).status).toBe(403);
+      expect((await reset('admin', 'nobody')).status).toBe(404);
+      expect((await reset('admin', 'erin')).status).toBe(204);
     });
   });
 }

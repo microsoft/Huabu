@@ -41,6 +41,8 @@ export const routes = {
   personMember: (principalId: string) => `/people/${enc(principalId)}/member`,
   personWorkspace: (principalId: string, workspaceId: string) =>
     `/people/${enc(principalId)}/workspaces/${enc(workspaceId)}`,
+  personAgentCredentialsReset: (principalId: string) =>
+    `/people/${enc(principalId)}/agent-credentials/reset`,
 
   // ── LLM ───────────────────────────────────────────────────────────
   llmConfig: '/llm/config',
@@ -188,6 +190,7 @@ export const routes = {
   acpAgentletRestart: '/acp/agentlet/restart',
   acpRuntimeConfig: '/acp/runtime-config',
   acpConnectionCommand: '/acp/connection-command',
+  acpConnectionCredentialsReset: '/acp/connection-credentials/reset',
   acpThreadCachedMeta: (
     threadId: string,
     canvasId?: string,

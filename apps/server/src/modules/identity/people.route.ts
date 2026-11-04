@@ -6,6 +6,7 @@ import {
   setPersonWorkspaceRoleSchema,
 } from '@huabu/shared';
 
+import { resetAgentCredentials } from './agent-credentials.js';
 import { getRequestIdentity, requireRequestIdentity } from './request.js';
 import { getWorkspaceRepository } from '../storage/index.js';
 
@@ -59,6 +60,24 @@ const peopleRoutes: FastifyPluginAsync<{ service: IdentityService }> = async (
         ))
       )
         return reply.code(404).send({ message: 'No such person' });
+      return reply.code(204).send();
+    },
+  );
+
+  // For a lost or leaked device: revokes that person's connection commands and
+  // agent credentials and disconnects their devices, as their own reset does.
+  app.post<{ Params: { principalId: string } }>(
+    '/:principalId/agent-credentials/reset',
+    async (request, reply) => {
+      const { principalId } = request.params;
+      // Listed, not resolved: a revoked or disabled person's devices too.
+      if (
+        !(await people.list()).some(
+          (person) => person.principal.principalId === principalId,
+        )
+      )
+        return reply.code(404).send({ message: 'No such person' });
+      resetAgentCredentials(principalId);
       return reply.code(204).send();
     },
   );

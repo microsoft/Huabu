@@ -20,6 +20,7 @@ import {
   runInWorkspace,
 } from '../workspace/context.js';
 
+import type { AgentReachback } from './agent-credentials.js';
 import type { IdentityCredentials, IdentityService } from './service.js';
 import type { IdentityResponse } from '@huabu/shared';
 import type { FastifyInstance } from 'fastify';
@@ -69,6 +70,11 @@ export function registerIdentity(
     secureOrigin?: boolean;
     /** Bounded revocation for long-lived HTTP responses such as canvas SSE. */
     revalidationIntervalMs?: number;
+    /**
+     * Whether an agent's reachback still names its live conversation. Without
+     * it, every reachback credential is refused.
+     */
+    isCurrentReachback?: (claims: AgentReachback) => Promise<boolean>;
   },
 ): void {
   const { service } = options;
@@ -166,7 +172,8 @@ export function registerIdentity(
         agentClaims.aud !== 'rfs' ||
         !request.routeOptions.url?.startsWith('/api/rfs/w/') ||
         params.workspaceId !== agentClaims.workspaceId ||
-        params.canvasId !== agentClaims.canvasId
+        params.canvasId !== agentClaims.canvasId ||
+        !(await options.isCurrentReachback?.(agentClaims).catch(() => false))
       )
         return null;
       return (

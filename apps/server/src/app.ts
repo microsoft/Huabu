@@ -30,6 +30,7 @@ import {
   mountAgenetes,
   resolveDaemonRuntime,
 } from './modules/agent/acp/index.js';
+import { isCurrentReachback } from './modules/agent/acp/reachback-conversation.js';
 import { initializeAgentDefaults } from './modules/agent/agent-defaults.js';
 import agentDefaultsRoutes from './modules/agent/agent-defaults.route.js';
 import agentRoutes from './modules/agent/agent.route.js';
@@ -147,6 +148,7 @@ const identity = createIdentity(getDeploymentEnvironment());
 registerIdentity(app, {
   service: identity.service,
   getConnectionToken,
+  isCurrentReachback,
   secureOrigin: resolveConfiguredPublicOrigin()?.startsWith('https:') ?? false,
 });
 // An embedded Bubble serves its own API beside Huabu's, behind the same host,

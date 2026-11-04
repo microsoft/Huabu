@@ -463,6 +463,11 @@
     "agentletConnectionTokenDescriptionLoading": "Loading the active credential source…",
     "agentletConnectionTokenPlaceholder": "Enter a replacement token",
     "agentletConnectionTokenSecurityInfo": "Connection commands and files contain a Huabu access key. Keep them private.",
+    "resetDeviceCredentials": "Reset device credentials",
+    "resetDeviceCredentialsDescription": "If a connection command or device may have leaked, reset your credentials. Your devices disconnect and running agents stop; connect again with a new command.",
+    "resetDeviceCredentialsConfirm": "Your devices disconnect, your running agents stop, and every connection command you copied stops working. Copy a new command to reconnect.",
+    "resetDeviceCredentialsDone": "Device credentials reset. Copy a new connection command to reconnect.",
+    "resetDeviceCredentialsFailed": "Could not reset device credentials.",
     "agentletTokenSource": {
       "stored": "encrypted credential storage",
       "environment": "HUABU_CONNECTION_TOKEN",
@@ -1666,6 +1671,9 @@
     "roleIn": "Role in {{workspace}}",
     "removeRole": "Remove from this Workspace",
     "addToWorkspace": "Add to a Workspace…",
+    "resetDevices": "Reset devices",
+    "resetDevicesConfirm": "{{name}}'s devices disconnect, their running agents stop, and every connection command they copied stops working.",
+    "resetDevicesDone": "{{name}}'s device credentials were reset.",
     "role": {
       "owner": "Owner",
       "editor": "Editor",

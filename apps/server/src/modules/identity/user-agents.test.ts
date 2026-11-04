@@ -26,6 +26,7 @@ import {
   canUseAgentlet,
   ownDeviceCredential,
   readAgentCredential,
+  resetAgentCredentials,
 } from './agent-credentials.js';
 import { openBubbleIdentity } from './bubble.js';
 import { registerIdentity } from './http.js';
@@ -53,13 +54,17 @@ import { runInWorkspace } from '../workspace/context.js';
 import { canvasAcpNamespace } from '../workspace/paths.js';
 import { getWorkspaceHandle } from '../workspace.js';
 
+import type { AgentReachback } from './agent-credentials.js';
 import type { ResourceDirectory } from './service.js';
 import type { WorkspaceScope } from '../workspace/context.js';
 import type { FastifyInstance } from 'fastify';
 
 let tmp: string;
 let app: FastifyInstance;
+/** The host's live-conversation check for reachback credentials. */
+let liveReachback: (claims: AgentReachback) => Promise<boolean>;
 beforeEach(() => {
+  liveReachback = async () => true;
   tmp = mkdtempSync(join(tmpdir(), 'huabu-user-agents-'));
   vi.stubEnv('HUABU_DATA_DIR', tmp);
   vi.stubEnv('HUABU_IDENTITY_PROVIDER', 'bubble');
@@ -128,7 +133,11 @@ async function host(
     });
   }
   app = Fastify();
-  registerIdentity(app, { service: bubble.service, getConnectionToken });
+  registerIdentity(app, {
+    service: bubble.service,
+    getConnectionToken,
+    isCurrentReachback: (claims) => liveReachback(claims),
+  });
   app.register(bubble.plugin, { prefix: '/bubble' });
   registerSpaceAccess(app);
   mountAgenetes(app, {
@@ -398,6 +407,17 @@ it('separates device transport from user and Space-scoped reachback, with fresh 
     401,
   );
   expect((await probe(token, '/api/acp/profiles')).statusCode).toBe(401);
+  // A credential names its conversation: once that is gone, so is access.
+  const asked: AgentReachback[] = [];
+  liveReachback = async (claims) => {
+    asked.push(claims);
+    return false;
+  };
+  expect((await probe(token)).statusCode).toBe(401);
+  expect(asked).toMatchObject([
+    { principalId: 'alice', canvasId: 'space-a', threadId: 'thread-a' },
+  ]);
+  liveReachback = async () => true;
   await expect(authenticate('new-device', token)).rejects.toThrow(
     'User device credential',
   );
@@ -414,6 +434,43 @@ it('separates device transport from user and Space-scoped reachback, with fresh 
   await expect(authenticate('alice-device', device)).rejects.toThrow(
     'not admitted',
   );
+});
+
+it("resets one person's device and reachback credentials without touching others", async () => {
+  const h = await host(false);
+  const authenticate = authenticateUserAgentlet(h.service);
+  const alice = await h.as('alice', ownDeviceCredential);
+  const bob = await h.as('bob', ownDeviceCredential);
+  await authenticate('alice-device', alice);
+  await authenticate('bob-device', bob);
+  const reachback = (await h.as('alice', () =>
+    agentReachbackEnvironment({
+      agentletId: 'alice-device',
+      env: {
+        HUABU_RFS_URL: 'https://huabu.example/api/rfs/w/w1/space-a',
+        HUABU_THREAD_ID: 'thread-a',
+      },
+    }),
+  ))!.HUABU_RFS_TOKEN;
+  const probe = (credential: string) =>
+    app.inject({
+      url: '/api/rfs/w/w1/space-a/probe',
+      headers: { authorization: `Bearer ${credential}` },
+    });
+  expect((await probe(reachback)).statusCode).toBe(200);
+
+  resetAgentCredentials('alice');
+
+  expect(readAgentCredential(alice)).toBeNull();
+  expect((await probe(reachback)).statusCode).toBe(401);
+  await expect(authenticate('alice-device', alice)).rejects.toThrow(
+    'User device credential',
+  );
+  await expect(authenticate('bob-device', bob)).resolves.toBeDefined();
+  // A new connection command reconnects the same device.
+  const renewed = await h.as('alice', ownDeviceCredential);
+  expect(renewed).not.toBe(alice);
+  await expect(authenticate('alice-device', renewed)).resolves.toBeDefined();
 });
 
 it.each([false, true])(
@@ -499,6 +556,15 @@ it.each([false, true])(
       expect(resolveConnectedAgentletId('alice-device')).toBeUndefined();
       expect(await connect('alice-device', bob)).toHaveProperty('error');
       expect(await connect('alice-device', alice)).toHaveProperty('result');
+      // Resetting Alice's credentials drops her live device, not Bob's.
+      resetAgentCredentials('alice');
+      await expect
+        .poll(() => getAgentletGateway()?.getAgentlet('alice-device')?.status)
+        .toBe('disconnected');
+      expect(getAgentletGateway()?.getAgentlet('bob-device')?.status).toBe(
+        'connected',
+      );
+      expect(await connect('alice-device', alice)).toHaveProperty('error');
     } finally {
       for (const socket of sockets) socket.close();
     }

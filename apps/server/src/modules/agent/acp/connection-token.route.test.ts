@@ -12,6 +12,8 @@ const mocks = vi.hoisted(() => ({
   buildCommand: vi.fn(),
   isOwner: vi.fn(),
   getToken: vi.fn(),
+  settingsOwner: vi.fn(),
+  reset: vi.fn(),
 }));
 vi.mock('../../../connection-token.js', () => ({
   InvalidAgentletConnectionOriginError: mocks.InvalidOriginError,
@@ -21,6 +23,13 @@ vi.mock('../../../connection-token.js', () => ({
 }));
 vi.mock('./runtime-config.js', () => ({
   getExternalAgentRuntimeConfig: () => ({ maxAgents: 7 }),
+}));
+vi.mock('../../identity/personal-settings.js', () => ({
+  personalSettingsOwner: mocks.settingsOwner,
+}));
+vi.mock('../../identity/agent-credentials.js', async (original) => ({
+  ...(await original<object>()),
+  resetAgentCredentials: mocks.reset,
 }));
 vi.mock('../../security/owner.js', () => ({
   canChangeOwnSettings: mocks.isOwner,
@@ -42,6 +51,23 @@ const payload = {
   shell: 'posix',
   format: 'command',
 };
+
+describe('device credential reset', () => {
+  it("revokes only the caller's own credentials, and only in Bubble mode", async () => {
+    const server = await setup();
+    const reset = () =>
+      server.inject({
+        method: 'POST',
+        url: '/api/acp/connection-credentials/reset',
+      });
+    mocks.settingsOwner.mockReturnValue(null);
+    expect((await reset()).statusCode).toBe(409);
+    expect(mocks.reset).not.toHaveBeenCalled();
+    mocks.settingsOwner.mockReturnValue('alice');
+    expect((await reset()).statusCode).toBe(204);
+    expect(mocks.reset).toHaveBeenCalledExactlyOnceWith('alice');
+  });
+});
 
 describe('explicit owner-only connection copy', () => {
   it('returns no-store structured credentials only to an owner', async () => {

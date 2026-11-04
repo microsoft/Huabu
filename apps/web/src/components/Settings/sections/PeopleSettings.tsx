@@ -7,6 +7,7 @@ import { useTranslation } from 'react-i18next';
 
 import {
   listPeople,
+  resetPersonDeviceCredentials,
   setPersonMember,
   setPersonWorkspaceRole,
   type Person,
@@ -18,6 +19,8 @@ import { Button } from '../../Common/Button';
 import { Select } from '../../Common/Select';
 import { toast } from '../../Common/Toast';
 import { Toggle } from '../../Common/Toggle';
+
+import { ResetDeviceCredentials } from './ResetDeviceCredentials';
 
 import type { WorkspaceDescriptor } from '../../../api/workspace';
 
@@ -151,8 +154,8 @@ export function PeopleSettings() {
                   ))}
                 </ul>
               )}
-              {addable.length > 0 && (
-                <div className="flex">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                {addable.length > 0 ? (
                   <Select
                     size="sm"
                     variant="ghost"
@@ -169,8 +172,21 @@ export function PeopleSettings() {
                       )
                     }
                   />
-                </div>
-              )}
+                ) : (
+                  <span />
+                )}
+                <ResetDeviceCredentials
+                  quiet
+                  label={t('people.resetDevices')}
+                  confirmation={t('people.resetDevicesConfirm', {
+                    name: personName(person),
+                  })}
+                  done={t('people.resetDevicesDone', {
+                    name: personName(person),
+                  })}
+                  onReset={() => resetPersonDeviceCredentials(id)}
+                />
+              </div>
             </li>
           );
         })}

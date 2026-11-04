@@ -81,6 +81,44 @@ test('members configure their own devices and Built-In settings and recover from
   await page.screenshot({
     path: testInfo.outputPath('member-connect-device.png'),
   });
+  let resets = 0;
+  await page.route('**/api/acp/connection-credentials/reset', (route) => {
+    resets++;
+    return route.fulfill({ status: 204 });
+  });
+  await dialog
+    .getByRole('button', {
+      name: en.settings.agentletOtherConnectionOptions,
+      exact: true,
+    })
+    .click();
+  const resetOwn = dialog.getByRole('button', {
+    name: en.settings.resetDeviceCredentials,
+    exact: true,
+  });
+  await resetOwn.scrollIntoViewIfNeeded();
+  await page.screenshot({
+    path: testInfo.outputPath('member-reset-devices.png'),
+  });
+  await resetOwn.click();
+  const confirmReset = page.getByRole('dialog', {
+    name: en.settings.resetDeviceCredentials,
+    exact: true,
+  });
+  await expect(
+    confirmReset.getByText(en.settings.resetDeviceCredentialsConfirm),
+  ).toBeVisible();
+  await page.screenshot({
+    path: testInfo.outputPath('member-reset-devices-confirm.png'),
+  });
+  await confirmReset
+    .getByRole('button', {
+      name: en.settings.resetDeviceCredentials,
+      exact: true,
+    })
+    .click();
+  await expect(confirmReset).toHaveCount(0);
+  expect(resets).toBe(1);
   await dialog
     .getByRole('button', { name: en.settings.agentSettings, exact: true })
     .click();

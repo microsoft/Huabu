@@ -46,3 +46,13 @@ export async function setPersonWorkspaceRole(
     fallbackMessage: 'Failed to change the Workspace role',
   });
 }
+
+/** Revoke someone's device connection credentials and disconnect their devices. */
+export async function resetPersonDeviceCredentials(
+  principalId: string,
+): Promise<void> {
+  await apiFetch<void>(routes.personAgentCredentialsReset(principalId), {
+    method: 'POST',
+    fallbackMessage: 'Failed to reset device credentials',
+  });
+}

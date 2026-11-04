@@ -463,6 +463,11 @@
     "agentletConnectionTokenDescriptionLoading": "正在加载当前凭据来源…",
     "agentletConnectionTokenPlaceholder": "输入新的令牌",
     "agentletConnectionTokenSecurityInfo": "连接命令和文件包含 Huabu 访问密钥，请勿分享。",
+    "resetDeviceCredentials": "重置设备凭据",
+    "resetDeviceCredentialsDescription": "如果连接命令或设备可能已泄露，请重置凭据。你的设备会断开连接，正在运行的智能体会停止；请使用新命令重新连接。",
+    "resetDeviceCredentialsConfirm": "你的设备会断开连接，正在运行的智能体会停止，你复制过的所有连接命令都将失效。请复制新命令重新连接。",
+    "resetDeviceCredentialsDone": "设备凭据已重置。请复制新的连接命令重新连接。",
+    "resetDeviceCredentialsFailed": "无法重置设备凭据。",
     "agentletTokenSource": {
       "stored": "加密凭据存储",
       "environment": "HUABU_CONNECTION_TOKEN",
@@ -1666,6 +1671,9 @@
     "roleIn": "在 {{workspace}} 中的角色",
     "removeRole": "从此工作区移除",
     "addToWorkspace": "添加到工作区…",
+    "resetDevices": "重置设备",
+    "resetDevicesConfirm": "{{name}} 的设备会断开连接，其正在运行的智能体会停止，其复制过的所有连接命令都将失效。",
+    "resetDevicesDone": "已重置 {{name}} 的设备凭据。",
     "role": {
       "owner": "所有者",
       "editor": "编辑者",

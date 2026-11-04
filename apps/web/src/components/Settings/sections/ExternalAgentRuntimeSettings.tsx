@@ -8,6 +8,7 @@ import { useTranslation } from 'react-i18next';
 import {
   createAgentletConnectionCommand,
   getExternalAgentRuntimeConfig,
+  resetOwnDeviceCredentials,
   updateExternalAgentRuntimeConfig,
 } from '@/api/acp';
 import { Button } from '@/components/Common/Button';
@@ -18,7 +19,10 @@ import { toast } from '@/components/Common/Toast';
 import { SettingRow } from '@/components/Settings/Common/SettingRow';
 import { getElectronBridge } from '@/hooks/useElectron';
 import { useDeploymentReadinessStore } from '@/store/deploymentReadinessStore';
+import { useIdentityStore } from '@/store/identityStore';
 import { copyToClipboard } from '@/utils/io/clipboard';
+
+import { ResetDeviceCredentials } from './ResetDeviceCredentials';
 
 import type {
   AgentletConnectionCommandResponse,
@@ -367,6 +371,11 @@ export function AgentConnectionSettings() {
       : 'settings.agentletLocalAccessSetup';
   const detailsId = useId();
   const [detailsExpanded, setDetailsExpanded] = useState(false);
+  // Each Bubble user's devices hold credentials of their own to revoke; a
+  // local deployment's share the machine token instead.
+  const personalDevices = useIdentityStore(
+    (state) => state.identity?.provider === 'bubble',
+  );
   const [connectionShell, setConnectionShell] =
     useState<ConnectionShell>('posix');
   const [copying, setCopying] = useState<ConnectionCopyFormat | null>(null);
@@ -531,6 +540,17 @@ export function AgentConnectionSettings() {
                 {'pnpm start:daemon --env-file ./connection.env'}
               </code>
             </pre>
+            {personalDevices && (
+              <div className="space-y-2 pt-1">
+                <p>{t('settings.resetDeviceCredentialsDescription')}</p>
+                <ResetDeviceCredentials
+                  label={t('settings.resetDeviceCredentials')}
+                  confirmation={t('settings.resetDeviceCredentialsConfirm')}
+                  done={t('settings.resetDeviceCredentialsDone')}
+                  onReset={resetOwnDeviceCredentials}
+                />
+              </div>
+            )}
           </div>
         )}
       </div>

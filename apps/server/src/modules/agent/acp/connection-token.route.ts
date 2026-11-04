@@ -12,7 +12,11 @@ import {
   InvalidAgentletConnectionEnvFileError,
   InvalidAgentletConnectionOriginError,
 } from '../../../connection-token.js';
-import { ownDeviceCredential } from '../../identity/agent-credentials.js';
+import {
+  ownDeviceCredential,
+  resetAgentCredentials,
+} from '../../identity/agent-credentials.js';
+import { personalSettingsOwner } from '../../identity/personal-settings.js';
 import { canChangeOwnSettings } from '../../security/owner.js';
 
 import type {
@@ -23,6 +27,19 @@ import type {
 import type { FastifyPluginAsync } from 'fastify';
 
 const connectionTokenRoutes: FastifyPluginAsync = async (app) => {
+  // Revokes every connection command and agent credential the caller was
+  // given, and disconnects their devices. Local mode's devices share the
+  // machine connection token, which is rotated on the Server instead.
+  app.post('/connection-credentials/reset', async (_request, reply) => {
+    const principalId = personalSettingsOwner();
+    if (!principalId)
+      return reply.status(409).send({
+        message: 'Device credentials are reset per user in Bubble mode only',
+      });
+    resetAgentCredentials(principalId);
+    return reply.code(204).send();
+  });
+
   app.post('/connection-credentials', async (request, reply) => {
     if (!canChangeOwnSettings(request)) {
       return reply.status(403).send({
