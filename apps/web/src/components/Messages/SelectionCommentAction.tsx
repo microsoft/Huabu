@@ -22,6 +22,7 @@ import {
 } from '@/store/conversationOwner';
 import { createConversation } from '@/store/conversationPreparation';
 import { usePanelStore } from '@/store/panelStore';
+import { openSpaceConversation } from '@/store/previewWorkspace/actions';
 import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store';
 
 import { FragmentCommentPopover } from './AIMessage/FragmentCommentPopover';
@@ -209,18 +210,9 @@ function DocumentCommentEditor({
     staged.current = true;
     onDismiss();
     if (view) {
-      usePanelStore.getState().requestOpenRightPanel();
-      const preview = usePreviewWorkspaceStore.getState();
-      const tabId = preview.openPreviewTarget(
-        {
-          kind: 'conversation',
-          canvasId,
-          nodeId: view.conversationOwner.nodeId,
-          threadId,
-        },
-        { openToSide: true },
-      );
-      preview.requestChatOpen(tabId, 'bottom');
+      openSpaceConversation(canvasId, view.conversationOwner.nodeId, threadId, {
+        openToSide: true,
+      });
     } else {
       usePanelStore.getState().requestOpenRightPanel();
       usePreviewWorkspaceStore

@@ -13,6 +13,19 @@ import { usePanelStore } from '../panelStore';
 import { findTabByTarget, groupOfTab, normalizePreviewTarget } from './model';
 import { selectActiveTab, usePreviewWorkspaceStore } from './store';
 
+function findConversationTab(
+  canvasId: string,
+  threadId: string,
+  nodeId?: string,
+) {
+  return Object.values(usePreviewWorkspaceStore.getState().workspace.tabs).find(
+    ({ target }) =>
+      target.canvasId === canvasId &&
+      ((target.kind === 'conversation' && target.threadId === threadId) ||
+        (target.kind === 'node' && target.nodeId === nodeId)),
+  );
+}
+
 export async function openConversationThread(
   canvasId: string,
   threadId: string,
@@ -25,12 +38,7 @@ export async function openConversationThread(
           (item) => item.type === 'question' && item.data.threadId === threadId,
         )
       : undefined;
-  const existing = Object.values(preview.workspace.tabs).find(
-    ({ target }) =>
-      target.canvasId === canvasId &&
-      ((target.kind === 'conversation' && target.threadId === threadId) ||
-        (target.kind === 'node' && target.nodeId === node?.id)),
-  );
+  const existing = findConversationTab(canvasId, threadId, node?.id);
   if (existing) {
     usePanelStore.getState().requestOpenRightPanel();
     preview.activateTab(existing.id);
@@ -67,15 +75,23 @@ export function openSpaceConversation(
   canvasId: string,
   nodeId: string,
   threadId: string,
+  options?: { openToSide?: boolean },
 ): string {
   const preview = usePreviewWorkspaceStore.getState();
   usePanelStore.getState().requestOpenRightPanel();
-  const tabId = preview.openPreviewTarget({
-    kind: 'conversation',
-    canvasId,
-    nodeId,
-    threadId,
-  });
+  const existing = findConversationTab(canvasId, threadId, nodeId);
+  const tabId =
+    existing?.id ??
+    preview.openPreviewTarget(
+      {
+        kind: 'conversation',
+        canvasId,
+        nodeId,
+        threadId,
+      },
+      options,
+    );
+  if (existing) preview.activateTab(existing.id);
   preview.requestChatOpen(tabId, 'bottom');
   return tabId;
 }

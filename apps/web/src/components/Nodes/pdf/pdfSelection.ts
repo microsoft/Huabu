@@ -78,9 +78,9 @@ export function readPdfHighlightText(
   const bounds = page.getBoundingClientRect();
   if (!bounds.width || !bounds.height) return '';
   const walker = document.createTreeWalker(layer, NodeFilter.SHOW_TEXT);
-  const parts: string[] = [];
+  let text = '';
+  let previous: { rect: DOMRect; node: Node } | undefined;
   for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-    let part = '';
     for (let index = 0; index < (node.textContent?.length ?? 0); index++) {
       const range = document.createRange();
       range.setStart(node, index);
@@ -95,10 +95,29 @@ export function readPdfHighlightText(
             x >= r.x && x <= r.x + r.width && y >= r.y && y <= r.y + r.height,
         )
       ) {
-        part += node.textContent?.[index] ?? '';
+        const character = node.textContent?.[index] ?? '';
+        if (
+          previous &&
+          previous.node !== node &&
+          !/\s$/.test(text) &&
+          !/^\s/.test(character)
+        ) {
+          const height = Math.min(previous.rect.height, rect.height);
+          const overlap =
+            Math.min(previous.rect.bottom, rect.bottom) -
+            Math.max(previous.rect.top, rect.top);
+          const gap = Math.max(
+            rect.left - previous.rect.right,
+            previous.rect.left - rect.right,
+          );
+          // DOM spans can split a word; only visual line breaks or word gaps add separators.
+          if (overlap < height / 2) text += '\n';
+          else if (gap > height * 0.2) text += ' ';
+        }
+        text += character;
+        previous = { rect, node };
       }
     }
-    if (part.trim()) parts.push(part);
   }
-  return parts.join(' ').trim();
+  return text.trim();
 }

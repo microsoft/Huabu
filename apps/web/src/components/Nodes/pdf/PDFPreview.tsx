@@ -649,7 +649,7 @@ export const PDFPreview = ({
   );
 
   // Host header slot — rendered by `ExpandedNodePanel`. When present
-  // we portal zoom / capture / highlight controls into the shared header
+  // we portal zoom / capture controls into the shared header
   // (same pattern as NotePreview / WebPreview / OfficePreview) so they
   // sit next to the universal Split view / Close buttons instead of
   // floating over the PDF content. In surfaces that don't provide a

@@ -442,6 +442,11 @@ for (const direction of [
         await page.mouse.up();
         await expect(excerpt).toHaveCount(2);
         await expect(grip).toHaveCount(0);
+        await text.evaluate((element) => {
+          const node = element.firstChild;
+          if (!(node instanceof Text)) throw new Error('Missing PDF text');
+          node.splitText(4);
+        });
         await page.mouse.click(
           restored.x + restored.width * 0.3,
           restored.y + restored.height / 2,

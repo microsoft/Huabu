@@ -208,6 +208,32 @@ it('blocks pending forks in the on-demand destination menu', async () => {
   );
 });
 
+it.each(['node', 'conversation'] as const)(
+  'reuses an already-visible %s destination without duplicating its tab',
+  async (kind) => {
+    const preview = usePreviewWorkspaceStore.getState();
+    const destinationTab = preview.openPreviewTarget(
+      kind === 'node'
+        ? { kind, canvasId: 'space', nodeId: 'agent' }
+        : { kind, canvasId: 'space', nodeId: 'agent', threadId: 'thread' },
+      { openToSide: true },
+    );
+    const tabIds = Object.keys(
+      usePreviewWorkspaceStore.getState().workspace.tabs,
+    );
+    await render();
+    await act(async () => commentButton().click());
+    writeComment();
+    act(() => addButton().click());
+    const state = usePreviewWorkspaceStore.getState();
+    expect(Object.keys(state.workspace.tabs)).toEqual(tabIds);
+    expect(state.chatOpenRequest?.tabId).toBe(destinationTab);
+    expect(
+      selectThreadQuotedComments(useChatStore.getState(), 'thread'),
+    ).toHaveLength(1);
+  },
+);
+
 it.each(['metaKey', 'ctrlKey'])(
   'does not edit the Note link from a comment with %s+K',
   async (modifier) => {

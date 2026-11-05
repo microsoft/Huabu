@@ -5,7 +5,51 @@ import { afterEach, expect, it, vi } from 'vitest';
 
 import { computeHighlightUpdate } from '@/handler/pdfHighlight/highlight';
 
-import { readPdfSelection } from './pdfSelection';
+import { readPdfHighlightText, readPdfSelection } from './pdfSelection';
+
+it.each([
+  { chunks: ['micro', 'scope'], gap: 0, y: 0, expected: 'microscope' },
+  { chunks: ['two', 'words'], gap: 5, y: 0, expected: 'two words' },
+  { chunks: ['two  ', 'words'], gap: 0, y: 0, expected: 'two  words' },
+  { chunks: ['two', '  ', 'words'], gap: 0, y: 0, expected: 'two  words' },
+  { chunks: ['micro', 'scope'], gap: 1, y: 0, expected: 'microscope' },
+  { chunks: ['中', '文'], gap: 0, y: 0, expected: '中文' },
+  { chunks: ['first', 'second'], gap: 0, y: 20, expected: 'first\nsecond' },
+])('recovers PDF glyph spacing: $expected', ({ chunks, gap, y, expected }) => {
+  const page = document.createElement('div');
+  const layer = document.createElement('div');
+  layer.className = 'textLayer';
+  page.append(layer);
+  document.body.append(page);
+  const positions = new Map<Node, { x: number; y: number }>();
+  let x = 10;
+  chunks.forEach((text, index) => {
+    const node = document.createTextNode(text);
+    layer.append(node);
+    positions.set(node, { x, y: 10 + (index ? y : 0) });
+    x += text.length * 5 + gap;
+  });
+  vi.spyOn(page, 'getBoundingClientRect').mockReturnValue(
+    new DOMRect(0, 0, 200, 100),
+  );
+  const createRange = document.createRange.bind(document);
+  vi.spyOn(document, 'createRange').mockImplementation(() => {
+    const range = createRange();
+    range.getBoundingClientRect = () => {
+      const position = positions.get(range.startContainer);
+      if (!position) throw new Error('Missing glyph position');
+      return new DOMRect(position.x + range.startOffset * 5, position.y, 5, 10);
+    };
+    return range;
+  });
+  expect(
+    readPdfHighlightText(page, {
+      id: 'highlight',
+      pageIndex: 0,
+      rects: [{ x: 0, y: 0, width: 1, height: 1 }],
+    }),
+  ).toBe(expected);
+});
 
 afterEach(() => {
   window.getSelection()?.removeAllRanges();
