@@ -2,7 +2,7 @@
 // Licensed under the MIT license.
 
 import clsx from 'clsx';
-import { Highlighter, Scan } from 'lucide-react';
+import { Highlighter, Scan, Trash2 } from 'lucide-react';
 import {
   startTransition,
   useCallback,
@@ -16,13 +16,11 @@ import { useTranslation } from 'react-i18next';
 import { Document } from 'react-pdf';
 
 import { resolveArtifactUrl, uploadImage } from '@/api/artifact';
+import { TextSelectionToolbar } from '@/components/Messages/TextSelectionToolbar';
 import { PreviewHeaderButton } from '@/components/Nodes/PreviewHeaderButton';
 import { usePreviewHeaderSlot } from '@/components/Nodes/PreviewHeaderSlot';
 import { useRegisterPreviewSearchAdapter } from '@/components/Panels/ExpandedNodePanel/PreviewSearchAdapterContext';
-import {
-  computeHighlightUpdate,
-  mergeLineRects,
-} from '@/handler/pdfHighlight/highlight';
+import { computeHighlightUpdate } from '@/handler/pdfHighlight/highlight';
 import { scheduleScrollToMatch, findProjectedRange } from '@/hooks/searchDom';
 import { handleCanvasNavigationKey } from '@/hooks/shortcuts/handleCanvasNavigationKey';
 import { usePreviewScrollMemory } from '@/hooks/usePreviewScrollMemory';
@@ -40,6 +38,7 @@ import {
 } from '@/store/previewWorkspace/model';
 import { readPdfPreviewView } from '@/store/previewWorkspace/scrollMemory';
 import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store';
+import { setDragPayload } from '@/utils/io/dragDrop';
 import { pageLifecycle } from '@/utils/pageLifecycle';
 
 import { FloatingDragHandle } from '../FloatingDragHandle';
@@ -49,6 +48,11 @@ import {
   updateVisiblePdfPages,
 } from './pdfPageRendering';
 import { PDFPageWithOverlay } from './PDFPageWithOverlay';
+import {
+  readPdfSelection,
+  readPdfHighlightText,
+  type PdfTextSelection,
+} from './pdfSelection';
 import { findPdfTextMatches, findPdfSourceMatch } from './pdfTextIndex';
 import { PDF_DOCUMENT_OPTIONS } from './pdfWorker';
 import { PDFZoomControls } from './PDFZoomControls';
@@ -154,14 +158,16 @@ export const PDFPreview = ({
     setNaturalPageWidth(saved?.source === src ? saved.naturalWidth : 612);
   }, [src, embedded, scrollViewKey]);
   const [captureMode, setCaptureMode] = useState(false);
-  const [highlightMode, setHighlightMode] = useState(false);
   const [pendingCapture, setPendingCapture] =
     useState<PendingCaptureDrag | null>(null);
   // Text selected via the browser's native selection (non-capture mode).
-  const [pendingTextSelection, setPendingTextSelection] = useState<{
-    text: string;
-    position: { x: number; y: number };
-  } | null>(null);
+  const [pendingTextSelection, setPendingTextSelection] =
+    useState<PdfTextSelection | null>(null);
+  const [editingComment, setEditingComment] = useState(false);
+  useEffect(() => {
+    setPendingTextSelection(null);
+    setEditingComment(false);
+  }, [src, id]);
 
   // Persistent highlights stored in node data.
   const highlights: PdfHighlight[] = useMemo(
@@ -172,6 +178,24 @@ export const PDFPreview = ({
   const highlightsRef = useRef(highlights);
   highlightsRef.current = highlights;
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const openHighlight = useCallback(
+    (highlight: PdfHighlight, position: { x: number; y: number }) => {
+      const page = scrollContainerRef.current?.querySelector<HTMLElement>(
+        `[data-pdf-page-index="${highlight.pageIndex}"]`,
+      );
+      if (!page) return;
+      const text = readPdfHighlightText(page, highlight);
+      if (!text)
+        toast(t('messages.commentSelectionUnavailable'), { tone: 'warning' });
+      setPendingTextSelection({
+        text,
+        highlightId: highlight.id,
+        rects: new Map([[highlight.pageIndex, highlight.rects]]),
+        position,
+      });
+    },
+    [t],
+  );
   usePreviewScrollMemory(
     scrollContainerRef,
     embedded ? undefined : scrollViewKey,
@@ -238,51 +262,77 @@ export const PDFPreview = ({
   }, [pendingCapture]);
 
   // ---------------------------------------------------------------------------
-  // Native text selection → FloatingDragHandle (non-capture mode only)
+  // Native text selection and persisted-highlight activation.
   // ---------------------------------------------------------------------------
   useEffect(() => {
-    if (embedded || captureMode || highlightMode) {
+    if (embedded || captureMode) {
       setPendingTextSelection(null);
       return;
     }
     const el = scrollContainerRef.current;
     if (!el) return;
+    let selectionFrame: number | undefined;
 
     const handleMouseUp = (e: MouseEvent) => {
+      if (
+        e.target instanceof Element &&
+        e.target.closest('[data-pdf-text-drag]')
+      )
+        return;
       // Small delay lets the browser finalise the selection range.
-      requestAnimationFrame(() => {
-        const sel = window.getSelection();
-        const text = sel?.toString().trim();
-        if (!text) return;
-
-        // Only act when the selection lives inside a .textLayer within *this* container.
-        const anchor = sel?.anchorNode;
-        if (
-          !anchor ||
-          !el.contains(anchor as Node) ||
-          !(anchor as Node).parentElement?.closest('.textLayer')
-        ) {
+      if (selectionFrame !== undefined) cancelAnimationFrame(selectionFrame);
+      selectionFrame = requestAnimationFrame(() => {
+        selectionFrame = undefined;
+        const selection = readPdfSelection(el, window.getSelection());
+        if (selection) {
+          setPendingTextSelection(selection);
           return;
         }
-
-        setPendingTextSelection({
-          text,
-          position: { x: e.clientX, y: e.clientY },
-        });
+        const page = (
+          e.target instanceof Element ? e.target : null
+        )?.closest<HTMLElement>('[data-pdf-page-index]');
+        if (!page) return;
+        const bounds = page.getBoundingClientRect();
+        const x = (e.clientX - bounds.left) / bounds.width;
+        const y = (e.clientY - bounds.top) / bounds.height;
+        const highlight = highlightsRef.current.find(
+          (item) =>
+            item.pageIndex === Number(page.dataset.pdfPageIndex) &&
+            item.rects.some(
+              (r) =>
+                x >= r.x &&
+                x <= r.x + r.width &&
+                y >= r.y &&
+                y <= r.y + r.height,
+            ),
+        );
+        if (!highlight) return;
+        openHighlight(highlight, { x: e.clientX, y: e.clientY });
       });
+    };
+    const handleKeyUp = () => {
+      const selection = readPdfSelection(el, window.getSelection());
+      if (selection) setPendingTextSelection(selection);
     };
 
     el.addEventListener('mouseup', handleMouseUp);
-    return () => el.removeEventListener('mouseup', handleMouseUp);
-  }, [embedded, captureMode, highlightMode]);
+    el.addEventListener('keyup', handleKeyUp);
+    return () => {
+      el.removeEventListener('mouseup', handleMouseUp);
+      el.removeEventListener('keyup', handleKeyUp);
+      if (selectionFrame !== undefined) cancelAnimationFrame(selectionFrame);
+    };
+  }, [embedded, captureMode, openHighlight, src, id]);
 
-  // Dismiss text-selection handle when selection is cleared or on scroll.
+  // Dismiss selection actions when selection is cleared or on scroll.
   useEffect(() => {
-    if (!pendingTextSelection) return;
+    if (!pendingTextSelection || editingComment) return;
 
     const handleSelectionChange = () => {
+      if (document.activeElement?.closest('[data-floating-chrome]')) return;
       const text = window.getSelection()?.toString().trim();
-      if (!text) setPendingTextSelection(null);
+      if (!text && !pendingTextSelection.highlightId)
+        setPendingTextSelection(null);
     };
     document.addEventListener('selectionchange', handleSelectionChange);
 
@@ -294,81 +344,23 @@ export const PDFPreview = ({
       document.removeEventListener('selectionchange', handleSelectionChange);
       el?.removeEventListener('scroll', handleScroll);
     };
-  }, [pendingTextSelection]);
+  }, [pendingTextSelection, editingComment]);
 
-  // ---------------------------------------------------------------------------
-  // Highlight mode: select text → toggle yellow highlight rects
-  //
-  // If the selection contains any unhighlighted area → add only the new parts.
-  // If the selection is fully covered by existing highlights → remove those
-  // highlights (toggle-off).
-  // ---------------------------------------------------------------------------
   const applyTextHighlight = useCallback(() => {
-    const el = scrollContainerRef.current;
-    const sel = window.getSelection();
-    if (!el || !sel || sel.rangeCount === 0 || !el.contains(sel.anchorNode))
-      return;
-    const text = sel.toString().trim();
-    if (!text) return;
-
-    const range = sel.getRangeAt(0);
-    const clientRects = range.getClientRects();
-    if (clientRects.length === 0) return;
-
-    // Group client rects by page container (normalized 0–1 coordinates).
-    const pageContainers = el.querySelectorAll<HTMLElement>(
-      '[data-pdf-page-index]',
-    );
-    const grouped = new Map<
-      number,
-      { x: number; y: number; width: number; height: number }[]
-    >();
-
-    for (const cr of clientRects) {
-      for (const pc of pageContainers) {
-        const pageRect = pc.getBoundingClientRect();
-        if (
-          cr.top >= pageRect.top - 2 &&
-          cr.bottom <= pageRect.bottom + 2 &&
-          cr.left >= pageRect.left - 2 &&
-          cr.right <= pageRect.right + 2
-        ) {
-          const pageIdx = Number(pc.dataset.pdfPageIndex);
-          const normalized = {
-            x: (cr.left - pageRect.left) / pageRect.width,
-            y: (cr.top - pageRect.top) / pageRect.height,
-            width: cr.width / pageRect.width,
-            height: cr.height / pageRect.height,
-          };
-          if (!grouped.has(pageIdx)) grouped.set(pageIdx, []);
-          const arr = grouped.get(pageIdx);
-          if (arr) arr.push(normalized);
-          break;
-        }
-      }
-    }
-
-    if (grouped.size === 0) return;
-
-    // Deduplicate & merge overlapping rects per page.
-    for (const [pageIdx, rects] of grouped) {
-      grouped.set(pageIdx, mergeLineRects(rects));
-    }
-
-    const updated = computeHighlightUpdate(highlightsRef.current, grouped);
-    onDataChange?.({ highlights: updated });
-    sel.removeAllRanges();
-  }, [onDataChange]);
-
-  useEffect(() => {
-    if (!highlightMode) return;
-    const el = scrollContainerRef.current;
-    if (!el) return;
-
-    const handleMouseUp = () => requestAnimationFrame(applyTextHighlight);
-    el.addEventListener('mouseup', handleMouseUp);
-    return () => el.removeEventListener('mouseup', handleMouseUp);
-  }, [highlightMode, applyTextHighlight]);
+    if (!pendingTextSelection || !onDataChange) return;
+    const updated = pendingTextSelection.highlightId
+      ? highlightsRef.current.filter(
+          (item) => item.id !== pendingTextSelection.highlightId,
+        )
+      : computeHighlightUpdate(
+          highlightsRef.current,
+          pendingTextSelection.rects,
+          'add',
+        );
+    onDataChange({ highlights: updated });
+    setPendingTextSelection(null);
+    window.getSelection()?.removeAllRanges();
+  }, [onDataChange, pendingTextSelection]);
 
   const handlePageAspectRatioResolved = useCallback(
     (pageIndex: number, aspectRatio: number, naturalWidth?: number) => {
@@ -657,7 +649,7 @@ export const PDFPreview = ({
   );
 
   // Host header slot — rendered by `ExpandedNodePanel`. When present
-  // we portal zoom / capture / highlight controls into the shared header
+  // we portal zoom / capture controls into the shared header
   // (same pattern as NotePreview / WebPreview / OfficePreview) so they
   // sit next to the universal Split view / Close buttons instead of
   // floating over the PDF content. In surfaces that don't provide a
@@ -679,28 +671,10 @@ export const PDFPreview = ({
         onClick={() => {
           const next = !captureMode;
           setCaptureMode(next);
-          if (next) setHighlightMode(false);
           if (!next) setPendingCapture(null);
         }}
       >
         <Scan />
-      </PreviewHeaderButton>
-      <PreviewHeaderButton
-        title={t('node.highlightText')}
-        aria-label={t('node.highlightText')}
-        aria-pressed={highlightMode}
-        className={clsx(highlightMode && 'bg-bg-default text-warning-fg')}
-        onClick={() => {
-          const next = !highlightMode;
-          setHighlightMode(next);
-          if (next) {
-            applyTextHighlight();
-            setCaptureMode(false);
-            setPendingCapture(null);
-          }
-        }}
-      >
-        <Highlighter />
       </PreviewHeaderButton>
     </>
   );
@@ -735,6 +709,22 @@ export const PDFPreview = ({
       <div
         ref={scrollContainerRef}
         data-pdf-scroll-viewport
+        onDragStart={(event) => {
+          if (embedded || captureMode || !id) return;
+          const selection = readPdfSelection(
+            event.currentTarget,
+            window.getSelection(),
+          );
+          if (!selection) return;
+          setDragPayload(event, {
+            kind: 'note',
+            origin: { type: 'user-excerpt', excerptFromNodeId: id },
+            data: { content: selection.text },
+          });
+          event.dataTransfer.setData('text/plain', selection.text);
+          setPendingTextSelection(null);
+        }}
+        onDragEnd={() => setPendingTextSelection(null)}
         role={embedded ? 'region' : undefined}
         aria-label={
           embedded ? String(data.label || t('node.untitledPdf')) : undefined
@@ -743,6 +733,7 @@ export const PDFPreview = ({
         tabIndex={embedded && interactive ? 0 : undefined}
         className={clsx(
           'bg-surface min-h-0 flex-1 overflow-x-auto overflow-y-auto p-1',
+          !embedded && 'pl-8',
           embedded && interactive && 'overscroll-contain',
         )}
       >
@@ -782,7 +773,10 @@ export const PDFPreview = ({
                 <div
                   key={`page_${index + 1}`}
                   data-pdf-page-shell={index}
-                  className="bg-bg-default shrink-0 overflow-hidden"
+                  className={clsx(
+                    'bg-bg-default shrink-0',
+                    embedded && 'overflow-hidden',
+                  )}
                   style={{
                     width: pageWidth > 0 ? pageWidth : '100%',
                     aspectRatio:
@@ -817,6 +811,26 @@ export const PDFPreview = ({
                         highlights={highlights.filter(
                           (h) => h.pageIndex === index,
                         )}
+                        textSelection={
+                          !embedded &&
+                          !captureMode &&
+                          !editingComment &&
+                          id &&
+                          pendingTextSelection &&
+                          !pendingTextSelection.highlightId &&
+                          !pendingCapture
+                            ? {
+                                text: pendingTextSelection.text,
+                                rects:
+                                  pendingTextSelection.rects.get(index) ?? [],
+                                excerptFromNodeId: id,
+                              }
+                            : undefined
+                        }
+                        selectionScale={scaleFactor}
+                        onHighlightActivate={
+                          !embedded && !captureMode ? openHighlight : undefined
+                        }
                         onAspectRatioResolved={handlePageAspectRatioResolved}
                       />
                     </div>
@@ -846,16 +860,46 @@ export const PDFPreview = ({
         />
       )}
 
-      {/* ── Floating drag handle (native text selection) */}
-      {!embedded && pendingTextSelection && !pendingCapture && (
-        <FloatingDragHandle
-          excerptFromNodeId={id}
-          text={pendingTextSelection.text}
-          imageUrl={null}
-          capturing={false}
+      {/* ── Native text selection actions */}
+      {!embedded && id && pendingTextSelection && !pendingCapture && (
+        <TextSelectionToolbar
+          canvasId={canvasId}
+          boundary={scrollContainerRef.current}
           position={pendingTextSelection.position}
-          onDismiss={() => setPendingTextSelection(null)}
-        />
+          quote={{
+            quote: pendingTextSelection.text,
+            contextBefore: '',
+            contextAfter: '',
+            source: {
+              kind: 'pdf',
+              canvasId,
+              nodeId: id,
+              pages: [...pendingTextSelection.rects.keys()].map(
+                (index) => index + 1,
+              ),
+            },
+          }}
+          onEditingChange={setEditingComment}
+          onDismiss={() => {
+            setEditingComment(false);
+            setPendingTextSelection(null);
+          }}
+        >
+          <Button
+            variant="ghost"
+            iconOnly
+            size="sm"
+            title={t(
+              pendingTextSelection.highlightId
+                ? 'messages.removeHighlight'
+                : 'node.highlightText',
+            )}
+            disabled={!onDataChange}
+            onClick={applyTextHighlight}
+          >
+            {pendingTextSelection.highlightId ? <Trash2 /> : <Highlighter />}
+          </Button>
+        </TextSelectionToolbar>
       )}
     </div>
   );

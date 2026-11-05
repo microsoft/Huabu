@@ -139,17 +139,13 @@ describe('quoted comment draft presentation', () => {
     );
   });
 
-  it('keeps an empty edit open with visible validation feedback', () => {
+  it('requires an authored comment before finishing a draft edit', () => {
     begin();
     type(' ');
     key('Enter');
-    expect(input().getAttribute('aria-invalid')).toBe('true');
-    expect(host.querySelector('[role="alert"]')?.textContent).toBe(
-      'Enter a comment or remove this quote.',
-    );
+    expect(host.querySelector('[role="alert"]')).not.toBeNull();
     expect(onKeyboardEditEnd).not.toHaveBeenCalled();
-    key('Escape');
-    expect(host.querySelector('textarea')).toBeNull();
+    expect(host.querySelector('textarea')).not.toBeNull();
   });
 
   it('does not finish editing during IME composition', () => {

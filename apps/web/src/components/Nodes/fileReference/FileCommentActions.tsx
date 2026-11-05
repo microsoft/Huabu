@@ -3,9 +3,12 @@
 
 import { Compartment, StateEffect } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
+import { MessageSquare } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { Button } from '@/components/Common/Button';
+import { FloatingToolbar } from '@/components/Common/FloatingToolbar';
 import { Popover } from '@/components/Common/Popover';
 import { toast } from '@/components/Common/Toast';
 import { FragmentSelectionActions } from '@/components/Messages/AIMessage/FragmentSelectionActions';
@@ -20,6 +23,8 @@ import { copyToClipboard } from '@/utils/io/clipboard';
 
 import type { FileReadResult } from '@huabu/shared';
 import type { RefObject } from 'react';
+
+import '@/components/Panels/Canvas/FloatingToolbars/NodeToolbar.css';
 
 export function captureFileComment(
   view: EditorView,
@@ -142,47 +147,61 @@ export function FileCommentActions({
       !dismissed ? (
         <Popover
           position={selection.selection.position}
-          className="p-1"
+          className="selection-context-toolbar border-0 bg-transparent p-0 shadow-none"
+          boundary={surfaceRef.current}
           onDismiss={() => setDismissed(true)}
         >
-          <FragmentSelectionActions
-            onCopy={async () => {
-              const next = readSelection();
-              if (!next)
-                throw new Error(t('messages.commentSelectionUnavailable'));
-              await copyToClipboard(next.selection.text);
-            }}
-            onCopied={clearSelection}
-            onSaveAsNote={() => {
-              const next = readSelection();
-              if (!next) {
-                toast(t('messages.commentSelectionUnavailable'), {
-                  tone: 'warning',
+          <FloatingToolbar className="canvas-context-toolbar">
+            <FragmentSelectionActions
+              onCopy={async () => {
+                const next = readSelection();
+                if (!next)
+                  throw new Error(t('messages.commentSelectionUnavailable'));
+                await copyToClipboard(next.selection.text);
+              }}
+              onCopied={clearSelection}
+              onSaveAsNote={() => {
+                const next = readSelection();
+                if (!next) {
+                  toast(t('messages.commentSelectionUnavailable'), {
+                    tone: 'warning',
+                  });
+                  setSelection(null);
+                  return;
+                }
+                useCanvasStore.getState().addNode({
+                  nodeType: 'note',
+                  data: {
+                    content: next.selection.text,
+                    origin: { type: 'user-excerpt', excerptFromNodeId: nodeId },
+                  },
                 });
-                setSelection(null);
-                return;
-              }
-              useCanvasStore.getState().addNode({
-                nodeType: 'note',
-                data: {
-                  content: next.selection.text,
-                  origin: { type: 'user-excerpt', excerptFromNodeId: nodeId },
-                },
-              });
-              clearSelection();
-            }}
-            onComment={() => {
-              const next = readSelection();
-              if (!next) {
-                toast(t('messages.commentSelectionUnavailable'), {
-                  tone: 'warning',
-                });
-                setSelection(null);
-                return;
-              }
-              setCapture(next);
-            }}
-          />
+                clearSelection();
+              }}
+            />
+          </FloatingToolbar>
+          <FloatingToolbar className="canvas-context-toolbar">
+            <Button
+              variant="ghost"
+              size="sm"
+              iconOnly
+              title={t('messages.fragmentComment')}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => {
+                const next = readSelection();
+                if (!next) {
+                  toast(t('messages.commentSelectionUnavailable'), {
+                    tone: 'warning',
+                  });
+                  setSelection(null);
+                  return;
+                }
+                setCapture(next);
+              }}
+            >
+              <MessageSquare />
+            </Button>
+          </FloatingToolbar>
         </Popover>
       ) : null}
       {capture ? (

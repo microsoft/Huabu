@@ -306,7 +306,7 @@ describe('InkAgentDestinationPicker', () => {
     expect(menu()).toBeNull();
     expect(trigger().textContent).toBe('Choose an Agent');
     await render({ binding });
-    expect(trigger().textContent).toContain('ReviewerNew');
+    expect(trigger().textContent).toBe('New · Reviewer');
   });
 
   it('retains an all-busy continuation group and hides it only after its last conversation is removed', async () => {
@@ -326,7 +326,7 @@ describe('InkAgentDestinationPicker', () => {
 
   it('distinguishes conversations sharing one Profile and retains the selected title and Agent identity', async () => {
     await render({ selectedNodeId: 'first' });
-    expect(trigger().textContent).toContain('First reviewContinue');
+    expect(trigger().textContent).toBe('First review');
     expect(trigger().getAttribute('aria-label')).toContain('Reviewer');
     await openMenu();
     expect(row('First review').textContent).toContain('Reviewer');
@@ -337,14 +337,14 @@ describe('InkAgentDestinationPicker', () => {
       'second',
     );
     expect(props.onNewConversation).not.toHaveBeenCalled();
-    expect(trigger().textContent).toContain('First reviewContinue');
+    expect(trigger().textContent).toBe('First review');
     await render({ selectedNodeId: 'second' });
-    expect(trigger().textContent).toContain('Second reviewContinue');
+    expect(trigger().textContent).toBe('Second review');
   });
 
   it('keeps unavailable conversations visible, explains their status, and responds to availability changes', async () => {
     await render({ selectedNodeId: 'busy' });
-    expect(trigger().textContent).toContain('Busy reviewContinue');
+    expect(trigger().textContent).toBe('Busy review');
     expect(trigger().disabled).toBe(false);
     expect(trigger().querySelector('.text-warning-fg')).toBeNull();
     expect(
@@ -381,7 +381,7 @@ describe('InkAgentDestinationPicker', () => {
         message: 'The destination was removed',
       },
     });
-    expect(trigger().textContent).toContain('Conversation unavailableContinue');
+    expect(trigger().textContent).toBe('Conversation unavailable');
     expect(trigger().querySelector('.text-warning-fg')).not.toBeNull();
     await openMenu();
     expect(menu()?.textContent).toContain('The destination was removed');
