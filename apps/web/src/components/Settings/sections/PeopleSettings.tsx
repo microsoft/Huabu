@@ -5,6 +5,7 @@ import { X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { ResetDeviceCredentials } from './ResetDeviceCredentials';
 import {
   listPeople,
   resetPersonDeviceCredentials,
@@ -19,8 +20,6 @@ import { Button } from '../../Common/Button';
 import { Select } from '../../Common/Select';
 import { toast } from '../../Common/Toast';
 import { Toggle } from '../../Common/Toggle';
-
-import { ResetDeviceCredentials } from './ResetDeviceCredentials';
 
 import type { WorkspaceDescriptor } from '../../../api/workspace';
 

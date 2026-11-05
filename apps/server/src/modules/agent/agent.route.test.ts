@@ -77,8 +77,8 @@ vi.mock('../workspace/paths.js', () => ({
   canvasAcpNamespace: (canvasId: string) => `test/${canvasId}`,
 }));
 
-import agentRoutes from './agent.route.js';
 import { AgentThreadResolutionError } from './agent-thread-resolver.js';
+import agentRoutes from './agent.route.js';
 import { InkAgentModeError } from './ink-response.js';
 import { setRequestIdentity } from '../identity/request.js';
 import { registerSpaceAccess } from '../security/space-access.js';

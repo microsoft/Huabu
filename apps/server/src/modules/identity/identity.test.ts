@@ -7,9 +7,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { resolveIdentityConfig } from './config.js';
 import { registerIdentity } from './http.js';
 import { createLocalIdentityService } from './local.js';
-import { isOwnerRequest } from '../security/owner.js';
-
 import { IdentityError } from './service.js';
+import { isOwnerRequest } from '../security/owner.js';
 
 import type { IdentityService } from './service.js';
 import type { FastifyInstance } from 'fastify';
