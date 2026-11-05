@@ -61,6 +61,7 @@ import { getLLMModel } from '../agent/llm.js';
 import { requireOwnAgentlet } from '../identity/agent-credentials.js';
 import { resolveProfileSnapshot } from './acp/profile-snapshot.js';
 import { getRequestIdentity } from '../identity/request.js';
+import { isRestrictedRequest } from '../security/space-access.js';
 import { canvasAcpNamespace } from '../workspace/paths.js';
 
 import type { ControlMsg, Namespace } from '@agenetes/protocol';
@@ -215,28 +216,25 @@ const agentRoutes: FastifyPluginAsync = async (
           .agentletId;
         if (agentletId) requireOwnAgentlet(agentletId);
       }
+      // Only a Bubble user's private registry hides a bound Profile, and there
+      // an unavailable one refuses Stop too: it is someone else's agent. The
+      // unrestricted local caller finds a missing Profile in realization, as
+      // it always has.
+      if (record || !isRestrictedRequest(request)) return;
       const target = await agentThreadService.resolveExternalTarget(
         canvasId,
         threadId,
       );
-      if (
-        target &&
-        !resolveProfileSnapshot(target.binding.profileId) &&
-        !record
-      )
+      if (target && !resolveProfileSnapshot(target.binding.profileId))
         return reply.code(403).send({
           message: 'Agent is unavailable to this user',
           code: 'AGENT_ACCESS_REQUIRED',
         });
     } catch (error) {
-      if (error instanceof AgentThreadResolutionError) {
-        // Stopping starts nothing: a Question node that no longer resolves
-        // (duplicated, emptied, rebound) must not keep its turn running.
-        if (request.routeOptions.url?.endsWith('/stop/:threadId')) return;
-        return reply
-          .code(error.code === 'canvas_not_found' ? 404 : 409)
-          .send({ message: error.message, code: error.code });
-      }
+      // A Question node that no longer resolves (duplicated, emptied,
+      // rebound) is the route's to report: starting a run refuses it, while
+      // renaming, stopping or setting a model starts nothing external.
+      if (error instanceof AgentThreadResolutionError) return;
       throw error;
     }
   });

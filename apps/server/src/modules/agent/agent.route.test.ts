@@ -79,8 +79,10 @@ vi.mock('../workspace/paths.js', () => ({
 
 import { AgentThreadResolutionError } from './agent-thread-resolver.js';
 import agentRoutes from './agent.route.js';
+import { conversationTitleService } from './conversation-title.service.js';
 import { InkAgentModeError } from './ink-response.js';
 import { setRequestIdentity } from '../identity/request.js';
+import { UNRESTRICTED_ACCESS } from '../identity/service.js';
 import { registerSpaceAccess } from '../security/space-access.js';
 
 import type { AgentStreamEvent, ChatEnvelope } from '@huabu/shared';
@@ -224,14 +226,74 @@ describe('POST /agent', () => {
         'mine',
         undefined,
       );
+      // Starting a run is what the unresolved Question refuses.
+      mocks.resolveFixedTarget.mockRejectedValue(
+        new AgentThreadResolutionError('duplicate_thread', 'Duplicated'),
+      );
       const start = await app.inject({
         method: 'POST',
         url: '/api/agent',
-        payload: { canvasId: 'mine', threadId: 'thread-a' },
+        payload: { canvasId: 'mine', threadId: 'thread-a', content: 'Go' },
       });
       expect(start.statusCode).toBe(409);
       expect(start.json()).toMatchObject({ code: 'duplicate_thread' });
     } finally {
+      await app.close();
+    }
+  });
+  it("leaves the local owner's conversation controls to their routes", async () => {
+    const app = Fastify();
+    app.addHook('onRequest', async (request) => {
+      setRequestIdentity(request, {
+        principal: { principalId: 'local', kind: 'user' },
+        member: true,
+        owner: true,
+        access: UNRESTRICTED_ACCESS,
+      });
+    });
+    registerSpaceAccess(app);
+    await app.register(agentRoutes, { prefix: '/api/agent' });
+    const setUserTitle = vi
+      .spyOn(conversationTitleService, 'setUserTitle')
+      .mockResolvedValue({ title: 'Renamed', source: 'user' } as never);
+    mocks.stopAndWait.mockResolvedValue({ stopped: true, acceptance: null });
+    try {
+      // Two Question nodes share the conversation: renaming it starts
+      // nothing, so it is not refused.
+      mocks.resolveExternalTarget.mockRejectedValue(
+        new AgentThreadResolutionError('duplicate_thread', 'Duplicated'),
+      );
+      const renamed = await app.inject({
+        method: 'PUT',
+        url: '/api/agent/threads/thread-a/title?canvasId=space-a',
+        payload: { title: 'Renamed' },
+      });
+      expect(renamed.statusCode).toBe(200);
+      expect(setUserTitle).toHaveBeenCalledWith(
+        'space-a',
+        'thread-a',
+        'Renamed',
+      );
+
+      // A Question bound to a Profile that was since removed: the local
+      // owner may still stop it; realization reports the missing Profile.
+      mocks.resolveExternalTarget.mockResolvedValue({
+        binding: { kind: 'external', profileId: 'removed-profile' },
+      });
+      const stop = await app.inject({
+        method: 'POST',
+        url: '/api/agent/stop/thread-a?canvasId=space-a',
+        payload: {},
+      });
+      expect(stop.statusCode).toBe(200);
+      expect(mocks.stopAndWait).toHaveBeenCalledWith(
+        'thread-a',
+        'space-a',
+        undefined,
+      );
+      expect(mocks.resolveExternalTarget).not.toHaveBeenCalled();
+    } finally {
+      setUserTitle.mockRestore();
       await app.close();
     }
   });

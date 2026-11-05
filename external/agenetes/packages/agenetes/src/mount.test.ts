@@ -2,6 +2,7 @@ import { defineDriver } from '@agenetes/runtime';
 import { describe, expect, it } from 'vitest';
 
 import { mountAgenetes } from './mount.js';
+import { InMemoryThreadStore } from './thread-store.js';
 
 const emptySchema = {
   safeParse(input: unknown) {
@@ -179,4 +180,34 @@ it('retains storage isolation for namespaces without a stable owner', async () =
     'another namespace',
   );
   await instance.close(spec.threadId, namespace);
+});
+
+// A record written before namespaces had owners is found under its owner's
+// namespace today, and the handle it realizes must live there too.
+it('realizes an ownerless record under the namespace that found it', async () => {
+  const threadStore = new InMemoryThreadStore();
+  const legacy = {
+    kind: 'external',
+    workloadType: 'Deployment' as const,
+    namespace: { name: 'space' },
+    threadId: 'legacy-id',
+    spec: {},
+  };
+  threadStore.upsert(legacy.namespace, legacy.threadId, {
+    driverSchemaVersion: 1,
+    spec: legacy,
+    state: { driverState: {} },
+  });
+  const instance = mountAgenetes({
+    drivers: { external: driver },
+    threadStore,
+  });
+  const owned = { name: 'space', ownerId: 'workspace-a' };
+  const handle = await instance.create({ ...legacy, namespace: owned });
+  expect(instance.get('legacy-id', owned)).toBe(handle);
+  await expect(instance.create({ ...legacy, namespace: owned })).resolves.toBe(
+    handle,
+  );
+  await instance.close('legacy-id', owned);
+  expect(instance.get('legacy-id', owned)).toBeUndefined();
 });

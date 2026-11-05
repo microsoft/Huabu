@@ -4,6 +4,7 @@
 import { randomUUID } from 'node:crypto';
 
 import { emptyAcpOverlay } from '@agenetes/acp-driver';
+import { AgenetesError } from '@agenetes/runtime';
 
 import { isCanvasIntent } from '@huabu/shared';
 import { AGENT_SSE_EVENTS, agentBindingSchema } from '@huabu/shared';
@@ -43,6 +44,8 @@ import type {
 import type { HuabuSubmission } from './agenetes/handle.js';
 import type { ChatEnvelope } from './conversation/envelope.js';
 import type { RenderedSpacePrompt } from './space-instruction-frames.js';
+import type { Agenetes } from '@agenetes/agenetes';
+import type { Namespace } from '@agenetes/protocol';
 import type {
   AgentBinding,
   AgentMode,
@@ -100,7 +103,44 @@ interface AgentThreadServiceDependencies {
   runExternal: typeof runAcpAgent;
   runInternal: typeof runAgent;
   closeHandle: (threadId: string, canvasId?: string) => void | Promise<void>;
+  /**
+   * Close a live handle for `threadId` that another Space's namespace holds,
+   * when this Space has the durable conversation. Called under the turn
+   * lease, so the handle it closes is idle.
+   */
+  releaseForeignHandle?: (threadId: string, canvasId?: string) => Promise<void>;
   confirmBinding?: typeof agentNodeBinding.confirm;
+}
+
+function isNamespaceConflict(error: unknown): boolean {
+  return (
+    error instanceof AgenetesError &&
+    (error.details as { reason?: unknown } | undefined)?.reason ===
+      'namespace_conflict'
+  );
+}
+
+/**
+ * Thread ids are client-chosen, so another Space can open a handle under one
+ * of this Space's ids while it is idle. The runtime rightly refuses to share
+ * it; this Space, which holds the conversation, displaces it instead of being
+ * locked out until restart. The other side keeps its own record and history.
+ * Callers hold the thread's turn lease, so the handle closed here is idle.
+ */
+export async function releaseForeignThreadHandle(
+  runtime: Pick<Agenetes, 'get' | 'record' | 'close'>,
+  namespace: Namespace,
+  threadId: string,
+): Promise<void> {
+  try {
+    runtime.get(threadId, namespace);
+    return;
+  } catch (error) {
+    if (!isNamespaceConflict(error)) throw error;
+  }
+  // Without a conversation here the id is someone else's; the runtime refuses.
+  if (!(await runtime.record(namespace, threadId))) return;
+  await runtime.close(threadId);
 }
 
 export function externalBindingFromWorkloadSpec(
@@ -195,6 +235,12 @@ const DEFAULT_DEPENDENCIES: AgentThreadServiceDependencies = {
   runInternal: runAgent,
   closeHandle: async (threadId, canvasId) =>
     await agenetes.close(threadId, canvasAcpNamespace(canvasId ?? '')),
+  releaseForeignHandle: (threadId, canvasId) =>
+    releaseForeignThreadHandle(
+      agenetes,
+      canvasAcpNamespace(canvasId ?? ''),
+      threadId,
+    ),
   confirmBinding: (...args) => agentNodeBinding.confirm(...args),
 };
 
@@ -571,6 +617,10 @@ export class AgentThreadService {
     let spacePrompt: string | undefined;
     let persistedSpacePrompt: PersistedSpacePrompt | undefined;
     try {
+      await this.dependencies.releaseForeignHandle?.(
+        options.threadId,
+        options.canvasId,
+      );
       // Resolve only after admission: a queued request must not execute an old draft.
       agentTarget = options.canvasId
         ? await this.dependencies.resolveAgentNode(

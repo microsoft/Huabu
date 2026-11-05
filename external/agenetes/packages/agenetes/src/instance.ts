@@ -790,10 +790,13 @@ export function createAgenetesInstance(
           { priorKind: prior.spec.kind, targetKind: incoming.spec.kind },
         );
       }
+      // The record was found under the caller's namespace, which therefore
+      // owns it; a record written before namespace owners existed still names
+      // the old, ownerless namespace and must not decide where the handle lives.
       const target =
         prior?.spec.workloadType === 'Deployment'
           ? {
-              spec: prior.spec,
+              spec: { ...prior.spec, namespace: incoming.spec.namespace },
               driver: resolveDriver(prior.spec),
             }
           : incoming;

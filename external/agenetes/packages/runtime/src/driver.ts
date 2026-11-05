@@ -209,6 +209,7 @@ export function createAgentRuntime(drivers: DriverMap): AgentRuntime {
       throw new AgenetesError(
         'invalid_workload',
         'Thread is live in another namespace',
+        { reason: 'namespace_conflict' },
       );
     return entry?.handle;
   };
