@@ -152,6 +152,26 @@ it('exposes read errors, supports retry and permits explicit existing choices', 
   expect(current.error).toBeNull();
 });
 
+it('preserves explicit New intent against a delayed recent-default response', async () => {
+  owners('a');
+  let resolve!: (
+    value: Awaited<ReturnType<typeof getRecentCanvasConversation>>,
+  ) => void;
+  vi.mocked(getRecentCanvasConversation).mockImplementation(
+    () =>
+      new Promise((done) => {
+        resolve = done;
+      }),
+  );
+  await act(async () => root.render(<Harness />));
+  act(() => current.choose(null));
+  await act(async () =>
+    resolve({ conversation: { nodeId: 'a', threadId: 'thread-a' } }),
+  );
+  expect(current.destination).toBeNull();
+  expect(current.loading).toBe(false);
+});
+
 it('ignores a response after the Space changes', async () => {
   owners('a');
   let resolve!: (

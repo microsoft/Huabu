@@ -2,19 +2,11 @@
 // Licensed under the MIT license.
 
 import { useState } from 'react';
-import { useTranslation } from 'react-i18next';
 
 import { nodeRevisionOf } from '@huabu/shared/canvas-engine';
 
-import { toast } from '@/components/Common/Toast';
-import { FragmentSelectionActions } from '@/components/Messages/AIMessage/FragmentSelectionActions';
-import {
-  PreviewCommentEditor,
-  type PreviewCommentCapture,
-} from '@/components/Messages/PreviewCommentEditor';
+import { SelectionCommentAction } from '@/components/Messages/SelectionCommentAction';
 import { MilkdownFloatingToolbar } from '@/components/Milkdown/MilkdownFloatingToolbar';
-import useCanvasStore from '@/store/canvasStore';
-import { copyToClipboard } from '@/utils/io/clipboard';
 
 import type { MilkdownInstance } from '@/components/Milkdown';
 import type { RefObject } from 'react';
@@ -32,8 +24,7 @@ export function NoteCommentActions({
   nodeId: string;
   mode: 'edit' | 'selection';
 }) {
-  const { t } = useTranslation();
-  const [capture, setCapture] = useState<PreviewCommentCapture | null>(null);
+  const [editingComment, setEditingComment] = useState(false);
   const readSelection = () => {
     const selection = editor?.getTextSelection();
     const rect = editor?.getSelectionClientRect();
@@ -57,51 +48,26 @@ export function NoteCommentActions({
         instance={editor}
         surfaceRef={surfaceRef}
         mode={mode}
-        disabled={capture !== null}
-      >
-        <FragmentSelectionActions
-          onCopy={async () => {
-            const captured = readSelection();
-            if (!captured)
-              throw new Error(t('messages.commentSelectionUnavailable'));
-            await copyToClipboard(captured.selection.text);
-          }}
-          onCopied={() => window.getSelection()?.removeAllRanges()}
-          onSaveAsNote={() => {
-            const captured = readSelection();
-            if (!captured) {
-              toast(t('messages.commentSelectionUnavailable'), {
-                tone: 'warning',
-              });
-              return;
-            }
-            useCanvasStore.getState().addNode({
-              nodeType: 'note',
-              data: {
-                content: captured.selection.markdown,
-                origin: { type: 'user-excerpt', excerptFromNodeId: nodeId },
-              },
-            });
-            window.getSelection()?.removeAllRanges();
-          }}
-          onComment={() => {
-            const captured = readSelection();
-            if (!captured) {
-              toast(t('messages.commentSelectionUnavailable'), {
-                tone: 'warning',
-              });
-              return;
-            }
-            setCapture(captured);
-          }}
-        />
-      </MilkdownFloatingToolbar>
-      {capture ? (
-        <PreviewCommentEditor
-          capture={capture}
-          onDismiss={() => setCapture(null)}
-        />
-      ) : null}
+        suspended={editingComment}
+        conversationActions={
+          <SelectionCommentAction
+            canvasId={canvasId}
+            onEditingChange={setEditingComment}
+            capture={() => {
+              const captured = readSelection();
+              return captured
+                ? {
+                    quote: captured.selection.text,
+                    contextBefore: captured.selection.contextBefore,
+                    contextAfter: captured.selection.contextAfter,
+                    source: captured.source,
+                  }
+                : null;
+            }}
+            onDismiss={() => window.getSelection()?.removeAllRanges()}
+          />
+        }
+      />
     </>
   );
 }

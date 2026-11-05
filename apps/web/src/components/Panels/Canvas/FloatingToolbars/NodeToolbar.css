@@ -4,28 +4,28 @@
  */
 
 :is(.node-floating-toolbar, .canvas-context-toolbar) {
-  height: 46px;
-  padding: 5px 8px;
+  height: var(--context-toolbar-height, 46px);
+  padding: var(--context-toolbar-padding, 5px 8px);
   gap: 2px;
-  border-radius: 12px;
+  border-radius: var(--context-toolbar-radius, 12px);
   border: 1px solid var(--edge-default);
   flex-wrap: nowrap;
 }
 :is(.node-floating-toolbar, .canvas-context-toolbar)
   button:not(.node-toolbar-font-trigger):not(.canvas-context-submit):not(
     .edge-toolbar-value
-  ):not(.ink-agent-destination-trigger) {
-  width: 32px;
-  height: 32px;
-  min-width: 32px;
-  padding: 7px;
+  ):not(.ink-agent-destination-trigger):not(.selection-block-trigger) {
+  width: var(--context-control-width, 32px);
+  height: var(--context-control-height, 32px);
+  min-width: var(--context-control-width, 32px);
+  padding: var(--context-control-padding, 7px);
   border-radius: 6px;
 }
 :is(.node-floating-toolbar, .canvas-context-toolbar) button svg,
 .node-toolbar-layout button svg {
-  width: 16px;
-  height: 16px;
-  stroke-width: 1.65;
+  width: var(--context-icon-size, 16px);
+  height: var(--context-icon-size, 16px);
+  stroke-width: var(--context-icon-stroke, 1.65);
 }
 :is(.node-floating-toolbar, .canvas-context-toolbar)
   button:where(:not(.canvas-context-submit)):hover,
@@ -82,17 +82,77 @@
   width: max-content;
   max-width: var(--canvas-popover-available-width, calc(100vw - 16px));
 }
+.selection-context-toolbar {
+  --context-toolbar-height: 36px;
+  --context-toolbar-padding: 3px 4px;
+  --context-toolbar-radius: 8px;
+  --context-control-width: 28px;
+  --context-control-height: 28px;
+  --context-control-padding: 6px;
+  --context-icon-size: 15px;
+  --context-icon-stroke: 1.5;
+  --canvas-popover-available-width: var(
+    --popover-available-width,
+    calc(100vw - 24px)
+  );
+  display: flex;
+  width: max-content;
+  max-width: var(--canvas-popover-available-width);
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 6px;
+}
+.selection-context-toolbar .canvas-context-toolbar {
+  flex-shrink: 0;
+  border-color: color-mix(in srgb, var(--edge-default) 70%, transparent);
+  box-shadow: 0 1px 4px color-mix(in srgb, var(--fg-default) 6%, transparent);
+}
+.selection-context-toolbar button.selection-block-trigger {
+  width: auto;
+  height: var(--context-control-height);
+  padding: 5px 6px;
+  border-radius: 6px;
+  gap: 4px;
+  font-size: 13px;
+}
+.selection-context-toolbar .selection-formatting-toolbar {
+  height: auto;
+  min-height: var(--context-toolbar-height);
+  flex-wrap: wrap;
+}
+@media (pointer: coarse) {
+  .selection-context-toolbar {
+    --context-control-width: 44px;
+    row-gap: 10px;
+  }
+  .selection-context-toolbar .selection-formatting-toolbar {
+    row-gap: 16px;
+  }
+  .selection-context-toolbar button {
+    position: relative;
+    min-width: 44px;
+  }
+  .selection-context-toolbar button::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 0;
+    right: 0;
+    height: 44px;
+    transform: translateY(-50%);
+  }
+}
 .ink-context-toolbar > .ink-toolbar-surface {
   flex-shrink: 0;
   flex-wrap: nowrap;
 }
 .canvas-context-toolbar button.ink-agent-destination-trigger {
   width: auto;
-  /* Reserve the capsule's 18px chrome, 2px gap, and 32px Send control. */
+  /* Reserve capsule chrome, divider, gaps, and the 32px action. */
   max-width: min(
     15rem,
     45vw,
-    calc(var(--canvas-popover-available-width, 100vw) - 52px)
+    calc(var(--canvas-popover-available-width, 100vw) - 65px)
   );
   height: 32px;
   padding: 6px;
