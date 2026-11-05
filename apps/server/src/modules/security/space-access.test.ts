@@ -213,10 +213,12 @@ describe('Space access', () => {
         })
       ).statusCode,
     ).toBe(404);
+    // An administrator's agents are private too: a conversation is still
+    // addressed through its Space.
     expect(
       (await app.inject({ url: '/api/agent/history/t1', headers: as('yes') }))
         .statusCode,
-    ).toBe(200);
+    ).toBe(400);
     expect(
       (
         await app.inject({
@@ -329,3 +331,31 @@ it('requires a Space even for a brand new member conversation without a thread i
   expect(result.statusCode).toBe(400);
   expect(result.json().code).toBe('SPACE_ACCESS_AMBIGUOUS');
 });
+
+it.each([false, true])(
+  'requires the Space of a named conversation, for administrators too (owner=%s)',
+  async (owner) => {
+    const { app } = host();
+    const headers = owner ? { 'x-owner': 'yes' } : {};
+    for (const request of [
+      { method: 'GET' as const, url: '/api/agent/history/t1' },
+      {
+        method: 'POST' as const,
+        url: '/api/acp/threads/t1/permission',
+        payload: {},
+      },
+    ]) {
+      const result = await app.inject({ ...request, headers });
+      expect(result.statusCode).toBe(400);
+      expect(result.json().code).toBe('SPACE_ACCESS_AMBIGUOUS');
+    }
+    expect(
+      (
+        await app.inject({
+          url: '/api/agent/history/t1?canvasId=mine',
+          headers,
+        })
+      ).statusCode,
+    ).toBe(200);
+  },
+);

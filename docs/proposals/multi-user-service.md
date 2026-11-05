@@ -127,7 +127,7 @@ Bubble mode accepts user-owned remote devices and does not supervise an unowned 
 
 ### Shared Spaces
 
-A run, its pending preparations and stop requests belong to their Workspace and Space, not to whoever started them: anyone who may use the Space sees a turn running, may stop it (external agents still need their device owner), and Space moves and deletes refuse while it runs. Memory passes on one Space are serialized whoever schedules them, and a coalesced follow-up runs in its latest requester's settings. Identical preprocessing requests for one Space are coalesced across its viewers.
+A run, its pending preparations and stop requests belong to their Workspace and Space, not to whoever started them: anyone who may read the Space sees a turn running, anyone who may write it may stop it (external agents still need their device owner), and Space moves and deletes refuse while it runs. Memory passes on one Space are serialized whoever schedules them, and a coalesced follow-up runs in its latest requester's settings. Identical preprocessing requests for one Space are coalesced across its viewers.
 
 ### Deferred
 

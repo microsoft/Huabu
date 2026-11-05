@@ -90,11 +90,13 @@ export function registerSpaceAccess(app: FastifyInstance): void {
     const route = request.routeOptions.url ?? '';
     // A conversation lives in a Space, and is reached only through one the
     // caller may use.
+    // Administrators included: their devices and agents are private too, and
+    // a conversation named without its Space would skip the device check.
     if (
-      !identity.owner &&
       !canvasId &&
       (threadId ||
-        ((route === '/api/agent' || route.startsWith('/api/agent/')) &&
+        (!identity.owner &&
+          (route === '/api/agent' || route.startsWith('/api/agent/')) &&
           route !== '/api/agent/defaults' &&
           route !== '/api/agent/defaults/'))
     )
