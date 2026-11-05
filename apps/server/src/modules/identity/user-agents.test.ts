@@ -90,6 +90,7 @@ async function host(
     handle: { workspaceId: 'w1', name: 'Shared' },
     path: null,
   },
+  revalidationIntervalMs?: number,
 ) {
   const store = new InMemoryBubbleStore();
   const resources: ResourceDirectory = {
@@ -138,6 +139,7 @@ async function host(
     service: bubble.service,
     getConnectionToken,
     isCurrentReachback: (claims) => liveReachback(claims),
+    revalidationIntervalMs,
   });
   app.register(bubble.plugin, { prefix: '/bubble' });
   registerSpaceAccess(app);
@@ -162,6 +164,14 @@ async function host(
     principalId: getRequestIdentity(request)?.principal.principalId,
     settingsOwner: personalSettingsOwner(),
   }));
+  app.get(
+    '/api/rfs/w/:workspaceId/:canvasId/stream',
+    async (_request, reply) => {
+      reply.hijack();
+      reply.raw.writeHead(200, { 'Content-Type': 'text/event-stream' });
+      reply.raw.write('data: ready\n\n');
+    },
+  );
   await app.ready();
   const as = async <T>(id: string, fn: () => T) =>
     openPersonalSettings(async () => {
@@ -492,6 +502,54 @@ it("resets one person's device and reachback credentials without touching others
   const renewed = await h.as('alice', ownDeviceCredential);
   expect(renewed).not.toBe(alice);
   await expect(authenticate('alice-device', renewed)).resolves.toBeDefined();
+});
+
+it('closes open RFS streams once their credentials are reset', async () => {
+  const h = await host(false, undefined, 20);
+  const origin = await app.listen({ port: 0, host: '127.0.0.1' });
+  const authenticate = authenticateUserAgentlet(h.service);
+  const alice = await h.as('alice', ownDeviceCredential);
+  const bob = await h.as('bob', ownDeviceCredential);
+  await authenticate('alice-device', alice);
+  await authenticate('bob-device', bob);
+  const reachback = (
+    await h.as('alice', () =>
+      agentReachbackEnvironment({
+        agentletId: 'alice-device',
+        env: {
+          HUABU_RFS_URL: 'https://huabu.example/api/rfs/w/w1/space-a',
+          HUABU_THREAD_ID: 'thread-a',
+        },
+      }),
+    )
+  )?.HUABU_RFS_TOKEN;
+  if (!reachback) throw new Error('No reachback credential');
+  const open = async (credential: string) => {
+    const response = await fetch(`${origin}/api/rfs/w/w1/space-a/stream`, {
+      headers: { authorization: `Bearer ${credential}` },
+      signal: AbortSignal.timeout(3_000),
+    });
+    const reader = response.body?.getReader();
+    if (!reader) throw new Error('Missing stream');
+    expect((await reader.read()).done).toBe(false);
+    return reader;
+  };
+  // Scoped reachback, and the device credential fallback.
+  const scoped = await open(reachback);
+  const device = await open(alice);
+  const others = await open(bob);
+
+  resetAgentCredentials('alice');
+
+  expect((await scoped.read()).done).toBe(true);
+  expect((await device.read()).done).toBe(true);
+  // Bob's credentials were not reset; his stream outlives several checks.
+  const outcome = await Promise.race([
+    others.read().then(() => 'closed'),
+    new Promise((resolve) => setTimeout(() => resolve('open'), 150)),
+  ]);
+  expect(outcome).toBe('open');
+  await others.cancel();
 });
 
 it.each([false, true])(

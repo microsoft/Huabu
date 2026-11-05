@@ -158,12 +158,15 @@ export function registerIdentity(
         return Array.isArray(value) ? value[0] : value;
       },
     };
-    const agentClaims =
-      service.provider === 'bubble'
-        ? readAgentCredential(authorization?.match(/^Bearer (\S+)$/)?.[1] ?? '')
-        : null;
+    const bearer = authorization?.match(/^Bearer (\S+)$/)?.[1] ?? '';
+    const agentCredential =
+      service.provider === 'bubble' && readAgentCredential(bearer) !== null;
     const resolveIdentity = async () => {
-      if (!agentClaims) return service.authenticate(credentials);
+      if (!agentCredential) return service.authenticate(credentials);
+      // Read afresh on every revalidation too: resetting its owner's
+      // credentials revokes it, and closes the responses it holds open.
+      const agentClaims = readAgentCredential(bearer);
+      if (!agentClaims) return null;
       const params = request.params as {
         workspaceId?: string;
         canvasId?: string;
