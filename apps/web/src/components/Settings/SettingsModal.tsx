@@ -76,6 +76,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const { t } = useTranslation();
   const identity = useIdentityStore((s) => s.identity);
   const admin = identity?.owner === true;
+  // Deployment readiness is the administrator's in Bubble; elsewhere it is the
+  // one caller's, signed in or not, as it always was.
+  const showsReadiness = admin || identity?.provider !== 'bubble';
   const tabs =
     identity?.provider === 'bubble' && admin ? [...TABS, PEOPLE_TAB] : TABS;
   const llmInit = useLLMStore((s) => s.init);
@@ -118,9 +121,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   }, [isOpen, activeTab]);
 
   useEffect(() => {
-    if (!isOpen || !admin) return;
+    if (!isOpen || !showsReadiness) return;
     void loadDeploymentReadiness();
-  }, [isOpen, admin, loadDeploymentReadiness]);
+  }, [isOpen, showsReadiness, loadDeploymentReadiness]);
 
   // Load each registry only when its owning tab is visible.
   useEffect(() => {
@@ -285,7 +288,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </header>
 
           <div className="min-h-0 flex-1 overflow-y-auto px-4 pt-0 pb-4 sm:px-5">
-            {admin && <DeploymentReadinessNotice />}
+            {showsReadiness && <DeploymentReadinessNotice />}
             {activeTab === 'general' && (
               <SettingSection>
                 <GeneralSettings />

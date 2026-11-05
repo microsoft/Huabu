@@ -156,6 +156,35 @@ it.each([null, 'agent', 'people'] as const)(
   },
 );
 
+it.each([
+  ['unknown', null],
+  [
+    'the local owner',
+    {
+      provider: 'local' as const,
+      principal: { principalId: 'local', kind: 'user' as const },
+      member: true,
+      owner: true,
+    },
+  ],
+  [
+    'a local caller who is not the owner',
+    {
+      provider: 'local' as const,
+      principal: { principalId: 'lan', kind: 'user' as const },
+      member: true,
+      owner: false,
+    },
+  ],
+])(
+  'loads deployment readiness outside Bubble when the caller is %s',
+  async (_caller, identity) => {
+    useIdentityStore.setState({ identity });
+    await renderModal();
+    expect(mocks.load).toHaveBeenCalledOnce();
+  },
+);
+
 it('retains the Devices and Agents tab when the caller becomes a member', async () => {
   await renderModal();
   expect(
