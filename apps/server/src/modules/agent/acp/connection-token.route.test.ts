@@ -1,6 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 import Fastify, { type FastifyInstance } from 'fastify';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -149,12 +152,38 @@ describe('explicit owner-only connection copy', () => {
       expect(response.headers['cache-control']).toBe('no-store');
       expect(response.headers.pragma).toBe('no-cache');
       expect(response.json().source).toBe('managed');
-      expect(mocks.buildCommand).toHaveBeenCalledWith(
-        { ...payload, format },
-        { token: mocks.getToken.mock.results.at(-1)?.value, source: 'managed' },
-      );
+      // Locally the command carries the machine token, and the builder
+      // reports where that came from (environment, file or generated).
+      expect(mocks.buildCommand).toHaveBeenCalledWith({ ...payload, format });
+      expect(mocks.buildCommand.mock.calls.at(-1)).toHaveLength(1);
     },
   );
+  it('gives a Bubble user a command with their own device credential', async () => {
+    mocks.isOwner.mockReturnValue(true);
+    mocks.settingsOwner.mockReturnValue('carol');
+    mocks.getToken.mockReturnValue('instance-signing-key');
+    vi.stubEnv(
+      'HUABU_DATA_DIR',
+      join(tmpdir(), `huabu-command-${process.pid}`),
+    );
+    mocks.buildCommand.mockReturnValue({
+      content: 'explicit secret-bearing copy text',
+      source: 'managed',
+      warnings: [],
+    });
+    const server = await setup();
+    const response = await server.inject({
+      method: 'POST',
+      url: '/api/acp/connection-command',
+      payload,
+    });
+    expect(response.statusCode).toBe(200);
+    const [, credential] = mocks.buildCommand.mock.calls.at(-1) ?? [];
+    expect(credential).toMatchObject({ source: 'managed' });
+    expect(credential.token).toMatch(/^huabu-agent\.v1\./);
+    expect(credential.token).not.toContain('instance-signing-key');
+    vi.unstubAllEnvs();
+  });
   it.each([
     { origin: 'not-a-url', shell: 'posix', format: 'command' },
     { origin: 'https://huabu.example' },

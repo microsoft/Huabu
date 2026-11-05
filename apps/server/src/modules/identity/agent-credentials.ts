@@ -100,6 +100,10 @@ function credentialVersion(principalId: string): number {
  * Revoke every device and reachback credential `principalId` holds, and
  * disconnect their devices and running agents. They reconnect with a new
  * connection command; nobody else's devices are affected.
+ *
+ * It also releases their devices: a machine they no longer use, or one
+ * shared with someone who should own it now, is claimed again by whoever
+ * next connects it. Their own devices re-claim theirs on reconnecting.
  */
 export function resetAgentCredentials(principalId: string): void {
   const versions = readMap(versionsPath(), versionsSchema);
@@ -114,6 +118,12 @@ export function resetAgentCredentials(principalId: string): void {
   ])
     if (agentletOwner(connection.agentletId) === principalId)
       connection.disconnect('Device credentials were reset');
+  const owners = readMap(ownersPath(), ownersSchema);
+  const kept = Object.fromEntries(
+    Object.entries(owners).filter(([, owner]) => owner !== principalId),
+  );
+  if (Object.keys(kept).length !== Object.keys(owners).length)
+    writeMap(ownersPath(), kept);
 }
 
 type Unsigned = {

@@ -21,6 +21,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 
 import {
+  agentletOwner,
   agentReachbackEnvironment,
   authenticateUserAgentlet,
   canUseAgentlet,
@@ -398,7 +399,14 @@ it('separates device transport from user and Space-scoped reachback, with fresh 
     principalId: 'alice',
     settingsOwner: 'alice',
   });
-  expect((await probe(device)).statusCode).toBe(401);
+  // `$AGENTLET_TOKEN` on the device is its device credential. Reachback
+  // written before HUABU_RFS_TOKEN still works with it, as the device owner
+  // and only within their own Workspaces and Spaces, and only on RFS.
+  expect((await probe(device)).json()).toEqual({
+    principalId: 'alice',
+    settingsOwner: 'alice',
+  });
+  expect((await probe(device, '/api/acp/profiles')).statusCode).toBe(401);
   expect((await probe(getConnectionToken())).statusCode).toBe(401);
   expect((await probe(token, '/api/rfs/w/w2/space-a/probe')).statusCode).toBe(
     401,
@@ -431,6 +439,7 @@ it('separates device transport from user and Space-scoped reachback, with fresh 
     disabledAt: new Date().toISOString(),
   });
   expect((await probe(token)).statusCode).toBe(401);
+  expect((await probe(device)).statusCode).toBe(401);
   await expect(authenticate('alice-device', device)).rejects.toThrow(
     'not admitted',
   );
@@ -442,7 +451,9 @@ it("resets one person's device and reachback credentials without touching others
   const alice = await h.as('alice', ownDeviceCredential);
   const bob = await h.as('bob', ownDeviceCredential);
   await authenticate('alice-device', alice);
+  await authenticate('shared-box', alice);
   await authenticate('bob-device', bob);
+  await expect(authenticate('shared-box', bob)).rejects.toThrow('another user');
   const reachback = (await h.as('alice', () =>
     agentReachbackEnvironment({
       agentletId: 'alice-device',
@@ -452,17 +463,28 @@ it("resets one person's device and reachback credentials without touching others
       },
     }),
   ))!.HUABU_RFS_TOKEN;
-  const probe = (credential: string) =>
+  const probe = (credential: string, path = '/api/rfs/w/w1/space-a/probe') =>
     app.inject({
-      url: '/api/rfs/w/w1/space-a/probe',
+      url: path,
       headers: { authorization: `Bearer ${credential}` },
     });
   expect((await probe(reachback)).statusCode).toBe(200);
+  expect((await probe(alice)).statusCode).toBe(200);
+  // A device credential reaches only Workspaces its owner holds a grant on.
+  expect((await probe(alice, '/api/rfs/w/w2/space-a/probe')).statusCode).toBe(
+    401,
+  );
 
   resetAgentCredentials('alice');
 
   expect(readAgentCredential(alice)).toBeNull();
   expect((await probe(reachback)).statusCode).toBe(401);
+  expect((await probe(alice)).statusCode).toBe(401);
+  // Her devices are released; Bob's stay his.
+  expect(agentletOwner('alice-device')).toBeNull();
+  expect(agentletOwner('bob-device')).toBe('bob');
+  await expect(authenticate('shared-box', bob)).resolves.toBeDefined();
+  expect(agentletOwner('shared-box')).toBe('bob');
   await expect(authenticate('alice-device', alice)).rejects.toThrow(
     'User device credential',
   );

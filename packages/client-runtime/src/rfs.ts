@@ -31,7 +31,7 @@ function header(value: string, name: string): string {
   return value;
 }
 function connection(env: NodeJS.ProcessEnv) {
-  const token = env.HUABU_RFS_TOKEN ?? env.AGENTLET_TOKEN;
+  const token = env.HUABU_RFS_TOKEN?.trim() || env.AGENTLET_TOKEN;
   if (!env.HUABU_RFS_URL || !token)
     throw new Error('HUABU_RFS_URL and a reachback credential are required');
   let url: URL;

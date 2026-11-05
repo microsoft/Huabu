@@ -85,10 +85,14 @@ const connectionTokenRoutes: FastifyPluginAsync = async (app) => {
         .send({ message: 'Browser origin does not match request origin' });
     }
     try {
-      const response = buildAgentletConnectionCommand(parsed.data, {
-        token: ownDeviceCredential(),
-        source: 'managed',
-      });
+      // A Bubble user's command carries their own device credential; locally
+      // it is the machine token, reported with where it came from.
+      const response = personalSettingsOwner()
+        ? buildAgentletConnectionCommand(parsed.data, {
+            token: ownDeviceCredential(),
+            source: 'managed',
+          })
+        : buildAgentletConnectionCommand(parsed.data);
       return reply
         .header('Cache-Control', 'no-store')
         .header('Pragma', 'no-cache')

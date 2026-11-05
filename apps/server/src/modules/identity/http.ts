@@ -169,16 +169,32 @@ export function registerIdentity(
         canvasId?: string;
       };
       if (
-        agentClaims.aud !== 'rfs' ||
         !request.routeOptions.url?.startsWith('/api/rfs/w/') ||
-        params.workspaceId !== agentClaims.workspaceId ||
-        params.canvasId !== agentClaims.canvasId ||
-        !(await options.isCurrentReachback?.(agentClaims).catch(() => false))
+        !params.workspaceId ||
+        !params.canvasId
       )
         return null;
-      return (
-        (await service.resolvePrincipal?.(agentClaims.principalId)) ?? null
-      );
+      if (agentClaims.aud === 'rfs') {
+        if (
+          params.workspaceId !== agentClaims.workspaceId ||
+          params.canvasId !== agentClaims.canvasId ||
+          !(await options.isCurrentReachback?.(agentClaims).catch(() => false))
+        )
+          return null;
+        return (
+          (await service.resolvePrincipal?.(agentClaims.principalId)) ?? null
+        );
+      }
+      // A device credential is what `$AGENTLET_TOKEN` holds on the owner's
+      // device. Skills, scripts and agent sessions from before per-conversation
+      // reachback still send it, so RFS accepts it for the device owner, with
+      // that person's own Workspace and Space access and nothing more.
+      const owner = await service.resolvePrincipal?.(agentClaims.principalId);
+      if (!owner) return null;
+      const workspaces = await owner.access.workspaces();
+      return workspaces === 'all' || workspaces.includes(params.workspaceId)
+        ? owner
+        : null;
     };
     // Without a login the RFS surface still requires the machine token.
     // Basic-authenticated owners retain their current access.
