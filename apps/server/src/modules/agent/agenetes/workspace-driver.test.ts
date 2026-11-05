@@ -8,7 +8,7 @@ import { join } from 'node:path';
 
 import { mountAgenetes } from '@agenetes/agenetes';
 import { defineDriver } from '@agenetes/runtime';
-import { afterEach, beforeEach, expect, it } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 
 import {
@@ -30,11 +30,16 @@ import {
 } from '../../workspace/context.js';
 import { canvasAcpNamespace } from '../../workspace/paths.js';
 import { createWorkspace } from '../../workspace-activation.js';
-import { setWorkspacePath } from '../../workspace.js';
+import { getWorkspaceHandle, setWorkspacePath } from '../../workspace.js';
+import { releaseForeignThreadHandle } from '../agent-thread.service.js';
 
 import type { Agenetes } from '@agenetes/agenetes';
 import type { AgentStateSnapshot } from '@agenetes/protocol';
 import type { AgentHandle } from '@agenetes/runtime';
+
+vi.mock('../memory/index.js', () => ({
+  readWorkspaceMemory: () => '',
+}));
 
 let tmp: string;
 let previousDataDir: string | undefined;
@@ -176,3 +181,80 @@ it.each([false, true])(
     }
   },
 );
+
+it('lets one Workspace displace a handle another Workspace holds under its thread id', async () => {
+  const canvasId = 'canvas-shared-id';
+  const threadId = 'thread-shared-id';
+  const carol = await openWorkspace(await createWorkspace('Carol'));
+  const erin = await openWorkspace(await createWorkspace('Erin'));
+  const closedIn: Array<string | undefined> = [];
+  const instance: Agenetes = mountAgenetes({
+    drivers: {
+      test: withWorkspaceStateReports(
+        defineDriver({
+          schemaVersion: 1,
+          workloadTypes: ['Deployment'],
+          specSchema: z.object({}),
+          stateSchema: z.object({}),
+          initialState: () => ({}),
+          create: () => ({
+            capabilities: {
+              supportedControlMessages: [],
+              turnInput: 'blocking',
+            },
+            onState: () => () => {},
+            async control() {
+              return { ok: false, code: 'unsupported', error: 'Unsupported' };
+            },
+            async *run() {
+              yield { type: 'end', data: {} };
+            },
+            close() {
+              closedIn.push(getWorkspaceHandle()?.workspaceId);
+            },
+          }),
+        }),
+      ),
+    },
+    threadStore: conversationThreadStore,
+    eventLogStore: conversationEventLogStore,
+    turnStore: conversationTurnStore,
+  });
+  const workload = (namespace: ReturnType<typeof canvasAcpNamespace>) => ({
+    kind: 'test',
+    workloadType: 'Deployment' as const,
+    threadId,
+    namespace,
+    spec: {},
+  });
+  // Carol's conversation exists but is idle; Erin reuses its id.
+  const carolNamespace = await runInWorkspace(carol, async () => {
+    await createSpace(canvasId, 'Carol Space');
+    const namespace = canvasAcpNamespace(canvasId);
+    await instance.create(workload(namespace));
+    await instance.close(threadId, namespace);
+    return namespace;
+  });
+  closedIn.length = 0;
+  const erinHandle = await runInWorkspace(erin, async () => {
+    await createSpace(canvasId, 'Erin Space');
+    return instance.create(workload(canvasAcpNamespace(canvasId)));
+  });
+
+  await runInWorkspace(carol, async () => {
+    // Erin's handle is refused in Carol's Workspace...
+    await expect(async () => {
+      for await (const _event of erinHandle.run(null, {})) {
+        // Never reached.
+      }
+    }).rejects.toThrow();
+    // ...but Carol's conversation displaces it and resumes.
+    await releaseForeignThreadHandle(instance, carolNamespace, threadId);
+    await expect(
+      instance.create(workload(carolNamespace)),
+    ).resolves.toBeDefined();
+    await instance.close(threadId, carolNamespace);
+  });
+  // Erin's handle was torn down in Erin's Workspace, not Carol's.
+  expect(closedIn).toEqual([erin.handle.workspaceId, carol.handle.workspaceId]);
+});

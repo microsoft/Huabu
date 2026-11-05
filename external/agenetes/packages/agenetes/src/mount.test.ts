@@ -211,3 +211,45 @@ it('realizes an ownerless record under the namespace that found it', async () =>
   await instance.close('legacy-id', owned);
   expect(instance.get('legacy-id', owned)).toBeUndefined();
 });
+
+// Ownership is the record's, not only the live handle's: after a close or a
+// restart, another owner's namespace of the same name must not reuse it.
+it.each([undefined, { root: '/same-root' }])(
+  'refuses another owner a closed thread recorded under the same name and storage %j',
+  async (storage) => {
+    const threadStore = new InMemoryThreadStore();
+    const instance = mountAgenetes({
+      drivers: { external: driver },
+      threadStore,
+    });
+    const spec = (ownerId: string) => ({
+      kind: 'external',
+      workloadType: 'Deployment' as const,
+      namespace: {
+        name: 'same-space',
+        ownerId,
+        ...(storage ? { storage } : {}),
+      },
+      threadId: 'closed-id',
+      spec: {},
+    });
+    await instance.create(spec('workspace-a'));
+    await instance.close('closed-id', spec('workspace-a').namespace);
+
+    await expect(instance.create(spec('workspace-b'))).rejects.toThrow(
+      'another namespace',
+    );
+    expect(
+      instance.get('closed-id', spec('workspace-b').namespace),
+    ).toBeUndefined();
+    // A restart forgets live handles, not owners.
+    const restarted = mountAgenetes({
+      drivers: { external: driver },
+      threadStore,
+    });
+    await expect(restarted.create(spec('workspace-b'))).rejects.toThrow(
+      'another namespace',
+    );
+    await expect(restarted.create(spec('workspace-a'))).resolves.toBeDefined();
+  },
+);

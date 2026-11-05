@@ -783,6 +783,22 @@ export function createAgenetesInstance(
         ? await threadStore.get(incoming.spec.namespace, incoming.spec.threadId)
         : undefined;
       const prior = rawPrior ? validateRecord(rawPrior) : undefined;
+      // A store may key records by namespace name alone; a record another
+      // owner wrote under the same name is theirs, live or not. One written
+      // before namespaces had owners names none, and belongs to whoever
+      // finds it under their namespace.
+      const ownerOf = (namespace: Namespace) =>
+        'ownerId' in namespace ? namespace.ownerId : undefined;
+      const priorOwner = prior && ownerOf(prior.spec.namespace);
+      if (
+        priorOwner !== undefined &&
+        priorOwner !== ownerOf(incoming.spec.namespace)
+      )
+        throw new AgenetesError(
+          'invalid_workload',
+          'Thread belongs to another namespace',
+          { reason: 'namespace_conflict' },
+        );
       if (prior && prior.spec.kind !== incoming.spec.kind) {
         throw new AgenetesError(
           'invalid_workload',
