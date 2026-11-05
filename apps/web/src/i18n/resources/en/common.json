@@ -1674,7 +1674,7 @@
     "removeRole": "Remove from this Workspace",
     "addToWorkspace": "Add to a Workspace…",
     "resetDevices": "Reset devices",
-    "resetDevicesConfirm": "{{name}}'s devices disconnect, their running agents stop, and every connection command they copied stops working. Their devices are released, so whoever connects one next owns it.",
+    "resetDevicesConfirm": "{{name}}'s devices disconnect, their running agents stop, and every connection command they copied stops working.",
     "resetDevicesDone": "{{name}}'s device credentials were reset.",
     "role": {
       "owner": "Owner",

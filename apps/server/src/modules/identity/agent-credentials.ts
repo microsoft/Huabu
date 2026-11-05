@@ -101,9 +101,8 @@ function credentialVersion(principalId: string): number {
  * disconnect their devices and running agents. They reconnect with a new
  * connection command; nobody else's devices are affected.
  *
- * It also releases their devices: a machine they no longer use, or one
- * shared with someone who should own it now, is claimed again by whoever
- * next connects it. Their own devices re-claim theirs on reconnecting.
+ * Their devices stay theirs: a device's Profiles and conversations are
+ * authorized through its owner, so handing the device on would hand them on.
  */
 export function resetAgentCredentials(principalId: string): void {
   const versions = readMap(versionsPath(), versionsSchema);
@@ -111,19 +110,20 @@ export function resetAgentCredentials(principalId: string): void {
     ...versions,
     [principalId]: credentialVersion(principalId) + 1,
   });
-  const gateway = getAgentletGateway();
-  for (const connection of [
-    ...(gateway?.getSessions() ?? []),
-    ...(gateway?.getAgentlets() ?? []),
-  ])
-    if (agentletOwner(connection.agentletId) === principalId)
-      connection.disconnect('Device credentials were reset');
-  const owners = readMap(ownersPath(), ownersSchema);
-  const kept = Object.fromEntries(
-    Object.entries(owners).filter(([, owner]) => owner !== principalId),
-  );
-  if (Object.keys(kept).length !== Object.keys(owners).length)
-    writeMap(ownersPath(), kept);
+  const disconnect = () => {
+    const gateway = getAgentletGateway();
+    for (const connection of [
+      ...(gateway?.getSessions() ?? []),
+      ...(gateway?.getAgentlets() ?? []),
+    ])
+      if (agentletOwner(connection.agentletId) === principalId)
+        connection.disconnect('Device credentials were reset');
+  };
+  disconnect();
+  // A handshake admitted just before the reset registers its connection
+  // once its authentication resolves, without another macrotask between
+  // them; it is not in the Gateway yet, so sweep again once it is.
+  setImmediate(disconnect);
 }
 
 type Unsigned = {
@@ -205,11 +205,16 @@ export function requireOwnAgentlet(agentletId: string): void {
 /** Called by the Gateway's existing host-owned authentication port. */
 export function authenticateUserAgentlet(service: IdentityService) {
   return async (agentletId: string, token: string) => {
+    const admitted = readAgentCredential(token);
+    if (admitted?.aud !== 'device')
+      throw new Error('User device credential required');
+    const identity = await service.resolvePrincipal?.(admitted.principalId);
+    if (!identity?.member) throw new Error('Device owner is not admitted');
+    // The credential may have been reset during the lookup, after its
+    // devices were disconnected; this one is not connected yet.
     const claims = readAgentCredential(token);
     if (claims?.aud !== 'device')
       throw new Error('User device credential required');
-    const identity = await service.resolvePrincipal?.(claims.principalId);
-    if (!identity?.member) throw new Error('Device owner is not admitted');
     const owners = readMap(ownersPath(), ownersSchema);
     if (
       Object.hasOwn(owners, agentletId) &&

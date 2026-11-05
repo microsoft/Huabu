@@ -480,11 +480,10 @@ it("resets one person's device and reachback credentials without touching others
   expect(readAgentCredential(alice)).toBeNull();
   expect((await probe(reachback)).statusCode).toBe(401);
   expect((await probe(alice)).statusCode).toBe(401);
-  // Her devices are released; Bob's stay his.
-  expect(agentletOwner('alice-device')).toBeNull();
+  // Her devices stay hers, with their Profiles and conversations.
+  expect(agentletOwner('alice-device')).toBe('alice');
   expect(agentletOwner('bob-device')).toBe('bob');
-  await expect(authenticate('shared-box', bob)).resolves.toBeDefined();
-  expect(agentletOwner('shared-box')).toBe('bob');
+  await expect(authenticate('shared-box', bob)).rejects.toThrow('another user');
   await expect(authenticate('alice-device', alice)).rejects.toThrow(
     'User device credential',
   );
@@ -587,6 +586,33 @@ it.each([false, true])(
         'connected',
       );
       expect(await connect('alice-device', alice)).toHaveProperty('error');
+      // Her device, and the Profile on it, are not Bob's to claim.
+      expect(await connect('alice-device', bob)).toHaveProperty('error');
+      expect((await list('bob')).profiles).toEqual([]);
+      expect((await list('alice')).profiles).toHaveLength(1);
+
+      // A handshake admitted just before a reset does not connect after it.
+      const renewed = await h.as('alice', ownDeviceCredential);
+      let admit!: () => void;
+      const admitted = new Promise<void>((resolve) => (admit = resolve));
+      let looking!: () => void;
+      const lookup = new Promise<void>((resolve) => (looking = resolve));
+      const resolvePrincipal = h.service.resolvePrincipal?.bind(h.service);
+      const gate = vi
+        .spyOn(h.service, 'resolvePrincipal')
+        .mockImplementationOnce(async (id) => {
+          looking();
+          await admitted;
+          return (await resolvePrincipal?.(id)) ?? null;
+        });
+      const late = connect('late-device', renewed);
+      await lookup;
+      resetAgentCredentials('alice');
+      admit();
+      expect(await late).toHaveProperty('error');
+      expect(getAgentletGateway()?.getAgentlet('late-device')).toBeUndefined();
+      expect(agentletOwner('late-device')).toBeNull();
+      gate.mockRestore();
     } finally {
       for (const socket of sockets) socket.close();
     }

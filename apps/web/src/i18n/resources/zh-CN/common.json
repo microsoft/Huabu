@@ -1674,7 +1674,7 @@
     "removeRole": "从此工作区移除",
     "addToWorkspace": "添加到工作区…",
     "resetDevices": "重置设备",
-    "resetDevicesConfirm": "{{name}} 的设备会断开连接，其正在运行的智能体会停止，其复制过的所有连接命令都将失效。其设备会被释放，之后由下一个连接该设备的人拥有。",
+    "resetDevicesConfirm": "{{name}} 的设备会断开连接，其正在运行的智能体会停止，其复制过的所有连接命令都将失效。",
     "resetDevicesDone": "已重置 {{name}} 的设备凭据。",
     "role": {
       "owner": "所有者",
