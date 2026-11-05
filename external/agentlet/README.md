@@ -18,7 +18,7 @@ It contains no AI or host-application logic. The daemon accepts authenticated co
 
 Agentlet does not provide a standalone relay server, REST API, browser UI, token administration service, or durable session/event store. Those control-plane responsibilities belong to the embedding host and its Gateway.
 
-The bundled `proxy` harness is a deterministic ACP agent, not an AI provider. It advertises only `fs-list` and `fs-read` through available commands and accepts `/COMMAND ` followed by a strict JSON object with an absolute `path` and optional stateless continuation cursor. Native read-only operations use the daemon account's filesystem permissions, follow ordinary symlinks, and never execute input as shell commands. Each response is one versioned JSON result or explicit error; listing, UTF-8 reads and serialized output are bounded. The executable is built beside the daemon and needs no downloaded runtime. Hosts decide whether and how to expose this capability to their owner.
+The bundled `proxy` harness is a deterministic ACP agent, not an AI provider. Its `initialize` response declares `agentCapabilities._meta["com.microsoft.agentlet/filesystem"] = { version: 1 }`, identifying the complete fixed read-only `fs-list` / `fs-read` contract. `@agentlet/protocol` exports the canonical extension key, capability value and `supportsFsProtocol` validator. Hosts can validate compatibility before creating a session and must not require a separate command-announcement handshake. The proxy still advertises both commands through `available_commands_update` for older hosts. It accepts `/COMMAND ` followed by a strict JSON object with an absolute `path` and optional stateless continuation cursor. Native read-only operations use the daemon account's filesystem permissions, follow ordinary symlinks, and never execute input as shell commands. Each response is one versioned JSON result or explicit error; listing, UTF-8 reads and serialized output are bounded. The executable is built beside the daemon and needs no downloaded runtime. Hosts decide whether and how to expose this capability to their owner.
 
 ## Packages
 
@@ -39,6 +39,8 @@ pnpm install
 pnpm build
 pnpm test
 ```
+
+After building, `pnpm --filter agentlet test` runs the focused filesystem initialization-capability, stdio and harness/bootstrap regressions; embedding workspaces can include them through their normal recursive test command. Set `AGENTLET_FS_PROXY_TEST_ENTRY` to an absolute bundled `fs-proxy.js` path to exercise the production bundle instead of `tsc` output; the harness test uses its sibling `index.js` as the daemon entry.
 
 ## Run the daemon
 

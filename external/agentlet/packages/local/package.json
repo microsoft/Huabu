@@ -13,7 +13,8 @@
   "scripts": {
     "build": "node --input-type=module -e \"import { rmSync } from 'node:fs'; rmSync('dist', { recursive: true, force: true });\" && tsc",
     "clean": "rm -rf dist",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "test": "vitest run --root ../.. packages/protocol/tests/filesystem.test.ts packages/local/tests/fs-proxy.test.ts"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^0.22.1",
@@ -23,6 +24,7 @@
   },
   "devDependencies": {
     "@types/ws": "^8.5.0",
-    "typescript": "^6.0.3"
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.11"
   }
 }

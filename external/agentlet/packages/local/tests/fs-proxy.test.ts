@@ -5,14 +5,21 @@ import { spawn } from 'node:child_process'
 import { once } from 'node:events'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { createInterface } from 'node:readline'
 import { fileURLToPath } from 'node:url'
+import { supportsFsProtocol } from '@agentlet/protocol'
 import { expect, it } from 'vitest'
+import { AgentProcess } from '../src/agent-process.js'
+import { proxyHarness } from '../src/harnesses/proxy.js'
+import { Logger } from '../src/logger.js'
+import { bootstrapSession } from '../src/session-bootstrap.js'
+
+const proxyEntry = process.env.AGENTLET_FS_PROXY_TEST_ENTRY ?? fileURLToPath(new URL('../dist/fs-proxy.js', import.meta.url))
 
 it('speaks ACP over stdio with discoverable deterministic filesystem commands', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'proxy-acp-'))
-  const child = spawn(process.execPath, [process.env.AGENTLET_FS_PROXY_TEST_ENTRY ?? fileURLToPath(new URL('../dist/fs-proxy.js', import.meta.url))], { stdio: 'pipe' })
+  const child = spawn(process.execPath, [proxyEntry], { stdio: 'pipe' })
   const lines = createInterface({ input: child.stdout })
   const notifications: Array<Record<string, unknown>> = []
   const pending = new Map<number, (packet: Record<string, unknown>) => void>()
@@ -35,9 +42,15 @@ it('speaks ACP over stdio with discoverable deterministic filesystem commands', 
   })
   try {
     await writeFile(join(directory, 'source.tex'), '\\documentclass{article}')
-    expect(await request('initialize', { protocolVersion: 1, clientCapabilities: {} })).toMatchObject({
+    const initialized = await request('initialize', { protocolVersion: 1, clientCapabilities: {} })
+    expect(initialized).toMatchObject({
       protocolVersion: 1, agentInfo: { name: 'proxy' },
+      agentCapabilities: { loadSession: false,
+        _meta: { 'com.microsoft.agentlet/filesystem': { version: 1 } } },
     })
+    if (!initialized || typeof initialized !== 'object' || !('agentCapabilities' in initialized)) throw new Error('Missing ACP capabilities')
+    expect(supportsFsProtocol(initialized.agentCapabilities)).toBe(true)
+    expect(notifications).toEqual([])
     const session = await request('session/new', { cwd: directory, mcpServers: [] })
     if (!session || typeof session !== 'object' || !('sessionId' in session)) throw new Error('Missing ACP session')
     expect(JSON.stringify(notifications)).toContain('available_commands_update')
@@ -59,6 +72,45 @@ it('speaks ACP over stdio with discoverable deterministic filesystem commands', 
     child.kill()
     await closed
     lines.close()
+    await rm(directory, { recursive: true, force: true })
+  }
+})
+
+it('preserves filesystem capability through harness launch and daemon bootstrap', async () => {
+  const argv = process.argv
+  let command: string
+  try {
+    process.argv = [process.execPath, join(dirname(proxyEntry), 'index.js')]
+    command = proxyHarness.compile().command
+  } finally { process.argv = argv }
+  const directory = await mkdtemp(join(tmpdir(), 'proxy-bootstrap-'))
+  const agent = new AgentProcess({ command, cwd: directory })
+  const errors: Error[] = []
+  agent.on('error', (error) => errors.push(error))
+  try {
+    agent.start()
+    const profile = await bootstrapSession(agent, {
+      cwd: directory, timeout: 5000,
+    }, new Logger('error'))
+    expect(profile.initializeResult).toMatchObject({
+      protocolVersion: 1, agentInfo: { name: 'proxy' },
+      agentCapabilities: { _meta: { 'com.microsoft.agentlet/filesystem': { version: 1 } } },
+    })
+    expect(profile.bootstrapNotifications).toContainEqual({
+      jsonrpc: '2.0', method: 'session/update',
+      params: { sessionId: profile.sessionId, update: {
+        sessionUpdate: 'available_commands_update',
+        availableCommands: [
+          expect.objectContaining({ name: 'fs-list' }),
+          expect.objectContaining({ name: 'fs-read' }),
+        ],
+      } },
+    })
+    expect(errors).toEqual([])
+  } finally {
+    const exited = agent.running ? once(agent, 'exit', { signal: AbortSignal.timeout(5000) }) : undefined
+    await agent.kill()
+    await exited
     await rm(directory, { recursive: true, force: true })
   }
 })
