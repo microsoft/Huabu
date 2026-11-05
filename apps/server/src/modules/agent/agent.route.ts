@@ -447,10 +447,11 @@ const agentRoutes: FastifyPluginAsync = async (
     if (!parsedQuery.success) {
       return reply.code(400).send({ message: 'Invalid query parameters' });
     }
-    if (
-      !parsedQuery.data.canvasId &&
-      getRequestIdentity(request)?.owner === false
-    )
+    // Without a Space, Stop matches the thread wherever it runs; the guard
+    // authorized whichever Space the request named, possibly only in its
+    // body, so every restricted caller, administrators included, names it in
+    // the query the run is matched by.
+    if (!parsedQuery.data.canvasId && isRestrictedRequest(request))
       return reply.code(400).send({
         message: 'A conversation is addressed through its query Space',
         code: 'SPACE_ACCESS_AMBIGUOUS',

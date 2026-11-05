@@ -184,6 +184,18 @@ describe('POST /agent', () => {
           })
         ).statusCode,
       ).toBe(400);
+      // An administrator's own Space in the body does not stop another
+      // user's run of the same thread elsewhere.
+      expect(
+        (
+          await app.inject({
+            method: 'POST',
+            url: '/api/agent/stop/thread-a',
+            payload: { canvasId: 'mine' },
+            headers: { 'x-owner': 'yes' },
+          })
+        ).statusCode,
+      ).toBe(400);
       expect(mocks.stopAndWait).toHaveBeenCalledTimes(2);
       expect(mocks.stopAndWait).toHaveBeenLastCalledWith(
         'thread-a',
