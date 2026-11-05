@@ -51,7 +51,9 @@ export async function listInteractiveAuthenticators(): Promise<
   const response = await fetch(
     `${API_CONFIG.BASE_URL}/bubble/v1/auth/authenticators`,
   );
-  if (!response.ok) return null;
+  if (response.status === 404) return null;
+  if (!response.ok)
+    throw new Error(`Sign-in discovery failed: ${response.status}`);
   const body = (await response.json()) as {
     authenticators?: Array<
       Partial<InteractiveAuthenticator> & { interactive?: boolean }

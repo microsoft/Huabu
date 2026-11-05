@@ -137,6 +137,9 @@ export function SignInGate({ children }: { children: ReactNode }) {
     async (loginError?: string) => {
       if (accountChanged.current) return false;
       const run = ++latestCheck.current;
+      const needsVerification =
+        appStarted.current &&
+        useIdentityStore.getState().identity?.provider === 'bubble';
       const settle = (next: GateState) => {
         if (run !== latestCheck.current) return;
         if (next.kind === 'ready') appStarted.current = true;
@@ -156,10 +159,7 @@ export function SignInGate({ children }: { children: ReactNode }) {
         }
         // A running Bubble app stays covered until its principal is verified.
         // Local deployments keep their existing connection-error handling.
-        if (
-          !appStarted.current ||
-          useIdentityStore.getState().identity?.provider !== 'bubble'
-        ) {
+        if (!needsVerification) {
           settle({ kind: 'ready' });
           return;
         }
@@ -205,9 +205,9 @@ export function SignInGate({ children }: { children: ReactNode }) {
       try {
         authenticators = await listInteractiveAuthenticators();
       } catch {
-        if (appStarted.current) recheckLater();
+        if (needsVerification) recheckLater();
         settle(
-          appStarted.current
+          needsVerification
             ? {
                 kind: 'signIn',
                 authenticators: knownAuthenticators.current,
@@ -243,6 +243,11 @@ export function SignInGate({ children }: { children: ReactNode }) {
     [setIdentity, recheckLater],
   );
 
+  /** Every recovery verifies the original principal before retrying saves. */
+  const recover = useCallback(async () => {
+    if (await check()) await resend();
+  }, [check]);
+
   useEffect(() => {
     callback.current ??= (async () => {
       try {
@@ -265,20 +270,11 @@ export function SignInGate({ children }: { children: ReactNode }) {
       void (async () => {
         try {
           const tokens = appStarted.current ? await refreshTokens() : null;
-          if (tokens) {
-            try {
-              await adopt(tokens);
-              if (await check()) await resend();
-              return;
-            } catch (error) {
-              await check(
-                error instanceof Error ? error.message : String(error),
-              );
-              return;
-            }
-          }
-          renewing.current = false;
-          await check();
+          if (tokens) await adopt(tokens);
+          else renewing.current = false;
+          await recover();
+        } catch (error) {
+          await check(error instanceof Error ? error.message : String(error));
         } finally {
           renewing.current = false;
         }
@@ -286,19 +282,19 @@ export function SignInGate({ children }: { children: ReactNode }) {
     };
     window.addEventListener(AUTH_REQUIRED_EVENT, recheck);
     return () => window.removeEventListener(AUTH_REQUIRED_EVENT, recheck);
-  }, [check, adopt]);
+  }, [check, adopt, recover]);
 
   /** Sign in again without leaving the page, then resend what was refused. */
   const signInInPlace = useCallback(
     async (authenticator: InteractiveAuthenticator) => {
       try {
         await adopt(await signInWithPopup(authenticator));
-        if (await check()) await resend();
+        await recover();
       } catch (error) {
         await check(error instanceof Error ? error.message : String(error));
       }
     },
-    [adopt, check],
+    [adopt, check, recover],
   );
 
   const overlay = state.kind === 'signIn' && appStarted.current;

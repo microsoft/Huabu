@@ -10,6 +10,29 @@ afterEach(() => {
   sessionStorage.clear();
 });
 
+it('recognizes an absent Bubble discovery route', async () => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => new Response(null, { status: 404 })),
+  );
+  const { listInteractiveAuthenticators } = await import('./identity');
+  await expect(listInteractiveAuthenticators()).resolves.toBeNull();
+});
+
+it.each([401, 429, 500, 503])(
+  'does not treat discovery HTTP %i as an absent Bubble deployment',
+  async (status) => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(null, { status })),
+    );
+    const { listInteractiveAuthenticators } = await import('./identity');
+    await expect(listInteractiveAuthenticators()).rejects.toThrow(
+      String(status),
+    );
+  },
+);
+
 it('waits for outstanding session writes before logout and refuses new adoptions', async () => {
   let release!: () => void;
   const calls: string[] = [];

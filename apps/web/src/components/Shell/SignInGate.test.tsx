@@ -369,6 +369,90 @@ describe('SignInGate', () => {
     expect(container.textContent).toBe('app');
   });
 
+  it.each([429, 503])(
+    'keeps a running Bubble app covered and retries after discovery HTTP %i',
+    async (status) => {
+      routes['GET /api/identity'] = () => json(MEMBER);
+      await mount();
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      resend.mockClear();
+      try {
+        routes['GET /api/identity'] = () => json({}, 401);
+        routes['GET /bubble/v1/auth/authenticators'] = () => json({}, status);
+        await act(async () =>
+          window.dispatchEvent(new Event(AUTH_REQUIRED_EVENT)),
+        );
+        expect(container.querySelector('[role="dialog"]')).not.toBeNull();
+        expect(container.querySelector('[inert]')).not.toBeNull();
+        expect(resend).not.toHaveBeenCalled();
+
+        routes['GET /bubble/v1/auth/authenticators'] = () =>
+          json({ authenticators: [ENTRA] });
+        await act(async () => vi.advanceTimersByTime(2_000));
+        expect(container.textContent).toContain('auth.continueWith');
+        expect(container.querySelector('[inert]')).not.toBeNull();
+        expect(resend).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it('leaves a running local deployment to the browser on a Basic Auth challenge', async () => {
+    routes['GET /api/identity'] = () => json({ ...MEMBER, provider: 'local' });
+    await mount();
+    routes['GET /api/identity'] = () => json({}, 401);
+    routes['GET /bubble/v1/auth/authenticators'] = () => json({}, 401);
+    await act(async () => window.dispatchEvent(new Event(AUTH_REQUIRED_EVENT)));
+    expect(container.textContent).toBe('app');
+    expect(container.querySelector('[role="dialog"]')).toBeNull();
+  });
+
+  it('resends refused saves when the existing cookie recovers without a refresh token', async () => {
+    routes['GET /api/identity'] = () => json(MEMBER);
+    await mount();
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    resend.mockClear();
+    try {
+      routes['GET /api/identity'] = () => {
+        throw new TypeError('Failed to fetch');
+      };
+      routes['GET /bubble/v1/auth/authenticators'] = () =>
+        json({ authenticators: [ENTRA] });
+      await act(async () =>
+        window.dispatchEvent(new Event(AUTH_REQUIRED_EVENT)),
+      );
+      expect(container.querySelector('[role="dialog"]')).not.toBeNull();
+      expect(resend).not.toHaveBeenCalled();
+
+      routes['GET /api/identity'] = () => json(MEMBER);
+      await act(async () => vi.advanceTimersByTime(2_000));
+      expect(container.textContent).toBe('app');
+      expect(container.querySelector('[inert]')).toBeNull();
+      expect(resend).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not resend old edits when a recovered cookie belongs to another account', async () => {
+    routes['GET /api/identity'] = () => json(MEMBER);
+    await mount();
+    resend.mockClear();
+    const reload = vi
+      .spyOn(window.location, 'reload')
+      .mockImplementation(() => {});
+    routes['GET /api/identity'] = () =>
+      json({
+        ...MEMBER,
+        principal: { ...MEMBER.principal, principalId: 'dave' },
+      });
+    await act(async () => window.dispatchEvent(new Event(AUTH_REQUIRED_EVENT)));
+    expect(reload).toHaveBeenCalledOnce();
+    expect(resend).not.toHaveBeenCalled();
+    expect(container.textContent).not.toContain('app');
+  });
+
   it('stays on the screen and says so when the Server does not confirm sign-out', async () => {
     routes['GET /api/identity'] = () => json({ ...MEMBER, member: false });
     routes['DELETE /api/identity/session'] = () => json({}, 503);
