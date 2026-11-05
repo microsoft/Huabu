@@ -225,6 +225,14 @@ async function enterable(
   return getWorkspaceRepository().list(allowed === 'all' ? undefined : allowed);
 }
 
+async function canEnter(
+  request: FastifyRequest,
+  workspaceId: string,
+): Promise<boolean> {
+  const allowed = await requireRequestIdentity(request).access.workspaces();
+  return allowed === 'all' || allowed.includes(workspaceId);
+}
+
 async function canManage(
   request: FastifyRequest,
   workspaceId: string,
@@ -279,11 +287,15 @@ const workspacesRoutes: FastifyPluginAsync = async (app) => {
   /**
    * Adopt (or find) the Disk folder at `requestedPath` as a Workspace, and
    * name it when a name is given. Storage without Workspace folders refuses.
+   *
+   * `authorize` vets a folder that is already a registered Workspace, before
+   * anything about it changes; refused, the caller learns only "not found".
    */
   async function adoptFolder(
     requestedPath: string,
     name: string | undefined,
     reply: FastifyReply,
+    authorize?: (workspace: WorkspaceHandle) => Promise<boolean>,
   ): Promise<{ workspace: WorkspaceHandle; created: boolean } | FastifyReply> {
     if (!storageServes('workspace-directory'))
       return sendError(
@@ -296,6 +308,8 @@ const workspacesRoutes: FastifyPluginAsync = async (app) => {
       const workspacePath = resolveWorkspacePath(requestedPath);
       const repository = getWorkspaceRepository();
       const existing = workspaceAtDirectory(workspacePath);
+      if (existing && authorize && !(await authorize(existing)))
+        return sendError(reply, 404, 'Workspace not found');
       if (existing) {
         const current = reconcileActiveWorkspaceLocation(
           existing,
@@ -314,6 +328,20 @@ const workspacesRoutes: FastifyPluginAsync = async (app) => {
         workspaceId: preparedManifest.workspaceId,
         name: preparedManifest.name,
       };
+      // Another spelling of a registered Workspace's folder (a symlink, say)
+      // reaches the same manifest, and is that Workspace rather than a new one.
+      const registered = authorize
+        ? await repository.get(preparedWorkspace.workspaceId)
+        : null;
+      if (registered && authorize) {
+        if (!(await authorize(registered)))
+          return sendError(reply, 404, 'Workspace not found');
+        if (!name) return { workspace: registered, created: false };
+        const renamed =
+          (await repository.rename(registered.workspaceId, name)) ?? registered;
+        updateActiveWorkspaceHandle(renamed);
+        return { workspace: renamed, created: false };
+      }
       let workspace: WorkspaceHandle;
       const processActive = getProcessWorkspaceHandle();
       if (processActive?.workspaceId === preparedWorkspace.workspaceId) {
@@ -351,13 +379,20 @@ const workspacesRoutes: FastifyPluginAsync = async (app) => {
           id: workspace.workspaceId,
         });
       if (parsed.data.path) {
+        // A folder that is already someone's Workspace stays theirs: renaming
+        // it takes manage access, opening it any grant, and neither claims it.
+        const name = parsed.data.name;
         const adopted = await adoptFolder(
           parsed.data.path,
-          parsed.data.name,
+          name,
           reply,
+          async (workspace) =>
+            name
+              ? canManage(request, workspace.workspaceId)
+              : canEnter(request, workspace.workspaceId),
         );
         if (!('workspace' in adopted)) return adopted;
-        await claim(adopted.workspace);
+        if (adopted.created) await claim(adopted.workspace);
         return reply
           .status(adopted.created ? 201 : 200)
           .send(descriptor(adopted.workspace));

@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+import { symlinkSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { InMemoryBubbleStore } from '@octostaff/bubble';
@@ -319,6 +320,77 @@ export function describeSeveralPeople(
         ).status,
       ).toBe(404);
     });
+
+    it.runIf(folders)(
+      'keeps a folder Workspace with the person who opened it',
+      async () => {
+        const { call, store, workspaceOf } = await host();
+        await workspaceOf('dave');
+        const folder = join(scratch(), 'carols-folder');
+        const opened = await call('carol', 'POST', '/api/workspaces', {
+          path: folder,
+          name: 'Carol folder',
+        });
+        expect(opened.status).toBe(201);
+        const id = opened.body.workspaceId as string;
+        // Another spelling of the same folder is the same Workspace.
+        const alias = join(scratch(), 'carols-alias');
+        symlinkSync(folder, alias, 'dir');
+        const renameAttempt = { name: 'Mine now' };
+
+        // Without a grant the folder is somebody's Workspace, not theirs.
+        for (const path of [folder, alias]) {
+          for (const body of [{ path }, { path, ...renameAttempt }])
+            expect(
+              (await call('dave', 'POST', '/api/workspaces', body)).status,
+            ).toBe(404);
+        }
+
+        // A viewer may open it by path, but neither renames nor owns it.
+        await store.grants.add({
+          target: { type: 'huabu.workspace', id },
+          principalId: 'dave',
+          role: 'huabu.workspace.viewer',
+          grantedByPrincipalId: 'carol',
+        });
+        for (const path of [folder, alias]) {
+          const reopened = await call('dave', 'POST', '/api/workspaces', {
+            path,
+          });
+          expect(reopened.status).toBe(200);
+          expect(reopened.body.workspaceId).toBe(id);
+          expect(
+            (
+              await call('dave', 'POST', '/api/workspaces', {
+                path,
+                ...renameAttempt,
+              })
+            ).status,
+          ).toBe(404);
+        }
+        expect(
+          (await call('dave', 'PATCH', `/api/workspaces/${id}`, renameAttempt))
+            .status,
+        ).toBe(404);
+        const roles = (
+          await store.grants.list({
+            target: { type: 'huabu.workspace', id },
+            principalId: 'dave',
+          })
+        ).map((grant) => grant.role);
+        expect(roles).toEqual(['huabu.workspace.viewer']);
+
+        // Its owner still names it by path.
+        const renamed = await call('carol', 'POST', '/api/workspaces', {
+          path: folder,
+          name: 'Renamed',
+        });
+        expect(renamed).toMatchObject({
+          status: 200,
+          body: { workspaceId: id, name: 'Renamed' },
+        });
+      },
+    );
 
     it('advertises top-level Space creation only where the caller may write the Workspace', async () => {
       const { call, store, workspaceOf } = await host();
