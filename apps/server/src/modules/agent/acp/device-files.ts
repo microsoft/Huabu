@@ -12,7 +12,7 @@ import {
   getAgentProfileRegistry,
   getAgentletGateway,
 } from '@agenetes/agentlet-host';
-import { FS_MAX_RESPONSE_BYTES } from '@agentlet/protocol';
+import { FS_MAX_RESPONSE_BYTES, supportsFsProtocol } from '@agentlet/protocol';
 
 import { proxyFsResponseSchema } from '@huabu/shared';
 
@@ -268,16 +268,14 @@ export class DeviceFilesService {
           this.assertCurrent(session);
         }
         if (
-          !['fs-list', 'fs-read'].every((name) =>
-            session.entry?.availableCommands.some(
-              (command) => command.name === name,
-            ),
+          !supportsFsProtocol(
+            session.entry.client.initializeResult?.agentCapabilities,
           )
         ) {
           throw new DeviceFilesError(
             'files_proxy_incompatible',
             503,
-            'Filesystem proxy does not advertise the required commands',
+            'Filesystem proxy capability is missing or incompatible; update Agentlet to enable Files',
           );
         }
       }
