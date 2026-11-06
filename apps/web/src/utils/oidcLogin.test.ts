@@ -24,6 +24,7 @@ const ENTRA = {
 afterEach(() => {
   forgetTokens();
   sessionStorage.clear();
+  localStorage.clear();
   window.history.replaceState(null, '', '/');
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
@@ -400,9 +401,14 @@ describe('keeping the session across reloads and tabs', () => {
         expect(heard).toContainEqual(expect.objectContaining({ type: 'held' })),
       );
       // A tab that rotated it hands on the newer one, which is redeemed next.
+      localStorage.setItem('huabu.oidc.refresh.revision', 'peer-rotation');
       tab.postMessage({
         type: 'held',
-        held: { authenticator: ENTRA, refreshToken: 'from-peer' },
+        held: {
+          authenticator: ENTRA,
+          refreshToken: 'from-peer',
+          revision: 'peer-rotation',
+        },
       });
       await vi.waitFor(() =>
         expect(sessionStorage.getItem('huabu.oidc.refresh')).toContain(
@@ -411,6 +417,34 @@ describe('keeping the session across reloads and tabs', () => {
       );
       await refreshTokens();
       expect(refreshed).toEqual(['from-peer']);
+      const current = JSON.parse(
+        sessionStorage.getItem('huabu.oidc.refresh') ?? 'null',
+      ) as { refreshToken: string; revision: string };
+      await vi.waitFor(() =>
+        expect(heard).toContainEqual(
+          expect.objectContaining({ type: 'held', held: current }),
+        ),
+      );
+      heard.length = 0;
+      // An older reply can arrive after rotation. It must not replace the
+      // current token or become the answer when another tab asks for it.
+      tab.postMessage({
+        type: 'held',
+        held: {
+          authenticator: ENTRA,
+          refreshToken: 'stale-peer',
+          revision: 'peer-rotation',
+        },
+      });
+      tab.postMessage({ type: 'want' });
+      await vi.waitFor(() =>
+        expect(heard).toContainEqual(
+          expect.objectContaining({ type: 'held', held: current }),
+        ),
+      );
+      expect(sessionStorage.getItem('huabu.oidc.refresh')).not.toContain(
+        'stale-peer',
+      );
       tab.postMessage({ type: 'forget' });
       await vi.waitFor(() =>
         expect(sessionStorage.getItem('huabu.oidc.refresh')).toBeNull(),

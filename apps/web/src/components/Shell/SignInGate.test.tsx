@@ -245,9 +245,15 @@ describe('SignInGate', () => {
   it('opens a new or reloaded tab on the session another tab can renew', async () => {
     const tab = new BroadcastChannel('huabu.oidc');
     try {
+      localStorage.setItem('huabu.oidc.refresh.revision', 'current-peer');
       tab.postMessage({
         type: 'held',
-        held: { authenticator: ENTRA, refreshToken: 'kept', expiresAt: 0 },
+        held: {
+          authenticator: ENTRA,
+          refreshToken: 'kept',
+          expiresAt: 0,
+          revision: 'current-peer',
+        },
       });
       await vi.waitFor(() =>
         expect(sessionStorage.getItem('huabu.oidc.refresh')).toContain('kept'),

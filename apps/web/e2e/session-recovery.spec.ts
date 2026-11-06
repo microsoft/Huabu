@@ -6,6 +6,118 @@ import { expect, test } from '@playwright/test';
 import { openNewCanvas } from './helpers';
 
 import type * as CanvasModule from '../src/store/canvasStore';
+import type * as OidcModule from '../src/utils/oidcLogin';
+
+for (const currentPeerRemains of [true, false]) {
+  test(`does not reuse a rotated token after a tab reload (current peer: ${currentPeerRemains})`, async ({
+    context,
+    page,
+  }) => {
+    // Keep browser storage, channels, locks and the OIDC module real. Only
+    // the provider and the document's delayed module startup are fixtures.
+    await context.route('**/session-rotation-probe', (route) =>
+      route.fulfill({ contentType: 'text/html', body: '<html></html>' }),
+    );
+    const presented: string[] = [];
+    let currentToken = 'refresh-1';
+    let familyRevoked = false;
+    await context.route('https://auth.example/**', (route) => {
+      const headers = { 'Access-Control-Allow-Origin': '*' };
+      if (route.request().url().endsWith('openid-configuration'))
+        return route.fulfill({
+          headers,
+          json: { token_endpoint: 'https://auth.example/token' },
+        });
+      const grant = new URLSearchParams(route.request().postData() ?? '');
+      if (grant.get('grant_type') === 'refresh_token') {
+        const token = grant.get('refresh_token') ?? '';
+        presented.push(token);
+        if (familyRevoked || token !== currentToken) {
+          familyRevoked = true;
+          return route.fulfill({
+            status: 400,
+            headers,
+            json: { error: 'invalid_grant' },
+          });
+        }
+        currentToken = `refresh-${presented.length + 1}`;
+      }
+      return route.fulfill({
+        headers,
+        json: {
+          access_token: 'fixture-access',
+          refresh_token: currentToken,
+          expires_in: 3600,
+        },
+      });
+    });
+
+    await page.goto('/session-rotation-probe');
+    await page.evaluate(async () => {
+      const modulePath = '/src/utils/oidcLogin.ts';
+      const oidc = (await import(modulePath)) as typeof OidcModule;
+      sessionStorage.setItem(
+        'huabu.oidc.pending',
+        JSON.stringify({
+          state: 'rotation-probe',
+          verifier: 'fixture-verifier',
+          returnTo: '/session-rotation-probe',
+          authenticator: {
+            driver: 'auth0',
+            issuer: 'https://auth.example',
+            authorizationUrl: 'https://auth.example/authorize',
+            clientId: 'fixture-spa',
+            scopes: ['openid'],
+          },
+        }),
+      );
+      history.replaceState(
+        null,
+        '',
+        '/auth/callback?state=rotation-probe&code=fixture-code',
+      );
+      await oidc.completeLogin();
+    });
+    const reloadingTab = await context.newPage();
+    await reloadingTab.goto('/session-rotation-probe');
+    await reloadingTab.evaluate(async () => {
+      const modulePath = '/src/utils/oidcLogin.ts';
+      await import(modulePath);
+    });
+    await expect
+      .poll(() =>
+        reloadingTab.evaluate(() =>
+          sessionStorage.getItem('huabu.oidc.refresh'),
+        ),
+      )
+      .toContain('refresh-1');
+
+    // B misses A's rotation while its replacement document is loading.
+    await reloadingTab.reload();
+    const renew = async () => {
+      const modulePath = '/src/utils/oidcLogin.ts';
+      const oidc = (await import(modulePath)) as typeof OidcModule;
+      return Boolean(await oidc.refreshTokens());
+    };
+    expect(await page.evaluate(renew)).toBe(true);
+    expect(presented).toEqual(['refresh-1']);
+    if (!currentPeerRemains) await page.close();
+
+    expect(await reloadingTab.evaluate(renew)).toBe(currentPeerRemains);
+    if (currentPeerRemains) {
+      expect(await page.evaluate(renew)).toBe(true);
+      expect(presented).toEqual(['refresh-1', 'refresh-2', 'refresh-3']);
+    } else {
+      // Without a current peer, require sign-in instead of risking the family.
+      expect(presented).toEqual(['refresh-1']);
+    }
+    expect(familyRevoked).toBe(false);
+    expect(
+      await reloadingTab.evaluate(() => JSON.stringify(localStorage)),
+    ).not.toContain('refresh-');
+    await reloadingTab.close();
+  });
+}
 
 test('keeps edits covered during discovery failure and saves them after cookie recovery', async ({
   page,

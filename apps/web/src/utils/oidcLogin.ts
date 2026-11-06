@@ -18,6 +18,8 @@ import type { InteractiveAuthenticator } from '../api/identity';
 const PENDING_KEY = 'huabu.oidc.pending';
 const PROVIDER_KEY = 'huabu.oidc.provider';
 const HELD_KEY = 'huabu.oidc.refresh';
+/** Only this non-secret revision is shared durably; tokens stay in sessionStorage. */
+const REVISION_KEY = 'huabu.oidc.refresh.revision';
 const PEER_CHANNEL = 'huabu.oidc';
 const REFRESH_LOCK = 'huabu.oidc.refresh';
 
@@ -48,6 +50,8 @@ export interface SignedInTokens {
 interface HeldRefresh {
   authenticator: InteractiveAuthenticator;
   refreshToken: string;
+  /** Matches the shared revision only while this token is the latest one. */
+  revision: string;
   /**
    * When the access token this refresh token last produced expires, in epoch
    * milliseconds; absent when the provider did not say.
@@ -59,7 +63,7 @@ interface HeldRefresh {
 type PeerMessage =
   /** The latest refresh token; adopt it in place of an older one. */
   | { type: 'held'; held: HeldRefresh }
-  /** A tab without a refresh token asks whoever holds one. */
+  /** A new or stale tab asks whoever holds the current refresh token. */
   | { type: 'want' }
   /** Someone signed out or in again; the shared refresh token is void. */
   | { type: 'forget' };
@@ -68,6 +72,7 @@ function isHeldRefresh(value: unknown): value is HeldRefresh {
   const candidate = value as Partial<HeldRefresh> | null;
   return (
     typeof candidate?.refreshToken === 'string' &&
+    typeof candidate.revision === 'string' &&
     typeof candidate.authenticator?.driver === 'string' &&
     typeof candidate.authenticator.issuer === 'string' &&
     typeof candidate.authenticator.clientId === 'string' &&
@@ -76,12 +81,23 @@ function isHeldRefresh(value: unknown): value is HeldRefresh {
   );
 }
 
+/** `undefined` means storage is unavailable: only this document may renew. */
+function sharedRevision(): string | null | undefined {
+  try {
+    return localStorage.getItem(REVISION_KEY);
+  } catch {
+    return undefined;
+  }
+}
+
 function readStoredHeld(): HeldRefresh | null {
   try {
     const stored: unknown = JSON.parse(
       sessionStorage.getItem(HELD_KEY) ?? 'null',
     );
-    return isHeldRefresh(stored) ? stored : null;
+    return isHeldRefresh(stored) && sharedRevision() !== undefined
+      ? stored
+      : null;
   } catch {
     return null;
   }
@@ -100,6 +116,14 @@ const peers =
 /** Hold `next` in this tab, and offer it to the others unless it came from them. */
 function setHeld(next: HeldRefresh | null, { share = true } = {}): void {
   held = next;
+  if (share) {
+    try {
+      if (next) localStorage.setItem(REVISION_KEY, next.revision);
+      else localStorage.removeItem(REVISION_KEY);
+    } catch {
+      /* Without shared storage, renew only in the document that signed in. */
+    }
+  }
   try {
     if (next) sessionStorage.setItem(HELD_KEY, JSON.stringify(next));
     else sessionStorage.removeItem(HELD_KEY);
@@ -119,19 +143,51 @@ function post(message: PeerMessage): void {
 
 peers?.addEventListener('message', (event: MessageEvent) => {
   const message = event.data as Partial<PeerMessage> | null;
-  if (message?.type === 'held' && isHeldRefresh(message.held))
+  if (
+    message?.type === 'held' &&
+    isHeldRefresh(message.held) &&
+    message.held.revision === sharedRevision()
+  )
     setHeld(message.held, { share: false });
-  else if (message?.type === 'want' && held) post({ type: 'held', held });
+  else if (
+    message?.type === 'want' &&
+    held &&
+    held.revision === sharedRevision()
+  )
+    post({ type: 'held', held });
   else if (message?.type === 'forget') {
     tokenGeneration += 1;
     refreshing = null;
-    setHeld(null);
+    setHeld(null, { share: false });
   }
 });
 
-// A new or reloaded tab without a refresh token asks the others for theirs;
-// the answer arrives well before its first identity check returns.
-if (!held) post({ type: 'want' });
+// Even a reloaded tab with a stored token may have missed a rotation.
+post({ type: 'want' });
+
+/** Under the refresh lock, recover a missed broadcast or refuse the stale token. */
+async function currentRefresh(): Promise<HeldRefresh | null> {
+  const revision = sharedRevision();
+  if (revision === undefined) return held;
+  if (!revision) return null;
+  if (held?.revision === revision) return held;
+  if (!peers) return null;
+  return new Promise((resolve) => {
+    const finish = (current: HeldRefresh | null) => {
+      window.clearTimeout(timer);
+      peers.removeEventListener('message', receive);
+      resolve(current);
+    };
+    const receive = () => {
+      const latest = sharedRevision();
+      if (!latest || held?.revision === latest) finish(latest ? held : null);
+    };
+    // A closed or suspended peer cannot answer; require sign-in, never replay.
+    const timer = window.setTimeout(() => finish(null), 1_000);
+    peers.addEventListener('message', receive);
+    post({ type: 'want' });
+  });
+}
 
 /**
  * Run `redeem` while no other Huabu tab redeems the shared refresh token.
@@ -144,12 +200,7 @@ function withRefreshLock<T>(redeem: () => Promise<T>): Promise<T> {
     }
   ).locks;
   if (!locks) return redeem();
-  return locks.request(REFRESH_LOCK, async () => {
-    // A tab that just redeemed it posted the rotated token before releasing
-    // the lock; let that message land before reading which one to present.
-    await new Promise((resolve) => window.setTimeout(resolve, 0));
-    return redeem();
-  });
+  return locks.request(REFRESH_LOCK, redeem);
 }
 
 function base64Url(bytes: Uint8Array): string {
@@ -231,6 +282,7 @@ async function requestTokens(
   grant: Record<string, string>,
 ): Promise<SignedInTokens> {
   const generation = tokenGeneration;
+  const revision = sharedRevision();
   const { token_endpoint: tokenEndpoint } =
     await providerMetadata(authenticator);
   if (!tokenEndpoint)
@@ -261,6 +313,9 @@ async function requestTokens(
       token.error_description ?? 'Sign-in could not be completed',
     );
   }
+  // A missed sign-out/sign-in broadcast must not restore the former token.
+  if (revision !== sharedRevision())
+    throw new Error('Sign-in changed during the token exchange');
   // Providers that rotate refresh tokens send a new one with each use.
   if (generation === tokenGeneration) {
     signedInAuthenticator = authenticator;
@@ -274,7 +329,12 @@ async function requestTokens(
         ? { expiresAt: Date.now() + token.expires_in * 1000 }
         : {};
     if (token.refresh_token)
-      setHeld({ authenticator, refreshToken: token.refresh_token, ...expiry });
+      setHeld({
+        authenticator,
+        refreshToken: token.refresh_token,
+        revision: crypto.randomUUID(),
+        ...expiry,
+      });
     else if (grant.grant_type === 'authorization_code') setHeld(null);
     else if (held) setHeld({ ...held, ...expiry });
   }
@@ -414,12 +474,11 @@ export async function signInWithPopup(
  */
 export function refreshTokens(): Promise<SignedInTokens | null> {
   if (refreshing) return refreshing;
-  if (!held) return Promise.resolve(null);
   const generation = tokenGeneration;
   const attempt = (async () => {
     try {
       return await withRefreshLock(async () => {
-        const current = held;
+        const current = await currentRefresh();
         if (!current || generation !== tokenGeneration) return null;
         try {
           const tokens = await requestTokens(current.authenticator, {
