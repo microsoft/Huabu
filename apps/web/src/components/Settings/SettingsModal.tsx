@@ -28,7 +28,10 @@ import { GeneralSettings } from './sections/GeneralSettings';
 import { LLMSettings } from './sections/LLMSettings';
 import { PeopleSettings } from './sections/PeopleSettings';
 import { ServicesSettings } from './sections/ServicesSettings';
-import { useIdentityStore } from '../../store/identityStore';
+import {
+  useIdentityStore,
+  useManagesDeployment,
+} from '../../store/identityStore';
 
 /** Identifiers for the settings tabs (left-nav order). */
 type SettingsTab = SettingsTabId;
@@ -76,9 +79,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const { t } = useTranslation();
   const identity = useIdentityStore((s) => s.identity);
   const admin = identity?.owner === true;
-  // Deployment readiness is the administrator's in Bubble; elsewhere it is the
-  // one caller's, signed in or not, as it always was.
-  const showsReadiness = admin || identity?.provider !== 'bubble';
+  const showsReadiness = useManagesDeployment();
   const tabs =
     identity?.provider === 'bubble' && admin ? [...TABS, PEOPLE_TAB] : TABS;
   const llmInit = useLLMStore((s) => s.init);
