@@ -119,6 +119,45 @@ for (const currentPeerRemains of [true, false]) {
   });
 }
 
+test('waits for a verified initial identity before allowing edits', async ({
+  page,
+}) => {
+  let available = false;
+  let identityRequests = 0;
+  let writes = 0;
+  await page.route('**/api/identity', (route) => {
+    identityRequests++;
+    return route.fulfill({
+      status: available ? 200 : 503,
+      json: available
+        ? {
+            provider: 'bubble',
+            principal: { principalId: 'dave', kind: 'user' },
+            member: true,
+            owner: false,
+          }
+        : {},
+    });
+  });
+  await page.route('**/api/canvas**', (route) => {
+    if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(route.request().method()))
+      writes++;
+    return route.continue();
+  });
+  await page.goto('/');
+  const create = page
+    .getByRole('button', { name: /New Space|Create your first Space/i })
+    .first();
+  await expect.poll(() => identityRequests).toBeGreaterThan(1);
+  await expect(create).toHaveCount(0);
+  expect(writes).toBe(0);
+  available = true;
+  await expect(create).toBeVisible();
+  await create.click();
+  await page.waitForURL(/\/canvas\//);
+  expect(writes).toBeGreaterThan(0);
+});
+
 test('keeps edits covered during discovery failure and saves them after cookie recovery', async ({
   page,
 }, testInfo) => {

@@ -165,9 +165,12 @@ export function SignInGate({ children }: { children: ReactNode }) {
           return;
         }
         // A running Bubble app stays covered until its principal is verified.
-        // Local deployments keep their existing connection-error handling.
+        // A running local app keeps its own connection-error handling.
         if (!needsVerification) {
-          settle({ kind: 'ready' });
+          // Starting without an identity would leave recovery unable to tell
+          // whose edits it was about to replay. Wait for the first check.
+          if (!appStarted.current) recheckLater();
+          settle({ kind: appStarted.current ? 'ready' : 'checking' });
           return;
         }
         recheckLater();
@@ -192,8 +195,11 @@ export function SignInGate({ children }: { children: ReactNode }) {
         if (run !== latestCheck.current) return false;
         const principal = identity.principal.principalId;
         if (
-          originalPrincipal.current &&
-          originalPrincipal.current !== principal
+          (originalPrincipal.current &&
+            originalPrincipal.current !== principal) ||
+          (appStarted.current &&
+            identity.provider === 'bubble' &&
+            !originalPrincipal.current)
         ) {
           accountChanged.current = true;
           window.clearTimeout(renewalTimer.current);
@@ -227,6 +233,11 @@ export function SignInGate({ children }: { children: ReactNode }) {
       try {
         authenticators = await listInteractiveAuthenticators();
       } catch {
+        if (!appStarted.current) {
+          recheckLater();
+          settle({ kind: 'checking' });
+          return;
+        }
         if (needsVerification) recheckLater();
         settle(
           needsVerification
@@ -267,7 +278,8 @@ export function SignInGate({ children }: { children: ReactNode }) {
 
   /** Every recovery verifies the original principal before retrying saves. */
   const recover = useCallback(async () => {
-    if (await check()) await resend();
+    const wasStarted = appStarted.current;
+    if ((await check()) && wasStarted) await resend();
   }, [check]);
 
   useEffect(() => {

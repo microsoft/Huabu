@@ -123,6 +123,29 @@ async function mount(strict = false) {
 }
 
 describe('SignInGate', () => {
+  it.each(['identity', 'discovery'])(
+    'waits for initial %s recovery before starting the app or replaying edits',
+    async (unavailable) => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      routes['GET /api/identity'] = () =>
+        json({}, unavailable === 'identity' ? 503 : 401);
+      routes['GET /bubble/v1/auth/authenticators'] = () => json({}, 503);
+      resend.mockClear();
+      try {
+        await mount();
+        expect(container.textContent).not.toContain('app');
+        expect(useIdentityStore.getState().identity).toBeNull();
+        routes['GET /api/identity'] = () => json(MEMBER);
+        await act(async () => vi.advanceTimersByTimeAsync(2_000));
+        expect(container.textContent).toBe('app');
+        expect(useIdentityStore.getState().identity).toEqual(MEMBER);
+        expect(resend).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
   it('renders the app at once for a resolved member', async () => {
     routes['GET /api/identity'] = () => json(MEMBER);
     await mount();
@@ -415,12 +438,12 @@ describe('SignInGate', () => {
     }
   });
 
-  it('falls back to the app when sign-in discovery fails', async () => {
+  it('keeps the app closed when initial sign-in discovery is malformed', async () => {
     routes['GET /api/identity'] = () => json({}, 401);
     routes['GET /bubble/v1/auth/authenticators'] = () =>
       new Response('not json', { status: 200 });
     await mount();
-    expect(container.textContent).toBe('app');
+    expect(container.textContent).not.toContain('app');
   });
 
   it.each([429, 503])(

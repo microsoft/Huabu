@@ -104,6 +104,8 @@ function readStoredHeld(): HeldRefresh | null {
 }
 
 let held: HeldRefresh | null = readStoredHeld();
+/** An unsuccessful revision write permits renewal only in this document. */
+let revisionWriteFailed = false;
 let tokenGeneration = 0;
 let refreshing: Promise<SignedInTokens | null> | null = null;
 let signedInAuthenticator: InteractiveAuthenticator | null = null;
@@ -116,12 +118,19 @@ const peers =
 /** Hold `next` in this tab, and offer it to the others unless it came from them. */
 function setHeld(next: HeldRefresh | null, { share = true } = {}): void {
   held = next;
+  revisionWriteFailed = false;
   if (share) {
     try {
       if (next) localStorage.setItem(REVISION_KEY, next.revision);
       else localStorage.removeItem(REVISION_KEY);
     } catch {
-      /* Without shared storage, renew only in the document that signed in. */
+      revisionWriteFailed = true;
+      // A readable but unwritable store must not advertise an older token.
+      try {
+        localStorage.removeItem(REVISION_KEY);
+      } catch {
+        /* Storage may be disabled altogether. */
+      }
     }
   }
   try {
@@ -130,7 +139,7 @@ function setHeld(next: HeldRefresh | null, { share = true } = {}): void {
   } catch {
     /* Storage may be disabled; memory still renews this page. */
   }
-  if (share && next) post({ type: 'held', held: next });
+  if (share && next && !revisionWriteFailed) post({ type: 'held', held: next });
 }
 
 function post(message: PeerMessage): void {
@@ -168,7 +177,7 @@ post({ type: 'want' });
 /** Under the refresh lock, recover a missed broadcast or refuse the stale token. */
 async function currentRefresh(): Promise<HeldRefresh | null> {
   const revision = sharedRevision();
-  if (revision === undefined) return held;
+  if (revision === undefined || (!revision && revisionWriteFailed)) return held;
   if (!revision) return null;
   if (held?.revision === revision) return held;
   if (!peers) return null;

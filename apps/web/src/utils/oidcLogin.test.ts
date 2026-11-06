@@ -45,6 +45,57 @@ async function holdRefreshToken() {
 }
 
 describe('session renewal', () => {
+  it('renews only this document when the shared revision cannot be written', async () => {
+    const tab = new BroadcastChannel('huabu.oidc');
+    const heard: unknown[] = [];
+    tab.addEventListener('message', (event) => heard.push(event.data));
+    const setItem = localStorage.setItem;
+    let writable = false;
+    vi.spyOn(localStorage, 'setItem').mockImplementation(
+      (key: string, value: string) => {
+        if (!writable && key === 'huabu.oidc.refresh.revision')
+          throw new DOMException('Storage is full', 'QuotaExceededError');
+        return setItem(key, value);
+      },
+    );
+    const refreshed: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input).endsWith('openid-configuration'))
+          return Response.json({
+            token_endpoint: 'https://login.example/token',
+          });
+        const grant = new URLSearchParams(String(init?.body));
+        if (grant.get('grant_type') === 'refresh_token')
+          refreshed.push(grant.get('refresh_token') ?? '');
+        return Response.json({
+          access_token: 'access',
+          refresh_token: `refresh-${refreshed.length + 1}`,
+        });
+      }),
+    );
+    try {
+      await holdRefreshToken();
+      expect(await refreshTokens()).not.toBeNull();
+      expect(await refreshTokens()).not.toBeNull();
+      expect(refreshed).toEqual(['refresh-1', 'refresh-2']);
+      expect(localStorage.getItem('huabu.oidc.refresh.revision')).toBeNull();
+      tab.postMessage({ type: 'want' });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(heard).not.toContainEqual(
+        expect.objectContaining({ type: 'held' }),
+      );
+      writable = true;
+      await holdRefreshToken();
+      await vi.waitFor(() =>
+        expect(heard).toContainEqual(expect.objectContaining({ type: 'held' })),
+      );
+    } finally {
+      tab.close();
+    }
+  });
+
   it('shares one rotating refresh across concurrent callers and permits the next rotation', async () => {
     let release!: (response: Response) => void;
     const pending = new Promise<Response>((resolve) => {

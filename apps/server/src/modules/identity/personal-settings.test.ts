@@ -9,6 +9,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ResolvedIdentity } from './service.js';
 
+// Logging is outside the settings boundary. Module resets must not open
+// asynchronous file destinations in directories that afterEach removes.
+vi.mock('../../utils/logger.js', async () => {
+  const { default: pino } = await import('pino');
+  const logger = pino({ enabled: false });
+  return { logger, getLogger: () => logger };
+});
+
 /**
  * A member's model keys and connected credentials are their own: the secret
  * store and the settings files answer from a personal namespace, and the
