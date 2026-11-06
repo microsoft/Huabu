@@ -494,8 +494,9 @@ it("resets one person's device and reachback credentials without touching others
   expect(agentletOwner('alice-device')).toBe('alice');
   expect(agentletOwner('bob-device')).toBe('bob');
   await expect(authenticate('shared-box', bob)).rejects.toThrow('another user');
+  // Her revoked command says so, instead of looking malformed.
   await expect(authenticate('alice-device', alice)).rejects.toThrow(
-    'User device credential',
+    'Device credentials were reset; copy a new connection command',
   );
   await expect(authenticate('bob-device', bob)).resolves.toBeDefined();
   // A new connection command reconnects the same device.

@@ -141,8 +141,11 @@ function sign(claims: Unsigned): string {
   return `${message}.${signature}`;
 }
 
-/** Purpose-separated credentials never expose the host's machine credential. */
-export function readAgentCredential(token: string): Claims | null {
+/**
+ * The claims of a credential this Server signed, whatever version it carries.
+ * Only {@link readAgentCredential} decides whether it is still honored.
+ */
+function signedClaims(token: string): Claims | null {
   if (!token.startsWith(PREFIX) || token.length > 8192) return null;
   const parts = token.slice(PREFIX.length).split('.');
   if (parts.length !== 2) return null;
@@ -160,13 +163,27 @@ export function readAgentCredential(token: string): Claims | null {
     const claims = claimsSchema.safeParse(
       JSON.parse(Buffer.from(payload, 'base64url').toString()),
     );
-    return claims.success &&
-      claims.data.v === credentialVersion(claims.data.principalId)
-      ? claims.data
-      : null;
+    return claims.success ? claims.data : null;
   } catch {
     return null;
   }
+}
+
+/** Purpose-separated credentials never expose the host's machine credential. */
+export function readAgentCredential(token: string): Claims | null {
+  const claims = signedClaims(token);
+  return claims && claims.v === credentialVersion(claims.principalId)
+    ? claims
+    : null;
+}
+
+/** Why a device's credential is refused, in words its owner can act on. */
+function refusedDeviceCredential(token: string): Error {
+  return new Error(
+    signedClaims(token)?.aud === 'device'
+      ? 'Device credentials were reset; copy a new connection command from Devices and Agents'
+      : 'User device credential required',
+  );
 }
 
 export function ownDeviceCredential(): string {
@@ -206,15 +223,13 @@ export function requireOwnAgentlet(agentletId: string): void {
 export function authenticateUserAgentlet(service: IdentityService) {
   return async (agentletId: string, token: string) => {
     const admitted = readAgentCredential(token);
-    if (admitted?.aud !== 'device')
-      throw new Error('User device credential required');
+    if (admitted?.aud !== 'device') throw refusedDeviceCredential(token);
     const identity = await service.resolvePrincipal?.(admitted.principalId);
     if (!identity?.member) throw new Error('Device owner is not admitted');
     // The credential may have been reset during the lookup, after its
     // devices were disconnected; this one is not connected yet.
     const claims = readAgentCredential(token);
-    if (claims?.aud !== 'device')
-      throw new Error('User device credential required');
+    if (claims?.aud !== 'device') throw refusedDeviceCredential(token);
     const owners = readMap(ownersPath(), ownersSchema);
     if (
       Object.hasOwn(owners, agentletId) &&
