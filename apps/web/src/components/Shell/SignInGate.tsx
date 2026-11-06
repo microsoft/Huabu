@@ -50,6 +50,8 @@ type GateState =
 /** Bounds for rechecking a running app's session while the Server is unreachable. */
 const RECHECK_MIN_MS = 2_000;
 const RECHECK_MAX_MS = 30_000;
+/** How often a person waiting for admission asks again, while the page is visible. */
+const NO_ACCESS_RECHECK_MS = 15_000;
 
 /**
  * The session is an HttpOnly cookie for this origin, which an API on any
@@ -305,6 +307,24 @@ export function SignInGate({ children }: { children: ReactNode }) {
     window.addEventListener(AUTH_REQUIRED_EVENT, recheck);
     return () => window.removeEventListener(AUTH_REQUIRED_EVENT, recheck);
   }, [check, adopt, recover]);
+
+  // Someone waiting for access is admitted by an administrator elsewhere, so
+  // ask again now and then, and whenever they come back to the page.
+  const awaitingAccess = state.kind === 'noAccess';
+  useEffect(() => {
+    if (!awaitingAccess) return;
+    const recheckAccess = () => {
+      if (document.visibilityState === 'visible') void check();
+    };
+    const timer = window.setInterval(recheckAccess, NO_ACCESS_RECHECK_MS);
+    window.addEventListener('focus', recheckAccess);
+    document.addEventListener('visibilitychange', recheckAccess);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener('focus', recheckAccess);
+      document.removeEventListener('visibilitychange', recheckAccess);
+    };
+  }, [awaitingAccess, check]);
 
   /** Sign in again without leaving the page, then resend what was refused. */
   const signInInPlace = useCallback(

@@ -280,6 +280,16 @@ describe('SignInGate', () => {
     ).toBe(false);
   });
 
+  it('admits someone waiting for access when they return to the page', async () => {
+    routes['GET /api/identity'] = () => json({ ...MEMBER, member: false });
+    await mount();
+    expect(container.textContent).toContain('auth.noAccessTitle');
+    routes['GET /api/identity'] = () => json(MEMBER);
+    await act(async () => window.dispatchEvent(new Event('focus')));
+    for (let i = 0; i < 5; i++) await act(async () => {});
+    expect(container.textContent).toBe('app');
+  });
+
   it('completes a provider redirect by handing the token to the Server', async () => {
     sessionStorage.setItem(
       'huabu.oidc.pending',
