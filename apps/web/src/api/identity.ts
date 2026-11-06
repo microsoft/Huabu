@@ -84,10 +84,58 @@ export async function listInteractiveAuthenticators(): Promise<
 let signingOut = false;
 const adoptions = new Set<Promise<void>>();
 
-/** Hand an access token to the Server, which keeps it in an HttpOnly cookie. */
-export function startSession(accessToken: string): Promise<void> {
+/**
+ * Every Huabu tab writes the one session cookie. Writes and sign-out's
+ * deletion take turns under this Web Lock, so a renewal another tab has in
+ * flight finishes before sign-out deletes the cookie, never after it.
+ */
+const SESSION_LOCK = 'huabu.session';
+/**
+ * Set, in `localStorage`, when any tab signs this browser out, and cleared
+ * by the next sign-in someone completes. Holds only a timestamp. A renewal
+ * that reaches the lock after a sign-out finds it and stays signed out.
+ */
+const SIGNED_OUT_KEY = 'huabu.session.signedOut';
+
+function withSessionLock<T>(write: () => Promise<T>): Promise<T> {
+  const locks = (
+    navigator as Navigator & {
+      locks?: { request: (name: string, cb: () => Promise<T>) => Promise<T> };
+    }
+  ).locks;
+  return locks ? locks.request(SESSION_LOCK, write) : write();
+}
+
+function signedOutElsewhere(): boolean {
+  try {
+    return localStorage.getItem(SIGNED_OUT_KEY) !== null;
+  } catch {
+    return false;
+  }
+}
+
+function markSignedOut(signedOut: boolean): void {
+  try {
+    if (signedOut) localStorage.setItem(SIGNED_OUT_KEY, String(Date.now()));
+    else localStorage.removeItem(SIGNED_OUT_KEY);
+  } catch {
+    /* Without storage, the lock alone orders this tab's writes. */
+  }
+}
+
+/**
+ * Hand an access token to the Server, which keeps it in an HttpOnly cookie.
+ * A `renewal` redeemed from a refresh token never restores a session that a
+ * tab signed out of meanwhile; a sign-in the person completed always may.
+ */
+export function startSession(
+  accessToken: string,
+  { renewal = false }: { renewal?: boolean } = {},
+): Promise<void> {
   if (signingOut) return Promise.reject(new Error('Sign-out is in progress'));
-  const adoption = (async () => {
+  const adoption = withSessionLock(async () => {
+    if (renewal && signedOutElsewhere())
+      throw new Error('Signed out in another tab');
     // Session rejection is handled by the gate; broadcasting another 401 here
     // would recursively start another renewal.
     const response = await fetch(`${API_CONFIG.API_URL}/identity/session`, {
@@ -95,7 +143,8 @@ export function startSession(accessToken: string): Promise<void> {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
     if (!response.ok) throw new Error('Sign-in was not accepted');
-  })();
+    if (!renewal) markSignedOut(false);
+  });
   adoptions.add(adoption);
   void adoption.then(
     () => adoptions.delete(adoption),
@@ -123,8 +172,13 @@ export async function signOut(
   forgetTokens({ keepProvider: true });
   await Promise.allSettled([...adoptions]);
   try {
-    await endSession();
+    await withSessionLock(async () => {
+      markSignedOut(true);
+      await endSession();
+    });
   } catch (error) {
+    // The session survives, so its renewals may continue.
+    markSignedOut(false);
     signingOut = false;
     throw error;
   }

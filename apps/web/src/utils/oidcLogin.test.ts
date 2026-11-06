@@ -76,10 +76,13 @@ describe('session renewal', () => {
     expect(refreshCalls).toBe(1);
     release(Response.json({ access_token: 'renewed', refresh_token: 'r2' }));
     expect(await Promise.all([first, second])).toEqual([
-      { accessToken: 'renewed' },
-      { accessToken: 'renewed' },
+      { accessToken: 'renewed', renewal: true },
+      { accessToken: 'renewed', renewal: true },
     ]);
-    expect(await refreshTokens()).toEqual({ accessToken: 'third' });
+    expect(await refreshTokens()).toEqual({
+      accessToken: 'third',
+      renewal: true,
+    });
   });
 
   it('does not restore a refresh token when an in-flight renewal finishes after sign-out', async () => {
@@ -257,7 +260,10 @@ describe('renewal failures', () => {
     mode = 'network';
     expect(await refreshTokens()).toBeNull();
     mode = 'recovered';
-    expect(await refreshTokens()).toEqual({ accessToken: 'fresh' });
+    expect(await refreshTokens()).toEqual({
+      accessToken: 'fresh',
+      renewal: true,
+    });
     mode = 'rejected';
     expect(await refreshTokens()).toBeNull();
     tokenFetch.mockClear();
@@ -413,5 +419,54 @@ describe('keeping the session across reloads and tabs', () => {
     } finally {
       tab.close();
     }
+  });
+
+  it('lets two tabs redeem a rotating refresh token one at a time', async () => {
+    // The test DOM has no Web Locks; grant requests in order, as browsers do.
+    const tails = new Map<string, Promise<unknown>>();
+    vi.spyOn(navigator, 'locks', 'get').mockReturnValue({
+      request: (name: string, callback: () => Promise<unknown>) => {
+        const run = (tails.get(name) ?? Promise.resolve()).then(callback);
+        tails.set(
+          name,
+          run.catch(() => {}),
+        );
+        return run;
+      },
+    } as unknown as LockManager);
+    let release: (() => void) | undefined;
+    const presented: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input).endsWith('openid-configuration'))
+          return Response.json({ token_endpoint: 'https://login.example/t' });
+        const grant = new URLSearchParams(String(init?.body));
+        if (grant.get('grant_type') === 'authorization_code')
+          return Response.json({ access_token: 'a0', refresh_token: 'r1' });
+        const token = grant.get('refresh_token') ?? '';
+        presented.push(token);
+        if (token === 'r1')
+          await new Promise<void>((resolve) => {
+            release = resolve;
+          });
+        const next = Number(token.slice(1)) + 1;
+        return Response.json({
+          access_token: `a${next}`,
+          refresh_token: `r${next}`,
+        });
+      }),
+    );
+    await holdRefreshToken();
+    vi.resetModules();
+    const otherTab = await import('./oidcLogin');
+    const first = refreshTokens();
+    await vi.waitFor(() => expect(release).toBeDefined());
+    const second = otherTab.refreshTokens();
+    release?.();
+    await Promise.all([first, second]);
+    // Auth0 revokes the whole family if a used token is presented again.
+    expect(presented).toEqual(['r1', 'r2']);
+    otherTab.forgetTokens();
   });
 });

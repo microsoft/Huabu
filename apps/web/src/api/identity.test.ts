@@ -8,6 +8,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
   sessionStorage.clear();
+  localStorage.clear();
 });
 
 it('recognizes an absent Bubble discovery route', async () => {
@@ -56,6 +57,65 @@ it('waits for outstanding session writes before logout and refuses new adoptions
   release();
   await Promise.all([adoption, logout]);
   expect(calls).toEqual(['POST', 'DELETE']);
+});
+
+it('lets another tab finish its renewal before signing out, and keeps later renewals out', async () => {
+  let release: (() => void) | undefined;
+  let held = true;
+  const calls: string[] = [];
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const method = init?.method ?? 'GET';
+      calls.push(method);
+      if (method === 'POST' && held) {
+        held = false;
+        await new Promise<void>((resolve) => {
+          release = resolve;
+        });
+      }
+      return new Response(null, { status: 204 });
+    }),
+  );
+  vi.spyOn(window.location, 'assign').mockImplementation(() => {});
+  // The test DOM has no Web Locks; grant each name's requests in order, as
+  // browsers do across tabs.
+  const tails = new Map<string, Promise<unknown>>();
+  vi.spyOn(navigator, 'locks', 'get').mockReturnValue({
+    request: (name: string, callback: () => Promise<unknown>) => {
+      const run = (tails.get(name) ?? Promise.resolve()).then(callback);
+      tails.set(
+        name,
+        run.catch(() => {}),
+      );
+      return run;
+    },
+  } as unknown as LockManager);
+  // Two module instances are two tabs sharing one cookie, lock and storage.
+  const renewingTab = await import('./identity');
+  vi.resetModules();
+  const signingOutTab = await import('./identity');
+
+  const renewal = renewingTab.startSession('renewed', { renewal: true });
+  await vi.waitFor(() => expect(release).toBeDefined());
+  const logout = signingOutTab.signOut();
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  // The deletion waits for the other tab's write instead of racing it.
+  expect(calls).toEqual(['POST']);
+  release?.();
+  await Promise.all([renewal, logout]);
+  expect(calls).toEqual(['POST', 'DELETE']);
+
+  // A renewal redeemed while the other tab signed out does not sign back in.
+  await expect(
+    renewingTab.startSession('late', { renewal: true }),
+  ).rejects.toThrow('another tab');
+  expect(calls).toEqual(['POST', 'DELETE']);
+
+  // A sign-in the person completes starts again, and renewals resume.
+  await renewingTab.startSession('signed-in');
+  await renewingTab.startSession('renewed-again', { renewal: true });
+  expect(calls).toEqual(['POST', 'DELETE', 'POST', 'POST']);
 });
 
 it('uses the persisted non-secret provider after reload without another discovery request', async () => {

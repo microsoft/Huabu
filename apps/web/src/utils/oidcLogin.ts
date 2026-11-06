@@ -38,6 +38,11 @@ export interface SignedInTokens {
   accessToken: string;
   /** Seconds until the access token expires, when the provider says. */
   expiresIn?: number;
+  /**
+   * Redeemed from a refresh token rather than from a sign-in the person just
+   * completed, so it must not undo a sign-out made in another tab.
+   */
+  renewal?: true;
 }
 
 interface HeldRefresh {
@@ -422,7 +427,9 @@ export function refreshTokens(): Promise<SignedInTokens | null> {
             refresh_token: current.refreshToken,
             scope: requestedScope(current.authenticator),
           });
-          return generation === tokenGeneration ? tokens : null;
+          return generation === tokenGeneration
+            ? { ...tokens, renewal: true as const }
+            : null;
         } catch (error) {
           if (error instanceof GrantRejectedError && held === current)
             setHeld(null);

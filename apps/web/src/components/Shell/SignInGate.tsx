@@ -127,7 +127,7 @@ export function SignInGate({ children }: { children: ReactNode }) {
   /** Hand fresh tokens to the Server, and schedule their renewal. */
   const adopt = useCallback(
     async (tokens: SignedInTokens) => {
-      await startSession(tokens.accessToken);
+      await startSession(tokens.accessToken, { renewal: tokens.renewal });
       scheduleRenewal(tokens.expiresIn);
     },
     [scheduleRenewal],
