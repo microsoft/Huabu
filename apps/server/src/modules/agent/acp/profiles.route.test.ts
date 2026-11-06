@@ -756,8 +756,8 @@ it('returns no operator daemon metadata in the member catalog', async () => {
   expect(response.json()).toMatchObject({
     profiles: [],
     connectedDevices: [],
-    agentlet: { online: false },
   });
-  expect(response.json().agentlet).toEqual({ online: false });
+  // Bubble supervises no shared worker, so there is no status to act on.
+  expect(response.json().agentlet).toBeNull();
   expect(mocks.registry.listProfiles).toHaveBeenCalled();
 });

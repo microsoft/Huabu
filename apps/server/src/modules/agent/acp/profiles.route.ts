@@ -332,8 +332,10 @@ const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
         connectedDevices,
         knownDevices: [...knownDevices.values()],
         folderPickerAgentletId,
+        // Bubble mounts no supervised worker (`supervise: false`), so a
+        // status would only ever read offline and offer a restart nobody can use.
         agentlet: personalSettingsOwner()
-          ? { online: false }
+          ? null
           : getDaemonSupervisor().getStatus(),
         agentDefaults: getAgentDefaults(),
       };

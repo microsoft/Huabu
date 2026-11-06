@@ -122,7 +122,10 @@ interface AcpProfilesState {
   /** Display-only device history; never used for runtime availability. */
   knownDevices: AgentletDevice[];
   folderPickerAgentletId: string | null;
-  /** Latest agentlet snapshot. `null` until the first fetch resolves. */
+  /**
+   * Latest snapshot of the Server's own worker: `null` until the first fetch
+   * resolves, and for Bubble users, whose Server runs no shared worker.
+   */
   agentlet: AcpAgentletStatus | null;
   /** Absent on older servers; never infer a default from list ordering. */
   agentDefaults: AgentDefaults | null;

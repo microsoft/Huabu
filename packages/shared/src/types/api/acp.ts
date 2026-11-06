@@ -635,7 +635,12 @@ export const acpProfilesListResponseSchema = z.object({
   knownDevices: z.array(agentletDeviceSchema).optional(),
   /** Connected persisted device identity on the Server's filesystem; absent on older servers. */
   folderPickerAgentletId: z.string().min(1).nullable().optional(),
-  agentlet: acpAgentletStatusSchema,
+  /**
+   * Health of the Server's own supervised Agentlet worker, or `null` when this
+   * Server runs none for the caller. Bubble users connect only their own
+   * devices, so there is no shared worker whose health they could act on.
+   */
+  agentlet: acpAgentletStatusSchema.nullable(),
   agentDefaults: agentDefaultsSchema.optional(),
 });
 
