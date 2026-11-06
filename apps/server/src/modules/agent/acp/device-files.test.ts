@@ -1,6 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+import {
+  FS_PROXY_CAPABILITY,
+  FS_PROXY_CAPABILITY_KEY,
+} from '@agentlet/protocol';
 import Fastify from 'fastify';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -87,9 +91,14 @@ beforeEach(() => {
   );
   mocks.ensure.mockResolvedValue({
     sessionId: 'session',
-    availableCommands: [{ name: 'fs-list' }, { name: 'fs-read' }],
+    availableCommands: [],
     client: {
       isClosed: false,
+      initializeResult: {
+        agentCapabilities: {
+          _meta: { [FS_PROXY_CAPABILITY_KEY]: FS_PROXY_CAPABILITY },
+        },
+      },
       prompt: mocks.prompt,
       shutdown: mocks.shutdown,
       resolvePermission: mocks.permission,
@@ -177,6 +186,80 @@ describe('private filesystem ACP service', () => {
     });
     expect(mocks.ensure).not.toHaveBeenCalled();
   });
+
+  it('accepts initialized filesystem capability without any command announcement', async () => {
+    const entry = await mocks.ensure();
+    mocks.ensure.mockClear();
+    expect(entry.availableCommands).toEqual([]);
+    await expect(service.execute(request)).resolves.toEqual({
+      operation: 'fs-list',
+      result: listing.result,
+    });
+    expect(mocks.prompt).toHaveBeenCalledOnce();
+    expect(entry.availableCommands).toEqual([]);
+  });
+
+  it('ignores a delayed command announcement during a filesystem response', async () => {
+    const prompt = mocks.prompt.getMockImplementation();
+    if (!prompt) throw new Error('Expected filesystem prompt implementation');
+    mocks.prompt.mockImplementation(
+      async (...args: Parameters<AcpAgentClient['prompt']>) => {
+        await new Promise((resolve) => setImmediate(resolve));
+        args[2]({
+          sessionUpdate: 'available_commands_update',
+          availableCommands: [
+            { name: 'fs-list', description: 'List files' },
+            { name: 'fs-read', description: 'Read text' },
+          ],
+        });
+        return prompt(...args);
+      },
+    );
+    await expect(service.execute(request)).resolves.toEqual({
+      operation: 'fs-list',
+      result: listing.result,
+    });
+  });
+
+  it.each([
+    null,
+    {},
+    { agentCapabilities: { loadSession: false } },
+    { agentCapabilities: { fs: { readTextFile: true } } },
+    { agentCapabilities: { _meta: null } },
+    { agentCapabilities: { _meta: [] } },
+    { agentCapabilities: { _meta: { [FS_PROXY_CAPABILITY_KEY]: true } } },
+    { agentCapabilities: { _meta: { [FS_PROXY_CAPABILITY_KEY]: {} } } },
+    {
+      agentCapabilities: {
+        _meta: { [FS_PROXY_CAPABILITY_KEY]: { version: '1' } },
+      },
+    },
+    {
+      agentCapabilities: {
+        _meta: { [FS_PROXY_CAPABILITY_KEY]: { version: 2 } },
+      },
+    },
+  ])(
+    'rejects incompatible initialization metadata %j despite legacy commands',
+    async (initializeResult) => {
+      const entry = await mocks.ensure();
+      mocks.ensure.mockResolvedValueOnce({
+        ...entry,
+        availableCommands: [{ name: 'fs-list' }, { name: 'fs-read' }],
+        client: { ...entry.client, initializeResult },
+      });
+      await expect(service.execute(request)).rejects.toMatchObject({
+        code: 'files_proxy_incompatible',
+        status: 503,
+        message: expect.stringContaining('update Agentlet'),
+      });
+      expect(mocks.prompt).not.toHaveBeenCalled();
+      expect(mocks.shutdown).toHaveBeenCalledOnce();
+      expect(mocks.release).toHaveBeenCalledOnce();
+      expect(mocks.remove).toHaveBeenCalledOnce();
+    },
+  );
 
   it('serializes overlapping calls and denies unexpected permissions', async () => {
     let active = 0;
