@@ -123,7 +123,7 @@ Bubble mode accepts user-owned remote devices and does not supervise an unowned 
 - OCR never imports deployment legacy files or environment credentials for a member. Pending model OAuth flows, pi-ai runtime Models collections and live OpenAI discovery caches belong to the settings owner. Member pi-ai authentication also excludes ambient environment and file credentials.
 - Live Deployment handles retain their namespace in the runtime cache; creation checks it before persistence, and scoped lookups and closes reject another namespace. Members must address a Space even for a new conversation. Artifact inlining checks read access to the source Space. Member model transport excludes deployment environment options, uses public-network connection checks for DNS and redirect hops, and uses SSE to keep streaming on that guarded transport. Providers whose upstream adapters cannot honor a custom transport are unavailable to members.
 - Agent invocation rechecks the final binding under the turn lease. External realization and controls authorize the canonical device even when using a persisted binding or a cached handle.
-- Session refresh shares one in-flight token exchange, retains the selected provider for logout, and discards a refresh that finishes after sign-out. Popup failures reach the existing sign-in error alert. Recovery uses main's save drain to retry retained sidecar failures while keeping its conflict and restoration guards.
+- Session refresh shares one in-flight token exchange per tab and one redemption at a time across tabs, retains the selected provider for logout, and discards a refresh that finishes after sign-out. Popup failures reach the existing sign-in error alert. Recovery uses main's save drain to retry retained sidecar failures while keeping its conflict and restoration guards.
 
 ### Shared Spaces
 
@@ -132,7 +132,6 @@ A run, its pending preparations and stop requests belong to their Workspace and 
 ### Deferred
 
 - **More member model providers.** Members can use OpenAI-compatible, Azure OpenAI Responses and Anthropic Messages providers. Google (Gemini, Vertex), Bedrock and Mistral adapters bring their own HTTP transport and cannot honor the public-network guard, so they stay hidden until each is routed through it.
-- **Sessions across reload.** Refresh tokens stay in page memory; a reload after the access token expires signs in again, usually silently through the provider's own session.
 
 ### Grant administration
 
@@ -140,9 +139,9 @@ A run, its pending preparations and stop requests belong to their Workspace and 
 
 ### Session lifecycle
 
-- **Refresh.** Auth0 and Entra sign-in request `offline_access`; generic OIDC uses the configured scopes. The page holds the refresh token in memory only, and renews the session before expiry and on a 401. Timer delays are bounded, transient network failures retain the refresh token, and rejected session adoptions do not broadcast another renewal event.
+- **Refresh.** Auth0 and Entra sign-in request `offline_access`; generic OIDC uses the configured scopes. Each refresh names the original scope, which Entra requires. The refresh token and its session expiry live in the tab's `sessionStorage`, so a reload keeps renewing; tabs share the latest one over a `BroadcastChannel` and redeem it under a Web Lock so Auth0's rotation never sees a used token again. The page renews before expiry, on a 401, and on opening with a lapsed cookie. Timer delays are bounded, transient failures retain the refresh token, a provider's refusal discards it, and rejected session adoptions do not broadcast another renewal event.
 - **Re-sign-in in a popup.** When renewal is impossible, the sign-in screen opens over the running app and signs in through a popup, then resends the refused saves only after verifying the original principal. Another account forces a reload before cached data or pending edits can be reused. The overlay traps focus, makes the background inert, and restores focus on recovery.
-- **Provider logout.** `HUABU_SIGN_OUT_PROVIDER=true` makes sign-out also end the provider session through `end_session_endpoint`. The non-secret provider selection survives page reload in session storage; refresh tokens do not. Logout blocks new session adoptions and waits for existing ones before clearing the cookie.
+- **Provider logout.** `HUABU_SIGN_OUT_PROVIDER=true` makes sign-out also end the provider session through `end_session_endpoint`. The provider selection and the refresh token survive a reload in session storage; sign-out clears the refresh token in every tab. Logout blocks new session adoptions and waits for existing ones before clearing the cookie.
 
 ### Proof
 

@@ -226,9 +226,12 @@ describe('signing in again in a popup', () => {
     await expect(refreshTokens()).resolves.toMatchObject({
       accessToken: 'fresh',
     });
+    // Entra refuses a refresh without the scope its API was granted under
+    // (AADSTS90009), so the original scope is named again.
     expect(bodies[1]).toMatchObject({
       grant_type: 'refresh_token',
       refresh_token: 'refresh',
+      scope: 'api://huabu/access openid profile offline_access',
     });
   });
 
@@ -261,6 +264,31 @@ describe('renewal failures', () => {
     expect(await refreshTokens()).toBeNull();
     expect(tokenFetch).not.toHaveBeenCalled();
   });
+
+  it.each([
+    [400, 'invalid_request', false],
+    [401, 'invalid_client', false],
+    [429, 'temporarily_unavailable', true],
+    [503, 'temporarily_unavailable', true],
+  ])(
+    'after HTTP %i %s keeps the refresh token: %s',
+    async (status, error, kept) => {
+      let refused = false;
+      const tokenFetch = vi.fn(async (input: RequestInfo | URL) => {
+        if (String(input).endsWith('openid-configuration'))
+          return Response.json({ token_endpoint: 'https://login.example/t' });
+        if (refused) return Response.json({ error }, { status });
+        return Response.json({ access_token: 'a', refresh_token: 'r' });
+      });
+      vi.stubGlobal('fetch', tokenFetch);
+      await holdRefreshToken();
+      refused = true;
+      expect(await refreshTokens()).toBeNull();
+      tokenFetch.mockClear();
+      await refreshTokens();
+      expect(tokenFetch.mock.calls.length > 0).toBe(kept);
+    },
+  );
 
   it('does not request offline_access for an unconfigured generic OIDC provider', async () => {
     const popup = { closed: false, location: { href: '' }, close: vi.fn() };
@@ -307,5 +335,83 @@ describe('renewal failures', () => {
     expect(await completeLogin()).toBeNull();
     expect(postMessage).toHaveBeenCalledOnce();
     expect(close).not.toHaveBeenCalled();
+  });
+});
+
+describe('keeping the session across reloads and tabs', () => {
+  function stubTokens(refreshed: string[]) {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input).endsWith('openid-configuration'))
+          return Response.json({ token_endpoint: 'https://login.example/t' });
+        const grant = new URLSearchParams(String(init?.body));
+        if (grant.get('grant_type') === 'refresh_token')
+          refreshed.push(grant.get('refresh_token')!);
+        return Response.json({
+          access_token: 'fresh',
+          refresh_token: `r${refreshed.length + 1}`,
+          expires_in: 3600,
+        });
+      }),
+    );
+  }
+
+  it('renews after a reload from the refresh token this tab kept', async () => {
+    const refreshed: string[] = [];
+    stubTokens(refreshed);
+    await holdRefreshToken();
+    vi.resetModules();
+    const reloaded = await import('./oidcLogin');
+    expect(reloaded.heldSessionExpiresIn()).toBeGreaterThan(3500);
+    expect(await reloaded.refreshTokens()).toMatchObject({
+      accessToken: 'fresh',
+    });
+    expect(refreshed).toEqual(['r1']);
+    reloaded.forgetTokens();
+  });
+
+  it('shares the latest refresh token with other tabs and forgets it with them', async () => {
+    const refreshed: string[] = [];
+    stubTokens(refreshed);
+    const tab = new BroadcastChannel('huabu.oidc');
+    const heard: { type: string; held?: { refreshToken: string } }[] = [];
+    tab.onmessage = (event) => heard.push(event.data);
+    try {
+      await holdRefreshToken();
+      await vi.waitFor(() =>
+        expect(heard).toContainEqual(
+          expect.objectContaining({
+            type: 'held',
+            held: expect.objectContaining({ refreshToken: 'r1' }),
+          }),
+        ),
+      );
+      // A new tab asks, and is offered the one this tab holds.
+      heard.length = 0;
+      tab.postMessage({ type: 'want' });
+      await vi.waitFor(() =>
+        expect(heard).toContainEqual(expect.objectContaining({ type: 'held' })),
+      );
+      // A tab that rotated it hands on the newer one, which is redeemed next.
+      tab.postMessage({
+        type: 'held',
+        held: { authenticator: ENTRA, refreshToken: 'from-peer' },
+      });
+      await vi.waitFor(() =>
+        expect(sessionStorage.getItem('huabu.oidc.refresh')).toContain(
+          'from-peer',
+        ),
+      );
+      await refreshTokens();
+      expect(refreshed).toEqual(['from-peer']);
+      tab.postMessage({ type: 'forget' });
+      await vi.waitFor(() =>
+        expect(sessionStorage.getItem('huabu.oidc.refresh')).toBeNull(),
+      );
+      expect(await refreshTokens()).toBeNull();
+    } finally {
+      tab.close();
+    }
   });
 });

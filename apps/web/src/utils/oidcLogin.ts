@@ -6,13 +6,20 @@ import type { InteractiveAuthenticator } from '../api/identity';
 /**
  * Browser login against whichever identity provider Bubble discovery names:
  * an OAuth authorization-code flow with PKCE, so no client secret is needed.
- * The Server keeps the access token in its session cookie. This page keeps a
- * refresh token, when the provider issues one, in memory only: it renews the
- * session in place while the page lives, and is gone with it.
+ * The Server keeps the access token in its session cookie, which lapses with
+ * that token. The refresh token the provider issues renews it in place. It is
+ * kept in this tab's `sessionStorage`, so a reload keeps renewing, and is gone
+ * when the tab closes or anyone signs out. Huabu tabs share the latest one
+ * over a `BroadcastChannel`, so a new tab renews too, and take turns
+ * redeeming it under a Web Lock: a provider that rotates refresh tokens
+ * (Auth0) revokes the whole family when a used one is presented again.
  */
 
 const PENDING_KEY = 'huabu.oidc.pending';
 const PROVIDER_KEY = 'huabu.oidc.provider';
+const HELD_KEY = 'huabu.oidc.refresh';
+const PEER_CHANNEL = 'huabu.oidc';
+const REFRESH_LOCK = 'huabu.oidc.refresh';
 
 class GrantRejectedError extends Error {}
 /** A login run in a popup reports back to its opener instead of finishing. */
@@ -36,12 +43,109 @@ export interface SignedInTokens {
 interface HeldRefresh {
   authenticator: InteractiveAuthenticator;
   refreshToken: string;
+  /**
+   * When the access token this refresh token last produced expires, in epoch
+   * milliseconds; absent when the provider did not say.
+   */
+  expiresAt?: number;
 }
 
-let held: HeldRefresh | null = null;
+/** What Huabu tabs tell each other about the refresh token they share. */
+type PeerMessage =
+  /** The latest refresh token; adopt it in place of an older one. */
+  | { type: 'held'; held: HeldRefresh }
+  /** A tab without a refresh token asks whoever holds one. */
+  | { type: 'want' }
+  /** Someone signed out or in again; the shared refresh token is void. */
+  | { type: 'forget' };
+
+function isHeldRefresh(value: unknown): value is HeldRefresh {
+  const candidate = value as Partial<HeldRefresh> | null;
+  return (
+    typeof candidate?.refreshToken === 'string' &&
+    typeof candidate.authenticator?.driver === 'string' &&
+    typeof candidate.authenticator.issuer === 'string' &&
+    typeof candidate.authenticator.clientId === 'string' &&
+    (candidate.expiresAt === undefined ||
+      typeof candidate.expiresAt === 'number')
+  );
+}
+
+function readStoredHeld(): HeldRefresh | null {
+  try {
+    const stored: unknown = JSON.parse(
+      sessionStorage.getItem(HELD_KEY) ?? 'null',
+    );
+    return isHeldRefresh(stored) ? stored : null;
+  } catch {
+    return null;
+  }
+}
+
+let held: HeldRefresh | null = readStoredHeld();
 let tokenGeneration = 0;
 let refreshing: Promise<SignedInTokens | null> | null = null;
 let signedInAuthenticator: InteractiveAuthenticator | null = null;
+
+const peers =
+  typeof BroadcastChannel === 'function'
+    ? new BroadcastChannel(PEER_CHANNEL)
+    : null;
+
+/** Hold `next` in this tab, and offer it to the others unless it came from them. */
+function setHeld(next: HeldRefresh | null, { share = true } = {}): void {
+  held = next;
+  try {
+    if (next) sessionStorage.setItem(HELD_KEY, JSON.stringify(next));
+    else sessionStorage.removeItem(HELD_KEY);
+  } catch {
+    /* Storage may be disabled; memory still renews this page. */
+  }
+  if (share && next) post({ type: 'held', held: next });
+}
+
+function post(message: PeerMessage): void {
+  try {
+    peers?.postMessage(message);
+  } catch {
+    /* A closed channel only loses sharing. */
+  }
+}
+
+peers?.addEventListener('message', (event: MessageEvent) => {
+  const message = event.data as Partial<PeerMessage> | null;
+  if (message?.type === 'held' && isHeldRefresh(message.held))
+    setHeld(message.held, { share: false });
+  else if (message?.type === 'want' && held) post({ type: 'held', held });
+  else if (message?.type === 'forget') {
+    tokenGeneration += 1;
+    refreshing = null;
+    setHeld(null);
+  }
+});
+
+// A new or reloaded tab without a refresh token asks the others for theirs;
+// the answer arrives well before its first identity check returns.
+if (!held) post({ type: 'want' });
+
+/**
+ * Run `redeem` while no other Huabu tab redeems the shared refresh token.
+ * Browsers without Web Locks redeem at once.
+ */
+function withRefreshLock<T>(redeem: () => Promise<T>): Promise<T> {
+  const locks = (
+    navigator as Navigator & {
+      locks?: { request: (name: string, cb: () => Promise<T>) => Promise<T> };
+    }
+  ).locks;
+  if (!locks) return redeem();
+  return locks.request(REFRESH_LOCK, async () => {
+    // A tab that just redeemed it posted the rotated token before releasing
+    // the lock; let that message land before reading which one to present.
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+    return redeem();
+  });
+}
 
 function base64Url(bytes: Uint8Array): string {
   return btoa(String.fromCharCode(...bytes))
@@ -61,6 +165,25 @@ function redirectUri(): string {
   return `${window.location.origin}${CALLBACK_PATH}`;
 }
 
+/**
+ * The scope sign-in asks for, and asks for again on every refresh. Entra
+ * refuses a refresh that names no scope when the app's API is its own
+ * audience (AADSTS90009); naming the original scope is valid for every
+ * provider (RFC 6749 §6). `offline_access` asks for the refresh token.
+ */
+function requestedScope(authenticator: InteractiveAuthenticator): string {
+  return [
+    ...new Set([
+      ...authenticator.scopes,
+      'openid',
+      'profile',
+      ...(['entra', 'auth0'].includes(authenticator.driver)
+        ? ['offline_access']
+        : []),
+    ]),
+  ].join(' ');
+}
+
 async function authorizationUrl(
   authenticator: InteractiveAuthenticator,
   state: string,
@@ -75,18 +198,7 @@ async function authorizationUrl(
     response_type: 'code',
     client_id: authenticator.clientId,
     redirect_uri: redirectUri(),
-    // `offline_access` asks for a refresh token, so a lapsing session can be
-    // renewed without leaving the page.
-    scope: [
-      ...new Set([
-        ...authenticator.scopes,
-        'openid',
-        'profile',
-        ...(['entra', 'auth0'].includes(authenticator.driver)
-          ? ['offline_access']
-          : []),
-      ]),
-    ].join(' '),
+    scope: requestedScope(authenticator),
     state,
     code_challenge: challenge,
     code_challenge_method: 'S256',
@@ -130,10 +242,20 @@ async function requestTokens(
     error_description?: string;
     error?: string;
   };
-  if (!response.ok || !token.access_token)
-    throw new (token.error === 'invalid_grant' ? GrantRejectedError : Error)(
+  if (!response.ok || !token.access_token) {
+    // The provider answered and refused: the same request would fail again.
+    // Timeouts, rate limits and server errors may pass, so they keep it.
+    const refused =
+      token.error === 'invalid_grant' ||
+      (typeof token.error === 'string' &&
+        response.status >= 400 &&
+        response.status < 500 &&
+        response.status !== 408 &&
+        response.status !== 429);
+    throw new (refused ? GrantRejectedError : Error)(
       token.error_description ?? 'Sign-in could not be completed',
     );
+  }
   // Providers that rotate refresh tokens send a new one with each use.
   if (generation === tokenGeneration) {
     signedInAuthenticator = authenticator;
@@ -142,9 +264,14 @@ async function requestTokens(
     } catch {
       /* Storage may be disabled. */
     }
+    const expiry =
+      typeof token.expires_in === 'number' && Number.isFinite(token.expires_in)
+        ? { expiresAt: Date.now() + token.expires_in * 1000 }
+        : {};
     if (token.refresh_token)
-      held = { authenticator, refreshToken: token.refresh_token };
-    else if (grant.grant_type === 'authorization_code') held = null;
+      setHeld({ authenticator, refreshToken: token.refresh_token, ...expiry });
+    else if (grant.grant_type === 'authorization_code') setHeld(null);
+    else if (held) setHeld({ ...held, ...expiry });
   }
   return {
     accessToken: token.access_token,
@@ -276,30 +403,48 @@ export async function signInWithPopup(
 }
 
 /**
- * A fresh access token from the refresh token this page holds, or `null`
- * when it holds none or the provider refuses it.
+ * A fresh access token from the refresh token this tab holds, or that
+ * another Huabu tab offers; `null` when there is none or the provider
+ * refuses it.
  */
 export function refreshTokens(): Promise<SignedInTokens | null> {
   if (refreshing) return refreshing;
-  const current = held;
-  if (!current) return Promise.resolve(null);
+  if (!held) return Promise.resolve(null);
   const generation = tokenGeneration;
   const attempt = (async () => {
     try {
-      const tokens = await requestTokens(current.authenticator, {
-        grant_type: 'refresh_token',
-        refresh_token: current.refreshToken,
+      return await withRefreshLock(async () => {
+        const current = held;
+        if (!current || generation !== tokenGeneration) return null;
+        try {
+          const tokens = await requestTokens(current.authenticator, {
+            grant_type: 'refresh_token',
+            refresh_token: current.refreshToken,
+            scope: requestedScope(current.authenticator),
+          });
+          return generation === tokenGeneration ? tokens : null;
+        } catch (error) {
+          if (error instanceof GrantRejectedError && held === current)
+            setHeld(null);
+          return null;
+        }
       });
-      return generation === tokenGeneration ? tokens : null;
-    } catch (error) {
-      if (error instanceof GrantRejectedError && held === current) held = null;
-      return null;
     } finally {
       if (generation === tokenGeneration) refreshing = null;
     }
   })();
   refreshing = attempt;
   return attempt;
+}
+
+/**
+ * Seconds until the session this tab's refresh token last renewed expires,
+ * or `null` when it holds none or the provider gave no lifetime. A reload
+ * schedules its next renewal from it.
+ */
+export function heldSessionExpiresIn(): number | null {
+  if (held?.expiresAt === undefined) return null;
+  return (held.expiresAt - Date.now()) / 1000;
 }
 
 /** The provider this page signed in with, retained until sign-out. */
@@ -324,7 +469,8 @@ export function forgetTokens({
   keepProvider = false,
 }: { keepProvider?: boolean } = {}): void {
   tokenGeneration += 1;
-  held = null;
+  setHeld(null);
+  post({ type: 'forget' });
   if (!keepProvider) {
     signedInAuthenticator = null;
     try {

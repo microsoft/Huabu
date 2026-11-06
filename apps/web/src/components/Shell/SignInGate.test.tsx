@@ -242,6 +242,44 @@ describe('SignInGate', () => {
     expect(resend).toHaveBeenCalled();
   });
 
+  it('opens a new or reloaded tab on the session another tab can renew', async () => {
+    const tab = new BroadcastChannel('huabu.oidc');
+    try {
+      tab.postMessage({
+        type: 'held',
+        held: { authenticator: ENTRA, refreshToken: 'kept', expiresAt: 0 },
+      });
+      await vi.waitFor(() =>
+        expect(sessionStorage.getItem('huabu.oidc.refresh')).toContain('kept'),
+      );
+    } finally {
+      tab.close();
+    }
+    routes[
+      'GET https://login.example/tenant/v2.0/.well-known/openid-configuration'
+    ] = () => json({ token_endpoint: 'https://login.example/token' });
+    routes['POST https://login.example/token'] = () =>
+      json({
+        access_token: 'renewed',
+        refresh_token: 'next',
+        expires_in: 3600,
+      });
+    let signedIn = false;
+    routes['POST /api/identity/session'] = () => {
+      signedIn = true;
+      return new Response(null, { status: 204 });
+    };
+    routes['GET /api/identity'] = () =>
+      signedIn ? json(MEMBER) : json({}, 401);
+    await mount();
+    for (let i = 0; i < 10; i++) await act(async () => {});
+    // The lapsed cookie never reaches the sign-in screen.
+    expect(container.textContent).toBe('app');
+    expect(
+      calls.some((call) => call.url === '/bubble/v1/auth/authenticators'),
+    ).toBe(false);
+  });
+
   it('completes a provider redirect by handing the token to the Server', async () => {
     sessionStorage.setItem(
       'huabu.oidc.pending',

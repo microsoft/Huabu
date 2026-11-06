@@ -21,6 +21,7 @@ import { useIdentityStore } from '../../store/identityStore';
 import {
   beginLogin,
   completeLogin,
+  heldSessionExpiresIn,
   refreshTokens,
   signInWithPopup,
   type SignedInTokens,
@@ -107,14 +108,9 @@ export function SignInGate({ children }: { children: ReactNode }) {
     recheckDelay.current = Math.min(recheckDelay.current * 2, RECHECK_MAX_MS);
   }, []);
 
-  /**
-   * Hand fresh tokens to the Server, and renew them a minute before they
-   * expire while this page holds a refresh token.
-   */
-  const adopt = useCallback(async (tokens: SignedInTokens) => {
-    await startSession(tokens.accessToken);
+  /** Renew the session a minute before its access token expires. */
+  const scheduleRenewal = useCallback((expiresIn: number | undefined) => {
     window.clearTimeout(renewalTimer.current);
-    const expiresIn = tokens.expiresIn;
     if (
       typeof expiresIn === 'number' &&
       Number.isFinite(expiresIn) &&
@@ -125,6 +121,15 @@ export function SignInGate({ children }: { children: ReactNode }) {
         Math.min((expiresIn - 60) * 1000, 2 ** 31 - 1),
       );
   }, []);
+
+  /** Hand fresh tokens to the Server, and schedule their renewal. */
+  const adopt = useCallback(
+    async (tokens: SignedInTokens) => {
+      await startSession(tokens.accessToken);
+      scheduleRenewal(tokens.expiresIn);
+    },
+    [scheduleRenewal],
+  );
   useEffect(
     () => () => {
       window.clearTimeout(renewalTimer.current);
@@ -134,7 +139,7 @@ export function SignInGate({ children }: { children: ReactNode }) {
   );
 
   const check = useCallback(
-    async (loginError?: string) => {
+    async (loginError?: string, canResume = true): Promise<boolean | void> => {
       if (accountChanged.current) return false;
       const run = ++latestCheck.current;
       const needsVerification =
@@ -201,6 +206,21 @@ export function SignInGate({ children }: { children: ReactNode }) {
         );
         return identity.member;
       }
+      // A reloaded or newly opened page renews a lapsed session from the
+      // refresh token its tab kept, or another Huabu tab offers, instead of
+      // asking the person to sign in again. A running app renews on its own.
+      if (canResume && !appStarted.current && !loginError) {
+        const tokens = await refreshTokens().catch(() => null);
+        if (run !== latestCheck.current) return false;
+        if (tokens) {
+          try {
+            await adopt(tokens);
+            return await check(undefined, false);
+          } catch {
+            /* The Server refused the renewed session; sign in as usual. */
+          }
+        }
+      }
       let authenticators: InteractiveAuthenticator[] | null;
       try {
         authenticators = await listInteractiveAuthenticators();
@@ -240,7 +260,7 @@ export function SignInGate({ children }: { children: ReactNode }) {
         unsavedEdits,
       });
     },
-    [setIdentity, recheckLater],
+    [setIdentity, recheckLater, adopt],
   );
 
   /** Every recovery verifies the original principal before retrying saves. */
@@ -252,14 +272,16 @@ export function SignInGate({ children }: { children: ReactNode }) {
     callback.current ??= (async () => {
       try {
         const tokens = await completeLogin();
+        // After a reload, renew from the refresh token this tab kept.
         if (tokens) await adopt(tokens);
+        else scheduleRenewal(heldSessionExpiresIn() ?? undefined);
         return undefined;
       } catch (error) {
         return error instanceof Error ? error.message : String(error);
       }
     })();
     void callback.current.then((loginError) => check(loginError));
-  }, [check, adopt]);
+  }, [check, adopt, scheduleRenewal]);
 
   useEffect(() => {
     // A lapsed session renews in place when this page holds a refresh token;
