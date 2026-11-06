@@ -53,6 +53,24 @@ describe('invertDeltas', () => {
     const inv = invertDeltas(deltas);
     expect(inv[0]).toEqual({ type: 'DELETE_NODE', node: b });
   });
+
+  it('inverts complete sibling lists without rolling back writer metadata', () => {
+    const before = { nodes: [note('a'), note('b')], edges: [] };
+    const deltas = [
+      {
+        type: 'SET_SIBLING_ORDER' as const,
+        parentId: null,
+        before: ['a', 'b'],
+        after: ['b', 'a'],
+        orderVersion: 101,
+      },
+    ];
+    const inverse = invertDeltas(deltas);
+    expect(inverse).toEqual([
+      { ...deltas[0], before: ['b', 'a'], after: ['a', 'b'] },
+    ]);
+    expect(applyDeltas(applyDeltas(before, deltas), inverse)).toEqual(before);
+  });
 });
 
 describe('fingerprintNodeFields', () => {

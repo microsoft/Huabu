@@ -48,7 +48,15 @@ describe.each(['column', 'row'] as const)(
             id: 'frame',
             type: 'frame',
             position: { x: 100, y: 200 },
-            data: { layoutMode: axis, gridCount: 2, sizing },
+            data: {
+              layoutMode: axis,
+              gridCount: 2,
+              sizing,
+              layoutOrder: [
+                soleSource ? ['dragged'] : ['source-peer', 'dragged'],
+                ['before', 'after', 'last'],
+              ],
+            },
             style: { width: 800, height: 800 },
             measured: { width: 800, height: 800 },
           },
@@ -126,6 +134,14 @@ describe.each(['column', 'row'] as const)(
           )
           .sort((a, b) => a.position[along] - b.position[along]);
         expect(ordered.map((node) => node.id)).toEqual([
+          'before',
+          'dragged',
+          'after',
+          'last',
+        ]);
+        const order = committed.find((node) => node.id === 'frame')?.data
+          .layoutOrder as string[][];
+        expect(order[dropped.data[field] as number]).toEqual([
           'before',
           'dragged',
           'after',

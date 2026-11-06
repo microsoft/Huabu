@@ -31,6 +31,33 @@ function node(
 }
 
 describe('buildSpaceMovePlan', () => {
+  it('rekeys Frame reading lists without deriving them from paint order', () => {
+    const frame = node('frame', 'frame', 0, 0);
+    frame.data = {
+      layoutMode: 'column',
+      gridCount: 1,
+      layoutOrder: [['b', 'a']],
+    };
+    const a = node('a', 'note', 0, 0, 'frame');
+    const b = node('b', 'note', 0, 200, 'frame');
+    a.data.frameColumn = 0;
+    b.data.frameColumn = 0;
+    const plan = buildSpaceMovePlan({
+      sourceNodes: [frame, a, b],
+      sourceEdges: [],
+      destinationNodes: [],
+      selectedNodeIds: ['frame'],
+      destinationCanvasId: 'destination',
+      createSourcePreview: false,
+    });
+    const output = executeCanvasCommands(
+      { source: 'system', commands: plan.commands },
+      { nodes: [], edges: [], canvasId: 'destination' },
+    ).writeResult.nodes;
+    expect(output.find((n) => n.type === 'frame')?.data.layoutOrder).toEqual([
+      [plan.nodeIdMap.get('b'), plan.nodeIdMap.get('a')],
+    ]);
+  });
   it.each([
     { name: 'legacy auto', data: {}, height: undefined },
     {

@@ -628,6 +628,8 @@ export const FRAME_GRID_DEFAULT_COUNT = 1;
 
 /** Frame node: container for grouping other nodes */
 export interface FrameNodeData extends BaseNodeData {
+  /** Direct child IDs per numeric masonry track, separate from sibling paint order. */
+  layoutOrder?: string[][];
   type: 'frame';
   /** Layout mode applied to direct children. Defaults to `'free'`. */
   layoutMode?: FrameLayoutMode;

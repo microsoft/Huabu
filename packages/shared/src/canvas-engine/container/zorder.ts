@@ -81,6 +81,18 @@ export function assignNodeZIndices(
   return z;
 }
 
+/** Materialize the same forest order used by rendering without authoring z-index. */
+export function materializeForestOrder<T extends NestableNode>(
+  nodes: readonly T[],
+): T[] {
+  const byId = new Map(nodes.map((node) => [node.id, node]));
+  return Array.from(assignNodeZIndices(nodes).keys(), (id) => {
+    const node = byId.get(id);
+    if (!node) throw new Error(`Missing forest node: ${id}`);
+    return node;
+  });
+}
+
 /**
  * Compute an edge's render z under `zIndexMode="manual"`.
  *

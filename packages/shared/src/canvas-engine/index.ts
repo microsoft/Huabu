@@ -1,6 +1,12 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+export { readLayoutOrder, remapLayoutOrder } from './autoLayout/layoutOrder.js';
+export {
+  withMasonryLayoutOrder,
+  describeFrameLayout,
+} from './autoLayout/gridLayout.js';
+
 /**
  * @huabu/shared/canvas-engine — pure, server-portable canvas command engine.
  *
@@ -58,7 +64,24 @@ export {
 } from './postEffects.js';
 
 // ── Deltas (server → client wire diff) ────────────────────────────────────
-export { type Delta, applyDeltas, invertDelta } from './delta.js';
+export {
+  type Delta,
+  type OrderedDelta,
+  applyDeltas,
+  applyOrderedDeltas,
+  invertDelta,
+} from './delta.js';
+export {
+  type SetSiblingOrderEvent,
+  type SiblingReorderAdmission,
+  type SiblingReorderTarget,
+  isSetSiblingOrderEvent,
+  admitSiblingReorder,
+  collectSiblingOrders,
+  diffSiblingOrderEvents,
+  applySiblingOrderEvents,
+  SiblingOrderReplayError,
+} from './siblingOrder.js';
 export {
   diffCanvasState,
   TRANSIENT_NODE_FIELDS,
@@ -211,6 +234,7 @@ export {
   computeContainerFit,
   applyContainerFit,
   assignNodeZIndices,
+  materializeForestOrder,
   edgeZIndex,
 } from './container/index.js';
 export {

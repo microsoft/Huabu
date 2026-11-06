@@ -453,6 +453,12 @@ it.each([
     mode: 'grid',
     cells: [{ nodeId: 'node-ink', column: 0 }],
   },
+  {
+    type: 'SET_FRAME_LAYOUT',
+    frameId: 'node-frame',
+    mode: 'column',
+    placements: [{ nodeId: 'node-ink', after: 'node-note' }],
+  },
   { type: 'REORDER_NODES', nodeIds: ['node-note'], to: { before: 'node-ink' } },
   { type: 'REORDER_NODES', nodeIds: ['node-note'], to: { after: 'node-ink' } },
   {

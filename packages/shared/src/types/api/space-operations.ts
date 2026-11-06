@@ -16,6 +16,10 @@ import {
   canvasSearchRequestSchema,
 } from './canvas-search.js';
 import {
+  frameLayoutPlacementSchema,
+  frameLayoutDescriptionSchema,
+} from './frame-layout.js';
+import {
   ACCENT_PALETTE,
   AGENT_CANVAS_COMMAND_TYPES,
   AGENT_CREATABLE_NODE_TYPES,
@@ -344,6 +348,14 @@ export const distributeNodesCommandSchema = z
 export const setFrameLayoutCommandSchema = z
   .object({
     type: z.literal('SET_FRAME_LAYOUT'),
+    placements: z
+      .array(frameLayoutPlacementSchema)
+      .min(1)
+      .max(200)
+      .optional()
+      .describe(
+        'Column/Row only, in the current mode: move direct children before/after a live child (adopting its track), or to a zero-based track start/end. Applied in list order; each moved ID must be unique. Example: [{nodeId:"B",after:"A"}]. Do not combine with cells, counts, sizing or a mode change. Missing/foreign/locked targets reject the whole command. This changes reading order, not paint order; Grid uses cells instead.',
+      ),
     frameId: z.string().min(1).describe('Target frame node ID.'),
     mode: z
       .enum(FRAME_LAYOUT_MODES)
@@ -380,7 +392,7 @@ export const setFrameLayoutCommandSchema = z
       )
       .optional()
       .describe(
-        'Where each direct child sits. A structured frame computes every child position from its cell, so `position` cannot express this — pass `cells` whenever placement matters. `column` addresses columns, `row` addresses rows, `grid` addresses both; an index for an axis the mode lacks is ignored. Children you omit keep their current cell, or are auto-assigned from their current on-screen position if they have none. Skipping a row number in one column is how you leave that cell blank in `grid`. Keep indices small and contiguous — they are positions, not labels, and a row far beyond the child count is clamped, so do not encode meaning (a year, an ID) in them.',
+        'Zero-based direct-child track/cell assignments: column mode uses column, row mode uses row, Grid uses both; inactive-axis indices are ignored. This does not specify Column/Row intra-track order; use placements in a separate command for that. Omitted children retain their cell or receive an initial automatic assignment. In Grid, skipping a row in one column leaves a blank cell. Keep indices small: they are positions, not permanent IDs, and oversized rows are clamped.',
       ),
     sizing: z
       .enum(FRAME_SIZING_MODES)
@@ -390,7 +402,9 @@ export const setFrameLayoutCommandSchema = z
       ),
   })
   .strict()
-  .describe("Set a frame's layout mode, track count, or sizing.");
+  .describe(
+    'Set Frame layout, Grid cells, or Column/Row reading order. REORDER_NODES changes paint order instead.',
+  );
 
 export const AGENT_COMMAND_SCHEMAS = {
   CREATE_NODES: createNodesCommandSchema,
@@ -753,6 +767,7 @@ const spaceNodeResultSchema = z
     summary: z.string().optional(),
     preview: z.string().optional(),
     rev: z.string().optional(),
+    layout: frameLayoutDescriptionSchema.optional(),
     parentFrame: z
       .object({
         id: z.string(),

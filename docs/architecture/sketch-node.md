@@ -134,10 +134,10 @@ No explicit trigger; any agent turn can treat a sketch as visual content:
   to see the drawing use `snapshot_node` to render a PNG vision attachment. Tool
   def: [definitions.ts](../../apps/server/src/modules/agent/tools/definitions.ts),
   impl: [snapshot-node.ts](../../apps/server/src/modules/agent/tools/handlers/snapshot-node.ts).
-- The chat route auto-snapshots the user's selected sketch / image on the first
-  turn (nodes ≤ 200px cluster into one PNG, strokes over image); keys go into
-  user-message metadata so the agent need not re-snapshot.
+- The chat route auto-snapshots the user's selected sketch / image on the first turn (same-parent nodes ≤ 200px cluster into one PNG); keys go into user-message metadata so the agent need not re-snapshot.
 - External agents: the system prompt says "use snapshot for `sketch` / `image`, not read-node".
+
+Ordinary node snapshots paint image and Sketch layers in the authoritative forest order, not selection order or an unconditional strokes-on-top order. Each Sketch retains its own stroke sequence. The content-addressed artifact key hashes the actual SVG, so a layer reorder or changed embedded image invalidates the old raster. Frame selection expands recursively, but different parents remain separate clusters; this is not an arbitrary full-Canvas screenshot. Explicit annotation/OCR compositions retain their existing image-backdrop and stroke-rendering profiles.
 
 ### 4.1 Partial stroke selection as AI context
 

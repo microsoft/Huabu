@@ -14,6 +14,7 @@ import type {
   NodeData,
 } from './node.js';
 import type { PrefixedId } from '../../utils/id.js';
+import type { FrameLayoutPlacement } from '../api/frame-layout.js';
 /**
  * Canvas node ids follow the standard `node-<uuid>` convention.
  */
@@ -267,6 +268,8 @@ export type CanvasCommand =
        * combination back to `'hug'`.
        */
       type: 'SET_FRAME_LAYOUT';
+      /** Column/Row relative placement; exclusive with cells, counts and mode changes. */
+      placements?: FrameLayoutPlacement[];
       frameId: CanvasNodeId;
       mode: FrameLayoutMode;
       gridCount?: number;

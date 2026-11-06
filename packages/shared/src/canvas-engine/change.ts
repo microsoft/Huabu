@@ -5,17 +5,18 @@
  * Canvas change records — a human-readable summary of a mutation plus
  * the **inverse deltas** needed to undo it.
  *
- * Built purely from a batch's {@link Delta} list (the same wire diff the
- * server broadcasts), so revert is a generic, complete operation:
+ * Legacy change records are built from a batch's {@link Delta} list:
  * `applyDeltas(state, record.revertDeltas)`. This avoids per-command
  * inverse logic — deltas carry the full prior/next node objects, so the
- * inverse is exact (including restored content) for every command type.
+ * entity values include restored content, but old logs have no exact sibling
+ * order. OrderedDelta inversion below is whole-batch only; per-entity Review
+ * extraction/coalescing remains on the legacy contract.
  *
  * Pure functions only — host-agnostic, shared by server (producer) and
  * web (renderer / reverter).
  */
 
-import { invertDelta, type Delta } from './delta.js';
+import { invertDelta, type Delta, type OrderedDelta } from './delta.js';
 import { createId } from '../utils/id.js';
 
 import type { CanvasNode, CanvasEdge } from './interfaces.js';
@@ -198,10 +199,13 @@ export function nodeRevisionOf(fields: {
 
 /**
  * Invert a delta batch. To undo a sequence applied in order, invert each
- * delta and apply them in reverse order.
+ * delta and apply them in reverse order. Ordered batches must be applied
+ * atomically; orderVersion is retained, not rolled back as a live writer version.
  */
-export function invertDeltas(deltas: readonly Delta[]): Delta[] {
-  const out: Delta[] = [];
+export function invertDeltas(deltas: readonly Delta[]): Delta[];
+export function invertDeltas(deltas: readonly OrderedDelta[]): OrderedDelta[];
+export function invertDeltas(deltas: readonly OrderedDelta[]): OrderedDelta[] {
+  const out: OrderedDelta[] = [];
   for (let i = deltas.length - 1; i >= 0; i--) {
     out.push(invertDelta(deltas[i]));
   }

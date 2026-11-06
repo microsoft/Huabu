@@ -1248,6 +1248,91 @@ describe('SNAPSHOT_NODES Space query', () => {
 });
 
 describe('POST /api/rfs/:canvasId/execute', () => {
+  it('persists relative reading placement across reload, rejects stale anchors and keeps layer moves independent', async () => {
+    getCanvasStore('layout-placement').write({
+      canvasId: 'layout-placement',
+      title: 'Layout',
+      version: 1,
+      createdAt: 1,
+      updatedAt: 1,
+      state: {
+        nodes: [
+          {
+            id: 'node-frame',
+            type: 'frame',
+            position: { x: 0, y: 0 },
+            data: { layoutMode: 'column', gridCount: 1, sizing: 'manual' },
+            style: { width: 400, height: 600 },
+          },
+          ...['a', 'b', 'c'].map((id, i) => ({
+            id: `node-${id}`,
+            type: 'note',
+            parentId: 'node-frame',
+            position: { x: 20, y: 80 + i * 120 },
+            style: { width: 200, height: 100 },
+            data: { frameColumn: 0 },
+          })),
+        ],
+        edges: [],
+      },
+    });
+    const app = await buildApp();
+    try {
+      const execute = (commands: unknown[]) =>
+        app.inject({
+          method: 'POST',
+          url: '/rfs/layout-placement/execute',
+          payload: { commands },
+        });
+      const placed = await execute([
+        {
+          type: 'SET_FRAME_LAYOUT',
+          frameId: 'node-frame',
+          mode: 'column',
+          placements: [{ nodeId: 'node-c', before: 'node-a' }],
+        },
+      ]);
+      expect(placed.statusCode).toBe(200);
+      expect(placed.json().results[0].applied).toBe(true);
+      resetStorageCache();
+      const read = await app.inject({
+        method: 'POST',
+        url: '/rfs/layout-placement/query',
+        payload: { type: 'INSPECT_NODES', ids: ['node-frame'] },
+      });
+      expect(read.statusCode).toBe(200);
+      expect(spaceQueryResponseSchema.safeParse(read.json()).success).toBe(
+        true,
+      );
+      expect(read.json().result.nodes[0].layout).toEqual({
+        mode: 'column',
+        tracks: [['node-c', 'node-a', 'node-b']],
+      });
+      const invalid = await execute([
+        {
+          type: 'SET_FRAME_LAYOUT',
+          frameId: 'node-frame',
+          mode: 'column',
+          placements: [{ nodeId: 'node-b', after: 'node-missing' }],
+        },
+      ]);
+      expect(invalid.json().results[0]).toMatchObject({
+        applied: false,
+        reason: 'invalid-target',
+      });
+      const painted = await execute([
+        { type: 'REORDER_NODES', nodeIds: ['node-c'], to: 'bottom' },
+      ]);
+      expect(painted.json().results[0].applied).toBe(true);
+      resetStorageCache();
+      const record = getCanvasStore('layout-placement').read();
+      expect(record?.state.nodes[0]).toMatchObject({
+        data: { layoutOrder: [['node-c', 'node-a', 'node-b']] },
+      });
+    } finally {
+      await app.close();
+    }
+  });
   const writeWorldFixture = (
     directory: string,
     canvasId: string,

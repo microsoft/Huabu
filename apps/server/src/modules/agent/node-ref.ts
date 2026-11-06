@@ -34,7 +34,11 @@ import { nodeRevisionOf } from '@huabu/shared/canvas-engine';
 
 import { toSafeFilename } from '../../utils/naming.js';
 
-import type { CanvasNodeType, WireNodeRef } from '@huabu/shared';
+import type {
+  CanvasNodeType,
+  WireNodeRef,
+  FrameLayoutDescription,
+} from '@huabu/shared';
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -104,6 +108,8 @@ export interface AgentNodePreview extends AgentNodeRef {
  *  - inspect_nodes results
  */
 export interface AgentNodeOutline extends AgentNodePreview {
+  /** Structured Frame placement, separate from paint order. Indices are zero-based. */
+  layout?: FrameLayoutDescription;
   /** Cross-Space address exposed by a Space preview. */
   targetCanvasId?: string;
   /** Parent frame, when the node lives inside one. */

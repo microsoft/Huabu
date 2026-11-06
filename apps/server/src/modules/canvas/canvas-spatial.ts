@@ -49,6 +49,7 @@ import {
 } from '@huabu/shared';
 import {
   getLayoutNodeSize,
+  describeFrameLayout,
   type CanvasNode,
 } from '@huabu/shared/canvas-engine';
 
@@ -724,6 +725,9 @@ export async function inspectNodes(
     delete base.summary;
     delete base.preview;
     const result: InspectNodeResult = base;
+    if (raw?.type === 'frame') {
+      result.layout = describeFrameLayout([...bundle.rawById.values()], raw.id);
+    }
     const threadId = raw?.type === 'question' ? raw.data.threadId : undefined;
     if (typeof threadId === 'string' && threadId.length > 0) {
       result.threadId = threadId;
