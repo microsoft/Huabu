@@ -20,6 +20,95 @@ it('recognizes an absent Bubble discovery route', async () => {
   await expect(listInteractiveAuthenticators()).resolves.toBeNull();
 });
 
+it.each([204, 401])(
+  'notifies peers before session adoption and after HTTP %i, without sharing credentials',
+  async (status) => {
+    const peer = new BroadcastChannel('huabu.session');
+    const heard: unknown[] = [];
+    peer.onmessage = (event) => heard.push(event.data);
+    let finish!: (response: Response) => void;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => new Promise<Response>((resolve) => (finish = resolve))),
+    );
+    try {
+      const { startSession } = await import('./identity');
+      const outcome = startSession('private-test-token').then(
+        () => 'accepted',
+        () => 'refused',
+      );
+      await vi.waitFor(() => expect(heard).toEqual(['changing']));
+      finish(new Response(null, { status }));
+      expect(await outcome).toBe(status === 204 ? 'accepted' : 'refused');
+      await vi.waitFor(() => expect(heard).toEqual(['changing', 'changed']));
+    } finally {
+      peer.close();
+    }
+  },
+);
+
+it('notifies peers before cookie deletion and after a failed deletion so they can verify the surviving session', async () => {
+  const peer = new BroadcastChannel('huabu.session');
+  const heard: unknown[] = [];
+  peer.onmessage = (event) => heard.push(event.data);
+  let finish!: (response: Response) => void;
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(() => new Promise<Response>((resolve) => (finish = resolve))),
+  );
+  try {
+    const { endSession } = await import('./identity');
+    const outcome = endSession().catch(() => 'refused');
+    await vi.waitFor(() => expect(heard).toEqual(['changing']));
+    finish(new Response('{}', { status: 503 }));
+    expect(await outcome).toBe('refused');
+    await vi.waitFor(() => expect(heard).toEqual(['changing', 'changed']));
+  } finally {
+    peer.close();
+  }
+});
+
+it('verifies identity only after a pending shared-cookie write finishes', async () => {
+  let finish!: () => void;
+  let signedIn = false;
+  const calls: string[] = [];
+  const tails = new Map<string, Promise<unknown>>();
+  vi.spyOn(navigator, 'locks', 'get').mockReturnValue({
+    request: (name: string, callback: () => Promise<unknown>) => {
+      const run = (tails.get(name) ?? Promise.resolve()).then(callback);
+      tails.set(
+        name,
+        run.catch(() => {}),
+      );
+      return run;
+    },
+  } as unknown as LockManager);
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push(init?.method ?? 'GET');
+      if (init?.method === 'POST') {
+        await new Promise<void>((resolve) => (finish = resolve));
+        signedIn = true;
+        return new Response(null, { status: 204 });
+      }
+      return Response.json({
+        principal: { principalId: signedIn ? 'b' : 'a' },
+      });
+    }),
+  );
+  const { startSession, getIdentity } = await import('./identity');
+  const adoption = startSession('b-token');
+  await vi.waitFor(() => expect(finish).toBeDefined());
+  const identity = getIdentity();
+  await Promise.resolve();
+  expect(calls).toEqual(['POST']);
+  finish();
+  await adoption;
+  expect(await identity).toMatchObject({ principal: { principalId: 'b' } });
+  expect(calls).toEqual(['POST', 'GET']);
+});
+
 it.each([401, 429, 500, 503])(
   'does not treat discovery HTTP %i as an absent Bubble deployment',
   async (status) => {

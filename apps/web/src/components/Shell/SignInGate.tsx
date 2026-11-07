@@ -8,11 +8,14 @@ import { useTranslation } from 'react-i18next';
 import { AUTH_REQUIRED_EVENT } from '../../api/_client';
 import {
   getIdentity,
+  hasSessionLock,
   IdentityDeniedError,
   listInteractiveAuthenticators,
+  SESSION_CHANGE_EVENT,
   signOut,
   startSession,
   type InteractiveAuthenticator,
+  type SessionChangePhase,
 } from '../../api/identity';
 import { API_CONFIG } from '../../config/api';
 import { APP_NAME } from '../../config/app';
@@ -34,6 +37,8 @@ import type { ReactNode } from 'react';
 type GateState =
   | { kind: 'checking' }
   | { kind: 'ready' }
+  /** Keep drafts mounted, but block interaction until the cookie is verified. */
+  | { kind: 'verifying' }
   | {
       kind: 'signIn';
       authenticators: InteractiveAuthenticator[];
@@ -89,11 +94,22 @@ export function SignInGate({ children }: { children: ReactNode }) {
   const appStarted = useRef(false);
   const originalPrincipal = useRef<string | null>(null);
   const accountChanged = useRef(false);
+  const sessionChanging = useRef(false);
+  const app = useRef<HTMLDivElement>(null);
   const renewing = useRef(false);
   const knownAuthenticators = useRef<InteractiveAuthenticator[]>([]);
   const renewalTimer = useRef<number | undefined>(undefined);
   const recheckTimer = useRef<number | undefined>(undefined);
   const recheckDelay = useRef(RECHECK_MIN_MS);
+
+  const blockApp = useCallback(() => {
+    // Native focus/broadcast handlers must block controls immediately, before
+    // React's next render and before the asynchronous identity response.
+    if (app.current) app.current.inert = true;
+    setState((prior) =>
+      prior.kind === 'ready' ? { kind: 'verifying' } : prior,
+    );
+  }, []);
 
   /**
    * The Server could not say who is calling (a restart or a network blip), so
@@ -150,6 +166,7 @@ export function SignInGate({ children }: { children: ReactNode }) {
       const settle = (next: GateState) => {
         if (run !== latestCheck.current) return;
         if (next.kind === 'ready') appStarted.current = true;
+        if (app.current) app.current.inert = next.kind !== 'ready';
         setState((prior) =>
           next.kind === 'signIn' && prior.kind === 'signIn' && !loginError
             ? { ...next, error: next.error ?? prior.error }
@@ -160,6 +177,10 @@ export function SignInGate({ children }: { children: ReactNode }) {
       try {
         identity = await getIdentity();
       } catch (error) {
+        if (run !== latestCheck.current) return false;
+        // The locked read has finished, even if the Server is unreachable.
+        // An interrupted writer must not suppress the recovery backoff.
+        sessionChanging.current = false;
         if (error instanceof IdentityDeniedError) {
           settle({ kind: 'denied', providerSignOut: error.providerSignOut });
           return;
@@ -189,6 +210,8 @@ export function SignInGate({ children }: { children: ReactNode }) {
         });
         return;
       }
+      if (run !== latestCheck.current) return false;
+      sessionChanging.current = false;
       window.clearTimeout(recheckTimer.current);
       recheckDelay.current = RECHECK_MIN_MS;
       if (identity) {
@@ -279,7 +302,19 @@ export function SignInGate({ children }: { children: ReactNode }) {
   /** Every recovery verifies the original principal before retrying saves. */
   const recover = useCallback(async () => {
     const wasStarted = appStarted.current;
-    if ((await check()) && wasStarted) await resend();
+    const verification = check();
+    const verified = latestCheck.current;
+    if (!(await verification) || !wasStarted) return;
+    const { resendUnsavedCanvasEdits } =
+      await import('../../store/canvasStore');
+    // Loading the editor module can yield to a peer's cookie write. Its
+    // earlier identity response must not authorize a later draft replay.
+    if (
+      verified === latestCheck.current &&
+      !sessionChanging.current &&
+      !accountChanged.current
+    )
+      await resendUnsavedCanvasEdits();
   }, [check]);
 
   useEffect(() => {
@@ -301,7 +336,10 @@ export function SignInGate({ children }: { children: ReactNode }) {
     // A lapsed session renews in place when this page holds a refresh token;
     // whatever it refused is then sent again.
     const recheck = () => {
-      if (renewing.current || accountChanged.current) return;
+      if (renewing.current || accountChanged.current || sessionChanging.current)
+        return;
+      if (useIdentityStore.getState().identity?.provider === 'bubble')
+        blockApp();
       renewing.current = true;
       void (async () => {
         try {
@@ -318,25 +356,56 @@ export function SignInGate({ children }: { children: ReactNode }) {
     };
     window.addEventListener(AUTH_REQUIRED_EVENT, recheck);
     return () => window.removeEventListener(AUTH_REQUIRED_EVENT, recheck);
-  }, [check, adopt, recover]);
+  }, [check, adopt, recover, blockApp]);
 
-  // Someone waiting for access is admitted by an administrator elsewhere, so
-  // ask again now and then, and whenever they come back to the page.
+  // Waiting members poll for admission. A running Bubble app also verifies
+  // its shared cookie on foreground and on peer writes, without refreshing
+  // tokens or replaying drafts that could belong to the previous account.
   const awaitingAccess = state.kind === 'noAccess';
   useEffect(() => {
-    if (!awaitingAccess) return;
-    const recheckAccess = () => {
-      if (document.visibilityState === 'visible') void check();
+    const verifyPrincipal = () => {
+      if (
+        accountChanged.current ||
+        (sessionChanging.current && !hasSessionLock())
+      )
+        return;
+      if (awaitingAccess) void check(undefined, false);
+      else if (
+        appStarted.current &&
+        useIdentityStore.getState().identity?.provider === 'bubble'
+      ) {
+        blockApp();
+        void check(undefined, false);
+      }
     };
-    const timer = window.setInterval(recheckAccess, NO_ACCESS_RECHECK_MS);
+    const recheckAccess = () => {
+      if (document.visibilityState === 'visible') verifyPrincipal();
+    };
+    const peerChanged = (event: Event) => {
+      const phase = (event as CustomEvent<SessionChangePhase>).detail;
+      if (phase !== 'changing' && phase !== 'changed') return;
+      sessionChanging.current = phase === 'changing';
+      // An identity response from before the cookie write cannot uncover UI.
+      latestCheck.current += 1;
+      blockApp();
+      // Queue behind a real writer immediately, even if it closes without
+      // sending "changed" and this peer never receives a new focus event.
+      // Without Web Locks, only the terminal notification makes a read safe.
+      if (phase === 'changed' || hasSessionLock()) void check(undefined, false);
+    };
+    const timer = awaitingAccess
+      ? window.setInterval(recheckAccess, NO_ACCESS_RECHECK_MS)
+      : undefined;
     window.addEventListener('focus', recheckAccess);
     document.addEventListener('visibilitychange', recheckAccess);
+    window.addEventListener(SESSION_CHANGE_EVENT, peerChanged);
     return () => {
       window.clearInterval(timer);
       window.removeEventListener('focus', recheckAccess);
       document.removeEventListener('visibilitychange', recheckAccess);
+      window.removeEventListener(SESSION_CHANGE_EVENT, peerChanged);
     };
-  }, [awaitingAccess, check]);
+  }, [awaitingAccess, check, blockApp]);
 
   /** Sign in again without leaving the page, then resend what was refused. */
   const signInInPlace = useCallback(
@@ -352,14 +421,24 @@ export function SignInGate({ children }: { children: ReactNode }) {
   );
 
   const overlay = state.kind === 'signIn' && appStarted.current;
+  const verifying = state.kind === 'verifying';
   const { refs, context } = useFloating({ open: overlay });
   if (state.kind === 'checking') return <WorkspaceLoadingScreen />;
-  if (state.kind === 'ready' || (appStarted.current && state.kind === 'signIn'))
+  if (
+    state.kind === 'ready' ||
+    verifying ||
+    (appStarted.current && state.kind === 'signIn')
+  )
     return (
       <>
-        <div className="contents" inert={overlay}>
+        <div ref={app} className="contents" inert={overlay || verifying}>
           {children}
         </div>
+        {verifying && (
+          <div className="bg-bg-default/95 fixed inset-0 z-[1000]">
+            <WorkspaceLoadingScreen />
+          </div>
+        )}
         {overlay && state.kind === 'signIn' && (
           <FloatingFocusManager
             context={context}
@@ -384,17 +463,12 @@ export function SignInGate({ children }: { children: ReactNode }) {
   return <SignInScreen state={state} />;
 }
 
-async function resend(): Promise<void> {
-  const { resendUnsavedCanvasEdits } = await import('../../store/canvasStore');
-  await resendUnsavedCanvasEdits();
-}
-
 /** The sign-in and no-access screens, in the Welcome page's frame. */
 export function SignInScreen({
   state,
   onSignIn,
 }: {
-  state: Exclude<GateState, { kind: 'checking' | 'ready' }>;
+  state: Exclude<GateState, { kind: 'checking' | 'ready' | 'verifying' }>;
   /** Sign in without leaving the page; the provider's redirect otherwise. */
   onSignIn?: (authenticator: InteractiveAuthenticator) => Promise<void>;
 }) {

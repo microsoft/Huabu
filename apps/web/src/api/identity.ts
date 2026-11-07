@@ -26,19 +26,27 @@ export class IdentityDeniedError extends Error {
   }
 }
 
-/** The caller as the Server resolves it, or `null` when it asks for a login. */
-export async function getIdentity(): Promise<IdentityResponse | null> {
-  const response = await fetch(`${API_CONFIG.API_URL}/identity`);
-  if (response.status === 401) return null;
-  if (response.status === 403) {
-    const body = (await response.json().catch(() => null)) as {
-      providerSignOut?: unknown;
-    } | null;
-    throw new IdentityDeniedError(body?.providerSignOut === true);
-  }
-  if (!response.ok)
-    throw new Error(`Identity request failed: ${response.status}`);
-  return (await response.json()) as IdentityResponse;
+/**
+ * The caller as the Server resolves it, or null when it asks for login.
+ * Read after any pending cookie write under the same session lock: a peer
+ * must not verify the old cookie while its replacement is still in flight.
+ */
+export function getIdentity(): Promise<IdentityResponse | null> {
+  return withSessionLock(async () => {
+    const response = await fetch(`${API_CONFIG.API_URL}/identity`, {
+      cache: 'no-store',
+    });
+    if (response.status === 401) return null;
+    if (response.status === 403) {
+      const body = (await response.json().catch(() => null)) as {
+        providerSignOut?: unknown;
+      } | null;
+      throw new IdentityDeniedError(body?.providerSignOut === true);
+    }
+    if (!response.ok)
+      throw new Error(`Identity request failed: ${response.status}`);
+    return (await response.json()) as IdentityResponse;
+  });
 }
 
 /**
@@ -91,6 +99,34 @@ const adoptions = new Set<Promise<void>>();
  */
 const SESSION_LOCK = 'huabu.session';
 /**
+ * Peer tabs cover cached UI before a cookie write and verify its principal
+ * afterward. Notifications carry only the write phase, never credentials or
+ * a second copy of the session. Foreground checks cover missed broadcasts.
+ */
+export const SESSION_CHANGE_EVENT = 'huabu:session-change';
+export type SessionChangePhase = 'changing' | 'changed';
+const sessionPeers =
+  typeof BroadcastChannel === 'function'
+    ? new BroadcastChannel(SESSION_LOCK)
+    : null;
+sessionPeers?.addEventListener('message', (event: MessageEvent) => {
+  const phase: unknown = event.data;
+  if (phase === 'changing' || phase === 'changed')
+    window.dispatchEvent(
+      new CustomEvent<SessionChangePhase>(SESSION_CHANGE_EVENT, {
+        detail: phase,
+      }),
+    );
+});
+
+function notifySessionPeers(phase: SessionChangePhase): void {
+  try {
+    sessionPeers?.postMessage(phase);
+  } catch {
+    /* Foreground verification still catches a closed/unavailable channel. */
+  }
+}
+/**
  * Set, in `localStorage`, when any tab signs this browser out, and cleared
  * by the next sign-in someone completes. Holds only a timestamp. A renewal
  * that reaches the lock after a sign-out finds it and stays signed out.
@@ -104,6 +140,11 @@ function withSessionLock<T>(write: () => Promise<T>): Promise<T> {
     }
   ).locks;
   return locks ? locks.request(SESSION_LOCK, write) : write();
+}
+
+/** Whether identity reads can wait for a peer's pending cookie write. */
+export function hasSessionLock(): boolean {
+  return typeof navigator.locks?.request === 'function';
 }
 
 function signedOutElsewhere(): boolean {
@@ -138,12 +179,18 @@ export function startSession(
       throw new Error('Signed out in another tab');
     // Session rejection is handled by the gate; broadcasting another 401 here
     // would recursively start another renewal.
-    const response = await fetch(`${API_CONFIG.API_URL}/identity/session`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
-    if (!response.ok) throw new Error('Sign-in was not accepted');
-    if (!renewal) markSignedOut(false);
+    notifySessionPeers('changing');
+    try {
+      const response = await fetch(`${API_CONFIG.API_URL}/identity/session`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      if (!response.ok) throw new Error('Sign-in was not accepted');
+      if (!renewal) markSignedOut(false);
+    } finally {
+      // A failed write may leave the old session intact; peers verify that too.
+      notifySessionPeers('changed');
+    }
   });
   adoptions.add(adoption);
   void adoption.then(
@@ -154,7 +201,12 @@ export function startSession(
 }
 
 export async function endSession(): Promise<void> {
-  await apiFetch<void>('/identity/session', { method: 'DELETE' });
+  notifySessionPeers('changing');
+  try {
+    await apiFetch<void>('/identity/session', { method: 'DELETE' });
+  } finally {
+    notifySessionPeers('changed');
+  }
 }
 
 /**

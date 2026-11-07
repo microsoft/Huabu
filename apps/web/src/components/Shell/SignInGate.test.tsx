@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { SignInGate } from './SignInGate';
 import { AUTH_REQUIRED_EVENT } from '../../api/_client';
+import { SESSION_CHANGE_EVENT } from '../../api/identity';
 import { useIdentityStore } from '../../store/identityStore';
 import * as oidc from '../../utils/oidcLogin';
 import { forgetTokens } from '../../utils/oidcLogin';
@@ -120,6 +121,24 @@ async function mount(strict = false) {
   });
   // Let the identity checks settle.
   for (let i = 0; i < 5; i++) await act(async () => {});
+}
+
+/** A peer owns the native session lock until its write finishes or tab closes. */
+function holdSessionWrite(): () => void {
+  let release!: () => void;
+  const barrier = new Promise<void>((resolve) => (release = resolve));
+  const tails = new Map<string, Promise<unknown>>([['huabu.session', barrier]]);
+  vi.spyOn(navigator, 'locks', 'get').mockReturnValue({
+    request: (name: string, callback: () => Promise<unknown>) => {
+      const run = (tails.get(name) ?? Promise.resolve()).then(callback);
+      tails.set(
+        name,
+        run.catch(() => {}),
+      );
+      return run;
+    },
+  } as unknown as LockManager);
+  return release;
 }
 
 describe('SignInGate', () => {
@@ -528,6 +547,244 @@ describe('SignInGate', () => {
     expect(reload).toHaveBeenCalledOnce();
     expect(resend).not.toHaveBeenCalled();
     expect(container.textContent).not.toContain('app');
+  });
+
+  it.each(['focus', 'visibilitychange'])(
+    'reloads a ready peer on %s when the shared cookie changes account, without replaying edits',
+    async (event) => {
+      routes['GET /api/identity'] = () => json(MEMBER);
+      await mount();
+      resend.mockClear();
+      const reload = vi
+        .spyOn(window.location, 'reload')
+        .mockImplementation(() => {});
+      routes['GET /api/identity'] = () =>
+        json({
+          ...MEMBER,
+          principal: { ...MEMBER.principal, principalId: 'dave' },
+        });
+      await act(async () => {
+        (event === 'focus' ? window : document).dispatchEvent(new Event(event));
+      });
+      expect(reload).toHaveBeenCalledOnce();
+      expect(resend).not.toHaveBeenCalled();
+      expect(useIdentityStore.getState().identity).toEqual(MEMBER);
+      expect(container.textContent).not.toContain('app');
+    },
+  );
+
+  it('blocks a ready peer during foreground verification and retains the same account draft without replay', async () => {
+    routes['GET /api/identity'] = () => json(MEMBER);
+    await act(async () =>
+      root.render(
+        <SignInGate>
+          <input aria-label="Draft" defaultValue="unsaved draft" />
+        </SignInGate>,
+      ),
+    );
+    for (let i = 0; i < 5; i++) await act(async () => {});
+    const draft = container.querySelector('input');
+    resend.mockClear();
+    let finish!: (response: Response) => void;
+    vi.mocked(fetch).mockImplementationOnce(
+      () => new Promise<Response>((resolve) => (finish = resolve)),
+    );
+    await act(async () => window.dispatchEvent(new Event('focus')));
+    expect(container.querySelector('[inert]')).not.toBeNull();
+    expect(container.querySelector('input')).toBe(draft);
+    await act(async () => finish(json(MEMBER)));
+    expect(container.querySelector('[inert]')).toBeNull();
+    expect(container.querySelector('input')).toBe(draft);
+    expect(draft?.value).toBe('unsaved draft');
+    expect(resend).not.toHaveBeenCalled();
+  });
+
+  it.each(['completed', 'closed'])(
+    'blocks a ready peer during a cookie write whose tab %s, then verifies without replaying another account draft',
+    async (writer) => {
+      routes['GET /api/identity'] = () => json(MEMBER);
+      await mount();
+      resend.mockClear();
+      const reload = vi
+        .spyOn(window.location, 'reload')
+        .mockImplementation(() => {});
+      const peer = new BroadcastChannel('huabu.session');
+      const release = holdSessionWrite();
+      try {
+        const before = calls.length;
+        peer.postMessage('changing');
+        await vi.waitFor(() =>
+          expect(container.querySelector('[inert]')).not.toBeNull(),
+        );
+        expect(calls).toHaveLength(before);
+        routes['GET /api/identity'] = () =>
+          json({
+            ...MEMBER,
+            principal: { ...MEMBER.principal, principalId: 'dave' },
+          });
+        if (writer === 'completed') peer.postMessage('changed');
+        else peer.close();
+        await act(async () => release());
+        await vi.waitFor(() => expect(reload).toHaveBeenCalledOnce());
+        expect(resend).not.toHaveBeenCalled();
+        expect(useIdentityStore.getState().identity).toEqual(MEMBER);
+        expect(container.textContent).not.toContain('app');
+      } finally {
+        release();
+        peer.close();
+      }
+    },
+  );
+
+  it('keeps the peer covered when another tab signs out, then resumes only the same principal', async () => {
+    routes['GET /api/identity'] = () => json(MEMBER);
+    await mount();
+    resend.mockClear();
+    const peer = new BroadcastChannel('huabu.session');
+    try {
+      routes['GET /api/identity'] = () => json({}, 401);
+      routes['GET /bubble/v1/auth/authenticators'] = () =>
+        json({ authenticators: [ENTRA] });
+      peer.postMessage('changing');
+      peer.postMessage('changed');
+      await vi.waitFor(() =>
+        expect(container.querySelector('[role="dialog"]')).not.toBeNull(),
+      );
+      expect(container.querySelector('[inert]')).not.toBeNull();
+      routes['GET /api/identity'] = () => json(MEMBER);
+      peer.postMessage('changing');
+      peer.postMessage('changed');
+      await vi.waitFor(() => expect(container.textContent).toBe('app'));
+      expect(container.querySelector('[inert]')).toBeNull();
+      expect(resend).not.toHaveBeenCalled();
+    } finally {
+      peer.close();
+    }
+  });
+
+  it('keeps a peer without Web Locks covered until a cookie write completes, including foreground checks', async () => {
+    routes['GET /api/identity'] = () => json(MEMBER);
+    await mount();
+    vi.spyOn(navigator, 'locks', 'get').mockReturnValue(
+      undefined as unknown as LockManager,
+    );
+    resend.mockClear();
+    const reload = vi
+      .spyOn(window.location, 'reload')
+      .mockImplementation(() => {});
+    const peer = new BroadcastChannel('huabu.session');
+    const before = calls.length;
+    try {
+      peer.postMessage('changing');
+      await vi.waitFor(() =>
+        expect(container.querySelector('[inert]')).not.toBeNull(),
+      );
+      await act(async () => window.dispatchEvent(new Event('focus')));
+      expect(calls).toHaveLength(before);
+      expect(container.querySelector('[inert]')).not.toBeNull();
+      routes['GET /api/identity'] = () =>
+        json({
+          ...MEMBER,
+          principal: { ...MEMBER.principal, principalId: 'dave' },
+        });
+      peer.postMessage('changed');
+      await vi.waitFor(() => expect(reload).toHaveBeenCalledOnce());
+      expect(resend).not.toHaveBeenCalled();
+    } finally {
+      peer.close();
+    }
+  });
+
+  it('does not uncover a peer with an identity response from before another tab started changing the cookie', async () => {
+    routes['GET /api/identity'] = () => json(MEMBER);
+    await mount();
+    const peer = new BroadcastChannel('huabu.session');
+    let finish!: (response: Response) => void;
+    let release: (() => void) | undefined;
+    vi.mocked(fetch).mockImplementationOnce(
+      () => new Promise<Response>((resolve) => (finish = resolve)),
+    );
+    try {
+      await act(async () => window.dispatchEvent(new Event('focus')));
+      release = holdSessionWrite();
+      const changing = new Promise<void>((resolve) =>
+        window.addEventListener(SESSION_CHANGE_EVENT, () => resolve(), {
+          once: true,
+        }),
+      );
+      await act(async () => {
+        peer.postMessage('changing');
+        await changing;
+      });
+      await act(async () => finish(json(MEMBER)));
+      expect(container.querySelector('[inert]')).not.toBeNull();
+      peer.postMessage('changed');
+      await act(async () => release?.());
+      await vi.waitFor(() =>
+        expect(container.querySelector('[inert]')).toBeNull(),
+      );
+    } finally {
+      release?.();
+      peer.close();
+    }
+  });
+
+  it.each([200, 401, 503])(
+    'recovers automatically after a peer closes without a terminal notification or new focus event, with identity HTTP %i',
+    async (status) => {
+      routes['GET /api/identity'] = () => json(MEMBER);
+      await mount();
+      resend.mockClear();
+      const peer = new BroadcastChannel('huabu.session');
+      const release = holdSessionWrite();
+      peer.postMessage('changing');
+      await vi.waitFor(() =>
+        expect(container.querySelector('[inert]')).not.toBeNull(),
+      );
+      peer.close();
+      routes['GET /api/identity'] = () => json(MEMBER, status);
+      routes['GET /bubble/v1/auth/authenticators'] = () =>
+        json({ authenticators: [ENTRA] });
+      await act(async () => release());
+      expect(resend).not.toHaveBeenCalled();
+      if (status === 200) {
+        expect(container.querySelector('[inert]')).toBeNull();
+      } else {
+        expect(container.querySelector('[inert]')).not.toBeNull();
+        routes['GET /api/identity'] = () => json(MEMBER);
+        await act(async () =>
+          window.dispatchEvent(new Event(AUTH_REQUIRED_EVENT)),
+        );
+        expect(container.querySelector('[inert]')).toBeNull();
+        expect(resend).toHaveBeenCalledOnce();
+      }
+    },
+  );
+
+  it('does not replay drafts when identity subscribers start a newer check before an older recovery returns', async () => {
+    routes['GET /api/identity'] = () => json(MEMBER);
+    await mount();
+    resend.mockClear();
+    let finish!: (response: Response) => void;
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(json(MEMBER))
+      .mockImplementationOnce(
+        () => new Promise<Response>((resolve) => (finish = resolve)),
+      );
+    const unsubscribe = useIdentityStore.subscribe(() => {
+      unsubscribe();
+      window.dispatchEvent(new Event('focus'));
+    });
+    try {
+      await act(async () =>
+        window.dispatchEvent(new Event(AUTH_REQUIRED_EVENT)),
+      );
+      expect(container.querySelector('[inert]')).not.toBeNull();
+      expect(resend).not.toHaveBeenCalled();
+    } finally {
+      unsubscribe();
+      await act(async () => finish(json(MEMBER)));
+    }
   });
 
   it('stays on the screen and says so when the Server does not confirm sign-out', async () => {
