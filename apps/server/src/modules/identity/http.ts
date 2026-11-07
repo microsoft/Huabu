@@ -3,7 +3,10 @@
 
 import { timingSafeEqual } from 'node:crypto';
 
-import { readAgentCredential } from './agent-credentials.js';
+import {
+  readAgentCredential,
+  registerAgentIdentity,
+} from './agent-credentials.js';
 import { openPersonalSettings, useCaller } from './personal-settings.js';
 import {
   getRequestAuthorizations,
@@ -82,6 +85,7 @@ export function registerIdentity(
   if (!Number.isFinite(interval) || interval <= 0) {
     throw new Error('Identity revalidation interval must be positive');
   }
+  registerAgentIdentity(app, service, interval);
   const activeResponses = new Set<() => void>();
   app.addHook('preClose', async () => {
     for (const close of activeResponses) close();
@@ -170,6 +174,7 @@ export function registerIdentity(
       const params = request.params as {
         workspaceId?: string;
         canvasId?: string;
+        threadId?: string;
       };
       if (
         !request.routeOptions.url?.startsWith('/api/rfs/w/') ||
@@ -181,9 +186,17 @@ export function registerIdentity(
         if (
           params.workspaceId !== agentClaims.workspaceId ||
           params.canvasId !== agentClaims.canvasId ||
+          (params.threadId !== undefined &&
+            params.threadId !== agentClaims.threadId) ||
+          (request.headers['x-huabu-host-thread-id'] !== undefined &&
+            request.headers['x-huabu-host-thread-id'] !==
+              agentClaims.threadId) ||
           !(await options.isCurrentReachback?.(agentClaims).catch(() => false))
         )
           return null;
+        // Scoped agent authorship comes from verified claims, including on
+        // generic /execute requests that have no conversation route parameter.
+        request.headers['x-huabu-host-thread-id'] = agentClaims.threadId;
         return (
           (await service.resolvePrincipal?.(agentClaims.principalId)) ?? null
         );

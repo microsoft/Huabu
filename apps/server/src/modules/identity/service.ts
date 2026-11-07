@@ -43,6 +43,7 @@ export interface HuabuResource {
 export type AccessLevel = 'read' | 'write' | 'manage';
 
 export interface ResourceAccess {
+  /** Resolve current account/admission and grants for each operation, even on a retained caller context. */
   can(level: AccessLevel, resource: HuabuResource): Promise<boolean>;
   /** Make the caller the owner of a resource it has just created. */
   claim(resource: HuabuResource): Promise<void>;

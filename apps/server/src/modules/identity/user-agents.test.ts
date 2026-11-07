@@ -31,6 +31,7 @@ import {
 } from './agent-credentials.js';
 import { openBubbleIdentity } from './bubble.js';
 import { registerIdentity } from './http.js';
+import { createLocalIdentityService } from './local.js';
 import {
   openPersonalSettings,
   useCaller,
@@ -84,6 +85,46 @@ const headers = (id: string) => ({
   authorization: 'Bearer master',
   'x-bubble-principal-id': id,
 });
+function connectDevice(
+  port: number,
+  sockets: WebSocket[],
+  id: string,
+  token: string,
+  hostname = id,
+) {
+  return new Promise<unknown>((resolve, reject) => {
+    const socket = new WebSocket(
+      `ws://127.0.0.1:${port}/api/acp/agent?role=agentlet&id=${encodeURIComponent(id)}&token=${encodeURIComponent(token)}`,
+    );
+    sockets.push(socket);
+    socket.onopen = () =>
+      socket.send(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'agentlet/hello',
+          params: {
+            agentletId: id,
+            agentletProfile: {
+              bridge: { name: 'agentlet', version: PROTOCOL_VERSION },
+              machine: { hostname, platform: 'linux' },
+              capabilities: {
+                autoRestart: true,
+                bufferLimit: 1000,
+                maxAgents: 10,
+              },
+            },
+          },
+        }),
+      );
+    socket.onmessage = (event) => {
+      const message = JSON.parse(String(event.data));
+      if (message.id === 1) resolve(message);
+    };
+    socket.onerror = () => reject(new Error('Device connection failed'));
+  });
+}
+
 async function host(
   admin: boolean,
   scope: WorkspaceScope = {
@@ -163,6 +204,13 @@ async function host(
   app.get('/api/rfs/w/:workspaceId/:canvasId/probe', async (request) => ({
     principalId: getRequestIdentity(request)?.principal.principalId,
     settingsOwner: personalSettingsOwner(),
+  }));
+  app.get(
+    '/api/rfs/w/:workspaceId/:canvasId/agent/:threadId/probe',
+    async () => ({ reached: true }),
+  );
+  app.get('/api/rfs/w/:workspaceId/:canvasId/attribution', async (request) => ({
+    threadId: request.headers['x-huabu-host-thread-id'],
   }));
   app.get(
     '/api/rfs/w/:workspaceId/:canvasId/stream',
@@ -425,6 +473,31 @@ it('separates device transport from user and Space-scoped reachback, with fresh 
     401,
   );
   expect((await probe(token, '/api/acp/profiles')).statusCode).toBe(401);
+  expect(
+    (await probe(token, '/api/rfs/w/w1/space-a/agent/thread-a/probe'))
+      .statusCode,
+  ).toBe(200);
+  expect(
+    (await probe(token, '/api/rfs/w/w1/space-a/agent/thread-b/probe'))
+      .statusCode,
+  ).toBe(401);
+  expect(
+    (await probe(token, '/api/rfs/w/w1/space-a/attribution')).json(),
+  ).toEqual({ threadId: 'thread-a' });
+  expect(
+    (await probe(device, '/api/rfs/w/w1/space-a/attribution')).json(),
+  ).toEqual({});
+  expect(
+    (
+      await app.inject({
+        url: '/api/rfs/w/w1/space-a/probe',
+        headers: {
+          authorization: `Bearer ${token}`,
+          'x-huabu-host-thread-id': 'thread-b',
+        },
+      })
+    ).statusCode,
+  ).toBe(401);
   // A credential names its conversation: once that is gone, so is access.
   const asked: AgentReachback[] = [];
   liveReachback = async (claims) => {
@@ -453,6 +526,39 @@ it('separates device transport from user and Space-scoped reachback, with fresh 
   await expect(authenticate('alice-device', device)).rejects.toThrow(
     'not admitted',
   );
+});
+
+it('uses the actual Bubble service to refuse unowned background devices and revoked owners', async () => {
+  const h = await host(false);
+  vi.stubEnv('HUABU_IDENTITY_PROVIDER', 'local');
+  await expect(
+    agentReachbackEnvironment({ agentletId: 'legacy-unowned-device' }),
+  ).rejects.toMatchObject({ code: 'DEVICE_ACCESS_REQUIRED' });
+  const device = await h.as('alice', ownDeviceCredential);
+  await authenticateUserAgentlet(h.service)('alice-device', device);
+  const spec = {
+    agentletId: 'alice-device',
+    env: {
+      HUABU_RFS_URL: 'https://huabu.example/api/rfs/w/w1/space-a',
+      HUABU_THREAD_ID: 'thread-a',
+    },
+  };
+  await expect(agentReachbackEnvironment(spec)).resolves.toBeDefined();
+  await h.service.people!.setMember('alice', false, 'bob');
+  await expect(agentReachbackEnvironment(spec)).rejects.toMatchObject({
+    code: 'DEVICE_ACCESS_REQUIRED',
+  });
+  await h.service.people!.setMember('alice', true, 'bob');
+  // Admission changes preserve reusable commands and durable ownership.
+  await expect(
+    authenticateUserAgentlet(h.service)('alice-device', device),
+  ).resolves.toBeDefined();
+  await h.store.principals.update('alice', {
+    disabledAt: new Date().toISOString(),
+  });
+  await expect(agentReachbackEnvironment(spec)).rejects.toMatchObject({
+    code: 'DEVICE_ACCESS_REQUIRED',
+  });
 });
 
 it("resets one person's device and reachback credentials without touching others", async () => {
@@ -561,37 +667,7 @@ it.each([false, true])(
     const port = (app.server.address() as { port: number }).port;
     const sockets: WebSocket[] = [];
     const connect = (id: string, token: string, hostname = id) =>
-      new Promise<unknown>((resolve, reject) => {
-        const socket = new WebSocket(
-          `ws://127.0.0.1:${port}/api/acp/agent?role=agentlet&id=${encodeURIComponent(id)}&token=${encodeURIComponent(token)}`,
-        );
-        sockets.push(socket);
-        socket.onopen = () =>
-          socket.send(
-            JSON.stringify({
-              jsonrpc: '2.0',
-              id: 1,
-              method: 'agentlet/hello',
-              params: {
-                agentletId: id,
-                agentletProfile: {
-                  bridge: { name: 'agentlet', version: PROTOCOL_VERSION },
-                  machine: { hostname, platform: 'linux' },
-                  capabilities: {
-                    autoRestart: true,
-                    bufferLimit: 1000,
-                    maxAgents: 10,
-                  },
-                },
-              },
-            }),
-          );
-        socket.onmessage = (event) => {
-          const message = JSON.parse(String(event.data));
-          if (message.id === 1) resolve(message);
-        };
-        socket.onerror = () => reject(new Error('Device connection failed'));
-      });
+      connectDevice(port, sockets, id, token, hostname);
     try {
       const alice = await h.as('alice', ownDeviceCredential);
       const bob = await h.as('bob', ownDeviceCredential);
@@ -677,3 +753,193 @@ it.each([false, true])(
     }
   },
 );
+
+it.each(['disabled', 'external-revocation', 'lookup-unavailable'] as const)(
+  'disconnects revoked members and then %s owners while preserving their reusable device command',
+  async (change) => {
+    const h = await host(false, undefined, 20);
+    await app.listen({ port: 0, host: '127.0.0.1' });
+    const port = (app.server.address() as { port: number }).port;
+    const sockets: WebSocket[] = [];
+    const alice = await h.as('alice', ownDeviceCredential);
+    const bob = await h.as('bob', ownDeviceCredential);
+    try {
+      expect(
+        await connectDevice(port, sockets, 'alice-device', alice),
+      ).toHaveProperty('result');
+      expect(
+        await connectDevice(port, sockets, 'bob-device', bob),
+      ).toHaveProperty('result');
+      await h.service.people!.setMember('alice', false, 'bob');
+      await expect
+        .poll(() => getAgentletGateway()?.getAgentlet('alice-device')?.status)
+        .toBe('disconnected');
+      expect(getAgentletGateway()?.getAgentlet('bob-device')?.status).toBe(
+        'connected',
+      );
+      expect(readAgentCredential(alice)).not.toBeNull();
+      expect(agentletOwner('alice-device')).toBe('alice');
+      await h.service.people!.setMember('alice', true, 'bob');
+      expect(
+        await connectDevice(port, sockets, 'alice-device', alice),
+      ).toHaveProperty('result');
+      if (change === 'disabled')
+        await h.store.principals.update('alice', {
+          disabledAt: new Date().toISOString(),
+        });
+      else if (change === 'external-revocation') {
+        for (const grant of await h.store.grants.list({
+          target: { type: 'system' },
+          principalId: 'alice',
+        }))
+          await h.store.grants.remove(grant.grantId);
+      } else {
+        const resolve = h.service.resolvePrincipal!.bind(h.service);
+        vi.spyOn(h.service, 'resolvePrincipal').mockImplementation(
+          async (id) => {
+            if (id === 'alice') throw new Error('Fixture identity unavailable');
+            return resolve(id);
+          },
+        );
+      }
+      await expect
+        .poll(() => getAgentletGateway()?.getAgentlet('alice-device')?.status)
+        .toBe('disconnected');
+      expect(getAgentletGateway()?.getAgentlet('bob-device')?.status).toBe(
+        'connected',
+      );
+    } finally {
+      for (const socket of sockets) socket.close();
+    }
+  },
+);
+
+it('keeps actual local-mode reachback even when the process provider variable says Bubble', async () => {
+  app = Fastify();
+  registerIdentity(app, {
+    service: createLocalIdentityService(),
+    getConnectionToken,
+  });
+  await app.ready();
+  expect(canUseAgentlet('local-device')).toBe(true);
+  await expect(
+    agentReachbackEnvironment({ agentletId: 'local-device' }),
+  ).resolves.toEqual({ HUABU_RFS_TOKEN: getConnectionToken() });
+});
+
+it('refuses a handshake whose initial admission result was retained across member revocation', async () => {
+  const h = await host(false);
+  await app.listen({ port: 0, host: '127.0.0.1' });
+  const port = (app.server.address() as { port: number }).port;
+  const sockets: WebSocket[] = [];
+  const alice = await h.as('alice', ownDeviceCredential);
+  let entered!: () => void;
+  const checking = new Promise<void>((resolve) => (entered = resolve));
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => (release = resolve));
+  const resolvePrincipal = h.service.resolvePrincipal!.bind(h.service);
+  vi.spyOn(h.service, 'resolvePrincipal').mockImplementationOnce(async (id) => {
+    const identity = await resolvePrincipal(id);
+    entered();
+    await held;
+    return identity;
+  });
+  try {
+    const handshake = connectDevice(port, sockets, 'late-device', alice);
+    await checking;
+    await h.service.people!.setMember('alice', false, 'bob');
+    release();
+    expect(await handshake).toHaveProperty('error');
+    expect(getAgentletGateway()?.getAgentlet('late-device')).toBeUndefined();
+    expect(agentletOwner('late-device')).toBeNull();
+  } finally {
+    release();
+    for (const socket of sockets) socket.close();
+  }
+});
+
+it('revalidates other owners during a stalled lookup, fails it closed, and stops late work after host close', async () => {
+  const intervalMs = 20;
+  const h = await host(false, undefined, intervalMs);
+  await app.listen({ port: 0, host: '127.0.0.1' });
+  const port = (app.server.address() as { port: number }).port;
+  const sockets: WebSocket[] = [];
+  const alice = await h.as('alice', ownDeviceCredential);
+  const bob = await h.as('bob', ownDeviceCredential);
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let enteredAlice!: () => void;
+  const aliceChecking = new Promise<void>((resolve) => {
+    enteredAlice = resolve;
+  });
+  let enteredBob!: () => void;
+  const bobChecked = new Promise<void>((resolve) => {
+    enteredBob = resolve;
+  });
+  const calls = { alice: 0, bob: 0 };
+  try {
+    expect(
+      await connectDevice(port, sockets, 'alice-device', alice),
+    ).toHaveProperty('result');
+    expect(
+      await connectDevice(port, sockets, 'bob-device', bob),
+    ).toHaveProperty('result');
+    const resolvePrincipal = h.service.resolvePrincipal?.bind(h.service);
+    if (!resolvePrincipal) throw new Error('Missing fixture identity service');
+    vi.spyOn(h.service, 'resolvePrincipal').mockImplementation(async (id) => {
+      if (id === 'alice') {
+        calls.alice++;
+        enteredAlice();
+        await held;
+      } else if (id === 'bob') calls.bob++;
+      const identity = await resolvePrincipal(id);
+      if (id === 'bob') enteredBob();
+      return identity;
+    });
+    await Promise.all([aliceChecking, bobChecked]);
+    // Exercise external Bubble changes: the local People mutation's immediate
+    // disconnect must not make this periodic revalidation regression pass.
+    for (const grant of await h.store.grants.list({
+      target: { type: 'system' },
+      principalId: 'bob',
+    }))
+      await h.store.grants.remove(grant.grantId);
+    await expect
+      .poll(() => getAgentletGateway()?.getAgentlet('bob-device')?.status)
+      .toBe('disconnected');
+    expect(calls.bob).toBeGreaterThan(1);
+    await expect
+      .poll(() => getAgentletGateway()?.getAgentlet('alice-device')?.status)
+      .toBe('disconnected');
+    // Alice's lookup remains held throughout both disconnections, and the
+    // deadline must not repeatedly launch queries for that same pending owner.
+    expect(calls.alice).toBe(1);
+    expect(readAgentCredential(alice)).not.toBeNull();
+    expect(agentletOwner('alice-device')).toBe('alice');
+
+    await h.store.principals.update('alice', {
+      disabledAt: new Date().toISOString(),
+    });
+    await app.close();
+    const callsAtClose = { ...calls };
+    // Sequential remount is deliberate: a late failed lookup from the retired
+    // host must neither disconnect this host's admitted Alice nor keep polling.
+    await host(false, undefined, intervalMs);
+    await app.listen({ port: 0, host: '127.0.0.1' });
+    const nextPort = (app.server.address() as { port: number }).port;
+    expect(
+      await connectDevice(nextPort, sockets, 'alice-device', alice),
+    ).toHaveProperty('result');
+    release();
+    await new Promise((resolve) => setTimeout(resolve, intervalMs * 4));
+    expect(getAgentletGateway()?.getAgentlet('alice-device')?.status).toBe(
+      'connected',
+    );
+    expect(calls).toEqual(callsAtClose);
+  } finally {
+    release();
+    for (const socket of sockets) socket.close();
+  }
+});

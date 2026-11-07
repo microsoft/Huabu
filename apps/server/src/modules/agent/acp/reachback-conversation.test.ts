@@ -70,6 +70,10 @@ it('accepts a reachback only for its live external conversation on its owner dev
       { workspaceId: '00000000-0000-4000-8000-000000000000' },
     ])
       expect(await isCurrentReachback({ ...claims, ...changed })).toBe(false);
+    // An identical credential must read the current durable conversation,
+    // rather than reuse the prior successful authorization result.
+    records.delete('space-a|thread-a');
+    expect(await isCurrentReachback(claims)).toBe(false);
   } finally {
     await opened.close();
   }

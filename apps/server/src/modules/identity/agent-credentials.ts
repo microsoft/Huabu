@@ -14,6 +14,108 @@ import { getDataDir } from '../../data-dir.js';
 import { atomicWriteJson, readJsonStrict } from '../../utils/fs.js';
 
 import type { IdentityService } from './service.js';
+import type { FastifyInstance } from 'fastify';
+
+/** The host-selected service, never inferred from a mutable process environment. */
+let hostIdentity: IdentityService | undefined;
+
+/**
+ * Bind device admission to the same service as HTTP and bound revocation of
+ * already connected devices. Ownership and reusable commands survive revocation.
+ * Lookup failure or a lookup exceeding the revalidation interval disconnects
+ * affected live devices. One stalled owner never blocks another owner's check.
+ */
+export function registerAgentIdentity(
+  app: FastifyInstance,
+  service: IdentityService,
+  intervalMs: number,
+): void {
+  hostIdentity = service;
+  app.addHook('onClose', async () => {
+    if (hostIdentity === service) hostIdentity = undefined;
+  });
+  if (service.provider !== 'bubble') return;
+  let closed = false;
+  // Coalesce only this owner's pending lookup. Keep a timed-out lookup reserved
+  // until it settles to avoid accumulating queries during a store outage;
+  // any reconnection in the meantime is still refused by the sweep.
+  const pending = new Map<
+    string,
+    { timer: ReturnType<typeof setTimeout>; timedOut: boolean }
+  >();
+  const revalidate = async () => {
+    if (closed) return;
+    const gateway = getAgentletGateway();
+    const connections = [
+      ...(gateway?.getSessions(undefined, { status: 'connected' }) ?? []),
+      ...(gateway?.getAgentlets({ status: 'connected' }) ?? []),
+    ];
+    try {
+      const owners = new Set(
+        connections.map((connection) => agentletOwner(connection.agentletId)),
+      );
+      await Promise.all(
+        [...owners].map(async (owner) => {
+          if (!owner) {
+            for (const connection of connections)
+              if (!agentletOwner(connection.agentletId))
+                connection.disconnect('User device owner required');
+            return;
+          }
+          const existing = pending.get(owner);
+          if (existing) {
+            if (existing.timedOut && !closed)
+              disconnectAgentlets(owner, 'Device identity unavailable');
+            return;
+          }
+          const check = {
+            timedOut: false,
+            timer: setTimeout(() => {
+              check.timedOut = true;
+              if (closed) return;
+              try {
+                disconnectAgentlets(owner, 'Device identity unavailable');
+              } catch {
+                // Ownership may have become unreadable while the lookup was
+                // held. The captured connections must still fail closed.
+                for (const connection of connections)
+                  connection.disconnect('Device identity unavailable');
+              }
+            }, intervalMs),
+          };
+          check.timer.unref();
+          pending.set(owner, check);
+          try {
+            const current = await service.resolvePrincipal?.(owner);
+            if (!closed && !current?.member)
+              disconnectAgentlets(owner, 'Device owner is not admitted');
+          } catch {
+            if (!closed)
+              disconnectAgentlets(owner, 'Device identity unavailable');
+          } finally {
+            clearTimeout(check.timer);
+            if (pending.get(owner) === check) pending.delete(owner);
+          }
+        }),
+      );
+    } catch {
+      // An unreadable ownership map cannot make an existing device trusted.
+      if (!closed)
+        for (const connection of connections)
+          connection.disconnect('Device identity unavailable');
+    }
+  };
+  const timer = setInterval(() => {
+    void revalidate().catch(() => {});
+  }, intervalMs);
+  timer.unref();
+  app.addHook('preClose', async () => {
+    closed = true;
+    clearInterval(timer);
+    for (const check of pending.values()) clearTimeout(check.timer);
+    pending.clear();
+  });
+}
 
 /**
  * Every credential names its owner's credential version: resetting it revokes
@@ -110,6 +212,11 @@ export function resetAgentCredentials(principalId: string): void {
     ...versions,
     [principalId]: credentialVersion(principalId) + 1,
   });
+  disconnectAgentlets(principalId, 'Device credentials were reset');
+}
+
+/** Disconnect this owner's current and just-admitted connections without rotating credentials. */
+export function disconnectAgentlets(principalId: string, reason: string): void {
   const disconnect = () => {
     const gateway = getAgentletGateway();
     for (const connection of [
@@ -117,10 +224,10 @@ export function resetAgentCredentials(principalId: string): void {
       ...(gateway?.getAgentlets() ?? []),
     ])
       if (agentletOwner(connection.agentletId) === principalId)
-        connection.disconnect('Device credentials were reset');
+        connection.disconnect(reason);
   };
   disconnect();
-  // A handshake admitted just before the reset registers its connection
+  // A handshake admitted just before disconnection registers its connection
   // once its authentication resolves, without another macrotask between
   // them; it is not in the Gateway yet, so sweep again once it is.
   setImmediate(disconnect);
@@ -201,7 +308,7 @@ export function canUseAgentlet(
   const owner = personalSettingsOwner();
   // Background recovery has no HTTP caller, but Bubble still requires a
   // durable owner. An old unowned workload must never receive the signing key.
-  if (!owner && process.env.HUABU_IDENTITY_PROVIDER === 'bubble') {
+  if (!owner && hostIdentity?.provider === 'bubble') {
     const expected = agentletOwner(requestedId ?? agentletId);
     return expected !== null && agentletOwner(agentletId) === expected;
   }
@@ -230,6 +337,11 @@ export function authenticateUserAgentlet(service: IdentityService) {
     // devices were disconnected; this one is not connected yet.
     const claims = readAgentCredential(token);
     if (claims?.aud !== 'device') throw refusedDeviceCredential(token);
+    // An admission mutation may have completed while a handshake's initial
+    // lookup was pending; reusable credentials alone do not admit its owner.
+    if (!(await service.resolvePrincipal?.(claims.principalId))?.member)
+      throw new Error('Device owner is not admitted');
+    if (!readAgentCredential(token)) throw refusedDeviceCredential(token);
     const owners = readMap(ownersPath(), ownersSchema);
     if (
       Object.hasOwn(owners, agentletId) &&
@@ -252,11 +364,19 @@ export async function agentReachbackEnvironment(spec: {
 }): Promise<Record<string, string> | undefined> {
   if (!spec.agentletId) return undefined;
   const principalId = agentletOwner(spec.agentletId);
+  requireOwnAgentlet(spec.agentletId);
+  if (
+    hostIdentity?.provider === 'bubble' &&
+    (!principalId ||
+      !(await hostIdentity.resolvePrincipal?.(principalId))?.member)
+  ) {
+    const error = new Error('Device owner is not admitted');
+    Object.assign(error, { statusCode: 403, code: 'DEVICE_ACCESS_REQUIRED' });
+    throw error;
+  }
   if (!principalId) {
-    requireOwnAgentlet(spec.agentletId);
     return { HUABU_RFS_TOKEN: getConnectionToken() };
   }
-  requireOwnAgentlet(spec.agentletId);
   const url = spec.env?.HUABU_RFS_URL;
   const threadId = spec.env?.HUABU_THREAD_ID;
   const path = url

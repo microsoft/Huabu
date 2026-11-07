@@ -20,6 +20,7 @@ import { identityPrincipalSchema } from '@huabu/shared';
 import { createKeyedMutex } from '../../utils/keyed-mutex.js';
 import { getLogger } from '../../utils/logger.js';
 import { getWorkspaceHandle } from '../workspace.js';
+import { disconnectAgentlets } from './agent-credentials.js';
 import { IdentityError } from './service.js';
 import {
   chooseRequestWorkspace,
@@ -73,6 +74,7 @@ const WORKSPACE_ROLE = {
 function bubblePeople(store: BubbleStore): PeopleDirectory {
   const SYSTEM = { type: 'system' } as const;
   const withWorkspaceGrantLock = createKeyedMutex();
+  const withMemberGrantLock = createKeyedMutex();
   const roleOf = (role: string): WorkspaceRole | null =>
     (Object.keys(WORKSPACE_ROLE) as WorkspaceRole[]).find(
       (key) => WORKSPACE_ROLE[key] === role,
@@ -121,20 +123,27 @@ function bubblePeople(store: BubbleStore): PeopleDirectory {
         };
       });
     },
-    async setMember(principalId, member, by) {
-      if (!(await store.principals.get(principalId))) return false;
-      const rows = await store.grants.list({ target: SYSTEM, principalId });
-      const current = rows.filter((row) => row.role === 'member');
-      if (member && current.length === 0)
-        await store.grants.add({
-          target: SYSTEM,
-          principalId,
-          role: 'member',
-          grantedByPrincipalId: by,
-        });
-      if (!member)
-        for (const row of current) await store.grants.remove(row.grantId);
-      return true;
+    setMember(principalId, member, by) {
+      return withMemberGrantLock(principalId, async () => {
+        if (!(await store.principals.get(principalId))) return false;
+        const rows = await store.grants.list({ target: SYSTEM, principalId });
+        const current = rows.filter((row) => row.role === 'member');
+        if (member && current.length === 0)
+          await store.grants.add({
+            target: SYSTEM,
+            principalId,
+            role: 'member',
+            grantedByPrincipalId: by,
+          });
+        if (!member) {
+          for (const row of current) await store.grants.remove(row.grantId);
+          // Removing membership does not rotate reusable device credentials.
+          // A system owner still has admission through its owner role.
+          if (!rows.some((row) => row.role === 'owner'))
+            disconnectAgentlets(principalId, 'Device owner is not admitted');
+        }
+        return true;
+      });
     },
     setWorkspaceRole(principalId, workspaceId, role, by) {
       return withWorkspaceGrantLock(
@@ -381,10 +390,17 @@ export async function openBubbleIdentity(options: {
     const member = await admission.can(USE, principalId, {
       type: 'system',
     });
-    // Resource checks start after Workspace selection, which can grant
-    // ownership during provisioning (including a racing first request).
-    // Cache that fresh policy until this request claims another resource.
-    let policy: ReturnType<typeof runtime.policy.scoped> | undefined;
+    // This access object can outlive the request in an agent or memory worker.
+    // Each operation owns a fresh policy and rechecks admission/account status;
+    // never retain Bubble's operation-local grant memo on the caller context.
+    const currentPolicy = async () => {
+      const current = await store.principals.get(principalId);
+      if (!current || current.disabledAt) return null;
+      const policy = runtime.policy.scoped();
+      return (await policy.can(USE, principalId, { type: 'system' }))
+        ? policy
+        : null;
+    };
     // A Space is the one of that id in the Workspace this call runs in.
     const target = (resource: HuabuResource) => {
       if (resource.type === 'workspace')
@@ -404,18 +420,22 @@ export async function openBubbleIdentity(options: {
       access: {
         can: async (level, resource) => {
           const resolved = target(resource);
-          return resolved
-            ? (policy ??= runtime.policy.scoped()).can(
-                CAPABILITY[level],
-                principalId,
-                resolved,
-              )
+          if (!resolved) return false;
+          const policy = await currentPolicy();
+          return policy
+            ? policy.can(CAPABILITY[level], principalId, resolved)
             : false;
         },
         claim: async (resource) => {
           const resolved = target(resource);
           if (!resolved)
             throw new Error('A Space is claimed inside a Workspace');
+          if (!(await currentPolicy()))
+            throw new IdentityError(
+              403,
+              'IDENTITY_FORBIDDEN',
+              'Huabu access required',
+            );
           await store.grants.add({
             target: resolved,
             principalId,
@@ -423,12 +443,14 @@ export async function openBubbleIdentity(options: {
               resource.type === 'space' ? SPACE_OWNER : WORKSPACE_ROLE.owner,
             grantedByPrincipalId: principalId,
           });
-          policy = undefined;
         },
         // A Space shared on its own makes its Workspace enterable; what
         // the caller sees there is still decided Space by Space.
         workspaces: async () => {
-          if (admin) return 'all';
+          const policy = await currentPolicy();
+          if (!policy) return [];
+          if (await policy.can(ADMIN, principalId, { type: 'system' }))
+            return 'all';
           const ids = new Set<string>();
           for (const grant of await store.grants.list({ principalId })) {
             const granted = grant.target;
