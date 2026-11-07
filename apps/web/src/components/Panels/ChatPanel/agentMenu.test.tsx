@@ -10,6 +10,7 @@ import {
   MENU_GROUP_CLASS,
   MENU_SECTION_LABEL_CLASS,
 } from '@/components/Common/menuStyles';
+import { useSettingsUiStore } from '@/store/settingsUiStore';
 
 import { AgentMenuOptions } from './agentMenu';
 import { AgentSelector } from './AgentSelector';
@@ -164,6 +165,38 @@ describe('AgentMenuOptions', () => {
 });
 
 describe('AgentSelector', () => {
+  it('offers direct Built-In configuration without any external Profile', async () => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    useSettingsUiStore.getState().close();
+    try {
+      await act(() => {
+        root?.render(
+          <AgentSelector
+            currentBinding={{ kind: 'internal' }}
+            currentMode="ask"
+            profiles={[]}
+            editable
+            onSelect={vi.fn()}
+          />,
+        );
+      });
+      const setup = container.querySelector<HTMLButtonElement>(
+        '[aria-label="settings.builtInPiConfigure"]',
+      );
+      expect(setup).not.toBeNull();
+      expect(setup?.disabled).toBe(false);
+      await act(() => setup?.click());
+      expect(useSettingsUiStore.getState()).toMatchObject({
+        isOpen: true,
+        requestedTab: 'builtIn',
+      });
+    } finally {
+      useSettingsUiStore.getState().close();
+    }
+  });
+
   it.each([true, false])(
     'omits the chevron while preserving editable=%s behavior',
     async (editable) => {

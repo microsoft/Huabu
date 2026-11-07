@@ -208,31 +208,40 @@ describe('browser-local recent conversation Agent', () => {
     await useAcpProfilesStore.getState().refresh();
     expect(useAcpProfilesStore.getState().folderPickerAgentletId).toBeNull();
   });
-  it('deduplicates Profile refresh and resolves the first selectable Profile', async () => {
+  it('deduplicates Profile refresh and starts new users with Built-In Pi', async () => {
     const [first, second] = await Promise.all([
       loadDefaultAgentBinding(),
       loadDefaultAgentBinding(),
     ]);
-    expect(first).toEqual({
-      kind: 'external',
-      profileId: profile.id,
-      alias: profile.alias,
-    });
+    expect(first).toEqual({ kind: 'internal' });
     expect(second).toEqual(first);
     expect(listProfiles).toHaveBeenCalledOnce();
     expect(api.getDefaults).not.toHaveBeenCalled();
   });
 
-  it('falls back to the first selectable Profile when the local cache is stale', async () => {
+  it('falls back to Built-In Pi when the explicit local choice is unavailable', async () => {
     await rememberConversationAgentBinding({
       kind: 'external',
       profileId: 'stale-profile',
       alias: 'Stale',
     });
-    await expect(loadDefaultAgentBinding()).resolves.toMatchObject({
-      kind: 'external',
-      profileId: profile.id,
+    await expect(loadDefaultAgentBinding()).resolves.toEqual({
+      kind: 'internal',
     });
+  });
+
+  it('creates a Built-In conversation without an external device or Profile', async () => {
+    listProfiles.mockResolvedValueOnce({
+      ...snapshot,
+      profiles: [],
+      selectableProfileIds: [],
+    });
+    await expect(loadDefaultAgentBinding()).resolves.toEqual({
+      kind: 'internal',
+    });
+    expect(
+      useAcpProfilesStore.getState().recentConversationProfileId,
+    ).toBeNull();
   });
 
   it('supports Built-In Pi as an explicit conversational choice', async () => {
@@ -258,6 +267,11 @@ describe('browser-local recent conversation Agent', () => {
   });
 
   it('does not let Utility Agent changes reroute new conversations', async () => {
+    await rememberConversationAgentBinding({
+      kind: 'external',
+      profileId: profile.id,
+      alias: profile.alias,
+    });
     await loadDefaultAgentBinding();
     await useAcpProfilesStore.getState().saveDefaults({
       profileId: 'huabu',
@@ -301,7 +315,7 @@ describe('browser-local recent conversation Agent', () => {
     expect(
       useAcpProfilesStore.getState().recentConversationProfileId,
     ).toBeNull();
-    expect(getDefaultAgentBinding()).toMatchObject({ profileId: profile.id });
+    expect(getDefaultAgentBinding()).toEqual({ kind: 'internal' });
     write.mockRestore();
   });
 

@@ -11,7 +11,7 @@ import { toast } from '@/components/Common/Toast';
 
 import { useAcpProfilesStore } from './acpProfilesStore';
 import useCanvasStore from './canvasStore';
-import { useChatStore } from './chatStore';
+import { selectThreadBinding, useChatStore } from './chatStore';
 import { usePanelStore } from './panelStore';
 import {
   closeActivePreviewNode,
@@ -134,18 +134,29 @@ describe('post-create editing', () => {
     expect(listProfiles).not.toHaveBeenCalled();
   });
 
-  it('prompts to configure defaults without creating a fallback Chat', async () => {
+  it('opens a Built-In Chat for a new user without external Profiles', async () => {
     listProfiles.mockResolvedValueOnce({
       ...profileSnapshot,
       profiles: [],
       selectableProfileIds: [],
     });
-    const threads = useChatStore.getState().threadsById;
-    expect(await openChat()).toBe('');
-    expect(useChatStore.getState().threadsById).toBe(threads);
-    expect(usePreviewWorkspaceStore.getState().workspace.tabs).toEqual({});
-    expect(toast).toHaveBeenCalledWith(expect.any(String), { tone: 'danger' });
-    expect(usePanelStore.getState().isRightCollapsed).toBe(true);
+    const tabId = await openChat();
+    const tab = usePreviewWorkspaceStore.getState().workspace.tabs[tabId];
+    expect(tab.target.kind).toBe('chat');
+    if (tab.target.kind !== 'chat') throw new Error('Expected a Chat tab');
+    expect(
+      selectThreadBinding(useChatStore.getState(), tab.target.threadId),
+    ).toEqual({
+      kind: 'internal',
+    });
+    expect(
+      Object.keys(usePreviewWorkspaceStore.getState().workspace.tabs),
+    ).toEqual([tabId]);
+    expect(usePanelStore.getState()).toMatchObject({
+      isRightCollapsed: false,
+      focusChatInputRequest: { threadId: tab.target.threadId },
+    });
+    expect(toast).not.toHaveBeenCalled();
   });
 
   it('does not open a delayed Chat in a different Canvas or changed workspace', async () => {
