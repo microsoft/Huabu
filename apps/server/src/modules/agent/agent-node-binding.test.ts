@@ -1,12 +1,34 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AgentNodeBindingCoordinator } from './agent-node-binding.js';
+import { createSpace } from '../storage/index.js';
+import {
+  mountTestWorkspace,
+  type MountedTestStorage,
+} from '../storage/testing.js';
+import { canvasAcpNamespace } from '../workspace/paths.js';
 
 import type { AgentNodeTarget } from './agent-thread-resolver.js';
 import type { ThreadRecord } from '@agenetes/agenetes';
+
+let mounted: MountedTestStorage | undefined;
+beforeEach(async () => {
+  // Record/promotion remain deterministic DI fixtures; admission still needs
+  // the same real Workspace/Space identity the coordinator uses in production.
+  mounted = await mountTestWorkspace(
+    { structured: { kind: 'disk' }, blobs: { kind: 'disk' } },
+    'agent-node-binding-',
+  );
+  const created = await createSpace('canvas-a', 'Binding fixture');
+  if (!created.ok) throw new Error('Failed to create binding fixture Space');
+});
+afterEach(async () => {
+  await mounted?.close();
+  mounted = undefined;
+});
 
 function target(): AgentNodeTarget {
   return {
@@ -230,7 +252,10 @@ describe('AgentNodeBindingCoordinator', () => {
     const release = await h.coordinator.guardDraftEdit(target(), {
       agentBinding: { kind: 'external', profileId: 'new', alias: 'New' },
     });
-    expect(h.acquireTurn).toHaveBeenCalledWith('thread-a');
+    expect(h.acquireTurn).toHaveBeenCalledWith(
+      'thread-a',
+      canvasAcpNamespace('canvas-a'),
+    );
     expect(h.release).not.toHaveBeenCalled();
     release();
     expect(h.release).toHaveBeenCalledOnce();
@@ -259,7 +284,10 @@ describe('AgentNodeBindingCoordinator', () => {
       { ...target(), bindingState: 'bound' },
       { agentMode: 'operate', label: 'Updated' },
     );
-    expect(h.acquireTurn).toHaveBeenCalledWith('thread-a');
+    expect(h.acquireTurn).toHaveBeenCalledWith(
+      'thread-a',
+      canvasAcpNamespace('canvas-a'),
+    );
     expect(h.readRecord).not.toHaveBeenCalled();
     expect(h.release).not.toHaveBeenCalled();
     release();

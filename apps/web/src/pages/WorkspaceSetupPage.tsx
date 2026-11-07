@@ -42,8 +42,12 @@ export default function WorkspaceSetupPage() {
   );
   const selectWorkspace = useWorkspaceStore((s) => s.selectWorkspace);
   const createWorkspace = useWorkspaceStore((s) => s.createWorkspace);
+  const openFolderWorkspace = useWorkspaceStore((s) => s.openFolderWorkspace);
   const named = useWorkspaceStore(
     (s) => s.capabilities?.namedWorkspaces === true,
+  );
+  const folders = useWorkspaceStore(
+    (s) => s.capabilities?.folderWorkspaces === true,
   );
   const storeError = useWorkspaceStore((s) => s.error);
 
@@ -80,6 +84,7 @@ export default function WorkspaceSetupPage() {
             workspaces={recentWorkspaces}
             activateWorkspace={activateRecentWorkspace}
             createWorkspace={createWorkspace}
+            openFolder={folders ? openFolderWorkspace : undefined}
             onActivated={() => navigate('/', { replace: true })}
           />
         ) : (
@@ -107,6 +112,8 @@ interface NamedSetupProps {
   workspaces: WorkspaceDescriptor[];
   activateWorkspace: (workspaceId: string) => Promise<void>;
   createWorkspace: (name: string) => Promise<void>;
+  /** Where Workspaces are Disk folders: open one by its path on the Server. */
+  openFolder?: (path: string) => Promise<void>;
   onActivated: () => void;
 }
 
@@ -115,10 +122,12 @@ function NamedSetup({
   workspaces,
   activateWorkspace,
   createWorkspace,
+  openFolder,
   onActivated,
 }: NamedSetupProps) {
   const { t } = useTranslation();
   const [name, setName] = useState('');
+  const [folder, setFolder] = useState('');
 
   const run = async (action: () => Promise<void>) => {
     try {
@@ -135,6 +144,11 @@ function NamedSetup({
   const create = () => {
     const trimmed = name.trim();
     if (trimmed) void run(() => createWorkspace(trimmed));
+  };
+
+  const open = () => {
+    const trimmed = folder.trim();
+    if (trimmed && openFolder) void run(() => openFolder(trimmed));
   };
 
   return (
@@ -196,6 +210,35 @@ function NamedSetup({
           {t('workspace.create')}
         </Button>
       </div>
+
+      {openFolder && (
+        <>
+          <label
+            htmlFor="open-workspace-folder"
+            className="text-fg-subtle mt-4 mb-1.5 block text-xs font-medium"
+          >
+            {t('workspace.openFolder')}
+          </label>
+          <div className="flex gap-2">
+            <TextInput
+              id="open-workspace-folder"
+              value={folder}
+              onChange={(event) => setFolder(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') open();
+              }}
+              placeholder={t('workspace.pathPlaceholder')}
+              disabled={isSyncing}
+              spellCheck={false}
+              autoComplete="off"
+              className="min-w-0 flex-1"
+            />
+            <Button onClick={open} disabled={isSyncing || !folder.trim()}>
+              {t('workspace.openFolderButton')}
+            </Button>
+          </div>
+        </>
+      )}
     </>
   );
 }

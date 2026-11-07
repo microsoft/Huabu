@@ -18,7 +18,7 @@ import {
   getIntegrationsConfig,
   setIntegrationsConfig,
 } from './integrations.js';
-import { isOwnerRequest } from '../security/owner.js';
+import { canChangeOwnSettings } from '../security/owner.js';
 
 import type {
   ApiResult,
@@ -39,7 +39,7 @@ const integrationsRoutes: FastifyPluginAsync = async (app) => {
     Body: IntegrationsConfigUpdate;
     Reply: ApiResult<IntegrationsConfig>;
   }>('/config', async (request, reply) => {
-    if (!isOwnerRequest(request)) {
+    if (!canChangeOwnSettings(request)) {
       return reply.status(403).send({
         message: 'Forbidden: integration keys require owner authorization',
       });

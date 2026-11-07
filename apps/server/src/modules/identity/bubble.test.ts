@@ -1,18 +1,26 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash } from 'node:crypto';
 
 import { InMemoryBubbleStore } from '@octostaff/bubble';
 import Fastify from 'fastify';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { migrateSpaceGrants, openBubbleIdentity } from './bubble.js';
 import { registerIdentity } from './http.js';
+import {
+  callerAccess,
+  openPersonalSettings,
+  useCaller,
+} from './personal-settings.js';
 import { createMemoryWorkspacePreferences } from './preferences.js';
 import { getRequestIdentity } from './request.js';
+import agentDefaultsRoutes from '../agent/agent-defaults.route.js';
 import { isOwnerRequest } from '../security/owner.js';
 import { registerSpaceAccess } from '../security/space-access.js';
+import { runInWorkspace } from '../workspace/context.js';
 import { getWorkspaceHandle } from '../workspace.js';
 
 import type { HuabuResource, ResourceDirectory } from './service.js';
@@ -141,6 +149,7 @@ async function host(
   });
   void app.register(bubble.plugin, { prefix: '/bubble' });
   registerSpaceAccess(app);
+  app.register(agentDefaultsRoutes, { prefix: '/api/agent/defaults' });
   app.get('/', { config: { identity: 'shell' } }, async () => 'shell');
   app.get('/api/data', async () => ({ private: true }));
   app.get('/api/workspace', async () => ({
@@ -198,7 +207,7 @@ async function host(
   };
   app.get('/api/events', events);
   app.get('/api/canvas/:canvasId/events', events);
-  return { app, store, lookups, resources };
+  return { app, store, lookups, resources, service: bubble.service };
 }
 
 /** Whether a WebSocket on `path` opens and, when asked, carries a clean reply. */
@@ -221,6 +230,116 @@ function connects(
 }
 
 describe('Bubble identity', () => {
+  it('rechecks grants and admission in a caller snapshot retained by background work', async () => {
+    const { app, store, service } = await host();
+    await app.ready();
+    await store.principals.upsert({ principalId: 'carol', kind: 'user' });
+    await grant(store, 'carol', 'member');
+    const target = { type: 'huabu.workspace', id: 'w1' } as const;
+    await grant(store, 'carol', 'huabu.workspace.owner', target);
+    const identity = (await service.resolvePrincipal!('carol'))!;
+    const resumed = runInWorkspace(scopeOf('w1'), () =>
+      openPersonalSettings(() => {
+        useCaller(identity);
+        return AsyncLocalStorage.snapshot();
+      }),
+    );
+    const can = (level: 'read' | 'manage') =>
+      resumed(() => callerAccess()!.can(level, { type: 'space', id: 'a' }));
+    expect(await can('manage')).toBe(true);
+    await revokeAll(store, 'carol', target);
+    await grant(store, 'carol', 'huabu.workspace.viewer', target);
+    expect(await can('manage')).toBe(false);
+    expect(await can('read')).toBe(true);
+    await revokeAll(store, 'carol', target);
+    expect(await can('read')).toBe(false);
+    await grant(store, 'carol', 'huabu.workspace.owner', target);
+    expect(await can('manage')).toBe(true);
+    await service.people.setMember('carol', false, 'admin');
+    expect(await can('read')).toBe(false);
+    expect(await resumed(() => callerAccess()!.workspaces())).toEqual([]);
+    await expect(
+      resumed(() =>
+        callerAccess()!.claim({ type: 'workspace', id: 'unadmitted-claim' }),
+      ),
+    ).rejects.toMatchObject({ code: 'IDENTITY_FORBIDDEN' });
+    await service.people.setMember('carol', true, 'admin');
+    expect(await can('manage')).toBe(true);
+    await store.principals.update('carol', {
+      disabledAt: new Date().toISOString(),
+    });
+    expect(await can('read')).toBe(false);
+  });
+
+  it('serializes overlapping admission and revocation for the same principal', async () => {
+    const backing = new InMemoryBubbleStore();
+    let entered!: () => void;
+    const adding = new Promise<void>((resolve) => (entered = resolve));
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const add: BubbleStore['grants']['add'] = async (input) => {
+      if (input.principalId === 'carol' && input.role === 'member') {
+        entered();
+        await gate;
+      }
+      return backing.grants.add(input);
+    };
+    // Delay the public port before entering the real store's transaction.
+    // A spy on its transaction-wrapped method would lock every store operation
+    // and hide the application's list-then-add race instead of exercising it.
+    const grants = new Proxy(backing.grants, {
+      get: (target, key) => (key === 'add' ? add : Reflect.get(target, key)),
+    });
+    const wrapped = new Proxy(backing, {
+      get: (target, key) =>
+        key === 'grants' ? grants : Reflect.get(target, key),
+    });
+    const { app, store, service } = await host({ store: wrapped });
+    await app.ready();
+    await store.principals.upsert({ principalId: 'carol', kind: 'user' });
+    const admit = service.people.setMember('carol', true, 'admin');
+    await adding;
+    let revoked = false;
+    const revoke = service.people
+      .setMember('carol', false, 'admin')
+      .finally(() => {
+        revoked = true;
+      });
+    try {
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(revoked).toBe(false);
+    } finally {
+      release();
+    }
+    expect(await Promise.all([admit, revoke])).toEqual([true, true]);
+    expect(
+      await store.grants.list({ target: SYSTEM, principalId: 'carol' }),
+    ).toEqual([]);
+  });
+
+  it.each(['/api/agent/defaults', '/api/agent/defaults/'])(
+    'lets a member read and change personal defaults without a Space at %s',
+    async (url) => {
+      const { app, store } = await host();
+      await grant(store, 'carol', 'member');
+      const response = await app.inject({ url, headers: as('carol') });
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toEqual({
+        defaults: { profileId: 'huabu', functionalModel: '' },
+        selectionState: 'available',
+        modelCapability: 'supported',
+      });
+      const write = await app.inject({
+        method: 'PUT',
+        url,
+        headers: as('carol'),
+        payload: { profileId: 'huabu', functionalModel: '' },
+      });
+      expect(write.statusCode).toBe(200);
+      expect(write.json().defaults.profileId).toBe('huabu');
+    },
+  );
+
   it('admits the provisioned owner by master key, and other principals only as themselves', async () => {
     const { app } = await host();
     const identity = await app.inject({
@@ -440,11 +559,38 @@ describe('Bubble identity', () => {
     ).toBe(404);
   });
 
-  it('answers every check in a request from one policy scope', async () => {
-    const { app, lookups } = await host();
-    await app.inject({ url: '/api/access', headers: MASTER });
-    // Eighteen questions, each Space resolved once.
-    expect(lookups.filter((id) => id === 'w1:a')).toHaveLength(1);
+  it('memoizes ancestors within one access operation but sees a grant removed before the next', async () => {
+    const { app, store, lookups } = await host();
+    await store.principals.upsert({ principalId: 'carol', kind: 'user' });
+    await grant(store, 'carol', 'member');
+    const target = { type: 'huabu.workspace', id: 'w1' } as const;
+    await grant(store, 'carol', 'huabu.workspace.owner', target);
+    app.get('/api/access-operations', async (request) => {
+      const { access } = getRequestIdentity(request)!;
+      const resource = { type: 'space', id: 'a1' } as const;
+      const before = await access.can('read', resource);
+      const ancestors = lookups.filter((id) => id === 'w1:a').length;
+      await revokeAll(store, 'carol', target);
+      return { before, ancestors, after: await access.can('read', resource) };
+    });
+    const response = await app.inject({
+      url: '/api/access-operations',
+      headers: as('carol'),
+    });
+    expect(response.json()).toEqual({
+      before: true,
+      ancestors: 1,
+      after: false,
+    });
+  });
+
+  it('does not retain administrator-wide Workspace entry after its system role is removed', async () => {
+    const { app, store, service } = await host();
+    await app.ready();
+    const held = (await service.resolvePrincipal!('admin'))!.access;
+    expect(await held.workspaces()).toBe('all');
+    await revokeAll(store, 'admin');
+    expect(await held.workspaces()).toEqual([]);
   });
 
   it('serves the application shell to a browser that has not signed in', async () => {
@@ -705,7 +851,7 @@ describe('Bubble identity', () => {
       url: '/api/identity/session',
       headers: { authorization: 'Bearer machine-secret' },
     });
-    expect(refused.statusCode).toBe(400);
+    expect(refused.statusCode).toBe(401);
 
     const started = await app.inject({
       method: 'POST',
@@ -818,3 +964,70 @@ describe('Bubble identity', () => {
     expect(await connects(port, '/bubble/v1/ws')).toBe(true);
   });
 });
+
+it('retains the old Workspace grant if adding the replacement role fails and projects the strongest role', async () => {
+  const store = new InMemoryBubbleStore();
+  const { service, plugin } = await openBubbleIdentity({
+    store,
+    authenticator: AUTHENTICATORS,
+    preferences: createMemoryWorkspacePreferences(),
+    resources: directory(),
+  });
+  const app = Fastify();
+  servers.push(app);
+  await app.register(plugin);
+  await app.ready();
+  await store.principals.upsert({ principalId: 'erin', kind: 'user' });
+  const target = { type: 'huabu.workspace', id: 'w1' } as const;
+  await grant(store, 'erin', 'huabu.workspace.editor', target);
+  const add = vi
+    .spyOn(store.grants, 'add')
+    .mockRejectedValueOnce(new Error('store unavailable'));
+  await expect(
+    service.people.setWorkspaceRole('erin', 'w1', 'owner', 'admin'),
+  ).rejects.toThrow('store unavailable');
+  expect(
+    (await store.grants.list({ target, principalId: 'erin' })).map(
+      (g) => g.role,
+    ),
+  ).toEqual(['huabu.workspace.editor']);
+  add.mockRestore();
+  await grant(store, 'erin', 'huabu.workspace.owner', target);
+  await grant(store, 'erin', 'huabu.workspace.viewer', target);
+  expect(
+    (await service.people.list()).find(
+      (p) => p.principal.principalId === 'erin',
+    )?.workspaces,
+  ).toEqual([{ workspaceId: 'w1', role: 'owner' }]);
+});
+
+it.each(['viewer', null] as const)(
+  'serializes concurrent Workspace role replacements ending in %s',
+  async (role) => {
+    const store = new InMemoryBubbleStore();
+    const { service, plugin } = await openBubbleIdentity({
+      store,
+      authenticator: AUTHENTICATORS,
+      preferences: createMemoryWorkspacePreferences(),
+      resources: directory(),
+    });
+    const app = Fastify();
+    servers.push(app);
+    await app.register(plugin);
+    await app.ready();
+    await store.principals.upsert({ principalId: 'erin', kind: 'user' });
+    const target = { type: 'huabu.workspace', id: 'w1' } as const;
+    await grant(store, 'erin', 'huabu.workspace.editor', target);
+
+    await Promise.all([
+      service.people.setWorkspaceRole('erin', 'w1', 'owner', 'admin'),
+      service.people.setWorkspaceRole('erin', 'w1', role, 'admin'),
+    ]);
+
+    expect(
+      (await store.grants.list({ target, principalId: 'erin' })).map(
+        (grant) => grant.role,
+      ),
+    ).toEqual(role ? ['huabu.workspace.viewer'] : []);
+  },
+);

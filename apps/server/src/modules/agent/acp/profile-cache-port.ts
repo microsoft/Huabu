@@ -23,12 +23,15 @@
 
 import { setAcpProfileCachePort } from '@agenetes/acp-driver';
 import { getAgentProfileRegistry } from '@agenetes/agentlet-host';
+import { threadIdentityKey } from '@agenetes/runtime';
 
 import {
   foldMetadataIntoProfileCache,
   getProfileSchemaCache,
 } from './profile-schema-cache.js';
 import { agenetes } from '../agenetes/drivers.js';
+
+import type { Namespace } from '@agenetes/protocol';
 
 /** Install the L1 read-side profile-schema-cache port into the ACP shell. */
 export function installAcpProfileCachePort(): void {
@@ -71,13 +74,15 @@ export function ensureProfileCacheSubscription(
   threadId: string,
   profileId: string,
   executionRevision = 0,
+  namespace?: Namespace,
 ): void {
   if (!threadId || !profileId) return;
-  if (subscribedThreads.has(threadId)) return;
-  subscribedThreads.add(threadId);
+  const key = threadIdentityKey({ threadId, namespace });
+  if (subscribedThreads.has(key)) return;
+  subscribedThreads.add(key);
   void (async () => {
     try {
-      for await (const meta of agenetes.notifications(threadId)) {
+      for await (const meta of agenetes.notifications(threadId, namespace)) {
         const profile = getAgentProfileRegistry()?.getProfile(profileId);
         if (!profile || (profile.executionRevision ?? 0) !== executionRevision)
           continue;
@@ -87,7 +92,7 @@ export function ensureProfileCacheSubscription(
       // Swallow: the cache is best-effort UX; a fold failure must not
       // surface on the thread's turn.
     } finally {
-      subscribedThreads.delete(threadId);
+      subscribedThreads.delete(key);
     }
   })();
 }

@@ -1,16 +1,32 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { handleCreateTask } from './task.js';
+import {
+  mountTestWorkspace,
+  type MountedTestStorage,
+} from '../../../storage/testing.js';
 import { runCompletionService } from '../../../task/run-completion.service.js';
 import { runLauncher } from '../../../task/run-launcher.js';
 import { taskService } from '../../../task/task.service.js';
 import { executeTool } from '../executor.js';
 
-afterEach(() => {
+let opened: MountedTestStorage;
+
+beforeEach(async () => {
+  // Dispatch authorization and the actual handler share a Workspace lease,
+  // even when this wiring suite replaces the downstream Task service.
+  opened = await mountTestWorkspace(
+    { structured: { kind: 'disk' }, blobs: { kind: 'disk' } },
+    'huabu-task-tools-',
+  );
+});
+
+afterEach(async () => {
   vi.restoreAllMocks();
+  await opened?.close();
 });
 
 describe('Task tool handlers', () => {

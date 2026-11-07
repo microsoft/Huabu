@@ -4,7 +4,8 @@
 import { deviceFilesBodySchema } from '@huabu/shared';
 
 import { DeviceFilesError, DeviceFilesService } from './device-files.js';
-import { isOwnerRequest } from '../../security/owner.js';
+import { requireOwnAgentlet } from '../../identity/agent-credentials.js';
+import { canChangeOwnSettings } from '../../security/owner.js';
 
 import type { FastifyPluginAsync } from 'fastify';
 
@@ -12,7 +13,7 @@ const deviceFilesRoutes: FastifyPluginAsync = async (app) => {
   let service: DeviceFilesService | undefined;
   app.addHook('preClose', async () => service?.dispose());
   app.post('/files', async (request, reply) => {
-    if (!isOwnerRequest(request))
+    if (!canChangeOwnSettings(request))
       return reply
         .status(403)
         .send({ message: 'Owner authorization required' });
@@ -22,6 +23,7 @@ const deviceFilesRoutes: FastifyPluginAsync = async (app) => {
         code: 'invalid_request',
         message: 'Invalid filesystem request',
       });
+    requireOwnAgentlet(parsed.data.agentletId);
     reply.header('Cache-Control', 'no-store');
     try {
       service ??= new DeviceFilesService(app.log);

@@ -240,6 +240,7 @@
     "title": "Settings",
     "open": "Open settings",
     "general": "General",
+    "people": "People",
     "agent": "Agent",
     "capabilities": "Capabilities",
     "capabilitiesDescription": "These Huabu-managed services can be configured as needed. Availability to an external Agent depends on that Agent's own capabilities.",
@@ -462,6 +463,11 @@
     "agentletConnectionTokenDescriptionLoading": "Loading the active credential source…",
     "agentletConnectionTokenPlaceholder": "Enter a replacement token",
     "agentletConnectionTokenSecurityInfo": "Connection commands and files contain a Huabu access key. Keep them private.",
+    "resetDeviceCredentials": "Reset device credentials",
+    "resetDeviceCredentialsDescription": "If a connection command or device may have leaked, reset your credentials. Your devices disconnect and running agents stop; connect again with a new command.",
+    "resetDeviceCredentialsConfirm": "Your devices disconnect, your running agents stop, and every connection command you copied stops working. Copy a new command to reconnect.",
+    "resetDeviceCredentialsDone": "Device credentials reset. Copy a new connection command to reconnect.",
+    "resetDeviceCredentialsFailed": "Could not reset device credentials.",
     "agentletTokenSource": {
       "stored": "encrypted credential storage",
       "environment": "HUABU_CONNECTION_TOKEN",
@@ -600,7 +606,7 @@
     "agentletLocalAccessSetup": "The server listens only on loopback. For remote access, stop the server, run pnpm run setup, then restart it.",
     "agentletDesktopLocalAccess": "The built-in desktop server is local-only. For remote access, configure and start a standalone server, then connect the desktop to it.",
     "agentletCheckConnection": "Check the connection in Huabu",
-    "agentletCheckConnectionDescription": "Keep the terminal running, then return to Agent settings in Huabu. The device appears under Connected devices, and supported Agents found on it are added to the Agent list automatically.",
+    "agentletCheckConnectionDescription": "Keep the terminal running, then return to Devices and Agents in Huabu. Your connected device and its supported Agents appear there automatically.",
     "agentletOtherConnectionOptions": "Other connection options",
     "agentletTargetShell": "Shell",
     "agentletShellPosix": "Bash / Zsh (macOS, Linux, WSL)",
@@ -714,6 +720,8 @@
     "intro": "Choose a Home folder to store your Spaces, notes, and artifacts.",
     "folder": "Home folder",
     "pathPlaceholder": "Type an absolute path, then press Enter",
+    "openFolder": "Open a folder",
+    "openFolderButton": "Open",
     "recent": "Recent Home folders",
     "removeRecent": "Remove from recent",
     "path": "Path: {{path}}",
@@ -1651,8 +1659,27 @@
     }
   },
   "errors": {
-    "conversationAgentUnconfigured": "Connect an external Agent before starting a new conversation.",
-    "nodeSaveFailed": "Couldn't write \"{{name}}\" to disk — the file may be locked or not writable.",
-    "rateLimited": "Too many requests. Try again in {{seconds}} seconds."
+    "nodeSaveFailed": "Could not save \"{{name}}\". Your changes are still here; try again.",
+    "rateLimited": "Too many requests. Try again in {{seconds}} seconds.",
+    "spaceSaveAccessDenied": "This Space is read-only for your account. Your changes were not saved."
+  },
+  "people": {
+    "loading": "Loading people…",
+    "loadFailed": "Could not load people.",
+    "saveFailed": "Could not save the change.",
+    "intro": "Who may use this Huabu, and which Workspaces they can open. People appear here after they first sign in. Changes apply on their next request.",
+    "administrator": "Administrator",
+    "access": "Access",
+    "roleIn": "Role in {{workspace}}",
+    "removeRole": "Remove from this Workspace",
+    "addToWorkspace": "Add to a Workspace…",
+    "resetDevices": "Reset devices",
+    "resetDevicesConfirm": "{{name}}'s devices disconnect, their running agents stop, and every connection command they copied stops working.",
+    "resetDevicesDone": "{{name}}'s device credentials were reset.",
+    "role": {
+      "owner": "Owner",
+      "editor": "Editor",
+      "viewer": "Viewer"
+    }
   }
 }

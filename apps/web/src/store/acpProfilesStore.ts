@@ -122,7 +122,10 @@ interface AcpProfilesState {
   /** Display-only device history; never used for runtime availability. */
   knownDevices: AgentletDevice[];
   folderPickerAgentletId: string | null;
-  /** Latest agentlet snapshot. `null` until the first fetch resolves. */
+  /**
+   * Latest snapshot of the Server's own worker: `null` until the first fetch
+   * resolves, and for Bubble users, whose Server runs no shared worker.
+   */
   agentlet: AcpAgentletStatus | null;
   /** Absent on older servers; never infer a default from list ordering. */
   agentDefaults: AgentDefaults | null;
@@ -345,12 +348,13 @@ const unsubscribePreferences = subscribeApplicationPreferences((key) => {
 });
 import.meta.hot?.dispose(unsubscribePreferences);
 
+/** Use the last available explicit choice; new users start with Built-In Pi. */
 export function selectDefaultConversationProfileId(
   state: Pick<
     AcpProfilesState,
     'profiles' | 'selectableProfileIds' | 'recentConversationProfileId'
   >,
-): string | null {
+): string {
   const recentProfileId = state.recentConversationProfileId;
   if (recentProfileId === HUABU_AGENT_PROFILE_ID) return recentProfileId;
   if (
@@ -360,16 +364,13 @@ export function selectDefaultConversationProfileId(
   ) {
     return recentProfileId;
   }
-  return state.selectableProfileIds[0] ?? null;
+  return HUABU_AGENT_PROFILE_ID;
 }
 
 /** Snapshot only the chat identity; functional-model routing is unrelated. */
 export function getDefaultAgentBinding(): AgentBinding {
   const state = useAcpProfilesStore.getState();
   const profileId = selectDefaultConversationProfileId(state);
-  if (!profileId) {
-    throw new Error(i18n.t('errors.conversationAgentUnconfigured'));
-  }
   if (profileId === HUABU_AGENT_PROFILE_ID) return { kind: 'internal' };
   const profile = state.profiles.find((entry) => entry.id === profileId);
   return {

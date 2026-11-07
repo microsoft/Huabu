@@ -27,6 +27,7 @@ import {
   getStructuredStore,
   space,
 } from '../storage/index.js';
+import { canvasAcpNamespace } from '../workspace/paths.js';
 import { getWorkspaceKey } from '../workspace.js';
 
 import type {
@@ -358,7 +359,10 @@ export async function deleteSpaceTree(
                   'SPACE_AGENT_RUNNING',
                   'Stop running Agents before deleting this subtree',
                 );
-              const release = acquireAgentTurn(threadId);
+              const release = acquireAgentTurn(
+                threadId,
+                canvasAcpNamespace(id),
+              );
               if (!release)
                 throw new SpaceHierarchyError(
                   'SPACE_AGENT_RUNNING',

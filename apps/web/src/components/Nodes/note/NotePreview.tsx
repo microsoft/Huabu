@@ -125,6 +125,9 @@ export const NotePreview = ({
   const touchMode = useIsNotMouse();
   const [touchEditing, setTouchEditing] = useState(() => !markdown.trim());
   const editable = !readOnly && (!touchMode || touchEditing);
+  // Retained editor callbacks must observe a permission loss immediately.
+  const readOnlyRef = useRef(readOnly);
+  readOnlyRef.current = readOnly;
   const provenance: MarkdownProvenance = useMemo(
     () =>
       PROVENANCE_ENABLED
@@ -153,8 +156,13 @@ export const NotePreview = ({
   // `data.content` is the same Markdown string in both modes.
   const [editMode, setEditMode] = useState<'wysiwyg' | 'raw'>('wysiwyg');
 
+  useEffect(() => {
+    if (readOnly) setTouchEditing(false);
+  }, [readOnly]);
+
   const writePatch = useCallback(
     (patch: Record<string, unknown>) => {
+      if (readOnlyRef.current) return;
       if (onDataChange) {
         onDataChange(patch);
       } else if (onContentChange && typeof patch.content === 'string') {
@@ -166,7 +174,7 @@ export const NotePreview = ({
 
   const handleEditorChange = useCallback(
     (next: string) => {
-      if (readOnly) return;
+      if (readOnlyRef.current) return;
       if (!onContentChange && !onDataChange) return;
       if (next === lastEmittedMarkdownRef.current) return;
 
@@ -190,14 +198,14 @@ export const NotePreview = ({
 
       writePatch({ content: next });
     },
-    [readOnly, onContentChange, onDataChange, editor, writePatch],
+    [onContentChange, onDataChange, editor, writePatch],
   );
 
   const handleExternalUpdate = useCallback<
     NonNullable<React.ComponentProps<typeof MilkdownEditor>['onExternalUpdate']>
   >(
     ({ oldKeys, newKeys }) => {
-      if (!PROVENANCE_ENABLED) return;
+      if (!PROVENANCE_ENABLED || readOnlyRef.current) return;
       // Pure key-equal => nothing to do (e.g. content normalized
       // round-trip with no actual block change).
       if (
@@ -242,6 +250,7 @@ export const NotePreview = ({
   // Provenance action handlers.
   const handleAcceptBlock = useCallback(
     (key: string) => {
+      if (readOnlyRef.current) return;
       // Accept: keep the AI rewrite as-is, just drop the marker.
       const next = dropBlockEntry(provenanceRef.current, key);
       provenanceRef.current = next;
@@ -252,7 +261,7 @@ export const NotePreview = ({
 
   const handleRejectBlock = useCallback(
     (key: string) => {
-      if (!editor) return;
+      if (!editor || readOnlyRef.current) return;
       const entry = provenanceRef.current.blocks.find((b) => b.key === key);
       if (!entry) return;
       // Reject = restore the block to its pre-AI state AND drop the
@@ -282,7 +291,7 @@ export const NotePreview = ({
   // matches. Mirrors the pre-Milkdown behaviour.
   const handleInsertBelow = useCallback(
     (key: string, baselineMarkdown: string) => {
-      if (!editor) return;
+      if (!editor || readOnlyRef.current) return;
       const liveAi = editor.getBlockMarkdownByKey(key);
       if (liveAi === null) return;
       // Insert AI version FIRST while `key` is still resolvable; then
@@ -303,7 +312,7 @@ export const NotePreview = ({
 
   const handleRestoreTombstone = useCallback(
     (deletedKey: string, restoreMarkdown: string, anchorKey: string | null) => {
-      if (!editor) return;
+      if (!editor || readOnlyRef.current) return;
       const next = dismissDeletedBlock(provenanceRef.current, deletedKey);
       provenanceRef.current = next;
       const ok = editor.insertBlocksAfter(anchorKey, restoreMarkdown);
@@ -317,6 +326,7 @@ export const NotePreview = ({
 
   const handleDismissTombstone = useCallback(
     (deletedKey: string) => {
+      if (readOnlyRef.current) return;
       const next = dismissDeletedBlock(provenanceRef.current, deletedKey);
       provenanceRef.current = next;
       writePatch({ provenance: next });
@@ -329,6 +339,7 @@ export const NotePreview = ({
   // wants to keep / discard the whole change set without clicking
   // through each block individually.
   const handleAcceptAll = useCallback(() => {
+    if (readOnlyRef.current) return;
     const prov = provenanceRef.current;
     if (prov.blocks.length === 0 && prov.deletedBlocks.length === 0) return;
     // Accept all = keep the live doc, drop every marker / tombstone.
@@ -338,7 +349,7 @@ export const NotePreview = ({
   }, [writePatch]);
 
   const handleRejectAll = useCallback(() => {
-    if (!editor) return;
+    if (!editor || readOnlyRef.current) return;
     const prov = provenanceRef.current;
     if (prov.blocks.length === 0 && prov.deletedBlocks.length === 0) return;
     const blockKeys = editor.getBlockKeys();
@@ -456,13 +467,13 @@ export const NotePreview = ({
   // survive a quick "switch → tweak → switch back" round-trip.
   const handleRawChange = useCallback(
     (next: string) => {
-      if (readOnly) return;
+      if (readOnlyRef.current) return;
       if (!onContentChange && !onDataChange) return;
       if (next === lastEmittedMarkdownRef.current) return;
       lastEmittedMarkdownRef.current = next;
       writePatch({ content: next });
     },
-    [readOnly, onContentChange, onDataChange, writePatch],
+    [onContentChange, onDataChange, writePatch],
   );
 
   // ── Drop target: external Huabu payloads (chat messages, image

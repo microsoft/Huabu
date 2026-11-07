@@ -431,6 +431,15 @@ describe('Namespace conformance', () => {
     expect(namespaceSchema.safeParse(ns).success).toBe(true);
   });
 
+  it('preserves stable ownership independently of a namespace storage location', () => {
+    const namespace: Namespace = {
+      name: 'canvas_1',
+      ownerId: 'workspace_1',
+      storage: { root: '/data/c1' },
+    };
+    expect(namespaceSchema.parse(namespace)).toEqual(namespace);
+  });
+
   it('rejects an empty name', () => {
     expect(namespaceSchema.safeParse({ name: '' }).success).toBe(false);
   });

@@ -13,7 +13,7 @@ import {
 import { publishCanvasUpdate } from './canvas-sync.js';
 import { withCanvasMutex } from './write-coordinator.js';
 import { agentThreadService } from '../agent/agent-thread.service.js';
-import { canReadSpace } from '../security/space-access.js';
+import { canReadSpace, getSpaceAccess } from '../security/space-access.js';
 import { getStructuredStore, space } from '../storage/index.js';
 import { canvasAcpNamespace } from '../workspace/paths.js';
 import { acquireWorkspaceOperationLease } from '../workspace.js';
@@ -110,6 +110,7 @@ export function registerSpaceCardRoutes(app: FastifyInstance): void {
                   title: record.title,
                   updatedAt: record.updatedAt,
                   activity,
+                  access: await getSpaceAccess(request, canvasId),
                 },
               ];
             } catch (error) {

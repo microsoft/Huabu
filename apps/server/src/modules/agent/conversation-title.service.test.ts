@@ -3,13 +3,32 @@
 
 import { describe, expect, it, vi } from 'vitest';
 
+vi.mock('../workspace/paths.js', async (importOriginal) => {
+  const paths = await importOriginal<typeof workspacePaths>();
+  const { getWorkspaceHandle } = await import('../workspace.js');
+  return {
+    ...paths,
+    // Unit service cases have no storage backend; preserve the production
+    // owner/empty-Space identity while integration suites cover real roots.
+    canvasAcpNamespace: (canvasId: string) => ({
+      name: canvasId,
+      ...(canvasId && getWorkspaceHandle()
+        ? { ownerId: getWorkspaceHandle()?.workspaceId }
+        : {}),
+    }),
+  };
+});
+
 import {
   CONVERSATION_TITLE_METADATA_KEY,
   ConversationTitleService,
   effectiveConversationTitle,
 } from './conversation-title.service.js';
+import { runInWorkspace } from '../workspace/context.js';
+import { getWorkspaceHandle } from '../workspace.js';
 
 import type { ConversationTitleDependencies } from './conversation-title.service.js';
+import type * as workspacePaths from '../workspace/paths.js';
 import type { ThreadRecord } from '@agenetes/agenetes';
 
 function fixture() {
@@ -76,6 +95,104 @@ function fixture() {
 }
 
 describe('generated-first conversation titles', () => {
+  it.each(['generation', 'subscription'])(
+    'keeps same-ID title %s independent across Workspace owners',
+    async (operation) => {
+      const { deps, getRecord } = fixture();
+      const records = new Map(
+        ['workspace-a', 'workspace-b'].map((owner) => [
+          owner,
+          structuredClone(getRecord()),
+        ]),
+      );
+      const owner = () => getWorkspaceHandle()?.workspaceId ?? '';
+      const inWorkspace = <T>(id: string, run: () => T): T =>
+        runInWorkspace(
+          { handle: { workspaceId: id, name: id }, path: null },
+          run,
+        );
+      deps.readRecord = () => records.get(owner());
+      deps.updateHostMetadata = vi.fn((_canvas, _thread, patch) => {
+        const record = records.get(owner());
+        if (!record) throw new Error('Missing scoped record');
+        records.set(owner(), {
+          ...record,
+          hostMetadata: { ...record.hostMetadata, ...patch },
+        });
+      });
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      deps.generate = vi.fn(async () => {
+        if (owner() === 'workspace-a') await gate;
+        return `${owner()} generated`;
+      });
+      deps.notifications = vi.fn(async function* () {
+        yield { sessionInfo: { title: `${owner()} ACP`, updatedAt: null } };
+        await gate;
+      });
+      const service = new ConversationTitleService(deps);
+      try {
+        if (operation === 'generation') {
+          const first = inWorkspace('workspace-a', () =>
+            service.initialize('canvas-a', 'thread-a', 'A prompt'),
+          );
+          await vi.waitFor(() =>
+            expect(deps.generate).toHaveBeenCalledTimes(1),
+          );
+          let secondDone = false;
+          const second = inWorkspace('workspace-b', () =>
+            service.initialize('canvas-a', 'thread-a', 'B prompt'),
+          ).then(() => {
+            secondDone = true;
+          });
+          await vi.waitFor(() => expect(secondDone).toBe(true));
+          expect(
+            records.get('workspace-b')?.hostMetadata?.[
+              CONVERSATION_TITLE_METADATA_KEY
+            ],
+          ).toEqual({ title: 'workspace-b generated', source: 'generated' });
+          release();
+          await Promise.all([first, second]);
+          expect(
+            records.get('workspace-a')?.hostMetadata?.[
+              CONVERSATION_TITLE_METADATA_KEY
+            ],
+          ).toEqual({ title: 'workspace-a generated', source: 'generated' });
+        } else {
+          inWorkspace('workspace-a', () =>
+            service.subscribe('canvas-a', 'thread-a'),
+          );
+          inWorkspace('workspace-b', () =>
+            service.subscribe('canvas-a', 'thread-a'),
+          );
+          inWorkspace('workspace-a', () =>
+            service.subscribe('canvas-a', 'thread-a'),
+          );
+          await vi.waitFor(() =>
+            expect(deps.notifications).toHaveBeenCalledTimes(2),
+          );
+          await vi.waitFor(() =>
+            expect(
+              records.get('workspace-b')?.hostMetadata?.[
+                CONVERSATION_TITLE_METADATA_KEY
+              ],
+            ).toEqual({ title: 'workspace-b ACP', source: 'acp' }),
+          );
+          expect(
+            records.get('workspace-a')?.hostMetadata?.[
+              CONVERSATION_TITLE_METADATA_KEY
+            ],
+          ).toEqual({ title: 'workspace-a ACP', source: 'acp' });
+        }
+        expect(deps.onError).not.toHaveBeenCalled();
+      } finally {
+        release();
+      }
+    },
+  );
+
   it('normalizes titles with the shared host and ACP policies', async () => {
     const { service, deps, getRecord, notify } = fixture();
     await notify('  ACP\t title  ');

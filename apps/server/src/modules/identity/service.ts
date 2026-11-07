@@ -2,7 +2,12 @@
 // Licensed under the MIT license.
 
 import type { WorkspaceScope } from '../workspace/context.js';
-import type { IdentityPrincipal, IdentityResponse } from '@huabu/shared';
+import type {
+  IdentityPrincipal,
+  IdentityResponse,
+  Person,
+  WorkspaceRole,
+} from '@huabu/shared';
 
 /** Supplied by a trusted transport, never copied from a request body. */
 export interface IdentityCredentials {
@@ -38,6 +43,7 @@ export interface HuabuResource {
 export type AccessLevel = 'read' | 'write' | 'manage';
 
 export interface ResourceAccess {
+  /** Resolve current account/admission and grants for each operation, even on a retained caller context. */
   can(level: AccessLevel, resource: HuabuResource): Promise<boolean>;
   /** Make the caller the owner of a resource it has just created. */
   claim(resource: HuabuResource): Promise<void>;
@@ -108,6 +114,8 @@ export interface ResourceDirectory {
 /** Resolve afresh for each request so revocation is not hidden by a host cache. */
 export interface IdentityService {
   readonly provider: IdentityResponse['provider'];
+  /** Signing out also ends the identity provider's own session. */
+  readonly providerSignOut?: boolean;
   readonly challenge: string;
   /**
    * Admits callers without any credential, as local mode does without Basic
@@ -117,6 +125,8 @@ export interface IdentityService {
   authenticate(
     credentials: IdentityCredentials,
   ): Promise<ResolvedIdentity | null>;
+  /** Resolve a previously enrolled device owner, rechecking account and grants. */
+  resolvePrincipal?(principalId: string): Promise<ResolvedIdentity | null>;
   /**
    * Whether the machine credential also carries owner authority. Local mode
    * keeps its loopback rule for it; without this the machine is never an owner.
@@ -129,6 +139,8 @@ export interface IdentityService {
    * mode).
    */
   selectWorkspace?(identity: ResolvedIdentity): Promise<WorkspaceScope | null>;
+  /** Who may use Huabu and with which Workspace roles; Bubble mode only. */
+  readonly people?: PeopleDirectory;
   /** Make a Workspace the caller's current one; `null` when refused. */
   chooseWorkspace?(
     identity: ResolvedIdentity,
@@ -144,4 +156,22 @@ export class IdentityError extends Error {
   ) {
     super(message);
   }
+}
+
+/**
+ * Administering people: admitting them to Huabu and giving them Workspace
+ * roles. Only an administrator's routes use it; the provider decides nothing
+ * here beyond storing the grants its policy then answers from.
+ */
+export interface PeopleDirectory {
+  list(): Promise<Person[]>;
+  /** `false` when there is no such principal. */
+  setMember(principalId: string, member: boolean, by: string): Promise<boolean>;
+  /** `null` removes every Workspace role they hold there. */
+  setWorkspaceRole(
+    principalId: string,
+    workspaceId: string,
+    role: WorkspaceRole | null,
+    by: string,
+  ): Promise<boolean>;
 }

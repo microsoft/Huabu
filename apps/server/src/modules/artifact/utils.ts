@@ -7,6 +7,7 @@ import { ARTIFACT_URL_REGEX } from '@huabu/shared';
 
 import { getLogger } from '../../utils/logger.js';
 import { IMAGE_MIME_MAP } from '../../utils/mime.js';
+import { callerAccess } from '../identity/personal-settings.js';
 import { space } from '../storage/index.js';
 
 const log = getLogger('artifact');
@@ -15,6 +16,19 @@ const log = getLogger('artifact');
 // (`./utils.js`) keep working without each call site reaching into the
 // shared package directly.
 export { ARTIFACT_URL_REGEX, artifactApiPath } from '@huabu/shared';
+
+/**
+ * Authorize the source Space before any artifact bytes enter a prompt.
+ * Denial aborts preparation: unlike a missing blob, it must not fall back to
+ * forwarding the denied URL/metadata or delivering an incomplete prompt.
+ */
+export async function assertArtifactSourceReadable(
+  canvasId: string,
+): Promise<void> {
+  const access = callerAccess();
+  if (access && !(await access.can('read', { type: 'space', id: canvasId })))
+    throw new Error('Artifact source Space is not readable');
+}
 
 /**
  * Resolve an artifact image URL to a base64 data URL.
@@ -54,6 +68,8 @@ export async function resolveArtifactImageUrl(
   }
 
   if (!canvasId || !filename) return url;
+
+  await assertArtifactSourceReadable(canvasId);
 
   try {
     const buffer = await space(canvasId).artifacts.read(filename);

@@ -13,7 +13,9 @@
 // peers. `closeThread(threadId)` ends every live subscriber for that thread
 // (the `for await` loops return) when the handle is closed.
 
-import type { AgentMetadata } from '@agenetes/protocol';
+import { threadIdentityKey } from '@agenetes/runtime';
+
+import type { AgentMetadata, Namespace } from '@agenetes/protocol';
 
 /** One subscriber's queue-backed async iterator controller. */
 interface Subscriber {
@@ -27,24 +29,23 @@ interface Subscriber {
 
 /**
  * A publish/subscribe fan-out over `AgentMetadata`, keyed by optional scope
- * and thread ID. The instance publishes to both the scoped and legacy channels
- * on each up-report and hands `subscribe`'s AsyncIterable back to L1.
+ * and thread ID. The instance always publishes scoped reports; it publishes
+ * legacy reports only for the unambiguous matching handle. It hands
+ * `subscribe`'s AsyncIterable back to L1.
  */
 export class ThreadNotificationBus {
   readonly #byThread = new Map<string, Set<Subscriber>>();
-
-  // Tuple encoding keeps legacy and scoped channels distinct even when IDs
-  // contain separators or resemble serialized keys.
-  #key(threadId: string, scope?: string): string {
-    return JSON.stringify([scope ?? null, threadId]);
-  }
 
   /**
    * Push a metadata snapshot to every live subscriber of the exact channel. A
    * no-op when nobody is listening (L1 has not opened the stream yet).
    */
-  publish(threadId: string, metadata: AgentMetadata, scope?: string): void {
-    const subs = this.#byThread.get(this.#key(threadId, scope));
+  publish(
+    threadId: string,
+    metadata: AgentMetadata,
+    namespace?: Namespace,
+  ): void {
+    const subs = this.#byThread.get(threadIdentityKey({ threadId, namespace }));
     if (!subs) return;
     for (const sub of subs) {
       if (sub.done) continue;
@@ -66,9 +67,9 @@ export class ThreadNotificationBus {
    */
   subscribe(
     threadId: string,
-    namespace?: string,
+    namespace?: Namespace,
   ): AsyncIterable<AgentMetadata> {
-    const key = this.#key(threadId, namespace);
+    const key = threadIdentityKey({ threadId, namespace });
     const sub: Subscriber = { queue: [], resolve: undefined, done: false };
     let scope = this.#byThread.get(key);
     if (!scope) {
@@ -115,8 +116,8 @@ export class ThreadNotificationBus {
    * End every live subscriber for the exact channel (each `for await` returns),
    * called when the thread's handle is closed. Idempotent.
    */
-  closeThread(threadId: string, scope?: string): void {
-    const key = this.#key(threadId, scope);
+  closeThread(threadId: string, namespace?: Namespace): void {
+    const key = threadIdentityKey({ threadId, namespace });
     const subs = this.#byThread.get(key);
     if (!subs) return;
     for (const sub of subs) {

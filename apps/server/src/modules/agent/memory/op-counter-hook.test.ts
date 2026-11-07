@@ -14,6 +14,7 @@ import {
 
 import { registerOpCounterHook } from './op-counter-hook.js';
 import { setRequestIdentity } from '../../identity/request.js';
+import { runInWorkspace } from '../../workspace/context.js';
 
 const mocks = vi.hoisted(() => ({
   defaults: vi.fn(),
@@ -27,6 +28,12 @@ vi.mock('./index.js', () => ({
 }));
 
 const app = Fastify();
+app.addHook('onRequest', (_request, _reply, done) => {
+  runInWorkspace(
+    { handle: { workspaceId: 'w1', name: 'Test' }, path: null },
+    done,
+  );
+});
 // `x-member` marks a per-Space member, as Bubble identity resolves one.
 app.addHook('onRequest', async (request) => {
   if (request.headers['x-member'])
@@ -35,7 +42,8 @@ app.addHook('onRequest', async (request) => {
       member: true,
       owner: false,
       access: {
-        can: async () => true,
+        can: async (_verb, resource) =>
+          resource.type === 'space' || !!request.headers['x-manage'],
         claim: async () => {},
         workspaces: async () => 'all' as const,
       },
@@ -105,6 +113,17 @@ describe('legacy curator eligibility', () => {
     });
     expect(mocks.bump).not.toHaveBeenCalled();
     expect(mocks.enqueue).not.toHaveBeenCalled();
+  });
+
+  it('lets a member with Workspace manage access schedule memory work', async () => {
+    await app.inject({
+      method: 'POST',
+      url: '/api/agent',
+      headers: { 'x-member': '1', 'x-manage': '1' },
+      payload: { canvasId: 'space-a' },
+    });
+    expect(mocks.bump).toHaveBeenCalledWith('space-a', 1);
+    expect(mocks.enqueue).toHaveBeenCalledOnce();
   });
 
   it('does not break requests or start Pi when defaults cannot be read', async () => {

@@ -11,6 +11,7 @@ import { UNRESTRICTED_ACCESS } from '../identity/service.js';
 import { getWorkspaceHandle } from '../workspace.js';
 
 import type { AccessLevel } from '../identity/service.js';
+import type { CanvasAccess } from '@huabu/shared';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 
 declare module 'fastify' {
@@ -21,26 +22,10 @@ declare module 'fastify' {
      * renaming, deleting, or changing its parent.
      */
     spaceAccess?: 'read' | 'manage';
-    /** Starts or steers an agent outside the agent route prefixes. */
-    invokesAgent?: true;
   }
 }
 
 type Fields = Record<string, unknown> | undefined;
-
-/**
- * Agents act through the shared machine credential, which reaches every
- * Space, so a member may not run or steer one until credentials carry the
- * caller's own authority. RFS is that credential's own surface: it launches
- * agents and Task Runs and leases shared service credentials, and the web
- * app never calls it. Matched by route pattern, not URL spelling.
- */
-const AGENT_ROUTES = [
-  '/api/agent',
-  '/api/acp',
-  '/api/agent-change-review',
-  '/api/rfs',
-];
 
 /**
  * The one value a request gives for `field` across its route parameters,
@@ -69,7 +54,7 @@ function single(
  * The Space is the `canvasId` route parameter, query field or body field,
  * which must agree wherever more than one is given; a route that moves
  * content between Spaces also names the other one in its body. Conversations
- * and agents are an owner's alone, as {@link AGENT_ROUTES} explains. The
+ * use the caller's Space access; external agent adapters also check device ownership. The
  * identity provider decides each check, and each granted check is recorded so
  * a long-lived response is closed once it no longer holds. Unrestricted
  * callers, the local owner and the machine credential, skip the guard
@@ -102,19 +87,22 @@ export function registerSpaceAccess(app: FastifyInstance): void {
         code: 'SPACE_ACCESS_AMBIGUOUS',
       });
     const route = request.routeOptions.url ?? '';
+    // A conversation lives in a Space, and is reached only through one the
+    // caller may use.
+    // Administrators included: their devices and agents are private too, and
+    // a conversation named without its Space would skip the device check.
     if (
-      !identity.owner &&
+      !canvasId &&
       (threadId ||
-        request.routeOptions.config?.invokesAgent ||
-        AGENT_ROUTES.some(
-          (prefix) => route === prefix || route.startsWith(`${prefix}/`),
-        ))
-    ) {
-      return reply.code(403).send({
-        message: 'Agents and conversations require an owner',
-        code: 'AGENT_ACCESS_REQUIRED',
+        (!identity.owner &&
+          (route === '/api/agent' || route.startsWith('/api/agent/')) &&
+          route !== '/api/agent/defaults' &&
+          route !== '/api/agent/defaults/'))
+    )
+      return reply.code(400).send({
+        message: 'A conversation is addressed through its Space',
+        code: 'SPACE_ACCESS_AMBIGUOUS',
       });
-    }
 
     const checks: Array<[AccessLevel, string]> = [];
     if (canvasId) checks.push([level, canvasId]);
@@ -205,6 +193,23 @@ export async function canManageSpace(
       id: canvasId,
     })) === true
   );
+}
+
+/** Project the existing authorization owner for UI affordances, never as a mutation grant. */
+export async function getSpaceAccess(
+  request: FastifyRequest,
+  canvasId: string,
+): Promise<CanvasAccess> {
+  const [write, manage] = await Promise.all([
+    !isRestrictedRequest(request)
+      ? true
+      : getRequestIdentity(request)?.access.can('write', {
+          type: 'space',
+          id: canvasId,
+        }),
+    canManageSpace(request, canvasId),
+  ]);
+  return { write: write === true, manage };
 }
 
 /** Record the caller as owner of the Space it has just created. */

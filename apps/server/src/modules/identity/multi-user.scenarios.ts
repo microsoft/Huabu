@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+import { symlinkSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { InMemoryBubbleStore } from '@octostaff/bubble';
@@ -9,6 +10,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { openBubbleIdentity } from './bubble.js';
 import { registerIdentity } from './http.js';
+import peopleRoutes from './people.route.js';
 import { createMemoryWorkspacePreferences } from './preferences.js';
 import { storageResourceDirectory } from './resources.js';
 import canvasRoutes from '../canvas/canvas.route.js';
@@ -72,6 +74,10 @@ export async function host(options: { revalidationIntervalMs?: number } = {}) {
   registerSpaceAccess(app);
   await app.register(canvasRoutes, { prefix: '/api/canvas' });
   await app.register(workspaceRoutes, { prefix: '/api/workspace' });
+  await app.register(peopleRoutes, {
+    prefix: '/api/people',
+    service: bubble.service,
+  });
   await app.register(workspacesRoutes, { prefix: '/api/workspaces' });
   // A long-lived Space stream that names its Workspace, as agent reachback does.
   const streams: FastifyPluginAsync = async (scoped) => {
@@ -117,12 +123,14 @@ export async function host(options: { revalidationIntervalMs?: number } = {}) {
 
 /**
  * The scenarios, for one storage backend. `tmp` is a scratch directory the
- * backend's setup owns; a folder path a member must not be able to adopt.
+ * backend's setup owns; on Disk any user may adopt a folder in it.
  */
 export function describeSeveralPeople(
   backend: string,
   scratch: () => string,
 ): void {
+  // Only Disk keeps Workspaces as folders a person can open by path.
+  const folders = backend === 'Disk';
   describe(`several people on one Server (${backend})`, () => {
     it('allows concurrent first-request writes after personal Workspace provisioning', async () => {
       const { call, spacesOf } = await host();
@@ -168,16 +176,17 @@ export function describeSeveralPeople(
         200,
       );
 
-      // Members never learn where the Server keeps their folder.
+      // Where Workspaces are folders, everyone sees and may open them.
       const info = (await call('carol', 'GET', '/api/workspace')).body;
       expect(info).toMatchObject({
-        path: null,
         capabilities: {
           canChangeWorkspace: true,
           nativePicker: false,
           namedWorkspaces: true,
+          folderWorkspaces: folders,
         },
       });
+      expect(typeof info.path).toBe(folders ? 'string' : 'object');
     });
 
     it('switches only its caller, among Workspaces they may enter', async () => {
@@ -190,7 +199,8 @@ export function describeSeveralPeople(
         name: 'Side project',
       });
       expect(made.status).toBe(201);
-      expect(made.body).toMatchObject({ name: 'Side project', path: null });
+      expect(made.body.name).toBe('Side project');
+      expect(made.body.path === null).toBe(!folders);
       const listed = (await call('carol', 'GET', '/api/workspaces'))
         .body as Array<{
         workspaceId: string;
@@ -221,14 +231,43 @@ export function describeSeveralPeople(
       }
       expect(await workspaceOf('dave')).toBe(daveWs);
 
-      // Folder operations stay with the administrator.
-      expect(
-        (
-          await call('carol', 'POST', '/api/workspaces', {
-            path: join(scratch(), 'elsewhere'),
-          })
-        ).status,
-      ).toBe(400);
+      // On Disk a folder becomes its opener's Workspace; elsewhere there are
+      // no Server folders to open.
+      const opened = await call('carol', 'POST', '/api/workspaces', {
+        path: join(scratch(), 'elsewhere'),
+        name: 'Elsewhere',
+      });
+      if (folders) {
+        expect(opened.status).toBe(201);
+        expect(opened.body).toMatchObject({
+          name: 'Elsewhere',
+          path: join(scratch(), 'elsewhere'),
+        });
+        expect(
+          (
+            await call(
+              'carol',
+              'POST',
+              `/api/workspaces/${opened.body.workspaceId}/activate`,
+            )
+          ).status,
+        ).toBe(200);
+        expect(await workspaceOf('carol')).toBe(opened.body.workspaceId);
+        expect(
+          (
+            await call(
+              'dave',
+              'POST',
+              `/api/workspaces/${opened.body.workspaceId}/activate`,
+            )
+          ).status,
+        ).toBe(404);
+      } else {
+        expect(opened.status).toBe(409);
+        expect(opened.body.code).toBe('STORAGE_CAPABILITY_UNAVAILABLE');
+      }
+      // Probing arbitrary Server paths and moving the process-wide Workspace
+      // stay with local and administrator callers.
       expect(
         (
           await call('carol', 'POST', '/api/workspace/validate-path', {
@@ -282,6 +321,77 @@ export function describeSeveralPeople(
       ).toBe(404);
     });
 
+    it.runIf(folders)(
+      'keeps a folder Workspace with the person who opened it',
+      async () => {
+        const { call, store, workspaceOf } = await host();
+        await workspaceOf('dave');
+        const folder = join(scratch(), 'carols-folder');
+        const opened = await call('carol', 'POST', '/api/workspaces', {
+          path: folder,
+          name: 'Carol folder',
+        });
+        expect(opened.status).toBe(201);
+        const id = opened.body.workspaceId as string;
+        // Another spelling of the same folder is the same Workspace.
+        const alias = join(scratch(), 'carols-alias');
+        symlinkSync(folder, alias, 'dir');
+        const renameAttempt = { name: 'Mine now' };
+
+        // Without a grant the folder is somebody's Workspace, not theirs.
+        for (const path of [folder, alias]) {
+          for (const body of [{ path }, { path, ...renameAttempt }])
+            expect(
+              (await call('dave', 'POST', '/api/workspaces', body)).status,
+            ).toBe(404);
+        }
+
+        // A viewer may open it by path, but neither renames nor owns it.
+        await store.grants.add({
+          target: { type: 'huabu.workspace', id },
+          principalId: 'dave',
+          role: 'huabu.workspace.viewer',
+          grantedByPrincipalId: 'carol',
+        });
+        for (const path of [folder, alias]) {
+          const reopened = await call('dave', 'POST', '/api/workspaces', {
+            path,
+          });
+          expect(reopened.status).toBe(200);
+          expect(reopened.body.workspaceId).toBe(id);
+          expect(
+            (
+              await call('dave', 'POST', '/api/workspaces', {
+                path,
+                ...renameAttempt,
+              })
+            ).status,
+          ).toBe(404);
+        }
+        expect(
+          (await call('dave', 'PATCH', `/api/workspaces/${id}`, renameAttempt))
+            .status,
+        ).toBe(404);
+        const roles = (
+          await store.grants.list({
+            target: { type: 'huabu.workspace', id },
+            principalId: 'dave',
+          })
+        ).map((grant) => grant.role);
+        expect(roles).toEqual(['huabu.workspace.viewer']);
+
+        // Its owner still names it by path.
+        const renamed = await call('carol', 'POST', '/api/workspaces', {
+          path: folder,
+          name: 'Renamed',
+        });
+        expect(renamed).toMatchObject({
+          status: 200,
+          body: { workspaceId: id, name: 'Renamed' },
+        });
+      },
+    );
+
     it('advertises top-level Space creation only where the caller may write the Workspace', async () => {
       const { call, store, workspaceOf } = await host();
       const canCreate = async (principalId: string) =>
@@ -331,6 +441,55 @@ export function describeSeveralPeople(
       // Back home, dave creates as before.
       await call('dave', 'POST', `/api/workspaces/${daveWs}/activate`);
       expect(await canCreate('dave')).toBe(true);
+    });
+
+    it('projects live Space access without replacing content, hiding unreadable Spaces', async () => {
+      const { call, store, workspaceOf } = await host();
+      const workspaceId = await workspaceOf('carol');
+      const created = await call('carol', 'POST', '/api/canvas', {
+        title: 'Permissions',
+      });
+      const id = created.body.canvasId as string;
+      expect(
+        (await call('carol', 'GET', `/api/canvas/${id}`)).body.access,
+      ).toEqual({ write: true, manage: true });
+      await call('admin', 'POST', `/api/workspaces/${workspaceId}/activate`);
+      expect(
+        (await call('admin', 'GET', `/api/canvas/${id}/access`)).body,
+      ).toEqual({ write: true, manage: true });
+      expect(
+        (await call('dave', 'GET', `/api/canvas/${id}/access`)).status,
+      ).toBe(404);
+      for (const [role, access] of [
+        ['viewer', { write: false, manage: false }],
+        ['editor', { write: true, manage: false }],
+        ['owner', { write: true, manage: true }],
+      ] as const) {
+        const grant = await store.grants.add({
+          target: { type: 'huabu.workspace', id: workspaceId },
+          principalId: 'dave',
+          role: `huabu.workspace.${role}`,
+          grantedByPrincipalId: 'carol',
+        });
+        await call('dave', 'POST', `/api/workspaces/${workspaceId}/activate`);
+        const refreshed = await call('dave', 'GET', `/api/canvas/${id}/access`);
+        expect(refreshed).toMatchObject({ status: 200, body: access });
+        expect(refreshed.body).not.toHaveProperty('state');
+        expect(
+          (await call('dave', 'GET', `/api/canvas/${id}`)).body.access,
+        ).toEqual(access);
+        expect(
+          (
+            await call('dave', 'POST', '/api/canvas/cards/query', {
+              canvasIds: [id],
+            })
+          ).body.spaces[id].access,
+        ).toEqual(access);
+        await store.grants.remove(grant.grant.grantId);
+        expect(
+          (await call('dave', 'GET', `/api/canvas/${id}/access`)).status,
+        ).toBe(404);
+      }
     });
 
     it('lets editors save content but requires manage for renames and ownership-granting detachment', async () => {
@@ -657,6 +816,86 @@ export function describeSeveralPeople(
           (item: { canvasId: string }) => item.canvasId === child.body.canvasId,
         ).parentSpaceId,
       ).toBe(destinationId);
+    });
+
+    it('lets an administrator admit, revoke and give Workspace roles', async () => {
+      const { call, store, workspaceOf, spacesOf } = await host();
+      await store.principals.upsert({ principalId: 'erin', kind: 'user' });
+      // Signed in, not admitted.
+      expect((await call('erin', 'GET', '/api/canvas')).status).toBe(403);
+      expect((await call('carol', 'GET', '/api/people')).status).toBe(403);
+
+      const listed = (await call('admin', 'GET', '/api/people')).body as Array<{
+        principal: { principalId: string };
+        member: boolean;
+        admin: boolean;
+      }>;
+      expect(
+        Object.fromEntries(
+          listed.map((p) => [p.principal.principalId, [p.member, p.admin]]),
+        ),
+      ).toMatchObject({
+        admin: [false, true],
+        carol: [true, false],
+        erin: [false, false],
+      });
+
+      const admit = (principalId: string, member: boolean) =>
+        call('admin', 'PUT', `/api/people/${principalId}/member`, { member });
+      expect((await admit('erin', true)).status).toBe(204);
+      expect((await call('erin', 'GET', '/api/canvas')).status).toBe(200);
+      expect((await admit('nobody', true)).status).toBe(404);
+      expect((await admit('admin', false)).status).toBe(409);
+
+      // A Workspace role lets Erin enter Carol's Workspace and edit there,
+      // beside the personal Workspace her first admitted request made.
+      const carolWs = await workspaceOf('carol');
+      await call('carol', 'POST', '/api/canvas', { title: 'plan' });
+      // #356 retains system-owner access. People role choices use the
+      // existing Workspace list, including each member's Workspace.
+      expect(
+        (await call('admin', 'GET', '/api/workspaces')).body.map(
+          (w: { workspaceId: string }) => w.workspaceId,
+        ),
+      ).toContain(carolWs);
+      const adminWs = await workspaceOf('admin');
+      expect(
+        (await call('admin', 'POST', `/api/workspaces/${carolWs}/activate`))
+          .status,
+      ).toBe(200);
+      expect(await spacesOf('admin')).toEqual(['plan']);
+      await call('admin', 'POST', `/api/workspaces/${adminWs}/activate`);
+      expect(
+        (
+          await call('admin', 'PUT', `/api/people/erin/workspaces/${carolWs}`, {
+            role: 'editor',
+          })
+        ).status,
+      ).toBe(204);
+      await call('erin', 'POST', `/api/workspaces/${carolWs}/activate`);
+      expect(await spacesOf('erin')).toEqual(['plan']);
+      const people = (await call('admin', 'GET', '/api/people')).body as Array<{
+        principal: { principalId: string };
+        workspaces: Array<{ workspaceId: string; role: string }>;
+      }>;
+      expect(
+        people.find((p) => p.principal.principalId === 'erin')?.workspaces,
+      ).toContainEqual({ workspaceId: carolWs, role: 'editor' });
+
+      // Removing it, then admission, takes effect on the next request.
+      await call('admin', 'PUT', `/api/people/erin/workspaces/${carolWs}`, {
+        role: null,
+      });
+      expect(await spacesOf('erin')).not.toContain('plan');
+      await admit('erin', false);
+      expect((await call('erin', 'GET', '/api/canvas')).status).toBe(403);
+
+      // A revoked person's devices can still be cut off; only by an admin.
+      const reset = (by: string, principalId: string) =>
+        call(by, 'POST', `/api/people/${principalId}/agent-credentials/reset`);
+      expect((await reset('carol', 'erin')).status).toBe(403);
+      expect((await reset('admin', 'nobody')).status).toBe(404);
+      expect((await reset('admin', 'erin')).status).toBe(204);
     });
   });
 }

@@ -16,6 +16,8 @@ import { FS_MAX_RESPONSE_BYTES } from '@agentlet/protocol';
 
 import { proxyFsResponseSchema } from '@huabu/shared';
 
+import { requireOwnAgentlet } from '../../identity/agent-credentials.js';
+
 import type { AcpSessionEntry } from '@agenetes/acp-driver';
 import type { DeviceFilesBody, DeviceFilesResponse } from '@huabu/shared';
 import type { FastifyBaseLogger } from 'fastify';
@@ -131,6 +133,7 @@ export class DeviceFilesService {
   }
 
   async execute(body: DeviceFilesBody): Promise<DeviceFilesResponse> {
+    requireOwnAgentlet(body.agentletId);
     if (
       this.disposed ||
       getAgentletGateway()?.getAgentlet(body.agentletId)?.status !== 'connected'

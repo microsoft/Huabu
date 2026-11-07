@@ -7,6 +7,7 @@ import { join } from 'node:path';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import type { MountedTestStorage } from '../storage/testing.js';
 import type { ThreadRecord } from '@agenetes/agenetes';
 const complete = vi.hoisted(() => vi.fn());
 const runText = vi.hoisted(() => vi.fn());
@@ -14,7 +15,10 @@ vi.mock('./llm.js', () => ({ llmComplete: complete }));
 vi.mock('./functional-text.js', () => ({ runFunctionalText: runText }));
 
 let tmp: string | undefined;
-afterEach(() => {
+let mounted: MountedTestStorage | undefined;
+afterEach(async () => {
+  await mounted?.close();
+  mounted = undefined;
   vi.unstubAllEnvs();
   if (tmp) rmSync(tmp, { recursive: true, force: true });
   vi.resetModules();
@@ -27,6 +31,16 @@ describe('conversation naming through canonical ProviderManager routing', () => 
     tmp = mkdtempSync(join(tmpdir(), 'huabu-title-provider-'));
     vi.stubEnv('HUABU_DATA_DIR', tmp);
     vi.resetModules();
+    const { mountTestWorkspace } = await import('../storage/testing.js');
+    const { createSpace } = await import('../storage/index.js');
+    // The Provider remains an external fake; the conversation naming scope
+    // comes from the documented real Workspace fixture after module reset.
+    mounted = await mountTestWorkspace(
+      { structured: { kind: 'disk' }, blobs: { kind: 'disk' } },
+      'title-provider-workspace-',
+    );
+    const created = await createSpace('canvas-a', 'Provider naming fixture');
+    if (!created.ok) throw new Error('Failed to create naming fixture Space');
     const { ProviderManager } =
       await import('../preprocessing/provider-manager.js');
     const { ConversationTitleService } =

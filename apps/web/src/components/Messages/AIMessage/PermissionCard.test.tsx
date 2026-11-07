@@ -92,6 +92,7 @@ describe('ACP permission surfaces', () => {
     render(
       <PermissionTray
         threadId="thread-1"
+        canvasId="space-1"
         messageId="assistant-1"
         part={part}
       />,
@@ -113,9 +114,10 @@ describe('ACP permission surfaces', () => {
       'assistant-1',
       expect.any(Function),
     );
-    expect(respondAcpPermission).toHaveBeenCalledWith('thread-1', {
-      requestId: 'permission-1',
-      optionId: 'allow-once',
-    });
+    expect(respondAcpPermission).toHaveBeenCalledWith(
+      'thread-1',
+      { requestId: 'permission-1', optionId: 'allow-once' },
+      'space-1',
+    );
   });
 });

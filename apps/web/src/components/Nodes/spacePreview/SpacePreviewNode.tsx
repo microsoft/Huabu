@@ -26,6 +26,7 @@ import {
 } from '@/hooks/useElectron';
 import { useTextAutoSize } from '@/hooks/useTextAutoSize';
 import useCanvasStore from '@/store/canvasStore';
+import { useIdentityStore } from '@/store/identityStore';
 import { openSpaceConversation } from '@/store/previewWorkspace/actions';
 import { useWorkspaceStore } from '@/store/workspaceStore';
 import {
@@ -103,8 +104,22 @@ export const SpacePreviewNode = memo(
     const targetStatus =
       snapshot?.status === 'missing' ? 'missing' : target.status;
     const canOpen = targetStatus === 'ready';
+    const bubble = useIdentityStore(
+      (state) => state.identity?.provider === 'bubble',
+    );
+    const canManage =
+      snapshot?.status === 'ready'
+        ? (snapshot.access?.manage ?? !bubble)
+        : !bubble;
     const canRename =
-      canOpen && !data.locked && data.targetCanvasId !== worldId;
+      canOpen && canManage && !data.locked && data.targetCanvasId !== worldId;
+    useEffect(() => {
+      if (!canRename) {
+        cancelled.current = true;
+        setEditing(false);
+        setRenameError(null);
+      }
+    }, [canRename]);
     const startRename = useCallback(() => {
       if (!canRename || savingRef.current) return;
       const title =
@@ -116,7 +131,7 @@ export const SpacePreviewNode = memo(
       setEditing(true);
     }, [canRename, data.targetCanvasId]);
     const commitRename = async () => {
-      if (cancelled.current || savingRef.current) return;
+      if (!canRename || cancelled.current || savingRef.current) return;
       const title = draft.trim();
       if (!title) {
         setRenameError(t('spacePreview.nameRequired'));

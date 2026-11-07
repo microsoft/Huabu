@@ -14,6 +14,7 @@
 
 import { beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 
+import { ApiError } from '@/api/_client';
 import {
   CanvasConflictError,
   NodeDuplicateFilesError,
@@ -73,6 +74,25 @@ beforeEach(() => {
 });
 
 describe('nodeContentQueue — save-failure surfacing', () => {
+  it('explains a permission refusal without a disk diagnosis or futile Retry action, retaining the draft', async () => {
+    const node = noteNode('unsaved private draft');
+    const { queue, state } = makeQueue(node);
+    putMock.mockRejectedValue(
+      new ApiError(
+        403,
+        { code: 'SPACE_ACCESS_REQUIRED', message: 'read-only' },
+        'denied',
+      ),
+    );
+    await expect(queue.flushNow('c1', node.id)).rejects.toThrow('read-only');
+    expect(toastMock).toHaveBeenCalledWith(
+      'This Space is read-only for your account. Your changes were not saved.',
+      expect.objectContaining({ action: undefined, duration: 0 }),
+    );
+    expect(state.nodes[0].data.content).toBe('unsaved private draft');
+    queue.discardCanvas('c1');
+  });
+
   it.each([false, true])(
     'duplicate Refresh preserves a newer content conflict and its recovery (deferred: %s)',
     async (deferred) => {

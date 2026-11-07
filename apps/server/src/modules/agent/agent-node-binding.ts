@@ -185,7 +185,10 @@ export class AgentNodeBindingCoordinator {
         );
       if (!modeChanged) return () => {};
     }
-    const release = this.dependencies.acquireTurn(target.threadId);
+    const release = this.dependencies.acquireTurn(
+      target.threadId,
+      canvasAcpNamespace(target.canvasId),
+    );
     if (!release) {
       // A layout save can echo unchanged preparation while an admitted turn
       // owns confirmation. It cannot replace that turn's configuration.
