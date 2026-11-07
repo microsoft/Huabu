@@ -241,6 +241,77 @@ function findButton(label: string): HTMLButtonElement {
 }
 
 describe('Settings information architecture', () => {
+  it('keeps the unfocusable backdrop clickable while background controls are inert', async () => {
+    const background = document.createElement('button');
+    document.body.append(background);
+    const onClose = vi.fn();
+    try {
+      await act(async () =>
+        root.render(<SettingsModal isOpen onClose={onClose} />),
+      );
+      const backdrop = container.querySelector<HTMLElement>(
+        '[role="presentation"]',
+      );
+      expect(backdrop).not.toBeNull();
+      await vi.waitFor(() => expect(background.inert).toBe(true));
+      expect(backdrop?.closest('[inert]')).toBeNull();
+      expect(backdrop?.tabIndex).toBe(-1);
+      expect(backdrop?.getAttribute('tabindex')).toBeNull();
+      await act(async () => backdrop?.click());
+      expect(onClose).toHaveBeenCalledOnce();
+      await renderModal(false);
+      expect(background.inert).toBe(false);
+    } finally {
+      background.remove();
+    }
+  });
+
+  it('cycles modal boundary focus and restores its opener on close', async () => {
+    // happy-dom 15 reports -1 for a native button without an explicit
+    // tabindex; browsers report 0. Keep real Floating UI/tabbable behavior
+    // while correcting only that DOM-environment default in this fixture.
+    const buttonTabIndex = vi
+      .spyOn(HTMLButtonElement.prototype, 'tabIndex', 'get')
+      .mockImplementation(function (this: HTMLButtonElement) {
+        return Number(this.getAttribute('tabindex') ?? 0);
+      });
+    const opener = document.createElement('button');
+    document.body.append(opener);
+    opener.focus();
+    try {
+      await renderModal();
+      const guards = container.querySelectorAll<HTMLElement>(
+        '[data-floating-ui-focus-guard]',
+      );
+      expect(guards).toHaveLength(2);
+      await vi.waitFor(() =>
+        expect(document.activeElement).toBe(
+          container.querySelector('header h3'),
+        ),
+      );
+
+      // Native Tab/Shift+Tab reaches these modal boundary guards in the
+      // browser; happy-dom cannot perform sequential keyboard traversal.
+      await act(async () => guards[1].focus());
+      await vi.waitFor(() =>
+        expect(document.activeElement).toBe(
+          findTab('settings.devicesAndAgents'),
+        ),
+      );
+      await act(async () => guards[0].focus());
+      await vi.waitFor(() =>
+        expect(document.activeElement).toBe(findButton('settings.addDevice')),
+      );
+      expect(document.activeElement).not.toBe(opener);
+
+      await renderModal(false);
+      await vi.waitFor(() => expect(document.activeElement).toBe(opener));
+    } finally {
+      buttonTabIndex.mockRestore();
+      opener.remove();
+    }
+  });
+
   it('keeps navigation and version above the scrollable form on narrow screens', async () => {
     await renderModal();
     const dialog = container.querySelector('[role="dialog"]');
