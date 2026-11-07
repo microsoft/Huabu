@@ -75,18 +75,29 @@ export async function handleFsWrite(args: FsWriteArgs): Promise<string> {
   const target = resolveTarget(args);
   if ('error' in target) return reject(target.path, target.error);
 
-  // Workspace memory and Skills steer every agent in the Workspace. Authorize
-  // the resolved tier so path routing and permission checks cannot disagree.
+  // A retained turn must still be allowed to change the resolved destination.
+  // Space memory needs write access there; Workspace memory and Skills steer
+  // every agent in the Workspace and therefore need Workspace manage access.
   const access = callerAccess();
-  if (access && target.tier !== 'canvas') {
-    const workspaceId = getWorkspaceHandle()?.workspaceId;
-    if (
-      !workspaceId ||
-      !(await access.can('manage', { type: 'workspace', id: workspaceId }))
-    )
-      throw new Error(
-        'Changing Workspace memory or Skills needs manage access to the Workspace',
-      );
+  if (access) {
+    if (target.tier === 'canvas') {
+      if (
+        !args.canvasId ||
+        !(await access.can('write', { type: 'space', id: args.canvasId }))
+      )
+        throw new Error(
+          'Changing Space memory needs write access to the Space',
+        );
+    } else {
+      const workspaceId = getWorkspaceHandle()?.workspaceId;
+      if (
+        !workspaceId ||
+        !(await access.can('manage', { type: 'workspace', id: workspaceId }))
+      )
+        throw new Error(
+          'Changing Workspace memory or Skills needs manage access to the Workspace',
+        );
+    }
   }
 
   if (args.mode === 'overwrite') {

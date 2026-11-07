@@ -158,8 +158,8 @@ describe('handleFsWrite — caller access', () => {
     },
   );
 
-  it('writes Space memory without Workspace manage access', async () => {
-    const can = vi.fn(async () => false);
+  it('writes Space memory with Space write access without Workspace manage access', async () => {
+    const can = vi.fn(async (level: string) => level === 'write');
     await openPersonalSettings(async () => {
       useCaller({
         principal: { principalId: 'carol', kind: 'user' },
@@ -177,7 +177,10 @@ describe('handleFsWrite — caller access', () => {
       );
       expect(result.ok).toBe(true);
     });
-    expect(can).not.toHaveBeenCalled();
+    expect(can).toHaveBeenCalledExactlyOnceWith('write', {
+      type: 'space',
+      id: canvasId,
+    });
     expect(readFileSync(memoryBlobFile(canvasId), 'utf8')).toBe(
       'Space briefing\n',
     );
