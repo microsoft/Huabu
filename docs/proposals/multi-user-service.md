@@ -137,7 +137,7 @@ A run, its pending preparations and stop requests belong to their Workspace and 
 
 ### Grant administration
 
-`/api/people`, and a People tab for system owners, list principals, admit and revoke `member`, and give or remove Workspace roles. Changes to a person's member grant are serialized. Each resource operation checks current admission, account status and grants, including operations in a retained caller context. Open streams repeat authorization every 30 seconds; revocation also disconnects the member's currently connected devices as described above.
+`/api/people`, and a People tab for system owners, list principals, admit and revoke `member`, and give or remove Workspace roles. Changes to a person's member grant are serialized. Each resource operation checks current admission, account status and grants, including operations in a retained caller context. Built-In tools repeat these checks after their original HTTP stream closes: owning-Space reads, World target reads, snapshots and image reference inputs need current read access; Space commands, image artifact writes, task mutations, Ink label changes and Space memory writes need current write access. Workspace instruction layers (`memory/user.md` and `skills/...`) remain readable through current Space or Workspace read access; their writes still require Workspace manage access. A denied tool operation neither delivers newly read content nor performs its mutation. These checks do not cancel the pipeline or discard already authorized history when a stream closes. Open streams repeat authorization every 30 seconds; revocation also disconnects the member's currently connected devices as described above.
 
 ### Session lifecycle
 
