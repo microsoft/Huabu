@@ -1,16 +1,30 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import {
-  completeLogin,
-  forgetTokens,
-  heldAuthenticator,
-  refreshTokens,
-  signInWithPopup,
-} from './oidcLogin';
-import { signOut } from '../api/identity';
+import type * as OidcModule from './oidcLogin';
+import type * as IdentityModule from '../api/identity';
+
+let completeLogin: typeof OidcModule.completeLogin;
+let forgetTokens: typeof OidcModule.forgetTokens;
+let heldAuthenticator: typeof OidcModule.heldAuthenticator;
+let refreshTokens: typeof OidcModule.refreshTokens;
+let signInWithPopup: typeof OidcModule.signInWithPopup;
+let signOut: typeof IdentityModule.signOut;
+
+beforeEach(async () => {
+  // Each test is a fresh document, including its provider metadata cache.
+  vi.resetModules();
+  ({
+    completeLogin,
+    forgetTokens,
+    heldAuthenticator,
+    refreshTokens,
+    signInWithPopup,
+  } = await import('./oidcLogin'));
+  ({ signOut } = await import('../api/identity'));
+});
 
 const ENTRA = {
   driver: 'entra',
@@ -43,6 +57,120 @@ async function holdRefreshToken() {
   window.history.replaceState(null, '', '/auth/callback?code=c&state=expected');
   await completeLogin();
 }
+
+describe('provider metadata', () => {
+  it('reuses one issuer discovery for code exchange, renewal and provider sign-out', async () => {
+    let discoveryCalls = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        if (String(input).endsWith('openid-configuration')) {
+          discoveryCalls++;
+          return Response.json({
+            token_endpoint: 'https://login.example/token',
+            end_session_endpoint: 'https://login.example/logout',
+          });
+        }
+        return Response.json({
+          access_token: 'access',
+          refresh_token: 'refresh',
+        });
+      }),
+    );
+    await holdRefreshToken();
+    expect(await refreshTokens()).not.toBeNull();
+    const { providerSignOutUrl } = await import('./oidcLogin');
+    expect(await providerSignOutUrl(ENTRA)).toContain(
+      'https://login.example/logout?',
+    );
+    expect(discoveryCalls).toBe(1);
+  });
+
+  it('coalesces concurrent issuer discovery and isolates different issuers', async () => {
+    const pending: (() => void)[] = [];
+    const discovered: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: RequestInfo | URL) => {
+        discovered.push(String(input));
+        return new Promise<Response>((resolve) =>
+          pending.push(() =>
+            resolve(
+              Response.json({
+                end_session_endpoint: 'https://login.example/logout',
+              }),
+            ),
+          ),
+        );
+      }),
+    );
+    const { providerSignOutUrl } = await import('./oidcLogin');
+    const first = providerSignOutUrl(ENTRA);
+    const second = providerSignOutUrl({
+      ...ENTRA,
+      issuer: `${ENTRA.issuer}/`,
+      clientId: 'other-spa',
+    });
+    await vi.waitFor(() => expect(pending.length).toBeGreaterThan(0));
+    pending.splice(0).forEach((finish) => finish());
+    expect(await first).toContain('client_id=spa');
+    expect(await second).toContain('client_id=other-spa');
+    expect(discovered).toHaveLength(1);
+    const other = providerSignOutUrl({
+      ...ENTRA,
+      issuer: 'https://other.example',
+    });
+    await vi.waitFor(() => expect(pending).toHaveLength(1));
+    pending.shift()?.();
+    await other;
+    expect(discovered).toEqual([
+      `${ENTRA.issuer}/.well-known/openid-configuration`,
+      'https://other.example/.well-known/openid-configuration',
+    ]);
+  });
+
+  it('refreshes successful discovery after five minutes', async () => {
+    let now = Date.now();
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    let discoveryCalls = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        Response.json({
+          end_session_endpoint: `https://login.example/logout-${++discoveryCalls}`,
+        }),
+      ),
+    );
+    const { providerSignOutUrl } = await import('./oidcLogin');
+    expect(await providerSignOutUrl(ENTRA)).toContain('/logout-1?');
+    now += 5 * 60 * 1000 - 1;
+    expect(await providerSignOutUrl(ENTRA)).toContain('/logout-1?');
+    now++;
+    expect(await providerSignOutUrl(ENTRA)).toContain('/logout-2?');
+    expect(discoveryCalls).toBe(2);
+  });
+
+  it('retries failed HTTP, JSON and metadata fields instead of caching the rejection', async () => {
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(new Response('{}', { status: 503 }))
+      .mockResolvedValueOnce(new Response('{', { status: 200 }))
+      .mockResolvedValueOnce(Response.json(null))
+      .mockResolvedValueOnce(Response.json({ token_endpoint: 5 }))
+      .mockImplementation(async () =>
+        Response.json({ end_session_endpoint: 'https://login.example/logout' }),
+      );
+    vi.stubGlobal('fetch', fetch);
+    const { providerSignOutUrl } = await import('./oidcLogin');
+    expect(await providerSignOutUrl(ENTRA)).toBeNull();
+    expect(await providerSignOutUrl(ENTRA)).toBeNull();
+    expect(await providerSignOutUrl(ENTRA)).toBeNull();
+    expect(await providerSignOutUrl(ENTRA)).toBeNull();
+    expect(await providerSignOutUrl(ENTRA)).toContain('/logout?');
+    expect(await providerSignOutUrl(ENTRA)).toContain('/logout?');
+    expect(fetch).toHaveBeenCalledTimes(5);
+  });
+});
 
 describe('session renewal', () => {
   it('renews only this document when the shared revision cannot be written', async () => {
@@ -157,7 +285,17 @@ describe('session renewal', () => {
     );
     await holdRefreshToken();
     const renewal = refreshTokens();
-    await vi.waitFor(() => expect(vi.mocked(fetch)).toHaveBeenCalledTimes(4));
+    await vi.waitFor(() =>
+      expect(
+        vi
+          .mocked(fetch)
+          .mock.calls.some(
+            ([, init]) =>
+              new URLSearchParams(String(init?.body)).get('grant_type') ===
+              'refresh_token',
+          ),
+      ).toBe(true),
+    );
     forgetTokens();
     release(
       Response.json({ access_token: 'late', refresh_token: 'late-refresh' }),
@@ -204,7 +342,10 @@ describe('session renewal', () => {
       await holdRefreshToken();
       if (retry) {
         await expect(signOut({ providerSignOut: true })).rejects.toThrow();
-        expect(await refreshTokens()).toBeNull();
+        expect(await refreshTokens()).toEqual({
+          accessToken: 'initial',
+          renewal: true,
+        });
         expect(heldAuthenticator()).toEqual(ENTRA);
         expect(assign).not.toHaveBeenCalled();
       }
@@ -243,7 +384,8 @@ describe('signing in again in a popup', () => {
     await vi.waitFor(() => expect(popup.location.href).not.toBe(''));
     const sent = new URL(popup.location.href);
     expect(sent.searchParams.get('scope')).toContain('offline_access');
-    const state = sent.searchParams.get('state')!;
+    const state = sent.searchParams.get('state');
+    expect(state).toBeTruthy();
 
     // Another origin, or another login's state, is ignored.
     window.dispatchEvent(
@@ -405,7 +547,7 @@ describe('keeping the session across reloads and tabs', () => {
           return Response.json({ token_endpoint: 'https://login.example/t' });
         const grant = new URLSearchParams(String(init?.body));
         if (grant.get('grant_type') === 'refresh_token')
-          refreshed.push(grant.get('refresh_token')!);
+          refreshed.push(grant.get('refresh_token') ?? '');
         return Response.json({
           access_token: 'fresh',
           refresh_token: `r${refreshed.length + 1}`,

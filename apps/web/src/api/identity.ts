@@ -221,16 +221,21 @@ export async function signOut(
   const { forgetTokens, providerSignOutUrl, heldAuthenticator } =
     await import('../utils/oidcLogin');
   const signedInAuthenticator = heldAuthenticator();
-  forgetTokens({ keepProvider: true });
   await Promise.allSettled([...adoptions]);
   try {
     await withSessionLock(async () => {
       markSignedOut(true);
-      await endSession();
+      try {
+        await endSession();
+      } catch (error) {
+        // Restore renewal before releasing the cookie lock, so this failed
+        // deletion cannot undo a later tab's successful sign-out marker.
+        markSignedOut(false);
+        throw error;
+      }
     });
   } catch (error) {
-    // The session survives, so its renewals may continue.
-    markSignedOut(false);
+    // The session survives; keep every tab's rotating refresh token intact.
     signingOut = false;
     throw error;
   }

@@ -1,12 +1,239 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+import { writeFile } from 'node:fs/promises';
+
 import { expect, test } from '@playwright/test';
 
 import { openNewCanvas } from './helpers';
 
 import type * as CanvasModule from '../src/store/canvasStore';
 import type * as OidcModule from '../src/utils/oidcLogin';
+
+test('keeps both tabs renewable after failed sign-out and clears them after a successful retry', async ({
+  context,
+  page,
+}, testInfo) => {
+  // Only the provider and identity HTTP replies are fixtures. The app menu,
+  // sign-in gate, browser storage/channels/locks and token rotation are real.
+  let sessionAlive = true;
+  let deletionAttempts = 0;
+  let currentRefresh = 'fixture-refresh-1';
+  const presented: string[] = [];
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.name));
+  const member = {
+    provider: 'bubble',
+    principal: {
+      principalId: 'logout-qa',
+      kind: 'user',
+      displayName: 'Logout QA',
+    },
+    member: true,
+    owner: false,
+  };
+  const authenticator = {
+    driver: 'auth0',
+    issuer: 'https://auth.example',
+    authorizationUrl: 'https://auth.example/authorize',
+    clientId: 'fixture-spa',
+    scopes: ['openid'],
+  };
+  await context.route('**/api/identity', (route) =>
+    route.fulfill({
+      status: sessionAlive ? 200 : 401,
+      json: sessionAlive ? member : {},
+    }),
+  );
+  await context.route('**/api/identity/session', (route) => {
+    if (route.request().method() === 'DELETE') {
+      deletionAttempts++;
+      if (deletionAttempts === 1)
+        return route.fulfill({ status: 503, json: {} });
+      sessionAlive = false;
+    } else sessionAlive = true;
+    return route.fulfill({ status: 204 });
+  });
+  await context.route('**/bubble/v1/auth/authenticators', (route) =>
+    route.fulfill({
+      json: { authenticators: [{ ...authenticator, interactive: true }] },
+    }),
+  );
+  await context.route('https://auth.example/**', (route) => {
+    const headers = { 'Access-Control-Allow-Origin': '*' };
+    if (route.request().url().endsWith('openid-configuration'))
+      return route.fulfill({
+        headers,
+        json: { token_endpoint: 'https://auth.example/token' },
+      });
+    const grant = new URLSearchParams(route.request().postData() ?? '');
+    if (grant.get('grant_type') === 'refresh_token') {
+      const token = grant.get('refresh_token') ?? '';
+      presented.push(token);
+      if (token !== currentRefresh)
+        return route.fulfill({
+          status: 400,
+          headers,
+          json: { error: 'invalid_grant' },
+        });
+      currentRefresh = `fixture-refresh-${presented.length + 1}`;
+    }
+    return route.fulfill({
+      headers,
+      json: {
+        access_token: 'fixture-access',
+        refresh_token: currentRefresh,
+        expires_in: 3600,
+      },
+    });
+  });
+  await openNewCanvas(page);
+  const canvasUrl = page.url();
+  const canvasId = new URL(canvasUrl).pathname.split('/').pop();
+  await page.evaluate(async (authenticator) => {
+    const modulePath =
+      performance
+        .getEntriesByType('resource')
+        .find((entry) => entry.name.includes('/src/utils/oidcLogin.ts'))
+        ?.name ?? '/src/utils/oidcLogin.ts';
+    const oidc = (await import(modulePath)) as typeof OidcModule;
+    const returnTo = location.pathname;
+    sessionStorage.setItem(
+      'huabu.oidc.pending',
+      JSON.stringify({
+        state: 'failed-logout-fixture',
+        verifier: 'fixture-verifier',
+        returnTo,
+        authenticator,
+      }),
+    );
+    history.replaceState(
+      null,
+      '',
+      '/auth/callback?state=failed-logout-fixture&code=fixture-code',
+    );
+    await oidc.completeLogin();
+  }, authenticator);
+  const peer = await context.newPage();
+  peer.on('pageerror', (error) => errors.push(error.name));
+  try {
+    await peer.goto(canvasUrl);
+    await expect(peer.locator('.react-flow__pane')).toBeVisible();
+    await expect
+      .poll(() =>
+        peer.evaluate(() =>
+          Boolean(sessionStorage.getItem('huabu.oidc.refresh')),
+        ),
+      )
+      .toBe(true);
+
+    await page
+      .getByRole('button', { name: 'Application menu', exact: true })
+      .click();
+    await page
+      .getByRole('menuitem', { name: 'Sign out (Logout QA)', exact: true })
+      .click();
+    await expect(
+      page.getByText(
+        'Could not sign out. Check your connection and try again.',
+        { exact: true },
+      ),
+    ).toBeVisible();
+    expect(sessionAlive).toBe(true);
+    for (const tab of [page, peer]) {
+      await expect
+        .poll(() =>
+          tab
+            .locator('.react-flow__pane')
+            .evaluate((pane) => !pane.closest('[inert]')),
+        )
+        .toBe(true);
+      expect(
+        await tab.evaluate(() =>
+          Boolean(sessionStorage.getItem('huabu.oidc.refresh')),
+        ),
+      ).toBe(true);
+    }
+    const retainedCapture = {
+      path: testInfo.outputPath('failed-logout-session-retained.png'),
+      route: new URL(page.url()).pathname,
+      viewport: page.viewportSize(),
+      actor: 'deterministic Logout QA',
+      state:
+        'Actual App menu sign-out failed with HTTP503; app controls and both refresh tokens retained',
+    };
+    await page.screenshot({ path: retainedCapture.path });
+
+    // A real gate renewal after cookie expiry must use the preserved token;
+    // the peer's next renewal must use the rotation rather than replaying it.
+    sessionAlive = false;
+    for (const [index, tab] of [page, peer].entries()) {
+      await tab.evaluate(async () => {
+        const clientPath = '/src/api/_client.ts';
+        const { AUTH_REQUIRED_EVENT } = await import(clientPath);
+        window.dispatchEvent(new Event(AUTH_REQUIRED_EVENT));
+      });
+      await expect.poll(() => presented.length).toBe(index + 1);
+      await expect
+        .poll(() =>
+          tab
+            .locator('.react-flow__pane')
+            .evaluate((pane) => !pane.closest('[inert]')),
+        )
+        .toBe(true);
+    }
+    expect(presented).toEqual(['fixture-refresh-1', 'fixture-refresh-2']);
+    expect(sessionAlive).toBe(true);
+
+    await page
+      .getByRole('button', { name: 'Application menu', exact: true })
+      .click();
+    await page
+      .getByRole('menuitem', { name: 'Sign out (Logout QA)', exact: true })
+      .click();
+    await expect(
+      page.getByRole('button', { name: 'Continue with Auth0', exact: true }),
+    ).toBeVisible();
+    await expect(
+      peer.getByRole('button', { name: 'Continue with Auth0', exact: true }),
+    ).toBeVisible();
+    for (const tab of [page, peer])
+      await expect
+        .poll(() =>
+          tab.evaluate(
+            () => sessionStorage.getItem('huabu.oidc.refresh') === null,
+          ),
+        )
+        .toBe(true);
+    expect(deletionAttempts).toBe(2);
+    expect(sessionAlive).toBe(false);
+    expect(errors).toEqual([]);
+    const signedOutCapture = {
+      path: testInfo.outputPath('logout-retry-sign-in.png'),
+      route: new URL(page.url()).pathname,
+      viewport: page.viewportSize(),
+      actor: 'deterministic Logout QA',
+      state:
+        'Successful retry clears both tabs and returns the existing Auth0 sign-in gate',
+    };
+    await page.screenshot({ path: signedOutCapture.path });
+    const manifestPath = testInfo.outputPath('logout-retest-captures.json');
+    await writeFile(
+      manifestPath,
+      JSON.stringify([retainedCapture, signedOutCapture], null, 2),
+    );
+    await testInfo.attach('logout-retest-captures', { path: manifestPath });
+  } finally {
+    await peer.close();
+    if (canvasId) {
+      const removed = await page.request.delete(`/api/canvas/${canvasId}`);
+      expect(removed.ok()).toBe(true);
+      expect((await page.request.get(`/api/canvas/${canvasId}`)).status()).toBe(
+        404,
+      );
+    }
+  }
+});
 
 for (const currentPeerRemains of [true, false]) {
   test(`does not reuse a rotated token after a tab reload (current peer: ${currentPeerRemains})`, async ({

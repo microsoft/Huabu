@@ -298,3 +298,133 @@ it('retains the selected provider after failed logout so retry ends its session'
   );
   expect(sessionStorage.getItem('huabu.oidc.provider')).toBeNull();
 });
+
+it('retains both tabs rotating refresh tokens after failed logout and forgets them only after confirmed deletion', async () => {
+  const authenticator = {
+    driver: 'auth0',
+    issuer: 'https://auth.example',
+    authorizationUrl: 'https://auth.example/authorize',
+    clientId: 'spa',
+    scopes: ['openid'],
+  };
+  sessionStorage.setItem(
+    'huabu.oidc.refresh',
+    JSON.stringify({
+      authenticator,
+      refreshToken: 'refresh-1',
+      revision: 'initial-revision',
+      expiresAt: Date.now() + 3_600_000,
+    }),
+  );
+  localStorage.setItem('huabu.oidc.refresh.revision', 'initial-revision');
+  const presented: string[] = [];
+  let deletes = 0;
+  vi.spyOn(window.location, 'assign').mockImplementation(() => {});
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'DELETE')
+        return new Response(null, { status: ++deletes === 1 ? 503 : 204 });
+      if (String(input).endsWith('openid-configuration'))
+        return Response.json({ token_endpoint: 'https://auth.example/token' });
+      const grant = new URLSearchParams(String(init?.body));
+      presented.push(grant.get('refresh_token') ?? '');
+      return Response.json({
+        access_token: `access-${presented.length}`,
+        refresh_token: `refresh-${presented.length + 1}`,
+        expires_in: 3600,
+      });
+    }),
+  );
+  const firstTab = await import('../utils/oidcLogin');
+  const { signOut } = await import('./identity');
+  vi.resetModules();
+  const secondTab = await import('../utils/oidcLogin');
+
+  await expect(signOut()).rejects.toThrow();
+  expect(localStorage.getItem('huabu.oidc.refresh.revision')).toBe(
+    'initial-revision',
+  );
+  expect(localStorage.getItem('huabu.session.signedOut')).toBeNull();
+  expect(firstTab.heldSessionExpiresIn()).toBeGreaterThan(3500);
+  expect(secondTab.heldSessionExpiresIn()).toBeGreaterThan(3500);
+  await expect(firstTab.refreshTokens()).resolves.toMatchObject({
+    renewal: true,
+  });
+  await expect(secondTab.refreshTokens()).resolves.toMatchObject({
+    renewal: true,
+  });
+  expect(presented).toEqual(['refresh-1', 'refresh-2']);
+
+  await signOut();
+  await vi.waitFor(() => expect(secondTab.heldSessionExpiresIn()).toBeNull());
+  expect(localStorage.getItem('huabu.oidc.refresh.revision')).toBeNull();
+  expect(localStorage.getItem('huabu.session.signedOut')).not.toBeNull();
+  await expect(firstTab.refreshTokens()).resolves.toBeNull();
+  await expect(secondTab.refreshTokens()).resolves.toBeNull();
+  expect(presented).toEqual(['refresh-1', 'refresh-2']);
+});
+
+it('can delete the session while provider redemption is pending and does not restore its late token', async () => {
+  const authenticator = {
+    driver: 'auth0',
+    issuer: 'https://auth.example',
+    authorizationUrl: 'https://auth.example/authorize',
+    clientId: 'spa',
+    scopes: ['openid'],
+  };
+  sessionStorage.setItem(
+    'huabu.oidc.refresh',
+    JSON.stringify({
+      authenticator,
+      refreshToken: 'refresh-1',
+      revision: 'initial-revision',
+    }),
+  );
+  localStorage.setItem('huabu.oidc.refresh.revision', 'initial-revision');
+  const lockNames: string[] = [];
+  const tails = new Map<string, Promise<unknown>>();
+  vi.spyOn(navigator, 'locks', 'get').mockReturnValue({
+    request: (name: string, callback: () => Promise<unknown>) => {
+      lockNames.push(name);
+      const run = (tails.get(name) ?? Promise.resolve()).then(callback);
+      tails.set(
+        name,
+        run.catch(() => {}),
+      );
+      return run;
+    },
+  } as unknown as LockManager);
+  let finish!: (response: Response) => void;
+  const assign = vi
+    .spyOn(window.location, 'assign')
+    .mockImplementation(() => {});
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'DELETE') return new Response(null, { status: 204 });
+      if (String(input).endsWith('openid-configuration'))
+        return Response.json({ token_endpoint: 'https://auth.example/token' });
+      return new Promise<Response>((resolve) => (finish = resolve));
+    }),
+  );
+  const oidc = await import('../utils/oidcLogin');
+  const { signOut } = await import('./identity');
+  const renewal = oidc.refreshTokens();
+  await vi.waitFor(() => expect(finish).toBeDefined());
+  try {
+    await signOut();
+    expect(assign).toHaveBeenCalledWith('/');
+    expect(lockNames).toEqual(['huabu.oidc.refresh', 'huabu.session']);
+  } finally {
+    finish(
+      Response.json({
+        access_token: 'late-access',
+        refresh_token: 'late-refresh',
+      }),
+    );
+  }
+  await expect(renewal).resolves.toBeNull();
+  await expect(oidc.refreshTokens()).resolves.toBeNull();
+  expect(sessionStorage.getItem('huabu.oidc.refresh')).toBeNull();
+});

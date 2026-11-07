@@ -272,18 +272,50 @@ async function authorizationUrl(
   return `${authenticator.authorizationUrl}?${params}`;
 }
 
-/** The provider's OpenID metadata, as far as this module reads it. */
-async function providerMetadata(
+/** The non-secret OpenID discovery fields this document uses. */
+type ProviderMetadata = {
+  token_endpoint?: string;
+  end_session_endpoint?: string;
+};
+/** Bound endpoint staleness while reusing discovery across login and renewals. */
+const PROVIDER_METADATA_CACHE_MS = 5 * 60 * 1000;
+const providerMetadataCache = new Map<
+  string,
+  { expiresAt: number; value: Promise<ProviderMetadata> }
+>();
+
+/** Share in-flight discovery per issuer; failed requests remain retryable. */
+function providerMetadata(
   authenticator: InteractiveAuthenticator,
-): Promise<{ token_endpoint?: string; end_session_endpoint?: string }> {
-  const metadata = await fetch(
-    `${authenticator.issuer.replace(/\/$/, '')}/.well-known/openid-configuration`,
-  );
-  if (!metadata.ok) throw new Error('Could not reach the sign-in provider');
-  return (await metadata.json()) as {
-    token_endpoint?: string;
-    end_session_endpoint?: string;
-  };
+): Promise<ProviderMetadata> {
+  const issuer = authenticator.issuer.replace(/\/$/, '');
+  const cached = providerMetadataCache.get(issuer);
+  if (cached && cached.expiresAt > Date.now()) return cached.value;
+  const value = (async () => {
+    const metadata = await fetch(`${issuer}/.well-known/openid-configuration`);
+    if (!metadata.ok) throw new Error('Could not reach the sign-in provider');
+    const body = (await metadata.json()) as ProviderMetadata | null;
+    if (
+      !body ||
+      typeof body !== 'object' ||
+      Array.isArray(body) ||
+      (body.token_endpoint !== undefined &&
+        typeof body.token_endpoint !== 'string') ||
+      (body.end_session_endpoint !== undefined &&
+        typeof body.end_session_endpoint !== 'string')
+    )
+      throw new Error('The sign-in provider returned invalid metadata');
+    return body;
+  })();
+  providerMetadataCache.set(issuer, {
+    expiresAt: Date.now() + PROVIDER_METADATA_CACHE_MS,
+    value,
+  });
+  void value.catch(() => {
+    if (providerMetadataCache.get(issuer)?.value === value)
+      providerMetadataCache.delete(issuer);
+  });
+  return value;
 }
 
 async function requestTokens(
