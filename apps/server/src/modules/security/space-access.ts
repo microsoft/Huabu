@@ -22,8 +22,6 @@ declare module 'fastify' {
      * renaming, deleting, or changing its parent.
      */
     spaceAccess?: 'read' | 'manage';
-    /** Starts or steers an agent outside the agent route prefixes. */
-    invokesAgent?: true;
   }
 }
 

@@ -66,11 +66,7 @@ function host() {
   app.get('/api/canvas/:canvasId/threads/:threadId/changes', ok);
   app.post('/api/canvas-titles', ok);
   app.post('/api/rfs/:canvasId/services/:serviceId/lease', ok);
-  app.post(
-    '/api/interactive-views/:canvasId/:nodeId/actions/:actionId',
-    { config: { invokesAgent: true } },
-    ok,
-  );
+  app.post('/api/interactive-views/:canvasId/:nodeId/actions/:actionId', ok);
   app.post('/api/canvas/:canvasId/move-selection', ok);
   app.patch('/api/canvas/:canvasId/parent', ok);
   app.post('/api/canvas/:canvasId/artifact/clone-from', ok);
