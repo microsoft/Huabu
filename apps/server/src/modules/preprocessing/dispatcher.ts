@@ -14,6 +14,7 @@ import { isLabelProtected } from './label-policy.js';
 import { runPipeline, type PipelineDeps } from './pipeline.js';
 import { getProfile } from './profiles.js';
 import { ProviderManager } from './provider-manager.js';
+import { personalSettingsOwner } from '../identity/personal-settings.js';
 import { withPublicNetworkOnly } from '../security/outbound.js';
 import { space, getStructuredStore } from '../storage/index.js';
 import { getWorkspaceHandle } from '../workspace.js';
@@ -109,6 +110,9 @@ function dedupeKey(request: PreprocessNodeRequest): string {
   const o = request.options;
   return [
     getWorkspaceHandle()?.workspaceId ?? '',
+    // Utility Agent selection, credentials, and failures belong to the caller.
+    // Only that member's tabs may reuse a pipeline that reads those settings.
+    JSON.stringify(personalSettingsOwner()),
     request.canvasId,
     request.nodeId,
     request.nodeType,
