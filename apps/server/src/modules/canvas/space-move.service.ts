@@ -470,11 +470,17 @@ async function moveCanvasSelectionUnlocked(
             if (agentThreadService.isActive(threadId, sourceCanvasId)) {
               throw new SpaceMoveError('MOVE_AGENT_RUNNING');
             }
-            const release = acquireAgentTurn(threadId);
-            if (!release) {
-              throw new SpaceMoveError('MOVE_AGENT_RUNNING');
+            // Admission precedes the Canvas write lock in agent requests.
+            // Reserve both conversation scopes through rehome/compensation,
+            // pushing each release immediately so a busy target unwinds source.
+            for (const namespace of [
+              canvasAcpNamespace(sourceCanvasId),
+              canvasAcpNamespace(destinationCanvasId),
+            ]) {
+              const release = acquireAgentTurn(threadId, namespace);
+              if (!release) throw new SpaceMoveError('MOVE_AGENT_RUNNING');
+              releaseThreads.push(release);
             }
-            releaseThreads.push(release);
             if ((await sourceHandle.changes.read(threadId)).length > 0) {
               throw new SpaceMoveError('MOVE_AGENT_PENDING_CHANGES');
             }

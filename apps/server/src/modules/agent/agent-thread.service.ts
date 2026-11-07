@@ -4,7 +4,7 @@
 import { randomUUID } from 'node:crypto';
 
 import { emptyAcpOverlay } from '@agenetes/acp-driver';
-import { AgenetesError } from '@agenetes/runtime';
+import { threadIdentityKey } from '@agenetes/runtime';
 
 import { isCanvasIntent } from '@huabu/shared';
 import { AGENT_SSE_EVENTS, agentBindingSchema } from '@huabu/shared';
@@ -44,8 +44,7 @@ import type {
 import type { HuabuSubmission } from './agenetes/handle.js';
 import type { ChatEnvelope } from './conversation/envelope.js';
 import type { RenderedSpacePrompt } from './space-instruction-frames.js';
-import type { Agenetes } from '@agenetes/agenetes';
-import type { Namespace } from '@agenetes/protocol';
+import type { ThreadIdentity } from '@agenetes/runtime';
 import type {
   AgentBinding,
   AgentMode,
@@ -103,44 +102,7 @@ interface AgentThreadServiceDependencies {
   runExternal: typeof runAcpAgent;
   runInternal: typeof runAgent;
   closeHandle: (threadId: string, canvasId?: string) => void | Promise<void>;
-  /**
-   * Close a live handle for `threadId` that another Space's namespace holds,
-   * when this Space has the durable conversation. Called under the turn
-   * lease, so the handle it closes is idle.
-   */
-  releaseForeignHandle?: (threadId: string, canvasId?: string) => Promise<void>;
   confirmBinding?: typeof agentNodeBinding.confirm;
-}
-
-function isNamespaceConflict(error: unknown): boolean {
-  return (
-    error instanceof AgenetesError &&
-    (error.details as { reason?: unknown } | undefined)?.reason ===
-      'namespace_conflict'
-  );
-}
-
-/**
- * Thread ids are client-chosen, so another Space can open a handle under one
- * of this Space's ids while it is idle. The runtime rightly refuses to share
- * it; this Space, which holds the conversation, displaces it instead of being
- * locked out until restart. The other side keeps its own record and history.
- * Callers hold the thread's turn lease, so the handle closed here is idle.
- */
-export async function releaseForeignThreadHandle(
-  runtime: Pick<Agenetes, 'get' | 'record' | 'close'>,
-  namespace: Namespace,
-  threadId: string,
-): Promise<void> {
-  try {
-    runtime.get(threadId, namespace);
-    return;
-  } catch (error) {
-    if (!isNamespaceConflict(error)) throw error;
-  }
-  // Without a conversation here the id is someone else's; the runtime refuses.
-  if (!(await runtime.record(namespace, threadId))) return;
-  await runtime.close(threadId);
 }
 
 export function externalBindingFromWorkloadSpec(
@@ -235,12 +197,6 @@ const DEFAULT_DEPENDENCIES: AgentThreadServiceDependencies = {
   runInternal: runAgent,
   closeHandle: async (threadId, canvasId) =>
     await agenetes.close(threadId, canvasAcpNamespace(canvasId ?? '')),
-  releaseForeignHandle: (threadId, canvasId) =>
-    releaseForeignThreadHandle(
-      agenetes,
-      canvasAcpNamespace(canvasId ?? ''),
-      threadId,
-    ),
   confirmBinding: (...args) => agentNodeBinding.confirm(...args),
 };
 
@@ -316,6 +272,7 @@ export interface ExternalAgentThreadTarget {
  * refuse while it does. Routes authorize the Space before reaching these.
  */
 interface ActiveAgentInvocation {
+  identity: ThreadIdentity;
   workspaceId?: string;
   requestId?: string;
   canvasId?: string;
@@ -329,6 +286,7 @@ interface ActiveAgentInvocation {
 }
 
 interface PendingAgentPreparation {
+  identity: ThreadIdentity;
   workspaceId?: string;
   requestId?: string;
   canvasId?: string;
@@ -359,6 +317,13 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'Internal Error';
 }
 
+function invocationIdentity(
+  threadId: string,
+  canvasId?: string,
+): ThreadIdentity {
+  return { namespace: canvasAcpNamespace(canvasId ?? ''), threadId };
+}
+
 export class AgentThreadService {
   // Fence delayed POSTs for the lifetime of their server process.
   private readonly stoppedRequests = new Set<string>();
@@ -374,10 +339,33 @@ export class AgentThreadService {
 
   private currentInvocation(
     threadId: string,
+    canvasId?: string,
   ): ActiveAgentInvocation | undefined {
-    const active = this.activeInvocations.get(threadId);
-    return active?.workspaceId === getWorkspaceHandle()?.workspaceId
-      ? active
+    if (canvasId !== undefined)
+      return this.activeInvocations.get(
+        threadIdentityKey(invocationIdentity(threadId, canvasId)),
+      );
+    // Legacy callers without a Space may use a unique current-Workspace run;
+    // a colliding ID is insufficient to select or stop either conversation.
+    const candidates = [...this.activeInvocations.values()].filter(
+      (active) =>
+        active.identity.threadId === threadId &&
+        active.workspaceId === getWorkspaceHandle()?.workspaceId,
+    );
+    const pendingKeys = [...this.pendingPreparations.values()]
+      .flatMap((pending) => [...pending])
+      .filter(
+        (pending) =>
+          pending.identity.threadId === threadId &&
+          pending.workspaceId === getWorkspaceHandle()?.workspaceId,
+      )
+      .map((pending) => threadIdentityKey(pending.identity));
+    const keys = new Set([
+      ...candidates.map((active) => threadIdentityKey(active.identity)),
+      ...pendingKeys,
+    ]);
+    return keys.size === 1 && candidates.length === 1
+      ? candidates[0]
       : undefined;
   }
 
@@ -386,15 +374,27 @@ export class AgentThreadService {
     canvasId: string | undefined,
     requestId: string,
   ): boolean {
-    const workspaceId = getWorkspaceHandle()?.workspaceId;
     return (
+      this.stoppedRequests.has(this.legacyRequestKey(threadId, requestId)) ||
       this.stoppedRequests.has(
-        JSON.stringify([workspaceId, canvasId, threadId, requestId]),
-      ) ||
-      this.stoppedRequests.has(
-        JSON.stringify([workspaceId, undefined, threadId, requestId]),
+        JSON.stringify([
+          threadIdentityKey(invocationIdentity(threadId, canvasId)),
+          requestId,
+        ]),
       )
     );
+  }
+
+  private legacyRequestKey(threadId: string, requestId: string): string {
+    // A local cancel may precede the POST that identifies its Space. Keep
+    // that request tombstone within this Workspace; member HTTP controls
+    // supply a Space and always take the qualified identity path instead.
+    return JSON.stringify([
+      'legacy-request',
+      getWorkspaceHandle()?.workspaceId ?? null,
+      threadId,
+      requestId,
+    ]);
   }
 
   beginPreparation(
@@ -405,7 +405,10 @@ export class AgentThreadService {
     signal: AbortSignal;
     finish: () => void;
   } {
+    const identity = invocationIdentity(threadId, canvasId);
+    const key = threadIdentityKey(identity);
     const preparation: PendingAgentPreparation = {
+      identity,
       workspaceId: getWorkspaceHandle()?.workspaceId,
       requestId,
       canvasId,
@@ -413,14 +416,14 @@ export class AgentThreadService {
     };
     if (requestId && this.isRequestStopped(threadId, canvasId, requestId))
       preparation.abortController.abort();
-    const pending = this.pendingPreparations.get(threadId) ?? new Set();
+    const pending = this.pendingPreparations.get(key) ?? new Set();
     pending.add(preparation);
-    this.pendingPreparations.set(threadId, pending);
+    this.pendingPreparations.set(key, pending);
     return {
       signal: preparation.abortController.signal,
       finish: () => {
         pending.delete(preparation);
-        if (pending.size === 0) this.pendingPreparations.delete(threadId);
+        if (pending.size === 0) this.pendingPreparations.delete(key);
       },
     };
   }
@@ -496,7 +499,13 @@ export class AgentThreadService {
     options: AgentThreadInvocationOptions,
   ): Promise<AgentThreadInvocation> {
     options.signal?.throwIfAborted();
-    await this.dependencies.waitForTurnRelease(options.threadId);
+    const identity = invocationIdentity(options.threadId, options.canvasId);
+    const key = threadIdentityKey(identity);
+    await this.dependencies.waitForTurnRelease(
+      options.threadId,
+      undefined,
+      identity.namespace,
+    );
     options.signal?.throwIfAborted();
     if (
       options.requestId &&
@@ -507,7 +516,10 @@ export class AgentThreadService {
       )
     )
       throw new AgentRequestStoppedError();
-    const releaseTurn = this.dependencies.acquireTurn(options.threadId);
+    const releaseTurn = this.dependencies.acquireTurn(
+      options.threadId,
+      identity.namespace,
+    );
     if (!releaseTurn) throw new AgentThreadBusyError(options.threadId);
 
     const abortController = new AbortController();
@@ -519,6 +531,7 @@ export class AgentThreadService {
       resolveTurnStarted = resolve;
     });
     const active: ActiveAgentInvocation = {
+      identity,
       workspaceId: getWorkspaceHandle()?.workspaceId,
       requestId: options.requestId,
       canvasId: options.canvasId,
@@ -533,7 +546,7 @@ export class AgentThreadService {
       active.turnStartState = state;
       resolveTurnStarted(state);
     };
-    this.activeInvocations.set(options.threadId, active);
+    this.activeInvocations.set(key, active);
 
     const onAbort = () => {
       if (active.phase !== 'settled' && !active.outcome)
@@ -608,8 +621,8 @@ export class AgentThreadService {
         throw error;
       } finally {
         signal.removeEventListener('abort', onAbort);
-        if (this.activeInvocations.get(options.threadId) === active) {
-          this.activeInvocations.delete(options.threadId);
+        if (this.activeInvocations.get(key) === active) {
+          this.activeInvocations.delete(key);
         }
         releaseTurn();
       }
@@ -617,10 +630,6 @@ export class AgentThreadService {
     let spacePrompt: string | undefined;
     let persistedSpacePrompt: PersistedSpacePrompt | undefined;
     try {
-      await this.dependencies.releaseForeignHandle?.(
-        options.threadId,
-        options.canvasId,
-      );
       // Resolve only after admission: a queued request must not execute an old draft.
       agentTarget = options.canvasId
         ? await this.dependencies.resolveAgentNode(
@@ -827,8 +836,8 @@ export class AgentThreadService {
     };
   }
 
-  stop(threadId: string): boolean {
-    const active = this.currentInvocation(threadId);
+  stop(threadId: string, canvasId?: string): boolean {
+    const active = this.currentInvocation(threadId, canvasId);
     if (active?.outcome || active?.phase === 'settled') return false;
     const controller = active?.abortController;
     if (!controller || controller.signal.aborted) return false;
@@ -842,21 +851,49 @@ export class AgentThreadService {
     requestId?: string,
   ): Promise<StopThreadResponse> {
     const workspaceId = getWorkspaceHandle()?.workspaceId;
+    const active = this.currentInvocation(threadId, canvasId);
+    const candidates = [...this.pendingPreparations.values()]
+      .flatMap((pending) => [...pending])
+      .filter(
+        (preparation) =>
+          preparation.identity.threadId === threadId &&
+          preparation.workspaceId === workspaceId &&
+          (canvasId === undefined || preparation.canvasId === canvasId),
+      );
+    const keys = new Set(
+      candidates.map((preparation) => threadIdentityKey(preparation.identity)),
+    );
+    for (const invocation of this.activeInvocations.values())
+      if (
+        invocation.identity.threadId === threadId &&
+        invocation.workspaceId === workspaceId &&
+        (canvasId === undefined || invocation.canvasId === canvasId)
+      )
+        keys.add(threadIdentityKey(invocation.identity));
+    if (keys.size > 1)
+      return {
+        stopped: false,
+        acceptance: null,
+        ...(requestId ? { request: { id: requestId, accepted: false } } : {}),
+      };
+    const pending = candidates.filter(
+      (preparation) =>
+        !preparation.abortController.signal.aborted &&
+        (requestId === undefined || preparation.requestId === requestId),
+    );
     if (requestId) {
+      const identity =
+        active?.identity ??
+        pending[0]?.identity ??
+        invocationIdentity(threadId, canvasId);
       this.stoppedRequests.add(
-        JSON.stringify([workspaceId, canvasId, threadId, requestId]),
+        canvasId === undefined && keys.size === 0
+          ? this.legacyRequestKey(threadId, requestId)
+          : JSON.stringify([threadIdentityKey(identity), requestId]),
       );
     }
-    const pending = [...(this.pendingPreparations.get(threadId) ?? [])].filter(
-      (preparation) =>
-        preparation.workspaceId === workspaceId &&
-        !preparation.abortController.signal.aborted &&
-        (requestId === undefined || preparation.requestId === requestId) &&
-        (canvasId === undefined || preparation.canvasId === canvasId),
-    );
     for (const preparation of pending) preparation.abortController.abort();
 
-    const active = this.currentInvocation(threadId);
     if (
       active &&
       (!active.abortController.signal.aborted || requestId !== undefined) &&
@@ -912,7 +949,7 @@ export class AgentThreadService {
   }
 
   isActive(threadId: string, canvasId?: string): boolean {
-    const active = this.currentInvocation(threadId);
+    const active = this.currentInvocation(threadId, canvasId);
     if (!active) return false;
     return active.canvasId === canvasId;
   }
@@ -921,7 +958,7 @@ export class AgentThreadService {
     threadId: string,
     canvasId?: string,
   ): Promise<boolean> {
-    const active = this.currentInvocation(threadId);
+    const active = this.currentInvocation(threadId, canvasId);
     if (!active || (canvasId !== undefined && active.canvasId !== canvasId)) {
       return false;
     }

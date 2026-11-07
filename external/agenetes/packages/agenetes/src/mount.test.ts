@@ -55,13 +55,13 @@ describe('mountAgenetes static driver map', () => {
   });
 });
 
-// A guessed thread id must not alias another namespace's live deployment,
-// including when the attacker's namespace is the first to realize after boot.
+// A guessed logical ID may create another conversation, never reuse or
+// tear down the original namespace's handle.
 it.each([
   ['carol', 'erin'],
   ['erin', 'carol'],
 ])(
-  'refuses cross-namespace reuse from %s to %s before persisting an alias',
+  'keeps colliding thread IDs independent from %s to %s',
   async (first, second) => {
     const instance = mountAgenetes({ drivers: { external: driver } });
     const spec = {
@@ -72,28 +72,25 @@ it.each([
       spec: {},
     };
     const handle = await instance.create(spec);
-    await expect(
-      instance.create({ ...spec, namespace: { name: second } }),
-    ).rejects.toThrow('another namespace');
-    expect(
-      await instance.record({ name: second }, 'shared-id'),
-    ).toBeUndefined();
-    expect(instance.get('shared-id', { name: first })).toBe(handle);
-    expect(() => instance.get('shared-id', { name: second })).toThrow(
-      'another namespace',
-    );
-    await expect(instance.close('shared-id', { name: second })).rejects.toThrow(
-      'another namespace',
-    );
+    expect(instance.get('shared-id', { name: second })).toBeUndefined();
+    await instance.close('shared-id', { name: second });
+    expect(instance.get('shared-id', spec.namespace)).toBe(handle);
+    const other = await instance.create({
+      ...spec,
+      namespace: { name: second },
+    });
+    expect(other).not.toBe(handle);
+    expect(instance.get('shared-id', { name: second })).toBe(other);
+    expect(() => instance.get('shared-id')).toThrow('ambiguous');
+    await expect(instance.close('shared-id')).rejects.toThrow('ambiguous');
     expect(await instance.create(spec)).toBe(handle);
-    await instance.close('shared-id', { name: first });
-    expect(
-      await instance.create({ ...spec, namespace: { name: second } }),
-    ).not.toBe(handle);
+    await instance.close('shared-id', spec.namespace);
+    expect(instance.get('shared-id')).toBe(other);
+    await instance.close('shared-id');
   },
 );
 
-it('reserves the namespace across concurrent deployment creation', async () => {
+it('creates colliding logical IDs concurrently in distinct namespaces', async () => {
   const instance = mountAgenetes({ drivers: { external: driver } });
   const spec = {
     kind: 'external',
@@ -106,7 +103,7 @@ it('reserves the namespace across concurrent deployment creation', async () => {
   );
   expect(results.map((r) => r.status).sort()).toEqual([
     'fulfilled',
-    'rejected',
+    'fulfilled',
   ]);
 });
 
@@ -127,12 +124,8 @@ it.each([undefined, { root: '/same-root' }])(
     await expect(
       instance.create({ ...spec, namespace: other }),
     ).rejects.toThrow('another namespace');
-    expect(() => instance.get(spec.threadId, other)).toThrow(
-      'another namespace',
-    );
-    await expect(instance.close(spec.threadId, other)).rejects.toThrow(
-      'another namespace',
-    );
+    expect(instance.get(spec.threadId, other)).toBeUndefined();
+    await instance.close(spec.threadId, other);
     expect(instance.get(spec.threadId, namespace)).toBe(handle);
     await instance.close(spec.threadId, namespace);
   },
@@ -160,7 +153,7 @@ it('keeps a live thread accessible when its owner moves namespace storage', asyn
   expect(instance.get(spec.threadId, moved)).toBeUndefined();
 });
 
-it('retains storage isolation for namespaces without a stable owner', async () => {
+it('keeps ownerless namespaces with different storage from aliasing handles', async () => {
   const instance = mountAgenetes({ drivers: { external: driver } });
   const namespace = { name: 'same-space', storage: { root: '/first' } };
   const spec = {
@@ -170,15 +163,17 @@ it('retains storage isolation for namespaces without a stable owner', async () =
     threadId: 'legacy-thread',
     spec: {},
   };
-  await instance.create(spec);
+  const first = await instance.create(spec);
   const other = { ...namespace, storage: { root: '/second' } };
-  await expect(instance.create({ ...spec, namespace: other })).rejects.toThrow(
-    'another namespace',
-  );
-  expect(() => instance.get(spec.threadId, other)).toThrow('another namespace');
-  await expect(instance.close(spec.threadId, other)).rejects.toThrow(
-    'another namespace',
-  );
+  expect(instance.get(spec.threadId, other)).toBeUndefined();
+  await instance.close(spec.threadId, other);
+  expect(instance.get(spec.threadId, namespace)).toBe(first);
+  const second = await instance.create({ ...spec, namespace: other });
+  expect(second).not.toBe(first);
+  expect(instance.get(spec.threadId, namespace)).toBe(first);
+  expect(instance.get(spec.threadId, other)).toBe(second);
+  await instance.close(spec.threadId, other);
+  expect(instance.get(spec.threadId)).toBe(first);
   await instance.close(spec.threadId, namespace);
 });
 

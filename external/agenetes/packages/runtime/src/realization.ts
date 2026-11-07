@@ -10,6 +10,27 @@ export interface ThreadIdentity {
   readonly threadId: string;
 }
 
+/**
+ * Collision-safe process key for one namespace-partitioned thread.
+ *
+ * A stable owner makes storage relocation irrelevant. Legacy namespaces
+ * without an owner retain their storage root as part of their identity.
+ * An absent namespace identifies only an unqualified legacy channel; it
+ * never aliases a qualified thread. Public thread IDs remain unchanged.
+ */
+export function threadIdentityKey(
+  identity: Pick<ThreadIdentity, 'threadId'> & { namespace?: Namespace },
+): string {
+  const namespace = identity.namespace;
+  const owner = namespace?.ownerId ?? null;
+  return JSON.stringify([
+    namespace?.name ?? null,
+    owner,
+    owner === null ? (namespace?.storage?.root ?? null) : null,
+    identity.threadId,
+  ]);
+}
+
 /** Same-thread durable input used only for recovery. */
 export interface AgentRecoveryInput<TDriverState = unknown> {
   readonly state: AgentStateSnapshot<TDriverState>;

@@ -135,9 +135,9 @@ describe('mounted Agenetes instance (M5 INST skeleton)', () => {
         driverState: {},
       });
       expect(await restarted.create(spec)).toBe(recovered);
-      expect(() =>
+      expect(
         restarted.get(spec.threadId, { ...namespace, ownerId: 'workspace-b' }),
-      ).toThrow('another namespace');
+      ).toBeUndefined();
     } finally {
       await first.close(spec.threadId, namespace);
       await restarted.close(spec.threadId, namespace);

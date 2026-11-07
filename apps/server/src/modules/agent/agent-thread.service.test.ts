@@ -3,6 +3,22 @@
 
 import { describe, expect, it, vi } from 'vitest';
 
+vi.mock('../workspace/paths.js', async (importOriginal) => {
+  const paths = await importOriginal<typeof workspacePaths>();
+  const { getWorkspaceHandle } = await import('../workspace.js');
+  return {
+    ...paths,
+    // Unit service cases have no storage backend; preserve the production
+    // owner/empty-Space identity while integration suites cover real roots.
+    canvasAcpNamespace: (canvasId: string) => ({
+      name: canvasId,
+      ...(canvasId && getWorkspaceHandle()
+        ? { ownerId: getWorkspaceHandle()?.workspaceId }
+        : {}),
+    }),
+  };
+});
+
 vi.mock('./memory/index.js', () => ({
   readWorkspaceMemory: () => '',
 }));
@@ -17,12 +33,14 @@ import {
   externalBindingFromWorkloadSpec,
   spacePromptFromWorkloadSpec,
 } from './agent-thread.service.js';
+import { acquireAgentTurn } from './turn-lease.js';
 import {
   openPersonalSettings,
   useCaller,
 } from '../identity/personal-settings.js';
 import { runInWorkspace } from '../workspace/context.js';
 
+import type * as workspacePaths from '../workspace/paths.js';
 import type { AcpHandle, AcpWorkloadSpec } from './agenetes/drivers.js';
 import type {
   AgentNodeTarget,
@@ -109,6 +127,7 @@ function createHarness(options?: {
   internalGate?: Promise<void>;
   internalEvents?: StreamEvent[];
   persistedRequestAccepted?: boolean;
+  realTurnLease?: boolean;
 }) {
   const release = vi.fn();
   const startLifecycle = options?.startError
@@ -203,7 +222,9 @@ function createHarness(options?: {
     collectSpacePrompt,
     realizeExternal,
     waitForTurnRelease: vi.fn().mockResolvedValue(undefined),
-    acquireTurn: vi.fn(() => (options?.busy ? null : release)),
+    acquireTurn: options?.realTurnLease
+      ? acquireAgentTurn
+      : vi.fn(() => (options?.busy ? null : release)),
     startLifecycle,
     finishLifecycle,
     failLifecycle,
@@ -346,6 +367,41 @@ describe('AgentThreadService', () => {
       otherThread.finish();
     },
   );
+
+  it('keeps a cancel-before-POST legacy tombstone inside its current Workspace', async () => {
+    const h = createHarness();
+    const inWorkspace = <T>(id: string, operation: () => T): T =>
+      runInWorkspace(
+        { handle: { workspaceId: id, name: id }, path: null },
+        operation,
+      );
+    await inWorkspace('workspace-a', () =>
+      h.service.stopAndWait('thread-a', undefined, 'request-a'),
+    );
+    const other = inWorkspace('workspace-b', () =>
+      h.service.beginPreparation('thread-a', 'canvas-a', 'request-a'),
+    );
+    const delayed = inWorkspace('workspace-a', () =>
+      h.service.beginPreparation('thread-a', 'canvas-a', 'request-a'),
+    );
+    try {
+      expect(other.signal.aborted).toBe(false);
+      expect(delayed.signal.aborted).toBe(true);
+      const invocation = await inWorkspace('workspace-b', () =>
+        h.service.invoke({ ...invocationOptions(), requestId: 'request-a' }),
+      );
+      expect(invocation.signal.aborted).toBe(false);
+      await invocation.dispose();
+      await expect(
+        inWorkspace('workspace-a', () =>
+          h.service.invoke({ ...invocationOptions(), requestId: 'request-a' }),
+        ),
+      ).rejects.toThrow('stopped before execution');
+    } finally {
+      other.finish();
+      delayed.finish();
+    }
+  });
 
   it('cancels a matching preparation in any Canvas without cancelling a newer request', async () => {
     const h = createHarness();
@@ -1694,6 +1750,131 @@ it('does not stop an invocation owned by another Canvas', async () => {
 
   releaseGate();
   await draining;
+});
+
+it('refuses an unqualified stop when an active and a pending same-ID conversation differ in Space', async () => {
+  const h = createHarness({ target: null, agentTarget: null });
+  const invocation = await h.service.invoke({
+    ...invocationOptions(),
+    requestBinding: { kind: 'internal' },
+    fixedTarget: null,
+    agentTarget: null,
+  });
+  const pending = h.service.beginPreparation(
+    'thread-a',
+    'canvas-b',
+    'request-a',
+  );
+  try {
+    expect(
+      await h.service.stopAndWait('thread-a', undefined, 'request-a'),
+    ).toMatchObject({ stopped: false, acceptance: null });
+    expect(invocation.signal.aborted).toBe(false);
+    expect(pending.signal.aborted).toBe(false);
+    expect(h.service.stop('thread-a')).toBe(false);
+    expect(
+      await h.service.stopAndWait('thread-a', 'canvas-b', 'request-a'),
+    ).toMatchObject({ stopped: true });
+    expect(pending.signal.aborted).toBe(true);
+    expect(invocation.signal.aborted).toBe(false);
+  } finally {
+    pending.finish();
+    await invocation.dispose();
+  }
+});
+
+it.each(['Space', 'Workspace'])(
+  'admits and controls same-ID invocations independently across %s boundaries',
+  async (boundary) => {
+    const h = createHarness({
+      target: null,
+      agentTarget: null,
+      realTurnLease: true,
+    });
+    const inWorkspace = <T>(id: string, operation: () => T): T =>
+      runInWorkspace(
+        { handle: { workspaceId: id, name: id }, path: null },
+        operation,
+      );
+    const aOwner = 'workspace-a';
+    const bOwner = boundary === 'Space' ? aOwner : 'workspace-b';
+    const bCanvas = boundary === 'Space' ? 'canvas-b' : 'canvas-a';
+    const options = {
+      ...invocationOptions(),
+      requestId: 'request-a',
+      requestBinding: { kind: 'internal' as const },
+      fixedTarget: null,
+      agentTarget: null,
+    };
+    const first = await inWorkspace(aOwner, () => h.service.invoke(options));
+    let second: Awaited<ReturnType<typeof h.service.invoke>> | undefined;
+    try {
+      second = await inWorkspace(bOwner, () =>
+        h.service.invoke({ ...options, canvasId: bCanvas }),
+      );
+      expect(first.signal.aborted).toBe(false);
+      expect(second.signal.aborted).toBe(false);
+      await expect(
+        inWorkspace(aOwner, () => h.service.invoke(options)),
+      ).rejects.toBeInstanceOf(AgentThreadBusyError);
+      if (boundary === 'Space') {
+        expect(
+          await inWorkspace(aOwner, () => h.service.stopAndWait('thread-a')),
+        ).toEqual({ stopped: false, acceptance: null });
+        expect(first.signal.aborted).toBe(false);
+        expect(second.signal.aborted).toBe(false);
+      }
+      expect(
+        await inWorkspace(aOwner, () =>
+          h.service.stopAndWait('thread-a', 'canvas-a', 'request-a'),
+        ),
+      ).toMatchObject({ stopped: true });
+      expect(first.signal.aborted).toBe(true);
+      expect(second.signal.aborted).toBe(false);
+      const pending = inWorkspace(bOwner, () =>
+        h.service.beginPreparation('thread-a', bCanvas, 'request-a'),
+      );
+      expect(pending.signal.aborted).toBe(false);
+      pending.finish();
+      expect(
+        inWorkspace(bOwner, () => h.service.isActive('thread-a', bCanvas)),
+      ).toBe(true);
+    } finally {
+      await inWorkspace(aOwner, () => first.dispose());
+      const bInvocation = second;
+      if (bInvocation) await inWorkspace(bOwner, () => bInvocation.dispose());
+    }
+  },
+);
+
+it('uses the same ownerless admission identity as unnamed local realization', async () => {
+  const h = createHarness({
+    target: null,
+    agentTarget: null,
+    realTurnLease: true,
+  });
+  const release = acquireAgentTurn('thread-a', { name: '' });
+  expect(release).not.toBeNull();
+  try {
+    await expect(
+      runInWorkspace(
+        {
+          handle: { workspaceId: 'local-workspace', name: 'Local' },
+          path: null,
+        },
+        () =>
+          h.service.invoke({
+            ...invocationOptions(),
+            canvasId: undefined,
+            requestBinding: { kind: 'internal' },
+            fixedTarget: null,
+            agentTarget: null,
+          }),
+      ),
+    ).rejects.toBeInstanceOf(AgentThreadBusyError);
+  } finally {
+    release?.();
+  }
 });
 
 it('keeps stop tracking and readiness inside the invocation Workspace', async () => {

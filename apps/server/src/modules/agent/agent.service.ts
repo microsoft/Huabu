@@ -458,7 +458,7 @@ export async function* runAgent(
         canvasId,
         origin,
         threadId: deploymentThreadId,
-        readSet: getSessionReadSet(deploymentThreadId),
+        readSet: getSessionReadSet(deploymentThreadId, namespace),
       })
     : undefined;
   const iterator = handle.run(submission, {

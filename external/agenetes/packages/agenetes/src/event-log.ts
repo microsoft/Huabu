@@ -24,6 +24,8 @@
 // handles the live fan-out. All of this is L2-internal — the sequence
 // numbers, the pub/sub, and the file layout never leak to L1 (I9.8).
 
+import { threadIdentityKey } from '@agenetes/runtime';
+
 import {
   appendJsonLine,
   readJsonLines,
@@ -381,13 +383,16 @@ export type EventLogListener = (entry: EventLogEntry) => void;
  * receives live entries observes a gap-free, duplicate-free sequence — the
  * fence the `tail` and history materializer compose on.
  *
- * The live fan-out is keyed by `threadId` alone: `threadId` is globally
- * unique (a host guarantee, I4.2), matching the threadId-keyed notification
- * bus. Durability stays namespace-partitioned via the store.
+ * Scoped fan-out and pending writes use ThreadIdentity ownership, matching
+ * the namespace-partitioned durable store and metadata bus. A legacy
+ * unqualified listener binds to its first observed scope and is removed if
+ * another scope appends the same logical ID; it never receives that output.
  */
 export class EventLog {
   readonly #store: EventLogStore;
   readonly #listeners = new Map<string, Set<EventLogListener>>();
+  /** First namespace observed by an active unqualified legacy channel. */
+  readonly #legacyScopes = new Map<string, string>();
 
   readonly #pending = new Map<string, Promise<unknown>>();
   /**
@@ -405,14 +410,13 @@ export class EventLog {
    * `tail` backfill can fail because a concurrent append failed. Removing
    * the propagation means first giving acceptance a signal of its own.
    */
-  #serialize<T>(threadId: string, operation: () => Promise<T>): Promise<T> {
-    const result = (this.#pending.get(threadId) ?? Promise.resolve())
+  #serialize<T>(key: string, operation: () => Promise<T>): Promise<T> {
+    const result = (this.#pending.get(key) ?? Promise.resolve())
       .catch(() => {})
       .then(operation);
-    this.#pending.set(threadId, result);
+    this.#pending.set(key, result);
     const clear = () => {
-      if (this.#pending.get(threadId) === result)
-        this.#pending.delete(threadId);
+      if (this.#pending.get(key) === result) this.#pending.delete(key);
     };
     void result.then(clear, clear);
     return result;
@@ -432,7 +436,7 @@ export class EventLog {
     request: AgentSubmission | null,
   ): Promise<TurnStartLogEntry> {
     return this.#serialize(
-      threadId,
+      threadIdentityKey({ namespace, threadId }),
       async () =>
         await this.#store.appendTurnStart(namespace, threadId, request),
     );
@@ -444,15 +448,33 @@ export class EventLog {
     threadId: string,
     event: AgentStreamEvent,
   ): Promise<EventLogEntry> {
-    return this.#serialize(threadId, async () => {
-      const entry = await this.#store.append(namespace, threadId, event);
-      const set = this.#listeners.get(threadId);
-      if (set) {
-        // Snapshot so a listener that unsubscribes during dispatch is safe.
-        for (const listener of [...set]) listener(entry);
-      }
-      return entry;
-    });
+    return this.#serialize(
+      threadIdentityKey({ namespace, threadId }),
+      async () => {
+        const entry = await this.#store.append(namespace, threadId, event);
+        const key = threadIdentityKey({ namespace, threadId });
+        const set = this.#listeners.get(key);
+        if (set) {
+          // Snapshot so a listener that unsubscribes during dispatch is safe.
+          for (const listener of [...set]) listener(entry);
+        }
+        const legacyKey = threadIdentityKey({ threadId });
+        const legacy = this.#listeners.get(legacyKey);
+        if (legacy) {
+          const previous = this.#legacyScopes.get(legacyKey);
+          if (previous && previous !== key) {
+            // A legacy observer binds to its first namespace, never the next
+            // owner's output when a client-chosen ID collides.
+            this.#listeners.delete(legacyKey);
+            this.#legacyScopes.delete(legacyKey);
+          } else {
+            this.#legacyScopes.set(legacyKey, key);
+            for (const listener of [...legacy]) listener(entry);
+          }
+        }
+        return entry;
+      },
+    );
   }
 
   /** Durable read (fence read when `sinceSeq` is set); see {@link EventLogStore.read}. */
@@ -461,7 +483,7 @@ export class EventLog {
     threadId: string,
     sinceSeq?: number,
   ): Promise<EventLogEntry[]> {
-    await this.#pending.get(threadId);
+    await this.#pending.get(threadIdentityKey({ namespace, threadId }));
     return await this.#store.read(namespace, threadId, sinceSeq);
   }
 
@@ -471,13 +493,13 @@ export class EventLog {
     threadId: string,
     sinceSeq?: number,
   ): Promise<EventLogRecord[]> {
-    await this.#pending.get(threadId);
+    await this.#pending.get(threadIdentityKey({ namespace, threadId }));
     return await this.#store.readRecords(namespace, threadId, sinceSeq);
   }
 
   /** The highest persisted `seq` for a thread (the fence), or `0` when empty. */
   async maxSeq(namespace: Namespace, threadId: string): Promise<number> {
-    await this.#pending.get(threadId);
+    await this.#pending.get(threadIdentityKey({ namespace, threadId }));
     return await this.#store.maxSeq(namespace, threadId);
   }
 
@@ -497,7 +519,7 @@ export class EventLog {
     // handing its caller a durable `seq` — and then erase the entry the seq
     // named.
     await this.#serialize(
-      threadId,
+      threadIdentityKey({ namespace, threadId }),
       async () => await this.#store.replace(namespace, threadId, records),
     );
   }
@@ -508,7 +530,7 @@ export class EventLog {
    */
   async delete(namespace: Namespace, threadId: string): Promise<void> {
     await this.#serialize(
-      threadId,
+      threadIdentityKey({ namespace, threadId }),
       async () => await this.#store.delete(namespace, threadId),
     );
   }
@@ -518,18 +540,26 @@ export class EventLog {
    * idempotent unsubscribe. Backfill (entries already persisted) is the
    * caller's `read` concern — this delivers only the live tail.
    */
-  subscribe(threadId: string, listener: EventLogListener): () => void {
-    let set = this.#listeners.get(threadId);
+  subscribe(
+    threadId: string,
+    listener: EventLogListener,
+    namespace?: Namespace,
+  ): () => void {
+    const key = threadIdentityKey({ threadId, namespace });
+    let set = this.#listeners.get(key);
     if (!set) {
       set = new Set();
-      this.#listeners.set(threadId, set);
+      this.#listeners.set(key, set);
     }
     set.add(listener);
     return () => {
-      const current = this.#listeners.get(threadId);
+      const current = this.#listeners.get(key);
       if (!current) return;
       current.delete(listener);
-      if (current.size === 0) this.#listeners.delete(threadId);
+      if (current.size === 0) {
+        this.#listeners.delete(key);
+        this.#legacyScopes.delete(key);
+      }
     };
   }
 }

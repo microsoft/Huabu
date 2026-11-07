@@ -21,6 +21,7 @@ import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
+import { FileThreadStore } from '@agenetes/agenetes';
 import { afterEach, expect, it } from 'vitest';
 
 import {
@@ -270,6 +271,36 @@ it('recovers older stored namespaces with their current Workspace ownership', as
   expect(namespace.ownerId).toBeTruthy();
   expect(recovered?.spec.namespace).toEqual(namespace);
 });
+
+it.each([
+  ['Disk', DISK_PROFILE],
+  ['SQLite', SQLITE_PROFILE],
+] as const)(
+  'rejects a %s record owned by another Workspace without rewriting it',
+  async (_kind, profile) => {
+    const opened = await mount(profile);
+    await opened.storage.structured.spaces().create({
+      canvasId: CANVAS_ID,
+      title: 'Persisted ownership',
+    });
+    const namespace = canvasAcpNamespace(CANVAS_ID);
+    const record = threadRecord('foreign history');
+    record.spec.namespace = { ...namespace, ownerId: 'foreign-workspace' };
+    const backing = namespace.storage?.root
+      ? new FileThreadStore()
+      : new SqliteThreadStore();
+    await backing.upsert(namespace, 'thread-1', record);
+
+    await expect(
+      conversationThreadStore.get(namespace, 'thread-1'),
+    ).rejects.toMatchObject({
+      details: { reason: 'namespace_conflict' },
+    });
+    expect(await backing.get(namespace, 'thread-1')).toMatchObject({
+      spec: { namespace: { ownerId: 'foreign-workspace' } },
+    });
+  },
+);
 
 it('asks again on every call, so a profile change takes effect between two reads', async () => {
   const opened = await mount(SQLITE_PROFILE);

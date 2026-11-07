@@ -518,6 +518,7 @@ describe('ExternalAgentRealizationService', () => {
       'thread-1',
       'profile-fixed',
       3,
+      { name: 'canvas-1', storage: { root: '/spaces/canvas-1/.history' } },
     );
     expect(harness.buildSpec).not.toHaveBeenCalled();
     expect(harness.collectSpacePrompt).not.toHaveBeenCalled();

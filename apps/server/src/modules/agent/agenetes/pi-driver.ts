@@ -142,7 +142,7 @@ export const huabuPiDriverPorts = {
         canvasId: host.canvasId,
         origin: host.origin,
         threadId: ctx.threadId,
-        readSet: getSessionReadSet(ctx.threadId),
+        readSet: getSessionReadSet(ctx.threadId, ctx.namespace),
       },
     );
   },

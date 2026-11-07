@@ -31,7 +31,6 @@ import {
 import { canvasAcpNamespace } from '../../workspace/paths.js';
 import { createWorkspace } from '../../workspace-activation.js';
 import { getWorkspaceHandle, setWorkspacePath } from '../../workspace.js';
-import { releaseForeignThreadHandle } from '../agent-thread.service.js';
 
 import type { Agenetes } from '@agenetes/agenetes';
 import type { AgentStateSnapshot } from '@agenetes/protocol';
@@ -248,13 +247,18 @@ it('lets one Workspace displace a handle another Workspace holds under its threa
         // Never reached.
       }
     }).rejects.toThrow();
-    // ...but Carol's conversation displaces it and resumes.
-    await releaseForeignThreadHandle(instance, carolNamespace, threadId);
+    // Carol resumes her own same-ID conversation without touching Erin's handle.
     await expect(
       instance.create(workload(carolNamespace)),
     ).resolves.toBeDefined();
     await instance.close(threadId, carolNamespace);
   });
-  // Erin's handle was torn down in Erin's Workspace, not Carol's.
-  expect(closedIn).toEqual([erin.handle.workspaceId, carol.handle.workspaceId]);
+  expect(closedIn).toEqual([carol.handle.workspaceId]);
+  await runInWorkspace(erin, async () => {
+    expect(instance.get(threadId, canvasAcpNamespace(canvasId))).toBe(
+      erinHandle,
+    );
+    await instance.close(threadId, canvasAcpNamespace(canvasId));
+  });
+  expect(closedIn).toEqual([carol.handle.workspaceId, erin.handle.workspaceId]);
 });

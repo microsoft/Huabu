@@ -12,15 +12,29 @@ import { mountAgenetes } from '@agenetes/agenetes';
 import { defineDriver } from '@agenetes/runtime';
 import { describe, expect, it, vi } from 'vitest';
 
+vi.mock('../workspace/paths.js', async (importOriginal) => {
+  const paths = await importOriginal<typeof workspacePaths>();
+  const { getWorkspaceHandle } = await import('../workspace.js');
+  return {
+    ...paths,
+    // Unit service cases have no storage backend; preserve the production
+    // owner/empty-Space identity while integration suites cover real roots.
+    canvasAcpNamespace: (canvasId: string) => ({
+      name: canvasId,
+      ...(canvasId && getWorkspaceHandle()
+        ? { ownerId: getWorkspaceHandle()?.workspaceId }
+        : {}),
+    }),
+  };
+});
+
 vi.mock('./memory/index.js', () => ({
   readWorkspaceMemory: () => '',
 }));
 
-import {
-  AgentThreadService,
-  releaseForeignThreadHandle,
-} from './agent-thread.service.js';
+import { AgentThreadService } from './agent-thread.service.js';
 
+import type * as workspacePaths from '../workspace/paths.js';
 import type { HuabuSubmission } from './agenetes/handle.js';
 import type { ChatEnvelope } from './conversation/envelope.js';
 import type { AgentStreamEvent } from '@huabu/shared';
@@ -67,74 +81,26 @@ const spec = (name: string) => ({
   spec: {},
 });
 
-describe('releaseForeignThreadHandle', () => {
-  it('lets the Space holding a conversation displace another Space’s live handle', async () => {
+describe('namespace-qualified live handles', () => {
+  it('resumes an idle conversation without evicting another namespace same-ID handle', async () => {
     const { instance, closed } = runtime();
-    // Carol's Space has the conversation; it is idle (no live handle).
-    const carol = await instance.create(spec('carol-space'));
+    await instance.create(spec('carol-space'));
     await instance.close('shared-id', { name: 'carol-space' });
     closed.length = 0;
-    // Erin reuses the id from her own Space while it is idle.
-    await instance.create(spec('erin-space'));
-    await expect(instance.create(spec('carol-space'))).rejects.toThrow(
-      'another namespace',
-    );
-
-    await releaseForeignThreadHandle(
-      instance,
-      { name: 'carol-space' },
-      'shared-id',
-    );
-
-    expect(closed).toEqual(['erin-space']);
+    const other = await instance.create(spec('erin-space'));
     const resumed = await instance.create(spec('carol-space'));
-    expect(resumed).not.toBe(carol);
-    expect(instance.get('shared-id', { name: 'carol-space' })).toBe(resumed);
-    // Erin keeps her own record; it never became Carol's.
-    expect(
-      await instance.record({ name: 'erin-space' }, 'shared-id'),
-    ).toMatchObject({ spec: { namespace: { name: 'erin-space' } } });
-  });
-
-  it('leaves another Space’s handle alone when this Space has no conversation', async () => {
-    const { instance, closed } = runtime();
-    const erin = await instance.create(spec('erin-space'));
-
-    await releaseForeignThreadHandle(
-      instance,
-      { name: 'carol-space' },
-      'shared-id',
-    );
-
+    expect(resumed).not.toBe(other);
     expect(closed).toEqual([]);
-    expect(instance.get('shared-id', { name: 'erin-space' })).toBe(erin);
-    await expect(instance.create(spec('carol-space'))).rejects.toThrow(
-      'another namespace',
-    );
-  });
-
-  it('does nothing for this Space’s own handle or a thread nobody holds', async () => {
-    const { instance, closed } = runtime();
-    const own = await instance.create(spec('carol-space'));
-
-    await releaseForeignThreadHandle(
-      instance,
-      { name: 'carol-space' },
-      'shared-id',
-    );
-    await releaseForeignThreadHandle(
-      instance,
-      { name: 'carol-space' },
-      'other-id',
-    );
-
-    expect(closed).toEqual([]);
-    expect(instance.get('shared-id', { name: 'carol-space' })).toBe(own);
+    expect(instance.get('shared-id', { name: 'erin-space' })).toBe(other);
+    await instance.close('shared-id', { name: 'carol-space' });
+    expect(closed).toEqual(['carol-space']);
+    expect(instance.get('shared-id', { name: 'erin-space' })).toBe(other);
+    await instance.close('shared-id', { name: 'erin-space' });
   });
 });
 
 describe('AgentThreadService', () => {
-  it('displaces a foreign handle only while holding the turn lease', async () => {
+  it('runs under the scoped turn lease without evicting another handle', async () => {
     const order: string[] = [];
     const service = new AgentThreadService({
       hasAcceptedRequest: vi.fn(async () => false),
@@ -163,9 +129,6 @@ describe('AgentThreadService', () => {
         })();
       }) as never,
       closeHandle: vi.fn(),
-      releaseForeignHandle: vi.fn(async (threadId, canvasId) => {
-        order.push(`displace ${canvasId}/${threadId}`);
-      }),
     });
     const invocation = await service.invoke({
       threadId: 'shared-id',
@@ -199,12 +162,6 @@ describe('AgentThreadService', () => {
     for await (const _event of invocation.events) {
       // Drain the turn.
     }
-    expect(order).toEqual([
-      'wait',
-      'lease',
-      'displace carol-space/shared-id',
-      'run',
-      'release',
-    ]);
+    expect(order).toEqual(['wait', 'lease', 'run', 'release']);
   });
 });

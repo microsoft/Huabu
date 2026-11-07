@@ -13,12 +13,29 @@
 
 import { describe, expect, it, vi } from 'vitest';
 
+vi.mock('../workspace/paths.js', async (importOriginal) => {
+  const paths = await importOriginal<typeof workspacePaths>();
+  const { getWorkspaceHandle } = await import('../workspace.js');
+  return {
+    ...paths,
+    // Unit service cases have no storage backend; preserve the production
+    // owner/empty-Space identity while integration suites cover real roots.
+    canvasAcpNamespace: (canvasId: string) => ({
+      name: canvasId,
+      ...(canvasId && getWorkspaceHandle()
+        ? { ownerId: getWorkspaceHandle()?.workspaceId }
+        : {}),
+    }),
+  };
+});
+
 vi.mock('./memory/index.js', () => ({
   readWorkspaceMemory: () => '',
 }));
 
 import { AgentThreadService } from './agent-thread.service.js';
 
+import type * as workspacePaths from '../workspace/paths.js';
 import type { HuabuSubmission } from './agenetes/handle.js';
 import type { ChatEnvelope } from './conversation/envelope.js';
 import type { AgentStreamEvent } from '@huabu/shared';

@@ -28,6 +28,7 @@ import {
   InMemoryThreadStore,
   InMemoryTurnStore,
 } from '@agenetes/agenetes';
+import { AgenetesError, threadIdentityKey } from '@agenetes/runtime';
 
 import {
   PostgresThreadStore,
@@ -77,13 +78,14 @@ const file: Backing = {
 const fileTurnOwners = new Map<string, { namespace: Namespace }>();
 
 function registerFileTurnOwner(namespace: Namespace): void {
-  const existing = fileTurnOwners.get(namespace.name);
+  const key = threadIdentityKey({ namespace, threadId: '' });
+  const existing = fileTurnOwners.get(key);
   if (existing) {
     existing.namespace = namespace;
     return;
   }
   const owner = { namespace };
-  fileTurnOwners.set(namespace.name, owner);
+  fileTurnOwners.set(key, owner);
   registerSpaceDirHandleOwner(namespace.name, {
     release: () => fileTurns.close(owner.namespace),
     reacquire: () => undefined,
@@ -143,28 +145,47 @@ async function inNamespace<T>(
   }
 }
 
+/** Rebind renamed storage while preserving a persisted Workspace's authority. */
+function currentThreadRecord(
+  current: Namespace,
+  record: ThreadRecord,
+): ThreadRecord {
+  if (!current.name) return record;
+  const priorOwner =
+    'ownerId' in record.spec.namespace
+      ? record.spec.namespace.ownerId
+      : undefined;
+  if (priorOwner !== undefined && priorOwner !== current.ownerId)
+    throw new AgenetesError(
+      'invalid_workload',
+      'Thread belongs to another namespace',
+      { reason: 'namespace_conflict' },
+    );
+  // Only ownerless legacy records adopt the resolved Workspace. Storage paths
+  // are host-owned and may change on rename; they are never durable authority.
+  return { ...record, spec: { ...record.spec, namespace: current } };
+}
+
 export const conversationThreadStore: ThreadStore = {
   upsert: (namespace, threadId, record: ThreadRecord) =>
     inNamespace(namespace, (current, backing) =>
       backing.threads.upsert(
         current,
         threadId,
-        current.name
-          ? { ...record, spec: { ...record.spec, namespace: current } }
-          : record,
+        currentThreadRecord(current, record),
       ),
     ),
   get: (namespace, threadId) =>
     inNamespace(namespace, async (current, backing) => {
       const record = await backing.threads.get(current, threadId);
-      // Recovered records may predate stable ownership or a Space rename.
-      // Their storage port has already verified the current Workspace.
-      return record && current.name
-        ? { ...record, spec: { ...record.spec, namespace: current } }
-        : record;
+      return record ? currentThreadRecord(current, record) : record;
     }),
   list: (namespace) =>
-    inNamespace(namespace, (current, backing) => backing.threads.list(current)),
+    inNamespace(namespace, async (current, backing) =>
+      (await backing.threads.list(current)).map((record) =>
+        currentThreadRecord(current, record),
+      ),
+    ),
   delete: (namespace, threadId) =>
     inNamespace(namespace, (current, backing) =>
       backing.threads.delete(current, threadId),
