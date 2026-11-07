@@ -22,6 +22,7 @@ import {
   getWorkspaceRepository,
   hasWorkspaceRegistry,
   materializesWorkspaces,
+  overlappingWorkspaceDirectories,
   resetStorageCache,
   storageServes,
   unavailableCapabilityMessage,
@@ -295,7 +296,10 @@ const workspacesRoutes: FastifyPluginAsync = async (app) => {
     requestedPath: string,
     name: string | undefined,
     reply: FastifyReply,
-    authorize?: (workspace: WorkspaceHandle) => Promise<boolean>,
+    authorize?: (
+      workspaceId: string,
+      modifiesFolder: boolean,
+    ) => Promise<boolean>,
   ): Promise<{ workspace: WorkspaceHandle; created: boolean } | FastifyReply> {
     if (!storageServes('workspace-directory'))
       return sendError(
@@ -307,8 +311,50 @@ const workspacesRoutes: FastifyPluginAsync = async (app) => {
     try {
       const workspacePath = resolveWorkspacePath(requestedPath);
       const repository = getWorkspaceRepository();
+      if (authorize) {
+        // Registry paths are safe to inspect before foreign metadata. New
+        // parent/child namespaces write into or expose registered Workspace
+        // data, so they require manage access even without a rename.
+        for (const overlap of overlappingWorkspaceDirectories(workspacePath)) {
+          if (
+            !(await authorize(
+              overlap.workspaceId,
+              !overlap.sameDirectory || !!name,
+            ))
+          )
+            return sendError(reply, 404, 'Workspace not found');
+        }
+        // A moved folder or manifest-bearing copy can identify a registered
+        // Workspace even when its path does not overlap the remembered one.
+        // Resolve that identity read-only, before preparation/migrations.
+        const identity = workspaceIdentityOnDisk(workspacePath);
+        const identityDirectory = identity
+          ? workspaceDirectory(identity.workspaceId)
+          : null;
+        if (identity && identityDirectory) {
+          if (!(await authorize(identity.workspaceId, !!name)))
+            return sendError(reply, 404, 'Workspace not found');
+          const registered = await repository.get(identity.workspaceId);
+          if (registered) {
+            const current =
+              path.resolve(identityDirectory) === workspacePath
+                ? reconcileActiveWorkspaceLocation(registered, workspacePath)
+                : registered;
+            if (!name) return { workspace: current, created: false };
+            const renamed =
+              (await repository.rename(registered.workspaceId, name)) ??
+              current;
+            updateActiveWorkspaceHandle(renamed);
+            return { workspace: renamed, created: false };
+          }
+        }
+      }
       const existing = workspaceAtDirectory(workspacePath);
-      if (existing && authorize && !(await authorize(existing)))
+      if (
+        existing &&
+        authorize &&
+        !(await authorize(existing.workspaceId, !!name))
+      )
         return sendError(reply, 404, 'Workspace not found');
       if (existing) {
         const current = reconcileActiveWorkspaceLocation(
@@ -334,7 +380,7 @@ const workspacesRoutes: FastifyPluginAsync = async (app) => {
         ? await repository.get(preparedWorkspace.workspaceId)
         : null;
       if (registered && authorize) {
-        if (!(await authorize(registered)))
+        if (!(await authorize(registered.workspaceId, !!name)))
           return sendError(reply, 404, 'Workspace not found');
         if (!name) return { workspace: registered, created: false };
         const renamed =
@@ -386,10 +432,13 @@ const workspacesRoutes: FastifyPluginAsync = async (app) => {
           parsed.data.path,
           name,
           reply,
-          async (workspace) =>
-            name
-              ? canManage(request, workspace.workspaceId)
-              : canEnter(request, workspace.workspaceId),
+          async (workspaceId, modifiesFolder) => {
+            // The grant-derived chooser needs no foreign manifest. Do not
+            // resolve manage policy (which verifies the resource on disk)
+            // until this caller may talk about that Workspace at all.
+            if (!(await canEnter(request, workspaceId))) return false;
+            return !modifiesFolder || canManage(request, workspaceId);
+          },
         );
         if (!('workspace' in adopted)) return adopted;
         if (adopted.created) await claim(adopted.workspace);
