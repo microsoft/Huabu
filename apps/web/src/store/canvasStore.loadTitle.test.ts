@@ -57,6 +57,7 @@ describe('canvas title ownership during loading', () => {
       canvasId: 'next',
       title: 'Next Space',
       version: 1,
+      access: { write: true, manage: true },
       state: { nodes: [], edges: [] },
     });
     await loading;

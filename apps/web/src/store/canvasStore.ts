@@ -110,6 +110,7 @@ import {
 } from '@/utils/spaceHierarchy';
 
 import { canvasHistoryManager } from './canvasHistoryManager';
+import { useIdentityStore } from './identityStore';
 import { useWorkspaceStore } from './workspaceStore';
 import {
   getCanvas,
@@ -117,9 +118,10 @@ import {
   associateAgentNode,
   putCanvas,
 } from '../api';
+import { ApiError } from '../api/_client';
 import { agentApi } from '../api/agent';
 import { cloneArtifactToCanvas, resolveArtifactUrl } from '../api/artifact';
-import { CanvasConflictError } from '../api/canvas';
+import { CanvasConflictError, getCanvasAccess } from '../api/canvas';
 import { measureMissingAutoHeights } from './canvasStore/height/measureMissingAutoHeights';
 import { normalizeFrameHeaderInsets } from './canvasStore/load/normalizeFrameHeaderInsets';
 import { normalizeNodeHeights } from './canvasStore/load/normalizeNodeHeights';
@@ -174,6 +176,7 @@ import type {
   CanvasNodeMeasuredHeightUpdate,
   CanvasNodeType,
   CanvasViewport,
+  CanvasAccess,
   RecentAction,
   WireSelectionNode,
 } from '@huabu/shared';
@@ -181,6 +184,9 @@ import type {
 const AUTOSAVE_DEBOUNCE_MS = 1000;
 const PREPROCESS_DEBOUNCE_MS = 1000;
 const NODE_CONTENT_DEBOUNCE_MS = 500;
+let accessRefreshInFlight:
+  | { canvasId: string; promise: Promise<void> }
+  | undefined;
 
 /**
  * Arm a single undo snapshot for a gesture: snapshot the current state and
@@ -454,6 +460,10 @@ type RFState = {
   nodes: Node[];
   edges: Edge[];
   canvasId: string;
+  /** Permissions are tied to this exact Space; null is unknown in Bubble. */
+  canvasAccess: (CanvasAccess & { canvasId: string }) | null;
+  /** Refresh permissions alone, retaining dirty content and history. */
+  refreshCanvasAccess: () => Promise<void>;
   version: number;
   isLoading: boolean;
   canvasNotFound: boolean;
@@ -1702,6 +1712,33 @@ const useCanvasStore = create<RFState>()(
     nodes: [],
     edges: [],
     canvasId: '',
+    canvasAccess: null,
+    refreshCanvasAccess: () => {
+      const canvasId = get().canvasId;
+      if (!canvasId) return Promise.resolve();
+      if (accessRefreshInFlight?.canvasId === canvasId)
+        return accessRefreshInFlight.promise;
+      const principalId =
+        useIdentityStore.getState().identity?.principal.principalId;
+      const isCurrent = () =>
+        get().canvasId === canvasId &&
+        useIdentityStore.getState().identity?.principal.principalId ===
+          principalId;
+      const promise = getCanvasAccess(canvasId)
+        .then((access) => {
+          if (isCurrent()) set({ canvasAccess: { canvasId, ...access } });
+        })
+        .catch(() => {
+          if (isCurrent())
+            set({ canvasAccess: { canvasId, write: false, manage: false } });
+        })
+        .finally(() => {
+          if (accessRefreshInFlight?.promise === promise)
+            accessRefreshInFlight = undefined;
+        });
+      accessRefreshInFlight = { canvasId, promise };
+      return promise;
+    },
     version: 0,
     isLoading: false,
     canvasNotFound: false,
@@ -2510,6 +2547,7 @@ const useCanvasStore = create<RFState>()(
         await drainPendingSaves();
       set({
         isLoading: true,
+        canvasAccess: null,
         pendingRevealNodeIds: [],
         canvasNotFound: false,
         versionConflict: false,
@@ -2535,6 +2573,7 @@ const useCanvasStore = create<RFState>()(
           });
         }
         const response = await getCanvas(targetId);
+        if (get().canvasId !== targetId) return;
         if (!response) {
           console.warn('Canvas not found:', targetId);
           canvasHistoryManager.clear();
@@ -2548,6 +2587,11 @@ const useCanvasStore = create<RFState>()(
         }
 
         structureSaveErrors.delete(targetId);
+        set({
+          canvasAccess: response.access
+            ? { canvasId: targetId, ...response.access }
+            : null,
+        });
 
         const state = response.state as {
           nodes?: Node[];
@@ -2850,6 +2894,11 @@ const useCanvasStore = create<RFState>()(
           throw error;
         }
         console.error('Failed to save canvas:', error);
+        if (error instanceof ApiError && error.status === 403) {
+          void get().refreshCanvasAccess();
+          toast(t('errors.spaceSaveAccessDenied'), { tone: 'danger' });
+          throw error;
+        }
       } finally {
         if (inflightStructureWrites.get(savingCanvasId) === structureWrite) {
           inflightStructureWrites.delete(savingCanvasId);
@@ -2881,6 +2930,12 @@ const useCanvasStore = create<RFState>()(
     },
 
     tryRename: async (kind, id, nextName) => {
+      if (
+        !(kind === 'canvas'
+          ? selectCanManageCanvas(get())
+          : selectCanWriteCanvas(get()))
+      )
+        return false;
       const trimmed = nextName.trim();
       if (!trimmed) return false;
 
@@ -2910,6 +2965,10 @@ const useCanvasStore = create<RFState>()(
           }
           return true;
         } catch (err) {
+          if (err instanceof ApiError && err.status === 403) {
+            set({ canvasTitle: previous });
+            return false;
+          }
           if (
             err instanceof CanvasConflictError &&
             err.code === 'CANVAS_TITLE_CONFLICT'
@@ -4858,3 +4917,20 @@ usePanelStore.subscribe((next, previous) => {
 });
 
 export default useCanvasStore;
+
+/** Local mode retains its one-owner behavior; unknown Bubble access stays read-only. */
+export function selectCanWriteCanvas(
+  state: Pick<RFState, 'canvasId' | 'canvasAccess'>,
+): boolean {
+  return state.canvasAccess?.canvasId === state.canvasId
+    ? state.canvasAccess.write
+    : useIdentityStore.getState().identity?.provider !== 'bubble';
+}
+
+export function selectCanManageCanvas(
+  state: Pick<RFState, 'canvasId' | 'canvasAccess'>,
+): boolean {
+  return state.canvasAccess?.canvasId === state.canvasId
+    ? state.canvasAccess.manage
+    : useIdentityStore.getState().identity?.provider !== 'bubble';
+}

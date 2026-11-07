@@ -11,6 +11,7 @@ import { UNRESTRICTED_ACCESS } from '../identity/service.js';
 import { getWorkspaceHandle } from '../workspace.js';
 
 import type { AccessLevel } from '../identity/service.js';
+import type { CanvasAccess } from '@huabu/shared';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 
 declare module 'fastify' {
@@ -194,6 +195,23 @@ export async function canManageSpace(
       id: canvasId,
     })) === true
   );
+}
+
+/** Project the existing authorization owner for UI affordances, never as a mutation grant. */
+export async function getSpaceAccess(
+  request: FastifyRequest,
+  canvasId: string,
+): Promise<CanvasAccess> {
+  const [write, manage] = await Promise.all([
+    !isRestrictedRequest(request)
+      ? true
+      : getRequestIdentity(request)?.access.can('write', {
+          type: 'space',
+          id: canvasId,
+        }),
+    canManageSpace(request, canvasId),
+  ]);
+  return { write: write === true, manage };
 }
 
 /** Record the caller as owner of the Space it has just created. */

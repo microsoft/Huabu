@@ -443,6 +443,55 @@ export function describeSeveralPeople(
       expect(await canCreate('dave')).toBe(true);
     });
 
+    it('projects live Space access without replacing content, hiding unreadable Spaces', async () => {
+      const { call, store, workspaceOf } = await host();
+      const workspaceId = await workspaceOf('carol');
+      const created = await call('carol', 'POST', '/api/canvas', {
+        title: 'Permissions',
+      });
+      const id = created.body.canvasId as string;
+      expect(
+        (await call('carol', 'GET', `/api/canvas/${id}`)).body.access,
+      ).toEqual({ write: true, manage: true });
+      await call('admin', 'POST', `/api/workspaces/${workspaceId}/activate`);
+      expect(
+        (await call('admin', 'GET', `/api/canvas/${id}/access`)).body,
+      ).toEqual({ write: true, manage: true });
+      expect(
+        (await call('dave', 'GET', `/api/canvas/${id}/access`)).status,
+      ).toBe(404);
+      for (const [role, access] of [
+        ['viewer', { write: false, manage: false }],
+        ['editor', { write: true, manage: false }],
+        ['owner', { write: true, manage: true }],
+      ] as const) {
+        const grant = await store.grants.add({
+          target: { type: 'huabu.workspace', id: workspaceId },
+          principalId: 'dave',
+          role: `huabu.workspace.${role}`,
+          grantedByPrincipalId: 'carol',
+        });
+        await call('dave', 'POST', `/api/workspaces/${workspaceId}/activate`);
+        const refreshed = await call('dave', 'GET', `/api/canvas/${id}/access`);
+        expect(refreshed).toMatchObject({ status: 200, body: access });
+        expect(refreshed.body).not.toHaveProperty('state');
+        expect(
+          (await call('dave', 'GET', `/api/canvas/${id}`)).body.access,
+        ).toEqual(access);
+        expect(
+          (
+            await call('dave', 'POST', '/api/canvas/cards/query', {
+              canvasIds: [id],
+            })
+          ).body.spaces[id].access,
+        ).toEqual(access);
+        await store.grants.remove(grant.grant.grantId);
+        expect(
+          (await call('dave', 'GET', `/api/canvas/${id}/access`)).status,
+        ).toBe(404);
+      }
+    });
+
     it('lets editors save content but requires manage for renames and ownership-granting detachment', async () => {
       const { call, store, workspaceOf } = await host();
       const workspaceId = await workspaceOf('carol');

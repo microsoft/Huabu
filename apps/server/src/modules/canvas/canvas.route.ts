@@ -94,6 +94,7 @@ import {
   canReadSpace,
   claimSpace,
   canManageSpace,
+  getSpaceAccess,
   requireWorkspaceWrite,
   isRestrictedRequest,
   readableSpaces,
@@ -1324,6 +1325,17 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     }
   });
 
+  // Permission refresh must not hydrate or replace the caller's unsaved content.
+  fastify.get<{ Params: { canvasId: string } }>(
+    '/:canvasId/access',
+    async (request, reply) => {
+      const { canvasId } = request.params;
+      if (!(await space(canvasId).read()))
+        return reply.code(404).send({ message: 'Canvas not found' });
+      return reply.send(await getSpaceAccess(request, canvasId));
+    },
+  );
+
   // --- GET Canvas ---
 
   fastify.get<{
@@ -1350,6 +1362,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       canvasId: canvas.canvasId,
       title: canvas.title,
       version: canvas.version,
+      access: await getSpaceAccess(request, canvasId),
       state: {
         ...canvas.state,
         nodes: hydratedNodes,

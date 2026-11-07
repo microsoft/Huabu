@@ -67,6 +67,7 @@ export const routes = {
   spaceTitle: (canvasId: string) => `/canvas/${enc(canvasId)}/title`,
   canvasImport: '/canvas/import',
   canvas: (canvasId: string) => `/canvas/${enc(canvasId)}`,
+  canvasAccess: (canvasId: string) => `/canvas/${enc(canvasId)}/access`,
   canvasChildren: (canvasId: string) => `/canvas/${enc(canvasId)}/children`,
   canvasParent: (canvasId: string) => `/canvas/${enc(canvasId)}/parent`,
   canvasDeletionPreview: (canvasId: string) =>

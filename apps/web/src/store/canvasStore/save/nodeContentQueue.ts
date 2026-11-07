@@ -25,6 +25,7 @@
 
 import { nodeRevisionOf } from '@huabu/shared/canvas-engine';
 
+import { ApiError } from '@/api/_client';
 import {
   CanvasConflictError,
   getNodeContent,
@@ -808,6 +809,11 @@ export function createNodeContentQueue(opts: {
     const currentLabel =
       typeof data['label'] === 'string' ? (data['label'] as string) : null;
     const lastGood = lastSuccessful.get(nodeId);
+    const permissionDenied = err instanceof ApiError && err.status === 403;
+    const failureMessage = (name: string) =>
+      permissionDenied
+        ? i18n.t('errors.spaceSaveAccessDenied')
+        : i18n.t('errors.nodeSaveFailed', { name });
 
     // Rename failure: we have a previously-persisted label AND the
     // store's label drifted away from it. Roll back the label only —
@@ -837,10 +843,9 @@ export function createNodeContentQueue(opts: {
       surfaceSaveError(
         canvasId,
         nodeId,
-        i18n.t('errors.nodeSaveFailed', {
-          name: lastGood.label ?? i18n.t('node.untitled'),
-        }),
+        failureMessage(lastGood.label ?? i18n.t('node.untitled')),
         source,
+        !permissionDenied,
       );
       console.error('Node rename failed; reverted:', nodeId, err);
       return;
@@ -852,10 +857,9 @@ export function createNodeContentQueue(opts: {
     surfaceSaveError(
       canvasId,
       nodeId,
-      i18n.t('errors.nodeSaveFailed', {
-        name: currentLabel || i18n.t('node.untitled'),
-      }),
+      failureMessage(currentLabel || i18n.t('node.untitled')),
       source,
+      !permissionDenied,
     );
     console.error('Node content save failed:', nodeId, err);
   }
@@ -873,6 +877,7 @@ export function createNodeContentQueue(opts: {
     nodeId: string,
     message: string,
     source: 'user' | 'auto',
+    retryable = true,
   ): void {
     if (saveErrorsHandledByCaller()) return;
     if (source === 'auto' && saveErrorToasted.has(nodeId)) return;
@@ -883,21 +888,25 @@ export function createNodeContentQueue(opts: {
       tone: 'danger',
       duration: 0,
       dismissible: true,
-      action: {
-        label: i18n.t('messages.retry'),
-        onClick: () => {
-          if (generations.get(nodeId) !== generation) return;
-          // Allow a later failure to re-alert, then re-attempt the write.
-          saveErrorToasted.delete(nodeId);
-          if (restores.get(nodeId)?.canvasId === canvasId) {
-            if (opts.getState().canvasId === canvasId) {
-              void opts.retryStructure?.().catch(() => undefined);
-            }
-            return;
+      action: retryable
+        ? {
+            label: i18n.t('messages.retry'),
+            onClick: () => {
+              if (generations.get(nodeId) !== generation) return;
+              // Allow a later failure to re-alert, then re-attempt the write.
+              saveErrorToasted.delete(nodeId);
+              if (restores.get(nodeId)?.canvasId === canvasId) {
+                if (opts.getState().canvasId === canvasId) {
+                  void opts.retryStructure?.().catch(() => undefined);
+                }
+                return;
+              }
+              void serializedFlush(canvasId, nodeId, 'user').catch(
+                () => undefined,
+              );
+            },
           }
-          void serializedFlush(canvasId, nodeId, 'user').catch(() => undefined);
-        },
-      },
+        : undefined,
     });
     failureToasts.set(nodeId, toastId);
   }
