@@ -92,10 +92,7 @@ export function registerSpaceCardRoutes(app: FastifyInstance): void {
                 record.state.nodes,
                 (threadId) => agentThreadService.isActive(threadId, canvasId),
                 (threadId) =>
-                  acpSessionRegistry.hasPendingPermissions(
-                    threadId,
-                    namespace.name,
-                  ),
+                  acpSessionRegistry.hasPendingPermissions(threadId, namespace),
               );
               const labels = await handle.nodes.readMany(
                 activity.map((agent) => agent.nodeId),

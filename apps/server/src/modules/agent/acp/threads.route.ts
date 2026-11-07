@@ -230,8 +230,11 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
       });
     }
     const { canvasId, profileId } = parsed.data;
-    const record = canvasId
-      ? await agenetes.record(canvasAcpNamespace(canvasId), threadId)
+    // Persistence and live metadata must address the same captured scope,
+    // even if the process-active local Workspace switches during this read.
+    const namespace = canvasId ? canvasAcpNamespace(canvasId) : undefined;
+    const record = namespace
+      ? await agenetes.record(namespace, threadId)
       : undefined;
     const spec =
       record?.spec.kind === 'external'
@@ -256,7 +259,7 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
     const agentletId = resolveThreadAgentletId(record);
     if (agentletId) requireOwnAgentlet(agentletId);
     const live = agentletId
-      ? acpSessionRegistry.get(agentletId, threadId)
+      ? acpSessionRegistry.get(agentletId, threadId, namespace)
       : undefined;
     if (live) {
       return {
