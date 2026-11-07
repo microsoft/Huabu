@@ -17,7 +17,11 @@ const log = getLogger('artifact');
 // shared package directly.
 export { ARTIFACT_URL_REGEX, artifactApiPath } from '@huabu/shared';
 
-/** Authorize the source Space before any artifact bytes enter a prompt. */
+/**
+ * Authorize the source Space before any artifact bytes enter a prompt.
+ * Denial aborts preparation: unlike a missing blob, it must not fall back to
+ * forwarding the denied URL/metadata or delivering an incomplete prompt.
+ */
 export async function assertArtifactSourceReadable(
   canvasId: string,
 ): Promise<void> {
