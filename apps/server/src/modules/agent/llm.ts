@@ -21,7 +21,6 @@ import { dirname, join } from 'node:path';
 import { getSupportedThinkingLevels } from '@earendil-works/pi-ai';
 import {
   complete as piComplete,
-  getEnvApiKey,
   getModel,
   getModels,
   getProviders,
@@ -41,6 +40,7 @@ import {
 } from './oauth.js';
 import { getPiModels, isOAuthProvider } from './pi-models.js';
 import { getDataDir } from '../../data-dir.js';
+import { EnvironmentSecretStore } from '../../security/environment-secret-store.js';
 import {
   llmProviderApiKeySecretId,
   SECRET_IDS,
@@ -79,6 +79,7 @@ import type {
 } from '@huabu/shared';
 
 const log = getLogger('llm');
+const environmentStore = new EnvironmentSecretStore();
 
 // ==================== Provider Catalog ====================
 
@@ -591,12 +592,10 @@ function buildProviderModel(cfg: PersistedConfig): Model<Api> {
   // Azure: fall back to legacy env var endpoint when no persisted baseUrl.
   // pi-ai's `normalizeAzureBaseUrl` will append `/openai/v1` as needed, so
   // we deliberately pass the raw endpoint without our own `/openai` suffix.
-  if (
-    cfg.provider === 'azure-openai' &&
-    !cfg.baseUrl &&
-    !personalSettingsOwner()
-  ) {
-    const endpoint = process.env.AZURE_OPENAI_API_ENDPOINT;
+  if (cfg.provider === 'azure-openai' && !cfg.baseUrl) {
+    const endpoint = environmentStore.getEnvironmentValue(
+      'AZURE_OPENAI_API_ENDPOINT',
+    );
     if (endpoint) {
       baseUrl = endpoint.replace(/\/+$/, '');
     }
@@ -649,9 +648,13 @@ function ensureConfig(): PersistedConfig {
     );
 
   // Fall back to legacy Azure OpenAI env vars
-  const azureKey = process.env.AZURE_OPENAI_API_KEY;
-  const azureEndpoint = process.env.AZURE_OPENAI_API_ENDPOINT;
-  const azureDeployment = process.env.AZURE_OPENAI_API_DEPLOYMENT_NAME;
+  const azureKey = environmentStore.get(SECRET_IDS.imageApiKey);
+  const azureEndpoint = environmentStore.getEnvironmentValue(
+    'AZURE_OPENAI_API_ENDPOINT',
+  );
+  const azureDeployment = environmentStore.getEnvironmentValue(
+    'AZURE_OPENAI_API_DEPLOYMENT_NAME',
+  );
 
   if (azureKey && azureEndpoint && azureDeployment) {
     const azure: PersistedConfig = {
@@ -664,7 +667,7 @@ function ensureConfig(): PersistedConfig {
 
   // Try other providers from env vars
   for (const p of getProviderCatalog()) {
-    if (p.builtIn && getEnvApiKey(p.id as KnownProvider)) {
+    if (p.builtIn && environmentStore.get(llmProviderApiKeySecretId(p.id))) {
       const models = getModelsForProvider(p.id);
       if (models.length > 0) {
         const found: PersistedConfig = { provider: p.id, model: models[0].id };
@@ -707,9 +710,9 @@ export function getModelsForProvider(providerId: string): LLMModelInfo[] {
 
   // Azure: list the configured deployment as the only model
   if (providerId === 'azure-openai') {
-    const deployment = personalSettingsOwner()
-      ? undefined
-      : process.env.AZURE_OPENAI_API_DEPLOYMENT_NAME;
+    const deployment = environmentStore.getEnvironmentValue(
+      'AZURE_OPENAI_API_DEPLOYMENT_NAME',
+    );
     if (deployment) {
       return [
         {

@@ -19,6 +19,7 @@
 
 import { builtinModels } from '@earendil-works/pi-ai/providers/all';
 
+import { EnvironmentSecretStore } from '../../security/environment-secret-store.js';
 import {
   llmProviderApiKeySecretId,
   SECRET_IDS,
@@ -39,6 +40,7 @@ import type {
 } from '@earendil-works/pi-ai';
 
 const log = getLogger('pi-models');
+const environmentStore = new EnvironmentSecretStore();
 
 /** Providers whose credential is stored as an OAuth JSON blob, not a raw key. */
 const OAUTH_PROVIDERS = new Set(['github-copilot', 'openai-codex']);
@@ -187,17 +189,11 @@ export function getPiModels(): MutableModels {
   let models = cachedModels.get(owner);
   if (!models) {
     const startedAt = Date.now();
+    const authContext = environmentStore.getAuthContext();
     models = builtinModels({
       credentials: credentialStore,
       // Ambient credentials and files belong to the deployment operator.
-      ...(owner
-        ? {
-            authContext: {
-              env: async () => undefined,
-              fileExists: async () => false,
-            },
-          }
-        : {}),
+      ...(authContext ? { authContext } : {}),
     });
     cachedModels.set(owner, models);
     log.debug(

@@ -10,6 +10,52 @@ import {
   parseLlmProviderApiKeySecretId,
   SECRET_IDS,
 } from './secret-ids.js';
+import {
+  openPersonalSettings,
+  useCaller,
+} from '../modules/identity/personal-settings.js';
+import { UNRESTRICTED_ACCESS } from '../modules/identity/service.js';
+
+it.each([false, true])(
+  'blocks ambient provider credentials/configuration for a personal caller (administrator=%s)',
+  async (owner) => {
+    vi.stubEnv('OPENAI_API_KEY', 'operator-model-key');
+    vi.stubEnv('VISION_KEY', 'operator-ocr-key');
+    vi.stubEnv(
+      'VISION_ENDPOINT',
+      'https://operator.cognitiveservices.azure.com',
+    );
+    try {
+      const environment = new EnvironmentSecretStore();
+      const modelKey = llmProviderApiKeySecretId('openai');
+      expect(environment.get(modelKey)).toBe('operator-model-key');
+      expect(environment.getAuthContext()).toBeUndefined();
+      await openPersonalSettings(async () => {
+        useCaller({
+          principal: { principalId: 'personal-user', kind: 'user' },
+          member: true,
+          owner,
+          access: UNRESTRICTED_ACCESS,
+        });
+        expect(environment.get(modelKey)).toBeNull();
+        expect(environment.get(SECRET_IDS.inkOcrApiKey)).toBeNull();
+        expect(
+          environment.getEnvironmentValue('VISION_ENDPOINT'),
+        ).toBeUndefined();
+        const context = environment.getAuthContext();
+        expect(context).toBeDefined();
+        expect(await context?.env('OPENAI_API_KEY')).toBeUndefined();
+        expect(await context?.fileExists('/operator/credentials')).toBe(false);
+      });
+      expect(environment.get(modelKey)).toBe('operator-model-key');
+      expect(environment.getEnvironmentValue('VISION_ENDPOINT')).toContain(
+        'operator.',
+      );
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  },
+);
 
 it('recognizes the dedicated OCR record id without mapping it to VISION_KEY', () => {
   expect(SECRET_IDS.inkOcrConfig).toBe('integration:azure-vision:config');

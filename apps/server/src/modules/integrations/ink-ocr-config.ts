@@ -76,14 +76,8 @@ function resolveRecord(record: ConfigRecord): {
   return {
     endpoint:
       record.endpoint ??
-      (personalSettingsOwner()
-        ? null
-        : process.env.VISION_ENDPOINT?.trim() || null),
-    key:
-      record.apiKey ??
-      (personalSettingsOwner()
-        ? null
-        : environmentStore.get(SECRET_IDS.inkOcrApiKey)),
+      (environmentStore.getEnvironmentValue('VISION_ENDPOINT')?.trim() || null),
+    key: record.apiKey ?? environmentStore.get(SECRET_IDS.inkOcrApiKey),
   };
 }
 
