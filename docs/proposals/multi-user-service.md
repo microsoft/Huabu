@@ -129,6 +129,8 @@ Bubble mode accepts user-owned remote devices and does not supervise an unowned 
 
 ### Shared Spaces
 
+The default Agenetes in-memory thread, event and turn stores use the same namespace identity as live handles, including the stable Workspace owner or an ownerless namespace's storage root. Replacing or deleting one namespace's turns does not invalidate another namespace's history cursor. Agent-owned state reports and teardown capture their Workspace even in local mode, so an idle agent's later reports stay with their original Workspace after the process switches elsewhere.
+
 A run, its pending preparations and stop requests belong to their Workspace and Space, not to whoever started them: anyone who may read the Space sees a turn running, anyone who may write it may stop it (external agents still need their device owner), and Space moves and deletes refuse while it runs. Memory passes on one Space are serialized whoever schedules them, and a coalesced follow-up runs in its latest requester's settings. Identical preprocessing requests for one Space coalesce only within the same personal settings owner, so each member's Utility Agent selection, credentials, results and configuration failures stay their own.
 
 ### Deferred
@@ -136,6 +138,8 @@ A run, its pending preparations and stop requests belong to their Workspace and 
 - **More member model providers.** Members can use OpenAI-compatible, Azure OpenAI Responses and Anthropic Messages providers. Google (Gemini, Vertex), Bedrock and Mistral adapters bring their own HTTP transport and cannot honor the public-network guard, so they stay hidden until each is routed through it.
 
 ### Grant administration
+
+Space listings use the existing `ResourceAccess.canMany` provider operation when available: one fresh account/admission/grant snapshot is shared across that listing's checks and ancestor resolution, then discarded. The next listing or retained tool operation rechecks current access. Inputs bind to their Workspace before asynchronous lookup; providers without batching use their existing single-resource checks.
 
 `/api/people`, and a People tab for system owners, list principals, admit and revoke `member`, and give or remove Workspace roles. Changes to a person's member grant are serialized. Each resource operation checks current admission, account status and grants, including operations in a retained caller context. Built-In tools repeat these checks after their original HTTP stream closes: owning-Space reads, World target reads, snapshots and image reference inputs need current read access; Space commands, image artifact writes, task mutations, Ink label changes and Space memory writes need current write access. Workspace instruction layers (`memory/user.md` and `skills/...`) remain readable through current Space or Workspace read access; their writes still require Workspace manage access. A denied tool operation neither delivers newly read content nor performs its mutation. These checks do not cancel the pipeline or discard already authorized history when a stream closes. Open streams repeat authorization every 30 seconds; revocation also disconnects the member's currently connected devices as described above.
 

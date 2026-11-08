@@ -181,6 +181,84 @@ it.each([false, true])(
   },
 );
 
+it('persists local idle and teardown reports in their captured Workspace after a switch', async () => {
+  const canvasId = 'idle-reports';
+  const threadId = 'idle-thread';
+  await createSpace(canvasId, 'Owning Space');
+  const owner = { handle: getWorkspaceHandle()!, path: join(tmp, 'server') };
+  const namespace = canvasAcpNamespace(canvasId);
+  const events = new EventEmitter();
+  const closedIn: Array<string | undefined> = [];
+  const instance = mountAgenetes({
+    drivers: {
+      test: withWorkspaceStateReports(
+        defineDriver({
+          schemaVersion: 1,
+          workloadTypes: ['Deployment'],
+          specSchema: z.object({}),
+          stateSchema: z.object({ count: z.number() }),
+          initialState: () => ({ count: 0 }),
+          create: () => ({
+            capabilities: {
+              supportedControlMessages: [],
+              turnInput: 'blocking',
+            },
+            onState(listener) {
+              events.on('state', listener);
+              return () => {
+                events.off('state', listener);
+              };
+            },
+            async *run() {
+              yield { type: 'end', data: {} };
+            },
+            async control() {
+              return { ok: true };
+            },
+            close() {
+              closedIn.push(getWorkspaceHandle()?.workspaceId);
+              events.emit('state', { driverState: { count: 43 } });
+            },
+          }),
+        }),
+      ),
+    },
+    threadStore: conversationThreadStore,
+    eventLogStore: conversationEventLogStore,
+    turnStore: conversationTurnStore,
+  });
+  await instance.create({
+    kind: 'test',
+    workloadType: 'Deployment',
+    threadId,
+    namespace,
+    spec: {},
+  });
+  try {
+    mkdirSync(join(tmp, 'other'));
+    setWorkspacePath(join(tmp, 'other'));
+    await createSpace(canvasId, 'Different Space');
+    const otherNamespace = canvasAcpNamespace(canvasId);
+    expect(currentWorkspaceScope()).toBeUndefined();
+    events.emit('state', { driverState: { count: 42 } });
+    expect(
+      (await runInWorkspace(owner, () => instance.record(namespace, threadId)))
+        ?.state.driverState,
+    ).toEqual({ count: 42 });
+    expect(await instance.record(otherNamespace, threadId)).toBeUndefined();
+    await instance.close(threadId, namespace);
+    expect(closedIn).toEqual([owner.handle.workspaceId]);
+    expect(
+      (await runInWorkspace(owner, () => instance.record(namespace, threadId)))
+        ?.state.driverState,
+    ).toEqual({ count: 43 });
+    expect(await instance.record(otherNamespace, threadId)).toBeUndefined();
+    expect(events.listenerCount('state')).toBe(0);
+  } finally {
+    await runInWorkspace(owner, () => instance.close(threadId, namespace));
+  }
+});
+
 it('lets one Workspace displace a handle another Workspace holds under its thread id', async () => {
   const canvasId = 'canvas-shared-id';
   const threadId = 'thread-shared-id';

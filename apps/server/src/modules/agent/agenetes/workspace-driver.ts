@@ -3,15 +3,20 @@
 
 import { AsyncLocalStorage } from 'node:async_hooks';
 
-import { currentWorkspaceScope } from '../../workspace/context.js';
-import { getWorkspaceHandle } from '../../workspace.js';
+import {
+  currentWorkspaceScope,
+  runInWorkspace,
+} from '../../workspace/context.js';
+import { getWorkspaceDirectory, getWorkspaceHandle } from '../../workspace.js';
 
 import type { AgentStateSnapshot } from '@agenetes/protocol';
 import type { MountedAgentDriver } from '@agenetes/runtime';
 
 /**
  * Gateway events arrive outside the request that created the agent; each
- * state listener runs in that request's async context instead, and so in the
+ * state listener runs in the creator's async context and captured Workspace,
+ * including local mode after the process-active Workspace changes. Ordinary
+ * local requests still use process state. Reports and teardown stay in the
  * Workspace the agent was created in. Using the handle from another Workspace
  * is refused, except closing it, which also runs in the creator's context.
  */
@@ -22,27 +27,31 @@ export function withWorkspaceStateReports(
     ...driver,
     create(workload, context) {
       const handle = driver.create(workload, context);
-      // Local mode keeps its process-active Workspace and original handle.
-      if (!currentWorkspaceScope() || !handle.onState) return handle;
-      const workspaceId = getWorkspaceHandle()?.workspaceId;
-      const onState = handle.onState.bind(handle);
+      const workspace = getWorkspaceHandle();
+      if (!workspace) return handle;
+      const scope = currentWorkspaceScope() ?? {
+        handle: workspace,
+        path: getWorkspaceDirectory(),
+      };
+      const workspaceId = workspace.workspaceId;
+      const onState = handle.onState?.bind(handle);
       const inCreator = AsyncLocalStorage.snapshot();
+      const inOwner = <T>(fn: () => T): T =>
+        inCreator(() => runInWorkspace(scope, fn));
       return new Proxy(handle, {
         get(target, property) {
-          // Closing is how a Space displaces a handle another Workspace holds
-          // under its thread id; the teardown runs in the creator's context,
-          // so whatever it persists lands in the owning Workspace.
-          if (property === 'close')
-            return () => inCreator(() => target.close());
+          // Teardown may be requested outside the owning Workspace. Its final
+          // reports and storage operations retain the captured owner.
+          if (property === 'close') return () => inOwner(() => target.close());
           // Resolving a promise with the handle probes `then`; that is no use.
           if (
             property !== 'then' &&
             getWorkspaceHandle()?.workspaceId !== workspaceId
           )
             throw new Error('Agent handle belongs to another Workspace');
-          if (property === 'onState')
+          if (property === 'onState' && onState)
             return (listener: (snapshot: AgentStateSnapshot) => void) =>
-              onState((snapshot) => inCreator(listener, snapshot));
+              onState((snapshot) => inOwner(() => listener(snapshot)));
           const value = Reflect.get(target, property, target);
           return typeof value === 'function' ? value.bind(target) : value;
         },
