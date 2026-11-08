@@ -243,11 +243,15 @@ export async function readableSpaces<T extends { canvasId: string }>(
 ): Promise<T[]> {
   const access = getRequestIdentity(request)?.access;
   if (!access) return [];
-  const readable = await Promise.all(
-    spaces.map((space) =>
-      access.can('read', { type: 'space', id: space.canvasId }),
-    ),
-  );
+  const resources = spaces.map((space) => ({
+    type: 'space' as const,
+    id: space.canvasId,
+  }));
+  const readable = access.canMany
+    ? await access.canMany('read', resources)
+    : await Promise.all(
+        resources.map((resource) => access.can('read', resource)),
+      );
   return spaces.filter((_, index) => readable[index]);
 }
 

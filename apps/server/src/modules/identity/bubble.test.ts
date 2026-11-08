@@ -16,17 +16,20 @@ import {
   useCaller,
 } from './personal-settings.js';
 import { createMemoryWorkspacePreferences } from './preferences.js';
-import { getRequestIdentity } from './request.js';
+import { getRequestIdentity, setRequestIdentity } from './request.js';
 import agentDefaultsRoutes from '../agent/agent-defaults.route.js';
 import { isOwnerRequest } from '../security/owner.js';
-import { registerSpaceAccess } from '../security/space-access.js';
+import {
+  readableSpaces,
+  registerSpaceAccess,
+} from '../security/space-access.js';
 import { runInWorkspace } from '../workspace/context.js';
 import { getWorkspaceHandle } from '../workspace.js';
 
 import type { HuabuResource, ResourceDirectory } from './service.js';
 import type { BubbleStore } from '@octostaff/bubble';
 import type { AuthzTarget, Role } from '@octostaff/sdk';
-import type { FastifyInstance, FastifyReply } from 'fastify';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { AddressInfo } from 'node:net';
 
 type Authenticator = Parameters<typeof openBubbleIdentity>[0]['authenticator'];
@@ -230,6 +233,43 @@ function connects(
 }
 
 describe('Bubble identity', () => {
+  it('uses one fresh caller snapshot for each Space listing and shares ancestry within the batch', async () => {
+    const { app, store, service, lookups } = await host();
+    await app.ready();
+    await store.principals.upsert({ principalId: 'carol', kind: 'user' });
+    await grant(store, 'carol', 'member');
+    const target = { type: 'huabu.workspace', id: 'w1' } as const;
+    await grant(store, 'carol', 'huabu.workspace.viewer', target);
+    const identity = (await service.resolvePrincipal!('carol'))!;
+    const request = {} as FastifyRequest;
+    setRequestIdentity(request, identity);
+    const spaces = ['b', 'missing', 'a1', 'a'].map((canvasId) => ({
+      canvasId,
+    }));
+    const list = () =>
+      runInWorkspace(scopeOf('w1'), () => readableSpaces(request, spaces));
+    const grants = vi.spyOn(store.grants, 'list');
+    const principals = vi.spyOn(store.principals, 'get');
+    lookups.length = 0;
+    expect(await list()).toEqual([spaces[0], spaces[2], spaces[3]]);
+    expect(grants).toHaveBeenCalledTimes(1);
+    expect(principals).toHaveBeenCalledTimes(1);
+    expect(lookups.filter((id) => id === 'w1:a')).toHaveLength(1);
+
+    await revokeAll(store, 'carol', target);
+    expect(await list()).toEqual([]);
+    await grant(store, 'carol', 'huabu.workspace.viewer', target);
+    expect(await list()).toEqual([spaces[0], spaces[2], spaces[3]]);
+    await service.people.setMember('carol', false, 'admin');
+    expect(await list()).toEqual([]);
+    await service.people.setMember('carol', true, 'admin');
+    expect(await list()).toHaveLength(3);
+    await store.principals.update('carol', {
+      disabledAt: new Date().toISOString(),
+    });
+    expect(await list()).toEqual([]);
+  });
+
   it('rechecks grants and admission in a caller snapshot retained by background work', async () => {
     const { app, store, service } = await host();
     await app.ready();
@@ -269,6 +309,34 @@ describe('Bubble identity', () => {
       disabledAt: new Date().toISOString(),
     });
     expect(await can('read')).toBe(false);
+  });
+
+  it('binds batch targets before awaiting the caller lookup and skips empty batches', async () => {
+    const { app, store, service } = await host();
+    await app.ready();
+    await store.principals.upsert({ principalId: 'carol', kind: 'user' });
+    await grant(store, 'carol', 'member');
+    await grant(store, 'carol', 'huabu.workspace.viewer', {
+      type: 'huabu.workspace',
+      id: 'w1',
+    });
+    const access = (await service.resolvePrincipal!('carol'))!.access;
+    const principals = vi.spyOn(store.principals, 'get');
+    expect(await access.canMany!('read', [])).toEqual([]);
+    expect(principals).not.toHaveBeenCalled();
+    // The input is caller-owned; mutation after entry cannot retarget the
+    // policy work once the async account lookup yields.
+    const resources: HuabuResource[] = [{ type: 'space', id: 'a' }];
+    const checking = runInWorkspace(scopeOf('w1'), () =>
+      access.canMany!('read', resources),
+    );
+    resources[0]!.id = 'c';
+    expect(await checking).toEqual([true]);
+    expect(
+      await runInWorkspace(scopeOf('w2'), () =>
+        access.canMany!('read', resources),
+      ),
+    ).toEqual([false]);
   });
 
   it('serializes overlapping admission and revocation for the same principal', async () => {

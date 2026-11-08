@@ -30,6 +30,7 @@ import {
 import type { WorkspacePreferences } from './preferences.js';
 import type {
   HuabuResource,
+  AccessLevel,
   IdentityService,
   PeopleDirectory,
   ResourceDirectory,
@@ -413,19 +414,30 @@ export async function openBubbleIdentity(options: {
           }
         : null;
     };
+    const canMany = async (
+      level: AccessLevel,
+      resources: readonly HuabuResource[],
+    ): Promise<boolean[]> => {
+      // Capture targets before any await; one operation shares Bubble's own
+      // grant/ancestry memo, while the next operation starts afresh.
+      const targets = resources.map(target);
+      if (!targets.some(Boolean)) return targets.map(() => false);
+      const policy = await currentPolicy();
+      return Promise.all(
+        targets.map((resolved) =>
+          policy && resolved
+            ? policy.can(CAPABILITY[level], principalId, resolved)
+            : false,
+        ),
+      );
+    };
     return {
       principal: identityPrincipalSchema.parse(principal),
       member,
       owner: admin,
       access: {
-        can: async (level, resource) => {
-          const resolved = target(resource);
-          if (!resolved) return false;
-          const policy = await currentPolicy();
-          return policy
-            ? policy.can(CAPABILITY[level], principalId, resolved)
-            : false;
-        },
+        can: async (level, resource) => (await canMany(level, [resource]))[0]!,
+        canMany,
         claim: async (resource) => {
           const resolved = target(resource);
           if (!resolved)

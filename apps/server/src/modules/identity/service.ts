@@ -45,6 +45,17 @@ export type AccessLevel = 'read' | 'write' | 'manage';
 export interface ResourceAccess {
   /** Resolve current account/admission and grants for each operation, even on a retained caller context. */
   can(level: AccessLevel, resource: HuabuResource): Promise<boolean>;
+  /**
+   * Optional provider batching: one fresh account/admission/grant snapshot for
+   * this operation, never retained for the next batch. Results have the same
+   * length/order as `resources`; a refused resource is false and lookup errors
+   * reject the batch. Space targets bind to the Workspace at call entry.
+   * Providers without batching retain the single-resource `can` behavior.
+   */
+  canMany?(
+    level: AccessLevel,
+    resources: readonly HuabuResource[],
+  ): Promise<boolean[]>;
   /** Make the caller the owner of a resource it has just created. */
   claim(resource: HuabuResource): Promise<void>;
   /**
