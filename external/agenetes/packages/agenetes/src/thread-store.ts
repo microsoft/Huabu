@@ -7,7 +7,7 @@ import {
   type Namespace,
   type WorkloadSpec,
 } from '@agenetes/protocol';
-import { AgenetesError } from '@agenetes/runtime';
+import { AgenetesError, threadIdentityKey } from '@agenetes/runtime';
 
 import { copyHostMetadata } from './host-metadata.js';
 import { atomicWriteJson, sanitizeId } from './io.js';
@@ -46,10 +46,11 @@ export class InMemoryThreadStore implements ThreadStore {
   readonly #byNamespace = new Map<string, Map<string, ThreadRecord>>();
 
   #scope(namespace: Namespace): Map<string, ThreadRecord> {
-    let scope = this.#byNamespace.get(namespace.name);
+    const key = threadIdentityKey({ namespace, threadId: '' });
+    let scope = this.#byNamespace.get(key);
     if (!scope) {
       scope = new Map();
-      this.#byNamespace.set(namespace.name, scope);
+      this.#byNamespace.set(key, scope);
     }
     return scope;
   }
@@ -59,16 +60,22 @@ export class InMemoryThreadStore implements ThreadStore {
   }
 
   get(namespace: Namespace, threadId: string): ThreadRecord | undefined {
-    return this.#byNamespace.get(namespace.name)?.get(threadId);
+    return this.#byNamespace
+      .get(threadIdentityKey({ namespace, threadId: '' }))
+      ?.get(threadId);
   }
 
   list(namespace: Namespace): ThreadRecord[] {
-    const scope = this.#byNamespace.get(namespace.name);
+    const scope = this.#byNamespace.get(
+      threadIdentityKey({ namespace, threadId: '' }),
+    );
     return scope ? [...scope.values()] : [];
   }
 
   delete(namespace: Namespace, threadId: string): void {
-    this.#byNamespace.get(namespace.name)?.delete(threadId);
+    this.#byNamespace
+      .get(threadIdentityKey({ namespace, threadId: '' }))
+      ?.delete(threadId);
   }
 }
 

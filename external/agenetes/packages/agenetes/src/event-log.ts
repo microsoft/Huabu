@@ -166,20 +166,21 @@ function isRecord(value: unknown): value is EventLogRecord {
 }
 
 /**
- * A process-local {@link EventLogStore} keyed by `namespace.name` — the
+ * A process-local {@link EventLogStore} keyed by runtime namespace identity — the
  * self-contained default so the instance needs no host wiring to run (and
  * unit tests need no disk). It does NOT survive a restart; the durable,
  * restart-surviving backing is {@link FileEventLogStore}. Namespaces are
- * isolated: logs never leak across `name`.
+ * isolated by name and stable owner, or storage root for ownerless scopes.
  */
 export class InMemoryEventLogStore implements EventLogStore {
   readonly #byNamespace = new Map<string, Map<string, EventLogRecord[]>>();
 
   #scope(namespace: Namespace): Map<string, EventLogRecord[]> {
-    let scope = this.#byNamespace.get(namespace.name);
+    const key = threadIdentityKey({ namespace, threadId: '' });
+    let scope = this.#byNamespace.get(key);
     if (!scope) {
       scope = new Map();
-      this.#byNamespace.set(namespace.name, scope);
+      this.#byNamespace.set(key, scope);
     }
     return scope;
   }
@@ -231,13 +232,17 @@ export class InMemoryEventLogStore implements EventLogStore {
     threadId: string,
     sinceSeq = 0,
   ): EventLogRecord[] {
-    const log = this.#byNamespace.get(namespace.name)?.get(threadId);
+    const log = this.#byNamespace
+      .get(threadIdentityKey({ namespace, threadId: '' }))
+      ?.get(threadId);
     if (!log) return [];
     return sinceSeq > 0 ? log.filter((e) => e.seq > sinceSeq) : [...log];
   }
 
   maxSeq(namespace: Namespace, threadId: string): number {
-    const log = this.#byNamespace.get(namespace.name)?.get(threadId);
+    const log = this.#byNamespace
+      .get(threadIdentityKey({ namespace, threadId: '' }))
+      ?.get(threadId);
     return log && log.length > 0 ? log[log.length - 1]!.seq : 0;
   }
 
@@ -250,7 +255,9 @@ export class InMemoryEventLogStore implements EventLogStore {
   }
 
   delete(namespace: Namespace, threadId: string): void {
-    this.#byNamespace.get(namespace.name)?.delete(threadId);
+    this.#byNamespace
+      .get(threadIdentityKey({ namespace, threadId: '' }))
+      ?.delete(threadId);
   }
 }
 
