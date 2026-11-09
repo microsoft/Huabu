@@ -46,6 +46,7 @@ import { listAcpProfiles, renameAgentletDevice } from '@/api/acp';
 import { getAgentDefaults, updateAgentDefaults } from '@/api/agentDefaults';
 import { toast } from '@/components/Common/Toast';
 import { i18n } from '@/i18n';
+import { useSettingsUiStore } from '@/store/settingsUiStore';
 import {
   readApplicationPreference,
   subscribeApplicationPreferences,
@@ -407,26 +408,33 @@ export class ConversationAgentUnconfiguredError extends Error {
 }
 
 /**
- * Report a failed conversation start. When no Agent is configured, the toast
- * also offers Built-In Pi: choosing it records the same explicit choice as the
- * Agent menus, then runs `retry` (when given) so the start completes with it.
+ * Report a failed conversation start. A missing Agent is a setup choice, not a
+ * failure: the persistent info toast offers connecting an external Agent in
+ * Settings, or Built-In Pi, which records the same explicit choice as the Agent
+ * menus and then runs `retry` (when given) so the start completes with it.
  */
 export function toastConversationStartError(
   error: unknown,
   retry?: () => void,
 ): void {
   const message = error instanceof Error ? error.message : String(error);
+  if (!(error instanceof ConversationAgentUnconfiguredError)) {
+    toast(message, { tone: 'danger' });
+    return;
+  }
   toast(message, {
-    tone: 'danger',
-    action:
-      error instanceof ConversationAgentUnconfiguredError
-        ? {
-            label: i18n.t('errors.useBuiltInPi'),
-            onClick: () => {
-              rememberConversationAgentBinding({ kind: 'internal' });
-              retry?.();
-            },
-          }
-        : undefined,
+    tone: 'info',
+    duration: 0,
+    secondaryAction: {
+      label: i18n.t('errors.connectAnAgent'),
+      onClick: () => useSettingsUiStore.getState().open('agent'),
+    },
+    action: {
+      label: i18n.t('errors.useBuiltInPi'),
+      onClick: () => {
+        rememberConversationAgentBinding({ kind: 'internal' });
+        retry?.();
+      },
+    },
   });
 }

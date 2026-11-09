@@ -1659,6 +1659,7 @@
     }
   },
   "errors": {
+    "connectAnAgent": "Connect an Agent",
     "conversationAgentUnconfigured": "Connect an external Agent or use Built-In Pi to start a new conversation.",
     "nodeSaveFailed": "Could not save \"{{name}}\". Your changes are still here; try again.",
     "rateLimited": "Too many requests. Try again in {{seconds}} seconds.",

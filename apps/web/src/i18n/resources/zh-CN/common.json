@@ -1659,6 +1659,7 @@
     }
   },
   "errors": {
+    "connectAnAgent": "连接 Agent",
     "conversationAgentUnconfigured": "请连接外部 Agent，或使用 Built-In Pi 开始新对话。",
     "nodeSaveFailed": "无法保存「{{name}}」。你的修改仍保留在此，请重试。",
     "rateLimited": "请求过于频繁，请在 {{seconds}} 秒后重试。",

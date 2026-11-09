@@ -32,6 +32,7 @@ import {
   selectActiveNodeId,
   usePreviewWorkspaceStore,
 } from '@/store/previewWorkspace/store';
+import { useSettingsUiStore } from '@/store/settingsUiStore';
 
 import {
   createQuestionNode,
@@ -256,9 +257,22 @@ describe('Question conversation presentation', () => {
     ).toBeNull();
     expect(addNode).not.toHaveBeenCalled();
     expect(toast).toHaveBeenCalledWith(expect.any(String), {
-      tone: 'danger',
+      tone: 'info',
+      duration: 0,
+      secondaryAction: expect.objectContaining({ label: expect.any(String) }),
       action: expect.objectContaining({ label: expect.any(String) }),
     });
+    const connect = vi.mocked(toast).mock.calls[0]?.[1]?.secondaryAction;
+    assert(connect);
+    connect.onClick();
+    expect(useSettingsUiStore.getState()).toMatchObject({
+      isOpen: true,
+      requestedTab: 'agent',
+    });
+    useSettingsUiStore.getState().close();
+    expect(useAcpProfilesStore.getState().recentConversationProfileId).toBe(
+      null,
+    );
     expect(useChatStore.getState().threadsById).toEqual({});
     expect(usePanelStore.getState().isRightCollapsed).toBe(true);
   });
