@@ -1659,9 +1659,11 @@
     }
   },
   "errors": {
+    "conversationAgentUnconfigured": "Connect an external Agent or use Built-In Pi to start a new conversation.",
     "nodeSaveFailed": "Could not save \"{{name}}\". Your changes are still here; try again.",
     "rateLimited": "Too many requests. Try again in {{seconds}} seconds.",
-    "spaceSaveAccessDenied": "This Space is read-only for your account. Your changes were not saved."
+    "spaceSaveAccessDenied": "This Space is read-only for your account. Your changes were not saved.",
+    "useBuiltInPi": "Use Built-In Pi"
   },
   "people": {
     "loading": "Loading people…",

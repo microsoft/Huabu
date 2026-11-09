@@ -27,7 +27,10 @@ import { scheduleScrollToMatch, findProjectedRange } from '@/hooks/searchDom';
 import { handleCanvasNavigationKey } from '@/hooks/shortcuts/handleCanvasNavigationKey';
 import { usePreviewScrollMemory } from '@/hooks/usePreviewScrollMemory';
 import { hashSearchSource } from '@/hooks/useSearchSource';
-import { loadDefaultAgentBinding } from '@/store/acpProfilesStore';
+import {
+  loadDefaultAgentBinding,
+  toastConversationStartError,
+} from '@/store/acpProfilesStore';
 import useCanvasStore from '@/store/canvasStore';
 import { useChatStore } from '@/store/chatStore';
 import { conversationViewForNode } from '@/store/conversationOwner';
@@ -638,8 +641,8 @@ export const PDFPreview = ({
           usePanelStore.getState().requestFocusChatInput(fallbackThreadId);
         });
       } catch (error) {
-        toast(error instanceof Error ? error.message : String(error), {
-          tone: 'danger',
+        toastConversationStartError(error, () => {
+          void handleSendToChat(attachment);
         });
       }
     },

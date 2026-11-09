@@ -201,9 +201,6 @@ describe('Question conversation presentation', () => {
   });
 
   it('creates and focuses the browser fallback instead of inheriting the Canvas selection', async () => {
-    useAcpProfilesStore.setState({
-      recentConversationProfileId: 'global-profile',
-    });
     const binding = {
       kind: 'external' as const,
       profileId: 'profile-1',
@@ -228,7 +225,6 @@ describe('Question conversation presentation', () => {
       profileId: 'global-profile',
       alias: 'Global Profile',
     });
-    expect(useChatStore.getState().bindingMap['canvas-1']).toEqual(binding);
     expect(addNode).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
@@ -243,47 +239,58 @@ describe('Question conversation presentation', () => {
     );
   });
 
-  it('opens a Built-In Question without external Profiles or an inherited Canvas selection', async () => {
+  it('does not create or open a node when defaults are unconfigured', async () => {
     listProfiles.mockResolvedValueOnce({
       ...profileSnapshot,
       profiles: [],
       selectableProfileIds: [],
     });
 
-    const inherited = {
-      kind: 'external' as const,
-      profileId: 'canvas-profile',
-      alias: 'Canvas Agent',
-    };
-    useChatStore.setState({ bindingMap: { 'canvas-1': inherited } });
     const addNode = vi.fn();
-    const created = await createQuestionNodeAndCompose({
+    expect(
+      await createQuestionNodeAndCompose({
+        addNode,
+        canvasId: 'canvas-1',
+        placementPoint: { x: 0, y: 0 },
+      }),
+    ).toBeNull();
+    expect(addNode).not.toHaveBeenCalled();
+    expect(toast).toHaveBeenCalledWith(expect.any(String), {
+      tone: 'danger',
+      action: expect.objectContaining({ label: expect.any(String) }),
+    });
+    expect(useChatStore.getState().threadsById).toEqual({});
+    expect(usePanelStore.getState().isRightCollapsed).toBe(true);
+  });
+
+  it('offers Built-In Pi without selecting it, then retries with that explicit choice', async () => {
+    listProfiles.mockResolvedValue({
+      ...profileSnapshot,
+      profiles: [],
+      selectableProfileIds: [],
+    });
+    const addNode = vi.fn();
+    await createQuestionNodeAndCompose({
       addNode,
       canvasId: 'canvas-1',
       placementPoint: { x: 0, y: 0 },
     });
-    assert(created);
-    expect(addNode).toHaveBeenCalledOnce();
+    expect(useAcpProfilesStore.getState().recentConversationProfileId).toBe(
+      null,
+    );
+    const action = vi.mocked(toast).mock.calls[0]?.[1]?.action;
+    assert(action);
+
+    action.onClick();
+    await vi.waitFor(() => expect(addNode).toHaveBeenCalledOnce());
+    expect(useAcpProfilesStore.getState().recentConversationProfileId).toBe(
+      'huabu',
+    );
     expect(addNode).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({
-          agentBinding: { kind: 'internal' },
-          agentMode: 'operate',
-        }),
+        data: expect.objectContaining({ agentBinding: { kind: 'internal' } }),
       }),
     );
-    expect(
-      selectThreadBinding(useChatStore.getState(), created.threadId),
-    ).toEqual({ kind: 'internal' });
-    expect(useChatStore.getState().bindingMap['canvas-1']).toEqual(inherited);
-    expect(usePanelStore.getState()).toMatchObject({
-      isRightCollapsed: false,
-      focusChatInputRequest: { threadId: created.threadId },
-    });
-    expect(selectActiveNodeId(usePreviewWorkspaceStore.getState())).toBe(
-      created.nodeId,
-    );
-    expect(toast).not.toHaveBeenCalled();
   });
 
   it('creates a Built-In Question in operate mode without loading external Profiles', async () => {

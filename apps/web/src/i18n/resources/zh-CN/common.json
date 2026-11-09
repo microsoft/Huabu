@@ -1659,9 +1659,11 @@
     }
   },
   "errors": {
+    "conversationAgentUnconfigured": "请连接外部 Agent，或使用 Built-In Pi 开始新对话。",
     "nodeSaveFailed": "无法保存「{{name}}」。你的修改仍保留在此，请重试。",
     "rateLimited": "请求过于频繁，请在 {{seconds}} 秒后重试。",
-    "spaceSaveAccessDenied": "你的账户对这个空间只有只读权限。修改未保存。"
+    "spaceSaveAccessDenied": "你的账户对这个空间只有只读权限。修改未保存。",
+    "useBuiltInPi": "使用 Built-In Pi"
   },
   "people": {
     "loading": "正在加载成员…",

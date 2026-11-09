@@ -348,13 +348,12 @@ const unsubscribePreferences = subscribeApplicationPreferences((key) => {
 });
 import.meta.hot?.dispose(unsubscribePreferences);
 
-/** Use the last available explicit choice; new users start with Built-In Pi. */
 export function selectDefaultConversationProfileId(
   state: Pick<
     AcpProfilesState,
     'profiles' | 'selectableProfileIds' | 'recentConversationProfileId'
   >,
-): string {
+): string | null {
   const recentProfileId = state.recentConversationProfileId;
   if (recentProfileId === HUABU_AGENT_PROFILE_ID) return recentProfileId;
   if (
@@ -364,13 +363,14 @@ export function selectDefaultConversationProfileId(
   ) {
     return recentProfileId;
   }
-  return HUABU_AGENT_PROFILE_ID;
+  return state.selectableProfileIds[0] ?? null;
 }
 
 /** Snapshot only the chat identity; functional-model routing is unrelated. */
 export function getDefaultAgentBinding(): AgentBinding {
   const state = useAcpProfilesStore.getState();
   const profileId = selectDefaultConversationProfileId(state);
+  if (!profileId) throw new ConversationAgentUnconfiguredError();
   if (profileId === HUABU_AGENT_PROFILE_ID) return { kind: 'internal' };
   const profile = state.profiles.find((entry) => entry.id === profileId);
   return {
@@ -392,4 +392,41 @@ export function rememberConversationAgentBinding(binding: AgentBinding): void {
   const profileId =
     binding.kind === 'internal' ? HUABU_AGENT_PROFILE_ID : binding.profileId;
   useAcpProfilesStore.getState().rememberConversationAgent(profileId);
+}
+
+/**
+ * A new conversation has no Agent: the browser remembers no available explicit
+ * choice and no external Profile is on a connected device. Built-In Pi is never
+ * chosen implicitly; {@link toastConversationStartError} offers it instead.
+ */
+export class ConversationAgentUnconfiguredError extends Error {
+  constructor() {
+    super(i18n.t('errors.conversationAgentUnconfigured'));
+    this.name = 'ConversationAgentUnconfiguredError';
+  }
+}
+
+/**
+ * Report a failed conversation start. When no Agent is configured, the toast
+ * also offers Built-In Pi: choosing it records the same explicit choice as the
+ * Agent menus, then runs `retry` (when given) so the start completes with it.
+ */
+export function toastConversationStartError(
+  error: unknown,
+  retry?: () => void,
+): void {
+  const message = error instanceof Error ? error.message : String(error);
+  toast(message, {
+    tone: 'danger',
+    action:
+      error instanceof ConversationAgentUnconfiguredError
+        ? {
+            label: i18n.t('errors.useBuiltInPi'),
+            onClick: () => {
+              rememberConversationAgentBinding({ kind: 'internal' });
+              retry?.();
+            },
+          }
+        : undefined,
+  });
 }

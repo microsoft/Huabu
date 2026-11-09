@@ -191,29 +191,18 @@ describe('chatStore thread creation', () => {
     ).toEqual(INTERNAL);
   });
 
-  it('creates distinct Built-In threads without external Profiles or inherited Utility defaults', () => {
+  it('refuses unconfigured creation without leaving an internal thread', () => {
     useAcpProfilesStore.setState({
       profiles: [],
       selectableProfileIds: [],
       recentConversationProfileId: null,
     });
-    const independent = useChatStore.getState().createThread();
-    const canvas = useChatStore.getState().ensureCanvasThread('canvas-new');
-    const state = useChatStore.getState();
-    expect(independent).not.toBe(canvas);
-    expect(selectThreadBinding(state, independent)).toEqual(INTERNAL);
-    expect(selectThreadBinding(state, canvas)).toEqual(INTERNAL);
-    expect(selectThreadLastAction(state, independent)).toBe('operate');
-    expect(selectThreadLastAction(state, canvas)).toBe('operate');
-    expect(selectThreadMessages(state, independent)).toEqual([]);
-    expect(selectThreadSettings(state, independent)).toEqual({
-      modelId: null,
-      reasoningEffort: null,
-    });
-    expect(state.threadMap).toEqual({ 'canvas-new': canvas });
-    expect(useChatStore.getState().ensureCanvasThread('canvas-new')).toBe(
-      canvas,
-    );
+    expect(() => useChatStore.getState().createThread()).toThrow();
+    expect(() =>
+      useChatStore.getState().ensureCanvasThread('canvas-new'),
+    ).toThrow();
+    expect(useChatStore.getState().threadsById).toEqual({});
+    expect(useChatStore.getState().threadMap).toEqual({});
   });
 
   it('keeps explicitly selected internal bindings and session preferences unchanged', () => {

@@ -17,6 +17,7 @@ import { toast } from '@/components/Common/Toast';
 import {
   getDefaultAgentBinding,
   loadDefaultAgentBinding,
+  toastConversationStartError,
   useAcpProfilesStore,
 } from '@/store/acpProfilesStore';
 import useCanvasStore from '@/store/canvasStore.ts';
@@ -206,8 +207,8 @@ export async function createQuestionNodeAndCompose(opts: {
     enterQuestionCompose(created.conversationView, canvasId, binding);
     return { nodeId: created.nodeId, threadId: created.threadId };
   } catch (error) {
-    toast(error instanceof Error ? error.message : String(error), {
-      tone: 'danger',
+    toastConversationStartError(error, () => {
+      void createQuestionNodeAndCompose(opts);
     });
     return null;
   }

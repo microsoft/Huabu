@@ -1698,27 +1698,17 @@ describe('StrokeSelectionToolbar Ink submission', () => {
     );
   });
 
-  it('keeps Ink selected when new-user Built-In preparation requires model setup', async () => {
+  it('keeps the Ink selection and creates nothing when no Profile is available at activation', async () => {
     useAcpProfilesStore.setState({
       profiles: [],
       selectableProfileIds: [],
       recentConversationProfileId: null,
     });
-    const setupError = new Error('Configure Built-In Pi');
-    mocks.prepare.mockImplementationOnce(() => {
-      throw setupError;
-    });
     const button = await renderToolbar();
     await act(async () => button.click());
-    expect(mocks.createQuestion).toHaveBeenCalledWith(
-      expect.objectContaining({
-        binding: { kind: 'internal' },
-        mode: 'operate',
-        pendingInkIntentLabel: true,
-      }),
-    );
+    expect(mocks.createQuestion).not.toHaveBeenCalled();
     expect(mocks.dispatch).not.toHaveBeenCalled();
-    expect(toast).toHaveBeenCalledWith(setupError.message, { tone: 'danger' });
+    expect(toast).toHaveBeenCalledWith(expect.any(String), { tone: 'danger' });
     expect(useGesturePreviewStore.getState().sketchStrokeSelection).toEqual({
       'sketch-1': ['stroke-1'],
     });
@@ -1743,26 +1733,17 @@ describe('StrokeSelectionToolbar Ink submission', () => {
     );
   });
 
-  it('falls back to Built-In when the last external Profile is no longer available', async () => {
+  it('requires an external Profile instead of falling back to the internal Agent', async () => {
     useAcpProfilesStore.setState({
       profiles: [],
       selectableProfileIds: [],
-      recentConversationProfileId: 'deleted-profile',
+      recentConversationProfileId: null,
     });
-    mocks.dispatch.mockResolvedValueOnce({ status: 'rejected' });
     const button = await renderToolbar();
     await act(async () => button.click());
-    expect(mocks.createQuestion).toHaveBeenCalledWith(
-      expect.objectContaining({
-        binding: { kind: 'internal' },
-        mode: 'operate',
-      }),
-    );
-    expect(mocks.prepare).toHaveBeenCalledWith(
-      expect.objectContaining({ mode: 'operate' }),
-    );
-    expect(mocks.dispatch).toHaveBeenCalledOnce();
-    expect(toast).not.toHaveBeenCalled();
+    expect(mocks.createQuestion).not.toHaveBeenCalled();
+    expect(mocks.dispatch).not.toHaveBeenCalled();
+    expect(toast).toHaveBeenCalledWith(expect.any(String), { tone: 'danger' });
   });
 
   it.each(['selection', 'canvas'] as const)(
