@@ -131,6 +131,7 @@ export function subtractAll(source: Rect, cutters: Rect[]): Rect[] {
 export function computeHighlightUpdate(
   highlights: PdfHighlight[],
   selectionByPage: Map<number, Rect[]>,
+  action: 'toggle' | 'add' = 'toggle',
 ): PdfHighlight[] {
   // Determine whether every selection rect is already fully covered.
   let allCovered = true;
@@ -147,7 +148,7 @@ export function computeHighlightUpdate(
     if (!allCovered) break;
   }
 
-  if (allCovered) {
+  if (allCovered && action === 'toggle') {
     // Toggle-off: subtract the selection rects from existing highlights.
     const pagesInSelection = new Set(selectionByPage.keys());
     return highlights.flatMap((hl) => {

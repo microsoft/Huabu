@@ -42,12 +42,49 @@ test('stages, edits and removes a quoted comment without exposing a prompt templ
   const original = (await passage.textContent())?.trim();
   if (!original) throw new Error('Missing assistant passage');
   await passage.click({ clickCount: 3 });
-  await page.getByRole('button', { name: 'Comment', exact: true }).click();
+  await expect(
+    page.getByRole('button', { name: 'Comment on selection', exact: true }),
+  ).toBeVisible();
+  await expect(page.locator('.canvas-context-toolbar')).toHaveCount(2);
+  for (const capsule of await page.locator('.canvas-context-toolbar').all()) {
+    await expect(capsule).toHaveCSS('height', '36px');
+    await expect(capsule).toHaveCSS('border-radius', '8px');
+  }
+  await expect(page.locator('.ink-agent-destination-trigger')).toHaveCount(0);
+  await page.screenshot({
+    path: testInfo.outputPath('chat-selection-toolbar.png'),
+  });
+  await page
+    .getByRole('button', { name: 'Comment on selection', exact: true })
+    .click();
   const fullComment = 'Please explain this in detail. '.repeat(12).trim();
+  await expect(
+    page.getByRole('button', { name: 'Add to input', exact: true }),
+  ).toBeDisabled();
+  for (const capsule of await page.locator('.canvas-context-toolbar').all()) {
+    await expect(capsule).toBeHidden();
+  }
+  await expect(
+    page.locator('[data-chat-input-surface] [data-quoted-comment]'),
+  ).toHaveCount(0);
+  await page
+    .getByRole('textbox', { name: 'Comment', exact: true })
+    .fill('  \n ');
+  await page
+    .getByRole('textbox', { name: 'Comment', exact: true })
+    .press('Enter');
+  await expect(
+    page.getByRole('button', { name: 'Add to input', exact: true }),
+  ).toBeDisabled();
+  await expect(
+    page.locator('[data-chat-input-surface] [data-quoted-comment]'),
+  ).toHaveCount(0);
   await page
     .getByRole('textbox', { name: 'Comment', exact: true })
     .fill(fullComment);
-  await page.getByRole('button', { name: 'Add to input', exact: true }).click();
+  await page
+    .getByRole('textbox', { name: 'Comment', exact: true })
+    .press('Enter');
 
   const card = page.locator('[data-chat-input-surface] [data-quoted-comment]');
   await expect(card).toHaveCount(1);
@@ -137,6 +174,11 @@ test('stages, edits and removes a quoted comment without exposing a prompt templ
     page.getByRole('button', { name: 'Send', exact: true }),
   ).toBeDisabled();
   await expect(card.getByRole('alert')).toBeVisible();
+  await textarea.fill('Main instructions do not replace a required comment');
+  await expect(
+    page.getByRole('button', { name: 'Send', exact: true }),
+  ).toBeDisabled();
+  await textarea.fill('');
   await comment.press('Escape');
   await expect(comment).toHaveCount(0);
   await expect(editComment).toHaveText('Updated comment');

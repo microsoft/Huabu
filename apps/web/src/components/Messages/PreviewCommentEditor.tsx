@@ -10,11 +10,11 @@ import {
   DropdownMenu,
   DropdownMenuItem,
 } from '@/components/Common/DropdownMenu';
-import { useCommentDestination } from '@/hooks/useCommentDestination';
-import useCanvasStore from '@/store/canvasStore';
+import {
+  resolveCommentDestination,
+  useCommentDestination,
+} from '@/hooks/useCommentDestination';
 import { useChatStore } from '@/store/chatStore';
-import { conversationViewForNode } from '@/store/conversationOwner';
-import { copyToClipboard } from '@/utils/io/clipboard';
 
 import { FragmentCommentPopover } from './AIMessage/FragmentCommentPopover';
 import { revealQuotedCommentDraft } from './quotedCommentNotification';
@@ -54,26 +54,15 @@ export function PreviewCommentEditor({
   return (
     <FragmentCommentPopover
       selection={capture.selection}
-      initialMode="comment"
-      onBegin={() => undefined}
-      onCopy={() => copyToClipboard(capture.selection.text)}
-      onSaveAsNote={() => undefined}
       onDismiss={onDismiss}
       addDisabled={!target.available || target.loading}
       onAdd={(comment) => {
         if (staged.current) return;
-        const canvas = useCanvasStore.getState();
-        const owner = target.destination;
-        const node = canvas.nodes.find((item) => item.id === owner?.nodeId);
-        const view = node
-          ? conversationViewForNode(node, capture.source.canvasId)
-          : null;
-        if (
-          canvas.canvasId !== capture.source.canvasId ||
-          !view ||
-          view.conversationOwner.threadId !== owner?.threadId ||
-          canvas.pendingForkThreadIds[view.conversationOwner.threadId]
-        ) {
+        const view = resolveCommentDestination(
+          capture.source.canvasId,
+          target.destination,
+        );
+        if (!view) {
           setStagingError(true);
           return;
         }
