@@ -39,6 +39,7 @@ interface UseCanvasLassoOptions {
   wrapperRef: MutableRefObject<HTMLDivElement | null>;
   rfInstanceRef: MutableRefObject<ReactFlowInstance | null>;
   inputMode: EffectiveInputMode;
+  readInputPolicy?: () => { active: boolean; inputMode: EffectiveInputMode };
 }
 
 function appendPoint(points: XYPosition[], next: XYPosition) {
@@ -68,14 +69,15 @@ export function useCanvasLasso({
   wrapperRef,
   rfInstanceRef,
   inputMode,
+  readInputPolicy,
 }: UseCanvasLassoOptions) {
   const flowStore = useStoreApi();
   const suppressClick = useAreaSelectionClickGuard(wrapperRef, scopeKey);
   const [screenPoints, setScreenPoints] = useState<XYPosition[] | null>(null);
   // Pointerup and auto-pan must see the last event even before React renders.
   const pointsRef = useRef<XYPosition[] | null>(null);
-  const optionsRef = useRef({ active, scopeKey });
-  optionsRef.current = { active, scopeKey };
+  const optionsRef = useRef({ active, scopeKey, readInputPolicy });
+  optionsRef.current = { active, scopeKey, readInputPolicy };
   const pendingRef = useRef<{
     pointerId: number;
     points: XYPosition[];
@@ -164,14 +166,18 @@ export function useCanvasLasso({
 
   const onPointerDown = useCallback(
     (event: LassoPointerEvent) => {
-      if (!active || useGesturePreviewStore.getState().inkSubmissionPreparing)
+      const policy = readInputPolicy?.() ?? { active, inputMode };
+      if (
+        !policy.active ||
+        useGesturePreviewStore.getState().inkSubmissionPreparing
+      )
         return false;
       if (event.button !== 0 || !event.isPrimary) return false;
       if (
         event.pointerType !== 'mouse' &&
-        (inputMode === 'mouse' ||
-          (inputMode === 'pen' && event.pointerType !== 'pen') ||
-          (inputMode === 'finger' && event.pointerType !== 'touch'))
+        (policy.inputMode === 'mouse' ||
+          (policy.inputMode === 'pen' && event.pointerType !== 'pen') ||
+          (policy.inputMode === 'finger' && event.pointerType !== 'touch'))
       )
         return false;
       if (!isLassoStartTarget(event.target as HTMLElement)) return false;
@@ -203,14 +209,28 @@ export function useCanvasLasso({
       };
       return true;
     },
-    [active, flowStore, inputMode, scopeKey, suppressClick, wrapperRef],
+    [
+      active,
+      flowStore,
+      inputMode,
+      scopeKey,
+      suppressClick,
+      wrapperRef,
+      readInputPolicy,
+    ],
   );
 
   const onPointerMove = useCallback(
     (event: LassoPointerEvent) => {
       const pending = pendingRef.current;
       if (!pending || pending.pointerId !== event.pointerId) return;
-      if (!optionsRef.current.active || !(event.buttons & 1)) {
+      if (
+        !(
+          optionsRef.current.readInputPolicy?.().active ??
+          optionsRef.current.active
+        ) ||
+        !(event.buttons & 1)
+      ) {
         cancel();
         return;
       }
@@ -251,7 +271,10 @@ export function useCanvasLasso({
       )
         return;
       if (
-        !optionsRef.current.active ||
+        !(
+          optionsRef.current.readInputPolicy?.().active ??
+          optionsRef.current.active
+        ) ||
         pending.scopeKey !== optionsRef.current.scopeKey
       ) {
         cancel();

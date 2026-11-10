@@ -100,6 +100,26 @@ it('does not publish input preference changes when main persistence fails', () =
   }
 });
 
+it('keeps placement and the preferred tool unchanged when explicit choice persistence fails', () => {
+  useToolStore.getState().setPendingNodeType('question');
+  const before = useToolStore.getState();
+  write.mockReturnValue({ ok: false, error: 'Disk full' });
+  expect(() => useToolStore.getState().chooseCanvasTool('pan', false)).toThrow(
+    'Disk full',
+  );
+  expect(useToolStore.getState()).toBe(before);
+});
+
+it('reconciles an incoming mouse preference without resetting a live Lasso session', async () => {
+  useToolStore.getState().chooseCanvasTool('lasso', true);
+  tools({ mouseToolPreference: 'pan' });
+  await useToolStore.persist.rehydrate();
+  expect(useToolStore.getState()).toMatchObject({
+    mouseToolPreference: 'pan',
+    explicitLassoActive: true,
+  });
+});
+
 it('does not publish chat preference changes when main persistence fails', () => {
   const before = useChatPreferencesStore.getState();
   write.mockReturnValue({ ok: false, error: 'Disk full' });

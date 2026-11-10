@@ -47,6 +47,7 @@ interface DragRange {
   end: Point;
   pointerType: string;
   clickAllowed: boolean;
+  scopeKey?: string;
 }
 
 /** Minimum frame size in flow-space pixels — guards against accidental taps. */
@@ -67,6 +68,7 @@ interface UseFrameDragToCreateOptions {
   onClick?: (point: Point) => void;
   /** Called whenever the gesture ends (commit, cancel, or escape). */
   onEnd: () => void;
+  isCurrent?: () => boolean;
 }
 
 interface UseFrameDragToCreateResult {
@@ -94,6 +96,7 @@ export function useFrameDragToCreate({
   onCreate,
   onClick,
   onEnd,
+  isCurrent,
 }: UseFrameDragToCreateOptions): UseFrameDragToCreateResult {
   const [drag, setDrag] = useState<DragRange | null>(null);
   useEffect(() => {
@@ -102,8 +105,8 @@ export function useFrameDragToCreate({
 
   const cancel = useCallback(() => {
     setDrag(null);
-    onEnd();
-  }, [onEnd]);
+    if (isCurrent?.() !== false) onEnd();
+  }, [onEnd, isCurrent]);
 
   // Escape cancels a pending frame placement.
   useEffect(() => {
@@ -136,10 +139,11 @@ export function useFrameDragToCreate({
         end: point,
         pointerType: e.pointerType,
         clickAllowed: isEmptyCanvasPlacementTarget(e.target as Element),
+        scopeKey,
       });
       return true;
     },
-    [active],
+    [active, scopeKey],
   );
 
   const onPointerMove = useCallback((e: ReactPointerEvent<HTMLDivElement>) => {
@@ -156,6 +160,10 @@ export function useFrameDragToCreate({
       // which would prevent click-to-place handlers from creating the node.
       if (!drag) return;
       e.currentTarget.releasePointerCapture(e.pointerId);
+      if (drag.scopeKey !== scopeKey || isCurrent?.() === false) {
+        setDrag(null);
+        return;
+      }
 
       const instance = rfInstanceRef.current;
       if (active && instance) {
@@ -187,16 +195,26 @@ export function useFrameDragToCreate({
       }
       cancel();
     },
-    [active, drag, rfInstanceRef, onCreate, onClick, cancel],
+    [
+      active,
+      drag,
+      rfInstanceRef,
+      onCreate,
+      onClick,
+      cancel,
+      scopeKey,
+      isCurrent,
+    ],
   );
 
   const onPointerCancel = useCallback(
     (e: ReactPointerEvent<HTMLDivElement>) => {
       if (!drag) return;
       e.currentTarget.releasePointerCapture(e.pointerId);
-      cancel();
+      if (drag.scopeKey === scopeKey) cancel();
+      else setDrag(null);
     },
-    [drag, cancel],
+    [drag, cancel, scopeKey],
   );
 
   // Translate the in-flight drag into a wrapper-relative rectangle for the

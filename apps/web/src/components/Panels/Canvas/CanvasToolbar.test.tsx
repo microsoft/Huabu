@@ -44,12 +44,17 @@ vi.mock('@/store/toolStore', () => ({
     selector: (state: {
       pendingNodeType: string | null;
       setPendingNodeType: () => void;
+      togglePendingNodeType: (type: string) => void;
       setSketchDraft: () => void;
     }) => unknown,
   ) =>
     selector({
       pendingNodeType: toolState.pendingNodeType,
       setPendingNodeType: toolState.setPendingNodeType,
+      togglePendingNodeType: (type) =>
+        toolState.setPendingNodeType(
+          toolState.pendingNodeType === type ? null : type,
+        ),
       setSketchDraft: vi.fn(),
     }),
 }));
@@ -106,6 +111,41 @@ afterEach(() => {
 });
 
 describe('NodeToolbar', () => {
+  it.each(['pan', 'lasso'] as const)(
+    'does not turn a placement choice into an explicit Select preference from %s',
+    async (activeTool) => {
+      container = document.createElement('div');
+      document.body.appendChild(container);
+      root = createRoot(container);
+      const change = vi.fn();
+      await act(async () =>
+        root?.render(
+          <NodeToolbar activeTool={activeTool} onToolChange={change} />,
+        ),
+      );
+      for (const [label, key, kind] of [
+        ['toolbar.nodes.note', '1', 'note'],
+        ['toolbar.nodes.text', '2', 'text'],
+        ['toolbar.nodes.frame', '3', 'frame'],
+        ['toolbar.nodes.addAgent', 'a', 'question'],
+      ]) {
+        await act(async () =>
+          container
+            ?.querySelector<HTMLButtonElement>(`button[aria-label^="${label}"]`)
+            ?.click(),
+        );
+        expect(toolState.setPendingNodeType).toHaveBeenLastCalledWith(kind);
+        await act(async () =>
+          window.dispatchEvent(
+            new KeyboardEvent('keydown', { key, bubbles: true }),
+          ),
+        );
+        expect(toolState.setPendingNodeType).toHaveBeenLastCalledWith(kind);
+      }
+      expect(change).not.toHaveBeenCalled();
+    },
+  );
+
   it('arms child Space placement from the primary toolbar button or shortcut 5', async () => {
     container = document.createElement('div');
     document.body.appendChild(container);

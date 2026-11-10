@@ -1,16 +1,139 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { resolveInputMode, useToolStore } from './toolStore';
 
 describe('toolStore input preference', () => {
   beforeEach(() => {
     localStorage.clear();
-    useToolStore.setState({
-      inputModePreference: 'auto',
-      penObserved: false,
+    useToolStore.setState(useToolStore.getInitialState(), true);
+  });
+
+  describe('mouse Canvas preference and tool intent', () => {
+    it.each(['select', 'pan', 'lasso'] as const)(
+      'restores explicit mouse %s without persisting placement or session state',
+      async (tool) => {
+        useToolStore.getState().chooseCanvasTool(tool, false);
+        useToolStore.getState().setPendingNodeType('note');
+        const saved = localStorage.getItem('huabu-sketch-tools');
+        expect(saved).not.toBeNull();
+        expect(JSON.parse(saved!).state).toMatchObject({
+          mouseToolPreference: tool,
+        });
+        for (const key of [
+          'pendingNodeType',
+          'explicitLassoActive',
+          'toolIntent',
+        ]) {
+          expect(JSON.parse(saved!).state).not.toHaveProperty(key);
+        }
+        useToolStore.getState().resetForCanvasSwitch();
+        await useToolStore.persist.rehydrate();
+        expect(useToolStore.getState()).toMatchObject({
+          mouseToolPreference: tool,
+          pendingNodeType: null,
+          explicitLassoActive: false,
+        });
+      },
+    );
+
+    it('does not save touch/pen tools or overwrite the mouse preference on placement', () => {
+      useToolStore.getState().chooseCanvasTool('pan', false);
+      for (const tool of ['lasso', 'select', 'pan'] as const) {
+        useToolStore.getState().chooseCanvasTool(tool, true);
+        expect(useToolStore.getState().mouseToolPreference).toBe('pan');
+      }
+      useToolStore.getState().togglePendingNodeType('note');
+      const intent = useToolStore.getState().toolIntent;
+      expect(useToolStore.getState().finishPendingNodeType(intent)).toBe(true);
+      expect(useToolStore.getState().mouseToolPreference).toBe('pan');
+    });
+
+    it('rejects stale completion after same-type rearming, explicit choice, and Space reset', () => {
+      useToolStore.getState().setPendingNodeType('question');
+      const old = useToolStore.getState().toolIntent;
+      useToolStore.getState().setPendingNodeType('question');
+      expect(useToolStore.getState().finishPendingNodeType(old)).toBe(false);
+      expect(useToolStore.getState().pendingNodeType).toBe('question');
+      const current = useToolStore.getState().toolIntent;
+      useToolStore.getState().chooseCanvasTool('lasso', false);
+      expect(useToolStore.getState().finishPendingNodeType(current)).toBe(
+        false,
+      );
+      useToolStore.getState().resetForCanvasSwitch();
+      expect(useToolStore.getState().toolIntent).toBeGreaterThan(current);
+    });
+
+    it.each([0, 1, 2, 3])(
+      'migrates version %s without losing existing preferences',
+      async (version) => {
+        localStorage.setItem(
+          'huabu-sketch-tools',
+          JSON.stringify({
+            version,
+            state: {
+              inputModePreference: 'pen',
+              penObserved: true,
+              sketchDraft: {
+                strokeColor: 'green',
+                strokeSize: 11,
+                eraserSize: 27,
+                mode: 'erase',
+              },
+              eraserSizePresets: [12, 24, 40],
+              activeEraserSizePreset: 1,
+            },
+          }),
+        );
+        await useToolStore.persist.rehydrate();
+        expect(useToolStore.getState()).toMatchObject({
+          mouseToolPreference: 'select',
+          inputModePreference: 'pen',
+          penObserved: true,
+          sketchDraft: {
+            strokeColor: 'green',
+            strokeSize: 11,
+            eraserSize: 27,
+            mode: 'erase',
+          },
+        });
+        if (version < 1)
+          expect(useToolStore.getState().colorPresets[0]).toBe('green');
+        if (version < 2)
+          expect(useToolStore.getState().eraserSizePresets[1]).toBe(27);
+        expect(
+          JSON.parse(localStorage.getItem('huabu-sketch-tools')!).version,
+        ).toBe(4);
+      },
+    );
+
+    it('diagnoses invalid tool values and resets deleted preferences without resetting a session', async () => {
+      const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+      try {
+        localStorage.setItem(
+          'huabu-sketch-tools',
+          JSON.stringify({
+            version: 4,
+            state: {
+              mouseToolPreference: 'sketch',
+              inputModePreference: 'finger',
+            },
+          }),
+        );
+        await useToolStore.persist.rehydrate();
+        expect(log).toHaveBeenCalled();
+        expect(useToolStore.getState().mouseToolPreference).toBe('select');
+        expect(useToolStore.getState().inputModePreference).toBe('finger');
+        useToolStore.getState().chooseCanvasTool('lasso', true);
+        localStorage.removeItem('huabu-sketch-tools');
+        await useToolStore.persist.rehydrate();
+        expect(useToolStore.getState().explicitLassoActive).toBe(true);
+        expect(localStorage.getItem('huabu-sketch-tools')).toBeNull();
+      } finally {
+        log.mockRestore();
+      }
     });
   });
 

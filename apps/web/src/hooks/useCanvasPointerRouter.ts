@@ -28,6 +28,10 @@ interface CanvasPointerRouterOptions {
   inputMode: EffectiveInputMode;
   explicitToolActive: boolean;
   inkToolActive?: boolean;
+  readToolPolicy?: () => Pick<
+    CanvasPointerRouterContext,
+    'explicitToolActive' | 'inkToolActive'
+  >;
   onTouchTakeover: () => void;
   onEmptyCanvasTap: () => void;
   onNodeTap: (nodeId: string) => void;
@@ -97,6 +101,7 @@ export function useCanvasPointerRouter(
         inputMode: readEffectiveInputMode(),
         explicitToolActive: o.explicitToolActive,
         inkToolActive: o.inkToolActive,
+        ...o.readToolPolicy?.(),
         onTouchTakeover: o.onTouchTakeover,
         onEmptyCanvasTap: o.onEmptyCanvasTap,
         onNodeTap: o.onNodeTap,
