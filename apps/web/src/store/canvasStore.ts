@@ -2519,6 +2519,7 @@ const useCanvasStore = create<RFState>()(
           .loadForCanvas(targetId, { chatThreadId });
         canvasHistoryManager.activate(targetId, options?.resetHistory);
         if (canvasId && targetId !== get().canvasId) {
+          useToolStore.getState().resetForCanvasSwitch();
           get()._setStateNoAutosave({
             canvasId: targetId,
             canvasTitle: '',
@@ -2703,7 +2704,6 @@ const useCanvasStore = create<RFState>()(
         canvasNotFound: false,
         viewport: null,
       });
-      useToolStore.getState().resetForCanvasSwitch();
       useGesturePreviewStore.getState().resetCanvasScopedTransients();
       // Load the new canvas
       await get().loadCanvas(canvasId);

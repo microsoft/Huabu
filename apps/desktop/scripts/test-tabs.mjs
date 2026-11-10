@@ -1707,6 +1707,38 @@ try {
     const { useToolStore } = await import('/src/store/toolStore.ts');
     useToolStore.getState().observePen();
   });
+  await b.evaluate(async () => {
+    const { useToolStore } = await import('/src/store/toolStore.ts');
+    useToolStore.getState().setPendingNodeType('note');
+  });
+  await a.evaluate(async () => {
+    const { useToolStore } = await import('/src/store/toolStore.ts');
+    useToolStore.getState().chooseCanvasTool('pan', false);
+  });
+  await waitFor(
+    () =>
+      b.evaluate(async () => {
+        const { useToolStore } = await import('/src/store/toolStore.ts');
+        return useToolStore.getState().mouseToolPreference === 'pan';
+      }),
+    'synchronizing mouse Canvas preference across partitions',
+  );
+  assert.deepEqual(
+    await b.evaluate(async () => {
+      const { useToolStore } = await import('/src/store/toolStore.ts');
+      return {
+        pending: useToolStore.getState().pendingNodeType,
+        replica: localStorage.getItem('huabu-sketch-tools'),
+      };
+    }),
+    { pending: 'note', replica: null },
+    'Preference invalidation must not interrupt a sibling placement or create a replica',
+  );
+  await b.evaluate(async () => {
+    const { useToolStore } = await import('/src/store/toolStore.ts');
+    const tools = useToolStore.getState();
+    tools.finishPendingNodeType(tools.toolIntent);
+  });
   await electron.evaluate(({ ipcMain }, canvasId) => {
     globalThis.tabsSmokeLegacyReads = 0;
     globalThis.tabsSmokeToolReads = 0;
@@ -2767,8 +2799,10 @@ try {
       const { i18n } = await import('/src/i18n/index.ts');
       const { getDefaultAgentBinding } =
         await import('/src/store/acpProfilesStore.ts');
+      const { useToolStore } = await import('/src/store/toolStore.ts');
       return {
         recentTurnCount: useChatPreferencesStore.getState().recentTurnCount,
+        mouseTool: useToolStore.getState().mouseToolPreference,
         binding: getDefaultAgentBinding(),
         language: i18n.language,
         replica: localStorage.getItem('huabu-chat-preferences'),
@@ -2776,6 +2810,7 @@ try {
     }),
     {
       recentTurnCount: 7,
+      mouseTool: 'pan',
       binding: { kind: 'internal' },
       language: 'en',
       replica: null,

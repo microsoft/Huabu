@@ -42,6 +42,7 @@ export function createPlacementRecognizer(
     pointerType: string;
     startX: number;
     startY: number;
+    toolIntent: number;
   } | null = null;
 
   return {
@@ -65,6 +66,7 @@ export function createPlacementRecognizer(
         pointerType: event.pointerType,
         startX: event.clientX,
         startY: event.clientY,
+        toolIntent: useToolStore.getState().toolIntent,
       };
       event.preventDefault();
       event.stopPropagation();
@@ -75,6 +77,7 @@ export function createPlacementRecognizer(
       const start = pending;
       pending = null;
       if (
+        start.toolIntent === useToolStore.getState().toolIntent &&
         isNodePlacementTap(
           start.startX,
           start.startY,

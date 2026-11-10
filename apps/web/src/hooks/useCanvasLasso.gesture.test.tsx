@@ -83,11 +83,13 @@ function Harness({
   scopeKey = 'canvas',
   inputMode = 'mouse',
   native = false,
+  readInputPolicy,
 }: {
   active?: boolean;
   scopeKey?: string;
   inputMode?: EffectiveInputMode;
   native?: boolean;
+  readInputPolicy?: () => { active: boolean; inputMode: EffectiveInputMode };
 }) {
   latest = useCanvasLasso({
     active,
@@ -95,6 +97,7 @@ function Harness({
     wrapperRef,
     rfInstanceRef: instanceRef,
     inputMode,
+    readInputPolicy,
   });
   useEffect(() => {
     if (!native) return;
@@ -251,6 +254,24 @@ afterEach(() => {
 });
 
 describe('lasso shared selection lifecycle', () => {
+  it('uses live activation and pen policy on the first contact before pointer UI rerenders', () => {
+    act(() =>
+      root.render(
+        <Harness
+          active={false}
+          inputMode="finger"
+          readInputPolicy={() => ({ active: true, inputMode: 'pen' })}
+        />,
+      ),
+    );
+    dispatch('pointerdown', 0, 0, { pointerType: 'pen' });
+    dispatch('pointermove', 80, 0, { pointerType: 'pen' });
+    dispatch('pointermove', 80, 80, { pointerType: 'pen' });
+    dispatch('pointermove', 0, 80, { pointerType: 'pen' });
+    dispatch('pointerup', 0, 0, { pointerType: 'pen' });
+    expect(selected()).toContain('note');
+  });
+
   it.each(['note', 'image', 'sketch', 'frame'])(
     'starts inside a %s node and captures selection without moving it',
     (type) => {

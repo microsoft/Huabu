@@ -142,7 +142,7 @@ it.each(['home', 'space'] as const)(
     values = {
       'huabu-sketch-tools': JSON.stringify({
         state: { inputModePreference: 'finger' },
-        version: 3,
+        version: 4,
       }),
       'huabu-chat-preferences': JSON.stringify({
         state: { recentTurnCount: 7 },
@@ -250,4 +250,32 @@ it('does not reconcile desktop preferences in a browser', async () => {
   expect(currentPreferences()).toEqual(before);
   expect(tabs.onPreference).not.toHaveBeenCalled();
   expect(tabs.getPreference).not.toHaveBeenCalled();
+});
+
+it('rehydrates browser tool preferences from current storage, not historical event payloads', async () => {
+  delete window.electronBridge;
+  await render();
+  await act(async () => {
+    localStorage.setItem(
+      'huabu-sketch-tools',
+      JSON.stringify({
+        version: 4,
+        state: { mouseToolPreference: 'pan' },
+      }),
+    );
+    window.dispatchEvent(
+      new StorageEvent('storage', {
+        key: 'huabu-sketch-tools',
+        newValue: JSON.stringify({
+          version: 4,
+          state: { mouseToolPreference: 'select' },
+        }),
+      }),
+    );
+  });
+  expect(useToolStore.getState()).toMatchObject({
+    mouseToolPreference: 'pan',
+    pendingNodeType: 'note',
+  });
+  expect(tabs.setPreference).not.toHaveBeenCalled();
 });

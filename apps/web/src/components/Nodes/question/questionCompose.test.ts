@@ -32,6 +32,7 @@ import {
   selectActiveNodeId,
   usePreviewWorkspaceStore,
 } from '@/store/previewWorkspace/store';
+import { useToolStore } from '@/store/toolStore';
 
 import {
   createQuestionNode,
@@ -104,6 +105,30 @@ beforeEach(() => {
     isRightCollapsed: true,
     focusChatInputRequest: null,
   });
+});
+
+it('does not create after a newer explicit tool choice supersedes consumed placement', async () => {
+  let resolve!: (value: typeof profileSnapshot) => void;
+  listProfiles.mockReturnValue(
+    new Promise((done) => {
+      resolve = done;
+    }),
+  );
+  useToolStore.getState().setPendingNodeType('question');
+  const { toolIntent, finishPendingNodeType } = useToolStore.getState();
+  finishPendingNodeType(toolIntent);
+  const addNode = vi.fn();
+  const creation = createQuestionNodeAndCompose({
+    canvasId: 'canvas-1',
+    placementPoint: { x: 10, y: 20 },
+    addNode,
+    isCurrent: () => useToolStore.getState().toolIntent === toolIntent,
+  });
+  useToolStore.getState().chooseCanvasTool('pan', false);
+  resolve(profileSnapshot);
+  expect(await creation).toBeNull();
+  expect(addNode).not.toHaveBeenCalled();
+  expect(useToolStore.getState().mouseToolPreference).toBe('pan');
 });
 
 describe('Question conversation presentation', () => {

@@ -14,6 +14,7 @@ globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 const create = vi.fn();
 const click = vi.fn();
 const end = vi.fn();
+const isCurrent = vi.fn(() => true);
 let host: HTMLDivElement;
 let root: Root;
 let zoom = 1;
@@ -42,6 +43,7 @@ function Harness({
     onCreate: create,
     onClick: child ? click : undefined,
     onEnd: end,
+    isCurrent,
   });
   return (
     <div ref={wrapperRef} {...pointerHandlers}>
@@ -75,6 +77,7 @@ function pointer(
 
 beforeEach(() => {
   vi.clearAllMocks();
+  isCurrent.mockReturnValue(true);
   zoom = 1;
   host = document.createElement('div');
   document.body.appendChild(host);
@@ -168,3 +171,16 @@ it('does not interpret a node click or a narrow drag as empty-space creation', (
   expect(create).not.toHaveBeenCalled();
   expect(click).not.toHaveBeenCalled();
 });
+
+it.each(['pointerup', 'pointercancel'])(
+  'does not finish a newer tool intent on stale %s',
+  (type) => {
+    pointer('pointerdown', 50, 60);
+    pointer('pointermove', 200, 180);
+    isCurrent.mockReturnValue(false);
+    pointer(type, 200, 180);
+    expect(create).not.toHaveBeenCalled();
+    expect(click).not.toHaveBeenCalled();
+    expect(end).not.toHaveBeenCalled();
+  },
+);

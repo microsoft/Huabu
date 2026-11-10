@@ -5,6 +5,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { createPlacementRecognizer } from '@/handler/canvasPointerRecognizers/placement';
 import { useGesturePreviewStore } from '@/store/gesturePreviewStore';
 import * as inkSigil from '@/store/inkSigilStore';
 import { useToolStore } from '@/store/toolStore';
@@ -106,6 +107,49 @@ afterEach(() => {
 });
 
 describe('useCanvasPointerRouter live input policy', () => {
+  it('does not commit a touch placement contact after a newer tool intent replaces it', () => {
+    useToolStore.getState().setInputModePreference('finger');
+    useToolStore.getState().setPendingNodeType('note');
+    wrapper.className = 'react-flow__pane';
+    const place = vi.fn(() => true);
+    const extras = [
+      createPlacementRecognizer({
+        placePendingNode: place,
+        suppressNextPaneClick: vi.fn(),
+      }),
+    ];
+    act(() =>
+      root.render(
+        <Harness
+          inputMode="finger"
+          explicitToolActive
+          extraRecognizers={extras}
+        />,
+      ),
+    );
+    const pointer = (type: string) =>
+      act(() =>
+        wrapper.dispatchEvent(
+          new PointerEvent(type, {
+            bubbles: true,
+            pointerId: 1,
+            pointerType: 'touch',
+            isPrimary: true,
+            button: 0,
+            clientX: 10,
+            clientY: 10,
+          }),
+        ),
+      );
+    pointer('pointerdown');
+    useToolStore.getState().setPendingNodeType('question');
+    pointer('pointerup');
+    expect(place).not.toHaveBeenCalled();
+    pointer('pointerdown');
+    pointer('pointerup');
+    expect(place).toHaveBeenCalledOnce();
+  });
+
   it.each(['frame-selection-drag', 'note-content'] as const)(
     'blocks legacy touch dragging for %s and preserves only Frame compatibility clicks',
     (id) => {

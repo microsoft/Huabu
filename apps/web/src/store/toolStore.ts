@@ -52,6 +52,7 @@ export type SketchColorPresets = [string, string, string];
 
 export type InputModePreference = 'auto' | 'mouse' | 'pen' | 'finger';
 export type EffectiveInputMode = Exclude<InputModePreference, 'auto'>;
+export type CanvasTool = 'select' | 'pan' | 'lasso';
 
 export function resolveInputMode(
   preference: InputModePreference,
@@ -65,6 +66,12 @@ export function resolveInputMode(
 
 type ToolState = {
   pendingNodeType: PendingNodeType;
+  mouseToolPreference: CanvasTool;
+  explicitLassoActive: boolean;
+  toolIntent: number;
+  chooseCanvasTool: (tool: CanvasTool, isNotMouse: boolean) => void;
+  togglePendingNodeType: (type: Exclude<PendingNodeType, null>) => void;
+  finishPendingNodeType: (intent: number) => boolean;
   sketchDraft: SketchDraft;
   colorPresets: SketchColorPresets;
   strokeSizePresets: SketchSizePresets;
@@ -87,8 +94,8 @@ type ToolState = {
     value: number,
   ) => void;
   /**
-   * Called by `canvasStore.switchCanvas` to clear transient tool state
-   * that should not survive a canvas switch (`pendingNodeType`).
+   * Called when canvasStore changes Space identity to retire transient
+   * placement and Lasso intent, including stale completion callbacks.
    *
    * `sketchDraft` is intentionally NOT reset — users expect their
    * brush color/size to persist across canvases.
@@ -121,28 +128,54 @@ const DEFAULT_TOOL_PREFERENCES = {
   activeEraserSizePreset: 0,
   inputModePreference: 'auto',
   penObserved: false,
+  mouseToolPreference: 'select',
 } satisfies Partial<ToolState>;
+
+function readMouseToolPreference(value: unknown): CanvasTool {
+  if (value === undefined) return 'select';
+  if (value === 'select' || value === 'pan' || value === 'lasso') return value;
+  console.error('[preferences] Invalid mouse Canvas tool:', value);
+  return 'select';
+}
 
 /**
  * Toolbar / tool-settings store.
  *
- * Holds the two pieces of UI state that belong to the canvas *toolbox*
- * rather than to the canvas data itself:
- *
- * - `pendingNodeType` — the node type the user has armed for placement
- *   via click-to-place or drag-to-create. Reset on canvas switch.
- * - `sketchDraft` — the active sketch tool's color, thickness, eraser
- *   size, and mode. Kept across canvas switches as a user preference.
- *
- * Extracted from `canvasStore` so the canvas data store can stay focused
- * on persisted nodes/edges.
+ * Persists explicit mouse, sketch, and input preferences separately from
+ * Space-scoped placement/Lasso intent. Gesture navigation never edits
+ * the saved mouse preference.
  */
 export const useToolStore = create<ToolState>()(
   persistApplicationPreferences(
     (set, get) => ({
       pendingNodeType: null,
+      explicitLassoActive: false,
+      toolIntent: 0,
       ...DEFAULT_TOOL_PREFERENCES,
-      setPendingNodeType: (type) => set({ pendingNodeType: type }),
+      chooseCanvasTool: (tool, isNotMouse) =>
+        set((state) => ({
+          ...(!isNotMouse ? { mouseToolPreference: tool } : {}),
+          pendingNodeType: null,
+          explicitLassoActive: tool === 'lasso',
+          toolIntent: state.toolIntent + 1,
+        })),
+      setPendingNodeType: (type) =>
+        set((state) => ({
+          pendingNodeType: type,
+          explicitLassoActive: false,
+          toolIntent: state.toolIntent + 1,
+        })),
+      togglePendingNodeType: (type) =>
+        set((state) => ({
+          pendingNodeType: state.pendingNodeType === type ? null : type,
+          explicitLassoActive: false,
+          toolIntent: state.toolIntent + 1,
+        })),
+      finishPendingNodeType: (intent) => {
+        if (get().toolIntent !== intent) return false;
+        set({ pendingNodeType: null });
+        return true;
+      },
       setSketchDraft: (patch) =>
         set((state) => ({ sketchDraft: { ...state.sketchDraft, ...patch } })),
       setInputModePreference: (inputModePreference) =>
@@ -207,15 +240,23 @@ export const useToolStore = create<ToolState>()(
                 sketchDraft: { ...state.sketchDraft, eraserSize: value },
               };
         }),
-      resetForCanvasSwitch: () => set({ pendingNodeType: null }),
+      resetForCanvasSwitch: () =>
+        set((state) => ({
+          pendingNodeType: null,
+          explicitLassoActive: false,
+          toolIntent: state.toolIntent + 1,
+        })),
     }),
     {
       name: 'huabu-sketch-tools',
-      version: 3,
+      version: 4,
       merge: (persisted, current) => ({
         ...current,
         ...DEFAULT_TOOL_PREFERENCES,
         ...(persisted as Partial<ToolState> | undefined),
+        mouseToolPreference: readMouseToolPreference(
+          (persisted as Partial<ToolState> | undefined)?.mouseToolPreference,
+        ),
       }),
       migrate: (persistedState, version) => {
         if (!persistedState) return persistedState as ToolState;
@@ -238,6 +279,9 @@ export const useToolStore = create<ToolState>()(
         }
         return {
           ...state,
+          mouseToolPreference: readMouseToolPreference(
+            state.mouseToolPreference,
+          ),
         } as ToolState;
       },
       partialize: (state) => ({
@@ -250,6 +294,7 @@ export const useToolStore = create<ToolState>()(
         activeEraserSizePreset: state.activeEraserSizePreset,
         inputModePreference: state.inputModePreference,
         penObserved: state.penObserved,
+        mouseToolPreference: state.mouseToolPreference,
       }),
     },
   ),
