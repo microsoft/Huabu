@@ -761,7 +761,7 @@ describe('SignInGate', () => {
     },
   );
 
-  it('does not replay drafts when identity subscribers start a newer check before an older recovery returns', async () => {
+  it('replays drafts only after the newer check that superseded a recovery verifies the same principal', async () => {
     routes['GET /api/identity'] = () => json(MEMBER);
     await mount();
     resend.mockClear();
@@ -781,9 +781,13 @@ describe('SignInGate', () => {
       );
       expect(container.querySelector('[inert]')).not.toBeNull();
       expect(resend).not.toHaveBeenCalled();
+      // The focus check verifies the same person, so the recovery's refused
+      // saves are resent there rather than stranded.
+      await act(async () => finish(json(MEMBER)));
+      await vi.waitFor(() => expect(resend).toHaveBeenCalledOnce());
+      expect(container.querySelector('[inert]')).toBeNull();
     } finally {
       unsubscribe();
-      await act(async () => finish(json(MEMBER)));
     }
   });
 

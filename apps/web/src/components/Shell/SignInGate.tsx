@@ -95,6 +95,10 @@ export function SignInGate({ children }: { children: ReactNode }) {
   const originalPrincipal = useRef<string | null>(null);
   const accountChanged = useRef(false);
   const sessionChanging = useRef(false);
+  // A recovery started while the app ran: edits the lapsed session refused
+  // still need resending. Whichever check next verifies the original
+  // principal resends them, even if it is not the recovery's own check.
+  const resendPending = useRef(false);
   const app = useRef<HTMLDivElement>(null);
   const renewing = useRef(false);
   const knownAuthenticators = useRef<InteractiveAuthenticator[]>([]);
@@ -235,6 +239,21 @@ export function SignInGate({ children }: { children: ReactNode }) {
         settle(
           identity.member ? { kind: 'ready' } : { kind: 'noAccess', identity },
         );
+        if (identity.member && resendPending.current) {
+          const { resendUnsavedCanvasEdits } =
+            await import('../../store/canvasStore');
+          // Loading the editor module can yield to a peer's cookie write.
+          // This identity response must not authorize a later draft replay;
+          // the check that supersedes it resends instead.
+          if (
+            run === latestCheck.current &&
+            !sessionChanging.current &&
+            !accountChanged.current
+          ) {
+            resendPending.current = false;
+            await resendUnsavedCanvasEdits();
+          }
+        }
         return identity.member;
       }
       // A reloaded or newly opened page renews a lapsed session from the
@@ -299,23 +318,17 @@ export function SignInGate({ children }: { children: ReactNode }) {
     [setIdentity, recheckLater, adopt],
   );
 
-  /** Every recovery verifies the original principal before retrying saves. */
-  const recover = useCallback(async () => {
-    const wasStarted = appStarted.current;
-    const verification = check();
-    const verified = latestCheck.current;
-    if (!(await verification) || !wasStarted) return;
-    const { resendUnsavedCanvasEdits } =
-      await import('../../store/canvasStore');
-    // Loading the editor module can yield to a peer's cookie write. Its
-    // earlier identity response must not authorize a later draft replay.
-    if (
-      verified === latestCheck.current &&
-      !sessionChanging.current &&
-      !accountChanged.current
-    )
-      await resendUnsavedCanvasEdits();
-  }, [check]);
+  /**
+   * Every recovery verifies the original principal before retrying saves.
+   * The resend waits for a verifying check, which may be a later one.
+   */
+  const recover = useCallback(
+    async (loginError?: string) => {
+      if (appStarted.current) resendPending.current = true;
+      await check(loginError);
+    },
+    [check],
+  );
 
   useEffect(() => {
     callback.current ??= (async () => {
@@ -348,7 +361,7 @@ export function SignInGate({ children }: { children: ReactNode }) {
           else renewing.current = false;
           await recover();
         } catch (error) {
-          await check(error instanceof Error ? error.message : String(error));
+          await recover(error instanceof Error ? error.message : String(error));
         } finally {
           renewing.current = false;
         }
