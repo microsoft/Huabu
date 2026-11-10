@@ -7,7 +7,7 @@ import {
   getAgentChangeReviewConfig,
   setAgentChangeReviewConfig,
 } from './change-review-config.js';
-import { isOwnerRequest } from '../security/owner.js';
+import { canChangeOwnSettings } from '../security/owner.js';
 
 import type { AgentChangeReviewConfig, ApiResult } from '@huabu/shared';
 import type { FastifyPluginAsync } from 'fastify';
@@ -16,7 +16,7 @@ const agentChangeReviewConfigRoutes: FastifyPluginAsync = async (app) => {
   app.get<{ Reply: ApiResult<AgentChangeReviewConfig> }>(
     '/config',
     async (request, reply) => {
-      if (!isOwnerRequest(request)) {
+      if (!canChangeOwnSettings(request)) {
         return reply.status(403).send({
           message:
             'Forbidden: Agent change-review config requires owner authorization',
@@ -30,7 +30,7 @@ const agentChangeReviewConfigRoutes: FastifyPluginAsync = async (app) => {
     Body: AgentChangeReviewConfig;
     Reply: ApiResult<AgentChangeReviewConfig>;
   }>('/config', async (request, reply) => {
-    if (!isOwnerRequest(request)) {
+    if (!canChangeOwnSettings(request)) {
       return reply.status(403).send({
         message:
           'Forbidden: Agent change-review config requires owner authorization',

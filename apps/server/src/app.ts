@@ -30,6 +30,7 @@ import {
   mountAgenetes,
   resolveDaemonRuntime,
 } from './modules/agent/acp/index.js';
+import { isCurrentReachback } from './modules/agent/acp/reachback-conversation.js';
 import { initializeAgentDefaults } from './modules/agent/agent-defaults.js';
 import agentDefaultsRoutes from './modules/agent/agent-defaults.route.js';
 import agentRoutes from './modules/agent/agent.route.js';
@@ -42,7 +43,12 @@ import canvasRoutes from './modules/canvas/canvas.route.js';
 import { resetExternalNoteSessions } from './modules/canvas/external-watcher.js';
 import externalNoteRoutes from './modules/canvas/external.route.js';
 import syncRoutes from './modules/canvas/sync.route.js';
+import {
+  authenticateUserAgentlet,
+  canUseAgentlet,
+} from './modules/identity/agent-credentials.js';
 import { createIdentity, registerIdentity } from './modules/identity/index.js';
+import peopleRoutes from './modules/identity/people.route.js';
 import integrationsRoutes from './modules/integrations/integrations.route.js';
 import interactiveViewRoutes from './modules/interactive-view/interactive-view.route.js';
 import rfsRoutes from './modules/remote_fs/rfs.route.js';
@@ -60,6 +66,8 @@ import { registerSpaceAccess } from './modules/security/space-access.js';
 import serviceRoutes from './modules/services/services.route.js';
 import { closeStorage } from './modules/storage/index.js';
 import webRoutes from './modules/web/web.route.js';
+import { registerWebShell } from './modules/web-shell.js';
+import { workspaceScopedRoutes } from './modules/workspace/scoped-routes.js';
 import { registerWorkspaceRequiredGuard } from './modules/workspace-required.js';
 import { initWorkspaceFromEnv } from './modules/workspace.js';
 import workspaceRoutes from './modules/workspace.route.js';
@@ -140,11 +148,16 @@ const identity = createIdentity(getDeploymentEnvironment());
 registerIdentity(app, {
   service: identity.service,
   getConnectionToken,
+  isCurrentReachback,
   secureOrigin: resolveConfiguredPublicOrigin()?.startsWith('https:') ?? false,
 });
 // An embedded Bubble serves its own API beside Huabu's, behind the same host,
 // origin and rate-limit guards; clients address it as `<origin>/bubble`.
 if (identity.bubble) app.register(identity.bubble, { prefix: '/bubble' });
+app.register(peopleRoutes, {
+  prefix: '/api/people',
+  service: identity.service,
+});
 
 // Register @fastify/static to enable `reply.sendFile()`.
 // Actual artifact serving uses a dynamic root resolved at request time
@@ -184,17 +197,20 @@ app.register(skillsRoutes, { prefix: '/api/skills' });
 app.register(workspaceRoutes, { prefix: '/api/workspace' });
 app.register(workspacesRoutes, { prefix: '/api/workspaces' });
 app.register(rfsRoutes, { prefix: '/api/rfs' });
+// An agent's reachback names the Workspace its run started in.
+app.register(workspaceScopedRoutes(rfsRoutes), {
+  prefix: '/api/rfs/w/:workspaceId',
+});
 
 // ── External agent (ACP) transport host ───────────────────────────────
 // Mount the Agenetes agentlet transport host (`@agenetes/agentlet-host`).
-// It mounts the stateless Gateway, forks & supervises the agentlet daemon,
-// and authenticates connections against the host-injected connection token.
-// The daemon owns the agent worker pool; the server tells it which agent CLI
-// to spawn (per user profile). The token is revealed only by the explicit
-// owner-only no-store copy action and is never part of ordinary read models.
+// It mounts the Gateway and authenticates private user devices in Bubble mode.
+// Local mode also supervises the implicit user's local agentlet daemon.
+// The daemon owns the agent worker pool; the server selects a caller-owned
+// Profile. Device credentials are revealed only by an explicit no-store action.
 //
 // L1 owns all deployment-layout knowledge and injects it downward:
-// the global connection token, the data directory, and the resolved
+// authentication, device ownership, the data directory, and the resolved
 // absolute daemon entry path.
 //
 // Legacy migration: older builds persisted an `enabled` flag + shared
@@ -222,6 +238,13 @@ if (!daemonRuntime.artifacts.serviceSdkEntry) {
 }
 const agentletGateway = mountAgenetes(app, {
   connectionToken: getConnectionToken(),
+  canAccessAgentlet: canUseAgentlet,
+  ...(identity.service.provider === 'bubble'
+    ? {
+        authenticate: authenticateUserAgentlet(identity.service),
+        supervise: false,
+      }
+    : {}),
   dataDir: getDataDir(),
   daemonEntryPath: daemonRuntime.artifacts.daemonEntry ?? '',
   bootstrapEnv: daemonRuntime.bootstrapEnv,
@@ -237,8 +260,16 @@ const agentletGateway = mountAgenetes(app, {
   hostEnvPrefix: 'HUABU_',
   hostEnvAllowlist: [],
   profiles: {
-    storageDir: join(getDataDir(), 'agent-profiles'),
-    legacyStorageDir: join(getDataDir(), 'agent-team'),
+    storageDir: join(
+      getDataDir(),
+      identity.service.provider === 'bubble'
+        ? 'user-agent-profiles'
+        : 'agent-profiles',
+    ),
+    canAccess: (profile) => canUseAgentlet(profile.agentletId),
+    ...(identity.service.provider === 'local'
+      ? { legacyStorageDir: join(getDataDir(), 'agent-team') }
+      : {}),
     legacyCommandProfiles: [],
   },
 });
@@ -303,19 +334,6 @@ registerOpCounterHook(app);
 // entirely — no behaviour change.
 const webDistPath = process.env.WEB_DIST_PATH;
 if (webDistPath) {
-  app.register(async (shell) => {
-    // The application shell is what a browser loads to sign in.
-    shell.addHook('onRoute', (route) => {
-      route.config = { ...route.config, identity: 'shell' };
-    });
-    await shell.register(staticPlugin, {
-      root: webDistPath,
-      prefix: '/',
-      decorateReply: false,
-    });
-  });
-  app.setNotFoundHandler((_request, reply) => {
-    void reply.sendFile('index.html', webDistPath);
-  });
+  registerWebShell(app, webDistPath);
   app.log.info(`[web] serving static assets from ${webDistPath}`);
 }

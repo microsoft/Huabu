@@ -99,6 +99,33 @@ describe('DiskWorkspaceRepository', () => {
     await expect(repository.list()).resolves.toEqual([second, first]);
   });
 
+  it('locates physical overlaps without reading Workspace manifests or creating descendants', () => {
+    const repository = new DiskWorkspaceRepository();
+    const root = tempDir('huabu-workspace-overlap-');
+    const folder = path.join(root, 'workspace');
+    const workspace = repository.adopt(folder);
+    const alias = path.join(root, 'alias');
+    symlinkSync(folder, alias, 'dir');
+    // Ownership lookup must stay available even when a denied manifest is
+    // corrupt; only the authorized metadata read should inspect that file.
+    writeFileSync(manifestPath(folder), '{corrupt');
+    expect(repository.overlappingDirectories(alias)).toEqual([
+      { workspaceId: workspace.workspaceId, sameDirectory: true },
+    ]);
+    for (const requested of [root, path.join(alias, 'missing', 'nested')]) {
+      expect(repository.overlappingDirectories(requested)).toEqual([
+        { workspaceId: workspace.workspaceId, sameDirectory: false },
+      ]);
+    }
+    expect(
+      repository.overlappingDirectories(path.join(root, 'workspace-sibling')),
+    ).toEqual([]);
+    expect(() =>
+      readFileSync(path.join(folder, 'missing', '.workspace.json')),
+    ).toThrow();
+    expect(readFileSync(manifestPath(folder), 'utf8')).toBe('{corrupt');
+  });
+
   it('persists recency as timestamps instead of array order', async () => {
     const firstOpenedAt = Date.parse('2026-08-26T01:00:00.000Z');
     const secondOpenedAt = Date.parse('2026-08-26T02:00:00.000Z');

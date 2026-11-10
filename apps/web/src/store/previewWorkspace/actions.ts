@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+import { ApiError } from '@/api/_client';
+import { getAgentConversationOwner } from '@/api/agent';
 import { toast } from '@/components/Common/Toast';
 import { pageLifecycle } from '@/utils/pageLifecycle';
 
@@ -22,6 +24,51 @@ function findConversationTab(
       ((target.kind === 'conversation' && target.threadId === threadId) ||
         (target.kind === 'node' && target.nodeId === nodeId)),
   );
+}
+
+export async function openConversationThread(
+  canvasId: string,
+  threadId: string,
+): Promise<string> {
+  const preview = usePreviewWorkspaceStore.getState();
+  const canvas = useCanvasStore.getState();
+  const node =
+    canvas.canvasId === canvasId
+      ? canvas.nodes.find(
+          (item) => item.type === 'question' && item.data.threadId === threadId,
+        )
+      : undefined;
+  const existing = findConversationTab(canvasId, threadId, node?.id);
+  if (existing) {
+    usePanelStore.getState().requestOpenRightPanel();
+    preview.activateTab(existing.id);
+    return existing.id;
+  }
+  if (node) return openSpaceConversation(canvasId, node.id, threadId);
+  if (canvas.canvasId !== canvasId || canvas.isLoading) {
+    try {
+      const owner = await getAgentConversationOwner(canvasId, threadId);
+      if (usePreviewWorkspaceStore.getState().canvasId !== preview.canvasId)
+        throw new Error(
+          'The active Space changed while opening the conversation',
+        );
+      return openSpaceConversation(canvasId, owner.nodeId, threadId);
+    } catch (error) {
+      if (
+        !(
+          error instanceof ApiError &&
+          error.code === 'conversation_owner_missing'
+        )
+      )
+        throw error;
+    }
+  }
+  if (usePreviewWorkspaceStore.getState().canvasId !== preview.canvasId)
+    throw new Error('The active Space changed while opening the conversation');
+  usePanelStore.getState().requestOpenRightPanel();
+  return usePreviewWorkspaceStore
+    .getState()
+    .openPreviewTarget({ kind: 'chat', canvasId, threadId });
 }
 
 export function openSpaceConversation(

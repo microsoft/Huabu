@@ -26,6 +26,7 @@
 
 import { existsSync, readFileSync } from 'node:fs';
 
+import { readCanvasMemory } from './read.js';
 import { loadAgent, listSkills } from '../../../prompt/index.js';
 import {
   getStructuredStore,
@@ -38,7 +39,6 @@ import {
   workspaceMemoryPath,
 } from '../../workspace/paths.js';
 import { runAgent } from '../agent.service.js';
-import { readCanvasMemory } from './read.js';
 
 import type { MemoryLogger } from './index.js';
 import type { WriteResult } from './writers.js';

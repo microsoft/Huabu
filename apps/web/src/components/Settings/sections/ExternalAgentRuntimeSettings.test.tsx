@@ -7,13 +7,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { getElectronBridge } from '@/hooks/useElectron';
 import { useDeploymentReadinessStore } from '@/store/deploymentReadinessStore';
+import { useIdentityStore } from '@/store/identityStore';
 
 const {
   createConnectionCommand,
   getRuntimeConfig,
   updateRuntimeConfig,
   toast,
+  resetCredentials,
 } = vi.hoisted(() => ({
+  resetCredentials: vi.fn(),
   createConnectionCommand: vi.fn(),
   getRuntimeConfig: vi.fn(),
   updateRuntimeConfig: vi.fn(),
@@ -27,6 +30,7 @@ vi.mock('@/api/acp', () => ({
   createAgentletConnectionCommand: createConnectionCommand,
   getExternalAgentRuntimeConfig: getRuntimeConfig,
   updateExternalAgentRuntimeConfig: updateRuntimeConfig,
+  resetOwnDeviceCredentials: resetCredentials,
 }));
 vi.mock('@/components/Common/Toast', () => ({ toast }));
 vi.mock('@/hooks/useElectron', () => ({ getElectronBridge: vi.fn() }));
@@ -166,6 +170,52 @@ async function blurMaxAgents() {
     );
   });
 }
+
+describe('device credential reset', () => {
+  it.each(['local', 'bubble'] as const)(
+    'is offered to each Bubble user for their own devices (%s)',
+    async (provider) => {
+      useIdentityStore.setState({
+        identity: {
+          provider,
+          principal: { principalId: 'carol', kind: 'user' },
+          member: true,
+          owner: false,
+        },
+      });
+      resetCredentials.mockResolvedValue(undefined);
+      await render();
+      const button = (label: string) =>
+        [...document.querySelectorAll('button')].find(
+          (candidate) => candidate.textContent === label,
+        );
+      await act(async () =>
+        button('settings.agentletOtherConnectionOptions')?.click(),
+      );
+      const reset = button('settings.resetDeviceCredentials');
+      expect(reset !== undefined).toBe(provider === 'bubble');
+      if (!reset) return;
+      await act(async () => reset.click());
+      // Nothing is revoked before the person confirms.
+      expect(resetCredentials).not.toHaveBeenCalled();
+      expect(document.body.textContent).toContain(
+        'settings.resetDeviceCredentialsConfirm',
+      );
+      const confirm = [...document.querySelectorAll('[role="dialog"] button')]
+        .filter((b) => b.textContent === 'settings.resetDeviceCredentials')
+        .at(-1) as HTMLButtonElement;
+      await act(async () => confirm.click());
+      expect(resetCredentials).toHaveBeenCalledOnce();
+      expect(toast).toHaveBeenCalledWith(
+        'settings.resetDeviceCredentialsDone',
+        {
+          tone: 'success',
+        },
+      );
+      useIdentityStore.setState({ identity: null });
+    },
+  );
+});
 
 describe('ExternalAgentRuntimeSettings', () => {
   it('shows setup guidance before copying when loopback readiness arrives', async () => {

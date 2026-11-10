@@ -62,6 +62,7 @@ export class AgentProfileRegistry {
   constructor(
     private readonly store: AgentProfileRegistryStore,
     private readonly generateId: () => string = randomUUID,
+    private readonly canAccess: (profile: AgentProfile) => boolean = () => true,
   ) {
     this.state = parseState(store.load());
   }
@@ -78,14 +79,16 @@ export class AgentProfileRegistry {
   }
   getProfile(id: string): AgentProfile | undefined {
     const profile = this.state.profiles.find((entry) => entry.id === id);
-    return profile ? structuredClone(profile) : undefined;
+    return profile && this.canAccess(profile)
+      ? structuredClone(profile)
+      : undefined;
   }
   listProfiles(): AgentProfile[] {
-    return structuredClone(this.state.profiles);
+    return structuredClone(this.state.profiles.filter(this.canAccess));
   }
   listSelectableProfileIds(): string[] {
     return this.state.profiles
-      .filter((profile) => profile.visible !== false)
+      .filter((profile) => profile.visible !== false && this.canAccess(profile))
       .map(({ id }) => id);
   }
   snapshotProfile(id: string): AgentProfileSnapshot {
@@ -114,7 +117,12 @@ export class AgentProfileRegistry {
         : harnessProfile(input, this.generateId);
     profile.revision = 0;
     profile.executionRevision = 0;
-    if (this.getProfile(profile.id))
+    if (!this.canAccess(profile))
+      throw new AgentProfileError(
+        'profile_not_found',
+        'Agent Profile is unavailable',
+      );
+    if (this.state.profiles.some((entry) => entry.id === profile.id))
       throw new AgentProfileError(
         'profile_conflict',
         `Agent Profile already exists: ${profile.id}`,
@@ -123,12 +131,22 @@ export class AgentProfileRegistry {
     return structuredClone(profile);
   }
   importCommandProfiles(inputs: CreateAcpCommandProfileInput[]): string[] {
-    const profiles = this.listProfiles();
+    const profiles = structuredClone(this.state.profiles);
     const imported = inputs.map((input) =>
       commandProfile(input, this.generateId),
     );
     for (const profile of imported) {
+      if (!this.canAccess(profile))
+        throw new AgentProfileError(
+          'profile_not_found',
+          'Agent Profile is unavailable',
+        );
       const existing = profiles.find(({ id }) => id === profile.id);
+      if (existing && !this.canAccess(existing))
+        throw new AgentProfileError(
+          'profile_conflict',
+          `Agent Profile already exists: ${profile.id}`,
+        );
       if (existing?.revision !== undefined)
         profile.revision = existing.revision;
       if (existing?.executionRevision !== undefined)
@@ -213,6 +231,7 @@ export class AgentProfileRegistry {
     return structuredClone(profile);
   }
   deleteProfile(id: string): boolean {
+    if (!this.getProfile(id)) return false;
     const profiles = this.state.profiles.filter((profile) => profile.id !== id);
     if (profiles.length === this.state.profiles.length) return false;
     this.commit({ profiles });

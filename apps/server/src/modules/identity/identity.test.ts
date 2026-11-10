@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { resolveIdentityConfig } from './config.js';
 import { registerIdentity } from './http.js';
 import { createLocalIdentityService } from './local.js';
+import { IdentityError } from './service.js';
 import { isOwnerRequest } from '../security/owner.js';
 
 import type { IdentityService } from './service.js';
@@ -254,5 +255,37 @@ describe('local identity admission', () => {
         })
       ).statusCode,
     ).toBe(200);
+  });
+});
+
+describe('refused accounts', () => {
+  it('say whether signing out ends the provider session, only where configured', async () => {
+    const refusing = (providerSignOut: boolean): IdentityService => ({
+      provider: 'bubble',
+      challenge: 'Bearer',
+      ...(providerSignOut ? { providerSignOut: true } : {}),
+      authenticate: async () => {
+        throw new IdentityError(
+          403,
+          'IDENTITY_FORBIDDEN',
+          'Identity access denied',
+        );
+      },
+    });
+    for (const configured of [false, true]) {
+      const app = host(refusing(configured));
+      const identity = await app.inject({ url: '/api/identity' });
+      expect(identity.statusCode).toBe(403);
+      expect(identity.json()).toEqual({
+        message: 'Identity access denied',
+        code: 'IDENTITY_FORBIDDEN',
+        ...(configured ? { providerSignOut: true } : {}),
+      });
+      // Other routes keep the plain refusal.
+      expect((await app.inject({ url: '/api/data' })).json()).toEqual({
+        message: 'Identity access denied',
+        code: 'IDENTITY_FORBIDDEN',
+      });
+    }
   });
 });

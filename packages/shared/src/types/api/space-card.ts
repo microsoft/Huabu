@@ -5,7 +5,10 @@ import { z } from 'zod';
 
 import { agentIconSchema } from './agent-profile.js';
 import { agentBindingSchema } from './agent.js';
-import { recentCanvasConversationParamsSchema } from './canvas.js';
+import {
+  canvasAccessSchema,
+  recentCanvasConversationParamsSchema,
+} from './canvas.js';
 
 export const spaceCardQuerySchema = z.object({
   canvasIds: z
@@ -34,6 +37,8 @@ export const spaceCardSnapshotSchema = z.discriminatedUnion('status', [
     title: z.string().nullable(),
     updatedAt: z.number(),
     activity: spaceAgentActivitySchema,
+    /** Same permission projection as Canvas GET; absent legacy responses are unknown in Bubble. */
+    access: canvasAccessSchema.optional(),
   }),
   z.object({ status: z.literal('missing') }),
   z.object({ status: z.literal('error') }),

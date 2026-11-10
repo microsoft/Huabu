@@ -46,6 +46,7 @@ import {
   adoptWorkspaceDirectory,
   materializesWorkspaces,
 } from './storage/index.js';
+import { currentWorkspaceScope } from './workspace/context.js';
 import { prepareWorkspaceOnDisk } from './workspace-prepare.js';
 import { invalidateUserSkill } from '../prompt/index.js';
 
@@ -60,8 +61,9 @@ const ENV_KEY = 'HUABU_WORKSPACE';
 let _workspaceHandle: WorkspaceHandle | null = null;
 let _workspacePath: string | null = null;
 let _managed = false;
-let _leasedWorkspaceKey: string | null = null;
-let _workspaceOperationLeaseCount = 0;
+// Leases per Workspace key. Several Workspaces can be live at once in Bubble
+// mode, each with its own in-flight work.
+const _workspaceOperationLeases = new Map<string, number>();
 let _activatingWorkspacePath: string | null = null;
 
 /**
@@ -114,7 +116,7 @@ export function isManagedMode(): boolean {
 }
 
 export function isWorkspaceConfigured(): boolean {
-  return _workspaceHandle !== null;
+  return getWorkspaceHandle() !== null;
 }
 
 /**
@@ -160,14 +162,15 @@ export function initWorkspaceFromEnv(): void {
  * Throws if no workspace has been activated yet.
  */
 export function getWorkspacePath(): string {
-  if (!_workspacePath) {
+  const workspacePath = getWorkspaceDirectory();
+  if (!workspacePath) {
     throw new Error(
       'Workspace path has not been configured. ' +
         'Activate a workspace first (PUT /api/workspace) or set ' +
         `${ENV_KEY} in the environment.`,
     );
   }
-  return _workspacePath;
+  return workspacePath;
 }
 
 /**
@@ -178,6 +181,8 @@ export function getWorkspacePath(): string {
  * a directory should keep calling {@link getWorkspacePath} and let it refuse.
  */
 export function getWorkspaceDirectory(): string | null {
+  const scope = currentWorkspaceScope();
+  if (scope !== undefined) return scope?.path ?? null;
   return _workspacePath;
 }
 
@@ -190,45 +195,76 @@ export function getWorkspaceDirectory(): string | null {
  * is the Workspace identity.
  */
 export function getWorkspaceKey(): string {
-  if (_workspacePath) return _workspacePath;
-  if (_workspaceHandle) return `workspace:${_workspaceHandle.workspaceId}`;
+  const key = workspaceKeyOf(getWorkspaceHandle(), getWorkspaceDirectory());
+  if (key) return key;
   throw new Error(
     'Workspace has not been configured. Activate a workspace first ' +
       `(PUT /api/workspace) or set ${ENV_KEY} in the environment.`,
   );
 }
 
-/** The active immutable Workspace identity, or null before configuration. */
+/**
+ * The immutable identity of the Workspace this call runs in: the request's
+ * own in Bubble mode, else the process-active one. `null` before
+ * configuration.
+ */
 export function getWorkspaceHandle(): WorkspaceHandle | null {
+  const scope = currentWorkspaceScope();
+  if (scope !== undefined) return scope?.handle ?? null;
   return _workspaceHandle;
 }
 
 /**
- * Keep the currently-active workspace stable for an async operation.
+ * The key {@link getWorkspaceKey} gives a Workspace: its folder on Disk, else
+ * its identity. `null` for no Workspace.
+ */
+export function workspaceKeyOf(
+  workspace: WorkspaceHandle,
+  directory: string | null,
+): string;
+export function workspaceKeyOf(
+  workspace: WorkspaceHandle | null,
+  directory: string | null,
+): string | null;
+export function workspaceKeyOf(
+  workspace: WorkspaceHandle | null,
+  directory: string | null,
+): string | null {
+  if (directory) return directory;
+  return workspace ? `workspace:${workspace.workspaceId}` : null;
+}
+
+/** The process-active Workspace, whatever Workspace this call runs in. */
+export function getProcessWorkspaceHandle(): WorkspaceHandle | null {
+  return _workspaceHandle;
+}
+
+/**
+ * Keep the Workspace this call runs in stable for an async operation.
  *
- * Multiple operations may hold leases concurrently. Switching to another
- * workspace is rejected until every lease has been released; recommitting the
- * same Workspace remains allowed.
+ * Multiple operations may hold leases concurrently, on one Workspace or
+ * several. Switching the process-active Workspace away from a leased one is
+ * rejected until its leases are released; recommitting the same Workspace
+ * remains allowed.
  */
 export function acquireWorkspaceOperationLease(): WorkspaceOperationLease {
   const workspaceKey = getWorkspaceKey();
+  const processKey = processWorkspaceKey();
 
+  // A pending switch moves only the process-active Workspace, so it holds
+  // back new work there and nowhere else.
   if (
     _activatingWorkspacePath !== null &&
+    workspaceKey === processKey &&
     _activatingWorkspacePath !== workspaceKey
   ) {
     throw new WorkspaceActivationInProgressError();
   }
 
-  if (
-    _workspaceOperationLeaseCount > 0 &&
-    _leasedWorkspaceKey !== workspaceKey
-  ) {
-    throw new Error('Workspace operation lease invariant violated');
-  }
-
-  _leasedWorkspaceKey = workspaceKey;
-  _workspaceOperationLeaseCount += 1;
+  _workspaceOperationLeases.set(
+    workspaceKey,
+    (_workspaceOperationLeases.get(workspaceKey) ?? 0) + 1,
+  );
 
   let released = false;
   return Object.freeze({
@@ -236,12 +272,20 @@ export function acquireWorkspaceOperationLease(): WorkspaceOperationLease {
     release(): void {
       if (released) return;
       released = true;
-      _workspaceOperationLeaseCount -= 1;
-      if (_workspaceOperationLeaseCount === 0) {
-        _leasedWorkspaceKey = null;
-      }
+      const remaining = (_workspaceOperationLeases.get(workspaceKey) ?? 1) - 1;
+      if (remaining > 0) _workspaceOperationLeases.set(workspaceKey, remaining);
+      else _workspaceOperationLeases.delete(workspaceKey);
     },
   });
+}
+
+/** Whether any operation holds a lease on this Workspace key. */
+export function isWorkspaceLeased(workspaceKey: string): boolean {
+  return _workspaceOperationLeases.has(workspaceKey);
+}
+
+function processWorkspaceKey(): string | null {
+  return workspaceKeyOf(_workspaceHandle, _workspacePath);
 }
 
 /**
@@ -331,8 +375,9 @@ function commitResolvedWorkspacePath(resolvedPath: string): void {
   _workspaceHandle = adoptWorkspaceDirectory(resolvedPath);
   _workspacePath = resolvedPath;
   // Drop the cached canvas-dir index so subsequent lookups (used by
-  // migrations and route handlers) reflect the new workspace.
-  refreshCanvasDirIndex();
+  // migrations and route handlers) reflect the new workspace. Named, because
+  // a request committing it may itself run in another Workspace.
+  refreshCanvasDirIndex(resolvedPath);
   // Drop any user-skill cache built against the previous workspace so
   // the next `listSkills` / `read("skills/...")` call rescans the new
   // `<workspace>/setting/skills/` from scratch. The import-cycle with
@@ -342,7 +387,7 @@ function commitResolvedWorkspacePath(resolvedPath: string): void {
   // — here `invalidateUserSkill` is only ever called from within
   // function bodies, after both modules have finished evaluating.
   invalidateUserSkill();
-  resetExternalNoteSessions();
+  resetExternalNoteSessions({ processOnly: true });
 }
 
 /**
@@ -356,26 +401,20 @@ function commitResolvedWorkspacePath(resolvedPath: string): void {
  */
 export function commitWorkspaceIdentity(workspace: WorkspaceHandle): void {
   assertNoWorkspaceActivationInProgress();
-  const key = `workspace:${workspace.workspaceId}`;
-  if (
-    _workspaceOperationLeaseCount > 0 &&
-    _leasedWorkspaceKey !== null &&
-    _leasedWorkspaceKey !== key
-  ) {
-    throw new WorkspaceOperationInProgressError();
-  }
+  assertProcessWorkspaceChangeAllowed(workspaceKeyOf(workspace, null));
   _workspaceHandle = workspace;
   _workspacePath = null;
   refreshCanvasDirIndex();
   invalidateUserSkill();
-  resetExternalNoteSessions();
+  resetExternalNoteSessions({ processOnly: true });
 }
 
 /** Refresh metadata for the active Workspace without switching namespaces. */
 export function updateActiveWorkspaceHandle(
   workspace: WorkspaceHandle,
 ): boolean {
-  if (_workspaceHandle?.workspaceId !== workspace.workspaceId) return false;
+  if (getProcessWorkspaceHandle()?.workspaceId !== workspace.workspaceId)
+    return false;
   _workspaceHandle = workspace;
   return true;
 }
@@ -401,11 +440,13 @@ function validateAbsolutePath(p: string): void {
 }
 
 function assertWorkspacePathChangeAllowed(resolvedPath: string): void {
-  if (
-    _workspaceOperationLeaseCount > 0 &&
-    _leasedWorkspaceKey !== null &&
-    _leasedWorkspaceKey !== resolvedPath
-  ) {
+  assertProcessWorkspaceChangeAllowed(resolvedPath);
+}
+
+/** Refuse to move the process-active Workspace away while work holds it. */
+function assertProcessWorkspaceChangeAllowed(nextKey: string): void {
+  const key = processWorkspaceKey();
+  if (key !== null && key !== nextKey && isWorkspaceLeased(key)) {
     throw new WorkspaceOperationInProgressError();
   }
 }

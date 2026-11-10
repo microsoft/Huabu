@@ -24,6 +24,7 @@ import {
   mountTestWorkspace,
   type MountedTestStorage,
 } from '../storage/testing.js';
+import { canvasAcpNamespace } from '../workspace/paths.js';
 
 import type { CanvasNode } from '@huabu/shared/canvas-engine';
 
@@ -127,7 +128,10 @@ describe('Agent Node creation against an awaited record', () => {
           ],
         });
       await setMode('operate');
-      release = acquireAgentTurn('thread-attached');
+      release = acquireAgentTurn(
+        'thread-attached',
+        canvasAcpNamespace(canvasId),
+      );
       expect(release).not.toBeNull();
       await expect(setMode('ask')).rejects.toMatchObject({
         code: 'agent_draft_busy',

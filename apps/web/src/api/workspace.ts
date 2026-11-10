@@ -60,6 +60,34 @@ export async function listWorkspaces(): Promise<WorkspaceDescriptor[]> {
   });
 }
 
+/**
+ * Create a Workspace by name, for a Server where each person keeps their own
+ * (`capabilities.namedWorkspaces`). The caller owns it; it is not activated.
+ */
+export async function createNamedWorkspace(
+  name: string,
+): Promise<WorkspaceDescriptor> {
+  return apiFetch<WorkspaceDescriptor>(routes.workspaces, {
+    method: 'POST',
+    json: { name },
+    fallbackMessage: 'Failed to create Workspace',
+  });
+}
+
+/**
+ * Open a folder on the Server as a Workspace of the caller's own
+ * (`capabilities.folderWorkspaces`). It is not activated.
+ */
+export async function openFolderWorkspace(
+  path: string,
+): Promise<WorkspaceDescriptor> {
+  return apiFetch<WorkspaceDescriptor>(routes.workspaces, {
+    method: 'POST',
+    json: { path },
+    fallbackMessage: 'Failed to open folder',
+  });
+}
+
 /** Activate a registered Workspace by stable identity. */
 export async function activateWorkspace(
   workspaceId: string,

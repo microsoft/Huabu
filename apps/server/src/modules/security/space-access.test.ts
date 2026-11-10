@@ -34,10 +34,13 @@ function host() {
       owner: request.headers['x-owner'] === 'yes',
       access: {
         can: async (level, { id }) =>
-          id === 'mine' || (id === 'shared' && level === 'read'),
+          id === 'mine' ||
+          (id === 'shared' && level === 'read') ||
+          (id === 'edit' && level !== 'manage'),
         claim: async ({ id }) => {
           claimed.push(id);
         },
+        workspaces: async () => 'all',
       },
     });
   });
@@ -45,6 +48,11 @@ function host() {
   const ok = async () => ({ ok: true });
   app.get('/api/canvas/:canvasId', ok);
   app.put('/api/canvas/:canvasId', ok);
+  app.delete(
+    '/api/canvas/:canvasId',
+    { config: { spaceAccess: 'manage' } },
+    ok,
+  );
   app.post(
     '/api/canvas/:canvasId/search',
     { config: { spaceAccess: 'read' } },
@@ -53,14 +61,12 @@ function host() {
   app.get('/api/agent/history/:threadId', ok);
   app.post('/api/agent', ok);
   app.post('/api/acp/threads/:threadId/permission', ok);
+  app.get('/api/acp/profiles', ok);
+  app.post('/api/acp/profiles', ok);
   app.get('/api/canvas/:canvasId/threads/:threadId/changes', ok);
   app.post('/api/canvas-titles', ok);
   app.post('/api/rfs/:canvasId/services/:serviceId/lease', ok);
-  app.post(
-    '/api/interactive-views/:canvasId/:nodeId/actions/:actionId',
-    { config: { invokesAgent: true } },
-    ok,
-  );
+  app.post('/api/interactive-views/:canvasId/:nodeId/actions/:actionId', ok);
   app.post('/api/canvas/:canvasId/move-selection', ok);
   app.patch('/api/canvas/:canvasId/parent', ok);
   app.post('/api/canvas/:canvasId/artifact/clone-from', ok);
@@ -79,6 +85,17 @@ function host() {
 }
 
 describe('Space access', () => {
+  it('needs manage, not only write, on a route that declares it', async () => {
+    const { app } = host();
+    const remove = async (id: string) =>
+      (await app.inject({ method: 'DELETE', url: `/api/canvas/${id}` }))
+        .statusCode;
+    expect(await remove('mine')).toBe(200);
+    expect(await remove('edit')).toBe(403);
+    expect(await remove('shared')).toBe(403);
+    expect(await remove('other')).toBe(404);
+  });
+
   it('reads and writes only the Spaces the identity provider allows', async () => {
     const { app } = host();
     const status = async (method: 'GET' | 'PUT', id: string) =>
@@ -139,23 +156,42 @@ describe('Space access', () => {
     expect((await titles('', { canvasId: ['mine'] })).statusCode).toBe(400);
   });
 
-  it('keeps agents and conversations to owners, whatever Space a request names', async () => {
+  it('authorizes member agent operations by Space while device ownership is enforced by agent services', async () => {
     const { app } = host();
     const as = (owner: 'yes' | 'no') => ({ 'x-owner': owner });
+    const member = async (request: {
+      method?: 'GET' | 'POST';
+      url: string;
+      payload?: object;
+    }) => (await app.inject({ ...request, headers: as('no') })).statusCode;
+    // Conversations, through a Space they may use.
+    expect(await member({ url: '/api/agent/history/t1?canvasId=mine' })).toBe(
+      200,
+    );
+    expect(
+      await member({
+        method: 'POST',
+        url: '/api/agent',
+        payload: { canvasId: 'mine' },
+      }),
+    ).toBe(200);
+    expect(await member({ url: '/api/canvas/mine/threads/t1/changes' })).toBe(
+      200,
+    );
+    // Not through one they may not, nor without naming one.
+    expect(await member({ url: '/api/agent/history/t1?canvasId=other' })).toBe(
+      404,
+    );
+    expect(await member({ url: '/api/agent/history/t1' })).toBe(400);
+    // Profile routes enforce device ownership separately from Space access.
+    expect(await member({ url: '/api/acp/profiles' })).toBe(200);
     for (const request of [
-      { url: '/api/agent/history/t1?canvasId=mine' },
-      { url: '/api/agent/history/t1' },
-      { method: 'POST', url: '/api/agent', payload: { canvasId: 'mine' } },
+      { method: 'POST', url: '/api/acp/profiles' },
       { method: 'POST', url: '/api/acp/threads/t1/permission?canvasId=mine' },
-      { url: '/api/canvas/mine/threads/t1/changes' },
-      // The machine credential's own surface: agent launches, Task Runs and
-      // shared service credentials.
       { method: 'POST', url: '/api/rfs/mine/services/web-search/lease' },
       { method: 'POST', url: '/api/interactive-views/mine/n1/actions/a1' },
     ] as const) {
-      expect(
-        (await app.inject({ ...request, headers: as('no') })).statusCode,
-      ).toBe(403);
+      expect(await member(request)).toBe(200);
     }
     expect(
       (
@@ -173,10 +209,12 @@ describe('Space access', () => {
         })
       ).statusCode,
     ).toBe(404);
+    // An administrator's agents are private too: a conversation is still
+    // addressed through its Space.
     expect(
       (await app.inject({ url: '/api/agent/history/t1', headers: as('yes') }))
         .statusCode,
-    ).toBe(200);
+    ).toBe(400);
     expect(
       (
         await app.inject({
@@ -278,3 +316,42 @@ describe('Space access', () => {
     expect(claimed).toEqual(['created']);
   });
 });
+
+it('requires a Space even for a brand new member conversation without a thread id', async () => {
+  const { app } = host();
+  const result = await app.inject({
+    method: 'POST',
+    url: '/api/agent',
+    payload: { content: 'hello' },
+  });
+  expect(result.statusCode).toBe(400);
+  expect(result.json().code).toBe('SPACE_ACCESS_AMBIGUOUS');
+});
+
+it.each([false, true])(
+  'requires the Space of a named conversation, for administrators too (owner=%s)',
+  async (owner) => {
+    const { app } = host();
+    const headers = owner ? { 'x-owner': 'yes' } : {};
+    for (const request of [
+      { method: 'GET' as const, url: '/api/agent/history/t1' },
+      {
+        method: 'POST' as const,
+        url: '/api/acp/threads/t1/permission',
+        payload: {},
+      },
+    ]) {
+      const result = await app.inject({ ...request, headers });
+      expect(result.statusCode).toBe(400);
+      expect(result.json().code).toBe('SPACE_ACCESS_AMBIGUOUS');
+    }
+    expect(
+      (
+        await app.inject({
+          url: '/api/agent/history/t1?canvasId=mine',
+          headers,
+        })
+      ).statusCode,
+    ).toBe(200);
+  },
+);

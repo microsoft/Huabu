@@ -4,14 +4,26 @@
 import { timingSafeEqual } from 'node:crypto';
 
 import {
+  readAgentCredential,
+  registerAgentIdentity,
+} from './agent-credentials.js';
+import { openPersonalSettings, useCaller } from './personal-settings.js';
+import {
   getRequestAuthorizations,
+  setRequestWorkspaceChooser,
   getRequestIdentity,
   setRequestIdentity,
 } from './request.js';
 import { IdentityError, UNRESTRICTED_ACCESS } from './service.js';
 import { isPublicRfsSkillBootstrapRequest } from '../remote_fs/public-skill.js';
 import { isLoopbackRequest } from '../security/peer.js';
+import {
+  fillWorkspaceScope,
+  openWorkspaceScope,
+  runInWorkspace,
+} from '../workspace/context.js';
 
+import type { AgentReachback } from './agent-credentials.js';
 import type { IdentityCredentials, IdentityService } from './service.js';
 import type { IdentityResponse } from '@huabu/shared';
 import type { FastifyInstance } from 'fastify';
@@ -61,6 +73,11 @@ export function registerIdentity(
     secureOrigin?: boolean;
     /** Bounded revocation for long-lived HTTP responses such as canvas SSE. */
     revalidationIntervalMs?: number;
+    /**
+     * Whether an agent's reachback still names its live conversation. Without
+     * it, every reachback credential is refused.
+     */
+    isCurrentReachback?: (claims: AgentReachback) => Promise<boolean>;
   },
 ): void {
   const { service } = options;
@@ -68,10 +85,23 @@ export function registerIdentity(
   if (!Number.isFinite(interval) || interval <= 0) {
     throw new Error('Identity revalidation interval must be positive');
   }
+  registerAgentIdentity(app, service, interval);
   const activeResponses = new Set<() => void>();
   app.addHook('preClose', async () => {
     for (const close of activeResponses) close();
   });
+  // In Bubble mode every request runs in its caller's own Workspace. The slot
+  // must wrap the rest of the lifecycle, which only a callback hook can do;
+  // admission fills it below once it knows who is calling.
+  if (service.provider === 'bubble') {
+    app.addHook('onRequest', (_request, _reply, done) =>
+      openWorkspaceScope(done),
+    );
+    // Likewise each member's settings, model keys and credentials are their own.
+    app.addHook('onRequest', (_request, _reply, done) =>
+      openPersonalSettings(done),
+    );
+  }
   app.addHook('onRequest', async (request, reply) => {
     const path = request.url.split('?', 1)[0];
     const identityRoute = path === '/api/identity' || path === SESSION_PATH;
@@ -102,15 +132,15 @@ export function registerIdentity(
     )
       return;
 
-    // Existing machine reachback remains available. Whether it is also an
-    // owner is the provider's call: local mode keeps its loopback rule, and in
-    // Bubble mode a daemon is never a human owner.
+    // Local machine reachback keeps its existing owner and loopback rules.
+    // Bubble admits only user credentials and scoped reachback below.
     const machineToken = options.getConnectionToken();
     const supplied = Buffer.from(authorization ?? '');
     const expected = machineToken
       ? Buffer.from(`Bearer ${machineToken}`)
       : undefined;
     if (
+      service.provider !== 'bubble' &&
       expected &&
       supplied.length === expected.length &&
       timingSafeEqual(supplied, expected)
@@ -132,6 +162,56 @@ export function registerIdentity(
         return Array.isArray(value) ? value[0] : value;
       },
     };
+    const bearer = authorization?.match(/^Bearer (\S+)$/)?.[1] ?? '';
+    const agentCredential =
+      service.provider === 'bubble' && readAgentCredential(bearer) !== null;
+    const resolveIdentity = async () => {
+      if (!agentCredential) return service.authenticate(credentials);
+      // Read afresh on every revalidation too: resetting its owner's
+      // credentials revokes it, and closes the responses it holds open.
+      const agentClaims = readAgentCredential(bearer);
+      if (!agentClaims) return null;
+      const params = request.params as {
+        workspaceId?: string;
+        canvasId?: string;
+        threadId?: string;
+      };
+      if (
+        !request.routeOptions.url?.startsWith('/api/rfs/w/') ||
+        !params.workspaceId ||
+        !params.canvasId
+      )
+        return null;
+      if (agentClaims.aud === 'rfs') {
+        if (
+          params.workspaceId !== agentClaims.workspaceId ||
+          params.canvasId !== agentClaims.canvasId ||
+          (params.threadId !== undefined &&
+            params.threadId !== agentClaims.threadId) ||
+          (request.headers['x-huabu-host-thread-id'] !== undefined &&
+            request.headers['x-huabu-host-thread-id'] !==
+              agentClaims.threadId) ||
+          !(await options.isCurrentReachback?.(agentClaims).catch(() => false))
+        )
+          return null;
+        // Scoped agent authorship comes from verified claims, including on
+        // generic /execute requests that have no conversation route parameter.
+        request.headers['x-huabu-host-thread-id'] = agentClaims.threadId;
+        return (
+          (await service.resolvePrincipal?.(agentClaims.principalId)) ?? null
+        );
+      }
+      // A device credential is what `$AGENTLET_TOKEN` holds on the owner's
+      // device. Skills, scripts and agent sessions from before per-conversation
+      // reachback still send it, so RFS accepts it for the device owner, with
+      // that person's own Workspace and Space access and nothing more.
+      const owner = await service.resolvePrincipal?.(agentClaims.principalId);
+      if (!owner) return null;
+      const workspaces = await owner.access.workspaces();
+      return workspaces === 'all' || workspaces.includes(params.workspaceId)
+        ? owner
+        : null;
+    };
     // Without a login the RFS surface still requires the machine token.
     // Basic-authenticated owners retain their current access.
     if (service.credentialFree && request.url.startsWith('/api/rfs/'))
@@ -140,7 +220,7 @@ export function registerIdentity(
         code: 'IDENTITY_REQUIRED',
       });
     try {
-      const identity = await service.authenticate(credentials);
+      const identity = await resolveIdentity();
       if (!identity) {
         return reply
           .header('WWW-Authenticate', service.challenge)
@@ -160,6 +240,20 @@ export function registerIdentity(
           code: 'ACCESS_REQUIRED',
         });
       }
+      // A member's first request, `GET /api/identity` after sign-in included,
+      // is also where their personal Workspace is created.
+      if (identity.member && service.selectWorkspace) useCaller(identity);
+      if (identity.member && service.selectWorkspace) {
+        const scope = await service.selectWorkspace(identity);
+        if (scope) fillWorkspaceScope(scope);
+        const { chooseWorkspace } = service;
+        if (chooseWorkspace)
+          setRequestWorkspaceChooser(
+            request,
+            async (workspaceId) =>
+              (await chooseWorkspace(identity, workspaceId)) !== null,
+          );
+      }
       if (
         service.provider === 'bubble' &&
         !reply.raw.destroyed &&
@@ -176,17 +270,23 @@ export function registerIdentity(
           clearInterval(timer);
           activeResponses.delete(close);
         };
-        // Every Space the request was let into must still be open to it.
+        // Every Space the request was let into must still be open to it, in
+        // the Workspace it was let in: a Workspace-scoped route's own, not
+        // the caller's current one this timer was started in.
         const stillAuthorized = async (current: typeof identity) => {
-          for (const { level, resource } of getRequestAuthorizations(request))
-            if (!(await current.access.can(level, resource))) return false;
+          for (const { level, resource, scope } of getRequestAuthorizations(
+            request,
+          )) {
+            const check = () => current.access.can(level, resource);
+            if (!(await (scope ? runInWorkspace(scope, check) : check())))
+              return false;
+          }
           return true;
         };
         const timer = setInterval(() => {
           if (closed || checking) return;
           checking = true;
-          void service
-            .authenticate(credentials)
+          void resolveIdentity()
             .then(async (current) => {
               if (
                 !closed &&
@@ -214,9 +314,17 @@ export function registerIdentity(
       }
     } catch (error) {
       if (!(error instanceof IdentityError)) throw error;
-      return reply
-        .code(error.statusCode)
-        .send({ message: error.message, code: error.code });
+      return reply.code(error.statusCode).send({
+        message: error.message,
+        code: error.code,
+        // A refused account signs out of the provider to switch accounts,
+        // when the deployment ends provider sessions at all.
+        ...(identityRoute &&
+        error.code === 'IDENTITY_FORBIDDEN' &&
+        service.providerSignOut
+          ? { providerSignOut: true }
+          : {}),
+      });
     }
   });
   app.get<{ Reply: IdentityResponse }>(
@@ -227,7 +335,13 @@ export function registerIdentity(
       if (!identity)
         throw new Error('Identity admission did not resolve a principal');
       const { principal, member, owner } = identity;
-      return { provider: service.provider, principal, member, owner };
+      return {
+        provider: service.provider,
+        principal,
+        member,
+        owner,
+        ...(service.providerSignOut ? { providerSignOut: true } : {}),
+      };
     },
   );
 

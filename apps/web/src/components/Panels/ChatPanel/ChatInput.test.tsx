@@ -63,6 +63,10 @@ vi.mock('@/store/previewWorkspace/store', () => ({
   },
 }));
 
+vi.mock('@/store/previewWorkspace/actions', () => ({
+  openConversationThread: vi.fn(),
+}));
+
 vi.mock('@/store/workspaceStore', () => ({
   useWorkspaceStore: { getState: () => ({ workspaceId: null }) },
 }));

@@ -70,6 +70,7 @@ const carol = (owner: boolean): ResolvedIdentity => ({
   access: {
     can: async (_level, { id }) => id === 'mine',
     claim: async () => {},
+    workspaces: async () => 'all' as const,
   },
 });
 
@@ -101,17 +102,17 @@ describe('POST /:canvasId/nodes/:nodeId/preprocess under per-Space access', () =
     expect(await preprocess(carol(false), 'artifact-own.png')).toBe(200);
   });
 
-  it('runs extraction without the Utility Agent, on the public network only, for a member', async () => {
+  it('lets members and administrators use their Utility Agent on the public network only', async () => {
     await preprocess(carol(false), 'artifact-own.png');
     await preprocess(carol(true), 'artifact-own.png');
     expect(seen.map((request) => request.options?.allowLLM)).toEqual([
-      false,
+      true,
       true,
     ]);
-    // A member's run fetches only from public addresses.
+    // Both roles' runs fetch only from public addresses.
     expect(seen.map((request) => request.publicNetworkOnly)).toEqual([
       true,
-      undefined,
+      true,
     ]);
   });
 

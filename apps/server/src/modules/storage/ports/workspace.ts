@@ -34,7 +34,8 @@ export interface WorkspaceHandle {
 
 export interface WorkspaceRepository {
   get(workspaceId: string): Promise<WorkspaceHandle | null>;
-  list(): Promise<readonly WorkspaceHandle[]>;
+  /** Preserve repository ordering, reading metadata only for the supplied ids. */
+  list(workspaceIds?: readonly string[]): Promise<readonly WorkspaceHandle[]>;
   rename(workspaceId: string, name: string): Promise<WorkspaceHandle | null>;
   /** Forget one member without deleting any Workspace-owned data. */
   remove(workspaceId: string): Promise<boolean>;

@@ -1,5 +1,6 @@
 /**
- * Per-process registry of live ACP sessions, keyed by agentletId + threadId.
+ * Per-process registry of live ACP sessions, keyed by device and the full
+ * namespace/thread identity shared with the Agenetes runtime.
  *
  * Persistence model: every Sediment chat thread bound to an external
  * agent (`AgentBindingExternal`) owns one long-lived ACP session on
@@ -29,6 +30,8 @@
  * history (loaded via `loadContext`) remains the source of truth for
  * what the user sees.
  */
+
+import { threadIdentityKey } from '@agenetes/runtime';
 
 import type { AcpBindingRecipe } from './binding-recipe.js';
 import type { AcpAgentClient } from './client.js';
@@ -66,10 +69,9 @@ export interface AcpSessionEntry {
    * Storage / metadata scope for this session (§7 M5.0) — the `Namespace`
    * (`{ name, storage? }`) the session store persists under, and the
    * opaque scope key for the fs sandbox / permission checks. A thread is
-   * normally pinned to one scope for its lifetime, but if it ever rebinds
-   * to a different `namespace.name` we treat it like a binding change and
-   * reset the session \u2014 otherwise fs sandbox / permission scope would
-   * leak across scopes. L1 maps its canvasId onto this; the driver treats
+   * normally pinned to one scope for its lifetime. Owner/name and legacy
+   * storage-root identity match the runtime, so sessions in different scopes
+   * coexist without replacing one another. L1 maps its canvasId onto this; the driver treats
    * it opaquely and resolves all on-disk paths from it, so no host path
    * helper is reached. An empty `name` means "no scope" and the fs sandbox
    * rejects any fs/* call in that state.
@@ -212,17 +214,165 @@ export interface AcpSessionEntry {
   metaUpdatedAt: number;
 }
 
+/** Capture caller-owned namespace data before asynchronous preparation. */
+export function captureAcpNamespace(namespace: Namespace): Namespace {
+  return Object.freeze({
+    ...namespace,
+    ...(namespace.storage
+      ? { storage: Object.freeze({ ...namespace.storage }) }
+      : {}),
+  });
+}
+
+/** Device transport key; namespace/thread identity has one owner in runtime. */
+export function acpTransportKey(
+  agentletId: string,
+  threadId: string,
+  namespace?: Namespace,
+): string {
+  return JSON.stringify([
+    agentletId,
+    threadIdentityKey({ threadId, namespace }),
+  ]);
+}
+
+interface PreparationScope {
+  agentletId: string;
+  threadId: string;
+  namespace?: Namespace;
+  pending: Set<Promise<void>>;
+  closing: boolean;
+}
+
 class AcpSessionRegistry {
   private readonly byPlacementAndThread = new Map<string, AcpSessionEntry>();
+  // Startup reservations are not live sessions yet. Keeping them beside the
+  // registry makes legacy ambiguity and teardown include that owned work.
+  private readonly preparing = new Map<string, PreparationScope>();
 
-  /** Look up the session bound to one placement/thread pair. */
-  get(agentletId: string, threadId: string): AcpSessionEntry | undefined {
-    return this.byPlacementAndThread.get(registryKey(agentletId, threadId));
+  scopes(
+    agentletId: string,
+    threadId: string,
+  ): Map<string, Namespace | undefined> {
+    const scopes = new Map<string, Namespace | undefined>();
+    for (const [key, entry] of this.byPlacementAndThread) {
+      if (entry.agentletId === agentletId && entry.threadId === threadId)
+        scopes.set(key, entry.namespace);
+    }
+    for (const [key, scope] of this.preparing) {
+      if (scope.agentletId === agentletId && scope.threadId === threadId)
+        scopes.set(key, scope.namespace);
+    }
+    return scopes;
   }
 
-  /** Register a fresh session for one placement/thread pair. */
+  private key(
+    agentletId: string,
+    threadId: string,
+    namespace?: Namespace,
+  ): string {
+    if (namespace) return acpTransportKey(agentletId, threadId, namespace);
+    const matches = this.scopes(agentletId, threadId);
+    if (matches.size > 1)
+      throw new Error(
+        `Ambiguous ACP thread '${threadId}'; supply its namespace`,
+      );
+    return matches.keys().next().value ?? acpTransportKey(agentletId, threadId);
+  }
+
+  reservePreparation(
+    agentletId: string,
+    threadId: string,
+    namespace?: Namespace,
+  ): () => void {
+    const key = acpTransportKey(agentletId, threadId, namespace);
+    let scope = this.preparing.get(key);
+    if (scope?.closing) throw new Error(`ACP thread '${threadId}' is closing`);
+    if (!scope) {
+      scope = {
+        agentletId,
+        threadId,
+        namespace,
+        pending: new Set(),
+        closing: false,
+      };
+      this.preparing.set(key, scope);
+    }
+    let settle!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      settle = resolve;
+    });
+    scope.pending.add(pending);
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      scope.pending.delete(pending);
+      settle();
+      if (
+        !scope.pending.size &&
+        !scope.closing &&
+        this.preparing.get(key) === scope
+      )
+        this.preparing.delete(key);
+    };
+  }
+
+  beginCleanup(agentletId: string, threadId: string, namespace?: Namespace) {
+    const key = this.key(agentletId, threadId, namespace);
+    let scope = this.preparing.get(key);
+    if (!scope) {
+      scope = {
+        agentletId,
+        threadId,
+        namespace: namespace ?? this.byPlacementAndThread.get(key)?.namespace,
+        pending: new Set(),
+        closing: false,
+      };
+      this.preparing.set(key, scope);
+    }
+    scope.closing = true;
+    return {
+      namespace: scope.namespace,
+      settled: Promise.all([...scope.pending]),
+      release: () => {
+        scope.closing = false;
+        if (!scope.pending.size && this.preparing.get(key) === scope)
+          this.preparing.delete(key);
+      },
+    };
+  }
+
+  isClosing(
+    agentletId: string,
+    threadId: string,
+    namespace?: Namespace,
+  ): boolean {
+    return (
+      this.preparing.get(acpTransportKey(agentletId, threadId, namespace))
+        ?.closing === true
+    );
+  }
+
+  /**
+   * Look up one device's captured namespace/thread identity. Omitting the
+   * namespace is legacy addressing and requires exactly one live/preparing
+   * scope; ambiguity refuses instead of choosing a peer.
+   */
+  get(
+    agentletId: string,
+    threadId: string,
+    namespace?: Namespace,
+  ): AcpSessionEntry | undefined {
+    return this.byPlacementAndThread.get(
+      this.key(agentletId, threadId, namespace),
+    );
+  }
+
+  /** Register one captured scope, replacing only that scope's prior session. */
   set(agentletId: string, threadId: string, entry: AcpSessionEntry): void {
-    const key = registryKey(agentletId, threadId);
+    entry.namespace = captureAcpNamespace(entry.namespace);
+    const key = acpTransportKey(agentletId, threadId, entry.namespace);
     const prior = this.byPlacementAndThread.get(key);
     if (prior && prior !== entry) {
       prior.client.shutdown('session_replaced');
@@ -231,11 +381,12 @@ class AcpSessionRegistry {
   }
 
   /**
-   * Drop and shutdown the session bound to `threadId`.
+   * Drop and shutdown one namespace/thread session. Legacy unqualified removal
+   * uses the same live/preparing uniqueness requirement as get().
    * Returns true if an entry was removed.
    */
-  remove(agentletId: string, threadId: string): boolean {
-    const key = registryKey(agentletId, threadId);
+  remove(agentletId: string, threadId: string, namespace?: Namespace): boolean {
+    const key = this.key(agentletId, threadId, namespace);
     const entry = this.byPlacementAndThread.get(key);
     if (!entry) return false;
     entry.client.shutdown('thread_session_removed');
@@ -247,21 +398,37 @@ class AcpSessionRegistry {
     return this.byPlacementAndThread.size;
   }
 
-  hasPendingPermissions(threadId: string, namespaceName: string): boolean {
-    for (const entry of this.byPlacementAndThread.values()) {
-      if (
+  hasPendingPermissions(
+    threadId: string,
+    namespace: Namespace | string,
+  ): boolean {
+    const matches = [...this.byPlacementAndThread.values()].filter(
+      (entry) =>
         entry.threadId === threadId &&
-        entry.namespace.name === namespaceName &&
-        entry.client.hasPendingPermissions(entry.sessionId)
-      )
-        return true;
+        (typeof namespace === 'string'
+          ? entry.namespace.name === namespace
+          : threadIdentityKey(entry) ===
+            threadIdentityKey({ threadId, namespace })),
+    );
+    if (typeof namespace === 'string') {
+      const identities = new Set(
+        matches.map((entry) => threadIdentityKey(entry)),
+      );
+      for (const scope of this.preparing.values()) {
+        if (scope.threadId === threadId && scope.namespace?.name === namespace)
+          identities.add(
+            threadIdentityKey({ threadId, namespace: scope.namespace }),
+          );
+      }
+      if (identities.size > 1)
+        throw new Error(
+          `Ambiguous ACP thread '${threadId}'; supply its namespace`,
+        );
     }
-    return false;
+    return matches.some((entry) =>
+      entry.client.hasPendingPermissions(entry.sessionId),
+    );
   }
-}
-
-function registryKey(agentletId: string, threadId: string): string {
-  return JSON.stringify([agentletId, threadId]);
 }
 
 /** Process-wide singleton. */

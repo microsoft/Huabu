@@ -2,13 +2,12 @@
 // Licensed under the MIT license.
 
 import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
 
 import { agentChangeReviewConfigSchema } from '@huabu/shared';
 
-import { getDataDir } from '../../data-dir.js';
 import { atomicWriteJson } from '../../utils/fs.js';
 import { getLogger } from '../../utils/logger.js';
+import { settingsFilePath } from '../identity/personal-settings.js';
 
 import type { AgentChangeReviewConfig } from '@huabu/shared';
 
@@ -19,7 +18,7 @@ export const DEFAULT_AGENT_CHANGE_REVIEW_CONFIG: AgentChangeReviewConfig = {
 const log = getLogger('agent-change-review-config');
 
 function configPath(): string {
-  return join(getDataDir(), 'agent-change-review-config.json');
+  return settingsFilePath('agent-change-review-config.json');
 }
 
 export function getAgentChangeReviewConfig(): AgentChangeReviewConfig {

@@ -103,6 +103,47 @@ function mount() {
 }
 
 describe('mounted Agenetes instance (M5 INST skeleton)', () => {
+  it('reuses and recovers a file-backed Deployment with stable namespace ownership', async () => {
+    const scratch = mkdtempSync(path.join(process.cwd(), '.agenetes-owner-'));
+    const namespace = { ...ns('space', scratch), ownerId: 'workspace-a' };
+    const spec: StubSpec = {
+      kind: 'external',
+      workloadType: 'Deployment',
+      threadId: 'thread',
+      namespace,
+      spec: { note: 'owned' },
+    };
+    const first = mountAgenetes({
+      drivers: { external: stubDriver() },
+      threadStore: new FileThreadStore(),
+    });
+    const restarted = mountAgenetes({
+      drivers: { external: stubDriver() },
+      threadStore: new FileThreadStore(),
+    });
+    try {
+      const handle = await first.create(spec);
+      expect(await first.create(spec)).toBe(handle);
+      await first.close(spec.threadId, namespace);
+      const durable = await restarted.record(namespace, spec.threadId);
+      if (!durable) throw new Error('Missing durable thread');
+      expect(durable.spec.namespace.ownerId).toBe('workspace-a');
+      const recovered = (await restarted.create(
+        durable.spec,
+      )) as unknown as StubHandle;
+      expect(recovered.createContext.recoveryInput?.state).toEqual({
+        driverState: {},
+      });
+      expect(await restarted.create(spec)).toBe(recovered);
+      expect(
+        restarted.get(spec.threadId, { ...namespace, ownerId: 'workspace-b' }),
+      ).toBeUndefined();
+    } finally {
+      await first.close(spec.threadId, namespace);
+      await restarted.close(spec.threadId, namespace);
+      rmSync(scratch, { recursive: true, force: true });
+    }
+  });
   it('updates host metadata without spawning or changing spec/state', async () => {
     const threadStore = new InMemoryThreadStore();
     const driver = stubDriver();

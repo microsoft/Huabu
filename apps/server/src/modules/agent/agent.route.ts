@@ -40,7 +40,11 @@ import conversationOwnerRoutes from './conversation-owner.route.js';
 import conversationTitleRoutes from './conversation-title.route.js';
 import { InkAgentModeError } from './ink-response.js';
 import { ExternalAgentRealizationError } from '../agent/acp/external-agent-realization.js';
-import { agenetes, INTERNAL_DRIVER_KIND } from '../agent/agenetes/drivers.js';
+import {
+  agenetes,
+  EXTERNAL_DRIVER_KIND,
+  INTERNAL_DRIVER_KIND,
+} from '../agent/agenetes/drivers.js';
 import { InkModelCapabilityError } from '../agent/agent-submission.js';
 import { AgentThreadResolutionError } from '../agent/agent-thread-resolver.js';
 import {
@@ -54,6 +58,10 @@ import {
 } from '../agent/conversation/envelope.js';
 import { buildHistoryFromTurns } from '../agent/conversation/transcript/history.js';
 import { getLLMModel } from '../agent/llm.js';
+import { requireOwnAgentlet } from '../identity/agent-credentials.js';
+import { resolveProfileSnapshot } from './acp/profile-snapshot.js';
+import { getRequestIdentity } from '../identity/request.js';
+import { isRestrictedRequest } from '../security/space-access.js';
 import { canvasAcpNamespace } from '../workspace/paths.js';
 
 import type { ControlMsg, Namespace } from '@agenetes/protocol';
@@ -147,7 +155,9 @@ async function dispatchBuiltinControl(
       code: 'not_builtin',
     };
   }
-  const handle = agenetes.get(threadId) ?? (await agenetes.create(record.spec));
+  const handle =
+    agenetes.get(threadId, record.spec.namespace) ??
+    (await agenetes.create(record.spec));
   const ack = await handle.control(msg);
   if (!ack.ok) {
     return {
@@ -181,6 +191,53 @@ const agentRoutes: FastifyPluginAsync = async (
   fastify,
   _opts,
 ): Promise<void> => {
+  // A Space grant permits Built-In conversations, but never control of an
+  // external thread using the deployment's machine credential. Resolve both
+  // the Question binding and persisted driver before any mutation runs.
+  fastify.addHook('preHandler', async (request, reply) => {
+    const identity = getRequestIdentity(request);
+    if (!identity || request.method === 'GET' || request.method === 'HEAD')
+      return;
+    const params = request.params as { threadId?: string };
+    const body = request.body as
+      | { threadId?: string; canvasId?: string }
+      | undefined;
+    const query = request.query as { canvasId?: string };
+    const threadId = params.threadId ?? body?.threadId;
+    const canvasId = body?.canvasId ?? query.canvasId;
+    if (!threadId || !canvasId) return;
+    try {
+      const record = await agenetes.record(
+        canvasAcpNamespace(canvasId),
+        threadId,
+      );
+      if (record?.spec.kind === EXTERNAL_DRIVER_KIND) {
+        const agentletId = (record.spec.spec as { agentletId?: string })
+          .agentletId;
+        if (agentletId) requireOwnAgentlet(agentletId);
+      }
+      // Only a Bubble user's private registry hides a bound Profile, and there
+      // an unavailable one refuses Stop too: it is someone else's agent. The
+      // unrestricted local caller finds a missing Profile in realization, as
+      // it always has.
+      if (record || !isRestrictedRequest(request)) return;
+      const target = await agentThreadService.resolveExternalTarget(
+        canvasId,
+        threadId,
+      );
+      if (target && !resolveProfileSnapshot(target.binding.profileId))
+        return reply.code(403).send({
+          message: 'Agent is unavailable to this user',
+          code: 'AGENT_ACCESS_REQUIRED',
+        });
+    } catch (error) {
+      // A Question node that no longer resolves (duplicated, emptied,
+      // rebound) is the route's to report: starting a run refuses it, while
+      // renaming, stopping or setting a model starts nothing external.
+      if (error instanceof AgentThreadResolutionError) return;
+      throw error;
+    }
+  });
   await fastify.register(conversationTitleRoutes);
   await fastify.register(conversationOwnerRoutes);
 
@@ -390,6 +447,15 @@ const agentRoutes: FastifyPluginAsync = async (
     if (!parsedQuery.success) {
       return reply.code(400).send({ message: 'Invalid query parameters' });
     }
+    // Without a Space, Stop matches the thread wherever it runs; the guard
+    // authorized whichever Space the request named, possibly only in its
+    // body, so every restricted caller, administrators included, names it in
+    // the query the run is matched by.
+    if (!parsedQuery.data.canvasId && isRestrictedRequest(request))
+      return reply.code(400).send({
+        message: 'A conversation is addressed through its query Space',
+        code: 'SPACE_ACCESS_AMBIGUOUS',
+      });
     return reply.send(
       await agentThreadService.stopAndWait(
         threadId,
@@ -757,6 +823,7 @@ const agentRoutes: FastifyPluginAsync = async (
       agentTarget,
       fixedTarget,
     });
+    // Profile selection and canonical realization enforce private device ownership.
     if (effectiveBinding?.kind === 'external') {
       request.log.info(
         {

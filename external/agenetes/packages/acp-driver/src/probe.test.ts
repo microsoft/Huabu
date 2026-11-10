@@ -71,8 +71,16 @@ describe('ephemeral ACP capability probe', () => {
     expect(request).not.toHaveProperty('priorState');
     expect(request).not.toHaveProperty('initialPreferences');
     expect(request.namespace).not.toHaveProperty('storage');
-    expect(mocks.remove).toHaveBeenCalledWith('machine', request.threadId);
-    expect(mocks.release).toHaveBeenCalledWith('machine', request.threadId);
+    expect(mocks.remove).toHaveBeenCalledWith(
+      'machine',
+      request.threadId,
+      request.namespace,
+    );
+    expect(mocks.release).toHaveBeenCalledWith(
+      'machine',
+      request.threadId,
+      request.namespace,
+    );
     entry.metaUpdatedAt = 99;
     expect(observation.metaUpdatedAt).not.toBe(99);
   });
@@ -86,6 +94,7 @@ describe('ephemeral ACP capability probe', () => {
     expect(mocks.release).toHaveBeenCalledWith(
       'machine',
       mocks.ensure.mock.calls[0][0].threadId,
+      mocks.ensure.mock.calls[0][0].namespace,
     );
   });
 

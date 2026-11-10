@@ -12,7 +12,7 @@
  * longer any pairing / clipboard step \u2014 the wrapper script and on-PATH
  * agentlet check were removed in the daemon-mode refactor.
  *
- * Owner-only. This adapter never probes the Huabu Server's PATH.
+ * Uses the caller's own device. This adapter never probes the Huabu Server's PATH.
  */
 
 import {
@@ -27,7 +27,8 @@ import {
 
 import { acpAgentCliQuerySchema } from '@huabu/shared';
 
-import { isOwnerRequest } from '../../security/owner.js';
+import { requireOwnAgentlet } from '../../identity/agent-credentials.js';
+import { canChangeOwnSettings } from '../../security/owner.js';
 
 import type {
   AcpAgentCliInfo,
@@ -49,6 +50,7 @@ async function detectAgentClis(target: {
     throw new Error('Agent Profile is unavailable');
   const requestedAgentletId = profile?.agentletId ?? target.agentletId;
   if (!requestedAgentletId) throw new Error('Agentlet target is required');
+  requireOwnAgentlet(requestedAgentletId);
   const agentletId = profile
     ? resolveConnectedAgentletId(requestedAgentletId)
     : requestedAgentletId;
@@ -80,7 +82,7 @@ export function createAcpAgentCliRoutes(
     app.get<{ Reply: ApiResult<AcpAgentCliListResponse> }>(
       '/agent-cli',
       async (request, reply) => {
-        if (!isOwnerRequest(request)) {
+        if (!canChangeOwnSettings(request)) {
           return reply.status(403).send({
             message:
               'Forbidden: agent CLI detection requires owner authorization',
@@ -93,16 +95,17 @@ export function createAcpAgentCliRoutes(
             message: 'Invalid harness catalogue query',
           });
         }
+        if (
+          parsed.data.profileId &&
+          !getAgentProfileRegistry()?.getProfile(parsed.data.profileId)
+        ) {
+          return reply.status(404).send({
+            code: 'profile_not_found',
+            message: 'Agent Profile is unavailable',
+          });
+        }
+        if (parsed.data.agentletId) requireOwnAgentlet(parsed.data.agentletId);
         try {
-          if (
-            parsed.data.profileId &&
-            !getAgentProfileRegistry()?.getProfile(parsed.data.profileId)
-          ) {
-            return reply.status(404).send({
-              code: 'profile_not_found',
-              message: 'Agent Profile is unavailable',
-            });
-          }
           return {
             agents: (await detect(parsed.data)).filter(
               (entry) => entry.id !== 'proxy',

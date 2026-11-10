@@ -8,33 +8,24 @@ import {
   recordRequestAuthorization,
 } from '../identity/request.js';
 import { UNRESTRICTED_ACCESS } from '../identity/service.js';
+import { getWorkspaceHandle } from '../workspace.js';
 
-import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { AccessLevel } from '../identity/service.js';
+import type { CanvasAccess } from '@huabu/shared';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 
 declare module 'fastify' {
   interface FastifyContextConfig {
-    /** A non-GET route that only reads the Space it names. */
-    spaceAccess?: 'read';
-    /** Starts or steers an agent outside the agent route prefixes. */
-    invokesAgent?: true;
+    /**
+     * What a route needs on the Space it names, when not the method's
+     * default: `read` for a non-GET route that only reads it, `manage` for
+     * renaming, deleting, or changing its parent.
+     */
+    spaceAccess?: 'read' | 'manage';
   }
 }
 
 type Fields = Record<string, unknown> | undefined;
-
-/**
- * Agents act through the shared machine credential, which reaches every
- * Space, so a member may not run or steer one until credentials carry the
- * caller's own authority. RFS is that credential's own surface: it launches
- * agents and Task Runs and leases shared service credentials, and the web
- * app never calls it. Matched by route pattern, not URL spelling.
- */
-const AGENT_ROUTES = [
-  '/api/agent',
-  '/api/acp',
-  '/api/agent-change-review',
-  '/api/rfs',
-];
 
 /**
  * The one value a request gives for `field` across its route parameters,
@@ -63,7 +54,7 @@ function single(
  * The Space is the `canvasId` route parameter, query field or body field,
  * which must agree wherever more than one is given; a route that moves
  * content between Spaces also names the other one in its body. Conversations
- * and agents are an owner's alone, as {@link AGENT_ROUTES} explains. The
+ * use the caller's Space access; external agent adapters also check device ownership. The
  * identity provider decides each check, and each granted check is recorded so
  * a long-lived response is closed once it no longer holds. Unrestricted
  * callers, the local owner and the machine credential, skip the guard
@@ -96,21 +87,24 @@ export function registerSpaceAccess(app: FastifyInstance): void {
         code: 'SPACE_ACCESS_AMBIGUOUS',
       });
     const route = request.routeOptions.url ?? '';
+    // A conversation lives in a Space, and is reached only through one the
+    // caller may use.
+    // Administrators included: their devices and agents are private too, and
+    // a conversation named without its Space would skip the device check.
     if (
-      !identity.owner &&
+      !canvasId &&
       (threadId ||
-        request.routeOptions.config?.invokesAgent ||
-        AGENT_ROUTES.some(
-          (prefix) => route === prefix || route.startsWith(`${prefix}/`),
-        ))
-    ) {
-      return reply.code(403).send({
-        message: 'Agents and conversations require an owner',
-        code: 'AGENT_ACCESS_REQUIRED',
+        (!identity.owner &&
+          (route === '/api/agent' || route.startsWith('/api/agent/')) &&
+          route !== '/api/agent/defaults' &&
+          route !== '/api/agent/defaults/'))
+    )
+      return reply.code(400).send({
+        message: 'A conversation is addressed through its Space',
+        code: 'SPACE_ACCESS_AMBIGUOUS',
       });
-    }
 
-    const checks: Array<['read' | 'write', string]> = [];
+    const checks: Array<[AccessLevel, string]> = [];
     if (canvasId) checks.push([level, canvasId]);
     const destination = body?.destination as Fields;
     for (const [needed, value] of [
@@ -135,7 +129,7 @@ export function registerSpaceAccess(app: FastifyInstance): void {
         continue;
       }
       // Without read access the Space is indistinguishable from a missing one.
-      if (needed === 'write' && (await identity.access.can('read', space)))
+      if (needed !== 'read' && (await identity.access.can('read', space)))
         return reply.code(403).send({
           message: 'Space is read-only for this principal',
           code: 'SPACE_ACCESS_REQUIRED',
@@ -149,6 +143,73 @@ export function registerSpaceAccess(app: FastifyInstance): void {
 export function isRestrictedRequest(request: FastifyRequest): boolean {
   const access = getRequestIdentity(request)?.access;
   return access !== undefined && access !== UNRESTRICTED_ACCESS;
+}
+
+/** The current Workspace, as a resource, if the caller may write it. */
+async function writableWorkspace(request: FastifyRequest) {
+  const workspaceId = getWorkspaceHandle()?.workspaceId;
+  if (!workspaceId) return null;
+  const resource = { type: 'workspace', id: workspaceId } as const;
+  return (await getRequestIdentity(request)?.access.can('write', resource))
+    ? resource
+    : null;
+}
+
+/** Whether the caller may create root Spaces in their current Workspace. */
+export async function canWriteWorkspace(
+  request: FastifyRequest,
+): Promise<boolean> {
+  return (
+    !isRestrictedRequest(request) || (await writableWorkspace(request)) !== null
+  );
+}
+
+/** Root creation has no existing Space to authorize; it writes the Workspace. */
+export async function requireWorkspaceWrite(
+  request: FastifyRequest,
+  reply: FastifyReply,
+): Promise<void> {
+  if (!isRestrictedRequest(request)) return;
+  const resource = await writableWorkspace(request);
+  if (resource) {
+    recordRequestAuthorization(request, 'write', resource);
+    return;
+  }
+  reply.code(403).send({
+    message: 'Workspace write access required',
+    code: 'SPACE_ACCESS_REQUIRED',
+  });
+}
+
+/** Conditional manage checks for mutations carried by otherwise writable routes. */
+export async function canManageSpace(
+  request: FastifyRequest,
+  canvasId: string,
+): Promise<boolean> {
+  return (
+    !isRestrictedRequest(request) ||
+    (await getRequestIdentity(request)?.access.can('manage', {
+      type: 'space',
+      id: canvasId,
+    })) === true
+  );
+}
+
+/** Project the existing authorization owner for UI affordances, never as a mutation grant. */
+export async function getSpaceAccess(
+  request: FastifyRequest,
+  canvasId: string,
+): Promise<CanvasAccess> {
+  const [write, manage] = await Promise.all([
+    !isRestrictedRequest(request)
+      ? true
+      : getRequestIdentity(request)?.access.can('write', {
+          type: 'space',
+          id: canvasId,
+        }),
+    canManageSpace(request, canvasId),
+  ]);
+  return { write: write === true, manage };
 }
 
 /** Record the caller as owner of the Space it has just created. */
@@ -182,11 +243,15 @@ export async function readableSpaces<T extends { canvasId: string }>(
 ): Promise<T[]> {
   const access = getRequestIdentity(request)?.access;
   if (!access) return [];
-  const readable = await Promise.all(
-    spaces.map((space) =>
-      access.can('read', { type: 'space', id: space.canvasId }),
-    ),
-  );
+  const resources = spaces.map((space) => ({
+    type: 'space' as const,
+    id: space.canvasId,
+  }));
+  const readable = access.canMany
+    ? await access.canMany('read', resources)
+    : await Promise.all(
+        resources.map((resource) => access.can('read', resource)),
+      );
   return spaces.filter((_, index) => readable[index]);
 }
 

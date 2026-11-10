@@ -25,6 +25,7 @@ interface PermissionCardProps {
 
 interface PermissionTrayProps {
   threadId: string;
+  canvasId: string;
   messageId: string;
   part: PermissionSegment;
 }
@@ -172,6 +173,7 @@ export function PermissionCard({ part }: PermissionCardProps) {
 
 export function PermissionTray({
   threadId,
+  canvasId,
   messageId,
   part,
 }: PermissionTrayProps) {
@@ -204,10 +206,14 @@ export function PermissionTray({
       option ? { optionId: option.optionId } : { cancelled: true },
     );
     try {
-      await respondAcpPermission(threadId, {
-        requestId,
-        ...(option ? { optionId: option.optionId } : { cancelled: true }),
-      });
+      await respondAcpPermission(
+        threadId,
+        {
+          requestId,
+          ...(option ? { optionId: option.optionId } : { cancelled: true }),
+        },
+        canvasId,
+      );
     } catch {
       // The server is the source of truth for the suspended promise;
       // a failed POST means the agent keeps waiting (until timeout).

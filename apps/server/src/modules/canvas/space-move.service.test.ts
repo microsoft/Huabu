@@ -14,6 +14,7 @@ import { acquireAgentTurn } from '../agent/turn-lease.js';
 import { createCanvas } from '../storage/compatibility/canvas.js';
 import { getCanvasStore, resetStorageCache, space } from '../storage/index.js';
 import { getStructuredStore } from '../storage/index.js';
+import { canvasAcpNamespace } from '../workspace/paths.js';
 import { setWorkspacePath } from '../workspace.js';
 
 import type { SpaceMoveError } from './space-move.service.js';
@@ -202,7 +203,10 @@ describe('moveCanvasSelection', () => {
         },
       ],
     });
-    const release = acquireAgentTurn('thread-busy');
+    const release = acquireAgentTurn(
+      'thread-busy',
+      canvasAcpNamespace('source'),
+    );
     expect(release).not.toBeNull();
     try {
       await expect(
@@ -434,7 +438,11 @@ describe('moveCanvasSelection', () => {
           createSourcePreview: false,
           expectedSourceVersion: seeded.toVersion,
         },
-        { canRead: async () => canRead, claim: async () => {} },
+        {
+          canRead: async () => canRead,
+          canManage: async () => true,
+          claim: async () => {},
+        },
       );
 
     await expect(move(false)).rejects.toMatchObject({
@@ -475,7 +483,7 @@ describe('moveCanvasSelection', () => {
           createSourcePreview: false,
           expectedSourceVersion: seeded.toVersion,
         },
-        { canRead: async () => true, claim },
+        { canRead: async () => true, canManage: async () => true, claim },
       );
 
     await expect(

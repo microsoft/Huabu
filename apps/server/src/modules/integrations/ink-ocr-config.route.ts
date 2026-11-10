@@ -5,7 +5,7 @@ import { inkOcrConfigUpdateSchema } from '@huabu/shared';
 
 import { getInkOcrConfig, setInkOcrConfig } from './ink-ocr-config.js';
 import { isSecretStoreWritable } from '../../security/secret-store.js';
-import { isOwnerRequest } from '../security/owner.js';
+import { canChangeOwnSettings } from '../security/owner.js';
 
 import type {
   ApiResult,
@@ -18,7 +18,7 @@ const inkOcrConfigRoutes: FastifyPluginAsync = async (app) => {
   app.get<{ Reply: ApiResult<InkOcrConfig> }>(
     '/config',
     async (request, reply) => {
-      if (!isOwnerRequest(request)) {
+      if (!canChangeOwnSettings(request)) {
         return reply.code(403).send({
           message:
             'Forbidden: Ink OCR configuration requires owner authorization',
@@ -43,7 +43,7 @@ const inkOcrConfigRoutes: FastifyPluginAsync = async (app) => {
     Body: InkOcrConfigUpdate;
     Reply: ApiResult<InkOcrConfig>;
   }>('/config', async (request, reply) => {
-    if (!isOwnerRequest(request)) {
+    if (!canChangeOwnSettings(request)) {
       return reply.code(403).send({
         message:
           'Forbidden: Ink OCR configuration requires owner authorization',

@@ -232,6 +232,36 @@ function samePhysicalDirectory(left: string, right: string): boolean {
   }
 }
 
+/**
+ * Resolve symlinks in the existing prefix of a directory, including when its
+ * final descendants do not exist yet. No directory or manifest is created.
+ */
+function canonicalDirectory(rawPath: string): string {
+  let existing = path.resolve(rawPath);
+  const missing: string[] = [];
+  while (true) {
+    try {
+      return path.join(realpathSync.native(existing), ...missing.reverse());
+    } catch (error) {
+      if (!isUnreachable(error)) throw error;
+      const parent = path.dirname(existing);
+      if (parent === existing) throw error;
+      missing.push(path.basename(existing));
+      existing = parent;
+    }
+  }
+}
+
+function containsDirectory(parent: string, child: string): boolean {
+  const relative = path.relative(parent, child);
+  return (
+    relative === '' ||
+    (relative !== '..' &&
+      !relative.startsWith(`..${path.sep}`) &&
+      !path.isAbsolute(relative))
+  );
+}
+
 function toHandle(manifest: WorkspaceManifest): WorkspaceHandle {
   return Object.freeze({
     workspaceId: manifest.workspaceId,
@@ -375,9 +405,14 @@ export class DiskWorkspaceRepository implements WorkspaceRepository {
     return entry ? this.#hydrate(entry) : null;
   }
 
-  async list(): Promise<readonly WorkspaceHandle[]> {
+  async list(
+    workspaceIds?: readonly string[],
+  ): Promise<readonly WorkspaceHandle[]> {
+    const allowed = workspaceIds && new Set(workspaceIds);
+    if (allowed?.size === 0) return [];
     const handles: WorkspaceHandle[] = [];
     for (const entry of this.#read().sort(compareMostRecentlyOpened)) {
+      if (allowed && !allowed.has(entry.workspaceId)) continue;
       const handle = this.#hydrate(entry);
       if (handle) handles.push(handle);
     }
@@ -421,6 +456,46 @@ export class DiskWorkspaceRepository implements WorkspaceRepository {
   /** The directory backing a registered Workspace, or null if it is not one. */
   directoryOf(workspaceId: string): string | null {
     return this.#entryFor(workspaceId)?.workspacePath ?? null;
+  }
+
+  /**
+   * Registered identities whose physical directories contain, equal, or sit
+   * inside `rawWorkspacePath`. `sameDirectory` distinguishes reopening an
+   * alias from adopting a parent/child that would write a new namespace.
+   *
+   * Reads registry paths only: callers authorize these IDs before reading a
+   * foreign manifest or preparing a folder. Existing symlink prefixes resolve
+   * even for missing descendants; unavailable registered folders remain
+   * protected at their remembered location. No display names or paths escape.
+   */
+  overlappingDirectories(rawWorkspacePath: string): readonly {
+    readonly workspaceId: string;
+    readonly sameDirectory: boolean;
+  }[] {
+    const requested = canonicalDirectory(rawWorkspacePath);
+    return this.#read().flatMap((entry) => {
+      let registered: string;
+      try {
+        registered = canonicalDirectory(entry.workspacePath);
+      } catch {
+        // The folder adoption route reports locator failures to its caller.
+        // A foreign registry path must not leak through realpath's message.
+        throw new Error(
+          'A registered Workspace directory could not be resolved',
+        );
+      }
+      if (
+        !containsDirectory(requested, registered) &&
+        !containsDirectory(registered, requested)
+      )
+        return [];
+      return [
+        {
+          workspaceId: entry.workspaceId,
+          sameDirectory: requested === registered,
+        },
+      ];
+    });
   }
 
   /** The registered Workspace materialized at a directory, if there is one. */

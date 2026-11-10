@@ -89,11 +89,13 @@ import { ARTIFACT_URL_REGEX } from '../artifact/utils.js';
 import { getPreprocessDispatcher, getProfile } from '../preprocessing/index.js';
 import { isLabelProtected } from '../preprocessing/label-policy.js';
 import { stripOfficeparserPreamble } from '../preprocessing/loaders/office-strip.js';
-import { isOwnerRequest } from '../security/owner.js';
 import {
   canReadCitedSpaces,
   canReadSpace,
   claimSpace,
+  canManageSpace,
+  getSpaceAccess,
+  requireWorkspaceWrite,
   isRestrictedRequest,
   readableSpaces,
 } from '../security/space-access.js';
@@ -688,65 +690,77 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.post<{
     Body: CreateCanvasRequest;
     Reply: ApiResult<CreateCanvasResponse>;
-  }>('/', async function (request, reply) {
-    const parsed = createCanvasBodySchema.safeParse(request.body);
-    if (!parsed.success) {
-      return reply.code(400).send({ message: 'Invalid request body' });
-    }
+  }>(
+    '/',
+    { preHandler: requireWorkspaceWrite },
+    async function (request, reply) {
+      const parsed = createCanvasBodySchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.code(400).send({ message: 'Invalid request body' });
+      }
 
-    const canvasId = createId('canvas');
-    const created = await createSpace(canvasId, parsed.data.title ?? undefined);
+      const canvasId = createId('canvas');
+      const created = await createSpace(
+        canvasId,
+        parsed.data.title ?? undefined,
+      );
 
-    if (!created.ok) {
+      if (!created.ok) {
+        return reply
+          .code(409)
+          .send({ message: 'Canvas with this ID already exists' });
+      }
+
+      const canvas = created.record;
+      await claimOrDiscard(request, canvas.canvasId);
       return reply
-        .code(409)
-        .send({ message: 'Canvas with this ID already exists' });
-    }
-
-    const canvas = created.record;
-    await claimOrDiscard(request, canvas.canvasId);
-    return reply
-      .code(201)
-      .send({ canvasId: canvas.canvasId, title: canvas.title });
-  });
+        .code(201)
+        .send({ canvasId: canvas.canvasId, title: canvas.title });
+    },
+  );
 
   // --- Delete a canvas ---
 
   fastify.delete<{
     Params: { canvasId: string };
     Reply: ApiResult<DeleteCanvasResponse>;
-  }>('/:canvasId', async function (request, reply) {
-    const { canvasId } = request.params;
-    return withSpaceHierarchyLock(async () => {
-      if (isWorldCanvasId(canvasId)) {
-        return reply
-          .code(403)
-          .send({ message: 'World canvas cannot be deleted' });
-      }
-      try {
-        const preview = deletionPreview(
-          await getStructuredStore().spaces().list(),
-          canvasId,
-        );
-        if (preview.spaces.length > 1)
-          return reply.code(409).send({
-            code: 'SPACE_TREE_CONFIRMATION_REQUIRED',
-            message: 'Confirm the complete subtree before deleting this Space',
-          });
-        await deleteSpaceTree(canvasId, preview.token);
-      } catch (error) {
-        if (error instanceof SpaceHierarchyError)
-          return reply.code(error.status).send({
-            code: error.code,
-            message: error.message,
-            details: error.details,
-          });
-        throw error;
-      }
+  }>(
+    '/:canvasId',
+    { config: { spaceAccess: 'manage' } },
+    async function (request, reply) {
+      const { canvasId } = request.params;
+      return withSpaceHierarchyLock(async () => {
+        if (isWorldCanvasId(canvasId)) {
+          return reply
+            .code(403)
+            .send({ message: 'World canvas cannot be deleted' });
+        }
+        try {
+          const preview = deletionPreview(
+            await getStructuredStore().spaces().list(),
+            canvasId,
+          );
+          if (preview.spaces.length > 1)
+            return reply.code(409).send({
+              code: 'SPACE_TREE_CONFIRMATION_REQUIRED',
+              message:
+                'Confirm the complete subtree before deleting this Space',
+            });
+          await deleteSpaceTree(canvasId, preview.token);
+        } catch (error) {
+          if (error instanceof SpaceHierarchyError)
+            return reply.code(error.status).send({
+              code: error.code,
+              message: error.message,
+              details: error.details,
+            });
+          throw error;
+        }
 
-      return reply.send({ success: true });
-    });
-  });
+        return reply.send({ success: true });
+      });
+    },
+  );
 
   // Delete a node — removes its markdown sidecar.
   //
@@ -1218,10 +1232,8 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     ) {
       return reply.code(404).send({ message: 'Canvas not found' });
     }
-    // Enrichment runs the Utility Agent through the shared machine
-    // credential, which a member may not use; extraction still runs, but
-    // only against public addresses.
-    const member = isRestrictedRequest(request) && !isOwnerRequest(request);
+    // Utility execution uses the caller's own Agent and credentials.
+    const restricted = isRestrictedRequest(request);
     const dispatcher = getPreprocessDispatcher();
     if (
       MD_BACKED_NODE_TYPES.has(nodeType) &&
@@ -1243,12 +1255,12 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         snapshot,
         previousSnapshot,
         options: {
-          allowLLM: !member && (options?.allowLLM ?? true),
+          allowLLM: options?.allowLLM ?? true,
           allowPersistence: options?.allowPersistence ?? true,
           force: options?.force ?? false,
           mode: options?.mode,
         },
-        ...(member ? { publicNetworkOnly: true } : {}),
+        ...(restricted ? { publicNetworkOnly: true } : {}),
       };
 
       const result = await dispatcher.preprocess(ppRequest);
@@ -1313,6 +1325,17 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     }
   });
 
+  // Permission refresh must not hydrate or replace the caller's unsaved content.
+  fastify.get<{ Params: { canvasId: string } }>(
+    '/:canvasId/access',
+    async (request, reply) => {
+      const { canvasId } = request.params;
+      if (!(await space(canvasId).read()))
+        return reply.code(404).send({ message: 'Canvas not found' });
+      return reply.send(await getSpaceAccess(request, canvasId));
+    },
+  );
+
   // --- GET Canvas ---
 
   fastify.get<{
@@ -1339,6 +1362,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       canvasId: canvas.canvasId,
       title: canvas.title,
       version: canvas.version,
+      access: await getSpaceAccess(request, canvasId),
       state: {
         ...canvas.state,
         nodes: hydratedNodes,
@@ -1515,6 +1539,11 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
           : undefined;
 
       if (existing !== null && titleChange !== undefined) {
+        if (!(await canManageSpace(request, canvasId)))
+          return reply.code(403).send({
+            message: 'Managing this Space is required to rename it',
+            code: 'SPACE_ACCESS_REQUIRED',
+          });
         let renamed;
         try {
           renamed = await spaces.rename({ canvasId, ...titleChange });
@@ -1719,10 +1748,18 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         message: 'Invalid move request',
       });
     }
+    if (
+      parsed.data.destination.kind === 'new' &&
+      !parsed.data.destination.asChild
+    ) {
+      await requireWorkspaceWrite(request, reply);
+      if (reply.sent) return;
+    }
     try {
       return reply.send(
         await moveCanvasSelection(params.data.canvasId, parsed.data, {
           canRead: (canvasId) => canReadSpace(request, canvasId),
+          canManage: (canvasId) => canManageSpace(request, canvasId),
           claim: (canvasId) => claimSpace(request, canvasId),
         }),
       );
@@ -1760,18 +1797,6 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     if (parsed.data.originator.source === 'system') {
       return reply.code(403).send({
         message: 'System command origin is reserved for internal callers',
-      });
-    }
-    // An agent batch fetches the sources its nodes name, as only an agent
-    // may; a member runs no agents, so cannot speak for one.
-    if (
-      parsed.data.originator.source === 'agent' &&
-      isRestrictedRequest(request) &&
-      !isOwnerRequest(request)
-    ) {
-      return reply.code(403).send({
-        message: 'Agents and conversations require an owner',
-        code: 'AGENT_ACCESS_REQUIRED',
       });
     }
     const { commands, originator, runId } = parsed.data;
@@ -2168,6 +2193,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
 
   fastify.post<{ Reply: ApiResult<ImportCanvasResponse> }>(
     '/import',
+    { preHandler: requireWorkspaceWrite },
     async function (request, reply) {
       const targetCanvasId = createId('canvas');
       // Where an imported Space lands is the backend's business — the

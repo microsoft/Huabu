@@ -5,7 +5,7 @@ You are working with a **Huabu** Space, an infinite visual surface of notes, ima
 These environment variables are already set:
 
 - `HUABU_RFS_URL` — the base URL for this Space, with no trailing slash.
-- `AGENTLET_TOKEN` — the RFS bearer credential.
+- `HUABU_RFS_TOKEN` — the RFS bearer credential.
 - `HUABU_THREAD_ID` — your conversation ID. Pass it on `execute` (see §6) to attribute your edits.
 
 This is the HTTP-native access guide. Client selection and optional CLI discovery are described in the initial bootstrap; these HTTP operations require no Node runtime or custom tool.

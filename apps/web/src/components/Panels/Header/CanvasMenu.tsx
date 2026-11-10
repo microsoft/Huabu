@@ -9,8 +9,15 @@ import { useTranslation } from 'react-i18next';
 import { REQUEST_REPARENT_SPACE } from '@/utils/spaceHierarchy';
 
 import { ApiError } from '../../../api/_client';
-import { exportCanvas } from '../../../api/canvas.ts';
-import useCanvasStore from '../../../store/canvasStore.ts';
+import {
+  CANVAS_ACCESS_CHANGED_EVENT,
+  exportCanvas,
+} from '../../../api/canvas.ts';
+import useCanvasStore, {
+  selectCanManageCanvas,
+  selectCanWriteCanvas,
+} from '../../../store/canvasStore.ts';
+import { useIdentityStore } from '../../../store/identityStore.ts';
 import { useWorkspaceStore } from '../../../store/workspaceStore.ts';
 import { formatShortcut } from '../../../utils/platform.ts';
 import { Button } from '../../Common/Button.tsx';
@@ -29,6 +36,9 @@ export const CanvasMenu: React.FC = () => {
   const canvasTitle = useCanvasStore((s) => s.canvasTitle);
   const tryRename = useCanvasStore((s) => s.tryRename);
   const canvasId = useCanvasStore((s) => s.canvasId);
+  const canManage = useCanvasStore(selectCanManageCanvas);
+  const canWrite = useCanvasStore(selectCanWriteCanvas);
+  const bubble = useIdentityStore((s) => s.identity?.provider === 'bubble');
   const isWorld = useWorkspaceStore((s) => s.worldCanvasId === canvasId);
   const parentSpaceId = useWorkspaceStore(
     (s) => s.spaceSummaries[canvasId]?.parentSpaceId,
@@ -53,7 +63,32 @@ export const CanvasMenu: React.FC = () => {
   // switch, undo, or a rejected rename revert).
   useEffect(() => {
     setDraftTitle(canvasTitle);
-  }, [canvasTitle]);
+  }, [canvasTitle, canManage]);
+
+  // The current Space header owns one lightweight permission refresh loop.
+  // Foreground checks apply administrator changes promptly; polling bounds
+  // changes made elsewhere without replacing unsaved node content.
+  useEffect(() => {
+    if (!bubble || !canvasId) return;
+    const refresh = () => {
+      if (document.visibilityState === 'visible')
+        void useCanvasStore.getState().refreshCanvasAccess();
+    };
+    const refused = (event: Event) => {
+      if ((event as CustomEvent<string>).detail === canvasId) refresh();
+    };
+    refresh();
+    const timer = window.setInterval(refresh, 15_000);
+    window.addEventListener('focus', refresh);
+    document.addEventListener('visibilitychange', refresh);
+    window.addEventListener(CANVAS_ACCESS_CHANGED_EVENT, refused);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener('focus', refresh);
+      document.removeEventListener('visibilitychange', refresh);
+      window.removeEventListener(CANVAS_ACCESS_CHANGED_EVENT, refused);
+    };
+  }, [bubble, canvasId]);
 
   // Keep input width in sync with its content. The +4px buffer compensates
   // for subpixel rendering differences between <span> measurement (sizer)
@@ -68,6 +103,10 @@ export const CanvasMenu: React.FC = () => {
   }, [draftTitle]);
 
   const commitTitle = useCallback(async () => {
+    if (!selectCanManageCanvas(useCanvasStore.getState())) {
+      setDraftTitle(useCanvasStore.getState().canvasTitle);
+      return;
+    }
     const workspaceId = useWorkspaceStore.getState().workspaceId;
     const accepted = await tryRename('canvas', canvasId, draftTitle);
     if (!accepted) {
@@ -130,6 +169,7 @@ export const CanvasMenu: React.FC = () => {
           autoComplete="off"
           className="text-fg-default focus:shadow-bottom m-0 h-7 max-w-full min-w-8 overflow-hidden bg-transparent py-0.5 pr-0.5 pl-1.5 text-[15px] leading-6 font-medium text-ellipsis outline-none"
           value={draftTitle}
+          readOnly={!canManage}
           onChange={(e) => setDraftTitle(e.target.value)}
           onBlur={() => void commitTitle()}
           onKeyDown={(e) => {
@@ -172,7 +212,7 @@ export const CanvasMenu: React.FC = () => {
         >
           <DropdownMenuItem
             shortcut={formatShortcut('Ctrl/Cmd+Z')}
-            disabled={!canUndo}
+            disabled={!canWrite || !canUndo}
             onClick={() => {
               setIsOpen(false);
               undo();
@@ -182,7 +222,7 @@ export const CanvasMenu: React.FC = () => {
           </DropdownMenuItem>
           <DropdownMenuItem
             shortcut={formatShortcut('Ctrl/Cmd+Shift+Z')}
-            disabled={!canRedo}
+            disabled={!canWrite || !canRedo}
             onClick={() => {
               setIsOpen(false);
               redo();
@@ -197,7 +237,7 @@ export const CanvasMenu: React.FC = () => {
           {!isWorld && (
             <>
               <DropdownMenuItem
-                disabled={busy || !canMove(canvasId)}
+                disabled={!canManage || busy || !canMove(canvasId)}
                 onClick={() => {
                   setIsOpen(false);
                   window.dispatchEvent(
@@ -211,7 +251,7 @@ export const CanvasMenu: React.FC = () => {
               </DropdownMenuItem>
               {parentSpaceId && (
                 <DropdownMenuItem
-                  disabled={busy || !canMove(canvasId)}
+                  disabled={!canManage || busy || !canMove(canvasId)}
                   onClick={() => {
                     setIsOpen(false);
                     void move(canvasId, null, parentSpaceId);

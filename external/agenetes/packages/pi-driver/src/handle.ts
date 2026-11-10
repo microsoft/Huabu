@@ -312,7 +312,11 @@ export class PiAgentHandle<
           messages: initialMessages,
         },
         convertToLlm: (msgs) => msgs as Message[],
-        streamFn: streamSimple,
+        streamFn: (model, context, options) =>
+          streamSimple(model, context, {
+            ...options,
+            ...this.ports.streamOptions?.(recipe.model, mCtx),
+          }),
         getApiKey: () => this.ports.getApiKey(recipe.model, mCtx),
         toolExecution: recipe.runtime?.toolExecution ?? 'parallel',
       });

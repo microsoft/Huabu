@@ -318,3 +318,40 @@ describe('AgentProfileRegistry', () => {
     ).toThrow();
   });
 });
+
+it('applies host ownership to reads and mutations without discarding other owners', () => {
+  const store = new InMemoryAgentProfileRegistryStore();
+  const all = new AgentProfileRegistry(store);
+  all.createProfile({ ...input, id: 'alice', agentletId: 'alice-device' });
+  all.createProfile({ ...input, id: 'bob', agentletId: 'bob-device' });
+  const alice = new AgentProfileRegistry(
+    store,
+    undefined,
+    (profile) => profile.agentletId === 'alice-device',
+  );
+  expect(alice.listProfiles().map((p) => p.id)).toEqual(['alice']);
+  expect(alice.listSelectableProfileIds()).toEqual(['alice']);
+  expect(alice.getProfile('bob')).toBeUndefined();
+  expect(() => alice.snapshotProfile('bob')).toThrow('not found');
+  expect(() => alice.patchProfile('bob', { alias: 'Stolen' })).toThrow(
+    'not found',
+  );
+  expect(alice.deleteProfile('bob')).toBe(false);
+  expect(() =>
+    alice.createProfile({ ...input, id: 'stolen', agentletId: 'bob-device' }),
+  ).toThrow('unavailable');
+  expect(() =>
+    alice.createProfile({ ...input, id: 'bob', agentletId: 'alice-device' }),
+  ).toThrow('already exists');
+  expect(() =>
+    alice.importCommandProfiles([
+      { ...input, id: 'bob', agentletId: 'alice-device' },
+    ]),
+  ).toThrow('already exists');
+  alice.importCommandProfiles([
+    { ...input, id: 'alice-two', agentletId: 'alice-device' },
+  ]);
+  expect(
+    new AgentProfileRegistry(store).listProfiles().map((p) => p.id),
+  ).toEqual(['alice', 'bob', 'alice-two']);
+});

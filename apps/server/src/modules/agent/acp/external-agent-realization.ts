@@ -7,7 +7,9 @@ import {
   resolveAcpAgentletId,
 } from '@agenetes/acp-driver';
 import { resolveConnectedAgentletId } from '@agenetes/agentlet-host';
+import { threadIdentityKey } from '@agenetes/runtime';
 
+import { requireOwnAgentlet } from '../../identity/agent-credentials.js';
 import { canvasAcpNamespace } from '../../workspace/paths.js';
 import {
   acpRuntimePolicy,
@@ -204,7 +206,7 @@ export class ExternalAgentRealizationService {
     options: RealizeExternalAgentThreadOptions,
   ): Promise<RealizedExternalAgentThread> {
     const namespace = canvasAcpNamespace(options.canvasId ?? '');
-    const key = `${namespace.name}\u0000${namespace.storage?.root ?? ''}\u0000${options.threadId}`;
+    const key = threadIdentityKey({ namespace, threadId: options.threadId });
     try {
       return await this.join(key, options, namespace);
     } catch (error) {
@@ -212,7 +214,7 @@ export class ExternalAgentRealizationService {
       // thread is busy — it *is* the busy turn. What happened is that it
       // joined a flight started by a caller without the lease, that flight
       // lost admission to this very lease, and its rejection went to
-      // everyone waiting on it. The flight is keyed by thread alone and
+      // everyone waiting on it. The flight is keyed by qualified identity and
       // carries no notion of admission, so this is the seam where the two
       // are told apart. Retried once, on its own terms.
       if (
@@ -226,7 +228,7 @@ export class ExternalAgentRealizationService {
     }
   }
 
-  /** Share one realization per thread; see {@link realize} for the exception. */
+  /** Share one realization per qualified thread; see {@link realize} for the exception. */
   private async join(
     key: string,
     options: RealizeExternalAgentThreadOptions,
@@ -239,6 +241,8 @@ export class ExternalAgentRealizationService {
     }
     try {
       const realized = await pending;
+      if (realized.spec.spec.agentletId)
+        requireOwnAgentlet(realized.spec.spec.agentletId);
       this.validateRequest(realized, options);
       return realized;
     } finally {
@@ -250,6 +254,8 @@ export class ExternalAgentRealizationService {
     realized: RealizedExternalAgentThread,
     logger: FastifyBaseLogger,
   ): Promise<AcpSessionEntry> {
+    if (realized.spec.spec.agentletId)
+      requireOwnAgentlet(realized.spec.spec.agentletId);
     return this.dependencies.ensureSession(realized, logger);
   }
 
@@ -263,7 +269,7 @@ export class ExternalAgentRealizationService {
     );
     const release =
       !record && !options.turnLeaseHeld && this.dependencies.acquireTurn
-        ? this.dependencies.acquireTurn(options.threadId)
+        ? this.dependencies.acquireTurn(options.threadId, namespace)
         : undefined;
     if (release === null) {
       throw new AgentNodeBindingError(
@@ -315,6 +321,7 @@ export class ExternalAgentRealizationService {
         );
       }
       const spec = record.spec as AcpWorkloadSpec;
+      if (spec.spec.agentletId) requireOwnAgentlet(spec.spec.agentletId);
       validateRequestedExecution(spec, options);
       const binding = bindingFromSpec(spec);
       const realized = {
@@ -328,6 +335,7 @@ export class ExternalAgentRealizationService {
         options.threadId,
         binding.profileId,
         spec.spec.profileExecutionRevision ?? 0,
+        namespace,
       );
       this.dependencies.subscribeTitles?.(
         options.canvasId ?? '',
@@ -421,6 +429,7 @@ export class ExternalAgentRealizationService {
       options.threadId,
       binding.profileId,
       spec.spec.profileExecutionRevision ?? 0,
+      namespace,
     );
     this.dependencies.subscribeTitles?.(
       options.canvasId ?? '',

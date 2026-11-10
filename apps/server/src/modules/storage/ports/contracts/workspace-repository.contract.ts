@@ -50,6 +50,21 @@ export function describeWorkspaceRepositoryContract(
       expect(workspaces).toEqual(expect.arrayContaining([first, second]));
     });
 
+    it('filters membership by allowed ids without changing repository order', async () => {
+      const { repository, create } = await open();
+      const first = await create('First');
+      await create('Unrelated');
+      const last = await create('Last');
+      const allowed = [first.workspaceId, last.workspaceId];
+      const expected = (await repository.list()).filter((w) =>
+        allowed.includes(w.workspaceId),
+      );
+      await expect(repository.list(allowed)).resolves.toEqual(expected);
+      await expect(repository.list([])).resolves.toEqual([]);
+      await repository.remove(first.workspaceId);
+      await expect(repository.list(allowed)).resolves.toEqual([last]);
+    });
+
     it('renames a registered Workspace and returns its authoritative handle', async () => {
       const { repository, create } = await open();
       const workspace = await create('Before');

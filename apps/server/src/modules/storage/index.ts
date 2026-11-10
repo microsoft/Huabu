@@ -79,6 +79,8 @@ export type {
 
 export {
   activateWorkspace,
+  openWorkspace,
+  overlappingWorkspaceDirectories,
   adoptWorkspaceDirectory,
   closeStorage,
   composeStorage,

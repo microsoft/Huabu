@@ -5,6 +5,8 @@ import { act, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { useIdentityStore } from '@/store/identityStore';
+
 import { SpacePreviewNode } from './SpacePreviewNode';
 import {
   OPEN_SPACE_SHORTCUT_EVENT,
@@ -32,6 +34,7 @@ const mocks = vi.hoisted(() => ({
     status: 'ready',
     activity: [] as SpaceAgentActivity,
     updatedAt: 0,
+    access: { write: true, manage: true },
   },
   spaceSummaries: {} as Record<
     string,
@@ -150,6 +153,7 @@ let root: Root;
 let host: HTMLDivElement;
 
 beforeEach(() => {
+  useIdentityStore.setState({ identity: null });
   vi.clearAllMocks();
   mocks.desktopRole = undefined;
   mocks.openTab.mockResolvedValue({ ok: true });
@@ -165,6 +169,7 @@ beforeEach(() => {
     status: 'ready',
     activity: [],
     updatedAt: 0,
+    access: { write: true, manage: true },
   };
   mocks.state.nodes = [
     {
@@ -243,6 +248,48 @@ function editTitle(value: string) {
   });
   return input;
 }
+
+it.each([false, true])(
+  'a viewer/editor cannot rename the target Space (write: %s)',
+  (write) => {
+    useIdentityStore.setState({
+      identity: {
+        provider: 'bubble',
+        principal: { principalId: 'member', kind: 'user' },
+        member: true,
+        owner: false,
+      },
+    });
+    mocks.activity.access = { write, manage: false };
+    render();
+    act(() =>
+      window.dispatchEvent(
+        new CustomEvent(RENAME_SPACE_SHORTCUT_EVENT, {
+          detail: { nodeId: 'shortcut' },
+        }),
+      ),
+    );
+    expect(host.querySelector('textarea')).toBeNull();
+    expect(mocks.rename).not.toHaveBeenCalled();
+  },
+);
+
+it('cancels a target-title draft when its manage permission is revoked', () => {
+  render();
+  act(() =>
+    window.dispatchEvent(
+      new CustomEvent(RENAME_SPACE_SHORTCUT_EVENT, {
+        detail: { nodeId: 'shortcut' },
+      }),
+    ),
+  );
+  const input = editTitle('Unsubmitted title');
+  mocks.activity.access.manage = false;
+  render();
+  act(() => input.dispatchEvent(new FocusEvent('focusout', { bubbles: true })));
+  expect(host.querySelector('textarea')).toBeNull();
+  expect(mocks.rename).not.toHaveBeenCalled();
+});
 
 it('leaves canonical entry deletion to the shared More menu instead of adding a toolbar button', () => {
   mocks.spaceSummaries = {

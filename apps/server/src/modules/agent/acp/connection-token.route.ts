@@ -9,11 +9,15 @@ import {
 import { getExternalAgentRuntimeConfig } from './runtime-config.js';
 import {
   buildAgentletConnectionCommand,
-  getConnectionToken,
   InvalidAgentletConnectionEnvFileError,
   InvalidAgentletConnectionOriginError,
 } from '../../../connection-token.js';
-import { isOwnerRequest } from '../../security/owner.js';
+import {
+  ownDeviceCredential,
+  resetAgentCredentials,
+} from '../../identity/agent-credentials.js';
+import { personalSettingsOwner } from '../../identity/personal-settings.js';
+import { canChangeOwnSettings } from '../../security/owner.js';
 
 import type {
   AgentletConnectionCommandRequest,
@@ -23,8 +27,21 @@ import type {
 import type { FastifyPluginAsync } from 'fastify';
 
 const connectionTokenRoutes: FastifyPluginAsync = async (app) => {
+  // Revokes every connection command and agent credential the caller was
+  // given, and disconnects their devices. Local mode's devices share the
+  // machine connection token, which is rotated on the Server instead.
+  app.post('/connection-credentials/reset', async (_request, reply) => {
+    const principalId = personalSettingsOwner();
+    if (!principalId)
+      return reply.status(409).send({
+        message: 'Device credentials are reset per user in Bubble mode only',
+      });
+    resetAgentCredentials(principalId);
+    return reply.code(204).send();
+  });
+
   app.post('/connection-credentials', async (request, reply) => {
-    if (!isOwnerRequest(request)) {
+    if (!canChangeOwnSettings(request)) {
       return reply.status(403).send({
         message: 'Forbidden: device connection requires owner authorization',
       });
@@ -39,7 +56,7 @@ const connectionTokenRoutes: FastifyPluginAsync = async (app) => {
       .header('Cache-Control', 'no-store')
       .header('Pragma', 'no-cache')
       .send({
-        token: getConnectionToken(),
+        token: ownDeviceCredential(),
         maxAgents: getExternalAgentRuntimeConfig().maxAgents,
       });
   });
@@ -48,7 +65,7 @@ const connectionTokenRoutes: FastifyPluginAsync = async (app) => {
     Body: AgentletConnectionCommandRequest;
     Reply: ApiResult<AgentletConnectionCommandResponse>;
   }>('/connection-command', async (request, reply) => {
-    if (!isOwnerRequest(request)) {
+    if (!canChangeOwnSettings(request)) {
       return reply.status(403).send({
         message: 'Forbidden: connection command requires owner authorization',
       });
@@ -68,7 +85,14 @@ const connectionTokenRoutes: FastifyPluginAsync = async (app) => {
         .send({ message: 'Browser origin does not match request origin' });
     }
     try {
-      const response = buildAgentletConnectionCommand(parsed.data);
+      // A Bubble user's command carries their own device credential; locally
+      // it is the machine token, reported with where it came from.
+      const response = personalSettingsOwner()
+        ? buildAgentletConnectionCommand(parsed.data, {
+            token: ownDeviceCredential(),
+            source: 'managed',
+          })
+        : buildAgentletConnectionCommand(parsed.data);
       return reply
         .header('Cache-Control', 'no-store')
         .header('Pragma', 'no-cache')

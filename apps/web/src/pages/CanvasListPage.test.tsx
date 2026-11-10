@@ -41,6 +41,7 @@ const environment = vi.hoisted(() => ({
   electron: false,
   desktopHome: false,
   canChangeWorkspace: false,
+  canCreateSpaces: true,
   pickerSupported: false,
   syncing: false,
   metadataStatus: 'ready' as 'idle' | 'loading' | 'ready' | 'error',
@@ -213,6 +214,7 @@ vi.mock('../store/workspaceStore', () => {
     selectWorkspace: environment.select,
   });
   return {
+    useCanCreateSpaces: () => environment.canCreateSpaces,
     useWorkspaceLabel: () => 'Test workspace',
     useFolderPickerSupported: () => environment.pickerSupported,
     useWorkspaceStore: Object.assign(
@@ -235,6 +237,7 @@ beforeEach(() => {
   environment.electron = false;
   environment.desktopHome = false;
   environment.canChangeWorkspace = false;
+  environment.canCreateSpaces = true;
   environment.pickerSupported = false;
   environment.syncing = false;
   environment.metadataStatus = 'ready';
@@ -414,6 +417,24 @@ describe('CanvasListPage navigation', () => {
       'space-1',
       'parent',
     ]);
+  });
+
+  it('offers New Space and Import Space only where the caller may create them', async () => {
+    const labels = () =>
+      [...container.querySelectorAll('main button')].map(
+        (button) => button.textContent,
+      );
+    await renderPage();
+    expect(labels()).toEqual(
+      expect.arrayContaining(['actions.importCanvas', 'actions.newCanvas']),
+    );
+
+    await act(async () => root.unmount());
+    root = createRoot(container);
+    environment.canCreateSpaces = false;
+    await renderPage();
+    expect(labels()).not.toContain('actions.importCanvas');
+    expect(labels()).not.toContain('actions.newCanvas');
   });
 
   it('does not offer promotion for a top-level Space', async () => {

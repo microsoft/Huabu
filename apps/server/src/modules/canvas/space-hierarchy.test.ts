@@ -26,6 +26,7 @@ import { assertChildSpaceEntriesAllowed } from './world-preview-policy.js';
 import { acquireAgentTurn } from '../agent/turn-lease.js';
 import { setRequestIdentity } from '../identity/request.js';
 import * as storage from '../storage/index.js';
+import { canvasAcpNamespace } from '../workspace/paths.js';
 import { setWorkspacePath } from '../workspace.js';
 
 import type { CanvasNodeId } from '@huabu/shared';
@@ -995,12 +996,60 @@ describe('Space ownership', () => {
         },
       ],
     });
-    const release = acquireAgentTurn('thread-busy')!;
+    const release = acquireAgentTurn(
+      'thread-busy',
+      canvasAcpNamespace(child.canvasId),
+    );
+    if (!release) throw new Error('Unexpected busy fixture');
     try {
       await expect(
         deleteSpaceTree('root', deletionPreview(await list(), 'root').token),
       ).rejects.toMatchObject({ code: 'SPACE_AGENT_RUNNING' });
       expect(await list()).toHaveLength(2);
+    } finally {
+      release();
+    }
+  });
+
+  it('deletes its subtree while another Space holds the same logical thread ID', async () => {
+    const child = await createChildSpace('root', 'Child');
+    await storage.createSpace('unrelated', 'Unrelated');
+    const write = await executeOnServer({
+      canvasId: child.canvasId,
+      originator: { source: 'ui' },
+      commands: [
+        {
+          type: 'CREATE_NODES',
+          nodes: [
+            {
+              id: 'node-agent',
+              nodeType: 'question',
+              position: { x: 0, y: 0 },
+              data: {
+                threadId: 'same-thread',
+                agentBinding: { kind: 'internal' },
+                content: 'Draft',
+              },
+            },
+          ],
+        },
+      ],
+    });
+    expect(write.results.every((result) => result.applied)).toBe(true);
+    const namespace = canvasAcpNamespace('unrelated');
+    const release = acquireAgentTurn('same-thread', namespace);
+    if (!release) throw new Error('Unexpected busy fixture');
+    try {
+      expect(
+        await deleteSpaceTree(
+          'root',
+          deletionPreview(await list(), 'root').token,
+        ),
+      ).toEqual([child.canvasId, 'root']);
+      expect((await list()).map((item) => item.canvasId)).toEqual([
+        'unrelated',
+      ]);
+      expect(acquireAgentTurn('same-thread', namespace)).toBeNull();
     } finally {
       release();
     }
@@ -1058,6 +1107,7 @@ describe('Space ownership', () => {
             );
             if (failClaim) throw new Error('grant store unavailable');
           },
+          workspaces: async () => 'all',
         },
       });
     });

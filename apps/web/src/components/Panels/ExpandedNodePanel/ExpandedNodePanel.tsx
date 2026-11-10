@@ -8,6 +8,7 @@ import { useTranslation } from 'react-i18next';
 
 import { getNodeIcon } from '@/config/nodeIcons.ts';
 import { formatShortcutById, matchesShortcut } from '@/config/shortcuts.ts';
+import { selectCanWriteCanvas } from '@/store/canvasStore';
 
 import { InPreviewSearchBar } from './InPreviewSearchBar.tsx';
 import {
@@ -216,6 +217,7 @@ export const ExpandedNodePanel = ({
   const nodes = useCanvasStore((s) => s.nodes);
   const edges = useCanvasStore((s) => s.edges);
   const canvasId = useCanvasStore((s) => s.canvasId);
+  const canWrite = useCanvasStore(selectCanWriteCanvas);
   const updateNodeData = useCanvasStore((s) => s.updateNodeData);
   // Routed through `tryRename` so a sibling-label collision triggers the
   // shared alert + revert flow (same path used by the layer tree and
@@ -419,7 +421,7 @@ export const ExpandedNodePanel = ({
   // so an unsubmitted draft never leaks onto the next node's title.
   useEffect(() => {
     setIsEditingTitle(false);
-  }, [expandedNodeId]);
+  }, [expandedNodeId, canWrite]);
 
   useEffect(() => {
     if (
@@ -430,15 +432,17 @@ export const ExpandedNodePanel = ({
     )
       return;
     handledRenameNonce.current = renameRequestNonce;
+    onRenameRequestHandled?.(renameRequestNonce);
+    if (!canWrite) return;
     setDraftTitle(liveLabel);
     setIsEditingTitle(true);
-    onRenameRequestHandled?.(renameRequestNonce);
   }, [
     renameRequestNonce,
     expandedNodeId,
     activeItem,
     liveLabel,
     onRenameRequestHandled,
+    canWrite,
   ]);
 
   // Listen for text selection inside the panel and auto-attach as pending
@@ -490,9 +494,13 @@ export const ExpandedNodePanel = ({
 
   if (!activeItem) return null;
 
-  const canEditTitle = !!expandedNodeId;
+  const canEditTitle = !!expandedNodeId && canWrite;
   const commitTitle = () => {
-    if (!canEditTitle || !expandedNodeId) {
+    if (
+      !canEditTitle ||
+      !expandedNodeId ||
+      !selectCanWriteCanvas(useCanvasStore.getState())
+    ) {
       setIsEditingTitle(false);
       setDraftTitle(liveLabel);
       return;
@@ -657,12 +665,14 @@ export const ExpandedNodePanel = ({
               }
               type={activeItem.type}
               data={activeItem.data}
-              readOnly={false}
+              readOnly={!canWrite}
               focusRequestNonce={nodeFocusRequestNonce}
               onFocusRequestHandled={onNodeFocusRequestHandled}
               onDataChange={
-                expandedNodeId
+                expandedNodeId && canWrite
                   ? (patch) => {
+                      if (!selectCanWriteCanvas(useCanvasStore.getState()))
+                        return;
                       updateNodeData(expandedNodeId, patch);
                       onCommit?.();
                     }

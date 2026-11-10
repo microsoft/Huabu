@@ -23,7 +23,10 @@ import { savedBeforeSignOut } from '../../../store/canvasStore';
 import { useIdentityStore } from '../../../store/identityStore';
 import { useSettingsUiStore } from '../../../store/settingsUiStore';
 import { useShortcutsUiStore } from '../../../store/shortcutsUiStore';
-import { useWorkspaceStore } from '../../../store/workspaceStore';
+import {
+  useCanCreateSpaces,
+  useWorkspaceStore,
+} from '../../../store/workspaceStore';
 import { setDesktopInputFrozen } from '../../../utils/desktopInput';
 import { formatShortcut } from '../../../utils/platform';
 import { Button } from '../../Common/Button';
@@ -76,6 +79,10 @@ export const AppMenu: React.FC<AppMenuProps> = ({
   const canChangeWorkspace = useWorkspaceStore(
     (s) => s.capabilities?.canChangeWorkspace ?? true,
   );
+  const canCreateSpaces = useCanCreateSpaces();
+  const namedWorkspaces = useWorkspaceStore(
+    (s) => s.capabilities?.namedWorkspaces === true,
+  );
   const identity = useIdentityStore((s) => s.identity);
   const worldCanvasId = useWorkspaceStore((s) => s.worldCanvasId);
   const worldEnabled = useWorkspaceStore((s) => s.worldEnabled);
@@ -102,7 +109,7 @@ export const AppMenu: React.FC<AppMenuProps> = ({
     try {
       if (!(await savedBeforeSignOut())) failure = 'auth.signOutUnsaved';
       else {
-        await signOut();
+        await signOut({ providerSignOut: identity?.providerSignOut });
         return;
       }
     } catch {
@@ -182,19 +189,27 @@ export const AppMenu: React.FC<AppMenuProps> = ({
           </>
         )}
 
-        <DropdownMenuItem
-          shortcut={newCanvasHint}
-          onClick={runAndClose(() => void create())}
-        >
-          {t('actions.newCanvas')}
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={runAndClose(openImportDialog)}>
-          {t('actions.importCanvas')}
-        </DropdownMenuItem>
+        {canCreateSpaces && (
+          <>
+            <DropdownMenuItem
+              shortcut={newCanvasHint}
+              onClick={runAndClose(() => void create())}
+            >
+              {t('actions.newCanvas')}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={runAndClose(openImportDialog)}>
+              {t('actions.importCanvas')}
+            </DropdownMenuItem>
+          </>
+        )}
 
         {canChangeWorkspace && (
           <DropdownMenuItem onClick={runAndClose(() => navigate('/setup'))}>
-            {t('navigation.switchWorkspace')}
+            {t(
+              namedWorkspaces
+                ? 'workspace.switcher'
+                : 'navigation.switchWorkspace',
+            )}
           </DropdownMenuItem>
         )}
 

@@ -10,6 +10,10 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import canvasRoutes from './canvas.route.js';
 import { createChildSpace } from './space-hierarchy.js';
+import {
+  openPersonalSettings,
+  useCaller,
+} from '../identity/personal-settings.js';
 import { setRequestIdentity } from '../identity/request.js';
 import {
   createSpace,
@@ -18,7 +22,7 @@ import {
 } from '../storage/index.js';
 import { setWorkspacePath } from '../workspace.js';
 
-import type { ResourceAccess } from '../identity/service.js';
+import type { ResolvedIdentity, ResourceAccess } from '../identity/service.js';
 
 let tmp: string;
 beforeEach(async () => {
@@ -52,6 +56,7 @@ describe('a member’s Spaces', () => {
     const app = await host({
       can: async (_level, { id }) => id === child.canvasId,
       claim: async () => {},
+      workspaces: async () => 'all' as const,
     });
     const listed = (await app.inject('/canvas')).json().canvases;
     await app.close();
@@ -69,16 +74,25 @@ describe('a member’s Spaces', () => {
     ).toBe('root');
   });
 
-  it('refuses a member a batch that claims to come from an agent', async () => {
+  it("allows agent batches under each user's own credentials, including administrators", async () => {
     const execute = async (owner: boolean, source: 'agent' | 'ui') => {
       const app = fastify();
+      app.addHook('onRequest', (_request, _reply, done) =>
+        openPersonalSettings(done),
+      );
       app.addHook('onRequest', async (request) => {
-        setRequestIdentity(request, {
-          principal: { principalId: 'carol', kind: 'user' },
+        const identity: ResolvedIdentity = {
+          principal: { principalId: 'carol', kind: 'user' as const },
           member: true,
           owner,
-          access: { can: async () => true, claim: async () => {} },
-        });
+          access: {
+            can: async () => true,
+            claim: async () => {},
+            workspaces: async () => 'all' as const,
+          },
+        };
+        setRequestIdentity(request, identity);
+        useCaller(identity);
       });
       await app.register(canvasRoutes, { prefix: '/canvas' });
       const response = await app.inject({
@@ -90,7 +104,7 @@ describe('a member’s Spaces', () => {
               type: 'CREATE_NODES',
               nodes: [
                 {
-                  id: 'node-img',
+                  id: `node-img-${owner}-${source}`,
                   nodeType: 'image',
                   data: { label: 'x', src: 'http://169.254.169.254/latest' },
                   position: { x: 0, y: 0 },
@@ -105,7 +119,8 @@ describe('a member’s Spaces', () => {
       await app.close();
       return response.statusCode;
     };
-    expect(await execute(false, 'agent')).toBe(403);
+    expect(await execute(false, 'agent')).toBe(200);
+    expect(await execute(true, 'agent')).toBe(200);
     expect(await execute(false, 'ui')).toBe(200);
   });
 
@@ -115,6 +130,7 @@ describe('a member’s Spaces', () => {
       claim: async () => {
         throw new Error('grant store unavailable');
       },
+      workspaces: async () => 'all',
     });
     const response = await app.inject({
       method: 'POST',

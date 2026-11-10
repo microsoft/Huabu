@@ -8,8 +8,10 @@ import { ApiError } from '../api/_client';
 import { listCanvases } from '../api/canvas';
 import {
   activateWorkspace,
+  createNamedWorkspace,
   getWorkspaceInfo,
   listWorkspaces,
+  openFolderWorkspace as adoptFolderWorkspace,
   putWorkspacePath,
   removeWorkspace,
   type WorkspaceCapabilities,
@@ -109,6 +111,10 @@ interface WorkspaceState {
 
   /** (Free mode) Activate a registered Workspace by stable identity. */
   activateRecentWorkspace: (workspaceId: string) => Promise<void>;
+  /** Create a Workspace by name and switch to it (`namedWorkspaces`). */
+  createWorkspace: (name: string) => Promise<void>;
+  /** Open a Server folder as one's own Workspace and switch to it (`folderWorkspaces`). */
+  openFolderWorkspace: (path: string) => Promise<void>;
 
   /** (Free mode) Unregister an inactive Workspace. */
   removeRecentWorkspace: (workspaceId: string) => void;
@@ -383,8 +389,12 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
       }
 
       // ── Free mode ──
-      // Server already activated (e.g. another tab beat us to it).
-      const activated = info.configured && Boolean(info.path);
+      // Server already activated (e.g. another tab beat us to it). Where each
+      // person has their own Workspaces, the Server has already chosen the
+      // caller's current one, which carries no path.
+      const activated =
+        info.configured &&
+        (Boolean(info.path) || info.capabilities.namedWorkspaces === true);
 
       let registered: WorkspaceDescriptor[] = [];
       try {
@@ -429,7 +439,11 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
 
       // Restore the most recently used registered Workspace. The registry is
       // authoritative and activation promotes the selected entry to its front.
-      const saved = registered[0];
+      // Where each person has their own Workspaces the Server has already
+      // picked theirs; having none, they choose. An administrator's registry
+      // holds everybody's, and its first entry may be someone else's.
+      const saved =
+        info.capabilities.namedWorkspaces === true ? undefined : registered[0];
       if (saved) {
         try {
           await activateWorkspace(saved.workspaceId);
@@ -484,6 +498,28 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     );
   },
 
+  createWorkspace: async (name: string) => {
+    if (get().mode === 'managed') {
+      throw new Error('Workspace is locked by the server (managed mode)');
+    }
+    await changeWorkspace(async () => {
+      const created = await createNamedWorkspace(name);
+      await activateWorkspace(created.workspaceId);
+      return getWorkspaceInfo();
+    }, name);
+  },
+
+  openFolderWorkspace: async (path: string) => {
+    if (get().mode === 'managed') {
+      throw new Error('Workspace is locked by the server (managed mode)');
+    }
+    await changeWorkspace(async () => {
+      const opened = await adoptFolderWorkspace(path);
+      await activateWorkspace(opened.workspaceId);
+      return getWorkspaceInfo();
+    }, path);
+  },
+
   removeRecentWorkspace: (workspaceId: string) => {
     void removeWorkspace(workspaceId)
       .then(() =>
@@ -520,6 +556,15 @@ export function useWorkspaceLabel(): string | null {
     if (path) return path.split(/[\\/]/).filter(Boolean).pop() ?? null;
     return null;
   }, [name, path]);
+}
+
+/**
+ * Whether the caller may create or import Spaces at the top of the current
+ * Workspace. A person given only some of its Spaces may not; servers that do
+ * not say so allow it.
+ */
+export function useCanCreateSpaces(): boolean {
+  return useWorkspaceStore((s) => s.capabilities?.canCreateSpaces ?? true);
 }
 
 /**

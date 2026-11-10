@@ -37,6 +37,7 @@ async function settlePendingInkQuestion(
   threadId: string,
   text?: string,
   invocationToken?: string,
+  authorizeSpaceMutation?: () => Promise<void>,
 ): Promise<boolean> {
   const assertActive = () => {
     if (
@@ -51,6 +52,10 @@ async function settlePendingInkQuestion(
     assertActive();
     const ownerNodeId = activeInkIntentOwnerNodeId(canvasId, threadId);
     if (!ownerNodeId) return false;
+    // The owner can appear while this call waits for the Canvas mutex. The
+    // dispatcher checks current rights here, before any Space data is read,
+    // while a no-owner report remains a stateless payload validation.
+    await authorizeSpaceMutation?.();
     const handle = space(canvasId);
     const canvas = await handle.read();
     if (!canvas) return false;
@@ -93,9 +98,15 @@ async function settlePendingInkQuestion(
   });
 }
 
+/**
+ * Validate an Ink report and settle its Question when an active turn owns one.
+ * The trusted caller may supply `authorizeSpaceMutation` to enforce current
+ * Space rights at the actual sidecar branch, after mutex/owner resolution.
+ */
 export async function reportInkIntent(
   args: ReportInkIntentArgs,
   context: { canvasId: string; threadId: string; invocationToken?: string },
+  authorizeSpaceMutation?: () => Promise<void>,
 ): Promise<RfsInkIntentResponse> {
   const report = inkIntentReportSchema.parse(args);
   const renamed = await settlePendingInkQuestion(
@@ -103,6 +114,7 @@ export async function reportInkIntent(
     context.threadId,
     report.text,
     context.invocationToken,
+    authorizeSpaceMutation,
   );
   if (
     context.invocationToken &&
@@ -128,6 +140,7 @@ export async function reportInkIntent(
 export async function handleReportInkIntent(
   args: ReportInkIntentArgs,
   context?: { canvasId?: string; threadId?: string },
+  authorizeSpaceMutation?: () => Promise<void>,
 ): Promise<string> {
   if (
     !context?.canvasId ||
@@ -136,9 +149,13 @@ export async function handleReportInkIntent(
   ) {
     throw new Error('report_ink_intent is available only during an Ink turn');
   }
-  const { report, renamed } = await reportInkIntent(args, {
-    canvasId: context.canvasId,
-    threadId: context.threadId,
-  });
+  const { report, renamed } = await reportInkIntent(
+    args,
+    {
+      canvasId: context.canvasId,
+      threadId: context.threadId,
+    },
+    authorizeSpaceMutation,
+  );
   return JSON.stringify({ ...report, renamed });
 }
