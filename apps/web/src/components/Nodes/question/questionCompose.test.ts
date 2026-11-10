@@ -298,10 +298,13 @@ describe('Question conversation presentation', () => {
     });
     const addNode = vi.fn();
     const onCreated = vi.fn();
+    // A caller whose user moved on still honors the explicit retry.
+    const isCurrent = vi.fn(({ retry }: { retry: boolean }) => retry);
     await createQuestionNodeAndCompose({
       addNode,
       canvasId: 'canvas-1',
       placementPoint: { x: 0, y: 0 },
+      isCurrent,
       onCreated,
     });
     expect(useAcpProfilesStore.getState().recentConversationProfileId).toBe(
@@ -314,6 +317,7 @@ describe('Question conversation presentation', () => {
     action.onClick();
     // The caller's follow-up (e.g. a connecting edge) still runs for the retry.
     await vi.waitFor(() => expect(onCreated).toHaveBeenCalledOnce());
+    expect(isCurrent).toHaveBeenCalledExactlyOnceWith({ retry: true });
     expect(addNode).toHaveBeenCalledOnce();
     expect(onCreated).toHaveBeenCalledWith({
       nodeId: addNode.mock.calls[0]?.[0]?.id,
