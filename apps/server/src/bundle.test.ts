@@ -22,13 +22,13 @@ import { build } from 'tsup';
 import { describe, expect, it } from 'vitest';
 import { parse } from 'yaml';
 
+import { getBundledServicePackages } from './modules/services/package-loader.js';
 import {
   buildHuabuBootstrapEnv,
   resolveRuntimeArtifacts,
 } from '../../../packages/client-runtime/src/bootstrap.js';
 import clientRuntimeConfig from '../../../packages/client-runtime/tsup.config.js';
 import bundleConfig from '../tsup.config.js';
-import { getBundledServicePackages } from './modules/services/package-loader.js';
 
 const configured =
   typeof bundleConfig === 'function' ? await bundleConfig({}) : bundleConfig;
