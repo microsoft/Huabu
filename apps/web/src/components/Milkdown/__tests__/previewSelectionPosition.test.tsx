@@ -115,6 +115,19 @@ describe('preview selection popover positioning', () => {
     expect(onTextSelection).toHaveBeenLastCalledWith(null);
   });
 
+  it('never flushes pending content over an uncaptured native selection', async () => {
+    mocks.getTextSelection.mockReturnValue(null);
+    await update('Selected passage, streaming');
+    await dispatch(editor, new MouseEvent('mouseup', { bubbles: true }));
+    expect(mocks.setMarkdown).not.toHaveBeenCalled();
+    expect(document.getSelection()?.toString()).toBe('Selected passage');
+    document.getSelection()?.collapseToEnd();
+    await dispatch(document, new Event('selectionchange'));
+    expect(mocks.setMarkdown).toHaveBeenCalledExactlyOnceWith(
+      'Selected passage, streaming',
+    );
+  });
+
   it('hides selection chrome throughout dragging, including streaming updates, until release', async () => {
     await dispatch(editor, new MouseEvent('mouseup', { bubbles: true }));
     await dispatch(editor, new MouseEvent('mousedown', { bubbles: true }));

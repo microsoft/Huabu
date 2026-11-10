@@ -73,6 +73,7 @@ export function FragmentCommentPopover({
             onChange={(event) => setComment(event.target.value)}
             onKeyDown={(event) => {
               if (event.key !== 'Enter') return;
+              event.stopPropagation();
               if (
                 event.nativeEvent.isComposing ||
                 event.nativeEvent.keyCode === 229

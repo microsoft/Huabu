@@ -5,6 +5,7 @@ import { expect, test, type Page } from '@playwright/test';
 
 import { expectSelectionToolbarOutsideSelection } from './helpers';
 
+import type * as MilkdownCardModule from '../src/components/Messages/AIMessage/MilkdownMessageCard';
 import type * as SelectionToolbarModule from '../src/components/Messages/TextSelectionToolbar';
 import type * as UserMessageModule from '../src/components/Messages/UserMessage';
 import type * as ChatStoreModule from '../src/store/chatStore';
@@ -12,6 +13,91 @@ import type * as ReactModule from 'react';
 import type * as DomModule from 'react-dom/client';
 
 test.use({ hasTouch: false });
+
+test('can comment on the same Chat message again after confirming with Enter', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 480, height: 800 });
+  await page.goto('/playground/chat-performance?messages=2');
+  const send = page.getByRole('button', { name: 'Send', exact: true });
+  const drafts = page.locator(
+    '[data-chat-input-surface] [data-quoted-comment]',
+  );
+  for (const [index, comment] of [
+    'First comment',
+    'Second comment',
+    'Third comment',
+  ].entries()) {
+    const passage = page
+      .locator(index === 1 ? '.ProseMirror h2' : '.ProseMirror p')
+      .first();
+    await passage.scrollIntoViewIfNeeded();
+    await passage.click({ clickCount: 3 });
+    await expect(
+      page.getByRole('button', { name: 'Comment on selection', exact: true }),
+    ).toBeVisible();
+    if (index > 0) await expect(send).toBeEnabled();
+    await page
+      .getByRole('button', { name: 'Comment on selection', exact: true })
+      .click();
+    const input = page.getByRole('textbox', { name: 'Comment', exact: true });
+    await input.fill(comment);
+    await input.press('Enter');
+    await expect(drafts).toHaveCount(index + 1);
+    await expect(send).toBeEnabled();
+  }
+});
+
+test('can comment on a CodeMirror passage and then select code again', async ({
+  page,
+}) => {
+  await page.goto('/playground/chat-performance?messages=0');
+  await page.evaluate(async () => {
+    const reactPath = '/node_modules/.vite/deps/react.js';
+    const domPath = '/node_modules/.vite/deps/react-dom_client.js';
+    const cardPath =
+      '/src/components/Messages/AIMessage/MilkdownMessageCard.tsx';
+    const { createElement } = (await import(reactPath))
+      .default as typeof ReactModule;
+    const { createRoot } = (await import(domPath)).default as typeof DomModule;
+    const { MilkdownMessageCard } = (await import(
+      cardPath
+    )) as typeof MilkdownCardModule;
+    const host = document.createElement('div');
+    host.id = 'code-comment-fixture';
+    host.style.cssText =
+      'position:fixed;left:40px;top:40px;width:600px;z-index:100';
+    document.body.append(host);
+    createRoot(host).render(
+      createElement(MilkdownMessageCard, {
+        content: '```ts\nconst selected = 1;\nconst other = 2;\n```',
+        threadId: 'chat-performance-thread',
+        messageId: 'code-message',
+        enableComments: true,
+      }),
+    );
+  });
+  for (const index of [0, 1]) {
+    const line = page.locator('#code-comment-fixture .cm-line').nth(index);
+    await line.click({ clickCount: 3 });
+    await page
+      .getByRole('button', { name: 'Comment on selection', exact: true })
+      .click();
+    const input = page.getByRole('textbox', { name: 'Comment', exact: true });
+    await input.fill(`Code comment ${index + 1}`);
+    await input.press('Enter');
+    const drafts = page.locator(
+      '[data-chat-input-surface] [data-quoted-comment]',
+    );
+    await expect(drafts).toHaveCount(index + 1);
+    await expect(drafts.nth(index).locator('blockquote')).toHaveText(
+      index === 0 ? 'const selected = 1;' : 'const other = 2;',
+    );
+    await expect(
+      page.getByRole('button', { name: 'Send', exact: true }),
+    ).toBeEnabled();
+  }
+});
 
 for (const placement of [
   'below',

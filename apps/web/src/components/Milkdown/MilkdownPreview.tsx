@@ -288,7 +288,6 @@ export function MilkdownPreview(
       if (!snapshot || !rect) {
         clearMousePosition();
         onTextSelectionRef.current?.(null);
-        if (!selectingWithMouseRef.current) syncPendingMarkdown();
         return;
       }
       let position: { x: number; y: number };
