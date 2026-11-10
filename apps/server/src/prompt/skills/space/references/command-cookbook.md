@@ -12,7 +12,7 @@ Composed `space_commands` sequences for common user intents. When a step needs t
 | Brainstorm from a source               | `CREATE_NODES` (multiple ideas) `⇒` `CONNECT_NODES` (each → source)                                                                             |
 | Merge / synthesize                     | `read("nodes/<filename>.md")` for inputs → `CREATE_NODES` (synthesised note) `⇒` `DELETE_NODES` (originals) + `CONNECT_NODES` (link to context) |
 | Restyle a cluster                      | `MERGE_NODE_DATA` with `style.accent` on each member (one call)                                                                                 |
-| Spread a crowded cluster apart        | `DISTRIBUTE_NODES` (≥3 nodes) → inspect final geometry                                                                  |
+| Spread a crowded cluster apart         | `DISTRIBUTE_NODES` (≥3 nodes) → inspect final geometry                                                                                          |
 | Convert a frame back to siblings       | `DISSOLVE_FRAME`                                                                                                                                |
 | Move a node into a frame               | `SET_NODE_PARENT { nodeId, parentId }`                                                                                                          |
 | Detach a node from its frame           | `SET_NODE_PARENT { nodeId, parentId: null } `                                                                                                   |

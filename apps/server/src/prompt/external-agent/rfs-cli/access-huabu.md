@@ -163,7 +163,7 @@ The accepted command set is:
 | `DISCONNECT_EDGES`  | Remove edges by ID or endpoint pair.                                                    |
 | `SET_EDGE_STYLE`    | Patch edge direction, line shape, dash style, stroke, width, or label.                  |
 | `ALIGN_NODES`       | Align existing nodes along one axis.                                                    |
-| `DISTRIBUTE_NODES`  | Spread three or more existing nodes apart. |
+| `DISTRIBUTE_NODES`  | Spread three or more existing nodes apart.                                              |
 | `SET_FRAME_LAYOUT`  | Configure a frame's free, column, row, or grid layout.                                  |
 
 This table is only a navigation summary. Load the current guidance for one command—including required fields, parameter types, enums, limits, semantic constraints, result description, and a valid example—before using it:
