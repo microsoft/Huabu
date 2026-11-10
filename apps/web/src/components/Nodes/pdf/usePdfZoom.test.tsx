@@ -206,6 +206,13 @@ describe('PDF zoom', () => {
     expect(viewport.scrollTop).toBe(6400);
   });
 
+  it('keeps pinch anchored to PDF content rather than its reserved gutter', () => {
+    viewport.style.paddingLeft = '32px';
+    expect(wheel(-300 * Math.log(2)).defaultPrevented).toBe(true);
+    expect(zoom.scale).toBeCloseTo(2);
+    expect(viewport.scrollLeft).toBeCloseTo(168);
+  });
+
   it('accumulates pinch events within a single render and clamps zoom to 25–400%', () => {
     act(() => {
       wheel(-300 * Math.log(2));

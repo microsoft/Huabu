@@ -1,0 +1,27 @@
+/*
+ * Copyright (c) Microsoft Corporation.
+ * Licensed under the MIT license.
+ */
+
+.pdf-text-selection-outline {
+  border-color: color-mix(in srgb, var(--fg-subtle) 35%, transparent);
+}
+
+.pdf-text-selection-grip {
+  background: var(--bg-hover);
+  color: var(--fg-muted);
+}
+
+.pdf-text-selection:has(
+    .pdf-text-selection-grip:hover,
+    .pdf-text-selection-grip:focus-visible
+  )
+  .pdf-text-selection-outline {
+  border-color: var(--fg-subtle);
+}
+
+.pdf-text-selection-grip:hover,
+.pdf-text-selection-grip:focus-visible {
+  background: color-mix(in srgb, var(--fg-muted) 16%, var(--bg-hover));
+  color: var(--fg-default);
+}

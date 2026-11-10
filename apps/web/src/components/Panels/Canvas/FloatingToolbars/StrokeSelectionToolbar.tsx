@@ -1123,6 +1123,7 @@ export const StrokeSelectionToolbar = () => {
               return useAcpProfilesStore.getState().refresh();
             }}
           />
+          <FloatingToolbar.Divider />
           <Button
             variant="solid"
             className="canvas-context-submit"

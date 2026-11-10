@@ -18,7 +18,7 @@ const sourceText = `Before selected passage after. ${'Wrapped source text. '.rep
 for (const mode of ['mouse', 'touch'] as const) {
   test(`file preview ${mode} stages a frozen partial-file Comment without a read, send or navigation`, async ({
     page,
-  }) => {
+  }, testInfo) => {
     const pageErrors: string[] = [];
     page.on('pageerror', (error) => pageErrors.push(error.message));
     await openNewCanvas(page);
@@ -184,6 +184,18 @@ for (const mode of ['mouse', 'touch'] as const) {
       ).toBeVisible();
     };
     await selectPassage();
+    const capsules = page.locator(
+      '.selection-context-toolbar .canvas-context-toolbar',
+    );
+    await expect(capsules).toHaveCount(2);
+    for (const capsule of await capsules.all()) {
+      await expect(capsule).toHaveCSS('height', '36px');
+      await expect(capsule).toHaveCSS('border-radius', '8px');
+    }
+    await page.screenshot({
+      path: testInfo.outputPath('file-selection-toolbar.png'),
+      animations: 'disabled',
+    });
     await expect(
       page.getByRole('button', { name: 'Copy', exact: true }),
     ).toBeVisible();

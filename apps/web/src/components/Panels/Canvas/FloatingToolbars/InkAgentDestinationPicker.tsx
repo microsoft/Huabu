@@ -54,6 +54,8 @@ export interface InkAgentDestinationPickerProps {
   unresolved?: boolean;
   loading?: boolean;
   disabled?: boolean;
+  builtInModes?: readonly AgentMode[];
+  menuLabel?: string;
   unavailableReason?: InkAgentDestinationIssue;
   onNewConversation: (choice: AgentChoice) => void;
   onContinueConversation: (nodeId: string) => void;
@@ -76,6 +78,8 @@ export function InkAgentDestinationPicker({
   unresolved = false,
   loading = false,
   disabled = false,
+  builtInModes = ['operate'],
+  menuLabel,
   unavailableReason,
   onNewConversation,
   onContinueConversation,
@@ -110,7 +114,9 @@ export function InkAgentDestinationPicker({
             ? 'toolbar.inkAgentPicker.loadingConversation'
             : 'toolbar.inkAgentPicker.chooseConversation',
         )
-      : agentName || t('toolbar.inkAgentPicker.chooseAgent');
+      : agentName
+        ? `${t('toolbar.inkAgentPicker.new')} · ${agentName}`
+        : t('toolbar.inkAgentPicker.chooseAgent');
   const reason =
     unavailableReason ??
     selected?.disabledReason ??
@@ -152,7 +158,7 @@ export function InkAgentDestinationPicker({
     >
       {/* Coordinate positioning clamps vertically even when neither side fits. */}
       <DropdownMenu
-        aria-label={t('toolbar.inkAgentPicker.menuLabel')}
+        aria-label={menuLabel ?? t('toolbar.inkAgentPicker.menuLabel')}
         align="bottom-right"
         // Clear the trigger's 7px toolbar inset, then leave an 8px surface gap.
         offset={{ x: 0, y: 15 }}
@@ -182,15 +188,6 @@ export function InkAgentDestinationPicker({
               )}
             </span>
             <span className="min-w-0 truncate">{label}</span>
-            {(agent || continuing) && (
-              <span className="text-fg-muted shrink-0 text-xs">
-                {t(
-                  continuing
-                    ? 'toolbar.inkAgentPicker.continue'
-                    : 'toolbar.inkAgentPicker.new',
-                )}
-              </span>
-            )}
             {reason?.kind === 'unavailable' && (
               <AlertCircle size={12} className="text-warning-fg" aria-hidden />
             )}
@@ -255,7 +252,7 @@ export function InkAgentDestinationPicker({
                     onClick={() => {
                       if (disabled || conversation.disabledReason) return;
                       onContinueConversation(conversation.nodeId);
-                      setOpen(false);
+                      handleOpenChange(false);
                     }}
                   >
                     <span className="block truncate">{conversation.title}</span>
@@ -292,13 +289,13 @@ export function InkAgentDestinationPicker({
               }
               currentMode={mode}
               profiles={profiles}
-              builtInModes={['operate']}
+              builtInModes={builtInModes}
               externalGroup="nested"
               busy={disabled}
               onSelect={(choice) => {
                 if (disabled) return;
                 onNewConversation(choice);
-                setOpen(false);
+                handleOpenChange(false);
               }}
             />
           </div>
