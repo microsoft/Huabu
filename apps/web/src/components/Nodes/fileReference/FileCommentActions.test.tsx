@@ -199,6 +199,40 @@ it('captures source-device identity, UTF-16 offsets and loaded-prefix context fr
   ).toMatchObject({ complete: true });
 });
 
+it.each([false, true])(
+  'keeps selection actions when the anchor is outside the viewport (backward: %s)',
+  async (backward) => {
+    view.dispatch({
+      selection: backward ? { anchor: 26, head: 10 } : { anchor: 10, head: 26 },
+    });
+    vi.mocked(view.coordsAtPos).mockImplementation((position) =>
+      position === view.state.selection.main.head
+        ? { left: 20, right: 100, top: 20, bottom: 40 }
+        : null,
+    );
+    const capture = captureFileComment(view, identity, file);
+    expect(capture).toMatchObject({
+      selection: {
+        text: 'selected passage',
+        position: { x: 100, y: 40 },
+        selectionRect: undefined,
+      },
+      source: {
+        ...identity,
+        from: 10,
+        to: 26,
+        contentVersion: file.contentVersion,
+      },
+    });
+    await render();
+    expect(button('Copy')).toBeTruthy();
+    expect(button('Add as note')).toBeTruthy();
+    expect(button('Comment')).toBeTruthy();
+    await act(async () => button('Copy').click());
+    expect(copyToClipboard).toHaveBeenCalledExactlyOnceWith('selected passage');
+  },
+);
+
 it('rejects empty, whitespace, disjoint or stale-document selections', () => {
   for (const selection of [
     EditorSelection.single(0),

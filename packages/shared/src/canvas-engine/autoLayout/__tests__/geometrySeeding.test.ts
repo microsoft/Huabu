@@ -340,6 +340,38 @@ describe('geometry seeding — banding does not chain', () => {
 });
 
 describe('grid row ceiling', () => {
+  it.each([
+    { requested: 300_000, expected: [6, 7, 8] },
+    { requested: 8, expected: [8, 0, 1] },
+  ])(
+    'bounds collisions at $requested and preserves cells on reload',
+    ({ requested, expected }) => {
+      let nodes = [
+        makeFrame('grid', 1),
+        ...['a', 'b', 'c'].map((id) =>
+          placedChild(id, 0, 0, { frameColumn: 0, frameRow: requested }),
+        ),
+      ];
+      for (let iteration = 0; iteration < 4; iteration++) {
+        const result = solved(applyGridLayout(nodes, 'f', 1));
+        const rows = ['a', 'b', 'c'].map((id) => rowOf(result, id));
+        expect(rows).toEqual(expected);
+        expect(result.rowTracks).toHaveLength(9);
+        nodes = nodes.map((node) =>
+          node.parentId
+            ? {
+                ...node,
+                data: {
+                  ...node.data,
+                  frameRow: result.rowAssignments?.get(node.id),
+                },
+              }
+            : node,
+        );
+      }
+    },
+  );
+
   it('clamps an out-of-range persisted row instead of allocating for it', () => {
     const nodes = [
       makeFrame('grid', 1),

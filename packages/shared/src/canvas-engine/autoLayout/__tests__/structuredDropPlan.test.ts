@@ -352,7 +352,7 @@ describe('planStructuredDrop — opening a row', () => {
       const layout = applyGridLayout(projected, 'frame', plan.count);
       expect(layout?.rowAssignments?.get('a')).toBe(0);
       expect(layout?.rowAssignments?.get('b')).toBe(6);
-      expect(layout?.rowAssignments?.get('peer')).toBe(7);
+      expect(layout?.rowAssignments?.get('peer')).toBe(8);
       projected = projected.map((node) =>
         node.parentId
           ? {
@@ -367,6 +367,73 @@ describe('planStructuredDrop — opening a row', () => {
       );
     }
   });
+
+  it.each([7, 8])(
+    'retains a source group spanning collision-overflow row %s across moves and reloads',
+    (row) => {
+      let nodes = [
+        makeFrame('grid', 2),
+        makeChild('a', { column: 0, row: 0 }, { x: 20, y: 64 }),
+        makeChild('peer', { column: 1, row: row - 1 }, { x: 120, y: 424 }),
+        makeChild('b', { column: 1, row }, { x: 120, y: 484 }),
+      ];
+      const original = applyGridLayout(nodes, 'frame', 2);
+      expect(original?.rowAssignments?.get('b')).toBe(row);
+      for (let move = 0; move < 3; move++) {
+        const plan = planStructuredDrop(nodes, 'frame', 'grid', 2, [
+          {
+            nodeId: 'a',
+            target: { kind: 'into-existing', slot: 0 },
+            rowTarget: { kind: 'insert-new', slot: 0 },
+          },
+          {
+            nodeId: 'b',
+            target: { kind: 'into-existing', slot: 1 },
+            rowTarget: { kind: 'insert-new', slot: row },
+          },
+        ]);
+        nodes = nodes.map((node) =>
+          node.parentId
+            ? {
+                ...node,
+                data: {
+                  ...node.data,
+                  frameColumn: plan.tracks.get(node.id),
+                  frameRow: plan.rows.get(node.id),
+                },
+              }
+            : node,
+        );
+        for (let reload = 0; reload < 3; reload++) {
+          const layout = applyGridLayout(nodes, 'frame', plan.count);
+          if (!layout?.rowAssignments) throw new Error('Missing Grid layout');
+          expect(layout.rowAssignments.get('b')).toBe(row);
+          expect(layout.rowAssignments.get('a')).toBe(0);
+          expect(layout.rowTracks?.length).toBeLessThanOrEqual(9);
+          expect(
+            new Set(
+              [...layout.rowAssignments].map(
+                ([id, assignedRow]) =>
+                  `${layout.slotAssignments.get(id)}:${assignedRow}`,
+              ),
+            ).size,
+          ).toBe(3);
+          nodes = nodes.map((node) =>
+            node.parentId
+              ? {
+                  ...node,
+                  data: {
+                    ...node.data,
+                    frameRow: layout.rowAssignments?.get(node.id),
+                  },
+                  position: layout.childPositions.get(node.id) ?? node.position,
+                }
+              : node,
+          );
+        }
+      }
+    },
+  );
 
   it.each([
     { row: 0, kind: 'into-existing', column: 0 },

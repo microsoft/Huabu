@@ -152,6 +152,11 @@ export function gridRowCeiling(childCount: number): number {
   return Math.max(0, childCount) * 2;
 }
 
+/** Retain previously resolved collision rows without allowing repeated solves to grow the bound. */
+function gridRowLimit(childCount: number): number {
+  return gridRowCeiling(childCount) + Math.max(0, childCount - 1);
+}
+
 /**
  * Read the user-pinned minimum row count off a `grid` Frame. Absent
  * (or non-positive) means the row count follows the content.
@@ -998,7 +1003,7 @@ export function applyRowLayout(
  * persistent, so later drags move one child instead of reshuffling
  * every row against the rendered geometry.
  *
- * Row indices are clamped to {@link gridRowCeiling}. Sparse indices are
+ * Row indices retain the bounded collision reserve above {@link gridRowCeiling}. Sparse indices are
  * accepted as input, but the band array is allocated per row index, so an
  * unclamped index turns a single command into an unbounded allocation.
  * Blank rows remain addressable while present but have no stable identity
@@ -1016,9 +1021,14 @@ function assignGridRows(
     ? null
     : bandChildrenByGeometry(children, 'row').band;
 
-  const ceiling = gridRowCeiling(children.length);
+  const limit = gridRowLimit(children.length);
   const requestedRow = (child: ChildSlot) =>
     readFrameGridRow(child.node) ?? seeded?.get(child.node.id) ?? 0;
+  let ceiling = gridRowCeiling(children.length);
+  for (const child of children) {
+    const row = requestedRow(child);
+    if (row <= limit) ceiling = Math.max(ceiling, row);
+  }
   const rowOf = (child: ChildSlot) => clampInt(requestedRow(child), 0, ceiling);
   const ordered = [...children].sort(
     (a, b) =>
@@ -1032,13 +1042,13 @@ function assignGridRows(
   for (const child of ordered) {
     const column = columnOf(child);
     let row = rowOf(child);
-    while (occupied.has(`${row}:${column}`)) row += 1;
+    // At the hard bound, fill an earlier vacancy instead of growing on every solve.
+    while (occupied.has(`${row}:${column}`)) row = (row + 1) % (limit + 1);
     occupied.add(`${row}:${column}`);
     assignment.set(child.node.id, row);
   }
 
-  // Collision bumping can push past the ceiling by at most one row per
-  // child, so the band array stays O(children).
+  // Both requested rows and collision resolution stay within the same O(children) bound.
   let maxRow = 0;
   for (const row of assignment.values()) {
     if (row > maxRow) maxRow = row;
@@ -1780,23 +1790,24 @@ export function planStructuredDrop(
   // ── Grid rows ───────────────────────────────────────────────────
   if (isGrid) {
     const movingIds = new Set(requests.map((request) => request.nodeId));
-    // A single-node column insertion already creates empty cells and
-    // must not also open a row. Grid groups only insert row blocks.
-    const rowInsertRequest =
-      !insertRequest &&
-      requests.length === 1 &&
-      requests[0].rowTarget?.kind === 'insert-new'
-        ? requests[0]
-        : null;
-
     if (isGridGroup) {
       const targetRows = requests.map(
         (request) => request.rowTarget?.slot ?? 0,
       );
       // Clamp the whole block, never its individual cells, to the solver's row bound.
+      const sourceRows = requests.map(
+        (request) => origRow.get(request.nodeId) ?? 0,
+      );
+      const rowCeiling = Math.min(
+        gridRowLimit(childIds.length),
+        Math.max(
+          gridRowCeiling(childIds.length),
+          Math.max(...sourceRows) - Math.min(...sourceRows),
+        ),
+      );
       const correction = Math.max(
         -Math.min(...targetRows),
-        Math.min(0, gridRowCeiling(childIds.length) - Math.max(...targetRows)),
+        Math.min(0, rowCeiling - Math.max(...targetRows)),
       );
       for (let index = 0; index < targetRows.length; index++)
         targetRows[index] += correction;
@@ -1821,18 +1832,20 @@ export function planStructuredDrop(
       requests.forEach((request, index) =>
         rows.set(request.nodeId, targetRows[index]),
       );
-    } else if (rowInsertRequest) {
-      const opened = rowInsertRequest.rowTarget?.slot ?? 0;
-      for (const id of childIds) {
-        if (id === rowInsertRequest.nodeId) continue;
-        const row = rows.get(id);
-        if (row !== undefined && row >= opened) rows.set(id, row + 1);
-      }
-      rows.set(rowInsertRequest.nodeId, opened);
     } else {
       for (const request of requests) {
         const targetRow = request.rowTarget?.slot ?? 0;
         const targetTrack = tracks.get(request.nodeId) ?? 0;
+        // Column insertion already creates empty cells; explicit row requests work in batches too.
+        if (!insertRequest && request.rowTarget?.kind === 'insert-new') {
+          for (const id of childIds) {
+            if (id === request.nodeId) continue;
+            const row = rows.get(id);
+            if (row !== undefined && row >= targetRow) rows.set(id, row + 1);
+          }
+          rows.set(request.nodeId, targetRow);
+          continue;
+        }
         // Read the occupant against the POST-shift columns, so the answer
         // does not depend on whether a track was opened this gesture.
         const occupantId = childIds.find(

@@ -41,21 +41,22 @@ export function captureFileComment(
   const rect = view.coordsAtPos(selection.main.head);
   const start = view.coordsAtPos(from, 1);
   const end = view.coordsAtPos(to, -1);
-  if (!rect || !start || !end) return null;
-  const left = Math.min(start.left, end.left);
-  const top = Math.min(start.top, end.top);
+  if (!rect) return null;
   return {
     selection: {
       text,
       contextBefore: doc.sliceString(Math.max(0, from - 40), from),
       contextAfter: doc.sliceString(to, Math.min(doc.length, to + 40)),
       position: { x: rect.right, y: rect.bottom },
-      selectionRect: new DOMRect(
-        left,
-        top,
-        Math.max(start.right, end.right) - left,
-        Math.max(start.bottom, end.bottom) - top,
-      ),
+      selectionRect:
+        start && end
+          ? new DOMRect(
+              Math.min(start.left, end.left),
+              Math.min(start.top, end.top),
+              Math.max(start.right, end.right) - Math.min(start.left, end.left),
+              Math.max(start.bottom, end.bottom) - Math.min(start.top, end.top),
+            )
+          : undefined,
     },
     source: {
       kind: 'file-reference',

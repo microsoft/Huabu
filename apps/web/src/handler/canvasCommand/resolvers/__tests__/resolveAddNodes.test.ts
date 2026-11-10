@@ -632,6 +632,39 @@ describe('resolveAddNodes in a Grid Frame', () => {
     expect(new Set(cells).size).toBe(cells.length);
   });
 
+  it('honors every leading-row insertion in a batch targeting empty columns', () => {
+    const nodes = scene().filter(
+      (node) => node.id !== 'node-cell-0' && node.id !== 'node-cell-1',
+    );
+    const layout = solveStructuredFrameLayout(nodes, 'node-grid');
+    const row = layout?.rowTracks?.[0];
+    const columns = layout?.columnTracks;
+    assert(row && columns);
+    const committed = createAt(
+      nodes,
+      [0, 1].map((column) => ({
+        id: `node-new-${column}` as CanvasNodeId,
+        nodeType: 'question' as const,
+        parentId: 'node-grid' as CanvasNodeId,
+        placementPoint: { x: columns[column].left + 20, y: row.top - 5 },
+      })),
+    );
+    expect(
+      committed.find((node) => node.id === 'node-new-0')?.data,
+    ).toMatchObject({ frameColumn: 0, frameRow: 1 });
+    expect(
+      committed.find((node) => node.id === 'node-new-1')?.data,
+    ).toMatchObject({ frameColumn: 1, frameRow: 0 });
+    for (const existing of nodes.filter((node) => node.parentId)) {
+      expect(
+        committed.find((node) => node.id === existing.id)?.data,
+      ).toMatchObject({
+        frameColumn: existing.data.frameColumn,
+        frameRow: (existing.data.frameRow as number) + 2,
+      });
+    }
+  });
+
   it('keeps automatic placement when no point is supplied', () => {
     const nodes = scene();
     const resolution = resolveAddNodes(
