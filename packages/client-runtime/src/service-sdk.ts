@@ -27,7 +27,9 @@ async function serviceFetch(
   init?: RequestInit,
 ): Promise<Response> {
   const baseUrl = requiredEnvironment('HUABU_RFS_URL').replace(/\/+$/, '');
-  const token = requiredEnvironment('AGENTLET_TOKEN');
+  const token =
+    process.env.HUABU_RFS_TOKEN?.trim() ||
+    requiredEnvironment('AGENTLET_TOKEN');
   const response = await fetch(`${baseUrl}${path}`, {
     ...init,
     headers: {

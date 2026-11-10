@@ -112,7 +112,6 @@ const interactiveViewRoutes: FastifyPluginAsync = async (app) => {
   }>(
     '/:canvasId/:nodeId/actions/:actionId',
     // The action is delivered to the view's agent as a new turn.
-    { config: { invokesAgent: true } },
     async (request, reply) => {
       const params = interactiveViewActionParamsSchema.safeParse(
         request.params,

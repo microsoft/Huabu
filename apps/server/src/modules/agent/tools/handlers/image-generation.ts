@@ -54,6 +54,7 @@ import {
 import { getLogger } from '../../../../utils/logger.js';
 import { serviceProvisioner } from '../../../services/index.js';
 import { space } from '../../../storage/index.js';
+import { memberModelFetch } from '../../llm.js';
 
 import type { generateImageParamsSchema } from '../definitions.js';
 import type { Static } from '@earendil-works/pi-ai';
@@ -191,6 +192,7 @@ export async function handleGenerateImage(
         baseURL: trimmedEndpoint,
         apiKey: azure.apiKey,
         timeout: REQUEST_TIMEOUT_MS,
+        fetch: memberModelFetch,
       })
     : new AzureOpenAI({
         endpoint: trimmedEndpoint,
@@ -198,6 +200,7 @@ export async function handleGenerateImage(
         apiVersion: azure.apiVersion,
         deployment: azure.deployment,
         timeout: REQUEST_TIMEOUT_MS,
+        fetch: memberModelFetch,
       });
 
   log.info(

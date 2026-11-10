@@ -15,10 +15,10 @@ Managed Agent Team runs receive these values from daemon environment injection. 
 
 ## Reading and writing the Huabu Space
 
-When `HUABU_RFS_URL` and `AGENTLET_TOKEN` are available, fetch the access guide before acting on the Space — it documents how to read/write files and talk to the Space agent:
+When `HUABU_RFS_URL` and `HUABU_RFS_TOKEN` are available, fetch the access guide before acting on the Space — it documents how to read/write files and talk to the Space agent:
 
 ```
-GET ${HUABU_RFS_URL}/skill      (header: Authorization: Bearer ${AGENTLET_TOKEN})
+GET ${HUABU_RFS_URL}/skill      (header: Authorization: Bearer ${HUABU_RFS_TOKEN})
 ```
 
 The guide explains the three things you can do: **download** files by path, **upload** payloads, and **ask the Space agent** to create / move / link / lay out nodes or find relevant files. Read it once, then use plain `curl` (or any HTTP client) for everything.

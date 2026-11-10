@@ -233,21 +233,19 @@ export function useCreateConnectedNode() {
             useCanvasStore
               .getState()
               .nodes.some((node) => node.id === sourceId),
-        })
-          .then((created) => {
-            if (!created) return;
+          onCreated: (created) => {
             dispatchUiIntent({
               type: 'CONNECT_EDGE',
               source: sourceId,
               target: created.nodeId,
               style: CONNECTED_NODE_EDGE_STYLE,
             });
-          })
-          .catch((error) => {
-            toast(error instanceof Error ? error.message : String(error), {
-              tone: 'danger',
-            });
+          },
+        }).catch((error) => {
+          toast(error instanceof Error ? error.message : String(error), {
+            tone: 'danger',
           });
+        });
         return;
       }
 

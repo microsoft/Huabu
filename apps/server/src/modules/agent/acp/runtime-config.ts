@@ -2,13 +2,12 @@
 // Licensed under the MIT license.
 
 import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
 
 import { externalAgentRuntimeConfigSchema } from '@huabu/shared';
 
-import { getDataDir } from '../../../data-dir.js';
 import { atomicWriteJson } from '../../../utils/fs.js';
 import { getLogger } from '../../../utils/logger.js';
+import { settingsFilePath } from '../../identity/personal-settings.js';
 
 import type { ExternalAgentRuntimeConfig } from '@huabu/shared';
 
@@ -21,7 +20,7 @@ export const DEFAULT_EXTERNAL_AGENT_RUNTIME_CONFIG: ExternalAgentRuntimeConfig =
 const log = getLogger('external-agent-runtime-config');
 
 function configPath(): string {
-  return join(getDataDir(), 'external-agent-runtime-config.json');
+  return settingsFilePath('external-agent-runtime-config.json');
 }
 
 export function getExternalAgentRuntimeConfig(): ExternalAgentRuntimeConfig {

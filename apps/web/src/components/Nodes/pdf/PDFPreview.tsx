@@ -25,7 +25,10 @@ import { scheduleScrollToMatch, findProjectedRange } from '@/hooks/searchDom';
 import { handleCanvasNavigationKey } from '@/hooks/shortcuts/handleCanvasNavigationKey';
 import { usePreviewScrollMemory } from '@/hooks/usePreviewScrollMemory';
 import { hashSearchSource } from '@/hooks/useSearchSource';
-import { loadDefaultAgentBinding } from '@/store/acpProfilesStore';
+import {
+  loadDefaultAgentBinding,
+  toastConversationStartError,
+} from '@/store/acpProfilesStore';
 import useCanvasStore from '@/store/canvasStore';
 import { useChatStore } from '@/store/chatStore';
 import { conversationViewForNode } from '@/store/conversationOwner';
@@ -38,6 +41,7 @@ import {
 } from '@/store/previewWorkspace/model';
 import { readPdfPreviewView } from '@/store/previewWorkspace/scrollMemory';
 import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store';
+import { useWorkspaceStore } from '@/store/workspaceStore';
 import { setDragPayload } from '@/utils/io/dragDrop';
 import { pageLifecycle } from '@/utils/pageLifecycle';
 
@@ -579,6 +583,12 @@ export const PDFPreview = ({
       const chat = useChatStore.getState();
       const canvas = useCanvasStore.getState();
       const preview = usePreviewWorkspaceStore.getState();
+      const workspaceId = useWorkspaceStore.getState().workspaceId;
+      const isCurrent = () =>
+        useWorkspaceStore.getState().workspaceId === workspaceId &&
+        useCanvasStore.getState().canvasId === canvasId &&
+        usePreviewWorkspaceStore.getState().workspace === preview.workspace;
+      if (!isCurrent()) return;
       const pdfTarget = { kind: 'node', canvasId, nodeId: id } as const;
       const adjacentConversation = conversationInOtherGroup(
         preview.workspace,
@@ -605,35 +615,35 @@ export const PDFPreview = ({
         return;
       }
 
-      try {
-        await pageLifecycle.run('updating', async () => {
-          let fallbackThreadId = chat.threadMap[canvasId];
-          if (!fallbackThreadId) {
-            const binding = await loadDefaultAgentBinding();
-            if (
-              useCanvasStore.getState().canvasId !== canvasId ||
-              usePreviewWorkspaceStore.getState().workspace !==
-                preview.workspace
-            )
-              return;
-            fallbackThreadId = chat.ensureCanvasThread(canvasId, binding);
-          }
-          const pdfTab = findTabByTarget(preview.workspace, pdfTarget);
-          const pdfGroup = pdfTab
-            ? groupOfTab(preview.workspace, pdfTab.id)
-            : null;
-          chat.addPendingAttachment(fallbackThreadId, attachment);
-          preview.openPreviewTarget(
-            { kind: 'chat', canvasId, threadId: fallbackThreadId },
-            { groupId: pdfGroup?.id, openToSide: true },
-          );
-          usePanelStore.getState().requestFocusChatInput(fallbackThreadId);
-        });
-      } catch (error) {
-        toast(error instanceof Error ? error.message : String(error), {
-          tone: 'danger',
-        });
+      // Retain the source scope even if the missing-Agent toast outlives this PDF.
+      async function attach(): Promise<void> {
+        if (!isCurrent()) return;
+        try {
+          await pageLifecycle.run('updating', async () => {
+            let fallbackThreadId = chat.threadMap[canvasId];
+            if (!fallbackThreadId) {
+              const binding = await loadDefaultAgentBinding();
+              if (!isCurrent()) return;
+              fallbackThreadId = chat.ensureCanvasThread(canvasId, binding);
+            }
+            const pdfTab = findTabByTarget(preview.workspace, pdfTarget);
+            const pdfGroup = pdfTab
+              ? groupOfTab(preview.workspace, pdfTab.id)
+              : null;
+            chat.addPendingAttachment(fallbackThreadId, attachment);
+            preview.openPreviewTarget(
+              { kind: 'chat', canvasId, threadId: fallbackThreadId },
+              { groupId: pdfGroup?.id, openToSide: true },
+            );
+            usePanelStore.getState().requestFocusChatInput(fallbackThreadId);
+          });
+        } catch (error) {
+          toastConversationStartError(error, () => {
+            void attach();
+          });
+        }
       }
+      await attach();
     },
     [canvasId, id],
   );

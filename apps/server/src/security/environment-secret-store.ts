@@ -4,18 +4,41 @@
 import { getEnvApiKey } from '@earendil-works/pi-ai/compat';
 
 import { parseLlmProviderApiKeySecretId, SECRET_IDS } from './secret-ids.js';
+import { personalSettingsOwner } from '../modules/identity/personal-settings.js';
 
 import type { SecretStore } from './secret-store-types.js';
 import type { KnownProvider } from '@earendil-works/pi-ai';
 
-/** Read-only fallback over process.env (including values loaded from .env). */
+/**
+ * Read-only deployment credentials and provider environment. Personal callers
+ * never inherit these values or pi-ai's ambient credential-file fallback.
+ */
 export class EnvironmentSecretStore implements SecretStore {
   readonly kind = 'environment';
   readonly writable = false;
 
   async initialize(): Promise<void> {}
 
+  /** Deployment-only provider configuration; undefined for a personal caller. */
+  getEnvironmentValue(name: string): string | undefined {
+    return personalSettingsOwner() ? undefined : process.env[name];
+  }
+
+  /**
+   * Suppress pi-ai's ambient environment/file auth for personal Models. An
+   * absent override keeps its existing operator behavior in local mode.
+   */
+  getAuthContext() {
+    return personalSettingsOwner()
+      ? {
+          env: async (_name: string) => undefined,
+          fileExists: async (_path: string) => false,
+        }
+      : undefined;
+  }
+
   get(id: string): string | null {
+    if (personalSettingsOwner()) return null;
     if (id === SECRET_IDS.tavilyApiKey) {
       return process.env.TAVILY_API_KEY ?? null;
     }

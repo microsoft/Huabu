@@ -37,7 +37,7 @@ afterEach(() => {
 });
 
 describe('Workspace-scoped routes', () => {
-  it('binds Bubble machine requests to the process Workspace unless the URL names another', async () => {
+  it('refuses the unscoped machine credential in Bubble Workspaces', async () => {
     const other = await createWorkspace('Other');
     const app = Fastify();
     registerIdentity(app, {
@@ -59,7 +59,7 @@ describe('Workspace-scoped routes', () => {
       prefix: '/api/rfs/w/:workspaceId',
     });
     try {
-      for (const [url, workspaceId] of [
+      for (const [url] of [
         ['/api/rfs/a/where', getWorkspaceHandle()?.workspaceId],
         [`/api/rfs/w/${other.workspaceId}/a/where`, other.workspaceId],
       ]) {
@@ -67,8 +67,7 @@ describe('Workspace-scoped routes', () => {
           url,
           headers: { authorization: 'Bearer machine-secret' },
         });
-        expect(response.statusCode).toBe(200);
-        expect(response.json()).toEqual({ workspaceId });
+        expect(response.statusCode).toBe(401);
       }
     } finally {
       await app.close();

@@ -950,7 +950,10 @@ const CanvasContent: React.FC<CanvasProps> = ({
           addNode,
           placementPoint: position,
           canvasId,
-          isCurrent: () => useToolStore.getState().pendingNodeType === null,
+          // Arming another tool while the Agent loads abandons this
+          // placement; an explicit retry from the prompt does not.
+          isCurrent: ({ retry }) =>
+            retry || useToolStore.getState().pendingNodeType === null,
         });
       } else {
         addNode({

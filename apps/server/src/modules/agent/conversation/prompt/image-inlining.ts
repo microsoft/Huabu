@@ -18,6 +18,7 @@
 
 import { isVisionImageMime } from '../../../../utils/mime.js';
 import { resolveArtifactImageUrl } from '../../../artifact/utils.js';
+import { outboundFetch } from '../../../security/outbound.js';
 
 /**
  * Hard cap on the decoded byte size of an image we are willing to
@@ -116,7 +117,7 @@ export async function resolveImageUrl(
   // External image URLs: fetch and inline as base64 so the LLM can see them.
   if (resolved.startsWith('http://') || resolved.startsWith('https://')) {
     try {
-      const res = await fetch(resolved, {
+      const res = await outboundFetch(resolved, {
         signal: AbortSignal.timeout(10_000),
       });
       if (!res.ok) return { kind: 'skipped', reason: 'fetch_failed' };

@@ -23,6 +23,11 @@ import type { Edge, Node } from '@xyflow/react';
 ).IS_REACT_ACT_ENVIRONMENT = true;
 
 const CANVAS_ID = 'test-canvas';
+const previewCallbacks = vi.hoisted(() => ({
+  onDataChange: undefined as
+    | ((patch: Record<string, unknown>) => void)
+    | undefined,
+}));
 
 /** The node the workspace is showing; presentation moved off `canvasStore`. */
 const expandedNodeId = () =>
@@ -51,18 +56,24 @@ vi.mock('../../Nodes/NodePreviewContent.tsx', () => ({
   NodePreviewContent: ({
     id,
     onDataChange,
+    readOnly,
   }: {
     id?: string;
     onDataChange?: (patch: Record<string, unknown>) => void;
-  }) => (
-    <div data-preview-node-id={id}>
-      <button
-        type="button"
-        data-testid="mutate-node"
-        onClick={() => onDataChange?.({ content: 'Updated' })}
-      />
-    </div>
-  ),
+    readOnly?: boolean;
+  }) => {
+    previewCallbacks.onDataChange = onDataChange;
+    return (
+      <div data-preview-node-id={id} data-preview-read-only={readOnly}>
+        <button
+          type="button"
+          data-testid="mutate-node"
+          disabled={readOnly}
+          onClick={() => onDataChange?.({ content: 'Updated' })}
+        />
+      </div>
+    );
+  },
 }));
 
 vi.mock('./InPreviewSearchBar.tsx', () => ({
@@ -168,6 +179,7 @@ function swipe(from: number, to: number, y = 0, target?: HTMLElement) {
 }
 
 beforeEach(() => {
+  useCanvasStore.setState({ canvasAccess: null });
   testStorage.clear();
   useChatStore.getState().setSelectionAttachment(null);
 });
@@ -189,6 +201,88 @@ afterEach(() => {
 });
 
 describe('ExpandedNodePanel edge navigation', () => {
+  it('consumes a denied rename request so later write access cannot reopen it', () => {
+    useCanvasStore.setState({
+      canvasAccess: { canvasId: CANVAS_ID, write: false, manage: false },
+    });
+    renderPanel([canvasNode('a', 'Alpha')], [], true);
+    const handled = vi.fn();
+    act(() =>
+      root?.render(
+        <ExpandedNodePanel
+          embedded
+          renameRequestNonce={3}
+          onRenameRequestHandled={handled}
+        />,
+      ),
+    );
+    expect(handled).toHaveBeenCalledOnce();
+    expect(handled).toHaveBeenCalledWith(3);
+    expect(container?.querySelector('input')).toBeNull();
+    act(() =>
+      useCanvasStore.setState({
+        canvasAccess: { canvasId: CANVAS_ID, write: true, manage: false },
+      }),
+    );
+    expect(container?.querySelector('input')).toBeNull();
+    expect(handled).toHaveBeenCalledOnce();
+    act(() =>
+      root?.render(
+        <ExpandedNodePanel
+          embedded
+          renameRequestNonce={4}
+          onRenameRequestHandled={handled}
+        />,
+      ),
+    );
+    expect(container?.querySelector('input')).not.toBeNull();
+    expect(handled).toHaveBeenCalledWith(4);
+  });
+
+  it('renders a viewer preview without content or node-title editing', () => {
+    useCanvasStore.setState({
+      canvasAccess: { canvasId: CANVAS_ID, write: false, manage: false },
+    });
+    const onCommit = vi.fn();
+    renderPanel([canvasNode('a', 'Alpha')], [], true, onCommit);
+    expect(
+      container?.querySelector('[data-preview-read-only="true"]'),
+    ).not.toBeNull();
+    act(() =>
+      container
+        ?.querySelector<HTMLElement>('[aria-label="Rename node"]')
+        ?.click(),
+    );
+    expect(container?.querySelector('input')).toBeNull();
+    expect(previewCallbacks.onDataChange).toBeUndefined();
+    expect(onCommit).not.toHaveBeenCalled();
+  });
+
+  it('cancels an open title edit and ignores retained content callbacks after permission loss', () => {
+    useCanvasStore.setState({
+      canvasAccess: { canvasId: CANVAS_ID, write: true, manage: false },
+    });
+    const onCommit = vi.fn();
+    renderPanel([canvasNode('a', 'Alpha')], [], true, onCommit);
+    const retainedChange = previewCallbacks.onDataChange;
+    expect(retainedChange).toBeDefined();
+    act(() =>
+      container
+        ?.querySelector<HTMLElement>('[aria-label="Rename node"]')
+        ?.click(),
+    );
+    expect(container?.querySelector('input')).not.toBeNull();
+    act(() =>
+      useCanvasStore.setState({
+        canvasAccess: { canvasId: CANVAS_ID, write: false, manage: false },
+      }),
+    );
+    expect(container?.querySelector('input')).toBeNull();
+    act(() => retainedChange?.({ content: 'Forbidden' }));
+    expect(useCanvasStore.getState().nodes[0].data).toEqual({ label: 'Alpha' });
+    expect(onCommit).not.toHaveBeenCalled();
+  });
+
   it('keeps a compact gap between navigation and the title without reserving an empty button slot', () => {
     renderPanel(
       [canvasNode('a', 'Alpha'), canvasNode('b', 'Beta')],

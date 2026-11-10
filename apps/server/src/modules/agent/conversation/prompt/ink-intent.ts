@@ -53,7 +53,7 @@ export function renderInkReportEndpoint(
   const endpoint = `/agent/${encodeURIComponent(threadId)}/ink-intent`;
   return [
     '<ink_report_endpoint>',
-    `For this turn only, POST JSON to "$HUABU_RFS_URL${endpoint}" with Authorization: Bearer $AGENTLET_TOKEN and Content-Type: application/json.`,
+    `For this turn only, POST JSON to "$HUABU_RFS_URL${endpoint}" with Authorization: Bearer $HUABU_RFS_TOKEN and Content-Type: application/json.`,
     `Body: ${JSON.stringify({ invocationToken, report: { text: '<one-line interpretation, at most 120 characters>', explanation: '<optional brief explanation, at most 600 characters; omit when unnecessary>' } })}`,
     'Always provide report.text, even when your understanding is partial or uncertain. Do not send a status field. The response is { report, renamed }; renamed=false is valid when no untouched placeholder needs naming. HTTP 409 means this turn is no longer active: stop without reporting to a different turn or executing the task.',
     'Correct a rejected payload and retry. If reporting remains unavailable or is denied by your harness, explicitly explain the reporting blocker; do not claim the interpretation was recorded. Reporting does not grant permission to execute the task.',

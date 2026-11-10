@@ -462,6 +462,7 @@ export async function remapImportedSpace(
           } else if (isRecord(spec) && workload.kind === 'external') {
             const env = { ...(isRecord(spec.env) ? spec.env : {}) };
             delete env.HUABU_RFS_URL;
+            delete env.HUABU_RFS_TOKEN;
             delete env.HUABU_THREAD_ID;
             spec = {
               ...spec,

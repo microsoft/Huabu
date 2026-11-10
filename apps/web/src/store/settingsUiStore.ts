@@ -24,7 +24,8 @@ export type SettingsTabId =
   | 'agent'
   | 'agentSettings'
   | 'services'
-  | 'builtIn';
+  | 'builtIn'
+  | 'people';
 
 interface SettingsUiState {
   isOpen: boolean;

@@ -80,6 +80,9 @@ export const AppMenu: React.FC<AppMenuProps> = ({
     (s) => s.capabilities?.canChangeWorkspace ?? true,
   );
   const canCreateSpaces = useCanCreateSpaces();
+  const namedWorkspaces = useWorkspaceStore(
+    (s) => s.capabilities?.namedWorkspaces === true,
+  );
   const identity = useIdentityStore((s) => s.identity);
   const worldCanvasId = useWorkspaceStore((s) => s.worldCanvasId);
   const worldEnabled = useWorkspaceStore((s) => s.worldEnabled);
@@ -106,7 +109,7 @@ export const AppMenu: React.FC<AppMenuProps> = ({
     try {
       if (!(await savedBeforeSignOut())) failure = 'auth.signOutUnsaved';
       else {
-        await signOut();
+        await signOut({ providerSignOut: identity?.providerSignOut });
         return;
       }
     } catch {
@@ -202,7 +205,11 @@ export const AppMenu: React.FC<AppMenuProps> = ({
 
         {canChangeWorkspace && (
           <DropdownMenuItem onClick={runAndClose(() => navigate('/setup'))}>
-            {t('navigation.switchWorkspace')}
+            {t(
+              namedWorkspaces
+                ? 'workspace.switcher'
+                : 'navigation.switchWorkspace',
+            )}
           </DropdownMenuItem>
         )}
 

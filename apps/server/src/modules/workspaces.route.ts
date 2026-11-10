@@ -8,12 +8,11 @@ import { z } from 'zod';
 import { workspaceCreateSchema, workspaceRenameSchema } from '@huabu/shared';
 
 import {
-  getRequestIdentity,
   getRequestWorkspaceChooser,
+  requireRequestIdentity,
 } from './identity/request.js';
 import { migrateLegacyDesktopWorkspaceStore } from './legacy-desktop-workspace-store.js';
 import { resetPreprocessDispatcher } from './preprocessing/index.js';
-import { isOwnerRequest } from './security/owner.js';
 import { isRestrictedRequest } from './security/space-access.js';
 import {
   activateWorkspace,
@@ -23,7 +22,10 @@ import {
   getWorkspaceRepository,
   hasWorkspaceRegistry,
   materializesWorkspaces,
+  overlappingWorkspaceDirectories,
   resetStorageCache,
+  storageServes,
+  unavailableCapabilityMessage,
   workspaceAtDirectory,
   workspaceDirectory,
   workspaceIdentityOnDisk,
@@ -96,10 +98,7 @@ function rejectReadOnlyMutation(
   return null;
 }
 
-function descriptor(
-  workspace: WorkspaceHandle,
-  showPath = true,
-): WorkspaceDescriptor {
+function descriptor(workspace: WorkspaceHandle): WorkspaceDescriptor {
   const workspacePath = workspaceDirectory(workspace.workspaceId);
   const activeHandle = getWorkspaceHandle();
   const activeDirectory = getWorkspaceDirectory();
@@ -117,7 +116,7 @@ function descriptor(
     name: workspace.name,
     // A Workspace's directory is a materialization fact the handle does not
     // carry, so it is resolved separately — and never sent in managed mode.
-    path: isManagedMode() || !showPath ? null : workspacePath,
+    path: isManagedMode() ? null : workspacePath,
     active,
   };
 }
@@ -210,9 +209,9 @@ interface WorkspaceParams {
  * In Bubble mode each person has Workspaces of their own and a current one,
  * and these routes act for the caller alone: they list what the caller may
  * enter, switch only the caller, and create, rename or unregister by the
- * caller's grants. Folder Workspaces stay with administrators, because they
- * name places on the Server's filesystem. Local mode acts for the Server, as
- * it always has.
+ * caller's grants. Where Workspaces are Disk folders, anyone may open one by
+ * path (a debugging setup; real deployments keep Workspaces in SQL storage).
+ * Local mode acts for the Server, as it always has.
  */
 function personal(request: FastifyRequest): boolean {
   return isRestrictedRequest(request);
@@ -223,15 +222,23 @@ async function enterable(
 ): Promise<readonly WorkspaceHandle[]> {
   // Managed mode keeps everyone in its one Workspace.
   if (isManagedMode()) return visibleWorkspaces();
-  const allowed = await getRequestIdentity(request)!.access.workspaces();
+  const allowed = await requireRequestIdentity(request).access.workspaces();
   return getWorkspaceRepository().list(allowed === 'all' ? undefined : allowed);
+}
+
+async function canEnter(
+  request: FastifyRequest,
+  workspaceId: string,
+): Promise<boolean> {
+  const allowed = await requireRequestIdentity(request).access.workspaces();
+  return allowed === 'all' || allowed.includes(workspaceId);
 }
 
 async function canManage(
   request: FastifyRequest,
   workspaceId: string,
 ): Promise<boolean> {
-  return getRequestIdentity(request)!.access.can('manage', {
+  return requireRequestIdentity(request).access.can('manage', {
     type: 'workspace',
     id: workspaceId,
   });
@@ -275,29 +282,173 @@ const workspacesRoutes: FastifyPluginAsync = async (app) => {
   app.get('/', async (request) => {
     if (!personal(request))
       return (await visibleWorkspaces()).map((w) => descriptor(w));
-    const showPath = isOwnerRequest(request);
-    return (await enterable(request)).map((w) => descriptor(w, showPath));
+    return (await enterable(request)).map((w) => descriptor(w));
   });
+
+  /**
+   * Adopt (or find) the Disk folder at `requestedPath` as a Workspace, and
+   * name it when a name is given. Storage without Workspace folders refuses.
+   *
+   * `authorize` vets a folder that is already a registered Workspace, before
+   * anything about it changes; refused, the caller learns only "not found".
+   */
+  async function adoptFolder(
+    requestedPath: string,
+    name: string | undefined,
+    reply: FastifyReply,
+    authorize?: (
+      workspaceId: string,
+      modifiesFolder: boolean,
+    ) => Promise<boolean>,
+  ): Promise<{ workspace: WorkspaceHandle; created: boolean } | FastifyReply> {
+    if (!storageServes('workspace-directory'))
+      return sendError(
+        reply,
+        409,
+        unavailableCapabilityMessage('workspace-directory'),
+        'STORAGE_CAPABILITY_UNAVAILABLE',
+      );
+    try {
+      const workspacePath = resolveWorkspacePath(requestedPath);
+      const repository = getWorkspaceRepository();
+      if (authorize) {
+        // Registry paths are safe to inspect before foreign metadata. New
+        // parent/child namespaces write into or expose registered Workspace
+        // data, so they require manage access even without a rename.
+        for (const overlap of overlappingWorkspaceDirectories(workspacePath)) {
+          if (
+            !(await authorize(
+              overlap.workspaceId,
+              !overlap.sameDirectory || !!name,
+            ))
+          )
+            return sendError(reply, 404, 'Workspace not found');
+        }
+        // A moved folder or manifest-bearing copy can identify a registered
+        // Workspace even when its path does not overlap the remembered one.
+        // Resolve that identity read-only, before preparation/migrations.
+        const identity = workspaceIdentityOnDisk(workspacePath);
+        const identityDirectory = identity
+          ? workspaceDirectory(identity.workspaceId)
+          : null;
+        if (identity && identityDirectory) {
+          if (!(await authorize(identity.workspaceId, !!name)))
+            return sendError(reply, 404, 'Workspace not found');
+          const registered = await repository.get(identity.workspaceId);
+          if (registered) {
+            const current =
+              path.resolve(identityDirectory) === workspacePath
+                ? reconcileActiveWorkspaceLocation(registered, workspacePath)
+                : registered;
+            if (!name) return { workspace: current, created: false };
+            const renamed =
+              (await repository.rename(registered.workspaceId, name)) ??
+              current;
+            updateActiveWorkspaceHandle(renamed);
+            return { workspace: renamed, created: false };
+          }
+        }
+      }
+      const existing = workspaceAtDirectory(workspacePath);
+      if (
+        existing &&
+        authorize &&
+        !(await authorize(existing.workspaceId, !!name))
+      )
+        return sendError(reply, 404, 'Workspace not found');
+      if (existing) {
+        const current = reconcileActiveWorkspaceLocation(
+          existing,
+          workspacePath,
+        );
+        if (!name) return { workspace: current, created: false };
+        const renamed =
+          (await repository.rename(existing.workspaceId, name)) ?? current;
+        updateActiveWorkspaceHandle(renamed);
+        return { workspace: renamed, created: false };
+      }
+
+      await prepareWorkspacePath(workspacePath);
+      const preparedManifest = ensureWorkspaceManifestOnDisk(workspacePath);
+      const preparedWorkspace = {
+        workspaceId: preparedManifest.workspaceId,
+        name: preparedManifest.name,
+      };
+      // Another spelling of a registered Workspace's folder (a symlink, say)
+      // reaches the same manifest, and is that Workspace rather than a new one.
+      const registered = authorize
+        ? await repository.get(preparedWorkspace.workspaceId)
+        : null;
+      if (registered && authorize) {
+        if (!(await authorize(registered.workspaceId, !!name)))
+          return sendError(reply, 404, 'Workspace not found');
+        if (!name) return { workspace: registered, created: false };
+        const renamed =
+          (await repository.rename(registered.workspaceId, name)) ?? registered;
+        updateActiveWorkspaceHandle(renamed);
+        return { workspace: renamed, created: false };
+      }
+      let workspace: WorkspaceHandle;
+      const processActive = getProcessWorkspaceHandle();
+      if (processActive?.workspaceId === preparedWorkspace.workspaceId) {
+        // `existing` was null, so even a same-path active Workspace needs its
+        // missing membership repaired. Committing adopts it and keeps active
+        // identity and materialization on one location.
+        commitWorkspacePath(workspacePath);
+        workspace = getProcessWorkspaceHandle() ?? preparedWorkspace;
+      } else {
+        workspace = adoptWorkspaceDirectory(workspacePath);
+      }
+      if (name) {
+        workspace =
+          (await repository.rename(workspace.workspaceId, name)) ?? workspace;
+        updateActiveWorkspaceHandle(workspace);
+      }
+      return { workspace, created: true };
+    } catch (error) {
+      return sendPreparationError(reply, error);
+    }
+  }
 
   app.post<{ Body: WorkspaceCreateRequest }>('/', async (request, reply) => {
     const parsed = workspaceCreateSchema.safeParse(request.body);
-    // A person's Workspace is made by name, wherever the backend keeps one,
-    // and is theirs. Choosing a folder is an administrator's, from localhost.
-    if (personal(request) && !(isOwnerRequest(request) && parsed.data?.path)) {
+    // A person's Workspace is theirs: made by name wherever the backend keeps
+    // one, or, where Workspaces are Disk folders, any folder they name.
+    if (personal(request)) {
       if (isManagedMode())
         return sendError(reply, 403, 'Workspace collection is read-only');
-      if (!parsed.success || !parsed.data.name || parsed.data.path)
+      if (!parsed.success || (!parsed.data.name && !parsed.data.path))
         return sendError(reply, 400, 'Workspace name is required');
-      try {
-        const workspace = await createWorkspace(parsed.data.name, (created) =>
-          getRequestIdentity(request)!.access.claim({
-            type: 'workspace',
-            id: created.workspaceId,
-          }),
+      const claim = (workspace: WorkspaceHandle) =>
+        requireRequestIdentity(request).access.claim({
+          type: 'workspace',
+          id: workspace.workspaceId,
+        });
+      if (parsed.data.path) {
+        // A folder that is already someone's Workspace stays theirs: renaming
+        // it takes manage access, opening it any grant, and neither claims it.
+        const name = parsed.data.name;
+        const adopted = await adoptFolder(
+          parsed.data.path,
+          name,
+          reply,
+          async (workspaceId, modifiesFolder) => {
+            // The grant-derived chooser needs no foreign manifest. Do not
+            // resolve manage policy (which verifies the resource on disk)
+            // until this caller may talk about that Workspace at all.
+            if (!(await canEnter(request, workspaceId))) return false;
+            return !modifiesFolder || canManage(request, workspaceId);
+          },
         );
+        if (!('workspace' in adopted)) return adopted;
+        if (adopted.created) await claim(adopted.workspace);
         return reply
-          .status(201)
-          .send(descriptor(workspace, isOwnerRequest(request)));
+          .status(adopted.created ? 201 : 200)
+          .send(descriptor(adopted.workspace));
+      }
+      try {
+        const workspace = await createWorkspace(parsed.data.name!, claim);
+        return reply.status(201).send(descriptor(workspace));
       } catch (error) {
         return sendPreparationError(reply, error);
       }
@@ -318,7 +469,7 @@ const workspacesRoutes: FastifyPluginAsync = async (app) => {
     // adopt, prepare, or fork a child process for. The deployment still holds
     // as many Workspaces as it likes — this is the only one of the collection
     // operations the folder API could not already express.
-    if (!materializesWorkspaces()) {
+    if (!parsed.data.path && !materializesWorkspaces()) {
       const name = parsed.data.name;
       if (!name) {
         return sendError(reply, 400, 'Workspace name is required');
@@ -336,51 +487,11 @@ const workspacesRoutes: FastifyPluginAsync = async (app) => {
     if (!requestedPath) {
       return sendError(reply, 400, 'Workspace path is required');
     }
-
-    try {
-      const workspacePath = resolveWorkspacePath(requestedPath);
-      const repository = getWorkspaceRepository();
-      const existing = workspaceAtDirectory(workspacePath);
-      if (existing) {
-        const current = reconcileActiveWorkspaceLocation(
-          existing,
-          workspacePath,
-        );
-        if (!parsed.data.name) return reply.send(descriptor(current));
-        const renamed =
-          (await repository.rename(existing.workspaceId, parsed.data.name)) ??
-          current;
-        updateActiveWorkspaceHandle(renamed);
-        return reply.send(descriptor(renamed));
-      }
-
-      await prepareWorkspacePath(workspacePath);
-      const preparedManifest = ensureWorkspaceManifestOnDisk(workspacePath);
-      const preparedWorkspace = {
-        workspaceId: preparedManifest.workspaceId,
-        name: preparedManifest.name,
-      };
-      let workspace: WorkspaceHandle;
-      const processActive = getProcessWorkspaceHandle();
-      if (processActive?.workspaceId === preparedWorkspace.workspaceId) {
-        // `existing` was null, so even a same-path active Workspace needs its
-        // missing membership repaired. Committing adopts it and keeps active
-        // identity and materialization on one location.
-        commitWorkspacePath(workspacePath);
-        workspace = getProcessWorkspaceHandle() ?? preparedWorkspace;
-      } else {
-        workspace = adoptWorkspaceDirectory(workspacePath);
-      }
-      if (parsed.data.name) {
-        workspace =
-          (await repository.rename(workspace.workspaceId, parsed.data.name)) ??
-          workspace;
-        updateActiveWorkspaceHandle(workspace);
-      }
-      return reply.status(201).send(descriptor(workspace));
-    } catch (error) {
-      return sendPreparationError(reply, error);
-    }
+    const adopted = await adoptFolder(requestedPath, parsed.data.name, reply);
+    if (!('workspace' in adopted)) return adopted;
+    return reply
+      .status(adopted.created ? 201 : 200)
+      .send(descriptor(adopted.workspace));
   });
 
   app.get<{ Params: WorkspaceParams }>(
@@ -393,7 +504,7 @@ const workspacesRoutes: FastifyPluginAsync = async (app) => {
           (w) => w.workspaceId === parsedId,
         );
         if (!workspace) return sendError(reply, 404, 'Workspace not found');
-        return reply.send(descriptor(workspace, isOwnerRequest(request)));
+        return reply.send(descriptor(workspace));
       }
       const workspace = await findVisible(parsedId);
       if (!workspace) return sendError(reply, 404, 'Workspace not found');
@@ -416,7 +527,7 @@ const workspacesRoutes: FastifyPluginAsync = async (app) => {
           return sendError(reply, 404, 'Workspace not found');
         const workspace = await getWorkspaceRepository().get(parsedId);
         if (!workspace) return sendError(reply, 404, 'Workspace not found');
-        const chosen = descriptor(workspace, isOwnerRequest(request));
+        const chosen = descriptor(workspace);
         return reply.send({ ...chosen, active: true });
       }
       const rejected = rejectReadOnlyMutation(request, reply);
@@ -483,9 +594,7 @@ const workspacesRoutes: FastifyPluginAsync = async (app) => {
         );
         if (!workspace) return sendError(reply, 404, 'Workspace not found');
         updateActiveWorkspaceHandle(workspace);
-        return reply.send(
-          descriptor(workspace, !personal(request) || isOwnerRequest(request)),
-        );
+        return reply.send(descriptor(workspace));
       } catch (error) {
         return sendError(reply, 400, (error as Error).message);
       }

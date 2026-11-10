@@ -355,7 +355,7 @@ export async function* runAgent(
   const deploymentThreadId = threadId ?? '';
   const liveHandle =
     workloadType === 'Deployment'
-      ? agenetes.get(deploymentThreadId)
+      ? agenetes.get(deploymentThreadId, namespace)
       : undefined;
   const durableRecord =
     workloadType === 'Deployment'
@@ -458,7 +458,7 @@ export async function* runAgent(
         canvasId,
         origin,
         threadId: deploymentThreadId,
-        readSet: getSessionReadSet(deploymentThreadId),
+        readSet: getSessionReadSet(deploymentThreadId, namespace),
       })
     : undefined;
   const iterator = handle.run(submission, {

@@ -240,6 +240,7 @@
     "title": "设置",
     "open": "打开设置",
     "general": "通用",
+    "people": "成员",
     "agent": "Agent",
     "capabilities": "能力",
     "capabilitiesDescription": "这些由 Huabu 管理的服务可按需配置。外部 Agent 能否使用这些服务，取决于该 Agent 自身支持的能力。",
@@ -462,6 +463,11 @@
     "agentletConnectionTokenDescriptionLoading": "正在加载当前凭据来源…",
     "agentletConnectionTokenPlaceholder": "输入新的令牌",
     "agentletConnectionTokenSecurityInfo": "连接命令和文件包含 Huabu 访问密钥，请勿分享。",
+    "resetDeviceCredentials": "重置设备凭据",
+    "resetDeviceCredentialsDescription": "如果连接命令或设备可能已泄露，请重置凭据。你的设备会断开连接，正在运行的智能体会停止；请使用新命令重新连接。",
+    "resetDeviceCredentialsConfirm": "你的设备会断开连接，正在运行的智能体会停止，你复制过的所有连接命令都将失效。请复制新命令重新连接。",
+    "resetDeviceCredentialsDone": "设备凭据已重置。请复制新的连接命令重新连接。",
+    "resetDeviceCredentialsFailed": "无法重置设备凭据。",
     "agentletTokenSource": {
       "stored": "加密凭据存储",
       "environment": "HUABU_CONNECTION_TOKEN",
@@ -600,7 +606,7 @@
     "agentletLocalAccessSetup": "当前服务器仅监听本机。如需远程访问，请停止服务器，运行 pnpm run setup 后重新启动。",
     "agentletDesktopLocalAccess": "桌面内置服务器仅限本机访问。如需远程访问，请配置并启动独立服务器，再让桌面连接该服务器。",
     "agentletCheckConnection": "返回 Huabu 确认连接",
-    "agentletCheckConnectionDescription": "保持该终端运行，返回 Huabu 的 Agent 设置。连接成功后，设备会显示在“已连接设备”中，检测到的可用 Agent 会自动添加到列表。",
+    "agentletCheckConnectionDescription": "保持该终端运行，返回 Huabu 的“设备与 Agent”。连接成功后，你的设备及其支持的 Agent 会自动显示在那里。",
     "agentletOtherConnectionOptions": "其他连接方式",
     "agentletTargetShell": "终端类型",
     "agentletShellPosix": "Bash / Zsh（macOS、Linux、WSL）",
@@ -714,6 +720,8 @@
     "intro": "选择一个 Home 文件夹来保存你的 Space、笔记和产物。",
     "folder": "Home 文件夹",
     "pathPlaceholder": "输入绝对路径，然后按 Enter",
+    "openFolder": "打开文件夹",
+    "openFolderButton": "打开",
     "recent": "最近的 Home 文件夹",
     "removeRecent": "从最近列表中移除",
     "path": "路径：{{path}}",
@@ -1655,8 +1663,30 @@
     }
   },
   "errors": {
-    "conversationAgentUnconfigured": "请先连接外部 Agent，再开始新对话。",
-    "nodeSaveFailed": "「{{name}}」写盘失败，可能文件被占用或没有写入权限。",
-    "rateLimited": "请求过于频繁，请在 {{seconds}} 秒后重试。"
+    "connectAnAgent": "连接 Agent",
+    "conversationAgentUnconfigured": "请连接外部 Agent，或使用 Built-In Pi 开始新对话。",
+    "nodeSaveFailed": "无法保存「{{name}}」。你的修改仍保留在此，请重试。",
+    "rateLimited": "请求过于频繁，请在 {{seconds}} 秒后重试。",
+    "spaceSaveAccessDenied": "你的账户对这个空间只有只读权限。修改未保存。",
+    "useBuiltInPi": "使用 Built-In Pi"
+  },
+  "people": {
+    "loading": "正在加载成员…",
+    "loadFailed": "无法加载成员。",
+    "saveFailed": "无法保存更改。",
+    "intro": "谁可以使用此 Huabu，以及能打开哪些工作区。成员首次登录后会出现在这里。更改在其下一次请求时生效。",
+    "administrator": "管理员",
+    "access": "访问权限",
+    "roleIn": "在 {{workspace}} 中的角色",
+    "removeRole": "从此工作区移除",
+    "addToWorkspace": "添加到工作区…",
+    "resetDevices": "重置设备",
+    "resetDevicesConfirm": "{{name}} 的设备会断开连接，其正在运行的智能体会停止，其复制过的所有连接命令都将失效。",
+    "resetDevicesDone": "已重置 {{name}} 的设备凭据。",
+    "role": {
+      "owner": "所有者",
+      "editor": "编辑者",
+      "viewer": "查看者"
+    }
   }
 }

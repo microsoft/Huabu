@@ -26,7 +26,7 @@ Read `SKILL.md`. With compatible Node, run `node entry.mjs --help` before invoki
 
 ## Lease configuration in a custom process
 
-When the entry cannot perform the required operation, write a business subprocess in an available language. Inside that process, send authenticated `POST /services/<id>/lease` using inherited `AGENTLET_TOKEN`, never argv. Reject non-2xx responses and require one coherent `{ id, version, manifest, config }` result whose IDs and versions agree.
+When the entry cannot perform the required operation, write a business subprocess in an available language. Inside that process, send authenticated `POST /services/<id>/lease` using inherited `HUABU_RFS_TOKEN`, never argv. Reject non-2xx responses and require one coherent `{ id, version, manifest, config }` result whose IDs and versions agree.
 
 This Python example keeps the lease inside the process; replace `perform_provider_operation` with the provider request described by the Package Skill:
 
@@ -39,7 +39,7 @@ service_id = "image-gen"
 request = urllib.request.Request(
     f"{os.environ['HUABU_RFS_URL']}/services/{service_id}/lease",
     method="POST",
-    headers={"Authorization": f"Bearer {os.environ['AGENTLET_TOKEN']}"},
+    headers={"Authorization": f"Bearer {os.environ['HUABU_RFS_TOKEN']}"},
 )
 with urllib.request.urlopen(request) as response:
     lease = json.load(response)

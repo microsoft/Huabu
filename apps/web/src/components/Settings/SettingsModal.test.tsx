@@ -6,11 +6,12 @@ import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { SettingsModal } from './SettingsModal';
+import { useIdentityStore } from '../../store/identityStore';
 
 import type { ExternalAgentsNavigation } from './agent-profiles/ExternalAgentsSettings';
 import type { Root } from 'react-dom/client';
 
-type RequestedTab = 'builtIn' | 'services' | null;
+type RequestedTab = 'builtIn' | 'services' | 'agent' | 'people' | null;
 
 const mocks = vi.hoisted(() => ({
   init: vi.fn(),
@@ -116,12 +117,98 @@ let root: Root;
 let container: HTMLDivElement;
 
 beforeEach(() => {
+  useIdentityStore.setState({ identity: null });
   vi.clearAllMocks();
   mocks.profileId = 'external';
   mocks.requestedTab = null;
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
+});
+
+it.each([null, 'agent', 'people'] as const)(
+  'gives members private agent controls and excludes People (requested: %s)',
+  async (requestedTab) => {
+    useIdentityStore.setState({
+      identity: {
+        provider: 'bubble',
+        principal: { principalId: 'carol', kind: 'user' },
+        member: true,
+        owner: false,
+      },
+    });
+    mocks.requestedTab = requestedTab;
+    await act(async () =>
+      root.render(<SettingsModal isOpen onClose={() => {}} />),
+    );
+    expect(
+      container.querySelector(
+        requestedTab === 'people'
+          ? '[data-testid="agent-defaults"]'
+          : '[data-testid="profile-management"]',
+      ),
+    ).not.toBeNull();
+    expect(container.textContent).toContain('settings.devicesAndAgents');
+    expect(container.textContent).not.toContain('settings.people');
+    expect(mocks.init).toHaveBeenCalled();
+    expect(mocks.load).not.toHaveBeenCalled();
+    expect(mocks.llmInit).not.toHaveBeenCalled();
+  },
+);
+
+it.each([
+  ['unknown', null],
+  [
+    'the local owner',
+    {
+      provider: 'local' as const,
+      principal: { principalId: 'local', kind: 'user' as const },
+      member: true,
+      owner: true,
+    },
+  ],
+  [
+    'a local caller who is not the owner',
+    {
+      provider: 'local' as const,
+      principal: { principalId: 'lan', kind: 'user' as const },
+      member: true,
+      owner: false,
+    },
+  ],
+])(
+  'loads deployment readiness outside Bubble when the caller is %s',
+  async (_caller, identity) => {
+    useIdentityStore.setState({ identity });
+    await renderModal();
+    expect(mocks.load).toHaveBeenCalledOnce();
+  },
+);
+
+it('retains the Devices and Agents tab when the caller becomes a member', async () => {
+  await renderModal();
+  expect(
+    container.querySelector('[data-testid="profile-management"]'),
+  ).not.toBeNull();
+  vi.clearAllMocks();
+  await act(async () => {
+    useIdentityStore.setState({
+      identity: {
+        provider: 'bubble',
+        principal: { principalId: 'carol', kind: 'user' },
+        member: true,
+        owner: false,
+      },
+    });
+  });
+  expect(
+    container.querySelector('[data-testid="profile-management"]'),
+  ).not.toBeNull();
+  expect(
+    findTab('settings.devicesAndAgents').getAttribute('aria-current'),
+  ).toBe('page');
+  expect(mocks.llmInit).not.toHaveBeenCalled();
+  expect(mocks.init).not.toHaveBeenCalled();
 });
 
 afterEach(() => {
@@ -154,6 +241,77 @@ function findButton(label: string): HTMLButtonElement {
 }
 
 describe('Settings information architecture', () => {
+  it('keeps the unfocusable backdrop clickable while background controls are inert', async () => {
+    const background = document.createElement('button');
+    document.body.append(background);
+    const onClose = vi.fn();
+    try {
+      await act(async () =>
+        root.render(<SettingsModal isOpen onClose={onClose} />),
+      );
+      const backdrop = container.querySelector<HTMLElement>(
+        '[role="presentation"]',
+      );
+      expect(backdrop).not.toBeNull();
+      await vi.waitFor(() => expect(background.inert).toBe(true));
+      expect(backdrop?.closest('[inert]')).toBeNull();
+      expect(backdrop?.tabIndex).toBe(-1);
+      expect(backdrop?.getAttribute('tabindex')).toBeNull();
+      await act(async () => backdrop?.click());
+      expect(onClose).toHaveBeenCalledOnce();
+      await renderModal(false);
+      expect(background.inert).toBe(false);
+    } finally {
+      background.remove();
+    }
+  });
+
+  it('cycles modal boundary focus and restores its opener on close', async () => {
+    // happy-dom 15 reports -1 for a native button without an explicit
+    // tabindex; browsers report 0. Keep real Floating UI/tabbable behavior
+    // while correcting only that DOM-environment default in this fixture.
+    const buttonTabIndex = vi
+      .spyOn(HTMLButtonElement.prototype, 'tabIndex', 'get')
+      .mockImplementation(function (this: HTMLButtonElement) {
+        return Number(this.getAttribute('tabindex') ?? 0);
+      });
+    const opener = document.createElement('button');
+    document.body.append(opener);
+    opener.focus();
+    try {
+      await renderModal();
+      const guards = container.querySelectorAll<HTMLElement>(
+        '[data-floating-ui-focus-guard]',
+      );
+      expect(guards).toHaveLength(2);
+      await vi.waitFor(() =>
+        expect(document.activeElement).toBe(
+          container.querySelector('header h3'),
+        ),
+      );
+
+      // Native Tab/Shift+Tab reaches these modal boundary guards in the
+      // browser; happy-dom cannot perform sequential keyboard traversal.
+      await act(async () => guards[1].focus());
+      await vi.waitFor(() =>
+        expect(document.activeElement).toBe(
+          findTab('settings.devicesAndAgents'),
+        ),
+      );
+      await act(async () => guards[0].focus());
+      await vi.waitFor(() =>
+        expect(document.activeElement).toBe(findButton('settings.addDevice')),
+      );
+      expect(document.activeElement).not.toBe(opener);
+
+      await renderModal(false);
+      await vi.waitFor(() => expect(document.activeElement).toBe(opener));
+    } finally {
+      buttonTabIndex.mockRestore();
+      opener.remove();
+    }
+  });
+
   it('keeps navigation and version above the scrollable form on narrow screens', async () => {
     await renderModal();
     const dialog = container.querySelector('[role="dialog"]');

@@ -33,8 +33,9 @@
  * "node-level granularity" semantics of the previous design).
  */
 
-import { isOwnerRequest } from '../../security/owner.js';
+import { getRequestIdentity } from '../../identity/request.js';
 import { isRestrictedRequest } from '../../security/space-access.js';
+import { getWorkspaceHandle } from '../../workspace.js';
 import { getAgentDefaults } from '../agent-defaults.js';
 
 import { bumpOpCounter, enqueue as enqueueMemory } from './index.js';
@@ -151,13 +152,17 @@ async function safeBump(
 
 // ─── Hook ──────────────────────────────────────────────────────────────────
 
-/**
- * A per-Space member's edits never count towards a memory run: the worker
- * runs an agent that rewrites Workspace-wide memory and Skills, which only
- * an owner may drive. Local callers and the machine credential still count.
- */
-function isMemberRequest(request: FastifyRequest): boolean {
-  return isRestrictedRequest(request) && !isOwnerRequest(request);
+/** Workspace-wide memory work requires manage access, regardless of system role. */
+async function mayScheduleMemory(request: FastifyRequest): Promise<boolean> {
+  if (!isRestrictedRequest(request)) return true;
+  const workspaceId = getWorkspaceHandle()?.workspaceId;
+  return (
+    !!workspaceId &&
+    !!(await getRequestIdentity(request)?.access.can('manage', {
+      type: 'workspace',
+      id: workspaceId,
+    }))
+  );
 }
 
 /**
@@ -170,7 +175,6 @@ export function registerOpCounterHook(app: FastifyInstance): void {
   // ── Stage 1: onResponse for ordinary endpoints ───────────────────────────
   app.addHook('onResponse', async (request, reply) => {
     if (!MUTATING_METHODS.has(request.method)) return;
-    if (isMemberRequest(request)) return;
     if (reply.statusCode < 200 || reply.statusCode >= 400) return;
 
     const url = request.url;
@@ -183,6 +187,8 @@ export function registerOpCounterHook(app: FastifyInstance): void {
 
     const canvasId = extractCanvasIdFromUrl(url);
     if (!canvasId) return;
+    // Checked last: in Bubble mode it is a policy lookup.
+    if (!(await mayScheduleMemory(request))) return;
 
     // Fire-and-forget: the bump is internally serialized per canvas
     // (see trigger.ts:stateLock), and `safeBump` swallows its own
@@ -201,12 +207,12 @@ export function registerOpCounterHook(app: FastifyInstance): void {
   // safer than under-counting for the memory worker.
   app.addHook('preHandler', async (request) => {
     if (request.method !== 'POST') return;
-    if (isMemberRequest(request)) return;
     const url = request.url;
     if (url !== '/api/agent' && !url.startsWith('/api/agent?')) return;
 
     const canvasId = extractCanvasIdFromAgentBody(request);
     if (!canvasId) return;
+    if (!(await mayScheduleMemory(request))) return;
 
     // Same fire-and-forget rationale as Stage 1 — adding an `await`
     // here would block the agent request waiting for state.json IO.

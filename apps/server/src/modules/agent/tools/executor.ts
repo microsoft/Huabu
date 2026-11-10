@@ -7,8 +7,9 @@
  * Each tool's body lives in its own `handlers/<name>.ts` file. This
  * module's job is just:
  *  1. Inject the request-scoped `canvasId` so every canvas-aware
- *     tool runs against the active canvas. The LLM never sees a
- *     `canvasId` argument — cross-canvas access is not exposed.
+ *     tool runs against the conversation's Space. Read tools may address
+ *     canonical World preview targets; writes and snapshots stay bound to
+ *     the conversation's Space.
  *  2. Dispatch the call to the matching handler.
  *  3. Return a string result that pi-agent-core wraps into a
  *     `toolResult` content block.
@@ -38,6 +39,7 @@ import {
   type CanvasCommandsArgs,
 } from './handlers/canvas-write.js';
 import { handleRead, type ReadArgs } from './handlers/fs-read.js';
+import { normalizeRel } from './handlers/fs-sandbox.js';
 import {
   handleFind,
   handleGrep,
@@ -69,17 +71,22 @@ import {
 } from './handlers/task.js';
 import { handleWebSearch, type WebSearchArgs } from './handlers/web-search.js';
 import { resolveWorldReadCanvasId } from '../../canvas/world-target-access.js';
-import { acquireWorkspaceOperationLease } from '../../workspace.js';
+import { callerAccess } from '../../identity/personal-settings.js';
+import {
+  acquireWorkspaceOperationLease,
+  getWorkspaceHandle,
+} from '../../workspace.js';
 
+import type { AccessLevel } from '../../identity/service.js';
 import type { AgentToolResult } from '@earendil-works/pi-agent-core';
 import type { NodeOrigin } from '@huabu/shared';
 
 /**
  * Per-request context every handler call receives.
  *
- * - `canvasId` is injected into every canvas-aware handler. The LLM
- *   never sees a `canvasId` argument — cross-canvas access is not
- *   exposed.
+ * - `canvasId` binds every canvas-aware handler to the conversation's Space.
+ *   Read tools can resolve an explicit World preview target; write and
+ *   snapshot tools retain this binding.
  * - `origin` is forwarded to `canvas_commands` only; other handlers
  *   ignore it. It controls the `NodeOrigin` stamp on AI-generated
  *   nodes (defaults to `'ai-operate'` when unset).
@@ -122,8 +129,41 @@ export async function executeTool(
     }
     return canvasId;
   };
-  const withCanvasId = <T>(value: Record<string, unknown>, toolName: string) =>
-    ({ ...value, canvasId: requireCanvasId(toolName) }) as unknown as T;
+  const assertCanvasAccess = async (
+    canvasId: string,
+    level: AccessLevel,
+    allowWorkspaceRead = false,
+  ): Promise<void> => {
+    // A retained Built-In turn can outlive its HTTP stream and its starter's
+    // grants. The conversation binding itself grants no resource authority.
+    const access = callerAccess();
+    if (!access || (await access.can(level, { type: 'space', id: canvasId })))
+      return;
+    // Skill files and user memory are Workspace/global instruction layers,
+    // also available to a legitimate shared-Space reader. Their reads may use
+    // either scope; both decisions freshly enforce membership and disabling.
+    const workspaceId =
+      level === 'read' && allowWorkspaceRead
+        ? getWorkspaceHandle()?.workspaceId
+        : undefined;
+    if (
+      workspaceId &&
+      (await access.can('read', { type: 'workspace', id: workspaceId }))
+    )
+      return;
+    throw new Error(
+      `Canvas ${canvasId} is not ${level === 'read' ? 'readable' : 'writable'}`,
+    );
+  };
+  const withAuthorizedCanvasId = async <T>(
+    value: Record<string, unknown>,
+    toolName: string,
+    level: AccessLevel,
+  ): Promise<T> => {
+    const canvasId = requireCanvasId(toolName);
+    await assertCanvasAccess(canvasId, level);
+    return { ...value, canvasId } as unknown as T;
+  };
   const withReadCanvasId = async <T>(
     value: Record<string, unknown>,
     toolName: string,
@@ -134,15 +174,23 @@ export async function executeTool(
       throw new Error('targetCanvasId must be a string');
     }
     const { targetCanvasId: _targetCanvasId, ...toolArgs } = value;
-    return {
-      ...toolArgs,
-      canvasId: await resolveWorldReadCanvasId(ownerCanvasId, requested),
-    } as unknown as T;
+    const canvasId = await resolveWorldReadCanvasId(ownerCanvasId, requested);
+    const readPath =
+      toolName === 'read' && typeof toolArgs.path === 'string'
+        ? normalizeRel(toolArgs.path)
+        : undefined;
+    // Match handleRead's two virtual paths. Explicit cross-Space targets
+    // retain their Space-only authorization even for these instruction files.
+    const workspaceInstruction =
+      canvasId === ownerCanvasId &&
+      (readPath?.startsWith('skills/') || readPath === 'memory/user.md');
+    await assertCanvasAccess(canvasId, 'read', workspaceInstruction);
+    return { ...toolArgs, canvasId } as unknown as T;
   };
   const withStableWorkspace = async <T>(
     operation: () => T | Promise<T>,
   ): Promise<T> => {
-    // Cross-Space read authorization and the handler that consumes it are one
+    // Space authorization and the handler that consumes it are one
     // operation. The resolver cannot release the Workspace before the handler
     // runs without reopening a switch window between the check and the read.
     const lease = acquireWorkspaceOperationLease();
@@ -154,8 +202,18 @@ export async function executeTool(
   };
 
   switch (name) {
-    case 'report_ink_intent':
-      return handleReportInkIntent(args as ReportInkIntentArgs, context);
+    case 'report_ink_intent': {
+      const canvasId = context?.canvasId;
+      if (!canvasId)
+        return handleReportInkIntent(args as ReportInkIntentArgs, context);
+      // The handler owns active-turn/placeholder rules and resolves whether
+      // this report actually touches a Space after acquiring its mutex.
+      return withStableWorkspace(() =>
+        handleReportInkIntent(args as ReportInkIntentArgs, context, () =>
+          assertCanvasAccess(canvasId, 'write'),
+        ),
+      );
+    }
 
     case 'web_search':
       return handleWebSearch(args as WebSearchArgs);
@@ -211,29 +269,53 @@ export async function executeTool(
     }
 
     case 'space_commands':
-      return handleCanvasCommands(
-        withCanvasId<CanvasCommandsArgs>(args, 'space_commands'),
-        context?.origin,
-        { threadId: context?.threadId, readSet: context?.readSet },
+      return withStableWorkspace(async () =>
+        handleCanvasCommands(
+          await withAuthorizedCanvasId<CanvasCommandsArgs>(
+            args,
+            'space_commands',
+            'write',
+          ),
+          context?.origin,
+          { threadId: context?.threadId, readSet: context?.readSet },
+        ),
       );
 
     case 'create_task':
-      return handleCreateTask(
-        withCanvasId<CreateTaskArgs>(args, 'create_task'),
+      return withStableWorkspace(async () =>
+        handleCreateTask(
+          await withAuthorizedCanvasId<CreateTaskArgs>(
+            args,
+            'create_task',
+            'write',
+          ),
+        ),
       );
 
     case 'start_task_run':
-      return handleStartTaskRun(
-        withCanvasId<StartTaskRunArgs>(args, 'start_task_run'),
+      return withStableWorkspace(async () =>
+        handleStartTaskRun(
+          await withAuthorizedCanvasId<StartTaskRunArgs>(
+            args,
+            'start_task_run',
+            'write',
+          ),
+        ),
       );
 
     case 'complete_task_run':
-      return handleCompleteTaskRun(
-        withCanvasId<CompleteTaskRunArgs>(args, 'complete_task_run'),
+      return withStableWorkspace(async () =>
+        handleCompleteTaskRun(
+          await withAuthorizedCanvasId<CompleteTaskRunArgs>(
+            args,
+            'complete_task_run',
+            'write',
+          ),
+        ),
       );
 
     case 'fs_write':
-      // canvasId is conditionally needed (only for memory/canvas.md);
+      // canvasId is conditionally needed (only for memory/space.md);
       // the handler enforces that. Pass it through when present so the
       // handler can resolve canvas-scoped paths, but do not require it
       // here — workspace and skill writes have no canvas binding.
@@ -243,13 +325,25 @@ export async function executeTool(
       } as FsWriteArgs);
 
     case 'snapshot_nodes':
-      return handleSnapshotNodes(
-        withCanvasId<SnapshotNodesArgs>(args, 'snapshot_nodes'),
+      return withStableWorkspace(async () =>
+        handleSnapshotNodes(
+          await withAuthorizedCanvasId<SnapshotNodesArgs>(
+            args,
+            'snapshot_nodes',
+            'read',
+          ),
+        ),
       );
 
     case 'generate_image':
-      return handleGenerateImage(
-        withCanvasId<GenerateImageArgs>(args, 'generate_image'),
+      return withStableWorkspace(async () =>
+        handleGenerateImage(
+          await withAuthorizedCanvasId<GenerateImageArgs>(
+            args,
+            'generate_image',
+            'write',
+          ),
+        ),
       );
 
     default:

@@ -25,6 +25,12 @@ const mocks = vi.hoisted(() => ({
     removeRecentWorkspace: vi.fn(),
     activateRecentWorkspace: vi.fn(),
     selectWorkspace: vi.fn(),
+    createWorkspace: vi.fn(),
+    openFolderWorkspace: vi.fn(),
+    capabilities: null as null | {
+      namedWorkspaces: boolean;
+      folderWorkspaces: boolean;
+    },
   },
 }));
 
@@ -56,6 +62,7 @@ let container: HTMLDivElement;
 beforeEach(async () => {
   vi.clearAllMocks();
   mocks.state.error = null;
+  mocks.state.capabilities = null;
   for (const action of [
     mocks.state.selectWorkspace,
     mocks.state.activateRecentWorkspace,
@@ -94,6 +101,43 @@ it.each(['Pick folder', '/tmp/second'])(
     expect(mocks.toast).toHaveBeenCalledExactlyOnceWith(
       'Background Space could not save',
       { tone: 'danger' },
+    );
+  },
+);
+
+it.each([false, true])(
+  'offers Bubble users a Server folder only where Workspaces are folders (%s)',
+  async (folderWorkspaces) => {
+    mocks.state.capabilities = { namedWorkspaces: true, folderWorkspaces };
+    mocks.state.openFolderWorkspace.mockResolvedValue(undefined);
+    await act(async () =>
+      root.render(
+        <MemoryRouter>
+          <WorkspaceSetupPage key="named" />
+        </MemoryRouter>,
+      ),
+    );
+    const input = container.querySelector<HTMLInputElement>(
+      '#open-workspace-folder',
+    );
+    expect(input !== null).toBe(folderWorkspaces);
+    expect(container.textContent).toContain('workspace.newWorkspace');
+    if (!input) return;
+    await act(async () => {
+      const setValue = Object.getOwnPropertyDescriptor(
+        HTMLInputElement.prototype,
+        'value',
+      )!.set!;
+      setValue.call(input, ' /srv/notes ');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () =>
+      input.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
+      ),
+    );
+    expect(mocks.state.openFolderWorkspace).toHaveBeenCalledExactlyOnceWith(
+      '/srv/notes',
     );
   },
 );

@@ -69,6 +69,7 @@ export async function probeAcpCapabilities(
   >,
 ) {
   const threadId = `capability-probe-${randomUUID()}`;
+  const namespace = Object.freeze({ name: 'capability-probe' });
   let result:
     | { ok: true; observation: CapabilityObservation }
     | { ok: false; error: unknown };
@@ -79,7 +80,7 @@ export async function probeAcpCapabilities(
         ? { ...options.recipe, autoRestart: false }
         : options.recipe,
       threadId,
-      namespace: { name: 'capability-probe' },
+      namespace,
       workloadType: 'Job',
       idleTimeoutSecs: 60,
     });
@@ -102,8 +103,8 @@ export async function probeAcpCapabilities(
     result = { ok: false, error };
   }
   try {
-    acpSessionRegistry.remove(options.agentletId, threadId);
-    await releaseThread(options.agentletId, threadId);
+    acpSessionRegistry.remove(options.agentletId, threadId, namespace);
+    await releaseThread(options.agentletId, threadId, namespace);
   } catch (error) {
     if (!result.ok) {
       throw new AggregateError(
