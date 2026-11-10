@@ -665,6 +665,32 @@ describe('resolveAddNodes in a Grid Frame', () => {
     }
   });
 
+  it('creates in a sparse Grid without redistributing existing children into its empty column', () => {
+    const nodes = scene().filter((node) =>
+      ['node-grid', 'node-cell-0', 'node-cell-8'].includes(node.id),
+    );
+    const layout = solveStructuredFrameLayout(nodes, 'node-grid');
+    const column = layout?.columnTracks?.[2];
+    const row = layout?.rowTracks?.[0];
+    assert(column && row);
+    const committed = createAt(nodes, [
+      {
+        id: 'node-new',
+        nodeType: 'question',
+        parentId: 'node-grid',
+        placementPoint: { x: column.left + 20, y: row.top + 10 },
+      },
+    ]);
+    expect(
+      committed.find((node) => node.id === 'node-new')?.data,
+    ).toMatchObject({ frameColumn: 2, frameRow: 0 });
+    for (const existing of nodes.filter((node) => node.parentId)) {
+      expect(
+        committed.find((node) => node.id === existing.id)?.data,
+      ).toMatchObject(existing.data);
+    }
+  });
+
   it('keeps automatic placement when no point is supplied', () => {
     const nodes = scene();
     const resolution = resolveAddNodes(

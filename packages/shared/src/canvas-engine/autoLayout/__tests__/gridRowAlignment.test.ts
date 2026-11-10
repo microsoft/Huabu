@@ -23,9 +23,11 @@
 
 import { describe, it, expect } from 'vitest';
 
+import { executeCanvasCommands } from '../../executor.js';
 import {
   applyColumnLayout,
   applyGridLayout,
+  pickColumnDropTarget,
   pickRowDropTarget,
 } from '../gridLayout.js';
 
@@ -61,6 +63,32 @@ function makeChild(
 }
 
 const SIZE = { width: 100, height: 50 };
+
+it('keeps an interior empty column visible and targetable after its only child is removed', () => {
+  const before = [
+    makeFrame(3),
+    makeChild('left', { x: 0, y: 0 }, SIZE, 0, 0),
+    makeChild('node-middle', { x: 200, y: 0 }, SIZE, 1, 0),
+    makeChild('right', { x: 400, y: 0 }, SIZE, 2, 0),
+  ];
+  const nodes = executeCanvasCommands(
+    {
+      source: 'ui',
+      commands: [{ type: 'DELETE_NODES', nodeIds: ['node-middle'] }],
+    },
+    { nodes: before, edges: [], canvasId: 'canvas' },
+  ).writeResult.nodes;
+  const result = applyGridLayout(nodes, 'f', 3);
+  const columns = result?.columnTracks;
+  if (!columns) throw new Error('Missing Grid columns');
+  expect(columns.map((column) => column.width)).toEqual([100, 100, 100]);
+  expect(columns[1].left).toBeGreaterThan(columns[0].left + 100);
+  expect(columns[2].left).toBeGreaterThan(columns[1].left + 100);
+  expect(pickColumnDropTarget(nodes, 'f', columns[1].left + 50)).toMatchObject({
+    kind: 'into-existing',
+    slot: 1,
+  });
+});
 
 /**
  * Two columns. The left column has three items; the right column has a

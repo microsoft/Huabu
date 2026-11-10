@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import {
   applyGridLayout,
   computeFrameFit,
+  describeStructuredDropZone,
   executeCanvasCommands,
 } from '@huabu/shared/canvas-engine';
 
@@ -80,6 +81,86 @@ function state(nodes: Node[]): UiResolverState {
 }
 
 describe('resolveNodeDragStop Grid cells', () => {
+  it('preserves sparse group placements and preview geometry when a drop reduces column count', () => {
+    const frame = makeFrame();
+    frame.data.gridCount = 4;
+    const original = [
+      frame,
+      makeChild('a', 0, 0),
+      makeChild('b', 2, 2),
+      makeChild('middle', 1, 3),
+      makeChild('right', 3, 4),
+    ];
+    const layout = applyGridLayout(original, 'frame', 4);
+    if (!layout?.columnTracks || !layout.rowTracks)
+      throw new Error('Missing Grid layout');
+    const nodes = original.map((node) => ({
+      ...node,
+      position: layout.childPositions.get(node.id) ?? node.position,
+    }));
+    const pointer = {
+      x: layout.columnTracks[1].left + 20,
+      y: layout.rowTracks[0].top + 10,
+    };
+    const zone = describeStructuredDropZone(
+      nodes,
+      'frame',
+      pointer,
+      'grid',
+      4,
+      { id: 'a', ...pointer, ...CHILD_SIZE },
+      {
+        target: { kind: 'into-existing', slot: 1 },
+        rowTarget: { kind: 'into-existing', slot: 0 },
+        requests: [
+          {
+            nodeId: 'a',
+            target: { kind: 'into-existing', slot: 1 },
+            rowTarget: { kind: 'into-existing', slot: 0 },
+          },
+          {
+            nodeId: 'b',
+            target: { kind: 'into-existing', slot: 3 },
+            rowTarget: { kind: 'into-existing', slot: 2 },
+          },
+        ],
+      },
+    );
+    const resolution = resolveUiIntent(
+      {
+        type: 'NODE_DRAG_STOP',
+        draggedNodeIds: ['a', 'b'],
+        bypassReparent: true,
+        pointerFlowPosition: pointer,
+      },
+      state(nodes),
+    );
+    const committed = executeCanvasCommands(
+      { source: 'ui', commands: resolution.commands },
+      { nodes, edges: [], canvasId: 'canvas' },
+    ).writeResult.nodes;
+    expect(committed.find((node) => node.id === 'frame')?.data.gridCount).toBe(
+      3,
+    );
+    expect(committed.find((node) => node.id === 'a')?.data).toMatchObject({
+      frameColumn: 0,
+      frameRow: 0,
+    });
+    expect(committed.find((node) => node.id === 'b')?.data).toMatchObject({
+      frameColumn: 2,
+      frameRow: 2,
+    });
+    expect(zone?.placements).toHaveLength(2);
+    for (const projected of [
+      ...(zone?.placements ?? []),
+      ...(zone?.reflow ?? []),
+    ]) {
+      expect(
+        committed.find((node) => node.id === projected.id)?.position,
+      ).toEqual({ x: projected.x, y: projected.y });
+    }
+  });
+
   it.each([
     ['a', 'd'],
     ['a', 'c'],

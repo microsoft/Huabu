@@ -293,7 +293,11 @@ export const Popover: FC<PopoverProps> = ({
     middleware: [
       floatingOffset(8),
       flip({ padding: viewportMargin, boundary: boundary ?? undefined }),
-      shift({ padding: viewportMargin, boundary: boundary ?? undefined }),
+      shift({
+        padding: viewportMargin,
+        boundary: boundary ?? undefined,
+        crossAxis: Boolean(referenceRect),
+      }),
       size({
         padding: viewportMargin,
         boundary: boundary ?? undefined,

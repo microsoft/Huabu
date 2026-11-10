@@ -99,11 +99,78 @@ test('can comment on a CodeMirror passage and then select code again', async ({
   }
 });
 
+test('keeps Comment reachable for a native Chat selection spanning the viewport', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 480, height: 800 });
+  await page.goto('/playground/chat-performance?messages=0');
+  await page.evaluate(async () => {
+    const reactPath = '/node_modules/.vite/deps/react.js';
+    const domPath = '/node_modules/.vite/deps/react-dom_client.js';
+    const cardPath =
+      '/src/components/Messages/AIMessage/MilkdownMessageCard.tsx';
+    const { createElement } = (await import(reactPath))
+      .default as typeof ReactModule;
+    const { createRoot } = (await import(domPath)).default as typeof DomModule;
+    const { MilkdownMessageCard } = (await import(
+      cardPath
+    )) as typeof MilkdownCardModule;
+    const host = document.createElement('div');
+    host.id = 'long-chat-selection';
+    host.style.cssText =
+      'position:fixed;left:40px;top:80px;width:360px;height:400px;overflow:auto;z-index:100';
+    document.body.append(host);
+    createRoot(host).render(
+      createElement(MilkdownMessageCard, {
+        content: Array.from(
+          { length: 60 },
+          (_, index) => `Paragraph ${index + 1}: a passage to discuss.`,
+        ).join('\n\n'),
+        threadId: 'chat-performance-thread',
+        messageId: 'long-message',
+        enableComments: true,
+      }),
+    );
+  });
+  const editor = page.locator('#long-chat-selection .ProseMirror');
+  await expect(editor.locator('p')).toHaveCount(60);
+  const selected = await editor.evaluate((element) => {
+    const host = document.getElementById('long-chat-selection');
+    if (!host) throw new Error('Missing scroll container');
+    host.scrollTop = host.scrollHeight / 2;
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    const selection = window.getSelection();
+    if (!selection) throw new Error('Missing native selection');
+    selection.removeAllRanges();
+    selection.addRange(range);
+    document.dispatchEvent(new Event('selectionchange'));
+    const bounds = range.getBoundingClientRect();
+    return { top: bounds.top, bottom: bounds.bottom };
+  });
+  expect(selected.top).toBeLessThan(0);
+  expect(selected.bottom).toBeGreaterThan(800);
+  const toolbar = page.locator('.selection-context-toolbar');
+  await expect(toolbar).toBeVisible();
+  const bounds = await toolbar.boundingBox();
+  if (!bounds) throw new Error('Missing toolbar');
+  expect(bounds.y).toBeGreaterThanOrEqual(12);
+  expect(bounds.y + bounds.height).toBeLessThanOrEqual(788);
+  await toolbar
+    .getByRole('button', { name: 'Comment on selection', exact: true })
+    .click();
+  await expect(
+    page.getByRole('textbox', { name: 'Comment', exact: true }),
+  ).toBeVisible();
+});
+
 for (const placement of [
   'below',
   'above',
   'right-edge',
   'panel-edge',
+  'viewport-spanning',
+  'panel-spanning',
 ] as const) {
   test(`selection toolbar avoids multiline text at ${placement}`, async ({
     page,
@@ -125,10 +192,20 @@ for (const placement of [
       boundary.style.cssText =
         'position:fixed;left:20px;top:20px;width:440px;height:400px';
       document.body.append(boundary);
-      const top =
-        placement === 'above' ? 690 : placement === 'panel-edge' ? 330 : 100;
+      const top = placement.endsWith('spanning')
+        ? -200
+        : placement === 'above'
+          ? 690
+          : placement === 'panel-edge'
+            ? 330
+            : 100;
       const left = placement === 'right-edge' ? 300 : 40;
-      const rect = new DOMRect(left, top, 120, 60);
+      const rect = new DOMRect(
+        left,
+        top,
+        120,
+        placement.endsWith('spanning') ? 1400 : 60,
+      );
       const host = document.createElement('div');
       document.body.append(host);
       createRoot(host).render(
@@ -142,7 +219,7 @@ for (const placement of [
           },
           position: { x: left + 10, y: top + 10 },
           selectionRect: rect,
-          boundary: placement === 'panel-edge' ? boundary : undefined,
+          boundary: placement.startsWith('panel-') ? boundary : undefined,
           onDismiss: () => {},
           onSaveAsNote: () => {},
         }),
@@ -153,7 +230,14 @@ for (const placement of [
     await expect(toolbar).toBeVisible();
     const bounds = await toolbar.boundingBox();
     if (!bounds) throw new Error('Missing selection toolbar bounds');
-    if (placement === 'above' || placement === 'panel-edge') {
+    if (placement.endsWith('spanning')) {
+      expect(bounds.y).toBeGreaterThanOrEqual(
+        placement === 'panel-spanning' ? 32 : 12,
+      );
+      expect(bounds.y + bounds.height).toBeLessThanOrEqual(
+        placement === 'panel-spanning' ? 408 : 788,
+      );
+    } else if (placement === 'above' || placement === 'panel-edge') {
       expect(bounds.y + bounds.height).toBeLessThanOrEqual(selected.top - 7);
     } else {
       expect(bounds.y).toBeGreaterThanOrEqual(selected.bottom + 7);
@@ -163,6 +247,14 @@ for (const placement of [
     await page.screenshot({
       path: testInfo.outputPath(`selection-${placement}.png`),
     });
+    if (placement.endsWith('spanning')) {
+      await toolbar
+        .getByRole('button', { name: 'Comment on selection', exact: true })
+        .click();
+      await expect(
+        page.getByRole('textbox', { name: 'Comment', exact: true }),
+      ).toBeVisible();
+    }
   });
 }
 

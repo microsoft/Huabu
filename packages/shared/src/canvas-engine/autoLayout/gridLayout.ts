@@ -1141,6 +1141,10 @@ export function applyGridLayout(
     const c = columnOf(child);
     if (child.width > colWidth[c]) colWidth[c] = child.width;
   }
+  const widthMedian = median(children.map((child) => child.width));
+  for (let column = 0; column < effectiveCols; column++) {
+    if (colWidth[column] === 0) colWidth[column] = widthMedian;
+  }
 
   const heightMedian = median(children.map((c) => c.height));
   const frameSize = getNodeSize(frame);
