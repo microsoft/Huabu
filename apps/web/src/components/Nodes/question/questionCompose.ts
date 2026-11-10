@@ -180,9 +180,14 @@ export function enterQuestionCompose(
 
 /**
  * Create a question node bound to a fresh thread at `placementPoint` and
- * enter compose after loading the default Profile. IDs are returned only
- * after creation so callers can wire follow-up work (e.g. a connecting edge).
- * Pass `id` to reuse a pre-minted node id.
+ * enter compose after loading the default Profile. Pass `id` to reuse a
+ * pre-minted node id.
+ *
+ * Creation can finish after this promise resolves: with no conversation
+ * Agent available, the user is offered Built-In Pi and accepting it retries
+ * creation. Callers that wire follow-up work (e.g. a connecting edge) must
+ * therefore do it in `onCreated`, which runs once for whichever attempt
+ * creates the node and never runs when nothing is created.
  */
 export async function createQuestionNodeAndCompose(opts: {
   addNode: (input: AddNodeInput) => void;
@@ -191,9 +196,12 @@ export async function createQuestionNodeAndCompose(opts: {
   id?: CanvasNodeId;
   /** Additional caller-owned scope, such as a connected source node. */
   isCurrent?: () => boolean;
-}): Promise<{ nodeId: CanvasNodeId; threadId: string } | null> {
+  /** Follow-up work for the created node; see above for when it runs. */
+  onCreated?: (created: { nodeId: CanvasNodeId; threadId: string }) => void;
+}): Promise<void> {
   const canvasId = opts.canvasId ?? useCanvasStore.getState().canvasId;
   const workspace = usePreviewWorkspaceStore.getState().workspace;
+  let created: ReturnType<typeof createQuestionNode>;
   try {
     const binding = await loadDefaultAgentBinding();
     if (
@@ -201,17 +209,18 @@ export async function createQuestionNodeAndCompose(opts: {
       usePreviewWorkspaceStore.getState().workspace !== workspace ||
       opts.isCurrent?.() === false
     ) {
-      return null;
+      return;
     }
-    const created = createQuestionNode({ ...opts, canvasId, binding });
+    created = createQuestionNode({ ...opts, canvasId, binding });
     enterQuestionCompose(created.conversationView, canvasId, binding);
-    return { nodeId: created.nodeId, threadId: created.threadId };
   } catch (error) {
     toastConversationStartError(error, () => {
       void createQuestionNodeAndCompose(opts);
     });
-    return null;
+    return;
   }
+  // Outside the try: a failing follow-up must not offer to create the node again.
+  opts.onCreated?.({ nodeId: created.nodeId, threadId: created.threadId });
 }
 
 export function createQuestionNode(opts: {

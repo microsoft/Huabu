@@ -107,6 +107,19 @@ beforeEach(() => {
   });
 });
 
+/** Runs creation and reports the node `onCreated` received, if any. */
+async function createAndCompose(
+  opts: Omit<Parameters<typeof createQuestionNodeAndCompose>[0], 'onCreated'>,
+): Promise<{ nodeId: string; threadId: string } | null> {
+  let created: { nodeId: string; threadId: string } | null = null;
+  await createQuestionNodeAndCompose({
+    ...opts,
+    onCreated: (value) => {
+      created = value;
+    },
+  });
+  return created;
+}
 describe('Question conversation presentation', () => {
   it('keeps legacy compose by awaiting a server-minted identity', async () => {
     useCanvasStore.getState()._setStateNoAutosave({
@@ -209,7 +222,7 @@ describe('Question conversation presentation', () => {
     };
     useChatStore.setState({ bindingMap: { 'canvas-1': binding } });
     const addNode = vi.fn();
-    const created = await createQuestionNodeAndCompose({
+    const created = await createAndCompose({
       addNode,
       canvasId: 'canvas-1',
       placementPoint: { x: 0, y: 0 },
@@ -249,7 +262,7 @@ describe('Question conversation presentation', () => {
 
     const addNode = vi.fn();
     expect(
-      await createQuestionNodeAndCompose({
+      await createAndCompose({
         addNode,
         canvasId: 'canvas-1',
         placementPoint: { x: 0, y: 0 },
@@ -284,19 +297,28 @@ describe('Question conversation presentation', () => {
       selectableProfileIds: [],
     });
     const addNode = vi.fn();
+    const onCreated = vi.fn();
     await createQuestionNodeAndCompose({
       addNode,
       canvasId: 'canvas-1',
       placementPoint: { x: 0, y: 0 },
+      onCreated,
     });
     expect(useAcpProfilesStore.getState().recentConversationProfileId).toBe(
       null,
     );
+    expect(onCreated).not.toHaveBeenCalled();
     const action = vi.mocked(toast).mock.calls[0]?.[1]?.action;
     assert(action);
 
     action.onClick();
-    await vi.waitFor(() => expect(addNode).toHaveBeenCalledOnce());
+    // The caller's follow-up (e.g. a connecting edge) still runs for the retry.
+    await vi.waitFor(() => expect(onCreated).toHaveBeenCalledOnce());
+    expect(addNode).toHaveBeenCalledOnce();
+    expect(onCreated).toHaveBeenCalledWith({
+      nodeId: addNode.mock.calls[0]?.[0]?.id,
+      threadId: expect.any(String),
+    });
     expect(useAcpProfilesStore.getState().recentConversationProfileId).toBe(
       'huabu',
     );
@@ -310,7 +332,7 @@ describe('Question conversation presentation', () => {
   it('creates a Built-In Question in operate mode without loading external Profiles', async () => {
     useAcpProfilesStore.setState({ recentConversationProfileId: 'huabu' });
     const addNode = vi.fn().mockReturnValue('question-built-in');
-    const created = await createQuestionNodeAndCompose({
+    const created = await createAndCompose({
       addNode,
       canvasId: 'canvas-1',
       placementPoint: { x: 0, y: 0 },
@@ -334,7 +356,7 @@ describe('Question conversation presentation', () => {
       }),
     );
     const addNode = vi.fn();
-    const pending = createQuestionNodeAndCompose({
+    const pending = createAndCompose({
       addNode,
       canvasId: 'canvas-1',
       placementPoint: { x: 0, y: 0 },
@@ -348,7 +370,7 @@ describe('Question conversation presentation', () => {
   it('does not create a connected node after its caller scope disappears', async () => {
     const addNode = vi.fn();
     expect(
-      await createQuestionNodeAndCompose({
+      await createAndCompose({
         addNode,
         canvasId: 'canvas-1',
         placementPoint: { x: 0, y: 0 },
