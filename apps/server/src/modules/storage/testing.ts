@@ -23,10 +23,10 @@ import path from 'node:path';
 
 import { inject } from 'vitest';
 
+import { setWorkspacePath } from '../workspace.js';
 import { prepareAzureTestEnvironment } from './backends/azure/test-support.js';
 import { preparePostgresTestEnvironment } from './backends/postgres/test-support.js';
 import { closeStorage, initStorage } from './storage.js';
-import { setWorkspacePath } from '../workspace.js';
 
 import type { StorageProfile } from './profile.js';
 import type { Storage } from './storage.js';
