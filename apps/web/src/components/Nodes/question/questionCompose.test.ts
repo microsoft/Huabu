@@ -33,6 +33,7 @@ import {
   usePreviewWorkspaceStore,
 } from '@/store/previewWorkspace/store';
 import { useSettingsUiStore } from '@/store/settingsUiStore';
+import { useWorkspaceStore } from '@/store/workspaceStore';
 
 import {
   createQuestionNode,
@@ -84,6 +85,7 @@ beforeEach(() => {
     recentConversationProfileId: null,
   });
   vi.mocked(toast).mockClear();
+  useWorkspaceStore.setState({ workspaceId: 'workspace-1' });
   useCanvasStore.getState()._setStateNoAutosave({
     canvasId: 'canvas-1',
     nodes: [],
@@ -317,7 +319,9 @@ describe('Question conversation presentation', () => {
     action.onClick();
     // The caller's follow-up (e.g. a connecting edge) still runs for the retry.
     await vi.waitFor(() => expect(onCreated).toHaveBeenCalledOnce());
-    expect(isCurrent).toHaveBeenCalledExactlyOnceWith({ retry: true });
+    expect(isCurrent).toHaveBeenCalledTimes(2);
+    expect(isCurrent).toHaveBeenNthCalledWith(1, { retry: true });
+    expect(isCurrent).toHaveBeenNthCalledWith(2, { retry: true });
     expect(addNode).toHaveBeenCalledOnce();
     expect(onCreated).toHaveBeenCalledWith({
       nodeId: addNode.mock.calls[0]?.[0]?.id,
@@ -350,6 +354,81 @@ describe('Question conversation presentation', () => {
         }),
       }),
     );
+  });
+
+  it.each(['Workspace', 'Canvas', 'preview', 'caller'] as const)(
+    'discards a persistent retry after its initiating %s changes',
+    async (scope) => {
+      listProfiles.mockResolvedValue({
+        ...profileSnapshot,
+        profiles: [],
+        selectableProfileIds: [],
+      });
+      const addNode = vi.fn();
+      const onCreated = vi.fn();
+      const isCurrent = vi.fn(() => true);
+      await createQuestionNodeAndCompose({
+        addNode,
+        canvasId: 'canvas-1',
+        placementPoint: { x: 0, y: 0 },
+        isCurrent,
+        onCreated,
+      });
+      const action = vi.mocked(toast).mock.calls[0]?.[1]?.action;
+      assert(action);
+      if (scope === 'Workspace')
+        useWorkspaceStore.setState({ workspaceId: 'workspace-2' });
+      if (scope === 'Canvas') useCanvasStore.setState({ canvasId: 'canvas-2' });
+      if (scope === 'preview')
+        usePreviewWorkspaceStore.setState({
+          workspace: createEmptyWorkspace(),
+        });
+      if (scope === 'caller') isCurrent.mockReturnValue(false);
+
+      const requests = listProfiles.mock.calls.length;
+      action.onClick();
+      await vi.waitFor(() =>
+        expect(useAcpProfilesStore.getState().loading).toBe(false),
+      );
+      expect(listProfiles).toHaveBeenCalledTimes(requests);
+      expect(addNode).not.toHaveBeenCalled();
+      expect(onCreated).not.toHaveBeenCalled();
+      expect(useChatStore.getState().threadsById).toEqual({});
+    },
+  );
+
+  it('discards a retry when the backend Workspace changes while loading its binding', async () => {
+    listProfiles.mockResolvedValueOnce({
+      ...profileSnapshot,
+      profiles: [],
+      selectableProfileIds: [],
+    });
+    const addNode = vi.fn();
+    const onCreated = vi.fn();
+    await createQuestionNodeAndCompose({
+      addNode,
+      canvasId: 'canvas-1',
+      placementPoint: { x: 0, y: 0 },
+      onCreated,
+    });
+    const action = vi.mocked(toast).mock.calls[0]?.[1]?.action;
+    assert(action);
+    let resolve!: (value: typeof profileSnapshot) => void;
+    listProfiles.mockReturnValueOnce(
+      new Promise((done) => {
+        resolve = done;
+      }),
+    );
+    action.onClick();
+    await vi.waitFor(() => expect(listProfiles).toHaveBeenCalledTimes(2));
+    useWorkspaceStore.setState({ workspaceId: 'workspace-2' });
+    resolve(profileSnapshot);
+    await vi.waitFor(() =>
+      expect(useAcpProfilesStore.getState().loading).toBe(false),
+    );
+    expect(addNode).not.toHaveBeenCalled();
+    expect(onCreated).not.toHaveBeenCalled();
+    expect(useChatStore.getState().threadsById).toEqual({});
   });
 
   it('discards delayed creation after the Canvas changes', async () => {

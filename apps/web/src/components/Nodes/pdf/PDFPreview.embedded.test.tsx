@@ -47,6 +47,9 @@ vi.mock('@/store/canvasStore', () => ({
     select({ canvasId: 'canvas-1' }),
 }));
 vi.mock('@/store/chatStore', () => ({ useChatStore: {} }));
+vi.mock('@/store/workspaceStore', () => ({
+  useWorkspaceStore: { getState: () => ({ workspaceId: 'workspace-1' }) },
+}));
 vi.mock('@/store/acpProfilesStore', () => ({
   loadDefaultAgentBinding: vi.fn(),
 }));
