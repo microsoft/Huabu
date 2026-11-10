@@ -147,8 +147,7 @@ export function runWebPostEffects(input: RunWebPostEffectsInput): void {
 // elsewhere, lift them to a separate module and add direct tests.
 
 // Module-level coalescing state. Multiple callers in the same tick
-// (e.g. a stream of ResizeObserver fires from `onNodesChange` plus a
-// `SET_NODE_GEOMETRY` height-clear post-effect) collapse into a
+// (e.g. several `SET_NODE_GEOMETRY` height-clear post-effects) collapse into a
 // single double-rAF pass — without this, each call would queue its
 // own double-rAF and we'd run the relayout N times for one logical
 // content reflow.
@@ -171,8 +170,8 @@ let pendingRelayoutScheduled = false;
  * than the standard `SET_NODE_GEOMETRY` pipeline:
  *   - an explicit height clear (`measured.height` left stale on
  *     purpose because the new content height is unknown until reflow)
- *   - a content-driven measured-size change picked up by ReactFlow's
- *     internal `dimensions` change event
+ * Measured-size events already have their final dimensions and project
+ * affected Frame geometry synchronously in `onNodesChange` instead.
  *
  * Safe to call with frame IDs that no longer exist or no longer have
  * a structured layout — both passes silently skip them.

@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { Copy, MessageSquare } from 'lucide-react';
+import { Copy } from 'lucide-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -11,7 +11,6 @@ import { NODE_ICON } from '@/config/nodeIcons';
 interface FragmentSelectionActionsProps {
   onCopy: () => Promise<void>;
   onSaveAsNote: () => void;
-  onComment: () => void;
   onCopied: () => void;
   saveAsNoteDisabled?: boolean;
   saveAsNoteTitle?: string;
@@ -20,7 +19,6 @@ interface FragmentSelectionActionsProps {
 export function FragmentSelectionActions({
   onCopy,
   onSaveAsNote,
-  onComment,
   onCopied,
   saveAsNoteDisabled = false,
   saveAsNoteTitle,
@@ -60,17 +58,6 @@ export function FragmentSelectionActions({
           onClick={onSaveAsNote}
         >
           <NoteIcon />
-        </Button>
-        <Button
-          variant="ghost"
-          iconOnly
-          size="sm"
-          title={t('messages.fragmentComment')}
-          disabled={copying}
-          onMouseDown={(event) => event.preventDefault()}
-          onClick={onComment}
-        >
-          <MessageSquare />
         </Button>
       </div>
       {copyError ? (

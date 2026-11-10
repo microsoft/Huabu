@@ -60,10 +60,7 @@ import {
   type NestableNode,
 } from '@huabu/shared/canvas-engine';
 
-import {
-  runWebPostEffects,
-  scheduleDeferredFrameRelayout,
-} from '@/handler/canvasCommand/postEffects.web';
+import { runWebPostEffects } from '@/handler/canvasCommand/postEffects.web';
 import {
   resolveUiIntent,
   type AddNodeInput,
@@ -75,7 +72,13 @@ import {
   getDragPointerPosition,
   mergeLiveDragGeometry,
 } from '@/handler/liveDragGeometry';
-import { isPointInTrackGap, resolveMasonryDrop } from '@/handler/masonryDrop';
+import {
+  isPointInTrackGap,
+  resolveGridDrop,
+  getGridDragGroup,
+  gridDragRequests,
+  resolveMasonryDrop,
+} from '@/handler/masonryDrop';
 import { projectStructuredTargetGeometry } from '@/handler/projectStructuredTargetGeometry';
 import {
   applySnap,
@@ -160,6 +163,7 @@ import { nodesToPlainText } from '../utils/io/nodeToPlainText';
 import type {
   FrameFitPreview,
   FrameFitPreviewRole,
+  StructuredDropPreview,
 } from './gesturePreviewStore';
 import type { CanvasPreviewWorkspace } from './previewWorkspace/model';
 import type { NodeIngestionInfo } from '@/handler/canvasCommand/preprocess';
@@ -3488,11 +3492,41 @@ const useCanvasStore = create<RFState>()(
                 }
               : undefined;
 
-          const previousDrop =
+          const draggedNodeIds = [
+            draggedNode.id,
+            ...draggedNodes
+              .filter((node) => node.id !== draggedNode.id)
+              .map((node) => node.id),
+          ];
+          const gridGroup = leavingByFrame.has(targetFrameId)
+            ? null
+            : getGridDragGroup(nodes, targetFrameId, draggedNodeIds);
+          const lastPreview =
             useGesturePreviewStore.getState().structuredDropPreview;
-          const masonry =
-            framePoint && gridCfg.axis !== 'grid'
-              ? resolveMasonryDrop(
+          const previousDrop =
+            lastPreview?.draggedNodeIds?.join(',') === draggedNodeIds.join(',')
+              ? lastPreview
+              : null;
+          const masonry: StructuredDropPreview['masonry'] = framePoint
+            ? gridCfg.axis === 'grid'
+              ? resolveGridDrop(
+                  projectedGestureNodes,
+                  targetFrameId,
+                  framePoint,
+                  {
+                    edges,
+                    zoom: get().rfInstance?.getZoom() ?? 1,
+                    allowInsert:
+                      (draggedNodes.length === 1 || !!gridGroup) &&
+                      !!pointerFlow,
+                    insertAxis: gridGroup ? 'row' : undefined,
+                    previous:
+                      previousDrop?.frameId === targetFrameId
+                        ? previousDrop.masonry
+                        : undefined,
+                  },
+                )
+              : resolveMasonryDrop(
                   projectedGestureNodes,
                   targetFrameId,
                   gridCfg.axis,
@@ -3507,6 +3541,20 @@ const useCanvasStore = create<RFState>()(
                         : undefined,
                   },
                 )
+            : undefined;
+          const rowTarget = masonry?.rowTarget;
+          const count = resolveFrameTrackCount(
+            projectedGestureNodes,
+            targetFrameId,
+          );
+          const requests =
+            gridGroup && masonry && rowTarget
+              ? gridDragRequests(
+                  gridGroup,
+                  draggedNode.id,
+                  { target: masonry.target, rowTarget },
+                  count,
+                )
               : undefined;
           const zone = framePoint
             ? describeStructuredDropZone(
@@ -3514,9 +3562,9 @@ const useCanvasStore = create<RFState>()(
                 targetFrameId,
                 framePoint,
                 gridCfg.axis,
-                resolveFrameTrackCount(projectedGestureNodes, targetFrameId),
+                count,
                 draggedRect,
-                { edges, target: masonry?.target },
+                { edges, target: masonry?.target, rowTarget, requests },
               )
             : null;
 
@@ -3530,16 +3578,19 @@ const useCanvasStore = create<RFState>()(
             });
             useGesturePreviewStore.getState().setStructuredDropPreview({
               nodeId: draggedNode.id,
+              draggedNodeIds,
               frameId: targetFrameId,
               kind: zone.kind,
               x: frameAbs.x + zone.x,
               y: frameAbs.y + zone.y,
               width: zone.width,
               height: zone.height,
+              placements: zone.placements?.map(toAbsoluteRect),
               ...(masonry
                 ? {
                     masonry: {
                       target: masonry.target,
+                      ...(rowTarget ? { rowTarget } : {}),
                       gap: masonry.gap ? toAbsoluteRect(masonry.gap) : null,
                     },
                   }
@@ -3657,12 +3708,16 @@ const useCanvasStore = create<RFState>()(
 
       get().dispatchUiIntent({
         type: 'NODE_DRAG_STOP',
-        draggedNodeIds: draggedNodes.map((n) => n.id),
+        draggedNodeIds: [
+          _node.id,
+          ...draggedNodes.filter((n) => n.id !== _node.id).map((n) => n.id),
+        ],
         pointerFlowPosition,
         zoom: get().rfInstance?.getZoom() ?? 1,
         masonryDrop:
           lastDrop?.masonry &&
-          (lastDrop.masonry.target.kind !== 'insert-new' ||
+          ((lastDrop.masonry.target.kind !== 'insert-new' &&
+            lastDrop.masonry.rowTarget?.kind !== 'insert-new') ||
             (pointerFlowPosition &&
               lastDrop.masonry.gap &&
               isPointInTrackGap(lastDrop.masonry.gap, pointerFlowPosition)))
@@ -3670,6 +3725,8 @@ const useCanvasStore = create<RFState>()(
                 nodeId: lastDrop.nodeId,
                 frameId: lastDrop.frameId,
                 target: lastDrop.masonry.target,
+                rowTarget: lastDrop.masonry.rowTarget,
+                draggedNodeIds: lastDrop.draggedNodeIds,
               }
             : undefined,
         bypassReparent,
@@ -3927,24 +3984,10 @@ const useCanvasStore = create<RFState>()(
         });
       }
 
-      // Internal RF changes (position mid-drag, select, dimensions /
-      // measured) are purely transient UI state. The authoritative
-      // geometry commit happens in `onNodeDragStop` via the
-      // `SET_NODE_GEOMETRY` engine command, which DOES schedule
-      // autosave. Routing this hot 60 fps drag-tick path through the
-      // no-autosave setter avoids running the structure dirty
-      // detector (and resetting the autosave debounce) on every frame.
-      get()._setStateNoAutosave({ nodes: nextNodes });
-
       // ── Frame relayout on measured-size changes ────────────────────
-      // Both structured (`column` / `row`) and free-mode frames refit
-      // when a child's measured size changes (e.g. a note growing as
-      // its content is edited, or a freshly-added note settling on its
-      // content height — which has no committed `style.height` yet, so
-      // the executor's synchronous fit treated it as zero). The deferred
-      // relayout runs the structured grid solver (a no-op for free
-      // frames) followed by a bounding-box `fitFrames` pass that handles
-      // free frames and cascades to ancestors.
+      // Measurements are already available: publish them with the final
+      // Frame layout, rather than painting stale positions for two more frames.
+      let frameGeometryChanged = false;
       if (!resizeCtx && !isSnapSessionActive()) {
         let framesToRelayout: Set<string> | undefined;
         for (const c of sanitized) {
@@ -3953,6 +3996,13 @@ const useCanvasStore = create<RFState>()(
           const child = nextNodes.find((n) => n.id === c.id);
           if (child?.type === 'frame') continue;
           if (!child?.parentId) continue;
+          const previous = currentById.get(child.id)?.measured;
+          if (
+            c.dimensions &&
+            previous?.width === c.dimensions.width &&
+            previous?.height === c.dimensions.height
+          )
+            continue;
           const parent = nextNodes.find((n) => n.id === child.parentId);
           if (!parent || parent.type !== 'frame') continue;
           // Per-frame sizing gate: structured (`column` / `row`)
@@ -3987,14 +4037,19 @@ const useCanvasStore = create<RFState>()(
           framesToRelayout.add(parent.id);
         }
         if (framesToRelayout && framesToRelayout.size > 0) {
-          scheduleDeferredFrameRelayout(
+          const projected = projectAffectedFrameGeometry(
+            nextNodes,
             framesToRelayout,
-            () => get().nodes,
-            () => get().edges,
-            (nodes) => set({ nodes }),
-          );
+            get().edges,
+          ).nodes;
+          frameGeometryChanged = projected !== nextNodes;
+          nextNodes = projected;
         }
       }
+
+      // Persist derived Frame geometry, but keep RF-only gesture ticks transient.
+      if (frameGeometryChanged) set({ nodes: nextNodes });
+      else get()._setStateNoAutosave({ nodes: nextNodes });
 
       if (isSnapSessionDragEndCommit(sanitized)) endSnapSession();
       if (isSnapSessionResizeEndCommit(sanitized)) endSnapSession();

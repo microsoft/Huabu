@@ -3,9 +3,12 @@
 
 import { Compartment, StateEffect } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
+import { MessageSquare } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { Button } from '@/components/Common/Button';
+import { FloatingToolbar } from '@/components/Common/FloatingToolbar';
 import { Popover } from '@/components/Common/Popover';
 import { toast } from '@/components/Common/Toast';
 import { FragmentSelectionActions } from '@/components/Messages/AIMessage/FragmentSelectionActions';
@@ -17,9 +20,12 @@ import { useTrackAttention } from '@/hooks/useTrackAttention';
 import useCanvasStore from '@/store/canvasStore';
 import { useAnyGlobalModalOpen } from '@/store/globalModalUi';
 import { copyToClipboard } from '@/utils/io/clipboard';
+import { trackTextSelectionGesture } from '@/utils/textSelectionGesture';
 
 import type { FileReadResult } from '@huabu/shared';
 import type { RefObject } from 'react';
+
+import '@/components/Panels/Canvas/FloatingToolbars/NodeToolbar.css';
 
 export function captureFileComment(
   view: EditorView,
@@ -33,13 +39,23 @@ export function captureFileComment(
   const text = doc.sliceString(from, to);
   if (!text.trim()) return null;
   const rect = view.coordsAtPos(selection.main.head);
-  if (!rect) return null;
+  const start = view.coordsAtPos(from, 1);
+  const end = view.coordsAtPos(to, -1);
+  if (!rect || !start || !end) return null;
+  const left = Math.min(start.left, end.left);
+  const top = Math.min(start.top, end.top);
   return {
     selection: {
       text,
       contextBefore: doc.sliceString(Math.max(0, from - 40), from),
       contextAfter: doc.sliceString(to, Math.min(doc.length, to + 40)),
       position: { x: rect.right, y: rect.bottom },
+      selectionRect: new DOMRect(
+        left,
+        top,
+        Math.max(start.right, end.right) - left,
+        Math.max(start.bottom, end.bottom) - top,
+      ),
     },
     source: {
       kind: 'file-reference',
@@ -99,15 +115,16 @@ export function FileCommentActions({
     setSelection(null);
     if (!view || !file || disabled) return;
     let active = true;
+    let selecting = false;
     const update = () => {
       view.requestMeasure({
         key: compartment,
         read: () =>
-          active
+          active && !selecting
             ? captureFileComment(view, { canvasId, nodeId, agentletId }, file)
             : null,
         write: (next) => {
-          if (active) setSelection(next);
+          if (active && !selecting) setSelection(next);
         },
       });
     };
@@ -123,10 +140,22 @@ export function FileCommentActions({
           : compartment.reconfigure(listener),
     });
     update();
+    const stopGesture = trackTextSelectionGesture(
+      view.dom,
+      () => {
+        selecting = true;
+        setSelection(null);
+      },
+      () => {
+        selecting = false;
+        update();
+      },
+    );
     const onScroll = () => setSelection(null);
     window.addEventListener('scroll', onScroll, true);
     return () => {
       active = false;
+      stopGesture();
       view.dispatch({ effects: compartment.reconfigure([]) });
       window.removeEventListener('scroll', onScroll, true);
     };
@@ -142,47 +171,63 @@ export function FileCommentActions({
       !dismissed ? (
         <Popover
           position={selection.selection.position}
-          className="p-1"
+          referenceRect={selection.selection.selectionRect}
+          placement="bottom-start"
+          className="selection-context-toolbar border-0 bg-transparent p-0 shadow-none"
+          boundary={surfaceRef.current}
           onDismiss={() => setDismissed(true)}
         >
-          <FragmentSelectionActions
-            onCopy={async () => {
-              const next = readSelection();
-              if (!next)
-                throw new Error(t('messages.commentSelectionUnavailable'));
-              await copyToClipboard(next.selection.text);
-            }}
-            onCopied={clearSelection}
-            onSaveAsNote={() => {
-              const next = readSelection();
-              if (!next) {
-                toast(t('messages.commentSelectionUnavailable'), {
-                  tone: 'warning',
+          <FloatingToolbar className="canvas-context-toolbar">
+            <FragmentSelectionActions
+              onCopy={async () => {
+                const next = readSelection();
+                if (!next)
+                  throw new Error(t('messages.commentSelectionUnavailable'));
+                await copyToClipboard(next.selection.text);
+              }}
+              onCopied={clearSelection}
+              onSaveAsNote={() => {
+                const next = readSelection();
+                if (!next) {
+                  toast(t('messages.commentSelectionUnavailable'), {
+                    tone: 'warning',
+                  });
+                  setSelection(null);
+                  return;
+                }
+                useCanvasStore.getState().addNode({
+                  nodeType: 'note',
+                  data: {
+                    content: next.selection.text,
+                    origin: { type: 'user-excerpt', excerptFromNodeId: nodeId },
+                  },
                 });
-                setSelection(null);
-                return;
-              }
-              useCanvasStore.getState().addNode({
-                nodeType: 'note',
-                data: {
-                  content: next.selection.text,
-                  origin: { type: 'user-excerpt', excerptFromNodeId: nodeId },
-                },
-              });
-              clearSelection();
-            }}
-            onComment={() => {
-              const next = readSelection();
-              if (!next) {
-                toast(t('messages.commentSelectionUnavailable'), {
-                  tone: 'warning',
-                });
-                setSelection(null);
-                return;
-              }
-              setCapture(next);
-            }}
-          />
+                clearSelection();
+              }}
+            />
+          </FloatingToolbar>
+          <FloatingToolbar className="canvas-context-toolbar">
+            <Button
+              variant="ghost"
+              size="sm"
+              iconOnly
+              title={t('messages.fragmentComment')}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => {
+                const next = readSelection();
+                if (!next) {
+                  toast(t('messages.commentSelectionUnavailable'), {
+                    tone: 'warning',
+                  });
+                  setSelection(null);
+                  return;
+                }
+                setCapture(next);
+              }}
+            >
+              <MessageSquare />
+            </Button>
+          </FloatingToolbar>
         </Popover>
       ) : null}
       {capture ? (

@@ -11,19 +11,40 @@ import { usePanelStore } from '../panelStore';
 import { findTabByTarget, groupOfTab, normalizePreviewTarget } from './model';
 import { selectActiveTab, usePreviewWorkspaceStore } from './store';
 
+function findConversationTab(
+  canvasId: string,
+  threadId: string,
+  nodeId?: string,
+) {
+  return Object.values(usePreviewWorkspaceStore.getState().workspace.tabs).find(
+    ({ target }) =>
+      target.canvasId === canvasId &&
+      ((target.kind === 'conversation' && target.threadId === threadId) ||
+        (target.kind === 'node' && target.nodeId === nodeId)),
+  );
+}
+
 export function openSpaceConversation(
   canvasId: string,
   nodeId: string,
   threadId: string,
+  options?: { openToSide?: boolean },
 ): string {
   const preview = usePreviewWorkspaceStore.getState();
   usePanelStore.getState().requestOpenRightPanel();
-  const tabId = preview.openPreviewTarget({
-    kind: 'conversation',
-    canvasId,
-    nodeId,
-    threadId,
-  });
+  const existing = findConversationTab(canvasId, threadId, nodeId);
+  const tabId =
+    existing?.id ??
+    preview.openPreviewTarget(
+      {
+        kind: 'conversation',
+        canvasId,
+        nodeId,
+        threadId,
+      },
+      options,
+    );
+  if (existing) preview.activateTab(existing.id);
   preview.requestChatOpen(tabId, 'bottom');
   return tabId;
 }

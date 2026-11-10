@@ -3,12 +3,82 @@
 
 import { expect, test, type Page } from '@playwright/test';
 
+import { expectSelectionToolbarOutsideSelection } from './helpers';
+
+import type * as SelectionToolbarModule from '../src/components/Messages/TextSelectionToolbar';
 import type * as UserMessageModule from '../src/components/Messages/UserMessage';
 import type * as ChatStoreModule from '../src/store/chatStore';
 import type * as ReactModule from 'react';
 import type * as DomModule from 'react-dom/client';
 
 test.use({ hasTouch: false });
+
+for (const placement of [
+  'below',
+  'above',
+  'right-edge',
+  'panel-edge',
+] as const) {
+  test(`selection toolbar avoids multiline text at ${placement}`, async ({
+    page,
+  }, testInfo) => {
+    await page.setViewportSize({ width: 480, height: 800 });
+    await page.goto('/playground/chat-performance?messages=0');
+    const selected = await page.evaluate(async (placement) => {
+      const reactPath = '/node_modules/.vite/deps/react.js';
+      const domPath = '/node_modules/.vite/deps/react-dom_client.js';
+      const toolbarPath = '/src/components/Messages/TextSelectionToolbar.tsx';
+      const { createElement } = (await import(reactPath))
+        .default as typeof ReactModule;
+      const { createRoot } = (await import(domPath))
+        .default as typeof DomModule;
+      const { TextSelectionToolbar } = (await import(
+        toolbarPath
+      )) as typeof SelectionToolbarModule;
+      const boundary = document.createElement('div');
+      boundary.style.cssText =
+        'position:fixed;left:20px;top:20px;width:440px;height:400px';
+      document.body.append(boundary);
+      const top =
+        placement === 'above' ? 690 : placement === 'panel-edge' ? 330 : 100;
+      const left = placement === 'right-edge' ? 300 : 40;
+      const rect = new DOMRect(left, top, 120, 60);
+      const host = document.createElement('div');
+      document.body.append(host);
+      createRoot(host).render(
+        createElement(TextSelectionToolbar, {
+          canvasId: 'space',
+          threadId: 'thread',
+          quote: {
+            quote: 'First line\nSecond line\nThird line',
+            contextBefore: '',
+            contextAfter: '',
+          },
+          position: { x: left + 10, y: top + 10 },
+          selectionRect: rect,
+          boundary: placement === 'panel-edge' ? boundary : undefined,
+          onDismiss: () => {},
+          onSaveAsNote: () => {},
+        }),
+      );
+      return { top: rect.top, bottom: rect.bottom };
+    }, placement);
+    const toolbar = page.locator('.selection-context-toolbar');
+    await expect(toolbar).toBeVisible();
+    const bounds = await toolbar.boundingBox();
+    if (!bounds) throw new Error('Missing selection toolbar bounds');
+    if (placement === 'above' || placement === 'panel-edge') {
+      expect(bounds.y + bounds.height).toBeLessThanOrEqual(selected.top - 7);
+    } else {
+      expect(bounds.y).toBeGreaterThanOrEqual(selected.bottom + 7);
+    }
+    expect(bounds.x).toBeGreaterThanOrEqual(12);
+    expect(bounds.x + bounds.width).toBeLessThanOrEqual(468);
+    await page.screenshot({
+      path: testInfo.outputPath(`selection-${placement}.png`),
+    });
+  });
+}
 
 async function stageDraft(page: Page, quote: string, comment: string) {
   await page.goto('/playground/chat-performance?messages=0');
@@ -41,16 +111,62 @@ test('stages, edits and removes a quoted comment without exposing a prompt templ
   await expect(passage).toBeVisible();
   const original = (await passage.textContent())?.trim();
   if (!original) throw new Error('Missing assistant passage');
-  await passage.click({ clickCount: 3 });
-  await page.getByRole('button', { name: 'Comment', exact: true }).click();
+  const passageBox = await passage.boundingBox();
+  if (!passageBox) throw new Error('Missing passage bounds');
+  await page.mouse.move(passageBox.x + 10, passageBox.y + 10);
+  await page.mouse.down({ clickCount: 3 });
+  await expect(page.locator('.selection-context-toolbar')).toHaveCount(0);
+  await page.mouse.up({ clickCount: 3 });
+  await expect(
+    page.getByRole('button', { name: 'Comment on selection', exact: true }),
+  ).toBeVisible();
+  await expect(page.locator('.canvas-context-toolbar')).toHaveCount(2);
+  await expectSelectionToolbarOutsideSelection(page);
+  for (const capsule of await page.locator('.canvas-context-toolbar').all()) {
+    await expect(capsule).toHaveCSS('height', '36px');
+    await expect(capsule).toHaveCSS('border-radius', '8px');
+  }
+  await expect(page.locator('.ink-agent-destination-trigger')).toHaveCount(0);
+  await page.screenshot({
+    path: testInfo.outputPath('chat-selection-toolbar.png'),
+  });
+  await page
+    .getByRole('button', { name: 'Comment on selection', exact: true })
+    .click();
   const fullComment = 'Please explain this in detail. '.repeat(12).trim();
+  await expect(
+    page.getByRole('button', { name: 'Add to input', exact: true }),
+  ).toBeDisabled();
+  for (const capsule of await page.locator('.canvas-context-toolbar').all()) {
+    await expect(capsule).toBeHidden();
+  }
+  await expect(
+    page.locator('[data-chat-input-surface] [data-quoted-comment]'),
+  ).toHaveCount(0);
+  await page
+    .getByRole('textbox', { name: 'Comment', exact: true })
+    .fill('  \n ');
+  await page
+    .getByRole('textbox', { name: 'Comment', exact: true })
+    .press('Enter');
+  await expect(
+    page.getByRole('button', { name: 'Add to input', exact: true }),
+  ).toBeDisabled();
+  await expect(
+    page.locator('[data-chat-input-surface] [data-quoted-comment]'),
+  ).toHaveCount(0);
   await page
     .getByRole('textbox', { name: 'Comment', exact: true })
     .fill(fullComment);
-  await page.getByRole('button', { name: 'Add to input', exact: true }).click();
+  await page
+    .getByRole('textbox', { name: 'Comment', exact: true })
+    .press('Enter');
 
   const card = page.locator('[data-chat-input-surface] [data-quoted-comment]');
   await expect(card).toHaveCount(1);
+  await expect(
+    card.getByRole('button', { name: 'Open source', exact: true }),
+  ).toHaveCount(0);
   await expect(card.locator('blockquote')).toHaveText(original);
   await expect(textarea).toHaveValue('General instructions');
   const comment = card.getByRole('textbox', { name: 'Comment', exact: true });
@@ -137,6 +253,11 @@ test('stages, edits and removes a quoted comment without exposing a prompt templ
     page.getByRole('button', { name: 'Send', exact: true }),
   ).toBeDisabled();
   await expect(card.getByRole('alert')).toBeVisible();
+  await textarea.fill('Main instructions do not replace a required comment');
+  await expect(
+    page.getByRole('button', { name: 'Send', exact: true }),
+  ).toBeDisabled();
+  await textarea.fill('');
   await comment.press('Escape');
   await expect(comment).toHaveCount(0);
   await expect(editComment).toHaveText('Updated comment');

@@ -3,6 +3,8 @@
 
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { projectAffectedFrameGeometry } from '@huabu/shared/canvas-engine';
+
 import {
   applyResizeProposal,
   beginSnapSession,
@@ -19,6 +21,98 @@ afterEach(() => {
 });
 
 describe('Frame resize React Flow measurement boundary', () => {
+  it.each(['column', 'row', 'grid', 'free'])(
+    'publishes new child measurements and %s Frame geometry together',
+    (layoutMode) => {
+      const nodes: Node[] = [
+        {
+          id: 'frame',
+          type: 'frame',
+          position: { x: 0, y: 0 },
+          data: { layoutMode, gridCount: 1, sizing: 'hug' },
+          style: { width: 440, height: 500 },
+        },
+        ...['new-question', 'peer'].map((id, index) => ({
+          id,
+          type: 'question',
+          parentId: 'frame',
+          position: { x: 28, y: 80 + index * 150 },
+          data: { frameColumn: 0, frameRow: index },
+          style: { width: 400 },
+          ...(index === 1 ? { measured: { width: 400, height: 100 } } : {}),
+        })),
+      ];
+      const initial = projectAffectedFrameGeometry(nodes, ['frame']).nodes;
+      useCanvasStore.getState()._setStateNoAutosave({
+        nodes: initial,
+        edges: [],
+      });
+      const expected = projectAffectedFrameGeometry(
+        initial.map((node) =>
+          node.id === 'new-question'
+            ? { ...node, measured: { width: 400, height: 120 } }
+            : node,
+        ),
+        ['frame'],
+      ).nodes;
+      const published: Node[][] = [];
+      const unsubscribe = useCanvasStore.subscribe((state) => {
+        published.push(state.nodes);
+      });
+      try {
+        useCanvasStore.getState().onNodesChange([
+          {
+            type: 'dimensions',
+            id: 'new-question',
+            dimensions: { width: 400, height: 120 },
+          },
+        ]);
+        expect(published).toHaveLength(1);
+        expect(published[0]).toEqual(expected);
+        expect(
+          published[0].find((node) => node.id === 'new-question')?.style
+            ?.height,
+        ).toBeUndefined();
+      } finally {
+        unsubscribe();
+      }
+    },
+  );
+
+  it('does not resize a free Manual Frame when a child is first measured', () => {
+    const frame: Node = {
+      id: 'frame',
+      type: 'frame',
+      position: { x: 0, y: 0 },
+      data: { layoutMode: 'free', sizing: 'manual' },
+      style: { width: 200, height: 200 },
+    };
+    const question: Node = {
+      id: 'question',
+      type: 'question',
+      parentId: frame.id,
+      position: { x: 20, y: 80 },
+      data: {},
+      style: { width: 400 },
+    };
+    useCanvasStore.getState()._setStateNoAutosave({
+      nodes: [frame, question],
+      edges: [],
+    });
+    useCanvasStore.getState().onNodesChange([
+      {
+        id: question.id,
+        type: 'dimensions',
+        dimensions: { width: 400, height: 300 },
+      },
+    ]);
+    expect(useCanvasStore.getState().nodes[0]).toBe(frame);
+    expect(useCanvasStore.getState().nodes[1].measured).toEqual({
+      width: 400,
+      height: 300,
+    });
+  });
+
   it('does not publish rounded Frame measurements when authored dimensions are already recorded', () => {
     const frame: Node = {
       id: 'frame',

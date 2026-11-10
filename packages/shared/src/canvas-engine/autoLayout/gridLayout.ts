@@ -377,6 +377,7 @@ function assignTrackSlots(
   sortKey: (c: ChildSlot) => number,
   emptyTrackPolicy: 'fill' | 'compact',
   trackAxis: FrameAxis,
+  preserveInteriorTracks = false,
 ): { assignment: Map<string, number>; count: number } {
   // Geometry is consulted up front because it answers two questions at
   // once: how many tracks there are (when the caller pinned no count)
@@ -454,7 +455,11 @@ function assignTrackSlots(
     rebalanceEmptyTracks(buckets, resolvedCount, assignment);
     return { assignment, count: resolvedCount };
   }
-  const compactCount = compactEmptyTracks(buckets, assignment);
+  const compactCount = compactEmptyTracks(
+    buckets,
+    assignment,
+    preserveInteriorTracks,
+  );
   return { assignment, count: compactCount };
 }
 
@@ -495,19 +500,27 @@ function rebalanceEmptyTracks(
 }
 
 /**
- * Drop empty tracks and renumber the survivors to a contiguous
- * `0..M-1` range, preserving order (so column 0 stays leftmost).
+ * Drop empty tracks and renumber survivors, optionally retaining interior
+ * blanks so Grid cell offsets survive ordinary relayout.
  * Rewrites `assignment` in place and returns the resulting track
  * count `M` (≥ 1 whenever there is at least one item).
  */
 function compactEmptyTracks(
   buckets: string[][],
   assignment: Map<string, number>,
+  preserveInteriorTracks = false,
 ): number {
   const remap = new Map<number, number>();
   let next = 0;
+  const first = buckets.findIndex((bucket) => bucket.length > 0);
+  let last = buckets.length - 1;
+  while (last >= 0 && buckets[last].length === 0) last--;
   for (let i = 0; i < buckets.length; i += 1) {
-    if (buckets[i].length === 0) continue;
+    if (
+      buckets[i].length === 0 &&
+      !(preserveInteriorTracks && i > first && i < last)
+    )
+      continue;
     remap.set(i, next);
     next += 1;
   }
@@ -1004,15 +1017,12 @@ function assignGridRows(
     : bandChildrenByGeometry(children, 'row').band;
 
   const ceiling = gridRowCeiling(children.length);
-  const rowOf = (child: ChildSlot) =>
-    clampInt(
-      readFrameGridRow(child.node) ?? seeded?.get(child.node.id) ?? 0,
-      0,
-      ceiling,
-    );
+  const requestedRow = (child: ChildSlot) =>
+    readFrameGridRow(child.node) ?? seeded?.get(child.node.id) ?? 0;
+  const rowOf = (child: ChildSlot) => clampInt(requestedRow(child), 0, ceiling);
   const ordered = [...children].sort(
     (a, b) =>
-      rowOf(a) - rowOf(b) ||
+      requestedRow(a) - requestedRow(b) ||
       a.node.position.y - b.node.position.y ||
       a.node.id.localeCompare(b.node.id),
   );
@@ -1110,6 +1120,7 @@ export function applyGridLayout(
     (c) => c.node.position.y,
     emptyTrackPolicy,
     'column',
+    true,
   );
   const columnOf = (child: ChildSlot) => assignment.get(child.node.id) ?? 0;
 
@@ -1525,6 +1536,8 @@ export interface StructuredDropZone {
    * onto the real nodes so peers slide aside under the cursor.
    */
   reflow: StructuredReflowEntry[];
+  /** All selected destinations for a grouped Grid move. */
+  placements?: DraggedNodeRect[];
   context: StructuredDropContext;
 }
 
@@ -1726,13 +1739,49 @@ export function planStructuredDrop(
     }
   }
 
+  const firstRequest = requests[0];
+  const columnShift = firstRequest
+    ? (tracks.get(firstRequest.nodeId) ?? 0) -
+      (origTrack.get(firstRequest.nodeId) ?? 0)
+    : 0;
+  const rowShift = firstRequest
+    ? (firstRequest.rowTarget?.slot ?? 0) -
+      (origRow.get(firstRequest.nodeId) ?? 0)
+    : 0;
+  const isGridGroup =
+    isGrid &&
+    requests.length > 1 &&
+    requests.every(
+      (request) =>
+        origTrack.has(request.nodeId) &&
+        origRow.has(request.nodeId) &&
+        request.target.kind === 'into-existing' &&
+        request.rowTarget !== undefined &&
+        request.rowTarget.kind === firstRequest.rowTarget?.kind &&
+        (tracks.get(request.nodeId) ?? 0) -
+          (origTrack.get(request.nodeId) ?? 0) ===
+          columnShift &&
+        request.rowTarget.slot - (origRow.get(request.nodeId) ?? 0) ===
+          rowShift,
+    );
+  // Empty bands inside the moved block are part of its shape, not disposable gaps.
+  const retainGroupSpan = (
+    occupied: Set<number>,
+    assignments: Map<string, number>,
+  ) => {
+    if (!isGridGroup) return;
+    const values = requests.map(
+      (request) => assignments.get(request.nodeId) ?? 0,
+    );
+    for (let slot = Math.min(...values); slot <= Math.max(...values); slot++)
+      occupied.add(slot);
+  };
+
   // ── Grid rows ───────────────────────────────────────────────────
   if (isGrid) {
-    // Opening a row mirrors the count axis: several dragged nodes share
-    // one cursor, so only a single-node drag names one gap. It is also
-    // never combined with opening a track in the same gesture — that
-    // drop lands in a column that is empty by construction, so there is
-    // nobody to push down and a row break would only add a blank stripe.
+    const movingIds = new Set(requests.map((request) => request.nodeId));
+    // A single-node column insertion already creates empty cells and
+    // must not also open a row. Grid groups only insert row blocks.
     const rowInsertRequest =
       !insertRequest &&
       requests.length === 1 &&
@@ -1740,7 +1789,39 @@ export function planStructuredDrop(
         ? requests[0]
         : null;
 
-    if (rowInsertRequest) {
+    if (isGridGroup) {
+      const targetRows = requests.map(
+        (request) => request.rowTarget?.slot ?? 0,
+      );
+      // Clamp the whole block, never its individual cells, to the solver's row bound.
+      const correction = Math.max(
+        -Math.min(...targetRows),
+        Math.min(0, gridRowCeiling(childIds.length) - Math.max(...targetRows)),
+      );
+      for (let index = 0; index < targetRows.length; index++)
+        targetRows[index] += correction;
+      const top = Math.min(...targetRows);
+      const span = Math.max(...targetRows) - top + 1;
+      const occupied = childIds.some(
+        (id) =>
+          !movingIds.has(id) &&
+          requests.some(
+            (request, index) =>
+              tracks.get(request.nodeId) === tracks.get(id) &&
+              rows.get(id) === targetRows[index],
+          ),
+      );
+      if (firstRequest.rowTarget?.kind === 'insert-new' || occupied) {
+        for (const id of childIds) {
+          const row = rows.get(id);
+          if (!movingIds.has(id) && row !== undefined && row >= top)
+            rows.set(id, row + span);
+        }
+      }
+      requests.forEach((request, index) =>
+        rows.set(request.nodeId, targetRows[index]),
+      );
+    } else if (rowInsertRequest) {
       const opened = rowInsertRequest.rowTarget?.slot ?? 0;
       for (const id of childIds) {
         if (id === rowInsertRequest.nodeId) continue;
@@ -1786,10 +1867,10 @@ export function planStructuredDrop(
       }
     }
 
-    // Once a move empties any row, canonicalize every occupied row to a
-    // contiguous index. Blank row indices have no persistent identity;
-    // an explicit gridRowCount floor is materialized again by layout.
+    // Compact vacant rows outside the moved group's span. Interior blanks
+    // preserve its shape; gridRowCount is materialized again by layout.
     const occupiedRows = new Set(rows.values());
+    retainGroupSpan(occupiedRows, rows);
     const emptiedRow = [...new Set(origRow.values())].some(
       (row) => !occupiedRows.has(row),
     );
@@ -1804,6 +1885,7 @@ export function planStructuredDrop(
 
   // ── Count-axis compaction ───────────────────────────────────────
   const occupiedTracks = new Set(tracks.values());
+  retainGroupSpan(occupiedTracks, tracks);
   const trackEmptied = [...origTrack.values()].some(
     (track) => !occupiedTracks.has(track),
   );
@@ -1831,6 +1913,9 @@ function describeGridDropZone(
   rowTarget: StructuredDropTarget,
   dragged: DraggedNodeRect,
   options: StructuredLayoutOptions,
+  requests: readonly StructuredDropRequest[] = [
+    { nodeId: dragged.id, target, rowTarget },
+  ],
 ): StructuredDropZone | null {
   const opensTrack =
     target.kind === 'insert-new' && count < FRAME_GRID_MAX_COUNT;
@@ -1840,9 +1925,8 @@ function describeGridDropZone(
 
   // The drop's meaning is resolved once, by the same planner the commit
   // path uses, so the preview cannot describe a different outcome.
-  const plan = planStructuredDrop(nodes, frameId, 'grid', count, [
-    { nodeId: dragged.id, target, rowTarget },
-  ]);
+  const plan = planStructuredDrop(nodes, frameId, 'grid', count, requests);
+  const movingIds = new Set(requests.map((request) => request.nodeId));
 
   let foundDragged = false;
   const simulated = nodes.map((node) => {
@@ -1910,7 +1994,21 @@ function describeGridDropZone(
     width: dragged.width,
     height: dragged.height,
     frameSize: layout.frameSize,
-    reflow: collectReflowPositions(nodes, frameId, dragged.id, layout),
+    reflow: collectReflowPositions(nodes, frameId, dragged.id, layout).filter(
+      (entry) => !movingIds.has(entry.id),
+    ),
+    ...(requests.length > 1
+      ? {
+          placements: simulated
+            .filter((node) => movingIds.has(node.id))
+            .flatMap((node) => {
+              const position = layout.childPositions.get(node.id);
+              return position
+                ? [{ id: node.id, ...position, ...getNodeSize(node) }]
+                : [];
+            }),
+        }
+      : {}),
     context: {
       axis: 'grid',
       tracks: bands.tracks,
@@ -1956,14 +2054,18 @@ export function describeStructuredDropZone(
   axis: FrameGridAxis,
   count: number,
   dragged?: DraggedNodeRect,
-  options: StructuredLayoutOptions & { target?: StructuredDropTarget } = {},
+  options: StructuredLayoutOptions & {
+    target?: StructuredDropTarget;
+    rowTarget?: StructuredDropTarget;
+    requests?: readonly StructuredDropRequest[];
+  } = {},
 ): StructuredDropZone | null {
   const frame = nodes.find((n) => n.id === frameId);
   if (!frame || !dragged) return null;
 
-  // A supplied masonry target needs only the simulated solve; Grid still picks a row.
+  // Explicit pointer targets need only the simulated post-drop solve.
   const preDrop =
-    !options.target || axis === 'grid'
+    !options.target || (axis === 'grid' && !options.rowTarget)
       ? solveStructuredFrameLayout(nodes, frameId, 'compact', options)
       : null;
   const isCol = axis !== 'row';
@@ -1979,9 +2081,10 @@ export function describeStructuredDropZone(
       frameId,
       count,
       target,
-      pickAxisDropTarget(preDrop, 'y', framePoint.y),
+      options.rowTarget ?? pickAxisDropTarget(preDrop, 'y', framePoint.y),
       dragged,
       options,
+      options.requests,
     );
   }
 

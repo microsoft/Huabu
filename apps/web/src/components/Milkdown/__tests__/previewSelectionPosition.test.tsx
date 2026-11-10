@@ -115,6 +115,42 @@ describe('preview selection popover positioning', () => {
     expect(onTextSelection).toHaveBeenLastCalledWith(null);
   });
 
+  it('hides selection chrome throughout dragging, including streaming updates, until release', async () => {
+    await dispatch(editor, new MouseEvent('mouseup', { bubbles: true }));
+    await dispatch(editor, new MouseEvent('mousedown', { bubbles: true }));
+    onTextSelection.mockClear();
+    await dispatch(document, new Event('selectionchange'));
+    await update('Selected passage, streaming');
+    await dispatch(document, new Event('selectionchange'));
+    expect(onTextSelection).not.toHaveBeenCalled();
+    expect(mocks.setMarkdown).not.toHaveBeenCalled();
+    await dispatch(
+      document.body,
+      new MouseEvent('mouseup', {
+        bubbles: true,
+        clientX: 250,
+        clientY: 80,
+      }),
+    );
+    expect(onTextSelection).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        text: 'Selected passage',
+        position: { x: 250, y: 80 },
+      }),
+    );
+    expect(mocks.setMarkdown).not.toHaveBeenCalled();
+  });
+
+  it('releases the mouse hold on window blur', async () => {
+    document.getSelection()?.removeAllRanges();
+    await dispatch(editor, new MouseEvent('mousedown', { bubbles: true }));
+    await update('Selected passage, streaming');
+    await dispatch(window, new Event('blur'));
+    expect(mocks.setMarkdown).toHaveBeenCalledExactlyOnceWith(
+      'Selected passage, streaming',
+    );
+  });
+
   it('defers updates during a mouse drag even before a text range exists', async () => {
     document.getSelection()?.removeAllRanges();
     await dispatch(editor, new MouseEvent('mousedown', { bubbles: true }));
@@ -206,7 +242,10 @@ describe('preview selection popover positioning', () => {
         new MouseEvent('mouseup', { bubbles: true, clientX: x, clientY: y }),
       );
       expect(onTextSelection).toHaveBeenLastCalledWith(
-        expect.objectContaining({ position: { x, y } }),
+        expect.objectContaining({
+          position: { x, y },
+          selectionRect: new DOMRect(20, 30, 180, 40),
+        }),
       );
       onTextSelection.mockClear();
       await dispatch(

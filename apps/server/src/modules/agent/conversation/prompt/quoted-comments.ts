@@ -38,7 +38,27 @@ export function renderQuotedComments(
                 `<selection offset_unit="utf-16" from="${item.source.from}" to="${item.source.to}" loaded_length="${item.source.loadedLength}" file_fully_loaded="${item.source.complete}" />`,
                 '</source>',
               ]
-            : ['This passage was captured from an earlier assistant reply.']),
+            : item.source?.kind === 'pdf'
+              ? [
+                  '<source>',
+                  '<kind>pdf</kind>',
+                  `<canvas_id>${escapeXmlText(item.source.canvasId)}</canvas_id>`,
+                  `<node_id>${escapeXmlText(item.source.nodeId)}</node_id>`,
+                  `<pages>${item.source.pages.join(', ')}</pages>`,
+                  '</source>',
+                ]
+              : item.source?.kind === 'chat'
+                ? [
+                    '<source>',
+                    '<kind>chat</kind>',
+                    `<canvas_id>${escapeXmlText(item.source.canvasId)}</canvas_id>`,
+                    `<thread_id>${escapeXmlText(item.source.threadId)}</thread_id>`,
+                    `<message_id>${escapeXmlText(item.source.messageId)}</message_id>`,
+                    '</source>',
+                  ]
+                : [
+                    'This passage was captured from an earlier assistant reply.',
+                  ]),
         `<quote>${escapeXmlText(item.quote)}</quote>`,
         ...(item.contextBefore || item.contextAfter
           ? [

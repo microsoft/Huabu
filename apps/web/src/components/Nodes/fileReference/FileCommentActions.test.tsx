@@ -148,6 +148,20 @@ async function render(value = file, disabled = false) {
     ),
   );
 }
+
+it('hides selection actions during dragging and restores them on outside release', async () => {
+  await render();
+  expect(document.querySelector('.selection-context-toolbar')).not.toBeNull();
+  act(() =>
+    view.dom.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })),
+  );
+  act(() => view.dispatch({ selection: { anchor: 0, head: 5 } }));
+  expect(document.querySelector('.selection-context-toolbar')).toBeNull();
+  await act(async () =>
+    document.body.dispatchEvent(new MouseEvent('mouseup', { bubbles: true })),
+  );
+  expect(document.querySelector('.selection-context-toolbar')).not.toBeNull();
+});
 function button(name: string) {
   const found = [...document.querySelectorAll('button')].find(
     (item) =>

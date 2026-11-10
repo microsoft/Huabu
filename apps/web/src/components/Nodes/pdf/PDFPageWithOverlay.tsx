@@ -3,15 +3,21 @@
 
 import clsx from 'clsx';
 import { useCallback, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Page } from 'react-pdf';
 
 import 'react-pdf/dist/Page/TextLayer.css';
 
+import { Button } from '@/components/Common/Button';
+import { DragToCanvasHandleButton } from '@/components/Common/DragToCanvasHandleButton';
+import { FLOATING_CHROME_PROPS } from '@/components/Common/floatingChrome';
 import { Loading } from '@/components/Common/Loading';
+import { setDragPayload } from '@/utils/io/dragDrop';
 
 import type { PdfHighlight } from '@huabu/shared';
 
 import './pdfWorker';
+import './pdfSelection.css';
 
 /** Minimal pdfjs page proxy shape we rely on. */
 type PdfPageProxy = {
@@ -64,6 +70,16 @@ type PDFPageWithOverlayProps = {
   persistedRect?: NormalizedRect;
   /** Persistent highlights to render on this page. */
   highlights?: PdfHighlight[];
+  textSelection?: {
+    rects: NormalizedRect[];
+    text: string;
+    excerptFromNodeId: string;
+  };
+  selectionScale?: number;
+  onHighlightActivate?: (
+    highlight: PdfHighlight,
+    position: { x: number; y: number },
+  ) => void;
   onAspectRatioResolved?: (
     pageIndex: number,
     aspectRatio: number,
@@ -79,13 +95,31 @@ export const PDFPageWithOverlay = ({
   onAreaCaptured,
   persistedRect,
   highlights,
+  textSelection,
+  selectionScale = 1,
+  onHighlightActivate,
   onAspectRatioResolved,
 }: PDFPageWithOverlayProps) => {
+  const { t } = useTranslation();
   const containerRef = useRef<HTMLDivElement>(null);
   const pageProxyRef = useRef<PdfPageProxy | null>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
   const dragRef = useRef<DragState | null>(null);
   const [rendered, setRendered] = useState(false);
+  const selectionBounds = textSelection?.rects.reduce<NormalizedRect | null>(
+    (bounds, rect) => {
+      if (!bounds) return rect;
+      const x = Math.min(bounds.x, rect.x);
+      const y = Math.min(bounds.y, rect.y);
+      return {
+        x,
+        y,
+        width: Math.max(bounds.x + bounds.width, rect.x + rect.width) - x,
+        height: Math.max(bounds.y + bounds.height, rect.y + rect.height) - y,
+      };
+    },
+    null,
+  );
 
   // ---------------------------------------------------------------------------
   // Pointer handlers — only active when captureEnabled is true
@@ -328,6 +362,88 @@ export const PDFPageWithOverlay = ({
             }}
           />
         )),
+      )}
+      {onHighlightActivate &&
+        highlights?.map((highlight) => {
+          const rect = highlight.rects[0];
+          if (!rect) return null;
+          return (
+            <Button
+              key={highlight.id}
+              variant="ghost"
+              size="sm"
+              aria-label={t('messages.pdfHighlight', { page: pageIndex + 1 })}
+              className="pointer-events-none absolute opacity-0 focus-visible:opacity-100"
+              style={{ left: `${rect.x * 100}%`, top: `${rect.y * 100}%` }}
+              onClick={(event) => {
+                const bounds = event.currentTarget.getBoundingClientRect();
+                onHighlightActivate(highlight, {
+                  x: bounds.right,
+                  y: bounds.bottom,
+                });
+              }}
+            >
+              {t('node.highlightText')}
+            </Button>
+          );
+        })}
+      {textSelection && selectionBounds && (
+        <div
+          {...FLOATING_CHROME_PROPS}
+          className="pdf-text-selection pointer-events-none absolute inset-0 z-10"
+        >
+          <div
+            data-pdf-text-selection-outline
+            className="pdf-text-selection-outline absolute rounded-sm border-dashed"
+            style={{
+              left: `calc(${selectionBounds.x * 100}% - ${2 / selectionScale}px)`,
+              top: `calc(${selectionBounds.y * 100}% - ${2 / selectionScale}px)`,
+              width: `calc(${selectionBounds.width * 100}% + ${4 / selectionScale}px)`,
+              height: `calc(${selectionBounds.height * 100}% + ${4 / selectionScale}px)`,
+              borderWidth: 1 / selectionScale,
+              borderRadius: 2 / selectionScale,
+            }}
+          />
+          <div
+            className="pointer-events-auto absolute"
+            style={{
+              left: -28 / selectionScale,
+              top: `calc(${(textSelection.rects[0].y + textSelection.rects[0].height / 2) * 100}% - ${12 / selectionScale}px)`,
+              transform: `scale(${1 / selectionScale})`,
+              transformOrigin: 'left top',
+            }}
+          >
+            <DragToCanvasHandleButton
+              data-pdf-text-drag
+              data-popover-dismiss-ignore
+              size="sm"
+              iconSize={14}
+              title={t('node.dragSelectedTextAsNote')}
+              aria-label={t('node.dragSelectedTextAsNote')}
+              className="pdf-text-selection-grip h-6 w-6 active:cursor-grabbing"
+              onDragStart={(event) => {
+                event.stopPropagation();
+                const preview = document.createElement('div');
+                preview.className =
+                  'text-fg-default line-clamp-4 max-w-72 whitespace-pre-wrap text-xs';
+                preview.textContent = textSelection.text;
+                setDragPayload(
+                  event,
+                  {
+                    kind: 'note',
+                    origin: {
+                      type: 'user-excerpt',
+                      excerptFromNodeId: textSelection.excerptFromNodeId,
+                    },
+                    data: { content: textSelection.text },
+                  },
+                  { dragImageElement: preview },
+                );
+                event.dataTransfer.setData('text/plain', textSelection.text);
+              }}
+            />
+          </div>
+        </div>
       )}
     </div>
   );

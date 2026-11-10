@@ -57,6 +57,16 @@ vi.mock('@/store/canvasStore', () => ({
     selector({ canvasId: null, nodes: [] }),
 }));
 
+vi.mock('@/store/previewWorkspace/store', () => ({
+  usePreviewWorkspaceStore: {
+    getState: () => ({ openPreviewTarget: vi.fn() }),
+  },
+}));
+
+vi.mock('@/store/workspaceStore', () => ({
+  useWorkspaceStore: { getState: () => ({ workspaceId: null }) },
+}));
+
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (key: string) => key }),
 }));

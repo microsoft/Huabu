@@ -673,7 +673,11 @@ describe('embedded PDF reader', () => {
   it('preserves header actions and search integration for expanded previews', () => {
     render(true, false);
     load();
-    expect(mocks.header?.querySelectorAll('button')).toHaveLength(5);
+    expect(mocks.header?.querySelectorAll('button')).toHaveLength(4);
+    expect(
+      mocks.header?.querySelector('[aria-label="node.selectAreaToCapture"]'),
+    ).not.toBeNull();
+    expect(mocks.header?.querySelectorAll('[aria-pressed]')).toHaveLength(1);
     expect(mocks.registerSearch).toHaveBeenCalled();
     expect(mocks.index).toHaveBeenLastCalledWith(
       expect.objectContaining({ enabled: true }),

@@ -80,6 +80,126 @@ function state(nodes: Node[]): UiResolverState {
 }
 
 describe('resolveNodeDragStop Grid cells', () => {
+  it.each([
+    ['a', 'd'],
+    ['a', 'c'],
+    ['a', 'b', 'c'],
+    ['a', 'f'],
+  ])(
+    'keeps the relative cells of selection %j through preview and execution',
+    (...ids) => {
+      const { nodes, rowTracks } = layoutScene([
+        makeFrame(),
+        ...['a', 'b', 'c', 'd', 'e', 'f'].map((id, index) =>
+          makeChild(id, index % 2, Math.floor(index / 2)),
+        ),
+      ]);
+      for (const armed of [false, true]) {
+        for (const anchor of ids) {
+          const draggedNodeIds = [anchor, ...ids.filter((id) => id !== anchor)];
+          const resolution = resolveUiIntent(
+            {
+              type: 'NODE_DRAG_STOP',
+              draggedNodeIds,
+              bypassReparent: true,
+              pointerFlowPosition: { x: 30, y: rowTracks[2].top + 10 },
+              masonryDrop: armed
+                ? {
+                    nodeId: anchor,
+                    frameId: 'frame',
+                    draggedNodeIds,
+                    target: { kind: 'into-existing', slot: 0 },
+                    rowTarget: { kind: 'insert-new', slot: 3 },
+                  }
+                : undefined,
+            },
+            state(nodes),
+          );
+          const result = executeCanvasCommands(
+            { source: 'ui', commands: resolution.commands },
+            { nodes, edges: [], canvasId: 'canvas' },
+          ).writeResult.nodes;
+          const before = nodes.find((node) => node.id === anchor);
+          const after = result.find((node) => node.id === anchor);
+          for (const id of ids) {
+            const original = nodes.find((node) => node.id === id);
+            const moved = result.find((node) => node.id === id);
+            for (const key of ['frameColumn', 'frameRow']) {
+              expect(Number(moved?.data[key]) - Number(after?.data[key])).toBe(
+                Number(original?.data[key]) - Number(before?.data[key]),
+              );
+            }
+          }
+          expect(result.map((node) => node.id).sort()).toEqual(
+            nodes.map((node) => node.id).sort(),
+          );
+          expect(
+            new Set(
+              result
+                .filter((node) => node.parentId === 'frame')
+                .map(
+                  (node) => `${node.data.frameColumn}:${node.data.frameRow}`,
+                ),
+            ).size,
+          ).toBe(6);
+        }
+      }
+    },
+  );
+
+  it.each([false, true])(
+    'moves two same-row nodes together (armed gap: %s)',
+    (armed) => {
+      const { nodes, rowTracks } = layoutScene([
+        makeFrame(),
+        ...['a', 'b', 'c', 'd', 'e', 'f'].map((id, index) =>
+          makeChild(id, index % 2, Math.floor(index / 2)),
+        ),
+      ]);
+      const resolution = resolveUiIntent(
+        {
+          type: 'NODE_DRAG_STOP',
+          draggedNodeIds: ['f', 'e'],
+          bypassReparent: true,
+          pointerFlowPosition: { x: 30, y: rowTracks[1].top + 10 },
+          masonryDrop: armed
+            ? {
+                nodeId: 'f',
+                frameId: 'frame',
+                draggedNodeIds: ['f', 'e'],
+                target: { kind: 'into-existing', slot: 0 },
+                rowTarget: { kind: 'insert-new', slot: 1 },
+              }
+            : undefined,
+        },
+        state(nodes),
+      );
+      const result = executeCanvasCommands(
+        { source: 'ui', commands: resolution.commands },
+        { nodes, edges: [], canvasId: 'canvas' },
+      ).writeResult.nodes;
+      const cells = Object.fromEntries(
+        result
+          .filter((node) => node.parentId === 'frame')
+          .map((node) => [
+            node.id,
+            { column: node.data.frameColumn, row: node.data.frameRow },
+          ]),
+      );
+      expect(cells).toEqual({
+        a: { column: 0, row: 0 },
+        b: { column: 1, row: 0 },
+        e: { column: 0, row: 1 },
+        f: { column: 1, row: 1 },
+        c: { column: 0, row: 2 },
+        d: { column: 1, row: 2 },
+      });
+      expect(result.map((node) => node.id).sort()).toEqual(
+        nodes.map((node) => node.id).sort(),
+      );
+    },
+  );
+
   it('freezes nested Frames for external drops unless entry is explicit', () => {
     const outer = {
       id: 'outer',
@@ -682,7 +802,7 @@ describe('resolveNodeDragStop Grid cells', () => {
     expect(patches.get('next-row')).toMatchObject({ frameRow: 2 });
   });
 
-  it('opens a row when an internal drag aims between two rows', () => {
+  it('opens a row only after the preview has armed insertion between rows', () => {
     // Without an `insert-new` target on the row axis this drop could
     // only resolve to one of the neighbouring rows, so a grid could be
     // permuted but never grown along Y.
@@ -703,6 +823,12 @@ describe('resolveNodeDragStop Grid cells', () => {
       {
         type: 'NODE_DRAG_STOP',
         draggedNodeIds: ['dragged'],
+        masonryDrop: {
+          nodeId: 'dragged',
+          frameId: 'frame',
+          target: { kind: 'into-existing', slot: 1 },
+          rowTarget: { kind: 'insert-new', slot: 1 },
+        },
         pointerFlowPosition: {
           x: columnPosition.x + CHILD_SIZE.width / 2,
           y: (firstRow.top + firstRow.height + secondRow.top) / 2,
@@ -748,6 +874,12 @@ describe('resolveNodeDragStop Grid cells', () => {
         type: 'NODE_DRAG_STOP',
         draggedNodeIds: ['dragged'],
         pointerFlowPosition: target,
+        masonryDrop: {
+          nodeId: 'dragged',
+          frameId: 'frame',
+          target: { kind: 'into-existing', slot: 1 },
+          rowTarget: { kind: 'insert-new', slot: 2 },
+        },
         cachedDecisions: new Map([
           ['dragged', { unframe: false, enterFrameId: null }],
         ]),
