@@ -11,6 +11,7 @@ import {
   createChatSubmission,
   createInteractiveViewSubmission,
 } from './agenetes/handle.js';
+import { AgentThreadResolutionError } from './agent-thread-resolver.js';
 import {
   AgentThreadBusyError,
   AgentThreadService,
@@ -1744,4 +1745,54 @@ it('stops pending preparation together with an active turn', async () => {
   releaseGate();
   await draining;
   preparation.finish();
+});
+
+describe('AgentThreadService.ownsThread', () => {
+  type Dependencies = ConstructorParameters<typeof AgentThreadService>[0];
+  const serviceWith = (
+    dependencies: Pick<
+      NonNullable<Dependencies>,
+      'resolveAgentNode' | 'resolvePersistedExternalBinding'
+    >,
+  ) => new AgentThreadService(dependencies as Dependencies);
+
+  it('owns the thread of an Agent Node in the Space', async () => {
+    const persisted = vi.fn(() => null);
+    const service = serviceWith({
+      resolveAgentNode: async () => TARGET,
+      resolvePersistedExternalBinding: persisted,
+    });
+    await expect(service.ownsThread('canvas-a', 'thread-a')).resolves.toBe(
+      true,
+    );
+    expect(persisted).not.toHaveBeenCalled();
+  });
+
+  it('owns an external thread realised in the Space without a node', async () => {
+    const service = serviceWith({
+      resolveAgentNode: async () => null,
+      resolvePersistedExternalBinding: (canvasId) =>
+        canvasId === 'canvas-a'
+          ? { kind: 'external', profileId: 'profile-a', alias: 'Agent A' }
+          : null,
+    });
+    await expect(service.ownsThread('canvas-a', 'thread-a')).resolves.toBe(
+      true,
+    );
+    await expect(service.ownsThread('canvas-b', 'thread-a')).resolves.toBe(
+      false,
+    );
+  });
+
+  it('owns nothing in a missing Space or under an ambiguous binding', async () => {
+    const service = serviceWith({
+      resolveAgentNode: async () => {
+        throw new AgentThreadResolutionError('canvas_not_found', 'missing');
+      },
+      resolvePersistedExternalBinding: () => null,
+    });
+    await expect(service.ownsThread('canvas-a', 'thread-a')).resolves.toBe(
+      false,
+    );
+  });
 });

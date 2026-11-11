@@ -30,6 +30,7 @@ const triggers: Record<string, string> = {
   state: 'AFTER UPDATE ON spaces',
   delta: 'AFTER INSERT ON delta_log',
   stamps: 'AFTER UPDATE ON space_save_heads',
+  reviews: 'AFTER UPDATE ON changes',
   result: 'AFTER INSERT ON space_save_results',
 };
 const trigger = triggers[stage];

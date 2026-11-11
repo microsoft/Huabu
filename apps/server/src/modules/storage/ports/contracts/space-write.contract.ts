@@ -12,6 +12,8 @@
 
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { extractCanvasChanges } from '@huabu/shared/canvas-engine';
+
 import { SaveIdReusedError } from '../save.js';
 
 import type {
@@ -21,6 +23,10 @@ import type {
 } from '../../../canvas/persistence-types.js';
 import type { SaveResult } from '../save.js';
 import type { SpaceHandle, SpaceWriteInput } from '../structured.js';
+import type {
+  CanvasChangeRecord,
+  CanvasNode,
+} from '@huabu/shared/canvas-engine';
 
 export interface SpaceWriteContractHarness {
   /** Existing ordinary Space, initially at version 0 with `existingNode`. */
@@ -87,6 +93,30 @@ function resultFor(
 ): SaveResult {
   return { key: { principalId, operationId }, digest, response };
 }
+
+/**
+ * A real Review record for `nodeId`, built through the engine: coalescing
+ * groups by the forward delta reconstructed from `revertDeltas`, so a
+ * hand-rolled record would be dropped and the suite would assert nothing.
+ */
+function review(nodeId: string, content = 'body'): CanvasChangeRecord {
+  const [record] = extractCanvasChanges([
+    {
+      type: 'INSERT_NODE',
+      node: {
+        id: nodeId,
+        type: 'note',
+        position: { x: 0, y: 0 },
+        data: { label: nodeId, content },
+      } as CanvasNode,
+    },
+  ]);
+  if (!record) throw new Error('Contract fixture produced no Review record');
+  return record;
+}
+
+const THREAD_A = 'contract-thread-a';
+const THREAD_B = 'contract-thread-b';
 
 async function requireRecord(space: SpaceHandle): Promise<CanvasFile> {
   const record = await space.read();
@@ -890,6 +920,174 @@ export function describeSpaceWriteContract(
         nodeMutations: [],
       });
       await expect(space.save.stamps()).resolves.toEqual(before);
+    });
+
+    // ─── Review records ────────────────────────────────────────────────────
+
+    it('stores Review records in the same write and returns the stored lists', async () => {
+      const { space, readJournal } = await open();
+      const current = await requireRecord(space);
+      const first = review('review-1');
+      const other = review('review-2');
+
+      const written = await space.write(
+        writeInput(current, {
+          delta: deltaFor(current.version + 1, 'reviews'),
+          reviews: [
+            { threadId: THREAD_A, records: [first] },
+            { threadId: THREAD_B, records: [other] },
+          ],
+        }),
+      );
+      expect(written).toEqual({
+        ok: true,
+        reviews: { [THREAD_A]: [first], [THREAD_B]: [other] },
+      });
+
+      // Present with no follow-up call, and exactly what the write reported.
+      await expect(space.changes.read(THREAD_A)).resolves.toEqual([first]);
+      await expect(space.changes.read(THREAD_B)).resolves.toEqual([other]);
+      await expect(readJournal()).resolves.toHaveLength(1);
+      expect((await requireRecord(space)).version).toBe(current.version + 1);
+    });
+
+    it('coalesces Review records with the stored list exactly as changes.append does', async () => {
+      const { space, concurrent } = await open();
+      const kept = review('review-kept');
+      const before = review('review-edited', 'before');
+      const after = review('review-edited', 'after');
+      const added = review('review-added');
+
+      // The same history through the two entry points, on two threads.
+      await space.changes.append(THREAD_A, [kept, before]);
+      await space.changes.append(THREAD_B, [kept, before]);
+      const appended = await space.changes.append(THREAD_A, [after, added]);
+
+      const current = await requireRecord(space);
+      const written = await space.write(
+        writeInput(current, {
+          reviews: [{ threadId: THREAD_B, records: [after, added] }],
+        }),
+      );
+
+      expect(written).toEqual({ ok: true, reviews: { [THREAD_B]: appended } });
+      await expect(concurrent.changes.read(THREAD_B)).resolves.toEqual(
+        appended,
+      );
+      await expect(space.changes.read(THREAD_A)).resolves.toEqual(appended);
+    });
+
+    it('stores no Review records when the write is refused, replayed or fails', async () => {
+      const { space, missing, newNode, failNextDeltaAppend, readJournal } =
+        await open();
+      const existing = review('review-existing');
+      await space.changes.append(THREAD_A, [existing]);
+      const current = await requireRecord(space);
+      const reviews = [{ threadId: THREAD_A, records: [review('review-new')] }];
+
+      await expect(
+        space.write({
+          expectedVersion: current.version + 5,
+          nextRecord: { ...current, version: current.version + 6 },
+          nodeMutations: [],
+          reviews,
+        }),
+      ).resolves.toMatchObject({ ok: false, reason: 'version-conflict' });
+      await expect(space.changes.read(THREAD_A)).resolves.toEqual([existing]);
+
+      await expect(
+        missing.write({
+          expectedVersion: 0,
+          nextRecord: {
+            canvasId: missing.canvasId,
+            title: 'Missing',
+            version: 1,
+            state: { nodes: [], edges: [] },
+            createdAt: 1,
+            updatedAt: 1,
+          },
+          nodeMutations: [],
+          reviews,
+        }),
+      ).resolves.toEqual({ ok: false, reason: 'not-found' });
+      await expect(missing.changes.read(THREAD_A)).resolves.toEqual([]);
+
+      const next = nextRecord(current, {
+        ...current.state,
+        nodes: [{ id: newNode.nodeId, type: newNode.type }],
+      });
+      const result = resultFor(OPERATION_A, DIGEST_A, { ok: true });
+      const input: SpaceWriteInput = {
+        expectedVersion: current.version,
+        nextRecord: next,
+        nodeMutations: [
+          {
+            kind: 'put',
+            nodeId: newNode.nodeId,
+            record: newNode,
+            authoritativeInsert: true,
+          },
+        ],
+        delta: deltaFor(next.version, 'failing-with-reviews'),
+        result,
+        reviews,
+      };
+      const restoreFault = await failNextDeltaAppend(
+        new Error('contract delta failure'),
+      );
+      try {
+        await expect(space.write(input)).rejects.toThrow(
+          'contract delta failure',
+        );
+      } finally {
+        await restoreFault();
+      }
+      await expect(space.read()).resolves.toEqual(current);
+      await expect(space.changes.read(THREAD_A)).resolves.toEqual([existing]);
+      await expect(readJournal()).resolves.toEqual([]);
+
+      // The request then applies once; repeating it adds nothing further.
+      const applied = await space.write(input);
+      expect(applied).toMatchObject({ ok: true });
+      const stored = await space.changes.read(THREAD_A);
+      expect(stored).toHaveLength(2);
+      await expect(space.write(input)).resolves.toMatchObject({
+        ok: false,
+        reason: 'result-exists',
+      });
+      await expect(space.changes.read(THREAD_A)).resolves.toEqual(stored);
+      await expect(readJournal()).resolves.toHaveLength(1);
+    });
+
+    it('refuses malformed Review input before writing anything', async () => {
+      const { space, missing } = await open();
+      const current = await requireRecord(space);
+
+      await expect(
+        space.write(
+          writeInput(current, {
+            reviews: [{ threadId: '../escape', records: [review('r')] }],
+          }),
+        ),
+      ).rejects.toThrow();
+      await expect(
+        missing.write({
+          expectedVersion: 0,
+          nextRecord: {
+            canvasId: missing.canvasId,
+            title: 'Missing',
+            version: 1,
+            state: { nodes: [], edges: [] },
+            createdAt: 1,
+            updatedAt: 1,
+          },
+          nodeMutations: [],
+          allowCreate: true,
+          reviews: [{ threadId: THREAD_A, records: [review('r')] }],
+        }),
+      ).rejects.toThrow('implicit create');
+      await expect(space.read()).resolves.toEqual(current);
+      await expect(missing.read()).resolves.toBeNull();
     });
   });
 }

@@ -19,8 +19,11 @@ import { fileURLToPath } from 'node:url';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { extractCanvasChanges } from '@huabu/shared/canvas-engine';
+
 import { refreshCanvasDirIndex } from './canvas-dirs.js';
 import {
+  changesPath,
   nodesDir,
   saveDir,
   saveHeadPath,
@@ -45,6 +48,10 @@ import type {
 } from '../../../canvas/persistence-types.js';
 import type { SaveResult } from '../../ports/save.js';
 import type { SpaceWriteInput } from '../../ports/structured.js';
+import type {
+  CanvasChangeRecord,
+  CanvasNode,
+} from '@huabu/shared/canvas-engine';
 
 const CANVAS = 'disk-save-space';
 const OPERATION = '0b6f3c52-7d1e-4c7a-9f3b-2a6f0e9d4c11';
@@ -59,6 +66,25 @@ function resultFor(
     digest: 'a'.repeat(64),
     response,
   };
+}
+
+const THREAD = 'thread-save';
+
+/** A real Review record; a hand-rolled one would be coalesced away. */
+function reviewRecord(nodeId: string): CanvasChangeRecord {
+  const [record] = extractCanvasChanges([
+    {
+      type: 'INSERT_NODE',
+      node: {
+        id: nodeId,
+        type: 'note',
+        position: { x: 0, y: 0 },
+        data: { label: nodeId, content: 'body' },
+      } as CanvasNode,
+    },
+  ]);
+  if (!record) throw new Error('No Review record was produced');
+  return record;
 }
 
 function operationId(index: number): string {
@@ -404,6 +430,148 @@ describe('Disk reliable save', () => {
       save.lookup(resultFor(operationId(4)).key),
     ).resolves.not.toBeNull();
     expect(statSync(directory).isDirectory()).toBe(true);
+  });
+
+  // ─── Review records ───────────────────────────────────────────────────────
+
+  /** `batch()` that also folds one Review record into THREAD's list. */
+  async function reviewedBatch(): Promise<{
+    input: SpaceWriteInput;
+    existing: CanvasChangeRecord[];
+    merged: CanvasChangeRecord[];
+  }> {
+    const existing = await store
+      .space(CANVAS)
+      .changes.append(THREAD, [reviewRecord('reviewed-earlier')]);
+    const added = reviewRecord('batch-node');
+    return {
+      input: {
+        ...(await batch(resultFor(OPERATION, { nodeIds: ['batch-node'] }))),
+        reviews: [{ threadId: THREAD, records: [added] }],
+      },
+      existing,
+      merged: [...existing, added],
+    };
+  }
+
+  it.each<[DiskSaveStage, boolean]>([
+    ['pending', false],
+    ['sidecars', false],
+    ['record', true],
+    ['delta', true],
+    ['reviews', true],
+    ['head', true],
+    ['result', true],
+  ])(
+    'keeps Review records with the write when the process dies at %s',
+    async (stage, committed) => {
+      await store.space(CANVAS).save.stamps();
+      const before = await current();
+      const { input, existing, merged } = await reviewedBatch();
+
+      const child = spawnSync(
+        process.execPath,
+        [
+          '--import',
+          'tsx',
+          fileURLToPath(
+            new URL('./space-save.crash-fixture.ts', import.meta.url),
+          ),
+          root,
+          CANVAS,
+          JSON.stringify(input),
+          stage,
+        ],
+        { encoding: 'utf8', timeout: 20000 },
+      );
+      expect(child.signal, child.stderr).toBe('SIGKILL');
+      resetStorageCache();
+      refreshCanvasDirIndex();
+      const recovered = new DiskStructuredStore().space(CANVAS);
+      expect(existsSync(savePendingPath(CANVAS))).toBe(true);
+
+      // Reading the list is enough to finish what the dead writer started:
+      // the record and the Review records are never seen apart.
+      await expect(recovered.changes.read(THREAD)).resolves.toEqual(
+        committed ? merged : existing,
+      );
+      expect(existsSync(savePendingPath(CANVAS))).toBe(false);
+      await expect(recovered.read()).resolves.toEqual(
+        committed ? input.nextRecord : before,
+      );
+
+      // The retry is answered or applied; either way the record is there once.
+      const retried = await recovered.write(input);
+      expect(retried).toMatchObject(
+        committed ? { ok: false, reason: 'result-exists' } : { ok: true },
+      );
+      await expect(recovered.changes.read(THREAD)).resolves.toEqual(merged);
+    },
+    30000,
+  );
+
+  it('does not let a finished intent overwrite a later Review decision', async () => {
+    const { input, merged } = await reviewedBatch();
+    const child = spawnSync(
+      process.execPath,
+      [
+        '--import',
+        'tsx',
+        fileURLToPath(
+          new URL('./space-save.crash-fixture.ts', import.meta.url),
+        ),
+        root,
+        CANVAS,
+        JSON.stringify(input),
+        'result',
+      ],
+      { encoding: 'utf8', timeout: 20000 },
+    );
+    expect(child.signal, child.stderr).toBe('SIGKILL');
+    resetStorageCache();
+    refreshCanvasDirIndex();
+    const recovered = new DiskStructuredStore().space(CANVAS);
+
+    // The user accepts one change before anything else touches the Space.
+    const accepted = merged[0] as CanvasChangeRecord;
+    await expect(
+      recovered.changes.delete(THREAD, accepted.id),
+    ).resolves.toEqual(accepted);
+    await recovered.save.lookup((input.result as SaveResult).key);
+    await expect(recovered.changes.read(THREAD)).resolves.toEqual(
+      merged.slice(1),
+    );
+  });
+
+  it('puts Review lists back when the write fails after storing them', async () => {
+    const space = store.space(CANVAS);
+    await space.save.stamps();
+    const before = await current();
+    const { input, existing } = await reviewedBatch();
+    const untouched = await batch();
+    const write = createDiskSpaceWrite(getCanvasStore(CANVAS), {
+      onStage: (stage: DiskSaveStage) => {
+        if (stage === 'reviews') throw new Error('failed after the reviews');
+      },
+    });
+
+    // With a result record, and without one: the in-process rollback alone.
+    for (const attempt of [input, { ...input, result: undefined }]) {
+      await expect(write(attempt)).rejects.toThrow('failed after the reviews');
+      await expect(space.read()).resolves.toEqual(before);
+      await expect(space.changes.read(THREAD)).resolves.toEqual(existing);
+      expect(journal()).toEqual([]);
+    }
+    // A thread that had no list is left with none.
+    await expect(
+      write({
+        ...untouched,
+        result: undefined,
+        reviews: [{ threadId: 'thread-new', records: [reviewRecord('n')] }],
+      }),
+    ).rejects.toThrow('failed after the reviews');
+    await expect(space.changes.read('thread-new')).resolves.toEqual([]);
+    expect(existsSync(changesPath(CANVAS, 'thread-new'))).toBe(false);
   });
 
   it.each<[DiskSaveStage, boolean]>([

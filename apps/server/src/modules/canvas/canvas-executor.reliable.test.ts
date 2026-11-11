@@ -34,6 +34,7 @@ import {
 } from './canvas-executor.js';
 import { subscribeCanvasUpdates } from './canvas-sync.js';
 import { importForeignNodeSources } from './import-node-src.js';
+import { setAgentChangeReviewConfig } from '../agent/change-review-config.js';
 import { getCanvasStore, space } from '../storage/index.js';
 import { setWorkspacePath } from '../workspace.js';
 
@@ -54,6 +55,8 @@ const faults = vi.hoisted(() => ({
     | null
     | ((real: (input: never) => Promise<unknown>, input: never) => unknown),
   lookup: null as null | ((real: () => Promise<unknown>) => unknown),
+  /** Calls to `changes.append`; the executor must not make any. */
+  appends: 0,
 }));
 
 vi.mock('../storage/index.js', async (importOriginal) => {
@@ -80,6 +83,16 @@ vi.mock('../storage/index.js', async (importOriginal) => {
                   : save.record(input),
               lookup: (key: never) =>
                 lookup ? lookup(() => save.lookup(key)) : save.lookup(key),
+            };
+          }
+          if (property === 'changes') {
+            const changes = target.changes;
+            return {
+              ...changes,
+              append: (threadId: string, records: never) => {
+                faults.appends += 1;
+                return changes.append(threadId, records);
+              },
             };
           }
           return Reflect.get(target, property, receiver);
@@ -114,12 +127,14 @@ beforeEach(() => {
   faults.write = null;
   faults.lookup = null;
   faults.record = null;
+  faults.appends = 0;
   vi.mocked(importForeignNodeSources).mockClear();
   events = [];
   unsubscribe = subscribeCanvasUpdates(CANVAS, (event) => events.push(event));
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   unsubscribe();
   if (originalDataDir === undefined) {
     delete process.env.HUABU_DATA_DIR;
@@ -900,5 +915,123 @@ describe('read version', () => {
     );
 
     expect(out.results).toMatchObject([{ applied: true }]);
+  });
+});
+
+describe('Review records', () => {
+  const THREAD = 'thread-review';
+  const REVIEWED = {
+    originator: { source: 'agent', threadId: THREAD },
+    computeChanges: true,
+  } satisfies Partial<ExecuteOnServerInput>;
+
+  const storedChanges = () => space(CANVAS).changes.read(THREAD);
+  const broadcastChanges = () =>
+    events.map((event) =>
+      event.type === 'update' ? event.data.changes : undefined,
+    );
+
+  it('stores them in the write itself and broadcasts the stored list', async () => {
+    seed();
+
+    const first = await run(cmds(createNote('One')), REVIEWED);
+    const second = await run(cmds(createNote('Two')), {
+      ...REVIEWED,
+      request: requestOf(),
+    });
+
+    // Nothing but the write stored them.
+    expect(faults.appends).toBe(0);
+    // The response carries the records of its own batch...
+    expect(first.changes).toHaveLength(1);
+    expect(second.changes).toHaveLength(1);
+    // ...the thread holds both, and each broadcast is the list as stored.
+    const stored = await storedChanges();
+    expect(stored).toEqual([
+      ...(first.changes ?? []),
+      ...(second.changes ?? []),
+    ]);
+    expect(broadcastChanges()).toEqual([first.changes, stored]);
+    expect(events[1]).toMatchObject({ data: { threadId: THREAD } });
+  });
+
+  it.each(['with', 'without'] as const)(
+    'leaves neither state nor Review records when storage fails (%s a request id)',
+    async (mode) => {
+      seed();
+      vi.spyOn(
+        getCanvasStore(CANVAS),
+        'appendDeltaLogEntry',
+      ).mockImplementation(() => {
+        throw new Error('disk full');
+      });
+
+      await expect(
+        run(cmds(createNote('New')), {
+          ...REVIEWED,
+          ...(mode === 'with' ? { request: requestOf() } : {}),
+        }),
+      ).rejects.toThrow('disk full');
+
+      expect(await versionNow()).toBe(1);
+      expect(await nodesNow()).toHaveLength(5);
+      expect(await storedChanges()).toEqual([]);
+      expect(events).toHaveLength(0);
+    },
+  );
+
+  it('does not store them a second time when the request is replayed', async () => {
+    seed();
+    const input = { ...REVIEWED, request: requestOf() };
+
+    const first = await run(cmds(createNote('New')), input);
+    const second = await run(cmds(createNote('New')), input);
+
+    expect(second).toEqual({ ...first, replayed: true });
+    expect(await storedChanges()).toEqual(first.changes);
+    expect(events).toHaveLength(1);
+  });
+
+  it('broadcasts the stored list when the write landed but its reply was lost', async () => {
+    seed();
+    await run(cmds(createNote('Earlier')), REVIEWED);
+    faults.write = async (real, input) => {
+      await real(input);
+      throw new Error('reply lost');
+    };
+
+    const output = await run(cmds(createNote('New')), {
+      ...REVIEWED,
+      request: requestOf(),
+    });
+    faults.write = null;
+
+    const stored = await storedChanges();
+    expect(stored).toHaveLength(2);
+    expect(output.changes).toHaveLength(1);
+    expect(broadcastChanges()[1]).toEqual(stored);
+  });
+
+  it('stores none when Space changes are accepted automatically', async () => {
+    seed();
+    setAgentChangeReviewConfig({ autoAcceptSpaceChanges: true });
+
+    const output = await run(cmds(createNote('New')), {
+      ...REVIEWED,
+      request: requestOf(),
+    });
+
+    expect(output.toVersion).toBe(2);
+    expect(output.changes).toBeUndefined();
+    expect(await storedChanges()).toEqual([]);
+    expect(broadcastChanges()).toEqual([undefined]);
+  });
+
+  it('stores none for a batch that asked for no Review records', async () => {
+    seed();
+    await run(cmds(createNote('New')), {
+      originator: { source: 'agent', threadId: THREAD },
+    });
+    expect(await storedChanges()).toEqual([]);
   });
 });

@@ -649,6 +649,13 @@ export interface ExecuteOnServerInput {
   basis?: string;
   /** Return the read version of the state this call leaves behind. */
   issueBasis?: boolean;
+  /**
+   * The thread id exactly as the caller sent it, when the entry point
+   * checked it and `originator.threadId` holds only what survived the check.
+   * Used to recognise a repeated request: a retry must match the original
+   * even if the thread stopped belonging to the Space in between.
+   */
+  claimedThreadId?: string;
 }
 
 export interface ExecuteOnServerOutput {
@@ -779,7 +786,7 @@ function reliableRequestOf(input: ExecuteOnServerInput): ReliableRequest {
       commands: input.commands,
       basis: input.basis ?? null,
       source: input.originator.source,
-      threadId: input.originator.threadId ?? null,
+      threadId: input.claimedThreadId ?? input.originator.threadId ?? null,
     }),
   };
 }
@@ -1599,15 +1606,16 @@ async function executePreparedOnServerAlreadyLocked(
     ...envelope(toVersion),
   });
 
-  // With a request id the response is part of the commit, so it has to be
-  // complete before the write. Without one it is assembled afterwards, as
-  // it always was.
-  let changes: CanvasChangeRecord[] | undefined;
-  let result: SaveResult | null = null;
-  if (request) {
-    changes = deriveChanges();
-    result = saveResultFor(canvasId, request, outputWith(changes));
-  }
+  // Review records are part of the commit, and with a request id so is the
+  // response, so both are complete before the write.
+  const changes = deriveChanges();
+  const reviewThreadId =
+    originator.threadId && changes && changes.length > 0
+      ? originator.threadId
+      : undefined;
+  const result = request
+    ? saveResultFor(canvasId, request, outputWith(changes))
+    : null;
 
   let write: Awaited<ReturnType<SpaceHandle['write']>>;
   try {
@@ -1617,6 +1625,9 @@ async function executePreparedOnServerAlreadyLocked(
       nodeMutations,
       delta: logEntry,
       ...(result ? { result } : {}),
+      ...(reviewThreadId && changes
+        ? { reviews: [{ threadId: reviewThreadId, records: changes }] }
+        : {}),
     });
   } catch (error) {
     if (!request || !result) throw error;
@@ -1638,27 +1649,21 @@ async function executePreparedOnServerAlreadyLocked(
     );
   }
 
-  if (!request) changes = deriveChanges();
-
-  // Broadcast the delta to live frontends and persist review records to
-  // the originating thread's sidecar. Every accepted write broadcasts —
-  // the initiating tab applies it from the sync stream, not the tool
-  // result. No-op fast path above already returned for empty diffs.
+  // Broadcast the delta to live frontends. Every accepted write broadcasts —
+  // the initiating tab applies it from the sync stream, not the tool result.
+  // No-op fast path above already returned for empty diffs.
   //
-  // When attributed to a thread, fold this batch's records into the
-  // thread's coalesced change list (one net record per entity) and
-  // broadcast that full list so live cards replace their state with it —
-  // matching what GET /changes returns.
+  // When attributed to a thread, this batch's records were folded into the
+  // thread's coalesced change list (one net record per entity) by the write
+  // itself; broadcast that full list so live cards replace their state with
+  // it — matching what GET /changes returns.
   let broadcastChanges = changes;
-  if (originator.threadId && changes && changes.length > 0) {
-    try {
-      broadcastChanges = await handle.changes.append(
-        originator.threadId,
-        changes,
-      );
-    } catch {
-      /* sidecar persistence is best-effort — never fail the write */
-    }
+  if (reviewThreadId) {
+    broadcastChanges =
+      write.reviews?.[reviewThreadId] ??
+      // Only a commit whose acknowledgement was lost reports no list: the
+      // records are stored, so the list is read back.
+      (await handle.changes.read(reviewThreadId).catch(() => changes));
   }
   if (input.publish !== false) {
     publishCanvasUpdate(canvasId, {

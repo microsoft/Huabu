@@ -504,6 +504,203 @@ describe('GET /api/rfs/:canvasId/execute/:operationId', () => {
   });
 });
 
+describe('GET /api/rfs/:canvasId/execute/:operationId for another entry point', () => {
+  it('reports a result stored by the canvas route as not found', async () => {
+    seed();
+    const app = await buildApp();
+    try {
+      // Same principal, but commands outside the agent vocabulary: the
+      // stored response has no RFS form.
+      const viaCanvas = await app.inject({
+        method: 'POST',
+        url: '/canvas/c1/execute',
+        headers: ALICE,
+        payload: {
+          originator: { source: 'ui' },
+          operationId: OP_1,
+          commands: [
+            {
+              type: 'CREATE_NODES',
+              nodes: [
+                {
+                  id: 'node-ui',
+                  type: 'note',
+                  position: { x: 900, y: 0 },
+                  data: { label: 'UI' },
+                },
+              ],
+            },
+          ],
+        },
+      });
+      expect(viaCanvas.statusCode).toBe(200);
+      expect(viaCanvas.json()).toMatchObject({ operationId: OP_1 });
+
+      const lookup = await app.inject({
+        method: 'GET',
+        url: `/rfs/c1/execute/${OP_1}`,
+        headers: ALICE,
+      });
+      expect(lookup.statusCode).toBe(404);
+      expect(lookup.json()).toMatchObject({ code: 'operation_not_found' });
+    } finally {
+      await app.close();
+    }
+  });
+});
+
+describe('Review attribution', () => {
+  const THREAD = 'thread-here';
+  const ELSEWHERE = 'thread-elsewhere';
+
+  /** Give `canvasId` an Agent Node whose conversation is `threadId`. */
+  function seedAgentNode(canvasId: string, threadId: string): void {
+    const store = getCanvasStore(canvasId);
+    const record = store.read() ?? {
+      canvasId,
+      title: null,
+      version: 1,
+      state: { nodes: [], edges: [] },
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    const nodeId = `agent-${threadId}`;
+    store.write({
+      ...record,
+      state: {
+        ...record.state,
+        nodes: [
+          ...record.state.nodes,
+          {
+            id: nodeId,
+            type: 'question',
+            position: { x: 0, y: 900 },
+            data: { threadId },
+          },
+        ],
+      },
+    });
+    store.writeNode(nodeId, {
+      nodeId,
+      type: 'question',
+      label: null,
+      content: '',
+    });
+  }
+
+  const changesOf = (canvasId: string, threadId: string) =>
+    getCanvasStore(canvasId).readChanges(threadId);
+
+  function seedBoth(): void {
+    seed();
+    seedAgentNode('c1', THREAD);
+    seedAgentNode('c2', ELSEWHERE);
+  }
+
+  it('attributes an RFS execute to a thread of this Space', async () => {
+    seedBoth();
+    const app = await buildApp();
+    try {
+      const response = await execute(
+        app,
+        { commands: [createNote('Mine')] },
+        { ...ALICE, 'x-huabu-host-thread-id': THREAD },
+      );
+      expect(response.statusCode).toBe(200);
+      expect(changesOf('c1', THREAD)).toHaveLength(1);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('applies an RFS execute unattributed when the thread belongs to another Space', async () => {
+    seedBoth();
+    const app = await buildApp();
+    try {
+      const before = nodeCount();
+      const response = await execute(
+        app,
+        { commands: [createNote('Not mine')] },
+        { ...ALICE, 'x-huabu-host-thread-id': ELSEWHERE },
+      );
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({ results: [{ applied: true }] });
+      expect(nodeCount()).toBe(before + 1);
+      // Nothing is filed under the foreign thread, here or where it lives.
+      expect(changesOf('c1', ELSEWHERE)).toEqual([]);
+      expect(changesOf('c2', ELSEWHERE)).toEqual([]);
+      expect(changesOf('c1', THREAD)).toEqual([]);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('still replays a request whose thread has left the Space since', async () => {
+    seedBoth();
+    const app = await buildApp();
+    try {
+      const headers = { ...ALICE, 'x-huabu-host-thread-id': THREAD };
+      const payload = { operationId: OP_1, commands: [createNote('Once')] };
+      const first = await execute(app, payload, headers);
+      expect(first.statusCode).toBe(200);
+      expect(changesOf('c1', THREAD)).toHaveLength(1);
+
+      const removed = await execute(app, {
+        commands: [{ type: 'DELETE_NODES', nodeIds: [`agent-${THREAD}`] }],
+      });
+      expect(removed.json()).toMatchObject({ results: [{ applied: true }] });
+
+      const second = await execute(app, payload, headers);
+      expect(second.statusCode).toBe(200);
+      expect(second.json()).toEqual({ ...first.json(), replayed: true });
+      expect(changesOf('c1', THREAD)).toHaveLength(1);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('applies the same check to the thread id in a canvas execute body', async () => {
+    seedBoth();
+    const app = await buildApp();
+    try {
+      const post = (threadId: string, id: string) =>
+        app.inject({
+          method: 'POST',
+          url: '/canvas/c1/execute',
+          headers: ALICE,
+          payload: {
+            originator: { source: 'agent', threadId },
+            commands: [
+              {
+                type: 'CREATE_NODES',
+                nodes: [
+                  {
+                    id,
+                    nodeType: 'note',
+                    position: { x: 900, y: 0 },
+                    data: { label: id, content: 'body' },
+                  },
+                ],
+              },
+            ],
+          },
+        });
+
+      const foreign = await post(ELSEWHERE, 'node-foreign');
+      expect(foreign.statusCode).toBe(200);
+      expect(foreign.json()).toMatchObject({ toVersion: 2 });
+      expect(changesOf('c1', ELSEWHERE)).toEqual([]);
+
+      const own = await post(THREAD, 'node-own');
+      expect(own.statusCode).toBe(200);
+      expect(own.json()).toMatchObject({ toVersion: 3 });
+      expect(changesOf('c1', THREAD)).toHaveLength(1);
+    } finally {
+      await app.close();
+    }
+  });
+});
+
 describe('basis on RFS reads', () => {
   it('returns the current basis from every query type and tracks writes', async () => {
     seed();

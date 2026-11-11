@@ -1444,6 +1444,33 @@ describe('POST /api/rfs/:canvasId/execute', () => {
 
   it('attributes change-review records to the host thread only when the header is present', async () => {
     seedNote('c1', 'node-1', 'Alpha', 'existing body');
+    // Attribution needs the thread to be a conversation of this Space.
+    {
+      const store = getCanvasStore('c1');
+      const record = store.read();
+      if (!record) throw new Error('Test Space is missing');
+      store.write({
+        ...record,
+        state: {
+          ...record.state,
+          nodes: [
+            ...record.state.nodes,
+            {
+              id: 'node-agent',
+              type: 'question',
+              position: { x: 400, y: 0 },
+              data: { threadId: 'thread-abc' },
+            },
+          ],
+        },
+      });
+      store.writeNode('node-agent', {
+        nodeId: 'node-agent',
+        type: 'question',
+        label: null,
+        content: '',
+      });
+    }
     const app = await buildApp();
     try {
       const payload = {

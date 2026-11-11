@@ -6,6 +6,7 @@
 import {
   existsSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -15,9 +16,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import multipart from '@fastify/multipart';
+import archiver from 'archiver';
 import fastify from 'fastify';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { encodeBasis, parseBasis } from '@huabu/shared';
 import { extractCanvasChanges } from '@huabu/shared/canvas-engine';
 
 vi.mock('../storage/index.js', async (importOriginal) => {
@@ -42,6 +45,7 @@ vi.mock(
   },
 );
 
+import { ExecuteBasisError, executeOnServer } from './canvas-executor.js';
 import { subscribeCanvasUpdates } from './canvas-sync.js';
 import canvasRoutes from './canvas.route.js';
 import { withCanvasMutex } from './write-coordinator.js';
@@ -1607,6 +1611,150 @@ describe('Space export/import persistence', () => {
         await importedSpace.changes.read(String(agent.data.threadId)),
       ).toEqual(storedChanges);
       expect(await space(importedId).artifacts.read('asset.bin')).toEqual(blob);
+    } finally {
+      await app.close();
+    }
+  });
+});
+
+describe('Space export/import and reliable-save state', () => {
+  const OPERATION = '0b6f3c52-7d1e-4c7a-9f3b-2a6f0e9d4c11';
+  const KEY = { principalId: 'user:alice', operationId: OPERATION };
+
+  /** A Space with a stamp baseline and one stored response. */
+  async function seedSavedSpace(): Promise<{ basis: string; saveDir: string }> {
+    createCanvas('c1', 'Saved');
+    const handle = space('c1');
+    const stamps = await handle.save.stamps();
+    const record = await handle.read();
+    if (!stamps || !record) throw new Error('Test Space is missing');
+    const written = await handle.write({
+      expectedVersion: record.version,
+      nextRecord: {
+        ...record,
+        version: record.version + 1,
+        state: {
+          ...record.state,
+          nodes: [
+            { id: 'n1', type: 'note', position: { x: 0, y: 0 }, data: {} },
+          ],
+        },
+      },
+      nodeMutations: [
+        {
+          kind: 'put',
+          nodeId: 'n1',
+          record: { nodeId: 'n1', type: 'note', label: 'n1', content: 'body' },
+          authoritativeInsert: true,
+        },
+      ],
+      result: { key: KEY, digest: 'a'.repeat(64), response: { stored: true } },
+    });
+    expect(written).toEqual({ ok: true });
+    const saveDir = join(handle.diskTree!.directory(), '.history', 'save');
+    expect(existsSync(join(saveDir, 'head.json'))).toBe(true);
+    expect(readdirSync(join(saveDir, 'results'))).toHaveLength(1);
+    return {
+      basis: encodeBasis(stamps.lineage, record.version + 1),
+      saveDir,
+    };
+  }
+
+  async function importBundle(
+    app: Awaited<ReturnType<typeof buildApp>>,
+    bundle: Buffer,
+  ): Promise<string> {
+    const upload = multipartBody('saved.huabu.zip', 'application/zip', bundle);
+    const imported = await app.inject({
+      method: 'POST',
+      url: '/canvas/import',
+      payload: upload.payload,
+      headers: upload.headers,
+    });
+    expect(imported.statusCode).toBe(200);
+    return (imported.json() as { canvasId: string }).canvasId;
+  }
+
+  /** The imported Space is a new Space: nothing of the source's saves. */
+  async function expectFreshSaveState(
+    importedId: string,
+    sourceBasis: string,
+  ): Promise<void> {
+    resetStorageCache();
+    const imported = space(importedId);
+    expect(
+      existsSync(join(imported.diskTree!.directory(), '.history', 'save')),
+    ).toBe(false);
+    await expect(imported.save.lookup(KEY)).resolves.toBeNull();
+    // Its baseline is its own, so a read version of the source is refused.
+    const stamps = await imported.save.stamps();
+    expect(stamps?.lineage).not.toBe(parseBasis(sourceBasis)?.lineage);
+    await expect(
+      executeOnServer({
+        canvasId: importedId,
+        commands: [],
+        originator: { source: 'ui' },
+        basis: sourceBasis,
+      }),
+    ).rejects.toBeInstanceOf(ExecuteBasisError);
+  }
+
+  it.each(['', '?includeHistory=false'])(
+    'leaves stamps and stored responses out of an export (%s)',
+    async (query) => {
+      const { basis } = await seedSavedSpace();
+      const app = await buildApp();
+      try {
+        const exported = await app.inject({
+          method: 'GET',
+          url: `/canvas/c1/export${query}`,
+        });
+        expect(exported.statusCode).toBe(200);
+        // Stored names are plain bytes in a ZIP, compressed or not.
+        expect(exported.rawPayload.includes('.history/save')).toBe(false);
+
+        await expectFreshSaveState(
+          await importBundle(app, exported.rawPayload),
+          basis,
+        );
+        // The source keeps what it had.
+        await expect(space('c1').save.lookup(KEY)).resolves.toMatchObject({
+          response: { stored: true },
+        });
+      } finally {
+        await app.close();
+      }
+    },
+  );
+
+  it('drops save state carried by a bundle that was not made by this export', async () => {
+    const { basis, saveDir } = await seedSavedSpace();
+    // An intent as a crashed writer would leave it, to be sure it is not
+    // carried over and "finished" in the copy.
+    writeFileSync(
+      join(saveDir, 'pending.json'),
+      JSON.stringify({ v: 1, toVersion: 1, result: {}, delta: null }),
+    );
+    const archive = archiver('zip');
+    const chunks: Buffer[] = [];
+    archive.on('data', (chunk: Buffer) => chunks.push(chunk));
+    const finished = new Promise<void>((resolve, reject) => {
+      archive.on('end', resolve);
+      archive.on('error', reject);
+    });
+    archive.append(JSON.stringify({ version: '2', title: 'Saved' }), {
+      name: 'manifest.json',
+    });
+    archive.glob('**/*', { cwd: space('c1').diskTree!.directory(), dot: true });
+    await archive.finalize();
+    await finished;
+    const bundle = Buffer.concat(chunks);
+    expect(bundle.includes('.history/save/head.json')).toBe(true);
+    rmSync(join(saveDir, 'pending.json'));
+
+    const app = await buildApp();
+    try {
+      await expectFreshSaveState(await importBundle(app, bundle), basis);
     } finally {
       await app.close();
     }

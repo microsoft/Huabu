@@ -24,9 +24,10 @@
  * This file may not import a backend implementation.
  */
 
+import { sanitizeId } from '../../../utils/fs.js';
 import { stringifyJson } from '../../../utils/json.js';
 
-import type { SpaceWriteInput } from './structured.js';
+import type { SpaceWriteInput, SpaceWriteReview } from './structured.js';
 
 /** Who asked, and the id they chose for the request. */
 export interface SaveKey {
@@ -193,6 +194,34 @@ export function validateWriteSaveResult(input: SpaceWriteInput): string | null {
     throw new Error('A result record cannot accompany an implicit create');
   }
   return validateSaveResult(input.result);
+}
+
+/**
+ * Validate the Review records carried by a write, if any.
+ *
+ * Shared so every backend refuses the same input before it touches anything:
+ * a thread id that could not name a list, or records that are not plain JSON.
+ *
+ * @returns the entries to store; empty when the write carries none.
+ */
+export function validateWriteReviews(
+  input: SpaceWriteInput,
+): readonly SpaceWriteReview[] {
+  if (input.reviews === undefined || input.reviews.length === 0) return [];
+  if (input.allowCreate === true) {
+    throw new Error('Review records cannot accompany an implicit create');
+  }
+  for (const review of input.reviews) {
+    sanitizeId(review.threadId, 'threadId');
+    if (!Array.isArray(review.records)) {
+      throw new TypeError('Review records must be an array');
+    }
+    stringifyJson(
+      review.records,
+      `Changes for thread ${JSON.stringify(review.threadId)}`,
+    );
+  }
+  return input.reviews;
 }
 
 /** Request ids compare case-insensitively, the way UUIDs do. */

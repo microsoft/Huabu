@@ -101,6 +101,7 @@ import {
 } from './space-capabilities.js';
 import {
   executeRfsCommands,
+  NotAnRfsExecuteResultError,
   lookupRfsExecuteResponse,
 } from './space-execute.js';
 import { safeJoin } from '../../utils/fs.js';
@@ -844,12 +845,15 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
       // Best-effort change attribution: when the agent forwards its
       // injected `HUABU_THREAD_ID` via `X-Huabu-Host-Thread-Id`, tag the
       // batch to that host conversation so its change-review card fills.
-      // Absent / malformed → the write still applies, just unattributed.
+      // Absent / malformed / not a thread of this Space → the write still
+      // applies, just unattributed.
       const headerFields = rfsExecuteHeadersSchema.shape;
       const parsedThread = headerFields['x-huabu-host-thread-id'].safeParse(
         request.headers['x-huabu-host-thread-id'],
       );
-      const hostThreadId = parsedThread.success ? parsedThread.data : undefined;
+      const claimedThreadId = parsedThread.success
+        ? parsedThread.data
+        : undefined;
 
       // The request id and read version may travel in a header so a client
       // can forward the body bytes untouched. Unlike attribution they change
@@ -903,6 +907,16 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
       }
 
       try {
+        // Known limitation: every machine-token caller is one principal, so
+        // this checks the thread is in this Space, not that the caller is it.
+        const hostThreadId =
+          claimedThreadId !== undefined &&
+          (await agentThreadService.ownsThread(
+            params.data.canvasId,
+            claimedThreadId,
+          ))
+            ? claimedThreadId
+            : undefined;
         return reply.send(
           await executeRfsCommands(
             params.data.canvasId,
@@ -911,7 +925,7 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
               ...(operationId !== undefined ? { operationId } : {}),
               ...(basis !== undefined ? { basis } : {}),
             },
-            { hostThreadId, principalId },
+            { hostThreadId, claimedThreadId, principalId },
           ),
         );
       } catch (error) {
@@ -1005,6 +1019,9 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
         });
         return stored ? reply.send(stored) : notFound();
       } catch (error) {
+        // Stored, but not by an RFS execute (the canvas route keeps results
+        // under the same principal): for this endpoint there is no result.
+        if (error instanceof NotAnRfsExecuteResultError) return notFound();
         request.log.error(
           { err: error, canvasId: params.data.canvasId },
           'rfs stored execute result lookup failed',

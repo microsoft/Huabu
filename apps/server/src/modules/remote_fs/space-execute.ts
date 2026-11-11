@@ -93,7 +93,10 @@ function collectDeltaIds(
 }
 
 export interface ExecuteRfsOptions {
+  /** Thread to attribute Review records to; the caller has verified it. */
   hostThreadId?: string;
+  /** The thread id as the caller sent it, verified or not. */
+  claimedThreadId?: string;
   /**
    * The authenticated caller. Required for `request.operationId` to take
    * effect: the stored response is kept per (principal, request id).
@@ -120,15 +123,16 @@ export async function executeRfsCommands(
     }),
     // Authorship stays server-owned (`source: 'agent'`); the caller only
     // correlates which host conversation the write belongs to via the
-    // `X-Huabu-Host-Thread-Id` header. When present, attribute the batch's
-    // change-review records to that thread (persist to its sidecar +
-    // broadcast) exactly like the built-in agent path.
+    // `X-Huabu-Host-Thread-Id` header. When the route found that thread in
+    // this Space, attribute the batch's change-review records to it (stored
+    // in the same commit + broadcast) exactly like the built-in agent path.
     originator: {
       source: 'agent',
       ...(hostThreadId ? { threadId: hostThreadId } : {}),
     },
     runId,
     ...(hostThreadId ? { computeChanges: true } : {}),
+    ...(opts?.claimedThreadId ? { claimedThreadId: opts.claimedThreadId } : {}),
     ...(request.operationId !== undefined && opts?.principalId
       ? {
           request: {
@@ -143,9 +147,21 @@ export async function executeRfsCommands(
   return projectRfsExecuteResponse(output, runId);
 }
 
+/** A stored result exists, but it is not the result of an RFS execute. */
+export class NotAnRfsExecuteResultError extends Error {
+  constructor(operationId: string, cause: unknown) {
+    super(`Result ${operationId} was not stored by an RFS execute`, { cause });
+    this.name = 'NotAnRfsExecuteResultError';
+  }
+}
+
 /**
  * The stored response of an earlier request, exactly as a repeat of that
  * request would be answered, or null when nothing is stored under the id.
+ *
+ * @throws NotAnRfsExecuteResultError when the stored result cannot be
+ *   expressed as an RFS execute response — it was saved through another entry
+ *   point, with commands outside the agent vocabulary.
  */
 export async function lookupRfsExecuteResponse(
   canvasId: string,
@@ -155,7 +171,14 @@ export async function lookupRfsExecuteResponse(
   if (!stored) return null;
   const output = stored.response as ExecuteOnServerOutput;
   if (typeof output.runId !== 'string') return null;
-  return projectRfsExecuteResponse({ ...output, replayed: true }, output.runId);
+  try {
+    return projectRfsExecuteResponse(
+      { ...output, replayed: true },
+      output.runId,
+    );
+  } catch (error) {
+    throw new NotAnRfsExecuteResultError(key.operationId, error);
+  }
 }
 
 /**

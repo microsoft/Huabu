@@ -347,7 +347,14 @@ export type SpaceSubstrate =
 // ─── The ordered Space write ─────────────────────────────────────────────────
 
 export type SpaceWriteResult =
-  | { ok: true }
+  | {
+      ok: true;
+      /**
+       * The stored Review list of each thread named in `input.reviews`, after
+       * coalescing — exactly what `changes.read` now returns for it.
+       */
+      reviews?: Record<string, CanvasChangeRecord[]>;
+    }
   | { ok: false; reason: 'not-found' }
   | { ok: false; reason: 'version-conflict'; actualVersion: number }
   /**
@@ -430,6 +437,23 @@ export interface SpaceWriteInput {
    * across process termination. Not valid together with `allowCreate`.
    */
   readonly result?: SaveResult;
+  /**
+   * Review records to fold into their threads' pending lists in the same
+   * commit as this write.
+   *
+   * Coalesced with what each thread already holds, exactly as
+   * {@link SpaceChanges.append} does, and returned in the result. They land
+   * with the record or not at all: a rejected write, a write answered from a
+   * stored result, and a failed write all leave every list untouched. Not
+   * valid together with `allowCreate`.
+   */
+  readonly reviews?: readonly SpaceWriteReview[];
+}
+
+/** One thread's new Review records, carried by a {@link SpaceWriteInput}. */
+export interface SpaceWriteReview {
+  readonly threadId: string;
+  readonly records: readonly CanvasChangeRecord[];
 }
 
 // ─── History ────────────────────────────────────────────────────────────────

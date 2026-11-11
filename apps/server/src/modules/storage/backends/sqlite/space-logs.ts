@@ -23,6 +23,7 @@ import type {
   SpaceChanges,
   SpaceEvents,
 } from '../../ports/structured.js';
+import type { DatabaseSync } from 'node:sqlite';
 
 function requireSpace(
   context: SqliteStoreContext,
@@ -35,6 +36,50 @@ function requireSpace(
       `SQLite Space logs(${canvasId}) cannot mutate a missing Space`,
     );
   }
+}
+
+/**
+ * Fold `records` into one thread's coalesced Review list, inside the caller's
+ * transaction, and return the list as stored.
+ *
+ * The one place the list is read, coalesced and replaced: `changes.append`
+ * runs it in a transaction of its own, the Space write runs it in the
+ * transaction that also replaces the record. The caller has validated the
+ * thread id and that the Space exists.
+ */
+export function appendSqliteChangesInTransaction(
+  database: DatabaseSync,
+  canvasId: string,
+  threadId: string,
+  records: readonly CanvasChangeRecord[],
+): CanvasChangeRecord[] {
+  if (!database.isTransaction)
+    throw new Error('Appending changes requires a transaction');
+  const current = database
+    .prepare(
+      `SELECT snapshot_json
+       FROM changes
+       WHERE canvas_id = ? AND thread_id = ?`,
+    )
+    .get(canvasId, threadId);
+  const existing =
+    current === undefined
+      ? []
+      : decodeChanges(current['snapshot_json'], canvasId, threadId);
+  const merged = coalesceChanges([...existing, ...records]);
+  database
+    .prepare(
+      `INSERT INTO changes (canvas_id, thread_id, snapshot_json)
+       VALUES (?, ?, ?)
+       ON CONFLICT(canvas_id, thread_id) DO UPDATE SET
+         snapshot_json = excluded.snapshot_json`,
+    )
+    .run(
+      canvasId,
+      threadId,
+      stringifyJson(merged, `Changes for thread ${threadId}`),
+    );
+  return merged;
 }
 
 export interface SqliteSpaceLogs {
@@ -122,33 +167,14 @@ class SqliteSpaceLogCoordinator {
     stringifyJson(records, `Changes for thread ${JSON.stringify(threadId)}`);
     requireSpace(this.#context, this.#workspace(), this.#canvasId);
     const database = this.#context.database();
-    return withImmediateTransaction(database, () => {
-      const current = database
-        .prepare(
-          `SELECT snapshot_json
-           FROM changes
-           WHERE canvas_id = ? AND thread_id = ?`,
-        )
-        .get(this.#canvasId, threadId);
-      const existing =
-        current === undefined
-          ? []
-          : decodeChanges(current['snapshot_json'], this.#canvasId, threadId);
-      const merged = coalesceChanges([...existing, ...records]);
-      database
-        .prepare(
-          `INSERT INTO changes (canvas_id, thread_id, snapshot_json)
-           VALUES (?, ?, ?)
-           ON CONFLICT(canvas_id, thread_id) DO UPDATE SET
-             snapshot_json = excluded.snapshot_json`,
-        )
-        .run(
-          this.#canvasId,
-          threadId,
-          stringifyJson(merged, `Changes for thread ${threadId}`),
-        );
-      return merged;
-    });
+    return withImmediateTransaction(database, () =>
+      appendSqliteChangesInTransaction(
+        database,
+        this.#canvasId,
+        threadId,
+        records,
+      ),
+    );
   }
 
   async deleteChange(

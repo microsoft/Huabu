@@ -6,6 +6,8 @@ import { fileURLToPath } from 'node:url';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { extractCanvasChanges } from '@huabu/shared/canvas-engine';
+
 import {
   openSqliteTestStore,
   readSqliteDeltaLog,
@@ -21,10 +23,32 @@ import type {
 } from '../../../canvas/persistence-types.js';
 import type { SaveResult } from '../../ports/save.js';
 import type { SpaceWriteInput } from '../../ports/structured.js';
+import type {
+  CanvasChangeRecord,
+  CanvasNode,
+} from '@huabu/shared/canvas-engine';
 
 const CANVAS = 'sqlite-save-space';
 const OPERATION = '0b6f3c52-7d1e-4c7a-9f3b-2a6f0e9d4c11';
 const DAY_MS = 24 * 60 * 60 * 1000;
+const THREAD = 'thread-save';
+
+/** A real Review record; a hand-rolled one would be coalesced away. */
+function reviewRecord(nodeId: string): CanvasChangeRecord {
+  const [record] = extractCanvasChanges([
+    {
+      type: 'INSERT_NODE',
+      node: {
+        id: nodeId,
+        type: 'note',
+        position: { x: 0, y: 0 },
+        data: { label: nodeId, content: 'body' },
+      } as CanvasNode,
+    },
+  ]);
+  if (!record) throw new Error('No Review record was produced');
+  return record;
+}
 
 function resultFor(
   operationId = OPERATION,
@@ -265,6 +289,7 @@ describe('SQLite reliable save', () => {
     'state',
     'delta',
     'stamps',
+    'reviews',
     'result',
     'committed-before-reply',
   ])(
@@ -276,6 +301,12 @@ describe('SQLite reliable save', () => {
       const baseline = await space.save.stamps();
       const next = bump(record, [{ id: 'crash-node', type: 'note' }]);
       const result = resultFor(OPERATION, { nodeIds: ['crash-node'] });
+      // The thread already holds a list, so the write updates a row.
+      const existing = await space.changes.append(THREAD, [
+        reviewRecord('reviewed-earlier'),
+      ]);
+      const added = reviewRecord('crash-node');
+      const merged = [...existing, added];
       const input: SpaceWriteInput = {
         expectedVersion: record.version,
         nextRecord: next,
@@ -284,6 +315,7 @@ describe('SQLite reliable save', () => {
         ],
         delta: deltaFor(next.version),
         result,
+        reviews: [{ threadId: THREAD, records: [added] }],
       };
 
       const child = spawnSync(
@@ -315,6 +347,9 @@ describe('SQLite reliable save', () => {
         committed ? stored : null,
       );
       expect(Boolean(await space.nodes.read('crash-node'))).toBe(committed);
+      await expect(space.changes.read(THREAD)).resolves.toEqual(
+        committed ? merged : existing,
+      );
       expect(readSqliteDeltaLog(h.filename, CANVAS)).toEqual(
         committed ? [input.delta] : [],
       );
@@ -332,8 +367,9 @@ describe('SQLite reliable save', () => {
       await expect(space.write(input)).resolves.toEqual(
         committed
           ? { ok: false, reason: 'result-exists', stored }
-          : { ok: true },
+          : { ok: true, reviews: { [THREAD]: merged } },
       );
+      await expect(space.changes.read(THREAD)).resolves.toEqual(merged);
       await expect(space.read()).resolves.toEqual(next);
       await expect(space.save.lookup(result.key)).resolves.toEqual(stored);
       expect(readSqliteDeltaLog(h.filename, CANVAS)).toEqual([input.delta]);

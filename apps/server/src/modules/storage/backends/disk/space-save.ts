@@ -9,16 +9,18 @@
  *
  *   1. `pending.json` is written durably. It holds everything needed to
  *      finish the write's bookkeeping without the process that started it:
- *      the result record, the delta row and the advanced stamps.
+ *      the result record, the delta row, the advanced stamps and the Review
+ *      lists the write leaves behind.
  *   2. The legacy writer runs unchanged: sidecars, `space.json`, delta row;
- *      `head.json` (the stamps) is written last, inside the same rollback
- *      scope.
+ *      then the Review lists, and `head.json` (the stamps) last, inside the
+ *      same rollback scope.
  *   3. The result file is written, then `pending.json` is removed.
  *
  * `space.json` is replaced atomically and carries the version, so it is the
  * commit point. {@link DiskSpaceSaveState.recoverPending} reads it to decide:
  * at or past the intent's target version the write happened, and whatever
- * bookkeeping is missing — delta row, stamps, result — is completed; below it
+ * bookkeeping is missing — delta row, stamps, Review lists, result — is
+ * completed; below it
  * the write did not happen and the intent is dropped. Recovery runs before
  * every write and every `save` call, is idempotent, and costs one `stat` when
  * the Space has never used this feature.
@@ -61,6 +63,7 @@ import {
   savePendingPath,
   saveResultsDir,
 } from './layout.js';
+import { writeDiskChanges } from './space-logs.js';
 import { readValidCanvasFile } from './space-record-validation.js';
 import { readDiskSpaceRecord } from './space-record.js';
 import { atomicWriteText } from '../../../../utils/fs.js';
@@ -88,6 +91,7 @@ import type {
   SpaceStamps,
   StoredSaveResult,
 } from '../../ports/save.js';
+import type { CanvasChangeRecord } from '@huabu/shared/canvas-engine';
 
 /** Points in a result-carrying write at which a test may stop the process. */
 export type DiskSaveStage =
@@ -95,6 +99,7 @@ export type DiskSaveStage =
   | 'sidecars'
   | 'record'
   | 'delta'
+  | 'reviews'
   | 'head'
   | 'result';
 
@@ -122,6 +127,13 @@ interface PendingFile {
   readonly delta: DeltaLogEntry | null;
   /** Stamps to install once the write is known to have committed. */
   readonly stamps: SpaceStamps | null;
+  /**
+   * The complete Review list each thread holds once the write has committed,
+   * already coalesced with what was there — so installing it is a replace,
+   * and doing it twice is harmless. Absent in intents written before Review
+   * records were part of the write.
+   */
+  readonly reviews?: Readonly<Record<string, CanvasChangeRecord[]>> | null;
 }
 
 /** A result-carrying write between its intent and its completion. */
@@ -328,6 +340,11 @@ export class DiskSpaceSaveState {
           this.writeHead(pending.stamps);
         }
       }
+      // Every Review reader finishes this intent before it looks, so nothing
+      // can have changed these lists since the write computed them.
+      for (const [threadId, merged] of Object.entries(pending.reviews ?? {})) {
+        writeDiskChanges(this.canvasId, threadId, merged);
+      }
       this.#writeResult(pending.result);
     }
     rmSync(pendingPath, { force: true });
@@ -435,6 +452,7 @@ export class DiskSpaceSaveState {
     toVersion: number;
     delta: DeltaLogEntry | undefined;
     stamps: SpaceStamps | null;
+    reviews: Readonly<Record<string, CanvasChangeRecord[]>> | null;
   }): DiskPendingSave {
     const pending: PendingFile = {
       v: 1,
@@ -447,6 +465,7 @@ export class DiskSpaceSaveState {
       toVersion: input.toVersion,
       delta: input.delta ?? null,
       stamps: input.stamps,
+      reviews: input.reviews,
     };
     durableWriteText(savePendingPath(this.canvasId), JSON.stringify(pending));
     this.stage('pending');

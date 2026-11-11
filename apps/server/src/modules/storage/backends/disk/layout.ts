@@ -110,6 +110,8 @@ export function artifactPath(canvasId: string, filename: string): string {
  * module note above and §12.5.3.
  */
 export const HISTORY_DIR_NAME = '.history';
+/** Reliable-save state, below {@link HISTORY_DIR_NAME}; see {@link saveDir}. */
+export const SAVE_DIR_NAME = 'save';
 
 export function historyDir(canvasId: string): string {
   return path.join(canvasRoot(canvasId), HISTORY_DIR_NAME);
@@ -166,7 +168,7 @@ export function deltaLogPath(canvasId: string): string {
  * that it has nothing to maintain.
  */
 export function saveDir(canvasId: string): string {
-  return path.join(historyDir(canvasId), 'save');
+  return path.join(historyDir(canvasId), SAVE_DIR_NAME);
 }
 
 export function saveHeadPath(canvasId: string): string {

@@ -89,6 +89,7 @@ import {
 import { MAX_UPLOAD_BYTES } from '../../upload-limits.js';
 import { conversationEventLogStore } from '../agent/agenetes/conversation-stores.js';
 import { AgentNodeBindingError } from '../agent/agent-node-binding.js';
+import { agentThreadService } from '../agent/agent-thread.service.js';
 import { readRecentCanvasConversation } from '../agent/recent-conversation.js';
 import { ARTIFACT_URL_REGEX } from '../artifact/utils.js';
 import { getRequestIdentity } from '../identity/request.js';
@@ -177,6 +178,14 @@ const HISTORY_EXPORT_IGNORE = [
   '.history/**',
   '.ext/huabu.prompt.log/**',
 ] as const;
+
+/**
+ * Reliable-save state (version stamps, stored responses, an unfinished write
+ * intent). It describes this Space's own history of writes: a copy carrying
+ * it would accept a read version issued for the original, and would answer
+ * the original's request ids. Never exported, whatever else is.
+ */
+const SAVE_STATE_EXPORT_IGNORE = '.history/save/**';
 
 function nowMs(): number {
   return Date.now();
@@ -1767,14 +1776,23 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     }
 
     try {
+      // The thread id comes from the body, so it is attributed only when it
+      // names a conversation of this Space; otherwise the batch still
+      // applies, unattributed. (Known limitation: this does not prove the
+      // caller is that conversation.)
+      const { threadId: claimedThreadId, ...unattributed } = originator;
+      const attributed =
+        claimedThreadId !== undefined &&
+        (await agentThreadService.ownsThread(canvasId, claimedThreadId));
       const out = await executeOnServer({
         canvasId,
         commands: commands as CanvasCommand[],
-        originator,
+        originator: attributed ? originator : unattributed,
+        ...(claimedThreadId !== undefined ? { claimedThreadId } : {}),
         ...(runId ? { runId } : {}),
         // Derive review records only for thread-attributed (ACP) batches —
         // they feed that conversation's change card. Other callers skip it.
-        computeChanges: !!originator.threadId,
+        computeChanges: attributed,
         ...(operationId !== undefined && principalId
           ? { request: { operationId, principalId } }
           : {}),
@@ -2178,7 +2196,9 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     archive.glob('**/*', {
       cwd: canvasDir,
       dot: true,
-      ignore: includeHistory ? [] : [...HISTORY_EXPORT_IGNORE],
+      ignore: includeHistory
+        ? [SAVE_STATE_EXPORT_IGNORE]
+        : [...HISTORY_EXPORT_IGNORE],
     });
 
     void archive.finalize();

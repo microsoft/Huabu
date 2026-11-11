@@ -8,6 +8,7 @@ import {
   readSpaceRow,
   updateSpaceRow,
 } from './rows.js';
+import { appendSqliteChangesInTransaction } from './space-logs.js';
 import { putSqliteNodeInTransaction } from './space-nodes.js';
 import {
   advanceSqliteStamps,
@@ -16,6 +17,7 @@ import {
 } from './space-save.js';
 import {
   storedResultOutcome,
+  validateWriteReviews,
   validateWriteSaveResult,
 } from '../../ports/save.js';
 import { stringifyJson } from '../sql/codecs.js';
@@ -32,6 +34,7 @@ import type {
   SpaceWriteInput,
   SpaceWriteResult,
 } from '../../ports/structured.js';
+import type { CanvasChangeRecord } from '@huabu/shared/canvas-engine';
 import type { DatabaseSync } from 'node:sqlite';
 
 /** Bind the atomic SQLite record/node/delta write to one Space. */
@@ -69,8 +72,8 @@ export function createSqliteSpaceWrite(
  * Also reused by the operation store inside its larger receipt transaction.
  * A result record and the Space's version stamps are part of the same
  * transaction: the stored result is checked before anything is touched, and
- * the stamps and the new result row are written after the record, so all of
- * it commits or none of it does.
+ * the stamps, the Review records and the new result row are written after the
+ * record, so all of it commits or none of it does.
  */
 export function writeSqliteSpaceInTransaction(
   database: DatabaseSync,
@@ -83,6 +86,7 @@ export function writeSqliteSpaceInTransaction(
     throw new Error('Space write requires a transaction');
   validateInput(canvasId, input);
   const responseJson = validateWriteSaveResult(input);
+  const reviews = validateWriteReviews(input);
   if (input.result !== undefined) {
     // First, before the version check: a retry of a committed write arrives
     // with a stale expected version and must be answered, not refused.
@@ -155,6 +159,16 @@ export function writeSqliteSpaceInTransaction(
       );
   }
   advanceSqliteStamps(database, canvasId, current.record, input.nextRecord);
+  let stored: Record<string, CanvasChangeRecord[]> | undefined;
+  for (const review of reviews) {
+    stored ??= {};
+    stored[review.threadId] = appendSqliteChangesInTransaction(
+      database,
+      canvasId,
+      review.threadId,
+      review.records,
+    );
+  }
   if (input.result !== undefined && responseJson !== null) {
     insertSqliteSaveResult(
       database,
@@ -165,5 +179,5 @@ export function writeSqliteSpaceInTransaction(
       now(),
     );
   }
-  return { ok: true } as const;
+  return stored ? { ok: true, reviews: stored } : { ok: true };
 }

@@ -7,6 +7,7 @@ import {
   readSpaceRow,
   updateSpaceRow,
 } from './rows.js';
+import { appendPostgresChangesInTransaction } from './space-logs.js';
 import { putPostgresNodeInTransaction } from './space-nodes.js';
 import {
   advancePostgresStamps,
@@ -17,6 +18,7 @@ import {
 } from './space-save.js';
 import {
   storedResultOutcome,
+  validateWriteReviews,
   validateWriteSaveResult,
 } from '../../ports/save.js';
 import { stringifyJson } from '../sql/codecs.js';
@@ -33,6 +35,7 @@ import type {
   SpaceWriteInput,
   SpaceWriteResult,
 } from '../../ports/structured.js';
+import type { CanvasChangeRecord } from '@huabu/shared/canvas-engine';
 
 /** Bind the atomic Postgres record/node/delta write to one Space. */
 export function createPostgresSpaceWrite(
@@ -84,8 +87,8 @@ export function createPostgresSpaceWrite(
  *
  * A result record and the Space's version stamps are part of the same
  * transaction: the stored result is checked before anything is touched, and
- * the stamps and the new result row are written after the record, so all of
- * it commits or none of it does.
+ * the stamps, the Review records and the new result row are written after the
+ * record, so all of it commits or none of it does.
  */
 export async function writePostgresSpaceInTransaction(
   database: PgExecutor,
@@ -96,6 +99,7 @@ export async function writePostgresSpaceInTransaction(
 ): Promise<SpaceWriteResult> {
   validateInput(canvasId, input);
   const responseJson = validateWriteSaveResult(input);
+  const reviews = validateWriteReviews(input);
   if (input.result !== undefined) {
     // First, before the version check: a retry of a committed write arrives
     // with a stale expected version and must be answered, not refused.
@@ -177,6 +181,16 @@ export async function writePostgresSpaceInTransaction(
     current.record,
     input.nextRecord,
   );
+  let stored: Record<string, CanvasChangeRecord[]> | undefined;
+  for (const review of reviews) {
+    stored ??= {};
+    stored[review.threadId] = await appendPostgresChangesInTransaction(
+      database,
+      canvasId,
+      review.threadId,
+      review.records,
+    );
+  }
   if (input.result !== undefined && responseJson !== null) {
     await insertPostgresSaveResult(
       database,
@@ -187,5 +201,5 @@ export async function writePostgresSpaceInTransaction(
       now(),
     );
   }
-  return { ok: true } as const;
+  return stored ? { ok: true, reviews: stored } : { ok: true };
 }

@@ -92,6 +92,40 @@ function readJsonArray<T>(filePath: string, family: string): T[] {
   return parsed as T[];
 }
 
+/** One thread's stored Review list, coalesced. */
+export function readDiskChanges(
+  canvasId: string,
+  threadId: string,
+): CanvasChangeRecord[] {
+  return coalesceChanges(
+    readJsonArray<CanvasChangeRecord>(
+      changesPath(canvasId, threadId),
+      'change-review records',
+    ),
+  );
+}
+
+/**
+ * `records` folded into what the thread already holds — the list an append
+ * stores. Pure with respect to the file: the caller decides when to write it,
+ * which lets the Space write compute it before it commits anything.
+ */
+export function mergeDiskChanges(
+  existing: readonly CanvasChangeRecord[],
+  records: readonly CanvasChangeRecord[],
+): CanvasChangeRecord[] {
+  return coalesceChanges([...existing, ...records]);
+}
+
+/** Replace one thread's stored Review list. */
+export function writeDiskChanges(
+  canvasId: string,
+  threadId: string,
+  merged: readonly CanvasChangeRecord[],
+): void {
+  atomicWriteJson(changesPath(canvasId, threadId), merged);
+}
+
 export interface DiskSpaceLogs {
   readonly events: SpaceEvents;
   readonly changes: SpaceChanges;
@@ -100,10 +134,12 @@ export interface DiskSpaceLogs {
 class DiskSpaceLogCoordinator {
   readonly #store: CanvasStore;
   readonly #workspacePath: string;
+  readonly #recover: () => void;
 
-  constructor(store: CanvasStore) {
+  constructor(store: CanvasStore, recover: () => void) {
     this.#store = store;
     this.#workspacePath = path.resolve(getWorkspacePath());
+    this.#recover = recover;
   }
 
   private assertActiveWorkspace(): void {
@@ -143,14 +179,19 @@ class DiskSpaceLogCoordinator {
 
   // ── Change-review records ─────────────────────────────────────────────────
 
+  // A Space write can carry Review records. If one was interrupted, its
+  // intent still holds the list it meant to store, and finishing it later
+  // would overwrite whatever happens here — so it is finished first.
+
   async readChanges(threadId: string): Promise<CanvasChangeRecord[]> {
     this.assertActiveWorkspace();
-    return coalesceChanges(
-      readJsonArray<CanvasChangeRecord>(
-        changesPath(this.#store.canvasId, threadId),
-        'change-review records',
-      ),
-    );
+    try {
+      this.#recover();
+    } catch {
+      // Recovery writes, and is refused while the Space is being deleted. A
+      // read then serves what is stored.
+    }
+    return readDiskChanges(this.#store.canvasId, threadId);
   }
 
   async appendChanges(
@@ -159,12 +200,13 @@ class DiskSpaceLogCoordinator {
   ): Promise<CanvasChangeRecord[]> {
     this.assertActiveWorkspace();
     this.requireSpace();
-    const filePath = changesPath(this.#store.canvasId, threadId);
-    const existing = coalesceChanges(
-      readJsonArray<CanvasChangeRecord>(filePath, 'change-review records'),
+    this.#recover();
+    const canvasId = this.#store.canvasId;
+    const merged = mergeDiskChanges(
+      readDiskChanges(canvasId, threadId),
+      records,
     );
-    const merged = coalesceChanges([...existing, ...records]);
-    atomicWriteJson(filePath, merged);
+    writeDiskChanges(canvasId, threadId, merged);
     return merged;
   }
 
@@ -174,6 +216,7 @@ class DiskSpaceLogCoordinator {
   ): Promise<CanvasChangeRecord | null> {
     this.assertActiveWorkspace();
     this.requireSpace();
+    this.#recover();
     const filePath = changesPath(this.#store.canvasId, threadId);
     const existing = coalesceChanges(
       readJsonArray<CanvasChangeRecord>(filePath, 'change-review records'),
@@ -191,9 +234,15 @@ class DiskSpaceLogCoordinator {
  *
  * Each facade is frozen and contains only its own operations. The shared
  * coordinator — and therefore its legacy store — is closure-private.
+ *
+ * @param recover Finishes an interrupted Space write (see `space-save.ts`);
+ *   the handle supplies it, and Review reads and writes call it first.
  */
-export function createDiskSpaceLogs(store: CanvasStore): DiskSpaceLogs {
-  const coordinator = new DiskSpaceLogCoordinator(store);
+export function createDiskSpaceLogs(
+  store: CanvasStore,
+  recover: () => void = () => {},
+): DiskSpaceLogs {
+  const coordinator = new DiskSpaceLogCoordinator(store, recover);
 
   const events: SpaceEvents = Object.freeze({
     read: (limit?: number) => coordinator.readEvents(limit),
