@@ -16,6 +16,7 @@
  */
 
 import { mountAgentProfileRegistry } from './agent-profile-mount.js';
+import { setAgentletAccessPolicy } from './agentlet-resolution.js';
 import { getDaemonAuth } from './daemon-auth.js';
 import { getDaemonSupervisor } from './daemon-supervisor.js';
 import { mountAgentletGateway } from './gateway-mount.js';
@@ -110,6 +111,10 @@ export interface MountAgenetesOptions {
    * connection-token validator in {@link getDaemonAuth}.
    */
   authenticate?: AgentletGatewayOptions['authenticateAgentlet'];
+  /** Whether this host owns a supervised daemon; false for remote-only hosts. */
+  supervise?: boolean;
+  /** Host authorization for device placement, including hostname resolution. */
+  canAccessAgentlet?: (agentletId: string, requestedId: string) => boolean;
   /**
    * Host-owned storage for the ordinary Profile registry.
    */
@@ -133,6 +138,8 @@ export function mountAgenetes(
   opts: MountAgenetesOptions,
 ): AgentletGateway {
   getDaemonAuth().setDaemonToken(opts.connectionToken);
+  setAgentletAccessPolicy(opts.canAccessAgentlet);
+  app.addHook('preClose', async () => setAgentletAccessPolicy());
 
   const gateway = mountAgentletGateway(app, {
     authenticate: opts.authenticate,
@@ -142,14 +149,15 @@ export function mountAgenetes(
     mountAgentProfileRegistry(app, opts.profiles);
   }
 
-  getDaemonSupervisor().attach(app, {
-    daemonEntryPath: opts.daemonEntryPath,
-    bootstrapEnv: opts.bootstrapEnv,
-    dataDir: opts.dataDir,
-    getMaxAgents: opts.getMaxAgents,
-    hostEnvPrefix: opts.hostEnvPrefix,
-    hostEnvAllowlist: opts.hostEnvAllowlist,
-  });
+  if (opts.supervise !== false)
+    getDaemonSupervisor().attach(app, {
+      daemonEntryPath: opts.daemonEntryPath,
+      bootstrapEnv: opts.bootstrapEnv,
+      dataDir: opts.dataDir,
+      getMaxAgents: opts.getMaxAgents,
+      hostEnvPrefix: opts.hostEnvPrefix,
+      hostEnvAllowlist: opts.hostEnvAllowlist,
+    });
 
   return gateway;
 }

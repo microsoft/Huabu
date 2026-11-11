@@ -21,7 +21,7 @@ PowerShell: `node "$env:HUABU_RFS_ENTRY" get-skill`. This returns basic CLI usag
 Huabu provides the JS entry, not Node. Do not install or provision a runtime merely to access the Space. Without a compatible runtime or entry, use authenticated native HTTP:
 
 ```bash
-curl -fsS -H "Authorization: Bearer $AGENTLET_TOKEN" "$HUABU_RFS_URL/skill"
+curl -fsS -H "Authorization: Bearer $HUABU_RFS_TOKEN" "$HUABU_RFS_URL/skill"
 ```
 
 The bundled root guide is also available as public bootstrap documentation. Fetching without an Authorization header always returns that bundled guide:
@@ -30,8 +30,8 @@ The bundled root guide is also available as public bootstrap documentation. Fetc
 curl -fsS "$HUABU_RFS_URL/skill"
 ```
 
-Every operational endpoint and advanced skill requires `Authorization: Bearer $AGENTLET_TOKEN`; missing or invalid credentials return `401`, and invalid credentials on the root Skill never fall back to the public guide. Both `HUABU_RFS_URL` and `AGENTLET_TOKEN` are set in your environment. For the authenticated examples in the guides, use:
+Every operational endpoint and advanced skill requires `Authorization: Bearer $HUABU_RFS_TOKEN`; missing or invalid credentials return `401`, and invalid credentials on the root Skill never fall back to the public guide. Both `HUABU_RFS_URL` and `HUABU_RFS_TOKEN` are set in your environment. For the authenticated examples in the guides, use:
 
 ```bash
-AUTH="Authorization: Bearer $AGENTLET_TOKEN"
+AUTH="Authorization: Bearer $HUABU_RFS_TOKEN"
 ```

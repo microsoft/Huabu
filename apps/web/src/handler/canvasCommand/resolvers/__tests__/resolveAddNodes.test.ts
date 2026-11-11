@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { describe, expect, it } from 'vitest';
+import { assert, describe, expect, it, vi } from 'vitest';
 
 import {
   autoHeightKey,
@@ -14,17 +14,53 @@ import { parseHuabuClipboard } from '@/utils/io/clipboard';
 import resolveAddNodes from '../resolveAddNodes';
 import resolvePasteClipboard from '../resolvePasteClipboard';
 
+import type { AddNodeInput } from '../../uiIntent';
 import type {
   CanvasNodeId,
   CanvasNodeType,
   Point,
   SketchStroke,
 } from '@huabu/shared';
+import type * as CanvasEngine from '@huabu/shared/canvas-engine';
 import type { Node } from '@xyflow/react';
 
 const ui = { nodes: [], edges: [] };
 
+vi.mock('@huabu/shared/canvas-engine', async (importOriginal) => {
+  const actual = await importOriginal<typeof CanvasEngine>();
+  return {
+    ...actual,
+    solveStructuredFrameLayout: vi.fn(actual.solveStructuredFrameLayout),
+  };
+});
+
 describe('resolveAddNodes', () => {
+  it('solves each target Grid only once for a batch of cursor-based additions', () => {
+    const nodes: Node[] = [
+      {
+        id: 'node-frame',
+        type: 'frame',
+        position: { x: 0, y: 0 },
+        data: { layoutMode: 'grid', gridCount: 2, sizing: 'manual' },
+        style: { width: 500, height: 500 },
+      },
+    ];
+    vi.mocked(solveStructuredFrameLayout).mockClear();
+    resolveAddNodes(
+      {
+        type: 'ADD_NODES',
+        inputs: ['node-a', 'node-b', 'node-c'].map((id) => ({
+          id: id as CanvasNodeId,
+          nodeType: 'note',
+          parentId: 'node-frame',
+          placementPoint: { x: 30, y: 80 },
+        })),
+      },
+      { nodes, edges: [] },
+    );
+    expect(solveStructuredFrameLayout).toHaveBeenCalledTimes(1);
+  });
+
   it.each(['note', 'text'] satisfies CanvasNodeType[])(
     'requests editing after explicitly creating one %s node',
     (nodeType) => {
@@ -138,9 +174,13 @@ describe('resolveAddNodes', () => {
   });
 });
 
-describe.each(['column', 'row'] as const)(
-  'resolveAddNodes in a %s Frame',
-  (axis) => {
+describe.each(
+  (['column', 'row'] as const).flatMap((axis) =>
+    (['note', 'question'] as const).map((nodeType) => ({ axis, nodeType })),
+  ),
+)(
+  'resolveAddNodes for a $nodeType node in a $axis Frame',
+  ({ axis, nodeType }) => {
     const frameId = 'node-frame';
     const field = axis === 'column' ? 'frameColumn' : 'frameRow';
     const along = axis === 'column' ? 'y' : 'x';
@@ -191,7 +231,7 @@ describe.each(['column', 'row'] as const)(
           inputs: [
             {
               id: 'node-new',
-              nodeType: 'note',
+              nodeType,
               size: { width: 120, height: 80 },
               ...(explicitParent ? { parentId: frameId } : {}),
               ...(point ? { placementPoint: point } : {}),
@@ -315,6 +355,362 @@ describe.each(['column', 'row'] as const)(
     });
   },
 );
+
+describe('resolveAddNodes in a Grid Frame', () => {
+  function scene(sizing = 'manual'): Node[] {
+    const nodes: Node[] = [
+      {
+        id: 'node-grid',
+        type: 'frame',
+        position: { x: 100, y: 200 },
+        data: { layoutMode: 'grid', gridCount: 3, sizing },
+        style: { width: 800, height: 800 },
+      },
+      ...[
+        [0, 0],
+        [1, 0],
+        [2, 0],
+        [0, 1],
+        [1, 1],
+        [2, 1],
+        [0, 2],
+        [1, 2],
+        [2, 2],
+        [0, 3],
+        [0, 4],
+      ].map(([frameColumn, frameRow], index) => ({
+        id: `node-cell-${index}`,
+        type: frameColumn === 2 ? 'question' : 'note',
+        parentId: 'node-grid',
+        position: { x: 0, y: 0 },
+        data: { frameColumn, frameRow, heightMode: 'fixed' },
+        style: { width: 120, height: 80 },
+      })),
+    ];
+    const layout = solveStructuredFrameLayout(nodes, 'node-grid');
+    if (!layout) throw new Error('Missing fixture layout');
+    return nodes.map((node) => ({
+      ...node,
+      position: layout.childPositions.get(node.id) ?? node.position,
+    }));
+  }
+
+  function createAt(nodes: Node[], inputs: AddNodeInput[]) {
+    const before = JSON.stringify(nodes);
+    const resolution = resolveAddNodes(
+      { type: 'ADD_NODES', inputs },
+      { nodes, edges: [] },
+    );
+    const result = executeCanvasCommands(
+      { source: 'ui', commands: resolution.commands },
+      { nodes, edges: [], canvasId: 'canvas' },
+    );
+    expect(result.commandResults.every((command) => command.applied)).toBe(
+      true,
+    );
+    expect(JSON.stringify(nodes)).toBe(before);
+    return result.writeResult.nodes;
+  }
+
+  it.each(['note', 'question'] as const)(
+    'creates a %s in the empty cell below the third column',
+    (nodeType) => {
+      const nodes = scene();
+      const thirdColumn = nodes.find((node) => node.id === 'node-cell-8');
+      const fourthRow = nodes.find((node) => node.id === 'node-cell-9');
+      assert(thirdColumn && fourthRow);
+      const committed = createAt(nodes, [
+        {
+          id: 'node-new',
+          nodeType,
+          size: { width: 120, height: 80 },
+          placementPoint: {
+            x: 100 + thirdColumn.position.x + 20,
+            y: 200 + fourthRow.position.y + 20,
+          },
+        },
+      ]);
+      expect(committed.find((node) => node.id === 'node-new')).toMatchObject({
+        parentId: 'node-grid',
+        data: { frameColumn: 2, frameRow: 3 },
+      });
+      for (const existing of nodes.filter((node) => node.parentId)) {
+        expect(
+          committed.find((node) => node.id === existing.id)?.data,
+        ).toMatchObject(existing.data);
+      }
+    },
+  );
+
+  it.each(['hug', 'manual'])(
+    'inserts a row when creating in an occupied cell (%s)',
+    (sizing) => {
+      const nodes = scene(sizing);
+      const target = nodes.find((node) => node.id === 'node-cell-5');
+      assert(target);
+      const committed = createAt(nodes, [
+        {
+          id: 'node-new',
+          nodeType: 'question',
+          placementPoint: {
+            x: 100 + target.position.x + 20,
+            y: 200 + target.position.y + 20,
+          },
+        },
+      ]);
+      expect(
+        committed.find((node) => node.id === 'node-new')?.data,
+      ).toMatchObject({ frameColumn: 2, frameRow: 1 });
+      for (const existing of nodes.filter((node) => node.parentId)) {
+        const row = existing.data.frameRow as number;
+        expect(
+          committed.find((node) => node.id === existing.id)?.data,
+        ).toMatchObject({
+          frameColumn: existing.data.frameColumn,
+          frameRow: row >= 1 ? row + 1 : row,
+        });
+      }
+    },
+  );
+
+  it.each(
+    ['hug', 'manual'].flatMap((sizing) =>
+      [false, true].flatMap((occupied) =>
+        [80, 360].flatMap((height) =>
+          [0, 1, 50, 99, 100].map((percentage) => ({
+            sizing,
+            occupied,
+            height,
+            percentage,
+          })),
+        ),
+      ),
+    ),
+  )(
+    'keeps the second row at $percentage% (height $height, occupied $occupied, $sizing)',
+    ({ sizing, occupied, height, percentage }) => {
+      const nodes = scene(sizing)
+        .filter((node) => occupied || node.id !== 'node-cell-5')
+        .map((node) =>
+          node.data.frameRow === 1
+            ? { ...node, style: { ...node.style, height } }
+            : node,
+        );
+      const layout = solveStructuredFrameLayout(nodes, 'node-grid');
+      const row = layout?.rowTracks?.[1];
+      const column = layout?.columnTracks?.[2];
+      assert(row && column);
+      const y = row.top + (row.height * percentage) / 100;
+      const committed = createAt(nodes, [
+        {
+          id: 'node-new',
+          nodeType: 'question',
+          parentId: 'node-grid',
+          placementPoint: { x: column.left + 20, y },
+        },
+      ]);
+      expect(
+        committed.find((node) => node.id === 'node-new')?.data,
+      ).toMatchObject({ frameColumn: 2, frameRow: 1 });
+      for (const existing of nodes.filter((node) => node.parentId)) {
+        const priorRow = existing.data.frameRow as number;
+        expect(
+          committed.find((node) => node.id === existing.id)?.data,
+        ).toMatchObject({
+          frameColumn: existing.data.frameColumn,
+          frameRow: occupied && priorRow >= 1 ? priorRow + 1 : priorRow,
+        });
+      }
+    },
+  );
+
+  it.each(['gap', 'top', 'bottom'] as const)(
+    'targets a row %s without adding a column',
+    (location) => {
+      const nodes = scene();
+      const layout = solveStructuredFrameLayout(nodes, 'node-grid');
+      const column = layout?.columnTracks?.[2];
+      const row =
+        layout?.rowTracks?.[
+          location === 'gap' ? 3 : location === 'top' ? 0 : 4
+        ];
+      assert(column && row);
+      const committed = createAt(nodes, [
+        {
+          id: 'node-new',
+          nodeType: 'question',
+          placementPoint: {
+            x: 100 + column.left - 1,
+            y:
+              200 +
+              (location === 'bottom' ? row.top + row.height + 30 : row.top - 5),
+          },
+        },
+      ]);
+      expect(
+        committed.find((node) => node.id === 'node-new')?.data,
+      ).toMatchObject({
+        frameColumn: 2,
+        frameRow: location === 'gap' ? 3 : location === 'top' ? 0 : 5,
+      });
+      for (const existing of nodes.filter((node) => node.parentId)) {
+        expect(
+          committed.find((node) => node.id === existing.id)?.data,
+        ).toMatchObject({
+          frameColumn: existing.data.frameColumn,
+          frameRow:
+            (existing.data.frameRow as number) + (location === 'top' ? 1 : 0),
+        });
+      }
+      expect(
+        committed.find((node) => node.id === 'node-grid')?.data.gridCount,
+      ).toBe(3);
+    },
+  );
+
+  it.each([false, true])(
+    'uses nested Frame coordinates (explicit parent: %s)',
+    (explicitParent) => {
+      const nodes: Node[] = [
+        {
+          id: 'node-outer',
+          type: 'frame',
+          position: { x: 300, y: 400 },
+          data: { sizing: 'manual' },
+          style: { width: 1600, height: 1600 },
+        },
+        ...scene().map((node) =>
+          node.id === 'node-grid' ? { ...node, parentId: 'node-outer' } : node,
+        ),
+      ];
+      const column = nodes.find((node) => node.id === 'node-cell-8');
+      const row = nodes.find((node) => node.id === 'node-cell-9');
+      assert(column && row);
+      const committed = createAt(nodes, [
+        {
+          id: 'node-new',
+          nodeType: 'question',
+          ...(explicitParent ? { parentId: 'node-grid' } : {}),
+          placementPoint: {
+            x: column.position.x + 20 + (explicitParent ? 0 : 400),
+            y: row.position.y + 20 + (explicitParent ? 0 : 600),
+          },
+        },
+      ]);
+      expect(committed.find((node) => node.id === 'node-new')).toMatchObject({
+        parentId: 'node-grid',
+        data: { frameColumn: 2, frameRow: 3 },
+      });
+    },
+  );
+
+  it('plans a batch together without colliding cells', () => {
+    const nodes = scene();
+    const column = nodes.find((node) => node.id === 'node-cell-8');
+    const row = nodes.find((node) => node.id === 'node-cell-9');
+    assert(column && row);
+    const committed = createAt(
+      nodes,
+      ['node-first', 'node-second'].map((id) => ({
+        id: id as CanvasNodeId,
+        nodeType: 'question',
+        placementPoint: {
+          x: 100 + column.position.x + 20,
+          y: 200 + row.position.y + 20,
+        },
+      })),
+    );
+    expect(
+      committed.find((node) => node.id === 'node-first')?.data,
+    ).toMatchObject({ frameColumn: 2, frameRow: 4 });
+    expect(
+      committed.find((node) => node.id === 'node-second')?.data,
+    ).toMatchObject({ frameColumn: 2, frameRow: 3 });
+    const cells = committed
+      .filter((node) => node.parentId === 'node-grid')
+      .map((node) => `${node.data.frameColumn}:${node.data.frameRow}`);
+    expect(new Set(cells).size).toBe(cells.length);
+  });
+
+  it('honors every leading-row insertion in a batch targeting empty columns', () => {
+    const nodes = scene().filter(
+      (node) => node.id !== 'node-cell-0' && node.id !== 'node-cell-1',
+    );
+    const layout = solveStructuredFrameLayout(nodes, 'node-grid');
+    const row = layout?.rowTracks?.[0];
+    const columns = layout?.columnTracks;
+    assert(row && columns);
+    const committed = createAt(
+      nodes,
+      [0, 1].map((column) => ({
+        id: `node-new-${column}` as CanvasNodeId,
+        nodeType: 'question' as const,
+        parentId: 'node-grid' as CanvasNodeId,
+        placementPoint: { x: columns[column].left + 20, y: row.top - 5 },
+      })),
+    );
+    expect(
+      committed.find((node) => node.id === 'node-new-0')?.data,
+    ).toMatchObject({ frameColumn: 0, frameRow: 1 });
+    expect(
+      committed.find((node) => node.id === 'node-new-1')?.data,
+    ).toMatchObject({ frameColumn: 1, frameRow: 0 });
+    for (const existing of nodes.filter((node) => node.parentId)) {
+      expect(
+        committed.find((node) => node.id === existing.id)?.data,
+      ).toMatchObject({
+        frameColumn: existing.data.frameColumn,
+        frameRow: (existing.data.frameRow as number) + 2,
+      });
+    }
+  });
+
+  it('creates in a sparse Grid without redistributing existing children into its empty column', () => {
+    const nodes = scene().filter((node) =>
+      ['node-grid', 'node-cell-0', 'node-cell-8'].includes(node.id),
+    );
+    const layout = solveStructuredFrameLayout(nodes, 'node-grid');
+    const column = layout?.columnTracks?.[2];
+    const row = layout?.rowTracks?.[0];
+    assert(column && row);
+    const committed = createAt(nodes, [
+      {
+        id: 'node-new',
+        nodeType: 'question',
+        parentId: 'node-grid',
+        placementPoint: { x: column.left + 20, y: row.top + 10 },
+      },
+    ]);
+    expect(
+      committed.find((node) => node.id === 'node-new')?.data,
+    ).toMatchObject({ frameColumn: 2, frameRow: 0 });
+    for (const existing of nodes.filter((node) => node.parentId)) {
+      expect(
+        committed.find((node) => node.id === existing.id)?.data,
+      ).toMatchObject(existing.data);
+    }
+  });
+
+  it('keeps automatic placement when no point is supplied', () => {
+    const nodes = scene();
+    const resolution = resolveAddNodes(
+      {
+        type: 'ADD_NODES',
+        inputs: [
+          {
+            id: 'node-new',
+            nodeType: 'question',
+            parentId: 'node-grid',
+          },
+        ],
+      },
+      { nodes, edges: [] },
+    );
+    expect(resolution.commands.map((command) => command.type)).toEqual([
+      'CREATE_NODES',
+    ]);
+  });
+});
 
 describe('resolvePasteClipboard', () => {
   it.each([

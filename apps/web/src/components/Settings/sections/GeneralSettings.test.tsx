@@ -5,6 +5,8 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
+import { useIdentityStore } from '@/store/identityStore';
+
 import { GeneralSettings } from './GeneralSettings';
 
 import type { SupportedLanguage } from '@/i18n';
@@ -41,7 +43,7 @@ vi.mock('@/components/Common/Select', () => ({
   },
 }));
 vi.mock('@/components/Settings/CanaryRedeploySettings', () => ({
-  CanaryRedeploySettings: () => null,
+  CanaryRedeploySettings: () => <p>canary</p>,
 }));
 vi.mock('@/hooks/useAppUpdate', () => ({
   useAppUpdate: () => ({ status: { state: 'idle' }, check: vi.fn() }),
@@ -181,3 +183,24 @@ it('still reports browser i18next failures', async () => {
     error,
   );
 });
+
+it.each([
+  [{ provider: 'bubble', owner: false }, false],
+  [{ provider: 'bubble', owner: true }, true],
+  [{ provider: 'local', owner: true }, true],
+])(
+  'offers Canary redeployment only to whoever manages the deployment (%o)',
+  async (caller, shown) => {
+    await act(async () =>
+      useIdentityStore.setState({
+        identity: {
+          ...caller,
+          principal: { principalId: 'p', kind: 'user' },
+          member: true,
+        } as never,
+      }),
+    );
+    expect(container.textContent?.includes('canary')).toBe(shown);
+    await act(async () => useIdentityStore.setState({ identity: null }));
+  },
+);

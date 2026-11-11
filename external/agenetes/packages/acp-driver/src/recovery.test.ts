@@ -101,7 +101,7 @@ const submission = {
 describe('ACP durable history recovery', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    acpSessionRegistry.remove('machine-a', spec.threadId);
+    acpSessionRegistry.remove('machine-a', spec.threadId, spec.namespace);
   });
 
   it('folds host side-channel events into the driver stream before termination', async () => {
@@ -201,7 +201,7 @@ describe('ACP durable history recovery', () => {
       expect(prompt).toHaveBeenCalledTimes(3);
       expect(remove).not.toHaveBeenCalled();
       await first.close();
-      expect(remove).toHaveBeenCalledWith('machine-a', ids[0]);
+      expect(remove).toHaveBeenCalledWith('machine-a', ids[0], spec.namespace);
       remove.mockRestore();
     },
   );

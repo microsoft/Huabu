@@ -5,7 +5,7 @@ You are working with a **Huabu** Space, an infinite visual surface of notes, ima
 These environment variables are already set:
 
 - `HUABU_RFS_URL` — the base URL for this Space, with no trailing slash.
-- `AGENTLET_TOKEN` — the RFS bearer credential.
+- `HUABU_RFS_TOKEN` — the RFS bearer credential.
 - `HUABU_THREAD_ID` — your conversation ID. Pass it on `execute` (see §6) to attribute your edits.
 
 This is the HTTP-native access guide. Client selection and optional CLI discovery are described in the initial bootstrap; these HTTP operations require no Node runtime or custom tool.
@@ -185,7 +185,7 @@ The accepted command set is:
 | `DISCONNECT_EDGES`  | Remove edges by ID or endpoint pair.                                                    |
 | `SET_EDGE_STYLE`    | Patch edge direction, line shape, dash style, stroke, width, or label.                  |
 | `ALIGN_NODES`       | Align existing nodes along one axis.                                                    |
-| `DISTRIBUTE_NODES`  | Evenly space three or more existing nodes.                                              |
+| `DISTRIBUTE_NODES`  | Spread three or more existing nodes apart.                                              |
 | `SET_FRAME_LAYOUT`  | Configure a frame's free, column, row, or grid layout.                                  |
 
 This table is only a navigation summary. For the complete contract of one command—including required fields, parameter types, enums, limits, semantic constraints, result description, and a valid example—fetch its capability:

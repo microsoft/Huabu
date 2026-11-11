@@ -17,10 +17,13 @@ import {
 } from '@huabu/shared';
 import {
   getNodeDefaultSize,
+  planStructuredDrop,
   readFrameGridConfig,
+  resolveFrameTrackCount,
+  solveStructuredFrameLayout,
 } from '@huabu/shared/canvas-engine';
 
-import { resolveMasonryDrop } from '../../masonryDrop';
+import { resolveGridDrop, resolveMasonryDrop } from '../../masonryDrop';
 import { resolveFrameAtPoint } from '../utils';
 
 import type {
@@ -29,7 +32,10 @@ import type {
   UiIntentResolution,
   UiResolverState,
 } from '../uiIntent';
-import type { NestableNode } from '@huabu/shared/canvas-engine';
+import type {
+  NestableNode,
+  StructuredDropRequest,
+} from '@huabu/shared/canvas-engine';
 
 // ---------------------------------------------------------------------------
 // Sizing helpers
@@ -231,6 +237,68 @@ export default function resolveAddNodes(
     if (usesFallback) staggerIndex += 1;
     return item;
   });
+  const gridDrops = new Map<CanvasNodeId, StructuredDropRequest[]>();
+  const gridLayouts = new Map<
+    CanvasNodeId,
+    ReturnType<typeof solveStructuredFrameLayout>
+  >();
+  for (const [index, { node, traceNode }] of created.entries()) {
+    if (!intent.inputs[index].placementPoint || !node.parentId) continue;
+    const config = readFrameGridConfig(
+      ui.nodes.find((parent) => parent.id === node.parentId),
+    );
+    if (config?.axis !== 'grid') continue;
+    if (!gridLayouts.has(node.parentId)) {
+      gridLayouts.set(
+        node.parentId,
+        solveStructuredFrameLayout(ui.nodes, node.parentId, 'compact', {
+          edges: ui.edges,
+        }),
+      );
+    }
+    const layout = gridLayouts.get(node.parentId);
+    const rows = layout?.rowTracks ?? [];
+    const drop = resolveGridDrop(ui.nodes, node.parentId, node.position, {
+      edges: ui.edges,
+      allowInsert: false,
+      layout,
+    });
+    const firstRow = rows[0];
+    const lastRow = rows[rows.length - 1];
+    const requests = gridDrops.get(node.parentId) ?? [];
+    requests.push({
+      nodeId: traceNode.id,
+      target: drop.target,
+      rowTarget:
+        firstRow && node.position.y < firstRow.top
+          ? { kind: 'insert-new', slot: 0 }
+          : lastRow && node.position.y > lastRow.top + lastRow.height
+            ? { kind: 'insert-new', slot: rows.length }
+            : drop.rowTarget,
+    });
+    gridDrops.set(node.parentId, requests);
+  }
+  const gridCommands: CanvasCommand[] = [];
+  for (const [frameId, requests] of gridDrops) {
+    const plan = planStructuredDrop(
+      ui.nodes,
+      frameId,
+      'grid',
+      resolveFrameTrackCount(ui.nodes, frameId),
+      requests,
+    );
+    // Apply cells after creation, before the executor's single layout pass.
+    gridCommands.push({
+      type: 'SET_FRAME_LAYOUT',
+      frameId,
+      mode: 'grid',
+      cells: Array.from(plan.tracks, ([nodeId, column]) => ({
+        nodeId: nodeId as CanvasNodeId,
+        column,
+        row: plan.rows.get(nodeId),
+      })),
+    });
+  }
   const onlyInput = intent.inputs.length === 1 ? intent.inputs[0] : null;
   const origin = onlyInput?.data?.origin as { type?: unknown } | undefined;
   const requestsEditing = origin?.type === 'user-created';
@@ -241,6 +309,7 @@ export default function resolveAddNodes(
         type: 'CREATE_NODES',
         nodes: created.map((item) => item.node),
       },
+      ...gridCommands,
     ],
     revealNodeIds: created
       .filter((_, index) => !intent.inputs[index].placementPoint)

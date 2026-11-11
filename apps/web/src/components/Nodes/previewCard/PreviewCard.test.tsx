@@ -68,6 +68,45 @@ function cardElement(): HTMLElement {
 }
 
 describe('PreviewCard', () => {
+  it.each(['web', 'pdf'])(
+    'uses screen-fixed far insets for %s and restores overview spacing',
+    (nodeType) => {
+      for (const image of [undefined, '/cover.jpg']) {
+        for (const [width, height] of [
+          [400, 400],
+          [800, 350],
+        ]) {
+          for (const farZoom of [0.1, 0.19, 0.24]) {
+            render({ nodeType, width, height, image, farZoom });
+            const style = cardElement().style;
+            expect(style.getPropertyValue('--card-padding-inline')).toBe('6px');
+            expect(style.getPropertyValue('--card-padding-block')).toBe('6px');
+            expect(style.getPropertyValue('--card-description-gap')).toBe(
+              '2px',
+            );
+          }
+          render({ nodeType, width, height, image });
+          const style = cardElement().style;
+          expect(style.getPropertyValue('--card-padding-inline')).toBe('');
+          expect(style.getPropertyValue('--card-padding-block')).toBe('');
+          expect(style.getPropertyValue('--card-padding')).toBe(
+            `${nodeContentSpacingForWidth(width).padding}px`,
+          );
+        }
+      }
+    },
+  );
+
+  it.each(['web', 'pdf'])(
+    'reduces %s far insets to retain one title line in a tiny text card',
+    (nodeType) => {
+      render({ nodeType, width: 102, height: 102, farZoom: 0.2 });
+      const style = cardElement().style;
+      expect(style.getPropertyValue('--card-padding-inline')).toBe('4px');
+      expect(style.getPropertyValue('--card-padding-block')).toBe('2px');
+    },
+  );
+
   it('renders summary paragraphs and lists without live links, images, or HTML', () => {
     render({
       nodeType: 'web',

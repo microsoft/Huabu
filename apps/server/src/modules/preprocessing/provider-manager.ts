@@ -4,7 +4,7 @@
 /**
  * Provider Manager
  *
- * Text and image metadata tasks use the explicitly selected global Agent.
+ * Text and image metadata tasks use the caller's selected Utility Agent.
  */
 
 import { z } from 'zod';

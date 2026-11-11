@@ -171,16 +171,13 @@ function sendError(
  */
 async function personalCaller(request: FastifyRequest) {
   return isRestrictedRequest(request)
-    ? {
-        admin: isOwnerRequest(request),
-        canCreateSpaces: await canWriteWorkspace(request),
-      }
+    ? { canCreateSpaces: await canWriteWorkspace(request) }
     : null;
 }
 
 /** Build the canonical success payload describing the current workspace. */
 async function buildWorkspaceState(
-  personal: { admin: boolean; canCreateSpaces: boolean } | null = null,
+  personal: { canCreateSpaces: boolean } | null = null,
 ): Promise<WorkspaceInfo> {
   const managed = isManagedMode();
   const workspace = getWorkspaceHandle();
@@ -192,10 +189,7 @@ async function buildWorkspaceState(
     // Free-mode active absolute path. Never exposed in managed mode.
     // Null in managed mode, and null wherever a Workspace has no folder at
     // all. The client already renders a Workspace with no path.
-    path:
-      workspace && !managed && (!personal || personal.admin)
-        ? getWorkspaceDirectory()
-        : null,
+    path: workspace && !managed ? getWorkspaceDirectory() : null,
     // Persisted display label. Safe to send in either mode.
     name: workspace?.name ?? null,
     worldCanvasId: configured
@@ -203,11 +197,12 @@ async function buildWorkspaceState(
       : null,
     capabilities: personal
       ? // Each person switches among, and creates, Workspaces of their own
-        // by name; folders are not theirs to pick.
+        // by name, or opens any folder where Workspaces are Disk folders.
         {
           canChangeWorkspace: !managed,
           nativePicker: false,
           namedWorkspaces: true,
+          folderWorkspaces: !managed && storageServes('workspace-directory'),
           canCreateSpaces: configured && personal.canCreateSpaces,
         }
       : {
@@ -300,6 +295,14 @@ const workspaceRoutes: FastifyPluginAsync = async (app) => {
     }
     if (!isLocalhost(request.ip)) {
       return sendError(reply, 403, 'Forbidden');
+    }
+    if (!storageServes('workspace-directory')) {
+      return sendError(
+        reply,
+        409,
+        unavailableCapabilityMessage('workspace-directory'),
+        'STORAGE_CAPABILITY_UNAVAILABLE',
+      );
     }
     const parsed = validatePathSchema.safeParse(request.body);
     if (!parsed.success) {

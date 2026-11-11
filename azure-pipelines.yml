@@ -175,6 +175,11 @@ jobs:
           }
         displayName: Validate Windows release assets
 
+      - task: ManifestGeneratorTask@0
+        displayName: Generate SBOM
+        inputs:
+          BuildDropPath: '$(Build.SourcesDirectory)/../huabu-electron-out'
+
       - task: PublishPipelineArtifact@1
         displayName: Publish complete Windows release output
         inputs:

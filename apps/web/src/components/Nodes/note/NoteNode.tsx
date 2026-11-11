@@ -26,7 +26,7 @@ import { MilkdownPreview } from '@/components/Milkdown';
 import { NODE_TYPE_LABEL } from '@/config/nodeIcons';
 import { useIsNotMouse } from '@/hooks/useInputMode';
 import { useNodePresentation } from '@/hooks/useNodePresentation';
-import useCanvasStore from '@/store/canvasStore';
+import useCanvasStore, { selectCanWriteCanvas } from '@/store/canvasStore';
 import { useGesturePreviewStore } from '@/store/gesturePreviewStore';
 import { openPreviewNode } from '@/store/previewWorkspace/actions';
 import {
@@ -88,6 +88,7 @@ export const NoteNode = memo(
   ({ id, data, selected }: NodeProps<NoteNodeType>) => {
     const { t } = useTranslation();
     const updateNodeData = useCanvasStore((s) => s.updateNodeData);
+    const canWrite = useCanvasStore(selectCanWriteCanvas);
     const moveNoteBlockIntoNote = useCanvasStore(
       (s) => s.moveNoteBlockIntoNote,
     );
@@ -394,7 +395,7 @@ export const NoteNode = memo(
     // payload's Markdown to this note's content. Locked notes opt
     // out so the gesture falls through to canvas's "create new
     // node" handler instead.
-    const isLocked = !!data.locked;
+    const isLocked = !!data.locked || !canWrite;
     // We use a small counter to track dragenter / dragleave events so
     // hovering between child elements doesn't flicker the highlight.
     const dragCounterRef = useRef(0);
@@ -445,7 +446,8 @@ export const NoteNode = memo(
     }, []);
     const handleNoteDrop = useCallback(
       (e: React.DragEvent) => {
-        if (isLocked) return;
+        if (isLocked || !selectCanWriteCanvas(useCanvasStore.getState()))
+          return;
         if (!canReadHuabuPayload(e.dataTransfer)) return;
         const payload = getHuabuPayload(e.dataTransfer);
         if (!payload) {

@@ -981,7 +981,10 @@ const CanvasContent: React.FC<CanvasProps> = ({
           addNode,
           placementPoint: position,
           canvasId,
-          isCurrent: () => useToolStore.getState().toolIntent === toolIntent,
+          // Arming another tool while the Agent loads abandons this
+          // placement; an explicit retry from the prompt does not.
+          isCurrent: ({ retry }) =>
+            retry || useToolStore.getState().toolIntent === toolIntent,
         });
       } else {
         addNode({

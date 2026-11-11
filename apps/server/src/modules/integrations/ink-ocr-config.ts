@@ -17,6 +17,10 @@ import {
 } from '../../security/secret-store.js';
 import { readJsonStrict } from '../../utils/fs.js';
 import { createKeyedMutex } from '../../utils/keyed-mutex.js';
+import {
+  personalSettingsOwner,
+  personalSecretId,
+} from '../identity/personal-settings.js';
 
 import type { InkOcrConfig, InkOcrConfigUpdate } from '@huabu/shared';
 
@@ -49,7 +53,9 @@ function readStoredRecord(): ConfigRecord {
       return configRecordSchema.parse(JSON.parse(raw));
     }
     // Legacy values are read only until the first successful single-record write.
-    const legacyEndpoint = readJsonStrict<unknown>(configPath());
+    const legacyEndpoint = personalSettingsOwner()
+      ? null
+      : readJsonStrict<unknown>(configPath());
     return configRecordSchema.parse({
       version: 1,
       endpoint:
@@ -68,7 +74,9 @@ function resolveRecord(record: ConfigRecord): {
   key: string | null;
 } {
   return {
-    endpoint: record.endpoint ?? (process.env.VISION_ENDPOINT?.trim() || null),
+    endpoint:
+      record.endpoint ??
+      (environmentStore.getEnvironmentValue('VISION_ENDPOINT')?.trim() || null),
     key: record.apiKey ?? environmentStore.get(SECRET_IDS.inkOcrApiKey),
   };
 }
@@ -108,7 +116,7 @@ export async function setInkOcrConfig(
 ): Promise<InkOcrConfig> {
   const parsed = inkOcrConfigUpdateSchema.safeParse(update);
   if (!parsed.success) throw new Error('Invalid Ink OCR configuration update');
-  return withConfigLock(SECRET_IDS.inkOcrConfig, async () => {
+  return withConfigLock(personalSecretId(SECRET_IDS.inkOcrConfig), async () => {
     if (!isSecretStoreWritable()) {
       throw new Error(
         'Credential storage is read-only. Configure secure credential storage before saving Ink OCR settings.',

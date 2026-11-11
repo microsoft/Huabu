@@ -7,6 +7,16 @@ type ConnectedAgentlet = Pick<
   'agentletId' | 'agentletProfile' | 'status'
 >;
 
+let canAccess: (agentletId: string, requestedId: string) => boolean = () =>
+  true;
+
+/** Host authorization also applies to legacy hostname-based placement. */
+export function setAgentletAccessPolicy(
+  policy?: (agentletId: string, requestedId: string) => boolean,
+): void {
+  canAccess = policy ?? (() => true);
+}
+
 export function resolveConnectedAgentletIdFromConnections(
   target: string,
   connections: readonly ConnectedAgentlet[],
@@ -30,6 +40,8 @@ export function resolveConnectedAgentletIdFromConnections(
 export function resolveConnectedAgentletId(target: string): string | undefined {
   return resolveConnectedAgentletIdFromConnections(
     target,
-    getAgentletGateway()?.getAgentlets({ status: 'connected' }) ?? [],
+    (getAgentletGateway()?.getAgentlets({ status: 'connected' }) ?? []).filter(
+      (connection) => canAccess(connection.agentletId, target),
+    ),
   );
 }

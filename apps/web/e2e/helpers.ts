@@ -1,7 +1,23 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { type CDPSession, type Page } from '@playwright/test';
+import { expect, type CDPSession, type Page } from '@playwright/test';
+
+export async function expectSelectionToolbarOutsideSelection(page: Page) {
+  const toolbar = page.locator('.selection-context-toolbar');
+  await expect(toolbar).toBeVisible();
+  await expect
+    .poll(() =>
+      toolbar.evaluate((element) => {
+        const selection = window.getSelection();
+        if (!selection?.rangeCount || selection.isCollapsed) return false;
+        const text = selection.getRangeAt(0).getBoundingClientRect();
+        const panel = element.getBoundingClientRect();
+        return panel.top >= text.bottom + 7 || panel.bottom <= text.top - 7;
+      }),
+    )
+    .toBe(true);
+}
 
 /**
  * Shared helpers for canvas gesture end-to-end tests.

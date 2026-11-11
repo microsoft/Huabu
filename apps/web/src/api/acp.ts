@@ -215,6 +215,17 @@ export async function createAgentletConnectionCommand(
 }
 
 /**
+ * Revoke every connection command and agent credential the caller was given,
+ * and disconnect their devices (Bubble mode).
+ */
+export async function resetOwnDeviceCredentials(): Promise<void> {
+  await apiFetch<void>(routes.acpConnectionCredentialsReset, {
+    method: 'POST',
+    fallbackMessage: 'Failed to reset device credentials',
+  });
+}
+
+/**
  * Fetch the GET-only capability observation for a thread and its Profile.
  * This never creates a workload or starts an ACP process.
  */
@@ -239,9 +250,10 @@ export async function getAcpThreadCachedMeta(
 export async function respondAcpPermission(
   threadId: string,
   decision: AcpPermissionDecisionRequest,
+  canvasId: string,
 ): Promise<AcpPermissionDecisionResponse> {
   return apiFetch<AcpPermissionDecisionResponse>(
-    routes.acpThreadPermission(threadId),
+    routes.acpThreadPermission(threadId, canvasId),
     {
       method: 'POST',
       json: decision,

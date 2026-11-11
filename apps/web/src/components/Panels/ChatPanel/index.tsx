@@ -1185,6 +1185,7 @@ export const ChatPanel = ({
               <div className="mb-2" inert={ownerUnavailable}>
                 <PermissionTray
                   threadId={threadId}
+                  canvasId={ownerCanvasId}
                   messageId={pendingPermission.messageId}
                   part={pendingPermission.part}
                 />

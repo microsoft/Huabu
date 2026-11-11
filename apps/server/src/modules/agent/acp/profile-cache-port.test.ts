@@ -35,6 +35,33 @@ beforeEach(() => {
 });
 
 describe('Profile cache execution isolation', () => {
+  it('starts separate scoped metadata folds for same-ID conversations', async () => {
+    let finish!: () => void;
+    const held = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    mocks.notifications.mockImplementation(() => ({
+      [Symbol.asyncIterator]: () => ({
+        next: async () => {
+          await held;
+          return { done: true, value: undefined };
+        },
+      }),
+    }));
+    const a = { name: 'space', ownerId: 'workspace-a' };
+    const b = { name: 'space', ownerId: 'workspace-b' };
+    try {
+      ensureProfileCacheSubscription('same-id', 'profile-a', 1, a);
+      ensureProfileCacheSubscription('same-id', 'profile-b', 1, b);
+      expect(mocks.notifications.mock.calls).toEqual([
+        ['same-id', a],
+        ['same-id', b],
+      ]);
+    } finally {
+      finish();
+      await held;
+    }
+  });
   it('does not warm-start an old execution from a newer Profile cache', () => {
     installAcpProfileCachePort();
     const port = mocks.install.mock.calls[0]?.[0] as {

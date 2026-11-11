@@ -32,7 +32,9 @@ import {
   selectActiveNodeId,
   usePreviewWorkspaceStore,
 } from '@/store/previewWorkspace/store';
+import { useSettingsUiStore } from '@/store/settingsUiStore';
 import { useToolStore } from '@/store/toolStore';
+import { useWorkspaceStore } from '@/store/workspaceStore';
 
 import {
   createQuestionNode,
@@ -84,6 +86,7 @@ beforeEach(() => {
     recentConversationProfileId: null,
   });
   vi.mocked(toast).mockClear();
+  useWorkspaceStore.setState({ workspaceId: 'workspace-1' });
   useCanvasStore.getState()._setStateNoAutosave({
     canvasId: 'canvas-1',
     nodes: [],
@@ -107,6 +110,20 @@ beforeEach(() => {
   });
 });
 
+/** Runs creation and reports the node `onCreated` received, if any. */
+async function createAndCompose(
+  opts: Omit<Parameters<typeof createQuestionNodeAndCompose>[0], 'onCreated'>,
+): Promise<{ nodeId: string; threadId: string } | null> {
+  let created: { nodeId: string; threadId: string } | null = null;
+  await createQuestionNodeAndCompose({
+    ...opts,
+    onCreated: (value) => {
+      created = value;
+    },
+  });
+  return created;
+}
+
 it('does not create after a newer explicit tool choice supersedes consumed placement', async () => {
   let resolve!: (value: typeof profileSnapshot) => void;
   listProfiles.mockReturnValue(
@@ -122,11 +139,12 @@ it('does not create after a newer explicit tool choice supersedes consumed place
     canvasId: 'canvas-1',
     placementPoint: { x: 10, y: 20 },
     addNode,
-    isCurrent: () => useToolStore.getState().toolIntent === toolIntent,
+    isCurrent: ({ retry }) =>
+      retry || useToolStore.getState().toolIntent === toolIntent,
   });
   useToolStore.getState().chooseCanvasTool('pan', false);
   resolve(profileSnapshot);
-  expect(await creation).toBeNull();
+  await creation;
   expect(addNode).not.toHaveBeenCalled();
   expect(useToolStore.getState().mouseToolPreference).toBe('pan');
 });
@@ -233,7 +251,7 @@ describe('Question conversation presentation', () => {
     };
     useChatStore.setState({ bindingMap: { 'canvas-1': binding } });
     const addNode = vi.fn();
-    const created = await createQuestionNodeAndCompose({
+    const created = await createAndCompose({
       addNode,
       canvasId: 'canvas-1',
       placementPoint: { x: 0, y: 0 },
@@ -273,22 +291,83 @@ describe('Question conversation presentation', () => {
 
     const addNode = vi.fn();
     expect(
-      await createQuestionNodeAndCompose({
+      await createAndCompose({
         addNode,
         canvasId: 'canvas-1',
         placementPoint: { x: 0, y: 0 },
       }),
     ).toBeNull();
     expect(addNode).not.toHaveBeenCalled();
-    expect(toast).toHaveBeenCalledWith(expect.any(String), { tone: 'danger' });
+    expect(toast).toHaveBeenCalledWith(expect.any(String), {
+      tone: 'info',
+      duration: 0,
+      secondaryAction: expect.objectContaining({ label: expect.any(String) }),
+      action: expect.objectContaining({ label: expect.any(String) }),
+    });
+    const connect = vi.mocked(toast).mock.calls[0]?.[1]?.secondaryAction;
+    assert(connect);
+    connect.onClick();
+    expect(useSettingsUiStore.getState()).toMatchObject({
+      isOpen: true,
+      requestedTab: 'agent',
+    });
+    useSettingsUiStore.getState().close();
+    expect(useAcpProfilesStore.getState().recentConversationProfileId).toBe(
+      null,
+    );
     expect(useChatStore.getState().threadsById).toEqual({});
     expect(usePanelStore.getState().isRightCollapsed).toBe(true);
+  });
+
+  it('offers Built-In Pi without selecting it, then retries with that explicit choice', async () => {
+    listProfiles.mockResolvedValue({
+      ...profileSnapshot,
+      profiles: [],
+      selectableProfileIds: [],
+    });
+    const addNode = vi.fn();
+    const onCreated = vi.fn();
+    // A caller whose user moved on still honors the explicit retry.
+    const isCurrent = vi.fn(({ retry }: { retry: boolean }) => retry);
+    await createQuestionNodeAndCompose({
+      addNode,
+      canvasId: 'canvas-1',
+      placementPoint: { x: 0, y: 0 },
+      isCurrent,
+      onCreated,
+    });
+    expect(useAcpProfilesStore.getState().recentConversationProfileId).toBe(
+      null,
+    );
+    expect(onCreated).not.toHaveBeenCalled();
+    const action = vi.mocked(toast).mock.calls[0]?.[1]?.action;
+    assert(action);
+
+    action.onClick();
+    // The caller's follow-up (e.g. a connecting edge) still runs for the retry.
+    await vi.waitFor(() => expect(onCreated).toHaveBeenCalledOnce());
+    expect(isCurrent).toHaveBeenCalledTimes(2);
+    expect(isCurrent).toHaveBeenNthCalledWith(1, { retry: true });
+    expect(isCurrent).toHaveBeenNthCalledWith(2, { retry: true });
+    expect(addNode).toHaveBeenCalledOnce();
+    expect(onCreated).toHaveBeenCalledWith({
+      nodeId: addNode.mock.calls[0]?.[0]?.id,
+      threadId: expect.any(String),
+    });
+    expect(useAcpProfilesStore.getState().recentConversationProfileId).toBe(
+      'huabu',
+    );
+    expect(addNode).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ agentBinding: { kind: 'internal' } }),
+      }),
+    );
   });
 
   it('creates a Built-In Question in operate mode without loading external Profiles', async () => {
     useAcpProfilesStore.setState({ recentConversationProfileId: 'huabu' });
     const addNode = vi.fn().mockReturnValue('question-built-in');
-    const created = await createQuestionNodeAndCompose({
+    const created = await createAndCompose({
       addNode,
       canvasId: 'canvas-1',
       placementPoint: { x: 0, y: 0 },
@@ -304,6 +383,81 @@ describe('Question conversation presentation', () => {
     );
   });
 
+  it.each(['Workspace', 'Canvas', 'preview', 'caller'] as const)(
+    'discards a persistent retry after its initiating %s changes',
+    async (scope) => {
+      listProfiles.mockResolvedValue({
+        ...profileSnapshot,
+        profiles: [],
+        selectableProfileIds: [],
+      });
+      const addNode = vi.fn();
+      const onCreated = vi.fn();
+      const isCurrent = vi.fn(() => true);
+      await createQuestionNodeAndCompose({
+        addNode,
+        canvasId: 'canvas-1',
+        placementPoint: { x: 0, y: 0 },
+        isCurrent,
+        onCreated,
+      });
+      const action = vi.mocked(toast).mock.calls[0]?.[1]?.action;
+      assert(action);
+      if (scope === 'Workspace')
+        useWorkspaceStore.setState({ workspaceId: 'workspace-2' });
+      if (scope === 'Canvas') useCanvasStore.setState({ canvasId: 'canvas-2' });
+      if (scope === 'preview')
+        usePreviewWorkspaceStore.setState({
+          workspace: createEmptyWorkspace(),
+        });
+      if (scope === 'caller') isCurrent.mockReturnValue(false);
+
+      const requests = listProfiles.mock.calls.length;
+      action.onClick();
+      await vi.waitFor(() =>
+        expect(useAcpProfilesStore.getState().loading).toBe(false),
+      );
+      expect(listProfiles).toHaveBeenCalledTimes(requests);
+      expect(addNode).not.toHaveBeenCalled();
+      expect(onCreated).not.toHaveBeenCalled();
+      expect(useChatStore.getState().threadsById).toEqual({});
+    },
+  );
+
+  it('discards a retry when the backend Workspace changes while loading its binding', async () => {
+    listProfiles.mockResolvedValueOnce({
+      ...profileSnapshot,
+      profiles: [],
+      selectableProfileIds: [],
+    });
+    const addNode = vi.fn();
+    const onCreated = vi.fn();
+    await createQuestionNodeAndCompose({
+      addNode,
+      canvasId: 'canvas-1',
+      placementPoint: { x: 0, y: 0 },
+      onCreated,
+    });
+    const action = vi.mocked(toast).mock.calls[0]?.[1]?.action;
+    assert(action);
+    let resolve!: (value: typeof profileSnapshot) => void;
+    listProfiles.mockReturnValueOnce(
+      new Promise((done) => {
+        resolve = done;
+      }),
+    );
+    action.onClick();
+    await vi.waitFor(() => expect(listProfiles).toHaveBeenCalledTimes(2));
+    useWorkspaceStore.setState({ workspaceId: 'workspace-2' });
+    resolve(profileSnapshot);
+    await vi.waitFor(() =>
+      expect(useAcpProfilesStore.getState().loading).toBe(false),
+    );
+    expect(addNode).not.toHaveBeenCalled();
+    expect(onCreated).not.toHaveBeenCalled();
+    expect(useChatStore.getState().threadsById).toEqual({});
+  });
+
   it('discards delayed creation after the Canvas changes', async () => {
     let resolve!: (value: unknown) => void;
     listProfiles.mockReturnValueOnce(
@@ -312,7 +466,7 @@ describe('Question conversation presentation', () => {
       }),
     );
     const addNode = vi.fn();
-    const pending = createQuestionNodeAndCompose({
+    const pending = createAndCompose({
       addNode,
       canvasId: 'canvas-1',
       placementPoint: { x: 0, y: 0 },
@@ -326,7 +480,7 @@ describe('Question conversation presentation', () => {
   it('does not create a connected node after its caller scope disappears', async () => {
     const addNode = vi.fn();
     expect(
-      await createQuestionNodeAndCompose({
+      await createAndCompose({
         addNode,
         canvasId: 'canvas-1',
         placementPoint: { x: 0, y: 0 },

@@ -5,10 +5,12 @@ import {
   readLegacyProfiles,
 } from './store.js';
 
-import type { CreateAcpCommandProfileInput } from './types.js';
+import type { AgentProfile, CreateAcpCommandProfileInput } from './types.js';
 
 export interface CreateAgentProfileRegistryOptions {
   storageDir: string;
+  /** Host authorization evaluated on every Profile read and mutation. */
+  canAccess?: (profile: AgentProfile) => boolean;
   legacyStorageDir?: string;
   legacyCommandProfiles?: CreateAcpCommandProfileInput[];
 }
@@ -28,5 +30,5 @@ export function createAgentProfileRegistry(
     imported.importCommandProfiles(options.legacyCommandProfiles ?? []);
     store.save({ profiles: imported.listProfiles() });
   }
-  return new AgentProfileRegistry(store);
+  return new AgentProfileRegistry(store, undefined, options.canAccess);
 }

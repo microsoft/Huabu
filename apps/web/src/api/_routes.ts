@@ -36,6 +36,14 @@ export const routes = {
   workspaceActivate: (workspaceId: string) =>
     `/workspaces/${enc(workspaceId)}/activate`,
 
+  // ── People (Bubble administration) ────────────────────────────────
+  people: '/people',
+  personMember: (principalId: string) => `/people/${enc(principalId)}/member`,
+  personWorkspace: (principalId: string, workspaceId: string) =>
+    `/people/${enc(principalId)}/workspaces/${enc(workspaceId)}`,
+  personAgentCredentialsReset: (principalId: string) =>
+    `/people/${enc(principalId)}/agent-credentials/reset`,
+
   // ── LLM ───────────────────────────────────────────────────────────
   llmConfig: '/llm/config',
   llmImageConfig: '/llm/image-config',
@@ -59,6 +67,7 @@ export const routes = {
   spaceTitle: (canvasId: string) => `/canvas/${enc(canvasId)}/title`,
   canvasImport: '/canvas/import',
   canvas: (canvasId: string) => `/canvas/${enc(canvasId)}`,
+  canvasAccess: (canvasId: string) => `/canvas/${enc(canvasId)}/access`,
   canvasChildren: (canvasId: string) => `/canvas/${enc(canvasId)}/children`,
   canvasParent: (canvasId: string) => `/canvas/${enc(canvasId)}/parent`,
   canvasDeletionPreview: (canvasId: string) =>
@@ -182,6 +191,7 @@ export const routes = {
   acpAgentletRestart: '/acp/agentlet/restart',
   acpRuntimeConfig: '/acp/runtime-config',
   acpConnectionCommand: '/acp/connection-command',
+  acpConnectionCredentialsReset: '/acp/connection-credentials/reset',
   acpThreadCachedMeta: (
     threadId: string,
     canvasId?: string,
@@ -193,8 +203,8 @@ export const routes = {
     const params = qs.length ? `?${qs.join('&')}` : '';
     return `/acp/threads/${enc(threadId)}/cached-meta${params}`;
   },
-  acpThreadPermission: (threadId: string) =>
-    `/acp/threads/${enc(threadId)}/permission`,
+  acpThreadPermission: (threadId: string, canvasId: string) =>
+    `/acp/threads/${enc(threadId)}/permission?canvasId=${enc(canvasId)}`,
   acpThreadMode: (threadId: string) => `/acp/threads/${enc(threadId)}/mode`,
   acpThreadModel: (threadId: string) => `/acp/threads/${enc(threadId)}/model`,
   acpThreadConfigOption: (threadId: string) =>

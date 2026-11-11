@@ -136,6 +136,8 @@ export type PopoverProps = Pick<
   'id' | 'role' | 'aria-label' | 'aria-labelledby' | 'onKeyDown'
 > & {
   reference?: Element | null;
+  /** Full selected-text bounds; placement flips around the selection, not a cursor point. */
+  referenceRect?: DOMRect | null;
   /** Logical owner for ancestor-hide dismissal, independent of positioning. */
   owner?: Element | null;
   placement?: Placement;
@@ -230,6 +232,7 @@ export const Popover: FC<PopoverProps> = ({
   'aria-labelledby': labelledBy,
   onKeyDown,
   reference,
+  referenceRect,
   owner,
   placement = 'bottom',
   position: positionProp,
@@ -274,8 +277,15 @@ export const Popover: FC<PopoverProps> = ({
       popoverRoots.delete(escapeLayer);
     };
   }, [contentElement, escapeLayer, reference, owner]);
+  const positionReference = useMemo(
+    () =>
+      referenceRect
+        ? { getBoundingClientRect: () => referenceRect }
+        : reference,
+    [reference, referenceRect],
+  );
   const floating = useFloating({
-    open: Boolean(reference),
+    open: Boolean(positionReference),
     elements: { reference },
     placement,
     strategy: 'fixed',
@@ -283,7 +293,11 @@ export const Popover: FC<PopoverProps> = ({
     middleware: [
       floatingOffset(8),
       flip({ padding: viewportMargin, boundary: boundary ?? undefined }),
-      shift({ padding: viewportMargin, boundary: boundary ?? undefined }),
+      shift({
+        padding: viewportMargin,
+        boundary: boundary ?? undefined,
+        crossAxis: Boolean(referenceRect),
+      }),
       size({
         padding: viewportMargin,
         boundary: boundary ?? undefined,
@@ -301,6 +315,9 @@ export const Popover: FC<PopoverProps> = ({
     ],
     whileElementsMounted: autoUpdate,
   });
+  useLayoutEffect(() => {
+    floating.refs.setPositionReference(positionReference ?? null);
+  }, [floating.refs, positionReference]);
 
   // If no position is provided, snapshot the mouse position on first mount.
   // Using a lazy initializer keeps the side-effect out of the render body.
@@ -316,7 +333,7 @@ export const Popover: FC<PopoverProps> = ({
 
   // Measure the panel and clamp it within the boundary (or viewport)
   const updateClampedPosition = useCallback(() => {
-    if (reference) return;
+    if (positionReference) return;
     const el = containerRef.current;
     if (!el) return;
 
@@ -367,7 +384,7 @@ export const Popover: FC<PopoverProps> = ({
     viewportMargin,
     boundary,
     anchor,
-    reference,
+    positionReference,
   ]);
 
   useLayoutEffect(() => {
@@ -376,7 +393,7 @@ export const Popover: FC<PopoverProps> = ({
 
   // Re-clamp on window resize so the panel stays within bounds
   useEffect(() => {
-    if (reference) return;
+    if (positionReference) return;
     window.addEventListener('resize', updateClampedPosition);
     if (boundary)
       window.addEventListener('scroll', updateClampedPosition, true);
@@ -385,12 +402,12 @@ export const Popover: FC<PopoverProps> = ({
       if (boundary)
         window.removeEventListener('scroll', updateClampedPosition, true);
     };
-  }, [boundary, reference, updateClampedPosition]);
+  }, [boundary, positionReference, updateClampedPosition]);
 
   // Re-clamp when the panel's own size changes (e.g. content switches from
   // a loading spinner to a longer list) so it doesn't overflow.
   useEffect(() => {
-    if (reference) return;
+    if (positionReference) return;
     const el = containerRef.current;
     if (!el) return;
 
@@ -398,7 +415,7 @@ export const Popover: FC<PopoverProps> = ({
     ro.observe(el);
     if (boundary) ro.observe(boundary);
     return () => ro.disconnect();
-  }, [boundary, reference, updateClampedPosition]);
+  }, [boundary, positionReference, updateClampedPosition]);
 
   // Dismiss on outside pointer-down.
   //
@@ -476,7 +493,7 @@ export const Popover: FC<PopoverProps> = ({
   }, [canDismissOnEscape, escapeLayer]);
 
   const isMeasuring = clamped === null;
-  const visible = reference ? floating.isPositioned : !isMeasuring;
+  const visible = positionReference ? floating.isPositioned : !isMeasuring;
   const initiallyFocused = useRef(false);
   useLayoutEffect(() => {
     if (!visible || initiallyFocused.current || !onOpenAutoFocus) return;
@@ -512,7 +529,7 @@ export const Popover: FC<PopoverProps> = ({
           left: isMeasuring ? 0 : clamped.x,
           top: isMeasuring ? 0 : clamped.y,
           visibility: isMeasuring ? 'hidden' : 'visible',
-          ...(reference
+          ...(positionReference
             ? {
                 ...floating.floatingStyles,
                 visibility: floating.isPositioned ? 'visible' : 'hidden',

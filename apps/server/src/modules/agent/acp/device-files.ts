@@ -16,7 +16,10 @@ import { FS_MAX_RESPONSE_BYTES, supportsFsProtocol } from '@agentlet/protocol';
 
 import { proxyFsResponseSchema } from '@huabu/shared';
 
+import { requireOwnAgentlet } from '../../identity/agent-credentials.js';
+
 import type { AcpSessionEntry } from '@agenetes/acp-driver';
+import type { Namespace } from '@agenetes/protocol';
 import type { DeviceFilesBody, DeviceFilesResponse } from '@huabu/shared';
 import type { FastifyBaseLogger } from 'fastify';
 
@@ -33,6 +36,8 @@ export class DeviceFilesError extends Error {
 interface DeviceSession {
   agentletId: string;
   threadId: string;
+  /** Captured private filesystem Job scope, reused for startup and cleanup. */
+  readonly namespace: Namespace;
   entry?: AcpSessionEntry;
   pending: number;
   tail: Promise<void>;
@@ -103,8 +108,16 @@ export class DeviceFilesService {
     // Keep admission ownership until late startup settles and can be reclaimed.
     if (session.starting) return;
     session.entry?.client.shutdown('Filesystem session retired');
-    acpSessionRegistry.remove(session.agentletId, session.threadId);
-    session.cleanup ??= releaseThread(session.agentletId, session.threadId)
+    acpSessionRegistry.remove(
+      session.agentletId,
+      session.threadId,
+      session.namespace,
+    );
+    session.cleanup ??= releaseThread(
+      session.agentletId,
+      session.threadId,
+      session.namespace,
+    )
       .then(() => {
         if (this.sessions.get(session.agentletId) === session)
           this.sessions.delete(session.agentletId);
@@ -131,6 +144,7 @@ export class DeviceFilesService {
   }
 
   async execute(body: DeviceFilesBody): Promise<DeviceFilesResponse> {
+    requireOwnAgentlet(body.agentletId);
     if (
       this.disposed ||
       getAgentletGateway()?.getAgentlet(body.agentletId)?.status !== 'connected'
@@ -162,6 +176,7 @@ export class DeviceFilesService {
       session = {
         agentletId: body.agentletId,
         threadId: `files-${randomUUID()}`,
+        namespace: Object.freeze({ name: '' }),
         pending: 0,
         tail: Promise.resolve(),
         retired: false,
@@ -255,7 +270,7 @@ export class DeviceFilesService {
               alias: profile.alias,
             },
             cwd: profile.workingDirPath,
-            namespace: { name: '' },
+            namespace: session.namespace,
             env: {},
             idleTimeoutSecs: 90,
             logger: this.logger,

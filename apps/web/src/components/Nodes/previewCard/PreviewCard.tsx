@@ -11,6 +11,7 @@ import { Button } from '@/components/Common/Button';
 import { Loading } from '@/components/Common/Loading';
 import { SummaryContent } from '@/components/Common/SummaryContent';
 import { getNodeIcon } from '@/config/nodeIcons';
+import { resolveFarLabelLayout } from '@/config/semanticZoom';
 import { handleCanvasNavigationKey } from '@/hooks/shortcuts/handleCanvasNavigationKey';
 
 import { previewCardMetricsForSize } from './previewCardDesign';
@@ -153,8 +154,28 @@ function PreviewCardContent({
   const baseMetrics = previewCardMetricsForSize(width, height);
   const far = farZoom !== undefined;
   const scale = farZoom ?? 1;
-  // Preserve authored orientation and proportional media/spacing. Only far
-  // typography uses screen units, shared with the Note label.
+  const horizontal = !textOnly && baseMetrics.horizontal;
+  const farLayout = far
+    ? resolveFarLabelLayout(
+        Math.max(
+          0,
+          width -
+            2 * NODE_BORDER_WIDTH -
+            (horizontal
+              ? baseMetrics.imageWidth + baseMetrics.imageTextGap
+              : 0),
+        ) * scale,
+        Math.max(
+          0,
+          height -
+            2 * NODE_BORDER_WIDTH -
+            (!textOnly && !horizontal
+              ? baseMetrics.verticalCoverMinHeight + NODE_BORDER_WIDTH
+              : 0),
+        ) * scale,
+      )
+    : undefined;
+  // Keep the cover orientation and scale; far text insets use Note's screen-space fit.
   const metrics = {
     ...baseMetrics,
     padding: baseMetrics.padding * scale,
@@ -319,6 +340,12 @@ function PreviewCardContent({
     '--card-view-radius': `calc(var(--node-inner-radius, ${metrics.radius - NODE_BORDER_WIDTH}px) * ${scale})`,
     '--card-inner-radius': `${metrics.radius - NODE_BORDER_WIDTH}px`,
     '--card-padding': `${metrics.padding}px`,
+    '--card-padding-inline': farLayout
+      ? `${farLayout.horizontalInset}px`
+      : undefined,
+    '--card-padding-block': farLayout
+      ? `${farLayout.verticalInset}px`
+      : undefined,
     '--card-image-text-gap': `${metrics.imageTextGap}px`,
     '--card-badge-padding': `${metrics.badgePadding}px`,
     '--card-gap': `${metrics.gap}px`,

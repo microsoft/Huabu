@@ -6,6 +6,7 @@ import {
   flip,
   offset,
   shift,
+  size,
   useFloating,
 } from '@floating-ui/react';
 import {
@@ -56,10 +57,11 @@ import {
   MENU_GROUP_CLASS,
   MENU_SECTION_LABEL_CLASS,
 } from '@/components/Common/menuStyles';
+import { Popover } from '@/components/Common/Popover';
 import { getAccentTokens } from '@/components/Nodes/design/accentTokens';
-import { useCloseOnEscape } from '@/hooks/useCloseOnEscape';
 import { useTrackAttention } from '@/hooks/useTrackAttention';
 import { useAnyGlobalModalOpen } from '@/store/globalModalUi';
+import { trackTextSelectionGesture } from '@/utils/textSelectionGesture';
 
 import type { MilkdownInstance, MilkdownTextRange } from './createMilkdown';
 import type {
@@ -200,6 +202,8 @@ export interface MilkdownFloatingToolbarProps {
   className?: string;
   mode?: 'edit' | 'selection';
   children?: ReactNode;
+  conversationActions?: ReactNode;
+  suspended?: boolean;
 }
 
 export function MilkdownFloatingToolbar({
@@ -209,6 +213,8 @@ export function MilkdownFloatingToolbar({
   className,
   mode = 'edit',
   children,
+  conversationActions,
+  suspended = false,
 }: MilkdownFloatingToolbarProps): React.JSX.Element | null {
   const { t } = useTranslation();
   const [formatting, setFormatting] = useState(() =>
@@ -238,10 +244,10 @@ export function MilkdownFloatingToolbar({
   // to `document.body` would otherwise paint on top of its backdrop.
   const hiddenByGlobalModal = useAnyGlobalModalOpen();
   const mathInputRef = useRef<HTMLInputElement>(null);
+  const mathAnchorRef = useRef<HTMLDivElement>(null);
   const mathSelectionRef = useRef<MilkdownTextRange | null>(null);
   const blockListOpen = openPopover === 'block-list';
   const mathOpen = openPopover === 'inline-math';
-  useCloseOnEscape(mathOpen, () => setOpenPopover(null));
   const hasTextSelection = !!instance?.getSelectionText()?.trim();
   const toolbarOpen =
     selectionRect !== null &&
@@ -261,18 +267,22 @@ export function MilkdownFloatingToolbar({
     isPositioned: toolbarPositioned,
   } = useFloating({
     open: toolbarOpen,
-    placement: 'top',
-    middleware: [offset(8), flip({ padding: 8 }), shift({ padding: 8 })],
-    whileElementsMounted: autoUpdate,
-  });
-  const {
-    refs: mathRefs,
-    floatingStyles: mathStyles,
-    isPositioned: mathPositioned,
-  } = useFloating({
-    open: mathOpen,
     placement: 'bottom',
-    middleware: [offset(8), flip({ padding: 8 }), shift({ padding: 8 })],
+    middleware: [
+      offset(8),
+      flip({ padding: 8, boundary: surfaceRef.current ?? undefined }),
+      shift({ padding: 8, boundary: surfaceRef.current ?? undefined }),
+      size({
+        padding: 8,
+        boundary: surfaceRef.current ?? undefined,
+        apply({ availableWidth, elements }) {
+          elements.floating.style.setProperty(
+            '--popover-available-width',
+            `${Math.max(0, availableWidth)}px`,
+          );
+        },
+      }),
+    ],
     whileElementsMounted: autoUpdate,
   });
 
@@ -286,22 +296,42 @@ export function MilkdownFloatingToolbar({
     setLinkAvailable(Boolean(instance?.getLinkSnapshot()));
     if (!instance) return;
 
+    let selecting = false;
+    let releaseFrame: number | undefined;
     const update = () => {
+      if (selecting) return;
       setFormatting(readFormattingState(instance));
       setSelectionRect(readSelectionRect(instance));
       setLinkAvailable(Boolean(instance.getLinkSnapshot()));
     };
     const unsubscribeFormatting = instance.onFormattingUpdated((state) => {
+      if (selecting) return;
       setFormatting(state);
       setSelectionRect(readSelectionRect(instance));
       setLinkAvailable(Boolean(instance.getLinkSnapshot()));
     });
+    const surface = surfaceRef.current;
+    const stopGesture = surface
+      ? trackTextSelectionGesture(
+          surface,
+          () => {
+            selecting = true;
+            setSelectionRect(null);
+          },
+          () => {
+            selecting = false;
+            releaseFrame = requestAnimationFrame(update);
+          },
+        )
+      : undefined;
     document.addEventListener('selectionchange', update);
     document.addEventListener('keyup', update, true);
     document.addEventListener('mouseup', update, true);
     window.addEventListener('scroll', update, true);
     window.addEventListener('resize', update);
     return () => {
+      stopGesture?.();
+      if (releaseFrame !== undefined) cancelAnimationFrame(releaseFrame);
       document.removeEventListener('selectionchange', update);
       document.removeEventListener('keyup', update, true);
       document.removeEventListener('mouseup', update, true);
@@ -309,20 +339,12 @@ export function MilkdownFloatingToolbar({
       window.removeEventListener('resize', update);
       unsubscribeFormatting();
     };
-  }, [instance]);
+  }, [instance, surfaceRef]);
 
   useEffect(() => {
     if (toolbarOpen) return;
     setOpenPopover(null);
   }, [toolbarOpen]);
-
-  useEffect(() => {
-    if (!mathOpen) return;
-    window.requestAnimationFrame(() => {
-      mathInputRef.current?.focus();
-      mathInputRef.current?.select();
-    });
-  }, [mathOpen]);
 
   if (!instance) return null;
 
@@ -388,9 +410,14 @@ export function MilkdownFloatingToolbar({
     setOpenPopover(null);
   };
 
-  const toolbar = (
+  const formattingToolbar = (
     <FloatingToolbar
-      className={cn('w-fit max-w-full flex-wrap', className)}
+      className={cn(
+        'w-fit max-w-full flex-wrap',
+        conversationActions &&
+          'canvas-context-toolbar selection-formatting-toolbar',
+        className,
+      )}
       onMouseDown={(event) => event.preventDefault()}
     >
       {mode === 'edit' ? (
@@ -411,7 +438,7 @@ export function MilkdownFloatingToolbar({
                   title={t('editor.blockType')}
                   disabled={disabled}
                   onClick={(event) => event.stopPropagation()}
-                  className="text-fg-muted hover:bg-bg-default gap-1"
+                  className="selection-block-trigger text-fg-muted hover:bg-bg-default gap-1"
                 >
                   <ActiveBlockIcon className="size-3.5" />
                   <span className="text-xs">{blockLabels[activeBlock]}</span>
@@ -473,6 +500,7 @@ export function MilkdownFloatingToolbar({
 
           <FloatingToolbar.Group>
             <FloatingToolbar.ColorPicker
+              floating
               colors={ACCENT_PICKER_OPTIONS_WITH_TRANSPARENT}
               value={formatting.textColor ?? ACCENT_NONE_TOKEN}
               onSelect={(token) => selectColor(token, instance.setTextColor)}
@@ -485,6 +513,7 @@ export function MilkdownFloatingToolbar({
               <TextColorTrigger color={textColorCss} />
             </FloatingToolbar.ColorPicker>
             <FloatingToolbar.ColorPicker
+              floating
               colors={BACKGROUND_COLOR_PICKER_OPTIONS}
               value={formatting.backgroundColor ?? ACCENT_NONE_TOKEN}
               onSelect={(token) =>
@@ -524,7 +553,7 @@ export function MilkdownFloatingToolbar({
             >
               <Code />
             </FloatingToolbar.ToggleButton>
-            <div ref={mathRefs.setReference} className="flex items-center">
+            <div ref={mathAnchorRef} className="flex items-center">
               <FloatingToolbar.ActionButton
                 title={t('editor.inlineMath')}
                 disabled={disabled}
@@ -555,67 +584,59 @@ export function MilkdownFloatingToolbar({
         </>
       ) : null}
       {hasTextSelection ? children : null}
-      {mathOpen
-        ? createPortal(
-            <>
-              <div
-                role="presentation"
-                className="fixed inset-0 z-40"
-                {...FLOATING_CHROME_PROPS}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  setOpenPopover(null);
-                }}
-              />
-              {/* Handlers below only isolate the popover from the editor. */}
-              {/* eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions, jsx-a11y/click-events-have-key-events */}
-              <form
-                ref={mathRefs.setFloating}
-                {...FLOATING_CHROME_PROPS}
-                className="border-edge-default shadow-bottom bg-surface z-50 flex items-center gap-1 rounded-md border p-1"
-                style={{
-                  ...mathStyles,
-                  visibility: mathPositioned ? 'visible' : 'hidden',
-                }}
-                onSubmit={(event) => {
+      {mathOpen ? (
+        <Popover
+          reference={mathAnchorRef.current}
+          placement="bottom"
+          onDismiss={() => setOpenPopover(null)}
+          onOpenAutoFocus={() => {
+            mathInputRef.current?.focus();
+            mathInputRef.current?.select();
+          }}
+          className="p-1"
+        >
+          {/* Handlers below only isolate the popover from the editor. */}
+          {/* eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions, jsx-a11y/click-events-have-key-events */}
+          <form
+            {...FLOATING_CHROME_PROPS}
+            className="flex items-center gap-1"
+            onSubmit={(event) => {
+              event.preventDefault();
+              applyInlineMath();
+            }}
+            onMouseDown={(event) => event.stopPropagation()}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <Input
+              ref={mathInputRef}
+              value={mathValue}
+              onChange={(event) => setMathValue(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Escape') {
                   event.preventDefault();
-                  applyInlineMath();
-                }}
-                onMouseDown={(event) => event.stopPropagation()}
-                onClick={(event) => event.stopPropagation()}
-              >
-                <Input
-                  ref={mathInputRef}
-                  value={mathValue}
-                  onChange={(event) => setMathValue(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Escape') {
-                      event.preventDefault();
-                      setOpenPopover(null);
-                    }
-                  }}
-                  placeholder="x + y"
-                  aria-label={t('editor.inlineMath')}
-                  className="border-edge-default bg-bg-default text-fg-default placeholder:text-fg-subtle focus:border-info h-7 w-56 rounded-sm border px-2 font-mono text-xs outline-none"
-                />
-                <Button
-                  type="submit"
-                  variant="solid"
-                  size="sm"
-                  iconOnly
-                  title={t('editor.applyInlineMath')}
-                >
-                  <Check className="size-3.5" />
-                </Button>
-              </form>
-            </>,
-            document.body,
-          )
-        : null}
+                  setOpenPopover(null);
+                }
+              }}
+              placeholder="x + y"
+              aria-label={t('editor.inlineMath')}
+              className="border-edge-default bg-bg-default text-fg-default placeholder:text-fg-subtle focus:border-info h-7 w-56 rounded-sm border px-2 font-mono text-xs outline-none"
+            />
+            <Button
+              type="submit"
+              variant="solid"
+              size="sm"
+              iconOnly
+              title={t('editor.applyInlineMath')}
+            >
+              <Check className="size-3.5" />
+            </Button>
+          </form>
+        </Popover>
+      ) : null}
     </FloatingToolbar>
   );
 
-  if (!toolbarOpen) return null;
+  if (!toolbarOpen && !suspended) return null;
 
   return createPortal(
     <div
@@ -624,6 +645,9 @@ export function MilkdownFloatingToolbar({
       role="presentation"
       onKeyDown={(event) => {
         if (
+          !suspended &&
+          event.target instanceof Node &&
+          event.currentTarget.contains(event.target) &&
           (event.metaKey || event.ctrlKey) &&
           !event.altKey &&
           !event.shiftKey &&
@@ -639,10 +663,18 @@ export function MilkdownFloatingToolbar({
       style={{
         ...toolbarStyles,
         zIndex: 1000,
-        visibility: toolbarPositioned ? 'visible' : 'hidden',
+        visibility: toolbarPositioned && !suspended ? 'visible' : 'hidden',
       }}
     >
-      {toolbar}
+      <div className="selection-context-toolbar">
+        {' '}
+        {mode === 'edit' || children ? formattingToolbar : null}
+        {(hasTextSelection || suspended) && conversationActions ? (
+          <FloatingToolbar className="canvas-context-toolbar">
+            {conversationActions}
+          </FloatingToolbar>
+        ) : null}
+      </div>
     </div>,
     document.body,
   );

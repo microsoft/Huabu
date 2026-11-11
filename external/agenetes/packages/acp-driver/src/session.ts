@@ -33,7 +33,11 @@ import { RequestError } from '@agentclientprotocol/sdk';
 import { acpBindingRecipeSchema } from './binding-recipe.js';
 import { AcpAgentClient } from './client.js';
 import { AcpServiceError } from './errors.js';
-import { acpSessionRegistry } from './session-registry.js';
+import {
+  acpSessionRegistry,
+  acpTransportKey,
+  captureAcpNamespace,
+} from './session-registry.js';
 import { ensureAgentForThread } from './spawn-orchestrator.js';
 
 import type { AcpBindingRecipe } from './binding-recipe.js';
@@ -111,7 +115,7 @@ export function setAcpProfileCachePort(port: AcpProfileCachePort | null): void {
 
 // ─── Up-report channel (I9.7) ─────────────────────────────────────────────
 //
-// The instance's per-thread up-report listeners, keyed by placement + threadId. The
+// The instance's up-report listeners, keyed by placement + namespace/thread. The
 // owning `AcpAgentHandle` registers one via `registerAcpStateListener` when
 // the Agenetes instance wires it (`handle.onState`), independent of whether
 // a `run` is active — so an out-of-turn set-RPC (which resolves an entry
@@ -124,12 +128,10 @@ const stateListeners = new Map<
   (snapshot: AgentStateSnapshot<AcpDurableState>) => void
 >();
 
-function placementThreadKey(agentletId: string, threadId: string): string {
-  return JSON.stringify([agentletId, threadId]);
-}
-
 /**
- * Register (replace) the up-report listener for `threadId`. Returns an
+ * Register (replace) the up-report listener for one device/namespace/thread.
+ * The namespace is explicit; undefined addresses only the unqualified channel
+ * and never observes a qualified peer. Returns an
  * unsubscribe that removes it only if it is still the current listener.
  * Called by {@link AcpAgentHandle.onState}.
  */
@@ -137,8 +139,9 @@ export function registerAcpStateListener(
   agentletId: string,
   threadId: string,
   listener: (snapshot: AgentStateSnapshot<AcpDurableState>) => void,
+  namespace: Namespace | undefined,
 ): () => void {
-  const key = placementThreadKey(agentletId, threadId);
+  const key = acpTransportKey(agentletId, threadId, namespace);
   stateListeners.set(key, listener);
   return () => {
     if (stateListeners.get(key) === listener) {
@@ -156,12 +159,21 @@ export function registerAcpStateListener(
  * once it resolves the entry.
  */
 export function reportEntryState(entry: AcpSessionEntry): void {
-  if (acpSessionRegistry.get(entry.agentletId, entry.threadId) !== entry) {
+  if (
+    acpSessionRegistry.get(
+      entry.agentletId,
+      entry.threadId,
+      entry.namespace,
+    ) !== entry
+  ) {
     return;
   }
-  stateListeners.get(placementThreadKey(entry.agentletId, entry.threadId))?.(
-    snapshotEntryState(entry),
+  const key = acpTransportKey(
+    entry.agentletId,
+    entry.threadId,
+    entry.namespace,
   );
+  stateListeners.get(key)?.(snapshotEntryState(entry));
 }
 
 // ─── Session lifecycle helper ─────────────────────────────────────────────
@@ -236,7 +248,7 @@ export interface EnsureAcpSessionOptions {
 /**
  * Per-key map of in-flight `ensureAcpSession` work, used to coalesce
  * concurrent callers so we never run `initialize() + session/new`
- * twice for the same `{agentletId, threadId, profileId, scopeName}` tuple.
+ * twice for the same device, full namespace/thread identity and profile.
  *
  * Why this matters: the ChatPanel mount fires
  * `POST /api/acp/threads/:id/session` to warm the slash-command cache,
@@ -247,8 +259,8 @@ export interface EnsureAcpSessionOptions {
  * `shutdown()`s the first client — which silently invalidates the
  * first request's listener registration and wastes one round-trip.
  *
- * Keying by all four staleness inputs means: different placement / profile /
- * scope / thread → independent slots, so a binding switch is never blocked
+ * Keying by full namespace identity and placement/profile means distinct
+ * owners, names or ownerless roots have independent slots, so a binding switch is never blocked
  * waiting on a stale promise.
  */
 const inflightEnsureSessions = new Map<string, Promise<AcpSessionEntry>>();
@@ -257,9 +269,12 @@ function ensureSessionKey(
   agentletId: string,
   threadId: string,
   profileId: string,
-  scopeName: string,
+  namespace: Namespace,
 ): string {
-  return JSON.stringify([agentletId, threadId, profileId, scopeName]);
+  return JSON.stringify([
+    acpTransportKey(agentletId, threadId, namespace),
+    profileId,
+  ]);
 }
 
 /**
@@ -794,18 +809,18 @@ function seedEntryFromNewSessionResult(
 /**
  * Get-or-create the per-thread ACP session, installing the long-lived
  * `available_commands_update` listener on first creation. Idempotent for
- * a given `{threadId, profileId, scopeName}` triple — repeated calls
+ * a captured device/namespace/thread identity and Profile — repeated calls
  * return the same {@link AcpSessionEntry} without re-issuing `session/new`.
  *
  * Concurrency: thread-safe across overlapping awaits. Multiple calls
- * for the same `{threadId, profileId, scopeName}` key share the
+ * for the same device/full namespace/thread identity and Profile share the
  * same in-flight promise so only one `initialize() + session/new`
  * pair is ever issued for a given coalescing window.
  *
  * Stale-entry rules (mirror the logic previously inlined in
  * `runAcpAgent`):
  *  - Binding switched to a different profile → drop and rebuild.
- *  - Canvas changed → drop (sandbox scope mismatch).
+ *  - Namespace identity differs → independent session, without evicting a peer.
  *  - Stored client was shut down → repair from its latest recoverable state.
  *
  * Throws synchronously when the agentlet bridge is not mounted or the
@@ -816,14 +831,30 @@ export async function ensureAcpSession(
   opts: EnsureAcpSessionOptions,
 ): Promise<AcpSessionEntry> {
   if (opts.recipe) acpBindingRecipeSchema.parse(opts.recipe);
+  opts = {
+    ...opts,
+    namespace: captureAcpNamespace(opts.namespace),
+    binding: { ...opts.binding },
+    ...(opts.recipe ? { recipe: structuredClone(opts.recipe) } : {}),
+    ...(opts.env ? { env: { ...opts.env } } : {}),
+  };
   const key = ensureSessionKey(
     opts.agentletId,
     opts.threadId,
     opts.binding.profileId,
-    opts.namespace.name,
+    opts.namespace,
   );
+  if (
+    acpSessionRegistry.isClosing(opts.agentletId, opts.threadId, opts.namespace)
+  )
+    throw new Error(`ACP thread '${opts.threadId}' is closing`);
   const existing = inflightEnsureSessions.get(key);
   if (existing) return existing;
+  const releasePreparation = acpSessionRegistry.reservePreparation(
+    opts.agentletId,
+    opts.threadId,
+    opts.namespace,
+  );
   // The IIFE's `finally` runs only AFTER the inner `await` suspends,
   // by which time `p` is fully assigned. Plain `delete(key)` is safe
   // because no other caller can replace this slot while we own it:
@@ -834,6 +865,7 @@ export async function ensureAcpSession(
       return await ensureAcpSessionInner(opts);
     } finally {
       inflightEnsureSessions.delete(key);
+      releasePreparation();
     }
   })();
   inflightEnsureSessions.set(key, p);
@@ -868,9 +900,15 @@ async function ensureAcpSessionInner(
     );
   }
 
-  const registeredEntry = acpSessionRegistry.get(agentletId, threadId);
+  const registeredEntry = acpSessionRegistry.get(
+    agentletId,
+    threadId,
+    namespace,
+  );
   const entryMatchesRequest =
-    registeredEntry?.namespace.name === scopeName &&
+    registeredEntry !== undefined &&
+    acpTransportKey(agentletId, threadId, registeredEntry.namespace) ===
+      acpTransportKey(agentletId, threadId, namespace) &&
     registeredEntry.profileId === binding.profileId;
   if (
     registeredEntry &&
@@ -934,6 +972,7 @@ async function ensureAcpSessionInner(
     opts.env,
     opts.idleTimeoutSecs,
     opts.workloadType ?? 'Deployment',
+    namespace,
   );
   const conn = gateway.getSession(agentletId, agentSessionId);
   if (!conn || conn.status !== 'connected') {

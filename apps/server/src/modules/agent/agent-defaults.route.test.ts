@@ -256,3 +256,67 @@ describe('owner-only Agent defaults', () => {
     expect(response.json().message).toContain('Invalid Agent defaults file');
   });
 });
+
+it.each(['huabu', 'existing-external', 'unknown-external', null])(
+  'lets a member select %s only when available in their profile registry',
+  async (profileId) => {
+    const { openPersonalSettings, useCaller } =
+      await import('../identity/personal-settings.js');
+    mocks.getProfile.mockImplementation((id) =>
+      id === 'existing-external'
+        ? { id, launch: { kind: 'acp-command' } }
+        : undefined,
+    );
+    await openPersonalSettings(async () => {
+      useCaller({
+        principal: { principalId: 'carol', kind: 'user' },
+        member: true,
+        owner: false,
+        access: {
+          can: async () => true,
+          claim: async () => {},
+          workspaces: async () => [],
+        },
+      });
+      const response = await app.inject({
+        method: 'PUT',
+        url,
+        remoteAddress: '192.0.2.10',
+        payload: { profileId, functionalModel: '' },
+      });
+      expect(response.statusCode).toBe(
+        profileId === 'unknown-external' ? 400 : 200,
+      );
+    });
+    if (profileId === 'unknown-external')
+      expect(mocks.set).not.toHaveBeenCalled();
+    else expect(mocks.set).toHaveBeenCalledOnce();
+  },
+);
+
+it('allows a member to read fixed defaults without exposing administrator controls', async () => {
+  const { openPersonalSettings, useCaller } =
+    await import('../identity/personal-settings.js');
+  mocks.get.mockReturnValue({ profileId: 'huabu', functionalModel: '' });
+  await openPersonalSettings(async () => {
+    useCaller({
+      principal: { principalId: 'carol', kind: 'user' },
+      member: true,
+      owner: false,
+      access: {
+        can: async () => true,
+        claim: async () => {},
+        workspaces: async () => [],
+      },
+    });
+    const response = await app.inject({ url, remoteAddress: '192.0.2.10' });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      defaults: { profileId: 'huabu', functionalModel: '' },
+      selectionState: 'available',
+      modelCapability: 'supported',
+    });
+  });
+  expect(mocks.set).not.toHaveBeenCalled();
+  expect(mocks.getProfile).not.toHaveBeenCalled();
+});

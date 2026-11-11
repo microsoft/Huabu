@@ -20,6 +20,9 @@ const mocks = vi.hoisted(() => ({
   callbacks: [] as Array<() => void>,
   disconnect: vi.fn(),
   propose: vi.fn(),
+  canWrite: true,
+  update: vi.fn(),
+  move: vi.fn(),
 }));
 vi.mock('@huabu/shared/canvas-engine', async (importOriginal) => {
   const actual = await importOriginal<typeof CanvasEngine>();
@@ -33,10 +36,11 @@ vi.mock('@/store/canvasStore', () => {
   const getState = () => ({
     nodes: mocks.nodes,
     canvasId: 'c1',
-    updateNodeData: vi.fn(),
-    moveNoteBlockIntoNote: vi.fn(),
+    updateNodeData: mocks.update,
+    moveNoteBlockIntoNote: mocks.move,
   });
   return {
+    selectCanWriteCanvas: () => mocks.canWrite,
     default: Object.assign(
       (select: (state: unknown) => unknown) => select(getState()),
       { getState },
@@ -101,6 +105,9 @@ const render = () =>
   );
 
 beforeEach(() => {
+  mocks.canWrite = true;
+  mocks.update.mockReset();
+  mocks.move.mockReset();
   mocks.nodes = [
     {
       id: 'n1',
@@ -155,6 +162,37 @@ afterEach(() => {
 });
 
 describe('mounted Note actual-width measurement', () => {
+  it.each([false, true])(
+    'inline note drops respect write permission (write: %s)',
+    (write) => {
+      mocks.canWrite = write;
+      render();
+      const target = required(
+        container.querySelector('.relative.h-full.w-full.overflow-hidden'),
+      );
+      const event = new Event('drop', { bubbles: true, cancelable: true });
+      Object.defineProperty(event, 'dataTransfer', {
+        value: {
+          types: ['application/x-huabu-dnd'],
+          getData: () =>
+            JSON.stringify({
+              dragId: 'test-drop',
+              kind: 'note',
+              origin: { type: 'user-excerpt' },
+              data: { content: 'Added' },
+            }),
+        },
+      });
+      act(() => target.dispatchEvent(event));
+      if (write)
+        expect(mocks.update).toHaveBeenCalledWith('n1', {
+          content: 'Document\n\nAdded',
+        });
+      else expect(mocks.update).not.toHaveBeenCalled();
+      expect(mocks.move).not.toHaveBeenCalled();
+    },
+  );
+
   it.each(['overview', 'reading'] as const)(
     'skips fixed minimal keys and resumes measurement in %s',
     (mode) => {

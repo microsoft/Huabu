@@ -30,6 +30,82 @@ function frame(
 }
 
 describe('projectAffectedFrameGeometry', () => {
+  it.each([100, 400])(
+    'fits free ancestors after structured descendants measure %spx tall',
+    (height) => {
+      const outer = frame('outer', { x: 0, y: 0 }, undefined, {
+        sizing: 'hug',
+      });
+      const inner = frame('inner', { x: 20, y: 64 }, 'outer', {
+        layoutMode: 'grid',
+        gridCount: 1,
+        sizing: 'hug',
+      });
+      const child: NestableNode = {
+        id: 'child',
+        type: 'question',
+        parentId: 'inner',
+        position: { x: 20, y: 64 },
+        data: { frameColumn: 0, frameRow: 0 },
+        style: { width: 200 },
+        measured: { width: 200, height },
+      };
+      const nodes = projectAffectedFrameGeometry(
+        [outer, inner, child],
+        ['inner'],
+      ).nodes;
+      expect(nodes.find((node) => node.id === 'inner')?.style).toMatchObject({
+        width: 240,
+        height: height + 84,
+      });
+      expect(nodes.find((node) => node.id === 'outer')?.style).toMatchObject({
+        width: 280,
+        height: height + 168,
+      });
+      expect(projectAffectedFrameGeometry(nodes, ['inner']).nodes).toEqual(
+        nodes,
+      );
+    },
+  );
+
+  it('projects alternating free and Grid levels inside-out while keeping Manual ancestors pinned', () => {
+    const manual = frame('manual', { x: 0, y: 0 }, undefined, {
+      sizing: 'manual',
+    });
+    const outer = frame('outer', { x: 20, y: 64 }, 'manual', { sizing: 'hug' });
+    const grid = frame('grid', { x: 20, y: 64 }, 'outer', {
+      layoutMode: 'grid',
+      gridCount: 1,
+    });
+    const free = frame('free', { x: 20, y: 64 }, 'grid', {
+      frameColumn: 0,
+      frameRow: 0,
+    });
+    const inner = frame('inner', { x: 20, y: 64 }, 'free', {
+      layoutMode: 'grid',
+      gridCount: 1,
+    });
+    const child: NestableNode = {
+      id: 'child',
+      type: 'note',
+      parentId: 'inner',
+      position: { x: 20, y: 64 },
+      data: { frameColumn: 0, frameRow: 0 },
+      style: { width: 200, height: 400 },
+    };
+    const nodes = projectAffectedFrameGeometry(
+      [manual, outer, grid, free, inner, child],
+      ['outer', 'inner'],
+    ).nodes;
+    for (const [index, id] of ['inner', 'free', 'grid', 'outer'].entries()) {
+      expect(nodes.find((node) => node.id === id)?.style?.height).toBe(
+        400 + 84 * (index + 1),
+      );
+    }
+    expect(nodes.find((node) => node.id === 'manual')).toBe(manual);
+    expect(projectAffectedFrameGeometry(nodes, ['inner']).nodes).toEqual(nodes);
+  });
+
   it('fits an inner source Frame and reflows its structured ancestor', () => {
     const outer = frame('outer', { x: 0, y: 0 }, undefined, {
       layoutMode: 'grid',

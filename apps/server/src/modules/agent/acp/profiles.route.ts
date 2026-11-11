@@ -9,11 +9,11 @@
  *                                        threads keep running off their
  *                                        own binding-recipe snapshots)
  *
- * Owner-only on every verb. Profiles contain a fully-resolved command line
- * that the daemon will execute on this machine, so unauthenticated callers
- * must never read or mutate them.
+ * Every verb uses the caller's own Profiles and devices. Profiles contain
+ * commands executed on those devices, so unauthenticated callers must never
+ * read or mutate them.
  *
- * The list includes the supervised agentlet's health snapshot. Profiles
+ * In local mode the list includes the supervised agentlet's health snapshot. Profiles
  * retain their own explicit machine identity.
  *
  * Profiles are templates: once a thread is first realized against a profile
@@ -52,7 +52,12 @@ import {
   readProfileCapabilities,
 } from './profile-capabilities.js';
 import { invalidateProfileSchemaCache } from './profile-schema-cache.js';
-import { isOwnerRequest } from '../../security/owner.js';
+import {
+  canUseAgentlet,
+  requireOwnAgentlet,
+} from '../../identity/agent-credentials.js';
+import { personalSettingsOwner } from '../../identity/personal-settings.js';
+import { canChangeOwnSettings } from '../../security/owner.js';
 import {
   getAgentDefaults,
   initializeAgentDefaults,
@@ -72,16 +77,18 @@ import type {
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 
 function denyRemote(request: FastifyRequest, reply: FastifyReply): boolean {
-  if (isOwnerRequest(request)) return false;
+  if (canChangeOwnSettings(request)) return false;
   reply.status(403).send({
     message:
-      'Forbidden: external agent profiles can only be managed from localhost',
+      'Forbidden: authorization to manage your agent profiles is required',
   });
   return true;
 }
 
 function getConnectedAgentlets(): AgentletConnection[] {
-  return getAgentletGateway()?.getAgentlets({ status: 'connected' }) ?? [];
+  return (
+    getAgentletGateway()?.getAgentlets({ status: 'connected' }) ?? []
+  ).filter((connection) => canUseAgentlet(connection.agentletId));
 }
 
 function isAgentletConnected(agentletId: string): boolean {
@@ -152,6 +159,7 @@ const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
           message: 'Device names must contain 1 to 120 characters.',
         });
       }
+      requireOwnAgentlet(params.data.agentletId);
       if (!isAgentletConnected(params.data.agentletId)) {
         return reply.status(404).send({
           code: 'device_not_connected',
@@ -230,7 +238,9 @@ const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
         });
       }
       const profiles = registry.listProfiles();
-      const connections = getAgentletGateway()?.getAgentlets() ?? [];
+      const connections = (getAgentletGateway()?.getAgentlets() ?? []).filter(
+        (connection) => canUseAgentlet(connection.agentletId),
+      );
       const connected = connections.filter(
         (connection) => connection.status === 'connected',
       );
@@ -246,7 +256,9 @@ const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
       }
       let folderPickerAgentletId: string | null = null;
       try {
-        const localId = await readPickerDeviceId();
+        const localId = personalSettingsOwner()
+          ? null
+          : await readPickerDeviceId();
         if (connected.some((device) => device.agentletId === localId))
           folderPickerAgentletId = localId;
       } catch (error) {
@@ -305,7 +317,7 @@ const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
         ),
       );
       for (const [agentletId, displayName] of Object.entries(deviceNames)) {
-        if (!knownDevices.has(agentletId))
+        if (canUseAgentlet(agentletId) && !knownDevices.has(agentletId))
           knownDevices.set(agentletId, { agentletId, displayName });
       }
       return {
@@ -320,7 +332,11 @@ const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
         connectedDevices,
         knownDevices: [...knownDevices.values()],
         folderPickerAgentletId,
-        agentlet: getDaemonSupervisor().getStatus(),
+        // Bubble mounts no supervised worker (`supervise: false`), so a
+        // status would only ever read offline and offer a restart nobody can use.
+        agentlet: personalSettingsOwner()
+          ? null
+          : getDaemonSupervisor().getStatus(),
         agentDefaults: getAgentDefaults(),
       };
     },
@@ -352,6 +368,7 @@ const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
         });
       }
       const agentletId = parsed.data.agentletId;
+      requireOwnAgentlet(agentletId);
       if (!isAgentletConnected(agentletId)) {
         return reply.status(409).send({
           code: 'agentlet_unavailable',

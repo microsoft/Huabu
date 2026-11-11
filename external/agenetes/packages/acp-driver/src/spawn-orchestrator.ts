@@ -11,19 +11,20 @@
  * The agentlet-facing model is a pool of live agent sessions addressed
  * by `sessionId`. This module bridges the two:
  *
- *   `ensureAgentForThread(agentletId, threadId, recipe, existingSessionId?, env?)`
+ *   `ensureAgentForThread(agentletId, threadId, recipe, ..., namespace?)`
  *     → returns `{agentletId, sessionId, pid}` for the explicitly targeted node
  *       that thread, spawning a new one on the agentlet if none is
  *       alive. Each thread gets its OWN CLI process; we do not share
  *       processes across threads.
  *
- *   `releaseThread(agentletId, threadId)`
+ *   `releaseThread(agentletId, threadId, namespace?)`
  *     → drop the cached mapping and best-effort ask the agentlet to
  *       stop the spawned agent. Used when a thread is deleted.
  *
  * Caching: the map lives in this process's memory and is keyed by
- * `(agentletId, threadId)`, so reconnecting one daemon cannot invalidate
- * or alias sessions owned by another execution node.
+ * device + runtime namespace/thread identity, so neither another device nor
+ * another namespace can alias a live process. Qualified appId is opaque host
+ * correlation; the agentlet still owns processes by its returned sessionId.
  *
  * Session lifecycle: sessions are NOT eagerly destroyed. The agentlet
  * daemon auto-suspends idle sessions after `idleTimeoutSecs` and can
@@ -42,12 +43,18 @@ import {
   getAgentletGateway,
   resolveConnectedAgentletId,
 } from '@agenetes/agentlet-host';
+import { threadIdentityKey } from '@agenetes/runtime';
 
 import { acpBindingRecipeSchema } from './binding-recipe.js';
 import { AcpServiceError } from './errors.js';
+import {
+  acpSessionRegistry,
+  acpTransportKey,
+  captureAcpNamespace,
+} from './session-registry.js';
 
 import type { AcpBindingRecipe } from './binding-recipe.js';
-import type { WorkloadType } from '@agenetes/protocol';
+import type { Namespace, WorkloadType } from '@agenetes/protocol';
 
 export function isSessionResumeUnavailableError(error: unknown): boolean {
   if (!(error instanceof AgentletRequestError)) return false;
@@ -76,18 +83,28 @@ interface CachedAgent {
   pid: number;
   /** Which agentlet instance owns this agent. */
   agentletId: string;
+  threadId: string;
+  namespace?: Namespace;
+  /** A failed compensation must be retried before this slot can be reused. */
+  cleanupRequired?: boolean;
 }
 
 const threadToAgent = new Map<string, CachedAgent>();
 const releaseOperations = new Map<string, Promise<void>>();
+const spawnOperations = new Map<
+  string,
+  {
+    agentletId: string;
+    threadId: string;
+    namespace?: Namespace;
+    token: symbol;
+    promise: Promise<{ agentletId: string; sessionId: string; pid: number }>;
+  }
+>();
 
 /** @deprecated Use threadId directly — kept for backwards compat during migration. */
 export function threadKey(_canvasId: string, threadId: string): string {
   return threadId;
-}
-
-function agentletThreadKey(agentletId: string, threadId: string): string {
-  return JSON.stringify([agentletId, threadId]);
 }
 
 /** Resolve one explicitly targeted execution node. */
@@ -170,8 +187,9 @@ async function waitForAgentConnection(
  *   • the agentlet RPC for spawn fails.
  *
  * Idempotent within a single agentlet's lifetime — repeat calls for
- * the same `(agentletId, threadId)` return the same `sessionId` until the agent
- * dies or the agentlet is re-forked.
+ * the same device and namespace/thread identity return the same `sessionId`
+ * until the agent dies or the agentlet is re-forked. Omitting namespace creates
+ * an exact unqualified legacy channel, distinct from every qualified one.
  */
 export async function ensureAgentForThread(
   agentletId: string,
@@ -181,12 +199,60 @@ export async function ensureAgentForThread(
   env?: Record<string, string>,
   idleTimeoutSecs = 600,
   workloadType: WorkloadType = 'Deployment',
+  namespace?: Namespace,
 ): Promise<{
   agentletId: string;
   sessionId: string;
   pid: number;
 }> {
   acpBindingRecipeSchema.parse(recipe);
+  namespace = namespace ? captureAcpNamespace(namespace) : undefined;
+  recipe = structuredClone(recipe);
+  env = env ? { ...env } : undefined;
+  agentletId = resolveConnectedAgentletId(agentletId) ?? agentletId;
+  const key = acpTransportKey(agentletId, threadId, namespace);
+  if (acpSessionRegistry.isClosing(agentletId, threadId, namespace))
+    throw new Error(`ACP thread '${threadId}' is closing`);
+  const existing = spawnOperations.get(key);
+  if (existing) return existing.promise;
+  const releasePreparation = acpSessionRegistry.reservePreparation(
+    agentletId,
+    threadId,
+    namespace,
+  );
+  const token = Symbol('ACP spawn operation');
+  const promise = (async () => {
+    try {
+      return await ensureAgentForThreadInner(
+        agentletId,
+        threadId,
+        recipe,
+        existingSessionId,
+        env,
+        idleTimeoutSecs,
+        workloadType,
+        namespace,
+      );
+    } finally {
+      if (spawnOperations.get(key)?.token === token)
+        spawnOperations.delete(key);
+      releasePreparation();
+    }
+  })();
+  spawnOperations.set(key, { agentletId, threadId, namespace, token, promise });
+  return promise;
+}
+
+async function ensureAgentForThreadInner(
+  agentletId: string,
+  threadId: string,
+  recipe: AcpBindingRecipe,
+  existingSessionId: string | undefined,
+  env: Record<string, string> | undefined,
+  idleTimeoutSecs: number,
+  workloadType: WorkloadType,
+  namespace: Namespace | undefined,
+): Promise<{ agentletId: string; sessionId: string; pid: number }> {
   const agentlet = await waitForTargetAgentlet(
     agentletId,
     AGENTLET_READY_TIMEOUT_MS,
@@ -198,9 +264,16 @@ export async function ensureAgentForThread(
     );
   }
 
-  const cacheKey = agentletThreadKey(agentlet.agentletId, threadId);
+  if (acpSessionRegistry.isClosing(agentletId, threadId, namespace))
+    throw new Error(`ACP thread '${threadId}' is closing`);
+  const cacheKey = acpTransportKey(agentlet.agentletId, threadId, namespace);
   const cached = threadToAgent.get(cacheKey);
   if (cached) {
+    if (cached.cleanupRequired)
+      throw new AcpServiceError(
+        'cleanup_failed',
+        `External agent for '${threadId}' still requires process reclamation`,
+      );
     const gateway = getAgentletGateway();
     const conn = gateway?.getSession(cached.agentletId, cached.sessionId);
     if (conn && conn.status === 'connected') {
@@ -231,7 +304,7 @@ export async function ensureAgentForThread(
   let pid: number;
   try {
     const result = await gateway.spawnOnAgentlet(agentlet.agentletId, {
-      appId: threadId,
+      appId: namespace ? threadIdentityKey({ threadId, namespace }) : threadId,
       workloadType,
       ...(existingSessionId ? { sessionId: existingSessionId } : {}),
       sessionSpec: {
@@ -296,6 +369,17 @@ export async function ensureAgentForThread(
     );
   }
 
+  // Own the process as soon as spawn succeeds, including a failed handshake
+  // whose compensation cannot be confirmed. Teardown can then retry it.
+  const spawned: CachedAgent = {
+    sessionId,
+    pid,
+    agentletId: agentlet.agentletId,
+    threadId,
+    namespace,
+  };
+  threadToAgent.set(cacheKey, spawned);
+
   // Wait for the agent's WS handshake to complete before reporting
   // success. If the agent never reaches `connected` within the window
   // we surface a `connect_timeout` — the spawn succeeded but the
@@ -314,7 +398,10 @@ export async function ensureAgentForThread(
       if (!result.stopped) {
         throw new Error('Agentlet did not confirm process reclamation');
       }
+      if (threadToAgent.get(cacheKey) === spawned)
+        threadToAgent.delete(cacheKey);
     } catch (error) {
+      spawned.cleanupRequired = true;
       throw new AcpServiceError(
         'cleanup_failed',
         `External agent '${recipe.alias}' did not connect and its process could not be reclaimed: ${
@@ -328,11 +415,6 @@ export async function ensureAgentForThread(
     );
   }
 
-  threadToAgent.set(cacheKey, {
-    sessionId,
-    pid,
-    agentletId: agentlet.agentletId,
-  });
   return {
     agentletId: agentlet.agentletId,
     sessionId,
@@ -343,26 +425,46 @@ export async function ensureAgentForThread(
 /**
  * Stop the exact spawned process and then drop the cached mapping.
  * Concurrent calls share one stop operation; failures retain the mapping
- * so the caller can retry instead of losing ownership.
+ * so the caller can retry instead of losing ownership. Omitting namespace
+ * requires one unique device/public-thread scope across live processes and
+ * pending preparations. Qualified cleanup fences only its own admissions and
+ * waits for its reserved startup before reclaiming the exact native session.
  */
 export async function releaseThread(
   agentletId: string,
   threadId: string,
+  namespace?: Namespace,
 ): Promise<void> {
-  const key = agentletThreadKey(agentletId, threadId);
+  agentletId = resolveConnectedAgentletId(agentletId) ?? agentletId;
+  namespace = namespace ? captureAcpNamespace(namespace) : undefined;
+  const scopes = acpSessionRegistry.scopes(agentletId, threadId);
+  for (const [key, cached] of [...threadToAgent, ...spawnOperations]) {
+    if (cached.agentletId === agentletId && cached.threadId === threadId)
+      scopes.set(key, cached.namespace);
+  }
+  if (!namespace && scopes.size > 1)
+    throw new Error(`Ambiguous ACP thread '${threadId}'; supply its namespace`);
+  const key = namespace
+    ? acpTransportKey(agentletId, threadId, namespace)
+    : (scopes.keys().next().value ?? acpTransportKey(agentletId, threadId));
+  namespace = namespace ?? scopes.get(key);
   const inFlight = releaseOperations.get(key);
   if (inFlight) return inFlight;
-  const cached = threadToAgent.get(key);
-  if (!cached) return;
-  const gateway = getAgentletGateway();
-  if (!gateway) {
-    throw new AcpServiceError(
-      'cleanup_failed',
-      `Cannot reclaim external agent for '${threadId}': Agentlet Gateway is not mounted`,
-    );
-  }
+  const cleanup = acpSessionRegistry.beginCleanup(
+    agentletId,
+    threadId,
+    namespace,
+  );
   const operation = (async () => {
     try {
+      // Reservations include session setup and direct spawn calls. A late
+      // result stays owned until its exact process can be reclaimed.
+      await cleanup.settled;
+      if (namespace) acpSessionRegistry.remove(agentletId, threadId, namespace);
+      const cached = threadToAgent.get(key);
+      if (!cached) return;
+      const gateway = getAgentletGateway();
+      if (!gateway) throw new Error('Agentlet Gateway is not mounted');
       const result = await gateway.stopOnAgentlet(cached.agentletId, {
         sessionId: cached.sessionId,
       });
@@ -384,6 +486,7 @@ export async function releaseThread(
     await operation;
   } finally {
     if (releaseOperations.get(key) === operation) releaseOperations.delete(key);
+    cleanup.release();
   }
 }
 
@@ -391,4 +494,5 @@ export async function releaseThread(
 export function _resetSpawnOrchestratorForTests(): void {
   threadToAgent.clear();
   releaseOperations.clear();
+  spawnOperations.clear();
 }

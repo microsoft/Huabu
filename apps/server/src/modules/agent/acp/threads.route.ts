@@ -2,9 +2,13 @@
 // Licensed under the MIT license.
 
 import { acpSessionRegistry } from '@agenetes/acp-driver';
-import { resolveConnectedAgentletId } from '@agenetes/agentlet-host';
+import {
+  getAgentProfileRegistry,
+  resolveConnectedAgentletId,
+} from '@agenetes/agentlet-host';
 
 import {
+  acpPermissionDecisionQuerySchema,
   acpPermissionDecisionSchema,
   acpThreadCachedMetaQuerySchema,
   setAcpSessionConfigOptionRequestSchema,
@@ -21,6 +25,8 @@ import {
   rememberProfileConfigPreference,
   rememberProfileSessionPreference,
 } from './profile-session-preferences.js';
+import { requireOwnAgentlet } from '../../identity/agent-credentials.js';
+import { personalSettingsOwner } from '../../identity/personal-settings.js';
 import { canvasAcpNamespace } from '../../workspace/paths.js';
 import { agenetes } from '../agenetes/index.js';
 
@@ -224,8 +230,11 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
       });
     }
     const { canvasId, profileId } = parsed.data;
-    const record = canvasId
-      ? await agenetes.record(canvasAcpNamespace(canvasId), threadId)
+    // Persistence and live metadata must address the same captured scope,
+    // even if the process-active local Workspace switches during this read.
+    const namespace = canvasId ? canvasAcpNamespace(canvasId) : undefined;
+    const record = namespace
+      ? await agenetes.record(namespace, threadId)
       : undefined;
     const spec =
       record?.spec.kind === 'external'
@@ -248,8 +257,9 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
         }
       : undefined;
     const agentletId = resolveThreadAgentletId(record);
+    if (agentletId) requireOwnAgentlet(agentletId);
     const live = agentletId
-      ? acpSessionRegistry.get(agentletId, threadId)
+      ? acpSessionRegistry.get(agentletId, threadId, namespace)
       : undefined;
     if (live) {
       return {
@@ -271,6 +281,10 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
       };
     }
     if (profileId) {
+      if (!getAgentProfileRegistry()?.getProfile(profileId))
+        return reply
+          .code(404)
+          .send({ message: 'Agent Profile is unavailable' });
       const profileCache = getProfileSchemaCache(profileId);
       if (
         profileCache &&
@@ -312,7 +326,28 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
     // `permission_request` emitted during an in-flight `session/prompt`),
     // so a live handle for this thread is the precondition. `get` never
     // spawns one (I9.3): a missing handle is a dead-session 404.
-    const handle = agenetes.get(threadId);
+    const query = acpPermissionDecisionQuerySchema.safeParse(request.query);
+    const personal = personalSettingsOwner() !== null;
+    if (!query.success || (personal && !query.data.canvasId)) {
+      return reply.status(400).send({
+        message: 'A valid Space query is required',
+        code: 'validation_failed',
+      });
+    }
+    const { canvasId } = query.data;
+    const namespace = canvasId ? canvasAcpNamespace(canvasId) : undefined;
+    const record = namespace
+      ? await agenetes.record(namespace, threadId)
+      : undefined;
+    const agentletId = resolveThreadAgentletId(record);
+    if (personal && !agentletId) {
+      return reply.status(404).send({
+        message: 'No ACP session for this thread',
+        code: 'session_not_found',
+      });
+    }
+    if (agentletId) requireOwnAgentlet(agentletId);
+    const handle = agenetes.get(threadId, namespace);
     if (!handle) {
       return reply.status(404).send({
         message: 'No ACP session for this thread',

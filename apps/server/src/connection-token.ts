@@ -113,6 +113,10 @@ function dotenvValue(key: string, value: string): string {
 
 export function buildAgentletConnectionCommand(
   request: AgentletConnectionCommandRequest,
+  credential: { token: string; source: ConnectionTokenSource } = {
+    token: getConnectionToken(),
+    source: activeSource ?? 'generated',
+  },
 ): AgentletConnectionCommandResponse {
   let normalizedOrigin: string;
   try {
@@ -125,7 +129,7 @@ export function buildAgentletConnectionCommand(
   }
   const origin = new URL(normalizedOrigin);
   const insecure = origin.protocol === 'http:';
-  const token = getConnectionToken();
+  const { token } = credential;
   let content: string;
   if (request.format === 'env-file') {
     content =
@@ -153,7 +157,7 @@ export function buildAgentletConnectionCommand(
   }
   return {
     content,
-    source: activeSource ?? 'generated',
+    source: credential.source,
     warnings: [
       ...(isLoopbackHostname(origin.hostname) ? (['loopback'] as const) : []),
       ...(insecure ? (['insecure'] as const) : []),

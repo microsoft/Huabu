@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+import { threadIdentityKey } from '@agenetes/runtime';
+
 import {
   conversationTitleSchema,
   chatInputText,
@@ -262,7 +264,10 @@ export class ConversationTitleService {
     question?: QuestionTitleSnapshot,
     allowLLM = true,
   ): Promise<void> {
-    const key = JSON.stringify([canvasId, threadId ?? question?.nodeId]);
+    const key = threadIdentityKey({
+      namespace: canvasAcpNamespace(canvasId),
+      threadId: threadId ?? question?.nodeId ?? '',
+    });
     return coalesceInFlight(this.inFlight, key, () =>
       this.initializeOnce(canvasId, threadId, prompt, question, allowLLM).catch(
         (error) => this.deps.onError(error),
@@ -351,7 +356,10 @@ export class ConversationTitleService {
   /** Install at realization, before session bootstrap; notifications are persist-then-notify. */
   subscribe(canvasId: string, threadId: string): void {
     if (!canvasId || !threadId) return;
-    const key = JSON.stringify([canvasId, threadId]);
+    const key = threadIdentityKey({
+      namespace: canvasAcpNamespace(canvasId),
+      threadId,
+    });
     if (this.subscriptions.has(key)) return;
     const token = Symbol();
     this.subscriptions.set(key, token);

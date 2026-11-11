@@ -1867,7 +1867,7 @@ describe('StrokeSelectionToolbar Ink submission', () => {
     expect(editGroup?.querySelector('.lucide-pencil')).not.toBeNull();
     expect(editGroup?.querySelector('.lucide-shapes')).toBeNull();
     expect(editGroup?.querySelectorAll('.bg-edge-default')).toHaveLength(2);
-    expect(agentGroup?.querySelector('.bg-edge-default')).toBeNull();
+    expect(agentGroup?.querySelectorAll('.bg-edge-default')).toHaveLength(1);
     expect(
       [...(toolbarContainer?.children ?? [])].some((child) =>
         child.classList.contains('bg-edge-default'),

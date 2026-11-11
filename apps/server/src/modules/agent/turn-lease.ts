@@ -1,6 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+import { threadIdentityKey } from '@agenetes/runtime';
+
+import type { Namespace } from '@agenetes/protocol';
+
 interface TurnLease {
   released: Promise<void>;
   resolveReleased: () => void;
@@ -14,8 +18,12 @@ const activeThreads = new Map<string, TurnLease>();
  * Returns an idempotent release callback, or `null` when another turn is
  * already running.
  */
-export function acquireAgentTurn(threadId: string): (() => void) | null {
-  if (activeThreads.has(threadId)) return null;
+export function acquireAgentTurn(
+  threadId: string,
+  namespace?: Namespace,
+): (() => void) | null {
+  const key = threadIdentityKey({ threadId, namespace });
+  if (activeThreads.has(key)) return null;
 
   let resolveReleased: (() => void) | undefined;
   const lease: TurnLease = {
@@ -24,14 +32,14 @@ export function acquireAgentTurn(threadId: string): (() => void) | null {
     }),
     resolveReleased: () => resolveReleased?.(),
   };
-  activeThreads.set(threadId, lease);
+  activeThreads.set(key, lease);
 
   let released = false;
   return () => {
     if (released) return;
     released = true;
-    if (activeThreads.get(threadId) === lease) {
-      activeThreads.delete(threadId);
+    if (activeThreads.get(key) === lease) {
+      activeThreads.delete(key);
     }
     lease.resolveReleased();
   };
@@ -48,8 +56,11 @@ export function acquireAgentTurn(threadId: string): (() => void) | null {
 export async function waitForAgentTurnRelease(
   threadId: string,
   timeoutMs = 5000,
+  namespace?: Namespace,
 ): Promise<void> {
-  const released = activeThreads.get(threadId)?.released;
+  const released = activeThreads.get(
+    threadIdentityKey({ threadId, namespace }),
+  )?.released;
   if (!released) return;
 
   let timer: ReturnType<typeof setTimeout> | undefined;

@@ -733,3 +733,31 @@ describe('ordinary Profile catalog routes', () => {
     expect(mocks.registry.patchProfile).not.toHaveBeenCalled();
   });
 });
+
+it('returns no operator daemon metadata in the member catalog', async () => {
+  const server = await setup();
+  mocks.registry.listProfiles.mockReturnValue([]);
+  const { openPersonalSettings, useCaller } =
+    await import('../../identity/personal-settings.js');
+  const response = await openPersonalSettings(async () => {
+    useCaller({
+      principal: { principalId: 'carol', kind: 'user' },
+      member: true,
+      owner: false,
+      access: {
+        can: async () => true,
+        claim: async () => {},
+        workspaces: async () => [],
+      },
+    });
+    return server.inject('/api/acp/profiles');
+  });
+  expect(response.statusCode).toBe(200);
+  expect(response.json()).toMatchObject({
+    profiles: [],
+    connectedDevices: [],
+  });
+  // Bubble supervises no shared worker, so there is no status to act on.
+  expect(response.json().agentlet).toBeNull();
+  expect(mocks.registry.listProfiles).toHaveBeenCalled();
+});
