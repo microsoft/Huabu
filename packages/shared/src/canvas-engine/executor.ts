@@ -52,6 +52,7 @@ import type {
 } from './interfaces.js';
 import type {
   CanvasCommand,
+  CanvasCommandFailureReason,
   CanvasExecution,
   CanvasCommandResult,
 } from '../index.js';
@@ -74,6 +75,20 @@ export interface ExecutorOptions {
   forceFitFrames?: boolean;
   /** Per-frame gutter sizes frozen by a live resize gesture. */
   frozenStructuredGutters?: ReadonlyMap<string, StructuredGutterSizes>;
+  /**
+   * Host admission check, asked once per command immediately before its
+   * handler, with the state that command would run against (the evolving
+   * state, so it already reflects earlier commands of the batch).
+   *
+   * Returning a reason rejects that one command — it is recorded as not
+   * applied with that reason and its handler never runs; the rest of the
+   * batch proceeds as usual. Returning `undefined` admits it. Omitted, every
+   * command is admitted.
+   */
+  admit?: (
+    command: CanvasCommand,
+    state: Pick<CanvasReadState, 'nodes' | 'edges'>,
+  ) => CanvasCommandFailureReason | undefined;
 }
 
 export interface ExecutorOutput {
@@ -133,6 +148,15 @@ export function executeCanvasCommands(
   let anyApplied = false;
 
   for (const cmd of execution.commands) {
+    const refused = options.admit?.(cmd, {
+      nodes: currentNodes,
+      edges: currentEdges,
+    });
+    if (refused !== undefined) {
+      commandResults.push({ command: cmd, applied: false, reason: refused });
+      continue;
+    }
+
     // ------------------------------------------------------------------
     // Dispatch to the handler registry. The HANDLERS table is exhaustive
     // over `CanvasCommandType`, so an unknown command type is a

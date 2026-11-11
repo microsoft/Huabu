@@ -47,6 +47,11 @@ export {
   type ExecutorOutput,
   type ExecutorOptions,
 } from './executor.js';
+export {
+  collectCommandIds,
+  commandReadTargets,
+  type CommandReadTargets,
+} from './commandTargets.js';
 export type {
   CanvasNode,
   CanvasEdge,

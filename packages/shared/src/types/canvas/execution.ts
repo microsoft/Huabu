@@ -26,7 +26,17 @@ export type CanvasCommandFailureReason =
   | 'invalid-scope'
   | 'cycle'
   | 'duplicate-id'
-  | 'conflict';
+  | 'conflict'
+  /**
+   * Read-version check: a node the command targets no longer exists, or was
+   * created after the version the caller read.
+   */
+  | 'stale-target'
+  /**
+   * Read-version check: a node the command targets was moved to another
+   * parent after the version the caller read.
+   */
+  | 'stale-parent';
 
 export interface CanvasCommandResult {
   command: CanvasCommand;

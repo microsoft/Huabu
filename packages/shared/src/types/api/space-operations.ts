@@ -1063,6 +1063,8 @@ export const rfsExecuteResponseSchema = z
               'cycle',
               'duplicate-id',
               'conflict',
+              'stale-target',
+              'stale-parent',
             ])
             .optional(),
           nodes: z.array(executeResultNodeSchema).optional(),
