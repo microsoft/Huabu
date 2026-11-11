@@ -154,6 +154,8 @@ generic operation — no per-command inverse logic:
 
 Records are persisted per thread in a mutable sidecar (`<threadId>.changes.json`, coalesced on read) and reach the frontend two ways: `load()` on thread open, and `replaceFromBroadcast()` (the broadcast carries the thread's full coalesced list, so the client replaces rather than appends). The global Settings → General preference **Automatically accept Agent Space changes** suppresses computation and persistence of new records for successful Agent batches when enabled; existing records remain available, and Canvas delta broadcast and current-session undo snapshots are unchanged.
 
+PDF ownership changes are an exception to one row per entity: the PDF change and its associated Note change share one row and all inverse deltas. Coalescing nets the constituent entities before regrouping them, preserving the pair through persistence and later edits. The shared freshness check examines every inverse delta, including the Note body for creation reverts. The revert endpoint repeats this check under the Canvas mutex and rejects stale rows with HTTP 409; server delta replay also rejects dangling links, replacement of existing Note links, and detachment of surviving owned Notes before writing.
+
 The [ChangeReviewCard](../../apps/web/src/components/Panels/ChatPanel/ChangeReviewCard.tsx)
 above the chat input renders the thread's records with per-item and bulk
 Keep / Revert, plus press-and-hold **preview** (temporarily applies the inverse

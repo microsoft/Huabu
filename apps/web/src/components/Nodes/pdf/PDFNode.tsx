@@ -100,8 +100,10 @@ export const PDFNode = memo(
     const isReading = mode === 'reading' && isVisible;
     const updateNodeData = useCanvasStore((s) => s.updateNodeData);
     const canvasId = useCanvasStore((s) => s.canvasId);
-    const notesContent = useCanvasStore(
-      (s) => s.nodes.find((node) => node.id === data.noteNodeId)?.data.content,
+    const notesContent = useCanvasStore((s) =>
+      data.noteNodeId
+        ? s.nodes.find((node) => node.id === data.noteNodeId)?.data.content
+        : undefined,
     );
 
     const hasCover = !!data.coverUrl;

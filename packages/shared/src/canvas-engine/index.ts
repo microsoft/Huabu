@@ -83,6 +83,7 @@ export {
   nodeRevision,
   nodeRevisionOf,
   invertDeltas,
+  isChangeStale,
 } from './change.js';
 
 // ── Command registry (handler / meta maps) ────────────────────────────────
@@ -282,6 +283,7 @@ export {
 export {
   pdfNoteId,
   pdfNoteIds,
+  hasValidPdfNoteOwnership,
   includePdfNotes,
   hidePdfNotes,
   validPdfNoteLink,

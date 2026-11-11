@@ -75,3 +75,23 @@ export function validPdfNoteLink(
     (pdfNoteId(node) === undefined || pdfNoteId(node) === value)
   );
 }
+
+/** Snapshot writes may remove a pair, but cannot replace or orphan its Note. */
+export function hasValidPdfNoteOwnership(
+  nodes: readonly NoteLinkNode[],
+  previousNodes: readonly NoteLinkNode[],
+): boolean {
+  if (
+    nodes.some((node) => !validPdfNoteLink(node, node.data?.noteNodeId, nodes))
+  )
+    return false;
+  const nextById = new Map(nodes.map((node) => [node.id, node]));
+  return previousNodes.every((previous) => {
+    const oldId = pdfNoteId(previous);
+    if (!oldId) return true;
+    const next = nextById.get(previous.id);
+    const nextId = next && pdfNoteId(next);
+    if (nextId === oldId) return true;
+    return !nextId && !nextById.has(oldId);
+  });
+}

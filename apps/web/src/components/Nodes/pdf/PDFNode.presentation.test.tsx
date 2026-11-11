@@ -22,6 +22,7 @@ const mocks = vi.hoisted(() => ({
   updateNodeData: vi.fn(),
   card: vi.fn(),
   note: { id: 'notes', data: { content: '' } },
+  nodesRead: vi.fn(),
 }));
 
 vi.mock('@/hooks/useNodePresentation', () => ({
@@ -32,7 +33,10 @@ vi.mock('@/store/canvasStore', () => ({
     select({
       canvasId: 'canvas-1',
       updateNodeData: mocks.updateNodeData,
-      nodes: [mocks.note],
+      get nodes() {
+        mocks.nodesRead();
+        return [mocks.note];
+      },
     }),
 }));
 vi.mock('@/api/artifact', () => ({
@@ -108,6 +112,13 @@ beforeEach(() => {
 afterEach(() => {
   act(() => root.unmount());
   container.remove();
+});
+
+it('does not scan canvas nodes when the PDF has no associated Note', async () => {
+  await render();
+  expect(mocks.nodesRead).not.toHaveBeenCalled();
+  await render({ noteNodeId: 'notes' });
+  expect(mocks.nodesRead).toHaveBeenCalled();
 });
 
 it.each([

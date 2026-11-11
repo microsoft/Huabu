@@ -26,7 +26,10 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { nodeRevisionOf } from '@huabu/shared/canvas-engine';
+import {
+  nodeRevisionOf,
+  extractCanvasChanges,
+} from '@huabu/shared/canvas-engine';
 
 import { applyDeltasOnServer, executeOnServer } from './canvas-executor.js';
 import { setAgentChangeReviewConfig } from '../agent/change-review-config.js';
@@ -748,6 +751,69 @@ describe('executeOnServer — batch node writes use one ordered backend call', (
 });
 
 describe('executor tombstone resurrection', () => {
+  it('restores an owned pair atomically and rejects partial or stale reverts', async () => {
+    seedNote('c1', 'notes', 'Saved body');
+    await executeOnServer({
+      canvasId: 'c1',
+      commands: [
+        {
+          type: 'CREATE_NODES',
+          nodes: [
+            {
+              id: 'node-pdf',
+              nodeType: 'pdf',
+              position: { x: 0, y: 0 },
+              data: { noteNodeId: 'notes' },
+            },
+          ],
+        },
+      ],
+      originator: UI,
+    });
+    const deleted = await executeOnServer({
+      canvasId: 'c1',
+      commands: [{ type: 'DELETE_NODES', nodeIds: ['node-pdf'] }],
+      originator: UI,
+    });
+    const [change] = extractCanvasChanges(deleted.deltas);
+    const store = getCanvasStore('c1');
+    const deletedVersion = store.read()?.version;
+    await expect(
+      applyDeltasOnServer({
+        canvasId: 'c1',
+        originator: UI,
+        deltas: [change.revertDeltas[0]],
+      }),
+    ).rejects.toThrow('Invalid PDF note ownership');
+    expect(store.read()?.version).toBe(deletedVersion);
+    await applyDeltasOnServer({
+      canvasId: 'c1',
+      originator: UI,
+      deltas: change.revertDeltas,
+      change,
+    });
+    expect(store.read()?.state.nodes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'node-pdf',
+          data: expect.objectContaining({ noteNodeId: 'notes' }),
+        }),
+        expect.objectContaining({ id: 'notes', hidden: true }),
+      ]),
+    );
+    expect(store.readNode('notes')?.content).toBe('Saved body');
+    const restoredVersion = store.read()?.version;
+    await expect(
+      applyDeltasOnServer({
+        canvasId: 'c1',
+        originator: UI,
+        deltas: change.revertDeltas,
+        change,
+      }),
+    ).rejects.toThrow('can no longer be reverted');
+    expect(store.read()?.version).toBe(restoredVersion);
+  });
+
   function restoredNode(content = 'restored') {
     return {
       id: 'n1',

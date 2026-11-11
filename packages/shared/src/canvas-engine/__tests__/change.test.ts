@@ -10,6 +10,7 @@ import {
   fingerprintNodeFields,
   nodeRevision,
   invertDeltas,
+  isChangeStale,
   type Delta,
 } from '../index.js';
 
@@ -24,6 +25,87 @@ function edge(id: string, source: string, target: string): CanvasEdge {
 }
 
 describe('invertDeltas', () => {
+  it('groups PDF and Note deletion through repeated coalescing and restores both', () => {
+    const pdf: CanvasNode = {
+      ...note('pdf'),
+      type: 'pdf',
+      data: { noteNodeId: 'notes' },
+    };
+    const notes = note('notes', { content: 'Keep my notes' });
+    const changes = extractCanvasChanges([
+      { type: 'DELETE_NODE', node: notes },
+      { type: 'DELETE_NODE', node: pdf },
+    ]);
+    expect(changes).toHaveLength(1);
+    expect(changes[0].nodeId).toBe('pdf');
+    const coalesced = coalesceChanges(coalesceChanges(changes));
+    expect(coalesced).toEqual(changes);
+    expect(
+      applyDeltas({ nodes: [], edges: [] }, coalesced[0].revertDeltas).nodes,
+    ).toEqual([pdf, notes]);
+    expect(isChangeStale(coalesced[0], [], [])).toBe(false);
+    expect(isChangeStale(coalesced[0], [notes], [])).toBe(true);
+  });
+
+  it('groups Note creation with its link and protects later Note edits', () => {
+    const pdf: CanvasNode = { ...note('pdf'), type: 'pdf' };
+    const linked = { ...pdf, data: { noteNodeId: 'notes' } };
+    const notes = note('notes', { content: 'First draft' });
+    const changes = extractCanvasChanges([
+      { type: 'INSERT_NODE', node: notes },
+      { type: 'REPLACE_NODE', prev: pdf, next: linked },
+    ]);
+    expect(changes).toHaveLength(1);
+    expect(isChangeStale(changes[0], [linked, notes], [])).toBe(false);
+    expect(
+      isChangeStale(
+        changes[0],
+        [linked, note('notes', { content: 'Human edit' })],
+        [],
+      ),
+    ).toBe(true);
+    const edits = extractCanvasChanges([
+      {
+        type: 'REPLACE_NODE',
+        prev: notes,
+        next: note('notes', { content: 'Agent edit' }),
+      },
+    ]);
+    const merged = coalesceChanges([...changes, ...edits]);
+    expect(merged).toHaveLength(1);
+    expect(merged[0].id).toBe(changes[0].id);
+    expect(
+      isChangeStale(
+        merged[0],
+        [linked, note('notes', { content: 'Agent edit' })],
+        [],
+      ),
+    ).toBe(false);
+    expect(
+      applyDeltas({ nodes: [linked, notes], edges: [] }, merged[0].revertDeltas)
+        .nodes,
+    ).toEqual([pdf]);
+  });
+
+  it('restores a directly deleted Note together with its owner link', () => {
+    const pdf: CanvasNode = {
+      ...note('pdf'),
+      type: 'pdf',
+      data: { noteNodeId: 'notes' },
+    };
+    const cleared = { ...pdf, data: {} };
+    const notes = note('notes', { content: 'Notes' });
+    const changes = extractCanvasChanges([
+      { type: 'REPLACE_NODE', prev: pdf, next: cleared },
+      { type: 'DELETE_NODE', node: notes },
+    ]);
+    expect(changes).toHaveLength(1);
+    expect(
+      applyDeltas({ nodes: [cleared], edges: [] }, changes[0].revertDeltas)
+        .nodes,
+    ).toEqual([pdf, notes]);
+  });
+
   it('round-trips: applying deltas then their inverse restores the state', () => {
     const a = note('node-a', { label: 'A', content: 'old' });
     const start = { nodes: [a], edges: [] as CanvasEdge[] };

@@ -49,6 +49,9 @@ import {
   diffCanvasState,
   executeCanvasCommands,
   extractCanvasChanges,
+  isChangeStale,
+  hasValidPdfNoteOwnership,
+  hidePdfNotes,
   nodeRevision,
   preserveAgentNodeOwnedData,
   projectAgentNodeEditableData,
@@ -688,6 +691,8 @@ export interface ExecuteOnServerOutput {
   viewConflicts?: InteractiveViewConflict[];
 }
 
+export class CanvasChangeConflictError extends Error {}
+
 export class CanvasNotFoundError extends Error {
   readonly canvasId: string;
   constructor(canvasId: string) {
@@ -1318,6 +1323,7 @@ export async function applyDeltasOnServer(input: {
   deltas: readonly Delta[];
   originator: ExecuteOriginator;
   runId?: string;
+  change?: CanvasChangeRecord;
 }): Promise<{
   canvasId: string;
   fromVersion: number;
@@ -1347,6 +1353,7 @@ export async function applyDeltasOnServerAlreadyLocked(input: {
   deltas: readonly Delta[];
   originator: ExecuteOriginator;
   runId?: string;
+  change?: CanvasChangeRecord;
   /** Only the internal lifecycle writer may bypass editable inverse projection. */
   agentNodeProjection?: boolean;
   /** Move compensation restores validated execution state after rehome-back. */
@@ -1380,6 +1387,14 @@ export async function applyDeltasOnServerAlreadyLocked(input: {
   );
   const prestateEdges = (canvas.state.edges ?? []) as CanvasEdge[];
 
+  if (
+    input.change &&
+    isChangeStale(input.change, prestateNodes, prestateEdges)
+  ) {
+    throw new CanvasChangeConflictError(
+      'Change can no longer be reverted safely',
+    );
+  }
   const liveNodes = new Map(prestateNodes.map((node) => [node.id, node]));
   const editableDeltas = input.agentNodeProjection
     ? input.deltas
@@ -1402,6 +1417,10 @@ export async function applyDeltasOnServerAlreadyLocked(input: {
     { nodes: prestateNodes, edges: prestateEdges },
     editableDeltas,
   );
+  if (!hasValidPdfNoteOwnership(final.nodes, prestateNodes)) {
+    throw new CanvasChangeConflictError('Invalid PDF note ownership');
+  }
+  final.nodes = hidePdfNotes(final.nodes);
   const previousById = new Map(prestateNodes.map((node) => [node.id, node]));
   const replacedNodeIds = new Set(
     input.deltas.flatMap((delta) =>

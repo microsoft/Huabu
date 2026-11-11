@@ -16,6 +16,7 @@
  */
 
 import { invertDelta, type Delta } from './delta.js';
+import { pdfNoteId } from './pdfNotes.js';
 import { createId } from '../utils/id.js';
 
 import type { CanvasNode, CanvasEdge } from './interfaces.js';
@@ -235,9 +236,84 @@ export function invertDeltas(deltas: readonly Delta[]): Delta[] {
   return out;
 }
 
+/** Check every member of an atomic review row against the same snapshot. */
+export function isChangeStale(
+  record: CanvasChangeRecord,
+  nodes: readonly CanvasNode[],
+  edges: readonly CanvasEdge[],
+): boolean {
+  return record.revertDeltas.some((delta, index) => {
+    switch (delta.type) {
+      case 'INSERT_NODE':
+        return nodes.some((node) => node.id === delta.node.id);
+      case 'DELETE_NODE':
+      case 'REPLACE_NODE': {
+        const applied = delta.type === 'DELETE_NODE' ? delta.node : delta.prev;
+        const current = nodes.find((node) => node.id === applied.id);
+        if (!current) return true;
+        const keys =
+          index === 0
+            ? (record.fingerprintKeys ?? [])
+            : delta.type === 'DELETE_NODE'
+              ? primaryKeysOf(nodeData(applied))
+              : changedKeys(nodeData(delta.next), nodeData(applied));
+        const expected =
+          index === 0
+            ? record.appliedFingerprint
+            : fingerprintNodeFields(applied, keys);
+        return (
+          keys.length > 0 && fingerprintNodeFields(current, keys) !== expected
+        );
+      }
+      case 'DELETE_EDGE':
+        return !edges.some((edge) => edge.id === delta.edge.id);
+      case 'INSERT_EDGE':
+        return edges.some((edge) => edge.id === delta.edge.id);
+      case 'REPLACE_EDGE':
+        return !edges.some((edge) => edge.id === delta.prev.id);
+      default:
+        return false;
+    }
+  });
+}
+
+function groupPdfNoteChanges(
+  records: CanvasChangeRecord[],
+): CanvasChangeRecord[] {
+  const byNodeId = new Map(records.map((record) => [record.nodeId, record]));
+  const grouped = new Set<CanvasChangeRecord>();
+  for (const record of records) {
+    const delta = record.revertDeltas[0];
+    if (!delta) continue;
+    const before =
+      delta.type === 'REPLACE_NODE'
+        ? delta.next
+        : delta.type === 'INSERT_NODE'
+          ? delta.node
+          : undefined;
+    const after =
+      delta.type === 'REPLACE_NODE'
+        ? delta.prev
+        : delta.type === 'DELETE_NODE'
+          ? delta.node
+          : undefined;
+    const beforeId = before && pdfNoteId(before);
+    const afterId = after && pdfNoteId(after);
+    if (beforeId === afterId) continue;
+    for (const id of new Set([beforeId, afterId])) {
+      const dependent = id && byNodeId.get(id);
+      if (!dependent || dependent === record || grouped.has(dependent))
+        continue;
+      record.revertDeltas.push(...dependent.revertDeltas);
+      grouped.add(dependent);
+    }
+  }
+  return records.filter((record) => !grouped.has(record));
+}
+
 /**
- * Build change records from a batch's deltas. One record per node/edge
- * delta. `revertDeltas` is the single inverse delta, ready to apply.
+ * Build change records from a batch's deltas. Ownership changes group the
+ * PDF and Note inverses; other rows represent one node or edge.
  *
  * @param deltas The batch deltas (server diff prestate → poststate).
  * @param opts.nodeLabelById Optional label lookup for edge endpoints
@@ -372,7 +448,7 @@ export function extractCanvasChanges(
     }
   }
 
-  return records;
+  return groupPdfNoteChanges(records);
 }
 
 // ── Coalescing (net effect per entity) ─────────────────────────────────────
@@ -482,7 +558,18 @@ export function coalesceChanges(
   const groups = new Map<string, CanvasChangeRecord[]>();
   const order: string[] = [];
   const labelById = new Map<string, string>();
-  for (const r of records) {
+  // Flatten grouped rows before netting each entity, then rebuild ownership groups.
+  const individual = records.flatMap((record) =>
+    record.revertDeltas.map((delta, index) => ({
+      ...record,
+      id:
+        index === 0
+          ? record.id
+          : `${record.id}:${forwardOf({ ...record, revertDeltas: [delta] })?.key}`,
+      revertDeltas: [delta],
+    })),
+  );
+  for (const r of individual) {
     if (r.nodeId && r.nodeLabel) labelById.set(r.nodeId, r.nodeLabel);
     if (r.sourceNodeId && r.sourceNodeLabel)
       labelById.set(r.sourceNodeId, r.sourceNodeLabel);

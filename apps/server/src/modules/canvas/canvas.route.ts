@@ -36,7 +36,7 @@ import {
 import {
   nodeRevisionOf,
   mergeNodeProperties,
-  validPdfNoteLink,
+  hasValidPdfNoteOwnership,
   hidePdfNotes,
 } from '@huabu/shared/canvas-engine';
 import {
@@ -57,6 +57,7 @@ import {
 import { acknowledgeAgentNodeResult } from './agent-node-projection.js';
 import {
   CanvasNotFoundError,
+  CanvasChangeConflictError,
   applyDeltasOnServer,
   executeOnServer,
 } from './canvas-executor.js';
@@ -1720,10 +1721,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
           if (node.data?.noteNodeId === null) delete node.data.noteNodeId;
         }
         if (
-          composedNodes.some(
-            (node) =>
-              !validPdfNoteLink(node, node.data?.noteNodeId, composedNodes),
-          )
+          !hasValidPdfNoteOwnership(composedNodes, [...currentById.values()])
         ) {
           return reply
             .code(400)
@@ -1968,6 +1966,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         const out = await applyDeltasOnServer({
           canvasId,
           deltas: record.revertDeltas,
+          change: record,
           originator: { source: 'ui' },
         });
         if (out.toVersion > out.fromVersion) {
@@ -1988,7 +1987,10 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         if (err instanceof AgentNodeBindingError) {
           return reply.code(409).send({ code: err.code, message: err.message });
         }
-        if (err instanceof WorldPreviewMutationError) {
+        if (
+          err instanceof WorldPreviewMutationError ||
+          err instanceof CanvasChangeConflictError
+        ) {
           return reply.code(409).send({ message: err.message });
         }
         request.log.error(
