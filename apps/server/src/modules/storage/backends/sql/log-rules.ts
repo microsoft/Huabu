@@ -43,6 +43,43 @@ export function decodeEvents(
   return records.slice(-Math.ceil(limit));
 }
 
+export const SELECT_CHANGES = `
+  SELECT snapshot_json
+  FROM changes
+  WHERE canvas_id = ? AND thread_id = ?`;
+
+export const UPSERT_CHANGES = `
+  INSERT INTO changes (canvas_id, thread_id, snapshot_json)
+  VALUES (?, ?, ?)
+  ON CONFLICT(canvas_id, thread_id) DO UPDATE SET
+    snapshot_json = excluded.snapshot_json`;
+
+/**
+ * `records` folded into the thread's stored list (`row` is the
+ * {@link SELECT_CHANGES} result, undefined when the thread holds none): the
+ * coalesced list and the parameters of {@link UPSERT_CHANGES} that store it.
+ */
+export function mergeChangesRow(
+  row: Record<string, unknown> | undefined,
+  canvasId: string,
+  threadId: string,
+  records: readonly CanvasChangeRecord[],
+): { merged: CanvasChangeRecord[]; params: [string, string, string] } {
+  const existing =
+    row === undefined
+      ? []
+      : decodeChanges(row['snapshot_json'], canvasId, threadId);
+  const merged = coalesceChanges([...existing, ...records]);
+  return {
+    merged,
+    params: [
+      canvasId,
+      threadId,
+      stringifyJson(merged, `Changes for thread ${threadId}`),
+    ],
+  };
+}
+
 export function decodeChanges(
   value: unknown,
   canvasId: string,

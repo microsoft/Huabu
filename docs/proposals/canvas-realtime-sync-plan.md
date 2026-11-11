@@ -1,7 +1,14 @@
 # Space structural collaboration
 
 Status: Proposed — Phase A investigation and contract design complete; B's opt-in ordering engine slice is implemented, with integration gaps recorded below. Not yet formally reviewed; collaboration is not enabled.
-Last updated: 2026-11-05
+Last updated: 2026-11-12
+
+> **Status note (2026-11-12).** The server side of this plan was implemented differently: request ids, read versions and Review records are saved inside the existing executor write, as described in [reliable save](../architecture/canvas-storage.md#42-reliable-save-in-the-write) and the [execute contract](../architecture/api-design.md#request-id-and-read-version-on-execute). The separate operation path built from this document was removed.
+>
+> - **Superseded:** §5 (the operation protocol with sessions and guards; §5.3 excepted), §7.1 (common storage boundary) and §7.3 (enabling a Space; there is no per-Space switch).
+> - **Still standing as browser-side requirements:** §2.2 (browser and desktop write inventory), §5.3 (client state and recovery) and §6 (conflict decisions, including undo).
+>
+> The text below is kept as written and is not updated to match.
 
 This is the repository contract and implementation handoff for the Space's A–F plan. Architecture documents describe implemented behavior; this document does not advertise available production APIs or storage guarantees. The bounded B implementation is documented under [sibling paint order and isolated replay](../architecture/canvas-command-architecture.md#sibling-paint-order-and-isolated-replay); unimplemented protocol and migration behavior below remains proposed. The [July roadmap](../archive/canvas-realtime-sync-roadmap-2026-07.md) is superseded, including its intermediate whole-Space PUT broadcast and own-client echo-filter plan.
 

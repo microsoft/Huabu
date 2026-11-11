@@ -161,9 +161,7 @@ const NODE_CONTENT_KEYS = new Set([
   'provenance',
 ]);
 
-export function stripNodesForCanvas(
-  nodes: readonly CanvasNode[],
-): CanvasNode[] {
+function stripNodesForCanvas(nodes: readonly CanvasNode[]): CanvasNode[] {
   return nodes.map((node) => {
     const data = (node.data ?? {}) as Record<string, unknown>;
     const cleanData: Record<string, unknown> = {};
@@ -301,7 +299,7 @@ function collectInteractiveViewConflicts(
   return conflicts;
 }
 
-export function buildNodeContent(node: CanvasNode): NodeContent | null {
+function buildNodeContent(node: CanvasNode): NodeContent | null {
   const nodeId = typeof node.id === 'string' ? node.id : '';
   if (!nodeId) return null;
   const nodeType = typeof node.type === 'string' ? node.type : '';

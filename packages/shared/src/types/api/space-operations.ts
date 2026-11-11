@@ -80,7 +80,7 @@ const accentTokenSchema = z
     `Palette color token. Tokens map to: ${ACCENT_PALETTE.map((color) => `"${color.token}"=${color.value} (${color.name})`).join(', ')}`,
   );
 
-export const nodeStyleSchema = z
+const nodeStyleSchema = z
   .object({
     accent: accentTokenSchema
       .nullable()
@@ -156,7 +156,7 @@ const agentNodeCreateInputSchema = z
   })
   .strict();
 
-export const edgeStyleSchema = z
+const edgeStyleSchema = z
   .object({
     lineType: z.enum(EDGE_LINE_TYPES).optional(),
     lineStyle: z.enum(EDGE_LINE_STYLES).optional(),

@@ -12,27 +12,25 @@
 
 import { randomUUID } from 'node:crypto';
 
+import { normalizeSaveKey, storedResultOutcome } from '../../ports/save.js';
 import {
-  advanceStamps,
-  normalizeSaveKey,
-  SAVE_RESULT_PRUNE_LIMIT,
-  SAVE_RESULT_RETENTION_MS,
-  storedResultOutcome,
-  validateSaveResult,
-} from '../../ports/save.js';
-import { stringifyJson } from '../sql/codecs.js';
-import {
-  decodeSaveHeadRow,
+  advanceSaveStampsParams,
+  checkSaveRecordVersion,
   decodeSaveResultRow,
   decodeSpaceSaveState,
   INSERT_SAVE_HEAD,
   INSERT_SAVE_RESULT_IF_ABSENT,
+  insertSaveResultParams,
+  newSaveHeadParams,
   PRUNE_SAVE_RESULTS,
+  pruneSaveResultsParams,
+  saveResultKeyParams,
   SELECT_SAVE_HEAD,
   SELECT_SAVE_RESULT,
   SELECT_SPACE_SAVE_STATE,
   stampsOf,
   UPDATE_SAVE_STAMPS,
+  validateSaveRecordInput,
 } from '../sql/save-rules.js';
 
 import type { PgExecutor, PostgresStoreContext } from './database.js';
@@ -64,13 +62,9 @@ export async function readPostgresSaveResult(
   canvasId: string,
   key: SaveKey,
 ): Promise<StoredSaveResult | null> {
-  const normalized = normalizeSaveKey(key);
   const row = await database.get(
     SELECT_SAVE_RESULT,
-    workspaceId,
-    canvasId,
-    normalized.principalId,
-    normalized.operationId,
+    ...saveResultKeyParams(workspaceId, canvasId, key),
   );
   return row === undefined ? null : decodeSaveResultRow(row);
 }
@@ -88,27 +82,17 @@ export async function insertPostgresSaveResult(
   atVersion: number,
   now: number,
 ): Promise<void> {
-  const key = normalizeSaveKey(result.key);
   await database.run(
     PRUNE_SAVE_RESULTS,
-    canvasId,
-    canvasId,
-    now - SAVE_RESULT_RETENTION_MS,
-    SAVE_RESULT_PRUNE_LIMIT,
+    ...pruneSaveResultsParams(canvasId, now),
   );
   const inserted = await database.run(
     INSERT_SAVE_RESULT_IF_ABSENT,
-    canvasId,
-    key.principalId,
-    key.operationId,
-    result.digest,
-    atVersion,
-    now,
-    responseJson,
+    ...insertSaveResultParams(canvasId, result, responseJson, atVersion, now),
   );
   if (inserted.changes !== 1) {
     throw new PostgresSaveResultRaceError(
-      `Result record for ${JSON.stringify(key.operationId)} appeared concurrently`,
+      `Result record for ${JSON.stringify(normalizeSaveKey(result.key).operationId)} appeared concurrently`,
     );
   }
 }
@@ -125,21 +109,13 @@ export async function advancePostgresStamps(
   current: CanvasFile,
   next: CanvasFile,
 ): Promise<void> {
-  const row = await database.get(SELECT_SAVE_HEAD, canvasId);
-  if (row === undefined) return;
-  const head = decodeSaveHeadRow(row);
-  const advanced = advanceStamps(
-    stampsOf(head, current.version),
-    current.state.nodes,
-    next.state.nodes,
-    next.version,
-  );
-  if (advanced.nodes === head.nodes) return;
-  await database.run(
-    UPDATE_SAVE_STAMPS,
-    stringifyJson(advanced.nodes, `Space ${canvasId} stamps`),
+  const update = advanceSaveStampsParams(
+    await database.get(SELECT_SAVE_HEAD, canvasId),
     canvasId,
+    current,
+    next,
   );
+  if (update) await database.run(UPDATE_SAVE_STAMPS, ...update);
 }
 
 /** Bind the `save` member of one PostgreSQL Space handle. */
@@ -181,10 +157,7 @@ export function createPostgresSpaceSave(
         if (!current.head) {
           await database.run(
             INSERT_SAVE_HEAD,
-            canvasId,
-            randomUUID(),
-            current.version,
-            '{}',
+            ...newSaveHeadParams(canvasId, randomUUID(), current.version),
           );
         }
         const settled = await readState(database, workspaceId);
@@ -198,10 +171,7 @@ export function createPostgresSpaceSave(
     async record(input: { expectedVersion: number; result: SaveResult }) {
       const workspaceId = workspace();
       context.assertMutationAllowed(canvasId);
-      if (!Number.isFinite(input.expectedVersion)) {
-        throw new TypeError('expectedVersion must be a finite number');
-      }
-      const responseJson = validateSaveResult(input.result);
+      const responseJson = validateSaveRecordInput(input);
       try {
         return await context.transaction(async (database) => {
           const stored = await readPostgresSaveResult(
@@ -212,24 +182,18 @@ export function createPostgresSpaceSave(
           );
           if (stored) return storedResultOutcome(stored, input.result);
           const state = await readState(database, workspaceId);
-          if (state === null) {
-            throw new Error(
-              `SpaceSave(${canvasId}) cannot record a result for a missing Space`,
-            );
-          }
-          if (state.version !== input.expectedVersion) {
-            return {
-              ok: false,
-              reason: 'version-conflict',
-              actualVersion: state.version,
-            } as const;
-          }
+          const conflict = checkSaveRecordVersion(
+            canvasId,
+            state,
+            input.expectedVersion,
+          );
+          if (conflict) return conflict;
           await insertPostgresSaveResult(
             database,
             canvasId,
             input.result,
             responseJson,
-            state.version,
+            input.expectedVersion,
             context.now(),
           );
           return { ok: true } as const;

@@ -29,11 +29,6 @@
 
 import { z } from 'zod';
 
-import {
-  canvasOperationCommitSchema,
-  canvasReviewNotificationSchema,
-} from './canvas-operations.js';
-
 import type { CanvasChangeRecord } from '../../canvas-engine/change.js';
 
 export const canvasSyncPendingEffectsSchema = z.object({
@@ -45,14 +40,6 @@ export const canvasSyncPendingEffectsSchema = z.object({
 });
 
 export const canvasSyncEventSchema = z.discriminatedUnion('type', [
-  z.object({
-    type: z.literal('review'),
-    data: canvasReviewNotificationSchema,
-  }),
-  z.object({
-    type: z.literal('commit'),
-    data: canvasOperationCommitSchema,
-  }),
   z.object({
     type: z.literal('invalidate'),
     /** Read-model notification, not an instruction to replace editable Canvas state. */

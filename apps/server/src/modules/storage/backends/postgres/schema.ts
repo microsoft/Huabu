@@ -171,4 +171,16 @@ export const POSTGRES_MIGRATIONS = [
         ON space_save_results(canvas_id, created_at);
     `,
   },
+  // The operation_* tables of v3 and v4 belonged to a separate operation
+  // path that was removed before it carried production data. Receipts go
+  // first: they reference sessions.
+  {
+    version: 6,
+    sql: `
+      DROP TABLE operation_receipts;
+      DROP TABLE operation_sessions;
+      DROP TABLE operation_commits;
+      DROP TABLE operation_heads;
+    `,
+  },
 ] as const;

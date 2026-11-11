@@ -25,7 +25,6 @@ import { getCanvasStore } from './legacy/canvas-store-cache.js';
 import { createDiskSpaceExtension } from './space-extension.js';
 import { createDiskSpaceLogs } from './space-logs.js';
 import { DiskSpaceNodes } from './space-nodes.js';
-import { createDiskSpaceOperations } from './space-operations.js';
 import { createDiskSpaceRecordReader } from './space-record.js';
 import { DiskSpaceRepository } from './space-repository.js';
 import { createDiskSpaceSave, DiskSpaceSaveState } from './space-save.js';
@@ -66,7 +65,6 @@ export class DiskStructuredStore implements StructuredStore {
       read,
       write: createDiskSpaceWrite(store),
       save: createDiskSpaceSave(store),
-      operations: createDiskSpaceOperations(store.canvasId),
       nodes: new DiskSpaceNodes(store),
       changes,
       tasks: new DiskSpaceTasks(store),

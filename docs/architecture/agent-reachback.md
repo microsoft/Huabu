@@ -56,7 +56,7 @@ Capability detail schemas are generated from the same Zod registry used for requ
 
 ## Direct execution plane
 
-`POST /execute` accepts `{ runId?, commands }`, rejects caller-supplied originator context and UI-only command variants, stamps server-owned agent authorship metadata, and invokes `executeOnServer()` with `{ source: 'agent' }`. The same preparation helper is used by the built-in `space_commands` tool; RFS does not call the Canvas HTTP route or duplicate executor behavior.
+`POST /execute` accepts `{ runId?, operationId?, basis?, commands }`, rejects caller-supplied originator context and UI-only command variants, stamps server-owned agent authorship metadata, and invokes `executeOnServer()` with `{ source: 'agent' }`. The same preparation helper is used by the built-in `space_commands` tool; RFS does not call the Canvas HTTP route or duplicate executor behavior.
 
 Node command `content` fields contain only the authored Markdown body, while downloads expose the complete sidecar with server-owned YAML frontmatter. Agent command preparation defensively unwraps a submitted leading frontmatter block only when its `id` exactly matches the `MERGE_NODE_DATA` target, preventing a downloaded sidecar from being nested into its own body without altering unrelated frontmatter-like Markdown.
 

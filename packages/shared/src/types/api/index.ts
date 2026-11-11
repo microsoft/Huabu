@@ -14,7 +14,6 @@ export * from './frame-layout.js';
 export * from './canvas-events.js';
 export * from './canvas-external.js';
 export * from './canvas-sync.js';
-export * from './canvas-operations.js';
 export * from './canvas-search.js';
 export * from './workspace.js';
 export * from './web.js';

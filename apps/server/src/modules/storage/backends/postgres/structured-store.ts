@@ -5,7 +5,6 @@ import { PostgresStoreContext } from './database.js';
 import { readSpaceRow, spaceRowExists } from './rows.js';
 import { createPostgresSpaceLogs } from './space-logs.js';
 import { PostgresSpaceNodes } from './space-nodes.js';
-import { createPostgresSpaceOperations } from './space-operations.js';
 import { PostgresSpaceRepository } from './space-repository.js';
 import { createPostgresSpaceSave } from './space-save.js';
 import { PostgresSpaceTasks } from './space-tasks.js';
@@ -60,7 +59,6 @@ export class PostgresStructuredStore implements StructuredStore {
       },
       write: createPostgresSpaceWrite(context, workspaceId, canvasId),
       save: createPostgresSpaceSave(context, workspaceId, canvasId),
-      operations: createPostgresSpaceOperations(context, workspaceId, canvasId),
       nodes: new PostgresSpaceNodes(context, workspaceId, canvasId),
       tasks: new PostgresSpaceTasks(context, workspaceId, canvasId),
       ...createPostgresSpaceLogs(context, workspaceId, canvasId),

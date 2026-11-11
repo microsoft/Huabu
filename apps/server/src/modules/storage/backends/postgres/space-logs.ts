@@ -1,11 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import {
-  coalesceChanges,
-  type CanvasChangeRecord,
-} from '@huabu/shared/canvas-engine';
-
 import { spaceRowExists } from './rows.js';
 import { sanitizeId } from '../../../../utils/fs.js';
 import { stringifyJson } from '../sql/codecs.js';
@@ -13,6 +8,9 @@ import {
   decodeChanges,
   decodeEvents,
   encodeEventBatch,
+  mergeChangesRow,
+  SELECT_CHANGES,
+  UPSERT_CHANGES,
 } from '../sql/log-rules.js';
 
 import type { PgExecutor, PostgresStoreContext } from './database.js';
@@ -22,6 +20,7 @@ import type {
   SpaceChanges,
   SpaceEvents,
 } from '../../ports/structured.js';
+import type { CanvasChangeRecord } from '@huabu/shared/canvas-engine';
 
 async function requireSpace(
   database: PgExecutor,
@@ -50,27 +49,13 @@ export async function appendPostgresChangesInTransaction(
   threadId: string,
   records: readonly CanvasChangeRecord[],
 ): Promise<CanvasChangeRecord[]> {
-  const current = await database.get(
-    `SELECT snapshot_json
-       FROM changes
-       WHERE canvas_id = ? AND thread_id = ?`,
+  const { merged, params } = mergeChangesRow(
+    await database.get(SELECT_CHANGES, canvasId, threadId),
     canvasId,
     threadId,
+    records,
   );
-  const existing =
-    current === undefined
-      ? []
-      : decodeChanges(current['snapshot_json'], canvasId, threadId);
-  const merged = coalesceChanges([...existing, ...records]);
-  await database.run(
-    `INSERT INTO changes (canvas_id, thread_id, snapshot_json)
-       VALUES (?, ?, ?)
-       ON CONFLICT(canvas_id, thread_id) DO UPDATE SET
-         snapshot_json = excluded.snapshot_json`,
-    canvasId,
-    threadId,
-    stringifyJson(merged, `Changes for thread ${threadId}`),
-  );
+  await database.run(UPSERT_CHANGES, ...params);
   return merged;
 }
 

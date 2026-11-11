@@ -69,7 +69,6 @@ export function createSqliteSpaceWrite(
 /**
  * The ordered write, inside the caller's transaction.
  *
- * Also reused by the operation store inside its larger receipt transaction.
  * A result record and the Space's version stamps are part of the same
  * transaction: the stored result is checked before anything is touched, and
  * the stamps, the Review records and the new result row are written after the

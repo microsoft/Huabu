@@ -41,7 +41,6 @@ import artifactRoute from './modules/artifact/artifact.route.js';
 import canvasRoutes from './modules/canvas/canvas.route.js';
 import { resetExternalNoteSessions } from './modules/canvas/external-watcher.js';
 import externalNoteRoutes from './modules/canvas/external.route.js';
-import operationRoutes from './modules/canvas/operations/routes.js';
 import syncRoutes from './modules/canvas/sync.route.js';
 import { createIdentity, registerIdentity } from './modules/identity/index.js';
 import integrationsRoutes from './modules/integrations/integrations.route.js';
@@ -172,7 +171,6 @@ app.register(agentChangeReviewConfigRoutes, {
 app.register(canvasRoutes, { prefix: '/api/canvas' });
 app.register(externalNoteRoutes, { prefix: '/api/canvas' });
 app.register(syncRoutes, { prefix: '/api/canvas' });
-app.register(operationRoutes, { prefix: '/api/canvas' });
 app.register(webRoutes, { prefix: '/api/web' });
 app.register(artifactRoute, { prefix: '/api/canvas' });
 

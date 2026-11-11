@@ -1,11 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import {
-  coalesceChanges,
-  type CanvasChangeRecord,
-} from '@huabu/shared/canvas-engine';
-
 import { withImmediateTransaction } from './database.js';
 import { spaceRowExists } from './rows.js';
 import { sanitizeId } from '../../../../utils/fs.js';
@@ -14,6 +9,9 @@ import {
   decodeChanges,
   decodeEvents,
   encodeEventBatch,
+  mergeChangesRow,
+  SELECT_CHANGES,
+  UPSERT_CHANGES,
 } from '../sql/log-rules.js';
 
 import type { SqliteStoreContext } from './database.js';
@@ -23,6 +21,7 @@ import type {
   SpaceChanges,
   SpaceEvents,
 } from '../../ports/structured.js';
+import type { CanvasChangeRecord } from '@huabu/shared/canvas-engine';
 import type { DatabaseSync } from 'node:sqlite';
 
 function requireSpace(
@@ -55,30 +54,13 @@ export function appendSqliteChangesInTransaction(
 ): CanvasChangeRecord[] {
   if (!database.isTransaction)
     throw new Error('Appending changes requires a transaction');
-  const current = database
-    .prepare(
-      `SELECT snapshot_json
-       FROM changes
-       WHERE canvas_id = ? AND thread_id = ?`,
-    )
-    .get(canvasId, threadId);
-  const existing =
-    current === undefined
-      ? []
-      : decodeChanges(current['snapshot_json'], canvasId, threadId);
-  const merged = coalesceChanges([...existing, ...records]);
-  database
-    .prepare(
-      `INSERT INTO changes (canvas_id, thread_id, snapshot_json)
-       VALUES (?, ?, ?)
-       ON CONFLICT(canvas_id, thread_id) DO UPDATE SET
-         snapshot_json = excluded.snapshot_json`,
-    )
-    .run(
-      canvasId,
-      threadId,
-      stringifyJson(merged, `Changes for thread ${threadId}`),
-    );
+  const { merged, params } = mergeChangesRow(
+    database.prepare(SELECT_CHANGES).get(canvasId, threadId),
+    canvasId,
+    threadId,
+    records,
+  );
+  database.prepare(UPSERT_CHANGES).run(...params);
   return merged;
 }
 

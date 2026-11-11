@@ -14,27 +14,25 @@
 import { randomUUID } from 'node:crypto';
 
 import { withImmediateTransaction } from './database.js';
+import { storedResultOutcome } from '../../ports/save.js';
 import {
-  advanceStamps,
-  normalizeSaveKey,
-  SAVE_RESULT_PRUNE_LIMIT,
-  SAVE_RESULT_RETENTION_MS,
-  storedResultOutcome,
-  validateSaveResult,
-} from '../../ports/save.js';
-import { stringifyJson } from '../sql/codecs.js';
-import {
-  decodeSaveHeadRow,
+  advanceSaveStampsParams,
+  checkSaveRecordVersion,
   decodeSaveResultRow,
   decodeSpaceSaveState,
   INSERT_SAVE_HEAD,
   INSERT_SAVE_RESULT,
+  insertSaveResultParams,
+  newSaveHeadParams,
   PRUNE_SAVE_RESULTS,
+  pruneSaveResultsParams,
+  saveResultKeyParams,
   SELECT_SAVE_HEAD,
   SELECT_SAVE_RESULT,
   SELECT_SPACE_SAVE_STATE,
   stampsOf,
   UPDATE_SAVE_STAMPS,
+  validateSaveRecordInput,
 } from '../sql/save-rules.js';
 
 import type { SqliteStoreContext } from './database.js';
@@ -53,10 +51,9 @@ export function readSqliteSaveResult(
   canvasId: string,
   key: SaveKey,
 ): StoredSaveResult | null {
-  const normalized = normalizeSaveKey(key);
   const row = database
     .prepare(SELECT_SAVE_RESULT)
-    .get(workspaceId, canvasId, normalized.principalId, normalized.operationId);
+    .get(...saveResultKeyParams(workspaceId, canvasId, key));
   return row === undefined ? null : decodeSaveResultRow(row);
 }
 
@@ -73,25 +70,13 @@ export function insertSqliteSaveResult(
   atVersion: number,
   now: number,
 ): void {
-  const key = normalizeSaveKey(result.key);
   database
     .prepare(PRUNE_SAVE_RESULTS)
-    .run(
-      canvasId,
-      canvasId,
-      now - SAVE_RESULT_RETENTION_MS,
-      SAVE_RESULT_PRUNE_LIMIT,
-    );
+    .run(...pruneSaveResultsParams(canvasId, now));
   database
     .prepare(INSERT_SAVE_RESULT)
     .run(
-      canvasId,
-      key.principalId,
-      key.operationId,
-      result.digest,
-      atVersion,
-      now,
-      responseJson,
+      ...insertSaveResultParams(canvasId, result, responseJson, atVersion, now),
     );
 }
 
@@ -107,19 +92,13 @@ export function advanceSqliteStamps(
   current: CanvasFile,
   next: CanvasFile,
 ): void {
-  const row = database.prepare(SELECT_SAVE_HEAD).get(canvasId);
-  if (row === undefined) return;
-  const head = decodeSaveHeadRow(row);
-  const advanced = advanceStamps(
-    stampsOf(head, current.version),
-    current.state.nodes,
-    next.state.nodes,
-    next.version,
+  const update = advanceSaveStampsParams(
+    database.prepare(SELECT_SAVE_HEAD).get(canvasId),
+    canvasId,
+    current,
+    next,
   );
-  if (advanced.nodes === head.nodes) return;
-  database
-    .prepare(UPDATE_SAVE_STAMPS)
-    .run(stringifyJson(advanced.nodes, `Space ${canvasId} stamps`), canvasId);
+  if (update) database.prepare(UPDATE_SAVE_STAMPS).run(...update);
 }
 
 /** Bind the `save` member of one SQLite Space handle. */
@@ -162,7 +141,7 @@ export function createSqliteSpaceSave(
         if (!current.head) {
           database
             .prepare(INSERT_SAVE_HEAD)
-            .run(canvasId, randomUUID(), current.version, '{}');
+            .run(...newSaveHeadParams(canvasId, randomUUID(), current.version));
         }
         const settled = readState(database, workspaceId);
         if (!settled?.head) {
@@ -175,10 +154,7 @@ export function createSqliteSpaceSave(
     async record(input: { expectedVersion: number; result: SaveResult }) {
       const workspaceId = workspace();
       context.assertMutationAllowed(canvasId);
-      if (!Number.isFinite(input.expectedVersion)) {
-        throw new TypeError('expectedVersion must be a finite number');
-      }
-      const responseJson = validateSaveResult(input.result);
+      const responseJson = validateSaveRecordInput(input);
       const database = context.database();
       return withImmediateTransaction(database, () => {
         const stored = readSqliteSaveResult(
@@ -189,24 +165,18 @@ export function createSqliteSpaceSave(
         );
         if (stored) return storedResultOutcome(stored, input.result);
         const state = readState(database, workspaceId);
-        if (state === null) {
-          throw new Error(
-            `SpaceSave(${canvasId}) cannot record a result for a missing Space`,
-          );
-        }
-        if (state.version !== input.expectedVersion) {
-          return {
-            ok: false,
-            reason: 'version-conflict',
-            actualVersion: state.version,
-          } as const;
-        }
+        const conflict = checkSaveRecordVersion(
+          canvasId,
+          state,
+          input.expectedVersion,
+        );
+        if (conflict) return conflict;
         insertSqliteSaveResult(
           database,
           canvasId,
           input.result,
           responseJson,
-          state.version,
+          input.expectedVersion,
           context.now(),
         );
         return { ok: true } as const;

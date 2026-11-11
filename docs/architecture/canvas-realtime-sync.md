@@ -24,7 +24,7 @@ World preview reconciliation is a system-originated command batch against World 
 filter guarantees an incoming agent write never clobbers a node the user is
 mid-editing.
 
-> The proposed next step (cross-tab user operation sync, explicit ordering, field-level events, operation receipts and recovery) lives in [canvas-realtime-sync-plan.md](../proposals/canvas-realtime-sync-plan.md). It is not shipped behavior. Same-body co-editing, presence and multi-server fan-out are outside that implementation scope.
+> Request ids and read versions on `execute` are shipped; see [reliable save](./canvas-storage.md#42-reliable-save-in-the-write). The browser side (cross-tab user edit sync, pending intents, recovery, undo) is still proposed in [canvas-realtime-sync-plan.md](../proposals/canvas-realtime-sync-plan.md), whose status note says which sections were superseded. Same-body co-editing, presence and multi-server fan-out are outside that scope.
 
 ## Data flow
 
@@ -130,7 +130,7 @@ Skipped ids flow back through `canvasSyncStore` into `acpThreadChangesStore`
 
 ## Change records & the review card
 
-The existing card and legacy routes below are unchanged. The separately gated operation protocol can attach new Review records to a structural commit and advertises the latest Review revision over negotiated SSE/reconnect, but it has no accept or revert operation. It does not enable collaboration, migrate this card or make legacy inverses safe for concurrent Revert. See [internal operation storage](./canvas-storage.md#42-internal-operation-storage-not-activated) and the [operation API contract](./api-design.md#gated-structural-operation-protocol).
+The Review records of an agent batch are saved in the same write as the batch (see [reliable save](./canvas-storage.md#42-reliable-save-in-the-write)); a request answered from a stored result appends none. The card, the accept/revert routes and the broadcast shape below are unchanged, and this does not make inverses safe for concurrent Revert.
 
 Change records are derived **purely from a batch's `Delta[]`**, so revert is a
 generic operation — no per-command inverse logic:

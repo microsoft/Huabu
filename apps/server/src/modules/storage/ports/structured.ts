@@ -37,7 +37,6 @@
  */
 
 import type { StorageHealth } from './common.js';
-import type { SpaceOperationStore } from './operations.js';
 import type { SaveResult, SpaceSave, StoredSaveResult } from './save.js';
 import type {
   CanvasEvent,
@@ -234,8 +233,6 @@ export interface SpaceRepository {
  */
 export interface SpaceHandle {
   readonly canvasId: string;
-  /** Internal recoverable-operation storage; absence explicitly means unsupported. */
-  readonly operations?: SpaceOperationStore;
   /** The current Space record, or null when the Space does not exist. */
   read(): Promise<CanvasFile | null>;
   /**

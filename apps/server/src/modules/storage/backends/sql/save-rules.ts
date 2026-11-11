@@ -16,11 +16,27 @@
  * one Workspace cannot answer for a Space in another.
  */
 
-import { numberColumn, parseJson, rowObject, stringColumn } from './codecs.js';
-import { parseNodeStamps } from '../../ports/save.js';
+import {
+  numberColumn,
+  parseJson,
+  rowObject,
+  stringColumn,
+  stringifyJson,
+} from './codecs.js';
+import {
+  advanceStamps,
+  normalizeSaveKey,
+  parseNodeStamps,
+  SAVE_RESULT_PRUNE_LIMIT,
+  SAVE_RESULT_RETENTION_MS,
+  validateSaveResult,
+} from '../../ports/save.js';
 
+import type { CanvasFile } from '../../../canvas/persistence-types.js';
 import type {
   NodeStamp,
+  SaveKey,
+  SaveResult,
   SpaceStamps,
   StoredSaveResult,
 } from '../../ports/save.js';
@@ -77,6 +93,119 @@ export const INSERT_SAVE_HEAD = `
 
 export const UPDATE_SAVE_STAMPS = `
   UPDATE space_save_heads SET stamps_json = ? WHERE canvas_id = ?`;
+
+/** Parameters of {@link SELECT_SAVE_RESULT}. */
+export function saveResultKeyParams(
+  workspaceId: string,
+  canvasId: string,
+  key: SaveKey,
+): [string, string, string, string] {
+  const normalized = normalizeSaveKey(key);
+  return [
+    workspaceId,
+    canvasId,
+    normalized.principalId,
+    normalized.operationId,
+  ];
+}
+
+/** Parameters of {@link PRUNE_SAVE_RESULTS}: results past retention, bounded. */
+export function pruneSaveResultsParams(
+  canvasId: string,
+  now: number,
+): [string, string, number, number] {
+  return [
+    canvasId,
+    canvasId,
+    now - SAVE_RESULT_RETENTION_MS,
+    SAVE_RESULT_PRUNE_LIMIT,
+  ];
+}
+
+/** Parameters of both result-row inserts. */
+export function insertSaveResultParams(
+  canvasId: string,
+  result: SaveResult,
+  responseJson: string,
+  atVersion: number,
+  now: number,
+): [string, string, string, string, number, number, string] {
+  const key = normalizeSaveKey(result.key);
+  return [
+    canvasId,
+    key.principalId,
+    key.operationId,
+    result.digest,
+    atVersion,
+    now,
+    responseJson,
+  ];
+}
+
+/** Parameters of {@link INSERT_SAVE_HEAD} for a baseline at `version`. */
+export function newSaveHeadParams(
+  canvasId: string,
+  lineage: string,
+  version: number,
+): [string, string, number, string] {
+  return [canvasId, lineage, version, '{}'];
+}
+
+/**
+ * The stamp update one record replacement needs, as parameters of
+ * {@link UPDATE_SAVE_STAMPS}; null when the Space has no baseline
+ * (`headRow` undefined) or the replacement moved no stamp.
+ */
+export function advanceSaveStampsParams(
+  headRow: unknown,
+  canvasId: string,
+  current: CanvasFile,
+  next: CanvasFile,
+): [string, string] | null {
+  if (headRow === undefined) return null;
+  const head = decodeSaveHeadRow(headRow);
+  const advanced = advanceStamps(
+    stampsOf(head, current.version),
+    current.state.nodes,
+    next.state.nodes,
+    next.version,
+  );
+  if (advanced.nodes === head.nodes) return null;
+  return [stringifyJson(advanced.nodes, `Space ${canvasId} stamps`), canvasId];
+}
+
+/** Validate a `save.record` call; returns the encoded response. */
+export function validateSaveRecordInput(input: {
+  expectedVersion: number;
+  result: SaveResult;
+}): string {
+  if (!Number.isFinite(input.expectedVersion)) {
+    throw new TypeError('expectedVersion must be a finite number');
+  }
+  return validateSaveResult(input.result);
+}
+
+/**
+ * Whether `save.record` may store its result against the Space as read
+ * inside the transaction: null to proceed, the refusal otherwise.
+ */
+export function checkSaveRecordVersion(
+  canvasId: string,
+  state: { version: number } | null,
+  expectedVersion: number,
+): { ok: false; reason: 'version-conflict'; actualVersion: number } | null {
+  if (state === null) {
+    throw new Error(
+      `SpaceSave(${canvasId}) cannot record a result for a missing Space`,
+    );
+  }
+  if (state.version === expectedVersion) return null;
+  return {
+    ok: false,
+    reason: 'version-conflict',
+    actualVersion: state.version,
+  };
+}
 
 export function decodeSaveResultRow(value: unknown): StoredSaveResult {
   const row = rowObject(value, 'save result row');

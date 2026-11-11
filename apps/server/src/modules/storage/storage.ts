@@ -253,7 +253,6 @@ function composeSpace(storage: Storage, canvasId: string): Space {
     },
     write: (input) => handle.write(input),
     save: handle.save,
-    operations: handle.operations,
     nodes: handle.nodes,
     changes: handle.changes,
     tasks: handle.tasks,
