@@ -7,7 +7,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { selectThreadSettings, useChatStore } from '@/store/chatStore';
 
-import { useBuiltinThreadSettings } from './useBuiltinThreadSettings';
+import {
+  clearBuiltinThreadSettingsCache,
+  useBuiltinThreadSettings,
+} from './useBuiltinThreadSettings';
 
 (
   globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -91,6 +94,7 @@ let root: Root | undefined;
 let container: HTMLDivElement | undefined;
 
 beforeEach(() => {
+  clearBuiltinThreadSettingsCache();
   settingsSeenAfterSelection = undefined;
   apiMocks.getModels.mockClear();
   apiMocks.getSettings.mockReset();

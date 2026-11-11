@@ -177,10 +177,13 @@ export function rememberMessageListScrollAnchor(
   viewKey: string | undefined,
 ): void {
   if (!viewKey) return;
+  const nextAnchor = captureMessageListScrollAnchor(container);
+  const existing = scrollPositionByViewKey.get(viewKey);
+  if (!nextAnchor && existing?.messageAnchor) return;
   scrollPositionByViewKey.set(viewKey, {
-    ...scrollPositionByViewKey.get(viewKey),
+    ...existing,
     scrollTop: Math.max(0, container.scrollTop),
-    messageAnchor: captureMessageListScrollAnchor(container),
+    messageAnchor: nextAnchor,
   });
 }
 

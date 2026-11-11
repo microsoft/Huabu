@@ -5,7 +5,10 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { useAcpSlashCommands } from './useAcpSlashCommands';
+import {
+  clearAcpSlashCommandsCache,
+  useAcpSlashCommands,
+} from './useAcpSlashCommands';
 
 const apiMocks = vi.hoisted(() => ({
   getCached: vi.fn(),
@@ -44,6 +47,7 @@ afterEach(() => {
   container = undefined;
   apiMocks.getCached.mockReset();
   apiMocks.loadProfile.mockReset();
+  clearAcpSlashCommandsCache();
 });
 
 async function renderHarness(): Promise<void> {

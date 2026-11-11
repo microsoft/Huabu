@@ -12,7 +12,10 @@ import {
   useConversationPreparationStore,
 } from '@/store/conversationPreparation';
 
-import { useAcpSessionMeta } from './useAcpSessionMeta';
+import {
+  clearAcpSessionMetaCache,
+  useAcpSessionMeta,
+} from './useAcpSessionMeta';
 
 const apiMocks = vi.hoisted(() => ({
   getCached: vi.fn(),
@@ -79,6 +82,7 @@ afterEach(() => {
   apiMocks.getCached.mockReset();
   apiMocks.loadProfile.mockReset();
   apiMocks.sink.mockReset();
+  clearAcpSessionMetaCache();
   useChatStore.setState({ threadsById: {}, bindingByThread: {} });
   useConversationPreparationStore.setState({
     directories: {},
@@ -365,5 +369,37 @@ describe('useAcpSessionMeta', () => {
     );
     expect(container?.textContent).toBe('profile:1');
     expect(apiMocks.loadProfile).not.toHaveBeenCalled();
+  });
+
+  it('retains cached session metadata across unmount and remount without re-entering loading', async () => {
+    apiMocks.getCached.mockResolvedValue({
+      source: 'thread',
+      availableCommands: [],
+      commandsUpdatedAt: 1,
+      sessionMeta: {
+        ...EMPTY_META,
+        currentModelId: 'model-1',
+        configOptions: [
+          {
+            id: 'allow_all',
+            name: 'Auto approve',
+            type: 'boolean',
+            currentValue: true,
+          },
+        ],
+        updatedAt: 1,
+      },
+    });
+
+    await renderHarness();
+    expect(container?.textContent).toBe('thread:1');
+    expect(apiMocks.getCached).toHaveBeenCalledOnce();
+
+    act(() => root?.unmount());
+    container?.remove();
+
+    await renderHarness();
+    expect(container?.textContent).toBe('thread:1');
+    expect(apiMocks.getCached).toHaveBeenCalledOnce();
   });
 });
