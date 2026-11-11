@@ -89,6 +89,44 @@ afterEach(() => {
 });
 
 describe('PUT /nodes/:nodeId/content — content CAS', () => {
+  it('uses the canonical Office revision even when GET strips a legacy body preamble', async () => {
+    seedCanvas('c1', 'office', 'Document');
+    const store = getCanvasStore('c1');
+    const canvas = store.read();
+    if (!canvas) throw new Error('Missing seeded Space');
+    canvas.state.nodes = [
+      { id: 'office', type: 'office', position: { x: 0, y: 0 }, data: {} },
+    ];
+    store.write(canvas);
+    const content = '---\nparser: officeparser\n---\n\nReadable body';
+    store.writeNode('office', {
+      nodeId: 'office',
+      type: 'office',
+      label: 'Document',
+      content,
+    });
+    const app = await buildApp();
+    try {
+      const read = await app.inject({
+        method: 'GET',
+        url: '/canvas/c1/nodes/office/content',
+      });
+      expect(read.json().content).toBe('Readable body');
+      const record = store.readNode('office');
+      if (!record) throw new Error('Missing Office record');
+      expect(read.json().rev).toBe(nodeRevisionOf(record));
+      const saved = await putContent(app, 'c1', 'office', {
+        nodeType: 'office',
+        properties: { Status: 'Read' },
+        expectRev: read.json().rev,
+      });
+      expect(saved.statusCode).toBe(200);
+      expect(store.readNode('office')?.content).toBe(content);
+    } finally {
+      await app.close();
+    }
+  });
+
   it('loads the canonical PDF revision without its extracted body and accepts repeated property saves', async () => {
     seedCanvas('c1', 'pdf', 'Paper');
     const store = getCanvasStore('c1');

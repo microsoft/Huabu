@@ -3,6 +3,7 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { cloneArtifactToCanvas } from '@/api/artifact';
 import { CanvasConflictError, putCanvas, putNodeContent } from '@/api/canvas';
 import { toast } from '@/components/Common/Toast';
 
@@ -13,7 +14,14 @@ import useCanvasStore, {
 } from './canvasStore';
 import { useWorkspaceStore } from './workspaceStore';
 
+import type * as ArtifactApi from '@/api/artifact';
 import type * as CanvasApi from '@/api/canvas';
+import type { PutNodeContentRequest } from '@huabu/shared';
+
+vi.mock('@/api/artifact', async (importActual) => ({
+  ...(await importActual<typeof ArtifactApi>()),
+  cloneArtifactToCanvas: vi.fn(),
+}));
 
 vi.mock('@/api/canvasEvents', () => ({
   postCanvasEvents: vi.fn().mockResolvedValue({ success: true }),
@@ -122,6 +130,80 @@ describe('durable node metadata actions', () => {
       'Extracted text',
     );
     expect(putCanvas).not.toHaveBeenCalled();
+  });
+  it.each([
+    { field: 'noteContent', value: 'First notes', cleared: '' },
+    { field: 'propertyDisplayKeys', value: ['keep'], cleared: [] },
+  ])(
+    'persists undo of the first $field edit before reload',
+    async ({ field, value, cleared }) => {
+      const id = `undo-${field}`;
+      seed(id);
+      const serverData: Record<string, unknown> = {};
+      vi.mocked(putNodeContent).mockImplementation(
+        async (_canvas, nodeId, body) => {
+          Object.assign(serverData, body);
+          return { nodeId, label: 'Paper', rev: 'saved' };
+        },
+      );
+      const patch = { [field]: value } as Pick<
+        PutNodeContentRequest,
+        'noteContent' | 'propertyDisplayKeys'
+      >;
+      if (field === 'noteContent') await commitNodeMetadata(id, patch);
+      else await commitNodeProperties(id, patch);
+      expect(serverData[field]).toEqual(value);
+      await useCanvasStore.getState().undo();
+      await vi.waitFor(() => expect(serverData[field]).toEqual(cleared), {
+        timeout: 3000,
+      });
+      seed(id);
+      useCanvasStore
+        .getState()
+        .patchNodeSilent(id, { [field]: serverData[field] });
+      expect(useCanvasStore.getState().nodes[0].data[field]).toEqual(cleared);
+    },
+  );
+
+  it('clones PDF note images on cross-Space paste without rewriting extracted text', async () => {
+    seed('paste-destination');
+    vi.mocked(cloneArtifactToCanvas).mockResolvedValue('artifact-cloned.png');
+    const noteContent = '![note](artifact-note.png)';
+    const dispatch = vi.spyOn(useCanvasStore.getState(), 'dispatchUiIntent');
+    useCanvasStore.getState().pasteNodes(
+      { x: 0, y: 0 },
+      [
+        {
+          id: 'source-pdf',
+          type: 'pdf',
+          position: { x: 0, y: 0 },
+          data: { noteContent, content: noteContent },
+        },
+      ],
+      [],
+      'paste-source',
+    );
+    await vi.waitFor(() =>
+      expect(dispatch).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'PASTE_CLIPBOARD',
+          clipboardNodes: [
+            expect.objectContaining({
+              data: {
+                noteContent: '![note](artifact-cloned.png)',
+                content: noteContent,
+              },
+            }),
+          ],
+        }),
+      ),
+    );
+    expect(cloneArtifactToCanvas).toHaveBeenCalledExactlyOnceWith(
+      'paste-source',
+      'artifact-note.png',
+      'paste-destination',
+    );
+    dispatch.mockRestore();
   });
 
   it('retracts properties and only resubmits when the toast Retry action runs', async () => {

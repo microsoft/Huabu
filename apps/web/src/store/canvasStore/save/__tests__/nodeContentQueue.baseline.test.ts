@@ -88,6 +88,16 @@ beforeEach(() => {
 });
 
 describe('nodeContentQueue baseline lifecycle', () => {
+  it('does not send clears for untouched optional metadata on a new node', async () => {
+    const node = noteNode('body');
+    const { queue } = makeQueue(node);
+    putMock.mockResolvedValue({ nodeId: 'n1', label: 'Note', rev: 'saved' });
+    queue.scheduleChanges('c1', [], [node]);
+    await queue.flushAll();
+    const body = putMock.mock.calls[0][2];
+    expect(body).not.toHaveProperty('noteContent');
+    expect(body).not.toHaveProperty('propertyDisplayKeys');
+  });
   it.each<Pick<PutNodeContentRequest, 'properties' | 'propertyDisplayKeys'>>([
     { properties: { Added: 'new' }, propertyDisplayKeys: ['Venue', 'Added'] },
     {

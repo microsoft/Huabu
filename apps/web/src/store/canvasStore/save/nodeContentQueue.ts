@@ -275,7 +275,7 @@ export function createNodeContentQueue(opts: {
     });
     if (cancel) pendingFailureRecovery.set(nodeId, cancel);
   }
-  const pendingFields = new Map<string, Map<string, object>>();
+  const pendingFields = new Map<string, Map<string, { removed?: boolean }>>();
   const suppressNextNewNodeSave = new Set<string>();
   /**
    * Last `(label, labelSource)` the server confirmed it persisted for
@@ -434,11 +434,18 @@ export function createNodeContentQueue(opts: {
     }
     if (
       includes('propertyDisplayKeys') &&
-      data.propertyDisplayKeys !== undefined
+      (data.propertyDisplayKeys !== undefined ||
+        pendingFields.get(nodeId)?.get('propertyDisplayKeys')?.removed)
     )
-      body.propertyDisplayKeys = data.propertyDisplayKeys as string[];
-    if (includes('noteContent') && typeof data.noteContent === 'string')
-      body.noteContent = data.noteContent;
+      body.propertyDisplayKeys =
+        (data.propertyDisplayKeys as string[] | undefined) ?? [];
+    if (
+      includes('noteContent') &&
+      (typeof data.noteContent === 'string' ||
+        pendingFields.get(nodeId)?.get('noteContent')?.removed)
+    )
+      body.noteContent =
+        typeof data.noteContent === 'string' ? data.noteContent : '';
 
     // Optimistic-concurrency baseline. A node we've loaded / synced has a
     // seeded rev; a brand-new node (no entry) sends the empty-content rev
@@ -1253,8 +1260,12 @@ export function createNodeContentQueue(opts: {
         for (const key of NODE_CONTENT_KEYS) {
           if (beforeData[key] !== afterData[key]) {
             const fields =
-              pendingFields.get(next.id) ?? new Map<string, object>();
-            fields.set(key, {});
+              pendingFields.get(next.id) ??
+              new Map<string, { removed?: boolean }>();
+            fields.set(key, {
+              removed:
+                beforeData[key] !== undefined && afterData[key] === undefined,
+            });
             pendingFields.set(next.id, fields);
             schedule(canvasId, next.id);
           }

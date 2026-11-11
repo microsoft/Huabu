@@ -107,6 +107,22 @@ afterEach(() => {
   container.remove();
 });
 
+it.each([
+  { properties: null },
+  { properties: { tags: [1, 'text'] } },
+  { properties: { nested: {} } },
+  { properties: { Venue: 'CHI' }, propertyDisplayKeys: 42 },
+])(
+  'keeps malformed sidecar metadata from crashing the PDF card: %j',
+  async (data) => {
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    await render(data);
+    expect(container.querySelector('[data-overview]')).not.toBeNull();
+    expect(warning).toHaveBeenCalled();
+    warning.mockRestore();
+  },
+);
+
 async function render(data: Record<string, unknown> = {}) {
   await act(async () =>
     root.render(

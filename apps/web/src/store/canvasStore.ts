@@ -4904,7 +4904,10 @@ const useCanvasStore = create<RFState>()(
           const data = (node.data ?? {}) as Record<string, unknown>;
           if (ARTIFACT_DATA_FIELDS.some((f) => parseArtifactRef(data[f])))
             return true;
-          return markdownArtifactFields(data).some((field) => {
+          return markdownArtifactFields({
+            ...data,
+            type: node.type ?? data.type,
+          }).some((field) => {
             const v = data[field];
             return (
               typeof v === 'string' && collectMarkdownArtifactRefs(v).length > 0
@@ -4982,7 +4985,10 @@ const useCanvasStore = create<RFState>()(
                 }
               }
 
-              for (const field of markdownArtifactFields(data)) {
+              for (const field of markdownArtifactFields({
+                ...data,
+                type: node.type ?? data.type,
+              })) {
                 const markdown = data[field];
                 if (typeof markdown !== 'string' || markdown.length === 0)
                   continue;

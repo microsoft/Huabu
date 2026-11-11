@@ -121,7 +121,7 @@ const agentNodeDataSchema = z
       .string()
       .optional()
       .describe(
-        'PDF-owned Markdown notes, separate from extracted content. Read the node before replacing notes and supply expectRev; inspection alone does not authorize replacement. Empty string clears notes. Does not create a canvas Note node.',
+        'PDF-owned Markdown notes, separate from extracted content. Read the node before replacing notes; inspection alone does not authorize replacement. Revision handling follows the command contract. Empty string clears notes. Does not create a canvas Note node.',
       ),
     label: z
       .string()

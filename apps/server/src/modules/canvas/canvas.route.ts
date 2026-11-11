@@ -1202,11 +1202,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       content: resolvedContent,
       // Baseline revision co-delivered with the content, so a single-node
       // refresh re-seeds the client's CAS baseline atomically.
-      rev: nodeRevisionOf({
-        ...existing,
-        content: resolvedContent,
-        ...(typeof existing.src === 'string' ? { src: existing.src } : {}),
-      }),
+      rev: nodeRevisionOf(existing),
     };
     response.properties = existing.properties;
     response.propertyDisplayKeys = existing.propertyDisplayKeys;

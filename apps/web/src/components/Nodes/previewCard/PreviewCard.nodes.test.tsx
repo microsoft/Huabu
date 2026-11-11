@@ -216,7 +216,7 @@ describe('PDF and Web PreviewCard integration', () => {
   });
   it('stops failed PDF captures, keeps metadata visible, and recovers for a new source', async () => {
     const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    await renderPdf({ summary: 'Still readable' });
+    await renderPdf({ noteContent: 'Still readable' });
     const failedProps = mocks.thumbnail.mock.lastCall?.[0] as {
       onError: (error: Error) => void;
     };
@@ -256,7 +256,7 @@ describe('PDF and Web PreviewCard integration', () => {
 
   it('retries a failed PDF capture only when requested and restores its cover', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
-    await renderPdf({ summary: 'Saved PDF summary' });
+    await renderPdf({ noteContent: 'Saved PDF notes' });
     const failedProps = mocks.thumbnail.mock.lastCall?.[0] as {
       onError: (error: Error) => void;
     };
@@ -264,7 +264,7 @@ describe('PDF and Web PreviewCard integration', () => {
     expect(container.querySelector('.preview-card__cover')).toBeNull();
     expect(container.querySelector('[data-thumbnail]')).toBeNull();
     expect(container.querySelector('h3')?.textContent).toBe('Original PDF');
-    expect(container.querySelector('p')?.textContent).toBe('Saved PDF summary');
+    expect(container.querySelector('p')?.textContent).toBe('Saved PDF notes');
     const retry = container.querySelector('button');
     expect(retry).not.toBeNull();
     await act(async () => retry?.click());

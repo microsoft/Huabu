@@ -11,12 +11,28 @@ export function isNodeProperties(value: unknown): value is NodeProperties {
 }
 
 export function orderedPropertyKeys(
-  properties: NodeProperties = {},
-  displayKeys: readonly string[] = [],
+  properties: unknown = {},
+  displayKeys: unknown = [],
 ): string[] {
-  return [...new Set([...displayKeys, ...Object.keys(properties)])].filter(
-    (key) => Object.prototype.hasOwnProperty.call(properties, key),
-  );
+  if (!isNodeProperties(properties)) {
+    console.warn(
+      '[node-properties] Invalid property bag; skipping its display',
+    );
+    return [];
+  }
+  const validDisplayKeys =
+    Array.isArray(displayKeys) &&
+    displayKeys.every((key) => typeof key === 'string');
+  if (!validDisplayKeys)
+    console.warn(
+      '[node-properties] Invalid display keys; using property order',
+    );
+  return [
+    ...new Set([
+      ...(validDisplayKeys ? displayKeys : []),
+      ...Object.keys(properties),
+    ]),
+  ].filter((key) => Object.prototype.hasOwnProperty.call(properties, key));
 }
 
 export function mergeNodeProperties(
