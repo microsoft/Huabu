@@ -8,6 +8,12 @@
  * Node/delta batches retain the pre-existing in-process before-image rollback;
  * record-only writes retain their existing single-file atomic replacement.
  *
+ * A write that carries a result record is additionally bracketed by a
+ * write-ahead intent, and a Space with a stamp baseline has its stamps
+ * advanced inside the same rollback scope; both live in `space-save.ts`. A
+ * write that carries no result, to a Space with no baseline, pays one `stat`
+ * for the privilege of doing neither.
+ *
  * ⚠️ Nothing between the current-version read and the write may `await`. The
  * single-winner guarantee rests entirely on that stretch running to completion
  * in one uninterrupted JavaScript turn — `read()` and `write()` on the legacy
@@ -29,9 +35,15 @@ import path from 'node:path';
 import { runCanvasPersistenceTransaction } from './canvas-persistence-transaction.js';
 import { canvasFileShapeError } from './space-record-validation.js';
 import { readDiskSpaceRecord } from './space-record.js';
+import { advanceDiskStamps, DiskSpaceSaveState } from './space-save.js';
 import { getWorkspacePath } from '../../../workspace.js';
+import {
+  storedResultOutcome,
+  validateWriteSaveResult,
+} from '../../ports/save.js';
 
 import type { CanvasStore } from './legacy/canvas-store.js';
+import type { DiskSaveOptions } from './space-save.js';
 import type {
   SpaceHandle,
   SpaceNodeMutation,
@@ -56,8 +68,12 @@ function nodeMutationError(mutation: SpaceNodeMutation, detail: string): Error {
  * thing it needs to own is the store it writes through and the Workspace it
  * was resolved in.
  */
-export function createDiskSpaceWrite(store: CanvasStore): SpaceHandle['write'] {
+export function createDiskSpaceWrite(
+  store: CanvasStore,
+  saveOptions: DiskSaveOptions = {},
+): SpaceHandle['write'] {
   const boundWorkspacePath = path.resolve(getWorkspacePath());
+  const save = new DiskSpaceSaveState(store, saveOptions);
 
   function assertActiveWorkspace(): void {
     if (path.resolve(getWorkspacePath()) !== boundWorkspacePath) {
@@ -148,6 +164,20 @@ export function createDiskSpaceWrite(store: CanvasStore): SpaceHandle['write'] {
   ): Promise<SpaceWriteResult> {
     assertActiveWorkspace();
     validateInput(input);
+    const responseJson = validateWriteSaveResult(input);
+
+    // Everything from here to the end of the write is synchronous, including
+    // recovery and the stored-result check: see the module note.
+    const saveInUse = save.inUse();
+    if (saveInUse) {
+      save.recoverPending();
+      if (input.result !== undefined) {
+        // Before the version check: a retry of a committed write arrives with
+        // a stale expected version and must be answered, not refused.
+        const stored = save.readResult(input.result.key);
+        if (stored) return storedResultOutcome(stored, input.result);
+      }
+    }
 
     const current = readDiskSpaceRecord(store);
     if (current === null) {
@@ -192,10 +222,44 @@ export function createDiskSpaceWrite(store: CanvasStore): SpaceHandle['write'] {
       parentEntryNodeId: current.parentEntryNodeId,
     };
 
+    const nextStamps = saveInUse
+      ? advanceDiskStamps(save, current, nextRecord)
+      : null;
+    const pending =
+      input.result !== undefined && responseJson !== null
+        ? save.begin({
+            result: input.result,
+            responseJson,
+            expectedVersion: input.expectedVersion,
+            toVersion: nextRecord.version,
+            delta: input.delta,
+            stamps: nextStamps,
+          })
+        : null;
+
     const needsBatchRollback =
       input.nodeMutations.length > 0 || input.delta !== undefined;
     if (!needsBatchRollback) {
-      store.write(nextRecord);
+      try {
+        store.write(nextRecord);
+      } catch (error) {
+        if (pending) save.settleAfterFailure();
+        throw error;
+      }
+      save.stage('record');
+      if (nextStamps) {
+        try {
+          save.writeHead(nextStamps);
+        } catch (error) {
+          // The record is already replaced and this path has no rollback. An
+          // intent finishes the stamps on the next call; without one the
+          // stale head is detected by its version and re-based. Either way
+          // the write itself succeeded only if its result can be stored.
+          if (pending) throw error;
+        }
+        save.stage('head');
+      }
+      if (pending) save.finish(pending);
       return { ok: true };
     }
 
@@ -208,25 +272,38 @@ export function createDiskSpaceWrite(store: CanvasStore): SpaceHandle['write'] {
       ),
     );
 
-    store.withValidatedNodeMutationTransaction(
-      { affectedNodeIds, insertedNodeIds },
-      () =>
-        runCanvasPersistenceTransaction({
-          canvasId: store.canvasId,
-          affectedNodeIds,
-          nodeIdForFilename: (filename) => store.nodeIdForFilename(filename),
-          resetRecordState: () => store.writeNodeMutationRollback(current),
-          commit: () => {
-            for (const mutation of input.nodeMutations) {
-              applyNodeMutation(mutation);
-            }
-            store.write(nextRecord);
-            if (input.delta !== undefined) {
-              store.appendDeltaLogEntry(input.delta);
-            }
-          },
-        }),
-    );
+    try {
+      store.withValidatedNodeMutationTransaction(
+        { affectedNodeIds, insertedNodeIds },
+        () =>
+          runCanvasPersistenceTransaction({
+            canvasId: store.canvasId,
+            affectedNodeIds,
+            nodeIdForFilename: (filename) => store.nodeIdForFilename(filename),
+            resetRecordState: () => store.writeNodeMutationRollback(current),
+            commit: () => {
+              for (const mutation of input.nodeMutations) {
+                applyNodeMutation(mutation);
+              }
+              save.stage('sidecars');
+              store.write(nextRecord);
+              save.stage('record');
+              if (input.delta !== undefined) {
+                store.appendDeltaLogEntry(input.delta);
+              }
+              save.stage('delta');
+              // Last, so that a failure here still rolls the record back and
+              // nothing after it can fail inside this scope.
+              if (nextStamps) save.writeHead(nextStamps);
+              save.stage('head');
+            },
+          }),
+      );
+    } catch (error) {
+      if (pending) save.settleAfterFailure();
+      throw error;
+    }
+    if (pending) save.finish(pending);
     return { ok: true };
   };
 }

@@ -28,6 +28,7 @@ import { DiskSpaceNodes } from './space-nodes.js';
 import { createDiskSpaceOperations } from './space-operations.js';
 import { createDiskSpaceRecordReader } from './space-record.js';
 import { DiskSpaceRepository } from './space-repository.js';
+import { createDiskSpaceSave } from './space-save.js';
 import { DiskSpaceTasks } from './space-tasks.js';
 import { createDiskSpaceWrite } from './space-write.js';
 
@@ -61,6 +62,7 @@ export class DiskStructuredStore implements StructuredStore {
       canvasId: store.canvasId,
       read,
       write: createDiskSpaceWrite(store),
+      save: createDiskSpaceSave(store),
       operations: createDiskSpaceOperations(store.canvasId),
       nodes: new DiskSpaceNodes(store),
       changes,

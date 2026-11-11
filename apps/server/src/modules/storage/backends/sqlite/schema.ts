@@ -177,6 +177,34 @@ export const SQLITE_MIGRATIONS: readonly SqliteMigration[] = Object.freeze([
     version: 4,
     sql: `ALTER TABLE operation_heads ADD COLUMN work_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(work_json));`,
   }),
+  // Reliable save: per-Space version stamps and per-request result records.
+  // Both hang off the Space row, so they follow it through rename and
+  // re-parenting and are removed with it.
+  Object.freeze({
+    version: 5,
+    sql: `
+      CREATE TABLE space_save_heads (
+        canvas_id TEXT PRIMARY KEY,
+        lineage TEXT NOT NULL,
+        floor INTEGER NOT NULL,
+        stamps_json TEXT NOT NULL CHECK (json_valid(stamps_json)),
+        FOREIGN KEY (canvas_id) REFERENCES spaces(canvas_id) ON DELETE CASCADE
+      ) STRICT;
+      CREATE TABLE space_save_results (
+        canvas_id TEXT NOT NULL,
+        principal_id TEXT NOT NULL,
+        operation_id TEXT NOT NULL,
+        digest TEXT NOT NULL,
+        at_version INTEGER NOT NULL,
+        created_at REAL NOT NULL,
+        response_json TEXT NOT NULL CHECK (json_valid(response_json)),
+        PRIMARY KEY (canvas_id, principal_id, operation_id),
+        FOREIGN KEY (canvas_id) REFERENCES spaces(canvas_id) ON DELETE CASCADE
+      ) STRICT;
+      CREATE INDEX space_save_results_by_age
+        ON space_save_results(canvas_id, created_at);
+    `,
+  }),
 ]);
 
 export const SQLITE_SCHEMA_VERSION =

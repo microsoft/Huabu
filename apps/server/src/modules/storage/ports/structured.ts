@@ -38,6 +38,7 @@
 
 import type { StorageHealth } from './common.js';
 import type { SpaceOperationStore } from './operations.js';
+import type { SaveResult, SpaceSave, StoredSaveResult } from './save.js';
 import type {
   CanvasEvent,
   CanvasFile,
@@ -245,6 +246,16 @@ export interface SpaceHandle {
    * to neither of them.
    */
   write(input: SpaceWriteInput): Promise<SpaceWriteResult>;
+  /**
+   * Result records and version stamps kept alongside {@link write}.
+   *
+   * A member rather than more methods on the handle because it is a part the
+   * Space holds — what was answered, and when each node last moved — with its
+   * own reads. Writing them is {@link write}'s business: a result record is
+   * stored by passing `result` to the write it describes, and stamps advance
+   * inside every write, so neither can drift from the state they describe.
+   */
+  readonly save: SpaceSave;
   /** Complete node records, addressed by stable id. */
   readonly nodes: SpaceNodes;
   /** Agent-proposed changes awaiting review, per thread. */
@@ -338,7 +349,12 @@ export type SpaceSubstrate =
 export type SpaceWriteResult =
   | { ok: true }
   | { ok: false; reason: 'not-found' }
-  | { ok: false; reason: 'version-conflict'; actualVersion: number };
+  | { ok: false; reason: 'version-conflict'; actualVersion: number }
+  /**
+   * `input.result` named a request already stored with the same digest.
+   * Nothing was written; `stored` is the answer given the first time.
+   */
+  | { ok: false; reason: 'result-exists'; stored: StoredSaveResult };
 
 export type SpaceNodeMutation =
   | {
@@ -403,6 +419,17 @@ export interface SpaceWriteInput {
    * Omitted or false means an absent Space returns `not-found`.
    */
   readonly allowCreate?: boolean;
+  /**
+   * Result record to store in the same commit as this write.
+   *
+   * The one exception to "no idempotent retry" above. When the key is already
+   * stored the write does nothing: the same digest returns `result-exists`
+   * with the stored answer, a different digest rejects with
+   * `SaveIdReusedError`. Otherwise the record lands atomically with the node
+   * mutations, the Space record and the delta — on every backend, including
+   * across process termination. Not valid together with `allowCreate`.
+   */
+  readonly result?: SaveResult;
 }
 
 // ─── History ────────────────────────────────────────────────────────────────
