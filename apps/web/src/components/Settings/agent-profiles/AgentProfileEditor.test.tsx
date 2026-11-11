@@ -562,24 +562,28 @@ describe('AgentProfileEditor', () => {
         id: 'gemini',
         displayName: 'Gemini',
         status: 'not-found',
+        installHint: 'Install Gemini',
         capabilities: { autoApprove: false, customLaunchCommand: false },
       },
       {
         id: 'claude',
         displayName: 'Claude Agent',
         status: 'adapter-missing',
+        installHint: 'Install Claude',
         capabilities: { autoApprove: false, customLaunchCommand: false },
       },
       {
         id: 'codex',
         displayName: 'Codex',
         status: 'ready',
+        installHint: 'Install Codex',
         capabilities: { autoApprove: true, customLaunchCommand: false },
       },
       {
         id: 'copilot',
         displayName: 'GitHub Copilot',
         status: 'ready',
+        installHint: 'Install Copilot',
         capabilities: { autoApprove: true, customLaunchCommand: false },
       },
     ]);

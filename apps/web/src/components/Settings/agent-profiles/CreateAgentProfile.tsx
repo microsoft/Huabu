@@ -14,7 +14,9 @@ import { CommandProfileForm } from './CommandProfileForm';
 
 import type { AcpAgentCliInfo, ConnectedAgentletDevice } from '@huabu/shared';
 
-function hasLookupFailed(cli: { diagnostics?: { code: string }[] }): boolean {
+function hasLookupFailed(
+  cli: Pick<AcpAgentCliInfo, 'id' | 'diagnostics'>,
+): boolean {
   return Boolean(
     cli.diagnostics?.some((diagnostic) => diagnostic.code === 'lookup_failed'),
   );
