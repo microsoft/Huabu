@@ -31,6 +31,30 @@ function node(
 }
 
 describe('buildSpaceMovePlan', () => {
+  it('moves PDF-owned notes and properties with the PDF', () => {
+    const pdf = node('pdf', 'pdf', 0, 0);
+    pdf.data = {
+      ...pdf.data,
+      noteContent: 'Notes about note',
+      properties: { citation: 'note' },
+    };
+    const plan = buildSpaceMovePlan({
+      sourceNodes: [pdf],
+      sourceEdges: [],
+      destinationNodes: [],
+      selectedNodeIds: ['pdf'],
+      destinationCanvasId: 'destination',
+      createSourcePreview: false,
+    });
+    const moved = executeCanvasCommands(
+      { source: 'system', commands: plan.commands },
+      { nodes: [], edges: [], canvasId: 'destination' },
+    ).writeResult.nodes;
+    const movedPdf = moved.find((entry) => entry.type === 'pdf')!;
+    expect(moved).toHaveLength(1);
+    expect(movedPdf.data.noteContent).toBe('Notes about note');
+    expect(movedPdf.data.properties).toEqual({ citation: 'note' });
+  });
   it.each([
     { name: 'legacy auto', data: {}, height: undefined },
     {

@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => ({
   reader: vi.fn(),
   thumbnail: vi.fn(),
   updateNodeData: vi.fn(),
+  card: vi.fn(),
 }));
 
 vi.mock('@/hooks/useNodePresentation', () => ({
@@ -27,13 +28,19 @@ vi.mock('@/hooks/useNodePresentation', () => ({
 }));
 vi.mock('@/store/canvasStore', () => ({
   default: (select: (state: unknown) => unknown) =>
-    select({ canvasId: 'canvas-1', updateNodeData: mocks.updateNodeData }),
+    select({
+      canvasId: 'canvas-1',
+      updateNodeData: mocks.updateNodeData,
+    }),
 }));
 vi.mock('@/api/artifact', () => ({
   resolveArtifactUrl: (src: string) => src,
 }));
 vi.mock('@/store/previewWorkspace/actions', () => ({
   openPreviewNode: vi.fn(),
+}));
+vi.mock('@/store/workspaceStore', () => ({
+  useWorkspaceStore: { getState: () => ({ workspaceId: 'workspace' }) },
 }));
 vi.mock('../shared/nodeHydrationScheduler', () => ({
   useDeferredHydration: () => mocks.hydrated,
@@ -50,9 +57,10 @@ vi.mock('../MissingFileBanner', () => ({
 }));
 vi.mock('../previewCard/PreviewCard', () => ({
   usePreviewCardSize: () => ({ width: 800, height: 600 }),
-  ViewportPreviewCard: ({ title }: { title: string }) => (
-    <div data-overview>{title}</div>
-  ),
+  ViewportPreviewCard: (props: { title: string }) => {
+    mocks.card(props);
+    return <div data-overview>{props.title}</div>;
+  },
 }));
 vi.mock('@/components/Common/FloatingToolbar', () => ({
   FloatingToolbar: { ActionButton: () => null },
@@ -115,6 +123,71 @@ async function render(data: Record<string, unknown> = {}) {
 }
 
 describe('PDF canvas presentation', () => {
+  it('uses property order automatically, skips empty values and keeps zero and false', async () => {
+    const properties = {
+      Empty: ' ',
+      Tags: [],
+      Score: 0,
+      Reviewed: false,
+      Venue: 'UIST',
+    };
+    await render({ properties });
+    expect(mocks.card).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        properties: [
+          { name: 'Score', value: '0' },
+          { name: 'Reviewed', value: 'false' },
+          { name: 'Venue', value: 'UIST' },
+        ],
+      }),
+    );
+    await render({
+      properties,
+      propertyDisplayKeys: ['Venue', 'Empty', 'Venue', 'missing', 'Reviewed'],
+    });
+    expect(mocks.card).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        properties: [
+          { name: 'Venue', value: 'UIST' },
+          { name: 'Reviewed', value: 'false' },
+          { name: 'Score', value: '0' },
+        ],
+      }),
+    );
+  });
+
+  it('uses PDF-owned notes instead of generated summaries', async () => {
+    await render({ summary: 'Old AI summary' });
+    expect(mocks.card).toHaveBeenLastCalledWith(
+      expect.objectContaining({ summary: undefined }),
+    );
+    await render({
+      summary: 'Old AI summary',
+      noteContent: '## Core question\n\n> My **own** interpretation.',
+      properties: { Venue: 'UIST', Internal: 'Hidden' },
+      propertyDisplayKeys: ['Venue'],
+    });
+    expect(mocks.card).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        summary: 'My own interpretation.',
+        properties: [
+          { name: 'Venue', value: 'UIST' },
+          { name: 'Internal', value: 'Hidden' },
+        ],
+      }),
+    );
+    await render({
+      noteContent: '## Notes\n\nOwned thoughts.',
+    });
+    expect(mocks.card).toHaveBeenLastCalledWith(
+      expect.objectContaining({ summary: 'Owned thoughts.' }),
+    );
+    await render({ noteContent: '' });
+    expect(mocks.card).toHaveBeenLastCalledWith(
+      expect.objectContaining({ summary: undefined }),
+    );
+  });
+
   it('keeps the overview and thumbnail pipeline at intermediate size', async () => {
     await render();
     expect(container.querySelector('[data-overview]')?.textContent).toBe(

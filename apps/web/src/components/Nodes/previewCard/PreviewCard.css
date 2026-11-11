@@ -47,6 +47,32 @@
   border-top: var(--card-divider-width, 1px) solid var(--edge-default);
 }
 
+.preview-card[data-node-type='pdf'][data-orientation='vertical'] {
+  padding: var(--card-padding-block, var(--card-padding))
+    var(--card-padding-inline, var(--card-padding));
+  gap: var(--card-image-text-gap);
+}
+
+.preview-card[data-node-type='pdf'][data-orientation='vertical']
+  .preview-card__cover {
+  border-radius: var(--card-image-radius);
+}
+
+.preview-card[data-node-type='pdf'][data-orientation='vertical']
+  .preview-card__info {
+  padding: 0;
+  border-top: 0;
+}
+
+.preview-card__properties {
+  overflow: hidden;
+  margin-top: var(--card-gap);
+  font-size: var(--card-description);
+  line-height: var(--card-description-line);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .preview-card__metadata {
   display: flex;
   align-items: center;

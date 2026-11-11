@@ -7,6 +7,7 @@ import { isFileReference } from '../../utils/file-reference.js';
 import { projectAgentNodeEditableData } from '../agentNodeOwnership.js';
 import { materializeAutoHeight } from '../height/materialize.js';
 import { getHeightPolicy } from '../height/policy.js';
+import { hasValidNodeProperties } from '../nodeProperties.js';
 import { hasValidInkResourceBindings } from '../utils/inkSigil.js';
 import { deduplicateLabel, generateNextLabel } from '../utils/labels.js';
 import {
@@ -43,6 +44,8 @@ const createNodes: CommandDefinition<Cmd> = {
 
   handler(cmd, state) {
     if (cmd.nodes.length === 0) return noop(state);
+    if (cmd.nodes.some((node) => !hasValidNodeProperties(node.data ?? {})))
+      return noop(state, 'invalid-target');
     if (
       cmd.nodes.some(
         (node) =>

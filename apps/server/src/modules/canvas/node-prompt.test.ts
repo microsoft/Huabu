@@ -13,6 +13,8 @@
 
 import { describe, expect, it } from 'vitest';
 
+import { nodeRevisionOf } from '@huabu/shared/canvas-engine';
+
 import { describeNode, nodeLabel, renderNodes } from './node-prompt.js';
 
 import type { NodeContent } from '../storage/index.js';
@@ -63,7 +65,7 @@ describe('describeNode — preview level', () => {
     expect(node.filename).toBe('nodes/Wire Label.md');
   });
 
-  it('omits rev / summary / preview for a node with no body or summary', () => {
+  it('keeps an empty Note revision for metadata CAS while omitting text hints', () => {
     // content '' by default
     const node = describeNode(
       { id: 'n1', type: 'note' },
@@ -71,9 +73,27 @@ describe('describeNode — preview level', () => {
       record('n1', { label: 'Empty' }),
     );
     expect(node.label).toBe('Empty');
-    expect(node.rev).toBeUndefined();
+    expect(node.rev).toBe(nodeRevisionOf({ content: '' }));
     expect(node.summary).toBeUndefined();
     expect(node.preview).toBeUndefined();
+  });
+
+  it('exposes stored authored metadata with the same revision as persistence', () => {
+    const stored = record('pdf', {
+      type: 'pdf',
+      content: 'extracted',
+      src: 'paper.pdf',
+      properties: { reviewed: false, authors: ['Ada'] },
+      propertyDisplayKeys: ['reviewed'],
+      noteContent: '# Reading notes',
+    })!;
+    const node = describeNode({ id: 'pdf', type: 'pdf' }, 'preview', stored);
+    expect(node).toMatchObject({
+      properties: stored.properties,
+      propertyDisplayKeys: stored.propertyDisplayKeys,
+      rev: nodeRevisionOf(stored),
+    });
+    expect(node).not.toHaveProperty('noteContent');
   });
 
   it('emits summary and preview as INDEPENDENT fields', () => {

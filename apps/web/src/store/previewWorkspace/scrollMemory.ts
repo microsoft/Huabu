@@ -14,6 +14,7 @@ export interface ChatViewportSnapshot {
 
 export interface PreviewScrollPosition {
   scrollTop: number;
+  scrollHeaderHeight?: number;
   chatViewport?: ChatViewportSnapshot;
   pdfView?: {
     source: string;
@@ -105,7 +106,12 @@ export function previewTargetKey(target: PreviewTarget): string {
       : target.kind === 'chat'
         ? [target.kind, target.canvasId, target.threadId]
         : target.kind === 'node'
-          ? [target.kind, target.canvasId, target.nodeId]
+          ? [
+              target.kind,
+              target.canvasId,
+              target.nodeId,
+              ...(target.view ? [target.view] : []),
+            ]
           : [target.kind, target.canvasId, target.url],
   );
 }
@@ -134,25 +140,37 @@ export function messageListViewKey(
   return `chat:${ownerCanvasId}:${threadId}`;
 }
 
-export function nodePreviewViewKey(canvasId: string, nodeId: string): string {
-  return `node:${canvasId}:${nodeId}`;
+export function nodePreviewViewKey(
+  canvasId: string,
+  nodeId: string,
+  view?: 'notes',
+): string {
+  return `node:${canvasId}:${nodeId}${view ? `:${view}` : ''}`;
 }
 
 export function readPreviewScrollPosition(
   viewKey: string | undefined,
+  headerHeight?: number,
 ): number | undefined {
-  return viewKey ? scrollPositionByViewKey.get(viewKey)?.scrollTop : undefined;
+  const position = viewKey ? scrollPositionByViewKey.get(viewKey) : undefined;
+  if (!position || headerHeight === undefined) return position?.scrollTop;
+  const previousHeaderHeight = position.scrollHeaderHeight ?? 0;
+  return position.scrollTop >= previousHeaderHeight
+    ? position.scrollTop - previousHeaderHeight + headerHeight
+    : Math.min(position.scrollTop, headerHeight);
 }
 
 export function rememberPreviewScrollPosition(
   viewKey: string | undefined,
   scrollTop: number,
+  headerHeight = 0,
 ): void {
   if (!viewKey || !Number.isFinite(scrollTop)) return;
   const previous = scrollPositionByViewKey.get(viewKey);
   scrollPositionByViewKey.set(viewKey, {
     ...previous,
     scrollTop: Math.max(0, scrollTop),
+    scrollHeaderHeight: headerHeight,
   });
 }
 

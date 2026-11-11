@@ -234,7 +234,11 @@ export function PreviewWorkspace({
               view.conversationOwner.canvasId,
               view.conversationOwner.threadId,
             )
-          : nodePreviewViewKey(target.canvasId, target.nodeId);
+          : nodePreviewViewKey(
+              target.canvasId,
+              target.nodeId,
+              target.kind === 'node' ? target.view : undefined,
+            );
       }),
     ),
   );

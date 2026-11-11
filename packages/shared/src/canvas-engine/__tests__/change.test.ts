@@ -120,7 +120,12 @@ describe('staleness scoping (per-change fingerprintKeys)', () => {
     const [rec] = extractCanvasChanges([
       { type: 'INSERT_NODE', node: created },
     ]);
-    expect(rec.fingerprintKeys).toEqual(['content']);
+    expect(rec.fingerprintKeys).toEqual([
+      'content',
+      'properties',
+      'propertyDisplayKeys',
+      'noteContent',
+    ]);
 
     // Preprocessing stamps summary/keywords and regenerates the label → fresh.
     const afterPreprocess = note('n', {
@@ -185,7 +190,12 @@ describe('extractCanvasChanges', () => {
     expect(rec.nodeId).toBe('node-a');
     expect(rec.revertDeltas).toEqual([{ type: 'DELETE_NODE', node: n }]);
     // CREATE fingerprints the authored body (content).
-    expect(rec.fingerprintKeys).toEqual(['content']);
+    expect(rec.fingerprintKeys).toEqual([
+      'content',
+      'properties',
+      'propertyDisplayKeys',
+      'noteContent',
+    ]);
     expect(rec.appliedFingerprint).toBe(fingerprintNodeFields(n, ['content']));
   });
 

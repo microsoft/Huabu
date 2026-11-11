@@ -20,7 +20,7 @@ import { parseSafeLinkUrl } from '@/utils/safeLink';
 
 /** The business resource a tab renders. */
 export type PreviewTarget =
-  | { kind: 'node'; canvasId: string; nodeId: string }
+  | { kind: 'node'; canvasId: string; nodeId: string; view?: 'notes' }
   | { kind: 'conversation'; canvasId: string; nodeId: string; threadId: string }
   | { kind: 'chat'; canvasId: string; threadId: string }
   | { kind: 'url'; canvasId: string; url: string };
@@ -96,7 +96,7 @@ export function isSamePreviewTarget(
   }
 
   if (left.kind === 'node' && right.kind === 'node') {
-    return left.nodeId === right.nodeId;
+    return left.nodeId === right.nodeId && left.view === right.view;
   }
   if (left.kind === 'conversation' && right.kind === 'conversation') {
     return left.nodeId === right.nodeId && left.threadId === right.threadId;

@@ -102,19 +102,34 @@ export function openPreviewNode(
     transient?: boolean;
     focusEditor?: boolean;
     markReadIntent?: boolean;
+    openToSide?: boolean;
+    groupId?: string;
+    view?: 'notes';
   },
 ): string {
   const canvas = useCanvasStore.getState();
   usePanelStore.getState().requestOpenRightPanel();
   const tabId = usePreviewWorkspaceStore.getState().openPreviewTarget(
-    { kind: 'node', canvasId: canvas.canvasId, nodeId },
+    {
+      kind: 'node',
+      canvasId: canvas.canvasId,
+      nodeId,
+      ...(options?.view ? { view: options.view } : {}),
+    },
     {
       transient: options?.transient ?? true,
       markReadIntent: options?.markReadIntent,
+      openToSide: options?.openToSide,
+      groupId: options?.groupId,
     },
   );
   const openedNode = canvas.nodes.find((node) => node.id === nodeId);
-  if (tabId && openedNode?.type === 'note' && options?.focusEditor !== false) {
+  if (
+    tabId &&
+    (openedNode?.type === 'note' ||
+      (openedNode?.type === 'pdf' && options?.view === 'notes')) &&
+    options?.focusEditor !== false
+  ) {
     usePreviewWorkspaceStore.getState().requestNodeFocus(tabId);
   } else if (tabId && options?.focusEditor === false) {
     const preview = usePreviewWorkspaceStore.getState();
@@ -124,6 +139,22 @@ export function openPreviewNode(
     }
   }
   return tabId;
+}
+
+/** Keep the PDF visible while reusing its owned notes view. */
+export function openPdfNotes(pdfId: string): string {
+  const sourceTab = openPreviewNode(pdfId, {
+    transient: false,
+    focusEditor: false,
+  });
+  const preview = usePreviewWorkspaceStore.getState();
+  const groupId = groupOfTab(preview.workspace, sourceTab)?.id;
+  return openPreviewNode(pdfId, {
+    view: 'notes',
+    transient: false,
+    openToSide: true,
+    groupId,
+  });
 }
 
 /** Opens the most recently used Chat, creating one when none exists. */

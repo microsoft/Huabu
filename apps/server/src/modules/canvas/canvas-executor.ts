@@ -143,6 +143,9 @@ const NODE_CONTENT_KEYS = new Set([
   'summary',
   'keywords',
   'provenance',
+  'properties',
+  'propertyDisplayKeys',
+  'noteContent',
 ]);
 
 function stripNodesForCanvas(nodes: readonly CanvasNode[]): CanvasNode[] {
@@ -184,6 +187,10 @@ export function hydrateCanvasNodes(
     if (content['keywords'] != null) data['keywords'] = content['keywords'];
     if (content['provenance'] != null)
       data['provenance'] = content['provenance'];
+    for (const key of ['properties', 'propertyDisplayKeys', 'noteContent']) {
+      if (content[key] !== undefined) data[key] = content[key];
+      else delete data[key];
+    }
     if (content['labelSource'] != null) {
       data['labelSource'] = content['labelSource'];
     }
@@ -193,18 +200,18 @@ export function hydrateCanvasNodes(
 
 /**
  * Compare-and-swap pre-flight for agent content writes. For each
- * `MERGE_NODE_DATA` patch that rewrites the authored body (`content`),
+ * `MERGE_NODE_DATA` patch that rewrites authored content or custom metadata,
  * compare the writer's `expectRev` against the hydrated node's current
  * {@link nodeRevision}. A missing `expectRev` (the agent never read the
  * node this run) or a mismatch (edited since) is a conflict.
  *
- * Only `content` is guarded — NOT `src`. `src` is a short pointer (an
+ * Content, owned notes, properties, and display order are guarded — NOT `src`. `src` is a short pointer (an
  * external URL / `artifacts/<file>` handle), not a mergeable body, and a
  * media node's `src` is never reached via a `nodes/<label>.md` read (the
  * agent reads the artifact the `src` points at, not the sidecar), so the
  * read-set never holds its rev — guarding it would reject every legit
  * `src` rewrite as `not-read`. Patches touching only non-body fields
- * (`src` / label / summary / style) are unconditional, like ui writes.
+ * (`src` / label / summary / style) remain unconditional.
  */
 function collectMergeConflicts(
   commands: readonly CanvasCommand[],
@@ -216,7 +223,12 @@ function collectMergeConflicts(
     if (cmd.type !== 'MERGE_NODE_DATA') continue;
     for (const entry of cmd.patches) {
       const patch = entry.patch ?? {};
-      const rewritesContent = 'content' in patch;
+      const rewritesContent = [
+        'content',
+        'properties',
+        'propertyDisplayKeys',
+        'noteContent',
+      ].some((key) => key in patch);
       if (!rewritesContent) continue;
       const node = byId.get(entry.nodeId);
       if (!node) continue; // missing node → engine emits 'not-found'
@@ -300,6 +312,14 @@ function buildNodeContent(node: CanvasNode): NodeContent | null {
   if (typeof data['summary'] === 'string') out['summary'] = data['summary'];
   if (Array.isArray(data['keywords'])) out['keywords'] = data['keywords'];
   if ('provenance' in data) out['provenance'] = data['provenance'];
+  for (const key of [
+    'properties',
+    'propertyDisplayKeys',
+    'noteContent',
+  ] as const) {
+    if (data[key] !== undefined)
+      (out as Record<string, unknown>)[key] = data[key];
+  }
   const labelSource = data['labelSource'];
   if (
     labelSource === 'user' ||

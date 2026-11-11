@@ -98,7 +98,13 @@ function parseTarget(value: unknown, canvasId: string): PreviewTarget | null {
     typeof candidate.nodeId === 'string' &&
     candidate.nodeId.length > 0
   ) {
-    return { kind: 'node', canvasId, nodeId: candidate.nodeId };
+    if (candidate.view !== undefined && candidate.view !== 'notes') return null;
+    return {
+      kind: 'node',
+      canvasId,
+      nodeId: candidate.nodeId,
+      ...(candidate.view === 'notes' ? { view: 'notes' as const } : {}),
+    };
   }
   if (
     candidate.kind === 'chat' &&

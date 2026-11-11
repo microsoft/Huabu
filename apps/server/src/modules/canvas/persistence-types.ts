@@ -15,7 +15,11 @@
  * directory handle). Those belong to the Disk adapter.
  */
 
-import type { CanvasEventRecord, ExecuteOriginator } from '@huabu/shared';
+import type {
+  CanvasEventRecord,
+  ExecuteOriginator,
+  NodeProperties,
+} from '@huabu/shared';
 
 /** On-disk shape of `<canvasDir>/space.json`. */
 export interface CanvasFile {
@@ -35,6 +39,9 @@ export interface CanvasFile {
 
 /** Canonical content of a single node markdown file. */
 export interface NodeContent {
+  properties?: NodeProperties;
+  propertyDisplayKeys?: string[];
+  noteContent?: string;
   nodeId: string;
   type: string;
   /**

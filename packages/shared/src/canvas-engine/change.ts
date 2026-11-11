@@ -107,7 +107,7 @@ function changedKeys(
 }
 
 /**
- * The authored *body* payload keys. A CREATE has no `prev` to diff, so it
+ * The authored body and metadata keys. A CREATE has no `prev` to diff, so it
  * can't derive its changed keys the way an UPDATE does — instead it
  * fingerprints only the body here, which is what a revert (deleting the
  * node) would actually destroy. Cosmetic (`style`) and auto-derived
@@ -115,11 +115,19 @@ function changedKeys(
  * creation) fields are deliberately excluded so they never flip a fresh
  * create to "stale"; a genuine edit to the body still does.
  */
-const PRIMARY_CONTENT_KEYS = ['content', 'src'];
+const PRIMARY_CONTENT_KEYS = [
+  'content',
+  'src',
+  'properties',
+  'propertyDisplayKeys',
+  'noteContent',
+];
 
 /** Body keys present on a node's `data`, for CREATE fingerprinting. */
 function primaryKeysOf(data: Record<string, unknown>): string[] {
-  return PRIMARY_CONTENT_KEYS.filter((k) => k in data);
+  return PRIMARY_CONTENT_KEYS.filter(
+    (k) => k in data || !['content', 'src'].includes(k),
+  );
 }
 
 /** djb2 hash over a canonical (sorted-key) projection of `data`. */
@@ -129,7 +137,17 @@ function hashDataFields(
 ): string {
   const picked: Record<string, unknown> = {};
   for (const k of [...keys].sort()) {
-    if (k in data) picked[k] = data[k];
+    if (k in data) {
+      const value = data[k];
+      picked[k] =
+        k === 'properties' && value && typeof value === 'object'
+          ? Object.fromEntries(
+              Object.entries(value).sort(([a], [b]) =>
+                a < b ? -1 : a > b ? 1 : 0,
+              ),
+            )
+          : value;
+    }
   }
   const json = JSON.stringify(picked);
   let h = 5381;
@@ -154,7 +172,7 @@ export function fingerprintNodeFields(
 
 /**
  * A node's **revision token**: a deterministic djb2 hash over its authored
- * content ({@link PRIMARY_CONTENT_KEYS} — `content` / `src`). Surfaced to
+ * content and metadata ({@link PRIMARY_CONTENT_KEYS}). Surfaced to
  * agents as an `ETag` on RFS downloads and as `rev` in per-turn refs /
  * neighbourhood, and (later) checked on the executor's content writes
  * (compare-and-swap).
@@ -175,24 +193,39 @@ export function fingerprintNodeFields(
  * three sites agree.
  */
 export function nodeRevision(node: CanvasNode | undefined): string {
-  return hashDataFields(nodeData(node), PRIMARY_CONTENT_KEYS);
+  return nodeRevisionOf({ ...nodeData(node), type: node?.type });
 }
 
 /**
  * {@link nodeRevision} for callers that hold the authored fields loosely
  * rather than a whole {@link CanvasNode} — e.g. a ref builder that already
- * extracted `content` / `src`, or the RFS lookup that hydrated the on-disk
+ * extracted authored fields, or the RFS lookup that hydrated the on-disk
  * body. Only defined fields are hashed, so the result matches
  * `nodeRevision(node)` for the equivalent node. Single source of truth for
  * "which fields define a node's revision".
  */
 export function nodeRevisionOf(fields: {
+  type?: string;
   content?: string;
   src?: string;
+  properties?: unknown;
+  propertyDisplayKeys?: unknown;
+  noteContent?: unknown;
 }): string {
   const data: Record<string, unknown> = {};
-  if (typeof fields.content === 'string') data.content = fields.content;
+  const hasBody =
+    fields.type === undefined ||
+    ['note', 'text', 'web', 'pdf', 'office', 'question'].includes(fields.type);
+  if (hasBody && typeof fields.content === 'string')
+    data.content = fields.content;
   if (typeof fields.src === 'string') data.src = fields.src;
+  for (const key of [
+    'properties',
+    'propertyDisplayKeys',
+    'noteContent',
+  ] as const) {
+    if (fields[key] !== undefined) data[key] = fields[key];
+  }
   return hashDataFields(data, PRIMARY_CONTENT_KEYS);
 }
 

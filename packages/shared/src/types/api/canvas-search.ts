@@ -36,6 +36,7 @@ import { z } from 'zod';
  *  - `summary`      — sidecar frontmatter `summary:` (one-line AI summary)
  *  - `keywords`     — sidecar frontmatter `keywords:` (string[])
  *  - `content`      — sidecar markdown body (the heavy one)
+ *  - `noteContent`  — PDF-owned Markdown notes, separate from extracted content
  *  - `conversation` — the chat thread a question node owns: every user
  *                     message + assistant reply across all turns,
  *                     read from `<threadId>.turns.jsonl`. Tool calls /
@@ -49,6 +50,7 @@ export const searchFieldSchema = z.enum([
   'summary',
   'keywords',
   'content',
+  'noteContent',
   'conversation',
 ]);
 export type SearchField = z.infer<typeof searchFieldSchema>;
@@ -86,7 +88,7 @@ export const canvasSearchRequestSchema = z.object({
    */
   nodeId: z.string().min(1).optional(),
   /**
-   * Which fields to scan. Defaults to all four. Omitting `content` keeps
+   * Which fields to scan. Defaults to all fields. Requesting only metadata keeps
    * the request entirely in the metadata tier (label/summary/keywords)
    * which the server can satisfy without reading any markdown body —
    * useful for "fast lookahead" suggestions.

@@ -88,6 +88,8 @@ export interface PreviewComponentProps {
   /** Runtime identity used to restore this Preview target's scroll offset. */
   scrollViewKey?: string;
   data: Record<string, unknown>;
+  /** Search ownership is independent of permission to act on a canvas node. */
+  searchNodeId?: string;
   readOnly?: boolean;
   /** One-shot focus request owned by the containing preview tab. */
   focusRequestNonce?: number;
@@ -104,6 +106,7 @@ export interface PreviewComponentProps {
 
 export const NotePreview = ({
   id,
+  searchNodeId = id,
   scrollViewKey,
   data,
   readOnly,
@@ -729,7 +732,7 @@ export const NotePreview = ({
               }
             >
               <RawMarkdownEditor
-                searchNodeId={id}
+                searchNodeId={searchNodeId}
                 value={markdown}
                 readOnly={!editable}
                 onChange={handleRawChange}

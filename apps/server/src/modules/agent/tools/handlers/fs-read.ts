@@ -98,6 +98,7 @@ async function projectNodeRead(
     const nc = (await space(canvasId).nodes.read(nodeId))?.record;
     if (!nc) return undefined;
     const rev = nodeRevisionOf({
+      ...nc,
       content: nc.content,
       src: typeof nc.src === 'string' ? nc.src : undefined,
     });

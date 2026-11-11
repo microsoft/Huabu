@@ -58,12 +58,16 @@ Where each node sits, how big it is, which frame it belongs to, what colour it's
 
 ### Boundary rule of thumb
 
-| Property                                  | Tool                |
-| ----------------------------------------- | ------------------- |
-| label, content, summary, keywords, src    | `read` / `grep`     |
-| position, size, parentFrame, visual style | `inspect_nodes`     |
-| edge direction / lineStyle / stroke       | `inspect_edges`     |
-| whole-Space overview, spatial clusters    | `get_space_outline` |
+| Property                                  | Tool                      |
+| ----------------------------------------- | ------------------------- |
+| label, content, summary, keywords, src    | `read` / `grep`           |
+| position, size, parentFrame, visual style | `inspect_nodes`           |
+| properties, propertyDisplayKeys           | `inspect_nodes` or `read` |
+| noteContent (PDF-owned Markdown notes)    | `read`                    |
+| edge direction / lineStyle / stroke       | `inspect_edges`           |
+| whole-Space overview, spatial clusters    | `get_space_outline`       |
+
+Custom properties and PDF-owned notes belong to structured node records, not to a particular filesystem format. Use `inspect_nodes` for portable metadata reads; file tools require a storage profile that exposes the file surface.
 
 ## Tool decision matrix
 

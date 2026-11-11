@@ -62,6 +62,20 @@ beforeEach(() => {
 });
 
 describe('workspace round trip', () => {
+  it('restores PDF and owned-notes views as distinct tabs of the same node', () => {
+    let workspace = openTarget(
+      createEmptyWorkspace('g1'),
+      node('pdf'),
+    ).workspace;
+    workspace = openTarget(
+      workspace,
+      { kind: 'node', canvasId: CANVAS, nodeId: 'pdf', view: 'notes' },
+      { openToSide: true },
+    ).workspace;
+    writeWorkspace(CANVAS, workspace);
+    expect(readWorkspace(CANVAS)).toEqual(workspace);
+    expect(Object.values(workspace.tabs)).toHaveLength(2);
+  });
   it('preserves a remote conversation identity in its parent layout without copying nodes', () => {
     const target = {
       kind: 'conversation',

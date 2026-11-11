@@ -24,6 +24,8 @@ World preview reconciliation is a system-originated command batch against World 
 filter guarantees an incoming agent write never clobbers a node the user is
 mid-editing.
 
+Canvas loading co-delivers `nodeContentRevisions`, computed from the same canonical node records used for hydration. The browser seeds its content-save queue from those server revisions, not from the rendered node projection: PDF extracted bodies are omitted from Canvas responses, and Office bodies may be normalized. Hashing those incomplete or normalized projections would falsely reject the first property save. Successful writes advance the queue to the returned revision; genuine stale writes remain conflicts. These revisions use the structured node repository and are independent of Disk, SQLite, or Postgres serialization.
+
 > Roadmap for what is **not** yet built (cross-tab user-edit sync, `clientId`
 > echo filter, field-level deltas, presence, Yjs content co-editing, cloud
 > fan-out) lives in the proposal

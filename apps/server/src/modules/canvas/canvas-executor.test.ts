@@ -94,6 +94,49 @@ function bodyOf(canvasId: string, id: string): string | undefined {
   return getCanvasStore(canvasId).readNode(id)?.content ?? undefined;
 }
 
+describe('agent property mutations', () => {
+  it('requires a current read and preserves unrelated authored fields across agent patches', async () => {
+    seedNote('properties', 'pdf', 'Extracted body', 'pdf');
+    const nodes = space('properties').nodes;
+    await updateNode(nodes, 'pdf', {
+      apply: (record) => ({
+        ...record!,
+        properties: { year: 2026, reviewed: false },
+        noteContent: '# Reading notes',
+      }),
+    });
+    const original = (await nodes.read('pdf'))!.record;
+    const apply = (expectRev?: string) =>
+      executeOnServer({
+        canvasId: 'properties',
+        originator: { source: 'agent', threadId: 'property-thread' },
+        commands: [
+          {
+            type: 'MERGE_NODE_DATA',
+            patches: [
+              {
+                nodeId: 'pdf' as never,
+                patch: { properties: { year: null, authors: ['Ada'] } },
+                expectRev,
+              },
+            ],
+          },
+        ],
+      });
+    expect((await apply()).conflicts).toHaveLength(1);
+    const revision = nodeRevisionOf(original);
+    expect((await apply(revision)).conflicts ?? []).toHaveLength(0);
+    const record = (await nodes.read('pdf'))!.record;
+    expect(record).toMatchObject({
+      properties: { reviewed: false, authors: ['Ada'] },
+      noteContent: '# Reading notes',
+      content: 'Extracted body',
+    });
+    expect(record.properties).not.toHaveProperty('year');
+    expect((await apply(revision)).conflicts).toHaveLength(1);
+  });
+});
+
 describe('atomic automatic label commits', () => {
   it('protects a queued user rename from automatic preprocessing under the Canvas mutex', async () => {
     seedNote('canvas-title', 'node-q', 'Body must survive', 'question');

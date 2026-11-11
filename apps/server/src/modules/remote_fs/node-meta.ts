@@ -137,7 +137,7 @@ export async function lookupNodeByPath(
   // `src`, so a missing body is fine.
   const content =
     typeof sidecar?.content === 'string' ? sidecar.content : undefined;
-  meta.rev = nodeRevisionOf({ content, src });
+  meta.rev = nodeRevisionOf({ ...sidecar, content, src });
 
   const edgeList = (canvas.state.edges ?? []) as CanvasEdge[];
   const edges: RfsNodeEdges = {

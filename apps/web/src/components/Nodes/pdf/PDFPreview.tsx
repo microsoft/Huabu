@@ -10,6 +10,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ReactNode,
 } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
@@ -87,6 +88,7 @@ type PendingCaptureDrag = {
 };
 
 type PDFPreviewProps = PreviewComponentProps & {
+  scrollHeader?: ReactNode;
   /** Reuse the page renderer without Preview Workspace tools or state. */
   embedded?: boolean;
   /** Canvas readers accept input only while their node is solely selected. */
@@ -106,6 +108,7 @@ export const PDFPreview = ({
   id,
   data,
   scrollViewKey,
+  scrollHeader,
   onDataChange,
   embedded = false,
   interactive = true,
@@ -183,6 +186,7 @@ export const PDFPreview = ({
   const highlightsRef = useRef(highlights);
   highlightsRef.current = highlights;
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const scrollHeaderRef = useRef<HTMLDivElement>(null);
   const openHighlight = useCallback(
     (highlight: PdfHighlight, position: { x: number; y: number }) => {
       const page = scrollContainerRef.current?.querySelector<HTMLElement>(
@@ -221,9 +225,11 @@ export const PDFPreview = ({
   usePreviewScrollMemory(
     scrollContainerRef,
     embedded ? undefined : scrollViewKey,
+    scrollHeaderRef,
   );
   const zoom = usePdfZoom({
     containerRef: scrollContainerRef,
+    headerRef: scrollHeaderRef,
     source: src,
     viewKey: scrollViewKey,
     embedded,
@@ -775,113 +781,123 @@ export const PDFPreview = ({
           embedded && interactive && 'overscroll-contain',
         )}
       >
-        {src ? (
-          <div
-            style={{
-              width: pageWidth > 0 ? pageWidth : undefined,
-              minWidth: '100%',
-            }}
-          >
-            <Document
-              key={loadAttempt}
-              file={resolvedSrc}
-              options={PDF_DOCUMENT_OPTIONS}
-              onLoadSuccess={onDocumentLoadSuccess}
-              onLoadError={() => setFailedSource(src)}
-              onSourceError={() => setFailedSource(src)}
-              loading=""
-              error={
-                <div className="text-danger-fg p-4 text-xs">
-                  {t('node.errorLoadingPdf')}
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => {
-                      setFailedSource(null);
-                      setLoadAttempt((attempt) => attempt + 1);
-                    }}
-                  >
-                    {t('messages.retry')}
-                  </Button>
-                </div>
-              }
-              className={clsx('flex flex-col items-center gap-0')}
+        <div className="flex min-h-full flex-col">
+          {scrollHeader && (
+            <div ref={scrollHeaderRef} className="-mr-1 -ml-8 shrink-0">
+              {scrollHeader}
+            </div>
+          )}
+          {src ? (
+            <div
+              className="shrink-0"
+              style={{
+                width: pageWidth > 0 ? pageWidth : undefined,
+                minWidth: '100%',
+              }}
             >
-              {Array.from(new Array(numPages ?? 0), (_el, index) => (
-                <div
-                  key={`page_${index + 1}`}
-                  data-pdf-page-shell={index}
-                  className={clsx(
-                    'bg-bg-default shrink-0',
-                    embedded && 'overflow-hidden',
-                  )}
-                  style={{
-                    width: pageWidth > 0 ? pageWidth : '100%',
-                    aspectRatio:
-                      pageAspectRatios.get(index) ??
-                      pageAspectRatios.get(0) ??
-                      DEFAULT_PDF_PAGE_ASPECT_RATIO,
-                  }}
-                >
-                  {visiblePageIndexes.has(index) ||
-                  retainedPageIndexes.has(index) ||
-                  forcedPageIndex === index ? (
-                    <div
-                      style={{
-                        width: renderedWidth > 0 ? renderedWidth : undefined,
-                        transformOrigin: 'top left',
-                        transform: `scale(${scaleFactor})`,
+              <Document
+                key={loadAttempt}
+                file={resolvedSrc}
+                options={PDF_DOCUMENT_OPTIONS}
+                onLoadSuccess={onDocumentLoadSuccess}
+                onLoadError={() => setFailedSource(src)}
+                onSourceError={() => setFailedSource(src)}
+                loading=""
+                error={
+                  <div className="text-danger-fg p-4 text-xs">
+                    {t('node.errorLoadingPdf')}
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setFailedSource(null);
+                        setLoadAttempt((attempt) => attempt + 1);
                       }}
                     >
-                      <PDFPageWithOverlay
-                        pageNumber={index + 1}
-                        pageIndex={index}
-                        pageWidth={
-                          renderedWidth > 0 ? renderedWidth : undefined
-                        }
-                        captureEnabled={!embedded && captureMode}
-                        onAreaCaptured={handleAreaCaptured}
-                        persistedRect={
-                          pendingCapture && pendingCapture.pageIndex === index
-                            ? pendingCapture.captureRect
-                            : undefined
-                        }
-                        highlights={highlights.filter(
-                          (h) => h.pageIndex === index,
-                        )}
-                        textSelection={
-                          !embedded &&
-                          !captureMode &&
-                          !editingComment &&
-                          id &&
-                          pendingTextSelection &&
-                          !pendingTextSelection.highlightId &&
-                          !pendingCapture
-                            ? {
-                                text: pendingTextSelection.text,
-                                rects:
-                                  pendingTextSelection.rects.get(index) ?? [],
-                                excerptFromNodeId: id,
-                              }
-                            : undefined
-                        }
-                        selectionScale={scaleFactor}
-                        onHighlightActivate={
-                          !embedded && !captureMode ? openHighlight : undefined
-                        }
-                        onAspectRatioResolved={handlePageAspectRatioResolved}
-                      />
-                    </div>
-                  ) : null}
-                </div>
-              ))}
-            </Document>
-          </div>
-        ) : (
-          <div className="text-fg-subtle flex h-full w-full items-center justify-center text-sm">
-            {t('node.noPdfSource')}
-          </div>
-        )}
+                      {t('messages.retry')}
+                    </Button>
+                  </div>
+                }
+                className={clsx('flex flex-col items-center gap-0')}
+              >
+                {Array.from(new Array(numPages ?? 0), (_el, index) => (
+                  <div
+                    key={`page_${index + 1}`}
+                    data-pdf-page-shell={index}
+                    className={clsx(
+                      'bg-bg-default shrink-0',
+                      embedded && 'overflow-hidden',
+                    )}
+                    style={{
+                      width: pageWidth > 0 ? pageWidth : '100%',
+                      aspectRatio:
+                        pageAspectRatios.get(index) ??
+                        pageAspectRatios.get(0) ??
+                        DEFAULT_PDF_PAGE_ASPECT_RATIO,
+                    }}
+                  >
+                    {visiblePageIndexes.has(index) ||
+                    retainedPageIndexes.has(index) ||
+                    forcedPageIndex === index ? (
+                      <div
+                        style={{
+                          width: renderedWidth > 0 ? renderedWidth : undefined,
+                          transformOrigin: 'top left',
+                          transform: `scale(${scaleFactor})`,
+                        }}
+                      >
+                        <PDFPageWithOverlay
+                          pageNumber={index + 1}
+                          pageIndex={index}
+                          pageWidth={
+                            renderedWidth > 0 ? renderedWidth : undefined
+                          }
+                          captureEnabled={!embedded && captureMode}
+                          onAreaCaptured={handleAreaCaptured}
+                          persistedRect={
+                            pendingCapture && pendingCapture.pageIndex === index
+                              ? pendingCapture.captureRect
+                              : undefined
+                          }
+                          highlights={highlights.filter(
+                            (h) => h.pageIndex === index,
+                          )}
+                          textSelection={
+                            !embedded &&
+                            !captureMode &&
+                            !editingComment &&
+                            id &&
+                            pendingTextSelection &&
+                            !pendingTextSelection.highlightId &&
+                            !pendingCapture
+                              ? {
+                                  text: pendingTextSelection.text,
+                                  rects:
+                                    pendingTextSelection.rects.get(index) ?? [],
+                                  excerptFromNodeId: id,
+                                }
+                              : undefined
+                          }
+                          selectionScale={scaleFactor}
+                          onHighlightActivate={
+                            !embedded && !captureMode
+                              ? openHighlight
+                              : undefined
+                          }
+                          onAspectRatioResolved={handlePageAspectRatioResolved}
+                        />
+                      </div>
+                    ) : null}
+                  </div>
+                ))}
+              </Document>
+            </div>
+          ) : (
+            <div className="text-fg-subtle flex w-full flex-1 items-center justify-center text-sm">
+              {t('node.noPdfSource')}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* ── Floating drag handle (area capture) */}

@@ -151,6 +151,26 @@ describe('prepareAgentCanvasCommands', () => {
     });
   });
 
+  it('uses inspected metadata freshness without authorizing unread body writes', () => {
+    const [command] = prepareAgentCanvasCommands(
+      [
+        {
+          type: 'MERGE_NODE_DATA',
+          patches: [
+            { nodeId: 'node-1', patch: { properties: { year: 2026 } } },
+            { nodeId: 'node-1', patch: { content: 'unread body' } },
+            { nodeId: 'node-1', patch: { noteContent: 'unread notes' } },
+          ],
+        },
+      ],
+      { readSet: new Map([['metadata:node-1', 'inspected']]) },
+    );
+    if (command.type !== 'MERGE_NODE_DATA') throw new Error('Expected merge');
+    expect(command.patches[0].expectRev).toBe('inspected');
+    expect(command.patches[1].expectRev).toBeUndefined();
+    expect(command.patches[2].expectRev).toBeUndefined();
+  });
+
   it('unwraps a downloaded node sidecar before writing its body back', () => {
     const [command] = prepareAgentCanvasCommands([
       {

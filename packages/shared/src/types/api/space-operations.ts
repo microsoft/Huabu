@@ -15,6 +15,7 @@ import {
   canvasSearchMatchSchema,
   canvasSearchRequestSchema,
 } from './canvas-search.js';
+import { nodePropertiesSchema, nodePropertiesPatchSchema } from './canvas.js';
 import {
   ACCENT_PALETTE,
   AGENT_CANVAS_COMMAND_TYPES,
@@ -105,6 +106,23 @@ const nodeStyleSchema = z
 
 const agentNodeDataSchema = z
   .object({
+    properties: nodePropertiesSchema
+      .optional()
+      .describe(
+        'Authored custom properties: strings, finite numbers, booleans, or string arrays. No schema registry.',
+      ),
+    propertyDisplayKeys: z
+      .array(z.string())
+      .optional()
+      .describe(
+        'Property display order for the property list and PDF card priority. Replaces the entire list; omitted existing keys follow, duplicates and missing keys are ignored. [] uses object-key order, not hidden visibility.',
+      ),
+    noteContent: z
+      .string()
+      .optional()
+      .describe(
+        'PDF-owned Markdown notes, separate from extracted content. Read the node before replacing notes and supply expectRev; inspection alone does not authorize replacement. Empty string clears notes. Does not create a canvas Note node.',
+      ),
     label: z
       .string()
       .max(500)
@@ -218,7 +236,13 @@ export const deleteNodesCommandSchema = z
 const mergeNodeDataPatchSchema = z
   .object({
     nodeId: z.string().min(1),
-    patch: agentNodeDataSchema,
+    patch: agentNodeDataSchema.extend({
+      properties: nodePropertiesPatchSchema
+        .optional()
+        .describe(
+          'Merge individual property keys; null deletes that key, omitted keys survive, {} changes nothing. Example: {"year":2026,"obsolete":null}.',
+        ),
+    }),
   })
   .strict();
 
@@ -235,7 +259,7 @@ export const mergeNodeDataCommandSchema = z
   })
   .strict()
   .describe(
-    'Merge patches into node data. patch.content is the Markdown body only, never a downloaded node sidecar or YAML frontmatter. Use expectRev for optimistic concurrency when rewriting content or src.',
+    'Merge patches into node data. patch.content is the Markdown body only, never a downloaded node sidecar or YAML frontmatter. content, noteContent, and authored metadata (properties, propertyDisplayKeys) require a fresh revision; use expectRev for src edits too. Read the node before content or noteContent edits; inspect_nodes suffices for property edits. Native callers pass expectRev; the built-in agent injects it from the read or inspection.',
   );
 
 export const setNodeParentCommandSchema = z
@@ -748,6 +772,8 @@ export type SpaceQuery = z.infer<typeof spaceQuerySchema>;
 
 const spaceNodeResultSchema = z
   .object({
+    properties: nodePropertiesSchema.optional(),
+    propertyDisplayKeys: z.array(z.string()).optional(),
     id: z.string(),
     type: z.enum(CANVAS_NODE_TYPES),
     label: z.string().optional(),

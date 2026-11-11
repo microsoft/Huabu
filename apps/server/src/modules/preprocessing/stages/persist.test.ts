@@ -98,6 +98,47 @@ async function bodyOf(
   return (await nodes.read(nodeId))?.record.content ?? undefined;
 }
 
+describe('authored property ownership', () => {
+  it('preserves authored metadata and legacy PDF summaries when extraction refreshes the body', async () => {
+    const nodes = await seedNode('properties', 'pdf', 'pdf', 'old');
+    const current = (await nodes.read('pdf'))!;
+    await nodes.put({
+      nodeId: 'pdf',
+      expectedRevision: current.revision,
+      record: {
+        ...current.record,
+        properties: { year: 2026 },
+        propertyDisplayKeys: ['year'],
+        noteContent: '# Authored notes',
+        summary: 'legacy',
+        keywords: ['old'],
+      },
+    });
+    await persist(
+      {
+        nodeId: 'pdf',
+        canonicalContent: 'new extracted body',
+        label: 'Paper',
+        metadata: {
+          properties: { wrong: 'derived' },
+          noteContent: 'Do not replace',
+        },
+      } as NormalizeResult,
+      'pdf',
+      'derived',
+      nodes,
+    );
+    expect((await nodes.read('pdf'))?.record).toMatchObject({
+      content: 'new extracted body',
+      properties: { year: 2026 },
+      propertyDisplayKeys: ['year'],
+      noteContent: '# Authored notes',
+      summary: 'legacy',
+      keywords: ['old'],
+    });
+  });
+});
+
 function normalized(nodeId: string, canonicalContent: string): NormalizeResult {
   return { nodeId, canonicalContent };
 }

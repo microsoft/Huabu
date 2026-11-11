@@ -127,15 +127,13 @@ describe('buildPlan — image label gating', () => {
 });
 
 describe('buildPlan — pdf enrich gating', () => {
-  it('runs full enrich on a fresh pdf', () => {
+  it('extracts and labels a fresh PDF without generating summaries or keywords', () => {
     const plan = planFor(req('pdf', { src: 'artifact-1.pdf' }));
     expect(plan).toEqual(
-      expect.arrayContaining([
-        'generate_label',
-        'generate_summary',
-        'generate_keywords',
-      ]),
+      expect.arrayContaining(['generate_label', 'extract_text']),
     );
+    expect(plan).not.toContain('generate_summary');
+    expect(plan).not.toContain('generate_keywords');
   });
 
   it('skips all enrich on a rename (title dirty, src unchanged)', () => {
@@ -151,7 +149,7 @@ describe('buildPlan — pdf enrich gating', () => {
     expect(plan).not.toContain('generate_keywords');
   });
 
-  it('re-enriches summary/keywords when src changes', () => {
+  it('re-extracts and labels when src changes without generating summaries or keywords', () => {
     const plan = planFor(
       req(
         'pdf',
@@ -160,12 +158,22 @@ describe('buildPlan — pdf enrich gating', () => {
       ),
     );
     expect(plan).toEqual(
-      expect.arrayContaining(['generate_summary', 'generate_keywords']),
+      expect.arrayContaining(['extract_text', 'generate_label']),
     );
+    expect(plan).not.toContain('generate_summary');
+    expect(plan).not.toContain('generate_keywords');
   });
 });
 
 describe('buildPlan — office enrich gating', () => {
+  it.each(['office', 'web'] as const)(
+    'retains summary and keyword generation for %s',
+    (type) => {
+      expect(planFor(req(type, { src: 'source' }))).toEqual(
+        expect.arrayContaining(['generate_summary', 'generate_keywords']),
+      );
+    },
+  );
   it('skips enrich on a rename even though office has no cache short-circuit', () => {
     const plan = planFor(
       req(

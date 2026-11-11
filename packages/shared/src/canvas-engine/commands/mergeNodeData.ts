@@ -7,9 +7,17 @@ import {
   hasAgentNodeOwnedData,
   changesAgentNodePreparation,
 } from '../agentNodeOwnership.js';
+import {
+  hasValidNodeProperties,
+  mergeNodeProperties,
+} from '../nodeProperties.js';
 import { hasValidInkResourceBindings } from '../utils/inkSigil.js';
 
 import type { CanvasCommand } from '../../index.js';
+import type {
+  NodeProperties,
+  NodePropertiesPatch,
+} from '../../types/api/canvas.js';
 import type { Node } from '@xyflow/react';
 
 type Cmd = Extract<CanvasCommand, { type: 'MERGE_NODE_DATA' }>;
@@ -23,6 +31,8 @@ const mergeNodeData: CommandDefinition<Cmd> = {
   handler(cmd, state) {
     if (cmd.patches.length === 0) return noop(state);
     for (const entry of cmd.patches) {
+      if (!hasValidNodeProperties(entry.patch, true))
+        return noop(state, 'invalid-target');
       const node = state.nodes.find(
         (candidate) => candidate.id === entry.nodeId,
       );
@@ -88,6 +98,12 @@ const mergeNodeData: CommandDefinition<Cmd> = {
       };
       if (n.type === 'question' && patchRec.agentLaunchOverrides === null)
         delete mergedData.agentLaunchOverrides;
+      if (patchRec.properties !== undefined) {
+        mergedData.properties = mergeNodeProperties(
+          dataRec.properties as NodeProperties | undefined,
+          patchRec.properties as NodePropertiesPatch,
+        );
+      }
       if ('style' in patchRec) {
         const incomingStyle = patchRec.style;
         if (incomingStyle && typeof incomingStyle === 'object') {

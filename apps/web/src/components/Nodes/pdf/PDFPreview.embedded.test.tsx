@@ -44,7 +44,8 @@ vi.mock('@/api/artifact', () => ({
 }));
 vi.mock('@/store/canvasStore', () => ({
   default: (select: (state: unknown) => unknown) =>
-    select({ canvasId: 'canvas-1' }),
+    select({ canvasId: 'canvas-1', nodes: [] }),
+  selectCanWriteCanvas: () => false,
 }));
 vi.mock('@/store/chatStore', () => ({ useChatStore: {} }));
 vi.mock('@/store/workspaceStore', () => ({
@@ -198,6 +199,30 @@ function load() {
 }
 
 describe('embedded PDF reader', () => {
+  it('places the properties header before the pages in the same scrolling content', () => {
+    act(() =>
+      root.render(
+        <PDFPreview
+          data={{ src: 'document.pdf' }}
+          scrollHeader={<div data-properties>Venue: UIST</div>}
+        />,
+      ),
+    );
+    load();
+    const viewport = container.querySelector('[data-pdf-scroll-viewport]');
+    const properties = viewport?.querySelector('[data-properties]');
+    const page = viewport?.querySelector('[data-pdf-page-shell="0"]');
+    expect(properties).not.toBeNull();
+    expect(page).not.toBeNull();
+    expect(viewport?.firstElementChild?.contains(properties ?? null)).toBe(
+      true,
+    );
+    expect(viewport?.firstElementChild?.contains(page ?? null)).toBe(true);
+    expect(page && properties?.compareDocumentPosition(page)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+  });
+
   it('does not let a failed previous source settle a replacement handoff', async () => {
     const renderSource = (src: string) =>
       root.render(

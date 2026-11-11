@@ -31,16 +31,20 @@ function Harness({
   source = 'paper.pdf',
   active = true,
   clampScroll = false,
+  headerHeight = 0,
 }: {
   embedded?: boolean;
   source?: string;
   active?: boolean;
   clampScroll?: boolean;
+  headerHeight?: number;
 }) {
   const ref = useRef<HTMLDivElement>(null);
-  usePreviewScrollMemory(ref, embedded ? undefined : viewKey);
+  const headerRef = useRef<HTMLDivElement>(null);
+  usePreviewScrollMemory(ref, embedded ? undefined : viewKey, headerRef);
   zoom = usePdfZoom({
     containerRef: ref,
+    headerRef,
     source,
     embedded,
     viewKey,
@@ -59,7 +63,7 @@ function Harness({
             clientHeight: { configurable: true, value: 800 },
             scrollHeight: {
               configurable: true,
-              value: (zoom.pageWidth * 20) / 0.75,
+              value: headerHeight + (zoom.pageWidth * 20) / 0.75,
             },
           });
           if (clampScroll) {
@@ -70,6 +74,17 @@ function Harness({
           }
         }}
       >
+        <div
+          ref={(element) => {
+            headerRef.current = element;
+            if (element) {
+              Object.defineProperty(element, 'offsetHeight', {
+                configurable: true,
+                value: headerHeight,
+              });
+            }
+          }}
+        />
         <div
           style={{
             width: zoom.pageWidth,
@@ -195,6 +210,22 @@ describe('PDF zoom', () => {
     expect(wheel(30, false).defaultPrevented).toBe(false);
     expect(zoom.scale).toBeCloseTo(2);
     expect(ancestor).toHaveBeenCalledOnce();
+  });
+
+  it('keeps the unscaled properties height out of the PDF zoom anchor', () => {
+    act(() => root.render(<Harness headerHeight={240} />));
+    viewport.scrollTop = 1000;
+    act(() => zoom.zoomIn());
+    expect(viewport.scrollTop).toBe(1290);
+    act(() => zoom.resetZoom());
+    expect(viewport.scrollTop).toBe(1000);
+  });
+
+  it('does not move the properties when the pinch anchor is above the pages', () => {
+    act(() => root.render(<Harness headerHeight={240} />));
+    wheel(-300 * Math.log(2));
+    expect(zoom.scale).toBeCloseTo(2);
+    expect(viewport.scrollTop).toBe(0);
   });
 
   it('preserves the reading anchor when shrinking content clamps native scroll before layout effects', () => {

@@ -229,7 +229,7 @@ Commands run in order, failures do not roll back accepted commands, and an accep
 
 A command cannot refer to a server-assigned ID before you receive it. Create first, read the generated ID, then connect or reparent it in a follow-up request.
 
-For a `MERGE_NODE_DATA` patch that changes `content`, first download the node and copy its unquoted `ETag` into `expectRev`. A missing or stale revision produces an HTTP 200 business result with `applied: false`, `reason: "conflict"`, and a structured conflict. Re-download, reconcile, and submit a new request.
+For a `MERGE_NODE_DATA` patch that changes `content` or PDF-owned `noteContent`, first download the node and copy its unquoted `ETag` into `expectRev`. Authored property edits (`properties`, `propertyDisplayKeys`) also require `expectRev`; `INSPECT_NODES` supplies the current `rev` without a filesystem download. A missing or stale revision produces an HTTP 200 business result with `applied: false`, `reason: "conflict"`, and a structured conflict. Re-read, reconcile, and submit a new request.
 
 Downloaded node Markdown is a complete Huabu sidecar: server-owned YAML frontmatter followed by the authored Markdown body. `CREATE_NODES.data.content` and `MERGE_NODE_DATA.patch.content` accept the Markdown body only. Never pass the downloaded file verbatim or copy its leading `---` block into `content`; remove exactly the first frontmatter block and preserve everything after its closing fence. Huabu serializes canonical node metadata itself. As a final safety net, an update whose submitted frontmatter `id` matches its target `nodeId` is unwrapped at the server boundary.
 

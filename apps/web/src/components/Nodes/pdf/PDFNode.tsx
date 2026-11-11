@@ -5,6 +5,8 @@ import { Download, Maximize2, ImageOff } from 'lucide-react';
 import { lazy, memo, Suspense, useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { orderedPropertyKeys } from '@huabu/shared/canvas-engine';
+
 import { resolveArtifactUrl } from '@/api/artifact';
 import { DropdownMenuItem } from '@/components/Common/DropdownMenu';
 import { FloatingToolbar } from '@/components/Common/FloatingToolbar';
@@ -12,12 +14,14 @@ import { useNodePresentation } from '@/hooks/useNodePresentation';
 import useCanvasStore from '@/store/canvasStore';
 import { openPreviewNode } from '@/store/previewWorkspace/actions';
 
+import { PDFNotesButton } from './PDFNotesButton';
 import { getMissingFileKind, MissingFileBanner } from '../MissingFileBanner';
 import { NodeWrapper } from '../NodeWrapper';
 import {
   ViewportPreviewCard,
   usePreviewCardSize,
 } from '../previewCard/PreviewCard';
+import { noteFarDescription } from '../semanticZoom/noteFarDescription';
 import { useDeferredHydration } from '../shared/nodeHydrationScheduler';
 
 import type { CanvasPdfNodeData } from '../types';
@@ -100,9 +104,26 @@ export const PDFNode = memo(
     const hasCover = !!data.coverUrl;
     const src = typeof data.src === 'string' ? data.src : '';
     const summary =
-      typeof (data as { summary?: unknown }).summary === 'string'
-        ? ((data as { summary?: string }).summary as string)
-        : '';
+      typeof data.noteContent === 'string'
+        ? noteFarDescription(data.noteContent, '')
+        : undefined;
+    const cardProperties = orderedPropertyKeys(
+      data.properties,
+      data.propertyDisplayKeys,
+    ).flatMap((key) => {
+      const value = data.properties?.[key];
+      const text = Array.isArray(value)
+        ? value.filter((item) => item.trim()).join(', ')
+        : String(value ?? '');
+      return !text.trim()
+        ? []
+        : [
+            {
+              name: key,
+              value: text,
+            },
+          ];
+    });
     const missingFileKind = getMissingFileKind(data);
     const title = data.label || t('node.untitledPdf');
 
@@ -181,6 +202,7 @@ export const PDFNode = memo(
         >
           <Maximize2 />
         </FloatingToolbar.ActionButton>
+        <PDFNotesButton id={id} surface="canvas" />
       </>
     );
     const PDFOverflow = (
@@ -208,6 +230,7 @@ export const PDFNode = memo(
         source="PDF"
         title={title}
         summary={summary}
+        properties={cardProperties}
         loading={mode !== 'minimal' && !coverImage && !thumbnailError}
         error={hasCover ? null : thumbnailError}
         onRetry={handleRetry}

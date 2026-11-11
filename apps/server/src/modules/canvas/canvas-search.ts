@@ -107,6 +107,7 @@ const ALL_FIELDS: readonly SearchField[] = [
   'summary',
   'keywords',
   'content',
+  'noteContent',
   'conversation',
 ];
 
@@ -195,17 +196,18 @@ function scanNodeMeta(
   }
 }
 
-/** Emit all content-body matches for one node. */
+/** Emit matches from one independently addressed content field. */
 function scanNodeContent(
   node: SearchableNode,
   content: NodeContent | undefined,
+  field: 'content' | 'noteContent',
   needleLower: string,
   needleLen: number,
   tryEmit: (match: CanvasSearchMatch) => boolean,
 ): void {
-  const body = content?.content;
+  const body = content?.[field];
   if (typeof body === 'string' && body.length > 0) {
-    emitFieldHits('content', body, needleLower, needleLen, {
+    emitFieldHits(field, body, needleLower, needleLen, {
       nodeId: node.id,
       nodeType: node.type,
       label: content?.label ?? null,
@@ -742,7 +744,10 @@ export async function searchCanvas(
   emit({ type: 'progress', phase: 'meta-done' });
 
   // ── Tier 2: content scan over the same in-memory cache. No disk I/O.
-  if (fields.has('content') && totalEmitted < limit) {
+  if (
+    (fields.has('content') || fields.has('noteContent')) &&
+    totalEmitted < limit
+  ) {
     const total = candidates.length;
     let scanned = 0;
     for (const node of candidates) {
@@ -752,9 +757,21 @@ export async function searchCanvas(
         break;
       }
       const content = contentByNodeId.get(node.id);
-      scanNodeContent(node, content, needleLower, needleLen, (m) =>
-        tryEmitMatch('content', m),
-      );
+      if (fields.has('content')) {
+        scanNodeContent(node, content, 'content', needleLower, needleLen, (m) =>
+          tryEmitMatch('content', m),
+        );
+      }
+      if (node.type === 'pdf' && fields.has('noteContent')) {
+        scanNodeContent(
+          node,
+          content,
+          'noteContent',
+          needleLower,
+          needleLen,
+          (m) => tryEmitMatch('content', m),
+        );
+      }
       scanned += 1;
       if (scanned % 25 === 0 && scanned < total) {
         emit({ type: 'progress', phase: 'content', scanned, total });

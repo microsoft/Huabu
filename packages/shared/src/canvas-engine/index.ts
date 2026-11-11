@@ -17,6 +17,12 @@
 // ── Executor + runtime types ──────────────────────────────────────────────
 export * from './utils/inkSigil.js';
 export {
+  mergeNodeProperties,
+  hasValidNodeProperties,
+  isNodeProperties,
+  orderedPropertyKeys,
+} from './nodeProperties.js';
+export {
   computeAdjacentNodePlacement,
   type NodePlacementBounds,
   type NodePlacementSide,

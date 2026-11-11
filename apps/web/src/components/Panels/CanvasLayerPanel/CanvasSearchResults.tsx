@@ -36,6 +36,7 @@ import { useTranslation } from 'react-i18next';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 
 import { usePreviewSearchStore } from '@/store/previewSearchStore';
+import { nodePreviewViewKey } from '@/store/previewWorkspace/scrollMemory';
 import { revealNodesOnCanvas } from '@/utils/canvasViewport';
 
 import { shouldCanvasSearchOwnKeyboard } from './canvasSearchKeyboard';
@@ -407,13 +408,25 @@ export const CanvasSearchResults = (): React.JSX.Element => {
       // Only open when the node type renders real preview content. Types
       // without a `NodePreviews` entry leave the user's current preview alone.
       if (hasNodePreview(nodeType)) {
+        const notes = nodeType === 'pdf' && row.match.field === 'noteContent';
         // Browsing results reuses the group's inspection slot (§9.2).
-        openPreviewNode(nodeId, { transient: true, focusEditor: false });
-        if (row.match.field === 'content') {
+        openPreviewNode(nodeId, {
+          transient: true,
+          focusEditor: false,
+          ...(notes ? { view: 'notes' as const } : {}),
+        });
+        if (row.match.field === 'content' || notes) {
+          const searchId = notes
+            ? nodePreviewViewKey(
+                useCanvasStore.getState().canvasId,
+                nodeId,
+                'notes',
+              )
+            : nodeId;
           usePreviewSearchStore
             .getState()
             .reveal(
-              nodeId,
+              searchId,
               navigationQuery,
               row.match.occurrenceIndex,
               row.match.source,

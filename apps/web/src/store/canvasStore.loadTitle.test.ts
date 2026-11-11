@@ -10,9 +10,18 @@ vi.mock('../api', async (importOriginal) => ({
   ...api,
 }));
 
+import { putNodeContent } from '@/api/canvas';
+
 import useCanvasStore from './canvasStore';
+import { commitNodeMetadata } from './canvasStore';
 
 import type * as canvasApi from '../api';
+import type * as ContentApi from '@/api/canvas';
+
+vi.mock('@/api/canvas', async (original) => ({
+  ...(await original<typeof ContentApi>()),
+  putNodeContent: vi.fn(),
+}));
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -35,6 +44,50 @@ afterEach(() => {
 });
 
 describe('canvas title ownership during loading', () => {
+  it('passes the canonical loaded PDF revision into the first property save', async () => {
+    api.getCanvas.mockResolvedValue({
+      canvasId: 'pdf-space',
+      title: 'Papers',
+      version: 1,
+      access: { write: true, manage: true },
+      nodeContentRevisions: { pdf: 'canonical-server-revision' },
+      state: {
+        nodes: [
+          {
+            id: 'pdf',
+            type: 'pdf',
+            position: { x: 0, y: 0 },
+            data: {
+              label: 'Paper',
+              src: 'paper.pdf',
+              properties: { Venue: 'CHI 25' },
+            },
+          },
+        ],
+        edges: [],
+      },
+    });
+    vi.mocked(putNodeContent).mockResolvedValue({
+      nodeId: 'pdf',
+      label: 'Paper',
+      rev: 'saved',
+    });
+    await useCanvasStore.getState().loadCanvas('pdf-space');
+    await commitNodeMetadata('pdf', { properties: { Status: 'Reading' } });
+    expect(putNodeContent).toHaveBeenCalledWith(
+      'pdf-space',
+      'pdf',
+      expect.objectContaining({
+        expectRev: 'canonical-server-revision',
+        properties: { Venue: 'CHI 25', Status: 'Reading' },
+      }),
+      undefined,
+    );
+    expect(vi.mocked(putNodeContent).mock.calls[0][2]).not.toHaveProperty(
+      'content',
+    );
+  });
+
   it('clears the outgoing title before fetching and installs the loaded title', async () => {
     let resolve!: (
       value: Awaited<ReturnType<typeof canvasApi.getCanvas>>,
