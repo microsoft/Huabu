@@ -40,7 +40,7 @@ import {
   type NestableNode,
 } from './frame/index.js';
 import { getFrameSizing } from './frame/sizing.js';
-import { hidePdfNotes } from './pdfNotes.js';
+import { hasValidPdfNoteOwnership, hidePdfNotes } from './pdfNotes.js';
 import {
   coerceProvenance,
   computeAiNoteProvenance,
@@ -148,6 +148,23 @@ export function executeCanvasCommands(
       canvasId: state.canvasId,
       source,
     });
+
+    // Compare with the batch prestate so CREATE then link may initialize a new Note.
+    if (
+      result.applied &&
+      ((cmd.type === 'CREATE_NODES' &&
+        cmd.nodes.some((node) => 'noteNodeId' in (node.data ?? {}))) ||
+        (cmd.type === 'MERGE_NODE_DATA' &&
+          cmd.patches.some(({ patch }) => 'noteNodeId' in patch))) &&
+      !hasValidPdfNoteOwnership(result.nodes, state.nodes)
+    ) {
+      commandResults.push({
+        command: cmd,
+        applied: false,
+        reason: 'invalid-target',
+      });
+      continue;
+    }
 
     // Record the command result.
     commandResults.push({

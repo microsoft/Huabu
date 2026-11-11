@@ -94,17 +94,115 @@ afterEach(() => {
 });
 
 describe('PUT /nodes/:nodeId/content — content CAS', () => {
+  it('rejects existing Note claims over HTTP but initializes a new hidden Note in one batch', async () => {
+    seedCanvas('c1', 'node-existing', 'Independent');
+    const app = await buildApp();
+    try {
+      const store = getCanvasStore('c1');
+      const independent = store.read()?.state.nodes[0];
+      const pdf = {
+        id: 'node-pdf',
+        type: 'pdf',
+        position: { x: 0, y: 0 },
+        data: {},
+      };
+      const claimed = await app.inject({
+        method: 'PUT',
+        url: '/canvas/c1',
+        payload: {
+          version: 1,
+          state: {
+            nodes: [
+              independent,
+              { ...pdf, data: { noteNodeId: 'node-existing' } },
+            ],
+            edges: [],
+          },
+        },
+      });
+      expect(claimed.statusCode).toBe(400);
+      expect(store.read()?.version).toBe(1);
+      const addedPdf = await app.inject({
+        method: 'PUT',
+        url: '/canvas/c1',
+        payload: {
+          version: 1,
+          state: { nodes: [independent, pdf], edges: [] },
+        },
+      });
+      expect(addedPdf.statusCode).toBe(200);
+      const patch = (id: string) => ({
+        type: 'MERGE_NODE_DATA',
+        patches: [{ nodeId: 'node-pdf', patch: { noteNodeId: id } }],
+      });
+      const rejected = await app.inject({
+        method: 'POST',
+        url: '/canvas/c1/execute',
+        payload: {
+          originator: { source: 'agent' },
+          commands: [patch('node-existing')],
+        },
+      });
+      expect(rejected.statusCode).toBe(200);
+      expect(rejected.json().results).toEqual([
+        expect.objectContaining({ applied: false, reason: 'invalid-target' }),
+      ]);
+      const initialized = await app.inject({
+        method: 'POST',
+        url: '/canvas/c1/execute',
+        payload: {
+          originator: { source: 'agent' },
+          commands: [
+            {
+              type: 'CREATE_NODES',
+              nodes: [
+                {
+                  id: 'node-new',
+                  nodeType: 'note',
+                  position: { x: 0, y: 0 },
+                  data: { content: 'New PDF notes' },
+                },
+              ],
+            },
+            patch('node-new'),
+          ],
+        },
+      });
+      expect(initialized.statusCode).toBe(200);
+      expect(initialized.json().results).toEqual([
+        expect.objectContaining({ applied: true }),
+        expect.objectContaining({ applied: true }),
+      ]);
+      expect(store.read()?.state.nodes).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: 'node-new',
+            hidden: true,
+            selected: false,
+          }),
+          expect.objectContaining({
+            id: 'node-pdf',
+            data: expect.objectContaining({ noteNodeId: 'node-new' }),
+          }),
+        ]),
+      );
+      expect(store.readNode('node-new')?.content).toBe('New PDF notes');
+      expect(store.read()?.state.nodes).not.toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ id: 'node-existing', hidden: true }),
+        ]),
+      );
+    } finally {
+      await app.close();
+    }
+  });
+
   it.each([false, true])(
     'reverts a persisted PDF/Note review row atomically (stale: %s)',
     async (stale) => {
-      seedCanvas('c1', 'node-note', 'Notes');
+      seedCanvas('c1', 'seed', 'Unrelated');
       const app = await buildApp();
       try {
-        await putContent(app, 'c1', 'node-note', {
-          nodeType: 'note',
-          content: 'Keep my notes',
-          expectRev: REV_EMPTY,
-        });
         await executeOnServer({
           canvasId: 'c1',
           originator: { source: 'ui' },
@@ -117,6 +215,12 @@ describe('PUT /nodes/:nodeId/content — content CAS', () => {
                   nodeType: 'pdf',
                   position: { x: 0, y: 0 },
                   data: { noteNodeId: 'node-note' },
+                },
+                {
+                  id: 'node-note',
+                  nodeType: 'note',
+                  position: { x: 0, y: 0 },
+                  data: { content: 'Keep my notes' },
                 },
               ],
             },

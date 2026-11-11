@@ -30,6 +30,84 @@ function run(commands: CanvasCommand[], nodes = [pdf, note]) {
 }
 
 describe('PDF-owned real Notes', () => {
+  const initialize: CanvasCommand[] = [
+    {
+      type: 'CREATE_NODES',
+      nodes: [
+        {
+          id: 'node-note',
+          nodeType: 'note',
+          position: note.position,
+          data: note.data,
+        },
+      ],
+    },
+    {
+      type: 'MERGE_NODE_DATA',
+      patches: [{ nodeId: 'node-pdf', patch: { noteNodeId: note.id } }],
+    },
+  ];
+
+  it.each(['ui', 'agent'] as const)(
+    'initializes a fresh hidden Note in one %s batch',
+    (source) => {
+      const result = executeCanvasCommands(
+        { source, commands: initialize },
+        { nodes: [{ ...pdf, data: {} }], edges: [], canvasId: 'space' },
+      );
+      expect(result.commandResults.every((entry) => entry.applied)).toBe(true);
+      expect(
+        result.writeResult.nodes.find((node) => node.id === note.id),
+      ).toMatchObject({
+        hidden: true,
+        selected: false,
+        data: { content: 'My notes' },
+      });
+      expect(
+        run([initialize[1]], result.writeResult.nodes).commandResults[0].reason,
+      ).not.toBe('invalid-target');
+    },
+  );
+
+  it.each(['ui', 'agent'] as const)(
+    'rejects claiming an existing Note through %s commands',
+    (source) => {
+      for (const commands of [
+        [initialize[1]],
+        [
+          {
+            type: 'CREATE_NODES',
+            nodes: [
+              {
+                id: 'node-new-pdf',
+                nodeType: 'pdf',
+                position: pdf.position,
+                data: pdf.data,
+              },
+            ],
+          },
+        ],
+        [{ type: 'DELETE_NODES', nodeIds: ['node-note'] }, ...initialize],
+      ] satisfies CanvasCommand[][]) {
+        const result = executeCanvasCommands(
+          { source, commands },
+          { nodes: [{ ...pdf, data: {} }, note], edges: [], canvasId: 'space' },
+        );
+        expect(
+          result.commandResults[result.commandResults.length - 1],
+        ).toMatchObject({
+          applied: false,
+          reason: 'invalid-target',
+        });
+        expect(
+          result.writeResult.nodes
+            .filter((node) => node.type === 'pdf')
+            .every((node) => !node.data.noteNodeId),
+        ).toBe(true);
+      }
+    },
+  );
+
   it('rejects simultaneous claims on the same Note in one patch command', () => {
     const result = run(
       [

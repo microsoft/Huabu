@@ -122,7 +122,7 @@ const agentNodeDataSchema = z
       .min(1)
       .optional()
       .describe(
-        'PDF-only link to its independently stored Note. Create the Note first, then link it; a Note can belong to only one PDF. Read and edit that Note by its own ID using ordinary Note operations. The linked Note is not displayed on the canvas and follows its PDF when copied, moved or deleted.',
+        'PDF-only link to its independently stored Note. To initialize a PDF without a Note, CREATE_NODES a fresh Note with an explicit ID, then MERGE_NODE_DATA the PDF noteNodeId in the SAME command batch. Never link an existing Note or replace an existing link. Read and edit the Note by its own ID. The linked Note is hidden on the canvas and follows its PDF when copied, moved or deleted.',
       ),
     label: z
       .string()

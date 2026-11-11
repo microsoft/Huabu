@@ -752,7 +752,7 @@ describe('executeOnServer — batch node writes use one ordered backend call', (
 
 describe('executor tombstone resurrection', () => {
   it('restores an owned pair atomically and rejects partial or stale reverts', async () => {
-    seedNote('c1', 'notes', 'Saved body');
+    seedNote('c1', 'seed', '');
     await executeOnServer({
       canvasId: 'c1',
       commands: [
@@ -763,7 +763,13 @@ describe('executor tombstone resurrection', () => {
               id: 'node-pdf',
               nodeType: 'pdf',
               position: { x: 0, y: 0 },
-              data: { noteNodeId: 'notes' },
+              data: { noteNodeId: 'node-notes' },
+            },
+            {
+              id: 'node-notes',
+              nodeType: 'note',
+              position: { x: 0, y: 0 },
+              data: { content: 'Saved body' },
             },
           ],
         },
@@ -796,12 +802,12 @@ describe('executor tombstone resurrection', () => {
       expect.arrayContaining([
         expect.objectContaining({
           id: 'node-pdf',
-          data: expect.objectContaining({ noteNodeId: 'notes' }),
+          data: expect.objectContaining({ noteNodeId: 'node-notes' }),
         }),
-        expect.objectContaining({ id: 'notes', hidden: true }),
+        expect.objectContaining({ id: 'node-notes', hidden: true }),
       ]),
     );
-    expect(store.readNode('notes')?.content).toBe('Saved body');
+    expect(store.readNode('node-notes')?.content).toBe('Saved body');
     const restoredVersion = store.read()?.version;
     await expect(
       applyDeltasOnServer({
