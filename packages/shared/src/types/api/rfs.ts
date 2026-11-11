@@ -143,6 +143,13 @@ export const RFS_HEADERS = {
   locked: 'X-Huabu-Locked',
   /** `X-Huabu-Node-Edges` — `{"parents":[…],"children":[…]}` JSON string. */
   edges: 'X-Huabu-Node-Edges',
+  /**
+   * `X-Huabu-Basis` — the Space's read version. On a node download it is the
+   * version the metadata was read at; on an execute request it quotes one back.
+   */
+  basis: 'X-Huabu-Basis',
+  /** `X-Huabu-Operation-Id` — the request id of an execute request. */
+  operationId: 'X-Huabu-Operation-Id',
 } as const;
 
 // ==================== Upload ====================
@@ -246,6 +253,10 @@ export const rfsExecuteHeadersSchema = z
       .max(200)
       .regex(/^[a-zA-Z0-9_-]+$/)
       .optional(),
+    /** Same meaning as the body's `operationId`; the two must agree. */
+    'x-huabu-operation-id': z.uuid().optional(),
+    /** Same meaning as the body's `basis`; the two must agree. */
+    'x-huabu-basis': z.string().min(1).max(128).optional(),
   })
   .passthrough();
 

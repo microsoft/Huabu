@@ -52,6 +52,9 @@ import {
 import { acknowledgeAgentNodeResult } from './agent-node-projection.js';
 import {
   CanvasNotFoundError,
+  ExecuteBasisError,
+  ExecuteOutcomeUnknownError,
+  ExecuteRequestReusedError,
   applyDeltasOnServer,
   executeOnServer,
 } from './canvas-executor.js';
@@ -88,6 +91,7 @@ import { conversationEventLogStore } from '../agent/agenetes/conversation-stores
 import { AgentNodeBindingError } from '../agent/agent-node-binding.js';
 import { readRecentCanvasConversation } from '../agent/recent-conversation.js';
 import { ARTIFACT_URL_REGEX } from '../artifact/utils.js';
+import { getRequestIdentity } from '../identity/request.js';
 import { getPreprocessDispatcher, getProfile } from '../preprocessing/index.js';
 import { stripOfficeparserPreamble } from '../preprocessing/loaders/office-strip.js';
 import { isOwnerRequest } from '../security/owner.js';
@@ -1743,7 +1747,16 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         code: 'AGENT_ACCESS_REQUIRED',
       });
     }
-    const { commands, originator, runId } = parsed.data;
+    const { commands, originator, runId, operationId, basis } = parsed.data;
+    // Stored responses are kept per authenticated caller; the principal is
+    // the transport's, never a value the request supplies.
+    const principalId = getRequestIdentity(request)?.principal.principalId;
+    if (operationId !== undefined && !principalId) {
+      return reply.code(401).send({
+        code: 'IDENTITY_REQUIRED',
+        message: 'A request id requires an authenticated caller',
+      });
+    }
     try {
       assertCurrentCanvasCommands(commands);
     } catch (error) {
@@ -1762,7 +1775,19 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         // Derive review records only for thread-attributed (ACP) batches —
         // they feed that conversation's change card. Other callers skip it.
         computeChanges: !!originator.threadId,
+        ...(operationId !== undefined && principalId
+          ? { request: { operationId, principalId } }
+          : {}),
+        ...(basis !== undefined ? { basis } : {}),
+        // A caller using neither field gets exactly the legacy call: no
+        // stamp baseline is created on its behalf.
+        ...(operationId !== undefined || basis !== undefined
+          ? { issueBasis: true }
+          : {}),
       });
+      // With a request id the executor's run id is the stored one, so a
+      // replay reports the original run.
+      const effectiveRunId = out.runId ?? runId;
       const response: PostCanvasExecuteResponse = {
         canvasId: out.canvasId,
         fromVersion: out.fromVersion,
@@ -1776,13 +1801,40 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
           contentEditedNodeIds: out.pendingEffects.contentEditedNodeIds,
           deferredFitFrameIds: out.pendingEffects.deferredFitFrameIds,
         },
-        ...(runId ? { runId } : {}),
+        ...(effectiveRunId ? { runId: effectiveRunId } : {}),
+        ...(out.operationId ? { operationId: out.operationId } : {}),
+        ...(out.basis ? { basis: out.basis } : {}),
+        ...(out.replayed ? { replayed: true as const } : {}),
       };
 
       return reply.send(response);
     } catch (err) {
       if (err instanceof CanvasNotFoundError) {
         return reply.code(404).send({ message: 'Canvas not found' });
+      }
+      if (err instanceof ExecuteRequestReusedError) {
+        return reply.code(409).send({
+          code: 'operation-id-reused',
+          message: 'This operation id was already used for a different request',
+        });
+      }
+      if (err instanceof ExecuteBasisError) {
+        return reply.code(409).send({
+          code: 'basis-unknown',
+          message:
+            'The basis is not a read version of this Space; nothing was applied',
+        });
+      }
+      if (err instanceof ExecuteOutcomeUnknownError) {
+        request.log.error(
+          { canvasId, err },
+          'Canvas execution outcome is unknown',
+        );
+        return reply.code(503).send({
+          code: 'operation-outcome-unknown',
+          message:
+            'The outcome of this request is unknown; send it again with the same operation id',
+        });
       }
       if (err instanceof WorldPreviewMutationError) {
         return reply.code(409).send({ message: err.message });

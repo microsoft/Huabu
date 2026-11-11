@@ -171,6 +171,7 @@ export function getRfsCapabilities(): RfsCapabilitiesResponse {
       partialCommit: true,
       idempotent: false,
       runIdIsIdempotencyKey: false,
+      operationIdIsIdempotencyKey: true,
     },
     limits: {
       queryDefault: SPACE_QUERY_DEFAULT_LIMIT,

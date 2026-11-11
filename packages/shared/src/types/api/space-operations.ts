@@ -913,35 +913,48 @@ const snapshotNodesResultSchema = z
   })
   .strict();
 
+/**
+ * The read version of the Space a response describes: an opaque token the
+ * caller may quote back in an execute request (`basis`) so commands aimed at
+ * nodes that were deleted, recreated or moved to another parent since are
+ * rejected instead of applied.
+ */
+const basisSchema = z.string().min(1).max(128);
+
 export const spaceQueryResponseSchema = z.discriminatedUnion('type', [
   z
     .object({
       type: z.literal('GET_SPACE_OUTLINE'),
       result: outlineResultSchema,
+      basis: basisSchema,
     })
     .strict(),
   z
     .object({
       type: z.literal('INSPECT_NODES'),
       result: inspectNodesResultSchema,
+      basis: basisSchema,
     })
     .strict(),
   z
     .object({
       type: z.literal('INSPECT_EDGES'),
       result: inspectEdgesResultSchema,
+      basis: basisSchema,
     })
     .strict(),
   z
     .object({
       type: z.literal('SEARCH'),
       result: searchResultSchema,
+      basis: basisSchema,
     })
     .strict(),
   z
     .object({
       type: z.literal('SNAPSHOT_NODES'),
       result: snapshotNodesResultSchema,
+      basis: basisSchema,
     })
     .strict(),
 ]);
@@ -963,8 +976,11 @@ export const rfsCapabilitiesResponseSchema = z
       .object({
         atomic: z.literal(false),
         partialCommit: z.literal(true),
+        /** A request without `operationId` is applied every time it is sent. */
         idempotent: z.literal(false),
         runIdIsIdempotencyKey: z.literal(false),
+        /** A request with `operationId` is applied once; a repeat returns the stored response. */
+        operationIdIsIdempotencyKey: z.literal(true),
       })
       .strict(),
     limits: z
@@ -1012,7 +1028,16 @@ export type RfsOperationCapabilityResponse = z.infer<
 
 export const rfsExecuteRequestSchema = z
   .object({
+    /** Correlation label only. Never deduplicates or joins requests. */
     runId: z.string().min(1).max(256).optional(),
+    /**
+     * Request id chosen by the caller. The response is stored under it in the
+     * same commit as the write, so sending the same id with the same body
+     * again returns that stored response instead of executing twice.
+     */
+    operationId: z.uuid().optional(),
+    /** Read version from an earlier query, download or execute response. */
+    basis: basisSchema.optional(),
     commands: z
       .array(agentCanvasCommandSchema)
       .min(1)
@@ -1043,7 +1068,17 @@ const executeResultEdgeSchema = z
 export const rfsExecuteResponseSchema = z
   .object({
     canvasId: z.string(),
+    /**
+     * Correlation label of the run that executed the batch. On a replayed
+     * response this is the original run, not the label of the repeat.
+     */
     runId: z.string(),
+    /** Echo of the request id, when one was supplied. */
+    operationId: z.string().optional(),
+    /** Read version of the Space after this request. */
+    basis: basisSchema.optional(),
+    /** Present when this is the stored response of an earlier request. */
+    replayed: z.literal(true).optional(),
     fromVersion: z.number().int().nonnegative(),
     toVersion: z.number().int().nonnegative(),
     commands: z.array(agentCanvasCommandSchema),

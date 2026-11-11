@@ -377,6 +377,13 @@ export const postCanvasExecuteBodySchema = z.object({
   originator: executeOriginatorSchema,
   /** Optional client-supplied run id for tracing / multi-batch grouping. */
   runId: z.string().optional(),
+  /**
+   * Request id. Sending the same id with the same request again returns the
+   * stored response instead of executing twice.
+   */
+  operationId: z.uuid().optional(),
+  /** Read version the batch was built on; stale structural edits are rejected. */
+  basis: z.string().min(1).max(128).optional(),
 });
 export type PostCanvasExecuteRequest = z.infer<
   typeof postCanvasExecuteBodySchema
@@ -437,6 +444,15 @@ export interface PostCanvasExecuteResponse {
   commands: unknown[];
   /** Subset of engine-pending effects that clients should drain. */
   pendingEffects: CanvasExecutePendingEffects;
-  /** Optional run id; echoed from the request when supplied. */
+  /**
+   * Optional run id; echoed from the request when supplied. On a replayed
+   * response it is the run id of the original request.
+   */
   runId?: string;
+  /** Echo of the request id, when one was supplied. */
+  operationId?: string;
+  /** Read version after this request; returned when `operationId` or `basis` was supplied. */
+  basis?: string;
+  /** Present when this is the stored response of an earlier request. */
+  replayed?: true;
 }

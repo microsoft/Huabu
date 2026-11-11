@@ -36,6 +36,7 @@ it('shares Canvas source addresses with strict Space SEARCH responses', () => {
       truncated: false,
       matches: [{ tier: 'content', match: value }],
     },
+    basis: 'b1.00000000-0000-4000-8000-000000000000.1',
   });
   expect(spaceQueryResponseSchema.parse(response(match))).toEqual(
     response(match),
@@ -184,6 +185,7 @@ describe('Space operation limits', () => {
           truncated: false,
           nodes: [node],
         },
+        basis: 'b1.00000000-0000-4000-8000-000000000000.1',
       }).success,
     ).toBe(true);
     expect(
@@ -196,7 +198,41 @@ describe('Space operation limits', () => {
           edges: [],
           spatial: { clusters: [] },
         },
+        basis: 'b1.00000000-0000-4000-8000-000000000000.1',
       }).success,
+    ).toBe(false);
+  });
+
+  it('requires a basis on every query response', () => {
+    const response = {
+      type: 'INSPECT_EDGES',
+      result: { count: 0, total: 0, truncated: false, edges: [] },
+    };
+    expect(spaceQueryResponseSchema.safeParse(response).success).toBe(false);
+    expect(
+      spaceQueryResponseSchema.safeParse({
+        ...response,
+        basis: 'b1.00000000-0000-4000-8000-000000000000.1',
+      }).success,
+    ).toBe(true);
+  });
+
+  it('accepts an optional request id and basis on execute', () => {
+    const commands = [{ type: 'DELETE_NODES', nodeIds: ['node-1'] }];
+    expect(
+      rfsExecuteRequestSchema.safeParse({
+        operationId: '11111111-1111-4111-8111-111111111111',
+        basis: 'b1.00000000-0000-4000-8000-000000000000.1',
+        commands,
+      }).success,
+    ).toBe(true);
+    expect(
+      rfsExecuteRequestSchema.safeParse({ operationId: 'run-1', commands })
+        .success,
+    ).toBe(false);
+    expect(
+      rfsExecuteRequestSchema.safeParse({ basis: 'b'.repeat(129), commands })
+        .success,
     ).toBe(false);
   });
 

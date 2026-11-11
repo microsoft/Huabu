@@ -15,7 +15,12 @@ import {
 } from '@huabu/shared/canvas-engine';
 
 import { prepareAgentCanvasCommands } from '../canvas/agent-command-preparation.js';
-import { executeOnServer } from '../canvas/canvas-executor.js';
+import {
+  executeOnServer,
+  type ExecuteOnServerOutput,
+} from '../canvas/canvas-executor.js';
+import { space } from '../storage/index.js';
+import { normalizeSaveKey, type SaveKey } from '../storage/ports/save.js';
 
 import type { CanvasCommand } from '@huabu/shared';
 
@@ -87,13 +92,27 @@ function collectDeltaIds(
   }
 }
 
+export interface ExecuteRfsOptions {
+  hostThreadId?: string;
+  /**
+   * The authenticated caller. Required for `request.operationId` to take
+   * effect: the stored response is kept per (principal, request id).
+   */
+  principalId?: string;
+}
+
 export async function executeRfsCommands(
   canvasId: string,
   request: RfsExecuteRequest,
-  opts?: { hostThreadId?: string },
+  opts?: ExecuteRfsOptions,
 ): Promise<RfsExecuteResponse> {
+  // Only a label. With a request id the executor stores the label it ran
+  // under, so a replay reports the original run rather than this one.
   const runId = request.runId ?? createId('run');
   const hostThreadId = opts?.hostThreadId;
+  if (request.operationId !== undefined && !opts?.principalId) {
+    throw new Error('A request id needs an authenticated principal');
+  }
   const output = await executeOnServer({
     canvasId,
     commands: prepareAgentCanvasCommands(request.commands, {
@@ -110,8 +129,45 @@ export async function executeRfsCommands(
     },
     runId,
     ...(hostThreadId ? { computeChanges: true } : {}),
+    ...(request.operationId !== undefined && opts?.principalId
+      ? {
+          request: {
+            operationId: request.operationId,
+            principalId: opts.principalId,
+          },
+        }
+      : {}),
+    ...(request.basis !== undefined ? { basis: request.basis } : {}),
+    issueBasis: true,
   });
+  return projectRfsExecuteResponse(output, runId);
+}
 
+/**
+ * The stored response of an earlier request, exactly as a repeat of that
+ * request would be answered, or null when nothing is stored under the id.
+ */
+export async function lookupRfsExecuteResponse(
+  canvasId: string,
+  key: SaveKey,
+): Promise<RfsExecuteResponse | null> {
+  const stored = await space(canvasId).save.lookup(normalizeSaveKey(key));
+  if (!stored) return null;
+  const output = stored.response as ExecuteOnServerOutput;
+  if (typeof output.runId !== 'string') return null;
+  return projectRfsExecuteResponse({ ...output, replayed: true }, output.runId);
+}
+
+/**
+ * Project an executor output onto the agent-facing response.
+ *
+ * Pure over `output`, so a stored output projects to the same response the
+ * original call returned.
+ */
+function projectRfsExecuteResponse(
+  output: ExecuteOnServerOutput,
+  fallbackRunId: string,
+): RfsExecuteResponse {
   const nodeIds = new Set<string>();
   const edgeIds = new Set<string>();
   const deletedNodeIds = new Set<string>();
@@ -136,7 +192,10 @@ export async function executeRfsCommands(
 
   return {
     canvasId: output.canvasId,
-    runId,
+    runId: output.runId ?? fallbackRunId,
+    ...(output.operationId ? { operationId: output.operationId } : {}),
+    ...(output.basis ? { basis: output.basis } : {}),
+    ...(output.replayed ? { replayed: true as const } : {}),
     fromVersion: output.fromVersion,
     toVersion: output.toVersion,
     commands,
