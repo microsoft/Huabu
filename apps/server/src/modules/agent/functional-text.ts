@@ -125,17 +125,42 @@ export async function runFunctionalText(
     FUNCTIONAL_TEXT_TIMEOUT_MS,
   );
   timer.unref();
+  let handle: Awaited<ReturnType<typeof agenetes.create>> | undefined;
+  let executionSettled = false;
+  let cleanupFailure: unknown;
+  let cleanup:
+    | Promise<{ ok: true } | { ok: false; error: unknown }>
+    | undefined;
+  const startCleanup = () => {
+    const active = handle;
+    if (!active) return undefined;
+    cleanup ??= Promise.resolve()
+      .then(() => active.close())
+      .then(
+        () => ({ ok: true as const }),
+        (error: unknown) => {
+          cleanupFailure = error;
+          logger.error({ error, taskId }, 'External text task cleanup failed');
+          return { ok: false as const, error };
+        },
+      );
+    return cleanup;
+  };
   let onAbort: () => void = () => {};
   const aborted = new Promise<never>((_resolve, reject) => {
-    onAbort = () => reject(signal.reason);
+    onAbort = () => {
+      if (!executionSettled) startCleanup();
+      reject(signal.reason);
+    };
     signal.addEventListener('abort', onAbort, { once: true });
     if (signal.aborted) onAbort();
   });
   const execute = async (): Promise<string> => {
     signal.throwIfAborted();
-    const handle = await agenetes.create(spec);
+    handle = await agenetes.create(spec);
     if (signal.aborted) {
-      await handle.close();
+      const released = await startCleanup();
+      if (released && !released.ok) throw released.error;
     }
     signal.throwIfAborted();
     const folder = createTranscriptFolder();
@@ -190,9 +215,20 @@ export async function runFunctionalText(
     if (!text) throw new Error('External text task returned empty text');
     return text;
   };
+  const execution = execute()
+    .catch((error: unknown) => {
+      if (signal.aborted && error !== signal.reason && error !== cleanupFailure)
+        logger.error(
+          { error, taskId },
+          'Cancelled external text task failed while settling',
+        );
+      throw error;
+    })
+    .finally(() => {
+      executionSettled = true;
+    });
   try {
-    // Bound caller latency even when a harness ignores session/cancel.
-    return await Promise.race([aborted, execute()]);
+    return await Promise.race([aborted, execution]);
   } catch (error) {
     controller.abort(error);
     throw error;

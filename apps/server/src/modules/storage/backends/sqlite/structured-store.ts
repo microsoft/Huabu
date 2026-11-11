@@ -9,6 +9,7 @@ import {
 } from './space-extension.js';
 import { createSqliteSpaceLogs } from './space-logs.js';
 import { SqliteSpaceNodes } from './space-nodes.js';
+import { createSqliteSpaceOperations } from './space-operations.js';
 import { SqliteSpaceRepository } from './space-repository.js';
 import { SqliteSpaceTasks } from './space-tasks.js';
 import { createSqliteSpaceWrite } from './space-write.js';
@@ -116,6 +117,11 @@ export class SqliteStructuredStore implements StructuredStore {
     );
     return Object.freeze({
       canvasId,
+      operations: createSqliteSpaceOperations(
+        this.#context,
+        workspaceId,
+        canvasId,
+      ),
       read: async () => {
         this.#context.assertBoundWorkspace(
           workspaceId,

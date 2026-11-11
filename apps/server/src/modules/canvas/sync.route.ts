@@ -13,9 +13,14 @@
  * Mirrors the SSE plumbing in `external.route.ts`.
  */
 
-import { recentCanvasConversationParamsSchema } from '@huabu/shared';
+import {
+  canvasOperationStreamQuerySchema,
+  recentCanvasConversationParamsSchema,
+} from '@huabu/shared';
 
 import { subscribeCanvasUpdates } from './canvas-sync.js';
+import { operationPrincipal } from './operations/routes.js';
+import { streamCanvasOperations } from './operations/stream.js';
 import { space } from '../storage/index.js';
 
 import type { CanvasSyncEvent } from '@huabu/shared';
@@ -37,6 +42,15 @@ const syncRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
           message: params.error.issues[0]?.message ?? 'Invalid canvas ID',
         });
       const { canvasId } = params.data;
+      if (Object.hasOwn(request.query as object, 'protocolVersion')) {
+        const query = canvasOperationStreamQuerySchema.safeParse(request.query);
+        if (!query.success)
+          return reply.code(400).send({
+            message: 'Invalid collaboration stream protocol or cursor',
+          });
+        if (!operationPrincipal(request, reply)) return;
+        return streamCanvasOperations(canvasId, query.data, request, reply);
+      }
       reply.hijack();
       reply.raw.writeHead(200, {
         'Content-Type': 'text/event-stream',

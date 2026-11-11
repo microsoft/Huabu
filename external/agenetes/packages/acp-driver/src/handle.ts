@@ -302,8 +302,7 @@ export const ACP_CAPABILITIES: AgentCapabilities = {
  * {@link AcpSessionEntry} for a turn inside {@link run} (get-or-create);
  * out-of-turn ops resolve the
  * live session from `acpSessionRegistry` by its session identity.
- * Jobs use a private identity but currently retain sessions after run,
- * just like Deployments; automatic Job resource release is deferred.
+ * Jobs use a private identity and Agenetes owns their one-shot cleanup.
  *
  * `TSubmission` specializes the opaque host source while retaining the
  * protocol-owned canonical input contract.
@@ -319,6 +318,7 @@ export class AcpAgentHandle<
   readonly capabilities: AgentCapabilities = ACP_CAPABILITIES;
   private turnsToLoad?: readonly AgentTurn[];
   private ensureSessionPromise?: Promise<AcpSessionEntry>;
+  private closed = false;
 
   /**
    * @param spec       The baked create-time WorkloadSpec projection.
@@ -371,12 +371,18 @@ export class AcpAgentHandle<
   private async ensureSession(
     logger: AcpSessionLogger,
   ): Promise<AcpSessionEntry> {
+    if (this.closed) throw new Error('ACP handle is closed');
     if (this.ensureSessionPromise) return this.ensureSessionPromise;
-    const promise = this.ensureSessionInner(logger).finally(() => {
-      if (this.ensureSessionPromise === promise) {
-        this.ensureSessionPromise = undefined;
-      }
-    });
+    const promise = Promise.resolve()
+      .then(() => {
+        if (this.closed) throw new Error('ACP handle is closed');
+        return this.ensureSessionInner(logger);
+      })
+      .finally(() => {
+        if (this.ensureSessionPromise === promise) {
+          this.ensureSessionPromise = undefined;
+        }
+      });
     this.ensureSessionPromise = promise;
     return promise;
   }
@@ -512,6 +518,7 @@ export class AcpAgentHandle<
     await awaitSelectionReplay(entry);
 
     if (signal?.aborted) return;
+    if (this.closed) throw new Error('ACP handle is closed');
 
     // Fire an initial up-report (I9.7) now that the entry is resolved and
     // in the live registry: this persists the resumed session's sessionId
@@ -812,7 +819,12 @@ export class AcpAgentHandle<
    * registry, and wait for the exact Agentlet process to be reclaimed.
    */
   async close(): Promise<void> {
-    acpSessionRegistry.remove(this.agentletId, this.sessionThreadId);
-    await releaseThread(this.agentletId, this.sessionThreadId);
+    this.closed = true;
+    try {
+      await this.ensureSessionPromise;
+    } finally {
+      acpSessionRegistry.remove(this.agentletId, this.sessionThreadId);
+      await releaseThread(this.agentletId, this.sessionThreadId);
+    }
   }
 }

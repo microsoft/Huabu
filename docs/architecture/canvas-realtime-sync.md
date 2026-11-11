@@ -24,10 +24,7 @@ World preview reconciliation is a system-originated command batch against World 
 filter guarantees an incoming agent write never clobbers a node the user is
 mid-editing.
 
-> Roadmap for what is **not** yet built (cross-tab user-edit sync, `clientId`
-> echo filter, field-level deltas, presence, Yjs content co-editing, cloud
-> fan-out) lives in the proposal
-> [canvas-realtime-sync-plan.md](../proposals/canvas-realtime-sync-plan.md).
+> The proposed next step (cross-tab user operation sync, explicit ordering, field-level events, operation receipts and recovery) lives in [canvas-realtime-sync-plan.md](../proposals/canvas-realtime-sync-plan.md). It is not shipped behavior. Same-body co-editing, presence and multi-server fan-out are outside that implementation scope.
 
 ## Data flow
 
@@ -75,8 +72,7 @@ schema + `z.infer`, web imports as `import type` only):
 
 ## One write path, one broadcast
 
-`executeOnServer` broadcasts **unconditionally** after persisting a non-empty
-batch — there is no per-caller broadcast flag. This unifies all writers:
+`executeOnServer` normally broadcasts after persisting a non-empty batch. Trusted coordinated lifecycle callers can defer publication with the internal `publish: false` option and publish after their orchestration reaches its declared boundary. `applyDeltasOnServer` persists and returns its result; its caller owns publication. These exceptions do not expose a client-controlled broadcast policy.
 
 - The built-in chat and question-node agents mutate the canvas in-process via
   `executeOnServer`. Their chat SSE tool result is now **UI-only** (tool card +
@@ -133,6 +129,8 @@ Skipped ids flow back through `canvasSyncStore` into `acpThreadChangesStore`
   partially-applied run is never silently reported as fully done.
 
 ## Change records & the review card
+
+The existing card and legacy routes below are unchanged. The separately gated operation protocol can attach new Review records to a structural commit and advertises the latest Review revision over negotiated SSE/reconnect, but it has no accept or revert operation. It does not enable collaboration, migrate this card or make legacy inverses safe for concurrent Revert. See [internal operation storage](./canvas-storage.md#42-internal-operation-storage-not-activated) and the [operation API contract](./api-design.md#gated-structural-operation-protocol).
 
 Change records are derived **purely from a batch's `Delta[]`**, so revert is a
 generic operation — no per-command inverse logic:

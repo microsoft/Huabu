@@ -12,7 +12,14 @@
  * plugin, so injecting the plugin directly needs no Bearer token.
  */
 
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -24,6 +31,7 @@ import {
   AGENT_CANVAS_COMMAND_TYPES,
   rfsCapabilitiesResponseSchema,
   rfsExecuteResponseSchema,
+  rfsUploadResponseSchema,
   rfsOperationCapabilityResponseSchema,
   spaceQueryResponseSchema,
 } from '@huabu/shared';
@@ -70,6 +78,7 @@ import {
   agentThreadService,
 } from '../agent/agent-thread.service.js';
 import * as selectableProfiles from '../agent/selectable-agent-profile.js';
+import { withCanvasMutex } from '../canvas/write-coordinator.js';
 import { ServiceProvisionError } from '../services/index.js';
 import { getCanvasStore, resetStorageCache, space } from '../storage/index.js';
 import {
@@ -78,7 +87,11 @@ import {
 } from '../task/run-completion.service.js';
 import { RunLaunchError, runLauncher } from '../task/run-launcher.js';
 import { taskService } from '../task/task.service.js';
-import { setWorkspacePath } from '../workspace.js';
+import {
+  getWorkspaceKey,
+  isWorkspaceLeased,
+  setWorkspacePath,
+} from '../workspace.js';
 
 import type { FixedAgentNodeTarget } from '../agent/agent-thread-resolver.js';
 import type * as ServiceModule from '../services/index.js';
@@ -1755,31 +1768,35 @@ describe('POST /api/rfs/:canvasId/execute', () => {
 });
 
 describe('POST/GET/DELETE /api/rfs/:canvasId/upload', () => {
-  it('roundtrips an upload then a download', async () => {
-    const app = await buildApp();
-    try {
-      const up = await app.inject({
-        method: 'POST',
-        url: '/rfs/c1/upload/note.md',
-        headers: { 'content-type': 'text/plain' },
-        payload: 'hello world',
-      });
-      expect(up.statusCode).toBe(201);
-      expect(up.json<{ path: string; size: number }>()).toEqual({
-        path: 'upload/note.md',
-        size: 11,
-      });
+  it.each(['note.md', 'nested/note.md'])(
+    'roundtrips upload %s then a download',
+    async (filename) => {
+      const app = await buildApp();
+      try {
+        const up = await app.inject({
+          method: 'POST',
+          url: `/rfs/c1/upload/${filename}`,
+          headers: { 'content-type': 'text/plain' },
+          payload: 'hello world',
+        });
+        expect(up.statusCode).toBe(201);
+        expect(rfsUploadResponseSchema.safeParse(up.json()).success).toBe(true);
+        expect(up.json<{ path: string; size: number }>()).toEqual({
+          path: `upload/${filename}`,
+          size: 11,
+        });
 
-      const down = await app.inject({
-        method: 'GET',
-        url: '/rfs/c1/download/upload/note.md',
-      });
-      expect(down.statusCode).toBe(200);
-      expect(down.body).toBe('hello world');
-    } finally {
-      await app.close();
-    }
-  });
+        const down = await app.inject({
+          method: 'GET',
+          url: `/rfs/c1/download/upload/${filename}`,
+        });
+        expect(down.statusCode).toBe(200);
+        expect(down.body).toBe('hello world');
+      } finally {
+        await app.close();
+      }
+    },
+  );
 
   it('rejects a colliding upload with 409 and a /skill hint', async () => {
     const app = await buildApp();
@@ -1797,6 +1814,87 @@ describe('POST/GET/DELETE /api/rfs/:canvasId/upload', () => {
       expect(res.statusCode).toBe(409);
       expect(res.json<{ message: string }>().message).toMatch(/\/skill/);
     } finally {
+      await app.close();
+    }
+  });
+
+  it('does not overwrite either upload when two requests race for the same name', async () => {
+    const app = await buildApp();
+    try {
+      const bodies = ['first body', 'second body'];
+      const results = await Promise.all(
+        bodies.map((payload) =>
+          app.inject({
+            method: 'POST',
+            url: '/rfs/c1/upload/race.txt',
+            payload,
+          }),
+        ),
+      );
+      expect(results.map((result) => result.statusCode).sort()).toEqual([
+        201, 409,
+      ]);
+      const saved = await app.inject({
+        method: 'GET',
+        url: '/rfs/c1/download/upload/race.txt',
+      });
+      expect(saved.body).toBe(
+        bodies[results.findIndex((result) => result.statusCode === 201)],
+      );
+    } finally {
+      await app.close();
+    }
+  });
+
+  it.each(['POST', 'DELETE'] as const)(
+    'rejects %s paths escaping the upload area without touching a node',
+    async (method) => {
+      const nodePath = seedNote('c1', 'keep', 'Keep', 'Original content');
+      const filename = join(diskDirOf('c1'), nodePath);
+      const before = readFileSync(filename, 'utf8');
+      const app = await buildApp();
+      try {
+        const response = await app.inject({
+          method,
+          url: '/rfs/c1/upload/%2e%2e%2Fnodes%2FKeep.md',
+          ...(method === 'POST' ? { payload: 'Must not write' } : {}),
+        });
+        expect(response.statusCode).toBe(400);
+        expect(response.json().message).toContain('/skill');
+        expect(readFileSync(filename, 'utf8')).toBe(before);
+      } finally {
+        await app.close();
+      }
+    },
+  );
+
+  it('holds a Workspace lease while an upload waits for the Space mutex', async () => {
+    const app = await buildApp();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const held = withCanvasMutex('c1', () => gate);
+    const pending = app.inject({
+      method: 'POST',
+      url: '/rfs/c1/upload/queued.bin',
+      payload: 'Queued bytes',
+    });
+    try {
+      await vi.waitFor(() =>
+        expect(isWorkspaceLeased(getWorkspaceKey())).toBe(true),
+      );
+      expect(existsSync(join(diskDirOf('c1'), '.upload', 'queued.bin'))).toBe(
+        false,
+      );
+      release();
+      await held;
+      expect((await pending).statusCode).toBe(201);
+      expect(isWorkspaceLeased(getWorkspaceKey())).toBe(false);
+    } finally {
+      release();
+      await held;
+      await pending;
       await app.close();
     }
   });

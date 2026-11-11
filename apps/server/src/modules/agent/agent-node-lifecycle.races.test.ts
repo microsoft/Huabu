@@ -24,12 +24,24 @@ import {
   AgentNodeLifecycle,
   agentNodeLifecycle,
 } from './agent-node-lifecycle.js';
+import {
+  acknowledgeAgentNodeResult,
+  projectAgentConversationActivity,
+} from '../canvas/agent-node-projection.js';
 import { createSpace, space, withCanvasMutex } from '../storage/index.js';
+import * as storage from '../storage/index.js';
 import {
   mountTestWorkspace,
   type MountedTestStorage,
 } from '../storage/testing.js';
 import { canvasAcpNamespace } from '../workspace/paths.js';
+import {
+  commitWorkspaceIdentity,
+  getWorkspaceHandle,
+  getWorkspaceKey,
+  isWorkspaceLeased,
+  WorkspaceOperationInProgressError,
+} from '../workspace.js';
 
 import type {
   AgentNodeProjection,
@@ -243,6 +255,141 @@ describe('AgentNodeLifecycle.start under the real Canvas mutex', () => {
       .content;
   }
 
+  function assertWorkspacePinned() {
+    const workspace = getWorkspaceHandle();
+    if (!workspace) throw new Error('Missing fixture Workspace');
+    expect(isWorkspaceLeased(getWorkspaceKey())).toBe(true);
+    expect(() =>
+      commitWorkspaceIdentity({
+        ...workspace,
+        workspaceId: `${workspace.workspaceId}-other`,
+      }),
+    ).toThrow(WorkspaceOperationInProgressError);
+  }
+
+  it.each(['start', 'bind', 'terminal', 'viewed', 'activity'] as const)(
+    'pins the original Workspace while %s waits for the Canvas mutex',
+    async (action) => {
+      await open();
+      try {
+        await agentNodeLifecycle.start(target, 'First prompt', 'attempt-1');
+        await agentNodeLifecycle.done(target, 'attempt-1');
+        const entered = deferred<void>();
+        const released = deferred<void>();
+        const blocker = withCanvasMutex(target.canvasId, async () => {
+          entered.resolve();
+          await released.promise;
+        });
+        await entered.promise;
+        expect(isWorkspaceLeased(getWorkspaceKey())).toBe(false);
+        const actions = {
+          start: () =>
+            agentNodeLifecycle.start(target, 'Second prompt', 'attempt-2'),
+          bind: () => agentNodeLifecycle.bind(target),
+          terminal: () =>
+            agentNodeLifecycle.error(target, 'Failed', 'attempt-1'),
+          viewed: () =>
+            acknowledgeAgentNodeResult(
+              target.canvasId,
+              target.nodeId,
+              'attempt-1',
+            ),
+          activity: () =>
+            projectAgentConversationActivity(
+              target.canvasId,
+              target.threadId,
+              1234,
+            ),
+        };
+        const pending = actions[action]();
+        try {
+          assertWorkspacePinned();
+          expect((await currentNode()).data).toMatchObject({
+            status: 'done',
+            invocationToken: 'attempt-1',
+            viewed: false,
+          });
+        } finally {
+          released.resolve();
+          await Promise.all([blocker, pending]);
+        }
+        expect(isWorkspaceLeased(getWorkspaceKey())).toBe(false);
+        const changes = {
+          start: { status: 'running', invocationToken: 'attempt-2' },
+          bind: { bindingState: 'bound' },
+          terminal: { status: 'error', errorMessage: 'Failed' },
+          viewed: { viewed: true },
+          activity: { lastActivityAt: 1234 },
+        };
+        expect((await currentNode()).data).toMatchObject(changes[action]);
+        expect(await currentContent()).toBe('First prompt');
+      } finally {
+        await close();
+      }
+    },
+  );
+
+  it.each(['viewed', 'activity'] as const)(
+    'keeps the Workspace during an asynchronous %s read and releases it on failure',
+    async (action) => {
+      await open();
+      try {
+        const handle = space(target.canvasId);
+        const entered = deferred<void>();
+        const released = deferred<void>();
+        const read = vi.spyOn(handle, 'read').mockImplementation(async () => {
+          entered.resolve();
+          await released.promise;
+          throw new Error('Projection read unavailable');
+        });
+        vi.spyOn(storage, 'space').mockReturnValue(handle);
+        const pending =
+          action === 'viewed'
+            ? acknowledgeAgentNodeResult(target.canvasId, target.nodeId, null)
+            : projectAgentConversationActivity(
+                target.canvasId,
+                target.threadId,
+                1234,
+              );
+        const rejected = expect(pending).rejects.toThrow(
+          'Projection read unavailable',
+        );
+        await entered.promise;
+        try {
+          assertWorkspacePinned();
+        } finally {
+          released.resolve();
+          await rejected;
+        }
+        expect(read).toHaveBeenCalledOnce();
+        expect(isWorkspaceLeased(getWorkspaceKey())).toBe(false);
+      } finally {
+        await close();
+      }
+    },
+  );
+
+  it('releases the Workspace after a failed history read without retrying it', async () => {
+    await open();
+    try {
+      const history = vi
+        .spyOn(agenetes, 'history')
+        .mockImplementation(async () => {
+          assertWorkspacePinned();
+          throw new Error('History unavailable');
+        });
+      await expect(
+        agentNodeLifecycle.start(target, 'First prompt', 'attempt-1'),
+      ).rejects.toThrow('History unavailable');
+      expect(history).toHaveBeenCalledOnce();
+      expect(isWorkspaceLeased(getWorkspaceKey())).toBe(false);
+      expect(await currentContent()).toBe('');
+      expect((await currentNode()).data.invocationToken).toBeUndefined();
+    } finally {
+      await close();
+    }
+  });
+
   it('holds the Space against every other writer while the submission read is pending', async () => {
     await open();
     try {
@@ -260,6 +407,7 @@ describe('AgentNodeLifecycle.start under the real Canvas mutex', () => {
         'attempt-1',
       );
       while (!reading) await settleQueues();
+      assertWorkspacePinned();
 
       let unrelatedWriteRan = false;
       const unrelated = withCanvasMutex(target.canvasId, async () => {
@@ -275,6 +423,7 @@ describe('AgentNodeLifecycle.start under the real Canvas mutex', () => {
       await unrelated;
       expect(unrelatedWriteRan).toBe(true);
       expect(await currentContent()).toBe('First prompt');
+      expect(isWorkspaceLeased(getWorkspaceKey())).toBe(false);
     } finally {
       await close();
     }

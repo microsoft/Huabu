@@ -1,497 +1,450 @@
-# Canvas Collaboration Sync — Upgrade Roadmap (Multi-Agent → Multi-User)
+# Space structural collaboration
 
-Status: In-Progress — P0 + P1 shipped; P2 is the next milestone.
-Last updated: 2026-07-02
+Status: Proposed — Phase A investigation and contract design complete; B's opt-in ordering engine slice is implemented, with integration gaps recorded below. Not yet formally reviewed; collaboration is not enabled.
+Last updated: 2026-11-05
 
-> **Shipped foundation (P0 + P1)** is documented in
-> [../architecture/canvas-realtime-sync.md](../architecture/canvas-realtime-sync.md).
-> This proposal now tracks only what remains (P2 onward).
+This is the repository contract and implementation handoff for the Space's A–F plan. Architecture documents describe implemented behavior; this document does not advertise available production APIs or storage guarantees. The bounded B implementation is documented under [sibling paint order and isolated replay](../architecture/canvas-command-architecture.md#sibling-paint-order-and-isolated-replay); unimplemented protocol and migration behavior below remains proposed. The [July roadmap](../archive/canvas-realtime-sync-roadmap-2026-07.md) is superseded, including its intermediate whole-Space PUT broadcast and own-client echo-filter plan.
 
-> **End goal:** one canvas edited concurrently by **many agents and many
-> humans**, converging without lost edits or forced reloads. We get there in
-> two waves — **multi-agent first** (several agents + several tabs on one
-> desktop), **multi-user second** (multiple people, presence, identity,
-> cloud). This doc is the single roadmap: what already ships, what's next, in
-> priority order, with the uplift each step buys. Milestone/PR mechanics and
-> the engine-extraction history live in the sibling
-> [headless-executor-plan.md](./headless-executor-plan.md) (Phase A/B, M1–M4);
-> the original M3 broadcast decisions are preserved verbatim in Appendix A.
+## 1. Scope and delivery boundary
 
-## 0. End state & the two-wave strategy
+The first release supports one owner editing one Space through multiple devices/tabs and Agents connected to one authoritative server process. Independent node/field changes survive together; ordinary concurrent position writes use server acceptance order. Deletion, invalid coordinates, ambiguous layout targets, and unsafe undo fail visibly rather than silently changing intent. Confirmed offline mode preserves drafts and pending operations but pauses new structural editing.
 
-The target is a **hybrid**, matching the industry consensus —
-**no single CRDT for everything**, because structure and content have
-different conflict semantics:
+Concurrent editing/merging of the same Markdown body is explicitly out of scope. Keep the existing authored-content CAS path; do not introduce Yjs, three-way merge, a new content-conflict UI, or a blanket human-over-Agent rule for structure. A structural replay must never carry an old body over a local draft. Deletion still requires draft preservation and stale-write protection even though body merging is excluded.
 
-| Concern                                               | Model                                                                                                  | Why                                                                                                |
-| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------- |
-| **Structure** (nodes, edges, geometry, frame nesting) | Server-authoritative **op-log** (delta event-sourcing), evolving to field-level deltas + server rebase | Hard invariants (label uniqueness, frame nesting, edge integrity) are easiest to enforce centrally |
-| **Content** (per-node markdown body)                  | **Yjs CRDT** per node over WebSocket, `.md` canonical                                                  | Character-level merge; last-writer-wins loses keystrokes                                           |
-| **Presence** (cursors, selection, "who's here")       | Ephemeral awareness over the same WebSocket                                                            | Not persisted; per-session                                                                         |
-| **Identity / permissions**                            | Auth layer + `userId` on every `originator`                                                            | Multi-user prerequisite                                                                            |
+Also excluded: full offline editing, presence/cursors, multi-user authorization, multi-server writes, fractional ordering keys, stable Grid row/column identities, and a replacement command engine or database architecture. Existing authentication and Agent lifecycle authorization remain mandatory.
 
-Two waves:
+| Phase | Deliverable                                                                                                                           | Gate                                                                         |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| A     | Evidence-backed write inventory, ownership/invariants, request/event/recovery contracts, B/C tasks, current-ordering characterization | This document; no production behavior or data migration                      |
+| B     | Explicit sibling-order events and complete replay/inversion                                                                           | A ordering contract                                                          |
+| C     | Operation admission, durable receipts, typed commits, replay, backend recovery and writer isolation                                   | A; B for complete order support                                              |
+| D     | Confirmed baseline + persistent pending intents + local gesture preview                                                               | B/C; only migrated features can write                                        |
+| E     | Structured layout intents, full restore/undo/Review, all measurement adapters                                                         | B/C/D; basic lifecycle fences already in C                                   |
+| F     | Complete migration, feature/backend coverage and release acceptance                                                                   | D/E; compatibility enforcement begins with the first enabled Space, not at F |
 
-- **Wave 1 — Multi-agent (P1–P2).** N agents (built-in + ACP + headless) and
-  N tabs on the _same_ desktop server converge safely. No identity needed.
-- **Wave 2 — Multi-user (P3–P6).** Structural co-edit without conflicts, text
-  co-editing, presence, identity, and multi-device / cloud infra.
+First integration slice: two browsers move independent free root nodes; an Agent edits an independent style leaf; repeat with the same node's position/style; lose a create response; reconnect with a pending operation and an event gap. Start on a backend satisfying C's recovery contract. This is an internal gated slice, not permission to ship unsupported Frame, undo, or whole-Space-save paths.
 
-## 1. Shipped foundation (P0 + P1)
+## 2. Current implementation evidence
 
-The delta-based event-sourcing substrate, the out-of-band SSE broadcast, the
-dirty-node conflict model, and the per-thread change-review card are **shipped**
-and documented in
-[../architecture/canvas-realtime-sync.md](../architecture/canvas-realtime-sync.md).
+The inventories below classify persistent write families and their shared funnels, rather than only visible buttons. Classification: **M** = migrate into the authoritative operation/commit service; **G** = retain the specialized owner service with freshness/lifecycle guards and commit publication; **L** = local projection only; **X** = exclude from the first enabled slice until its dedicated path is ready.
 
-<details>
-<summary>P0/P1 capability map (historical)</summary>
+### 2.1 Shared engine and order
 
-The delta-based event-sourcing substrate **and** the out-of-band broadcast are
-in place. What ships today:
+| Evidence                                                                                                                                                                                       | Current behavior and consequence                                                                                                                                                                                                                     | Handoff                                                                                                                                                |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| [`command.ts`](../../packages/shared/src/types/canvas/command.ts), [`executor.ts`](../../packages/shared/src/canvas-engine/executor.ts), `executeCanvasCommands`                               | Shared commands already express domain intent. The engine evolves candidate state command by command, accumulates effects, fits affected Frames deepest-first, then normalizes tree order. Independent failures do not make the entire batch atomic. | Reuse engine; add admission/group atomicity around candidate execution, not a second engine.                                                           |
+| [`reorderNodes.ts`](../../packages/shared/src/canvas-engine/commands/reorderNodes.ts), `handler`                                                                                               | Reorders `state.nodes`; missing relative anchors currently append. Group order follows existing array order.                                                                                                                                         | M: reject stale/moved anchors and missing group members; emit explicit final sibling order.                                                            |
+| [`diff.ts`](../../packages/shared/src/canvas-engine/diff.ts), `diffCanvasState`; [`delta.ts`](../../packages/shared/src/canvas-engine/delta.ts), `applyDeltas`                                 | ID-keyed insert/delete/replace cannot encode a pure permutation. Map insertion order retains old positions on replacement and appends new IDs.                                                                                                       | B: represent ordering for pure reorder, insertion in the middle, deletion inversion, and reparent.                                                     |
+| [`tree.ts`](../../packages/shared/src/canvas-engine/container/tree.ts), `normalizeTreeOrder`; [`zorder.ts`](../../packages/shared/src/canvas-engine/container/zorder.ts), `assignNodeZIndices` | Normalizer ensures parent-before-child and repairs invalid legacy parents/cycles; it does not guarantee a contiguous stored DFS array. The render z-order walker does traverse complete subtrees contiguously.                                       | Preserve visible forest order, reuse the walker/helpers; validate new commands before legacy repair. Do not confuse storage array with render z-index. |
+| [`setNodeParent.ts`](../../packages/shared/src/canvas-engine/commands/setNodeParent.ts)                                                                                                        | Validates members/parent/cycles, preserves world geometry through container helpers, marks old/new Frames affected; lacks proposed expected-membership/coordinate tokens.                                                                            | M: atomic reparent + coordinate conversion + sibling order + both layouts, with server lock/ancestor checks.                                           |
+| [`gridLayout.ts`](../../packages/shared/src/canvas-engine/autoLayout/gridLayout.ts), Column/Row solvers                                                                                        | Column children sort by Y, Row children by X; numeric `frameColumn`/`frameRow` and mode-specific planners drive layout.                                                                                                                              | E: explicit track reading order, numeric targets guarded by layout revision; retain existing occupancy/swap/group-shape policies.                      |
+| [`mergeNodeData.ts`](../../packages/shared/src/canvas-engine/commands/mergeNodeData.ts)                                                                                                        | Data is shallow-merged except one-level-deep `data.style`; generic patches are not a complete per-type concurrency contract.                                                                                                                         | Reuse style-leaf semantics, restrict admitted fields and define explicit removal.                                                                      |
+| [`change.ts`](../../packages/shared/src/canvas-engine/change.ts)                                                                                                                               | Inverse coarse deltas and fingerprints support current Review. Content revision hashes `content`/`src`, not geometry, lifecycle, or commit sequence.                                                                                                 | Preserve content revision meaning; extend change extraction/inversion, but never submit old whole-node inverses as concurrent undo.                    |
 
-| Capability                                                                                | Status | Where                                                                                                                                                                  |
-| ----------------------------------------------------------------------------------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Shared engine + coarse deltas (`INSERT`/`DELETE`/`REPLACE_NODE`), fail-open `applyDeltas` | ✅     | [canvas-engine](../../packages/shared/src/canvas-engine)                                                                                                               |
-| Server-side executor + per-canvas mutex + monotonic `version`                             | ✅     | [canvas-executor.ts](../../apps/server/src/modules/canvas/canvas-executor.ts)                                                                                          |
-| Persistent delta log (`.history/delta-log.jsonl`)                                         | ✅     | [canvas-store.ts](../../apps/server/src/modules/storage/canvas-store.ts)                                                                                               |
-| `POST /:id/execute` headless write path                                                   | ✅     | [canvas.route.ts](../../apps/server/src/modules/canvas/canvas.route.ts)                                                                                                |
-| In-memory pub/sub + `GET /:id/sync/stream` SSE                                            | ✅     | [canvas-sync.ts](../../apps/server/src/modules/canvas/canvas-sync.ts), [sync.route.ts](../../apps/server/src/modules/canvas/sync.route.ts)                             |
-| Web sync subscriber → `applyDeltasFromAgent`                                              | ✅     | [canvasSyncStore.ts](../../apps/web/src/store/canvasSyncStore.ts)                                                                                                      |
-| **All agent writes broadcast to every tab** (unconditional)                               | ✅     | `executeOnServer` always publishes ([canvas-executor.ts](../../apps/server/src/modules/canvas/canvas-executor.ts))                                                     |
-| ACP chat-card correlation (`threadId` + `changes` + per-card revert)                      | ✅     | [acpThreadChangesStore.ts](../../apps/web/src/store/acpThreadChangesStore.ts), revert route in [canvas.route.ts](../../apps/server/src/modules/canvas/canvas.route.ts) |
-| Snapshot-on-connect version reconcile (gap → `loadCanvas`)                                | ✅     | [canvasSyncStore.ts](../../apps/web/src/store/canvasSyncStore.ts)                                                                                                      |
+Phase A characterized pure-order loss: the engine produced `[node-b, node-a]` while the entity-only diff replayed as `[node-a, node-b]`. B replaced that limitation assertion in [`diff.test.ts`](../../packages/shared/src/canvas-engine/__tests__/diff.test.ts) with equality through the explicit `orderVersion` opt-in, and added insertion, deletion/restore, reparent, nested-Frame and invalid-replay cases. The two-argument legacy diff still cannot express pure ordering; existing filtered broadcast and per-entity Review consumers have not been migrated to atomic ordered batches.
 
-</details>
+### 2.2 Browser and desktop write inventory
 
-**Gaps remaining after P1** (= the P2 backlog): no `clientId` echo filter
-(needed only once user hand-edits broadcast); broadcast receivers still _trigger_
-preprocessing (cost already deduped server-side, ownership cleanup pending);
-version gaps do a full `loadCanvas` (incremental delta-log backfill pending) —
-now skipped while the tab has un-persisted local edits; user hand-edits don't
-propagate to other tabs at all.
+The main browser funnel is [`canvasStore.ts`](../../apps/web/src/store/canvasStore.ts): `dispatchUiIntent` (2304–2430) resolves UI operands, `executeCommands` (1798–1950) runs the engine and effects, the wrapped setter (1378–1450) schedules structural/content saves, and `saveCanvas` (2712–2869) sends the complete slim scene through [`api/canvas.ts`](../../apps/web/src/api/canvas.ts). Line ranges are investigation coordinates, not stable APIs.
 
-## 2. Roadmap (priority order)
+| Writer / code evidence                                                                                                                                                                                              | Fields and current guard / persistence                                                                                                                                                                                                                                         | Effects and disposition                                                                                                                                                             |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Common commands: [`uiIntent.ts`](../../apps/web/src/handler/canvasCommand/uiIntent.ts), `resolveUiIntent`; store funnel above                                                                                       | Creation, deletion, parent/order/layout, alignment, locks, conversion, node/edge style; local guards then whole-Space versioned PUT                                                                                                                                            | M: retain resolvers, separate one-time admission/effects from pure projection. Existing wrapper takes history, preprocessing, deletion, trace and focus actions.                    |
+| Free drag: `canvasStore.onNodesChange` / `onNodeDragStop` (3658–3937)                                                                                                                                               | RF directly updates positions; a plain free drop can emit no command and instead explicitly schedule structure save                                                                                                                                                            | L for pointer ticks, M for final intent. Migrating only command callers misses ordinary movement.                                                                                   |
+| Resize: [`resizePreview.ts`](../../apps/web/src/store/canvasStore/slices/resizePreview.ts), [`MultiSelectResizer.tsx`](../../apps/web/src/components/Panels/Canvas/MultiSelectResizer.tsx), store geometry handlers | Position/size, child geometry, font scale and Note height ownership; previews can reach normal executor and wrapped data patches                                                                                                                                               | L preview + M atomic final gesture. The current preview flag suppresses trace, not all persistence/effects.                                                                         |
+| Creation/import/paste: [`nodeInputBuilders.ts`](../../apps/web/src/handler/canvasCommand/nodeInputBuilders.ts), store `pasteNodes` (4509–4754)                                                                      | IDs, initial sidecar, artifacts, conversation references and topology; uploads/forks precede insertion, then PUT/content queue                                                                                                                                                 | M insertion, G prepared resources; never repeat cloning/forking on rebase. Recheck captured Space and offline admission on async completion; gate unsupported mixed-resource cases. |
+| Question creation exception: store `executeCommands` (1825–1890)                                                                                                                                                    | Any batch containing Question creation already sends its whole batch to `/execute`; optimistic path suppresses initial body save and reconciles results                                                                                                                        | M integration, not a second POST around an existing one; creation failure invalidates dependents and history.                                                                       |
+| Direct patches: store `patchNodeSilent` (4273–4286)                                                                                                                                                                 | Arbitrary `data` patches use the autosave-wrapped setter                                                                                                                                                                                                                       | M/G/L by owned field. "Silent" means no command/history, not no persistence. Replace ambiguous callers with typed authored/derived/acknowledged/local entry points.                 |
+| Undo/redo: [`canvasHistoryManager.ts`](../../apps/web/src/store/canvasHistoryManager.ts), store `undo`/`redo` (4760–4830)                                                                                           | Whole node/edge snapshots, sidecar saves, tracked DELETE requests; restored body waits for topology acknowledgement                                                                                                                                                            | X until operation undo. Keep restoration generation and acknowledgement barriers; no whole-scene inverse against remote edits.                                                      |
+| Review preview: [`ChangeReviewCard.tsx`](../../apps/web/src/components/Panels/ChatPanel/ChangeReviewCard.tsx), press-and-hold (66–94)                                                                               | Raw scene replacement followed by restoring captured arrays; bypasses autosave but not remote-state races                                                                                                                                                                      | L overlay, never swap canonical baseline. Test remote update during preview.                                                                                                        |
+| Load: store `loadCanvas` (2496–2678)                                                                                                                                                                                | GET, tree/height normalization, warmup, optional legacy Frame-header whole PUT and label backfill                                                                                                                                                                              | G conditional migration/derived proposals; X old full PUT for enabled Spaces. Loading is not currently a read-only path.                                                            |
+| Measurement: [`height/commitQueue.ts`](../../apps/web/src/components/Nodes/shared/height/commitQueue.ts), [`useTextAutoSize.ts`](../../apps/web/src/hooks/useTextAutoSize.ts)                                       | Note key/ownership guards; Text/Question renderer sizing; accepted local geometry still reaches ordinary saves                                                                                                                                                                 | G derived operation, lifetime/content/width guards. Measurements against unsaved body drafts remain local until the measured revision exists on the server.                         |
+| Deferred layout: [`postEffects.web.ts`](../../apps/web/src/handler/canvasCommand/postEffects.web.ts), deferred refit                                                                                                | DOM measurements and double-rAF Frame fitting eventually use wrapped `set({nodes})`; no complete durable context token                                                                                                                                                         | L measurement mirror, G guarded proposal; remote reception/reprojection must not persist a second layout.                                                                           |
+| Preprocess: [`preprocessQueue.ts`](../../apps/web/src/store/canvasStore/save/preprocessQueue.ts), [`preprocess.ts`](../../apps/web/src/handler/canvasCommand/preprocess.ts)                                         | Label/source/body/extraction/cover and ingestion flags; task/input/Space freshness, deletion and restore guards; POST response can reach `patchNodeSilent`                                                                                                                     | G owner service; distinguish acknowledged server state from authored edits so a response does not enqueue another write.                                                            |
+| Content boundary: [`nodeContentFields.ts`](../../apps/web/src/store/canvasStore/save/nodeContentFields.ts), [`nodeContentQueue.ts`](../../apps/web/src/store/canvasStore/save/nodeContentQueue.ts)                  | Structure serialization excludes `content`, `label`, `labelSource`, `src`, `summary`, `keywords`, `provenance`. Content queue serializes saves and uses baseline/generation/restore tokens; Question uses pending-field patches, other kinds usually send their sidecar bundle | G existing content CAS; structure does not replay body or rebase content CAS. Mixed excerpts/type conversion/create/delete need explicit dependency handling, not body merge work.  |
+| Receive: [`canvasSyncStore.ts`](../../apps/web/src/store/canvasSyncStore.ts), store `applyDeltasFromAgent`                                                                                                          | Mutates live scene, not confirmed baseline. Update-gap checks content dirtiness, snapshot branch lacks equivalent protection; receiver can run history/post-effects                                                                                                            | M authoritative baseline application; no blanket client-ID skip, body loss or repeated effects. Existing monotonic save reconciliation is useful, not a merge algorithm.            |
+| Cross-Space move: [`moveNodesToSpace.ts`](../../apps/web/src/components/Space/moveNodesToSpace.ts); import/create: [`useCanvasActions.ts`](../../apps/web/src/hooks/useCanvasActions.ts)                            | Specialized APIs; move drains source and sends expected source version; changes artifacts/conversations and multiple Spaces                                                                                                                                                    | G owner service / X until its compatible transaction/publication path exists.                                                                                                       |
+| Selection/hover/viewport/Layers collapse                                                                                                                                                                            | Raw/local store and persisted local view preferences, not shared document intent                                                                                                                                                                                               | L; do not manufacture shared operations from presentation changes.                                                                                                                  |
 
-Legend: ✅ shipped · 🟡 partial · ⬜ todo.
+### 2.3 Save and navigation boundaries
 
-### P1 — Multi-agent correctness — ✅ SHIPPED
+| Entry                                                                                                                                | Current behavior                                                                                                                                                          | Required migration                                                                                                                          |
+| ------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| Store `drainPendingSaves` (1093–1134), unsaved indicator (1211–1221)                                                                 | Waits structure/content/tracked deletes, retries retained non-conflict failures, rejects conflict/failure/held restores                                                   | Include unresolved operation receipts, continuous baseline and pending creation dependencies; sending HTTP is not saving.                   |
+| [`pageLifecycle.ts`](../../apps/web/src/utils/pageLifecycle.ts), Canvas lifecycle participant                                        | Settles editors, awaits tracked imports through insertion, flushes owners, repeats on generation change; Canvas flush drains preprocessing between saves                  | Reuse lifecycle owner registration, include operation coordinator; reprojecting remote state must not keep generating persistence work.     |
+| [`SpaceNavigationGuard.tsx`](../../apps/web/src/components/Space/SpaceNavigationGuard.tsx), store switch/discard                     | Source stays loaded until save succeeds; explicit discard cancels unsent work and awaits already-issued work                                                              | Keep drafts and unknown requests; local discard never means remote rollback.                                                                |
+| [`unloadFlush.ts`](../../apps/web/src/store/canvasStore/save/unloadFlush.ts)                                                         | Browser unload uses keepalives and can force a concurrent full structural PUT                                                                                             | Remove full-PUT fallback for enabled Spaces; durable pending queue is required because browser unload cannot promise completion.            |
+| [`useDesktopContent.ts`](../../apps/web/src/hooks/useDesktopContent.ts), [`desktop-tabs.ts`](../../apps/desktop/src/desktop-tabs.ts) | Freeze input before blur, request/renderer identity fencing, heartbeats, save outcomes and explicit discard; main watchdog/deadline protect close/reload/Workspace change | Reuse preparation protocol, acknowledge only actual persistence; failure retains renderer unless explicitly discarded.                      |
+| Desktop activation versus replacement                                                                                                | Retained tab activation does not drain/destroy the source; replacing/closing its view does                                                                                | Do not add save-before-every-tab-activation. Each renderer retains its own pending state; replacement/close waits at the existing boundary. |
 
-Folded into
-[../architecture/canvas-realtime-sync.md](../architecture/canvas-realtime-sync.md).
-The one deferred remainder (O2 preprocessing _ownership_) is tracked under P2
-below. Original rationale kept for history:
+### 2.4 Server write inventory
 
-<details>
-<summary>P1 detail (shipped)</summary>
+| Writer / evidence                                                                                                                                                                                                                                                                                           | Current protection, persistence and publication                                                                                                                                                                                                               | Disposition                                                                                                                                                              |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Ordinary PUT: [`canvas.route.ts`](../../apps/server/src/modules/canvas/canvas.route.ts), 1428–1704                                                                                                                                                                                                          | Canvas mutex, expected Space version, Agent/World/formal-entry checks; `handle.write` with no node mutations or journal, then `invalidate`. Retained fields are composed, but membership/edges remain snapshot-based; missing Space can be implicitly created | M: operations, no implicit missing-Space creation by an old editing request. Separate creation/rename from ordinary structure save.                                      |
+| Content PUT / node DELETE: same route, 765–1067; [`write-coordinator.ts`](../../apps/server/src/modules/canvas/write-coordinator.ts), `updateNode`                                                                                                                                                          | Authored content CAS plus opaque node-record CAS under mutex; no general topology/incarnation check inside coordinator. Sidecar DELETE is separate from later client topology PUT; both notify with `invalidate`                                              | G content writer with lifetime/membership/type guards; M atomic node+sidecar deletion. Keep any repair-only sidecar deletion privileged.                                 |
+| Executor: [`canvas-executor.ts`](../../apps/server/src/modules/canvas/canvas-executor.ts), `executeOnServer`, 710–767 / 1160–1271                                                                                                                                                                           | IDs/source preparation precede mutex; hydrate/validate/execute; node+record+delta through `write`; Review append separately best-effort; normal update publication can be internally deferred                                                                 | M commit boundary, reuse engine. Receipt admission precedes repeated preparation/ID allocation; prepared resources have cleanup and are not visible before commit.       |
+| Delta replay: same file, `applyDeltasOnServer`, 1302–1609                                                                                                                                                                                                                                                   | Mutex/ownership composition, node+record+delta write; returns result for its caller to publish                                                                                                                                                                | M internal commit primitive; not a public arbitrary inverse/privilege bypass.                                                                                            |
+| RFS / built-in / World: [`space-execute.ts`](../../apps/server/src/modules/remote_fs/space-execute.ts), [`world-previews.ts`](../../apps/server/src/modules/canvas/world-previews.ts)                                                                                                                       | Reuse executor; RFS retains content revisions and thread attribution; World queues reconciliation and replans rejected work                                                                                                                                   | M through same commit service; preserve caller contracts and server-derived identity. `runId` is not a receipt.                                                          |
+| RFS staging: [`rfs.route.ts`](../../apps/server/src/modules/remote_fs/rfs.route.ts), upload/delete, 929–1013                                                                                                                                                                                                | Filesystem staging separate from structural commit; no operation receipt                                                                                                                                                                                      | G resource staging with Space-lifetime/exclusive-publication guards; staged upload does not imply node creation.                                                         |
+| Agent FSM/association: [`agent-node-lifecycle.ts`](../../apps/server/src/modules/agent/agent-node-lifecycle.ts), [`agent-node-projection.ts`](../../apps/server/src/modules/canvas/agent-node-projection.ts), [`agent-node-association.ts`](../../apps/server/src/modules/canvas/agent-node-association.ts) | Question/thread/sidecar and invocation/terminal-token checks, trusted delta replay, explicit publication                                                                                                                                                      | G business owners + M commit evidence; never authorize lifecycle writes from a submitted `origin` string.                                                                |
+| Preprocessing: [`dispatcher.ts`](../../apps/server/src/modules/preprocessing/dispatcher.ts), [`stages/persist.ts`](../../apps/server/src/modules/preprocessing/stages/persist.ts), [`pipeline.ts`](../../apps/server/src/modules/preprocessing/pipeline.ts)                                                 | In-flight coalescing; asynchronous work then `updateNode`, existing-record and authored/source freshness guards; returns patches rather than a complete structural commit                                                                                     | G content/metadata owner, add captured incarnation/job context and authoritative notification; measure/geometry changes use M derived commits.                           |
+| Cross-Space Move: [`space-move.service.ts`](../../apps/server/src/modules/canvas/space-move.service.ts), 286–803                                                                                                                                                                                            | Hierarchy/Workspace/sorted Space locks, source-version/Agent leases; copy resources, destination commit, history rehome, source commit, hierarchy writes, deferred publication; known failures compensated, uncertain outcomes retain destination             | G orchestration / X initial slice. Durable saga/result needed; not one cross-store atomic transaction.                                                                   |
+| Create/reparent/delete tree: [`space-hierarchy.ts`](../../apps/server/src/modules/canvas/space-hierarchy.ts), 137–415; [`storage.ts`](../../apps/server/src/modules/storage/storage.ts), create/delete                                                                                                      | Hierarchy lock and sorted Space locks, explicit partial results; blob sweep precedes record deletion and abort cannot restore swept blobs                                                                                                                     | G lifecycle authority / X until durable intent and retryable outcome. Do not let generic node deletion bypass child-Space rules.                                         |
+| Rename: [`space-card.route.ts`](../../apps/server/src/modules/canvas/space-card.route.ts), 142–201; Disk [`space-repository.ts`](../../apps/server/src/modules/storage/backends/disk/space-repository.ts)                                                                                                   | Title CAS, repository rename then separate version-only write and snapshot notification; `setParent` can update record without version increment                                                                                                              | M logical title/hierarchy commit, G materialization. Directory rename is not already in the topology transaction.                                                        |
+| Review: `canvas.route.ts`, 1882–1950; `SpaceChanges`                                                                                                                                                                                                                                                        | Accept separately deletes record; Revert reads outside mutex, applies locked inverse, publishes, then consumes record outside that state transaction; no route-level current fingerprint check                                                                | M serialized state+Review+receipt; independent list revision for Accept.                                                                                                 |
+| External notes: [`external-watcher.ts`](../../apps/server/src/modules/canvas/external-watcher.ts), [`external.route.ts`](../../apps/server/src/modules/canvas/external.route.ts), 81–128                                                                                                                    | Watcher discovers files; claim reads/unlinks source before browser creation and has no structural receipt                                                                                                                                                     | G discovery; X claim until durable server adoption. Keep source until accepted result, not delete-before-create.                                                         |
+| Bundle import: Disk [`space-import.ts`](../../apps/server/src/modules/storage/backends/disk/space-import.ts), 77–132                                                                                                                                                                                        | Hidden staging and ID remap, direct record write, directory publication and index registration outside `SpaceHandle.write`                                                                                                                                    | G privileged staged import; final lifecycle publication/receipt required before collaborative use.                                                                       |
+| Read-time/boot maintenance: Disk [`legacy/canvas-store.ts`](../../apps/server/src/modules/storage/backends/disk/legacy/canvas-store.ts), `reconcileValidatedRecord` (399–425); [`workspace-prepare.ts`](../../apps/server/src/modules/workspace-prepare.ts)                                                 | Read may rewrite title/record without sequence/event; activation runs filesystem migrations/World bootstrap                                                                                                                                                   | Make read-time repair explicit guarded reconciliation or projection-only; boot migrations admin-only with admission closed.                                              |
+| Behavioral events and extension/task documents: [`ports/structured.ts`](../../apps/server/src/modules/storage/ports/structured.ts)                                                                                                                                                                          | Separate repositories/owned documents, not topology replay                                                                                                                                                                                                    | G owner services; do not treat action logs, Task records or conversation history as structural commits. Their resulting Canvas mutations still enter the commit service. |
 
-Makes "several agents + several tabs on one desktop" actually safe. Every item
-is a small, independently shippable fix on top of P0.
+The server's `stripNodesForCanvas` and executor hydration use the same seven sidecar keys listed in §2.2. Text-bearing sidecar bodies include Note/Text/Question and extracted Web/PDF/Office content; PDF body is omitted from bulk Canvas hydration but remains separately stored/readable. SQL stores corresponding node records instead of Markdown files. Source bytes are blobs, not `src` strings inside the structural transaction. Metadata such as a label therefore needs a node-record mutation even though same-body co-editing is excluded.
 
-- ✅ **C2 — all built-in agents broadcast-only (unified with ACP).** _Shipped +
-  verified._ The built-in chat **and question-node** agents deliver canvas
-  mutations _only_ via the sync broadcast, like ACP — the chat SSE tool result
-  no longer applies state, so the initiating tab is a plain receiver (**no
-  self-echo, no `clientId`**; C5 moved to P2). Broadcasting is now
-  **unconditional** in `executeOnServer` — the per-caller `broadcastCanvasWrites`
-  / `broadcast` flag chain was removed
-  ([canvas-executor.ts](../../apps/server/src/modules/canvas/canvas-executor.ts),
-  [agent.service.ts](../../apps/server/src/modules/agent/agent.service.ts),
-  [canvas-write.ts](../../apps/server/src/modules/agent/tools/handlers/canvas-write.ts)).
-  `animateCanvasCommandsFromToolResult` no longer applies state or extracts
-  client-side changes — it just surfaces the command list + animation
-  ([useAgentStream.ts](../../apps/web/src/hooks/useAgentStream.ts)). Revert is
-  owned by the per-thread `ChangeReviewCard` (renamed from `AcpChangeCard`, now
-  renders for internal bindings too) fed by the broadcast `changes`
-  ([ChangeReviewCard.tsx](../../apps/web/src/components/Panels/ChatPanel/ChangeReviewCard.tsx)).
-  The per-message `CanvasCommandCard` is now display-only; its dead revert path
-  was deleted. (A `sketch-recognized` carve-out existed here until sketch
-  gesture recognition was removed; every writer now goes through broadcast.)
-- 🟡 **C4 / O2 — preprocessing cost deduped (full ownership deferred to P2).**
-  Duplicate **work** is fixed:
-  [PreprocessDispatcher](../../apps/server/src/modules/preprocessing/dispatcher.ts)
-  coalesces concurrent identical requests
-  ([coalesce.ts](../../apps/server/src/modules/preprocessing/coalesce.ts)), so N
-  tabs replaying one broadcast delta run the pipeline (extract + LLM enrich)
-  **once**, not N times. This removed the actual harm (N× LLM / embedding
-  cost). The remaining _ownership_ cleanup — receivers not _triggering_ at all
-  (`applyDeltasFromAgent` still calls `triggerPreprocessing`, now cheap) plus a
-  server-side trigger + enriched writeback broadcast — is **moved to P2**: it
-  shares the "server produces a delta → broadcast" mechanism with Plan A and is
-  no longer cost-urgent, so it is not worth its medium risk on its own.
-- ✅ **C3 — `dirtyNodeIds` protection + conflict surfacing.** _Shipped._
-  `applyDeltasFromAgent` skips incoming `REPLACE`/`DELETE` deltas targeting a
-  node with un-persisted local **content** edits (pending debounced save or
-  in-flight PUT, exposed via `nodeContentQueue.pendingNodeIds()`), so an agent
-  write never clobbers what a human is mid-typing — `INSERT` always applies.
-  Resolution is deterministic **local-first**: the skipped node keeps the
-  human's value and post-effects (preprocessing / fit) skip it too; `version`
-  still advances to `toVersion` so the next autosave doesn't 409. The skipped
-  ids flow back through `canvasSyncStore` into `acpThreadChangesStore`
-  (`conflictedByThread`); the `ChangeReviewCard` renders those rows as
-  **conflicts** ("· skipped", warning icon, revert disabled) and the question
-  node's **done** badge grows a warning `ConflictBadge` count — surfacing the
-  conflict per node/thread instead of a global toast. **Scope:** content only;
-  same-node **structure** conflicts (geometry/parent) stay coarse — no per-node
-  structure-dirty tracking yet, rebased away by P3's field-level deltas.
+### 2.5 Backend capability evidence
 
-**Uplift:** any mix of built-in + ACP + headless agents writing concurrently
-converges on _every_ open tab — no double-apply, no duplicate embeddings, no
-lost local edits. The happy path (in-order broadcasts) already applies
-incrementally; only the rare version-gap case still falls back to a full
-`loadCanvas` (the incremental gap-heal is deferred to P2). This is
-"multi-agent done."
+[`SpaceWriteInput`](../../apps/server/src/modules/storage/ports/structured.ts) (333–402) owns expected version, next record, node mutations, optional delta and legacy creation. It explicitly does not guarantee portable crash durability, retry idempotency, unknown-connection recovery, multi-process coordination or publication. There is no receipt/incarnation/Review mutation or public journal-read member. The following is static implementation evidence, not crash-fault certification.
 
-</details>
+| Backend / implementation                                                                                                                                                                                                  | Existing guarantees                                                                                                                                                         | Missing before collaboration can be enabled                                                                                                                                                                         |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Disk [`space-write.ts`](../../apps/server/src/modules/storage/backends/disk/space-write.ts), [`canvas-persistence-transaction.ts`](../../apps/server/src/modules/storage/backends/disk/canvas-persistence-transaction.ts) | Synchronous version check/write provides single-process same-turn winner; captures in-memory before-images, writes nodes -> record -> delta and restores on caught failures | Process termination loses rollback images; rollback itself can fail. Need durable decision/redo, receipt+event indexes and read fencing. JSONL tail repair does not recover the commit.                             |
+| SQLite [`space-write.ts`](../../apps/server/src/modules/storage/backends/sqlite/space-write.ts), [`database.ts`](../../apps/server/src/modules/storage/backends/sqlite/database.ts)                                       | `BEGIN IMMEDIATE` covers node changes, conditional Space update and delta row; WAL configured with `synchronous=NORMAL`                                                     | Add receipts, sessions, lifecycle/context versions and Review in same transaction via transaction-bound helpers. Current settings do not promise every acknowledged write survives power loss.                      |
+| PostgreSQL [`space-write.ts`](../../apps/server/src/modules/storage/backends/postgres/space-write.ts), [`database.ts`](../../apps/server/src/modules/storage/backends/postgres/database.ts)                               | One connection/transaction, transaction advisory lock and timeout, node+Space+delta writes, broken connection disposal                                                      | Add same receipt/lifecycle/Review boundary; lost COMMIT reply remains unknown until receipt lookup. Transaction protection does not make application pub/sub, blob deletion or process-local admission distributed. |
 
-### P2 — Multi-window user-edit sync (Plan A) ← Wave 1 finish
+Disk has a private `readDeltaLogSince`; SQL stores `delta_log` rows. Neither establishes a portable replay API or complete sequence: ordinary PUT and title writes can increment version without a journal row. Keep action logs and collaboration commits distinct.
 
-- ⬜ **Plan A (C6).** On the autosave PUT, the server diffs old→new and
-  broadcasts the resulting deltas to _other_ `clientId`s. Minimal client
-  change; ~1s debounce latency; reuses the existing 409 safety net.
-- ⬜ **C5 — per-client echo filter.** Deferred from P1: only _now_ needed,
-  because with user edits broadcasting (Plan A) a tab must skip its **own** PUT
-  echo. Each tab mints a `clientId`, carried on `/execute` + PUT `originator`;
-  the broadcast carries `originatorClientId`; the receiver skips its own. (The
-  built-in agent no longer needs this once C2 makes it a pure receiver.)
-- ⬜ **O2 — server-owned preprocessing + writeback broadcast.** Moved here from
-  P1 (cost already deduped by coalescing). Make broadcast receivers skip
-  `triggerPreprocessing` (`applyDeltasFromAgent` gains a `preprocess` toggle;
-  [canvasSyncStore.ts](../../apps/web/src/store/canvasSyncStore.ts) passes
-  `false`, the built-in-agent path keeps `true`); run preprocessing once
-  server-side for broadcast `/execute` writes; broadcast the enriched writeback
-  (label / summary / keywords) as a `MERGE_NODE_DATA` delta, guarded against
-  re-triggering itself. Reuses the same PUT→diff→broadcast path as Plan A.
-  ~5 files, medium risk (loop guard, server-side snapshot fidelity, async
-  writeback timing).
-- ⬜ **Log backfill.** Wire `GET /:id/log?since=v` into the sync store so a
-  version gap heals incrementally instead of a full `loadCanvas` flicker. Pure
-  optimization of the existing gap fallback (not needed for correctness); more
-  valuable here because Plan A's user-edit broadcasts raise gap frequency.
-- ⬜ **Reversibility category (c) (C7 phase 1).** Checkpoint "restore to the
-  version before this run" (the delta log already supports it) + AI-change
-  badges via `NodeOrigin`; a transient undoable toast for truly-remote
-  changes. Keep remote changes OUT of this tab's global undo stack.
-- ⬜ **Broadcast the change-card _list state_ across tabs.** Today only the
-  canvas deltas broadcast; the per-thread change records (`acpThreadChangesStore`)
-  do **not** re-sync when another tab Accepts/Reverts. So tab B's above-input
-  card can go stale (still lists a change tab A already kept/reverted). Fix:
-  when a change is accepted (`DELETE …/changes/:id`) or reverted, also broadcast
-  the thread's updated coalesced list (reuse the `update` event's `threadId` +
-  `changes`) so every tab's `replaceFromBroadcast` converges. Low-medium risk,
-  additive.
-- ⬜ **SSE reliability (heartbeat + client auto-reconnect).** The sync stream
-  has no periodic keep-alive and `canvasSyncStore` (a `fetch` + typed-SSE reader,
-  not native `EventSource`) does not reconnect on drop, so a broken stream stays
-  broken until a canvas switch / reload. Add a server-side `: ping` interval
-  (cleared on close) to both SSE routes, and a client exponential-backoff
-  reconnect that re-runs the snapshot-on-connect reconcile to heal the gap.
-  Low risk; matches the current `external.route.ts` gap too.
-- ⬜ **Revert-route atomicity.** The `…/changes/:changeId/revert` handler reads
-  the record and removes it outside the per-canvas mutex (only
-  `applyDeltasOnServer` is inside), so two concurrent reverts of the same change
-  could double-apply. Wrap read → apply → remove in `withCanvasMutex`, or make
-  removal a compare-and-remove that skips apply when the record is already gone.
-  Negligible on single-user desktop; superseded by P3's unified write path.
+Disk [`node-tombstones.ts`](../../apps/server/src/modules/storage/backends/disk/legacy/node-tombstones.ts) uses expiring in-memory deletion markers; SQL [`space-nodes.ts`](../../apps/server/src/modules/storage/backends/sqlite/space-nodes.ts) can upsert a missing node record with `expectedRevision: null`. An absent sidecar is not proof of a valid new creation. All enabled backends need the same topology/lifetime guard.
 
-**Uplift:** two windows/tabs on the same device editing one canvas see each
-other's edits within ~1s; remote changes are reviewable (badge / checkpoint)
-instead of triggering a forced reload.
+Existing [`sync.route.ts`](../../apps/server/src/modules/canvas/sync.route.ts) subscribes before reading the version baseline, buffers during that read, and sends 15-second heartbeats. It has no durable cursor/replay, bounded initial buffer, or complete backpressure/deleted-Space protocol. [`canvas-sync.ts`](../../apps/server/src/modules/canvas/canvas-sync.ts) is process-local and keyed by Canvas ID. Reuse liveness and subscription ordering; qualify channels by captured Workspace/epoch and add bounded recovery, rather than implementing another heartbeat.
 
-### P3 — Unified write path + field-level deltas + rebase ← Wave 2 foundation
+## 3. Field ownership and persistent invariants
 
-The structural-conflict engine for real multi-user. Aligns with the headless
-plan's Phase B (M3.5–3.9).
+Storage placement must continue to use the existing node serializers and storage ports. A field's presence under `data` does not make it body content or freely client-writable. The registry below is exhaustive by current node kind; adding an admitted field requires a registry/schema/test decision, not arbitrary JSON-path patching.
 
-- ⬜ **Plan B (C6 / D8).** Route user edits through `/execute`: optimistic local
-  apply + async post + reconcile on broadcast + rollback on failure. One write
-  path, server as source of truth, immediate propagation (no 1s debounce).
-- ⬜ **Field-level deltas (D5, deferred M1 task 1.7).** Replace coarse
-  `REPLACE_NODE` with `SET_GEOMETRY` / `SET_DATA(key)` / `SET_NODE_PARENT` so
-  two clients editing _different fields_ of one node don't clobber.
-- ⬜ **Server rebase.** Re-expand a command against current head; `clientId` +
-  `optimisticTag` reconcile predicted vs authoritative deltas.
-- ⬜ **Retire PUT + 409 (M3.7 / 3.8).** Full re-saves become a `RESET_CANVAS`
-  `/execute`; the "modified elsewhere" conflict toast disappears.
+| Types / fields                                                               | Authority and persistence                                                                                                                                       | Conflict unit / event                                                                                  | Undo / deletion                                                                       |
+| ---------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------- |
+| All nodes: ID, type, incarnation                                             | Service allocates incarnation; create or guarded type conversion owns identity; topology                                                                        | Entity lifecycle; insert/remove or guarded conversion                                                  | Restore gets fresh incarnation; old writes never recreate                             |
+| All nodes: free `position`, fixed outer width/height, `heightMode`, lock     | Human/Agent commands where permitted; topology                                                                                                                  | Position is one X/Y value; dimensions/ownership follow gesture group; typed node field patch           | Authored fields undoable with last-writer guards; locked ancestors rechecked          |
+| All nodes: parent, sibling order                                             | Service validates and computes topology                                                                                                                         | One reparent group; node membership revision + coordinate context; sibling-order event                 | Guard parent/order revisions; no whole-Space restore                                  |
+| All nodes: `data.style` accent/font leaves                                   | Allowed commands; existing serializer                                                                                                                           | Per leaf; a proportional Text/Question resize couples font/size/position                               | Leaf undo; never restores unrelated style siblings                                    |
+| All nodes: label + `labelSource`, origin/provenance, missing/duplicate flags | Existing sidecar/projection ownership; manual rename sets source together; generated labels respect it                                                          | Sidecar metadata patch, explicit authored label pair; diagnostic flags are read-only projections       | Do not undo generation/diagnostics as human actions; no write after deletion          |
+| Note                                                                         | Body/provenance via existing content service/CAS; height mode in topology; measurement hint + numeric height materialized by service                            | Body notification separate from structural fields; `autoHeight` is derived with freshness key          | Body merge excluded; retain draft on delete; hints not undoable                       |
+| Text                                                                         | Body via content CAS; authored font/width, derived content height                                                                                               | Separate body notification and typed structure patch                                                   | No fixed-height authoring; derived height not undoable                                |
+| Question                                                                     | Body via content CAS; preparation via existing Agent admission; `threadId`, binding/FSM, invocation, attention, title provenance through trusted owner services | Preparation uses existing execution checks; lifecycle projection separate from body/geometry           | Restore cannot restore old invocation/binding state; lifecycle never enters user undo |
+| Frame                                                                        | `layoutMode`, `gridCount`, `gridRowCount`, `sizing`; child cells and proposed reading order in topology                                                         | Frame semantic operation + final computed geometry; versioned layout context                           | User layout operation undoable as group; computed fit is not a separate undo step     |
+| Image, PDF, Office, Video, Audio, Web                                        | `src` via existing source/content freshness policy; cover/format/extraction metadata through preprocessing; image aspect-ratio sizing reused                    | Source CAS distinct from geometry; derived metadata notification                                       | No structural overwrite of source; stale preprocessing rejected                       |
+| PDF highlights; Sketch strokes/initialSize/resource bindings                 | Authored topology data; whole collection is an atomic field, not a collaborative sequence                                                                       | Conditional collection replacement using field version; retain existing binding validation             | X for first slice; do not last-write-win two stroke/highlight collections             |
+| Web interactive view / `viewKey`                                             | Existing View definition CAS and View state service                                                                                                             | Keep `expectViewRev` and owner service; not an arbitrary structure patch                               | X until adapter ready; View state is not Canvas undo state                            |
+| Space Shortcut (`spacePreview`)                                              | Target/width mode via UI/World hierarchy services; target metadata is a read model                                                                              | Target change guarded as one field; structure commit + existing metadata invalidation                  | No child ownership invented; X for cross-Space lifecycle until adapter ready          |
+| File Reference (`fileReference`)                                             | Validated device/path metadata through existing reference service; label sidecar; no body/source writes                                                         | Whole validated reference value, guarded version                                                       | X until adapter ready; no file-byte mutation through Canvas                           |
+| Edges                                                                        | Endpoints/identity via connect/disconnect; direction/line shape/dash/stroke/width/label via edge commands                                                       | Endpoint pair atomic; style leaves independent; layout gutters recomputed in same commit when affected | Endpoint existence/incarnation rechecked; incident edges deleted with node            |
+| Space title / parent ownership                                               | Title through guarded rename; ownership through hierarchy service; record and directory materialization remain distinct                                         | Title field version; hierarchy service transaction/saga and affected-Space publication                 | X cross-Space lifecycle initially; no ordinary PUT creation/rename bypass             |
+| Local UI                                                                     | Selection, viewport, focus, hover, drag/resize previews, DOM `measured`, render z-index                                                                         | L: never serialized into authoritative events                                                          | Not shared history                                                                    |
 
-**Uplift:** two users editing the same node's different fields merge cleanly;
-the 409 conflict wall is gone; concurrent structural editing becomes safe.
+Unknown or diagnostic fields are not admitted merely because the old generic merge accepted them. `SET_NODE_SELECTION` stays local; `SET_NODE_LOCKED`, `CHANGE_NODE_TYPE`, and measurement commands need their own validated UI admission, not exposure through the Agent schema.
 
-### P4 — Content co-editing (Yjs) ← Wave 2 (text)
+### 3.1 Concurrency tokens
 
-- ⬜ **Yjs per node over WebSocket (D3 / headless M4).** `.md` canonical, Y.Doc
-  a transient mirror seeded on open and flushed debounced. Orthogonal to the
-  structure channel (P1–P3); can proceed in parallel once the WS transport
-  from P5 exists.
+Use separate meanings, not one universal revision:
 
-**Uplift:** two people typing in the same note body merge at character level
-instead of last-writer-wins.
+| Token                           | Proposed meaning                                                                                                                                                     |
+| ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `spaceEpoch` + `version`        | Persisted synchronization generation plus contiguous commit sequence. Epoch changes on destructive reset/restore or migration boundary, not ordinary server restart. |
+| `incarnation`                   | New opaque entity lifetime ID on creation/restoration, including edges; never derived from body hash or node ID.                                                     |
+| `membershipVersion`             | Last commit changing a node's parent membership, including move-away-and-back; prevents parent-ID ABA.                                                               |
+| `coordinateContext`             | Opaque token derived from current ancestry identities, membership and coordinate-basis revisions; no token based only on equal numeric coordinates.                  |
+| `layoutVersion`                 | Frame's last layout-input change: mode, sizing/count, membership, cells, reading order, relevant sizes, edge-gutter inputs, or coordinate-basis changes.             |
+| `fieldVersion` / `orderVersion` | Last writer's commit for each atomic field unit or sibling list; used for guarded destructive edits and undo, including change-away-and-back.                        |
+| `expectRev` / `expectViewRev`   | Existing authored-content / View definition CAS; unchanged meaning.                                                                                                  |
 
-### P5 — Presence + identity + permissions ← Wave 2 (the "multi-user" gate)
+A plain root move checks incarnation and root coordinate context but not the previous position's field version; later accepted position wins. Parent-local writes additionally check membership and coordinate context. Parent/ancestor movements or Hug-origin changes invalidate descendant world-coordinate interpretations; the token can be derived from ancestry versions without writing every descendant. First release rejects stale contexts and asks the client to resolve its gesture again; it does not guess a conversion.
 
-- ⬜ **WebSocket transport consolidation.** Replace SSE + PUT for the sync /
-  presence channel with a single bidirectional connection (one-way agent
-  streams can stay on SSE). Prerequisite for low-latency co-edit + awareness.
-- ⬜ **Awareness.** Live cursors, selections, "who's on this canvas."
-- ⬜ **Identity / auth / per-canvas permissions.** Currently zero — the real
-  gate for multi-user, and larger than the sync algorithm itself.
-- ⬜ **Attribute everything to `userId`.** Extend `originator`; deltas,
-  change-cards, undo, and badges all become per-person.
+Independent width/position intents touch only named units. A corner/proportional resize carries the geometry/font versions it read and is all-or-nothing; stale coupling is rejected, not split into a half-resize. Server-computed layout/fit runs before persistence in the same candidate commit. Asynchronous browser measurements produce a later guarded derived operation; they are never unlogged post-success repairs.
 
-**Uplift:** real multi-user — see collaborators live, changes attributed to
-people, access controlled.
+## 4. Ordering contract
 
-### P6 — Multi-device / cloud infra ← Wave 2 (scale-out)
+### 4.1 Sibling order
 
-- ⬜ **Broker-backed pub/sub.** Replace the in-memory `listenersByCanvas` Map
-  with Redis / NATS so multiple server replicas fan out to each other. (The
-  Map is fine for one process / one desktop; "single process" — not "single
-  client" — is its true ceiling.)
-- ⬜ **Shared server + shared storage topology.** Today each desktop forks its
-  own `127.0.0.1` server against local files, so two devices are two
-  independent servers + two `canvas.json`s. Multi-device needs a shared
-  authority (or a sync-of-syncs).
-- ⬜ **`delta_log` → SQLite (D6).** Migrate the JSONL log to the table schema
-  for indexed server-side `since=v` backfill at scale.
+Keep node arrays as the initial storage representation; do not add fractional keys. Logical sibling order is the subsequence of nodes sharing the same live parent, with root represented by `null`. Later siblings paint above earlier siblings; a Frame's complete rendered subtree occupies one continuous band. The render array/z-index derives from the forest; no client-authored z-index is a second ordering authority.
 
-**Uplift:** multi-device and horizontally-scaled cloud deployments converge.
+Reuse `REORDER_NODES { nodeIds, to: "top" | "bottom" | { before } | { after } }` with admission preconditions. Members must be unique, live, same-parent roots, unlocked through their ancestry; the anchor must be a distinct live sibling outside their subtrees. Preserve group-internal current sibling order, not request-list order. Missing/moved anchors and partially missing groups reject. `top` appends and `bottom` prepends within this parent only. A Frame move changes its sibling slot, not every descendant's logical slot. An unchanged result has a no-op receipt and no commit.
 
-## 3. Dependency map
+Proposed authoritative event:
 
-```
-P0 (shipped)
- └─► P1 multi-agent correctness ──► P2 user-edit sync (Plan A)      ◄ Wave 1 done
-       │  (C2 makes built-in agent a pure receiver — no clientId)
-       └─► P3 unified path + field deltas + rebase
-             ├─► P4 Yjs content (parallelizable; needs WS from P5)
-             └─► P5 presence + identity ──► P6 cloud / multi-replica ◄ Wave 2 done
+```json
+{
+  "type": "SET_SIBLING_ORDER",
+  "parentId": null,
+  "before": ["node-a", "node-b", "node-c"],
+  "after": ["node-c", "node-a", "node-b"],
+  "orderVersion": 101
+}
 ```
 
-Critical path to **multi-agent**: P1. Critical path to **multi-user**:
-P3 → P5 (+ P4 for text). P6 only when leaving the single-process desktop.
+Emit one event for every affected parent whenever order or membership changes, including create/delete/reparent, even if the remaining siblings did not move. Lists contain all direct children exactly once. Deleted/new parent lists use an empty absent-side list. In one atomic commit application, create/delete/patch entity maps first, install all `after` lists, verify they match final parent membership and have no cycles, then materialize the forest and render once. Invalid lists/missing entities are a replay error requiring recovery, not fail-open skipping.
 
----
+Inversion swaps entity before/after values and the complete sibling lists, restoring membership before materializing order; invert the whole commit rather than rendering intermediate inverse rows. Order version is concurrency metadata, not a value to roll backward during live undo. Example: `[a,b,c]`, move `[a,b]` after `c` -> `[c,a,b]`; inverse replay -> `[a,b,c]`. Reparent `b` from `[a,b]` into target `[c]` after `c` emits source `[a,b] -> [a]`, target `[c] -> [c,b]`, and parent/position changes together.
 
-## Appendix A — Decision rationale (C1–C7, preserved)
+Two inserts after the same still-live anchor use serialized current state. Starting `[a,z]`, insert `b` after `a`, then `c` after `a` -> `[a,c,b,z]`. No client timestamp tie-break or permanent reservation of a gap. Event size is O(affected sibling counts), not O(moved nodes).
 
-> Preserved verbatim from the original M3 broadcast design. These decisions
-> still govern the mechanisms above — P1–P2 are largely the implementation of
-> C3–C7.
->
-> **Note (2026-07):** the appendices below reference
-> `apps/web/src/hooks/useCanvasChanges.ts` / `snapshotAndExtractChanges`, a
-> client-side change-capture hook that has since been **deleted**. Revertible
-> AI changes are now server-authored delta records surfaced through
-> `acpThreadChangesStore`; read those names as the historical stand-in for that
-> machinery.
+### 4.2 Reading order and Grid
 
-### C1 — Plan A (server-side SSE broadcast) is the chosen mechanism
+Column/Row get an explicit Frame-owned `layoutOrder` record: ordered direct child IDs per numeric track, separate from sibling paint order. First structured migration seeds it from the current solver's actual track order, including stable array-order ties, then the solver consumes the explicit list. Track IDs remain numeric and revision-scoped; no permanent duplicate order field on children. Reparent/deletion updates membership/cells/reading lists together. Migration must preserve existing geometry and reading order.
 
-This is exactly the "M3 cross-tab broadcast" the codebase already anticipated.
-Catch-up clients use `fromVersion` vs local `version`: matching → incremental
-apply; mismatch (gap) → full `loadCanvas` fallback. `applyDeltas`'s fail-open
-behavior is the second safety net.
+Grid retains numeric `frameColumn`/`frameRow`, existing swap/insert/compaction and sparse-group behavior. Numeric cell/track targets require the observed `layoutVersion`; mismatch returns `stale-layout`. Semantic before/after-node targets may re-resolve from a still-live same-Frame anchor if mode, target role and move shape remain compatible; otherwise reject. Layer reorder does not alter reading order/cells or bump layout version by itself. Edge styles that affect gutters and accepted measurements that affect sizes do bump the affected layout version.
 
-### C2 — State mutation flows through ONE path (pure broadcast)
+First D slice gates all structured Frame mutation until E wires these semantics. Lifecycle and coordinate guards must already exist for whatever D exposes.
 
-Collapse the two paths ("M3 will collapse the two paths once cross-tab
-broadcast lands"):
+## 5. Proposed operation protocol
 
-- **State** is mutated only via the broadcast applier (`applyDeltasFromAgent`).
-- The agent SSE `tool` result degrades to a **UI-only signal** (tool card,
-  animation, per-card revert metadata). It no longer mutates canvas state.
-- Latency is negligible: the built-in agent already runs server-side, so both
-  the tool event and the broadcast originate from the same server over SSE
-  (same process on desktop). Lower maintenance: one state path.
-- Ordering nuance (tool card on agent stream vs state on sync stream): the
-  receiving tab can `snapshotAndExtractChanges` right before applying the
-  broadcast deltas (REPLACE deltas already carry before/after), and the card
-  animation simply waits for state to land.
+### 5.1 Admission and result identity
 
-### C3 — Conflict model: version + "dirty node" protection. Local unsaved is NEVER overwritten.
+Define new schemas once under `packages/shared/src/types/api/canvas-sync.ts` or a focused imported sibling; Zod `safeParse` on server, type-only imports on Web. Names/JSON below define the design, not executable examples for today's endpoints. Reuse existing command schemas and executor. Do not widen the legacy RFS contract implicitly.
 
-`version` remains the concurrency primitive (autosave PUT keeps optimistic
-concurrency; server-ahead → 409 → existing sticky toast + Reload). Layered on
-top, a new **`dirtyNodeIds`** set (nodes with un-persisted local edits) filters
-incoming broadcast deltas:
+Proposed routes under `/api/canvas/:canvasId`: `POST /sync/sessions`, `POST /operations`, `GET /operations/:operationId?sessionId=...`, `GET /sync/commits`, and `GET /sync/snapshot`; extend existing `/sync/stream` through explicit protocol negotiation. RFS can later expose the same service through a versioned adapter without changing its current partial-success contract.
 
-```
-For each incoming delta:
-  INSERT (new node)        → always safe to apply (ACP new nodes never collide)
-  REPLACE / DELETE (exist) → if id ∈ dirtyNodeIds → SKIP (preserve local unsaved)
-                           → else apply
+A persisted server-issued session lease returns `sessionId`, `spaceEpoch`, `expiresAt`, protocol/model capabilities and limits. Initial design: seven-day admission/retry window; retain terminal receipts until at least seven days after that session's expiry. Retention is advertised and must not be shortened for an existing lease. Expired sessions cannot admit absent operations, even if their old receipts have been collected. Existing receipts may still be queried/returned. This prevents an old request from becoming a fresh write after deduplication expires. Session creation has no Canvas mutation; losing its reply may create an unused lease safely.
+
+Receipt identity is `(workspaceId, canvasId, spaceEpoch, sessionId, operationId)`. Operation IDs are opaque UUIDs (IDs in examples are abbreviated); neither `runId` nor client timestamps identify an execution. Bind sessions to authenticated scope; derive writer identity/source server-side. Digest the normalized validated request, including mode, commands, guards and observed version, using deterministic JSON and a collision-resistant digest. Same key/same request returns original terminal results; same key/different request rejects `operation-id-reused`. A changed/rebased request gets a new operation ID.
+
+```json
+{
+  "protocolVersion": 1,
+  "spaceEpoch": "epoch-1",
+  "sessionId": "session-1",
+  "operationId": "op-1",
+  "observedVersion": 100,
+  "mode": "atomic",
+  "commands": [
+    {
+      "type": "SET_NODE_GEOMETRY",
+      "items": [{ "nodeId": "node-a", "position": { "x": 120, "y": 80 } }]
+    }
+  ],
+  "preconditions": [
+    {
+      "commandIndex": 0,
+      "nodeId": "node-a",
+      "incarnation": "life-a",
+      "parentId": null,
+      "membershipVersion": 91,
+      "coordinateContext": "root:epoch-1"
+    }
+  ]
+}
 ```
 
-`applyDeltas` is id-keyed, so locally-edited-but-not-in-delta nodes are
-untouched. The only real hazard (same node edited locally + remotely) resolves
-**local-first** by skipping that delta row. When `fromVersion !== localVersion`
-(diverged) with local dirty state, do NOT blind-`loadCanvas` (would lose local
-edits) — let autosave's 409 path arbitrate so unsaved edits are recoverable.
+Protocol version here is the new collaboration protocol, not RFS's existing protocol version. `observedVersion` is an observation/catch-up hint, not a whole-Space equality condition. Guards are command-specific discriminated schemas, not optional arbitrary maps: every existing target/reference requires its lifetime; coordinates require context; collections/destructive operations require their declared field versions. References to nodes created earlier in the same atomic group are resolved against that candidate, not required to exist in the prestate.
 
-### C4 — Preprocessing: "whoever modified the canvas" runs it, exactly once; writeback also broadcasts without looping
+For `atomic`, preflight and execute the entire group against isolated candidate state, validate the final forest/edges/layout, then publish effects only after durable commit. Failure leaves no state, files, preprocessing, association, or history side effects. Commands that require irreversible work cannot enter an atomic group without a prepared-resource/compensation design; keep them gated. Independent Agent commands retain ordered `partial` mode: rejected commands have no effects, the accepted subset commits once. Later commands see earlier accepted commands, not rejected effects.
 
-- The **originator** of a canvas change runs preprocessing
-  (embedding/summary). Receivers of a broadcast NEVER call
-  `triggerPreprocessing`.
-- For ACP / headless `/execute`, the originator is the **server** → server runs
-  preprocessing.
-- Preprocessing produces a **writeback** (embedding/summary), which is itself a
-  canvas mutation → it goes through the same fan-out and broadcasts to others.
-- Loop/duplication avoidance: tag the writeback (e.g. `origin: 'preprocess'`
-  or touch only non-content fields) so the originator does NOT re-preprocess
-  its own writeback. Receivers don't preprocess anyway, so they're safe.
+Validated UI creates may supply existing engine-supported explicit IDs, checked for collisions and past lifetimes. RFS continues server allocation unless explicitly upgraded. Initial node sidecars and topology commit together before dependent body writes; failed creation fails its pending dependents. Client projection cannot regenerate random IDs or repeat preprocessing on every rebase.
 
-### C5 — Echo filtering via per-client id
+### 5.2 Outcomes and authoritative events
 
-Each tab generates a `clientId`, carried on its `/execute` `originator` (and on
-PUT). The broadcast event carries `originatorClientId`; a receiver skips events
-whose `originatorClientId === own` to avoid double-applying its own change.
+| Outcome                                              | Wire meaning                                                                                                               |
+| ---------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| Committed                                            | Terminal receipt with `status: "committed"`, ordered command results, generated IDs, `commitVersion`, and canonical commit |
+| No-op                                                | Terminal receipt with `status: "noop"`, results, `atVersion`, `commit: null`; no sequence increment                        |
+| Domain rejection                                     | Terminal receipt with `status: "rejected"`, typed reason/current target conditions, command results, `commit: null`        |
+| Invalid input / unauthorized / incompatible protocol | HTTP 4xx `ApiErrorBody`; never a success-shaped default                                                                    |
+| Transport error / uncertain persistence              | Client remains `unknown`; neither a timeout nor HTTP 5xx proves absence                                                    |
 
-### C6 — Broadcast to other tabs WHILE keeping local editing optimistic
+Domain rejection is an explicit HTTP 200 business outcome; schema/auth/protocol failures are HTTP errors, following [API design](../architecture/api-design.md). A duplicate result returns original commit information even when the current Space version has advanced. Never mint a second commit for retry.
 
-User edits stay optimistic (apply locally + render immediately, never wait for
-backend). To propagate them to other tabs, prefer **Plan A first**:
+Example terminal rejection: `{ "operationId": "op-2", "status": "rejected", "atVersion": 102, "commit": null, "results": [{ "commandIndex": 0, "applied": false, "reason": "stale-parent", "nodeId": "node-a" }] }`, wrapped with the same session/epoch identity. Example no-op: `{ "operationId": "op-3", "status": "noop", "atVersion": 102, "commit": null, "results": [{ "commandIndex": 0, "applied": false, "reason": "no-change" }] }`. A lost response has no invented server result: the client stores `unknown`, then operation lookup either returns the original terminal receipt or the explicit pending/absent/expired state below.
 
-- **Plan A (chosen first)**: user edit stays as today (optimistic local +
-  debounced state PUT). The **server diffs old vs new state on PUT** to produce
-  deltas and broadcasts them to **other** clientIds. Minimal client change;
-  reuses the existing 409 safety net. Cost: other tabs see edits with up to the
-  ~1s autosave debounce delay.
-- **Plan B (later evolution)**: route user edits through the `/execute` command
-  stream like the agent. Still optimistic — apply locally immediately, then
-  fire `/execute` async (do not await); reconcile version on response/broadcast;
-  roll back the optimistic apply on `/execute` failure. Finer deltas, immediate
-  broadcast (no 1s debounce), single write path / server as source of truth.
-  Cost: larger refactor (all UI mutations through `/execute`, plus optimistic
-  rollback handling).
+HTTP acknowledgement, SSE and replay carry the same canonical commit:
 
-Decision: **ship Plan A first, treat Plan B as the "unified write path"
-evolution target.**
+```json
+{
+  "spaceEpoch": "epoch-1",
+  "fromVersion": 100,
+  "toVersion": 101,
+  "sessionId": "session-1",
+  "operationId": "op-1",
+  "origin": { "kind": "ui" },
+  "events": [
+    {
+      "type": "PATCH_NODE",
+      "nodeId": "node-a",
+      "incarnation": "life-a",
+      "changes": [
+        {
+          "field": "position",
+          "before": { "present": true, "value": { "x": 0, "y": 0 } },
+          "after": { "present": true, "value": { "x": 120, "y": 80 } }
+        }
+      ]
+    }
+  ],
+  "results": [{ "commandIndex": 0, "applied": true }]
+}
+```
 
-### C7 — AI-change undo/reversibility model (industry-aligned, but split by origin)
+Event union: node/edge insert and remove, typed node/edge field changes, sibling-order changes, Frame reading-order changes, and owned metadata/content-revision notifications. Each field has a declared schema; `present: false` removes a field, distinct from `null`. Style leaves are separate fields; position is one value. Do not accept generic arbitrary paths or a full old node as an update. Field writer versions derive from the commit sequence. Lifecycle/context metadata required to construct the next baseline is included in its canonical entity metadata.
 
-Adopt the industry consensus, but classify by **who initiated the
-change AND how its delta reaches the frontend** — there are THREE categories,
-not two. ACP is user-initiated and interactive (it has a chat card), so it
-belongs with the built-in agent in the "local interactive" bucket — NOT the
-"remote" bucket. ACP differs from the built-in agent only in the transport of
-its delta (broadcast instead of the chat SSE tool result).
+Structural insert/remove images omit Markdown bodies and server-private state. Sidecar changes use allowlisted metadata patches and body/source revision notifications; consumers fetch through the existing content reader without overwriting drafts. A body snapshot needed for restore lives in a guarded durable recovery/change record, not in every geometry event. Equality for replay compares the declared shared structural/metadata projection; body storage and revision integrity have separate assertions.
 
-| Category                                                             | Delta transport                                               | Reversibility strategy                                                                                                                                                                                                                              |
-| -------------------------------------------------------------------- | ------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **(a) Built-in agent (this tab)**                                    | rides the chat SSE tool result (today)                        | local interactive: (1) whole **run** = one undo transaction; (2) streaming intermediate → **proposal layer**, not undo; (4) tool card + change badges.                                                                                              |
-| **(b) ACP agent (this tab's chat session; external process writes)** | **must ride the broadcast** (delta is NOT in the chat stream) | **also local interactive, also has a chat card** → deserves the SAME per-card revert UX as (a). Requires threadId/run-id correlation (see below).                                                                                                   |
-| **(c) Truly remote (other tab / other device / headless)**           | broadcast                                                     | **apply immediately** + (3) coarse **checkpoint** ("restore to before this run", on the existing delta-log/version) + (4) badge / "Agent changed N nodes" undoable toast. **No card in this tab; not in this tab's global undo; no proposal gate.** |
+### 5.3 Client state and recovery
 
-**ACP card correlation**: to give (b) the same revert card as (a), thread the
-ACP `threadId` (or a session/run id) through the reachback `/execute`
-`originator`, carry it in the broadcast event, and let the frontend attach the
-canvas change to the matching ACP chat card (reusing
-`snapshotAndExtractChanges` reverse commands). This is an additive enhancement
-that can land after the basic refresh works.
+Maintain confirmed baseline at `(epoch, appliedVersion)`, durable ordered pending intents, and transient current gesture. Derive the visible state by pure projection; remote events advance the baseline and reproject pending intents without rerunning UI focus, history, random ID generation, uploads, or preprocessing.
 
-Supporting facts from the codebase:
+| Local state          | Transition                                                                                                                                 |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `queued`             | Persist before send; contains exact request and dependencies; may cancel if never sent                                                     |
+| `unknown`            | Mark durably before attempting send; timeout/disconnect stays unknown                                                                      |
+| `committed` / `noop` | Match receipt by full operation key; reconcile once, do not discard an optimistic effect before its commit reaches the continuous baseline |
+| `rejected`           | Remove/mark this intent, revalidate dependents; never restore an old whole-Space snapshot                                                  |
+| `needs-recovery`     | Expired result window, changed epoch, corrupt/gapped history or unresolvable dependencies; retain drafts and stop automatic resubmission   |
 
-- Global undo is full-state snapshots (`canvasHistoryManager.takeSnapshot`);
-  `applyDeltasFromAgent` already takes ONE snapshot per batch.
-- AI changes are reverted today via per-message `CanvasCommandCard`
-  (Revert / Keep), with reverse commands from `snapshotAndExtractChanges` — NOT
-  via the global Ctrl+Z stack.
-- `NodeOrigin` (`ai-operate` / `sketch-recognized`) already tags AI nodes →
-  cheap basis for badges.
-- Delta-log + version already exist → checkpoints are cheap ("restore to
-  version N before the run").
+Own SSE events are not filtered by client ID. Deduplicate by commit epoch/version and operation key. Receiving HTTP commit 103 with baseline 100 buffers it while fetching 101–102; `latestObservedVersion` is separate from `appliedVersion`. No-op/rejection receipts need no SSE event. Duplicate old events do not regress the baseline.
 
-Recommended build order for C7: **(3) checkpoint + (4) badges first** (directly
-serves broadcast sync, lowest cost, same infra), then **(1) per-run undo
-transaction**, then **(2) proposal layer last and only for the local
-interactive agent**.
+Operation lookup returns `terminal`, `pending`, `absent` (only within a valid lease), or `expired`. Lookup and admission share the same writer serialization; an in-progress commit is never reported absent. `absent` permits retrying the exact operation ID/request under the still-valid lease; a late original request is deduplicated. `expired` does not authorize replay under a new ID: reconcile current state and require explicit recovery for unresolved effects.
 
----
+Replay query carries epoch, `afterVersion`, count/byte limits and optionally a fixed `throughVersion`. First page captures an upper watermark; later pages preserve it. Example: `{ fromVersion: 100, throughVersion: 103, commits: [101,102], nextAfterVersion: 102, hasMore: true }`. The actual `commits` entries are full canonical envelopes. Pages must be contiguous and bounded (initial caps: 200 commits / 4 MiB); never split a commit. Reject oversized operations before commit (initial event cap: 1 MiB). These are protocol bounds, not performance claims; surface an explicit size error.
 
-## Appendix B — Open questions (still open)
+If epoch differs or the cursor predates the retained replay floor, return `{ status: "snapshot-required", spaceEpoch, earliestReplayVersion, latestVersion }`, not a truncated success. Snapshot returns the matching structural projection, metadata and exact version from one consistent read. Keep local drafts/pending requests, replace only the baseline, query unknown results, then revalidate uncommitted intents.
 
-### O1 — Reversibility UX, split by category (a/b/c)
+Reuse subscribe-before-baseline buffering and existing heartbeats. Register stream listener first, acquire a watermark/read baseline, replay to it, then drain buffered commits above it with deduplication; a raced commit belongs to replay or the buffer, never neither. Buffer overflow closes with recovery required. Initial replay retention target: seven days, with an advertised actual floor under a configured byte cap; receipts outlive log trimming so a snapshot does not erase retry knowledge.
 
-For **(c) truly remote** changes: checkpoint + badge/toast (not global undo).
-For **(b) ACP** changes: same per-card revert as the built-in agent, which
-requires threadId/run-id correlation through `/execute` → broadcast → card. To
-confirm: the correlation id to use (ACP `threadId` vs a dedicated run id) and
-whether (b) also joins this tab's global undo or only the chat-card revert.
+Pending local storage is bounded per Workspace/Space (initial limit: 200 operations / 8 MiB). When full or storage fails, pause new structural edits with a visible error; never evict unknown operations. Confirmed offline pauses new structural edits. Close/navigation/Agent submission drain only after all required operation outcomes and contiguous baseline updates are accounted for, or use existing explicit discard/recovery UX. Dropping a sent local request is not remote rollback.
 
-### O2 — Server-side preprocessing for headless `/execute`
+## 6. Conflict decision table
 
-Confirmed in principle (C4: ACP originator = server runs preprocessing).
-**Status:** the cost half shipped (dispatcher coalescing — see P1); the
-ownership half (receivers skip + server trigger + enriched writeback
-broadcast) is **scheduled under P2**, bundled with Plan A because it reuses the
-same server-diff → broadcast path. Still to confirm: the exact
-"already-preprocessed" writeback tag/marker used to break the re-trigger loop.
+| Request and competing change                         | Admission / result                                                           | Client behavior                                                                       |
+| ---------------------------------------------------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| Move A; move B                                       | Accept both if both targets/contexts valid                                   | Both positions retained                                                               |
+| Move A; change A accent                              | Accept independent units                                                     | New position and accent retained                                                      |
+| Move A twice in same valid free context              | Later service acceptance wins whole X/Y                                      | Reconcile authoritative result; no X-from-one/Y-from-other                            |
+| Width-only resize; move                              | Accept independent units unless a declared layout/gesture dependency changed | Preserve both; coupled resize uses stricter group guard                               |
+| Move; reparent or Hug/ancestor coordinate change     | Reject stale membership/context                                              | Keep intent as rejected, re-resolve against current geometry; no automatic relabeling |
+| Reparent; another reparent away and back             | Membership token differs even if parent ID matches                           | Reject stale-parent                                                                   |
+| Reorder; anchor deleted/reparented                   | Reject stale-target                                                          | No silent append                                                                      |
+| Grid drop; row insertion/compaction/mode change      | Re-resolve valid semantic anchor or reject stale-layout                      | No reuse of ambiguous numeric row                                                     |
+| Delete; later move/style/body/measurement            | Deletion remains authoritative; dead incarnation rejected                    | Cancel gesture, preserve draft separately                                             |
+| Restore same node ID; late old request               | Fresh incarnation rejects old request                                        | Never apply an old request to the restored lifetime                                   |
+| Undo move; remote accent edit                        | Position's last-writer guard still matches                                   | Restore position only, retain accent                                                  |
+| Undo; remote edit of the same field, including ABA   | Reject stale-undo using writer revision, not value equality                  | No whole-node inverse overwrite                                                       |
+| Undo create; another writer edited/attached entities | Reject dangerous undo in first release                                       | Offer explicit separately confirmed deletion, not disguised undo                      |
+| Revert from two devices                              | Serialize check/apply/consume with receipt                                   | At most one change; both learn final Review list                                      |
 
-### O3 — Plan A vs Plan B sequencing
+Deletion/restoration must revalidate edges, children/Space ownership, locks and Agent services. Short-lived file tombstones cannot replace incarnation checks. First-slice restore remains gated; basic deletion fences must ship before any collaborative delete.
 
-Confirmed: Plan A first (C6). To confirm whether/when to invest in Plan B
-(unified `/execute` write path with optimistic rollback).
+Undo is a new admitted operation referencing owned committed field units, not raw inverse replay. Pure inversion is for isolated history/replay; concurrent undo checks present lifetimes and last-writer versions and stamps fresh commit metadata. Group undo is atomic; redo is a new validated operation. Derived updates do not enter user history.
 
-### O4 — Proposal layer (C7 item 2) scope and timing
+Review uses its own persistent `reviewRevision` for accept-only changes without a Space mutation. Revert atomically checks the record's freshness, applies structural changes, advances list revision and consumes the record with the operation receipt. Publish the final list revision/snapshot; reconnect reads it even if the structural version is unchanged. Preserve existing auto-accept policy and attribution.
 
-Largest, most divergent piece (today agent edits apply immediately, no staging
-overlay). To confirm: do we build a true staging/accept-gate layer for the
-local interactive agent, and when? Remote/ACP explicitly bypass it.
+## 7. Durable commit and compatibility contract
 
-### O5 — Per-run undo transaction grouping (C7 item 1)
+### 7.1 Common storage boundary
 
-Currently undo is per-`canvas_commands` batch (one snapshot each). Grouping a
-whole multi-tool-call run into one transaction needs run lifecycle hooks
-(open at run start, suppress intermediate snapshots, close at run end). To
-confirm: do this for interactive runs; for long async runs interleaved with
-user edits, defer to checkpoints (C7 item 3) instead.
+Extend the existing backend-neutral structured port with a collaboration capability, not a Disk-log route. Required operations are consistent snapshot read, atomic commit with expected epoch/head, receipt lookup, bounded contiguous log read, and session-lease admission. A commit plan owns topology, changed/deleted sidecars, incarnation/field/context versions, canonical event, terminal receipt, associated Review changes and durable derived-work intents. No-op/rejection writes only its terminal receipt. Ports return an explicit unsupported capability until the adapter satisfies the complete boundary.
 
----
+The invariant is recoverability: after restart, an operation has either no committed effect or exactly its original committed state/event/result. A visible success cannot reference absent state. A committed state cannot lose the receipt needed for safe retry. Broadcast is after durable commit and is only a latency optimization; failure to publish does not roll back a committed operation.
 
-## Appendix C — Original M3 implementation outline (maps to P0 / P1)
+Keep the current Workspace operation lease, hierarchical coordination and per-Space mutex around admission, hydration, candidate execution and commit. The mutex is single-process only. All enabled writers, including specialized services, must share the commit boundary or be blocked; an ordinary `nodes.write()` bypass would invalidate recovery just as much as an old full PUT. Permission to use PostgreSQL is not permission to start a second authority.
 
-1. **Shared types** (`packages/shared/src/types/api/canvas-sync.ts`): zod schema
-   - `z.infer` for the broadcast event (`snapshot` baseline + `update`
-     carrying `fromVersion` / `toVersion` / `deltas` / `pendingEffects` /
-     `originatorClientId`). Web imports as `import type` only.
-2. **Server publisher** (`apps/server/.../canvas/canvas-sync.ts`): in-memory
-   `listenersByCanvas`, `publishCanvasUpdate`, `subscribeCanvasUpdates` —
-   mirror `external-watcher.ts`.
-3. **Server hook-in**: emit from `executeOnServer` after
-   `appendDeltaLogEntry` (skip the no-op fast path). For Plan A user-edit
-   sync, also diff + publish on the autosave PUT path.
-4. **Server SSE route** (`GET /:canvasId/sync/stream`): mirror
-   `external.route.ts`; send a `snapshot` (current version) on connect, then
-   forward published updates.
-5. **Web subscribe store** (mirror `externalImportsStore.ts`, using
-   `fetch` + `readTypedSSEStream` for auth): on `update`, skip own
-   `clientId`; if `fromVersion === localVersion` apply via
-   `applyDeltasFromAgent` filtered by `dirtyNodeIds`; else `loadCanvas`
-   fallback. Never call `triggerPreprocessing` on received updates.
-6. **Web wiring**: `_routes.ts` add `canvasSyncStream`; connect in
-   `CanvasPage` after `loadCanvas`, disconnect on unmount / canvas switch.
-7. **ACP card correlation (stage 1.5, additive)**: thread ACP `threadId` (or a
-   run id) through the reachback `/execute` `originator` and into the broadcast
-   event; frontend attaches the canvas change to the matching ACP chat card,
-   reusing `snapshotAndExtractChanges` reverse commands. Independent of the
-   basic refresh; can land later.
-8. **Reversibility (C7 phase 1, category c)**: checkpoint
-   (restore-to-version-before-run) + AI-change badges via `NodeOrigin`;
-   transient undoable toast for truly-remote changes.
+Central admission must capture and lease the Workspace before asynchronous preparation or mutex queueing; current executor/coordinator entry points do not guarantee that every caller has done so. Qualify receipts, durable lifetimes and publication by Workspace/Space/epoch. Workspace-level deleted-Space tombstones and lifecycle receipts must outlive deletion of the Space record itself; cascade deletion must not erase the only retry result.
 
-### Testing
+For SQL, one adapter-owned database transaction must encompass all structured records in the plan, including receipts and journal; a transaction wrapping only the final topology row is insufficient. Immutable uploaded blobs can be prepared first, referenced only after commit and collected if abandoned. External irreversible actions do not belong inside the transaction.
 
-- Server: publisher subscribe/unsubscribe/multi-subscriber; no-op batch does
-  not publish.
-- Integration: after `/execute`, a subscriber receives correct `toVersion` +
-  deltas.
-- Web: `fromVersion` aligned → incremental; gap → `loadCanvas`; own-echo
-  filtered; `dirtyNodeIds` rows skipped; received updates do not preprocess.
+C must distinguish process-crash recovery from power-loss durability. Use SQLite `synchronous=FULL` for an enabled profile promising acknowledged durable commits, and verify PostgreSQL durable-commit settings and the backing storage assumptions. A successful ordinary rollback/reopen test does not prove power-loss survival. No such deployment assurance is claimed in A.
 
-### Non-goals / unaffected
+For Disk, implement a per-Space write-ahead redo protocol before advertising support: prepare complete immutable redo images and a plan digest, durably flush them and their directory entries, then durably record the commit decision. Install sidecar/topology/journal/receipt projections idempotently from that committed plan before acknowledging. Recovery redoes every committed-but-incomplete plan before permitting reads/writes; prepared plans without a commit decision are discarded. Readers must not observe partially installed projections. Filesystem failures/corruption fence the Space rather than treating a missing projection as an empty Space. Atomic rename of one file alone is not sufficient. Reuse safe path helpers and storage abstraction, not route-local filesystem code.
 
-- Server persistence, delta-log, `canvas.json` write path unchanged (only a
-  trailing in-memory emit added).
-- No change to the `/execute` request/response contract.
-- No new dependencies. With zero subscribers, emit is a no-op (no perf impact).
+This is a proposed algorithm, not a claim that the current Disk adapter, every filesystem, or SQL deployment already meets it. C must exercise process termination at each decision/install point on each enabled backend. Filesystems that cannot support the advertised flush/rename contract remain unsupported for collaboration.
+
+Disk redo owns declared Huabu records only; preserve unrelated external files. External edits to managed files require explicit revision-aware adoption into the authority, not silent overwrite by replay or read-time repair. Until that adapter exists, direct external-file adoption is unavailable on collaboration-enabled Spaces.
+
+### 7.2 Failure/recovery matrix
+
+| Failure point                                    | Required outcome                                                                                                                        |
+| ------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------- |
+| Before durable commit decision                   | No visible structural effects; discard uncommitted preparations; exact request may retry within its lease                               |
+| After decision, before all projections installed | Fence reads/admission and finish redo; preserve the committed receipt, never execute command intent again                               |
+| After state/receipt committed, before response   | Original receipt returned on retry, including allocated IDs                                                                             |
+| After commit, before/during SSE broadcast        | Log replay/snapshot exposes the change; no rollback or duplicate execution                                                              |
+| Rejection/no-op response lost                    | Original terminal outcome returned even if later state would produce a different answer                                                 |
+| Log retention passed                             | Explicit snapshot-required, while receipt query can still resolve operation results                                                     |
+| Receipt/session horizon passed                   | No automatic re-execution; keep local recovery material and reconcile explicitly                                                        |
+| Reset/restore changes epoch                      | Reject stale-epoch requests; keep local drafts, replace baseline and resolve old pending operations without new-ID blind retries        |
+| Derived work crashes/repeats                     | Durable work key + content/lifecycle freshness prevent duplicate/stale writeback; external provider calls are not promised exactly once |
+
+Measurement authority: for a current `(incarnation, measurement key)` accept the first non-provisional result as canonical; later equal-key results are no-ops. A provisional value may be replaced by the first final value, never the reverse. Content/width/renderer-layout-version changes form a new key. Reuse Note's key computation, add equivalent declared freshness inputs for Text/Question/Shortcut before enabling them. If rendering metrics change without a key change, bump the renderer-layout version; do not let devices oscillate persisted height.
+
+Do not submit measurements of a local unconfirmed body as though they describe the canonical sidecar. Keep those proposals local until the existing body save confirms that revision, then revalidate the key. This is a content/geometry ordering guard, not same-body collaboration.
+
+### 7.3 Enabling a Space
+
+Persist an explicit collaboration model/protocol marker and new `spaceEpoch`. Establish the initial snapshot from currently stored sibling/Frame order, not an incomplete historical delta log; set the replay floor to that snapshot version. Historic logs/Review records remain readable but cannot be advertised as exact new-protocol replay. Export/import preserves model metadata where meaningful and allocates a new destination epoch/lifetimes so pending requests cannot cross Spaces.
+
+Before enabling any collaborative write, drain/resolve legacy writers, block ordinary full structural PUT for that Space at the server, and enforce the same marker on import/reset, lifecycle and background writers. Reject old clients with a typed upgrade-required error; never partially strip unknown fields and accept. Existing older clients may not know how to export drafts, so activation requires quiescent acknowledged editors or explicit owner-managed recovery; do not claim a new server can retroactively protect an old client's memory.
+
+During D, enable only the implemented operation allowlist per Space. Unsupported UI paths are disabled and server-side refused, including undo and indirect background writes, not routed back through full PUT. Existing snapshots for import/reset remain privileged maintenance operations with strict epoch/head conditions and writer exclusion. Rollback means a compatible writer or read-only recovery/export, not reopening destructive old PUTs against a new model.
+
+Cross-Space move and hierarchy/World maintenance keep their owner services, stable multi-Space lock order and compensation rules. They stay gated for enabled Spaces until both affected Spaces use compatible guarded publication; this design does not claim distributed multi-Space atomicity. Generic Canvas operations must not bypass child-Space deletion or Agent ownership checks.
+
+## 8. Implementation handoff
+
+Each task below must land without enabling unsupported writers. File paths identify existing modules to extend; proposed new schema/port members remain local to their canonical shared modules. B and C can proceed in parallel after this contract's review, then integrate before D.
+
+| Task                                | Files / contract                                                                                        | Depends on                                   | Acceptance / release restriction                                                                                                                                                          |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------- | -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| B1: typed order event               | `packages/shared/src/canvas-engine/{delta,diff}.ts`; shared sync API schema                             | §4                                           | Pure reorder, insert-in-middle, delete/restore and reparent have complete sibling lists; reject duplicate/missing members; replace the A limitation assertion with replay equality        |
+| B2: relative admission              | `commands/reorderNodes.ts`, `commands/setNodeParent.ts`, container helpers                              | B1 event shape                               | Missing members/anchors and moved anchors reject; same-parent group order stable; no-op does not emit a commit; no fractional-key migration                                               |
+| B3: order application and inverse   | `delta.ts`, `change.ts`, existing change/order suites                                                   | B1                                           | Atomically apply entity + membership + order; forward/inverse equality including root/nested Frames; legacy coarse deltas stay readable but not falsely exact                             |
+| B4: render and consumer wiring      | `container/{tree,zorder}.ts`, Layers/snapshot/clipboard/import consumers                                | B2/B3                                        | Preserve actual visual stacking; Frame subtree continuous in render; do not change Column/Row reading order on layer reorder; B alone does not enable collaboration                       |
+| C1: port capability and commit plan | `apps/server/src/modules/storage/ports/structured.ts`, existing write coordinator                       | §5–7                                         | Consistent snapshot, atomic state/event/receipt, session lookup and contiguous replay contracts; unsupported adapters refuse; no Disk assumptions in route                                |
+| C2: SQL transaction adapters        | SQLite/Postgres Space handles and migrations identified in §2                                           | C1                                           | Transaction covers sidecars/topology/journal/receipt/Review; crash/rollback fixtures; one authoritative process only                                                                      |
+| C3: Disk redo adapter               | Disk Space handle, CanvasStore persistence and storage recovery tests                                   | C1                                           | Kill before/after commit decision and each projection; recover state/event/receipt together; fence corrupt/unrecoverable Spaces; no enablement on unverified filesystems                  |
+| C4: operation admission             | `canvas-executor.ts`, `write-coordinator.ts`, shared schemas, Canvas operation routes                   | C1 + an enabled adapter; B event integration | Persist lease, scoped digest/result, atomic UI and partial Agent modes; no side effects before commit; identical retries return generated IDs; no-op/rejection receipts stable            |
+| C5: field/lifecycle guard registry  | Shared node/edge/Agent ownership helpers, executor, node-sidecar/preprocess owner services              | C4                                           | Different fields merge; deleted/restored lifetimes reject stale writes; parent-context ABA fails; owned fields cannot be spoofed; basic fences required before D                          |
+| C6: commit transport                | `sync.route.ts`, `canvas-sync.ts`, shared sync schema and routes                                        | C4/B3                                        | HTTP/SSE/replay use one envelope; subscribe/replay handoff has no gap; floor/epoch/byte limits explicit; rejection/no-op discoverable without a broadcast                                 |
+| C7: writer isolation                | Ordinary Canvas PUT, import/reset, lifecycle/World/cross-Space services                                 | C4/C5                                        | Per-Space marker blocks all incompatible writers before first enabled operation; support allowlist enforced server-side; cannot silently fall back to old PUT                             |
+| D1: first end-to-end slice          | UI command dispatcher, structure scheduler, sync store/subscription, Canvas API, pending-save lifecycle | B/C                                          | Two browsers + Agent preserve root moves/style; unknown create resolves once; snapshot preserves pending draft; preview rebase is side-effect-free; unsupported features visibly disabled |
+| E/F follow-through                  | Layout/measurement, history/Review, specialized writers, serializers and desktop lifecycle              | D + their dedicated adapters                 | Remove gates only after invariant and recovery cases below pass; complete A's inventory row-by-row                                                                                        |
+
+Implementation unknowns are bounded, not invitations to choose different conflict semantics: C2/C3 must establish real backend crash behavior and storage limits; D must establish projection/render cost; E must establish renderer-key coverage across node types. Failure to meet a capability keeps that backend/feature disabled. Changing product conflict policy, offline behavior, or same-body scope requires a new decision; changing internal helper factoring does not.
+
+### 8.1 Acceptance matrix
+
+| Area                | Cases and exact observable assertion                                                                                                                                                                              |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Replay/inversion    | Root/nested/multi-select order, create-middle/delete/reparent: previous declared shared projection + commit equals committed next projection; inverse restores prior projection; include order, not only versions |
+| Field concurrency   | Different nodes and same-node independent style/position preserve both; same position yields one complete accepted X/Y; style clear versus leaf set has explicit server order                                     |
+| Context             | Reparent, parent away/back, Hug-origin shift, ancestor move, Grid insert/compaction/mode switch: reject or re-resolve without interpreting stale coordinates in a new context                                     |
+| Operation lifecycle | Unknown response, same ID/different request, partial batch, atomic failure, no-op/rejection retry, expired session, queued dependencies: no duplicate create or unreported accepted subset                        |
+| Transport           | HTTP before SSE, SSE before HTTP, duplicate/out-of-order commit, page clipping, trimmed history, snapshot/subscribe race and buffer overflow: contiguous baseline or explicit recovery                            |
+| Storage             | Failure/termination at every prepared/committed/install stage on each enabled adapter; durable state, journal, receipt and Review agree after restart                                                             |
+| Deletion/restore    | Pending local draft survives separately; shared topology deletes; restored same ID rejects old content/measurement/op writes; Agent execution identity is not resurrected                                         |
+| Undo/Review         | Own field undo preserves unrelated remote edits; same-field ABA blocks; create undo does not delete later work; concurrent Revert executes once; Accept-only list revision propagates                             |
+| Migration           | Existing forest/reading order stable; old PUT and indirect incompatible writers rejected; import/reset establishes new epoch; duplicate migration does not reorder; pending old operations never cross epoch      |
+| Local UX            | Selection/focus/viewport/preview stay local; save drain waits for real confirmation; offline/queue-full/rejected/recovery states visible; no silent unknown-operation eviction                                    |
+
+Performance acceptance is measured separately from correctness: use a stated hardware/network fixture, 1,000 nodes and three clients; target LAN commit-to-remote-render p95 below 250 ms, with pointer preview independent of network. Measure full-sibling order payloads and Frame relayout fan-out honestly; neither is promised O(moved nodes). No performance result is claimed by Phase A.
+
+### 8.2 Phase A completion record
+
+Reusable regression homes include shared [`diff.test.ts`](../../packages/shared/src/canvas-engine/__tests__/diff.test.ts), [`treeOrderInvariant.executor.test.ts`](../../packages/shared/src/canvas-engine/__tests__/treeOrderInvariant.executor.test.ts), [`change.test.ts`](../../packages/shared/src/canvas-engine/__tests__/change.test.ts), existing container/z-order/structured-layout suites, Web [`canvasStore.restorePersistence.test.ts`](../../apps/web/src/store/canvasStore.restorePersistence.test.ts), [`canvasStore.agentDeltaConflict.test.ts`](../../apps/web/src/store/canvasStore.agentDeltaConflict.test.ts), [`canvasSyncStore.test.ts`](../../apps/web/src/store/canvasSyncStore.test.ts), [`pageLifecycle.test.ts`](../../apps/web/src/utils/pageLifecycle.test.ts), [`postEffects.web.test.ts`](../../apps/web/src/handler/canvasCommand/__tests__/postEffects.web.test.ts), content-baseline/preprocess-lifecycle suites, desktop [`desktop-tabs.test.ts`](../../apps/desktop/src/desktop-tabs.test.ts), and browser [`space-save-navigation.spec.ts`](../../apps/web/e2e/space-save-navigation.spec.ts) / [`note-auto-height.spec.ts`](../../apps/web/e2e/note-auto-height.spec.ts). Reuse these runners rather than creating a parallel testing toolchain.
+
+Server regression homes: [`space-write.contract.ts`](../../apps/server/src/modules/storage/ports/contracts/space-write.contract.ts), [`canvas-executor.test.ts`](../../apps/server/src/modules/canvas/canvas-executor.test.ts), [`write-coordinator.test.ts`](../../apps/server/src/modules/canvas/write-coordinator.test.ts), [`canvas-content-cas.test.ts`](../../apps/server/src/modules/canvas/canvas-content-cas.test.ts), [`sync.route.test.ts`](../../apps/server/src/modules/canvas/sync.route.test.ts), [`canvas-sync.test.ts`](../../apps/server/src/modules/canvas/canvas-sync.test.ts), [`space-hierarchy.test.ts`](../../apps/server/src/modules/canvas/space-hierarchy.test.ts), [`space-move.service.test.ts`](../../apps/server/src/modules/canvas/space-move.service.test.ts), [`agent-node-lifecycle.races.test.ts`](../../apps/server/src/modules/agent/agent-node-lifecycle.races.test.ts), preprocessing [`persist.test.ts`](../../apps/server/src/modules/preprocessing/stages/persist.test.ts), and PostgreSQL [`integration.remote.test.ts`](../../apps/server/src/modules/storage/backends/postgres/integration.remote.test.ts). Existing contract/in-process rollback cases must be extended with actual termination/unknown-commit scenarios, not cited as crash certification.
+
+Add explicit cases for import finishing after navigation/offline admission, Review preview spanning a remote commit, and repeated projection producing zero HTTP calls, deletes, preprocessing, history entries, traces, focus actions or content-queue mutations. Existing in-memory content/pending queues do not establish durable recovery after browser process loss.
+
+Phase A delivers design and current-state evidence, not a working collaborative editor. The only executable change is the passing ordering characterization in the existing shared suite; no production endpoint/schema, storage migration, save path, or content-conflict policy changes here. The existing `CanvasCommand` executor, diff/inverse helpers, forest projection, layout solver, content CAS, storage ports, heartbeat/subscription and save-drain machinery remain the reuse foundation.
+
+Formal design review and the remaining B–F acceptance matrix are still future work. Backend capability and cross-device recovery guarantees must not be reported as implemented on the strength of this document or engine unit tests.
+
+### 8.3 B bounded implementation record
+
+B implements the exported `SetSiblingOrderEvent` contract, runtime guard, `diffSiblingOrderEvents`, `applySiblingOrderEvents`, explicit ordered-diff mode, strict atomic replay and batch inversion. Live reorder admission rejects incomplete groups, duplicate IDs, mixed parents, missing/moved anchors and locked ancestry; the legacy command retains Layers' expanded-subtree compatibility. Frame root reordering materializes the existing render forest before normalization, preserving complete subtree bands. Engine and legacy Layers/clipboard/selection regressions exercise these changes; this is not cross-device or backend recovery certification.
+
+B4 follow-up wires ordinary snapshot clusters to the canonical forest paint order and hashes rendered SVG for order-sensitive caching; default annotation/OCR compositing is unchanged. Regressions cover reversed request order, reordered raster bytes/cache identity, recursive Frame selection, nested clipboard ID remapping plus ordered replay, and staged import of root/nested order events plus inverse lists. The importer validates the canonical event and rewrites known identities using its existing map; it does not migrate active collaboration sessions/epochs or repair already missing historical identities.
+
+Remaining integration is explicit: C's `types/api/canvas-operations.ts` references B's exported guard/type; that reference is not acceptance evidence for ordering or membership submission. The canonical entity-event application must use the sibling helpers, not the old coarse node images as the §5 wire protocol. New-protocol admission must call the strict root-only helper and add persisted incarnation/membership/order guards. Existing server broadcast and per-entity Review are not converted by B. Column/Row explicit lists and tie isolation have since been implemented in the legacy layout path (below); structured collaboration still needs E's layout-version and concurrent undo/Review adaptation. No live Space migration, backend activation or release is claimed.
+
+### 8.4 User-requested unified placement implementation
+
+The user requested compatible Grid/masonry placement, explicit Agent-readable state and relative intent operations. The implemented model retains Grid cells and adds Frame-owned `layoutOrder` tracks for Column/Row, rather than overloading the other axis or sibling paint order. Shared `SET_FRAME_LAYOUT.placements` handles relative placement with all-or-nothing validation; `INSPECT_NODES.layout` exposes tracks or cells. Pointer preview/commit, resize relayout, node lifecycle, clipboard, cross-Space moves and staged import use the same order machinery. Legacy lists are captured on relevant edits, including before a paint reorder, not by a live bulk migration or read-side write. Existing Grid interaction semantics remain unchanged.
+
+Current contracts and entry points are documented in [structured placement and reading order](../architecture/canvas-command-architecture.md#structured-placement-and-reading-order). HTTP execution/reload checks cover persistence, explicit rejection and paint-order independence. This does not revise §5 conflict rules, certify concurrent layout edits or claim formal proposal approval; the new-protocol structured mutation gate remains closed.

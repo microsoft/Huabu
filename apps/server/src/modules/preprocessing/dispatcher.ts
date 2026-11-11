@@ -16,6 +16,7 @@ import { getProfile } from './profiles.js';
 import { ProviderManager } from './provider-manager.js';
 import { withPublicNetworkOnly } from '../security/outbound.js';
 import { space, getStructuredStore } from '../storage/index.js';
+import { acquireWorkspaceOperationLease } from '../workspace.js';
 
 import type {
   Capability,
@@ -134,9 +135,16 @@ export class PreprocessDispatcher {
   async preprocess(
     request: PreprocessNodeRequest,
   ): Promise<PreprocessNodeResult> {
-    return coalesceInFlight(this.inFlight, dedupeKey(request), () =>
-      this.runPreprocess(request),
-    );
+    const lease = acquireWorkspaceOperationLease();
+    try {
+      return await coalesceInFlight(
+        this.inFlight,
+        JSON.stringify([lease.workspaceKey, dedupeKey(request)]),
+        () => this.runPreprocess(request),
+      );
+    } finally {
+      lease.release();
+    }
   }
 
   private async runPreprocess(

@@ -30,6 +30,7 @@ const mocks = vi.hoisted(() => ({
   >(),
   close: vi.fn(),
   warn: vi.fn(),
+  error: vi.fn(),
   complete: vi.fn(),
 }));
 
@@ -65,7 +66,7 @@ vi.mock('../../utils/logger.js', () => ({
   getLogger: () => ({
     info: vi.fn(),
     warn: mocks.warn,
-    error: vi.fn(),
+    error: mocks.error,
     debug: vi.fn(),
   }),
 }));
@@ -386,7 +387,9 @@ describe('external functional text', () => {
       });
       await expect(runFunctionalText('task', context)).rejects.toThrow(message);
       expect(mocks.run.mock.calls[0][1].signal?.aborted).toBe(true);
-      expect(mocks.close).not.toHaveBeenCalled();
+      expect(mocks.close).toHaveBeenCalledTimes(
+        event.type === 'permission_request' ? 1 : 0,
+      );
     },
   );
 

@@ -158,7 +158,7 @@ export class CanvasStoreIOError extends Error {
  */
 const LEGACY_FRONTMATTER_KEYS = ['content_hash', 'meta_json'] as const;
 
-function nodeContentToMarkdown(c: NodeContent): string {
+export function nodeContentToMarkdown(c: NodeContent): string {
   // `nodeId` is the stable identifier; we explicitly inject it as the
   // frontmatter `id:` field so the on-disk filename (which is derived
   // from the user-facing label and may collide / be deduped) can always
@@ -181,7 +181,7 @@ function nodeContentToMarkdown(c: NodeContent): string {
   return `${toFrontmatter(fm)}\n${content}`;
 }
 
-function markdownToNodeContent(
+export function markdownToNodeContent(
   nodeId: string,
   raw: string,
   strict = false,

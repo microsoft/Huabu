@@ -54,6 +54,8 @@ import {
   rfsAgentPromptRequestSchema,
   rfsExecuteHeadersSchema,
   rfsExecuteRequestSchema,
+  recentCanvasConversationParamsSchema,
+  rfsUploadParamsSchema,
   rfsInkIntentParamsSchema,
   rfsInkIntentRequestSchema,
   RFS_SKILL_CLIENT_HEADER,
@@ -72,7 +74,9 @@ import {
   type RfsAgentEventMode,
   type RfsAgentCreateResponse,
   type RfsAgentProfilesResponse,
+  type RfsUploadParams,
   type RfsUploadResponse,
+  type RecentCanvasConversationParams,
   type AgentStreamEvent,
   type StartTaskRunResponse,
   type ServiceParams,
@@ -95,6 +99,7 @@ import {
   getRfsCapabilities,
 } from './space-capabilities.js';
 import { executeRfsCommands } from './space-execute.js';
+import { safeJoin } from '../../utils/fs.js';
 import {
   AgentNodeCreationError,
   agentNodeService,
@@ -123,6 +128,7 @@ import {
 import { CanvasNotFoundError } from '../canvas/canvas-executor.js';
 import { executeSpaceQuery, SpaceQueryError } from '../canvas/space-query.js';
 import { WorldPreviewMutationError } from '../canvas/world-preview-policy.js';
+import { withCanvasMutex } from '../canvas/write-coordinator.js';
 import {
   InteractiveViewServiceError,
   interactiveViewService,
@@ -144,6 +150,7 @@ import {
 } from '../task/run-completion.service.js';
 import { RunLaunchError, runLauncher } from '../task/run-launcher.js';
 import { TaskCreationError, taskService } from '../task/task.service.js';
+import { acquireWorkspaceOperationLease } from '../workspace.js';
 
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 
@@ -165,6 +172,18 @@ function rfsError(
     ...(code ? { code } : {}),
     ...(details !== undefined ? { details } : {}),
   };
+}
+
+async function withLegacyUploadMutation<T>(
+  canvasId: string,
+  mutate: () => Promise<T>,
+): Promise<T> {
+  const lease = acquireWorkspaceOperationLease();
+  try {
+    return await withCanvasMutex(canvasId, mutate);
+  } finally {
+    lease.release();
+  }
 }
 
 function interactiveViewStatus(error: InteractiveViewServiceError): number {
@@ -779,9 +798,16 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
   );
 
   // ── POST /:canvasId/execute ──
-  app.post<{ Params: { canvasId: string } }>(
+  app.post<{ Params: RecentCanvasConversationParams }>(
     '/:canvasId/execute',
     async (request, reply) => {
+      const params = recentCanvasConversationParamsSchema.safeParse(
+        request.params,
+      );
+      if (!params.success)
+        return reply
+          .code(400)
+          .send(rfsError('Invalid Space identity.', 'validation_failed'));
       const body = request.body;
       const buffer = Buffer.isBuffer(body) ? body : Buffer.alloc(0);
       let json: unknown;
@@ -816,7 +842,7 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
 
       try {
         return reply.send(
-          await executeRfsCommands(request.params.canvasId, parsed.data, {
+          await executeRfsCommands(params.data.canvasId, parsed.data, {
             hostThreadId,
           }),
         );
@@ -927,37 +953,21 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
   );
 
   // ── POST /:canvasId/upload/* ──
-  app.post<{ Params: { canvasId: string; '*': string } }>(
+  app.post<{ Params: RfsUploadParams }>(
     '/:canvasId/upload/*',
     async (request, reply) => {
-      const { canvasId } = request.params;
-      const filename = request.params['*'];
-      if (!filename) {
+      const params = rfsUploadParamsSchema.safeParse(request.params);
+      if (!params.success) {
         return reply
           .code(400)
-          .send(rfsError('An upload filename is required (upload/<file>).'));
-      }
-
-      let absPath: string;
-      try {
-        absPath = safeResolve(canvasId, path.join('.upload', filename));
-      } catch {
-        return reply
-          .code(400)
-          .send(rfsError(`Upload path "${filename}" is not allowed.`));
-      }
-
-      if (existsSync(absPath)) {
-        return reply
-          .code(409)
           .send(
             rfsError(
-              `A file already named "upload/${filename}" exists; ` +
-                `choose a different name (overwrite is not allowed).`,
+              'Invalid upload Space or filename (upload/<file>).',
+              'validation_failed',
             ),
           );
       }
-
+      const { canvasId, '*': filename } = params.data;
       const body = request.body;
       if (!Buffer.isBuffer(body)) {
         return reply
@@ -966,9 +976,29 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
       }
 
       try {
-        await mkdir(path.dirname(absPath), { recursive: true });
-        await writeFile(absPath, body);
+        await withLegacyUploadMutation(canvasId, async () => {
+          const uploadRoot = safeResolve(canvasId, '.upload');
+          let absPath: string;
+          try {
+            absPath = safeJoin(uploadRoot, filename);
+          } catch {
+            return reply
+              .code(400)
+              .send(rfsError(`Upload path "${filename}" is not allowed.`));
+          }
+          await mkdir(path.dirname(absPath), { recursive: true });
+          await writeFile(absPath, body, { flag: 'wx' });
+        });
+        if (reply.sent) return reply;
       } catch (err) {
+        if (err instanceof Error && 'code' in err && err.code === 'EEXIST')
+          return reply
+            .code(409)
+            .send(
+              rfsError(
+                `A file already named "upload/${filename}" exists; choose a different name (overwrite is not allowed).`,
+              ),
+            );
         request.log.error({ err, canvasId, filename }, 'rfs upload failed');
         return reply
           .code(500)
@@ -984,33 +1014,48 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
   );
 
   // ── DELETE /:canvasId/upload/* ──
-  app.delete<{ Params: { canvasId: string; '*': string } }>(
+  app.delete<{ Params: RfsUploadParams }>(
     '/:canvasId/upload/*',
     async (request, reply) => {
-      const { canvasId } = request.params;
-      const filename = request.params['*'];
-      if (!filename) {
+      const params = rfsUploadParamsSchema.safeParse(request.params);
+      if (!params.success) {
         return reply
           .code(400)
-          .send(rfsError('An upload filename is required (upload/<file>).'));
+          .send(
+            rfsError(
+              'Invalid upload Space or filename (upload/<file>).',
+              'validation_failed',
+            ),
+          );
       }
-
-      let absPath: string;
+      const { canvasId, '*': filename } = params.data;
       try {
-        absPath = safeResolve(canvasId, path.join('.upload', filename));
-      } catch {
+        return await withLegacyUploadMutation(canvasId, async () => {
+          const uploadRoot = safeResolve(canvasId, '.upload');
+          let absPath: string;
+          try {
+            absPath = safeJoin(uploadRoot, filename);
+          } catch {
+            return reply
+              .code(400)
+              .send(rfsError(`Upload path "${filename}" is not allowed.`));
+          }
+          if (!existsSync(absPath))
+            return reply
+              .code(404)
+              .send(rfsError(`No staged file at "upload/${filename}".`));
+          await rm(absPath, { force: true });
+          return reply.code(204).send();
+        });
+      } catch (error) {
+        request.log.error(
+          { err: error, canvasId, filename },
+          'rfs upload deletion failed',
+        );
         return reply
-          .code(400)
-          .send(rfsError(`Upload path "${filename}" is not allowed.`));
+          .code(500)
+          .send(rfsError(`Failed to delete "upload/${filename}".`));
       }
-
-      if (!existsSync(absPath)) {
-        return reply
-          .code(404)
-          .send(rfsError(`No staged file at "upload/${filename}".`));
-      }
-      await rm(absPath, { force: true });
-      return reply.code(204).send();
     },
   );
 

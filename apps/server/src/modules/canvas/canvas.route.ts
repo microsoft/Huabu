@@ -57,6 +57,8 @@ import {
 } from './canvas-executor.js';
 import { searchCanvas } from './canvas-search.js';
 import { publishCanvasUpdate } from './canvas-sync.js';
+import { remapImportedSpace } from './import-space-identity.js';
+import { resolveNodeContentUpdate } from './node-content-update.js';
 import { registerSpaceCardRoutes } from './space-card.route.js';
 import {
   deletionPreview,
@@ -87,7 +89,6 @@ import { AgentNodeBindingError } from '../agent/agent-node-binding.js';
 import { readRecentCanvasConversation } from '../agent/recent-conversation.js';
 import { ARTIFACT_URL_REGEX } from '../artifact/utils.js';
 import { getPreprocessDispatcher, getProfile } from '../preprocessing/index.js';
-import { isLabelProtected } from '../preprocessing/label-policy.js';
 import { stripOfficeparserPreamble } from '../preprocessing/loaders/office-strip.js';
 import { isOwnerRequest } from '../security/owner.js';
 import {
@@ -115,7 +116,6 @@ import {
   updateNode,
 } from '../storage/index.js';
 import { acquireWorkspaceOperationLease } from '../workspace.js';
-import { remapImportedSpace } from './import-space-identity.js';
 
 import type { CanvasNodeType } from '@huabu/shared';
 import type {
@@ -249,18 +249,8 @@ const MD_BACKED_NODE_TYPES = new Set([
   'sketch',
 ]);
 
-/** Subset that carries a textual body in the markdown. */
-const TEXT_BEARING_NODE_TYPES = new Set([
-  'note',
-  'text',
-  'web',
-  'pdf',
-  'office',
-  'question',
-]);
-
 /**
- * Subset of {@link TEXT_BEARING_NODE_TYPES} whose `data.content` is
+ * Subset of text-bearing nodes whose `data.content` is
  * actually consumed by the web renderer (preview body, AI block
  * provenance, …) — and therefore worth inlining into the batched
  * `GET /:canvasId` response so first paint can render without a
@@ -875,12 +865,8 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     const {
       nodeType,
       content: incomingContent,
-      label: incomingLabel,
       labelSource,
       src: incomingSrc,
-      summary,
-      keywords,
-      provenance,
       expectRev,
     } = parsed.data;
     const storedNode = (canvas.state.nodes as NodeLike[] | undefined)?.find(
@@ -914,55 +900,8 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     // `canvas/write-coordinator.ts`.
     let persisted: NodeContent | undefined;
     const apply = (existing: NodeContent | null): NodeContent => {
-      // Body resolution:
-      //   - text-bearing nodes (including `question`): prefer the caller's
-      //     content; fall back to the existing on-disk body so a label-only
-      //     update doesn't wipe it.
-      //   - frontmatter-only nodes (image/video/frame): always empty.
-      const acceptsBody = TEXT_BEARING_NODE_TYPES.has(nodeType);
-      const body = acceptsBody
-        ? (incomingContent ?? existing?.content ?? '')
-        : '';
-      // Guard against accidental content wipes (autosave race vs. editor
-      // flush): an explicit `content: ""` over a non-empty body keeps the
-      // existing body but still refreshes the frontmatter.
-      const wouldClobber =
-        acceptsBody &&
-        nodeType !== 'question' &&
-        incomingContent === '' &&
-        typeof existing?.content === 'string' &&
-        existing.content.length > 0;
-      const safeBody = wouldClobber ? existing!.content : body;
-      const protectAutomaticLabel =
-        labelSource === 'auto' &&
-        isLabelProtected(existing?.['labelSource'], existing?.label);
-      // Label resolution: explicit `null` clears; absent leaves it untouched.
-      const resolvedLabel =
-        protectAutomaticLabel || incomingLabel === undefined
-          ? (existing?.label ?? null)
-          : (incomingLabel ?? null);
-
-      const nodeContent: NodeContent = {
-        ...(existing ?? {}),
-        nodeId,
-        type: nodeType,
-        label: resolvedLabel,
-        // Only include `src` when the caller or existing record had one, so
-        // pure note/text/frame frontmatter never gets a `src: undefined`.
-        ...(incomingSrc !== undefined
-          ? { src: incomingSrc }
-          : existing?.src !== undefined
-            ? { src: existing.src }
-            : {}),
-        content: safeBody,
-      };
-      if (labelSource !== undefined && !protectAutomaticLabel)
-        nodeContent['labelSource'] = labelSource;
-      if (summary !== undefined) nodeContent['summary'] = summary;
-      if (keywords !== undefined) nodeContent['keywords'] = keywords;
-      if (provenance !== undefined) nodeContent['provenance'] = provenance;
-      persisted = nodeContent;
-      return nodeContent;
+      persisted = resolveNodeContentUpdate(nodeId, parsed.data, existing);
+      return persisted;
     };
 
     // Strict rename only for user-typed labels: the `tryRename` flow awaits
@@ -1212,7 +1151,10 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     Body: PreprocessNodeBody;
     Reply: ApiResult<PreprocessNodeResponse>;
   }>('/:canvasId/nodes/:nodeId/preprocess', async function (request, reply) {
-    const { canvasId, nodeId } = request.params;
+    const params = deleteNodeParamsSchema.safeParse(request.params);
+    if (!params.success)
+      return reply.code(400).send({ message: 'Invalid canvas or node ID' });
+    const { canvasId, nodeId } = params.data;
     const parsed = preprocessNodeBodySchema.safeParse(request.body);
     if (!parsed.success) {
       return reply.code(400).send({

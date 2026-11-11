@@ -89,6 +89,7 @@ import {
   type NodeSnapshot,
   type SpaceNodeMutation,
 } from '../storage/index.js';
+import { acquireWorkspaceOperationLease } from '../workspace.js';
 
 /** Ordinary Spaces do not need World membership checks. */
 const EMPTY_CANVAS_IDS: ReadonlySet<string> = new Set<string>();
@@ -145,7 +146,9 @@ const NODE_CONTENT_KEYS = new Set([
   'provenance',
 ]);
 
-function stripNodesForCanvas(nodes: readonly CanvasNode[]): CanvasNode[] {
+export function stripNodesForCanvas(
+  nodes: readonly CanvasNode[],
+): CanvasNode[] {
   return nodes.map((node) => {
     const data = (node.data ?? {}) as Record<string, unknown>;
     const cleanData: Record<string, unknown> = {};
@@ -283,7 +286,7 @@ function collectInteractiveViewConflicts(
   return conflicts;
 }
 
-function buildNodeContent(node: CanvasNode): NodeContent | null {
+export function buildNodeContent(node: CanvasNode): NodeContent | null {
   const nodeId = typeof node.id === 'string' ? node.id : '';
   if (!nodeId) return null;
   const nodeType = typeof node.type === 'string' ? node.type : '';
@@ -712,28 +715,33 @@ export async function executeOnServer(
 ): Promise<ExecuteOnServerOutput> {
   const { canvasId, originator } = input;
   assertCurrentCanvasCommands(input.commands);
-  let commands = preAssignIds(input.commands);
+  const lease = acquireWorkspaceOperationLease();
+  try {
+    let commands = preAssignIds(input.commands);
 
-  // Normalize agent-authored `data.src` values into artifact keys BEFORE the
-  // per-canvas mutex: an ACP agent may point a node at an RFS upload
-  // (`upload/foo.png`) or an online URL, neither of which the web can render.
-  // `importForeignNodeSources` copies / downloads the bytes into `.artifacts/`
-  // and rewrites `src` to the bare key. It only reads scratch bytes and writes
-  // fresh artifact files (unique ids, no topology contention), so keeping it
-  // outside the mutex means a slow online download never stalls concurrent
-  // writes to the same canvas. Idempotent for values that are already artifact
-  // keys / `/api/` URLs / `data:` URIs.
-  if (originator.source === 'agent') {
-    commands = await importForeignNodeSources(canvasId, commands);
+    // Normalize agent-authored `data.src` values into artifact keys BEFORE the
+    // per-canvas mutex: an ACP agent may point a node at an RFS upload
+    // (`upload/foo.png`) or an online URL, neither of which the web can render.
+    // `importForeignNodeSources` copies / downloads the bytes into `.artifacts/`
+    // and rewrites `src` to the bare key. It only reads scratch bytes and writes
+    // fresh artifact files (unique ids, no topology contention), so keeping it
+    // outside the mutex means a slow online download never stalls concurrent
+    // writes to the same canvas. Idempotent for values that are already artifact
+    // keys / `/api/` URLs / `data:` URIs.
+    if (originator.source === 'agent') {
+      commands = await importForeignNodeSources(canvasId, commands);
 
-    // For image nodes with only width specified, calculate height from actual
-    // image aspect ratio. This ensures correct proportions for all image sources.
-    commands = await normalizeImageNodeSizes(canvasId, commands);
+      // For image nodes with only width specified, calculate height from actual
+      // image aspect ratio. This ensures correct proportions for all image sources.
+      commands = await normalizeImageNodeSizes(canvasId, commands);
+    }
+
+    return await withCanvasMutex(canvasId, () =>
+      executeOnServerAlreadyLocked({ ...input, commands }),
+    );
+  } finally {
+    lease.release();
   }
-
-  return await withCanvasMutex(canvasId, () =>
-    executeOnServerAlreadyLocked({ ...input, commands }),
-  );
 }
 
 /**
@@ -1318,9 +1326,14 @@ export async function applyDeltasOnServer(input: {
 }> {
   const { canvasId } = input;
 
-  return await withCanvasMutex(canvasId, () =>
-    applyDeltasOnServerAlreadyLocked(input),
-  );
+  const lease = acquireWorkspaceOperationLease();
+  try {
+    return await withCanvasMutex(canvasId, () =>
+      applyDeltasOnServerAlreadyLocked(input),
+    );
+  } finally {
+    lease.release();
+  }
 }
 
 /**

@@ -33,6 +33,7 @@
 import { z } from 'zod';
 
 import { inkIntentReportSchema } from './agent.js';
+import { recentCanvasConversationParamsSchema } from './canvas.js';
 import { CANVAS_NODE_TYPES } from '../canvas/node.js';
 
 export const RFS_SKILL_CLIENT_HEADER = 'X-Huabu-Skill-Client';
@@ -146,16 +147,21 @@ export const RFS_HEADERS = {
 
 // ==================== Upload ====================
 
+export const rfsUploadParamsSchema =
+  recentCanvasConversationParamsSchema.extend({
+    '*': z.string().min(1).max(4096),
+  });
+export type RfsUploadParams = z.infer<typeof rfsUploadParamsSchema>;
+
 /** Success body for `POST /api/rfs/:canvasId/upload/<file>`. */
-export interface RfsUploadResponse {
-  /**
-   * Canvas-relative path where the bytes were staged, e.g. `upload/out.md`.
-   * This is the path the internal agent reads when asked to consume the file.
-   */
-  path: string;
-  /** Number of bytes written. */
-  size: number;
-}
+export const rfsUploadResponseSchema = z
+  .object({
+    /** Canvas-relative staging path, e.g. `upload/out.md`. */
+    path: z.string(),
+    size: z.number().int().nonnegative(),
+  })
+  .strict();
+export type RfsUploadResponse = z.infer<typeof rfsUploadResponseSchema>;
 
 // ==================== ask-agent ====================
 

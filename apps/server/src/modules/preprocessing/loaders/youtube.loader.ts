@@ -3,13 +3,13 @@
 
 import { extractYoutubeVideoId } from './youtube-id.js';
 import { getLogger } from '../../../utils/logger.js';
-import { serviceProvisioner } from '../../services/index.js';
 
 import type { IDocumentLoader, LoadResult } from './loader.interface.js';
 
 const log = getLogger('preprocessing.youtube');
 
-function resolveRapidApiKey(): string {
+async function resolveRapidApiKey(): Promise<string> {
+  const { serviceProvisioner } = await import('../../services/index.js');
   const resolved = serviceProvisioner.resolveForServer('youtube-transcripts');
   return typeof resolved.apiKey === 'string' ? resolved.apiKey : '';
 }
@@ -108,7 +108,7 @@ export class YoutubeLoader implements IDocumentLoader {
     transcript: YoutubeTranscriptItem[];
     transcript_text?: string;
   }> {
-    const apiKey = resolveRapidApiKey();
+    const apiKey = await resolveRapidApiKey();
 
     const response = await fetch(
       `https://yt-api.p.rapidapi.com/get_transcript?id=${videoId}`,
@@ -146,7 +146,7 @@ export class YoutubeLoader implements IDocumentLoader {
   private async fetchVideoInfo(
     videoId: string,
   ): Promise<YoutubeVideoInfoResponse> {
-    const apiKey = resolveRapidApiKey();
+    const apiKey = await resolveRapidApiKey();
 
     const abortController = new AbortController();
     const timeoutMs = 15000;

@@ -129,6 +129,54 @@ export const SQLITE_MIGRATIONS: readonly SqliteMigration[] = Object.freeze([
       CREATE INDEX spaces_by_parent ON spaces(workspace_id, parent_space_id);
     `,
   }),
+  Object.freeze({
+    version: 3,
+    sql: `
+      CREATE TABLE operation_heads (
+        workspace_id TEXT NOT NULL,
+        canvas_id TEXT NOT NULL PRIMARY KEY,
+        metadata_json TEXT NOT NULL CHECK (json_valid(metadata_json)),
+        FOREIGN KEY (canvas_id) REFERENCES spaces(canvas_id) ON DELETE CASCADE
+      ) STRICT;
+      CREATE TABLE operation_sessions (
+        workspace_id TEXT NOT NULL,
+        canvas_id TEXT NOT NULL,
+        space_epoch TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        principal_id TEXT NOT NULL,
+        session_json TEXT NOT NULL CHECK (json_valid(session_json)),
+        PRIMARY KEY (workspace_id, canvas_id, space_epoch, session_id),
+        FOREIGN KEY (workspace_id) REFERENCES workspaces(workspace_id) ON DELETE CASCADE
+      ) STRICT;
+      CREATE TABLE operation_receipts (
+        workspace_id TEXT NOT NULL,
+        canvas_id TEXT NOT NULL,
+        space_epoch TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        operation_id TEXT NOT NULL,
+        digest TEXT NOT NULL,
+        receipt_json TEXT NOT NULL CHECK (json_valid(receipt_json)),
+        PRIMARY KEY (workspace_id, canvas_id, space_epoch, session_id, operation_id),
+        FOREIGN KEY (workspace_id, canvas_id, space_epoch, session_id)
+          REFERENCES operation_sessions(workspace_id, canvas_id, space_epoch, session_id)
+      ) STRICT;
+      CREATE TABLE operation_commits (
+        workspace_id TEXT NOT NULL,
+        canvas_id TEXT NOT NULL,
+        space_epoch TEXT NOT NULL,
+        version INTEGER NOT NULL,
+        commit_json TEXT NOT NULL CHECK (json_valid(commit_json)),
+        PRIMARY KEY (workspace_id, canvas_id, space_epoch, version),
+        FOREIGN KEY (canvas_id) REFERENCES spaces(canvas_id) ON DELETE CASCADE
+      ) STRICT;
+    `,
+  }),
+  // The work_json column is unused. The migration is retained only so that
+  // databases which already ran it keep opening.
+  Object.freeze({
+    version: 4,
+    sql: `ALTER TABLE operation_heads ADD COLUMN work_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(work_json));`,
+  }),
 ]);
 
 export const SQLITE_SCHEMA_VERSION =

@@ -95,4 +95,52 @@ export const POSTGRES_MIGRATIONS = [
       CREATE INDEX spaces_by_parent ON spaces(workspace_id, parent_space_id);
     `,
   },
+  {
+    version: 3,
+    sql: `
+      CREATE TABLE operation_heads (
+        workspace_id TEXT NOT NULL,
+        canvas_id TEXT NOT NULL PRIMARY KEY,
+        metadata_json TEXT NOT NULL CHECK ((metadata_json::json) IS NOT NULL),
+        FOREIGN KEY (canvas_id) REFERENCES spaces(canvas_id) ON DELETE CASCADE
+      );
+      CREATE TABLE operation_sessions (
+        workspace_id TEXT NOT NULL,
+        canvas_id TEXT NOT NULL,
+        space_epoch TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        principal_id TEXT NOT NULL,
+        session_json TEXT NOT NULL CHECK ((session_json::json) IS NOT NULL),
+        PRIMARY KEY (workspace_id, canvas_id, space_epoch, session_id),
+        FOREIGN KEY (workspace_id) REFERENCES workspaces(workspace_id) ON DELETE CASCADE
+      );
+      CREATE TABLE operation_receipts (
+        workspace_id TEXT NOT NULL,
+        canvas_id TEXT NOT NULL,
+        space_epoch TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        operation_id TEXT NOT NULL,
+        digest TEXT NOT NULL,
+        receipt_json TEXT NOT NULL CHECK ((receipt_json::json) IS NOT NULL),
+        PRIMARY KEY (workspace_id, canvas_id, space_epoch, session_id, operation_id),
+        FOREIGN KEY (workspace_id, canvas_id, space_epoch, session_id)
+          REFERENCES operation_sessions(workspace_id, canvas_id, space_epoch, session_id)
+      );
+      CREATE TABLE operation_commits (
+        workspace_id TEXT NOT NULL,
+        canvas_id TEXT NOT NULL,
+        space_epoch TEXT NOT NULL,
+        version BIGINT NOT NULL,
+        commit_json TEXT NOT NULL CHECK ((commit_json::json) IS NOT NULL),
+        PRIMARY KEY (workspace_id, canvas_id, space_epoch, version),
+        FOREIGN KEY (canvas_id) REFERENCES spaces(canvas_id) ON DELETE CASCADE
+      );
+    `,
+  },
+  // The work_json column is unused. The migration is retained only so that
+  // databases which already ran it keep opening.
+  {
+    version: 4,
+    sql: `ALTER TABLE operation_heads ADD COLUMN work_json TEXT NOT NULL DEFAULT '{}' CHECK ((work_json::json) IS NOT NULL);`,
+  },
 ] as const;

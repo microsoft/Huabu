@@ -8,6 +8,8 @@ export * from './utils/id.js';
 export * from './utils/chat-input.js';
 export * from './utils/text-search.js';
 export * from './utils/agent-icon.js';
+export * from './utils/agent-node-transition.js';
+export * from './utils/node-label.js';
 export * from './utils/spatial/index.js';
 export * from './utils/artifact-url.js';
 export * from './utils/acp-session-selectors.js';
