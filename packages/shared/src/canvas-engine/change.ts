@@ -120,7 +120,6 @@ const PRIMARY_CONTENT_KEYS = [
   'src',
   'properties',
   'propertyDisplayKeys',
-  'noteContent',
 ];
 
 /** Body keys present on a node's `data`, for CREATE fingerprinting. */
@@ -210,7 +209,6 @@ export function nodeRevisionOf(fields: {
   src?: string;
   properties?: unknown;
   propertyDisplayKeys?: unknown;
-  noteContent?: unknown;
 }): string {
   const data: Record<string, unknown> = {};
   const hasBody =
@@ -219,11 +217,7 @@ export function nodeRevisionOf(fields: {
   if (hasBody && typeof fields.content === 'string')
     data.content = fields.content;
   if (typeof fields.src === 'string') data.src = fields.src;
-  for (const key of [
-    'properties',
-    'propertyDisplayKeys',
-    'noteContent',
-  ] as const) {
+  for (const key of ['properties', 'propertyDisplayKeys'] as const) {
     if (fields[key] !== undefined) data[key] = fields[key];
   }
   return hashDataFields(data, PRIMARY_CONTENT_KEYS);

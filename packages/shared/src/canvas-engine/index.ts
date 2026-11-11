@@ -279,3 +279,10 @@ export {
   findTombstonesAfter,
   type StampInput,
 } from './provenance/noteProvenance.js';
+export {
+  pdfNoteId,
+  pdfNoteIds,
+  includePdfNotes,
+  hidePdfNotes,
+  validPdfNoteLink,
+} from './pdfNotes.js';

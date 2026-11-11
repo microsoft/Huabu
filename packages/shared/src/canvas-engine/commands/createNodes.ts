@@ -8,6 +8,7 @@ import { projectAgentNodeEditableData } from '../agentNodeOwnership.js';
 import { materializeAutoHeight } from '../height/materialize.js';
 import { getHeightPolicy } from '../height/policy.js';
 import { hasValidNodeProperties } from '../nodeProperties.js';
+import { validPdfNoteLink } from '../pdfNotes.js';
 import { hasValidInkResourceBindings } from '../utils/inkSigil.js';
 import { deduplicateLabel, generateNextLabel } from '../utils/labels.js';
 import {
@@ -249,6 +250,17 @@ const createNodes: CommandDefinition<Cmd> = {
     // this handler no longer normalizes itself.
     // ---------------------------------------------------------------
     const orderedNodes = [...state.nodes, ...newNodes];
+    if (
+      newNodes.some(
+        (node) =>
+          !validPdfNoteLink(node, node.data.noteNodeId, orderedNodes) ||
+          (node.type === 'spacePreview' &&
+            ['properties', 'propertyDisplayKeys'].some(
+              (key) => key in node.data,
+            )),
+      )
+    )
+      return noop(state, 'invalid-target');
     const selectableCreatedNodeIds =
       state.source === 'ui'
         ? newNodes

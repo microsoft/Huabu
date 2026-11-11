@@ -36,7 +36,6 @@ import { useTranslation } from 'react-i18next';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 
 import { usePreviewSearchStore } from '@/store/previewSearchStore';
-import { nodePreviewViewKey } from '@/store/previewWorkspace/scrollMemory';
 import { revealNodesOnCanvas } from '@/utils/canvasViewport';
 
 import { shouldCanvasSearchOwnKeyboard } from './canvasSearchKeyboard';
@@ -259,9 +258,15 @@ export const CanvasSearchResults = (): React.JSX.Element => {
 
   const focusNodeOnCanvas = useCallback(
     (nodeId: string) => {
-      selectNodes([nodeId], false);
+      const owner = useCanvasStore
+        .getState()
+        .nodes.find(
+          (node) => node.type === 'pdf' && node.data.noteNodeId === nodeId,
+        );
+      const visibleId = owner?.id ?? nodeId;
+      selectNodes([visibleId], false);
       if (rfInstance && canvasWrapper) {
-        revealNodesOnCanvas(rfInstance, canvasWrapper, [nodeId], 400);
+        revealNodesOnCanvas(rfInstance, canvasWrapper, [visibleId], 400);
       }
     },
     [selectNodes, rfInstance, canvasWrapper],
@@ -408,25 +413,16 @@ export const CanvasSearchResults = (): React.JSX.Element => {
       // Only open when the node type renders real preview content. Types
       // without a `NodePreviews` entry leave the user's current preview alone.
       if (hasNodePreview(nodeType)) {
-        const notes = nodeType === 'pdf' && row.match.field === 'noteContent';
         // Browsing results reuses the group's inspection slot (§9.2).
         openPreviewNode(nodeId, {
           transient: true,
           focusEditor: false,
-          ...(notes ? { view: 'notes' as const } : {}),
         });
-        if (row.match.field === 'content' || notes) {
-          const searchId = notes
-            ? nodePreviewViewKey(
-                useCanvasStore.getState().canvasId,
-                nodeId,
-                'notes',
-              )
-            : nodeId;
+        if (row.match.field === 'content') {
           usePreviewSearchStore
             .getState()
             .reveal(
-              searchId,
+              nodeId,
               navigationQuery,
               row.match.occurrenceIndex,
               row.match.source,

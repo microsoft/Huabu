@@ -85,7 +85,6 @@ describe('describeNode — preview level', () => {
       src: 'paper.pdf',
       properties: { reviewed: false, authors: ['Ada'] },
       propertyDisplayKeys: ['reviewed'],
-      noteContent: '# Reading notes',
     })!;
     const node = describeNode({ id: 'pdf', type: 'pdf' }, 'preview', stored);
     expect(node).toMatchObject({
@@ -93,7 +92,6 @@ describe('describeNode — preview level', () => {
       propertyDisplayKeys: stored.propertyDisplayKeys,
       rev: nodeRevisionOf(stored),
     });
-    expect(node).not.toHaveProperty('noteContent');
   });
 
   it('emits summary and preview as INDEPENDENT fields', () => {

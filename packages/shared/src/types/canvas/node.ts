@@ -311,8 +311,8 @@ export interface BaseNodeData {
   properties?: NodeProperties;
   /** Display priority; unlisted properties follow, and PDF cards prefer earlier nonempty values. */
   propertyDisplayKeys?: string[];
-  /** PDF-owned Markdown notes, separate from extracted content. */
-  noteContent?: string;
+  /** The real Note owned by this PDF; its body is stored on that Note. */
+  noteNodeId?: string;
   /** Node origin/source */
   origin?: NodeOrigin;
   /** Display label */

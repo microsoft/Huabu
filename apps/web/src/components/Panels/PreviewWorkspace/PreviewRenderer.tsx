@@ -133,9 +133,7 @@ export function PreviewRenderer({
         conversationView: null,
       };
     }
-    return node && !(target.kind === 'node' && target.view === 'notes')
-      ? questionSession(node, target.canvasId)
-      : null;
+    return node ? questionSession(node, target.canvasId) : null;
   }, [target, node]);
 
   if (target.kind === 'url') return <UrlPreview url={target.url} />;
@@ -192,10 +190,7 @@ export function PreviewRenderer({
   // waiting for its thread.
   if (target.kind === 'chat') return null;
 
-  if (
-    !node ||
-    (target.kind === 'node' && target.view === 'notes' && node.type !== 'pdf')
-  ) {
+  if (!node) {
     // A tab can outlive its node when deletion arrives from elsewhere;
     // validation removes it, and this covers the frame in between.
     return (
@@ -208,7 +203,6 @@ export function PreviewRenderer({
   return (
     <ExpandedNodePanel
       nodeId={node.id}
-      pdfNotes={target.kind === 'node' && target.view === 'notes'}
       onClose={onClose}
       onCommit={onCommit}
       embedded

@@ -1,17 +1,24 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+import { t } from 'i18next';
+
+import { createId } from '@huabu/shared';
+
 import { ApiError } from '@/api/_client';
 import { getAgentConversationOwner } from '@/api/agent';
 import { toast } from '@/components/Common/Toast';
 import { pageLifecycle } from '@/utils/pageLifecycle';
 
 import { loadDefaultAgentBinding } from '../acpProfilesStore';
+import { selectCanWriteCanvas } from '../canvasStore';
 import useCanvasStore from '../canvasStore';
 import { createConversation } from '../conversationPreparation';
 import { usePanelStore } from '../panelStore';
 import { findTabByTarget, groupOfTab, normalizePreviewTarget } from './model';
 import { selectActiveTab, usePreviewWorkspaceStore } from './store';
+
+import type { CanvasNodeId } from '@huabu/shared';
 
 function findConversationTab(
   canvasId: string,
@@ -104,7 +111,6 @@ export function openPreviewNode(
     markReadIntent?: boolean;
     openToSide?: boolean;
     groupId?: string;
-    view?: 'notes';
   },
 ): string {
   const canvas = useCanvasStore.getState();
@@ -114,7 +120,6 @@ export function openPreviewNode(
       kind: 'node',
       canvasId: canvas.canvasId,
       nodeId,
-      ...(options?.view ? { view: options.view } : {}),
     },
     {
       transient: options?.transient ?? true,
@@ -124,12 +129,7 @@ export function openPreviewNode(
     },
   );
   const openedNode = canvas.nodes.find((node) => node.id === nodeId);
-  if (
-    tabId &&
-    (openedNode?.type === 'note' ||
-      (openedNode?.type === 'pdf' && options?.view === 'notes')) &&
-    options?.focusEditor !== false
-  ) {
+  if (tabId && openedNode?.type === 'note' && options?.focusEditor !== false) {
     usePreviewWorkspaceStore.getState().requestNodeFocus(tabId);
   } else if (tabId && options?.focusEditor === false) {
     const preview = usePreviewWorkspaceStore.getState();
@@ -143,14 +143,61 @@ export function openPreviewNode(
 
 /** Keep the PDF visible while reusing its owned notes view. */
 export function openPdfNotes(pdfId: string): string {
+  const canvas = useCanvasStore.getState();
+  const pdf = canvas.nodes.find(
+    (node) => node.id === pdfId && node.type === 'pdf',
+  );
+  if (!pdf) throw new Error('PDF not found');
+  let noteId =
+    typeof pdf.data.noteNodeId === 'string' ? pdf.data.noteNodeId : undefined;
+  if (!noteId) {
+    if (!selectCanWriteCanvas(canvas))
+      throw new Error(t('node.pdfNotesReadOnly'));
+    const newNoteId = createId('node');
+    noteId = newNoteId;
+    canvas.executeCommands(
+      [
+        {
+          type: 'CREATE_NODES',
+          nodes: [
+            {
+              id: newNoteId,
+              nodeType: 'note',
+              position: { x: 0, y: 0 },
+              data: {
+                content: '',
+                label: t('node.pdfNoteLabel', {
+                  title: pdf.data.label || t('node.untitledPdf'),
+                }),
+                origin: { type: 'user-created' },
+              },
+              selectOnCreate: false,
+            },
+          ],
+        },
+        {
+          type: 'MERGE_NODE_DATA',
+          patches: [
+            { nodeId: pdfId as CanvasNodeId, patch: { noteNodeId: noteId } },
+          ],
+        },
+      ],
+      'ui',
+    );
+  }
+  if (
+    !useCanvasStore
+      .getState()
+      .nodes.some((node) => node.id === noteId && node.type === 'note')
+  )
+    throw new Error('PDF note is unavailable');
   const sourceTab = openPreviewNode(pdfId, {
     transient: false,
     focusEditor: false,
   });
   const preview = usePreviewWorkspaceStore.getState();
   const groupId = groupOfTab(preview.workspace, sourceTab)?.id;
-  return openPreviewNode(pdfId, {
-    view: 'notes',
+  return openPreviewNode(noteId, {
     transient: false,
     openToSide: true,
     groupId,

@@ -52,7 +52,7 @@ export { renderNodes } from '../agent/conversation/prompt/node-element.js';
 export interface NodeInput {
   properties?: NodeProperties;
   propertyDisplayKeys?: string[];
-  noteContent?: string;
+  noteNodeId?: string;
   id: string;
   type?: string;
   label?: string;
@@ -87,13 +87,7 @@ function authoredFields(
   m: NodeContent | null,
 ): Pick<
   NodeInput,
-  | 'label'
-  | 'summary'
-  | 'content'
-  | 'src'
-  | 'properties'
-  | 'propertyDisplayKeys'
-  | 'noteContent'
+  'label' | 'summary' | 'content' | 'src' | 'properties' | 'propertyDisplayKeys'
 > {
   const out: {
     label?: string;
@@ -102,7 +96,6 @@ function authoredFields(
     src?: string;
     properties?: NodeProperties;
     propertyDisplayKeys?: string[];
-    noteContent?: string;
   } = {};
   const label = pick(input.label, m?.label);
   if (label !== undefined) out.label = label;
@@ -118,7 +111,6 @@ function authoredFields(
   if (src !== undefined) out.src = src;
   out.properties = input.properties ?? m?.properties;
   out.propertyDisplayKeys = input.propertyDisplayKeys ?? m?.propertyDisplayKeys;
-  out.noteContent = input.noteContent ?? m?.noteContent;
   return out;
 }
 
@@ -161,6 +153,7 @@ export function describeNode(
       ...(input.style ? { style: input.style } : {}),
       ...(input.targetCanvasId ? { targetCanvasId: input.targetCanvasId } : {}),
       ...(input.target ? { target: input.target } : {}),
+      ...(input.noteNodeId ? { noteNodeId: input.noteNodeId } : {}),
     });
   }
   return buildAgentNodePreview(common);

@@ -69,7 +69,7 @@ describe('workspace round trip', () => {
     ).workspace;
     workspace = openTarget(
       workspace,
-      { kind: 'node', canvasId: CANVAS, nodeId: 'pdf', view: 'notes' },
+      { kind: 'node', canvasId: CANVAS, nodeId: 'notes' },
       { openToSide: true },
     ).workspace;
     writeWorkspace(CANVAS, workspace);

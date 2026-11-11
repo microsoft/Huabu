@@ -58,8 +58,6 @@ export function hasValidNodeProperties(
   data: Record<string, unknown>,
   patch = false,
 ): boolean {
-  if (data.noteContent !== undefined && typeof data.noteContent !== 'string')
-    return false;
   if (data.properties !== undefined) {
     if (
       !data.properties ||

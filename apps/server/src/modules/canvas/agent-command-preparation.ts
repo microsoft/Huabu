@@ -71,7 +71,7 @@ export function prepareAgentCanvasCommands(
             (key) => key in entry.patch,
           );
           const injectedRev =
-            'content' in entry.patch || 'noteContent' in entry.patch
+            'content' in entry.patch
               ? options.readSet?.get(entry.nodeId)
               : editsMetadata
                 ? (options.readSet?.get(`metadata:${entry.nodeId}`) ??

@@ -81,7 +81,6 @@ export function describeSpaceNodesContract(
           empty: '',
         },
         propertyDisplayKeys: ['year', 'reviewed'],
-        noteContent: '# My reading\n\nIndependent of extraction.',
       };
       const first = await putSuccessfully(repository, { nodeId, record });
       expect((await repository.read(nodeId))?.record).toEqual(record);
@@ -98,7 +97,6 @@ export function describeSpaceNodesContract(
         ...record,
         properties: { reviewed: true },
         propertyDisplayKeys: [],
-        noteContent: '',
       };
       const second = await putSuccessfully(repository, {
         nodeId,

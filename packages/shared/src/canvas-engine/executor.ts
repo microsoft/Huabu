@@ -40,6 +40,7 @@ import {
   type NestableNode,
 } from './frame/index.js';
 import { getFrameSizing } from './frame/sizing.js';
+import { hidePdfNotes } from './pdfNotes.js';
 import {
   coerceProvenance,
   computeAiNoteProvenance,
@@ -298,7 +299,9 @@ export function executeCanvasCommands(
   // (no sort, no remap, no allocation).
   // ------------------------------------------------------------------
   if (anyApplied) {
-    currentNodes = normalizeTreeOrder(currentNodes as NestableNode[]);
+    currentNodes = hidePdfNotes(
+      normalizeTreeOrder(currentNodes as NestableNode[]),
+    );
   }
 
   // ------------------------------------------------------------------

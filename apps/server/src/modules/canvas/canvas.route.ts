@@ -36,6 +36,8 @@ import {
 import {
   nodeRevisionOf,
   mergeNodeProperties,
+  validPdfNoteLink,
+  hidePdfNotes,
 } from '@huabu/shared/canvas-engine';
 import {
   preserveAgentNodeOwnedData,
@@ -313,7 +315,6 @@ const NODE_CONTENT_KEYS = new Set([
   'provenance',
   'properties',
   'propertyDisplayKeys',
-  'noteContent',
 ]);
 
 /**
@@ -518,7 +519,7 @@ function hydrateOneNode(
   if (persistedProvenance !== undefined) {
     data['provenance'] = persistedProvenance;
   }
-  for (const key of ['properties', 'propertyDisplayKeys', 'noteContent']) {
+  for (const key of ['properties', 'propertyDisplayKeys']) {
     if (nodeContent[key] !== undefined) data[key] = nodeContent[key];
     else delete data[key];
   }
@@ -626,7 +627,7 @@ async function hydrateNodeContent(
       handle.diskTree?.duplicateSidecars(nodeId) ?? [],
     );
   });
-  return { nodes: hydratedNodes, nodeContentRevisions };
+  return { nodes: hidePdfNotes(hydratedNodes), nodeContentRevisions };
 }
 
 /**
@@ -903,7 +904,6 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       provenance,
       properties,
       propertyDisplayKeys,
-      noteContent: authoredNoteContent,
       expectRev,
     } = parsed.data;
     const storedNode = (canvas.state.nodes as NodeLike[] | undefined)?.find(
@@ -991,8 +991,6 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         );
       if (propertyDisplayKeys !== undefined)
         nodeContent.propertyDisplayKeys = propertyDisplayKeys;
-      if (authoredNoteContent !== undefined)
-        nodeContent.noteContent = authoredNoteContent;
       persisted = nodeContent;
       return nodeContent;
     };
@@ -1020,8 +1018,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         expectRev:
           isAuthored ||
           properties !== undefined ||
-          propertyDisplayKeys !== undefined ||
-          authoredNoteContent !== undefined
+          propertyDisplayKeys !== undefined
             ? expectRev
             : undefined,
         apply,
@@ -1206,7 +1203,6 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     };
     response.properties = existing.properties;
     response.propertyDisplayKeys = existing.propertyDisplayKeys;
-    response.noteContent = existing.noteContent;
     const ls = existing['labelSource'];
     if (ls === 'user' || ls === 'auto' || ls === 'agent') {
       response.labelSource = ls;
@@ -1720,7 +1716,20 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
             });
           }
         }
-        const slimNodes = stripNodesForCanvas(composedNodes);
+        for (const node of composedNodes) {
+          if (node.data?.noteNodeId === null) delete node.data.noteNodeId;
+        }
+        if (
+          composedNodes.some(
+            (node) =>
+              !validPdfNoteLink(node, node.data?.noteNodeId, composedNodes),
+          )
+        ) {
+          return reply
+            .code(400)
+            .send({ message: 'Invalid PDF note ownership' });
+        }
+        const slimNodes = stripNodesForCanvas(hidePdfNotes(composedNodes));
 
         const canvasFile: CanvasFile = {
           canvasId,

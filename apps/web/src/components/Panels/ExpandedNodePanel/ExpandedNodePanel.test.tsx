@@ -123,7 +123,6 @@ function renderPanel(
   edges: Edge[],
   embedded = false,
   onCommit?: () => void,
-  pdfNotes = false,
 ) {
   useCanvasStore.setState({
     nodes,
@@ -141,17 +140,11 @@ function renderPanel(
   document.body.appendChild(container);
   root = createRoot(container);
   act(() =>
-    root?.render(
-      <ExpandedNodePanel
-        embedded={embedded}
-        onCommit={onCommit}
-        pdfNotes={pdfNotes}
-      />,
-    ),
+    root?.render(<ExpandedNodePanel embedded={embedded} onCommit={onCommit} />),
   );
 }
 
-it('edits PDF-owned notes without changing the PDF body or creating another node', () => {
+it('edits an owned Note with its real identity, preserving PDF text and provenance', () => {
   const update = vi
     .spyOn(useCanvasStore.getState(), 'updateNodeData')
     .mockImplementation(() => {});
@@ -159,18 +152,21 @@ it('edits PDF-owned notes without changing the PDF body or creating another node
     [
       {
         ...canvasNode('a', 'Paper'),
-        type: 'pdf',
+        type: 'note',
         data: {
           label: 'Paper',
-          content: 'Extracted',
-          noteContent: 'Existing authored notes',
+          content: 'Existing authored notes',
         },
+      },
+      {
+        ...canvasNode('pdf', 'Paper'),
+        type: 'pdf',
+        data: { noteNodeId: 'a', content: 'Extracted' },
       },
     ],
     [],
     true,
     undefined,
-    true,
   );
   expect(
     container
@@ -181,44 +177,46 @@ it('edits PDF-owned notes without changing the PDF body or creating another node
     container
       ?.querySelector('[data-search-scope="node"]')
       ?.getAttribute('data-search-node-id'),
-  ).toBe(`node:${CANVAS_ID}:a:notes`);
+  ).toBe('a');
   expect(
     container
       ?.querySelector('[data-preview-content]')
       ?.getAttribute('data-preview-search-id'),
-  ).toBe(`node:${CANVAS_ID}:a:notes`);
+  ).toBe('a');
   expect(
     container
       ?.querySelector('[data-preview-content]')
       ?.hasAttribute('data-preview-node-id'),
-  ).toBe(false);
+  ).toBe(true);
   act(() =>
     previewCallbacks.onDataChange?.({
       content: 'New owned notes',
       provenance: {},
     }),
   );
-  expect(update).toHaveBeenCalledWith('a', { noteContent: 'New owned notes' });
-  expect(useCanvasStore.getState().nodes).toHaveLength(1);
-  expect(useCanvasStore.getState().nodes[0].data.content).toBe('Extracted');
+  expect(update).toHaveBeenCalledWith('a', {
+    content: 'New owned notes',
+    provenance: {},
+  });
+  expect(useCanvasStore.getState().nodes).toHaveLength(2);
+  expect(useCanvasStore.getState().nodes[1].data.content).toBe('Extracted');
   update.mockRestore();
 });
 
 it.each([undefined, ''])(
   'shows an empty editor for missing or cleared notes (%s), not extracted text',
-  (noteContent) => {
+  (content) => {
     renderPanel(
       [
         {
           ...canvasNode('a', 'Paper'),
-          type: 'pdf',
-          data: { content: 'Extracted', noteContent },
+          type: 'note',
+          data: { content },
         },
       ],
       [],
       true,
       undefined,
-      true,
     );
     expect(
       container

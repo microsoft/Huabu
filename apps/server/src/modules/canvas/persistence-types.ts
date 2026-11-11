@@ -41,7 +41,6 @@ export interface CanvasFile {
 export interface NodeContent {
   properties?: NodeProperties;
   propertyDisplayKeys?: string[];
-  noteContent?: string;
   nodeId: string;
   type: string;
   /**

@@ -36,7 +36,6 @@ import { z } from 'zod';
  *  - `summary`      — sidecar frontmatter `summary:` (one-line AI summary)
  *  - `keywords`     — sidecar frontmatter `keywords:` (string[])
  *  - `content`      — sidecar markdown body (the heavy one)
- *  - `noteContent`  — PDF-owned Markdown notes, separate from extracted content
  *  - `conversation` — the chat thread a question node owns: every user
  *                     message + assistant reply across all turns,
  *                     read from `<threadId>.turns.jsonl`. Tool calls /
@@ -50,7 +49,6 @@ export const searchFieldSchema = z.enum([
   'summary',
   'keywords',
   'content',
-  'noteContent',
   'conversation',
 ]);
 export type SearchField = z.infer<typeof searchFieldSchema>;

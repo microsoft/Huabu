@@ -50,6 +50,40 @@ function merge(patch: Record<string, unknown>, nodes = [pdf, note]) {
 }
 
 describe('node properties', () => {
+  it('rejects properties on non-sidecar Space previews instead of losing them on reload', () => {
+    const result = executeCanvasCommands(
+      {
+        source: 'agent',
+        commands: [
+          {
+            type: 'MERGE_NODE_DATA',
+            patches: [
+              {
+                nodeId: 'node-space',
+                patch: { properties: { Status: 'Read' } },
+              },
+            ],
+          },
+        ],
+      },
+      {
+        canvasId: 'space',
+        edges: [],
+        nodes: [
+          {
+            id: 'node-space',
+            type: 'spacePreview',
+            position: { x: 0, y: 0 },
+            data: { targetCanvasId: 'destination' },
+          },
+        ],
+      },
+    );
+    expect(result.commandResults[0]).toMatchObject({
+      applied: false,
+      reason: 'invalid-target',
+    });
+  });
   it('resolves saved priority without losing unordered properties or repeating stale keys', () => {
     const properties = {
       '2': 'Second',
@@ -121,10 +155,6 @@ describe('node properties', () => {
     expect(nodeRevisionOf(first)).not.toBe(
       nodeRevisionOf({ ...first, propertyDisplayKeys: ['year'] }),
     );
-    expect(nodeRevisionOf(first)).not.toBe(
-      nodeRevisionOf({ ...first, noteContent: 'My notes' }),
-    );
-    expect(merge({ noteContent: 12 }).data).toEqual(pdf.data);
     expect(
       nodeRevisionOf({
         type: 'image',

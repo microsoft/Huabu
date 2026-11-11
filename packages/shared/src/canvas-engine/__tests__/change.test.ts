@@ -124,7 +124,6 @@ describe('staleness scoping (per-change fingerprintKeys)', () => {
       'content',
       'properties',
       'propertyDisplayKeys',
-      'noteContent',
     ]);
 
     // Preprocessing stamps summary/keywords and regenerates the label → fresh.
@@ -194,7 +193,6 @@ describe('extractCanvasChanges', () => {
       'content',
       'properties',
       'propertyDisplayKeys',
-      'noteContent',
     ]);
     expect(rec.appliedFingerprint).toBe(fingerprintNodeFields(n, ['content']));
   });

@@ -35,11 +35,7 @@ it.each(['canvas', 'preview'] as const)(
       expect(document.querySelector('[role="dialog"], input')).toBeNull();
       act(() =>
         root.render(
-          <PDFNotesButton
-            id="pdf"
-            surface={surface}
-            noteContent="Existing notes"
-          />,
+          <PDFNotesButton id="pdf" surface={surface} noteNodeId="notes" />,
         ),
       );
       expect(container.querySelector('button')?.textContent).toBe(

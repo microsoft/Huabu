@@ -439,13 +439,6 @@ export function createNodeContentQueue(opts: {
     )
       body.propertyDisplayKeys =
         (data.propertyDisplayKeys as string[] | undefined) ?? [];
-    if (
-      includes('noteContent') &&
-      (typeof data.noteContent === 'string' ||
-        pendingFields.get(nodeId)?.get('noteContent')?.removed)
-    )
-      body.noteContent =
-        typeof data.noteContent === 'string' ? data.noteContent : '';
 
     // Optimistic-concurrency baseline. A node we've loaded / synced has a
     // seeded rev; a brand-new node (no entry) sends the empty-content rev
@@ -793,7 +786,6 @@ export function createNodeContentQueue(opts: {
               keywords: res.keywords,
               properties: res.properties,
               propertyDisplayKeys: res.propertyDisplayKeys,
-              noteContent: res.noteContent,
               contentMissing: res.contentMissing ?? false,
               artifactMissing: res.artifactMissing ?? false,
               contentDuplicate: res.contentDuplicate ?? false,

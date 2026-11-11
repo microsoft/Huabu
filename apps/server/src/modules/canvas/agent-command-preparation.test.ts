@@ -159,7 +159,7 @@ describe('prepareAgentCanvasCommands', () => {
           patches: [
             { nodeId: 'node-1', patch: { properties: { year: 2026 } } },
             { nodeId: 'node-1', patch: { content: 'unread body' } },
-            { nodeId: 'node-1', patch: { noteContent: 'unread notes' } },
+            { nodeId: 'node-1', patch: { content: 'unread notes' } },
           ],
         },
       ],

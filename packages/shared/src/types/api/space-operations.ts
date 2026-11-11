@@ -117,11 +117,12 @@ const agentNodeDataSchema = z
       .describe(
         'Property display order for the property list and PDF card priority. Replaces the entire list; omitted existing keys follow, duplicates and missing keys are ignored. [] uses object-key order, not hidden visibility.',
       ),
-    noteContent: z
+    noteNodeId: z
       .string()
+      .min(1)
       .optional()
       .describe(
-        'PDF-owned Markdown notes, separate from extracted content. Read the node before replacing notes; inspection alone does not authorize replacement. Revision handling follows the command contract. Empty string clears notes. Does not create a canvas Note node.',
+        'PDF-only link to its independently stored Note. Create the Note first, then link it; a Note can belong to only one PDF. Read and edit that Note by its own ID using ordinary Note operations. The linked Note is not displayed on the canvas and follows its PDF when copied, moved or deleted.',
       ),
     label: z
       .string()
@@ -259,7 +260,7 @@ export const mergeNodeDataCommandSchema = z
   })
   .strict()
   .describe(
-    'Merge patches into node data. patch.content is the Markdown body only, never a downloaded node sidecar or YAML frontmatter. content, noteContent, and authored metadata (properties, propertyDisplayKeys) require a fresh revision; use expectRev for src edits too. Read the node before content or noteContent edits; inspect_nodes suffices for property edits. Native callers pass expectRev; the built-in agent injects it from the read or inspection.',
+    'Merge patches into node data. patch.content is the Markdown body only, never a downloaded node sidecar or YAML frontmatter. Content and authored metadata (properties, propertyDisplayKeys) require a fresh revision; use expectRev for src edits too. Read the node before content edits; inspect_nodes suffices for property edits. Native callers pass expectRev; the built-in agent injects it from the read or inspection.',
   );
 
 export const setNodeParentCommandSchema = z
@@ -772,6 +773,7 @@ export type SpaceQuery = z.infer<typeof spaceQuerySchema>;
 
 const spaceNodeResultSchema = z
   .object({
+    noteNodeId: z.string().optional(),
     properties: nodePropertiesSchema.optional(),
     propertyDisplayKeys: z.array(z.string()).optional(),
     id: z.string(),

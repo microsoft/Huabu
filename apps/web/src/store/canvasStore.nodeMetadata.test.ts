@@ -12,6 +12,7 @@ import useCanvasStore, {
   commitNodeMetadata,
   commitNodeProperties,
 } from './canvasStore';
+import { openPdfNotes } from './previewWorkspace/actions';
 import { useWorkspaceStore } from './workspaceStore';
 
 import type * as ArtifactApi from '@/api/artifact';
@@ -33,10 +34,57 @@ vi.mock('@/components/Common/Toast', () => ({
 vi.mock('@/api/canvas', async (importActual) => ({
   ...(await importActual<typeof CanvasApi>()),
   putNodeContent: vi.fn(),
+  deleteNode: vi.fn().mockResolvedValue({ success: true }),
   putCanvas: vi.fn(async (canvasId: string) => ({ canvasId, version: 1 })),
 }));
 
 describe('durable node metadata actions', () => {
+  it('creates real owned notes once and restores the entire pair when undoing deletion', async () => {
+    seed('node-paper');
+    openPdfNotes('node-paper');
+    const pdf = useCanvasStore
+      .getState()
+      .nodes.find((node) => node.id === 'node-paper');
+    const noteId = pdf?.data.noteNodeId;
+    if (typeof noteId !== 'string') throw new Error('Missing owned Note');
+    expect(
+      useCanvasStore.getState().nodes.find((node) => node.id === noteId),
+    ).toMatchObject({ type: 'note', hidden: true });
+    openPdfNotes('node-paper');
+    expect(useCanvasStore.getState().nodes).toHaveLength(2);
+    useCanvasStore
+      .getState()
+      .updateNodeData(noteId, { content: 'Authored notes' });
+    await vi.waitFor(
+      () =>
+        expect(putNodeContent).toHaveBeenCalledWith(
+          'node-paper',
+          noteId,
+          expect.objectContaining({
+            nodeType: 'note',
+            content: 'Authored notes',
+          }),
+          undefined,
+        ),
+      { timeout: 3000 },
+    );
+    useCanvasStore.getState().deleteNodes(['node-paper']);
+    expect(useCanvasStore.getState().nodes).toHaveLength(0);
+    await useCanvasStore.getState().undo();
+    expect(useCanvasStore.getState().nodes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'node-paper',
+          data: expect.objectContaining({ noteNodeId: noteId }),
+        }),
+        expect.objectContaining({
+          id: noteId,
+          hidden: true,
+          data: expect.objectContaining({ content: 'Authored notes' }),
+        }),
+      ]),
+    );
+  });
   beforeEach(() => {
     useWorkspaceStore.setState({ workspaceId: 'metadata-tests' });
     vi.mocked(putNodeContent).mockReset();
@@ -105,36 +153,7 @@ describe('durable node metadata actions', () => {
     });
   });
 
-  it('saves and clears PDF-owned notes without creating nodes or overwriting extracted text', async () => {
-    seed('owned-notes');
-    await commitNodeMetadata('owned-notes', {
-      noteContent: '# My reading\n\nA thought.',
-    });
-    expect(useCanvasStore.getState().nodes).toHaveLength(1);
-    expect(useCanvasStore.getState().nodes[0].data.content).toBe(
-      'Extracted text',
-    );
-    expect(putNodeContent).toHaveBeenLastCalledWith(
-      'owned-notes',
-      'owned-notes',
-      expect.objectContaining({ noteContent: '# My reading\n\nA thought.' }),
-      undefined,
-    );
-    await commitNodeMetadata('owned-notes', { noteContent: '' });
-    expect(vi.mocked(putNodeContent).mock.calls.at(-1)?.[2]).toHaveProperty(
-      'noteContent',
-      '',
-    );
-    expect(vi.mocked(putNodeContent).mock.calls.at(-1)?.[2]).toHaveProperty(
-      'content',
-      'Extracted text',
-    );
-    expect(putCanvas).not.toHaveBeenCalled();
-  });
-  it.each([
-    { field: 'noteContent', value: 'First notes', cleared: '' },
-    { field: 'propertyDisplayKeys', value: ['keep'], cleared: [] },
-  ])(
+  it.each([{ field: 'propertyDisplayKeys', value: ['keep'], cleared: [] }])(
     'persists undo of the first $field edit before reload',
     async ({ field, value, cleared }) => {
       const id = `undo-${field}`;
@@ -148,10 +167,9 @@ describe('durable node metadata actions', () => {
       );
       const patch = { [field]: value } as Pick<
         PutNodeContentRequest,
-        'noteContent' | 'propertyDisplayKeys'
+        'propertyDisplayKeys'
       >;
-      if (field === 'noteContent') await commitNodeMetadata(id, patch);
-      else await commitNodeProperties(id, patch);
+      await commitNodeProperties(id, patch);
       expect(serverData[field]).toEqual(value);
       await useCanvasStore.getState().undo();
       await vi.waitFor(() => expect(serverData[field]).toEqual(cleared), {
@@ -177,7 +195,13 @@ describe('durable node metadata actions', () => {
           id: 'source-pdf',
           type: 'pdf',
           position: { x: 0, y: 0 },
-          data: { noteContent, content: noteContent },
+          data: { noteNodeId: 'source-notes', content: noteContent },
+        },
+        {
+          id: 'source-notes',
+          type: 'note',
+          position: { x: 0, y: 0 },
+          data: { content: noteContent },
         },
       ],
       [],
@@ -190,9 +214,12 @@ describe('durable node metadata actions', () => {
           clipboardNodes: [
             expect.objectContaining({
               data: {
-                noteContent: '![note](artifact-cloned.png)',
+                noteNodeId: 'source-notes',
                 content: noteContent,
               },
+            }),
+            expect.objectContaining({
+              data: { content: '![note](artifact-cloned.png)' },
             }),
           ],
         }),
@@ -203,6 +230,18 @@ describe('durable node metadata actions', () => {
       'artifact-note.png',
       'paste-destination',
     );
+    const pasted = useCanvasStore.getState().nodes;
+    const pdf = pasted.find(
+      (node) => node.type === 'pdf' && node.id !== 'paste-destination',
+    );
+    expect(pdf?.data.noteNodeId).not.toBe('source-notes');
+    expect(
+      pasted.find((node) => node.id === pdf?.data.noteNodeId),
+    ).toMatchObject({
+      type: 'note',
+      hidden: true,
+      data: { content: '![note](artifact-cloned.png)' },
+    });
     dispatch.mockRestore();
   });
 
@@ -299,7 +338,7 @@ describe('durable node metadata actions', () => {
       },
     );
     await expect(
-      commitNodeMetadata('metadata-scope', { noteContent: 'Draft' }),
+      commitNodeMetadata('metadata-scope', { properties: { Draft: true } }),
     ).rejects.toThrow();
   });
 });

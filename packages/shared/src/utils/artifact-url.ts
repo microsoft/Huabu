@@ -70,7 +70,6 @@ const ARTIFACT_MARKDOWN_FIELDS_BY_TYPE: Readonly<
   Record<string, readonly string[]>
 > = {
   note: ['content'],
-  pdf: ['noteContent'],
 };
 
 /**

@@ -175,7 +175,6 @@ export async function persist(
         // Extraction metadata must never overwrite authored properties.
         properties: existing?.properties,
         propertyDisplayKeys: existing?.propertyDisplayKeys,
-        noteContent: existing?.noteContent,
         nodeId,
         type: contentKind,
         label: normalized.label ?? null,

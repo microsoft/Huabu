@@ -84,22 +84,21 @@ it('preserves owned notes and property values when importing with new identities
   const original = record();
   (original.state.nodes[0] as CanvasNode).type = 'pdf';
   (original.state.nodes[0] as CanvasNode).data = {
-    noteContent: 'Notes about note',
+    noteNodeId: 'note',
     properties: { citedNode: 'note' },
   };
   await mkdir(path.join(directory, 'nodes'));
   await writeFile(
     path.join(directory, 'nodes', 'Frame.md'),
-    `${toFrontmatter({ id: 'frame', type: 'pdf', noteContent: 'Notes about note', properties: { citedNode: 'note' } })}\n`,
+    `${toFrontmatter({ id: 'frame', type: 'pdf', properties: { citedNode: 'note' } })}\n`,
   );
   const imported = await remapImportedSpace(directory, original, 'destination');
   const nodes = imported.state.nodes as CanvasNode[];
-  expect(nodes[0].data.noteContent).toBe('Notes about note');
+  expect(nodes[0].data.noteNodeId).toBe(nodes[1].id);
   expect(nodes[0].data.properties).toEqual({ citedNode: 'note' });
   const stored = parseFrontmatter(
     await readFile(path.join(directory, 'nodes', 'Frame.md'), 'utf8'),
   ).meta;
-  expect(stored.noteContent).toBe('Notes about note');
   expect(stored.properties).toEqual({ citedNode: 'note' });
 });
 

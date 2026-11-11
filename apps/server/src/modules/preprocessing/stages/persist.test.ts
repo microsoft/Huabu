@@ -109,7 +109,6 @@ describe('authored property ownership', () => {
         ...current.record,
         properties: { year: 2026 },
         propertyDisplayKeys: ['year'],
-        noteContent: '# Authored notes',
         summary: 'legacy',
         keywords: ['old'],
       },
@@ -121,7 +120,6 @@ describe('authored property ownership', () => {
         label: 'Paper',
         metadata: {
           properties: { wrong: 'derived' },
-          noteContent: 'Do not replace',
         },
       } as NormalizeResult,
       'pdf',
@@ -132,7 +130,6 @@ describe('authored property ownership', () => {
       content: 'new extracted body',
       properties: { year: 2026 },
       propertyDisplayKeys: ['year'],
-      noteContent: '# Authored notes',
       summary: 'legacy',
       keywords: ['old'],
     });

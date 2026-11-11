@@ -80,14 +80,21 @@ it('opens a new destination to the side when requested', () => {
   expect(chatOpenRequest?.tabId).toBe(tabId);
 });
 
-it('opens PDF-owned notes beside the PDF without adding nodes or duplicating tabs', () => {
+it('opens the real owned Note beside the PDF without duplicating nodes or tabs', () => {
   useCanvasStore.setState({
     nodes: [
       {
         id: 'pdf',
         type: 'pdf',
         position: { x: 0, y: 0 },
-        data: { noteContent: 'My notes' },
+        data: { noteNodeId: 'notes' },
+      },
+      {
+        id: 'notes',
+        type: 'note',
+        hidden: true,
+        position: { x: 0, y: 0 },
+        data: { content: 'My notes' },
       },
     ],
   });
@@ -107,30 +114,26 @@ it('opens PDF-owned notes beside the PDF without adding nodes or duplicating tab
   expect(workspace.tabs[noteTab].target).toEqual({
     kind: 'node',
     canvasId: 'space',
-    nodeId: 'pdf',
-    view: 'notes',
+    nodeId: 'notes',
   });
-  expect(useCanvasStore.getState().nodes).toHaveLength(1);
+  expect(useCanvasStore.getState().nodes).toHaveLength(2);
 });
 
 it('reuses PDF notes for search without retaining an editor-focus request', () => {
   useCanvasStore.setState({
-    nodes: [{ id: 'pdf', type: 'pdf', position: { x: 0, y: 0 }, data: {} }],
+    nodes: [{ id: 'notes', type: 'note', position: { x: 0, y: 0 }, data: {} }],
   });
-  const searchTab = openPreviewNode('pdf', {
-    view: 'notes',
+  const searchTab = openPreviewNode('notes', {
     focusEditor: false,
   });
   expect(
     usePreviewWorkspaceStore.getState().workspace.tabs[searchTab],
   ).toMatchObject({
-    target: { kind: 'node', canvasId: 'space', nodeId: 'pdf', view: 'notes' },
+    target: { kind: 'node', canvasId: 'space', nodeId: 'notes' },
     transient: true,
   });
   usePreviewWorkspaceStore.getState().requestNodeFocus(searchTab);
-  expect(openPreviewNode('pdf', { view: 'notes', focusEditor: false })).toBe(
-    searchTab,
-  );
+  expect(openPreviewNode('notes', { focusEditor: false })).toBe(searchTab);
   expect(usePreviewWorkspaceStore.getState().nodeFocusRequest).toBeNull();
   expect(
     Object.values(usePreviewWorkspaceStore.getState().workspace.tabs),

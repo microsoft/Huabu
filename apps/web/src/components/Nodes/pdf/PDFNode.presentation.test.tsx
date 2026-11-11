@@ -21,6 +21,7 @@ const mocks = vi.hoisted(() => ({
   thumbnail: vi.fn(),
   updateNodeData: vi.fn(),
   card: vi.fn(),
+  note: { id: 'notes', data: { content: '' } },
 }));
 
 vi.mock('@/hooks/useNodePresentation', () => ({
@@ -31,6 +32,7 @@ vi.mock('@/store/canvasStore', () => ({
     select({
       canvasId: 'canvas-1',
       updateNodeData: mocks.updateNodeData,
+      nodes: [mocks.note],
     }),
 }));
 vi.mock('@/api/artifact', () => ({
@@ -90,6 +92,7 @@ let container: HTMLDivElement;
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.note.data.content = '';
   mocks.presentation = {
     mode: 'overview',
     isVisible: true,
@@ -177,9 +180,11 @@ describe('PDF canvas presentation', () => {
     expect(mocks.card).toHaveBeenLastCalledWith(
       expect.objectContaining({ summary: undefined }),
     );
+    mocks.note.data.content =
+      '## Core question\n\n> My **own** interpretation.';
     await render({
       summary: 'Old AI summary',
-      noteContent: '## Core question\n\n> My **own** interpretation.',
+      noteNodeId: 'notes',
       properties: { Venue: 'UIST', Internal: 'Hidden' },
       propertyDisplayKeys: ['Venue'],
     });
@@ -192,13 +197,13 @@ describe('PDF canvas presentation', () => {
         ],
       }),
     );
-    await render({
-      noteContent: '## Notes\n\nOwned thoughts.',
-    });
+    mocks.note.data.content = '## Notes\n\nOwned thoughts.';
+    await render({ noteNodeId: 'notes' });
     expect(mocks.card).toHaveBeenLastCalledWith(
       expect.objectContaining({ summary: 'Owned thoughts.' }),
     );
-    await render({ noteContent: '' });
+    mocks.note.data.content = '';
+    await render({ noteNodeId: 'notes' });
     expect(mocks.card).toHaveBeenLastCalledWith(
       expect.objectContaining({ summary: undefined }),
     );

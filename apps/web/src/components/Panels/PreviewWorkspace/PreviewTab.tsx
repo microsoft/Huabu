@@ -88,7 +88,6 @@ function usePreviewTabPresentation(
       : undefined,
   );
   const isNode = target.kind === 'node';
-  const isPdfNotes = isNode && target.view === 'notes';
   const chatTitle = useConversationTitleStore((state) => {
     if (target.kind !== 'chat' && target.kind !== 'conversation')
       return undefined;
@@ -97,14 +96,12 @@ function usePreviewTabPresentation(
   const label =
     isNode && typeof node?.data.label === 'string' ? node.data.label : '';
   const title = isNode
-    ? isPdfNotes
-      ? t('node.pdfNoteLabel', { title: label || t('node.untitledPdf') })
-      : label || t('node.untitled')
+    ? label || t('node.untitled')
     : target.kind === 'url'
       ? new URL(target.url).host
       : chatTitle || t('chat.newConversation');
   const Icon = isNode
-    ? getNodeIcon(isPdfNotes ? 'note' : node?.type, node?.data)
+    ? getNodeIcon(node?.type, node?.data)
     : target.kind === 'conversation'
       ? getNodeIcon('question')
       : target.kind === 'url'
@@ -144,9 +141,7 @@ function usePreviewTabPresentation(
     typeLabel,
     Icon,
     canRename:
-      target.kind === 'chat' ||
-      target.kind === 'conversation' ||
-      (!!node && !isPdfNotes),
+      target.kind === 'chat' || target.kind === 'conversation' || !!node,
   };
 }
 

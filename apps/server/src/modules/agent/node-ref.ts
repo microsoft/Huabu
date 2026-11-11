@@ -110,6 +110,7 @@ export interface AgentNodePreview extends AgentNodeRef {
  *  - inspect_nodes results
  */
 export interface AgentNodeOutline extends AgentNodePreview {
+  noteNodeId?: string;
   /** Cross-Space address exposed by a Space preview. */
   targetCanvasId?: string;
   /** Parent frame, when the node lives inside one. */
@@ -155,7 +156,6 @@ export interface NodeRefInput {
 export interface NodePreviewInput extends NodeRefInput {
   properties?: NodeProperties;
   propertyDisplayKeys?: string[];
-  noteContent?: string;
   /** Frontmatter `summary` from `nodes/<file>.md`, when available. */
   summary?: string;
   /** Inline node body text (markdown / plain text). */
@@ -170,6 +170,7 @@ export interface NodePreviewInput extends NodeRefInput {
  * consumer needs them; everything else is optional.
  */
 export interface NodeOutlineInput extends NodePreviewInput {
+  noteNodeId?: string;
   targetCanvasId?: string;
   parentFrame?: { id: string; label?: string };
   position: { x: number; y: number };
@@ -254,8 +255,7 @@ function revisionOfPreviewInput(input: NodePreviewInput): string | undefined {
     typeof input.content !== 'string' &&
     typeof input.src !== 'string' &&
     input.properties === undefined &&
-    input.propertyDisplayKeys === undefined &&
-    input.noteContent === undefined
+    input.propertyDisplayKeys === undefined
   ) {
     return undefined;
   }
@@ -296,5 +296,6 @@ export function buildAgentNodeOutline(
   if (input.parentFrame) out.parentFrame = input.parentFrame;
   if (input.style) out.style = input.style;
   if (input.targetCanvasId) out.targetCanvasId = input.targetCanvasId;
+  if (input.noteNodeId) out.noteNodeId = input.noteNodeId;
   return out;
 }

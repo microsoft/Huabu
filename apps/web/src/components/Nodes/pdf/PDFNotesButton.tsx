@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 
 import { Button } from '@/components/Common/Button';
 import { FloatingToolbar } from '@/components/Common/FloatingToolbar';
+import { toast } from '@/components/Common/Toast';
 import { NODE_ICON } from '@/config/nodeIcons';
 import { openPdfNotes } from '@/store/previewWorkspace/actions';
 
@@ -15,17 +16,24 @@ const NoteIcon = NODE_ICON.note;
 export function PDFNotesButton({
   id,
   surface = 'preview',
-  noteContent,
+  noteNodeId,
 }: {
   id: string;
   surface?: 'canvas' | 'preview';
-  noteContent?: string;
+  noteNodeId?: string;
 }) {
   const { t } = useTranslation();
   const label = t('node.pdfNotes');
   const onClick = (event: MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation();
-    openPdfNotes(id);
+    try {
+      openPdfNotes(id);
+    } catch (error) {
+      console.error('[PDF notes] Could not open notes', error);
+      toast(error instanceof Error ? error.message : String(error), {
+        tone: 'danger',
+      });
+    }
   };
 
   if (surface === 'canvas') {
@@ -48,9 +56,7 @@ export function PDFNotesButton({
       >
         <NoteIcon />
       </span>
-      <span>
-        {t(noteContent?.trim() ? 'node.openPdfNotes' : 'node.addPdfNotes')}
-      </span>
+      <span>{t(noteNodeId ? 'node.openPdfNotes' : 'node.addPdfNotes')}</span>
     </Button>
   );
 }

@@ -39,6 +39,7 @@ import {
   applySharedPostEffects,
   applySharedPostEffectsFromWriteResult,
   executeCanvasCommands,
+  includePdfNotes,
   FRAME_POINTER_CAPTURE_MARGIN,
   getAbsolutePosition as getFrameAbsolutePosition,
   getFrameSizing,
@@ -417,7 +418,7 @@ export function dismissVersionConflictToast(): void {
 
 export type NodeMetadataPatch = Pick<
   PutNodeContentRequest,
-  'properties' | 'propertyDisplayKeys' | 'noteContent'
+  'properties' | 'propertyDisplayKeys'
 >;
 
 /** Publish acknowledged property edits; only the toast retains a failed patch. */
@@ -581,6 +582,10 @@ function stripNodeContentForStructurePut(
         continue;
       }
       slim[k] = v;
+    }
+    if (node.type === 'pdf') {
+      slim.noteNodeId = data.noteNodeId ?? null;
+      mutated = true;
     }
     return mutated || data !== node.data
       ? { ...structureNode, data: slim }
@@ -2293,7 +2298,6 @@ const useCanvasStore = create<RFState>()(
                         'src',
                         'properties',
                         'propertyDisplayKeys',
-                        'noteContent',
                       ].includes(key),
                     )
                   ) {
@@ -4714,6 +4718,7 @@ const useCanvasStore = create<RFState>()(
         if (n.type === 'frame') collectDescendants(n.id);
       }
 
+      for (const id of includePdfNotes(nodes, selectedIds)) selectedIds.add(id);
       const toCopy = nodes.filter((n) => selectedIds.has(n.id));
 
       // Keep original IDs in the clipboard so the paste helper can remap

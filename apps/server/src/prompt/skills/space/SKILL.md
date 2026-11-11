@@ -63,11 +63,11 @@ Where each node sits, how big it is, which frame it belongs to, what colour it's
 | label, content, summary, keywords, src    | `read` / `grep`           |
 | position, size, parentFrame, visual style | `inspect_nodes`           |
 | properties, propertyDisplayKeys           | `inspect_nodes` or `read` |
-| noteContent (PDF-owned Markdown notes)    | `read`                    |
+| noteNodeId (PDF-owned Note link)          | `inspect_nodes`           |
 | edge direction / lineStyle / stroke       | `inspect_edges`           |
 | whole-Space overview, spatial clusters    | `get_space_outline`       |
 
-Custom properties and PDF-owned notes belong to structured node records, not to a particular filesystem format. Use `inspect_nodes` for portable metadata reads; file tools require a storage profile that exposes the file surface.
+Custom properties belong to structured node records, not to a particular filesystem format. PDF notes are real Note nodes: inspect the PDF for `noteNodeId`, then read and edit that Note's ordinary `content`. Its ID is also the source of selected-text comments. Do not write notes into the PDF's extracted body. See the `noteNodeId` command field for ownership rules. File tools require a storage profile that exposes the file surface.
 
 ## Tool decision matrix
 

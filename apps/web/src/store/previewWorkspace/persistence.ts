@@ -103,7 +103,6 @@ function parseTarget(value: unknown, canvasId: string): PreviewTarget | null {
       kind: 'node',
       canvasId,
       nodeId: candidate.nodeId,
-      ...(candidate.view === 'notes' ? { view: 'notes' as const } : {}),
     };
   }
   if (

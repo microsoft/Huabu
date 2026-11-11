@@ -102,7 +102,6 @@ describe('agent property mutations', () => {
       apply: (record) => ({
         ...record!,
         properties: { year: 2026, reviewed: false },
-        noteContent: '# Reading notes',
       }),
     });
     const original = (await nodes.read('pdf'))!.record;
@@ -129,7 +128,6 @@ describe('agent property mutations', () => {
     const record = (await nodes.read('pdf'))!.record;
     expect(record).toMatchObject({
       properties: { reviewed: false, authors: ['Ada'] },
-      noteContent: '# Reading notes',
       content: 'Extracted body',
     });
     expect(record.properties).not.toHaveProperty('year');

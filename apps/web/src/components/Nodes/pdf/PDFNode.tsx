@@ -100,12 +100,15 @@ export const PDFNode = memo(
     const isReading = mode === 'reading' && isVisible;
     const updateNodeData = useCanvasStore((s) => s.updateNodeData);
     const canvasId = useCanvasStore((s) => s.canvasId);
+    const notesContent = useCanvasStore(
+      (s) => s.nodes.find((node) => node.id === data.noteNodeId)?.data.content,
+    );
 
     const hasCover = !!data.coverUrl;
     const src = typeof data.src === 'string' ? data.src : '';
     const summary =
-      typeof data.noteContent === 'string'
-        ? noteFarDescription(data.noteContent, '')
+      typeof notesContent === 'string'
+        ? noteFarDescription(notesContent, '')
         : undefined;
     const cardProperties = orderedPropertyKeys(
       data.properties,

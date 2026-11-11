@@ -89,6 +89,88 @@ afterEach(() => {
 });
 
 describe('PUT /nodes/:nodeId/content — content CAS', () => {
+  it('round-trips an owned Note independently and validates structural ownership', async () => {
+    seedCanvas('c1', 'pdf', 'Paper');
+    const app = await buildApp();
+    try {
+      const before = (
+        await app.inject({ method: 'GET', url: '/canvas/c1' })
+      ).json<GetCanvasResponse>();
+      const nodes = [
+        {
+          id: 'pdf',
+          type: 'pdf',
+          position: { x: 0, y: 0 },
+          data: { noteNodeId: 'notes' },
+        },
+        { id: 'notes', type: 'note', position: { x: 0, y: 0 }, data: {} },
+      ];
+      const linked = await app.inject({
+        method: 'PUT',
+        url: '/canvas/c1',
+        payload: { version: before.version, state: { nodes, edges: [] } },
+      });
+      expect(linked.statusCode).toBe(200);
+      const saved = await putContent(app, 'c1', 'notes', {
+        nodeType: 'note',
+        content: 'My independently stored notes',
+        label: 'Reading notes',
+        expectRev: nodeRevisionOf({}),
+      });
+      expect(saved.statusCode).toBe(200);
+      const loaded = (
+        await app.inject({ method: 'GET', url: '/canvas/c1' })
+      ).json<GetCanvasResponse>();
+      expect(loaded.state).toMatchObject({
+        nodes: [
+          { id: 'pdf', data: { noteNodeId: 'notes' } },
+          {
+            id: 'notes',
+            hidden: true,
+            data: { content: 'My independently stored notes' },
+          },
+        ],
+      });
+      const invalid = await app.inject({
+        method: 'PUT',
+        url: '/canvas/c1',
+        payload: {
+          version: loaded.version,
+          state: {
+            nodes: [{ ...nodes[0], data: { noteNodeId: 'missing' } }, nodes[1]],
+            edges: [],
+          },
+        },
+      });
+      expect(invalid.statusCode).toBe(400);
+      const unlinked = await app.inject({
+        method: 'PUT',
+        url: '/canvas/c1',
+        payload: {
+          version: loaded.version,
+          state: {
+            nodes: [{ ...nodes[0], data: { noteNodeId: null } }],
+            edges: [],
+          },
+        },
+      });
+      expect(unlinked.statusCode).toBe(200);
+      const withoutNote = (
+        await app.inject({ method: 'GET', url: '/canvas/c1' })
+      ).json<GetCanvasResponse>();
+      expect(withoutNote.state).toMatchObject({
+        nodes: [
+          {
+            id: 'pdf',
+            data: expect.not.objectContaining({ noteNodeId: 'notes' }),
+          },
+        ],
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
   it('uses the canonical Office revision even when GET strips a legacy body preamble', async () => {
     seedCanvas('c1', 'office', 'Document');
     const store = getCanvasStore('c1');
@@ -189,36 +271,6 @@ describe('PUT /nodes/:nodeId/content — content CAS', () => {
         ],
       });
       expect(afterReorder.nodeContentRevisions?.pdf).toBe(reordered.json().rev);
-      const notes = await putContent(app, 'c1', 'pdf', {
-        nodeType: 'pdf',
-        noteContent: '# My reading\n\nFirst thought.',
-        expectRev: reordered.json().rev,
-      });
-      expect(notes.statusCode).toBe(200);
-      const withNotes = (
-        await app.inject({ method: 'GET', url: '/canvas/c1' })
-      ).json<GetCanvasResponse>();
-      expect(withNotes.state).toMatchObject({
-        nodes: [{ data: { noteContent: '# My reading\n\nFirst thought.' } }],
-      });
-      expect(withNotes.nodeContentRevisions?.pdf).toBe(notes.json().rev);
-      expect(notes.json().rev).not.toBe(reordered.json().rev);
-      expect(
-        (
-          await putContent(app, 'c1', 'pdf', {
-            nodeType: 'pdf',
-            noteContent: 'Stale notes',
-            expectRev: reordered.json().rev,
-          })
-        ).statusCode,
-      ).toBe(409);
-      const clearedNotes = await putContent(app, 'c1', 'pdf', {
-        nodeType: 'pdf',
-        noteContent: '',
-        expectRev: notes.json().rev,
-      });
-      expect(clearedNotes.statusCode).toBe(200);
-      expect(store.readNode('pdf')?.noteContent).toBe('');
       const staleEdit = await putContent(app, 'c1', 'pdf', {
         nodeType: 'pdf',
         properties: { Status: 'Stale' },

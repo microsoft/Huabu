@@ -139,7 +139,6 @@ export const putNodeContentBodySchema = z.object({
   /** Keywise patch; null deletes one key and omitted keys are preserved. */
   properties: nodePropertiesPatchSchema.optional(),
   propertyDisplayKeys: z.array(z.string()).optional(),
-  noteContent: z.string().optional(),
   /**
    * Optimistic-concurrency baseline: the {@link nodeRevision} the client's
    * edit descends from (a deterministic djb2 over the node's authored
@@ -208,7 +207,6 @@ export interface GetNodeContentResponse extends z.infer<
   keywords?: string[];
   properties?: NodeProperties;
   propertyDisplayKeys?: string[];
-  noteContent?: string;
   contentMissing?: boolean;
   artifactMissing?: boolean;
   /** Mirror of {@link BaseNodeData.contentDuplicate} for single-node refresh. */

@@ -74,7 +74,6 @@ type ExpandedNodePanelProps = {
    * the focused group's active tab.
    */
   nodeId?: string;
-  pdfNotes?: boolean;
   /** Closes this instance; defaults to closing the focused group's tab. */
   onClose?: () => void;
   /** Reports a persistent node mutation to the owning preview surface. */
@@ -221,7 +220,6 @@ const ConnectedNodeMenu = ({
 
 export const ExpandedNodePanel = ({
   nodeId,
-  pdfNotes = false,
   onClose,
   onCommit,
   nodeFocusRequestNonce,
@@ -262,8 +260,6 @@ export const ExpandedNodePanel = ({
       propertiesRegionRef.current?.scrollIntoView({ block: 'start' });
     }
   }, [propertiesOpen, node?.type]);
-  const notesContent =
-    typeof node?.data.noteContent === 'string' ? node.data.noteContent : '';
   const incomingNeighbors = useMemo(
     () =>
       expandedNodeId
@@ -353,13 +349,11 @@ export const ExpandedNodePanel = ({
   const activeItem = useMemo(() => {
     if (!expandedNodeId || !node) return null;
     return {
-      type: pdfNotes ? 'note' : node.type || 'text',
-      data: pdfNotes
-        ? { content: notesContent }
-        : (node.data as Record<string, unknown>),
+      type: node.type || 'text',
+      data: node.data as Record<string, unknown>,
       close: closeExpandedCanvas,
     };
-  }, [expandedNodeId, node, closeExpandedCanvas, pdfNotes, notesContent]);
+  }, [expandedNodeId, node, closeExpandedCanvas]);
 
   // If the node was removed while expanded, close the panel.
   useEffect(() => {
@@ -471,7 +465,7 @@ export const ExpandedNodePanel = ({
       return;
     handledRenameNonce.current = renameRequestNonce;
     onRenameRequestHandled?.(renameRequestNonce);
-    if (!canWrite || pdfNotes) return;
+    if (!canWrite) return;
     setDraftTitle(liveLabel);
     setIsEditingTitle(true);
   }, [
@@ -481,7 +475,6 @@ export const ExpandedNodePanel = ({
     liveLabel,
     onRenameRequestHandled,
     canWrite,
-    pdfNotes,
   ]);
 
   // Listen for text selection inside the panel and auto-attach as pending
@@ -533,7 +526,7 @@ export const ExpandedNodePanel = ({
 
   if (!activeItem) return null;
 
-  const canEditTitle = !!expandedNodeId && canWrite && !pdfNotes;
+  const canEditTitle = !!expandedNodeId && canWrite;
   const commitTitle = () => {
     if (
       !canEditTitle ||
@@ -560,12 +553,8 @@ export const ExpandedNodePanel = ({
   // Search node id — the find bar's scope dispatcher (see
   // `useGlobalSearchHotkey`) requires a non-empty value to open the
   // in-preview find bar.
-  const previewNodeId =
-    pdfNotes && canvasId && expandedNodeId
-      ? nodePreviewViewKey(canvasId, expandedNodeId, 'notes')
-      : (expandedNodeId ?? '');
-  const supportsProperties =
-    !pdfNotes && (node?.type === 'pdf' || node?.type === 'note');
+  const previewNodeId = expandedNodeId ?? '';
+  const supportsProperties = node?.type === 'pdf' || node?.type === 'note';
   const properties = isNodeProperties(node?.data.properties)
     ? node.data.properties
     : undefined;
@@ -591,7 +580,11 @@ export const ExpandedNodePanel = ({
             <PDFNotesButton
               key={expandedNodeId}
               id={expandedNodeId}
-              noteContent={notesContent}
+              noteNodeId={
+                typeof node?.data.noteNodeId === 'string'
+                  ? node.data.noteNodeId
+                  : undefined
+              }
             />
           </div>
         )}
@@ -771,16 +764,12 @@ export const ExpandedNodePanel = ({
           />
           <PreviewHeaderSlotContext.Provider value={headerSlotValue}>
             <NodePreviewContent
-              key={`${expandedNodeId}:${pdfNotes ? 'notes' : 'document'}`}
-              id={pdfNotes ? undefined : (expandedNodeId ?? undefined)}
+              key={expandedNodeId}
+              id={expandedNodeId ?? undefined}
               searchNodeId={previewNodeId}
               scrollViewKey={
                 canvasId && expandedNodeId
-                  ? nodePreviewViewKey(
-                      canvasId,
-                      expandedNodeId,
-                      pdfNotes ? 'notes' : undefined,
-                    )
+                  ? nodePreviewViewKey(canvasId, expandedNodeId)
                   : undefined
               }
               type={activeItem.type}
@@ -796,14 +785,7 @@ export const ExpandedNodePanel = ({
                   ? (patch) => {
                       if (!selectCanWriteCanvas(useCanvasStore.getState()))
                         return;
-                      if (pdfNotes) {
-                        if (typeof patch.content !== 'string') return;
-                        updateNodeData(expandedNodeId, {
-                          noteContent: patch.content,
-                        });
-                      } else {
-                        updateNodeData(expandedNodeId, patch);
-                      }
+                      updateNodeData(expandedNodeId, patch);
                       onCommit?.();
                     }
                   : undefined

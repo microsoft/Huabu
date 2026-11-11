@@ -106,12 +106,7 @@ export function previewTargetKey(target: PreviewTarget): string {
       : target.kind === 'chat'
         ? [target.kind, target.canvasId, target.threadId]
         : target.kind === 'node'
-          ? [
-              target.kind,
-              target.canvasId,
-              target.nodeId,
-              ...(target.view ? [target.view] : []),
-            ]
+          ? [target.kind, target.canvasId, target.nodeId]
           : [target.kind, target.canvasId, target.url],
   );
 }
@@ -140,12 +135,8 @@ export function messageListViewKey(
   return `chat:${ownerCanvasId}:${threadId}`;
 }
 
-export function nodePreviewViewKey(
-  canvasId: string,
-  nodeId: string,
-  view?: 'notes',
-): string {
-  return `node:${canvasId}:${nodeId}${view ? `:${view}` : ''}`;
+export function nodePreviewViewKey(canvasId: string, nodeId: string): string {
+  return `node:${canvasId}:${nodeId}`;
 }
 
 export function readPreviewScrollPosition(

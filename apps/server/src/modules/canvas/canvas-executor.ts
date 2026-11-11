@@ -145,7 +145,6 @@ const NODE_CONTENT_KEYS = new Set([
   'provenance',
   'properties',
   'propertyDisplayKeys',
-  'noteContent',
 ]);
 
 function stripNodesForCanvas(nodes: readonly CanvasNode[]): CanvasNode[] {
@@ -187,7 +186,7 @@ export function hydrateCanvasNodes(
     if (content['keywords'] != null) data['keywords'] = content['keywords'];
     if (content['provenance'] != null)
       data['provenance'] = content['provenance'];
-    for (const key of ['properties', 'propertyDisplayKeys', 'noteContent']) {
+    for (const key of ['properties', 'propertyDisplayKeys']) {
       if (content[key] !== undefined) data[key] = content[key];
       else delete data[key];
     }
@@ -227,7 +226,6 @@ function collectMergeConflicts(
         'content',
         'properties',
         'propertyDisplayKeys',
-        'noteContent',
       ].some((key) => key in patch);
       if (!rewritesContent) continue;
       const node = byId.get(entry.nodeId);
@@ -312,11 +310,7 @@ function buildNodeContent(node: CanvasNode): NodeContent | null {
   if (typeof data['summary'] === 'string') out['summary'] = data['summary'];
   if (Array.isArray(data['keywords'])) out['keywords'] = data['keywords'];
   if ('provenance' in data) out['provenance'] = data['provenance'];
-  for (const key of [
-    'properties',
-    'propertyDisplayKeys',
-    'noteContent',
-  ] as const) {
+  for (const key of ['properties', 'propertyDisplayKeys'] as const) {
     if (data[key] !== undefined)
       (out as Record<string, unknown>)[key] = data[key];
   }

@@ -11,6 +11,7 @@ import {
   hasValidNodeProperties,
   mergeNodeProperties,
 } from '../nodeProperties.js';
+import { validPdfNoteLink } from '../pdfNotes.js';
 import { hasValidInkResourceBindings } from '../utils/inkSigil.js';
 
 import type { CanvasCommand } from '../../index.js';
@@ -30,12 +31,34 @@ const mergeNodeData: CommandDefinition<Cmd> = {
 
   handler(cmd, state) {
     if (cmd.patches.length === 0) return noop(state);
+    const patchMap = new Map(
+      cmd.patches.map((p) => [p.nodeId as string, p.patch]),
+    );
+    const linkedNodes = cmd.patches.some((entry) => 'noteNodeId' in entry.patch)
+      ? state.nodes.map((node) => {
+          const patch = patchMap.get(node.id);
+          return patch && 'noteNodeId' in patch
+            ? { ...node, data: { ...node.data, noteNodeId: patch.noteNodeId } }
+            : node;
+        })
+      : state.nodes;
     for (const entry of cmd.patches) {
       if (!hasValidNodeProperties(entry.patch, true))
         return noop(state, 'invalid-target');
       const node = state.nodes.find(
         (candidate) => candidate.id === entry.nodeId,
       );
+      if (
+        node &&
+        'noteNodeId' in entry.patch &&
+        !validPdfNoteLink(node, entry.patch.noteNodeId, linkedNodes)
+      )
+        return noop(state, 'invalid-target');
+      if (
+        node?.type === 'spacePreview' &&
+        ['properties', 'propertyDisplayKeys'].some((key) => key in entry.patch)
+      )
+        return noop(state, 'invalid-target');
       if (
         node?.type === 'fileReference' &&
         (['content', 'src'].some((key) => key in entry.patch) ||
@@ -55,9 +78,6 @@ const mergeNodeData: CommandDefinition<Cmd> = {
         return noop(state, 'invalid-target');
     }
 
-    const patchMap = new Map(
-      cmd.patches.map((p) => [p.nodeId as string, p.patch]),
-    );
     // Every node whose data we actually patched, plus any parent frame
     // whose child label changed. The engine doesn't filter by watched
     // fields — the server's preprocessing dispatcher does that against

@@ -33,7 +33,6 @@ export const NODE_CONTENT_KEYS: ReadonlySet<string> = new Set([
   'provenance',
   'properties',
   'propertyDisplayKeys',
-  'noteContent',
 ]);
 
 /**

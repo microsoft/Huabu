@@ -145,12 +145,12 @@ describe('searchCanvas — tiered emission', () => {
   it('searches PDF notes separately from extracted text with independent source addresses', async () => {
     const noteContent = '# Reading\n\nNeedle notes, another needle.';
     const events = await collect(
-      [mkNode('pdf', 'pdf')],
+      [mkNode('pdf', 'pdf'), mkNode('notes', 'note')],
       [
         mkContent('pdf', 'pdf', {
           content: 'Extracted needle',
-          noteContent,
         }),
+        mkContent('notes', 'note', { content: noteContent }),
       ],
       { query: 'needle' },
     );
@@ -161,12 +161,12 @@ describe('searchCanvas — tiered emission', () => {
       matches.map(({ field, occurrenceIndex }) => [field, occurrenceIndex]),
     ).toEqual([
       ['content', 0],
-      ['noteContent', 0],
-      ['noteContent', 1],
+      ['content', 0],
+      ['content', 1],
     ]);
     expect(matches[1]).toMatchObject({
-      nodeId: 'pdf',
-      nodeType: 'pdf',
+      nodeId: 'notes',
+      nodeType: 'note',
       source: {
         hash: createHash('sha256').update(noteContent).digest('hex'),
         offset: noteContent.indexOf('Needle'),
@@ -175,10 +175,7 @@ describe('searchCanvas — tiered emission', () => {
     });
   });
 
-  it.each([
-    [['content'], ['content']],
-    [['noteContent'], ['noteContent', 'noteContent']],
-  ] as const)(
+  it.each([[['content'], ['content', 'content', 'content']]] as const)(
     'respects PDF content field selection: %s',
     async (fields, expected) => {
       const events = await collect(
@@ -186,10 +183,9 @@ describe('searchCanvas — tiered emission', () => {
         [
           mkContent('pdf', 'pdf', {
             content: 'needle',
-            noteContent: 'needle needle',
           }),
-          mkContent('note', 'note', { noteContent: 'needle' }),
-          mkContent('empty', 'pdf', { noteContent: '' }),
+          mkContent('note', 'note', { content: 'needle needle' }),
+          mkContent('empty', 'pdf', { content: '' }),
         ],
         { query: 'needle', fields: [...fields] },
       );
@@ -203,12 +199,12 @@ describe('searchCanvas — tiered emission', () => {
 
   it('applies the shared match limit across PDF text and notes', async () => {
     const events = await collect(
-      [mkNode('pdf', 'pdf')],
+      [mkNode('pdf', 'pdf'), mkNode('notes', 'note')],
       [
         mkContent('pdf', 'pdf', {
           content: 'needle',
-          noteContent: 'needle needle',
         }),
+        mkContent('notes', 'note', { content: 'needle needle' }),
       ],
       { query: 'needle', limit: 2 },
     );

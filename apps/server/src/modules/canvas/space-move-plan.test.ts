@@ -35,11 +35,17 @@ describe('buildSpaceMovePlan', () => {
     const pdf = node('pdf', 'pdf', 0, 0);
     pdf.data = {
       ...pdf.data,
-      noteContent: 'Notes about note',
+      noteNodeId: 'notes',
       properties: { citation: 'note' },
     };
     const plan = buildSpaceMovePlan({
-      sourceNodes: [pdf],
+      sourceNodes: [
+        pdf,
+        {
+          ...node('notes', 'note', 0, 0),
+          data: { content: 'Notes about note' },
+        },
+      ],
       sourceEdges: [],
       destinationNodes: [],
       selectedNodeIds: ['pdf'],
@@ -51,8 +57,11 @@ describe('buildSpaceMovePlan', () => {
       { nodes: [], edges: [], canvasId: 'destination' },
     ).writeResult.nodes;
     const movedPdf = moved.find((entry) => entry.type === 'pdf')!;
-    expect(moved).toHaveLength(1);
-    expect(movedPdf.data.noteContent).toBe('Notes about note');
+    expect(moved).toHaveLength(2);
+    const notes = moved.find((entry) => entry.type === 'note');
+    expect(movedPdf.data.noteNodeId).toBe(notes?.id);
+    expect(notes?.data.content).toBe('Notes about note');
+    expect(notes?.hidden).toBe(true);
     expect(movedPdf.data.properties).toEqual({ citation: 'note' });
   });
   it.each([

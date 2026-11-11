@@ -389,8 +389,9 @@ describe('Canvas search field groups and preview navigation', () => {
               key: 'first:noteContent:0',
               match: {
                 ...results[0].match,
-                nodeType: 'pdf',
-                field: 'noteContent',
+                nodeType: 'note',
+                nodeId: 'notes',
+                field: 'content',
                 source,
               },
             },
@@ -398,23 +399,21 @@ describe('Canvas search field groups and preview navigation', () => {
         }),
       );
       expect(
-        container?.querySelector('[data-search-field="noteContent"]')
-          ?.textContent,
-      ).toContain(language === 'en' ? 'Notes' : '笔记');
-      act(() => getRow(2).focus());
-      press(getRow(2), 'Enter');
-      expect(openPreviewNode).toHaveBeenLastCalledWith('first', {
+        container?.querySelector('[data-search-field="content"]')?.textContent,
+      ).toBeTruthy();
+      act(() => getRow(3).focus());
+      press(getRow(3), 'Enter');
+      expect(openPreviewNode).toHaveBeenLastCalledWith('notes', {
         transient: true,
         focusEditor: false,
-        view: 'notes',
       });
       expect(usePreviewSearchStore.getState()).toMatchObject({
-        nodeId: 'node:canvas:first:notes',
+        nodeId: 'notes',
         query: 'test',
         focusInput: false,
         navigationRequest: { occurrenceIndex: 0, source },
       });
-      expect(document.activeElement).toBe(getRow(2));
+      expect(document.activeElement).toBe(getRow(3));
       act(() => getRow(1).click());
       expect(openPreviewNode).toHaveBeenLastCalledWith('first', {
         transient: true,
