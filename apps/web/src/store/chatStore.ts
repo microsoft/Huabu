@@ -881,7 +881,10 @@ export const useChatStore = create<ChatState>()(
       setThreadLoading: (threadId, loading) =>
         set((state) => {
           if (threadOf(state, threadId).isStreaming === loading) return {};
-          return patchThread(state, threadId, { isStreaming: loading });
+          return patchThread(state, threadId, {
+            isStreaming: loading,
+            ...(loading ? { completedTurnId: undefined } : {}),
+          });
         }),
 
       setThreadPreparing: (threadId, preparing) =>

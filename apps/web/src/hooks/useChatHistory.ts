@@ -75,6 +75,7 @@ import type {
 const KNOWN_HISTORY_ROLES = new Set<string>(['user', 'assistant', 'status']);
 const INITIAL_ATTACH_RETRY_MS = 500;
 const MAX_ATTACH_RETRY_MS = 10_000;
+const HISTORY_SETTLE_RETRY_MS = [500, 1_000, 2_000];
 const attachRetryDelayByThread = new Map<string, number>();
 
 function waitForRetry(delayMs: number, signal: AbortSignal): Promise<void> {
@@ -807,39 +808,54 @@ export function useChatHistory(
   const completedTurnId = useChatStore(
     (state) => state.threadsById[threadId]?.completedTurnId,
   );
+  const interruptedMessageId = useChatStore((state) => {
+    const last = state.threadsById[threadId]?.messages.at(-1);
+    return last?.role === 'status' &&
+      last.status === 'interrupted' &&
+      !last.historyTurnId
+      ? last.id
+      : undefined;
+  });
   const streaming = useChatStore(
     (state) => state.threadsById[threadId]?.isStreaming,
   );
   useEffect(() => {
     if (
       ownerUnavailable ||
-      !completedTurnId ||
+      (!completedTurnId && !interruptedMessageId) ||
       streaming ||
       !ownerCanvasId ||
       !isHistoryLoaded
     )
       return;
-    let cancelled = false;
+    const controller = new AbortController();
     const original = selectThreadMessages(useChatStore.getState(), threadId);
+    const isCurrent = () => {
+      const current = useChatStore.getState().threadsById[threadId];
+      return (
+        !controller.signal.aborted &&
+        current?.historyLoaded &&
+        !current.isStreaming &&
+        !current.isPreparing &&
+        current.completedTurnId === completedTurnId &&
+        current.messages.at(-1) === original.at(-1)
+      );
+    };
+    const localUser = [...original]
+      .reverse()
+      .find((message) => message.role === 'user' && !message.historyTurnId);
+    const lastPersistedTurn = [...original]
+      .reverse()
+      .find((message) => message.historyTurnId)?.historyTurnId;
     setRefreshError(undefined);
-    void fetchLatestHistoryWindow(threadId, ownerCanvasId, HISTORY_PAGE_TURNS)
-      .then((window) => {
-        const current = useChatStore.getState().threadsById[threadId];
-        if (
-          cancelled ||
-          !current?.historyLoaded ||
-          current?.isStreaming ||
-          current?.isPreparing ||
-          current?.completedTurnId !== completedTurnId ||
-          current?.messages.at(-1) !== original.at(-1)
-        )
-          return;
-        const localUser = [...original]
-          .reverse()
-          .find((message) => message.role === 'user' && !message.historyTurnId);
-        const lastPersistedTurn = [...original]
-          .reverse()
-          .find((message) => message.historyTurnId)?.historyTurnId;
+    void (async () => {
+      for (let attempt = 0; isCurrent(); attempt++) {
+        const window = await fetchLatestHistoryWindow(
+          threadId,
+          ownerCanvasId,
+          HISTORY_PAGE_TURNS,
+        );
+        if (!isCurrent()) return;
         const lastTurn = window.response.turns.at(-1);
         const persistedUser = [...(lastTurn?.messages ?? [])]
           .reverse()
@@ -851,30 +867,37 @@ export function useChatHistory(
             persistedUser?.role !== 'user' ||
             persistedUser.content !== localUser.content)
         ) {
+          const delay = HISTORY_SETTLE_RETRY_MS[attempt];
+          if (delay !== undefined) {
+            await waitForRetry(delay, controller.signal);
+            continue;
+          }
           throw new Error(
             'The completed turn is not available in history yet. Your messages are retained; retry to refresh.',
           );
         }
         applyLatestHistoryWindow(window, ownerCanvasId);
-      })
-      .catch((error: unknown) => {
-        if (!cancelled) {
-          console.warn(
-            '[useChatHistory] completed history refresh failed',
-            error,
-          );
-          setRefreshError(
-            error instanceof Error
-              ? error.message
-              : 'Failed to refresh completed history',
-          );
-        }
-      });
+        return;
+      }
+    })().catch((error: unknown) => {
+      if (isCurrent()) {
+        console.warn(
+          '[useChatHistory] completed history refresh failed',
+          error,
+        );
+        setRefreshError(
+          error instanceof Error
+            ? error.message
+            : 'Failed to refresh completed history',
+        );
+      }
+    });
     return () => {
-      cancelled = true;
+      controller.abort();
     };
   }, [
     completedTurnId,
+    interruptedMessageId,
     streaming,
     ownerCanvasId,
     threadId,
