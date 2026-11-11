@@ -149,6 +149,38 @@ afterEach(() => {
 });
 
 describe('Workspace-scoped conversation caches', () => {
+  it('adopts commands refreshed by another panel when opening the menu', async () => {
+    const panels: Record<
+      string,
+      ReturnType<typeof useInternalSlashCommands>
+    > = {};
+    function Commands({ id }: { id: string }) {
+      const result = useInternalSlashCommands({
+        binding: { kind: 'internal' },
+      });
+      panels[id] = result;
+      return (
+        <div>{result.commands.map((command) => command.name).join(',')}</div>
+      );
+    }
+    await act(async () =>
+      root.render(
+        <>
+          <Commands id="left" />
+          <Commands id="right" />
+        </>,
+      ),
+    );
+    respondWith('updated');
+    await act(async () => panels.left.refresh());
+    const requests = api.skills.mock.calls.length;
+    await act(async () => panels.right.refreshIfStale());
+    expect(panels.right.commands).toEqual([
+      { name: 'updated', description: 'updated' },
+    ]);
+    expect(api.skills).toHaveBeenCalledTimes(requests);
+  });
+
   it.each(['hide', 'remount'])(
     'retains warm caches across %s without loading',
     async (mode) => {

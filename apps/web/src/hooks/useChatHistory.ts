@@ -812,6 +812,7 @@ export function useChatHistory(
     const last = state.threadsById[threadId]?.messages.at(-1);
     return last?.role === 'status' &&
       last.status === 'interrupted' &&
+      !last.localOnly &&
       !last.historyTurnId
       ? last.id
       : undefined;

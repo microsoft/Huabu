@@ -919,6 +919,67 @@ describe('queued composer turns', () => {
     },
   );
 
+  it('does not wait for history when Stop cancels a dispatched but unaccepted turn', async () => {
+    act(() => {
+      const chat = useChatStore.getState();
+      chat.setHistoryLoaded(session.threadId, true);
+      chat.setMessages(session.threadId, [
+        { id: 'old:0', historyTurnId: 'old', role: 'user', content: 'Earlier' },
+        { id: 'old:1', historyTurnId: 'old', role: 'assistant', segments: [] },
+      ]);
+    });
+    let historyError: string | undefined;
+    function MountedChat() {
+      hook = useAgentStream(session);
+      historyError = useChatHistory(
+        session,
+        useChatStore.getState().setThreadLoading,
+      ).historyPageError;
+      return null;
+    }
+    await act(async () => root?.render(createElement(MountedChat)));
+    const started = deferred();
+    mocks.stream.mockImplementationOnce(
+      async (
+        _content,
+        _thread,
+        _mode,
+        callbacks,
+        options: { signal: AbortSignal },
+      ) => {
+        started.resolve();
+        await new Promise<void>((resolve) =>
+          options.signal.addEventListener('abort', () => resolve(), {
+            once: true,
+          }),
+        );
+        callbacks.onComplete();
+      },
+    );
+    mocks.stop.mockImplementationOnce(async (_tid, _canvasId, requestId) => ({
+      stopped: true,
+      acceptance: null,
+      request: { id: requestId, accepted: false },
+    }));
+    let running!: Promise<void>;
+    await act(async () => {
+      running = hook.startStream('Changed my mind', 'operate');
+      await started.promise;
+    });
+    await act(async () => {
+      stopAgentTurn(session);
+      await running;
+    });
+    expect(
+      selectThreadMessages(useChatStore.getState(), session.threadId).at(-1),
+    ).toMatchObject({
+      role: 'status',
+      status: 'interrupted',
+    });
+    expect(mocks.history).not.toHaveBeenCalled();
+    expect(historyError).toBeUndefined();
+  });
+
   it('reloads history after inactive accepted Stop without remounting the composer', async () => {
     const historyGate = deferred();
     act(() => useChatStore.getState().setHistoryLoaded(session.threadId, true));

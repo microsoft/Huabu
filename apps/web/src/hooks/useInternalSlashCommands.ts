@@ -185,11 +185,18 @@ export function useInternalSlashCommands({
   const refreshIfStale = useCallback(
     (ttlMs: number = STALE_TTL_MS) => {
       if (loadingRef.current) return;
-      const last =
-        (cacheKey
-          ? internalSlashCommandsCache.get(cacheKey)?.fetchedAt
-          : undefined) ?? lastFetchedAtRef.current;
-      if (last > 0 && Date.now() - last < ttlMs) return;
+      const cached = cacheKey
+        ? internalSlashCommandsCache.get(cacheKey)
+        : undefined;
+      const last = cached?.fetchedAt ?? lastFetchedAtRef.current;
+      if (last > 0 && Date.now() - last < ttlMs) {
+        if (cached) {
+          setCommands(cached.commands);
+          setError(null);
+          lastFetchedAtRef.current = cached.fetchedAt;
+        }
+        return;
+      }
       void refresh();
     },
     [cacheKey, refresh, internalSlashCommandsCache],

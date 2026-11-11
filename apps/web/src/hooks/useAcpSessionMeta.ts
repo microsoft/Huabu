@@ -404,7 +404,12 @@ export function useAcpSessionMeta({
       setError(null);
       setLoading(false);
       lastFetchedAtRef.current = cached.fetchedAt;
-      if (Date.now() - cached.fetchedAt >= STALE_TTL_MS) {
+      if (
+        !loadingRef.current &&
+        (Date.now() - cached.fetchedAt >= STALE_TTL_MS ||
+          (!!threadId &&
+            selectThreadIsLoading(useChatStore.getState(), threadId)))
+      ) {
         void refresh();
       }
       return invalidatePending;
@@ -416,12 +421,23 @@ export function useAcpSessionMeta({
     lastFetchedAtRef.current = 0;
     void refresh();
     return invalidatePending;
-  }, [cacheKey, refresh, invalidatePending, sessionMetaCache]);
+  }, [cacheKey, threadId, refresh, invalidatePending, sessionMetaCache]);
 
   useEffect(() => {
     if (!threadId || bindingKind !== 'external') return;
-    return registerAcpSessionMetaSink(threadId, applyEvent);
-  }, [threadId, bindingKind, applyEvent]);
+    const unregister = registerAcpSessionMetaSink(threadId, applyEvent);
+    return () => {
+      unregister();
+      // Hidden panels miss stream metadata, including a final usage update.
+      if (
+        cacheKey &&
+        selectThreadIsLoading(useChatStore.getState(), threadId)
+      ) {
+        const cached = sessionMetaCache.get(cacheKey);
+        if (cached) sessionMetaCache.set(cacheKey, { ...cached, fetchedAt: 0 });
+      }
+    };
+  }, [threadId, bindingKind, applyEvent, cacheKey, sessionMetaCache]);
 
   return {
     meta,

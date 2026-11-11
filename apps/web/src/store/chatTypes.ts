@@ -107,6 +107,8 @@ export type ChatMessage =
       historyTurnActive?: boolean;
       role: 'status';
       status: 'interrupted' | 'error';
+      /** Stop confirmed no durable turn was accepted; no history is expected. */
+      localOnly?: boolean;
       detail?: string;
     };
 
