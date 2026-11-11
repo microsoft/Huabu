@@ -861,11 +861,11 @@ export function useChatHistory(
           .reverse()
           .find((message) => message.role === 'user');
         if (
-          localUser?.role === 'user' &&
-          (lastTurn?.active ||
-            lastTurn?.id === lastPersistedTurn ||
-            persistedUser?.role !== 'user' ||
-            persistedUser.content !== localUser.content)
+          lastTurn?.active ||
+          (localUser?.role === 'user' &&
+            (lastTurn?.id === lastPersistedTurn ||
+              persistedUser?.role !== 'user' ||
+              persistedUser.content !== localUser.content))
         ) {
           const delay = HISTORY_SETTLE_RETRY_MS[attempt];
           if (delay !== undefined) {
