@@ -6,12 +6,10 @@ import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 
 import { Button } from '@/components/Common/Button';
-import { toast } from '@/components/Common/Toast';
 import { Tooltip } from '@/components/Common/Tooltip';
 import { useSearchSource } from '@/hooks/useSearchSource';
 import useCanvasStore from '@/store/canvasStore';
 import { usePanelStore } from '@/store/panelStore';
-import { openConversationThread } from '@/store/previewWorkspace/actions';
 import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store';
 import { useWorkspaceStore } from '@/store/workspaceStore';
 import { buildNodeDeepLink } from '@/utils/nodeDeepLink';
@@ -39,7 +37,9 @@ export function QuotedCommentCard({
       data-quoted-comment
       className="group/quoted-comment bg-hover/50 relative flex w-full max-w-full min-w-0 flex-col gap-1 rounded-lg p-2"
     >
-      {source ? <QuoteSourceButton source={source} /> : null}
+      {source && source.kind !== 'chat' ? (
+        <QuoteSourceButton source={source} />
+      ) : null}
       <div className="flex min-w-0 items-center gap-1.5">
         <blockquote className="border-edge-default min-w-0 flex-1 border-l-2 pl-2">
           <Tooltip
@@ -104,7 +104,7 @@ export function QuotedCommentCard({
 function QuoteSourceButton({
   source,
 }: {
-  source: NonNullable<QuotedComment['source']>;
+  source: Exclude<NonNullable<QuotedComment['source']>, { kind: 'chat' }>;
 }) {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -115,16 +115,6 @@ function QuoteSourceButton({
       title={t('messages.quoteSource')}
       className="text-fg-muted w-fit max-w-full px-0 text-xs"
       onClick={() => {
-        if (source.kind === 'chat') {
-          void openConversationThread(source.canvasId, source.threadId).catch(
-            (error: unknown) => {
-              toast(error instanceof Error ? error.message : String(error), {
-                tone: 'warning',
-              });
-            },
-          );
-          return;
-        }
         const canvasId = useCanvasStore.getState().canvasId;
         if (source.canvasId !== canvasId) {
           const url = new URL(
@@ -154,9 +144,7 @@ function QuoteSourceButton({
         ? `PDF · ${source.pages.join(', ')}`
         : source.kind === 'file-reference'
           ? source.path
-          : source.kind === 'chat'
-            ? 'Chat'
-            : 'Note'}
+          : 'Note'}
     </Button>
   );
 }

@@ -89,6 +89,7 @@ it('captures page-normalized geometry and exact selected text across pages', () 
     { x: 0.1, y: 0.1, width: 0.6, height: 0.1 },
   ]);
   expect(captured?.position).toEqual({ x: 70, y: 120 });
+  expect(captured?.selectionRect).toEqual(new DOMRect(10, 10, 60, 110));
 });
 
 it('rejects selections crossing out of the PDF', () => {

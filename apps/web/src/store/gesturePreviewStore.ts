@@ -223,15 +223,24 @@ type GesturePreviewState = GesturePreviewData & {
  */
 export type StructuredDropPreview = {
   nodeId: string;
+  draggedNodeIds?: string[];
   frameId: string;
   kind: 'into-existing' | 'insert-new';
   x: number;
   y: number;
   width: number;
   height: number;
+  placements?: Array<{
+    id: string;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  }>;
   context: StructuredDropContext;
   masonry?: {
     target: StructuredDropTarget;
+    rowTarget?: StructuredDropTarget;
     gap: TrackDropGap | null;
   };
 };
@@ -335,21 +344,38 @@ export const useGesturePreviewStore = create<GesturePreviewState>()(
         !!preview?.masonry?.gap &&
         !!previous?.masonry?.gap &&
         preview.nodeId === previous.nodeId &&
+        preview.draggedNodeIds?.join(',') ===
+          previous.draggedNodeIds?.join(',') &&
         preview.frameId === previous.frameId &&
         preview.context.axis === previous.context.axis &&
+        preview.masonry.gap.axis === previous.masonry.gap.axis &&
         preview.masonry.gap.slot === previous.masonry.gap.slot;
       if (!sameGap) clearTrackDwell();
+      if (sameGap && preview?.masonry && previous?.masonry) {
+        preview = {
+          ...preview,
+          masonry: { ...preview.masonry, gap: previous.masonry.gap },
+        };
+      }
       if (
         sameGap &&
         preview?.masonry &&
-        previous?.masonry?.target.kind === 'insert-new'
+        (previous?.masonry?.target.kind === 'insert-new' ||
+          previous?.masonry?.rowTarget?.kind === 'insert-new')
       ) {
         preview = {
           ...preview,
           kind: 'insert-new',
           masonry: {
             ...preview.masonry,
-            target: previous.masonry.target,
+            target:
+              previous.masonry.target.kind === 'insert-new'
+                ? previous.masonry.target
+                : preview.masonry.target,
+            ...(previous.masonry.rowTarget?.kind === 'insert-new'
+              ? { rowTarget: previous.masonry.rowTarget }
+              : {}),
+            gap: previous.masonry.gap,
           },
         };
       }
@@ -365,7 +391,10 @@ export const useGesturePreviewStore = create<GesturePreviewState>()(
               kind: 'insert-new',
               masonry: {
                 ...current.masonry,
-                target: {
+                [current.masonry.gap.axis === 'row' &&
+                current.context.axis === 'grid'
+                  ? 'rowTarget'
+                  : 'target']: {
                   kind: 'insert-new',
                   slot: current.masonry.gap.slot,
                 },

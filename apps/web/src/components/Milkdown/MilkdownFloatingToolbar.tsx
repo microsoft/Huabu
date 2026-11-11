@@ -61,6 +61,7 @@ import { Popover } from '@/components/Common/Popover';
 import { getAccentTokens } from '@/components/Nodes/design/accentTokens';
 import { useTrackAttention } from '@/hooks/useTrackAttention';
 import { useAnyGlobalModalOpen } from '@/store/globalModalUi';
+import { trackTextSelectionGesture } from '@/utils/textSelectionGesture';
 
 import type { MilkdownInstance, MilkdownTextRange } from './createMilkdown';
 import type {
@@ -266,7 +267,7 @@ export function MilkdownFloatingToolbar({
     isPositioned: toolbarPositioned,
   } = useFloating({
     open: toolbarOpen,
-    placement: 'top',
+    placement: 'bottom',
     middleware: [
       offset(8),
       flip({ padding: 8, boundary: surfaceRef.current ?? undefined }),
@@ -295,22 +296,42 @@ export function MilkdownFloatingToolbar({
     setLinkAvailable(Boolean(instance?.getLinkSnapshot()));
     if (!instance) return;
 
+    let selecting = false;
+    let releaseFrame: number | undefined;
     const update = () => {
+      if (selecting) return;
       setFormatting(readFormattingState(instance));
       setSelectionRect(readSelectionRect(instance));
       setLinkAvailable(Boolean(instance.getLinkSnapshot()));
     };
     const unsubscribeFormatting = instance.onFormattingUpdated((state) => {
+      if (selecting) return;
       setFormatting(state);
       setSelectionRect(readSelectionRect(instance));
       setLinkAvailable(Boolean(instance.getLinkSnapshot()));
     });
+    const surface = surfaceRef.current;
+    const stopGesture = surface
+      ? trackTextSelectionGesture(
+          surface,
+          () => {
+            selecting = true;
+            setSelectionRect(null);
+          },
+          () => {
+            selecting = false;
+            releaseFrame = requestAnimationFrame(update);
+          },
+        )
+      : undefined;
     document.addEventListener('selectionchange', update);
     document.addEventListener('keyup', update, true);
     document.addEventListener('mouseup', update, true);
     window.addEventListener('scroll', update, true);
     window.addEventListener('resize', update);
     return () => {
+      stopGesture?.();
+      if (releaseFrame !== undefined) cancelAnimationFrame(releaseFrame);
       document.removeEventListener('selectionchange', update);
       document.removeEventListener('keyup', update, true);
       document.removeEventListener('mouseup', update, true);
@@ -318,7 +339,7 @@ export function MilkdownFloatingToolbar({
       window.removeEventListener('resize', update);
       unsubscribeFormatting();
     };
-  }, [instance]);
+  }, [instance, surfaceRef]);
 
   useEffect(() => {
     if (toolbarOpen) return;

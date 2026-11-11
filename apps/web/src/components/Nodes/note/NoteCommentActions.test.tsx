@@ -208,6 +208,22 @@ it('blocks pending forks in the on-demand destination menu', async () => {
   );
 });
 
+it('hides the toolbar during selection and restores it on release outside the Note', async () => {
+  await render();
+  expect(commentButton()).toBeTruthy();
+  act(() => {
+    editorRoot.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    document.dispatchEvent(new Event('selectionchange'));
+  });
+  expect(
+    document.querySelector('[aria-label="Comment on selection"]'),
+  ).toBeNull();
+  await act(async () =>
+    document.body.dispatchEvent(new MouseEvent('mouseup', { bubbles: true })),
+  );
+  expect(commentButton()).toBeTruthy();
+});
+
 it.each(['node', 'conversation'] as const)(
   'reuses an already-visible %s destination without duplicating its tab',
   async (kind) => {

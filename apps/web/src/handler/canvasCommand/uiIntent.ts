@@ -126,6 +126,8 @@ export type CanvasUiIntent =
         nodeId: string;
         frameId: string;
         target: StructuredDropTarget;
+        rowTarget?: StructuredDropTarget;
+        draggedNodeIds?: string[];
       };
       /**
        * When true, the user was holding Space at drag-stop (the "opt

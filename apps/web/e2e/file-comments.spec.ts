@@ -3,7 +3,11 @@
 
 import { expect, test } from '@playwright/test';
 
-import { openNewCanvas, readScreenshotPixels } from './helpers';
+import {
+  expectSelectionToolbarOutsideSelection,
+  openNewCanvas,
+  readScreenshotPixels,
+} from './helpers';
 
 import type * as QuestionModule from '../src/components/Nodes/question/questionCompose';
 import type * as CanvasModule from '../src/store/canvasStore';
@@ -149,6 +153,15 @@ for (const mode of ['mouse', 'touch'] as const) {
       const line = editor.locator('.cm-line').first();
       if (mode === 'touch') {
         await line.tap();
+        // Let CodeMirror finish the tap's selection sync before simulating native touch handles.
+        await page.evaluate(
+          () =>
+            new Promise<void>((resolve) => {
+              requestAnimationFrame(() =>
+                requestAnimationFrame(() => resolve()),
+              );
+            }),
+        );
         await line.evaluate((element) => {
           const text = element.firstChild;
           if (!text) throw new Error('Missing source text');
@@ -177,6 +190,7 @@ for (const mode of ['mouse', 'touch'] as const) {
         await page.mouse.move(points.from.x, points.from.y);
         await page.mouse.down();
         await page.mouse.move(points.to.x, points.to.y, { steps: 8 });
+        await expect(page.locator('.selection-context-toolbar')).toHaveCount(0);
         await page.mouse.up();
       }
       await expect(
@@ -184,6 +198,7 @@ for (const mode of ['mouse', 'touch'] as const) {
       ).toBeVisible();
     };
     await selectPassage();
+    await expectSelectionToolbarOutsideSelection(page);
     const capsules = page.locator(
       '.selection-context-toolbar .canvas-context-toolbar',
     );

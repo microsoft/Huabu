@@ -3,7 +3,10 @@
 
 import { expect, test, type Locator } from '@playwright/test';
 
-import { openNewCanvas } from './helpers';
+import {
+  expectSelectionToolbarOutsideSelection,
+  openNewCanvas,
+} from './helpers';
 
 import type * as CanvasModule from '../src/store/canvasStore';
 import type * as ChatModule from '../src/store/chatStore';
@@ -182,6 +185,7 @@ for (const direction of [
       expect(
         await page.evaluate(() => window.getSelection()?.toString()),
       ).not.toBe('');
+      await expect(page.locator('.selection-context-toolbar')).toHaveCount(0);
       await page.mouse.up();
       await expect(
         reader.locator('[data-pdf-text-selection-outline]'),
@@ -197,6 +201,7 @@ for (const direction of [
         });
       }
       await expect(reader.locator('[data-pdf-text-drag]')).toHaveCount(1);
+      await expectSelectionToolbarOutsideSelection(page);
       await expect(reader.locator('[style*="--pdf-highlight-bg"]')).toHaveCount(
         0,
       );
@@ -269,6 +274,14 @@ for (const direction of [
         );
         const toolbar = page.locator('.selection-context-toolbar');
         await expect(toolbar).toBeVisible();
+        const highlightBounds = await highlights.first().boundingBox();
+        const toolbarBounds = await toolbar.boundingBox();
+        if (!highlightBounds || !toolbarBounds)
+          throw new Error('Missing restored highlight or toolbar bounds');
+        expect(
+          toolbarBounds.y >= highlightBounds.y + highlightBounds.height + 7 ||
+            toolbarBounds.y + toolbarBounds.height <= highlightBounds.y - 7,
+        ).toBe(true);
         await expect(toolbar.locator('.canvas-context-toolbar')).toHaveCount(2);
         await expect(
           toolbar.locator('.ink-agent-destination-trigger'),

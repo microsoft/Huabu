@@ -19,6 +19,7 @@ export function TextSelectionToolbar({
   threadId,
   quote,
   position,
+  selectionRect,
   boundary,
   onDismiss,
   onSaveAsNote,
@@ -31,6 +32,7 @@ export function TextSelectionToolbar({
   threadId?: string;
   quote: Omit<QuotedComment, 'comment'>;
   position: { x: number; y: number };
+  selectionRect?: DOMRect;
   boundary?: HTMLElement | null;
   onDismiss: () => void;
   onSaveAsNote?: () => void;
@@ -43,6 +45,8 @@ export function TextSelectionToolbar({
   return (
     <Popover
       position={position}
+      referenceRect={selectionRect}
+      placement="bottom-start"
       offset={{ x: 0, y: 8 }}
       boundary={boundary}
       onDismiss={onDismiss}

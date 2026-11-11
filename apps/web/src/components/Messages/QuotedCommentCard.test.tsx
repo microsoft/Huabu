@@ -38,6 +38,41 @@ const sources: NonNullable<QuotedComment['source']>[] = [
   },
 ];
 
+it('renders Chat quotations without a redundant source label or navigation control', async () => {
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+  await i18n.changeLanguage('en');
+  const host = document.createElement('div');
+  const root = createRoot(host);
+  try {
+    await act(async () =>
+      root.render(
+        <QuotedCommentCard
+          comment={{
+            quote: 'Selected passage',
+            contextBefore: '',
+            contextAfter: '',
+            comment: 'Explain this',
+            source: {
+              kind: 'chat',
+              canvasId: 'space',
+              threadId: 'thread',
+              messageId: 'message',
+            },
+          }}
+        />,
+      ),
+    );
+    expect(host.textContent).toBe('Selected passageExplain this');
+    expect(host.querySelectorAll('button')).toHaveLength(1);
+    expect(host.querySelector('blockquote button')?.textContent).toBe(
+      'Selected passage',
+    );
+  } finally {
+    act(() => root.unmount());
+    vi.unstubAllGlobals();
+  }
+});
+
 it.each(
   sources.flatMap((source) => [source, { ...source, canvasId: 'local' }]),
 )('opens a $canvasId $kind source in its owning Space', async (source) => {

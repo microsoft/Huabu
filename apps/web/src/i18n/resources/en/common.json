@@ -1439,7 +1439,7 @@
       "gridColumns_other": "grid, {{count}} columns"
     },
     "commandOperationAligned": "Aligned nodes: {{count}} ({{detail}})",
-    "commandOperationDistributed": "Distributed nodes: {{count}}",
+    "commandOperationDistributed": "Spread nodes apart: {{count}}",
     "commandOperationReordered": "Reordered nodes: {{count}} ({{detail}})",
     "commandOperationEdgeStyle": "Updated connection styles: {{count}}",
     "failed": "Failed",

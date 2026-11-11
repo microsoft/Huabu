@@ -163,6 +163,7 @@ export const MilkdownMessageCard = memo(function MilkdownMessageCard({
           canvasId={activeCanvasId}
           threadId={threadId}
           position={selection.position}
+          selectionRect={selection.selectionRect}
           quote={{
             quote: selection.text,
             contextBefore: selection.contextBefore,

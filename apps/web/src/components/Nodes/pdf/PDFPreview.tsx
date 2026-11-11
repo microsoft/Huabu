@@ -44,6 +44,7 @@ import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store';
 import { useWorkspaceStore } from '@/store/workspaceStore';
 import { setDragPayload } from '@/utils/io/dragDrop';
 import { pageLifecycle } from '@/utils/pageLifecycle';
+import { trackTextSelectionGesture } from '@/utils/textSelectionGesture';
 
 import { FloatingDragHandle } from '../FloatingDragHandle';
 import {
@@ -191,11 +192,28 @@ export const PDFPreview = ({
       const text = readPdfHighlightText(page, highlight);
       if (!text)
         toast(t('messages.commentSelectionUnavailable'), { tone: 'warning' });
+      const bounds = page.getBoundingClientRect();
+      const left = Math.min(...highlight.rects.map((rect) => rect.x));
+      const top = Math.min(...highlight.rects.map((rect) => rect.y));
+      const right = Math.max(
+        ...highlight.rects.map((rect) => rect.x + rect.width),
+      );
+      const bottom = Math.max(
+        ...highlight.rects.map((rect) => rect.y + rect.height),
+      );
       setPendingTextSelection({
         text,
         highlightId: highlight.id,
         rects: new Map([[highlight.pageIndex, highlight.rects]]),
         position,
+        selectionRect: highlight.rects.length
+          ? new DOMRect(
+              bounds.left + left * bounds.width,
+              bounds.top + top * bounds.height,
+              (right - left) * bounds.width,
+              (bottom - top) * bounds.height,
+            )
+          : undefined,
       });
     },
     [t],
@@ -269,6 +287,7 @@ export const PDFPreview = ({
   // Native text selection and persisted-highlight activation.
   // ---------------------------------------------------------------------------
   useEffect(() => {
+    if (editingComment) return;
     if (embedded || captureMode) {
       setPendingTextSelection(null);
       return;
@@ -319,14 +338,23 @@ export const PDFPreview = ({
       if (selection) setPendingTextSelection(selection);
     };
 
-    el.addEventListener('mouseup', handleMouseUp);
+    const stopGesture = trackTextSelectionGesture(
+      el,
+      () => {
+        if (selectionFrame !== undefined) cancelAnimationFrame(selectionFrame);
+        setPendingTextSelection(null);
+      },
+      (event) => {
+        if (event) handleMouseUp(event);
+      },
+    );
     el.addEventListener('keyup', handleKeyUp);
     return () => {
-      el.removeEventListener('mouseup', handleMouseUp);
+      stopGesture();
       el.removeEventListener('keyup', handleKeyUp);
       if (selectionFrame !== undefined) cancelAnimationFrame(selectionFrame);
     };
-  }, [embedded, captureMode, openHighlight, src, id]);
+  }, [embedded, captureMode, openHighlight, src, id, editingComment]);
 
   // Dismiss selection actions when selection is cleared or on scroll.
   useEffect(() => {
@@ -876,6 +904,7 @@ export const PDFPreview = ({
           canvasId={canvasId}
           boundary={scrollContainerRef.current}
           position={pendingTextSelection.position}
+          selectionRect={pendingTextSelection.selectionRect}
           quote={{
             quote: pendingTextSelection.text,
             contextBefore: '',

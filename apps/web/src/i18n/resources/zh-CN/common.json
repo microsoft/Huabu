@@ -1439,7 +1439,7 @@
       "gridColumns_other": "网格 {{count}} 列"
     },
     "commandOperationAligned": "已对齐节点：{{count}} 个（{{detail}}）",
-    "commandOperationDistributed": "已均匀分布节点：{{count}} 个",
+    "commandOperationDistributed": "已分散排列节点：{{count}} 个",
     "commandOperationReordered": "已调整节点层级：{{count}} 个（{{detail}}）",
     "commandOperationEdgeStyle": "已更新连接样式：{{count}} 条",
     "failed": "失败",
@@ -1550,7 +1550,7 @@
       "top": "顶部对齐",
       "middle": "垂直居中",
       "bottom": "底部对齐",
-      "spreadApart": "均匀分布"
+      "spreadApart": "分散排列"
     },
     "accentColor": "强调色",
     "cardScale": "缩放",

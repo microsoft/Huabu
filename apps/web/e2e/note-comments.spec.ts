@@ -3,7 +3,10 @@
 
 import { expect, test } from '@playwright/test';
 
-import { openNewCanvas } from './helpers';
+import {
+  expectSelectionToolbarOutsideSelection,
+  openNewCanvas,
+} from './helpers';
 
 import type * as QuestionModule from '../src/components/Nodes/question/questionCompose';
 import type * as CanvasModule from '../src/store/canvasStore';
@@ -140,13 +143,45 @@ for (const mode of ['mouse', 'touch'] as const) {
         .getByRole('button', { name: 'Comment on selection', exact: true })
         .tap();
     } else {
-      await editor.locator('p').first().click({ clickCount: 3 });
+      await editor.locator('p').first().click();
+      const points = await editor
+        .locator('p')
+        .first()
+        .evaluate((paragraph) => {
+          const range = document.createRange();
+          if (!paragraph.firstChild || !paragraph.lastChild)
+            throw new Error('Missing Note text');
+          range.setStart(paragraph.firstChild, 0);
+          range.collapse(true);
+          const start = range.getBoundingClientRect();
+          range.setStart(
+            paragraph.lastChild,
+            paragraph.lastChild.textContent?.length ?? 0,
+          );
+          range.collapse(true);
+          const end = range.getBoundingClientRect();
+          return {
+            x: start.x,
+            y: start.y + start.height / 2,
+            endX: end.x,
+            endY: end.y + end.height / 2,
+          };
+        });
+      await page.mouse.move(points.x, points.y);
+      await page.mouse.down();
+      await page.mouse.move(points.endX, points.endY, { steps: 8 });
+      await expect(page.locator('.selection-context-toolbar')).toHaveCount(0);
+      await page.mouse.up();
+      expect(await page.evaluate(() => window.getSelection()?.toString())).toBe(
+        'Before selected passage after.',
+      );
       await expect(
         page.getByRole('button', { name: 'Comment on selection', exact: true }),
       ).toBeVisible();
       await page.screenshot({
         path: testInfo.outputPath('note-selection-toolbar.png'),
       });
+      await expectSelectionToolbarOutsideSelection(page);
       await expect(
         page.locator('.selection-context-toolbar .canvas-context-toolbar'),
       ).toHaveCount(2);

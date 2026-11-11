@@ -5,14 +5,19 @@ import { FRAME_GRID_MAX_COUNT } from '@huabu/shared';
 import {
   FRAME_LAYOUT_CONFIG,
   getNodeSize,
+  readFrameGridConfig,
+  readFrameGridRow,
+  readFrameTrack,
   solveStructuredFrameLayout,
   type FrameAxis,
   type StructuredDropTarget,
+  type StructuredDropRequest,
 } from '@huabu/shared/canvas-engine';
 
 import type { Edge, Node } from '@xyflow/react';
 
 export interface TrackDropGap {
+  axis?: FrameAxis;
   slot: number;
   x: number;
   y: number;
@@ -43,16 +48,15 @@ export function resolveMasonryDrop(
     zoom = 1,
     allowInsert = true,
     previous,
+    layout = solveStructuredFrameLayout(nodes, frameId, 'compact', { edges }),
   }: {
     edges?: readonly Edge[];
     zoom?: number;
     allowInsert?: boolean;
     previous?: StructuredDropTarget;
+    layout?: ReturnType<typeof solveStructuredFrameLayout>;
   } = {},
 ): { target: StructuredDropTarget; gap: TrackDropGap | null } {
-  const layout = solveStructuredFrameLayout(nodes, frameId, 'compact', {
-    edges,
-  });
   const column = axis === 'column';
   const bands = column
     ? (layout?.columnTracks ?? []).map((track) => ({
@@ -71,7 +75,8 @@ export function resolveMasonryDrop(
   if (!frame) return { target: { kind: 'into-existing', slot: 0 }, gap: null };
   const frameSize = getNodeSize(frame);
   let gap: TrackDropGap | null = null;
-  if (allowInsert && bands.length < FRAME_GRID_MAX_COUNT) {
+  const gridRow = axis === 'row' && readFrameGridConfig(frame)?.axis === 'grid';
+  if (allowInsert && (gridRow || bands.length < FRAME_GRID_MAX_COUNT)) {
     for (let slot = 0; slot <= bands.length; slot++) {
       const before = bands[slot - 1];
       const after = bands[slot];
@@ -116,7 +121,7 @@ export function resolveMasonryDrop(
       coordinate >= band.start && coordinate <= band.start + band.extent,
   );
   if (inside >= 0)
-    return { target: { kind: 'into-existing', slot: inside }, gap };
+    return { target: { kind: 'into-existing', slot: inside }, gap: null };
   if (
     previous?.kind === 'into-existing' &&
     previous.slot < bands.length &&
@@ -139,4 +144,116 @@ export function resolveMasonryDrop(
     }
   });
   return { target: { kind: 'into-existing', slot }, gap };
+}
+
+/** Grid shares the same narrow gaps and nearest-boundary targets on both axes. */
+export function resolveGridDrop(
+  nodes: Node[],
+  frameId: string,
+  point: { x: number; y: number },
+  options: {
+    edges?: readonly Edge[];
+    zoom?: number;
+    allowInsert?: boolean;
+    layout?: ReturnType<typeof solveStructuredFrameLayout>;
+    insertAxis?: FrameAxis;
+    previous?: {
+      target: StructuredDropTarget;
+      rowTarget?: StructuredDropTarget;
+      gap?: TrackDropGap | null;
+    };
+  } = {},
+) {
+  const layout =
+    options.layout === undefined
+      ? solveStructuredFrameLayout(nodes, frameId, 'compact', {
+          edges: options.edges,
+        })
+      : options.layout;
+  const column = resolveMasonryDrop(nodes, frameId, 'column', point, {
+    ...options,
+    layout,
+    allowInsert: options.allowInsert !== false && options.insertAxis !== 'row',
+    previous: options.previous?.target,
+  });
+  const row = resolveMasonryDrop(nodes, frameId, 'row', point, {
+    ...options,
+    layout,
+    allowInsert:
+      options.allowInsert !== false && options.insertAxis !== 'column',
+    previous: options.previous?.rowTarget,
+  });
+  // Keep the chosen axis at intersections; a fresh intersection prefers columns.
+  const gap: TrackDropGap | null =
+    row.gap && (!column.gap || options.previous?.gap?.axis === 'row')
+      ? { ...row.gap, axis: 'row' }
+      : column.gap
+        ? { ...column.gap, axis: 'column' }
+        : null;
+  return { target: column.target, rowTarget: row.target, gap };
+}
+
+/** A selection within one Grid moves in cell space, independently of rendered sizes. */
+export function getGridDragGroup(
+  nodes: Node[],
+  frameId: string,
+  ids: readonly string[],
+): Node[] | null {
+  if (
+    ids.length < 2 ||
+    readFrameGridConfig(nodes.find((node) => node.id === frameId))?.axis !==
+      'grid'
+  )
+    return null;
+  const byId = new Map(nodes.map((node) => [node.id, node]));
+  const group: Node[] = [];
+  for (const id of ids) {
+    const node = byId.get(id);
+    if (
+      !node ||
+      node.parentId !== frameId ||
+      readFrameGridRow(node) === undefined ||
+      readFrameTrack(node, 'column') === undefined
+    )
+      return null;
+    group.push(node);
+  }
+  return new Set(
+    group.map(
+      (node) => `${readFrameTrack(node, 'column')}:${readFrameGridRow(node)}`,
+    ),
+  ).size === group.length
+    ? group
+    : null;
+}
+
+export function gridDragRequests(
+  group: Node[],
+  anchorId: string,
+  drop: { target: StructuredDropTarget; rowTarget: StructuredDropTarget },
+  count: number,
+): StructuredDropRequest[] {
+  const columns = group.map((node) => readFrameTrack(node, 'column') ?? 0);
+  const rows = group.map((node) => readFrameGridRow(node) ?? 0);
+  const anchor = group.findIndex((node) => node.id === anchorId);
+  const shift = Math.max(
+    -Math.min(...columns),
+    Math.min(
+      count - 1 - Math.max(...columns),
+      drop.target.slot - columns[Math.max(0, anchor)],
+    ),
+  );
+  // A gap names the top of the whole block; a cell names the grabbed member.
+  const rowShift = Math.max(
+    -Math.min(...rows),
+    drop.rowTarget.slot -
+      (drop.rowTarget.kind === 'insert-new'
+        ? Math.min(...rows)
+        : rows[Math.max(0, anchor)]),
+  );
+  return group.map((node, index) => ({
+    nodeId: node.id,
+    target: { kind: 'into-existing', slot: columns[index] + shift },
+    rowTarget: { ...drop.rowTarget, slot: rows[index] + rowShift },
+  }));
 }

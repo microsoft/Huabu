@@ -61,7 +61,7 @@ export interface UseTextAutoSizeOpts {
   fontOpts: FontOpts;
   /** Placeholder text used to measure minimum width when content is empty. */
   placeholder?: string;
-  /** Node width from NodeProps (only available once measured). */
+  /** Node width from NodeProps (may be zero before the first measurement). */
   width?: number;
   /** Minimum natural width for non-text chrome; never overrides authored width. */
   minAutoWidth?: number;
@@ -107,9 +107,10 @@ export function useTextAutoSize({
   const style = useStore(
     (s) => s.nodeLookup.get(nodeId)?.data?.style as NodeStyle | undefined,
   );
-  const hasFixedWidth = useStore(
-    (s) => typeof s.nodeLookup.get(nodeId)?.style?.width === 'number',
+  const persistedWidth = useStore(
+    (s) => s.nodeLookup.get(nodeId)?.style?.width,
   );
+  const hasFixedWidth = typeof persistedWidth === 'number';
   const persistedHeight = useStore(
     (s) => s.nodeLookup.get(nodeId)?.style?.height as number | undefined,
   );
@@ -245,8 +246,13 @@ export function useTextAutoSize({
   //   resizable fit/scale modes use the dragged height until release.
   // - Font:   live drag value > locked `style.fontSize` > placeholder cap
   // --------------------------------------------------------------------
+  const measuredWidth =
+    width !== undefined && Number.isFinite(width) && width > 0
+      ? width
+      : undefined;
   const effectiveWidth =
-    liveSize?.width ?? (hasFixedWidth ? (width ?? autoWidth) : autoWidth);
+    liveSize?.width ??
+    (hasFixedWidth ? (measuredWidth ?? persistedWidth) : autoWidth);
   const contentWidth = Math.max(effectiveWidth - insetX * 2, 1);
 
   // Placeholder renders at the same font size as user-typed text so there

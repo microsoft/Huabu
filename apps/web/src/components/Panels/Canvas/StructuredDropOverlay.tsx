@@ -17,15 +17,11 @@ export const StructuredDropOverlay = memo(function StructuredDropOverlay() {
   const node = useInternalNode(preview?.nodeId ?? '');
   if (!preview || !node) return null;
 
-  const borderRadius =
-    node.type === 'frame'
-      ? frameVisualMetricsForSize(preview.width, preview.height).borderRadius
-      : nodeMetricsForSize(preview.width, preview.height).radius;
   const opensTrack = preview.kind === 'insert-new';
   const gap = preview.masonry?.gap;
 
   if (gap) {
-    const column = preview.context.axis === 'column';
+    const column = (gap.axis ?? preview.context.axis) === 'column';
     return (
       <ViewportPortal>
         <div
@@ -79,26 +75,36 @@ export const StructuredDropOverlay = memo(function StructuredDropOverlay() {
   return (
     <ViewportPortal>
       <div data-canvas-grounding-exclude aria-hidden className="contents">
-        <div
-          data-structured-drop={preview.kind}
-          className={
-            opensTrack
-              ? 'bg-canvas-overlay-drop border-info pointer-events-none absolute flex items-center justify-center border border-dashed'
-              : 'bg-canvas-overlay-subtle border-info pointer-events-none absolute border border-dashed'
-          }
-          style={{
-            left: preview.x,
-            top: preview.y,
-            width: preview.width,
-            height: preview.height,
-            borderRadius,
-            zIndex: node.internals.z - 1,
-          }}
-        >
-          {opensTrack ? (
-            <Plus className="text-info-fg" size={20} strokeWidth={2.5} />
-          ) : null}
-        </div>
+        {(preview.placements ?? [{ ...preview, id: preview.nodeId }]).map(
+          (rect) => (
+            <div
+              key={rect.id}
+              data-structured-drop-node={rect.id}
+              data-structured-drop={preview.kind}
+              className={
+                opensTrack
+                  ? 'bg-canvas-overlay-drop border-info pointer-events-none absolute flex items-center justify-center border border-dashed'
+                  : 'bg-canvas-overlay-subtle border-info pointer-events-none absolute border border-dashed'
+              }
+              style={{
+                left: rect.x,
+                top: rect.y,
+                width: rect.width,
+                height: rect.height,
+                borderRadius:
+                  node.type === 'frame'
+                    ? frameVisualMetricsForSize(rect.width, rect.height)
+                        .borderRadius
+                    : nodeMetricsForSize(rect.width, rect.height).radius,
+                zIndex: node.internals.z - 1,
+              }}
+            >
+              {opensTrack ? (
+                <Plus className="text-info-fg" size={20} strokeWidth={2.5} />
+              ) : null}
+            </div>
+          ),
+        )}
       </div>
     </ViewportPortal>
   );

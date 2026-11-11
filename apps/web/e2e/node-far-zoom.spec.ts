@@ -284,6 +284,78 @@ async function frames(page: Page) {
   });
 }
 
+for (const size of [400, 102]) {
+  test(`text-only far cards share Note insets at ${size}px and restore overview spacing`, async ({
+    page,
+  }) => {
+    const audit = await mountNodes(page, {
+      width: size,
+      height: size,
+      zoom: 0.24,
+      title: '标题',
+      cover: false,
+    });
+    const before = await page.evaluate(() => window.farZoomFixture.readState());
+    for (const theme of ['light', 'dark']) {
+      await page.evaluate((theme) => {
+        document.documentElement.classList.toggle('dark', theme === 'dark');
+      }, theme);
+      for (const zoom of [0.24, 0.2, 0.19, 0.24]) {
+        await zoomTo(page, zoom);
+        const noteLabel = await shell(page, 'note')
+          .locator('[data-study-label]')
+          .boundingBox();
+        const noteBox = await shell(page, 'note').boundingBox();
+        if (!noteLabel || !noteBox) throw new Error('Missing Note geometry');
+        for (const type of ['web', 'pdf'] as const) {
+          const node = shell(page, type);
+          await expect(node.locator('.preview-card')).toHaveAttribute(
+            'data-orientation',
+            'text',
+          );
+          const box = await node.evaluate((element) => {
+            const info = element.querySelector('.preview-card__info');
+            const title = element.querySelector('.preview-card__title');
+            if (!info || !title) throw new Error('Missing card content');
+            const rect = element.getBoundingClientRect();
+            const infoRect = info.getBoundingClientRect();
+            const titleRect = title.getBoundingClientRect();
+            const style = getComputedStyle(info);
+            return {
+              left: infoRect.left + parseFloat(style.paddingLeft) - rect.left,
+              top: titleRect.top - rect.top,
+              right: parseFloat(style.paddingRight),
+              bottom: parseFloat(style.paddingBottom),
+            };
+          });
+          expect(box.left).toBeCloseTo(noteLabel.x - noteBox.x, 1);
+          expect(box.top).toBeCloseTo(noteLabel.y - noteBox.y, 1);
+          expect(box.right).toBeCloseTo(box.left - zoom, 1);
+          expect(box.bottom).toBeCloseTo(box.top - zoom, 1);
+        }
+      }
+      await test.info().attach(`aligned-far-cards-${size}-${theme}`, {
+        body: await page.locator('#far-zoom-fixture').screenshot({
+          path: test.info().outputPath(`aligned-${theme}.png`),
+        }),
+        contentType: 'image/png',
+      });
+    }
+    await zoomTo(page, 0.5);
+    for (const type of ['web', 'pdf'] as const) {
+      await expect(shell(page, type).locator('.preview-card__info')).toHaveCSS(
+        'padding',
+        `${(16 * (size - 2 * NODE_BORDER_WIDTH)) / 400}px`,
+      );
+    }
+    expect(
+      await page.evaluate(() => window.farZoomFixture.readState()),
+    ).toEqual(before);
+    expect(audit.writes).toEqual([]);
+    expect(audit.errors).toEqual([]);
+  });
+}
+
 test('dense Note titles require one complete 16px line without changing geometry', async ({
   page,
 }) => {
@@ -520,6 +592,11 @@ for (const [width, height] of [
         await zoomTo(page, zoom, type);
         await expectLayers(node, true);
         const card = node.locator('.preview-card');
+        await expect(
+          orientation === 'horizontal'
+            ? card
+            : node.locator('.preview-card__info'),
+        ).toHaveCSS('padding', '6px');
         await expect(card).toHaveCSS('background-color', tint);
         await expect(node.locator('.preview-card__cover')).toHaveCSS(
           'background-color',

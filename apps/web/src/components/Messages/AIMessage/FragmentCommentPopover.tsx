@@ -15,7 +15,7 @@ import type { ReactNode } from 'react';
 
 export type FragmentCommentSelection = Pick<
   MilkdownPreviewSelection,
-  'text' | 'contextBefore' | 'contextAfter' | 'position'
+  'text' | 'contextBefore' | 'contextAfter' | 'position' | 'selectionRect'
 >;
 
 interface FragmentCommentPopoverProps {
@@ -73,6 +73,7 @@ export function FragmentCommentPopover({
             onChange={(event) => setComment(event.target.value)}
             onKeyDown={(event) => {
               if (event.key !== 'Enter') return;
+              event.stopPropagation();
               if (
                 event.nativeEvent.isComposing ||
                 event.nativeEvent.keyCode === 229

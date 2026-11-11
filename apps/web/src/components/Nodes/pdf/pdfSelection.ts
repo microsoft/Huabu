@@ -9,6 +9,7 @@ import type { PdfHighlight } from '@huabu/shared';
 export interface PdfTextSelection {
   text: string;
   position: { x: number; y: number };
+  selectionRect?: DOMRect;
   rects: Map<number, Rect[]>;
   highlightId?: string;
 }
@@ -28,6 +29,7 @@ export function readPdfSelection(
   const pages = root.querySelectorAll<HTMLElement>('[data-pdf-page-index]');
   const rects = new Map<number, Rect[]>();
   let last: DOMRect | undefined;
+  let selectionRect: DOMRect | undefined;
   for (const rect of range.getClientRects()) {
     if (rect.width <= 0 || rect.height <= 0) continue;
     for (const page of pages) {
@@ -51,6 +53,14 @@ export function readPdfSelection(
       });
       rects.set(index, values);
       last = rect;
+      const left = Math.min(selectionRect?.left ?? rect.left, rect.left);
+      const top = Math.min(selectionRect?.top ?? rect.top, rect.top);
+      selectionRect = new DOMRect(
+        left,
+        top,
+        Math.max(selectionRect?.right ?? rect.right, rect.right) - left,
+        Math.max(selectionRect?.bottom ?? rect.bottom, rect.bottom) - top,
+      );
       break;
     }
   }
@@ -64,6 +74,7 @@ export function readPdfSelection(
         text: selection.toString().trim(),
         rects,
         position: { x: last.right, y: last.bottom },
+        selectionRect,
       }
     : null;
 }

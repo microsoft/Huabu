@@ -20,6 +20,7 @@ import { useTrackAttention } from '@/hooks/useTrackAttention';
 import useCanvasStore from '@/store/canvasStore';
 import { useAnyGlobalModalOpen } from '@/store/globalModalUi';
 import { copyToClipboard } from '@/utils/io/clipboard';
+import { trackTextSelectionGesture } from '@/utils/textSelectionGesture';
 
 import type { FileReadResult } from '@huabu/shared';
 import type { RefObject } from 'react';
@@ -38,6 +39,8 @@ export function captureFileComment(
   const text = doc.sliceString(from, to);
   if (!text.trim()) return null;
   const rect = view.coordsAtPos(selection.main.head);
+  const start = view.coordsAtPos(from, 1);
+  const end = view.coordsAtPos(to, -1);
   if (!rect) return null;
   return {
     selection: {
@@ -45,6 +48,15 @@ export function captureFileComment(
       contextBefore: doc.sliceString(Math.max(0, from - 40), from),
       contextAfter: doc.sliceString(to, Math.min(doc.length, to + 40)),
       position: { x: rect.right, y: rect.bottom },
+      selectionRect:
+        start && end
+          ? new DOMRect(
+              Math.min(start.left, end.left),
+              Math.min(start.top, end.top),
+              Math.max(start.right, end.right) - Math.min(start.left, end.left),
+              Math.max(start.bottom, end.bottom) - Math.min(start.top, end.top),
+            )
+          : undefined,
     },
     source: {
       kind: 'file-reference',
@@ -104,15 +116,16 @@ export function FileCommentActions({
     setSelection(null);
     if (!view || !file || disabled) return;
     let active = true;
+    let selecting = false;
     const update = () => {
       view.requestMeasure({
         key: compartment,
         read: () =>
-          active
+          active && !selecting
             ? captureFileComment(view, { canvasId, nodeId, agentletId }, file)
             : null,
         write: (next) => {
-          if (active) setSelection(next);
+          if (active && !selecting) setSelection(next);
         },
       });
     };
@@ -128,10 +141,22 @@ export function FileCommentActions({
           : compartment.reconfigure(listener),
     });
     update();
+    const stopGesture = trackTextSelectionGesture(
+      view.dom,
+      () => {
+        selecting = true;
+        setSelection(null);
+      },
+      () => {
+        selecting = false;
+        update();
+      },
+    );
     const onScroll = () => setSelection(null);
     window.addEventListener('scroll', onScroll, true);
     return () => {
       active = false;
+      stopGesture();
       view.dispatch({ effects: compartment.reconfigure([]) });
       window.removeEventListener('scroll', onScroll, true);
     };
@@ -147,6 +172,8 @@ export function FileCommentActions({
       !dismissed ? (
         <Popover
           position={selection.selection.position}
+          referenceRect={selection.selection.selectionRect}
+          placement="bottom-start"
           className="selection-context-toolbar border-0 bg-transparent p-0 shadow-none"
           boundary={surfaceRef.current}
           onDismiss={() => setDismissed(true)}

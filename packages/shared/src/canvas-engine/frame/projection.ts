@@ -1,10 +1,14 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { fitFrames } from './fit.js';
+import { fitFrameToChildren } from './fit.js';
 import { getFrameSizing } from './sizing.js';
 import { applyStructuredFrameRelayout } from '../autoLayout/gridLayout.js';
-import { indexById, type NestableNode } from '../container/tree.js';
+import {
+  getAncestorIds,
+  indexById,
+  type NestableNode,
+} from '../container/tree.js';
 
 import type { Edge } from '@xyflow/react';
 
@@ -17,8 +21,8 @@ export interface AffectedFrameProjection {
  * Project the final geometry of affected Frames and their ancestor chain.
  *
  * Callers supply a tree whose parent membership already represents the future
- * transaction. Free/Hug Frames fit deepest-first, then structured ancestors
- * relayout deepest-first against those fitted child footprints.
+ * transaction. Each Frame completes its own layout deepest-first, so mixed
+ * free/structured ancestors always consume the final child footprint.
  */
 export function projectAffectedFrameGeometry(
   nodes: NestableNode[],
@@ -41,16 +45,25 @@ export function projectAffectedFrameGeometry(
     return { nodes, affectedFrameIds };
   }
 
-  const hugFrameIds = [...affectedFrameIds].filter(
-    (id) => getFrameSizing(byId.get(id)) === 'hug',
-  );
-  const fitted = fitFrames(nodes, hugFrameIds);
-  const relaid = applyStructuredFrameRelayout(
-    fitted,
-    affectedFrameIds,
-    undefined,
-    { edges },
-  ).nodes as NestableNode[];
+  const ordered = [...affectedFrameIds]
+    .map((id) => ({ id, depth: getAncestorIds(byId, id).length }))
+    .sort((a, b) => b.depth - a.depth);
+  let projected = nodes;
+  for (const { id } of ordered) {
+    const structured = applyStructuredFrameRelayout(
+      projected,
+      [id],
+      undefined,
+      { edges },
+    );
+    projected = structured.nodes;
+    if (
+      !structured.handledFrameIds.has(id) &&
+      getFrameSizing(byId.get(id)) === 'hug'
+    ) {
+      projected = fitFrameToChildren(projected, id);
+    }
+  }
 
-  return { nodes: relaid, affectedFrameIds };
+  return { nodes: projected, affectedFrameIds };
 }

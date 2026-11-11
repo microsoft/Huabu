@@ -55,6 +55,482 @@ function expectRect(actual: Rect, expected: Rect) {
   }
 }
 
+for (const destination of ['occupied', 'gap', 'tail'] as const) {
+  test(`Grid same-row selection moves together to ${destination}`, async ({
+    page,
+  }) => {
+    await page.addInitScript(() => {
+      localStorage.setItem(
+        'huabu-sketch-tools',
+        JSON.stringify({
+          state: { inputModePreference: 'mouse' },
+          version: 0,
+        }),
+      );
+    });
+    await openNewCanvas(page);
+    await page.keyboard.press('Escape');
+    await execute(page, [
+      {
+        type: 'CREATE_NODES',
+        nodes: [
+          {
+            id: 'node-grid-group',
+            nodeType: 'frame',
+            selectOnCreate: false,
+            position: { x: 100, y: 100 },
+            size: { width: 440, height: 440 },
+            data: { layoutMode: 'grid', gridCount: 2, sizing: 'hug' },
+          },
+          ...Array.from({ length: 6 }, (_, index) => ({
+            id: `node-group-${index}` as CanvasNodeId,
+            nodeType: 'note' as const,
+            selectOnCreate: false,
+            parentId: 'node-grid-group' as CanvasNodeId,
+            position: { x: 0, y: 0 },
+            size: { width: 160, height: 80 },
+            data: {
+              label: `Group ${index}`,
+              content: `Group ${index}`,
+              frameColumn: index % 2,
+              frameRow: Math.floor(index / 2),
+            },
+          })),
+        ],
+      },
+    ]);
+    await page.addInitScript((id) => {
+      localStorage.setItem(
+        `huabu.viewport.${id}`,
+        JSON.stringify({ x: 180, y: 80, zoom: 1 }),
+      );
+    }, canvasId(page));
+    await page.reload();
+    await expect(page.locator('.react-flow__node')).toHaveCount(7);
+    await expect.poll(() => readViewportTransform(page)).toContain('scale(1)');
+    const child = (index: number) =>
+      page.locator(`.react-flow__node[data-id="node-group-${index}"]`);
+    const first = await rect(child(0));
+    const below = await rect(child(2));
+    const last = await rect(child(4));
+    const selected = destination === 'tail' ? [0, 1] : [4, 5];
+    const left = await rect(child(selected[0]));
+    const right = await rect(child(selected[1]));
+    await page.mouse.move(left.x - 8, left.y - 8);
+    await page.mouse.down();
+    await page.mouse.move(
+      right.x + right.width + 8,
+      right.y + right.height + 8,
+      { steps: 6 },
+    );
+    await page.mouse.up();
+    await expect(child(selected[0])).toHaveClass(/selected/);
+    await expect(child(selected[1])).toHaveClass(/selected/);
+    // Start on the right-hand member, but aim into the left column.
+    await page.mouse.move(right.x + 50, right.y + 8);
+    await page.mouse.down();
+    const point = {
+      x: first.x + 40,
+      y:
+        destination === 'tail'
+          ? last.y + last.height + 10
+          : destination === 'gap'
+            ? (first.y + first.height + below.y) / 2
+            : below.y + 30,
+    };
+    await page.mouse.move(point.x, point.y, { steps: 6 });
+    const footprints = new Map<number, Rect>();
+    if (destination === 'occupied') {
+      for (const index of selected) {
+        const marker = page.locator(
+          `[data-structured-drop-node="node-group-${index}"]`,
+        );
+        await expect(marker).toBeVisible();
+        footprints.set(index, await rect(marker));
+      }
+    } else {
+      await expect(page.locator('[data-track-insert-label]')).toHaveText(
+        'New row',
+      );
+    }
+    await page.mouse.up();
+    const cells = (nodes: Node[]) =>
+      nodes
+        .filter((node) => node.parentId === 'node-grid-group')
+        .sort((a, b) => a.id.localeCompare(b.id))
+        .map((node) => ({
+          id: node.id,
+          column: node.data.frameColumn,
+          row: node.data.frameRow,
+        }));
+    const expected = Array.from({ length: 6 }, (_, index) => ({
+      id: `node-group-${index}`,
+      column: index % 2,
+      row:
+        destination === 'tail'
+          ? [2, 0, 1][Math.floor(index / 2)]
+          : [0, 2, 1][Math.floor(index / 2)],
+    }));
+    await expect(async () =>
+      expect(cells(await savedNodes(page))).toEqual(expected),
+    ).toPass();
+    await expect(page.locator('.react-flow__node')).toHaveCount(7);
+    for (const [index, footprint] of footprints) {
+      await expect(async () =>
+        expectRect(await rect(child(index)), footprint),
+      ).toPass();
+    }
+    await page.keyboard.press('ControlOrMeta+z');
+    await expect(async () =>
+      expect(cells(await savedNodes(page))).toEqual(
+        expected.map((cell, index) => ({
+          ...cell,
+          row: Math.floor(index / 2),
+        })),
+      ),
+    ).toPass();
+    await page.keyboard.press('ControlOrMeta+Shift+z');
+    await expect(async () =>
+      expect(cells(await savedNodes(page))).toEqual(expected),
+    ).toPass();
+    await page.reload();
+    await expect(page.locator('.react-flow__node')).toHaveCount(7);
+    expect(cells(await savedNodes(page))).toEqual(expected);
+  });
+}
+
+for (const shape of [
+  {
+    name: 'diagonal',
+    cells: [
+      [0, 0],
+      [1, 1],
+    ],
+  },
+  {
+    name: 'L-shaped',
+    cells: [
+      [0, 0],
+      [1, 0],
+      [0, 1],
+    ],
+  },
+  {
+    name: 'sparse',
+    cells: [
+      [0, 0],
+      [2, 2],
+    ],
+  },
+]) {
+  for (const destination of ['occupied', 'head-gap'] as const) {
+    test(`Grid ${shape.name} selection preserves offsets at ${destination}`, async ({
+      page,
+    }) => {
+      await page.addInitScript(() => {
+        localStorage.setItem(
+          'huabu-sketch-tools',
+          JSON.stringify({
+            state: { inputModePreference: 'mouse' },
+            version: 0,
+          }),
+        );
+      });
+      await openNewCanvas(page);
+      await page.keyboard.press('Escape');
+      const originalCells = [
+        { id: 'node-peer-0', column: 0, row: 0 },
+        { id: 'node-peer-1', column: 1, row: 1 },
+        ...shape.cells.map(([column, row], index) => ({
+          id: `node-shape-${index}`,
+          column,
+          row: row + 2,
+        })),
+      ];
+      await execute(page, [
+        {
+          type: 'CREATE_NODES',
+          nodes: [
+            {
+              id: 'node-shape-frame',
+              nodeType: 'frame',
+              selectOnCreate: false,
+              position: { x: 100, y: 100 },
+              size: { width: 440, height: 600 },
+              data: { layoutMode: 'grid', gridCount: 3, sizing: 'hug' },
+            },
+            ...originalCells.map(({ id, column, row }) => ({
+              id: id as CanvasNodeId,
+              nodeType: 'note' as const,
+              selectOnCreate: false,
+              parentId: 'node-shape-frame' as CanvasNodeId,
+              position: { x: 0, y: 0 },
+              size: { width: 120, height: 60 },
+              data: { content: id, frameColumn: column, frameRow: row },
+            })),
+          ],
+        },
+      ]);
+      await page.addInitScript((id) => {
+        localStorage.setItem(
+          `huabu.viewport.${id}`,
+          JSON.stringify({ x: 180, y: 40, zoom: 1 }),
+        );
+      }, canvasId(page));
+      await page.reload();
+      await expect(page.locator('.react-flow__node')).toHaveCount(
+        originalCells.length + 1,
+      );
+      const node = (id: string) =>
+        page.locator(`.react-flow__node[data-id="${id}"]`);
+      const movingIds = shape.cells.map((_, index) => `node-shape-${index}`);
+      const boxes = await Promise.all(movingIds.map((id) => rect(node(id))));
+      await page.mouse.move(
+        Math.min(...boxes.map((box) => box.x)) - 6,
+        Math.min(...boxes.map((box) => box.y)) - 6,
+      );
+      await page.mouse.down();
+      await page.mouse.move(
+        Math.max(...boxes.map((box) => box.x + box.width)) + 6,
+        Math.max(...boxes.map((box) => box.y + box.height)) + 6,
+        { steps: 6 },
+      );
+      await page.mouse.up();
+      for (const id of movingIds)
+        await expect(node(id)).toHaveClass(/selected/);
+      await expect(node('node-peer-0')).not.toHaveClass(/selected/);
+      const anchor = boxes[boxes.length - 1];
+      const target = await rect(node('node-peer-0'));
+      await page.mouse.move(anchor.x + 30, anchor.y + 8);
+      await page.mouse.down();
+      await page.mouse.move(
+        target.x + 30,
+        destination === 'head-gap' ? target.y - 8 : target.y + 25,
+        { steps: 8 },
+      );
+      const footprints = new Map<string, Rect>();
+      if (destination === 'head-gap') {
+        await expect(page.locator('[data-track-insert-label]')).toHaveText(
+          'New row',
+        );
+      } else {
+        for (const id of movingIds) {
+          const marker = page.locator(`[data-structured-drop-node="${id}"]`);
+          await expect(marker).toBeVisible();
+          footprints.set(id, await rect(marker));
+        }
+      }
+      await page.mouse.up();
+      const cells = (nodes: Node[]) =>
+        nodes
+          .filter((node) => node.parentId === 'node-shape-frame')
+          .map((node) => ({
+            id: node.id,
+            column: Number(node.data.frameColumn),
+            row: Number(node.data.frameRow),
+          }))
+          .sort((a, b) => a.id.localeCompare(b.id));
+      await expect(async () => {
+        const saved = cells(await savedNodes(page));
+        expect(saved).toHaveLength(originalCells.length);
+        const first = saved.find((cell) => cell.id === movingIds[0]);
+        expect(first?.row).toBe(0);
+        shape.cells.forEach(([column, row], index) => {
+          const moved = saved.find((cell) => cell.id === movingIds[index]);
+          expect((moved?.column ?? -1) - (first?.column ?? 0)).toBe(column);
+          expect((moved?.row ?? -1) - (first?.row ?? 0)).toBe(row);
+        });
+        expect(
+          new Set(saved.map((cell) => `${cell.column}:${cell.row}`)).size,
+        ).toBe(originalCells.length);
+      }).toPass();
+      for (const [id, footprint] of footprints) {
+        await expect(async () =>
+          expectRect(await rect(node(id)), footprint),
+        ).toPass();
+      }
+      const committed = cells(await savedNodes(page));
+      await page.keyboard.press('ControlOrMeta+z');
+      await expect(async () =>
+        expect(cells(await savedNodes(page))).toEqual(
+          [...originalCells].sort((a, b) => a.id.localeCompare(b.id)),
+        ),
+      ).toPass();
+      await page.keyboard.press('ControlOrMeta+Shift+z');
+      await expect(async () =>
+        expect(cells(await savedNodes(page))).toEqual(committed),
+      ).toPass();
+      await page.reload();
+      await expect(page.locator('.react-flow__node')).toHaveCount(
+        originalCells.length + 1,
+      );
+      expect(cells(await savedNodes(page))).toEqual(committed);
+    });
+  }
+}
+
+for (const axis of ['column', 'row'] as const) {
+  for (const armed of [false, true]) {
+    test(`Grid ${axis} gap uses dwell before insertion (armed: ${armed})`, async ({
+      page,
+    }, testInfo) => {
+      await page.addInitScript(() => {
+        localStorage.setItem(
+          'huabu-sketch-tools',
+          JSON.stringify({
+            state: { inputModePreference: 'mouse' },
+            version: 0,
+          }),
+        );
+      });
+      await openNewCanvas(page);
+      await page.keyboard.press('Escape');
+      await execute(page, [
+        {
+          type: 'CREATE_NODES',
+          nodes: [
+            {
+              id: 'node-grid-dwell',
+              nodeType: 'frame',
+              selectOnCreate: false,
+              position: { x: 100, y: 100 },
+              size: { width: 440, height: 440 },
+              data: { layoutMode: 'grid', gridCount: 2, sizing: 'hug' },
+            },
+            ...Array.from({ length: 6 }, (_, index) => ({
+              id: `node-grid-${index}` as CanvasNodeId,
+              nodeType: 'note' as const,
+              selectOnCreate: false,
+              parentId: 'node-grid-dwell' as CanvasNodeId,
+              position: { x: 0, y: 0 },
+              size: { width: 160, height: 80 },
+              data: {
+                label: `Grid ${index}`,
+                content: `Grid ${index}`,
+                frameColumn: index % 2,
+                frameRow: Math.floor(index / 2),
+              },
+            })),
+          ],
+        },
+      ]);
+      await page.addInitScript((id) => {
+        localStorage.setItem(
+          `huabu.viewport.${id}`,
+          JSON.stringify({ x: 180, y: 80, zoom: 1 }),
+        );
+      }, canvasId(page));
+      await page.reload();
+      await expect(page.locator('.react-flow__node')).toHaveCount(7);
+      await expect
+        .poll(() => readViewportTransform(page))
+        .toContain('scale(1)');
+      const child = (index: number) =>
+        page.locator(`.react-flow__node[data-id="node-grid-${index}"]`);
+      const first = await rect(child(0));
+      const right = await rect(child(1));
+      const below = await rect(child(2));
+      const start = await rect(child(5));
+      const peers = await Promise.all(
+        Array.from({ length: 5 }, (_, index) => rect(child(index))),
+      );
+      const point =
+        axis === 'column'
+          ? { x: (first.x + first.width + right.x) / 2, y: first.y + 20 }
+          : { x: first.x + 30, y: (first.y + first.height + below.y) / 2 };
+      await page.mouse.move(start.x + start.width / 2, start.y + 8);
+      await page.mouse.down();
+      await page.mouse.move(point.x, point.y, { steps: 6 });
+      const marker = page.locator('[data-structured-gap]');
+      await expect(marker).toHaveAttribute(
+        'data-structured-drop',
+        'into-existing',
+      );
+      const before = await rect(marker);
+      if (armed) {
+        await expect(marker).toHaveAttribute(
+          'data-structured-drop',
+          'insert-new',
+        );
+        await expect(page.locator('[data-track-insert-label]')).toHaveText(
+          axis === 'column' ? 'New column' : 'New row',
+        );
+        await page.mouse.move(point.x + 1, point.y + 1);
+        expectRect(await rect(marker), before);
+        for (const [index, peer] of peers.entries()) {
+          expectRect(await rect(child(index)), peer);
+        }
+        await page.screenshot({
+          path: testInfo.outputPath(`grid-${axis}-armed.png`),
+        });
+        await page.mouse.move(first.x + 30, first.y + 20);
+        await expect(page.locator('[data-track-insert-label]')).toHaveCount(0);
+        await page.mouse.move(point.x, point.y);
+        await expect(marker).toHaveAttribute(
+          'data-structured-drop',
+          'into-existing',
+        );
+        await expect(marker).toHaveAttribute(
+          'data-structured-drop',
+          'insert-new',
+        );
+      }
+      await page.mouse.up();
+      await expect(marker).toHaveCount(0);
+      const cells = (nodes: Node[]) =>
+        nodes
+          .filter((node) => node.parentId === 'node-grid-dwell')
+          .map((node) => ({
+            id: node.id,
+            column: node.data.frameColumn,
+            row: node.data.frameRow,
+          }))
+          .sort((a, b) => a.id.localeCompare(b.id));
+      await expect(async () => {
+        const nodes = await savedNodes(page);
+        const frame = nodes.find((node) => node.id === 'node-grid-dwell');
+        expect(frame?.data.gridCount).toBe(armed && axis === 'column' ? 3 : 2);
+        if (armed) {
+          expect(
+            cells(nodes).find((cell) => cell.id === 'node-grid-5')?.[axis],
+          ).toBe(1);
+          expect(
+            cells(nodes).find(
+              (cell) =>
+                cell.id === (axis === 'row' ? 'node-grid-2' : 'node-grid-1'),
+            )?.[axis],
+          ).toBe(2);
+        } else {
+          expect(
+            Math.max(...cells(nodes).map((cell) => Number(cell.row))),
+          ).toBe(2);
+          const moved = cells(nodes).find((cell) => cell.id === 'node-grid-5');
+          expect(moved?.column).toBe(axis === 'column' ? 1 : 0);
+          expect(Number(moved?.row)).toBeLessThan(2);
+        }
+      }).toPass();
+      const committed = cells(await savedNodes(page));
+      await page.keyboard.press('ControlOrMeta+z');
+      await expect(async () => {
+        expect(cells(await savedNodes(page))).toEqual(
+          Array.from({ length: 6 }, (_, index) => ({
+            id: `node-grid-${index}`,
+            column: index % 2,
+            row: Math.floor(index / 2),
+          })),
+        );
+      }).toPass();
+      await page.keyboard.press('ControlOrMeta+Shift+z');
+      await expect(async () =>
+        expect(cells(await savedNodes(page))).toEqual(committed),
+      ).toPass();
+      await page.reload();
+      await expect(page.locator('.react-flow__node')).toHaveCount(7);
+      expect(cells(await savedNodes(page))).toEqual(committed);
+    });
+  }
+}
+
 for (const axis of ['column', 'row'] as const) {
   for (const zoom of [0.5, 1]) {
     for (const { quickRelease, inputMode } of [false, true].flatMap(
