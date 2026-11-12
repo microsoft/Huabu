@@ -52,6 +52,7 @@ import {
   isChangeStale,
   hasValidPdfNoteOwnership,
   hidePdfNotes,
+  pdfNoteId,
   nodeRevision,
   preserveAgentNodeOwnedData,
   projectAgentNodeEditableData,
@@ -645,7 +646,7 @@ export interface ExecuteOnServerOutput {
      * CONNECT_NODES / SET_NODE_PARENT call instead of inventing ids. Image
      * nodes additionally carry their server-derived width/height/src for
      * exact follow-up layout. Also emitted for MERGE_NODE_DATA writes that
-     * change an image src.
+     * change an image src, and for INITIALIZE_PDF_NOTE (new or reused Note).
      */
     nodes?: Array<{
       nodeId: string;
@@ -1057,7 +1058,27 @@ async function executePreparedOnServerAlreadyLocked(
     // follow-up CONNECT_NODES / SET_NODE_PARENT call with the real,
     // server-assigned ids instead of inventing ids that collide across
     // runs. Image nodes also carry server-derived dimensions/src.
-    if (r.applied && r.command.type === 'CREATE_NODES') {
+    if (
+      r.command.type === 'INITIALIZE_PDF_NOTE' &&
+      (r.applied || r.reason === 'no-op')
+    ) {
+      const pdf = finalById.get(r.command.nodeId);
+      const noteId = pdf && pdfNoteId(pdf);
+      const note = noteId ? finalById.get(noteId) : undefined;
+      if (note?.type === 'note') {
+        result.nodes = [
+          {
+            nodeId: note.id,
+            ...(typeof note.data.label === 'string'
+              ? { label: note.data.label }
+              : {}),
+            width: typeof note.style?.width === 'number' ? note.style.width : 0,
+            height:
+              typeof note.style?.height === 'number' ? note.style.height : 0,
+          },
+        ];
+      }
+    } else if (r.applied && r.command.type === 'CREATE_NODES') {
       const nodes = r.command.nodes
         .map((n) => {
           const node = finalById.get(n.id as string);

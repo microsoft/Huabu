@@ -1248,6 +1248,112 @@ describe('SNAPSHOT_NODES Space query', () => {
 });
 
 describe('POST /api/rfs/:canvasId/execute', () => {
+  it('initializes PDF notes through the public schema and returns the same Note on concurrent retries', async () => {
+    seedNote('c1', 'node-independent', 'Independent', 'Do not claim');
+    const app = await buildApp();
+    try {
+      const execute = (commands: unknown[]) =>
+        app.inject({
+          method: 'POST',
+          url: '/rfs/c1/execute',
+          headers: { 'content-type': 'application/json' },
+          payload: { commands },
+        });
+      const pdfResponse = await execute([
+        {
+          type: 'CREATE_NODES',
+          nodes: [
+            {
+              nodeType: 'pdf',
+              position: { x: 0, y: 0 },
+              data: { label: 'Paper' },
+            },
+          ],
+        },
+      ]);
+      expect(pdfResponse.statusCode).toBe(200);
+      const pdfId = rfsExecuteResponseSchema.parse(pdfResponse.json())
+        .results[0].nodes?.[0].nodeId;
+      expect(pdfId).toBeDefined();
+      const command = { type: 'INITIALIZE_PDF_NOTE', nodeId: pdfId };
+      const responses = await Promise.all([
+        execute([command]),
+        execute([command]),
+      ]);
+      responses.forEach((response) => expect(response.statusCode).toBe(200));
+      const results = responses.map((response) =>
+        rfsExecuteResponseSchema.parse(response.json()),
+      );
+      const created = results.find((result) => result.results[0].applied);
+      const reused = results.find((result) => !result.results[0].applied);
+      const noteId = created?.results[0].nodes?.[0].nodeId;
+      expect(noteId).toBeDefined();
+      expect(reused?.results[0]).toMatchObject({
+        reason: 'no-op',
+        nodes: [{ nodeId: noteId }],
+      });
+      expect(reused?.toVersion).toBe(reused?.fromVersion);
+      const store = getCanvasStore('c1');
+      expect(store.read()?.state.nodes).toHaveLength(3);
+      expect(store.read()?.state.nodes).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: noteId,
+            type: 'note',
+            hidden: true,
+            selected: false,
+          }),
+          expect.objectContaining({
+            id: pdfId,
+            data: expect.objectContaining({ noteNodeId: noteId }),
+          }),
+        ]),
+      );
+      const edit = await execute([
+        {
+          type: 'MERGE_NODE_DATA',
+          patches: [
+            {
+              nodeId: noteId,
+              patch: { content: 'Edited through the ordinary Note API' },
+              expectRev: created?.revisions.find(
+                (entry) => entry.nodeId === noteId,
+              )?.rev,
+            },
+          ],
+        },
+      ]);
+      expect(edit.statusCode).toBe(200);
+      expect(
+        rfsExecuteResponseSchema.parse(edit.json()).results[0].applied,
+      ).toBe(true);
+      const repeated = rfsExecuteResponseSchema.parse(
+        (await execute([command])).json(),
+      );
+      expect(repeated.results[0]).toMatchObject({
+        applied: false,
+        reason: 'no-op',
+        nodes: [{ nodeId: noteId }],
+      });
+      if (!noteId) throw new Error('Missing initialized Note ID');
+      expect(store.readNode(noteId)?.content).toBe(
+        'Edited through the ordinary Note API',
+      );
+      const before = store.read();
+      for (const nodeId of ['node-independent', 'node-missing']) {
+        const invalid = rfsExecuteResponseSchema.parse(
+          (await execute([{ ...command, nodeId }])).json(),
+        );
+        expect(invalid.results[0].applied).toBe(false);
+        expect(invalid.results[0].nodes).toBeUndefined();
+        expect(invalid.toVersion).toBe(invalid.fromVersion);
+      }
+      expect(store.read()).toEqual(before);
+    } finally {
+      await app.close();
+    }
+  });
+
   const writeWorldFixture = (
     directory: string,
     canvasId: string,

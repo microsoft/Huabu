@@ -105,6 +105,7 @@ Same-parent move validation treats both a persisted `null` parent and an absent 
 `CanvasCommand` is the smallest shared executable domain instruction (not the smallest state diff). A command may own deterministic domain behavior inside execution:
 
 - `DELETE_NODES` automatically removes incident edges.
+- `INITIALIZE_PDF_NOTE` accepts a PDF `nodeId` and creates one empty, hidden, independently stored Note plus its ownership link in a single undoable operation. It reuses the ordinary Note creation handler and naming/defaults. Existing valid links are no-ops that preserve content; malformed links and missing/non-PDF targets fail without mutation. Server execution returns the created or reused Note in `results[].nodes[0]`, including on a no-op, so Agent callers never assign or coordinate Note IDs. The frontend notes action uses this same command. Persistence uses the executor's existing rollback-protected topology/sidecar commit and mutex.
 - `SET_NODE_PARENT` rejects invalid targets, non-Container parents, or cycles. Frames are the only persistent Container type; `spacePreview` nodes may be Frame children but cannot own children.
 - `CONNECT_NODES` rejects the command (`applied: false`, `reason: 'invalid-target'`) when any edge endpoint is not a live node — it never silently drops the edge.
 - `ALIGN_NODES` aligns provided nodes without relying on selection.

@@ -89,6 +89,9 @@ function collectCommandIds(
   edgeIds: Set<string>,
 ): void {
   switch (command.type) {
+    case 'INITIALIZE_PDF_NOTE':
+      nodeIds.add(command.nodeId);
+      break;
     case 'CREATE_NODES':
       for (const node of command.nodes) if (node.id) nodeIds.add(node.id);
       break;

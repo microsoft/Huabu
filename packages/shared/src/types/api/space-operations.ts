@@ -122,7 +122,7 @@ const agentNodeDataSchema = z
       .min(1)
       .optional()
       .describe(
-        'PDF-only link to its independently stored Note. To initialize a PDF without a Note, CREATE_NODES a fresh Note with an explicit ID, then MERGE_NODE_DATA the PDF noteNodeId in the SAME command batch. Never link an existing Note or replace an existing link. Read and edit the Note by its own ID. The linked Note is hidden on the canvas and follows its PDF when copied, moved or deleted.',
+        'PDF-only link to its independently stored Note. Use INITIALIZE_PDF_NOTE to obtain a hidden Note; never link an existing Note or replace an existing link. Read and edit the Note by its own ID. It follows its PDF when copied, moved or deleted.',
       ),
     label: z
       .string()
@@ -419,8 +419,19 @@ export const setFrameLayoutCommandSchema = z
   .strict()
   .describe("Set a frame's layout mode, track count, or sizing.");
 
+export const initializePdfNoteCommandSchema = z
+  .object({
+    type: z.literal('INITIALIZE_PDF_NOTE'),
+    nodeId: z.string().min(1).describe('ID of the PDF that needs a Note.'),
+  })
+  .strict()
+  .describe(
+    'Create and link an empty hidden Note for a PDF in one operation, or reuse its existing Note without changing content. Returns the Note ID in results[].nodes[0].nodeId, including on an already-initialized no-op. Read/edit that Note normally afterward. Missing or non-PDF targets fail without creating anything. Example: {"type":"INITIALIZE_PDF_NOTE","nodeId":"node-paper"}.',
+  );
+
 export const AGENT_COMMAND_SCHEMAS = {
   CREATE_NODES: createNodesCommandSchema,
+  INITIALIZE_PDF_NOTE: initializePdfNoteCommandSchema,
   DELETE_NODES: deleteNodesCommandSchema,
   MERGE_NODE_DATA: mergeNodeDataCommandSchema,
   SET_NODE_PARENT: setNodeParentCommandSchema,
@@ -440,6 +451,7 @@ export const AGENT_COMMAND_SCHEMAS = {
 
 export const agentCanvasCommandSchema = z.discriminatedUnion('type', [
   createNodesCommandSchema,
+  initializePdfNoteCommandSchema,
   deleteNodesCommandSchema,
   mergeNodeDataCommandSchema,
   setNodeParentCommandSchema,
@@ -468,6 +480,7 @@ export const builtInMergeNodeDataCommandSchema = z
 
 export const builtInAgentCanvasCommandSchema = z.discriminatedUnion('type', [
   createNodesCommandSchema,
+  initializePdfNoteCommandSchema,
   deleteNodesCommandSchema,
   builtInMergeNodeDataCommandSchema,
   setNodeParentCommandSchema,

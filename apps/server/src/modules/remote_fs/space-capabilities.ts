@@ -92,6 +92,7 @@ const COMMAND_EXAMPLES: Record<
     ],
   },
   DELETE_NODES: { type: 'DELETE_NODES', nodeIds: ['node-123'] },
+  INITIALIZE_PDF_NOTE: { type: 'INITIALIZE_PDF_NOTE', nodeId: 'node-paper' },
   MERGE_NODE_DATA: {
     type: 'MERGE_NODE_DATA',
     patches: [

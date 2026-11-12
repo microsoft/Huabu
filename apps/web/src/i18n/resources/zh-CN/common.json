@@ -929,7 +929,6 @@
     "openPdfNotes": "打开笔记",
     "expandPdfDetails": "展开资料",
     "collapsePdfDetails": "收起资料",
-    "pdfNoteLabel": "{{title}} — 笔记",
     "pdfNotesReadOnly": "此空间只读，可以打开已有笔记，但不能新建笔记。",
     "noteTouchReading": "滑动阅读 · 轻点取消选择",
     "frameLayout": "布局",

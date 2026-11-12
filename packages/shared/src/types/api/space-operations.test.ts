@@ -59,6 +59,20 @@ it('shares Canvas source addresses with strict Space SEARCH responses', () => {
 });
 
 describe('agentCanvasCommandSchema', () => {
+  it('accepts initialization by PDF ID at both public boundaries without caller-assigned Note IDs', () => {
+    const command = { type: 'INITIALIZE_PDF_NOTE', nodeId: 'node-paper' };
+    for (const schema of [
+      agentCanvasCommandSchema,
+      builtInAgentCanvasCommandSchema,
+    ]) {
+      expect(schema.parse(command)).toEqual(command);
+      expect(
+        schema.safeParse({ ...command, noteNodeId: 'node-existing' }).success,
+      ).toBe(false);
+      expect(schema.safeParse({ ...command, nodeId: '' }).success).toBe(false);
+    }
+  });
+
   it('rejects the retired Pin command at both agent boundaries', () => {
     const command = {
       type: 'SET_PORTAL_NODE_PINS',

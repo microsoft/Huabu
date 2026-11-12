@@ -30,6 +30,57 @@ function run(commands: CanvasCommand[], nodes = [pdf, note]) {
 }
 
 describe('PDF-owned real Notes', () => {
+  it('initializes a Note atomically and reuses it without changing content or selection', () => {
+    const command: CanvasCommand = {
+      type: 'INITIALIZE_PDF_NOTE',
+      nodeId: 'node-pdf',
+    };
+    const initial = [{ ...pdf, data: {}, selected: true }];
+    const created = run([command], initial);
+    expect(created.commandResults[0].applied).toBe(true);
+    const owner = created.writeResult.nodes.find((node) => node.id === pdf.id);
+    const child = created.writeResult.nodes.find(
+      (node) => node.id === owner?.data.noteNodeId,
+    );
+    expect(child).toMatchObject({
+      type: 'note',
+      hidden: true,
+      selected: false,
+      data: { content: '' },
+    });
+    expect(owner?.selected).toBe(true);
+    const edited = created.writeResult.nodes.map((node) =>
+      node.id === child?.id
+        ? { ...node, data: { ...node.data, content: 'Keep my draft' } }
+        : node,
+    );
+    const repeated = run([command], edited);
+    expect(repeated.commandResults[0]).toMatchObject({
+      applied: false,
+      reason: 'no-op',
+    });
+    expect(repeated.writeResult.nodes).toEqual(edited);
+    expect(repeated.pendingEffects.mutatedNodes).toEqual([]);
+    expect(repeated.writeResult.snapshotNeeded).toBe(false);
+  });
+
+  it.each([
+    { nodes: [] },
+    { nodes: [{ ...pdf, type: 'note', data: {} }] },
+    { nodes: [pdf] },
+  ])(
+    'rejects invalid initialization targets without partial creation',
+    ({ nodes }) => {
+      const result = run(
+        [{ type: 'INITIALIZE_PDF_NOTE', nodeId: 'node-pdf' }],
+        nodes,
+      );
+      expect(result.commandResults[0].applied).toBe(false);
+      expect(result.writeResult.nodes).toEqual(nodes);
+      expect(result.pendingEffects.mutatedNodes).toEqual([]);
+    },
+  );
+
   const initialize: CanvasCommand[] = [
     {
       type: 'CREATE_NODES',

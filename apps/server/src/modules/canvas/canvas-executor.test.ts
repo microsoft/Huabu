@@ -26,6 +26,7 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { builtInAgentCanvasCommandsParamsSchema } from '@huabu/shared';
 import {
   nodeRevisionOf,
   extractCanvasChanges,
@@ -33,6 +34,7 @@ import {
 
 import { applyDeltasOnServer, executeOnServer } from './canvas-executor.js';
 import { setAgentChangeReviewConfig } from '../agent/change-review-config.js';
+import { handleCanvasCommands } from '../agent/tools/handlers/canvas-write.js';
 import {
   space,
   getCanvasStore,
@@ -751,6 +753,48 @@ describe('executeOnServer — batch node writes use one ordered backend call', (
 });
 
 describe('executor tombstone resurrection', () => {
+  it('initializes through the built-in public schema and rolls back a failed pair commit', async () => {
+    seedNote('c1', 'node-pdf', 'PDF source text', 'pdf');
+    const store = getCanvasStore('c1');
+    const before = store.read();
+    const beforeIds = [...(await space('c1').nodes.list()).keys()].sort();
+    const args = builtInAgentCanvasCommandsParamsSchema.parse({
+      commands: [{ type: 'INITIALIZE_PDF_NOTE', nodeId: 'node-pdf' }],
+    });
+    const originalAppend = store.appendDeltaLogEntry;
+    store.appendDeltaLogEntry = (entry) => {
+      originalAppend.call(store, entry);
+      throw new Error('injected initialization failure');
+    };
+    try {
+      await expect(
+        handleCanvasCommands({ canvasId: 'c1', ...args }),
+      ).rejects.toThrow('injected initialization failure');
+    } finally {
+      store.appendDeltaLogEntry = originalAppend;
+    }
+    expect(store.read()).toEqual(before);
+    expect([...(await space('c1').nodes.list()).keys()].sort()).toEqual(
+      beforeIds,
+    );
+    const initialized = JSON.parse(
+      await handleCanvasCommands({ canvasId: 'c1', ...args }),
+    );
+    expect(initialized.results[0].applied).toBe(true);
+    const noteId = initialized.results[0].nodes[0].nodeId;
+    expect(store.readNode(noteId)?.content).toBe('');
+    const repeated = JSON.parse(
+      await handleCanvasCommands({ canvasId: 'c1', ...args }),
+    );
+    expect(repeated.results[0]).toMatchObject({
+      applied: false,
+      reason: 'no-op',
+      nodes: [{ nodeId: noteId }],
+    });
+    expect(repeated.toVersion).toBe(repeated.fromVersion);
+    expect(store.readNode('node-pdf')?.content).toBe('PDF source text');
+  });
+
   it('restores an owned pair atomically and rejects partial or stale reverts', async () => {
     seedNote('c1', 'seed', '');
     await executeOnServer({

@@ -929,7 +929,6 @@
     "openPdfNotes": "Open notes",
     "expandPdfDetails": "Expand details",
     "collapsePdfDetails": "Collapse details",
-    "pdfNoteLabel": "{{title}} — Notes",
     "pdfNotesReadOnly": "This Space is read-only. You can open existing notes, but cannot create new ones.",
     "noteTouchReading": "Swipe to scroll · Tap to deselect",
     "frameLayout": "Layout",

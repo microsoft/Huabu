@@ -3,8 +3,6 @@
 
 import { t } from 'i18next';
 
-import { createId } from '@huabu/shared';
-
 import { ApiError } from '@/api/_client';
 import { getAgentConversationOwner } from '@/api/agent';
 import { toast } from '@/components/Common/Toast';
@@ -153,39 +151,20 @@ export function openPdfNotes(pdfId: string): string {
   if (!noteId) {
     if (!selectCanWriteCanvas(canvas))
       throw new Error(t('node.pdfNotesReadOnly'));
-    const newNoteId = createId('node');
-    noteId = newNoteId;
     canvas.executeCommands(
-      [
-        {
-          type: 'CREATE_NODES',
-          nodes: [
-            {
-              id: newNoteId,
-              nodeType: 'note',
-              position: { x: 0, y: 0 },
-              data: {
-                content: '',
-                label: t('node.pdfNoteLabel', {
-                  title: pdf.data.label || t('node.untitledPdf'),
-                }),
-                origin: { type: 'user-created' },
-              },
-              selectOnCreate: false,
-            },
-          ],
-        },
-        {
-          type: 'MERGE_NODE_DATA',
-          patches: [
-            { nodeId: pdfId as CanvasNodeId, patch: { noteNodeId: noteId } },
-          ],
-        },
-      ],
+      [{ type: 'INITIALIZE_PDF_NOTE', nodeId: pdfId as CanvasNodeId }],
       'ui',
     );
+    const updatedPdf = useCanvasStore
+      .getState()
+      .nodes.find((node) => node.id === pdfId);
+    noteId =
+      typeof updatedPdf?.data.noteNodeId === 'string'
+        ? updatedPdf.data.noteNodeId
+        : undefined;
   }
   if (
+    !noteId ||
     !useCanvasStore
       .getState()
       .nodes.some((node) => node.id === noteId && node.type === 'note')
