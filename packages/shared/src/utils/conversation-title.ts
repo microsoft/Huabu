@@ -28,8 +28,10 @@ export function stripInlineMarkdown(text: string): string {
       // Leading list markers must be removed before bold/italic markers.
       .replace(/^(?:>\s*)+/, '')
       .replace(/^(?:[-*+]|\d+\.)\s+/, '')
-      .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
-      .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+      // Labels exclude `[` and targets allow one level of balanced parentheses,
+      // so an unclosed `![](` run fails fast instead of rescanning the tail.
+      .replace(/!\[([^[\]]*)\]\((?:[^()]|\([^()]*\))*\)/g, '$1')
+      .replace(/\[([^[\]]*)\]\((?:[^()]|\([^()]*\))*\)/g, '$1')
       .replace(/\*{1,3}(.+?)\*{1,3}/g, '$1')
       .replace(/_{1,3}(.+?)_{1,3}/g, '$1')
       .replace(/~~(.+?)~~/g, '$1')
