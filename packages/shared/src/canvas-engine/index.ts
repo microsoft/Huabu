@@ -156,6 +156,7 @@ export {
 } from './frame/design.js';
 export {
   stripMarkdown,
+  markdownExcerptParagraphs,
   markdownSearchTarget,
   markdownSummaryBlocks,
 } from './utils/markdown.js';

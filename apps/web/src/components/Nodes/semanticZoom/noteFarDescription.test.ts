@@ -69,18 +69,15 @@ describe('noteFarDescription', () => {
     ).toBe('Read the guide with code and bold. Next line. Later.');
   });
 
-  it.each([
-    '## Tasks\n- First\n  continuation\n- Second',
-    'Tasks\n---\n1. First\n2. Second',
-    '## Tasks\n- [ ] Task',
-    '## Code\n    const x = 1;',
-    'Code\n===\n\tconst x = 1;',
-  ])('skips lists and code immediately after headings: %j', (block) => {
-    expect(
-      noteFarDescription(`Intro prose.\n\n${block}\n\nLater prose.`, 'Title'),
-    ).toBe('Intro prose. Later prose.');
-    expect(noteFarDescription(block, 'Title')).toBeUndefined();
-  });
+  it.each(['## Code\n    const x = 1;', 'Code\n===\n\tconst x = 1;'])(
+    'skips code immediately after headings: %j',
+    (block) => {
+      expect(
+        noteFarDescription(`Intro prose.\n\n${block}\n\nLater prose.`, 'Title'),
+      ).toBe('Intro prose. Later prose.');
+      expect(noteFarDescription(block, 'Title')).toBeUndefined();
+    },
+  );
 
   it('skips fenced code with blank lines, longer fences, and tilde fences', () => {
     expect(
@@ -100,16 +97,37 @@ describe('noteFarDescription', () => {
     ).toBeUndefined();
   });
 
+  it.each(['    const x = 1;', '\tconst x = 1;'])(
+    'skips indented code: %j',
+    (block) => {
+      expect(noteFarDescription(`${block}\n\nActual prose.`, 'Title')).toBe(
+        'Actual prose.',
+      );
+      expect(noteFarDescription(block, 'Title')).toBeUndefined();
+    },
+  );
+
   it.each([
-    '- First\n  continuation\n- Second',
-    '1. First\n2. Second',
-    '- [ ] Task',
-    '    const x = 1;',
-  ])('skips lists and indented code: %j', (block) => {
-    expect(noteFarDescription(`${block}\n\nActual prose.`, 'Title')).toBe(
-      'Actual prose.',
-    );
-    expect(noteFarDescription(block, 'Title')).toBeUndefined();
+    ['- First\n  continuation\n- Second', 'First continuation Second'],
+    ['## Tasks\n- First\n- Second', 'First Second'],
+    ['Tasks\n---\n1. First\n2. Second', 'First Second'],
+    ['- [ ] Pending\n- [x] Done', 'Pending Done'],
+    ['- Item.\n\n  List continuation.', 'Item. List continuation.'],
+    ['10. Item.\n\n    List continuation.', 'Item. List continuation.'],
+    ['- Parent\n  - Child\n    - Grandchild', 'Parent Child Grandchild'],
+  ])('retains list text without markers: %j', (block, expected) => {
+    expect(
+      noteFarDescription(`Intro prose.\n\n${block}\n\nLater prose.`, 'Title'),
+    ).toBe(`Intro prose. ${expected} Later prose.`);
+  });
+
+  it('excludes nested list code while retaining following list paragraphs', () => {
+    expect(
+      noteFarDescription(
+        '- Item.\n\n  ```js\n  hidden();\n  ```\n\n  Continuation.\n\n      indented();\n\n  - Child with `inline` code.',
+        'Title',
+      ),
+    ).toBe('Item. Continuation. Child with inline code.');
   });
 
   it('preserves Chinese prose and skips a repeated Chinese title', () => {
