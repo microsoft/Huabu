@@ -33,3 +33,7 @@ Never merge. Issue comments/closure, publication, release, branch deletion, work
 ## Milestones
 
 Maintain the supplied Execution Note according to the Issue Execution Note Contract. Download the latest body/revision before each guarded update; preserve Coordinator-owned identities and user edits. Record exact approval and its scope, not an inferred permission. Use approval-needed for material decisions, in-progress after approval, blocked for external conditions, and PR-prepared only after the pushed PR exists with head/base identities, checks and limitations recorded. Only the Coordinator marks completed under the contract's completion rule.
+
+Before ending each milestone turn, durably write findings, decisions and the next required action to the Execution Note and synchronize your Agent and containing Issue Frame labels under **Issue Frame Layout**. These Layer labels use lifecycle emoji only, issue identity and the same concise stable title, with ` · Agent` only on the Agent. Keep the complete Agent label at most 80 characters; preserve the Note's full status words and audit title. Re-read actual labels/geometry after updating; do not rely on requested labels surviving deconfliction.
+
+The Coordinator may disconnect after prompt acceptance without waiting for your final response. Closing that response stream does not cancel your durable turn. Continue the approved work and persist milestone state before ending, regardless of whether the Coordinator receives your final answer or a runtime notification.

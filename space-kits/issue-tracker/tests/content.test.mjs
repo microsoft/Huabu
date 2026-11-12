@@ -131,3 +131,91 @@ test('configuration is explicit, portable and evidence-backed, never inferred', 
     /UNVERIFIED user confirmation/,
   );
 });
+
+test('Layer label examples identify the issue within the Agent budget without audit-only status words', async () => {
+  const { content } = await loadKit();
+  const layout = content['assets/issue-frame-layout.md'];
+  assert.match(
+    layout,
+    /Frame: `<status emoji> <issue identity> · <stable issue title>`/,
+  );
+  assert.match(
+    layout,
+    /Agent: `<status emoji> <issue identity> · <stable issue title> · Agent`/,
+  );
+  const examples = [
+    ...layout.matchAll(/\| `[🛠🟣⛔🚀✅] #\d+ · [^`]+` \| `[^\n]+` \|/gu),
+  ];
+  assert(
+    examples.length >= 2,
+    'Include initial decision and delivery examples',
+  );
+  for (const [row] of examples) {
+    const [frame, agent] = [...row.matchAll(/`([^`]+)`/g)].map(
+      ([, value]) => value,
+    );
+    assert.match(frame, /^(?:🛠|🟣|⛔|🚀|✅) #\d+ · \S.+$/u);
+    assert.equal(agent, `${frame} · Agent`);
+    assert(Array.from(agent).length <= 80, agent);
+    assert.doesNotMatch(
+      agent,
+      /Approval Needed|In Progress|PR Prepared|Fixing Agent|Issue Frame|\(2\)/,
+    );
+  }
+  const contract = content['assets/execution-note-contract.md'];
+  assert.match(contract, /🟣 Approval Needed/);
+  assert.match(contract, /🚀 PR Prepared/);
+  assert.doesNotMatch(
+    contract,
+    /Give the containing Frame a distinct|`· Issue Frame` suffix/,
+  );
+});
+
+test('installed contracts require acceptance-only dispatch and durable milestone handoff, not final-answer waiting', async () => {
+  const { content } = await loadKit();
+  const coordinator = content['assets/coordinator-prompt.md'];
+  assert.match(
+    coordinator,
+    /wait only for prompt acceptance and confirmation of that existing Thread identity/,
+  );
+  assert.match(
+    coordinator,
+    /stop consuming the response and return control to the user/,
+  );
+  assert.match(
+    coordinator,
+    /Closing the response stream does not cancel the durable Agent turn/,
+  );
+  assert.match(
+    coordinator,
+    /Do not wait for, poll, or depend on receiving the final answer/,
+  );
+  assert.match(
+    coordinator,
+    /an HTTP connection or Thread announcement alone does not prove prompt acceptance/,
+  );
+  assert.match(
+    coordinator,
+    /exposes no acceptance signal, report dispatch confirmation as blocked/,
+  );
+  assert.match(
+    coordinator,
+    /user asks, a runtime notification is available, or a dependent action requires it/,
+  );
+  assert.doesNotMatch(
+    coordinator,
+    /wait for the Agent to finish|wait for its final answer|SSE="\$\(/i,
+  );
+  for (const file of ['execution-note-contract', 'fixing-agent-preamble']) {
+    const contract = content[`assets/${file}.md`];
+    assert.match(
+      contract,
+      /before ending each milestone turn|Before ending each milestone turn/,
+    );
+    assert.match(contract, /findings, decisions and the next required action/);
+    assert.match(
+      contract,
+      /synchronize.*(?:Agent and Frame|Agent and containing Issue Frame|Layer labels)/,
+    );
+  }
+});

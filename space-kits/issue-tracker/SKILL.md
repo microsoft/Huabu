@@ -37,6 +37,8 @@ node ./scripts/install.mjs --installer-node NODE_ID --profile PROFILE_ID --apply
 
 The script copies installed bytes from [assets](./assets/coordinator-prompt.md); do not regenerate or summarize these assets. Its Installation Record stores Kit version/content digest, instance identity, actual role-to-node/thread mapping, baseline content hashes, configuration validation state, and pending write intent. Labels are navigation hints, never ownership proof.
 
+Install the current naming and asynchronous-dispatch contracts unchanged: **Issue Frame Layout** owns compact issue Frame/Agent labels, while the Execution Note retains full status words. The installed Coordinator returns after prompt acceptance/Thread confirmation rather than waiting for a Fixing Agent's final answer; the Fixing Agent persists milestone state and synchronizes labels. These rules apply to future issue units, not the setup Coordinator's issue-free label. Do not copy older `Fixing Agent`/`Issue Frame` label suffixes or synchronous waiting instructions from a previous installation.
+
 Instruction Frames start with inactive labels. The script creates the Coordinator with `X-Huabu-Agent-Start: false`, no prompt, no parent lineage, and no host-thread header; connects its specific Prompt Frame; then activates instruction labels. Common instructions are global, and the fixing contract is a lazy Skill Note. No prompt, warm-up, mode/model/config control, or implementation authorization is sent.
 
 ## 4. Complete configuration

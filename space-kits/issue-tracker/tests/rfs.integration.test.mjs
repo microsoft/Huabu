@@ -160,6 +160,16 @@ it('previews without writes; installs exact assets and an unrealized scoped Coor
   expect(prompt.diagnostics.truncated).toBe(false);
   expect(prompt.diagnostics.truncatedNoteIds).toEqual([]);
   expect(prompt.markdown).toContain('# Issue Tracker Coordinator');
+  expect(prompt.markdown).toContain(
+    'stop consuming the response and return control to the user',
+  );
+  expect(prompt.markdown).toContain(
+    '`<status emoji> <issue identity> · <stable issue title> · Agent`',
+  );
+  expect(prompt.markdown).toContain('before ending each milestone turn');
+  expect(prompt.markdown).not.toContain(
+    'Give the containing Frame a distinct `· Issue Frame` suffix',
+  );
   expect(otherPrompt.markdown).not.toContain('# Issue Tracker Coordinator');
   expect(otherPrompt.markdown).toContain('# Issue Execution Note Contract');
   const skill = await resolveSpaceSkill('c1');

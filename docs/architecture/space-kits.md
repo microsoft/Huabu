@@ -32,6 +32,18 @@ The helper first creates instruction Frames under inactive labels, copies direct
 
 Configuration can remain incomplete while the Coordinator exists idle. Amber Frame/Text warnings and field-level REQUIRED/INVALID/UNVERIFIED diagnostics expose that state. `ready` requires structurally valid evidenced/user-confirmed configuration and verified object/topology/geometry state. Color is not a technical launch interlock; the user must not interact with the Coordinator before completing configuration/topology. Structural checks do not prove a remote filesystem or user-authored evidence true; the Coordinator verifies Git/path/device facts before creating an execution environment. Existing execution units retain their saved delivery identities even after configuration changes.
 
+## Installed issue workflow
+
+The installed **Issue Frame Layout** asset is the naming authority: Frame labels use `<status emoji> <issue identity> · <stable issue title>` and Agent labels append ` · Agent`. Lifecycle is carried only by 🛠/🟣/⛔/🚀/✅, without status words or the old `Fixing Agent`/`Issue Frame` suffixes. Complete Agent labels are at most 80 characters; the shared display title may be shortened unambiguously, but Execution Notes preserve their full stable audit title and status words. The setup Coordinator has no issue identity and retains its role label.
+
+Coordinator dispatch is acceptance-only and asynchronous: confirm prompt acceptance and the existing Thread, stop consuming the stream, and return control. Disconnecting delivery is not cancellation of the durable turn. The Coordinator does not buffer final-answer SSE output, wait for a final answer or poll for status. This is installed Agent guidance using existing RFS, not a new installer dispatch API. The installer itself never prompts an Agent.
+
+Acceptance must be observable under the live transport contract; HTTP success or a Thread announcement alone is insufficient. The current RFS prompt stream does not expose the service's internal acceptance promise as a distinct acknowledgment, so dispatch confirmation must be reported as blocked if the available live contract provides no such signal. This Kit change does not add that runtime capability or claim provider-level dispatch validation.
+
+The Fixing Agent must persist findings, decisions and the next required action in its Execution Note and synchronize compact Agent/Frame labels before ending each milestone turn. Status reconciliation occurs on user request, an available runtime notification, or before a dependent action; receiving a final response/notification is not required for durable handoff and does not prove execution completion. The Note's revision guards and stable execution identities remain authoritative.
+
+Kit 0.1.1 carries the revised contracts. A previous version/digest is not silently upgraded or rewritten; existing installations still require an explicit reconciliation decision.
+
 ## Code entry points
 
 | File                                                                                             | Responsibility                                                         |
