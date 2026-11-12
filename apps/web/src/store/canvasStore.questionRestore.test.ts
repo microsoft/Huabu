@@ -36,7 +36,11 @@ vi.mock('../api/canvas', async (importOriginal) => ({
 vi.mock('../api/agent', () => ({ agentApi: { forkThread } }));
 
 import { canvasHistoryManager } from './canvasHistoryManager';
-import useCanvasStore, { awaitQuestionCreation } from './canvasStore';
+import useCanvasStore, {
+  awaitQuestionCreation,
+  resetCanvasSyncForTests,
+} from './canvasStore';
+import { createFakeSpaceServer } from './canvasStore/sync/testing/fakeExecuteServer';
 
 import type * as CanvasApi from '../api';
 import type { PutNodeContentRequest } from '@huabu/shared';
@@ -59,6 +63,7 @@ const question: Node = {
 
 beforeEach(() => {
   vi.useFakeTimers();
+  resetCanvasSyncForTests();
   associateNode.mockReset();
   deleteNode.mockClear();
   putCanvas.mockReset();
@@ -141,6 +146,10 @@ describe('Question creation settlement', () => {
   it('rolls back an unsupported conversation fork without poisoning unrelated saves or undo', async () => {
     const error = new Error('Fork not supported (501)');
     forkThread.mockRejectedValue(error);
+    const server = createFakeSpaceServer();
+    postCanvasExecute.mockImplementation(async (canvasId, request) =>
+      server.execute(canvasId, request),
+    );
     useCanvasStore.getState().pasteNodes({ x: 0, y: 0 }, [question]);
     const pasted = useCanvasStore.getState().nodes[0];
     expect(pasted).toBeDefined();
@@ -155,8 +164,16 @@ describe('Question creation settlement', () => {
     expect(useCanvasStore.getState().nodes.map((node) => node.type)).toEqual([
       'note',
     ]);
-    expect(postCanvasExecute).not.toHaveBeenCalled();
-    putCanvas.mockResolvedValue({ canvasId: 'canvas-restore', version: 2 });
+    // The failed fork never sends its Question; the unrelated note behind
+    // it in the queue is sent on its own.
+    expect(postCanvasExecute).toHaveBeenCalledTimes(1);
+    expect(
+      postCanvasExecute.mock.calls[0][1].commands.flatMap(
+        (command: { nodes?: Array<{ nodeType: string }> }) =>
+          (command.nodes ?? []).map((node) => node.nodeType),
+      ),
+    ).toEqual(['note']);
+    putCanvas.mockResolvedValue({ canvasId: 'canvas-restore', version: 3 });
     await useCanvasStore.getState().saveCanvas();
     expect(putCanvas).toHaveBeenCalledTimes(1);
     expect(

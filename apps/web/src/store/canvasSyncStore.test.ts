@@ -42,6 +42,15 @@ vi.mock('@/store/canvasStore', () => ({
   default: {
     getState: () => mocks.canvasState,
   },
+  // The store holds a reload back while edits are waiting to be sent; with
+  // nothing queued it reloads at once, which is what this stand-in does.
+  requestCanvasResync: (canvasId: string, afterReload?: () => void) => {
+    const load = mocks.canvasState.loadCanvas as unknown as (
+      canvasId: string,
+      options: { resetHistory: boolean },
+    ) => Promise<void>;
+    void load(canvasId, { resetHistory: true }).then(() => afterReload?.());
+  },
 }));
 vi.mock('@/store/chatStore', () => ({
   useChatStore: {

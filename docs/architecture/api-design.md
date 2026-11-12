@@ -150,6 +150,8 @@ The Canvas route uses the same codes in its `{ code, message }` error body. The 
 
 `huabu-rfs execute` sends a fresh request id per invocation unless `--operation-id <uuid>` is given, buffers the body, and retries a bounded number of times with the same id and body on a fetch failure, timeout or 503 `operation-outcome-unknown`; on final failure it prints `operation-id=<id>` on stderr. `huabu-rfs result <operation-id>` calls the lookup endpoint.
 
+The browser sends its own structure edits through `POST /api/canvas/:canvasId/execute` with `originator: { source: 'ui', tabId }` and an `operationId`, and never a `basis`; a failed request is repeated with the same id. The `update` event also carries `source`, the batch's `originator.source`. See [browser structure edits](./canvas-realtime-sync.md#browser-structure-edits).
+
 Not covered: the browser whole-canvas `PUT /api/canvas/:canvasId` and the node content PUT accept neither field, so their lost replies are not replayable and their writes are not read-version checked. All machine-token callers share one principal, so two external agents must not reuse each other's request ids. There is no caller-visible session, no commit replay stream and no per-Space switch.
 
 Canvas Sync's shared `CanvasSyncEvent` union includes `invalidate` with `{ nodeIds?: string[] }`. Successful ordinary topology saves, node-content saves, node-sidecar deletion and Space-tree deletion publish this bounded read-model notification. Server-side conversation snapshot subscriptions reread matching owners (all observed owners in the Space when `nodeIds` is absent); Canvas renderers do not interpret it as editable deltas. Canvas stream path parameters use `recentCanvasConversationParamsSchema.safeParse`.

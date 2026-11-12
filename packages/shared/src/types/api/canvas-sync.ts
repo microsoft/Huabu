@@ -86,6 +86,12 @@ export const canvasSyncEventSchema = z.discriminatedUnion('type', [
        * one. Lets a client recognise the echo of its own write.
        */
       operationId: z.string().optional(),
+      /**
+       * Who wrote the batch (`originator.source`). A page uses it to tell
+       * another person's edit from an agent's; absent on batches that have
+       * no originator (delta replays).
+       */
+      source: z.enum(['ui', 'agent', 'system']).optional(),
     }),
   }),
 ]);

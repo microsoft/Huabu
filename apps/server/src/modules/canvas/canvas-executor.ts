@@ -1710,6 +1710,7 @@ async function executePreparedOnServerAlreadyLocked(
         ...(originator.threadId ? { threadId: originator.threadId } : {}),
         ...(broadcastChanges ? { changes: broadcastChanges } : {}),
         ...(request ? { operationId: request.key.operationId } : {}),
+        source: originator.source,
       },
     });
   }

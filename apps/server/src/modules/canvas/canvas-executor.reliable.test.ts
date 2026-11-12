@@ -289,7 +289,8 @@ describe('request ids', () => {
     expect(events).toHaveLength(1);
     expect(events[0]).toMatchObject({
       type: 'update',
-      data: { toVersion: 2, operationId: request.operationId },
+      // `source` lets a page tell a person's edit from an agent's.
+      data: { toVersion: 2, operationId: request.operationId, source: 'agent' },
     });
     expect(importForeignNodeSources).toHaveBeenCalledTimes(1);
     expect(first.basis).toBe(await basisNow());

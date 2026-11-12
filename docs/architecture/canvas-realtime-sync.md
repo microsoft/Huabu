@@ -24,12 +24,12 @@ World preview reconciliation is a system-originated command batch against World 
 filter guarantees an incoming agent write never clobbers a node the user is
 mid-editing.
 
-> Request ids and read versions on `execute` are shipped; see [reliable save](./canvas-storage.md#42-reliable-save-in-the-write). The browser side (cross-tab user edit sync, pending intents, recovery, undo) is still proposed in [canvas-realtime-sync-plan.md](../proposals/canvas-realtime-sync-plan.md), whose status note says which sections were superseded. Same-body co-editing, presence and multi-server fan-out are outside that scope.
+> Request ids and read versions on `execute` are shipped; see [reliable save](./canvas-storage.md#42-reliable-save-in-the-write). The browser sends its own structure edits through `execute` too, so they reach every other open page; see [Browser structure edits](#browser-structure-edits). Note body text between pages, recovery UI and undo through the same path are not covered there; the remaining proposal is [canvas-realtime-sync-plan.md](../proposals/canvas-realtime-sync-plan.md). Same-body co-editing, presence and multi-server fan-out are outside that scope.
 
 ## Data flow
 
 ```
-writer (agent / ACP / headless /execute)
+writer (agent / ACP / headless /execute / a browser page's send queue)
   │
   ▼
 executeOnServer  ── per-canvas mutex ──► persist .md + space.json
@@ -38,15 +38,16 @@ executeOnServer  ── per-canvas mutex ──► persist .md + space.json
   ▼
 publishCanvasUpdate(canvasId, { type:'update', fromVersion, toVersion,
                                 deltas, pendingEffects, orderEvents?,
-                                threadId?, changes? })
+                                threadId?, changes?, operationId?, source })
   │  in-memory pub/sub (listenersByCanvas)
   ▼
 GET /:canvasId/sync/stream  (SSE, one per tab)
   │
   ▼
-canvasSyncStore  ── fromVersion === local? ──► applyDeltasFromAgent (dirty-filtered)
+canvasSyncStore  ── fromVersion === local? ──► applyDeltasFromAgent (field-level, dirty-filtered)
   │                │                            └ then orderEvents → sibling paint order
-  │                └ gap (toVersion > local) ─► loadCanvas  (skipped if local dirty)
+  │                └ gap (toVersion > local) ─► loadCanvas  (skipped if a body is dirty,
+  │                                             held until the send queue is empty)
   ▼
 canvasStore state  +  acpThreadChangesStore.replaceFromBroadcast(threadId, changes)
 ```
@@ -60,7 +61,7 @@ schema + `z.infer`, web imports as `import type` only):
 | Event        | When                                                                         | Payload                                                                                                                                        |
 | ------------ | ---------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
 | `snapshot`   | once, on SSE connect                                                         | `{ version }` — lets a tab that connected _after_ a mutation detect the gap and `loadCanvas`.                                                  |
-| `update`     | after every persisted batch                                                  | `{ fromVersion, toVersion, deltas, pendingEffects, orderEvents?, threadId?, changes?, agentNodeProjection? }`                                  |
+| `update`     | after every persisted batch                                                  | `{ fromVersion, toVersion, deltas, pendingEffects, orderEvents?, threadId?, changes?, agentNodeProjection?, operationId?, source? }`           |
 | `invalidate` | ordinary topology/content save, node-sidecar deletion or Space-tree deletion | `{ nodeIds? }` — refresh observed read models for those nodes, or every observed owner in that Space when omitted; not editable Canvas deltas. |
 
 `canvasSyncSubscription` manages the per-Space Canvas transport, preserving the 45-second inactivity timeout, heartbeat handling, rate-limit-aware 500ms-to-10s reconnect backoff, and version baselines for late subscribers. The final subscriber aborts the transport. Conversation views instead share one dedicated owner-state subscription per conversation address per page: the server listens to this same Canvas publisher, reads canonical ownership, and pushes complete versioned metadata snapshots. The browser applies those snapshots without querying ownership for each change or loading the source Canvas document. Reconnect, focus and visibility restoration obtain a fresh baseline. Canvas rendering ignores `invalidate`: ordinary browser saves do not become full-document replacement or bypass dirty-edit protection. See [conversation observation](./preview-workspace.md#3-opening-and-target-conversion).
@@ -72,6 +73,7 @@ schema + `z.infer`, web imports as `import type` only):
   feed the originating conversation's review card.
 - `orderEvents` is present only when an `executeOnServer` batch changed a parent's direct-child list; see [Sibling paint order](#sibling-paint-order).
 - `agentNodeProjection` identifies trusted server binding/lifecycle/association effects for browser undo handling; it is output metadata, not client authorization to submit those writes.
+- `operationId` is the request id the writer supplied, when it supplied one; a page uses it to recognise the update for its own batch. `source` is the batch's `originator.source` (`ui`, `agent` or `system`), set on every `executeOnServer` batch and absent on `applyDeltasOnServer` replays; a page uses it to tell another person's edit from an agent's.
 
 ## Sibling paint order
 
@@ -94,9 +96,37 @@ Limits: `applyDeltasOnServer` batches (review revert, Agent Node projections, ti
   broadcast.
 - ACP / headless writers hit `POST /:canvasId/execute`, which calls the same
   `executeOnServer`.
-- There is **no per-client echo filter** yet: correctness relies on the single
-  apply path + id-keyed `applyDeltas`. A `clientId` filter is only needed once
-  user hand-edits also broadcast (deferred — see the plan).
+- A browser page's own structure edits are a writer of the same kind: they go through `POST /:canvasId/execute` with a request id. The page is not filtered out of the broadcast; it recognises its own batch by `operationId` and applies it through the same path, see below.
+
+## Browser structure edits
+
+A `ui` command batch (`executeCommands` with the default source: create, delete, move, resize, reparent, reorder, style, connect, …) runs on the page first and is then sent to the server by a send queue. Code is under [canvasStore/sync/](../../apps/web/src/store/canvasStore/sync).
+
+**Sending** ([sendQueue.ts](../../apps/web/src/store/canvasStore/sync/sendQueue.ts)). One serial lane per open Space. Each entry is one `POST /execute` with `originator: { source: 'ui', tabId }` and a fresh `operationId`; no `basis` is sent, so the server runs the batch on its latest state and edits to unrelated nodes from two pages never reject each other. A transport failure, a 5xx (including `operation-outcome-unknown`), 401, 408 or 429 repeats the same request with the same id after a backoff (500 ms doubling to 10 s); any other 4xx fails the entry. Batches made while a request is on the wire are folded into the next entry (up to 200 commands), so a slider drag is not one round trip per tick. `CREATE_NODES` and `CONNECT_NODES` are given explicit node, thread and edge ids before the local run (`withClientIds`), so the server creates the entities the page already shows.
+
+**What is sent** ([serverCommands.ts](../../apps/web/src/store/canvasStore/sync/serverCommands.ts)). `SET_NODE_SELECTION` is not sent, and a created node is sent with `selectOnCreate: false`. Content fields of existing nodes (`NODE_CONTENT_KEYS`: body, label, summary, …) are stripped from `MERGE_NODE_DATA`; they keep their own writer, the per-node content PUT, and are therefore still not shown on other pages. A created node is sent whole and the content queue does not write its first sidecar (`prepareServerCreatedNodes`). A batch that leaves nothing to send is not queued. Batches sent this way do not schedule the whole-Space PUT.
+
+**Pointer gestures.** Live drag ticks and resize preview ticks (`executeCommands(…, { localOnly: true })`) change the store without sending. `beginGesture` records the nodes at gesture start; the batch that closes the gesture is sent with a prelude of `SET_NODE_GEOMETRY` / `MERGE_NODE_DATA` commands for what changed since then ([localDiffCommands.ts](../../apps/web/src/store/canvasStore/sync/localDiffCommands.ts)). A free drag whose resolver emits no command is sent as that prelude alone from `onNodeDragStop`. The server therefore runs the engine on a geometry command the page applied tick by tick; what the engine adds (a structured Frame named by the command is re-flowed, a hug Frame refits) reaches the page with the update.
+
+**In-flight set** ([inFlight.ts](../../apps/web/src/store/canvasStore/sync/inFlight.ts)). Every queued batch holds the (entity, property unit) pairs it changed, derived from the difference between the state before the batch (before the gesture, for a closing batch) and the state after it — not from the command list, so engine consequences such as a Frame refit are held too. Property units ([propertyUnits.ts](../../apps/web/src/store/canvasStore/sync/propertyUnits.ts)): `position`; `size` (`width`, `height`, top-level `style`); `parent` (`parentId`, `extent`, `expandParent`); each `data.style` leaf; every other `data` key; every other top-level node key; node existence; each edge as a whole; and each parent's direct-child order. Content `data` keys are never held (the content queue's dirty protection covers them), and React Flow runtime fields (`selected`, `dragging`, `measured`, `resizing`) belong to no unit.
+
+**Applying** ([fieldLevelDeltas.ts](../../apps/web/src/store/canvasStore/sync/fieldLevelDeltas.ts)). `applyDeltasFromAgent` rewrites every incoming batch — a person's or an agent's — before replaying it: a `REPLACE_NODE` becomes a replace of the live local node with only the units `prev → next` changed, minus the held ones; an `INSERT_NODE` for a node the page already has (its own optimistic creation) is merged the same way; selection is never taken from another page. So when page A has moved X and page B recolours X, A applies the colour and keeps its position, and B applies A's move when it arrives. A held unit keeps the local value and the remote value is kept back as the unit's last confirmed value.
+
+**Own update.** The update for the page's own batch is recognised by `operationId` and applied through the same path, except that only holds of _later_ queued batches withhold a unit: two moves of one node in a row keep the second position when the first update arrives, and the version still advances. When the update is applied the batch's holds are released. A unit the update did not change is set to its last confirmed value — the remote value kept back meanwhile, or else the value before the batch — because the server did not take that part of the change. The same release happens when the response reports nothing written (`toVersion === fromVersion`). The HTTP response of the request is used as the update when it is the next contiguous version (`fromVersion === local version`); the stream copy that follows is then stale and ignored, and vice versa. Otherwise the page waits for the stream, and reloads if the update has not arrived 8 s after the response.
+
+**Rejected commands.** A command the server reports as not applied with a reason other than `no-op`, or a request refused with a 4xx, shows one warning toast, releases the batch's holds as above and requests a reload of the Space. Other queued batches are still sent. A creation the server did not take removes its optimistic nodes before the next batch is sent.
+
+**Reloads.** `requestCanvasResync` is the only way the sync subscriber reloads (version gap, reconnect snapshot mismatch, paint order that could not be installed, missing update, rejected command). It runs `loadCanvas(…, { resetHistory: true })` at once when the send queue is empty and otherwise as soon as it has drained; a page with unsent changes is never replaced. A paint-order divergence is ignored while the page holds an unconfirmed change to the same parent's children, since the update for that change carries the order the server ended with.
+
+**Whole-Space PUT.** Writers that do not go through `ui` commands still save with `PUT /api/canvas/:id` (see the list under [Known gaps](#known-gaps-of-browser-structure-edits)). `saveCanvas` waits until the send queue is empty and every answered batch's update has been applied, so the PUT never carries a version the queue is about to advance; `drainPendingSaves` and `hasUnsavedCanvasEdits` include the queue.
+
+### Known gaps of browser structure edits
+
+- A PUT bumps the version and only broadcasts `invalidate`, so another page sees the next `update` as a gap and reloads (dropping its undo history). This affects undo/redo, measured heights, deferred Frame relayout, `patchNodeSilent`, paste and title changes until they are moved.
+- Body, label and other content fields are not sent through the queue and do not reach other pages.
+- Bounded retry, an unsynced indicator and a page-close flush are not implemented: retries continue until the request succeeds.
+- An undo restores a whole snapshot and can overwrite what another page changed since.
+- Covered by unit tests with a simulated second page and by `apps/web/e2e/multi-page-sync-baseline.spec.ts` with two real browser contexts; not by a run across two devices.
 
 ## Conflict model — version + dirty-node protection
 
@@ -126,10 +156,10 @@ otherwise                → apply
 - On a **version gap** (`toVersion > local`), the tab catches up with
   `loadCanvas` — but **only when there are no dirty nodes**. With local dirty
   state a blind `loadCanvas` would lose the edit, so the tab defers to autosave's
-  409 path (existing sticky "modified elsewhere" toast + Reload) instead.
+  409 path (existing sticky "modified elsewhere" toast + Reload) instead. The
+  reload is also held until the send queue is empty, see [Browser structure edits](#browser-structure-edits).
 - Structure-save acknowledgements reconcile monotonically with Canvas Sync: a delayed HTTP success cannot lower the local version, and a delayed 409 whose reported server version has already arrived over SSE is retried against that fresh baseline instead of opening the global conflict state. If the 409 arrives first, the client records its server version; a later SSE update that reaches that version clears the warning and schedules the latest structure for retry.
-- **Scope:** content only. Same-node _structure_ conflicts (geometry / parent)
-  stay coarse — there is no per-node structure-dirty tracking yet.
+- **Scope:** this dirty-node filter covers content only. Structure is protected per property unit by the in-flight set described under [Browser structure edits](#browser-structure-edits).
 - **Mixed Question content/FSM deltas:** when a pending field rejects an overlapping remote authored value, authoritative binding, invocation, attention, association metadata, and independent sidecar fields still apply. The local overlapping value, existing amber conflict notice, skipped change-card state, and content-CAS baseline rebase remain intact. Geometry and deletion conflict policy is unchanged; this field-level exception is specific to Question sidecar reconciliation, not general structure merging.
 
 Skipped ids flow back through `canvasSyncStore` into `acpThreadChangesStore`
@@ -227,7 +257,7 @@ The saving dialog explicitly carries `role="dialog"` for the shared Canvas inter
 
 ## Undo interaction
 
-Editable broadcast batches take **one** undo snapshot (via `applyDeltasFromAgent`), including a batch that only changes sibling paint order. Trusted Agent Node projection batches and FSM-only replacements do not create ordinary undo entries. The server's first-submitted-content effect rebases matching empty Question content in existing snapshots, so undoing an earlier drag cannot erase that submitted intent.
+Editable broadcast batches from an agent take **one** undo snapshot (via `applyDeltasFromAgent`), including a batch that only changes sibling paint order. A batch written by a person (`source: 'ui'`) — the page's own or another page's — takes none: the page's own edit already has its entry, and another person's edit is not this page's to undo. Trusted Agent Node projection batches and FSM-only replacements do not create ordinary undo entries. The server's first-submitted-content effect rebases matching empty Question content in existing snapshots, so undoing an earlier drag cannot erase that submitted intent.
 
 **Restore persistence is ordered, not delay-dependent.** Before undo/redo publishes reappearing nodes, the existing `nodeContentQueue` holds their sidecar writes behind generation tokens. Deleted-node content bookkeeping is forgotten immediately, while the preprocessing queue remembers interrupted work for history resurrection. Already-issued content and preprocessing requests settle before the history manager sends DELETE; DELETE promises are tracked to completion rather than aborted, because aborting fetch does not cancel an admitted server mutation. `saveCanvas` waits for outstanding deletes, reads the latest topology, and releases only tokens captured by that successfully acknowledged structure PUT. A later undo/redo invalidates earlier tokens, so neither an old acknowledgement nor a queued body resurrects a node removed again. Ordinary content edits retain their independent debounce and revision baseline; only an acknowledged resurrection starts with the absent-sidecar revision, still subject to the existing content CAS.
 
@@ -283,5 +313,6 @@ The server emits a heartbeat comment every 15 seconds. Canvas Sync applies a 45-
 | [store/remoteConversationOwner.ts](../../apps/web/src/store/remoteConversationOwner.ts)                                                                                                                                                                          | Shared local/remote snapshot observation, stale-result fencing and recovery calibration.          |
 | [store/acpThreadChangesStore.ts](../../apps/web/src/store/acpThreadChangesStore.ts)                                                                                                                                                                              | Per-thread change records + staleness (`isChangeStale`), Keep / Revert.                           |
 | [store/canvasStore.ts](../../apps/web/src/store/canvasStore.ts)                                                                                                                                                                                                  | `applyDeltasFromAgent` (dirty filter, order replay), `pendingContentNodeIds`.                     |
+| [store/canvasStore/sync/](../../apps/web/src/store/canvasStore/sync)                                                                                                                                                                                             | Send queue, in-flight set, property units, field-level deltas, gesture diff commands.             |
 | [ChangeReviewCard.tsx](../../apps/web/src/components/Panels/ChatPanel/ChangeReviewCard.tsx)                                                                                                                                                                      | Above-input Keep / Revert / preview card.                                                         |
 | [pages/CanvasPage/CanvasPage.tsx](../../apps/web/src/pages/CanvasPage/CanvasPage.tsx)                                                                                                                                                                            | Connects / disconnects the sync stream on canvas load / switch.                                   |

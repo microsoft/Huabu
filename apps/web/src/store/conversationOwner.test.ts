@@ -25,7 +25,9 @@ vi.mock('@/store/conversationTitleStore', () => ({
   invalidateConversationTitle: vi.fn(),
 }));
 
-import useCanvasStore from './canvasStore';
+import { ApiError } from '@/api/_client';
+
+import useCanvasStore, { resetCanvasSyncForTests } from './canvasStore';
 import { useChatStore } from './chatStore';
 import {
   ConversationIntegrityError,
@@ -76,6 +78,7 @@ beforeEach(() => {
     },
   });
   postCanvasExecute.mockReset();
+  resetCanvasSyncForTests();
   useRemoteConversationOwnerStore.setState({ entries: {} });
   getOwner.mockReset().mockResolvedValue({
     canvasId: 'canvas-source',
@@ -442,7 +445,9 @@ describe('conversation owner routing', () => {
     expect(postCanvasExecute.mock.calls[0][1].commands[0].type).toBe(
       'CREATE_NODES',
     );
-    rejectCreation?.(new Error('creation failed'));
+    // A refusal, not a transport failure: the queue repeats the latter with
+    // the same request id instead of giving up.
+    rejectCreation?.(new ApiError(409, { message: 'creation failed' }, ''));
     await expect(draft).rejects.toThrow('creation failed');
     expect(postCanvasExecute).toHaveBeenCalledTimes(1);
   });

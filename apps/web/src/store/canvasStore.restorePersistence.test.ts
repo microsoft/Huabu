@@ -7,6 +7,7 @@ import { nodeRevisionOf } from '@huabu/shared/canvas-engine';
 
 const api = vi.hoisted(() => ({
   putCanvas: vi.fn(),
+  postCanvasExecute: vi.fn(),
   deleteNode: vi.fn(),
   putNodeContent: vi.fn(),
   getCanvas: vi.fn(),
@@ -29,10 +30,12 @@ import { canvasHistoryManager } from './canvasHistoryManager';
 import useCanvasStore, {
   discardPendingSaves,
   drainPendingSaves,
+  resetCanvasSyncForTests,
   saveCanvasForSubmission,
   settleNodePreprocess,
 } from './canvasStore';
 import { CanvasConflictError } from '../api/canvas';
+import { createFakeExecuteServer } from './canvasStore/sync/testing/fakeExecuteServer';
 import {
   openPreviewNode,
   openSpaceConversation,
@@ -82,9 +85,24 @@ const state = () => useCanvasStore.getState();
 // debounce, and OCC reconciliation are real. This transport explicitly models
 // the server's split topology/sidecar contract, including benign tombstone 200
 // and revision refusal. The acceptance spec checks the real Disk endpoints.
+//
+// A command batch (the deletion these cases start from) is an execute
+// request, answered by the real engine over the same `topology` / `version`
+// the structure PUT writes; undo and redo still save through that PUT.
 beforeEach(() => {
   vi.useFakeTimers();
   vi.clearAllMocks();
+  resetCanvasSyncForTests();
+  const executeServer = createFakeExecuteServer(
+    () => ({ nodes: topology, edges: [], version }),
+    (next) => {
+      topology = next.nodes;
+      version = next.version;
+    },
+  );
+  api.postCanvasExecute.mockImplementation(async (canvasId, request) =>
+    executeServer.execute(canvasId, request),
+  );
   structureGate = deleteGate = contentGate = undefined;
   version = 1;
   topology = [note];
@@ -259,6 +277,9 @@ describe('undo/redo persistence ordering', () => {
     const child = { ...note, parentId: frame.id, selected: true };
     const other = { ...child, id: 'node-other', position: { x: 400, y: 0 } };
     state()._setStateNoAutosave({ nodes: [frame, child, other] });
+    // The move out of the Frame is a command batch; the server has the same
+    // three nodes to run it against.
+    topology = [frame, child, other];
     const parentValues = () => {
       const request = api.putCanvas.mock.lastCall?.[1] as
         | PutCanvasRequest

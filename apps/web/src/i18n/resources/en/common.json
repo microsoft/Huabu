@@ -1663,6 +1663,9 @@
       "closeShortcuts": "Close the shortcuts dialog"
     }
   },
+  "canvasSync": {
+    "changeRejected": "A change could not be applied because the item was changed elsewhere. This Space now shows the latest version."
+  },
   "errors": {
     "connectAnAgent": "Connect an Agent",
     "conversationAgentUnconfigured": "Connect an external Agent or use Built-In Pi to start a new conversation.",

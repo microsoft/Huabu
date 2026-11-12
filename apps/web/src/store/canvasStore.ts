@@ -145,6 +145,21 @@ import { createStructureScheduler } from './canvasStore/save/structureScheduler'
 import { createUnloadFlush } from './canvasStore/save/unloadFlush';
 import { replaySiblingOrder } from './canvasStore/siblingOrderReplay';
 import { createResizePreviewController } from './canvasStore/slices/resizePreview';
+import {
+  createBrowserSync,
+  type PreparedRemote,
+} from './canvasStore/sync/browserSync';
+import { commandsForLocalDiff } from './canvasStore/sync/localDiffCommands';
+import {
+  applyUnits,
+  changedUnits,
+  writeUnit,
+  type UnitNode,
+} from './canvasStore/sync/propertyUnits';
+import {
+  commandsForServer,
+  withClientIds,
+} from './canvasStore/sync/serverCommands';
 import { useChatStore } from './chatStore';
 import { useGesturePreviewStore } from './gesturePreviewStore';
 import { usePanelStore } from './panelStore';
@@ -164,6 +179,7 @@ import {
 import { copyCanvasClipboard } from '../utils/io/clipboard';
 import { nodesToPlainText } from '../utils/io/nodeToPlainText';
 
+import type { SendOutcome } from './canvasStore/sync/sendQueue';
 import type {
   FrameFitPreview,
   FrameFitPreviewRole,
@@ -902,7 +918,13 @@ type RFState = {
   executeCommands: (
     commands: CanvasCommand[],
     source?: CanvasExecutionSource,
-    options?: Pick<ExecutorOptions, 'frozenStructuredGutters'>,
+    options?: Pick<ExecutorOptions, 'frozenStructuredGutters'> & {
+      /**
+       * A gesture preview tick: run and show the result, send nothing. The
+       * batch that closes the gesture carries what the ticks changed.
+       */
+      localOnly?: boolean;
+    },
   ) => void;
   /**
    * @internal Apply a server-authored delta batch (M2 headless executor).
@@ -942,6 +964,12 @@ type RFState = {
       events?: readonly SetSiblingOrderEvent[];
       onDiverged?: () => void;
     },
+    /**
+     * Where the batch came from: the request id its writer supplied (this
+     * page recognises its own) and the writer's kind. A person's edit, from
+     * this page or another, takes no undo snapshot here.
+     */
+    sync?: { operationId?: string; source?: 'ui' | 'agent' | 'system' },
   ) => string[];
   /**
    * Ids of nodes with un-persisted local content edits (pending debounced
@@ -1068,6 +1096,192 @@ const nodeContentQueue = createNodeContentQueue({
     preprocessQueue.resumeRestored(canvasId, nodeId),
 });
 
+// ─── Structure edits through execute ──────────────────────────────────────
+//
+// A `ui` command batch runs locally first, then the same commands are sent
+// to `POST /execute` through a serial queue (see `./canvasStore/sync/`).
+// The server's `update` for that batch — from the Canvas Sync stream, or the
+// request's own response when it is the next contiguous version — is replayed
+// field by field, so it cannot overwrite a property this page changed again
+// meanwhile. Batches sent this way do not schedule the whole-Space PUT.
+
+/** Identifies this page in `originator.tabId`; a reload gets a new one. */
+const SYNC_CLIENT_ID =
+  typeof crypto !== 'undefined' && 'randomUUID' in crypto
+    ? crypto.randomUUID()
+    : `page-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+/** A whole-Space PUT was skipped because the send queue could not send. */
+let structureSaveDeferred = false;
+
+/** Depth of local commits whose persistence is the send queue, not the PUT. */
+let structureSaveSuppressed = 0;
+
+function withoutStructureSave<T>(run: () => T): T {
+  structureSaveSuppressed += 1;
+  try {
+    return run();
+  } finally {
+    structureSaveSuppressed -= 1;
+  }
+}
+
+/**
+ * Nodes as they were when the current pointer gesture began. Live drag and
+ * resize ticks move nodes without a command; the batch that closes the
+ * gesture holds what changed since this state, not only since its own start.
+ */
+let syncGestureBaseline: Node[] | null = null;
+
+/** The node and edge lists in the shape the sync modules read. */
+function syncView(
+  nodes: readonly Node[],
+  edges: readonly Edge[],
+): {
+  nodes: readonly UnitNode[];
+  edges: readonly ({ id: string } & Record<string, unknown>)[];
+} {
+  return {
+    nodes: nodes as unknown as UnitNode[],
+    edges: edges as unknown as ({ id: string } & Record<string, unknown>)[],
+  };
+}
+
+/** Content fields are saved by the per-node content PUT, not the queue. */
+function isContentUnit(unit: string): boolean {
+  return unit.startsWith('data.') && NODE_CONTENT_KEYS.has(unit.slice(5));
+}
+
+let syncRejectedToastId: string | null = null;
+let afterCanvasResync: (() => void) | null = null;
+
+const browserSync = createBrowserSync({
+  send: (canvasId, request, options) =>
+    postCanvasExecute(canvasId, request, options),
+  clientId: SYNC_CLIENT_ID,
+  getState: () => {
+    const { canvasId, version } = useCanvasStore.getState();
+    return { canvasId, version };
+  },
+  applyOwnResponse: (response, operationId) => {
+    useCanvasStore.getState().applyDeltasFromAgent(
+      response.deltas as Delta[],
+      response.toVersion,
+      response.pendingEffects as Parameters<RFState['applyDeltasFromAgent']>[2],
+      false,
+      {
+        events: response.orderEvents,
+        onDiverged: () => browserSync.deferReload(response.canvasId),
+      },
+      { operationId, source: 'ui' },
+    );
+  },
+  applyWithheld: (canvasId, units) => {
+    const state = useCanvasStore.getState();
+    if (state.canvasId !== canvasId) return;
+    const byNode = new Map<string, typeof units>();
+    for (const unit of units) {
+      byNode.set(unit.nodeId, [...(byNode.get(unit.nodeId) ?? []), unit]);
+    }
+    let touched = false;
+    const nodes = state.nodes.map((node) => {
+      const pending = byNode.get(node.id);
+      if (!pending) return node;
+      let next = node as unknown as UnitNode;
+      for (const unit of pending) next = writeUnit(next, unit.unit, unit.value);
+      if (changedUnits(node as unknown as UnitNode, next).length === 0)
+        return node;
+      touched = true;
+      return next as unknown as Node;
+    });
+    if (!touched) return;
+    state._setStateNoAutosave({ nodes });
+  },
+  onRejected: ({ canvasId, outcome }) => {
+    if (useCanvasStore.getState().canvasId !== canvasId) return;
+    // One notice however many commands were refused.
+    if (syncRejectedToastId) dismissToast(syncRejectedToastId);
+    // A failed precondition (a conversation fork) reports its own reason.
+    syncRejectedToastId =
+      outcome.kind === 'failed' && !outcome.sent
+        ? toast(
+            outcome.error instanceof Error
+              ? outcome.error.message
+              : t('canvasSync.changeRejected'),
+            { tone: 'danger' },
+          )
+        : toast(t('canvasSync.changeRejected'), { tone: 'warning' });
+  },
+  reload: (canvasId) => {
+    const state = useCanvasStore.getState();
+    if (state.canvasId !== canvasId) return;
+    // A reload would drop a body the user is still typing; the next update
+    // that shows the gap asks again.
+    if (nodeContentQueue.pendingNodeIds().length > 0) return;
+    const done = afterCanvasResync;
+    void state
+      .loadCanvas(canvasId, { resetHistory: true })
+      .then(() => done?.());
+  },
+  ignoreUnit: isContentUnit,
+});
+
+browserSync.queue.subscribe((status) => {
+  if (status.phase !== 'idle' || !structureSaveDeferred) return;
+  if (useCanvasStore.getState().canvasId !== status.canvasId) return;
+  structureSaveDeferred = false;
+  structureScheduler.schedule();
+});
+
+/**
+ * Send what the open pointer gesture changed without a command — the
+ * positions its live ticks left in the store — and close the gesture.
+ *
+ * @param edgesBefore Edges before the drop re-routed them.
+ */
+function submitGestureTicks(edgesBefore: readonly Edge[]): void {
+  const baseline = syncGestureBaseline;
+  syncGestureBaseline = null;
+  const state = useCanvasStore.getState();
+  if (!baseline || !state.canvasId) return;
+  const { commands } = commandsForLocalDiff(
+    baseline as unknown as UnitNode[],
+    state.nodes as unknown as UnitNode[],
+    isContentUnit,
+  );
+  if (commands.length === 0) return;
+  browserSync.submit({
+    canvasId: state.canvasId,
+    commands,
+    prev: syncView(baseline, edgesBefore),
+    next: syncView(state.nodes, state.edges),
+  });
+}
+
+/**
+ * Forget every queued batch and unconfirmed hold. The queue is module state
+ * that outlives a test; suites that edit structure call this between cases.
+ */
+export function resetCanvasSyncForTests(): void {
+  browserSync.reset();
+  syncGestureBaseline = null;
+  structureSaveDeferred = false;
+}
+
+/**
+ * Converge this page to the server's whole Space: after a version gap, a
+ * reconnect snapshot that does not match, or a diverged paint order. Runs at
+ * once when nothing is waiting to be sent, otherwise as soon as the send
+ * queue has drained — never while it still holds unsent changes.
+ */
+export function requestCanvasResync(
+  canvasId: string,
+  afterReload?: () => void,
+): void {
+  afterCanvasResync = afterReload ?? null;
+  browserSync.deferReload(canvasId);
+}
+
 /** Drain issued sidecar writers without promoting held/debounced writes. */
 async function waitForSidecarWrites(): Promise<void> {
   await Promise.all([
@@ -1137,6 +1351,12 @@ export async function drainPendingSaves(
     nodeContentQueue.retryFailedSaves(canvasId);
   }
   do {
+    // Queued structure edits first: the whole-Space PUT waits for them too.
+    if ((await browserSync.whenQuiet(canvasId)) === 'stalled') {
+      throw new Error(
+        'Changes to this Space could not be sent. Retry before leaving it.',
+      );
+    }
     if (isActive()) await structureScheduler.flushAsync();
     await waitForStructureSave(canvasId);
     if (isActive()) await nodeContentQueue.flushAll();
@@ -1168,6 +1388,7 @@ export async function discardPendingSaves(canvasId: string): Promise<void> {
   state._setStateNoAutosave({ isLoading: true, pendingSave: false });
   structureScheduler.cancelPending();
   preprocessQueue.cancelAll();
+  browserSync.discard(canvasId);
   const resumeContentSaves = nodeContentQueue.suspendCanvas(canvasId);
   try {
     // Keep failure records until every admitted writer has settled.
@@ -1235,6 +1456,15 @@ export async function savedBeforeSignOut(): Promise<boolean> {
  * queued, in flight or failed. Leaving the page now would lose it.
  */
 export function hasUnsavedCanvasEdits(): boolean {
+  const { canvasId } = useCanvasStore.getState();
+  if (!canvasId) return false;
+  return (
+    hasUnsavedStructureOrContent() || browserSync.queue.hasPending(canvasId)
+  );
+}
+
+/** Unsaved work of the whole-Space PUT and the per-node content PUT. */
+function hasUnsavedStructureOrContent(): boolean {
   const { canvasId, isSaving, pendingSave, versionConflict } =
     useCanvasStore.getState();
   if (!canvasId) return false;
@@ -1435,7 +1665,10 @@ const autoSaveMiddleware =
         // content edits do NOT bump the canvas `version` — they ride
         // the per-node content PUT instead. See
         // `./canvasStore/save/structureDirtyDetector.ts`.
-        if (shouldScheduleStructureSave(prev, next)) {
+        if (
+          structureSaveSuppressed === 0 &&
+          shouldScheduleStructureSave(prev, next)
+        ) {
           structureScheduler.schedule();
         }
         // --- Per-node content diff ---
@@ -1858,108 +2091,84 @@ const useCanvasStore = create<RFState>()(
     // --- Internal: not exposed in the public CanvasStore interface ---
 
     /** Execute a batch of shared CanvasCommands. Source defaults to 'ui'. */
-    executeCommands: (commands, source, options) => {
+    executeCommands: (inputCommands, source, options) => {
       const resolvedSource = source ?? 'ui';
-      const execution: CanvasExecution = {
-        source: resolvedSource,
-        commands,
-      };
+      const { localOnly, ...engineOptions } = options ?? {};
       const state = {
         nodes: get().nodes,
         edges: get().edges,
         canvasId: get().canvasId,
       };
+      // A `ui` batch is persisted by sending these same commands to the
+      // server, so the ids it creates must be decided here.
+      const routed = resolvedSource === 'ui' && !localOnly && !!state.canvasId;
+      const commands = routed ? withClientIds(inputCommands) : inputCommands;
+      const execution: CanvasExecution = {
+        source: resolvedSource,
+        commands,
+      };
+
+      // The batch that closes a pointer gesture also carries what the
+      // gesture's live ticks changed without a command.
+      const gestureBaseline =
+        routed && canvasHistoryManager.gestureSnapshotTaken
+          ? syncGestureBaseline
+          : null;
+      if (routed) syncGestureBaseline = null;
+      const prelude = gestureBaseline
+        ? commandsForLocalDiff(
+            gestureBaseline as unknown as UnitNode[],
+            state.nodes as unknown as UnitNode[],
+            isContentUnit,
+          ).commands
+        : [];
+      const submitPreludeOnly = (): void => {
+        if (!gestureBaseline || prelude.length === 0) return;
+        browserSync.submit({
+          canvasId: state.canvasId,
+          commands: prelude,
+          prev: syncView(gestureBaseline, state.edges),
+          next: syncView(state.nodes, state.edges),
+        });
+      };
 
       const { writeResult, commandResults, pendingEffects } =
         executeCanvasCommands(execution, state, {
-          ...options,
+          ...engineOptions,
           // Agent batches must always refit parent frames because the
           // LLM cannot accurately predict rendered dimensions.
           forceFitFrames: resolvedSource === 'agent',
         });
 
       // Only commit if at least one command was applied.
-      if (!commandResults.some((r) => r.applied)) return;
       if (
+        !commandResults.some((r) => r.applied) ||
         !canChangeSpaceEntries(state.canvasId, state.nodes, writeResult.nodes)
-      )
+      ) {
+        submitPreludeOnly();
         return;
-
-      const createdQuestions = writeResult.nodes.filter(
-        (node) =>
-          node.type === 'question' &&
-          !state.nodes.some((old) => old.id === node.id),
-      );
-      if (createdQuestions.length > 0 && resolvedSource === 'ui') {
-        nodeContentQueue.prepareServerCreatedNodes(createdQuestions);
-        const creation = Promise.all(
-          createdQuestions.map((node) =>
-            questionForks.get(`${state.canvasId}\0${node.data.threadId}`),
-          ),
-        )
-          .then(() =>
-            postCanvasExecute(state.canvasId, {
-              commands,
-              originator: { source: 'ui' },
-            }),
-          )
-          .then((response) => {
-            for (const node of createdQuestions) {
-              const pending = questionCreations.get(
-                `${state.canvasId}\0${node.id}`,
-              );
-              if (pending?.promise === creation)
-                pending.toVersion = response.toVersion;
-            }
-            for (const node of createdQuestions) {
-              const index = commands.findIndex(
-                (command) =>
-                  command.type === 'CREATE_NODES' &&
-                  command.nodes.some((entry) => entry.id === node.id),
-              );
-              if (index < 0 || !response.results[index]?.applied) {
-                throw new Error('Question creation was not acknowledged');
-              }
-            }
-            const current = get();
-            if (
-              current.canvasId === response.canvasId &&
-              current.version === response.fromVersion
-            ) {
-              current.applyDeltasFromAgent(
-                response.deltas as Delta[],
-                response.toVersion,
-                response.pendingEffects as Parameters<
-                  typeof current.applyDeltasFromAgent
-                >[2],
-                false,
-                {
-                  events: response.orderEvents,
-                  onDiverged: () =>
-                    void get().loadCanvas(response.canvasId, {
-                      resetHistory: true,
-                    }),
-                },
-              );
-            }
-          });
-        for (const node of createdQuestions) {
-          questionCreations.set(`${state.canvasId}\0${node.id}`, {
-            promise: creation,
-          });
-        }
-        void creation.catch((error) => {
-          // A failed fork/creation is not a fresh conversation. Remove only
-          // its optimistic Questions, including copies in later undo entries.
-          rollbackFailedQuestions(state.canvasId, createdQuestions);
-          toast(
-            error instanceof Error
-              ? error.message
-              : 'Failed to create Question',
-            { tone: 'danger' },
-          );
-        });
       }
+
+      const forServer = routed
+        ? commandsForServer(commands, NODE_CONTENT_KEYS)
+        : { commands: [], sourceIndex: [] };
+      // Whether the send queue persists this batch. A batch whose applied
+      // commands are all local (selection, content fields) is not sent.
+      const viaQueue =
+        routed &&
+        (prelude.length > 0 ||
+          forServer.sourceIndex.some(
+            (index) => commandResults[index]?.applied,
+          ));
+
+      const previousIds = new Set(state.nodes.map((node) => node.id));
+      const createdNodes = viaQueue
+        ? writeResult.nodes.filter((node) => !previousIds.has(node.id))
+        : [];
+      // The server writes a created node's first content from the command,
+      // so the content queue must not also create it.
+      if (createdNodes.length > 0)
+        nodeContentQueue.prepareServerCreatedNodes(createdNodes);
 
       // Guard: verify that 'caller' snapshot commands were preceded by beginGesture.
       // Skip for agent-originated commands (no UI gesture involved).
@@ -1997,11 +2206,96 @@ const useCanvasStore = create<RFState>()(
       // single set() call instead of triggering a second render.
       const sharedOut = applySharedPostEffectsFromWriteResult(writeResult);
 
-      // Commit new state in one shot.
-      set({
-        nodes: writeResult.nodes,
-        edges: sharedOut.edges,
-      });
+      // Commit new state in one shot. A batch the queue persists, and a
+      // gesture preview tick its closing batch will carry, do not schedule
+      // the whole-Space PUT.
+      const commit = (): void =>
+        set({
+          nodes: writeResult.nodes,
+          edges: sharedOut.edges,
+        });
+      if (
+        viaQueue ||
+        (localOnly && resolvedSource === 'ui' && syncGestureBaseline !== null)
+      )
+        withoutStructureSave(commit);
+      else commit();
+
+      let sent: Promise<unknown> | undefined;
+      if (viaQueue) {
+        const forks = createdNodes.flatMap((node) => {
+          const fork =
+            node.type === 'question'
+              ? questionForks.get(`${state.canvasId}\0${node.data.threadId}`)
+              : undefined;
+          return fork ? [fork] : [];
+        });
+        // Whether the server took every node this batch created.
+        const creationError = (
+          outcome: SendOutcome,
+          offset: number,
+        ): unknown => {
+          if (outcome.kind === 'failed') return outcome.error;
+          if (outcome.kind === 'discarded')
+            return new Error('Creation was discarded before it was sent');
+          for (const node of createdNodes) {
+            const index = forServer.commands.findIndex(
+              (command) =>
+                command.type === 'CREATE_NODES' &&
+                command.nodes.some((created) => created.id === node.id),
+            );
+            // A node a later command of the batch created (none today)
+            // has no CREATE_NODES to acknowledge.
+            if (index < 0) continue;
+            const result =
+              outcome.response.results[offset + prelude.length + index];
+            if (!result?.applied)
+              return new Error('Node creation was not acknowledged');
+          }
+          return undefined;
+        };
+        const { entry, offset } = browserSync.submit({
+          canvasId: state.canvasId,
+          commands: [...prelude, ...forServer.commands],
+          prev: syncView(gestureBaseline ?? state.nodes, state.edges),
+          next: syncView(get().nodes, get().edges),
+          ...(forks.length > 0 ? { gate: Promise.all(forks) } : {}),
+          ...(createdNodes.length > 0
+            ? {
+                // The queue already told the user. A creation the server
+                // did not take is not on the Space: remove only its
+                // optimistic nodes, including copies in later undo
+                // entries, before the next batch is sent.
+                onSettled: (outcome, at) => {
+                  if (creationError(outcome, at) !== undefined)
+                    rollbackFailedQuestions(state.canvasId, createdNodes);
+                },
+              }
+            : {}),
+        });
+        sent = entry.settled;
+        if (createdNodes.length > 0) {
+          const creation = entry.settled.then((outcome) => {
+            if (outcome.kind === 'response') {
+              for (const node of createdNodes) {
+                const pending = questionCreations.get(
+                  `${state.canvasId}\0${node.id}`,
+                );
+                if (pending?.promise === creation)
+                  pending.toVersion = outcome.response.toVersion;
+              }
+            }
+            const error = creationError(outcome, offset);
+            if (error !== undefined) throw error;
+          });
+          for (const node of createdNodes) {
+            questionCreations.set(`${state.canvasId}\0${node.id}`, {
+              promise: creation,
+            });
+          }
+          void creation.catch(() => undefined);
+        }
+      }
 
       // Drain web-only effects (preprocessing trigger, delete
       // tracking, AI flag, transition cleanup, deferred frame fit).
@@ -2013,8 +2307,15 @@ const useCanvasStore = create<RFState>()(
         setNodes: (nodes) => set({ nodes }),
         triggerPreprocessing: scheduleAcknowledgedNodePreprocessing,
         forgetNodeContent: nodeContentQueue.forgetNode,
-        getPendingCreation: (nodeId) =>
-          questionCreations.get(`${state.canvasId}\0${nodeId}`)?.promise,
+        // The sidecar is unlinked only after the batch that removes the
+        // node from the Space has been answered.
+        getPendingCreation: (nodeId) => {
+          const creation = questionCreations.get(
+            `${state.canvasId}\0${nodeId}`,
+          )?.promise;
+          if (!sent) return creation;
+          return Promise.allSettled([creation, sent]).then(() => undefined);
+        },
         waitForNodeContent: waitForSidecarWrites,
         validatePreviewNodes: (liveNodeIds) =>
           usePreviewWorkspaceStore.getState().validate(liveNodeIds),
@@ -2039,6 +2340,7 @@ const useCanvasStore = create<RFState>()(
       pendingEffects,
       agentNodeProjection = false,
       order,
+      sync,
     ) => {
       const orderEvents = order?.events ?? [];
       const reconcileIncomingVersion = (): void => {
@@ -2136,6 +2438,20 @@ const useCanvasStore = create<RFState>()(
           };
         });
       }
+      // Apply the batch property by property: write only what it changed,
+      // and leave alone what this page changed and has not had confirmed.
+      const remote: PreparedRemote = browserSync.prepareRemote({
+        deltas,
+        localNodes: syncView(get().nodes, get().edges).nodes,
+        localEdges: syncView(get().nodes, get().edges).edges,
+        ...(sync?.operationId ? { operationId: sync.operationId } : {}),
+        ...(sync?.source ? { source: sync.source } : {}),
+      });
+      deltas = remote.deltas;
+      // A person's edit is theirs to undo, not this page's.
+      const recordUndo = !remote.own && sync?.source !== 'ui';
+      const serverNodeOf = (node: { id: string }): Node =>
+        (remote.serverNodes.get(node.id) ?? node) as unknown as Node;
       const safeDeltas =
         dirty.size === 0
           ? deltas
@@ -2166,13 +2482,13 @@ const useCanvasStore = create<RFState>()(
                   preservedPendingNodeIds.add(d.next.id);
                   if (changesPendingContent) {
                     skippedNodeIds.push(d.next.id);
-                    skippedRemoteNodes.push(d.next as unknown as Node);
+                    skippedRemoteNodes.push(serverNodeOf(d.next));
                   } else if (
                     changedContentFields.some(
                       (key) => key === 'content' || key === 'src',
                     )
                   ) {
-                    advancedRemoteBaselines.push(d.next as unknown as Node);
+                    advancedRemoteBaselines.push(serverNodeOf(d.next));
                   }
                   return [
                     {
@@ -2209,7 +2525,7 @@ const useCanvasStore = create<RFState>()(
                   }
                 }
                 skippedNodeIds.push(d.next.id);
-                skippedRemoteNodes.push(d.next as unknown as Node);
+                skippedRemoteNodes.push(serverNodeOf(d.next));
                 return [];
               }
               if (d.type === 'DELETE_NODE' && dirty.has(d.node.id)) {
@@ -2240,6 +2556,7 @@ const useCanvasStore = create<RFState>()(
         // Still reconcile the version so the next local edit's autosave
         // doesn't 409 against our stale view of server state.
         reconcileIncomingVersion();
+        remote.finish();
         return skippedNodeIds;
       }
 
@@ -2261,6 +2578,7 @@ const useCanvasStore = create<RFState>()(
       if (agentNodeProjection) {
         canvasHistoryManager.rebaseAgentInitialContent(safeDeltas);
       } else if (
+        recordUndo &&
         safeDeltas.some((delta) => {
           if (delta.type === 'INSERT_NODE' && delta.node.type === 'question') {
             const live = prevNodes.find((node) => node.id === delta.node.id);
@@ -2326,16 +2644,14 @@ const useCanvasStore = create<RFState>()(
           ? replaySiblingOrder(
               prevNodes as NestableNode[],
               entityOrderedNodes,
-              new Set(
-                safeDeltas.flatMap((delta) =>
-                  delta.type === 'INSERT_NODE' ? [delta.node.id] : [],
-                ),
-              ),
+              // Includes the optimistic copy of a node this page created.
+              remote.insertedNodeIds,
               orderEvents,
             )
           : { nodes: entityOrderedNodes, diverged: false };
       const orderedNodes = orderReplay.nodes;
       if (
+        recordUndo &&
         !agentNodeProjection &&
         !undoSnapshotTaken &&
         orderedNodes.some(
@@ -2370,23 +2686,39 @@ const useCanvasStore = create<RFState>()(
       // wrong.
       const skipped = new Set([...skippedNodeIds, ...removedQuestionIds]);
       runWebPostEffects({
-        effects: {
-          mutatedNodes:
-            skipped.size === 0
-              ? pendingEffects.mutatedNodes
-              : pendingEffects.mutatedNodes.filter((n) => !skipped.has(n.id)),
-          deletedNodeIds:
-            skipped.size === 0
-              ? pendingEffects.deletedNodeIds
-              : pendingEffects.deletedNodeIds.filter((id) => !skipped.has(id)),
-          contentEditedNodeIds:
-            skipped.size === 0
-              ? pendingEffects.contentEditedNodeIds
-              : pendingEffects.contentEditedNodeIds.filter(
-                  (id) => !skipped.has(id),
-                ),
-          deferredFitFrameIds: pendingEffects.deferredFitFrameIds,
-        },
+        // This page already ran the effects of its own batch when it
+        // executed it. Preprocessing of another person's edit is triggered
+        // by the page that made it.
+        effects: remote.own
+          ? {
+              mutatedNodes: [],
+              deletedNodeIds: [],
+              contentEditedNodeIds: [],
+              deferredFitFrameIds: [],
+            }
+          : {
+              mutatedNodes:
+                sync?.source === 'ui'
+                  ? []
+                  : skipped.size === 0
+                    ? pendingEffects.mutatedNodes
+                    : pendingEffects.mutatedNodes.filter(
+                        (n) => !skipped.has(n.id),
+                      ),
+              deletedNodeIds:
+                skipped.size === 0
+                  ? pendingEffects.deletedNodeIds
+                  : pendingEffects.deletedNodeIds.filter(
+                      (id) => !skipped.has(id),
+                    ),
+              contentEditedNodeIds:
+                skipped.size === 0
+                  ? pendingEffects.contentEditedNodeIds
+                  : pendingEffects.contentEditedNodeIds.filter(
+                      (id) => !skipped.has(id),
+                    ),
+              deferredFitFrameIds: pendingEffects.deferredFitFrameIds,
+            },
         canvasId,
         getNodes: () => get().nodes,
         getEdges: () => get().edges,
@@ -2400,12 +2732,45 @@ const useCanvasStore = create<RFState>()(
           usePreviewWorkspaceStore.getState().validate(liveNodeIds),
       });
 
+      // Keep the open gesture's starting point in step with the server, so
+      // its closing batch sends only what the gesture itself changed.
+      if (syncGestureBaseline) {
+        const changes = new Map(
+          safeDeltas.flatMap((delta) =>
+            delta.type === 'REPLACE_NODE'
+              ? [[delta.next.id, delta] as const]
+              : [],
+          ),
+        );
+        if (changes.size > 0) {
+          syncGestureBaseline = syncGestureBaseline.map((node) => {
+            const change = changes.get(node.id);
+            if (!change) return node;
+            return applyUnits(
+              node as unknown as UnitNode,
+              change.next as unknown as UnitNode,
+              changedUnits(
+                change.prev as unknown as UnitNode,
+                change.next as unknown as UnitNode,
+              ),
+            ) as unknown as Node;
+          });
+        }
+      }
+
+      // Release what this batch confirmed and install what it left to the
+      // server's earlier value.
+      remote.finish();
+
       // Rows withheld for local-first reasons and unsaved edits make the
-      // local order differ on purpose; the next save settles it.
+      // local order differ on purpose; the next save settles it. So does an
+      // unconfirmed local change to the same parent's children: the update
+      // for that change carries the order the server ended with.
       if (
         orderReplay.diverged &&
         skipped.size === 0 &&
-        !hasUnsavedCanvasEdits()
+        !hasUnsavedStructureOrContent() &&
+        !orderEvents.some((event) => remote.orderHeld(event.parentId))
       ) {
         order?.onDiverged?.();
       }
@@ -2483,6 +2848,7 @@ const useCanvasStore = create<RFState>()(
           intent.type === 'RESIZE_NODE' && intent.preview
             ? {
                 frozenStructuredGutters: intent.frozenStructuredGutters,
+                localOnly: true,
               }
             : undefined,
         );
@@ -2758,6 +3124,9 @@ const useCanvasStore = create<RFState>()(
         // even when the canvas id is unchanged, selected stroke ids and
         // retained polygons may have been deleted or moved remotely.
         useGesturePreviewStore.getState().resetCanvasScopedTransients();
+        // The loaded Space is the server's: nothing local is unconfirmed.
+        syncGestureBaseline = null;
+        browserSync.adoptedServerState(targetId);
         // Do not autosave the loaded baseline again. The no-autosave setter
         // also skips history availability sync, so restore those flags here.
         get()._setStateNoAutosave({
@@ -2877,7 +3246,24 @@ const useCanvasStore = create<RFState>()(
           });
           const deleting =
             canvasHistoryManager.hasPendingDeletes(savingCanvasId);
-          if (creating.length === 0 && !deleting) break;
+          // The PUT carries the whole Space and this page's version. Wait
+          // until every queued batch is answered and its update applied, so
+          // it never goes out with a version the queue is about to advance.
+          // The page-close flush cannot wait.
+          const sending =
+            !options?.keepalive && browserSync.isBusy(savingCanvasId);
+          if (creating.length === 0 && !deleting && !sending) break;
+          if (sending) {
+            const quiet = await browserSync.whenQuiet(savingCanvasId);
+            if (get().canvasId !== savingCanvasId) return;
+            if (quiet === 'stalled') {
+              // Nothing can be sent right now; the PUT would only race the
+              // queue's retry. It is rescheduled when the queue recovers.
+              structureSaveDeferred = true;
+              return;
+            }
+            continue;
+          }
           await Promise.all(creating);
           for (const creation of creating) acknowledgedCreations.add(creation);
           // Re-read identities after waiting: undo/redo may have restored a
@@ -3867,13 +4253,11 @@ const useCanvasStore = create<RFState>()(
         cachedDecisions,
       });
 
-      // Ensure a structure save is scheduled whenever the drag actually
-      // moved a node. The resolver only emits a `SET_NODE_GEOMETRY`
-      // command for frame / parent transitions; a plain free-node move
-      // yields no command (the final position is already in the store
-      // from the live `_setStateNoAutosave` ticks), so without this the
-      // new position would never be persisted. Re-scheduling when the
-      // resolver did commit is harmless — it just resets the debounce.
+      // A plain free-node move yields no command: the final position is
+      // already in the store from the live `_setStateNoAutosave` ticks. The
+      // drop is then sent as the `SET_NODE_GEOMETRY` those ticks amount to.
+      // When the resolver did emit commands, `executeCommands` has already
+      // sent the ticks ahead of them and this finds nothing left.
       const startPositions = _dragStartPositions;
       _dragStartPositions = null;
       if (startPositions) {
@@ -3888,7 +4272,7 @@ const useCanvasStore = create<RFState>()(
         if (moved) {
           // Free moves may apply no command, bypassing executeCommands and
           // its routing effects. Reconcile against final geometry before the
-          // existing gesture save; frames can move un-dragged edge endpoints
+          // drop is sent; frames can move un-dragged edge endpoints
           // and unconnected nodes can change another edge's obstacle path.
           const edges = get().edges;
           const routed = applySharedPostEffects({
@@ -3899,7 +4283,7 @@ const useCanvasStore = create<RFState>()(
           if (routed.edges !== edges) {
             get()._setStateNoAutosave({ edges: routed.edges });
           }
-          structureScheduler.schedule();
+          submitGestureTicks(edges);
           // A real move: the pre-drag snapshot beginGesture took is a
           // legitimate undo entry — keep it (executeCommands already
           // consumed it for frame-transition moves; this is idempotent
@@ -3914,6 +4298,7 @@ const useCanvasStore = create<RFState>()(
           canvasHistoryManager.rollbackGestureSnapshot();
         }
       }
+      syncGestureBaseline = null;
     },
 
     cancelActiveNodeDrag: () => {
@@ -3944,6 +4329,7 @@ const useCanvasStore = create<RFState>()(
       }
 
       endSnapSession();
+      syncGestureBaseline = null;
       canvasHistoryManager.rollbackGestureSnapshot();
       set({
         canUndo: canvasHistoryManager.canUndo,
@@ -3970,6 +4356,7 @@ const useCanvasStore = create<RFState>()(
       useGesturePreviewStore.getState().clearStructuredDropPreview();
       useGesturePreviewStore.getState().clearNodeGeometryPreviews();
       _dragStartPositions = null;
+      syncGestureBaseline = null;
       endSnapSession();
     },
 
@@ -4555,6 +4942,8 @@ const useCanvasStore = create<RFState>()(
       if (COMMAND_META[commandType].snapshot === 'caller') {
         const { nodes, edges } = get();
         armGestureSnapshot(nodes, edges);
+        // What the gesture's live ticks change is sent by its closing batch.
+        syncGestureBaseline = nodes;
       }
     },
 
@@ -4564,6 +4953,8 @@ const useCanvasStore = create<RFState>()(
       // flag, hence the explicit `endNodeDataGesture` counterpart below.
       const { nodes, edges } = get();
       armGestureSnapshot(nodes, edges);
+      // Every tick of this burst is its own command batch.
+      syncGestureBaseline = null;
     },
 
     endNodeDataGesture: () => {

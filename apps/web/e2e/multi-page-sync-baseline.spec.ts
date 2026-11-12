@@ -21,19 +21,26 @@ import type { CreateCanvasResponse } from '@huabu/shared';
  * server, storage, autosave and Canvas Sync stream. Nothing is mocked and no
  * store is written from the test; the store is only *read* for evidence.
  *
- * Every case has two tests driven by the same scenario:
+ * Cases (a)–(e) are structure edits. They are sent as execute requests and
+ * reach the other page live; their tests assert that behaviour.
+ *
+ * Case (f), note bodies, is not synced between pages yet, so it still has two
+ * tests driven by the same scenario:
  *
  *  - `current: …` pins what the product does today. These are characterization
- *    tests, not endorsements: several of them pin a defect (an edit that never
- *    reaches the other page, or one that is lost). When the behaviour is fixed
- *    they are expected to fail and should be deleted.
+ *    tests, not endorsements: they pin a defect (a body that never reaches the
+ *    other page, or a refused save). When the behaviour is fixed they are
+ *    expected to fail and should be deleted.
  *  - `target: …` states the behaviour the product should have. They are
  *    `test.fixme` so the suite stays green; set `E2E_RUN_SYNC_TARGETS=1` to run
  *    them as `test.fail` and prove each one really fails today. Flip them to
  *    plain `test` as the implementation lands.
  *
- * Timing: a human edit is autosaved 1000 ms after the last change, so every
- * scenario waits on the server record rather than on a clock. "The other page
+ * Case (g) is the control: a headless execute request.
+ *
+ * Timing: a structure edit is sent at once and a body is autosaved shortly
+ * after the last change, so every scenario waits on the server record rather
+ * than on a clock. "The other page
  * did not change" cannot be observed as an event, so `observeRemote` waits for
  * the other page's sync stream to deliver a frame written after the edit and
  * then keeps sampling for `LIVE_WINDOW_MS`.
@@ -673,10 +680,11 @@ async function twoWriterScenario(
   await waitForServerPosition(request, canvasId, X, xMoved);
   const afterA = await serverRecord(request, canvasId);
 
+  // A structure edit is sent as an execute request, not a whole-Space save.
   const bSave = b.page.waitForResponse(
     (response) =>
-      response.request().method() === 'PUT' &&
-      new URL(response.url()).pathname === `/api/canvas/${canvasId}`,
+      response.request().method() === 'POST' &&
+      new URL(response.url()).pathname === `/api/canvas/${canvasId}/execute`,
   );
   const aMark = a.syncText().length;
   const yMoved = await dragNode(b.page, Y, 120, 0);
@@ -776,7 +784,7 @@ async function bodyScenario(
     .poll(() =>
       b.calls
         .slice(moveCallsBefore)
-        .some((call) => call.path === '<space>' && call.status),
+        .some((call) => call.path === '<space>/execute' && call.status),
     )
     .toBe(true);
   await b.page.waitForTimeout(1_500);
@@ -903,157 +911,78 @@ async function executeScenario(
 
 // ─── (a) move ───────────────────────────────────────────────────────────────
 
-test('current: (a) a node dragged on page A stays put on page B until B reloads', async ({
+test('(a) a node dragged on page A moves on page B without a reload', async ({
   browser,
   request,
 }, testInfo) => {
   const result = await moveScenario(browser, request, testInfo);
-  expect(result.bFrames).toContain('invalidate');
-  expect(result.bFrames).not.toContain('update');
-  expect(result.bLive).toEqual(SEED[X]);
+  expect(result.bLive).toEqual(result.moved);
   expect(result.bReloaded).toBe(false);
-  expect(result.bAfterReload).toEqual(result.moved);
+  expect(result.bConflictToast).toBe(0);
+  expect(result.bViewportKept).toBe(true);
+  expect(result.bSelectionKept).toBe(true);
 });
-
-target(
-  'target: (a) a node dragged on page A moves on page B without a reload',
-  async ({ browser, request }, testInfo) => {
-    const result = await moveScenario(browser, request, testInfo);
-    expect(result.bLive).toEqual(result.moved);
-    expect(result.bReloaded).toBe(false);
-    expect(result.bConflictToast).toBe(0);
-    expect(result.bViewportKept).toBe(true);
-    expect(result.bSelectionKept).toBe(true);
-  },
-);
 
 // ─── (b) create / delete ────────────────────────────────────────────────────
 
-test('current: (b) a node created on page A is missing on page B until B reloads', async ({
+test('(b) a node created on page A appears on page B without a reload', async ({
   browser,
   request,
 }, testInfo) => {
   const result = await createScenario(browser, request, testInfo);
-  expect(result.bLiveCount).toBe(3);
+  expect(result.bLiveCount).toBe(4);
   expect(result.bReloaded).toBe(false);
-  expect(result.bCountAfterReload).toBe(4);
 });
 
-target(
-  'target: (b) a node created on page A appears on page B without a reload',
-  async ({ browser, request }, testInfo) => {
-    const result = await createScenario(browser, request, testInfo);
-    expect(result.bLiveCount).toBe(4);
-    expect(result.bReloaded).toBe(false);
-  },
-);
-
-test('current: (b) a node deleted on page A remains on page B until B reloads', async ({
+test('(b) a node deleted on page A disappears from page B without a reload', async ({
   browser,
   request,
 }, testInfo) => {
   const result = await deleteScenario(browser, request, testInfo);
-  expect(result.bLiveIds).toEqual([X, Y, Z].sort());
+  expect(result.bLiveIds).toEqual([X, Y].sort());
   expect(result.bReloaded).toBe(false);
-  expect(result.bIdsAfterReload).toEqual([X, Y].sort());
 });
-
-target(
-  'target: (b) a node deleted on page A disappears from page B without a reload',
-  async ({ browser, request }, testInfo) => {
-    const result = await deleteScenario(browser, request, testInfo);
-    expect(result.bLiveIds).toEqual([X, Y].sort());
-    expect(result.bReloaded).toBe(false);
-  },
-);
 
 // ─── (c) style ──────────────────────────────────────────────────────────────
 
-test('current: (c) an accent colour chosen on page A is not shown on page B until B reloads', async ({
+test('(c) an accent colour chosen on page A shows on page B without a reload', async ({
   browser,
   request,
 }, testInfo) => {
   const result = await styleScenario(browser, request, testInfo);
-  expect(result.bLive).toBe(result.before);
+  expect(result.bLive).toBe(result.applied);
   expect(result.bReloaded).toBe(false);
-  expect(result.bAfterReload).toBe(result.applied);
 });
-
-target(
-  'target: (c) an accent colour chosen on page A shows on page B without a reload',
-  async ({ browser, request }, testInfo) => {
-    const result = await styleScenario(browser, request, testInfo);
-    expect(result.bLive).toBe(result.applied);
-    expect(result.bReloaded).toBe(false);
-  },
-);
 
 // ─── (d) layer order ────────────────────────────────────────────────────────
 
-test('current: (d) a layer-order change on page A is not shown on page B until B reloads', async ({
+test('(d) a layer-order change on page A shows on page B without a reload', async ({
   browser,
   request,
 }, testInfo) => {
   const result = await layerScenario(browser, request, testInfo);
-  expect(result.bLive).toEqual(result.before);
+  expect(result.bLive).toEqual(result.applied);
   expect(result.bReloaded).toBe(false);
-  expect(result.bAfterReload).toEqual(result.applied);
 });
-
-target(
-  'target: (d) a layer-order change on page A shows on page B without a reload',
-  async ({ browser, request }, testInfo) => {
-    const result = await layerScenario(browser, request, testInfo);
-    expect(result.bLive).toEqual(result.applied);
-    expect(result.bReloaded).toBe(false);
-  },
-);
 
 // ─── (e) two writers, different nodes ───────────────────────────────────────
 
-test('current: (e) page B moving a different node after page A is rejected, and reloading discards it', async ({
+test('(e) moves of different nodes from page A and page B are both saved and shown on both pages', async ({
   browser,
   request,
 }, testInfo) => {
   const result = await twoWriterScenario(browser, request, testInfo);
-  // B's save carried the version it loaded, which A had already advanced.
-  expect(result.bSaveStatus).toBe(409);
-  expect(result.bSaveBody).toContain('CANVAS_VERSION_CONFLICT');
-  expect(result.serverVersionAfterB).toBe(result.serverVersionAfterA);
-  // A's edit is saved; B's edit to a *different* node is not.
   expect(result.serverX).toEqual(result.xMoved);
-  expect(result.serverY).toEqual(SEED[Y]);
-  // B keeps its own move on screen, never sees A's, and is told to reload.
+  expect(result.serverY).toEqual(result.yMoved);
+  expect(result.bShowsX).toEqual(result.xMoved);
   expect(result.bShowsY).toEqual(result.yMoved);
-  expect(result.bShowsX).toEqual(SEED[X]);
-  expect(result.aShowsY).toEqual(SEED[Y]);
-  expect(result.bVersionConflict).toBe(true);
-  expect(result.bConflictToast).toBe(1);
+  expect(result.aShowsY).toEqual(result.yMoved);
+  expect(result.bConflictToast).toBe(0);
+  expect(result.bVersionConflict).toBe(false);
   expect(result.bReloadedBeforeChoice).toBe(false);
-  // Taking the offered reload shows A's move and drops B's for good.
-  expect(result.afterReloadChoice).toEqual({
-    bShowsX: result.xMoved,
-    bShowsY: SEED[Y],
-    serverY: SEED[Y],
-  });
+  expect(result.bViewportKept).toBe(true);
+  expect(result.bSelected).toEqual([Y]);
 });
-
-target(
-  'target: (e) moves of different nodes from page A and page B are both saved and shown on both pages',
-  async ({ browser, request }, testInfo) => {
-    const result = await twoWriterScenario(browser, request, testInfo);
-    expect(result.serverX).toEqual(result.xMoved);
-    expect(result.serverY).toEqual(result.yMoved);
-    expect(result.bShowsX).toEqual(result.xMoved);
-    expect(result.bShowsY).toEqual(result.yMoved);
-    expect(result.aShowsY).toEqual(result.yMoved);
-    expect(result.bConflictToast).toBe(0);
-    expect(result.bVersionConflict).toBe(false);
-    expect(result.bReloadedBeforeChoice).toBe(false);
-    expect(result.bViewportKept).toBe(true);
-    expect(result.bSelected).toEqual([Y]);
-  },
-);
 
 // ─── (f) note body ──────────────────────────────────────────────────────────
 
@@ -1077,10 +1006,10 @@ test('current: (f) a note body edited on page A is not shown on page B until B r
   expect(result.serverBodyX).toBe(bodyA);
   expect(result.serverBodyY).toBe(bodyB);
   expect(result.bToastAfterBody).toBe(0);
-  // Because the version did not move, B's later move is accepted too and
-  // leaves both bodies intact.
+  // B's later move is an execute request; it is accepted and leaves both
+  // bodies intact.
   expect(
-    result.bMoveCalls.find((call) => call.path === '<space>')?.status,
+    result.bMoveCalls.find((call) => call.path === '<space>/execute')?.status,
   ).toBe(200);
   expect(result.serverYAfterMove).toEqual(result.yMoved);
   expect(result.serverBodyXAfterMove).toBe(bodyA);

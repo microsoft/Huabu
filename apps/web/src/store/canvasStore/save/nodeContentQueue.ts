@@ -90,7 +90,7 @@ export type NodeContentQueueState = {
  */
 export type NodeContentQueue = {
   /**
-   * Seed Questions whose CREATE_NODES command is being persisted by the
+   * Seed nodes whose CREATE_NODES command is being persisted by the
    * server, and suppress the redundant "new node" sidecar PUT. A real edit
    * after the optimistic insertion still schedules normally.
    */
@@ -969,7 +969,7 @@ export function createNodeContentQueue(opts: {
   return {
     prepareServerCreatedNodes(nodes) {
       for (const node of nodes) {
-        if (node.type !== 'question') continue;
+        if (!MD_BACKED_NODE_TYPES.has(node.type ?? '')) continue;
         suppressNextNewNodeSave.add(node.id);
         baselineRev.set(node.id, revOfNode(node));
         baselineGeneration.set(node.id, {});

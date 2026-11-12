@@ -3,9 +3,17 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { CanvasConflictError, putNodeContent } from '@/api/canvas';
+import {
+  CanvasConflictError,
+  postCanvasExecute,
+  putNodeContent,
+} from '@/api/canvas';
 
-import useCanvasStore, { drainPendingSaves } from './canvasStore';
+import useCanvasStore, {
+  drainPendingSaves,
+  resetCanvasSyncForTests,
+} from './canvasStore';
+import { createFakeSpaceServer } from './canvasStore/sync/testing/fakeExecuteServer';
 
 import type * as CanvasApi from '@/api/canvas';
 
@@ -19,11 +27,26 @@ vi.mock('@/api/canvas', async (importActual) => {
     ...actual,
     putNodeContent: vi.fn(),
     putCanvas: vi.fn(async (canvasId: string) => ({ canvasId, version: 1 })),
+    // A rename also clears `pendingInkIntentLabel`, a structure field, which
+    // is sent as an execute request.
+    postCanvasExecute: vi.fn(),
   };
 });
 
+const server = createFakeSpaceServer();
+/** The server starts from the Space the case put in the store. */
+function seedServer(): void {
+  const { nodes, edges, version } = useCanvasStore.getState();
+  server.reset(nodes, edges, version);
+}
+
 describe('User rename ownership and save recovery', () => {
   beforeEach(() => {
+    resetCanvasSyncForTests();
+    vi.mocked(postCanvasExecute).mockImplementation(async (canvasId, request) =>
+      server.execute(canvasId, request),
+    );
+    server.reset([], []);
     vi.mocked(putNodeContent).mockReset();
     vi.mocked(putNodeContent).mockResolvedValue({
       nodeId: 'question-1',
@@ -51,6 +74,7 @@ describe('User rename ownership and save recovery', () => {
       ],
       edges: [],
     });
+    seedServer();
     vi.mocked(putNodeContent).mockRejectedValueOnce(
       new CanvasConflictError({
         code: 'NODE_LABEL_CONFLICT',
@@ -98,6 +122,7 @@ describe('User rename ownership and save recovery', () => {
       ],
       edges: [],
     });
+    seedServer();
 
     await expect(
       useCanvasStore

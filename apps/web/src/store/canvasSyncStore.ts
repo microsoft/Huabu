@@ -6,7 +6,7 @@ import { create } from 'zustand';
 import { dismissToast, toast } from '@/components/Common/Toast';
 import { hasAgentStreamClaim } from '@/hooks/agentStreamCoordinator';
 import { useAcpThreadChangesStore } from '@/store/acpThreadChangesStore';
-import useCanvasStore from '@/store/canvasStore';
+import useCanvasStore, { requestCanvasResync } from '@/store/canvasStore';
 import { useChatStore } from '@/store/chatStore';
 import { usePanelStore } from '@/store/panelStore';
 import { openPreviewNode } from '@/store/previewWorkspace/actions';
@@ -26,10 +26,14 @@ import type { Node } from '@xyflow/react';
  *
  * Reconciliation:
  *  - `snapshot` (on connect): if the server version differs from local,
- *    a mutation happened before we subscribed → `loadCanvas` to catch up.
+ *    a mutation happened before we subscribed → reload to catch up.
  *  - `update`: if `fromVersion === local version` replay the deltas via
  *    `applyDeltasFromAgent`; if we are behind (`toVersion > local`) fall
- *    back to `loadCanvas`; older/stale updates are ignored.
+ *    back to a reload; older/stale updates are ignored.
+ *
+ * A reload replaces the whole Space, so it never runs while this page still
+ * has structure edits waiting to be sent: `requestCanvasResync` holds it
+ * until the send queue has drained.
  *
  * Received updates intentionally do NOT trigger preprocessing — that
  * stays with the originating side (the server, for headless `/execute`).
@@ -140,6 +144,13 @@ export const useCanvasSyncStore = create<CanvasSyncState>((set, get) => ({
       if (get().canvasId !== canvasId) return;
       const canvasStore = useCanvasStore.getState();
       if (canvasStore.canvasId !== canvasId) return;
+      const reload = (): void =>
+        requestCanvasResync(canvasId, () => {
+          const current = useCanvasStore.getState();
+          if (current.canvasId === canvasId) {
+            invalidateUnclaimedAgentHistories(canvasId, current.nodes);
+          }
+        });
 
       if (event.type === 'snapshot') {
         // Skip the catch-up reload while an initial/primary load is
@@ -153,31 +164,12 @@ export const useCanvasSyncStore = create<CanvasSyncState>((set, get) => ({
         // freshest state, so a snapshot-driven reload is only
         // meaningful once we've settled.
         if (canvasStore.isLoading) return;
-        if (event.data.version !== canvasStore.version) {
-          void canvasStore
-            .loadCanvas(canvasId, { resetHistory: true })
-            .then(() => {
-              const current = useCanvasStore.getState();
-              if (current.canvasId === canvasId) {
-                invalidateUnclaimedAgentHistories(canvasId, current.nodes);
-              }
-            });
-        }
+        if (event.data.version !== canvasStore.version) reload();
         return;
       }
 
       if (event.type !== 'update') return;
       const { fromVersion, toVersion, deltas, pendingEffects } = event.data;
-      const reload = (): void => {
-        void canvasStore
-          .loadCanvas(canvasId, { resetHistory: true })
-          .then(() => {
-            const current = useCanvasStore.getState();
-            if (current.canvasId === canvasId) {
-              invalidateUnclaimedAgentHistories(canvasId, current.nodes);
-            }
-          });
-      };
       let skippedNodeIds: string[] = [];
       if (fromVersion === canvasStore.version) {
         skippedNodeIds = canvasStore.applyDeltasFromAgent(
@@ -188,12 +180,21 @@ export const useCanvasSyncStore = create<CanvasSyncState>((set, get) => ({
           // Paint order the deltas cannot express; an order that cannot be
           // installed heals through the same reload as a version gap.
           { events: event.data.orderEvents, onDiverged: reload },
+          // Lets the store recognise the echo of this page's own batch and
+          // tell a person's edit from an agent's.
+          {
+            ...(event.data.operationId
+              ? { operationId: event.data.operationId }
+              : {}),
+            ...(event.data.source ? { source: event.data.source } : {}),
+          },
         );
       } else if (toVersion > canvasStore.version) {
         // Gap (missed an earlier update). A blind `loadCanvas` would
         // clobber un-persisted local edits, so skip it while the user
-        // is mid-editing and let autosave's 409 path arbitrate (C3).
-        // Incremental gap-heal (delta-log backfill) is deferred to P2.
+        // is mid-editing a body, and hold it until queued structure edits
+        // have been sent. Incremental gap-heal (delta-log backfill) is
+        // deferred to P2.
         if (canvasStore.pendingContentNodeIds().length === 0) reload();
       }
       // else: stale/older update — ignore.

@@ -204,10 +204,12 @@ export function getCanvasAccess(canvasId: string): Promise<CanvasAccess> {
 export async function postCanvasExecute(
   canvasId: string,
   request: PostCanvasExecuteRequest,
+  options?: { keepalive?: boolean },
 ): Promise<PostCanvasExecuteResponse> {
   return apiFetch<PostCanvasExecuteResponse>(routes.canvasExecute(canvasId), {
     method: 'POST',
     json: request,
+    ...(options?.keepalive ? { keepalive: true } : {}),
     fallbackMessage: 'Failed to execute Space command',
   });
 }

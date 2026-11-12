@@ -5,6 +5,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 import { canvasHistoryManager } from './canvasHistoryManager';
 import useCanvasStore from './canvasStore';
+import { createFakeSpaceServer } from './canvasStore/sync/testing/fakeExecuteServer';
 import { useWorkspaceStore } from './workspaceStore';
 import * as api from '../api';
 import * as notifications from '../components/Common/Toast';
@@ -19,6 +20,8 @@ const entry: Node = {
   position: { x: 0, y: 0 },
   data: { targetCanvasId: 'child' },
 };
+// Structure edits are sent as execute requests; this stands in for the server.
+const server = createFakeSpaceServer();
 const originalRefresh = useWorkspaceStore.getState().refreshSpaceTitles;
 const refresh = vi.fn(async () => undefined);
 const edge = {
@@ -38,6 +41,10 @@ beforeEach(() => {
   vi.useFakeTimers();
   vi.clearAllMocks();
   vi.spyOn(api, 'deleteNode').mockResolvedValue({ success: true });
+  server.reset([], [], 0);
+  vi.spyOn(api, 'postCanvasExecute').mockImplementation(
+    async (canvasId, request) => server.execute(canvasId, request),
+  );
   vi.spyOn(notifications, 'toast').mockImplementation(() => '');
   canvasHistoryManager.activate('parent', true);
   useCanvasStore.getState()._setStateNoAutosave({
@@ -179,6 +186,7 @@ it('deletes ordinary nodes and selected edges in one undoable execution', async 
   };
   const nodes = [note, ...endpoints];
   useCanvasStore.getState()._setStateNoAutosave({ nodes, edges: [edge] });
+  server.reset(nodes, [edge], 0);
   useCanvasStore.getState().deleteNodes([note.id], [edge.id]);
   expect(useCanvasStore.getState().nodes).toEqual(endpoints);
   expect(useCanvasStore.getState().edges).toEqual([]);
@@ -218,6 +226,7 @@ it('does not consume a redo snapshot that would remove a now-canonical entry', a
 it('lets a confirmed missing-target shortcut be deleted after metadata settles', async () => {
   useWorkspaceStore.setState({ spaceTitlesStatus: 'ready', spaceTitles: {} });
   useCanvasStore.getState()._setStateNoAutosave({ nodes: [entry] });
+  server.reset([entry], [], 0);
   useCanvasStore
     .getState()
     .dispatchUiIntent({ type: 'DELETE_NODES', nodeIds: [entry.id] });
