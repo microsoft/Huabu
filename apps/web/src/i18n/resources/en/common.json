@@ -1098,6 +1098,7 @@
     "emptyFrame": "This frame has no child nodes.",
     "multiDragSameParentOnly": "Select layers from the same parent to move them together.",
     "invalidFrameDrop": "These layers cannot be moved to this destination. Check that the frame is available, unlocked, and not inside a selected layer.",
+    "invalidReorderSelection": "These layers cannot be reordered together. Select unlocked layers in the same container.",
     "filterLabels": {
       "fileReference": "File Reference",
       "note": "Note",

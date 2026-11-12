@@ -176,3 +176,42 @@ describe('REORDER_NODES_RELATIVE', () => {
     expect(nodes.find((item) => item.id === 'child')?.parentId).toBe('nested');
   });
 });
+
+describe('REORDER_SELECTED_NODES', () => {
+  function shortcut(selected: string[], lockedId?: string) {
+    const nodes = [
+      node('a'),
+      node('b'),
+      node('frame', undefined, 'frame'),
+      node('child', 'frame'),
+    ].map((item) => ({
+      ...item,
+      selected: selected.includes(item.id),
+      data: { ...item.data, locked: item.id === lockedId },
+    }));
+    return resolveUiIntent(
+      { type: 'REORDER_SELECTED_NODES', to: 'top' },
+      { nodes, edges: [] },
+    );
+  }
+
+  it('reorders a same-container selection', () => {
+    const resolution = shortcut(['a', 'b']);
+    expect(resolution.rejectionKey).toBeUndefined();
+    expect(resolution.commands).toEqual([
+      { type: 'REORDER_NODES', nodeIds: ['a', 'b'], to: 'top' },
+    ]);
+  });
+
+  it.each([
+    ['a selection spanning containers', ['a', 'child'], undefined],
+    ['a locked layer', ['a', 'b'], 'b'],
+    ['a layer inside a locked Frame', ['child'], 'frame'],
+  ])('notifies instead of silently ignoring %s', (_, selected, lockedId) => {
+    expect(shortcut(selected, lockedId)).toEqual({
+      commands: [],
+      trace: [],
+      rejectionKey: 'layers.invalidReorderSelection',
+    });
+  });
+});
