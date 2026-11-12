@@ -1,0 +1,57 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "values", "evidence", "confirmedByUser"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "values": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repository",
+        "codebasePath",
+        "worktreeRoot",
+        "fixingProfileId",
+        "developmentBaseRef",
+        "pullRequestBase"
+      ],
+      "properties": {
+        "repository": {
+          "type": ["string", "null"],
+          "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$",
+          "description": "GitHub owner/repository identity confirmed by the user."
+        },
+        "codebasePath": {
+          "type": ["string", "null"],
+          "pattern": "^(?:/|[A-Za-z]:[\\\\/]|\\\\\\\\).+",
+          "description": "Absolute checkout path on the execution device."
+        },
+        "worktreeRoot": {
+          "type": ["string", "null"],
+          "pattern": "^(?:/|[A-Za-z]:[\\\\/]|\\\\\\\\).+",
+          "description": "Absolute issue worktree parent on the execution device."
+        },
+        "fixingProfileId": {
+          "type": ["string", "null"],
+          "pattern": "^\\S+$",
+          "description": "Explicit selectable external Profile ID, not an inferred alias/device."
+        },
+        "developmentBaseRef": {
+          "type": ["string", "null"],
+          "pattern": "^(?![-/])(?!.*(?:\\.\\.|[\\s~^:?*\\[\\\\]|@\\{|//))(?!.*[/.]$)[^/]+/.+$",
+          "description": "Verified remote-tracking ref under the project's delivery policy."
+        },
+        "pullRequestBase": {
+          "type": ["string", "null"],
+          "pattern": "^(?![-/])(?!.*(?:\\.\\.|[\\s~^:?*\\[\\\\]|@\\{|//))(?!.*[/.]$).+$",
+          "description": "Confirmed PR target branch; no hardcoded compatibility default."
+        }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": { "type": "string", "minLength": 1 }
+    },
+    "confirmedByUser": { "type": "boolean" }
+  }
+}

@@ -95,7 +95,7 @@ The generic registry writes `<HUABU_DATA_DIR>/agent-profiles/registry.json` atom
 
 Old Team registry/config/setup-log files and conversation records are not deleted or rewritten by migration. Manifest Profiles are not imported as active Profiles or converted to executable commands. Agentlet and Agenetes reject retired Team launch recipes instead of silently treating them as ordinary commands.
 
-The repository's `agent-teams/` manifest, prompt and Skill folders remain data assets. There is no bundled Team registration, manifest execution, setup worker, Team CLI, Team API, member Config UI or preparation lifecycle. Space Templates are a separate feature; their implementation is not required for ordinary Profiles. Historical design material is retained in [the archive](../archive/agent-teams-as-extensions.md).
+The repository's `agent-teams/` manifest, prompt and Skill folders remain data assets. There is no bundled Team registration, manifest execution, setup worker, Team CLI, Team API, member Config UI or preparation lifecycle. [Space Kits](./space-kits.md) are separate source-distributed installers; Issue Tracker has moved there and uses ordinary Profiles without provisioning them. Historical design material is retained in [the archive](../archive/agent-teams-as-extensions.md).
 
 ## Settings and APIs
 

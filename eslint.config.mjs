@@ -194,6 +194,7 @@ export default typescriptEslint.config(
       '*.config.js',
       '*.config.mjs',
       'scripts/**/*.{js,mjs,cjs}',
+      'space-kits/**/*.{js,mjs,cjs}',
     ],
     languageOptions: {
       globals: {
