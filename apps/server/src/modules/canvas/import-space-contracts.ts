@@ -125,6 +125,12 @@ const commandFields = {
     sizing: null,
   },
   CHANGE_NODE_TYPE: { nodeId: 'nodeId', to: null },
+  RESTORE_NODES: {
+    nodes: 'nodes',
+    edges: 'edges',
+    replace: 'nodeIds',
+    keepDataKeys: null,
+  },
 } satisfies {
   [T in CanvasCommand['type']]: Shape<
     Omit<Extract<CanvasCommand, { type: T }>, 'type'>

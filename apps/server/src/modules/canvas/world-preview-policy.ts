@@ -207,7 +207,8 @@ export function assertWorldPreviewMutationsAllowed(
       command.patches.some(
         (entry) =>
           byId.get(entry.nodeId)?.type === 'spacePreview' &&
-          'targetCanvasId' in (entry.patch ?? {}),
+          ('targetCanvasId' in (entry.patch ?? {}) ||
+            entry.unset?.includes('targetCanvasId') === true),
       )
     )
       throw new WorldPreviewMutationError(

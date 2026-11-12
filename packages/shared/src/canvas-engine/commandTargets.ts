@@ -69,6 +69,14 @@ export function collectCommandIds(
         }
       }
       break;
+    case 'RESTORE_NODES':
+      for (const node of command.nodes ?? []) nodeIds.add(node.id);
+      for (const edge of command.edges ?? []) {
+        nodeIds.add(edge.source);
+        nodeIds.add(edge.target);
+        edgeIds.add(edge.id);
+      }
+      break;
     case 'SET_NODE_SELECTION':
     case 'SET_NODE_LOCKED':
     case 'CHANGE_NODE_TYPE':
@@ -139,6 +147,7 @@ export function commandReadTargets(command: CanvasCommand): CommandReadTargets {
     case 'SET_EDGE_STYLE':
     case 'SET_NODE_SELECTION':
     case 'APPLY_MEASURED_HEIGHT':
+    case 'RESTORE_NODES':
       return NO_TARGETS;
     case 'DELETE_NODES':
       return { existence: unique(command.nodeIds), membership: [] };

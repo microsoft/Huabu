@@ -138,6 +138,8 @@ export type {
   CanvasNodeGeometryUpdate,
   CanvasNodeLockUpdate,
   CanvasNodeMeasuredHeightUpdate,
+  CanvasRestoredEdge,
+  CanvasRestoredNode,
   NodeGeometrySize,
   CanvasEdgeCreateInput,
   CanvasEdgeStylePatch,

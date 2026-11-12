@@ -127,6 +127,13 @@ export type CanvasNodeDataMergePatch = {
    * from the complete persisted View Definition and never stored separately.
    */
   expectViewRev?: string;
+  /**
+   * `data` keys to remove after the merge. `style.<leaf>` removes one leaf
+   * of `data.style`. JSON cannot carry a key whose value is `undefined`, so
+   * a page states the removal here. Sibling of `patch`; not part of the
+   * agent schema, which clears with `null` where a field allows it.
+   */
+  unset?: string[];
 };
 
 export interface CanvasNodeParentUpdate {
@@ -310,20 +317,63 @@ export type CanvasCommand =
       type: 'CHANGE_NODE_TYPE';
       nodeId: CanvasNodeId;
       to: 'text' | 'note';
+    }
+  | {
+      /**
+       * Put nodes and edges back exactly as a page's undo history holds
+       * them, ids and content included. UI-only.
+       *
+       * A node not named in `replace` is inserted and must not exist; one
+       * named there must exist and is replaced in place. An edge is
+       * inserted, or replaces the edge with its id. Every restored node's
+       * parent chain must exist after the command and be made of
+       * containers. Agent Nodes cannot be inserted this way (their identity
+       * has its own association path) and never change type. The command is
+       * all-or-nothing and fits no Frame.
+       */
+      type: 'RESTORE_NODES';
+      nodes: CanvasRestoredNode[];
+      edges?: CanvasRestoredEdge[];
+      /** Ids in `nodes` that exist and are replaced whole. */
+      replace?: CanvasNodeId[];
+      /**
+       * `data` keys a replaced node keeps from its current state instead
+       * of taking from the snapshot (content fields, which have their own
+       * writer).
+       */
+      keepDataKeys?: string[];
     };
+
+/** A whole persisted node, as an undo snapshot holds it. */
+export type CanvasRestoredNode = {
+  id: CanvasNodeId;
+  type: CanvasNodeType;
+  position: Point;
+  data?: Record<string, unknown>;
+  parentId?: CanvasNodeId | null;
+} & Record<string, unknown>;
+
+/** A whole persisted edge, as an undo snapshot holds it. */
+export type CanvasRestoredEdge = {
+  id: CanvasEdgeId;
+  source: CanvasNodeId;
+  target: CanvasNodeId;
+} & Record<string, unknown>;
 
 export type CanvasCommandType = CanvasCommand['type'];
 
 /**
  * Command types that are UI-only and excluded from the agent-facing schema.
- * These depend on ephemeral view state, user-controlled protection, or a
- * browser measurement the agent has no way to produce.
+ * These depend on ephemeral view state, user-controlled protection, a
+ * browser measurement the agent has no way to produce, or a page's own undo
+ * history.
  */
 export const UI_ONLY_CANVAS_COMMAND_TYPES = [
   'SET_NODE_LOCKED',
   'SET_NODE_SELECTION',
   'CHANGE_NODE_TYPE',
   'APPLY_MEASURED_HEIGHT',
+  'RESTORE_NODES',
 ] as const;
 export type UiOnlyCanvasCommandType =
   (typeof UI_ONLY_CANVAS_COMMAND_TYPES)[number];
