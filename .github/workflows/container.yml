@@ -26,9 +26,13 @@ on:
 permissions:
   contents: read
 
+env:
+  # Existing release workflows avoid the exhausted Actions artifact store too.
+  DOCKER_BUILD_RECORD_UPLOAD: 'false'
+
 concurrency:
   group: web-container-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   verify:
