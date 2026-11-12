@@ -25,6 +25,8 @@ import { resolveAccentCss } from '@/utils/accentColor';
 import { TEXT_NODE_PADDING_X } from '@/utils/node/nodeFontConfig';
 import { measureTextContent } from '@/utils/node/textMeasure';
 
+import { routeAtRenderedPorts } from './autoEdgeRouting';
+import { useAutoEdgeRoute } from './AutoEdgeRoutingContext';
 import { getEdgeAccent } from './edgeAccent';
 import { getEdgeLabelRenderZ } from './edgeZ';
 
@@ -74,17 +76,42 @@ export function LabelledEdge(props: EdgeProps) {
 
   const edgeStyle = getEdgeStyle(data);
   const frameInternal = useFrameInternalEdge(props.source, props.target);
-  const [edgePath, labelX, labelY] = getEdgePath(
-    {
+  const autoEntry = useAutoEdgeRoute(id);
+  const autoRoute = useMemo(
+    () =>
+      autoEntry
+        ? routeAtRenderedPorts(autoEntry, {
+            sourceX,
+            sourceY,
+            targetX,
+            targetY,
+            sourcePosition,
+            targetPosition,
+          })
+        : undefined,
+    [
+      autoEntry,
       sourceX,
       sourceY,
       targetX,
       targetY,
       sourcePosition,
       targetPosition,
-    },
-    getEdgeLineType(data, props.type),
+    ],
   );
+  const [edgePath, labelX, labelY] = autoRoute
+    ? [autoRoute.path, autoRoute.labelX, autoRoute.labelY]
+    : getEdgePath(
+        {
+          sourceX,
+          sourceY,
+          targetX,
+          targetY,
+          sourcePosition,
+          targetPosition,
+        },
+        getEdgeLineType(data, props.type),
+      );
 
   // ── Arrow rendering ────────────────────────────────────────────────
   //

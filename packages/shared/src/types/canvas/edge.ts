@@ -14,7 +14,7 @@ import type { LabelSource } from './node.js';
  * of truth — both the TypeScript union and the agent-facing TypeBox schema
  * are derived from it, so adding a value here automatically propagates.
  */
-export const EDGE_LINE_TYPES = ['bezier', 'straight', 'step'] as const;
+export const EDGE_LINE_TYPES = ['auto', 'bezier', 'straight', 'step'] as const;
 export type EdgeLineType = (typeof EDGE_LINE_TYPES)[number];
 
 /** Allowed dash patterns. Source of truth for both TS union and schema. */

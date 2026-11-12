@@ -16,6 +16,15 @@
 
 // ── Executor + runtime types ──────────────────────────────────────────────
 export * from './utils/inkSigil.js';
+export { routeOrthogonalEdge } from './utils/orthogonalRouting.js';
+export type {
+  OrthogonalPoint,
+  OrthogonalRect,
+  OrthogonalSide,
+  OrthogonalSegment,
+  OrthogonalRoute,
+  OrthogonalRouteOptions,
+} from './utils/orthogonalRouting.js';
 export {
   mergeNodeProperties,
   hasValidNodeProperties,

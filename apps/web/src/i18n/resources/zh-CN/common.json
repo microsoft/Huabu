@@ -1611,6 +1611,7 @@
     "edgeColor": "边颜色",
     "deleteEdge": "删除边",
     "lineType": {
+      "auto": "自动避障",
       "bezier": "贝塞尔",
       "straight": "直线",
       "step": "折线"

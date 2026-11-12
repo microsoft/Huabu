@@ -1611,6 +1611,7 @@
     "edgeColor": "Edge color",
     "deleteEdge": "Delete Edge",
     "lineType": {
+      "auto": "Auto route",
       "bezier": "Bezier",
       "straight": "Straight",
       "step": "Step"
