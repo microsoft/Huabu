@@ -99,12 +99,22 @@ describe('commandsForLocalDiff', () => {
     });
   });
 
-  it('reports what it cannot express instead of guessing', () => {
+  it('names removed data keys, and reports what it cannot express', () => {
     const next = [{ ...x, zIndex: 4, data: { content: 'body', style: {} } }];
     const result = commandsForLocalDiff([x], next);
-    expect(result.uncovered.sort()).toEqual(
-      ['x:data.label', 'x:data.style.accent', 'x:node.zIndex'].sort(),
-    );
+    expect(result.commands).toEqual([
+      {
+        type: 'MERGE_NODE_DATA',
+        patches: [
+          {
+            nodeId: 'x',
+            patch: {},
+            unset: expect.arrayContaining(['label', 'style.accent']),
+          },
+        ],
+      },
+    ]);
+    expect(result.uncovered).toEqual(['x:node.zIndex']);
   });
 
   it('is empty for the same list and for untouched nodes', () => {
@@ -133,12 +143,15 @@ describe('commandsForStateDiff', () => {
     });
   });
 
-  it('cannot bring a node back', () => {
+  it('brings a node back whole, without its runtime fields', () => {
     const result = commandsForStateDiff(
       { nodes: [x], edges: [] },
-      { nodes: [x, y], edges: [] },
+      { nodes: [x, { ...y, selected: true }], edges: [] },
     );
-    expect(result.uncovered).toEqual(['y:existence']);
+    expect(result).toEqual({
+      commands: [{ type: 'RESTORE_NODES', nodes: [y] }],
+      uncovered: [],
+    });
   });
 
   it('reparents, then states the final position', () => {
@@ -182,14 +195,19 @@ describe('commandsForStateDiff', () => {
     ).toEqual([{ type: 'REORDER_NODES', nodeIds: ['c'], to: { before: 'a' } }]);
   });
 
-  it('connects an added edge under its id', () => {
+  it('puts an added edge back as it was', () => {
+    const routed = { ...edge, sourceHandle: 'right', selected: true };
     expect(
       commandsForStateDiff(
         { nodes: [x, y], edges: [] },
-        { nodes: [x, y], edges: [edge] },
+        { nodes: [x, y], edges: [routed] },
       ).commands,
     ).toEqual([
-      { type: 'CONNECT_NODES', edges: [{ id: 'e', source: 'x', target: 'y' }] },
+      {
+        type: 'RESTORE_NODES',
+        nodes: [],
+        edges: [{ ...edge, sourceHandle: 'right' }],
+      },
     ]);
   });
 });

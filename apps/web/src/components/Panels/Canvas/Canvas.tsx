@@ -1451,8 +1451,8 @@ const CanvasContent: React.FC<CanvasProps> = ({
           onMoveEnd={(_event, viewport) => {
             resumeHeightCommits('viewport');
             // Mirror pan/zoom into localStorage (per canvas) so browser and
-            // desktop restarts restore the same view. Does NOT participate in
-            // the structure autosave.
+            // desktop restarts restore the same view. It is never sent to the
+            // server.
             setViewport(viewport);
           }}
           onPaneClick={handlePaneClick}

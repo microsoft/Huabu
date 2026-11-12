@@ -28,6 +28,7 @@ vi.mock('@/components/Common/Toast', () => ({
 import {
   autoHeightKey,
   intrinsicToLayoutHeight,
+  measuredSizeKey,
   type Delta,
 } from '@huabu/shared/canvas-engine';
 
@@ -168,10 +169,6 @@ beforeEach(() => {
     edges: [],
     version: 1,
     isLoading: false,
-    isSaving: false,
-    pendingSave: false,
-    versionConflict: false,
-    versionConflictServerVersion: null,
     canUndo: false,
     canRedo: false,
   });
@@ -475,42 +472,33 @@ describe('receiving while a local change is in flight', () => {
   });
 });
 
-describe('the whole-Space save and reload wait for the queue', () => {
-  it('does not PUT while a batch is unanswered, then PUTs with the advanced version', async () => {
+describe('nothing saves the whole Space', () => {
+  it('sends no whole-Space PUT after a command batch, a title change or a direct store write', async () => {
     moveHere(X, 500);
-    // A writer that still saves through the whole-Space PUT.
     useCanvasStore.setState({ canvasTitle: 'Renamed' });
-    await vi.advanceTimersByTimeAsync(5_000);
-    expect(api.putCanvas).not.toHaveBeenCalled();
-
-    await answer(0);
-    await vi.advanceTimersByTimeAsync(0);
-    expect(api.putCanvas).toHaveBeenCalledTimes(1);
-    expect(api.putCanvas.mock.calls[0][1].version).toBe(2);
-  });
-
-  it('does not let the update for an earlier batch put back what is waiting for the PUT', async () => {
-    moveHere(X, 500);
-    // A writer that saves through the whole-Space PUT moves the node on.
     useCanvasStore.setState({
       nodes: state().nodes.map((n) =>
-        n.id === X ? { ...n, position: { x: 700, y: 0 } } : n,
+        n.id === Y ? { ...n, position: { x: 900, y: 900 } } : n,
       ),
     });
-    // The first move's update arrives; the PUT has not gone out yet.
-    await answer(0);
-    expect(node(X).position).toEqual({ x: 700, y: 0 });
-
     await vi.advanceTimersByTimeAsync(5_000);
-    expect(api.putCanvas).toHaveBeenCalledTimes(1);
-    const saved = api.putCanvas.mock.calls[0][1].state.nodes as Node[];
-    expect(saved.find((n) => n.id === X)?.position).toEqual({ x: 700, y: 0 });
-    // Once saved, the node is no longer held: another page can move it.
-    server.reset(state().nodes, [], state().version);
-    deliver(remote([moveCommand(X, 40)]), 'ui');
-    expect(node(X).position).toEqual({ x: 40, y: 0 });
+    await answer(0);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(api.putCanvas).not.toHaveBeenCalled();
+    // Only the command reached the server.
+    expect(own).toHaveLength(1);
+    expect(serverNode(Y)?.position).not.toEqual({ x: 900, y: 900 });
   });
 
+  it('does not flush a whole-Space PUT when the page closes', async () => {
+    moveHere(X, 500);
+    window.dispatchEvent(new Event('beforeunload', { cancelable: true }));
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(api.putCanvas).not.toHaveBeenCalled();
+  });
+});
+
+describe('a wanted reload waits for the queue', () => {
   it('holds a wanted reload until the queue has drained', async () => {
     moveHere(X, 500);
     const reloaded = vi.fn();
@@ -722,6 +710,35 @@ describe('when a change cannot be sent', () => {
     await expect(drainPendingSaves(SPACE)).rejects.toThrow(/could not be sent/);
   });
 
+  it('refuses to leave as soon as the request fails again, without waiting out the retry schedule', async () => {
+    moveHere(X, 500);
+    own[0].reject(new Error('offline'));
+    await flush();
+    expect(own).toHaveLength(1);
+
+    const leaving = drainPendingSaves(SPACE);
+    const refused = expect(leaving).rejects.toThrow(/could not be sent/);
+    // The request is tried again at once rather than after the backoff.
+    await flush();
+    expect(own).toHaveLength(2);
+    own[1].reject(new Error('offline'));
+    await refused;
+    // Nothing was given up: the edit is still waiting to be sent.
+    expect(hasUnsavedCanvasEdits()).toBe(true);
+    expect(node(X).position).toEqual({ x: 500, y: 0 });
+  });
+
+  it('lets the page leave once the retried request is answered', async () => {
+    moveHere(X, 500);
+    own[0].reject(new Error('offline'));
+    await flush();
+    const leaving = drainPendingSaves(SPACE);
+    await flush();
+    await answer(1);
+    await expect(leaving).resolves.toBeUndefined();
+    expect(serverNode(X)?.position).toEqual({ x: 500, y: 0 });
+  });
+
   it('"keep trying" sends the same request again', async () => {
     moveHere(X, 500);
     await failUntilStalled();
@@ -769,20 +786,6 @@ describe('when a change cannot be sent', () => {
     expect(own).toHaveLength(attempts + 1);
     await answer(own.length - 1);
     expect(syncState()).toBe('synced');
-  });
-
-  it('does not send the whole-Space PUT while the queue cannot send', async () => {
-    moveHere(X, 500);
-    useCanvasStore.setState({ canvasTitle: 'Renamed' });
-    await failUntilStalled();
-    await vi.advanceTimersByTimeAsync(10_000);
-    expect(api.putCanvas).not.toHaveBeenCalled();
-
-    notices().at(-1)?.options?.action?.onClick();
-    await answer(own.length - 1);
-    await vi.advanceTimersByTimeAsync(5_000);
-    expect(api.putCanvas).toHaveBeenCalledTimes(1);
-    expect(api.putCanvas.mock.calls[0][1].version).toBe(2);
   });
 
   it('warns before the page closes and flushes unsent batches with keepalive', async () => {
@@ -863,10 +866,12 @@ describe('undo and redo beyond what commands can say', () => {
     expect(accentOf(node(X))).toBe('blue');
   });
 
-  it('brings a deleted node back through the whole-Space PUT, and an edit made meanwhile joins it', async () => {
+  it('brings a deleted node back as itself with a command, and a later edit follows it in the queue', async () => {
+    const original = node(X);
     state().deleteNodes([X]);
     await answer(0);
     expect(state().nodes.map((n) => n.id)).toEqual([Y]);
+    expect(serverNode(X)).toBeUndefined();
 
     state().undo();
     expect(
@@ -874,28 +879,61 @@ describe('undo and redo beyond what commands can say', () => {
         .nodes.map((n) => n.id)
         .sort(),
     ).toEqual([X, Y].sort());
-    // No command creates a node from a snapshot.
-    expect(own).toHaveLength(1);
-    // A move made before that PUT has gone out rides it: sent as a command
-    // it could reach the server before the node it moves.
+    expect(own).toHaveLength(2);
+    expect(own[1].request.commands).toEqual([
+      {
+        type: 'RESTORE_NODES',
+        nodes: [expect.objectContaining({ id: X, data: original.data })],
+      },
+      // It comes back where it was in the paint order.
+      { type: 'REORDER_NODES', nodeIds: [X], to: { before: Y } },
+    ]);
+    // A move made before the restore is answered goes out after it.
     moveHere(X, 700);
-    expect(own).toHaveLength(1);
+    await answer(1);
+    expect(serverNode(X)?.data).toMatchObject(original.data);
+    await vi.advanceTimersByTimeAsync(0);
+    await answer(2);
+    expect(serverNode(X)?.position).toEqual({ x: 700, y: 0 });
+    expect(node(X).position).toEqual({ x: 700, y: 0 });
 
     await vi.advanceTimersByTimeAsync(5_000);
-    expect(api.putCanvas).toHaveBeenCalledTimes(1);
-    const saved = api.putCanvas.mock.calls[0][1].state.nodes as Node[];
-    expect(saved.find((n) => n.id === X)?.position).toEqual({ x: 700, y: 0 });
+    expect(api.putCanvas).not.toHaveBeenCalled();
   });
 
-  it('keeps a patch that clears a key on the whole-Space PUT', async () => {
+  it('sends a patch that clears a key as an explicit removal', async () => {
     state().updateNodeData(X, { pinned: true });
     await answer(0);
-    // `undefined` does not survive JSON, so this cannot be a command.
+    expect(serverNode(X)?.data.pinned).toBe(true);
+    // `undefined` does not survive JSON, so the removal is named.
     state().updateNodeData(X, { pinned: undefined });
-    expect(own).toHaveLength(1);
     expect(node(X).data.pinned).toBeUndefined();
+    expect(own).toHaveLength(2);
+    expect(own[1].request.commands).toEqual([
+      {
+        type: 'MERGE_NODE_DATA',
+        patches: [{ nodeId: X, patch: {}, unset: ['pinned'] }],
+      },
+    ]);
+    await answer(1);
+    expect(serverNode(X)?.data).not.toHaveProperty('pinned');
     await vi.advanceTimersByTimeAsync(5_000);
-    expect(api.putCanvas).toHaveBeenCalledTimes(1);
+    expect(api.putCanvas).not.toHaveBeenCalled();
+  });
+
+  it('undoes the first setting of a data key by removing it', async () => {
+    state().updateNodeData(X, { pinned: true });
+    await answer(0);
+    state().undo();
+    expect(node(X).data).not.toHaveProperty('pinned');
+    expect(own[1].request.commands).toEqual([
+      {
+        type: 'MERGE_NODE_DATA',
+        patches: [{ nodeId: X, patch: {}, unset: ['pinned'] }],
+      },
+    ]);
+    await answer(1);
+    expect(serverNode(X)?.data).not.toHaveProperty('pinned');
   });
 });
 
@@ -1061,5 +1099,179 @@ describe('measured heights', () => {
     });
     expect(heightOf(node(AUTO))).toBe(layoutHeight(400));
     expect(toast).not.toHaveBeenCalled();
+  });
+});
+
+describe('renderer-measured boxes', () => {
+  const FRAME = 'node-sync-frame';
+  const TEXT = 'node-sync-text';
+  const frame = (): Node => ({
+    id: FRAME,
+    type: 'frame',
+    position: { x: 1000, y: 0 },
+    style: { width: 300, height: 200 },
+    data: { type: 'frame', label: 'Frame', sizing: 'hug' },
+  });
+  const text = (data: Record<string, unknown> = {}): Node => ({
+    id: TEXT,
+    type: 'text',
+    parentId: FRAME,
+    position: { x: 20, y: 60 },
+    style: { width: 200 },
+    data: { type: 'text', content: 'A line', ...data },
+  });
+  const measure = (width: number, height: number) =>
+    state().onNodesChange([
+      { type: 'dimensions', id: TEXT, dimensions: { width, height } },
+    ]);
+  const item = (width: number, height: number) => ({
+    nodeId: TEXT,
+    width,
+    height,
+    measuredFor: measuredSizeKey(node(TEXT)),
+  });
+  const frameHeight = (value: Node | undefined) =>
+    (value?.style as { height?: number } | undefined)?.height;
+
+  function seed(textNode: Node = text()) {
+    const nodes = [...state().nodes, frame(), textNode];
+    state()._setStateNoAutosave({ nodes });
+    server.reset(nodes, [], 1);
+  }
+
+  it('reports the box once and the server lays the Frame out around it, without a whole-Space save', async () => {
+    seed();
+    measure(200, 340);
+    expect(own).toHaveLength(1);
+    expect(own[0].request.commands).toEqual([
+      { type: 'APPLY_MEASURED_SIZE', items: [item(200, 340)] },
+    ]);
+    // The same measurement again says nothing new.
+    measure(200, 340);
+    expect(own).toHaveLength(1);
+
+    const local = frameHeight(node(FRAME));
+    await answer(0);
+    expect(serverNode(TEXT)?.data.measuredSize).toEqual({
+      width: 200,
+      height: 340,
+      measuredFor: item(200, 340).measuredFor,
+    });
+    // The server ran the same layout this page did.
+    expect(frameHeight(serverNode(FRAME))).toBe(local);
+    expect(frameHeight(node(FRAME))).toBe(local);
+    expect(canvasHistoryManager.canUndo).toBe(false);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(own).toHaveLength(1);
+    expect(api.putCanvas).not.toHaveBeenCalled();
+  });
+
+  it('says nothing when the server already holds this box for this content', async () => {
+    const stored = text();
+    seed({
+      ...stored,
+      data: {
+        ...stored.data,
+        measuredSize: {
+          width: 200,
+          height: 340,
+          measuredFor: measuredSizeKey(stored),
+        },
+      },
+    });
+    // A pixel apart is the same box.
+    measure(200, 341);
+    expect(own).toHaveLength(0);
+  });
+
+  it('does not answer another page’s report with its own rendering of the same content', async () => {
+    const stored = text();
+    seed({
+      ...stored,
+      data: {
+        ...stored.data,
+        measuredSize: {
+          width: 200,
+          height: 340,
+          measuredFor: measuredSizeKey(stored),
+        },
+      },
+    });
+    // This page renders the same body 12px taller. It lays its own Frame
+    // out around that and leaves the stored box alone.
+    measure(200, 352);
+    expect(own).toHaveLength(0);
+    expect(node(TEXT).measured).toMatchObject({ width: 200, height: 352 });
+  });
+
+  it('reports again when its own rendering of the same content changes', async () => {
+    seed();
+    measure(200, 340);
+    await answer(0);
+    // A larger font: same body, same width, another box.
+    measure(200, 420);
+    expect(own).toHaveLength(2);
+    expect(own[1].request.commands).toEqual([
+      { type: 'APPLY_MEASURED_SIZE', items: [item(200, 420)] },
+    ]);
+  });
+
+  it('waits for the content save before reporting the box of an edited body', async () => {
+    seed();
+    let saved!: () => void;
+    api.putNodeContent.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          saved = () => resolve({ nodeId: TEXT, label: null, rev: 'rev-2' });
+        }),
+    );
+    state().updateNodeData(TEXT, { content: 'Two\nlines now' });
+    measure(200, 380);
+    // The server would ignore a box for a body it does not have yet.
+    expect(own).toHaveLength(0);
+
+    await vi.advanceTimersByTimeAsync(3_000);
+    saved();
+    await flush();
+    expect(own).toHaveLength(1);
+    expect(own[0].request.commands).toEqual([
+      { type: 'APPLY_MEASURED_SIZE', items: [item(200, 380)] },
+    ]);
+  });
+
+  it('keeps its layout and stays quiet when the server ignores the report', async () => {
+    seed();
+    measure(200, 340);
+    const local = frameHeight(node(FRAME));
+    await answer(0, {
+      canvasId: SPACE,
+      fromVersion: 1,
+      toVersion: 1,
+      deltas: [],
+      results: [
+        {
+          command: own[0].request.commands[0],
+          applied: false,
+          reason: 'no-op',
+        },
+      ],
+      commands: own[0].request.commands,
+      pendingEffects: {
+        mutatedNodes: [],
+        deletedNodeIds: [],
+        contentEditedNodeIds: [],
+        deferredFitFrameIds: [],
+      },
+    });
+    expect(frameHeight(node(FRAME))).toBe(local);
+    expect(toast).not.toHaveBeenCalled();
+    expect(api.getCanvas).not.toHaveBeenCalled();
+  });
+
+  it('does not report the box of a node whose size is authored', async () => {
+    state().onNodesChange([
+      { type: 'dimensions', id: X, dimensions: { width: 300, height: 180 } },
+    ]);
+    expect(own).toHaveLength(0);
   });
 });

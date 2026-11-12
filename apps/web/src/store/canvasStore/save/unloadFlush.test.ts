@@ -13,9 +13,6 @@ describe('createUnloadFlush', () => {
       events: { flushAllKeepalive: vi.fn() },
       nodeContent: { flushAllKeepalive: vi.fn() },
       preprocess: { flushKeepalive: vi.fn() },
-      structure: { cancelPending: vi.fn(() => false) },
-      getSaveCanvas: vi.fn(),
-      hasUnsavedStructure: vi.fn(() => false),
     } as unknown as UnloadFlushDeps;
 
     createUnloadFlush(deps)();
@@ -29,9 +26,6 @@ describe('createUnloadFlush', () => {
       events: { flushAllKeepalive: vi.fn() },
       nodeContent: { flushAllKeepalive: vi.fn() },
       preprocess: { flushKeepalive: vi.fn() },
-      structure: { cancelPending: vi.fn(() => false) },
-      getSaveCanvas: vi.fn(),
-      hasUnsavedStructure: vi.fn(() => false),
       sendQueue: queue,
     } as unknown as UnloadFlushDeps;
   }

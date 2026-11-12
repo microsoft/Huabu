@@ -56,9 +56,6 @@ function seed(nodes: Node[]): void {
     edges: [],
     version: 1,
     isLoading: false,
-    isSaving: false,
-    pendingSave: false,
-    versionConflict: false,
   });
 }
 
@@ -72,7 +69,6 @@ afterEach(() => {
   // cleared timers and reads as an unsaved edit in the next test.
   useCanvasStore.getState()._setStateNoAutosave({
     nodes: [],
-    pendingSave: false,
   });
   vi.clearAllTimers();
   vi.useRealTimers();
@@ -193,7 +189,8 @@ describe('sibling order from a server update', () => {
 
   it('does not ask for a reload over unsaved local edits', () => {
     seed([note('b'), note('a'), note('c')]);
-    useCanvasStore.getState()._setStateNoAutosave({ pendingSave: true });
+    // A body the content save has not sent yet.
+    useCanvasStore.getState().updateNodeData('a', { content: 'Unsaved' });
     const serverBefore = [note('a'), note('b'), note('c')];
     const onDiverged = vi.fn();
 

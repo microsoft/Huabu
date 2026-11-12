@@ -302,7 +302,6 @@ describe('CanvasPage node deep-link navigation', () => {
     const after = useCanvasStore.getState();
     expect(after.nodes[0]).toEqual({ ...entry, selected: false });
     expect(after.edges[0]).toEqual({ ...before.edges[0], selected: false });
-    expect(after.pendingSave).toBe(before.pendingSave);
     expect(after.version).toBe(before.version);
     expect(mocks.fitNodesOnCanvas).not.toHaveBeenCalled();
   });

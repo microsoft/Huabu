@@ -146,7 +146,6 @@ async function storeState(page: Page) {
     const state = store.getState();
     return {
       version: state.version,
-      isSaving: state.isSaving,
       selected: state.nodes
         .filter((node) => node.selected)
         .map((node) => node.id),
@@ -248,7 +247,6 @@ test('B sees A’s cursor and the node A selected, placed under its own viewport
   for (const device of [a, b]) {
     const state = await storeState(device.page);
     expect(state.version).toBe(version);
-    expect(state.isSaving).toBe(false);
     expect(
       device.calls.filter((call) => call !== 'POST <space>/presence'),
     ).toEqual([]);

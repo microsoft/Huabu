@@ -24,8 +24,6 @@ beforeEach(() => {
     nodes: [],
     edges: [],
     isLoading: false,
-    isSaving: false,
-    pendingSave: false,
   });
 });
 
@@ -69,7 +67,6 @@ describe('canvas title ownership during loading', () => {
       canvasId: 'next',
       canvasTitle: '',
       isLoading: true,
-      pendingSave: false,
     });
 
     resolve({
@@ -83,7 +80,6 @@ describe('canvas title ownership during loading', () => {
     expect(useCanvasStore.getState()).toMatchObject({
       canvasTitle: 'Next Space',
       isLoading: false,
-      pendingSave: false,
     });
   });
 

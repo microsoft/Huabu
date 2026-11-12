@@ -10,16 +10,22 @@
  * commands, so it is read back from the difference between two states.
  *
  * Covered: position, size, a changed parent, non-content `data` keys and
- * `data.style` leaves of nodes present in both states; deleted nodes; a
+ * `data.style` leaves (set or removed) of nodes present in both states;
+ * deleted nodes; nodes present only in the later state, put back whole; a
  * changed sibling order; added and removed edges. Reported as `uncovered`
- * instead: created nodes, removed `data` keys, other top-level node fields,
- * and edges whose own fields changed.
+ * instead: other top-level node fields. Edges whose own fields changed are
+ * not seen here.
  *
  * The result is a proposal. Whether running it reproduces the target state
  * is for the caller to check by executing it (see `canvasStore`).
  *
  * Pure functions only.
  */
+
+import {
+  stripTransientEdgeFields,
+  stripTransientNodeFields,
+} from '@huabu/shared/canvas-engine';
 
 import {
   changedUnits,
@@ -30,7 +36,13 @@ import {
   type UnitNode,
 } from './propertyUnits';
 
-import type { CanvasCommand, CanvasEdgeId, CanvasNodeId } from '@huabu/shared';
+import type {
+  CanvasCommand,
+  CanvasEdgeId,
+  CanvasNodeId,
+  CanvasRestoredEdge,
+  CanvasRestoredNode,
+} from '@huabu/shared';
 
 type GeometryItem = Extract<
   CanvasCommand,
@@ -87,6 +99,7 @@ export function commandsForLocalDiff(
     const item: { position?: unknown; size?: unknown } = {};
     const patch: Record<string, unknown> = {};
     const style: Record<string, unknown> = {};
+    const unset: string[] = [];
     for (const unit of units) {
       if (unit === POSITION_UNIT) {
         item.position = node.position;
@@ -108,11 +121,11 @@ export function commandsForLocalDiff(
         const value = readUnit(node, unit);
         if (value.present)
           style[unit.slice(DATA_STYLE_PREFIX.length)] = value.value;
-        else uncovered.push(`${node.id}:${unit}`);
+        else unset.push(unit.slice(DATA_PREFIX.length));
       } else if (unit.startsWith(DATA_PREFIX)) {
         const value = readUnit(node, unit);
         if (value.present) patch[unit.slice(DATA_PREFIX.length)] = value.value;
-        else uncovered.push(`${node.id}:${unit}`);
+        else unset.push(unit.slice(DATA_PREFIX.length));
       } else {
         uncovered.push(`${node.id}:${unit}`);
       }
@@ -124,8 +137,12 @@ export function commandsForLocalDiff(
         ...item,
       } as GeometryItem);
     }
-    if (Object.keys(patch).length > 0) {
-      patches.push({ nodeId: node.id as CanvasNodeId, patch } as DataPatch);
+    if (Object.keys(patch).length > 0 || unset.length > 0) {
+      patches.push({
+        nodeId: node.id as CanvasNodeId,
+        patch,
+        ...(unset.length > 0 ? { unset } : {}),
+      } as DataPatch);
     }
   }
 
@@ -149,7 +166,8 @@ type DiffEdge = { id: string; source: string; target: string } & Record<
 
 /**
  * Commands that take one whole state to another: {@link commandsForLocalDiff}
- * plus deleted nodes, sibling order and edges. Used by undo and redo.
+ * plus deleted nodes, nodes that come back (`RESTORE_NODES`), sibling order
+ * and edges. Used by undo and redo (see `restorePlan.ts`).
  */
 export function commandsForStateDiff(
   prev: { nodes: readonly UnitNode[]; edges: readonly DiffEdge[] },
@@ -161,9 +179,7 @@ export function commandsForStateDiff(
 
   const nextIds = new Set(next.nodes.map((node) => node.id));
   const prevIds = new Set(prev.nodes.map((node) => node.id));
-  for (const node of next.nodes) {
-    if (!prevIds.has(node.id)) uncovered.push(`${node.id}:existence`);
-  }
+  const created = next.nodes.filter((node) => !prevIds.has(node.id));
 
   // Edges first: an edge removed together with its node must not be named
   // after the node is gone.
@@ -190,6 +206,16 @@ export function commandsForStateDiff(
     });
   }
 
+  // A node that comes back is put back whole, as itself.
+  if (created.length > 0) {
+    commands.push({
+      type: 'RESTORE_NODES',
+      nodes: created.map(
+        (node) => stripTransientNodeFields(node) as CanvasRestoredNode,
+      ),
+    });
+  }
+
   const survivors = prev.nodes.filter((node) => nextIds.has(node.id));
   const nodeDiff = commandsForLocalDiff(survivors, next.nodes, ignoreUnit);
   commands.push(...nodeDiff.commands);
@@ -197,15 +223,16 @@ export function commandsForStateDiff(
 
   commands.push(...reorderCommands(survivors, next.nodes));
 
+  // An edge that comes back is put back as it was, handles included,
+  // rather than connected and routed anew.
   const addedEdges = next.edges.filter((edge) => !prevEdges.has(edge.id));
   if (addedEdges.length > 0) {
     commands.push({
-      type: 'CONNECT_NODES',
-      edges: addedEdges.map((edge) => ({
-        id: edge.id as CanvasEdgeId,
-        source: edge.source as CanvasNodeId,
-        target: edge.target as CanvasNodeId,
-      })),
+      type: 'RESTORE_NODES',
+      nodes: [],
+      edges: addedEdges.map(
+        (edge) => stripTransientEdgeFields(edge) as CanvasRestoredEdge,
+      ),
     });
   }
 
@@ -217,7 +244,7 @@ export function commandsForStateDiff(
  * into the one in `next`, moving as few nodes as a left-to-right pass needs.
  * Parents whose membership differs are left to the parent commands.
  */
-function reorderCommands(
+export function reorderCommands(
   prev: readonly UnitNode[],
   next: readonly UnitNode[],
 ): CanvasCommand[] {

@@ -33,8 +33,6 @@ beforeEach(() => {
     nodes: [note()],
     edges: [],
     isLoading: false,
-    isSaving: false,
-    pendingSave: false,
   });
 });
 afterEach(() => {

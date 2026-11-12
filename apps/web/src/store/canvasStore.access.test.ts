@@ -5,6 +5,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 import { ApiError } from '@/api/_client';
 import { getCanvasAccess, putCanvas } from '@/api/canvas';
+import { renameSpace } from '@/api/spaceCard';
 
 import useCanvasStore, {
   selectCanManageCanvas,
@@ -19,10 +20,15 @@ vi.mock('@/api/canvas', async (importActual) => ({
   getCanvasAccess: vi.fn(),
   putCanvas: vi.fn(),
 }));
+vi.mock('@/api/spaceCard', async (importActual) => ({
+  ...(await importActual()),
+  renameSpace: vi.fn(),
+}));
 
 beforeEach(() => {
   vi.mocked(getCanvasAccess).mockReset();
   vi.mocked(putCanvas).mockReset();
+  vi.mocked(renameSpace).mockReset();
   useIdentityStore.setState({
     identity: {
       provider: 'bubble',
@@ -44,7 +50,6 @@ beforeEach(() => {
     ],
     canvasTitle: 'Original',
     version: 7,
-    pendingSave: true,
   });
 });
 afterEach(() => {
@@ -53,7 +58,6 @@ afterEach(() => {
     canvasAccess: null,
     canvasId: '',
     nodes: [],
-    pendingSave: false,
   });
 });
 
@@ -84,7 +88,6 @@ it('refreshes grant changes without replacing unsaved content, pending saves, or
     nodes: before.nodes,
     canvasTitle: 'Original',
     version: 7,
-    pendingSave: true,
     canvasAccess: { canvasId: 'space', write: false, manage: false },
   });
   expect(useCanvasStore.getState().nodes).toBe(before.nodes);
@@ -133,12 +136,12 @@ it('fails closed on permission-check failure and can recover after readmission',
   expect(selectCanManageCanvas(useCanvasStore.getState())).toBe(true);
 });
 
-it('a 403 during rename reverts the optimistic title and settles a pending re-save without leaking rejection', async () => {
+it('a 403 during rename reverts the optimistic title and re-reads the permission', async () => {
   useCanvasStore.setState({
     canvasAccess: { canvasId: 'space', write: true, manage: true },
   });
   vi.mocked(getCanvasAccess).mockResolvedValue({ write: true, manage: false });
-  vi.mocked(putCanvas).mockRejectedValue(
+  vi.mocked(renameSpace).mockRejectedValue(
     new ApiError(
       403,
       { code: 'SPACE_ACCESS_REQUIRED', message: 'manage required' },
@@ -148,9 +151,46 @@ it('a 403 during rename reverts the optimistic title and settles a pending re-sa
   await expect(
     useCanvasStore.getState().tryRename('canvas', 'space', 'Forbidden'),
   ).resolves.toBe(false);
-  await vi.waitFor(() =>
-    expect(useCanvasStore.getState().isSaving).toBe(false),
-  );
   expect(useCanvasStore.getState().canvasTitle).toBe('Original');
-  expect(putCanvas).toHaveBeenCalledTimes(2);
+  // The title has its own endpoint; the Space's structure is not saved.
+  expect(renameSpace).toHaveBeenCalledExactlyOnceWith('space', {
+    title: 'Forbidden',
+    expectedTitle: 'Original',
+  });
+  expect(putCanvas).not.toHaveBeenCalled();
+  await vi.waitFor(() =>
+    expect(selectCanManageCanvas(useCanvasStore.getState())).toBe(false),
+  );
 });
+
+it('renames through the title endpoint and adopts the title the server stored', async () => {
+  useCanvasStore.setState({
+    canvasAccess: { canvasId: 'space', write: true, manage: true },
+  });
+  vi.mocked(renameSpace).mockResolvedValue({ title: 'Renamed', updatedAt: 1 });
+  await expect(
+    useCanvasStore.getState().tryRename('canvas', 'space', '  Renamed '),
+  ).resolves.toBe(true);
+  expect(renameSpace).toHaveBeenCalledExactlyOnceWith('space', {
+    title: 'Renamed',
+    expectedTitle: 'Original',
+  });
+  expect(useCanvasStore.getState().canvasTitle).toBe('Renamed');
+  expect(putCanvas).not.toHaveBeenCalled();
+});
+
+it.each(['CANVAS_TITLE_CONFLICT', 'SPACE_TITLE_CHANGED'] as const)(
+  'reverts the optimistic title when the rename is refused with %s',
+  async (code) => {
+    useCanvasStore.setState({
+      canvasAccess: { canvasId: 'space', write: true, manage: true },
+    });
+    vi.mocked(renameSpace).mockRejectedValue(
+      new ApiError(409, { code, message: 'refused' }, 'refused'),
+    );
+    await expect(
+      useCanvasStore.getState().tryRename('canvas', 'space', 'Taken'),
+    ).resolves.toBe(false);
+    expect(useCanvasStore.getState().canvasTitle).toBe('Original');
+  },
+);

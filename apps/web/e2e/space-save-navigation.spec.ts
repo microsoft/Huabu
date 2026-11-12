@@ -57,9 +57,12 @@ for (const failure of ['content', 'structure'] as const) {
           .nodes.find((node) => node.id === 'node-save-navigation');
       });
       expect(sourceNode).toBeDefined();
-      const failingRoute = `**/api/canvas/${child}${failure === 'content' ? '/nodes/*/content' : ''}`;
+      // A body is saved by the per-node content PUT; a structure edit is
+      // sent as an execute request. Nothing saves the whole Space.
+      const failingRoute = `**/api/canvas/${child}${failure === 'content' ? '/nodes/*/content' : '/execute'}`;
+      const failingMethod = failure === 'content' ? 'PUT' : 'POST';
       await page.route(failingRoute, async (route) => {
-        if (route.request().method() !== 'PUT') return route.continue();
+        if (route.request().method() !== failingMethod) return route.continue();
         await route.fulfill({
           status: 500,
           contentType: 'application/json',
@@ -69,14 +72,25 @@ for (const failure of ['content', 'structure'] as const) {
       await page.evaluate(async (kind) => {
         const path = '/src/store/canvasStore.ts';
         const { default: store } = (await import(path)) as typeof CanvasStore;
-        store.setState({
-          nodes: store.getState().nodes.map((node) => {
-            if (node.id !== 'node-save-navigation') return node;
-            return kind === 'content'
-              ? { ...node, data: { ...node.data, content: 'Unsaved text' } }
-              : { ...node, position: { x: 400, y: 400 } };
-          }),
-        });
+        if (kind === 'content') {
+          store.setState({
+            nodes: store
+              .getState()
+              .nodes.map((node) =>
+                node.id === 'node-save-navigation'
+                  ? { ...node, data: { ...node.data, content: 'Unsaved text' } }
+                  : node,
+              ),
+          });
+          return;
+        }
+        // The move a drag commits, through the store's own action.
+        store.getState().beginGesture('SET_NODE_GEOMETRY');
+        store
+          .getState()
+          .setNodeGeometry([
+            { nodeId: 'node-save-navigation', position: { x: 400, y: 400 } },
+          ]);
       }, failure);
       await page
         .getByRole('link', { name: destinationTitle, exact: true })
@@ -144,7 +158,9 @@ for (const failure of ['content', 'structure'] as const) {
           : sourceNode?.position,
       );
       expect(restored.pending).toEqual([]);
-      expect(restored.canUndo).toBe(false);
+      // The move is a real edit with an undo entry, which a Space keeps
+      // across navigation once it is saved; a discard clears it.
+      expect(restored.canUndo).toBe(recover && failure === 'structure');
     });
   }
 }

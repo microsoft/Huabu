@@ -14,8 +14,10 @@ const mocks = vi.hoisted(() => {
     pendingContentNodeIds: vi.fn(() => []),
     applyDeltasFromAgent: vi.fn(() => []),
     loadCanvas: vi.fn(async () => undefined),
+    _setStateNoAutosave: vi.fn(),
   };
-  return { canvasState };
+  const setSpaceTitle = vi.fn();
+  return { canvasState, setSpaceTitle };
 });
 
 vi.mock('@/api/_client', () => ({
@@ -64,6 +66,11 @@ vi.mock('@/store/panelStore', () => ({
 }));
 vi.mock('@/store/previewWorkspace/actions', () => ({
   openPreviewNode: vi.fn(),
+}));
+vi.mock('@/store/workspaceStore', () => ({
+  useWorkspaceStore: {
+    getState: () => ({ setSpaceTitle: mocks.setSpaceTitle }),
+  },
 }));
 
 const encoder = new TextEncoder();
@@ -167,5 +174,49 @@ describe('canvasSyncStore stream recovery', () => {
     expect(mocks.canvasState.loadCanvas).toHaveBeenCalledWith('canvas-1', {
       resetHistory: true,
     });
+  });
+
+  it('shows a renamed Space and follows its version without loading it again', async () => {
+    const update = {
+      fromVersion: 1,
+      toVersion: 2,
+      deltas: [],
+      pendingEffects: {
+        mutatedNodes: [],
+        deletedNodeIds: [],
+        contentEditedNodeIds: [],
+        deferredFitFrameIds: [],
+      },
+      title: 'Renamed elsewhere',
+    };
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(
+          encoder.encode(
+            `event: snapshot\ndata: {"version":1}\n\nevent: update\ndata: ${JSON.stringify(update)}\n\n`,
+          ),
+        );
+      },
+    });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(stream)));
+    mocks.canvasState.applyDeltasFromAgent.mockClear();
+    mocks.canvasState._setStateNoAutosave.mockClear();
+
+    useCanvasSyncStore.getState().connect('canvas-1');
+    await vi.advanceTimersByTimeAsync(100);
+
+    expect(mocks.canvasState._setStateNoAutosave).toHaveBeenCalledWith({
+      canvasTitle: 'Renamed elsewhere',
+    });
+    expect(mocks.setSpaceTitle).toHaveBeenCalledWith(
+      'canvas-1',
+      'Renamed elsewhere',
+    );
+    // The update itself advances the version through the normal path.
+    expect(mocks.canvasState.applyDeltasFromAgent).toHaveBeenCalledOnce();
+    expect(mocks.canvasState.applyDeltasFromAgent.mock.calls[0]).toEqual(
+      expect.arrayContaining([[], 2]),
+    );
+    expect(mocks.canvasState.loadCanvas).not.toHaveBeenCalled();
   });
 });

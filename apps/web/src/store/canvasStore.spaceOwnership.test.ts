@@ -54,8 +54,6 @@ beforeEach(() => {
     edges: [],
     version: 0,
     isLoading: false,
-    isSaving: false,
-    pendingSave: false,
   });
   useWorkspaceStore.setState({
     workspaceId: 'workspace',

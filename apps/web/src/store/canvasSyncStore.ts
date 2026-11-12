@@ -10,6 +10,7 @@ import useCanvasStore, { requestCanvasResync } from '@/store/canvasStore';
 import { useChatStore } from '@/store/chatStore';
 import { usePanelStore } from '@/store/panelStore';
 import { openPreviewNode } from '@/store/previewWorkspace/actions';
+import { useWorkspaceStore } from '@/store/workspaceStore';
 
 import { subscribeCanvasSync } from './canvasSyncSubscription';
 
@@ -158,9 +159,8 @@ export const useCanvasSyncStore = create<CanvasSyncState>((set, get) => ({
         // is already fetching the latest state, but it hasn't set
         // `version` yet when this snapshot arrives — without this
         // guard the stale-version comparison below fires a second,
-        // redundant `loadCanvas` that races the mount load and
-        // leaks a spurious structure PUT (resetting `updatedAt` to
-        // the open time). The in-flight load already brings the
+        // redundant `loadCanvas` that races the mount load. The
+        // in-flight load already brings the
         // freshest state, so a snapshot-driven reload is only
         // meaningful once we've settled.
         if (canvasStore.isLoading) return;
@@ -171,6 +171,16 @@ export const useCanvasSyncStore = create<CanvasSyncState>((set, get) => ({
       if (event.type !== 'update') return;
       const { fromVersion, toVersion, deltas, pendingEffects } = event.data;
       let skippedNodeIds: string[] = [];
+      // A rename: the title is not part of any node, so it is taken as is.
+      // It is the server's value even when this update arrives out of step.
+      if (
+        event.data.title !== undefined &&
+        toVersion > canvasStore.version &&
+        event.data.title !== null
+      ) {
+        canvasStore._setStateNoAutosave({ canvasTitle: event.data.title });
+        useWorkspaceStore.getState().setSpaceTitle(canvasId, event.data.title);
+      }
       if (fromVersion === canvasStore.version) {
         skippedNodeIds = canvasStore.applyDeltasFromAgent(
           deltas as Delta[],

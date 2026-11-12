@@ -255,8 +255,6 @@ async function storeState(page: Page) {
     const state = store.getState();
     return {
       version: state.version,
-      versionConflict: state.versionConflict,
-      isSaving: state.isSaving,
       order: state.nodes.map((node) => node.id),
       selected: state.nodes
         .filter((node) => node.selected)
@@ -323,7 +321,6 @@ async function settle(
     const { version } = await serverRecord(request, canvasId);
     for (const device of devices) {
       const state = await storeState(device.page);
-      expect(state.isSaving, `${device.name} is saving`).toBe(false);
       expect(state.version, `${device.name} version`).toBe(version);
     }
   }).toPass();
@@ -717,7 +714,6 @@ async function twoWriterScenario(
     bShowsY: await domPosition(b.page, Y),
     aShowsY: aLive.value,
     bConflictToast: await toast.count(),
-    bVersionConflict: bState.versionConflict,
     bSelected: bState.selected,
     bReloadedBeforeChoice: await wasReloaded(b.page),
     bViewportKept: (await viewport(b.page)) === bViewport,
@@ -813,7 +809,6 @@ async function bodyScenario(
     versionAfterMove: afterMove.version,
     serverBodyXAfterMove: afterMove.node(X)?.data.content?.trim(),
     bToastAfterMove: await b.page.getByText(CONFLICT_TOAST).count(),
-    bVersionConflict: (await storeState(b.page)).versionConflict,
     aShowsBodyY: (await storeState(a.page)).content[Y],
     bDomAfterReload: await reloadAndRead(b, () => domBody(b.page, X)),
   };
@@ -981,7 +976,6 @@ test('(e) moves of different nodes from page A and page B are both saved and sho
   expect(result.bShowsY).toEqual(result.yMoved);
   expect(result.aShowsY).toEqual(result.yMoved);
   expect(result.bConflictToast).toBe(0);
-  expect(result.bVersionConflict).toBe(false);
   expect(result.bReloadedBeforeChoice).toBe(false);
   expect(result.bViewportKept).toBe(true);
   expect(result.bSelected).toEqual([Y]);
@@ -1164,7 +1158,6 @@ test('(j) two pages that measure the same auto-height note report it once and do
     const { version } = await serverRecord(request, canvasId);
     for (const device of [a, b]) {
       const state = await storeState(device.page);
-      expect(state.isSaving, `${device.name} is saving`).toBe(false);
       expect(state.version, `${device.name} version`).toBe(version);
     }
   }).toPass();
@@ -1185,10 +1178,6 @@ test('(j) two pages that measure the same auto-height note report it once and do
     aShows: await shown(a.page),
     bShows: await shown(b.page),
     reloaded: [await wasReloaded(a.page), await wasReloaded(b.page)],
-    conflict: [
-      (await storeState(a.page)).versionConflict,
-      (await storeState(b.page)).versionConflict,
-    ],
     toasts:
       (await a.page.getByText(CONFLICT_TOAST).count()) +
       (await b.page.getByText(CONFLICT_TOAST).count()),
@@ -1204,7 +1193,6 @@ test('(j) two pages that measure the same auto-height note report it once and do
   expect(result.after.height).not.toBe(result.before.height);
   expect(result.aShows).toBe(result.after.height);
   expect(result.bShows).toBe(result.after.height);
-  expect(result.conflict).toEqual([false, false]);
   expect(result.toasts).toBe(0);
   expect(result.reloaded).toEqual([false, false]);
 });
@@ -1240,7 +1228,6 @@ test('current: (f) a note body edited on page A is not shown on page B until B r
   expect(result.serverBodyXAfterMove).toBe(bodyA);
   expect(result.serverBodyYAfterMove).toBe(bodyB);
   expect(result.bToastAfterMove).toBe(0);
-  expect(result.bVersionConflict).toBe(false);
   // Neither page ever shows the other's body without reloading.
   expect(result.aShowsBodyY).toBe(`Seed body ${Y}`);
   expect(result.bDomAfterReload).toBe(bodyA);
@@ -1283,7 +1270,6 @@ target(
     expect(result.aShowsBodyY?.trim()).toBe('Body written by page B');
     expect(result.serverYAfterMove).toEqual(result.yMoved);
     expect(result.bToastAfterMove).toBe(0);
-    expect(result.bVersionConflict).toBe(false);
   },
 );
 

@@ -1617,9 +1617,6 @@ beforeEach(() => {
   useCanvasStore.getState()._setStateNoAutosave({
     canvasId: 'canvas-1',
     isLoading: false,
-    isSaving: false,
-    pendingSave: false,
-    versionConflict: false,
     nodes: [
       {
         id: 'note-1',

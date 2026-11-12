@@ -56,10 +56,6 @@ beforeEach(() => {
     edges: [],
     version: 1,
     isLoading: false,
-    isSaving: false,
-    pendingSave: false,
-    versionConflict: false,
-    versionConflictServerVersion: null,
   });
 });
 

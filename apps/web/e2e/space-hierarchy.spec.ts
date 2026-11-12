@@ -527,8 +527,10 @@ test('cancelling child-Space deletion preserves separately selected edges', asyn
   await expect(dialog).not.toBeVisible();
   const retained = await page.evaluate(async () => {
     const path = '/src/store/canvasStore.ts';
-    const { default: store } = (await import(path)) as typeof CanvasStore;
-    await store.getState().saveCanvas();
+    const { default: store, drainPendingSaves } = (await import(
+      path
+    )) as typeof CanvasStore;
+    await drainPendingSaves();
     return {
       nodes: store.getState().nodes.map((node) => node.id),
       edges: store.getState().edges.map((edge) => edge.id),
@@ -572,9 +574,11 @@ test('immediate Undo after child creation keeps its entry and leaves saves usabl
     .toBe(true);
   await page.evaluate(async () => {
     const path = '/src/store/canvasStore.ts';
-    const { default: store } = (await import(path)) as typeof CanvasStore;
+    const { default: store, drainPendingSaves } = (await import(
+      path
+    )) as typeof CanvasStore;
     await store.getState().undo();
-    await store.getState().saveCanvas();
+    await drainPendingSaves();
   });
   const record = await (await page.request.get(`/api/canvas/${parent}`)).json();
   expect(record.state.nodes).toEqual(
@@ -582,12 +586,15 @@ test('immediate Undo after child creation keeps its entry and leaves saves usabl
       expect.objectContaining({ id: child.parentEntryNodeId }),
     ]),
   );
+  // Saving still works afterwards: nothing is left unsent.
   await expect
     .poll(() =>
       page.evaluate(async () => {
         const path = '/src/store/canvasStore.ts';
-        const { default: store } = (await import(path)) as typeof CanvasStore;
-        return store.getState().versionConflict;
+        const { hasUnsavedCanvasEdits } = (await import(
+          path
+        )) as typeof CanvasStore;
+        return hasUnsavedCanvasEdits();
       }),
     )
     .toBe(false);

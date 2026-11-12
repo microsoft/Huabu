@@ -59,7 +59,6 @@ describe('User rename ownership and save recovery', () => {
     useCanvasStore.getState()._setStateNoAutosave({
       canvasId: 'canvas-rename-conflict',
       isLoading: false,
-      versionConflict: false,
       nodes: [
         {
           id: 'rename-conflict',

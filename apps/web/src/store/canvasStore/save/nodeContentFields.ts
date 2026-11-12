@@ -5,9 +5,9 @@
  * Shared constants describing which node fields participate in the
  * per-node markdown sidecar pipeline. Imported by both:
  *
- *   • {@link ../save/structureDirtyDetector} — to *exclude* these
- *     fields from the structure-save diff (content edits must not
- *     bump `canvas.version`).
+ *   • the store's send queue — to *exclude* these fields from the
+ *     structure commands it sends (content edits must not bump
+ *     `canvas.version`).
  *   • the future `nodeContentQueue` extraction — to *include* them
  *     in the per-node `PUT /api/canvas/:id/nodes/:nodeId/content`
  *     body and decide which nodes own a `.md` sidecar.
@@ -20,8 +20,7 @@
  * `data` keys whose values live in the per-node markdown sidecar
  * (`nodes/<safe(label)>.md`), not in structural state. A patch touching
  * any of these schedules a per-node content save and the key is
- * stripped from the structure PUT body so a viewport drag does not
- * rewrite content.
+ * left out of the structure commands the page sends.
  */
 export const NODE_CONTENT_KEYS: ReadonlySet<string> = new Set([
   'content',
@@ -42,11 +41,11 @@ export const NODE_CONTENT_KEYS: ReadonlySet<string> = new Set([
  * `question` is included as a frontmatter-only sidecar (no body) so
  * its auto-generated label / labelSource survive canvas reloads —
  * without this, `patchNodeSilent({label, labelSource})` would only
- * live in memory because the structure PUT strips both fields.
+ * live in memory because structure commands leave both fields out.
  *
  * `sketch` is included for the same reason as `question`: the canvas
  * engine auto-stamps a `Sketch N` label on creation (and the user can
- * rename it from the layer panel) but the structure PUT strips
+ * rename it from the layer panel) but structure commands leave out
  * `label` / `labelSource`. Without a sidecar those fields would only
  * live in memory and the layer panel would show a blank row after
  * reload. The sidecar is frontmatter-only — stroke geometry stays

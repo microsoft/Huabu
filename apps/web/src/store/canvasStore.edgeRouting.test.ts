@@ -121,10 +121,6 @@ beforeEach(() => {
     canvasTitle: 'Routing',
     version: 1,
     isLoading: false,
-    isSaving: false,
-    pendingSave: false,
-    versionConflict: false,
-    versionConflictServerVersion: null,
     rfInstance: null,
     canvasWrapper: null,
   });
