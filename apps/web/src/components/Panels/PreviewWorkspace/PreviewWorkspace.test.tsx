@@ -209,6 +209,7 @@ afterEach(() => {
   useCanvasStore.setState({
     nodes: [],
     canvasId: '',
+    canvasAccess: null,
     tryRename: originalTryRename,
   });
 });
@@ -751,23 +752,98 @@ describe('tab strip', () => {
     ).toBe('thread-question-1');
   });
 
-  it('creates a Chat tab from the workspace toolbar while a node is active', async () => {
+  it('creates an unbound Chat from the creation menu while a node is active', async () => {
     openNode('a');
     render([canvasNode('a', 'Alpha')]);
 
     const newChatButton = container?.querySelector<HTMLButtonElement>(
-      '[aria-label="New conversation"]',
+      '[aria-label="Conversation creation options"]',
     );
     expect(newChatButton).not.toBeNull();
     await act(async () => newChatButton?.click());
+    const temporaryChat = Array.from(
+      document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'),
+    ).find((item) => item.textContent === 'New temporary chat');
+    expect(temporaryChat).toBeDefined();
+    await act(async () => temporaryChat?.click());
 
     expect(tabs()).toHaveLength(2);
     expect(activeTabName()).toBe('New conversation');
+    expect(useCanvasStore.getState().nodes).toHaveLength(1);
     expect(
       Object.values(store().workspace.tabs).some(
         (tab) => tab.target.kind === 'node' && tab.target.nodeId === 'a',
       ),
     ).toBe(true);
+  });
+
+  it('creates a permanent Agent tab in the initiating group by default', async () => {
+    openNode('a');
+    store().splitGroup();
+    const group = store().workspace.groups[1];
+    render([canvasNode('a', 'Alpha')]);
+    const addNode = vi
+      .spyOn(useCanvasStore.getState(), 'addNode')
+      .mockImplementation((input) => {
+        const id = input.id;
+        assert(id);
+        useCanvasStore.setState((state) => ({
+          nodes: [
+            ...state.nodes,
+            {
+              id,
+              type: input.nodeType,
+              position: { x: 0, y: 0 },
+              data: input.data ?? {},
+            },
+          ],
+        }));
+      });
+    try {
+      const create = container?.querySelector<HTMLButtonElement>(
+        `#preview-new-chat-${group.id}`,
+      );
+      expect(create?.getAttribute('aria-label')).toBe('New Agent Node');
+      await act(async () => create?.click());
+      const agent = useCanvasStore
+        .getState()
+        .nodes.find((node) => node.type === 'question');
+      assert(agent);
+      expect(addNode).toHaveBeenCalledOnce();
+      expect(addNode.mock.calls[0][0].placementPoint).toBeUndefined();
+      expect(addNode.mock.calls[0][0].selectOnCreate).toBe(true);
+      const currentGroup = store().workspace.groups[1];
+      assert(currentGroup.activeTabId);
+      expect(store().workspace.tabs[currentGroup.activeTabId]).toMatchObject({
+        target: { kind: 'node', nodeId: agent.id },
+        transient: false,
+      });
+      expect(store().workspace.groups[0].tabIds).toHaveLength(1);
+      expect(
+        container
+          ?.querySelector('[data-preview-active="true"] [data-thread-id]')
+          ?.getAttribute('data-thread-id'),
+      ).toBe(agent.data.threadId);
+    } finally {
+      addNode.mockRestore();
+    }
+  });
+
+  it('retains temporary chats without offering node creation in read-only Spaces', async () => {
+    useCanvasStore.setState({
+      canvasAccess: { canvasId: CANVAS_ID, write: false, manage: false },
+    });
+    render([]);
+    expect(
+      container?.querySelector('[aria-label="New Agent Node"]'),
+    ).toBeNull();
+    const create = container?.querySelector<HTMLButtonElement>(
+      '[aria-label="New temporary chat"]',
+    );
+    expect(create).not.toBeNull();
+    await act(async () => create?.click());
+    expect(Object.values(store().workspace.tabs)[0].target.kind).toBe('chat');
+    expect(useCanvasStore.getState().nodes).toHaveLength(0);
   });
 
   it('keeps the active and most recent eligible tab mounted', async () => {
@@ -1450,7 +1526,7 @@ describe('split', () => {
     ).toBeNull();
     expect(store().workspace.groups[0].tabIds).toEqual([]);
     expect(document.activeElement).toBe(
-      container?.querySelector('button[aria-label="New conversation"]'),
+      container?.querySelector('button[aria-label="New Agent Node"]'),
     );
   });
 
@@ -1937,10 +2013,9 @@ describe('right panel host', () => {
       '[data-testid="collapse-preview"]',
     );
     const newChat = container?.querySelector<HTMLButtonElement>(
-      'button[aria-label="New conversation"]:not([role="tab"])',
+      'button[aria-label="New Agent Node"]:not([role="tab"])',
     );
     expect(collapse?.classList.contains('p-1.5')).toBe(true);
-    expect(collapse?.className).toBe(newChat?.className);
     expect(collapse?.querySelector('.lucide-panel-right-close')).not.toBeNull();
     expect(newChat?.querySelector('.lucide-plus')).not.toBeNull();
     for (const button of [newChat, collapse]) {

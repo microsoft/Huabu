@@ -1211,6 +1211,8 @@
     "agentHeading": "Agent",
     "currentAgentThread": "Current agent for this conversation",
     "newConversation": "New conversation",
+    "newTemporaryConversation": "New temporary chat",
+    "newConversationOptions": "Conversation creation options",
     "titleSaveFailed": "Could not sync conversation title",
     "retryTitleSave": "Retry title save",
     "renameTitle": "Rename conversation",

@@ -62,6 +62,7 @@ export function noteFarDescription(
     .join('\n');
 
   const titleKey = comparisonKey(title);
+  const paragraphs: string[] = [];
   for (const paragraph of withoutImageText(prose).split(/\n[ \t]*\n/)) {
     // Lists (including their continuation lines) and indented code are not
     // prose paragraphs. Keep this heuristic local rather than parsing a document.
@@ -77,8 +78,8 @@ export function noteFarDescription(
       .join('\n');
     const text = plainText(body);
     if (/[\p{L}\p{N}]/u.test(text) && comparisonKey(text) !== titleKey) {
-      return text;
+      paragraphs.push(text);
     }
   }
-  return undefined;
+  return paragraphs.length ? paragraphs.join(' ') : undefined;
 }

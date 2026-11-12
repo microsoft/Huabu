@@ -104,6 +104,7 @@ export function openSpaceConversation(
 export function openPreviewNode(
   nodeId: string,
   options?: {
+    groupId?: string;
     transient?: boolean;
     focusEditor?: boolean;
     markReadIntent?: boolean;
@@ -120,6 +121,7 @@ export function openPreviewNode(
       nodeId,
     },
     {
+      groupId: options?.groupId,
       transient: options?.transient ?? true,
       markReadIntent: options?.markReadIntent,
       openToSide: options?.openToSide,

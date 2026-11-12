@@ -42,13 +42,13 @@ describe('noteFarDescription', () => {
     expect(noteFarDescription(markdown, 'Title')).toBeUndefined();
   });
 
-  it('skips headings and repeated titles, then selects only the first prose paragraph', () => {
+  it('skips headings and repeated titles while retaining later prose paragraphs', () => {
     expect(
       noteFarDescription(
         '# Title\n\n**TITLE:**\n\nFirst **useful** paragraph.\nContinues here.\n\nLater paragraph.',
         'Title',
       ),
-    ).toBe('First useful paragraph. Continues here.');
+    ).toBe('First useful paragraph. Continues here. Later paragraph.');
   });
 
   it('keeps prose immediately after ATX and setext headings', () => {
@@ -66,7 +66,7 @@ describe('noteFarDescription', () => {
         '  Read [the guide](https://example.com) with `code` and <b>bold</b>.\r\nNext line.\r\n\r\nLater.',
         'Title',
       ),
-    ).toBe('Read the guide with code and bold. Next line.');
+    ).toBe('Read the guide with code and bold. Next line. Later.');
   });
 
   it('skips fenced code with blank lines, longer fences, and tilde fences', () => {
@@ -105,7 +105,7 @@ describe('noteFarDescription', () => {
         '# 研究计划\n\n**研究计划**。\n\n通过访谈理解协作过程。\n\n后续安排。',
         '研究计划',
       ),
-    ).toBe('通过访谈理解协作过程。');
+    ).toBe('通过访谈理解协作过程。 后续安排。');
   });
 
   it('does not discard prose just because it begins with the title', () => {

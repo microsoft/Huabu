@@ -18,6 +18,7 @@ import {
   SortableContext,
 } from '@dnd-kit/sortable';
 import {
+  ChevronDown,
   Columns2,
   Maximize,
   Minimize,
@@ -31,6 +32,8 @@ import { useTranslation } from 'react-i18next';
 import { PreviewTab } from './PreviewTab';
 import { groupDropId } from './tabDnd';
 import { Button } from '../../Common/Button';
+import { cn } from '../../Common/cn';
+import { DropdownMenu, DropdownMenuItem } from '../../Common/DropdownMenu';
 
 import type { TabDropIndicator } from './tabDnd';
 import type { AcpConnectionInfo } from '../ChatPanel/AcpConnectionBadge';
@@ -56,6 +59,7 @@ type PreviewTabStripProps = {
   onCloseEmptyGroup?: () => void;
   /** Creates a fresh Chat tab in this group. */
   onNewChat: () => void;
+  onNewAgent?: () => void;
   tabDropIndicator: TabDropIndicator | null;
   isFullscreen: boolean;
   onToggleFullscreen?: () => void;
@@ -83,6 +87,7 @@ export function PreviewTabStrip({
   onSplit,
   onCloseEmptyGroup,
   onNewChat,
+  onNewAgent,
   tabDropIndicator,
   isFullscreen,
   onToggleFullscreen,
@@ -227,18 +232,63 @@ export function PreviewTabStrip({
         )}
       </div>
       <div className="flex shrink-0 items-center pr-2">
-        <Button
-          id={newChatElementId(groupId)}
-          variant="ghost"
-          iconOnly
-          size="md"
-          className="text-fg-subtle enabled:hover:text-fg-default"
-          title={t('chat.newConversation')}
-          tooltipPlacement="bottom"
-          onClick={onNewChat}
+        <div
+          role="group"
+          aria-label={t('chat.newConversation')}
+          className={
+            onNewAgent
+              ? 'hover:bg-hover focus-within:bg-hover mr-1.5 inline-flex items-center rounded-md'
+              : 'contents'
+          }
         >
-          <Plus aria-hidden />
-        </Button>
+          <Button
+            id={newChatElementId(groupId)}
+            variant="ghost"
+            iconOnly
+            size="md"
+            className={cn(
+              'text-fg-subtle enabled:hover:text-fg-default',
+              onNewAgent && 'size-6 rounded-r-none p-1',
+            )}
+            title={t(
+              onNewAgent ? 'chat.newQuestion' : 'chat.newTemporaryConversation',
+            )}
+            tooltipPlacement="bottom"
+            onClick={onNewAgent ?? onNewChat}
+          >
+            <Plus aria-hidden />
+          </Button>
+          {onNewAgent && (
+            <DropdownMenu
+              align="bottom-right"
+              trigger={
+                <Button
+                  variant="ghost"
+                  iconOnly
+                  size="md"
+                  className="text-fg-subtle enabled:hover:text-fg-default h-6 w-4.5 rounded-l-none px-0.5 py-1 pointer-coarse:w-6 [&_svg]:size-3"
+                  title={t('chat.newConversationOptions')}
+                  tooltipPlacement="bottom"
+                >
+                  <ChevronDown aria-hidden />
+                </Button>
+              }
+            >
+              <DropdownMenuItem onClick={onNewAgent}>
+                {t('chat.newQuestion')}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={onNewChat}>
+                {t('chat.newTemporaryConversation')}
+              </DropdownMenuItem>
+            </DropdownMenu>
+          )}
+        </div>
+        {onToggleFullscreen && (
+          <div
+            aria-hidden
+            className="bg-edge-default mr-1.5 h-4 w-px shrink-0"
+          />
+        )}
         {onToggleFullscreen && (
           <Button
             variant="ghost"

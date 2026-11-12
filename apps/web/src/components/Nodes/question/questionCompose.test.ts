@@ -319,6 +319,27 @@ describe('Question conversation presentation', () => {
     expect(usePanelStore.getState().isRightCollapsed).toBe(true);
   });
 
+  it('abandons preview creation when its group closes while defaults load', async () => {
+    let resolveProfiles!: (value: typeof profileSnapshot) => void;
+    listProfiles.mockReturnValueOnce(
+      new Promise<typeof profileSnapshot>((resolve) => {
+        resolveProfiles = resolve;
+      }),
+    );
+    usePreviewWorkspaceStore.getState().splitGroup();
+    const groupId = usePreviewWorkspaceStore.getState().workspace.groups[1].id;
+    const addNode = vi.fn();
+    const pending = createAndCompose({
+      addNode,
+      canvasId: 'canvas-1',
+      previewOptions: { groupId, transient: false },
+    });
+    usePreviewWorkspaceStore.getState().closeEmptyGroup(groupId);
+    resolveProfiles(profileSnapshot);
+    expect(await pending).toBeNull();
+    expect(addNode).not.toHaveBeenCalled();
+  });
+
   it('offers Built-In Pi without selecting it, then retries with that explicit choice', async () => {
     listProfiles.mockResolvedValue({
       ...profileSnapshot,
