@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { act } from 'react';
+import { Activity, act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -12,12 +12,15 @@ import {
   useConversationPreparationStore,
 } from '@/store/conversationPreparation';
 
-import { useAcpSessionMeta } from './useAcpSessionMeta';
+import {
+  clearAcpSessionMetaCache,
+  useAcpSessionMeta,
+} from './useAcpSessionMeta';
 
 const apiMocks = vi.hoisted(() => ({
   getCached: vi.fn(),
   loadProfile: vi.fn(),
-  sink: vi.fn(),
+  sink: vi.fn().mockReturnValue(() => {}),
 }));
 
 vi.mock('@/api/acp', () => ({
@@ -78,7 +81,8 @@ afterEach(() => {
   container = undefined;
   apiMocks.getCached.mockReset();
   apiMocks.loadProfile.mockReset();
-  apiMocks.sink.mockReset();
+  apiMocks.sink.mockReset().mockReturnValue(() => {});
+  clearAcpSessionMetaCache();
   useChatStore.setState({ threadsById: {}, bindingByThread: {} });
   useConversationPreparationStore.setState({
     directories: {},
@@ -102,6 +106,66 @@ async function renderHarness(): Promise<void> {
 }
 
 describe('useAcpSessionMeta', () => {
+  it.each([
+    { remount: false, stillStreaming: true },
+    { remount: false, stillStreaming: false },
+    { remount: true, stillStreaming: true },
+    { remount: true, stillStreaming: false },
+  ])(
+    'silently refreshes missed metadata on return (remount=$remount, still streaming=$stillStreaming)',
+    async ({ remount, stillStreaming }) => {
+      apiMocks.getCached.mockResolvedValue({
+        source: 'thread',
+        sessionMeta: { ...EMPTY_META, updatedAt: 1 },
+      });
+      useChatStore.getState().setThreadLoading('thread-1', true);
+      container = document.createElement('div');
+      root = createRoot(container);
+      await act(async () =>
+        root?.render(
+          <Activity mode="visible">
+            <Harness />
+          </Activity>,
+        ),
+      );
+      if (remount) {
+        act(() => root?.unmount());
+        root = createRoot(container);
+      } else {
+        await act(async () =>
+          root?.render(
+            <Activity mode="hidden">
+              <Harness />
+            </Activity>,
+          ),
+        );
+      }
+      let finish!: (value: unknown) => void;
+      apiMocks.getCached.mockReturnValue(
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+      );
+      await act(async () => {
+        useChatStore.getState().setThreadLoading('thread-1', stillStreaming);
+        root?.render(
+          <Activity mode="visible">
+            <Harness />
+          </Activity>,
+        );
+      });
+      expect(container.textContent).toBe('thread:0');
+      expect(apiMocks.getCached.mock.calls.length).toBeGreaterThan(1);
+      await act(async () =>
+        finish({
+          source: 'thread',
+          sessionMeta: { ...EMPTY_META, updatedAt: 2 },
+        }),
+      );
+      expect(container.querySelector('button')?.dataset.updatedAt).toBe('2');
+    },
+  );
+
   it.each([undefined, true])(
     'records an unrealized draft before failed discovery and allows retry (prior lock=%s)',
     async (locked) => {
@@ -365,5 +429,37 @@ describe('useAcpSessionMeta', () => {
     );
     expect(container?.textContent).toBe('profile:1');
     expect(apiMocks.loadProfile).not.toHaveBeenCalled();
+  });
+
+  it('retains cached session metadata across unmount and remount without re-entering loading', async () => {
+    apiMocks.getCached.mockResolvedValue({
+      source: 'thread',
+      availableCommands: [],
+      commandsUpdatedAt: 1,
+      sessionMeta: {
+        ...EMPTY_META,
+        currentModelId: 'model-1',
+        configOptions: [
+          {
+            id: 'allow_all',
+            name: 'Auto approve',
+            type: 'boolean',
+            currentValue: true,
+          },
+        ],
+        updatedAt: 1,
+      },
+    });
+
+    await renderHarness();
+    expect(container?.textContent).toBe('thread:1');
+    expect(apiMocks.getCached).toHaveBeenCalledOnce();
+
+    act(() => root?.unmount());
+    container?.remove();
+
+    await renderHarness();
+    expect(container?.textContent).toBe('thread:1');
+    expect(apiMocks.getCached).toHaveBeenCalledOnce();
   });
 });
