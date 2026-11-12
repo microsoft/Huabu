@@ -231,6 +231,90 @@ describe('acpUpdateToStreamEvent — active discriminators', () => {
   });
 });
 
+describe('Pi adapter standard ACP projections', () => {
+  it('preserves terminal-less Bash command, cumulative output and completion from the fork', () => {
+    expect(
+      acpUpdateToStreamEvent({
+        sessionUpdate: 'tool_call',
+        toolCallId: 'bash-1',
+        title: 'printf hello',
+        kind: 'execute',
+        status: 'in_progress',
+        rawInput: { command: 'printf hello' },
+      }),
+    ).toMatchObject({
+      type: 'tool_call',
+      data: {
+        toolCallId: 'bash-1',
+        command: 'printf hello',
+        toolKind: 'execute',
+      },
+    });
+    for (const [status, text] of [
+      ['in_progress', 'hel'],
+      ['completed', 'hello'],
+    ]) {
+      const content = [{ type: 'content', content: { type: 'text', text } }];
+      const rawOutput = { content: [{ type: 'text', text }] };
+      expect(
+        acpUpdateToStreamEvent({
+          sessionUpdate: 'tool_call_update',
+          toolCallId: 'bash-1',
+          status,
+          content,
+          rawOutput,
+        }),
+      ).toMatchObject({
+        type: 'tool_call_update',
+        data: { toolCallId: 'bash-1', status, content, rawOutput },
+      });
+    }
+    expect(getTranslatorCounters().invalidPayloads).toBe(0);
+  });
+
+  it('retains the adapters structured file diff with null old text for a new file', () => {
+    const content = [
+      { type: 'diff', path: 'scratch.txt', oldText: null, newText: 'hello\n' },
+    ];
+    expect(
+      acpUpdateToStreamEvent({
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'write-1',
+        status: 'completed',
+        content,
+      }),
+    ).toMatchObject({
+      type: 'tool_call_update',
+      data: { content, status: 'completed' },
+    });
+  });
+
+  it('accepts standard fork plan entries while leaving section metadata non-essential', () => {
+    const entry = {
+      content: '[worker] Read files',
+      priority: 'medium',
+      status: 'in_progress',
+      _meta: { piAcp: { section: 'agents' } },
+    };
+    expect(
+      acpUpdateToStreamEvent({ sessionUpdate: 'plan', entries: [entry] }),
+    ).toMatchObject({
+      type: 'plan',
+      data: {
+        entries: [
+          { content: entry.content, priority: 'medium', status: 'in_progress' },
+        ],
+      },
+    });
+    expect(
+      acpUpdateToStreamEvent({ sessionUpdate: 'plan', entries: [] }),
+    ).toEqual({
+      type: 'plan',
+      data: { entries: [] },
+    });
+  });
+});
+
 describe('acpUpdateToStreamEvent — ignored discriminators', () => {
   it.each(['user_message_chunk', 'available_commands_update'])(
     'returns null for %s (no counter bump)',
