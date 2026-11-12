@@ -7,7 +7,13 @@ import {
   FRAME_SIZING_MODES,
   type FrameSizing,
 } from '../../types/canvas/node.js';
-import { clampGridCount, planGridReflow } from '../autoLayout/gridLayout.js';
+import {
+  clampGridCount,
+  planGridReflow,
+  solveStructuredFrameLayout,
+} from '../autoLayout/gridLayout.js';
+import { readLayoutOrder, sameLayoutOrder } from '../autoLayout/layoutOrder.js';
+import { hasUnlockedAncestry } from '../siblingOrder.js';
 
 import type { CanvasCommand } from '../../index.js';
 
@@ -22,9 +28,9 @@ type Cmd = Extract<CanvasCommand, { type: 'SET_FRAME_LAYOUT' }>;
  *  - resizes the frame to fit its content;
  *  - cascades the size change to ancestor frames.
  *
- * The handler itself only writes the two `data` fields and reports
- * the frame in `affectedFrameIds`; all layout math lives in the
- * shared `applyStructuredFrameRelayout` pass (see `executor.ts`).
+ * The handler writes layout configuration, cells or relative reading
+ * placements and reports the affected Frame. Final geometry is computed
+ * by the shared end-of-batch relayout pass.
  */
 const setFrameLayout: CommandDefinition<Cmd> = {
   meta: {
@@ -37,6 +43,103 @@ const setFrameLayout: CommandDefinition<Cmd> = {
     if (!frame || frame.type !== 'frame') return noop(state, 'not-found');
     if (!FRAME_LAYOUT_MODES.includes(cmd.mode)) {
       return noop(state, 'invalid-target');
+    }
+    const byId = new Map(state.nodes.map((node) => [node.id, node]));
+    if (!hasUnlockedAncestry(byId, frame.id))
+      return noop(state, 'invalid-target');
+
+    if (cmd.placements) {
+      if (
+        (cmd.mode !== 'column' && cmd.mode !== 'row') ||
+        frame.data.layoutMode !== cmd.mode ||
+        cmd.cells ||
+        cmd.gridCount !== undefined ||
+        cmd.gridRowCount !== undefined ||
+        cmd.sizing ||
+        cmd.placements.length === 0 ||
+        new Set(cmd.placements.map((item) => item.nodeId)).size !==
+          cmd.placements.length
+      ) {
+        return noop(state, 'invalid-target');
+      }
+      const solved = solveStructuredFrameLayout(
+        state.nodes,
+        frame.id,
+        'compact',
+        { edges: state.edges },
+      );
+      if (!solved?.layoutOrder) return noop(state, 'invalid-target');
+      const tracks = solved.layoutOrder.map((track) => [...track]);
+      for (const placement of cmd.placements) {
+        const node = byId.get(placement.nodeId);
+        const anchorId =
+          'before' in placement
+            ? placement.before
+            : 'after' in placement
+              ? placement.after
+              : undefined;
+        const anchor = anchorId ? byId.get(anchorId) : undefined;
+        if (
+          !node ||
+          node.parentId !== frame.id ||
+          !hasUnlockedAncestry(byId, node.id) ||
+          (anchorId !== undefined &&
+            (!anchor ||
+              anchor.parentId !== frame.id ||
+              anchor.id === node.id ||
+              !hasUnlockedAncestry(byId, anchor.id)))
+        ) {
+          return noop(state, 'invalid-target');
+        }
+        const target =
+          'track' in placement
+            ? placement.track
+            : tracks.findIndex((track) => track.includes(anchorId ?? ''));
+        if (!Number.isInteger(target) || target < 0 || target >= tracks.length)
+          return noop(state, 'invalid-target');
+        for (const track of tracks) {
+          const index = track.indexOf(node.id);
+          if (index >= 0) track.splice(index, 1);
+        }
+        const track = tracks[target];
+        const index =
+          'track' in placement
+            ? placement.at === 'start'
+              ? 0
+              : track.length
+            : track.indexOf(anchorId ?? '') + ('after' in placement ? 1 : 0);
+        track.splice(index, 0, node.id);
+      }
+      const order = tracks.filter((track) => track.length > 0);
+      const field = cmd.mode === 'column' ? 'frameColumn' : 'frameRow';
+      const assignments = new Map(
+        order.flatMap((track, i) => track.map((id) => [id, i] as const)),
+      );
+      const nextNodes = state.nodes.map((node) => {
+        if (node.id === frame.id)
+          return {
+            ...node,
+            data: { ...node.data, layoutOrder: order, gridCount: order.length },
+          };
+        const slot = assignments.get(node.id);
+        return slot !== undefined && node.data[field] !== slot
+          ? { ...node, data: { ...node.data, [field]: slot } }
+          : node;
+      });
+      if (
+        sameLayoutOrder(readLayoutOrder(frame.data), order) &&
+        nextNodes.every(
+          (node, i) => node.id === frame.id || node === state.nodes[i],
+        )
+      )
+        return noop(state, 'no-op');
+      return {
+        applied: true,
+        nodes: nextNodes,
+        edges: state.edges,
+        mutatedNodes: nextNodes.filter((node, i) => node !== state.nodes[i]),
+        affectedFrameIds: [frame.id],
+      };
     }
 
     const prior = (frame.data ?? {}) as {
@@ -179,6 +282,7 @@ const setFrameLayout: CommandDefinition<Cmd> = {
         ...dataRec,
         layoutMode: cmd.mode,
       };
+      if (modeChanged) delete nextData.layoutOrder;
       if (typeof nextGridCount === 'number') {
         nextData.gridCount = nextGridCount;
       } else {

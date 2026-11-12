@@ -11,6 +11,11 @@ export interface InputOptions {
   noStart?: boolean;
 }
 
+export interface ExecuteOptions extends InputOptions {
+  operationId?: string;
+  basis?: string;
+}
+
 export interface DownloadOptions {
   output: string;
   ifRevision?: string;
@@ -25,7 +30,8 @@ export interface RfsActions {
   rootHelp: () => Promise<void>;
   getSkill: (id: string | undefined, usage: string) => Promise<void>;
   query: (options: InputOptions) => Promise<void>;
-  execute: (options: InputOptions) => Promise<void>;
+  execute: (options: ExecuteOptions) => Promise<void>;
+  result: (operationId: string) => Promise<void>;
   download: (path: string, options: DownloadOptions) => Promise<void>;
   upload: (name: string, options: UploadOptions) => Promise<void>;
   profiles: () => Promise<void>;
@@ -63,7 +69,7 @@ export function createRfsProgram(
     .addHelpText(
       'after',
       '\nOperation response bodies and SSE are raw; exit 0 means delivery completed, not business success.\n' +
-        'No redirects, retries, reconnects or remote cancellation.\n' +
+        'No redirects, reconnects or remote cancellation. Only execute retries, re-sending one request id.\n' +
         'Start with get-skill; use COMMAND --help for usage and live contracts when applicable.\n',
     );
 
@@ -99,21 +105,44 @@ export function createRfsProgram(
     actions.getSkill(id, program.helpInformation()),
   );
 
-  for (const [name, action] of [
-    ['query', actions.query],
-    ['execute', actions.execute],
-  ] as const) {
-    const command = guide(
-      inputs(
-        program.command(name).description(`Send raw ${name} JSON`),
-        false,
-      ).helpOption(
-        '-h, --help',
-        'Show usage; --help TYPE loads one operation contract',
+  const operationHelp = [
+    '-h, --help',
+    'Show usage; --help TYPE loads one operation contract',
+  ] as const;
+  const query = guide(
+    inputs(
+      program.command('query').description('Send raw query JSON'),
+      false,
+    ).helpOption(...operationHelp),
+  );
+  query.action(() => actions.query(query.opts<InputOptions>()));
+  const execute = guide(
+    inputs(
+      program
+        .command('execute')
+        .description(
+          'Send raw execute JSON; retries a dropped connection under one request id',
+        ),
+      false,
+    )
+      .option(
+        '--operation-id <uuid>',
+        'Request id; default: a new one per invocation. Re-use the printed id to get the original result instead of executing twice',
+      )
+      .option(
+        '--basis <token>',
+        'Read version from a query, download or execute; stale structural edits are rejected',
+      )
+      .helpOption(...operationHelp),
+  );
+  execute.action(() => actions.execute(execute.opts<ExecuteOptions>()));
+  guide(
+    program
+      .command('result <operationId>')
+      .description(
+        'Print the stored response of an earlier execute; never executes',
       ),
-    );
-    command.action(() => action(command.opts<InputOptions>()));
-  }
+  ).action((id: string) => actions.result(id));
   const download = guide(
     program
       .command('download <logicalPath>')

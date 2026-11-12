@@ -71,6 +71,11 @@ export const canvasSyncEventSchema = z.discriminatedUnion('type', [
        * the API layer; the client casts.
        */
       changes: z.array(z.unknown()).optional(),
+      /**
+       * Request id the writer supplied with this batch, when it supplied
+       * one. Lets a client recognise the echo of its own write.
+       */
+      operationId: z.string().optional(),
     }),
   }),
 ]);

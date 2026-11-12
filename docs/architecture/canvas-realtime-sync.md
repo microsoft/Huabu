@@ -24,10 +24,7 @@ World preview reconciliation is a system-originated command batch against World 
 filter guarantees an incoming agent write never clobbers a node the user is
 mid-editing.
 
-> Roadmap for what is **not** yet built (cross-tab user-edit sync, `clientId`
-> echo filter, field-level deltas, presence, Yjs content co-editing, cloud
-> fan-out) lives in the proposal
-> [canvas-realtime-sync-plan.md](../proposals/canvas-realtime-sync-plan.md).
+> Request ids and read versions on `execute` are shipped; see [reliable save](./canvas-storage.md#42-reliable-save-in-the-write). The browser side (cross-tab user edit sync, pending intents, recovery, undo) is still proposed in [canvas-realtime-sync-plan.md](../proposals/canvas-realtime-sync-plan.md), whose status note says which sections were superseded. Same-body co-editing, presence and multi-server fan-out are outside that scope.
 
 ## Data flow
 
@@ -75,8 +72,7 @@ schema + `z.infer`, web imports as `import type` only):
 
 ## One write path, one broadcast
 
-`executeOnServer` broadcasts **unconditionally** after persisting a non-empty
-batch — there is no per-caller broadcast flag. This unifies all writers:
+`executeOnServer` normally broadcasts after persisting a non-empty batch. Trusted coordinated lifecycle callers can defer publication with the internal `publish: false` option and publish after their orchestration reaches its declared boundary. `applyDeltasOnServer` persists and returns its result; its caller owns publication. These exceptions do not expose a client-controlled broadcast policy.
 
 - The built-in chat and question-node agents mutate the canvas in-process via
   `executeOnServer`. Their chat SSE tool result is now **UI-only** (tool card +
@@ -133,6 +129,8 @@ Skipped ids flow back through `canvasSyncStore` into `acpThreadChangesStore`
   partially-applied run is never silently reported as fully done.
 
 ## Change records & the review card
+
+The Review records of an agent batch are saved in the same write as the batch (see [reliable save](./canvas-storage.md#42-reliable-save-in-the-write)); a request answered from a stored result appends none. The card, the accept/revert routes and the broadcast shape below are unchanged, and this does not make inverses safe for concurrent Revert.
 
 Change records are derived **purely from a batch's `Delta[]`**, so revert is a
 generic operation — no per-command inverse logic:

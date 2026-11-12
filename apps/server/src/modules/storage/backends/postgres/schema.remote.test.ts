@@ -10,6 +10,16 @@ import {
   openPostgresTestDatabase,
   openPostgresTestStore,
 } from './test-support.js';
+/** Tables of the retired operation path still present in the schema. */
+async function operationRelations(db: {
+  query(sql: string): Promise<{ rows: Array<Record<string, unknown>> }>;
+}): Promise<string[]> {
+  const result = await db.query(
+    "SELECT tablename FROM pg_tables WHERE schemaname = current_schema() AND tablename LIKE 'operation\\_%' ORDER BY tablename",
+  );
+  return result.rows.map((row) => String(row['tablename']));
+}
+
 const cleanup: Array<() => Promise<unknown>> = [];
 afterEach(async () => {
   for (const close of cleanup.splice(0).reverse()) await close();
@@ -55,6 +65,53 @@ it('runs on PostgreSQL 18 and serializes simultaneous fresh migrations', async (
       'delta_log',
     ]),
   );
+});
+it('ends a fresh database without the retired operation tables', async () => {
+  const h = await openPostgresTestStore();
+  cleanup.push(h.cleanup);
+  expect(await operationRelations(h.context.connection())).toEqual([]);
+});
+it('drops the retired operation tables from a v5 database and keeps its data', async () => {
+  const h = await openPostgresTestDatabase();
+  cleanup.push(h.cleanup);
+  const pool = new Pool(h.config);
+  cleanup.push(() => pool.end());
+  for (const migration of POSTGRES_MIGRATIONS.slice(0, 5))
+    await pool.query(migration.sql);
+  await pool.query(
+    'CREATE TABLE huabu_schema_version (id INTEGER PRIMARY KEY CHECK (id = 1), version INTEGER NOT NULL)',
+  );
+  await pool.query('INSERT INTO huabu_schema_version VALUES (1, 5)');
+  await pool.query(
+    "INSERT INTO workspaces VALUES ('original', 'Original', 1, 1, NULL)",
+  );
+  await pool.query(
+    "INSERT INTO operation_sessions VALUES ('original', 's', 'e', 'sess', 'p', '{}')",
+  );
+  await pool.query(
+    "INSERT INTO operation_receipts VALUES ('original', 's', 'e', 'sess', 'op', 'd', '{}')",
+  );
+  expect(await operationRelations(pool)).toEqual([
+    'operation_commits',
+    'operation_heads',
+    'operation_receipts',
+    'operation_sessions',
+  ]);
+  const context = new PostgresStoreContext(h.config);
+  cleanup.push(() => context.close());
+  await context.init();
+  const db = context.connection();
+  expect(await operationRelations(db)).toEqual([]);
+  expect((await db.query('SELECT * FROM huabu_schema_version')).rows).toEqual([
+    { id: 1, version: POSTGRES_MIGRATIONS.length },
+  ]);
+  expect(
+    (await db.query('SELECT workspace_id, name FROM workspaces')).rows,
+  ).toEqual([{ workspace_id: 'original', name: 'Original' }]);
+  expect(
+    (await db.query("SELECT to_regclass('space_save_heads') AS heads")).rows[0]
+      .heads,
+  ).not.toBeNull();
 });
 it('opens the original v1 schema without changing existing data', async () => {
   const h = await openPostgresTestDatabase();

@@ -2,12 +2,7 @@
 // Licensed under the MIT license.
 
 import { randomUUID } from 'node:crypto';
-import { createWriteStream } from 'node:fs';
-import { chmod, mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import path from 'node:path';
 import { Readable } from 'node:stream';
-import { pipeline } from 'node:stream/promises';
 
 import { BlobServiceClient, type ContainerClient } from '@azure/storage-blob';
 
@@ -16,10 +11,10 @@ import { createKeyedMutex } from '../../../../utils/keyed-mutex.js';
 import { getWorkspaceKey } from '../../../workspace.js';
 import {
   BlobNameError,
-  createBlobLease,
   normalizeBlobName,
   SPACE_GUIDE_BLOB_NAMES,
 } from '../../ports/blob.js';
+import { materializeBlobCopy } from '../blob/materialization.js';
 
 import type {
   BlobInfo,
@@ -342,23 +337,7 @@ class AzureBlobScope implements BlobScope {
     return result;
   }
   async materialize(input: string): Promise<BlobLease | null> {
-    const opened = await this.open(input);
-    if (!opened) return null;
-    let directory: string | undefined;
-    try {
-      directory = await mkdtemp(path.join(tmpdir(), 'huabu-azure-'));
-      const ownedDirectory = directory;
-      const filename = path.join(directory, opened.info.name);
-      await pipeline(opened.body, createWriteStream(filename, { mode: 0o600 }));
-      await chmod(filename, 0o400);
-      return createBlobLease(filename, () =>
-        rm(ownedDirectory, { recursive: true, force: true }),
-      );
-    } catch (error) {
-      opened.body.destroy();
-      if (directory) await rm(directory, { recursive: true, force: true });
-      throw error;
-    }
+    return materializeBlobCopy(await this.open(input));
   }
   async deleteAll(): Promise<void> {
     this.guard();

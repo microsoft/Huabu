@@ -1,74 +1,15 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+import { stringifyJson } from '../../../../utils/json.js';
 import { canvasFileShapeError } from '../../../canvas/persistence-validation.js';
+
+export { assertJsonValue, stringifyJson } from '../../../../utils/json.js';
 
 import type {
   CanvasFile,
   NodeContent,
 } from '../../../canvas/persistence-types.js';
-
-type JsonPrimitive = null | boolean | number | string;
-
-type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
-
-export function assertJsonValue(
-  value: unknown,
-  context: string,
-  seen: Set<object>,
-): asserts value is JsonValue {
-  if (
-    value === null ||
-    typeof value === 'string' ||
-    typeof value === 'boolean'
-  ) {
-    return;
-  }
-  if (typeof value === 'number') {
-    if (!Number.isFinite(value)) {
-      throw new TypeError(`${context} contains a non-finite number`);
-    }
-    return;
-  }
-  // `JSON.stringify` drops an `undefined` object property and encodes an
-  // `undefined` array element as null, so Disk already accepts both. Matching
-  // that rule keeps one record from being writable on one backend only.
-  if (value === undefined) return;
-  if (typeof value !== 'object') {
-    throw new TypeError(`${context} contains a non-JSON value`);
-  }
-  if (seen.has(value)) throw new TypeError(`${context} contains a cycle`);
-  seen.add(value);
-  try {
-    if (Array.isArray(value)) {
-      for (let index = 0; index < value.length; index += 1) {
-        if (!Object.prototype.hasOwnProperty.call(value, index)) {
-          throw new TypeError(`${context} contains a sparse array`);
-        }
-        assertJsonValue(value[index], `${context}[${index}]`, seen);
-      }
-      return;
-    }
-    const prototype = Object.getPrototypeOf(value);
-    if (prototype !== Object.prototype && prototype !== null) {
-      throw new TypeError(`${context} contains a non-plain object`);
-    }
-    for (const [key, entry] of Object.entries(value)) {
-      assertJsonValue(entry, `${context}.${key}`, seen);
-    }
-  } finally {
-    seen.delete(value);
-  }
-}
-
-export function stringifyJson(value: unknown, context: string): string {
-  assertJsonValue(value, context, new Set());
-  const encoded = JSON.stringify(value);
-  if (encoded === undefined) {
-    throw new TypeError(`${context} is not representable as JSON`);
-  }
-  return encoded;
-}
 
 export function parseJson(value: unknown, context: string): unknown {
   if (typeof value !== 'string') {

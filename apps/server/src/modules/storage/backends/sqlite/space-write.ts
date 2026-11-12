@@ -8,7 +8,18 @@ import {
   readSpaceRow,
   updateSpaceRow,
 } from './rows.js';
+import { appendSqliteChangesInTransaction } from './space-logs.js';
 import { putSqliteNodeInTransaction } from './space-nodes.js';
+import {
+  advanceSqliteStamps,
+  insertSqliteSaveResult,
+  readSqliteSaveResult,
+} from './space-save.js';
+import {
+  storedResultOutcome,
+  validateWriteReviews,
+  validateWriteSaveResult,
+} from '../../ports/save.js';
 import { stringifyJson } from '../sql/codecs.js';
 import { allocateSpaceIdentity } from '../sql/identity.js';
 import {
@@ -23,6 +34,8 @@ import type {
   SpaceWriteInput,
   SpaceWriteResult,
 } from '../../ports/structured.js';
+import type { CanvasChangeRecord } from '@huabu/shared/canvas-engine';
+import type { DatabaseSync } from 'node:sqlite';
 
 /** Bind the atomic SQLite record/node/delta write to one Space. */
 export function createSqliteSpaceWrite(
@@ -41,73 +54,129 @@ export function createSqliteSpaceWrite(
     validateInput(canvasId, input);
     const database = context.database();
 
-    return withImmediateTransaction(database, () => {
-      const current = readSpaceRow(database, workspaceId, canvasId);
-      const rejected = checkWritePreconditions(
+    return withImmediateTransaction(database, () =>
+      writeSqliteSpaceInTransaction(
+        database,
+        workspaceId,
         canvasId,
-        current?.record ?? null,
         input,
-      );
-      if (rejected) return rejected;
-      if (current === null) {
-        const identity = allocateSpaceIdentity(
-          input.nextRecord.title,
-          canvasId,
-          occupiedCollisionKeys(database, workspaceId),
-        );
-        insertSpaceRow(
-          database,
-          workspaceId,
-          { ...input.nextRecord, title: identity.title },
-          identity.collisionKey,
-        );
-        return { ok: true } as const;
-      }
-
-      for (const mutation of input.nodeMutations) {
-        if (mutation.kind === 'delete') {
-          database
-            .prepare('DELETE FROM nodes WHERE canvas_id = ? AND node_id = ?')
-            .run(canvasId, mutation.nodeId);
-          continue;
-        }
-
-        const result = putSqliteNodeInTransaction(
-          database,
-          workspaceId,
-          canvasId,
-          {
-            nodeId: mutation.nodeId,
-            record: mutation.record,
-            strictLabel: mutation.strictLabel,
-          },
-        );
-        if (!result.ok) throw mutationError(mutation, result);
-      }
-
-      if (
-        updateSpaceRow(
-          database,
-          workspaceId,
-          input.nextRecord,
-          input.expectedVersion,
-        ) !== 1
-      ) {
-        throw new Error(`SpaceWrite(${canvasId}) lost its version race`);
-      }
-      if (input.delta !== undefined) {
-        database
-          .prepare(
-            `INSERT INTO delta_log (canvas_id, version, entry_json)
-             VALUES (?, ?, ?)`,
-          )
-          .run(
-            canvasId,
-            input.delta.version,
-            stringifyJson(input.delta, `Space ${canvasId} delta`),
-          );
-      }
-      return { ok: true } as const;
-    });
+        context.now,
+      ),
+    );
   };
+}
+
+/**
+ * The ordered write, inside the caller's transaction.
+ *
+ * A result record and the Space's version stamps are part of the same
+ * transaction: the stored result is checked before anything is touched, and
+ * the stamps, the Review records and the new result row are written after the
+ * record, so all of it commits or none of it does.
+ */
+export function writeSqliteSpaceInTransaction(
+  database: DatabaseSync,
+  workspaceId: string,
+  canvasId: string,
+  input: SpaceWriteInput,
+  now: () => number = Date.now,
+): SpaceWriteResult {
+  if (!database.isTransaction)
+    throw new Error('Space write requires a transaction');
+  validateInput(canvasId, input);
+  const responseJson = validateWriteSaveResult(input);
+  const reviews = validateWriteReviews(input);
+  if (input.result !== undefined) {
+    // First, before the version check: a retry of a committed write arrives
+    // with a stale expected version and must be answered, not refused.
+    const stored = readSqliteSaveResult(
+      database,
+      workspaceId,
+      canvasId,
+      input.result.key,
+    );
+    if (stored) return storedResultOutcome(stored, input.result);
+  }
+  const current = readSpaceRow(database, workspaceId, canvasId);
+  const rejected = checkWritePreconditions(
+    canvasId,
+    current?.record ?? null,
+    input,
+  );
+  if (rejected) return rejected;
+  if (current === null) {
+    const identity = allocateSpaceIdentity(
+      input.nextRecord.title,
+      canvasId,
+      occupiedCollisionKeys(database, workspaceId),
+    );
+    insertSpaceRow(
+      database,
+      workspaceId,
+      { ...input.nextRecord, title: identity.title },
+      identity.collisionKey,
+    );
+    return { ok: true } as const;
+  }
+
+  for (const mutation of input.nodeMutations) {
+    if (mutation.kind === 'delete') {
+      database
+        .prepare('DELETE FROM nodes WHERE canvas_id = ? AND node_id = ?')
+        .run(canvasId, mutation.nodeId);
+      continue;
+    }
+
+    const result = putSqliteNodeInTransaction(database, workspaceId, canvasId, {
+      nodeId: mutation.nodeId,
+      record: mutation.record,
+      strictLabel: mutation.strictLabel,
+    });
+    if (!result.ok) throw mutationError(mutation, result);
+  }
+
+  if (
+    updateSpaceRow(
+      database,
+      workspaceId,
+      input.nextRecord,
+      input.expectedVersion,
+    ) !== 1
+  ) {
+    throw new Error(`SpaceWrite(${canvasId}) lost its version race`);
+  }
+  if (input.delta !== undefined) {
+    database
+      .prepare(
+        `INSERT INTO delta_log (canvas_id, version, entry_json)
+             VALUES (?, ?, ?)`,
+      )
+      .run(
+        canvasId,
+        input.delta.version,
+        stringifyJson(input.delta, `Space ${canvasId} delta`),
+      );
+  }
+  advanceSqliteStamps(database, canvasId, current.record, input.nextRecord);
+  let stored: Record<string, CanvasChangeRecord[]> | undefined;
+  for (const review of reviews) {
+    stored ??= {};
+    stored[review.threadId] = appendSqliteChangesInTransaction(
+      database,
+      canvasId,
+      review.threadId,
+      review.records,
+    );
+  }
+  if (input.result !== undefined && responseJson !== null) {
+    insertSqliteSaveResult(
+      database,
+      canvasId,
+      input.result,
+      responseJson,
+      input.nextRecord.version,
+      now(),
+    );
+  }
+  return stored ? { ok: true, reviews: stored } : { ok: true };
 }

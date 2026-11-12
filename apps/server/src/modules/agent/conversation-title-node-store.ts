@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { normalizeConversationTitle } from '@huabu/shared/conversation-title';
+import { questionConversationTitle } from '@huabu/shared/conversation-title';
 
 import { dedupeName, toSafeFilename } from '../../utils/naming.js';
 import {
@@ -25,29 +25,12 @@ export interface QuestionTitleSnapshot {
 
 /** The node label is the title, not a mirror of thread host metadata. */
 export function questionTitleSnapshot(node: CanvasNode): QuestionTitleSnapshot {
-  const title = normalizeConversationTitle(node.data.label);
-  const owner = node.data.labelSource;
-  const source = node.data.conversationTitleSource;
   return {
     nodeId: node.id,
     threadId:
       typeof node.data.threadId === 'string' ? node.data.threadId : undefined,
     content: typeof node.data.content === 'string' ? node.data.content : '',
-    protected: !!title && (owner === 'user' || owner === 'agent'),
-    title: {
-      title,
-      source: !title
-        ? null
-        : owner === 'user'
-          ? 'user'
-          : owner === 'agent'
-            ? 'generated'
-            : source === 'generated' ||
-                source === 'acp' ||
-                source === 'fallback'
-              ? source
-              : 'fallback',
-    },
+    ...questionConversationTitle(node.data),
   };
 }
 

@@ -27,6 +27,7 @@ import { createDiskSpaceLogs } from './space-logs.js';
 import { DiskSpaceNodes } from './space-nodes.js';
 import { createDiskSpaceRecordReader } from './space-record.js';
 import { DiskSpaceRepository } from './space-repository.js';
+import { createDiskSpaceSave, DiskSpaceSaveState } from './space-save.js';
 import { DiskSpaceTasks } from './space-tasks.js';
 import { createDiskSpaceWrite } from './space-write.js';
 
@@ -54,12 +55,16 @@ export class DiskStructuredStore implements StructuredStore {
   space(canvasId: string): SpaceHandle {
     // `getCanvasStore` validates the id and owns the instance cache.
     const store = getCanvasStore(canvasId);
-    const { events, changes } = createDiskSpaceLogs(store);
+    const saveState = new DiskSpaceSaveState(store);
+    const { events, changes } = createDiskSpaceLogs(store, () =>
+      saveState.recoverPending(),
+    );
     const read = createDiskSpaceRecordReader(store);
     return {
       canvasId: store.canvasId,
       read,
       write: createDiskSpaceWrite(store),
+      save: createDiskSpaceSave(store),
       nodes: new DiskSpaceNodes(store),
       changes,
       tasks: new DiskSpaceTasks(store),

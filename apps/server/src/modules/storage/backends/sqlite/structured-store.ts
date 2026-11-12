@@ -10,6 +10,7 @@ import {
 import { createSqliteSpaceLogs } from './space-logs.js';
 import { SqliteSpaceNodes } from './space-nodes.js';
 import { SqliteSpaceRepository } from './space-repository.js';
+import { createSqliteSpaceSave } from './space-save.js';
 import { SqliteSpaceTasks } from './space-tasks.js';
 import { createSqliteSpaceWrite } from './space-write.js';
 import { sanitizeId } from '../../../../utils/fs.js';
@@ -127,6 +128,7 @@ export class SqliteStructuredStore implements StructuredStore {
         );
       },
       write: createSqliteSpaceWrite(this.#context, workspaceId, canvasId),
+      save: createSqliteSpaceSave(this.#context, workspaceId, canvasId),
       nodes,
       changes,
       tasks,

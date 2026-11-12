@@ -27,6 +27,8 @@ import { rm } from 'node:fs/promises';
 
 import { stripLegacyPortalTopology } from '@huabu/shared';
 
+import { runInWorkspace } from '../workspace/context.js';
+import { runWorkspacePreparation } from '../workspace-activation.js';
 import {
   commitWorkspaceIdentity,
   getWorkspaceHandle,
@@ -53,6 +55,7 @@ import {
 } from './backends/sqlite/database.js';
 import { SqliteStructuredStore } from './backends/sqlite/structured-store.js';
 import { SqliteWorkspaceRepository } from './backends/sqlite/workspace-repository.js';
+import { refreshCanvasDirIndex } from './canvas-dirs.js';
 import { hasStorageCapability } from './capabilities.js';
 import {
   assertSpaceHierarchyLocked,
@@ -67,9 +70,6 @@ import {
   type StorageProfile,
 } from './profile.js';
 import { withSpacePutAdmission } from './space-lifecycle-admission.js';
-import { runInWorkspace } from '../workspace/context.js';
-import { runWorkspacePreparation } from '../workspace-activation.js';
-import { refreshCanvasDirIndex } from './canvas-dirs.js';
 
 import type { WorkspaceScope } from '../workspace/context.js';
 import type { DiskSpaceImport } from './backends/disk/space-import.js';
@@ -252,6 +252,7 @@ function composeSpace(storage: Storage, canvasId: string): Space {
       return { ...record, state: { ...record.state, ...topology } };
     },
     write: (input) => handle.write(input),
+    save: handle.save,
     nodes: handle.nodes,
     changes: handle.changes,
     tasks: handle.tasks,

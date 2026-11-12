@@ -3,7 +3,10 @@
 
 import { agentInputSchema } from '@agenetes/protocol';
 
-import { fingerprintNodeFields } from '@huabu/shared/canvas-engine';
+import {
+  fingerprintNodeFields,
+  isSetSiblingOrderEvent,
+} from '@huabu/shared/canvas-engine';
 
 import {
   escapeXmlAttr,
@@ -113,6 +116,7 @@ const commandFields = {
   SET_NODE_LOCKED: { items: 'geometry' },
   APPLY_MEASURED_HEIGHT: { items: 'geometry' },
   SET_FRAME_LAYOUT: {
+    placements: 'layout-placements',
     frameId: 'nodeId',
     cells: 'geometry',
     mode: null,
@@ -171,6 +175,26 @@ export function rewriteImportContract(
   context: string,
   rewrite: Rewrite,
 ): RecordValue | undefined {
+  if (context === 'layout-placements') {
+    return fields(
+      value,
+      { nodeId: 'nodeId', before: 'nodeId', after: 'nodeId' },
+      rewrite,
+    );
+  }
+  if (
+    (context === 'deltas' || context === 'revertDeltas') &&
+    value.type === 'SET_SIBLING_ORDER'
+  ) {
+    if (!isSetSiblingOrderEvent(value)) {
+      throw new Error('Invalid imported sibling-order event');
+    }
+    return fields(
+      value,
+      { parentId: 'nodeId', before: 'nodeIds', after: 'nodeIds' },
+      rewrite,
+    );
+  }
   if (context === 'commands' && typeof value.type === 'string') {
     const shape = Object.entries(commandFields).find(
       ([type]) => type === value.type,

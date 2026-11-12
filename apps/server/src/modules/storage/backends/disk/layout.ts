@@ -19,6 +19,9 @@
  *     events.jsonl
  *     tasks.json
  *     delta-log.jsonl
+ *     save/head.json              per-node version stamps (reliable save)
+ *     save/pending.json           write-ahead intent of one in-flight write
+ *     save/results/<hash>.json    one stored response per request id
  *
  * `.history/` also hosts state this backend does not own — ACP sessions and
  * the debug prompt log — which the agent domain addresses through the
@@ -107,6 +110,8 @@ export function artifactPath(canvasId: string, filename: string): string {
  * module note above and §12.5.3.
  */
 export const HISTORY_DIR_NAME = '.history';
+/** Reliable-save state, below {@link HISTORY_DIR_NAME}; see {@link saveDir}. */
+export const SAVE_DIR_NAME = 'save';
 
 export function historyDir(canvasId: string): string {
   return path.join(canvasRoot(canvasId), HISTORY_DIR_NAME);
@@ -151,4 +156,29 @@ export function eventsPath(canvasId: string): string {
  */
 export function deltaLogPath(canvasId: string): string {
   return path.join(historyDir(canvasId), 'delta-log.jsonl');
+}
+
+/**
+ * Reliable-save state for one Space: version stamps, the write-ahead intent
+ * of an in-flight write, and stored responses keyed by request id.
+ *
+ * Inside the Space directory, so it is renamed, moved and deleted with the
+ * Space and never needs a lifecycle hook of its own. Absent until the Space
+ * first uses the feature — its absence is how a write learns, in one `stat`,
+ * that it has nothing to maintain.
+ */
+export function saveDir(canvasId: string): string {
+  return path.join(historyDir(canvasId), SAVE_DIR_NAME);
+}
+
+export function saveHeadPath(canvasId: string): string {
+  return path.join(saveDir(canvasId), 'head.json');
+}
+
+export function savePendingPath(canvasId: string): string {
+  return path.join(saveDir(canvasId), 'pending.json');
+}
+
+export function saveResultsDir(canvasId: string): string {
+  return path.join(saveDir(canvasId), 'results');
 }

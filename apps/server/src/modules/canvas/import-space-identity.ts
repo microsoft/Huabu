@@ -12,6 +12,7 @@ import {
   createId,
   interactiveViewAgentEventV1Schema,
 } from '@huabu/shared';
+import { readLayoutOrder } from '@huabu/shared/canvas-engine';
 
 import {
   rewriteImportContract,
@@ -361,6 +362,18 @@ export async function remapImportedSpace(
       }
       const mapped = Object.fromEntries(
         Object.entries(value).map(([key, item]) => {
+          if (
+            key === 'layoutOrder' &&
+            /^(node-data|node-metadata)$/.test(field)
+          ) {
+            const order = readLayoutOrder({ layoutOrder: item });
+            return [
+              key,
+              order?.map((track) =>
+                rewrite(track, 'nodeIds', '', internalHistory),
+              ),
+            ];
+          }
           if (key === 'data' && /^(node|nodes)$/.test(field))
             return [key, rewrite(item, 'node-data', '', internalHistory)];
           if (key === 'patch' && field === 'patches')

@@ -11,6 +11,7 @@ import {
 import {
   normalizeAcpConversationTitle,
   normalizeConversationTitle,
+  acceptsConversationTitle,
 } from '@huabu/shared/conversation-title';
 
 import { agenetes } from './agenetes/drivers.js';
@@ -66,20 +67,6 @@ export function effectiveConversationTitle(
   if (title && saved.source === 'fallback')
     return { title, source: 'fallback' };
   return { title: null, source: null };
-}
-
-function acceptsTitle(
-  current: ConversationTitle,
-  source: NonNullable<ConversationTitle['source']>,
-): boolean {
-  return (
-    source === 'user' ||
-    (current.source !== 'user' &&
-      current.source !== 'generated' &&
-      (source !== 'fallback' ||
-        !current.title ||
-        current.source === 'fallback'))
-  );
 }
 
 export interface ConversationTitleDependencies {
@@ -431,7 +418,7 @@ export class ConversationTitleService {
         expected ?? question,
         (current) => {
           if (
-            !acceptsTitle(current.title, source) ||
+            !acceptsConversationTitle(current.title, source) ||
             (source !== 'user' &&
               (current.protected ||
                 (expected && current.content !== expected.content)))
@@ -446,7 +433,7 @@ export class ConversationTitleService {
     const record = await this.deps.readRecord(canvasId, threadId);
     if (!record) return false;
     const current = effectiveConversationTitle(record);
-    if (!acceptsTitle(current, source)) return false;
+    if (!acceptsConversationTitle(current, source)) return false;
     const saved = storedTitle(record);
     if (saved.title !== title || saved.source !== source) {
       await this.deps.updateHostMetadata(canvasId, threadId, {

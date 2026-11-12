@@ -15,6 +15,7 @@ import {
 import { agentNodeLifecycle } from './agent-node-lifecycle.js';
 import { acquireAgentTurn } from './turn-lease.js';
 import { canvasAcpNamespace } from '../workspace/paths.js';
+import { acquireWorkspaceOperationLease } from '../workspace.js';
 
 import type { AgentNodeTarget } from './agent-thread-resolver.js';
 import type { AgentBinding } from '@huabu/shared';
@@ -28,6 +29,7 @@ interface BindingDependencies {
   hasHistory: (target: AgentNodeTarget) => boolean | Promise<boolean>;
   promote: (target: AgentNodeTarget, alreadyLocked?: boolean) => Promise<void>;
   acquireTurn: typeof acquireAgentTurn;
+  acquireWorkspaceLease: typeof acquireWorkspaceOperationLease;
 }
 
 export class AgentNodeBindingError extends Error {
@@ -69,6 +71,7 @@ const DEFAULT_DEPENDENCIES: BindingDependencies = {
   promote: (target, alreadyLocked) =>
     agentNodeLifecycle.bind(target, alreadyLocked),
   acquireTurn: acquireAgentTurn,
+  acquireWorkspaceLease: acquireWorkspaceOperationLease,
 };
 
 /** Canonical record confirmation, shared by prompts, controls and draft writes. */
@@ -85,61 +88,66 @@ export class AgentNodeBindingCoordinator {
       record?: ExecutionRecord | null;
     } = {},
   ): Promise<AgentBinding | null> {
-    const record =
-      options.record === undefined
-        ? await this.dependencies.record(target)
-        : options.record;
-    if (!record) {
+    const lease = this.dependencies.acquireWorkspaceLease();
+    try {
+      const record =
+        options.record === undefined
+          ? await this.dependencies.record(target)
+          : options.record;
+      if (!record) {
+        if (
+          options.required ||
+          target.bindingState === 'bound' ||
+          (await this.dependencies.hasHistory(target))
+        ) {
+          throw new AgentNodeBindingError(
+            'execution_record_missing',
+            `Thread ${target.threadId} has no canonical execution record`,
+          );
+        }
+        return null;
+      }
+      const spec = record.spec;
       if (
-        options.required ||
-        target.bindingState === 'bound' ||
-        (await this.dependencies.hasHistory(target))
+        spec.threadId !== target.threadId ||
+        spec.namespace.name !== target.canvasId
       ) {
         throw new AgentNodeBindingError(
-          'execution_record_missing',
-          `Thread ${target.threadId} has no canonical execution record`,
+          'execution_record_invalid',
+          `Thread ${target.threadId} has a mismatched execution record`,
         );
       }
-      return null;
-    }
-    const spec = record.spec;
-    if (
-      spec.threadId !== target.threadId ||
-      spec.namespace.name !== target.canvasId
-    ) {
-      throw new AgentNodeBindingError(
-        'execution_record_invalid',
-        `Thread ${target.threadId} has a mismatched execution record`,
-      );
-    }
-    let binding: AgentBinding;
-    if (spec.kind === INTERNAL_DRIVER_KIND) {
-      binding = { kind: 'internal' };
-    } else if (spec.kind === EXTERNAL_DRIVER_KIND) {
-      const driverSpec = spec.spec as { binding?: Record<string, unknown> };
-      const parsed = agentBindingSchema.safeParse({
-        ...driverSpec.binding,
-        kind: 'external',
-      });
-      if (!parsed.success) {
+      let binding: AgentBinding;
+      if (spec.kind === INTERNAL_DRIVER_KIND) {
+        binding = { kind: 'internal' };
+      } else if (spec.kind === EXTERNAL_DRIVER_KIND) {
+        const driverSpec = spec.spec as { binding?: Record<string, unknown> };
+        const parsed = agentBindingSchema.safeParse({
+          ...driverSpec.binding,
+          kind: 'external',
+        });
+        if (!parsed.success) {
+          throw new AgentNodeBindingError(
+            'execution_record_invalid',
+            `Thread ${target.threadId} has an invalid external execution binding`,
+          );
+        }
+        binding = parsed.data;
+      } else {
         throw new AgentNodeBindingError(
           'execution_record_invalid',
-          `Thread ${target.threadId} has an invalid external execution binding`,
+          `Thread ${target.threadId} uses an unsupported driver`,
         );
       }
-      binding = parsed.data;
-    } else {
-      throw new AgentNodeBindingError(
-        'execution_record_invalid',
-        `Thread ${target.threadId} uses an unsupported driver`,
-      );
+      if (target.bindingState !== 'bound') {
+        await this.dependencies.promote(target, options.alreadyLocked);
+        target.bindingState = 'bound';
+      }
+      this.assertRequestedBinding(binding, target.agentBinding);
+      return binding;
+    } finally {
+      lease.release();
     }
-    if (target.bindingState !== 'bound') {
-      await this.dependencies.promote(target, options.alreadyLocked);
-      target.bindingState = 'bound';
-    }
-    this.assertRequestedBinding(binding, target.agentBinding);
-    return binding;
   }
 
   assertRequestedBinding(saved: AgentBinding, requested?: AgentBinding): void {

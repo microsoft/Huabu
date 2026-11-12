@@ -20,7 +20,12 @@ describe('rfsMetaHeaders', () => {
     const headers = rfsMetaHeaders({
       meta: { id: 'n1', type: 'note', label: '我的笔记 / draft', locked: true },
       edges: { parents: ['p1'], children: ['c1', 'c2'] },
+      basis: 'b1.00000000-0000-4000-8000-000000000000.7',
     });
+
+    expect(headers[RFS_HEADERS.basis]).toBe(
+      'b1.00000000-0000-4000-8000-000000000000.7',
+    );
 
     expect(headers[RFS_HEADERS.nodeId]).toBe('n1');
     expect(headers[RFS_HEADERS.nodeType]).toBe('note');
@@ -39,6 +44,7 @@ describe('rfsMetaHeaders', () => {
     const headers = rfsMetaHeaders({
       meta: { id: 'n2', type: 'note' },
       edges: { parents: [], children: [] },
+      basis: 'b1.00000000-0000-4000-8000-000000000000.7',
     });
 
     expect(headers[RFS_HEADERS.nodeLabel]).toBeUndefined();

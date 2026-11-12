@@ -52,11 +52,16 @@ import {
 import { acknowledgeAgentNodeResult } from './agent-node-projection.js';
 import {
   CanvasNotFoundError,
+  ExecuteBasisError,
+  ExecuteOutcomeUnknownError,
+  ExecuteRequestReusedError,
   applyDeltasOnServer,
   executeOnServer,
 } from './canvas-executor.js';
 import { searchCanvas } from './canvas-search.js';
 import { publishCanvasUpdate } from './canvas-sync.js';
+import { remapImportedSpace } from './import-space-identity.js';
+import { resolveNodeContentUpdate } from './node-content-update.js';
 import { registerSpaceCardRoutes } from './space-card.route.js';
 import {
   deletionPreview,
@@ -84,10 +89,11 @@ import {
 import { MAX_UPLOAD_BYTES } from '../../upload-limits.js';
 import { conversationEventLogStore } from '../agent/agenetes/conversation-stores.js';
 import { AgentNodeBindingError } from '../agent/agent-node-binding.js';
+import { agentThreadService } from '../agent/agent-thread.service.js';
 import { readRecentCanvasConversation } from '../agent/recent-conversation.js';
 import { ARTIFACT_URL_REGEX } from '../artifact/utils.js';
+import { getRequestIdentity } from '../identity/request.js';
 import { getPreprocessDispatcher, getProfile } from '../preprocessing/index.js';
-import { isLabelProtected } from '../preprocessing/label-policy.js';
 import { stripOfficeparserPreamble } from '../preprocessing/loaders/office-strip.js';
 import {
   canReadCitedSpaces,
@@ -115,7 +121,6 @@ import {
   updateNode,
 } from '../storage/index.js';
 import { acquireWorkspaceOperationLease } from '../workspace.js';
-import { remapImportedSpace } from './import-space-identity.js';
 
 import type { CanvasNodeType } from '@huabu/shared';
 import type {
@@ -173,6 +178,14 @@ const HISTORY_EXPORT_IGNORE = [
   '.history/**',
   '.ext/huabu.prompt.log/**',
 ] as const;
+
+/**
+ * Reliable-save state (version stamps, stored responses, an unfinished write
+ * intent). It describes this Space's own history of writes: a copy carrying
+ * it would accept a read version issued for the original, and would answer
+ * the original's request ids. Never exported, whatever else is.
+ */
+const SAVE_STATE_EXPORT_IGNORE = '.history/save/**';
 
 function nowMs(): number {
   return Date.now();
@@ -249,18 +262,8 @@ const MD_BACKED_NODE_TYPES = new Set([
   'sketch',
 ]);
 
-/** Subset that carries a textual body in the markdown. */
-const TEXT_BEARING_NODE_TYPES = new Set([
-  'note',
-  'text',
-  'web',
-  'pdf',
-  'office',
-  'question',
-]);
-
 /**
- * Subset of {@link TEXT_BEARING_NODE_TYPES} whose `data.content` is
+ * Subset of text-bearing nodes whose `data.content` is
  * actually consumed by the web renderer (preview body, AI block
  * provenance, …) — and therefore worth inlining into the batched
  * `GET /:canvasId` response so first paint can render without a
@@ -875,12 +878,8 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     const {
       nodeType,
       content: incomingContent,
-      label: incomingLabel,
       labelSource,
       src: incomingSrc,
-      summary,
-      keywords,
-      provenance,
       expectRev,
     } = parsed.data;
     const storedNode = (canvas.state.nodes as NodeLike[] | undefined)?.find(
@@ -914,55 +913,8 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     // `canvas/write-coordinator.ts`.
     let persisted: NodeContent | undefined;
     const apply = (existing: NodeContent | null): NodeContent => {
-      // Body resolution:
-      //   - text-bearing nodes (including `question`): prefer the caller's
-      //     content; fall back to the existing on-disk body so a label-only
-      //     update doesn't wipe it.
-      //   - frontmatter-only nodes (image/video/frame): always empty.
-      const acceptsBody = TEXT_BEARING_NODE_TYPES.has(nodeType);
-      const body = acceptsBody
-        ? (incomingContent ?? existing?.content ?? '')
-        : '';
-      // Guard against accidental content wipes (autosave race vs. editor
-      // flush): an explicit `content: ""` over a non-empty body keeps the
-      // existing body but still refreshes the frontmatter.
-      const wouldClobber =
-        acceptsBody &&
-        nodeType !== 'question' &&
-        incomingContent === '' &&
-        typeof existing?.content === 'string' &&
-        existing.content.length > 0;
-      const safeBody = wouldClobber ? existing!.content : body;
-      const protectAutomaticLabel =
-        labelSource === 'auto' &&
-        isLabelProtected(existing?.['labelSource'], existing?.label);
-      // Label resolution: explicit `null` clears; absent leaves it untouched.
-      const resolvedLabel =
-        protectAutomaticLabel || incomingLabel === undefined
-          ? (existing?.label ?? null)
-          : (incomingLabel ?? null);
-
-      const nodeContent: NodeContent = {
-        ...(existing ?? {}),
-        nodeId,
-        type: nodeType,
-        label: resolvedLabel,
-        // Only include `src` when the caller or existing record had one, so
-        // pure note/text/frame frontmatter never gets a `src: undefined`.
-        ...(incomingSrc !== undefined
-          ? { src: incomingSrc }
-          : existing?.src !== undefined
-            ? { src: existing.src }
-            : {}),
-        content: safeBody,
-      };
-      if (labelSource !== undefined && !protectAutomaticLabel)
-        nodeContent['labelSource'] = labelSource;
-      if (summary !== undefined) nodeContent['summary'] = summary;
-      if (keywords !== undefined) nodeContent['keywords'] = keywords;
-      if (provenance !== undefined) nodeContent['provenance'] = provenance;
-      persisted = nodeContent;
-      return nodeContent;
+      persisted = resolveNodeContentUpdate(nodeId, parsed.data, existing);
+      return persisted;
     };
 
     // Strict rename only for user-typed labels: the `tryRename` flow awaits
@@ -1212,7 +1164,10 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     Body: PreprocessNodeBody;
     Reply: ApiResult<PreprocessNodeResponse>;
   }>('/:canvasId/nodes/:nodeId/preprocess', async function (request, reply) {
-    const { canvasId, nodeId } = request.params;
+    const params = deleteNodeParamsSchema.safeParse(request.params);
+    if (!params.success)
+      return reply.code(400).send({ message: 'Invalid canvas or node ID' });
+    const { canvasId, nodeId } = params.data;
     const parsed = preprocessNodeBodySchema.safeParse(request.body);
     if (!parsed.success) {
       return reply.code(400).send({
@@ -1799,7 +1754,16 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         message: 'System command origin is reserved for internal callers',
       });
     }
-    const { commands, originator, runId } = parsed.data;
+    const { commands, originator, runId, operationId, basis } = parsed.data;
+    // Stored responses are kept per authenticated caller; the principal is
+    // the transport's, never a value the request supplies.
+    const principalId = getRequestIdentity(request)?.principal.principalId;
+    if (operationId !== undefined && !principalId) {
+      return reply.code(401).send({
+        code: 'IDENTITY_REQUIRED',
+        message: 'A request id requires an authenticated caller',
+      });
+    }
     try {
       assertCurrentCanvasCommands(commands);
     } catch (error) {
@@ -1810,15 +1774,36 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     }
 
     try {
+      // The thread id comes from the body, so it is attributed only when it
+      // names a conversation of this Space; otherwise the batch still
+      // applies, unattributed. (Known limitation: this does not prove the
+      // caller is that conversation.)
+      const { threadId: claimedThreadId, ...unattributed } = originator;
+      const attributed =
+        claimedThreadId !== undefined &&
+        (await agentThreadService.ownsThread(canvasId, claimedThreadId));
       const out = await executeOnServer({
         canvasId,
         commands: commands as CanvasCommand[],
-        originator,
+        originator: attributed ? originator : unattributed,
+        ...(claimedThreadId !== undefined ? { claimedThreadId } : {}),
         ...(runId ? { runId } : {}),
         // Derive review records only for thread-attributed (ACP) batches —
         // they feed that conversation's change card. Other callers skip it.
-        computeChanges: !!originator.threadId,
+        computeChanges: attributed,
+        ...(operationId !== undefined && principalId
+          ? { request: { operationId, principalId } }
+          : {}),
+        ...(basis !== undefined ? { basis } : {}),
+        // A caller using neither field gets exactly the legacy call: no
+        // stamp baseline is created on its behalf.
+        ...(operationId !== undefined || basis !== undefined
+          ? { issueBasis: true }
+          : {}),
       });
+      // With a request id the executor's run id is the stored one, so a
+      // replay reports the original run.
+      const effectiveRunId = out.runId ?? runId;
       const response: PostCanvasExecuteResponse = {
         canvasId: out.canvasId,
         fromVersion: out.fromVersion,
@@ -1832,13 +1817,40 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
           contentEditedNodeIds: out.pendingEffects.contentEditedNodeIds,
           deferredFitFrameIds: out.pendingEffects.deferredFitFrameIds,
         },
-        ...(runId ? { runId } : {}),
+        ...(effectiveRunId ? { runId: effectiveRunId } : {}),
+        ...(out.operationId ? { operationId: out.operationId } : {}),
+        ...(out.basis ? { basis: out.basis } : {}),
+        ...(out.replayed ? { replayed: true as const } : {}),
       };
 
       return reply.send(response);
     } catch (err) {
       if (err instanceof CanvasNotFoundError) {
         return reply.code(404).send({ message: 'Canvas not found' });
+      }
+      if (err instanceof ExecuteRequestReusedError) {
+        return reply.code(409).send({
+          code: 'operation-id-reused',
+          message: 'This operation id was already used for a different request',
+        });
+      }
+      if (err instanceof ExecuteBasisError) {
+        return reply.code(409).send({
+          code: 'basis-unknown',
+          message:
+            'The basis is not a read version of this Space; nothing was applied',
+        });
+      }
+      if (err instanceof ExecuteOutcomeUnknownError) {
+        request.log.error(
+          { canvasId, err },
+          'Canvas execution outcome is unknown',
+        );
+        return reply.code(503).send({
+          code: 'operation-outcome-unknown',
+          message:
+            'The outcome of this request is unknown; send it again with the same operation id',
+        });
       }
       if (err instanceof WorldPreviewMutationError) {
         return reply.code(409).send({ message: err.message });
@@ -2182,7 +2194,9 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     archive.glob('**/*', {
       cwd: canvasDir,
       dot: true,
-      ignore: includeHistory ? [] : [...HISTORY_EXPORT_IGNORE],
+      ignore: includeHistory
+        ? [SAVE_STATE_EXPORT_IGNORE]
+        : [...HISTORY_EXPORT_IGNORE],
     });
 
     void archive.finalize();

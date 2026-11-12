@@ -27,6 +27,7 @@ interface SeedNode {
   parentId?: string;
   label: string;
   threadId?: string;
+  data?: Record<string, unknown>;
 }
 
 function seed(canvasId: string, nodes: SeedNode[]): void {
@@ -43,6 +44,7 @@ function seed(canvasId: string, nodes: SeedNode[]): void {
         style: { width: 200, height: 100 },
         measured: { width: 200, height: 100 },
         data: {
+          ...n.data,
           label: n.label,
           ...(n.threadId ? { threadId: n.threadId } : {}),
         },
@@ -81,6 +83,68 @@ afterEach(() => {
 });
 
 describe('inspect_nodes / outline — dual-field coordinates', () => {
+  it('exposes persisted reading order and Grid cells without changing stored geometry', async () => {
+    seed('layout-read', [
+      {
+        id: 'masonry',
+        type: 'frame',
+        position: { x: 0, y: 0 },
+        label: 'Column',
+        data: {
+          layoutMode: 'column',
+          gridCount: 1,
+          layoutOrder: [['b', 'a']],
+          locked: true,
+        },
+      },
+      {
+        id: 'a',
+        type: 'note',
+        parentId: 'masonry',
+        position: { x: 0, y: 0 },
+        label: 'A',
+        data: { frameColumn: 0 },
+      },
+      {
+        id: 'b',
+        type: 'note',
+        parentId: 'masonry',
+        position: { x: 0, y: 200 },
+        label: 'B',
+        data: { frameColumn: 0 },
+      },
+      {
+        id: 'grid',
+        type: 'frame',
+        position: { x: 500, y: 0 },
+        label: 'Grid',
+        data: { layoutMode: 'grid', gridCount: 2 },
+      },
+      {
+        id: 'cell',
+        type: 'note',
+        parentId: 'grid',
+        position: { x: 0, y: 0 },
+        label: 'Cell',
+        data: { frameColumn: 1, frameRow: 0 },
+      },
+    ]);
+    const result = await inspectNodes('layout-read', {
+      ids: ['masonry', 'grid', 'b'],
+    });
+    if ('error' in result) throw new Error(result.error);
+    expect(result.nodes.find((node) => node.id === 'masonry')?.layout).toEqual({
+      mode: 'column',
+      tracks: [['b', 'a']],
+    });
+    expect(
+      result.nodes.find((node) => node.id === 'grid')?.layout,
+    ).toMatchObject({ mode: 'grid', cells: [{ nodeId: 'cell', row: 0 }] });
+    expect(result.nodes.find((node) => node.id === 'b')?.position).toEqual({
+      x: 0,
+      y: 200,
+    });
+  });
   // Root note at (100,100); frame at (1000,500); a direct child at
   // frame-relative (50,60); a nested inner frame at frame-relative
   // (100,100) with a grandchild at inner-relative (10,20).

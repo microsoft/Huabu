@@ -5,6 +5,7 @@ import { agenetes } from './agenetes/drivers.js';
 import { projectAgentNodeStateAlreadyLocked } from '../canvas/agent-node-projection.js';
 import { space, withCanvasMutex } from '../storage/index.js';
 import { canvasAcpNamespace } from '../workspace/paths.js';
+import { acquireWorkspaceOperationLease } from '../workspace.js';
 
 import type { AgentNodeTarget } from './agent-thread-resolver.js';
 import type { AgentNodeProjection as AgentNodeProjectionWrite } from '@huabu/shared';
@@ -93,7 +94,14 @@ async function transitionAgentNode(
       );
     }
   };
-  return alreadyLocked ? apply() : withCanvasMutex(target.canvasId, apply);
+  const lease = acquireWorkspaceOperationLease();
+  try {
+    return await (alreadyLocked
+      ? apply()
+      : withCanvasMutex(target.canvasId, apply));
+  } finally {
+    lease.release();
+  }
 }
 
 const DEFAULT_DEPENDENCIES: LifecycleDependencies = {

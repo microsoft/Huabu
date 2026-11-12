@@ -56,7 +56,7 @@ Capability detail schemas are generated from the same Zod registry used for requ
 
 ## Direct execution plane
 
-`POST /execute` accepts `{ runId?, commands }`, rejects caller-supplied originator context and UI-only command variants, stamps server-owned agent authorship metadata, and invokes `executeOnServer()` with `{ source: 'agent' }`. The same preparation helper is used by the built-in `space_commands` tool; RFS does not call the Canvas HTTP route or duplicate executor behavior.
+`POST /execute` accepts `{ runId?, operationId?, basis?, commands }`, rejects caller-supplied originator context and UI-only command variants, stamps server-owned agent authorship metadata, and invokes `executeOnServer()` with `{ source: 'agent' }`. The same preparation helper is used by the built-in `space_commands` tool; RFS does not call the Canvas HTTP route or duplicate executor behavior.
 
 Node command `content` fields contain only the authored Markdown body, while downloads expose the complete sidecar with server-owned YAML frontmatter. Agent command preparation defensively unwraps a submitted leading frontmatter block only when its `id` exactly matches the `MERGE_NODE_DATA` target, preventing a downloaded sidecar from being nested into its own body without altering unrelated frontmatter-like Markdown.
 
@@ -97,6 +97,10 @@ Downloads expose only the public canvas projection: node Markdown sidecars, arti
 Node downloads return raw bytes plus allow-listed `X-Huabu-*` metadata headers. `X-Huabu-Node-Label` is percent-encoded, `X-Huabu-Node-Edges` contains compact JSON, and authored node content exposes its revision as an `ETag`. A matching `If-None-Match` returns `304`.
 
 Uploads are inert payloads stored under `.upload/`. Names must be explicit and collision-free; the server returns `409` instead of overwriting an existing payload.
+
+Upload creation and deletion acquire the existing Workspace-operation lease before Canvas-mutex queueing and resolve paths or touch files only under that mutex. Shared schemas validate Space identity and the nonempty upload path. `safeJoin` confines nested paths to the upload area rather than merely the Space root, so a staging request cannot address a sibling node file through `..`. Creation uses exclusive filesystem create, including after an asynchronous directory preparation, and returns 409 on a collision. Storage/cleanup failures are logged and surfaced, not reported as successful staging or deletion. Request/response behavior and nested upload paths are otherwise unchanged.
+
+These are process-local admission and namespace boundaries, not a recoverable blob-publication protocol, revocation of previously retained raw paths, or complete Space-deletion coordination. They do not broaden the existing Disk-only RFS file-plane capability.
 
 ## Agent control plane
 

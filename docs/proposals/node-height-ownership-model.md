@@ -1,9 +1,11 @@
 # Node Height Ownership Model
 
 Status: Partly shipped
-Last updated: 2026-07-28
+Last updated: 2026-11-05
 
 > Steps 1–5 and most of Step 7 have shipped; the current behaviour is documented in [node-auto-height.md](../architecture/node-auto-height.md), which is authoritative. **Step 6 (sync isolation) is outstanding** and belongs with the multi-user co-editing work. Moving `text` / `question` onto the model is deferred and needs its own proposal — see the note at the end of the rollout.
+
+> Design update (not shipped): the [structural collaboration contract](./canvas-realtime-sync-plan.md#7-durable-commit-and-compatibility-contract) supersedes D9 / Step 6's proposed no-version/no-broadcast channel for collaboration-enabled Spaces. Accepted measurements and resulting Frame geometry become one guarded, server-materialized commit, while remaining outside user undo. Same-key measurements are not assumed identical across devices. The no-version assertions and proposed tests below preserve the older design rationale, not the acceptance criteria for the new collaboration work; existing non-collaborative runtime behavior is unchanged.
 
 > Related: [note-auto-height-stable-geometry.md](./note-auto-height-stable-geometry.md) attacks the same symptom and reaches several of the same conclusions independently. This revision adopts its freshness and stability mechanisms (see [D8](#d8--freshness-is-a-key-not-a-timestamp), [D10](#d10--measurement-is-bounded-and-may-be-provisional)) while keeping a different storage decision. See [Relationship to the stable-geometry proposal](#relationship-to-the-stable-geometry-proposal).
 

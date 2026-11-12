@@ -29,6 +29,8 @@ Do not guess fields or duplicate operation guidance locally. Run the relevant he
 
 `huabu-rfs query` accepts one canonical query object. Keep queries bounded. Inspect responses include `count`, `total`, and `truncated`; search responses include `count` and `truncated`. Narrow the predicate or raise the limit within the advertised maximum when results truncate.
 
+Every query response also carries a top-level `basis`: an opaque token for the Space version you read. Keep the latest one when you plan structural edits; section 7 explains how to pass it back.
+
 ```bash
 cat > /tmp/huabu-query.json <<'JSON'
 {
@@ -71,6 +73,8 @@ huabu-rfs download \
 ```
 
 An unchanged file emits `not_modified` and preserves the existing output. Otherwise wait for `download_completed` before reading the file.
+
+For a node file, `download_started` also includes `basis`, the same kind of token a query returns. `not_modified` carries none.
 
 ## 4. Snapshot visual nodes
 
@@ -140,7 +144,7 @@ Before placing or resizing relative to existing content, query the relevant node
 
 Never pin top-level height for `text` or `question`. Both respect `data.style.fontSize`: Text defaults to 16px and Question to 24px. The font also scales content padding and, for Question, the avatar, alias, status, and gaps; Question chrome retains a separate 28px design basis. Width-only edits preserve the font and reflow content-driven height; proportional canvas resize gestures scale the font with outer width. Existing Question font values are respected without automatic persisted-data migration. New Notes default to fixed height; use `SET_NODE_GEOMETRY` with `size.height: "auto"` to fit a Note to its content. Resizing their container preserves fixed typography and reflows or scrolls the document rather than scaling its font. For free-form root or frame layouts, a useful starting heuristic is about 50px between nodes, 28px side/bottom Frame padding, and an 80px top inset for a Regular internal Frame title, adjusted to the actual queried sizes.
 
-Frames default to `free` layout, where child positions remain explicit and parent-local. `column`, `row`, and `grid` are structured layouts configured through `SET_FRAME_LAYOUT`; `gridCount` selects 1–12 tracks (columns for `column` and `grid`, rows for `row`) and defaults to 1. `column` and `row` are masonry: each track stacks independently, so a track holding fewer items pulls its next item up. `grid` additionally aligns rows: every child holds a cell, and a column with no child in a row leaves that cell blank, which is what keeps items in different columns side by side when one column has no counterpart. Structured frames compute final child geometry, so child `position` is only an ordering hint — in `grid` mode it does not decide rows at all. Use the same command's `cells` array to place children: `column` addresses columns, `row` addresses rows, `grid` addresses both. Their default `hug` sizing fits the frame to its content; `manual` preserves a pinned frame size while children still reflow and may overflow. Run `huabu-rfs execute --help SET_FRAME_LAYOUT` before using sizing or track options.
+Frames default to `free` layout with explicit parent-local positions. Structured `column`/`row` layouts pack independent tracks; `grid` also aligns rows and retains empty cells. Inspect the Frame's `layout` to read ordered tracks or Grid cells. Use `SET_FRAME_LAYOUT` for placement and `REORDER_NODES` only for paint order; the Frame computes final geometry. Run `huabu-rfs execute --help SET_FRAME_LAYOUT` for `cells`, relative `placements`, counts and sizing; the focused `layout` Skill contains shared recipes.
 
 ## 7. Execute Space commands
 
@@ -208,11 +212,27 @@ For a `MERGE_NODE_DATA` patch that changes `content`, first download the node an
 
 Downloaded node Markdown is a complete Huabu sidecar: Huabu-owned YAML frontmatter followed by the authored Markdown body. `CREATE_NODES.data.content` and `MERGE_NODE_DATA.patch.content` accept the Markdown body only. Never pass the downloaded file verbatim or copy its leading `---` block into `content`; remove exactly the first frontmatter block and preserve everything after its closing fence. Huabu serializes canonical node metadata itself. As a final safety net, an update whose submitted frontmatter `id` matches its target `nodeId` is unwrapped before execution.
 
-`runId` is an optional opaque correlation label of 1–256 characters. It does not need to be unique. When omitted, Huabu generates a fresh `run-<UUID>` value; either way, the response returns the effective value. Reusing one `runId` in adjacent requests does not join them, reject the later request, deduplicate execution, or return an earlier result: every request executes independently and may create another committed delta-log entry carrying the same label. Reuse a value only to correlate related requests; use distinct values when you need to distinguish them.
+`runId` is an optional opaque correlation label of 1–256 characters. It does not need to be unique. When omitted, Huabu generates a fresh `run-<UUID>` value; either way, the response returns the effective value. Reusing one `runId` in adjacent requests does not join them, reject the later request, deduplicate execution, or return an earlier result: every request executes independently and may create another committed delta-log entry carrying the same label. Reuse a value only to correlate related requests; use distinct values when you need to distinguish them. A replayed response (see below) reports the `runId` of the original request.
 
-`runId` is not an idempotency key and provides no retry safety. After a timeout or dropped connection, never blindly retry a mutation—even with the same `runId`: query the Space, reconcile the observed state, then decide whether another command is needed.
+`runId` is not an idempotency key and provides no retry safety. Retry safety comes from the request id described below, which the CLI adds for you.
 
-The response includes version transition, projected commands, command results, generated IDs, affected IDs, and new revisions. It intentionally excludes Web UI deltas and internal change-review records.
+Every `query` response, every node `download_started` event, and every `execute` response carries `basis`. Pass the most recent one you read as `--basis <token>` so that commands planned on an outdated view are rejected instead of applied:
+
+- `reason: "stale-target"` — a node the command targets no longer exists, or was created after your read.
+- `reason: "stale-parent"` — only for `SET_NODE_GEOMETRY`, `SET_NODE_PARENT`, `REORDER_NODES`, `ALIGN_NODES`, and `DISTRIBUTE_NODES`: a node the command targets was moved to a different parent after your read.
+- HTTP `409` with code `basis-unknown` — the token is not a read version of this Space. Nothing is applied; query again and use the new `basis`.
+
+The first two reject only that command (`applied: false`); the rest of the batch proceeds as usual. The check covers only the nodes a command names, so unrelated edits by others never cause a rejection. `CREATE_NODES`, `CONNECT_NODES`, and edge commands are not checked, and the check does not detect that someone else edited the same field: keep using `expectRev` for content. Without `--basis` none of these checks run.
+
+After each `execute`, switch to the `basis` in its response: nodes that request created are newer than any earlier `basis`, so targeting them with an older one is rejected as `stale-target`.
+
+The CLI attaches a request id (`operationId`, a UUID) to every `execute`, and Huabu saves the response under that id together with the write. When the connection drops, the request times out, or Huabu answers `503` with code `operation-outcome-unknown`, the CLI re-sends the same request under the same id, up to four attempts within about five minutes; one attempt waits up to two minutes. Huabu applies it at most once; a repeat returns the saved response, marked `replayed: true`, with the original generated IDs. A `4xx` rejection is never retried.
+
+If the command still fails, stderr prints `operation-id=<uuid>`. Re-run the same command with the same input, the same `--basis` if you passed one, and `--operation-id <uuid>`: you get the original result if the request was applied, and it is applied once if it was not. `huabu-rfs result <uuid>` prints the saved response without executing anything, or fails with `404` when none is saved under that id. Do not re-run without the id: a new invocation gets a new id and executes again, which may duplicate created nodes and edges. If you no longer have the id, query the Space and reconcile the observed state before sending anything.
+
+A request id belongs to one exact request. Reusing it with different commands or a different `--basis` is rejected with `409` and code `operation-id-reused`; use a new id (omit `--operation-id`) for a new request. Saved responses are kept for about two weeks, and a response larger than 4 MiB is not saved, so that request is not protected against a repeat.
+
+The response includes version transition, projected commands, command results, generated IDs, affected IDs, new revisions, the effective `operationId`, and the new `basis`. It intentionally excludes Web UI deltas and internal change-review records.
 
 ## 8. Create or continue an Agent
 

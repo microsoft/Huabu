@@ -19,7 +19,7 @@
  * Not named `*.test.ts` on purpose — it defines a suite, it isn't one.
  */
 
-import { readFile } from 'node:fs/promises';
+import { chmod, readFile, writeFile } from 'node:fs/promises';
 import { Readable } from 'node:stream';
 
 import { afterEach, describe, expect, it } from 'vitest';
@@ -323,11 +323,19 @@ export function describeBlobStoreContract(
         await blobs.materialize('leased.txt'),
         'materialize("leased.txt")',
       );
-      await lease.release();
-
-      // Disk keeps the file — its path *is* the storage — so without this
-      // rule a consumer could read after release on Disk and fail on a
-      // backend that unlinks its temp copy.
+      const retainedPath = lease.path;
+      try {
+        await chmod(retainedPath, 0o600);
+        await writeFile(retainedPath, 'path-only consumer mutation');
+        expect(await blobs.read('leased.txt')).toEqual(
+          Buffer.from('leased bytes'),
+        );
+      } finally {
+        await lease.release();
+      }
+      await expect(readFile(retainedPath)).rejects.toMatchObject({
+        code: 'ENOENT',
+      });
       expect(() => lease.path).toThrow(BlobLeaseError);
       // Releasing twice is a no-op, so `finally` blocks stay simple.
       await expect(lease.release()).resolves.toBeUndefined();

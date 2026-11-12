@@ -33,6 +33,7 @@ import { imageSize } from 'image-size';
 
 import {
   createId,
+  encodeBasis,
   interactiveViewDefinitionV1Schema,
   interactiveViewRevision,
   type CanvasCommand,
@@ -67,6 +68,7 @@ import {
 } from './agent-node-edit.js';
 import { publishCanvasUpdate } from './canvas-sync.js';
 import { importForeignNodeSources } from './import-node-src.js';
+import { createReadVersionAdmit, resolveReadVersion } from './read-version.js';
 import {
   assertWorldPreviewMutationsAllowed,
   assertChildSpaceEntriesAllowed,
@@ -75,6 +77,7 @@ import {
   assertCurrentCanvasCommands,
   readLiveSpaceIds,
 } from './world-preview-policy.js';
+import { digestJson, stringifyJson } from '../../utils/json.js';
 import { getLogger } from '../../utils/logger.js';
 import { getAgentChangeReviewConfig } from '../agent/change-review-config.js';
 import { isLabelProtected } from '../preprocessing/label-policy.js';
@@ -89,6 +92,19 @@ import {
   type NodeSnapshot,
   type SpaceNodeMutation,
 } from '../storage/index.js';
+import {
+  SAVE_RESPONSE_MAX_BYTES,
+  SaveIdReusedError,
+  normalizeSaveKey,
+  type SaveKey,
+  type SaveResult,
+  type SpaceStamps,
+  type StoredSaveResult,
+} from '../storage/ports/save.js';
+import {
+  acquireWorkspaceOperationLease,
+  getWorkspaceKey,
+} from '../workspace.js';
 
 /** Ordinary Spaces do not need World membership checks. */
 const EMPTY_CANVAS_IDS: ReadonlySet<string> = new Set<string>();
@@ -611,6 +627,33 @@ export interface ExecuteOnServerInput {
   publish?: boolean;
   /** Validated cross-Space move retains the original execution identity. */
   agentNodeMoveState?: ReadonlyMap<string, Record<string, unknown>>;
+  /**
+   * Makes the call safe to retry. The response is stored under
+   * (`principalId`, `operationId`) in the same commit as the write it
+   * describes; calling again with the same id and the same request returns
+   * that stored response (`replayed: true`) instead of applying the batch a
+   * second time. `operationId` must be a UUID.
+   *
+   * Honoured by {@link executeOnServer} only. Omitted, nothing is looked up
+   * and nothing is stored.
+   */
+  request?: { operationId: string; principalId: string };
+  /**
+   * The read version the caller built this batch on (an opaque string from
+   * an earlier `basis` output). When given, each command is checked against
+   * the nodes it targets — see `read-version.ts` — and rejected with
+   * `stale-target` / `stale-parent` if they changed since.
+   */
+  basis?: string;
+  /** Return the read version of the state this call leaves behind. */
+  issueBasis?: boolean;
+  /**
+   * The thread id exactly as the caller sent it, when the entry point
+   * checked it and `originator.threadId` holds only what survived the check.
+   * Used to recognise a repeated request: a retry must match the original
+   * even if the thread stopped belonging to the Space in between.
+   */
+  claimedThreadId?: string;
 }
 
 export interface ExecuteOnServerOutput {
@@ -672,6 +715,232 @@ export interface ExecuteOnServerOutput {
    */
   conflicts?: ExecuteConflict[];
   viewConflicts?: InteractiveViewConflict[];
+  /** Read version of the state this call left behind (`issueBasis`). */
+  basis?: string;
+  /** The request id this response is stored under, when one was supplied. */
+  operationId?: string;
+  /**
+   * The run id the batch was journalled under. Present only when a request
+   * id was supplied, so a replay reports the original run and not a new one.
+   */
+  runId?: string;
+  /** This is the stored response of an earlier call with the same id. */
+  replayed?: true;
+}
+
+/** The request id was already used for a different request. */
+export class ExecuteRequestReusedError extends Error {
+  readonly operationId: string;
+  constructor(operationId: string) {
+    super(`Request id ${operationId} was already used for a different request`);
+    this.name = 'ExecuteRequestReusedError';
+    this.operationId = operationId;
+  }
+}
+
+/**
+ * Storage failed in a way that leaves it unknown whether the batch was
+ * saved. The caller must ask again with the same request id; it must not
+ * treat this as a rejection.
+ */
+export class ExecuteOutcomeUnknownError extends Error {
+  readonly operationId: string;
+  constructor(operationId: string, cause: unknown) {
+    super(`The outcome of request ${operationId} is unknown`, { cause });
+    this.name = 'ExecuteOutcomeUnknownError';
+    this.operationId = operationId;
+  }
+}
+
+/** The supplied read version does not name a version of this Space. */
+export class ExecuteBasisError extends Error {
+  readonly basis: string;
+  constructor(basis: string) {
+    super('The read version is not one this Space issued');
+    this.name = 'ExecuteBasisError';
+    this.basis = basis;
+  }
+}
+
+// ── Reliable save ────────────────────────────────────────────────────────
+//
+// Everything below is reached only when the caller supplied a request id.
+
+/** A request id, resolved once at the entry point. */
+interface ReliableRequest {
+  readonly key: SaveKey;
+  readonly digest: string;
+}
+
+type SpaceHandle = ReturnType<typeof space>;
+
+function reliableRequestOf(input: ExecuteOnServerInput): ReliableRequest {
+  const key = normalizeSaveKey(input.request as SaveKey);
+  return {
+    key,
+    // `runId` is correlation, not content: a retry may carry a new one.
+    digest: digestJson({
+      canvasId: input.canvasId,
+      commands: input.commands,
+      basis: input.basis ?? null,
+      source: input.originator.source,
+      threadId: input.claimedThreadId ?? input.originator.threadId ?? null,
+    }),
+  };
+}
+
+/** Hand back a stored response, or refuse an id reused for something else. */
+function replayStored(
+  request: ReliableRequest,
+  stored: StoredSaveResult,
+): ExecuteOnServerOutput {
+  if (stored.digest !== request.digest) {
+    throw new ExecuteRequestReusedError(request.key.operationId);
+  }
+  return {
+    ...(stored.response as ExecuteOnServerOutput),
+    replayed: true,
+  };
+}
+
+async function lookupReplay(
+  handle: SpaceHandle,
+  request: ReliableRequest,
+): Promise<ExecuteOnServerOutput | null> {
+  const stored = await handle.save.lookup(request.key);
+  return stored ? replayStored(request, stored) : null;
+}
+
+/**
+ * The result record for `output`, or null when it cannot be stored.
+ *
+ * An unstorable response — larger than a result record may be, or not plain
+ * JSON — does not fail the batch: it is saved the ordinary way, and a retry
+ * of that request is then simply a new request.
+ */
+function saveResultFor(
+  canvasId: string,
+  request: ReliableRequest,
+  output: ExecuteOnServerOutput,
+): SaveResult | null {
+  let bytes: number;
+  try {
+    bytes = Buffer.byteLength(
+      stringifyJson(output, 'Execute response'),
+      'utf8',
+    );
+  } catch (error) {
+    log.warn(
+      { canvasId, operationId: request.key.operationId, error },
+      'Execute response is not storable; saving without a result record',
+    );
+    return null;
+  }
+  if (bytes > SAVE_RESPONSE_MAX_BYTES) {
+    log.warn(
+      { canvasId, operationId: request.key.operationId, bytes },
+      'Execute response exceeds the result record limit; saving without one',
+    );
+    return null;
+  }
+  return { key: request.key, digest: request.digest, response: output };
+}
+
+/**
+ * Decide what a storage failure means for a call that carried a request id.
+ *
+ * The write may or may not have landed. The result record is stored in the
+ * same commit, so its presence settles it: found means saved, absent means
+ * not. Only when that question cannot be answered either is the outcome
+ * reported as unknown.
+ *
+ * @returns the stored result when the write did land; otherwise throws.
+ */
+async function settleFailedSave(
+  handle: SpaceHandle,
+  request: ReliableRequest,
+  failure: unknown,
+): Promise<StoredSaveResult> {
+  if (failure instanceof SaveIdReusedError) {
+    throw new ExecuteRequestReusedError(request.key.operationId);
+  }
+  let stored: StoredSaveResult | null;
+  try {
+    stored = await handle.save.lookup(request.key);
+  } catch {
+    throw new ExecuteOutcomeUnknownError(request.key.operationId, failure);
+  }
+  if (!stored) throw failure;
+  if (stored.digest !== request.digest) {
+    throw new ExecuteRequestReusedError(request.key.operationId);
+  }
+  return stored;
+}
+
+/**
+ * Store the outcome of a batch that changed nothing, and return what the
+ * caller should be given.
+ */
+async function recordUnchangedOutcome(
+  handle: SpaceHandle,
+  request: ReliableRequest | undefined,
+  output: ExecuteOnServerOutput,
+): Promise<ExecuteOnServerOutput> {
+  if (!request) return output;
+  const result = saveResultFor(output.canvasId, request, output);
+  if (!result) return output;
+  try {
+    const recorded = await handle.save.record({
+      expectedVersion: output.fromVersion,
+      result,
+    });
+    if (recorded.ok) return output;
+    if (recorded.reason === 'result-exists') {
+      return replayStored(request, recorded.stored);
+    }
+    // Nothing was applied and nothing was stored: a retry starts afresh.
+    log.warn(
+      {
+        canvasId: output.canvasId,
+        operationId: request.key.operationId,
+        actualVersion: recorded.actualVersion,
+      },
+      'Space moved while recording an unchanged outcome; not stored',
+    );
+    return output;
+  } catch (error) {
+    // Found: the record landed and only its acknowledgement was lost.
+    await settleFailedSave(handle, request, error);
+    return output;
+  }
+}
+
+/** Requests being executed right now, by Workspace, Space and request key. */
+const requestsInFlight = new Map<string, Promise<unknown>>();
+
+/**
+ * Run `task` unless the same request is already running; in that case wait
+ * for it first. The waiter then runs too — and finds the stored result — so
+ * a request that failed without storing anything is simply attempted again.
+ */
+async function withRequestSingleFlight<T>(
+  flightKey: string,
+  task: () => Promise<T>,
+): Promise<T> {
+  for (;;) {
+    const running = requestsInFlight.get(flightKey);
+    if (!running) break;
+    await running.catch(() => undefined);
+  }
+  const mine = task();
+  requestsInFlight.set(flightKey, mine);
+  try {
+    return await mine;
+  } finally {
+    if (requestsInFlight.get(flightKey) === mine) {
+      requestsInFlight.delete(flightKey);
+    }
+  }
 }
 
 export class CanvasNotFoundError extends Error {
@@ -693,6 +962,7 @@ export function publishCanvasExecution(output: ExecuteOnServerOutput): void {
       toVersion: output.toVersion,
       deltas: output.deltas,
       pendingEffects: output.pendingEffects,
+      ...(output.operationId ? { operationId: output.operationId } : {}),
     },
   });
 }
@@ -710,8 +980,42 @@ export function publishCanvasExecution(output: ExecuteOnServerOutput): void {
 export async function executeOnServer(
   input: ExecuteOnServerInput,
 ): Promise<ExecuteOnServerOutput> {
-  const { canvasId, originator } = input;
   assertCurrentCanvasCommands(input.commands);
+  const lease = acquireWorkspaceOperationLease();
+  try {
+    if (!input.request) return await executeUnlocked(input, undefined);
+
+    const { canvasId } = input;
+    const request = reliableRequestOf(input);
+    return await withRequestSingleFlight(
+      JSON.stringify([
+        getWorkspaceKey(),
+        canvasId,
+        request.key.principalId,
+        request.key.operationId,
+      ]),
+      async () => {
+        // Before any preparation: a retry must not mint new ids or import
+        // foreign sources a second time.
+        const replay = await lookupReplay(space(canvasId), request);
+        if (replay) return replay;
+        return executeUnlocked(
+          { ...input, runId: input.runId ?? createId('run') },
+          request,
+        );
+      },
+    );
+  } finally {
+    lease.release();
+  }
+}
+
+/** Prepare a batch outside the Canvas mutex, then run it inside. */
+async function executeUnlocked(
+  input: ExecuteOnServerInput,
+  request: ReliableRequest | undefined,
+): Promise<ExecuteOnServerOutput> {
+  const { canvasId, originator } = input;
   let commands = preAssignIds(input.commands);
 
   // Normalize agent-authored `data.src` values into artifact keys BEFORE the
@@ -732,7 +1036,7 @@ export async function executeOnServer(
   }
 
   return await withCanvasMutex(canvasId, () =>
-    executeOnServerAlreadyLocked({ ...input, commands }),
+    executeLocked({ ...input, commands }, request),
   );
 }
 
@@ -746,11 +1050,24 @@ export async function executeOnServer(
 export async function executeOnServerAlreadyLocked(
   input: ExecuteOnServerInput,
 ): Promise<ExecuteOnServerOutput> {
+  return executeLocked(input, undefined);
+}
+
+async function executeLocked(
+  input: ExecuteOnServerInput,
+  request: ReliableRequest | undefined,
+): Promise<ExecuteOnServerOutput> {
   const { canvasId } = input;
   assertCurrentCanvasCommands(input.commands);
   const commands = [...input.commands];
 
   const handle = space(canvasId);
+  if (request) {
+    // The entry-point lookup ran before the mutex; the same request may have
+    // been saved by another caller in between.
+    const replay = await lookupReplay(handle, request);
+    if (replay) return replay;
+  }
   const canvas = await handle.read();
   if (!canvas) throw new CanvasNotFoundError(canvasId);
 
@@ -811,7 +1128,7 @@ export async function executeOnServerAlreadyLocked(
     const confirmedCanvas = await handle.read();
     if (!confirmedCanvas) throw new CanvasNotFoundError(canvasId);
     const promoted = confirmedCanvas.version !== canvas.version;
-    return await executePreparedOnServerAlreadyLocked(input, {
+    return await executePreparedOnServerAlreadyLocked(input, request, {
       handle,
       canvas: confirmedCanvas,
       commands,
@@ -830,6 +1147,7 @@ export async function executeOnServerAlreadyLocked(
 
 async function executePreparedOnServerAlreadyLocked(
   input: ExecuteOnServerInput,
+  request: ReliableRequest | undefined,
   prepared: {
     handle: ReturnType<typeof space>;
     canvas: CanvasFile;
@@ -842,6 +1160,36 @@ async function executePreparedOnServerAlreadyLocked(
   const { handle, canvas, prestateNodes, prestateEdges } = prepared;
   let commands = prepared.commands;
   const fromVersion = canvas.version;
+
+  // Stamps are read only when the caller quotes or asks for a read version;
+  // the first such call is what gives a Space its baseline.
+  let stamps: SpaceStamps | null = null;
+  if (input.basis !== undefined || input.issueBasis === true) {
+    stamps = await handle.save.stamps();
+    if (!stamps) throw new CanvasNotFoundError(canvasId);
+  }
+  const readVersion =
+    input.basis !== undefined && stamps
+      ? resolveReadVersion(input.basis, stamps)
+      : null;
+  if (input.basis !== undefined && !readVersion) {
+    throw new ExecuteBasisError(input.basis);
+  }
+  /** Commands the Server appends below; not checked on their own. */
+  const serverAppended = new Set<CanvasCommand>();
+
+  /** Fields every response of this call carries, whatever its outcome. */
+  const envelope = (version: number): Partial<ExecuteOnServerOutput> => ({
+    ...(stamps && input.issueBasis === true
+      ? { basis: encodeBasis(stamps.lineage, version) }
+      : {}),
+    ...(request
+      ? {
+          operationId: request.key.operationId,
+          ...(runId ? { runId } : {}),
+        }
+      : {}),
+  });
 
   // Automatic preprocessing can arrive after an agent or user rename.
   // Filter only its label fields at the actual commit, not at request time.
@@ -892,11 +1240,17 @@ async function executePreparedOnServerAlreadyLocked(
       commands,
       prestateNodes,
     );
+    const authored = readVersion ? new Set(commands) : null;
     commands = await normalizeMergeImageGeometry(
       canvasId,
       commands,
       prestateNodes,
     );
+    if (authored) {
+      for (const command of commands) {
+        if (!authored.has(command)) serverAppended.add(command);
+      }
+    }
   }
 
   // Compare-and-swap pre-flight (agent writes only). A stale or
@@ -907,7 +1261,7 @@ async function executePreparedOnServerAlreadyLocked(
     const conflicts = collectMergeConflicts(commands, prestateNodes);
     if (conflicts.length > 0) {
       const conflictIds = new Set(conflicts.map((c) => c.nodeId));
-      return {
+      return recordUnchangedOutcome(handle, request, {
         canvasId,
         fromVersion,
         toVersion: fromVersion,
@@ -928,7 +1282,8 @@ async function executePreparedOnServerAlreadyLocked(
           deferredFitFrameIds: [],
         },
         conflicts,
-      };
+        ...envelope(fromVersion),
+      });
     }
   }
 
@@ -940,7 +1295,7 @@ async function executePreparedOnServerAlreadyLocked(
     const conflictIds = new Set(
       viewConflicts.map((conflict) => conflict.nodeId),
     );
-    return {
+    return recordUnchangedOutcome(handle, request, {
       canvasId,
       fromVersion,
       toVersion: fromVersion,
@@ -961,7 +1316,8 @@ async function executePreparedOnServerAlreadyLocked(
         deferredFitFrameIds: [],
       },
       viewConflicts,
-    };
+      ...envelope(fromVersion),
+    });
   }
 
   const { writeResult, commandResults, pendingEffects } = executeCanvasCommands(
@@ -971,7 +1327,19 @@ async function executePreparedOnServerAlreadyLocked(
       edges: prestateEdges,
       canvasId,
     },
-    { forceFitFrames: originator.source === 'agent' },
+    {
+      forceFitFrames: originator.source === 'agent',
+      ...(readVersion && stamps
+        ? {
+            admit: createReadVersionAdmit({
+              basis: readVersion,
+              stamps,
+              prestateNodes,
+              exempt: serverAppended,
+            }),
+          }
+        : {}),
+    },
   );
 
   // Pure host-agnostic cleanups (edge handle reroute) — same path the
@@ -1120,7 +1488,7 @@ async function executePreparedOnServerAlreadyLocked(
   // No-op fast path. Returning early preserves the invariant that
   // `toVersion === fromVersion` IFF no row was appended to the log.
   if (deltas.length === 0 && !orderChanged) {
-    return {
+    return recordUnchangedOutcome(handle, request, {
       canvasId,
       fromVersion,
       toVersion: fromVersion,
@@ -1133,7 +1501,8 @@ async function executePreparedOnServerAlreadyLocked(
         contentEditedNodeIds: pendingEffects.contentEditedNodeIds,
         deferredFitFrameIds: pendingEffects.deferredFitFrameIds,
       },
-    };
+      ...envelope(fromVersion),
+    });
   }
 
   const toVersion = fromVersion + 1;
@@ -1199,58 +1568,100 @@ async function executePreparedOnServerAlreadyLocked(
     deltas: deltas as unknown[],
     originator,
   };
-  const write = await handle.write({
-    expectedVersion: fromVersion,
-    nextRecord: nextCanvas,
-    nodeMutations,
-    delta: logEntry,
+  // Derive review records (ACP change cards) only when asked. Edge
+  // endpoint labels are resolved against the post-state nodes.
+  const deriveChanges = (): CanvasChangeRecord[] | undefined => {
+    const shouldComputeChanges =
+      input.computeChanges === true &&
+      !(
+        originator.source === 'agent' &&
+        getAgentChangeReviewConfig().autoAcceptSpaceChanges
+      );
+    if (!shouldComputeChanges) return undefined;
+    const labelById = new Map<string, string>();
+    for (const node of finalNodes) {
+      const lbl = (node.data as Record<string, unknown> | undefined)?.['label'];
+      if (typeof lbl === 'string' && lbl) labelById.set(node.id, lbl);
+    }
+    return extractCanvasChanges(deltas, { nodeLabelById: labelById });
+  };
+  const outputWith = (
+    changes: CanvasChangeRecord[] | undefined,
+  ): ExecuteOnServerOutput => ({
+    canvasId,
+    fromVersion,
+    toVersion,
+    deltas,
+    results,
+    commands,
+    pendingEffects: {
+      mutatedNodes: pendingEffects.mutatedNodes,
+      deletedNodeIds: pendingEffects.deletedNodeIds,
+      contentEditedNodeIds: pendingEffects.contentEditedNodeIds,
+      deferredFitFrameIds: pendingEffects.deferredFitFrameIds,
+    },
+    ...(changes ? { changes } : {}),
+    ...envelope(toVersion),
   });
+
+  // Review records are part of the commit, and with a request id so is the
+  // response, so both are complete before the write.
+  const changes = deriveChanges();
+  const reviewThreadId =
+    originator.threadId && changes && changes.length > 0
+      ? originator.threadId
+      : undefined;
+  const result = request
+    ? saveResultFor(canvasId, request, outputWith(changes))
+    : null;
+
+  let write: Awaited<ReturnType<SpaceHandle['write']>>;
+  try {
+    write = await handle.write({
+      expectedVersion: fromVersion,
+      nextRecord: nextCanvas,
+      nodeMutations,
+      delta: logEntry,
+      ...(result ? { result } : {}),
+      ...(reviewThreadId && changes
+        ? { reviews: [{ threadId: reviewThreadId, records: changes }] }
+        : {}),
+    });
+  } catch (error) {
+    if (!request || !result) throw error;
+    // Found: the commit landed and only its acknowledgement was lost, so
+    // this call finishes as the success it was. Otherwise this throws.
+    const stored = await settleFailedSave(handle, request, error);
+    if (stored.atVersion !== toVersion) return replayStored(request, stored);
+    write = { ok: true };
+  }
   if (!write.ok) {
     if (write.reason === 'not-found') {
       throw new CanvasNotFoundError(canvasId);
+    }
+    if (write.reason === 'result-exists' && request) {
+      return replayStored(request, write.stored);
     }
     throw new Error(
       `[canvas-executor] ordered Space write rejected: ${write.reason}`,
     );
   }
 
-  // Derive review records (ACP change cards) only when asked. Edge
-  // endpoint labels are resolved against the post-state nodes.
-  const shouldComputeChanges =
-    input.computeChanges === true &&
-    !(
-      originator.source === 'agent' &&
-      getAgentChangeReviewConfig().autoAcceptSpaceChanges
-    );
-  let changes: CanvasChangeRecord[] | undefined;
-  if (shouldComputeChanges) {
-    const labelById = new Map<string, string>();
-    for (const node of finalNodes) {
-      const lbl = (node.data as Record<string, unknown> | undefined)?.['label'];
-      if (typeof lbl === 'string' && lbl) labelById.set(node.id, lbl);
-    }
-    changes = extractCanvasChanges(deltas, { nodeLabelById: labelById });
-  }
-
-  // Broadcast the delta to live frontends and persist review records to
-  // the originating thread's sidecar. Every accepted write broadcasts —
-  // the initiating tab applies it from the sync stream, not the tool
-  // result. No-op fast path above already returned for empty diffs.
+  // Broadcast the delta to live frontends. Every accepted write broadcasts —
+  // the initiating tab applies it from the sync stream, not the tool result.
+  // No-op fast path above already returned for empty diffs.
   //
-  // When attributed to a thread, fold this batch's records into the
-  // thread's coalesced change list (one net record per entity) and
-  // broadcast that full list so live cards replace their state with it —
-  // matching what GET /changes returns.
+  // When attributed to a thread, this batch's records were folded into the
+  // thread's coalesced change list (one net record per entity) by the write
+  // itself; broadcast that full list so live cards replace their state with
+  // it — matching what GET /changes returns.
   let broadcastChanges = changes;
-  if (originator.threadId && changes && changes.length > 0) {
-    try {
-      broadcastChanges = await handle.changes.append(
-        originator.threadId,
-        changes,
-      );
-    } catch {
-      /* sidecar persistence is best-effort — never fail the write */
-    }
+  if (reviewThreadId) {
+    broadcastChanges =
+      write.reviews?.[reviewThreadId] ??
+      // Only a commit whose acknowledgement was lost reports no list: the
+      // records are stored, so the list is read back.
+      (await handle.changes.read(reviewThreadId).catch(() => changes));
   }
   if (input.publish !== false) {
     publishCanvasUpdate(canvasId, {
@@ -1267,25 +1678,12 @@ async function executePreparedOnServerAlreadyLocked(
         },
         ...(originator.threadId ? { threadId: originator.threadId } : {}),
         ...(broadcastChanges ? { changes: broadcastChanges } : {}),
+        ...(request ? { operationId: request.key.operationId } : {}),
       },
     });
   }
 
-  return {
-    canvasId,
-    fromVersion,
-    toVersion,
-    deltas,
-    results,
-    commands,
-    pendingEffects: {
-      mutatedNodes: pendingEffects.mutatedNodes,
-      deletedNodeIds: pendingEffects.deletedNodeIds,
-      contentEditedNodeIds: pendingEffects.contentEditedNodeIds,
-      deferredFitFrameIds: pendingEffects.deferredFitFrameIds,
-    },
-    ...(changes ? { changes } : {}),
-  };
+  return outputWith(changes);
 }
 
 /**
@@ -1318,9 +1716,14 @@ export async function applyDeltasOnServer(input: {
 }> {
   const { canvasId } = input;
 
-  return await withCanvasMutex(canvasId, () =>
-    applyDeltasOnServerAlreadyLocked(input),
-  );
+  const lease = acquireWorkspaceOperationLease();
+  try {
+    return await withCanvasMutex(canvasId, () =>
+      applyDeltasOnServerAlreadyLocked(input),
+    );
+  } finally {
+    lease.release();
+  }
 }
 
 /**

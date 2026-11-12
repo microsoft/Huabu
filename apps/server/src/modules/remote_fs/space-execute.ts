@@ -8,10 +8,19 @@ import {
   type RfsExecuteRequest,
   type RfsExecuteResponse,
 } from '@huabu/shared';
-import { nodeRevision, type Delta } from '@huabu/shared/canvas-engine';
+import {
+  collectCommandIds,
+  nodeRevision,
+  type Delta,
+} from '@huabu/shared/canvas-engine';
 
 import { prepareAgentCanvasCommands } from '../canvas/agent-command-preparation.js';
-import { executeOnServer } from '../canvas/canvas-executor.js';
+import {
+  executeOnServer,
+  type ExecuteOnServerOutput,
+} from '../canvas/canvas-executor.js';
+import { space } from '../storage/index.js';
+import { normalizeSaveKey, type SaveKey } from '../storage/ports/save.js';
 
 import type { CanvasCommand } from '@huabu/shared';
 
@@ -83,74 +92,30 @@ function collectDeltaIds(
   }
 }
 
-function collectCommandIds(
-  command: CanvasCommand,
-  nodeIds: Set<string>,
-  edgeIds: Set<string>,
-): void {
-  switch (command.type) {
-    case 'CREATE_NODES':
-      for (const node of command.nodes) if (node.id) nodeIds.add(node.id);
-      break;
-    case 'DELETE_NODES':
-    case 'REORDER_NODES':
-    case 'ALIGN_NODES':
-    case 'DISTRIBUTE_NODES':
-      for (const nodeId of command.nodeIds) nodeIds.add(nodeId);
-      break;
-    case 'MERGE_NODE_DATA':
-      for (const patch of command.patches) nodeIds.add(patch.nodeId);
-      break;
-    case 'SET_NODE_PARENT':
-      for (const nodeId of command.nodeIds) nodeIds.add(nodeId);
-      if (command.parentId) nodeIds.add(command.parentId);
-      break;
-    case 'DISSOLVE_FRAME':
-    case 'SET_FRAME_LAYOUT':
-      nodeIds.add(command.frameId);
-      break;
-    case 'SET_NODE_GEOMETRY':
-      for (const item of command.items) nodeIds.add(item.nodeId);
-      break;
-    case 'CONNECT_NODES':
-      for (const edge of command.edges) {
-        nodeIds.add(edge.source);
-        nodeIds.add(edge.target);
-        if (edge.id) edgeIds.add(edge.id);
-      }
-      break;
-    case 'DISCONNECT_EDGES':
-      for (const edge of command.edges) {
-        if (typeof edge === 'string') edgeIds.add(edge);
-        else {
-          nodeIds.add(edge.source);
-          nodeIds.add(edge.target);
-        }
-      }
-      break;
-    case 'SET_EDGE_STYLE':
-      for (const entry of command.edges) {
-        if (typeof entry.edge === 'string') edgeIds.add(entry.edge);
-        else {
-          nodeIds.add(entry.edge.source);
-          nodeIds.add(entry.edge.target);
-        }
-      }
-      break;
-    case 'SET_NODE_SELECTION':
-    case 'SET_NODE_LOCKED':
-    case 'CHANGE_NODE_TYPE':
-      break;
-  }
+export interface ExecuteRfsOptions {
+  /** Thread to attribute Review records to; the caller has verified it. */
+  hostThreadId?: string;
+  /** The thread id as the caller sent it, verified or not. */
+  claimedThreadId?: string;
+  /**
+   * The authenticated caller. Required for `request.operationId` to take
+   * effect: the stored response is kept per (principal, request id).
+   */
+  principalId?: string;
 }
 
 export async function executeRfsCommands(
   canvasId: string,
   request: RfsExecuteRequest,
-  opts?: { hostThreadId?: string },
+  opts?: ExecuteRfsOptions,
 ): Promise<RfsExecuteResponse> {
+  // Only a label. With a request id the executor stores the label it ran
+  // under, so a replay reports the original run rather than this one.
   const runId = request.runId ?? createId('run');
   const hostThreadId = opts?.hostThreadId;
+  if (request.operationId !== undefined && !opts?.principalId) {
+    throw new Error('A request id needs an authenticated principal');
+  }
   const output = await executeOnServer({
     canvasId,
     commands: prepareAgentCanvasCommands(request.commands, {
@@ -158,17 +123,74 @@ export async function executeRfsCommands(
     }),
     // Authorship stays server-owned (`source: 'agent'`); the caller only
     // correlates which host conversation the write belongs to via the
-    // `X-Huabu-Host-Thread-Id` header. When present, attribute the batch's
-    // change-review records to that thread (persist to its sidecar +
-    // broadcast) exactly like the built-in agent path.
+    // `X-Huabu-Host-Thread-Id` header. When the route found that thread in
+    // this Space, attribute the batch's change-review records to it (stored
+    // in the same commit + broadcast) exactly like the built-in agent path.
     originator: {
       source: 'agent',
       ...(hostThreadId ? { threadId: hostThreadId } : {}),
     },
     runId,
     ...(hostThreadId ? { computeChanges: true } : {}),
+    ...(opts?.claimedThreadId ? { claimedThreadId: opts.claimedThreadId } : {}),
+    ...(request.operationId !== undefined && opts?.principalId
+      ? {
+          request: {
+            operationId: request.operationId,
+            principalId: opts.principalId,
+          },
+        }
+      : {}),
+    ...(request.basis !== undefined ? { basis: request.basis } : {}),
+    issueBasis: true,
   });
+  return projectRfsExecuteResponse(output, runId);
+}
 
+/** A stored result exists, but it is not the result of an RFS execute. */
+export class NotAnRfsExecuteResultError extends Error {
+  constructor(operationId: string, cause: unknown) {
+    super(`Result ${operationId} was not stored by an RFS execute`, { cause });
+    this.name = 'NotAnRfsExecuteResultError';
+  }
+}
+
+/**
+ * The stored response of an earlier request, exactly as a repeat of that
+ * request would be answered, or null when nothing is stored under the id.
+ *
+ * @throws NotAnRfsExecuteResultError when the stored result cannot be
+ *   expressed as an RFS execute response — it was saved through another entry
+ *   point, with commands outside the agent vocabulary.
+ */
+export async function lookupRfsExecuteResponse(
+  canvasId: string,
+  key: SaveKey,
+): Promise<RfsExecuteResponse | null> {
+  const stored = await space(canvasId).save.lookup(normalizeSaveKey(key));
+  if (!stored) return null;
+  const output = stored.response as ExecuteOnServerOutput;
+  if (typeof output.runId !== 'string') return null;
+  try {
+    return projectRfsExecuteResponse(
+      { ...output, replayed: true },
+      output.runId,
+    );
+  } catch (error) {
+    throw new NotAnRfsExecuteResultError(key.operationId, error);
+  }
+}
+
+/**
+ * Project an executor output onto the agent-facing response.
+ *
+ * Pure over `output`, so a stored output projects to the same response the
+ * original call returned.
+ */
+function projectRfsExecuteResponse(
+  output: ExecuteOnServerOutput,
+  fallbackRunId: string,
+): RfsExecuteResponse {
   const nodeIds = new Set<string>();
   const edgeIds = new Set<string>();
   const deletedNodeIds = new Set<string>();
@@ -193,7 +215,10 @@ export async function executeRfsCommands(
 
   return {
     canvasId: output.canvasId,
-    runId,
+    runId: output.runId ?? fallbackRunId,
+    ...(output.operationId ? { operationId: output.operationId } : {}),
+    ...(output.basis ? { basis: output.basis } : {}),
+    ...(output.replayed ? { replayed: true as const } : {}),
     fromVersion: output.fromVersion,
     toVersion: output.toVersion,
     commands,

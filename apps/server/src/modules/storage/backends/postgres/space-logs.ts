@@ -1,11 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import {
-  coalesceChanges,
-  type CanvasChangeRecord,
-} from '@huabu/shared/canvas-engine';
-
 import { spaceRowExists } from './rows.js';
 import { sanitizeId } from '../../../../utils/fs.js';
 import { stringifyJson } from '../sql/codecs.js';
@@ -13,6 +8,9 @@ import {
   decodeChanges,
   decodeEvents,
   encodeEventBatch,
+  mergeChangesRow,
+  SELECT_CHANGES,
+  UPSERT_CHANGES,
 } from '../sql/log-rules.js';
 
 import type { PgExecutor, PostgresStoreContext } from './database.js';
@@ -22,6 +20,7 @@ import type {
   SpaceChanges,
   SpaceEvents,
 } from '../../ports/structured.js';
+import type { CanvasChangeRecord } from '@huabu/shared/canvas-engine';
 
 async function requireSpace(
   database: PgExecutor,
@@ -33,6 +32,31 @@ async function requireSpace(
       `Postgres Space logs(${canvasId}) cannot mutate a missing Space`,
     );
   }
+}
+
+/**
+ * Fold `records` into one thread's coalesced Review list, inside the caller's
+ * transaction, and return the list as stored.
+ *
+ * The one place the list is read, coalesced and replaced: `changes.append`
+ * runs it in a transaction of its own, the Space write runs it in the
+ * transaction that also replaces the record. The caller has validated the
+ * thread id and that the Space exists.
+ */
+export async function appendPostgresChangesInTransaction(
+  database: PgExecutor,
+  canvasId: string,
+  threadId: string,
+  records: readonly CanvasChangeRecord[],
+): Promise<CanvasChangeRecord[]> {
+  const { merged, params } = mergeChangesRow(
+    await database.get(SELECT_CHANGES, canvasId, threadId),
+    canvasId,
+    threadId,
+    records,
+  );
+  await database.run(UPSERT_CHANGES, ...params);
+  return merged;
 }
 
 export interface PostgresSpaceLogs {
@@ -130,28 +154,12 @@ class PostgresSpaceLogCoordinator {
     const workspaceId = this.#workspace();
     return await this.#context.transaction(async (database) => {
       await requireSpace(database, workspaceId, this.#canvasId);
-      const current = await database.get(
-        `SELECT snapshot_json
-           FROM changes
-           WHERE canvas_id = ? AND thread_id = ?`,
+      return appendPostgresChangesInTransaction(
+        database,
         this.#canvasId,
         threadId,
+        records,
       );
-      const existing =
-        current === undefined
-          ? []
-          : decodeChanges(current['snapshot_json'], this.#canvasId, threadId);
-      const merged = coalesceChanges([...existing, ...records]);
-      await database.run(
-        `INSERT INTO changes (canvas_id, thread_id, snapshot_json)
-           VALUES (?, ?, ?)
-           ON CONFLICT(canvas_id, thread_id) DO UPDATE SET
-             snapshot_json = excluded.snapshot_json`,
-        this.#canvasId,
-        threadId,
-        stringifyJson(merged, `Changes for thread ${threadId}`),
-      );
-      return merged;
     });
   }
 

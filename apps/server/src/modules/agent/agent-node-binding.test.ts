@@ -62,22 +62,50 @@ function harness(existing?: ThreadRecord, history = false) {
   const promote = vi.fn().mockResolvedValue(undefined);
   const release = vi.fn();
   const acquireTurn = vi.fn((): (() => void) | null => release);
+  const releaseWorkspace = vi.fn();
+  const acquireWorkspaceLease = vi.fn(() => ({
+    workspaceKey: 'test-workspace',
+    release: releaseWorkspace,
+  }));
   const coordinator = new AgentNodeBindingCoordinator({
     record: readRecord,
     hasHistory: () => history,
     promote,
     acquireTurn,
+    acquireWorkspaceLease,
   });
-  return { coordinator, readRecord, promote, release, acquireTurn };
+  return {
+    coordinator,
+    readRecord,
+    promote,
+    release,
+    acquireTurn,
+    acquireWorkspaceLease,
+    releaseWorkspace,
+  };
 }
 
 describe('AgentNodeBindingCoordinator', () => {
+  it('refuses confirmation before reads or promotion when Workspace admission fails', async () => {
+    const h = harness(record());
+    h.acquireWorkspaceLease.mockImplementation(() => {
+      throw new Error('Workspace activation in progress');
+    });
+    await expect(h.coordinator.confirm(target())).rejects.toThrow(
+      'Workspace activation in progress',
+    );
+    expect(h.readRecord).not.toHaveBeenCalled();
+    expect(h.promote).not.toHaveBeenCalled();
+    expect(h.releaseWorkspace).not.toHaveBeenCalled();
+  });
+
   it('leaves a genuinely fresh draft Editing without creating execution', async () => {
     const h = harness();
     const node = target();
     expect(await h.coordinator.confirm(node)).toBeNull();
     expect(node.bindingState).toBe('editing');
     expect(h.promote).not.toHaveBeenCalled();
+    expect(h.releaseWorkspace).toHaveBeenCalledOnce();
   });
 
   it.each(['Deployment', 'Job'])(
@@ -101,6 +129,7 @@ describe('AgentNodeBindingCoordinator', () => {
       'Canvas unavailable',
     );
     expect(node.bindingState).toBe('editing');
+    expect(h.releaseWorkspace).toHaveBeenCalledOnce();
     await expect(
       h.coordinator.guardDraftEdit(node, {
         agentBinding: {

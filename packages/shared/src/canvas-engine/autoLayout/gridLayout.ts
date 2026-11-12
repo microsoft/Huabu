@@ -31,6 +31,7 @@
  * That is the only thing standing between "switch the layout mode" and
  * "scatter the arrangement the user built".
  */
+import { orderTrack, readLayoutOrder, sameLayoutOrder } from './layoutOrder.js';
 import { EDGE_LABEL_MAX_INVERSE_SCALE } from '../../types/canvas/edge.js';
 import {
   FRAME_GRID_DEFAULT_COUNT,
@@ -46,6 +47,10 @@ import {
 import { getFrameSizing } from '../frame/sizing.js';
 import { getNodeSize } from '../utils/nodeSizes.js';
 
+import type {
+  FrameLayoutOrder,
+  FrameLayoutDescription,
+} from '../../types/api/frame-layout.js';
 import type { FrameLayoutMode } from '../../types/canvas/node.js';
 import type { Edge, Node, XYPosition } from '@xyflow/react';
 
@@ -552,6 +557,7 @@ function compactEmptyTracks(
  * locked, or has no children.
  */
 export interface FrameGridLayoutResult {
+  layoutOrder?: FrameLayoutOrder;
   childPositions: Map<string, XYPosition>;
   slotAssignments: Map<string, number>;
   /** Grid-only row assignments persisted as `data.frameRow`. */
@@ -598,6 +604,8 @@ export interface StructuredGutterPlan {
 }
 
 export interface StructuredLayoutOptions {
+  /** Pointer placement only: these members re-enter the stored order at their live coordinates. */
+  masonryMovedNodeIds?: ReadonlySet<string>;
   edges?: readonly Edge[];
   /** Insets shared by the resize inverse and its forward layout. */
   responsiveMetrics?: FrameResponsiveMetrics;
@@ -747,7 +755,12 @@ export function applyColumnLayout(
   const frame = nodes.find((n) => n.id === frameId);
   if (!frame || frame.type !== 'frame' || isLocked(frame)) return null;
 
-  const children = collectChildren(nodes, frameId);
+  const children = orderTrack(
+    collectChildren(nodes, frameId),
+    (item) => item.node.id,
+    (item) => item.node.position.y,
+    masonryOrderRanks(frame, options),
+  );
   if (children.length === 0) return null;
 
   if (!responsiveMetricsOverride) {
@@ -774,7 +787,7 @@ export function applyColumnLayout(
     'column',
   );
 
-  // Bucket by column, sort each column by current Y.
+  const orderRanks = masonryOrderRanks(frame, options);
   const colItems: ChildSlot[][] = Array.from(
     { length: effectiveCols },
     () => [],
@@ -783,8 +796,13 @@ export function applyColumnLayout(
     const slot = assignment.get(child.node.id) ?? 0;
     colItems[slot].push(child);
   }
-  for (const list of colItems) {
-    list.sort((a, b) => a.node.position.y - b.node.position.y);
+  for (let i = 0; i < colItems.length; i++) {
+    colItems[i] = orderTrack(
+      colItems[i],
+      (item) => item.node.id,
+      (item) => item.node.position.y,
+      orderRanks,
+    );
   }
 
   // Each column's width = widest child in it (0 = empty → collapses).
@@ -849,6 +867,7 @@ export function applyColumnLayout(
   const result: FrameGridLayoutResult = {
     childPositions: positions,
     slotAssignments: assignment,
+    layoutOrder: colItems.map((items) => items.map((item) => item.node.id)),
     columnTracks: colOriginX.map((left, c) => ({
       left,
       width: colWidth[c],
@@ -879,7 +898,12 @@ export function applyRowLayout(
   const frame = nodes.find((n) => n.id === frameId);
   if (!frame || frame.type !== 'frame' || isLocked(frame)) return null;
 
-  const children = collectChildren(nodes, frameId);
+  const children = orderTrack(
+    collectChildren(nodes, frameId),
+    (item) => item.node.id,
+    (item) => item.node.position.x,
+    masonryOrderRanks(frame, options),
+  );
   if (children.length === 0) return null;
 
   if (!responsiveMetricsOverride) {
@@ -914,8 +938,14 @@ export function applyRowLayout(
     const slot = assignment.get(child.node.id) ?? 0;
     rowItems[slot].push(child);
   }
-  for (const list of rowItems) {
-    list.sort((a, b) => a.node.position.x - b.node.position.x);
+  const orderRanks = masonryOrderRanks(frame, options);
+  for (let i = 0; i < rowItems.length; i++) {
+    rowItems[i] = orderTrack(
+      rowItems[i],
+      (item) => item.node.id,
+      (item) => item.node.position.x,
+      orderRanks,
+    );
   }
 
   const rowHeight = rowItems.map((items) =>
@@ -981,6 +1011,7 @@ export function applyRowLayout(
   const result: FrameGridLayoutResult = {
     childPositions: positions,
     slotAssignments: assignment,
+    layoutOrder: rowItems.map((items) => items.map((item) => item.node.id)),
     rowTracks: rowOriginY.map((top, r) => ({ top, height: rowHeight[r] })),
     frameSize: { width, height },
     gutters,
@@ -2160,7 +2191,7 @@ export function describeStructuredDropZone(
     simulated,
     frameId,
     'compact',
-    options,
+    { ...options, masonryMovedNodeIds: new Set([dragged.id]) },
   );
   const position = simulatedLayout?.childPositions.get(dragged.id);
   if (!simulatedLayout || !position) return null;
@@ -2280,7 +2311,21 @@ export function applyStructuredFrameRelayout(
       policy,
       layoutOptions,
     );
-    if (!result) continue;
+    if (!result) {
+      if (
+        frame &&
+        (cfg.axis === 'column' || cfg.axis === 'row') &&
+        !working.some((node) => node.parentId === frameId) &&
+        !sameLayoutOrder(readLayoutOrder(frame.data), [])
+      ) {
+        working = working.map((node) =>
+          node.id === frameId
+            ? { ...node, data: { ...node.data, layoutOrder: [] } }
+            : node,
+        );
+      }
+      continue;
+    }
 
     handled.add(frameId);
 
@@ -2312,18 +2357,24 @@ export function applyStructuredFrameRelayout(
         const gridChanged =
           (prevData as { gridCount?: number }).gridCount !==
           result.effectiveCount;
+        const orderChanged =
+          result.layoutOrder !== undefined &&
+          !sameLayoutOrder(readLayoutOrder(prevData), result.layoutOrder);
+        const nextData = {
+          ...prevData,
+          gridCount: result.effectiveCount,
+          ...(result.layoutOrder ? { layoutOrder: result.layoutOrder } : {}),
+        };
         if (!writeFrameSize) {
-          if (!gridChanged) return n;
+          if (!gridChanged && !orderChanged) return n;
           return {
             ...n,
-            data: { ...prevData, gridCount: result.effectiveCount },
+            data: nextData,
           };
         }
         return {
           ...n,
-          ...(gridChanged
-            ? { data: { ...prevData, gridCount: result.effectiveCount } }
-            : {}),
+          ...(gridChanged || orderChanged ? { data: nextData } : {}),
           style: {
             ...(n.style ?? {}),
             width: result.frameSize.width,
@@ -2376,4 +2427,82 @@ export function applyStructuredFrameRelayout(
   }
 
   return { nodes: working, handledFrameIds: handled };
+}
+
+function masonryOrderRanks(
+  frame: Node,
+  options: StructuredLayoutOptions,
+): Map<string, number> {
+  const order = readLayoutOrder(frame.data);
+  return new Map(
+    (order?.flat() ?? [])
+      .filter((id) => !options.masonryMovedNodeIds?.has(id))
+      .map((id, index) => [id, index]),
+  );
+}
+
+/** Capture reading order without changing geometry or enabling a storage migration. */
+export function withMasonryLayoutOrder(
+  nodes: Node[],
+  frameId: string,
+  movedIds: ReadonlySet<string> = new Set(),
+  edges: readonly Edge[] = [],
+): Node[] {
+  const frame = nodes.find((node) => node.id === frameId);
+  const mode = frame?.data.layoutMode;
+  if (!frame || (mode !== 'column' && mode !== 'row')) return nodes;
+  const result = solveStructuredFrameLayout(nodes, frameId, 'compact', {
+    edges,
+    masonryMovedNodeIds: movedIds,
+  });
+  const order = result?.layoutOrder;
+  if (!order || sameLayoutOrder(readLayoutOrder(frame.data), order))
+    return nodes;
+  return nodes.map((node) =>
+    node.id === frameId
+      ? { ...node, data: { ...node.data, layoutOrder: order } }
+      : node,
+  );
+}
+
+export function describeFrameLayout(
+  nodes: Node[],
+  frameId: string,
+): FrameLayoutDescription | undefined {
+  const frame = nodes.find((node) => node.id === frameId);
+  const mode = frame?.data.layoutMode;
+  if (mode !== 'column' && mode !== 'row' && mode !== 'grid') return undefined;
+  if (mode === 'grid') {
+    const children = nodes.filter((node) => node.parentId === frameId);
+    const cells = children.flatMap((node) => {
+      const column = readFrameTrack(node, 'column');
+      const row = readFrameGridRow(node);
+      return column === undefined || row === undefined
+        ? []
+        : [{ nodeId: node.id, column, row }];
+    });
+    if (cells.length === children.length)
+      return {
+        mode,
+        cells: cells.sort((a, b) => a.row - b.row || a.column - b.column),
+      };
+  }
+  // Locks prevent mutations, not inspection of the current logical layout.
+  const readable = frame?.data.locked
+    ? nodes.map((node) =>
+        node.id === frameId
+          ? { ...node, data: { ...node.data, locked: false } }
+          : node,
+      )
+    : nodes;
+  const result = solveStructuredFrameLayout(readable, frameId);
+  if (mode !== 'grid') return { mode, tracks: result?.layoutOrder ?? [] };
+  return {
+    mode,
+    cells: [...(result?.slotAssignments ?? [])].map(([nodeId, column]) => ({
+      nodeId,
+      column,
+      row: result?.rowAssignments?.get(nodeId) ?? 0,
+    })),
+  };
 }

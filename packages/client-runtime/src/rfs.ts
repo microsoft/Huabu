@@ -1,12 +1,14 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import { createReadStream, createWriteStream } from 'node:fs';
 import { mkdtemp, readFile, rename, rm } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { Readable, Writable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
+import { setTimeout as delay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 
 import { CommanderError } from 'commander';
@@ -18,6 +20,7 @@ import {
   createRfsProgram,
   segment,
   type InputOptions,
+  type ExecuteOptions,
   type DownloadOptions,
   type UploadOptions,
 } from './rfs-cli.js';
@@ -150,6 +153,7 @@ function downloadMetadata(response: Response) {
   const src = response.headers.get(RFS_HEADERS.src);
   const locked = response.headers.get(RFS_HEADERS.locked);
   const edges = response.headers.get(RFS_HEADERS.edges);
+  const basis = response.headers.get(RFS_HEADERS.basis);
   const node =
     id && type
       ? {
@@ -166,6 +170,7 @@ function downloadMetadata(response: Response) {
       ? { size }
       : {}),
     ...(revision === undefined ? {} : { revision }),
+    ...(basis === null ? {} : { basis }),
     ...(contentType === null ? {} : { contentType }),
     ...(node === undefined ? {} : { node }),
   };
@@ -176,6 +181,49 @@ function cliErrorBody(body: string): string {
     .replace('curl -fsS "$HUABU_RFS_URL/skill"', 'huabu-rfs get-skill')
     .replace('curl -fsS \\"$HUABU_RFS_URL/skill\\"', 'huabu-rfs get-skill');
 }
+
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** The top-level string field of a JSON object body, if it has one. */
+function declaredField(bytes: Buffer, name: string): string | undefined {
+  try {
+    const value: unknown = JSON.parse(bytes.toString());
+    if (value === null || typeof value !== 'object') return undefined;
+    const field = (value as Record<string, unknown>)[name];
+    return typeof field === 'string' ? field : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Whether an error body is the Server saying it cannot tell what happened. */
+function outcomeUnknown(body: Buffer): boolean {
+  return declaredField(body, 'code') === 'operation-outcome-unknown';
+}
+
+/**
+ * How `execute` retries. Every attempt re-sends the same request id and the
+ * same bytes, so the Server applies the request at most once.
+ */
+export interface ExecuteRetryPolicy {
+  /** Most attempts, the first included. */
+  attempts: number;
+  /** Time allowed for all attempts and the waits between them. */
+  budgetMs: number;
+  /** Time allowed for one attempt. */
+  attemptTimeoutMs: number;
+  /** Wait before attempt 2, 3, …; the last entry repeats. */
+  backoffMs: readonly number[];
+}
+
+const EXECUTE_RETRY: ExecuteRetryPolicy = {
+  attempts: 4,
+  // An execute may import remote media before it writes; allow a slow one.
+  budgetMs: 300_000,
+  attemptTimeoutMs: 120_000,
+  backoffMs: [1000, 2000, 4000],
+};
 
 function streamBody(source: Readable): ReadableStream<Uint8Array> {
   const iterator = source[Symbol.asyncIterator]();
@@ -203,6 +251,8 @@ export interface RfsIO {
   stderr?: Writable;
   signal?: AbortSignal;
   helpTimeoutMs?: number;
+  /** Overrides for the `execute` retry policy. */
+  executeRetry?: Partial<ExecuteRetryPolicy>;
 }
 
 export async function runRfs(args: string[], io: RfsIO = {}): Promise<number> {
@@ -216,6 +266,8 @@ export async function runRfs(args: string[], io: RfsIO = {}): Promise<number> {
     : controller.signal;
   let mutation = false;
   let sent = false;
+  /** Request id of the execute in flight, for the failure report. */
+  let executeOperationId: string | undefined;
   let uploadStream: Readable | undefined;
   let temporary: string | undefined;
   const diagnostic = (message: string) =>
@@ -369,6 +421,121 @@ export async function runRfs(args: string[], io: RfsIO = {}): Promise<number> {
       correlate,
     });
   }
+  const rerunAdvice = (operationId: string) => {
+    diagnostic(`operation-id=${operationId}`);
+    diagnostic(
+      `Remote outcome may be unknown. Re-run the same command with --operation-id ${operationId} and the same input: it returns the original result if the request was applied, and applies it once if it was not. Do not resend without it.`,
+    );
+  };
+  async function execute(options: ExecuteOptions) {
+    const source = await input(options, stdin, true, signal);
+    if (
+      options.operationId !== undefined &&
+      !UUID_PATTERN.test(options.operationId)
+    )
+      throw new Error('--operation-id must be a UUID');
+    // The body is forwarded byte for byte, so the request id and basis
+    // travel in headers. A body that names its own request id keeps it.
+    const declared = declaredField(source.bytes, 'operationId');
+    const operationId = (
+      options.operationId ??
+      declared ??
+      randomUUID()
+    ).toLowerCase();
+    const config = connection(env);
+    const headers: Record<string, string> = {
+      ...config.headers,
+      'Content-Type': source.contentType,
+      ...(options.operationId !== undefined || declared === undefined
+        ? { [RFS_HEADERS.operationId]: operationId }
+        : {}),
+      ...(options.basis === undefined
+        ? {}
+        : { [RFS_HEADERS.basis]: header(options.basis, '--basis') }),
+    };
+    if (env.HUABU_THREAD_ID !== undefined)
+      headers['X-Huabu-Host-Thread-Id'] = header(
+        env.HUABU_THREAD_ID,
+        'HUABU_THREAD_ID',
+      );
+    else
+      diagnostic(
+        'HUABU_THREAD_ID is absent; proceeding without host-thread correlation.',
+      );
+    const policy = { ...EXECUTE_RETRY, ...io.executeRetry };
+    const started = Date.now();
+    mutation = true;
+    executeOperationId = operationId;
+    let failure = '';
+    let unknownBody: Buffer | undefined;
+    let attempt = 0;
+    while (true) {
+      attempt += 1;
+      const remaining = policy.budgetMs - (Date.now() - started);
+      const timeout = AbortSignal.timeout(
+        Math.max(1, Math.min(policy.attemptTimeoutMs, remaining)),
+      );
+      unknownBody = undefined;
+      try {
+        sent = true;
+        const response = await fetch(`${config.base}/execute`, {
+          method: 'POST',
+          headers,
+          // The same buffered bytes on every attempt.
+          body: new Uint8Array(source.bytes),
+          redirect: 'manual',
+          signal: AbortSignal.any([signal, timeout]),
+        });
+        const body = Buffer.from(await response.arrayBuffer());
+        if (response.ok) {
+          stdout.write(body);
+          executeOperationId = undefined;
+          code = 0;
+          return;
+        }
+        if (response.status !== 503 || !outcomeUnknown(body)) {
+          // A definite answer. A rejection is never retried.
+          stdout.write(cliErrorBody(body.toString()));
+          diagnostic(
+            `Request failed (status ${response.status}); response body is on stdout.`,
+          );
+          executeOperationId = undefined;
+          if (response.status >= 500) rerunAdvice(operationId);
+          code = 1;
+          return;
+        }
+        unknownBody = body;
+        failure = 'the Server could not confirm the outcome (status 503)';
+      } catch (error) {
+        // A local interrupt is not a transport failure and is not retried.
+        if (signal.aborted) throw error;
+        failure = timeout.aborted
+          ? 'no response in time'
+          : error instanceof Error
+            ? error.message
+            : String(error);
+      }
+      const wait =
+        policy.backoffMs[Math.min(attempt - 1, policy.backoffMs.length - 1)] ??
+        0;
+      if (
+        attempt >= policy.attempts ||
+        Date.now() - started + wait >= policy.budgetMs
+      )
+        break;
+      diagnostic(
+        `Attempt ${attempt} failed (${failure}); retrying with the same operation id.`,
+      );
+      await delay(wait, undefined, { signal });
+    }
+    if (unknownBody) stdout.write(cliErrorBody(unknownBody.toString()));
+    diagnostic(
+      `Request failed after ${attempt} attempt${attempt === 1 ? '' : 's'}: ${failure}.${unknownBody ? ' Response body is on stdout.' : ''}`,
+    );
+    executeOperationId = undefined;
+    rerunAdvice(operationId);
+    code = 1;
+  }
   function serviceId(id: string) {
     const parsed = serviceParamsSchema.safeParse({ serviceId: id });
     if (!parsed.success) throw new Error('Invalid Service id');
@@ -431,7 +598,12 @@ export async function runRfs(args: string[], io: RfsIO = {}): Promise<number> {
           usage: id ? undefined : usage,
         }),
       query: (options) => post('/query', options, true),
-      execute: (options) => post('/execute', options, true, true),
+      execute,
+      result: (id) => {
+        if (!UUID_PATTERN.test(id))
+          throw new Error('Operation id must be a UUID');
+        return send({ path: `/execute/${id.toLowerCase()}` });
+      },
       download: async (path, options) => {
         const url = `/download/${path.split('/').map(segment).join('/')}`;
         if (!options.output) throw new Error('--output must be nonempty');
@@ -514,7 +686,8 @@ export async function runRfs(args: string[], io: RfsIO = {}): Promise<number> {
           ? error.message
           : String(error),
     );
-    if (mutation && sent)
+    if (executeOperationId && sent) rerunAdvice(executeOperationId);
+    else if (mutation && sent)
       diagnostic(
         'Remote outcome may be unknown. Inspect state before any further mutation; do not blindly resend.',
       );

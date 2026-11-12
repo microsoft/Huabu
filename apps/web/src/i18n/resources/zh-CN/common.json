@@ -1098,6 +1098,7 @@
     "emptyFrame": "此框架中没有子节点。",
     "multiDragSameParentOnly": "请选择同一父级的图层后一起移动。",
     "invalidFrameDrop": "无法将这些图层移到此目标。请确认框架仍存在、未被锁定，且不在选中的图层内部。",
+    "invalidReorderSelection": "无法调整这些图层的顺序。请只选择同一容器内、未被锁定的图层。",
     "filterLabels": {
       "fileReference": "文件引用",
       "note": "笔记",

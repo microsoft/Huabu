@@ -9,7 +9,7 @@
  * after a server-side batch run. The executor produces a poststate;
  * this module reduces (prestate, poststate) → coarse deltas.
  *
- * Phase A semantics (matches `delta.ts` Phase A note):
+ * Legacy coarse entity semantics:
  *
  *   - Identity equality (`Object.is`) on `node` / `edge` references is
  *     the fast path. The engine handlers return shared references for
@@ -25,7 +25,9 @@
  * Pure — does not depend on host or executor state.
  */
 
-import type { Delta } from './delta.js';
+import { diffSiblingOrderEvents } from './siblingOrder.js';
+
+import type { Delta, OrderedDelta } from './delta.js';
 import type { CanvasEdge, CanvasNode } from './interfaces.js';
 
 /**
@@ -64,18 +66,29 @@ export function stripTransientEdgeFields<T extends object>(edge: T): T {
 }
 
 /**
- * Compute the coarse delta list that transforms `prev` into `next`.
+ * Compute entity deltas; passing orderVersion opts into complete sibling lists.
+ * The two-argument legacy contract deliberately remains entity-only until its
+ * filtered broadcast and per-entity Review consumers support atomic order replay.
  *
  * Output ordering: deletes first, then inserts, then replaces. This
- * lets {@link applyDeltas} consumers reason about transient state
- * (e.g. delete an old edge that referenced a node, before that node
- * is replaced) without juggling intermediate maps.
+ * Ordered output appends sibling events. Apply the whole batch, not individual
+ * rows; replay materializes the rendered forest rather than legacy interleaving.
  */
 export function diffCanvasState(
   prev: { nodes: readonly CanvasNode[]; edges: readonly CanvasEdge[] },
   next: { nodes: readonly CanvasNode[]; edges: readonly CanvasEdge[] },
-): Delta[] {
-  const out: Delta[] = [];
+  options: { orderVersion: number },
+): OrderedDelta[];
+export function diffCanvasState(
+  prev: { nodes: readonly CanvasNode[]; edges: readonly CanvasEdge[] },
+  next: { nodes: readonly CanvasNode[]; edges: readonly CanvasEdge[] },
+): Delta[];
+export function diffCanvasState(
+  prev: { nodes: readonly CanvasNode[]; edges: readonly CanvasEdge[] },
+  next: { nodes: readonly CanvasNode[]; edges: readonly CanvasEdge[] },
+  options?: { orderVersion: number },
+): OrderedDelta[] {
+  const out: OrderedDelta[] = [];
 
   const prevNodeMap = new Map<string, CanvasNode>(
     prev.nodes.map((n) => [n.id, n]),
@@ -124,6 +137,11 @@ export function diffCanvasState(
     out.push({ type: 'REPLACE_EDGE', prev: prevEdge, next: nextEdge });
   }
 
+  if (options) {
+    out.push(
+      ...diffSiblingOrderEvents(prev.nodes, next.nodes, options.orderVersion),
+    );
+  }
   return out;
 }
 

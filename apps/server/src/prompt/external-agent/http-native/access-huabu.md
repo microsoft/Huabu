@@ -47,6 +47,8 @@ Do not guess fields or duplicate the schemas locally. Re-fetch the relevant capa
 
 `POST query` accepts one canonical query object. Keep queries bounded. Inspect responses include `count`, `total`, and `truncated`; search responses include `count` and `truncated`. Narrow the predicate or raise the limit within the advertised maximum when results truncate.
 
+Every query response also carries a top-level `basis`: an opaque token for the Space version you read. Keep the latest one when you plan structural edits; section 7 explains how to pass it back.
+
 ```bash
 cat > /tmp/huabu-query.json <<'JSON'
 {
@@ -72,7 +74,7 @@ Query results point to node files. Large bodies and artifacts remain out of band
 
 Selected-node context supplies an exact `file` path. Pass that path through instead of guessing a filename. There is no directory-listing endpoint.
 
-Always write bodies to a file rather than dumping large content into your context. For a node, save response headers too: `X-Huabu-Node-Id`, `X-Huabu-Node-Type`, `X-Huabu-Node-Label`, `X-Huabu-Src`, `X-Huabu-Locked`, `X-Huabu-Node-Edges`, and `ETag`.
+Always write bodies to a file rather than dumping large content into your context. For a node, save response headers too: `X-Huabu-Node-Id`, `X-Huabu-Node-Type`, `X-Huabu-Node-Label`, `X-Huabu-Src`, `X-Huabu-Locked`, `X-Huabu-Node-Edges`, `X-Huabu-Basis`, and `ETag`. `X-Huabu-Basis` is the same kind of token a query returns as `basis`; a `304` carries none.
 
 ```bash
 curl -fsS -H "$AUTH" -D /tmp/huabu-headers.txt -o /tmp/node.md \
@@ -162,11 +164,11 @@ Before placing or resizing relative to existing content, query the relevant node
 
 Never pin top-level height for `text` or `question`. Both respect `data.style.fontSize`: Text defaults to 16px and Question to 24px. The font also scales content padding and, for Question, the avatar, alias, status, and gaps; Question chrome retains a separate 28px design basis. Width-only edits preserve the font and reflow content-driven height; proportional canvas resize gestures scale the font with outer width. Existing Question font values are respected without automatic persisted-data migration. New Notes default to fixed height; use `SET_NODE_GEOMETRY` with `size.height: "auto"` to fit a Note to its content. Resizing their container preserves fixed typography and reflows or scrolls the document rather than scaling its font. For free-form root or frame layouts, a useful starting heuristic is about 50px between nodes, 28px side/bottom Frame padding, and an 80px top inset for a Regular internal Frame title, adjusted to the actual queried sizes.
 
-Frames default to `free` layout, where child positions remain explicit and parent-local. `column`, `row`, and `grid` are structured layouts configured through `SET_FRAME_LAYOUT`; `gridCount` selects 1–12 tracks (columns for `column` and `grid`, rows for `row`) and defaults to 1. `column` and `row` are masonry: each track stacks independently, so a track holding fewer items pulls its next item up. `grid` additionally aligns rows: every child holds a cell, and a column with no child in a row leaves that cell blank, which is what keeps items in different columns side by side when one column has no counterpart. Structured frames compute final child geometry, so child `position` is only an ordering hint — in `grid` mode it does not decide rows at all. Use the same command's `cells` array to place children: `column` addresses columns, `row` addresses rows, `grid` addresses both. Their default `hug` sizing fits the frame to its content; `manual` preserves a pinned frame size while children still reflow and may overflow. Fetch the `SET_FRAME_LAYOUT` capability before using sizing or track options.
+Frames default to `free` layout with explicit parent-local positions. Structured `column`/`row` layouts pack independent tracks; `grid` also aligns rows and retains empty cells. Inspect the Frame's `layout` to read ordered tracks or Grid cells. Use `SET_FRAME_LAYOUT` for placement and `REORDER_NODES` only for paint order; the Frame computes final geometry. Fetch the `SET_FRAME_LAYOUT` capability for `cells`, relative `placements`, counts and sizing; the focused `layout` Skill contains shared recipes.
 
 ## 7. Execute Space commands
 
-`POST execute` accepts `{ "runId"?: string, "commands": [...] }`. The server owns canvas scope, agent origin, authorship metadata, and generated node/edge IDs; do not send them.
+`POST execute` accepts `{ "runId"?: string, "operationId"?: string, "basis"?: string, "commands": [...] }`. The server owns canvas scope, agent origin, authorship metadata, and generated node/edge IDs; do not send them.
 
 Add the header `X-Huabu-Host-Thread-Id: $HUABU_THREAD_ID` so your edits are attributed to this conversation. Optional — omitting it still applies the write.
 
@@ -233,11 +235,27 @@ For a `MERGE_NODE_DATA` patch that changes `content`, first download the node an
 
 Downloaded node Markdown is a complete Huabu sidecar: server-owned YAML frontmatter followed by the authored Markdown body. `CREATE_NODES.data.content` and `MERGE_NODE_DATA.patch.content` accept the Markdown body only. Never pass the downloaded file verbatim or copy its leading `---` block into `content`; remove exactly the first frontmatter block and preserve everything after its closing fence. Huabu serializes canonical node metadata itself. As a final safety net, an update whose submitted frontmatter `id` matches its target `nodeId` is unwrapped at the server boundary.
 
-`runId` is an optional opaque correlation label of 1–256 characters. It does not need to be unique. When omitted, Huabu generates a fresh `run-<UUID>` value; either way, the response returns the effective value. Reusing one `runId` in adjacent requests does not join them, reject the later request, deduplicate execution, or return an earlier result: every request executes independently and may create another committed delta-log entry carrying the same label. Reuse a value only to correlate related requests; use distinct values when you need to distinguish them.
+`runId` is an optional opaque correlation label of 1–256 characters. It does not need to be unique. When omitted, Huabu generates a fresh `run-<UUID>` value; either way, the response returns the effective value. Reusing one `runId` in adjacent requests does not join them, reject the later request, deduplicate execution, or return an earlier result: every request executes independently and may create another committed delta-log entry carrying the same label. Reuse a value only to correlate related requests; use distinct values when you need to distinguish them. A replayed response (see below) reports the `runId` of the original request.
 
-`runId` is not an idempotency key and provides no retry safety. After a timeout or dropped connection, never blindly retry a mutation—even with the same `runId`: query the Space, reconcile the observed state, then decide whether another command is needed.
+`runId` is not an idempotency key and provides no retry safety. Retry safety comes only from `operationId`, described below.
 
-The response includes version transition, projected commands, command results, generated IDs, affected IDs, and new revisions. It intentionally excludes Web UI deltas and internal change-review records.
+Every `query` response, every node download (`X-Huabu-Basis`), and every `execute` response carries a `basis`. Send the most recent one you read as `basis` in the execute body so that commands planned on an outdated view are rejected instead of applied:
+
+- `reason: "stale-target"` — a node the command targets no longer exists, or was created after your read.
+- `reason: "stale-parent"` — only for `SET_NODE_GEOMETRY`, `SET_NODE_PARENT`, `REORDER_NODES`, `ALIGN_NODES`, and `DISTRIBUTE_NODES`: a node the command targets was moved to a different parent after your read.
+- HTTP `409` with code `basis-unknown` — the token is not a read version of this Space. Nothing is applied; query again and use the new `basis`.
+
+The first two reject only that command (`applied: false`); the rest of the batch proceeds as usual. The check covers only the nodes a command names, so unrelated edits by others never cause a rejection. `CREATE_NODES`, `CONNECT_NODES`, and edge commands are not checked, and the check does not detect that someone else edited the same field: keep using `expectRev` for content. Without `basis` none of these checks run.
+
+After each `execute`, switch to the `basis` in its response: nodes that request created are newer than any earlier `basis`, so targeting them with an older one is rejected as `stale-target`.
+
+To make a request safe to repeat, generate a UUID and send it as `operationId`; write the body to a file first so a repeat sends identical bytes. Huabu saves the response under that id together with the write. When the connection drops, the request times out, or Huabu answers `503` with code `operation-outcome-unknown`, send the identical request again with the same `operationId`: Huabu applies it at most once, and a repeat returns the saved response, marked `replayed: true`, with the original generated IDs. `GET execute/<operationId>` returns the saved response without executing anything, or `404` when none is saved under that id. Never retry a `4xx` rejection unchanged.
+
+Without an `operationId`, never blindly retry a mutation after a timeout or dropped connection: the request executes again and may duplicate created nodes and edges. Query the Space, reconcile the observed state, then decide whether another command is needed.
+
+An `operationId` belongs to one exact request. Reusing it with different commands or a different `basis` is rejected with `409` and code `operation-id-reused`; use a new UUID for a new request. Saved responses are kept for about two weeks, and a response larger than 4 MiB is not saved, so that request is not protected against a repeat.
+
+The response includes version transition, projected commands, command results, generated IDs, affected IDs, new revisions, the `operationId` when you sent one, and the new `basis`. It intentionally excludes Web UI deltas and internal change-review records.
 
 ## 8. Create or continue an Agent
 

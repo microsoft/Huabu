@@ -16,6 +16,10 @@ import {
   canvasSearchRequestSchema,
 } from './canvas-search.js';
 import {
+  frameLayoutPlacementSchema,
+  frameLayoutDescriptionSchema,
+} from './frame-layout.js';
+import {
   ACCENT_PALETTE,
   AGENT_CANVAS_COMMAND_TYPES,
   AGENT_CREATABLE_NODE_TYPES,
@@ -346,6 +350,14 @@ export const distributeNodesCommandSchema = z
 export const setFrameLayoutCommandSchema = z
   .object({
     type: z.literal('SET_FRAME_LAYOUT'),
+    placements: z
+      .array(frameLayoutPlacementSchema)
+      .min(1)
+      .max(200)
+      .optional()
+      .describe(
+        'Column/Row only, in the current mode: move direct children before/after a live child (adopting its track), or to a zero-based track start/end. Applied in list order; each moved ID must be unique. Example: [{nodeId:"B",after:"A"}]. Do not combine with cells, counts, sizing or a mode change. Missing/foreign/locked targets reject the whole command. This changes reading order, not paint order; Grid uses cells instead.',
+      ),
     frameId: z.string().min(1).describe('Target frame node ID.'),
     mode: z
       .enum(FRAME_LAYOUT_MODES)
@@ -382,7 +394,7 @@ export const setFrameLayoutCommandSchema = z
       )
       .optional()
       .describe(
-        'Where each direct child sits. A structured frame computes every child position from its cell, so `position` cannot express this — pass `cells` whenever placement matters. `column` addresses columns, `row` addresses rows, `grid` addresses both; an index for an axis the mode lacks is ignored. Children you omit keep their current cell, or are auto-assigned from their current on-screen position if they have none. Skipping a row number in one column is how you leave that cell blank in `grid`. Keep indices small and contiguous — they are positions, not labels, and a row far beyond the child count is clamped, so do not encode meaning (a year, an ID) in them.',
+        'Zero-based direct-child track/cell assignments: column mode uses column, row mode uses row, Grid uses both; inactive-axis indices are ignored. This does not specify Column/Row intra-track order; use placements in a separate command for that. Omitted children retain their cell or receive an initial automatic assignment. In Grid, skipping a row in one column leaves a blank cell. Keep indices small: they are positions, not permanent IDs, and oversized rows are clamped.',
       ),
     sizing: z
       .enum(FRAME_SIZING_MODES)
@@ -392,7 +404,9 @@ export const setFrameLayoutCommandSchema = z
       ),
   })
   .strict()
-  .describe("Set a frame's layout mode, track count, or sizing.");
+  .describe(
+    'Set Frame layout, Grid cells, or Column/Row reading order. REORDER_NODES changes paint order instead.',
+  );
 
 export const AGENT_COMMAND_SCHEMAS = {
   CREATE_NODES: createNodesCommandSchema,
@@ -755,6 +769,7 @@ const spaceNodeResultSchema = z
     summary: z.string().optional(),
     preview: z.string().optional(),
     rev: z.string().optional(),
+    layout: frameLayoutDescriptionSchema.optional(),
     parentFrame: z
       .object({
         id: z.string(),
@@ -900,35 +915,48 @@ const snapshotNodesResultSchema = z
   })
   .strict();
 
+/**
+ * The read version of the Space a response describes: an opaque token the
+ * caller may quote back in an execute request (`basis`) so commands aimed at
+ * nodes that were deleted, recreated or moved to another parent since are
+ * rejected instead of applied.
+ */
+const basisSchema = z.string().min(1).max(128);
+
 export const spaceQueryResponseSchema = z.discriminatedUnion('type', [
   z
     .object({
       type: z.literal('GET_SPACE_OUTLINE'),
       result: outlineResultSchema,
+      basis: basisSchema,
     })
     .strict(),
   z
     .object({
       type: z.literal('INSPECT_NODES'),
       result: inspectNodesResultSchema,
+      basis: basisSchema,
     })
     .strict(),
   z
     .object({
       type: z.literal('INSPECT_EDGES'),
       result: inspectEdgesResultSchema,
+      basis: basisSchema,
     })
     .strict(),
   z
     .object({
       type: z.literal('SEARCH'),
       result: searchResultSchema,
+      basis: basisSchema,
     })
     .strict(),
   z
     .object({
       type: z.literal('SNAPSHOT_NODES'),
       result: snapshotNodesResultSchema,
+      basis: basisSchema,
     })
     .strict(),
 ]);
@@ -950,8 +978,11 @@ export const rfsCapabilitiesResponseSchema = z
       .object({
         atomic: z.literal(false),
         partialCommit: z.literal(true),
+        /** A request without `operationId` is applied every time it is sent. */
         idempotent: z.literal(false),
         runIdIsIdempotencyKey: z.literal(false),
+        /** A request with `operationId` is applied once; a repeat returns the stored response. */
+        operationIdIsIdempotencyKey: z.literal(true),
       })
       .strict(),
     limits: z
@@ -999,7 +1030,16 @@ export type RfsOperationCapabilityResponse = z.infer<
 
 export const rfsExecuteRequestSchema = z
   .object({
+    /** Correlation label only. Never deduplicates or joins requests. */
     runId: z.string().min(1).max(256).optional(),
+    /**
+     * Request id chosen by the caller. The response is stored under it in the
+     * same commit as the write, so sending the same id with the same body
+     * again returns that stored response instead of executing twice.
+     */
+    operationId: z.uuid().optional(),
+    /** Read version from an earlier query, download or execute response. */
+    basis: basisSchema.optional(),
     commands: z
       .array(agentCanvasCommandSchema)
       .min(1)
@@ -1030,7 +1070,17 @@ const executeResultEdgeSchema = z
 export const rfsExecuteResponseSchema = z
   .object({
     canvasId: z.string(),
+    /**
+     * Correlation label of the run that executed the batch. On a replayed
+     * response this is the original run, not the label of the repeat.
+     */
     runId: z.string(),
+    /** Echo of the request id, when one was supplied. */
+    operationId: z.string().optional(),
+    /** Read version of the Space after this request. */
+    basis: basisSchema.optional(),
+    /** Present when this is the stored response of an earlier request. */
+    replayed: z.literal(true).optional(),
     fromVersion: z.number().int().nonnegative(),
     toVersion: z.number().int().nonnegative(),
     commands: z.array(agentCanvasCommandSchema),
@@ -1050,6 +1100,8 @@ export const rfsExecuteResponseSchema = z
               'cycle',
               'duplicate-id',
               'conflict',
+              'stale-target',
+              'stale-parent',
             ])
             .optional(),
           nodes: z.array(executeResultNodeSchema).optional(),

@@ -3,6 +3,7 @@
 
 import {
   agentNodeProjectionSchema,
+  projectAgentNodeTransition,
   type AgentNodeProjection,
 } from '@huabu/shared';
 
@@ -13,6 +14,7 @@ import {
 import { publishCanvasUpdate } from './canvas-sync.js';
 import { withCanvasMutex } from './write-coordinator.js';
 import { space } from '../storage/index.js';
+import { acquireWorkspaceOperationLease } from '../workspace.js';
 
 import type { CanvasNode } from '@huabu/shared/canvas-engine';
 
@@ -22,25 +24,30 @@ export async function projectAgentConversationActivity(
   threadId: string,
   lastActivityAt: number,
 ): Promise<void> {
-  await withCanvasMutex(canvasId, async () => {
-    const canvas = await space(canvasId).read();
-    for (const node of (canvas?.state.nodes ?? []) as CanvasNode[]) {
-      if (
-        node.type !== 'question' ||
-        node.data.threadId !== threadId ||
-        (typeof node.data.lastActivityAt === 'number' &&
-          node.data.lastActivityAt >= lastActivityAt)
-      )
-        continue;
-      if (
-        !(await projectAgentNodeStateAlreadyLocked(canvasId, node.id, {
-          threadId,
-          lastActivityAt,
-        }))
-      )
-        throw new Error('Conversation activity projection was rejected');
-    }
-  });
+  const lease = acquireWorkspaceOperationLease();
+  try {
+    await withCanvasMutex(canvasId, async () => {
+      const canvas = await space(canvasId).read();
+      for (const node of (canvas?.state.nodes ?? []) as CanvasNode[]) {
+        if (
+          node.type !== 'question' ||
+          node.data.threadId !== threadId ||
+          (typeof node.data.lastActivityAt === 'number' &&
+            node.data.lastActivityAt >= lastActivityAt)
+        )
+          continue;
+        if (
+          !(await projectAgentNodeStateAlreadyLocked(canvasId, node.id, {
+            threadId,
+            lastActivityAt,
+          }))
+        )
+          throw new Error('Conversation activity projection was rejected');
+      }
+    });
+  } finally {
+    lease.release();
+  }
 }
 
 export async function projectAgentNodeState(
@@ -48,9 +55,14 @@ export async function projectAgentNodeState(
   nodeId: string,
   transition: AgentNodeProjection,
 ): Promise<boolean> {
-  return withCanvasMutex(canvasId, () =>
-    projectAgentNodeStateAlreadyLocked(canvasId, nodeId, transition),
-  );
+  const lease = acquireWorkspaceOperationLease();
+  try {
+    return await withCanvasMutex(canvasId, () =>
+      projectAgentNodeStateAlreadyLocked(canvasId, nodeId, transition),
+    );
+  } finally {
+    lease.release();
+  }
 }
 
 /** Caller owns the Canvas mutex; never acquire another lock from this entry. */
@@ -71,37 +83,14 @@ export async function projectAgentNodeStateAlreadyLocked(
     stored.data.threadId !== transition.threadId
   )
     return false;
-  if (
-    transition.expectedInvocationToken !== undefined &&
-    stored.data.invocationToken !== transition.expectedInvocationToken
-  )
-    return false;
-  if (
-    stored.data.bindingState === 'bound' &&
-    transition.bindingState === 'editing'
-  ) {
-    throw new Error('An established Agent binding cannot be demoted');
-  }
   const record = await handle.nodes.read(nodeId);
   const node = hydrateCanvasNodes(
     record ? new Map([[nodeId, record]]) : new Map(),
     [stored],
   )[0];
   if (!node) return false;
-  const {
-    threadId: _threadId,
-    expectedInvocationToken: _expected,
-    initialContent,
-    ...patch
-  } = parsed.data;
-  const data: Record<string, unknown> = { ...node.data, ...patch };
-  if (
-    initialContent !== undefined &&
-    !node.data.invocationToken &&
-    typeof node.data.content === 'string' &&
-    node.data.content.trim().length === 0
-  )
-    data.content = initialContent;
+  const data = projectAgentNodeTransition(node.data, parsed.data);
+  if (!data) return false;
   const output = await applyDeltasOnServerAlreadyLocked({
     canvasId,
     deltas: [{ type: 'REPLACE_NODE', prev: node, next: { ...node, data } }],
@@ -128,24 +117,29 @@ export async function acknowledgeAgentNodeResult(
   nodeId: string,
   invocationToken: string | null,
 ): Promise<boolean> {
-  return withCanvasMutex(canvasId, async () => {
-    const canvas = await space(canvasId).read();
-    const node = (canvas?.state.nodes as CanvasNode[] | undefined)?.find(
-      (item) => item.id === nodeId,
-    );
-    if (
-      node?.type !== 'question' ||
-      (node.data.invocationToken ?? null) !== invocationToken ||
-      (node.data.status !== 'done' && node.data.status !== 'error') ||
-      typeof node.data.threadId !== 'string'
-    )
-      return false;
-    return projectAgentNodeStateAlreadyLocked(canvasId, nodeId, {
-      threadId: node.data.threadId,
-      ...(invocationToken !== null
-        ? { expectedInvocationToken: invocationToken }
-        : {}),
-      viewed: true,
+  const lease = acquireWorkspaceOperationLease();
+  try {
+    return await withCanvasMutex(canvasId, async () => {
+      const canvas = await space(canvasId).read();
+      const node = (canvas?.state.nodes as CanvasNode[] | undefined)?.find(
+        (item) => item.id === nodeId,
+      );
+      if (
+        node?.type !== 'question' ||
+        (node.data.invocationToken ?? null) !== invocationToken ||
+        (node.data.status !== 'done' && node.data.status !== 'error') ||
+        typeof node.data.threadId !== 'string'
+      )
+        return false;
+      return projectAgentNodeStateAlreadyLocked(canvasId, nodeId, {
+        threadId: node.data.threadId,
+        ...(invocationToken !== null
+          ? { expectedInvocationToken: invocationToken }
+          : {}),
+        viewed: true,
+      });
     });
-  });
+  } finally {
+    lease.release();
+  }
 }

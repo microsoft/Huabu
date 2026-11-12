@@ -9,6 +9,8 @@ import {
   moveNodeOutOfContainer,
   type NestableNode,
 } from '../container/index.js';
+import { indexById } from '../container/tree.js';
+import { hasUnlockedAncestry } from '../siblingOrder.js';
 
 import type { CanvasCommand } from '../../index.js';
 import type { Node } from '@xyflow/react';
@@ -31,6 +33,10 @@ const setNodeParent: CommandDefinition<Cmd> = {
     const mutatedNodes: Node[] = [];
     const affectedFrameIds = new Set<string>();
     const parentId = cmd.parentId as string | null;
+    const byId = indexById(result);
+    const requested = new Set<string>(cmd.nodeIds);
+    if (requested.size !== cmd.nodeIds.length)
+      return noop(state, 'invalid-target');
 
     // Whole-command validation gate. A missing target node or a missing
     // parent frame is a hard error surfaced to the caller (`invalid-target`
@@ -40,14 +46,17 @@ const setNodeParent: CommandDefinition<Cmd> = {
     // caller can react — dependent reparents should run in a later turn
     // against the real ids returned by CREATE_NODES.
     for (const nodeId of cmd.nodeIds) {
-      if (!result.some((n) => n.id === (nodeId as string))) {
+      if (!byId.has(nodeId)) {
         return noop(state, 'invalid-target');
       }
+      if (!hasUnlockedAncestry(byId, nodeId))
+        return noop(state, 'invalid-parent');
     }
     if (parentId) {
       const parent = result.find((node) => node.id === parentId);
       if (!parent) return noop(state, 'invalid-parent');
-      if (parent.data?.locked) return noop(state, 'invalid-parent');
+      if (!hasUnlockedAncestry(byId, parentId))
+        return noop(state, 'invalid-parent');
       for (const nodeId of cmd.nodeIds) {
         const child = result.find((node) => node.id === (nodeId as string));
         if (!canParentNode(parent, child)) {
@@ -71,7 +80,10 @@ const setNodeParent: CommandDefinition<Cmd> = {
     }
 
     let changed = false;
-    for (const nodeId of cmd.nodeIds) {
+    const orderedNodeIds = state.nodes
+      .filter((node) => requested.has(node.id))
+      .map((node) => node.id);
+    for (const nodeId of orderedNodeIds) {
       const id = nodeId as string;
       const node = result.find((n) => n.id === id);
       if (!node) continue;

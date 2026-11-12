@@ -129,6 +129,94 @@ export const SQLITE_MIGRATIONS: readonly SqliteMigration[] = Object.freeze([
       CREATE INDEX spaces_by_parent ON spaces(workspace_id, parent_space_id);
     `,
   }),
+  Object.freeze({
+    version: 3,
+    sql: `
+      CREATE TABLE operation_heads (
+        workspace_id TEXT NOT NULL,
+        canvas_id TEXT NOT NULL PRIMARY KEY,
+        metadata_json TEXT NOT NULL CHECK (json_valid(metadata_json)),
+        FOREIGN KEY (canvas_id) REFERENCES spaces(canvas_id) ON DELETE CASCADE
+      ) STRICT;
+      CREATE TABLE operation_sessions (
+        workspace_id TEXT NOT NULL,
+        canvas_id TEXT NOT NULL,
+        space_epoch TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        principal_id TEXT NOT NULL,
+        session_json TEXT NOT NULL CHECK (json_valid(session_json)),
+        PRIMARY KEY (workspace_id, canvas_id, space_epoch, session_id),
+        FOREIGN KEY (workspace_id) REFERENCES workspaces(workspace_id) ON DELETE CASCADE
+      ) STRICT;
+      CREATE TABLE operation_receipts (
+        workspace_id TEXT NOT NULL,
+        canvas_id TEXT NOT NULL,
+        space_epoch TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        operation_id TEXT NOT NULL,
+        digest TEXT NOT NULL,
+        receipt_json TEXT NOT NULL CHECK (json_valid(receipt_json)),
+        PRIMARY KEY (workspace_id, canvas_id, space_epoch, session_id, operation_id),
+        FOREIGN KEY (workspace_id, canvas_id, space_epoch, session_id)
+          REFERENCES operation_sessions(workspace_id, canvas_id, space_epoch, session_id)
+      ) STRICT;
+      CREATE TABLE operation_commits (
+        workspace_id TEXT NOT NULL,
+        canvas_id TEXT NOT NULL,
+        space_epoch TEXT NOT NULL,
+        version INTEGER NOT NULL,
+        commit_json TEXT NOT NULL CHECK (json_valid(commit_json)),
+        PRIMARY KEY (workspace_id, canvas_id, space_epoch, version),
+        FOREIGN KEY (canvas_id) REFERENCES spaces(canvas_id) ON DELETE CASCADE
+      ) STRICT;
+    `,
+  }),
+  // The work_json column is unused. The migration is retained only so that
+  // databases which already ran it keep opening.
+  Object.freeze({
+    version: 4,
+    sql: `ALTER TABLE operation_heads ADD COLUMN work_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(work_json));`,
+  }),
+  // Reliable save: per-Space version stamps and per-request result records.
+  // Both hang off the Space row, so they follow it through rename and
+  // re-parenting and are removed with it.
+  Object.freeze({
+    version: 5,
+    sql: `
+      CREATE TABLE space_save_heads (
+        canvas_id TEXT PRIMARY KEY,
+        lineage TEXT NOT NULL,
+        floor INTEGER NOT NULL,
+        stamps_json TEXT NOT NULL CHECK (json_valid(stamps_json)),
+        FOREIGN KEY (canvas_id) REFERENCES spaces(canvas_id) ON DELETE CASCADE
+      ) STRICT;
+      CREATE TABLE space_save_results (
+        canvas_id TEXT NOT NULL,
+        principal_id TEXT NOT NULL,
+        operation_id TEXT NOT NULL,
+        digest TEXT NOT NULL,
+        at_version INTEGER NOT NULL,
+        created_at REAL NOT NULL,
+        response_json TEXT NOT NULL CHECK (json_valid(response_json)),
+        PRIMARY KEY (canvas_id, principal_id, operation_id),
+        FOREIGN KEY (canvas_id) REFERENCES spaces(canvas_id) ON DELETE CASCADE
+      ) STRICT;
+      CREATE INDEX space_save_results_by_age
+        ON space_save_results(canvas_id, created_at);
+    `,
+  }),
+  // The operation_* tables of v3 and v4 belonged to a separate operation
+  // path that was removed before it carried production data. Receipts go
+  // first: they reference sessions.
+  Object.freeze({
+    version: 6,
+    sql: `
+      DROP TABLE operation_receipts;
+      DROP TABLE operation_sessions;
+      DROP TABLE operation_commits;
+      DROP TABLE operation_heads;
+    `,
+  }),
 ]);
 
 export const SQLITE_SCHEMA_VERSION =

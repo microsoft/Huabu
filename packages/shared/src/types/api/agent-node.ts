@@ -225,6 +225,7 @@ export const agentNodeProjectionSchema = z
     errorMessage: z.string().optional(),
     viewed: z.boolean().optional(),
     initialContent: z.string().optional(),
+    pendingInkIntentLabel: z.literal(false).optional(),
   })
   .strict();
 export type AgentNodeProjection = z.infer<typeof agentNodeProjectionSchema>;

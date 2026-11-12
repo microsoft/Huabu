@@ -10,6 +10,7 @@ import { extractCanvasChanges } from '@huabu/shared/canvas-engine';
 import {
   applySqliteMigrations,
   SqliteStoreContext,
+  SQLITE_MIGRATIONS,
   SQLITE_SCHEMA_VERSION,
 } from './database.js';
 import { SqliteStructuredStore } from './structured-store.js';
@@ -231,6 +232,11 @@ describe('SqliteStructuredStore lifecycle and schema', () => {
       );
       expect(productionTables.every((row) => row['strict'] === 1)).toBe(true);
       expect(
+        tableRows
+          .map((row) => String(row['name']))
+          .filter((name) => name.startsWith('operation_')),
+      ).toEqual([]);
+      expect(
         database
           .prepare('PRAGMA foreign_key_list(nodes)')
           .all()
@@ -324,6 +330,60 @@ describe('SqliteStructuredStore lifecycle and schema', () => {
         originator: { source: 'system' },
       },
     ]);
+  });
+
+  it('drops the retired operation tables from a v5 database and keeps its data', async () => {
+    const file = trackedFile('huabu-sqlite-v5-schema-');
+    const operationTables = () =>
+      withTestDatabase(file.filename, (database) =>
+        database
+          .prepare(
+            `SELECT name FROM sqlite_schema
+             WHERE type IN ('table', 'index') AND name LIKE '%operation_%'
+             ORDER BY name`,
+          )
+          .all()
+          .map((row) => String(row['name'])),
+      );
+    withTestDatabase(file.filename, (database) => {
+      applySqliteMigrations(database, SQLITE_MIGRATIONS.slice(0, 5));
+      database.exec(`
+        INSERT INTO workspaces VALUES ('w', 'W', 1, 1, NULL);
+        INSERT INTO spaces (workspace_id, canvas_id, title, collision_key, version, created_at, updated_at, state_json)
+          VALUES ('w', 's', 'S', 's', 3, 1, 1, '{}');
+        INSERT INTO operation_heads (workspace_id, canvas_id, metadata_json)
+          VALUES ('w', 's', '{}');
+        INSERT INTO operation_sessions VALUES ('w', 's', 'e', 'sess', 'p', '{}');
+        INSERT INTO operation_receipts VALUES ('w', 's', 'e', 'sess', 'op', 'd', '{}');
+        INSERT INTO operation_commits VALUES ('w', 's', 'e', 1, '{}');
+        INSERT INTO space_save_heads VALUES ('s', 'l', 3, '{}');
+      `);
+    });
+    expect(operationTables()).toEqual(
+      expect.arrayContaining([
+        'operation_commits',
+        'operation_heads',
+        'operation_receipts',
+        'operation_sessions',
+      ]),
+    );
+
+    const store = trackedStore(file.filename);
+    await store.init();
+
+    expect(operationTables()).toEqual([]);
+    withTestDatabase(file.filename, (database) => {
+      expect(database.prepare('PRAGMA user_version').get()).toEqual({
+        user_version: SQLITE_SCHEMA_VERSION,
+      });
+      expect(database.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
+      expect(
+        database.prepare('SELECT canvas_id, version FROM spaces').all(),
+      ).toEqual([{ canvas_id: 's', version: 3 }]);
+      expect(
+        database.prepare('SELECT canvas_id, floor FROM space_save_heads').all(),
+      ).toEqual([{ canvas_id: 's', floor: 3 }]);
+    });
   });
 
   it('rejects a database whose user_version is from the future', async () => {

@@ -2,6 +2,49 @@
 // Licensed under the MIT license.
 
 const MAX_TITLE_LENGTH = 120;
+import type { ConversationTitle } from '../types/api/conversation-title.js';
+
+export function acceptsConversationTitle(
+  current: ConversationTitle,
+  source: NonNullable<ConversationTitle['source']>,
+): boolean {
+  return (
+    source === 'user' ||
+    (current.source !== 'user' &&
+      current.source !== 'generated' &&
+      (source !== 'fallback' ||
+        !current.title ||
+        current.source === 'fallback'))
+  );
+}
+
+export function questionConversationTitle(
+  data: Readonly<Record<string, unknown>>,
+): {
+  title: ConversationTitle;
+  protected: boolean;
+} {
+  const title = normalizeConversationTitle(data.label);
+  const owner = data.labelSource;
+  const source = data.conversationTitleSource;
+  return {
+    protected: !!title && (owner === 'user' || owner === 'agent'),
+    title: {
+      title,
+      source: !title
+        ? null
+        : owner === 'user'
+          ? 'user'
+          : owner === 'agent'
+            ? 'generated'
+            : source === 'generated' ||
+                source === 'acp' ||
+                source === 'fallback'
+              ? source
+              : 'fallback',
+    },
+  };
+}
 
 function normalizeWhitespace(value: unknown): string | null {
   if (typeof value !== 'string') return null;

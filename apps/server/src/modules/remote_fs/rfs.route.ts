@@ -26,6 +26,7 @@
  * - `GET    capabilities*`   — discover direct query/command contracts.
  * - `POST   query`           — run one bounded canonical SpaceQuery.
  * - `POST   execute`         — execute validated agent Space commands.
+ * - `GET    execute/:operationId` — stored response of an earlier execute.
  *
  * Errors keep the repo-standard `{ message }` shape and, on `4xx`/`5xx`, fold
  * a runnable `/skill` recovery command into the message (self-healing pull).
@@ -54,6 +55,8 @@ import {
   rfsAgentPromptRequestSchema,
   rfsExecuteHeadersSchema,
   rfsExecuteRequestSchema,
+  recentCanvasConversationParamsSchema,
+  rfsUploadParamsSchema,
   rfsInkIntentParamsSchema,
   rfsInkIntentRequestSchema,
   RFS_SKILL_CLIENT_HEADER,
@@ -72,7 +75,9 @@ import {
   type RfsAgentEventMode,
   type RfsAgentCreateResponse,
   type RfsAgentProfilesResponse,
+  type RfsUploadParams,
   type RfsUploadResponse,
+  type RecentCanvasConversationParams,
   type AgentStreamEvent,
   type StartTaskRunResponse,
   type ServiceParams,
@@ -94,7 +99,12 @@ import {
   getQueryCapability,
   getRfsCapabilities,
 } from './space-capabilities.js';
-import { executeRfsCommands } from './space-execute.js';
+import {
+  executeRfsCommands,
+  NotAnRfsExecuteResultError,
+  lookupRfsExecuteResponse,
+} from './space-execute.js';
+import { safeJoin } from '../../utils/fs.js';
 import {
   AgentNodeCreationError,
   agentNodeService,
@@ -120,9 +130,16 @@ import {
   InkIntentTurnError,
   reportInkIntent,
 } from '../agent/tools/handlers/report-ink-intent.js';
-import { CanvasNotFoundError } from '../canvas/canvas-executor.js';
+import {
+  CanvasNotFoundError,
+  ExecuteBasisError,
+  ExecuteOutcomeUnknownError,
+  ExecuteRequestReusedError,
+} from '../canvas/canvas-executor.js';
 import { executeSpaceQuery, SpaceQueryError } from '../canvas/space-query.js';
 import { WorldPreviewMutationError } from '../canvas/world-preview-policy.js';
+import { withCanvasMutex } from '../canvas/write-coordinator.js';
+import { getRequestIdentity } from '../identity/request.js';
 import {
   InteractiveViewServiceError,
   interactiveViewService,
@@ -144,6 +161,7 @@ import {
 } from '../task/run-completion.service.js';
 import { RunLaunchError, runLauncher } from '../task/run-launcher.js';
 import { TaskCreationError, taskService } from '../task/task.service.js';
+import { acquireWorkspaceOperationLease } from '../workspace.js';
 
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 
@@ -165,6 +183,18 @@ function rfsError(
     ...(code ? { code } : {}),
     ...(details !== undefined ? { details } : {}),
   };
+}
+
+async function withLegacyUploadMutation<T>(
+  canvasId: string,
+  mutate: () => Promise<T>,
+): Promise<T> {
+  const lease = acquireWorkspaceOperationLease();
+  try {
+    return await withCanvasMutex(canvasId, mutate);
+  } finally {
+    lease.release();
+  }
 }
 
 function interactiveViewStatus(error: InteractiveViewServiceError): number {
@@ -779,9 +809,16 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
   );
 
   // ── POST /:canvasId/execute ──
-  app.post<{ Params: { canvasId: string } }>(
+  app.post<{ Params: RecentCanvasConversationParams }>(
     '/:canvasId/execute',
     async (request, reply) => {
+      const params = recentCanvasConversationParamsSchema.safeParse(
+        request.params,
+      );
+      if (!params.success)
+        return reply
+          .code(400)
+          .send(rfsError('Invalid Space identity.', 'validation_failed'));
       const body = request.body;
       const buffer = Buffer.isBuffer(body) ? body : Buffer.alloc(0);
       let json: unknown;
@@ -808,17 +845,88 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
       // Best-effort change attribution: when the agent forwards its
       // injected `HUABU_THREAD_ID` via `X-Huabu-Host-Thread-Id`, tag the
       // batch to that host conversation so its change-review card fills.
-      // Absent / malformed → the write still applies, just unattributed.
-      const parsedHeaders = rfsExecuteHeadersSchema.safeParse(request.headers);
-      const hostThreadId = parsedHeaders.success
-        ? parsedHeaders.data['x-huabu-host-thread-id']
+      // Absent / malformed / not a thread of this Space → the write still
+      // applies, just unattributed.
+      const headerFields = rfsExecuteHeadersSchema.shape;
+      const parsedThread = headerFields['x-huabu-host-thread-id'].safeParse(
+        request.headers['x-huabu-host-thread-id'],
+      );
+      const claimedThreadId = parsedThread.success
+        ? parsedThread.data
         : undefined;
 
+      // The request id and read version may travel in a header so a client
+      // can forward the body bytes untouched. Unlike attribution they change
+      // what the request means, so a malformed or contradicting value is
+      // refused rather than ignored.
+      const parsedOperationId = headerFields['x-huabu-operation-id'].safeParse(
+        request.headers['x-huabu-operation-id'],
+      );
+      const parsedBasis = headerFields['x-huabu-basis'].safeParse(
+        request.headers['x-huabu-basis'],
+      );
+      if (!parsedOperationId.success || !parsedBasis.success) {
+        return reply
+          .code(400)
+          .send(
+            rfsError(
+              `Invalid ${parsedOperationId.success ? 'X-Huabu-Basis' : 'X-Huabu-Operation-Id'} header.`,
+              'validation_failed',
+            ),
+          );
+      }
+      const operationId = parsed.data.operationId ?? parsedOperationId.data;
+      const basis = parsed.data.basis ?? parsedBasis.data;
+      if (
+        (parsedOperationId.data !== undefined &&
+          parsedOperationId.data.toLowerCase() !==
+            operationId?.toLowerCase()) ||
+        (parsedBasis.data !== undefined && parsedBasis.data !== basis)
+      ) {
+        return reply
+          .code(400)
+          .send(
+            rfsError(
+              'The request id or basis in the headers differs from the one in the body.',
+              'validation_failed',
+            ),
+          );
+      }
+      // Stored responses are kept per authenticated caller; the principal is
+      // the transport's, never a value the request supplies.
+      const principalId = getRequestIdentity(request)?.principal.principalId;
+      if (operationId !== undefined && !principalId) {
+        return reply
+          .code(401)
+          .send(
+            rfsError(
+              'A request id requires an authenticated caller.',
+              'identity_required',
+            ),
+          );
+      }
+
       try {
+        // Known limitation: every machine-token caller is one principal, so
+        // this checks the thread is in this Space, not that the caller is it.
+        const hostThreadId =
+          claimedThreadId !== undefined &&
+          (await agentThreadService.ownsThread(
+            params.data.canvasId,
+            claimedThreadId,
+          ))
+            ? claimedThreadId
+            : undefined;
         return reply.send(
-          await executeRfsCommands(request.params.canvasId, parsed.data, {
-            hostThreadId,
-          }),
+          await executeRfsCommands(
+            params.data.canvasId,
+            {
+              ...parsed.data,
+              ...(operationId !== undefined ? { operationId } : {}),
+              ...(basis !== undefined ? { basis } : {}),
+            },
+            { hostThreadId, claimedThreadId, principalId },
+          ),
         );
       } catch (error) {
         if (error instanceof CanvasNotFoundError) {
@@ -829,6 +937,40 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
         if (error instanceof WorldPreviewMutationError) {
           return reply.code(409).send(rfsError(error.message));
         }
+        if (error instanceof ExecuteRequestReusedError) {
+          return reply
+            .code(409)
+            .send(
+              rfsError(
+                'This operation id was already used for a different request. Use a new operation id for a new request.',
+                'operation-id-reused',
+              ),
+            );
+        }
+        if (error instanceof ExecuteBasisError) {
+          return reply
+            .code(409)
+            .send(
+              rfsError(
+                'The basis is not a read version of this Space. Nothing was applied; query again for a current basis.',
+                'basis-unknown',
+              ),
+            );
+        }
+        if (error instanceof ExecuteOutcomeUnknownError) {
+          request.log.error(
+            { err: error, canvasId: request.params.canvasId },
+            'rfs Space execution outcome is unknown',
+          );
+          return reply
+            .code(503)
+            .send(
+              rfsError(
+                'The outcome of this request is unknown. Send it again with the same operation id; do not send it under a new one.',
+                'operation-outcome-unknown',
+              ),
+            );
+        }
         request.log.error(
           { err: error, canvasId: request.params.canvasId },
           'rfs Space execution failed',
@@ -836,6 +978,57 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
         return reply
           .code(500)
           .send(rfsError('Failed to execute the Space commands.'));
+      }
+    },
+  );
+
+  // ── GET /:canvasId/execute/:operationId ──
+  // The stored response of an earlier execute request of this caller, shaped
+  // as a repeat of that request would be answered. Never executes anything.
+  app.get<{ Params: { canvasId: string; operationId: string } }>(
+    '/:canvasId/execute/:operationId',
+    async (request, reply) => {
+      const params = recentCanvasConversationParamsSchema.safeParse({
+        canvasId: request.params.canvasId,
+      });
+      const operationId = rfsExecuteRequestSchema.shape.operationId.safeParse(
+        request.params.operationId,
+      );
+      if (!params.success || !operationId.success || !operationId.data) {
+        return reply
+          .code(400)
+          .send(
+            rfsError('Invalid Space or operation id.', 'validation_failed'),
+          );
+      }
+      const notFound = () =>
+        reply
+          .code(404)
+          .send(
+            rfsError(
+              'No stored result for this operation id. Either the request was never saved, it was sent by another caller, or the record has expired.',
+              'operation_not_found',
+            ),
+          );
+      const principalId = getRequestIdentity(request)?.principal.principalId;
+      if (!principalId) return notFound();
+      try {
+        const stored = await lookupRfsExecuteResponse(params.data.canvasId, {
+          principalId,
+          operationId: operationId.data,
+        });
+        return stored ? reply.send(stored) : notFound();
+      } catch (error) {
+        // Stored, but not by an RFS execute (the canvas route keeps results
+        // under the same principal): for this endpoint there is no result.
+        if (error instanceof NotAnRfsExecuteResultError) return notFound();
+        request.log.error(
+          { err: error, canvasId: params.data.canvasId },
+          'rfs stored execute result lookup failed',
+        );
+        return reply
+          .code(500)
+          .send(rfsError('Failed to read the stored result.'));
       }
     },
   );
@@ -927,37 +1120,21 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
   );
 
   // ── POST /:canvasId/upload/* ──
-  app.post<{ Params: { canvasId: string; '*': string } }>(
+  app.post<{ Params: RfsUploadParams }>(
     '/:canvasId/upload/*',
     async (request, reply) => {
-      const { canvasId } = request.params;
-      const filename = request.params['*'];
-      if (!filename) {
+      const params = rfsUploadParamsSchema.safeParse(request.params);
+      if (!params.success) {
         return reply
           .code(400)
-          .send(rfsError('An upload filename is required (upload/<file>).'));
-      }
-
-      let absPath: string;
-      try {
-        absPath = safeResolve(canvasId, path.join('.upload', filename));
-      } catch {
-        return reply
-          .code(400)
-          .send(rfsError(`Upload path "${filename}" is not allowed.`));
-      }
-
-      if (existsSync(absPath)) {
-        return reply
-          .code(409)
           .send(
             rfsError(
-              `A file already named "upload/${filename}" exists; ` +
-                `choose a different name (overwrite is not allowed).`,
+              'Invalid upload Space or filename (upload/<file>).',
+              'validation_failed',
             ),
           );
       }
-
+      const { canvasId, '*': filename } = params.data;
       const body = request.body;
       if (!Buffer.isBuffer(body)) {
         return reply
@@ -966,9 +1143,29 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
       }
 
       try {
-        await mkdir(path.dirname(absPath), { recursive: true });
-        await writeFile(absPath, body);
+        await withLegacyUploadMutation(canvasId, async () => {
+          const uploadRoot = safeResolve(canvasId, '.upload');
+          let absPath: string;
+          try {
+            absPath = safeJoin(uploadRoot, filename);
+          } catch {
+            return reply
+              .code(400)
+              .send(rfsError(`Upload path "${filename}" is not allowed.`));
+          }
+          await mkdir(path.dirname(absPath), { recursive: true });
+          await writeFile(absPath, body, { flag: 'wx' });
+        });
+        if (reply.sent) return reply;
       } catch (err) {
+        if (err instanceof Error && 'code' in err && err.code === 'EEXIST')
+          return reply
+            .code(409)
+            .send(
+              rfsError(
+                `A file already named "upload/${filename}" exists; choose a different name (overwrite is not allowed).`,
+              ),
+            );
         request.log.error({ err, canvasId, filename }, 'rfs upload failed');
         return reply
           .code(500)
@@ -984,33 +1181,48 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
   );
 
   // ── DELETE /:canvasId/upload/* ──
-  app.delete<{ Params: { canvasId: string; '*': string } }>(
+  app.delete<{ Params: RfsUploadParams }>(
     '/:canvasId/upload/*',
     async (request, reply) => {
-      const { canvasId } = request.params;
-      const filename = request.params['*'];
-      if (!filename) {
+      const params = rfsUploadParamsSchema.safeParse(request.params);
+      if (!params.success) {
         return reply
           .code(400)
-          .send(rfsError('An upload filename is required (upload/<file>).'));
+          .send(
+            rfsError(
+              'Invalid upload Space or filename (upload/<file>).',
+              'validation_failed',
+            ),
+          );
       }
-
-      let absPath: string;
+      const { canvasId, '*': filename } = params.data;
       try {
-        absPath = safeResolve(canvasId, path.join('.upload', filename));
-      } catch {
+        return await withLegacyUploadMutation(canvasId, async () => {
+          const uploadRoot = safeResolve(canvasId, '.upload');
+          let absPath: string;
+          try {
+            absPath = safeJoin(uploadRoot, filename);
+          } catch {
+            return reply
+              .code(400)
+              .send(rfsError(`Upload path "${filename}" is not allowed.`));
+          }
+          if (!existsSync(absPath))
+            return reply
+              .code(404)
+              .send(rfsError(`No staged file at "upload/${filename}".`));
+          await rm(absPath, { force: true });
+          return reply.code(204).send();
+        });
+      } catch (error) {
+        request.log.error(
+          { err: error, canvasId, filename },
+          'rfs upload deletion failed',
+        );
         return reply
-          .code(400)
-          .send(rfsError(`Upload path "${filename}" is not allowed.`));
+          .code(500)
+          .send(rfsError(`Failed to delete "upload/${filename}".`));
       }
-
-      if (!existsSync(absPath)) {
-        return reply
-          .code(404)
-          .send(rfsError(`No staged file at "upload/${filename}".`));
-      }
-      await rm(absPath, { force: true });
-      return reply.code(204).send();
     },
   );
 

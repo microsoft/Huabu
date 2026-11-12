@@ -386,6 +386,7 @@ describe('optional raw RFS client', () => {
         response.writeHead(304);
         response.end();
       } else {
+        response.setHeader('x-huabu-basis', 'b1.read');
         response.setHeader('content-length', '3');
         response.end(Buffer.from([0, 255, 10]));
       }
@@ -406,6 +407,7 @@ describe('optional raw RFS client', () => {
         output: target,
         size: 3,
         revision: 'revision',
+        basis: 'b1.read',
         contentType: 'application/octet-stream',
         node: {
           id: 'node-1',
@@ -426,6 +428,7 @@ describe('optional raw RFS client', () => {
         received: 3,
         size: 3,
         revision: 'revision',
+        basis: 'b1.read',
         contentType: 'application/octet-stream',
         node: {
           id: 'node-1',
@@ -893,10 +896,290 @@ describe('optional raw RFS client', () => {
     const dropped = await server((request) => {
       request.socket.destroy();
     });
-    const unknown = await call(['execute', '--json', '{}'], dropped);
+    const unknown = await call(
+      ['execute', '--json', '{}'],
+      dropped,
+      undefined,
+      { executeRetry: { backoffMs: [1] } },
+    );
     expect(unknown.code).toBe(1);
     expect(unknown.stderr).toContain('Remote outcome may be unknown');
     expect(unknown.stderr).not.toContain('private-token');
+  });
+
+  describe('execute request ids', () => {
+    const UUID =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+    const OPERATION = '11111111-1111-4111-8111-111111111111';
+    const fast = { executeRetry: { backoffMs: [1] } };
+    /** Record what each attempt sent, then let the test answer it. */
+    async function recorder(
+      answer: (
+        attempt: number,
+        request: IncomingMessage,
+        response: ServerResponse,
+      ) => void,
+    ) {
+      const seen: { id: string | undefined; basis: unknown; body: string }[] =
+        [];
+      const env = await server(async (request, response) => {
+        expect(request.url).toBe('/rfs/space/execute');
+        seen.push({
+          id: request.headers['x-huabu-operation-id'] as string | undefined,
+          basis: request.headers['x-huabu-basis'],
+          body: (await bytes(request)).toString(),
+        });
+        answer(seen.length, request, response);
+      });
+      return { env, seen };
+    }
+    const echo = (request: IncomingMessage, response: ServerResponse) =>
+      response.end(
+        JSON.stringify({
+          canvasId: 'space',
+          operationId: request.headers['x-huabu-operation-id'],
+          basis: 'b1.next',
+          results: [],
+        }),
+      );
+
+    it('adds a fresh request id per invocation and prints it with the basis, body untouched', async () => {
+      const { env, seen } = await recorder((_attempt, request, response) =>
+        echo(request, response),
+      );
+      const body = '{ "commands": [ ] }';
+      const first = await call(['execute', '--json', body], env);
+      const second = await call(['execute', '--json', body], env);
+      expect(first.code).toBe(0);
+      expect(seen).toHaveLength(2);
+      expect(seen[0]?.id).toMatch(UUID);
+      expect(seen[1]?.id).toMatch(UUID);
+      expect(seen[0]?.id).not.toBe(seen[1]?.id);
+      expect(seen[0]?.body).toBe(body);
+      expect(seen[0]?.basis).toBeUndefined();
+      // stdout stays the raw response, which names the effective id and basis.
+      expect(JSON.parse(first.stdout.toString())).toEqual({
+        canvasId: 'space',
+        operationId: seen[0]?.id,
+        basis: 'b1.next',
+        results: [],
+      });
+      expect(first.stderr).toBe('');
+      expect(JSON.parse(second.stdout.toString()).operationId).toBe(
+        seen[1]?.id,
+      );
+    });
+
+    it('forwards --operation-id and --basis, and keeps a request id the body names', async () => {
+      const { env, seen } = await recorder((_attempt, request, response) =>
+        echo(request, response),
+      );
+      const flagged = await call(
+        [
+          'execute',
+          '--json',
+          '{"commands":[]}',
+          '--operation-id',
+          OPERATION.toUpperCase(),
+          '--basis',
+          'b1.read',
+        ],
+        env,
+      );
+      expect(flagged.code).toBe(0);
+      expect(seen[0]).toEqual({
+        id: OPERATION,
+        basis: 'b1.read',
+        body: '{"commands":[]}',
+      });
+
+      const inBody = `{"operationId":"${OPERATION}","commands":[]}`;
+      await call(['execute', '--json', inBody], env);
+      expect(seen[1]).toEqual({
+        id: undefined,
+        basis: undefined,
+        body: inBody,
+      });
+
+      const invalid = await call(
+        ['execute', '--json', '{}', '--operation-id', 'nope'],
+        env,
+      );
+      expect(invalid.code).toBe(1);
+      expect(invalid.stderr).toContain('--operation-id must be a UUID');
+      expect(invalid.stderr).not.toContain('operation-id=');
+      expect(seen).toHaveLength(2);
+    });
+
+    it('retries a dropped connection and an unknown outcome with the same id and body', async () => {
+      const { env, seen } = await recorder((attempt, request, response) => {
+        if (attempt === 1) request.socket.destroy();
+        else if (attempt === 2)
+          response
+            .writeHead(503, { 'Content-Type': 'application/json' })
+            .end('{"code":"operation-outcome-unknown","message":"unknown"}');
+        else echo(request, response);
+      });
+      const body = '{"commands":[{"type":"CREATE_NODES"}]}';
+      const result = await call(
+        ['execute', '--json-file', '-'],
+        env,
+        Buffer.from(body),
+        fast,
+      );
+      expect(result.code).toBe(0);
+      expect(seen).toHaveLength(3);
+      expect(seen[0]?.id).toMatch(UUID);
+      expect(new Set(seen.map((attempt) => attempt.id)).size).toBe(1);
+      expect(seen.map((attempt) => attempt.body)).toEqual([body, body, body]);
+      // Only the final answer reaches stdout.
+      expect(JSON.parse(result.stdout.toString()).operationId).toBe(
+        seen[0]?.id,
+      );
+      expect(result.stderr).toContain('retrying with the same operation id');
+      expect(result.stderr).not.toContain('operation-id=');
+    });
+
+    it('retries an attempt that gets no response in time', async () => {
+      const { env, seen } = await recorder((attempt, request, response) => {
+        if (attempt > 1) echo(request, response);
+      });
+      const result = await call(['execute', '--json', '{}'], env, undefined, {
+        executeRetry: { backoffMs: [1], attemptTimeoutMs: 100 },
+      });
+      expect(result.code).toBe(0);
+      expect(seen).toHaveLength(2);
+      expect(seen[0]?.id).toBe(seen[1]?.id);
+      expect(result.stderr).toContain('no response in time');
+    });
+
+    it.each([400, 409, 422])(
+      'does not retry a %i rejection',
+      async (status) => {
+        const { env, seen } = await recorder((_attempt, _request, response) =>
+          response
+            .writeHead(status)
+            .end('{"code":"operation-id-reused","message":"no"}'),
+        );
+        const result = await call(
+          ['execute', '--json', '{}'],
+          env,
+          undefined,
+          fast,
+        );
+        expect(result.code).toBe(1);
+        expect(seen).toHaveLength(1);
+        expect(result.stdout.toString()).toContain('operation-id-reused');
+        expect(result.stderr).toContain(`status ${status}`);
+        expect(result.stderr).not.toContain('operation-id=');
+      },
+    );
+
+    it('does not retry a 503 that is not an unknown outcome', async () => {
+      const { env, seen } = await recorder((_attempt, _request, response) =>
+        response.writeHead(503).end('busy'),
+      );
+      const result = await call(
+        ['execute', '--json', '{}'],
+        env,
+        undefined,
+        fast,
+      );
+      expect(result.code).toBe(1);
+      expect(seen).toHaveLength(1);
+      expect(result.stderr).toContain(`operation-id=${seen[0]?.id}`);
+    });
+
+    it('gives up after four attempts and prints the request id with the error', async () => {
+      const { env, seen } = await recorder((_attempt, request) =>
+        request.socket.destroy(),
+      );
+      const result = await call(
+        ['execute', '--json', '{}', '--operation-id', OPERATION],
+        env,
+        undefined,
+        fast,
+      );
+      expect(result.code).toBe(1);
+      expect(seen).toHaveLength(4);
+      expect(seen.every((attempt) => attempt.id === OPERATION)).toBe(true);
+      expect(result.stdout.toString()).toBe('');
+      expect(result.stderr).toContain('Request failed after 4 attempts');
+      expect(result.stderr).toContain(`huabu-rfs: operation-id=${OPERATION}\n`);
+      expect(result.stderr).toContain(`--operation-id ${OPERATION}`);
+
+      const unknown = await recorder((_attempt, _request, response) =>
+        response
+          .writeHead(503)
+          .end('{"code":"operation-outcome-unknown","message":"unknown"}'),
+      );
+      const exhausted = await call(
+        ['execute', '--json', '{}'],
+        unknown.env,
+        undefined,
+        fast,
+      );
+      expect(exhausted.code).toBe(1);
+      expect(unknown.seen).toHaveLength(4);
+      expect(exhausted.stdout.toString()).toContain(
+        'operation-outcome-unknown',
+      );
+      expect(exhausted.stderr).toContain(`operation-id=${unknown.seen[0]?.id}`);
+    });
+
+    it('stops within the time budget and never retries a local interrupt', async () => {
+      const slow = await recorder(() => {});
+      const bounded = await call(
+        ['execute', '--json', '{}'],
+        slow.env,
+        undefined,
+        {
+          executeRetry: { backoffMs: [1], attemptTimeoutMs: 80, budgetMs: 150 },
+        },
+      );
+      expect(bounded.code).toBe(1);
+      expect(slow.seen.length).toBeGreaterThanOrEqual(1);
+      expect(slow.seen.length).toBeLessThan(4);
+      expect(bounded.stderr).toContain(`operation-id=${slow.seen[0]?.id}`);
+
+      const controller = new AbortController();
+      const hanging = await recorder(() => controller.abort());
+      const interrupted = await call(
+        ['execute', '--json', '{}'],
+        hanging.env,
+        undefined,
+        { ...fast, signal: controller.signal },
+      );
+      expect(interrupted.code).toBe(130);
+      expect(hanging.seen).toHaveLength(1);
+      expect(interrupted.stderr).toContain('Local delivery interrupted');
+      expect(interrupted.stderr).toContain(
+        `operation-id=${hanging.seen[0]?.id}`,
+      );
+    });
+
+    it('reads a stored result by request id without executing', async () => {
+      const env = await server((request, response) => {
+        expect(request.method).toBe('GET');
+        if (request.url === `/rfs/space/execute/${OPERATION}`)
+          response.end('{"operationId":"stored","replayed":true}');
+        else response.writeHead(404).end('{"code":"operation_not_found"}');
+      });
+      const found = await call(['result', OPERATION.toUpperCase()], env);
+      expect(found.code).toBe(0);
+      expect(found.stdout.toString()).toBe(
+        '{"operationId":"stored","replayed":true}',
+      );
+      const missing = await call(
+        ['result', '22222222-2222-4222-8222-222222222222'],
+        env,
+      );
+      expect(missing.code).toBe(1);
+      expect(missing.stdout.toString()).toContain('operation_not_found');
+      const invalid = await call(['result', '../skill'], env);
+      expect(invalid.code).toBe(1);
+      expect(invalid.stderr).toContain('Operation id must be a UUID');
+    });
   });
 
   it('aborts local SSE delivery without pretending to cancel remote work', async () => {
