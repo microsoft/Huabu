@@ -11,7 +11,8 @@
  *
  * Event kinds:
  *  - `invalidate` — ordinary saves/deletes invalidate bounded read models
- *    without replacing editable Canvas state.
+ *    without replacing editable Canvas state. With `nodeIds` it also tells
+ *    the other pages to fetch those nodes' saved content.
  *  - `snapshot` — sent once on connect. Carries the canvas's current
  *    `version` so a client that connected *after* a mutation can detect
  *    the gap (snapshot.version !== local version) and `loadCanvas` to
@@ -47,7 +48,15 @@ export const canvasSyncEventSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('invalidate'),
     /** Read-model notification, not an instruction to replace editable Canvas state. */
-    data: z.object({ nodeIds: z.array(z.string()).optional() }),
+    data: z.object({
+      nodeIds: z.array(z.string()).optional(),
+      /**
+       * Page that made the node-content save behind this event, when it
+       * named itself. That page already has what it wrote and does not
+       * fetch it again; every other page does.
+       */
+      originPageId: z.string().optional(),
+    }),
   }),
   z.object({
     type: z.literal('snapshot'),

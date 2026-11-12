@@ -17,6 +17,7 @@ import { useActivelyViewingQuestionNode } from '@/hooks/useActivelyViewingQuesti
 import { useTextNodeSurface } from '@/hooks/useTextNodeSurface';
 import { useAcpProfilesStore } from '@/store/acpProfilesStore.ts';
 import { useAcpThreadChangesStore } from '@/store/acpThreadChangesStore.ts';
+import { canStartEditing } from '@/store/canvasPresence/editLock';
 import useCanvasStore from '@/store/canvasStore.ts';
 import {
   selectThreadBinding,
@@ -452,6 +453,7 @@ export const QuestionNode = memo(
                     maxLength: 120,
                     onStart: () => {
                       if (titleSavePending.current) return;
+                      if (!canStartEditing(id)) return;
                       originalTitle.current = displayText.trim();
                       setTitleDraft(displayText);
                       setTitleError(null);

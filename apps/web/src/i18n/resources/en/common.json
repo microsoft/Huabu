@@ -1673,7 +1673,8 @@
   "canvasPresence": {
     "anotherDevice": "Another device",
     "editing": "{{label}} · editing",
-    "moving": "{{label}} · moving"
+    "moving": "{{label}} · moving",
+    "editLocked": "{{label}} is editing this. You can edit it when they finish."
   },
   "errors": {
     "connectAnAgent": "Connect an Agent",

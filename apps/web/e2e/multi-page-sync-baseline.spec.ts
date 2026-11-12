@@ -24,17 +24,11 @@ import type { CreateCanvasResponse } from '@huabu/shared';
  * Cases (a)–(e) are structure edits. They are sent as execute requests and
  * reach the other page live; their tests assert that behaviour.
  *
- * Case (f), note bodies, is not synced between pages yet, so it still has two
- * tests driven by the same scenario:
- *
- *  - `current: …` pins what the product does today. These are characterization
- *    tests, not endorsements: they pin a defect (a body that never reaches the
- *    other page, or a refused save). When the behaviour is fixed they are
- *    expected to fail and should be deleted.
- *  - `target: …` states the behaviour the product should have. They are
- *    `test.fixme` so the suite stays green; set `E2E_RUN_SYNC_TARGETS=1` to run
- *    them as `test.fail` and prove each one really fails today. Flip them to
- *    plain `test` as the implementation lands.
+ * Case (f) is a note body. It is saved by the per-node content request, which
+ * does not change the Space version; the other page is told which node was
+ * saved, fetches it and shows it. Its tests assert that, and that receiving a
+ * body changes nothing else on the receiving page. Titles, an open preview
+ * and the one-editor-at-a-time rule are in `content-sync.spec.ts`.
  *
  * Case (g) is the control: a headless execute request. Case (h) takes one
  * page offline while it edits. Case (i) undoes on one page after the other
@@ -54,8 +48,6 @@ test.use({ hasTouch: false });
 
 const LIVE_WINDOW_MS = 2_000;
 const CONFLICT_TOAST = /This Space was modified elsewhere/;
-
-const target = process.env.E2E_RUN_SYNC_TARGETS ? test.fail : test.fixme;
 
 const X = 'node-sync-x';
 const Y = 'node-sync-y';
@@ -255,6 +247,7 @@ async function storeState(page: Page) {
     const state = store.getState();
     return {
       version: state.version,
+      canUndo: state.canUndo,
       order: state.nodes.map((node) => node.id),
       selected: state.nodes
         .filter((node) => node.selected)
@@ -752,6 +745,10 @@ async function bodyScenario(
   const bodyA = 'Body written by page A';
   const bodyB = 'Body written by page B';
   const before = await domBody(b.page, X);
+  // What B is doing when the body arrives: Z selected, its own viewport.
+  await selectNode(b.page, Z);
+  const bViewportBefore = await viewport(b.page);
+  const bCallsBeforeA = b.calls.length;
   const mark = b.syncText().length;
   await editBody(a.page, X, bodyA);
   await expect.poll(() => serverBody(request, canvasId, X)).toBe(bodyA);
@@ -762,8 +759,14 @@ async function bodyScenario(
   await a.page.waitForTimeout(1_300);
   const versionAfterA = (await serverRecord(request, canvasId)).version;
   const live = await observeRemote(b, mark, before, () => domBody(b.page, X));
-  const bStoreLive = (await storeState(b.page)).content[X];
+  const bStateLive = await storeState(b.page);
+  const bStoreLive = bStateLive.content[X];
   const bReloadedLive = await wasReloaded(b.page);
+  // Everything B sent while it received the body, presence reports aside.
+  const bCallsWhileReceiving = b.calls
+    .slice(bCallsBeforeA)
+    .filter((call) => !call.path.startsWith('<space>/presence'));
+  const bViewportLive = await viewport(b.page);
 
   // B, still not reloaded, edits a different note.
   const bCallsBefore = b.calls.length;
@@ -797,6 +800,11 @@ async function bodyScenario(
     bLiveStore: bStoreLive,
     bFrames: live.frames,
     bReloadedLive,
+    bSelectedLive: bStateLive.selected,
+    bCanUndoLive: bStateLive.canUndo,
+    bPendingContentLive: bStateLive.pendingContent,
+    bViewportKept: bViewportLive === bViewportBefore,
+    bCallsWhileReceiving,
     bBodyCalls: bodyCalls,
     bToastAfterBody,
     serverBodyX: afterBodyB.node(X)?.data.content?.trim(),
@@ -1199,26 +1207,37 @@ test('(j) two pages that measure the same auto-height note report it once and do
 
 // ─── (f) note body ──────────────────────────────────────────────────────────
 
-test('current: (f) a note body edited on page A is not shown on page B until B reloads, but B can still save another note and a move', async ({
+test('(f) a note body edited on page A shows on page B without a reload, and B keeps editing other notes and moving nodes', async ({
   browser,
   request,
 }, testInfo) => {
   const result = await bodyScenario(browser, request, testInfo);
   const bodyA = 'Body written by page A';
   const bodyB = 'Body written by page B';
-  // A body save is a per-node write: the Space version does not move.
+  // A body save is a per-node write: the Space version does not move, and B
+  // is told which node was saved rather than sent an update.
   expect(result.versionAfterA).toBe(result.versionBefore);
-  // B is told something changed, but neither its card nor its store updates.
   expect(result.bFrames).toContain('invalidate');
   expect(result.bFrames).not.toContain('update');
-  expect(result.bLiveDom).toBe(result.before);
-  expect(result.bLiveStore).toBe(result.before);
+  // B's card and store show A's body, and the page was not reloaded.
+  expect(result.bLiveDom).toBe(bodyA);
+  expect(result.bLiveStore?.trim()).toBe(bodyA);
   expect(result.bReloadedLive).toBe(false);
-  // B's own body edit to a different note is accepted; both bodies are saved.
+  // Receiving it changed nothing else on B: no request of any kind was sent
+  // (no save, structure write or preprocessing run), nothing is waiting to
+  // be saved, there is nothing to undo, and selection and viewport stayed.
+  expect(result.bCallsWhileReceiving).toEqual([]);
+  expect(result.bPendingContentLive).toEqual([]);
+  expect(result.bCanUndoLive).toBe(false);
+  expect(result.bSelectedLive).toEqual([Z]);
+  expect(result.bViewportKept).toBe(true);
+  // B's own body edit to a different note is accepted; both bodies are saved
+  // and A shows B's without reloading either.
   expect(result.bBodyCalls.map((call) => call.status)).not.toContain(409);
   expect(result.serverBodyX).toBe(bodyA);
   expect(result.serverBodyY).toBe(bodyB);
   expect(result.bToastAfterBody).toBe(0);
+  expect(result.aShowsBodyY?.trim()).toBe(bodyB);
   // B's later move is an execute request; it is accepted and leaves both
   // bodies intact.
   expect(
@@ -1228,50 +1247,24 @@ test('current: (f) a note body edited on page A is not shown on page B until B r
   expect(result.serverBodyXAfterMove).toBe(bodyA);
   expect(result.serverBodyYAfterMove).toBe(bodyB);
   expect(result.bToastAfterMove).toBe(0);
-  // Neither page ever shows the other's body without reloading.
-  expect(result.aShowsBodyY).toBe(`Seed body ${Y}`);
   expect(result.bDomAfterReload).toBe(bodyA);
 });
 
-test('current: (f) page B editing the same note after page A is refused and asked to choose a version', async ({
+test("(f) page B editing the same note after page A has saved builds on A's body and is accepted", async ({
   browser,
   request,
 }, testInfo) => {
   const result = await sameBodyScenario(browser, request, testInfo);
-  expect(result.bCalls.map((call) => call.status)).toContain(409);
-  expect(result.bCalls.map((call) => call.response).join()).toContain(
+  // B's save descends from the revision it fetched, so it is not refused.
+  expect(result.bCalls.map((call) => call.status)).not.toContain(409);
+  expect(result.bCalls.map((call) => call.response).join()).not.toContain(
     'NODE_CONTENT_CONFLICT',
   );
-  expect(result.serverBodyX).toBe('Body written by page A');
+  expect(result.serverBodyX).toBe('Body written by page B');
   expect(result.bShowsBody).toBe('Body written by page B');
-  expect(result.bConflictActions.sort()).toEqual(['Keep mine', 'Load latest']);
+  expect(result.bConflictActions).toEqual([]);
   expect(result.bReloaded).toBe(false);
 });
-
-target(
-  "target: (f) page B editing the same note after page A has saved builds on A's body and is accepted",
-  async ({ browser, request }, testInfo) => {
-    const result = await sameBodyScenario(browser, request, testInfo);
-    expect(result.bCalls.map((call) => call.status)).not.toContain(409);
-    expect(result.serverBodyX).toBe('Body written by page B');
-    expect(result.bConflictActions).toEqual([]);
-    expect(result.bReloaded).toBe(false);
-  },
-);
-
-target(
-  'target: (f) a note body edited on page A shows on page B, and B can keep editing other notes and moving nodes',
-  async ({ browser, request }, testInfo) => {
-    const result = await bodyScenario(browser, request, testInfo);
-    expect(result.bLiveDom).toBe('Body written by page A');
-    expect(result.bReloadedLive).toBe(false);
-    expect(result.serverBodyX).toBe('Body written by page A');
-    expect(result.serverBodyY).toBe('Body written by page B');
-    expect(result.aShowsBodyY?.trim()).toBe('Body written by page B');
-    expect(result.serverYAfterMove).toEqual(result.yMoved);
-    expect(result.bToastAfterMove).toBe(0);
-  },
-);
 
 // ─── (g) control: execute ───────────────────────────────────────────────────
 

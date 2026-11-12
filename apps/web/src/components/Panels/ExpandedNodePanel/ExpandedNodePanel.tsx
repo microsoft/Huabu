@@ -8,6 +8,11 @@ import { useTranslation } from 'react-i18next';
 
 import { getNodeIcon } from '@/config/nodeIcons.ts';
 import { formatShortcutById, matchesShortcut } from '@/config/shortcuts.ts';
+import {
+  canStartEditing,
+  showEditLockedHint,
+  useEditLockHolder,
+} from '@/store/canvasPresence/editLock';
 import { selectCanWriteCanvas } from '@/store/canvasStore';
 
 import { InPreviewSearchBar } from './InPreviewSearchBar.tsx';
@@ -218,6 +223,14 @@ export const ExpandedNodePanel = ({
   const edges = useCanvasStore((s) => s.edges);
   const canvasId = useCanvasStore((s) => s.canvasId);
   const canWrite = useCanvasStore(selectCanWriteCanvas);
+  // One editor at a time: while another page is editing this node the
+  // preview is read-only here and its title cannot be edited.
+  const editLockHolder = useEditLockHolder(expandedNodeId);
+  const editLockLabel = editLockHolder
+    ? editLockHolder.displayName?.trim() ||
+      editLockHolder.label.trim() ||
+      t('canvasPresence.anotherDevice')
+    : null;
   const updateNodeData = useCanvasStore((s) => s.updateNodeData);
   // Routed through `tryRename` so a sibling-label collision triggers the
   // shared alert + revert flow (same path used by the layer tree and
@@ -433,7 +446,7 @@ export const ExpandedNodePanel = ({
       return;
     handledRenameNonce.current = renameRequestNonce;
     onRenameRequestHandled?.(renameRequestNonce);
-    if (!canWrite) return;
+    if (!canWrite || !canStartEditing(expandedNodeId)) return;
     setDraftTitle(liveLabel);
     setIsEditingTitle(true);
   }, [
@@ -598,7 +611,10 @@ export const ExpandedNodePanel = ({
                         onChange: setDraftTitle,
                         onCommit: commitTitle,
                         onKeyboardEditEnd: onRenameKeyboardEnd,
-                        onStart: () => setIsEditingTitle(true),
+                        onStart: () => {
+                          if (canStartEditing(expandedNodeId))
+                            setIsEditingTitle(true);
+                        },
                         onCancel: () => {
                           setDraftTitle(liveLabel);
                           setIsEditingTitle(false);
@@ -643,7 +659,29 @@ export const ExpandedNodePanel = ({
           bar (Cmd+F) to the top-right of this body — keeps the
           preview document underneath fully visible instead of
           pushing it down with an inline find row. */}
-      <div ref={setPreviewBodyEl} className="relative flex-1 overflow-hidden">
+      {editLockHolder && (
+        <div
+          role="status"
+          data-edit-locked-notice
+          className="bg-info-bg text-fg-default border-edge-default shrink-0 border-b px-3 py-1.5 text-xs"
+        >
+          {t('canvasPresence.editLocked', { label: editLockLabel })}
+        </div>
+      )}
+      <div
+        ref={setPreviewBodyEl}
+        className="relative flex-1 overflow-hidden"
+        // A mouse press in the body is the attempt to edit; touch and pen
+        // press there to scroll, and read the notice above instead.
+        onPointerDown={
+          editLockHolder && canWrite
+            ? (event) => {
+                if (event.pointerType === 'mouse')
+                  showEditLockedHint(editLockHolder);
+              }
+            : undefined
+        }
+      >
         <PreviewSearchAdapterProvider key={expandedNodeId}>
           {/* In-preview find bar — renders nothing unless search scope
               is `'node'`. Wires the highlight walk to the body element
@@ -665,11 +703,11 @@ export const ExpandedNodePanel = ({
               }
               type={activeItem.type}
               data={activeItem.data}
-              readOnly={!canWrite}
+              readOnly={!canWrite || editLockHolder !== null}
               focusRequestNonce={nodeFocusRequestNonce}
               onFocusRequestHandled={onNodeFocusRequestHandled}
               onDataChange={
-                expandedNodeId && canWrite
+                expandedNodeId && canWrite && !editLockHolder
                   ? (patch) => {
                       if (!selectCanWriteCanvas(useCanvasStore.getState()))
                         return;

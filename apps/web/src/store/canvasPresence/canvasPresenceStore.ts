@@ -28,6 +28,13 @@ interface CanvasPresenceState {
   pages: Record<string, RemotePresencePage>;
   pointers: Record<string, CanvasPresencePoint>;
   /**
+   * The node whose text control has focus on this page, as last reported.
+   * Kept here so the edit lock can tell "another page is editing this node"
+   * from "both pages are": a page that is already editing is never locked out.
+   */
+  localEditingNodeId: string | null;
+  setLocalEditingNodeId: (nodeId: string | null) => void;
+  /**
    * Follow the presence of `canvasId`. `onConnected` runs each time the
    * stream (re)connects, when this page must announce itself again.
    */
@@ -79,6 +86,12 @@ export const useCanvasPresenceStore = create<CanvasPresenceState>(
     canvasId: null,
     pages: {},
     pointers: {},
+    localEditingNodeId: null,
+
+    setLocalEditingNodeId: (nodeId) => {
+      if (get().localEditingNodeId !== nodeId)
+        set({ localEditingNodeId: nodeId });
+    },
 
     connect: (canvasId, onConnected) => {
       if (get().canvasId === canvasId && unsubscribe) return;
@@ -99,7 +112,12 @@ export const useCanvasPresenceStore = create<CanvasPresenceState>(
     disconnect: () => {
       unsubscribe?.();
       unsubscribe = null;
-      set({ canvasId: null, pages: {}, pointers: {} });
+      set({
+        canvasId: null,
+        pages: {},
+        pointers: {},
+        localEditingNodeId: null,
+      });
     },
 
     clear: () => {

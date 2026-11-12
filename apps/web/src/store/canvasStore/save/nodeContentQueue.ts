@@ -48,6 +48,7 @@ import {
 import { createPerKeyDebouncer } from './perKeyDebouncer';
 
 import type {
+  GetNodeContentResponse,
   PutNodeContentRequest,
   PutNodeContentResponse,
 } from '@huabu/shared';
@@ -71,6 +72,72 @@ function revOfNode(node: Node): string {
     ...(typeof data['src'] === 'string' ? { src: data['src'] as string } : {}),
   });
 }
+
+/** JSON-shaped values compared by content, ignoring object key order. */
+function sameValue(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (typeof a !== 'object' || typeof b !== 'object' || !a || !b) return false;
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  const aKeys = Object.keys(a);
+  const bKeys = Object.keys(b);
+  return (
+    aKeys.length === bKeys.length &&
+    aKeys.every(
+      (key) =>
+        key in b &&
+        sameValue(
+          (a as Record<string, unknown>)[key],
+          (b as Record<string, unknown>)[key],
+        ),
+    )
+  );
+}
+
+/**
+ * The sidecar fields of `data` that differ from what the server returned.
+ * A field the response leaves out is left alone, an absent label equals
+ * `null`, and a body is only taken by a node that carries one.
+ */
+function remoteContentPatch(
+  nodeType: string,
+  data: Record<string, unknown>,
+  res: GetNodeContentResponse,
+): Record<string, unknown> {
+  const patch: Record<string, unknown> = {};
+  if (
+    (TEXT_BEARING_NODE_TYPES.has(nodeType) ||
+      typeof data['content'] === 'string') &&
+    data['content'] !== res.content
+  )
+    patch['content'] = res.content;
+  if ((data['label'] ?? null) !== res.label) patch['label'] = res.label;
+  for (const key of [
+    'labelSource',
+    'src',
+    'summary',
+    'keywords',
+    'provenance',
+  ] as const) {
+    const remote = res[key];
+    if (remote !== undefined && !sameValue(data[key], remote))
+      patch[key] = remote;
+  }
+  if (data['contentMissing'] === true) patch['contentMissing'] = false;
+  return patch;
+}
+
+/** What {@link NodeContentQueue.adoptRemoteContent} did with a node. */
+export type RemoteContentOutcome =
+  /** The node now shows the server's content. */
+  | 'applied'
+  /** The node already showed it; only the baseline revision moved. */
+  | 'unchanged'
+  /** This page has its own unsaved content for the node; nothing was touched. */
+  | 'kept-local'
+  /** The node, its sidecar or the Space is not there (any more). */
+  | 'absent'
+  /** The content could not be fetched. */
+  | 'failed';
 
 /**
  * Slice fields the queue reads at fire time. Kept structural (not
@@ -213,6 +280,23 @@ export type NodeContentQueue = {
    * already reflected in the user's view.
    */
   seedBaselines(nodes: readonly Node[]): void;
+
+  /**
+   * Another page saved `nodeId`'s sidecar: fetch it and show it, together
+   * with its revision as the new baseline, so this page's next save of the
+   * node descends from what it now shows.
+   *
+   * A node with content this page has not saved yet (queued, in flight,
+   * failed, conflicted or held for a restore) is left exactly as it is, so
+   * the existing `NODE_CONTENT_CONFLICT` choice still decides it; the node is
+   * fetched once that save has been acknowledged. The store is written
+   * through `_setStateNoAutosave`: no save, undo entry or preprocessing run
+   * follows on this page.
+   */
+  adoptRemoteContent(
+    canvasId: string,
+    nodeId: string,
+  ): Promise<RemoteContentOutcome>;
 };
 
 /**
@@ -231,6 +315,14 @@ export function createNodeContentQueue(opts: {
   onRestoredContentPersisted?: (canvasId: string, nodeId: string) => void;
   /** A node's content save was acknowledged and nothing more is pending for it. */
   onContentPersisted?: (canvasId: string, nodeId: string) => void;
+  /** Sent with every save so this page can recognise its own `invalidate`. */
+  pageId?: string;
+  /** Another page's content was put into the store for `nodeId`. */
+  onRemoteContentAdopted?: (
+    canvasId: string,
+    nodeId: string,
+    patch: Readonly<Record<string, unknown>>,
+  ) => void;
 }): NodeContentQueue {
   const debouncer = createPerKeyDebouncer<string>(opts.delayMs);
   const suspendedCanvases = new Set<string>();
@@ -406,6 +498,7 @@ export function createNodeContentQueue(opts: {
     // `bodyOwnership` in the preprocessing profiles is the single source
     // of truth, so the client need not know the classification.
     body.expectRev = baselineRev.get(nodeId) ?? REV_EMPTY;
+    if (opts.pageId) body.pageId = opts.pageId;
 
     return body;
   }
@@ -914,6 +1007,120 @@ export function createNodeContentQueue(opts: {
     failureToasts.set(nodeId, toastId);
   }
 
+  /** Nodes another page saved while this page held unsaved content for them. */
+  const remoteWhileUnsaved = new Set<string>();
+  /** Fetches under way, and whether another save arrived meanwhile. */
+  const remoteFetches = new Map<
+    string,
+    { again: boolean; done: Promise<RemoteContentOutcome> }
+  >();
+
+  /** Content of `nodeId` the server has not acknowledged from this page. */
+  function hasUnsavedLocalContent(nodeId: string): boolean {
+    return (
+      inflight.has(nodeId) ||
+      pendingFields.has(nodeId) ||
+      restoredContent.has(nodeId) ||
+      restores.has(nodeId) ||
+      frozen.has(nodeId) ||
+      failures.has(nodeId) ||
+      debouncer.pendingKeys().includes(nodeId)
+    );
+  }
+
+  async function fetchRemoteContent(
+    canvasId: string,
+    nodeId: string,
+    entry: { again: boolean },
+  ): Promise<RemoteContentOutcome> {
+    for (;;) {
+      entry.again = false;
+      const generation = generations.get(nodeId);
+      const res = await getNodeContent(canvasId, nodeId);
+      const state = opts.getState();
+      if (state.canvasId !== canvasId || suspendedCanvases.has(canvasId))
+        return 'absent';
+      const node = state.nodes.find((n) => n.id === nodeId);
+      if (!node || generations.get(nodeId) !== generation) return 'absent';
+      if (hasUnsavedLocalContent(nodeId)) {
+        // The person started typing while the fetch was under way.
+        remoteWhileUnsaved.add(nodeId);
+        return 'kept-local';
+      }
+      if (!res) {
+        if (entry.again) continue;
+        return 'failed';
+      }
+      // A sidecar that is gone belongs to a deletion; the structure update
+      // removes the node, and an absent body is never adopted as an empty one.
+      if (res.contentMissing) {
+        if (entry.again) continue;
+        return 'absent';
+      }
+      const data = (node.data ?? {}) as Record<string, unknown>;
+      const patch = remoteContentPatch(node.type ?? '', data, res);
+      const changed = Object.keys(patch).length > 0;
+      if (changed) {
+        state._setStateNoAutosave({
+          nodes: state.nodes.map((n) =>
+            n.id === nodeId ? { ...n, data: { ...n.data, ...patch } } : n,
+          ),
+        });
+      }
+      // Content and its baseline move together, as on every other path.
+      baselineRev.set(nodeId, res.rev);
+      baselineGeneration.set(nodeId, {});
+      lastSuccessful.set(nodeId, {
+        label: res.label,
+        labelSource: res.labelSource,
+      });
+      if (changed) opts.onRemoteContentAdopted?.(canvasId, nodeId, patch);
+      if (entry.again) continue;
+      return changed ? 'applied' : 'unchanged';
+    }
+  }
+
+  function adoptRemoteContent(
+    canvasId: string,
+    nodeId: string,
+  ): Promise<RemoteContentOutcome> {
+    const state = opts.getState();
+    if (
+      !canvasId ||
+      state.canvasId !== canvasId ||
+      suspendedCanvases.has(canvasId)
+    )
+      return Promise.resolve('absent');
+    const node = state.nodes.find((n) => n.id === nodeId);
+    if (!node || !MD_BACKED_NODE_TYPES.has(node.type ?? ''))
+      return Promise.resolve('absent');
+    if (hasUnsavedLocalContent(nodeId)) {
+      remoteWhileUnsaved.add(nodeId);
+      return Promise.resolve('kept-local');
+    }
+    const running = remoteFetches.get(nodeId);
+    if (running) {
+      // One fetch per node at a time; a save that lands during it is read
+      // by one more fetch, however many arrive.
+      running.again = true;
+      return running.done;
+    }
+    const entry = {
+      again: false,
+      done: Promise.resolve<RemoteContentOutcome>('absent'),
+    };
+    entry.done = fetchRemoteContent(canvasId, nodeId, entry)
+      .catch((error: unknown): RemoteContentOutcome => {
+        console.error('[node-content] remote refresh failed:', nodeId, error);
+        return 'failed';
+      })
+      .finally(() => {
+        if (remoteFetches.get(nodeId) === entry) remoteFetches.delete(nodeId);
+      });
+    remoteFetches.set(nodeId, entry);
+    return entry.done;
+  }
+
   /**
    * Serialize per-node PUTs: chain each new flush onto any pending
    * one so the server never sees two writes for the same node in
@@ -945,6 +1152,14 @@ export function createNodeContentQueue(opts: {
         if (inflight.get(nodeId) === next) {
           inflight.delete(nodeId);
         }
+        // Another page saved this node while ours was unsaved. Once the
+        // server has taken ours, pick up what that save left besides it.
+        if (
+          remoteWhileUnsaved.has(nodeId) &&
+          !hasUnsavedLocalContent(nodeId) &&
+          remoteWhileUnsaved.delete(nodeId)
+        )
+          void adoptRemoteContent(canvasId, nodeId);
       })
       .catch(() => undefined);
     return next;
@@ -1215,7 +1430,10 @@ export function createNodeContentQueue(opts: {
       saveErrorToasted.delete(nodeId);
       duplicateToasted.delete(nodeId);
       lastSuccessful.delete(nodeId);
+      remoteWhileUnsaved.delete(nodeId);
     },
+
+    adoptRemoteContent,
 
     seedBaselines(nodes) {
       for (const node of nodes) {

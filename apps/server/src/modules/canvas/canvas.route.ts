@@ -1015,7 +1015,11 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
 
     publishCanvasUpdate(canvasId, {
       type: 'invalidate',
-      data: { nodeIds: [nodeId] },
+      data: {
+        nodeIds: [nodeId],
+        // Lets the saving page skip the refetch every other page makes.
+        ...(parsed.data.pageId ? { originPageId: parsed.data.pageId } : {}),
+      },
     });
     const response: PutNodeContentResponse = {
       nodeId,
@@ -1139,6 +1143,10 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     const kws = existing['keywords'];
     if (Array.isArray(kws) && kws.every((k) => typeof k === 'string')) {
       response.keywords = kws as string[];
+    }
+    const provenance = existing['provenance'];
+    if (provenance !== undefined && provenance !== null) {
+      response.provenance = provenance;
     }
     if (data['artifactMissing'] === true) {
       response.artifactMissing = true;

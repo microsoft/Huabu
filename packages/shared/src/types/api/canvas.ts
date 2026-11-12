@@ -129,6 +129,12 @@ export const putNodeContentBodySchema = z.object({
    * skip the check entirely (kept optional so non-CAS callers still work).
    */
   expectRev: z.string().optional(),
+  /**
+   * The saving page's id (its `originator.tabId` / presence page id). Echoed
+   * as `originPageId` on the `invalidate` event so that page can tell its own
+   * save from another page's. Not a credential.
+   */
+  pageId: z.string().min(1).max(64).optional(),
 });
 export type PutNodeContentRequest = z.infer<typeof putNodeContentBodySchema>;
 
@@ -182,6 +188,8 @@ export interface GetNodeContentResponse extends z.infer<
   rev: string;
   summary?: string;
   keywords?: string[];
+  /** Opaque frontmatter blob (block-level AI-edit markers), when stored. */
+  provenance?: unknown;
   contentMissing?: boolean;
   artifactMissing?: boolean;
   /** Mirror of {@link BaseNodeData.contentDuplicate} for single-node refresh. */

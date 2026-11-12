@@ -1673,7 +1673,8 @@
   "canvasPresence": {
     "anotherDevice": "其他设备",
     "editing": "{{label}} · 正在编辑",
-    "moving": "{{label}} · 正在移动"
+    "moving": "{{label}} · 正在移动",
+    "editLocked": "{{label}}正在编辑此内容，对方完成后你才能编辑。"
   },
   "errors": {
     "connectAnAgent": "连接 Agent",
