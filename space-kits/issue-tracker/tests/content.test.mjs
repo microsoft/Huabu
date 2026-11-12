@@ -152,6 +152,7 @@ test('Single-Agent-node label examples identify the issue within the Agent budge
   const { content } = await loadKit();
   const layout = content['assets/issue-frame-layout.md'];
   assert.match(layout, /single Fixing Agent node/i);
+  assert.match(layout, /400x300/);
   assert.match(
     layout,
     /do not create a per-issue Frame or a separate Execution Note node/i,
