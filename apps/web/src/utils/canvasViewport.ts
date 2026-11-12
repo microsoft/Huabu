@@ -204,12 +204,13 @@ export const fitCanvasContent = (
 
 const pendingReveals = new WeakMap<HTMLElement, object>();
 
-/** Reveal after layout commits, preserving zoom and only the latest request. */
+/** Reveal after layout commits; an optional minimum zoom makes small targets readable. */
 export const revealNodesOnCanvas = (
   rfInstance: ReactFlowInstance,
   canvasWrapper: HTMLElement,
   nodeIds: string[],
   duration = 400,
+  minimumZoom = MIN_ZOOM,
 ): void => {
   const request = {};
   const targets = [...nodeIds];
@@ -223,7 +224,24 @@ export const revealNodesOnCanvas = (
     const area = getCanvasVisibleArea(canvasWrapper);
     if (area.width <= 0 || area.height <= 0) return;
     const currentViewport = rfInstance.getViewport();
-    const nextViewport = revealBoundsInViewport(currentViewport, area, bounds);
+    let nextViewport = revealBoundsInViewport(currentViewport, area, bounds);
+    if (currentViewport.zoom < minimumZoom) {
+      const focusedViewport = getViewportForBounds(
+        bounds,
+        area.width,
+        area.height,
+        MIN_ZOOM,
+        minimumZoom,
+        0.15,
+      );
+      if (focusedViewport.zoom > currentViewport.zoom) {
+        nextViewport = {
+          ...focusedViewport,
+          x: focusedViewport.x + area.x,
+          y: focusedViewport.y + area.y,
+        };
+      }
+    }
     if (nextViewport === currentViewport) return;
     void rfInstance.setViewport(nextViewport, {
       duration,

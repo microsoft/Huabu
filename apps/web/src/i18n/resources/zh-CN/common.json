@@ -1211,6 +1211,8 @@
     "agentHeading": "Agent",
     "currentAgentThread": "当前对话使用的 Agent",
     "newConversation": "新对话",
+    "newTemporaryConversation": "新建临时对话",
+    "newConversationOptions": "对话创建选项",
     "titleSaveFailed": "无法同步对话标题",
     "retryTitleSave": "重试标题保存",
     "renameTitle": "重命名对话",

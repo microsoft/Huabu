@@ -6,8 +6,11 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { PDFNode, type PDFNodeType } from './PDFNode';
+import { noteFarDescription } from '../semanticZoom/noteFarDescription';
 
 import type { NodeProps } from '@xyflow/react';
+
+vi.mock('../semanticZoom/noteFarDescription', { spy: true });
 
 const mocks = vi.hoisted(() => ({
   presentation: {
@@ -153,6 +156,26 @@ async function render(data: Record<string, unknown> = {}) {
 }
 
 describe('PDF canvas presentation', () => {
+  it('reuses the notes excerpt across presentation updates and refreshes it after edits', async () => {
+    mocks.note.data.content = '- First item';
+    await render({ noteNodeId: 'notes' });
+    expect(noteFarDescription).toHaveBeenCalledTimes(1);
+
+    mocks.presentation = { ...mocks.presentation, mode: 'minimal', zoom: 0.1 };
+    await render({ noteNodeId: 'notes', label: 'Renamed PDF' });
+    expect(noteFarDescription).toHaveBeenCalledTimes(1);
+    expect(mocks.card).toHaveBeenLastCalledWith(
+      expect.objectContaining({ summary: 'First item' }),
+    );
+
+    mocks.note.data.content = '- Updated item';
+    await render({ noteNodeId: 'notes' });
+    expect(noteFarDescription).toHaveBeenCalledTimes(2);
+    expect(mocks.card).toHaveBeenLastCalledWith(
+      expect.objectContaining({ summary: 'Updated item' }),
+    );
+  });
+
   it('uses property order automatically, skips empty values and keeps zero and false', async () => {
     const properties = {
       Empty: ' ',
