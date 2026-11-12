@@ -31,7 +31,6 @@ test('portable package links resolve and Prompt bodies fit native UTF-8 budgets'
   }
   const promptFiles = [
     'common-policy',
-    'execution-note-contract',
     'issue-frame-layout',
     'coordinator-prompt',
   ];
@@ -41,6 +40,7 @@ test('portable package links resolve and Prompt bodies fit native UTF-8 budgets'
     0,
   );
   assert(promptBytes < 28 * 1024, 'Leave room for rendered Prompt wrappers');
+  assert.equal(kit.content['assets/execution-note-contract.md'], undefined);
   const skill = kit.content['SKILL.md'];
   assert.match(skill, /^---\nname: issue-tracker\n/);
   assert.match(skill, /Use when/);
@@ -52,6 +52,7 @@ test('portable package links resolve and Prompt bodies fit native UTF-8 budgets'
     /## Step 3\. Finalize installation and create Coordinator/,
   );
   assert.match(skill, /HUABU_RFS_ENTRY/);
+  assert.match(skill, /single Fixing Agent node/i);
 });
 
 test('script works from a standalone clone outside the Huabu checkout', async () => {
@@ -147,48 +148,43 @@ test('configuration is explicit, portable and evidence-backed, never inferred', 
   );
 });
 
-test('Layer label examples identify the issue within the Agent budget without audit-only status words', async () => {
+test('Single-Agent-node label examples identify the issue within the Agent budget without status words or suffixes', async () => {
   const { content } = await loadKit();
   const layout = content['assets/issue-frame-layout.md'];
+  assert.match(layout, /single Fixing Agent node/i);
   assert.match(
     layout,
-    /Frame: `<status emoji> <issue identity> · <stable issue title>`/,
+    /do not create a per-issue Frame or a separate Execution Note node/i,
   );
   assert.match(
     layout,
-    /Agent: `<status emoji> <issue identity> · <stable issue title> · Agent`/,
+    /Agent: `<status emoji> <issue identity> · <stable issue title>`/,
   );
   const examples = [
-    ...layout.matchAll(/\| `[🛠🟣⛔🚀✅] #\d+ · [^`]+` \| `[^\n]+` \|/gu),
+    ...layout.matchAll(/\| [^|\n]+ \| `([🛠🟣⛔🚀✅] #\d+ · [^`]+)` \|/gu),
   ];
   assert(
     examples.length >= 2,
     'Include initial decision and delivery examples',
   );
-  for (const [row] of examples) {
-    const [frame, agent] = [...row.matchAll(/`([^`]+)`/g)].map(
-      ([, value]) => value,
-    );
-    assert.match(frame, /^(?:🛠|🟣|⛔|🚀|✅) #\d+ · \S.+$/u);
-    assert.equal(agent, `${frame} · Agent`);
+  for (const [, agent] of examples) {
+    assert.match(agent, /^(?:🛠|🟣|⛔|🚀|✅) #\d+ · \S.+$/u);
     assert(Array.from(agent).length <= 80, agent);
     assert.doesNotMatch(
       agent,
-      /Approval Needed|In Progress|PR Prepared|Fixing Agent|Issue Frame|\(2\)/,
+      /Approval Needed|In Progress|PR Prepared|Fixing Agent|· Agent|Issue Frame|\(2\)/,
     );
   }
-  const contract = content['assets/execution-note-contract.md'];
-  assert.match(contract, /🟣 Approval Needed/);
-  assert.match(contract, /🚀 PR Prepared/);
-  assert.doesNotMatch(
-    contract,
-    /Give the containing Frame a distinct|`· Issue Frame` suffix/,
-  );
 });
 
-test('installed contracts require acceptance-only dispatch and durable milestone handoff, not final-answer waiting', async () => {
+test('installed contracts require acceptance-only dispatch, initial-prompt identities, and direct chat/label milestone handoff', async () => {
   const { content } = await loadKit();
   const coordinator = content['assets/coordinator-prompt.md'];
+  assert.match(coordinator, /single Fixing Agent node/i);
+  assert.match(
+    coordinator,
+    /do not create an Execution Note or per-issue Frame/i,
+  );
   assert.match(
     coordinator,
     /wait only for prompt acceptance and confirmation of that existing Thread identity/,
@@ -221,16 +217,21 @@ test('installed contracts require acceptance-only dispatch and durable milestone
     coordinator,
     /wait for the Agent to finish|wait for its final answer|SSE="\$\(/i,
   );
-  for (const file of ['execution-note-contract', 'fixing-agent-preamble']) {
-    const contract = content[`assets/${file}.md`];
-    assert.match(
-      contract,
-      /before ending each milestone turn|Before ending each milestone turn/,
-    );
-    assert.match(contract, /findings, decisions and the next required action/);
-    assert.match(
-      contract,
-      /synchronize.*(?:Agent and Frame|Agent and containing Issue Frame|Layer labels)/,
-    );
-  }
+  const safety = content['assets/fixing-agent-preamble.md'];
+  assert.match(
+    safety,
+    /single Fixing Agent node without a separate Execution Note or per-issue Frame/,
+  );
+  assert.match(
+    safety,
+    /before ending each milestone turn|Before ending each milestone turn/,
+  );
+  assert.match(
+    safety,
+    /findings, decisions, validation evidence and the next required action/,
+  );
+  assert.match(
+    safety,
+    /synchronize your own Agent node label under \*\*Issue Frame Layout\*\*/,
+  );
 });

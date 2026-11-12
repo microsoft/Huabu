@@ -1,25 +1,21 @@
 # Issue Frame Layout
 
-Use the **Issues** area until the user confirms project-specific grouping. Do not install the Kit author's project categories. Within an area, keep one horizontal row, newest active unit at the left and completed units at the right. Align Frame tops, keep a consistent gap and never overlap.
+Use the **Issues** area until the user confirms project-specific grouping. Do not install the Kit author's project categories. Within an area Frame, each issue execution unit is a **single Fixing Agent node**—do not create a per-issue Frame or a separate Execution Note node. Keep one horizontal row inside the area Frame, newest active unit at the left and completed units at the right. Align Agent node tops, keep a consistent gap (at least 24px) and never overlap.
 
-Each execution unit has one Frame containing its Execution Note, Fixing Agent and durable outputs. Layer-facing labels follow this contract:
+Each Fixing Agent node label follows this compact contract:
 
-- Frame: `<status emoji> <issue identity> · <stable issue title>`
-- Agent: `<status emoji> <issue identity> · <stable issue title> · Agent`
+- Agent: `<status emoji> <issue identity> · <stable issue title>`
 
-The emoji alone carries lifecycle state: 🛠 in progress, 🟣 approval needed, ⛔ blocked, 🚀 PR prepared, ✅ completed. Do not spell out status words, use a `Fixing Agent` or `Issue Frame` suffix, or omit the issue title. Keep the complete Agent label at most 80 characters, including emoji, separators and ` · Agent`. If necessary, choose one concise, unambiguous shortened stable title for both Frame and Agent; preserve the full audit title in the Execution Note. Frame and Agent labels must differ so Huabu does not append `(2)`.
+The emoji alone carries lifecycle state: 🛠 in progress, 🟣 approval needed, ⛔ blocked, 🚀 PR prepared, ✅ completed. Do not spell out status words (`In Progress`, `Approval Needed`, `PR Prepared`), do not append `Fixing Agent`, `Agent` or `Issue Frame` suffixes, and do not omit the issue title. Keep the complete Agent label at most 80 characters, including emoji and separators, by choosing a concise, unambiguous stable title.
 
-| State           | Frame label                     | Agent label                             |
-| --------------- | ------------------------------- | --------------------------------------- |
-| Approval needed | `🟣 #12 · Slow history loading` | `🟣 #12 · Slow history loading · Agent` |
-| PR prepared     | `🚀 #12 · Slow history loading` | `🚀 #12 · Slow history loading · Agent` |
+| State           | Agent label                     |
+| --------------- | ------------------------------- |
+| In progress     | `🛠 #12 · Slow history loading` |
+| Approval needed | `🟣 #12 · Slow history loading` |
+| PR prepared     | `🚀 #12 · Slow history loading` |
 
-The Coordinator establishes these labels before dispatch. At each later milestone the Fixing Agent synchronizes both labels with the Execution Note before ending its turn. The Execution Note retains full status words under its own contract; Layer labels do not.
+The Coordinator establishes the initial `🛠` label on the Fixing Agent node before dispatch. At each later milestone (`🟣`, `🛠`, `⛔`, `🚀`), the Fixing Agent updates its own Agent node label before ending its turn. Only the Coordinator sets `✅` after verifying completion.
 
-Start an Issue Frame at width 440: 20px left/right padding with 400px children. Place the fixed-height Execution Note at `(20,64)`, size `400x200`. Place the Fixing Agent below it at `(20,292)`, width 400 and content-driven height. Never pin Question/Text height.
+Place each Fixing Agent directly inside the **Issues** Frame at width 400 with content-driven height (`y: 64` for the row). Never pin Question/Text height. Query the Agent's actual geometry after creation, first prompt and later size changes. Extend the parent area Frame (`SET_NODE_GEOMETRY`) to contain the row, title inset and at least 20px padding without proportional Frame scaling. Query final parent-local and absolute geometry to verify containment, sibling gaps and non-overlap; requested dimensions are not proof of final geometry.
 
-Query the Agent's actual geometry after creation, first prompt and later size changes. Set Frame height to at least `max(child.y + child.height) + 20`; do not reuse an old fixed Frame height. If sizes differ, keep at least 24px between Note and Agent. Preserve Note scrolling rather than expanding long Notes across the layout.
-
-Extend the parent area to contain the row, title inset and padding. Use direct geometry edits, not proportional Frame scaling, to preserve child typography. Query final parent-local and absolute geometry and verify containment, sibling gaps and non-overlap; requested dimensions are not proof of final geometry.
-
-Connect the Execution Note to its Fixing Agent only when useful for navigation. Do not connect Coordinator to Fixing Agents or issue Frames. Prompt targeting uses direct Agent adjacency, not containment or arrow direction; accidental edges can change instruction scope.
+Do not connect the Coordinator to Fixing Agents or create Execution Note edges. Prompt targeting uses direct Agent adjacency, not containment or arrow direction; accidental edges can change instruction scope.

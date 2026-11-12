@@ -145,7 +145,6 @@ it('previews without writes; installs exact assets and an unrealized scoped Coor
   const kit = await loadKit();
   for (const [role, file] of Object.entries({
     policy: 'common-policy',
-    contract: 'execution-note-contract',
     layout: 'issue-frame-layout',
     safety: 'fixing-agent-preamble',
     coordinatorInstructions: 'coordinator-prompt',
@@ -155,6 +154,7 @@ it('previews without writes; installs exact assets and an unrealized scoped Coor
       kit.content[`assets/${file}.md`],
     );
   }
+  expect(record.objects.contract).toBeUndefined();
   const prompt = await resolveSpacePrompt('c1', result.coordinator.nodeId);
   const otherPrompt = await resolveSpacePrompt('c1', 'node-installer');
   expect(prompt.diagnostics.truncated).toBe(false);
@@ -164,14 +164,16 @@ it('previews without writes; installs exact assets and an unrealized scoped Coor
     'stop consuming the response and return control to the user',
   );
   expect(prompt.markdown).toContain(
-    '`<status emoji> <issue identity> · <stable issue title> · Agent`',
+    '`<status emoji> <issue identity> · <stable issue title>`',
+  );
+  expect(prompt.markdown).toContain(
+    'do not create a per-issue Frame or a separate Execution Note node',
   );
   expect(prompt.markdown).toContain('before ending each milestone turn');
-  expect(prompt.markdown).not.toContain(
-    'Give the containing Frame a distinct `· Issue Frame` suffix',
-  );
+  expect(prompt.markdown).not.toContain('# Issue Execution Note Contract');
   expect(otherPrompt.markdown).not.toContain('# Issue Tracker Coordinator');
-  expect(otherPrompt.markdown).toContain('# Issue Execution Note Contract');
+  expect(otherPrompt.markdown).toContain('# Issue Frame Layout');
+  expect(otherPrompt.markdown).not.toContain('# Issue Execution Note Contract');
   const skill = await resolveSpaceSkill('c1');
   expect(skill.markdown).toContain('Fixing Agent Safety Contract');
   expect(skill.markdown).not.toContain(

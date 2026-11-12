@@ -2,7 +2,7 @@
 
 A Space Kit is a repository-local installer Skill plus portable assets and, where useful, a small initialization script. The user supplies a trusted GitHub repository/revision and Kit path to an Agent in a blank Huabu Space. The Agent clones the repository, reads the selected `SKILL.md`, and uses existing authenticated RFS operations. There is no Kit registry, discovery endpoint, desktop bundle, Profile provisioning or generic Kit runtime.
 
-The first Kit is [Issue Tracker](./issue-tracker/SKILL.md). It installs one Space's native instruction/configuration/issue-area nodes and a fresh idle Coordinator, using current Execution Note/direct Agent conventions. It does not create Tasks, Runs or Views.
+The first Kit is [Issue Tracker](./issue-tracker/SKILL.md). It installs one Space's native instruction/configuration/issue-area nodes and a fresh idle Coordinator, using a single Fixing Agent node per issue inside the `Issues` Frame. It does not create Execution Notes, per-issue Frames, Tasks, Runs or Views.
 
 ```text
 space-kits/

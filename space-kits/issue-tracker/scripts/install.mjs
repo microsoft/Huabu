@@ -38,7 +38,6 @@ export async function loadKit() {
     'scripts/install.mjs',
     'assets/common-policy.md',
     'assets/coordinator-prompt.md',
-    'assets/execution-note-contract.md',
     'assets/fixing-agent-preamble.md',
     'assets/issue-frame-layout.md',
     'assets/configuration.md',
@@ -170,13 +169,6 @@ function specifications(kit) {
       'Issue Tracker Common Instructions',
       'common-policy',
       200,
-    ),
-    note(
-      'contract',
-      'common',
-      'Issue Execution Note Contract',
-      'execution-note-contract',
-      240,
     ),
     note('layout', 'common', 'Issue Frame Layout', 'issue-frame-layout', 200),
     note(
