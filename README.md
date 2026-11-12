@@ -97,6 +97,8 @@ Before rerunning setup, stop the instance's Huabu and Vite servers; restart them
 
 Environment variables and `.env` override setup choices and are never rewritten by setup. See [`.env.example`](.env.example) and [Deployment security](docs/architecture/deployment-security.md).
 
+For Linux containers and the daily App Service image, see [Web container](docs/architecture/web-container.md).
+
 Back up and persist both server data and private credential configuration. See [Credential storage](docs/architecture/credential-storage.md).
 
 ## Data, Credentials, and Connected Services

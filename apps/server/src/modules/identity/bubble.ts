@@ -529,6 +529,21 @@ export async function openBubbleIdentity(options: {
       },
     },
     plugin: async (app) => {
+      // Register cleanup before plugin setup: a rejected registration still
+      // owns the runtime, store and preference connections opened above.
+      app.addHook('onClose', async () => {
+        // Stop workers before their connections, but a failed stop/close
+        // must not prevent the remaining connections from being released.
+        const stopped = await Promise.allSettled([runtime.stop()]);
+        const closed = await Promise.allSettled([
+          store.close?.(),
+          preferences.close(),
+        ]);
+        const failure = [...stopped, ...closed].find(
+          (result) => result.status === 'rejected',
+        );
+        if (failure?.status === 'rejected') throw failure.reason;
+      });
       // Bubble authenticates and authorizes each of its own routes, including
       // for principals that hold no Huabu permission.
       app.addHook('onRoute', (route) => {
@@ -543,6 +558,9 @@ export async function openBubbleIdentity(options: {
         if (url.startsWith(`${app.prefix}/`)) upgrades.emit('upgrade', ...args);
       };
       app.server.on('upgrade', forward);
+      app.addHook('onClose', async () => {
+        app.server.off('upgrade', forward);
+      });
       await app.register(websocket, {
         options: {
           server: upgrades as never,
@@ -552,13 +570,6 @@ export async function openBubbleIdentity(options: {
       await app.register(bubblePlugin(runtime, { healthCheck: false }));
 
       app.addHook('onReady', () => runtime.start());
-      // Stop Bubble's workers before releasing the storage they query.
-      app.addHook('onClose', async () => {
-        app.server.off('upgrade', forward);
-        await runtime.stop();
-        await store.close?.();
-        await preferences.close();
-      });
     },
   };
 }

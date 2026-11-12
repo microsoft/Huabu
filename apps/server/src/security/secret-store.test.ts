@@ -289,7 +289,9 @@ describe('initializeSecretStore — master key isolation', () => {
   it(
     'automatically initializes writable storage and restores credentials without an env key',
     async () => {
-      process.env.HUABU_DATA_DIR = createDataDir();
+      const directory = createDataDir();
+      process.env.HUABU_DATA_DIR = join(directory, 'data');
+      vi.stubEnv('HUABU_CONFIG_DIR', join(directory, 'config'));
 
       const mod = await import('./secret-store.js');
       await mod.initializeSecretStore();

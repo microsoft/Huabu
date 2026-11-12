@@ -76,6 +76,7 @@ function setEnv(key: string, value: string | undefined): void {
 
 /** Point the Azure profile at a container, existing or not. */
 function azureEnvironment(container: string): void {
+  setEnv('HUABU_AZURE_STORAGE_ACCOUNT_URL', undefined);
   setEnv(
     'HUABU_AZURE_STORAGE_CONNECTION_STRING',
     inject('azureConnectionString'),
@@ -307,11 +308,12 @@ describe('opening storage', () => {
   it('refuses Azure blobs the environment does not describe, opening nothing', async () => {
     const postgres = await emptyPostgres();
     setEnv('HUABU_POSTGRES_URL', postgres.url);
+    setEnv('HUABU_AZURE_STORAGE_ACCOUNT_URL', undefined);
     setEnv('HUABU_AZURE_STORAGE_CONNECTION_STRING', undefined);
     setEnv('HUABU_AZURE_BLOB_CONTAINER', undefined);
 
     await expect(initStorage(POSTGRES_AZURE)).rejects.toThrow(
-      /HUABU_AZURE_STORAGE_CONNECTION_STRING and HUABU_AZURE_BLOB_CONTAINER/,
+      /HUABU_AZURE_BLOB_CONTAINER and exactly one of HUABU_AZURE_STORAGE_ACCOUNT_URL or HUABU_AZURE_STORAGE_CONNECTION_STRING/,
     );
     // The structured store is built first, so this is the case where the
     // second half of the composition throws while the first is already

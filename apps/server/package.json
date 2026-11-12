@@ -34,6 +34,7 @@
     "@agenetes/runtime": "workspace:*",
     "@agentclientprotocol/sdk": "^0.22.1",
     "@agentlet/protocol": "workspace:*",
+    "@azure/identity": "^4.14.0",
     "@azure/storage-blob": "^12.33.0",
     "@clack/prompts": "^1.8.1",
     "@earendil-works/pi-agent-core": "^0.85.1",

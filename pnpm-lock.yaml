@@ -194,6 +194,9 @@ importers:
       '@agentlet/protocol':
         specifier: workspace:*
         version: link:../../external/agentlet/packages/protocol
+      '@azure/identity':
+        specifier: ^4.14.0
+        version: 4.14.0
       '@azure/storage-blob':
         specifier: ^12.33.0
         version: 12.33.0

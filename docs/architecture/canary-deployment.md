@@ -21,7 +21,9 @@ Set them in the hosting Server's environment or repository-root `.env`, then res
 
 ## Supported workflow
 
-The supported helper runs from a source checkout through `pnpm start:web`. `scripts/start-web.mjs` captures the startup commit in `HUABU_DEPLOYED_SHA` and exports the resolved checkout root as `HUABU_REPO_ROOT` before loading the bundled Server. Production-style startup binds the fixed `SERVER_PORT` (default `3001`) and fails rather than selecting another port when it is unavailable.
+The supported helper runs from a source checkout through `pnpm start:web`. `scripts/start-web.mjs` captures the startup commit in `HUABU_DEPLOYED_SHA` when no revision was supplied by the environment or root `.env`, and exports the resolved checkout root as `HUABU_REPO_ROOT` before loading the bundled Server. Production-style startup binds the fixed `SERVER_PORT` (default `3001`) and fails rather than selecting another port when it is unavailable.
+
+For an image built ahead of time, run `pnpm run build:web` during image construction and `pnpm run start:web:built` (or `node scripts/start-web.mjs`) at runtime. The latter does not install dependencies or rebuild assets. Preserve the repository-relative layout of the launcher, `packages/client-runtime/dist`, `apps/server/dist-bundle`, `apps/web/dist`, and the launcher's `dotenv` dependency. Supply `HUABU_DEPLOYED_SHA` with the image's source revision. Git and `.git` are optional for ordinary prebuilt startup; without a supplied or discoverable revision, the running SHA is unknown. Canary redeployment still requires a source checkout and Git. Set `HUABU_DATA_DIR` to persistent writable storage and retain the original encryption key across image replacements; see [credential storage](./credential-storage.md).
 
 Setting `HUABU_CANARY_REDEPLOY_ENABLED=1` enables an owner-only Settings surface. The selected branch is persisted as an application-global versioned record under `HUABU_DATA_DIR`; a missing record or explicit cleared value resolves to `alpha`. Malformed stored configuration fails explicitly rather than silently using the default.
 

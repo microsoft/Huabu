@@ -1,0 +1,113 @@
+name: Web container
+
+on:
+  schedule:
+    # 08:37 Asia/Shanghai (UTC+8); schedules run from the default branch.
+    - cron: '37 0 * * *'
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - Dockerfile
+      - .dockerignore
+      - .github/workflows/container.yml
+      - .nvmrc
+      - package.json
+      - pnpm-lock.yaml
+      - pnpm-workspace.yaml
+      - tsconfig*.json
+      - apps/server/**
+      - apps/web/**
+      - assets/**
+      - packages/**
+      - external/**
+      - scripts/start-web.mjs
+      - scripts/test-web-container.mjs
+
+permissions:
+  contents: read
+
+env:
+  # Existing release workflows avoid the exhausted Actions artifact store too.
+  DOCKER_BUILD_RECORD_UPLOAD: 'false'
+
+concurrency:
+  group: web-container-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  verify:
+    name: Build and test Linux image
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          pull: true
+          no-cache-filters: base
+          tags: huabu-web:verify
+          build-args: SOURCE_REVISION=${{ github.sha }}
+          cache-from: type=gha,scope=web-container
+          cache-to: type=gha,mode=max,scope=web-container
+          provenance: false
+      - name: Test production startup and persistence
+        run: node scripts/test-web-container.mjs huabu-web:verify
+
+  publish:
+    name: Publish daily App Service image
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && github.repository == 'microsoft/Huabu'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: Name image
+        id: image
+        shell: bash
+        run: |
+          echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+          echo "tag=sha-${GITHUB_SHA}-run-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_OUTPUT"
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          pull: true
+          no-cache-filters: base
+          tags: huabu-web:verify
+          build-args: SOURCE_REVISION=${{ github.sha }}
+          cache-from: type=gha,scope=web-container
+          cache-to: type=gha,mode=max,scope=web-container
+          provenance: false
+      - name: Test production startup and persistence
+        run: node scripts/test-web-container.mjs huabu-web:verify
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish the tested image
+        env:
+          IMAGE: ${{ steps.image.outputs.name }}
+          IMMUTABLE_TAG: ${{ steps.image.outputs.tag }}
+        shell: bash
+        run: |
+          docker tag huabu-web:verify "$IMAGE:$IMMUTABLE_TAG"
+          docker tag huabu-web:verify "$IMAGE:daily"
+          docker push "$IMAGE:$IMMUTABLE_TAG"
+          docker push "$IMAGE:daily"
+          {
+            echo '### App Service image'
+            echo "- Daily tag: \`$IMAGE:daily\`"
+            echo "- Run tag: \`$IMAGE:$IMMUTABLE_TAG\`"
+            echo '- Pin an image digest for deployment; publishing does not update App Service.'
+            docker inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$IMAGE:$IMMUTABLE_TAG"
+          } >> "$GITHUB_STEP_SUMMARY"
