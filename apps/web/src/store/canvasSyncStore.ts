@@ -6,7 +6,11 @@ import { create } from 'zustand';
 import { dismissToast, toast } from '@/components/Common/Toast';
 import { hasAgentStreamClaim } from '@/hooks/agentStreamCoordinator';
 import { useAcpThreadChangesStore } from '@/store/acpThreadChangesStore';
-import useCanvasStore, { requestCanvasResync } from '@/store/canvasStore';
+import useCanvasStore, {
+  adoptRemoteNodeContent,
+  requestCanvasResync,
+} from '@/store/canvasStore';
+import { CANVAS_PAGE_ID } from '@/store/canvasStore/sync/pageId';
 import { useChatStore } from '@/store/chatStore';
 import { usePanelStore } from '@/store/panelStore';
 import { openPreviewNode } from '@/store/previewWorkspace/actions';
@@ -35,6 +39,11 @@ import type { Node } from '@xyflow/react';
  * has structure edits waiting to be sent: `requestCanvasResync` holds it
  * until the send queue has drained.
  *
+ *  - `invalidate` naming nodes: another page saved those nodes' content
+ *    (body, label, summary, …) through the per-node content PUT, which no
+ *    `update` carries. Each node is fetched and shown unless this page has
+ *    unsaved content of its own for it; the page's own saves are skipped.
+ *
  * Received updates intentionally do NOT trigger preprocessing — that
  * stays with the originating side (the server, for headless `/execute`).
  */
@@ -46,6 +55,30 @@ interface CanvasSyncState {
 }
 
 let unsubscribe: (() => void) | null = null;
+
+/**
+ * Nodes another page saved while this page was still loading the Space. The
+ * load may have read them before that save, so they are fetched once it ends.
+ */
+const savedDuringLoad = new Set<string>();
+let stopWaitingForLoad: (() => void) | null = null;
+
+function forgetSavedDuringLoad(): void {
+  stopWaitingForLoad?.();
+  stopWaitingForLoad = null;
+  savedDuringLoad.clear();
+}
+
+function adoptAfterLoad(canvasId: string, nodeIds: readonly string[]): void {
+  for (const id of nodeIds) savedDuringLoad.add(id);
+  if (stopWaitingForLoad) return;
+  stopWaitingForLoad = useCanvasStore.subscribe((state) => {
+    if (state.isLoading) return;
+    const ids = [...savedDuringLoad];
+    forgetSavedDuringLoad();
+    if (state.canvasId === canvasId) void adoptRemoteNodeContent(canvasId, ids);
+  });
+}
 
 type SyncPendingEffects = {
   mutatedNodes: Node[];
@@ -138,6 +171,7 @@ export const useCanvasSyncStore = create<CanvasSyncState>((set, get) => ({
   connect: (canvasId) => {
     if (get().canvasId === canvasId && unsubscribe) return;
     unsubscribe?.();
+    forgetSavedDuringLoad();
     set({ canvasId });
     unsubscribe = subscribeCanvasSync(canvasId, (event) => {
       // Ignore late frames after a canvas switch / disconnect.
@@ -165,6 +199,16 @@ export const useCanvasSyncStore = create<CanvasSyncState>((set, get) => ({
         // meaningful once we've settled.
         if (canvasStore.isLoading) return;
         if (event.data.version !== canvasStore.version) reload();
+        return;
+      }
+
+      if (event.type === 'invalidate') {
+        // A node-content save by another page. An event without node ids is
+        // a read-model notice, and this page already shows its own saves.
+        const { nodeIds, originPageId } = event.data;
+        if (!nodeIds?.length || originPageId === CANVAS_PAGE_ID) return;
+        if (canvasStore.isLoading) adoptAfterLoad(canvasId, nodeIds);
+        else void adoptRemoteNodeContent(canvasId, nodeIds);
         return;
       }
 
@@ -232,6 +276,7 @@ export const useCanvasSyncStore = create<CanvasSyncState>((set, get) => ({
   disconnect: () => {
     unsubscribe?.();
     unsubscribe = null;
+    forgetSavedDuringLoad();
     // Clear any lingering conflict toast — it's bound to the canvas we're
     // leaving and shouldn't bleed onto the next one.
     if (conflictToastId) {

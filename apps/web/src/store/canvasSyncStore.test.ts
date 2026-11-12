@@ -3,6 +3,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { CANVAS_PAGE_ID } from './canvasStore/sync/pageId';
 import { useCanvasSyncStore } from './canvasSyncStore';
 
 const mocks = vi.hoisted(() => {
@@ -15,7 +16,9 @@ const mocks = vi.hoisted(() => {
     applyDeltasFromAgent: vi.fn(() => []),
     loadCanvas: vi.fn(async () => undefined),
   };
-  return { canvasState };
+  const adoptRemoteNodeContent = vi.fn(async () => []);
+  const storeListeners = new Set<(state: typeof canvasState) => void>();
+  return { canvasState, adoptRemoteNodeContent, storeListeners };
 });
 
 vi.mock('@/api/_client', () => ({
@@ -41,7 +44,12 @@ vi.mock('@/store/acpThreadChangesStore', () => ({
 vi.mock('@/store/canvasStore', () => ({
   default: {
     getState: () => mocks.canvasState,
+    subscribe: (listener: (state: typeof mocks.canvasState) => void) => {
+      mocks.storeListeners.add(listener);
+      return () => mocks.storeListeners.delete(listener);
+    },
   },
+  adoptRemoteNodeContent: mocks.adoptRemoteNodeContent,
   // The store holds a reload back while edits are waiting to be sent; with
   // nothing queued it reloads at once, which is what this stand-in does.
   requestCanvasResync: (canvasId: string, afterReload?: () => void) => {
@@ -166,6 +174,84 @@ describe('canvasSyncStore stream recovery', () => {
     call[4].onDiverged();
     expect(mocks.canvasState.loadCanvas).toHaveBeenCalledWith('canvas-1', {
       resetHistory: true,
+    });
+  });
+
+  describe('node content saved by another page', () => {
+    const connectWith = async (...events: Array<[string, unknown]>) => {
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(
+            encoder.encode(
+              events
+                .map(
+                  ([type, data]) =>
+                    `event: ${type}\ndata: ${JSON.stringify(data)}\n\n`,
+                )
+                .join(''),
+            ),
+          );
+        },
+      });
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(stream)));
+      useCanvasSyncStore.getState().connect('canvas-1');
+      await vi.advanceTimersByTimeAsync(100);
+    };
+
+    beforeEach(() => {
+      mocks.adoptRemoteNodeContent.mockClear();
+      mocks.storeListeners.clear();
+      mocks.canvasState.isLoading = false;
+      mocks.canvasState.applyDeltasFromAgent.mockClear();
+    });
+
+    it("fetches the nodes another page's save names", async () => {
+      await connectWith(
+        ['snapshot', { version: 1 }],
+        ['invalidate', { nodeIds: ['n1'], originPageId: 'another-page' }],
+        // A save from a client that does not name itself is fetched too.
+        ['invalidate', { nodeIds: ['n2'] }],
+      );
+
+      expect(mocks.adoptRemoteNodeContent.mock.calls).toEqual([
+        ['canvas-1', ['n1']],
+        ['canvas-1', ['n2']],
+      ]);
+      // Content is not a version change: nothing is replayed or reloaded.
+      expect(mocks.canvasState.applyDeltasFromAgent).not.toHaveBeenCalled();
+      expect(mocks.canvasState.loadCanvas).not.toHaveBeenCalled();
+    });
+
+    it("does not fetch this page's own save or a notice without node ids", async () => {
+      await connectWith(
+        ['snapshot', { version: 1 }],
+        ['invalidate', { nodeIds: ['n1'], originPageId: CANVAS_PAGE_ID }],
+        ['invalidate', {}],
+        ['invalidate', { nodeIds: [] }],
+      );
+
+      expect(mocks.adoptRemoteNodeContent).not.toHaveBeenCalled();
+    });
+
+    it('fetches a node saved while the Space was loading once the load ends', async () => {
+      mocks.canvasState.isLoading = true;
+      await connectWith(
+        ['invalidate', { nodeIds: ['n1'], originPageId: 'another-page' }],
+        ['invalidate', { nodeIds: ['n1', 'n2'], originPageId: 'another-page' }],
+      );
+      expect(mocks.adoptRemoteNodeContent).not.toHaveBeenCalled();
+
+      for (const listener of [...mocks.storeListeners])
+        listener(mocks.canvasState);
+      expect(mocks.adoptRemoteNodeContent).not.toHaveBeenCalled();
+
+      mocks.canvasState.isLoading = false;
+      for (const listener of [...mocks.storeListeners])
+        listener(mocks.canvasState);
+      expect(mocks.adoptRemoteNodeContent.mock.calls).toEqual([
+        ['canvas-1', ['n1', 'n2']],
+      ]);
+      expect(mocks.storeListeners.size).toBe(0);
     });
   });
 });

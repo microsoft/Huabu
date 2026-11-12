@@ -132,6 +132,66 @@ describe('PUT /nodes/:nodeId/content — content CAS', () => {
     }
   });
 
+  it('names the saving page on the notification and serves what the other pages then fetch', async () => {
+    const app = await buildApp();
+    const received = vi.fn();
+    const unsubscribe = subscribeCanvasUpdates('c1', received);
+    try {
+      seedCanvas('c1', 'n1', 'Note');
+      const provenance = { blocks: [{ id: 'b1', source: 'agent' }] };
+      const saved = await putContent(app, 'c1', 'n1', {
+        nodeType: 'note',
+        content: 'from page A',
+        label: 'Renamed',
+        labelSource: 'user',
+        summary: 'A summary',
+        keywords: ['one', 'two'],
+        provenance,
+        expectRev: REV_EMPTY,
+        pageId: 'page-a',
+      });
+      expect(saved.statusCode).toBe(200);
+      expect(received).toHaveBeenCalledExactlyOnceWith({
+        type: 'invalidate',
+        data: { nodeIds: ['n1'], originPageId: 'page-a' },
+      });
+
+      const fetched = await app.inject({
+        method: 'GET',
+        url: '/canvas/c1/nodes/n1/content',
+      });
+      expect(fetched.statusCode).toBe(200);
+      // The page id is routing information, never stored with the node.
+      expect(fetched.json()).toEqual({
+        nodeId: 'n1',
+        type: 'note',
+        label: 'Renamed',
+        labelSource: 'user',
+        content: 'from page A',
+        rev: saved.json().rev,
+        summary: 'A summary',
+        keywords: ['one', 'two'],
+        provenance,
+      });
+      expect(saved.json().rev).toBe(nodeRevisionOf({ content: 'from page A' }));
+
+      // A page id that is not a short string is refused, not relayed.
+      expect(
+        (
+          await putContent(app, 'c1', 'n1', {
+            nodeType: 'note',
+            content: 'again',
+            expectRev: saved.json().rev,
+            pageId: 'x'.repeat(65),
+          })
+        ).statusCode,
+      ).toBe(400);
+    } finally {
+      unsubscribe();
+      await app.close();
+    }
+  });
+
   it('rejects source/body writes and type spoofing on metadata-only file references', async () => {
     seedCanvas('c1', 'ref', 'Source');
     const store = getCanvasStore('c1');

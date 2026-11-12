@@ -354,6 +354,24 @@ class CanvasHistoryManager {
     }
   }
 
+  /**
+   * Another page saved these sidecar fields of a node. Every entry takes
+   * them, so undoing or redoing a local edit cannot put the earlier content
+   * back and save it over the other page's.
+   */
+  rebaseRemoteContent(
+    nodeId: string,
+    patch: Readonly<Record<string, unknown>>,
+  ): void {
+    for (const snapshot of [...this.undoStack, ...this.redoStack]) {
+      snapshot.nodes = snapshot.nodes.map((node) =>
+        node.id === nodeId
+          ? { ...node, data: { ...node.data, ...patch } }
+          : node,
+      );
+    }
+  }
+
   discardNodes(nodeIds: ReadonlySet<string>): void {
     for (const snapshot of [...this.undoStack, ...this.redoStack]) {
       snapshot.nodes = snapshot.nodes.filter((node) => !nodeIds.has(node.id));
@@ -574,6 +592,14 @@ export class CanvasHistoryRegistry {
 
   rebaseAgentInitialContent(deltas: readonly Delta[]): void {
     this.active.rebaseAgentInitialContent(deltas);
+  }
+
+  rebaseRemoteContent(
+    canvasId: string,
+    nodeId: string,
+    patch: Readonly<Record<string, unknown>>,
+  ): void {
+    this.managers.get(canvasId)?.rebaseRemoteContent(nodeId, patch);
   }
 
   discardNodes(canvasId: string, nodeIds: ReadonlySet<string>): void {

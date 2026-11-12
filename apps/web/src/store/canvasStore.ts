@@ -137,7 +137,10 @@ import { shouldBackfillNodeLabel } from './canvasStore/load/shouldBackfillNodeLa
 import { warmupNodeHeights } from './canvasStore/load/warmupNodeHeights';
 import { createCanvasEventBuffer } from './canvasStore/save/eventBuffer';
 import { NODE_CONTENT_KEYS } from './canvasStore/save/nodeContentFields';
-import { createNodeContentQueue } from './canvasStore/save/nodeContentQueue';
+import {
+  createNodeContentQueue,
+  type RemoteContentOutcome,
+} from './canvasStore/save/nodeContentQueue';
 import { createPreprocessQueue } from './canvasStore/save/preprocessQueue';
 import { shouldScheduleStructureSave } from './canvasStore/save/structureDirtyDetector';
 import {
@@ -1119,6 +1122,9 @@ const nodeContentQueue = createNodeContentQueue({
     if (useCanvasStore.getState().canvasId === canvasId)
       reportMeasuredHeights([nodeId], undefined, nodeId);
   },
+  pageId: CANVAS_PAGE_ID,
+  onRemoteContentAdopted: (canvasId, nodeId, patch) =>
+    canvasHistoryManager.rebaseRemoteContent(canvasId, nodeId, patch),
 });
 
 // ─── Structure edits through execute ──────────────────────────────────────
@@ -1841,6 +1847,32 @@ export async function saveCanvasForSubmission(canvasId: string): Promise<void> {
  */
 export function clearNodeDuplicateGuard(nodeId: string): void {
   nodeContentQueue.clearDuplicateGuard(nodeId);
+}
+
+/**
+ * Another page saved the content (body, label, summary, …) of these nodes:
+ * show it here, unless this page has unsaved content of its own for a node.
+ * See `NodeContentQueue.adoptRemoteContent`.
+ */
+export function adoptRemoteNodeContent(
+  canvasId: string,
+  nodeIds: readonly string[],
+): Promise<RemoteContentOutcome[]> {
+  return Promise.all(
+    nodeIds.map((nodeId) =>
+      nodeContentQueue.adoptRemoteContent(canvasId, nodeId),
+    ),
+  );
+}
+
+/** Save `nodeId`'s queued content now; settles once the server has answered. */
+export function flushNodeContent(nodeId: string): Promise<void> {
+  const { canvasId } = useCanvasStore.getState();
+  if (!canvasId || !nodeContentQueue.pendingNodeIds().includes(nodeId))
+    return Promise.resolve();
+  return nodeContentQueue
+    .flushNow(canvasId, nodeId, { source: 'auto' })
+    .catch(() => undefined);
 }
 
 /**
