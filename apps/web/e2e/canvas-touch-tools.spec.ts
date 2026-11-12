@@ -235,15 +235,9 @@ test.describe('canvas touch tools', () => {
     expect(inkPoint.y).toBeGreaterThanOrEqual(textBox.y);
     expect(inkPoint.y).toBeLessThanOrEqual(textBox.y + textBox.height);
 
-    const select = page.getByRole('button', { name: /^Select/ });
-    const selectBox = await select.boundingBox();
-    if (!selectBox) throw new Error('Select button has no bounding box');
-    await touchTap(client, {
-      x: selectBox.x + selectBox.width / 2,
-      y: selectBox.y + selectBox.height / 2,
-    });
+    // Select is hidden for touch; Escape explicitly exits sticky Sketch.
+    await page.keyboard.press('Escape');
     await expect(page.locator('.canvas-pending-sketch')).toHaveCount(0);
-    await expect(select).toBeVisible();
     await touchTap(client, inkPoint);
 
     await expect(page.locator('.react-flow__node-sketch.selected')).toHaveCount(

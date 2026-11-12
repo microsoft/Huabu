@@ -47,10 +47,12 @@ import {
 import { OPEN_SPACE_SHORTCUT_EVENT } from '../../components/Nodes/spacePreview/spaceShortcutEvents';
 import { REQUEST_CREATE_CHILD_SPACE } from '../../components/Space/createChildSpaceAction';
 import { getCombo } from '../../config/shortcuts';
+import { useToolStore } from '../../store/toolStore';
 import {
   installDesktopInputGuard,
   setDesktopInputFrozen,
 } from '../../utils/desktopInput';
+import { observeInputPointer, useInputModeStore } from '../useInputMode';
 
 // react-dom's `act` needs this flag set in a test environment.
 (
@@ -81,6 +83,8 @@ describe('useCanvasShortcuts catalog key lock', () => {
   let removeInputGuard: () => void;
 
   beforeEach(() => {
+    useToolStore.setState(useToolStore.getInitialState(), true);
+    useInputModeStore.setState({ mode: 'mouse' });
     removeInputGuard = installDesktopInputGuard();
     canvasActions.nodes = [];
     canvasActions.edges = [];
@@ -682,5 +686,125 @@ describe('useCanvasShortcuts catalog key lock', () => {
       window.dispatchEvent(new Event('blur'));
     });
     expect(container.querySelector('[data-tool="select"]')).not.toBeNull();
+  });
+
+  it('uses the live explicit choice for Space restoration without an intervening render', () => {
+    act(() => {
+      useToolStore.getState().chooseCanvasTool('lasso', false);
+      window.dispatchEvent(
+        new KeyboardEvent('keydown', { key: ' ', cancelable: true }),
+      );
+    });
+    expect(container.querySelector('[data-tool="pan"]')).not.toBeNull();
+    expect(useToolStore.getState().mouseToolPreference).toBe('lasso');
+    act(() => window.dispatchEvent(new KeyboardEvent('keyup', { key: ' ' })));
+    expect(container.querySelector('[data-tool="lasso"]')).not.toBeNull();
+  });
+
+  it('retains preferred Pan across Space release and hides it only for current non-mouse input', () => {
+    act(() => {
+      useToolStore.getState().chooseCanvasTool('pan', false);
+      window.dispatchEvent(
+        new KeyboardEvent('keydown', { key: ' ', cancelable: true }),
+      );
+      window.dispatchEvent(new KeyboardEvent('keyup', { key: ' ' }));
+    });
+    expect(container.querySelector('[data-tool="pan"]')).not.toBeNull();
+    act(() => {
+      useToolStore.getState().setInputModePreference('pen');
+      observeInputPointer('touch');
+    });
+    expect(container.querySelector('[data-tool="select"]')).not.toBeNull();
+    act(() => observeInputPointer('mouse'));
+    expect(container.querySelector('[data-tool="pan"]')).not.toBeNull();
+    expect(useToolStore.getState().mouseToolPreference).toBe('pan');
+  });
+
+  it.each(['mouse', 'auto', 'pen', 'finger'] as const)(
+    'restores placement to the current pointer baseline under %s input',
+    (mode) => {
+      act(() => {
+        useToolStore.getState().setInputModePreference(mode);
+        useToolStore.getState().chooseCanvasTool('pan', false);
+        useToolStore.getState().togglePendingNodeType('note');
+      });
+      expect(container.querySelector('[data-tool="select"]')).not.toBeNull();
+      act(() => {
+        observeInputPointer('touch');
+        const state = useToolStore.getState();
+        state.finishPendingNodeType(state.toolIntent);
+      });
+      expect(
+        container.querySelector(
+          `[data-tool="${mode === 'mouse' ? 'pan' : 'select'}"]`,
+        ),
+      ).not.toBeNull();
+      act(() => observeInputPointer('mouse'));
+      expect(container.querySelector('[data-tool="pan"]')).not.toBeNull();
+    },
+  );
+
+  it('does not let a late Space keyup restore over a newer explicit tool choice', () => {
+    act(() => {
+      window.dispatchEvent(
+        new KeyboardEvent('keydown', { key: ' ', cancelable: true }),
+      );
+      window.dispatchEvent(
+        new PointerEvent('pointerdown', {
+          button: 0,
+          isPrimary: true,
+          pointerId: 7,
+          pointerType: 'mouse',
+        }),
+      );
+      useToolStore.getState().chooseCanvasTool('lasso', false);
+      window.dispatchEvent(new KeyboardEvent('keyup', { key: ' ' }));
+    });
+    expect(container.querySelector('[data-tool="pan"]')).not.toBeNull();
+    act(() => {
+      window.dispatchEvent(
+        new PointerEvent('pointerup', { pointerId: 7, pointerType: 'mouse' }),
+      );
+      window.dispatchEvent(new MouseEvent('mouseup'));
+    });
+    expect(container.querySelector('[data-tool="lasso"]')).not.toBeNull();
+    expect(useToolStore.getState().mouseToolPreference).toBe('lasso');
+  });
+
+  it('recovers held Pan from a fallback mouseup when pointerup is lost', () => {
+    act(() => {
+      useToolStore.getState().chooseCanvasTool('pan', false);
+      window.dispatchEvent(
+        new PointerEvent('pointerdown', {
+          button: 0,
+          isPrimary: true,
+          pointerId: 7,
+          pointerType: 'mouse',
+        }),
+      );
+      useToolStore.getState().chooseCanvasTool('lasso', false);
+    });
+    expect(container.querySelector('[data-tool="pan"]')).not.toBeNull();
+    act(() => window.dispatchEvent(new MouseEvent('mouseup', { button: 0 })));
+    expect(container.querySelector('[data-tool="lasso"]')).not.toBeNull();
+    expect(useToolStore.getState().mouseToolPreference).toBe('lasso');
+  });
+
+  it('cancels the Space overlay when hidden without persisting Pan', () => {
+    act(() =>
+      window.dispatchEvent(
+        new KeyboardEvent('keydown', { key: ' ', cancelable: true }),
+      ),
+    );
+    const visibility = vi
+      .spyOn(document, 'visibilityState', 'get')
+      .mockReturnValue('hidden');
+    try {
+      act(() => document.dispatchEvent(new Event('visibilitychange')));
+      expect(container.querySelector('[data-tool="select"]')).not.toBeNull();
+      expect(useToolStore.getState().mouseToolPreference).toBe('select');
+    } finally {
+      visibility.mockRestore();
+    }
   });
 });
