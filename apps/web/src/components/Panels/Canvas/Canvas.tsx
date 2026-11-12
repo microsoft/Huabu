@@ -120,6 +120,7 @@ import { MultiSelectToolbar } from './FloatingToolbars/MultiSelectToolbar.tsx';
 import { StrokeSelectionToolbar } from './FloatingToolbars/StrokeSelectionToolbar.tsx';
 import { MoveSelectionPopover } from './MoveSelectionPopover.tsx';
 import { MultiSelectResizer } from './MultiSelectResizer.tsx';
+import { CanvasPresenceLayer } from './presence/CanvasPresenceLayer.tsx';
 import { SelectionOutlines } from './SelectionOutlines.tsx';
 import { canvasNodeZOrder, withoutNodeStyleZIndex } from './selectionZOrder';
 import { SnapGuidesOverlay } from './SnapGuidesOverlay.tsx';
@@ -1592,6 +1593,7 @@ const CanvasContent: React.FC<CanvasProps> = ({
           )}
           <MultiSelectResizer />
           <SelectionOutlines />
+          <CanvasPresenceLayer />
           {!isBoxSelecting && !hasLassoSelection && <MultiSelectToolbar />}
           {!isBoxSelecting && <StrokeSelectionRegion />}
           {!isBoxSelecting && <StrokeSelectionToolbar />}

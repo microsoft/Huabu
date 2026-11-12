@@ -158,6 +158,7 @@ import {
   commandsForLocalDiff,
   commandsForStateDiff,
 } from './canvasStore/sync/localDiffCommands';
+import { CANVAS_PAGE_ID } from './canvasStore/sync/pageId';
 import {
   applyUnits,
   changedUnits,
@@ -1130,10 +1131,7 @@ const nodeContentQueue = createNodeContentQueue({
 // meanwhile. Batches sent this way do not schedule the whole-Space PUT.
 
 /** Identifies this page in `originator.tabId`; a reload gets a new one. */
-const SYNC_CLIENT_ID =
-  typeof crypto !== 'undefined' && 'randomUUID' in crypto
-    ? crypto.randomUUID()
-    : `page-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+const SYNC_CLIENT_ID = CANVAS_PAGE_ID;
 
 /** A whole-Space PUT was skipped because the send queue could not send. */
 let structureSaveDeferred = false;

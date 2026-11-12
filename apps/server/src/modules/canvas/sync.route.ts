@@ -10,23 +10,38 @@
  * gap and `loadCanvas` to catch up), then forwards every subsequent
  * `update` published by `publishCanvasUpdate`.
  *
+ * The same stream carries `presence` events (see `canvas-presence.ts`). A
+ * page that opens it with `?pageId=` is not sent its own presence, and that
+ * page's presence is dropped when its last stream closes.
+ *
  * Mirrors the SSE plumbing in `external.route.ts`.
  */
 
-import { recentCanvasConversationParamsSchema } from '@huabu/shared';
+import {
+  canvasSyncStreamQuerySchema,
+  recentCanvasConversationParamsSchema,
+} from '@huabu/shared';
 
+import { canvasPresence } from './canvas-presence.js';
 import { subscribeCanvasUpdates } from './canvas-sync.js';
+import { presenceSpaceKey } from './presence.route.js';
 import { space } from '../storage/index.js';
 
-import type { CanvasSyncEvent } from '@huabu/shared';
+import type { CanvasPresenceEvent, CanvasSyncEvent } from '@huabu/shared';
 import type { FastifyPluginAsync } from 'fastify';
 
-function writeSSE(raw: NodeJS.WritableStream, event: CanvasSyncEvent): void {
+/** Pointer positions are skipped for a stream this far behind; the next one supersedes them. */
+const POINTER_BACKLOG_BYTES = 256 * 1024;
+
+function writeSSE(
+  raw: NodeJS.WritableStream,
+  event: CanvasSyncEvent | CanvasPresenceEvent,
+): void {
   raw.write(`event: ${event.type}\ndata: ${JSON.stringify(event.data)}\n\n`);
 }
 
 const syncRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
-  fastify.get<{ Params: { canvasId: string } }>(
+  fastify.get<{ Params: { canvasId: string }; Querystring: unknown }>(
     '/:canvasId/sync/stream',
     async (request, reply) => {
       const params = recentCanvasConversationParamsSchema.safeParse(
@@ -36,7 +51,14 @@ const syncRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
         return reply.code(400).send({
           message: params.error.issues[0]?.message ?? 'Invalid canvas ID',
         });
+      const query = canvasSyncStreamQuerySchema.safeParse(request.query);
+      if (!query.success)
+        return reply.code(400).send({
+          message: query.error.issues[0]?.message ?? 'Invalid page ID',
+        });
       const { canvasId } = params.data;
+      const { pageId } = query.data;
+      const presenceKey = presenceSpaceKey(canvasId);
       reply.hijack();
       reply.raw.writeHead(200, {
         'Content-Type': 'text/event-stream',
@@ -58,6 +80,28 @@ const syncRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
         }
         writeSSE(reply.raw, event);
       });
+      // Presence is independent of the Space version, so it is not held back
+      // for the baseline: subscribe, then send who is already here.
+      const unsubscribePresence = canvasPresence.subscribe(
+        presenceKey,
+        pageId,
+        (data) => {
+          if (closed) return;
+          if (
+            data.op === 'pointer' &&
+            reply.raw.writableLength > POINTER_BACKLOG_BYTES
+          )
+            return;
+          writeSSE(reply.raw, { type: 'presence', data });
+        },
+      );
+      writeSSE(reply.raw, {
+        type: 'presence',
+        data: {
+          op: 'snapshot',
+          pages: canvasPresence.snapshot(presenceKey, pageId),
+        },
+      });
       const heartbeat = setInterval(() => {
         reply.raw.write(': ping\n\n');
       }, 15_000);
@@ -66,6 +110,7 @@ const syncRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
         closed = true;
         clearInterval(heartbeat);
         unsubscribe();
+        unsubscribePresence();
       };
       reply.raw.once('close', cleanup);
 

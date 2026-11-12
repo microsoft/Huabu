@@ -8,26 +8,89 @@ import {
 import { readTypedSSEStream } from '@/api/_sse';
 import { canvasSyncStreamUrl } from '@/api/canvasSync';
 
-import type { CanvasSyncEvent } from '@huabu/shared';
+import { CANVAS_PAGE_ID } from './canvasStore/sync/pageId';
+
+import type {
+  CanvasPresenceEvent,
+  CanvasPresenceEventData,
+  CanvasPresencePage,
+  CanvasSyncEvent,
+} from '@huabu/shared';
 
 type Listener = (event: CanvasSyncEvent) => void;
-const subscriptions = new Map<
-  string,
-  {
-    controller: AbortController;
-    listeners: Set<Listener>;
-    version?: number;
-  }
->();
 
-/** Canvas rendering and conversation observation share one transport per Space. */
-export function subscribeCanvasSync(
-  canvasId: string,
-  listener: Listener,
-): () => void {
+/** Receives the stream's `presence` events and learns when the stream drops. */
+export interface CanvasPresenceListener {
+  onEvent: (event: CanvasPresenceEventData) => void;
+  /** The stream ended or failed; presence is unknown until the next snapshot. */
+  onDisconnect: () => void;
+}
+
+interface Subscription {
+  controller: AbortController;
+  listeners: Set<Listener>;
+  presenceListeners: Set<CanvasPresenceListener>;
+  /**
+   * The other pages as of the last presence event, for a listener that
+   * subscribes after the stream's snapshot; `null` while not connected.
+   */
+  presencePages: Map<string, CanvasPresencePage> | null;
+  version?: number;
+}
+
+const subscriptions = new Map<string, Subscription>();
+
+function trackPresence(
+  subscription: Subscription,
+  event: CanvasPresenceEventData,
+): void {
+  if (event.op === 'snapshot') {
+    subscription.presencePages = new Map(
+      event.pages.map((page) => [page.pageId, page]),
+    );
+    return;
+  }
+  const pages = subscription.presencePages;
+  if (!pages) return;
+  if (event.op === 'update') pages.set(event.page.pageId, event.page);
+  else if (event.op === 'leave') pages.delete(event.pageId);
+  else {
+    const page = pages.get(event.pageId);
+    if (page) pages.set(event.pageId, { ...page, pointer: event.pointer });
+  }
+}
+
+function notifyPresence(
+  subscription: Subscription,
+  notify: (listener: CanvasPresenceListener) => void,
+): void {
+  for (const listener of subscription.presenceListeners) {
+    try {
+      notify(listener);
+    } catch (error) {
+      console.error('[canvasSync] presence subscriber failed', error);
+    }
+  }
+}
+
+function release(canvasId: string, subscription: Subscription): void {
+  if (subscription.listeners.size + subscription.presenceListeners.size > 0)
+    return;
+  subscription.controller.abort();
+  if (subscriptions.get(canvasId) === subscription)
+    subscriptions.delete(canvasId);
+}
+
+/** The Space's one stream, opened on first use. */
+function acquire(canvasId: string): Subscription {
   let subscription = subscriptions.get(canvasId);
   if (!subscription) {
-    subscription = { controller: new AbortController(), listeners: new Set() };
+    subscription = {
+      controller: new AbortController(),
+      listeners: new Set(),
+      presenceListeners: new Set(),
+      presencePages: null,
+    };
     subscriptions.set(canvasId, subscription);
     const current = subscription;
     const { signal } = current.controller;
@@ -36,9 +99,10 @@ export function subscribeCanvasSync(
       while (!signal.aborted) {
         let nextDelay = delay;
         try {
-          const response = await fetch(canvasSyncStreamUrl(canvasId), {
-            signal,
-          });
+          const response = await fetch(
+            canvasSyncStreamUrl(canvasId, CANVAS_PAGE_ID),
+            { signal },
+          );
           if (!response.ok)
             throw await apiErrorFromResponse(
               response,
@@ -46,10 +110,17 @@ export function subscribeCanvasSync(
             );
           if (!response.body)
             throw new Error('Canvas sync response has no stream');
-          await readTypedSSEStream<CanvasSyncEvent>(
+          await readTypedSSEStream<CanvasSyncEvent | CanvasPresenceEvent>(
             response,
             (event) => {
               if (signal.aborted) return;
+              if (event.type === 'presence') {
+                trackPresence(current, event.data);
+                notifyPresence(current, (listener) =>
+                  listener.onEvent(event.data),
+                );
+                return;
+              }
               if (
                 event.type !== 'snapshot' &&
                 event.type !== 'update' &&
@@ -83,6 +154,8 @@ export function subscribeCanvasSync(
           console.warn('[canvasSync] reconnecting after stream failure', error);
         }
         if (signal.aborted) return;
+        current.presencePages = null;
+        notifyPresence(current, (listener) => listener.onDisconnect());
         await new Promise<void>((resolve) => {
           const finish = () => {
             clearTimeout(timer);
@@ -96,7 +169,15 @@ export function subscribeCanvasSync(
       }
     })();
   }
-  const current = subscription;
+  return subscription;
+}
+
+/** Canvas rendering and conversation observation share one transport per Space. */
+export function subscribeCanvasSync(
+  canvasId: string,
+  listener: Listener,
+): () => void {
+  const current = acquire(canvasId);
   current.listeners.add(listener);
   if (current.version !== undefined) {
     queueMicrotask(() => {
@@ -106,10 +187,31 @@ export function subscribeCanvasSync(
   }
   return () => {
     if (!current.listeners.delete(listener)) return;
-    if (current.listeners.size === 0) {
-      current.controller.abort();
-      if (subscriptions.get(canvasId) === current)
-        subscriptions.delete(canvasId);
-    }
+    release(canvasId, current);
+  };
+}
+
+/**
+ * Space presence rides the same stream. A listener added after the stream's
+ * presence snapshot is given the current set as a snapshot of its own.
+ */
+export function subscribeCanvasPresence(
+  canvasId: string,
+  listener: CanvasPresenceListener,
+): () => void {
+  const current = acquire(canvasId);
+  current.presenceListeners.add(listener);
+  if (current.presencePages) {
+    queueMicrotask(() => {
+      if (current.presenceListeners.has(listener) && current.presencePages)
+        listener.onEvent({
+          op: 'snapshot',
+          pages: [...current.presencePages.values()],
+        });
+    });
+  }
+  return () => {
+    if (!current.presenceListeners.delete(listener)) return;
+    release(canvasId, current);
   };
 }

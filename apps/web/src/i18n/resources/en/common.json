@@ -1670,6 +1670,11 @@
     "keepTrying": "Keep trying",
     "reloadAndDiscard": "Reload and discard unsent changes"
   },
+  "canvasPresence": {
+    "anotherDevice": "Another device",
+    "editing": "{{label}} · editing",
+    "moving": "{{label}} · moving"
+  },
   "errors": {
     "connectAnAgent": "Connect an Agent",
     "conversationAgentUnconfigured": "Connect an external Agent or use Built-In Pi to start a new conversation.",

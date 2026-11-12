@@ -24,7 +24,7 @@ World preview reconciliation is a system-originated command batch against World 
 filter guarantees an incoming agent write never clobbers a node the user is
 mid-editing.
 
-> Request ids and read versions on `execute` are shipped; see [reliable save](./canvas-storage.md#42-reliable-save-in-the-write). The browser sends its own structure edits through `execute` too, so they reach every other open page; see [Browser structure edits](#browser-structure-edits). Note body text between pages is not covered there; the remaining proposal is [canvas-realtime-sync-plan.md](../proposals/canvas-realtime-sync-plan.md). Same-body co-editing, presence and multi-server fan-out are outside that scope.
+> Request ids and read versions on `execute` are shipped; see [reliable save](./canvas-storage.md#42-reliable-save-in-the-write). The browser sends its own structure edits through `execute` too, so they reach every other open page; see [Browser structure edits](#browser-structure-edits). Note body text between pages is not covered there; the remaining proposal is [canvas-realtime-sync-plan.md](../proposals/canvas-realtime-sync-plan.md). Same-body co-editing and multi-server fan-out are outside that scope. Which other pages have the Space open, and what they point at, select, drag or edit, is [Space presence](#space-presence).
 
 ## Data flow
 
@@ -305,6 +305,71 @@ Question restoration preserves main's immediate local undo/redo behavior and con
 
 The auto-accept preference still suppresses new Agent review records only. It does not suppress broadcasts or editable undo snapshots, and it does not weaken FSM ownership during manual revert or undo.
 
+## Space presence
+
+When a Space is open on several pages (tabs or devices), each page shows the others: a coloured cursor where the other page's pointer is, and an outline in the same colour around the nodes that page has selected, is dragging or is editing. There is one account, so a marker stands for a page, not a person: the server gives each page a colour and the page supplies a short device label such as `Chrome · Mac`.
+
+Presence is ephemeral. It is held in server memory and in a browser store of its own; it is not part of the Space record, its `version`, the delta log, change records, undo/redo or anything an Agent reads, and reporting it neither marks the Space dirty nor schedules a save. A drag is reported only as "these nodes are being dragged": positions are not streamed, and the moved node arrives on drop through [browser structure edits](#browser-structure-edits).
+
+```
+page A pointer / selection / drag / focus
+   │  useReportCanvasPresence → presenceReporter (≤1 request / 80 ms)
+   ▼
+POST /api/canvas/:id/presence ──► canvas-presence hub (memory, per Space, by page id)
+                                        │  relay to every other subscriber
+                                        ▼
+GET /api/canvas/:id/sync/stream?pageId=B ──► event: presence
+   ▼
+canvasSyncSubscription → canvasPresenceStore → RemoteCursors / RemoteNodeOutlines
+```
+
+### Wire contract
+
+Schemas and limits live in [canvas-presence.ts](../../packages/shared/src/types/api/canvas-presence.ts) and [canvas-presence-limits.ts](../../packages/shared/src/types/api/canvas-presence-limits.ts).
+
+| Endpoint                                    | Body                                                                                                                | Result                                                                                                     |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `POST /api/canvas/:canvasId/presence`       | `{ pageId, label?, displayName?, pointer?: { x, y } \| null, selectedNodeIds?, draggingNodeIds?, editingNodeIds? }` | 204; 400 invalid; 413 over 128 KiB; 429 `PRESENCE_RATE_LIMITED` / `PRESENCE_SPACE_FULL` with `Retry-After` |
+| `POST /api/canvas/:canvasId/presence/leave` | `{ pageId }`                                                                                                        | 204; 400 invalid                                                                                           |
+| `GET /api/canvas/:canvasId/sync/stream`     | query `pageId?`                                                                                                     | adds `presence` events to the stream; 400 for a malformed `pageId`                                         |
+
+The report body is strict (unknown fields are rejected). An absent field leaves that part of the page's presence unchanged, so a pointer tick does not resend the selection. `pageId` is the page's `originator.tabId` (`CANVAS_PAGE_ID`); `pointer` is in canvas (flow) coordinates so it lands on the same canvas point under any pan and zoom, and is `null` when the pointer is not over the canvas. `displayName` is reserved for a person's name and is preferred over `label` when present.
+
+A `presence` event's data is one of `{ op: 'snapshot', pages }` (sent once on connect: every other page present), `{ op: 'update', page }` (a page appeared or changed anything besides its pointer), `{ op: 'pointer', pageId, pointer }` and `{ op: 'leave', pageId }`. A page is `{ pageId, colorIndex, label, displayName?, pointer, selectedNodeIds, draggingNodeIds, editingNodeIds }`. A stream opened with `pageId` is never sent that page's own presence.
+
+Both POST routes need only read access to the Space (`spaceAccess: 'read'`), the same as the stream, and go through the same host, origin, identity and Space-access guards as every Canvas route. The page id is chosen by the page and is not a credential: any caller that may read the Space may report or withdraw presence under any page id in it.
+
+| Limit                    | Value                                                                                     |
+| ------------------------ | ----------------------------------------------------------------------------------------- |
+| Node ids per list        | 200, each at most 128 characters                                                          |
+| `label` / `displayName`  | 40 / 80 characters                                                                        |
+| Coordinates              | finite, magnitude at most 10,000,000                                                      |
+| Pages per Space          | 32; a further page is refused with 429 `PRESENCE_SPACE_FULL`                              |
+| Reports per page         | 30 per second on the server; the browser sends at most one per 80 ms and one at a time    |
+| Reports per network peer | 3,000 per minute, counted apart from the application-wide request budget                  |
+| Colours                  | 6 (`--color-presence-1` … `-6`); the lowest unused one, kept while the page stays present |
+| Heartbeat / expiry       | the page repeats its whole state every 20 s; a page silent for 75 s is dropped            |
+
+### Server
+
+[canvas-presence.ts](../../apps/server/src/modules/canvas/canvas-presence.ts) keeps a map of pages per Space, keyed by Workspace id and Space id, and its own subscriber list; it does not use `publishCanvasUpdate`, so conversation observers and other server-side listeners of Canvas Sync never see presence. A page is removed, and the others are sent `leave`, when it posts `leave`, when the last stream opened with its `pageId` closes, or when it has not reported for the expiry time (a sweep runs while any page is present), so a crashed page or a dropped connection leaves no marker behind. The expiry is longer than a minute because a background tab's heartbeat timer may fire only once a minute. Pointer events are skipped for a stream whose unsent backlog exceeds 256 KiB.
+
+### Browser
+
+[canvasSyncSubscription.ts](../../apps/web/src/store/canvasSyncSubscription.ts) opens the Space's one stream with this page's id and hands `presence` events to presence listeners only; a listener that subscribes late is given the current set as a snapshot, and every listener is told when the stream drops. [canvasPresenceStore.ts](../../apps/web/src/store/canvasPresence/canvasPresenceStore.ts) holds the other pages in two maps, `pages` and `pointers`, and clears them when the stream drops. `pages` keeps its identity across pointer events, so only the cursor layer re-renders for a pointer tick; neither map is in `canvasStore`, and the React Flow node list is not touched.
+
+[useReportCanvasPresence.ts](../../apps/web/src/components/Panels/Canvas/presence/useReportCanvasPresence.ts) reads this page's state without writing any: pointer moves over the canvas (mouse and pen, converted to flow coordinates once per frame; `null` when the pointer leaves, the window loses focus or the tab is hidden), `selected` / `dragging` flags of `canvasStore.nodes`, and the node whose text control has focus, either on the canvas or in the preview panel. [presenceReporter.ts](../../apps/web/src/store/canvasPresence/presenceReporter.ts) sends at most one request at a time and one per 80 ms, each carrying only the latest values of what changed; it sends the whole state on every stream (re)connect and as the heartbeat, waits out a 429, and posts `leave` (`keepalive`) when the canvas unmounts or the page is hidden for unload. Report failures are silent.
+
+[CanvasPresenceLayer.tsx](../../apps/web/src/components/Panels/Canvas/presence/CanvasPresenceLayer.tsx), mounted inside `<ReactFlow>`, draws the cursors and outlines as a screen-space layer in the `.react-flow` container, like `SelectionOutlines`. A remote outline reuses `SelectionOutline` and the measured node geometry, drawn 3 px outside the node (a further 3 px per additional page) so it stays visible beside this page's own selection outline. Every node being edited or dragged carries the page's label with `· editing` / `· moving`; of a plain selection only the first node is labelled. A node this page does not have is not outlined.
+
+### Not covered
+
+- Text carets and selections inside a note body, live drag positions and viewport following.
+- More than one server process: presence is in the memory of the process that received the report.
+- Touch pointers are not reported as a cursor.
+- Two pages in the same browser on the same system have the same label and differ only by colour; with more than six pages colours repeat.
+- A sketch stroke selection, an edge selection and a marquee in progress are not presence.
+
 ## Stream reliability
 
 The sync route subscribes before reading the initial Canvas version, buffers updates committed during that read, sends the snapshot first, and then flushes the buffered updates. This closes the snapshot/subscribe loss window while preserving snapshot-before-update ordering.
@@ -325,7 +390,7 @@ The server emits a heartbeat comment every 15 seconds. Canvas Sync applies a 45-
 | [canvas-engine/change.ts](../../packages/shared/src/canvas-engine/change.ts)                                                                                                                                                                                     | `extractCanvasChanges`, `coalesceChanges`, inverse deltas, staleness fingerprint.                 |
 | [canvas-engine/diff.ts](../../packages/shared/src/canvas-engine/diff.ts)                                                                                                                                                                                         | `diffCanvasState` + shared transient-field stripping.                                             |
 | [canvas/canvas-sync.ts](../../apps/server/src/modules/canvas/canvas-sync.ts)                                                                                                                                                                                     | In-memory pub/sub (`publishCanvasUpdate` / `subscribeCanvasUpdates`).                             |
-| [canvas/sync.route.ts](../../apps/server/src/modules/canvas/sync.route.ts)                                                                                                                                                                                       | `GET /:canvasId/sync/stream` SSE (snapshot handshake + forward updates).                          |
+| [canvas/sync.route.ts](../../apps/server/src/modules/canvas/sync.route.ts)                                                                                                                                                                                       | `GET /:canvasId/sync/stream` SSE (snapshot handshake + forward updates and presence).             |
 | [canvas/canvas-executor.ts](../../apps/server/src/modules/canvas/canvas-executor.ts)                                                                                                                                                                             | `executeOnServer` (always broadcasts, optional `computeChanges`); `applyDeltasOnServer` (revert). |
 | [canvas/canvas.route.ts](../../apps/server/src/modules/canvas/canvas.route.ts)                                                                                                                                                                                   | `/execute`; `GET`/`DELETE` `…/threads/:threadId/changes[/:changeId]`; `…/:changeId/revert`.       |
 | [storage/canvas-store.ts](../../apps/server/src/modules/storage/canvas-store.ts)                                                                                                                                                                                 | Change-record sidecar (`readChanges` / `writeChanges` / `appendChanges` / `removeChange`).        |
@@ -333,10 +398,14 @@ The server emits a heartbeat comment every 15 seconds. Canvas Sync applies a 45-
 | [preprocessing/coalesce.ts](../../apps/server/src/modules/preprocessing/coalesce.ts) · [dispatcher.ts](../../apps/server/src/modules/preprocessing/dispatcher.ts)                                                                                                | In-flight request coalescing.                                                                     |
 | [reachback/reachback-env.ts](../../apps/server/src/modules/agent/acp/reachback-env.ts) · [remote_fs/rfs.route.ts](../../apps/server/src/modules/remote_fs/rfs.route.ts) · [remote_fs/space-execute.ts](../../apps/server/src/modules/remote_fs/space-execute.ts) | `HUABU_THREAD_ID` → `X-Huabu-Host-Thread-Id` → `originator.threadId` on `/execute`.               |
 | [store/canvasSyncStore.ts](../../apps/web/src/store/canvasSyncStore.ts)                                                                                                                                                                                          | SSE subscriber: reconcile, apply, dirty-gap guard, conflict toast, thread attribution.            |
-| [store/canvasSyncSubscription.ts](../../apps/web/src/store/canvasSyncSubscription.ts)                                                                                                                                                                            | Reference-counted source-Space transports, retry and late-subscriber baseline.                    |
+| [store/canvasSyncSubscription.ts](../../apps/web/src/store/canvasSyncSubscription.ts)                                                                                                                                                                            | Reference-counted source-Space transports, retry, late-subscriber baseline, presence listeners.   |
 | [store/remoteConversationOwner.ts](../../apps/web/src/store/remoteConversationOwner.ts)                                                                                                                                                                          | Shared local/remote snapshot observation, stale-result fencing and recovery calibration.          |
 | [store/acpThreadChangesStore.ts](../../apps/web/src/store/acpThreadChangesStore.ts)                                                                                                                                                                              | Per-thread change records + staleness (`isChangeStale`), Keep / Revert.                           |
 | [store/canvasStore.ts](../../apps/web/src/store/canvasStore.ts)                                                                                                                                                                                                  | `applyDeltasFromAgent` (dirty filter, order replay), `pendingContentNodeIds`.                     |
 | [store/canvasStore/sync/](../../apps/web/src/store/canvasStore/sync)                                                                                                                                                                                             | Send queue, in-flight set, property units, field-level deltas, gesture diff commands.             |
 | [ChangeReviewCard.tsx](../../apps/web/src/components/Panels/ChatPanel/ChangeReviewCard.tsx)                                                                                                                                                                      | Above-input Keep / Revert / preview card.                                                         |
 | [pages/CanvasPage/CanvasPage.tsx](../../apps/web/src/pages/CanvasPage/CanvasPage.tsx)                                                                                                                                                                            | Connects / disconnects the sync stream on canvas load / switch.                                   |
+| [types/api/canvas-presence.ts](../../packages/shared/src/types/api/canvas-presence.ts) · [canvas-presence-limits.ts](../../packages/shared/src/types/api/canvas-presence-limits.ts)                                                                              | Presence report / leave bodies, `presence` event, limits and timings.                             |
+| [canvas/canvas-presence.ts](../../apps/server/src/modules/canvas/canvas-presence.ts) · [presence.route.ts](../../apps/server/src/modules/canvas/presence.route.ts)                                                                                               | In-memory presence per Space (relay, colours, rate, expiry); report and leave routes.             |
+| [store/canvasPresence/](../../apps/web/src/store/canvasPresence)                                                                                                                                                                                                 | Other pages' presence store, throttled reporter, device label.                                    |
+| [Canvas/presence/](../../apps/web/src/components/Panels/Canvas/presence)                                                                                                                                                                                         | Reporting hook, remote cursors and remote node outlines.                                          |
