@@ -32,7 +32,7 @@ import {
 import { resolveUiIntent } from '@/handler/canvasCommand/uiIntent';
 
 import { canvasHistoryManager } from './canvasHistoryManager';
-import useCanvasStore from './canvasStore';
+import useCanvasStore, { resetCanvasSyncForTests } from './canvasStore';
 import { createFakeSpaceServer } from './canvasStore/sync/testing/fakeExecuteServer';
 import { useGesturePreviewStore } from './gesturePreviewStore';
 
@@ -130,6 +130,7 @@ beforeEach(() => {
   });
   api.putCanvas.mockResolvedValue({ canvasId: 'routing-canvas', version: 2 });
   server.reset([], []);
+  resetCanvasSyncForTests();
   api.postCanvasExecute.mockImplementation(async (canvasId, request) =>
     server.execute(canvasId, request),
   );

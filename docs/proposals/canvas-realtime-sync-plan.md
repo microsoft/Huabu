@@ -8,6 +8,8 @@ Last updated: 2026-11-12
 > - **Superseded:** §5 (the operation protocol with sessions and guards; §5.3 excepted), §7.1 (common storage boundary) and §7.3 (enabling a Space; there is no per-Space switch).
 > - **Still standing as browser-side requirements:** §2.2 (browser and desktop write inventory), §5.3 (client state and recovery) and §6 (conflict decisions, including undo).
 >
+> **Status note (2026-11-12, browser side).** The browser now sends its structure edits through `execute` and applies updates per property; see [browser structure edits](../architecture/canvas-realtime-sync.md#browser-structure-edits), which also lists what still saves through the whole-Space PUT. Note body text between pages remains proposed.
+>
 > The text below is kept as written and is not updated to match.
 
 This is the repository contract and implementation handoff for the Space's A–F plan. Architecture documents describe implemented behavior; this document does not advertise available production APIs or storage guarantees. The bounded B implementation is documented under [sibling paint order and isolated replay](../architecture/canvas-command-architecture.md#sibling-paint-order-and-isolated-replay); unimplemented protocol and migration behavior below remains proposed. The [July roadmap](../archive/canvas-realtime-sync-roadmap-2026-07.md) is superseded, including its intermediate whole-Space PUT broadcast and own-client echo-filter plan.

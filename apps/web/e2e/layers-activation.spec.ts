@@ -15,12 +15,12 @@ import {
   touchTap,
 } from './helpers';
 
+import type * as CanvasStore from '../src/store/canvasStore';
 import type {
   CanvasCommand,
   CanvasNodeCreateInput,
   CanvasNodeId,
   GetCanvasResponse,
-  PutCanvasRequest,
 } from '@huabu/shared';
 import type { Node } from '@xyflow/react';
 
@@ -1030,11 +1030,20 @@ for (const count of [1, 2]) {
               'Existing child',
               ...sources,
             ]);
+            // Selection is this page's view state. The move is sent as
+            // commands, which do not save it, so it is read from the page.
             expect(
-              after
-                .filter((node) => node.selected)
-                .map((node) => node.id)
-                .sort(),
+              await page.evaluate(async () => {
+                const path = '/src/store/canvasStore.ts';
+                const { default: store } = (await import(
+                  path
+                )) as typeof CanvasStore;
+                return store
+                  .getState()
+                  .nodes.filter((node) => node.selected)
+                  .map((node) => node.id)
+                  .sort();
+              }),
             ).toEqual(sources.map(id).sort());
             await expect(tree.locator('[aria-selected="true"]')).toHaveCount(
               collapsed ? 0 : count,
@@ -1044,28 +1053,24 @@ for (const count of [1, 2]) {
               String(!collapsed),
             );
             await expect(page.getByRole('tab')).toHaveCount(tabs);
+            // The move, its undo and its redo are each saved by one write:
+            // an execute request carrying the commands, or (when a
+            // whole-Space save is already pending) that PUT. Either way the
+            // saved record ends with the sources under the expected parent.
+            // Like the response wait this replaces, it is bounded by the
+            // test timeout rather than by the default assertion timeout.
             const waitForParentsSave = (parentId: string | undefined) =>
-              page.waitForResponse((response) => {
-                if (
-                  response.request().method() !== 'PUT' ||
-                  !response.url().endsWith(`/api/canvas/${canvasId}`)
+              expect
+                .poll(
+                  async () =>
+                    (await persisted())
+                      .filter((node) =>
+                        sources.includes(String(node.data.label)),
+                      )
+                      .map((node) => node.parentId ?? null),
+                  { timeout: 30_000 },
                 )
-                  return false;
-                const body = response
-                  .request()
-                  .postDataJSON() as PutCanvasRequest;
-                const sourceIds = new Set<string>(sources.map(id));
-                const moved = body.state.nodes.filter((node) =>
-                  sourceIds.has(node.id),
-                );
-                return (
-                  response.ok() &&
-                  moved.length === sources.length &&
-                  moved.every(
-                    (node) => (node.parentId ?? null) === (parentId ?? null),
-                  )
-                );
-              });
+                .toEqual(sources.map(() => parentId ?? null));
             const undoSaved = waitForParentsSave(id('Source frame'));
             await target.focus();
             await expect(target).toBeFocused();

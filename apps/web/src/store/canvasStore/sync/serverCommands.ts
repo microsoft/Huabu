@@ -63,6 +63,12 @@ export interface ServerCommands {
   commands: CanvasCommand[];
   /** For each sent command, its index in the local batch. */
   sourceIndex: number[];
+  /**
+   * The batch means something its JSON form cannot say: a data patch that
+   * clears a key with `undefined`, which serialization drops. Such a batch
+   * is not sent as commands.
+   */
+  inexpressible: boolean;
 }
 
 /**
@@ -81,6 +87,16 @@ export function commandsForServer(
 ): ServerCommands {
   const out: CanvasCommand[] = [];
   const sourceIndex: number[] = [];
+  let inexpressible = false;
+  const clears = (patch: Record<string, unknown>): boolean =>
+    Object.entries(patch).some(
+      ([key, value]) =>
+        value === undefined ||
+        (key === 'style' &&
+          typeof value === 'object' &&
+          value !== null &&
+          Object.values(value).some((leaf) => leaf === undefined)),
+    );
   commands.forEach((command, index) => {
     let sent: CanvasCommand | null = command;
     if (command.type === 'SET_NODE_SELECTION') {
@@ -107,11 +123,15 @@ export function commandsForServer(
           ? [{ ...entry, patch: kept } as typeof entry]
           : [];
       });
+      if (
+        patches.some((entry) => clears(entry.patch as Record<string, unknown>))
+      )
+        inexpressible = true;
       sent = patches.length > 0 ? { ...command, patches } : null;
     }
     if (!sent) return;
     out.push(sent);
     sourceIndex.push(index);
   });
-  return { commands: out, sourceIndex };
+  return { commands: out, sourceIndex, inexpressible };
 }

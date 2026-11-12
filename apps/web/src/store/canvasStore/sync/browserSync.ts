@@ -84,6 +84,13 @@ export interface SubmitInput {
   next: { nodes: readonly UnitNode[]; edges: readonly UnitEdge[] };
   gate?: Promise<unknown>;
   /**
+   * The batch reports something the page derived (a measured height) rather
+   * than something the user did. Its units are held while it is in flight,
+   * but a server that does not take it leaves the page's value in place
+   * instead of putting back the one before.
+   */
+  derived?: boolean;
+  /**
    * Called synchronously when the batch's request is answered or dropped,
    * after its holds are released and before the next request is sent.
    * `offset` is the index of this batch's first command in the response.
@@ -99,6 +106,11 @@ export interface PrepareRemoteInput {
   operationId?: string;
   /** Who wrote the batch, when the server says. */
   source?: 'ui' | 'agent' | 'system';
+  /**
+   * Keys held for a reason the queue does not know: what a pointer gesture
+   * has changed so far and not sent yet.
+   */
+  alsoHeld?: (key: string) => boolean;
 }
 
 export interface PreparedRemote extends FieldLevelResult {
@@ -261,10 +273,9 @@ export function createBrowserSync(deps: BrowserSyncDeps): BrowserSync {
       const result = queue.enqueue(input.canvasId, input.commands, {
         ...(input.gate ? { gate: input.gate } : {}),
       });
-      inFlight.hold(
-        result.entry.id,
-        deriveHeldKeys(input.prev, input.next, deps.ignoreUnit),
-      );
+      const keys = deriveHeldKeys(input.prev, input.next, deps.ignoreUnit);
+      if (input.derived) for (const key of keys.keys()) keys.set(key, null);
+      inFlight.hold(result.entry.id, keys);
       if (input.onSettled) {
         const hooks = settleHooks.get(result.entry.id) ?? [];
         hooks.push({ offset: result.offset, run: input.onSettled });
@@ -281,7 +292,8 @@ export function createBrowserSync(deps: BrowserSyncDeps): BrowserSync {
         deltas: input.deltas,
         localNodes: input.localNodes,
         localEdges: input.localEdges,
-        isHeld: (key) => inFlight.isHeld(key, except),
+        isHeld: (key) =>
+          inFlight.isHeld(key, except) || input.alsoHeld?.(key) === true,
         stripInsertedSelection: !own && input.source === 'ui',
       });
       return {

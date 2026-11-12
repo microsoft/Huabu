@@ -4,7 +4,7 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 import { canvasHistoryManager } from './canvasHistoryManager';
-import useCanvasStore from './canvasStore';
+import useCanvasStore, { resetCanvasSyncForTests } from './canvasStore';
 import { createFakeSpaceServer } from './canvasStore/sync/testing/fakeExecuteServer';
 import { useWorkspaceStore } from './workspaceStore';
 import * as api from '../api';
@@ -42,6 +42,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.spyOn(api, 'deleteNode').mockResolvedValue({ success: true });
   server.reset([], [], 0);
+  resetCanvasSyncForTests();
   vi.spyOn(api, 'postCanvasExecute').mockImplementation(
     async (canvasId, request) => server.execute(canvasId, request),
   );
@@ -110,6 +111,8 @@ it('allows geometry undo and redo for canonical entries', async () => {
   useCanvasStore.getState()._setStateNoAutosave({
     nodes: [{ ...entry, position: { x: 50, y: 60 } }],
   });
+  // Undo and redo of a move are sent as commands; the server has the entry.
+  server.reset([{ ...entry, position: { x: 50, y: 60 } }], [], 0);
   await useCanvasStore.getState().undo();
   expect(useCanvasStore.getState().nodes[0].position).toEqual(entry.position);
   await useCanvasStore.getState().redo();

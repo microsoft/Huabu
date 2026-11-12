@@ -5,15 +5,18 @@
  * Commands for changes that reached the store without one.
  *
  * Some writers move the store directly: live drag and resize ticks, the
- * preview passes that follow a resize, and style patches applied during a
- * gesture. Their result has to reach the server as commands, so it is read
- * back from the difference between two node lists.
+ * preview passes that follow a resize, style patches applied during a
+ * gesture, and undo / redo. Their result has to reach the server as
+ * commands, so it is read back from the difference between two states.
  *
- * Covered: position, size, non-content `data` keys and `data.style` leaves
- * of nodes present in both lists. Not covered (left to the commands the
- * caller already has, or reported as `uncovered`): created and deleted
- * nodes, a changed parent, sibling order, removed `data` keys, and other
- * top-level node fields.
+ * Covered: position, size, a changed parent, non-content `data` keys and
+ * `data.style` leaves of nodes present in both states; deleted nodes; a
+ * changed sibling order; added and removed edges. Reported as `uncovered`
+ * instead: created nodes, removed `data` keys, other top-level node fields,
+ * and edges whose own fields changed.
+ *
+ * The result is a proposal. Whether running it reproduces the target state
+ * is for the caller to check by executing it (see `canvasStore`).
  *
  * Pure functions only.
  */
@@ -27,7 +30,7 @@ import {
   type UnitNode,
 } from './propertyUnits';
 
-import type { CanvasCommand, CanvasNodeId } from '@huabu/shared';
+import type { CanvasCommand, CanvasEdgeId, CanvasNodeId } from '@huabu/shared';
 
 type GeometryItem = Extract<
   CanvasCommand,
@@ -70,6 +73,8 @@ export function commandsForLocalDiff(
   const items: GeometryItem[] = [];
   const patches: DataPatch[] = [];
   const uncovered: string[] = [];
+  /** New parent id (`''` for the root) → nodes moved under it. */
+  const reparented = new Map<string, string[]>();
   if (prev === next) return { commands: [], uncovered };
 
   const before = new Map(prev.map((node) => [node.id, node]));
@@ -90,7 +95,15 @@ export function commandsForLocalDiff(
         if (size) item.size = size;
         else uncovered.push(`${node.id}:${unit}`);
       } else if (unit === PARENT_UNIT) {
-        uncovered.push(`${node.id}:${unit}`);
+        const parentId = (node.parentId as string | undefined) ?? null;
+        if (((start.parentId as string | undefined) ?? null) === parentId) {
+          uncovered.push(`${node.id}:${unit}`);
+        } else {
+          const key = parentId ?? '';
+          reparented.set(key, [...(reparented.get(key) ?? []), node.id]);
+          // The parent change converts the position; state the final one.
+          item.position = node.position;
+        }
       } else if (unit.startsWith(DATA_STYLE_PREFIX)) {
         const value = readUnit(node, unit);
         if (value.present)
@@ -117,7 +130,139 @@ export function commandsForLocalDiff(
   }
 
   const commands: CanvasCommand[] = [];
+  for (const [parentKey, nodeIds] of reparented) {
+    commands.push({
+      type: 'SET_NODE_PARENT',
+      nodeIds: nodeIds as CanvasNodeId[],
+      parentId: (parentKey || null) as CanvasNodeId | null,
+    });
+  }
   if (items.length > 0) commands.push({ type: 'SET_NODE_GEOMETRY', items });
   if (patches.length > 0) commands.push({ type: 'MERGE_NODE_DATA', patches });
   return { commands, uncovered };
+}
+
+type DiffEdge = { id: string; source: string; target: string } & Record<
+  string,
+  unknown
+>;
+
+/**
+ * Commands that take one whole state to another: {@link commandsForLocalDiff}
+ * plus deleted nodes, sibling order and edges. Used by undo and redo.
+ */
+export function commandsForStateDiff(
+  prev: { nodes: readonly UnitNode[]; edges: readonly DiffEdge[] },
+  next: { nodes: readonly UnitNode[]; edges: readonly DiffEdge[] },
+  ignoreUnit: (unit: string) => boolean = () => false,
+): LocalDiffCommands {
+  const commands: CanvasCommand[] = [];
+  const uncovered: string[] = [];
+
+  const nextIds = new Set(next.nodes.map((node) => node.id));
+  const prevIds = new Set(prev.nodes.map((node) => node.id));
+  for (const node of next.nodes) {
+    if (!prevIds.has(node.id)) uncovered.push(`${node.id}:existence`);
+  }
+
+  // Edges first: an edge removed together with its node must not be named
+  // after the node is gone.
+  const nextEdges = new Map(next.edges.map((edge) => [edge.id, edge]));
+  const prevEdges = new Map(prev.edges.map((edge) => [edge.id, edge]));
+  const removedEdges = prev.edges.filter(
+    (edge) =>
+      !nextEdges.has(edge.id) &&
+      nextIds.has(edge.source) &&
+      nextIds.has(edge.target),
+  );
+  if (removedEdges.length > 0) {
+    commands.push({
+      type: 'DISCONNECT_EDGES',
+      edges: removedEdges.map((edge) => edge.id as CanvasEdgeId),
+    });
+  }
+
+  const deleted = prev.nodes.filter((node) => !nextIds.has(node.id));
+  if (deleted.length > 0) {
+    commands.push({
+      type: 'DELETE_NODES',
+      nodeIds: deleted.map((node) => node.id as CanvasNodeId),
+    });
+  }
+
+  const survivors = prev.nodes.filter((node) => nextIds.has(node.id));
+  const nodeDiff = commandsForLocalDiff(survivors, next.nodes, ignoreUnit);
+  commands.push(...nodeDiff.commands);
+  uncovered.push(...nodeDiff.uncovered);
+
+  commands.push(...reorderCommands(survivors, next.nodes));
+
+  const addedEdges = next.edges.filter((edge) => !prevEdges.has(edge.id));
+  if (addedEdges.length > 0) {
+    commands.push({
+      type: 'CONNECT_NODES',
+      edges: addedEdges.map((edge) => ({
+        id: edge.id as CanvasEdgeId,
+        source: edge.source as CanvasNodeId,
+        target: edge.target as CanvasNodeId,
+      })),
+    });
+  }
+
+  return { commands, uncovered };
+}
+
+/**
+ * `REORDER_NODES` commands that turn each parent's child order in `prev`
+ * into the one in `next`, moving as few nodes as a left-to-right pass needs.
+ * Parents whose membership differs are left to the parent commands.
+ */
+function reorderCommands(
+  prev: readonly UnitNode[],
+  next: readonly UnitNode[],
+): CanvasCommand[] {
+  const childrenOf = (nodes: readonly UnitNode[]) => {
+    const byParent = new Map<string, string[]>();
+    for (const node of nodes) {
+      const key = (node.parentId as string | undefined) ?? '';
+      byParent.set(key, [...(byParent.get(key) ?? []), node.id]);
+    }
+    return byParent;
+  };
+  // Order is compared after the parent commands ran, i.e. over the
+  // membership `next` has.
+  const nextParent = new Map(
+    next.map((node) => [node.id, (node.parentId as string | undefined) ?? '']),
+  );
+  const before = childrenOf(
+    prev.map((node) => ({
+      ...node,
+      parentId: nextParent.get(node.id) || undefined,
+    })),
+  );
+  const after = childrenOf(next);
+  const commands: CanvasCommand[] = [];
+  for (const [parent, target] of after) {
+    const working = [...(before.get(parent) ?? [])];
+    if (
+      working.length !== target.length ||
+      !target.every((id) => working.includes(id))
+    )
+      continue;
+    for (let index = 0; index < target.length; index++) {
+      const id = target[index];
+      if (working[index] === id) continue;
+      commands.push({
+        type: 'REORDER_NODES',
+        nodeIds: [id as CanvasNodeId],
+        to:
+          index === 0
+            ? { before: working[0] as CanvasNodeId }
+            : { after: target[index - 1] as CanvasNodeId },
+      });
+      working.splice(working.indexOf(id), 1);
+      working.splice(index, 0, id);
+    }
+  }
+  return commands;
 }

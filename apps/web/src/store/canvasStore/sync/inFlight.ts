@@ -45,6 +45,22 @@ export function orderKey(parentId: string | null | undefined): string {
   return `o${SEPARATOR}${parentId ?? ''}`;
 }
 
+export type ParsedKey =
+  | { kind: 'node'; nodeId: string; unit: string }
+  | { kind: 'edge'; edgeId: string }
+  | { kind: 'order'; parentId: string | null };
+
+/** Inverse of {@link nodeUnitKey}, {@link edgeKey} and {@link orderKey}. */
+export function parseKey(key: string): ParsedKey | null {
+  const [kind, id, ...rest] = key.split(SEPARATOR);
+  if (kind === 'n' && id !== undefined && rest.length > 0)
+    return { kind: 'node', nodeId: id, unit: rest.join(SEPARATOR) };
+  if (kind === 'e' && id) return { kind: 'edge', edgeId: id };
+  if (kind === 'o' && id !== undefined)
+    return { kind: 'order', parentId: id || null };
+  return null;
+}
+
 /** The server's value of one node unit, as far as this page knows it. */
 export interface WithheldUnit {
   nodeId: string;

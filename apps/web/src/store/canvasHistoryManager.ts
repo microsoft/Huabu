@@ -30,6 +30,17 @@ const MAX_HISTORY = 50;
 export type CanvasSnapshot = {
   nodes: Node[];
   edges: Edge[];
+  /**
+   * What the edit after this snapshot changed, as in-flight keys (see
+   * `canvasStore/sync/inFlight.ts`). Absent when the edit did not report it;
+   * the snapshot is then restored whole.
+   */
+  changed?: Set<string>;
+  /**
+   * Another page's edit was applied after this snapshot was taken. Restoring
+   * it whole would undo that edit too, so only `changed` is restored.
+   */
+  remoteSince?: boolean;
 };
 
 /** Extended snapshot that also captures action history for preview/restore. */
@@ -168,6 +179,16 @@ function preserveLiveTransient(
   });
 }
 
+/** The scope an entry is restored with; its opposite entry shares it. */
+function restoreScope(
+  snapshot: CanvasSnapshot,
+): Pick<CanvasSnapshot, 'changed' | 'remoteSince'> {
+  return {
+    ...(snapshot.changed ? { changed: snapshot.changed } : {}),
+    ...(snapshot.remoteSince ? { remoteSince: true } : {}),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Canvas History Manager
 // ---------------------------------------------------------------------------
@@ -207,6 +228,9 @@ class CanvasHistoryManager {
    *  only pop a snapshot this gesture created. */
   private _gestureSnapshotPushed = false;
 
+  /** The undo entry the pending gesture's edits belong to. */
+  private _gestureEntry: CanvasSnapshot | undefined;
+
   get gestureSnapshotTaken(): boolean {
     return this._gestureSnapshotTaken;
   }
@@ -215,6 +239,7 @@ class CanvasHistoryManager {
   consumeGestureSnapshot(): void {
     this._gestureSnapshotTaken = false;
     this._gestureSnapshotPushed = false;
+    this._gestureEntry = undefined;
   }
 
   /** Mark that a caller-managed snapshot was taken for the upcoming command.
@@ -225,7 +250,28 @@ class CanvasHistoryManager {
    *  state. */
   markGestureSnapshot(pushed?: boolean): void {
     this._gestureSnapshotTaken = true;
-    if (pushed !== undefined) this._gestureSnapshotPushed = pushed;
+    if (pushed !== undefined) {
+      this._gestureSnapshotPushed = pushed;
+      this._gestureEntry = this.undoStack.at(-1);
+    }
+  }
+
+  /**
+   * Record what the edit that follows the current undo entry changed. A
+   * gesture's edits all land on the entry its snapshot created, even when
+   * another entry was pushed meanwhile.
+   */
+  noteChange(keys: Iterable<string>): void {
+    const entry = this._gestureEntry ?? this.undoStack.at(-1);
+    if (!entry) return;
+    entry.changed ??= new Set();
+    for (const key of keys) entry.changed.add(key);
+  }
+
+  /** Another page's edit was applied: no existing entry may be restored whole. */
+  markRemoteChange(): void {
+    for (const snapshot of [...this.undoStack, ...this.redoStack])
+      snapshot.remoteSince = true;
   }
 
   /**
@@ -244,6 +290,7 @@ class CanvasHistoryManager {
     }
     this._gestureSnapshotTaken = false;
     this._gestureSnapshotPushed = false;
+    this._gestureEntry = undefined;
   }
 
   // ---------- Public getters ----------
@@ -333,10 +380,14 @@ class CanvasHistoryManager {
     if (canRestore && !canRestore(snapshot)) return null;
     this.undoStack.pop();
 
-    this.redoStack.push(createSnapshot(currentNodes, currentEdges));
+    this.redoStack.push({
+      ...createSnapshot(currentNodes, currentEdges),
+      ...restoreScope(snapshot),
+    });
     const topology = stripLegacyPortalTopology(snapshot.nodes, snapshot.edges);
     return {
       ...topology,
+      ...restoreScope(snapshot),
       nodes: preserveLiveTransient(
         preserveLiveQuestionData(topology.nodes, currentNodes),
         currentNodes,
@@ -359,10 +410,14 @@ class CanvasHistoryManager {
     if (canRestore && !canRestore(snapshot)) return null;
     this.redoStack.pop();
 
-    this.undoStack.push(createSnapshot(currentNodes, currentEdges));
+    this.undoStack.push({
+      ...createSnapshot(currentNodes, currentEdges),
+      ...restoreScope(snapshot),
+    });
     const topology = stripLegacyPortalTopology(snapshot.nodes, snapshot.edges);
     return {
       ...topology,
+      ...restoreScope(snapshot),
       nodes: preserveLiveTransient(
         preserveLiveQuestionData(topology.nodes, currentNodes),
         currentNodes,
@@ -503,6 +558,14 @@ export class CanvasHistoryRegistry {
 
   rollbackGestureSnapshot(): void {
     this.active.rollbackGestureSnapshot();
+  }
+
+  noteChange(keys: Iterable<string>): void {
+    this.active.noteChange(keys);
+  }
+
+  markRemoteChange(): void {
+    this.active.markRemoteChange();
   }
 
   takeSnapshot(nodes: Node[], edges: Edge[]): boolean {

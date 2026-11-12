@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
     ingestionByNodeId: {},
     setNodeGeometry: vi.fn(),
     onNodeResizeStart: vi.fn(),
+    closePointerGesture: vi.fn(),
     updateResizePreview: vi.fn(),
     endResizePreview: vi.fn(),
   },

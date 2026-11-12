@@ -229,6 +229,8 @@ export function createNodeContentQueue(opts: {
   waitForCreation?: (canvasId: string, nodeId: string) => Promise<void>;
   retryStructure?: () => Promise<void>;
   onRestoredContentPersisted?: (canvasId: string, nodeId: string) => void;
+  /** A node's content save was acknowledged and nothing more is pending for it. */
+  onContentPersisted?: (canvasId: string, nodeId: string) => void;
 }): NodeContentQueue {
   const debouncer = createPerKeyDebouncer<string>(opts.delayMs);
   const suspendedCanvases = new Set<string>();
@@ -523,6 +525,7 @@ export function createNodeContentQueue(opts: {
         });
       }
       if (pendingFields.get(nodeId)?.size) schedule(canvasId, nodeId);
+      else opts.onContentPersisted?.(canvasId, nodeId);
       if (completedRestore && !suspendedCanvases.has(canvasId))
         opts.onRestoredContentPersisted?.(canvasId, nodeId);
       return;

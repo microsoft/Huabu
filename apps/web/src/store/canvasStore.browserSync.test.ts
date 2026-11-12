@@ -25,6 +25,12 @@ vi.mock('@/components/Common/Toast', () => ({
   dismissToast: vi.fn(),
 }));
 
+import {
+  autoHeightKey,
+  intrinsicToLayoutHeight,
+  type Delta,
+} from '@huabu/shared/canvas-engine';
+
 import { dismissToast, toast } from '@/components/Common/Toast';
 
 import { canvasHistoryManager } from './canvasHistoryManager';
@@ -45,7 +51,6 @@ import type {
   PostCanvasExecuteRequest,
   PostCanvasExecuteResponse,
 } from '@huabu/shared';
-import type { Delta } from '@huabu/shared/canvas-engine';
 import type { Node } from '@xyflow/react';
 
 /**
@@ -201,6 +206,8 @@ afterEach(async () => {
   // Let the save that deletion scheduled run, so no timer is left armed.
   await vi.advanceTimersByTimeAsync(5_000);
   resetCanvasSyncForTests();
+  // A case may end inside a gesture; do not let its snapshot flag carry on.
+  canvasHistoryManager.consumeGestureSnapshot();
   canvasHistoryManager.clear();
   vi.clearAllTimers();
   vi.useRealTimers();
@@ -472,7 +479,7 @@ describe('the whole-Space save and reload wait for the queue', () => {
   it('does not PUT while a batch is unanswered, then PUTs with the advanced version', async () => {
     moveHere(X, 500);
     // A writer that still saves through the whole-Space PUT.
-    state().patchNodeSilent(Y, { pinned: true });
+    useCanvasStore.setState({ canvasTitle: 'Renamed' });
     await vi.advanceTimersByTimeAsync(5_000);
     expect(api.putCanvas).not.toHaveBeenCalled();
 
@@ -480,6 +487,28 @@ describe('the whole-Space save and reload wait for the queue', () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(api.putCanvas).toHaveBeenCalledTimes(1);
     expect(api.putCanvas.mock.calls[0][1].version).toBe(2);
+  });
+
+  it('does not let the update for an earlier batch put back what is waiting for the PUT', async () => {
+    moveHere(X, 500);
+    // A writer that saves through the whole-Space PUT moves the node on.
+    useCanvasStore.setState({
+      nodes: state().nodes.map((n) =>
+        n.id === X ? { ...n, position: { x: 700, y: 0 } } : n,
+      ),
+    });
+    // The first move's update arrives; the PUT has not gone out yet.
+    await answer(0);
+    expect(node(X).position).toEqual({ x: 700, y: 0 });
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(api.putCanvas).toHaveBeenCalledTimes(1);
+    const saved = api.putCanvas.mock.calls[0][1].state.nodes as Node[];
+    expect(saved.find((n) => n.id === X)?.position).toEqual({ x: 700, y: 0 });
+    // Once saved, the node is no longer held: another page can move it.
+    server.reset(state().nodes, [], state().version);
+    deliver(remote([moveCommand(X, 40)]), 'ui');
+    expect(node(X).position).toEqual({ x: 40, y: 0 });
   });
 
   it('holds a wanted reload until the queue has drained', async () => {
@@ -534,6 +563,85 @@ describe('a free drag', () => {
     state().undo();
     expect(node(X).position).toEqual({ x: 0, y: 0 });
     expect(canvasHistoryManager.canUndo).toBe(false);
+  });
+
+  const tick = (id: string, x: number, dragging = true) =>
+    state().onNodesChange([
+      { type: 'position', id, position: { x, y: 0 }, dragging },
+    ]);
+
+  it('keeps a node under the pointer where it is when another page moves it, and the drop wins', async () => {
+    state().onNodeDragStart(new MouseEvent('mousedown'), node(X), [node(X)]);
+    tick(X, 150);
+    deliver(remote([moveCommand(X, 900), accentCommand(X, 'blue')]), 'ui');
+    // The colour lands; the position stays under the hand.
+    expect(node(X).position).toEqual({ x: 150, y: 0 });
+    expect(accentOf(node(X))).toBe('blue');
+
+    tick(X, 200, false);
+    state().onNodeDragStop(new MouseEvent('mouseup'), node(X), [node(X)]);
+    expect(own).toHaveLength(1);
+    expect(own[0].request.commands).toEqual([moveCommand(X, 200)]);
+    await answer(0);
+    expect(serverNode(X)?.position).toEqual({ x: 200, y: 0 });
+    expect(node(X).position).toEqual({ x: 200, y: 0 });
+  });
+
+  it('a cancelled drag goes back to where another page put the node meanwhile', async () => {
+    state().onNodeDragStart(new MouseEvent('mousedown'), node(X), [node(X)]);
+    tick(X, 150);
+    deliver(remote([moveCommand(X, 900)]), 'ui');
+    expect(node(X).position).toEqual({ x: 150, y: 0 });
+
+    state().cancelActiveNodeDrag();
+    expect(node(X).position).toEqual({ x: 900, y: 0 });
+    expect(own).toHaveLength(0);
+    expect(canvasHistoryManager.canUndo).toBe(false);
+  });
+
+  it('a batch sent in the middle of a gesture does not pull the node back or lose the rest of it', async () => {
+    state().onNodeDragStart(new MouseEvent('mousedown'), node(X), [node(X)]);
+    tick(X, 100);
+    // Something commits mid-gesture (a modifier key interrupting a resize
+    // does this); the gesture goes on.
+    state().setNodeGeometry([{ nodeId: X, position: { x: 100, y: 0 } }]);
+    expect(own).toHaveLength(1);
+    tick(X, 200);
+
+    // The update for the mid-gesture batch arrives while the pointer is
+    // still down.
+    await answer(0);
+    expect(serverNode(X)?.position).toEqual({ x: 100, y: 0 });
+    expect(node(X).position).toEqual({ x: 200, y: 0 });
+
+    tick(X, 260, false);
+    state().onNodeDragStop(new MouseEvent('mouseup'), node(X), [node(X)]);
+    expect(own).toHaveLength(2);
+    expect(own[1].request.commands).toEqual([moveCommand(X, 260)]);
+    await answer(1);
+    expect(serverNode(X)?.position).toEqual({ x: 260, y: 0 });
+    expect(node(X).position).toEqual({ x: 260, y: 0 });
+  });
+
+  it('a gesture that ends without a command still sends what its ticks changed', async () => {
+    state().onNodeResizeStart();
+    state()._setStateNoAutosave({
+      nodes: state().nodes.map((n) =>
+        n.id === X ? { ...n, style: { width: 360, height: 200 } } : n,
+      ),
+    });
+    expect(own).toHaveLength(0);
+    state().closePointerGesture();
+    expect(own).toHaveLength(1);
+    expect(own[0].request.commands).toEqual([
+      {
+        type: 'SET_NODE_GEOMETRY',
+        items: [{ nodeId: X, size: { width: 360, height: 200 } }],
+      },
+    ]);
+    // Closing twice sends nothing more.
+    state().closePointerGesture();
+    expect(own).toHaveLength(1);
   });
 
   it('sends nothing for a click that did not move the node', async () => {
@@ -665,7 +773,7 @@ describe('when a change cannot be sent', () => {
 
   it('does not send the whole-Space PUT while the queue cannot send', async () => {
     moveHere(X, 500);
-    state().patchNodeSilent(Y, { pinned: true });
+    useCanvasStore.setState({ canvasTitle: 'Renamed' });
     await failUntilStalled();
     await vi.advanceTimersByTimeAsync(10_000);
     expect(api.putCanvas).not.toHaveBeenCalled();
@@ -700,5 +808,258 @@ describe('when a change cannot be sent', () => {
     const event = new Event('beforeunload', { cancelable: true });
     window.dispatchEvent(event);
     expect(event.defaultPrevented).toBe(false);
+  });
+});
+
+describe('undo and redo', () => {
+  it("takes back this page's move and keeps what another page changed since", async () => {
+    moveHere(X, 500);
+    await answer(0);
+    deliver(remote([accentCommand(X, 'blue'), moveCommand(Y, 40, 300)]), 'ui');
+    expect(accentOf(node(X))).toBe('blue');
+
+    state().undo();
+    // Only the move is taken back.
+    expect(node(X).position).toEqual({ x: 0, y: 0 });
+    expect(accentOf(node(X))).toBe('blue');
+    expect(node(Y).position).toEqual({ x: 40, y: 300 });
+    // It is sent as the command that reproduces it.
+    expect(own).toHaveLength(2);
+    expect(own[1].request.commands).toEqual([moveCommand(X, 0)]);
+    await answer(1);
+    expect(serverNode(X)?.position).toEqual({ x: 0, y: 0 });
+    expect(accentOf(serverNode(X) as Node)).toBe('blue');
+
+    state().redo();
+    expect(node(X).position).toEqual({ x: 500, y: 0 });
+    expect(accentOf(node(X))).toBe('blue');
+    expect(own[2].request.commands).toEqual([moveCommand(X, 500)]);
+    await answer(2);
+    expect(serverNode(X)?.position).toEqual({ x: 500, y: 0 });
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(api.putCanvas).not.toHaveBeenCalled();
+  });
+});
+
+describe('undo and redo beyond what commands can say', () => {
+  it('records what a gesture changed even when its closing batch applies nothing', async () => {
+    state().beginGesture('SET_NODE_GEOMETRY');
+    // Live ticks put the node where the pointer is.
+    state()._setStateNoAutosave({
+      nodes: state().nodes.map((n) =>
+        n.id === X ? { ...n, position: { x: 300, y: 0 } } : n,
+      ),
+    });
+    // The batch that closes the gesture applies nothing itself.
+    state().executeCommands([
+      { type: 'DELETE_NODES', nodeIds: ['node-not-there'] },
+    ]);
+    expect(own[0].request.commands).toEqual([moveCommand(X, 300)]);
+    await answer(0);
+    deliver(remote([accentCommand(X, 'blue')]), 'ui');
+
+    state().undo();
+    expect(node(X).position).toEqual({ x: 0, y: 0 });
+    expect(accentOf(node(X))).toBe('blue');
+  });
+
+  it('brings a deleted node back through the whole-Space PUT, and an edit made meanwhile joins it', async () => {
+    state().deleteNodes([X]);
+    await answer(0);
+    expect(state().nodes.map((n) => n.id)).toEqual([Y]);
+
+    state().undo();
+    expect(
+      state()
+        .nodes.map((n) => n.id)
+        .sort(),
+    ).toEqual([X, Y].sort());
+    // No command creates a node from a snapshot.
+    expect(own).toHaveLength(1);
+    // A move made before that PUT has gone out rides it: sent as a command
+    // it could reach the server before the node it moves.
+    moveHere(X, 700);
+    expect(own).toHaveLength(1);
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(api.putCanvas).toHaveBeenCalledTimes(1);
+    const saved = api.putCanvas.mock.calls[0][1].state.nodes as Node[];
+    expect(saved.find((n) => n.id === X)?.position).toEqual({ x: 700, y: 0 });
+  });
+
+  it('keeps a patch that clears a key on the whole-Space PUT', async () => {
+    state().updateNodeData(X, { pinned: true });
+    await answer(0);
+    // `undefined` does not survive JSON, so this cannot be a command.
+    state().updateNodeData(X, { pinned: undefined });
+    expect(own).toHaveLength(1);
+    expect(node(X).data.pinned).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(api.putCanvas).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('writers that used to save only through the whole-Space PUT', () => {
+  it('sends a silent structure patch as a command', async () => {
+    state().patchNodeSilent(X, {
+      style: { ...(node(X).data.style as object), fontSize: 22 },
+    });
+    expect(own).toHaveLength(1);
+    expect(own[0].request.commands).toEqual([
+      {
+        type: 'MERGE_NODE_DATA',
+        patches: [{ nodeId: X, patch: { style: { fontSize: 22 } } }],
+      },
+    ]);
+    await answer(0);
+    expect((serverNode(X)?.data.style as { fontSize?: number }).fontSize).toBe(
+      22,
+    );
+    // Not an undo entry, and not a whole-Space save.
+    expect(canvasHistoryManager.canUndo).toBe(false);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(api.putCanvas).not.toHaveBeenCalled();
+  });
+
+  it('does not queue a silent patch of content fields or read-model hints', async () => {
+    state().patchNodeSilent(X, { label: 'Generated', summary: 'S' });
+    state().patchNodeSilent(X, { contentMissing: true });
+    expect(own).toHaveLength(0);
+    expect(node(X).data).toMatchObject({
+      label: 'Generated',
+      contentMissing: true,
+    });
+  });
+
+  it('folds a silent patch made during a pointer gesture into the batch that closes it', async () => {
+    state().beginGesture('SET_NODE_GEOMETRY');
+    state().patchNodeSilent(X, { style: { accent: 'white', fontSize: 30 } });
+    expect(own).toHaveLength(0);
+    state().setNodeGeometry([{ nodeId: X, position: { x: 80, y: 0 } }]);
+    expect(own).toHaveLength(1);
+    expect(own[0].request.commands).toEqual([
+      {
+        type: 'MERGE_NODE_DATA',
+        patches: [{ nodeId: X, patch: { style: { fontSize: 30 } } }],
+      },
+      moveCommand(X, 80),
+    ]);
+  });
+});
+
+describe('measured heights', () => {
+  const AUTO = 'node-sync-auto';
+  const autoNote = (): Node => ({
+    id: AUTO,
+    type: 'note',
+    position: { x: 600, y: 0 },
+    style: { width: 300, height: 120 },
+    data: { type: 'note', content: 'Auto body', heightMode: 'auto' },
+  });
+  const measurement = (intrinsicHeight: number) => ({
+    nodeId: AUTO as `node-${string}`,
+    intrinsicHeight,
+    measuredFor: autoHeightKey(node(AUTO)),
+  });
+  const layoutHeight = (intrinsicHeight: number) =>
+    intrinsicToLayoutHeight(intrinsicHeight, 'note', 300);
+  const heightOf = (value: Node | undefined) =>
+    (value?.style as { height?: number } | undefined)?.height;
+
+  beforeEach(() => {
+    const nodes = [...state().nodes, autoNote()];
+    state()._setStateNoAutosave({ nodes });
+    server.reset(nodes, [], 1);
+  });
+
+  it('applies a measurement here at once and reports it once, without a whole-Space save', async () => {
+    state().applyMeasuredHeights([measurement(400)]);
+    expect(heightOf(node(AUTO))).toBe(layoutHeight(400));
+    expect(own).toHaveLength(1);
+    expect(own[0].request.commands).toEqual([
+      { type: 'APPLY_MEASURED_HEIGHT', items: [measurement(400)] },
+    ]);
+    expect(own[0].request.originator.source).toBe('ui');
+
+    await answer(0);
+    expect(heightOf(serverNode(AUTO))).toBe(layoutHeight(400));
+    expect(heightOf(node(AUTO))).toBe(layoutHeight(400));
+    // A measurement is not an undo entry.
+    expect(canvasHistoryManager.canUndo).toBe(false);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(api.putCanvas).not.toHaveBeenCalled();
+  });
+
+  it('does not report again for content the server already has a height for', async () => {
+    state().applyMeasuredHeights([measurement(400)]);
+    await answer(0);
+    // This page renders the same body a little taller.
+    state().applyMeasuredHeights([measurement(420)]);
+    expect(heightOf(node(AUTO))).toBe(layoutHeight(420));
+    expect(own).toHaveLength(1);
+    expect(heightOf(serverNode(AUTO))).toBe(layoutHeight(400));
+  });
+
+  it("does not report over another page's measurement of the same content", async () => {
+    deliver(
+      remote([{ type: 'APPLY_MEASURED_HEIGHT', items: [measurement(400)] }]),
+      'ui',
+    );
+    expect(heightOf(node(AUTO))).toBe(layoutHeight(400));
+    state().applyMeasuredHeights([measurement(420)]);
+    // Shown here, not written back: two pages would otherwise keep
+    // rewriting each other's size.
+    expect(heightOf(node(AUTO))).toBe(layoutHeight(420));
+    expect(own).toHaveLength(0);
+    expect(heightOf(serverNode(AUTO))).toBe(layoutHeight(400));
+  });
+
+  it('waits for the content save before reporting the height of an edited body', async () => {
+    let saved!: () => void;
+    api.putNodeContent.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          saved = () => resolve({ nodeId: AUTO, label: null, rev: 'rev-2' });
+        }),
+    );
+    state().updateNodeData(AUTO, { content: 'A much longer body' });
+    state().applyMeasuredHeights([measurement(500)]);
+    expect(heightOf(node(AUTO))).toBe(layoutHeight(500));
+    // The server would refuse a height for a body it does not have yet.
+    expect(own).toHaveLength(0);
+
+    await vi.advanceTimersByTimeAsync(3_000);
+    saved();
+    await flush();
+    expect(own).toHaveLength(1);
+    expect(own[0].request.commands).toEqual([
+      { type: 'APPLY_MEASURED_HEIGHT', items: [measurement(500)] },
+    ]);
+  });
+
+  it('keeps the measured height here when the server refuses the report', async () => {
+    state().applyMeasuredHeights([measurement(400)]);
+    await answer(0, {
+      canvasId: SPACE,
+      fromVersion: 1,
+      toVersion: 1,
+      deltas: [],
+      results: [
+        {
+          command: own[0].request.commands[0],
+          applied: false,
+          reason: 'no-op',
+        },
+      ],
+      commands: own[0].request.commands,
+      pendingEffects: {
+        mutatedNodes: [],
+        deletedNodeIds: [],
+        contentEditedNodeIds: [],
+        deferredFitFrameIds: [],
+      },
+    });
+    expect(heightOf(node(AUTO))).toBe(layoutHeight(400));
+    expect(toast).not.toHaveBeenCalled();
   });
 });

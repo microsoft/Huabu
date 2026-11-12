@@ -119,7 +119,7 @@ The shared `CREATE_NODES` command converts `size.height: "auto"` to explicit Not
 
 ## 9. Persistence
 
-The hint and materialized height ride the ordinary structure save. Load recomputes geometry from current hints; stale hints retain the persisted numeric footprint only as a seed until measurement corrects it. No path rewrites an old key to make a seed appear fresh.
+The hint and materialized height are reported to the server as an `APPLY_MEASURED_HEIGHT` command through the browser's send queue, not through the whole-Space save: a page reports a current measurement once the node's content save has landed, and not when a measurement under the same key is already on the server, so two pages do not keep rewriting each other's size (see [browser structure edits](./canvas-realtime-sync.md#browser-structure-edits)). The server applies it only when the key matches its own copy of the body; otherwise the page keeps showing its measurement and the stored hint catches up on a later load. Load recomputes geometry from current hints; stale hints retain the persisted numeric footprint only as a seed until measurement corrects it. No path rewrites an old key to make a seed appear fresh.
 
 Derived geometry is **not yet isolated from the sync path** — see §11.
 

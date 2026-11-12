@@ -37,7 +37,9 @@ import type { CreateCanvasResponse } from '@huabu/shared';
  *    plain `test` as the implementation lands.
  *
  * Case (g) is the control: a headless execute request. Case (h) takes one
- * page offline while it edits.
+ * page offline while it edits. Case (i) undoes on one page after the other
+ * page changed the same node. Case (j) opens two pages on a note whose
+ * height neither has measured yet.
  *
  * Timing: a structure edit is sent at once and a body is autosaved shortly
  * after the last change, so every scenario waits on the server record rather
@@ -1033,6 +1035,178 @@ test('(h) an edit made offline stays on screen, is flagged as unsynced and is se
   expect(result.executeCalls.length).toBeGreaterThan(1);
   expect(result.executeCalls.at(-1)).toBe(200);
   expect(result.aVersion).toBe(result.serverVersion);
+});
+
+// ─── (i) undo ───────────────────────────────────────────────────────────────
+
+test('(i) undo on page A takes back its own move and keeps the colour page B chose since', async ({
+  browser,
+  request,
+}, testInfo) => {
+  const { canvasId, a, b } = await openBoth(browser, request, 'Sync undo');
+  const savedAccent = async () =>
+    (await serverRecord(request, canvasId)).node(X)?.data.style?.accent;
+  const accentBefore = await savedAccent();
+
+  // A moves X; B, once it shows the move, recolours X.
+  let mark = b.syncText().length;
+  const moved = await dragNode(a.page, X, 120, 0);
+  await waitForServerPosition(request, canvasId, X, moved);
+  await observeRemote(b, mark, SEED[X] as Point, () => domPosition(b.page, X));
+  mark = a.syncText().length;
+  const aAccentBefore = await accent(a.page, X);
+  await selectNode(b.page, X);
+  await b.page
+    .getByRole('button', { name: 'Accent color', exact: true })
+    .click();
+  await b.page.getByRole('button', { name: 'Blue', exact: true }).click();
+  await expect.poll(savedAccent).not.toBe(accentBefore);
+  const blue = await accent(b.page, X);
+  await observeRemote(a, mark, aAccentBefore, () => accent(a.page, X));
+
+  // A undoes. Its history holds the move, not B's recolour.
+  a.calls.length = 0;
+  mark = b.syncText().length;
+  await a.page.locator('[data-canvas-root]').focus();
+  await a.page.keyboard.press('ControlOrMeta+z');
+  await waitForServerPosition(request, canvasId, X, SEED[X]);
+  const bLive = await observeRemote(b, mark, moved, () =>
+    domPosition(b.page, X),
+  );
+  const result = {
+    moved,
+    blue,
+    aCalls: [...a.calls],
+    aShows: await domPosition(a.page, X),
+    aAccent: await accent(a.page, X),
+    bShows: bLive.value,
+    bAccent: await accent(b.page, X),
+    savedAccentChanged: (await savedAccent()) !== accentBefore,
+    reloaded: [await wasReloaded(a.page), await wasReloaded(b.page)],
+    toasts:
+      (await a.page.getByText(CONFLICT_TOAST).count()) +
+      (await b.page.getByText(CONFLICT_TOAST).count()),
+  };
+  await evidence(testInfo, result);
+  await closeBoth(a, b);
+
+  expect(result.aShows).toEqual(SEED[X]);
+  expect(result.bShows).toEqual(SEED[X]);
+  expect(result.aAccent).toBe(blue);
+  expect(result.bAccent).toBe(blue);
+  expect(result.savedAccentChanged).toBe(true);
+  // Sent as a command, not as a whole-Space save.
+  expect(result.aCalls.map((call) => call.path)).toContain('<space>/execute');
+  expect(result.aCalls.map((call) => call.path)).not.toContain('<space>');
+  expect(result.reloaded).toEqual([false, false]);
+  expect(result.toasts).toBe(0);
+});
+
+// ─── (j) measured heights ───────────────────────────────────────────────────
+
+test('(j) two pages that measure the same auto-height note report it once and do not save over each other', async ({
+  browser,
+  request,
+}, testInfo) => {
+  const AUTO = 'node-sync-auto';
+  const canvasId = await seedSpace(request, 'Sync heights');
+  // An auto-height note nobody has rendered yet: it has no measured height.
+  const seeded = await request.post(`/api/canvas/${canvasId}/execute`, {
+    data: {
+      commands: [
+        {
+          type: 'CREATE_NODES',
+          nodes: [
+            {
+              id: AUTO,
+              nodeType: 'note',
+              data: {
+                type: 'note',
+                label: 'Auto',
+                content: Array.from(
+                  { length: 12 },
+                  (_, line) =>
+                    `Line ${line + 1} of a body tall enough to need measuring.`,
+                ).join('\n\n'),
+              },
+              selectOnCreate: false,
+              position: { x: 820, y: 340 },
+              size: { width: 300, height: 'auto' },
+            },
+          ],
+        },
+      ],
+      originator: { source: 'ui', tabId: 'e2e-multi-page-sync-seed' },
+    },
+  });
+  expect(seeded.ok(), await seeded.text()).toBe(true);
+  const saved = async () => {
+    const node = (await serverRecord(request, canvasId)).node(AUTO) as
+      | (ServerNode & {
+          style?: { height?: number };
+          data: { autoHeight?: { measuredFor?: string } };
+        })
+      | undefined;
+    return {
+      height: node?.style?.height,
+      measuredFor: node?.data.autoHeight?.measuredFor,
+    };
+  };
+  const before = await saved();
+
+  const a = await openDevice(browser, canvasId, 'A');
+  const b = await openDevice(browser, canvasId, 'B');
+  // Both pages measured on load; wait until the server has a measurement
+  // and both pages have caught up with it.
+  await expect.poll(async () => (await saved()).measuredFor).toBeTruthy();
+  await a.page.waitForTimeout(2_500);
+  await expect(async () => {
+    const { version } = await serverRecord(request, canvasId);
+    for (const device of [a, b]) {
+      const state = await storeState(device.page);
+      expect(state.isSaving, `${device.name} is saving`).toBe(false);
+      expect(state.version, `${device.name} version`).toBe(version);
+    }
+  }).toPass();
+  const shown = (page: Page) =>
+    page.evaluate(
+      (id) =>
+        document
+          .querySelector<HTMLElement>(`.react-flow__node[data-id="${id}"]`)
+          ?.getBoundingClientRect().height ?? null,
+      AUTO,
+    );
+  const after = await saved();
+  const result = {
+    before,
+    after,
+    aCalls: [...a.calls],
+    bCalls: [...b.calls],
+    aShows: await shown(a.page),
+    bShows: await shown(b.page),
+    reloaded: [await wasReloaded(a.page), await wasReloaded(b.page)],
+    conflict: [
+      (await storeState(a.page)).versionConflict,
+      (await storeState(b.page)).versionConflict,
+    ],
+    toasts:
+      (await a.page.getByText(CONFLICT_TOAST).count()) +
+      (await b.page.getByText(CONFLICT_TOAST).count()),
+  };
+  await evidence(testInfo, result);
+  await closeBoth(a, b);
+
+  const paths = [...result.aCalls, ...result.bCalls].map((call) => call.path);
+  // The measurement is reported as a command; no page saves the whole Space.
+  expect(paths).toContain('<space>/execute');
+  expect(paths).not.toContain('<space>');
+  expect(result.after.measuredFor).toBeTruthy();
+  expect(result.after.height).not.toBe(result.before.height);
+  expect(result.aShows).toBe(result.after.height);
+  expect(result.bShows).toBe(result.after.height);
+  expect(result.conflict).toEqual([false, false]);
+  expect(result.toasts).toBe(0);
+  expect(result.reloaded).toEqual([false, false]);
 });
 
 // ─── (f) note body ──────────────────────────────────────────────────────────

@@ -361,6 +361,13 @@ describe('Question creation settlement', () => {
       .updateNodeData('node-pdf', { coverUrl: undefined });
     expect(useCanvasStore.getState().nodes[0].data.coverUrl).toBeUndefined();
     expect(useCanvasStore.getState().nodes[0].data.label).toBe('PDF');
+    // The clear has been saved; the undo that sets the cover again is sent
+    // as a command, so the server needs the node it applies to.
+    const server = createFakeSpaceServer();
+    server.reset(useCanvasStore.getState().nodes, [], 1);
+    postCanvasExecute.mockImplementation(async (canvasId, request) =>
+      server.execute(canvasId, request),
+    );
     await useCanvasStore.getState().undo();
     expect(useCanvasStore.getState().nodes[0].data.coverUrl).toBe('old-cover');
     await useCanvasStore.getState().redo();
