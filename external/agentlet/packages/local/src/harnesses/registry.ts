@@ -8,6 +8,7 @@ import { geminiHarness } from './gemini.js'
 import { hermesHarness } from './hermes.js'
 import { kimiHarness } from './kimi.js'
 import { opencodeHarness } from './opencode.js'
+import { piHarness } from './pi.js'
 import { qwenHarness } from './qwen.js'
 import { proxyHarness } from './proxy.js'
 import type { HarnessDefinition } from './types.js'
@@ -23,6 +24,7 @@ export const HARNESS_DEFINITIONS: readonly HarnessDefinition[] = [
   cursorHarness,
   codebuddyHarness,
   hermesHarness,
+  piHarness,
   proxyHarness,
   customHarness,
 ]

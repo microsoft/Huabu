@@ -28,6 +28,7 @@ import { Agentlet } from '../src/agentlet.js'
 import { AgentProcess } from '../src/agent-process.js'
 import { Logger } from '../src/logger.js'
 import { resolveProxyEntry } from '../src/harnesses/proxy.js'
+import { piHarness } from '../src/harnesses/pi.js'
 
 afterEach(() => {
   vi.unstubAllEnvs()
@@ -81,7 +82,7 @@ describe('trusted harness discovery', () => {
   it('returns the complete stable catalogue without creating workspaces by default', async () => {
     const { harnesses } = await discoverHarnesses()
     expect(harnesses.map((entry) => entry.id)).toEqual(HARNESS_DEFINITIONS.map((entry) => entry.id))
-    expect(harnesses).toHaveLength(12)
+    expect(harnesses).toHaveLength(13)
     expect(harnesses.filter((entry) => entry.id !== 'proxy').every((entry) => entry.status === 'ready')).toBe(true)
     expect(harnesses.at(-1)).toMatchObject({
       id: 'custom',
@@ -100,7 +101,7 @@ describe('trusted harness discovery', () => {
 
   it('never invokes adapters that skip the optional version probe', async () => {
     const { harnesses } = await discoverHarnesses()
-    for (const command of ['claude-agent-acp', 'codex-acp', 'hermes']) {
+    for (const command of ['claude-agent-acp', 'codex-acp', 'hermes', 'pi-acp', 'pi']) {
       expect(mocks.probe).not.toHaveBeenCalledWith(`/usr/local/bin/${command}`, ['--version'], expect.anything())
     }
     expect(harnesses.find((entry) => entry.id === 'claude')?.version).toBeUndefined()
@@ -154,7 +155,7 @@ describe('trusted harness discovery', () => {
       mocks.platform.mockReturnValue('win32')
       mocks.probe.mockImplementation(async (file: string, args: string[]) => ({
         stdout: file === 'where.exe'
-          ? `C:\\Tools\\${args[0]}${extension ? `.${extension}` : ''}\r\n`
+          ? `C:\\Tools\\${args[0]}${args[0]!.endsWith('.cmd') ? '' : `.${extension}`}\r\n`
           : '1.0\r\n',
       }))
       const { harnesses } = await discoverHarnesses()
@@ -210,6 +211,110 @@ describe('trusted harness discovery', () => {
   )
 })
 
+describe('Pi prerequisites', () => {
+  it.each(['linux', 'darwin'])('only looks up both launchers on %s without running version or ACP probes', async (target) => {
+    mocks.platform.mockReturnValue(target)
+    expect(await piHarness.discover()).toEqual({ status: 'ready' })
+    expect(mocks.probe).toHaveBeenCalledTimes(2)
+    for (const command of ['pi-acp', 'pi']) {
+      expect(mocks.probe).toHaveBeenCalledWith('which', [command], expect.objectContaining({ shell: false }))
+    }
+    expect(mocks.mkdir).not.toHaveBeenCalled()
+    expect(piHarness.installHint).toContain('@geohar/pi-acp@0.4.0')
+  })
+
+  it.each(['linux', 'win32'])('requires both default launchers on %s and reports each missing prerequisite', async (target) => {
+    mocks.platform.mockReturnValue(target)
+    const native = target === 'win32' ? 'pi.cmd' : 'pi'
+    for (const [adapterInstalled, nativeInstalled, status] of [
+      [true, true, 'ready'],
+      [false, true, 'adapter-missing'],
+      [true, false, 'not-found'],
+      [false, false, 'not-found'],
+    ] as const) {
+      mocks.mkdir.mockClear()
+      mocks.probe.mockImplementation(async (file: string, args: string[]) => {
+        if (file !== 'which' && file !== 'where.exe') return { stdout: '1.2.3\n' }
+        const command = args[0]!
+        if ((command === 'pi-acp' && !adapterInstalled) || (command === native && !nativeInstalled)) {
+          throw Object.assign(new Error('not found'), { code: 1 })
+        }
+        return {
+          stdout: target === 'win32'
+            ? `C:\\Program Files\\npm\\${command}${command.endsWith('.cmd') ? '' : '.cmd'}\r\n`
+            : `/usr/local/bin/${command}\n`,
+        }
+      })
+      const { harnesses } = await discoverHarnesses({ prepareWorkspaces: true })
+      const pi = harnesses.find(({ id }) => id === 'pi')
+      expect(pi).toMatchObject({
+        status,
+        capabilities: { autoApprove: false, customLaunchCommand: false },
+      })
+      expect(pi?.version).toBeUndefined()
+      expect(pi?.workingDirPath).toBe(status === 'ready' ? join('/home/agentlet-test', '.agentlet', 'workspace', 'pi') : undefined)
+      expect(pi?.diagnostics?.map(({ code }) => code) ?? []).toEqual([
+        ...(!adapterInstalled ? ['adapter_missing'] : []),
+        ...(!nativeInstalled ? ['native_runtime_missing'] : []),
+      ])
+      expect(mocks.mkdir.mock.calls.some(([path]) => path === join('/home/agentlet-test', '.agentlet', 'workspace', 'pi'))).toBe(status === 'ready')
+    }
+  })
+
+  it.each(['pi-acp', 'pi.cmd'])('scans all Windows lookup results for %s without executing either launcher', async (shim) => {
+    mocks.platform.mockReturnValue('win32')
+    mocks.probe.mockImplementation(async (file: string, args: string[]) => {
+      expect(file).toBe('where.exe')
+      const command = args[0]!
+      const wrapper = command.endsWith('.cmd') ? command : `${command}.cmd`
+      return {
+        stdout: command === shim
+          ? `C:\\npm\\${command.replace(/\.cmd$/, '')}\r\nC:\\Program Files\\npm\\${wrapper}\r\n`
+          : `C:\\npm\\${wrapper}\r\n`,
+      }
+    })
+    expect(await piHarness.discover()).toEqual({ status: 'ready' })
+    expect(mocks.probe).toHaveBeenCalledTimes(2)
+    expect(mocks.probe).toHaveBeenCalledWith('where.exe', ['pi.cmd'], expect.objectContaining({ shell: false }))
+    expect(piHarness.installHint).toContain('Windows session-path')
+    expect(piHarness.installHint).toContain('pi-acp@0.0.34')
+  })
+
+  it('does not substitute pi.exe for the Windows adapter default pi.cmd', async () => {
+    mocks.platform.mockReturnValue('win32')
+    mocks.probe.mockImplementation(async (_file: string, args: string[]) => {
+      if (args[0] === 'pi.cmd') throw Object.assign(new Error('not found'), { code: 1 })
+      return { stdout: 'C:\\npm\\pi-acp.cmd\r\nC:\\Tools\\pi.exe\r\n' }
+    })
+    expect(await piHarness.discover()).toMatchObject({
+      status: 'not-found',
+      diagnostics: [{ code: 'native_runtime_missing', message: expect.stringContaining('pi.cmd') }],
+    })
+  })
+
+  it.each(['pi-acp', 'pi'])('preserves %s lookup failures instead of suggesting a missing package', async (failedCommand) => {
+    for (const error of [Object.assign(new Error('timed out'), { code: 1, killed: true }), Object.assign(new Error('lookup unavailable'), { code: 'ENOENT' })]) {
+      mocks.probe.mockImplementation(async (_file: string, args: string[]) => {
+        if (args[0] === failedCommand) throw error
+        return { stdout: `/usr/local/bin/${args[0]}\n` }
+      })
+      expect(await piHarness.discover()).toEqual({
+        status: 'not-found',
+        diagnostics: [{ code: 'lookup_failed', message: `${failedCommand}: ${error.message}` }],
+      })
+    }
+  })
+
+  it.each(['pi-acp', 'pi'])('rejects malformed %s lookup output', async (failedCommand) => {
+    mocks.probe.mockImplementation(async (_file: string, args: string[]) => ({
+      stdout: args[0] === failedCommand ? 'relative/launcher\n' : `/usr/local/bin/${args[0]}\n`,
+    }))
+    expect(await piHarness.discover()).toMatchObject({
+      status: 'not-found', diagnostics: [{ code: 'lookup_failed', message: expect.stringContaining(failedCommand) }],
+    })
+  })
+})
+
 describe('daemon discovery RPC', () => {
   function createDaemon() {
     const daemon = new Agentlet({
@@ -238,8 +343,8 @@ describe('daemon discovery RPC', () => {
         const response = await createDaemon().request(ServerMethods.DISCOVER_HARNESSES, params)
         expect(response).toHaveProperty('result')
         const result = ('result' in response ? response.result : undefined) as HarnessDiscoveryResult
-        expect(result.harnesses).toHaveLength(12)
-        expect(mocks.mkdir).toHaveBeenCalledTimes(params && 'prepareWorkspaces' in params && params.prepareWorkspaces ? 10 : 0)
+        expect(result.harnesses).toHaveLength(13)
+        expect(mocks.mkdir).toHaveBeenCalledTimes(params && 'prepareWorkspaces' in params && params.prepareWorkspaces ? 11 : 0)
         expect(start).not.toHaveBeenCalled()
       } finally {
         start.mockRestore()
