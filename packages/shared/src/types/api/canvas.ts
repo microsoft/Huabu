@@ -15,6 +15,24 @@ import { canvasEditableNodeSchema } from './agent-node.js';
 
 import type { videoCoverPatchSchema } from './preprocessing.js';
 
+export const nodePropertyValueSchema = z.union([
+  z.string(),
+  z.number().finite(),
+  z.boolean(),
+  z.array(z.string()),
+]);
+export const nodePropertiesSchema = z.record(
+  z.string(),
+  nodePropertyValueSchema,
+);
+export const nodePropertiesPatchSchema = z.record(
+  z.string(),
+  nodePropertyValueSchema.nullable(),
+);
+export type NodePropertyValue = z.infer<typeof nodePropertyValueSchema>;
+export type NodeProperties = z.infer<typeof nodePropertiesSchema>;
+export type NodePropertiesPatch = z.infer<typeof nodePropertiesPatchSchema>;
+
 export const recentCanvasConversationParamsSchema = z.object({
   canvasId: z.string().regex(/^[a-zA-Z0-9_-]+$/, 'Invalid canvas ID'),
 });
@@ -43,14 +61,17 @@ export const canvasAccessSchema = z.object({
 });
 export type CanvasAccess = z.infer<typeof canvasAccessSchema>;
 
-export interface GetCanvasResponse {
-  canvasId: string;
-  title: string | null;
-  version: number;
-  state: unknown;
+export const getCanvasResponseSchema = z.object({
+  canvasId: z.string(),
+  title: z.string().nullable(),
+  version: z.number(),
+  state: z.unknown(),
   /** Co-delivered with the loaded content; refreshed independently without discarding edits. */
-  access: CanvasAccess;
-}
+  access: canvasAccessSchema,
+  /** Canonical content revisions, including bodies omitted or normalized for rendering. */
+  nodeContentRevisions: z.record(z.string(), z.string()).optional(),
+});
+export type GetCanvasResponse = z.infer<typeof getCanvasResponseSchema>;
 
 /** Body for `PUT /api/canvas/:canvasId`. */
 export const putCanvasBodySchema = z.object({
@@ -115,6 +136,9 @@ export const putNodeContentBodySchema = z.object({
   keywords: z.array(z.string()).optional(),
   /** Opaque pass-through frontmatter blob (e.g. AI provenance markers). */
   provenance: z.unknown().optional(),
+  /** Keywise patch; null deletes one key and omitted keys are preserved. */
+  properties: nodePropertiesPatchSchema.optional(),
+  propertyDisplayKeys: z.array(z.string()).optional(),
   /**
    * Optimistic-concurrency baseline: the {@link nodeRevision} the client's
    * edit descends from (a deterministic djb2 over the node's authored
@@ -181,6 +205,8 @@ export interface GetNodeContentResponse extends z.infer<
   rev: string;
   summary?: string;
   keywords?: string[];
+  properties?: NodeProperties;
+  propertyDisplayKeys?: string[];
   contentMissing?: boolean;
   artifactMissing?: boolean;
   /** Mirror of {@link BaseNodeData.contentDuplicate} for single-node refresh. */

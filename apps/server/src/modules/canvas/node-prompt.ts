@@ -39,7 +39,7 @@ import {
 
 import type { AgentNodeOutline, AgentNodePreview } from '../agent/node-ref.js';
 import type { NodeContent } from '../storage/index.js';
-import type { CanvasNodeType } from '@huabu/shared';
+import type { CanvasNodeType, NodeProperties } from '@huabu/shared';
 
 export { renderNodes } from '../agent/conversation/prompt/node-element.js';
 
@@ -50,6 +50,9 @@ export { renderNodes } from '../agent/conversation/prompt/node-element.js';
  * `parentFrame` / `style`) are only consumed at the `'outline'` level.
  */
 export interface NodeInput {
+  properties?: NodeProperties;
+  propertyDisplayKeys?: string[];
+  noteNodeId?: string;
   id: string;
   type?: string;
   label?: string;
@@ -82,12 +85,17 @@ function pick(own: unknown, fromStore: unknown): string | undefined {
 function authoredFields(
   input: NodeInput,
   m: NodeContent | null,
-): { label?: string; summary?: string; content?: string; src?: string } {
+): Pick<
+  NodeInput,
+  'label' | 'summary' | 'content' | 'src' | 'properties' | 'propertyDisplayKeys'
+> {
   const out: {
     label?: string;
     summary?: string;
     content?: string;
     src?: string;
+    properties?: NodeProperties;
+    propertyDisplayKeys?: string[];
   } = {};
   const label = pick(input.label, m?.label);
   if (label !== undefined) out.label = label;
@@ -96,10 +104,13 @@ function authoredFields(
     (m as Record<string, unknown> | null)?.['summary'],
   );
   if (summary !== undefined) out.summary = summary;
-  const content = pick(input.content, m?.content);
+  const content =
+    typeof input.content === 'string' ? input.content : m?.content;
   if (content !== undefined) out.content = content;
   const src = pick(input.src, m?.src);
   if (src !== undefined) out.src = src;
+  out.properties = input.properties ?? m?.properties;
+  out.propertyDisplayKeys = input.propertyDisplayKeys ?? m?.propertyDisplayKeys;
   return out;
 }
 
@@ -142,6 +153,7 @@ export function describeNode(
       ...(input.style ? { style: input.style } : {}),
       ...(input.targetCanvasId ? { targetCanvasId: input.targetCanvasId } : {}),
       ...(input.target ? { target: input.target } : {}),
+      ...(input.noteNodeId ? { noteNodeId: input.noteNodeId } : {}),
     });
   }
   return buildAgentNodePreview(common);

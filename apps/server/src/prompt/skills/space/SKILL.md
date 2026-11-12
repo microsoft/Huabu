@@ -58,12 +58,16 @@ Where each node sits, how big it is, which frame it belongs to, what colour it's
 
 ### Boundary rule of thumb
 
-| Property                                  | Tool                |
-| ----------------------------------------- | ------------------- |
-| label, content, summary, keywords, src    | `read` / `grep`     |
-| position, size, parentFrame, visual style | `inspect_nodes`     |
-| edge direction / lineStyle / stroke       | `inspect_edges`     |
-| whole-Space overview, spatial clusters    | `get_space_outline` |
+| Property                                  | Tool                      |
+| ----------------------------------------- | ------------------------- |
+| label, content, summary, keywords, src    | `read` / `grep`           |
+| position, size, parentFrame, visual style | `inspect_nodes`           |
+| properties, propertyDisplayKeys           | `inspect_nodes` or `read` |
+| noteNodeId (PDF-owned Note link)          | `inspect_nodes`           |
+| edge direction / lineStyle / stroke       | `inspect_edges`           |
+| whole-Space overview, spatial clusters    | `get_space_outline`       |
+
+Custom properties belong to structured node records, not to a particular filesystem format. PDF notes are real Note nodes: inspect the PDF for `noteNodeId`, then read and edit that Note's ordinary `content`. If absent, use `INITIALIZE_PDF_NOTE`; its command description defines initialization and result fields. The Note ID is also the source of selected-text comments. Do not write notes into the PDF's extracted body. File tools require a storage profile that exposes the file surface.
 
 ## Tool decision matrix
 

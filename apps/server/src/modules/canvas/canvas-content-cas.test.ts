@@ -22,19 +22,25 @@ import { join } from 'node:path';
 import fastify from 'fastify';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { nodeRevisionOf } from '@huabu/shared/canvas-engine';
+import {
+  nodeRevisionOf,
+  extractCanvasChanges,
+} from '@huabu/shared/canvas-engine';
 
+import { executeOnServer } from './canvas-executor.js';
 import { subscribeCanvasUpdates } from './canvas-sync.js';
 import canvasRoutes from './canvas.route.js';
 import {
   getCanvasStore,
   getStorage,
+  getStructuredStore,
   setStorageForTesting,
 } from '../storage/index.js';
 import { nodesDir } from '../storage/paths.js';
 import { setWorkspacePath } from '../workspace.js';
 
 import type { BlobScope, BlobStore } from '../storage/index.js';
+import type { GetCanvasResponse } from '@huabu/shared';
 
 let tmp: string;
 
@@ -88,6 +94,466 @@ afterEach(() => {
 });
 
 describe('PUT /nodes/:nodeId/content — content CAS', () => {
+  it('rejects existing Note claims over HTTP but initializes a new hidden Note in one batch', async () => {
+    seedCanvas('c1', 'node-existing', 'Independent');
+    const app = await buildApp();
+    try {
+      const store = getCanvasStore('c1');
+      const independent = store.read()?.state.nodes[0];
+      const pdf = {
+        id: 'node-pdf',
+        type: 'pdf',
+        position: { x: 0, y: 0 },
+        data: {},
+      };
+      const claimed = await app.inject({
+        method: 'PUT',
+        url: '/canvas/c1',
+        payload: {
+          version: 1,
+          state: {
+            nodes: [
+              independent,
+              { ...pdf, data: { noteNodeId: 'node-existing' } },
+            ],
+            edges: [],
+          },
+        },
+      });
+      expect(claimed.statusCode).toBe(400);
+      expect(store.read()?.version).toBe(1);
+      const addedPdf = await app.inject({
+        method: 'PUT',
+        url: '/canvas/c1',
+        payload: {
+          version: 1,
+          state: { nodes: [independent, pdf], edges: [] },
+        },
+      });
+      expect(addedPdf.statusCode).toBe(200);
+      const patch = (id: string) => ({
+        type: 'MERGE_NODE_DATA',
+        patches: [{ nodeId: 'node-pdf', patch: { noteNodeId: id } }],
+      });
+      const rejected = await app.inject({
+        method: 'POST',
+        url: '/canvas/c1/execute',
+        payload: {
+          originator: { source: 'agent' },
+          commands: [patch('node-existing')],
+        },
+      });
+      expect(rejected.statusCode).toBe(200);
+      expect(rejected.json().results).toEqual([
+        expect.objectContaining({ applied: false, reason: 'invalid-target' }),
+      ]);
+      const initialized = await app.inject({
+        method: 'POST',
+        url: '/canvas/c1/execute',
+        payload: {
+          originator: { source: 'agent' },
+          commands: [
+            {
+              type: 'CREATE_NODES',
+              nodes: [
+                {
+                  id: 'node-new',
+                  nodeType: 'note',
+                  position: { x: 0, y: 0 },
+                  data: { content: 'New PDF notes' },
+                },
+              ],
+            },
+            patch('node-new'),
+          ],
+        },
+      });
+      expect(initialized.statusCode).toBe(200);
+      expect(initialized.json().results).toEqual([
+        expect.objectContaining({ applied: true }),
+        expect.objectContaining({ applied: true }),
+      ]);
+      expect(store.read()?.state.nodes).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: 'node-new',
+            hidden: true,
+            selected: false,
+          }),
+          expect.objectContaining({
+            id: 'node-pdf',
+            data: expect.objectContaining({ noteNodeId: 'node-new' }),
+          }),
+        ]),
+      );
+      expect(store.readNode('node-new')?.content).toBe('New PDF notes');
+      expect(store.read()?.state.nodes).not.toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ id: 'node-existing', hidden: true }),
+        ]),
+      );
+    } finally {
+      await app.close();
+    }
+  });
+
+  it.each([false, true])(
+    'reverts a persisted PDF/Note review row atomically (stale: %s)',
+    async (stale) => {
+      seedCanvas('c1', 'seed', 'Unrelated');
+      const app = await buildApp();
+      try {
+        await executeOnServer({
+          canvasId: 'c1',
+          originator: { source: 'ui' },
+          commands: [
+            {
+              type: 'CREATE_NODES',
+              nodes: [
+                {
+                  id: 'node-pdf',
+                  nodeType: 'pdf',
+                  position: { x: 0, y: 0 },
+                  data: { noteNodeId: 'node-note' },
+                },
+                {
+                  id: 'node-note',
+                  nodeType: 'note',
+                  position: { x: 0, y: 0 },
+                  data: { content: 'Keep my notes' },
+                },
+              ],
+            },
+          ],
+        });
+        const deleted = await executeOnServer({
+          canvasId: 'c1',
+          originator: { source: 'ui' },
+          commands: [{ type: 'DELETE_NODES', nodeIds: ['node-pdf'] }],
+        });
+        const handle = getStructuredStore().space('c1');
+        const [record] = await handle.changes.append(
+          'thread-review',
+          extractCanvasChanges(deleted.deltas),
+        );
+        if (stale) {
+          await executeOnServer({
+            canvasId: 'c1',
+            originator: { source: 'ui' },
+            commands: [
+              {
+                type: 'CREATE_NODES',
+                nodes: [
+                  {
+                    id: 'node-note',
+                    nodeType: 'note',
+                    position: { x: 0, y: 0 },
+                    data: { content: 'New independent Note' },
+                  },
+                ],
+              },
+            ],
+          });
+        }
+        const reverted = await app.inject({
+          method: 'POST',
+          url: `/canvas/c1/threads/thread-review/changes/${record.id}/revert`,
+        });
+        expect(reverted.statusCode).toBe(stale ? 409 : 200);
+        const nodes = (await handle.read())?.state.nodes;
+        if (stale) {
+          expect(nodes).not.toEqual(
+            expect.arrayContaining([
+              expect.objectContaining({ id: 'node-pdf' }),
+            ]),
+          );
+          expect(getCanvasStore('c1').readNode('node-note')?.content).toBe(
+            'New independent Note',
+          );
+          expect(await handle.changes.read('thread-review')).toHaveLength(1);
+        } else {
+          expect(nodes).toEqual(
+            expect.arrayContaining([
+              expect.objectContaining({
+                id: 'node-pdf',
+                data: expect.objectContaining({ noteNodeId: 'node-note' }),
+              }),
+              expect.objectContaining({ id: 'node-note', hidden: true }),
+            ]),
+          );
+          expect(getCanvasStore('c1').readNode('node-note')?.content).toBe(
+            'Keep my notes',
+          );
+          expect(await handle.changes.read('thread-review')).toEqual([]);
+        }
+      } finally {
+        await app.close();
+      }
+    },
+  );
+
+  it('round-trips an owned Note independently and validates structural ownership', async () => {
+    seedCanvas('c1', 'pdf', 'Paper');
+    const app = await buildApp();
+    try {
+      const before = (
+        await app.inject({ method: 'GET', url: '/canvas/c1' })
+      ).json<GetCanvasResponse>();
+      const nodes = [
+        {
+          id: 'pdf',
+          type: 'pdf',
+          position: { x: 0, y: 0 },
+          data: { noteNodeId: 'notes' },
+        },
+        { id: 'notes', type: 'note', position: { x: 0, y: 0 }, data: {} },
+      ];
+      const linked = await app.inject({
+        method: 'PUT',
+        url: '/canvas/c1',
+        payload: { version: before.version, state: { nodes, edges: [] } },
+      });
+      expect(linked.statusCode).toBe(200);
+      const saved = await putContent(app, 'c1', 'notes', {
+        nodeType: 'note',
+        content: 'My independently stored notes',
+        label: 'Reading notes',
+        expectRev: nodeRevisionOf({}),
+      });
+      expect(saved.statusCode).toBe(200);
+      const loaded = (
+        await app.inject({ method: 'GET', url: '/canvas/c1' })
+      ).json<GetCanvasResponse>();
+      expect(loaded.state).toMatchObject({
+        nodes: [
+          { id: 'pdf', data: { noteNodeId: 'notes' } },
+          {
+            id: 'notes',
+            hidden: true,
+            data: { content: 'My independently stored notes' },
+          },
+        ],
+      });
+      const invalid = await app.inject({
+        method: 'PUT',
+        url: '/canvas/c1',
+        payload: {
+          version: loaded.version,
+          state: {
+            nodes: [{ ...nodes[0], data: { noteNodeId: 'missing' } }, nodes[1]],
+            edges: [],
+          },
+        },
+      });
+      expect(invalid.statusCode).toBe(400);
+      const another = { ...nodes[1], id: 'other-notes' };
+      for (const proposed of [
+        [{ ...nodes[0], data: { noteNodeId: another.id } }, nodes[1], another],
+        [{ ...nodes[0], data: { noteNodeId: another.id } }, another],
+        [{ ...nodes[0], data: { noteNodeId: null } }, nodes[1]],
+        [nodes[1]],
+      ]) {
+        const rejected = await app.inject({
+          method: 'PUT',
+          url: '/canvas/c1',
+          payload: {
+            version: loaded.version,
+            state: { nodes: proposed, edges: [] },
+          },
+        });
+        expect(rejected.statusCode).toBe(400);
+      }
+      const unlinked = await app.inject({
+        method: 'PUT',
+        url: '/canvas/c1',
+        payload: {
+          version: loaded.version,
+          state: {
+            nodes: [{ ...nodes[0], data: { noteNodeId: null } }],
+            edges: [],
+          },
+        },
+      });
+      expect(unlinked.statusCode).toBe(200);
+      const withoutNote = (
+        await app.inject({ method: 'GET', url: '/canvas/c1' })
+      ).json<GetCanvasResponse>();
+      expect(withoutNote.state).toMatchObject({
+        nodes: [
+          {
+            id: 'pdf',
+            data: expect.not.objectContaining({ noteNodeId: 'notes' }),
+          },
+        ],
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('uses the canonical Office revision even when GET strips a legacy body preamble', async () => {
+    seedCanvas('c1', 'office', 'Document');
+    const store = getCanvasStore('c1');
+    const canvas = store.read();
+    if (!canvas) throw new Error('Missing seeded Space');
+    canvas.state.nodes = [
+      { id: 'office', type: 'office', position: { x: 0, y: 0 }, data: {} },
+    ];
+    store.write(canvas);
+    const content = '---\nparser: officeparser\n---\n\nReadable body';
+    store.writeNode('office', {
+      nodeId: 'office',
+      type: 'office',
+      label: 'Document',
+      content,
+    });
+    const app = await buildApp();
+    try {
+      const read = await app.inject({
+        method: 'GET',
+        url: '/canvas/c1/nodes/office/content',
+      });
+      expect(read.json().content).toBe('Readable body');
+      const record = store.readNode('office');
+      if (!record) throw new Error('Missing Office record');
+      expect(read.json().rev).toBe(nodeRevisionOf(record));
+      const saved = await putContent(app, 'c1', 'office', {
+        nodeType: 'office',
+        properties: { Status: 'Read' },
+        expectRev: read.json().rev,
+      });
+      expect(saved.statusCode).toBe(200);
+      expect(store.readNode('office')?.content).toBe(content);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('loads the canonical PDF revision without its extracted body and accepts repeated property saves', async () => {
+    seedCanvas('c1', 'pdf', 'Paper');
+    const store = getCanvasStore('c1');
+    const canvas = store.read()!;
+    canvas.state.nodes = [
+      { id: 'pdf', type: 'pdf', position: { x: 0, y: 0 }, data: {} },
+    ];
+    store.write(canvas);
+    const app = await buildApp();
+    try {
+      const created = await putContent(app, 'c1', 'pdf', {
+        nodeType: 'pdf',
+        label: 'Paper',
+        content: 'Extracted PDF text that is not sent to the canvas.',
+        properties: { Venue: 'CHI 25' },
+        expectRev: REV_EMPTY,
+      });
+      expect(created.statusCode).toBe(200);
+      const loaded = await app.inject({ method: 'GET', url: '/canvas/c1' });
+      expect(loaded.statusCode).toBe(200);
+      const response = loaded.json<GetCanvasResponse>();
+      const state = response.state as {
+        nodes: Array<{ data: Record<string, unknown> }>;
+      };
+      expect(state.nodes[0].data).not.toHaveProperty('content');
+      expect(response.nodeContentRevisions?.pdf).toBe(created.json().rev);
+      const edited = await putContent(app, 'c1', 'pdf', {
+        nodeType: 'pdf',
+        properties: { Status: 'Reading' },
+        expectRev: response.nodeContentRevisions?.pdf,
+      });
+      expect(edited.statusCode).toBe(200);
+      const reloaded = (
+        await app.inject({ method: 'GET', url: '/canvas/c1' })
+      ).json<GetCanvasResponse>();
+      expect(reloaded.nodeContentRevisions?.pdf).toBe(edited.json().rev);
+      const secondEdit = await putContent(app, 'c1', 'pdf', {
+        nodeType: 'pdf',
+        properties: { Status: 'Read' },
+        expectRev: reloaded.nodeContentRevisions?.pdf,
+      });
+      expect(secondEdit.statusCode).toBe(200);
+      const reordered = await putContent(app, 'c1', 'pdf', {
+        nodeType: 'pdf',
+        propertyDisplayKeys: ['Status', 'Venue'],
+        expectRev: secondEdit.json().rev,
+      });
+      expect(reordered.statusCode).toBe(200);
+      const afterReorder = (
+        await app.inject({ method: 'GET', url: '/canvas/c1' })
+      ).json<GetCanvasResponse>();
+      expect(afterReorder.state).toMatchObject({
+        nodes: [
+          {
+            data: {
+              properties: { Venue: 'CHI 25', Status: 'Read' },
+              propertyDisplayKeys: ['Status', 'Venue'],
+            },
+          },
+        ],
+      });
+      expect(afterReorder.nodeContentRevisions?.pdf).toBe(reordered.json().rev);
+      const staleEdit = await putContent(app, 'c1', 'pdf', {
+        nodeType: 'pdf',
+        properties: { Status: 'Stale' },
+        expectRev: response.nodeContentRevisions?.pdf,
+      });
+      expect(staleEdit.statusCode).toBe(409);
+      expect(store.readNode('pdf')?.content).toBe(
+        'Extracted PDF text that is not sent to the canvas.',
+      );
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('round-trips PDF properties with key deletion and CAS', async () => {
+    seedCanvas('c1', 'pdf', 'Paper');
+    const store = getCanvasStore('c1');
+    const canvas = store.read()!;
+    canvas.state.nodes = [
+      { id: 'pdf', type: 'pdf', position: { x: 0, y: 0 }, data: {} },
+    ];
+    store.write(canvas);
+    const app = await buildApp();
+    try {
+      const first = await putContent(app, 'c1', 'pdf', {
+        nodeType: 'pdf',
+        content: 'extracted',
+        expectRev: REV_EMPTY,
+        properties: { year: 2026, reviewed: false, authors: ['Ada'] },
+        propertyDisplayKeys: ['year'],
+      });
+      expect(first.statusCode).toBe(200);
+      const second = await putContent(app, 'c1', 'pdf', {
+        nodeType: 'pdf',
+        expectRev: first.json().rev,
+        properties: { year: null, reviewed: true },
+        propertyDisplayKeys: [],
+      });
+      expect(second.statusCode).toBe(200);
+      const loaded = await app.inject({
+        method: 'GET',
+        url: '/canvas/c1/nodes/pdf/content',
+      });
+      expect(loaded.json()).toMatchObject({
+        properties: { reviewed: true, authors: ['Ada'] },
+        propertyDisplayKeys: [],
+        content: 'extracted',
+        rev: second.json().rev,
+      });
+      expect(loaded.json().properties).not.toHaveProperty('year');
+      expect(
+        (
+          await putContent(app, 'c1', 'pdf', {
+            nodeType: 'pdf',
+            expectRev: first.json().rev,
+            properties: { authors: null },
+          })
+        ).statusCode,
+      ).toBe(409);
+    } finally {
+      await app.close();
+    }
+  });
   it('notifies the affected node after content save and sidecar deletion, not a rejected CAS', async () => {
     const app = await buildApp();
     const received = vi.fn();

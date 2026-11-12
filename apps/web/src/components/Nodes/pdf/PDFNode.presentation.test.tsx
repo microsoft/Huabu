@@ -20,6 +20,9 @@ const mocks = vi.hoisted(() => ({
   reader: vi.fn(),
   thumbnail: vi.fn(),
   updateNodeData: vi.fn(),
+  card: vi.fn(),
+  note: { id: 'notes', data: { content: '' } },
+  nodesRead: vi.fn(),
 }));
 
 vi.mock('@/hooks/useNodePresentation', () => ({
@@ -27,13 +30,23 @@ vi.mock('@/hooks/useNodePresentation', () => ({
 }));
 vi.mock('@/store/canvasStore', () => ({
   default: (select: (state: unknown) => unknown) =>
-    select({ canvasId: 'canvas-1', updateNodeData: mocks.updateNodeData }),
+    select({
+      canvasId: 'canvas-1',
+      updateNodeData: mocks.updateNodeData,
+      get nodes() {
+        mocks.nodesRead();
+        return [mocks.note];
+      },
+    }),
 }));
 vi.mock('@/api/artifact', () => ({
   resolveArtifactUrl: (src: string) => src,
 }));
 vi.mock('@/store/previewWorkspace/actions', () => ({
   openPreviewNode: vi.fn(),
+}));
+vi.mock('@/store/workspaceStore', () => ({
+  useWorkspaceStore: { getState: () => ({ workspaceId: 'workspace' }) },
 }));
 vi.mock('../shared/nodeHydrationScheduler', () => ({
   useDeferredHydration: () => mocks.hydrated,
@@ -50,9 +63,10 @@ vi.mock('../MissingFileBanner', () => ({
 }));
 vi.mock('../previewCard/PreviewCard', () => ({
   usePreviewCardSize: () => ({ width: 800, height: 600 }),
-  ViewportPreviewCard: ({ title }: { title: string }) => (
-    <div data-overview>{title}</div>
-  ),
+  ViewportPreviewCard: (props: { title: string }) => {
+    mocks.card(props);
+    return <div data-overview>{props.title}</div>;
+  },
 }));
 vi.mock('@/components/Common/FloatingToolbar', () => ({
   FloatingToolbar: { ActionButton: () => null },
@@ -82,6 +96,7 @@ let container: HTMLDivElement;
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.note.data.content = '';
   mocks.presentation = {
     mode: 'overview',
     isVisible: true,
@@ -99,6 +114,29 @@ afterEach(() => {
   container.remove();
 });
 
+it('does not scan canvas nodes when the PDF has no associated Note', async () => {
+  await render();
+  expect(mocks.nodesRead).not.toHaveBeenCalled();
+  await render({ noteNodeId: 'notes' });
+  expect(mocks.nodesRead).toHaveBeenCalled();
+});
+
+it.each([
+  { properties: null },
+  { properties: { tags: [1, 'text'] } },
+  { properties: { nested: {} } },
+  { properties: { Venue: 'CHI' }, propertyDisplayKeys: 42 },
+])(
+  'keeps malformed sidecar metadata from crashing the PDF card: %j',
+  async (data) => {
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    await render(data);
+    expect(container.querySelector('[data-overview]')).not.toBeNull();
+    expect(warning).toHaveBeenCalled();
+    warning.mockRestore();
+  },
+);
+
 async function render(data: Record<string, unknown> = {}) {
   await act(async () =>
     root.render(
@@ -115,6 +153,73 @@ async function render(data: Record<string, unknown> = {}) {
 }
 
 describe('PDF canvas presentation', () => {
+  it('uses property order automatically, skips empty values and keeps zero and false', async () => {
+    const properties = {
+      Empty: ' ',
+      Tags: [],
+      Score: 0,
+      Reviewed: false,
+      Venue: 'UIST',
+    };
+    await render({ properties });
+    expect(mocks.card).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        properties: [
+          { name: 'Score', value: '0' },
+          { name: 'Reviewed', value: 'false' },
+          { name: 'Venue', value: 'UIST' },
+        ],
+      }),
+    );
+    await render({
+      properties,
+      propertyDisplayKeys: ['Venue', 'Empty', 'Venue', 'missing', 'Reviewed'],
+    });
+    expect(mocks.card).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        properties: [
+          { name: 'Venue', value: 'UIST' },
+          { name: 'Reviewed', value: 'false' },
+          { name: 'Score', value: '0' },
+        ],
+      }),
+    );
+  });
+
+  it('uses PDF-owned notes instead of generated summaries', async () => {
+    await render({ summary: 'Old AI summary' });
+    expect(mocks.card).toHaveBeenLastCalledWith(
+      expect.objectContaining({ summary: undefined }),
+    );
+    mocks.note.data.content =
+      '## Core question\n\n> My **own** interpretation.';
+    await render({
+      summary: 'Old AI summary',
+      noteNodeId: 'notes',
+      properties: { Venue: 'UIST', Internal: 'Hidden' },
+      propertyDisplayKeys: ['Venue'],
+    });
+    expect(mocks.card).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        summary: 'My own interpretation.',
+        properties: [
+          { name: 'Venue', value: 'UIST' },
+          { name: 'Internal', value: 'Hidden' },
+        ],
+      }),
+    );
+    mocks.note.data.content = '## Notes\n\nOwned thoughts.';
+    await render({ noteNodeId: 'notes' });
+    expect(mocks.card).toHaveBeenLastCalledWith(
+      expect.objectContaining({ summary: 'Owned thoughts.' }),
+    );
+    mocks.note.data.content = '';
+    await render({ noteNodeId: 'notes' });
+    expect(mocks.card).toHaveBeenLastCalledWith(
+      expect.objectContaining({ summary: undefined }),
+    );
+  });
+
   it('keeps the overview and thumbnail pipeline at intermediate size', async () => {
     await render();
     expect(container.querySelector('[data-overview]')?.textContent).toBe(

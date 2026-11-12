@@ -70,6 +70,7 @@ export interface PreviewCardProps {
   /** Tint information and its surrounding padding, never the media surface. */
   accent?: string | null;
   summary?: string;
+  properties?: Array<{ name: string; value: string }>;
   loading?: boolean;
   error?: string | null;
   onRetry?: () => void;
@@ -134,6 +135,7 @@ function PreviewCardContent({
   title,
   accent,
   summary,
+  properties,
   loading = false,
   error,
   onRetry,
@@ -310,6 +312,7 @@ function PreviewCardContent({
     fitSummaryToHeight,
     maxSummaryLines,
     summary,
+    properties,
     title,
     source,
     nodeType,
@@ -382,6 +385,7 @@ function PreviewCardContent({
     <div
       className="preview-card bg-surface text-fg-default"
       data-far={far || undefined}
+      data-node-type={nodeType}
       data-tier={metrics.tier}
       data-orientation={
         textOnly ? 'text' : metrics.horizontal ? 'horizontal' : 'vertical'
@@ -446,6 +450,23 @@ function PreviewCardContent({
             ) : null}
           </>
         )}
+        {!far && properties?.length ? (
+          <div className="preview-card__properties text-fg-default font-medium">
+            {properties.map(({ name, value }, index) => (
+              <span key={name} title={`${name}: ${value}`}>
+                {index > 0 && (
+                  <span
+                    aria-hidden="true"
+                    className="text-fg-subtle mx-[calc(var(--card-gap)/2)]"
+                  >
+                    &middot;
+                  </span>
+                )}
+                {value}
+              </span>
+            ))}
+          </div>
+        ) : null}
         {summary?.trim() ? (
           <div
             className="preview-card__summary text-fg-muted"

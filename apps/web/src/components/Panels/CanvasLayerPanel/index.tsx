@@ -12,6 +12,8 @@ import {
 } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { pdfNoteIds } from '@huabu/shared/canvas-engine';
+
 import { useWorkspaceStore } from '@/store/workspaceStore';
 import { isVisibleWorldNode } from '@/utils/spaceHierarchy';
 
@@ -174,13 +176,14 @@ export const CanvasLayerPanel = ({
   const worldId = useWorkspaceStore((state) => state.worldCanvasId);
   const summaries = useWorkspaceStore((state) => state.spaceSummaries);
   const sourceNodes = isLeftCollapsed ? frozenNodesRef.current.nodes : rawNodes;
-  const nodes = useMemo(
-    () =>
-      sourceNodes.filter((node) =>
+  const nodes = useMemo(() => {
+    const ownedIds = pdfNoteIds(sourceNodes);
+    return sourceNodes.filter(
+      (node) =>
+        !ownedIds.has(node.id) &&
         isVisibleWorldNode(node, activeCanvasId, worldId, summaries),
-      ),
-    [sourceNodes, activeCanvasId, worldId, summaries],
-  );
+    );
+  }, [sourceNodes, activeCanvasId, worldId, summaries]);
   const listHostRef = useRef<HTMLDivElement>(null);
   const listSessionRef = useRef({
     canvasId: activeCanvasId,

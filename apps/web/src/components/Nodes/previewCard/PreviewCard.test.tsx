@@ -68,6 +68,29 @@ function cardElement(): HTMLElement {
 }
 
 describe('PreviewCard', () => {
+  it('shows supplied property values without labels and hides them at far zoom', () => {
+    const properties = [
+      { name: 'Conference', value: 'UIST 2026' },
+      { name: 'Status', value: 'Reading' },
+    ];
+    render({ properties });
+    const metadata = container.querySelector('.preview-card__properties');
+    expect(metadata?.textContent).toBe('UIST 2026\u00b7Reading');
+    expect(metadata?.querySelectorAll('[aria-hidden="true"]')).toHaveLength(1);
+    expect(metadata?.querySelector('span')?.title).toBe(
+      'Conference: UIST 2026',
+    );
+    render({ properties: properties.slice(0, 1) });
+    expect(
+      container.querySelector('.preview-card__properties')?.textContent,
+    ).toBe('UIST 2026');
+    expect(
+      container.querySelector('.preview-card__properties [aria-hidden="true"]'),
+    ).toBeNull();
+    render({ properties, farZoom: 0.19 });
+    expect(container.querySelector('.preview-card__properties')).toBeNull();
+  });
+
   it.each(['web', 'pdf'])(
     'uses screen-fixed far insets for %s and restores overview spacing',
     (nodeType) => {

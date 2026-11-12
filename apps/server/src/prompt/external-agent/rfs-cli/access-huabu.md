@@ -150,21 +150,22 @@ The CLI adds available conversation correlation automatically; no request header
 
 The accepted command set is:
 
-| Command             | Purpose                                                                                 |
-| ------------------- | --------------------------------------------------------------------------------------- |
-| `CREATE_NODES`      | Create one or more nodes; Huabu assigns node IDs.                                       |
-| `DELETE_NODES`      | Delete nodes and their incident edges.                                                  |
-| `MERGE_NODE_DATA`   | Patch node label, content, source, or visual style; content writes require `expectRev`. |
-| `SET_NODE_PARENT`   | Move nodes into a frame or back to the root.                                            |
-| `DISSOLVE_FRAME`    | Remove a frame while keeping its children in the Space.                                 |
-| `SET_NODE_GEOMETRY` | Change node position and/or size.                                                       |
-| `REORDER_NODES`     | Change node z-order.                                                                    |
-| `CONNECT_NODES`     | Create edges between existing nodes; Huabu assigns edge IDs.                            |
-| `DISCONNECT_EDGES`  | Remove edges by ID or endpoint pair.                                                    |
-| `SET_EDGE_STYLE`    | Patch edge direction, line shape, dash style, stroke, width, or label.                  |
-| `ALIGN_NODES`       | Align existing nodes along one axis.                                                    |
-| `DISTRIBUTE_NODES`  | Spread three or more existing nodes apart.                                              |
-| `SET_FRAME_LAYOUT`  | Configure a frame's free, column, row, or grid layout.                                  |
+| Command               | Purpose                                                                                 |
+| --------------------- | --------------------------------------------------------------------------------------- |
+| `CREATE_NODES`        | Create one or more nodes; Huabu assigns node IDs.                                       |
+| `INITIALIZE_PDF_NOTE` | Create or reuse a PDF's hidden Note; see the command capability for result fields.      |
+| `DELETE_NODES`        | Delete nodes and their incident edges.                                                  |
+| `MERGE_NODE_DATA`     | Patch node label, content, source, or visual style; content writes require `expectRev`. |
+| `SET_NODE_PARENT`     | Move nodes into a frame or back to the root.                                            |
+| `DISSOLVE_FRAME`      | Remove a frame while keeping its children in the Space.                                 |
+| `SET_NODE_GEOMETRY`   | Change node position and/or size.                                                       |
+| `REORDER_NODES`       | Change node z-order.                                                                    |
+| `CONNECT_NODES`       | Create edges between existing nodes; Huabu assigns edge IDs.                            |
+| `DISCONNECT_EDGES`    | Remove edges by ID or endpoint pair.                                                    |
+| `SET_EDGE_STYLE`      | Patch edge direction, line shape, dash style, stroke, width, or label.                  |
+| `ALIGN_NODES`         | Align existing nodes along one axis.                                                    |
+| `DISTRIBUTE_NODES`    | Spread three or more existing nodes apart.                                              |
+| `SET_FRAME_LAYOUT`    | Configure a frame's free, column, row, or grid layout.                                  |
 
 This table is only a navigation summary. Load the current guidance for one command—including required fields, parameter types, enums, limits, semantic constraints, result description, and a valid example—before using it:
 
@@ -204,7 +205,7 @@ Commands run in order, failures do not roll back accepted commands, and an accep
 
 A command cannot refer to a Huabu-assigned ID before you receive it. Create first, read the generated ID, then connect or reparent it in a follow-up request.
 
-For a `MERGE_NODE_DATA` patch that changes `content`, first download the node and copy its `revision` metadata into `expectRev`. A missing or stale revision produces `applied: false`, `reason: "conflict"`, and a structured conflict. Re-download, reconcile, and submit a new request.
+For a `MERGE_NODE_DATA` patch that changes `content`, first download the node and copy its `revision` metadata into `expectRev`. PDF notes are separate Note nodes: inspect the PDF for `noteNodeId`, then read and edit that Note by its own ID, not the PDF's extracted body. Authored property edits (`properties`, `propertyDisplayKeys`) also require `expectRev`; `INSPECT_NODES` supplies the current `rev` without a filesystem download. A missing or stale revision produces `applied: false`, `reason: "conflict"`, and a structured conflict. Re-read, reconcile, and submit a new request.
 
 Downloaded node Markdown is a complete Huabu sidecar: Huabu-owned YAML frontmatter followed by the authored Markdown body. `CREATE_NODES.data.content` and `MERGE_NODE_DATA.patch.content` accept the Markdown body only. Never pass the downloaded file verbatim or copy its leading `---` block into `content`; remove exactly the first frontmatter block and preserve everything after its closing fence. Huabu serializes canonical node metadata itself. As a final safety net, an update whose submitted frontmatter `id` matches its target `nodeId` is unwrapped before execution.
 

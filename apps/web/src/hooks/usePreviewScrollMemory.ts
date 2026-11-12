@@ -29,17 +29,21 @@ function isEditableTarget(target: EventTarget | null): boolean {
 export function usePreviewScrollMemory(
   containerRef: React.RefObject<HTMLElement | null>,
   viewKey: string | undefined,
+  headerRef?: React.RefObject<HTMLElement | null>,
 ): void {
   useLayoutEffect(() => {
     const container = containerRef.current;
     if (!container || !viewKey) return;
 
-    let desiredScrollTop = readPreviewScrollPosition(viewKey);
+    const headerHeight = () => headerRef?.current?.offsetHeight;
+    let desiredScrollTop = readPreviewScrollPosition(viewKey, headerHeight());
     let isRestoring = desiredScrollTop !== undefined;
     const isActive = () =>
       container.closest('[data-preview-active="false"]') === null;
     const restore = () => {
       if (!isRestoring || desiredScrollTop === undefined || !isActive()) return;
+      desiredScrollTop = readPreviewScrollPosition(viewKey, headerHeight());
+      if (desiredScrollTop === undefined) return;
       const maxScrollTop = Math.max(
         0,
         container.scrollHeight - container.clientHeight,
@@ -64,13 +68,21 @@ export function usePreviewScrollMemory(
       }
       desiredScrollTop = container.scrollTop;
       isRestoring = false;
-      rememberPreviewScrollPosition(viewKey, container.scrollTop);
+      rememberPreviewScrollPosition(
+        viewKey,
+        container.scrollTop,
+        headerHeight(),
+      );
     };
     const takeOverRestore = () => {
       if (!isRestoring || !isActive()) return;
       isRestoring = false;
       desiredScrollTop = container.scrollTop;
-      rememberPreviewScrollPosition(viewKey, container.scrollTop);
+      rememberPreviewScrollPosition(
+        viewKey,
+        container.scrollTop,
+        headerHeight(),
+      );
     };
     const takeOverRestoreFromKey = (event: KeyboardEvent) => {
       if (SCROLL_KEYS.has(event.key) && !isEditableTarget(event.target)) {
@@ -117,5 +129,5 @@ export function usePreviewScrollMemory(
       container.removeEventListener('keydown', takeOverRestoreFromKey);
       remember();
     };
-  }, [containerRef, viewKey]);
+  }, [containerRef, headerRef, viewKey]);
 }

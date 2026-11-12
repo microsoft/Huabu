@@ -62,6 +62,7 @@ export async function handleGetCanvasOutline(
 
 export async function handleInspectNodes(
   args: InspectNodesArgs,
+  readSet?: Map<string, string>,
 ): Promise<string> {
   const { canvasId, ...predicates } = args;
   const result = await inspectNodes(canvasId, predicates);
@@ -70,6 +71,10 @@ export async function handleInspectNodes(
   // pi-agent-core flags the tool result as `isError: true`.
   if ('error' in result) {
     throw new Error(result.error);
+  }
+  // Metadata inspection authorizes metadata writes, never unread body replacement.
+  for (const node of result.nodes) {
+    if (node.rev) readSet?.set(`metadata:${node.id}`, node.rev);
   }
   return JSON.stringify(result);
 }

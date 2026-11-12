@@ -28,6 +28,7 @@ const commands: Array<Record<string, unknown>> = [
   { type: 'ALIGN_NODES', nodeIds: [NODE_1, NODE_2], direction: 'left' },
   { type: 'DISTRIBUTE_NODES', nodeIds: [NODE_1, NODE_2] },
   { type: 'SET_FRAME_LAYOUT', frameId: NODE_2, mode: 'column', gridCount: 2 },
+  { type: 'INITIALIZE_PDF_NOTE', nodeId: NODE_1 },
 ];
 
 describe('reconstructChangesFromCommands', () => {
@@ -69,6 +70,12 @@ describe('reconstructChangesFromCommands', () => {
     expect(changes[12]).toMatchObject({
       nodeId: NODE_2,
       frameLayout: { mode: 'column', gridCount: 2 },
+    });
+    expect(changes[13]).toMatchObject({
+      label: 'Initialized PDF notes',
+      nodeId: NODE_1,
+      nodeType: 'pdf',
+      revertible: false,
     });
   });
 });

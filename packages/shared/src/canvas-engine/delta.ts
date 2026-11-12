@@ -43,6 +43,22 @@ export type Delta =
   | { type: 'DELETE_EDGE'; edge: CanvasEdge }
   | { type: 'REPLACE_EDGE'; prev: CanvasEdge; next: CanvasEdge };
 
+/** Replay recorded field changes without replacing later unrelated values. */
+export function replayChangedData(
+  current: Record<string, unknown>,
+  before: Record<string, unknown>,
+  after: Record<string, unknown>,
+): Record<string, unknown> {
+  const result = { ...current };
+  for (const key of new Set([...Object.keys(before), ...Object.keys(after)])) {
+    if (JSON.stringify(before[key]) === JSON.stringify(after[key])) continue;
+    if (Object.prototype.hasOwnProperty.call(after, key))
+      result[key] = after[key];
+    else delete result[key];
+  }
+  return result;
+}
+
 /**
  * Return the inverse of a single delta. Applying the inverse to a
  * state that already has the delta applied yields the original state.

@@ -30,7 +30,7 @@ import { migrateAcpSessionsFile } from '../workspace/migrations/migrate-acp-sess
 import type { CanvasFile } from './persistence-types.js';
 
 const NODE_REFERENCE =
-  /^(parentId|nodeIds?|frameIds?|edgeIds?|selectedNodeIds|originNodeIds|sourceNodeId|targetNodeId|anchorNodeId|rootNodeId|parentEntryNodeId|createdNodeIds|deletedNodeIds)$/;
+  /^(parentId|noteNodeId|nodeIds?|frameIds?|edgeIds?|selectedNodeIds|originNodeIds|sourceNodeId|targetNodeId|anchorNodeId|rootNodeId|parentEntryNodeId|createdNodeIds|deletedNodeIds)$/;
 const SPACE_REFERENCE =
   /^(canvasId|canvasIdSnapshot|spaceId|targetCanvasId|sourceCanvasId|parentSpaceId)$/;
 const THREAD_REFERENCE =

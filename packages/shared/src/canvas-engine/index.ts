@@ -17,6 +17,12 @@
 // ── Executor + runtime types ──────────────────────────────────────────────
 export * from './utils/inkSigil.js';
 export {
+  mergeNodeProperties,
+  hasValidNodeProperties,
+  isNodeProperties,
+  orderedPropertyKeys,
+} from './nodeProperties.js';
+export {
   computeAdjacentNodePlacement,
   type NodePlacementBounds,
   type NodePlacementSide,
@@ -58,7 +64,12 @@ export {
 } from './postEffects.js';
 
 // ── Deltas (server → client wire diff) ────────────────────────────────────
-export { type Delta, applyDeltas, invertDelta } from './delta.js';
+export {
+  type Delta,
+  applyDeltas,
+  invertDelta,
+  replayChangedData,
+} from './delta.js';
 export {
   diffCanvasState,
   TRANSIENT_NODE_FIELDS,
@@ -77,6 +88,7 @@ export {
   nodeRevision,
   nodeRevisionOf,
   invertDeltas,
+  isChangeStale,
 } from './change.js';
 
 // ── Command registry (handler / meta maps) ────────────────────────────────
@@ -273,3 +285,11 @@ export {
   findTombstonesAfter,
   type StampInput,
 } from './provenance/noteProvenance.js';
+export {
+  pdfNoteId,
+  pdfNoteIds,
+  hasValidPdfNoteOwnership,
+  includePdfNotes,
+  hidePdfNotes,
+  validPdfNoteLink,
+} from './pdfNotes.js';
