@@ -29,6 +29,11 @@ import type { CreateCanvasResponse } from '@huabu/shared';
  * never fetches the Space after its first load, is never reloaded, shows
  * what page A did, and can still undo its own edit.
  *
+ * The second test is the same claim across the two save paths that remain:
+ * a body (per-node content save) and a move (command batch) from page A
+ * both reach page B, whose undo of its own earlier edit then neither loads
+ * the Space nor saves the body it was taken with over page A's.
+ *
  * Page A's edits are issued through the store's own actions (the same ones
  * the UI calls); nothing is written to the store directly.
  */
@@ -379,6 +384,108 @@ test('edits through every path that used to save the whole Space reach the other
   await expect
     .poll(async () => (await shown(a.page)).nodes[Y].position)
     .toEqual({ x: 380, y: 320 });
+  expect(b.spaceLoads()).toBe(loadsB);
+
+  await a.context.close();
+  await b.context.close();
+});
+
+test('a body and a move from page A reach page B without a Space load or a whole-Space save, and B can still undo its own edit without writing the old body back', async ({
+  browser,
+  request,
+}) => {
+  test.setTimeout(90_000);
+  const canvasId = await seedSpace(request);
+  const a = await openDevice(browser, canvasId);
+  const b = await openDevice(browser, canvasId);
+  await a.page.waitForTimeout(1_500);
+  await settled(request, canvasId, [a, b]);
+  const loadsA = a.spaceLoads();
+  const loadsB = b.spaceLoads();
+  const bodyA = 'Body written by page A';
+  const serverBody = async (id: string) => {
+    const content = (await serverRecord(request, canvasId)).node(id)?.data
+      .content;
+    return typeof content === 'string' ? content.trim() : content;
+  };
+
+  // Page B's own edit, made while X still has its first body: the undo
+  // entry holds that body.
+  await act(b.page, 'beginGesture', 'SET_NODE_GEOMETRY');
+  await act(b.page, 'setNodeGeometry', [
+    { nodeId: Y, position: { x: 380, y: 560 } },
+  ]);
+  await expect
+    .poll(async () => (await serverRecord(request, canvasId)).node(Y)?.position)
+    .toEqual({ x: 380, y: 560 });
+  await settled(request, canvasId, [a, b]);
+  expect((await shown(b.page)).canUndo).toBe(true);
+  const bWritesBefore = b.writes.length;
+
+  // Page A rewrites X's body (a per-node content save) and moves Z (a
+  // command batch).
+  await act(a.page, 'updateNodeData', X, { content: bodyA });
+  await act(a.page, 'beginGesture', 'SET_NODE_GEOMETRY');
+  await act(a.page, 'setNodeGeometry', [
+    { nodeId: Z, position: { x: 700, y: 560 } },
+  ]);
+  await expect.poll(() => serverBody(X)).toBe(bodyA);
+  await expect
+    .poll(async () => (await serverRecord(request, canvasId)).node(Z)?.position)
+    .toEqual({ x: 700, y: 560 });
+
+  // Page B shows both, in the store and on the card.
+  await expect
+    .poll(async () => {
+      const { nodes } = await shown(b.page);
+      return [
+        String(nodes[X].data.content ?? '').trim(),
+        nodes[Z].position,
+        nodes[Y].position,
+      ];
+    })
+    .toEqual([bodyA, { x: 700, y: 560 }, { x: 380, y: 560 }]);
+  await expect(
+    b.page.locator(`.react-flow__node[data-id="${X}"] .ProseMirror`),
+  ).toHaveText(bodyA);
+  await settled(request, canvasId, [a, b]);
+
+  // Receiving them made B write nothing but presence, and it kept its
+  // undo entry.
+  await b.page.waitForTimeout(1_500);
+  expect(
+    b.writes.slice(bWritesBefore).filter((call) => !call.includes('/presence')),
+  ).toEqual([]);
+  expect((await shown(b.page)).canUndo).toBe(true);
+
+  // B undoes its own move: Y goes back, A's move of Z and A's body stay,
+  // and the body the undo entry was taken with is not saved over A's.
+  await act(b.page, 'undo');
+  await expect
+    .poll(async () => (await serverRecord(request, canvasId)).node(Y)?.position)
+    .toEqual({ x: 380, y: 320 });
+  await settled(request, canvasId, [a, b]);
+  await b.page.waitForTimeout(1_500);
+  await settled(request, canvasId, [a, b]);
+  expect(await serverBody(X)).toBe(bodyA);
+  expect((await serverRecord(request, canvasId)).node(Z)?.position).toEqual({
+    x: 700,
+    y: 560,
+  });
+  for (const device of [a, b]) {
+    const state = await shown(device.page);
+    expect(String(state.nodes[X].data.content ?? '').trim()).toBe(bodyA);
+    expect(state.nodes[Z].position).toEqual({ x: 700, y: 560 });
+    expect(state.nodes[Y].position).toEqual({ x: 380, y: 320 });
+    expect(state.reloaded).toBe(false);
+    // Neither page saved the whole Space…
+    expect(device.writes).not.toContain('PUT <space>');
+  }
+  expect(b.writes).not.toContain(`PUT <space>/nodes/${X}/content`);
+  expect(a.writes).toContain(`PUT <space>/nodes/${X}/content`);
+  expect(a.writes).toContain('POST <space>/execute');
+  // …and neither loaded it again.
+  expect(a.spaceLoads()).toBe(loadsA);
   expect(b.spaceLoads()).toBe(loadsB);
 
   await a.context.close();
