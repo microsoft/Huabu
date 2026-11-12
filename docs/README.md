@@ -51,6 +51,7 @@ Connected-device browsing and the bundled ACP proxy are documented in [device-fi
 | [agent-context.md](./architecture/agent-context.md)                             | How canvas state gets shaped into `AgentChatContext` and reaches the model.                              |
 | [agent-reachback.md](./architecture/agent-reachback.md)                         | Huabu Reachback Tool (HRT) — how external agents read/write the Space out-of-band.                       |
 | [agent-profiles.md](./architecture/agent-profiles.md)                           | Generic persisted Profiles, agentlet-local harness discovery, Settings and retired Team data.            |
+| [space-kits.md](./architecture/space-kits.md)                                   | Source-distributed installation Skills, portable assets and existing-RFS Space initialization.           |
 | [api-design.md](./architecture/api-design.md)                                   | **Authoritative** rules for every HTTP / SSE endpoint, zod-first wire contracts.                         |
 | [canvas-command-architecture.md](./architecture/canvas-command-architecture.md) | `CanvasUiIntent` / `CanvasCommand` / `CanvasExecution` three-layer model.                                |
 | [canvas-input-interactions.md](./architecture/canvas-input-interactions.md)     | Mouse, touch, and pen preference resolution, gesture ownership, and multi-touch arbitration.             |

@@ -65,6 +65,9 @@ jobs:
       - name: Agent Team skills
         run: pnpm run test:agent-team-skills && pnpm run check:agent-team-skills
 
+      - name: Space Kits
+        run: pnpm run test:space-kits
+
       - name: License headers
         run: node scripts/check-headers.mjs
 

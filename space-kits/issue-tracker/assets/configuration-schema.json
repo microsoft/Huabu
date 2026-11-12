@@ -1,0 +1,60 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "values", "confirmedByUser"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "values": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["codebasePath", "fixingProfileId"],
+      "properties": {
+        "codebasePath": {
+          "type": ["string", "null"],
+          "pattern": "^(?:/|[A-Za-z]:[\\\\/]|\\\\\\\\).+",
+          "description": "Absolute Git checkout path on the execution device."
+        },
+        "fixingProfileId": {
+          "type": ["string", "null"],
+          "pattern": "^\\S+$",
+          "description": "Explicit selectable external Profile ID (used for both Coordinator and Fixing Agents unless coordinatorProfileId is set)."
+        },
+        "coordinatorProfileId": {
+          "type": ["string", "null"],
+          "default": null,
+          "pattern": "^\\S+$",
+          "description": "Optional external Profile ID override for the Coordinator; defaults to fixingProfileId when null or omitted."
+        },
+        "repository": {
+          "type": ["string", "null"],
+          "default": null,
+          "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$",
+          "description": "Optional GitHub owner/repo override; derived from codebasePath Git remotes when null or omitted."
+        },
+        "worktreeRoot": {
+          "type": ["string", "null"],
+          "default": null,
+          "pattern": "^(?:/|[A-Za-z]:[\\\\/]|\\\\\\\\).+",
+          "description": "Optional absolute issue worktree parent directory; defaults to <codebasePath>-worktrees when null or omitted."
+        },
+        "developmentBaseRef": {
+          "type": ["string", "null"],
+          "default": "origin/main",
+          "pattern": "^(?![-/])(?!.*(?:\\.\\.|[\\s~^:?*\\[\\\\]|@\\{|//))(?!.*[/.]$)[^/]+/.+$",
+          "description": "Remote-tracking development base ref; defaults to origin/main."
+        },
+        "pullRequestBase": {
+          "type": ["string", "null"],
+          "default": "main",
+          "pattern": "^(?![-/])(?!.*(?:\\.\\.|[\\s~^:?*\\[\\\\]|@\\{|//))(?!.*[/.]$).+$",
+          "description": "Pull-request target branch name (without remote prefix); defaults to main."
+        }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": { "type": "string", "minLength": 1 }
+    },
+    "confirmedByUser": { "type": "boolean" }
+  }
+}
