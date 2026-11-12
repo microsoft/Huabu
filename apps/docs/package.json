@@ -26,7 +26,7 @@
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^4.3.4",
-    "happy-dom": "^20.8.9",
+    "happy-dom": "^21.0.4",
     "pagefind": "^1.4.0",
     "postcss": "^8.5.18",
     "tailwindcss": "^4.1.18",
