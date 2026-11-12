@@ -70,7 +70,7 @@ import {
 
 import type * as SpaceDirHandlesModule from '../storage/backends/disk/space-dir-handles.js';
 import type * as StorageModule from '../storage/index.js';
-import type { RecentAction } from '@huabu/shared';
+import type { CanvasSyncEvent, RecentAction } from '@huabu/shared';
 import type { CanvasNode } from '@huabu/shared/canvas-engine';
 
 let tmp: string;
@@ -204,16 +204,40 @@ describe('POST /api/canvas lifecycle', () => {
       await createCanvas('card-target', 'Before');
       await createCanvas('other-target', 'Taken');
       const before = await space('card-target').read();
+      const published: CanvasSyncEvent[] = [];
+      const unsubscribe = subscribeCanvasUpdates('card-target', (event) =>
+        published.push(event),
+      );
       const renamed = await app.inject({
         method: 'PATCH',
         url: '/canvas/card-target/title',
         payload: { title: ' After ', expectedTitle: 'Before' },
       });
+      unsubscribe();
       expect(renamed.statusCode).toBe(200);
       expect(renamed.json().title).toBe('After');
       const after = await space('card-target').read();
       expect(after?.version).toBe((before?.version ?? 0) + 1);
       expect(after?.state).toEqual(before?.state);
+      // Open pages follow the version and learn the title from one update,
+      // not from a snapshot that would make them load the Space again.
+      expect(published).toEqual([
+        {
+          type: 'update',
+          data: {
+            fromVersion: before?.version,
+            toVersion: after?.version,
+            deltas: [],
+            pendingEffects: {
+              mutatedNodes: [],
+              deletedNodeIds: [],
+              contentEditedNodeIds: [],
+              deferredFitFrameIds: [],
+            },
+            title: 'After',
+          },
+        },
+      ]);
       const stale = await app.inject({
         method: 'PATCH',
         url: '/canvas/card-target/title',

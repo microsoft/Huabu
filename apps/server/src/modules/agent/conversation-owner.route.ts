@@ -338,7 +338,13 @@ const conversationOwnerRoutes: FastifyPluginAsync = async (fastify) => {
       })();
     };
     const unsubscribe = subscribeCanvasUpdates(canvasId, (event) => {
-      if (!nodeId || event.type === 'snapshot') return refresh();
+      // A rename changes what the owner shows without touching a node.
+      if (
+        !nodeId ||
+        event.type === 'snapshot' ||
+        (event.type === 'update' && event.data.title !== undefined)
+      )
+        return refresh();
       if (event.type === 'invalidate') {
         if (!event.data.nodeIds || event.data.nodeIds.includes(nodeId))
           refresh();

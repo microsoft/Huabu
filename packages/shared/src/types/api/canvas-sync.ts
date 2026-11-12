@@ -19,6 +19,7 @@
  *  - `update` — sent after every persisted `/execute` batch. Carries the
  *    structural `deltas` + `pendingEffects` the client replays via
  *    `applyDeltasFromAgent`, gated on `fromVersion === local version`.
+ *    A Space rename also publishes one, with no deltas and the new `title`.
  *
  * `deltas` / `pendingEffects.mutatedNodes` are modelled as `unknown` on
  * the wire — they mirror the same loosely-typed payload already used by
@@ -92,6 +93,12 @@ export const canvasSyncEventSchema = z.discriminatedUnion('type', [
        * no originator (delta replays).
        */
       source: z.enum(['ui', 'agent', 'system']).optional(),
+      /**
+       * The Space's title after this version, present only on the update a
+       * rename publishes (which carries no deltas). Lets open pages show the
+       * new title without loading the Space again.
+       */
+      title: z.string().nullable().optional(),
     }),
   }),
 ]);
