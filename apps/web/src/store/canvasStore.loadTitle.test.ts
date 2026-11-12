@@ -14,6 +14,7 @@ import { putNodeContent } from '@/api/canvas';
 
 import useCanvasStore from './canvasStore';
 import { commitNodeMetadata } from './canvasStore';
+import { useToolStore } from './toolStore';
 
 import type * as canvasApi from '../api';
 import type * as ContentApi from '@/api/canvas';
@@ -88,6 +89,24 @@ describe('canvas title ownership during loading', () => {
     );
   });
 
+  it('resets tool intent on a direct Space change but preserves preferences and same-Space placement', async () => {
+    api.getCanvas.mockResolvedValue({
+      canvasId: 'next',
+      title: 'Next',
+      version: 1,
+      state: { nodes: [], edges: [] },
+    });
+    useToolStore.getState().chooseCanvasTool('pan', false);
+    useToolStore.getState().setPendingNodeType('note');
+    await useCanvasStore.getState().loadCanvas('next');
+    expect(useToolStore.getState()).toMatchObject({
+      pendingNodeType: null,
+      mouseToolPreference: 'pan',
+    });
+    useToolStore.getState().setPendingNodeType('text');
+    await useCanvasStore.getState().loadCanvas('next');
+    expect(useToolStore.getState().pendingNodeType).toBe('text');
+  });
   it('clears the outgoing title before fetching and installs the loaded title', async () => {
     let resolve!: (
       value: Awaited<ReturnType<typeof canvasApi.getCanvas>>,

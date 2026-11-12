@@ -7,9 +7,28 @@ import {
   isKeyboardInteractiveTarget,
 } from '@/hooks/shortcuts/isKeyboardInteractiveTarget';
 
-import type { EffectiveInputMode } from '@/store/toolStore';
+import type {
+  CanvasTool,
+  EffectiveInputMode,
+  PendingNodeType,
+} from '@/store/toolStore';
 
-export type CanvasTool = 'select' | 'pan' | 'lasso';
+export type { CanvasTool } from '@/store/toolStore';
+
+export function resolveEffectiveCanvasTool(
+  state: {
+    pendingNodeType: PendingNodeType;
+    mouseToolPreference: CanvasTool;
+    explicitLassoActive: boolean;
+  },
+  isNotMouse: boolean,
+  temporaryPan = false,
+): CanvasTool {
+  if (state.pendingNodeType) return 'select';
+  if (temporaryPan && !isNotMouse) return 'pan';
+  if (state.explicitLassoActive) return 'lasso';
+  return isNotMouse ? 'select' : state.mouseToolPreference;
+}
 
 // React Flow DOM class selectors used for pointer-target ownership checks.
 // Centralised here so every gesture path agrees on what a panel, node, or

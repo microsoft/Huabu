@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto'
 import { AgentSideConnection, ndJsonStream, PROTOCOL_VERSION, RequestError,
   type Agent, type InitializeResponse, type NewSessionResponse, type PromptRequest, type PromptResponse,
 } from '@agentclientprotocol/sdk'
-import { FS_MAX_RESPONSE_BYTES } from '@agentlet/protocol'
+import { FS_MAX_RESPONSE_BYTES, FS_PROXY_CAPABILITY, FS_PROXY_CAPABILITY_KEY } from '@agentlet/protocol'
 import { executeFsCommand } from './filesystem.js'
 
 class FilesystemProxy implements Agent {
@@ -15,7 +15,8 @@ class FilesystemProxy implements Agent {
   constructor(private readonly connection: AgentSideConnection) {}
   async initialize(): Promise<InitializeResponse> {
     return { protocolVersion: PROTOCOL_VERSION, agentInfo: { name: 'proxy', version: '1' },
-      agentCapabilities: { loadSession: false } }
+      agentCapabilities: { loadSession: false,
+        _meta: { [FS_PROXY_CAPABILITY_KEY]: FS_PROXY_CAPABILITY } } }
   }
   async authenticate() { return {} }
   async newSession(): Promise<NewSessionResponse> {

@@ -325,10 +325,10 @@ export function useDesktopContent(): {
   }, [tabs]);
 
   useEffect(() => {
-    if (!tabs) return;
     const hydratePreference = (key: DesktopPreferenceKey) => {
       try {
         if (key === 'huabu-sketch-tools') void useToolStore.persist.rehydrate();
+        if (!tabs) return;
         if (key === 'huabu-chat-preferences')
           void useChatPreferencesStore.persist.rehydrate();
         if (key === 'huabu:world-enabled')
@@ -352,9 +352,11 @@ export function useDesktopContent(): {
     };
     const unsubscribe = subscribeApplicationPreferences(hydratePreference);
     hydratePreference('huabu-sketch-tools');
-    hydratePreference('huabu-chat-preferences');
-    hydratePreference('huabu:world-enabled');
-    hydratePreference('huabu.minimapEnabled');
+    if (tabs) {
+      hydratePreference('huabu-chat-preferences');
+      hydratePreference('huabu:world-enabled');
+      hydratePreference('huabu.minimapEnabled');
+    }
     return unsubscribe;
   }, [tabs]);
 

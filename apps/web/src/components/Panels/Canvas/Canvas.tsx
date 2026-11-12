@@ -84,6 +84,7 @@ import { useFrameSelectionDrag } from '@/hooks/useFrameSelectionDrag';
 import {
   useEffectiveInputMode,
   useInputMode,
+  readEffectiveInputMode,
   useIsNotMouse,
 } from '@/hooks/useInputMode';
 import { useSketchHoverRouting } from '@/hooks/useSketchHoverRouting';
@@ -289,6 +290,10 @@ const CanvasGestures: React.FC<{
   inputMode: 'mouse' | 'pen' | 'finger';
   explicitToolActive: boolean;
   inkToolActive: boolean;
+  readToolPolicy: () => Pick<
+    CanvasPointerRouterContext,
+    'explicitToolActive' | 'inkToolActive'
+  >;
   mouseMarqueeEnabled: boolean;
   canvasId: string | null;
   onMarqueeActiveChange: (active: boolean) => void;
@@ -305,6 +310,7 @@ const CanvasGestures: React.FC<{
   inputMode,
   explicitToolActive,
   inkToolActive,
+  readToolPolicy,
   mouseMarqueeEnabled,
   canvasId,
   onMarqueeActiveChange,
@@ -337,6 +343,7 @@ const CanvasGestures: React.FC<{
       inputMode,
       explicitToolActive,
       inkToolActive,
+      readToolPolicy,
       onTouchTakeover: () => {
         marquee.cancel();
         onTouchTakeover();
@@ -416,6 +423,7 @@ const CanvasContent: React.FC<CanvasProps> = ({
   );
   const minimapEnabled = useCanvasStore((state) => state.minimapEnabled);
   const pendingNodeType = useToolStore((state) => state.pendingNodeType);
+  const toolIntent = useToolStore((state) => state.toolIntent);
   // Whether a stroke-level sketch selection is active — suppresses node
   // toolbars so a mixed lasso never shows them (boolean selector).
   const hasLassoSelection = useGesturePreviewStore(
@@ -468,7 +476,6 @@ const CanvasContent: React.FC<CanvasProps> = ({
     frameNodesInRect,
     selectNodes,
   } = useCanvasStore.getState();
-  const { setPendingNodeType } = useToolStore.getState();
 
   const isBoxSelecting = useStore((state) => state.userSelectionActive);
   // The custom marquee owns auto-pan; native selection must not run it twice.
@@ -522,7 +529,7 @@ const CanvasContent: React.FC<CanvasProps> = ({
 
   // Keyboard shortcuts + paste handler (extracted to hook).
   // Also manages tool state (select/pan) and Space-key temporary pan.
-  const { tool, setTool } = useCanvasShortcuts(
+  const { tool, setTool, nativePanHeld, readTool } = useCanvasShortcuts(
     {
       rfInstanceRef,
       mousePositionRef,
@@ -531,7 +538,26 @@ const CanvasContent: React.FC<CanvasProps> = ({
       disabled: shortcutsDisabled,
     },
   );
-  useCanvasPanReleaseGuard(wrapperRef, !isNotMouse && tool === 'pan');
+  const readToolPolicy = useCallback(() => {
+    const pending = useToolStore.getState().pendingNodeType;
+    const lasso = !pending && readTool() === 'lasso';
+    return {
+      explicitToolActive: Boolean(pending) || lasso,
+      inkToolActive: pending === 'sketch' || lasso,
+    };
+  }, [readTool]);
+  const readLassoInputPolicy = useCallback(
+    () => ({
+      active:
+        !useToolStore.getState().pendingNodeType && readTool() === 'lasso',
+      inputMode: readEffectiveInputMode(),
+    }),
+    [readTool],
+  );
+  useCanvasPanReleaseGuard(
+    wrapperRef,
+    nativePanHeld || (!isNotMouse && tool === 'pan'),
+  );
 
   const mouseMarqueeEnabled = !pendingNodeType && tool === 'select';
 
@@ -539,10 +565,6 @@ const CanvasContent: React.FC<CanvasProps> = ({
   const dragActivationDistance = isNotMouse
     ? getDragActivationDistance(lastPointer === 'pen' ? 'pen' : 'touch')
     : getDragActivationDistance('mouse');
-
-  useEffect(() => {
-    if (isNotMouse && tool === 'pan') setTool('select');
-  }, [isNotMouse, setTool, tool]);
 
   // Measure notes the user has not reached yet. `onlyRenderVisibleElements`
   // unmounts offscreen nodes, so this is the only way an unvisited note
@@ -682,14 +704,20 @@ const CanvasContent: React.FC<CanvasProps> = ({
   );
 
   // --- Frame drag-to-create gesture (mouse / pen / touch) ---
-  const exitPendingNodeType = useCallback(
-    () => setPendingNodeType(null),
-    [setPendingNodeType],
+  const exitPendingNodeType = useCallback(() => {
+    useToolStore.getState().finishPendingNodeType(toolIntent);
+  }, [toolIntent]);
+  const isCurrentToolIntent = useCallback(
+    () =>
+      useToolStore.getState().toolIntent === toolIntent &&
+      useCanvasStore.getState().canvasId === canvasId,
+    [toolIntent, canvasId],
   );
   const { pointerHandlers: framePointerHandlers, previewRect: frameDragRect } =
     useFrameDragToCreate({
       active: pendingNodeType === 'frame' || pendingNodeType === 'childSpace',
-      scopeKey: `${canvasId}:${pendingNodeType}`,
+      scopeKey: `${canvasId}:${toolIntent}:${pendingNodeType}`,
+      isCurrent: isCurrentToolIntent,
       wrapperRef,
       rfInstanceRef,
       onCreate: (rect) => {
@@ -727,6 +755,7 @@ const CanvasContent: React.FC<CanvasProps> = ({
     wrapperRef,
     rfInstanceRef,
     inputMode,
+    readInputPolicy: readLassoInputPolicy,
   });
 
   // Sketch hover routing: hit-test the cursor against painted strokes so
@@ -929,6 +958,8 @@ const CanvasContent: React.FC<CanvasProps> = ({
 
   const placePendingNode = useCallback(
     (clientX: number, clientY: number) => {
+      const { pendingNodeType, toolIntent, finishPendingNodeType } =
+        useToolStore.getState();
       if (
         !pendingNodeType ||
         pendingNodeType === 'frame' ||
@@ -953,7 +984,7 @@ const CanvasContent: React.FC<CanvasProps> = ({
           // Arming another tool while the Agent loads abandons this
           // placement; an explicit retry from the prompt does not.
           isCurrent: ({ retry }) =>
-            retry || useToolStore.getState().pendingNodeType === null,
+            retry || useToolStore.getState().toolIntent === toolIntent,
         });
       } else {
         addNode({
@@ -965,10 +996,10 @@ const CanvasContent: React.FC<CanvasProps> = ({
           },
         });
       }
-      setPendingNodeType(null);
+      finishPendingNodeType(toolIntent);
       return true;
     },
-    [addNode, canvasId, pendingNodeType, setPendingNodeType],
+    [addNode, canvasId],
   );
 
   // Click-to-place pointer recognizer for the pointer router. Backed by
@@ -998,8 +1029,6 @@ const CanvasContent: React.FC<CanvasProps> = ({
   });
   const strokeMoveHandlersRef = useRef(strokeMoveHandlers);
   strokeMoveHandlersRef.current = strokeMoveHandlers;
-  const toolRef = useRef(tool);
-  toolRef.current = tool;
   const pointerRecognizers = useMemo<
     PointerRecognizer<PointerEvent, CanvasPointerRouterContext>[]
   >(() => {
@@ -1040,7 +1069,7 @@ const CanvasContent: React.FC<CanvasProps> = ({
         }),
         (event, ctx) => {
           if (useToolStore.getState().pendingNodeType !== null) return false;
-          if (toolRef.current !== 'lasso') return false;
+          if (readTool() !== 'lasso') return false;
           if (event.button !== 0 || !event.isPrimary) return false;
           if (!canStartRetainedSelectionMove(event.target as Element | null))
             return false;
@@ -1067,14 +1096,14 @@ const CanvasContent: React.FC<CanvasProps> = ({
         () => lassoHandlersRef.current,
         (event, ctx) =>
           useToolStore.getState().pendingNodeType === null &&
-          toolRef.current === 'lasso' &&
+          readTool() === 'lasso' &&
           event.button === 0 &&
           event.isPrimary &&
           isLassoStartTarget(event.target as Element | null) &&
           canDirectlyManipulateWithPointer(event.pointerType, ctx.inputMode),
       ),
     ];
-  }, [suppressNextPaneClick]);
+  }, [suppressNextPaneClick, readTool]);
 
   // Handle click-to-place for note, text, and question.
   const handlePaneClick = useCallback(
@@ -1446,20 +1475,22 @@ const CanvasContent: React.FC<CanvasProps> = ({
             );
           }}
           panOnDrag={
-            isNotMouse
-              ? false /* touch/pen → custom pointer router is the sole pan driver;
+            nativePanHeld
+              ? true
+              : isNotMouse
+                ? false /* touch/pen → custom pointer router is the sole pan driver;
                        React Flow's d3-zoom touch pan (a separate Touch Events
                        stream) would otherwise still fire under a truthy
                        `[1]` and pan the canvas mid-frame/lasso/placement */
-              : pendingNodeType
-                ? [
-                    1,
-                  ] /* mouse + creation tool → middle mouse button still pans */
-                : tool === 'pan'
-                  ? true
-                  : [
+                : pendingNodeType
+                  ? [
                       1,
-                    ] /* mouse + selection tools → middle mouse button pans; drag box-selects */
+                    ] /* mouse + creation tool → middle mouse button still pans */
+                  : tool === 'pan'
+                    ? true
+                    : [
+                        1,
+                      ] /* mouse + selection tools → middle mouse button pans; drag box-selects */
           }
           // useCanvasShortcuts owns temporary Space-pan and the tool state
           // consumed by the pointer router; avoid a second keyboard owner.
@@ -1508,6 +1539,7 @@ const CanvasContent: React.FC<CanvasProps> = ({
               pendingNodeType === 'sketch' ||
               (!pendingNodeType && tool === 'lasso')
             }
+            readToolPolicy={readToolPolicy}
             mouseMarqueeEnabled={mouseMarqueeEnabled}
             canvasId={canvasId}
             onMarqueeActiveChange={setIsMouseMarqueeSelecting}

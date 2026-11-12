@@ -25,6 +25,7 @@ const mocks = vi.hoisted(() => ({
   fitNodesOnCanvas: vi.fn(),
   openPreviewNode: vi.fn<typeof PreviewActions.openPreviewNode>(() => 'tab-1'),
   toast: vi.fn(),
+  setPendingNodeType: vi.fn(),
   requestChatOpen: vi.fn(),
   connect: vi.fn(),
   disconnect: vi.fn(),
@@ -93,7 +94,7 @@ vi.mock('../../store/shortcutsUiStore', () => ({
 vi.mock('../../store/toolStore', () => ({
   useToolStore: (
     selector: (state: { setPendingNodeType: () => void }) => unknown,
-  ) => selector({ setPendingNodeType: vi.fn() }),
+  ) => selector({ setPendingNodeType: mocks.setPendingNodeType }),
 }));
 vi.mock('../../store/workspaceStore', () => ({
   useWorkspaceStore: (
@@ -127,7 +128,7 @@ function node(type: string, data: Record<string, unknown> = {}): Node {
 
 async function renderAt(
   path: string,
-  canvasNode: Node,
+  canvasNode: Node | null,
   rfInstance: object | null = {},
   state: unknown = null,
 ) {
@@ -137,7 +138,7 @@ async function renderAt(
     canvasId: CANVAS_ID,
     canvasNotFound: false,
     isLoading: false,
-    nodes: [canvasNode],
+    nodes: canvasNode ? [canvasNode] : [],
     rfInstance: rfInstance as never,
     canvasWrapper: document.createElement('div'),
     selectNodes,
@@ -178,6 +179,7 @@ beforeEach(() => {
   mocks.fitNodesOnCanvas.mockClear();
   mocks.openPreviewNode.mockReset();
   mocks.toast.mockClear();
+  mocks.setPendingNodeType.mockClear();
   mocks.requestChatOpen.mockClear();
   mocks.refreshSpaceTitles.mockClear();
   mocks.worldCanvasId = null;
@@ -206,6 +208,28 @@ afterEach(() => {
 });
 
 describe('CanvasPage node deep-link navigation', () => {
+  it.each(['note', 'sketch'])(
+    'consumes initial %s intent once without rearming on deletion or reload navigation',
+    async (nodeType) => {
+      const { router } = await renderAt(
+        `/canvas/${CANVAS_ID}`,
+        null,
+        {},
+        {
+          newCanvasPlacement: { canvasId: CANVAS_ID, nodeType },
+        },
+      );
+      expect(mocks.setPendingNodeType).toHaveBeenCalledExactlyOnceWith(
+        nodeType,
+      );
+      expect(router.state.location.state).toBeNull();
+      act(() => useCanvasStore.setState({ nodes: [node('note')] }));
+      act(() => useCanvasStore.setState({ nodes: [] }));
+      await act(async () => router.navigate(`/canvas/${CANVAS_ID}?reopen=1`));
+      expect(mocks.setPendingNodeType).toHaveBeenCalledTimes(1);
+    },
+  );
+
   it.each(['/spaces', '/canvas/other'])(
     'dismisses move feedback when navigating to %s despite the stale canvas store',
     async (destination) => {

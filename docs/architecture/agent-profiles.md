@@ -8,6 +8,8 @@ Profiles describe ACP harness launch identities, not standalone service APIs. Th
 
 ## Discovery and provisioning
 
+The hidden filesystem proxy's launch identity does not prove runtime compatibility. Files validates its versioned `agentCapabilities._meta["com.microsoft.agentlet/filesystem"]` from the current ACP initialization result, independently of optional session command announcements. Missing or unsupported capabilities require an Agentlet update; discovery does not synthesize them from a Profile. See the [filesystem command contract](./device-files.md#command-contract).
+
 ```text
 agentlet connection / reconnection
   -> capability-gated server/discoverHarnesses through Gateway
