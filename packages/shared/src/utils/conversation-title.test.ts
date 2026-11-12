@@ -98,11 +98,13 @@ describe('stripInlineMarkdown links', () => {
     ['![alt](a.png) caption', 'alt caption'],
     ['[Foo](https://en.wikipedia.org/wiki/Foo_(bar))', 'Foo'],
     ['[unclosed](https://example.com', '[unclosed](https://example.com'],
+    ['![report \\[draft](image.png)', 'report \\[draft'],
+    ['[a \\[b\\] c](https://example.com) d', 'a \\[b\\] c d'],
   ])('strips %s', (input, expected) => {
     expect(stripInlineMarkdown(input)).toBe(expected);
   });
 
-  it.each(['![', '![](', '[](', '![]((', '[a]((b'])(
+  it.each(['![', '![](', '[](', '![]((', '[a]((b', '![\\', '[\\[', '\\'])(
     'stays linear on repeated unclosed %s',
     (unit) => {
       const input = unit.repeat(50_000);
