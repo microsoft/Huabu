@@ -69,6 +69,19 @@ describe('noteFarDescription', () => {
     ).toBe('Read the guide with code and bold. Next line. Later.');
   });
 
+  it.each([
+    '## Tasks\n- First\n  continuation\n- Second',
+    'Tasks\n---\n1. First\n2. Second',
+    '## Tasks\n- [ ] Task',
+    '## Code\n    const x = 1;',
+    'Code\n===\n\tconst x = 1;',
+  ])('skips lists and code immediately after headings: %j', (block) => {
+    expect(
+      noteFarDescription(`Intro prose.\n\n${block}\n\nLater prose.`, 'Title'),
+    ).toBe('Intro prose. Later prose.');
+    expect(noteFarDescription(block, 'Title')).toBeUndefined();
+  });
+
   it('skips fenced code with blank lines, longer fences, and tilde fences', () => {
     expect(
       noteFarDescription(

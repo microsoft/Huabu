@@ -64,9 +64,6 @@ export function noteFarDescription(
   const titleKey = comparisonKey(title);
   const paragraphs: string[] = [];
   for (const paragraph of withoutImageText(prose).split(/\n[ \t]*\n/)) {
-    // Lists (including their continuation lines) and indented code are not
-    // prose paragraphs. Keep this heuristic local rather than parsing a document.
-    if (/^(?: {0,3}(?:[-*+]|\d+[.)])[ \t]+| {4}|\t)/.test(paragraph)) continue;
     const lines = paragraph.split('\n');
     const body = lines
       .filter(
@@ -76,6 +73,13 @@ export function noteFarDescription(
           !/^ {0,3}(?:=+|-+)[ \t]*$/.test(line),
       )
       .join('\n');
+    // Check both forms so removing a heading cannot expose a list or code block.
+    if (
+      [paragraph, body].some((text) =>
+        /^(?: {0,3}(?:[-*+]|\d+[.)])[ \t]+| {4}|\t)/.test(text),
+      )
+    )
+      continue;
     const text = plainText(body);
     if (/[\p{L}\p{N}]/u.test(text) && comparisonKey(text) !== titleKey) {
       paragraphs.push(text);
