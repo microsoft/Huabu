@@ -28,6 +28,7 @@ import { noop, type CommandDefinition } from './types.js';
 import { preserveAgentNodeOwnedData } from '../agentNodeOwnership.js';
 import { isContainerNode } from '../container/policy.js';
 import { stripTransientEdgeFields, stripTransientNodeFields } from '../diff.js';
+import { measuredSizeKey, readMeasuredSizeHint } from '../height/freshness.js';
 
 import type { CanvasCommand } from '../../index.js';
 import type { Edge, Node } from '@xyflow/react';
@@ -119,13 +120,21 @@ const restoreNodes: CommandDefinition<Cmd> = {
         if (current.type === 'question')
           data = preserveAgentNodeOwnedData(data, currentData);
       }
-      incoming.set(raw.id, {
+      const restored: Node = {
         ...rest,
         ...(parentId ? { parentId } : {}),
-        // What the renderer measured is this page's, not the snapshot's.
-        ...(current?.measured ? { measured: current.measured } : {}),
         data,
-      });
+      };
+      // What a renderer measured is not the snapshot's to say: a replaced
+      // node keeps its live box, and a returning one starts from the box
+      // last reported for exactly this content, if any.
+      const reported = current ? undefined : readMeasuredSizeHint(restored);
+      const measured =
+        current?.measured ??
+        (reported && reported.measuredFor === measuredSizeKey(restored)
+          ? { width: reported.width, height: reported.height }
+          : undefined);
+      incoming.set(raw.id, measured ? { ...restored, measured } : restored);
     }
     for (const id of replaceIds) {
       if (!incoming.has(id)) return noop(state, 'invalid-target');

@@ -115,6 +115,7 @@ const commandFields = {
   SET_NODE_SELECTION: { nodeIds: 'nodeIds' },
   SET_NODE_LOCKED: { items: 'geometry' },
   APPLY_MEASURED_HEIGHT: { items: 'geometry' },
+  APPLY_MEASURED_SIZE: { items: 'geometry' },
   SET_FRAME_LAYOUT: {
     placements: 'layout-placements',
     frameId: 'nodeId',

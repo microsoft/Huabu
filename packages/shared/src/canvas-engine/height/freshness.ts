@@ -19,7 +19,10 @@
 import { nodeRevisionOf } from '../change.js';
 import { autoHeightContentWidth } from './compute.js';
 
-import type { AutoHeightHint } from '../../types/canvas/node.js';
+import type {
+  AutoHeightHint,
+  MeasuredSizeHint,
+} from '../../types/canvas/node.js';
 import type { Node } from '@xyflow/react';
 
 /**
@@ -102,4 +105,44 @@ function isAutoHeightHint(value: unknown): value is AutoHeightHint {
     hint.intrinsicHeight > 0 &&
     typeof hint.measuredFor === 'string'
   );
+}
+
+/**
+ * Identity of the thing a renderer-owned node box was measured against:
+ * `` `${HEIGHT_LAYOUT_VERSION}:${revision}:${authoredWidth | 'auto'}` ``.
+ *
+ * Used for the types whose size only a renderer knows (`content` height
+ * policy). It proves a reported box still describes the node's content and
+ * authored width; like {@link AutoHeightKey} it requires hydrated content.
+ */
+export type MeasuredSizeKey = string;
+
+/** The key a box measured *now* would be valid for. */
+export function measuredSizeKey(node: Node): MeasuredSizeKey {
+  const data = node.data as { content?: unknown; src?: unknown } | undefined;
+  const revision = nodeRevisionOf({
+    content: typeof data?.content === 'string' ? data.content : undefined,
+    src: typeof data?.src === 'string' ? data.src : undefined,
+  });
+  const width = (node.style as { width?: unknown } | undefined)?.width;
+  return `${HEIGHT_LAYOUT_VERSION}:${revision}:${
+    typeof width === 'number' && Number.isFinite(width) ? width : 'auto'
+  }`;
+}
+
+/** A node's stored renderer-reported box, when it is well formed. */
+export function readMeasuredSizeHint(node: Node): MeasuredSizeHint | undefined {
+  const hint = (node.data as { measuredSize?: unknown } | undefined)
+    ?.measuredSize;
+  if (!hint || typeof hint !== 'object') return undefined;
+  const { width, height, measuredFor } = hint as Partial<MeasuredSizeHint>;
+  return typeof width === 'number' &&
+    Number.isFinite(width) &&
+    width > 0 &&
+    typeof height === 'number' &&
+    Number.isFinite(height) &&
+    height > 0 &&
+    typeof measuredFor === 'string'
+    ? { width, height, measuredFor }
+    : undefined;
 }

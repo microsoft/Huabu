@@ -147,6 +147,7 @@ export function commandReadTargets(command: CanvasCommand): CommandReadTargets {
     case 'SET_EDGE_STYLE':
     case 'SET_NODE_SELECTION':
     case 'APPLY_MEASURED_HEIGHT':
+    case 'APPLY_MEASURED_SIZE':
     case 'RESTORE_NODES':
       return NO_TARGETS;
     case 'DELETE_NODES':

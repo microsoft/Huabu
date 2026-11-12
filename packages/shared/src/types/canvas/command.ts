@@ -184,6 +184,26 @@ export interface CanvasNodeMeasuredHeightUpdate {
   provisional?: boolean;
 }
 
+/**
+ * The box a renderer measured for one node whose size only a renderer
+ * knows (`text`, `question`, `spacePreview`). Derived data, like
+ * {@link CanvasNodeMeasuredHeightUpdate}.
+ */
+export interface CanvasNodeMeasuredSizeUpdate {
+  nodeId: CanvasNodeId;
+  /** Rendered width in canvas px. */
+  width: number;
+  /** Rendered height in canvas px. */
+  height: number;
+  /**
+   * The `MeasuredSizeKey` the box was measured under (see
+   * `canvas-engine/height/freshness.ts`). An item whose key no longer
+   * matches the node — its content or authored width changed since — is
+   * ignored.
+   */
+  measuredFor: string;
+}
+
 export interface CanvasEdgeCreateInput {
   id?: CanvasEdgeId;
   source: CanvasNodeId;
@@ -250,6 +270,18 @@ export type CanvasCommand =
        */
       type: 'APPLY_MEASURED_HEIGHT';
       items: CanvasNodeMeasuredHeightUpdate[];
+    }
+  | {
+      /**
+       * Report the box a renderer measured for nodes whose size only a
+       * renderer knows, so Frames are laid out around their real
+       * footprint. The counterpart of `APPLY_MEASURED_HEIGHT` for the
+       * `content` height policy; non-undoable and UI-only for the same
+       * reasons. Stale items (key mismatch) and other node types are
+       * ignored rather than rejected.
+       */
+      type: 'APPLY_MEASURED_SIZE';
+      items: CanvasNodeMeasuredSizeUpdate[];
     }
   | {
       /**
@@ -373,6 +405,7 @@ export const UI_ONLY_CANVAS_COMMAND_TYPES = [
   'SET_NODE_SELECTION',
   'CHANGE_NODE_TYPE',
   'APPLY_MEASURED_HEIGHT',
+  'APPLY_MEASURED_SIZE',
   'RESTORE_NODES',
 ] as const;
 export type UiOnlyCanvasCommandType =

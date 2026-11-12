@@ -181,6 +181,7 @@ export {
   type AutoHeightFreshness,
   type AutoHeightHintRead,
   type AutoHeightKey,
+  type MeasuredSizeKey,
   type HeightKind,
   type HeightPolicy,
   HEIGHT_LAYOUT_VERSION,
@@ -196,8 +197,10 @@ export {
   isAutoHeightByDefaultType,
   materializeAutoHeight,
   materializeAutoHeights,
+  measuredSizeKey,
   quantizeHeight,
   readAutoHeightHint,
+  readMeasuredSizeHint,
   resolveAutoLayoutHeight,
   resolveHeightMode,
 } from './height/index.js';

@@ -13,11 +13,14 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { measuredSizeKey } from '@huabu/shared/canvas-engine';
+
 import { executeOnServer } from './canvas-executor.js';
 import { getCanvasStore } from '../storage/index.js';
 import { setWorkspacePath } from '../workspace.js';
 
 import type { CanvasCommand } from '@huabu/shared';
+import type { CanvasNode } from '@huabu/shared/canvas-engine';
 
 let tmp: string;
 const originalDataDir = process.env.HUABU_DATA_DIR;
@@ -56,14 +59,24 @@ beforeEach(() => {
     createdAt: Date.now(),
     updatedAt: Date.now(),
   });
-  store.writeNode('frame', { nodeId: 'frame', type: 'frame', label: 'Frame' });
+  store.writeNode('frame', {
+    nodeId: 'frame',
+    type: 'frame',
+    label: 'Frame',
+    content: '',
+  });
   store.writeNode('note', {
     nodeId: 'note',
     type: 'note',
     label: 'Kept',
     content: '# The body',
   });
-  store.writeNode('other', { nodeId: 'other', type: 'note', label: 'Other' });
+  store.writeNode('other', {
+    nodeId: 'other',
+    type: 'note',
+    label: 'Other',
+    content: '',
+  });
 });
 
 afterEach(() => {
@@ -222,5 +235,103 @@ describe('MERGE_NODE_DATA unset on the server', () => {
     expect(out.toVersion).toBe(out.fromVersion + 1);
     const node = stored().nodes.find((candidate) => candidate.id === 'note');
     expect(node?.data).toEqual({ type: 'note', heightMode: 'fixed' });
+  });
+});
+
+describe('APPLY_MEASURED_SIZE on the server', () => {
+  const textNode = {
+    id: 'text',
+    type: 'text',
+    position: { x: 20, y: 60 },
+    style: { width: 200 },
+    data: { type: 'text', content: 'A line' },
+  };
+  const key = measuredSizeKey(textNode as unknown as CanvasNode);
+
+  beforeEach(async () => {
+    await run([
+      {
+        type: 'CREATE_NODES',
+        nodes: [
+          {
+            id: 'hug',
+            nodeType: 'frame',
+            position: { x: 1000, y: 1000 },
+            size: { width: 300, height: 200 },
+            data: { sizing: 'hug' },
+          },
+        ],
+      },
+      {
+        type: 'CREATE_NODES',
+        nodes: [
+          {
+            id: 'text',
+            nodeType: 'text',
+            parentId: 'hug',
+            position: { x: 20, y: 60 },
+            size: { width: 200 },
+            data: { content: 'A line' },
+          },
+        ],
+      },
+    ]);
+  });
+
+  it('stores the reported box and lays the Frame out around it', async () => {
+    const first = await run([
+      {
+        type: 'APPLY_MEASURED_SIZE',
+        items: [{ nodeId: 'text', width: 200, height: 40, measuredFor: key }],
+      },
+    ]);
+    expect(first.results[0].applied).toBe(true);
+    const frameHeight = () =>
+      (
+        stored().nodes.find((node) => node.id === 'hug')?.style as {
+          height: number;
+        }
+      ).height;
+    const fitted = frameHeight();
+
+    const grown = await run([
+      {
+        type: 'APPLY_MEASURED_SIZE',
+        items: [{ nodeId: 'text', width: 200, height: 340, measuredFor: key }],
+      },
+    ]);
+    expect(grown.toVersion).toBe(grown.fromVersion + 1);
+    expect(frameHeight()).toBe(fitted + 300);
+    expect(stored().nodes.find((node) => node.id === 'text')).toMatchObject({
+      measured: { width: 200, height: 340 },
+      data: { measuredSize: { width: 200, height: 340, measuredFor: key } },
+    });
+  });
+
+  it('writes nothing for a measurement of content the Space no longer has', async () => {
+    await run([
+      {
+        type: 'MERGE_NODE_DATA',
+        patches: [{ nodeId: 'text', patch: { content: 'Two\nlines now' } }],
+      },
+    ]);
+    const out = await run([
+      {
+        type: 'APPLY_MEASURED_SIZE',
+        items: [{ nodeId: 'text', width: 200, height: 340, measuredFor: key }],
+      },
+    ]);
+    expect(out.results[0]).toMatchObject({ applied: false, reason: 'no-op' });
+    expect(out.toVersion).toBe(out.fromVersion);
+    expect(
+      stored().nodes.find((node) => node.id === 'text')?.data,
+    ).not.toHaveProperty('measuredSize');
+  });
+
+  it('writes nothing when the same box is reported again', async () => {
+    const item = { nodeId: 'text', width: 200, height: 40, measuredFor: key };
+    await run([{ type: 'APPLY_MEASURED_SIZE', items: [item] }]);
+    const again = await run([{ type: 'APPLY_MEASURED_SIZE', items: [item] }]);
+    expect(again.toVersion).toBe(again.fromVersion);
   });
 });
