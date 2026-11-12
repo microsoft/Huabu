@@ -38,6 +38,7 @@ import useCanvasStore, {
   resetCanvasSyncForTests,
 } from './canvasStore';
 import { CANVAS_PAGE_ID } from './canvasStore/sync/pageId';
+import { createFakeSpaceServer } from './canvasStore/sync/testing/fakeExecuteServer';
 
 import type * as apiModule from '../api';
 import type * as canvasApiModule from '../api/canvas';
@@ -202,6 +203,61 @@ describe('content another page saved, in the store', () => {
     expect(api.putNodeContent).not.toHaveBeenCalled();
   });
 
+  it('comes back with the node when this page deletes it and undoes the deletion', async () => {
+    // This case needs the server to answer: the restore follows the delete.
+    const server = createFakeSpaceServer();
+    server.reset(state().nodes, [], 1);
+    api.postCanvasExecute.mockImplementation(async (canvasId, request) =>
+      server.execute(canvasId, request),
+    );
+    // An entry taken while X still had its first body.
+    state().executeCommands([
+      {
+        type: 'MERGE_NODE_DATA',
+        patches: [
+          {
+            nodeId: X as `node-${string}`,
+            patch: { style: { accent: 'red' } },
+          },
+        ],
+      },
+    ]);
+    api.getNodeContent.mockResolvedValue(
+      savedOnServer('Body from A', 'From A'),
+    );
+    await adoptRemoteNodeContent(SPACE, [X]);
+    api.deleteNode.mockResolvedValue({ success: true });
+
+    state().deleteNodes([X]);
+    expect(state().nodes.map((n) => n.id)).toEqual([Y]);
+    state().undo();
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    expect(node(X).data).toMatchObject({
+      content: 'Body from A',
+      label: 'From A',
+    });
+    // The restoring batch carries the adopted body, not the entry's first.
+    const restored = server.requests
+      .flatMap(
+        (request) =>
+          request.commands as Array<{ type: string; nodes?: Node[] }>,
+      )
+      .filter((command) => command.type === 'RESTORE_NODES')
+      .flatMap((command) => command.nodes ?? [])
+      .filter((restoredNode) => restoredNode.id === X);
+    expect(restored.map((restoredNode) => restoredNode.data.content)).toEqual([
+      'Body from A',
+    ]);
+    expect(
+      server.state.nodes.find((serverNode) => serverNode.id === X)?.data
+        .content,
+    ).toBe('Body from A');
+    expect(api.putNodeContent).not.toHaveBeenCalled();
+    expect(api.putCanvas).not.toHaveBeenCalled();
+    expect(hasUnsavedCanvasEdits()).toBe(false);
+  });
+
   it('leaves a node this page is still saving exactly as typed', async () => {
     state().updateNodeData(X, { content: 'Typed on this page' });
     api.getNodeContent.mockResolvedValue(
@@ -216,6 +272,41 @@ describe('content another page saved, in the store', () => {
     expect(node(X).data).toMatchObject({
       content: 'Typed on this page',
       label: `Label ${X}`,
+    });
+  });
+});
+
+describe('a body typed on this page while an update for another node arrives', () => {
+  it('is saved from the revision the server holds, not from its own', async () => {
+    // The queue outlives a test: start from what the server holds.
+    api.getNodeContent.mockResolvedValue({
+      ...savedOnServer(`Body ${Y}`, `Label ${Y}`),
+      nodeId: Y,
+    });
+    await adoptRemoteNodeContent(SPACE, [Y]);
+    state().updateNodeData(Y, { content: 'Typed while X moved' });
+    // Another page moved X before this page's save was sent.
+    const moved = { ...node(X), position: { x: 400, y: 300 } };
+    state().applyDeltasFromAgent(
+      [{ type: 'REPLACE_NODE', prev: node(X), next: moved }] as never,
+      2,
+      {
+        mutatedNodes: [],
+        deletedNodeIds: [],
+        contentEditedNodeIds: [],
+        deferredFitFrameIds: [],
+      } as never,
+      undefined,
+      undefined,
+      { source: 'ui' },
+    );
+    expect(node(X).position).toEqual({ x: 400, y: 300 });
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    expect(api.putNodeContent).toHaveBeenCalledTimes(1);
+    expect(api.putNodeContent.mock.calls[0][2]).toMatchObject({
+      content: 'Typed while X moved',
+      expectRev: nodeRevisionOf({ content: `Body ${Y}` }),
     });
   });
 });

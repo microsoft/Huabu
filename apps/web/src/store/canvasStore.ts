@@ -3249,11 +3249,17 @@ const useCanvasStore = create<RFState>()(
       // actually applied. Skipped mid-edit nodes had their baseline adopted
       // to the agent's rev above (local-first rebase), so exclude them here
       // to avoid clobbering that with their own unchanged local content.
+      // A node with unsaved content that this batch did not touch is
+      // excluded too: its content is not the server's, and a baseline taken
+      // from it would have its own save refused as a conflict.
       {
         const skippedSet = new Set(skippedNodeIds);
         nodeContentQueue.seedBaselines(
           (applied.nodes as Node[]).filter(
-            (n) => !skippedSet.has(n.id) && !preservedPendingNodeIds.has(n.id),
+            (n) =>
+              !skippedSet.has(n.id) &&
+              !preservedPendingNodeIds.has(n.id) &&
+              !dirty.has(n.id),
           ),
         );
       }
