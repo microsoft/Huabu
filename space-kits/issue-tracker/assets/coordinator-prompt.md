@@ -8,6 +8,14 @@ Follow host policy, repository instructions, user authorization and tool safety 
 
 Before each new execution unit, apply the common configuration gate and read the mapped configuration Note. Verify paths/Git on the intended execution device; if your tools cannot reach it, report the limitation rather than checking the Server's filesystem.
 
+Resolve the effective configuration values as follows:
+
+- **Required inputs**: `codebasePath` (local Git checkout path on the execution device) and `fixingProfileId` (external Agent Profile ID).
+- **`coordinatorProfileId`**: defaults to `fixingProfileId` when `null` or omitted.
+- **`repository`**: when `null` or omitted, derive `owner/repo` from `git remote -v` inside `codebasePath`. Do not blindly assume `origin` when multiple distinct GitHub remotes exist (for example a personal fork `origin` alongside `upstream`); if ambiguous, ask the user to confirm or set `repository` explicitly. If `repository` is explicitly configured and conflicts with the checkout's remotes, stop and ask the user to reconcile.
+- **`worktreeRoot`**: when `null` or omitted, default to `<codebasePath>-worktrees` (sibling directory next to `codebasePath`).
+- **`developmentBaseRef` and `pullRequestBase`**: default to `"origin/main"` and `"main"` (PR base branch names never carry an `origin/` prefix) only when left at their default/omitted values and the repository defines no custom Canary/branch delivery policy. When explicit refs are configured, enforce them strictly and fail closed if a configured ref is missing, invalid, or unreachable—never silently fall back to `main`.
+
 Read the live RFS root and relevant Agent/operation guides. Resolve the configured Fixing Profile to its exact available external ID; never silently select another Profile. Read the target repository's own contribution/agent instructions and use its documented conventions; no particular architecture folder, package manager, build command or delivery branch is assumed.
 
 Each issue normally has one execution unit represented on the Space by a **single Fixing Agent node** inside the **Issues** Frame (no per-issue Frame and no Execution Note node): stable issue identity/title, branch, worktree, creation-time Base ref/SHA, PR Base, Fixing Profile, Agent Node and Thread. Keep units isolated. Combine issues only after explicit user approval of the complete set and evidence supporting a shared execution boundary. Do not change an existing unit's Base/PR Base because configuration later changed.

@@ -60,6 +60,31 @@ export async function loadKit() {
   };
 }
 
+export function resolveConfigurationValues(rawValues = {}) {
+  const clean = (val) =>
+    typeof val === 'string' && val.trim() ? val.trim() : null;
+  const codebasePath = clean(rawValues.codebasePath);
+  const fixingProfileId = clean(rawValues.fixingProfileId);
+  const coordinatorProfileId =
+    clean(rawValues.coordinatorProfileId) ?? fixingProfileId;
+  const repository = clean(rawValues.repository);
+  const worktreeRoot =
+    clean(rawValues.worktreeRoot) ??
+    (codebasePath ? `${codebasePath.replace(/[\\/]+$/, '')}-worktrees` : null);
+  const developmentBaseRef =
+    clean(rawValues.developmentBaseRef) ?? 'origin/main';
+  const pullRequestBase = clean(rawValues.pullRequestBase) ?? 'main';
+  return {
+    codebasePath,
+    fixingProfileId,
+    coordinatorProfileId,
+    repository,
+    worktreeRoot,
+    developmentBaseRef,
+    pullRequestBase,
+  };
+}
+
 export function validateConfiguration(content, schema, profiles) {
   let config;
   try {
@@ -73,26 +98,30 @@ export function validateConfiguration(content, schema, profiles) {
     !config.values ||
     typeof config.values !== 'object' ||
     Array.isArray(config.values) ||
-    !config.evidence ||
-    typeof config.evidence !== 'object' ||
-    Array.isArray(config.evidence) ||
+    (config.evidence !== undefined &&
+      (!config.evidence ||
+        typeof config.evidence !== 'object' ||
+        Array.isArray(config.evidence))) ||
     typeof config.confirmedByUser !== 'boolean'
   ) {
     return ['INVALID configuration structure; restore the documented schema'];
   }
   const fields = schema.properties.values.properties;
+  const requiredFields = new Set(schema.properties.values.required ?? []);
   const errors = [];
   if (
     Object.keys(config).some((key) => !Object.hasOwn(schema.properties, key)) ||
     Object.keys(config.values).some((key) => !Object.hasOwn(fields, key)) ||
-    Object.keys(config.evidence).some((key) => !Object.hasOwn(fields, key))
+    (config.evidence &&
+      Object.keys(config.evidence).some((key) => !Object.hasOwn(fields, key)))
   ) {
     errors.push('INVALID unknown configuration field');
   }
   for (const [key, rule] of Object.entries(fields)) {
     const value = config.values[key];
-    if (value === null || value === undefined || value === '') {
-      errors.push(`REQUIRED ${key}`);
+    const isEmpty = value === null || value === undefined || value === '';
+    if (isEmpty) {
+      if (requiredFields.has(key)) errors.push(`REQUIRED ${key}`);
     } else if (
       typeof value !== 'string' ||
       value !== value.trim() ||
@@ -102,20 +131,28 @@ export function validateConfiguration(content, schema, profiles) {
       errors.push(`INVALID ${key}: ${rule.description}`);
     }
     if (
-      typeof config.evidence[key] !== 'string' ||
-      !config.evidence[key].trim()
+      config.evidence &&
+      Object.hasOwn(config.evidence, key) &&
+      (typeof config.evidence[key] !== 'string' || !config.evidence[key].trim())
     ) {
       errors.push(
-        `UNVERIFIED ${key}: evidence must identify the source/device`,
+        `INVALID evidence.${key}: when provided, evidence must be a non-empty string`,
       );
     }
   }
+  const resolved = resolveConfigurationValues(config.values);
   for (const profileKey of ['coordinatorProfileId', 'fixingProfileId']) {
+    const rawValue = config.values[profileKey];
+    const checkId =
+      profileKey === 'coordinatorProfileId'
+        ? rawValue !== null && rawValue !== undefined && rawValue !== ''
+          ? rawValue
+          : null
+        : resolved.fixingProfileId;
     if (
-      config.values[profileKey] &&
+      typeof checkId === 'string' &&
       !profiles.some(
-        (profile) =>
-          profile.id !== 'huabu' && profile.id === config.values[profileKey],
+        (profile) => profile.id !== 'huabu' && profile.id === checkId,
       )
     ) {
       errors.push(`INVALID ${profileKey}: external Profile is not selectable`);
@@ -128,8 +165,10 @@ export function validateConfiguration(content, schema, profiles) {
 export function extractConfigProfile(content) {
   try {
     const config = parseRecord(content);
-    const id = config?.values?.coordinatorProfileId;
-    return typeof id === 'string' && id.trim() ? id.trim() : undefined;
+    return (
+      resolveConfigurationValues(config?.values).coordinatorProfileId ??
+      undefined
+    );
   } catch {
     return undefined;
   }

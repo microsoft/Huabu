@@ -511,26 +511,19 @@ it('runs the cloned standalone CLI over huabu-rfs and 3-step workflow from a dif
   expect(step1.coordinator).toBeNull();
   expect(ledger().objects.coordinator).toBeUndefined();
 
-  // Step 2: user fills in configuration on the Space
+  // Step 2: user fills in minimal required configuration on the Space (coordinatorProfileId, repository, worktreeRoot left null to use defaults/derivation)
   const configNodeId = ledger().objects.configuration.nodeId;
-  const values = {
-    repository: 'octo/example',
-    codebasePath: '/projects/example',
-    worktreeRoot: '/projects/worktrees',
-    coordinatorProfileId: 'project-profile',
-    fixingProfileId: 'project-profile',
-    developmentBaseRef: 'upstream/develop',
-    pullRequestBase: 'develop',
-  };
   const configuration = {
     schemaVersion: 1,
-    values,
-    evidence: Object.fromEntries(
-      Object.keys(values).map((key) => [
-        key,
-        'User confirmed on intended execution device',
-      ]),
-    ),
+    values: {
+      codebasePath: '/projects/example',
+      fixingProfileId: 'project-profile',
+      coordinatorProfileId: null,
+      repository: null,
+      worktreeRoot: null,
+      developmentBaseRef: 'origin/main',
+      pullRequestBase: 'main',
+    },
     confirmedByUser: true,
   };
   store().writeNode(configNodeId, {

@@ -9,7 +9,12 @@ import { execFileSync } from 'node:child_process';
 import { test } from 'node:test';
 import { pathToFileURL } from 'node:url';
 
-import { loadKit, validateConfiguration } from '../scripts/install.mjs';
+import {
+  extractConfigProfile,
+  loadKit,
+  resolveConfigurationValues,
+  validateConfiguration,
+} from '../scripts/install.mjs';
 
 test('portable package links resolve and Prompt bodies fit native UTF-8 budgets', async () => {
   const kit = await loadKit();
@@ -76,27 +81,64 @@ test('script works from a standalone clone outside the Huabu checkout', async ()
   }
 });
 
-test('configuration is explicit, portable and evidence-backed, never inferred', async () => {
+test('configuration requires only codebasePath and fixingProfileId upfront while applying defaults and validating overrides', async () => {
   const kit = await loadKit();
   const validate = (value) =>
     validateConfiguration(
       `\`\`\`json\n${JSON.stringify(value)}\n\`\`\`\n`,
       kit.configurationSchema,
-      [{ id: 'external-test', alias: 'A project Agent' }],
+      [
+        { id: 'external-test', alias: 'A project Agent' },
+        { id: 'coordinator-only', alias: 'Coordinator Agent' },
+      ],
     );
   const missing = validateConfiguration(
     kit.content['assets/configuration.md'],
     kit.configurationSchema,
     [],
   );
-  assert(missing.includes('REQUIRED repository'));
+  assert(missing.includes('REQUIRED codebasePath'));
+  assert(missing.includes('REQUIRED fixingProfileId'));
+  assert(!missing.includes('REQUIRED repository'));
+  assert(!missing.includes('REQUIRED worktreeRoot'));
+  assert(!missing.includes('REQUIRED coordinatorProfileId'));
   assert(missing.includes('UNVERIFIED user confirmation'));
+
+  const minimalConfig = {
+    schemaVersion: 1,
+    values: {
+      codebasePath: 'D:\\projects\\example',
+      fixingProfileId: 'external-test',
+      coordinatorProfileId: null,
+      repository: null,
+      worktreeRoot: null,
+      developmentBaseRef: 'origin/main',
+      pullRequestBase: 'main',
+    },
+    confirmedByUser: true,
+  };
+  assert.deepEqual(validate(minimalConfig), []);
+  assert.deepEqual(resolveConfigurationValues(minimalConfig.values), {
+    codebasePath: 'D:\\projects\\example',
+    fixingProfileId: 'external-test',
+    coordinatorProfileId: 'external-test',
+    repository: null,
+    worktreeRoot: 'D:\\projects\\example-worktrees',
+    developmentBaseRef: 'origin/main',
+    pullRequestBase: 'main',
+  });
+  assert.equal(
+    extractConfigProfile(
+      `\`\`\`json\n${JSON.stringify(minimalConfig)}\n\`\`\`\n`,
+    ),
+    'external-test',
+  );
 
   const values = {
     repository: 'octo/example',
     codebasePath: 'D:\\projects\\example',
     worktreeRoot: 'D:\\worktrees',
-    coordinatorProfileId: 'external-test',
+    coordinatorProfileId: 'coordinator-only',
     fixingProfileId: 'external-test',
     developmentBaseRef: 'upstream/develop',
     pullRequestBase: 'develop',
@@ -113,6 +155,10 @@ test('configuration is explicit, portable and evidence-backed, never inferred', 
     confirmedByUser: true,
   };
   assert.deepEqual(validate(config), []);
+  assert.equal(
+    extractConfigProfile(`\`\`\`json\n${JSON.stringify(config)}\n\`\`\`\n`),
+    'coordinator-only',
+  );
   assert.match(
     validate({
       ...config,
@@ -141,7 +187,10 @@ test('configuration is explicit, portable and evidence-backed, never inferred', 
     }).join('\n'),
     /INVALID fixingProfileId/,
   );
-  assert.match(validate({ ...config, evidence: {} }).join('\n'), /UNVERIFIED/);
+  assert.match(
+    validate({ ...config, evidence: { codebasePath: '   ' } }).join('\n'),
+    /INVALID evidence\.codebasePath/,
+  );
   assert.match(
     validate({ ...config, confirmedByUser: false }).join('\n'),
     /UNVERIFIED user confirmation/,

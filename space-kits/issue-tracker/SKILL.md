@@ -41,13 +41,15 @@ When run before configuration is filled in, Step 1 stops cleanly in `state: "nee
 
 The amber **Issue Tracker Configuration** Frame contains the editable [configuration template](./assets/configuration.md) and a conspicuous Text warning. Missing, invalid, or unverified values are reported by field, along with `availableProfiles` from the installer output.
 
-Guide the user to fill in or confirm the configuration fields in the existing **Issue Tracker Configuration** Note:
+Guide the user to fill in and confirm the configuration in the existing **Issue Tracker Configuration** Note. Only two fields are required upfront (`codebasePath` and `fixingProfileId`), while the remaining fields have sensible defaults or are derived at runtime:
 
-- `coordinatorProfileId` and `fixingProfileId`: explicit selectable external Profile IDs (may be the same or different; never `huabu` or an inferred alias). The Coordinator inherits its Profile's cwd because project paths live in configuration.
-- `repository`: `owner/repo` derived only from auditable project evidence and confirmed by the user.
-- `codebasePath` and `worktreeRoot`: absolute paths on the intended execution device.
-- `developmentBaseRef` and `pullRequestBase`: verified remote-tracking ref and target branch from project evidence.
-- `evidence` and `confirmedByUser`: one source/device evidence note per field, and `confirmedByUser: true` only after explicit user confirmation.
+- `codebasePath` (**required**): absolute path to the local Git repository on the intended execution device.
+- `fixingProfileId` (**required**): explicit selectable external Profile ID (never `huabu` or an inferred alias). Also used for the Coordinator unless `coordinatorProfileId` is set.
+- `coordinatorProfileId` (_optional_): defaults to `fixingProfileId` when `null`.
+- `repository` (_optional_): `owner/repo` override; when `null`, the Coordinator derives it from `codebasePath` Git remotes (and asks for confirmation if remotes such as fork `origin` vs `upstream` are ambiguous).
+- `worktreeRoot` (_optional_): absolute parent directory for issue worktrees; when `null`, defaults to `<codebasePath>-worktrees`.
+- `developmentBaseRef` and `pullRequestBase` (_optional_): default to `"origin/main"` and `"main"`. Override them when the project uses a custom branch workflow (such as `origin/alpha` + `alpha` or `origin/develop` + `develop`); once configured, the Coordinator enforces those exact refs and fails closed rather than silently falling back.
+- `confirmedByUser`: set to `true` after the user confirms the configuration (`evidence` remains an optional per-field note map).
 
 Do not copy the Kit repository's settings, guess a default branch, insert host paths, or treat a Server-local check as evidence about another machine. Read the target repository's own instructions; do not impose Huabu's architecture directories, package manager, checks, or Canary policy. Edit the existing configuration Note, not another copy. Validation checks shape, selected Profiles and confirmation; the Coordinator must still verify Git/path/device facts on the intended device before creating an execution environment.
 
@@ -65,7 +67,7 @@ When `configurationState` is `valid`, run with `--apply` to finalize the install
 node ./scripts/install.mjs --apply
 ```
 
-Using the validated `coordinatorProfileId` from configuration (or `--profile PROFILE_ID`), the script creates the fresh idle Coordinator with `noStart` (`X-Huabu-Agent-Start: false`), no prompt, no parent lineage, and no host-thread correlation; labels it `Issue Tracker Coordinator`; connects its specific Prompt Frame; activates the instruction Frame labels (`prompt: issue tracking common`, `prompt: issue tracking coordinator`, `skill: issue fixing`); and records `state: "ready"` in the Installation Record. Common instructions are global, and the fixing contract is a lazy Skill Note. No prompt, warm-up, mode/model/config control, or implementation authorization is sent.
+Using the validated `coordinatorProfileId` (or `fixingProfileId` when `coordinatorProfileId` is `null`, or `--profile PROFILE_ID`), the script creates the fresh idle Coordinator with `noStart` (`X-Huabu-Agent-Start: false`), no prompt, no parent lineage, and no host-thread correlation; labels it `Issue Tracker Coordinator`; connects its specific Prompt Frame; activates the instruction Frame labels (`prompt: issue tracking common`, `prompt: issue tracking coordinator`, `skill: issue fixing`); and records `state: "ready"` in the Installation Record. Common instructions are global, and the fixing contract is a lazy Skill Note. No prompt, warm-up, mode/model/config control, or implementation authorization is sent.
 
 Require `state: "ready"` with no unresolved write intent, valid configuration, expected direct Prompt adjacency, complete object mappings and no unexpected edges. The installer checks queried geometry for containment/non-overlap. Review the visible Space as well: browser text measurement may refine content-driven heights after headless installation. Report the installed Coordinator Node/Thread, package identity, configuration state and limitations. Only then invite the user to send the Coordinator its **first message**.
 
