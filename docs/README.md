@@ -59,7 +59,7 @@ Connected-device browsing and the bundled ACP proxy are documented in [device-fi
 | [service-packages.md](./architecture/service-packages.md)                       | Manifest-driven third-party Services, storage bindings, Agent declarations, RFS leases, and SDK.         |
 | [canary-deployment.md](./architecture/canary-deployment.md)                     | Personal Alpha Canary status, owner-triggered redeployment, and explicit reliability limits.             |
 | [canvas-action-log.md](./architecture/canvas-action-log.md)                     | Persistent `events.jsonl` user-action trail; consumed by the memory curator.                             |
-| [canvas-realtime-sync.md](./architecture/canvas-realtime-sync.md)               | Multi-agent real-time sync: SSE broadcast, dirty-node conflict model, per-thread change-review card.     |
+| [canvas-realtime-sync.md](./architecture/canvas-realtime-sync.md)               | Real-time sync: SSE broadcast, structure edits, node content between pages, presence, edit lock.         |
 | [credential-storage.md](./architecture/credential-storage.md)                   | Electron OS-protected credentials, utility-process bridge, migration, and standalone fallback.           |
 | [desktop-auto-update.md](./architecture/desktop-auto-update.md)                 | Desktop auto-update: electron-updater lifecycle, env-driven update feed, required release artifacts.     |
 | [desktop-startup.md](./architecture/desktop-startup.md)                         | Cold start: splash window, main-window reveal, and the first-screen bundle boundary.                     |
