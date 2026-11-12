@@ -44,7 +44,11 @@ import {
 } from '../storage/index.js';
 import { setWorkspacePath } from '../workspace.js';
 
-import type { CanvasCommand, ExecuteOriginator } from '@huabu/shared';
+import type {
+  CanvasCommand,
+  CanvasNodeId,
+  ExecuteOriginator,
+} from '@huabu/shared';
 
 let tmp: string;
 const originalDataDir = process.env.HUABU_DATA_DIR;
@@ -753,6 +757,68 @@ describe('executeOnServer — batch node writes use one ordered backend call', (
 });
 
 describe('executor tombstone resurrection', () => {
+  it.each(['initialize', 'delete'] as const)(
+    'preserves later PDF data when reverting Note %s',
+    async (operation) => {
+      seedNote('c1', 'node-pdf', 'Original extraction', 'pdf');
+      const initialized = await executeOnServer({
+        canvasId: 'c1',
+        commands: [{ type: 'INITIALIZE_PDF_NOTE', nodeId: 'node-pdf' }],
+        originator: UI,
+      });
+      const noteId = initialized.results[0].nodes?.[0].nodeId;
+      if (!noteId) throw new Error('Missing initialized Note');
+      const changed =
+        operation === 'initialize'
+          ? initialized
+          : await executeOnServer({
+              canvasId: 'c1',
+              commands: [
+                { type: 'DELETE_NODES', nodeIds: [noteId as CanvasNodeId] },
+              ],
+              originator: UI,
+            });
+      const [change] = extractCanvasChanges(changed.deltas);
+      await updateNode(space('c1').nodes, 'node-pdf', {
+        apply: (record) => {
+          if (!record) throw new Error('Missing PDF');
+          return {
+            ...record,
+            content: 'New extraction',
+            label: 'Renamed paper',
+            properties: { Status: 'Read' },
+            propertyDisplayKeys: ['Status'],
+          };
+        },
+      });
+      await applyDeltasOnServer({
+        canvasId: 'c1',
+        originator: UI,
+        deltas: change.revertDeltas,
+        change,
+      });
+      const store = getCanvasStore('c1');
+      expect(store.readNode('node-pdf')).toMatchObject({
+        content: 'New extraction',
+        label: 'Renamed paper',
+        properties: { Status: 'Read' },
+        propertyDisplayKeys: ['Status'],
+      });
+      expect(store.read()?.state.nodes).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: 'node-pdf',
+            data:
+              operation === 'delete'
+                ? expect.objectContaining({ noteNodeId: noteId })
+                : expect.not.objectContaining({ noteNodeId: noteId }),
+          }),
+        ]),
+      );
+      expect(store.readNode(noteId) !== null).toBe(operation === 'delete');
+    },
+  );
+
   it('initializes through the built-in public schema and rolls back a failed pair commit', async () => {
     seedNote('c1', 'node-pdf', 'PDF source text', 'pdf');
     const store = getCanvasStore('c1');

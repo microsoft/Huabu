@@ -64,7 +64,12 @@ export {
 } from './postEffects.js';
 
 // ── Deltas (server → client wire diff) ────────────────────────────────────
-export { type Delta, applyDeltas, invertDelta } from './delta.js';
+export {
+  type Delta,
+  applyDeltas,
+  invertDelta,
+  replayChangedData,
+} from './delta.js';
 export {
   diffCanvasState,
   TRANSIENT_NODE_FIELDS,

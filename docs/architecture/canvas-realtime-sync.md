@@ -156,6 +156,8 @@ Records are persisted per thread in a mutable sidecar (`<threadId>.changes.json`
 
 PDF ownership changes are an exception to one row per entity: the PDF change and its associated Note change share one row and all inverse deltas. Coalescing nets the constituent entities before regrouping them, preserving the pair through persistence and later edits. The shared freshness check examines every inverse delta, including the Note body for creation reverts. The revert endpoint repeats this check under the Canvas mutex and rejects stale rows with HTTP 409; server delta replay also rejects dangling links, replacement of existing Note links, and detachment of surviving owned Notes before writing.
 
+Reviewed PDF update inverses replay only the recorded `data` field changes onto the live canonical PDF data, using the same field-difference replay helper as Question editable-data inverses. Reverting Note initialization or restoring a deleted Note therefore preserves later PDF properties, display order, title, and extracted text that the original operation did not modify. Changes to fields touched by the reviewed operation still fail the shared freshness check.
+
 The [ChangeReviewCard](../../apps/web/src/components/Panels/ChatPanel/ChangeReviewCard.tsx)
 above the chat input renders the thread's records with per-item and bulk
 Keep / Revert, plus press-and-hold **preview** (temporarily applies the inverse

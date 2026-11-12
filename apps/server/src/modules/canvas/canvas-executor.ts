@@ -53,6 +53,7 @@ import {
   hasValidPdfNoteOwnership,
   hidePdfNotes,
   pdfNoteId,
+  replayChangedData,
   nodeRevision,
   preserveAgentNodeOwnedData,
   projectAgentNodeEditableData,
@@ -1422,6 +1423,23 @@ export async function applyDeltasOnServerAlreadyLocked(input: {
     : input.deltas.map((delta): Delta => {
         if (delta.type !== 'REPLACE_NODE') return delta;
         const current = liveNodes.get(delta.next.id);
+        if (
+          input.change &&
+          current?.type === 'pdf' &&
+          delta.prev.type === 'pdf' &&
+          delta.next.type === 'pdf'
+        ) {
+          const next = {
+            ...delta.next,
+            data: replayChangedData(
+              current.data,
+              delta.prev.data,
+              delta.next.data,
+            ),
+          };
+          liveNodes.set(next.id, next);
+          return { ...delta, next };
+        }
         if (current?.type !== 'question') return delta;
         const next = {
           ...delta.next,

@@ -30,6 +30,25 @@ function run(commands: CanvasCommand[], nodes = [pdf, note]) {
 }
 
 describe('PDF-owned real Notes', () => {
+  it('allows explicit deletion followed by fresh initialization in the same batch', () => {
+    const result = run([
+      { type: 'DELETE_NODES', nodeIds: ['node-note'] },
+      { type: 'INITIALIZE_PDF_NOTE', nodeId: 'node-pdf' },
+    ]);
+    expect(result.commandResults.every((entry) => entry.applied)).toBe(true);
+    const owner = result.writeResult.nodes.find((entry) => entry.id === pdf.id);
+    const replacement = result.writeResult.nodes.find(
+      (entry) => entry.id === owner?.data.noteNodeId,
+    );
+    expect(result.writeResult.nodes).toHaveLength(2);
+    expect(replacement?.id).not.toBe(note.id);
+    expect(replacement).toMatchObject({
+      type: 'note',
+      hidden: true,
+      data: { content: '' },
+    });
+  });
+
   it('initializes a Note atomically and reuses it without changing content or selection', () => {
     const command: CanvasCommand = {
       type: 'INITIALIZE_PDF_NOTE',
