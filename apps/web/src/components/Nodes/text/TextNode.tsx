@@ -18,6 +18,7 @@ import {
 } from '@/components/Common/DropdownMenu';
 import { FloatingToolbar } from '@/components/Common/FloatingToolbar.tsx';
 import { useTextNodeSurface } from '@/hooks/useTextNodeSurface';
+import { canStartEditing } from '@/store/canvasPresence/editLock';
 import useCanvasStore, { settleNodePreprocess } from '@/store/canvasStore.ts';
 import {
   FONT_FAMILY_CSS,
@@ -146,10 +147,15 @@ export const TextNode = memo(
       updateStyle({ textDecoration: current.join(' ') });
     };
 
-    const handleDoubleClick = useCallback((e: React.MouseEvent) => {
-      e.stopPropagation();
-      setIsEditing(true);
-    }, []);
+    const handleDoubleClick = useCallback(
+      (e: React.MouseEvent) => {
+        e.stopPropagation();
+        // One editor at a time: not while another page is editing this text.
+        if (!canStartEditing(id)) return;
+        setIsEditing(true);
+      },
+      [id],
+    );
 
     const handleBlur = useCallback(() => {
       setIsEditing(false);

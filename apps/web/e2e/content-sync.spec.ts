@@ -24,6 +24,10 @@ import type { CreateCanvasResponse } from '@huabu/shared';
  * in the card and in an open preview, and receiving it must not make the
  * receiving page save anything. The plain body case and "B then edits the
  * same note" are case (f) of `multi-page-sync-baseline.spec.ts`.
+ *
+ * One editor at a time: while one page is editing a node, the other cannot
+ * start editing its body or title and is told why; it still can move it. When
+ * the first page finishes, the other has its text and may edit.
  */
 
 // Mouse input: the default project emulates touch for the gesture suites.
@@ -32,6 +36,8 @@ test.use({ hasTouch: false });
 const X = 'node-content-x';
 const Y = 'node-content-y';
 const AUTO = 'node-content-auto';
+const TEXT = 'node-content-text';
+const LOCKED_HINT = /is editing this\. You can edit it when they finish\./;
 const SEED = {
   [X]: { x: 380, y: 90 },
   [Y]: { x: 380, y: 340 },
@@ -42,6 +48,8 @@ interface Device {
   page: Page;
   /** Every non-GET `/api/canvas/**` call this page made, without the Space id. */
   calls: string[];
+  /** Calls the server refused with 409. */
+  conflicts: string[];
 }
 
 async function seedSpace(request: APIRequestContext, title: string) {
@@ -81,6 +89,13 @@ async function seedSpace(request: APIRequestContext, title: string) {
               position: { x: 820, y: 90 },
               size: { width: 300, height: 'auto' },
             },
+            {
+              id: TEXT,
+              nodeType: 'text',
+              data: { type: 'text', content: 'Seed text' },
+              selectOnCreate: false,
+              position: { x: 60, y: 420 },
+            },
           ],
         },
       ],
@@ -93,6 +108,7 @@ async function seedSpace(request: APIRequestContext, title: string) {
 
 interface ServerNode {
   id: string;
+  position: { x: number; y: number };
   style?: { height?: number };
   data: { content?: string; label?: string };
 }
@@ -144,6 +160,12 @@ async function openDevice(browser: Browser, canvasId: string): Promise<Device> {
       `${request.method()} ${path.replace(`/api/canvas/${canvasId}`, '<space>')}`,
     );
   });
+  const conflicts: string[] = [];
+  page.on('response', (response) => {
+    const path = new URL(response.url()).pathname;
+    if (response.status() === 409 && path.startsWith('/api/canvas/'))
+      conflicts.push(`${response.request().method()} ${path}`);
+  });
   await page.goto(`/canvas/${canvasId}`);
   await expect(page.locator('[data-canvas-root]')).toHaveAttribute(
     'aria-busy',
@@ -156,7 +178,7 @@ async function openDevice(browser: Browser, canvasId: string): Promise<Device> {
       window as unknown as { __contentSyncLoaded: boolean }
     ).__contentSyncLoaded = true;
   });
-  return { context, page, calls };
+  return { context, page, calls, conflicts };
 }
 
 async function storeState(page: Page) {
@@ -341,5 +363,126 @@ test('a body that changes an auto-height note is measured on both pages without 
   expect((await storeState(b.page)).reloaded).toBe(false);
 
   await a.context.close();
+  await b.context.close();
+});
+
+test("while page A is editing a note, page B cannot edit its body or title, and can once A finishes, starting from A's text", async ({
+  browser,
+  request,
+}) => {
+  const { canvasId, a, b } = await openBoth(browser, request, 'Content lock');
+
+  // A opens X and types; its caret stays in the editor.
+  await openPreview(a.page, X);
+  await editablePreview(a.page).fill('Typed by page A');
+  await expect(editablePreview(a.page)).toBeFocused();
+
+  // B is shown that X is being edited.
+  await expect(
+    b.page.locator(`[data-presence-outline-label="${X}"]`),
+  ).toContainText('editing');
+
+  // Structure stays free: B moves X while A edits it.
+  const card = b.page.locator(`.react-flow__node[data-id="${X}"]`);
+  const box = await card.boundingBox();
+  if (!box) throw new Error('X is not visible on B');
+  await b.page.mouse.move(box.x + box.width / 2, box.y + 12);
+  await b.page.mouse.down();
+  await b.page.mouse.move(box.x + box.width / 2, box.y + 12 - 60, {
+    steps: 10,
+  });
+  await b.page.mouse.up();
+  await expect
+    .poll(
+      async () => (await serverRecord(request, canvasId)).node(X)?.position.y,
+    )
+    .toBeLessThan(SEED[X].y - 30);
+  await expect(b.page.getByText(LOCKED_HINT)).toHaveCount(0);
+
+  // B opens X: the preview is read-only, says why, and shows A's text.
+  await openPreview(b.page, X);
+  await expect(b.page.locator('[data-edit-locked-notice]')).toHaveText(
+    LOCKED_HINT,
+  );
+  await expect(editablePreview(b.page)).toHaveCount(0);
+  await expect(previewEditor(b.page)).toHaveText('Typed by page A');
+  // Trying to type there does nothing but show the hint.
+  await previewEditor(b.page).click();
+  await b.page.keyboard.type('typed by B while locked');
+  await expect(b.page.getByText(LOCKED_HINT)).toHaveCount(2);
+  await expect(previewEditor(b.page)).toHaveText('Typed by page A');
+  // The title cannot be edited either.
+  await b.page.getByRole('tab', { selected: true }).focus();
+  await b.page.keyboard.press('F2');
+  await expect(
+    b.page.getByRole('textbox', { name: 'Rename node' }),
+  ).toHaveCount(0);
+  // B saved no content while it was locked out, and A is still the editor.
+  expect(b.calls.filter((call) => call.includes('/content'))).toEqual([]);
+  expect((await storeState(b.page)).pendingContent).toEqual([]);
+  await expect(editablePreview(a.page)).toBeFocused();
+
+  // A finishes. B is told nothing more, may edit, and has A's text.
+  await closePreview(a.page);
+  await expect(b.page.locator('[data-edit-locked-notice]')).toHaveCount(0);
+  // A still has X selected, but is no longer shown as editing it.
+  await expect(
+    b.page.locator(`[data-presence-outline="${X}"]`),
+  ).toHaveAttribute('data-presence-activity', 'selected');
+  await expect(editablePreview(b.page)).toHaveCount(1);
+  await expect(editablePreview(b.page)).toHaveText('Typed by page A');
+  await editablePreview(b.page).fill('Typed by page A, then by page B');
+  await closePreview(b.page);
+  await expect
+    .poll(async () =>
+      (await serverRecord(request, canvasId)).node(X)?.data.content?.trim(),
+    )
+    .toBe('Typed by page A, then by page B');
+
+  // B's save descended from A's: nothing was refused, nobody has to choose.
+  await expect(cardBody(a.page, X)).toHaveText(
+    'Typed by page A, then by page B',
+  );
+  expect(a.conflicts).toEqual([]);
+  expect(b.conflicts).toEqual([]);
+  for (const device of [a, b]) {
+    await expect(
+      device.page.getByRole('button', { name: /^(Keep mine|Load latest)$/ }),
+    ).toHaveCount(0);
+    expect((await storeState(device.page)).reloaded).toBe(false);
+  }
+
+  await a.context.close();
+  await b.context.close();
+});
+
+test('page B cannot start editing a text node in place while page A is editing it, and the lock ends when A closes the page', async ({
+  browser,
+  request,
+}) => {
+  const { a, b } = await openBoth(browser, request, 'Content lock text');
+  const textOn = (page: Page) =>
+    page.locator(`.react-flow__node[data-id="${TEXT}"]`);
+
+  await textOn(a.page).dblclick();
+  await expect(textOn(a.page).locator('textarea')).toBeFocused();
+  await expect(
+    b.page.locator(`[data-presence-outline-label="${TEXT}"]`),
+  ).toContainText('editing');
+
+  await textOn(b.page).dblclick();
+  await expect(b.page.getByText(LOCKED_HINT)).toHaveCount(1);
+  // The field stays the read-only mirror it is outside editing.
+  await expect(textOn(b.page).locator('textarea')).not.toBeFocused();
+  await expect(textOn(b.page).locator('textarea')).not.toBeEditable();
+
+  // A goes away without leaving the editor: the lock goes with the page.
+  await a.context.close();
+  await expect(
+    b.page.locator(`[data-presence-outline-label="${TEXT}"]`),
+  ).toHaveCount(0);
+  await textOn(b.page).dblclick();
+  await expect(textOn(b.page).locator('textarea')).toBeFocused();
+
   await b.context.close();
 });

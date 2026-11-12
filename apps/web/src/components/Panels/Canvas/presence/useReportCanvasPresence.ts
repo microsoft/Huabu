@@ -11,8 +11,13 @@ import {
 import { isElectron } from '@/hooks/useElectron';
 import { useCanvasPresenceStore } from '@/store/canvasPresence/canvasPresenceStore';
 import { presenceDeviceLabel } from '@/store/canvasPresence/deviceLabel';
+import { createEditingTracker } from '@/store/canvasPresence/editingTracker';
+import {
+  selectEditLockHolder,
+  showEditLockedHint,
+} from '@/store/canvasPresence/editLock';
 import { createPresenceReporter } from '@/store/canvasPresence/presenceReporter';
-import useCanvasStore from '@/store/canvasStore';
+import useCanvasStore, { flushNodeContent } from '@/store/canvasStore';
 import { CANVAS_PAGE_ID } from '@/store/canvasStore/sync/pageId';
 
 import type { Node } from '@xyflow/react';
@@ -20,15 +25,26 @@ import type { Node } from '@xyflow/react';
 const EDITABLE =
   'textarea, input, select, [contenteditable]:not([contenteditable="false"])';
 
+/** What counts as the person still working in an editor. */
+const ACTIVITY_EVENTS = ['keydown', 'pointerdown', 'input'] as const;
+
 /**
  * The node whose text control has focus: a node edited in place on the
- * canvas, or the one open in the preview panel beside it.
+ * canvas, or the one open in the preview panel beside it. A read-only field
+ * (a title that is shown in an input until it is edited) is not editing.
  */
 export function editingNodeId(
   canvas: HTMLElement,
   active: Element | null,
 ): string | null {
-  if (!active?.closest(EDITABLE)) return null;
+  const control = active?.closest(EDITABLE);
+  if (!active || !control) return null;
+  if (
+    (control instanceof HTMLInputElement ||
+      control instanceof HTMLTextAreaElement) &&
+    control.readOnly
+  )
+    return null;
   if (canvas.contains(active))
     return (
       active.closest<HTMLElement>('.react-flow__node[data-id]')?.dataset.id ??
@@ -104,16 +120,48 @@ export function useReportCanvasPresence(domNode: HTMLDivElement | null): void {
       reporter.setPointer(null);
     };
 
-    const syncEditing = (): void => {
-      const id = editingNodeId(domNode, document.activeElement);
-      reporter.setNodes({ editingNodeIds: id ? [id] : [] });
-    };
+    // The reported node is the other pages' edit lock on it.
+    const presence = useCanvasPresenceStore.getState();
+    const editing = createEditingTracker({
+      focusedNodeId: () => editingNodeId(domNode, document.activeElement),
+      pageActive: () =>
+        document.hasFocus() && document.visibilityState !== 'hidden',
+      report: (id) => reporter.setNodes({ editingNodeIds: id ? [id] : [] }),
+      setLocal: (id) => presence.setLocalEditingNodeId(id),
+      save: flushNodeContent,
+      yieldIfHeldElsewhere: (id) => {
+        const holder = selectEditLockHolder(
+          {
+            pages: useCanvasPresenceStore.getState().pages,
+            localEditingNodeId: null,
+          },
+          id,
+        );
+        if (!holder) return false;
+        const active = document.activeElement;
+        if (active instanceof HTMLElement) active.blur();
+        showEditLockedHint(holder);
+        return true;
+      },
+    });
+    const syncEditing = (): void => editing.sync();
+    const resumeEditing = (): void => editing.resume();
+    const noteActivity = (): void => editing.activity();
     // On `focusout` the next element is not focused yet.
     const afterBlur = (): void => void setTimeout(syncEditing, 0);
+    const windowBlur = (): void => {
+      hidePointer();
+      editing.sync();
+    };
 
     const visibility = (): void => {
-      if (document.visibilityState === 'hidden') hidePointer();
-      else reporter.announce();
+      if (document.visibilityState === 'hidden') {
+        hidePointer();
+        editing.sync();
+      } else {
+        reporter.announce();
+        editing.resume();
+      }
     };
     // The page may be restored from the back/forward cache, so withdraw
     // without stopping; `pageshow` announces it again.
@@ -129,7 +177,13 @@ export function useReportCanvasPresence(domNode: HTMLDivElement | null): void {
     // Document-wide: a node is also edited in the preview panel.
     document.addEventListener('focusin', syncEditing);
     document.addEventListener('focusout', afterBlur);
-    window.addEventListener('blur', hidePointer);
+    window.addEventListener('blur', windowBlur);
+    window.addEventListener('focus', resumeEditing);
+    for (const type of ACTIVITY_EVENTS)
+      document.addEventListener(type, noteActivity, {
+        capture: true,
+        passive: true,
+      });
     document.addEventListener('visibilitychange', visibility);
     window.addEventListener('pagehide', pageHide);
     window.addEventListener('pageshow', pageShow);
@@ -140,9 +194,13 @@ export function useReportCanvasPresence(domNode: HTMLDivElement | null): void {
       stopNodes();
       domNode.removeEventListener('pointermove', move, { capture: true });
       domNode.removeEventListener('pointerleave', hidePointer);
-      domNode.removeEventListener('focusin', syncEditing);
-      domNode.removeEventListener('focusout', afterBlur);
-      window.removeEventListener('blur', hidePointer);
+      document.removeEventListener('focusin', syncEditing);
+      document.removeEventListener('focusout', afterBlur);
+      editing.stop();
+      window.removeEventListener('blur', windowBlur);
+      window.removeEventListener('focus', resumeEditing);
+      for (const type of ACTIVITY_EVENTS)
+        document.removeEventListener(type, noteActivity, { capture: true });
       document.removeEventListener('visibilitychange', visibility);
       window.removeEventListener('pagehide', pageHide);
       window.removeEventListener('pageshow', pageShow);

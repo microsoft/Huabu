@@ -273,6 +273,10 @@ describe('editingNodeId', () => {
         <button id="button">b</button>
       </div>
       <div class="react-flow__node" data-id="text-1"><textarea id="area"></textarea></div>
+      <div class="react-flow__node" data-id="frame-1">
+        <input id="frame-title" readonly />
+        <textarea id="frame-area" readonly></textarea>
+      </div>
       <input id="toolbar" />`;
     const panel = document.createElement('div');
     panel.innerHTML = `
@@ -287,6 +291,11 @@ describe('editingNodeId', () => {
       expect(editingNodeId(container, find('caret'))).toBe('note-1');
       expect(editingNodeId(container, find('area'))).toBe('text-1');
       expect(editingNodeId(container, find('button'))).toBeNull();
+      // A title shown in a read-only field is selected, not edited.
+      expect(editingNodeId(container, find('frame-title'))).toBeNull();
+      expect(editingNodeId(container, find('frame-area'))).toBeNull();
+      (find('frame-title') as HTMLInputElement).readOnly = false;
+      expect(editingNodeId(container, find('frame-title'))).toBe('frame-1');
       expect(editingNodeId(container, find('toolbar'))).toBeNull();
       expect(editingNodeId(container, find('panel-caret'))).toBe('note-2');
       expect(editingNodeId(container, find('panel-button'))).toBeNull();

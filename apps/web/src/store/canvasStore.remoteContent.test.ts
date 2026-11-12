@@ -28,7 +28,10 @@ vi.mock('@/components/Common/Toast', () => ({
 
 import { nodeRevisionOf } from '@huabu/shared/canvas-engine';
 
+import { toast } from '@/components/Common/Toast';
+
 import { canvasHistoryManager } from './canvasHistoryManager';
+import { useCanvasPresenceStore } from './canvasPresence/canvasPresenceStore';
 import useCanvasStore, {
   adoptRemoteNodeContent,
   hasUnsavedCanvasEdits,
@@ -108,6 +111,9 @@ beforeEach(() => {
   );
   api.preprocessNode.mockResolvedValue({ success: true });
   api.postCanvasEvents.mockResolvedValue({ success: true });
+  // The content queue outlives a test; a fetch it still owes finds nothing.
+  api.getNodeContent.mockReset();
+  api.getNodeContent.mockResolvedValue(null);
 });
 
 afterEach(() => {
@@ -216,5 +222,75 @@ describe('content another page saved, in the store', () => {
       content: 'Typed on this page',
       label: `Label ${X}`,
     });
+  });
+});
+
+describe('renaming a node another page is editing', () => {
+  const editedBy = (editingNodeIds: string[]) =>
+    useCanvasPresenceStore.getState().applyEvent({
+      op: 'update',
+      page: {
+        pageId: 'page-a',
+        colorIndex: 0,
+        label: 'Chrome · Mac',
+        pointer: null,
+        selectedNodeIds: [],
+        draggingNodeIds: [],
+        editingNodeIds,
+      },
+    });
+
+  beforeEach(() => {
+    useCanvasPresenceStore.setState({
+      pages: {},
+      pointers: {},
+      localEditingNodeId: null,
+    });
+  });
+
+  it('is refused with a hint, from whichever surface asks, and allowed again once that page finishes', async () => {
+    editedBy([X]);
+
+    await expect(state().tryRename('node', X, 'Renamed here')).resolves.toBe(
+      false,
+    );
+    expect(node(X).data.label).toBe(`Label ${X}`);
+    expect(api.putNodeContent).not.toHaveBeenCalled();
+    expect(toast).toHaveBeenCalledExactlyOnceWith(
+      expect.stringContaining('Chrome · Mac'),
+      { tone: 'info' },
+    );
+
+    // A node nobody else is editing is renamed as before.
+    await expect(state().tryRename('node', Y, 'Renamed Y')).resolves.toBe(true);
+    expect(node(Y).data.label).toBe('Renamed Y');
+
+    editedBy([]);
+    await expect(state().tryRename('node', X, 'Renamed here')).resolves.toBe(
+      true,
+    );
+    expect(node(X).data.label).toBe('Renamed here');
+  });
+
+  it('leaves moving and recolouring the node alone', async () => {
+    editedBy([X]);
+
+    state().beginGesture('SET_NODE_GEOMETRY');
+    state().setNodeGeometry([{ nodeId: X, position: { x: 250, y: 40 } }]);
+    state().executeCommands([
+      {
+        type: 'MERGE_NODE_DATA',
+        patches: [
+          {
+            nodeId: X as `node-${string}`,
+            patch: { style: { accent: 'red' } },
+          },
+        ],
+      },
+    ]);
+
+    expect(node(X).position).toEqual({ x: 250, y: 40 });
+    expect(node(X).data.style).toEqual({ accent: 'red' });
+    expect(toast).not.toHaveBeenCalled();
   });
 });

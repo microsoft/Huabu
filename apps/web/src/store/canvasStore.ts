@@ -117,6 +117,7 @@ import {
 } from '@/utils/spaceHierarchy';
 
 import { canvasHistoryManager } from './canvasHistoryManager';
+import { canStartEditing } from './canvasPresence/editLock';
 import { useIdentityStore } from './identityStore';
 import { useWorkspaceStore } from './workspaceStore';
 import {
@@ -3953,6 +3954,9 @@ const useCanvasStore = create<RFState>()(
           : selectCanWriteCanvas(get()))
       )
         return false;
+      // One editor at a time: another page is editing this node's body or
+      // title. Checked here so every rename surface is covered.
+      if (kind === 'node' && !canStartEditing(id)) return false;
       const trimmed = nextName.trim();
       if (!trimmed) return false;
 
