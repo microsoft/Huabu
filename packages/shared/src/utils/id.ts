@@ -24,16 +24,6 @@ function bytesToUuidV4(bytes: Uint8Array): string {
   )}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
-function pseudoUuidV4(): string {
-  // Fallback when crypto is not available (not cryptographically secure).
-  // Generates a UUID-shaped string to preserve the {type}-{uuid} contract.
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
-    const r = (Math.random() * 16) | 0;
-    const v = c === 'x' ? r : (r & 0x3) | 0x8;
-    return v.toString(16);
-  });
-}
-
 export function createUuid(): string {
   const crypto = getCrypto();
 
@@ -47,7 +37,9 @@ export function createUuid(): string {
     return bytesToUuidV4(bytes);
   }
 
-  return pseudoUuidV4();
+  // Every supported runtime (Node, browsers, workers) exposes Web Crypto.
+  // Ids name Spaces and nodes, so never fall back to a predictable source.
+  throw new Error('createUuid(): Web Crypto is not available');
 }
 
 export type PrefixedId<TType extends string = string> = `${TType}-${string}`;
