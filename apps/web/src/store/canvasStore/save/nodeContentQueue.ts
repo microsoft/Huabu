@@ -311,7 +311,6 @@ export function createNodeContentQueue(opts: {
   delayMs: number;
   getState: () => NodeContentQueueState;
   waitForCreation?: (canvasId: string, nodeId: string) => Promise<void>;
-  retryStructure?: () => Promise<void>;
   onRestoredContentPersisted?: (canvasId: string, nodeId: string) => void;
   /** A node's content save was acknowledged and nothing more is pending for it. */
   onContentPersisted?: (canvasId: string, nodeId: string) => void;
@@ -991,12 +990,9 @@ export function createNodeContentQueue(opts: {
               if (generations.get(nodeId) !== generation) return;
               // Allow a later failure to re-alert, then re-attempt the write.
               saveErrorToasted.delete(nodeId);
-              if (restores.get(nodeId)?.canvasId === canvasId) {
-                if (opts.getState().canvasId === canvasId) {
-                  void opts.retryStructure?.().catch(() => undefined);
-                }
-                return;
-              }
+              // A body held for a restore is saved once the restoring batch
+              // is answered; the send queue retries that batch on its own.
+              if (restores.get(nodeId)?.canvasId === canvasId) return;
               void serializedFlush(canvasId, nodeId, 'user').catch(
                 () => undefined,
               );
