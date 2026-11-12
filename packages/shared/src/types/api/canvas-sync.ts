@@ -29,7 +29,10 @@
 
 import { z } from 'zod';
 
+import { isSetSiblingOrderEvent } from '../../canvas-engine/siblingOrder.js';
+
 import type { CanvasChangeRecord } from '../../canvas-engine/change.js';
+import type { SetSiblingOrderEvent } from '../../canvas-engine/siblingOrder.js';
 
 export const canvasSyncPendingEffectsSchema = z.object({
   /** Final post-execution snapshots of nodes that were created or edited. */
@@ -59,6 +62,13 @@ export const canvasSyncEventSchema = z.discriminatedUnion('type', [
       /** Structural deltas between prestate and poststate, in apply order. */
       deltas: z.array(z.unknown()),
       pendingEffects: canvasSyncPendingEffectsSchema,
+      /**
+       * Sibling paint order of every parent the batch changed, replayed
+       * after `deltas`. Absent when no order changed.
+       */
+      orderEvents: z
+        .array(z.custom<SetSiblingOrderEvent>(isSetSiblingOrderEvent))
+        .optional(),
       /**
        * ACP chat thread that initiated this batch, when known. Lets the
        * client attach `changes` to the right conversation's review card.

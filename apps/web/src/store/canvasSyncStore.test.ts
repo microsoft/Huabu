@@ -102,4 +102,61 @@ describe('canvasSyncStore stream recovery', () => {
       resetHistory: true,
     });
   });
+
+  it('passes order events to the store and reloads when they cannot be installed', async () => {
+    const orderEvents = [
+      {
+        type: 'SET_SIBLING_ORDER',
+        parentId: null,
+        before: ['a', 'b'],
+        after: ['b', 'a'],
+        orderVersion: 2,
+      },
+    ];
+    const update = {
+      fromVersion: 1,
+      toVersion: 2,
+      deltas: [],
+      pendingEffects: {
+        mutatedNodes: [],
+        deletedNodeIds: [],
+        contentEditedNodeIds: [],
+        deferredFitFrameIds: [],
+      },
+      orderEvents,
+    };
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(
+          encoder.encode(
+            `event: snapshot\ndata: {"version":1}\n\nevent: update\ndata: ${JSON.stringify(update)}\n\n`,
+          ),
+        );
+      },
+    });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(stream)));
+    mocks.canvasState.applyDeltasFromAgent.mockClear();
+
+    useCanvasSyncStore.getState().connect('canvas-1');
+    await vi.advanceTimersByTimeAsync(100);
+
+    expect(mocks.canvasState.applyDeltasFromAgent).toHaveBeenCalledOnce();
+    const call = mocks.canvasState.applyDeltasFromAgent.mock
+      .calls[0] as unknown as [
+      unknown[],
+      number,
+      unknown,
+      boolean | undefined,
+      { events: unknown; onDiverged: () => void },
+    ];
+    expect(call[0]).toEqual([]);
+    expect(call[1]).toBe(2);
+    expect(call[4].events).toEqual(orderEvents);
+    expect(mocks.canvasState.loadCanvas).not.toHaveBeenCalled();
+
+    call[4].onDiverged();
+    expect(mocks.canvasState.loadCanvas).toHaveBeenCalledWith('canvas-1', {
+      resetHistory: true,
+    });
+  });
 });

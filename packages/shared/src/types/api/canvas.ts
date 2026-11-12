@@ -14,6 +14,7 @@ import { z } from 'zod';
 import { canvasEditableNodeSchema } from './agent-node.js';
 
 import type { videoCoverPatchSchema } from './preprocessing.js';
+import type { SetSiblingOrderEvent } from '../../canvas-engine/siblingOrder.js';
 
 export const recentCanvasConversationParamsSchema = z.object({
   canvasId: z.string().regex(/^[a-zA-Z0-9_-]+$/, 'Invalid canvas ID'),
@@ -455,6 +456,12 @@ export interface PostCanvasExecuteResponse {
   commands: unknown[];
   /** Subset of engine-pending effects that clients should drain. */
   pendingEffects: CanvasExecutePendingEffects;
+  /**
+   * Sibling paint order of every parent the batch changed, to replay after
+   * `deltas`. Absent when no order changed; ignoring it keeps entity-only
+   * replay.
+   */
+  orderEvents?: SetSiblingOrderEvent[];
   /**
    * Optional run id; echoed from the request when supplied. On a replayed
    * response it is the run id of the original request.

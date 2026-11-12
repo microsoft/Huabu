@@ -37,13 +37,15 @@ executeOnServer  ── per-canvas mutex ──► persist .md + space.json
   │                                      (optional) computeChanges → sidecar
   ▼
 publishCanvasUpdate(canvasId, { type:'update', fromVersion, toVersion,
-                                deltas, pendingEffects, threadId?, changes? })
+                                deltas, pendingEffects, orderEvents?,
+                                threadId?, changes? })
   │  in-memory pub/sub (listenersByCanvas)
   ▼
 GET /:canvasId/sync/stream  (SSE, one per tab)
   │
   ▼
 canvasSyncStore  ── fromVersion === local? ──► applyDeltasFromAgent (dirty-filtered)
+  │                │                            └ then orderEvents → sibling paint order
   │                └ gap (toVersion > local) ─► loadCanvas  (skipped if local dirty)
   ▼
 canvasStore state  +  acpThreadChangesStore.replaceFromBroadcast(threadId, changes)
@@ -58,7 +60,7 @@ schema + `z.infer`, web imports as `import type` only):
 | Event        | When                                                                         | Payload                                                                                                                                        |
 | ------------ | ---------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
 | `snapshot`   | once, on SSE connect                                                         | `{ version }` — lets a tab that connected _after_ a mutation detect the gap and `loadCanvas`.                                                  |
-| `update`     | after every persisted batch                                                  | `{ fromVersion, toVersion, deltas, pendingEffects, threadId?, changes?, agentNodeProjection? }`                                                |
+| `update`     | after every persisted batch                                                  | `{ fromVersion, toVersion, deltas, pendingEffects, orderEvents?, threadId?, changes?, agentNodeProjection? }`                                  |
 | `invalidate` | ordinary topology/content save, node-sidecar deletion or Space-tree deletion | `{ nodeIds? }` — refresh observed read models for those nodes, or every observed owner in that Space when omitted; not editable Canvas deltas. |
 
 `canvasSyncSubscription` manages the per-Space Canvas transport, preserving the 45-second inactivity timeout, heartbeat handling, rate-limit-aware 500ms-to-10s reconnect backoff, and version baselines for late subscribers. The final subscriber aborts the transport. Conversation views instead share one dedicated owner-state subscription per conversation address per page: the server listens to this same Canvas publisher, reads canonical ownership, and pushes complete versioned metadata snapshots. The browser applies those snapshots without querying ownership for each change or loading the source Canvas document. Reconnect, focus and visibility restoration obtain a fresh baseline. Canvas rendering ignores `invalidate`: ordinary browser saves do not become full-document replacement or bypass dirty-edit protection. See [conversation observation](./preview-workspace.md#3-opening-and-target-conversion).
@@ -68,7 +70,18 @@ schema + `z.infer`, web imports as `import type` only):
   shapes live in the canvas-engine module, not the API layer). The client casts.
 - `threadId` + `changes` are present **only** for thread-attributed batches; they
   feed the originating conversation's review card.
+- `orderEvents` is present only when an `executeOnServer` batch changed a parent's direct-child list; see [Sibling paint order](#sibling-paint-order).
 - `agentNodeProjection` identifies trusted server binding/lifecycle/association effects for browser undo handling; it is output metadata, not client authorization to submit those writes.
+
+## Sibling paint order
+
+Entity `deltas` are keyed by id and cannot express stacking order: a pure `REORDER_NODES` batch commits with `deltas: []`. `executeOnServer` therefore calls `diffSiblingOrderEvents(prestateNodes, finalNodes, toVersion)` for every committed batch and attaches the result as `orderEvents` (`SetSiblingOrderEvent[]`, [contract](./canvas-command-architecture.md#sibling-paint-order-and-isolated-replay)) to the `update` event, to `publishCanvasExecution`, and to the `POST /execute` response. Each event lists one changed parent's complete direct-child ids before and after the commit, so a batch that creates, deletes or reparents nodes carries one too. The field is omitted when no list changed, and when the strict forest check rejects a legacy topology (the batch still commits and broadcasts entity-only). The schema validates each entry with `isSetSiblingOrderEvent`. A consumer that ignores the field behaves as it did before the field existed.
+
+`applyDeltasFromAgent` takes the events as an optional argument. After the entity deltas are replayed and tree-normalized it calls `replaySiblingOrder` ([siblingOrderReplay.ts](../../apps/web/src/store/canvasStore/siblingOrderReplay.ts)), which runs `applySiblingOrderEvents` against the pre-batch local nodes — minus local optimistic copies of nodes the batch inserts — and installs the returned forest. An order-only batch no longer returns early; it takes one undo snapshot like any other editable batch.
+
+If the events do not fit the local forest (`SiblingOrderReplayError`: stale `before` list, membership mismatch, invalid local topology) the store keeps the entity-only result and still adopts `toVersion`; nothing is partially reordered. It then compares each listed parent's local child order with the event's `after` list. Only when one differs, no delta row was withheld by dirty-node protection, and `hasUnsavedCanvasEdits()` is false does it call the caller's `onDiverged`: `canvasSyncStore` runs the same `loadCanvas(…, { resetHistory: true })` as a version gap, and the Question-creation HTTP path in `executeCommands` reloads the Space. With unsaved local edits the local order stays, and the next whole-Space save decides it, as for any other local structural edit.
+
+Limits: `applyDeltasOnServer` batches (review revert, Agent Node projections, title updates) send no `orderEvents`, so a reverted deletion is still appended by entity replay. The delta log and Review records stay entity-only; the stored response of a request with an `operationId` does include `orderEvents`, so a replay returns what the first call returned. Each event carries two complete id lists, so its size grows with the changed parent's child count. The behaviour is covered by server and store tests, not by a two-browser run.
 
 ## One write path, one broadcast
 
@@ -214,7 +227,7 @@ The saving dialog explicitly carries `role="dialog"` for the shared Canvas inter
 
 ## Undo interaction
 
-Editable broadcast batches take **one** undo snapshot (via `applyDeltasFromAgent`). Trusted Agent Node projection batches and FSM-only replacements do not create ordinary undo entries. The server's first-submitted-content effect rebases matching empty Question content in existing snapshots, so undoing an earlier drag cannot erase that submitted intent.
+Editable broadcast batches take **one** undo snapshot (via `applyDeltasFromAgent`), including a batch that only changes sibling paint order. Trusted Agent Node projection batches and FSM-only replacements do not create ordinary undo entries. The server's first-submitted-content effect rebases matching empty Question content in existing snapshots, so undoing an earlier drag cannot erase that submitted intent.
 
 **Restore persistence is ordered, not delay-dependent.** Before undo/redo publishes reappearing nodes, the existing `nodeContentQueue` holds their sidecar writes behind generation tokens. Deleted-node content bookkeeping is forgotten immediately, while the preprocessing queue remembers interrupted work for history resurrection. Already-issued content and preprocessing requests settle before the history manager sends DELETE; DELETE promises are tracked to completion rather than aborted, because aborting fetch does not cancel an admitted server mutation. `saveCanvas` waits for outstanding deletes, reads the latest topology, and releases only tokens captured by that successfully acknowledged structure PUT. A later undo/redo invalidates earlier tokens, so neither an old acknowledgement nor a queued body resurrects a node removed again. Ordinary content edits retain their independent debounce and revision baseline; only an acknowledged resurrection starts with the absent-sidecar revision, still subject to the existing content CAS.
 
@@ -269,6 +282,6 @@ The server emits a heartbeat comment every 15 seconds. Canvas Sync applies a 45-
 | [store/canvasSyncSubscription.ts](../../apps/web/src/store/canvasSyncSubscription.ts)                                                                                                                                                                            | Reference-counted source-Space transports, retry and late-subscriber baseline.                    |
 | [store/remoteConversationOwner.ts](../../apps/web/src/store/remoteConversationOwner.ts)                                                                                                                                                                          | Shared local/remote snapshot observation, stale-result fencing and recovery calibration.          |
 | [store/acpThreadChangesStore.ts](../../apps/web/src/store/acpThreadChangesStore.ts)                                                                                                                                                                              | Per-thread change records + staleness (`isChangeStale`), Keep / Revert.                           |
-| [store/canvasStore.ts](../../apps/web/src/store/canvasStore.ts)                                                                                                                                                                                                  | `applyDeltasFromAgent` (dirty filter), `pendingContentNodeIds`.                                   |
+| [store/canvasStore.ts](../../apps/web/src/store/canvasStore.ts)                                                                                                                                                                                                  | `applyDeltasFromAgent` (dirty filter, order replay), `pendingContentNodeIds`.                     |
 | [ChangeReviewCard.tsx](../../apps/web/src/components/Panels/ChatPanel/ChangeReviewCard.tsx)                                                                                                                                                                      | Above-input Keep / Revert / preview card.                                                         |
 | [pages/CanvasPage/CanvasPage.tsx](../../apps/web/src/pages/CanvasPage/CanvasPage.tsx)                                                                                                                                                                            | Connects / disconnects the sync stream on canvas load / switch.                                   |

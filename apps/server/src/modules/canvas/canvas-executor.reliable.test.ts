@@ -21,7 +21,7 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { encodeBasis } from '@huabu/shared';
+import { canvasSyncEventSchema, encodeBasis } from '@huabu/shared';
 import { nodeRevisionOf } from '@huabu/shared/canvas-engine';
 
 import {
@@ -1033,5 +1033,77 @@ describe('Review records', () => {
       originator: { source: 'agent', threadId: THREAD },
     });
     expect(await storedChanges()).toEqual([]);
+  });
+});
+
+describe('sibling order in the update notification', () => {
+  const orderEventsOf = (event: CanvasSyncEvent | undefined) =>
+    event?.type === 'update' ? event.data.orderEvents : undefined;
+
+  it('publishes the new root order of a pure reorder', async () => {
+    seed();
+    const request = requestOf();
+    const output = await run(
+      cmds({ type: 'REORDER_NODES', nodeIds: ['a'], to: 'top' }),
+      { request },
+    );
+
+    expect(output.results[0]?.applied).toBe(true);
+    expect(output.deltas).toEqual([]);
+    expect(output.toVersion).toBe(2);
+    const expected = [
+      {
+        type: 'SET_SIBLING_ORDER',
+        parentId: null,
+        before: ['f1', 'f2', 'a', 'b', 'c'],
+        after: ['f1', 'f2', 'b', 'c', 'a'],
+        orderVersion: 2,
+      },
+    ];
+    expect(output.orderEvents).toEqual(expected);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      type: 'update',
+      data: { fromVersion: 1, toVersion: 2, deltas: [] },
+    });
+    expect(orderEventsOf(events[0])).toEqual(expected);
+    expect(canvasSyncEventSchema.safeParse(events[0]).success).toBe(true);
+    expect((await nodesNow()).map((node) => node.id)).toEqual(
+      expected[0].after,
+    );
+
+    // The stored response replays the same order; the delta log does not carry it.
+    const replayed = await run(
+      cmds({ type: 'REORDER_NODES', nodeIds: ['a'], to: 'top' }),
+      { request },
+    );
+    expect(replayed.orderEvents).toEqual(expected);
+    expect(events).toHaveLength(1);
+    expect(deltaRows()[0]).not.toHaveProperty('orderEvents');
+  });
+
+  it('lists a parent whose membership changed and omits the field otherwise', async () => {
+    seed();
+    const created = await run(cmds(createNote('New', 'n1')));
+    expect(created.orderEvents).toEqual([
+      {
+        type: 'SET_SIBLING_ORDER',
+        parentId: null,
+        before: ['f1', 'f2', 'a', 'b', 'c'],
+        after: ['f1', 'f2', 'a', 'b', 'c', 'n1'],
+        orderVersion: 2,
+      },
+    ]);
+    expect(orderEventsOf(events[0])).toEqual(created.orderEvents);
+
+    const moved = await run(
+      cmds({
+        type: 'SET_NODE_GEOMETRY',
+        items: [{ nodeId: 'a', position: { x: 50, y: 50 } }],
+      }),
+    );
+    expect(moved.toVersion).toBe(3);
+    expect(moved).not.toHaveProperty('orderEvents');
+    expect(events[1]?.data).not.toHaveProperty('orderEvents');
   });
 });

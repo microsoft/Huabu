@@ -1817,6 +1817,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
           contentEditedNodeIds: out.pendingEffects.contentEditedNodeIds,
           deferredFitFrameIds: out.pendingEffects.deferredFitFrameIds,
         },
+        ...(out.orderEvents ? { orderEvents: out.orderEvents } : {}),
         ...(effectiveRunId ? { runId: effectiveRunId } : {}),
         ...(out.operationId ? { operationId: out.operationId } : {}),
         ...(out.basis ? { basis: out.basis } : {}),

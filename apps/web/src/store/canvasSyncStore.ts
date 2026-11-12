@@ -168,6 +168,16 @@ export const useCanvasSyncStore = create<CanvasSyncState>((set, get) => ({
 
       if (event.type !== 'update') return;
       const { fromVersion, toVersion, deltas, pendingEffects } = event.data;
+      const reload = (): void => {
+        void canvasStore
+          .loadCanvas(canvasId, { resetHistory: true })
+          .then(() => {
+            const current = useCanvasStore.getState();
+            if (current.canvasId === canvasId) {
+              invalidateUnclaimedAgentHistories(canvasId, current.nodes);
+            }
+          });
+      };
       let skippedNodeIds: string[] = [];
       if (fromVersion === canvasStore.version) {
         skippedNodeIds = canvasStore.applyDeltasFromAgent(
@@ -175,22 +185,16 @@ export const useCanvasSyncStore = create<CanvasSyncState>((set, get) => ({
           toVersion,
           pendingEffects as SyncPendingEffects,
           event.data.agentNodeProjection,
+          // Paint order the deltas cannot express; an order that cannot be
+          // installed heals through the same reload as a version gap.
+          { events: event.data.orderEvents, onDiverged: reload },
         );
       } else if (toVersion > canvasStore.version) {
         // Gap (missed an earlier update). A blind `loadCanvas` would
         // clobber un-persisted local edits, so skip it while the user
         // is mid-editing and let autosave's 409 path arbitrate (C3).
         // Incremental gap-heal (delta-log backfill) is deferred to P2.
-        if (canvasStore.pendingContentNodeIds().length === 0) {
-          void canvasStore
-            .loadCanvas(canvasId, { resetHistory: true })
-            .then(() => {
-              const current = useCanvasStore.getState();
-              if (current.canvasId === canvasId) {
-                invalidateUnclaimedAgentHistories(canvasId, current.nodes);
-              }
-            });
-        }
+        if (canvasStore.pendingContentNodeIds().length === 0) reload();
       }
       // else: stale/older update — ignore.
 

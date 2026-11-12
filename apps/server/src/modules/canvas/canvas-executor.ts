@@ -48,6 +48,8 @@ import {
   applySharedPostEffectsFromWriteResult,
   applyDeltas,
   diffCanvasState,
+  diffSiblingOrderEvents,
+  SiblingOrderReplayError,
   executeCanvasCommands,
   extractCanvasChanges,
   nodeRevision,
@@ -59,6 +61,7 @@ import {
   type CanvasEdge,
   type CanvasNode,
   type Delta,
+  type SetSiblingOrderEvent,
 } from '@huabu/shared/canvas-engine';
 
 import {
@@ -110,6 +113,24 @@ import {
 const EMPTY_CANVAS_IDS: ReadonlySet<string> = new Set<string>();
 
 const log = getLogger('canvas.executor');
+
+/**
+ * Sibling order events for a commit's notification. The strict forest check
+ * rejects legacy topology that loads still repair; such a commit sends none
+ * and clients keep their entity-only replay.
+ */
+function siblingOrderEventsFor(
+  prestateNodes: readonly CanvasNode[],
+  finalNodes: readonly CanvasNode[],
+  orderVersion: number,
+): SetSiblingOrderEvent[] {
+  try {
+    return diffSiblingOrderEvents(prestateNodes, finalNodes, orderVersion);
+  } catch (error) {
+    if (error instanceof SiblingOrderReplayError) return [];
+    throw error;
+  }
+}
 
 function insertedNodeIds(deltas: readonly Delta[]): Set<string> {
   return new Set(
@@ -715,6 +736,12 @@ export interface ExecuteOnServerOutput {
    */
   conflicts?: ExecuteConflict[];
   viewConflicts?: InteractiveViewConflict[];
+  /**
+   * Complete direct-child lists of every parent whose sibling paint order or
+   * membership this batch changed, stamped with `toVersion`. Entity `deltas`
+   * cannot express order; clients replay these after them.
+   */
+  orderEvents?: SetSiblingOrderEvent[];
   /** Read version of the state this call left behind (`issueBasis`). */
   basis?: string;
   /** The request id this response is stored under, when one was supplied. */
@@ -962,6 +989,7 @@ export function publishCanvasExecution(output: ExecuteOnServerOutput): void {
       toVersion: output.toVersion,
       deltas: output.deltas,
       pendingEffects: output.pendingEffects,
+      ...(output.orderEvents ? { orderEvents: output.orderEvents } : {}),
       ...(output.operationId ? { operationId: output.operationId } : {}),
     },
   });
@@ -1473,12 +1501,8 @@ async function executePreparedOnServerAlreadyLocked(
   // leaving the agent with `applied: true` while persisted topology
   // is unchanged.
   //
-  // We do NOT synthesise a delta — Phase A has no order-aware delta
-  // type, and cross-tab broadcast (M3) is not shipped yet. We just
-  // fall through to the persistence branch so topology and the
-  // delta-log version both reflect that something happened. Catch-up
-  // clients on M3 will see the version bump and need to refetch the
-  // full canvas; that's an acceptable Phase-A trade-off.
+  // The delta log stays entity-only; the order itself travels to clients
+  // as `orderEvents` on the response and the sync notification below.
   const orderChanged =
     prestateNodes.length !== finalNodes.length ||
     prestateEdges.length !== finalEdges.length ||
@@ -1506,6 +1530,11 @@ async function executePreparedOnServerAlreadyLocked(
   }
 
   const toVersion = fromVersion + 1;
+  const orderEvents = siblingOrderEventsFor(
+    prestateNodes,
+    finalNodes,
+    toVersion,
+  );
 
   // Persist .md sidecars first so topology never references a markdown
   // file that does not exist on disk. The synchronous commit section is
@@ -1601,6 +1630,7 @@ async function executePreparedOnServerAlreadyLocked(
       deferredFitFrameIds: pendingEffects.deferredFitFrameIds,
     },
     ...(changes ? { changes } : {}),
+    ...(orderEvents.length > 0 ? { orderEvents } : {}),
     ...envelope(toVersion),
   });
 
@@ -1676,6 +1706,7 @@ async function executePreparedOnServerAlreadyLocked(
           contentEditedNodeIds: pendingEffects.contentEditedNodeIds,
           deferredFitFrameIds: pendingEffects.deferredFitFrameIds,
         },
+        ...(orderEvents.length > 0 ? { orderEvents } : {}),
         ...(originator.threadId ? { threadId: originator.threadId } : {}),
         ...(broadcastChanges ? { changes: broadcastChanges } : {}),
         ...(request ? { operationId: request.key.operationId } : {}),

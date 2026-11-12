@@ -58,6 +58,7 @@ import {
   type Delta,
   type ExecutorOptions,
   type NestableNode,
+  type SetSiblingOrderEvent,
 } from '@huabu/shared/canvas-engine';
 
 import { runWebPostEffects } from '@/handler/canvasCommand/postEffects.web';
@@ -142,6 +143,7 @@ import {
 } from './canvasStore/save/structureSaveReconciliation';
 import { createStructureScheduler } from './canvasStore/save/structureScheduler';
 import { createUnloadFlush } from './canvasStore/save/unloadFlush';
+import { replaySiblingOrder } from './canvasStore/siblingOrderReplay';
 import { createResizePreviewController } from './canvasStore/slices/resizePreview';
 import { useChatStore } from './chatStore';
 import { useGesturePreviewStore } from './gesturePreviewStore';
@@ -930,6 +932,16 @@ type RFState = {
       deferredFitFrameIds: string[];
     },
     agentNodeProjection?: boolean,
+    /**
+     * The batch's sibling paint order, installed after its deltas.
+     * `onDiverged` runs when it could not be installed, the local order is
+     * not the server's, and there is no unsaved local edit to protect; the
+     * entity changes and the version are applied either way.
+     */
+    order?: {
+      events?: readonly SetSiblingOrderEvent[];
+      onDiverged?: () => void;
+    },
   ) => string[];
   /**
    * Ids of nodes with un-persisted local content edits (pending debounced
@@ -1920,6 +1932,14 @@ const useCanvasStore = create<RFState>()(
                 response.pendingEffects as Parameters<
                   typeof current.applyDeltasFromAgent
                 >[2],
+                false,
+                {
+                  events: response.orderEvents,
+                  onDiverged: () =>
+                    void get().loadCanvas(response.canvasId, {
+                      resetHistory: true,
+                    }),
+                },
               );
             }
           });
@@ -2018,7 +2038,9 @@ const useCanvasStore = create<RFState>()(
       toVersion,
       pendingEffects,
       agentNodeProjection = false,
+      order,
     ) => {
+      const orderEvents = order?.events ?? [];
       const reconcileIncomingVersion = (): void => {
         const current = get();
         const reconciled = reconcileCanvasVersion(
@@ -2213,7 +2235,7 @@ const useCanvasStore = create<RFState>()(
         nodeContentQueue.seedBaselines(rebasedRemoteNodes);
       }
 
-      if (safeDeltas.length === 0) {
+      if (safeDeltas.length === 0 && orderEvents.length === 0) {
         // Nothing to apply locally (empty batch, or every row protected).
         // Still reconcile the version so the next local edit's autosave
         // doesn't 409 against our stale view of server state.
@@ -2235,6 +2257,7 @@ const useCanvasStore = create<RFState>()(
         void useWorkspaceStore
           .getState()
           .refreshSpaceTitles(insertedSpaceTargets);
+      let undoSnapshotTaken = false;
       if (agentNodeProjection) {
         canvasHistoryManager.rebaseAgentInitialContent(safeDeltas);
       } else if (
@@ -2268,6 +2291,7 @@ const useCanvasStore = create<RFState>()(
         })
       ) {
         canvasHistoryManager.takeSnapshot(prevNodes, prevEdges);
+        undoSnapshotTaken = true;
       }
 
       // Replay the structural diff. The shared helper tolerates
@@ -2290,7 +2314,37 @@ const useCanvasStore = create<RFState>()(
       // a child ahead of its parent — React Flow then throws "Parent node not
       // found". This delta-replay path bypasses the server executor entirely,
       // so we normalize here at the client state-producer boundary.
-      const orderedNodes = normalizeTreeOrder(applied.nodes as NestableNode[]);
+      const entityOrderedNodes = normalizeTreeOrder(
+        applied.nodes as NestableNode[],
+      );
+
+      // Entity deltas cannot express sibling paint order, so the server's
+      // order is installed over their result. A failed replay keeps that
+      // result unchanged.
+      const orderReplay =
+        orderEvents.length > 0
+          ? replaySiblingOrder(
+              prevNodes as NestableNode[],
+              entityOrderedNodes,
+              new Set(
+                safeDeltas.flatMap((delta) =>
+                  delta.type === 'INSERT_NODE' ? [delta.node.id] : [],
+                ),
+              ),
+              orderEvents,
+            )
+          : { nodes: entityOrderedNodes, diverged: false };
+      const orderedNodes = orderReplay.nodes;
+      if (
+        !agentNodeProjection &&
+        !undoSnapshotTaken &&
+        orderedNodes.some(
+          (node, index) => node.id !== entityOrderedNodes[index]?.id,
+        )
+      ) {
+        // An order-only change is undoable like any other applied batch.
+        canvasHistoryManager.takeSnapshot(prevNodes, prevEdges);
+      }
 
       get()._setStateNoAutosave({
         nodes: orderedNodes as Node[],
@@ -2345,6 +2399,16 @@ const useCanvasStore = create<RFState>()(
         validatePreviewNodes: (liveNodeIds) =>
           usePreviewWorkspaceStore.getState().validate(liveNodeIds),
       });
+
+      // Rows withheld for local-first reasons and unsaved edits make the
+      // local order differ on purpose; the next save settles it.
+      if (
+        orderReplay.diverged &&
+        skipped.size === 0 &&
+        !hasUnsavedCanvasEdits()
+      ) {
+        order?.onDiverged?.();
+      }
 
       return skippedNodeIds;
     },
