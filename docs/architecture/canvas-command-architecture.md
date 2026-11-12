@@ -253,6 +253,29 @@ See `packages/shared/src/types/canvas/command.ts` for the full discriminated uni
 | Locking          | `SET_NODE_LOCKED`                                       |
 | Edge graph       | `CONNECT_NODES`, `DISCONNECT_EDGES`, `SET_EDGE_STYLE`   |
 | Algorithms       | `ALIGN_NODES`, `DISTRIBUTE_NODES`                       |
+| Derived (UI)     | `APPLY_MEASURED_HEIGHT`, `APPLY_MEASURED_SIZE`          |
+| History (UI)     | `RESTORE_NODES`                                         |
+
+`APPLY_MEASURED_SIZE` records the box a renderer measured for a node whose
+size only a renderer knows (`text`, `question`, `spacePreview`) and lets the
+end-of-batch pass lay the affected Frames out around it; an item whose
+`measuredFor` key no longer matches the node is ignored. `RESTORE_NODES` puts
+nodes and edges back exactly as a page's undo history holds them. A node not
+named in `replace` is inserted and must not exist (`duplicate-id`); one named
+there must exist (`not-found`) and is replaced in place, keeping the data keys
+listed in `keepDataKeys`. Every restored node's parent chain must exist after
+the command and consist of containers (`invalid-parent`, `cycle`); a node
+returns under a locked container only as the non-draggable member it was; an
+Agent Node cannot be inserted and never changes type (`invalid-target`). The
+command is all-or-nothing, fits no Frame and reroutes no edge. Both are
+UI-only: they are absent from the Agent schema and refused for an `agent`
+batch (`invalid-scope`).
+
+`MERGE_NODE_DATA` patches accept `unset`, a list of `data` keys (or
+`style.<leaf>`) to remove after the merge. JSON cannot carry a key whose value
+is `undefined`, so a page states the removal there; it is admitted like a write
+of the same key and refused for an `agent` batch, which clears with `null`
+where a field allows it.
 
 Geometry commands preserve each node type's sizing model. `text` and
 `question` nodes are always content-height nodes: `CREATE_NODES`,
@@ -332,7 +355,7 @@ Agent and web now converge on the same `CanvasCommand` pipeline. The server neve
 
 ### Agent Command Schema
 
-The agent exposes a single `space_commands` tool (`apps/server/src/modules/agent/tools/definitions.ts`). Its parameter schema is generated from the canonical Zod contracts in `packages/shared/src/types/api/space-operations.ts` and covers the 13 Agent-allowed commands (excluding `SET_NODE_LOCKED`, `SET_NODE_SELECTION`, `CHANGE_NODE_TYPE`, and internal `APPLY_MEASURED_HEIGHT`).
+The agent exposes a single `space_commands` tool (`apps/server/src/modules/agent/tools/definitions.ts`). Its parameter schema is generated from the canonical Zod contracts in `packages/shared/src/types/api/space-operations.ts` and covers the 13 Agent-allowed commands (excluding `SET_NODE_LOCKED`, `SET_NODE_SELECTION`, `CHANGE_NODE_TYPE`, and the page-only `APPLY_MEASURED_HEIGHT`, `APPLY_MEASURED_SIZE` and `RESTORE_NODES`).
 
 Built-in tool calls and direct RFS execution both pass their validated wire commands through `prepareAgentCanvasCommands()`. This thin preparation step adds server-owned `origin` and `labelSource` metadata and, for built-in turns, injects content revisions from the turn read-set; it does not implement command behavior.
 

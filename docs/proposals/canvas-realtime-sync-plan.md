@@ -8,7 +8,7 @@ Last updated: 2026-11-12
 > - **Superseded:** §5 (the operation protocol with sessions and guards; §5.3 excepted), §7.1 (common storage boundary) and §7.3 (enabling a Space; there is no per-Space switch).
 > - **Still standing as browser-side requirements:** §2.2 (browser and desktop write inventory), §5.3 (client state and recovery) and §6 (conflict decisions, including undo).
 >
-> **Status note (2026-11-12, browser side).** The browser now sends its structure edits through `execute` and applies updates per property; see [browser structure edits](../architecture/canvas-realtime-sync.md#browser-structure-edits), which also lists what still saves through the whole-Space PUT. Note body text between pages remains proposed.
+> **Status note (2026-11-12, browser side).** The browser now sends its structure edits through `execute` and applies updates per property; see [browser structure edits](../architecture/canvas-realtime-sync.md#browser-structure-edits), which also describes how the writers that used to end in the whole-Space PUT (undo of a deletion, renderer-measured Frame layout, the title, load-time migration) are sent; the browser no longer saves the whole Space. Note body text between pages remains proposed.
 >
 > The text below is kept as written and is not updated to match.
 
