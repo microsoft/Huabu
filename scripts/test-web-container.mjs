@@ -5,6 +5,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
+import { get as httpGet } from 'node:http';
 import { createServer } from 'node:net';
 import { setTimeout as delay } from 'node:timers/promises';
 
@@ -36,6 +37,30 @@ async function unusedPort() {
   const port = reservation.address().port;
   await new Promise((resolve) => reservation.close(resolve));
   return port;
+}
+
+// Node fetch normalizes Host to the URL authority; the core HTTP client lets
+// this local probe model the public Host forwarded by a reverse proxy.
+function get(url, headers, timeout = 5000) {
+  return new Promise((resolve, reject) => {
+    const request = httpGet(
+      url,
+      { headers, signal: AbortSignal.timeout(timeout) },
+      (response) => {
+        const chunks = [];
+        response.on('data', (chunk) => chunks.push(chunk));
+        response.on('error', reject);
+        response.on('end', () =>
+          resolve({
+            status: response.statusCode,
+            contentType: response.headers['content-type'] ?? '',
+            body: Buffer.concat(chunks).toString('utf8'),
+          }),
+        );
+      },
+    );
+    request.on('error', reject);
+  });
 }
 
 const user = docker([
@@ -79,10 +104,11 @@ try {
     let ready = false;
     for (let attempt = 0; attempt < 120; attempt++) {
       try {
-        const response = await fetch(`${origin}/api/deployment/readiness`, {
+        const response = await get(
+          `${origin}/api/deployment/readiness`,
           headers,
-          signal: AbortSignal.timeout(2000),
-        });
+          2000,
+        );
         if (response.status === 200) {
           ready = true;
           break;
@@ -97,21 +123,15 @@ try {
       await delay(500);
     }
     assert.ok(ready, 'Container did not become ready');
-    const page = await fetch(origin, {
-      headers,
-      signal: AbortSignal.timeout(5000),
-    });
+    const page = await get(origin, headers);
     assert.equal(page.status, 200);
-    const html = await page.text();
+    const html = page.body;
     assert.match(html, /<!doctype html|<html/i);
     const script = html.match(/<script[^>]+src="([^"]+)"/u)?.[1];
     assert.ok(script, 'The built SPA must reference its JavaScript');
-    const asset = await fetch(new URL(script, origin), {
-      headers,
-      signal: AbortSignal.timeout(5000),
-    });
+    const asset = await get(new URL(script, origin), headers);
     assert.equal(asset.status, 200);
-    assert.match(asset.headers.get('content-type'), /javascript/iu);
+    assert.match(asset.contentType, /javascript/iu);
     const ciphertext = docker([
       'exec',
       name,
