@@ -25,6 +25,11 @@ const workspaceState = vi.hoisted(() => ({ path: '' }));
 vi.mock('../workspace.js', () => ({
   getWorkspacePath: () => workspaceState.path,
   getWorkspaceKey: () => workspaceState.path,
+  // Writes hold a Workspace lease; this suite has one fixed Workspace.
+  acquireWorkspaceOperationLease: () => ({
+    workspaceKey: workspaceState.path,
+    release: () => {},
+  }),
 }));
 
 import * as canvasExecutor from './canvas-executor.js';

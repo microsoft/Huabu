@@ -8,6 +8,14 @@ vi.mock('./video-cover-decoder.js', () => ({ extractLocalVideoCover: decode }));
 vi.mock('../agent/conversation-title.service.js', () => ({
   conversationTitleService: {},
 }));
+// Node writes hold a Workspace lease; the pipeline under test has no Workspace.
+vi.mock('../workspace.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof Workspace>()),
+  acquireWorkspaceOperationLease: () => ({
+    workspaceKey: 'test-workspace',
+    release: () => {},
+  }),
+}));
 
 import { extractYoutubeVideoId } from './loaders/youtube-id.js';
 import { runPipeline } from './pipeline.js';
@@ -16,6 +24,7 @@ import { fetchYoutubeCover } from './video-cover.js';
 
 import type { PipelineDeps } from './pipeline.js';
 import type { NodeContent } from '../storage/index.js';
+import type * as Workspace from '../workspace.js';
 import type { PreprocessNodeRequest } from '@huabu/shared';
 
 const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xd9]);
