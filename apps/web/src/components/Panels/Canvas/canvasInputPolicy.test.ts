@@ -17,10 +17,46 @@ import {
   isNodeTarget,
   isPanelTarget,
   resolveCanvasToolShortcut,
+  resolveEffectiveCanvasTool,
   resolveNodeDraggable,
 } from './canvasInputPolicy';
 
 describe('canvas input policy', () => {
+  it.each(['select', 'pan', 'lasso'] as const)(
+    'projects saved %s without hidden Pan or automatic touch Lasso',
+    (mouseToolPreference) => {
+      const state = {
+        mouseToolPreference,
+        pendingNodeType: null,
+        explicitLassoActive: false,
+      };
+      expect(resolveEffectiveCanvasTool(state, false)).toBe(
+        mouseToolPreference,
+      );
+      expect(resolveEffectiveCanvasTool(state, true)).toBe('select');
+      expect(resolveEffectiveCanvasTool(state, false, true)).toBe('pan');
+      expect(resolveEffectiveCanvasTool(state, true, true)).toBe('select');
+      expect(
+        resolveEffectiveCanvasTool(
+          { ...state, explicitLassoActive: true },
+          true,
+        ),
+      ).toBe('lasso');
+      expect(
+        resolveEffectiveCanvasTool(
+          { ...state, pendingNodeType: 'note' },
+          false,
+          true,
+        ),
+      ).toBe('select');
+      expect(
+        resolveEffectiveCanvasTool(
+          { ...state, pendingNodeType: 'sketch', explicitLassoActive: true },
+          true,
+        ),
+      ).toBe('select');
+    },
+  );
   it.each(['data-ink-sigil-label', 'data-ink-sigil-hit-target'])(
     'reserves native input for the Sigil control %s',
     (attribute) => {

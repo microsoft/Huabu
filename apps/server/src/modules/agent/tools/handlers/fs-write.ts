@@ -32,6 +32,7 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 
 import { normalizeRel } from './fs-sandbox.js';
+import { callerAccess } from '../../../identity/personal-settings.js';
 import {
   space,
   SPACE_MEMORY_BLOB_NAME,
@@ -39,6 +40,7 @@ import {
   unavailableCapabilityMessage,
 } from '../../../storage/index.js';
 import { settingDir, userSkillsDir } from '../../../workspace/paths.js';
+import { getWorkspaceHandle } from '../../../workspace.js';
 import {
   resolveLongTermPath,
   resolveUserSkillPath,
@@ -72,6 +74,31 @@ export type FsWriteArgs = Static<typeof fsWriteParamsSchema> & {
 export async function handleFsWrite(args: FsWriteArgs): Promise<string> {
   const target = resolveTarget(args);
   if ('error' in target) return reject(target.path, target.error);
+
+  // A retained turn must still be allowed to change the resolved destination.
+  // Space memory needs write access there; Workspace memory and Skills steer
+  // every agent in the Workspace and therefore need Workspace manage access.
+  const access = callerAccess();
+  if (access) {
+    if (target.tier === 'canvas') {
+      if (
+        !args.canvasId ||
+        !(await access.can('write', { type: 'space', id: args.canvasId }))
+      )
+        throw new Error(
+          'Changing Space memory needs write access to the Space',
+        );
+    } else {
+      const workspaceId = getWorkspaceHandle()?.workspaceId;
+      if (
+        !workspaceId ||
+        !(await access.can('manage', { type: 'workspace', id: workspaceId }))
+      )
+        throw new Error(
+          'Changing Workspace memory or Skills needs manage access to the Workspace',
+        );
+    }
+  }
 
   if (args.mode === 'overwrite') {
     return handleOverwrite(args, target);

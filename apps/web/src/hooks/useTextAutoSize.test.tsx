@@ -116,6 +116,18 @@ afterEach(() => {
 });
 
 describe('useTextAutoSize resize modes', () => {
+  it.each([undefined, 0, NaN, -1, Infinity])(
+    'uses the authored width when the initial measured width is %s',
+    (width) => {
+      render({ width, fontSizing: 'proportional' });
+      expect(result.effectiveWidth).toBe(332);
+      const firstHeight = result.effectiveHeight;
+      render({ width: 332 });
+      expect(result.effectiveHeight).toBe(firstHeight);
+      expect(fixture.patchNodeSilent).not.toHaveBeenCalled();
+    },
+  );
+
   it('scales typography by outer width independently of dragged height and keeps side reflow typography', () => {
     render({ fontSizing: 'proportional' });
     const height = result.effectiveHeight;

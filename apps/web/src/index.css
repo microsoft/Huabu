@@ -75,7 +75,8 @@
   /* Text hierarchy */
   --fg-default: #191919;
   --fg-muted: #55514a;
-  --fg-subtle: #767676;
+  /* Normal-text guidance remains readable on the default gray page. */
+  --fg-subtle: #707070;
   --fg-inverse: #ffffff;
 
   /* Backgrounds */
@@ -198,7 +199,8 @@
   /* --- App design-system tokens --- */
   --fg-default: oklch(0.985 0 0);
   --fg-muted: oklch(0.78 0 0);
-  --fg-subtle: oklch(0.53 0 0);
+  /* Normal-text guidance remains readable on default and elevated surfaces. */
+  --fg-subtle: oklch(0.61 0 0);
   --fg-inverse: #191919;
   --bg-default: oklch(0.145 0 0);
   --bg-surface: oklch(0.22 0 0);

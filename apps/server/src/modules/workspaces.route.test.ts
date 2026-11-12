@@ -155,6 +155,8 @@ vi.mock('./storage/index.js', () => ({
   // profile under test is the one that has directories; a case that is about
   // the other kind flips `materializes`.
   materializesWorkspaces: () => testState.materializes,
+  storageServes: (id: string) =>
+    id !== 'workspace-directory' || testState.materializes,
   createNamedWorkspace: storageMocks.createNamedWorkspace,
   resetStorageCache: storageMocks.resetStorageCache,
   unavailableCapabilityMessage: (id: string) => `capability ${id}`,
@@ -597,7 +599,7 @@ describe('Workspace collection on a backend with no folders', () => {
     }
   });
 
-  it('asks for the name it can actually use', async () => {
+  it('refuses a Server folder, which this storage has none of', async () => {
     const app = await buildApp();
     try {
       const response = await app.inject({
@@ -606,9 +608,10 @@ describe('Workspace collection on a backend with no folders', () => {
         payload: { path: '/tmp/somewhere' },
       });
 
-      expect(response.statusCode).toBe(400);
-      expect(response.json().message).toMatch(/name is required/i);
+      expect(response.statusCode).toBe(409);
+      expect(response.json().code).toBe('STORAGE_CAPABILITY_UNAVAILABLE');
       expect(storageMocks.createNamedWorkspace).not.toHaveBeenCalled();
+      expect(locatorMocks.adoptWorkspaceDirectory).not.toHaveBeenCalled();
     } finally {
       await app.close();
     }

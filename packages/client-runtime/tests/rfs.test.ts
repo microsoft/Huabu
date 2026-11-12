@@ -1206,3 +1206,31 @@ describe('optional raw RFS client', () => {
     expect(stderr.text()).toContain('Remote outcome may be unknown');
   });
 });
+
+it('uses a scoped reachback credential independently of the Agentlet transport', async () => {
+  const env = await server((request, response) => {
+    expect(request.headers.authorization).toBe('Bearer scoped-reachback');
+    response.end('ok');
+  });
+  const result = await call(['get-skill'], {
+    ...env,
+    HUABU_RFS_TOKEN: 'scoped-reachback',
+    AGENTLET_TOKEN: 'device-only',
+  });
+  expect(result.code).toBe(0);
+});
+
+it.each(['', '   '])(
+  'falls back to AGENTLET_TOKEN when HUABU_RFS_TOKEN is %j',
+  async (blank) => {
+    const env = await server((request, response) => {
+      expect(request.headers.authorization).toBe('Bearer private-token');
+      response.end('ok');
+    });
+    const result = await call(['get-skill'], {
+      ...env,
+      HUABU_RFS_TOKEN: blank,
+    });
+    expect(result.code).toBe(0);
+  },
+);

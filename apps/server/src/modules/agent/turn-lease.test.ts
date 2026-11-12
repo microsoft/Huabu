@@ -6,6 +6,46 @@ import { describe, expect, it } from 'vitest';
 import { acquireAgentTurn, waitForAgentTurnRelease } from './turn-lease.js';
 
 describe('acquireAgentTurn', () => {
+  it('admits the same logical ID independently in different namespace owners', () => {
+    const a = { name: 'space', ownerId: 'workspace-a' };
+    const b = { name: 'space', ownerId: 'workspace-b' };
+    const releaseA = acquireAgentTurn('same-id', a);
+    const releaseB = acquireAgentTurn('same-id', b);
+    try {
+      expect(releaseA).not.toBeNull();
+      expect(releaseB).not.toBeNull();
+      expect(acquireAgentTurn('same-id', a)).toBeNull();
+      expect(acquireAgentTurn('same-id', b)).toBeNull();
+    } finally {
+      releaseA?.();
+      releaseB?.();
+    }
+  });
+  it('waits only for its own namespace lease and preserves stable ownership across a root move', async () => {
+    const a = {
+      name: 'space',
+      ownerId: 'workspace-a',
+      storage: { root: '/original' },
+    };
+    const b = { ...a, ownerId: 'workspace-b' };
+    const release = acquireAgentTurn('scoped-wait', a);
+    expect(release).not.toBeNull();
+    expect(
+      acquireAgentTurn('scoped-wait', { ...a, storage: { root: '/moved' } }),
+    ).toBeNull();
+    let aDone = false;
+    const waiting = waitForAgentTurnRelease('scoped-wait', 1000, a).then(() => {
+      aDone = true;
+    });
+    try {
+      await waitForAgentTurnRelease('scoped-wait', 1000, b);
+      expect(aDone).toBe(false);
+    } finally {
+      release?.();
+    }
+    await waiting;
+    expect(aDone).toBe(true);
+  });
   it('rejects overlapping turns and permits reuse after release', () => {
     const release = acquireAgentTurn('thread-1');
     expect(release).not.toBeNull();

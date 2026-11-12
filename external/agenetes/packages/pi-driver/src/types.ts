@@ -7,7 +7,12 @@ import type {
   AgentTool,
   ToolExecutionMode,
 } from '@earendil-works/pi-agent-core';
-import type { Api, Message, Model } from '@earendil-works/pi-ai';
+import type {
+  Api,
+  Message,
+  Model,
+  ProviderStreamOptions,
+} from '@earendil-works/pi-ai';
 
 export type JsonObject = Record<string, unknown>;
 
@@ -157,7 +162,9 @@ export interface PiHistoryReplay {
   readonly estimatedSize: number;
 }
 
+/** The host may supply transport policy without changing model resolution. */
 export interface PiDriverPorts {
+  streamOptions?(ref: PiModelRef, ctx: PiModelContext): ProviderStreamOptions;
   resolveModel(ref: PiModelRef, ctx: PiModelContext): Promise<Model<Api>>;
   getApiKey(
     ref: PiModelRef,

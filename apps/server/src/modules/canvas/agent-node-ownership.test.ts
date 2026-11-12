@@ -253,7 +253,10 @@ forEachProductProfile((profile, label) => {
       });
       const before = await current();
       const version = (await currentCanvas()).version;
-      const release = acquireAgentTurn('thread-agent');
+      const release = acquireAgentTurn(
+        'thread-agent',
+        canvasAcpNamespace(canvasId),
+      );
       expect(release).not.toBeNull();
       try {
         const response = await app.inject({

@@ -21,6 +21,7 @@ vi.mock('@/api/agentDefaults', () => ({
 vi.mock('@/components/Common/Toast', () => ({ toast: api.toast }));
 
 import {
+  ConversationAgentUnconfiguredError,
   getDefaultAgentBinding,
   loadDefaultAgentBinding,
   RECENT_CONVERSATION_AGENT_STORAGE_KEY,
@@ -233,6 +234,20 @@ describe('browser-local recent conversation Agent', () => {
       kind: 'external',
       profileId: profile.id,
     });
+  });
+
+  it('refuses to choose Built-In Pi implicitly when no external Profile is connected', async () => {
+    listProfiles.mockResolvedValueOnce({
+      ...snapshot,
+      profiles: [],
+      selectableProfileIds: [],
+    });
+    await expect(loadDefaultAgentBinding()).rejects.toBeInstanceOf(
+      ConversationAgentUnconfiguredError,
+    );
+    expect(
+      useAcpProfilesStore.getState().recentConversationProfileId,
+    ).toBeNull();
   });
 
   it('supports Built-In Pi as an explicit conversational choice', async () => {

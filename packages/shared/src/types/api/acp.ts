@@ -441,6 +441,14 @@ export type AcpProfileCapabilitiesResponse = z.infer<
   typeof acpProfileCapabilitiesResponseSchema
 >;
 
+/** Owning Space; required for permission answers in Bubble mode. */
+export const acpPermissionDecisionQuerySchema = z.object({
+  canvasId: z.string().min(1).optional(),
+});
+export type AcpPermissionDecisionQuery = z.infer<
+  typeof acpPermissionDecisionQuerySchema
+>;
+
 /** Schema mirror of {@link AcpPermissionDecisionRequest}. */
 export const acpPermissionDecisionSchema = z.object({
   requestId: z.string().min(1),
@@ -627,7 +635,12 @@ export const acpProfilesListResponseSchema = z.object({
   knownDevices: z.array(agentletDeviceSchema).optional(),
   /** Connected persisted device identity on the Server's filesystem; absent on older servers. */
   folderPickerAgentletId: z.string().min(1).nullable().optional(),
-  agentlet: acpAgentletStatusSchema,
+  /**
+   * Health of the Server's own supervised Agentlet worker, or `null` when this
+   * Server runs none for the caller. Bubble users connect only their own
+   * devices, so there is no shared worker whose health they could act on.
+   */
+  agentlet: acpAgentletStatusSchema.nullable(),
   agentDefaults: agentDefaultsSchema.optional(),
 });
 

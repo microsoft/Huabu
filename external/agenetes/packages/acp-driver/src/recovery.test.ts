@@ -1,10 +1,9 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AcpServiceError } from './errors.js';
 import { AcpAgentHandle, lowerAcpInputs } from './handle.js';
 import { emptyAcpOverlay } from './overlay.js';
 import { acpSessionRegistry } from './session-registry.js';
-import * as spawn from './spawn-orchestrator.js';
 
 import type { AcpCreateSpec, AcpDurableState } from './handle.js';
 import type { AcpSessionEntry } from './session-registry.js';
@@ -100,11 +99,9 @@ const submission = {
 };
 
 describe('ACP durable history recovery', () => {
-  afterEach(() => vi.restoreAllMocks());
-
   beforeEach(() => {
     vi.clearAllMocks();
-    acpSessionRegistry.remove('machine-a', spec.threadId);
+    acpSessionRegistry.remove('machine-a', spec.threadId, spec.namespace);
   });
 
   it('folds host side-channel events into the driver stream before termination', async () => {
@@ -137,104 +134,6 @@ describe('ACP durable history recovery', () => {
     expect(events).toContainEqual(hostEvent);
     expect(events.at(-1)?.type).toBe('done');
     expect(events.indexOf(hostEvent)).toBeLessThan(events.length - 1);
-  });
-
-  it('waits for late bootstrap before removing the session and reclaiming its process', async () => {
-    const { entry, prompt } = sessionEntry();
-    const shutdown = vi.fn();
-    Object.assign(entry.client, { shutdown });
-    let opened!: () => void;
-    let reclaimed!: () => void;
-    sessionMocks.ensureAcpSession.mockImplementationOnce(
-      (options) =>
-        new Promise<AcpSessionEntry>((resolve) => {
-          opened = () => {
-            acpSessionRegistry.set(options.agentletId, options.threadId, entry);
-            resolve(entry);
-          };
-        }),
-    );
-    const release = vi.spyOn(spawn, 'releaseThread').mockImplementationOnce(
-      () =>
-        new Promise<void>((resolve) => {
-          reclaimed = resolve;
-        }),
-    );
-    const handle = new AcpAgentHandle(
-      { ...spec, workloadType: 'Job', threadId: '' },
-      {
-        recovery: {
-          authorizeHistoryLoad: async () => ({
-            allowed: true,
-            estimatedSize: 0,
-          }),
-        },
-      },
-    );
-    const controller = new AbortController();
-    const next = handle
-      .run(submission, {
-        overlay: emptyAcpOverlay(),
-        logger,
-        signal: controller.signal,
-      })
-      .next();
-    await vi.waitFor(() =>
-      expect(sessionMocks.ensureAcpSession).toHaveBeenCalledOnce(),
-    );
-    controller.abort();
-    let closed = false;
-    const closing = handle.close().then(() => {
-      closed = true;
-    });
-    await Promise.resolve();
-    expect(release).not.toHaveBeenCalled();
-    expect(closed).toBe(false);
-    opened();
-    await vi.waitFor(() => expect(release).toHaveBeenCalledOnce());
-    expect(shutdown).toHaveBeenCalledOnce();
-    expect(closed).toBe(false);
-    expect(prompt).not.toHaveBeenCalled();
-    const identity = sessionMocks.ensureAcpSession.mock.calls[0][0];
-    expect(release).toHaveBeenCalledWith(
-      identity.agentletId,
-      identity.threadId,
-    );
-    expect(
-      acpSessionRegistry.get(identity.agentletId, identity.threadId),
-    ).toBeUndefined();
-    reclaimed();
-    await closing;
-    await expect(next).resolves.toMatchObject({ done: true });
-    await expect(
-      handle.run(submission, { overlay: emptyAcpOverlay(), logger }).next(),
-    ).rejects.toThrow('closed');
-  });
-
-  it('still attempts reclamation when an in-flight bootstrap fails during close', async () => {
-    const error = new Error('Bootstrap failed');
-    let fail!: (error: Error) => void;
-    sessionMocks.ensureAcpSession.mockReturnValueOnce(
-      new Promise((_resolve, reject) => {
-        fail = reject;
-      }),
-    );
-    const release = vi.spyOn(spawn, 'releaseThread').mockResolvedValue();
-    const handle = new AcpAgentHandle(spec, {
-      recovery: {
-        authorizeHistoryLoad: async () => ({ allowed: true, estimatedSize: 0 }),
-      },
-    });
-    const running = expect(
-      handle.run(submission, { overlay: emptyAcpOverlay(), logger }).next(),
-    ).rejects.toBe(error);
-    await vi.waitFor(() =>
-      expect(sessionMocks.ensureAcpSession).toHaveBeenCalledOnce(),
-    );
-    const closing = expect(handle.close()).rejects.toBe(error);
-    fail(error);
-    await Promise.all([running, closing]);
-    expect(release).toHaveBeenCalledOnce();
   });
 
   describe('ACP canonical input lowering', () => {
@@ -302,7 +201,7 @@ describe('ACP durable history recovery', () => {
       expect(prompt).toHaveBeenCalledTimes(3);
       expect(remove).not.toHaveBeenCalled();
       await first.close();
-      expect(remove).toHaveBeenCalledWith('machine-a', ids[0]);
+      expect(remove).toHaveBeenCalledWith('machine-a', ids[0], spec.namespace);
       remove.mockRestore();
     },
   );

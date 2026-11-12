@@ -46,6 +46,7 @@ import { listAcpProfiles, renameAgentletDevice } from '@/api/acp';
 import { getAgentDefaults, updateAgentDefaults } from '@/api/agentDefaults';
 import { toast } from '@/components/Common/Toast';
 import { i18n } from '@/i18n';
+import { useSettingsUiStore } from '@/store/settingsUiStore';
 import {
   readApplicationPreference,
   subscribeApplicationPreferences,
@@ -122,7 +123,10 @@ interface AcpProfilesState {
   /** Display-only device history; never used for runtime availability. */
   knownDevices: AgentletDevice[];
   folderPickerAgentletId: string | null;
-  /** Latest agentlet snapshot. `null` until the first fetch resolves. */
+  /**
+   * Latest snapshot of the Server's own worker: `null` until the first fetch
+   * resolves, and for Bubble users, whose Server runs no shared worker.
+   */
   agentlet: AcpAgentletStatus | null;
   /** Absent on older servers; never infer a default from list ordering. */
   agentDefaults: AgentDefaults | null;
@@ -367,9 +371,7 @@ export function selectDefaultConversationProfileId(
 export function getDefaultAgentBinding(): AgentBinding {
   const state = useAcpProfilesStore.getState();
   const profileId = selectDefaultConversationProfileId(state);
-  if (!profileId) {
-    throw new Error(i18n.t('errors.conversationAgentUnconfigured'));
-  }
+  if (!profileId) throw new ConversationAgentUnconfiguredError();
   if (profileId === HUABU_AGENT_PROFILE_ID) return { kind: 'internal' };
   const profile = state.profiles.find((entry) => entry.id === profileId);
   return {
@@ -391,4 +393,48 @@ export function rememberConversationAgentBinding(binding: AgentBinding): void {
   const profileId =
     binding.kind === 'internal' ? HUABU_AGENT_PROFILE_ID : binding.profileId;
   useAcpProfilesStore.getState().rememberConversationAgent(profileId);
+}
+
+/**
+ * A new conversation has no Agent: the browser remembers no available explicit
+ * choice and no external Profile is on a connected device. Built-In Pi is never
+ * chosen implicitly; {@link toastConversationStartError} offers it instead.
+ */
+export class ConversationAgentUnconfiguredError extends Error {
+  constructor() {
+    super(i18n.t('errors.conversationAgentUnconfigured'));
+    this.name = 'ConversationAgentUnconfiguredError';
+  }
+}
+
+/**
+ * Report a failed conversation start. A missing Agent is a setup choice, not a
+ * failure: the persistent info toast offers connecting an external Agent in
+ * Settings, or Built-In Pi, which records the same explicit choice as the Agent
+ * menus and then runs `retry` (when given) so the start completes with it.
+ */
+export function toastConversationStartError(
+  error: unknown,
+  retry?: () => void,
+): void {
+  const message = error instanceof Error ? error.message : String(error);
+  if (!(error instanceof ConversationAgentUnconfiguredError)) {
+    toast(message, { tone: 'danger' });
+    return;
+  }
+  toast(message, {
+    tone: 'info',
+    duration: 0,
+    secondaryAction: {
+      label: i18n.t('errors.connectAnAgent'),
+      onClick: () => useSettingsUiStore.getState().open('agent'),
+    },
+    action: {
+      label: i18n.t('errors.useBuiltInPi'),
+      onClick: () => {
+        rememberConversationAgentBinding({ kind: 'internal' });
+        retry?.();
+      },
+    },
+  });
 }

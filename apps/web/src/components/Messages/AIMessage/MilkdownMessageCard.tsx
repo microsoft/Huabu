@@ -11,13 +11,10 @@ import { parseArtifactUrl } from '@huabu/shared';
 
 import { MilkdownPreview } from '@/components/Milkdown';
 import useCanvasStore from '@/store/canvasStore';
-import { useChatStore } from '@/store/chatStore';
-import { usePanelStore } from '@/store/panelStore';
-import { copyToClipboard } from '@/utils/io/clipboard';
 import { createDragId, setDragPayload } from '@/utils/io/dragDrop';
 import { openDocumentLink } from '@/utils/openDocumentLink';
 
-import { FragmentCommentPopover } from './FragmentCommentPopover';
+import { TextSelectionToolbar } from '../TextSelectionToolbar';
 
 import type { MilkdownPreviewSelection } from '@/components/Milkdown/MilkdownPreview';
 import type { ImageDragPayload, NoteDragPayload } from '@/utils/io/dragDrop';
@@ -162,10 +159,18 @@ export const MilkdownMessageCard = memo(function MilkdownMessageCard({
         }}
       />
       {enableComments && messageId && selection ? (
-        <FragmentCommentPopover
-          selection={selection}
-          canvasActionsDisabled={canvasActionsDisabled}
-          onCopy={() => copyToClipboard(selection.text)}
+        <TextSelectionToolbar
+          canvasId={activeCanvasId}
+          threadId={threadId}
+          position={selection.position}
+          selectionRect={selection.selectionRect}
+          quote={{
+            quote: selection.text,
+            contextBefore: selection.contextBefore,
+            contextAfter: selection.contextAfter,
+            source: { kind: 'chat', canvasId, threadId, messageId },
+          }}
+          saveAsNoteDisabled={canvasActionsDisabled}
           onSaveAsNote={() => {
             useCanvasStore.getState().addNode({
               nodeType: 'note',
@@ -176,19 +181,9 @@ export const MilkdownMessageCard = memo(function MilkdownMessageCard({
             });
             dismissComment();
           }}
+          onDismiss={dismissComment}
           onBegin={() => {
             editingRef.current = true;
-          }}
-          onDismiss={dismissComment}
-          onAdd={(comment) => {
-            useChatStore.getState().addQuotedComment(threadId, {
-              quote: selection.text,
-              contextBefore: selection.contextBefore,
-              contextAfter: selection.contextAfter,
-              comment,
-            });
-            dismissComment();
-            usePanelStore.getState().requestFocusChatInput(threadId);
           }}
         />
       ) : null}

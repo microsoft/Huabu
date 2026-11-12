@@ -26,10 +26,7 @@ import { useIsNotMouse } from '@/hooks/useInputMode';
 import { useToolStore } from '@/store/toolStore';
 import { useWorkspaceStore } from '@/store/workspaceStore';
 
-import {
-  getAvailableCanvasTools,
-  resolveCanvasToolShortcut,
-} from './canvasInputPolicy.ts';
+import { getAvailableCanvasTools } from './canvasInputPolicy.ts';
 import { NODE_ICON } from '../../../config/nodeIcons.ts';
 import useCanvasStore from '../../../store/canvasStore.ts';
 import { detectNodeType } from '../../../utils/io/media.ts';
@@ -63,7 +60,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
   const { t } = useTranslation();
   const addNodes = useCanvasStore((s) => s.addNodes);
   const pendingNodeType = useToolStore((s) => s.pendingNodeType);
-  const setPendingNodeType = useToolStore((s) => s.setPendingNodeType);
+  const togglePendingNodeType = useToolStore((s) => s.togglePendingNodeType);
   const setSketchDraft = useToolStore((s) => s.setSketchDraft);
 
   // Non-mouse undo / redo (delete now lives on the per-context floating toolbars)
@@ -131,38 +128,32 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
       // any pending placement first; placement modes toggle themselves.
       if (matchesShortcut(e, 'tool.select')) {
         e.preventDefault();
-        if (pendingNodeType) setPendingNodeType(null);
         onToolChange('select');
         return;
       }
       if (matchesShortcut(e, 'tool.pan')) {
         e.preventDefault();
-        if (pendingNodeType) setPendingNodeType(null);
-        onToolChange(resolveCanvasToolShortcut('pan', isNotMouse));
+        onToolChange('pan');
         return;
       }
       if (matchesShortcut(e, 'tool.lasso')) {
         e.preventDefault();
-        if (pendingNodeType) setPendingNodeType(null);
         onToolChange('lasso');
         return;
       }
       if (matchesShortcut(e, 'mode.frame')) {
         e.preventDefault();
-        onToolChange('select');
-        setPendingNodeType(pendingNodeType === 'frame' ? null : 'frame');
+        togglePendingNodeType('frame');
         return;
       }
       if (matchesShortcut(e, 'mode.note')) {
         e.preventDefault();
-        onToolChange('select');
-        setPendingNodeType(pendingNodeType === 'note' ? null : 'note');
+        togglePendingNodeType('note');
         return;
       }
       if (matchesShortcut(e, 'mode.text')) {
         e.preventDefault();
-        onToolChange('select');
-        setPendingNodeType(pendingNodeType === 'text' ? null : 'text');
+        togglePendingNodeType('text');
         return;
       }
       if (matchesShortcut(e, 'mode.sketch')) {
@@ -170,22 +161,17 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
         // Match the click handler: always reset the sketch tool to draw
         // mode so the eraser doesn't silently persist between sessions.
         setSketchDraft({ mode: 'draw' });
-        onToolChange('select');
-        setPendingNodeType(pendingNodeType === 'sketch' ? null : 'sketch');
+        togglePendingNodeType('sketch');
         return;
       }
       if (matchesShortcut(e, 'mode.childSpace') && canvasId !== worldCanvasId) {
         e.preventDefault();
-        onToolChange('select');
-        setPendingNodeType(
-          pendingNodeType === 'childSpace' ? null : 'childSpace',
-        );
+        togglePendingNodeType('childSpace');
         return;
       }
       if (matchesShortcut(e, 'mode.question')) {
         e.preventDefault();
-        onToolChange('select');
-        setPendingNodeType(pendingNodeType === 'question' ? null : 'question');
+        togglePendingNodeType('question');
         return;
       }
     };
@@ -195,10 +181,8 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
     activeModal,
     canvasId,
     worldCanvasId,
-    isNotMouse,
     onToolChange,
-    pendingNodeType,
-    setPendingNodeType,
+    togglePendingNodeType,
     setSketchDraft,
   ]);
 
@@ -320,7 +304,6 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
                   'text-info-fg bg-info-bg enabled:hover:bg-info-bg',
               )}
               onClick={() => {
-                if (pendingNodeType) setPendingNodeType(null);
                 onToolChange('lasso');
               }}
             >
@@ -331,11 +314,9 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
               options={toolOptions}
               value={activeTool}
               onPrimaryAction={(tool) => {
-                if (pendingNodeType) setPendingNodeType(null);
                 onToolChange(tool);
               }}
               onChange={(tool) => {
-                if (pendingNodeType) setPendingNodeType(null);
                 onToolChange(tool);
               }}
               variant="ghost"
@@ -383,8 +364,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
                 'text-info-fg bg-info-bg enabled:hover:bg-info-bg',
             )}
             onClick={() => {
-              onToolChange('select');
-              setPendingNodeType(pendingNodeType === 'note' ? null : 'note');
+              togglePendingNodeType('note');
             }}
           >
             <NODE_ICON.note />
@@ -402,8 +382,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
                 'text-info-fg bg-info-bg enabled:hover:bg-info-bg',
             )}
             onClick={() => {
-              onToolChange('select');
-              setPendingNodeType(pendingNodeType === 'text' ? null : 'text');
+              togglePendingNodeType('text');
             }}
           >
             <NODE_ICON.text />
@@ -421,8 +400,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
                 'text-info-fg bg-info-bg enabled:hover:bg-info-bg',
             )}
             onClick={() => {
-              onToolChange('select');
-              setPendingNodeType(pendingNodeType === 'frame' ? null : 'frame');
+              togglePendingNodeType('frame');
             }}
           >
             <NODE_ICON.frame />
@@ -439,8 +417,9 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
                 size="md"
                 active={pendingNodeType === 'sketch'}
                 onActivate={() => {
-                  onToolChange('select');
-                  setPendingNodeType('sketch');
+                  if (useToolStore.getState().pendingNodeType !== 'sketch') {
+                    togglePendingNodeType('sketch');
+                  }
                 }}
               />
             ) : (
@@ -460,10 +439,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
                   // Clicking the Sketch button always resets the tool to draw
                   // mode so the eraser doesn't silently persist between sessions.
                   setSketchDraft({ mode: 'draw' });
-                  onToolChange('select');
-                  setPendingNodeType(
-                    pendingNodeType === 'sketch' ? null : 'sketch',
-                  );
+                  togglePendingNodeType('sketch');
                 }}
               >
                 <NODE_ICON.sketch />
@@ -484,10 +460,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
                   'text-info-fg bg-info-bg enabled:hover:bg-info-bg',
               )}
               onClick={() => {
-                onToolChange('select');
-                setPendingNodeType(
-                  pendingNodeType === 'childSpace' ? null : 'childSpace',
-                );
+                togglePendingNodeType('childSpace');
               }}
             >
               <NODE_ICON.spacePreview />
@@ -573,11 +546,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
               pendingNodeType === 'question' &&
                 'text-info-fg bg-info-bg enabled:hover:bg-info-bg',
             )}
-            onClick={() =>
-              setPendingNodeType(
-                pendingNodeType === 'question' ? null : 'question',
-              )
-            }
+            onClick={() => togglePendingNodeType('question')}
           >
             <Sparkles aria-hidden />
             {t('toolbar.nodes.agent')}

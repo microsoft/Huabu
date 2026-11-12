@@ -94,6 +94,13 @@ export function readEffectiveInputMode(): EffectiveInputMode {
   );
 }
 
+export function readIsNotMouse(): boolean {
+  return (
+    readEffectiveInputMode() !== 'mouse' &&
+    useInputModeStore.getState().mode !== 'mouse'
+  );
+}
+
 export function useEffectiveInputMode(): EffectiveInputMode {
   const preference = useToolStore((state) => state.inputModePreference);
   const penObserved = useToolStore((state) => state.penObserved);

@@ -13,6 +13,21 @@ type Destination = NonNullable<
   RecentCanvasConversationResponse['conversation']
 >;
 
+export function resolveCommentDestination(
+  canvasId: string,
+  destination: Destination | null,
+) {
+  const canvas = useCanvasStore.getState();
+  const node = canvas.nodes.find((item) => item.id === destination?.nodeId);
+  const view = node ? conversationViewForNode(node, canvasId) : null;
+  return canvas.canvasId === canvasId &&
+    view &&
+    view.conversationOwner.threadId === destination?.threadId &&
+    !canvas.pendingForkThreadIds[view.conversationOwner.threadId]
+    ? view
+    : null;
+}
+
 /** Existing owners only; staging never creates, realizes or starts an Agent. */
 export function useCommentDestination(canvasId: string) {
   const nodes = useCanvasStore((state) => state.nodes);
@@ -78,7 +93,7 @@ export function useCommentDestination(canvasId: string) {
     available: selected?.available === true,
     loading,
     error,
-    choose: (choice: Destination) => {
+    choose: (choice: Destination | null) => {
       explicitChoice.current = true;
       setDestination(choice);
       setLoading(false);

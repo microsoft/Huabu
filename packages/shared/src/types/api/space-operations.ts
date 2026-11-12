@@ -343,7 +343,9 @@ export const distributeNodesCommandSchema = z
     nodeIds: z.array(z.string().min(1)).min(3),
   })
   .strict()
-  .describe('Evenly distribute three or more nodes.');
+  .describe(
+    'Spread apart three or more supplied nodes within each parent group. Does not equalize gaps, preserve alignment, or avoid unlisted nodes.',
+  );
 
 export const setFrameLayoutCommandSchema = z
   .object({

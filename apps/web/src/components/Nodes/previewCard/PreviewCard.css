@@ -39,7 +39,8 @@
 .preview-card__info {
   flex: 0 0 auto;
   min-width: 0;
-  padding: var(--card-padding);
+  padding: var(--card-padding-block, var(--card-padding))
+    var(--card-padding-inline, var(--card-padding));
 }
 
 .preview-card[data-orientation='vertical'] .preview-card__info {
@@ -87,8 +88,8 @@
 
 .preview-card__cover-label {
   position: absolute;
-  top: var(--card-padding);
-  left: var(--card-padding);
+  top: var(--card-padding-block, var(--card-padding));
+  left: var(--card-padding-inline, var(--card-padding));
   z-index: 1;
   pointer-events: none;
 }
@@ -140,7 +141,8 @@
 
 .preview-card[data-orientation='horizontal'] {
   flex-direction: row;
-  padding: var(--card-padding);
+  padding: var(--card-padding-block, var(--card-padding))
+    var(--card-padding-inline, var(--card-padding));
   gap: var(--card-image-text-gap);
 }
 

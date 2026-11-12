@@ -3,12 +3,260 @@
 
 import { expect, test, type Page } from '@playwright/test';
 
+import { expectSelectionToolbarOutsideSelection } from './helpers';
+
+import type * as MilkdownCardModule from '../src/components/Messages/AIMessage/MilkdownMessageCard';
+import type * as SelectionToolbarModule from '../src/components/Messages/TextSelectionToolbar';
 import type * as UserMessageModule from '../src/components/Messages/UserMessage';
 import type * as ChatStoreModule from '../src/store/chatStore';
 import type * as ReactModule from 'react';
 import type * as DomModule from 'react-dom/client';
 
 test.use({ hasTouch: false });
+
+test('can comment on the same Chat message again after confirming with Enter', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 480, height: 800 });
+  await page.goto('/playground/chat-performance?messages=2');
+  const send = page.getByRole('button', { name: 'Send', exact: true });
+  const drafts = page.locator(
+    '[data-chat-input-surface] [data-quoted-comment]',
+  );
+  for (const [index, comment] of [
+    'First comment',
+    'Second comment',
+    'Third comment',
+  ].entries()) {
+    const passage = page
+      .locator(index === 1 ? '.ProseMirror h2' : '.ProseMirror p')
+      .first();
+    await passage.scrollIntoViewIfNeeded();
+    await passage.click({ clickCount: 3 });
+    await expect(
+      page.getByRole('button', { name: 'Comment on selection', exact: true }),
+    ).toBeVisible();
+    if (index > 0) await expect(send).toBeEnabled();
+    await page
+      .getByRole('button', { name: 'Comment on selection', exact: true })
+      .click();
+    const input = page.getByRole('textbox', { name: 'Comment', exact: true });
+    await input.fill(comment);
+    await input.press('Enter');
+    await expect(drafts).toHaveCount(index + 1);
+    await expect(send).toBeEnabled();
+  }
+});
+
+test('can comment on a CodeMirror passage and then select code again', async ({
+  page,
+}) => {
+  await page.goto('/playground/chat-performance?messages=0');
+  await page.evaluate(async () => {
+    const reactPath = '/node_modules/.vite/deps/react.js';
+    const domPath = '/node_modules/.vite/deps/react-dom_client.js';
+    const cardPath =
+      '/src/components/Messages/AIMessage/MilkdownMessageCard.tsx';
+    const { createElement } = (await import(reactPath))
+      .default as typeof ReactModule;
+    const { createRoot } = (await import(domPath)).default as typeof DomModule;
+    const { MilkdownMessageCard } = (await import(
+      cardPath
+    )) as typeof MilkdownCardModule;
+    const host = document.createElement('div');
+    host.id = 'code-comment-fixture';
+    host.style.cssText =
+      'position:fixed;left:40px;top:40px;width:600px;z-index:100';
+    document.body.append(host);
+    createRoot(host).render(
+      createElement(MilkdownMessageCard, {
+        content: '```ts\nconst selected = 1;\nconst other = 2;\n```',
+        threadId: 'chat-performance-thread',
+        messageId: 'code-message',
+        enableComments: true,
+      }),
+    );
+  });
+  for (const index of [0, 1]) {
+    const line = page.locator('#code-comment-fixture .cm-line').nth(index);
+    await line.click({ clickCount: 3 });
+    await page
+      .getByRole('button', { name: 'Comment on selection', exact: true })
+      .click();
+    const input = page.getByRole('textbox', { name: 'Comment', exact: true });
+    await input.fill(`Code comment ${index + 1}`);
+    await input.press('Enter');
+    const drafts = page.locator(
+      '[data-chat-input-surface] [data-quoted-comment]',
+    );
+    await expect(drafts).toHaveCount(index + 1);
+    await expect(drafts.nth(index).locator('blockquote')).toHaveText(
+      index === 0 ? 'const selected = 1;' : 'const other = 2;',
+    );
+    await expect(
+      page.getByRole('button', { name: 'Send', exact: true }),
+    ).toBeEnabled();
+  }
+});
+
+test('keeps Comment reachable for a native Chat selection spanning the viewport', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 480, height: 800 });
+  await page.goto('/playground/chat-performance?messages=0');
+  await page.evaluate(async () => {
+    const reactPath = '/node_modules/.vite/deps/react.js';
+    const domPath = '/node_modules/.vite/deps/react-dom_client.js';
+    const cardPath =
+      '/src/components/Messages/AIMessage/MilkdownMessageCard.tsx';
+    const { createElement } = (await import(reactPath))
+      .default as typeof ReactModule;
+    const { createRoot } = (await import(domPath)).default as typeof DomModule;
+    const { MilkdownMessageCard } = (await import(
+      cardPath
+    )) as typeof MilkdownCardModule;
+    const host = document.createElement('div');
+    host.id = 'long-chat-selection';
+    host.style.cssText =
+      'position:fixed;left:40px;top:80px;width:360px;height:400px;overflow:auto;z-index:100';
+    document.body.append(host);
+    createRoot(host).render(
+      createElement(MilkdownMessageCard, {
+        content: Array.from(
+          { length: 60 },
+          (_, index) => `Paragraph ${index + 1}: a passage to discuss.`,
+        ).join('\n\n'),
+        threadId: 'chat-performance-thread',
+        messageId: 'long-message',
+        enableComments: true,
+      }),
+    );
+  });
+  const editor = page.locator('#long-chat-selection .ProseMirror');
+  await expect(editor.locator('p')).toHaveCount(60);
+  const selected = await editor.evaluate((element) => {
+    const host = document.getElementById('long-chat-selection');
+    if (!host) throw new Error('Missing scroll container');
+    host.scrollTop = host.scrollHeight / 2;
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    const selection = window.getSelection();
+    if (!selection) throw new Error('Missing native selection');
+    selection.removeAllRanges();
+    selection.addRange(range);
+    document.dispatchEvent(new Event('selectionchange'));
+    const bounds = range.getBoundingClientRect();
+    return { top: bounds.top, bottom: bounds.bottom };
+  });
+  expect(selected.top).toBeLessThan(0);
+  expect(selected.bottom).toBeGreaterThan(800);
+  const toolbar = page.locator('.selection-context-toolbar');
+  await expect(toolbar).toBeVisible();
+  const bounds = await toolbar.boundingBox();
+  if (!bounds) throw new Error('Missing toolbar');
+  expect(bounds.y).toBeGreaterThanOrEqual(12);
+  expect(bounds.y + bounds.height).toBeLessThanOrEqual(788);
+  await toolbar
+    .getByRole('button', { name: 'Comment on selection', exact: true })
+    .click();
+  await expect(
+    page.getByRole('textbox', { name: 'Comment', exact: true }),
+  ).toBeVisible();
+});
+
+for (const placement of [
+  'below',
+  'above',
+  'right-edge',
+  'panel-edge',
+  'viewport-spanning',
+  'panel-spanning',
+] as const) {
+  test(`selection toolbar avoids multiline text at ${placement}`, async ({
+    page,
+  }, testInfo) => {
+    await page.setViewportSize({ width: 480, height: 800 });
+    await page.goto('/playground/chat-performance?messages=0');
+    const selected = await page.evaluate(async (placement) => {
+      const reactPath = '/node_modules/.vite/deps/react.js';
+      const domPath = '/node_modules/.vite/deps/react-dom_client.js';
+      const toolbarPath = '/src/components/Messages/TextSelectionToolbar.tsx';
+      const { createElement } = (await import(reactPath))
+        .default as typeof ReactModule;
+      const { createRoot } = (await import(domPath))
+        .default as typeof DomModule;
+      const { TextSelectionToolbar } = (await import(
+        toolbarPath
+      )) as typeof SelectionToolbarModule;
+      const boundary = document.createElement('div');
+      boundary.style.cssText =
+        'position:fixed;left:20px;top:20px;width:440px;height:400px';
+      document.body.append(boundary);
+      const top = placement.endsWith('spanning')
+        ? -200
+        : placement === 'above'
+          ? 690
+          : placement === 'panel-edge'
+            ? 330
+            : 100;
+      const left = placement === 'right-edge' ? 300 : 40;
+      const rect = new DOMRect(
+        left,
+        top,
+        120,
+        placement.endsWith('spanning') ? 1400 : 60,
+      );
+      const host = document.createElement('div');
+      document.body.append(host);
+      createRoot(host).render(
+        createElement(TextSelectionToolbar, {
+          canvasId: 'space',
+          threadId: 'thread',
+          quote: {
+            quote: 'First line\nSecond line\nThird line',
+            contextBefore: '',
+            contextAfter: '',
+          },
+          position: { x: left + 10, y: top + 10 },
+          selectionRect: rect,
+          boundary: placement.startsWith('panel-') ? boundary : undefined,
+          onDismiss: () => {},
+          onSaveAsNote: () => {},
+        }),
+      );
+      return { top: rect.top, bottom: rect.bottom };
+    }, placement);
+    const toolbar = page.locator('.selection-context-toolbar');
+    await expect(toolbar).toBeVisible();
+    const bounds = await toolbar.boundingBox();
+    if (!bounds) throw new Error('Missing selection toolbar bounds');
+    if (placement.endsWith('spanning')) {
+      expect(bounds.y).toBeGreaterThanOrEqual(
+        placement === 'panel-spanning' ? 32 : 12,
+      );
+      expect(bounds.y + bounds.height).toBeLessThanOrEqual(
+        placement === 'panel-spanning' ? 408 : 788,
+      );
+    } else if (placement === 'above' || placement === 'panel-edge') {
+      expect(bounds.y + bounds.height).toBeLessThanOrEqual(selected.top - 7);
+    } else {
+      expect(bounds.y).toBeGreaterThanOrEqual(selected.bottom + 7);
+    }
+    expect(bounds.x).toBeGreaterThanOrEqual(12);
+    expect(bounds.x + bounds.width).toBeLessThanOrEqual(468);
+    await page.screenshot({
+      path: testInfo.outputPath(`selection-${placement}.png`),
+    });
+    if (placement.endsWith('spanning')) {
+      await toolbar
+        .getByRole('button', { name: 'Comment on selection', exact: true })
+        .click();
+      await expect(
+        page.getByRole('textbox', { name: 'Comment', exact: true }),
+      ).toBeVisible();
+    }
+  });
+}
 
 async function stageDraft(page: Page, quote: string, comment: string) {
   await page.goto('/playground/chat-performance?messages=0');
@@ -41,16 +289,62 @@ test('stages, edits and removes a quoted comment without exposing a prompt templ
   await expect(passage).toBeVisible();
   const original = (await passage.textContent())?.trim();
   if (!original) throw new Error('Missing assistant passage');
-  await passage.click({ clickCount: 3 });
-  await page.getByRole('button', { name: 'Comment', exact: true }).click();
+  const passageBox = await passage.boundingBox();
+  if (!passageBox) throw new Error('Missing passage bounds');
+  await page.mouse.move(passageBox.x + 10, passageBox.y + 10);
+  await page.mouse.down({ clickCount: 3 });
+  await expect(page.locator('.selection-context-toolbar')).toHaveCount(0);
+  await page.mouse.up({ clickCount: 3 });
+  await expect(
+    page.getByRole('button', { name: 'Comment on selection', exact: true }),
+  ).toBeVisible();
+  await expect(page.locator('.canvas-context-toolbar')).toHaveCount(2);
+  await expectSelectionToolbarOutsideSelection(page);
+  for (const capsule of await page.locator('.canvas-context-toolbar').all()) {
+    await expect(capsule).toHaveCSS('height', '36px');
+    await expect(capsule).toHaveCSS('border-radius', '8px');
+  }
+  await expect(page.locator('.ink-agent-destination-trigger')).toHaveCount(0);
+  await page.screenshot({
+    path: testInfo.outputPath('chat-selection-toolbar.png'),
+  });
+  await page
+    .getByRole('button', { name: 'Comment on selection', exact: true })
+    .click();
   const fullComment = 'Please explain this in detail. '.repeat(12).trim();
+  await expect(
+    page.getByRole('button', { name: 'Add to input', exact: true }),
+  ).toBeDisabled();
+  for (const capsule of await page.locator('.canvas-context-toolbar').all()) {
+    await expect(capsule).toBeHidden();
+  }
+  await expect(
+    page.locator('[data-chat-input-surface] [data-quoted-comment]'),
+  ).toHaveCount(0);
+  await page
+    .getByRole('textbox', { name: 'Comment', exact: true })
+    .fill('  \n ');
+  await page
+    .getByRole('textbox', { name: 'Comment', exact: true })
+    .press('Enter');
+  await expect(
+    page.getByRole('button', { name: 'Add to input', exact: true }),
+  ).toBeDisabled();
+  await expect(
+    page.locator('[data-chat-input-surface] [data-quoted-comment]'),
+  ).toHaveCount(0);
   await page
     .getByRole('textbox', { name: 'Comment', exact: true })
     .fill(fullComment);
-  await page.getByRole('button', { name: 'Add to input', exact: true }).click();
+  await page
+    .getByRole('textbox', { name: 'Comment', exact: true })
+    .press('Enter');
 
   const card = page.locator('[data-chat-input-surface] [data-quoted-comment]');
   await expect(card).toHaveCount(1);
+  await expect(
+    card.getByRole('button', { name: 'Open source', exact: true }),
+  ).toHaveCount(0);
   await expect(card.locator('blockquote')).toHaveText(original);
   await expect(textarea).toHaveValue('General instructions');
   const comment = card.getByRole('textbox', { name: 'Comment', exact: true });
@@ -137,6 +431,11 @@ test('stages, edits and removes a quoted comment without exposing a prompt templ
     page.getByRole('button', { name: 'Send', exact: true }),
   ).toBeDisabled();
   await expect(card.getByRole('alert')).toBeVisible();
+  await textarea.fill('Main instructions do not replace a required comment');
+  await expect(
+    page.getByRole('button', { name: 'Send', exact: true }),
+  ).toBeDisabled();
+  await textarea.fill('');
   await comment.press('Escape');
   await expect(comment).toHaveCount(0);
   await expect(editComment).toHaveText('Updated comment');

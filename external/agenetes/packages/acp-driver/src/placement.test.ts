@@ -71,7 +71,10 @@ describe('explicit ACP placement', () => {
       },
     );
     host.gateway = {
-      getAgentlet: () => undefined,
+      getAgentlet: (agentletId: string) =>
+        agentletId === 'device-uuid'
+          ? { agentletId, status: 'connected' }
+          : undefined,
       getAgentlets: () => [
         {
           agentletId: 'device-uuid',
@@ -193,11 +196,13 @@ describe('explicit ACP placement', () => {
     const entryA = {
       agentletId: 'machine-a',
       threadId: 'thread-1',
+      namespace: { name: 'legacy' },
       client: { shutdown: vi.fn() } as unknown as AcpAgentClient,
     } as AcpSessionEntry;
     const entryB = {
       agentletId: 'machine-b',
       threadId: 'thread-1',
+      namespace: { name: 'legacy' },
       client: { shutdown: vi.fn() } as unknown as AcpAgentClient,
     } as AcpSessionEntry;
 
@@ -347,5 +352,243 @@ describe('explicit ACP placement', () => {
     await vi.advanceTimersByTimeAsync(20_100);
 
     await rejection;
+  });
+});
+
+describe('qualified ACP legacy lifecycle access', () => {
+  const namespaceA = { name: 'shared-name', ownerId: 'workspace-a' };
+  const namespaceB = { name: 'shared-name', ownerId: 'workspace-b' };
+
+  it('retains a spawned process after failed handshake compensation until cleanup succeeds', async () => {
+    vi.useFakeTimers();
+    const stopOnAgentlet = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('still running'))
+      .mockResolvedValueOnce({ stopped: true, disposition: 'stopped' });
+    const spawnOnAgentlet = vi.fn(async () => ({
+      sessionId: 'unconnected-native',
+      pid: 404,
+    }));
+    host.gateway = {
+      getAgentlet: () => ({ agentletId: 'machine-a', status: 'connected' }),
+      getSession: () => undefined,
+      spawnOnAgentlet,
+      stopOnAgentlet,
+    };
+    const pending = ensureAgentForThread(
+      'machine-a',
+      'handshake-compensation',
+      recipe,
+      undefined,
+      undefined,
+      600,
+      'Deployment',
+      namespaceA,
+    );
+    const rejected = expect(pending).rejects.toMatchObject({
+      code: 'cleanup_failed',
+    });
+    try {
+      await vi.advanceTimersByTimeAsync(3100);
+      await rejected;
+      await expect(
+        ensureAgentForThread(
+          'machine-a',
+          'handshake-compensation',
+          recipe,
+          undefined,
+          undefined,
+          600,
+          'Deployment',
+          namespaceA,
+        ),
+      ).rejects.toMatchObject({ code: 'cleanup_failed' });
+      expect(spawnOnAgentlet).toHaveBeenCalledTimes(1);
+      await releaseThread('machine-a', 'handshake-compensation', namespaceA);
+      expect(stopOnAgentlet).toHaveBeenNthCalledWith(2, 'machine-a', {
+        sessionId: 'unconnected-native',
+      });
+    } finally {
+      await pending.catch(() => undefined);
+      await releaseThread('machine-a', 'handshake-compensation', namespaceA);
+    }
+  });
+
+  it('refuses unqualified registry lookup and removal when the device/thread is ambiguous', () => {
+    const entryA = {
+      agentletId: 'machine-a',
+      threadId: 'legacy-ambiguous',
+      namespace: namespaceA,
+      client: { shutdown: vi.fn() },
+    } as unknown as AcpSessionEntry;
+    const entryB = {
+      agentletId: 'machine-a',
+      threadId: 'legacy-ambiguous',
+      namespace: namespaceB,
+      client: { shutdown: vi.fn() },
+    } as unknown as AcpSessionEntry;
+    acpSessionRegistry.set('machine-a', 'legacy-ambiguous', entryA);
+    acpSessionRegistry.set('machine-a', 'legacy-ambiguous', entryB);
+    try {
+      expect(() =>
+        acpSessionRegistry.get('machine-a', 'legacy-ambiguous'),
+      ).toThrow('Ambiguous');
+      expect(() =>
+        acpSessionRegistry.remove('machine-a', 'legacy-ambiguous'),
+      ).toThrow('Ambiguous');
+      expect(entryA.client.shutdown).not.toHaveBeenCalled();
+      expect(entryB.client.shutdown).not.toHaveBeenCalled();
+      expect(
+        acpSessionRegistry.get('machine-a', 'legacy-ambiguous', namespaceA),
+      ).toBe(entryA);
+      acpSessionRegistry.remove('machine-a', 'legacy-ambiguous', namespaceA);
+      expect(acpSessionRegistry.get('machine-a', 'legacy-ambiguous')).toBe(
+        entryB,
+      );
+    } finally {
+      acpSessionRegistry.remove('machine-a', 'legacy-ambiguous', namespaceA);
+      acpSessionRegistry.remove('machine-a', 'legacy-ambiguous', namespaceB);
+    }
+  });
+
+  it('includes a pending peer in legacy lookup/removal/release ambiguity', async () => {
+    const entryA = {
+      agentletId: 'machine-a',
+      threadId: 'legacy-pending',
+      namespace: namespaceA,
+      client: { shutdown: vi.fn() },
+    } as unknown as AcpSessionEntry;
+    const started = Promise.withResolvers<void>();
+    const response = Promise.withResolvers<{
+      sessionId: string;
+      pid: number;
+    }>();
+    const stopOnAgentlet = vi.fn(async () => ({
+      stopped: true,
+      disposition: 'stopped',
+    }));
+    host.gateway = {
+      getAgentlet: () => ({ agentletId: 'machine-a', status: 'connected' }),
+      getSession: () => ({ status: 'connected' }),
+      spawnOnAgentlet: vi.fn(() => {
+        started.resolve();
+        return response.promise;
+      }),
+      stopOnAgentlet,
+    };
+    acpSessionRegistry.set('machine-a', 'legacy-pending', entryA);
+    const pending = ensureAgentForThread(
+      'machine-a',
+      'legacy-pending',
+      recipe,
+      undefined,
+      undefined,
+      600,
+      'Deployment',
+      namespaceB,
+    );
+    try {
+      await started.promise;
+      expect(() =>
+        acpSessionRegistry.get('machine-a', 'legacy-pending'),
+      ).toThrow('Ambiguous');
+      expect(() =>
+        acpSessionRegistry.remove('machine-a', 'legacy-pending'),
+      ).toThrow('Ambiguous');
+      await expect(
+        releaseThread('machine-a', 'legacy-pending'),
+      ).rejects.toThrow('Ambiguous');
+      expect(entryA.client.shutdown).not.toHaveBeenCalled();
+      expect(stopOnAgentlet).not.toHaveBeenCalled();
+      response.resolve({ sessionId: 'pending-peer-native', pid: 202 });
+      await pending;
+      await releaseThread('machine-a', 'legacy-pending', namespaceB);
+      expect(
+        acpSessionRegistry.get('machine-a', 'legacy-pending', namespaceA),
+      ).toBe(entryA);
+    } finally {
+      response.resolve({ sessionId: 'pending-peer-native', pid: 202 });
+      await pending.catch(() => undefined);
+      await releaseThread('machine-a', 'legacy-pending', namespaceB);
+      acpSessionRegistry.remove('machine-a', 'legacy-pending', namespaceA);
+    }
+  });
+
+  it('coalesces scoped startup, fences cleanup admissions, and lets another namespace progress', async () => {
+    const started = Promise.withResolvers<void>();
+    const response = Promise.withResolvers<{
+      sessionId: string;
+      pid: number;
+    }>();
+    const stopOnAgentlet = vi.fn(async () => ({
+      stopped: true,
+      disposition: 'stopped',
+    }));
+    const spawnOnAgentlet = vi.fn(
+      (
+        _id: string,
+        args: { sessionSpec: { env?: Record<string, string> } },
+      ) => {
+        if (args.sessionSpec.env?.['OWNER'] === 'a') {
+          started.resolve();
+          return response.promise;
+        }
+        return Promise.resolve({ sessionId: 'independent-peer', pid: 303 });
+      },
+    );
+    host.gateway = {
+      getAgentlet: () => ({ agentletId: 'machine-a', status: 'connected' }),
+      getSession: () => ({ status: 'connected' }),
+      spawnOnAgentlet,
+      stopOnAgentlet,
+    };
+    const openA = () =>
+      ensureAgentForThread(
+        'machine-a',
+        'cleanup-pending',
+        recipe,
+        undefined,
+        { OWNER: 'a' },
+        600,
+        'Deployment',
+        namespaceA,
+      );
+    const first = openA();
+    const coalesced = openA();
+    let cleanup: Promise<void> | undefined;
+    try {
+      await started.promise;
+      cleanup = releaseThread('machine-a', 'cleanup-pending', namespaceA);
+      await expect(openA()).rejects.toThrow('closing');
+      const peer = await ensureAgentForThread(
+        'machine-a',
+        'cleanup-pending',
+        recipe,
+        undefined,
+        { OWNER: 'b' },
+        600,
+        'Deployment',
+        namespaceB,
+      );
+      expect(peer.sessionId).toBe('independent-peer');
+      expect(stopOnAgentlet).not.toHaveBeenCalled();
+      response.resolve({ sessionId: 'owned-late-native', pid: 202 });
+      expect(await first).toEqual(await coalesced);
+      await cleanup;
+      expect(stopOnAgentlet).toHaveBeenCalledTimes(1);
+      expect(stopOnAgentlet).toHaveBeenCalledWith('machine-a', {
+        sessionId: 'owned-late-native',
+      });
+      await releaseThread('machine-a', 'cleanup-pending', namespaceB);
+    } finally {
+      response.resolve({ sessionId: 'owned-late-native', pid: 202 });
+      await Promise.allSettled([
+        first,
+        coalesced,
+        ...(cleanup ? [cleanup] : []),
+      ]);
+      await releaseThread('machine-a', 'cleanup-pending', namespaceA);
+      await releaseThread('machine-a', 'cleanup-pending', namespaceB);
+    }
   });
 });

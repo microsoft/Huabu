@@ -19,6 +19,7 @@ import {
 } from './pi-models.js';
 import { getPersistedSecret, getSecret } from '../../security/secret-store.js';
 import { getLogger } from '../../utils/logger.js';
+import { personalSettingsOwner } from '../identity/personal-settings.js';
 
 import type {
   Api,
@@ -69,7 +70,7 @@ interface PendingLoginSession {
 }
 
 /** In-flight login state — captures the abort controller and auth info for the frontend. */
-let pendingLogin: PendingLoginSession | null = null;
+const pendingLogins = new Map<string | null, PendingLoginSession>();
 
 /**
  * Start the GitHub Copilot device code flow via pi-ai.
@@ -82,10 +83,12 @@ export async function startDeviceCodeFlow(
   verificationUri: string;
   interval: number;
 }> {
-  // Cancel any existing flow
+  const owner = personalSettingsOwner();
+  const pendingLogin = pendingLogins.get(owner);
+  // Cancel only this settings owner's existing flow.
   if (pendingLogin) {
     pendingLogin.abortController.abort();
-    pendingLogin = null;
+    pendingLogins.delete(owner);
   }
 
   const abortController = new AbortController();
@@ -157,7 +160,7 @@ export async function startDeviceCodeFlow(
     });
   });
 
-  pendingLogin = session;
+  pendingLogins.set(owner, session);
 
   // Wait for onAuth callback or timeout
   await Promise.race([
@@ -174,7 +177,7 @@ export async function startDeviceCodeFlow(
       'oauth device-code flow failed before code was issued',
     );
     abortController.abort();
-    pendingLogin = null;
+    if (pendingLogins.get(owner) === session) pendingLogins.delete(owner);
     throw err;
   });
 
@@ -192,6 +195,8 @@ export async function startDeviceCodeFlow(
 export async function pollDeviceCode(
   provider = 'github-copilot',
 ): Promise<'pending' | 'complete' | 'expired'> {
+  const owner = personalSettingsOwner();
+  const pendingLogin = pendingLogins.get(owner);
   if (!pendingLogin || pendingLogin.provider !== provider) {
     throw new Error(
       'No pending OAuth session. Call startDeviceCodeFlow first.',
@@ -216,7 +221,7 @@ export async function pollDeviceCode(
       { provider, elapsedMs: Date.now() - pendingLogin.startedAt },
       'oauth login complete',
     );
-    pendingLogin = null;
+    if (pendingLogins.get(owner) === pendingLogin) pendingLogins.delete(owner);
     return 'complete';
   }
 
@@ -324,9 +329,11 @@ export async function verifyOAuthCredentials(
  * Clear stored OAuth credentials (logout).
  */
 export async function logoutOAuth(provider = 'github-copilot'): Promise<void> {
+  const owner = personalSettingsOwner();
+  const pendingLogin = pendingLogins.get(owner);
   if (pendingLogin && pendingLogin.provider === provider) {
     pendingLogin.abortController.abort();
-    pendingLogin = null;
+    pendingLogins.delete(owner);
   }
   // Nothing persisted (e.g. env-only headless / read-only store) → logout is a
   // no-op success; skip the delete a non-writable store would reject.

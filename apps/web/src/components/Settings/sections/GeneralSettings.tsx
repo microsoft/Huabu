@@ -15,6 +15,7 @@ import { getElectronBridge } from '@/hooks/useElectron';
 import { useEffectiveInputMode } from '@/hooks/useInputMode';
 import { supportedLngs, type SupportedLanguage } from '@/i18n';
 import useCanvasStore from '@/store/canvasStore';
+import { useManagesDeployment } from '@/store/identityStore';
 import { useToolStore, type InputModePreference } from '@/store/toolStore';
 import { useWorkspaceStore } from '@/store/workspaceStore';
 import { writeApplicationPreference } from '@/utils/desktopStorage';
@@ -54,6 +55,7 @@ export const GeneralSettings: React.FC = () => {
   const effectiveInputMode = useEffectiveInputMode();
   const { status: updateStatus, check: checkForUpdates } = useAppUpdate();
   const updaterAvailable = !!getElectronBridge()?.updater;
+  const managesDeployment = useManagesDeployment();
 
   const current = (i18n.resolvedLanguage ?? i18n.language) as SupportedLanguage;
 
@@ -138,7 +140,7 @@ export const GeneralSettings: React.FC = () => {
           </Button>
         </SettingRow>
       )}
-      {!updaterAvailable && <CanaryRedeploySettings />}
+      {!updaterAvailable && managesDeployment && <CanaryRedeploySettings />}
       <SettingRow
         title={t('settings.inputMode')}
         description={t('settings.inputModeDescription')}

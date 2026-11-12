@@ -29,6 +29,7 @@ import { resolveArtifactUrl } from '@/api/artifact';
 import { useEffectiveInputMode } from '@/hooks/useInputMode';
 import { useLinkFollowModifierHeld } from '@/hooks/useMultiSelectModifier';
 import { useSearchSource } from '@/hooks/useSearchSource';
+import { trackTextSelectionGesture } from '@/utils/textSelectionGesture';
 
 import { attachBlockDragListeners } from './blockDrag';
 import {
@@ -70,6 +71,7 @@ export interface MilkdownPreviewProps {
 
 export interface MilkdownPreviewSelection extends MilkdownTextSelection {
   position: { x: number; y: number };
+  selectionRect?: DOMRect;
 }
 
 /**
@@ -259,6 +261,7 @@ export function MilkdownPreview(
     };
     const report = () => {
       frame = undefined;
+      if (selectingWithMouseRef.current) return;
       const instance = instanceRef.current;
       const native = mountRoot.ownerDocument.getSelection();
       const editor = mountRoot.querySelector('.ProseMirror');
@@ -285,7 +288,6 @@ export function MilkdownPreview(
       if (!snapshot || !rect) {
         clearMousePosition();
         onTextSelectionRef.current?.(null);
-        if (!selectingWithMouseRef.current) syncPendingMarkdown();
         return;
       }
       let position: { x: number; y: number };
@@ -305,7 +307,11 @@ export function MilkdownPreview(
             ? { x: focusRect.left, y: focusRect.bottom }
             : { x: rect.right, y: rect.bottom };
       }
-      onTextSelectionRef.current?.({ ...snapshot, position });
+      onTextSelectionRef.current?.({
+        ...snapshot,
+        position,
+        selectionRect: rect,
+      });
     };
     const schedule = () => {
       const native = mountRoot.ownerDocument.getSelection();
@@ -320,27 +326,15 @@ export function MilkdownPreview(
       if (frame !== undefined) cancelAnimationFrame(frame);
       frame = requestAnimationFrame(report);
     };
-    const handleMouseDown = (event: MouseEvent) => {
-      if (event.button !== 0) return;
+    const handleMouseDown = () => {
       selectingWithMouseRef.current = true;
       clearMousePosition();
+      onTextSelectionRef.current?.(null);
     };
-    const handleMouseUp = (event: MouseEvent) => {
-      if (event.button !== 0) return;
-      if (
-        !selectingWithMouseRef.current &&
-        (!(event.target instanceof Node) || !mountRoot.contains(event.target))
-      ) {
-        return;
-      }
+    const handleMouseUp = (event: MouseEvent | null) => {
       selectingWithMouseRef.current = false;
-      mousePosition = { x: event.clientX, y: event.clientY };
+      mousePosition = event ? { x: event.clientX, y: event.clientY } : null;
       mouseSelectionRect = null;
-      schedule();
-    };
-    const handleDragEnd = () => {
-      selectingWithMouseRef.current = false;
-      clearMousePosition();
       schedule();
     };
     const handleKeyUp = () => {
@@ -348,19 +342,19 @@ export function MilkdownPreview(
       schedule();
     };
     const doc = mountRoot.ownerDocument;
+    const stopGesture = trackTextSelectionGesture(
+      mountRoot,
+      handleMouseDown,
+      handleMouseUp,
+    );
     doc.addEventListener('selectionchange', schedule);
-    mountRoot.addEventListener('mousedown', handleMouseDown);
-    mountRoot.addEventListener('dragend', handleDragEnd);
-    doc.addEventListener('mouseup', handleMouseUp);
     mountRoot.addEventListener('keyup', handleKeyUp);
     window.addEventListener('scroll', schedule, true);
     window.addEventListener('resize', schedule);
     return () => {
       if (frame !== undefined) cancelAnimationFrame(frame);
+      stopGesture();
       doc.removeEventListener('selectionchange', schedule);
-      mountRoot.removeEventListener('mousedown', handleMouseDown);
-      mountRoot.removeEventListener('dragend', handleDragEnd);
-      doc.removeEventListener('mouseup', handleMouseUp);
       mountRoot.removeEventListener('keyup', handleKeyUp);
       window.removeEventListener('scroll', schedule, true);
       window.removeEventListener('resize', schedule);

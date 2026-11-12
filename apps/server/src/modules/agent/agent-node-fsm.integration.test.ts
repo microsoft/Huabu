@@ -328,7 +328,10 @@ forEachProductProfile((profile, label) => {
     });
 
     it('rejects draft edits nonblockingly during admission and allows fresh projection writes', async () => {
-      const release = acquireAgentTurn(target.threadId);
+      const release = acquireAgentTurn(
+        target.threadId,
+        canvasAcpNamespace(target.canvasId),
+      );
       if (!release) throw new Error('Unexpected busy thread');
       try {
         await expect(
@@ -496,7 +499,10 @@ forEachProductProfile((profile, label) => {
     });
 
     it('allows a layout PUT with unchanged preparation while a prompt is admitted', async () => {
-      const release = acquireAgentTurn(target.threadId);
+      const release = acquireAgentTurn(
+        target.threadId,
+        canvasAcpNamespace(target.canvasId),
+      );
       if (!release) throw new Error('Unexpected busy thread');
       const app = fastify();
       try {
@@ -553,7 +559,10 @@ forEachProductProfile((profile, label) => {
       );
       if (!inserted || inserted.type !== 'INSERT_NODE')
         throw new Error('Text was not created');
-      const release = acquireAgentTurn(target.threadId);
+      const release = acquireAgentTurn(
+        target.threadId,
+        canvasAcpNamespace(target.canvasId),
+      );
       if (!release) throw new Error('Unexpected busy thread');
       try {
         await withCanvasMutex(target.canvasId, () =>

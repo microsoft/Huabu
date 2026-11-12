@@ -121,7 +121,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  acpSessionRegistry.remove(agentletId, threadId);
+  acpSessionRegistry.remove(agentletId, threadId, namespace);
   setAcpProfileCachePort(null);
 });
 
@@ -191,6 +191,7 @@ describe('ACP Handle session self-repair', () => {
       undefined,
       undefined,
       'Deployment',
+      namespace,
     );
     expect(entry).toMatchObject({
       cwd: '/original',
@@ -228,46 +229,51 @@ describe('ACP Handle session self-repair', () => {
   it('repairs a closed committed entry from its latest session state', async () => {
     const oldEntry = closedEntry();
     acpSessionRegistry.set(agentletId, threadId, oldEntry);
-    let finishSpawn:
-      | ((value: { sessionId: string; pid: number }) => void)
-      | undefined;
+    const spawn = Promise.withResolvers<{ sessionId: string; pid: number }>();
     orchestrator.ensureAgentForThread.mockImplementationOnce(
-      () =>
-        new Promise((resolve) => {
-          finishSpawn = resolve;
-        }),
+      () => spawn.promise,
     );
 
     const first = ensureAcpSession(ensureOptions());
     const second = ensureAcpSession(ensureOptions());
-    await vi.waitFor(() => {
-      expect(orchestrator.ensureAgentForThread).toHaveBeenCalledOnce();
-    });
+    try {
+      await vi.waitFor(() => {
+        expect(orchestrator.ensureAgentForThread).toHaveBeenCalledOnce();
+      });
 
-    expect(acpSessionRegistry.get(agentletId, threadId)).toBe(oldEntry);
-    expect(orchestrator.ensureAgentForThread).toHaveBeenCalledWith(
-      agentletId,
-      threadId,
-      recipe,
-      'session-old',
-      undefined,
-      undefined,
-      'Deployment',
-    );
+      expect(acpSessionRegistry.get(agentletId, threadId, namespace)).toBe(
+        oldEntry,
+      );
+      expect(orchestrator.ensureAgentForThread).toHaveBeenCalledWith(
+        agentletId,
+        threadId,
+        recipe,
+        'session-old',
+        undefined,
+        undefined,
+        'Deployment',
+        namespace,
+      );
 
-    finishSpawn?.({ sessionId: 'session-repaired', pid: 42 });
-    const [repaired, coalesced] = await Promise.all([first, second]);
+      spawn.resolve({ sessionId: 'session-repaired', pid: 42 });
+      const [repaired, coalesced] = await Promise.all([first, second]);
 
-    expect(coalesced).toBe(repaired);
-    expect(repaired).toMatchObject({
-      sessionId: 'session-repaired',
-      persistedToDisk: true,
-      initialPreambleDelivered: true,
-      currentModeId: 'ask',
-      currentModelId: 'model-1',
-    });
-    expect(oldEntry.client.shutdown).toHaveBeenCalledWith('session_replaced');
-    expect(acpSessionRegistry.get(agentletId, threadId)).toBe(repaired);
+      expect(coalesced).toBe(repaired);
+      expect(repaired).toMatchObject({
+        sessionId: 'session-repaired',
+        persistedToDisk: true,
+        initialPreambleDelivered: true,
+        currentModeId: 'ask',
+        currentModelId: 'model-1',
+      });
+      expect(oldEntry.client.shutdown).toHaveBeenCalledWith('session_replaced');
+      expect(acpSessionRegistry.get(agentletId, threadId, namespace)).toBe(
+        repaired,
+      );
+    } finally {
+      spawn.resolve({ sessionId: 'session-repaired', pid: 42 });
+      await Promise.allSettled([first, second]);
+    }
   });
 
   it('does not resume an uncommitted empty session', async () => {
@@ -291,6 +297,7 @@ describe('ACP Handle session self-repair', () => {
       undefined,
       undefined,
       'Deployment',
+      namespace,
     );
     expect(repaired.persistedToDisk).toBe(false);
   });

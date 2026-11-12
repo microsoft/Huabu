@@ -7,8 +7,6 @@ import {
   FRAME_POINTER_CAPTURE_MARGIN,
   moveNodeIntoFrame,
   moveNodeOutOfFrame,
-  pickColumnDropTarget,
-  pickRowDropTarget,
   planStructuredDrop,
   withMasonryLayoutOrder,
   readFrameGridConfig,
@@ -23,7 +21,12 @@ import {
   type StructuredDropTarget,
 } from '@huabu/shared/canvas-engine';
 
-import { resolveMasonryDrop } from '../../masonryDrop';
+import {
+  getGridDragGroup,
+  gridDragRequests,
+  resolveGridDrop,
+  resolveMasonryDrop,
+} from '../../masonryDrop';
 import { extractNodeRef, canvasSizeFromStyle } from '../utils';
 import {
   applyPendingMutations,
@@ -396,11 +399,14 @@ function collectGridDropPlans(
     nodeId: string;
     frameId: string;
     target: StructuredDropTarget;
+    rowTarget?: StructuredDropTarget;
+    draggedNodeIds?: string[];
   },
   zoom = 1,
 ): GridDropPlan[] {
   const plans: GridDropPlan[] = [];
   for (const id of draggedIds) {
+    if (plans.some((plan) => plan.nodeId === id)) continue;
     const post = postDragNodes.find((n) => n.id === id);
     if (!post?.parentId) continue;
     const frame = preDragNodes.find((n) => n.id === post.parentId);
@@ -408,6 +414,14 @@ function collectGridDropPlans(
     const cfg = readFrameGridConfig(frame);
     if (!cfg) continue;
     const count = resolveFrameTrackCount(preDragNodes, frame.id);
+    const group = getGridDragGroup(preDragNodes, frame.id, draggedIds);
+    const gridGroup = group?.every(
+      (node) =>
+        postDragNodes.find((post) => post.id === node.id)?.parentId ===
+        frame.id,
+    )
+      ? group
+      : null;
 
     // Convert cursor → frame-local space; fall back to child top-left.
     const framePoint = pointerFlowPosition
@@ -417,22 +431,63 @@ function collectGridDropPlans(
         }
       : { x: post.position.x, y: post.position.y };
 
-    const previous =
-      cachedDrop?.nodeId === id && cachedDrop.frameId === frame.id
-        ? cachedDrop.target
+    const cached =
+      (draggedIds.length === 1 ||
+        (gridGroup &&
+          cachedDrop?.draggedNodeIds?.length === draggedIds.length &&
+          draggedIds.every((nodeId) =>
+            cachedDrop.draggedNodeIds?.includes(nodeId),
+          ))) &&
+      cachedDrop?.nodeId === id &&
+      cachedDrop.frameId === frame.id
+        ? cachedDrop
+        : undefined;
+    const previous = cached?.target;
+    const grid =
+      cfg.axis === 'grid'
+        ? resolveGridDrop(preDragNodes, frame.id, framePoint, {
+            edges,
+            zoom,
+            allowInsert: false,
+            previous: cached,
+          })
         : undefined;
     const target =
-      cfg.axis === 'grid'
-        ? pickColumnDropTarget(preDragNodes, frame.id, framePoint.x, edges)
-        : previous && (previous.kind === 'insert-new' || !pointerFlowPosition)
-          ? previous
-          : resolveMasonryDrop(preDragNodes, frame.id, cfg.axis, framePoint, {
+      previous && (previous.kind === 'insert-new' || !pointerFlowPosition)
+        ? previous
+        : (grid?.target ??
+          resolveMasonryDrop(
+            preDragNodes,
+            frame.id,
+            cfg.axis === 'row' ? 'row' : 'column',
+            framePoint,
+            {
               edges,
               zoom,
               previous,
               allowInsert: draggedIds.length === 1 && !!pointerFlowPosition,
-            }).target;
+            },
+          ).target);
 
+    const rowTarget =
+      cached?.rowTarget &&
+      (cached.rowTarget.kind === 'insert-new' || !pointerFlowPosition)
+        ? cached.rowTarget
+        : grid?.rowTarget;
+    if (gridGroup && rowTarget) {
+      plans.push(
+        ...gridDragRequests(gridGroup, id, { target, rowTarget }, count).map(
+          (request) => ({
+            ...request,
+            nodeId: request.nodeId as CanvasNodeId,
+            frameId: frame.id,
+            axis: cfg.axis,
+            count,
+          }),
+        ),
+      );
+      continue;
+    }
     plans.push({
       nodeId: id as CanvasNodeId,
       frameId: frame.id,
@@ -441,12 +496,7 @@ function collectGridDropPlans(
       target,
       ...(cfg.axis === 'grid'
         ? {
-            rowTarget: pickRowDropTarget(
-              preDragNodes,
-              frame.id,
-              framePoint.y,
-              edges,
-            ),
+            rowTarget,
           }
         : {}),
     });

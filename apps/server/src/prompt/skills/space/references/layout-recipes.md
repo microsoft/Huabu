@@ -105,7 +105,7 @@ In structured layouts, accent doubles as a layout primitive: pick **one accent t
 ## Post-layout cleanup
 
 - Optionally call `ALIGN_NODES` on nodes within the same row / column for pixel-perfect alignment.
-- Call `DISTRIBUTE_NODES` on a row / column of ≥3 nodes for even spacing.
+- Use `DISTRIBUTE_NODES` for crowding, not equal spacing; inspect the resulting layout.
 - Both operate on the created nodes, so run them in the **follow-up call** (alongside `CONNECT_NODES`) using the ids the create step returned in `results[].nodes` — not in the create call itself.
 
 ## Recipe: row-track flowchart / research roadmap
@@ -137,7 +137,7 @@ Keep edges minimal — let proximity and alignment imply relationships. Only con
 1. **Create call** — `CREATE_NODES` (headers + main + sub, all with explicit positions). Read the assigned ids back from `results[].nodes`.
 2. **Follow-up call**, using those ids:
    - `CONNECT_NODES` (horizontal sequence + cross-track verticals).
-   - `ALIGN_NODES` (`center-v` per row) + `DISTRIBUTE_NODES` (per row).
+   - `ALIGN_NODES` (`center-v` per row) if needed.
 
 ### Example 3-track layout
 

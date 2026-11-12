@@ -34,11 +34,22 @@ export type RecentCanvasConversationResponse = z.infer<
   typeof recentCanvasConversationResponseSchema
 >;
 
+/** The caller's current Space permissions; every mutation remains server-authorized. */
+export const canvasAccessSchema = z.object({
+  /** May change node content and canvas structure. */
+  write: z.boolean(),
+  /** May rename, delete, or change ownership/parenthood of this Space. */
+  manage: z.boolean(),
+});
+export type CanvasAccess = z.infer<typeof canvasAccessSchema>;
+
 export interface GetCanvasResponse {
   canvasId: string;
   title: string | null;
   version: number;
   state: unknown;
+  /** Co-delivered with the loaded content; refreshed independently without discarding edits. */
+  access: CanvasAccess;
 }
 
 /** Body for `PUT /api/canvas/:canvasId`. */

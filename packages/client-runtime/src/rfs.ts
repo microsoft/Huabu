@@ -34,8 +34,9 @@ function header(value: string, name: string): string {
   return value;
 }
 function connection(env: NodeJS.ProcessEnv) {
-  if (!env.HUABU_RFS_URL || !env.AGENTLET_TOKEN)
-    throw new Error('HUABU_RFS_URL and AGENTLET_TOKEN are required');
+  const token = env.HUABU_RFS_TOKEN?.trim() || env.AGENTLET_TOKEN;
+  if (!env.HUABU_RFS_URL || !token)
+    throw new Error('HUABU_RFS_URL and a reachback credential are required');
   let url: URL;
   try {
     url = new URL(env.HUABU_RFS_URL);
@@ -55,7 +56,7 @@ function connection(env: NodeJS.ProcessEnv) {
   return {
     base: url.href.replace(/\/+$/, ''),
     headers: {
-      Authorization: header(`Bearer ${env.AGENTLET_TOKEN}`, 'AGENTLET_TOKEN'),
+      Authorization: header(`Bearer ${token}`, 'HUABU_RFS_TOKEN'),
     },
   };
 }

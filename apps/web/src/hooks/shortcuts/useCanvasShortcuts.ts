@@ -15,9 +15,15 @@ import {
   type OpenSpaceShortcutDetail,
 } from '@/components/Nodes/spacePreview/spaceShortcutEvents';
 import { isVideoControlTarget } from '@/components/Nodes/video/videoInteraction';
+import {
+  resolveCanvasToolShortcut,
+  resolveEffectiveCanvasTool,
+} from '@/components/Panels/Canvas/canvasInputPolicy';
 import { EDIT_EDGE_LABEL_EVENT } from '@/components/Panels/Canvas/edges/LabelledEdge';
 import { requestCreateChildSpace } from '@/components/Space/createChildSpaceAction';
 import { matchesShortcut } from '@/config/shortcuts';
+import { readIsNotMouse, useIsNotMouse } from '@/hooks/useInputMode';
+import { useToolStore, type CanvasTool } from '@/store/toolStore';
 import { fitCanvasContent } from '@/utils/canvasViewport';
 import { pageLifecycle } from '@/utils/pageLifecycle';
 
@@ -57,7 +63,7 @@ export interface UseCanvasShortcutsOptions {
   disabled?: boolean;
 }
 
-export type CanvasTool = 'select' | 'lasso' | 'pan';
+export type { CanvasTool } from '@/store/toolStore';
 
 function hasNativeCopySelection(target: EventTarget | null): boolean {
   if (
@@ -91,7 +97,9 @@ export function useCanvasShortcuts(
   options: UseCanvasShortcutsOptions = {},
 ): {
   tool: CanvasTool;
-  setTool: React.Dispatch<React.SetStateAction<CanvasTool>>;
+  setTool: (tool: CanvasTool) => void;
+  nativePanHeld: boolean;
+  readTool: () => CanvasTool;
 } {
   const { rfInstanceRef, mousePositionRef } = refs;
   const { disabled = false } = options;
@@ -109,30 +117,64 @@ export function useCanvasShortcuts(
   const canvasId = useCanvasStore((s) => s.canvasId);
 
   // --- Tool state (select / lasso / pan) ---
-  const [tool, setTool] = useState<CanvasTool>('select');
-  const previousToolRef = useRef<Exclude<CanvasTool, 'pan'>>('select');
+  const pendingNodeType = useToolStore((state) => state.pendingNodeType);
+  const mouseToolPreference = useToolStore(
+    (state) => state.mouseToolPreference,
+  );
+  const explicitLassoActive = useToolStore(
+    (state) => state.explicitLassoActive,
+  );
+  const toolIntent = useToolStore((state) => state.toolIntent);
+  const isNotMouse = useIsNotMouse();
+  const [temporaryPanIntent, setTemporaryPanIntent] = useState<number | null>(
+    null,
+  );
+  const [nativePanHeld, setNativePanHeld] = useState(false);
+  const nativePanHeldRef = useRef(false);
   const temporaryPanRef = useRef(false);
   const temporaryPanPointerRef = useRef<number | null>(null);
   const temporaryPanMouseUpPendingRef = useRef(false);
   const spacePressedRef = useRef(false);
 
-  useEffect(() => {
-    if (tool !== 'pan') {
-      previousToolRef.current = tool;
-    }
-  }, [tool]);
+  const temporaryPanIntentRef = useRef<number | null>(null);
+  const tool = resolveEffectiveCanvasTool(
+    { pendingNodeType, mouseToolPreference, explicitLassoActive },
+    isNotMouse,
+    temporaryPanIntent === toolIntent || nativePanHeld,
+  );
+  const readTool = useCallback(() => {
+    const state = useToolStore.getState();
+    return resolveEffectiveCanvasTool(
+      state,
+      readIsNotMouse(),
+      nativePanHeldRef.current ||
+        (temporaryPanRef.current &&
+          temporaryPanIntentRef.current === state.toolIntent),
+    );
+  }, []);
+  const setTool = useCallback((next: CanvasTool) => {
+    const isNotMouse = readIsNotMouse();
+    useToolStore
+      .getState()
+      .chooseCanvasTool(
+        resolveCanvasToolShortcut(next, isNotMouse),
+        isNotMouse,
+      );
+  }, []);
 
   // Space key: temporarily switch to pan mode while held
   useEffect(() => {
     if (disabled) return;
 
     const restoreTemporaryPan = () => {
-      if (!temporaryPanRef.current) return;
       temporaryPanRef.current = false;
       temporaryPanPointerRef.current = null;
       temporaryPanMouseUpPendingRef.current = false;
       spacePressedRef.current = false;
-      setTool((prev) => (prev === 'pan' ? previousToolRef.current : prev));
+      temporaryPanIntentRef.current = null;
+      setTemporaryPanIntent(null);
+      nativePanHeldRef.current = false;
+      setNativePanHeld(false);
     };
 
     const onKeyDown = (e: KeyboardEvent) => {
@@ -145,13 +187,14 @@ export function useCanvasShortcuts(
       // keydown listener for the duration of the drag). Skip the
       // pan-tool switch so the two interpretations don't fight.
       if (isSnapSessionActive()) return;
+      if (readIsNotMouse()) return;
       spacePressedRef.current = true;
-      setTool((prev) => {
-        if (prev === 'pan') return prev;
-        e.preventDefault();
-        temporaryPanRef.current = true;
-        return 'pan';
-      });
+      if (resolveEffectiveCanvasTool(useToolStore.getState(), false) === 'pan')
+        return;
+      e.preventDefault();
+      temporaryPanRef.current = true;
+      temporaryPanIntentRef.current = useToolStore.getState().toolIntent;
+      setTemporaryPanIntent(temporaryPanIntentRef.current);
     };
     const onKeyUp = (e: KeyboardEvent) => {
       if (e.key !== ' ') return;
@@ -165,8 +208,12 @@ export function useCanvasShortcuts(
     };
     const onPointerDown = (e: PointerEvent) => {
       if (isOutsideCanvasInteraction(e.target)) return;
-      if (!temporaryPanRef.current || e.button !== 0 || !e.isPrimary) return;
+      if (e.button !== 0 || !e.isPrimary || readTool() !== 'pan') return;
       temporaryPanPointerRef.current = e.pointerId;
+      if (e.pointerType === 'mouse') {
+        nativePanHeldRef.current = true;
+        setNativePanHeld(true);
+      }
     };
     const onPointerUp = (e: PointerEvent) => {
       if (temporaryPanPointerRef.current !== e.pointerId) return;
@@ -177,10 +224,19 @@ export function useCanvasShortcuts(
       }
       temporaryPanMouseUpPendingRef.current = true;
     };
-    const onMouseUp = () => {
-      if (!temporaryPanMouseUpPendingRef.current) return;
+    const onMouseUp = (e: MouseEvent) => {
+      const recoversHeldNativePan = e.button === 0 && nativePanHeldRef.current;
+      if (!temporaryPanMouseUpPendingRef.current && !recoversHeldNativePan)
+        return;
+      temporaryPanPointerRef.current = null;
       temporaryPanMouseUpPendingRef.current = false;
-      if (!spacePressedRef.current) restoreTemporaryPan();
+      nativePanHeldRef.current = false;
+      setNativePanHeld(false);
+      if (
+        !spacePressedRef.current ||
+        temporaryPanIntentRef.current !== useToolStore.getState().toolIntent
+      )
+        restoreTemporaryPan();
     };
     const onPointerCancel = (e: PointerEvent) => {
       if (temporaryPanPointerRef.current !== e.pointerId) return;
@@ -208,7 +264,7 @@ export function useCanvasShortcuts(
       document.removeEventListener('visibilitychange', onVisibilityChange);
       restoreTemporaryPan();
     };
-  }, [disabled]);
+  }, [disabled, readTool]);
 
   // Prevents double-paste between native paste event and async Clipboard API.
   const pasteHandledRef = useRef(false);
@@ -623,5 +679,5 @@ export function useCanvasShortcuts(
     return () => window.removeEventListener('paste', onPaste, true);
   }, [disabled, getFlowPos, pasteFiles, pasteText, pasteNodes]);
 
-  return { tool, setTool };
+  return { tool, setTool, nativePanHeld, readTool };
 }

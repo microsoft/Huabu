@@ -40,6 +40,76 @@ afterEach(() => {
 });
 
 describe('track insertion dwell', () => {
+  it.each(['column', 'row'] as const)(
+    'arms only the Grid %s axis after 300ms and retains its gap',
+    (axis) => {
+      const initial = preview();
+      initial.context.axis = 'grid';
+      if (!initial.masonry?.gap) throw new Error('Missing fixture gap');
+      initial.masonry.rowTarget = { kind: 'into-existing', slot: 0 };
+      initial.masonry.gap.axis = axis;
+      store().setStructuredDropPreview(initial);
+      vi.advanceTimersByTime(150);
+      store().setStructuredDropPreview({
+        ...initial,
+        masonry: {
+          ...initial.masonry,
+          gap: { ...initial.masonry.gap, x: 999 },
+        },
+      });
+      expect(store().structuredDropPreview?.masonry?.gap).toEqual(
+        initial.masonry.gap,
+      );
+      vi.advanceTimersByTime(149);
+      expect(store().structuredDropPreview?.kind).toBe('into-existing');
+      vi.advanceTimersByTime(1);
+      const armed = store().structuredDropPreview?.masonry;
+      expect(armed?.target.kind).toBe(
+        axis === 'column' ? 'insert-new' : 'into-existing',
+      );
+      expect(armed?.rowTarget?.kind).toBe(
+        axis === 'row' ? 'insert-new' : 'into-existing',
+      );
+      store().setStructuredDropPreview({
+        ...initial,
+        masonry: {
+          ...initial.masonry,
+          gap: { ...initial.masonry.gap, x: 999 },
+        },
+      });
+      expect(store().structuredDropPreview?.masonry).toEqual(armed);
+      store().clearStructuredDropPreview();
+      vi.advanceTimersByTime(300);
+      expect(store().structuredDropPreview).toBeNull();
+    },
+  );
+
+  it('restarts Grid dwell when switching from a column gap to a row gap', () => {
+    const initial = preview();
+    initial.context.axis = 'grid';
+    if (!initial.masonry?.gap) throw new Error('Missing fixture gap');
+    initial.masonry.rowTarget = { kind: 'into-existing', slot: 0 };
+    initial.masonry.gap.axis = 'column';
+    store().setStructuredDropPreview(initial);
+    vi.advanceTimersByTime(250);
+    store().setStructuredDropPreview({
+      ...initial,
+      masonry: {
+        ...initial.masonry,
+        gap: { ...initial.masonry.gap, axis: 'row' },
+      },
+    });
+    vi.advanceTimersByTime(299);
+    expect(store().structuredDropPreview?.kind).toBe('into-existing');
+    vi.advanceTimersByTime(1);
+    expect(store().structuredDropPreview?.masonry?.rowTarget?.kind).toBe(
+      'insert-new',
+    );
+    expect(store().structuredDropPreview?.masonry?.target.kind).toBe(
+      'into-existing',
+    );
+  });
+
   it('arms after exactly 300ms without another pointer move or changing geometry', () => {
     const initial = preview();
     store().setStructuredDropPreview(initial);
@@ -67,7 +137,7 @@ describe('track insertion dwell', () => {
     });
   });
 
-  it.each(['gap', 'node', 'frame', 'axis'] as const)(
+  it.each(['gap', 'node', 'frame', 'axis', 'selection'] as const)(
     'restarts the timer after changing %s',
     (change) => {
       store().setStructuredDropPreview(preview());
@@ -77,6 +147,7 @@ describe('track insertion dwell', () => {
       if (change === 'node') next.nodeId = 'other';
       if (change === 'frame') next.frameId = 'other';
       if (change === 'axis') next.context.axis = 'row';
+      if (change === 'selection') next.draggedNodeIds = ['node', 'other'];
       store().setStructuredDropPreview(next);
       vi.advanceTimersByTime(100);
       expect(store().structuredDropPreview?.kind).toBe('into-existing');

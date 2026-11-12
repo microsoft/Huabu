@@ -334,6 +334,18 @@ export const quotedCommentSchema = z.object({
   source: z
     .discriminatedUnion('kind', [
       z.object({
+        kind: z.literal('pdf'),
+        canvasId: z.string().min(1),
+        nodeId: z.string().min(1),
+        pages: z.array(z.number().int().positive()).min(1),
+      }),
+      z.object({
+        kind: z.literal('chat'),
+        canvasId: z.string().min(1),
+        threadId: z.string().min(1),
+        messageId: z.string().min(1),
+      }),
+      z.object({
         kind: z.literal('note'),
         canvasId: z.string().min(1),
         nodeId: z.string().min(1),
@@ -469,7 +481,10 @@ export const agentRequestSchema = z
           message: 'Visible Canvas grounding is only valid for Ink requests',
         });
       }
-      if (request.content.length === 0 && !request.quotedComments?.length) {
+      if (
+        !request.content.trim() &&
+        !request.quotedComments?.some((item) => item.comment.trim())
+      ) {
         context.addIssue({
           code: 'custom',
           path: ['content'],

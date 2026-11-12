@@ -33,6 +33,11 @@ export const workspaceCapabilitiesSchema = z.object({
    */
   namedWorkspaces: z.boolean().optional(),
   /**
+   * With `namedWorkspaces`: whether the caller may also open a folder on the
+   * Server as a Workspace, by path. Only where Workspaces are Disk folders.
+   */
+  folderWorkspaces: z.boolean().optional(),
+  /**
    * Whether the caller may create and import Spaces at the top of the current
    * Workspace. Absent means yes: a local caller, or an older server.
    */
@@ -45,7 +50,7 @@ export const workspaceInfoSchema = z.object({
   configured: z.boolean(),
   /** Stable Workspace identity, or null before configuration. */
   workspaceId: z.string().uuid().nullable(),
-  /** Disk path for a local caller or Bubble administrator; otherwise null. */
+  /** The active Workspace's Disk folder; null where Workspaces have none. */
   path: z.string().nullable(),
   /** Persisted display label (defaults to the active path basename), or null. */
   name: z.string().nullable(),
@@ -59,7 +64,7 @@ export type WorkspaceInfo = z.infer<typeof workspaceInfoSchema>;
 export const workspaceDescriptorSchema = z.object({
   workspaceId: z.string().uuid(),
   name: z.string().min(1),
-  /** Disk path in free mode; hidden for managed deployments and Bubble members. */
+  /** Disk folder, where Workspaces have one; hidden for managed deployments. */
   path: z.string().nullable(),
   active: z.boolean(),
 });
@@ -68,9 +73,10 @@ export type WorkspaceDescriptor = z.infer<typeof workspaceDescriptorSchema>;
 /**
  * Body for `POST /api/workspaces`.
  *
- * `path` adopts a Disk folder for a local caller or Bubble administrator.
- * `name` alone creates a Workspace for any Bubble member when
- * `capabilities.namedWorkspaces` is true, or for a local SQL backend.
+ * `path` adopts a Disk folder, for a local caller or any Bubble user; storage
+ * without Workspace folders refuses it. `name` alone creates a Workspace for
+ * any Bubble user when `capabilities.namedWorkspaces` is true, or for a local
+ * SQL backend.
  * The server validates the required form using the caller and storage profile.
  */
 export const workspaceCreateSchema = z.object({

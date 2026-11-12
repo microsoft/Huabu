@@ -74,6 +74,20 @@ export async function createNamedWorkspace(
   });
 }
 
+/**
+ * Open a folder on the Server as a Workspace of the caller's own
+ * (`capabilities.folderWorkspaces`). It is not activated.
+ */
+export async function openFolderWorkspace(
+  path: string,
+): Promise<WorkspaceDescriptor> {
+  return apiFetch<WorkspaceDescriptor>(routes.workspaces, {
+    method: 'POST',
+    json: { path },
+    fallbackMessage: 'Failed to open folder',
+  });
+}
+
 /** Activate a registered Workspace by stable identity. */
 export async function activateWorkspace(
   workspaceId: string,

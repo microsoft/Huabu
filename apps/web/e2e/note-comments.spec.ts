@@ -3,7 +3,10 @@
 
 import { expect, test } from '@playwright/test';
 
-import { openNewCanvas } from './helpers';
+import {
+  expectSelectionToolbarOutsideSelection,
+  openNewCanvas,
+} from './helpers';
 
 import type * as QuestionModule from '../src/components/Nodes/question/questionCompose';
 import type * as CanvasModule from '../src/store/canvasStore';
@@ -14,9 +17,9 @@ import type * as PreviewModule from '../src/store/previewWorkspace/store';
 import type * as ToolModule from '../src/store/toolStore';
 
 for (const mode of ['mouse', 'touch'] as const) {
-  test(`expanded Note ${mode} preview stages an attributed Comment without creating, sending or navigating`, async ({
+  test(`expanded Note ${mode} preview stages a reference and focuses the adjacent conversation without sending`, async ({
     page,
-  }) => {
+  }, testInfo) => {
     await openNewCanvas(page);
     await page.keyboard.press('Escape');
     const canvasId = page.url().split('/canvas/')[1]?.split(/[?#]/)[0];
@@ -136,31 +139,91 @@ for (const mode of ['mouse', 'touch'] as const) {
           selection.addRange(range);
           document.dispatchEvent(new Event('selectionchange'));
         });
-      await page.getByRole('button', { name: 'Comment', exact: true }).tap();
+      await page
+        .getByRole('button', { name: 'Comment on selection', exact: true })
+        .tap();
     } else {
-      await editor.locator('p').first().click({ clickCount: 3 });
-      await page.getByRole('button', { name: 'Comment', exact: true }).click();
+      await editor.locator('p').first().click();
+      const points = await editor
+        .locator('p')
+        .first()
+        .evaluate((paragraph) => {
+          const range = document.createRange();
+          if (!paragraph.firstChild || !paragraph.lastChild)
+            throw new Error('Missing Note text');
+          range.setStart(paragraph.firstChild, 0);
+          range.collapse(true);
+          const start = range.getBoundingClientRect();
+          range.setStart(
+            paragraph.lastChild,
+            paragraph.lastChild.textContent?.length ?? 0,
+          );
+          range.collapse(true);
+          const end = range.getBoundingClientRect();
+          return {
+            x: start.x,
+            y: start.y + start.height / 2,
+            endX: end.x,
+            endY: end.y + end.height / 2,
+          };
+        });
+      await page.mouse.move(points.x, points.y);
+      await page.mouse.down();
+      await page.mouse.move(points.endX, points.endY, { steps: 8 });
+      await expect(page.locator('.selection-context-toolbar')).toHaveCount(0);
+      await page.mouse.up();
+      expect(await page.evaluate(() => window.getSelection()?.toString())).toBe(
+        'Before selected passage after.',
+      );
+      await expect(
+        page.getByRole('button', { name: 'Comment on selection', exact: true }),
+      ).toBeVisible();
+      await page.screenshot({
+        path: testInfo.outputPath('note-selection-toolbar.png'),
+      });
+      await expectSelectionToolbarOutsideSelection(page);
+      await expect(
+        page.locator('.selection-context-toolbar .canvas-context-toolbar'),
+      ).toHaveCount(2);
+      await expect(
+        page
+          .locator('.selection-context-toolbar')
+          .getByRole('button', { name: 'Copy', exact: true }),
+      ).toHaveCount(0);
+      await expect(
+        page
+          .locator('.selection-context-toolbar')
+          .getByRole('button', { name: 'Add as note', exact: true }),
+      ).toHaveCount(0);
+      await expect(page.locator('.ink-agent-destination-trigger')).toHaveCount(
+        0,
+      );
+      await page
+        .getByRole('button', { name: 'Comment on selection', exact: true })
+        .click();
     }
-    await page
-      .getByRole('textbox', { name: 'Comment', exact: true })
-      .fill('Explain the selected claim');
-    await expect(
-      page.getByRole('button', { name: 'Add to input', exact: true }),
-    ).toBeEnabled();
-    const addToInput = page.getByRole('button', {
-      name: 'Add to input',
-      exact: true,
-    });
-    if (mode === 'touch') await addToInput.tap();
-    else await addToInput.click();
-    await expect(
-      page.getByRole('button', { name: 'View input', exact: true }),
-    ).toBeVisible();
     await expect(editor).toBeVisible();
     await expect(editor).toHaveAttribute(
       'contenteditable',
       mode === 'mouse' ? 'true' : 'false',
     );
+    const commentInput = page.getByRole('textbox', {
+      name: 'Comment',
+      exact: true,
+    });
+    await expect(commentInput).toBeVisible();
+    const addComment = page.getByRole('button', {
+      name: 'Add to input',
+      exact: true,
+    });
+    await expect(addComment).toBeDisabled();
+    await expect(
+      page.locator('[data-chat-input-surface] [data-quoted-comment]'),
+    ).toHaveCount(0);
+    await commentInput.fill('Explain this passage');
+    if (mode === 'touch') await addComment.tap();
+    else await addComment.click();
+    await expect(page.locator('textarea[name="agent-message"]')).toBeFocused();
     const after = await page.evaluate(async ({ threadId }) => {
       const previewPath = '/src/store/previewWorkspace/store.ts';
       const canvasPath = '/src/store/canvasStore.ts';
@@ -184,16 +247,15 @@ for (const mode of ['mouse', 'touch'] as const) {
         focus: usePanelStore.getState().focusChatInputRequest,
       };
     }, destination);
-    expect(after.workspace).toEqual(before.workspace);
+    expect(after.workspace.groups).toHaveLength(2);
     expect(after.nodeIds).toEqual(before.nodeIds);
     expect(after.collapsed).toBe(before.collapsed);
     expect(after.viewport).toBe(before.viewport);
-    expect(after.focus).toBeNull();
     expect(after.thread.draft).toBe('Keep these instructions');
     expect(after.thread.pendingQuotedComments).toMatchObject([
       {
         quote: 'Before selected passage after.',
-        comment: 'Explain the selected claim',
+        comment: 'Explain this passage',
         source: {
           kind: 'note',
           canvasId,
@@ -203,7 +265,6 @@ for (const mode of ['mouse', 'touch'] as const) {
       },
     ]);
     expect(turns).toBe(0);
-    await page.getByRole('button', { name: 'View input', exact: true }).click();
     const composer = page.locator('textarea[name="agent-message"]');
     await expect(composer).toHaveValue('Keep these instructions');
     await expect(composer).toBeFocused();
@@ -213,5 +274,47 @@ for (const mode of ['mouse', 'touch'] as const) {
     await expect(page.locator('[data-chat-input-surface]')).not.toContainText(
       'snapshotRevision',
     );
+    if (mode === 'mouse') {
+      await editor.locator('p').first().click({ clickCount: 3 });
+      await page
+        .getByRole('button', { name: 'Comment on selection', exact: true })
+        .click();
+      await page.locator('.ink-agent-destination-trigger').click();
+      const menu = page.getByRole('menu', { name: 'Comment destination' });
+      await expect(
+        menu.getByRole('menuitem', { name: 'Chat Built-In Pi', exact: true }),
+      ).toBeVisible();
+      await menu
+        .getByRole('menuitem', { name: 'Agent Built-In Pi', exact: true })
+        .click();
+      await page
+        .getByRole('textbox', { name: 'Comment', exact: true })
+        .fill('New discussion');
+      await page
+        .getByRole('button', { name: 'Add to input', exact: true })
+        .click();
+      const drafts = await page.evaluate(async () => {
+        const chatPath = '/src/store/chatStore.ts';
+        const { useChatStore } = (await import(chatPath)) as typeof ChatModule;
+        return Object.values(useChatStore.getState().threadsById).filter(
+          (thread) => thread.pendingQuotedComments.length,
+        );
+      });
+      expect(drafts).toHaveLength(2);
+      expect(drafts.every((thread) => thread.messages.length === 0)).toBe(true);
+      expect(await page.locator('.react-flow__node-question').count()).toBe(1);
+      expect(turns).toBe(0);
+      await editor.locator('p').first().click({ clickCount: 3 });
+      await page
+        .getByRole('button', { name: 'Inline math', exact: true })
+        .click();
+      await page
+        .getByRole('textbox', { name: 'Inline math', exact: true })
+        .fill('x + y');
+      await page
+        .getByRole('button', { name: 'Apply inline math', exact: true })
+        .click();
+      await expect(editor.locator('.katex').first()).toBeVisible();
+    }
   });
 }

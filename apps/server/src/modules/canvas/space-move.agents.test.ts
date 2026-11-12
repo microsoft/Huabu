@@ -230,12 +230,16 @@ forEachProductProfile((profile, label) => {
       });
     }
 
-    function assertReleased() {
-      for (const node of nodes) {
-        const release = acquireAgentTurn(String(node.data.threadId));
-        expect(release).not.toBeNull();
-        release?.();
-      }
+    function assertReleased(...additionalSpaces: string[]) {
+      for (const canvasId of [SOURCE, DESTINATION, ...additionalSpaces])
+        for (const node of nodes) {
+          const release = acquireAgentTurn(
+            String(node.data.threadId),
+            canvasAcpNamespace(canvasId),
+          );
+          expect(release).not.toBeNull();
+          release?.();
+        }
     }
 
     async function assertRestored() {
@@ -269,6 +273,115 @@ forEachProductProfile((profile, label) => {
       assertReleased();
     }
 
+    it.each([SOURCE, DESTINATION])(
+      'rejects a held %s admission lease before closing or writing',
+      async (canvasId) => {
+        await seed();
+        const sourceBefore = await storage.space(SOURCE).read();
+        const destinationBefore = await storage.space(DESTINATION).read();
+        const release = acquireAgentTurn(THREAD, canvasAcpNamespace(canvasId));
+        assert.ok(release);
+        try {
+          await expect(move()).rejects.toMatchObject({
+            code: 'MOVE_AGENT_RUNNING',
+          });
+          expect(handles[0]?.close).not.toHaveBeenCalled();
+          expect(await storage.space(SOURCE).read()).toEqual(sourceBefore);
+          expect(await storage.space(DESTINATION).read()).toEqual(
+            destinationBefore,
+          );
+        } finally {
+          release();
+        }
+        assertReleased();
+      },
+    );
+
+    it('moves its conversation while another Space holds the same-ID admission lease', async () => {
+      await seed();
+      expect(
+        (await storage.createSpace('unrelated-space', 'Unrelated')).ok,
+      ).toBe(true);
+      const namespace = canvasAcpNamespace('unrelated-space');
+      const release = acquireAgentTurn(THREAD, namespace);
+      assert.ok(release);
+      try {
+        await move();
+        expect(
+          await runtime.record(canvasAcpNamespace(SOURCE), THREAD),
+        ).toBeUndefined();
+        expect(
+          (await runtime.history(canvasAcpNamespace(DESTINATION), THREAD))
+            .turns,
+        ).toHaveLength(1);
+        expect(acquireAgentTurn(THREAD, namespace)).toBeNull();
+      } finally {
+        release();
+      }
+      assertReleased();
+    });
+
+    it('holds both admission scopes through parked rehome and releases them after completion', async () => {
+      await seed();
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let entered = false;
+      vi.spyOn(agenetes, 'rehome').mockImplementation(async (...args) => {
+        entered = true;
+        await gate;
+        return runtime.rehome(...args);
+      });
+      const moving = move();
+      try {
+        await vi.waitFor(() => expect(entered).toBe(true));
+        for (const canvasId of [SOURCE, DESTINATION]) {
+          const admitted = acquireAgentTurn(
+            THREAD,
+            canvasAcpNamespace(canvasId),
+          );
+          // An unexpected admission must still release its lease on a red run.
+          admitted?.();
+          expect(admitted).toBeNull();
+        }
+      } finally {
+        release();
+        await moving;
+      }
+      assertReleased();
+    });
+
+    it('retains a same-ID destination owner and refuses migration without evicting it', async () => {
+      await seed();
+      const source = await runtime.record(canvasAcpNamespace(SOURCE), THREAD);
+      assert.ok(source);
+      const destination = canvasAcpNamespace(DESTINATION);
+      const destinationHandle = await runtime.create({
+        ...source.spec,
+        namespace: destination,
+      });
+      const destinationRecord = await runtime.record(destination, THREAD);
+      try {
+        await expect(move()).rejects.toMatchObject({
+          code: 'MOVE_DESTINATION_CONFLICT',
+        });
+        expect(runtime.get(THREAD, destination)).toBe(destinationHandle);
+        expect(await runtime.record(destination, THREAD)).toEqual(
+          destinationRecord,
+        );
+        expect(
+          await runtime.record(canvasAcpNamespace(SOURCE), THREAD),
+        ).toBeDefined();
+        expect((await storage.space(DESTINATION).read())?.state.nodes).toEqual(
+          [],
+        );
+      } finally {
+        await runtime.close(THREAD, destination);
+      }
+      assertReleased();
+    });
+
     it.each(['internal', 'external'] as const)(
       'closes a completed cached %s Agent and recovers in the destination',
       async (kind) => {
@@ -288,7 +401,10 @@ forEachProductProfile((profile, label) => {
         );
         const result = await move();
         expect(result.movedConversationCount).toBe(1);
-        expect(agenetes.close).toHaveBeenCalledExactlyOnceWith(THREAD);
+        expect(agenetes.close).toHaveBeenCalledExactlyOnceWith(
+          THREAD,
+          expect.objectContaining({ name: SOURCE }),
+        );
         const closeOrder = vi.mocked(agenetes.close).mock
           .invocationCallOrder[0];
         const rehomeOrder = vi.mocked(agenetes.rehome).mock
@@ -415,7 +531,8 @@ forEachProductProfile((profile, label) => {
         let release: (() => void) | null = null;
         if (reason === 'active')
           vi.spyOn(agentThreadService, 'isActive').mockReturnValue(true);
-        if (reason === 'leased') release = acquireAgentTurn(`${THREAD}-1`);
+        if (reason === 'leased')
+          release = acquireAgentTurn(`${THREAD}-1`, canvasAcpNamespace(SOURCE));
         if (reason === 'task') {
           const tasks = storage.space(SOURCE).tasks;
           await tasks.create({
@@ -640,6 +757,7 @@ forEachProductProfile((profile, label) => {
       'retains a newly created destination when %s has an unknown outcome',
       async (failurePhase) => {
         await seed();
+        const created = vi.spyOn(storage, 'createSpace');
         const remove = vi.spyOn(storage, 'deleteSpace');
         const inverse = vi.spyOn(executor, 'applyDeltasOnServerAlreadyLocked');
         if (failurePhase === 'rehome') {
@@ -670,12 +788,15 @@ forEachProductProfile((profile, label) => {
         expect(
           JSON.stringify([...warn.mock.calls, ...errorLog.mock.calls]),
         ).not.toContain(PRIVATE_ERROR);
-        assertReleased();
+        const createdId = created.mock.calls[0]?.[0];
+        assert.ok(createdId);
+        assertReleased(createdId);
       },
     );
 
     it('removes a newly created destination after a determinate close failure', async () => {
       await seed();
+      const created = vi.spyOn(storage, 'createSpace');
       closeFailure = true;
       await expect(
         move({ kind: 'new', title: 'Synthetic temporary destination' }),
@@ -685,11 +806,14 @@ forEachProductProfile((profile, label) => {
           (entry) => entry.title === 'Synthetic temporary destination',
         ),
       ).toBe(false);
-      assertReleased();
+      const createdId = created.mock.calls[0]?.[0];
+      assert.ok(createdId);
+      assertReleased(createdId);
     });
 
     it('reports cleanup failure without exposing either cause', async () => {
       await seed();
+      const created = vi.spyOn(storage, 'createSpace');
       closeFailure = true;
       vi.spyOn(storage, 'deleteSpace').mockRejectedValueOnce(
         new Error(PRIVATE_ERROR),
@@ -703,7 +827,9 @@ forEachProductProfile((profile, label) => {
       expect(
         JSON.stringify([...warn.mock.calls, ...errorLog.mock.calls]),
       ).not.toContain(PRIVATE_ERROR);
-      assertReleased();
+      const createdId = created.mock.calls[0]?.[0];
+      assert.ok(createdId);
+      assertReleased(createdId);
     });
 
     it.each([

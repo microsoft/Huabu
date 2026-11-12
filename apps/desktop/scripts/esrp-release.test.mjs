@@ -207,6 +207,30 @@ test('pipeline signs only the exact final installer using the six original varia
   );
 });
 
+test('Windows generates the SBOM in the complete release output before publishing', () => {
+  const validateIndex = windows.steps.findIndex(
+    (step) => step.displayName === 'Validate Windows release assets',
+  );
+  const manifestSteps = windows.steps.filter(
+    (step) => step.task === 'ManifestGeneratorTask@0',
+  );
+  assert.equal(manifestSteps.length, 1);
+  const manifest = manifestSteps[0];
+  assert.equal(windows.steps.indexOf(manifest), validateIndex + 1);
+  assert.ok(validateIndex >= 0);
+  assert.equal(manifest.displayName, 'Generate SBOM');
+  assert.deepEqual(manifest.inputs, {
+    BuildDropPath: '$(Build.SourcesDirectory)/../huabu-electron-out',
+  });
+  const publish = windows.steps[validateIndex + 2];
+  assert.equal(publish.task, 'PublishPipelineArtifact@1');
+  assert.deepEqual(publish.inputs, {
+    targetPath: manifest.inputs.BuildDropPath,
+    artifact: 'huabu-windows',
+    publishLocation: 'pipeline',
+  });
+});
+
 test(
   'signature gate rejects unsigned, untimestamped or unchanged installers before metadata refresh',
   { skip: process.platform !== 'win32' },

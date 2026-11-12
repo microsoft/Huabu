@@ -60,10 +60,7 @@ import {
   type NestableNode,
 } from '@huabu/shared/canvas-engine';
 
-import {
-  runWebPostEffects,
-  scheduleDeferredFrameRelayout,
-} from '@/handler/canvasCommand/postEffects.web';
+import { runWebPostEffects } from '@/handler/canvasCommand/postEffects.web';
 import {
   resolveUiIntent,
   type AddNodeInput,
@@ -75,7 +72,13 @@ import {
   getDragPointerPosition,
   mergeLiveDragGeometry,
 } from '@/handler/liveDragGeometry';
-import { isPointInTrackGap, resolveMasonryDrop } from '@/handler/masonryDrop';
+import {
+  isPointInTrackGap,
+  resolveGridDrop,
+  getGridDragGroup,
+  gridDragRequests,
+  resolveMasonryDrop,
+} from '@/handler/masonryDrop';
 import { projectStructuredTargetGeometry } from '@/handler/projectStructuredTargetGeometry';
 import {
   applySnap,
@@ -110,6 +113,7 @@ import {
 } from '@/utils/spaceHierarchy';
 
 import { canvasHistoryManager } from './canvasHistoryManager';
+import { useIdentityStore } from './identityStore';
 import { useWorkspaceStore } from './workspaceStore';
 import {
   getCanvas,
@@ -117,9 +121,10 @@ import {
   associateAgentNode,
   putCanvas,
 } from '../api';
+import { ApiError } from '../api/_client';
 import { agentApi } from '../api/agent';
 import { cloneArtifactToCanvas, resolveArtifactUrl } from '../api/artifact';
-import { CanvasConflictError } from '../api/canvas';
+import { CanvasConflictError, getCanvasAccess } from '../api/canvas';
 import { measureMissingAutoHeights } from './canvasStore/height/measureMissingAutoHeights';
 import { normalizeFrameHeaderInsets } from './canvasStore/load/normalizeFrameHeaderInsets';
 import { normalizeNodeHeights } from './canvasStore/load/normalizeNodeHeights';
@@ -160,6 +165,7 @@ import { nodesToPlainText } from '../utils/io/nodeToPlainText';
 import type {
   FrameFitPreview,
   FrameFitPreviewRole,
+  StructuredDropPreview,
 } from './gesturePreviewStore';
 import type { CanvasPreviewWorkspace } from './previewWorkspace/model';
 import type { NodeIngestionInfo } from '@/handler/canvasCommand/preprocess';
@@ -174,6 +180,7 @@ import type {
   CanvasNodeMeasuredHeightUpdate,
   CanvasNodeType,
   CanvasViewport,
+  CanvasAccess,
   RecentAction,
   WireSelectionNode,
 } from '@huabu/shared';
@@ -181,6 +188,9 @@ import type {
 const AUTOSAVE_DEBOUNCE_MS = 1000;
 const PREPROCESS_DEBOUNCE_MS = 1000;
 const NODE_CONTENT_DEBOUNCE_MS = 500;
+let accessRefreshInFlight:
+  | { canvasId: string; promise: Promise<void> }
+  | undefined;
 
 /**
  * Arm a single undo snapshot for a gesture: snapshot the current state and
@@ -454,6 +464,10 @@ type RFState = {
   nodes: Node[];
   edges: Edge[];
   canvasId: string;
+  /** Permissions are tied to this exact Space; null is unknown in Bubble. */
+  canvasAccess: (CanvasAccess & { canvasId: string }) | null;
+  /** Refresh permissions alone, retaining dirty content and history. */
+  refreshCanvasAccess: () => Promise<void>;
   version: number;
   isLoading: boolean;
   canvasNotFound: boolean;
@@ -1222,6 +1236,16 @@ export function hasUnsavedCanvasEdits(): boolean {
   );
 }
 
+/**
+ * Resend what a lapsed session refused, once it has been renewed. Best
+ * effort: a save that fails again is reported as any other save failure.
+ */
+export async function resendUnsavedCanvasEdits(): Promise<void> {
+  const { canvasId } = useCanvasStore.getState();
+  if (!canvasId) return;
+  await drainPendingSaves(canvasId);
+}
+
 export class CanvasSubmissionSaveError extends Error {
   readonly code = 'canvas_save_failed';
 
@@ -1692,6 +1716,33 @@ const useCanvasStore = create<RFState>()(
     nodes: [],
     edges: [],
     canvasId: '',
+    canvasAccess: null,
+    refreshCanvasAccess: () => {
+      const canvasId = get().canvasId;
+      if (!canvasId) return Promise.resolve();
+      if (accessRefreshInFlight?.canvasId === canvasId)
+        return accessRefreshInFlight.promise;
+      const principalId =
+        useIdentityStore.getState().identity?.principal.principalId;
+      const isCurrent = () =>
+        get().canvasId === canvasId &&
+        useIdentityStore.getState().identity?.principal.principalId ===
+          principalId;
+      const promise = getCanvasAccess(canvasId)
+        .then((access) => {
+          if (isCurrent()) set({ canvasAccess: { canvasId, ...access } });
+        })
+        .catch(() => {
+          if (isCurrent())
+            set({ canvasAccess: { canvasId, write: false, manage: false } });
+        })
+        .finally(() => {
+          if (accessRefreshInFlight?.promise === promise)
+            accessRefreshInFlight = undefined;
+        });
+      accessRefreshInFlight = { canvasId, promise };
+      return promise;
+    },
     version: 0,
     isLoading: false,
     canvasNotFound: false,
@@ -2500,6 +2551,7 @@ const useCanvasStore = create<RFState>()(
         await drainPendingSaves();
       set({
         isLoading: true,
+        canvasAccess: null,
         pendingRevealNodeIds: [],
         canvasNotFound: false,
         versionConflict: false,
@@ -2519,12 +2571,14 @@ const useCanvasStore = create<RFState>()(
           .loadForCanvas(targetId, { chatThreadId });
         canvasHistoryManager.activate(targetId, options?.resetHistory);
         if (canvasId && targetId !== get().canvasId) {
+          useToolStore.getState().resetForCanvasSwitch();
           get()._setStateNoAutosave({
             canvasId: targetId,
             canvasTitle: '',
           });
         }
         const response = await getCanvas(targetId);
+        if (get().canvasId !== targetId) return;
         if (!response) {
           console.warn('Canvas not found:', targetId);
           canvasHistoryManager.clear();
@@ -2538,6 +2592,11 @@ const useCanvasStore = create<RFState>()(
         }
 
         structureSaveErrors.delete(targetId);
+        set({
+          canvasAccess: response.access
+            ? { canvasId: targetId, ...response.access }
+            : null,
+        });
 
         const state = response.state as {
           nodes?: Node[];
@@ -2703,7 +2762,6 @@ const useCanvasStore = create<RFState>()(
         canvasNotFound: false,
         viewport: null,
       });
-      useToolStore.getState().resetForCanvasSwitch();
       useGesturePreviewStore.getState().resetCanvasScopedTransients();
       // Load the new canvas
       await get().loadCanvas(canvasId);
@@ -2840,6 +2898,11 @@ const useCanvasStore = create<RFState>()(
           throw error;
         }
         console.error('Failed to save canvas:', error);
+        if (error instanceof ApiError && error.status === 403) {
+          void get().refreshCanvasAccess();
+          toast(t('errors.spaceSaveAccessDenied'), { tone: 'danger' });
+          throw error;
+        }
       } finally {
         if (inflightStructureWrites.get(savingCanvasId) === structureWrite) {
           inflightStructureWrites.delete(savingCanvasId);
@@ -2871,6 +2934,12 @@ const useCanvasStore = create<RFState>()(
     },
 
     tryRename: async (kind, id, nextName) => {
+      if (
+        !(kind === 'canvas'
+          ? selectCanManageCanvas(get())
+          : selectCanWriteCanvas(get()))
+      )
+        return false;
       const trimmed = nextName.trim();
       if (!trimmed) return false;
 
@@ -2900,6 +2969,10 @@ const useCanvasStore = create<RFState>()(
           }
           return true;
         } catch (err) {
+          if (err instanceof ApiError && err.status === 403) {
+            set({ canvasTitle: previous });
+            return false;
+          }
           if (
             err instanceof CanvasConflictError &&
             err.code === 'CANVAS_TITLE_CONFLICT'
@@ -3488,11 +3561,41 @@ const useCanvasStore = create<RFState>()(
                 }
               : undefined;
 
-          const previousDrop =
+          const draggedNodeIds = [
+            draggedNode.id,
+            ...draggedNodes
+              .filter((node) => node.id !== draggedNode.id)
+              .map((node) => node.id),
+          ];
+          const gridGroup = leavingByFrame.has(targetFrameId)
+            ? null
+            : getGridDragGroup(nodes, targetFrameId, draggedNodeIds);
+          const lastPreview =
             useGesturePreviewStore.getState().structuredDropPreview;
-          const masonry =
-            framePoint && gridCfg.axis !== 'grid'
-              ? resolveMasonryDrop(
+          const previousDrop =
+            lastPreview?.draggedNodeIds?.join(',') === draggedNodeIds.join(',')
+              ? lastPreview
+              : null;
+          const masonry: StructuredDropPreview['masonry'] = framePoint
+            ? gridCfg.axis === 'grid'
+              ? resolveGridDrop(
+                  projectedGestureNodes,
+                  targetFrameId,
+                  framePoint,
+                  {
+                    edges,
+                    zoom: get().rfInstance?.getZoom() ?? 1,
+                    allowInsert:
+                      (draggedNodes.length === 1 || !!gridGroup) &&
+                      !!pointerFlow,
+                    insertAxis: gridGroup ? 'row' : undefined,
+                    previous:
+                      previousDrop?.frameId === targetFrameId
+                        ? previousDrop.masonry
+                        : undefined,
+                  },
+                )
+              : resolveMasonryDrop(
                   projectedGestureNodes,
                   targetFrameId,
                   gridCfg.axis,
@@ -3507,6 +3610,20 @@ const useCanvasStore = create<RFState>()(
                         : undefined,
                   },
                 )
+            : undefined;
+          const rowTarget = masonry?.rowTarget;
+          const count = resolveFrameTrackCount(
+            projectedGestureNodes,
+            targetFrameId,
+          );
+          const requests =
+            gridGroup && masonry && rowTarget
+              ? gridDragRequests(
+                  gridGroup,
+                  draggedNode.id,
+                  { target: masonry.target, rowTarget },
+                  count,
+                )
               : undefined;
           const zone = framePoint
             ? describeStructuredDropZone(
@@ -3514,9 +3631,9 @@ const useCanvasStore = create<RFState>()(
                 targetFrameId,
                 framePoint,
                 gridCfg.axis,
-                resolveFrameTrackCount(projectedGestureNodes, targetFrameId),
+                count,
                 draggedRect,
-                { edges, target: masonry?.target },
+                { edges, target: masonry?.target, rowTarget, requests },
               )
             : null;
 
@@ -3530,16 +3647,19 @@ const useCanvasStore = create<RFState>()(
             });
             useGesturePreviewStore.getState().setStructuredDropPreview({
               nodeId: draggedNode.id,
+              draggedNodeIds,
               frameId: targetFrameId,
               kind: zone.kind,
               x: frameAbs.x + zone.x,
               y: frameAbs.y + zone.y,
               width: zone.width,
               height: zone.height,
+              placements: zone.placements?.map(toAbsoluteRect),
               ...(masonry
                 ? {
                     masonry: {
                       target: masonry.target,
+                      ...(rowTarget ? { rowTarget } : {}),
                       gap: masonry.gap ? toAbsoluteRect(masonry.gap) : null,
                     },
                   }
@@ -3657,12 +3777,16 @@ const useCanvasStore = create<RFState>()(
 
       get().dispatchUiIntent({
         type: 'NODE_DRAG_STOP',
-        draggedNodeIds: draggedNodes.map((n) => n.id),
+        draggedNodeIds: [
+          _node.id,
+          ...draggedNodes.filter((n) => n.id !== _node.id).map((n) => n.id),
+        ],
         pointerFlowPosition,
         zoom: get().rfInstance?.getZoom() ?? 1,
         masonryDrop:
           lastDrop?.masonry &&
-          (lastDrop.masonry.target.kind !== 'insert-new' ||
+          ((lastDrop.masonry.target.kind !== 'insert-new' &&
+            lastDrop.masonry.rowTarget?.kind !== 'insert-new') ||
             (pointerFlowPosition &&
               lastDrop.masonry.gap &&
               isPointInTrackGap(lastDrop.masonry.gap, pointerFlowPosition)))
@@ -3670,6 +3794,8 @@ const useCanvasStore = create<RFState>()(
                 nodeId: lastDrop.nodeId,
                 frameId: lastDrop.frameId,
                 target: lastDrop.masonry.target,
+                rowTarget: lastDrop.masonry.rowTarget,
+                draggedNodeIds: lastDrop.draggedNodeIds,
               }
             : undefined,
         bypassReparent,
@@ -3927,24 +4053,10 @@ const useCanvasStore = create<RFState>()(
         });
       }
 
-      // Internal RF changes (position mid-drag, select, dimensions /
-      // measured) are purely transient UI state. The authoritative
-      // geometry commit happens in `onNodeDragStop` via the
-      // `SET_NODE_GEOMETRY` engine command, which DOES schedule
-      // autosave. Routing this hot 60 fps drag-tick path through the
-      // no-autosave setter avoids running the structure dirty
-      // detector (and resetting the autosave debounce) on every frame.
-      get()._setStateNoAutosave({ nodes: nextNodes });
-
       // ── Frame relayout on measured-size changes ────────────────────
-      // Both structured (`column` / `row`) and free-mode frames refit
-      // when a child's measured size changes (e.g. a note growing as
-      // its content is edited, or a freshly-added note settling on its
-      // content height — which has no committed `style.height` yet, so
-      // the executor's synchronous fit treated it as zero). The deferred
-      // relayout runs the structured grid solver (a no-op for free
-      // frames) followed by a bounding-box `fitFrames` pass that handles
-      // free frames and cascades to ancestors.
+      // Measurements are already available: publish them with the final
+      // Frame layout, rather than painting stale positions for two more frames.
+      let frameGeometryChanged = false;
       if (!resizeCtx && !isSnapSessionActive()) {
         let framesToRelayout: Set<string> | undefined;
         for (const c of sanitized) {
@@ -3953,6 +4065,13 @@ const useCanvasStore = create<RFState>()(
           const child = nextNodes.find((n) => n.id === c.id);
           if (child?.type === 'frame') continue;
           if (!child?.parentId) continue;
+          const previous = currentById.get(child.id)?.measured;
+          if (
+            c.dimensions &&
+            previous?.width === c.dimensions.width &&
+            previous?.height === c.dimensions.height
+          )
+            continue;
           const parent = nextNodes.find((n) => n.id === child.parentId);
           if (!parent || parent.type !== 'frame') continue;
           // Per-frame sizing gate: structured (`column` / `row`)
@@ -3987,14 +4106,19 @@ const useCanvasStore = create<RFState>()(
           framesToRelayout.add(parent.id);
         }
         if (framesToRelayout && framesToRelayout.size > 0) {
-          scheduleDeferredFrameRelayout(
+          const projected = projectAffectedFrameGeometry(
+            nextNodes,
             framesToRelayout,
-            () => get().nodes,
-            () => get().edges,
-            (nodes) => set({ nodes }),
-          );
+            get().edges,
+          ).nodes;
+          frameGeometryChanged = projected !== nextNodes;
+          nextNodes = projected;
         }
       }
+
+      // Persist derived Frame geometry, but keep RF-only gesture ticks transient.
+      if (frameGeometryChanged) set({ nodes: nextNodes });
+      else get()._setStateNoAutosave({ nodes: nextNodes });
 
       if (isSnapSessionDragEndCommit(sanitized)) endSnapSession();
       if (isSnapSessionResizeEndCommit(sanitized)) endSnapSession();
@@ -4848,3 +4972,20 @@ usePanelStore.subscribe((next, previous) => {
 });
 
 export default useCanvasStore;
+
+/** Local mode retains its one-owner behavior; unknown Bubble access stays read-only. */
+export function selectCanWriteCanvas(
+  state: Pick<RFState, 'canvasId' | 'canvasAccess'>,
+): boolean {
+  return state.canvasAccess?.canvasId === state.canvasId
+    ? state.canvasAccess.write
+    : useIdentityStore.getState().identity?.provider !== 'bubble';
+}
+
+export function selectCanManageCanvas(
+  state: Pick<RFState, 'canvasId' | 'canvasAccess'>,
+): boolean {
+  return state.canvasAccess?.canvasId === state.canvasId
+    ? state.canvasAccess.manage
+    : useIdentityStore.getState().identity?.provider !== 'bubble';
+}

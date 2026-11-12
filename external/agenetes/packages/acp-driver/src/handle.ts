@@ -46,7 +46,7 @@ import {
 } from './binding-recipe.js';
 import { AcpServiceError } from './errors.js';
 import { applyToolExt } from './overlay.js';
-import { acpSessionRegistry } from './session-registry.js';
+import { acpSessionRegistry, captureAcpNamespace } from './session-registry.js';
 import {
   MODEL_SELECTION_ID,
   MODE_SELECTION_ID,
@@ -302,7 +302,8 @@ export const ACP_CAPABILITIES: AgentCapabilities = {
  * {@link AcpSessionEntry} for a turn inside {@link run} (get-or-create);
  * out-of-turn ops resolve the
  * live session from `acpSessionRegistry` by its session identity.
- * Jobs use a private identity and Agenetes owns their one-shot cleanup.
+ * Jobs use a private identity but currently retain sessions after run,
+ * just like Deployments; automatic Job resource release is deferred.
  *
  * `TSubmission` specializes the opaque host source while retaining the
  * protocol-owned canonical input contract.
@@ -318,7 +319,8 @@ export class AcpAgentHandle<
   readonly capabilities: AgentCapabilities = ACP_CAPABILITIES;
   private turnsToLoad?: readonly AgentTurn[];
   private ensureSessionPromise?: Promise<AcpSessionEntry>;
-  private closed = false;
+  private closing = false;
+  private closePromise?: Promise<void>;
 
   /**
    * @param spec       The baked create-time WorkloadSpec projection.
@@ -331,6 +333,26 @@ export class AcpAgentHandle<
       getIdleTimeoutSecs: () => 600,
     },
   ) {
+    // The runtime captures workload identity, but direct driver consumers may
+    // supply mutable specs. Later controls and teardown use this same snapshot.
+    this.spec = {
+      ...spec,
+      namespace: captureAcpNamespace(spec.namespace),
+      spec: Object.freeze({
+        ...spec.spec,
+        binding: Object.freeze({ ...spec.spec.binding }),
+        ...(spec.spec.recipe
+          ? { recipe: structuredClone(spec.spec.recipe) }
+          : {}),
+        ...(spec.spec.env ? { env: { ...spec.spec.env } } : {}),
+        ...(spec.spec.initialPreamble
+          ? { initialPreamble: [...spec.spec.initialPreamble] }
+          : {}),
+        ...(spec.spec.initialPreferences
+          ? { initialPreferences: { ...spec.spec.initialPreferences } }
+          : {}),
+      }),
+    };
     this.requestedAgentletId = resolveAcpAgentletId(spec);
     this.agentletId =
       resolveConnectedAgentletId(this.requestedAgentletId) ??
@@ -371,12 +393,12 @@ export class AcpAgentHandle<
   private async ensureSession(
     logger: AcpSessionLogger,
   ): Promise<AcpSessionEntry> {
-    if (this.closed) throw new Error('ACP handle is closed');
+    if (this.closing) throw new Error('ACP handle is closed');
     if (this.ensureSessionPromise) return this.ensureSessionPromise;
-    const promise = Promise.resolve()
-      .then(() => {
-        if (this.closed) throw new Error('ACP handle is closed');
-        return this.ensureSessionInner(logger);
+    const promise = this.ensureSessionInner(logger)
+      .then((entry) => {
+        if (this.closing) throw new Error('ACP handle is closed');
+        return entry;
       })
       .finally(() => {
         if (this.ensureSessionPromise === promise) {
@@ -438,6 +460,8 @@ export class AcpAgentHandle<
       this.spec.spec,
       this.runtimePolicy,
     );
+    // close may have finished while a host-owned launch port was still pending.
+    if (this.closing) throw new Error('ACP handle is closed');
     const agentletId = this.resolveAgentletId();
     return ensureAcpSession({
       agentletId,
@@ -461,7 +485,7 @@ export class AcpAgentHandle<
 
   /**
    * Register the instance's up-report listener (I9.7). The listener is
-   * keyed by `threadId` in the driver's module-level registry, so it fires
+   * keyed by device and captured namespace/thread identity in the driver's registry, so it fires
    * for every meta change on this thread — including out-of-turn set-RPCs
    * that resolve an entry without going through `run`. Returns an
    * unsubscribe that clears it. The instance wires this once per live
@@ -474,6 +498,7 @@ export class AcpAgentHandle<
       this.agentletId,
       this.sessionThreadId,
       listener,
+      this.spec.namespace,
     );
   }
 
@@ -517,8 +542,8 @@ export class AcpAgentHandle<
     // turn rather than hanging it.
     await awaitSelectionReplay(entry);
 
+    if (this.closing) throw new Error('ACP handle is closed');
     if (signal?.aborted) return;
-    if (this.closed) throw new Error('ACP handle is closed');
 
     // Fire an initial up-report (I9.7) now that the entry is resolved and
     // in the live registry: this persists the resumed session's sessionId
@@ -736,6 +761,8 @@ export class AcpAgentHandle<
   }
 
   async control(msg: ControlMsg): Promise<ControlAck> {
+    if (this.closing)
+      return { ok: false, code: 'not_found', error: 'ACP handle is closed' };
     if (!this.capabilities.supportedControlMessages.includes(msg.type)) {
       return {
         ok: false,
@@ -746,7 +773,11 @@ export class AcpAgentHandle<
     // Resolve the live session out-of-turn. A control op with no live
     // session to act on is a precondition failure — we do NOT lazily spawn
     // one just to, e.g., set a mode (§3.6.2 / M2.6).
-    const entry = acpSessionRegistry.get(this.agentletId, this.sessionThreadId);
+    const entry = acpSessionRegistry.get(
+      this.agentletId,
+      this.sessionThreadId,
+      this.spec.namespace,
+    );
     if (!entry || entry.client.isClosed) {
       return {
         ok: false,
@@ -819,12 +850,19 @@ export class AcpAgentHandle<
    * registry, and wait for the exact Agentlet process to be reclaimed.
    */
   async close(): Promise<void> {
-    this.closed = true;
+    this.closing = true;
+    if (this.closePromise) return this.closePromise;
+    const operation = releaseThread(
+      this.agentletId,
+      this.sessionThreadId,
+      this.spec.namespace,
+    );
+    this.closePromise = operation;
     try {
-      await this.ensureSessionPromise;
-    } finally {
-      acpSessionRegistry.remove(this.agentletId, this.sessionThreadId);
-      await releaseThread(this.agentletId, this.sessionThreadId);
+      await operation;
+    } catch (error) {
+      if (this.closePromise === operation) this.closePromise = undefined;
+      throw error;
     }
   }
 }

@@ -124,7 +124,7 @@ describe('notification surface (M5.5/A3.0, I9.7)', () => {
     await inst.close(b.threadId);
     const handle = (await inst.create(a)) as unknown as ReportingHandle;
     const scopedA = inst
-      .notifications(a.threadId, ns(a.namespace.name))
+      .notifications(a.threadId, a.namespace)
       [Symbol.asyncIterator]();
     const scopedB = inst
       .notifications(b.threadId, b.namespace)
@@ -174,8 +174,8 @@ describe('notification surface (M5.5/A3.0, I9.7)', () => {
   it('keeps tuple-like legacy IDs and separator-bearing scoped IDs distinct', async () => {
     const bus = new ThreadNotificationBus();
     const channels = [
-      { thread: 'b\0c', scope: 'a' },
-      { thread: 'c', scope: 'a\0b' },
+      { thread: 'b\0c', scope: { name: 'a' } },
+      { thread: 'c', scope: { name: 'a\0b' } },
       { thread: JSON.stringify(['a', 'b\0c']), scope: undefined },
       { thread: 'b\0c', scope: undefined },
     ];

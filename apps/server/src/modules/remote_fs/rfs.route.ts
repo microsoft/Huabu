@@ -171,7 +171,7 @@ import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
  * Build the repo-standard error body. On any RFS failure the message embeds a
  * copy-pasteable command that fetches the full access guide, so an agent that
  * skipped the bootstrap or mis-formed a request is handed the fix on its first
- * fumble. `$HUABU_RFS_URL` / `$AGENTLET_TOKEN` are the agent's own env vars.
+ * fumble. `$HUABU_RFS_URL` / `$HUABU_RFS_TOKEN` are the agent's own env vars.
  */
 function rfsError(
   reason: string,

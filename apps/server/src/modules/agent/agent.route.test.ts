@@ -13,6 +13,8 @@ const mocks = vi.hoisted(() => ({
   resolveBinding: vi.fn(),
   invoke: vi.fn(),
   stopAndWait: vi.fn(),
+  resolveExternalTarget: vi.fn(),
+  record: vi.fn(),
 }));
 
 vi.mock('./conversation/envelope.js', () => ({
@@ -43,6 +45,7 @@ vi.mock('./agent-thread.service.js', () => {
       beginPreparation: mocks.beginPreparation,
       invoke: mocks.invoke,
       stopAndWait: mocks.stopAndWait,
+      resolveExternalTarget: mocks.resolveExternalTarget,
     },
   };
 });
@@ -55,8 +58,10 @@ vi.mock('./acp/external-agent-realization.js', () => ({
 
 vi.mock('./agenetes/drivers.js', () => ({
   INTERNAL_DRIVER_KIND: 'internal',
+  EXTERNAL_DRIVER_KIND: 'external',
   agenetes: {
     logMetadata: () => ({ turnCount: 0 }),
+    record: mocks.record,
   },
 }));
 
@@ -72,8 +77,13 @@ vi.mock('../workspace/paths.js', () => ({
   canvasAcpNamespace: (canvasId: string) => `test/${canvasId}`,
 }));
 
+import { AgentThreadResolutionError } from './agent-thread-resolver.js';
 import agentRoutes from './agent.route.js';
+import { conversationTitleService } from './conversation-title.service.js';
 import { InkAgentModeError } from './ink-response.js';
+import { setRequestIdentity } from '../identity/request.js';
+import { UNRESTRICTED_ACCESS } from '../identity/service.js';
+import { registerSpaceAccess } from '../security/space-access.js';
 
 import type { AgentStreamEvent, ChatEnvelope } from '@huabu/shared';
 
@@ -106,6 +116,7 @@ async function* failsBeforeFirstEvent(): AsyncGenerator<
 afterEach(() => {
   vi.clearAllMocks();
   mocks.resolveTarget.mockResolvedValue(null);
+  mocks.record.mockResolvedValue(null);
   mocks.resolveBinding.mockImplementation(
     ({ requestBinding }: { requestBinding?: unknown }) =>
       requestBinding ?? { kind: 'internal' },
@@ -122,6 +133,182 @@ afterEach(() => {
 });
 
 describe('POST /agent', () => {
+  it('refuses unavailable external bindings for members and administrators before stopping', async () => {
+    const app = Fastify();
+    app.addHook('onRequest', async (request) => {
+      setRequestIdentity(request, {
+        principal: { principalId: 'carol', kind: 'user' },
+        member: true,
+        owner: request.headers['x-owner'] === 'yes',
+        access: {
+          can: async (_level, resource) => resource.id === 'mine',
+          claim: async () => {},
+          workspaces: async () => 'all',
+        },
+      });
+    });
+    registerSpaceAccess(app);
+    await app.register(agentRoutes, { prefix: '/api/agent' });
+    mocks.resolveExternalTarget.mockResolvedValue({
+      binding: { kind: 'external' },
+    });
+    mocks.stopAndWait.mockResolvedValue({ status: 'stopped' });
+    try {
+      const request = {
+        method: 'POST' as const,
+        url: '/api/agent/stop/thread-a?canvasId=mine',
+        payload: {},
+      };
+      expect((await app.inject(request)).statusCode).toBe(403);
+      expect(mocks.stopAndWait).not.toHaveBeenCalled();
+      expect(
+        (await app.inject({ ...request, headers: { 'x-owner': 'yes' } }))
+          .statusCode,
+      ).toBe(403);
+      expect(mocks.stopAndWait).not.toHaveBeenCalled();
+      mocks.resolveExternalTarget.mockResolvedValue(null);
+      mocks.record.mockResolvedValue({
+        spec: { kind: 'external', spec: { agentletId: 'device-a' } },
+      });
+      expect((await app.inject(request)).statusCode).toBe(200);
+      expect(mocks.stopAndWait).toHaveBeenCalledOnce();
+      mocks.record.mockResolvedValue(null);
+      expect((await app.inject(request)).statusCode).toBe(200);
+      expect(mocks.stopAndWait).toHaveBeenCalledTimes(2);
+      expect(
+        (
+          await app.inject({
+            method: 'POST',
+            url: '/api/agent/stop/thread-a',
+            payload: { canvasId: 'mine' },
+          })
+        ).statusCode,
+      ).toBe(400);
+      // An administrator's own Space in the body does not stop another
+      // user's run of the same thread elsewhere.
+      expect(
+        (
+          await app.inject({
+            method: 'POST',
+            url: '/api/agent/stop/thread-a',
+            payload: { canvasId: 'mine' },
+            headers: { 'x-owner': 'yes' },
+          })
+        ).statusCode,
+      ).toBe(400);
+      expect(mocks.stopAndWait).toHaveBeenCalledTimes(2);
+      expect(mocks.stopAndWait).toHaveBeenLastCalledWith(
+        'thread-a',
+        'mine',
+        undefined,
+      );
+    } finally {
+      await app.close();
+    }
+  });
+  it('stops a turn whose Question node no longer resolves', async () => {
+    const app = Fastify();
+    app.addHook('onRequest', async (request) => {
+      setRequestIdentity(request, {
+        principal: { principalId: 'carol', kind: 'user' },
+        member: true,
+        owner: false,
+        access: {
+          can: async (_level, resource) => resource.id === 'mine',
+          claim: async () => {},
+          workspaces: async () => 'all',
+        },
+      });
+    });
+    registerSpaceAccess(app);
+    await app.register(agentRoutes, { prefix: '/api/agent' });
+    mocks.resolveExternalTarget.mockRejectedValue(
+      new AgentThreadResolutionError('duplicate_thread', 'Duplicated'),
+    );
+    mocks.stopAndWait.mockResolvedValue({ stopped: true, acceptance: null });
+    try {
+      const stop = await app.inject({
+        method: 'POST',
+        url: '/api/agent/stop/thread-a?canvasId=mine',
+        payload: {},
+      });
+      expect(stop.statusCode).toBe(200);
+      expect(mocks.stopAndWait).toHaveBeenCalledWith(
+        'thread-a',
+        'mine',
+        undefined,
+      );
+      // Starting a run is what the unresolved Question refuses.
+      mocks.resolveFixedTarget.mockRejectedValue(
+        new AgentThreadResolutionError('duplicate_thread', 'Duplicated'),
+      );
+      const start = await app.inject({
+        method: 'POST',
+        url: '/api/agent',
+        payload: { canvasId: 'mine', threadId: 'thread-a', content: 'Go' },
+      });
+      expect(start.statusCode).toBe(409);
+      expect(start.json()).toMatchObject({ code: 'duplicate_thread' });
+    } finally {
+      await app.close();
+    }
+  });
+  it("leaves the local owner's conversation controls to their routes", async () => {
+    const app = Fastify();
+    app.addHook('onRequest', async (request) => {
+      setRequestIdentity(request, {
+        principal: { principalId: 'local', kind: 'user' },
+        member: true,
+        owner: true,
+        access: UNRESTRICTED_ACCESS,
+      });
+    });
+    registerSpaceAccess(app);
+    await app.register(agentRoutes, { prefix: '/api/agent' });
+    const setUserTitle = vi
+      .spyOn(conversationTitleService, 'setUserTitle')
+      .mockResolvedValue({ title: 'Renamed', source: 'user' } as never);
+    mocks.stopAndWait.mockResolvedValue({ stopped: true, acceptance: null });
+    try {
+      // Two Question nodes share the conversation: renaming it starts
+      // nothing, so it is not refused.
+      mocks.resolveExternalTarget.mockRejectedValue(
+        new AgentThreadResolutionError('duplicate_thread', 'Duplicated'),
+      );
+      const renamed = await app.inject({
+        method: 'PUT',
+        url: '/api/agent/threads/thread-a/title?canvasId=space-a',
+        payload: { title: 'Renamed' },
+      });
+      expect(renamed.statusCode).toBe(200);
+      expect(setUserTitle).toHaveBeenCalledWith(
+        'space-a',
+        'thread-a',
+        'Renamed',
+      );
+
+      // A Question bound to a Profile that was since removed: the local
+      // owner may still stop it; realization reports the missing Profile.
+      mocks.resolveExternalTarget.mockResolvedValue({
+        binding: { kind: 'external', profileId: 'removed-profile' },
+      });
+      const stop = await app.inject({
+        method: 'POST',
+        url: '/api/agent/stop/thread-a?canvasId=space-a',
+        payload: {},
+      });
+      expect(stop.statusCode).toBe(200);
+      expect(mocks.stopAndWait).toHaveBeenCalledWith(
+        'thread-a',
+        'space-a',
+        undefined,
+      );
+      expect(mocks.resolveExternalTarget).not.toHaveBeenCalled();
+    } finally {
+      setUserTitle.mockRestore();
+      await app.close();
+    }
+  });
   it('carries the request identity through preparation, dispatch and the durable envelope', async () => {
     mocks.beginPreparation.mockReturnValue({
       signal: new AbortController().signal,

@@ -24,6 +24,8 @@ import { existsSync, mkdirSync, renameSync } from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
+import { threadIdentityKey } from '@agenetes/runtime';
+
 import { readJsonLines, sanitizeId } from './io.js';
 
 import type { AgentTurn, Namespace } from '@agenetes/protocol';
@@ -207,21 +209,22 @@ function isPersistedTurn(value: unknown): value is PersistedTurn {
 }
 
 /**
- * A process-local {@link TurnStore} keyed by `namespace.name` — the
+ * A process-local {@link TurnStore} keyed by runtime namespace identity — the
  * self-contained default so the instance needs no host wiring to run (and
  * unit tests need no disk). It does NOT survive a restart; the durable,
  * restart-surviving Disk backing is {@link FileTurnStore}. Namespaces are
- * isolated: turns never leak across `name`.
+ * isolated by name and stable owner, or storage root for ownerless scopes.
  */
 export class InMemoryTurnStore implements TurnStore {
   readonly #byNamespace = new Map<string, Map<string, PersistedTurn[]>>();
   readonly #generations = new Map<string, number>();
 
   #scope(namespace: Namespace): Map<string, PersistedTurn[]> {
-    let scope = this.#byNamespace.get(namespace.name);
+    const key = threadIdentityKey({ namespace, threadId: '' });
+    let scope = this.#byNamespace.get(key);
     if (!scope) {
       scope = new Map();
-      this.#byNamespace.set(namespace.name, scope);
+      this.#byNamespace.set(key, scope);
     }
     return scope;
   }
@@ -245,7 +248,9 @@ export class InMemoryTurnStore implements TurnStore {
   }
 
   list(namespace: Namespace, threadId: string): PersistedTurn[] {
-    const log = this.#byNamespace.get(namespace.name)?.get(threadId);
+    const log = this.#byNamespace
+      .get(threadIdentityKey({ namespace, threadId: '' }))
+      ?.get(threadId);
     return log ? [...log] : [];
   }
 
@@ -255,9 +260,12 @@ export class InMemoryTurnStore implements TurnStore {
     options: TurnStorePageOptions,
   ): TurnStorePage {
     requireTurnPageLimit(options.limit);
-    const key = `${namespace.name}\0${threadId}`;
+    const key = threadIdentityKey({ namespace, threadId });
     const generation = this.#generations.get(key) ?? 1;
-    const log = this.#byNamespace.get(namespace.name)?.get(threadId) ?? [];
+    const log =
+      this.#byNamespace
+        .get(threadIdentityKey({ namespace, threadId: '' }))
+        ?.get(threadId) ?? [];
     const cursor = options.before
       ? decodeTurnCursor(options.before, threadId)
       : undefined;
@@ -295,11 +303,17 @@ export class InMemoryTurnStore implements TurnStore {
   }
 
   count(namespace: Namespace, threadId: string): number {
-    return this.#byNamespace.get(namespace.name)?.get(threadId)?.length ?? 0;
+    return (
+      this.#byNamespace
+        .get(threadIdentityKey({ namespace, threadId: '' }))
+        ?.get(threadId)?.length ?? 0
+    );
   }
 
   fence(namespace: Namespace, threadId: string): number {
-    const log = this.#byNamespace.get(namespace.name)?.get(threadId);
+    const log = this.#byNamespace
+      .get(threadIdentityKey({ namespace, threadId: '' }))
+      ?.get(threadId);
     return log && log.length > 0 ? log[log.length - 1]!.seqEnd : 0;
   }
 
@@ -308,15 +322,17 @@ export class InMemoryTurnStore implements TurnStore {
     threadId: string,
     persisted: readonly PersistedTurn[],
   ): void {
-    const key = `${namespace.name}\0${threadId}`;
+    const key = threadIdentityKey({ namespace, threadId });
     this.#generations.set(key, (this.#generations.get(key) ?? 1) + 1);
     this.#scope(namespace).set(threadId, [...persisted]);
   }
 
   delete(namespace: Namespace, threadId: string): void {
-    const key = `${namespace.name}\0${threadId}`;
+    const key = threadIdentityKey({ namespace, threadId });
     this.#generations.set(key, (this.#generations.get(key) ?? 1) + 1);
-    this.#byNamespace.get(namespace.name)?.delete(threadId);
+    this.#byNamespace
+      .get(threadIdentityKey({ namespace, threadId: '' }))
+      ?.delete(threadId);
   }
 }
 

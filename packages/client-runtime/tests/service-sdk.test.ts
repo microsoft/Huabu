@@ -34,6 +34,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
   delete process.env.HUABU_RFS_URL;
   delete process.env.AGENTLET_TOKEN;
+  delete process.env.HUABU_RFS_TOKEN;
 });
 
 describe('Service SDK', () => {
@@ -152,4 +153,25 @@ describe('Service SDK', () => {
       'Service request failed (409)',
     );
   });
+});
+
+it('uses the scoped reachback credential instead of the device transport credential', async () => {
+  process.env.HUABU_RFS_URL = 'https://huabu.example/api/rfs/w/w1/c1';
+  process.env.AGENTLET_TOKEN = 'device-only';
+  process.env.HUABU_RFS_TOKEN = 'scoped-reachback';
+  const fetcher = vi.fn().mockResolvedValue(
+    new Response(
+      JSON.stringify({
+        id: 'example',
+        version: '1.0.0',
+        manifest,
+        config: { apiKey: 'key' },
+      }),
+    ),
+  );
+  vi.stubGlobal('fetch', fetcher);
+  await leaseService('example');
+  expect(fetcher.mock.calls[0][1].headers.Authorization).toBe(
+    'Bearer scoped-reachback',
+  );
 });

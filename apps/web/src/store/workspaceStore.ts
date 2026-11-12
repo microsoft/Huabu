@@ -11,6 +11,7 @@ import {
   createNamedWorkspace,
   getWorkspaceInfo,
   listWorkspaces,
+  openFolderWorkspace as adoptFolderWorkspace,
   putWorkspacePath,
   removeWorkspace,
   type WorkspaceCapabilities,
@@ -112,6 +113,8 @@ interface WorkspaceState {
   activateRecentWorkspace: (workspaceId: string) => Promise<void>;
   /** Create a Workspace by name and switch to it (`namedWorkspaces`). */
   createWorkspace: (name: string) => Promise<void>;
+  /** Open a Server folder as one's own Workspace and switch to it (`folderWorkspaces`). */
+  openFolderWorkspace: (path: string) => Promise<void>;
 
   /** (Free mode) Unregister an inactive Workspace. */
   removeRecentWorkspace: (workspaceId: string) => void;
@@ -504,6 +507,17 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
       await activateWorkspace(created.workspaceId);
       return getWorkspaceInfo();
     }, name);
+  },
+
+  openFolderWorkspace: async (path: string) => {
+    if (get().mode === 'managed') {
+      throw new Error('Workspace is locked by the server (managed mode)');
+    }
+    await changeWorkspace(async () => {
+      const opened = await adoptFolderWorkspace(path);
+      await activateWorkspace(opened.workspaceId);
+      return getWorkspaceInfo();
+    }, path);
   },
 
   removeRecentWorkspace: (workspaceId: string) => {

@@ -11,11 +11,13 @@
  * supervisor's auto-restart budget is exhausted.
  *
  * Both verbs require the owner because restarting the worker disrupts
- * active agent operations.
+ * active agent operations. Bubble supervises no worker, so both answer 404
+ * there instead of reporting or starting one.
  */
 
 import { getDaemonSupervisor } from '@agenetes/agentlet-host';
 
+import { personalSettingsOwner } from '../../identity/personal-settings.js';
 import { isOwnerRequest } from '../../security/owner.js';
 
 import type {
@@ -24,6 +26,11 @@ import type {
   ApiResult,
 } from '@huabu/shared';
 import type { FastifyPluginAsync } from 'fastify';
+
+const NO_WORKER = {
+  message: 'This Server runs no shared agent worker',
+  code: 'AGENTLET_UNAVAILABLE',
+} as const;
 
 const acpAgentletRoutes: FastifyPluginAsync = async (app) => {
   app.get<{ Reply: ApiResult<AcpAgentletStatusResponse> }>(
@@ -34,6 +41,7 @@ const acpAgentletRoutes: FastifyPluginAsync = async (app) => {
           message: 'Forbidden: agentlet status requires owner authorization',
         });
       }
+      if (personalSettingsOwner()) return reply.status(404).send(NO_WORKER);
       return getDaemonSupervisor().getStatus();
     },
   );
@@ -46,6 +54,7 @@ const acpAgentletRoutes: FastifyPluginAsync = async (app) => {
           message: 'Forbidden: agentlet restart requires owner authorization',
         });
       }
+      if (personalSettingsOwner()) return reply.status(404).send(NO_WORKER);
       return getDaemonSupervisor().restart();
     },
   );

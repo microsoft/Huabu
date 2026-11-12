@@ -21,6 +21,8 @@ import { z } from 'zod';
  *
  * - `name` — the stable scope id, addressed by L2 and treated opaque (the
  *   K8s `metadata.name` of the namespace). L1 decides what it represents.
+ * - `ownerId` — optional stable containing boundary (for example a Workspace
+ *   id). Together with `name` it identifies ownership across storage moves.
  * - `storage` — OPTIONAL description of where this scope's L2 state
  *   persists. It is plain serializable data (it rides the `WorkloadSpec`,
  *   so it carries no methods/closures): `storage.root` is the absolute
@@ -36,6 +38,7 @@ import { z } from 'zod';
  */
 export const namespaceSchema = z.object({
   name: z.string().min(1),
+  ownerId: z.string().min(1).optional(),
   storage: z.object({ root: z.string() }).optional(),
 });
 

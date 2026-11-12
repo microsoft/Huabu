@@ -573,6 +573,15 @@ export function workspaceAtDirectory(
 }
 
 /**
+ * Registered Disk Workspace IDs that physically overlap a proposed folder.
+ * This read-only locator includes aliases and missing descendants, without
+ * reading Workspace metadata; the caller owns authorization before mutation.
+ */
+export function overlappingWorkspaceDirectories(workspacePath: string) {
+  return materializedWorkspaces().overlappingDirectories(workspacePath);
+}
+
+/**
  * The directory backing a registered Workspace, or `null` if there is none.
  *
  * `null` covers both "not a registered Workspace" and "this backend does not

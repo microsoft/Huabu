@@ -290,6 +290,51 @@ describe('SET_FRAME_LAYOUT cells', () => {
     ).toBe(false);
   });
 
+  it.each([false, true])(
+    'preserves explicit sparse cells during execution (earlier count command: %s)',
+    (earlierCount) => {
+      const nodes = scene([
+        { frameColumn: 0, frameRow: 0 },
+        { frameColumn: 2, frameRow: 0 },
+        { frameColumn: 2, frameRow: 2 },
+      ]).map((node) => ({
+        ...node,
+        id: `node-${node.id}`,
+        parentId: node.parentId ? `node-${node.parentId}` : undefined,
+        style: { width: 100, height: 50 },
+      }));
+      nodes[0].data = { layoutMode: 'grid', gridCount: 3 };
+      const count: Cmd = {
+        type: 'SET_FRAME_LAYOUT',
+        frameId: 'node-frame',
+        mode: 'grid',
+        gridCount: 3,
+      };
+      const result = executeCanvasCommands(
+        {
+          source: 'ui',
+          commands: [
+            ...(earlierCount ? [count] : []),
+            {
+              ...count,
+              cells: [
+                { nodeId: 'node-c0', column: 0, row: 0 },
+                { nodeId: 'node-c1', column: 2, row: 0 },
+                { nodeId: 'node-c2', column: 2, row: 2 },
+              ],
+            },
+          ],
+        },
+        { nodes, edges: [], canvasId: 'canvas' },
+      );
+      for (const original of nodes.slice(1)) {
+        expect(dataOf(result.writeResult.nodes, original.id)).toMatchObject(
+          original.data,
+        );
+      }
+    },
+  );
+
   it('pins each child to the cell it names', () => {
     const result = run(
       {

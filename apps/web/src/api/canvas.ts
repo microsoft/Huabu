@@ -14,6 +14,7 @@ import type {
   CanvasErrorCode,
   DeleteCanvasResponse,
   GetCanvasResponse,
+  CanvasAccess,
   GetNodeContentResponse,
   PutCanvasRequest,
   PutCanvasResponse,
@@ -33,6 +34,16 @@ import type {
   MoveSelectionResponse,
   RecentCanvasConversationResponse,
 } from '@huabu/shared';
+
+/** A rejected write should refresh the open Space's permission affordances. */
+export const CANVAS_ACCESS_CHANGED_EVENT = 'huabu:canvas-access-changed';
+
+function notifyAccessRefusal(canvasId: string, status: number): void {
+  if (status === 403 && typeof window !== 'undefined')
+    window.dispatchEvent(
+      new CustomEvent(CANVAS_ACCESS_CHANGED_EVENT, { detail: canvasId }),
+    );
+}
 
 export async function getRecentCanvasConversation(
   canvasId: string,
@@ -182,6 +193,14 @@ export async function getCanvas(
   }
 }
 
+/** Refresh only permissions so an open editor keeps its unsaved body. */
+export function getCanvasAccess(canvasId: string): Promise<CanvasAccess> {
+  return apiFetch<CanvasAccess>(routes.canvasAccess(canvasId), {
+    cache: 'no-store',
+    fallbackMessage: 'Failed to check Space access',
+  });
+}
+
 export async function postCanvasExecute(
   canvasId: string,
   request: PostCanvasExecuteRequest,
@@ -225,6 +244,7 @@ export async function putCanvas(
   });
 
   if (!response.ok) {
+    notifyAccessRefusal(canvasId, response.status);
     const body = (await response.json().catch(() => null)) as unknown;
     if (response.status === 409 && isCanvasConflictResponse(body)) {
       throw new CanvasConflictError(body);
@@ -277,6 +297,7 @@ export async function putNodeContent(
   );
 
   if (!response.ok) {
+    notifyAccessRefusal(canvasId, response.status);
     const body = (await response.json().catch(() => null)) as unknown;
     // Duplicate-sidecar refusal must be checked before the generic
     // conflict branch: it also carries a `code`, so `isCanvasConflictResponse`

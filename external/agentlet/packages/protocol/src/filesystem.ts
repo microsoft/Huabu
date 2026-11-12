@@ -2,9 +2,23 @@
 // Licensed under the MIT license.
 
 export const FS_PROTOCOL_VERSION = 1
+export const FS_PROXY_CAPABILITY_KEY = 'com.microsoft.agentlet/filesystem'
+export const FS_PROXY_CAPABILITY = Object.freeze({ version: FS_PROTOCOL_VERSION })
 export const FS_MAX_TEXT_BYTES = 65_536
 export const FS_MAX_RESPONSE_BYTES = 524_288
 export const FS_MAX_ENTRIES = 100
+
+export function supportsFsProtocol(agentCapabilities: unknown): boolean {
+  if (!agentCapabilities || typeof agentCapabilities !== 'object' ||
+    Array.isArray(agentCapabilities) || !('_meta' in agentCapabilities)) return false
+  const meta = agentCapabilities._meta
+  if (!meta || typeof meta !== 'object' || Array.isArray(meta) ||
+    !(FS_PROXY_CAPABILITY_KEY in meta)) return false
+  const capability = meta[FS_PROXY_CAPABILITY_KEY]
+  return capability !== null && typeof capability === 'object' &&
+    !Array.isArray(capability) && 'version' in capability &&
+    capability.version === FS_PROTOCOL_VERSION
+}
 
 export type FsOperation = 'fs-list' | 'fs-read'
 export interface FsRequest {
