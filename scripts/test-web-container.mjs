@@ -52,6 +52,9 @@ try {
   for (let boot = 1; boot <= 2; boot++) {
     const port = await unusedPort();
     const origin = `http://127.0.0.1:${port}`;
+    // Model a reverse proxy's public Host while keeping the test socket local.
+    const publicHost = `huabu-container.test:${port}`;
+    const headers = { authorization, host: publicHost };
     docker([
       'run',
       '--detach',
@@ -70,14 +73,14 @@ try {
       '--env',
       'HUABU_IDENTITY_PROVIDER=local',
       '--env',
-      `HUABU_PUBLIC_ORIGIN=${origin}`,
+      `HUABU_PUBLIC_ORIGIN=http://${publicHost}`,
       image,
     ]);
     let ready = false;
     for (let attempt = 0; attempt < 120; attempt++) {
       try {
         const response = await fetch(`${origin}/api/deployment/readiness`, {
-          headers: { authorization },
+          headers,
           signal: AbortSignal.timeout(2000),
         });
         if (response.status === 200) {
@@ -94,14 +97,18 @@ try {
       await delay(500);
     }
     assert.ok(ready, 'Container did not become ready');
-    const page = await fetch(origin, { headers: { authorization } });
+    const page = await fetch(origin, {
+      headers,
+      signal: AbortSignal.timeout(5000),
+    });
     assert.equal(page.status, 200);
     const html = await page.text();
     assert.match(html, /<!doctype html|<html/i);
     const script = html.match(/<script[^>]+src="([^"]+)"/u)?.[1];
     assert.ok(script, 'The built SPA must reference its JavaScript');
     const asset = await fetch(new URL(script, origin), {
-      headers: { authorization },
+      headers,
+      signal: AbortSignal.timeout(5000),
     });
     assert.equal(asset.status, 200);
     assert.match(asset.headers.get('content-type'), /javascript/iu);
