@@ -6,12 +6,10 @@ import {
   stripMarkdown,
 } from '@huabu/shared/canvas-engine';
 
-function plainText(markdown: string): string {
-  return stripMarkdown(markdown).replace(/\s+/g, ' ').trim();
-}
-
 function comparisonKey(text: string): string {
-  return plainText(text)
+  return text
+    .replace(/\s+/g, ' ')
+    .trim()
     .replace(/[.!?。！？:：]+$/u, '')
     .toLowerCase();
 }
@@ -37,7 +35,7 @@ export function noteFarDescription(
   markdown: string,
   title: string,
 ): string | undefined {
-  const titleKey = comparisonKey(title);
+  const titleKey = comparisonKey(stripMarkdown(title));
   const paragraphs: string[] = [];
   for (const text of markdownExcerptParagraphs(withoutImageText(markdown))) {
     if (/[\p{L}\p{N}]/u.test(text) && comparisonKey(text) !== titleKey) {

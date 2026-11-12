@@ -1,11 +1,31 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+
+import { stripMarkdown } from '@huabu/shared/canvas-engine';
 
 import { noteFarDescription } from './noteFarDescription';
 
+vi.mock('@huabu/shared/canvas-engine', { spy: true });
+
 describe('noteFarDescription', () => {
+  it('does not reparse projected paragraphs when comparing them with the title', () => {
+    vi.mocked(stripMarkdown).mockClear();
+    const paragraphs = Array.from(
+      { length: 100 },
+      (_, index) => `Paragraph ${index} with **formatting**.`,
+    );
+    expect(noteFarDescription(paragraphs.join('\n\n'), '**Title**')).toBe(
+      paragraphs.map((text) => text.replaceAll('**', '')).join(' '),
+    );
+    expect(stripMarkdown).toHaveBeenCalledExactlyOnceWith('**Title**');
+  });
+
+  it('does not reinterpret literal Markdown text as a repeated title', () => {
+    expect(noteFarDescription('`**Title**`', 'Title')).toBe('**Title**');
+  });
+
   it.each([
     '![tmux 代表图](art_tmux.png)',
     '![tmux 代表图](images/tmux(v2).png "Preview")',

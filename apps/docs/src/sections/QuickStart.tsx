@@ -35,13 +35,13 @@ export default function QuickStart() {
       <span id="1-download-and-install-huabu" />
       <H2>1. Run Huabu from source</H2>
       <P>
-        Running from source is the recommended way to use Huabu. Desktop installers
-        are coming soon.
+        Running from source is the recommended way to use Huabu. Desktop
+        installers are coming soon.
       </P>
       <P>
         Requirements: Node.js 24.16.0+ and pnpm 10+. Get the source from{' '}
-        <DocLink href="https://github.com/microsoft/Huabu">GitHub</DocLink>, then
-        install dependencies in the repository directory:
+        <DocLink href="https://github.com/microsoft/Huabu">GitHub</DocLink>,
+        then install dependencies in the repository directory:
       </P>
       <CodeBlock language="bash">pnpm install</CodeBlock>
       <P>Start the desktop application:</P>
@@ -49,8 +49,8 @@ export default function QuickStart() {
       <P>Or start the web application:</P>
       <CodeBlock language="bash">pnpm start:web</CodeBlock>
       <P>
-        For the web application, open the server address printed in the terminal.
-        See the{' '}
+        For the web application, open the server address printed in the
+        terminal. See the{' '}
         <DocLink href="https://github.com/microsoft/Huabu#building-from-source">
           README
         </DocLink>{' '}

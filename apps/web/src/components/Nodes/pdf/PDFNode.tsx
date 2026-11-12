@@ -2,7 +2,15 @@
 // Licensed under the MIT license.
 
 import { Download, Maximize2, ImageOff } from 'lucide-react';
-import { lazy, memo, Suspense, useCallback, useEffect, useState } from 'react';
+import {
+  lazy,
+  memo,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { orderedPropertyKeys } from '@huabu/shared/canvas-engine';
@@ -108,10 +116,13 @@ export const PDFNode = memo(
 
     const hasCover = !!data.coverUrl;
     const src = typeof data.src === 'string' ? data.src : '';
-    const summary =
-      typeof notesContent === 'string'
-        ? noteFarDescription(notesContent, '')
-        : undefined;
+    const summary = useMemo(
+      () =>
+        typeof notesContent === 'string'
+          ? noteFarDescription(notesContent, '')
+          : undefined,
+      [notesContent],
+    );
     const cardProperties = orderedPropertyKeys(
       data.properties,
       data.propertyDisplayKeys,
