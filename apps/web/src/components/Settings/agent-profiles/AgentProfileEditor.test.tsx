@@ -469,9 +469,9 @@ describe('AgentProfileEditor', () => {
       launch: { kind: 'acp-command', command: 'new-agent --custom' },
       workingDirPath: '/new/work',
     });
-    expect(container?.textContent).toContain(
-      'settings.profileChangesNewExecutions',
-    );
+    expect(api.toast).toHaveBeenCalledWith('settings.profileUpdated', {
+      tone: 'success',
+    });
   });
 
   it('preserves an untouched structured recipe, including absent options', async () => {
