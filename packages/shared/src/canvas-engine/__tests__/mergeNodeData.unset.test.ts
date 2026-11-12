@@ -28,10 +28,11 @@ function merge(
     patch: Record<string, unknown>;
     unset?: string[];
   }>,
+  source: 'ui' | 'agent' = 'ui',
 ) {
   return executeCanvasCommands(
     {
-      source: 'ui',
+      source,
       commands: [
         { type: 'MERGE_NODE_DATA', patches } as unknown as CanvasCommand,
       ],
@@ -101,5 +102,19 @@ describe('MERGE_NODE_DATA unset', () => {
       applied: false,
       reason: 'invalid-target',
     });
+  });
+
+  it('is refused for an agent batch, which clears with null where a field allows it', () => {
+    const before = [node('a', 'pdf', { coverPage: 3 })];
+    const { commandResults, writeResult } = merge(
+      before,
+      [{ nodeId: 'a', patch: {}, unset: ['coverPage'] }],
+      'agent',
+    );
+    expect(commandResults[0]).toMatchObject({
+      applied: false,
+      reason: 'invalid-scope',
+    });
+    expect(writeResult.nodes).toBe(before);
   });
 });
