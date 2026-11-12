@@ -63,6 +63,8 @@ export interface SendQueueStatus {
   phase: SendQueuePhase;
   /** Entries not yet answered. */
   pending: number;
+  /** Consecutive failed attempts; above zero the Space is unsynced. */
+  failures: number;
 }
 
 export interface SendQueueRetryPolicy {
@@ -219,6 +221,7 @@ export function createSendQueue(options: SendQueueOptions): SendQueue {
     canvasId: lane.canvasId,
     phase: lane.phase,
     pending: lane.entries.length,
+    failures: lane.failures,
   });
 
   const publish = (lane: Lane): void => {

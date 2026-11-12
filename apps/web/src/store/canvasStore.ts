@@ -178,6 +178,11 @@ import {
 } from '../components/Nodes/shared/height/commitSuspension';
 import { copyCanvasClipboard } from '../utils/io/clipboard';
 import { nodesToPlainText } from '../utils/io/nodeToPlainText';
+import {
+  syncStateOf,
+  useCanvasSyncStatusStore,
+  type CanvasSyncState,
+} from './canvasStore/sync/syncStatus';
 
 import type { SendOutcome } from './canvasStore/sync/sendQueue';
 import type {
@@ -1226,6 +1231,79 @@ const browserSync = createBrowserSync({
   ignoreUnit: isContentUnit,
 });
 
+// ─── Unsynced and error notices ───────────────────────────────────────────
+//
+// While a request keeps failing the page says so and keeps retrying. Once
+// the retry limit is reached nothing more is sent until the user chooses:
+// keep trying, or reload the Space and give up what was not sent. The page
+// never reloads over unsent changes on its own.
+
+let syncNotice: { state: 'unsynced' | 'error'; toastId: string } | null = null;
+
+function dismissSyncNotice(): void {
+  if (!syncNotice) return;
+  dismissToast(syncNotice.toastId);
+  syncNotice = null;
+}
+
+function showSyncNotice(canvasId: string, state: CanvasSyncState): void {
+  if (state !== 'unsynced' && state !== 'error') {
+    dismissSyncNotice();
+    return;
+  }
+  if (syncNotice?.state === state) return;
+  dismissSyncNotice();
+  syncNotice = {
+    state,
+    toastId:
+      state === 'unsynced'
+        ? toast(t('canvasSync.unsynced'), {
+            tone: 'warning',
+            duration: 0,
+            dismissible: false,
+          })
+        : toast(t('canvasSync.sendFailed'), {
+            tone: 'danger',
+            duration: 0,
+            dismissible: false,
+            action: {
+              label: t('canvasSync.keepTrying'),
+              onClick: () => {
+                syncNotice = null;
+                browserSync.queue.resume(canvasId);
+              },
+            },
+            secondaryAction: {
+              label: t('canvasSync.reloadAndDiscard'),
+              onClick: () => {
+                syncNotice = null;
+                discardUnsentCanvasEdits(canvasId);
+              },
+            },
+          }),
+  };
+}
+
+/**
+ * The user's choice in the error state: give up what could not be sent and
+ * show the server's Space again.
+ */
+export function discardUnsentCanvasEdits(canvasId: string): void {
+  browserSync.discard(canvasId);
+  browserSync.deferReload(canvasId);
+}
+
+browserSync.queue.subscribe((status) => {
+  if (useCanvasStore.getState().canvasId !== status.canvasId) return;
+  const state = syncStateOf(status);
+  useCanvasSyncStatusStore.setState({
+    canvasId: status.canvasId,
+    state,
+    pending: status.pending,
+  });
+  showSyncNotice(status.canvasId, state);
+});
+
 browserSync.queue.subscribe((status) => {
   if (status.phase !== 'idle' || !structureSaveDeferred) return;
   if (useCanvasStore.getState().canvasId !== status.canvasId) return;
@@ -1266,6 +1344,8 @@ export function resetCanvasSyncForTests(): void {
   browserSync.reset();
   syncGestureBaseline = null;
   structureSaveDeferred = false;
+  dismissSyncNotice();
+  useCanvasSyncStatusStore.setState({ state: 'synced', pending: 0 });
 }
 
 /**
@@ -1485,6 +1565,8 @@ function hasUnsavedStructureOrContent(): boolean {
 export async function resendUnsavedCanvasEdits(): Promise<void> {
   const { canvasId } = useCanvasStore.getState();
   if (!canvasId) return;
+  // A lapsed session may have used up the retry limit.
+  browserSync.queue.resume(canvasId);
   await drainPendingSaves(canvasId);
 }
 
@@ -1629,8 +1711,23 @@ if (typeof window !== 'undefined') {
         return s.isSaving || s.pendingSave;
       },
       flushPreviewWorkspace: () => usePreviewWorkspaceStore.getState().flush(),
+      sendQueue: {
+        hasUnsent: () =>
+          browserSync.queue.hasPending(useCanvasStore.getState().canvasId),
+        flushKeepalive: () => browserSync.queue.flushKeepalive(),
+        // The desktop app closes through its own acknowledged save flow; a
+        // cancelled `beforeunload` there would block the window silently.
+        warnBeforeLeaving: () => !getElectronBridge(),
+      },
     }),
   );
+  // Back online: try at once instead of waiting out the backoff, and leave
+  // the error state the outage caused.
+  window.addEventListener('online', () => {
+    const { canvasId } = useCanvasStore.getState();
+    if (canvasId && browserSync.queue.hasPending(canvasId))
+      browserSync.queue.resume(canvasId);
+  });
 }
 
 /**

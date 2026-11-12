@@ -118,15 +118,19 @@ A `ui` command batch (`executeCommands` with the default source: create, delete,
 
 **Reloads.** `requestCanvasResync` is the only way the sync subscriber reloads (version gap, reconnect snapshot mismatch, paint order that could not be installed, missing update, rejected command). It runs `loadCanvas(…, { resetHistory: true })` at once when the send queue is empty and otherwise as soon as it has drained; a page with unsent changes is never replaced. A paint-order divergence is ignored while the page holds an unconfirmed change to the same parent's children, since the update for that change carries the order the server ended with.
 
+**When a request cannot be sent.** The queue's status for the open Space is mirrored in `useCanvasSyncStatusStore` ([syncStatus.ts](../../apps/web/src/store/canvasStore/sync/syncStatus.ts)) as `synced`, `syncing`, `unsynced` or `error`. After the first failed attempt the page shows a persistent warning toast (`canvasSync.unsynced`) and keeps retrying; the edits stay on screen and nothing is persisted locally, so closing the page loses them. The `online` event retries at once. After 8 consecutive failed attempts, or 60 s since the first of them, the lane stalls: nothing is sent, and a danger toast (`canvasSync.sendFailed`) offers **Keep trying** (`queue.resume`) and **Reload and discard unsent changes** (`discardUnsentCanvasEdits`: drop the lane, then reload the Space). The page never reloads over unsent changes on its own; while stalled a wanted reload stays held, the whole-Space PUT is not sent, and `drainPendingSaves` rejects, so leaving the Space goes through the existing unsaved-changes dialog (whose discard also drops the lane). Renewing a lapsed session resumes the lane.
+
+**Page close.** With unanswered batches the `beforeunload` handler ([unloadFlush.ts](../../apps/web/src/store/canvasStore/save/unloadFlush.ts)) sends each of them with `keepalive` — the one on the wire with the request id it already has, so it cannot run twice — and asks the browser for its leave confirmation. The desktop app does not ask; it closes through its own save boundary, which drains the queue via `drainPendingSaves`. A keepalive request is best effort and limited in size by the browser.
+
 **Whole-Space PUT.** Writers that do not go through `ui` commands still save with `PUT /api/canvas/:id` (see the list under [Known gaps](#known-gaps-of-browser-structure-edits)). `saveCanvas` waits until the send queue is empty and every answered batch's update has been applied, so the PUT never carries a version the queue is about to advance; `drainPendingSaves` and `hasUnsavedCanvasEdits` include the queue.
 
 ### Known gaps of browser structure edits
 
 - A PUT bumps the version and only broadcasts `invalidate`, so another page sees the next `update` as a gap and reloads (dropping its undo history). This affects undo/redo, measured heights, deferred Frame relayout, `patchNodeSilent`, paste and title changes until they are moved.
 - Body, label and other content fields are not sent through the queue and do not reach other pages.
-- Bounded retry, an unsynced indicator and a page-close flush are not implemented: retries continue until the request succeeds.
+- The unsynced and error states are toasts; there is no separate indicator, and unsent edits are held in memory only.
 - An undo restores a whole snapshot and can overwrite what another page changed since.
-- Covered by unit tests with a simulated second page and by `apps/web/e2e/multi-page-sync-baseline.spec.ts` with two real browser contexts; not by a run across two devices.
+- Covered by unit tests with a simulated second page and by `apps/web/e2e/multi-page-sync-baseline.spec.ts` with two real browser contexts, including one page going offline; the error state, its two choices and the page-close flush are covered by unit tests only. Not covered by a run across two devices.
 
 ## Conflict model — version + dirty-node protection
 

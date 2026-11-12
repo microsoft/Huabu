@@ -25,14 +25,17 @@ vi.mock('@/components/Common/Toast', () => ({
   dismissToast: vi.fn(),
 }));
 
-import { toast } from '@/components/Common/Toast';
+import { dismissToast, toast } from '@/components/Common/Toast';
 
 import { canvasHistoryManager } from './canvasHistoryManager';
 import useCanvasStore, {
+  drainPendingSaves,
   hasUnsavedCanvasEdits,
   requestCanvasResync,
   resetCanvasSyncForTests,
 } from './canvasStore';
+import { DEFAULT_SEND_RETRY } from './canvasStore/sync/sendQueue';
+import { useCanvasSyncStatusStore } from './canvasStore/sync/syncStatus';
 import { createFakeSpaceServer } from './canvasStore/sync/testing/fakeExecuteServer';
 
 import type * as apiModule from '../api';
@@ -539,5 +542,163 @@ describe('a free drag', () => {
     state().onNodeDragStop(new MouseEvent('mouseup'), node(X), [node(X)]);
     expect(own).toHaveLength(0);
     expect(canvasHistoryManager.canUndo).toBe(false);
+  });
+});
+
+describe('when a change cannot be sent', () => {
+  const offline = () => new TypeError('Failed to fetch');
+  const syncState = () => useCanvasSyncStatusStore.getState().state;
+  const notices = () =>
+    vi.mocked(toast).mock.calls.map(([message, options]) => ({
+      message,
+      options,
+    }));
+  /** Fail the request on the wire and wait out the backoff before the next. */
+  async function failOnce() {
+    own.at(-1)?.reject(offline());
+    await flush();
+    await vi.advanceTimersByTimeAsync(DEFAULT_SEND_RETRY.maxDelayMs);
+  }
+  async function failUntilStalled() {
+    for (let attempt = 0; attempt < DEFAULT_SEND_RETRY.maxAttempts; attempt++)
+      await failOnce();
+    expect(syncState()).toBe('error');
+  }
+
+  it('shows an unsynced state, retries the same request on its own and clears when it gets through', async () => {
+    moveHere(X, 500);
+    expect(syncState()).toBe('syncing');
+    await failOnce();
+    expect(syncState()).toBe('unsynced');
+    expect(notices()).toHaveLength(1);
+    expect(notices()[0].message).toMatch(/not synced yet/);
+    // The edit stays on screen and the same request is sent again.
+    expect(node(X).position).toEqual({ x: 500, y: 0 });
+    expect(own).toHaveLength(2);
+    expect(own[1].request).toEqual(own[0].request);
+
+    await failOnce();
+    // Still one notice, not one per attempt.
+    expect(notices()).toHaveLength(1);
+
+    await answer(own.length - 1);
+    expect(syncState()).toBe('synced');
+    expect(dismissToast).toHaveBeenCalledWith('toast-id');
+    expect(serverNode(X)?.position).toEqual({ x: 500, y: 0 });
+    // The server ran the batch once however often it was sent.
+    expect(server.state.version).toBe(2);
+    expect(api.getCanvas).not.toHaveBeenCalled();
+  });
+
+  it('enters an explicit error state after the retry limit and never reloads on its own', async () => {
+    moveHere(X, 500);
+    await failUntilStalled();
+    const attempts = own.length;
+    const error = notices().at(-1);
+    expect(error?.message).toMatch(/could not be sent/);
+    expect(error?.options).toMatchObject({
+      duration: 0,
+      dismissible: false,
+      action: { label: 'Keep trying' },
+      secondaryAction: { label: 'Reload and discard unsent changes' },
+    });
+
+    // Nothing more is sent, and a reload that becomes wanted is held.
+    requestCanvasResync(SPACE);
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(own).toHaveLength(attempts);
+    expect(api.getCanvas).not.toHaveBeenCalled();
+    expect(node(X).position).toEqual({ x: 500, y: 0 });
+    expect(hasUnsavedCanvasEdits()).toBe(true);
+    // Leaving the Space is refused while the change is unsent.
+    await expect(drainPendingSaves(SPACE)).rejects.toThrow(/could not be sent/);
+  });
+
+  it('"keep trying" sends the same request again', async () => {
+    moveHere(X, 500);
+    await failUntilStalled();
+    const attempts = own.length;
+    notices().at(-1)?.options?.action?.onClick();
+    expect(own).toHaveLength(attempts + 1);
+    expect(own.at(-1)?.request).toEqual(own[0].request);
+    expect(syncState()).toBe('syncing');
+
+    await answer(own.length - 1);
+    expect(syncState()).toBe('synced');
+    expect(serverNode(X)?.position).toEqual({ x: 500, y: 0 });
+  });
+
+  it('"reload and discard" drops the unsent changes and shows the server\'s Space', async () => {
+    moveHere(X, 500);
+    recolourHere(Y, 'red');
+    await failUntilStalled();
+    notices().at(-1)?.options?.secondaryAction?.onClick();
+    await flush();
+    expect(api.getCanvas).toHaveBeenCalledTimes(1);
+    expect(node(X).position).toEqual({ x: 0, y: 0 });
+    expect(accentOf(node(Y))).toBe('white');
+    expect(syncState()).toBe('synced');
+    expect(hasUnsavedCanvasEdits()).toBe(false);
+    // Nothing of the discarded batches is sent afterwards.
+    const attempts = own.length;
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(own).toHaveLength(attempts);
+  });
+
+  it('retries at once when the browser comes back online, also from the error state', async () => {
+    moveHere(X, 500);
+    own[0].reject(offline());
+    await flush();
+    expect(own).toHaveLength(1);
+    // Without waiting out the backoff.
+    window.dispatchEvent(new Event('online'));
+    await flush();
+    expect(own).toHaveLength(2);
+
+    await failUntilStalled();
+    const attempts = own.length;
+    window.dispatchEvent(new Event('online'));
+    expect(own).toHaveLength(attempts + 1);
+    await answer(own.length - 1);
+    expect(syncState()).toBe('synced');
+  });
+
+  it('does not send the whole-Space PUT while the queue cannot send', async () => {
+    moveHere(X, 500);
+    state().patchNodeSilent(Y, { pinned: true });
+    await failUntilStalled();
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(api.putCanvas).not.toHaveBeenCalled();
+
+    notices().at(-1)?.options?.action?.onClick();
+    await answer(own.length - 1);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(api.putCanvas).toHaveBeenCalledTimes(1);
+    expect(api.putCanvas.mock.calls[0][1].version).toBe(2);
+  });
+
+  it('warns before the page closes and flushes unsent batches with keepalive', async () => {
+    moveHere(X, 500);
+    moveHere(Y, 500, 300);
+    const event = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(true);
+    const flushed = api.postCanvasExecute.mock.calls.filter(
+      ([, , options]) => options?.keepalive === true,
+    );
+    expect(flushed.map(([, request]) => request.operationId)).toEqual([
+      own[0].request.operationId,
+      // The second batch had not been sent yet; it goes out with its own id.
+      expect.stringMatching(/^[0-9a-f-]{36}$/),
+    ]);
+    expect(flushed[1][1].commands).toEqual([moveCommand(Y, 500, 300)]);
+  });
+
+  it('does not warn when everything has been sent', async () => {
+    moveHere(X, 500);
+    await answer(0);
+    const event = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(false);
   });
 });

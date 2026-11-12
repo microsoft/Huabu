@@ -19,8 +19,15 @@
  *   1. Event buffer (cheapest, fire-and-forget POST per canvas).
  *   2. Per-node content (cheap, one keepalive PUT per dirty node).
  *   3. Preprocess (one keepalive POST per node with a fresh snapshot).
- *   4. Structure (one keepalive PUT — only when a debounce was queued,
+ *   4. Queued structure edits (one keepalive execute request per
+ *      unanswered batch, each with the request id it already has, so one
+ *      that was on the wire cannot run twice).
+ *   5. Structure (one keepalive PUT — only when a debounce was queued,
  *      so closing a clean tab no longer bumps `version` for free).
+ *
+ * When structure edits are still unsent the handler also asks the browser
+ * to confirm leaving: a keepalive request is best effort, and with the
+ * network down nothing can be flushed at all.
  */
 
 import type { CanvasEventBuffer } from './eventBuffer';
@@ -58,18 +65,40 @@ export type UnloadFlushDeps = {
   hasUnsavedStructure: () => boolean;
   /** Persist the current Canvas's local Preview Workspace layout. */
   flushPreviewWorkspace: () => void;
+  /** This page's queued structure edits (the execute send queue). */
+  sendQueue?: {
+    /** Whether a batch has not been answered by the server yet. */
+    hasUnsent: () => boolean;
+    /** Send every unanswered batch with `keepalive`. */
+    flushKeepalive: () => void;
+    /**
+     * Whether to ask the browser for its "leave site?" confirmation. False
+     * where the host has its own close flow (the desktop app).
+     */
+    warnBeforeLeaving: () => boolean;
+  };
 };
 
 /**
  * Build the `beforeunload` listener. Caller is responsible for
  * registering it via `window.addEventListener('beforeunload', ...)`.
  */
-export function createUnloadFlush(deps: UnloadFlushDeps): () => void {
-  return () => {
+export function createUnloadFlush(
+  deps: UnloadFlushDeps,
+): (event?: BeforeUnloadEvent) => void {
+  return (event) => {
     deps.flushPreviewWorkspace();
     deps.events.flushAllKeepalive();
     deps.nodeContent.flushAllKeepalive();
     deps.preprocess.flushKeepalive();
+    if (deps.sendQueue?.hasUnsent()) {
+      deps.sendQueue.flushKeepalive();
+      if (event && deps.sendQueue.warnBeforeLeaving()) {
+        // The standard way to ask for the browser's own confirmation.
+        event.preventDefault();
+        event.returnValue = '';
+      }
+    }
     // Structure save has three "unsaved" states on unload:
     //   1. A debounce timer is still queued — `cancelPending()`
     //      returns `true`; we cancel it and send the PUT ourselves.

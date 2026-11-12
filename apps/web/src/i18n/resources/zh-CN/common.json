@@ -1664,7 +1664,11 @@
     }
   },
   "canvasSync": {
-    "changeRejected": "有一项修改未能应用，因为该内容已在别处被更改。当前空间已显示最新版本。"
+    "changeRejected": "有一项修改未能应用，因为该内容已在别处被更改。当前空间已显示最新版本。",
+    "unsynced": "你的修改尚未同步，正在重试…",
+    "sendFailed": "部分修改未能发送到服务器。",
+    "keepTrying": "继续重试",
+    "reloadAndDiscard": "重新加载并放弃未发送的修改"
   },
   "errors": {
     "connectAnAgent": "连接 Agent",

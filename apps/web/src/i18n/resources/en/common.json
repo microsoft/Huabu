@@ -1664,7 +1664,11 @@
     }
   },
   "canvasSync": {
-    "changeRejected": "A change could not be applied because the item was changed elsewhere. This Space now shows the latest version."
+    "changeRejected": "A change could not be applied because the item was changed elsewhere. This Space now shows the latest version.",
+    "unsynced": "Your changes are not synced yet. Trying again…",
+    "sendFailed": "Some changes could not be sent to the server.",
+    "keepTrying": "Keep trying",
+    "reloadAndDiscard": "Reload and discard unsent changes"
   },
   "errors": {
     "connectAnAgent": "Connect an Agent",

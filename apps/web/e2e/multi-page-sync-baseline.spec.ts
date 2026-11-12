@@ -36,7 +36,8 @@ import type { CreateCanvasResponse } from '@huabu/shared';
  *    them as `test.fail` and prove each one really fails today. Flip them to
  *    plain `test` as the implementation lands.
  *
- * Case (g) is the control: a headless execute request.
+ * Case (g) is the control: a headless execute request. Case (h) takes one
+ * page offline while it edits.
  *
  * Timing: a structure edit is sent at once and a body is autosaved shortly
  * after the last change, so every scenario waits on the server record rather
@@ -982,6 +983,56 @@ test('(e) moves of different nodes from page A and page B are both saved and sho
   expect(result.bReloadedBeforeChoice).toBe(false);
   expect(result.bViewportKept).toBe(true);
   expect(result.bSelected).toEqual([Y]);
+});
+
+// ─── (h) offline ────────────────────────────────────────────────────────────
+
+test('(h) an edit made offline stays on screen, is flagged as unsynced and is sent when the connection returns', async ({
+  browser,
+  request,
+}, testInfo) => {
+  const { canvasId, a, b } = await openBoth(browser, request, 'Sync offline');
+  const unsynced = a.page.getByText(/not synced yet/);
+  const mark = b.syncText().length;
+
+  await a.context.setOffline(true);
+  const moved = await dragNode(a.page, X, 120, 0);
+  await expect(unsynced).toBeVisible();
+  const whileOffline = {
+    server: (await serverRecord(request, canvasId)).position(X),
+    aShows: await domPosition(a.page, X),
+  };
+
+  await a.context.setOffline(false);
+  await waitForServerPosition(request, canvasId, X, moved);
+  await expect(unsynced).toHaveCount(0);
+  const live = await observeRemote(b, mark, SEED[X] as Point, () =>
+    domPosition(b.page, X),
+  );
+  const result = {
+    moved,
+    whileOffline,
+    executeCalls: a.calls
+      .filter((call) => call.path === '<space>/execute')
+      .map((call) => call.status),
+    aShows: await domPosition(a.page, X),
+    bLive: live.value,
+    aReloaded: await wasReloaded(a.page),
+    serverVersion: (await serverRecord(request, canvasId)).version,
+    aVersion: (await storeState(a.page)).version,
+  };
+  await evidence(testInfo, result);
+  await closeBoth(a, b);
+
+  expect(result.whileOffline.server).toEqual(SEED[X]);
+  expect(result.whileOffline.aShows).toEqual(moved);
+  expect(result.aShows).toEqual(moved);
+  expect(result.bLive).toEqual(moved);
+  expect(result.aReloaded).toBe(false);
+  // Sent more than once, executed once.
+  expect(result.executeCalls.length).toBeGreaterThan(1);
+  expect(result.executeCalls.at(-1)).toBe(200);
+  expect(result.aVersion).toBe(result.serverVersion);
 });
 
 // ─── (f) note body ──────────────────────────────────────────────────────────
