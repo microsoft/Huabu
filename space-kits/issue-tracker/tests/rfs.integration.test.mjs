@@ -204,6 +204,7 @@ it('validates edited configuration for a non-Huabu repository without recreating
     repository: 'octo/example',
     codebasePath: '/projects/example',
     worktreeRoot: '/projects/worktrees',
+    coordinatorProfileId: 'project-profile',
     fixingProfileId: 'project-profile',
     developmentBaseRef: 'upstream/develop',
     pullRequestBase: 'develop',
@@ -477,32 +478,79 @@ it('detects a concurrent ledger edit even on an otherwise unchanged rerun', asyn
   );
 });
 
-it('runs the cloned standalone CLI over native HTTP from a different cwd', async () => {
+it('runs the cloned standalone CLI over huabu-rfs and 3-step workflow from a different cwd', async () => {
   const address = await app.listen({ host: '127.0.0.1', port: 0 });
   const clone = join(workspace, 'standalone-kit');
   await cp(new URL('../', import.meta.url), clone, { recursive: true });
-  const { stdout } = await promisify(execFile)(
-    process.execPath,
-    [
-      join(clone, 'scripts/install.mjs'),
-      '--installer-node',
-      'node-installer',
-      '--profile',
-      'project-profile',
-      '--apply',
-    ],
-    {
-      cwd: workspace,
-      env: {
-        HUABU_RFS_URL: `${address}/rfs/c1`,
-        AGENTLET_TOKEN: 'fixture-only',
-      },
-    },
+  const rfsEntry = new URL(
+    '../../../packages/client-runtime/dist/rfs.js',
+    import.meta.url,
+  ).pathname;
+  const env = {
+    ...process.env,
+    HUABU_RFS_URL: `${address}/rfs/c1`,
+    AGENTLET_TOKEN: 'fixture-only',
+    HUABU_RFS_ENTRY: rfsEntry,
+    HUABU_THREAD_ID: 'thread-installer',
+  };
+  // Step 1: lay out Space content without passing --installer-node or --profile
+  const step1 = JSON.parse(
+    (
+      await promisify(execFile)(
+        process.execPath,
+        [join(clone, 'scripts/install.mjs'), '--apply'],
+        { cwd: workspace, env },
+      )
+    ).stdout,
   );
-  const result = JSON.parse(stdout);
-  expect(result.state).toBe('needs_configuration');
+  expect(step1.transport).toBe('huabu-rfs');
+  expect(step1.installerNode).toBe('node-installer');
+  expect(step1.state).toBe('needs_configuration');
+  expect(step1.coordinator).toBeNull();
+  expect(ledger().objects.coordinator).toBeUndefined();
+
+  // Step 2: user fills in configuration on the Space
+  const configNodeId = ledger().objects.configuration.nodeId;
+  const values = {
+    repository: 'octo/example',
+    codebasePath: '/projects/example',
+    worktreeRoot: '/projects/worktrees',
+    coordinatorProfileId: 'project-profile',
+    fixingProfileId: 'project-profile',
+    developmentBaseRef: 'upstream/develop',
+    pullRequestBase: 'develop',
+  };
+  const configuration = {
+    schemaVersion: 1,
+    values,
+    evidence: Object.fromEntries(
+      Object.keys(values).map((key) => [
+        key,
+        'User confirmed on intended execution device',
+      ]),
+    ),
+    confirmedByUser: true,
+  };
+  store().writeNode(configNodeId, {
+    ...store().readNode(configNodeId),
+    content: `# Issue Tracker Configuration\n\n\`\`\`json\n${JSON.stringify(configuration)}\n\`\`\`\n`,
+  });
+
+  // Step 3: finalize installation and create Coordinator from configuration
+  const step3 = JSON.parse(
+    (
+      await promisify(execFile)(
+        process.execPath,
+        [join(clone, 'scripts/install.mjs'), '--apply'],
+        { cwd: workspace, env },
+      )
+    ).stdout,
+  );
+  expect(step3.transport).toBe('huabu-rfs');
+  expect(step3.state).toBe('ready');
+  expect(step3.coordinator?.threadId).toBeTruthy();
   expect(ledger().objects.coordinator.threadId).toBe(
-    result.coordinator.threadId,
+    step3.coordinator.threadId,
   );
   expect(agentThreadService.invoke).not.toHaveBeenCalled();
   expect(agenetes.create).not.toHaveBeenCalled();

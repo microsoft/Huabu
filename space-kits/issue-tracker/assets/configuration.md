@@ -1,6 +1,6 @@
 # Issue Tracker Configuration
 
-Edit the JSON below in this existing Note. `null` means REQUIRED, never an inferred default. Paths refer to the intended Agent execution device. Select a Fixing Profile explicitly. Confirm repository and delivery refs from project evidence, not from the Kit checkout. Supply one evidence description per value, then set `confirmedByUser` only after user confirmation.
+Edit the JSON below in this existing Note. `null` means REQUIRED, never an inferred default. Paths refer to the intended Agent execution device. Select both Coordinator and Fixing Profiles explicitly (they may use the same or different external Profile IDs). Confirm repository and delivery refs from project evidence, not from the Kit checkout. Supply one evidence description per value, then set `confirmedByUser` only after user confirmation.
 
 ```json
 {
@@ -9,6 +9,7 @@ Edit the JSON below in this existing Note. `null` means REQUIRED, never an infer
     "repository": null,
     "codebasePath": null,
     "worktreeRoot": null,
+    "coordinatorProfileId": null,
     "fixingProfileId": null,
     "developmentBaseRef": null,
     "pullRequestBase": null

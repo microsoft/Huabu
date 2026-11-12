@@ -45,6 +45,13 @@ test('portable package links resolve and Prompt bodies fit native UTF-8 budgets'
   assert.match(skill, /^---\nname: issue-tracker\n/);
   assert.match(skill, /Use when/);
   assert.match(skill, /Do not use/);
+  assert.match(skill, /## Step 1\. Lay out Space content/);
+  assert.match(skill, /## Step 2\. Fill in configuration on the Space/);
+  assert.match(
+    skill,
+    /## Step 3\. Finalize installation and create Coordinator/,
+  );
+  assert.match(skill, /HUABU_RFS_ENTRY/);
 });
 
 test('script works from a standalone clone outside the Huabu checkout', async () => {
@@ -88,6 +95,7 @@ test('configuration is explicit, portable and evidence-backed, never inferred', 
     repository: 'octo/example',
     codebasePath: 'D:\\projects\\example',
     worktreeRoot: 'D:\\worktrees',
+    coordinatorProfileId: 'external-test',
     fixingProfileId: 'external-test',
     developmentBaseRef: 'upstream/develop',
     pullRequestBase: 'develop',
@@ -117,6 +125,13 @@ test('configuration is explicit, portable and evidence-backed, never inferred', 
       values: { ...values, developmentBaseRef: 'upstream/../wrong' },
     }).join('\n'),
     /INVALID developmentBaseRef/,
+  );
+  assert.match(
+    validate({
+      ...config,
+      values: { ...values, coordinatorProfileId: 'huabu' },
+    }).join('\n'),
+    /INVALID coordinatorProfileId/,
   );
   assert.match(
     validate({

@@ -3,9 +3,14 @@
 // Licensed under the MIT license.
 
 import { createHash, randomUUID } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
-import { parseArgs } from 'node:util';
+import { execFile } from 'node:child_process';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { parseArgs, promisify } from 'node:util';
 import { pathToFileURL } from 'node:url';
+
+const execFileAsync = promisify(execFile);
 
 const root = new URL('../', import.meta.url);
 export const recordLabel = 'Issue Tracker Installation Record';
@@ -106,17 +111,29 @@ export function validateConfiguration(content, schema, profiles) {
       );
     }
   }
-  if (
-    config.values.fixingProfileId &&
-    !profiles.some(
-      (profile) =>
-        profile.id !== 'huabu' && profile.id === config.values.fixingProfileId,
-    )
-  ) {
-    errors.push('INVALID fixingProfileId: external Profile is not selectable');
+  for (const profileKey of ['coordinatorProfileId', 'fixingProfileId']) {
+    if (
+      config.values[profileKey] &&
+      !profiles.some(
+        (profile) =>
+          profile.id !== 'huabu' && profile.id === config.values[profileKey],
+      )
+    ) {
+      errors.push(`INVALID ${profileKey}: external Profile is not selectable`);
+    }
   }
   if (!config.confirmedByUser) errors.push('UNVERIFIED user confirmation');
   return errors;
+}
+
+export function extractConfigProfile(content) {
+  try {
+    const config = parseRecord(content);
+    const id = config?.values?.coordinatorProfileId;
+    return typeof id === 'string' && id.trim() ? id.trim() : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function specifications(kit) {
@@ -248,15 +265,18 @@ function assertGeometry(nodes, objects) {
 export async function install({
   baseUrl = process.env.HUABU_RFS_URL,
   token = process.env.AGENTLET_TOKEN,
+  rfsEntry = process.env.HUABU_RFS_ENTRY,
+  threadId = process.env.HUABU_THREAD_ID,
   installerNode,
   profile,
   apply = false,
-  fetchImpl = fetch,
+  fetchImpl,
 }) {
-  if (!baseUrl || !token || !installerNode || !profile || profile === 'huabu') {
-    throw new Error(
-      'Require RFS URL/token, --installer-node and an external --profile',
-    );
+  if (!baseUrl || !token) {
+    throw new Error('Require HUABU_RFS_URL and AGENTLET_TOKEN');
+  }
+  if (profile === 'huabu') {
+    throw new Error('Coordinator Profile must be an external Profile');
   }
   const base = new URL(baseUrl);
   if (
@@ -268,8 +288,64 @@ export async function install({
   ) {
     throw new Error('Invalid RFS base URL');
   }
+  const useCli = Boolean(rfsEntry && !fetchImpl);
+  const httpFetch = fetchImpl ?? fetch;
+  let cliModule;
+  const runCli = async (args, { correlate = false } = {}) => {
+    const env = {
+      ...process.env,
+      HUABU_RFS_URL: baseUrl,
+      AGENTLET_TOKEN: token,
+    };
+    if (!correlate) delete env.HUABU_THREAD_ID;
+    cliModule ??= await import(pathToFileURL(rfsEntry).href).catch(() => null);
+    if (typeof cliModule?.runRfs === 'function') {
+      const { PassThrough, Writable } = await import('node:stream');
+      const stdoutChunks = [];
+      const stderrChunks = [];
+      const stdin = new PassThrough();
+      stdin.end();
+      const stdout = new Writable({
+        write(chunk, _encoding, callback) {
+          stdoutChunks.push(Buffer.from(chunk));
+          callback();
+        },
+      });
+      const stderr = new Writable({
+        write(chunk, _encoding, callback) {
+          stderrChunks.push(Buffer.from(chunk));
+          callback();
+        },
+      });
+      const code = await cliModule.runRfs(args, {
+        env,
+        stdin,
+        stdout,
+        stderr,
+        signal: AbortSignal.timeout(30_000),
+      });
+      const out = Buffer.concat(stdoutChunks).toString('utf8');
+      const err = Buffer.concat(stderrChunks).toString('utf8');
+      if (code !== 0) {
+        throw new Error(
+          `huabu-rfs ${args[0] ?? ''} failed: ${(err || out).trim()}`,
+        );
+      }
+      return out;
+    }
+    const { stdout } = await execFileAsync(
+      process.execPath,
+      [rfsEntry, ...args],
+      {
+        env,
+        maxBuffer: 16 * 1024 * 1024,
+        timeout: 30_000,
+      },
+    );
+    return stdout;
+  };
   const request = async (path, body, extraHeaders = {}) => {
-    const response = await fetchImpl(
+    const response = await httpFetch(
       `${base.href.replace(/\/$/, '')}/${path}`,
       {
         method: body === undefined ? 'GET' : 'POST',
@@ -293,7 +369,15 @@ export async function install({
   const json = async (path, body, headers) =>
     (await request(path, body, headers)).json();
   const query = async (type) => {
-    const response = await json('query', { type, limit: 200 });
+    const response = useCli
+      ? JSON.parse(
+          await runCli([
+            'query',
+            '--json',
+            JSON.stringify({ type, limit: 200 }),
+          ]),
+        )
+      : await json('query', { type, limit: 200 });
     const result = response.result;
     const items = type === 'INSPECT_NODES' ? result?.nodes : result?.edges;
     if (
@@ -323,17 +407,60 @@ export async function install({
     ) {
       throw new Error('Missing/invalid canonical node download path');
     }
-    const response = await request(
-      `download/${node.filename.split('/').map(encodeURIComponent).join('/')}`,
-    );
-    const sidecar = await response.text();
+    let sidecar;
+    let revision;
+    if (useCli) {
+      const dir = await mkdtemp(join(tmpdir(), 'issue-tracker-dl-'));
+      try {
+        const out = join(dir, 'node.md');
+        const stdout = await runCli([
+          'download',
+          '--output',
+          out,
+          node.filename,
+        ]);
+        const events = stdout
+          .trim()
+          .split('\n')
+          .filter(Boolean)
+          .map((line) => JSON.parse(line));
+        const completed = events.find(
+          (entry) => entry.event === 'download_completed',
+        );
+        revision = completed?.revision;
+        sidecar = await readFile(out, 'utf8');
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    } else {
+      const response = await request(
+        `download/${node.filename.split('/').map(encodeURIComponent).join('/')}`,
+      );
+      sidecar = await response.text();
+      revision = response.headers.get('etag')?.replace(/^"|"$/g, '');
+    }
     const match = /^---\r?\n[\s\S]*?\r?\n---\r?\n/.exec(sidecar);
-    const revision = response.headers.get('etag')?.replace(/^"|"$/g, '');
     if (!match || !revision) throw new Error('Node sidecar/revision missing');
     return { content: sidecar.slice(match[0].length), revision };
   };
   const execute = async (command) => {
-    const result = await json('execute', { commands: [command] });
+    let result;
+    if (useCli) {
+      const dir = await mkdtemp(join(tmpdir(), 'issue-tracker-exec-'));
+      try {
+        const payloadPath = join(dir, 'commands.json');
+        await writeFile(payloadPath, JSON.stringify({ commands: [command] }));
+        result = JSON.parse(
+          await runCli(['execute', '--json-file', payloadPath], {
+            correlate: true,
+          }),
+        );
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    } else {
+      result = await json('execute', { commands: [command] });
+    }
     if (
       result.results?.length !== 1 ||
       result.results[0].applied !== true ||
@@ -345,9 +472,40 @@ export async function install({
     }
     return result.results[0];
   };
+  const listProfiles = async () =>
+    useCli
+      ? JSON.parse(await runCli(['agent', 'profiles']))
+      : json('agent/profiles');
+  const createCoordinator = async (profileId, position) =>
+    useCli
+      ? JSON.parse(
+          await runCli(
+            [
+              'agent',
+              'create',
+              '--no-start',
+              '--json',
+              JSON.stringify({ profileId, position }),
+            ],
+            { correlate: false },
+          ),
+        )
+      : json(
+          'agent',
+          { profileId, position },
+          { 'X-Huabu-Agent-Start': 'false' },
+        );
+
+  const checkCapabilities = async () =>
+    useCli
+      ? (() =>
+          runCli(['execute', '--help']).then((stdout) =>
+            JSON.parse(stdout.split('\nLive operation contract\n')[1] ?? '{}'),
+          ))()
+      : json('capabilities');
 
   const kit = await loadKit();
-  const capabilities = await json('capabilities');
+  const capabilities = await checkCapabilities();
   if (
     capabilities.protocolVersion !== 2 ||
     !capabilities.permissions?.read ||
@@ -361,16 +519,30 @@ export async function install({
       'Unsupported RFS capabilities; load the authenticated root guide',
     );
   }
-  const catalogue = await json('agent/profiles');
+  const catalogue = await listProfiles();
   const profiles = catalogue.profiles;
-  if (!Array.isArray(profiles) || !profiles.some(({ id }) => id === profile)) {
+  if (!Array.isArray(profiles)) {
+    throw new Error('Could not load available Agent Profiles');
+  }
+  if (profile && !profiles.some(({ id }) => id !== 'huabu' && id === profile)) {
     throw new Error('Coordinator Profile is not selectable');
   }
   const specs = specifications(kit);
   let current = await inventory();
-  const installer = current.nodes.find(({ id }) => id === installerNode);
+  const resolvedInstallerNode =
+    installerNode ||
+    (threadId
+      ? current.nodes.find(
+          (node) => node.type === 'question' && node.threadId === threadId,
+        )?.id
+      : undefined);
+  const installer = current.nodes.find(
+    ({ id }) => id === resolvedInstallerNode,
+  );
   if (installer?.type !== 'question' || !installer.threadId) {
-    throw new Error('Installer must be an existing Agent Node with a thread');
+    throw new Error(
+      'Installer must be an existing Agent Node with a thread (set HUABU_THREAD_ID or pass --installer-node)',
+    );
   }
   const candidates = current.nodes.filter(({ label }) => label === recordLabel);
   if (candidates.length > 1) throw new Error('Ambiguous Installation Records');
@@ -385,8 +557,9 @@ export async function install({
       record.kitId !== kit.id ||
       record.version !== kit.version ||
       record.digest !== kit.digest ||
-      record.profileId !== profile ||
-      record.installerNodeId !== installerNode ||
+      (record.profileId !== null && typeof record.profileId !== 'string') ||
+      (profile && record.profileId && record.profileId !== profile) ||
+      record.installerNodeId !== resolvedInstallerNode ||
       !record.objects ||
       typeof record.objects !== 'object' ||
       Array.isArray(record.objects) ||
@@ -413,8 +586,8 @@ export async function install({
       version: kit.version,
       digest: kit.digest,
       instanceId: randomUUID(),
-      installerNodeId: installerNode,
-      profileId: profile,
+      installerNodeId: resolvedInstallerNode,
+      profileId: profile ?? null,
       recordNodeId: null,
       origin: {
         x: installer.absolutePosition.x + installer.size.width + 120,
@@ -427,17 +600,20 @@ export async function install({
     };
   }
 
-  const steps = [
+  const baseSteps = [
     ...specs.map(({ role }) => `create:${role}`),
     ...['common', 'coordinatorPrompt', 'fixingSkill', 'configurationFrame'].map(
       (role) => `layout:${role}`,
     ),
     'fit:configurationFrame',
+  ];
+  const coordinatorSteps = [
     'create:coordinator',
     'label:coordinator',
     'connect',
     'activate',
   ];
+  const steps = [...baseSteps, ...coordinatorSteps];
   if (
     record.completed.some((name) => !steps.includes(name)) ||
     new Set(record.completed).size !== record.completed.length ||
@@ -454,7 +630,7 @@ export async function install({
   const verifiedContent = new Map();
   async function checkOwned() {
     const allowed = new Set([
-      installerNode,
+      resolvedInstallerNode,
       record.recordNodeId,
       ...Object.values(record.objects).map(({ nodeId }) => nodeId),
     ]);
@@ -549,26 +725,55 @@ export async function install({
     kit.configurationSchema,
     profiles,
   );
+  const configuredProfile = extractConfigProfile(configuration.content);
+  if (
+    record.profileId &&
+    configuredProfile &&
+    configuredProfile !== record.profileId
+  ) {
+    errors.push(
+      `INVALID coordinatorProfileId: conflicts with existing Coordinator Profile ${record.profileId}`,
+    );
+  }
+  const effectiveProfile =
+    profile ||
+    record.profileId ||
+    (!errors.length ? configuredProfile : undefined);
+  const canCreateCoordinator = Boolean(
+    effectiveProfile &&
+    profiles.some(({ id }) => id !== 'huabu' && id === effectiveProfile),
+  );
   if (!apply) {
+    const baseComplete = baseSteps.every((name) =>
+      record.completed.includes(name),
+    );
     const complete = steps.every((name) => record.completed.includes(name));
-    if (complete) assertGeometry(current.nodes, record.objects);
+    if (baseComplete) assertGeometry(current.nodes, record.objects);
     return {
       mode: 'preview',
+      transport: useCli ? 'huabu-rfs' : 'http',
+      installerNode: resolvedInstallerNode,
       kit: { id: kit.id, version: kit.version, digest: kit.digest },
       resume: Boolean(record.recordNodeId),
       state: complete
         ? errors.length
           ? 'needs_configuration'
           : 'ready'
-        : record.recordNodeId
-          ? 'installing'
-          : 'planned',
+        : baseComplete
+          ? 'needs_configuration'
+          : record.recordNodeId
+            ? 'installing'
+            : 'planned',
       configurationState: errors.length ? 'needs_configuration' : 'valid',
       configuration: errors,
-      create: [...specs.map(({ role }) => role), 'coordinator'].filter(
-        (role) => !record.objects[role],
-      ),
-      activation: 'none; fresh Coordinator stays idle',
+      availableProfiles: profiles.filter(({ id }) => id !== 'huabu'),
+      create: [
+        ...specs.map(({ role }) => role),
+        ...(canCreateCoordinator ? ['coordinator'] : []),
+      ].filter((role) => !record.objects[role]),
+      activation: canCreateCoordinator
+        ? 'none; fresh Coordinator stays idle'
+        : 'deferred; layout first, create Coordinator after configuration',
     };
   }
 
@@ -696,58 +901,90 @@ export async function install({
       ],
     });
   });
-  await step('create:coordinator', async () => {
-    const result = await json(
-      'agent',
-      {
-        profileId: profile,
-        position: { x: record.origin.x + 1800, y: record.origin.y },
-      },
-      { 'X-Huabu-Agent-Start': 'false' },
+  const finalConfigBeforeCoordinator = await download(
+    (await query('INSPECT_NODES')).find(
+      ({ id }) => id === record.objects.configuration.nodeId,
+    ),
+  );
+  const preCoordinatorValidation = validateConfiguration(
+    finalConfigBeforeCoordinator.content,
+    kit.configurationSchema,
+    profiles,
+  );
+  const finalConfiguredProfile = extractConfigProfile(
+    finalConfigBeforeCoordinator.content,
+  );
+  if (
+    record.profileId &&
+    finalConfiguredProfile &&
+    finalConfiguredProfile !== record.profileId
+  ) {
+    preCoordinatorValidation.push(
+      `INVALID coordinatorProfileId: conflicts with existing Coordinator Profile ${record.profileId}`,
     );
-    if (!result.nodeId || !result.threadId || result.profileId !== profile) {
-      throw new Error('Missing/mismatched Coordinator creation identity');
-    }
-    record.objects.coordinator = {
-      nodeId: result.nodeId,
-      threadId: result.threadId,
-    };
-  });
-  await step('label:coordinator', () =>
-    execute({
-      type: 'MERGE_NODE_DATA',
-      patches: [
-        {
-          nodeId: record.objects.coordinator.nodeId,
-          patch: { label: 'Issue Tracker Coordinator' },
-        },
-      ],
-    }),
-  );
-  await step('connect', () =>
-    execute({
-      type: 'CONNECT_NODES',
-      edges: [
-        {
-          source: record.objects.coordinatorPrompt.nodeId,
-          target: record.objects.coordinator.nodeId,
-        },
-      ],
-    }),
-  );
-  await step('activate', () =>
-    execute({
-      type: 'MERGE_NODE_DATA',
-      patches: Object.entries({
-        common: 'prompt: issue tracking common',
-        coordinatorPrompt: 'prompt: issue tracking coordinator',
-        fixingSkill: 'skill: issue fixing',
-      }).map(([role, label]) => ({
-        nodeId: record.objects[role].nodeId,
-        patch: { label },
-      })),
-    }),
-  );
+  }
+  const targetProfile =
+    profile ||
+    record.profileId ||
+    (!preCoordinatorValidation.length ? finalConfiguredProfile : undefined);
+  if (
+    targetProfile &&
+    profiles.some(({ id }) => id !== 'huabu' && id === targetProfile)
+  ) {
+    record.profileId = targetProfile;
+    await step('create:coordinator', async () => {
+      const result = await createCoordinator(targetProfile, {
+        x: record.origin.x + 1800,
+        y: record.origin.y,
+      });
+      if (
+        !result.nodeId ||
+        !result.threadId ||
+        result.profileId !== targetProfile
+      ) {
+        throw new Error('Missing/mismatched Coordinator creation identity');
+      }
+      record.objects.coordinator = {
+        nodeId: result.nodeId,
+        threadId: result.threadId,
+      };
+    });
+    await step('label:coordinator', () =>
+      execute({
+        type: 'MERGE_NODE_DATA',
+        patches: [
+          {
+            nodeId: record.objects.coordinator.nodeId,
+            patch: { label: 'Issue Tracker Coordinator' },
+          },
+        ],
+      }),
+    );
+    await step('connect', () =>
+      execute({
+        type: 'CONNECT_NODES',
+        edges: [
+          {
+            source: record.objects.coordinatorPrompt.nodeId,
+            target: record.objects.coordinator.nodeId,
+          },
+        ],
+      }),
+    );
+    await step('activate', () =>
+      execute({
+        type: 'MERGE_NODE_DATA',
+        patches: Object.entries({
+          common: 'prompt: issue tracking common',
+          coordinatorPrompt: 'prompt: issue tracking coordinator',
+          fixingSkill: 'skill: issue fixing',
+        }).map(([role, label]) => ({
+          nodeId: record.objects[role].nodeId,
+          patch: { label },
+        })),
+      }),
+    );
+  }
   current = await inventory();
   await checkOwned();
   assertGeometry(current.nodes, record.objects);
@@ -759,7 +996,18 @@ export async function install({
     kit.configurationSchema,
     profiles,
   );
-  record.state = validation.length ? 'needs_configuration' : 'ready';
+  if (
+    record.profileId &&
+    extractConfigProfile(finalConfig.content) &&
+    extractConfigProfile(finalConfig.content) !== record.profileId
+  ) {
+    validation.push(
+      `INVALID coordinatorProfileId: conflicts with existing Coordinator Profile ${record.profileId}`,
+    );
+  }
+  const allStepsDone = steps.every((name) => record.completed.includes(name));
+  record.state =
+    validation.length || !allStepsDone ? 'needs_configuration' : 'ready';
   record.configuration = {
     contentHash: hash(finalConfig.content),
     errors: validation,
@@ -767,14 +1015,18 @@ export async function install({
   await save();
   return {
     mode: 'installed',
+    transport: useCli ? 'huabu-rfs' : 'http',
+    installerNode: resolvedInstallerNode,
     state: record.state,
     configuration: validation,
-    coordinator: record.objects.coordinator,
+    availableProfiles: profiles.filter(({ id }) => id !== 'huabu'),
+    coordinator: record.objects.coordinator ?? null,
     recordNodeId: record.recordNodeId,
     version: kit.version,
     digest: kit.digest,
-    activation:
-      'none; first prompt/control must wait for complete configuration',
+    activation: record.objects.coordinator
+      ? 'none; first prompt/control must wait for complete configuration'
+      : 'deferred; complete Issue Tracker Configuration and rerun with --apply to create the Coordinator',
   };
 }
 
@@ -792,7 +1044,7 @@ if (
   });
   if (values.help) {
     console.log(
-      'Usage: node install.mjs --installer-node NODE_ID --profile PROFILE_ID [--apply]\nPreview is read-only. Uses HUABU_RFS_URL and AGENTLET_TOKEN. Read SKILL.md first.',
+      'Usage: node install.mjs [--installer-node NODE_ID] [--profile PROFILE_ID] [--apply]\nPreview is read-only. Uses HUABU_RFS_ENTRY when present, with HUABU_RFS_URL, AGENTLET_TOKEN and optional HUABU_THREAD_ID. Read SKILL.md first.',
     );
   } else {
     try {
