@@ -26,7 +26,7 @@ import {
   Plus,
   X,
 } from 'lucide-react';
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { PreviewTab } from './PreviewTab';
@@ -94,6 +94,7 @@ export function PreviewTabStrip({
   onCollapse,
 }: PreviewTabStripProps) {
   const { t } = useTranslation();
+  const [creationMenuOpen, setCreationMenuOpen] = useState(false);
   const { setNodeRef } = useDroppable({
     id: groupDropId(groupId),
     data: { type: 'preview-group', groupId, isEmpty: tabs.length === 0 },
@@ -261,6 +262,8 @@ export function PreviewTabStrip({
           {onNewAgent && (
             <DropdownMenu
               align="bottom-right"
+              open={creationMenuOpen}
+              onOpenChange={setCreationMenuOpen}
               trigger={
                 <Button
                   variant="ghost"
@@ -274,10 +277,20 @@ export function PreviewTabStrip({
                 </Button>
               }
             >
-              <DropdownMenuItem onClick={onNewAgent}>
+              <DropdownMenuItem
+                onClick={() => {
+                  setCreationMenuOpen(false);
+                  onNewAgent();
+                }}
+              >
                 {t('chat.newQuestion')}
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={onNewChat}>
+              <DropdownMenuItem
+                onClick={() => {
+                  setCreationMenuOpen(false);
+                  onNewChat();
+                }}
+              >
                 {t('chat.newTemporaryConversation')}
               </DropdownMenuItem>
             </DropdownMenu>

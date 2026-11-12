@@ -600,6 +600,7 @@ export function setActiveGroup(
   workspace: CanvasPreviewWorkspace,
   groupId: string,
 ): CanvasPreviewWorkspace {
+  if (workspace.activeGroupId === groupId) return workspace;
   if (!workspace.groups.some((g) => g.id === groupId)) return workspace;
   return { ...workspace, activeGroupId: groupId };
 }

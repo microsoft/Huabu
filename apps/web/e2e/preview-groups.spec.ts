@@ -167,6 +167,7 @@ test('preview creation defaults to a persistent Agent Node and retains temporary
   await page
     .getByRole('menuitem', { name: 'New temporary chat', exact: true })
     .click();
+  await expect(page.getByRole('menu')).toHaveCount(0);
   await expect(panel.getByRole('tab')).toHaveCount(3);
   await expect(page.locator('.react-flow__node-question')).toHaveCount(1);
   const workspace = await snapshot();

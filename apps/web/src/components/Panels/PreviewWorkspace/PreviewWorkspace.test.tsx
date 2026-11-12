@@ -766,6 +766,8 @@ describe('tab strip', () => {
     ).find((item) => item.textContent === 'New temporary chat');
     expect(temporaryChat).toBeDefined();
     await act(async () => temporaryChat?.click());
+    expect(newChatButton?.getAttribute('aria-expanded')).toBe('false');
+    expect(document.querySelector('[role="menu"]')).toBeNull();
 
     expect(tabs()).toHaveLength(2);
     expect(activeTabName()).toBe('New conversation');
@@ -777,57 +779,77 @@ describe('tab strip', () => {
     ).toBe(true);
   });
 
-  it('creates a permanent Agent tab in the initiating group by default', async () => {
-    openNode('a');
-    store().splitGroup();
-    const group = store().workspace.groups[1];
-    render([canvasNode('a', 'Alpha')]);
-    const addNode = vi
-      .spyOn(useCanvasStore.getState(), 'addNode')
-      .mockImplementation((input) => {
-        const id = input.id;
-        assert(id);
-        useCanvasStore.setState((state) => ({
-          nodes: [
-            ...state.nodes,
-            {
-              id,
-              type: input.nodeType,
-              position: { x: 0, y: 0 },
-              data: input.data ?? {},
-            },
-          ],
-        }));
-      });
-    try {
-      const create = container?.querySelector<HTMLButtonElement>(
-        `#preview-new-chat-${group.id}`,
-      );
-      expect(create?.getAttribute('aria-label')).toBe('New Agent Node');
-      await act(async () => create?.click());
-      const agent = useCanvasStore
-        .getState()
-        .nodes.find((node) => node.type === 'question');
-      assert(agent);
-      expect(addNode).toHaveBeenCalledOnce();
-      expect(addNode.mock.calls[0][0].placementPoint).toBeUndefined();
-      expect(addNode.mock.calls[0][0].selectOnCreate).toBe(true);
-      const currentGroup = store().workspace.groups[1];
-      assert(currentGroup.activeTabId);
-      expect(store().workspace.tabs[currentGroup.activeTabId]).toMatchObject({
-        target: { kind: 'node', nodeId: agent.id },
-        transient: false,
-      });
-      expect(store().workspace.groups[0].tabIds).toHaveLength(1);
-      expect(
-        container
-          ?.querySelector('[data-preview-active="true"] [data-thread-id]')
-          ?.getAttribute('data-thread-id'),
-      ).toBe(agent.data.threadId);
-    } finally {
-      addNode.mockRestore();
-    }
-  });
+  it.each(['primary', 'menu'])(
+    'creates a permanent Agent tab in the initiating group via %s',
+    async (entry) => {
+      openNode('a');
+      store().splitGroup();
+      const group = store().workspace.groups[1];
+      render([canvasNode('a', 'Alpha')]);
+      const addNode = vi
+        .spyOn(useCanvasStore.getState(), 'addNode')
+        .mockImplementation((input) => {
+          const id = input.id;
+          assert(id);
+          useCanvasStore.setState((state) => ({
+            nodes: [
+              ...state.nodes,
+              {
+                id,
+                type: input.nodeType,
+                position: { x: 0, y: 0 },
+                data: input.data ?? {},
+              },
+            ],
+          }));
+        });
+      try {
+        const create = container?.querySelector<HTMLButtonElement>(
+          `#preview-new-chat-${group.id}`,
+        );
+        expect(create?.getAttribute('aria-label')).toBe('New Agent Node');
+        if (entry === 'menu') {
+          const options = create
+            ?.closest('[role="group"]')
+            ?.querySelector<HTMLButtonElement>(
+              '[aria-label="Conversation creation options"]',
+            );
+          assert(options);
+          await act(async () => options.click());
+          const menuItem = Array.from(
+            document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'),
+          ).find((item) => item.textContent === 'New Agent Node');
+          assert(menuItem);
+          await act(async () => menuItem.click());
+          expect(options.getAttribute('aria-expanded')).toBe('false');
+          expect(document.querySelector('[role="menu"]')).toBeNull();
+        } else {
+          await act(async () => create?.click());
+        }
+        const agent = useCanvasStore
+          .getState()
+          .nodes.find((node) => node.type === 'question');
+        assert(agent);
+        expect(addNode).toHaveBeenCalledOnce();
+        expect(addNode.mock.calls[0][0].placementPoint).toBeUndefined();
+        expect(addNode.mock.calls[0][0].selectOnCreate).toBe(true);
+        const currentGroup = store().workspace.groups[1];
+        assert(currentGroup.activeTabId);
+        expect(store().workspace.tabs[currentGroup.activeTabId]).toMatchObject({
+          target: { kind: 'node', nodeId: agent.id },
+          transient: false,
+        });
+        expect(store().workspace.groups[0].tabIds).toHaveLength(1);
+        expect(
+          container
+            ?.querySelector('[data-preview-active="true"] [data-thread-id]')
+            ?.getAttribute('data-thread-id'),
+        ).toBe(agent.data.threadId);
+      } finally {
+        addNode.mockRestore();
+      }
+    },
+  );
 
   it('retains temporary chats without offering node creation in read-only Spaces', async () => {
     useCanvasStore.setState({
