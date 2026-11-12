@@ -771,6 +771,25 @@ describe('useCanvasShortcuts catalog key lock', () => {
     expect(useToolStore.getState().mouseToolPreference).toBe('lasso');
   });
 
+  it('recovers held Pan from a fallback mouseup when pointerup is lost', () => {
+    act(() => {
+      useToolStore.getState().chooseCanvasTool('pan', false);
+      window.dispatchEvent(
+        new PointerEvent('pointerdown', {
+          button: 0,
+          isPrimary: true,
+          pointerId: 7,
+          pointerType: 'mouse',
+        }),
+      );
+      useToolStore.getState().chooseCanvasTool('lasso', false);
+    });
+    expect(container.querySelector('[data-tool="pan"]')).not.toBeNull();
+    act(() => window.dispatchEvent(new MouseEvent('mouseup', { button: 0 })));
+    expect(container.querySelector('[data-tool="lasso"]')).not.toBeNull();
+    expect(useToolStore.getState().mouseToolPreference).toBe('lasso');
+  });
+
   it('cancels the Space overlay when hidden without persisting Pan', () => {
     act(() =>
       window.dispatchEvent(

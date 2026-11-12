@@ -224,8 +224,11 @@ export function useCanvasShortcuts(
       }
       temporaryPanMouseUpPendingRef.current = true;
     };
-    const onMouseUp = () => {
-      if (!temporaryPanMouseUpPendingRef.current) return;
+    const onMouseUp = (e: MouseEvent) => {
+      const recoversHeldNativePan = e.button === 0 && nativePanHeldRef.current;
+      if (!temporaryPanMouseUpPendingRef.current && !recoversHeldNativePan)
+        return;
+      temporaryPanPointerRef.current = null;
       temporaryPanMouseUpPendingRef.current = false;
       nativePanHeldRef.current = false;
       setNativePanHeld(false);
