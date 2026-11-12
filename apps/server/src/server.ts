@@ -9,6 +9,7 @@ import { prewarmOAuthCredentials } from './modules/agent/oauth.js';
 import { resolveDeploymentConfig } from './modules/security/deployment-config.js';
 import {
   describeUnavailableCapabilities,
+  closeStorage,
   initStorage,
 } from './modules/storage/index.js';
 import {
@@ -98,10 +99,28 @@ async function start(): Promise<void> {
     prewarmOAuthCredentials();
   } catch (err) {
     log.error({ err }, 'Failed to start server');
-    // Let Node drain Pino's asynchronous SonicBoom destinations before
-    // exiting. A synchronous process.exit() here can run Pino's exit hook
-    // before the destinations are ready and mask the real startup error.
+    // Let Node drain Pino's asynchronous destinations rather than forcing a
+    // synchronous exit that could hide the original startup error.
     process.exitCode = 1;
+    // A failed listen/onReady can leave Bubble workers and database pools
+    // alive. Close the app's lifecycle hooks, or storage directly when the
+    // app has not been imported yet, so the platform observes a failed boot.
+    const forceExit = setTimeout(() => {
+      process.exit(1);
+    }, 3000);
+    forceExit.unref();
+    try {
+      if (app) await app.close();
+    } catch (cleanupError) {
+      log.error({ err: cleanupError }, 'Failed to clean up server startup');
+      // Keep the timeout armed if a failed close leaves resources alive.
+    }
+    try {
+      // Idempotent, including after a partially failed app.close().
+      await closeStorage();
+    } catch (cleanupError) {
+      log.error({ err: cleanupError }, 'Failed to close startup storage');
+    }
   }
 }
 

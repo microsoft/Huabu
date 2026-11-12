@@ -335,7 +335,11 @@ export function describeSeveralPeople(
         const id = opened.body.workspaceId as string;
         // Another spelling of the same folder is the same Workspace.
         const alias = join(scratch(), 'carols-alias');
-        symlinkSync(folder, alias, 'dir');
+        symlinkSync(
+          folder,
+          alias,
+          process.platform === 'win32' ? 'junction' : 'dir',
+        );
         const renameAttempt = { name: 'Mine now' };
 
         // Without a grant the folder is somebody's Workspace, not theirs.
