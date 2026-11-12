@@ -350,7 +350,7 @@ The auto-accept preference still suppresses new Agent review records only. It do
 
 ## Space presence
 
-When a Space is open on several pages (tabs or devices), each page shows the others: a coloured cursor where the other page's pointer is, and an outline in the same colour around the nodes that page has selected, is dragging or is editing. There is one account, so a marker stands for a page, not a person: the server gives each page a colour and the page supplies a short device label such as `Chrome · Mac`.
+When a Space is open on several pages (tabs or devices), each page shows the others: a coloured cursor where the other page's mouse, pen or finger is, and an outline in the same colour around the nodes that page has selected, is dragging or is editing. There is one account, so a marker stands for a page, not a person: the server gives each page a colour and the page supplies a short device label such as `Chrome · Mac`.
 
 Presence is ephemeral. It is held in server memory and in a browser store of its own; it is not part of the Space record, its `version`, the delta log, change records, undo/redo or anything an Agent reads, and reporting it neither marks the Space dirty nor schedules a save. A drag is reported only as "these nodes are being dragged": positions are not streamed, and the moved node arrives on drop through [browser structure edits](#browser-structure-edits).
 
@@ -382,16 +382,16 @@ A `presence` event's data is one of `{ op: 'snapshot', pages }` (sent once on co
 
 Both POST routes need only read access to the Space (`spaceAccess: 'read'`), the same as the stream, and go through the same host, origin, identity and Space-access guards as every Canvas route. The page id is chosen by the page and is not a credential: any caller that may read the Space may report or withdraw presence under any page id in it.
 
-| Limit                    | Value                                                                                     |
-| ------------------------ | ----------------------------------------------------------------------------------------- |
-| Node ids per list        | 200, each at most 128 characters                                                          |
-| `label` / `displayName`  | 40 / 80 characters                                                                        |
-| Coordinates              | finite, magnitude at most 10,000,000                                                      |
-| Pages per Space          | 32; a further page is refused with 429 `PRESENCE_SPACE_FULL`                              |
-| Reports per page         | 30 per second on the server; the browser sends at most one per 80 ms and one at a time    |
-| Reports per network peer | 3,000 per minute, counted apart from the application-wide request budget                  |
-| Colours                  | 6 (`--color-presence-1` … `-6`); the lowest unused one, kept while the page stays present |
-| Heartbeat / expiry       | the page repeats its whole state every 20 s; a page silent for 75 s is dropped            |
+| Limit                    | Value                                                                                  |
+| ------------------------ | -------------------------------------------------------------------------------------- |
+| Node ids per list        | 200, each at most 128 characters                                                       |
+| `label` / `displayName`  | 40 / 80 characters                                                                     |
+| Coordinates              | finite, magnitude at most 10,000,000                                                   |
+| Pages per Space          | 32; a further page is refused with 429 `PRESENCE_SPACE_FULL`                           |
+| Reports per page         | 30 per second on the server; the browser sends at most one per 80 ms and one at a time |
+| Reports per network peer | 3,000 per minute, counted apart from the application-wide request budget               |
+| Colours                  | 6 colour indices; the lowest unused one, kept while the page stays present             |
+| Heartbeat / expiry       | the page repeats its whole state every 20 s; a page silent for 75 s is dropped         |
 
 ### Server
 
@@ -401,9 +401,38 @@ Both POST routes need only read access to the Space (`spaceAccess: 'read'`), the
 
 [canvasSyncSubscription.ts](../../apps/web/src/store/canvasSyncSubscription.ts) opens the Space's one stream with this page's id and hands `presence` events to presence listeners only; a listener that subscribes late is given the current set as a snapshot, and every listener is told when the stream drops. [canvasPresenceStore.ts](../../apps/web/src/store/canvasPresence/canvasPresenceStore.ts) holds the other pages in two maps, `pages` and `pointers`, and clears them when the stream drops. `pages` keeps its identity across pointer events, so only the cursor layer re-renders for a pointer tick; neither map is in `canvasStore`, and the React Flow node list is not touched.
 
-[useReportCanvasPresence.ts](../../apps/web/src/components/Panels/Canvas/presence/useReportCanvasPresence.ts) reads this page's state without writing any: pointer moves over the canvas (mouse and pen, converted to flow coordinates once per frame; `null` when the pointer leaves, the window loses focus or the tab is hidden), `selected` / `dragging` flags of `canvasStore.nodes`, and the node being edited, which [editingTracker.ts](../../apps/web/src/store/canvasPresence/editingTracker.ts) derives from the focused text control, on the canvas or in the preview panel (see [One editor at a time](#one-editor-at-a-time)). [presenceReporter.ts](../../apps/web/src/store/canvasPresence/presenceReporter.ts) sends at most one request at a time and one per 80 ms, each carrying only the latest values of what changed; it sends the whole state on every stream (re)connect and as the heartbeat, waits out a 429, and posts `leave` (`keepalive`) when the canvas unmounts or the page is hidden for unload. Report failures are silent.
+[useReportCanvasPresence.ts](../../apps/web/src/components/Panels/Canvas/presence/useReportCanvasPresence.ts) reads this page's state without writing any: the pointer over the canvas (mouse, pen or finger as described under [Pointer](#pointer), converted to flow coordinates once per frame; `null` when it leaves, the window loses focus or the tab is hidden), `selected` / `dragging` flags of `canvasStore.nodes`, and the node being edited, which [editingTracker.ts](../../apps/web/src/store/canvasPresence/editingTracker.ts) derives from the focused text control, on the canvas or in the preview panel (see [One editor at a time](#one-editor-at-a-time)). [presenceReporter.ts](../../apps/web/src/store/canvasPresence/presenceReporter.ts) sends at most one request at a time and one per 80 ms, each carrying only the latest values of what changed; it sends the whole state on every stream (re)connect and as the heartbeat, waits out a 429, and posts `leave` (`keepalive`) when the canvas unmounts or the page is hidden for unload. Report failures are silent.
 
 [CanvasPresenceLayer.tsx](../../apps/web/src/components/Panels/Canvas/presence/CanvasPresenceLayer.tsx), mounted inside `<ReactFlow>`, draws the cursors and outlines as a screen-space layer in the `.react-flow` container, like `SelectionOutlines`. A remote outline reuses `SelectionOutline` and the measured node geometry, drawn 3 px outside the node (a further 3 px per additional page) so it stays visible beside this page's own selection outline. Every node being edited or dragged carries the page's label with `· editing` / `· moving`; of a plain selection only the first node is labelled. A node this page does not have is not outlined.
+
+### Colours
+
+The server hands out a colour index; the browser maps it to the node accent palette in [presencePaint.ts](../../apps/web/src/components/Panels/Canvas/presence/presencePaint.ts) (`PRESENCE_COLOR_TOKENS`), so there are no presence-specific colour tokens. The six are teal, orange, purple, green, red and amber, in that order of index so that the first pages to arrive get unlike hues. White and grey are left out because they do not read as a colour, and blue because it is this page's own selection colour.
+
+A marker is a thin outline, a 16 px arrow and a 10 px label whose text is `--fg-inverse` on the marker colour, so each entry uses the accent's existing foreground token rather than a tint: `--accent-<name>-text-fg`, except amber, which uses the darker `--accent-amber-fg` because `--accent-amber-text-fg` is too light under white label text in the light theme (3.6:1). In the dark theme the two tokens have the same value.
+
+| Token                     | Light: label text / on canvas | Dark: label text / on canvas |
+| ------------------------- | ----------------------------- | ---------------------------- |
+| `--accent-teal-text-fg`   | 5.0 / 4.6                     | 11.0 / 12.4                  |
+| `--accent-orange-text-fg` | 4.8 / 4.4                     | 12.4 / 14.0                  |
+| `--accent-purple-text-fg` | 5.1 / 4.6                     | 10.2 / 11.5                  |
+| `--accent-green-text-fg`  | 4.9 / 4.5                     | 11.2 / 12.6                  |
+| `--accent-red-text-fg`    | 4.9 / 4.5                     | 11.4 / 12.8                  |
+| `--accent-amber-fg`       | 7.1 / 6.5                     | 14.1 / 15.9                  |
+
+The figures are WCAG contrast ratios computed from the token values: label text (`--fg-inverse`) against the marker colour, and the marker colour against the canvas background (`--bg-default`, `#f5f5f5` light and about `#0a0a0a` dark). A unit test recomputes them from `index.css` and requires more than 4.5 for the label and more than 4.3 for the outline. They are computed, not measured on a display.
+
+### Pointer
+
+[pointerTracker.ts](../../apps/web/src/store/canvasPresence/pointerTracker.ts) decides which position is shown as this page's cursor. The events are heard on the window, because the canvas pointer router stops touch and pen events before they reach the canvas element.
+
+| Input  | Reported                                                                                                                                                                                                                                                                 |
+| ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Mouse  | Wherever it moves over the canvas, until it leaves the canvas.                                                                                                                                                                                                           |
+| Pen    | Wherever it is over the canvas, hovering (where the device reports hover) or in contact; after lifting it stays while the pen remains in range, and clears on `pointerleave` (out of range or off the canvas).                                                           |
+| Finger | The contact point of a single touch that began on the canvas, from 80 ms after it lands (`TOUCH_REPORT_DELAY_MS`) and wherever it moves; it stays for 1.5 s after the finger lifts (`TOUCH_LINGER_MS`), then clears. A tap shorter than the delay shows where it landed. |
+
+Two or more fingers are this page's own pan or pinch and are not reported: the delay keeps the first finger of a pinch from flashing, a point already shown is withdrawn when a second finger lands, and nothing is reported until every finger of that gesture has lifted. Touches made while a pen is in range are treated as the resting hand and ignored. The position is reported whatever the input mode, including a mode in which the canvas itself ignores that pointer.
 
 ### One editor at a time
 
@@ -441,7 +470,7 @@ Limits: the lock is per node, not per field. Typing in a Question's chat compose
 
 - Text carets and selections inside a note body, live drag positions and viewport following.
 - More than one server process: presence is in the memory of the process that received the report.
-- Touch pointers are not reported as a cursor.
+- Pen and finger reporting is exercised with synthesized pointer events (unit tests, and Chromium touch and pen events in `apps/web/e2e/space-presence.spec.ts`), not with pen hardware or on a touch device; whether a given pen reports hover, and when it reports leaving range, is the device's and browser's behaviour.
 - Two pages in the same browser on the same system have the same label and differ only by colour; with more than six pages colours repeat.
 - A sketch stroke selection, an edge selection and a marquee in progress are not presence.
 

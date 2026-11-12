@@ -22,7 +22,9 @@ import type { CreateCanvasResponse } from '@huabu/shared';
  * and the node A selects, both placed correctly under B's own viewport, and
  * both must go when A closes or navigates away. Presence must not write the
  * Space: its version and both pages' saves are checked. While A drags a node
- * B is only told that it is being moved; the position arrives on drop.
+ * B is only told that it is being moved; the position arrives on drop. A
+ * finger on a touchscreen shows as a cursor while it touches and shortly
+ * after; two fingers navigating do not.
  */
 
 // Mouse input: the default project emulates touch for the gesture suites.
@@ -88,10 +90,12 @@ async function openDevice(
   browser: Browser,
   canvasId: string,
   viewport: Viewport,
+  /** A touchscreen device in Finger mode instead of a mouse device. */
+  touch = false,
 ): Promise<Device> {
-  const context = await browser.newContext();
+  const context = await browser.newContext(touch ? { hasTouch: true } : {});
   await context.addInitScript(
-    ({ canvasId, viewport }) => {
+    ({ canvasId, viewport, touch }) => {
       if (window !== window.top) return;
       localStorage.setItem('huabu.language', 'en');
       localStorage.setItem(
@@ -104,14 +108,14 @@ async function openDevice(
           JSON.stringify({
             version: 4,
             state: {
-              inputModePreference: 'mouse',
+              inputModePreference: touch ? 'finger' : 'mouse',
               mouseToolPreference: 'select',
             },
           }),
         );
       }
     },
-    { canvasId, viewport },
+    { canvasId, viewport, touch },
   );
   const page = await context.newPage();
   const calls: string[] = [];
@@ -333,5 +337,147 @@ test('B is told that A is moving or editing a node; the moved node’s position 
 
   await a.context.close();
   await expect(outlines(b.page)).toHaveCount(0);
+  await b.context.close();
+});
+
+test('B sees where A’s finger touches the canvas, briefly after it lifts, and nothing while A pinches', async ({
+  browser,
+  request,
+}) => {
+  const canvasId = await seedSpace(request);
+  const a = await openDevice(browser, canvasId, { x: 0, y: 0, zoom: 1 }, true);
+  const b = await openDevice(browser, canvasId, { x: 120, y: 60, zoom: 0.5 });
+  const touch = await a.context.newCDPSession(a.page);
+  const cursor = cursors(b.page);
+
+  // One finger rests on empty canvas, right of the notes.
+  const flow = { x: 820, y: 420 };
+  const at = await clientPoint(a, flow);
+  await touch.send('Input.dispatchTouchEvent', {
+    type: 'touchStart',
+    touchPoints: [at],
+  });
+  await expect(cursor).toHaveCount(1);
+  const expected = await clientPoint(b, flow);
+  await expect
+    .poll(async () => {
+      const box = await cursor.locator('svg').boundingBox();
+      return box
+        ? Math.hypot(box.x - expected.x, box.y - expected.y)
+        : Number.POSITIVE_INFINITY;
+    })
+    .toBeLessThan(4);
+
+  // It lifts: the point stays for a moment, then goes on its own.
+  await touch.send('Input.dispatchTouchEvent', {
+    type: 'touchEnd',
+    touchPoints: [],
+  });
+  await b.page.waitForTimeout(500);
+  await expect(cursor).toHaveCount(1);
+  await expect(cursor).toHaveCount(0);
+
+  // Two fingers pinch A's own view: B is shown no cursor at any point.
+  const seen: number[] = [];
+  const sample = async () => seen.push(await cursor.count());
+  const center = await clientPoint(a, { x: 820, y: 420 });
+  const fingers = (gap: number) => [
+    { x: center.x - gap / 2, y: center.y },
+    { x: center.x + gap / 2, y: center.y },
+  ];
+  await touch.send('Input.dispatchTouchEvent', {
+    type: 'touchStart',
+    touchPoints: fingers(80),
+  });
+  for (let step = 1; step <= 8; step++) {
+    await touch.send('Input.dispatchTouchEvent', {
+      type: 'touchMove',
+      touchPoints: fingers(80 + step * 15),
+    });
+    await b.page.waitForTimeout(80);
+    await sample();
+  }
+  await touch.send('Input.dispatchTouchEvent', {
+    type: 'touchEnd',
+    touchPoints: [],
+  });
+  await b.page.waitForTimeout(700);
+  await sample();
+  expect(seen).toEqual(seen.map(() => 0));
+  // The pinch did change A's own view, so it really was a navigation.
+  const transform = await a.page
+    .locator('.react-flow__viewport')
+    .evaluate((element) => (element as HTMLElement).style.transform);
+  expect(transform).not.toContain('scale(1)');
+
+  await a.context.close();
+  await b.context.close();
+});
+
+test('B sees A’s pen while it hovers and while it is in contact', async ({
+  browser,
+  request,
+}) => {
+  const canvasId = await seedSpace(request);
+  const a = await openDevice(browser, canvasId, { x: 0, y: 0, zoom: 1 });
+  const b = await openDevice(browser, canvasId, { x: 0, y: 0, zoom: 1 });
+  const pen = await a.context.newCDPSession(a.page);
+  const cursor = cursors(b.page);
+  const distanceTo = async (flow: { x: number; y: number }) => {
+    const expected = await clientPoint(b, flow);
+    const box = await cursor.locator('svg').boundingBox();
+    return box
+      ? Math.hypot(box.x - expected.x, box.y - expected.y)
+      : Number.POSITIVE_INFINITY;
+  };
+  const penEvent = async (
+    type: 'mouseMoved' | 'mousePressed' | 'mouseReleased',
+    flow: { x: number; y: number },
+  ) => {
+    const at = await clientPoint(a, flow);
+    await pen.send('Input.dispatchMouseEvent', {
+      type,
+      x: at.x,
+      y: at.y,
+      pointerType: 'pen',
+      ...(type === 'mouseMoved'
+        ? {}
+        : { button: 'left' as const, buttons: 1, clickCount: 1 }),
+    });
+  };
+  // What page A actually received, so the check is of pen input.
+  await a.page.evaluate(() => {
+    const seen = new Set<string>();
+    (window as unknown as { __penSeen: Set<string> }).__penSeen = seen;
+    for (const type of ['pointermove', 'pointerdown'])
+      window.addEventListener(
+        type,
+        (event) => seen.add(`${type}:${(event as PointerEvent).pointerType}`),
+        true,
+      );
+  });
+
+  // Hovering over empty canvas.
+  await penEvent('mouseMoved', { x: 800, y: 400 });
+  await penEvent('mouseMoved', { x: 820, y: 420 });
+  await expect(cursor).toHaveCount(1);
+  await expect.poll(() => distanceTo({ x: 820, y: 420 })).toBeLessThan(4);
+
+  // In contact, moving.
+  await penEvent('mousePressed', { x: 820, y: 420 });
+  await penEvent('mouseMoved', { x: 860, y: 460 });
+  await expect.poll(() => distanceTo({ x: 860, y: 460 })).toBeLessThan(4);
+  await penEvent('mouseReleased', { x: 860, y: 460 });
+  // Lifted but still in range: the cursor stays where the pen is.
+  await b.page.waitForTimeout(500);
+  await expect(cursor).toHaveCount(1);
+
+  expect(
+    await a.page.evaluate(() => [
+      ...(window as unknown as { __penSeen: Set<string> }).__penSeen,
+    ]),
+  ).toEqual(expect.arrayContaining(['pointermove:pen', 'pointerdown:pen']));
+
+  await a.context.close();
   await b.context.close();
 });

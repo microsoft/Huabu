@@ -16,6 +16,7 @@ import {
   selectEditLockHolder,
   showEditLockedHint,
 } from '@/store/canvasPresence/editLock';
+import { createPresencePointerTracker } from '@/store/canvasPresence/pointerTracker';
 import { createPresenceReporter } from '@/store/canvasPresence/presenceReporter';
 import useCanvasStore, { flushNodeContent } from '@/store/canvasStore';
 import { CANVAS_PAGE_ID } from '@/store/canvasStore/sync/pageId';
@@ -57,9 +58,9 @@ export function editingNodeId(
 }
 
 /**
- * Tell the other pages what this page is doing in the Space: pointer position
- * over the canvas (flow coordinates), and the nodes it has selected, is
- * dragging or is editing. Only reads the canvas; nothing is written to
+ * Tell the other pages what this page is doing in the Space: where its mouse,
+ * pen or finger is over the canvas (flow coordinates), and the nodes it has
+ * selected, is dragging or is editing. Only reads the canvas; nothing is written to
  * `canvasStore`, so reporting cannot mark the Space dirty or enter undo.
  */
 export function useReportCanvasPresence(domNode: HTMLDivElement | null): void {
@@ -110,15 +111,27 @@ export function useReportCanvasPresence(domNode: HTMLDivElement | null): void {
         y: Math.round(flow.y * 10) / 10,
       });
     };
+    // Which pointer is shown, for mouse, pen and touch: `pointerTracker`.
+    const pointer = createPresencePointerTracker((next) => {
+      client = next;
+      if (!next) reporter.setPointer(null);
+      else if (!frame) frame = requestAnimationFrame(convert);
+    });
+    // Heard on the window: the canvas pointer router stops touch and pen
+    // events there before they reach the canvas element.
+    const overCanvas = (event: PointerEvent): boolean =>
+      event.target instanceof Element && domNode.contains(event.target);
+    const down = (event: PointerEvent): void => {
+      if (overCanvas(event)) pointer.down(event);
+    };
     const move = (event: PointerEvent): void => {
-      if (event.pointerType === 'touch') return;
-      client = { x: event.clientX, y: event.clientY };
-      if (!frame) frame = requestAnimationFrame(convert);
+      // A finger is followed wherever it goes once it landed on the canvas.
+      if (event.pointerType === 'touch' || overCanvas(event))
+        pointer.move(event);
     };
-    const hidePointer = (): void => {
-      client = null;
-      reporter.setPointer(null);
-    };
+    const up = (event: PointerEvent): void => pointer.up(event);
+    const leave = (event: PointerEvent): void => pointer.leave(event);
+    const hidePointer = (): void => pointer.reset();
 
     // The reported node is the other pages' edit lock on it.
     const presence = useCanvasPresenceStore.getState();
@@ -169,11 +182,12 @@ export function useReportCanvasPresence(domNode: HTMLDivElement | null): void {
       leaveCanvasPresence(canvasId, { pageId: CANVAS_PAGE_ID });
     const pageShow = (): void => reporter.announce();
 
-    domNode.addEventListener('pointermove', move, {
-      capture: true,
-      passive: true,
-    });
-    domNode.addEventListener('pointerleave', hidePointer);
+    const listening = { capture: true, passive: true } as const;
+    window.addEventListener('pointerdown', down, listening);
+    window.addEventListener('pointermove', move, listening);
+    window.addEventListener('pointerup', up, listening);
+    window.addEventListener('pointercancel', up, listening);
+    domNode.addEventListener('pointerleave', leave);
     // Document-wide: a node is also edited in the preview panel.
     document.addEventListener('focusin', syncEditing);
     document.addEventListener('focusout', afterBlur);
@@ -192,8 +206,12 @@ export function useReportCanvasPresence(domNode: HTMLDivElement | null): void {
     return () => {
       if (frame) cancelAnimationFrame(frame);
       stopNodes();
-      domNode.removeEventListener('pointermove', move, { capture: true });
-      domNode.removeEventListener('pointerleave', hidePointer);
+      pointer.stop();
+      window.removeEventListener('pointerdown', down, { capture: true });
+      window.removeEventListener('pointermove', move, { capture: true });
+      window.removeEventListener('pointerup', up, { capture: true });
+      window.removeEventListener('pointercancel', up, { capture: true });
+      domNode.removeEventListener('pointerleave', leave);
       document.removeEventListener('focusin', syncEditing);
       document.removeEventListener('focusout', afterBlur);
       editing.stop();

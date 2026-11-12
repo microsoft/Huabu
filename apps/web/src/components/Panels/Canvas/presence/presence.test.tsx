@@ -1,13 +1,21 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+import { readFileSync } from 'node:fs';
+
 import { act, Profiler } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { CANVAS_PRESENCE_LIMITS } from '@huabu/shared';
+
 import { useCanvasPresenceStore } from '@/store/canvasPresence/canvasPresenceStore';
 
-import { presenceColor, remoteNodeOutlines } from './presencePaint';
+import {
+  PRESENCE_COLOR_TOKENS,
+  presenceColor,
+  remoteNodeOutlines,
+} from './presencePaint';
 import { RemoteCursors } from './RemoteCursors';
 import { RemoteNodeOutlines } from './RemoteNodeOutlines';
 import { editingNodeId } from './useReportCanvasPresence';
@@ -119,7 +127,7 @@ describe('remote cursors', () => {
     );
     expect(cursors[0]?.style.transform).toBe('translate(60px, 100px)');
     expect(cursors[0]?.querySelector('svg')?.style.color).toBe(
-      'var(--color-presence-3)',
+      'var(--accent-purple-text-fg)',
     );
     const labels = [...cursors].map(
       (cursor) =>
@@ -129,7 +137,7 @@ describe('remote cursors', () => {
     expect(
       cursors[1]?.querySelector<HTMLElement>('[data-presence-label]')?.style
         .backgroundColor,
-    ).toBe('var(--color-presence-5)');
+    ).toBe('var(--accent-red-text-fg)');
   });
 
   it('prefers a display name, follows the pointer, and removes the marker on leave', () => {
@@ -190,7 +198,7 @@ describe('remote node outlines', () => {
     expect(selected?.style.top).toBe('120px');
     expect(selected?.style.width).toBe('600px');
     expect(selected?.style.height).toBe('400px');
-    expect(selected?.style.outline).toContain('var(--color-presence-4)');
+    expect(selected?.style.outline).toContain('var(--accent-green-text-fg)');
     // Outside this page's own outline, which sits on the node's edge.
     expect(selected?.style.outlineOffset).toBe('3px');
     expect(selected?.style.pointerEvents).toBe('none');
@@ -239,11 +247,78 @@ describe('remote node outlines', () => {
 });
 
 describe('presence paint', () => {
-  it('maps every colour index onto one of the palette tokens', () => {
-    expect(presenceColor(0)).toBe('var(--color-presence-1)');
-    expect(presenceColor(5)).toBe('var(--color-presence-6)');
-    expect(presenceColor(6)).toBe('var(--color-presence-1)');
-    expect(presenceColor(-1)).toBe('var(--color-presence-6)');
+  it('maps every colour index onto one of the node accent tokens', () => {
+    expect(presenceColor(0)).toBe('var(--accent-teal-text-fg)');
+    expect(presenceColor(5)).toBe('var(--accent-amber-fg)');
+    expect(presenceColor(6)).toBe('var(--accent-teal-text-fg)');
+    expect(presenceColor(-1)).toBe('var(--accent-amber-fg)');
+    // One per colour index the server hands out.
+    expect(PRESENCE_COLOR_TOKENS).toHaveLength(
+      CANVAS_PRESENCE_LIMITS.colorCount,
+    );
+  });
+
+  it('uses teal, green, amber, orange, red and purple, and never white, grey or blue', () => {
+    const accents = PRESENCE_COLOR_TOKENS.map(
+      (token) => /^--accent-([a-z]+)-/.exec(token)?.[1],
+    );
+    expect([...accents].sort()).toEqual([
+      'amber',
+      'green',
+      'orange',
+      'purple',
+      'red',
+      'teal',
+    ]);
+  });
+
+  it('keeps label text and outlines legible on the canvas in both themes', () => {
+    // The tokens' values in `index.css`, read from the file so the check
+    // follows the palette. Light is `:root`, dark is `.dark`.
+    const css = readFileSync('src/index.css', 'utf8');
+    const [light, dark] = css.split(/^\.dark\s*\{/m);
+    const value = (block: string, token: string): string => {
+      const match = new RegExp(`${token}:\\s*([^;]+);`).exec(block);
+      if (!match) throw new Error(`Missing ${token}`);
+      const alias = /^var\((--[\w-]+)\)$/.exec(match[1].trim());
+      return alias ? value(block, alias[1]) : match[1].trim();
+    };
+    const luminance = (hex: string): number => {
+      const [r, g, b] = [1, 3, 5].map((at) => {
+        const channel = parseInt(hex.slice(at, at + 2), 16) / 255;
+        return channel <= 0.03928
+          ? channel / 12.92
+          : ((channel + 0.055) / 1.055) ** 2.4;
+      });
+      return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    };
+    const contrast = (a: string, b: string): number => {
+      const [high, low] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+      return (high + 0.05) / (low + 0.05);
+    };
+    // Label text is `--fg-inverse`; the canvas is `--bg-default`, which the
+    // dark theme gives as oklch(0.145 0 0), about #0a0a0a.
+    const themes = [
+      { block: light, text: value(light, '--fg-inverse'), canvas: '#f5f5f5' },
+      { block: dark, text: value(dark, '--fg-inverse'), canvas: '#0a0a0a' },
+    ];
+    expect(value(light, '--bg-default')).toBe('#f5f5f5');
+    expect(value(dark, '--bg-default')).toBe('oklch(0.145 0 0)');
+    for (const theme of themes) {
+      for (const token of PRESENCE_COLOR_TOKENS) {
+        const color = value(theme.block, token);
+        expect(color, token).toMatch(/^#[0-9a-f]{6}$/i);
+        // WCAG AA for the 10px label text on the marker colour.
+        expect(contrast(theme.text, color), `${token} label`).toBeGreaterThan(
+          4.5,
+        );
+        // And comfortably above the 3:1 asked of a thin outline or icon.
+        expect(
+          contrast(color, theme.canvas),
+          `${token} outline`,
+        ).toBeGreaterThan(4.3);
+      }
+    }
   });
 
   it('gives a node its strongest activity once and labels only the first plain selection', () => {

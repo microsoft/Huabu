@@ -1,8 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { CANVAS_PRESENCE_LIMITS } from '@huabu/shared';
-
 import type { RemotePresencePage } from '@/store/canvasPresence/canvasPresenceStore';
 
 /** What another page is doing with a node, strongest first. */
@@ -19,11 +17,32 @@ export interface RemoteNodeOutline {
   labelled: boolean;
 }
 
-/** The `--color-presence-*` token of a page's colour index. */
+/**
+ * Presence colours are the node accent palette, so a marker looks like part
+ * of the app in both themes. White and grey do not read as a colour, and
+ * blue is this page's own selection, so those three are left out. The order
+ * puts unlike hues next to each other, since pages take the lowest free one.
+ *
+ * Each entry is the accent's existing foreground token: a marker is a thin
+ * outline, a small arrow and a label with `text-fg-inverse` on it, so it
+ * needs the palette's text-strength colour, not a tint. `text-fg` is the
+ * stronger of the two in the light theme; amber's is too light to carry the
+ * label text there, so amber uses `fg`. In the dark theme both are the same.
+ */
+export const PRESENCE_COLOR_TOKENS = [
+  '--accent-teal-text-fg',
+  '--accent-orange-text-fg',
+  '--accent-purple-text-fg',
+  '--accent-green-text-fg',
+  '--accent-red-text-fg',
+  '--accent-amber-fg',
+] as const;
+
+/** The accent token of a page's colour index. */
 export function presenceColor(colorIndex: number): string {
-  const count = CANVAS_PRESENCE_LIMITS.colorCount;
+  const count = PRESENCE_COLOR_TOKENS.length;
   const slot = ((Math.trunc(colorIndex) % count) + count) % count;
-  return `var(--color-presence-${slot + 1})`;
+  return `var(${PRESENCE_COLOR_TOKENS[slot]})`;
 }
 
 /**

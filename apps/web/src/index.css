@@ -127,15 +127,6 @@
   --question-bg: #fbe7ad;
   --question-border: #eec84e;
 
-  /* Space presence: one colour per other page that has the Space open.
-     Kept away from --info, which paints this page's own selection. */
-  --presence-1: #c2338d;
-  --presence-2: #0b8273;
-  --presence-3: #7c5cf0;
-  --presence-4: #a87400;
-  --presence-5: #a0623a;
-  --presence-6: #4c8414;
-
   /* Special purpose */
   --canvas-grid: #cccccc;
   --pdf-selection-border: var(--info);
@@ -257,12 +248,6 @@
   --question-fg: #d97a2b;
   --question-bg: #eec84e;
   --question-border: #8a7535;
-  --presence-1: #f07cc4;
-  --presence-2: #4fd1bd;
-  --presence-3: #a998ff;
-  --presence-4: #e6b83a;
-  --presence-5: #d39a72;
-  --presence-6: #9bd15a;
   --canvas-grid: oklch(0.35 0 0);
   --shimmer-1: oklch(0.45 0 0);
   --shimmer-2: oklch(0.6 0 0);
@@ -360,12 +345,6 @@
   --color-question-fg: var(--question-fg);
   --color-question-bg: var(--question-bg);
   --color-question-border: var(--question-border);
-  --color-presence-1: var(--presence-1);
-  --color-presence-2: var(--presence-2);
-  --color-presence-3: var(--presence-3);
-  --color-presence-4: var(--presence-4);
-  --color-presence-5: var(--presence-5);
-  --color-presence-6: var(--presence-6);
 }
 
 @theme {
