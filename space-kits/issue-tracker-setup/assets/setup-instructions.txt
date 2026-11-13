@@ -1,0 +1,24 @@
+Fill in the Issue Tracker Configuration table
+
+The amber Frame needs your configuration. Edit only the Value column in its Note; leave Field names unchanged.
+
+Required:
+codebasePath: absolute Git checkout path on the intended execution device.
+fixingProfileId: copy an external Profile ID from the list below (not its display name).
+
+Available Profiles:
+{{AVAILABLE_PROFILES}}
+
+Optional (leave blank to use these defaults):
+coordinatorProfileId: same as fixingProfileId.
+repository: derive owner/repo from Git remotes; confirm if ambiguous.
+worktreeRoot: <codebasePath>-worktrees.
+
+Check the prefilled branch values:
+developmentBaseRef: origin/main.
+pullRequestBase: main.
+Use your project's actual development and PR target branches.
+
+When finished, set confirmedByUser to true and ask the setup Agent to validate and finish installation. The Frame turns green when ready; then send the new Coordinator its first message.
+
+No issue work starts during setup. If configuration changes later, confirm it and rerun setup validation before starting new work.

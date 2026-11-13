@@ -29,7 +29,7 @@
     "test": "pnpm -r --if-present run test",
     "test:deployment": "node --test scripts/build-web.test.mjs scripts/canary-redeploy-runner.test.mjs",
     "test:agent-team-skills": "node --test scripts/check-agent-team-skills.test.mjs",
-    "test:space-kits": "node --test space-kits/issue-tracker/tests/content.test.mjs && pnpm --filter @huabu/server exec vitest run --config ../../space-kits/issue-tracker/vitest.config.mjs",
+    "test:space-kits": "node --test space-kits/issue-tracker-setup/tests/content.test.mjs && pnpm --filter @huabu/server exec vitest run --config ../../space-kits/issue-tracker-setup/vitest.config.mjs",
     "test:shared": "pnpm --filter @huabu/shared test",
     "vision:ocr": "node scripts/test-azure-vision.mjs",
     "subtree:pull:agentlet": "git subtree pull --prefix=external/agentlet agentlet-upstream main --squash",

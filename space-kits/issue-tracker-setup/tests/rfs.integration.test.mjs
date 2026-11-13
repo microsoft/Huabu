@@ -44,10 +44,13 @@ const options = () => ({
   baseUrl: 'http://fixture/rfs/c1',
   token: 'fixture-only',
   installerNode: 'node-installer',
-  profile: 'project-profile',
   fetchImpl,
 });
 const store = () => getCanvasStore('c1');
+const nodeStyle = (nodeId) =>
+  store()
+    .read()
+    .state.nodes.find((node) => node.id === nodeId)?.data?.style;
 const ledger = () => {
   const node = store()
     .read()
@@ -56,6 +59,29 @@ const ledger = () => {
     );
   return parseRecord(store().readNode(node.id).content);
 };
+
+function configurationTable({ values, confirmedByUser = true }) {
+  return [
+    '| Field | Value |',
+    '| --- | --- |',
+    ...Object.entries({ ...values, confirmedByUser }).map(
+      ([field, value]) => `| \`${field}\` | ${value ?? ''} |`,
+    ),
+  ].join('\n');
+}
+
+function fillConfiguration() {
+  const nodeId = ledger().objects.configuration.nodeId;
+  store().writeNode(nodeId, {
+    ...store().readNode(nodeId),
+    content: configurationTable({
+      values: {
+        codebasePath: '/projects/example',
+        fixingProfileId: 'project-profile',
+      },
+    }),
+  });
+}
 
 beforeEach(async () => {
   workspace = mkdtempSync(join(tmpdir(), 'issue-tracker-rfs-'));
@@ -133,13 +159,15 @@ afterEach(async () => {
   rmSync(workspace, { recursive: true, force: true });
 });
 
-it('previews without writes; installs exact assets and an unrealized scoped Coordinator', async () => {
+it('creates final instruction titles and an inline configuration table, then an idle Coordinator only after confirmation', async () => {
   const preview = await install(options());
   expect(preview.state).toBe('planned');
   expect(preview.configurationState).toBe('needs_configuration');
   expect(writes).toEqual([]);
-  const result = await install({ ...options(), apply: true });
-  expect(result.state).toBe('needs_configuration');
+  const initial = await install({ ...options(), apply: true });
+  expect(initial.state).toBe('needs_configuration');
+  expect(initial.coordinator).toBeNull();
+  expect(writes.filter(({ path }) => path.endsWith('/agent'))).toHaveLength(0);
   const record = ledger();
   expect(record.pending).toBeNull();
   const kit = await loadKit();
@@ -155,6 +183,44 @@ it('previews without writes; installs exact assets and an unrealized scoped Coor
     );
   }
   expect(record.objects.contract).toBeUndefined();
+  const expectedLabels = {
+    common: 'prompt: issue tracking common',
+    coordinatorPrompt: 'prompt: issue tracking coordinator',
+    fixingSkill: 'skill: issue fixing',
+    configurationFrame: 'prompt: issue tracking configuration',
+  };
+  for (const [role, label] of Object.entries(expectedLabels)) {
+    expect(store().readNode(record.objects[role].nodeId).label).toBe(label);
+  }
+  expect(nodeStyle(record.objects.configurationFrame.nodeId)?.accent).toBe(
+    'amber',
+  );
+  const warning = store().readNode(record.objects.warning.nodeId);
+  expect(warning.content).toContain('Project coding Agent: project-profile');
+  expect(warning.content).not.toContain('{{AVAILABLE_PROFILES}}');
+  expect(
+    store()
+      .read()
+      .state.nodes.find((node) => node.id === record.objects.warning.nodeId)
+      .parentId,
+  ).toBeUndefined();
+  const initialPrompt = await resolveSpacePrompt('c1', 'node-installer');
+  expect(initialPrompt.markdown).toContain(
+    kit.content['assets/configuration.md'],
+  );
+  expect(initialPrompt.markdown).not.toContain('Edit only the Value column');
+  writes.length = 0;
+  await install({ ...options(), apply: true });
+  expect(writes).toEqual([]);
+  fillConfiguration();
+  const result = await install({ ...options(), apply: true });
+  expect(result.state).toBe('ready');
+  expect(nodeStyle(record.objects.configurationFrame.nodeId)?.accent).toBe(
+    'green',
+  );
+  for (const [role, label] of Object.entries(expectedLabels)) {
+    expect(store().readNode(record.objects[role].nodeId).label).toBe(label);
+  }
   const prompt = await resolveSpacePrompt('c1', result.coordinator.nodeId);
   const otherPrompt = await resolveSpacePrompt('c1', 'node-installer');
   expect(prompt.diagnostics.truncated).toBe(false);
@@ -201,6 +267,8 @@ it('previews without writes; installs exact assets and an unrealized scoped Coor
 
 it('validates edited configuration for a non-Huabu repository without recreating or starting Agents', async () => {
   await install({ ...options(), apply: true });
+  fillConfiguration();
+  await install({ ...options(), apply: true });
   const record = ledger();
   const values = {
     repository: 'octo/example',
@@ -214,18 +282,12 @@ it('validates edited configuration for a non-Huabu repository without recreating
   const configuration = {
     schemaVersion: 1,
     values,
-    evidence: Object.fromEntries(
-      Object.keys(values).map((key) => [
-        key,
-        'User confirmed on intended execution device',
-      ]),
-    ),
     confirmedByUser: true,
   };
   const nodeId = record.objects.configuration.nodeId;
   store().writeNode(nodeId, {
     ...store().readNode(nodeId),
-    content: `# Issue Tracker Configuration\n\n\`\`\`json\n${JSON.stringify(configuration)}\n\`\`\`\n`,
+    content: configurationTable(configuration),
   });
   writes.length = 0;
   const result = await install({ ...options(), apply: true });
@@ -241,11 +303,39 @@ it('validates edited configuration for a non-Huabu repository without recreating
   configuration.confirmedByUser = false;
   store().writeNode(nodeId, {
     ...store().readNode(nodeId),
-    content: `# Issue Tracker Configuration\n\n\`\`\`json\n${JSON.stringify(configuration)}\n\`\`\`\n`,
+    content: configurationTable(configuration),
   });
   const changed = await install({ ...options(), apply: true });
   expect(changed.state).toBe('needs_configuration');
   expect(changed.configuration).toContain('UNVERIFIED user confirmation');
+  expect(nodeStyle(record.objects.configurationFrame.nodeId)?.accent).toBe(
+    'amber',
+  );
+});
+
+it('does not let an explicit Profile bypass missing, invalid, or unconfirmed configuration', async () => {
+  const explicit = { ...options(), profile: 'project-profile' };
+  await install({ ...explicit, apply: true });
+  expect(ledger().objects.coordinator).toBeUndefined();
+  const nodeId = ledger().objects.configuration.nodeId;
+  for (const [path, confirmedByUser] of [
+    ['relative/path', true],
+    ['/projects/example', false],
+  ]) {
+    store().writeNode(nodeId, {
+      ...store().readNode(nodeId),
+      content: configurationTable({
+        values: { codebasePath: path, fixingProfileId: 'project-profile' },
+        confirmedByUser,
+      }),
+    });
+    const preview = await install(explicit);
+    expect(preview.create).not.toContain('coordinator');
+    const result = await install({ ...explicit, apply: true });
+    expect(result.state).toBe('needs_configuration');
+    expect(result.coordinator).toBeNull();
+  }
+  expect(writes.filter(({ path }) => path.endsWith('/agent'))).toHaveLength(0);
 });
 
 it('blocks non-empty and truncated preflights without any mutation', async () => {
@@ -374,10 +464,15 @@ it('resumes an acknowledged prefix with unchanged identities', async () => {
   fetchImpl = original;
   await install({ ...options(), apply: true });
   expect(ledger().objects.common).toEqual(prefix.objects.common);
+  expect(writes.filter(({ path }) => path.endsWith('/agent'))).toHaveLength(0);
+  fillConfiguration();
+  await install({ ...options(), apply: true });
   expect(writes.filter(({ path }) => path.endsWith('/agent'))).toHaveLength(1);
 });
 
 it('preserves deleted objects and unexpected topology instead of recreating or repairing', async () => {
+  await install({ ...options(), apply: true });
+  fillConfiguration();
   await install({ ...options(), apply: true });
   const record = ledger();
   const canvas = store().read();
@@ -426,6 +521,8 @@ it('keeps durable pending state after a rejected command or lost Agent response'
 });
 
 it('does not duplicate a Coordinator when its creation response is lost', async () => {
+  await install({ ...options(), apply: true });
+  fillConfiguration();
   const original = fetchImpl;
   fetchImpl = async (url, init) => {
     const response = await original(url, init);
@@ -528,7 +625,7 @@ it('runs the cloned standalone CLI over huabu-rfs and 3-step workflow from a dif
   };
   store().writeNode(configNodeId, {
     ...store().readNode(configNodeId),
-    content: `# Issue Tracker Configuration\n\n\`\`\`json\n${JSON.stringify(configuration)}\n\`\`\`\n`,
+    content: configurationTable(configuration),
   });
 
   // Step 3: finalize installation and create Coordinator from configuration

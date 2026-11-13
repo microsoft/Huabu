@@ -12,9 +12,20 @@ import { pathToFileURL } from 'node:url';
 import {
   extractConfigProfile,
   loadKit,
+  parseConfiguration,
   resolveConfigurationValues,
   validateConfiguration,
 } from '../scripts/install.mjs';
+
+function configurationTable(values, confirmedByUser = true) {
+  return [
+    '| Field | Value |',
+    '| --- | --- |',
+    ...Object.entries({ ...values, confirmedByUser }).map(
+      ([field, value]) => `| \`${field}\` | ${value ?? ''} |`,
+    ),
+  ].join('\n');
+}
 
 test('portable package links resolve and Prompt bodies fit native UTF-8 budgets', async () => {
   const kit = await loadKit();
@@ -38,6 +49,7 @@ test('portable package links resolve and Prompt bodies fit native UTF-8 budgets'
     'common-policy',
     'issue-frame-layout',
     'coordinator-prompt',
+    'configuration',
   ];
   const promptBytes = promptFiles.reduce(
     (total, file) =>
@@ -47,7 +59,12 @@ test('portable package links resolve and Prompt bodies fit native UTF-8 budgets'
   assert(promptBytes < 28 * 1024, 'Leave room for rendered Prompt wrappers');
   assert.equal(kit.content['assets/execution-note-contract.md'], undefined);
   const skill = kit.content['SKILL.md'];
-  assert.match(skill, /^---\nname: issue-tracker\n/);
+  const folderName = new URL('../', import.meta.url).pathname
+    .split('/')
+    .filter(Boolean)
+    .at(-1);
+  assert.equal(folderName, 'issue-tracker-setup');
+  assert.match(skill, new RegExp(`^---\\nname: ${folderName}\\n`));
   assert.match(skill, /Use when/);
   assert.match(skill, /Do not use/);
   assert.match(skill, /## Step 1\. Lay out Space content/);
@@ -85,7 +102,7 @@ test('configuration requires only codebasePath and fixingProfileId upfront while
   const kit = await loadKit();
   const validate = (value) =>
     validateConfiguration(
-      `\`\`\`json\n${JSON.stringify(value)}\n\`\`\`\n`,
+      configurationTable(value.values, value.confirmedByUser),
       kit.configurationSchema,
       [
         { id: 'external-test', alias: 'A project Agent' },
@@ -128,9 +145,7 @@ test('configuration requires only codebasePath and fixingProfileId upfront while
     pullRequestBase: 'main',
   });
   assert.equal(
-    extractConfigProfile(
-      `\`\`\`json\n${JSON.stringify(minimalConfig)}\n\`\`\`\n`,
-    ),
+    extractConfigProfile(configurationTable(minimalConfig.values)),
     'external-test',
   );
 
@@ -146,17 +161,11 @@ test('configuration requires only codebasePath and fixingProfileId upfront while
   const config = {
     schemaVersion: 1,
     values,
-    evidence: Object.fromEntries(
-      Object.keys(values).map((key) => [
-        key,
-        'User confirmed; checked on selected execution device',
-      ]),
-    ),
     confirmedByUser: true,
   };
   assert.deepEqual(validate(config), []);
   assert.equal(
-    extractConfigProfile(`\`\`\`json\n${JSON.stringify(config)}\n\`\`\`\n`),
+    extractConfigProfile(configurationTable(values)),
     'coordinator-only',
   );
   assert.match(
@@ -188,11 +197,66 @@ test('configuration requires only codebasePath and fixingProfileId upfront while
     /INVALID fixingProfileId/,
   );
   assert.match(
-    validate({ ...config, evidence: { codebasePath: '   ' } }).join('\n'),
-    /INVALID evidence\.codebasePath/,
-  );
-  assert.match(
     validate({ ...config, confirmedByUser: false }).join('\n'),
+    /UNVERIFIED user confirmation/,
+  );
+});
+
+test('Markdown configuration rejects ambiguous rows and preserves authored path values', async () => {
+  const { configurationSchema } = await loadKit();
+  const values = {
+    codebasePath: 'D:\\projects\\example',
+    fixingProfileId: 'external-test',
+    repository: null,
+    worktreeRoot: '/projects/with\\|pipe',
+  };
+  const content = `# Issue Tracker Configuration\n\n${configurationTable(values)}`;
+  assert.deepEqual(parseConfiguration(content), {
+    schemaVersion: 1,
+    values: { ...values, worktreeRoot: '/projects/with|pipe' },
+    confirmedByUser: true,
+  });
+  assert.deepEqual(
+    validateConfiguration(content, configurationSchema, [
+      { id: 'external-test' },
+    ]),
+    [],
+  );
+  const invalid = [
+    [
+      content + '\n| `fixingProfileId` | other |',
+      /Duplicate configuration field/,
+    ],
+    [content.replace('true', 'yes'), /confirmedByUser must be true or false/],
+    [content.replace('Field | Value', 'Name | Value'), /Field and Value/],
+    [content.replace('--- | ---', '-- | ---'), /Field and Value/],
+    [content + '\n| extra | value | extra |', /Field and Value/],
+    [
+      content + '\n' + configurationTable(values),
+      /Duplicate configuration field/,
+    ],
+    ['```json\n{"values":{}}\n```', /Markdown table/],
+  ];
+  for (const [body, message] of invalid) {
+    assert.throws(() => parseConfiguration(body), message);
+    assert.match(
+      validateConfiguration(body, configurationSchema, []).join('\n'),
+      /INVALID configuration/,
+    );
+  }
+  assert.match(
+    validateConfiguration(
+      configurationTable({ ...values, typo: 'unexpected' }),
+      configurationSchema,
+      [{ id: 'external-test' }],
+    ).join('\n'),
+    /unknown configuration field/,
+  );
+  const blankConfirmation = configurationTable(values).replace('true', '');
+  assert.match(
+    validateConfiguration(blankConfirmation, configurationSchema, []).join(
+      '\n',
+    ),
     /UNVERIFIED user confirmation/,
   );
 });

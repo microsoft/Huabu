@@ -2,11 +2,11 @@
 
 A Space Kit is a repository-local installer Skill plus portable assets and, where useful, a small initialization script. The user supplies a trusted GitHub repository/revision and Kit path to an Agent in a blank Huabu Space. The Agent clones the repository, reads the selected `SKILL.md`, and uses existing authenticated RFS operations. There is no Kit registry, discovery endpoint, desktop bundle, Profile provisioning or generic Kit runtime.
 
-The first Kit is [Issue Tracker](./issue-tracker/SKILL.md). It installs one Space's native instruction/configuration/issue-area nodes and a fresh idle Coordinator, using a single Fixing Agent node per issue inside the `Issues` Frame. It does not create Execution Notes, per-issue Frames, Tasks, Runs or Views.
+The first Kit is [Issue Tracker](./issue-tracker-setup/SKILL.md), installed by the `issue-tracker-setup` Skill (Kit ID remains `issue-tracker`). It creates native instruction/configuration/issue-area nodes, then a fresh idle Coordinator after configuration is confirmed. Prompt/Skill Frames use their final recognized titles from creation. The single editable configuration source is a Markdown table Note inside an amber Prompt Frame; onboarding guidance is a Text node outside all instruction Frames. The Frame turns green when ready. Each issue uses a single Fixing Agent node inside the `Issues` Frame, without Execution Notes, per-issue Frames, Tasks, Runs or Views.
 
 ```text
 space-kits/
-  issue-tracker/
+  issue-tracker-setup/
     SKILL.md           # Installation procedure and precise trigger
     kit.json           # Kit ID and version
     assets/            # Installed bytes and editable configuration template/schema
@@ -21,13 +21,13 @@ Version identity is `kit.json` plus the installer's digest over its exact runtim
 Run the dependency-free content/configuration tests with:
 
 ```bash
-node --test space-kits/issue-tracker/tests/*.test.mjs
+node --test space-kits/issue-tracker-setup/tests/content.test.mjs
 ```
 
 The real RFS/storage/topology integration suite uses the repository's existing development dependencies:
 
 ```bash
-pnpm --filter @huabu/server exec vitest run --config ../../space-kits/issue-tracker/vitest.config.mjs
+pnpm --filter @huabu/server exec vitest run --config ../../space-kits/issue-tracker-setup/vitest.config.mjs
 ```
 
 See [Space Kits architecture](../docs/architecture/space-kits.md) for boundaries and code entry points.

@@ -8,7 +8,9 @@ export default {
   test: {
     environment: 'node',
     setupFiles: ['./vitest.setup.ts'],
-    include: ['../../space-kits/issue-tracker/tests/*.integration.test.mjs'],
+    include: [
+      '../../space-kits/issue-tracker-setup/tests/*.integration.test.mjs',
+    ],
     testTimeout: 30_000,
   },
 };

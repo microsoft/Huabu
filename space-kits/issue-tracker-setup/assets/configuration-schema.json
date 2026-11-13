@@ -51,10 +51,6 @@
         }
       }
     },
-    "evidence": {
-      "type": "object",
-      "additionalProperties": { "type": "string", "minLength": 1 }
-    },
     "confirmedByUser": { "type": "boolean" }
   }
 }

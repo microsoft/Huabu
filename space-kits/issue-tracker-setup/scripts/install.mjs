@@ -17,7 +17,6 @@ export const recordLabel = 'Issue Tracker Installation Record';
 const commandTypes = [
   'CREATE_NODES',
   'MERGE_NODE_DATA',
-  'SET_NODE_GEOMETRY',
   'SET_FRAME_LAYOUT',
   'CONNECT_NODES',
 ];
@@ -31,6 +30,57 @@ export function parseRecord(content) {
   return JSON.parse(matches[0][1]);
 }
 
+export function parseConfiguration(content) {
+  const rows = content
+    .trim()
+    .split(/\r?\n/)
+    .filter((line) => line.trim() && !/^# /u.test(line));
+  const cells = rows.map((row) => {
+    if (!/^\s*\|.*\|\s*$/u.test(row)) {
+      throw new Error('Expected a Markdown table with Field and Value columns');
+    }
+    return row
+      .trim()
+      .slice(1, -1)
+      .split(/(?<!\\)\|/u)
+      .map((cell) =>
+        cell
+          .trim()
+          .replace(/^`([^`]+)`$/u, '$1')
+          .replace(/\\\|/gu, '|'),
+      );
+  });
+  if (
+    cells.length < 3 ||
+    cells.some((row) => row.length !== 2) ||
+    cells[0][0] !== 'Field' ||
+    cells[0][1] !== 'Value' ||
+    !cells[1].every((cell) => /^:?-{3,}:?$/u.test(cell))
+  ) {
+    throw new Error('Expected one Markdown table with Field and Value columns');
+  }
+  const entries = new Map();
+  for (const [field, value] of cells.slice(2)) {
+    if (entries.has(field))
+      throw new Error(`Duplicate configuration field: ${field}`);
+    entries.set(field, value || null);
+  }
+  const confirmed = entries.get('confirmedByUser');
+  if (
+    confirmed !== undefined &&
+    confirmed !== null &&
+    !['true', 'false'].includes(confirmed)
+  ) {
+    throw new Error('confirmedByUser must be true or false');
+  }
+  entries.delete('confirmedByUser');
+  return {
+    schemaVersion: 1,
+    values: Object.fromEntries(entries),
+    confirmedByUser: confirmed === 'true',
+  };
+}
+
 export async function loadKit() {
   const files = [
     'kit.json',
@@ -42,6 +92,7 @@ export async function loadKit() {
     'assets/issue-frame-layout.md',
     'assets/configuration.md',
     'assets/configuration-schema.json',
+    'assets/setup-instructions.txt',
   ].sort();
   const bytes = await Promise.all(
     files.map(async (file) => [
@@ -88,7 +139,7 @@ export function resolveConfigurationValues(rawValues = {}) {
 export function validateConfiguration(content, schema, profiles) {
   let config;
   try {
-    config = parseRecord(content);
+    config = parseConfiguration(content);
   } catch (error) {
     return [`INVALID configuration: ${error.message}`];
   }
@@ -98,10 +149,6 @@ export function validateConfiguration(content, schema, profiles) {
     !config.values ||
     typeof config.values !== 'object' ||
     Array.isArray(config.values) ||
-    (config.evidence !== undefined &&
-      (!config.evidence ||
-        typeof config.evidence !== 'object' ||
-        Array.isArray(config.evidence))) ||
     typeof config.confirmedByUser !== 'boolean'
   ) {
     return ['INVALID configuration structure; restore the documented schema'];
@@ -111,9 +158,7 @@ export function validateConfiguration(content, schema, profiles) {
   const errors = [];
   if (
     Object.keys(config).some((key) => !Object.hasOwn(schema.properties, key)) ||
-    Object.keys(config.values).some((key) => !Object.hasOwn(fields, key)) ||
-    (config.evidence &&
-      Object.keys(config.evidence).some((key) => !Object.hasOwn(fields, key)))
+    Object.keys(config.values).some((key) => !Object.hasOwn(fields, key))
   ) {
     errors.push('INVALID unknown configuration field');
   }
@@ -129,15 +174,6 @@ export function validateConfiguration(content, schema, profiles) {
       !new RegExp(rule.pattern).test(value)
     ) {
       errors.push(`INVALID ${key}: ${rule.description}`);
-    }
-    if (
-      config.evidence &&
-      Object.hasOwn(config.evidence, key) &&
-      (typeof config.evidence[key] !== 'string' || !config.evidence[key].trim())
-    ) {
-      errors.push(
-        `INVALID evidence.${key}: when provided, evidence must be a non-empty string`,
-      );
     }
   }
   const resolved = resolveConfigurationValues(config.values);
@@ -164,7 +200,7 @@ export function validateConfiguration(content, schema, profiles) {
 
 export function extractConfigProfile(content) {
   try {
-    const config = parseRecord(content);
+    const config = parseConfiguration(content);
     return (
       resolveConfigurationValues(config?.values).coordinatorProfileId ??
       undefined
@@ -174,7 +210,7 @@ export function extractConfigProfile(content) {
   }
 }
 
-function specifications(kit) {
+function specifications(kit, profiles) {
   const note = (role, parent, label, file, height) => ({
     role,
     parent,
@@ -191,12 +227,12 @@ function specifications(kit) {
     size: { width: 520, height: 400 },
   });
   return [
-    frame('common', 'Issue Tracker Common Instructions (installing)', 0, 0),
-    frame('coordinatorPrompt', 'Coordinator Instructions (installing)', 600, 0),
-    frame('fixingSkill', 'Fixing Instructions (installing)', 600, 620),
+    frame('common', 'prompt: issue tracking common', 0, 0),
+    frame('coordinatorPrompt', 'prompt: issue tracking coordinator', 600, 0),
+    frame('fixingSkill', 'skill: issue fixing', 600, 620),
     frame(
       'configurationFrame',
-      'Issue Tracker Configuration · Setup',
+      'prompt: issue tracking configuration',
       1200,
       0,
       'amber',
@@ -229,20 +265,24 @@ function specifications(kit) {
       'configurationFrame',
       'Issue Tracker Configuration',
       'configuration',
-      400,
+      500,
     ),
     {
       role: 'warning',
-      parent: 'configurationFrame',
       nodeType: 'text',
       data: {
-        label: 'Before the first Coordinator interaction',
-        content:
-          'REQUIRED: finish configuration before the first Coordinator prompt/control. Rerun installer to validate.',
+        label: 'How to configure Issue Tracker',
+        content: kit.content['assets/setup-instructions.txt'].replace(
+          '{{AVAILABLE_PROFILES}}',
+          profiles
+            .filter(({ id }) => id !== 'huabu')
+            .map(({ alias, id }) => `${alias ?? id}: ${id}`)
+            .join('\n') || '(No external Profiles are currently selectable.)',
+        ),
         style: { accent: 'amber', fontWeight: 'bold' },
       },
-      position: { x: 28, y: 520 },
-      size: { width: 440 },
+      position: { x: 1200, y: 700 },
+      size: { width: 520 },
     },
   ];
 }
@@ -558,7 +598,7 @@ export async function install({
   if (profile && !profiles.some(({ id }) => id !== 'huabu' && id === profile)) {
     throw new Error('Coordinator Profile is not selectable');
   }
-  const specs = specifications(kit);
+  const specs = specifications(kit, profiles);
   let current = await inventory();
   const resolvedInstallerNode =
     installerNode ||
@@ -636,13 +676,11 @@ export async function install({
     ...['common', 'coordinatorPrompt', 'fixingSkill', 'configurationFrame'].map(
       (role) => `layout:${role}`,
     ),
-    'fit:configurationFrame',
   ];
   const coordinatorSteps = [
     'create:coordinator',
     'label:coordinator',
     'connect',
-    'activate',
   ];
   const steps = [...baseSteps, ...coordinatorSteps];
   if (
@@ -677,7 +715,9 @@ export async function install({
       if (
         !object ||
         typeof object.nodeId !== 'string' ||
-        (spec?.data.content && object.contentHash !== hash(spec.data.content))
+        (spec?.data.content &&
+          role !== 'warning' &&
+          object.contentHash !== hash(spec.data.content))
       ) {
         throw new Error(`Invalid installed content baseline: ${role}`);
       }
@@ -709,16 +749,7 @@ export async function install({
         verifiedContent.set(node.id, downloaded.revision);
       }
       if (spec?.nodeType === 'frame') {
-        const active = {
-          common: 'prompt: issue tracking common',
-          coordinatorPrompt: 'prompt: issue tracking coordinator',
-          fixingSkill: 'skill: issue fixing',
-        }[role];
-        const expected =
-          active && record.completed.includes('activate')
-            ? active
-            : spec.data.label;
-        if (node.label !== expected)
+        if (node.label !== spec.data.label)
           throw new Error(`Changed instruction/Frame label: ${role}`);
       }
     }
@@ -771,6 +802,7 @@ export async function install({
     record.profileId ||
     (!errors.length ? configuredProfile : undefined);
   const canCreateCoordinator = Boolean(
+    !errors.length &&
     effectiveProfile &&
     profiles.some(({ id }) => id !== 'huabu' && id === effectiveProfile),
   );
@@ -802,9 +834,8 @@ export async function install({
         ...specs.map(({ role }) => role),
         ...(canCreateCoordinator ? ['coordinator'] : []),
       ].filter((role) => !record.objects[role]),
-      activation: canCreateCoordinator
-        ? 'none; fresh Coordinator stays idle'
-        : 'deferred; layout first, create Coordinator after configuration',
+      activation:
+        'instruction titles are final; Coordinator creation requires valid confirmed configuration',
     };
   }
 
@@ -905,33 +936,10 @@ export async function install({
         type: 'SET_FRAME_LAYOUT',
         frameId: record.objects[role].nodeId,
         mode: 'column',
-        sizing: role === 'configurationFrame' ? 'manual' : 'hug',
+        sizing: 'hug',
       }),
     );
   }
-  await step('fit:configurationFrame', async () => {
-    const nodes = await query('INSPECT_NODES');
-    const frameId = record.objects.configurationFrame.nodeId;
-    const children = nodes.filter((node) => node.parentFrame?.id === frameId);
-    await execute({
-      type: 'SET_NODE_GEOMETRY',
-      items: [
-        {
-          nodeId: frameId,
-          size: {
-            width:
-              Math.max(
-                ...children.map((node) => node.position.x + node.size.width),
-              ) + 20,
-            height:
-              Math.max(
-                ...children.map((node) => node.position.y + node.size.height),
-              ) + 20,
-          },
-        },
-      ],
-    });
-  });
   const finalConfigBeforeCoordinator = await download(
     (await query('INSPECT_NODES')).find(
       ({ id }) => id === record.objects.configuration.nodeId,
@@ -959,6 +967,7 @@ export async function install({
     record.profileId ||
     (!preCoordinatorValidation.length ? finalConfiguredProfile : undefined);
   if (
+    !preCoordinatorValidation.length &&
     targetProfile &&
     profiles.some(({ id }) => id !== 'huabu' && id === targetProfile)
   ) {
@@ -1002,19 +1011,6 @@ export async function install({
         ],
       }),
     );
-    await step('activate', () =>
-      execute({
-        type: 'MERGE_NODE_DATA',
-        patches: Object.entries({
-          common: 'prompt: issue tracking common',
-          coordinatorPrompt: 'prompt: issue tracking coordinator',
-          fixingSkill: 'skill: issue fixing',
-        }).map(([role, label]) => ({
-          nodeId: record.objects[role].nodeId,
-          patch: { label },
-        })),
-      }),
-    );
   }
   current = await inventory();
   await checkOwned();
@@ -1037,8 +1033,25 @@ export async function install({
     );
   }
   const allStepsDone = steps.every((name) => record.completed.includes(name));
-  record.state =
+  const nextState =
     validation.length || !allStepsDone ? 'needs_configuration' : 'ready';
+  const prevAccent = record.state === 'ready' ? 'green' : 'amber';
+  const nextAccent = nextState === 'ready' ? 'green' : 'amber';
+  if (prevAccent !== nextAccent) {
+    record.pending = 'status:configuration';
+    await save();
+    await execute({
+      type: 'MERGE_NODE_DATA',
+      patches: [
+        {
+          nodeId: record.objects.configurationFrame.nodeId,
+          patch: { style: { accent: nextAccent } },
+        },
+      ],
+    });
+    record.pending = null;
+  }
+  record.state = nextState;
   record.configuration = {
     contentHash: hash(finalConfig.content),
     errors: validation,
@@ -1056,7 +1069,7 @@ export async function install({
     version: kit.version,
     digest: kit.digest,
     activation: record.objects.coordinator
-      ? 'none; first prompt/control must wait for complete configuration'
+      ? 'none; Coordinator stays idle until its first user message'
       : 'deferred; complete Issue Tracker Configuration and rerun with --apply to create the Coordinator',
   };
 }

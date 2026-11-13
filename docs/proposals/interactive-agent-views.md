@@ -6,7 +6,7 @@
 
 ---
 
-Historical demo note: the original Issue Tracker Team/View example below is retained as design history, not the current Issue Tracker workflow. Its obsolete renderer/manifest were removed when Issue Tracker moved to the [Space Kit](../../space-kits/issue-tracker/SKILL.md), which uses native Execution Notes and Agent Threads without Tasks, Runs or Views. See [Space Kits architecture](../architecture/space-kits.md) for the current package boundary.
+Historical demo note: the original Issue Tracker Team/View example below is retained as design history, not the current Issue Tracker workflow. Its obsolete renderer/manifest were removed when Issue Tracker moved to the [Space Kit](../../space-kits/issue-tracker-setup/SKILL.md), which uses native Execution Notes and Agent Threads without Tasks, Runs or Views. See [Space Kits architecture](../architecture/space-kits.md) for the current package boundary.
 
 ## 1. Context
 
@@ -531,4 +531,4 @@ The first implementation is not blocked on renderer standardization. After the H
 | `apps/web/src/components/Nodes/web/InteractiveViewPreview.tsx` | Sandboxed renderer host and MessageChannel bridge.                                                        |
 | `apps/web/src/api/interactive-view.ts`                         | Host web-client operations required outside the iframe bridge.                                            |
 | `apps/server/src/modules/agent/agent-thread.service.ts`        | Canonical structured-submission entry point for Chat and Interactive View turns.                          |
-| `space-kits/issue-tracker/`                                    | Current native-node Issue Tracker package; the historical View validation renderer is no longer retained. |
+| `space-kits/issue-tracker-setup/`                              | Current native-node Issue Tracker package; the historical View validation renderer is no longer retained. |
