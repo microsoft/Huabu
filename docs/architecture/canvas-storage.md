@@ -293,26 +293,6 @@ Standalone content PUT and preprocessing persist call `updateNode(SpaceNodes, ..
 
 Ordinary content PUT's pure body/label/metadata resolution lives in `node-content-update.ts`; it owns CAS, label protection and empty-body protection for that route. Preprocessing retains its existing owner-specific merge callback.
 
-Executor and revert batches already hold that mutex for their whole command
-batch, so they make one `SpaceHandle.write(...)` call instead of
-re-entering the standalone coordinator per node. That call receives complete
-node puts/deletes, the next Space record, and its optional delta row. HTTP
-response schemas/statuses, version increments, no-op handling, and SSE
-publication remain in the Canvas application layer. Conflict responses now
-report the existing logical title/label instead of a Disk filename or directory
-locator.
-
-Phase 4 changes no shared schema or web/client source. HTTP statuses and schemas
-and the SSE shape remain stable, subject to the logical conflict-value correction
-above. Publication remains an application action after persistence rather than
-a storage-port responsibility.
-
-The mutex is single-process application policy. It is not advertised as a
-backend transaction or distributed lock; an adapter supplies its own CAS and
-may be stronger than the common contract.
-
-Ordinary structure PUT composes supported editable fields with current Agent metadata under this same Canvas mutex. Trusted projections and editable inverse replay use already-locked writer entries to avoid recursive acquisition; draft acceptance holds a nonblocking turn lease through its actual Canvas write. Space Move retains sorted multi-Canvas locking and nonblocking turn acquisition rather than waiting for an invocation while holding a Canvas lock.
-
 ### 4.1 Executor persistence restoration
 
 For a node/delta batch, Disk's ordered writer changes multiple files: affected node sidecars, `space.json`, and the append-only delta log. Its existing `runCanvasPersistenceTransaction()` helper now lives inside the Disk adapter. It captures raw bytes for `space.json` and affected sidecars, plus the delta log's existence and byte length. If a normal in-process write throws, rollback restores the sidecars and record bytes and truncates or removes the delta log back to its captured state before the rejection returns. A rejected node → record → delta batch therefore does not expose a completed prefix.
@@ -342,6 +322,42 @@ An explicit title rename is resolved before the protected node → record → de
 Blob materialization uses one shared disposable-copy implementation on Disk and Azure. Path-only consumers receive a read-only temporary copy; even a retained string or consumer changing its permissions cannot mutate authoritative bytes. Release removes that copy and invalidates the lease getter. This does not revoke raw Disk paths, extension connections or handles retained earlier, and process termination can still leave temporary files for host cleanup.
 
 `executeOnServer` captures a Workspace lease before the result lookup, ID allocation or foreign-source preparation, and public inverse replay leases the Workspace before mutex queueing. RFS staged-upload creation/deletion likewise acquire the Workspace lease before Canvas-mutex queueing; the upload namespace is bounded with `safeJoin`, and exclusive creation prevents replacing a raced filename. This is not complete Space-deletion coordination, durable staging publication or revocation of a raw path previously handed to another caller.
+
+### 4.3 Which nodes were written since a position
+
+`SpaceNodes.changes(since?)` answers, without reading any node record, which nodes of a Space were written after a position, and returns the position the sequence stands at. It exists so a page that was not listening when node content was saved can be told what to fetch ([Content saved before the stream was open](./canvas-realtime-sync.md#content-saved-before-the-stream-was-open)); a content save does not change the Space version, so nothing else records it. Every node write counts — the standalone `put` behind the content PUT and preprocessing, and a `put` inside `SpaceHandle.write` — whatever field it changed, so a title or summary is covered as well as a body. A deleted node is not named. The answer is complete, not minimal: it may name a node written at the position itself, so a caller treats a name as "read it again". A position is `{ epoch, seq }`: `epoch` names the sequence, and a position of another epoch (or ahead of the sequence) is answered with `nodeIds: null`, "cannot compare".
+
+What each backend persists per node, and what `changes` reads:
+
+| Backend    | Per node, before this                                                                                                                                     | Marker used                                                                                                                                                                                                                                                                                                                                                              | `changes` cost                                                                                                                                                                                         |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| SQLite     | `nodes(record_json, revision, label_collision_key)`; `revision` is a random UUID per write — it says _that_ a row changed, not _when_ relative to another | Schema v7: `spaces.node_change_seq`, a counter per Space, and `nodes.change_seq`, its value at the node's last write, indexed by `(canvas_id, change_seq)`. Both are written in the transaction that writes the node. `epoch` is `sqlite:<Space created_at>`, so a Space deleted and created again under the same id is another sequence                                 | Two indexed statements; rows returned only for nodes written since                                                                                                                                     |
+| PostgreSQL | The same columns                                                                                                                                          | The same two columns (`BIGINT`), schema v7. A node put first locks the Space row (`SELECT … FOR UPDATE`), so node writers of one Space commit in counter order and no reader is handed a position that an uncommitted write falls behind; `SpaceHandle.write` takes the same lock before its first node mutation, so the two never wait on each other in opposite orders | The same                                                                                                                                                                                               |
+| Disk       | One Markdown sidecar per node. Its `revision` is a hash computed when the file is read; nothing orders writes except the file's modification time         | The sidecar's modification time in whole milliseconds; `epoch` is `disk:mtime-ms`. No file format change and nothing extra written                                                                                                                                                                                                                                       | One `readdir` and one `stat` per sidecar, synchronous; no file is read once the id-to-filename index is warm (a cold index is built by reading each sidecar once, as any first read of the Space does) |
+
+The Disk position is `min(latest sidecar modification time, now)` and a node is named when its time is **at or after** the position asked from. "At or after" makes a file system with coarse timestamps safe: a write in the same tick as the position is named again instead of missed. Taking the position from the files rather than from the clock keeps it in the file system's own time, so a workspace on a volume whose clock differs from the server's is unaffected; the bound by `now` keeps a sidecar dated in the future from carrying the position past later writes, and lets the position follow a clock that was set back. The costs: the nodes written in the same millisecond as the Space's most recent write are named on every question until a later write moves the position (one or a few redundant fetches), and a future-dated sidecar is named until the clock passes it. What the Disk marker cannot see is a write dated before the position: a clock set back past the Space's most recent write and not yet caught up, or a sidecar put in place with an older modification time preserved (`cp -p`, a sync client restoring a file). SQL backends have neither limit.
+
+Rows that existed before schema v7 share position 0, and the migration reads no record. The contract is in `space-nodes.contract.ts` (run for Disk, SQLite and PostgreSQL), including a position read before the store is reopened and a node put by a Space write.
+
+Executor and revert batches already hold that mutex for their whole command
+batch, so they make one `SpaceHandle.write(...)` call instead of
+re-entering the standalone coordinator per node. That call receives complete
+node puts/deletes, the next Space record, and its optional delta row. HTTP
+response schemas/statuses, version increments, no-op handling, and SSE
+publication remain in the Canvas application layer. Conflict responses now
+report the existing logical title/label instead of a Disk filename or directory
+locator.
+
+Phase 4 changes no shared schema or web/client source. HTTP statuses and schemas
+and the SSE shape remain stable, subject to the logical conflict-value correction
+above. Publication remains an application action after persistence rather than
+a storage-port responsibility.
+
+The mutex is single-process application policy. It is not advertised as a
+backend transaction or distributed lock; an adapter supplies its own CAS and
+may be stronger than the common contract.
+
+Ordinary structure PUT composes supported editable fields with current Agent metadata under this same Canvas mutex. Trusted projections and editable inverse replay use already-locked writer entries to avoid recursive acquisition; draft acceptance holds a nonblocking turn lease through its actual Canvas write. Space Move retains sorted multi-Canvas locking and nonblocking turn acquisition rather than waiting for an invocation while holding a Canvas lock.
 
 ## Code entry points
 

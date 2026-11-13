@@ -4,17 +4,19 @@
 import Fastify from 'fastify';
 import { afterEach, expect, it, vi } from 'vitest';
 
-import { contentWatermark, recordContentSave } from './content-watermark.js';
 import syncRoutes from './sync.route.js';
 
 import type { CanvasSyncEvent } from '@huabu/shared';
 
 const mocks = vi.hoisted(() => ({
   read: vi.fn(),
+  changes: vi.fn(),
   subscribe: vi.fn(),
   unsubscribe: vi.fn(),
 }));
-vi.mock('../storage/index.js', () => ({ space: () => ({ read: mocks.read }) }));
+vi.mock('../storage/index.js', () => ({
+  space: () => ({ read: mocks.read, nodes: { changes: mocks.changes } }),
+}));
 vi.mock('./canvas-sync.js', () => ({
   subscribeCanvasUpdates: mocks.subscribe,
 }));
@@ -126,27 +128,40 @@ async function changesSince(since: { epoch: string; seq: number }) {
   }
 }
 
-it('names the nodes whose content was saved since the position a page gives', async () => {
-  const seen = contentWatermark();
-  recordContentSave('child', ['n1']);
-  recordContentSave('other-space', ['elsewhere']);
-  recordContentSave('child', ['n2']);
-  expect(await changesSince(seen)).toEqual({
-    position: contentWatermark(),
+it("answers from storage's record of node writes, asked from the position the page gives", async () => {
+  mocks.changes.mockResolvedValue({
+    position: { epoch: 'disk:mtime-ms', seq: 20 },
+    nodeIds: ['n1', 'n2'],
+  });
+  expect(await changesSince({ epoch: 'disk:mtime-ms', seq: 12 })).toEqual({
+    position: { epoch: 'disk:mtime-ms', seq: 20 },
     changedNodeIds: ['n1', 'n2'],
+  });
+  expect(mocks.changes).toHaveBeenCalledExactlyOnceWith({
+    epoch: 'disk:mtime-ms',
+    seq: 12,
   });
 });
 
-it('names nothing when nothing was saved since', async () => {
-  const seen = contentWatermark();
-  expect(await changesSince(seen)).toEqual({ position: contentWatermark() });
+it('names nothing when nothing was written since', async () => {
+  mocks.changes.mockResolvedValue({
+    position: { epoch: 'e', seq: 12 },
+    nodeIds: [],
+  });
+  expect(await changesSince({ epoch: 'e', seq: 12 })).toEqual({
+    position: { epoch: 'e', seq: 12 },
+  });
 });
 
-it('says so when it cannot tell what was saved since', async () => {
-  const seen = contentWatermark();
-  expect(
-    await changesSince({ epoch: 'before-restart', seq: seen.seq }),
-  ).toEqual({ position: contentWatermark(), reset: true });
+it('says so when storage cannot compare the position', async () => {
+  mocks.changes.mockResolvedValue({
+    position: { epoch: 'e2', seq: 3 },
+    nodeIds: null,
+  });
+  expect(await changesSince({ epoch: 'e1', seq: 12 })).toEqual({
+    position: { epoch: 'e2', seq: 3 },
+    reset: true,
+  });
 });
 
 it('refuses a content position that is not one, and a Space that does not exist', async () => {

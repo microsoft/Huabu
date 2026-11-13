@@ -183,4 +183,15 @@ export const POSTGRES_MIGRATIONS = [
       DROP TABLE operation_heads;
     `,
   },
+  // Which nodes were written since a given point: a counter per Space,
+  // advanced by every node write, and the value it had at each node's last
+  // write. Rows that predate the column share position 0.
+  {
+    version: 7,
+    sql: `
+      ALTER TABLE spaces ADD COLUMN node_change_seq BIGINT NOT NULL DEFAULT 0;
+      ALTER TABLE nodes ADD COLUMN change_seq BIGINT NOT NULL DEFAULT 0;
+      CREATE INDEX nodes_by_change ON nodes(canvas_id, change_seq);
+    `,
+  },
 ] as const;

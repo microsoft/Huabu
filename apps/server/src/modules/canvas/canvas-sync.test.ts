@@ -4,7 +4,6 @@
 import { describe, it, expect, vi } from 'vitest';
 
 import { publishCanvasUpdate, subscribeCanvasUpdates } from './canvas-sync.js';
-import { contentSavedSince, contentWatermark } from './content-watermark.js';
 import { currentWorkspaceScope, runInWorkspace } from '../workspace/context.js';
 
 import type { CanvasSyncEvent } from '@huabu/shared';
@@ -44,9 +43,8 @@ describe('canvas-sync publisher', () => {
     unsubscribe();
   });
 
-  it('records a content save with nobody listening', () => {
-    const before = contentWatermark();
-    // No subscriber yet: the save is still recorded.
+  it('delivers a content save and a read-model notice as published, and keeps nothing for a later subscriber', () => {
+    // No subscriber yet: nothing is held for one that comes later.
     publishCanvasUpdate('canvas-content', {
       type: 'invalidate',
       data: { nodeIds: ['n1'], originPageId: 'page-a' },
@@ -57,20 +55,12 @@ describe('canvas-sync publisher', () => {
       type: 'invalidate',
       data: { nodeIds: ['n2'] },
     });
-    // A read-model notice names no node and is not a content save.
     publishCanvasUpdate('canvas-content', { type: 'invalidate', data: {} });
 
     expect(listener.mock.calls).toEqual([
-      [
-        {
-          type: 'invalidate',
-          data: { nodeIds: ['n2'] },
-        },
-      ],
+      [{ type: 'invalidate', data: { nodeIds: ['n2'] } }],
       [{ type: 'invalidate', data: {} }],
     ]);
-    expect(contentSavedSince('canvas-content', before)).toEqual(['n1', 'n2']);
-    expect(contentWatermark().seq).toBe(before.seq + 2);
     unsubscribe();
   });
 

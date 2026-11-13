@@ -49,10 +49,12 @@ import type { Node } from '@xyflow/react';
  *    valid from (`canvasStore.contentPosition`, set by the load). The named
  *    nodes are fetched like the nodes of an `invalidate`, and the position
  *    moves on to the answer's. So nothing saved between the load's read and
- *    the subscription is missed, in either order of the two. When the server
- *    cannot compare the position (`reset`), every node with saved content is
- *    checked, a few at a time; a Space with more than
- *    {@link CONTENT_REVALIDATE_LIMIT} of them is reloaded instead.
+ *    the subscription is missed, in either order of the two. The position
+ *    is the server's stored record of node writes, so it holds across a
+ *    server restart. Should the server be unable to compare it all the same
+ *    (`reset`: the Space was created anew, or moved to another storage
+ *    backend), every node with saved content is fetched, a few at a time.
+ *    The Space is never loaded again for content.
  *
  *  - A load that ends behind the stream: a snapshot that arrives while the
  *    Space is loading is not compared, since the load is expected to bring
@@ -101,12 +103,6 @@ function adoptAfterLoad(canvasId: string, nodeIds: readonly string[]): void {
   });
 }
 
-/**
- * The most nodes whose content is checked one by one when the server cannot
- * say what was saved. Above it one whole-Space load costs less than the
- * fetches.
- */
-export const CONTENT_REVALIDATE_LIMIT = 200;
 const CONTENT_FETCH_CONCURRENCY = 4;
 /** Waits before asking again after a failed content check. */
 const CONTENT_CHECK_RETRY_MS = [1_000, 2_000, 4_000];
@@ -146,7 +142,7 @@ function closeConnection(): void {
  * only when every named node was fetched, so a failed request or fetch is
  * asked for again (a few times, then at the next snapshot or load).
  */
-function catchUpContent(current: Connection, reload: () => void): void {
+function catchUpContent(current: Connection): void {
   if (current.checking) {
     current.checkAgain = true;
     return;
@@ -179,17 +175,14 @@ function catchUpContent(current: Connection, reload: () => void): void {
           continue;
         }
         let nodeIds = answer.changedNodeIds ?? [];
-        if (answer.reset) {
+        // The server cannot compare the position: fetch every node that has
+        // saved content. Never a whole-Space load, which would drop the
+        // page's undo history for content it may well already show.
+        if (answer.reset)
           nodeIds = useCanvasStore
             .getState()
             .nodes.filter((node) => MD_BACKED_NODE_TYPES.has(node.type ?? ''))
             .map((node) => node.id);
-          if (nodeIds.length > CONTENT_REVALIDATE_LIMIT) {
-            // The load brings every node and a position of its own.
-            reload();
-            return;
-          }
-        }
         for (
           let start = 0;
           start < nodeIds.length;
@@ -220,7 +213,7 @@ function catchUpContent(current: Connection, reload: () => void): void {
       if (wait !== undefined)
         current.retryTimer = setTimeout(() => {
           current.retryTimer = null;
-          if (connection === current) catchUpContent(current, reload);
+          if (connection === current) catchUpContent(current);
         }, wait);
     } finally {
       current.checking = false;
@@ -358,7 +351,7 @@ export const useCanvasSyncStore = create<CanvasSyncState>((set, get) => ({
           reload();
           return;
         }
-        catchUpContent(current, reload);
+        catchUpContent(current);
       }),
     };
     connection = current;
@@ -383,7 +376,7 @@ export const useCanvasSyncStore = create<CanvasSyncState>((set, get) => ({
           !canvasStore.isLoading &&
           event.data.version === canvasStore.version
         )
-          catchUpContent(current, reload);
+          catchUpContent(current);
         // Skip the catch-up reload while an initial/primary load is
         // still in flight. On fresh open the CanvasPage mount load
         // is already fetching the latest state, but it hasn't set

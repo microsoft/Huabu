@@ -2,6 +2,7 @@
 // Licensed under the MIT license.
 
 import { SqliteStoreContext } from './database.js';
+import { SqliteStructuredStore } from './structured-store.js';
 import {
   createSqliteTestFile,
   installDeltaAbortTrigger,
@@ -19,7 +20,6 @@ import { describeSpaceWriteContract } from '../../ports/contracts/space-write.co
 import { describeStructuredStoreContract } from '../../ports/contracts/structured-store.contract.js';
 import { describeWorkspaceRepositoryContract } from '../../ports/contracts/workspace-repository.contract.js';
 
-import type { SqliteStructuredStore } from './structured-store.js';
 import type { NodeContent } from '../../../canvas/persistence-types.js';
 
 function note(nodeId: string, label: string, content: string): NodeContent {
@@ -88,12 +88,26 @@ describeSpaceNodesContract('SQLite', async () => {
   const canvasId = 'sqlite-nodes-contract';
   await createOrdinarySpace(harness.store, canvasId, 'SQLite Nodes Contract');
   const space = harness.store.space(canvasId);
+  const reopened: SqliteStoreContext[] = [];
   return {
     repository: space.nodes,
     missingRepository: harness.store.space('sqlite-nodes-missing').nodes,
     expectedCanvasId: canvasId,
     deletedNodePut: 'allowed',
-    cleanup: harness.cleanup,
+    space,
+    // A second connection to the same file, as a restarted Server has.
+    reopen: () => {
+      harness.closeConnection();
+      const context = new SqliteStoreContext(harness.filename);
+      reopened.push(context);
+      context.init();
+      context.useWorkspace(harness.workspaceId);
+      return new SqliteStructuredStore(context).space(canvasId).nodes;
+    },
+    cleanup: async () => {
+      for (const context of reopened.splice(0)) context.close();
+      await harness.cleanup();
+    },
   };
 });
 

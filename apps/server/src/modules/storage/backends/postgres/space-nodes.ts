@@ -8,15 +8,21 @@ import { sanitizeId } from '../../../../utils/fs.js';
 import { stringifyJson } from '../sql/codecs.js';
 import { allocateNodeIdentity } from '../sql/identity.js';
 import {
+  absentNodeChangePosition,
   collectNodeRow,
+  decodeChangeSeq,
   decodeIdentifiedNodeRow,
   decodeLabelConflict,
   decodeNodeRow,
+  isComparableNodeChangePosition,
+  nodeChangeEpoch,
   validatePut,
 } from '../sql/node-rules.js';
 
 import type { PgExecutor, PostgresStoreContext } from './database.js';
 import type {
+  NodeChangePosition,
+  NodeChanges,
   NodeDeleteResult,
   NodePutInput,
   NodePutResult,
@@ -57,9 +63,19 @@ export async function putPostgresNodeInTransaction(
   input: NodePutInput,
 ): Promise<NodePutResult> {
   const nodeId = validatePut(input);
-  if (!(await spaceRowExists(database, workspaceId, canvasId))) {
-    return { ok: false, reason: 'not-found' };
-  }
+  // Existence check and lock in one. Every node put of a Space holds the
+  // Space row's lock from here to its commit, before it touches a node row,
+  // so node writers of one Space run one after another: the counter values
+  // given out below are in commit order, and no reader can be handed a
+  // position that a write still to commit falls behind.
+  const present = await database.get(
+    `SELECT 1 AS present FROM spaces
+       WHERE workspace_id = ? AND canvas_id = ?
+       FOR UPDATE`,
+    workspaceId,
+    canvasId,
+  );
+  if (present === undefined) return { ok: false, reason: 'not-found' };
 
   const current = await readNodeRow(database, canvasId, nodeId);
   const currentRevision = current?.revision ?? null;
@@ -109,19 +125,30 @@ export async function putPostgresNodeInTransaction(
   }
 
   const revision = randomUUID();
+  const counter = await database.get(
+    `UPDATE spaces SET node_change_seq = node_change_seq + 1
+       WHERE workspace_id = ? AND canvas_id = ?
+       RETURNING node_change_seq`,
+    workspaceId,
+    canvasId,
+  );
+  const changeSeq = decodeChangeSeq(counter?.['node_change_seq']);
   await database.run(
     `INSERT INTO nodes (
-         canvas_id, node_id, record_json, revision, label_collision_key
-       ) VALUES (?, ?, ?, ?, ?)
+         canvas_id, node_id, record_json, revision, label_collision_key,
+         change_seq
+       ) VALUES (?, ?, ?, ?, ?, ?)
        ON CONFLICT(canvas_id, node_id) DO UPDATE SET
          record_json = excluded.record_json,
          revision = excluded.revision,
-         label_collision_key = excluded.label_collision_key`,
+         label_collision_key = excluded.label_collision_key,
+         change_seq = excluded.change_seq`,
     canvasId,
     nodeId,
     stringifyJson(allocation.record, `Node ${JSON.stringify(nodeId)} record`),
     revision,
     allocation.collisionKey,
+    changeSeq,
   );
   return {
     ok: true,
@@ -270,6 +297,35 @@ export class PostgresSpaceNodes implements SpaceNodes {
          WHERE canvas_id = ?`,
       this.canvasId,
     );
+  }
+
+  async changes(since?: NodeChangePosition): Promise<NodeChanges> {
+    const workspaceId = this.#workspace();
+    // The counter is read before the rows. A write that commits between the
+    // two statements may be named although it is after the position
+    // returned; the next call names it again, which the port allows.
+    const row = await this.#context.database().get(
+      `SELECT node_change_seq, created_at
+         FROM spaces
+         WHERE workspace_id = ? AND canvas_id = ?`,
+      workspaceId,
+      this.canvasId,
+    );
+    if (row === undefined)
+      return { position: absentNodeChangePosition('postgres'), nodeIds: null };
+    const position = {
+      epoch: nodeChangeEpoch('postgres', row['created_at']),
+      seq: decodeChangeSeq(row['node_change_seq']),
+    };
+    if (!isComparableNodeChangePosition(since, position))
+      return { position, nodeIds: null };
+    const rows = await this.#context.database().all(
+      `SELECT node_id FROM nodes
+         WHERE canvas_id = ? AND change_seq > ?`,
+      this.canvasId,
+      since.seq,
+    );
+    return { position, nodeIds: rows.map((entry) => String(entry['node_id'])) };
   }
 
   async put(input: NodePutInput): Promise<NodePutResult> {

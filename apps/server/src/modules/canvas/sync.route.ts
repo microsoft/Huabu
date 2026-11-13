@@ -11,9 +11,10 @@
  * `update` published by `publishCanvasUpdate`.
  *
  * `GET /:canvasId/content/changes` answers what the version cannot: which
- * nodes had their content saved after a given content position (see
- * `content-watermark.ts`). A page asks once its stream is open, from the
- * position its loaded content is valid from.
+ * nodes had their content saved after a given content position. The
+ * position is storage's own record of node writes (`SpaceNodes.changes`),
+ * so it holds across a restart. A page asks once its stream is open, from
+ * the position its loaded content is valid from.
  *
  * The same stream carries `presence` events (see `canvas-presence.ts`). A
  * page that opens it with `?pageId=` is not sent its own presence, and that
@@ -30,7 +31,6 @@ import {
 
 import { canvasPresence } from './canvas-presence.js';
 import { subscribeCanvasUpdates } from './canvas-sync.js';
-import { contentSavedSince, contentWatermark } from './content-watermark.js';
 import { presenceSpaceKey } from './presence.route.js';
 import { space } from '../storage/index.js';
 
@@ -170,15 +170,16 @@ const syncRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
         message: query.error.issues[0]?.message ?? 'Invalid content position',
       });
     const { canvasId } = params.data;
-    if (!(await space(canvasId).read()))
+    const handle = space(canvasId);
+    if (!(await handle.read()))
       return reply.code(404).send({ message: 'Canvas not found' });
-    const changed = contentSavedSince(canvasId, query.data);
+    const { position, nodeIds } = await handle.nodes.changes(query.data);
     return reply.send({
-      position: contentWatermark(),
-      ...(changed === null
+      position,
+      ...(nodeIds === null
         ? { reset: true }
-        : changed.length
-          ? { changedNodeIds: changed }
+        : nodeIds.length
+          ? { changedNodeIds: [...nodeIds] }
           : {}),
     });
   });

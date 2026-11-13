@@ -21,8 +21,6 @@
 
 import { AsyncResource } from 'node:async_hooks';
 
-import { recordContentSave } from './content-watermark.js';
-
 import type { CanvasSyncEvent } from '@huabu/shared';
 
 type Listener = (event: CanvasSyncEvent) => void;
@@ -32,16 +30,14 @@ const listenersByCanvas = new Map<string, Set<Listener>>();
 /**
  * Broadcast a sync event to every subscriber of `canvasId`.
  *
- * An `invalidate` that names nodes is a content save: it is recorded
- * whether or not anyone is listening, so a page that connects later can ask
- * what it missed.
+ * Nothing is kept for a page that is not listening. What such a page missed
+ * it learns from storage: the Space version for structure, and the node
+ * writes since its content position for content (`SpaceNodes.changes`).
  */
 export function publishCanvasUpdate(
   canvasId: string,
   event: CanvasSyncEvent,
 ): void {
-  if (event.type === 'invalidate' && event.data.nodeIds?.length)
-    recordContentSave(canvasId, event.data.nodeIds);
   const set = listenersByCanvas.get(canvasId);
   if (!set) return;
   for (const fn of set) {

@@ -11,6 +11,7 @@ import {
   readdirSync,
   rmSync,
   unlinkSync,
+  statSync,
 } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -750,6 +751,38 @@ export class CanvasStore {
       diskFiles.length !== indexedFiles.length ||
       diskFiles.some((file, index) => file !== indexedFiles[index])
     );
+  }
+
+  /**
+   * When each node's sidecar was last written, in whole milliseconds, by
+   * stable id — the file's modification time, read with one `stat` per
+   * sidecar and no file contents.
+   *
+   * The id of a file comes from the cached index. The index is rebuilt (one
+   * read per sidecar) only when it is cold or the directory's filenames no
+   * longer match it, exactly as a write would rebuild it. A sidecar that
+   * vanishes between the listing and its `stat` is left out.
+   */
+  nodeWriteTimes(): Map<string, number> {
+    this.assertActiveWorkspace();
+    let idx = this.nodeIndex();
+    if (this.nodeIndexCountStale(idx)) {
+      this.invalidateNodeIndex();
+      idx = this.nodeIndex();
+    }
+    const dir = nodesDir(this.canvasId);
+    const times = new Map<string, number>();
+    for (const entry of idx.list()) {
+      try {
+        times.set(
+          entry.id,
+          Math.floor(statSync(path.join(dir, entry.filename)).mtimeMs),
+        );
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      }
+    }
+    return times;
   }
 
   /**

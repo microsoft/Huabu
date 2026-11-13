@@ -584,6 +584,35 @@ export type NodePutResult =
 export type NodeDeleteResult = 'deleted' | 'absent';
 
 /**
+ * A point in one Space's sequence of node writes.
+ *
+ * Persisted, so it means the same after a restart. `epoch` names the
+ * sequence (the backend kind and the Space's lineage); `seq` orders writes
+ * within it. A caller stores both and hands them back unchanged; it never
+ * compares the `seq` of two epochs or computes with it.
+ */
+export interface NodeChangePosition {
+  readonly epoch: string;
+  readonly seq: number;
+}
+
+export interface NodeChanges {
+  /**
+   * Where the sequence stood when this was read. Every node write that
+   * completes after the read is reported by a later
+   * {@link SpaceNodes.changes} call given this position.
+   */
+  readonly position: NodeChangePosition;
+  /**
+   * The nodes that exist and were written since the position given. `null`
+   * when no position was given, or when it belongs to another sequence and
+   * so cannot be compared — the caller then knows nothing about what
+   * changed.
+   */
+  readonly nodeIds: readonly string[] | null;
+}
+
+/**
  * Complete node-record persistence for one Space.
  *
  * Revisions are opaque full-record storage tokens, distinct from any public
@@ -673,6 +702,27 @@ export interface SpaceNodes {
   ): Promise<Map<string, NodeSnapshot>>;
   put(input: NodePutInput): Promise<NodePutResult>;
   delete(nodeId: string): Promise<NodeDeleteResult>;
+  /**
+   * Which nodes were written since `since`, without reading any record.
+   *
+   * Every write of a node record counts — a standalone {@link put} and a put
+   * inside {@link SpaceHandle.write} alike — whatever part of the record it
+   * changed. The answer is **complete, not minimal**: it names every node
+   * written after `since` was read, and may also name nodes written at that
+   * very position, so a caller treats a named node as "read it again", which
+   * must be harmless to repeat. A deleted node is not named; deletion is a
+   * structural change and travels with the Space record.
+   *
+   * The position survives a restart. An adapter with a transactional store
+   * keeps a counter per Space, advanced in the transaction that writes the
+   * node. An adapter that keeps records in files uses the files' modification
+   * times, bounded by the clock so that a record dated in the future cannot
+   * hide later writes; it is then exact only as far as that clock does not
+   * step back past the Space's most recent write.
+   *
+   * A Space that does not exist reports no changes at a zero position.
+   */
+  changes(since?: NodeChangePosition): Promise<NodeChanges>;
 }
 
 export interface NodeStreamOptions {

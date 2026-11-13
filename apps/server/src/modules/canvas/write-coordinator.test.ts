@@ -162,6 +162,9 @@ function fakeRepository(canvasId = 'c1') {
         ? new Map()
         : new Map([[snapshot.record.nodeId, snapshot]]);
     },
+    async changes() {
+      return { position: { epoch: 'test', seq: 0 }, nodeIds: null };
+    },
     async stream(onNode): Promise<Map<string, NodeSnapshot>> {
       const all = await nodes.list();
       for (const snapshot of all.values()) onNode(snapshot);

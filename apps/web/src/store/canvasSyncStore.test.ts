@@ -4,10 +4,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { CANVAS_PAGE_ID } from './canvasStore/sync/pageId';
-import {
-  CONTENT_REVALIDATE_LIMIT,
-  useCanvasSyncStore,
-} from './canvasSyncStore';
+import { useCanvasSyncStore } from './canvasSyncStore';
 
 import type {
   CanvasContentChangesResponse,
@@ -513,12 +510,24 @@ describe('canvasSyncStore stream recovery', () => {
       expect(mocks.canvasState.loadCanvas).not.toHaveBeenCalled();
     });
 
-    it('loads the Space once instead when it has too many nodes to check one by one', async () => {
-      mocks.canvasState.nodes = nodesOf(CONTENT_REVALIDATE_LIMIT + 1);
+    it('checks a large Space the same way, without loading it again', async () => {
+      mocks.canvasState.nodes = nodesOf(450);
       answer({ position: { epoch: 'e2', seq: 0 }, reset: true });
       await connectWithSnapshot({ version: 1 });
-      expect(mocks.adoptRemoteNodeContent).not.toHaveBeenCalled();
-      expect(mocks.canvasState.loadCanvas).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(
+        mocks.adoptRemoteNodeContent.mock.calls.flatMap(([, ids]) => ids),
+      ).toHaveLength(450);
+      expect(
+        mocks.adoptRemoteNodeContent.mock.calls.every(
+          ([, ids]) => ids.length <= 4,
+        ),
+      ).toBe(true);
+      expect(mocks.canvasState.contentPosition).toEqual({
+        epoch: 'e2',
+        seq: 0,
+      });
+      expect(mocks.canvasState.loadCanvas).not.toHaveBeenCalled();
     });
 
     it('leaves it to the reload when the version moved as well', async () => {

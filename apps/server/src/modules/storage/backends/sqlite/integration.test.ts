@@ -271,6 +271,43 @@ describe('SqliteStructuredStore lifecycle and schema', () => {
     });
   });
 
+  it('orders node writes in a database upgraded from v1, leaving its existing nodes at the start', async () => {
+    const file = trackedFile('huabu-sqlite-v1-changes-');
+    const fixtureSql = readFileSync(
+      new URL('./fixtures/v1.sql', import.meta.url),
+      'utf8',
+    );
+    withTestDatabase(file.filename, (database) => database.exec(fixtureSql));
+
+    const store = await reopenWithWorkspace(file.filename);
+    const { nodes } = store.space('fixture-space');
+    const start = await nodes.changes();
+    expect(start.position.seq).toBe(0);
+    // Nothing was written since the upgrade: the node that was already
+    // there is not named.
+    expect((await nodes.changes(start.position)).nodeIds).toEqual([]);
+
+    const put = await nodes.put({
+      nodeId: 'added-node',
+      record: {
+        nodeId: 'added-node',
+        type: 'note',
+        label: 'Added',
+        content: 'after the upgrade',
+      },
+    });
+    expect(put.ok).toBe(true);
+    const after = await nodes.changes(start.position);
+    expect(after.nodeIds).toEqual(['added-node']);
+    expect(after.position).toEqual({ epoch: start.position.epoch, seq: 1 });
+    // Exactly the writes after a position, and none at it.
+    expect((await nodes.changes(after.position)).nodeIds).toEqual([]);
+    // A position ahead of the counter belongs to some other history.
+    expect(
+      (await nodes.changes({ epoch: start.position.epoch, seq: 99 })).nodeIds,
+    ).toBeNull();
+  });
+
   it('opens the immutable v1 SQL fixture without rewriting its records', async () => {
     const file = trackedFile('huabu-sqlite-v1-fixture-');
     const fixtureSql = readFileSync(

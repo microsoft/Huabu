@@ -60,7 +60,6 @@ import {
 } from './canvas-executor.js';
 import { searchCanvas } from './canvas-search.js';
 import { publishCanvasUpdate } from './canvas-sync.js';
-import { contentWatermark } from './content-watermark.js';
 import { remapImportedSpace } from './import-space-identity.js';
 import { resolveNodeContentUpdate } from './node-content-update.js';
 import { registerSpaceCardRoutes } from './space-card.route.js';
@@ -1314,7 +1313,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     // Before any node is read: a content save that lands while this request
     // is reading is after this position, so the page asks for it again
     // rather than missing it.
-    const contentPosition = contentWatermark();
+    const { position: contentPosition } = await handle.nodes.changes();
     const canvas = await handle.read();
 
     if (!canvas) {

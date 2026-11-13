@@ -6,7 +6,12 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
 import type { NodeContent } from '../../../canvas/persistence-types.js';
-import type { NodePutInput, SpaceNodes, NodeSnapshot } from '../structured.js';
+import type {
+  NodePutInput,
+  NodeSnapshot,
+  SpaceHandle,
+  SpaceNodes,
+} from '../structured.js';
 
 export interface SpaceNodesContractHarness {
   /** Repository for an existing Space, initially empty at contract-owned ids. */
@@ -16,6 +21,13 @@ export interface SpaceNodesContractHarness {
   readonly expectedCanvasId: string;
   /** Whether this adapter fences a deleted id against late standalone puts. */
   readonly deletedNodePut: 'allowed' | 'write-suppressed';
+  /** The Space {@link repository} belongs to, for writes that carry nodes. */
+  readonly space?: SpaceHandle;
+  /**
+   * The same Space's nodes through a store opened afresh, as after a restart.
+   * Omitted by a harness that cannot reopen its backend.
+   */
+  readonly reopen?: () => Promise<SpaceNodes> | SpaceNodes;
   readonly cleanup?: () => Promise<void> | void;
 }
 
@@ -356,6 +368,179 @@ export function describeSpaceNodesContract(
           record: late,
         });
       }
+    });
+
+    describe('changes', () => {
+      async function changedSince(
+        repository: SpaceNodes,
+        since: Awaited<ReturnType<SpaceNodes['changes']>>['position'],
+      ): Promise<readonly string[]> {
+        const { nodeIds } = await repository.changes(since);
+        if (nodeIds === null)
+          throw new Error('Expected a comparable change position');
+        return nodeIds;
+      }
+
+      it('says nothing about what changed when no position is given', async () => {
+        const { repository } = await open();
+        await putSuccessfully(repository, {
+          nodeId: 'contract-change-a',
+          record: note('contract-change-a', 'Contract change A', 'a'),
+        });
+
+        const { position, nodeIds } = await repository.changes();
+        expect(nodeIds).toBeNull();
+        expect(position.epoch).toEqual(expect.any(String));
+        expect(Number.isSafeInteger(position.seq)).toBe(true);
+      });
+
+      it('names every node put after the position was read', async () => {
+        const { repository } = await open();
+        await putSuccessfully(repository, {
+          nodeId: 'contract-change-a',
+          record: note('contract-change-a', 'Contract change A', 'a'),
+        });
+        const { position } = await repository.changes();
+
+        // A new node, and an existing one whose title alone changes.
+        await putSuccessfully(repository, {
+          nodeId: 'contract-change-b',
+          record: note('contract-change-b', 'Contract change B', 'b'),
+        });
+        await putSuccessfully(repository, {
+          nodeId: 'contract-change-a',
+          record: note('contract-change-a', 'Contract change A renamed', 'a'),
+        });
+
+        const changed = await changedSince(repository, position);
+        expect(changed).toEqual(
+          expect.arrayContaining(['contract-change-a', 'contract-change-b']),
+        );
+        expect(new Set(changed).size).toBe(changed.length);
+      });
+
+      it('keeps naming a later write from every earlier position', async () => {
+        const { repository } = await open();
+        const first = (await repository.changes()).position;
+        await putSuccessfully(repository, {
+          nodeId: 'contract-change-a',
+          record: note('contract-change-a', 'Contract change A', 'a'),
+        });
+        const second = (await repository.changes()).position;
+        await putSuccessfully(repository, {
+          nodeId: 'contract-change-b',
+          record: note('contract-change-b', 'Contract change B', 'b'),
+        });
+
+        expect(await changedSince(repository, first)).toEqual(
+          expect.arrayContaining(['contract-change-a', 'contract-change-b']),
+        );
+        expect(await changedSince(repository, second)).toContain(
+          'contract-change-b',
+        );
+        // Asking again changes nothing: reading is not consuming.
+        expect(await changedSince(repository, second)).toContain(
+          'contract-change-b',
+        );
+      });
+
+      it('does not name a deleted node', async () => {
+        const { repository } = await open();
+        const { position } = await repository.changes();
+        await putSuccessfully(repository, {
+          nodeId: 'contract-change-gone',
+          record: note('contract-change-gone', 'Contract change gone', 'x'),
+        });
+        await repository.delete('contract-change-gone');
+
+        expect(await changedSince(repository, position)).not.toContain(
+          'contract-change-gone',
+        );
+      });
+
+      it('cannot compare a position from another sequence', async () => {
+        const { repository } = await open();
+        await putSuccessfully(repository, {
+          nodeId: 'contract-change-a',
+          record: note('contract-change-a', 'Contract change A', 'a'),
+        });
+
+        const { nodeIds } = await repository.changes({
+          epoch: 'contract-some-other-sequence',
+          seq: 0,
+        });
+        expect(nodeIds).toBeNull();
+      });
+
+      it('reports no node of a Space that does not exist', async () => {
+        const { missingRepository } = await open();
+
+        const first = await missingRepository.changes();
+        expect(first.nodeIds).toBeNull();
+        const again = await missingRepository.changes(first.position);
+        expect(again.nodeIds ?? []).toEqual([]);
+      });
+
+      it('names a node put by a Space write', async () => {
+        const { repository, space } = await open();
+        if (!space) return;
+        const { position } = await repository.changes();
+        const record = await space.read();
+        if (!record) throw new Error('Contract Space is missing');
+
+        const written = await space.write({
+          expectedVersion: record.version,
+          nextRecord: { ...record, version: record.version + 1 },
+          nodeMutations: [
+            {
+              kind: 'put',
+              nodeId: 'contract-change-batch',
+              record: note(
+                'contract-change-batch',
+                'Contract change batch',
+                'written with the Space',
+              ),
+            },
+          ],
+        });
+        expect(written.ok).toBe(true);
+
+        expect(await changedSince(repository, position)).toContain(
+          'contract-change-batch',
+        );
+      });
+
+      it('answers from a position read before the store was reopened', async () => {
+        const { repository, reopen } = await open();
+        if (!reopen) return;
+        await putSuccessfully(repository, {
+          nodeId: 'contract-change-a',
+          record: note('contract-change-a', 'Contract change A', 'a'),
+        });
+        const { position } = await repository.changes();
+        await putSuccessfully(repository, {
+          nodeId: 'contract-change-b',
+          record: note('contract-change-b', 'Contract change B', 'b'),
+        });
+
+        const reopened = await reopen();
+        expect(await changedSince(reopened, position)).toContain(
+          'contract-change-b',
+        );
+        // And a write made after the restart is in the same sequence.
+        const afterRestart = (await reopened.changes()).position;
+        expect(afterRestart.epoch).toBe(position.epoch);
+        await putSuccessfully(reopened, {
+          nodeId: 'contract-change-c',
+          record: note('contract-change-c', 'Contract change C', 'c'),
+        });
+        expect(await changedSince(reopened, position)).toEqual(
+          expect.arrayContaining(['contract-change-b', 'contract-change-c']),
+        );
+        expect(await changedSince(reopened, afterRestart)).toContain(
+          'contract-change-c',
+        );
+      });
     });
   });
 }

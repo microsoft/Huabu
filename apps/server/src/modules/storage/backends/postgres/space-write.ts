@@ -133,6 +133,19 @@ export async function writePostgresSpaceInTransaction(
     return { ok: true } as const;
   }
 
+  if (input.nodeMutations.length > 0) {
+    // Every node put takes the Space row's lock first (it advances the
+    // Space's node-write counter). Take it here too, before a delete locks
+    // a node row, so this write and a standalone put never wait on each
+    // other in opposite orders.
+    await database.get(
+      `SELECT 1 AS locked FROM spaces
+         WHERE workspace_id = ? AND canvas_id = ?
+         FOR UPDATE`,
+      workspaceId,
+      canvasId,
+    );
+  }
   for (const mutation of input.nodeMutations) {
     if (mutation.kind === 'delete') {
       await database.run(
