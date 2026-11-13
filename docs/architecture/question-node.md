@@ -44,7 +44,7 @@ For an Ink-initiated turn, the Agent must deliver an actual Canvas response with
 
 | Field                     | Persisted | Notes                                                                                                                                         |
 | ------------------------- | --------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `content`                 | sidecar   | The question text; stored in `nodes/<safeLabel>.md` body like text/note (`TEXT_BEARING_NODE_TYPES`), stripped from the structure PUT          |
+| `content`                 | sidecar   | The question text; stored in `nodes/<safeLabel>.md` body like text/note (`TEXT_BEARING_NODE_TYPES`), stripped from structural state           |
 | `status`                  | ✅        | Optional sparse status: absent means `idle`; non-default values are `running` / `done` / `error`                                              |
 | `threadId`                | ✅        | Owns one chat thread; minted on first compose                                                                                                 |
 | `conversationTitleSource` | ✅        | Server-owned naming provenance (`user` / `generated` / `acp` / `fallback` / null); the title value remains the canonical `label`              |

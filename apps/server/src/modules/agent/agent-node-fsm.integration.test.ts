@@ -366,7 +366,7 @@ forEachProductProfile((profile, label) => {
       }
     });
 
-    it.each(['command', 'put', 'delta'] as const)(
+    it.each(['command', 'delta'] as const)(
       'preserves the same-config binding and version policy during %s Save',
       async (operation) => {
         await createCanonicalExecution();
@@ -374,11 +374,10 @@ forEachProductProfile((profile, label) => {
         if (!before) throw new Error('Space disappeared');
         const node = await current();
         expect(node.data.bindingState).toBe('editing');
-        const expectedBindingState = operation === 'put' ? 'editing' : 'bound';
-        const expectedVersion = before.version + (operation === 'put' ? 1 : 2);
-        const expectedLabel = operation === 'put' ? 'Agent' : 'Saved';
-        const expectedPosition =
-          operation === 'put' ? { x: 40, y: 60 } : node.position;
+        const expectedBindingState = 'bound';
+        const expectedVersion = before.version + 2;
+        const expectedLabel = 'Saved';
+        const expectedPosition = node.position;
         if (operation === 'command') {
           const result = await executeOnServer({
             canvasId: target.canvasId,
@@ -400,36 +399,6 @@ forEachProductProfile((profile, label) => {
           });
           expect(result.fromVersion).toBe(before.version + 1);
           expect(result.toVersion).toBe(before.version + 2);
-        } else if (operation === 'put') {
-          const app = fastify();
-          try {
-            await app.register(multipart);
-            await app.register(canvasRoutes, { prefix: '/canvas' });
-            const response = await app.inject({
-              method: 'PUT',
-              url: `/canvas/${target.canvasId}`,
-              payload: {
-                version: before.version,
-                state: {
-                  ...before.state,
-                  nodes: [
-                    {
-                      ...node,
-                      position: expectedPosition,
-                      data: {
-                        agentBinding: { kind: 'internal' },
-                        label: 'Saved',
-                      },
-                    },
-                  ],
-                },
-              },
-            });
-            expect(response.statusCode, response.body).toBe(200);
-            expect(response.json().version).toBe(expectedVersion);
-          } finally {
-            await app.close();
-          }
         } else {
           const result = await withCanvasMutex(target.canvasId, () =>
             applyDeltasOnServerAlreadyLocked({
@@ -498,7 +467,7 @@ forEachProductProfile((profile, label) => {
       expect((await current()).data.bindingState).toBe('bound');
     });
 
-    it('allows a layout PUT with unchanged preparation while a prompt is admitted', async () => {
+    it('allows a layout edit while a prompt is admitted', async () => {
       const release = acquireAgentTurn(
         target.threadId,
         canvasAcpNamespace(target.canvasId),
@@ -508,24 +477,17 @@ forEachProductProfile((profile, label) => {
       try {
         await app.register(multipart);
         await app.register(canvasRoutes, { prefix: '/canvas' });
-        const canvas = await space(target.canvasId).read();
-        if (!canvas) throw new Error('Space disappeared');
         const response = await app.inject({
-          method: 'PUT',
-          url: `/canvas/${target.canvasId}`,
+          method: 'POST',
+          url: `/canvas/${target.canvasId}/execute`,
           payload: {
-            version: canvas.version,
-            state: {
-              nodes: [
-                {
-                  id: target.nodeId,
-                  type: 'question',
-                  position: { x: 42, y: 0 },
-                  data: { agentBinding: { kind: 'internal' } },
-                },
-              ],
-              edges: [],
-            },
+            originator: { source: 'ui' },
+            commands: [
+              {
+                type: 'SET_NODE_GEOMETRY',
+                items: [{ nodeId: target.nodeId, position: { x: 42, y: 0 } }],
+              },
+            ],
           },
         });
         expect(response.statusCode, response.body).toBe(200);

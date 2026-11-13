@@ -368,216 +368,32 @@ describe('POST /api/canvas lifecycle', () => {
   });
 });
 
-describe('PUT /api/canvas/:canvasId lifecycle', () => {
-  it('notifies observers after topology saves without publishing editable deltas', async () => {
-    createCanvas('c1', 'Original');
-    const app = await buildApp();
-    const received = vi.fn();
-    const unsubscribe = subscribeCanvasUpdates('c1', received);
-    try {
-      const response = await app.inject({
-        method: 'PUT',
-        url: '/canvas/c1',
-        payload: { version: 0, state: { nodes: [], edges: [] } },
-      });
-      expect(response.statusCode).toBe(200);
-      expect(received).toHaveBeenCalledExactlyOnceWith({
-        type: 'invalidate',
-        data: {},
-      });
-      received.mockClear();
-      const conflict = await app.inject({
-        method: 'PUT',
-        url: '/canvas/c1',
-        payload: { version: 0, state: { nodes: [], edges: [] } },
-      });
-      expect(conflict.statusCode).toBe(409);
-      expect(received).not.toHaveBeenCalled();
-    } finally {
-      unsubscribe();
-      await app.close();
-    }
-  });
-  it.each(['sketch', undefined])(
-    'rejects malformed persisted Sigil metadata before saving or renaming with type %s',
-    async (type) => {
-      createCanvas('c1', 'Original');
-      const app = await buildApp();
-      try {
-        const seed = await app.inject({
-          method: 'PUT',
-          url: '/canvas/c1',
-          payload: {
-            version: 0,
-            state: {
-              nodes: [
-                {
-                  id: 'ink',
-                  type: 'sketch',
-                  position: { x: 0, y: 0 },
-                  data: { strokes: [] },
-                },
-              ],
-              edges: [],
-            },
-          },
-        });
-        expect(seed.statusCode).toBe(200);
-        const before = await space('c1').read();
-        const response = await app.inject({
-          method: 'PUT',
-          url: '/canvas/c1',
-          payload: {
-            version: seed.json().version,
-            title: 'Must not rename',
-            state: {
-              nodes: [
-                {
-                  id: 'ink',
-                  type,
-                  position: { x: 0, y: 0 },
-                  data: {
-                    strokes: [
-                      {
-                        id: 's0',
-                        points: [
-                          [0, 0],
-                          [10, 10],
-                        ],
-                        color: 'black',
-                        size: 2,
-                        resourceBinding: { strokeIds: 42 },
-                      },
-                    ],
-                  },
-                },
-              ],
-              edges: [],
-            },
-          },
-        });
-        expect(response.statusCode).toBe(400);
-        expect(response.json()).toMatchObject({
-          message: 'Invalid request body',
-        });
-        expect(await space('c1').read()).toEqual(before);
-      } finally {
-        await app.close();
-      }
-    },
-  );
+describe('PATCH /api/canvas/:canvasId/title storage outcomes', () => {
+  const rename = (
+    app: Awaited<ReturnType<typeof buildApp>>,
+    canvasId: string,
+    title: string,
+    expectedTitle: string,
+  ) =>
+    app.inject({
+      method: 'PATCH',
+      url: `/canvas/${canvasId}/title`,
+      payload: { title, expectedTitle },
+    });
 
-  it('preserves the legacy structural response, version bump, and no-delta behavior', async () => {
-    createCanvas('c1', 'Original');
-    const app = await buildApp();
-    try {
-      const response = await app.inject({
-        method: 'PUT',
-        url: '/canvas/c1',
-        payload: {
-          version: 0,
-          state: {
-            nodes: [
-              {
-                id: 'n1',
-                type: 'note',
-                position: { x: 0, y: 0 },
-                data: { label: 'Note', content: 'must stay out of space.json' },
-              },
-            ],
-            edges: [],
-          },
-        },
-      });
-
-      expect(response.statusCode).toBe(200);
-      expect(response.json()).toEqual({ canvasId: 'c1', version: 1 });
-      expect(getCanvasStore('c1').read()).toMatchObject({
-        version: 1,
-        state: {
-          nodes: [
-            expect.objectContaining({
-              id: 'n1',
-              data: { label: 'Note' },
-            }),
-          ],
-          edges: [],
-        },
-      });
-      expect(getCanvasStore('c1').readDeltaLogSince(0)).toEqual([]);
-    } finally {
-      await app.close();
-    }
-  });
-
-  it('keeps the legacy implicit-create path for an initially absent Space', async () => {
-    const app = await buildApp();
-    try {
-      const response = await app.inject({
-        method: 'PUT',
-        url: '/canvas/implicit',
-        payload: { version: 0, state: { nodes: [], edges: [] } },
-      });
-
-      expect(response.statusCode).toBe(200);
-      expect(response.json()).toEqual({ canvasId: 'implicit', version: 1 });
-      expect(getCanvasStore('implicit').read()).toMatchObject({
-        canvasId: 'implicit',
-        version: 1,
-        state: { nodes: [], edges: [] },
-      });
-    } finally {
-      await app.close();
-    }
-  });
-
-  it('keeps title collision as a 409 without applying the record write', async () => {
+  it('answers a title collision with a 409 without applying the record write', async () => {
     createCanvas('c1', 'Original');
     createCanvas('c2', 'Taken/A');
     const app = await buildApp();
     try {
-      const response = await app.inject({
-        method: 'PUT',
-        url: '/canvas/c1',
-        payload: {
-          version: 0,
-          title: 'Taken:A',
-          state: { nodes: [], edges: [] },
-        },
-      });
+      // The two titles differ, but are filed under the same name.
+      const response = await rename(app, 'c1', 'Taken:A', 'Original');
 
       expect(response.statusCode).toBe(409);
-      expect(response.json()).toMatchObject({
-        code: 'CANVAS_TITLE_CONFLICT',
-        conflictWith: 'Taken/A',
-      });
+      expect(response.json()).toMatchObject({ code: 'CANVAS_TITLE_CONFLICT' });
       expect(getCanvasStore('c1').read()).toMatchObject({
         title: 'Original',
         version: 0,
-      });
-    } finally {
-      await app.close();
-    }
-  });
-
-  it('renames only when the request explicitly supplies a new title', async () => {
-    createCanvas('c1', 'Original');
-    const app = await buildApp();
-    try {
-      const response = await app.inject({
-        method: 'PUT',
-        url: '/canvas/c1',
-        payload: {
-          version: 0,
-          title: 'Explicit rename',
-          state: { nodes: [], edges: [] },
-        },
-      });
-
-      expect(response.statusCode).toBe(200);
-      expect(getCanvasStore('c1').read()).toMatchObject({
-        title: 'Explicit rename',
-        version: 1,
       });
     } finally {
       await app.close();
@@ -588,15 +404,7 @@ describe('PUT /api/canvas/:canvasId lifecycle', () => {
     createCanvas('c1', 'A/B');
     const app = await buildApp();
     try {
-      const response = await app.inject({
-        method: 'PUT',
-        url: '/canvas/c1',
-        payload: {
-          version: 0,
-          title: 'A:B',
-          state: { nodes: [], edges: [] },
-        },
-      });
+      const response = await rename(app, 'c1', 'A:B', 'A/B');
 
       expect(response.statusCode).toBe(200);
       expect(getCanvasStore('c1').read()).toMatchObject({
@@ -608,29 +416,7 @@ describe('PUT /api/canvas/:canvasId lifecycle', () => {
     }
   });
 
-  it('preserves an externally reconciled title when the request omits title', async () => {
-    createCanvas('c1', 'Original');
-    const store = getCanvasStore('c1');
-    expect(store.renameSelf('Finder rename')).toMatchObject({ ok: true });
-    const app = await buildApp();
-    try {
-      const response = await app.inject({
-        method: 'PUT',
-        url: '/canvas/c1',
-        payload: { version: 0, state: { nodes: [], edges: [] } },
-      });
-
-      expect(response.statusCode).toBe(200);
-      expect(getCanvasStore('c1').read()).toMatchObject({
-        title: 'Finder rename',
-        version: 1,
-      });
-    } finally {
-      await app.close();
-    }
-  });
-
-  it('keeps filesystem rename failures behind the legacy generic 500', async () => {
+  it('keeps filesystem rename failures behind a generic 500', async () => {
     createCanvas('c1', 'Original');
     vi.mocked(withSpaceDirHandlesReleased).mockImplementationOnce(
       (async () => ({
@@ -641,25 +427,21 @@ describe('PUT /api/canvas/:canvasId lifecycle', () => {
     );
     const app = await buildApp();
     try {
-      const response = await app.inject({
-        method: 'PUT',
-        url: '/canvas/c1',
-        payload: {
-          version: 0,
-          title: 'Cannot rename',
-          state: { nodes: [], edges: [] },
-        },
-      });
+      const response = await rename(app, 'c1', 'Cannot rename', 'Original');
 
       expect(response.statusCode).toBe(500);
-      expect(response.json()).toEqual({ message: 'Failed to rename canvas' });
+      expect(response.json()).toMatchObject({ code: 'SPACE_RENAME_FAILED' });
       expect(response.body).not.toContain('sensitive filesystem detail');
+      expect(getCanvasStore('c1').read()).toMatchObject({
+        title: 'Original',
+        version: 0,
+      });
     } finally {
       await app.close();
     }
   });
 
-  it('does not recreate a Space deleted after the initial read', async () => {
+  it('does not recreate a Space deleted while its rename is in flight', async () => {
     createCanvas('c1', 'Original');
     const paused = deferred();
     const release = deferred();
@@ -674,24 +456,176 @@ describe('PUT /api/canvas/:canvasId lifecycle', () => {
 
     const app = await buildApp();
     try {
-      const updating = app.inject({
-        method: 'PUT',
-        url: '/canvas/c1',
-        payload: {
-          version: 0,
-          title: 'Renamed before delete',
-          state: { nodes: [], edges: [] },
-        },
-      });
+      const updating = rename(app, 'c1', 'Renamed before delete', 'Original');
       await paused.promise;
       await expect(deleteCanvas('c1')).resolves.toBe(true);
       release.resolve();
 
       const response = await updating;
-      expect(response.statusCode).toBe(404);
+      expect(response.statusCode).toBe(500);
       expect(getCanvasStore('c1').read()).toBeNull();
     } finally {
       release.resolve();
+      await app.close();
+    }
+  });
+});
+
+describe('whole-Space save', () => {
+  it('is not a route: a PUT of a Space is a 404 and writes nothing', async () => {
+    createCanvas('c1', 'Original');
+    const app = await buildApp();
+    try {
+      const before = getCanvasStore('c1').read();
+      const response = await app.inject({
+        method: 'PUT',
+        url: '/canvas/c1',
+        payload: { version: 0, state: { nodes: [], edges: [] } },
+      });
+
+      expect(response.statusCode).toBe(404);
+      expect(getCanvasStore('c1').read()).toEqual(before);
+    } finally {
+      await app.close();
+    }
+  });
+});
+
+describe('POST /api/canvas/:canvasId/execute storage outcomes', () => {
+  const execute = (
+    app: Awaited<ReturnType<typeof buildApp>>,
+    canvasId: string,
+    commands: unknown[],
+  ) =>
+    app.inject({
+      method: 'POST',
+      url: `/canvas/${canvasId}/execute`,
+      payload: { commands, originator: { source: 'ui' } },
+    });
+
+  it('keeps node content out of the Space record', async () => {
+    createCanvas('c1', 'Original');
+    const app = await buildApp();
+    try {
+      const response = await execute(app, 'c1', [
+        {
+          type: 'CREATE_NODES',
+          nodes: [
+            {
+              id: 'n1',
+              nodeType: 'note',
+              position: { x: 0, y: 0 },
+              data: { label: 'Note', content: 'must stay out of space.json' },
+            },
+          ],
+        },
+      ]);
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({ fromVersion: 0, toVersion: 1 });
+      const record = getCanvasStore('c1').read();
+      expect(record?.version).toBe(1);
+      const [node] = (record?.state.nodes ?? []) as CanvasNode[];
+      expect(node).toMatchObject({ id: 'n1', type: 'note' });
+      expect(node?.data).not.toHaveProperty('content');
+      expect(node?.data).not.toHaveProperty('label');
+      expect(getCanvasStore('c1').readNode('n1')).toMatchObject({
+        label: 'Note',
+        content: 'must stay out of space.json',
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('does not create a Space that is absent', async () => {
+    const app = await buildApp();
+    try {
+      const response = await execute(app, 'implicit', [
+        {
+          type: 'CREATE_NODES',
+          nodes: [{ nodeType: 'note', position: { x: 0, y: 0 } }],
+        },
+      ]);
+
+      expect(response.statusCode).toBe(404);
+      expect(getCanvasStore('implicit').read()).toBeNull();
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('keeps an externally reconciled title across a structure edit', async () => {
+    createCanvas('c1', 'Original');
+    const store = getCanvasStore('c1');
+    expect(store.renameSelf('Finder rename')).toMatchObject({ ok: true });
+    const app = await buildApp();
+    try {
+      const response = await execute(app, 'c1', [
+        {
+          type: 'CREATE_NODES',
+          nodes: [{ nodeType: 'note', position: { x: 0, y: 0 } }],
+        },
+      ]);
+
+      expect(response.statusCode).toBe(200);
+      expect(getCanvasStore('c1').read()).toMatchObject({
+        title: 'Finder rename',
+        version: 1,
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('refuses malformed persisted Sigil metadata without saving', async () => {
+    createCanvas('c1', 'Original');
+    const app = await buildApp();
+    try {
+      const seed = await execute(app, 'c1', [
+        {
+          type: 'CREATE_NODES',
+          nodes: [
+            {
+              id: 'ink',
+              nodeType: 'sketch',
+              position: { x: 0, y: 0 },
+              data: { strokes: [] },
+            },
+          ],
+        },
+      ]);
+      expect(seed.statusCode).toBe(200);
+      expect(seed.json().results[0].applied).toBe(true);
+      const before = await space('c1').read();
+      const response = await execute(app, 'c1', [
+        {
+          type: 'MERGE_NODE_DATA',
+          patches: [
+            {
+              nodeId: 'ink',
+              patch: {
+                strokes: [
+                  {
+                    id: 's0',
+                    points: [
+                      [0, 0],
+                      [10, 10],
+                    ],
+                    color: 'black',
+                    size: 2,
+                    resourceBinding: { strokeIds: 42 },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      ]);
+      expect(response.statusCode).toBe(200);
+      expect(response.json().results[0].applied).toBe(false);
+      expect(await space('c1').read()).toEqual(before);
+    } finally {
       await app.close();
     }
   });

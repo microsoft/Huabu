@@ -21,9 +21,6 @@ import {
   moveSelectionBodySchema,
   moveSelectionParamsSchema,
   preprocessNodeBodySchema,
-  putCanvasBodySchema,
-  canvasEditableNodeDataSchema,
-  sketchResourceBindingDataSchema,
   acknowledgeAgentNodeResultBodySchema,
   associateAgentNodeBodySchema,
   associateAgentNodeParamsSchema,
@@ -31,24 +28,14 @@ import {
   stripLegacyPortalTopology,
   recentCanvasConversationParamsSchema,
   deleteNodeParamsSchema,
-  fileReferenceSchema,
 } from '@huabu/shared';
 import { nodeRevisionOf } from '@huabu/shared/canvas-engine';
-import {
-  preserveAgentNodeOwnedData,
-  projectAgentNodeEditableData,
-  changesAgentNodePreparation,
-} from '@huabu/shared/canvas-engine';
 
 import {
   associateAgentNode,
   AgentNodeAssociationError,
 } from './agent-node-association.js';
-import {
-  AgentNodeEditError,
-  guardAgentNodeDraftEditsAlreadyLocked,
-  withDefaultAgentBinding,
-} from './agent-node-edit.js';
+import { AgentNodeEditError } from './agent-node-edit.js';
 import { acknowledgeAgentNodeResult } from './agent-node-projection.js';
 import {
   CanvasNotFoundError,
@@ -77,8 +64,6 @@ import {
 import {
   assertCurrentCanvasCommands,
   assertChildSpaceEntriesAllowed,
-  assertWorldPreviewTopologyAllowed,
-  readLiveSpaceIds,
   WorldPreviewMutationError,
 } from './world-preview-policy.js';
 import { reconcileWorldPreviews } from './world-previews.js';
@@ -114,7 +99,6 @@ import {
   storageServes,
   unavailableCapabilityMessage,
   getStructuredStore,
-  type CanvasFile,
   type NodeContent,
   type Space,
   type UpdateNodeOutcome,
@@ -152,8 +136,6 @@ import type {
   PreprocessNodeBody,
   PreprocessNodeRequest,
   PreprocessNodeResponse,
-  PutCanvasRequest,
-  PutCanvasResponse,
   PutNodeContentRequest,
   PutNodeContentResponse,
   RevealNodesFolderResponse,
@@ -186,10 +168,6 @@ const HISTORY_EXPORT_IGNORE = [
  * the original's request ids. Never exported, whatever else is.
  */
 const SAVE_STATE_EXPORT_IGNORE = '.history/save/**';
-
-function nowMs(): number {
-  return Date.now();
-}
 
 function toMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -238,7 +216,7 @@ function openInFileManager(targetPath: string): void {
  *
  * `question` is included so its auto-generated label / labelSource
  * (written by the preprocess pipeline via `patchNodeSilent` on the
- * client) survives canvas reloads — the structure PUT strips those
+ * client) survives canvas reloads — structure writes strip those
  * fields, so the sidecar is the only persistence path.
  *
  * `sketch` is included for the same reason: the canvas engine
@@ -283,7 +261,7 @@ const MD_BACKED_NODE_TYPES = new Set([
  * `question` IS inlined: the prompt is short, the QuestionNode reads
  * `data.content` to render the textarea, and skipping the inline copy
  * would leave every question node blank on first paint (its
- * `data.content` is stripped by `stripNodesForCanvas` on the PUT, so
+ * `data.content` is stripped from structural state by the executor, so
  * the sidecar body is the only surviving copy).
  */
 const WIRE_INLINE_CONTENT_TYPES = new Set([
@@ -293,53 +271,6 @@ const WIRE_INLINE_CONTENT_TYPES = new Set([
   'office',
   'question',
 ]);
-
-/**
- * Per-node `data` keys whose values live exclusively in the markdown
- * sidecar (`nodes/<safe(label)>.md`). The structure PUT strips these
- * before persisting structural state so the two stores cannot drift;
- * `hydrateNodeContent` re-attaches them from the `.md` on read.
- *
- * Must stay in sync with `NODE_CONTENT_KEYS` on the web (see
- * `apps/web/src/store/canvasStore.ts`).
- */
-const NODE_CONTENT_KEYS = new Set([
-  'content',
-  'label',
-  'labelSource',
-  'src',
-  'summary',
-  'keywords',
-  'provenance',
-]);
-
-/**
- * Strip every per-node content / label / source / summary / keyword
- * field from each node's `data` before persisting structural state. The
- * structure PUT no longer carries those fields — they are persisted via
- * the dedicated `PUT /:canvasId/nodes/:nodeId/content` endpoint and
- * re-attached on read by {@link hydrateNodeContent}.
- *
- * Pure: takes a node list, returns a new list with the same `id` /
- * `type` / geometry / parenthood and a copy of `data` containing only
- * non-content keys. The original node objects are not mutated.
- *
- * Legacy clients that still send content in the structure body have it
- * silently dropped here; their per-node content PUTs (issued in
- * parallel) are the actual write path now.
- */
-function stripNodesForCanvas(nodes: NodeLike[]): NodeLike[] {
-  return nodes.map((node) => {
-    const data = node.data;
-    if (!data) return { ...node };
-    const cleanData: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(data)) {
-      if (NODE_CONTENT_KEYS.has(k)) continue;
-      cleanData[k] = v;
-    }
-    return { ...node, data: cleanData };
-  });
-}
 
 /**
  * Node types that reference an artifact file via `data.src`. When the
@@ -433,9 +364,9 @@ function hydrateOneNode(
   const data: Record<string, unknown> = { ...(node.data ?? {}) };
 
   // ----- Read markdown side-file first -----
-  // The structure PUT strips every per-node content key (src,
-  // provenance, label, summary, keywords, …) before persisting structural
-  // state via {@link stripNodesForCanvas}. The markdown sidecar
+  // The executor strips every per-node content key (src, provenance,
+  // label, summary, keywords, …) before persisting structural state
+  // (`stripNodesForCanvas` in `canvas-executor.ts`). The markdown sidecar
   // is the only source of truth for those fields, so we read it before
   // any check that depends on them (notably the artifact-missing probe,
   // which needs the hydrated `src`).
@@ -487,9 +418,9 @@ function hydrateOneNode(
   }
 
   // Rehydrate the source URL for artifact-backed (image/pdf/video) and
-  // remote (web) nodes. Without this step the structure PUT permanently
-  // wipes `data.src` from the canvas state on the next reload because
-  // `stripNodesForCanvas` removed it before persistence.
+  // remote (web) nodes. Structural state never carries `data.src` — the
+  // executor removes it before persistence — so without this step a
+  // reloaded node would have none.
   if (typeof nodeContent.src === 'string' && nodeContent.src.length > 0) {
     data['src'] = nodeContent.src;
   }
@@ -508,9 +439,9 @@ function hydrateOneNode(
     }
   }
 
-  // Rehydrate AI-edit block provenance. Same rationale as `src`: the
-  // structure PUT strips it, so reloading any note that had AI edits
-  // would lose its provenance markers without this step.
+  // Rehydrate AI-edit block provenance. Same rationale as `src`:
+  // structural state does not carry it, so reloading any note that had AI
+  // edits would lose its provenance markers without this step.
   const persistedProvenance = nodeContent['provenance'];
   if (persistedProvenance !== undefined) {
     data['provenance'] = persistedProvenance;
@@ -767,11 +698,9 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Delete a node — removes its markdown sidecar.
   //
-  // This endpoint deliberately does not mutate structural state.
-  // The client owns the canvas state (nodes / edges) and will persist
-  // the updated state via the autosave PUT on `/:canvasId`. Doing so here
-  // would race with that PUT and surface as a
-  // spurious 409 (CANVAS_VERSION_MISMATCH) on the very next autosave.
+  // This endpoint deliberately does not mutate structural state: the
+  // node leaves the structure through a `DELETE_NODES` command on
+  // `POST /:canvasId/execute`.
   //
   // What only the server can do — and therefore what this route
   // exists for — is unlink the per-node markdown sidecar in
@@ -849,12 +778,11 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
   // --- Per-node content endpoints --------------------------------------
   //
   // These let the web client persist a single node's markdown sidecar
-  // (`nodes/<safe(label)>.md`) without going through the full canvas
-  // PUT, so editor edits no longer collide with the canvas-level
-  // optimistic-concurrency `version` counter. The structure PUT in
-  // `PUT /:canvasId` strips every per-node content field via
-  // {@link stripNodesForCanvas} — these endpoints are the only write
-  // path for `.md` sidecars. See `docs/node-content-api-split.md`.
+  // (`nodes/<safe(label)>.md`) without a structure write, so editor edits
+  // do not advance the Space's structural `version` counter. Structure
+  // writes strip every per-node content field (`stripNodesForCanvas` in
+  // `canvas-executor.ts`) — these endpoints are the browser's write path
+  // for `.md` sidecars. See `docs/node-content-api-split.md`.
 
   fastify.put<{
     Params: { canvasId: string; nodeId: string };
@@ -1402,296 +1330,6 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       });
     },
   );
-
-  fastify.put<{
-    Params: { canvasId: string };
-    Body: PutCanvasRequest;
-    Reply: ApiResult<PutCanvasResponse> | CanvasConflictResponse;
-  }>('/:canvasId', async function (request, reply) {
-    const { canvasId } = request.params;
-    const parsed = putCanvasBodySchema.safeParse(request.body);
-    if (!parsed.success) {
-      return reply.code(400).send({ message: 'Invalid request body' });
-    }
-
-    const { version: clientVersion, state, title } = parsed.data;
-    const incomingState = state as {
-      nodes?: NodeLike[];
-      edges?: unknown[];
-      [key: string]: unknown;
-    };
-
-    return withCanvasMutex(canvasId, async () => {
-      const structured = getStructuredStore();
-      const spaces = structured.spaces();
-      const handle = space(canvasId);
-      let existing = await handle.read();
-      let serverVersion = existing?.version ?? 0;
-      if (clientVersion !== serverVersion) {
-        return reply.code(409).send({
-          code: 'CANVAS_VERSION_CONFLICT',
-          message: 'Canvas version mismatch',
-          serverVersion,
-        } satisfies CanvasConflictResponse);
-      }
-
-      const currentById = new Map(
-        ((existing?.state.nodes ?? []) as NodeLike[]).map((node) => [
-          node.id,
-          node,
-        ]),
-      );
-      for (const node of incomingState.nodes ?? []) {
-        if (
-          node.type === undefined &&
-          currentById.get(node.id)?.type === 'sketch' &&
-          !sketchResourceBindingDataSchema.safeParse(node.data ?? {}).success
-        ) {
-          return reply.code(400).send({ message: 'Invalid request body' });
-        }
-      }
-
-      const identityNodes = (incomingState.nodes ?? []).map((node) => {
-        const current = currentById.get(node.id);
-        return {
-          ...current,
-          ...node,
-          data: { ...current?.data, ...node.data },
-        };
-      });
-      if (
-        identityNodes.some(
-          (node) =>
-            node.type === 'fileReference' &&
-            (!fileReferenceSchema.safeParse(node.data?.fileReference).success ||
-              ['content', 'src'].some((key) => key in (node.data ?? {}))),
-        )
-      ) {
-        return reply.code(400).send({
-          message: 'Invalid file reference',
-          code: 'invalid_file_reference',
-        });
-      }
-      try {
-        await assertChildSpaceEntriesAllowed(
-          canvasId,
-          existing?.state.nodes ?? [],
-          identityNodes,
-        );
-        assertWorldPreviewTopologyAllowed(
-          canvasId,
-          (existing?.state.nodes ?? []) as NodeLike[],
-          identityNodes,
-          isWorldCanvasId(canvasId)
-            ? await readLiveSpaceIds()
-            : new Set<string>(),
-        );
-      } catch (error) {
-        if (error instanceof WorldPreviewMutationError) {
-          return reply.code(409).send({ message: error.message });
-        }
-        throw error;
-      }
-
-      const previousTitle = existing?.title ?? null;
-      // The record write below refuses to change the title — addressing is the
-      // rename operation's business. So the title it carries must be the one
-      // rename actually installed, not the one the client asked for: the two
-      // differ whenever the backend reconciles a title against its locator, and
-      // sending the requested title would make the write throw instead of
-      // returning a business result the route can answer with.
-      let nextTitle = title ?? previousTitle;
-      const titleChange =
-        typeof title === 'string' && title !== previousTitle
-          ? { title }
-          : undefined;
-
-      if (existing !== null && titleChange !== undefined) {
-        if (!(await canManageSpace(request, canvasId)))
-          return reply.code(403).send({
-            message: 'Managing this Space is required to rename it',
-            code: 'SPACE_ACCESS_REQUIRED',
-          });
-        let renamed;
-        try {
-          renamed = await spaces.rename({ canvasId, ...titleChange });
-        } catch (error) {
-          request.log.error(
-            { canvasId, err: toMessage(error) },
-            'Failed to rename canvas directory',
-          );
-          return reply.code(500).send({ message: 'Failed to rename canvas' });
-        }
-        if (!renamed.ok) {
-          switch (renamed.reason) {
-            case 'not-found':
-              return reply.code(404).send({ message: 'Canvas not found' });
-            case 'title-conflict':
-              return reply.code(409).send({
-                code: 'CANVAS_TITLE_CONFLICT',
-                message: `Another canvas already uses the title "${renamed.conflictingTitle ?? ''}"`,
-                conflictWith: renamed.conflictingTitle ?? '',
-              } satisfies CanvasConflictResponse);
-            case 'world-forbidden':
-              return reply
-                .code(403)
-                .send({ message: 'World canvas cannot be renamed' });
-          }
-        } else {
-          nextTitle = renamed.record.title;
-        }
-      }
-
-      const timestamp = nowMs();
-
-      const rawState = incomingState;
-
-      let releaseDrafts: () => void;
-      try {
-        for (const node of rawState.nodes ?? []) {
-          if (currentById.get(node.id)?.type !== 'question') continue;
-          const parsed = canvasEditableNodeDataSchema.safeParse(
-            node.data ?? {},
-          );
-          if (!parsed.success)
-            throw new AgentNodeEditError(
-              'Agent Node lifecycle and association are server-owned',
-            );
-        }
-        releaseDrafts = await guardAgentNodeDraftEditsAlreadyLocked(
-          canvasId,
-          (rawState.nodes ?? []).flatMap((node) => {
-            const current = currentById.get(node.id);
-            const patch = node.data ?? {};
-            return current &&
-              (changesAgentNodePreparation(current.data ?? {}, patch) ||
-                (Object.prototype.hasOwnProperty.call(patch, 'agentMode') &&
-                  patch.agentMode !== current.data?.agentMode))
-              ? [{ current, patch }]
-              : [];
-          }),
-        );
-      } catch (error) {
-        if (error instanceof AgentNodeEditError) {
-          return reply
-            .code(400)
-            .send({ code: 'INVALID_REQUEST', message: error.message });
-        }
-        if (error instanceof AgentNodeBindingError) {
-          return reply
-            .code(409)
-            .send({ code: error.code, message: error.message });
-        }
-        throw error;
-      }
-      try {
-        // Admission above may have completed a canonical record-to-Bound write.
-        const confirmedCanvas = await handle.read();
-        if (existing !== null && confirmedCanvas === null) {
-          return reply.code(404).send({ message: 'Canvas not found' });
-        }
-        existing = confirmedCanvas;
-        serverVersion = existing?.version ?? 0;
-        const nextVersion = serverVersion + 1;
-        currentById.clear();
-        for (const node of (existing?.state.nodes ?? []) as NodeLike[])
-          currentById.set(node.id, node);
-        const composedNodes: NodeLike[] = [];
-        for (const node of rawState.nodes ?? []) {
-          const current = currentById.get(node.id ?? '');
-          if (current?.type === 'question') {
-            if (node.type !== undefined && node.type !== 'question') {
-              return reply
-                .code(409)
-                .send({ message: 'Agent Node type cannot change' });
-            }
-            if (
-              current.data?.bindingState === 'bound' &&
-              changesAgentNodePreparation(current.data, node.data ?? {})
-            )
-              return reply.code(409).send({
-                message: 'Agent preparation cannot change after binding',
-              });
-            const composedData = preserveAgentNodeOwnedData(
-              { ...current.data, ...node.data },
-              current.data ?? {},
-            );
-            if (node.data?.agentLaunchOverrides === null)
-              delete composedData.agentLaunchOverrides;
-            composedNodes.push({
-              ...current,
-              ...node,
-              type: current.type,
-              data: composedData,
-            });
-          } else {
-            composedNodes.push({
-              ...current,
-              ...node,
-              data: {
-                ...(node.type === 'question'
-                  ? withDefaultAgentBinding(
-                      projectAgentNodeEditableData({
-                        ...current?.data,
-                        ...node.data,
-                      }),
-                    )
-                  : { ...current?.data, ...node.data }),
-                ...(node.type === 'question'
-                  ? { bindingState: 'editing', threadId: createId('thread') }
-                  : {}),
-              },
-            });
-          }
-        }
-        const slimNodes = stripNodesForCanvas(composedNodes);
-
-        const canvasFile: CanvasFile = {
-          canvasId,
-          title: nextTitle,
-          version: nextVersion,
-          state: {
-            ...rawState,
-            nodes: slimNodes,
-            edges: rawState?.edges ?? [],
-          },
-          createdAt: existing?.createdAt ?? timestamp,
-          updatedAt: timestamp,
-        };
-
-        const outcome = await handle.write({
-          expectedVersion: serverVersion,
-          nextRecord: canvasFile,
-          nodeMutations: [],
-          allowCreate: existing === null,
-        });
-        if (!outcome.ok) {
-          switch (outcome.reason) {
-            case 'not-found':
-              return reply.code(404).send({ message: 'Canvas not found' });
-            case 'version-conflict':
-              return reply.code(409).send({
-                code: 'CANVAS_VERSION_CONFLICT',
-                message: 'Canvas version mismatch',
-                serverVersion: outcome.actualVersion,
-              } satisfies CanvasConflictResponse);
-          }
-        }
-
-        publishCanvasUpdate(canvasId, { type: 'invalidate', data: {} });
-        return reply.send({ canvasId, version: nextVersion });
-      } catch (error) {
-        if (error instanceof AgentNodeEditError) {
-          return reply
-            .code(400)
-            .send({ code: 'INVALID_REQUEST', message: error.message });
-        }
-        throw error;
-      } finally {
-        releaseDrafts();
-      }
-    });
-  });
 
   // --- POST /:canvasId/execute (headless executor, M2) -----------------
   //

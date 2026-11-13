@@ -10,7 +10,7 @@ import {
   replayAgentNodeEditableData,
 } from './agentNodeOwnership.js';
 import { executeCanvasCommands } from './executor.js';
-import { putCanvasBodySchema } from '../types/api/canvas.js';
+import { canvasEditableNodeDataSchema } from '../types/api/agent-node.js';
 
 describe('Agent Node ownership', () => {
   const data = {
@@ -24,23 +24,10 @@ describe('Agent Node ownership', () => {
   };
 
   it('separates complete reads from editable structure DTOs', () => {
-    const node = {
-      id: 'node-agent',
-      type: 'question',
-      position: { x: 0, y: 0 },
-      data,
-    };
+    expect(canvasEditableNodeDataSchema.safeParse(data).success).toBe(false);
     expect(
-      putCanvasBodySchema.safeParse({ version: 1, state: { nodes: [node] } })
+      canvasEditableNodeDataSchema.safeParse(projectAgentNodeEditableData(data))
         .success,
-    ).toBe(false);
-    expect(
-      putCanvasBodySchema.safeParse({
-        version: 1,
-        state: {
-          nodes: [{ ...node, data: projectAgentNodeEditableData(data) }],
-        },
-      }).success,
     ).toBe(true);
     expect(
       preserveAgentNodeOwnedData({ content: 'Edited', status: 'idle' }, data),
@@ -73,12 +60,6 @@ describe('Agent Node ownership', () => {
       position: { x: 0, y: 0 },
       data: { content: 'Note', status: 'custom', threadId: 'reference' },
     };
-    expect(
-      putCanvasBodySchema.safeParse({
-        version: 1,
-        state: { nodes: [node] },
-      }).success,
-    ).toBe(true);
     const result = executeCanvasCommands(
       {
         source: 'ui',

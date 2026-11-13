@@ -564,8 +564,8 @@ test('real shortcuts keep fixed widths, undo, resize, and navigate without scene
   const title = `A longer research notebook covering many observations and future product directions (${targetId})`;
   await seedNode(page, targetId, 'text', { content: 'A saved target node' });
   const target = await readSpace(page, targetId);
-  const renamed = await page.request.put(`/api/canvas/${targetId}`, {
-    data: { version: target.version, state: target.state, title },
+  const renamed = await page.request.patch(`/api/canvas/${targetId}/title`, {
+    data: { title, expectedTitle: target.title },
   });
   expect(renamed.ok(), await renamed.text()).toBe(true);
   await page.evaluate(() => window.dispatchEvent(new Event('focus')));

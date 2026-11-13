@@ -409,7 +409,7 @@ describe('Space ownership', () => {
     },
   );
 
-  it.each(['commands', 'deltas', 'structure', 'sidecar'])(
+  it.each(['commands', 'deltas', 'sidecar'])(
     'allows malformed dangling shortcut cleanup through %s',
     async (path) => {
       await executeOnServer({
@@ -451,16 +451,6 @@ describe('Space ownership', () => {
             })),
             originator: { source: 'ui' },
           });
-        } else if (path === 'structure') {
-          const response = await app.inject({
-            method: 'PUT',
-            url: '/root',
-            payload: {
-              version: before.version,
-              state: { nodes: [], edges: [] },
-            },
-          });
-          expect(response.statusCode, response.body).toBe(200);
         } else {
           const response = await app.inject({
             method: 'DELETE',
@@ -498,25 +488,22 @@ describe('Space ownership', () => {
     },
   );
 
-  it('accepts geometry-only PUTs but rejects removed or retargeted canonical entries', async () => {
+  it('accepts geometry edits but rejects removing or retargeting a canonical entry', async () => {
     const child = await createChildSpace('root', 'Child');
     const app = Fastify();
     await app.register(canvasRoutes);
+    const execute = (command: unknown) =>
+      app.inject({
+        method: 'POST',
+        url: '/root/execute',
+        payload: { commands: [command], originator: { source: 'ui' } },
+      });
     try {
-      const before = await storage.space('root').read();
-      if (!before) throw new Error('Missing parent');
-      const moved = await app.inject({
-        method: 'PUT',
-        url: '/root',
-        payload: {
-          version: before.version,
-          state: {
-            nodes: [
-              { id: child.parentEntryNodeId, position: { x: 20, y: 30 } },
-            ],
-            edges: [],
-          },
-        },
+      const moved = await execute({
+        type: 'SET_NODE_GEOMETRY',
+        items: [
+          { nodeId: child.parentEntryNodeId, position: { x: 20, y: 30 } },
+        ],
       });
       expect(moved.statusCode, moved.body).toBe(200);
       const saved = await storage.space('root').read();
@@ -525,22 +512,21 @@ describe('Space ownership', () => {
         data: { targetCanvasId: child.canvasId },
         position: { x: 20, y: 30 },
       });
-      for (const nodes of [
-        [],
-        [
-          {
-            id: child.parentEntryNodeId,
-            position: { x: 20, y: 30 },
-            data: { targetCanvasId: 'elsewhere' },
-          },
-        ],
+      for (const command of [
+        { type: 'DELETE_NODES', nodeIds: [child.parentEntryNodeId] },
+        {
+          type: 'MERGE_NODE_DATA',
+          patches: [
+            {
+              nodeId: child.parentEntryNodeId,
+              patch: { targetCanvasId: 'elsewhere' },
+            },
+          ],
+        },
       ]) {
-        const rejected = await app.inject({
-          method: 'PUT',
-          url: '/root',
-          payload: { version: saved?.version, state: { nodes, edges: [] } },
-        });
+        const rejected = await execute(command);
         expect(rejected.statusCode, rejected.body).toBe(409);
+        expect(await storage.space('root').read()).toEqual(saved);
       }
     } finally {
       await app.close();
@@ -569,7 +555,7 @@ describe('Space ownership', () => {
     expect(listing).not.toHaveBeenCalled();
   });
 
-  it('does not list Workspace membership during ordinary commands, delta replay, or structural saves', async () => {
+  it('does not list Workspace membership during ordinary commands, delta replay, or geometry edits', async () => {
     const child = await createChildSpace('root', 'Child');
     const repository = storage.getStructuredStore().spaces();
     const listing = vi
@@ -597,21 +583,22 @@ describe('Space ownership', () => {
       originator: { source: 'ui' },
       deltas: [...created.deltas].reverse().map(invertDelta),
     });
-    const current = await storage.space('root').read();
     const app = Fastify();
     await app.register(canvasRoutes);
     try {
       const response = await app.inject({
-        method: 'PUT',
-        url: '/root',
+        method: 'POST',
+        url: '/root/execute',
         payload: {
-          version: current?.version,
-          state: {
-            nodes: [
-              { id: child.parentEntryNodeId, position: { x: 20, y: 30 } },
-            ],
-            edges: [],
-          },
+          originator: { source: 'ui' },
+          commands: [
+            {
+              type: 'SET_NODE_GEOMETRY',
+              items: [
+                { nodeId: child.parentEntryNodeId, position: { x: 20, y: 30 } },
+              ],
+            },
+          ],
         },
       });
       expect(response.statusCode, response.body).toBe(200);

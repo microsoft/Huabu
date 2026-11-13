@@ -778,7 +778,7 @@ describe('Canonical canvas write boundaries', () => {
   });
 
   it.each(['future-invalid', 'canvasRef'])(
-    'cannot persist %s through commands or full PUT',
+    'cannot persist %s through commands',
     async (nodeType) => {
       writeCanvas('Project A', 'canvas-a', [
         { ...preview('node-note'), type: 'note', data: {} },
@@ -814,21 +814,6 @@ describe('Canonical canvas write boundaries', () => {
             }
             expect(diskSnapshot()).toEqual(diskBefore);
           }
-          for (const node of [
-            { ...preview(), type: nodeType },
-            { ...preview(), type: 'note', data: { type: nodeType } },
-          ]) {
-            const put = await app.inject({
-              method: 'PUT',
-              url: `/canvas/${canvasId}`,
-              payload: {
-                version: before?.version,
-                state: { nodes: [node], edges: [] },
-              },
-            });
-            expect(put.statusCode).toBe(409);
-            expect(diskSnapshot()).toEqual(diskBefore);
-          }
           expect(await space(canvasId).read()).toEqual(before);
         }
         expect(
@@ -845,7 +830,7 @@ describe('Canonical canvas write boundaries', () => {
     },
   );
 
-  it('preserves unknown types on read but rejects writing them back; omitted types remain valid', async () => {
+  it('preserves unknown types on read but rejects writing them back', async () => {
     const node = { ...preview(), type: 'future-invalid' };
     writeCanvas('Project A', 'canvas-a', [node]);
     const before = diskSnapshot();
@@ -854,18 +839,22 @@ describe('Canonical canvas write boundaries', () => {
     const app = Fastify();
     await app.register(canvasRoutes, { prefix: '/canvas' });
     try {
-      const put = (nodes: unknown[]) =>
-        app.inject({
-          method: 'PUT',
-          url: '/canvas/canvas-a',
-          payload: { version: 0, state: { nodes, edges: [] } },
-        });
-      expect((await put([node])).statusCode).toBe(409);
+      // Any structure edit would store the unknown node again.
+      const moved = await app.inject({
+        method: 'POST',
+        url: '/canvas/canvas-a/execute',
+        payload: {
+          originator: { source: 'ui' },
+          commands: [
+            {
+              type: 'SET_NODE_GEOMETRY',
+              items: [{ nodeId: node.id, position: { x: 9, y: 9 } }],
+            },
+          ],
+        },
+      });
+      expect(moved.statusCode).toBe(409);
       expect(diskSnapshot()).toEqual(before);
-      expect(
-        (await put([{ id: 'node-loose', position: { x: 0, y: 0 }, data: {} }]))
-          .statusCode,
-      ).toBe(200);
     } finally {
       await app.close();
     }

@@ -162,26 +162,28 @@ async function seedLegacyWorkspace(): Promise<void> {
   const app = await buildApp();
   try {
     // Real topology write.
-    const put = await app.inject({
-      method: 'PUT',
-      url: `/api/canvas/${CANVAS_ID}`,
+    const created = await app.inject({
+      method: 'POST',
+      url: `/api/canvas/${CANVAS_ID}/execute`,
       payload: {
-        version: 0,
-        title: SPACE_TITLE,
-        state: {
-          nodes: [
-            {
-              id: 'n-note',
-              type: 'note',
-              position: { x: 10, y: 20 },
-              data: { label: 'Old Note' },
-            },
-          ],
-          edges: [],
-        },
+        originator: { source: 'ui' },
+        commands: [
+          {
+            type: 'CREATE_NODES',
+            nodes: [
+              {
+                id: 'n-note',
+                nodeType: 'note',
+                position: { x: 10, y: 20 },
+                data: { label: 'Old Note' },
+              },
+            ],
+          },
+        ],
       },
     });
-    expect(put.statusCode).toBe(200);
+    expect(created.statusCode, created.body).toBe(200);
+    expect(created.json().results[0].applied).toBe(true);
 
     // Real node markdown sidecar.
     const content = await app.inject({

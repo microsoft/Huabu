@@ -104,7 +104,7 @@ export function assertCurrentCanvasCommands(
   }
 }
 
-/** Full-state writes preserve managed identity, but may change geometry. */
+/** Results of non-system writes preserve managed identity, but may change geometry. */
 export function assertWorldPreviewTopologyAllowed(
   canvasId: string,
   previousNodesInput: readonly unknown[],

@@ -90,13 +90,12 @@ export async function acknowledgeAgentNodeResult(
 /**
  * Error thrown when a canvas mutation is rejected by the server with a
  * structured 409 conflict (`CanvasConflictResponse`). Callers can branch on
- * `code` to distinguish title / node-label collisions from version drift.
+ * `code` to distinguish title / node-label collisions from content conflicts.
  */
 export class CanvasConflictError extends Error {
   readonly code: CanvasErrorCode;
   readonly conflictWith?: string;
   readonly nodeId?: string;
-  readonly serverVersion?: number;
   /** For `NODE_CONTENT_CONFLICT`: the on-disk node's current revision. */
   readonly currentRev?: string;
 
@@ -106,7 +105,6 @@ export class CanvasConflictError extends Error {
     this.code = payload.code;
     this.conflictWith = payload.conflictWith;
     this.nodeId = payload.nodeId;
-    this.serverVersion = payload.serverVersion;
     this.currentRev = payload.currentRev;
   }
 }

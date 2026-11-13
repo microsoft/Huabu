@@ -11,8 +11,6 @@
 
 import { z } from 'zod';
 
-import { canvasEditableNodeSchema } from './agent-node.js';
-
 import type { CanvasContentPosition } from './canvas-sync.js';
 import type { videoCoverPatchSchema } from './preprocessing.js';
 import type { SetSiblingOrderEvent } from '../../canvas-engine/siblingOrder.js';
@@ -59,24 +57,6 @@ export interface GetCanvasResponse {
    * (`GET /api/canvas/:canvasId/content/changes`).
    */
   contentPosition?: CanvasContentPosition;
-}
-
-/** Body for `PUT /api/canvas/:canvasId`. */
-export const putCanvasBodySchema = z.object({
-  version: z.number().int().nonnegative(),
-  state: z
-    .object({
-      nodes: z.array(canvasEditableNodeSchema),
-      edges: z.array(z.unknown()).optional(),
-    })
-    .catchall(z.unknown()),
-  title: z.string().min(1).optional(),
-});
-export type PutCanvasRequest = z.infer<typeof putCanvasBodySchema>;
-
-export interface PutCanvasResponse {
-  canvasId: string;
-  version: number;
 }
 
 export const deleteNodeParamsSchema =
@@ -220,18 +200,6 @@ export interface RevealNodesFolderResponse {
   success: boolean;
 }
 
-/**
- * 409 Conflict body returned by `PUT /api/canvas/:canvasId` when the
- * client's version doesn't match the server's. Shaped like an
- * `ApiErrorBody` so the canonical client (`apiFetch`) surfaces it as a
- * normal `ApiError` and the caller can read `details.serverVersion`.
- */
-export interface CanvasVersionMismatchError {
-  message: string;
-  code: 'CANVAS_VERSION_MISMATCH';
-  details: { serverVersion: number };
-}
-
 // ─── Rename / conflict errors ─────────────────────────────────────────────
 
 /**
@@ -245,7 +213,7 @@ export interface CanvasVersionMismatchError {
  * Codes fall into two buckets:
  * - **4xx conflicts**: caller submitted something that collides with
  *   existing state. Carried by {@link CanvasConflictResponse} with
- *   extra context (`conflictWith`, `nodeId`, `serverVersion`).
+ *   extra context (`conflictWith`, `nodeId`).
  * - **4xx/5xx operational failures**: request was well-formed but the
  *   server couldn't honour it (canvas missing, fs lock, etc.).
  *   Carried by the standard {@link ApiErrorBody}.
@@ -255,7 +223,6 @@ export type CanvasErrorCode =
   | 'NODE_LABEL_CONFLICT'
   | 'NODE_DUPLICATE_FILES'
   | 'NODE_CONTENT_CONFLICT'
-  | 'CANVAS_VERSION_CONFLICT'
   | 'INVALID_REQUEST'
   | 'CANVAS_NOT_FOUND'
   | 'NODE_FILE_DELETE_FAILED';
@@ -273,8 +240,6 @@ export interface CanvasConflictResponse {
   conflictWith?: string;
   /** For node-level conflicts. */
   nodeId?: string;
-  /** For version conflicts. */
-  serverVersion?: number;
   /**
    * For `NODE_DUPLICATE_FILES`: every markdown sidecar filename on disk
    * that currently claims the node's id, so the client can list them in

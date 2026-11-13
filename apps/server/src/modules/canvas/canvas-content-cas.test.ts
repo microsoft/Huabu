@@ -360,21 +360,22 @@ describe('PUT /nodes/:nodeId/content — content CAS', () => {
       expect(node.data).not.toHaveProperty('content');
       expect(node.data).not.toHaveProperty('src');
       const move = await app.inject({
-        method: 'PUT',
-        url: '/canvas/c1',
+        method: 'POST',
+        url: '/canvas/c1/execute',
         payload: {
-          version: store.read()?.version,
-          state: {
-            nodes: [
-              { id: 'ref', type: 'fileReference', position: { x: 5, y: 5 } },
-            ],
-            edges: [],
-          },
+          originator: { source: 'ui' },
+          commands: [
+            {
+              type: 'SET_NODE_GEOMETRY',
+              items: [{ nodeId: 'ref', position: { x: 5, y: 5 } }],
+            },
+          ],
         },
       });
       expect(move.statusCode).toBe(200);
       expect(store.read()?.state.nodes).toMatchObject([
         {
+          position: { x: 5, y: 5 },
           data: {
             fileReference: {
               agentletId: 'offline-device',
@@ -383,18 +384,28 @@ describe('PUT /nodes/:nodeId/content — content CAS', () => {
           },
         },
       ]);
+      // A structure edit names no node type, so it cannot spoof one: what
+      // the stored node is decides, and a body is refused.
+      const version = store.read()?.version;
       const invalid = await app.inject({
-        method: 'PUT',
-        url: '/canvas/c1',
+        method: 'POST',
+        url: '/canvas/c1/execute',
         payload: {
-          version: store.read()?.version,
-          state: {
-            nodes: [{ id: 'ref', data: { content: 'type-omitted bypass' } }],
-            edges: [],
-          },
+          originator: { source: 'ui' },
+          commands: [
+            {
+              type: 'MERGE_NODE_DATA',
+              patches: [
+                { nodeId: 'ref', patch: { content: 'type-omitted bypass' } },
+              ],
+            },
+          ],
         },
       });
-      expect(invalid.statusCode).toBe(400);
+      expect(invalid.statusCode).toBe(200);
+      expect(invalid.json().results[0].applied).toBe(false);
+      expect(store.read()?.version).toBe(version);
+      expect(store.readNode('ref')).toMatchObject({ content: '' });
     } finally {
       await app.close();
     }

@@ -513,21 +513,32 @@ export function describeSeveralPeople(
       await call('dave', 'POST', `/api/workspaces/${workspaceId}/activate`);
 
       const before = (await call('dave', 'GET', `/api/canvas/${id}`)).body;
-      const renamed = await call('dave', 'PUT', `/api/canvas/${id}`, {
-        version: before.version,
-        state: before.state,
+      const renamed = await call('dave', 'PATCH', `/api/canvas/${id}/title`, {
         title: 'Stolen title',
+        expectedTitle: 'Root',
       });
       expect(renamed.status).toBe(403);
       expect(
         (await call('carol', 'GET', `/api/canvas/${id}`)).body,
       ).toMatchObject({ title: 'Root', version: before.version });
-      const saved = await call('dave', 'PUT', `/api/canvas/${id}`, {
-        version: before.version,
-        state: before.state,
-        title: 'Root',
+      const saved = await call('dave', 'POST', `/api/canvas/${id}/execute`, {
+        originator: { source: 'ui' },
+        commands: [
+          {
+            type: 'CREATE_NODES',
+            nodes: [
+              {
+                id: 'node-editor-note',
+                nodeType: 'note',
+                position: { x: 0, y: 400 },
+                data: { content: 'Written by an editor' },
+              },
+            ],
+          },
+        ],
       });
       expect(saved.status).toBe(200);
+      expect(saved.body.toVersion).toBe(before.version + 1);
       expect(
         (
           await call('dave', 'PATCH', `/api/canvas/${childId}/parent`, {
@@ -583,16 +594,17 @@ export function describeSeveralPeople(
           })
         ).status,
       ).toBe(200);
-      const current = (await call('carol', 'GET', `/api/canvas/${id}`)).body;
       expect(
         (
-          await call('carol', 'PUT', `/api/canvas/${id}`, {
-            version: current.version,
-            state: current.state,
+          await call('carol', 'PATCH', `/api/canvas/${id}/title`, {
             title: 'Renamed',
+            expectedTitle: 'Root',
           })
         ).status,
       ).toBe(200);
+      expect((await call('carol', 'GET', `/api/canvas/${id}`)).body.title).toBe(
+        'Renamed',
+      );
     });
 
     it('requires Workspace write to move into a new root, while a Space owner may create a child destination', async () => {

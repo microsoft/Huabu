@@ -91,6 +91,26 @@ forEachProductProfile((profile, label) => {
       return (await currentCanvas()).state.nodes[0] as CanvasNode;
     }
 
+    /** What a browser sends for a structure edit. */
+    function execute(commands: unknown[]) {
+      return app.inject({
+        method: 'POST',
+        url: `/canvas/${canvasId}/execute`,
+        payload: { commands, originator: { source: 'ui' } },
+      });
+    }
+
+    function move(x: number, y: number, nodeId: string = node.id) {
+      return {
+        type: 'SET_NODE_GEOMETRY',
+        items: [{ nodeId, position: { x, y } }],
+      };
+    }
+
+    function merge(patch: Record<string, unknown>, nodeId: string = node.id) {
+      return { type: 'MERGE_NODE_DATA', patches: [{ nodeId, patch }] };
+    }
+
     it.each(['done', 'error'] as const)(
       'persists real log %s activity, without token, geometry, or viewing updates',
       async (terminal) => {
@@ -128,43 +148,13 @@ forEachProductProfile((profile, label) => {
           viewed: true,
         });
         expect((await current()).data.lastActivityAt).toBe(ended.ts);
-        const stored = await current();
-        const saved = await app.inject({
-          method: 'PUT',
-          url: `/canvas/${canvasId}`,
-          payload: {
-            version: (await currentCanvas()).version,
-            state: {
-              nodes: [
-                {
-                  ...stored,
-                  position: { x: 100, y: 100 },
-                  data: { ...stored.data, lastActivityAt: 1 },
-                },
-              ],
-              edges: [],
-            },
-          },
-        });
-        expect(saved.statusCode).toBe(400);
+        const version = (await currentCanvas()).version;
+        const forged = await execute([merge({ lastActivityAt: 1 })]);
+        expect(forged.statusCode).toBe(200);
+        expect(forged.json().results[0].applied).toBe(false);
         expect((await current()).data.lastActivityAt).toBe(ended.ts);
-        const moved = await app.inject({
-          method: 'PUT',
-          url: `/canvas/${canvasId}`,
-          payload: {
-            version: (await currentCanvas()).version,
-            state: {
-              nodes: [
-                {
-                  ...stored,
-                  position: { x: 100, y: 100 },
-                  data: { agentBinding: { kind: 'internal' } },
-                },
-              ],
-              edges: [],
-            },
-          },
-        });
+        expect((await currentCanvas()).version).toBe(version);
+        const moved = await execute([move(100, 100)]);
         expect(moved.statusCode).toBe(200);
         expect(await current()).toMatchObject({
           position: { x: 100, y: 100 },
@@ -173,33 +163,14 @@ forEachProductProfile((profile, label) => {
       },
     );
 
-    it('saves layout with unchanged preparation despite missing execution records, but rejects preparation changes', async () => {
+    it('saves layout despite missing execution records, but rejects preparation changes', async () => {
       const readRecord = vi
         .spyOn(agenetes, 'record')
         .mockResolvedValue(undefined);
       const history = vi.spyOn(agenetes, 'history').mockResolvedValue({
         turns: [{}],
       } as Awaited<ReturnType<typeof agenetes.history>>);
-      const response = await app.inject({
-        method: 'PUT',
-        url: `/canvas/${canvasId}`,
-        payload: {
-          version: 1,
-          state: {
-            nodes: [
-              {
-                ...node,
-                position: { x: 40, y: 60 },
-                data: {
-                  agentBinding: { kind: 'internal' },
-                  agentLaunchOverrides: null,
-                },
-              },
-            ],
-            edges: [],
-          },
-        },
-      });
+      const response = await execute([move(40, 60)]);
       expect(response.statusCode).toBe(200);
       expect(await current()).toMatchObject({
         position: { x: 40, y: 60 },
@@ -211,34 +182,20 @@ forEachProductProfile((profile, label) => {
       });
       expect(readRecord).not.toHaveBeenCalled();
       expect(history).not.toHaveBeenCalled();
+      const version = (await currentCanvas()).version;
 
-      const rejected = await app.inject({
-        method: 'PUT',
-        url: `/canvas/${canvasId}`,
-        payload: {
-          version: response.json().version,
-          state: {
-            nodes: [
-              {
-                ...node,
-                data: {
-                  agentLaunchOverrides: {
-                    additionalInitialPreamble: 'Changed',
-                  },
-                },
-              },
-            ],
-            edges: [],
-          },
-        },
-      });
+      const rejected = await execute([
+        merge({
+          agentLaunchOverrides: { additionalInitialPreamble: 'Changed' },
+        }),
+      ]);
       expect(rejected.statusCode).toBe(409);
       expect(rejected.json().code).toBe('execution_record_missing');
       expect((await current()).position).toEqual({ x: 40, y: 60 });
-      expect((await currentCanvas()).version).toBe(response.json().version);
+      expect((await currentCanvas()).version).toBe(version);
     });
 
-    it('rejects mode changes through PUT and undo while admission is held', async () => {
+    it('rejects mode changes through execute and undo while admission is held', async () => {
       await executeOnServer({
         canvasId,
         originator: { source: 'ui' },
@@ -259,19 +216,7 @@ forEachProductProfile((profile, label) => {
       );
       expect(release).not.toBeNull();
       try {
-        const response = await app.inject({
-          method: 'PUT',
-          url: `/canvas/${canvasId}`,
-          payload: {
-            version,
-            state: {
-              nodes: [
-                { id: node.id, type: 'question', data: { agentMode: 'ask' } },
-              ],
-              edges: [],
-            },
-          },
-        });
+        const response = await execute([merge({ agentMode: 'ask' })]);
         expect(response.statusCode).toBe(409);
         expect(response.json().code).toBe('agent_draft_busy');
         const { agentMode: _mode, ...withoutMode } = before.data;
@@ -293,19 +238,7 @@ forEachProductProfile((profile, label) => {
       } finally {
         release?.();
       }
-      const response = await app.inject({
-        method: 'PUT',
-        url: `/canvas/${canvasId}`,
-        payload: {
-          version,
-          state: {
-            nodes: [
-              { id: node.id, type: 'question', data: { agentMode: 'ask' } },
-            ],
-            edges: [],
-          },
-        },
-      });
+      const response = await execute([merge({ agentMode: 'ask' })]);
       expect(response.statusCode).toBe(200);
       expect((await current()).data.agentMode).toBe('ask');
     });
@@ -611,7 +544,7 @@ forEachProductProfile((profile, label) => {
       expect((await current()).data.viewed).toBe(false);
     });
 
-    it('rejects forbidden PUT and MERGE writes but composes omitted metadata from fresh state', async () => {
+    it('refuses writes to server-owned fields and keeps them across a layout edit', async () => {
       await projectAgentNodeState(canvasId, node.id, {
         threadId: 'thread-agent',
         bindingState: 'bound',
@@ -619,15 +552,12 @@ forEachProductProfile((profile, label) => {
         status: 'done',
       });
       const version = (await currentCanvas()).version;
-      const forged = await app.inject({
-        method: 'PUT',
-        url: `/canvas/${canvasId}`,
-        payload: {
-          version,
-          state: { nodes: [{ ...node, data: { status: 'idle' } }], edges: [] },
-        },
-      });
-      expect(forged.statusCode).toBe(400);
+      // The patch names no node type: what the stored node is decides.
+      const forged = await execute([merge({ status: 'idle' })]);
+      expect(forged.statusCode).toBe(200);
+      expect(forged.json().results[0].applied).toBe(false);
+      expect((await current()).data.status).toBe('done');
+      expect((await currentCanvas()).version).toBe(version);
       const merged = await executeOnServer({
         canvasId,
         originator: { source: 'system' },
@@ -644,47 +574,20 @@ forEachProductProfile((profile, label) => {
         ],
       });
       expect(merged.results[0]?.applied).toBe(false);
-      const saved = await app.inject({
-        method: 'PUT',
-        url: `/canvas/${canvasId}`,
-        payload: {
-          version,
-          state: {
-            nodes: [
-              {
-                id: node.id,
-                type: 'question',
-                position: { x: 100, y: 20 },
-                data: { label: 'New' },
-              },
-            ],
-            edges: [],
-          },
-        },
-      });
+      const saved = await execute([move(100, 20)]);
       expect(saved.statusCode).toBe(200);
-      expect((await current()).data).toMatchObject({
-        bindingState: 'bound',
-        invocationToken: 'current',
-        status: 'done',
-        threadId: 'thread-agent',
-      });
-    });
-
-    it('validates stored Question ownership when a PUT omits the node type', async () => {
-      const response = await app.inject({
-        method: 'PUT',
-        url: `/canvas/${canvasId}`,
-        payload: {
-          version: (await currentCanvas()).version,
-          state: { nodes: [{ id: node.id, data: { status: 'done' } }] },
+      expect(await current()).toMatchObject({
+        position: { x: 100, y: 20 },
+        data: {
+          bindingState: 'bound',
+          invocationToken: 'current',
+          status: 'done',
+          threadId: 'thread-agent',
         },
       });
-      expect(response.statusCode).toBe(400);
-      expect((await current()).data).not.toHaveProperty('status');
     });
 
-    it('preserves unrelated node metadata without carrying it into a new Question identity', async () => {
+    it('does not reserve Agent field names on other node types', async () => {
       await executeOnServer({
         canvasId,
         originator: { source: 'ui' },
@@ -720,49 +623,23 @@ forEachProductProfile((profile, label) => {
         ],
       });
       expect(result.results[0]?.applied).toBe(true);
-      const canvas = await currentCanvas();
-      const response = await app.inject({
-        method: 'PUT',
-        url: `/canvas/${canvasId}`,
-        payload: {
-          version: canvas.version,
-          state: {
-            nodes: [
-              { id: node.id, type: 'question', data: {} },
-              {
-                id: 'node-note',
-                type: 'note',
-                data: { status: 'saved', threadId: 'reference' },
-              },
-            ],
-          },
-        },
-      });
-      expect(response.statusCode).toBe(200);
-      const converted = await app.inject({
-        method: 'PUT',
-        url: `/canvas/${canvasId}`,
-        payload: {
-          version: response.json().version,
-          state: {
-            nodes: [
-              { id: node.id, type: 'question', data: {} },
-              {
-                id: 'node-note',
-                type: 'question',
-                data: { agentBinding: { kind: 'internal' } },
-              },
-            ],
-          },
-        },
-      });
-      expect(converted.statusCode).toBe(200);
-      const question = (await currentCanvas()).state.nodes.find(
+      const saved = await execute([
+        merge({ status: 'saved', threadId: 'reference' }, 'node-note'),
+        move(30, 30, 'node-note'),
+      ]);
+      expect(saved.statusCode).toBe(200);
+      const note = (await currentCanvas()).state.nodes.find(
         (entry) => (entry as CanvasNode).id === 'node-note',
       ) as CanvasNode;
-      expect(question.data).toMatchObject({ bindingState: 'editing' });
-      expect(question.data).not.toHaveProperty('status');
-      expect(question.data.threadId).not.toBe('reference');
+      expect(note).toMatchObject({
+        position: { x: 30, y: 30 },
+        data: { status: 'saved', threadId: 'reference' },
+      });
+      // The Question beside it is untouched.
+      expect((await current()).data).toMatchObject({
+        threadId: 'thread-agent',
+        bindingState: 'editing',
+      });
     });
 
     it('retains live FSM and preparation when reverting an unrelated historical edit', async () => {
@@ -888,54 +765,24 @@ forEachProductProfile((profile, label) => {
         driverSchemaVersion: 1,
       } as NonNullable<Awaited<ReturnType<typeof agenetes.record>>>;
       const readRecord = vi.spyOn(agenetes, 'record').mockResolvedValue(record);
-      const response = await app.inject({
-        method: 'PUT',
-        url: `/canvas/${canvasId}`,
-        payload: {
-          version: 1,
-          state: {
-            nodes: [
-              {
-                id: node.id,
-                type: 'question',
-                data: {
-                  agentBinding: {
-                    kind: 'external',
-                    alias: 'Different',
-                    profileId: 'different',
-                  },
-                },
-              },
-            ],
-            edges: [],
+      const response = await execute([
+        merge({
+          agentBinding: {
+            kind: 'external',
+            alias: 'Different',
+            profileId: 'different',
           },
-        },
-      });
+        }),
+      ]);
       expect(response.statusCode).toBe(409);
       expect((await current()).data).toMatchObject({
         bindingState: 'bound',
         agentBinding: { kind: 'internal' },
       });
       expect(readRecord).toHaveBeenCalledOnce();
-      const saved = await app.inject({
-        method: 'PUT',
-        url: `/canvas/${canvasId}`,
-        payload: {
-          version: (await currentCanvas()).version,
-          state: {
-            nodes: [
-              {
-                id: node.id,
-                type: 'question',
-                position: { x: 10, y: 10 },
-                data: {},
-              },
-            ],
-            edges: [],
-          },
-        },
-      });
+      const saved = await execute([move(10, 10)]);
       expect(saved.statusCode).toBe(200);
+      expect((await current()).position).toEqual({ x: 10, y: 10 });
       expect(readRecord).toHaveBeenCalledOnce();
     });
 

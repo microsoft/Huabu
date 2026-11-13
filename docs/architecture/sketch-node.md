@@ -29,11 +29,11 @@ No explicit trigger is needed.
 
 ## 2. Data model & persistence
 
-| Node type                                | inline in space.json                                           | `nodes/<safeLabel>.md` | Notes                                                                                                               |
-| ---------------------------------------- | -------------------------------------------------------------- | ---------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| `sketch`                                 | **stroke geometry** (`points` / `initialSize` / `strokeColor`) | ✅ frontmatter-only    | geometry inline in `state.nodes[i].data`; sidecar only persists `label` / `labelSource` (structure PUT strips them) |
-| `question` / `image` / `video` / `frame` | metadata                                                       | ✅ frontmatter-only    | same as sketch, sidecar only                                                                                        |
-| `note` / `text` / `web` / `pdf`          | metadata                                                       | ✅                     | text types also carry a markdown body                                                                               |
+| Node type                                | inline in space.json                                           | `nodes/<safeLabel>.md` | Notes                                                                                                                 |
+| ---------------------------------------- | -------------------------------------------------------------- | ---------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `sketch`                                 | **stroke geometry** (`points` / `initialSize` / `strokeColor`) | ✅ frontmatter-only    | geometry inline in `state.nodes[i].data`; sidecar only persists `label` / `labelSource` (structure writes strip them) |
+| `question` / `image` / `video` / `frame` | metadata                                                       | ✅ frontmatter-only    | same as sketch, sidecar only                                                                                          |
+| `note` / `text` / `web` / `pdf`          | metadata                                                       | ✅                     | text types also carry a markdown body                                                                                 |
 
 `MD_BACKED_NODE_TYPES` whitelist: [canvas.route.ts](../../apps/server/src/modules/canvas/canvas.route.ts). Footprint: ~0.5–3 KB per stroke, negligible for `space.json`.
 
