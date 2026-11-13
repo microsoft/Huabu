@@ -16,7 +16,9 @@
  *  - `snapshot` — sent once on connect. Carries the canvas's current
  *    `version` so a client that connected *after* a mutation can detect
  *    the gap (snapshot.version !== local version) and `loadCanvas` to
- *    catch up.
+ *    catch up. Node content saved before the connection is not in it: a
+ *    content save does not change `version`. The page asks for that
+ *    separately, see {@link canvasContentChangesQuerySchema}.
  *  - `update` — sent after every persisted `/execute` batch. Carries the
  *    structural `deltas` + `pendingEffects` the client replays via
  *    `applyDeltasFromAgent`, gated on `fromVersion === local version`.
@@ -56,35 +58,12 @@ export const canvasSyncEventSchema = z.discriminatedUnion('type', [
        * fetch it again; every other page does.
        */
       originPageId: z.string().optional(),
-      /**
-       * Position of this content save in the server's content sequence;
-       * present when `nodeIds` is. See `snapshot.content`.
-       */
-      contentSeq: z.number().int().optional(),
     }),
   }),
   z.object({
     type: z.literal('snapshot'),
     data: z.object({
       version: z.number(),
-      /**
-       * Where the server's content sequence stands. A content save (body,
-       * title, …) does not change `version`; a page keeps `epoch` and the
-       * highest `seq` it has seen and sends them when it reconnects
-       * (`contentEpoch` / `contentSeq` on the stream URL). The server then
-       * answers with `changedNodeIds`, the nodes whose content was saved
-       * since, or with `reset` when it cannot tell (it restarted, or too
-       * much was saved since): the page then checks every node it shows.
-       * Neither is present for a page that sent no position.
-       */
-      content: z
-        .object({
-          epoch: z.string(),
-          seq: z.number().int(),
-          changedNodeIds: z.array(z.string()).optional(),
-          reset: z.boolean().optional(),
-        })
-        .optional(),
     }),
   }),
   z.object({
@@ -138,6 +117,49 @@ export const canvasSyncEventSchema = z.discriminatedUnion('type', [
 ]);
 
 export type CanvasSyncEvent = z.infer<typeof canvasSyncEventSchema>;
+
+/**
+ * A point in a Space's sequence of node-content saves.
+ *
+ * `GET /api/canvas/:canvasId` returns the position its node content is
+ * valid from (`contentPosition`): everything saved up to it is in that
+ * response. `epoch` names the sequence and `seq` orders saves within it;
+ * a page hands both back unchanged and never interprets them.
+ */
+export const canvasContentPositionSchema = z.object({
+  epoch: z.string().min(1).max(128),
+  seq: z.number().int().min(0),
+});
+export type CanvasContentPosition = z.infer<typeof canvasContentPositionSchema>;
+
+/**
+ * Query of `GET /api/canvas/:canvasId/content/changes`: the position the
+ * page's content is valid from.
+ */
+export const canvasContentChangesQuerySchema = z.object({
+  epoch: z.string().min(1).max(128),
+  seq: z.coerce.number().int().min(0),
+});
+export type CanvasContentChangesQuery = z.infer<
+  typeof canvasContentChangesQuerySchema
+>;
+
+/**
+ * Response of `GET /api/canvas/:canvasId/content/changes`.
+ *
+ * `changedNodeIds` names every node whose content was saved after the
+ * position asked from; it may also name a node saved at that position, so
+ * fetching a named node must be harmless to repeat. `reset` is set instead
+ * when the server cannot compare the position with its sequence: the page
+ * then knows nothing and fetches every node that has saved content.
+ * `position` is where the sequence stood for this answer; the page asks from
+ * it next time.
+ */
+export interface CanvasContentChangesResponse {
+  position: CanvasContentPosition;
+  changedNodeIds?: string[];
+  reset?: boolean;
+}
 
 /** Response for `GET /api/canvas/:canvasId/threads/:threadId/changes`. */
 export interface GetThreadChangesResponse {

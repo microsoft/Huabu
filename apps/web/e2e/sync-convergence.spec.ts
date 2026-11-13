@@ -249,13 +249,16 @@ async function serverContent(
  * (Chromium's offline emulation leaves an open stream running.) The server
  * sees the connection close; nothing in the app is touched.
  */
-async function interceptSyncStream(context: BrowserContext) {
-  await context.addInitScript(() => {
+async function interceptSyncStream(
+  context: BrowserContext,
+  options: { blockedFromStart?: boolean } = {},
+) {
+  await context.addInitScript((blockedFromStart) => {
     if (window !== window.top) return;
     const realFetch = window.fetch.bind(window);
     const open = new Set<AbortController>();
     const control = {
-      blocked: false,
+      blocked: blockedFromStart,
       drop: () => {
         control.blocked = true;
         for (const controller of open) controller.abort();
@@ -282,7 +285,7 @@ async function interceptSyncStream(context: BrowserContext) {
       open.add(controller);
       return realFetch(input, { ...init, signal: controller.signal });
     };
-  });
+  }, options.blockedFromStart === true);
 }
 
 async function dropStream(device: Device) {
@@ -304,6 +307,154 @@ async function restoreStream(device: Device) {
       window as unknown as { __syncStream: { restore: () => void } }
     ).__syncStream.restore(),
   );
+}
+
+/** Save node content as a client that is not one of the pages under test. */
+async function saveAsAnotherClient(
+  request: APIRequestContext,
+  canvasId: string,
+  nodeId: string,
+  fields: Record<string, unknown>,
+) {
+  const { rev } = await serverContent(request, canvasId, nodeId);
+  const saved = await request.put(
+    `/api/canvas/${canvasId}/nodes/${nodeId}/content`,
+    {
+      data: {
+        nodeType: 'note',
+        expectRev: rev,
+        pageId: 'e2e-another-page',
+        ...fields,
+      },
+    },
+  );
+  expect(saved.ok(), await saved.text()).toBe(true);
+}
+
+test('content saved between a page loading the Space and subscribing to its stream is shown, without a second load', async ({
+  browser,
+  request,
+}) => {
+  test.setTimeout(120_000);
+  const canvasId = await seedSpace(request);
+  const b = await newDevice(browser, canvasId);
+  // The page loads the Space, but its stream cannot be opened yet.
+  await interceptSyncStream(b.context, { blockedFromStart: true });
+  await b.open();
+  const loadsB = b.spaceLoads();
+  const { version } = await spaceRecord(request, canvasId);
+
+  // In that window another client saves a body and, on another node, a
+  // title. No stream is open to this page, so no event can reach it.
+  await saveAsAnotherClient(request, canvasId, X, {
+    content: 'Body saved in the gap',
+  });
+  await saveAsAnotherClient(request, canvasId, Y, {
+    label: 'Title saved in the gap',
+    labelSource: 'user',
+  });
+  expect((await spaceRecord(request, canvasId)).version).toBe(version);
+  expect((await shownNode(b.page, X)).content).toBe(`Body of ${X}`);
+
+  // The stream opens for the first time.
+  await restoreStream(b);
+  await expect
+    .poll(async () => (await shownNode(b.page, X)).content, {
+      timeout: 30_000,
+    })
+    .toBe('Body saved in the gap');
+  await expect
+    .poll(async () => (await shownNode(b.page, Y)).label)
+    .toBe('Title saved in the gap');
+  expect((await shownNode(b.page, X)).reloaded).toBe(false);
+  expect(b.spaceLoads()).toBe(loadsB);
+
+  await b.context.close();
+});
+
+for (const change of ['body', 'move'] as const) {
+  test(`a ${change} made after the server read the Space for a load still in flight is shown once the load lands`, async ({
+    browser,
+    request,
+  }) => {
+    test.setTimeout(120_000);
+    const canvasId = await seedSpace(request);
+    const b = await newDevice(browser, canvasId);
+    await interceptSyncStream(b.context, { blockedFromStart: true });
+
+    // Hold the first load's response after the server has answered it.
+    let releaseLoad: (() => void) | null = null;
+    let answered: (() => void) | null = null;
+    const serverAnswered = new Promise<void>((resolve) => {
+      answered = resolve;
+    });
+    let held = false;
+    await b.context.route(`**/api/canvas/${canvasId}`, async (route) => {
+      if (route.request().method() !== 'GET' || held) return route.continue();
+      held = true;
+      const response = await route.fetch();
+      const gate = new Promise<void>((resolve) => {
+        releaseLoad = resolve;
+      });
+      answered?.();
+      await gate;
+      await route.fulfill({ response });
+    });
+    await b.page.goto(`/canvas/${canvasId}`);
+    await serverAnswered;
+
+    // After the server's read, before this page is subscribed.
+    if (change === 'body') {
+      await saveAsAnotherClient(request, canvasId, X, {
+        content: 'Body saved during the load',
+      });
+    } else {
+      // A move advances the Space version.
+      const moved = await request.post(`/api/canvas/${canvasId}/execute`, {
+        data: {
+          commands: [
+            {
+              type: 'SET_NODE_GEOMETRY',
+              items: [{ nodeId: Y, position: { x: 40, y: 480 } }],
+            },
+          ],
+          originator: { source: 'ui', tabId: 'e2e-another-page' },
+        },
+      });
+      expect(moved.ok(), await moved.text()).toBe(true);
+    }
+
+    // The stream opens and delivers its first message while the load is
+    // still in flight; then the load lands with what the server read
+    // earlier.
+    const streamOpened = b.page.waitForResponse((response) =>
+      response.url().includes('/sync/stream'),
+    );
+    await restoreStream(b);
+    await streamOpened;
+    await b.page.waitForTimeout(1_000);
+    (releaseLoad as (() => void) | null)?.();
+
+    await expect(b.page.locator('[data-canvas-root]')).toHaveAttribute(
+      'aria-busy',
+      'false',
+    );
+    if (change === 'body') {
+      await expect
+        .poll(async () => (await shownNode(b.page, X)).content, {
+          timeout: 30_000,
+        })
+        .toBe('Body saved during the load');
+    } else {
+      await expect
+        .poll(async () => (await shownNode(b.page, Y)).position, {
+          timeout: 30_000,
+        })
+        .toEqual({ x: 40, y: 480 });
+    }
+
+    await b.context.close();
+  });
 }
 
 test('content another page saved while this page was disconnected is shown after it reconnects, without a reload or a conflict', async ({

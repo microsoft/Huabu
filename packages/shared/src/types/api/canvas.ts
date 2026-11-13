@@ -13,6 +13,7 @@ import { z } from 'zod';
 
 import { canvasEditableNodeSchema } from './agent-node.js';
 
+import type { CanvasContentPosition } from './canvas-sync.js';
 import type { videoCoverPatchSchema } from './preprocessing.js';
 import type { SetSiblingOrderEvent } from '../../canvas-engine/siblingOrder.js';
 
@@ -51,6 +52,13 @@ export interface GetCanvasResponse {
   state: unknown;
   /** Co-delivered with the loaded content; refreshed independently without discarding edits. */
   access: CanvasAccess;
+  /**
+   * The content position `state`'s node content is valid from: every
+   * content save up to it is in this response, and the page asks for the
+   * saves after it once its stream is open
+   * (`GET /api/canvas/:canvasId/content/changes`).
+   */
+  contentPosition?: CanvasContentPosition;
 }
 
 /** Body for `PUT /api/canvas/:canvasId`. */

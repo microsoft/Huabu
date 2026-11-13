@@ -3,6 +3,7 @@
 
 import { create } from 'zustand';
 
+import { getCanvasContentChanges } from '@/api/canvasSync';
 import { dismissToast, toast } from '@/components/Common/Toast';
 import { hasAgentStreamClaim } from '@/hooks/agentStreamCoordinator';
 import { useAcpThreadChangesStore } from '@/store/acpThreadChangesStore';
@@ -41,12 +42,23 @@ import type { Node } from '@xyflow/react';
  * has structure edits waiting to be sent: `requestCanvasResync` holds it
  * until the send queue has drained.
  *
- *  - `snapshot` after a reconnect also says which nodes had their content
- *    saved while the stream was down (`content.changedNodeIds`); they are
- *    fetched like the nodes of an `invalidate`. When the server cannot tell
- *    (`content.reset`), every node with saved content is checked, a few at a
- *    time; a Space with more than {@link CONTENT_REVALIDATE_LIMIT} of them
- *    is reloaded instead.
+ *  - Content saved before the stream was open (a content save does not
+ *    change the version): every snapshot — the first and each reconnect —
+ *    and every load that ends with the stream open asks the server which
+ *    nodes were saved after the content position the page's content is
+ *    valid from (`canvasStore.contentPosition`, set by the load). The named
+ *    nodes are fetched like the nodes of an `invalidate`, and the position
+ *    moves on to the answer's. So nothing saved between the load's read and
+ *    the subscription is missed, in either order of the two. When the server
+ *    cannot compare the position (`reset`), every node with saved content is
+ *    checked, a few at a time; a Space with more than
+ *    {@link CONTENT_REVALIDATE_LIMIT} of them is reloaded instead.
+ *
+ *  - A load that ends behind the stream: a snapshot that arrives while the
+ *    Space is loading is not compared, since the load is expected to bring
+ *    that version. If the load then ends with an older version than the
+ *    stream has named — its read was made before a commit that preceded the
+ *    subscription — the Space is loaded again.
  *
  *  - `invalidate` naming nodes: another page saved those nodes' content
  *    (body, label, summary, …) through the per-node content PUT, which no
@@ -91,58 +103,129 @@ function adoptAfterLoad(canvasId: string, nodeIds: readonly string[]): void {
 
 /**
  * The most nodes whose content is checked one by one when the server cannot
- * say what was saved while the stream was down. Above it one whole-Space
- * load costs less than the fetches.
+ * say what was saved. Above it one whole-Space load costs less than the
+ * fetches.
  */
 export const CONTENT_REVALIDATE_LIMIT = 200;
-const CONTENT_REVALIDATE_CONCURRENCY = 4;
+const CONTENT_FETCH_CONCURRENCY = 4;
+/** Waits before asking again after a failed content check. */
+const CONTENT_CHECK_RETRY_MS = [1_000, 2_000, 4_000];
 
-/** Run `action` now, or once the Space's load in progress has ended. */
-function afterLoad(canvasId: string, action: () => void): void {
-  if (!useCanvasStore.getState().isLoading) {
-    action();
-    return;
-  }
-  const stop = useCanvasStore.subscribe((state) => {
-    if (state.isLoading) return;
-    stop();
-    if (state.canvasId === canvasId) action();
-  });
+/** What the stream has said since `connect`, and the content check's run. */
+interface Connection {
+  canvasId: string;
+  /** A snapshot has arrived: the server is delivering events to this page. */
+  streamSeen: boolean;
+  /** The highest Space version the stream has named. */
+  streamVersion: number | null;
+  /** The stream version a load that ended behind it was last reloaded for. */
+  reloadedFor: number | null;
+  checking: boolean;
+  checkAgain: boolean;
+  failedChecks: number;
+  retryTimer: ReturnType<typeof setTimeout> | null;
+  stopWatchingLoads: () => void;
+}
+let connection: Connection | null = null;
+
+function closeConnection(): void {
+  if (!connection) return;
+  if (connection.retryTimer) clearTimeout(connection.retryTimer);
+  connection.stopWatchingLoads();
+  connection = null;
 }
 
 /**
- * The server could not say which content was saved while the stream was
- * down: fetch every node that has saved content, a few at a time. Nodes
- * with unsaved content on this page are left alone by the fetch itself.
+ * Ask the server which nodes had their content saved after the position the
+ * page's content is valid from, fetch them, and move the position on.
+ *
+ * Called when the stream has (re)connected and when a load ends with the
+ * stream open. By then the server delivers every later save as an event, so
+ * what this asks for is exactly what no event could have carried. One run at
+ * a time; a call during a run makes it ask once more. The position moves
+ * only when every named node was fetched, so a failed request or fetch is
+ * asked for again (a few times, then at the next snapshot or load).
  */
-function revalidateAllContent(canvasId: string, reload: () => void): void {
-  afterLoad(canvasId, () => {
-    const isCurrent = (): boolean =>
-      useCanvasSyncStore.getState().canvasId === canvasId &&
-      useCanvasStore.getState().canvasId === canvasId;
-    if (!isCurrent()) return;
-    const ids = useCanvasStore
-      .getState()
-      .nodes.filter((node) => MD_BACKED_NODE_TYPES.has(node.type ?? ''))
-      .map((node) => node.id);
-    if (ids.length === 0) return;
-    if (ids.length > CONTENT_REVALIDATE_LIMIT) {
-      reload();
-      return;
+function catchUpContent(current: Connection, reload: () => void): void {
+  if (current.checking) {
+    current.checkAgain = true;
+    return;
+  }
+  if (current.retryTimer) {
+    clearTimeout(current.retryTimer);
+    current.retryTimer = null;
+  }
+  const { canvasId } = current;
+  const live = (): boolean =>
+    connection === current && useCanvasStore.getState().canvasId === canvasId;
+  current.checking = true;
+  void (async () => {
+    try {
+      do {
+        current.checkAgain = false;
+        if (!live()) return;
+        const store = useCanvasStore.getState();
+        const since = store.contentPosition;
+        // While loading, the load's end asks. Without a position there is
+        // nothing to ask from.
+        if (store.isLoading || !since) return;
+        const answer = await getCanvasContentChanges(canvasId, since);
+        if (!live()) return;
+        // A load that began meanwhile brings fresher content and its own
+        // position; its end asks again.
+        if (useCanvasStore.getState().isLoading) return;
+        if (useCanvasStore.getState().contentPosition !== since) {
+          current.checkAgain = true;
+          continue;
+        }
+        let nodeIds = answer.changedNodeIds ?? [];
+        if (answer.reset) {
+          nodeIds = useCanvasStore
+            .getState()
+            .nodes.filter((node) => MD_BACKED_NODE_TYPES.has(node.type ?? ''))
+            .map((node) => node.id);
+          if (nodeIds.length > CONTENT_REVALIDATE_LIMIT) {
+            // The load brings every node and a position of its own.
+            reload();
+            return;
+          }
+        }
+        for (
+          let start = 0;
+          start < nodeIds.length;
+          start += CONTENT_FETCH_CONCURRENCY
+        ) {
+          const outcomes = await adoptRemoteNodeContent(
+            canvasId,
+            nodeIds.slice(start, start + CONTENT_FETCH_CONCURRENCY),
+          );
+          if (!live()) return;
+          if (outcomes.includes('failed'))
+            throw new Error('A saved node could not be fetched');
+        }
+        const now = useCanvasStore.getState();
+        if (now.isLoading) return;
+        if (now.contentPosition !== since) {
+          current.checkAgain = true;
+          continue;
+        }
+        now._setStateNoAutosave({ contentPosition: answer.position });
+        current.failedChecks = 0;
+      } while (current.checkAgain);
+    } catch (error) {
+      if (!live()) return;
+      console.warn('[canvasSync] content check failed', error);
+      const wait = CONTENT_CHECK_RETRY_MS[current.failedChecks];
+      current.failedChecks += 1;
+      if (wait !== undefined)
+        current.retryTimer = setTimeout(() => {
+          current.retryTimer = null;
+          if (connection === current) catchUpContent(current, reload);
+        }, wait);
+    } finally {
+      current.checking = false;
     }
-    void (async () => {
-      for (
-        let start = 0;
-        start < ids.length && isCurrent();
-        start += CONTENT_REVALIDATE_CONCURRENCY
-      ) {
-        await adoptRemoteNodeContent(
-          canvasId,
-          ids.slice(start, start + CONTENT_REVALIDATE_CONCURRENCY),
-        );
-      }
-    })();
-  });
+  })();
 }
 
 type SyncPendingEffects = {
@@ -237,34 +320,70 @@ export const useCanvasSyncStore = create<CanvasSyncState>((set, get) => ({
     if (get().canvasId === canvasId && unsubscribe) return;
     unsubscribe?.();
     forgetSavedDuringLoad();
+    closeConnection();
     set({ canvasId });
+    const reload = (): void =>
+      requestCanvasResync(canvasId, () => {
+        const current = useCanvasStore.getState();
+        if (current.canvasId === canvasId) {
+          invalidateUnclaimedAgentHistories(canvasId, current.nodes);
+        }
+      });
+    let wasLoading = useCanvasStore.getState().isLoading;
+    const current: Connection = {
+      canvasId,
+      streamSeen: false,
+      streamVersion: null,
+      reloadedFor: null,
+      checking: false,
+      checkAgain: false,
+      failedChecks: 0,
+      retryTimer: null,
+      // A load that ends while the stream is open. Its content is valid from
+      // its own position, which may be before the subscription; and its
+      // version may be behind what the stream named while it was in flight.
+      stopWatchingLoads: useCanvasStore.subscribe((state) => {
+        const ended = wasLoading && !state.isLoading;
+        wasLoading = state.isLoading;
+        if (!ended || state.canvasId !== canvasId || !current.streamSeen)
+          return;
+        if (
+          current.streamVersion !== null &&
+          current.streamVersion > state.version &&
+          current.reloadedFor !== current.streamVersion
+        ) {
+          // Once per version named, so a load that cannot catch up does not
+          // loop; the reload's own end comes back here.
+          current.reloadedFor = current.streamVersion;
+          reload();
+          return;
+        }
+        catchUpContent(current, reload);
+      }),
+    };
+    connection = current;
     unsubscribe = subscribeCanvasSync(canvasId, (event) => {
       // Ignore late frames after a canvas switch / disconnect.
       if (get().canvasId !== canvasId) return;
       const canvasStore = useCanvasStore.getState();
       if (canvasStore.canvasId !== canvasId) return;
-      const reload = (): void =>
-        requestCanvasResync(canvasId, () => {
-          const current = useCanvasStore.getState();
-          if (current.canvasId === canvasId) {
-            invalidateUnclaimedAgentHistories(canvasId, current.nodes);
-          }
-        });
+      if (event.type !== 'invalidate')
+        current.streamVersion = Math.max(
+          current.streamVersion ?? 0,
+          event.type === 'snapshot' ? event.data.version : event.data.toVersion,
+        );
 
       if (event.type === 'snapshot') {
-        // Content saved while the stream was down. A content save does not
+        current.streamSeen = true;
+        // Content saved before this (re)connection: a content save does not
         // change the version, so the comparison below does not see it.
-        const { content } = event.data;
-        const versionMoved =
-          !canvasStore.isLoading && event.data.version !== canvasStore.version;
-        if (content?.changedNodeIds?.length) {
-          if (canvasStore.isLoading)
-            adoptAfterLoad(canvasId, content.changedNodeIds);
-          else void adoptRemoteNodeContent(canvasId, content.changedNodeIds);
-        } else if (content?.reset && !versionMoved) {
-          // With the version moved too, the reload below reads everything.
-          revalidateAllContent(canvasId, reload);
-        }
+        // While a load is in flight its end asks instead. With the version
+        // moved too, the reload below reads everything.
+        if (
+          !canvasStore.isLoading &&
+          event.data.version === canvasStore.version
+        )
+          catchUpContent(current, reload);
         // Skip the catch-up reload while an initial/primary load is
         // still in flight. On fresh open the CanvasPage mount load
         // is already fetching the latest state, but it hasn't set
@@ -364,6 +483,7 @@ export const useCanvasSyncStore = create<CanvasSyncState>((set, get) => ({
     unsubscribe?.();
     unsubscribe = null;
     forgetSavedDuringLoad();
+    closeConnection();
     // Clear any lingering conflict toast — it's bound to the canvas we're
     // leaving and shouldn't bleed onto the next one.
     if (conflictToastId) {

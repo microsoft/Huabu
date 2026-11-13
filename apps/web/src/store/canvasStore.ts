@@ -207,6 +207,7 @@ import type {
   AgentChatContext,
   CanvasCommand,
   CanvasCommandType,
+  CanvasContentPosition,
   CanvasExecution,
   CanvasExecutionSource,
   CanvasNodeId,
@@ -410,6 +411,13 @@ type RFState = {
   /** Refresh permissions alone, retaining dirty content and history. */
   refreshCanvasAccess: () => Promise<void>;
   version: number;
+  /**
+   * The content position this page's node content is valid from: every
+   * content save up to it is shown (or being fetched). Set by a load, and
+   * moved on by the sync store each time it has asked the server for the
+   * saves after it. `null` until a load has brought one.
+   */
+  contentPosition: CanvasContentPosition | null;
   isLoading: boolean;
   canvasNotFound: boolean;
   moveSelectionDialogOpen: boolean;
@@ -1806,6 +1814,7 @@ export async function discardPendingSaves(canvasId: string): Promise<void> {
       nodes: [],
       edges: [],
       version: 0,
+      contentPosition: null,
       viewport: null,
       isLoading: false,
       canUndo: false,
@@ -2640,6 +2649,7 @@ const useCanvasStore = create<RFState>()(
       return promise;
     },
     version: 0,
+    contentPosition: null,
     isLoading: false,
     canvasNotFound: false,
     moveSelectionDialogOpen: false,
@@ -3844,6 +3854,7 @@ const useCanvasStore = create<RFState>()(
           viewport: loadedViewport,
           canvasTitle: response.title || 'Untitled',
           version: loadedVersion,
+          contentPosition: response.contentPosition ?? null,
           isLoading: false,
           canUndo: canvasHistoryManager.canUndo,
           canRedo: canvasHistoryManager.canRedo,

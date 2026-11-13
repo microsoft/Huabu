@@ -81,8 +81,7 @@ it.each(['close', 'failure', 'snapshot'] as const)(
   },
 );
 
-/** The `snapshot` event's data of a stream opened with `query`. */
-async function snapshotOf(query: string) {
+it('sends the Space version and nothing else in the snapshot', async () => {
   mocks.read.mockResolvedValue({ version: 7 });
   mocks.subscribe.mockReturnValue(mocks.unsubscribe);
   const app = Fastify();
@@ -90,7 +89,7 @@ async function snapshotOf(query: string) {
   const address = await app.listen({ port: 0, host: '127.0.0.1' });
   const controller = new AbortController();
   try {
-    const response = await fetch(`${address}/child/sync/stream${query}`, {
+    const response = await fetch(`${address}/child/sync/stream`, {
       signal: controller.signal,
     });
     const reader = response.body?.getReader();
@@ -100,45 +99,72 @@ async function snapshotOf(query: string) {
       if (!chunk || chunk.done) throw new Error('Stream ended early');
       body += new TextDecoder().decode(chunk.value);
     }
-    return JSON.parse(/event: snapshot\ndata: (.*)\n/.exec(body)?.[1] ?? '');
+    expect(
+      JSON.parse(/event: snapshot\ndata: (.*)\n/.exec(body)?.[1] ?? ''),
+    ).toEqual({ version: 7 });
   } finally {
     controller.abort();
     await vi.waitFor(() => expect(mocks.unsubscribe).toHaveBeenCalledOnce());
     await app.close();
   }
-}
-
-it('tells a first connection where the content sequence stands, and nothing more', async () => {
-  recordContentSave('child', ['n0']);
-  expect(await snapshotOf('')).toEqual({
-    version: 7,
-    content: contentWatermark(),
-  });
 });
 
-it('names the nodes whose content was saved since the position a reconnecting page gives', async () => {
+/** The answer of `GET /child/content/changes` asked from `since`. */
+async function changesSince(since: { epoch: string; seq: number }) {
+  mocks.read.mockResolvedValue({ version: 7 });
+  const app = Fastify();
+  await app.register(syncRoutes);
+  try {
+    const response = await app.inject({
+      method: 'GET',
+      url: `/child/content/changes?epoch=${encodeURIComponent(since.epoch)}&seq=${since.seq}`,
+    });
+    expect(response.statusCode).toBe(200);
+    return response.json();
+  } finally {
+    await app.close();
+  }
+}
+
+it('names the nodes whose content was saved since the position a page gives', async () => {
   const seen = contentWatermark();
   recordContentSave('child', ['n1']);
   recordContentSave('other-space', ['elsewhere']);
   recordContentSave('child', ['n2']);
-  expect(
-    await snapshotOf(`?contentEpoch=${seen.epoch}&contentSeq=${seen.seq}`),
-  ).toEqual({
-    version: 7,
-    content: { ...contentWatermark(), changedNodeIds: ['n1', 'n2'] },
+  expect(await changesSince(seen)).toEqual({
+    position: contentWatermark(),
+    changedNodeIds: ['n1', 'n2'],
   });
 });
 
 it('names nothing when nothing was saved since', async () => {
   const seen = contentWatermark();
-  expect(
-    await snapshotOf(`?contentEpoch=${seen.epoch}&contentSeq=${seen.seq}`),
-  ).toEqual({ version: 7, content: contentWatermark() });
+  expect(await changesSince(seen)).toEqual({ position: contentWatermark() });
 });
 
 it('says so when it cannot tell what was saved since', async () => {
   const seen = contentWatermark();
   expect(
-    await snapshotOf(`?contentEpoch=before-restart&contentSeq=${seen.seq}`),
-  ).toEqual({ version: 7, content: { ...contentWatermark(), reset: true } });
+    await changesSince({ epoch: 'before-restart', seq: seen.seq }),
+  ).toEqual({ position: contentWatermark(), reset: true });
+});
+
+it('refuses a content position that is not one, and a Space that does not exist', async () => {
+  const app = Fastify();
+  await app.register(syncRoutes);
+  try {
+    mocks.read.mockResolvedValue({ version: 7 });
+    for (const query of ['', '?epoch=e', '?epoch=e&seq=-1', '?epoch=e&seq=x'])
+      expect(
+        (await app.inject({ url: `/child/content/changes${query}` }))
+          .statusCode,
+      ).toBe(400);
+    mocks.read.mockResolvedValue(null);
+    expect(
+      (await app.inject({ url: '/child/content/changes?epoch=e&seq=0' }))
+        .statusCode,
+    ).toBe(404);
+  } finally {
+    await app.close();
+  }
 });

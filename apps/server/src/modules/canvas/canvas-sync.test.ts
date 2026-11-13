@@ -44,7 +44,7 @@ describe('canvas-sync publisher', () => {
     unsubscribe();
   });
 
-  it('stamps a content save with its sequence and records it with nobody listening', () => {
+  it('records a content save with nobody listening', () => {
     const before = contentWatermark();
     // No subscriber yet: the save is still recorded.
     publishCanvasUpdate('canvas-content', {
@@ -64,7 +64,7 @@ describe('canvas-sync publisher', () => {
       [
         {
           type: 'invalidate',
-          data: { nodeIds: ['n2'], contentSeq: before.seq + 2 },
+          data: { nodeIds: ['n2'] },
         },
       ],
       [{ type: 'invalidate', data: {} }],

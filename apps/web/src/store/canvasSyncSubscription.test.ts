@@ -9,14 +9,8 @@ import {
 } from './canvasSyncSubscription';
 
 vi.mock('@/api/canvasSync', () => ({
-  canvasSyncStreamUrl: (
-    id: string,
-    pageId: string,
-    contentSince?: { epoch: string; seq: number },
-  ) =>
-    `/sync/${id}?pageId=${pageId}${
-      contentSince ? `&since=${contentSince.epoch}:${contentSince.seq}` : ''
-    }`,
+  canvasSyncStreamUrl: (id: string, pageId: string) =>
+    `/sync/${id}?pageId=${pageId}`,
 }));
 vi.mock('./canvasStore/sync/pageId', () => ({ CANVAS_PAGE_ID: 'this-page' }));
 
@@ -153,58 +147,5 @@ it('tells presence listeners when the stream drops', async () => {
     await vi.waitFor(() => expect(presence.onDisconnect).toHaveBeenCalled());
   } finally {
     close();
-  }
-});
-
-it('reopens a dropped stream with the content position it had reached', async () => {
-  vi.useFakeTimers();
-  vi.spyOn(console, 'warn').mockImplementation(() => {});
-  const encode = new TextEncoder();
-  const streamOf = (...frames: string[]) =>
-    new Response(
-      new ReadableStream<Uint8Array>({
-        start(controller) {
-          for (const frame of frames) controller.enqueue(encode.encode(frame));
-          controller.close();
-        },
-      }),
-    );
-  const event = (type: string, data: unknown) =>
-    `event: ${type}\ndata: ${JSON.stringify(data)}\n\n`;
-  const fetchMock = vi
-    .fn<(url: string, options: RequestInit) => Promise<Response>>()
-    // The first stream reaches position 7 and then drops.
-    .mockResolvedValueOnce(
-      streamOf(
-        event('snapshot', { version: 1, content: { epoch: 'e1', seq: 4 } }),
-        event('invalidate', { nodeIds: ['n1'], contentSeq: 7 }),
-        // A read-model notice and an older save do not move it.
-        event('invalidate', {}),
-        event('invalidate', { nodeIds: ['n0'], contentSeq: 5 }),
-      ),
-    )
-    // The second is a restarted server: a new sequence.
-    .mockResolvedValueOnce(
-      streamOf(
-        event('snapshot', {
-          version: 1,
-          content: { epoch: 'e2', seq: 2, reset: true },
-        }),
-      ),
-    )
-    .mockResolvedValue(new Response(new ReadableStream()));
-  vi.stubGlobal('fetch', fetchMock);
-  const close = subscribeCanvasSync('reconnecting', vi.fn());
-  try {
-    await vi.advanceTimersByTimeAsync(5_000);
-    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
-      // A first connection has no position to give.
-      '/sync/reconnecting?pageId=this-page',
-      '/sync/reconnecting?pageId=this-page&since=e1:7',
-      '/sync/reconnecting?pageId=this-page&since=e2:2',
-    ]);
-  } finally {
-    close();
-    vi.useRealTimers();
   }
 });

@@ -9,24 +9,37 @@ import {
   useCanvasSyncStore,
 } from './canvasSyncStore';
 
+import type {
+  CanvasContentChangesResponse,
+  CanvasContentPosition,
+} from '@huabu/shared';
+
 const mocks = vi.hoisted(() => {
   const canvasState = {
     canvasId: 'canvas-1',
     version: 1,
+    contentPosition: null as { epoch: string; seq: number } | null,
     isLoading: false,
     nodes: [],
     pendingContentNodeIds: vi.fn(() => []),
     applyDeltasFromAgent: vi.fn(() => []),
     loadCanvas: vi.fn(async () => undefined),
-    _setStateNoAutosave: vi.fn(),
+    _setStateNoAutosave: vi.fn((partial: Record<string, unknown>) => {
+      Object.assign(canvasState, partial);
+    }),
   };
   const setSpaceTitle = vi.fn();
-  const adoptRemoteNodeContent = vi.fn(async () => []);
+  const adoptRemoteNodeContent = vi.fn(
+    async (_canvasId: string, nodeIds: readonly string[]) =>
+      nodeIds.map(() => 'applied'),
+  );
+  const getCanvasContentChanges = vi.fn();
   const storeListeners = new Set<(state: typeof canvasState) => void>();
   return {
     canvasState,
     setSpaceTitle,
     adoptRemoteNodeContent,
+    getCanvasContentChanges,
     storeListeners,
   };
 });
@@ -38,6 +51,7 @@ vi.mock('@/api/_client', () => ({
 vi.mock('@/api/canvasSync', () => ({
   canvasSyncStreamUrl: (canvasId: string) =>
     `/api/canvas/${canvasId}/sync/stream`,
+  getCanvasContentChanges: mocks.getCanvasContentChanges,
 }));
 vi.mock('@/components/Common/Toast', () => ({
   dismissToast: vi.fn(),
@@ -310,11 +324,14 @@ describe('canvasSyncStore stream recovery', () => {
       expect(mocks.adoptRemoteNodeContent.mock.calls).toEqual([
         ['canvas-1', ['n1', 'n2']],
       ]);
-      expect(mocks.storeListeners.size).toBe(0);
+      // The wait for the load is over; only the connection's own watch of
+      // loads is left.
+      expect(mocks.storeListeners.size).toBe(1);
     });
   });
 
-  describe('node content saved while the stream was down', () => {
+  describe('node content saved before the stream was open', () => {
+    const LOADED: CanvasContentPosition = { epoch: 'e', seq: 4 };
     const connectWithSnapshot = async (data: unknown) => {
       const stream = new ReadableStream<Uint8Array>({
         start(controller) {
@@ -334,51 +351,147 @@ describe('canvasSyncStore stream recovery', () => {
         id: `${type}-${index}`,
         type,
       })) as never;
+    const answer = (response: CanvasContentChangesResponse) =>
+      mocks.getCanvasContentChanges.mockResolvedValueOnce(response);
+    /** The store finishes a load that brought `version` and `position`. */
+    const endLoad = async (
+      version: number,
+      position: CanvasContentPosition | null,
+    ) => {
+      mocks.canvasState.version = version;
+      mocks.canvasState.contentPosition = position;
+      mocks.canvasState.isLoading = false;
+      for (const listener of [...mocks.storeListeners])
+        listener(mocks.canvasState);
+      await vi.advanceTimersByTimeAsync(100);
+    };
 
     beforeEach(() => {
       mocks.adoptRemoteNodeContent.mockClear();
+      mocks.getCanvasContentChanges.mockReset();
+      mocks.getCanvasContentChanges.mockResolvedValue({
+        position: { epoch: 'e', seq: 9 },
+      });
       mocks.storeListeners.clear();
       mocks.canvasState.isLoading = false;
       mocks.canvasState.version = 1;
+      mocks.canvasState.contentPosition = LOADED;
       mocks.canvasState.nodes = [];
     });
     afterEach(() => {
       mocks.canvasState.nodes = [];
+      mocks.canvasState.contentPosition = null;
     });
 
-    it('fetches the nodes the snapshot names, without loading the Space', async () => {
-      await connectWithSnapshot({
-        version: 1,
-        content: { epoch: 'e', seq: 9, changedNodeIds: ['n1', 'n2'] },
+    it('asks from the position the load brought when the stream first opens, and fetches what was saved since', async () => {
+      // The Space was loaded, then the stream opened: a save in between
+      // reached no stream.
+      answer({
+        position: { epoch: 'e', seq: 9 },
+        changedNodeIds: ['n1', 'n2'],
       });
+      await connectWithSnapshot({ version: 1 });
+
+      expect(mocks.getCanvasContentChanges.mock.calls).toEqual([
+        ['canvas-1', LOADED],
+      ]);
       expect(mocks.adoptRemoteNodeContent.mock.calls).toEqual([
         ['canvas-1', ['n1', 'n2']],
       ]);
+      // The next check asks from where this one ended.
+      expect(mocks.canvasState.contentPosition).toEqual({ epoch: 'e', seq: 9 });
       expect(mocks.canvasState.loadCanvas).not.toHaveBeenCalled();
     });
 
-    it('does nothing for a snapshot that names nothing', async () => {
-      await connectWithSnapshot({
-        version: 1,
-        content: { epoch: 'e', seq: 9 },
-      });
+    it('fetches nothing when nothing was saved since, and still moves the position on', async () => {
+      await connectWithSnapshot({ version: 1 });
       expect(mocks.adoptRemoteNodeContent).not.toHaveBeenCalled();
+      expect(mocks.canvasState.contentPosition).toEqual({ epoch: 'e', seq: 9 });
       expect(mocks.canvasState.loadCanvas).not.toHaveBeenCalled();
     });
 
-    it('fetches the named nodes once a load in progress has ended', async () => {
+    it('asks once the load in flight ends, from the position that load brought', async () => {
+      // The stream opened first; the load's read may predate a save that
+      // predates the subscription.
       mocks.canvasState.isLoading = true;
-      await connectWithSnapshot({
-        version: 5,
-        content: { epoch: 'e', seq: 9, changedNodeIds: ['n1'] },
-      });
-      expect(mocks.adoptRemoteNodeContent).not.toHaveBeenCalled();
-      mocks.canvasState.isLoading = false;
-      for (const listener of [...mocks.storeListeners])
-        listener(mocks.canvasState);
+      mocks.canvasState.contentPosition = null;
+      await connectWithSnapshot({ version: 5 });
+      expect(mocks.getCanvasContentChanges).not.toHaveBeenCalled();
+
+      answer({ position: { epoch: 'e', seq: 12 }, changedNodeIds: ['n1'] });
+      await endLoad(5, { epoch: 'e', seq: 11 });
+      expect(mocks.getCanvasContentChanges.mock.calls).toEqual([
+        ['canvas-1', { epoch: 'e', seq: 11 }],
+      ]);
       expect(mocks.adoptRemoteNodeContent.mock.calls).toEqual([
         ['canvas-1', ['n1']],
       ]);
+      expect(mocks.canvasState.loadCanvas).not.toHaveBeenCalled();
+    });
+
+    it('loads again when the load in flight ends behind the version the stream named', async () => {
+      // The load read version 4; a commit made it 5 before the stream was
+      // subscribed, so no update for it was ever sent to this page.
+      mocks.canvasState.isLoading = true;
+      await connectWithSnapshot({ version: 5 });
+      await endLoad(4, LOADED);
+      expect(mocks.canvasState.loadCanvas).toHaveBeenCalledTimes(1);
+      expect(mocks.getCanvasContentChanges).not.toHaveBeenCalled();
+
+      // That load brings version 5: nothing more to reload, content is asked.
+      mocks.canvasState.isLoading = true;
+      for (const listener of [...mocks.storeListeners])
+        listener(mocks.canvasState);
+      await endLoad(5, { epoch: 'e', seq: 6 });
+      expect(mocks.canvasState.loadCanvas).toHaveBeenCalledTimes(1);
+      expect(mocks.getCanvasContentChanges.mock.calls).toEqual([
+        ['canvas-1', { epoch: 'e', seq: 6 }],
+      ]);
+    });
+
+    it('does not load again and again when a load cannot reach the version named', async () => {
+      mocks.canvasState.isLoading = true;
+      await connectWithSnapshot({ version: 5 });
+      await endLoad(4, LOADED);
+      mocks.canvasState.isLoading = true;
+      for (const listener of [...mocks.storeListeners])
+        listener(mocks.canvasState);
+      await endLoad(4, LOADED);
+      expect(mocks.canvasState.loadCanvas).toHaveBeenCalledTimes(1);
+    });
+
+    it('asks again after a reload that ends with the stream open', async () => {
+      await connectWithSnapshot({ version: 1 });
+      mocks.getCanvasContentChanges.mockClear();
+
+      mocks.canvasState.isLoading = true;
+      for (const listener of [...mocks.storeListeners])
+        listener(mocks.canvasState);
+      await endLoad(1, { epoch: 'e', seq: 20 });
+      expect(mocks.getCanvasContentChanges.mock.calls).toEqual([
+        ['canvas-1', { epoch: 'e', seq: 20 }],
+      ]);
+    });
+
+    it('keeps the position and asks again when the check or a fetch fails', async () => {
+      mocks.getCanvasContentChanges.mockRejectedValueOnce(new Error('offline'));
+      await connectWithSnapshot({ version: 1 });
+      expect(mocks.canvasState.contentPosition).toEqual(LOADED);
+
+      // The retry names a node whose fetch then fails once.
+      answer({ position: { epoch: 'e', seq: 9 }, changedNodeIds: ['n1'] });
+      mocks.adoptRemoteNodeContent.mockResolvedValueOnce(['failed']);
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(mocks.canvasState.contentPosition).toEqual(LOADED);
+
+      answer({ position: { epoch: 'e', seq: 9 }, changedNodeIds: ['n1'] });
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(mocks.getCanvasContentChanges.mock.calls).toEqual([
+        ['canvas-1', LOADED],
+        ['canvas-1', LOADED],
+        ['canvas-1', LOADED],
+      ]);
+      expect(mocks.canvasState.contentPosition).toEqual({ epoch: 'e', seq: 9 });
     });
 
     it('checks every node with saved content, a few at a time, when the server cannot tell', async () => {
@@ -387,34 +500,31 @@ describe('canvasSyncStore stream recovery', () => {
         // A Space card has no saved content of its own.
         ...(nodesOf(2, 'spacePreview') as never[]),
       ] as never;
-      await connectWithSnapshot({
-        version: 1,
-        content: { epoch: 'e2', seq: 0, reset: true },
-      });
+      answer({ position: { epoch: 'e2', seq: 0 }, reset: true });
+      await connectWithSnapshot({ version: 1 });
       expect(mocks.adoptRemoteNodeContent.mock.calls).toEqual([
         ['canvas-1', ['note-0', 'note-1', 'note-2', 'note-3']],
         ['canvas-1', ['note-4', 'note-5']],
       ]);
+      expect(mocks.canvasState.contentPosition).toEqual({
+        epoch: 'e2',
+        seq: 0,
+      });
       expect(mocks.canvasState.loadCanvas).not.toHaveBeenCalled();
     });
 
     it('loads the Space once instead when it has too many nodes to check one by one', async () => {
       mocks.canvasState.nodes = nodesOf(CONTENT_REVALIDATE_LIMIT + 1);
-      await connectWithSnapshot({
-        version: 1,
-        content: { epoch: 'e2', seq: 0, reset: true },
-      });
+      answer({ position: { epoch: 'e2', seq: 0 }, reset: true });
+      await connectWithSnapshot({ version: 1 });
       expect(mocks.adoptRemoteNodeContent).not.toHaveBeenCalled();
       expect(mocks.canvasState.loadCanvas).toHaveBeenCalledTimes(1);
     });
 
     it('leaves it to the reload when the version moved as well', async () => {
       mocks.canvasState.nodes = nodesOf(3);
-      await connectWithSnapshot({
-        version: 2,
-        content: { epoch: 'e2', seq: 0, reset: true },
-      });
-      expect(mocks.adoptRemoteNodeContent).not.toHaveBeenCalled();
+      await connectWithSnapshot({ version: 2 });
+      expect(mocks.getCanvasContentChanges).not.toHaveBeenCalled();
       expect(mocks.canvasState.loadCanvas).toHaveBeenCalledTimes(1);
     });
   });

@@ -104,16 +104,13 @@ export const routes = {
     `/canvas/${enc(canvasId)}/external/stream`,
   canvasExternalImport: (canvasId: string) =>
     `/canvas/${enc(canvasId)}/external/import`,
-  canvasSyncStream: (
+  canvasSyncStream: (canvasId: string, pageId: string) =>
+    `/canvas/${enc(canvasId)}/sync/stream?pageId=${enc(pageId)}`,
+  canvasContentChanges: (
     canvasId: string,
-    pageId: string,
-    contentSince?: { epoch: string; seq: number },
+    since: { epoch: string; seq: number },
   ) =>
-    `/canvas/${enc(canvasId)}/sync/stream?pageId=${enc(pageId)}${
-      contentSince
-        ? `&contentEpoch=${enc(contentSince.epoch)}&contentSeq=${contentSince.seq}`
-        : ''
-    }`,
+    `/canvas/${enc(canvasId)}/content/changes?epoch=${enc(since.epoch)}&seq=${since.seq}`,
   canvasPresence: (canvasId: string) => `/canvas/${enc(canvasId)}/presence`,
   canvasPresenceLeave: (canvasId: string) =>
     `/canvas/${enc(canvasId)}/presence/leave`,

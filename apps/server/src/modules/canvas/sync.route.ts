@@ -8,10 +8,12 @@
  * connect it emits one `snapshot` event carrying the canvas's current
  * `version` (so a client that connected after a mutation can detect the
  * gap and `loadCanvas` to catch up), then forwards every subsequent
- * `update` published by `publishCanvasUpdate`. The snapshot also carries the
- * content position, and for a page that reconnects with the position it
- * last saw, the nodes whose content was saved meanwhile (see
- * `content-watermark.ts`).
+ * `update` published by `publishCanvasUpdate`.
+ *
+ * `GET /:canvasId/content/changes` answers what the version cannot: which
+ * nodes had their content saved after a given content position (see
+ * `content-watermark.ts`). A page asks once its stream is open, from the
+ * position its loaded content is valid from.
  *
  * The same stream carries `presence` events (see `canvas-presence.ts`). A
  * page that opens it with `?pageId=` is not sent its own presence, and that
@@ -21,6 +23,7 @@
  */
 
 import {
+  canvasContentChangesQuerySchema,
   canvasSyncStreamQuerySchema,
   recentCanvasConversationParamsSchema,
 } from '@huabu/shared';
@@ -31,7 +34,11 @@ import { contentSavedSince, contentWatermark } from './content-watermark.js';
 import { presenceSpaceKey } from './presence.route.js';
 import { space } from '../storage/index.js';
 
-import type { CanvasPresenceEvent, CanvasSyncEvent } from '@huabu/shared';
+import type {
+  CanvasContentChangesResponse,
+  CanvasPresenceEvent,
+  CanvasSyncEvent,
+} from '@huabu/shared';
 import type { FastifyPluginAsync } from 'fastify';
 
 /** Pointer positions are skipped for a stream this far behind; the next one supersedes them. */
@@ -61,7 +68,7 @@ const syncRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
           message: query.error.issues[0]?.message ?? 'Invalid page ID',
         });
       const { canvasId } = params.data;
-      const { pageId, contentEpoch, contentSeq } = query.data;
+      const { pageId } = query.data;
       const presenceKey = presenceSpaceKey(canvasId);
       reply.hijack();
       reply.raw.writeHead(200, {
@@ -134,36 +141,47 @@ const syncRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
         return;
       }
       if (closed) return;
-      // Read in the same tick as the snapshot is written: every content
-      // save recorded so far is either named here or, being after the
-      // subscription above, also delivered as its own event.
-      const watermark = contentWatermark();
-      const savedSince =
-        contentEpoch !== undefined && contentSeq !== undefined
-          ? contentSavedSince(canvasId, {
-              epoch: contentEpoch,
-              seq: contentSeq,
-            })
-          : undefined;
       writeSSE(reply.raw, {
         type: 'snapshot',
-        data: {
-          version: canvas?.version ?? 0,
-          content: {
-            ...watermark,
-            ...(savedSince === null
-              ? { reset: true }
-              : savedSince?.length
-                ? { changedNodeIds: savedSince }
-                : {}),
-          },
-        },
+        data: { version: canvas?.version ?? 0 },
       });
       snapshotSent = true;
       for (const event of pending) writeSSE(reply.raw, event);
       pending.length = 0;
     },
   );
+
+  fastify.get<{
+    Params: { canvasId: string };
+    Querystring: unknown;
+    Reply: CanvasContentChangesResponse | { message: string };
+  }>('/:canvasId/content/changes', async (request, reply) => {
+    reply.header('Cache-Control', 'no-store');
+    const params = recentCanvasConversationParamsSchema.safeParse(
+      request.params,
+    );
+    if (!params.success)
+      return reply.code(400).send({
+        message: params.error.issues[0]?.message ?? 'Invalid canvas ID',
+      });
+    const query = canvasContentChangesQuerySchema.safeParse(request.query);
+    if (!query.success)
+      return reply.code(400).send({
+        message: query.error.issues[0]?.message ?? 'Invalid content position',
+      });
+    const { canvasId } = params.data;
+    if (!(await space(canvasId).read()))
+      return reply.code(404).send({ message: 'Canvas not found' });
+    const changed = contentSavedSince(canvasId, query.data);
+    return reply.send({
+      position: contentWatermark(),
+      ...(changed === null
+        ? { reset: true }
+        : changed.length
+          ? { changedNodeIds: changed }
+          : {}),
+    });
+  });
 };
 
 export default syncRoutes;

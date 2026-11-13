@@ -26,6 +26,7 @@ import { nodeRevisionOf } from '@huabu/shared/canvas-engine';
 
 import { subscribeCanvasUpdates } from './canvas-sync.js';
 import canvasRoutes from './canvas.route.js';
+import syncRoutes from './sync.route.js';
 import {
   getCanvasStore,
   getStorage,
@@ -43,6 +44,7 @@ const REV_EMPTY = nodeRevisionOf({});
 async function buildApp() {
   const app = fastify();
   await app.register(canvasRoutes, { prefix: '/canvas' });
+  await app.register(syncRoutes, { prefix: '/canvas' });
   await app.ready();
   return app;
 }
@@ -87,6 +89,123 @@ afterEach(() => {
   rmSync(tmp, { recursive: true, force: true });
 });
 
+describe('content saved after a load', () => {
+  /** Add a second note to the seeded Space's record. */
+  function addNote(canvasId: string, nodeId: string): void {
+    const store = getCanvasStore(canvasId);
+    const record = store.read();
+    if (!record) throw new Error('Space is missing');
+    store.write({
+      ...record,
+      state: {
+        ...record.state,
+        nodes: [
+          ...record.state.nodes,
+          {
+            id: nodeId,
+            type: 'note',
+            position: { x: 0, y: 200 },
+            data: { label: nodeId },
+          },
+        ],
+      },
+    });
+  }
+
+  it('is named when asked from the position that load carried: a body, and a title alone', async () => {
+    const app = await buildApp();
+    try {
+      seedCanvas('c1', 'n1', 'Note');
+      addNote('c1', 'n2');
+      for (const nodeId of ['n1', 'n2'])
+        expect(
+          (
+            await putContent(app, 'c1', nodeId, {
+              nodeType: 'note',
+              content: `first ${nodeId}`,
+              expectRev: REV_EMPTY,
+            })
+          ).statusCode,
+        ).toBe(200);
+
+      // A page loads the Space. Its stream is not open yet.
+      const loaded = (
+        await app.inject({ method: 'GET', url: '/canvas/c1' })
+      ).json() as {
+        version: number;
+        contentPosition: { epoch: string; seq: number };
+      };
+      expect(loaded.contentPosition).toEqual({
+        epoch: expect.any(String),
+        seq: expect.any(Number),
+      });
+      const changesSince = async (position: { epoch: string; seq: number }) =>
+        (
+          await app.inject({
+            method: 'GET',
+            url: `/canvas/c1/content/changes?epoch=${encodeURIComponent(position.epoch)}&seq=${position.seq}`,
+          })
+        ).json() as {
+          position: { epoch: string; seq: number };
+          changedNodeIds?: string[];
+          reset?: boolean;
+        };
+
+      // Another page saves a body, and on the other node a title only.
+      // Neither changes the Space version.
+      const first = await app.inject({
+        method: 'GET',
+        url: '/canvas/c1/nodes/n1/content',
+      });
+      expect(
+        (
+          await putContent(app, 'c1', 'n1', {
+            nodeType: 'note',
+            content: 'saved in the gap',
+            expectRev: (first.json() as { rev: string }).rev,
+            pageId: 'another-page',
+          })
+        ).statusCode,
+      ).toBe(200);
+      const second = await app.inject({
+        method: 'GET',
+        url: '/canvas/c1/nodes/n2/content',
+      });
+      expect(
+        (
+          await putContent(app, 'c1', 'n2', {
+            nodeType: 'note',
+            label: 'Renamed in the gap',
+            labelSource: 'user',
+            expectRev: (second.json() as { rev: string }).rev,
+            pageId: 'another-page',
+          })
+        ).statusCode,
+      ).toBe(200);
+      expect(
+        (
+          (await app.inject({ method: 'GET', url: '/canvas/c1' })).json() as {
+            version: number;
+          }
+        ).version,
+      ).toBe(loaded.version);
+
+      const answer = await changesSince(loaded.contentPosition);
+      expect(answer.reset).toBeUndefined();
+      expect(answer.changedNodeIds).toEqual(
+        expect.arrayContaining(['n1', 'n2']),
+      );
+      // The answer's position is the one a load made now would carry.
+      const reloaded = (
+        await app.inject({ method: 'GET', url: '/canvas/c1' })
+      ).json() as { contentPosition: { epoch: string; seq: number } };
+      expect(answer.position).toEqual(reloaded.contentPosition);
+    } finally {
+      await app.close();
+    }
+  });
+});
+
 describe('PUT /nodes/:nodeId/content — content CAS', () => {
   it('notifies the affected node after content save and sidecar deletion, not a rejected CAS', async () => {
     const app = await buildApp();
@@ -105,7 +224,7 @@ describe('PUT /nodes/:nodeId/content — content CAS', () => {
       ).toBe(200);
       expect(received).toHaveBeenCalledExactlyOnceWith({
         type: 'invalidate',
-        data: { nodeIds: ['n1'], contentSeq: expect.any(Number) },
+        data: { nodeIds: ['n1'] },
       });
       received.mockClear();
       expect(
@@ -124,7 +243,7 @@ describe('PUT /nodes/:nodeId/content — content CAS', () => {
       ).toBe(200);
       expect(received).toHaveBeenCalledExactlyOnceWith({
         type: 'invalidate',
-        data: { nodeIds: ['n1'], contentSeq: expect.any(Number) },
+        data: { nodeIds: ['n1'] },
       });
     } finally {
       unsubscribe();
@@ -153,11 +272,7 @@ describe('PUT /nodes/:nodeId/content — content CAS', () => {
       expect(saved.statusCode).toBe(200);
       expect(received).toHaveBeenCalledExactlyOnceWith({
         type: 'invalidate',
-        data: {
-          nodeIds: ['n1'],
-          originPageId: 'page-a',
-          contentSeq: expect.any(Number),
-        },
+        data: { nodeIds: ['n1'], originPageId: 'page-a' },
       });
 
       const fetched = await app.inject({

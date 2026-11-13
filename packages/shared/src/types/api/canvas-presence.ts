@@ -80,13 +80,6 @@ export type CanvasPresenceLeaveBody = z.infer<
 /** Query of the Canvas Sync stream. */
 export const canvasSyncStreamQuerySchema = z.object({
   pageId: pageIdSchema.optional(),
-  /**
-   * The content position the page last saw (`snapshot.content`), sent when
-   * it reconnects so the server can name the nodes saved since. Both or
-   * neither.
-   */
-  contentEpoch: z.string().min(1).max(64).optional(),
-  contentSeq: z.coerce.number().int().min(0).optional(),
 });
 export type CanvasSyncStreamQuery = z.infer<typeof canvasSyncStreamQuerySchema>;
 
