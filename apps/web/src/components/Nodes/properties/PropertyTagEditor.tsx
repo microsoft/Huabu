@@ -2,7 +2,7 @@
 // Licensed under the MIT license.
 
 import { X } from 'lucide-react';
-import { useId, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { POPOVER_SURFACE_CLASS } from '@/components/Common/Popover';
@@ -66,9 +66,19 @@ export function PropertyTagEditor({
         ? 0
         : null;
   const add = (tag: string) => {
+    // A save is in flight with the list as it was; a change now would be
+    // dropped when that save clears the draft.
+    if (disabled) return;
     setCursor(null);
     onChange({ items: withTag(items, tag), text: '' });
   };
+  // Arrow keys can move the highlight past the list's visible rows.
+  useEffect(() => {
+    if (active === null) return;
+    document
+      .getElementById(`${listId}-${active}`)
+      ?.scrollIntoView?.({ block: 'nearest' });
+  }, [active, listId]);
 
   return (
     <div

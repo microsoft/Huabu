@@ -617,3 +617,68 @@ it("lets Enter on a tag's remove button remove the tag instead of saving", async
   expect(save).not.toHaveBeenCalled();
   expect(container.querySelector('form')).not.toBeNull();
 });
+
+it('ignores a tag option clicked while a save is in flight', async () => {
+  let finish: () => void = () => {};
+  save.mockImplementation(
+    () => new Promise<void>((resolve) => (finish = resolve)),
+  );
+  act(() =>
+    root.render(
+      <NodeProperties
+        properties={{ Keywords: ['ink'] }}
+        displayKeys={[]}
+        readOnly={false}
+        tagOptions={() => ['agents', 'canvas']}
+        onSave={save}
+      />,
+    ),
+  );
+  click('node.editProperty:Keywords');
+  act(() => option('agents')?.click());
+  await submit();
+  expect(save).toHaveBeenCalledExactlyOnceWith({
+    properties: { Keywords: ['ink', 'agents'] },
+  });
+  // The pending save holds the list as it was: a later pick would be lost
+  // when that save clears the draft, so it is not taken at all.
+  act(() => option('canvas')?.click());
+  expect(
+    Array.from(container.querySelectorAll('form [data-property-tag]')).map(
+      (tag) => tag.textContent,
+    ),
+  ).toEqual(['ink', 'agents']);
+  await act(async () => finish());
+});
+
+it('scrolls the option highlighted from the keyboard into view', () => {
+  const scrolled: string[] = [];
+  const original = Element.prototype.scrollIntoView;
+  Element.prototype.scrollIntoView = function (this: Element) {
+    scrolled.push(this.textContent ?? '');
+  };
+  try {
+    act(() =>
+      root.render(
+        <NodeProperties
+          properties={{ Keywords: [] }}
+          displayKeys={[]}
+          readOnly={false}
+          tagOptions={() => ['agents', 'canvas', 'ink']}
+          onSave={save}
+        />,
+      ),
+    );
+    click('node.editProperty:Keywords');
+    const field = container.querySelector('[role="combobox"]');
+    for (let press = 0; press < 2; press += 1)
+      act(() => {
+        field?.dispatchEvent(
+          new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }),
+        );
+      });
+    expect(scrolled).toEqual(['agents', 'canvas']);
+  } finally {
+    Element.prototype.scrollIntoView = original;
+  }
+});

@@ -201,6 +201,19 @@ describe('text group that cannot open', () => {
   });
 });
 
+describe('many text properties', () => {
+  it('allocates thousands of them without work that grows with their square', () => {
+    const started = performance.now();
+    const budget = allocate(6, {
+      title: 1,
+      texts: Array.from({ length: 20000 }, () => 3),
+    });
+    expect(performance.now() - started).toBeLessThan(100);
+    expect(budget.textLines.slice(0, 3)).toEqual([3, 2, 0]);
+    expect(budget.textLines.reduce((sum, lines) => sum + lines, 0)).toBe(5);
+  });
+});
+
 describe('cardTextHeight', () => {
   const sizes = {
     titleLine: 30,

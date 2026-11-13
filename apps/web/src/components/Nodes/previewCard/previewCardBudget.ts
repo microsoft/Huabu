@@ -61,6 +61,8 @@ interface Block {
   cost: (n: number) => number;
   need: number;
   count: number;
+  /** Set on text properties: called when the block gets its first line. */
+  onShown?: () => void;
 }
 
 export function allocateCardLines(input: CardBudgetInput): CardBudget {
@@ -80,21 +82,19 @@ export function allocateCardLines(input: CardBudgetInput): CardBudget {
   // whichever one that turns out to be; only properties after it join at the
   // inner gap. (A later one must not slip in cheaply past an earlier one that
   // could not afford to open the group.)
-  const texts: Block[] = [];
-  for (const need of input.textNeeds) {
-    const earlier = [...texts];
-    texts.push({
-      cost: (n) =>
-        input.textLine +
-        (n > 1
-          ? 0
-          : earlier.some((text) => text.count > 0)
-            ? input.textInnerGap
-            : input.textGap),
-      need,
-      count: 0,
-    });
-  }
+  // Lines are granted in property order and every property costs the same
+  // to open, so once one is shown every later one follows an open group.
+  let groupOpen = false;
+  const texts: Block[] = input.textNeeds.map((need) => ({
+    cost: (n) =>
+      input.textLine +
+      (n > 1 ? 0 : groupOpen ? input.textInnerGap : input.textGap),
+    need,
+    count: 0,
+    onShown: () => {
+      groupOpen = true;
+    },
+  }));
   const summary: Block = {
     cost: (n) => input.textLine + (n === 1 ? input.summaryGap : 0),
     need: input.summaryNeed,
@@ -107,6 +107,7 @@ export function allocateCardLines(input: CardBudgetInput): CardBudget {
     while (block.count < target && block.cost(block.count + 1) <= left) {
       left -= block.cost(block.count + 1);
       block.count += 1;
+      if (block.count === 1) block.onShown?.();
     }
   };
 

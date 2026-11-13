@@ -257,6 +257,8 @@ export async function importForeignNodeSources(
             data?.['src'],
             mode.allowRemoteDownload,
             mode.allowedLocalExtensions,
+            undefined,
+            stagedCoverUploads,
           );
           if (key === null) return node;
           // Cast back to the discriminated create-input union — the engine
@@ -289,6 +291,8 @@ export async function importForeignNodeSources(
             entry.patch?.['src'],
             mode.allowRemoteDownload,
             mode.allowedLocalExtensions,
+            undefined,
+            stagedCoverUploads,
           );
           if (key === null) return entry;
           return { ...entry, patch: { ...entry.patch, src: key } };
@@ -436,6 +440,7 @@ async function resolveImportedSrc(
   allowRemoteDownload: boolean,
   allowedLocalExtensions?: ReadonlySet<string>,
   deferredUploads?: string[],
+  keptUploads?: readonly string[],
 ): Promise<string | null> {
   if (typeof raw !== 'string' || raw.length === 0) return null;
   const src = raw;
@@ -504,7 +509,13 @@ async function resolveImportedSrc(
     return null;
   }
 
-  return await copyToArtifact(canvasId, absPath, physicalRel, deferredUploads);
+  return await copyToArtifact(
+    canvasId,
+    absPath,
+    physicalRel,
+    deferredUploads,
+    keptUploads,
+  );
 }
 
 /** Copy a canvas-local file into blob storage, returning the new key. */
@@ -513,6 +524,7 @@ async function copyToArtifact(
   absPath: string,
   physicalRel: string,
   deferredUploads?: string[],
+  keptUploads?: readonly string[],
 ): Promise<string | null> {
   try {
     const ext = path.extname(absPath) || '.bin';
@@ -528,7 +540,8 @@ async function copyToArtifact(
     if (!normalized.startsWith(UPLOAD_DIR_NAME + '/')) return key;
     // A caller that may still reject the batch reclaims the upload itself.
     if (deferredUploads) deferredUploads.push(absPath);
-    else {
+    // Already owed to a cover in this batch: its owner decides when it goes.
+    else if (!keptUploads?.includes(absPath)) {
       try {
         await rm(absPath, { force: true });
       } catch {

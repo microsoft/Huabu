@@ -709,6 +709,37 @@ describe('importForeignNodeSources — PDF covers', () => {
     expect(existsSync(staged)).toBe(false);
   });
 
+  it('keeps an upload shared by a cover and a source for a caller that may still reject the batch', async () => {
+    seedNodes('pdf');
+    const staged = stageBytes('shared.png', PNG);
+    const stagedCoverUploads: string[] = [];
+
+    const out = await importForeignNodeSources(
+      canvasId,
+      [
+        ...mergeCovers('upload/shared.png'),
+        {
+          type: 'CREATE_NODES',
+          nodes: [
+            {
+              id: 'node-image',
+              nodeType: 'image',
+              position: { x: 0, y: 0 },
+              data: { src: 'upload/shared.png' },
+            },
+          ],
+        } as unknown as CanvasCommand,
+      ],
+      { agentCovers: true, stagedCoverUploads },
+    );
+
+    expect(firstSrc(out)).toMatch(/^artifact-.+\.png$/);
+    // Source normalization did not take the file the cover still owes to a
+    // possible retry.
+    expect(existsSync(staged)).toBe(true);
+    expect(stagedCoverUploads).toEqual([staged]);
+  });
+
   it('hands consumed cover uploads to a caller that reclaims them itself', async () => {
     seedNodes('pdf');
     const staged = stageBytes('cover.png', PNG);
