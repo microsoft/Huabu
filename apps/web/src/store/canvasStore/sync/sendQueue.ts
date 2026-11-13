@@ -18,6 +18,12 @@
  * Retries are bounded by attempts and by elapsed time. Past either limit
  * the lane stalls: nothing is dropped and nothing is sent until the caller
  * resumes or discards it.
+ *
+ * A derived entry reports something the page computed (a measured height or
+ * box), not something the user did. It is sent like any other, but it is not
+ * unsent work: a lane that reaches the limit holding only derived entries
+ * gives them up instead of stalling, and `derivedPending` lets callers leave
+ * them out of what they tell or ask the user.
  */
 
 import { ApiError } from '@/api/_client';
@@ -44,6 +50,8 @@ export interface SendQueueEntry {
   readonly id: string;
   readonly canvasId: string;
   readonly commands: CanvasCommand[];
+  /** Every batch in the entry is a derived report; see the module comment. */
+  readonly derived: boolean;
   /** Resolves once the entry leaves the queue. Never rejects. */
   readonly settled: Promise<SendOutcome>;
 }
@@ -63,6 +71,8 @@ export interface SendQueueStatus {
   phase: SendQueuePhase;
   /** Entries not yet answered. */
   pending: number;
+  /** How many of them are derived reports rather than the user's edits. */
+  derivedPending: number;
   /** Consecutive failed attempts; above zero the Space is unsynced. */
   failures: number;
 }
@@ -109,6 +119,8 @@ export interface EnqueueOptions {
    * sending it.
    */
   gate?: Promise<unknown>;
+  /** The batch is a derived report, not an edit the user made. */
+  derived?: boolean;
 }
 
 export interface EnqueueResult {
@@ -126,6 +138,8 @@ export interface SendQueue {
   status(canvasId: string): SendQueueStatus;
   /** Whether `canvasId` has entries not yet answered. */
   hasPending(canvasId: string): boolean;
+  /** Whether `canvasId` has an unanswered entry that is the user's edit. */
+  hasUserPending(canvasId: string): boolean;
   /** Whether `operationId` is a request this page issued. */
   isOwn(operationId: string): boolean;
   /** Resolves when the lane is empty, or as soon as it stalls. */
@@ -178,6 +192,7 @@ function isExecuteResponse(value: unknown): value is PostCanvasExecuteResponse {
 }
 
 interface Entry extends SendQueueEntry {
+  derived: boolean;
   gate?: Promise<unknown>;
   sending: boolean;
   attempted: boolean;
@@ -231,6 +246,7 @@ export function createSendQueue(options: SendQueueOptions): SendQueue {
     canvasId: lane.canvasId,
     phase: lane.phase,
     pending: lane.entries.length,
+    derivedPending: lane.entries.filter((entry) => entry.derived).length,
     failures: lane.failures,
   });
 
@@ -309,6 +325,15 @@ export function createSendQueue(options: SendQueueOptions): SendQueue {
             lane.failures >= retry.maxAttempts ||
             now() - lane.firstFailureAt >= retry.maxElapsedMs
           ) {
+            if (lane.entries.every((queued) => queued.derived)) {
+              // Nothing of the user's is waiting: give the reports up
+              // rather than ask the user to decide about them.
+              lane.failures = 0;
+              lane.firstFailureAt = null;
+              for (const queued of [...lane.entries])
+                settle(lane, queued, { kind: 'failed', error, sent: false });
+              continue;
+            }
             setPhase(lane, 'stalled');
             break;
           }
@@ -361,6 +386,7 @@ export function createSendQueue(options: SendQueueOptions): SendQueue {
       ) {
         const offset = last.commands.length;
         last.commands.push(...commands);
+        last.derived &&= enqueueOptions?.derived === true;
         publish(lane);
         return { entry: last, offset };
       }
@@ -372,6 +398,7 @@ export function createSendQueue(options: SendQueueOptions): SendQueue {
         id: createId(),
         canvasId,
         commands: [...commands],
+        derived: enqueueOptions?.derived === true,
         settled,
         ...(enqueueOptions?.gate ? { gate: enqueueOptions.gate } : {}),
         sending: false,
@@ -392,6 +419,9 @@ export function createSendQueue(options: SendQueueOptions): SendQueue {
     status: (canvasId) => statusOf(laneOf(canvasId)),
 
     hasPending: (canvasId) => (lanes.get(canvasId)?.entries.length ?? 0) > 0,
+
+    hasUserPending: (canvasId) =>
+      lanes.get(canvasId)?.entries.some((entry) => !entry.derived) ?? false,
 
     isOwn: (operationId) => ownIds.has(operationId),
 

@@ -31,6 +31,9 @@ export interface CanvasSyncStatus {
 }
 
 export function syncStateOf(status: SendQueueStatus): CanvasSyncState {
+  // A derived report (a measured height) is not something the user changed:
+  // while nothing else waits, the page has nothing to tell them.
+  if (status.pending === status.derivedPending) return 'synced';
   if (status.phase === 'stalled') return 'error';
   if (status.failures > 0) return 'unsynced';
   return status.pending > 0 ? 'syncing' : 'synced';

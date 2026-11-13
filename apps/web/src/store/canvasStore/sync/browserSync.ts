@@ -87,7 +87,8 @@ export interface SubmitInput {
    * The batch reports something the page derived (a measured height) rather
    * than something the user did. Its units are held while it is in flight,
    * but a server that does not take it leaves the page's value in place
-   * instead of putting back the one before.
+   * instead of putting back the one before. It is also not unsent work of
+   * the user's: see `SendQueueEntry.derived`.
    */
   derived?: boolean;
   /**
@@ -199,7 +200,9 @@ export function createBrowserSync(deps: BrowserSyncDeps): BrowserSync {
     }
     if (outcome.kind === 'failed') {
       release(canvasId, entry.id, new Set());
-      deps.onRejected({ canvasId, entry, outcome });
+      // A derived report the queue gave up is nothing the user did.
+      if (outcome.sent || !entry.derived)
+        deps.onRejected({ canvasId, entry, outcome });
       // A request that was never sent changed nothing on the server; the
       // released holds already put this page back.
       if (outcome.sent) reloadWanted.add(canvasId);
@@ -272,6 +275,7 @@ export function createBrowserSync(deps: BrowserSyncDeps): BrowserSync {
     submit(input) {
       const result = queue.enqueue(input.canvasId, input.commands, {
         ...(input.gate ? { gate: input.gate } : {}),
+        ...(input.derived ? { derived: true } : {}),
       });
       const keys = deriveHeldKeys(input.prev, input.next, deps.ignoreUnit);
       if (input.derived) for (const key of keys.keys()) keys.set(key, null);

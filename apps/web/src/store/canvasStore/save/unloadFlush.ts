@@ -44,7 +44,10 @@ export type UnloadFlushDeps = {
     flushKeepalive: () => void;
     /**
      * Whether to ask the browser for its "leave site?" confirmation. False
-     * where the host has its own close flow (the desktop app).
+     * where the host has its own close flow (the desktop app), and when
+     * every unanswered batch is a derived report (a measured height or
+     * box) rather than an edit the user made: those are flushed, best
+     * effort, without asking.
      */
     warnBeforeLeaving: () => boolean;
   };

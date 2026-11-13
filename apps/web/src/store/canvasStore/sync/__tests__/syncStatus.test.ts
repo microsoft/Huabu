@@ -11,6 +11,7 @@ const status = (patch: Partial<SendQueueStatus>): SendQueueStatus => ({
   canvasId: 'space',
   phase: 'idle',
   pending: 0,
+  derivedPending: 0,
   failures: 0,
   ...patch,
 });
@@ -32,6 +33,29 @@ describe('syncStateOf', () => {
     ).toBe('unsynced');
     expect(
       syncStateOf(status({ phase: 'sending', pending: 1, failures: 2 })),
+    ).toBe('unsynced');
+  });
+
+  it('is synced while only derived reports wait, even failing ones', () => {
+    expect(
+      syncStateOf(
+        status({
+          phase: 'retrying',
+          pending: 2,
+          derivedPending: 2,
+          failures: 3,
+        }),
+      ),
+    ).toBe('synced');
+    expect(
+      syncStateOf(
+        status({
+          phase: 'retrying',
+          pending: 2,
+          derivedPending: 1,
+          failures: 3,
+        }),
+      ),
     ).toBe('unsynced');
   });
 

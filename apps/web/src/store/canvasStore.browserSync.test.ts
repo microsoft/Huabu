@@ -1148,6 +1148,113 @@ describe('measured heights', () => {
   });
 });
 
+describe('a derived report is not an unsent edit', () => {
+  const AUTO = 'node-sync-auto';
+  const offline = () => new TypeError('Failed to fetch');
+  const syncState = () => useCanvasSyncStatusStore.getState().state;
+  const measurement = (intrinsicHeight: number) => ({
+    nodeId: AUTO as `node-${string}`,
+    intrinsicHeight,
+    measuredFor: autoHeightKey(node(AUTO)),
+  });
+  const leave = () => {
+    const event = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(event);
+    return event;
+  };
+  const keepaliveRequests = () =>
+    api.postCanvasExecute.mock.calls.filter(
+      ([, , options]) => options?.keepalive === true,
+    );
+
+  beforeEach(() => {
+    const nodes = [
+      ...state().nodes,
+      {
+        id: AUTO,
+        type: 'note',
+        position: { x: 600, y: 0 },
+        style: { width: 300, height: 120 },
+        data: { type: 'note', content: 'Auto body', heightMode: 'auto' },
+      } as Node,
+    ];
+    state()._setStateNoAutosave({ nodes });
+    server.reset(nodes, [], 1);
+  });
+
+  it('does not ask before leaving for an unanswered measurement, and still flushes it', () => {
+    state().applyMeasuredHeights([measurement(400)]);
+    expect(own).toHaveLength(1);
+    expect(leave().defaultPrevented).toBe(false);
+    // Best effort: the report is still sent on the way out.
+    expect(keepaliveRequests().map(([, request]) => request.commands)).toEqual([
+      [{ type: 'APPLY_MEASURED_HEIGHT', items: [measurement(400)] }],
+    ]);
+    expect(hasUnsavedCanvasEdits()).toBe(false);
+  });
+
+  it("asks before leaving when a user's edit waits behind a measurement", () => {
+    state().applyMeasuredHeights([measurement(400)]);
+    moveHere(X, 500);
+    expect(leave().defaultPrevented).toBe(true);
+    expect(keepaliveRequests()).toHaveLength(2);
+    expect(hasUnsavedCanvasEdits()).toBe(true);
+  });
+
+  it('neither shows the unsynced notice nor refuses leaving while only a measurement fails', async () => {
+    state().applyMeasuredHeights([measurement(400)]);
+    own[0].reject(offline());
+    await flush();
+    expect(syncState()).toBe('synced');
+    expect(toast).not.toHaveBeenCalled();
+    await expect(drainPendingSaves(SPACE)).resolves.toBeUndefined();
+  });
+
+  it('gives a measurement up at the retry limit without the error state, and reports it again later', async () => {
+    state().applyMeasuredHeights([measurement(400)]);
+    for (let attempt = 0; attempt < DEFAULT_SEND_RETRY.maxAttempts; attempt++) {
+      own.at(-1)?.reject(offline());
+      await flush();
+      await vi.advanceTimersByTimeAsync(DEFAULT_SEND_RETRY.maxDelayMs);
+    }
+    // The attempt or the time limit was reached: nothing more is sent.
+    const attempts = own.length;
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(own).toHaveLength(attempts);
+    await expect(drainPendingSaves(SPACE)).resolves.toBeUndefined();
+    expect(syncState()).toBe('synced');
+    expect(toast).not.toHaveBeenCalled();
+    // The page keeps what it measured.
+    expect((node(AUTO).style as { height?: number } | undefined)?.height).toBe(
+      intrinsicToLayoutHeight(400, 'note', 300),
+    );
+    // A user's edit made afterwards starts with its own attempts.
+    moveHere(X, 500);
+    expect(own).toHaveLength(attempts + 1);
+    expect(syncState()).toBe('syncing');
+    await answer(own.length - 1);
+    // The height was not left marked as reported: the next measurement of
+    // the same content goes out.
+    state().applyMeasuredHeights([measurement(420)]);
+    expect(own.at(-1)?.request.commands).toEqual([
+      { type: 'APPLY_MEASURED_HEIGHT', items: [measurement(420)] },
+    ]);
+  });
+
+  it("shows the unsynced notice and refuses leaving when a user's edit is stuck behind a failing measurement", async () => {
+    state().applyMeasuredHeights([measurement(400)]);
+    moveHere(X, 500);
+    own[0].reject(offline());
+    await flush();
+    expect(syncState()).toBe('unsynced');
+    const leaving = drainPendingSaves(SPACE);
+    const refused = expect(leaving).rejects.toThrow(/could not be sent/);
+    await flush();
+    own.at(-1)?.reject(offline());
+    await refused;
+  });
+});
+
 describe('renderer-measured boxes', () => {
   const FRAME = 'node-sync-frame';
   const TEXT = 'node-sync-text';

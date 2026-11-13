@@ -242,6 +242,64 @@ describe('send queue', () => {
     expect(queue.status('space').phase).toBe('stalled');
   });
 
+  it('gives up derived reports at the limit instead of stalling', async () => {
+    const { queue, calls, settled, flush } = harness();
+    queue.enqueue('space', [move(1)], { derived: true });
+    expect(queue.hasPending('space')).toBe(true);
+    expect(queue.hasUserPending('space')).toBe(false);
+    expect(queue.status('space')).toMatchObject({
+      pending: 1,
+      derivedPending: 1,
+    });
+    for (const delay of [100, 200, 0]) {
+      calls.at(-1)?.reject(new TypeError('offline'));
+      await flush();
+      await vi.advanceTimersByTimeAsync(delay);
+    }
+    expect(calls).toHaveLength(3);
+    expect(queue.status('space')).toMatchObject({
+      phase: 'idle',
+      pending: 0,
+      failures: 0,
+    });
+    expect(settled).toEqual([
+      {
+        id: 'op-1',
+        outcome: { kind: 'failed', error: expect.any(TypeError), sent: false },
+      },
+    ]);
+  });
+
+  it("stalls when a user's edit waits behind a failing derived report", async () => {
+    const { queue, calls, settled, flush } = harness();
+    queue.enqueue('space', [move(1)], { derived: true });
+    await flush();
+    queue.enqueue('space', [move(2)]);
+    expect(queue.hasUserPending('space')).toBe(true);
+    for (const delay of [100, 200, 0]) {
+      calls.at(-1)?.reject(new TypeError('offline'));
+      await flush();
+      await vi.advanceTimersByTimeAsync(delay);
+    }
+    expect(queue.status('space')).toMatchObject({
+      phase: 'stalled',
+      pending: 2,
+      derivedPending: 1,
+    });
+    expect(settled).toHaveLength(0);
+  });
+
+  it("an entry that folds a user's edit into a derived report is the user's", () => {
+    const { queue } = harness();
+    queue.enqueue('space', [move(1)]);
+    const report = queue.enqueue('space', [move(2)], { derived: true });
+    expect(report.entry.derived).toBe(true);
+    const edit = queue.enqueue('space', [move(3)]);
+    expect(edit.entry).toBe(report.entry);
+    expect(edit.entry.derived).toBe(false);
+    expect(queue.status('space').derivedPending).toBe(0);
+  });
+
   it('stalls once the total retry time is used up', async () => {
     const { queue, calls, flush } = harness({
       baseDelayMs: 100,

@@ -1228,6 +1228,14 @@ function reportMeasuredHeights(
     // The server may refuse a measurement (its copy of the body differs);
     // the page still shows what it measured.
     derived: true,
+    onSettled: (outcome) => {
+      if (outcome.kind === 'response') return;
+      // Never delivered: the next measurement reports it again.
+      for (const item of items) {
+        if (reportedHeightKeys.get(item.nodeId) === item.measuredFor)
+          reportedHeightKeys.delete(item.nodeId);
+      }
+    },
   });
 }
 
@@ -1338,6 +1346,14 @@ function reportMeasuredSizes(
     // The server may ignore a box (its copy of the body differs); the page
     // still shows what it measured.
     derived: true,
+    onSettled: (outcome) => {
+      if (outcome.kind === 'response') return;
+      // Never delivered: the next measurement reports it again.
+      for (const item of items) {
+        if (reportedSizes.get(item.nodeId)?.key === item.measuredFor)
+          reportedSizes.delete(item.nodeId);
+      }
+    },
   });
 }
 
@@ -1672,6 +1688,19 @@ function pendingQuestionCreations(canvasId: string): Promise<void>[] {
 }
 
 /**
+ * Whether a drain has the send queue to wait for: an edit of the user's, or
+ * a derived report (a measured height or box) that is not failing. A report
+ * that cannot be sent is not worth holding the user for.
+ */
+function drainWaitsForQueue(canvasId: string): boolean {
+  const status = browserSync.queue.status(canvasId);
+  return (
+    status.pending > status.derivedPending ||
+    (status.pending > 0 && status.failures === 0)
+  );
+}
+
+/**
  * Resolves once every queued structure edit has been answered, or as soon as
  * a request fails. A drain is a moment the user is waiting on (leaving the
  * Space, submitting a prompt): a request that was failing is tried again at
@@ -1682,7 +1711,7 @@ function pendingQuestionCreations(canvasId: string): Promise<void>[] {
  */
 function whenSentOrFailing(canvasId: string): Promise<'idle' | 'failing'> {
   const { queue } = browserSync;
-  if (!queue.hasPending(canvasId)) return Promise.resolve('idle');
+  if (!drainWaitsForQueue(canvasId)) return Promise.resolve('idle');
   const before = queue.status(canvasId);
   // Stalled is the user's decision to make (keep trying, or discard).
   if (before.phase === 'stalled') return Promise.resolve('failing');
@@ -1695,7 +1724,10 @@ function whenSentOrFailing(canvasId: string): Promise<'idle' | 'failing'> {
         status.pending === 0
           ? 'idle'
           : status.phase === 'stalled' || status.failures > seen
-            ? 'failing'
+            ? // Only derived reports are failing: nothing to stay for.
+              status.pending > status.derivedPending
+              ? 'failing'
+              : 'idle'
             : null;
       seen = Math.min(seen, status.failures);
       if (!outcome) return;
@@ -1747,7 +1779,7 @@ export async function drainPendingSaves(
       );
     }
     await nodeContentQueue.flushAllForSubmission(canvasId);
-  } while (isActive() && browserSync.queue.hasPending(canvasId));
+  } while (isActive() && drainWaitsForQueue(canvasId));
 }
 
 /** Explicit navigation-only discard; already-issued writes cannot be undone. */
@@ -1814,13 +1846,14 @@ export async function savedBeforeSignOut(): Promise<boolean> {
 
 /**
  * Whether the open Canvas holds an edit the Server has not acknowledged:
- * queued, in flight or failed. Leaving the page now would lose it.
+ * queued, in flight or failed. Leaving the page now would lose it. A
+ * derived report (a measured height or box) is not an edit.
  */
 export function hasUnsavedCanvasEdits(): boolean {
   const { canvasId } = useCanvasStore.getState();
   if (!canvasId) return false;
   return (
-    hasUnsavedStructureOrContent() || browserSync.queue.hasPending(canvasId)
+    hasUnsavedStructureOrContent() || browserSync.queue.hasUserPending(canvasId)
   );
 }
 
@@ -2006,7 +2039,10 @@ if (typeof window !== 'undefined') {
         flushKeepalive: () => browserSync.queue.flushKeepalive(),
         // The desktop app closes through its own acknowledged save flow; a
         // cancelled `beforeunload` there would block the window silently.
-        warnBeforeLeaving: () => !getElectronBridge(),
+        // Derived reports are flushed, but only an edit asks to stay.
+        warnBeforeLeaving: () =>
+          !getElectronBridge() &&
+          browserSync.queue.hasUserPending(useCanvasStore.getState().canvasId),
       },
     }),
   );
