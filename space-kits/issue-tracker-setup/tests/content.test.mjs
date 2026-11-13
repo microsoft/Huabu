@@ -318,7 +318,7 @@ test('installed contracts require acceptance-only dispatch, initial-prompt ident
   );
   assert.match(
     coordinator,
-    /an HTTP connection or Thread announcement alone does not prove prompt acceptance/,
+    /an HTTP connection or Thread announcement alone does not prove prompt acceptance/i,
   );
   assert.match(
     coordinator,
@@ -331,6 +331,11 @@ test('installed contracts require acceptance-only dispatch, initial-prompt ident
   assert.doesNotMatch(
     coordinator,
     /wait for the Agent to finish|wait for its final answer|SSE="\$\(/i,
+  );
+  assert.match(coordinator, /agent prompt --until-accepted/);
+  assert.match(
+    coordinator,
+    /send its actual content directly to that same saved Thread/,
   );
   const safety = content['assets/fixing-agent-preamble.md'];
   assert.match(

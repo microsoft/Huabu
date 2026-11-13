@@ -124,7 +124,7 @@ The generic registry writes atomically to `<HUABU_DATA_DIR>/user-agent-profiles/
 
 Old Team registry/config/setup-log files and conversation records are not deleted or rewritten by migration. Manifest Profiles are not imported as active Profiles or converted to executable commands. Agentlet and Agenetes reject retired Team launch recipes instead of silently treating them as ordinary commands.
 
-The repository's `agent-teams/` manifest, prompt and Skill folders remain data assets. There is no bundled Team registration, manifest execution, setup worker, Team CLI, Team API, member Config UI or preparation lifecycle. [Space Kits](./space-kits.md) are separate source-distributed installers; Issue Tracker has moved there and uses ordinary Profiles without provisioning them. Historical design material is retained in [the archive](../archive/agent-teams-as-extensions.md).
+The repository's `agent-teams/` collection is retired. Issue Tracker, Paper Reviewer and Paper Scout are [Space Kits](./space-kits.md) using ordinary Profiles without provisioning them; HackMD is a [Service Package](./service-packages.md). Obsolete DeepV and HTML Slides Maker source packages were removed, without touching user data. There is no bundled Team registration, manifest execution, setup worker, Team CLI, Team API, member Config UI or preparation lifecycle. Historical design material is retained in [the archive](../archive/agent-teams-as-extensions.md).
 
 ## Settings and APIs
 

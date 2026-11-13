@@ -431,8 +431,8 @@ Add `RunCompletionService` and an atomic `SpaceTaskRuns.complete()` transition s
 | [`packages/shared/src/types/canvas/node.ts`](../../packages/shared/src/types/canvas/node.ts) | Existing `QuestionNodeData` contract to extend with launch overrides                              |
 | [`packages/shared/src/types/api/`](../../packages/shared/src/types/api/)                     | Canonical zod-first Task and RFS wire contracts                                                   |
 | [`external/agenetes/packages/`](../../external/agenetes/packages/)                           | Workload realization, Profiles, drivers, event logs, history, and replay                          |
-| [`agent-teams/paper-scout/`](../../agent-teams/paper-scout/)                                 | Existing bounded academic discovery capability                                                    |
-| [`agent-teams/paper-reviewer/`](../../agent-teams/paper-reviewer/)                           | Existing paper-reading and review capability                                                      |
+| [`space-kits/paper-scout-setup/`](../../space-kits/paper-scout-setup/)                       | Bounded academic discovery installation Skill and assets                                          |
+| [`space-kits/paper-reviewer-setup/`](../../space-kits/paper-reviewer-setup/)                 | Paper-reading and review installation Skill and assets                                            |
 
 ## Related documents
 

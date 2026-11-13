@@ -82,7 +82,7 @@ import { setWorkspacePath } from '../workspace.js';
 
 import type { FixedAgentNodeTarget } from '../agent/agent-thread-resolver.js';
 import type * as ServiceModule from '../services/index.js';
-import type { CanvasNodeId } from '@huabu/shared';
+import type { AgentTurnAccepted, CanvasNodeId } from '@huabu/shared';
 
 /**
  * The Space's Disk directory, or a test failure.
@@ -97,6 +97,14 @@ function diskDirOf(canvasId: string): string {
 }
 
 let tmp: string;
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((settle) => {
+    resolve = settle;
+  });
+  return { promise, resolve };
+}
 
 async function buildApp() {
   const app = fastify();
@@ -2230,11 +2238,11 @@ describe('POST /api/rfs/:canvasId/agent', () => {
     }
   });
 
-  it('keeps terminal errors visible in final mode', async () => {
+  it('announces durable acceptance before any answer and drains after the caller disconnects', async () => {
     const target: FixedAgentNodeTarget = {
       canvasId: 'c1',
-      nodeId: 'node-error' as CanvasNodeId,
-      threadId: 'thread-error',
+      nodeId: 'node-accepted' as CanvasNodeId,
+      threadId: 'thread-accepted',
       agentBinding: { kind: 'internal' },
       status: 'idle',
       content: '',
@@ -2242,35 +2250,109 @@ describe('POST /api/rfs/:canvasId/agent', () => {
     vi.spyOn(agentThreadService, 'resolveFixedTarget').mockResolvedValue(
       target,
     );
-    vi.spyOn(agentThreadService, 'invoke').mockImplementation(
-      async (options) => ({
-        binding: target.agentBinding,
-        fixedTarget: target,
-        signal: options.signal ?? new AbortController().signal,
-        acceptance: Promise.resolve(null),
-        dispose: vi.fn().mockResolvedValue(undefined),
-        events: (async function* () {
-          yield { type: 'error' as const, data: { error: 'model failed' } };
-        })(),
-      }),
-    );
-
+    const receipt = deferred<AgentTurnAccepted | null>();
+    const finish = deferred<void>();
+    const drained = deferred<void>();
+    const controller = new AbortController();
+    const dispose = vi.fn();
+    vi.spyOn(agentThreadService, 'invoke').mockResolvedValue({
+      binding: target.agentBinding,
+      fixedTarget: target,
+      signal: controller.signal,
+      acceptance: receipt.promise,
+      dispose,
+      events: (async function* () {
+        receipt.resolve({ threadId: target.threadId, turnStartSeq: 9 });
+        await finish.promise;
+        yield { type: 'done' as const, data: { message: 'later answer' } };
+        drained.resolve();
+      })(),
+    });
     const app = await buildApp();
     try {
-      const res = await app.inject({
-        method: 'POST',
-        url: '/rfs/c1/agent/thread-error/prompt',
-        headers: { 'content-type': 'text/plain' },
-        payload: 'hello',
-      });
-
-      expect(res.statusCode).toBe(200);
-      expect(res.body).toContain('event: error');
-      expect(res.body).toContain('"error":"model failed"');
+      const address = await app.listen({ host: '127.0.0.1', port: 0 });
+      const response = await fetch(
+        `${address}/rfs/c1/agent/${target.threadId}/prompt`,
+        {
+          method: 'POST',
+          headers: {
+            'content-type': 'text/plain',
+            'x-huabu-event-mode': 'all',
+          },
+          body: 'investigate only',
+        },
+      );
+      if (!response.body) throw new Error('Expected SSE response body');
+      const reader = response.body.getReader();
+      let received = '';
+      while (!received.includes('"turnStartSeq":9}')) {
+        const chunk = await reader.read();
+        expect(chunk.done).toBe(false);
+        received += new TextDecoder().decode(chunk.value);
+      }
+      expect(received).toContain('event: accepted');
+      expect(received).not.toContain('later answer');
+      await reader.cancel();
+      finish.resolve();
+      await drained.promise;
+      expect(controller.signal.aborted).toBe(false);
+      expect(dispose).not.toHaveBeenCalled();
     } finally {
+      finish.resolve();
       await app.close();
     }
   });
+
+  it.each(['final', 'all'])(
+    'keeps pre-acceptance errors visible in %s mode without blocking stream settlement',
+    async (eventMode) => {
+      const target: FixedAgentNodeTarget = {
+        canvasId: 'c1',
+        nodeId: 'node-error' as CanvasNodeId,
+        threadId: 'thread-error',
+        agentBinding: { kind: 'internal' },
+        status: 'idle',
+        content: '',
+      };
+      vi.spyOn(agentThreadService, 'resolveFixedTarget').mockResolvedValue(
+        target,
+      );
+      const receipt = deferred<AgentTurnAccepted | null>();
+      vi.spyOn(agentThreadService, 'invoke').mockImplementation(
+        async (options) => ({
+          binding: target.agentBinding,
+          fixedTarget: target,
+          signal: options.signal ?? new AbortController().signal,
+          acceptance: receipt.promise,
+          dispose: vi.fn().mockResolvedValue(undefined),
+          events: (async function* () {
+            yield { type: 'error' as const, data: { error: 'model failed' } };
+            receipt.resolve(null);
+          })(),
+        }),
+      );
+
+      const app = await buildApp();
+      try {
+        const res = await app.inject({
+          method: 'POST',
+          url: '/rfs/c1/agent/thread-error/prompt',
+          headers: {
+            'content-type': 'text/plain',
+            'x-huabu-event-mode': eventMode,
+          },
+          payload: 'hello',
+        });
+
+        expect(res.statusCode).toBe(200);
+        expect(res.body).toContain('event: error');
+        expect(res.body).toContain('"error":"model failed"');
+        expect(res.body).not.toContain('event: accepted');
+      } finally {
+        await app.close();
+      }
+    },
+  );
 
   it('lets event-mode headers override JSON prompt options', async () => {
     const target: FixedAgentNodeTarget = {

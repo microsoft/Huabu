@@ -174,4 +174,4 @@ Archive contains only abandoned or superseded designs.
 
 For external-agent work also read [Agent Profiles](./architecture/agent-profiles.md),
 [`external/agentlet/spec/`](../external/agentlet/spec) and
-[`agent-teams/README.md`](../agent-teams/README.md).
+[`space-kits/README.md`](../space-kits/README.md) and [Service Packages](./architecture/service-packages.md).

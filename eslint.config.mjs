@@ -45,7 +45,6 @@ export default typescriptEslint.config(
       'external/agentlet/**',
       // Agent Team packages are self-contained plugins with their own
       // scripts/prompts; not part of the app's lint surface.
-      'agent-teams/**',
     ],
   },
   js.configs.recommended,

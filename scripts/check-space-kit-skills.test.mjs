@@ -7,27 +7,20 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, test } from 'node:test';
 
-import { validateSkillPackage } from './check-agent-team-skills.mjs';
+import { validateSkillPackage } from './check-space-kit-skills.mjs';
 
 const temporaryDirectories = [];
 
 function createPackage(skillContent) {
-  const root = mkdtempSync(join(tmpdir(), 'agent-team-skill-'));
+  const root = mkdtempSync(join(tmpdir(), 'space-kit-skill-'));
   temporaryDirectories.push(root);
   const packageDir = join(root, 'example-agent');
   mkdirSync(packageDir);
+  mkdirSync(join(packageDir, 'assets'));
   writeFileSync(
-    join(packageDir, 'agentlet.yaml'),
-    [
-      'schema: agentlet-agent-schema-v1',
-      'name: example-agent',
-      'require:',
-      '  prompts:',
-      '    - system_prompt.md',
-      '',
-    ].join('\n'),
+    join(packageDir, 'assets', 'workflow.md'),
+    '# Example Workflow\n',
   );
-  writeFileSync(join(packageDir, 'system_prompt.md'), '# Example Agent\n');
   writeFileSync(join(packageDir, 'SKILL.md'), skillContent);
   return packageDir;
 }
@@ -41,7 +34,7 @@ function validSkill(extra = '') {
     '',
     '# Example Agent',
     '',
-    'Read the [canonical instructions](./system_prompt.md).',
+    'Install the [canonical workflow](./assets/workflow.md).',
     extra,
     '',
   ].join('\n');
@@ -53,7 +46,7 @@ afterEach(() => {
   }
 });
 
-test('accepts a portable skill package with a canonical prompt', () => {
+test('accepts an installation Skill and assets without a Team manifest', () => {
   assert.deepEqual(validateSkillPackage(createPackage(validSkill())), []);
 });
 

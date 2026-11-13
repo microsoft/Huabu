@@ -13,6 +13,10 @@ space-kits/
     tests/             # Focused checks, not installed content
 ```
 
+The [Paper Reviewer](./paper-reviewer-setup/SKILL.md) and [Paper Scout](./paper-scout-setup/SKILL.md) Kits independently install idle Agents, dedicated Prompt Frames, lazy runtime Skill Notes, and empty paper work areas. Paper Scout also installs its helper source as a separate lazy Note, so it remains usable without the original clone. These lightweight installers follow direct RFS guidance rather than adding a generic runtime.
+
+HackMD lives under [`apps/server/src/services/hackmd/`](../apps/server/src/services/hackmd/) as a third-party Service. The outdated DeepV and HTML Slides Maker packages were removed; `agent-teams/` is retired. No user credentials, working directories, or conversation records are migrated or removed.
+
 Keep installer procedure in `SKILL.md`, installed content under `assets/`, and optional installer-only reading under `references/` only when needed. Runtime Coordinator instructions must not duplicate installation procedure. Project configuration is editable and separate from static Prompt/Skill bytes. Do not copy the Kit author's paths, Profiles, issue categories, protected branch names, repository toolchain or IDs into another user's Space.
 
 Run the dependency-free content/configuration tests with:
@@ -20,6 +24,8 @@ Run the dependency-free content/configuration tests with:
 ```bash
 node --test space-kits/issue-tracker-setup/tests/content.test.mjs
 ```
+
+`pnpm run test:space-kits` also checks every installation Skill's metadata, package-local references and tracked-file hygiene, plus the real Issue Tracker RFS/storage/topology tests.
 
 The real RFS/storage/topology integration suite uses the repository's existing development dependencies:
 

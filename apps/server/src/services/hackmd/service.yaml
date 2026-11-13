@@ -1,0 +1,16 @@
+schema: huabu-service/v1
+id: hackmd
+version: 1.0.0
+name: HackMD
+description: Read, create, and update HackMD notes.
+storage:
+  namespace: integration.hackmd
+package:
+  files:
+    - SKILL.md
+    - entry.mjs
+configuration:
+  - id: apiKey
+    label: API token
+    type: secret
+    required: true

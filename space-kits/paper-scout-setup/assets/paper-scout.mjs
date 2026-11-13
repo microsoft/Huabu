@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-
-/* global AbortSignal, fetch */
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
 
 import process from 'node:process';
 import { URL } from 'node:url';
