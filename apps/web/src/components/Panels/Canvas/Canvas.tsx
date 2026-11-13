@@ -1412,7 +1412,7 @@ const CanvasContent: React.FC<CanvasProps> = ({
         }
       }}
     >
-      <AutoEdgeRoutingProvider nodes={visibleNodes} edges={visibleEdges}>
+      <AutoEdgeRoutingProvider nodes={visibleNodes}>
         <FrameZoomProvider>
           <ReactFlow
             className={cn(

@@ -115,22 +115,6 @@ describe('routeOrthogonalEdge', () => {
     expectClear(flattenEdgePath(result.path), [sourceRect, targetRect]);
   });
 
-  it('uses a different channel when another edge already occupies the direct corridor', () => {
-    const result = routeOrthogonalEdge({
-      ...base,
-      occupiedSegments: [{ start: { x: 24, y: 0 }, end: { x: 276, y: 0 } }],
-    });
-    expect(result.status).toBe('routed');
-    expect(result.points.some((point) => point.y !== 0)).toBe(true);
-  });
-
-  it('provides opposite preferred lanes for parallel connections', () => {
-    const upper = routeOrthogonalEdge({ ...base, laneOffset: -24 });
-    const lower = routeOrthogonalEdge({ ...base, laneOffset: 24 });
-    expect(upper.points.some((point) => point.y < 0)).toBe(true);
-    expect(lower.points.some((point) => point.y > 0)).toBe(true);
-  });
-
   it('reports a finite bounded fallback when a different card covers the source port', () => {
     const result = routeOrthogonalEdge({
       ...base,
@@ -209,72 +193,6 @@ describe('routeOrthogonalEdge', () => {
     }
   });
 
-  it('keeps local parallel routes separated when hundreds of unrelated cards are far away', () => {
-    const obstacles = Array.from({ length: 257 }, (_, index) => ({
-      x: 10_000 + index * 50,
-      y: 10_000,
-      w: 20,
-      h: 20,
-    }));
-    const upper = routeOrthogonalEdge({ ...base, obstacles, laneOffset: -14 });
-    const lower = routeOrthogonalEdge({ ...base, obstacles, laneOffset: 14 });
-    expect(upper.status).toBe('routed');
-    expect(lower.status).toBe('routed');
-    expect(upper.points.some((point) => point.y < 0)).toBe(true);
-    expect(lower.points.some((point) => point.y > 0)).toBe(true);
-    expect(upper.path).not.toEqual(lower.path);
-    expectClear(flattenEdgePath(upper.path), obstacles);
-    expectClear(flattenEdgePath(lower.path), obstacles);
-  });
-
-  it('keeps lane preferences when the obstacle budget requires an exterior detour', () => {
-    const obstacles = Array.from({ length: 257 }, () => ({
-      x: 100,
-      y: -40,
-      w: 80,
-      h: 80,
-    }));
-    const upper = routeOrthogonalEdge({ ...base, obstacles, laneOffset: -14 });
-    const lower = routeOrthogonalEdge({ ...base, obstacles, laneOffset: 14 });
-    expect(upper.points.some((point) => point.y < 0)).toBe(true);
-    expect(lower.points.some((point) => point.y > 0)).toBe(true);
-    expectClear(flattenEdgePath(upper.path), obstacles);
-    expectClear(flattenEdgePath(lower.path), obstacles);
-  });
-
-  it('checks all obstacles and respects an already occupied fallback corridor', () => {
-    const obstacles = Array.from({ length: 257 }, () => ({
-      x: 100,
-      y: -40,
-      w: 80,
-      h: 80,
-    }));
-    const first = routeOrthogonalEdge({ ...base, obstacles });
-    const occupiedSegments = first.points
-      .slice(1)
-      .map((end, index) => ({ start: first.points[index], end }));
-    const second = routeOrthogonalEdge({
-      ...base,
-      obstacles,
-      occupiedSegments,
-    });
-    expect(second.path).not.toBe(first.path);
-    expectClear(second.points, obstacles);
-    // A late entry must still block a candidate, even if earlier obstacles are distant.
-    const far = Array.from({ length: 257 }, (_, index) => ({
-      x: 10_000 + index,
-      y: 10_000,
-      w: 10,
-      h: 10,
-    }));
-    const blocking = { x: 120, y: -20, w: 60, h: 40 };
-    const routed = routeOrthogonalEdge({
-      ...base,
-      obstacles: [...far, blocking],
-    });
-    expectClear(flattenEdgePath(routed.path), [blocking]);
-  });
-
   it('finds a compact clear middle channel before a tiny grid forces a perimeter detour', () => {
     const obstacles = [
       { x: 200, y: -20, w: 30, h: 100 },
@@ -291,15 +209,5 @@ describe('routeOrthogonalEdge', () => {
       true,
     );
     expectClear(flattenEdgePath(result.path), obstacles);
-  });
-
-  it('searches beyond the compact candidates when all their channels are already occupied', () => {
-    const occupiedSegments = [-12, 0, 12].map((y) => ({
-      start: { x: 24, y },
-      end: { x: 276, y },
-    }));
-    const result = routeOrthogonalEdge({ ...base, occupiedSegments });
-    expect(result.status).toBe('routed');
-    expect(result.points.some((point) => Math.abs(point.y) >= 24)).toBe(true);
   });
 });

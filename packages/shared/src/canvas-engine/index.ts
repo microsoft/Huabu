@@ -21,7 +21,6 @@ export type {
   OrthogonalPoint,
   OrthogonalRect,
   OrthogonalSide,
-  OrthogonalSegment,
   OrthogonalRoute,
   OrthogonalRouteOptions,
 } from './utils/orthogonalRouting.js';

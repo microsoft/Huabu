@@ -12,10 +12,6 @@ export interface OrthogonalRect {
   h: number;
 }
 export type OrthogonalSide = 'left' | 'right' | 'top' | 'bottom';
-export interface OrthogonalSegment {
-  start: OrthogonalPoint;
-  end: OrthogonalPoint;
-}
 export interface OrthogonalRouteOptions {
   source: OrthogonalPoint;
   target: OrthogonalPoint;
@@ -27,8 +23,6 @@ export interface OrthogonalRouteOptions {
   clearance?: number;
   stubLength?: number;
   bendPenalty?: number;
-  occupiedSegments?: readonly OrthogonalSegment[];
-  laneOffset?: number;
   maxGridPoints?: number;
 }
 export interface OrthogonalRoute {
@@ -253,45 +247,6 @@ function coordinates(
   );
 }
 
-function crowding(
-  a: OrthogonalPoint,
-  b: OrthogonalPoint,
-  occupied: readonly OrthogonalSegment[],
-  spacing: number,
-): number {
-  const horizontal = a.y === b.y;
-  let cost = 0;
-  for (const segment of occupied) {
-    const c = segment.start;
-    const d = segment.end;
-    if ((c.y === d.y) === horizontal) {
-      const gap = horizontal ? Math.abs(a.y - c.y) : Math.abs(a.x - c.x);
-      if (gap >= spacing) continue;
-      const overlap = horizontal
-        ? Math.min(Math.max(a.x, b.x), Math.max(c.x, d.x)) -
-          Math.max(Math.min(a.x, b.x), Math.min(c.x, d.x))
-        : Math.min(Math.max(a.y, b.y), Math.max(c.y, d.y)) -
-          Math.max(Math.min(a.y, b.y), Math.min(c.y, d.y));
-      cost += Math.max(0, overlap) * 4 * (1 - gap / spacing);
-    } else {
-      const x = horizontal ? c.x : a.x;
-      const y = horizontal ? a.y : c.y;
-      if (
-        x > Math.min(a.x, b.x) - EPSILON &&
-        x < Math.max(a.x, b.x) + EPSILON &&
-        y > Math.min(a.y, b.y) - EPSILON &&
-        y < Math.max(a.y, b.y) + EPSILON &&
-        x > Math.min(c.x, d.x) - EPSILON &&
-        x < Math.max(c.x, d.x) + EPSILON &&
-        y > Math.min(c.y, d.y) - EPSILON &&
-        y < Math.max(c.y, d.y) + EPSILON
-      )
-        cost += 20;
-    }
-  }
-  return cost;
-}
-
 /**
  * Route in absolute canvas coordinates, with a hard cap on grid size and search work.
  * Endpoint rectangles are obstacles after their own outward port stubs. Other
@@ -308,8 +263,6 @@ export function routeOrthogonalEdge(
   const stubLength = Math.max(1, options.stubLength ?? 24, clearance + radius);
   const bendPenalty = Math.max(0, options.bendPenalty ?? 24);
   const spacing = Math.max(12, clearance);
-  const laneOffset = options.laneOffset ?? 0;
-  const occupied = options.occupiedSegments ?? [];
   const obstacles = options.obstacles
     .filter(
       (r) =>
@@ -329,25 +282,6 @@ export function routeOrthogonalEdge(
   ];
   const start = outwardStub(source, sourceSide, stubLength, sourceRect);
   const end = outwardStub(target, targetSide, stubLength, targetRect);
-  const horizontal =
-    Math.abs(target.x - source.x) >= Math.abs(target.y - source.y);
-  const lane =
-    (horizontal ? (source.y + target.y) / 2 : (source.x + target.x) / 2) +
-    laneOffset;
-  const segmentCost = (a: OrthogonalPoint, b: OrthogonalPoint): number => {
-    const length = distance(a, b);
-    const alongLane = horizontal ? a.y === b.y : a.x === b.x;
-    const laneCost =
-      laneOffset && alongLane
-        ? length *
-          0.75 *
-          Math.min(
-            4,
-            Math.abs((horizontal ? a.y : a.x) - lane) / Math.abs(laneOffset),
-          )
-        : 0;
-    return length + crowding(a, b, occupied, spacing) + laneCost;
-  };
   const blockedPort =
     obstacles.some((r) => hits(source, start, r) || hits(end, target, r)) ||
     !!(targetRect && hits(source, start, targetRect)) ||
@@ -355,11 +289,7 @@ export function routeOrthogonalEdge(
   // Distant cards must not consume the coordinate budget. Select grid
   // coordinates locally, then include every obstacle intersecting the final
   // search bounds in collision checks; a final global check fences the result.
-  const margin = Math.max(
-    stubLength * 2,
-    distance(start, end) / 3,
-    Math.abs(laneOffset) + spacing,
-  );
+  const margin = Math.max(stubLength * 2, distance(start, end) / 3);
   const neighborhood = {
     x: Math.min(start.x, end.x) - margin,
     y: Math.min(start.y, end.y) - margin,
@@ -385,12 +315,10 @@ export function routeOrthogonalEdge(
     end.y - spacing,
     end.y + spacing,
   ];
-  if (horizontal) ys.push(lane);
-  else xs.push(lane);
-  let left = Math.min(start.x, end.x, horizontal ? start.x : lane);
-  let right = Math.max(start.x, end.x, horizontal ? start.x : lane);
-  let top = Math.min(start.y, end.y, horizontal ? lane : start.y);
-  let bottom = Math.max(start.y, end.y, horizontal ? lane : start.y);
+  let left = Math.min(start.x, end.x);
+  let right = Math.max(start.x, end.x);
+  let top = Math.min(start.y, end.y);
+  let bottom = Math.max(start.y, end.y);
   for (const rect of localBlockers) {
     xs.push(rect.x, rect.x + rect.w);
     ys.push(rect.y, rect.y + rect.h);
@@ -398,38 +326,6 @@ export function routeOrthogonalEdge(
     right = Math.max(right, rect.x + rect.w);
     top = Math.min(top, rect.y);
     bottom = Math.max(bottom, rect.y + rect.h);
-  }
-  for (const segment of occupied) {
-    xs.push(
-      segment.start.x - spacing,
-      segment.start.x + spacing,
-      segment.end.x - spacing,
-      segment.end.x + spacing,
-    );
-    ys.push(
-      segment.start.y - spacing,
-      segment.start.y + spacing,
-      segment.end.y - spacing,
-      segment.end.y + spacing,
-    );
-    const rect = {
-      x: Math.min(segment.start.x, segment.end.x),
-      y: Math.min(segment.start.y, segment.end.y),
-      w: Math.abs(segment.start.x - segment.end.x),
-      h: Math.abs(segment.start.y - segment.end.y),
-    };
-    if (overlaps(rect, neighborhood)) {
-      left = Math.min(left, Math.max(rect.x, neighborhood.x));
-      right = Math.max(
-        right,
-        Math.min(rect.x + rect.w, neighborhood.x + neighborhood.w),
-      );
-      top = Math.min(top, Math.max(rect.y, neighborhood.y));
-      bottom = Math.max(
-        bottom,
-        Math.min(rect.y + rect.h, neighborhood.y + neighborhood.h),
-      );
-    }
   }
   left -= spacing;
   right += spacing;
@@ -453,24 +349,16 @@ export function routeOrthogonalEdge(
     [start, { x: start.x, y: end.y }, end],
     horizontalChannel((start.y + end.y) / 2),
     verticalChannel((start.x + end.x) / 2),
-    ...[lane, lane - spacing, lane + spacing].map(
-      horizontal ? horizontalChannel : verticalChannel,
-    ),
   ];
   const rankCandidates = (candidates: OrthogonalPoint[][]) => {
-    // Compare collision counts before costs, so a long safe detour always beats
-    // a short crossing. Every candidate is checked against ALL obstacles, even
-    // when their count exceeds the search budget. Lane and crowding costs remain
-    // active here: distant cards must not collapse parallel connections.
+    // Prefer a clear path, then fewer reversals and a shorter route.
     return candidates
       .map((middle, order) => {
         const points = simplify([source, ...middle, target]);
         let collisions = 0;
         let reversals = 0;
         let cost = 0;
-        let congestion = 0;
         for (let i = 1; i < middle.length; i++) {
-          congestion += crowding(middle[i - 1], middle[i], occupied, spacing);
           for (const rect of blockers) {
             if (hits(middle[i - 1], middle[i], rect)) collisions++;
           }
@@ -479,14 +367,14 @@ export function routeOrthogonalEdge(
           const a = points[i - 1];
           const b = points[i];
           const c = points[i + 1];
-          cost += segmentCost(a, b);
+          cost += distance(a, b);
           if (c) {
             if ((b.x - a.x) * (c.x - b.x) + (b.y - a.y) * (c.y - b.y) < 0)
               reversals++;
             if ((a.x === b.x) !== (b.x === c.x)) cost += bendPenalty;
           }
         }
-        return { points, collisions, reversals, cost, congestion, order };
+        return { points, collisions, reversals, cost, order };
       })
       .sort(
         (a, b) =>
@@ -511,16 +399,10 @@ export function routeOrthogonalEdge(
     );
   };
 
-  // Most drag frames need only a direct, L-shaped or local channel route.
-  // These candidates never use the far perimeter. Validate the whole route
-  // and score occupied lanes before returning; blocked candidates go to A*.
+  // Try direct and simple bent paths before searching around obstacles.
   if (!blockedPort) {
     const quick = rankCandidates(compactCandidates)[0];
-    if (
-      quick.collisions === 0 &&
-      quick.reversals === 0 &&
-      quick.congestion <= Math.max(spacing * 4, distance(start, end) * 0.3)
-    )
+    if (quick.collisions === 0 && quick.reversals === 0)
       return render(quick.points, radius, 'routed');
   }
 
@@ -591,7 +473,7 @@ export function routeOrthogonalEdge(
       if (!passable) continue;
       const cost =
         current.cost +
-        segmentCost(a, b) +
+        distance(a, b) +
         (nextDirection !== direction ? bendPenalty : 0);
       const state = next * 4 + nextDirection;
       if (cost >= scores[state]) continue;
