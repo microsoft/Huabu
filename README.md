@@ -70,6 +70,8 @@ pnpm start:web
 
 Open the server address printed in the terminal, choose your Home folder, and configure your agents or models in Settings. The web application and API share one server, accessible only from the same machine by default.
 
+`pnpm start:web` builds and then starts the application. To separate these steps, run `pnpm build:web` followed by `node scripts/start-web.mjs`. The launch-only entry point loads the existing repository-root `.env` and requires prepared build artifacts. For Linux boot startup, optional Caddy HTTPS, updates, and migration from the deprecated tmux workflow, see the [server deployment guide](docs/server-deployment.md).
+
 ### Remote access
 
 To use Huabu from another device, first stop any Huabu server and Vite development server using this instance's credential storage. Then run setup on the hosting machine, either directly or over SSH, and start the server:

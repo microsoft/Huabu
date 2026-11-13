@@ -10,6 +10,8 @@ The desktop security-review attachment is [desktop-threat-model-attachment.md](.
 For **diagnosing slow or misbehaving agents** (built-in Huabu agents or external
 ACP agents), see [agent-diagnosis-guide.md](./agent-diagnosis-guide.md).
 
+For **running a Linux server**, see [server-deployment.md](./server-deployment.md): systemd user services, optional Caddy HTTPS, updates, and migration from deprecated tmux management.
+
 ---
 
 ## How this folder is organized

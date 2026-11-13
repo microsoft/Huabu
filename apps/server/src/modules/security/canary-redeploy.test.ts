@@ -4,6 +4,7 @@
 import { execFile, execFileSync, spawnSync } from 'node:child_process';
 import {
   chmodSync,
+  existsSync,
   mkdtempSync,
   mkdirSync,
   readFileSync,
@@ -103,6 +104,8 @@ describe('Canary redeployment service', () => {
     dataDir: process.env.HUABU_DATA_DIR,
     username: process.env.HUABU_BASIC_AUTH_USER,
     password: process.env.HUABU_BASIC_AUTH_PASS,
+    serviceManager: process.env.HUABU_SERVICE_MANAGER,
+    path: process.env.PATH,
   };
 
   beforeEach(() => {
@@ -111,7 +114,11 @@ describe('Canary redeployment service', () => {
     remote = mkdtempSync(join(tmpdir(), 'huabu-canary-remote-'));
     dataDir = mkdtempSync(join(tmpdir(), 'huabu-canary-data-'));
     mkdirSync(join(root, 'scripts'));
-    for (const name of ['start-huabu.sh', 'canary-redeploy-runner.mjs']) {
+    for (const name of [
+      'start-huabu.sh',
+      'build-web.mjs',
+      'canary-redeploy-runner.mjs',
+    ]) {
       const file = join(root, 'scripts', name);
       writeFileSync(file, '#!/usr/bin/env bash\nexit 0\n');
       chmodSync(file, 0o755);
@@ -139,6 +146,7 @@ describe('Canary redeployment service', () => {
     process.env.HUABU_REPO_ROOT = root;
     process.env.HUABU_DEPLOYED_SHA = sha;
     process.env.HUABU_DATA_DIR = dataDir;
+    delete process.env.HUABU_SERVICE_MANAGER;
     resetCanaryRedeployStateForTest();
   });
 
@@ -153,6 +161,8 @@ describe('Canary redeployment service', () => {
     restore('HUABU_DATA_DIR', originalEnv.dataDir);
     restore('HUABU_BASIC_AUTH_USER', originalEnv.username);
     restore('HUABU_BASIC_AUTH_PASS', originalEnv.password);
+    restore('HUABU_SERVICE_MANAGER', originalEnv.serviceManager);
+    restore('PATH', originalEnv.path);
     installDeploymentEnvironment(deploymentEnvironment);
     resetCanaryRedeployStateForTest();
     rmSync(root, { recursive: true, force: true });
@@ -171,6 +181,16 @@ describe('Canary redeployment service', () => {
     expect(resolveCanaryCapability()).toMatchObject({
       available: false,
       reason: 'disabled',
+    });
+  });
+
+  it('uses the readable build entry instead of the legacy shell for systemd', () => {
+    process.env.HUABU_SERVICE_MANAGER = 'systemd-user';
+    rmSync(join(root, 'scripts', 'start-huabu.sh'));
+    chmodSync(join(root, 'scripts', 'build-web.mjs'), 0o644);
+    expect(resolveCanaryCapability()).toMatchObject({
+      available: true,
+      scriptPath: join(root, 'scripts', 'build-web.mjs'),
     });
   });
 
@@ -361,6 +381,201 @@ describe('Canary redeployment service', () => {
     expect(status).not.toContain('private-output');
     expect(readFileSync(logPath, 'utf8')).toContain('Redeploying x/alpha');
     expect(readFileSync(logPath, 'utf8')).toContain('private-output');
+  });
+
+  it('starts a separate systemd user unit and sends credentials only through stdin', async () => {
+    const bin = join(root, 'bin');
+    const resultPath = join(dataDir, 'systemd-launch.json');
+    mkdirSync(bin);
+    const launcher = join(bin, 'systemd-run');
+    writeFileSync(
+      launcher,
+      `#!${process.execPath}
+const { readFileSync, writeFileSync } = require('node:fs');
+const { createInterface } = require('node:readline');
+(async () => {
+const input = createInterface({ input: process.stdin });
+const lines = input[Symbol.asyncIterator]();
+const environment = JSON.parse((await lines.next()).value);
+const result = {
+  args: process.argv.slice(2),
+  passwordMatches: environment.HUABU_CANARY_BASIC_AUTH_PASS === 'saved-test-password',
+};
+process.stdout.write('Huabu redeploy runner ready ' + process.pid + '\\n');
+const confirmation = (await lines.next()).value;
+const status = JSON.parse(readFileSync(${JSON.stringify(join(dataDir, 'canary-redeploy-status.json'))}, 'utf8'));
+writeFileSync(${JSON.stringify(resultPath)}, JSON.stringify({
+  ...result,
+  confirmed: confirmation === 'Huabu redeploy runner accepted',
+  runningPersisted: status.state === 'running' && status.runnerPid === process.pid,
+}));
+input.close();
+process.stdin.destroy();
+})();
+`,
+    );
+    chmodSync(launcher, 0o755);
+    process.env.PATH = `${bin}:${process.env.PATH}`;
+    process.env.HUABU_SERVICE_MANAGER = 'systemd-user';
+    installDeploymentEnvironment({
+      HUABU_BASIC_AUTH_USER: 'owner',
+      HUABU_BASIC_AUTH_PASS: 'saved-test-password',
+    });
+
+    await expect(requestCanaryRedeploy('alpha')).resolves.toMatchObject({
+      redeploy: { branch: 'alpha' },
+    });
+    await expect
+      .poll(() => JSON.parse(readFileSync(resultPath, 'utf8')))
+      .toMatchObject({ confirmed: true, runningPersisted: true });
+    const launch = JSON.parse(readFileSync(resultPath, 'utf8'));
+    expect(launch.passwordMatches).toBe(true);
+    expect(launch.args).toEqual([
+      '--user',
+      '--quiet',
+      '--collect',
+      '--pipe',
+      '--service-type=exec',
+      '--unit=huabu-redeploy.service',
+      '--expand-environment=no',
+      `--working-directory=${root}`,
+      process.execPath,
+      join(root, 'scripts', 'canary-redeploy-runner.mjs'),
+      join(root, 'scripts', 'build-web.mjs'),
+      join(dataDir, 'canary-redeploy-status.json'),
+      join(dataDir, 'logs', 'canary-redeploy.log'),
+      expect.stringMatching(/^\d+$/u),
+      'alpha',
+      '--environment-stdin',
+    ]);
+    expect(JSON.stringify(launch)).not.toContain('saved-test-password');
+    expect(
+      readFileSync(join(dataDir, 'canary-redeploy-status.json'), 'utf8'),
+    ).not.toContain('saved-test-password');
+  });
+
+  it('records systemd admission failures without leaving a requested deployment', async () => {
+    const bin = join(root, 'bin');
+    mkdirSync(bin);
+    const launcher = join(bin, 'systemd-run');
+    writeFileSync(launcher, '#!/usr/bin/env bash\nexit 7\n');
+    chmodSync(launcher, 0o755);
+    process.env.PATH = `${bin}:${process.env.PATH}`;
+    process.env.HUABU_SERVICE_MANAGER = 'systemd-user';
+    await expect(requestCanaryRedeploy('alpha')).rejects.toMatchObject({
+      code: 'redeploy_unavailable',
+    });
+    await expect(getCanaryRedeployStatus()).resolves.toMatchObject({
+      redeploy: { state: 'failed', message: 'Unable to start redeploy runner' },
+    });
+  });
+
+  it('prevents a late runner from deploying or overwriting a timed-out admission', async () => {
+    const bin = join(root, 'bin');
+    const finished = join(dataDir, 'late-launcher-finished');
+    const executed = join(dataDir, 'unexpected-build');
+    mkdirSync(bin);
+    writeFileSync(
+      join(root, 'scripts', 'canary-redeploy-runner.mjs'),
+      readFileSync(
+        new URL(
+          '../../../../../scripts/canary-redeploy-runner.mjs',
+          import.meta.url,
+        ),
+        'utf8',
+      ),
+    );
+    writeFileSync(
+      join(root, 'scripts', 'build-web.mjs'),
+      `import { writeFileSync } from 'node:fs';
+writeFileSync(${JSON.stringify(executed)}, 'executed');
+process.exit(7);
+`,
+    );
+    const launcher = join(bin, 'systemd-run');
+    writeFileSync(
+      launcher,
+      `#!${process.execPath}
+const { spawn } = require('node:child_process');
+const { writeFileSync } = require('node:fs');
+setTimeout(() => {
+  const nodeIndex = process.argv.indexOf(${JSON.stringify(process.execPath)}, 2);
+  const child = spawn(process.execPath, process.argv.slice(nodeIndex + 1), { stdio: 'inherit' });
+  child.once('error', () => writeFileSync(${JSON.stringify(finished)}, 'spawn failed'));
+  child.once('close', () => writeFileSync(${JSON.stringify(finished)}, 'finished'));
+}, 11000);
+`,
+    );
+    chmodSync(launcher, 0o755);
+    process.env.PATH = `${bin}:${process.env.PATH}`;
+    process.env.HUABU_SERVICE_MANAGER = 'systemd-user';
+
+    await expect(requestCanaryRedeploy('alpha')).rejects.toMatchObject({
+      code: 'redeploy_unavailable',
+    });
+    const rejectedStatus = readFileSync(
+      join(dataDir, 'canary-redeploy-status.json'),
+      'utf8',
+    );
+    expect(JSON.parse(rejectedStatus)).toMatchObject({
+      state: 'failed',
+      exitCode: -1,
+      message: 'Unable to start redeploy runner',
+    });
+    await expect.poll(() => existsSync(finished), { timeout: 5000 }).toBe(true);
+    expect(existsSync(executed)).toBe(false);
+    expect(
+      readFileSync(join(dataDir, 'canary-redeploy-status.json'), 'utf8'),
+    ).toBe(rejectedStatus);
+  }, 20_000);
+
+  it('receives the systemd runner environment without persisting probe credentials', () => {
+    const hook = join(root, 'stdin-hook.sh');
+    const statusPath = join(dataDir, 'stdin-status.json');
+    const logPath = join(dataDir, 'stdin.log');
+    writeFileSync(
+      hook,
+      '#!/usr/bin/env bash\n[[ "$HUABU_CANARY_BASIC_AUTH_PASS" == "probe-test-password" ]]\n',
+    );
+    chmodSync(hook, 0o755);
+    const runner = join(
+      process.cwd(),
+      '..',
+      '..',
+      'scripts',
+      'canary-redeploy-runner.mjs',
+    );
+    const result = spawnSync(
+      process.execPath,
+      [
+        runner,
+        hook,
+        statusPath,
+        logPath,
+        '100',
+        'alpha',
+        '--environment-stdin',
+      ],
+      {
+        encoding: 'utf8',
+        input: `${JSON.stringify({
+          ...process.env,
+          HUABU_CANARY_BASIC_AUTH_PASS: 'probe-test-password',
+        })}\nHuabu redeploy runner accepted\n`,
+      },
+    );
+    expect(result.status).toBe(0);
+    expect(result.stdout).toMatch(
+      /^Huabu redeploy runner ready [1-9][0-9]*\n$/u,
+    );
+    expect(JSON.parse(readFileSync(statusPath, 'utf8'))).toMatchObject({
+      state: 'succeeded',
+      branch: 'alpha',
+    });
+    expect(readFileSync(statusPath, 'utf8')).not.toContain(
+      'probe-test-password',
+    );
+    expect(readFileSync(logPath, 'utf8')).not.toContain('probe-test-password');
   });
 
   it('rejects malformed runner branch arguments before executing the hook', () => {
