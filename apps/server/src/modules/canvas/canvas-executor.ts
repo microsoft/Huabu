@@ -50,6 +50,7 @@ import {
   diffCanvasState,
   diffSiblingOrderEvents,
   SiblingOrderReplayError,
+  createExpectedParentsAdmit,
   executeCanvasCommands,
   extractCanvasChanges,
   nodeRevision,
@@ -61,6 +62,8 @@ import {
   type CanvasEdge,
   type CanvasNode,
   type Delta,
+  type ExecutorOptions,
+  type ExpectedParents,
   type SetSiblingOrderEvent,
 } from '@huabu/shared/canvas-engine';
 
@@ -669,6 +672,15 @@ export interface ExecuteOnServerInput {
   /** Return the read version of the state this call leaves behind. */
   issueBasis?: boolean;
   /**
+   * For `ui` batches: runs of commands that each form one edit, with the
+   * parent every node the edit places had when it was made. A run whose
+   * node is under another parent (or gone) when the run is reached is
+   * refused as a whole with `stale-parent` (`stale-target`); see
+   * `expectedParents.ts` in the shared engine. Ignored for other sources,
+   * whose batches the Server may extend.
+   */
+  expectedParents?: readonly ExpectedParents[];
+  /**
    * The thread id exactly as the caller sent it, when the entry point
    * checked it and `originator.threadId` holds only what survived the check.
    * Used to recognise a repeated request: a retry must match the original
@@ -812,6 +824,11 @@ function reliableRequestOf(input: ExecuteOnServerInput): ReliableRequest {
       basis: input.basis ?? null,
       source: input.originator.source,
       threadId: input.claimedThreadId ?? input.originator.threadId ?? null,
+      // Only when stated, so requests saved before the field existed still
+      // match their retries.
+      ...(input.expectedParents?.length
+        ? { expectedParents: input.expectedParents }
+        : {}),
     }),
   };
 }
@@ -1348,6 +1365,32 @@ async function executePreparedOnServerAlreadyLocked(
     });
   }
 
+  const readVersionAdmit =
+    readVersion && stamps
+      ? createReadVersionAdmit({
+          basis: readVersion,
+          stamps,
+          prestateNodes,
+          exempt: serverAppended,
+        })
+      : undefined;
+  // A `ui` batch reaches the engine command for command as it was sent, so
+  // the runs' indexes still address it.
+  const expectedParentsAdmit =
+    originator.source === 'ui' &&
+    input.expectedParents?.length &&
+    commands.length === input.commands.length
+      ? createExpectedParentsAdmit(commands, input.expectedParents)
+      : undefined;
+  const admit: ExecutorOptions['admit'] =
+    readVersionAdmit && expectedParentsAdmit
+      ? (command, state) => {
+          // Both are asked: the read-version check follows the batch.
+          const stale = readVersionAdmit(command, state);
+          return expectedParentsAdmit(command, state) ?? stale;
+        }
+      : (readVersionAdmit ?? expectedParentsAdmit);
+
   const { writeResult, commandResults, pendingEffects } = executeCanvasCommands(
     { source: originator.source, commands },
     {
@@ -1357,16 +1400,7 @@ async function executePreparedOnServerAlreadyLocked(
     },
     {
       forceFitFrames: originator.source === 'agent',
-      ...(readVersion && stamps
-        ? {
-            admit: createReadVersionAdmit({
-              basis: readVersion,
-              stamps,
-              prestateNodes,
-              exempt: serverAppended,
-            }),
-          }
-        : {}),
+      ...(admit ? { admit } : {}),
     },
   );
 

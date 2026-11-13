@@ -29,7 +29,10 @@ import {
   recentCanvasConversationParamsSchema,
   deleteNodeParamsSchema,
 } from '@huabu/shared';
-import { nodeRevisionOf } from '@huabu/shared/canvas-engine';
+import {
+  expectedParentsProblem,
+  nodeRevisionOf,
+} from '@huabu/shared/canvas-engine';
 
 import {
   associateAgentNode,
@@ -1405,7 +1408,15 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         message: 'System command origin is reserved for internal callers',
       });
     }
-    const { commands, originator, runId, operationId, basis } = parsed.data;
+    const { commands, originator, runId, operationId, basis, expectedParents } =
+      parsed.data;
+    if (expectedParents !== undefined) {
+      const problem =
+        originator.source !== 'ui'
+          ? 'expectedParents is accepted for ui batches only'
+          : expectedParentsProblem(expectedParents, commands.length);
+      if (problem) return reply.code(400).send({ message: problem });
+    }
     // Stored responses are kept per authenticated caller; the principal is
     // the transport's, never a value the request supplies.
     const principalId = getRequestIdentity(request)?.principal.principalId;
@@ -1446,6 +1457,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
           ? { request: { operationId, principalId } }
           : {}),
         ...(basis !== undefined ? { basis } : {}),
+        ...(expectedParents?.length ? { expectedParents } : {}),
         // A caller using neither field gets exactly the legacy call: no
         // stamp baseline is created on its behalf.
         ...(operationId !== undefined || basis !== undefined
