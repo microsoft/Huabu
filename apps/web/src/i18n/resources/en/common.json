@@ -1668,7 +1668,17 @@
     "unsynced": "Your changes are not synced yet. Trying again…",
     "sendFailed": "Some changes could not be sent to the server.",
     "keepTrying": "Keep trying",
-    "reloadAndDiscard": "Reload and discard unsent changes"
+    "reloadAndDiscard": "Reload and discard unsent changes",
+    "reloadWaiting": "This Space has newer changes. They will be shown once the unsaved text in {{notes}} has been saved.",
+    "savingTextBeforeReload": "Saving note text before reloading…",
+    "unsavedTextConfirm": "Text in {{notes}} could not be saved. Reloading will discard that text as well. Cancel to keep it and copy it out first.",
+    "cancelDiscard": "Cancel",
+    "discardTextAndReload": "Discard this text and reload",
+    "reloadedDiscarded": "This Space was reloaded. The changes that could not be sent were discarded.",
+    "noteName": "“{{name}}”",
+    "untitledNote": "an untitled note",
+    "noteSeparator": ", ",
+    "notesAndMore": "{{notes}} and {{count}} more"
   },
   "canvasPresence": {
     "anotherDevice": "Another device",

@@ -136,6 +136,20 @@ function remote(commands: CanvasCommand[]): PostCanvasExecuteResponse {
     operationId: crypto.randomUUID(),
   });
 }
+/** The server stores a body a page saved through the content request. */
+function saveOnServer(nodeId: string, content: string) {
+  const { nodes, edges, version } = server.state;
+  server.reset(
+    nodes.map((candidate) =>
+      candidate.id === nodeId
+        ? { ...candidate, data: { ...candidate.data, content } }
+        : candidate,
+    ),
+    edges,
+    version,
+  );
+}
+
 const moveCommand = (id: string, x: number, y = 0): CanvasCommand => ({
   type: 'SET_NODE_GEOMETRY',
   items: [{ nodeId: id as `node-${string}`, position: { x, y } }],
@@ -530,6 +544,72 @@ describe('a wanted reload waits for the queue', () => {
   });
 });
 
+describe('a wanted reload waits for unsaved note text', () => {
+  const waitingNotices = () =>
+    vi
+      .mocked(toast)
+      .mock.calls.filter(([message]) => /newer changes/i.test(String(message)));
+
+  it('runs by itself once the text has been saved, without the text being lost', async () => {
+    api.putNodeContent.mockImplementation(
+      async (
+        _canvasId: string,
+        nodeId: string,
+        request: { content?: string },
+      ) => {
+        saveOnServer(nodeId, request.content ?? '');
+        return { nodeId, label: null, rev: 'rev-saved' };
+      },
+    );
+    state().updateNodeData(Y, { content: 'Being typed' });
+    const reloaded = vi.fn();
+    // A version gap, a snapshot that does not match, a rejected command.
+    requestCanvasResync(SPACE, reloaded);
+    await flush();
+    // Not over text that is not saved yet.
+    expect(api.getCanvas).not.toHaveBeenCalled();
+    expect(node(Y).data.content).toBe('Being typed');
+
+    // The debounced save goes out and is acknowledged; nothing else happens.
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(api.getCanvas).toHaveBeenCalledTimes(1);
+    expect(reloaded).toHaveBeenCalledTimes(1);
+    expect(node(Y).data.content).toBe('Being typed');
+    expect(waitingNotices()).toHaveLength(0);
+  });
+
+  it('says what it is waiting for when the text cannot be saved, and runs once it has been', async () => {
+    api.putNodeContent.mockRejectedValue(new TypeError('Failed to fetch'));
+    state().updateNodeData(Y, { content: 'Cannot be saved yet' });
+    requestCanvasResync(SPACE);
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    expect(api.getCanvas).not.toHaveBeenCalled();
+    expect(node(Y).data.content).toBe('Cannot be saved yet');
+    expect(waitingNotices()).toHaveLength(1);
+    expect(String(waitingNotices()[0][0])).toContain(`Label ${Y}`);
+    // One notice, however long it waits.
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(waitingNotices()).toHaveLength(1);
+
+    // The save gets through (the user's Retry, or the next drain).
+    api.putNodeContent.mockImplementation(
+      async (
+        _canvasId: string,
+        nodeId: string,
+        request: { content?: string },
+      ) => {
+        saveOnServer(nodeId, request.content ?? '');
+        return { nodeId, label: null, rev: 'rev-saved' };
+      },
+    );
+    await drainPendingSaves(SPACE).catch(() => undefined);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(api.getCanvas).toHaveBeenCalledTimes(1);
+    expect(node(Y).data.content).toBe('Cannot be saved yet');
+  });
+});
+
 describe('a free drag', () => {
   it('is sent at the drop as the geometry its ticks left in the store', async () => {
     const dragged = [node(X)];
@@ -821,6 +901,118 @@ describe('when a change cannot be sent', () => {
     const attempts = own.length;
     await vi.advanceTimersByTimeAsync(120_000);
     expect(own).toHaveLength(attempts);
+  });
+
+  describe('"reload and discard" with unsaved note text', () => {
+    const contentSaves = () =>
+      api.putNodeContent.mock.calls.map((call) => ({
+        nodeId: call[1] as string,
+        content: (call[2] as { content?: string }).content,
+      }));
+    const clickReloadAndDiscard = () =>
+      notices()
+        .filter((notice) => /could not be sent/.test(String(notice.message)))
+        .at(-1)
+        ?.options?.secondaryAction?.onClick();
+    const confirmation = () =>
+      notices()
+        .filter((notice) => /could not be saved/.test(String(notice.message)))
+        .at(-1);
+
+    it('saves the text first, then reloads: the body survives and the unsent move is gone', async () => {
+      moveHere(X, 500);
+      await failUntilStalled();
+      // Typed just now: not saved yet.
+      state().updateNodeData(Y, { content: 'Typed and not saved yet' });
+      // The body is saved by its own request, which gets through.
+      api.putNodeContent.mockImplementation(
+        async (
+          _canvasId: string,
+          nodeId: string,
+          request: { content?: string },
+        ) => {
+          saveOnServer(nodeId, request.content ?? '');
+          return { nodeId, label: null, rev: 'rev-saved' };
+        },
+      );
+
+      clickReloadAndDiscard();
+      await vi.advanceTimersByTimeAsync(1_000);
+
+      expect(contentSaves()).toContainEqual({
+        nodeId: Y,
+        content: 'Typed and not saved yet',
+      });
+      expect(api.getCanvas).toHaveBeenCalledTimes(1);
+      expect(node(X).position).toEqual({ x: 0, y: 0 });
+      expect(node(Y).data.content).toBe('Typed and not saved yet');
+      expect(syncState()).toBe('synced');
+      expect(hasUnsavedCanvasEdits()).toBe(false);
+      // No question was asked: nothing typed was at risk.
+      expect(confirmation()).toBeUndefined();
+      // The outcome is said.
+      expect(notices().at(-1)?.message).toMatch(/reloaded/i);
+    });
+
+    it('names the note whose text cannot be saved and asks before discarding it; cancelling keeps everything', async () => {
+      moveHere(X, 500);
+      await failUntilStalled();
+      state().updateNodeData(Y, { content: 'Only here' });
+      api.putNodeContent.mockRejectedValue(offline());
+
+      clickReloadAndDiscard();
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      // Not reloaded, not silent: the note is named and the user is asked.
+      expect(api.getCanvas).not.toHaveBeenCalled();
+      const asked = confirmation();
+      expect(asked?.message).toContain(`Label ${Y}`);
+      expect(asked?.options).toMatchObject({
+        duration: 0,
+        dismissible: false,
+        action: { label: 'Cancel' },
+        secondaryAction: { label: 'Discard this text and reload' },
+      });
+
+      // Cancel: the text and the unsent move are still here, and so is the
+      // choice the user started from.
+      const before = notices().length;
+      asked?.options?.action?.onClick();
+      await flush();
+      expect(api.getCanvas).not.toHaveBeenCalled();
+      expect(node(Y).data.content).toBe('Only here');
+      expect(node(X).position).toEqual({ x: 500, y: 0 });
+      expect(syncState()).toBe('error');
+      expect(hasUnsavedCanvasEdits()).toBe(true);
+      const again = notices().slice(before).at(-1);
+      expect(again?.message).toMatch(/could not be sent/);
+      expect(again?.options).toMatchObject({
+        secondaryAction: { label: 'Reload and discard unsent changes' },
+      });
+    });
+
+    it('discards the text and reloads once the user confirms', async () => {
+      moveHere(X, 500);
+      await failUntilStalled();
+      state().updateNodeData(Y, { content: 'Only here' });
+      api.putNodeContent.mockRejectedValue(offline());
+
+      clickReloadAndDiscard();
+      await vi.advanceTimersByTimeAsync(10_000);
+      const savesBefore = api.putNodeContent.mock.calls.length;
+      confirmation()?.options?.secondaryAction?.onClick();
+      await vi.advanceTimersByTimeAsync(1_000);
+
+      expect(api.getCanvas).toHaveBeenCalledTimes(1);
+      expect(node(Y).data.content).toBe(`Body ${Y}`);
+      expect(node(X).position).toEqual({ x: 0, y: 0 });
+      expect(syncState()).toBe('synced');
+      expect(hasUnsavedCanvasEdits()).toBe(false);
+      expect(notices().at(-1)?.message).toMatch(/reloaded/i);
+      // The discarded text is not sent afterwards.
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(api.putNodeContent.mock.calls.length).toBe(savesBefore);
+    });
   });
 
   it('retries at once when the browser comes back online, also from the error state', async () => {

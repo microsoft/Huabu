@@ -434,11 +434,11 @@ export const useCanvasSyncStore = create<CanvasSyncState>((set, get) => ({
         );
       } else if (toVersion > canvasStore.version) {
         // Gap (missed an earlier update). A blind `loadCanvas` would
-        // clobber un-persisted local edits, so skip it while the user
-        // is mid-editing a body, and hold it until queued structure edits
-        // have been sent. Incremental gap-heal (delta-log backfill) is
-        // deferred to P2.
-        if (canvasStore.pendingContentNodeIds().length === 0) reload();
+        // clobber un-persisted local edits, so the reload is held — not
+        // dropped — until queued structure edits have been sent and until
+        // a body being edited has been saved (`requestCanvasResync`).
+        // Incremental gap-heal (delta-log backfill) is deferred to P2.
+        reload();
       }
       // else: stale/older update — ignore.
 

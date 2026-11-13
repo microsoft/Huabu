@@ -22,7 +22,11 @@ import type { CreateCanvasResponse } from '@huabu/shared';
  *   is unanswered does not ask "leave site?"; a user's edit does;
  * - a body and a title another page saved while this page's stream was down
  *   are shown after it reconnects, without loading the Space again, and this
- *   page's next save of that node is not refused as a conflict.
+ *   page's next save of that node is not refused as a conflict;
+ * - content saved between a page's load of the Space and its subscription
+ *   to the stream is shown, in either order of the two;
+ * - "Reload and discard unsent changes" with unsaved note text saves what it
+ *   can, asks about the rest by name, and then does what was chosen.
  */
 
 // Mouse input: the default project emulates touch for the gesture suites.
@@ -529,4 +533,97 @@ test('content another page saved while this page was disconnected is shown after
   );
 
   await b.context.close();
+});
+
+test('"Reload and discard unsent changes" saves note text first, asks about text it cannot save, and then reloads', async ({
+  browser,
+  request,
+}) => {
+  test.setTimeout(180_000);
+  const canvasId = await seedSpace(request);
+  const device = await newDevice(browser, canvasId);
+  await device.open();
+  // The page reports the Text's rendered box once; wait that out.
+  await device.page.waitForTimeout(1_500);
+
+  // Structure edits cannot be sent; and one note's text cannot be saved.
+  await device.context.route('**/api/canvas/*/execute', (route) =>
+    route.abort('failed'),
+  );
+  let refuseX = true;
+  const savesOfX: string[] = [];
+  await device.context.route(
+    `**/api/canvas/${canvasId}/nodes/${X}/content`,
+    (route) => {
+      if (route.request().method() !== 'PUT') return route.continue();
+      savesOfX.push(route.request().postData() ?? '');
+      return refuseX ? route.abort('failed') : route.continue();
+    },
+  );
+
+  // A structure edit of the user's, until the page gives up retrying it.
+  await act(device.page, 'updateNodeData', Y, { pinned: true });
+  const reloadAndDiscard = device.page.getByRole('button', {
+    name: 'Reload and discard unsent changes',
+  });
+  await expect(reloadAndDiscard).toBeVisible({ timeout: 90_000 });
+
+  // Text typed in two notes just before choosing to reload: Y's can be
+  // saved, X's cannot.
+  await act(device.page, 'updateNodeData', Y, { content: 'Y typed last' });
+  await act(device.page, 'updateNodeData', X, { content: 'X typed last' });
+  const loads = device.spaceLoads();
+  await reloadAndDiscard.click();
+
+  // Not a silent nothing: the note that cannot be saved is named and the
+  // page asks. What could be saved was saved; nothing is reloaded yet.
+  const question = device.page.getByText(/could not be saved/);
+  await expect(question).toBeVisible({ timeout: 30_000 });
+  await expect(question).toContainText(`Label ${X}`);
+  await expect(question).not.toContainText(`Label ${Y}`);
+  expect((await serverContent(request, canvasId, Y)).content).toBe(
+    'Y typed last',
+  );
+  expect(device.spaceLoads()).toBe(loads);
+  expect((await shownNode(device.page, X)).content).toBe('X typed last');
+
+  // Cancel: the text is still here to copy out, and the choice comes back.
+  await device.page.getByRole('button', { name: 'Cancel' }).click();
+  await expect(question).toBeHidden();
+  expect((await shownNode(device.page, X)).content).toBe('X typed last');
+  expect(device.spaceLoads()).toBe(loads);
+  await expect(reloadAndDiscard).toBeVisible();
+
+  // Again, and this time discard the text as well.
+  await reloadAndDiscard.click();
+  await expect(question).toBeVisible({ timeout: 30_000 });
+  await device.page
+    .getByRole('button', { name: 'Discard this text and reload' })
+    .click();
+  await expect(device.page.getByText(/This Space was reloaded/)).toBeVisible({
+    timeout: 30_000,
+  });
+  expect(device.spaceLoads()).toBe(loads + 1);
+  // The server's Space: X's unsaved text and the unsent pin are gone, Y's
+  // saved text is there.
+  expect((await shownNode(device.page, X)).content).toBe(`Body of ${X}`);
+  expect((await shownNode(device.page, Y)).content).toBe('Y typed last');
+  expect(
+    await device.page.evaluate(async (nodeId) => {
+      const path = '/src/store/canvasStore.ts';
+      const { default: store } = (await import(path)) as typeof CanvasStore;
+      return store.getState().nodes.find((n) => n.id === nodeId)?.data.pinned;
+    }, Y),
+  ).toBeUndefined();
+  expect((await shownNode(device.page, X)).reloaded).toBe(false);
+  // The discarded text is not sent afterwards.
+  refuseX = false;
+  const attempts = savesOfX.length;
+  await device.page.waitForTimeout(3_000);
+  expect(savesOfX.length).toBe(attempts);
+  expect((await serverContent(request, canvasId, X)).content).toBe(
+    `Body of ${X}`,
+  );
+
+  await device.context.close();
 });

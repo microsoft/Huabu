@@ -1668,7 +1668,17 @@
     "unsynced": "你的修改尚未同步，正在重试…",
     "sendFailed": "部分修改未能发送到服务器。",
     "keepTrying": "继续重试",
-    "reloadAndDiscard": "重新加载并放弃未发送的修改"
+    "reloadAndDiscard": "重新加载并放弃未发送的修改",
+    "reloadWaiting": "此空间有更新的修改。{{notes}}中未保存的文字保存后，将显示这些修改。",
+    "savingTextBeforeReload": "正在保存笔记文字，然后重新加载…",
+    "unsavedTextConfirm": "{{notes}}中的文字未能保存。重新加载会一并放弃这些文字。如需保留，请取消并先复制出来。",
+    "cancelDiscard": "取消",
+    "discardTextAndReload": "放弃这些文字并重新加载",
+    "reloadedDiscarded": "此空间已重新加载，未能发送的修改已放弃。",
+    "noteName": "“{{name}}”",
+    "untitledNote": "未命名笔记",
+    "noteSeparator": "、",
+    "notesAndMore": "{{notes}}等另外 {{count}} 条"
   },
   "canvasPresence": {
     "anotherDevice": "其他设备",

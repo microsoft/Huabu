@@ -980,6 +980,8 @@ const nodeContentQueue = createNodeContentQueue({
   onRestoredContentPersisted: (canvasId, nodeId) =>
     preprocessQueue.resumeRestored(canvasId, nodeId),
   onContentPersisted: (canvasId, nodeId) => {
+    // A reload that was waiting for this text can run now.
+    resumeReloadHeldForContent();
     // The server now has the body this node was measured against.
     if (useCanvasStore.getState().canvasId !== canvasId) return;
     if (heightsAwaitingContent.delete(nodeId))
@@ -1501,9 +1503,13 @@ const browserSync = createBrowserSync({
   reload: (canvasId) => {
     const state = useCanvasStore.getState();
     if (state.canvasId !== canvasId) return;
-    // A reload would drop a body the user is still typing; the next update
-    // that shows the gap asks again.
-    if (nodeContentQueue.pendingNodeIds().length > 0) return;
+    // A reload would drop a body the user is still typing. It is not given
+    // up: it runs as soon as that text has been saved.
+    if (nodeContentQueue.pendingNodeIds().length > 0) {
+      holdReloadForContent(canvasId);
+      return;
+    }
+    releaseReloadHeldForContent();
     const done = afterCanvasResync;
     void state
       .loadCanvas(canvasId, { resetHistory: true })
@@ -1511,6 +1517,103 @@ const browserSync = createBrowserSync({
   },
   ignoreUnit: isContentUnit,
 });
+
+// ─── A reload that waits for unsaved note text ────────────────────────────
+//
+// Every reload the sync layer asks for (a version gap, a snapshot that does
+// not match, a paint order that could not be installed, an update that never
+// arrived, a rejected command) ends in `reload` above, which will not replace
+// a body the server does not have. Such a reload is held here instead of
+// being dropped: it runs by itself when the content queue has nothing unsaved
+// left — normally a moment later, when the debounced save is acknowledged.
+// When the text cannot be saved (a failing save, a conflict the user has not
+// answered) the page says what the reload is waiting for.
+
+/** How long a held reload waits quietly before the page says why. */
+const RELOAD_HELD_NOTICE_MS = 5_000;
+/** How often a held reload looks whether the text has been dealt with. */
+const RELOAD_HELD_POLL_MS = 1_000;
+
+let reloadHeldForContent: {
+  canvasId: string;
+  poll: ReturnType<typeof setInterval>;
+  noticeTimer: ReturnType<typeof setTimeout> | null;
+  toastId: string | null;
+} | null = null;
+
+function releaseReloadHeldForContent(): void {
+  const held = reloadHeldForContent;
+  if (!held) return;
+  reloadHeldForContent = null;
+  clearInterval(held.poll);
+  if (held.noticeTimer) clearTimeout(held.noticeTimer);
+  if (held.toastId) dismissToast(held.toastId);
+}
+
+/** Run the held reload if nothing stands in its way any more. */
+function resumeReloadHeldForContent(): void {
+  const held = reloadHeldForContent;
+  if (!held) return;
+  if (useCanvasStore.getState().canvasId !== held.canvasId) {
+    // The user left the Space; the next visit loads it anyway.
+    releaseReloadHeldForContent();
+    return;
+  }
+  if (nodeContentQueue.pendingNodeIds().length > 0) return;
+  releaseReloadHeldForContent();
+  // Through the queue's own gate again: not over unsent structure edits.
+  browserSync.deferReload(held.canvasId);
+}
+
+function holdReloadForContent(canvasId: string): void {
+  if (reloadHeldForContent?.canvasId === canvasId) return;
+  releaseReloadHeldForContent();
+  const held: NonNullable<typeof reloadHeldForContent> = {
+    canvasId,
+    // A save's acknowledgement resumes at once; this also catches text that
+    // stops being unsaved another way (a conflict answered with the server's
+    // version, the node deleted).
+    poll: setInterval(resumeReloadHeldForContent, RELOAD_HELD_POLL_MS),
+    noticeTimer: setTimeout(() => {
+      held.noticeTimer = null;
+      if (reloadHeldForContent !== held) return;
+      const names = unsavedNoteNames(canvasId);
+      if (names === null) return;
+      held.toastId = toast(t('canvasSync.reloadWaiting', { notes: names }), {
+        tone: 'warning',
+        duration: 0,
+      });
+    }, RELOAD_HELD_NOTICE_MS),
+    toastId: null,
+  };
+  reloadHeldForContent = held;
+}
+
+/**
+ * The notes of `canvasId` whose text is not saved, as one phrase for a
+ * notice: up to three titles, then how many more. `null` when there is none.
+ */
+function unsavedNoteNames(canvasId: string): string | null {
+  const state = useCanvasStore.getState();
+  if (state.canvasId !== canvasId) return null;
+  const unsaved = new Set(nodeContentQueue.unsavedNodeIds(canvasId));
+  if (unsaved.size === 0) return null;
+  const titles = state.nodes
+    .filter((node) => unsaved.has(node.id))
+    .map((node) => {
+      const label = (node.data as { label?: unknown } | undefined)?.label;
+      return typeof label === 'string' && label.trim()
+        ? t('canvasSync.noteName', { name: label.trim() })
+        : t('canvasSync.untitledNote');
+    });
+  // Text of a node that is no longer shown (deleted here, save still failing).
+  for (let i = titles.length; i < unsaved.size; i++)
+    titles.push(t('canvasSync.untitledNote'));
+  const shown = titles.slice(0, 3).join(t('canvasSync.noteSeparator'));
+  return titles.length > 3
+    ? t('canvasSync.notesAndMore', { notes: shown, count: titles.length - 3 })
+    : shown;
+}
 
 // ─── Unsynced and error notices ───────────────────────────────────────────
 //
@@ -1558,20 +1661,123 @@ function showSyncNotice(canvasId: string, state: CanvasSyncState): void {
               label: t('canvasSync.reloadAndDiscard'),
               onClick: () => {
                 syncNotice = null;
-                discardUnsentCanvasEdits(canvasId);
+                void discardUnsentCanvasEdits(canvasId);
               },
             },
           }),
   };
 }
 
+/** The longest "reload and discard" waits for note text to be saved first. */
+const DISCARD_CONTENT_SAVE_WAIT_MS = 5_000;
+let discardingUnsentEdits = false;
+
 /**
  * The user's choice in the error state: give up what could not be sent and
  * show the server's Space again.
+ *
+ * Structure edits are what could not be sent; note text has its own request
+ * and may well get through. So the text is saved first, and then the Space
+ * is reloaded. Text that cannot be saved either is never dropped on the
+ * quiet: the notes are named and the user decides — discard that text too,
+ * or cancel (to copy it out, or to keep trying), which leaves the page
+ * exactly as it was. Every path ends in something the user sees.
  */
-export function discardUnsentCanvasEdits(canvasId: string): void {
+export async function discardUnsentCanvasEdits(
+  canvasId: string,
+): Promise<void> {
+  if (discardingUnsentEdits) return;
+  const isCurrent = () => useCanvasStore.getState().canvasId === canvasId;
+  if (!isCurrent()) return;
+  discardingUnsentEdits = true;
+  try {
+    if (nodeContentQueue.unsavedNodeIds(canvasId).length > 0) {
+      const savingToast = toast(t('canvasSync.savingTextBeforeReload'), {
+        tone: 'info',
+        duration: 0,
+        dismissible: false,
+      });
+      try {
+        nodeContentQueue.retryFailedSaves(canvasId);
+        // Bounded: the text of a node whose creation is among the unsent
+        // edits waits for that creation, which is not coming.
+        await Promise.race([
+          nodeContentQueue.flushAll(),
+          new Promise((resolve) =>
+            setTimeout(resolve, DISCARD_CONTENT_SAVE_WAIT_MS),
+          ),
+        ]);
+      } finally {
+        dismissToast(savingToast);
+      }
+      if (!isCurrent()) return;
+    }
+    const names = unsavedNoteNames(canvasId);
+    if (names === null) {
+      await reloadDiscardingUnsent(canvasId, false);
+      return;
+    }
+    toast(t('canvasSync.unsavedTextConfirm', { notes: names }), {
+      tone: 'danger',
+      duration: 0,
+      dismissible: false,
+      action: {
+        label: t('canvasSync.cancelDiscard'),
+        // Nothing was given up: the page is in the state the choice was
+        // made from, so offer that choice again.
+        onClick: () =>
+          showSyncNotice(canvasId, useCanvasSyncStatusStore.getState().state),
+      },
+      secondaryAction: {
+        label: t('canvasSync.discardTextAndReload'),
+        onClick: () => void reloadDiscardingUnsent(canvasId, true),
+      },
+    });
+  } finally {
+    discardingUnsentEdits = false;
+  }
+}
+
+/**
+ * Drop the unsent structure edits — and, when the user has confirmed it,
+ * the note text that could not be saved — then load the server's Space.
+ */
+async function reloadDiscardingUnsent(
+  canvasId: string,
+  discardContent: boolean,
+): Promise<void> {
+  const state = useCanvasStore.getState();
+  if (state.canvasId !== canvasId) return;
+  if (!discardContent && nodeContentQueue.unsavedNodeIds(canvasId).length > 0) {
+    // Typed between the check and here: ask rather than lose it.
+    void discardUnsentCanvasEdits(canvasId);
+    return;
+  }
+  releaseReloadHeldForContent();
   browserSync.discard(canvasId);
-  browserSync.deferReload(canvasId);
+  if (discardContent) {
+    preprocessQueue.cancelAll();
+    const resumeContentSaves = nodeContentQueue.suspendCanvas(canvasId);
+    try {
+      // Requests already issued cannot be taken back; let them settle so
+      // none of them answers into the reloaded Space.
+      await Promise.race([
+        waitForSidecarWrites(),
+        new Promise((resolve) =>
+          setTimeout(resolve, DISCARD_CONTENT_SAVE_WAIT_MS),
+        ),
+      ]);
+      if (useCanvasStore.getState().canvasId !== canvasId) return;
+      nodeContentQueue.discardCanvas(canvasId);
+    } finally {
+      resumeContentSaves();
+    }
+  }
+  const done = afterCanvasResync;
+  await useCanvasStore.getState().loadCanvas(canvasId, { resetHistory: true });
+  done?.();
+  if (useCanvasStore.getState().canvasId === canvasId)
+    toast(t('canvasSync.reloadedDiscarded'), { tone: 'info' });
 }
 
 browserSync.queue.subscribe((status) => {
@@ -1662,6 +1868,8 @@ export function resetCanvasSyncForTests(): void {
   restoringNodeIds.clear();
   failedRestores.clear();
   dismissSyncNotice();
+  releaseReloadHeldForContent();
+  discardingUnsentEdits = false;
   useCanvasSyncStatusStore.setState({ state: 'synced', pending: 0 });
 }
 

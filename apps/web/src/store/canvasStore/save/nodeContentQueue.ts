@@ -264,6 +264,11 @@ export type NodeContentQueue = {
    * user is mid-editing from an incoming agent write.
    */
   pendingNodeIds(): string[];
+  /**
+   * Nodes of `canvasId` whose content exists only on this page: everything
+   * {@link pendingNodeIds} names, and the nodes whose last save failed.
+   */
+  unsavedNodeIds(canvasId: string): string[];
   pendingFields(nodeId: string): ReadonlySet<string>;
   /** Whether a content edit has not reached the Server: queued, in flight or failed. */
   hasUnsavedContent(canvasId: string): boolean;
@@ -1473,6 +1478,19 @@ export function createNodeContentQueue(opts: {
           ...frozen.keys(),
           ...[...restoredContent]
             .filter(([, canvasId]) => canvasId === opts.getState().canvasId)
+            .map(([id]) => id),
+        ]),
+      );
+    },
+
+    unsavedNodeIds(canvasId) {
+      return Array.from(
+        new Set([
+          ...(opts.getState().canvasId === canvasId
+            ? this.pendingNodeIds()
+            : []),
+          ...[...failures]
+            .filter(([, failure]) => failure.canvasId === canvasId)
             .map(([id]) => id),
         ]),
       );
