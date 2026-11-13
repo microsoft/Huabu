@@ -16,8 +16,6 @@ import type {
   GetCanvasResponse,
   CanvasAccess,
   GetNodeContentResponse,
-  PutCanvasRequest,
-  PutCanvasResponse,
   PutNodeContentRequest,
   PutNodeContentResponse,
   DeleteNodeResponse,
@@ -225,40 +223,6 @@ export async function moveCanvasSelection(
   });
 }
 
-export async function putCanvas(
-  canvasId: string,
-  request: PutCanvasRequest,
-  options?: { keepalive?: boolean },
-): Promise<PutCanvasResponse> {
-  // We can't use `apiFetch` directly because the structured 409
-  // `CanvasConflictResponse` carries `conflictWith` / `nodeId` /
-  // `serverVersion` at the top level, while `ApiError` only preserves
-  // `code` + `details` from the canonical `ApiErrorBody`. Fall back to
-  // a raw `fetch` so we can throw a `CanvasConflictError` with the
-  // full payload intact.
-  const response = await fetch(apiUrl(routes.canvas(canvasId)), {
-    method: 'PUT',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(request),
-    keepalive: options?.keepalive ?? false,
-  });
-
-  if (!response.ok) {
-    notifyAccessRefusal(canvasId, response.status);
-    const body = (await response.json().catch(() => null)) as unknown;
-    if (response.status === 409 && isCanvasConflictResponse(body)) {
-      throw new CanvasConflictError(body);
-    }
-    const errBody =
-      body && typeof body === 'object' ? (body as Partial<ApiErrorBody>) : {};
-    throw new ApiError(response.status, errBody, 'Failed to save Space');
-  }
-
-  return (await response.json()) as PutCanvasResponse;
-}
-
 export async function deleteNode(
   canvasId: string,
   nodeId: string,
@@ -273,12 +237,13 @@ export async function deleteNode(
 
 /**
  * Persist a single node's markdown sidecar
- * (`nodes/<safe(label)>.md`). Unlike `putCanvas`, this endpoint never
- * touches structural state and therefore does not participate in the
- * canvas-level optimistic-concurrency `version` counter — concurrent
- * editor edits and viewport drags never collide on it.
+ * (`nodes/<safe(label)>.md`). This endpoint never touches structural
+ * state and therefore does not participate in the canvas-level
+ * optimistic-concurrency `version` counter — concurrent editor edits and
+ * viewport drags never collide on it.
  *
- * Mirrors `putCanvas`'s raw-fetch pattern so a 409 `NODE_LABEL_CONFLICT`
+ * Uses a raw fetch rather than `apiFetch` (which keeps only `code` and
+ * `details` of an error body) so a 409 `NODE_LABEL_CONFLICT`
  * body deserialises into `CanvasConflictError` with `nodeId` +
  * `conflictWith` intact, which `tryRename` reads to revert + alert.
  */

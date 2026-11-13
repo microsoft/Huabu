@@ -57,7 +57,6 @@ import {
   ExecuteRequestReusedError,
   applyDeltasOnServer,
   executeOnServer,
-  hydrateCanvasNodes,
 } from './canvas-executor.js';
 import { searchCanvas } from './canvas-search.js';
 import { publishCanvasUpdate } from './canvas-sync.js';
@@ -75,7 +74,6 @@ import {
   getSpacePreviewScene,
   SpacePreviewSceneError,
 } from './space-preview-scene.js';
-import { wholeSpaceSaveUpdate } from './whole-space-save-update.js';
 import {
   assertCurrentCanvasCommands,
   assertChildSpaceEntriesAllowed,
@@ -118,7 +116,6 @@ import {
   getStructuredStore,
   type CanvasFile,
   type NodeContent,
-  type NodeSnapshot,
   type Space,
   type UpdateNodeOutcome,
   updateNode,
@@ -1676,44 +1673,6 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
           }
         }
 
-        // Pages follow the version through `update` events only: publish
-        // what this save changed as one, so they show it and stay in step.
-        if (existing !== null) {
-          try {
-            publishCanvasUpdate(
-              canvasId,
-              await wholeSpaceSaveUpdate(
-                {
-                  version: serverVersion,
-                  title: previousTitle,
-                  nodes: existing.state.nodes,
-                  edges: existing.state.edges,
-                },
-                {
-                  version: nextVersion,
-                  title: nextTitle,
-                  nodes: slimNodes,
-                  edges: canvasFile.state.edges,
-                },
-                async (nodes) => {
-                  const records = new Map<string, NodeSnapshot>();
-                  for (const id of new Set(nodes.map((node) => node.id))) {
-                    const record = await handle.nodes.read(id);
-                    if (record) records.set(id, record);
-                  }
-                  return hydrateCanvasNodes(records, nodes);
-                },
-              ),
-            );
-          } catch (error) {
-            // The save is written. Without the update, pages reload at the
-            // next commit, as they did before it was published.
-            request.log.warn(
-              { canvasId, err: toMessage(error) },
-              'Whole-Space save could not be published as an update',
-            );
-          }
-        }
         publishCanvasUpdate(canvasId, { type: 'invalidate', data: {} });
         return reply.send({ canvasId, version: nextVersion });
       } catch (error) {

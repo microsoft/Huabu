@@ -6,7 +6,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { nodeRevisionOf } from '@huabu/shared/canvas-engine';
 
 const api = vi.hoisted(() => ({
-  putCanvas: vi.fn(),
   postCanvasExecute: vi.fn(),
   deleteNode: vi.fn(),
   putNodeContent: vi.fn(),
@@ -358,7 +357,6 @@ describe('undo/redo persistence ordering', () => {
     });
     await vi.advanceTimersByTimeAsync(500);
     expect(body).toBe('edited');
-    expect(api.putCanvas).not.toHaveBeenCalled();
     expect(api.putNodeContent.mock.calls[0][2].expectRev).toBe(
       nodeRevisionOf({ content: note.data.content as string }),
     );
@@ -391,7 +389,6 @@ describe('undo/redo persistence ordering', () => {
     state().redo();
     await tick();
     expect(parents()).toEqual([null, null]);
-    expect(api.putCanvas).not.toHaveBeenCalled();
   });
 
   it('brings a deleted note back with its body in one command, without a content PUT', async () => {
@@ -407,7 +404,6 @@ describe('undo/redo persistence ordering', () => {
     expect(calls).toEqual(['execute:start', 'restore:committed']);
     await vi.advanceTimersByTimeAsync(2_000);
     expect(api.putNodeContent).not.toHaveBeenCalled();
-    expect(api.putCanvas).not.toHaveBeenCalled();
     expect(state().pendingContentNodeIds()).toEqual([]);
   });
 
@@ -496,7 +492,6 @@ describe('undo/redo persistence ordering', () => {
       data: { content: 'Restored elsewhere' },
     });
     expect(body).toBe('Restored elsewhere');
-    expect(api.putCanvas).not.toHaveBeenCalled();
   });
 
   it('Retry on the failed save of an edited returning note sends the restore again', async () => {
@@ -611,7 +606,6 @@ describe('undo/redo persistence ordering', () => {
     retry?.();
     await vi.advanceTimersByTimeAsync(2_000);
     expect(api.putNodeContent).toHaveBeenCalledTimes(1);
-    expect(api.putCanvas).not.toHaveBeenCalled();
     expect(api.getCanvas).toHaveBeenCalledTimes(1);
     expect(state().canvasId).toBe('');
     expect(state().nodes).toEqual([]);

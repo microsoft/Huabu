@@ -7,7 +7,6 @@ import { stripLegacyPortalTopology } from '@huabu/shared';
 
 const api = vi.hoisted(() => ({
   getCanvas: vi.fn(),
-  putCanvas: vi.fn(),
   postCanvasExecute: vi.fn(),
   deleteNode: vi.fn(),
 }));
@@ -233,13 +232,11 @@ describe('legacy topology load boundary', () => {
     expect(loaded.version).toBe(10);
     expect(loaded.isLoading).toBe(false);
     expect(api.postCanvasExecute).toHaveBeenCalledOnce();
-    expect(api.putCanvas).not.toHaveBeenCalled();
     expect(JSON.stringify(graph)).toBe(before);
 
     await useCanvasStore.getState().loadCanvas('canvas-loaded');
     await vi.advanceTimersByTimeAsync(2000);
     expect(api.postCanvasExecute).toHaveBeenCalledOnce();
-    expect(api.putCanvas).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -285,7 +282,6 @@ describe('legacy topology load boundary', () => {
         await vi.advanceTimersByTimeAsync(2000);
         expect(useCanvasStore.getState().isLoading).toBe(false);
         expect(api.postCanvasExecute).toHaveBeenCalledTimes(2);
-        expect(api.putCanvas).not.toHaveBeenCalled();
         expect(notify).not.toHaveBeenCalled();
       } finally {
         consoleWarn.mockRestore();
@@ -331,7 +327,6 @@ describe('legacy topology load boundary', () => {
     expect(loaded.version).toBe(9);
     expect(JSON.stringify(graph)).toBe(before);
     expect(localStorage.getItem('legacy-topology-fixture')).toBe(before);
-    expect(api.putCanvas).not.toHaveBeenCalled();
     expect(api.deleteNode).not.toHaveBeenCalled();
   });
 

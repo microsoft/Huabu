@@ -26,7 +26,6 @@ vi.mock('@/api/canvas', async (importActual) => {
   return {
     ...actual,
     putNodeContent: vi.fn(),
-    putCanvas: vi.fn(async (canvasId: string) => ({ canvasId, version: 1 })),
     // A rename also clears `pendingInkIntentLabel`, a structure field, which
     // is sent as an execute request.
     postCanvasExecute: vi.fn(),

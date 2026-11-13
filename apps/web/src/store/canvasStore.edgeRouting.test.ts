@@ -10,7 +10,6 @@ import {
 } from '@huabu/shared/canvas-engine';
 
 const api = vi.hoisted(() => ({
-  putCanvas: vi.fn(),
   postCanvasExecute: vi.fn(),
   postCanvasEvents: vi.fn(),
 }));
@@ -124,7 +123,6 @@ beforeEach(() => {
     rfInstance: null,
     canvasWrapper: null,
   });
-  api.putCanvas.mockResolvedValue({ canvasId: 'routing-canvas', version: 2 });
   server.reset([], []);
   resetCanvasSyncForTests();
   api.postCanvasExecute.mockImplementation(async (canvasId, request) =>
@@ -186,7 +184,6 @@ describe('edge routing after real node drags', () => {
       }
       await vi.advanceTimersByTimeAsync(2000);
       expect(server.requests).toHaveLength(1);
-      expect(api.putCanvas).not.toHaveBeenCalled();
       expect(server.state.nodes).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
@@ -365,7 +362,6 @@ describe('edge routing after real node drags', () => {
 
     await vi.advanceTimersByTimeAsync(2000);
     expect(server.requests).toHaveLength(1);
-    expect(api.putCanvas).not.toHaveBeenCalled();
     expect(server.state.nodes).toEqual(
       expect.arrayContaining([
         expect.objectContaining({

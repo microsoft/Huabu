@@ -4,7 +4,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const api = vi.hoisted(() => ({
-  putCanvas: vi.fn(),
   postCanvasExecute: vi.fn(),
   getCanvas: vi.fn(),
   deleteNode: vi.fn(),
@@ -178,12 +177,6 @@ beforeEach(() => {
         own.push({ request: structuredClone(request), resolve, reject });
       }),
   );
-  api.putCanvas.mockImplementation(
-    async (canvasId: string, request: { version: number }) => ({
-      canvasId,
-      version: request.version + 1,
-    }),
-  );
   api.getCanvas.mockImplementation(async (canvasId: string) => ({
     canvasId,
     title: 'Sync',
@@ -229,7 +222,6 @@ describe('sending a local edit', () => {
     expect(hasUnsavedCanvasEdits()).toBe(false);
     // The edit is not saved a second time as a whole-Space PUT.
     await vi.advanceTimersByTimeAsync(3_000);
-    expect(api.putCanvas).not.toHaveBeenCalled();
   });
 
   it('does not send selection, and keeps content fields on the content save', async () => {
@@ -238,7 +230,6 @@ describe('sending a local edit', () => {
     expect(own).toHaveLength(0);
     await vi.advanceTimersByTimeAsync(3_000);
     expect(api.putNodeContent).toHaveBeenCalled();
-    expect(api.putCanvas).not.toHaveBeenCalled();
 
     // A patch that mixes both is sent without the content fields.
     state().updateNodeData(X, { label: 'Renamed', style: { accent: 'blue' } });
@@ -472,60 +463,20 @@ describe('receiving while a local change is in flight', () => {
   });
 });
 
-describe("an older client's whole-Space save, published as an update", () => {
-  it("shows what it changed and keeps this page's unsent move and unsaved body", async () => {
-    // The update carries each changed node with the body the server holds.
-    const x = node(X);
-    const y = node(Y);
-    // This page: a move not answered yet, and a body not saved yet.
-    moveHere(X, 500);
-    state().updateNodeData(Y, { content: 'Typed here' });
-    expect(own).toHaveLength(1);
-
-    // The older client recoloured X where the server had it and moved Y.
-    state().applyDeltasFromAgent(
-      [
-        {
-          type: 'REPLACE_NODE',
-          prev: x,
-          next: { ...x, data: { ...x.data, style: { accent: 'blue' } } },
-        },
-        {
-          type: 'REPLACE_NODE',
-          prev: y,
-          next: { ...y, position: { x: 40, y: 300 } },
-        },
-      ] as Delta[],
-      2,
-      {
-        mutatedNodes: [],
-        deletedNodeIds: [],
-        contentEditedNodeIds: [],
-        deferredFitFrameIds: [],
-      },
-      false,
-      { events: [] },
-      { source: 'ui' },
+describe('nothing saves the whole Space', () => {
+  // The API client has no whole-Space save any more; this watches the wire
+  // for a request made around it.
+  const wholeSpacePuts = (fetchSpy: { mock: { calls: unknown[][] } }) =>
+    fetchSpy.mock.calls.filter(
+      ([url, init]) =>
+        (init as RequestInit | undefined)?.method === 'PUT' &&
+        /\/canvas\/[^/]+$/.test(String(url)),
     );
 
-    expect(state().version).toBe(2);
-    // Their recolour and move are shown.
-    expect(accentOf(node(X))).toBe('blue');
-    expect(node(Y).position).toEqual({ x: 40, y: 300 });
-    // This page's unsent move and unsaved body are untouched.
-    expect(node(X).position).toEqual({ x: 500, y: 0 });
-    expect(node(X).data.content).toBe(`Body ${X}`);
-    expect(node(Y).data.content).toBe('Typed here');
-    expect(state().pendingContentNodeIds()).toContain(Y);
-    expect(hasUnsavedCanvasEdits()).toBe(true);
-    // No reload; this page's undo history is still there.
-    expect(api.getCanvas).not.toHaveBeenCalled();
-    expect(canvasHistoryManager.canUndo).toBe(true);
-  });
-});
-
-describe('nothing saves the whole Space', () => {
   it('sends no whole-Space PUT after a command batch, a title change or a direct store write', async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockRejectedValue(new Error('no network in this test'));
     moveHere(X, 500);
     useCanvasStore.setState({ canvasTitle: 'Renamed' });
     useCanvasStore.setState({
@@ -536,17 +487,22 @@ describe('nothing saves the whole Space', () => {
     await vi.advanceTimersByTimeAsync(5_000);
     await answer(0);
     await vi.advanceTimersByTimeAsync(5_000);
-    expect(api.putCanvas).not.toHaveBeenCalled();
+    expect(wholeSpacePuts(fetchSpy)).toEqual([]);
     // Only the command reached the server.
     expect(own).toHaveLength(1);
     expect(serverNode(Y)?.position).not.toEqual({ x: 900, y: 900 });
+    fetchSpy.mockRestore();
   });
 
   it('does not flush a whole-Space PUT when the page closes', async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockRejectedValue(new Error('no network in this test'));
     moveHere(X, 500);
     window.dispatchEvent(new Event('beforeunload', { cancelable: true }));
     await vi.advanceTimersByTimeAsync(5_000);
-    expect(api.putCanvas).not.toHaveBeenCalled();
+    expect(wholeSpacePuts(fetchSpy)).toEqual([]);
+    fetchSpy.mockRestore();
   });
 });
 
@@ -598,7 +554,6 @@ describe('a free drag', () => {
     await answer(0);
     expect(serverNode(X)?.position).toEqual({ x: 240, y: 60 });
     await vi.advanceTimersByTimeAsync(3_000);
-    expect(api.putCanvas).not.toHaveBeenCalled();
     // One undo entry for the drag.
     state().undo();
     expect(node(X).position).toEqual({ x: 0, y: 0 });
@@ -938,7 +893,6 @@ describe('undo and redo', () => {
     await answer(2);
     expect(serverNode(X)?.position).toEqual({ x: 500, y: 0 });
     await vi.advanceTimersByTimeAsync(5_000);
-    expect(api.putCanvas).not.toHaveBeenCalled();
   });
 });
 
@@ -996,7 +950,6 @@ describe('undo and redo beyond what commands can say', () => {
     expect(node(X).position).toEqual({ x: 700, y: 0 });
 
     await vi.advanceTimersByTimeAsync(5_000);
-    expect(api.putCanvas).not.toHaveBeenCalled();
   });
 
   it('sends a patch that clears a key as an explicit removal', async () => {
@@ -1016,7 +969,6 @@ describe('undo and redo beyond what commands can say', () => {
     await answer(1);
     expect(serverNode(X)?.data).not.toHaveProperty('pinned');
     await vi.advanceTimersByTimeAsync(5_000);
-    expect(api.putCanvas).not.toHaveBeenCalled();
   });
 
   it('undoes the first setting of a data key by removing it', async () => {
@@ -1054,7 +1006,6 @@ describe('writers that used to save only through the whole-Space PUT', () => {
     // Not an undo entry, and not a whole-Space save.
     expect(canvasHistoryManager.canUndo).toBe(false);
     await vi.advanceTimersByTimeAsync(5_000);
-    expect(api.putCanvas).not.toHaveBeenCalled();
   });
 
   it('does not queue a silent patch of content fields or read-model hints', async () => {
@@ -1123,7 +1074,6 @@ describe('measured heights', () => {
     // A measurement is not an undo entry.
     expect(canvasHistoryManager.canUndo).toBe(false);
     await vi.advanceTimersByTimeAsync(5_000);
-    expect(api.putCanvas).not.toHaveBeenCalled();
   });
 
   it('does not report again for content the server already has a height for', async () => {
@@ -1368,7 +1318,6 @@ describe('renderer-measured boxes', () => {
     expect(canvasHistoryManager.canUndo).toBe(false);
     await vi.advanceTimersByTimeAsync(5_000);
     expect(own).toHaveLength(1);
-    expect(api.putCanvas).not.toHaveBeenCalled();
   });
 
   it('says nothing when the server already holds this box for this content', async () => {

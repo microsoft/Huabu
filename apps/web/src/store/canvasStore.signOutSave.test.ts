@@ -4,7 +4,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const api = vi.hoisted(() => ({
-  putCanvas: vi.fn(),
   putNodeContent: vi.fn(),
   preprocessNode: vi.fn(),
   postCanvasEvents: vi.fn(),
@@ -43,10 +42,6 @@ const state = () => useCanvasStore.getState();
 // bookkeeping are real.
 beforeEach(() => {
   vi.clearAllMocks();
-  api.putCanvas.mockImplementation(async (canvasId: string) => ({
-    canvasId,
-    version: 2,
-  }));
   api.preprocessNode.mockResolvedValue({ success: true });
   api.postCanvasEvents.mockResolvedValue({ ok: true });
   state()._setStateNoAutosave({

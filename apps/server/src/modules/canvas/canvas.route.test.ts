@@ -21,10 +21,7 @@ import fastify from 'fastify';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { encodeBasis, parseBasis } from '@huabu/shared';
-import {
-  extractCanvasChanges,
-  nodeRevisionOf,
-} from '@huabu/shared/canvas-engine';
+import { extractCanvasChanges } from '@huabu/shared/canvas-engine';
 
 vi.mock('../storage/index.js', async (importOriginal) => {
   const actual = await importOriginal<typeof StorageModule>();
@@ -372,7 +369,7 @@ describe('POST /api/canvas lifecycle', () => {
 });
 
 describe('PUT /api/canvas/:canvasId lifecycle', () => {
-  it('publishes a topology save as the update pages follow the version by, then notifies observers', async () => {
+  it('notifies observers after topology saves without publishing editable deltas', async () => {
     createCanvas('c1', 'Original');
     const app = await buildApp();
     const received = vi.fn();
@@ -384,26 +381,10 @@ describe('PUT /api/canvas/:canvasId lifecycle', () => {
         payload: { version: 0, state: { nodes: [], edges: [] } },
       });
       expect(response.statusCode).toBe(200);
-      expect(received.mock.calls).toEqual([
-        [
-          {
-            type: 'update',
-            data: {
-              fromVersion: 0,
-              toVersion: 1,
-              deltas: [],
-              pendingEffects: {
-                mutatedNodes: [],
-                deletedNodeIds: [],
-                contentEditedNodeIds: [],
-                deferredFitFrameIds: [],
-              },
-              source: 'ui',
-            },
-          },
-        ],
-        [{ type: 'invalidate', data: {} }],
-      ]);
+      expect(received).toHaveBeenCalledExactlyOnceWith({
+        type: 'invalidate',
+        data: {},
+      });
       received.mockClear();
       const conflict = await app.inject({
         method: 'PUT',
@@ -417,99 +398,6 @@ describe('PUT /api/canvas/:canvasId lifecycle', () => {
       await app.close();
     }
   });
-  it('publishes what a whole-Space save changed as deltas at the version it wrote', async () => {
-    createCanvas('c1', 'Original');
-    const app = await buildApp();
-    const node = (id: string, x: number, content: string) => ({
-      id,
-      type: 'note',
-      position: { x, y: 0 },
-      data: { label: id, content },
-    });
-    try {
-      const seed = await app.inject({
-        method: 'PUT',
-        url: '/canvas/c1',
-        payload: {
-          version: 0,
-          state: {
-            nodes: [node('n1', 0, 'one'), node('n2', 100, 'two')],
-            edges: [],
-          },
-        },
-      });
-      expect(seed.statusCode).toBe(200);
-      // n1's body is saved by its own request, as every body is.
-      const body = await app.inject({
-        method: 'PUT',
-        url: '/canvas/c1/nodes/n1/content',
-        payload: {
-          nodeType: 'note',
-          content: 'Stored body of n1',
-          expectRev: nodeRevisionOf({}),
-        },
-      });
-      expect(body.statusCode).toBe(200);
-      const received = vi.fn();
-      const unsubscribe = subscribeCanvasUpdates('c1', received);
-      try {
-        // An older client moves n1, drops n2 and adds n3.
-        const response = await app.inject({
-          method: 'PUT',
-          url: '/canvas/c1',
-          payload: {
-            version: 1,
-            state: {
-              nodes: [
-                { ...node('n1', 40, 'one'), selected: true },
-                node('n3', 200, 'three'),
-              ],
-              edges: [],
-            },
-          },
-        });
-        expect(response.statusCode).toBe(200);
-        const events = received.mock.calls.map(([event]) => event);
-        expect(events.map((event) => event.type)).toEqual([
-          'update',
-          'invalidate',
-        ]);
-        expect(events[0].data).toMatchObject({
-          fromVersion: 1,
-          toVersion: 2,
-          source: 'ui',
-          deltas: [
-            { type: 'DELETE_NODE', node: { id: 'n2' } },
-            {
-              type: 'INSERT_NODE',
-              node: { id: 'n3', position: { x: 200, y: 0 } },
-            },
-            {
-              type: 'REPLACE_NODE',
-              prev: { id: 'n1', position: { x: 0, y: 0 } },
-              next: { id: 'n1', position: { x: 40, y: 0 } },
-            },
-          ],
-          pendingEffects: { deletedNodeIds: ['n2'] },
-        });
-        // A page that replaces whole nodes keeps the body: both sides of
-        // the replaced node carry the stored one.
-        const replaced = events[0].data.deltas[2];
-        expect(replaced.prev.data.content).toBe('Stored body of n1');
-        expect(replaced.next.data.content).toBe('Stored body of n1');
-        // The saving page's selection is not part of the Space.
-        expect(JSON.stringify(events[0].data)).not.toContain('"selected"');
-        expect(events[1].data).toEqual({});
-        // Still not a command batch: nothing joins the delta log.
-        expect(getCanvasStore('c1').readDeltaLogSince(0)).toEqual([]);
-      } finally {
-        unsubscribe();
-      }
-    } finally {
-      await app.close();
-    }
-  });
-
   it.each(['sketch', undefined])(
     'rejects malformed persisted Sigil metadata before saving or renaming with type %s',
     async (type) => {

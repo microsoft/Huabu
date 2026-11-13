@@ -8,14 +8,12 @@ import { nodeRevisionOf } from '@huabu/shared/canvas-engine';
 const {
   associateNode,
   deleteNode,
-  putCanvas,
   putNodeContent,
   postCanvasExecute,
   forkThread,
 } = vi.hoisted(() => ({
   associateNode: vi.fn(),
   deleteNode: vi.fn().mockResolvedValue({ success: true }),
-  putCanvas: vi.fn(),
   putNodeContent: vi.fn(),
   postCanvasExecute: vi.fn(),
   forkThread: vi.fn(),
@@ -24,7 +22,6 @@ vi.mock('../api', async (importOriginal) => ({
   ...(await importOriginal<typeof CanvasApi>()),
   associateAgentNode: associateNode,
   deleteNode,
-  putCanvas,
   postCanvasExecute,
   postCanvasEvents: vi.fn().mockResolvedValue({ success: true }),
 }));
@@ -66,7 +63,6 @@ beforeEach(() => {
   resetCanvasSyncForTests();
   associateNode.mockReset();
   deleteNode.mockClear();
-  putCanvas.mockReset();
   postCanvasExecute.mockReset();
   putNodeContent.mockReset();
   putNodeContent.mockImplementation(
@@ -178,7 +174,6 @@ describe('Question creation settlement', () => {
       useCanvasStore.getState().nodes.some((node) => node.type === 'question'),
     ).toBe(false);
     expect(associateNode).not.toHaveBeenCalled();
-    expect(putCanvas).not.toHaveBeenCalled();
   });
 
   it.each(['http-first', 'sse-first'] as const)(
@@ -233,7 +228,6 @@ describe('Question creation settlement', () => {
       expect(canvasHistoryManager.canUndo).toBe(false);
       expect(deleteNode).toHaveBeenCalledTimes(1);
       expect(deleteNode).toHaveBeenCalledWith('canvas-restore', node.id);
-      expect(putCanvas).not.toHaveBeenCalled();
       // A genuinely newer server restoration is not the stale create echo.
       useCanvasStore
         .getState()
@@ -300,7 +294,6 @@ describe('Question creation settlement', () => {
     expect(useCanvasStore.getState().nodes[0].data.threadId).toBe(
       node.data.threadId,
     );
-    expect(putCanvas).not.toHaveBeenCalled();
   });
 
   it('does not resurrect a pending undo reinsertion removed by redo', async () => {
@@ -404,7 +397,6 @@ describe('Question undo identity reinsertion', () => {
     await awaitQuestionCreation('canvas-restore', question.id);
     expect(associateNode).toHaveBeenCalledTimes(1);
     expect(useCanvasStore.getState().version).toBe(3);
-    expect(putCanvas).not.toHaveBeenCalled();
   });
 
   it('awaits deletion and validates the old thread before autosave, without replaying old FSM', async () => {
@@ -465,6 +457,5 @@ describe('Question undo identity reinsertion', () => {
     // Nothing else creates the node on the server in its place.
     await vi.advanceTimersByTimeAsync(5_000);
     expect(postCanvasExecute).not.toHaveBeenCalled();
-    expect(putCanvas).not.toHaveBeenCalled();
   });
 });

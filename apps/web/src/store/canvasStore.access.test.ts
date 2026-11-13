@@ -4,7 +4,7 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 import { ApiError } from '@/api/_client';
-import { getCanvasAccess, putCanvas } from '@/api/canvas';
+import { getCanvasAccess } from '@/api/canvas';
 import { renameSpace } from '@/api/spaceCard';
 
 import useCanvasStore, {
@@ -18,7 +18,6 @@ import type { CanvasAccess } from '@huabu/shared';
 vi.mock('@/api/canvas', async (importActual) => ({
   ...(await importActual()),
   getCanvasAccess: vi.fn(),
-  putCanvas: vi.fn(),
 }));
 vi.mock('@/api/spaceCard', async (importActual) => ({
   ...(await importActual()),
@@ -27,7 +26,6 @@ vi.mock('@/api/spaceCard', async (importActual) => ({
 
 beforeEach(() => {
   vi.mocked(getCanvasAccess).mockReset();
-  vi.mocked(putCanvas).mockReset();
   vi.mocked(renameSpace).mockReset();
   useIdentityStore.setState({
     identity: {
@@ -157,7 +155,6 @@ it('a 403 during rename reverts the optimistic title and re-reads the permission
     title: 'Forbidden',
     expectedTitle: 'Original',
   });
-  expect(putCanvas).not.toHaveBeenCalled();
   await vi.waitFor(() =>
     expect(selectCanManageCanvas(useCanvasStore.getState())).toBe(false),
   );
@@ -176,7 +173,6 @@ it('renames through the title endpoint and adopts the title the server stored', 
     expectedTitle: 'Original',
   });
   expect(useCanvasStore.getState().canvasTitle).toBe('Renamed');
-  expect(putCanvas).not.toHaveBeenCalled();
 });
 
 it.each(['CANVAS_TITLE_CONFLICT', 'SPACE_TITLE_CHANGED'] as const)(

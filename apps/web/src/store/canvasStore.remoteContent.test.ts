@@ -4,7 +4,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const api = vi.hoisted(() => ({
-  putCanvas: vi.fn(),
   postCanvasExecute: vi.fn(),
   getCanvas: vi.fn(),
   deleteNode: vi.fn(),
@@ -143,7 +142,6 @@ describe('content another page saved, in the store', () => {
     expect(state().pendingContentNodeIds()).toEqual([]);
     expect(hasUnsavedCanvasEdits()).toBe(false);
     expect(api.putNodeContent).not.toHaveBeenCalled();
-    expect(api.putCanvas).not.toHaveBeenCalled();
     expect(api.postCanvasExecute).not.toHaveBeenCalled();
     expect(api.preprocessNode).not.toHaveBeenCalled();
   });
@@ -255,7 +253,6 @@ describe('content another page saved, in the store', () => {
         .content,
     ).toBe('Body from A');
     expect(api.putNodeContent).not.toHaveBeenCalled();
-    expect(api.putCanvas).not.toHaveBeenCalled();
     expect(hasUnsavedCanvasEdits()).toBe(false);
   });
 
