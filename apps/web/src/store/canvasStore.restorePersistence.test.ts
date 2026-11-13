@@ -34,6 +34,7 @@ import useCanvasStore, {
   saveCanvasForSubmission,
   settleNodePreprocess,
 } from './canvasStore';
+import { ApiError } from '../api/_client';
 import { CanvasConflictError } from '../api/canvas';
 import { createFakeExecuteServer } from './canvasStore/sync/testing/fakeExecuteServer';
 import {
@@ -496,6 +497,53 @@ describe('undo/redo persistence ordering', () => {
     });
     expect(body).toBe('Restored elsewhere');
     expect(api.putCanvas).not.toHaveBeenCalled();
+  });
+
+  it('Retry on the failed save of an edited returning note sends the restore again', async () => {
+    await deleted();
+    const gate = (executeGate = deferred());
+    state().undo();
+    await tick();
+    state().updateNodeData(note.id, { content: '# Edited during restore' });
+    await vi.advanceTimersByTimeAsync(2_000);
+    // The server refuses the restoring request outright.
+    gate.reject(new ApiError(400, { message: 'Bad request' }, 'Bad request'));
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(topology).toEqual([]);
+    // The edit is still on the page, and its save is reported as failed.
+    expect(state().nodes[0]?.data.content).toBe('# Edited during restore');
+    const failed = vi
+      .mocked(toast)
+      .mock.calls.filter(([, options]) => options?.action?.label === 'Retry')
+      .at(-1);
+    expect(failed).toBeDefined();
+    expect(api.putNodeContent).not.toHaveBeenCalled();
+    calls = [];
+
+    failed?.[1]?.action?.onClick();
+    await vi.advanceTimersByTimeAsync(2_000);
+    // Retry brought the node back on the server, with the edited body.
+    expect(calls.slice(0, 2)).toEqual(['execute:start', 'restore:committed']);
+    expect(topology.map((node) => node.id)).toEqual([note.id]);
+    expect(body).toBe('# Edited during restore');
+    expect(state().pendingContentNodeIds()).toEqual([]);
+    await expect(drainPendingSaves()).resolves.toBeUndefined();
+  });
+
+  it('leaving the Space sends a failed restore again before the edit that waits for it', async () => {
+    await deleted();
+    const gate = (executeGate = deferred());
+    state().undo();
+    await tick();
+    state().updateNodeData(note.id, { content: '# Edited during restore' });
+    await vi.advanceTimersByTimeAsync(2_000);
+    gate.reject(new ApiError(400, { message: 'Bad request' }, 'Bad request'));
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(topology).toEqual([]);
+
+    await expect(drainPendingSaves()).resolves.toBeUndefined();
+    expect(topology.map((node) => node.id)).toEqual([note.id]);
+    expect(body).toBe('# Edited during restore');
   });
 
   it('redoes the deletion of a restored note and unlinks it once', async () => {

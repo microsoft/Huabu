@@ -968,6 +968,7 @@ const nodeContentQueue = createNodeContentQueue({
   delayMs: NODE_CONTENT_DEBOUNCE_MS,
   getState: () => useCanvasStore.getState(),
   waitForCreation: awaitQuestionCreation,
+  retryCreation: (canvasId, nodeId) => retryFailedRestores(canvasId, nodeId),
   onRestoredContentPersisted: (canvasId, nodeId) =>
     preprocessQueue.resumeRestored(canvasId, nodeId),
   onContentPersisted: (canvasId, nodeId) => {
@@ -1635,6 +1636,7 @@ export function resetCanvasSyncForTests(): void {
   reportedSizes.clear();
   localSizes.clear();
   restoringNodeIds.clear();
+  failedRestores.clear();
   dismissSyncNotice();
   useCanvasSyncStatusStore.setState({ state: 'synced', pending: 0 });
 }
@@ -2345,6 +2347,111 @@ function restoreQuestionAssociations(
 }
 
 /**
+ * Nodes an undo brought back whose restoring batch the server refused or
+ * the page dropped, with their Space. The server has no such node, so
+ * nothing about it can be saved until the restore is sent again.
+ */
+const failedRestores = new Map<string, string>();
+
+/**
+ * Queue the batch that puts `restoredNodes` back on the server. Until it is
+ * answered a content save for one of them waits, as for a creation: the
+ * server would drop it as a write to a deleted node.
+ *
+ * @returns Settles when the batch has been answered or dropped.
+ */
+function sendRestore(
+  canvasId: string,
+  commands: CanvasCommand[],
+  restoredNodes: readonly Node[],
+  held: Pick<Parameters<typeof browserSync.submit>[0], 'prev' | 'next'>,
+  deletions: readonly Promise<unknown>[],
+): Promise<unknown> {
+  for (const node of restoredNodes) restoringNodeIds.add(node.id);
+  const restore = browserSync.submit({
+    canvasId,
+    commands,
+    ...held,
+    ...(deletions.length > 0 ? { gate: Promise.all(deletions) } : {}),
+    onSettled: () => {
+      // Answered either way: a refusal is followed by a reload.
+      for (const node of restoredNodes) {
+        restoringNodeIds.delete(node.id);
+        preprocessQueue.resumeRestored(canvasId, node.id);
+      }
+    },
+  });
+  if (restoredNodes.length > 0) {
+    const returned = restore.entry.settled.then((outcome) => {
+      if (outcome.kind === 'failed') throw outcome.error;
+      if (outcome.kind === 'discarded')
+        throw new Error('The restore was discarded before it was sent');
+      const refused = outcome.response.results
+        .slice(restore.offset, restore.offset + commands.length)
+        .some(
+          (result, index) =>
+            commands[index].type === 'RESTORE_NODES' && !result.applied,
+        );
+      if (refused) throw new Error('The node could not be restored');
+    });
+    for (const node of restoredNodes) {
+      questionCreations.set(`${canvasId}\0${node.id}`, { promise: returned });
+    }
+    void returned.then(
+      () => {
+        for (const node of restoredNodes) failedRestores.delete(node.id);
+      },
+      () => {
+        // What still waits for these nodes (an edit made to one meanwhile)
+        // can be saved once `retryFailedRestores` has sent them again.
+        for (const node of restoredNodes) failedRestores.set(node.id, canvasId);
+      },
+    );
+  }
+  return restore.entry.settled;
+}
+
+/**
+ * Send again the restore of every node of `canvasId` whose restoring batch
+ * failed, when `nodeId` is one of them: the Retry of a content save that
+ * waits for such a node. The nodes go back as this page shows them now,
+ * content included, so the content save that follows descends from it.
+ */
+function retryFailedRestores(canvasId: string, nodeId: string): void {
+  const state = useCanvasStore.getState();
+  if (state.canvasId !== canvasId || failedRestores.get(nodeId) !== canvasId)
+    return;
+  const ids = new Set(
+    [...failedRestores]
+      .filter(([, owner]) => owner === canvasId)
+      .map(([id]) => id),
+  );
+  for (const id of ids) failedRestores.delete(id);
+  const returning = state.nodes.filter((node) => ids.has(node.id));
+  if (returning.length === 0) return;
+  // What the server holds: this page's Space without those nodes.
+  const before = {
+    nodes: state.nodes.filter((node) => !ids.has(node.id)),
+    edges: state.edges.filter(
+      (edge) => !ids.has(edge.source) && !ids.has(edge.target),
+    ),
+  };
+  const plan = planHistoryRestore(canvasId, before, state);
+  if (plan.commands.length === 0) return;
+  nodeContentQueue.prepareServerCreatedNodes(returning);
+  void sendRestore(
+    canvasId,
+    plan.commands,
+    returning,
+    {
+      prev: syncView(before.nodes, before.edges),
+      next: syncView(state.nodes, state.edges),
+    },
+    [],
+  );
+}
+
+/**
  * Undo or redo one history entry.
  *
  * The entry is a snapshot of the Space before one local edit. It is put
@@ -2423,45 +2530,13 @@ function restoreFromHistory(direction: 'undo' | 'redo'): void {
         ? [canvasHistoryManager.waitForDeletion(canvasId, node.id)]
         : [],
     );
-    for (const node of restoredNodes) restoringNodeIds.add(node.id);
-    const restore = browserSync.submit({
+    sent = sendRestore(
       canvasId,
-      commands: plan.commands,
-      prev: syncView(nodes, edges),
-      next: syncView(live.nodes, live.edges),
-      ...(deletions.length > 0 ? { gate: Promise.all(deletions) } : {}),
-      onSettled: () => {
-        // Answered either way: a refusal is followed by a reload.
-        for (const node of restoredNodes) {
-          restoringNodeIds.delete(node.id);
-          preprocessQueue.resumeRestored(canvasId, node.id);
-        }
-      },
-    });
-    sent = restore.entry.settled;
-    if (restoredNodes.length > 0) {
-      // Until the server has the node again, a content save for it would
-      // be dropped as a write to a deleted node: it waits, as for a
-      // creation.
-      const returned = restore.entry.settled.then((outcome) => {
-        if (outcome.kind === 'failed') throw outcome.error;
-        if (outcome.kind === 'discarded')
-          throw new Error('The restore was discarded before it was sent');
-        const refused = outcome.response.results
-          .slice(restore.offset, restore.offset + plan.commands.length)
-          .some(
-            (result, index) =>
-              plan.commands[index].type === 'RESTORE_NODES' && !result.applied,
-          );
-        if (refused) throw new Error('The node could not be restored');
-      });
-      for (const node of restoredNodes) {
-        questionCreations.set(`${canvasId}\0${node.id}`, {
-          promise: returned,
-        });
-      }
-      void returned.catch(() => undefined);
-    }
+      plan.commands,
+      restoredNodes,
+      { prev: syncView(nodes, edges), next: syncView(live.nodes, live.edges) },
+      deletions,
+    );
   }
   if (plan && plan.restoredQuestionIds.length > 0) {
     restoreQuestionAssociations(canvasId, nodes, target.nodes, sent);
@@ -3714,6 +3789,7 @@ const useCanvasStore = create<RFState>()(
         reportedSizes.clear();
         localSizes.clear();
         restoringNodeIds.clear();
+        failedRestores.clear();
         for (const node of loadedNodes) {
           const { hint } = readAutoHeightHint(node);
           if (hint && !hint.provisional)

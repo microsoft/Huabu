@@ -171,7 +171,6 @@ export type NodeContentQueue = {
   ): void;
   hasRestore(nodeId: string): boolean;
   hasPendingRestoredContent(nodeId?: string): boolean;
-  reportRestoreFailure(canvasId: string): void;
   waitForIdle(): Promise<void>;
   /**
    * Diff `prevNodes` against `nextNodes` and schedule a per-node
@@ -311,6 +310,12 @@ export function createNodeContentQueue(opts: {
   delayMs: number;
   getState: () => NodeContentQueueState;
   waitForCreation?: (canvasId: string, nodeId: string) => Promise<void>;
+  /**
+   * A failed save of `nodeId` is about to be tried again. When what
+   * `waitForCreation` waits for has itself failed (the batch that brings the
+   * node back), send that again first; otherwise do nothing.
+   */
+  retryCreation?: (canvasId: string, nodeId: string) => void;
   onRestoredContentPersisted?: (canvasId: string, nodeId: string) => void;
   /** A node's content save was acknowledged and nothing more is pending for it. */
   onContentPersisted?: (canvasId: string, nodeId: string) => void;
@@ -990,9 +995,10 @@ export function createNodeContentQueue(opts: {
               if (generations.get(nodeId) !== generation) return;
               // Allow a later failure to re-alert, then re-attempt the write.
               saveErrorToasted.delete(nodeId);
-              // A body held for a restore is saved once the restoring batch
-              // is answered; the send queue retries that batch on its own.
-              if (restores.get(nodeId)?.canvasId === canvasId) return;
+              // A node whose restoring batch failed is sent again first;
+              // the save below waits for it. (A body still held for a
+              // restore is not written by the flush; its release does that.)
+              opts.retryCreation?.(canvasId, nodeId);
               void serializedFlush(canvasId, nodeId, 'user').catch(
                 () => undefined,
               );
@@ -1245,22 +1251,6 @@ export function createNodeContentQueue(opts: {
         ? [...restoredContent.values()].includes(opts.getState().canvasId)
         : restoredContent.get(nodeId) === opts.getState().canvasId,
 
-    reportRestoreFailure(canvasId) {
-      for (const [id, entry] of restores) {
-        if (entry.canvasId !== canvasId) continue;
-        const label = opts.getState().nodes.find((n) => n.id === id)
-          ?.data?.label;
-        surfaceSaveError(
-          canvasId,
-          id,
-          i18n.t('errors.nodeSaveFailed', {
-            name: typeof label === 'string' ? label : i18n.t('node.untitled'),
-          }),
-          'auto',
-        );
-      }
-    },
-
     async waitForIdle() {
       await Promise.all(
         [...inflight.values()].map((p) => p.catch(() => undefined)),
@@ -1324,6 +1314,7 @@ export function createNodeContentQueue(opts: {
           !inflight.has(nodeId) &&
           !pendingIds.has(nodeId)
         ) {
+          opts.retryCreation?.(canvasId, nodeId);
           schedule(canvasId, nodeId);
         }
       }
