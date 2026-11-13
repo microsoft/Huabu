@@ -39,16 +39,19 @@ export async function prepareAzureTestEnvironment() {
   const h = await openAzureTestStore();
   const previousConnection =
     process.env['HUABU_AZURE_STORAGE_CONNECTION_STRING'];
+  const previousAccountUrl = process.env['HUABU_AZURE_STORAGE_ACCOUNT_URL'];
   const previousContainer = process.env['HUABU_AZURE_BLOB_CONTAINER'];
   const previousPrefix = process.env['HUABU_AZURE_BLOB_PREFIX'];
   process.env['HUABU_AZURE_STORAGE_CONNECTION_STRING'] = inject(
     'azureConnectionString',
   );
+  delete process.env['HUABU_AZURE_STORAGE_ACCOUNT_URL'];
   process.env['HUABU_AZURE_BLOB_CONTAINER'] = h.container.containerName;
   process.env['HUABU_AZURE_BLOB_PREFIX'] = 'test';
   return async () => {
     for (const [key, previous] of [
       ['HUABU_AZURE_STORAGE_CONNECTION_STRING', previousConnection],
+      ['HUABU_AZURE_STORAGE_ACCOUNT_URL', previousAccountUrl],
       ['HUABU_AZURE_BLOB_CONTAINER', previousContainer],
       ['HUABU_AZURE_BLOB_PREFIX', previousPrefix],
     ] as const) {
