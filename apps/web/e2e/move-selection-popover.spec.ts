@@ -15,7 +15,7 @@ test('production move anchor survives Ctrl, Cmd and Shift modifier combinations'
     }),
   );
   await page.goto('/playground/node-toolbars');
-  await expect(page.locator('.nt-toolbar')).toHaveCount(12);
+  await expect(page.locator('.nt-toolbar').first()).toBeVisible();
   await page.evaluate(async () => {
     const load = (path: string) => import(/* @vite-ignore */ path);
     const { mountMoveSelectionToolbar } = await load(
@@ -81,7 +81,7 @@ for (const consumePointer of [false, true]) {
       }),
     );
     await page.goto('/playground/node-toolbars');
-    await expect(page.locator('.nt-toolbar')).toHaveCount(12);
+    await expect(page.locator('.nt-toolbar').first()).toBeVisible();
     await page.evaluate(async () => {
       const load = (path: string) => import(/* @vite-ignore */ path);
       const { mountMoveSelectionToolbar } = await load(

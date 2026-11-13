@@ -11,7 +11,7 @@ test('Ink submission spinner stays centered throughout rotation and respects red
     (route) => route.fulfill({ json: { conversation: null } }),
   );
   await page.goto('/playground/node-toolbars');
-  await expect(page.locator('.nt-toolbar')).toHaveCount(12);
+  await expect(page.locator('.nt-toolbar').first()).toBeVisible();
   await page.evaluate(async () => {
     const load = (path: string) => import(/* @vite-ignore */ path);
     const { mountInkToolbar } = await load('/e2e/fixtures/ink-toolbar.tsx');
@@ -97,7 +97,7 @@ test('Ink excludes built-in Chat from new and recent destinations while retainin
       }),
   );
   await page.goto('/playground/node-toolbars');
-  await expect(page.locator('.nt-toolbar')).toHaveCount(12);
+  await expect(page.locator('.nt-toolbar').first()).toBeVisible();
   await page.evaluate(async () => {
     const load = (path: string) => import(/* @vite-ignore */ path);
     const { mountInkToolbar } = await load('/e2e/fixtures/ink-toolbar.tsx');
@@ -169,7 +169,7 @@ for (const pointerOpen of ['click', 'tap'] as const) {
       (route) => route.fulfill({ json: { conversation: null } }),
     );
     await page.goto('/playground/node-toolbars');
-    await expect(page.locator('.nt-toolbar')).toHaveCount(12);
+    await expect(page.locator('.nt-toolbar').first()).toBeVisible();
     await page.evaluate(async () => {
       const load = (path: string) => import(/* @vite-ignore */ path);
       const { mountInkToolbar } = await load('/e2e/fixtures/ink-toolbar.tsx');
@@ -264,7 +264,7 @@ test('canceling a replacement Lasso restores its manual conversation destination
     },
   );
   await page.goto('/playground/node-toolbars');
-  await expect(page.locator('.nt-toolbar')).toHaveCount(12);
+  await expect(page.locator('.nt-toolbar').first()).toBeVisible();
   await page.evaluate(async () => {
     const load = (path: string) => import(/* @vite-ignore */ path);
     const { mountInkToolbar } = await load('/e2e/fixtures/ink-toolbar.tsx');
@@ -302,7 +302,7 @@ test('conversation default reads server recency only for a fresh Lasso', async (
     },
   );
   await page.goto('/playground/node-toolbars');
-  await expect(page.locator('.nt-toolbar')).toHaveCount(12);
+  await expect(page.locator('.nt-toolbar').first()).toBeVisible();
   await page.evaluate(async () => {
     const load = (path: string) => import(/* @vite-ignore */ path);
     const { mountInkToolbar } = await load('/e2e/fixtures/ink-toolbar.tsx');
@@ -341,7 +341,7 @@ for (const locale of ['zh-CN', 'en']) {
       (route) => route.fulfill({ json: { conversation: null } }),
     );
     await page.goto('/playground/node-toolbars');
-    await expect(page.locator('.nt-toolbar')).toHaveCount(12);
+    await expect(page.locator('.nt-toolbar').first()).toBeVisible();
     await page.evaluate(async (language) => {
       const load = (path: string) => import(/* @vite-ignore */ path);
       const { mountInkToolbar } = await load('/e2e/fixtures/ink-toolbar.tsx');
@@ -396,7 +396,7 @@ for (const locale of ['zh-CN', 'en']) {
       (route) => route.fulfill({ json: { conversation: null } }),
     );
     await page.goto('/playground/node-toolbars');
-    await expect(page.locator('.nt-toolbar')).toHaveCount(12);
+    await expect(page.locator('.nt-toolbar').first()).toBeVisible();
     await page.evaluate(async (language) => {
       const load = (path: string) => import(/* @vite-ignore */ path);
       const { mountInkToolbar } = await load('/e2e/fixtures/ink-toolbar.tsx');

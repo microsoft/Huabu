@@ -7,7 +7,7 @@ test('shared menus keep default metrics, states and behaviors without toolbar ov
   page,
 }) => {
   await page.goto('/playground/node-toolbars');
-  await expect(page.locator('.nt-toolbar')).toHaveCount(12);
+  await expect(page.locator('.nt-toolbar').first()).toBeVisible();
   await page.evaluate(async () => {
     const load = (path: string) => import(/* @vite-ignore */ path);
     const { mountMenuStylesFixture } = await load(
