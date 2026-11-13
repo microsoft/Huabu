@@ -312,6 +312,45 @@ describe('nodeContentQueue baseline lifecycle', () => {
     expect(toastMock).toHaveBeenCalledTimes(1);
   });
 
+  it('a frozen node counts as unsaved content and keeps its conflict when the server content moves on', async () => {
+    const node = noteNode('mine');
+    const { queue } = makeQueue(node);
+    queue.seedBaselines([node]);
+    putMock.mockRejectedValueOnce(
+      new CanvasConflictError({
+        code: 'NODE_CONTENT_CONFLICT',
+        message: 'changed elsewhere',
+        nodeId: 'n1',
+        currentRev: 'OTHER',
+      }),
+    );
+    // A flush with no field recorded as pending, as `flushNow` allows.
+    await queue.flushNow('c1', 'n1');
+    expect(toastMock).toHaveBeenCalledTimes(1);
+    // The sync applier reads this to leave the node's text alone.
+    expect(queue.pendingNodeIds()).toEqual(['n1']);
+
+    // An update carried newer server content for the node.
+    expect(queue.rebaseConflict(noteNode('newer on the server'))).toBe(true);
+    await queue.flushNow('c1', 'n1');
+    expect(putMock).toHaveBeenCalledTimes(1);
+
+    // Keep mine overwrites the revision the server holds now.
+    putMock.mockResolvedValueOnce({ nodeId: 'n1', label: 'Note', rev: 'R' });
+    const toastOpts = toastMock.mock.calls[0][1] as {
+      secondaryAction: { onClick: () => void };
+    };
+    toastOpts.secondaryAction.onClick();
+    await vi.waitFor(() => expect(putMock).toHaveBeenCalledTimes(2));
+    expect(putMock.mock.calls[1][2].expectRev).toBe(
+      nodeRevisionOf({ content: 'newer on the server' }),
+    );
+    await queue.waitForIdle();
+    expect(queue.pendingNodeIds()).toEqual([]);
+    // A node that is not frozen is not this method's business.
+    expect(queue.rebaseConflict(noteNode('anything'))).toBe(false);
+  });
+
   it.each([false, true])(
     'adopts contentMissing when Load latest finds a deleted sidecar (deferred: %s)',
     async (deferred) => {

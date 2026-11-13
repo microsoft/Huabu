@@ -28,9 +28,10 @@ vi.mock('@/components/Common/Toast', () => ({
 
 import { nodeRevisionOf } from '@huabu/shared/canvas-engine';
 
-import { toast } from '@/components/Common/Toast';
+import { dismissToast, toast } from '@/components/Common/Toast';
 
 import { canvasHistoryManager } from './canvasHistoryManager';
+import { CanvasConflictError } from '../api/canvas';
 import { useCanvasPresenceStore } from './canvasPresence/canvasPresenceStore';
 import useCanvasStore, {
   adoptRemoteNodeContent,
@@ -378,5 +379,130 @@ describe('renaming a node another page is editing', () => {
     expect(node(X).position).toEqual({ x: 250, y: 40 });
     expect(node(X).data.style).toEqual({ accent: 'red' });
     expect(toast).not.toHaveBeenCalled();
+  });
+});
+
+describe('a node frozen by a content conflict the user has not answered', () => {
+  const noEffects = {
+    mutatedNodes: [],
+    deletedNodeIds: [],
+    contentEditedNodeIds: [],
+    deferredFitFrameIds: [],
+  } as never;
+  const conflictToast = () =>
+    vi
+      .mocked(toast)
+      .mock.calls.filter(
+        ([, options]) => options?.secondaryAction?.label === 'Keep mine',
+      );
+  /** An `update` from the stream that replaces `prev` with `next`. */
+  function deliver(prev: Node, next: Node, source: 'ui' | 'agent') {
+    const { version } = state();
+    return state().applyDeltasFromAgent(
+      [{ type: 'REPLACE_NODE', prev, next }] as never,
+      version + 1,
+      noEffects,
+      undefined,
+      undefined,
+      { source },
+    );
+  }
+  /** Whether the page would still refuse to save Y on its own. */
+  async function staysFrozen() {
+    const before = api.putNodeContent.mock.calls.length;
+    state().updateNodeData(Y, { content: `${node(Y).data.content}!` });
+    await vi.advanceTimersByTimeAsync(10_000);
+    return api.putNodeContent.mock.calls.length === before;
+  }
+
+  beforeEach(async () => {
+    // Start from what the server holds, then type; another page saved first.
+    api.getNodeContent.mockResolvedValue({
+      ...savedOnServer(`Body ${Y}`, `Label ${Y}`),
+      nodeId: Y,
+    });
+    await adoptRemoteNodeContent(SPACE, [Y]);
+    state().updateNodeData(Y, { content: 'Mine' });
+    api.putNodeContent.mockRejectedValueOnce(
+      new CanvasConflictError({
+        code: 'NODE_CONTENT_CONFLICT',
+        message: 'changed elsewhere',
+        nodeId: Y,
+        currentRev: nodeRevisionOf({ content: 'Theirs' }),
+      }),
+    );
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(api.putNodeContent).toHaveBeenCalledTimes(1);
+    expect(conflictToast()).toHaveLength(1);
+    vi.mocked(dismissToast).mockClear();
+  });
+
+  afterEach(async () => {
+    // The content queue outlives a test: forget the frozen node the way a
+    // deletion does.
+    useCanvasStore.setState({ nodes: [], isLoading: false });
+    await vi.advanceTimersByTimeAsync(10_000);
+  });
+
+  it('stays frozen, with its choice, through an update to another node', async () => {
+    deliver(node(X), { ...node(X), position: { x: 400, y: 300 } }, 'ui');
+    expect(node(X).position).toEqual({ x: 400, y: 300 });
+    expect(dismissToast).not.toHaveBeenCalled();
+    expect(await staysFrozen()).toBe(true);
+    expect(node(Y).data.content).toBe('Mine!');
+  });
+
+  it('stays frozen through an update that moves it', async () => {
+    deliver(node(Y), { ...node(Y), position: { x: 900, y: 300 } }, 'ui');
+    expect(node(Y).position).toEqual({ x: 900, y: 300 });
+    expect(dismissToast).not.toHaveBeenCalled();
+    expect(await staysFrozen()).toBe(true);
+    expect(node(Y).data.content).toBe('Mine!');
+  });
+
+  it("stays frozen when an update carries someone else's body for it, and Keep mine then replaces that body", async () => {
+    const server = { ...node(Y), data: { ...node(Y).data, content: 'Theirs' } };
+    const skipped = deliver(
+      server,
+      { ...server, data: { ...server.data, content: 'Agent' } },
+      'agent',
+    );
+    // The page keeps what the user typed and says so.
+    expect(skipped).toEqual([Y]);
+    expect(node(Y).data.content).toBe('Mine');
+    // The conflict is still the user's to answer: nothing is written.
+    expect(dismissToast).not.toHaveBeenCalled();
+    expect(await staysFrozen()).toBe(true);
+    expect(node(Y).data.content).toBe('Mine!');
+
+    // Keep mine overwrites what the server holds now, knowingly.
+    conflictToast()[0][1]?.secondaryAction?.onClick();
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(api.putNodeContent).toHaveBeenCalledTimes(2);
+    expect(api.putNodeContent.mock.calls[1][2]).toMatchObject({
+      content: 'Mine!',
+      expectRev: nodeRevisionOf({ content: 'Agent' }),
+    });
+  });
+
+  it('stays frozen when an update brings exactly what the user typed, until they choose', async () => {
+    const server = { ...node(Y), data: { ...node(Y).data, content: 'Theirs' } };
+    deliver(
+      server,
+      { ...server, data: { ...server.data, content: 'Mine' } },
+      'agent',
+    );
+    expect(node(Y).data.content).toBe('Mine');
+    expect(dismissToast).not.toHaveBeenCalled();
+    expect(await staysFrozen()).toBe(true);
+  });
+
+  it('stays frozen through a wanted reload and a gap', async () => {
+    const { requestCanvasResync } = await import('./canvasStore');
+    requestCanvasResync(SPACE);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(api.getCanvas).not.toHaveBeenCalled();
+    expect(state().pendingContentNodeIds()).toContain(Y);
+    expect(await staysFrozen()).toBe(true);
   });
 });

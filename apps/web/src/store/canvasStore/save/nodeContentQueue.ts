@@ -281,6 +281,16 @@ export type NodeContentQueue = {
   seedBaselines(nodes: readonly Node[]): void;
 
   /**
+   * An update carried the server's new content for `node` while this page
+   * kept its own unsaved content. When the node is frozen by a content
+   * conflict the user has not answered, the conflict stays theirs to answer:
+   * the node stays frozen with its toast, and only the revision **Keep
+   * mine** would overwrite moves on to the server's new one. Returns whether
+   * the node is frozen; a node that is not is left to {@link seedBaselines}.
+   */
+  rebaseConflict(node: Node): boolean;
+
+  /**
    * Another page saved `nodeId`'s sidecar: fetch it and show it, together
    * with its revision as the new baseline, so this page's next save of the
    * node descends from what it now shows.
@@ -398,7 +408,11 @@ export function createNodeContentQueue(opts: {
    * stale in-app version onto disk and clobber the newer server content.
    * The stored rev lets "Keep mine" re-baseline and force the overwrite.
    * Cleared when the node is resolved (reseeded on load / agent-sync, or
-   * a successful forced write).
+   * a successful forced write). An update that arrives meanwhile never
+   * clears it: a frozen node counts as having unsaved content
+   * ({@link NodeContentQueue.pendingNodeIds}), and an update that carries
+   * new server content for it only moves the stored rev
+   * ({@link NodeContentQueue.rebaseConflict}).
    */
   const frozen = new Map<string, string>();
 
@@ -1440,14 +1454,23 @@ export function createNodeContentQueue(opts: {
       }
     },
 
+    rebaseConflict(node) {
+      if (!frozen.has(node.id)) return false;
+      frozen.set(node.id, revOfNode(node));
+      return true;
+    },
+
     pendingNodeIds() {
       // Debounced-but-not-yet-fired saves plus in-flight PUTs: both mean
-      // the node holds a local edit the server hasn't acknowledged.
+      // the node holds a local edit the server hasn't acknowledged. So does
+      // a conflict the user has not answered, whatever else is recorded
+      // for the node: its text must not be replaced or re-baselined.
       return Array.from(
         new Set([
           ...debouncer.pendingKeys(),
           ...inflight.keys(),
           ...pendingFields.keys(),
+          ...frozen.keys(),
           ...[...restoredContent]
             .filter(([, canvasId]) => canvasId === opts.getState().canvasId)
             .map(([id]) => id),

@@ -3227,10 +3227,15 @@ const useCanvasStore = create<RFState>()(
       // change the local-first policy already decided the user wins. The
       // "your version was kept" notice tells the user what happened; the
       // change-review card lets them inspect the agent's dropped edit.
+      //
+      // Not so for a node frozen by a content conflict: the user has not
+      // chosen between their text and the server's yet, and an update must
+      // not choose for them. It stays frozen; "Keep mine" will overwrite
+      // the revision this update brought.
       const rebasedRemoteNodes = [
         ...skippedRemoteNodes,
         ...advancedRemoteBaselines,
-      ];
+      ].filter((remoteNode) => !nodeContentQueue.rebaseConflict(remoteNode));
       if (rebasedRemoteNodes.length > 0) {
         nodeContentQueue.seedBaselines(rebasedRemoteNodes);
       }
