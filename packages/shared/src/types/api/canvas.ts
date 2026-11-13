@@ -358,6 +358,24 @@ export const executeOriginatorSchema = z.object({
 export type ExecuteOriginator = z.infer<typeof executeOriginatorSchema>;
 
 /**
+ * One edit within an execute batch — a run of consecutive commands — and the
+ * parent each node it places had when the edit was made (`null` is the
+ * canvas). Mirrors `ExpectedParents` in the canvas engine.
+ */
+export const canvasExecuteExpectedParentsSchema = z
+  .object({
+    /** Index of the edit's first command in `commands`. */
+    start: z.number().int().min(0),
+    /** How many consecutive commands belong to the edit. */
+    count: z.number().int().min(1),
+    parents: z.record(z.string().min(1), z.string().min(1).nullable()),
+  })
+  .strict();
+export type CanvasExecuteExpectedParents = z.infer<
+  typeof canvasExecuteExpectedParentsSchema
+>;
+
+/**
  * Body for `POST /api/canvas/:canvasId/execute`.
  *
  * `commands` is intentionally `z.array(z.unknown())` — the canvas
@@ -377,6 +395,12 @@ export const postCanvasExecuteBodySchema = z.object({
   operationId: z.uuid().optional(),
   /** Read version the batch was built on; stale structural edits are rejected. */
   basis: z.string().min(1).max(128).optional(),
+  /**
+   * For `ui` batches: the parents each edit's nodes had when the edit was
+   * made. An edit whose node is under another parent by the time it runs is
+   * refused as a whole (`stale-parent`).
+   */
+  expectedParents: z.array(canvasExecuteExpectedParentsSchema).optional(),
 });
 export type PostCanvasExecuteRequest = z.infer<
   typeof postCanvasExecuteBodySchema
