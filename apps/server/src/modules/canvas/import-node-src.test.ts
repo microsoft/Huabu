@@ -13,7 +13,7 @@ import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { importForeignNodeSources } from './import-node-src.js';
+import { importForeignNodeSources, NodeCoverError } from './import-node-src.js';
 import { createCanvas } from '../storage/compatibility/canvas.js';
 import { space, getCanvasStore } from '../storage/index.js';
 import { setWorkspacePath } from '../workspace.js';
@@ -55,6 +55,7 @@ beforeEach(() => {
     'c-web-merge-remote',
     'c-image-local',
     'c-image-reentered',
+    'c-pdf-cover',
   ]) {
     createCanvas(canvasId);
   }
@@ -471,5 +472,147 @@ describe('importForeignNodeSources — media nodes (regression)', () => {
     const out = await importForeignNodeSources(canvasId, commands);
 
     expect(firstSrc(out)).toBe('pic.png');
+  });
+});
+
+describe('importForeignNodeSources — PDF covers', () => {
+  const canvasId = 'c-pdf-cover';
+
+  function seedNode(type: string): void {
+    getCanvasStore(canvasId).write({
+      canvasId,
+      title: null,
+      version: 1,
+      state: {
+        nodes: [
+          {
+            id: 'node-1',
+            type,
+            position: { x: 0, y: 0 },
+            data: { label: 'Existing node' },
+          },
+        ],
+        edges: [],
+      },
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+  }
+
+  function mergeCover(coverUrl: string | null): CanvasCommand[] {
+    return [
+      {
+        type: 'MERGE_NODE_DATA',
+        patches: [{ nodeId: 'node-1', patch: { coverUrl } }],
+      },
+    ];
+  }
+
+  function patchedCover(commands: CanvasCommand[]): unknown {
+    const merge = commands.find((c) => c.type === 'MERGE_NODE_DATA');
+    if (merge?.type !== 'MERGE_NODE_DATA') return undefined;
+    return (merge.patches[0]?.patch as Record<string, unknown>)['coverUrl'];
+  }
+
+  it('moves a staged image upload into artifacts as the PDF cover', async () => {
+    seedNode('pdf');
+    const staged = stageUpload(canvasId, 'cover.png', 'png bytes');
+
+    const cover = patchedCover(
+      await importForeignNodeSources(canvasId, mergeCover('upload/cover.png')),
+    );
+
+    expect(cover).toMatch(/^artifact-.+\.png$/);
+    expect(
+      await space(canvasId).artifacts.head(cover as string),
+    ).not.toBeNull();
+    expect(existsSync(staged)).toBe(false);
+  });
+
+  it('keeps an existing image artifact key and passes null through to clear', async () => {
+    seedNode('pdf');
+    await space(canvasId).artifacts.put('existing.jpg', Buffer.from('jpg'));
+
+    expect(
+      patchedCover(
+        await importForeignNodeSources(canvasId, mergeCover('existing.jpg')),
+      ),
+    ).toBe('existing.jpg');
+    expect(
+      patchedCover(await importForeignNodeSources(canvasId, mergeCover(null))),
+    ).toBeNull();
+  });
+
+  it('accepts a cover on a PDF created earlier in the same batch and drops a null cover on create', async () => {
+    seedNode('pdf');
+    await space(canvasId).artifacts.put('existing.jpg', Buffer.from('jpg'));
+    const position = { x: 0, y: 0 };
+
+    const out = await importForeignNodeSources(canvasId, [
+      {
+        type: 'CREATE_NODES',
+        nodes: [
+          {
+            id: 'node-new-a',
+            nodeType: 'pdf',
+            position,
+            data: { coverUrl: null },
+          },
+          { id: 'node-new-b', nodeType: 'pdf', position },
+        ],
+      } as unknown as CanvasCommand,
+      {
+        type: 'MERGE_NODE_DATA',
+        patches: [
+          { nodeId: 'node-new-b', patch: { coverUrl: 'existing.jpg' } },
+        ],
+      },
+    ]);
+
+    const create = out[0];
+    if (create?.type !== 'CREATE_NODES') throw new Error('Expected a create');
+    expect(create.nodes[0]?.data).toEqual({});
+    expect(patchedCover(out)).toBe('existing.jpg');
+  });
+
+  it.each([
+    ['a missing artifact key', 'pdf', 'missing.png'],
+    ['a non-image artifact', 'pdf', 'paper.pdf'],
+    ['a non-image upload', 'pdf', 'upload/notes.txt'],
+    ['a non-PDF target', 'note', 'existing.jpg'],
+    ['clearing a non-PDF target', 'note', null],
+  ])('rejects %s', async (_case, type, coverUrl) => {
+    seedNode(type);
+    await space(canvasId).artifacts.put('existing.jpg', Buffer.from('jpg'));
+    await space(canvasId).artifacts.put('paper.pdf', Buffer.from('pdf'));
+    stageUpload(canvasId, 'notes.txt', 'text');
+
+    await expect(
+      importForeignNodeSources(canvasId, mergeCover(coverUrl)),
+    ).rejects.toBeInstanceOf(NodeCoverError);
+  });
+
+  it('rejects a remote cover that does not download as an image', async () => {
+    seedNode('pdf');
+    // The shared fetch stub answers with text/html.
+    await expect(
+      importForeignNodeSources(
+        canvasId,
+        mergeCover('https://example.com/cover'),
+      ),
+    ).rejects.toBeInstanceOf(NodeCoverError);
+  });
+
+  it('leaves a cover patch on an unknown node for the engine to reject', async () => {
+    seedNode('pdf');
+    const commands: CanvasCommand[] = [
+      {
+        type: 'MERGE_NODE_DATA',
+        patches: [{ nodeId: 'node-ghost', patch: { coverUrl: 'missing.png' } }],
+      },
+    ];
+    expect(await importForeignNodeSources(canvasId, commands)).toEqual(
+      commands,
+    );
   });
 });

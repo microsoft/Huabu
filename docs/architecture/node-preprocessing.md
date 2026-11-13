@@ -50,6 +50,8 @@ Summary source input is bounded to 6,000 JavaScript string code units, including
 Image labeling uses the same global-default functional runner with text plus canonical image parts; Built-In uses the `imageLabel` role with its vision guard, while external uses ACP image input. It reuses chat image resolution, supported MIME types, and the 4 MB decoded-image cap without introducing a separate renderer or file-transfer channel. Missing pixels, unsupported image input, Agent errors, and invalid labels fail explicitly so enrichment remains retryable; there is no cross-backend fallback.
 Agent `CREATE_NODES` and `MERGE_NODE_DATA` source imports preserve validated YouTube platform URLs verbatim only for `video` nodes, reusing the same ID parser as YouTube preprocessing. They never download the video page into an artifact, so embedding and cover extraction retain the platform source. Lookalike hosts and invalid video IDs do not receive this exception; other media and direct remote imports retain their existing download behavior. Content PUT already persists the supplied `src` verbatim without importing it; subsequent preprocessing uses that source.
 
+Agent `CREATE_NODES` and `MERGE_NODE_DATA` also accept a PDF-only `coverUrl`. The same executor boundary resolves a staged upload, artifact key, or HTTPS image into an existing raster artifact key (png, jpg, gif, webp, avif) before any `src` import; `null` clears the cover and restores the first-page thumbnail. Unlike a failed `src` import, a non-PDF target or an unavailable image rejects the whole request (`NodeCoverError`, HTTP 400) rather than storing a dangling cover. The cover stays structural node data, exactly as when a user sets it from a PDF selection.
+
 ---
 
 ## 3. Node profiles

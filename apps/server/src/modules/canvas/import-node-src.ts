@@ -110,6 +110,28 @@ const LOCAL_ONLY_ARTIFACT_SRC_NODE_TYPES: ReadonlySet<string> = new Set([
 /** Local file extensions accepted as agent-authored `web` node sources. */
 const WEB_LOCAL_EXTENSIONS: ReadonlySet<string> = new Set(['.html']);
 
+/** Raster formats accepted as an agent-authored PDF cover. */
+const COVER_EXTENSIONS: ReadonlySet<string> = new Set([
+  '.png',
+  '.jpg',
+  '.jpeg',
+  '.gif',
+  '.webp',
+  '.avif',
+]);
+
+/**
+ * An agent-authored `coverUrl` that cannot be honoured. Unlike a failed `src`
+ * import, this rejects the batch: a dangling cover would replace a working
+ * first-page thumbnail with a broken image.
+ */
+export class NodeCoverError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'NodeCoverError';
+  }
+}
+
 interface SrcNormalizeMode {
   allowRemoteDownload: boolean;
   allowedLocalExtensions?: ReadonlySet<string>;
@@ -179,11 +201,16 @@ export async function importForeignNodeSources(
     return (await typeByIdPromise).get(nodeId) ?? '';
   };
 
+  // Covers are validated for the whole batch before any `src` bytes move, so
+  // a rejected cover never leaves half-imported sources behind.
+  const covers = await resolveCovers(canvasId, commands, nodeType);
+
   const out: CanvasCommand[] = [];
   for (const cmd of commands) {
     if (cmd.type === 'CREATE_NODES') {
       const nodes = await Promise.all(
-        cmd.nodes.map(async (node) => {
+        cmd.nodes.map(async (original) => {
+          const node = withCover(original, covers);
           const data = node.data as Record<string, unknown> | undefined;
           const mode = srcNormalizeMode(node.nodeType, data?.['src']);
           if (!mode) return node;
@@ -207,7 +234,13 @@ export async function importForeignNodeSources(
     }
     if (cmd.type === 'MERGE_NODE_DATA') {
       const patches = await Promise.all(
-        cmd.patches.map(async (entry) => {
+        cmd.patches.map(async (original) => {
+          const entry = covers.has(original)
+            ? {
+                ...original,
+                patch: { ...original.patch, coverUrl: covers.get(original) },
+              }
+            : original;
           const mode = srcNormalizeMode(
             await nodeType(entry.nodeId),
             entry.patch?.['src'],
@@ -229,6 +262,84 @@ export async function importForeignNodeSources(
     out.push(cmd);
   }
   return out;
+}
+
+/** Apply a resolved cover to a create input; a cleared cover is simply absent. */
+function withCover(
+  node: CanvasNodeCreateInput,
+  covers: ReadonlyMap<object, string | null>,
+): CanvasNodeCreateInput {
+  if (!covers.has(node)) return node;
+  const { coverUrl: _replaced, ...data } = (node.data ?? {}) as Record<
+    string,
+    unknown
+  >;
+  const cover = covers.get(node);
+  return {
+    ...node,
+    data: cover === null ? data : { ...data, coverUrl: cover },
+  } as CanvasNodeCreateInput;
+}
+
+/**
+ * Resolve every agent-authored `coverUrl` in the batch to an existing image
+ * artifact key (or `null` to clear), keyed by its create input / patch entry.
+ * Throws {@link NodeCoverError} for a non-PDF target or an unusable image.
+ */
+async function resolveCovers(
+  canvasId: string,
+  commands: readonly CanvasCommand[],
+  storedNodeType: (nodeId: string) => Promise<string>,
+): Promise<Map<object, string | null>> {
+  const covers = new Map<object, string | null>();
+  // Nodes created earlier in this batch are not in the stored snapshot yet.
+  const createdTypes = new Map<string, string>();
+  const resolve = async (owner: object, type: string, raw: unknown) => {
+    if (type !== 'pdf')
+      throw new NodeCoverError('coverUrl is supported only on PDF nodes');
+    if (raw === null) {
+      covers.set(owner, null);
+      return;
+    }
+    const imported = await resolveImportedSrc(
+      canvasId,
+      raw,
+      true,
+      COVER_EXTENSIONS,
+    );
+    const key = imported ?? (raw as string);
+    const available =
+      path.basename(key) === key &&
+      COVER_EXTENSIONS.has(path.extname(key).toLowerCase()) &&
+      (await space(canvasId).artifacts.hasMany([key])).has(key);
+    if (!available)
+      throw new NodeCoverError(
+        `PDF cover ${JSON.stringify(raw)} is not an available image: use a staged upload path, an existing artifact key, or an HTTPS image URL`,
+      );
+    covers.set(owner, key);
+  };
+
+  for (const cmd of commands) {
+    if (cmd.type === 'CREATE_NODES') {
+      for (const node of cmd.nodes) {
+        if (node.id) createdTypes.set(node.id, node.nodeType);
+        const data = node.data as Record<string, unknown> | undefined;
+        if (data?.['coverUrl'] !== undefined)
+          await resolve(node, node.nodeType, data['coverUrl']);
+      }
+    } else if (cmd.type === 'MERGE_NODE_DATA') {
+      for (const entry of cmd.patches) {
+        const raw = (entry.patch as Record<string, unknown>)['coverUrl'];
+        if (raw === undefined) continue;
+        const type =
+          createdTypes.get(entry.nodeId) ??
+          (await storedNodeType(entry.nodeId));
+        // An unknown target is the engine's to reject, not a cover problem.
+        if (type) await resolve(entry, type, raw);
+      }
+    }
+  }
+  return covers;
 }
 
 /**
