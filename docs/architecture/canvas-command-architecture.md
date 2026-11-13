@@ -124,6 +124,8 @@ Node geometry on `CanvasCommand` (`CREATE_NODES.position`, `SET_NODE_GEOMETRY.po
 
 The executor interprets the submitted `position` in that local space; a subsequent frame-fit or structured-layout pass may then normalize the persisted local value (e.g. a hug frame moves its origin and rewrites children's locals to preserve their world placement; a `column`/`row` frame re-slots children and treats `position` only as an intra-track sort key). So the contract is "interpret the input as parent-local", not "persist the numeric input verbatim". The agent-facing read side exposes the same `position` plus a read-only resolved `absolutePosition`.
 
+Which parent that is, is decided when the command runs. A command carries no parent of its own; a writer that needs the command to mean what it meant when it was written says so beside the commands: an agent quotes the `basis` it read ([reliable save](./canvas-storage.md#42-reliable-save-in-the-write)), and a browser page states the parents its edit was made under (`expectedParents`, [moves and containers](./canvas-realtime-sync.md#moves-and-containers)). Both are host `admit` checks on the executor and refuse with `stale-parent` when the node has been moved to another parent; neither converts coordinates. `commandPlacementTargets` in [expectedParents.ts](../../packages/shared/src/canvas-engine/expectedParents.ts) lists, per command, the nodes whose parent its meaning depends on.
+
 ### Sibling paint order and isolated replay
 
 `REORDER_NODES` moves same-parent roots in their existing sibling order; `top` and `bottom` append/prepend within that parent, and relative targets must be distinct live siblings. Duplicate or partially missing groups, mixed-parent roots, missing/moved anchors, and locked nodes or ancestors reject without mutation. An unchanged order returns `applied: false`, `reason: "no-op"` and takes no snapshot. Legacy Layers operands may include descendants of a selected Frame; the command collapses these to roots for compatibility. `admitSiblingReorder` called with the original operands rejects expanded/mixed-parent groups rather than collapsing them; no production caller uses it that way today, so `POST /execute` gets the same compatible collapse as Layers.
@@ -310,7 +312,7 @@ Node ids use `node-<uuid>`, edge ids use `edge-<uuid>`.
 ### Execution Semantics
 
 1. Process commands sequentially; each command sees state from prior commands.
-2. Validate each command. Commands that fail return `applied: false`.
+2. Validate each command. Commands that fail return `applied: false`. A host `admit` check may refuse a command before its handler runs; the expected-parents check refuses a whole run of commands (one edit) on the state the run starts from, so that edit is applied entirely or not at all while the rest of the batch proceeds.
 3. If no command changes state, commit nothing.
 4. If any command changes state, take one undo snapshot and commit once.
 5. Run post-commit effects.
