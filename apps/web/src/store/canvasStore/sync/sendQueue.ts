@@ -130,8 +130,17 @@ export interface SendQueue {
   isOwn(operationId: string): boolean;
   /** Resolves when the lane is empty, or as soon as it stalls. */
   whenIdle(canvasId: string): Promise<'idle' | 'stalled'>;
-  /** Leave the stalled state, or cut a retry delay short, and try again. */
+  /**
+   * Start over: forget the failures so far, leave the stalled state or cut
+   * a retry delay short, and try again. For a deliberate choice ("Keep
+   * trying") or a sign that the cause is gone (back online, session renewed).
+   */
   resume(canvasId: string): void;
+  /**
+   * Cut a retry delay short without forgetting the failures so far, so the
+   * attempt counts towards the retry limit. A stalled lane stays stalled.
+   */
+  retryNow(canvasId: string): void;
   /** Drop every unanswered entry of the lane. */
   discard(canvasId: string): void;
   /**
@@ -191,7 +200,8 @@ const MAX_REMEMBERED_IDS = 2_000;
 
 export function createSendQueue(options: SendQueueOptions): SendQueue {
   const retry = options.retry ?? DEFAULT_SEND_RETRY;
-  const now = options.now ?? Date.now;
+  // Read through `Date` at call time, so a replaced clock is honoured.
+  const now = options.now ?? (() => Date.now());
   const createId = options.createId ?? (() => crypto.randomUUID());
   const maxBatch = options.maxBatchCommands ?? 200;
   const lanes = new Map<string, Lane>();
@@ -404,6 +414,11 @@ export function createSendQueue(options: SendQueueOptions): SendQueue {
         return;
       }
       lane.wake?.();
+    },
+
+    retryNow(canvasId) {
+      const lane = lanes.get(canvasId);
+      if (lane && lane.phase !== 'stalled') lane.wake?.();
     },
 
     discard(canvasId) {

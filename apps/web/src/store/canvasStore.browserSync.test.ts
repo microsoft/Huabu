@@ -728,6 +728,52 @@ describe('when a change cannot be sent', () => {
     expect(node(X).position).toEqual({ x: 500, y: 0 });
   });
 
+  it('counts the attempts a drain makes towards the retry limit', async () => {
+    moveHere(X, 500);
+    own[0].reject(offline());
+    await flush();
+    // Leaving is tried again and again while the request keeps failing.
+    for (let drain = 1; drain < DEFAULT_SEND_RETRY.maxAttempts; drain++) {
+      const leaving = drainPendingSaves(SPACE);
+      const refused = expect(leaving).rejects.toThrow(/could not be sent/);
+      await flush();
+      own.at(-1)?.reject(offline());
+      await refused;
+    }
+    // The limit holds across drains: the page is in the error state now.
+    expect(own).toHaveLength(DEFAULT_SEND_RETRY.maxAttempts);
+    expect(syncState()).toBe('error');
+    expect(notices().at(-1)?.options).toMatchObject({
+      action: { label: 'Keep trying' },
+    });
+    // One more drain is refused without another request.
+    await expect(drainPendingSaves(SPACE)).rejects.toThrow(/could not be sent/);
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(own).toHaveLength(DEFAULT_SEND_RETRY.maxAttempts);
+
+    // The user's "Keep trying" starts a fresh count.
+    notices().at(-1)?.options?.action?.onClick();
+    expect(own).toHaveLength(DEFAULT_SEND_RETRY.maxAttempts + 1);
+    own.at(-1)?.reject(offline());
+    await flush();
+    expect(syncState()).toBe('unsynced');
+  });
+
+  it('counts the time a drain spends towards the retry time limit', async () => {
+    moveHere(X, 500);
+    own[0].reject(offline());
+    await flush();
+    await vi.advanceTimersByTimeAsync(DEFAULT_SEND_RETRY.maxElapsedMs);
+    // The backoff sent the request again meanwhile; fail what is on the wire
+    // through a drain, well past the time limit since the first failure.
+    const leaving = drainPendingSaves(SPACE);
+    const refused = expect(leaving).rejects.toThrow(/could not be sent/);
+    await flush();
+    own.at(-1)?.reject(offline());
+    await refused;
+    expect(syncState()).toBe('error');
+  });
+
   it('lets the page leave once the retried request is answered', async () => {
     moveHere(X, 500);
     own[0].reject(new Error('offline'));

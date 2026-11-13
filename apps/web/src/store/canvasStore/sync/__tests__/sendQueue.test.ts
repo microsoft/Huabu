@@ -212,6 +212,36 @@ describe('send queue', () => {
     expect(queue.status('space').phase).toBe('idle');
   });
 
+  it('retries at once on request without forgetting the failures so far', async () => {
+    const { queue, calls, flush } = harness();
+    queue.enqueue('space', [move(1)]);
+    calls[0].reject(new TypeError('offline'));
+    await flush();
+    expect(queue.status('space')).toMatchObject({
+      phase: 'retrying',
+      failures: 1,
+    });
+
+    // The backoff is cut short; the count is kept.
+    queue.retryNow('space');
+    await flush();
+    expect(calls).toHaveLength(2);
+    expect(queue.status('space').failures).toBe(1);
+    calls[1].reject(new TypeError('offline'));
+    await flush();
+    queue.retryNow('space');
+    await flush();
+    calls[2].reject(new TypeError('offline'));
+    await flush();
+    expect(queue.status('space').phase).toBe('stalled');
+
+    // A stalled lane is the user's to resume.
+    queue.retryNow('space');
+    await flush();
+    expect(calls).toHaveLength(3);
+    expect(queue.status('space').phase).toBe('stalled');
+  });
+
   it('stalls once the total retry time is used up', async () => {
     const { queue, calls, flush } = harness({
       baseDelayMs: 100,

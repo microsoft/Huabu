@@ -1674,7 +1674,9 @@ function pendingQuestionCreations(canvasId: string): Promise<void>[] {
  * a request fails. A drain is a moment the user is waiting on (leaving the
  * Space, submitting a prompt): a request that was failing is tried again at
  * once, and one more failure is reported instead of sitting out the retry
- * schedule. A queue that has stalled reports at once.
+ * schedule. That attempt counts towards the retry limit like any other, so
+ * repeated drains end in the stalled state rather than retrying for ever.
+ * A queue that has stalled reports at once.
  */
 function whenSentOrFailing(canvasId: string): Promise<'idle' | 'failing'> {
   const { queue } = browserSync;
@@ -1682,8 +1684,8 @@ function whenSentOrFailing(canvasId: string): Promise<'idle' | 'failing'> {
   const before = queue.status(canvasId);
   // Stalled is the user's decision to make (keep trying, or discard).
   if (before.phase === 'stalled') return Promise.resolve('failing');
-  if (before.failures > 0) queue.resume(canvasId);
-  let seen = queue.status(canvasId).failures;
+  if (before.failures > 0) queue.retryNow(canvasId);
+  let seen = before.failures;
   return new Promise((resolve) => {
     const unsubscribe = queue.subscribe((status) => {
       if (status.canvasId !== canvasId) return;
