@@ -353,6 +353,12 @@ async function resolveCovers(
       return;
     }
     const value = raw as string;
+    // The contract offers HTTPS only; node `src` imports are more lenient,
+    // but nothing obliges a cover to be fetched in the clear.
+    if (/^http:\/\//i.test(value))
+      throw new NodeCoverError(
+        `PDF cover ${JSON.stringify(raw)} must use HTTPS, a staged upload path, or an existing artifact key`,
+      );
     let key = keyByValue.get(value);
     if (key === undefined) {
       key =

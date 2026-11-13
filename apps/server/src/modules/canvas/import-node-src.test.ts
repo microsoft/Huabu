@@ -604,6 +604,19 @@ describe('importForeignNodeSources — PDF covers', () => {
     expect(cover).toMatch(/^artifact-.+\.png$/);
   });
 
+  it('rejects a plain-HTTP cover without fetching it', async () => {
+    seedNodes('pdf');
+    fetchMock.mockImplementation(
+      async () =>
+        new Response(PNG, { headers: { 'content-type': 'image/png' } }),
+    );
+
+    await expect(
+      importCovers(mergeCovers('http://example.com/cover.png')),
+    ).rejects.toBeInstanceOf(NodeCoverError);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('accepts a cover on a PDF created earlier in the same batch and drops a null cover on create', async () => {
     seedNodes('pdf');
     await space(canvasId).artifacts.put('existing.gif', GIF);
