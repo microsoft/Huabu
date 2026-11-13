@@ -431,7 +431,14 @@ function PreviewCardContent({
   useLayoutEffect(() => {
     const info = infoRef.current;
     const card = info?.parentElement;
-    if (budgeted || !info || !card) return;
+    if (budgeted) {
+      // The far layout hides a heading it has no line for by writing to the
+      // element. The budget sizes the heading through React, so that write
+      // would otherwise outlive the zoom back in and keep the title hidden.
+      if (titleRef.current) titleRef.current.style.maxHeight = '';
+      return;
+    }
+    if (!info || !card) return;
     const coverBudget =
       far && !fitSummaryToHeight
         ? baseMetrics.verticalCoverMinHeight * scale

@@ -111,6 +111,26 @@ describe('PreviewCard', () => {
     ]);
   });
 
+  it('shows a PDF title again after far zoom had collapsed it', () => {
+    // No room for a title line at far zoom: the far layout hides the heading.
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(10);
+    vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(16);
+    render({ farZoom: 0.19 });
+    const heading = () => {
+      const element = container.querySelector<HTMLElement>(
+        '.preview-card__title',
+      );
+      if (!element) throw new Error('Missing heading');
+      return element;
+    };
+    expect(heading().style.maxHeight).toBe('0px');
+    // Back at reading zoom the budget owns the heading; nothing of the far
+    // layout may linger on it.
+    render({});
+    expect(heading().style.maxHeight).toBe('');
+    expect(heading().style.getPropertyValue('--card-title-lines')).toBe('1');
+  });
+
   it('keeps measuring copies out of the accessibility tree and out of non-PDF cards', () => {
     render({ tags, texts });
     const measurer = container.querySelector('.preview-card__measure');
