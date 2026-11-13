@@ -6,7 +6,7 @@ Follow host policy, repository instructions, user authorization and tool safety 
 
 ## Configuration and identity
 
-Before each new execution unit, apply the common configuration gate and download the current mapped configuration Note. Read its Markdown table's `Field`/`Value` cells, not JSON or a stale initial Prompt snapshot. Blank optional cells mean omitted values; `confirmedByUser` must be `true`. Verify paths/Git on the intended execution device; if your tools cannot reach it, report the limitation rather than checking the Server's filesystem.
+Before each new execution unit, apply the common configuration gate and download the current **Issue Tracker Configuration** Note inside `prompt: issue tracking configuration`. Read its Markdown table's `Field`/`Value` cells, not JSON or a stale initial Prompt snapshot. Blank optional cells mean omitted values; `confirmedByUser` must be `true`. Verify paths/Git on the intended execution device; if your tools cannot reach it, report the limitation rather than checking the Server's filesystem.
 
 Resolve the effective configuration values as follows:
 

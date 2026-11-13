@@ -2,21 +2,18 @@
 
 A Space Kit is a repository-local installer Skill plus portable assets and, where useful, a small initialization script. The user supplies a trusted GitHub repository/revision and Kit path to an Agent in a blank Huabu Space. The Agent clones the repository, reads the selected `SKILL.md`, and uses existing authenticated RFS operations. There is no Kit registry, discovery endpoint, desktop bundle, Profile provisioning or generic Kit runtime.
 
-The first Kit is [Issue Tracker](./issue-tracker-setup/SKILL.md), installed by the `issue-tracker-setup` Skill (Kit ID remains `issue-tracker`). It creates native instruction/configuration/issue-area nodes, then a fresh idle Coordinator after configuration is confirmed. Prompt/Skill Frames use their final recognized titles from creation. The single editable configuration source is a Markdown table Note inside an amber Prompt Frame; onboarding guidance is a Text node outside all instruction Frames. The Frame turns green when ready. Each issue uses a single Fixing Agent node inside the `Issues` Frame, without Execution Notes, per-issue Frames, Tasks, Runs or Views.
+The first Kit is [Issue Tracker](./issue-tracker-setup/SKILL.md), installed by the `issue-tracker-setup` Skill. It creates native instruction/configuration/issue-area nodes, then a fresh idle Coordinator after configuration is confirmed, keeping setup state in the installer Agent's conversation context without placing any ledger Note on the canvas. Prompt/Skill Frames use their final recognized titles from creation. The single editable configuration source is a Markdown table Note inside an amber Prompt Frame; onboarding guidance is a Text node outside all instruction Frames. The Frame turns green when ready. Each issue uses a single Fixing Agent node inside the `Issues` Frame, without Execution Notes, per-issue Frames, Tasks, Runs or Views.
 
 ```text
 space-kits/
   issue-tracker-setup/
     SKILL.md           # Installation procedure and precise trigger
-    kit.json           # Kit ID and version
     assets/            # Installed bytes and editable configuration template/schema
     scripts/           # Dependency-free initialization helper
     tests/             # Focused checks, not installed content
 ```
 
 Keep installer procedure in `SKILL.md`, installed content under `assets/`, and optional installer-only reading under `references/` only when needed. Runtime Coordinator instructions must not duplicate installation procedure. Project configuration is editable and separate from static Prompt/Skill bytes. Do not copy the Kit author's paths, Profiles, issue categories, protected branch names, repository toolchain or IDs into another user's Space.
-
-Version identity is `kit.json` plus the installer's digest over its exact runtime inputs. Record the cloned commit for provenance; the installer refuses version/digest changes in an existing installation. This is not a signed package, an automatic upgrade protocol or a general declarative blueprint.
 
 Run the dependency-free content/configuration tests with:
 

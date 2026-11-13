@@ -2,7 +2,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { createHash, randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -13,22 +12,13 @@ import { pathToFileURL } from 'node:url';
 const execFileAsync = promisify(execFile);
 
 const root = new URL('../', import.meta.url);
-export const recordLabel = 'Issue Tracker Installation Record';
 const commandTypes = [
   'CREATE_NODES',
   'MERGE_NODE_DATA',
   'SET_FRAME_LAYOUT',
   'CONNECT_NODES',
 ];
-const hash = (value) => createHash('sha256').update(value).digest('hex');
-const jsonBlock = (heading, value) =>
-  `# ${heading}\n\n\`\`\`json\n${JSON.stringify(value, null, 2)}\n\`\`\`\n`;
-
-export function parseRecord(content) {
-  const matches = [...content.matchAll(/^```json\r?\n([\s\S]*?)^```/gm)];
-  if (matches.length !== 1) throw new Error('Expected exactly one JSON block');
-  return JSON.parse(matches[0][1]);
-}
+const queryTypes = ['GET_SPACE_OUTLINE', 'INSPECT_NODES', 'INSPECT_EDGES'];
 
 export function parseConfiguration(content) {
   const rows = content
@@ -83,7 +73,6 @@ export function parseConfiguration(content) {
 
 export async function loadKit() {
   const files = [
-    'kit.json',
     'SKILL.md',
     'scripts/install.mjs',
     'assets/common-policy.md',
@@ -102,8 +91,6 @@ export async function loadKit() {
   );
   const content = Object.fromEntries(bytes);
   return {
-    ...JSON.parse(content['kit.json']),
-    digest: hash(JSON.stringify(bytes)),
     content,
     configurationSchema: JSON.parse(
       content['assets/configuration-schema.json'],
@@ -287,10 +274,11 @@ function specifications(kit, profiles) {
   ];
 }
 
-function assertGeometry(nodes, objects) {
-  const owned = Object.values(objects).map(({ nodeId }) =>
-    nodes.find((node) => node.id === nodeId),
-  );
+function assertGeometry(nodes, nodeMap) {
+  const owned = Object.values(nodeMap)
+    .filter(Boolean)
+    .map((nodeId) => nodes.find((node) => node.id === nodeId))
+    .filter(Boolean);
   for (const node of owned) {
     const parent = owned.find(
       (candidate) => candidate.id === node.parentFrame?.id,
@@ -333,12 +321,162 @@ function assertGeometry(nodes, objects) {
   }
 }
 
+function resolveSetupState(current, specs, installerNodeId, passedNodes) {
+  const frameSpecs = specs.filter(({ nodeType }) => nodeType === 'frame');
+  if (passedNodes !== undefined) {
+    if (
+      !passedNodes ||
+      typeof passedNodes !== 'object' ||
+      Array.isArray(passedNodes)
+    ) {
+      throw new Error('Invalid --nodes state; expected a JSON object');
+    }
+    const required = [
+      'common',
+      'coordinatorPrompt',
+      'fixingSkill',
+      'configurationFrame',
+      'issues',
+      'configuration',
+    ];
+    for (const role of required) {
+      const expectedType = role === 'configuration' ? 'note' : 'frame';
+      const node = current.nodes.find(({ id }) => id === passedNodes[role]);
+      if (!node || node.type !== expectedType) {
+        throw new Error(`Missing or changed setup node for ${role}`);
+      }
+    }
+    const configNode = current.nodes.find(
+      ({ id }) => id === passedNodes.configuration,
+    );
+    if (configNode.parentFrame?.id !== passedNodes.configurationFrame) {
+      throw new Error(
+        'Issue Tracker Configuration Note is outside its configuration Frame',
+      );
+    }
+    const nodeMap = { ...passedNodes };
+    return resolveCoordinatorForSetup(current, nodeMap, installerNodeId);
+  }
+
+  const foundFrames = Object.fromEntries(
+    frameSpecs.map(({ role, data }) => [
+      role,
+      current.nodes.filter(
+        (node) => node.type === 'frame' && node.label === data.label,
+      ),
+    ]),
+  );
+  const totalMatchedFrames = Object.values(foundFrames).reduce(
+    (sum, list) => sum + list.length,
+    0,
+  );
+  if (totalMatchedFrames === 0) {
+    if (
+      current.nodes.some(({ id }) => id !== installerNodeId) ||
+      current.edges.length > 0
+    ) {
+      throw new Error('Non-empty Space; refusing overlay installation');
+    }
+    return null;
+  }
+  if (Object.values(foundFrames).some((list) => list.length !== 1)) {
+    throw new Error(
+      'Incomplete or ambiguous Issue Tracker Frames on Space; inspect existing nodes before retrying',
+    );
+  }
+  const nodeMap = Object.fromEntries(
+    Object.entries(foundFrames).map(([role, [node]]) => [role, node.id]),
+  );
+  for (const spec of specs.filter(({ nodeType }) => nodeType !== 'frame')) {
+    const matches = current.nodes.filter(
+      (node) =>
+        node.type === spec.nodeType &&
+        node.label === spec.data.label &&
+        (spec.parent ? node.parentFrame?.id === nodeMap[spec.parent] : true),
+    );
+    if (spec.role === 'configuration' && matches.length !== 1) {
+      throw new Error(
+        'Missing or ambiguous Issue Tracker Configuration Note inside configuration Frame',
+      );
+    }
+    if (matches.length === 1) nodeMap[spec.role] = matches[0].id;
+  }
+  return resolveCoordinatorForSetup(current, nodeMap, installerNodeId);
+}
+
+function resolveCoordinatorForSetup(current, nodeMap, installerNodeId) {
+  const promptId = nodeMap.coordinatorPrompt;
+  const connectedAgents = current.edges
+    .map((edge) =>
+      edge.source === promptId
+        ? edge.target
+        : edge.target === promptId
+          ? edge.source
+          : null,
+    )
+    .filter(Boolean)
+    .map((id) => current.nodes.find((node) => node.id === id))
+    .filter(
+      (node) =>
+        node &&
+        node.id !== installerNodeId &&
+        node.type === 'question' &&
+        node.threadId,
+    );
+  const uniqueAgents = [
+    ...new Map(connectedAgents.map((node) => [node.id, node])).values(),
+  ];
+  if (uniqueAgents.length > 1) {
+    throw new Error(
+      'Ambiguous Coordinator connections on Coordinator Prompt Frame',
+    );
+  }
+  let coordinatorNode = uniqueAgents[0];
+  if (!coordinatorNode && typeof nodeMap.coordinator === 'string') {
+    const candidate = current.nodes.find(
+      (node) =>
+        node.id === nodeMap.coordinator &&
+        node.id !== installerNodeId &&
+        node.type === 'question' &&
+        node.threadId,
+    );
+    if (!candidate) {
+      throw new Error('Recorded Coordinator node no longer exists on Space');
+    }
+    coordinatorNode = candidate;
+  }
+  if (!coordinatorNode) {
+    const strayAgent = current.nodes.find(
+      (node) =>
+        node.id !== installerNodeId &&
+        node.type === 'question' &&
+        !node.parentFrame,
+    );
+    if (strayAgent) {
+      throw new Error(
+        `Unconnected Agent node (${strayAgent.id}) found on Space; inspect state before creating another Coordinator`,
+      );
+    }
+  }
+  if (coordinatorNode) {
+    nodeMap.coordinator = coordinatorNode.id;
+  }
+  return {
+    nodeMap,
+    coordinator: coordinatorNode
+      ? { nodeId: coordinatorNode.id, threadId: coordinatorNode.threadId }
+      : null,
+    coordinatorConnected: uniqueAgents.length === 1,
+  };
+}
+
 export async function install({
   baseUrl = process.env.HUABU_RFS_URL,
   token = process.env.AGENTLET_TOKEN,
   rfsEntry = process.env.HUABU_RFS_ENTRY,
   threadId = process.env.HUABU_THREAD_ID,
   installerNode,
+  nodes: passedNodes,
   profile,
   apply = false,
   fetchImpl,
@@ -514,13 +652,26 @@ export async function install({
     if (!match || !revision) throw new Error('Node sidecar/revision missing');
     return { content: sidecar.slice(match[0].length), revision };
   };
-  const execute = async (command) => {
+  const queryOutline = async () => {
+    const payload = { type: 'GET_SPACE_OUTLINE', includeStyle: true };
+    const response = useCli
+      ? JSON.parse(await runCli(['query', '--json', JSON.stringify(payload)]))
+      : await json('query', payload);
+    if (
+      response.type !== 'GET_SPACE_OUTLINE' ||
+      !Array.isArray(response.result?.nodes)
+    ) {
+      throw new Error('Invalid GET_SPACE_OUTLINE response');
+    }
+    return response.result.nodes;
+  };
+  const executeCommands = async (commands) => {
     let result;
     if (useCli) {
       const dir = await mkdtemp(join(tmpdir(), 'issue-tracker-exec-'));
       try {
         const payloadPath = join(dir, 'commands.json');
-        await writeFile(payloadPath, JSON.stringify({ commands: [command] }));
+        await writeFile(payloadPath, JSON.stringify({ commands }));
         result = JSON.parse(
           await runCli(['execute', '--json-file', payloadPath], {
             correlate: true,
@@ -530,18 +681,18 @@ export async function install({
         await rm(dir, { recursive: true, force: true });
       }
     } else {
-      result = await json('execute', { commands: [command] });
+      result = await json('execute', { commands });
     }
     if (
-      result.results?.length !== 1 ||
-      result.results[0].applied !== true ||
+      result.results?.length !== commands.length ||
+      result.results.some((entry) => entry.applied !== true) ||
       result.conflicts?.length
     ) {
       throw new Error(
-        `Rejected ${command.type}; inspect pending write and all command results`,
+        `Rejected Space command (${commands.map(({ type }) => type).join(', ')}); inspect actual Space state before retrying`,
       );
     }
-    return result.results[0];
+    return result.results;
   };
   const listProfiles = async () =>
     useCli
@@ -582,9 +733,7 @@ export async function install({
     !capabilities.permissions?.read ||
     (apply && !capabilities.permissions?.write) ||
     !commandTypes.every((type) => capabilities.commandTypes?.includes(type)) ||
-    !['INSPECT_NODES', 'INSPECT_EDGES'].every((type) =>
-      capabilities.queryTypes?.includes(type),
-    )
+    !queryTypes.every((type) => capabilities.queryTypes?.includes(type))
   ) {
     throw new Error(
       'Unsupported RFS capabilities; load the authenticated root guide',
@@ -615,170 +764,16 @@ export async function install({
       'Installer must be an existing Agent Node with a thread (set HUABU_THREAD_ID or pass --installer-node)',
     );
   }
-  const candidates = current.nodes.filter(({ label }) => label === recordLabel);
-  if (candidates.length > 1) throw new Error('Ambiguous Installation Records');
-  let record;
-  let recordContent;
-  if (candidates.length) {
-    recordContent = await download(candidates[0]);
-    record = parseRecord(recordContent.content);
-    if (
-      record.schema !== 'issue-tracker-installation/v1' ||
-      record.recordNodeId !== candidates[0].id ||
-      record.kitId !== kit.id ||
-      record.version !== kit.version ||
-      record.digest !== kit.digest ||
-      (record.profileId !== null && typeof record.profileId !== 'string') ||
-      (profile && record.profileId && record.profileId !== profile) ||
-      record.installerNodeId !== resolvedInstallerNode ||
-      !record.objects ||
-      typeof record.objects !== 'object' ||
-      Array.isArray(record.objects) ||
-      typeof record.instanceId !== 'string' ||
-      !record.instanceId ||
-      !Number.isFinite(record.origin?.x) ||
-      !Number.isFinite(record.origin?.y) ||
-      !['installing', 'needs_configuration', 'ready'].includes(record.state) ||
-      !Array.isArray(record.completed)
-    ) {
-      throw new Error(
-        'Installation identity/version/digest conflict; no automatic adoption or upgrade',
-      );
-    }
-    if (record.pending) {
-      throw new Error(
-        `Unresolved write ${record.pending}; inspect actual state and request explicit recovery`,
-      );
-    }
-  } else {
-    record = {
-      schema: 'issue-tracker-installation/v1',
-      kitId: kit.id,
-      version: kit.version,
-      digest: kit.digest,
-      instanceId: randomUUID(),
-      installerNodeId: resolvedInstallerNode,
-      profileId: profile ?? null,
-      recordNodeId: null,
-      origin: {
-        x: installer.absolutePosition.x + installer.size.width + 120,
-        y: installer.absolutePosition.y,
-      },
-      state: 'installing',
-      objects: {},
-      completed: [],
-      pending: null,
-    };
-  }
 
-  const baseSteps = [
-    ...specs.map(({ role }) => `create:${role}`),
-    ...['common', 'coordinatorPrompt', 'fixingSkill', 'configurationFrame'].map(
-      (role) => `layout:${role}`,
-    ),
-  ];
-  const coordinatorSteps = [
-    'create:coordinator',
-    'label:coordinator',
-    'connect',
-  ];
-  const steps = [...baseSteps, ...coordinatorSteps];
-  if (
-    record.completed.some((name) => !steps.includes(name)) ||
-    new Set(record.completed).size !== record.completed.length ||
-    [...specs.map(({ role }) => role), 'coordinator'].some(
-      (role) =>
-        record.completed.includes(`create:${role}`) !==
-        Object.hasOwn(record.objects, role),
-    )
-  ) {
-    throw new Error(
-      'Invalid Installation Record step/object mapping; reconcile before resuming',
-    );
-  }
-  const verifiedContent = new Map();
-  async function checkOwned() {
-    const allowed = new Set([
-      resolvedInstallerNode,
-      record.recordNodeId,
-      ...Object.values(record.objects).map(({ nodeId }) => nodeId),
-    ]);
-    if (current.nodes.some(({ id }) => !allowed.has(id))) {
-      throw new Error(
-        'Non-empty Space/unrecorded content; refusing overlay installation',
-      );
-    }
-    for (const [role, object] of Object.entries(record.objects)) {
-      const spec = specs.find((entry) => entry.role === role);
-      if (!spec && role !== 'coordinator')
-        throw new Error('Unknown installed role');
-      if (
-        !object ||
-        typeof object.nodeId !== 'string' ||
-        (spec?.data.content &&
-          role !== 'warning' &&
-          object.contentHash !== hash(spec.data.content))
-      ) {
-        throw new Error(`Invalid installed content baseline: ${role}`);
-      }
-      const node = current.nodes.find(({ id }) => id === object.nodeId);
-      const parent = spec?.parent
-        ? record.objects[spec.parent]?.nodeId
-        : undefined;
-      if (
-        !node ||
-        node.type !== (role === 'coordinator' ? 'question' : spec.nodeType) ||
-        node.parentFrame?.id !== parent ||
-        (role === 'coordinator' && node.threadId !== object.threadId)
-      ) {
-        throw new Error(
-          `Missing/changed installed identity or parent: ${role}`,
-        );
-      }
-      if (
-        object.contentHash &&
-        role !== 'configuration' &&
-        (!node.rev || verifiedContent.get(node.id) !== node.rev)
-      ) {
-        const downloaded = await download(node);
-        if (hash(downloaded.content) !== object.contentHash) {
-          throw new Error(
-            `User-edited installed content: ${role}; preserving it`,
-          );
-        }
-        verifiedContent.set(node.id, downloaded.revision);
-      }
-      if (spec?.nodeType === 'frame') {
-        if (node.label !== spec.data.label)
-          throw new Error(`Changed instruction/Frame label: ${role}`);
-      }
-    }
-    const coordinator = record.objects.coordinator?.nodeId;
-    const prompt = record.objects.coordinatorPrompt?.nodeId;
-    if (
-      current.edges.some(
-        (edge) =>
-          !(
-            (edge.source === coordinator && edge.target === prompt) ||
-            (edge.source === prompt && edge.target === coordinator)
-          ),
-      ) ||
-      current.edges.length > 1
-    ) {
-      throw new Error(
-        'Unexpected edges/Prompt scope; refusing automatic repair',
-      );
-    }
-    if (record.completed.includes('connect') && current.edges.length !== 1) {
-      throw new Error(
-        'Deleted Coordinator Prompt edge; preserving user change',
-      );
-    }
-  }
-  await checkOwned();
-  const configNode = current.nodes.find(
-    ({ id }) => id === record.objects.configuration?.nodeId,
+  let setup = resolveSetupState(
+    current,
+    specs,
+    resolvedInstallerNode,
+    passedNodes,
   );
+  const configNode = setup
+    ? current.nodes.find(({ id }) => id === setup.nodeMap.configuration)
+    : null;
   const configuration = configNode
     ? await download(configNode)
     : { content: kit.content['assets/configuration.md'] };
@@ -788,287 +783,221 @@ export async function install({
     profiles,
   );
   const configuredProfile = extractConfigProfile(configuration.content);
-  if (
-    record.profileId &&
-    configuredProfile &&
-    configuredProfile !== record.profileId
-  ) {
+  if (profile && configuredProfile && configuredProfile !== profile) {
     errors.push(
-      `INVALID coordinatorProfileId: conflicts with existing Coordinator Profile ${record.profileId}`,
+      `INVALID coordinatorProfileId: conflicts with --profile ${profile}`,
     );
   }
   const effectiveProfile =
-    profile ||
-    record.profileId ||
-    (!errors.length ? configuredProfile : undefined);
+    profile || (!errors.length ? configuredProfile : undefined);
   const canCreateCoordinator = Boolean(
     !errors.length &&
     effectiveProfile &&
     profiles.some(({ id }) => id !== 'huabu' && id === effectiveProfile),
   );
+
   if (!apply) {
-    const baseComplete = baseSteps.every((name) =>
-      record.completed.includes(name),
-    );
-    const complete = steps.every((name) => record.completed.includes(name));
-    if (baseComplete) assertGeometry(current.nodes, record.objects);
     return {
       mode: 'preview',
       transport: useCli ? 'huabu-rfs' : 'http',
       installerNode: resolvedInstallerNode,
-      kit: { id: kit.id, version: kit.version, digest: kit.digest },
-      resume: Boolean(record.recordNodeId),
-      state: complete
-        ? errors.length
-          ? 'needs_configuration'
-          : 'ready'
-        : baseComplete
-          ? 'needs_configuration'
-          : record.recordNodeId
-            ? 'installing'
-            : 'planned',
+      resume: Boolean(setup),
+      state: setup
+        ? setup.coordinator && setup.coordinatorConnected && !errors.length
+          ? 'ready'
+          : 'needs_configuration'
+        : 'planned',
       configurationState: errors.length ? 'needs_configuration' : 'valid',
       configuration: errors,
       availableProfiles: profiles.filter(({ id }) => id !== 'huabu'),
-      create: [
-        ...specs.map(({ role }) => role),
-        ...(canCreateCoordinator ? ['coordinator'] : []),
-      ].filter((role) => !record.objects[role]),
+      nodes: setup?.nodeMap ?? null,
+      coordinator: setup?.coordinator ?? null,
+      create: setup
+        ? canCreateCoordinator && !setup.coordinator
+          ? ['coordinator']
+          : []
+        : [
+            ...specs.map(({ role }) => role),
+            ...(canCreateCoordinator ? ['coordinator'] : []),
+          ],
       activation:
         'instruction titles are final; Coordinator creation requires valid confirmed configuration',
     };
   }
 
-  if (!record.recordNodeId) {
-    const result = await execute({
-      type: 'CREATE_NODES',
-      nodes: [
-        {
-          nodeType: 'note',
-          data: { label: recordLabel, content: jsonBlock(recordLabel, record) },
-          position: { x: record.origin.x, y: record.origin.y + 1400 },
-          size: { width: 520, height: 260 },
-        },
-      ],
-    });
-    record.recordNodeId = result.nodes?.[0]?.nodeId;
-    if (!record.recordNodeId)
-      throw new Error(
-        'Lost Installation Record identity; inspect before retrying',
-      );
-    current = await inventory();
-    recordContent = await download(
-      current.nodes.find(({ id }) => id === record.recordNodeId),
-    );
-  }
-  const save = async () => {
-    const body = jsonBlock(recordLabel, record);
-    const node = (await query('INSPECT_NODES')).find(
-      ({ id }) => id === record.recordNodeId,
-    );
-    const latest = await download(node);
-    if (latest.revision !== recordContent.revision) {
-      throw new Error(
-        'Installation Record changed; stop competing installer or reconcile edits',
-      );
-    }
-    if (recordContent.content === body) return;
-    await execute({
-      type: 'MERGE_NODE_DATA',
-      patches: [
-        {
-          nodeId: record.recordNodeId,
-          expectRev: latest.revision,
-          patch: { content: body },
-        },
-      ],
-    });
-    recordContent = await download(node);
-    if (recordContent.content !== body)
-      throw new Error('Installation Record readback mismatch');
-  };
-  await save();
-  const step = async (name, action) => {
-    if (record.completed.includes(name)) return;
-    current = await inventory();
-    await checkOwned();
-    record.pending = name;
-    await save();
-    await action();
-    record.completed.push(name);
-    record.pending = null;
-    await save();
-  };
-  for (const { role, parent, ...spec } of specs) {
-    await step(`create:${role}`, async () => {
-      const result = await execute({
+  if (!setup) {
+    const origin = {
+      x: installer.absolutePosition.x + installer.size.width + 120,
+      y: installer.absolutePosition.y,
+    };
+    const rootSpecs = specs.filter(({ parent }) => !parent);
+    const [rootCreated] = await executeCommands([
+      {
         type: 'CREATE_NODES',
-        nodes: [
-          {
-            ...spec,
-            ...(parent
-              ? { parentId: record.objects[parent].nodeId }
-              : {
-                  position: {
-                    x: record.origin.x + spec.position.x,
-                    y: record.origin.y + spec.position.y,
-                  },
-                }),
+        nodes: rootSpecs.map(({ nodeType, data, position, size }) => ({
+          nodeType,
+          data,
+          ...(size ? { size } : {}),
+          position: {
+            x: origin.x + position.x,
+            y: origin.y + position.y,
           },
-        ],
-      });
-      const nodeId = result.nodes?.[0]?.nodeId;
+        })),
+      },
+    ]);
+    const nodeMap = {};
+    rootSpecs.forEach(({ role }, index) => {
+      const nodeId = rootCreated.nodes?.[index]?.nodeId;
       if (!nodeId) throw new Error(`Missing created identity for ${role}`);
-      record.objects[role] = {
-        nodeId,
-        ...(spec.data.content ? { contentHash: hash(spec.data.content) } : {}),
-      };
+      nodeMap[role] = nodeId;
     });
-  }
-  for (const role of [
-    'common',
-    'coordinatorPrompt',
-    'fixingSkill',
-    'configurationFrame',
-  ]) {
-    await step(`layout:${role}`, () =>
-      execute({
+
+    const childSpecs = specs.filter(({ parent }) => Boolean(parent));
+    const [childrenCreated] = await executeCommands([
+      {
+        type: 'CREATE_NODES',
+        nodes: childSpecs.map(({ parent, nodeType, data, position, size }) => ({
+          nodeType,
+          data,
+          position,
+          ...(size ? { size } : {}),
+          parentId: nodeMap[parent],
+        })),
+      },
+      ...[
+        'common',
+        'coordinatorPrompt',
+        'fixingSkill',
+        'configurationFrame',
+      ].map((role) => ({
         type: 'SET_FRAME_LAYOUT',
-        frameId: record.objects[role].nodeId,
+        frameId: nodeMap[role],
         mode: 'column',
         sizing: 'hug',
-      }),
-    );
+      })),
+    ]);
+    childSpecs.forEach(({ role }, index) => {
+      const nodeId = childrenCreated.nodes?.[index]?.nodeId;
+      if (!nodeId) throw new Error(`Missing created identity for ${role}`);
+      nodeMap[role] = nodeId;
+    });
+
+    current = await inventory();
+    assertGeometry(current.nodes, nodeMap);
+    setup = { nodeMap, coordinator: null, coordinatorConnected: false };
   }
-  const finalConfigBeforeCoordinator = await download(
-    (await query('INSPECT_NODES')).find(
-      ({ id }) => id === record.objects.configuration.nodeId,
-    ),
+
+  const latestConfig = await download(
+    current.nodes.find(({ id }) => id === setup.nodeMap.configuration),
   );
-  const preCoordinatorValidation = validateConfiguration(
-    finalConfigBeforeCoordinator.content,
+  const validation = validateConfiguration(
+    latestConfig.content,
     kit.configurationSchema,
     profiles,
   );
-  const finalConfiguredProfile = extractConfigProfile(
-    finalConfigBeforeCoordinator.content,
-  );
+  const latestConfiguredProfile = extractConfigProfile(latestConfig.content);
   if (
-    record.profileId &&
-    finalConfiguredProfile &&
-    finalConfiguredProfile !== record.profileId
+    profile &&
+    latestConfiguredProfile &&
+    latestConfiguredProfile !== profile
   ) {
-    preCoordinatorValidation.push(
-      `INVALID coordinatorProfileId: conflicts with existing Coordinator Profile ${record.profileId}`,
+    validation.push(
+      `INVALID coordinatorProfileId: conflicts with --profile ${profile}`,
     );
   }
   const targetProfile =
-    profile ||
-    record.profileId ||
-    (!preCoordinatorValidation.length ? finalConfiguredProfile : undefined);
+    profile || (!validation.length ? latestConfiguredProfile : undefined);
+
+  let coordinator = setup.coordinator;
+  let coordinatorConnected = setup.coordinatorConnected;
   if (
-    !preCoordinatorValidation.length &&
+    !validation.length &&
+    !coordinator &&
     targetProfile &&
     profiles.some(({ id }) => id !== 'huabu' && id === targetProfile)
   ) {
-    record.profileId = targetProfile;
-    await step('create:coordinator', async () => {
-      const result = await createCoordinator(targetProfile, {
-        x: record.origin.x + 1800,
-        y: record.origin.y,
-      });
-      if (
-        !result.nodeId ||
-        !result.threadId ||
-        result.profileId !== targetProfile
-      ) {
-        throw new Error('Missing/mismatched Coordinator creation identity');
-      }
-      record.objects.coordinator = {
-        nodeId: result.nodeId,
-        threadId: result.threadId,
-      };
+    const issuesNode = current.nodes.find(
+      ({ id }) => id === setup.nodeMap.issues,
+    );
+    const created = await createCoordinator(targetProfile, {
+      x: issuesNode.absolutePosition.x,
+      y: issuesNode.absolutePosition.y - 400,
     });
-    await step('label:coordinator', () =>
-      execute({
+    if (
+      !created.nodeId ||
+      !created.threadId ||
+      created.profileId !== targetProfile
+    ) {
+      throw new Error('Missing/mismatched Coordinator creation identity');
+    }
+    coordinator = { nodeId: created.nodeId, threadId: created.threadId };
+    setup.nodeMap.coordinator = created.nodeId;
+    current = await inventory();
+  }
+
+  const outlineNodes = await queryOutline();
+  const currentAccent = outlineNodes.find(
+    ({ id }) => id === setup.nodeMap.configurationFrame,
+  )?.style?.accent;
+  const ready = Boolean(!validation.length && coordinator);
+  const desiredAccent = ready ? 'green' : 'amber';
+  const finalizeCommands = [];
+
+  if (ready) {
+    const coordNode = current.nodes.find(({ id }) => id === coordinator.nodeId);
+    if (coordNode?.label !== 'Issue Tracker Coordinator') {
+      finalizeCommands.push({
         type: 'MERGE_NODE_DATA',
         patches: [
           {
-            nodeId: record.objects.coordinator.nodeId,
+            nodeId: coordinator.nodeId,
             patch: { label: 'Issue Tracker Coordinator' },
           },
         ],
-      }),
-    );
-    await step('connect', () =>
-      execute({
+      });
+    }
+    if (!coordinatorConnected) {
+      finalizeCommands.push({
         type: 'CONNECT_NODES',
         edges: [
           {
-            source: record.objects.coordinatorPrompt.nodeId,
-            target: record.objects.coordinator.nodeId,
+            source: setup.nodeMap.coordinatorPrompt,
+            target: coordinator.nodeId,
           },
         ],
-      }),
-    );
+      });
+      coordinatorConnected = true;
+    }
   }
-  current = await inventory();
-  await checkOwned();
-  assertGeometry(current.nodes, record.objects);
-  const finalConfig = await download(
-    current.nodes.find(({ id }) => id === record.objects.configuration.nodeId),
-  );
-  const validation = validateConfiguration(
-    finalConfig.content,
-    kit.configurationSchema,
-    profiles,
-  );
-  if (
-    record.profileId &&
-    extractConfigProfile(finalConfig.content) &&
-    extractConfigProfile(finalConfig.content) !== record.profileId
-  ) {
-    validation.push(
-      `INVALID coordinatorProfileId: conflicts with existing Coordinator Profile ${record.profileId}`,
-    );
-  }
-  const allStepsDone = steps.every((name) => record.completed.includes(name));
-  const nextState =
-    validation.length || !allStepsDone ? 'needs_configuration' : 'ready';
-  const prevAccent = record.state === 'ready' ? 'green' : 'amber';
-  const nextAccent = nextState === 'ready' ? 'green' : 'amber';
-  if (prevAccent !== nextAccent) {
-    record.pending = 'status:configuration';
-    await save();
-    await execute({
+  if (currentAccent !== desiredAccent) {
+    finalizeCommands.push({
       type: 'MERGE_NODE_DATA',
       patches: [
         {
-          nodeId: record.objects.configurationFrame.nodeId,
-          patch: { style: { accent: nextAccent } },
+          nodeId: setup.nodeMap.configurationFrame,
+          patch: { style: { accent: desiredAccent } },
         },
       ],
     });
-    record.pending = null;
   }
-  record.state = nextState;
-  record.configuration = {
-    contentHash: hash(finalConfig.content),
-    errors: validation,
-  };
-  await save();
+  if (finalizeCommands.length > 0) {
+    await executeCommands(finalizeCommands);
+  }
+
+  const state =
+    !validation.length && coordinator && coordinatorConnected
+      ? 'ready'
+      : 'needs_configuration';
   return {
     mode: 'installed',
     transport: useCli ? 'huabu-rfs' : 'http',
     installerNode: resolvedInstallerNode,
-    state: record.state,
+    state,
     configuration: validation,
     availableProfiles: profiles.filter(({ id }) => id !== 'huabu'),
-    coordinator: record.objects.coordinator ?? null,
-    recordNodeId: record.recordNodeId,
-    version: kit.version,
-    digest: kit.digest,
-    activation: record.objects.coordinator
+    nodes: setup.nodeMap,
+    coordinator,
+    activation: coordinator
       ? 'none; Coordinator stays idle until its first user message'
       : 'deferred; complete Issue Tracker Configuration and rerun with --apply to create the Coordinator',
   };
@@ -1081,6 +1010,7 @@ if (
   const { values } = parseArgs({
     options: {
       'installer-node': { type: 'string' },
+      nodes: { type: 'string' },
       profile: { type: 'string' },
       apply: { type: 'boolean', default: false },
       help: { type: 'boolean', default: false },
@@ -1088,14 +1018,16 @@ if (
   });
   if (values.help) {
     console.log(
-      'Usage: node install.mjs [--installer-node NODE_ID] [--profile PROFILE_ID] [--apply]\nPreview is read-only. Uses HUABU_RFS_ENTRY when present, with HUABU_RFS_URL, AGENTLET_TOKEN and optional HUABU_THREAD_ID. Read SKILL.md first.',
+      'Usage: node install.mjs [--installer-node NODE_ID] [--nodes JSON] [--profile PROFILE_ID] [--apply]\nPreview is read-only. Uses HUABU_RFS_ENTRY when present, with HUABU_RFS_URL, AGENTLET_TOKEN and optional HUABU_THREAD_ID. Read SKILL.md first.',
     );
   } else {
     try {
+      const parsedNodes = values.nodes ? JSON.parse(values.nodes) : undefined;
       console.log(
         JSON.stringify(
           await install({
             installerNode: values['installer-node'],
+            nodes: parsedNodes,
             profile: values.profile,
             apply: values.apply,
           }),

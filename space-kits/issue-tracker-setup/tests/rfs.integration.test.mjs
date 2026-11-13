@@ -11,12 +11,7 @@ import { promisify } from 'node:util';
 
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
-import {
-  install,
-  loadKit,
-  parseRecord,
-  recordLabel,
-} from '../scripts/install.mjs';
+import { install, loadKit } from '../scripts/install.mjs';
 import rfsRoutes from '../../../apps/server/src/modules/remote_fs/rfs.route.js';
 import {
   getCanvasStore,
@@ -51,14 +46,6 @@ const nodeStyle = (nodeId) =>
   store()
     .read()
     .state.nodes.find((node) => node.id === nodeId)?.data?.style;
-const ledger = () => {
-  const node = store()
-    .read()
-    .state.nodes.find(
-      (node) => store().readNode(node.id)?.label === recordLabel,
-    );
-  return parseRecord(store().readNode(node.id).content);
-};
 
 function configurationTable({ values, confirmedByUser = true }) {
   return [
@@ -70,8 +57,7 @@ function configurationTable({ values, confirmedByUser = true }) {
   ].join('\n');
 }
 
-function fillConfiguration() {
-  const nodeId = ledger().objects.configuration.nodeId;
+function fillConfiguration(nodeId) {
   store().writeNode(nodeId, {
     ...store().readNode(nodeId),
     content: configurationTable({
@@ -159,7 +145,7 @@ afterEach(async () => {
   rmSync(workspace, { recursive: true, force: true });
 });
 
-it('creates final instruction titles and an inline configuration table, then an idle Coordinator only after confirmation', async () => {
+it('creates final instruction titles and an inline configuration table without any ledger Note, then an idle Coordinator only after confirmation', async () => {
   const preview = await install(options());
   expect(preview.state).toBe('planned');
   expect(preview.configurationState).toBe('needs_configuration');
@@ -168,8 +154,14 @@ it('creates final instruction titles and an inline configuration table, then an 
   expect(initial.state).toBe('needs_configuration');
   expect(initial.coordinator).toBeNull();
   expect(writes.filter(({ path }) => path.endsWith('/agent'))).toHaveLength(0);
-  const record = ledger();
-  expect(record.pending).toBeNull();
+  expect(
+    store()
+      .read()
+      .state.nodes.some((node) =>
+        store().readNode(node.id)?.label?.includes('Installation Record'),
+      ),
+  ).toBe(false);
+  const { nodes } = initial;
   const kit = await loadKit();
   for (const [role, file] of Object.entries({
     policy: 'common-policy',
@@ -178,11 +170,10 @@ it('creates final instruction titles and an inline configuration table, then an 
     coordinatorInstructions: 'coordinator-prompt',
     configuration: 'configuration',
   })) {
-    expect(store().readNode(record.objects[role].nodeId).content).toBe(
+    expect(store().readNode(nodes[role]).content).toBe(
       kit.content[`assets/${file}.md`],
     );
   }
-  expect(record.objects.contract).toBeUndefined();
   const expectedLabels = {
     common: 'prompt: issue tracking common',
     coordinatorPrompt: 'prompt: issue tracking coordinator',
@@ -190,19 +181,16 @@ it('creates final instruction titles and an inline configuration table, then an 
     configurationFrame: 'prompt: issue tracking configuration',
   };
   for (const [role, label] of Object.entries(expectedLabels)) {
-    expect(store().readNode(record.objects[role].nodeId).label).toBe(label);
+    expect(store().readNode(nodes[role]).label).toBe(label);
   }
-  expect(nodeStyle(record.objects.configurationFrame.nodeId)?.accent).toBe(
-    'amber',
-  );
-  const warning = store().readNode(record.objects.warning.nodeId);
+  expect(nodeStyle(nodes.configurationFrame)?.accent).toBe('amber');
+  const warning = store().readNode(nodes.warning);
   expect(warning.content).toContain('Project coding Agent: project-profile');
   expect(warning.content).not.toContain('{{AVAILABLE_PROFILES}}');
   expect(
     store()
       .read()
-      .state.nodes.find((node) => node.id === record.objects.warning.nodeId)
-      .parentId,
+      .state.nodes.find((node) => node.id === nodes.warning).parentId,
   ).toBeUndefined();
   const initialPrompt = await resolveSpacePrompt('c1', 'node-installer');
   expect(initialPrompt.markdown).toContain(
@@ -210,16 +198,14 @@ it('creates final instruction titles and an inline configuration table, then an 
   );
   expect(initialPrompt.markdown).not.toContain('Edit only the Value column');
   writes.length = 0;
-  await install({ ...options(), apply: true });
+  await install({ ...options(), nodes, apply: true });
   expect(writes).toEqual([]);
-  fillConfiguration();
-  const result = await install({ ...options(), apply: true });
+  fillConfiguration(nodes.configuration);
+  const result = await install({ ...options(), nodes, apply: true });
   expect(result.state).toBe('ready');
-  expect(nodeStyle(record.objects.configurationFrame.nodeId)?.accent).toBe(
-    'green',
-  );
+  expect(nodeStyle(nodes.configurationFrame)?.accent).toBe('green');
   for (const [role, label] of Object.entries(expectedLabels)) {
-    expect(store().readNode(record.objects[role].nodeId).label).toBe(label);
+    expect(store().readNode(nodes[role]).label).toBe(label);
   }
   const prompt = await resolveSpacePrompt('c1', result.coordinator.nodeId);
   const otherPrompt = await resolveSpacePrompt('c1', 'node-installer');
@@ -266,10 +252,13 @@ it('creates final instruction titles and an inline configuration table, then an 
 });
 
 it('validates edited configuration for a non-Huabu repository without recreating or starting Agents', async () => {
-  await install({ ...options(), apply: true });
-  fillConfiguration();
-  await install({ ...options(), apply: true });
-  const record = ledger();
+  const step1 = await install({ ...options(), apply: true });
+  fillConfiguration(step1.nodes.configuration);
+  const ready = await install({
+    ...options(),
+    nodes: step1.nodes,
+    apply: true,
+  });
   const values = {
     repository: 'octo/example',
     codebasePath: '/projects/example',
@@ -284,7 +273,7 @@ it('validates edited configuration for a non-Huabu repository without recreating
     values,
     confirmedByUser: true,
   };
-  const nodeId = record.objects.configuration.nodeId;
+  const nodeId = step1.nodes.configuration;
   store().writeNode(nodeId, {
     ...store().readNode(nodeId),
     content: configurationTable(configuration),
@@ -292,14 +281,11 @@ it('validates edited configuration for a non-Huabu repository without recreating
   writes.length = 0;
   const result = await install({ ...options(), apply: true });
   expect(result.state).toBe('ready');
-  expect(result.coordinator).toEqual(record.objects.coordinator);
-  expect(writes).toHaveLength(1);
-  expect(writes[0].path).toMatch(/\/execute$/);
+  expect(result.coordinator).toEqual(ready.coordinator);
+  expect(writes).toEqual([]);
   expect(agentThreadService.invoke).not.toHaveBeenCalled();
   expect(agenetes.create).not.toHaveBeenCalled();
-  writes.length = 0;
-  await install({ ...options(), apply: true });
-  expect(writes).toEqual([]);
+
   configuration.confirmedByUser = false;
   store().writeNode(nodeId, {
     ...store().readNode(nodeId),
@@ -308,16 +294,16 @@ it('validates edited configuration for a non-Huabu repository without recreating
   const changed = await install({ ...options(), apply: true });
   expect(changed.state).toBe('needs_configuration');
   expect(changed.configuration).toContain('UNVERIFIED user confirmation');
-  expect(nodeStyle(record.objects.configurationFrame.nodeId)?.accent).toBe(
-    'amber',
-  );
+  expect(writes).toHaveLength(1);
+  expect(writes[0].path).toMatch(/\/execute$/);
+  expect(nodeStyle(step1.nodes.configurationFrame)?.accent).toBe('amber');
 });
 
 it('does not let an explicit Profile bypass missing, invalid, or unconfirmed configuration', async () => {
   const explicit = { ...options(), profile: 'project-profile' };
-  await install({ ...explicit, apply: true });
-  expect(ledger().objects.coordinator).toBeUndefined();
-  const nodeId = ledger().objects.configuration.nodeId;
+  const step1 = await install({ ...explicit, apply: true });
+  expect(step1.coordinator).toBeNull();
+  const nodeId = step1.nodes.configuration;
   for (const [path, confirmedByUser] of [
     ['relative/path', true],
     ['/projects/example', false],
@@ -377,207 +363,86 @@ it('blocks non-empty and truncated preflights without any mutation', async () =>
   expect(writes).toEqual([]);
 });
 
-it('preserves edited static content and blocks mismatched versions', async () => {
-  await install({ ...options(), apply: true });
-  const record = ledger();
-  const nodeId = record.objects.policy.nodeId;
-  const original = store().readNode(nodeId);
-  store().writeNode(nodeId, {
-    ...original,
-    content: 'User edited instructions',
-  });
-  writes.length = 0;
-  await expect(install({ ...options(), apply: true })).rejects.toThrow(
-    /User-edited/,
-  );
-  expect(writes).toEqual([]);
-  expect(store().readNode(nodeId).content).toBe('User edited instructions');
-  store().writeNode(nodeId, original);
-  record.version = '99.0.0';
-  store().writeNode(record.recordNodeId, {
-    ...store().readNode(record.recordNodeId),
-    content: `# ${recordLabel}\n\n\`\`\`json\n${JSON.stringify(record)}\n\`\`\`\n`,
-  });
-  await expect(install({ ...options(), apply: true })).rejects.toThrow(
-    /identity\/version\/digest/,
-  );
-  expect(writes).toEqual([]);
-});
-
-it('stops after a dropped creation acknowledgement instead of duplicating accepted nodes', async () => {
-  const original = fetchImpl;
-  let dropped = false;
-  fetchImpl = async (url, init) => {
-    const response = await original(url, init);
-    const command = init.body && JSON.parse(init.body).commands?.[0];
-    if (
-      !dropped &&
-      command?.type === 'CREATE_NODES' &&
-      command.nodes[0].nodeType === 'frame'
-    ) {
-      dropped = true;
-      throw new Error('Lost acknowledgement');
-    }
-    return response;
-  };
-  await expect(install({ ...options(), apply: true })).rejects.toThrow(
-    /Lost acknowledgement/,
-  );
-  expect(ledger().pending).toBe('create:common');
-  const count = store().read().state.nodes.length;
-  writes.length = 0;
-  fetchImpl = original;
-  await expect(install({ ...options(), apply: true })).rejects.toThrow(
-    /Unresolved write create:common/,
-  );
-  expect(store().read().state.nodes).toHaveLength(count);
-  expect(writes).toEqual([]);
-});
-
-it('resumes an acknowledged prefix with unchanged identities', async () => {
-  const original = fetchImpl;
-  let interrupted = false;
-  fetchImpl = async (url, init) => {
-    if (
-      !interrupted &&
-      url.endsWith('/query') &&
-      ledgerIfPresent()?.completed.includes('create:common')
-    ) {
-      interrupted = true;
-      throw new Error('Interrupted between acknowledged steps');
-    }
-    return original(url, init);
-  };
-  function ledgerIfPresent() {
-    const node = store()
-      .read()
-      .state.nodes.find(
-        (node) => store().readNode(node.id)?.label === recordLabel,
-      );
-    return node ? parseRecord(store().readNode(node.id).content) : null;
-  }
-  await expect(install({ ...options(), apply: true })).rejects.toThrow(
-    /Interrupted/,
-  );
-  const prefix = ledger();
-  expect(prefix.pending).toBeNull();
-  fetchImpl = original;
-  await install({ ...options(), apply: true });
-  expect(ledger().objects.common).toEqual(prefix.objects.common);
-  expect(writes.filter(({ path }) => path.endsWith('/agent'))).toHaveLength(0);
-  fillConfiguration();
-  await install({ ...options(), apply: true });
-  expect(writes.filter(({ path }) => path.endsWith('/agent'))).toHaveLength(1);
-});
-
-it('preserves deleted objects and unexpected topology instead of recreating or repairing', async () => {
-  await install({ ...options(), apply: true });
-  fillConfiguration();
-  await install({ ...options(), apply: true });
-  const record = ledger();
+it('allows user notes and instruction edits after layout without blocking Coordinator creation', async () => {
+  const step1 = await install({ ...options(), apply: true });
   const canvas = store().read();
-  const originalEdges = canvas.state.edges;
-  canvas.state.edges = [];
+  canvas.state.nodes.push({
+    id: 'node-user-memo',
+    type: 'note',
+    position: { x: 50, y: 900 },
+    data: {},
+  });
   store().write(canvas);
-  writes.length = 0;
-  await expect(install({ ...options(), apply: true })).rejects.toThrow(
-    /Deleted Coordinator Prompt edge/,
+  store().writeNode('node-user-memo', {
+    nodeId: 'node-user-memo',
+    type: 'note',
+    label: 'My scratchpad',
+    content: 'Personal notes while onboarding',
+  });
+  const policyNode = store().readNode(step1.nodes.policy);
+  store().writeNode(step1.nodes.policy, {
+    ...policyNode,
+    content: `${policyNode.content}\nCustom team note.\n`,
+  });
+  fillConfiguration(step1.nodes.configuration);
+
+  const finalized = await install({
+    ...options(),
+    nodes: step1.nodes,
+    apply: true,
+  });
+  expect(finalized.state).toBe('ready');
+  expect(finalized.coordinator?.threadId).toBeTruthy();
+  expect(store().readNode('node-user-memo').content).toBe(
+    'Personal notes while onboarding',
   );
-  expect(writes).toEqual([]);
-  canvas.state.edges = originalEdges;
-  canvas.state.nodes = canvas.state.nodes.filter(
-    (node) => node.id !== record.objects.safety.nodeId,
+  expect(store().readNode(step1.nodes.policy).content).toContain(
+    'Custom team note.',
   );
-  store().write(canvas);
-  await expect(install({ ...options(), apply: true })).rejects.toThrow(
-    /Missing\/changed installed identity/,
-  );
-  expect(writes).toEqual([]);
 });
 
-it('keeps durable pending state after a rejected command or lost Agent response', async () => {
-  const original = fetchImpl;
-  let rejected = false;
-  fetchImpl = async (url, init) => {
-    const command = init.body && JSON.parse(init.body).commands?.[0];
-    if (!rejected && command?.type === 'SET_FRAME_LAYOUT') {
-      rejected = true;
-      return Response.json({
-        results: [{ applied: false, reason: 'conflict' }],
-      });
-    }
-    return original(url, init);
-  };
-  await expect(install({ ...options(), apply: true })).rejects.toThrow(
-    /Rejected SET_FRAME_LAYOUT/,
+it('rejects partial/ambiguous Frames and rejected commands cleanly', async () => {
+  const step1 = await install({ ...options(), apply: true });
+  const canvas = store().read();
+  canvas.state.nodes = canvas.state.nodes.filter(
+    (node) => node.id !== step1.nodes.fixingSkill,
   );
-  expect(ledger().pending).toBe('layout:common');
-  fetchImpl = original;
+  store().write(canvas);
   writes.length = 0;
   await expect(install({ ...options(), apply: true })).rejects.toThrow(
-    /Unresolved write/,
+    /Incomplete or ambiguous/,
   );
+  await expect(
+    install({ ...options(), nodes: step1.nodes, apply: true }),
+  ).rejects.toThrow(/Missing or changed setup node for fixingSkill/);
   expect(writes).toEqual([]);
 });
 
 it('does not duplicate a Coordinator when its creation response is lost', async () => {
-  await install({ ...options(), apply: true });
-  fillConfiguration();
+  const step1 = await install({ ...options(), apply: true });
+  fillConfiguration(step1.nodes.configuration);
   const original = fetchImpl;
   fetchImpl = async (url, init) => {
     const response = await original(url, init);
     if (url.endsWith('/agent')) throw new Error('Lost Agent response');
     return response;
   };
-  await expect(install({ ...options(), apply: true })).rejects.toThrow(
-    /Lost Agent response/,
-  );
-  expect(ledger().pending).toBe('create:coordinator');
+  await expect(
+    install({ ...options(), nodes: step1.nodes, apply: true }),
+  ).rejects.toThrow(/Lost Agent response/);
   const agents = store()
     .read()
     .state.nodes.filter((node) => node.type === 'question');
   expect(agents).toHaveLength(2);
   fetchImpl = original;
   writes.length = 0;
-  await expect(install({ ...options(), apply: true })).rejects.toThrow(
-    /Unresolved write/,
-  );
+  await expect(
+    install({ ...options(), nodes: step1.nodes, apply: true }),
+  ).rejects.toThrow(/Unconnected Agent node/);
   expect(writes).toEqual([]);
 });
 
-it('detects a concurrent ledger edit even on an otherwise unchanged rerun', async () => {
-  await install({ ...options(), apply: true });
-  const record = ledger();
-  const original = fetchImpl;
-  let edited = false;
-  writes.length = 0;
-  fetchImpl = async (url, init) => {
-    const response = await original(url, init);
-    if (
-      !edited &&
-      decodeURIComponent(new URL(url).pathname).endsWith(
-        '/download/nodes/Issue Tracker Configuration.md',
-      )
-    ) {
-      edited = true;
-      const current = store().readNode(record.recordNodeId);
-      store().writeNode(record.recordNodeId, {
-        ...current,
-        content: `${current.content}\nUser recovery decision: stop here.\n`,
-      });
-    }
-    return response;
-  };
-  await expect(install({ ...options(), apply: true })).rejects.toThrow(
-    /Installation Record changed/,
-  );
-  expect(writes).toEqual([]);
-  expect(store().readNode(record.recordNodeId).content).toContain(
-    'User recovery decision',
-  );
-});
-
-it('runs the cloned standalone CLI over huabu-rfs and 3-step workflow from a different cwd', async () => {
+it('runs the cloned standalone CLI over huabu-rfs and 3-step workflow with --nodes from a different cwd', async () => {
   const address = await app.listen({ host: '127.0.0.1', port: 0 });
   const clone = join(workspace, 'standalone-kit');
   await cp(new URL('../', import.meta.url), clone, { recursive: true });
@@ -606,10 +471,10 @@ it('runs the cloned standalone CLI over huabu-rfs and 3-step workflow from a dif
   expect(step1.installerNode).toBe('node-installer');
   expect(step1.state).toBe('needs_configuration');
   expect(step1.coordinator).toBeNull();
-  expect(ledger().objects.coordinator).toBeUndefined();
+  expect(step1.nodes?.configuration).toBeTruthy();
 
-  // Step 2: user fills in minimal required configuration on the Space (coordinatorProfileId, repository, worktreeRoot left null to use defaults/derivation)
-  const configNodeId = ledger().objects.configuration.nodeId;
+  // Step 2: user fills in minimal required configuration on the Space
+  const configNodeId = step1.nodes.configuration;
   const configuration = {
     schemaVersion: 1,
     values: {
@@ -628,12 +493,17 @@ it('runs the cloned standalone CLI over huabu-rfs and 3-step workflow from a dif
     content: configurationTable(configuration),
   });
 
-  // Step 3: finalize installation and create Coordinator from configuration
+  // Step 3: finalize installation passing --nodes from Step 1 conversation history
   const step3 = JSON.parse(
     (
       await promisify(execFile)(
         process.execPath,
-        [join(clone, 'scripts/install.mjs'), '--apply'],
+        [
+          join(clone, 'scripts/install.mjs'),
+          '--nodes',
+          JSON.stringify(step1.nodes),
+          '--apply',
+        ],
         { cwd: workspace, env },
       )
     ).stdout,
@@ -641,9 +511,7 @@ it('runs the cloned standalone CLI over huabu-rfs and 3-step workflow from a dif
   expect(step3.transport).toBe('huabu-rfs');
   expect(step3.state).toBe('ready');
   expect(step3.coordinator?.threadId).toBeTruthy();
-  expect(ledger().objects.coordinator.threadId).toBe(
-    step3.coordinator.threadId,
-  );
+  expect(step3.nodes?.coordinator).toBe(step3.coordinator.nodeId);
   expect(agentThreadService.invoke).not.toHaveBeenCalled();
   expect(agenetes.create).not.toHaveBeenCalled();
 });

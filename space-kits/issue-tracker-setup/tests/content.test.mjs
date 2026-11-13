@@ -58,6 +58,7 @@ test('portable package links resolve and Prompt bodies fit native UTF-8 budgets'
   );
   assert(promptBytes < 28 * 1024, 'Leave room for rendered Prompt wrappers');
   assert.equal(kit.content['assets/execution-note-contract.md'], undefined);
+  assert.equal(kit.content['kit.json'], undefined);
   const skill = kit.content['SKILL.md'];
   const folderName = new URL('../', import.meta.url).pathname
     .split('/')
@@ -92,7 +93,7 @@ test('script works from a standalone clone outside the Huabu checkout', async ()
     const { loadKit: standalone } = await import(
       pathToFileURL(join(directory, 'kit/scripts/install.mjs')).href
     );
-    assert.equal((await standalone()).digest, (await loadKit()).digest);
+    assert.deepEqual((await standalone()).content, (await loadKit()).content);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
