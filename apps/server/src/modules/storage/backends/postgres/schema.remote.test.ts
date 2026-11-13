@@ -10,14 +10,38 @@ import {
   openPostgresTestDatabase,
   openPostgresTestStore,
 } from './test-support.js';
-/** Tables of the retired operation path still present in the schema. */
-async function operationRelations(db: {
+/**
+ * Everything the migrations define in the current schema: columns in order
+ * with type, nullability and default; constraints; indexes.
+ */
+async function describeSchema(db: {
   query(sql: string): Promise<{ rows: Array<Record<string, unknown>> }>;
-}): Promise<string[]> {
-  const result = await db.query(
-    "SELECT tablename FROM pg_tables WHERE schemaname = current_schema() AND tablename LIKE 'operation\\_%' ORDER BY tablename",
-  );
-  return result.rows.map((row) => String(row['tablename']));
+}) {
+  const rows = async (sql: string) => (await db.query(sql)).rows;
+  return {
+    columns: await rows(
+      `SELECT table_name, ordinal_position, column_name, data_type,
+              is_nullable, column_default, is_identity, identity_generation
+       FROM information_schema.columns
+       WHERE table_schema = current_schema()
+       ORDER BY table_name, ordinal_position`,
+    ),
+    constraints: await rows(
+      `SELECT c.conrelid::regclass::text AS table_name, c.conname, c.contype,
+              pg_get_constraintdef(c.oid) AS definition
+       FROM pg_constraint c
+       JOIN pg_namespace n ON n.oid = c.connamespace
+       WHERE n.nspname = current_schema()
+       ORDER BY table_name, c.conname`,
+    ),
+    indexes: await rows(
+      `SELECT tablename, indexname,
+              replace(indexdef, current_schema() || '.', '') AS indexdef
+       FROM pg_indexes
+       WHERE schemaname = current_schema()
+       ORDER BY tablename, indexname`,
+    ),
+  };
 }
 
 const cleanup: Array<() => Promise<unknown>> = [];
@@ -66,52 +90,61 @@ it('runs on PostgreSQL 18 and serializes simultaneous fresh migrations', async (
     ]),
   );
 });
-it('ends a fresh database without the retired operation tables', async () => {
-  const h = await openPostgresTestStore();
-  cleanup.push(h.cleanup);
-  expect(await operationRelations(h.context.connection())).toEqual([]);
-});
-it('drops the retired operation tables from a v5 database and keeps its data', async () => {
+it('reaches the same v3 schema from a fresh database and from a v2 database', async () => {
+  const fresh = await openPostgresTestStore(false);
+  cleanup.push(fresh.cleanup);
   const h = await openPostgresTestDatabase();
   cleanup.push(h.cleanup);
   const pool = new Pool(h.config);
   cleanup.push(() => pool.end());
-  for (const migration of POSTGRES_MIGRATIONS.slice(0, 5))
+  for (const migration of POSTGRES_MIGRATIONS.slice(0, 2))
     await pool.query(migration.sql);
   await pool.query(
     'CREATE TABLE huabu_schema_version (id INTEGER PRIMARY KEY CHECK (id = 1), version INTEGER NOT NULL)',
   );
-  await pool.query('INSERT INTO huabu_schema_version VALUES (1, 5)');
+  await pool.query('INSERT INTO huabu_schema_version VALUES (1, 2)');
   await pool.query(
     "INSERT INTO workspaces VALUES ('original', 'Original', 1, 1, NULL)",
   );
   await pool.query(
-    "INSERT INTO operation_sessions VALUES ('original', 's', 'e', 'sess', 'p', '{}')",
+    "INSERT INTO spaces (workspace_id, canvas_id, title, collision_key, version, created_at, updated_at, state_json) VALUES ('original', 's', 'S', 's', 3, 1, 1, '{}')",
   );
-  await pool.query(
-    "INSERT INTO operation_receipts VALUES ('original', 's', 'e', 'sess', 'op', 'd', '{}')",
-  );
-  expect(await operationRelations(pool)).toEqual([
-    'operation_commits',
-    'operation_heads',
-    'operation_receipts',
-    'operation_sessions',
-  ]);
+  await pool.query("INSERT INTO nodes VALUES ('s', 'n', '{}', 'r', 'n')");
   const context = new PostgresStoreContext(h.config);
   cleanup.push(() => context.close());
   await context.init();
   const db = context.connection();
-  expect(await operationRelations(db)).toEqual([]);
+  expect(POSTGRES_MIGRATIONS.length).toBe(3);
   expect((await db.query('SELECT * FROM huabu_schema_version')).rows).toEqual([
-    { id: 1, version: POSTGRES_MIGRATIONS.length },
+    { id: 1, version: 3 },
   ]);
   expect(
-    (await db.query('SELECT workspace_id, name FROM workspaces')).rows,
-  ).toEqual([{ workspace_id: 'original', name: 'Original' }]);
+    (await db.query('SELECT canvas_id, version, node_change_seq FROM spaces'))
+      .rows,
+  ).toEqual([{ canvas_id: 's', version: 3, node_change_seq: '0' }]);
   expect(
-    (await db.query("SELECT to_regclass('space_save_heads') AS heads")).rows[0]
-      .heads,
-  ).not.toBeNull();
+    (await db.query('SELECT node_id, change_seq FROM nodes')).rows,
+  ).toEqual([{ node_id: 'n', change_seq: '0' }]);
+  const upgraded = await describeSchema(db);
+  expect(upgraded).toEqual(await describeSchema(fresh.context.connection()));
+  expect(upgraded.indexes.map((row) => row['indexname'])).toEqual(
+    expect.arrayContaining(['nodes_by_change', 'space_save_results_by_age']),
+  );
+  expect(
+    [...new Set(upgraded.columns.map((row) => row['table_name']))].sort(),
+  ).toEqual([
+    'changes',
+    'delta_log',
+    'events',
+    'huabu_schema_version',
+    'nodes',
+    'space_extensions',
+    'space_save_heads',
+    'space_save_results',
+    'spaces',
+    'tasks',
+    'workspaces',
+  ]);
 });
 it('opens the original v1 schema without changing existing data', async () => {
   const h = await openPostgresTestDatabase();

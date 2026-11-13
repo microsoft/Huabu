@@ -5,7 +5,7 @@
  * SQL text and row codecs for result records and version stamps.
  *
  * Shared by the SQLite and PostgreSQL adapters: both keep the same two tables
- * (migration v5) and differ only in how a statement is executed. Parameters
+ * (migration v3) and differ only in how a statement is executed. Parameters
  * are positional `?`; no statement here contains a literal `?`.
  *
  * Neither table carries a Workspace column. Like `nodes` and `delta_log` they

@@ -31,6 +31,7 @@ import type {
 import type { NodeSnapshot } from '../../ports/structured.js';
 import type { TaskRecord } from '@huabu/shared';
 import type { CanvasNode } from '@huabu/shared/canvas-engine';
+import type { DatabaseSync } from 'node:sqlite';
 
 const cleanups: Array<() => Promise<void> | void> = [];
 
@@ -232,11 +233,6 @@ describe('SqliteStructuredStore lifecycle and schema', () => {
       );
       expect(productionTables.every((row) => row['strict'] === 1)).toBe(true);
       expect(
-        tableRows
-          .map((row) => String(row['name']))
-          .filter((name) => name.startsWith('operation_')),
-      ).toEqual([]);
-      expect(
         database
           .prepare('PRAGMA foreign_key_list(nodes)')
           .all()
@@ -369,58 +365,71 @@ describe('SqliteStructuredStore lifecycle and schema', () => {
     ]);
   });
 
-  it('drops the retired operation tables from a v5 database and keeps its data', async () => {
-    const file = trackedFile('huabu-sqlite-v5-schema-');
-    const operationTables = () =>
-      withTestDatabase(file.filename, (database) =>
+  it('reaches the pinned v3 schema from a fresh database and from a v2 database', () => {
+    // `fixtures/v3-schema.json` is every table and index of the released
+    // schema, as SQLite records it. A fresh database and one upgraded from
+    // v2 must both arrive at exactly that.
+    const pinned: unknown = JSON.parse(
+      readFileSync(
+        new URL('./fixtures/v3-schema.json', import.meta.url),
+        'utf8',
+      ),
+    );
+    const schemaOf = (database: DatabaseSync) => ({
+      version: database.prepare('PRAGMA user_version').get()?.['user_version'],
+      objects: database
+        .prepare(
+          `SELECT type, name, tbl_name, sql FROM sqlite_schema
+           WHERE name NOT LIKE 'sqlite_%'
+           ORDER BY type, name`,
+        )
+        .all()
+        .map((row) => ({ ...row })),
+      // Column order and defaults, which the recorded SQL of an altered
+      // table states only implicitly.
+      columns: ['spaces', 'nodes'].map((table) =>
         database
-          .prepare(
-            `SELECT name FROM sqlite_schema
-             WHERE type IN ('table', 'index') AND name LIKE '%operation_%'
-             ORDER BY name`,
-          )
+          .prepare(`PRAGMA table_xinfo(${table})`)
           .all()
-          .map((row) => String(row['name'])),
-      );
-    withTestDatabase(file.filename, (database) => {
-      applySqliteMigrations(database, SQLITE_MIGRATIONS.slice(0, 5));
+          .map((row) => ({ ...row })),
+      ),
+    });
+
+    const fresh = trackedFile('huabu-sqlite-v3-fresh-');
+    const upgraded = trackedFile('huabu-sqlite-v3-from-v2-');
+    const freshSchema = withTestDatabase(fresh.filename, (database) => {
+      applySqliteMigrations(database);
+      return schemaOf(database);
+    });
+    const upgradedSchema = withTestDatabase(upgraded.filename, (database) => {
+      applySqliteMigrations(database, SQLITE_MIGRATIONS.slice(0, 2));
       database.exec(`
         INSERT INTO workspaces VALUES ('w', 'W', 1, 1, NULL);
         INSERT INTO spaces (workspace_id, canvas_id, title, collision_key, version, created_at, updated_at, state_json)
           VALUES ('w', 's', 'S', 's', 3, 1, 1, '{}');
-        INSERT INTO operation_heads (workspace_id, canvas_id, metadata_json)
-          VALUES ('w', 's', '{}');
-        INSERT INTO operation_sessions VALUES ('w', 's', 'e', 'sess', 'p', '{}');
-        INSERT INTO operation_receipts VALUES ('w', 's', 'e', 'sess', 'op', 'd', '{}');
-        INSERT INTO operation_commits VALUES ('w', 's', 'e', 1, '{}');
-        INSERT INTO space_save_heads VALUES ('s', 'l', 3, '{}');
+        INSERT INTO nodes VALUES ('s', 'n', '{}', 'r', 'n');
       `);
-    });
-    expect(operationTables()).toEqual(
-      expect.arrayContaining([
-        'operation_commits',
-        'operation_heads',
-        'operation_receipts',
-        'operation_sessions',
-      ]),
-    );
-
-    const store = trackedStore(file.filename);
-    await store.init();
-
-    expect(operationTables()).toEqual([]);
-    withTestDatabase(file.filename, (database) => {
-      expect(database.prepare('PRAGMA user_version').get()).toEqual({
-        user_version: SQLITE_SCHEMA_VERSION,
-      });
+      applySqliteMigrations(database);
       expect(database.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
       expect(
-        database.prepare('SELECT canvas_id, version FROM spaces').all(),
-      ).toEqual([{ canvas_id: 's', version: 3 }]);
+        database
+          .prepare('SELECT canvas_id, version, node_change_seq FROM spaces')
+          .all()
+          .map((row) => ({ ...row })),
+      ).toEqual([{ canvas_id: 's', version: 3, node_change_seq: 0 }]);
       expect(
-        database.prepare('SELECT canvas_id, floor FROM space_save_heads').all(),
-      ).toEqual([{ canvas_id: 's', floor: 3 }]);
+        database
+          .prepare('SELECT node_id, change_seq FROM nodes')
+          .all()
+          .map((row) => ({ ...row })),
+      ).toEqual([{ node_id: 'n', change_seq: 0 }]);
+      return schemaOf(database);
     });
+
+    expect(freshSchema.version).toBe(3);
+    expect(SQLITE_SCHEMA_VERSION).toBe(3);
+    expect(freshSchema.objects).toEqual(pinned);
+    expect(upgradedSchema).toEqual(freshSchema);
   });
 
   it('rejects a database whose user_version is from the future', async () => {
