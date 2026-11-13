@@ -26,6 +26,7 @@ import { isNodeProperties } from '@huabu/shared/canvas-engine';
 import { Button } from '@/components/Common/Button';
 import { PDFNotesButton } from '@/components/Nodes/pdf/PDFNotesButton';
 import { NodeProperties } from '@/components/Nodes/properties/NodeProperties';
+import { propertyTagOptions } from '@/components/Nodes/properties/propertyTagOptions';
 import { getNodeIcon } from '@/config/nodeIcons.ts';
 import { formatShortcutById, matchesShortcut } from '@/config/shortcuts.ts';
 import {
@@ -606,6 +607,9 @@ export const ExpandedNodePanel = ({
           properties={properties}
           displayKeys={propertyDisplayKeys}
           readOnly={!canWrite}
+          tagOptions={(name) =>
+            propertyTagOptions(useCanvasStore.getState().nodes, name)
+          }
           onSave={async (patch) => {
             if (await commitNodeProperties(expandedNodeId, patch)) onCommit?.();
           }}
