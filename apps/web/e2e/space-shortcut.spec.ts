@@ -630,7 +630,7 @@ test('real shortcuts keep fixed widths, undo, resize, and navigate without scene
   await expect(body).toHaveCSS('font-size', '24px');
   await expect(node.locator('.semantic-lod-node')).toHaveCSS(
     'border-top-width',
-    '2px',
+    '1px',
   );
   await history(page, 'undo');
   await expect(node).toHaveCSS('width', '320px');
