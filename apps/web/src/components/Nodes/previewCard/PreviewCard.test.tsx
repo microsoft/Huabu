@@ -68,27 +68,138 @@ function cardElement(): HTMLElement {
 }
 
 describe('PreviewCard', () => {
-  it('shows supplied property values without labels and hides them at far zoom', () => {
-    const properties = [
-      { name: 'Conference', value: 'UIST 2026' },
-      { name: 'Status', value: 'Reading' },
-    ];
-    render({ properties });
-    const metadata = container.querySelector('.preview-card__properties');
-    expect(metadata?.textContent).toBe('UIST 2026\u00b7Reading');
-    expect(metadata?.querySelectorAll('[aria-hidden="true"]')).toHaveLength(1);
-    expect(metadata?.querySelector('span')?.title).toBe(
-      'Conference: UIST 2026',
+  const tags = [
+    { name: 'Venue', value: 'UIST 2026' },
+    { name: 'Keywords', value: 'canvas' },
+    { name: 'Keywords', value: 'ink' },
+  ];
+  const texts = [
+    { name: 'Question', value: 'How do people steer agents?' },
+    { name: 'Method', value: 'A long-term field study.' },
+  ];
+  const shown = (selector: string) =>
+    Array.from(container.querySelectorAll<HTMLElement>(selector));
+
+  it('shows tags as chips and text properties as their own lines, without names', () => {
+    render({ tags, texts, summary: 'An excerpt.' });
+    expect(shown('.preview-card__tag').map((tag) => tag.textContent)).toEqual([
+      'UIST 2026',
+      'canvas',
+      'ink',
+    ]);
+    expect(shown('.preview-card__tag')[0].title).toBe('Venue: UIST 2026');
+    // Unmeasured, the guaranteed two lines go one to each property.
+    expect(
+      shown('.preview-card__text').map((text) => text.textContent),
+    ).toEqual(['How do people steer agents?', 'A long-term field study.']);
+    expect(shown('.preview-card__text')[0].title).toBe(
+      'Question: How do people steer agents?',
     );
-    render({ properties: properties.slice(0, 1) });
+    // Title, tags, text, excerpt — top to bottom.
+    const info = container.querySelector('.preview-card__info');
     expect(
-      container.querySelector('.preview-card__properties')?.textContent,
-    ).toBe('UIST 2026');
+      Array.from(
+        info?.children ?? [],
+        (child) => child.className.split(' ')[0],
+      ),
+    ).toEqual([
+      'preview-card__heading',
+      'preview-card__tags',
+      'preview-card__text',
+      'preview-card__text',
+      'preview-card__summary',
+    ]);
+  });
+
+  it('keeps measuring copies out of the accessibility tree and out of non-PDF cards', () => {
+    render({ tags, texts });
+    const measurer = container.querySelector('.preview-card__measure');
+    expect(measurer?.getAttribute('aria-hidden')).toBe('true');
+    expect(cardElement().dataset.budget).toBe('true');
+    render({});
+    expect(container.querySelector('.preview-card__measure')).toBeNull();
+    render({ nodeType: 'web', tags, texts });
+    expect(container.querySelector('.preview-card__measure')).toBeNull();
+    expect(container.querySelector('.preview-card__tag')).toBeNull();
+    expect(cardElement().dataset.budget).toBeUndefined();
+  });
+
+  it('hides tags and text properties at far zoom', () => {
+    render({ tags, texts, farZoom: 0.19 });
+    expect(container.querySelector('.preview-card__tag')).toBeNull();
+    expect(container.querySelector('.preview-card__text')).toBeNull();
+    expect(container.querySelector('.preview-card__measure')).toBeNull();
+  });
+
+  it('divides the measured text area by priority and collapses extra tags into +N', () => {
+    // 20px title lines and 16px text lines; every block needs more than fits.
+    const heights: Record<string, number> = { text: 64, summary: 1600 };
+    // (Both text properties and the excerpt need more lines than fit.)
+    vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockImplementation(
+      function (this: HTMLElement) {
+        return heights[this.dataset.measure ?? ''] ?? 0;
+      },
+    );
+    vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockImplementation(
+      function (this: HTMLElement) {
+        return this.classList.contains('preview-card__title') ? 200 : 0;
+      },
+    );
+    vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(
+      function (this: HTMLElement) {
+        return this.dataset.measure === 'tag'
+          ? 90
+          : this.dataset.measure === 'more'
+            ? 30
+            : 0;
+      },
+    );
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(
+      function (this: HTMLElement) {
+        return this.classList.contains('preview-card__info') ? 200 : 0;
+      },
+    );
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(
+      function (this: HTMLElement) {
+        return this.classList.contains('preview-card__info') ? 400 : 0;
+      },
+    );
+    render({ tags, texts, summary: 'An excerpt.' });
+    const metrics = previewCardMetricsForSize(400, 400);
+    const title = shown('.preview-card__title')[0];
+    expect(title.style.getPropertyValue('--card-title-lines')).toBe('2');
+    // Two 90px tags do not fit beside the marker in 200px; one does.
+    expect(shown('.preview-card__tag').map((tag) => tag.textContent)).toEqual([
+      'UIST 2026',
+      '+2',
+    ]);
+    expect(shown('.preview-card__tag')[1].title).toBe('canvas, ink');
+    const textLines = shown('.preview-card__text').map((text) =>
+      text.style.getPropertyValue('--card-text-lines'),
+    );
+    expect(textLines).toEqual(['1', '1']);
+    // Tags trail half a line's leading; text blocks sit that much closer.
+    const halfLeading = (metrics.descriptionLine - metrics.description) / 2;
+    const used =
+      2 * metrics.titleLine +
+      (metrics.gap + metrics.descriptionLine + halfLeading) +
+      // The second text property joins the first without a gap.
+      (metrics.gap - halfLeading + 2 * metrics.descriptionLine) +
+      // The excerpt's rule is spaced by its box, like a tag.
+      metrics.gap;
+    expect(cardElement().style.getPropertyValue('--card-tag-trail')).toBe(
+      `${halfLeading}px`,
+    );
+    expect(cardElement().style.getPropertyValue('--card-text-gap')).toBe(
+      `${metrics.gap - halfLeading}px`,
+    );
+    expect(cardElement().style.getPropertyValue('--card-summary-lines')).toBe(
+      String(Math.floor((400 - used) / metrics.descriptionLine)),
+    );
     expect(
-      container.querySelector('.preview-card__properties [aria-hidden="true"]'),
-    ).toBeNull();
-    render({ properties, farZoom: 0.19 });
-    expect(container.querySelector('.preview-card__properties')).toBeNull();
+      container.querySelector<HTMLElement>('.preview-card__measure')?.style
+        .width,
+    ).toBe('200px');
   });
 
   it.each(['web', 'pdf'])(
@@ -159,7 +270,8 @@ describe('PreviewCard', () => {
   });
 
   it('retains a single summary line and original typography outside far zoom', () => {
-    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(60);
+    // Room for the heading line, the gap and one line of excerpt.
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(80);
     vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(16);
     render({ summary: 'Supporting details.' });
     const card = cardElement();
@@ -364,12 +476,18 @@ describe('PreviewCard', () => {
         Number(heading.style.getPropertyValue('--card-title-lines')),
       ).toBeGreaterThan(2);
       render(props);
-      expect(heading.style.getPropertyValue('--card-title-lines')).toBe('');
+      // Reading zoom: Web returns to the stylesheet clamp; a PDF heading is
+      // budgeted, and this short title needs a single line.
+      expect(heading.style.getPropertyValue('--card-title-lines')).toBe(
+        nodeType === 'pdf' ? '1' : '',
+      );
       expect(heading.style.maxHeight).toBe('');
     },
   );
 
-  it.each(['web', 'pdf'])(
+  // PDF cards size their heading from the line budget instead; see the
+  // budget tests above and previewCardBudget.test.ts.
+  it.each(['web'])(
     'allocates horizontal %s title lines before descriptions, even without a summary',
     (nodeType) => {
       let height = 200;
@@ -409,12 +527,11 @@ describe('PreviewCard', () => {
     },
   );
   it.each([
+    // PDF cards guarantee the title two lines and give the excerpt the rest,
+    // so a longer title no longer hides it.
     ['web', 400, 400, '/cover.jpg'],
-    ['pdf', 400, 400, '/cover.jpg'],
     ['web', 400, 214, '/cover.jpg'],
-    ['pdf', 400, 214, '/cover.jpg'],
     ['web', 400, 400, undefined],
-    ['pdf', 400, 400, undefined],
   ] as const)(
     'hides descriptions behind a truncated %s title at %s x %s (%s)',
     (nodeType, width, height, image) => {

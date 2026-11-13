@@ -14,6 +14,16 @@ import { getNodeIcon } from '@/config/nodeIcons';
 import { resolveFarLabelLayout } from '@/config/semanticZoom';
 import { handleCanvasNavigationKey } from '@/hooks/shortcuts/handleCanvasNavigationKey';
 
+import {
+  allocateCardLines,
+  cardTextHeight,
+  CARD_COVER_SHARE,
+  CARD_TAG_ROWS,
+  CARD_TEXT_LINES,
+  CARD_TITLE_LINES,
+  visibleTagCount,
+  tagRowsNeeded,
+} from './previewCardBudget';
 import { previewCardMetricsForSize } from './previewCardDesign';
 import { FAR_ZOOM_DESIGN } from '../design/farZoomDesign';
 import { nodeAccentToken } from '../design/nodeAccentPolicy';
@@ -55,6 +65,35 @@ export function usePreviewCardSize(
   return { width: liveWidth, height: liveHeight };
 }
 
+export interface CardProperty {
+  name: string;
+  value: string;
+}
+
+/** Measured line counts for the budgeted PDF text area. */
+interface CardLines {
+  titleLines: number;
+  tagRows: number;
+  visibleTags: number;
+  textLines: number[];
+  summaryLines: number;
+  /** Height the shown blocks occupy, in px. */
+  textHeight: number;
+}
+
+function sameLines(a: CardLines | null, b: CardLines): boolean {
+  return (
+    !!a &&
+    a.titleLines === b.titleLines &&
+    a.tagRows === b.tagRows &&
+    a.visibleTags === b.visibleTags &&
+    a.summaryLines === b.summaryLines &&
+    a.textHeight === b.textHeight &&
+    a.textLines.length === b.textLines.length &&
+    a.textLines.every((lines, index) => lines === b.textLines[index])
+  );
+}
+
 /** Shared, canvas-space cover and information layout for PDF and Web nodes. */
 export interface PreviewCardProps {
   width: number;
@@ -70,7 +109,10 @@ export interface PreviewCardProps {
   /** Tint information and its surrounding padding, never the media surface. */
   accent?: string | null;
   summary?: string;
-  properties?: Array<{ name: string; value: string }>;
+  /** Short categorical values, shown as one row of tags (PDF cards). */
+  tags?: CardProperty[];
+  /** Prose values, each on its own lines below the tags (PDF cards). */
+  texts?: CardProperty[];
   loading?: boolean;
   error?: string | null;
   onRetry?: () => void;
@@ -135,7 +177,8 @@ function PreviewCardContent({
   title,
   accent,
   summary,
-  properties,
+  tags,
+  texts,
   loading = false,
   error,
   onRetry,
@@ -153,6 +196,8 @@ function PreviewCardContent({
   const titleRef = useRef<HTMLHeadingElement>(null);
   const [titleFits, setTitleFits] = useState(true);
   const [summaryLines, setSummaryLines] = useState(6);
+  const measureRef = useRef<HTMLDivElement>(null);
+  const [measuredLines, setMeasuredLines] = useState<CardLines | null>(null);
   const baseMetrics = previewCardMetricsForSize(width, height);
   const far = farZoom !== undefined;
   const scale = farZoom ?? 1;
@@ -203,11 +248,190 @@ function PreviewCardContent({
   const fitSummaryToHeight = textOnly || metrics.horizontal;
   const maxSummaryLines = textOnly ? 6 : Infinity;
   const minSummaryLines = far ? FAR_ZOOM_DESIGN.descriptionMinLines : 1;
+  // PDF cards at reading zoom divide a fixed text area by priority; see
+  // previewCardBudget. Far zoom and other node types keep the flow layout.
+  const budgeted = nodeType === 'pdf' && !far;
+  const tagList = budgeted ? (tags ?? []) : [];
+  const textList = budgeted ? (texts ?? []) : [];
+  const tagChipGap = metrics.gap / 2;
+  // One optical rhythm between blocks. Text lines carry half a line's
+  // leading above and below their glyphs and tag chips carry none, so text
+  // blocks sit that much closer and the tag row trails that much extra:
+  // every visible gap then equals the card gap.
+  const halfLeading = (metrics.descriptionLine - metrics.description) / 2;
+  const textGap = Math.max(0, metrics.gap - halfLeading);
+  const tagTrail = halfLeading;
+  // Consecutive text properties read as one group: no extra space beyond
+  // their own leading.
+  const textInnerGap = 0;
+  const lines: CardLines =
+    measuredLines &&
+    measuredLines.textLines.length === textList.length &&
+    measuredLines.visibleTags <= tagList.length
+      ? measuredLines
+      : {
+          // Before the first measurement, show each block's guaranteed share.
+          titleLines: CARD_TITLE_LINES,
+          tagRows: tagList.length ? CARD_TAG_ROWS : 0,
+          visibleTags: tagList.length,
+          textLines: textList.map((_, index) =>
+            textList.length === 1
+              ? CARD_TEXT_LINES
+              : index < CARD_TEXT_LINES
+                ? 1
+                : 0,
+          ),
+          summaryLines: fitSummaryToHeight ? 6 : 2,
+          textHeight: Infinity,
+        };
+  // A vertical cover keeps at least its share; the text area is budgeted
+  // against the rest and hands back what it does not use.
+  const verticalBody = baseMetrics.innerHeight - baseMetrics.imageTextGap;
+  const minCoverHeight = Math.min(
+    Math.max(
+      baseMetrics.innerHeight * CARD_COVER_SHARE,
+      baseMetrics.verticalCoverMinHeight,
+    ),
+    Math.max(0, verticalBody - baseMetrics.titleLine),
+  );
+  const coverHeight = Math.max(minCoverHeight, verticalBody - lines.textHeight);
+  const verticalBudget = budgeted && !textOnly && !horizontal;
+
+  useLayoutEffect(() => {
+    const info = infoRef.current;
+    const measurer = measureRef.current;
+    if (!budgeted || !info) return;
+    let active = true;
+    const run = () => {
+      if (!active || !info.clientHeight) return;
+      const infoStyle = getComputedStyle(info);
+      // Vertical cards budget against the cover's minimum, not the live text
+      // area, whose height depends on the result.
+      let available = verticalBudget
+        ? verticalBody - minCoverHeight
+        : info.clientHeight -
+          (parseFloat(infoStyle.paddingTop) || 0) -
+          (parseFloat(infoStyle.paddingBottom) || 0);
+      let errorHeight = 0;
+      const errorRow = info.querySelector<HTMLElement>('.preview-card__error');
+      if (errorRow) {
+        const errorStyle = getComputedStyle(errorRow);
+        errorHeight =
+          errorRow.offsetHeight + (parseFloat(errorStyle.marginTop) || 0);
+        available -= errorHeight;
+      }
+      // Layout width with its fraction: `clientWidth` rounds, and half a
+      // pixel decides whether a line wraps. (Bounding rects would include
+      // the canvas zoom transform.)
+      const inlinePadding =
+        (parseFloat(infoStyle.paddingLeft) || 0) +
+        (parseFloat(infoStyle.paddingRight) || 0);
+      const styledWidth = parseFloat(infoStyle.width);
+      const rowWidth = Math.max(
+        0,
+        styledWidth > 0
+          ? styledWidth -
+              (infoStyle.boxSizing === 'border-box' ? inlinePadding : 0)
+          : info.clientWidth - inlinePadding,
+      );
+      // The copies wrap exactly as the text area does.
+      if (measurer) measurer.style.width = `${rowWidth}px`;
+      const needed = (selector: string) =>
+        Array.from(measurer?.querySelectorAll<HTMLElement>(selector) ?? []).map(
+          (element) =>
+            Math.max(
+              1,
+              Math.round(element.offsetHeight / metrics.descriptionLine),
+            ),
+        );
+      const widths = Array.from(
+        measurer?.querySelectorAll<HTMLElement>('[data-measure="tag"]') ?? [],
+      ).map((element) => element.offsetWidth);
+      const moreWidth =
+        measurer?.querySelector<HTMLElement>('[data-measure="more"]')
+          ?.offsetWidth ?? 0;
+      // A clamped heading still reports its full height.
+      const heading = titleRef.current;
+      const titleNeed = heading
+        ? Math.max(1, Math.round(heading.scrollHeight / metrics.titleLine))
+        : 0;
+      const sizes = {
+        titleLine: metrics.titleLine,
+        textLine: metrics.descriptionLine,
+        tagRow: metrics.descriptionLine,
+        tagRowGap: tagChipGap,
+        // The row's trailing space is part of what showing tags costs.
+        tagGap: metrics.gap + tagTrail,
+        textGap,
+        textInnerGap,
+        // The excerpt's rule spans its whole line box, so like a tag chip it
+        // is spaced by its box rather than its glyphs.
+        summaryGap: metrics.gap,
+      };
+      const budget = allocateCardLines({
+        ...sizes,
+        available,
+        titleNeed,
+        tagRowsNeed: tagRowsNeeded(widths, rowWidth, tagChipGap),
+        textNeeds: needed('[data-measure="text"]'),
+        summaryNeed: needed('[data-measure="summary"]')[0] ?? 0,
+      });
+      const next = {
+        ...budget,
+        textHeight: cardTextHeight(sizes, budget) + errorHeight,
+        visibleTags: visibleTagCount(
+          widths,
+          rowWidth,
+          tagChipGap,
+          budget.tagRows,
+          moreWidth,
+        ),
+      };
+      setMeasuredLines((previous) =>
+        sameLines(previous, next) ? previous : next,
+      );
+    };
+    run();
+    const observer = new ResizeObserver(run);
+    observer.observe(info);
+    if (titleRef.current) observer.observe(titleRef.current);
+    for (const child of Array.from(
+      measurer?.querySelectorAll('[data-measure]') ?? [],
+    ))
+      observer.observe(child);
+    document.fonts?.addEventListener('loadingdone', run);
+    void document.fonts?.ready.then(run);
+    return () => {
+      active = false;
+      observer.disconnect();
+      document.fonts?.removeEventListener('loadingdone', run);
+    };
+  }, [
+    budgeted,
+    tags,
+    texts,
+    summary,
+    title,
+    source,
+    failed,
+    textOnly,
+    width,
+    height,
+    verticalBudget,
+    verticalBody,
+    minCoverHeight,
+    metrics.titleLine,
+    metrics.descriptionLine,
+    metrics.gap,
+    tagChipGap,
+    textGap,
+    tagTrail,
+  ]);
 
   useLayoutEffect(() => {
     const info = infoRef.current;
     const card = info?.parentElement;
-    if (!info || !card) return;
+    if (budgeted || !info || !card) return;
     const coverBudget =
       far && !fitSummaryToHeight
         ? baseMetrics.verticalCoverMinHeight * scale
@@ -309,10 +533,10 @@ function PreviewCardContent({
       document.fonts?.removeEventListener('loadingdone', measure);
     };
   }, [
+    budgeted,
     fitSummaryToHeight,
     maxSummaryLines,
     summary,
-    properties,
     title,
     source,
     nodeType,
@@ -364,9 +588,16 @@ function PreviewCardContent({
     '--card-image-radius': `${metrics.radius * 0.65 * scale}px`,
     '--card-divider-width': `${scale}px`,
     '--card-image-width': `${metrics.imageWidth}px`,
-    '--card-summary-lines': fitSummaryToHeight
-      ? summaryLines
-      : Math.min(2, summaryLines),
+    '--card-cover-height': `${coverHeight}px`,
+    '--card-tag-gap': `${tagChipGap}px`,
+    '--card-text-gap': `${textGap}px`,
+    '--card-tag-trail': `${tagTrail}px`,
+    '--card-text-inner-gap': `${textInnerGap}px`,
+    '--card-summary-lines': budgeted
+      ? lines.summaryLines
+      : fitSummaryToHeight
+        ? summaryLines
+        : Math.min(2, summaryLines),
   } as CSSProperties;
   const pdfLabel =
     nodeType === 'pdf' ? (
@@ -385,6 +616,7 @@ function PreviewCardContent({
     <div
       className="preview-card bg-surface text-fg-default"
       data-far={far || undefined}
+      data-budget={budgeted || undefined}
       data-node-type={nodeType}
       data-tier={metrics.tier}
       data-orientation={
@@ -425,7 +657,17 @@ function PreviewCardContent({
           <div className="preview-card__heading">
             {textOnly ? pdfLabel : null}
             {title ? (
-              <h3 ref={titleRef} className="preview-card__title">
+              <h3
+                ref={titleRef}
+                className="preview-card__title"
+                style={
+                  budgeted
+                    ? ({
+                        '--card-title-lines': lines.titleLines,
+                      } as CSSProperties)
+                    : undefined
+                }
+              >
                 {title}
               </h3>
             ) : null}
@@ -450,28 +692,60 @@ function PreviewCardContent({
             ) : null}
           </>
         )}
-        {!far && properties?.length ? (
-          <div className="preview-card__properties text-fg-default font-medium">
-            {properties.map(({ name, value }, index) => (
-              <span key={name} title={`${name}: ${value}`}>
-                {index > 0 && (
-                  <span
-                    aria-hidden="true"
-                    className="text-fg-subtle mx-[calc(var(--card-gap)/2)]"
-                  >
-                    &middot;
-                  </span>
-                )}
+        {lines.tagRows > 0 && tagList.length > 0 ? (
+          <div
+            className="preview-card__tags"
+            style={{
+              maxHeight:
+                lines.tagRows * metrics.descriptionLine +
+                (lines.tagRows - 1) * tagChipGap,
+            }}
+          >
+            {tagList.slice(0, lines.visibleTags).map(({ name, value }) => (
+              <span
+                key={`${name}\0${value}`}
+                className="preview-card__tag"
+                title={name === value ? name : `${name}: ${value}`}
+              >
                 {value}
               </span>
             ))}
+            {lines.visibleTags < tagList.length ? (
+              <span
+                className="preview-card__tag text-fg-muted"
+                title={tagList
+                  .slice(lines.visibleTags)
+                  .map(({ value }) => value)
+                  .join(', ')}
+              >
+                +{tagList.length - lines.visibleTags}
+              </span>
+            ) : null}
           </div>
         ) : null}
+        {textList.map(({ name, value }, index) =>
+          lines.textLines[index] > 0 ? (
+            <p
+              key={name}
+              className="preview-card__text"
+              title={`${name}: ${value}`}
+              style={
+                { '--card-text-lines': lines.textLines[index] } as CSSProperties
+              }
+            >
+              {value}
+            </p>
+          ) : null,
+        )}
         {summary?.trim() ? (
           <div
             className="preview-card__summary text-fg-muted"
             style={
-              !titleFits || summaryLines < minSummaryLines
+              (
+                budgeted
+                  ? lines.summaryLines === 0
+                  : !titleFits || summaryLines < minSummaryLines
+              )
                 ? { display: 'none' }
                 : undefined
             }
@@ -507,6 +781,36 @@ function PreviewCardContent({
           </div>
         ) : null}
       </div>
+      {budgeted && (tagList.length || textList.length || summary?.trim()) ? (
+        // Unclamped copies at the text area's width: what each block needs in
+        // full, independent of what the budget currently shows.
+        <div ref={measureRef} className="preview-card__measure" aria-hidden>
+          <div className="preview-card__measure-tags">
+            {tagList.map(({ name, value }) => (
+              <span
+                key={`${name}\0${value}`}
+                className="preview-card__measure-tag"
+                data-measure="tag"
+              >
+                {value}
+              </span>
+            ))}
+            <span className="preview-card__measure-tag" data-measure="more">
+              +{tagList.length}
+            </span>
+          </div>
+          {textList.map(({ name, value }) => (
+            <p key={name} data-measure="text">
+              {value}
+            </p>
+          ))}
+          {summary?.trim() ? (
+            <div data-measure="summary">
+              <SummaryContent summary={summary} />
+            </div>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }

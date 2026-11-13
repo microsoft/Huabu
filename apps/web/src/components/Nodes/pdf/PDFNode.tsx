@@ -32,6 +32,7 @@ import {
 import { noteFarDescription } from '../semanticZoom/noteFarDescription';
 import { useDeferredHydration } from '../shared/nodeHydrationScheduler';
 
+import type { CardProperty } from '../previewCard/PreviewCard';
 import type { CanvasPdfNodeData } from '../types';
 import type { Node, NodeProps } from '@xyflow/react';
 import type { ReactNode } from 'react';
@@ -123,23 +124,30 @@ export const PDFNode = memo(
           : undefined,
       [notesContent],
     );
-    const cardProperties = orderedPropertyKeys(
-      data.properties,
-      data.propertyDisplayKeys,
-    ).flatMap((key) => {
-      const value = data.properties?.[key];
-      const text = Array.isArray(value)
-        ? value.filter((item) => item.trim()).join(', ')
-        : String(value ?? '');
-      return !text.trim()
-        ? []
-        : [
-            {
-              name: key,
-              value: text,
-            },
-          ];
-    });
+    // Type decides placement: lists, numbers and true flags read as tags;
+    // text is prose on its own lines, however short. Memoized so an unrelated
+    // re-render hands the card the same arrays and it does not re-measure.
+    const { cardTags, cardTexts } = useMemo(() => {
+      const cardTags: CardProperty[] = [];
+      const cardTexts: CardProperty[] = [];
+      for (const name of orderedPropertyKeys(
+        data.properties,
+        data.propertyDisplayKeys,
+      )) {
+        const value = data.properties?.[name];
+        if (Array.isArray(value)) {
+          for (const item of new Set(value.map((entry) => entry.trim())))
+            if (item) cardTags.push({ name, value: item });
+        } else if (typeof value === 'number') {
+          cardTags.push({ name, value: String(value) });
+        } else if (value === true) {
+          cardTags.push({ name, value: name });
+        } else if (typeof value === 'string' && value.trim()) {
+          cardTexts.push({ name, value: value.trim() });
+        }
+      }
+      return { cardTags, cardTexts };
+    }, [data.properties, data.propertyDisplayKeys]);
     const missingFileKind = getMissingFileKind(data);
     const title = data.label || t('node.untitledPdf');
 
@@ -246,7 +254,8 @@ export const PDFNode = memo(
         source="PDF"
         title={title}
         summary={summary}
-        properties={cardProperties}
+        tags={cardTags}
+        texts={cardTexts}
         loading={mode !== 'minimal' && !coverImage && !thumbnailError}
         error={hasCover ? null : thumbnailError}
         onRetry={handleRetry}
