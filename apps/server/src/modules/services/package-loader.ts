@@ -19,6 +19,7 @@ const PACKAGE_IDS = [
   'web-search',
   'youtube-transcripts',
   'ink-ocr',
+  'hackmd',
 ] as const;
 
 export interface BundledServicePackage {

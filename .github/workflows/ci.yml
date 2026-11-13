@@ -56,14 +56,17 @@ jobs:
       - name: Unit tests
         run: pnpm -r --if-present --no-bail run test
 
+      - name: Web deployment scripts
+        run: pnpm run test:deployment
+
       - name: Storage backend contracts (PostgreSQL and Azurite)
         run: pnpm run test:storage-backends
 
       - name: i18n parity
         run: pnpm run check:i18n
 
-      - name: Agent Team skills
-        run: pnpm run test:agent-team-skills && pnpm run check:agent-team-skills
+      - name: Space Kits
+        run: pnpm run test:space-kits
 
       - name: License headers
         run: node scripts/check-headers.mjs

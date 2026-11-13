@@ -314,8 +314,8 @@ The proposal is complete when all of the following are true:
 ## 16. Related documents
 
 - [`managed-agent-teams.md`](./managed-agent-teams.md) — unified Agenetes Profile registry, managed discovery, preparation, and runtime design.
-- [`../architecture/agent-teams-as-extensions.md`](../architecture/agent-teams-as-extensions.md) — current shipped Agent Team product and ownership boundaries.
+- [`../archive/agent-teams-as-extensions.md`](../archive/agent-teams-as-extensions.md) — historical Agent Team product and ownership boundaries.
 - [`../architecture/api-design.md`](../architecture/api-design.md) — shared-contract and endpoint requirements.
 - [`../architecture/web-architecture.md`](../architecture/web-architecture.md) — frontend ownership and component conventions.
-- [`../../agent-teams/README.md`](../../agent-teams/README.md) — bundled Template manifests and current usage.
+- [`Space Kits`](../architecture/space-kits.md) — replacement for retired Team packages; manifests described in this proposal are historical.
 - [`../../external/agentlet/spec/agent-team.md`](../../external/agentlet/spec/agent-team.md) — generic Agent Team package contract.

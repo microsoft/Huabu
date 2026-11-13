@@ -63,4 +63,12 @@ huabu-rfs agent prompt --text-file ./follow-up.txt "$THREAD_ID"
 
 Only Question Nodes with a non-empty existing association include `threadId`; non-Question Nodes and unbound Questions omit it. Inspection is read-only and never creates or realizes Agent state. The prompt endpoint never creates another Agent or changes its Profile. The response is SSE, and closing the connection stops delivery without aborting the durable turn.
 
+For asynchronous handoff, send the prompt yourself and return after durable acceptance rather than waiting for its answer:
+
+```bash
+huabu-rfs agent prompt --until-accepted --text-file ./follow-up.txt "$THREAD_ID"
+```
+
+This opt-in mode selects `all` events, validates an `accepted` receipt matching the requested Thread, prints its JSON `{ "threadId": "...", "turnStartSeq": 1 }` (and `requestId` when supplied by the server), and disconnects without cancelling execution. It allows up to 60 seconds for submission and acceptance, not for task completion. HTTP success, heartbeat comments, `created`, `meta`, or a Thread announcement are not acceptance. An error, mismatched receipt, timeout, or end of stream without a receipt exits nonzero; the remote outcome can be uncertain, so never blindly resend or replace the Agent. Older servers without this event cannot confirm an acceptance-only handoff. Default commands still stream the full response unchanged.
+
 An Agent can repeat the same create-and-prompt workflow to delegate recursively. Prefer direct work when another Agent adds no useful specialization, isolation, or parallelism.

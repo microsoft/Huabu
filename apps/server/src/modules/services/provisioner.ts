@@ -11,7 +11,7 @@ import {
 
 import { isAgentFacingService } from './package-loader.js';
 import { SECRET_IDS } from '../../security/secret-ids.js';
-import { getSecret } from '../../security/secret-store.js';
+import { getSecret, setSecret } from '../../security/secret-store.js';
 import {
   getImageConfig,
   getAzureImageConfig,
@@ -215,6 +215,13 @@ const inkOcrAdapter: ServiceStorageAdapter = {
 
 const adapters = new Map<string, ServiceStorageAdapter>([
   ['llm.imageConfig', imageAdapter],
+  [
+    'integration.hackmd',
+    secretAdapter({
+      read: () => getSecret(SECRET_IDS.hackmdApiKey) ?? undefined,
+      update: (apiKey) => setSecret(SECRET_IDS.hackmdApiKey, apiKey),
+    }),
+  ],
   [
     'integration.tavily',
     secretAdapter({

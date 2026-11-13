@@ -6,6 +6,8 @@
 
 ---
 
+Historical demo note: the original Issue Tracker Team/View example below is retained as design history, not the current Issue Tracker workflow. Its obsolete renderer/manifest were removed when Issue Tracker moved to the [Space Kit](../../space-kits/issue-tracker-setup/SKILL.md), which uses native Execution Notes and Agent Threads without Tasks, Runs or Views. See [Space Kits architecture](../architecture/space-kits.md) for the current package boundary.
+
 ## 1. Context
 
 Huabu already lets an external Agent upload an HTML artifact, create a Web Node, create durable Tasks and Runs through RFS, and create or continue visible Agent threads. These capabilities are sufficient for an Agent to produce content and orchestrate work, but not for the Agent to expose an interactive application-like surface inside the Canvas.
@@ -482,7 +484,7 @@ The Issue Tracker Agent receives the approved structured event in its existing c
 ### Phase 4 — Issue Tracker demo
 
 - Move the two path fields from Agent Team environment Configs into Anchor View State.
-- Package the renderer and schema inside `agent-teams/issue-tracker/`.
+- Package the renderer and schema inside the then-retained `agent-teams/issue-tracker/` (historical demo, now removed; see the note above).
 - Update the Agent prompt to select, discover, create, read, and update the Anchor View.
 - Demonstrate plan approval and continuation through the same external Agent thread.
 
@@ -521,12 +523,12 @@ The first implementation is not blocked on renderer standardization. After the H
 
 ## 21. Proposed code entry points
 
-| File/dir                                                       | Responsibility                                                                           |
-| -------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| `packages/shared/src/types/api/interactive-view.ts`            | Canonical schemas and inferred wire types.                                               |
-| `packages/shared/src/types/canvas/node.ts`                     | Interactive Web Node definition and persisted state shape.                               |
-| `apps/server/src/modules/interactive-view/`                    | Validation, grants, data bindings, action dispatch, RFS adapters, and runtime lifecycle. |
-| `apps/web/src/components/Nodes/web/InteractiveViewPreview.tsx` | Sandboxed renderer host and MessageChannel bridge.                                       |
-| `apps/web/src/api/interactive-view.ts`                         | Host web-client operations required outside the iframe bridge.                           |
-| `apps/server/src/modules/agent/agent-thread.service.ts`        | Canonical structured-submission entry point for Chat and Interactive View turns.         |
-| `agent-teams/issue-tracker/`                                   | Validation package containing the external Agent workflow and package-owned renderer.    |
+| File/dir                                                       | Responsibility                                                                                            |
+| -------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `packages/shared/src/types/api/interactive-view.ts`            | Canonical schemas and inferred wire types.                                                                |
+| `packages/shared/src/types/canvas/node.ts`                     | Interactive Web Node definition and persisted state shape.                                                |
+| `apps/server/src/modules/interactive-view/`                    | Validation, grants, data bindings, action dispatch, RFS adapters, and runtime lifecycle.                  |
+| `apps/web/src/components/Nodes/web/InteractiveViewPreview.tsx` | Sandboxed renderer host and MessageChannel bridge.                                                        |
+| `apps/web/src/api/interactive-view.ts`                         | Host web-client operations required outside the iframe bridge.                                            |
+| `apps/server/src/modules/agent/agent-thread.service.ts`        | Canonical structured-submission entry point for Chat and Interactive View turns.                          |
+| `space-kits/issue-tracker-setup/`                              | Current native-node Issue Tracker package; the historical View validation renderer is no longer retained. |

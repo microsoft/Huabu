@@ -4,7 +4,7 @@
 >
 > Status: **Superseded** · Last updated: 2026-09-18
 
-This historical proposal no longer describes the runtime. Team execution and preparation have been retired; see [generic Agent Profiles](../architecture/agent-profiles.md). The manifest folders remain data assets.
+This historical proposal no longer describes the runtime. Team execution, preparation, and the repository manifest collection have been retired; see [generic Agent Profiles](../architecture/agent-profiles.md), [Space Kits](../architecture/space-kits.md), and [Service Packages](../architecture/service-packages.md) for the current replacements.
 
 ---
 
@@ -281,7 +281,7 @@ Profile deletion does not revoke existing threads. Global restart policy, crash-
 
 ## 6. Related documents
 
-- [`../../agent-teams/README.md`](../../agent-teams/README.md) — current Huabu Agent Team usage and package authoring.
+- [`Space Kits`](../architecture/space-kits.md) — current replacement for the retired Agent Team package collection.
 - [`../architecture/agent-teams-as-extensions.md`](../architecture/agent-teams-as-extensions.md) — current product vision and shipped control-plane boundaries.
 - [`../../external/agentlet/spec/agent-team.md`](../../external/agentlet/spec/agent-team.md) — generic Agent Team package and setup contract.
 - [`../architecture/agent-architecture.md`](../architecture/agent-architecture.md) — current built-in and ACP agent runtime.

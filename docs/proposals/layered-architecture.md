@@ -544,10 +544,10 @@ Two dry runs confirm the [§3.6](#36-the-l1l2-binding-an-in-process-ari-handle-m
 
 **What lives here**
 
-| Kind                | Where                                       | Notes                                                      |
-| ------------------- | ------------------------------------------- | ---------------------------------------------------------- |
-| Bundled Agent Teams | [agent-teams/](../../agent-teams)           | `deepv-slides-maker`, `hackmd-publisher`, `paper-reviewer` |
-| External harnesses  | Claude Code · Copilot CLI · Gemini · custom | Connected through the L2 ACP bridge                        |
+| Kind               | Where                                       | Notes                                                                                                   |
+| ------------------ | ------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| Former Agent Teams | [Space Kits](../architecture/space-kits.md) | Historical packages are retired; current installation assets live in Space Kits and HackMD is a Service |
+| External harnesses | Claude Code · Copilot CLI · Gemini · custom | Connected through the L2 ACP bridge                                                                     |
 
 **Boundary owned by L3.** An L3 agent is a _manifest + prompt + tools it happens to have on its PATH_ (`agentlet.yaml` → `command` / `require`). Its only contract with the rest of the system is: receive a prompt via ACP, optionally read/write the canvas via RFS, stream results back. This is exactly the "agent IS the plugin system" thesis — the interface is natural language + tool use, not an SDK.
 
@@ -1012,22 +1012,22 @@ No big-bang. The refactor is a chain of **milestones**, each a standalone, revie
 
 ## 9. Code entry points
 
-| Layer | Anchor                                                                                                 | Role                                                                         |
-| ----- | ------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------- |
-| L1    | [apps/web/src/App.tsx](../../apps/web/src/App.tsx)                                                     | Canvas app shell / router.                                                   |
-| L1    | [packages/shared/src/canvas-engine](../../packages/shared/src/canvas-engine)                           | Shared command executor (headless-capable).                                  |
-| L1→L2 | [apps/web/src/hooks/useAgentStream.ts](../../apps/web/src/hooks/useAgentStream.ts)                     | Consumes `AgentStreamEvent`; the L1 side of the seam.                        |
-| L1↔L2 | [external/agenetes/packages/protocol](../../external/agenetes/packages/protocol)                       | Frozen L1↔L2 wire contracts (zod + `z.infer`) — M1.                          |
-| L1→L2 | [apps/server/src/app.ts](../../apps/server/src/app.ts) (`mountAgenetes`)                               | In-process composition root; holds the single Agenetes instance L1 talks to. |
-| L2    | [apps/server/src/modules/agent/agent.service.ts](../../apps/server/src/modules/agent/agent.service.ts) | Built-in agent loop (`runAgent`).                                            |
-| L2    | [apps/server/src/modules/agent/acp/service.ts](../../apps/server/src/modules/agent/acp/service.ts)     | External agent path (`runAcpAgent`).                                         |
-| L2    | [external/agenetes/packages/runtime](../../external/agenetes/packages/runtime)                         | Host-agnostic driver-registry framework — M2.5.                              |
-| L2    | [external/agenetes/packages/agentlet-host](../../external/agenetes/packages/agentlet-host)             | Agentlet transport host (transport mount) — M4.                              |
-| L2    | [external/agenetes/packages/acp-driver](../../external/agenetes/packages/acp-driver)                   | Standard ACP driver + its session mgmt — M5.                                 |
-| L2    | [external/agenetes/packages/agenetes](../../external/agenetes/packages/agenetes)                       | Top assembly: `mountAgenetes` → the Agenetes instance — M5.                  |
-| L2    | [apps/server/src/modules/remote_fs](../../apps/server/src/modules/remote_fs)                           | RFS reachback surface.                                                       |
-| L2↔L3 | [external/agentlet/spec/protocol.md](../../external/agentlet/spec/protocol.md)                         | ACP transport contract.                                                      |
-| L3    | [agent-teams/](../../agent-teams)                                                                      | Bundled functional agents.                                                   |
+| Layer | Anchor                                                                                                 | Role                                                                           |
+| ----- | ------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------ |
+| L1    | [apps/web/src/App.tsx](../../apps/web/src/App.tsx)                                                     | Canvas app shell / router.                                                     |
+| L1    | [packages/shared/src/canvas-engine](../../packages/shared/src/canvas-engine)                           | Shared command executor (headless-capable).                                    |
+| L1→L2 | [apps/web/src/hooks/useAgentStream.ts](../../apps/web/src/hooks/useAgentStream.ts)                     | Consumes `AgentStreamEvent`; the L1 side of the seam.                          |
+| L1↔L2 | [external/agenetes/packages/protocol](../../external/agenetes/packages/protocol)                       | Frozen L1↔L2 wire contracts (zod + `z.infer`) — M1.                            |
+| L1→L2 | [apps/server/src/app.ts](../../apps/server/src/app.ts) (`mountAgenetes`)                               | In-process composition root; holds the single Agenetes instance L1 talks to.   |
+| L2    | [apps/server/src/modules/agent/agent.service.ts](../../apps/server/src/modules/agent/agent.service.ts) | Built-in agent loop (`runAgent`).                                              |
+| L2    | [apps/server/src/modules/agent/acp/service.ts](../../apps/server/src/modules/agent/acp/service.ts)     | External agent path (`runAcpAgent`).                                           |
+| L2    | [external/agenetes/packages/runtime](../../external/agenetes/packages/runtime)                         | Host-agnostic driver-registry framework — M2.5.                                |
+| L2    | [external/agenetes/packages/agentlet-host](../../external/agenetes/packages/agentlet-host)             | Agentlet transport host (transport mount) — M4.                                |
+| L2    | [external/agenetes/packages/acp-driver](../../external/agenetes/packages/acp-driver)                   | Standard ACP driver + its session mgmt — M5.                                   |
+| L2    | [external/agenetes/packages/agenetes](../../external/agenetes/packages/agenetes)                       | Top assembly: `mountAgenetes` → the Agenetes instance — M5.                    |
+| L2    | [apps/server/src/modules/remote_fs](../../apps/server/src/modules/remote_fs)                           | RFS reachback surface.                                                         |
+| L2↔L3 | [external/agentlet/spec/protocol.md](../../external/agentlet/spec/protocol.md)                         | ACP transport contract.                                                        |
+| L3    | [space-kits/](../../space-kits)                                                                        | Agent-executed installation Skills and assets replacing retired Team packages. |
 
 ---
 

@@ -45,7 +45,6 @@ export default typescriptEslint.config(
       'external/agentlet/**',
       // Agent Team packages are self-contained plugins with their own
       // scripts/prompts; not part of the app's lint surface.
-      'agent-teams/**',
     ],
   },
   js.configs.recommended,
@@ -194,6 +193,7 @@ export default typescriptEslint.config(
       '*.config.js',
       '*.config.mjs',
       'scripts/**/*.{js,mjs,cjs}',
+      'space-kits/**/*.{js,mjs,cjs}',
     ],
     languageOptions: {
       globals: {
