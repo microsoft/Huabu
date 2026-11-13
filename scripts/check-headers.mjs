@@ -54,10 +54,8 @@ function expectedHeader(style) {
   return headerLines.map((line) => `// ${line}`);
 }
 
-// Vendored / subtree code keeps its upstream headers: external/ is pushed
-// back to the agentlet and agenetes repositories, and agent-teams/ ships
-// self-contained third-party plugin scripts.
-const excludedPrefixes = ['external/', 'agent-teams/'];
+// Subtrees retain their upstream headers.
+const excludedPrefixes = ['external/'];
 
 const trackedPaths = execFileSync('git', ['ls-files', '-z'], {
   cwd: repoRoot,

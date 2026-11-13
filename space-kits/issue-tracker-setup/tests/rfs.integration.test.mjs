@@ -5,7 +5,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createRequire } from 'node:module';
-import { cp } from 'node:fs/promises';
+import { cp, readFile, writeFile } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
@@ -145,6 +145,142 @@ afterEach(async () => {
   rmSync(workspace, { recursive: true, force: true });
 });
 
+it.each([
+  {
+    kit: 'paper-reviewer-setup',
+    role: 'Paper Reviewer',
+    workflowLabel: 'Paper Review Workflow',
+    skill: 'paper review',
+    workflow: 'review-workflow.md',
+    areas: ['Papers', 'Discussion', 'Review Drafts'],
+  },
+  {
+    kit: 'paper-scout-setup',
+    role: 'Paper Scout',
+    workflowLabel: 'Paper Scout Workflow',
+    skill: 'paper scout',
+    workflow: 'scout-workflow.md',
+    areas: ['Research Questions', 'Candidate Papers', 'Comparisons'],
+  },
+])(
+  'materializes $kit assets through native RFS with targeted Prompt and lazy portable workflow',
+  async ({ kit, role, skill, workflow, workflowLabel, areas }) => {
+    const asset = (file) =>
+      readFile(new URL(`../../${kit}/assets/${file}`, import.meta.url), 'utf8');
+    const execute = async (command) => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/rfs/c1/execute',
+        headers: { 'content-type': 'application/json' },
+        payload: JSON.stringify({ commands: [command] }),
+      });
+      expect(response.statusCode).toBe(200);
+      const result = response.json().results[0];
+      expect(result.applied).toBe(true);
+      return result;
+    };
+    const roots = await execute({
+      type: 'CREATE_NODES',
+      nodes: [`prompt: ${role.toLowerCase()}`, `skill: ${skill}`, ...areas].map(
+        (label, index) => ({
+          nodeType: 'frame',
+          data: { label },
+          position: { x: 700 + index * 600, y: 0 },
+          size: { width: 520, height: 500 },
+        }),
+      ),
+    });
+    const promptId = roots.nodes[0].nodeId;
+    const skillId = roots.nodes[1].nodeId;
+    const promptContent = await asset('role-prompt.md');
+    const workflowContent = await asset(workflow);
+    const helper =
+      kit === 'paper-scout-setup' ? await asset('paper-scout.mjs') : null;
+    const notes = await execute({
+      type: 'CREATE_NODES',
+      nodes: [
+        {
+          parentId: promptId,
+          label: `${role} Instructions`,
+          content: promptContent,
+        },
+        { parentId: skillId, label: workflowLabel, content: workflowContent },
+        ...(helper
+          ? [
+              {
+                parentId: skillId,
+                label: 'Paper Scout Helper',
+                content: `\`\`\`javascript\n${helper}\`\`\`\n`,
+              },
+            ]
+          : []),
+      ].map(({ parentId, label, content }, index) => ({
+        nodeType: 'note',
+        parentId,
+        data: { label, content },
+        position: { x: 20, y: index === 2 ? 270 : 64 },
+        size: { width: 440, height: 180 },
+      })),
+    });
+    const creation = await app.inject({
+      method: 'POST',
+      url: '/rfs/c1/agent',
+      headers: {
+        'content-type': 'application/json',
+        'x-huabu-agent-start': 'false',
+      },
+      payload: JSON.stringify({
+        profileId: 'project-profile',
+        position: { x: 700, y: 570 },
+      }),
+    });
+    expect(creation.statusCode).toBe(201);
+    const agent = creation.json();
+    await execute({
+      type: 'CONNECT_NODES',
+      edges: [{ source: promptId, target: agent.nodeId }],
+    });
+    const prompt = await resolveSpacePrompt('c1', agent.nodeId);
+    const other = await resolveSpacePrompt('c1', 'node-installer');
+    expect(prompt.markdown).toContain(promptContent);
+    expect(prompt.markdown).not.toContain(workflowContent);
+    expect(other?.markdown ?? '').not.toContain(promptContent);
+    const catalogue = await resolveSpaceSkill('c1');
+    expect(catalogue.markdown).toContain(workflowLabel);
+    expect(catalogue.markdown).not.toContain(workflowContent);
+    expect(store().read().state.edges).toHaveLength(1);
+    expect(agentThreadService.invoke).not.toHaveBeenCalled();
+    expect(agenetes.create).not.toHaveBeenCalled();
+    if (helper) {
+      const helperId = notes.nodes[2].nodeId;
+      const query = await app.inject({
+        method: 'POST',
+        url: '/rfs/c1/query',
+        headers: { 'content-type': 'application/json' },
+        payload: JSON.stringify({ type: 'INSPECT_NODES', ids: [helperId] }),
+      });
+      const filename = query.json().result.nodes[0].filename;
+      const download = await app.inject({
+        method: 'GET',
+        url: `/rfs/c1/download/${filename.split('/').map(encodeURIComponent).join('/')}`,
+      });
+      const body = download.body
+        .replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, '')
+        .trimStart();
+      const recovered = body.match(/^```javascript\n([\s\S]*)```\s*$/)?.[1];
+      expect(recovered).toBe(helper);
+      const file = join(workspace, 'scout-from-space.mjs');
+      await writeFile(file, recovered);
+      const { stdout } = await promisify(execFile)(
+        process.execPath,
+        [file, '--help'],
+        { cwd: workspace },
+      );
+      expect(stdout).toContain('paper-scout.mjs search');
+    }
+  },
+);
+
 it('creates final instruction titles and an inline configuration table without any ledger Note, then an idle Coordinator only after confirmation', async () => {
   const preview = await install(options());
   expect(preview.state).toBe('planned');
@@ -203,6 +339,34 @@ it('creates final instruction titles and an inline configuration table without a
   fillConfiguration(nodes.configuration);
   const result = await install({ ...options(), nodes, apply: true });
   expect(result.state).toBe('ready');
+  const geometry = await app.inject({
+    method: 'POST',
+    url: '/rfs/c1/query',
+    headers: { 'content-type': 'application/json' },
+    payload: JSON.stringify({
+      type: 'INSPECT_NODES',
+      ids: [
+        nodes.coordinatorPrompt,
+        result.coordinator.nodeId,
+        nodes.fixingSkill,
+        nodes.common,
+      ],
+    }),
+  });
+  const measured = new Map(
+    geometry.json().result.nodes.map((node) => [node.id, node]),
+  );
+  const promptFrame = measured.get(nodes.coordinatorPrompt);
+  const coordinator = measured.get(result.coordinator.nodeId);
+  expect(coordinator.absolutePosition.x).toBe(promptFrame.absolutePosition.x);
+  expect(
+    coordinator.absolutePosition.y -
+      promptFrame.absolutePosition.y -
+      promptFrame.size.height,
+  ).toBe(64);
+  expect(measured.get(nodes.fixingSkill).absolutePosition.x).toBe(
+    measured.get(nodes.common).absolutePosition.x,
+  );
   expect(nodeStyle(nodes.configurationFrame)?.accent).toBe('green');
   for (const [role, label] of Object.entries(expectedLabels)) {
     expect(store().readNode(nodes[role]).label).toBe(label);
@@ -237,6 +401,13 @@ it('creates final instruction titles and an inline configuration table without a
   expect(creation[0].headers['X-Huabu-Host-Thread-Id']).toBeUndefined();
   expect(JSON.parse(creation[0].body)).not.toHaveProperty('prompt');
   expect(JSON.parse(creation[0].body)).not.toHaveProperty('parentThreadId');
+  expect(JSON.parse(creation[0].body).workingDirPath).toBe('/projects/example');
+  expect(
+    store()
+      .read()
+      .state.nodes.find((node) => node.id === result.coordinator.nodeId).data
+      .agentLaunchOverrides,
+  ).toEqual({ workingDirPath: '/projects/example' });
   expect(agentThreadService.invoke).not.toHaveBeenCalled();
   expect(agenetes.create).not.toHaveBeenCalled();
   expect(await agenetes.record(result.coordinator.threadId)).toBeUndefined();
@@ -261,7 +432,7 @@ it('validates edited configuration for a non-Huabu repository without recreating
   });
   const values = {
     repository: 'octo/example',
-    codebasePath: '/projects/example',
+    codebasePath: '/projects/other',
     worktreeRoot: '/projects/worktrees',
     coordinatorProfileId: 'project-profile',
     fixingProfileId: 'project-profile',
@@ -282,6 +453,12 @@ it('validates edited configuration for a non-Huabu repository without recreating
   const result = await install({ ...options(), apply: true });
   expect(result.state).toBe('ready');
   expect(result.coordinator).toEqual(ready.coordinator);
+  expect(
+    store()
+      .read()
+      .state.nodes.find((node) => node.id === ready.coordinator.nodeId).data
+      .agentLaunchOverrides,
+  ).toEqual({ workingDirPath: '/projects/example' });
   expect(writes).toEqual([]);
   expect(agentThreadService.invoke).not.toHaveBeenCalled();
   expect(agenetes.create).not.toHaveBeenCalled();
@@ -512,6 +689,12 @@ it('runs the cloned standalone CLI over huabu-rfs and 3-step workflow with --nod
   expect(step3.state).toBe('ready');
   expect(step3.coordinator?.threadId).toBeTruthy();
   expect(step3.nodes?.coordinator).toBe(step3.coordinator.nodeId);
+  expect(
+    store()
+      .read()
+      .state.nodes.find((node) => node.id === step3.coordinator.nodeId).data
+      .agentLaunchOverrides,
+  ).toEqual({ workingDirPath: configuration.values.codebasePath });
   expect(agentThreadService.invoke).not.toHaveBeenCalled();
   expect(agenetes.create).not.toHaveBeenCalled();
 });

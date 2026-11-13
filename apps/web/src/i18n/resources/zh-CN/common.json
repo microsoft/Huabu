@@ -581,6 +581,11 @@
         "description": "搜索网页，获取最新信息。",
         "fields": { "apiKey": { "label": "API 密钥" } }
       },
+      "hackmd": {
+        "name": "HackMD",
+        "description": "读取、创建和更新 Markdown 笔记。",
+        "fields": { "apiKey": { "label": "API 令牌" } }
+      },
       "youtube-transcripts": {
         "name": "YouTube 字幕（RapidAPI）",
         "description": "获取 YouTube 视频的字幕文本。",

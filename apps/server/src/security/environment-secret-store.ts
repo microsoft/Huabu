@@ -42,6 +42,9 @@ export class EnvironmentSecretStore implements SecretStore {
     if (id === SECRET_IDS.tavilyApiKey) {
       return process.env.TAVILY_API_KEY ?? null;
     }
+    if (id === SECRET_IDS.hackmdApiKey) {
+      return process.env.HMD_API_ACCESS_TOKEN?.trim() || null;
+    }
     if (id === SECRET_IDS.rapidApiKey) {
       return process.env.RAPIDAPI_KEY ?? null;
     }

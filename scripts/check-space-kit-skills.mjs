@@ -52,11 +52,6 @@ export function parseSkillFrontmatter(content) {
   );
 }
 
-function readManifestName(manifestContent) {
-  const manifest = parseYamlObject(manifestContent, 'agentlet.yaml');
-  return typeof manifest.name === 'string' ? manifest.name : null;
-}
-
 function markdownLinks(content) {
   return [...content.matchAll(/\[[^\]]*]\(([^)\s]+)(?:\s+[^)]*)?\)/g)].map(
     (match) => match[1],
@@ -90,14 +85,12 @@ export function validateSkillPackage(packageDir, options = {}) {
   const resolveRealPath = options.realpath ?? realpathSync;
   const errors = [];
   const packageName = packageDir.split(/[\\/]/).at(-1);
-  const manifestPath = join(packageDir, 'agentlet.yaml');
   const skillPath = join(packageDir, 'SKILL.md');
 
   if (!fileExists(skillPath)) {
     return [`${packageName}: missing SKILL.md`];
   }
 
-  const manifestContent = readFile(manifestPath);
   const skillContent = readFile(skillPath);
   let frontmatter;
   try {
@@ -119,12 +112,6 @@ export function validateSkillPackage(packageDir, options = {}) {
         `${packageName}: frontmatter name must match the package folder`,
       );
     }
-    const manifestName = readManifestName(manifestContent);
-    if (frontmatter.name !== manifestName) {
-      errors.push(
-        `${packageName}: frontmatter name must match agentlet.yaml name`,
-      );
-    }
   }
 
   if (!frontmatter.description) {
@@ -138,18 +125,7 @@ export function validateSkillPackage(packageDir, options = {}) {
     }
   }
 
-  if (!manifestContent.includes('- system_prompt.md')) {
-    errors.push(
-      `${packageName}: agentlet.yaml must use system_prompt.md as its canonical prompt`,
-    );
-  }
-
   const links = markdownLinks(skillContent);
-  if (!links.includes('./system_prompt.md')) {
-    errors.push(
-      `${packageName}: SKILL.md must link to the canonical ./system_prompt.md`,
-    );
-  }
 
   if (NON_PORTABLE_TEXT_PATTERN.test(skillContent)) {
     errors.push(`${packageName}: SKILL.md contains a non-portable path`);
@@ -193,13 +169,13 @@ function listPackageDirectories(collectionDir) {
     .map((entry) => join(collectionDir, entry))
     .filter(
       (path) =>
-        statSync(path).isDirectory() && existsSync(join(path, 'agentlet.yaml')),
+        statSync(path).isDirectory() && existsSync(join(path, 'SKILL.md')),
     )
     .sort();
 }
 
 function validateTrackedPackageState(repoRoot) {
-  const trackedFiles = execFileSync('git', ['ls-files', '--', 'agent-teams'], {
+  const trackedFiles = execFileSync('git', ['ls-files', '--', 'space-kits'], {
     cwd: repoRoot,
     encoding: 'utf8',
   })
@@ -214,8 +190,8 @@ function validateTrackedPackageState(repoRoot) {
     .map((path) => `tracked generated runtime or secret file: ${path}`);
 }
 
-export function validateAgentTeamSkills(repoRoot) {
-  const collectionDir = join(repoRoot, 'agent-teams');
+export function validateSpaceKitSkills(repoRoot) {
+  const collectionDir = join(repoRoot, 'space-kits');
   const packageDirs = listPackageDirectories(collectionDir);
   const errors = packageDirs.flatMap((packageDir) =>
     validateSkillPackage(packageDir),
@@ -228,11 +204,11 @@ const scriptPath = fileURLToPath(import.meta.url);
 const invokedPath = process.argv[1] ? resolve(process.argv[1]) : null;
 if (invokedPath === scriptPath) {
   const repoRoot = dirname(dirname(scriptPath));
-  const { errors, packageCount } = validateAgentTeamSkills(repoRoot);
+  const { errors, packageCount } = validateSpaceKitSkills(repoRoot);
   if (errors.length > 0) {
-    console.error('Agent Team skill validation failed:\n');
+    console.error('Space Kit skill validation failed:\n');
     console.error(errors.map((error) => `- ${error}`).join('\n'));
     process.exit(1);
   }
-  console.log(`Validated ${packageCount} Agent Team skill package(s).`);
+  console.log(`Validated ${packageCount} Space Kit skill package(s).`);
 }

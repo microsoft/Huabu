@@ -216,7 +216,7 @@ function specifications(kit, profiles) {
   return [
     frame('common', 'prompt: issue tracking common', 0, 0),
     frame('coordinatorPrompt', 'prompt: issue tracking coordinator', 600, 0),
-    frame('fixingSkill', 'skill: issue fixing', 600, 620),
+    frame('fixingSkill', 'skill: issue fixing', 0, 620),
     frame(
       'configurationFrame',
       'prompt: issue tracking configuration',
@@ -698,7 +698,7 @@ export async function install({
     useCli
       ? JSON.parse(await runCli(['agent', 'profiles']))
       : json('agent/profiles');
-  const createCoordinator = async (profileId, position) =>
+  const createCoordinator = async (profileId, position, workingDirPath) =>
     useCli
       ? JSON.parse(
           await runCli(
@@ -707,14 +707,14 @@ export async function install({
               'create',
               '--no-start',
               '--json',
-              JSON.stringify({ profileId, position }),
+              JSON.stringify({ profileId, position, workingDirPath }),
             ],
             { correlate: false },
           ),
         )
       : json(
           'agent',
-          { profileId, position },
+          { profileId, position, workingDirPath },
           { 'X-Huabu-Agent-Start': 'false' },
         );
 
@@ -916,13 +916,20 @@ export async function install({
     targetProfile &&
     profiles.some(({ id }) => id !== 'huabu' && id === targetProfile)
   ) {
-    const issuesNode = current.nodes.find(
-      ({ id }) => id === setup.nodeMap.issues,
+    const promptNode = current.nodes.find(
+      ({ id }) => id === setup.nodeMap.coordinatorPrompt,
     );
-    const created = await createCoordinator(targetProfile, {
-      x: issuesNode.absolutePosition.x,
-      y: issuesNode.absolutePosition.y - 400,
-    });
+    const { codebasePath } = resolveConfigurationValues(
+      parseConfiguration(latestConfig.content).values,
+    );
+    const created = await createCoordinator(
+      targetProfile,
+      {
+        x: promptNode.absolutePosition.x,
+        y: promptNode.absolutePosition.y + promptNode.size.height + 64,
+      },
+      codebasePath,
+    );
     if (
       !created.nodeId ||
       !created.threadId ||
@@ -983,6 +990,8 @@ export async function install({
   if (finalizeCommands.length > 0) {
     await executeCommands(finalizeCommands);
   }
+  current = await inventory();
+  assertGeometry(current.nodes, setup.nodeMap);
 
   const state =
     !validation.length && coordinator && coordinatorConnected

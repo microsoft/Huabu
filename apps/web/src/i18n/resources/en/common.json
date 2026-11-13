@@ -581,6 +581,11 @@
         "description": "Search the web for current information.",
         "fields": { "apiKey": { "label": "API key" } }
       },
+      "hackmd": {
+        "name": "HackMD",
+        "description": "Read, create, and update Markdown notes.",
+        "fields": { "apiKey": { "label": "API token" } }
+      },
       "youtube-transcripts": {
         "name": "YouTube Transcripts (RapidAPI)",
         "description": "Get transcript text from YouTube videos.",
