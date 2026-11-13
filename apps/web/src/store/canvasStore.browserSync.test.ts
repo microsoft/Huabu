@@ -472,6 +472,58 @@ describe('receiving while a local change is in flight', () => {
   });
 });
 
+describe("an older client's whole-Space save, published as an update", () => {
+  it("shows what it changed and keeps this page's unsent move and unsaved body", async () => {
+    // The update carries each changed node with the body the server holds.
+    const x = node(X);
+    const y = node(Y);
+    // This page: a move not answered yet, and a body not saved yet.
+    moveHere(X, 500);
+    state().updateNodeData(Y, { content: 'Typed here' });
+    expect(own).toHaveLength(1);
+
+    // The older client recoloured X where the server had it and moved Y.
+    state().applyDeltasFromAgent(
+      [
+        {
+          type: 'REPLACE_NODE',
+          prev: x,
+          next: { ...x, data: { ...x.data, style: { accent: 'blue' } } },
+        },
+        {
+          type: 'REPLACE_NODE',
+          prev: y,
+          next: { ...y, position: { x: 40, y: 300 } },
+        },
+      ] as Delta[],
+      2,
+      {
+        mutatedNodes: [],
+        deletedNodeIds: [],
+        contentEditedNodeIds: [],
+        deferredFitFrameIds: [],
+      },
+      false,
+      { events: [] },
+      { source: 'ui' },
+    );
+
+    expect(state().version).toBe(2);
+    // Their recolour and move are shown.
+    expect(accentOf(node(X))).toBe('blue');
+    expect(node(Y).position).toEqual({ x: 40, y: 300 });
+    // This page's unsent move and unsaved body are untouched.
+    expect(node(X).position).toEqual({ x: 500, y: 0 });
+    expect(node(X).data.content).toBe(`Body ${X}`);
+    expect(node(Y).data.content).toBe('Typed here');
+    expect(state().pendingContentNodeIds()).toContain(Y);
+    expect(hasUnsavedCanvasEdits()).toBe(true);
+    // No reload; this page's undo history is still there.
+    expect(api.getCanvas).not.toHaveBeenCalled();
+    expect(canvasHistoryManager.canUndo).toBe(true);
+  });
+});
+
 describe('nothing saves the whole Space', () => {
   it('sends no whole-Space PUT after a command batch, a title change or a direct store write', async () => {
     moveHere(X, 500);

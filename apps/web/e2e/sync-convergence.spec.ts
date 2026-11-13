@@ -22,7 +22,10 @@ import type { CreateCanvasResponse } from '@huabu/shared';
  *   is unanswered does not ask "leave site?"; a user's edit does;
  * - a body and a title another page saved while this page's stream was down
  *   are shown after it reconnects, without loading the Space again, and this
- *   page's next save of that node is not refused as a conflict.
+ *   page's next save of that node is not refused as a conflict;
+ * - a whole-Space save from an older client (`PUT /api/canvas/:id`, which
+ *   current pages no longer send) reaches a current page as it happens,
+ *   without a reload, and the page keeps its undo history and stays in step.
  */
 
 // Mouse input: the default project emulates touch for the gesture suites.
@@ -376,6 +379,136 @@ test('content another page saved while this page was disconnected is shown after
   expect((await serverContent(request, canvasId, Y)).label).toBe(
     'Title saved meanwhile',
   );
+
+  await b.context.close();
+});
+
+/** What the page's store says about the Space, read only. */
+async function shownSpace(page: Page) {
+  return page.evaluate(async () => {
+    const path = '/src/store/canvasStore.ts';
+    const { default: store, hasUnsavedCanvasEdits } = (await import(
+      path
+    )) as typeof CanvasStore;
+    const state = store.getState();
+    return {
+      version: state.version,
+      canUndo: state.canUndo,
+      unsaved: hasUnsavedCanvasEdits(),
+      ids: state.nodes.map((node) => node.id),
+      reloaded:
+        (window as unknown as { __noReload?: boolean }).__noReload !== true,
+    };
+  });
+}
+
+test("an older client's whole-Space save reaches a current page without a reload", async ({
+  browser,
+  request,
+}) => {
+  test.setTimeout(120_000);
+  const LEGACY_NEW = 'node-conv-legacy-new';
+  const canvasId = await seedSpace(request);
+  const b = await newDevice(browser, canvasId);
+  await b.open();
+  // The page reports the Text's rendered box once; wait that out.
+  await b.page.waitForTimeout(1_500);
+
+  // The current page holds an undo entry of its own.
+  await act(b.page, 'beginGesture', 'SET_NODE_GEOMETRY');
+  await act(b.page, 'setNodeGeometry', [
+    { nodeId: Y, position: { x: 400, y: 520 } },
+  ]);
+  await expect(async () => {
+    const server = await spaceRecord(request, canvasId);
+    const page = await shownSpace(b.page);
+    expect(page.unsaved).toBe(false);
+    expect(page.version).toBe(server.version);
+  }).toPass({ timeout: 15_000 });
+  const loads = b.spaceLoads();
+
+  // An older client, in step with the server, saves the whole Space: it
+  // moved a node, changed the paint order and added a node.
+  const before = await request.get(`/api/canvas/${canvasId}`);
+  const record = (await before.json()) as {
+    version: number;
+    state: { nodes: Array<Record<string, unknown>>; edges: unknown[] };
+  };
+  const nodes = record.state.nodes.map((node) =>
+    node.id === X ? { ...node, position: { x: 60, y: 600 } } : node,
+  );
+  // X goes last among the root nodes (painted on top).
+  const moved = nodes.filter((node) => node.id === X);
+  const legacyNodes = [
+    ...nodes.filter((node) => node.id !== X),
+    ...moved,
+    {
+      id: LEGACY_NEW,
+      type: 'note',
+      position: { x: 60, y: 300 },
+      style: { width: 260, height: 160 },
+      data: { type: 'note', heightMode: 'fixed' },
+    },
+  ];
+  const saved = await request.put(`/api/canvas/${canvasId}`, {
+    data: {
+      version: record.version,
+      state: { nodes: legacyNodes, edges: record.state.edges },
+    },
+  });
+  expect(saved.ok(), await saved.text()).toBe(true);
+  const { version: savedVersion } = (await saved.json()) as {
+    version: number;
+  };
+  expect(savedVersion).toBe(record.version + 1);
+
+  // The current page shows all of it, at the saved version.
+  await expect(async () => {
+    expect((await shownNode(b.page, X)).position).toEqual({ x: 60, y: 600 });
+    const page = await shownSpace(b.page);
+    expect(page.ids).toContain(LEGACY_NEW);
+    expect(page.ids.indexOf(X)).toBeGreaterThan(page.ids.indexOf(Y));
+    expect(page.version).toBe(savedVersion);
+  }).toPass({ timeout: 10_000 });
+  await expect(b.page.locator(`[data-id="${LEGACY_NEW}"]`)).toBeVisible();
+  // The moved node kept its body.
+  expect((await shownNode(b.page, X)).content).toBe(`Body of ${X}`);
+
+  // The next command batch is the next version for it: no gap, no load.
+  const next = await request.post(`/api/canvas/${canvasId}/execute`, {
+    data: {
+      commands: [
+        {
+          type: 'SET_NODE_GEOMETRY',
+          items: [{ nodeId: LEGACY_NEW, position: { x: 90, y: 320 } }],
+        },
+      ],
+      originator: { source: 'ui', tabId: 'e2e-another-page' },
+    },
+  });
+  expect(next.ok(), await next.text()).toBe(true);
+  await expect
+    .poll(async () => (await shownNode(b.page, LEGACY_NEW)).position)
+    .toEqual({ x: 90, y: 320 });
+
+  // Its own undo entry survived, and undoing it does not undo theirs.
+  const page = await shownSpace(b.page);
+  expect(page.reloaded).toBe(false);
+  expect(b.spaceLoads()).toBe(loads);
+  expect(page.canUndo).toBe(true);
+  await act(b.page, 'undo');
+  expect((await shownNode(b.page, Y)).position).toEqual({ x: 380, y: 320 });
+  expect((await shownNode(b.page, X)).position).toEqual({ x: 60, y: 600 });
+  await expect(async () => {
+    const server = await spaceRecord(request, canvasId);
+    const position = (id: string) =>
+      server.state.nodes.find((node) => node.id === id)?.position;
+    expect(position(Y)).toEqual({ x: 380, y: 320 });
+    expect(position(X)).toEqual({ x: 60, y: 600 });
+    expect(position(LEGACY_NEW)).toEqual({ x: 90, y: 320 });
+    expect((await shownSpace(b.page)).version).toBe(server.version);
+  }).toPass({ timeout: 15_000 });
+  expect(b.spaceLoads()).toBe(loads);
 
   await b.context.close();
 });
