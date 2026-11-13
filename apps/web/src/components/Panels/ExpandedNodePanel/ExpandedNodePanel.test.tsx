@@ -250,7 +250,6 @@ it('keeps the PDF properties toggle in the toolbar and the list inside the rende
   const toggle = header?.querySelector<HTMLButtonElement>(
     '[aria-controls][aria-expanded]',
   );
-  expect(toggle).not.toBeNull();
   expect(toggle?.textContent).toBe('');
   expect(
     header?.querySelector('[data-preview-header-actions]')?.textContent,
@@ -258,21 +257,79 @@ it('keeps the PDF properties toggle in the toolbar and the list inside the rende
   const region = document.getElementById(
     toggle?.getAttribute('aria-controls') ?? '',
   );
-  expect(region?.hidden).toBe(true);
+  // A PDF with properties opens them by default, labelled as properties.
+  expect(region?.hidden).toBe(false);
+  expect(toggle?.getAttribute('aria-label')).toBe('Collapse properties');
+  expect(region?.textContent).toContain('UIST');
+  expect(region?.querySelector('button[aria-label="Add notes"]')).toBeNull();
   expect(header?.contains(region)).toBe(false);
   expect(
     container?.querySelector('[data-preview-node-id]')?.contains(region),
   ).toBe(true);
   act(() => toggle?.click());
-  expect(region?.hidden).toBe(false);
-  expect(region?.querySelector('button')?.textContent).toBe('Add notes');
-  expect(region?.querySelector('[data-property-name="Add notes"]')).toBeNull();
-  expect(region?.textContent).toContain('UIST');
-  act(() => toggle?.click());
   expect(region?.hidden).toBe(true);
+  expect(toggle?.getAttribute('aria-label')).toBe('Expand properties');
+  // Notes stay reachable from the header, ahead of the collapsed disclosure.
+  const notes = header?.querySelector<HTMLButtonElement>(
+    'button[aria-label="Add notes"]',
+  );
+  if (!notes || !toggle) throw new Error('Expected notes before the toggle');
+  expect(
+    notes.compareDocumentPosition(toggle) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+  act(() => toggle.click());
+  expect(region?.hidden).toBe(false);
 });
 
-it('uses an icon-only Note disclosure that opens properties without a PDF notes action', () => {
+it.each([
+  ['a PDF', 'pdf'],
+  ['a Note', 'note'],
+])('starts %s without properties collapsed', (_name, type) => {
+  renderPanel(
+    [{ ...canvasNode('a', 'Empty'), type, data: { label: 'Empty' } }],
+    [],
+    true,
+  );
+  const toggle = container?.querySelector<HTMLButtonElement>(
+    '[aria-controls][aria-expanded]',
+  );
+  const region = document.getElementById(
+    toggle?.getAttribute('aria-controls') ?? '',
+  );
+  expect(toggle?.getAttribute('aria-label')).toBe('Expand properties');
+  expect(region?.hidden).toBe(true);
+  act(() => toggle?.click());
+  expect(region?.hidden).toBe(false);
+});
+
+it('keeps the opening state when properties are written or removed later', () => {
+  const paper = (properties?: Record<string, string>): Node => ({
+    ...canvasNode('a', 'Paper'),
+    type: 'pdf',
+    data: { label: 'Paper', ...(properties ? { properties } : {}) },
+  });
+  const region = () =>
+    document.getElementById(
+      container
+        ?.querySelector('[aria-controls][aria-expanded]')
+        ?.getAttribute('aria-controls') ?? '',
+    );
+  // Opened without properties: an agent filling them in must not pop the
+  // list open over the pages being read.
+  renderPanel([paper()], [], true);
+  expect(region()?.hidden).toBe(true);
+  act(() => useCanvasStore.setState({ nodes: [paper({ Venue: 'UIST' })] }));
+  expect(region()?.hidden).toBe(true);
+  act(() => root?.unmount());
+  container?.remove();
+  // Opened with properties: losing the last one does not collapse it either.
+  renderPanel([paper({ Venue: 'UIST' })], [], true);
+  expect(region()?.hidden).toBe(false);
+  act(() => useCanvasStore.setState({ nodes: [paper()] }));
+  expect(region()?.hidden).toBe(false);
+});
+
+it('uses an icon-only Note disclosure that shows properties without a PDF notes action', () => {
   renderPanel(
     [
       {
@@ -291,15 +348,15 @@ it('uses an icon-only Note disclosure that opens properties without a PDF notes 
     toggle?.getAttribute('aria-controls') ?? '',
   );
   expect(toggle?.textContent).toBe('');
-  expect(toggle?.getAttribute('aria-label')).toBe('Expand properties');
-  expect(region?.hidden).toBe(true);
-  act(() => toggle?.click());
   expect(toggle?.getAttribute('aria-label')).toBe('Collapse properties');
   expect(toggle?.getAttribute('aria-expanded')).toBe('true');
   expect(region?.hidden).toBe(false);
   expect(region?.textContent).toContain('Canvas');
-  expect(region?.textContent).not.toContain('Add notes');
-  expect(region?.textContent).not.toContain('Open notes');
+  expect(
+    container?.querySelector(
+      'button[aria-label="Add notes"], button[aria-label="Open notes"]',
+    ),
+  ).toBeNull();
   act(() => toggle?.click());
   expect(toggle?.getAttribute('aria-label')).toBe('Expand properties');
   expect(region?.hidden).toBe(true);

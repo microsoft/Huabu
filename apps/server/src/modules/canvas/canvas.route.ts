@@ -63,6 +63,8 @@ import {
 } from './canvas-executor.js';
 import { searchCanvas } from './canvas-search.js';
 import { publishCanvasUpdate } from './canvas-sync.js';
+import { NodeCoverError } from './import-node-src.js';
+import { remapImportedSpace } from './import-space-identity.js';
 import { registerSpaceCardRoutes } from './space-card.route.js';
 import {
   deletionPreview,
@@ -121,7 +123,6 @@ import {
   updateNode,
 } from '../storage/index.js';
 import { acquireWorkspaceOperationLease } from '../workspace.js';
-import { remapImportedSpace } from './import-space-identity.js';
 
 import type { CanvasNodeType } from '@huabu/shared';
 import type {
@@ -1897,7 +1898,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       if (err instanceof AgentNodeBindingError) {
         return reply.code(409).send({ code: err.code, message: err.message });
       }
-      if (err instanceof AgentNodeEditError) {
+      if (err instanceof AgentNodeEditError || err instanceof NodeCoverError) {
         return reply
           .code(400)
           .send({ code: 'INVALID_REQUEST', message: err.message });

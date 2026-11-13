@@ -27,9 +27,10 @@ it.each(['canvas', 'preview'] as const)(
     const root = createRoot(container);
     try {
       act(() => root.render(<PDFNotesButton id="pdf" surface={surface} />));
-      expect(container.querySelector('button')?.textContent).toBe(
-        surface === 'preview' ? 'node.addPdfNotes' : '',
-      );
+      expect(container.querySelector('button')?.textContent).toBe('');
+      expect(
+        container.querySelector('button')?.getAttribute('aria-label'),
+      ).toBe(surface === 'preview' ? 'node.addPdfNotes' : 'node.pdfNotes');
       act(() => container.querySelector('button')?.click());
       expect(openPdfNotes).toHaveBeenCalledExactlyOnceWith('pdf');
       expect(document.querySelector('[role="dialog"], input')).toBeNull();
@@ -38,9 +39,9 @@ it.each(['canvas', 'preview'] as const)(
           <PDFNotesButton id="pdf" surface={surface} noteNodeId="notes" />,
         ),
       );
-      expect(container.querySelector('button')?.textContent).toBe(
-        surface === 'preview' ? 'node.openPdfNotes' : '',
-      );
+      expect(
+        container.querySelector('button')?.getAttribute('aria-label'),
+      ).toBe(surface === 'preview' ? 'node.openPdfNotes' : 'node.pdfNotes');
     } finally {
       act(() => root.unmount());
       container.remove();

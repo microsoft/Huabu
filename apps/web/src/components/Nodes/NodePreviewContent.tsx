@@ -56,7 +56,10 @@ export const NodePreviewContent = (props: NodePreviewContentProps) => {
 
   return (
     <div className="flex h-full flex-col">
-      <AiSummaryButton key={id} summary={summary} keywords={keywords} />
+      {/* PDFs no longer generate summaries or keywords; legacy stored values stay hidden. */}
+      {type !== 'pdf' && (
+        <AiSummaryButton key={id} summary={summary} keywords={keywords} />
+      )}
       <div className="relative min-h-0 flex-1">
         <PreviewComponent id={id} data={data} {...rest} />
       </div>

@@ -121,6 +121,7 @@ import {
   reportInkIntent,
 } from '../agent/tools/handlers/report-ink-intent.js';
 import { CanvasNotFoundError } from '../canvas/canvas-executor.js';
+import { NodeCoverError } from '../canvas/import-node-src.js';
 import { executeSpaceQuery, SpaceQueryError } from '../canvas/space-query.js';
 import { WorldPreviewMutationError } from '../canvas/world-preview-policy.js';
 import {
@@ -828,6 +829,11 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
         }
         if (error instanceof WorldPreviewMutationError) {
           return reply.code(409).send(rfsError(error.message));
+        }
+        if (error instanceof NodeCoverError) {
+          return reply
+            .code(400)
+            .send(rfsError(error.message, 'validation_failed'));
         }
         request.log.error(
           { err: error, canvasId: request.params.canvasId },

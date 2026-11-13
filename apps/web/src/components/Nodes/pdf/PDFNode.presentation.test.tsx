@@ -176,34 +176,52 @@ describe('PDF canvas presentation', () => {
     );
   });
 
-  it('uses property order automatically, skips empty values and keeps zero and false', async () => {
+  it('splits properties by type into tags and text, in property order', async () => {
     const properties = {
       Empty: ' ',
-      Tags: [],
+      NoTags: [],
       Score: 0,
       Reviewed: false,
-      Venue: 'UIST',
+      Starred: true,
+      Venue: ['UIST 2026'],
+      Keywords: ['canvas', ' ', 'ink', 'canvas'],
+      Question: ' How do people steer agents? ',
+      Short: 'CHI',
     };
     await render({ properties });
     expect(mocks.card).toHaveBeenLastCalledWith(
       expect.objectContaining({
-        properties: [
+        // Zero is a value; a false flag and blank entries say nothing.
+        tags: [
           { name: 'Score', value: '0' },
-          { name: 'Reviewed', value: 'false' },
-          { name: 'Venue', value: 'UIST' },
+          { name: 'Starred', value: 'Starred' },
+          { name: 'Venue', value: 'UIST 2026' },
+          { name: 'Keywords', value: 'canvas' },
+          { name: 'Keywords', value: 'ink' },
+        ],
+        // Text stays text however short it is.
+        texts: [
+          { name: 'Question', value: 'How do people steer agents?' },
+          { name: 'Short', value: 'CHI' },
         ],
       }),
     );
     await render({
       properties,
-      propertyDisplayKeys: ['Venue', 'Empty', 'Venue', 'missing', 'Reviewed'],
+      propertyDisplayKeys: ['Short', 'Keywords', 'Short', 'missing', 'Venue'],
     });
     expect(mocks.card).toHaveBeenLastCalledWith(
       expect.objectContaining({
-        properties: [
-          { name: 'Venue', value: 'UIST' },
-          { name: 'Reviewed', value: 'false' },
+        tags: [
+          { name: 'Keywords', value: 'canvas' },
+          { name: 'Keywords', value: 'ink' },
+          { name: 'Venue', value: 'UIST 2026' },
           { name: 'Score', value: '0' },
+          { name: 'Starred', value: 'Starred' },
+        ],
+        texts: [
+          { name: 'Short', value: 'CHI' },
+          { name: 'Question', value: 'How do people steer agents?' },
         ],
       }),
     );
@@ -225,7 +243,8 @@ describe('PDF canvas presentation', () => {
     expect(mocks.card).toHaveBeenLastCalledWith(
       expect.objectContaining({
         summary: 'My own interpretation.',
-        properties: [
+        tags: [],
+        texts: [
           { name: 'Venue', value: 'UIST' },
           { name: 'Internal', value: 'Hidden' },
         ],

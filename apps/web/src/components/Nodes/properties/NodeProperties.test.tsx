@@ -161,8 +161,8 @@ it('keeps the edited draft and surfaces save failures for retry', async () => {
   input('node.propertyValue', 'DIS');
   await submit();
   expect(
-    container.querySelector<HTMLInputElement>(
-      'input[aria-label="node.propertyValue"]',
+    container.querySelector<HTMLTextAreaElement>(
+      'textarea[aria-label="node.propertyValue"]',
     )?.value,
   ).toBe('DIS');
   expect(container.querySelector('[role="alert"]')?.textContent).toBe(
@@ -223,8 +223,8 @@ it('retains a new value with a missing name, but dismisses it once both inputs a
   await submit();
   expect(container.querySelector('[role="alert"]')).not.toBeNull();
   expect(
-    container.querySelector<HTMLInputElement>(
-      'input[aria-label="node.propertyValue"]',
+    container.querySelector<HTMLTextAreaElement>(
+      'textarea[aria-label="node.propertyValue"]',
     )?.value,
   ).toBe('Reading');
   input('node.propertyValue', '');
@@ -306,14 +306,20 @@ it('reports reorder failures and never changes read-only order', async () => {
   expect(save).toHaveBeenCalledTimes(1);
 });
 
-it('preserves commas within tags and trims only line boundaries', async () => {
+it('preserves commas within a tag and ignores a duplicate', async () => {
   render(false, [], { Topics: ['Old'] });
   click('node.editProperty:Topics');
-  input('node.propertyValue', 'Canvas, Workspace\n\n  Sketch  ');
+  input('node.propertyValue', '  Canvas, Workspace ');
   await submit();
   expect(save).toHaveBeenCalledWith({
-    properties: { Topics: ['Canvas, Workspace', 'Sketch'] },
+    properties: { Topics: ['Old', 'Canvas, Workspace'] },
   });
+  save.mockClear();
+  render(false, [], { Topics: ['Old'] });
+  click('node.editProperty:Topics');
+  input('node.propertyValue', 'Old');
+  await submit();
+  expect(save).toHaveBeenCalledWith({ properties: { Topics: ['Old'] } });
 });
 
 it('saves on leaving the editor without a button row or type selector', async () => {
@@ -321,7 +327,7 @@ it('saves on leaving the editor without a button row or type selector', async ()
   click('node.editProperty:Venue');
   expect(container.querySelector('form button')).toBeNull();
   input('node.propertyValue', 'DIS');
-  const field = container.querySelector('input');
+  const field = container.querySelector('textarea');
   await act(async () =>
     field?.dispatchEvent(new FocusEvent('focusout', { bubbles: true })),
   );
@@ -398,8 +404,8 @@ it('commits checkbox edits on Enter without refocusing on every change', async (
 it('keeps composition Enter and cancellation inside the inline editor', () => {
   render();
   click('node.editProperty:Venue');
-  const field = container.querySelector<HTMLInputElement>(
-    'input[aria-label="node.propertyValue"]',
+  const field = container.querySelector<HTMLTextAreaElement>(
+    'textarea[aria-label="node.propertyValue"]',
   );
   const enter = new KeyboardEvent('keydown', {
     key: 'Enter',
@@ -417,4 +423,263 @@ it('keeps composition Enter and cancellation inside the inline editor', () => {
   });
   expect(container.querySelector('form')).toBeNull();
   expect(save).not.toHaveBeenCalled();
+});
+
+it.each([true, false])(
+  'shows each list value as its own tag and keeps text plain (readOnly=%s)',
+  (readOnly) => {
+    render(readOnly, ['Keywords'], {
+      Keywords: ['canvas', 'shared context'],
+      Venue: 'UIST',
+    });
+    const tags = (name: string) =>
+      Array.from(
+        container.querySelectorAll(
+          `[data-property-name="${name}"] [data-property-tag]`,
+        ),
+      ).map((tag) => tag.textContent);
+    expect(tags('Keywords')).toEqual(['canvas', 'shared context']);
+    expect(tags('Venue')).toEqual([]);
+  },
+);
+
+// Options float in a popover outside the property list's own container.
+function option(text: string) {
+  return Array.from(
+    document.querySelectorAll<HTMLElement>('[role="option"]'),
+  ).find((item) => item.textContent === text);
+}
+
+it('picks known tags, creates new ones, and removes chosen ones in one save', async () => {
+  act(() =>
+    root.render(
+      <NodeProperties
+        properties={{ Keywords: ['canvas', 'ink'] }}
+        displayKeys={[]}
+        readOnly={false}
+        tagOptions={(name) =>
+          name === 'Keywords' ? ['agents', 'canvas', 'genui'] : []
+        }
+        onSave={save}
+      />,
+    ),
+  );
+  click('node.editProperty:Keywords');
+  // Tags already chosen are not offered again.
+  expect(
+    Array.from(document.querySelectorAll('[role="option"]')).map(
+      (item) => item.textContent,
+    ),
+  ).toEqual(['agents', 'genui']);
+  act(() => option('genui')?.click());
+  click('node.removePropertyTag:canvas');
+  input('node.propertyValue', 'sketch');
+  expect(option('node.createPropertyTagsketch')).toBeDefined();
+  const field = container.querySelector<HTMLInputElement>('[role="combobox"]');
+  const enter = () =>
+    act(() => {
+      field?.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
+      );
+    });
+  // The first Enter adds the typed tag; nothing is saved yet.
+  enter();
+  expect(save).not.toHaveBeenCalled();
+  expect(field?.value).toBe('');
+  // With nothing left to add, Enter saves the whole list once.
+  enter();
+  await act(async () => {});
+  expect(save).toHaveBeenCalledExactlyOnceWith({
+    properties: { Keywords: ['ink', 'genui', 'sketch'] },
+  });
+});
+
+it('keeps text still in the tag field when the editor loses focus', async () => {
+  render(false, [], { Venue: ['UIST'] });
+  click('node.editProperty:Venue');
+  input('node.propertyValue', ' CHI ');
+  act(() => {
+    container
+      .querySelector('[role="combobox"]')
+      ?.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
+  });
+  await act(async () => {});
+  expect(save).toHaveBeenCalledExactlyOnceWith({
+    properties: { Venue: ['UIST', 'CHI'] },
+  });
+});
+
+it('edits text in a wrapping field and keeps pasted line breaks out of the value', async () => {
+  render(false, [], { Question: 'How do people steer agents?' });
+  click('node.editProperty:Question');
+  const field = container.querySelector<HTMLTextAreaElement>(
+    'textarea[aria-label="node.propertyValue"]',
+  );
+  expect(field?.value).toBe('How do people steer agents?');
+  input('node.propertyValue', 'How do people\n  steer agents\nover time?');
+  expect(field?.value).toBe('How do people steer agents over time?');
+  await submit();
+  expect(save).toHaveBeenCalledWith({
+    properties: { Question: 'How do people steer agents over time?' },
+  });
+});
+
+it('keeps numbers in a single-line field', () => {
+  render();
+  click('node.editProperty:Score');
+  expect(container.querySelector('textarea')).toBeNull();
+  expect(
+    container.querySelector('input[aria-label="node.propertyValue"]'),
+  ).not.toBeNull();
+});
+
+it('removes one of two repeated tags and lets Enter save once the pointer leaves the options', async () => {
+  act(() =>
+    root.render(
+      <NodeProperties
+        properties={{ Keywords: ['ink', 'ink', 'canvas'] }}
+        displayKeys={[]}
+        readOnly={false}
+        tagOptions={() => ['agents']}
+        onSave={save}
+      />,
+    ),
+  );
+  click('node.editProperty:Keywords');
+  // Legacy lists may repeat a value: removing the first leaves the second.
+  click('node.removePropertyTag:ink');
+  const hovered = option('agents');
+  act(() => {
+    hovered?.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+  });
+  expect(hovered?.getAttribute('aria-selected')).toBe('true');
+  act(() => {
+    hovered?.parentElement?.dispatchEvent(
+      new MouseEvent('mouseout', { bubbles: true }),
+    );
+  });
+  expect(hovered?.getAttribute('aria-selected')).toBe('false');
+  act(() => {
+    container
+      .querySelector('[role="combobox"]')
+      ?.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
+      );
+  });
+  await act(async () => {});
+  expect(save).toHaveBeenCalledExactlyOnceWith({
+    properties: { Keywords: ['ink', 'canvas'] },
+  });
+});
+
+it.each([
+  ['a tag', { Keywords: ['ink'] }, '[role="combobox"]'],
+  ['text', { Venue: 'UIST' }, 'textarea'],
+])(
+  'does not save %s on the Enter an IME uses to confirm a candidate',
+  async (_kind, properties, selector) => {
+    render(false, [], properties);
+    click(`node.editProperty:${Object.keys(properties)[0]}`);
+    // Safari: composition has ended, isComposing is false, keyCode is 229.
+    const enter = new KeyboardEvent('keydown', {
+      key: 'Enter',
+      keyCode: 229,
+      bubbles: true,
+      cancelable: true,
+    });
+    act(() => {
+      container.querySelector(selector)?.dispatchEvent(enter);
+    });
+    await act(async () => {});
+    expect(save).not.toHaveBeenCalled();
+    expect(container.querySelector('form')).not.toBeNull();
+  },
+);
+
+it("lets Enter on a tag's remove button remove the tag instead of saving", async () => {
+  render(false, [], { Keywords: ['ink', 'canvas'] });
+  click('node.editProperty:Keywords');
+  const remove = Array.from(container.querySelectorAll('button')).find(
+    (button) =>
+      button.getAttribute('aria-label') === 'node.removePropertyTag:ink',
+  );
+  const enter = new KeyboardEvent('keydown', {
+    key: 'Enter',
+    bubbles: true,
+    cancelable: true,
+  });
+  act(() => {
+    remove?.dispatchEvent(enter);
+  });
+  await act(async () => {});
+  // The form neither swallowed the key nor committed: the button's own
+  // activation is free to run.
+  expect(enter.defaultPrevented).toBe(false);
+  expect(save).not.toHaveBeenCalled();
+  expect(container.querySelector('form')).not.toBeNull();
+});
+
+it('ignores a tag option clicked while a save is in flight', async () => {
+  let finish: () => void = () => {};
+  save.mockImplementation(
+    () => new Promise<void>((resolve) => (finish = resolve)),
+  );
+  act(() =>
+    root.render(
+      <NodeProperties
+        properties={{ Keywords: ['ink'] }}
+        displayKeys={[]}
+        readOnly={false}
+        tagOptions={() => ['agents', 'canvas']}
+        onSave={save}
+      />,
+    ),
+  );
+  click('node.editProperty:Keywords');
+  act(() => option('agents')?.click());
+  await submit();
+  expect(save).toHaveBeenCalledExactlyOnceWith({
+    properties: { Keywords: ['ink', 'agents'] },
+  });
+  // The pending save holds the list as it was: a later pick would be lost
+  // when that save clears the draft, so it is not taken at all.
+  act(() => option('canvas')?.click());
+  expect(
+    Array.from(container.querySelectorAll('form [data-property-tag]')).map(
+      (tag) => tag.textContent,
+    ),
+  ).toEqual(['ink', 'agents']);
+  await act(async () => finish());
+});
+
+it('scrolls the option highlighted from the keyboard into view', () => {
+  const scrolled: string[] = [];
+  const original = Element.prototype.scrollIntoView;
+  Element.prototype.scrollIntoView = function (this: Element) {
+    scrolled.push(this.textContent ?? '');
+  };
+  try {
+    act(() =>
+      root.render(
+        <NodeProperties
+          properties={{ Keywords: [] }}
+          displayKeys={[]}
+          readOnly={false}
+          tagOptions={() => ['agents', 'canvas', 'ink']}
+          onSave={save}
+        />,
+      ),
+    );
+    click('node.editProperty:Keywords');
+    const field = container.querySelector('[role="combobox"]');
+    for (let press = 0; press < 2; press += 1)
+      act(() => {
+        field?.dispatchEvent(
+          new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }),
+        );
+      });
+    expect(scrolled).toEqual(['agents', 'canvas']);
+  } finally {
+    Element.prototype.scrollIntoView = original;
+  }
 });
