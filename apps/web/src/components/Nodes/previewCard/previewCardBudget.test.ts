@@ -177,6 +177,30 @@ describe('text group spacing', () => {
   });
 });
 
+describe('text group that cannot open', () => {
+  it('does not let a later property in at the inner gap', () => {
+    const input = {
+      // A title line and one text line, but not the gap that opens the group.
+      available: 20 + 20 + 5,
+      titleLine: 20,
+      textLine: 20,
+      tagRow: 20,
+      tagRowGap: 0,
+      tagGap: 0,
+      textGap: 6,
+      textInnerGap: 0,
+      summaryGap: 0,
+      titleNeed: 1,
+      tagRowsNeed: 0,
+      textNeeds: [1, 1],
+      summaryNeed: 0,
+    };
+    const budget = allocateCardLines(input);
+    expect(budget.textLines).toEqual([0, 0]);
+    expect(cardTextHeight(input, budget)).toBeLessThanOrEqual(input.available);
+  });
+});
+
 describe('cardTextHeight', () => {
   const sizes = {
     titleLine: 30,

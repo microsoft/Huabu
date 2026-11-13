@@ -76,15 +76,25 @@ export function allocateCardLines(input: CardBudgetInput): CardBudget {
     need: input.tagRowsNeed,
     count: 0,
   };
-  // Lines are granted in property order, so the first property is always
-  // the first one shown.
-  const texts: Block[] = input.textNeeds.map((need, index) => ({
-    cost: (n) =>
-      input.textLine +
-      (n === 1 ? (index === 0 ? input.textGap : input.textInnerGap) : 0),
-    need,
-    count: 0,
-  }));
+  // The first property to be shown opens the group and pays the group gap,
+  // whichever one that turns out to be; only properties after it join at the
+  // inner gap. (A later one must not slip in cheaply past an earlier one that
+  // could not afford to open the group.)
+  const texts: Block[] = [];
+  for (const need of input.textNeeds) {
+    const earlier = [...texts];
+    texts.push({
+      cost: (n) =>
+        input.textLine +
+        (n > 1
+          ? 0
+          : earlier.some((text) => text.count > 0)
+            ? input.textInnerGap
+            : input.textGap),
+      need,
+      count: 0,
+    });
+  }
   const summary: Block = {
     cost: (n) => input.textLine + (n === 1 ? input.summaryGap : 0),
     need: input.summaryNeed,

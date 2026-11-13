@@ -458,7 +458,14 @@ export function NodeProperties({
           if (event.key === 'Enter') {
             event.preventDefault();
             event.stopPropagation();
-            if (!event.nativeEvent.isComposing && !composing.current) submit();
+            // 229: an IME still owns this key. Safari reports the Enter that
+            // confirms a candidate after composition has ended.
+            if (
+              !event.nativeEvent.isComposing &&
+              !composing.current &&
+              event.keyCode !== 229
+            )
+              submit();
           }
           if (event.key === 'Escape') {
             event.preventDefault();

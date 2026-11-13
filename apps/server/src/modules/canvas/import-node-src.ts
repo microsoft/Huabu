@@ -30,6 +30,8 @@ import { existsSync, statSync } from 'node:fs';
 import { readFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 
+import { imageSize } from 'image-size';
+
 import {
   createId,
   type CanvasCommand,
@@ -118,6 +120,15 @@ const COVER_EXTENSIONS: ReadonlySet<string> = new Set([
   '.gif',
   '.webp',
   '.avif',
+]);
+
+/** Decoded formats accepted as a cover, as `image-size` names them. */
+const COVER_IMAGE_TYPES: ReadonlySet<string> = new Set([
+  'png',
+  'jpg',
+  'gif',
+  'webp',
+  'avif',
 ]);
 
 /**
@@ -294,6 +305,11 @@ async function resolveCovers(
   const covers = new Map<object, string | null>();
   // Nodes created earlier in this batch are not in the stored snapshot yet.
   const createdTypes = new Map<string, string>();
+  // One import per distinct value, so two PDFs may share a staged upload.
+  const keyByValue = new Map<string, string>();
+  // Staged uploads stay in place until every cover in the batch is valid: a
+  // rejected batch must leave them for the retry.
+  const stagedUploads: string[] = [];
   const resolve = async (owner: object, type: string, raw: unknown) => {
     if (type !== 'pdf')
       throw new NodeCoverError('coverUrl is supported only on PDF nodes');
@@ -301,21 +317,23 @@ async function resolveCovers(
       covers.set(owner, null);
       return;
     }
-    const imported = await resolveImportedSrc(
-      canvasId,
-      raw,
-      true,
-      COVER_EXTENSIONS,
-    );
-    const key = imported ?? (raw as string);
-    const available =
-      path.basename(key) === key &&
-      COVER_EXTENSIONS.has(path.extname(key).toLowerCase()) &&
-      (await space(canvasId).artifacts.hasMany([key])).has(key);
-    if (!available)
-      throw new NodeCoverError(
-        `PDF cover ${JSON.stringify(raw)} is not an available image: use a staged upload path, an existing artifact key, or an HTTPS image URL`,
-      );
+    const value = raw as string;
+    let key = keyByValue.get(value);
+    if (key === undefined) {
+      key =
+        (await resolveImportedSrc(
+          canvasId,
+          value,
+          true,
+          COVER_EXTENSIONS,
+          stagedUploads,
+        )) ?? value;
+      if (!(await isCoverImage(canvasId, key)))
+        throw new NodeCoverError(
+          `PDF cover ${JSON.stringify(raw)} is not an available image: use a staged upload path, an existing artifact key, or an HTTPS image URL`,
+        );
+      keyByValue.set(value, key);
+    }
     covers.set(owner, key);
   };
 
@@ -339,7 +357,37 @@ async function resolveCovers(
       }
     }
   }
+  await Promise.all(
+    stagedUploads.map((absPath) => rm(absPath, { force: true }).catch(noop)),
+  );
   return covers;
+}
+
+function noop(): void {
+  /* best-effort cleanup — the copy already succeeded */
+}
+
+/**
+ * Whether `key` names a stored artifact whose bytes are a supported raster
+ * image. The extension alone proves nothing: a `.png` URL can answer with an
+ * HTML error page, and a broken cover would replace a working thumbnail.
+ */
+async function isCoverImage(canvasId: string, key: string): Promise<boolean> {
+  if (
+    path.basename(key) !== key ||
+    !COVER_EXTENSIONS.has(path.extname(key).toLowerCase())
+  )
+    return false;
+  const bytes = await space(canvasId).artifacts.read(key);
+  if (!bytes) return false;
+  try {
+    const image = imageSize(bytes);
+    return (
+      !!image.width && !!image.height && COVER_IMAGE_TYPES.has(image.type ?? '')
+    );
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -359,6 +407,7 @@ async function resolveImportedSrc(
   raw: unknown,
   allowRemoteDownload: boolean,
   allowedLocalExtensions?: ReadonlySet<string>,
+  deferredUploads?: string[],
 ): Promise<string | null> {
   if (typeof raw !== 'string' || raw.length === 0) return null;
   const src = raw;
@@ -427,7 +476,7 @@ async function resolveImportedSrc(
     return null;
   }
 
-  return await copyToArtifact(canvasId, absPath, physicalRel);
+  return await copyToArtifact(canvasId, absPath, physicalRel, deferredUploads);
 }
 
 /** Copy a canvas-local file into blob storage, returning the new key. */
@@ -435,6 +484,7 @@ async function copyToArtifact(
   canvasId: string,
   absPath: string,
   physicalRel: string,
+  deferredUploads?: string[],
 ): Promise<string | null> {
   try {
     const ext = path.extname(absPath) || '.bin';
@@ -447,7 +497,10 @@ async function copyToArtifact(
     // stored. Never delete user node files or other canvas content —
     // only the hidden `.upload/` staging dir is fair game.
     const normalized = physicalRel.split(path.sep).join('/');
-    if (normalized.startsWith(UPLOAD_DIR_NAME + '/')) {
+    if (!normalized.startsWith(UPLOAD_DIR_NAME + '/')) return key;
+    // A caller that may still reject the batch reclaims the upload itself.
+    if (deferredUploads) deferredUploads.push(absPath);
+    else {
       try {
         await rm(absPath, { force: true });
       } catch {

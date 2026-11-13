@@ -570,3 +570,27 @@ it('removes one of two repeated tags and lets Enter save once the pointer leaves
     properties: { Keywords: ['ink', 'canvas'] },
   });
 });
+
+it.each([
+  ['a tag', { Keywords: ['ink'] }, '[role="combobox"]'],
+  ['text', { Venue: 'UIST' }, 'textarea'],
+])(
+  'does not save %s on the Enter an IME uses to confirm a candidate',
+  async (_kind, properties, selector) => {
+    render(false, [], properties);
+    click(`node.editProperty:${Object.keys(properties)[0]}`);
+    // Safari: composition has ended, isComposing is false, keyCode is 229.
+    const enter = new KeyboardEvent('keydown', {
+      key: 'Enter',
+      keyCode: 229,
+      bubbles: true,
+      cancelable: true,
+    });
+    act(() => {
+      container.querySelector(selector)?.dispatchEvent(enter);
+    });
+    await act(async () => {});
+    expect(save).not.toHaveBeenCalled();
+    expect(container.querySelector('form')).not.toBeNull();
+  },
+);
