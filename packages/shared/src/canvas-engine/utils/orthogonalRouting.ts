@@ -280,6 +280,20 @@ export function routeOrthogonalEdge(
     ...(sourceRect ? [sourceRect] : []),
     ...(targetRect ? [targetRect] : []),
   ];
+  // A clear facing connection needs no stubs, even in a narrow endpoint gap.
+  const normal = NORMAL[sourceSide];
+  const dx = target.x - source.x;
+  const dy = target.y - source.y;
+  if (
+    DIRECTION[targetSide] === (DIRECTION[sourceSide] + 2) % 4 &&
+    dx * normal.x + dy * normal.y > 0 &&
+    dx * normal.y - dy * normal.x === 0 &&
+    !obstacles.some((rect) => hits(source, target, rect)) &&
+    !(options.sourceRect && hits(source, target, options.sourceRect)) &&
+    !(options.targetRect && hits(source, target, options.targetRect))
+  )
+    return render([source, target], radius, 'routed');
+
   const start = outwardStub(source, sourceSide, stubLength, sourceRect);
   const end = outwardStub(target, targetSide, stubLength, targetRect);
   const blockedPort =
