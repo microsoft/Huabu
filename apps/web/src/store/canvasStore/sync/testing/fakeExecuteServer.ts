@@ -15,6 +15,7 @@
 
 import {
   applySharedPostEffectsFromWriteResult,
+  createExpectedParentsAdmit,
   diffCanvasState,
   diffSiblingOrderEvents,
   executeCanvasCommands,
@@ -72,6 +73,14 @@ export function createFakeExecuteServer(
       const out = executeCanvasCommands(
         { source: 'ui', commands: request.commands as CanvasCommand[] },
         { nodes: prevNodes, edges: before.edges, canvasId },
+        request.expectedParents?.length
+          ? {
+              admit: createExpectedParentsAdmit(
+                request.commands as CanvasCommand[],
+                request.expectedParents,
+              ),
+            }
+          : {},
       );
       const shared = applySharedPostEffectsFromWriteResult(out.writeResult);
       const nextNodes = out.writeResult.nodes.map((node) =>

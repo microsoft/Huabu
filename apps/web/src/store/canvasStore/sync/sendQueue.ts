@@ -10,7 +10,9 @@
  * the same request with the same id, which the server answers from its
  * stored result, so a batch never executes twice. No read version is sent:
  * the server runs every batch on its latest state, so edits to unrelated
- * nodes from two pages never reject each other.
+ * nodes from two pages never reject each other. What is sent instead is, per
+ * edit, the parent each node it places had on this page (`expectedParents`),
+ * so an edit made in a container the node has left is refused as a whole.
  *
  * The queue only transports. Applying the result, releasing in-flight
  * holds and telling the user are the caller's, through `onSettled`.
@@ -30,6 +32,7 @@ import { ApiError } from '@/api/_client';
 
 import type {
   CanvasCommand,
+  CanvasExecuteExpectedParents,
   PostCanvasExecuteRequest,
   PostCanvasExecuteResponse,
 } from '@huabu/shared';
@@ -50,6 +53,11 @@ export interface SendQueueEntry {
   readonly id: string;
   readonly canvasId: string;
   readonly commands: CanvasCommand[];
+  /**
+   * For each batch folded into the entry that places nodes: its run of
+   * commands and the parents those nodes had when the batch was made.
+   */
+  readonly expectedParents: CanvasExecuteExpectedParents[];
   /** Every batch in the entry is a derived report; see the module comment. */
   readonly derived: boolean;
   /** Resolves once the entry leaves the queue. Never rejects. */
@@ -121,6 +129,11 @@ export interface EnqueueOptions {
   gate?: Promise<unknown>;
   /** The batch is a derived report, not an edit the user made. */
   derived?: boolean;
+  /**
+   * Node id → the parent the node had on this page when the batch was made
+   * (`null` is the canvas), for the nodes the batch places.
+   */
+  expectedParents?: Record<string, string | null> | null;
 }
 
 export interface EnqueueResult {
@@ -268,6 +281,9 @@ export function createSendQueue(options: SendQueueOptions): SendQueue {
     commands: entry.commands,
     originator: { source: 'ui', tabId: options.clientId },
     operationId: entry.id,
+    ...(entry.expectedParents.length > 0
+      ? { expectedParents: entry.expectedParents }
+      : {}),
   });
 
   const settle = (lane: Lane, entry: Entry, outcome: SendOutcome): void => {
@@ -386,6 +402,13 @@ export function createSendQueue(options: SendQueueOptions): SendQueue {
       ) {
         const offset = last.commands.length;
         last.commands.push(...commands);
+        if (enqueueOptions?.expectedParents && commands.length > 0) {
+          last.expectedParents.push({
+            start: offset,
+            count: commands.length,
+            parents: enqueueOptions.expectedParents,
+          });
+        }
         last.derived &&= enqueueOptions?.derived === true;
         publish(lane);
         return { entry: last, offset };
@@ -398,6 +421,16 @@ export function createSendQueue(options: SendQueueOptions): SendQueue {
         id: createId(),
         canvasId,
         commands: [...commands],
+        expectedParents:
+          enqueueOptions?.expectedParents && commands.length > 0
+            ? [
+                {
+                  start: 0,
+                  count: commands.length,
+                  parents: enqueueOptions.expectedParents,
+                },
+              ]
+            : [],
         derived: enqueueOptions?.derived === true,
         settled,
         ...(enqueueOptions?.gate ? { gate: enqueueOptions.gate } : {}),

@@ -1621,3 +1621,299 @@ describe('renderer-measured boxes', () => {
     expect(own).toHaveLength(0);
   });
 });
+
+describe('a move made in a container the node has left', () => {
+  const F = 'node-sync-f';
+  const G = 'node-sync-g';
+  const frame = (id: string, x: number): Node => ({
+    id,
+    type: 'frame',
+    position: { x, y: 1000 },
+    style: { width: 400, height: 400 },
+    data: { type: 'frame', label: id, sizing: 'hug' },
+  });
+  const sizeOf = (value: Node | undefined) => value?.style;
+  const parentOf = (value: Node | undefined) => value?.parentId ?? null;
+  const intoCommands = (
+    id: string,
+    parentId: string | null,
+  ): CanvasCommand[] => [
+    {
+      type: 'SET_NODE_PARENT',
+      nodeIds: [id as `node-${string}`],
+      parentId: parentId as `node-${string}` | null,
+    },
+  ];
+  /** A drag that ends in another container, as this page sends it. */
+  function reparentHere(id: string, parentId: string | null) {
+    state().executeCommands(intoCommands(id, parentId));
+  }
+  const refused = (index: number) =>
+    commit(index).results.map((result) => result.reason ?? 'applied');
+
+  /** X on the canvas, Y inside F, G empty. */
+  function seed() {
+    const nodes = [
+      note(X, 0, 0),
+      frame(F, 1000),
+      { ...note(Y, 40, 80), parentId: F },
+      frame(G, 2000),
+    ];
+    state()._setStateNoAutosave({ nodes });
+    server.reset(nodes, [], 1);
+  }
+
+  it('states the parent each placed node had when the edit was made', async () => {
+    seed();
+    moveHere(X, 500);
+    expect(own[0].request.expectedParents).toEqual([
+      { start: 0, count: 1, parents: { [X]: null } },
+    ]);
+    await answer(0);
+    // A change that places nothing states nothing.
+    recolourHere(Y, 'red');
+    expect(own[1].request).not.toHaveProperty('expectedParents');
+  });
+
+  it("is refused when another page put the node into a Frame first; the page shows its own whole edit until then and the server's afterwards", async () => {
+    seed();
+    const frameBefore = sizeOf(serverNode(F));
+    moveHere(X, 500, 700);
+    // A drags X into F; that commits before this page's move.
+    const theirs = remote(intoCommands(X, F));
+    deliver(theirs, 'ui');
+    // Never A's parent with this page's coordinates.
+    expect(parentOf(node(X))).toBeNull();
+    expect(node(X).position).toEqual({ x: 500, y: 700 });
+    const placed = { ...serverNode(X)?.position };
+    const frameAfterTheirs = sizeOf(serverNode(F));
+
+    await answer(0);
+    expect(refused(0)).toEqual(['stale-parent']);
+    // The server kept A's edit and the Frame did not grow for this move.
+    expect(parentOf(serverNode(X))).toBe(F);
+    expect(serverNode(X)?.position).toEqual(placed);
+    expect(sizeOf(serverNode(F))).toEqual(frameAfterTheirs);
+    expect(frameBefore).toBeDefined();
+    // This page: one notice, then exactly the server's node.
+    expect(toast).toHaveBeenCalledTimes(1);
+    expect(parentOf(node(X))).toBe(F);
+    expect(node(X).position).toEqual(placed);
+    await flush();
+    expect(api.getCanvas).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(api.getCanvas).toHaveBeenCalledTimes(1);
+    expect(toast).toHaveBeenCalledTimes(1);
+    // The refused move is not in the history any more.
+    expect(canvasHistoryManager.canUndo).toBe(false);
+    expect(hasUnsavedCanvasEdits()).toBe(false);
+  });
+
+  it('is refused when another page took the node out of the Frame first (the mirror case)', async () => {
+    seed();
+    moveHere(Y, 200, 250);
+    // Where the move left Y inside F, once the Frame was fitted around it.
+    const mine = { ...node(Y).position };
+    const theirs = remote(intoCommands(Y, null));
+    deliver(theirs, 'ui');
+    expect(parentOf(node(Y))).toBe(F);
+    expect(node(Y).position).toEqual(mine);
+    const placed = { ...serverNode(Y)?.position };
+
+    await answer(0);
+    expect(refused(0)).toEqual(['stale-parent']);
+    expect(parentOf(serverNode(Y))).toBeNull();
+    expect(serverNode(Y)?.position).toEqual(placed);
+    expect(toast).toHaveBeenCalledTimes(1);
+    expect(parentOf(node(Y))).toBeNull();
+    expect(node(Y).position).toEqual(placed);
+    await flush();
+    expect(api.getCanvas).toHaveBeenCalledTimes(1);
+  });
+
+  it('refuses the later of two drags of one node into different Frames, as a whole', async () => {
+    seed();
+    // This page drags X into G and, in the same gesture, moves Y.
+    state().beginGesture('SET_NODE_GEOMETRY');
+    state().executeCommands([
+      ...intoCommands(X, G),
+      {
+        type: 'SET_NODE_GEOMETRY',
+        items: [
+          { nodeId: X as `node-${string}`, position: { x: 30, y: 60 } },
+          { nodeId: Y as `node-${string}`, position: { x: 90, y: 90 } },
+        ],
+      },
+    ]);
+    expect(parentOf(node(X))).toBe(G);
+    expect(own[0].request.expectedParents).toEqual([
+      { start: 0, count: 2, parents: { [X]: null, [Y]: F } },
+    ]);
+    const mine = { ...node(X).position };
+    deliver(remote(intoCommands(X, F)), 'ui');
+    expect(parentOf(node(X))).toBe(G);
+    expect(node(X).position).toEqual(mine);
+    const placed = { ...serverNode(X)?.position };
+    // Where A's edit left Y once F was fitted around X.
+    const beside = { ...serverNode(Y)?.position };
+
+    await answer(0);
+    // Neither the parent change nor either position was taken.
+    expect(refused(0)).toEqual(['stale-parent', 'stale-parent']);
+    expect(parentOf(serverNode(X))).toBe(F);
+    expect(serverNode(X)?.position).toEqual(placed);
+    expect(serverNode(Y)?.position).toEqual(beside);
+    expect(toast).toHaveBeenCalledTimes(1);
+    await flush();
+    expect(api.getCanvas).toHaveBeenCalledTimes(1);
+    expect(parentOf(node(X))).toBe(F);
+    expect(node(X).position).toEqual(placed);
+    expect(node(Y).position).toEqual(beside);
+  });
+
+  it("stands when it is committed first, and the other page's later move is the one refused", async () => {
+    seed();
+    reparentHere(X, F);
+    await answer(0);
+    expect(parentOf(serverNode(X))).toBe(F);
+    const placed = { ...serverNode(X)?.position };
+    // B had not heard of it and moved X on the canvas.
+    const theirs = server.execute(SPACE, {
+      commands: [moveCommand(X, 700, 700)],
+      originator: { source: 'ui', tabId: 'page-b' },
+      operationId: crypto.randomUUID(),
+      expectedParents: [{ start: 0, count: 1, parents: { [X]: null } }],
+    });
+    expect(theirs.results.map((result) => result.reason)).toEqual([
+      'stale-parent',
+    ]);
+    expect(theirs.toVersion).toBe(theirs.fromVersion);
+    expect(serverNode(X)?.position).toEqual(placed);
+    expect(node(X).position).toEqual(placed);
+    expect(toast).not.toHaveBeenCalled();
+  });
+
+  it('does not refuse its own consecutive drags: each states the parent the one before it left', async () => {
+    seed();
+    reparentHere(X, F);
+    // Before the first is answered: move inside F, then out again.
+    moveHere(X, 60, 120);
+    reparentHere(X, null);
+    moveHere(X, 5, 5);
+    expect(own).toHaveLength(1);
+    await answer(0);
+    // The edits made meanwhile were folded into one request.
+    expect(own).toHaveLength(2);
+    expect(own[1].request.expectedParents).toEqual([
+      { start: 0, count: 1, parents: { [X]: F } },
+      { start: 1, count: 1, parents: { [X]: F } },
+      { start: 2, count: 1, parents: { [X]: null } },
+    ]);
+    await answer(1);
+    expect(
+      [...commit(0).results, ...commit(1).results].every(
+        (result) => result.applied,
+      ),
+    ).toBe(true);
+    expect(toast).not.toHaveBeenCalled();
+    expect(api.getCanvas).not.toHaveBeenCalled();
+    expect(parentOf(serverNode(X))).toBeNull();
+    expect(serverNode(X)?.position).toEqual({ x: 5, y: 5 });
+    expect(node(X).position).toEqual({ x: 5, y: 5 });
+  });
+
+  it('refuses an edit that builds on a refused one, and still takes the unrelated ones', async () => {
+    seed();
+    moveHere(X, 500, 700);
+    // Folded into the next request while the first is on the wire.
+    moveHere(X, 600, 700);
+    recolourHere(Y, 'red');
+    deliver(remote(intoCommands(X, F)), 'ui');
+    await answer(0);
+    expect(refused(0)).toEqual(['stale-parent']);
+    await answer(1);
+    expect(refused(1)).toEqual(['stale-parent', 'applied']);
+    expect(accentOf(serverNode(Y) as Node)).toBe('red');
+    expect(parentOf(serverNode(X))).toBe(F);
+    await flush();
+    expect(api.getCanvas).toHaveBeenCalledTimes(1);
+    expect(accentOf(node(Y))).toBe('red');
+    expect(parentOf(node(X))).toBe(F);
+  });
+
+  const tick = (id: string, x: number, y: number, dragging = true) =>
+    state().onNodesChange([
+      { type: 'position', id, position: { x, y }, dragging },
+    ]);
+
+  it('keeps a node under the pointer in its own container while another page reparents it, and the drop is refused', async () => {
+    seed();
+    state().onNodeDragStart(new MouseEvent('mousedown'), node(X), [node(X)]);
+    tick(X, 150, 700);
+    deliver(remote(intoCommands(X, F)), 'ui');
+    // Still on the canvas, under the hand.
+    expect(parentOf(node(X))).toBeNull();
+    expect(node(X).position).toEqual({ x: 150, y: 700 });
+    expect(api.getCanvas).not.toHaveBeenCalled();
+    const placed = { ...serverNode(X)?.position };
+
+    tick(X, 200, 700, false);
+    state().onNodeDragStop(new MouseEvent('mouseup'), node(X), [node(X)]);
+    expect(own).toHaveLength(1);
+    // The drop states the container the page showed during the drag.
+    expect(own[0].request.expectedParents).toHaveLength(1);
+    expect(own[0].request.expectedParents?.[0]?.parents).toMatchObject({
+      [X]: null,
+    });
+    await flush();
+    expect(api.getCanvas).not.toHaveBeenCalled();
+
+    await answer(0);
+    expect(commit(0).results.every((result) => !result.applied)).toBe(true);
+    expect(parentOf(serverNode(X))).toBe(F);
+    expect(serverNode(X)?.position).toEqual(placed);
+    expect(toast).toHaveBeenCalledTimes(1);
+    await flush();
+    expect(api.getCanvas).toHaveBeenCalledTimes(1);
+    expect(parentOf(node(X))).toBe(F);
+    expect(node(X).position).toEqual(placed);
+  });
+
+  it('a cancelled drag adopts the parent and position another page gave the node meanwhile', async () => {
+    seed();
+    state().onNodeDragStart(new MouseEvent('mousedown'), node(X), [node(X)]);
+    tick(X, 150, 700);
+    deliver(remote(intoCommands(X, F)), 'ui');
+    expect(parentOf(node(X))).toBeNull();
+
+    state().cancelActiveNodeDrag();
+    expect(parentOf(node(X))).toBe(F);
+    expect(node(X).position).toEqual(serverNode(X)?.position);
+    // The parent comes before its child, as React Flow requires.
+    const ids = state().nodes.map((candidate) => candidate.id);
+    expect(ids.indexOf(F)).toBeLessThan(ids.indexOf(X));
+    expect(own).toHaveLength(0);
+    expect(toast).not.toHaveBeenCalled();
+    await flush();
+    // Sibling order is the server's after one load.
+    expect(api.getCanvas).toHaveBeenCalledTimes(1);
+  });
+
+  it("takes this page's move back together with its container once another page has reparented the node", async () => {
+    seed();
+    moveHere(X, 500, 700);
+    await answer(0);
+    deliver(remote(intoCommands(X, F)), 'ui');
+    expect(parentOf(node(X))).toBe(F);
+
+    state().undo();
+    // Not the old canvas coordinates read inside the Frame.
+    expect(parentOf(node(X))).toBeNull();
+    expect(node(X).position).toEqual({ x: 0, y: 0 });
+    await answer(1);
+    expect(commit(1).results.every((result) => result.applied)).toBe(true);
+    expect(parentOf(serverNode(X))).toBeNull();
+    expect(serverNode(X)?.position).toEqual({ x: 0, y: 0 });
+    await vi.advanceTimersByTimeAsync(5_000);
+  });
+});

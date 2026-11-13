@@ -17,6 +17,8 @@
  * `canvasStore` and can be driven by a fake store in tests.
  */
 
+import { expectedParentsOf } from '@huabu/shared/canvas-engine';
+
 import { toFieldLevelDeltas, type FieldLevelResult } from './fieldLevelDeltas';
 import {
   deriveHeldKeys,
@@ -82,6 +84,12 @@ export interface SubmitInput {
   prev: { nodes: readonly UnitNode[]; edges: readonly UnitEdge[] };
   /** State after the batch ran locally. */
   next: { nodes: readonly UnitNode[]; edges: readonly UnitEdge[] };
+  /**
+   * The nodes as this page showed them when the commands were made, when
+   * that is not `prev`. The parents the batch states it was made under
+   * (`expectedParents`) are read from here.
+   */
+  madeIn?: readonly UnitNode[];
   gate?: Promise<unknown>;
   /**
    * The batch reports something the page derived (a measured height) rather
@@ -276,6 +284,13 @@ export function createBrowserSync(deps: BrowserSyncDeps): BrowserSync {
       const result = queue.enqueue(input.canvasId, input.commands, {
         ...(input.gate ? { gate: input.gate } : {}),
         ...(input.derived ? { derived: true } : {}),
+        expectedParents: expectedParentsOf(
+          input.commands,
+          (input.madeIn ?? input.prev.nodes) as readonly {
+            id: string;
+            parentId?: string | null;
+          }[],
+        ),
       });
       const keys = deriveHeldKeys(input.prev, input.next, deps.ignoreUnit);
       if (input.derived) for (const key of keys.keys()) keys.set(key, null);

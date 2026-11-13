@@ -150,7 +150,7 @@ import {
   type PreparedRemote,
 } from './canvasStore/sync/browserSync';
 import { restoreChanged } from './canvasStore/sync/historyRestore';
-import { deriveHeldKeys } from './canvasStore/sync/inFlight';
+import { deriveHeldKeys, nodeUnitKey } from './canvasStore/sync/inFlight';
 import {
   commandsForLocalDiff,
   commandsForStateDiff,
@@ -159,6 +159,8 @@ import { CANVAS_PAGE_ID } from './canvasStore/sync/pageId';
 import {
   applyUnits,
   changedUnits,
+  PARENT_UNIT,
+  PLACEMENT_UNITS,
   writeUnit,
   type UnitNode,
 } from './canvasStore/sync/propertyUnits';
@@ -1014,6 +1016,48 @@ const SYNC_CLIENT_ID = CANVAS_PAGE_ID;
  */
 let syncGestureBaseline: Node[] | null = null;
 
+/**
+ * Nodes whose parent another page changed while the open gesture held their
+ * placement. The page kept showing them under their own parent, so that is
+ * the parent the gesture was made under — not the one `syncGestureBaseline`
+ * has been brought up to since.
+ */
+const gestureWithheldParents = new Set<string>();
+
+/**
+ * The gesture's starting nodes, with the parent this page showed for every
+ * node whose parent change it kept back: what the gesture's batch states as
+ * the parents it was made under.
+ */
+function gestureMadeIn(
+  baseline: readonly Node[],
+  shown: readonly Node[],
+): readonly Node[] {
+  if (gestureWithheldParents.size === 0) return baseline;
+  const live = new Map(shown.map((node) => [node.id, node]));
+  return baseline.map((node) => {
+    const current = gestureWithheldParents.has(node.id) && live.get(node.id);
+    return current ? { ...node, parentId: current.parentId } : node;
+  });
+}
+
+/**
+ * Close the open gesture's sync bookkeeping (or restart it from `next`).
+ *
+ * A gesture that kept another page's parent change back has ended: whatever
+ * it sent states the parent the page showed, so the server refuses it, and a
+ * gesture that sent nothing left the page behind the server. Either way the
+ * page converges by loading the Space once nothing is left to send.
+ */
+function endSyncGesture(next: Node[] | null = null): void {
+  syncGestureBaseline = next;
+  if (gestureWithheldParents.size === 0) return;
+  gestureWithheldParents.clear();
+  const { canvasId } = useCanvasStore.getState();
+  // After the caller has queued the gesture's batch, never before it.
+  if (canvasId) queueMicrotask(() => browserSync.deferReload(canvasId));
+}
+
 /** The node and edge lists in the shape the sync modules read. */
 function syncView(
   nodes: readonly Node[],
@@ -1483,7 +1527,14 @@ const browserSync = createBrowserSync({
       return next as unknown as Node;
     });
     if (!touched) return;
-    state._setStateNoAutosave({ nodes });
+    // A parent put back to the server's needs the parent-before-child order
+    // React Flow requires; sibling order follows with the reload a refusal
+    // asks for.
+    state._setStateNoAutosave({
+      nodes: units.some((unit) => unit.unit === PARENT_UNIT)
+        ? (normalizeTreeOrder(nodes as NestableNode[]) as Node[])
+        : nodes,
+    });
   },
   onRejected: ({ canvasId, outcome }) => {
     if (useCanvasStore.getState().canvasId !== canvasId) return;
@@ -1830,8 +1881,9 @@ function rebaseGestureBaseline(deltas: readonly Delta[]): void {
  */
 function submitGestureTicks(edgesBefore: readonly Edge[]): void {
   const baseline = syncGestureBaseline;
-  syncGestureBaseline = null;
   const state = useCanvasStore.getState();
+  const madeIn = baseline ? gestureMadeIn(baseline, state.nodes) : [];
+  endSyncGesture();
   if (!baseline || !state.canvasId) return;
   const { commands } = commandsForLocalDiff(
     baseline as unknown as UnitNode[],
@@ -1850,6 +1902,7 @@ function submitGestureTicks(edgesBefore: readonly Edge[]): void {
     commands,
     prev: syncView(baseline, edgesBefore),
     next: syncView(state.nodes, state.edges),
+    madeIn: madeIn as unknown as UnitNode[],
   });
 }
 
@@ -1860,6 +1913,7 @@ function submitGestureTicks(edgesBefore: readonly Edge[]): void {
 export function resetCanvasSyncForTests(): void {
   browserSync.reset();
   syncGestureBaseline = null;
+  gestureWithheldParents.clear();
   heightsAwaitingContent.clear();
   reportedHeightKeys.clear();
   sizesAwaitingContent.clear();
@@ -2994,9 +3048,14 @@ const useCanvasStore = create<RFState>()(
       // pointer (a resize a modifier key interrupted) goes on from here, so
       // what its later ticks change is measured from the state this batch
       // leaves.
+      // The parents the gesture was made under, read before its bookkeeping
+      // is closed.
+      const madeIn = gestureBaseline
+        ? (gestureMadeIn(gestureBaseline, state.nodes) as unknown as UnitNode[])
+        : undefined;
       const gestureTicksSent = (): void => {
         if (!openGesture) return;
-        syncGestureBaseline = pointerGestureActive() ? get().nodes : null;
+        endSyncGesture(pointerGestureActive() ? get().nodes : null);
       };
       const prelude = gestureBaseline
         ? commandsForLocalDiff(
@@ -3012,6 +3071,7 @@ const useCanvasStore = create<RFState>()(
           commands: prelude,
           prev: syncView(gestureBaseline, state.edges),
           next: syncView(state.nodes, state.edges),
+          ...(madeIn ? { madeIn } : {}),
         });
       };
 
@@ -3162,6 +3222,7 @@ const useCanvasStore = create<RFState>()(
           commands: [...prelude, ...forServer.commands],
           prev: syncView(gestureBaseline ?? state.nodes, state.edges),
           next: syncView(get().nodes, get().edges),
+          ...(madeIn ? { madeIn } : {}),
           ...(forks.length > 0 ? { gate: Promise.all(forks) } : {}),
           ...(createdNodes.length > 0
             ? {
@@ -3350,6 +3411,15 @@ const useCanvasStore = create<RFState>()(
         ...(sync?.source ? { source: sync.source } : {}),
       });
       deltas = remote.deltas;
+      // The gesture goes on under the parent this page shows; remember that
+      // its batch was made there.
+      for (const unit of remote.withheld) {
+        if (
+          unit.unit === PARENT_UNIT &&
+          gestureKeys?.has(nodeUnitKey(unit.nodeId, PARENT_UNIT))
+        )
+          gestureWithheldParents.add(unit.nodeId);
+      }
       // A person's edit is theirs to undo, not this page's.
       const recordUndo = !remote.own && sync?.source !== 'ui';
       const serverNodeOf = (node: { id: string }): Node =>
@@ -3687,7 +3757,10 @@ const useCanvasStore = create<RFState>()(
         orderReplay.diverged &&
         skipped.size === 0 &&
         !hasUnsavedStructureOrContent() &&
-        !orderEvents.some((event) => remote.orderHeld(event.parentId))
+        !orderEvents.some((event) => remote.orderHeld(event.parentId)) &&
+        // A parent change kept back leaves the node among its local
+        // siblings; the answer to the change that holds it settles both.
+        !remote.withheld.some((unit) => unit.unit === PARENT_UNIT)
       ) {
         order?.onDiverged?.();
       }
@@ -4041,6 +4114,7 @@ const useCanvasStore = create<RFState>()(
         useGesturePreviewStore.getState().resetCanvasScopedTransients();
         // The loaded Space is the server's: nothing local is unconfirmed.
         syncGestureBaseline = null;
+        gestureWithheldParents.clear();
         browserSync.adoptedServerState(targetId);
         heightsAwaitingContent.clear();
         reportedHeightKeys.clear();
@@ -5057,7 +5131,7 @@ const useCanvasStore = create<RFState>()(
           canvasHistoryManager.rollbackGestureSnapshot();
         }
       }
-      syncGestureBaseline = null;
+      endSyncGesture();
     },
 
     cancelActiveNodeDrag: () => {
@@ -5074,26 +5148,44 @@ const useCanvasStore = create<RFState>()(
       _dragStartPositions = null;
       if (startPositions) {
         // Where the node was when the drag began — or where another page
-        // has put it since, which the drag kept back.
+        // has put it since, which the drag kept back: its position and,
+        // with it, the parent that position is relative to.
         const baseline = new Map(
-          (syncGestureBaseline ?? []).map((node) => [node.id, node.position]),
+          (syncGestureBaseline ?? []).map((node) => [node.id, node]),
         );
-        get()._setStateNoAutosave({
-          nodes: get().nodes.map((node) => {
-            const start = startPositions.get(node.id);
-            if (!start) return node;
-            const position = baseline.get(node.id) ?? start;
+        let reparented = false;
+        const nodes = get().nodes.map((node) => {
+          const start = startPositions.get(node.id);
+          if (!start) return node;
+          const server = baseline.get(node.id);
+          if (!server) {
             return {
               ...node,
-              position: { x: position.x, y: position.y },
+              position: { x: start.x, y: start.y },
               dragging: false,
             };
-          }),
+          }
+          const placed = applyUnits(
+            node as unknown as UnitNode,
+            server as unknown as UnitNode,
+            PLACEMENT_UNITS,
+          ) as unknown as Node;
+          reparented ||= placed.parentId !== node.parentId;
+          return {
+            ...placed,
+            position: { x: server.position.x, y: server.position.y },
+            dragging: false,
+          };
+        });
+        get()._setStateNoAutosave({
+          nodes: reparented
+            ? (normalizeTreeOrder(nodes as NestableNode[]) as Node[])
+            : nodes,
         });
       }
 
       endSnapSession();
-      syncGestureBaseline = null;
+      endSyncGesture();
       canvasHistoryManager.rollbackGestureSnapshot();
       set({
         canUndo: canvasHistoryManager.canUndo,
@@ -5120,7 +5212,7 @@ const useCanvasStore = create<RFState>()(
       useGesturePreviewStore.getState().clearStructuredDropPreview();
       useGesturePreviewStore.getState().clearNodeGeometryPreviews();
       _dragStartPositions = null;
-      syncGestureBaseline = null;
+      endSyncGesture();
       endSnapSession();
     },
 
@@ -5769,7 +5861,7 @@ const useCanvasStore = create<RFState>()(
       const { nodes, edges } = get();
       armGestureSnapshot(nodes, edges);
       // Every tick of this burst is its own command batch.
-      syncGestureBaseline = null;
+      endSyncGesture();
     },
 
     endNodeDataGesture: () => {

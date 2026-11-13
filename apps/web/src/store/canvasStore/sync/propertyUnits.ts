@@ -23,6 +23,9 @@
  * React Flow runtime fields (`selected`, `dragging`, `measured`, `resizing`)
  * belong to no unit: they are never taken from another page.
  *
+ * `position` and `parent` are separate units but are held together while a
+ * local change to either is unconfirmed ({@link PLACEMENT_UNITS}).
+ *
  * Pure functions only.
  */
 
@@ -36,6 +39,13 @@ export type UnitNode = { id: string } & Record<string, unknown>;
 export const POSITION_UNIT = 'position';
 export const SIZE_UNIT = 'size';
 export const PARENT_UNIT = 'parent';
+/**
+ * The units that say where a node is: its parent and its position relative
+ * to that parent. Each is a unit of its own for reading and writing, but
+ * one is meaningless without the other, so an unconfirmed local change holds
+ * them together (see `deriveHeldKeys`).
+ */
+export const PLACEMENT_UNITS: readonly string[] = [POSITION_UNIT, PARENT_UNIT];
 const DATA_STYLE_PREFIX = 'data.style.';
 const DATA_PREFIX = 'data.';
 const NODE_PREFIX = 'node.';

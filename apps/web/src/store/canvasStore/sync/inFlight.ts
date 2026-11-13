@@ -22,6 +22,7 @@ import { TRANSIENT_EDGE_FIELDS } from '@huabu/shared/canvas-engine';
 
 import {
   changedUnits,
+  PLACEMENT_UNITS,
   readUnit,
   type UnitNode,
   type UnitValue,
@@ -186,6 +187,12 @@ function childOrders(nodes: readonly UnitNode[]): Map<string, string[]> {
  * `prev` and `next`, node and edge existence, and each parent whose
  * direct-child order changed.
  *
+ * A node's `position` and `parent` are held together: a position is
+ * relative to the parent, so a change to either holds both. An update from
+ * another page that changes the one this page did not touch is then kept
+ * back with the other, and the page never shows its own coordinates under
+ * another page's parent (or the reverse).
+ *
  * @param ignoreUnit Units that are not sent through the queue (they are
  *   saved by another writer and protected by its own bookkeeping).
  */
@@ -207,7 +214,12 @@ export function deriveHeldKeys(
         continue;
       }
       if (before === node) continue;
-      for (const unit of changedUnits(before, node)) {
+      const units = changedUnits(before, node);
+      if (PLACEMENT_UNITS.some((unit) => units.includes(unit))) {
+        for (const unit of PLACEMENT_UNITS)
+          if (!units.includes(unit)) units.push(unit);
+      }
+      for (const unit of units) {
         if (ignoreUnit(unit)) continue;
         keys.set(nodeUnitKey(node.id, unit), {
           nodeId: node.id,

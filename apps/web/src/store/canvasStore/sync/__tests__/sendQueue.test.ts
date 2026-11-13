@@ -338,6 +338,25 @@ describe('send queue', () => {
     expect(calls[1].request.commands).toEqual([move(2), move(3), move(4)]);
   });
 
+  it('sends, per folded batch, the parents it was made under and the commands they cover', async () => {
+    const { queue, calls, flush } = harness();
+    queue.enqueue('space', [move(1)]);
+    // No parents stated: the request carries no such field.
+    expect(calls[0].request).not.toHaveProperty('expectedParents');
+    queue.enqueue('space', [move(2), move(3)], {
+      expectedParents: { 'node-x': null },
+    });
+    queue.enqueue('space', [move(4)], {
+      expectedParents: { 'node-x': 'node-frame' },
+    });
+    calls[0].resolve(response(calls[0].request, 1));
+    await flush();
+    expect(calls[1].request.expectedParents).toEqual([
+      { start: 0, count: 2, parents: { 'node-x': null } },
+      { start: 2, count: 1, parents: { 'node-x': 'node-frame' } },
+    ]);
+  });
+
   it('waits for a gate and fails the entry without sending when it rejects', async () => {
     const { queue, calls, settled, flush } = harness();
     let open!: () => void;

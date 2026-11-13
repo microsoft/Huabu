@@ -127,12 +127,49 @@ describe('deriveHeldKeys', () => {
   const edge = { id: 'e', source: 'x', target: 'y' };
 
   it('holds exactly the units a batch changed, with their value before it', () => {
+    const next = [{ ...x, style: { width: 50 } }, y];
+    const keys = deriveHeldKeys(
+      { nodes: [x, y], edges: [edge] },
+      { nodes: next, edges: [edge] },
+    );
+    expect([...keys.keys()]).toEqual([nodeUnitKey('x', 'size')]);
+    expect(keys.get(nodeUnitKey('x', 'size'))).toEqual({
+      nodeId: 'x',
+      unit: 'size',
+      value: { present: false },
+    });
+  });
+
+  it('holds the parent with a changed position: where a node is, is one fact', () => {
     const next = [{ ...x, position: { x: 50, y: 0 } }, y];
     const keys = deriveHeldKeys(
       { nodes: [x, y], edges: [edge] },
       { nodes: next, edges: [edge] },
     );
-    expect([...keys.keys()]).toEqual([nodeUnitKey('x', 'position')]);
+    expect([...keys.keys()]).toEqual([
+      nodeUnitKey('x', 'position'),
+      nodeUnitKey('x', 'parent'),
+    ]);
+    expect(keys.get(nodeUnitKey('x', 'position'))).toEqual({
+      nodeId: 'x',
+      unit: 'position',
+      value: { present: true, value: { x: 0, y: 0 } },
+    });
+    // The parent did not change; its value before the batch is the canvas.
+    expect(keys.get(nodeUnitKey('x', 'parent'))).toEqual({
+      nodeId: 'x',
+      unit: 'parent',
+      value: { present: false },
+    });
+  });
+
+  it('holds the position with a changed parent, even when the coordinates are the same', () => {
+    const frame: UnitNode = { id: 'f', position: { x: 0, y: 0 }, data: {} };
+    const keys = deriveHeldKeys(
+      { nodes: [frame, x], edges: [] },
+      { nodes: [frame, { ...x, parentId: 'f' }], edges: [] },
+    );
+    expect(keys.has(nodeUnitKey('x', 'parent'))).toBe(true);
     expect(keys.get(nodeUnitKey('x', 'position'))).toEqual({
       nodeId: 'x',
       unit: 'position',
