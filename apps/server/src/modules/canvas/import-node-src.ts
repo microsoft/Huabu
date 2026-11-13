@@ -179,9 +179,33 @@ function srcNormalizeMode(type: string, src: unknown): SrcNormalizeMode | null {
  * reference. Import failures are logged and swallowed — the original `src` is
  * preserved so a single unreachable URL never fails the whole batch.
  */
+export interface ImportNodeSourcesOptions {
+  /**
+   * Resolve and validate `coverUrl` under the agent command contract (PDF
+   * only, an existing raster image). Off by default: callers that predate
+   * that contract keep storing whatever cover string they send.
+   */
+  agentCovers?: boolean;
+  /**
+   * Receives the staged uploads consumed as covers instead of having them
+   * reclaimed here, so the caller can keep them until its batch is accepted.
+   */
+  stagedCoverUploads?: string[];
+}
+
+/** Remove staged uploads whose bytes are already stored as artifacts. */
+export async function reclaimStagedUploads(
+  absPaths: readonly string[],
+): Promise<void> {
+  await Promise.all(
+    absPaths.map((absPath) => rm(absPath, { force: true }).catch(noop)),
+  );
+}
+
 export async function importForeignNodeSources(
   canvasId: string,
   commands: readonly CanvasCommand[],
+  options: ImportNodeSourcesOptions = {},
 ): Promise<CanvasCommand[]> {
   // Validate all creates before importing any bytes from the batch.
   assertCurrentCanvasNodeTypes(
@@ -214,7 +238,10 @@ export async function importForeignNodeSources(
 
   // Covers are validated for the whole batch before any `src` bytes move, so
   // a rejected cover never leaves half-imported sources behind.
-  const covers = await resolveCovers(canvasId, commands, nodeType);
+  const stagedCoverUploads = options.stagedCoverUploads ?? [];
+  const covers = options.agentCovers
+    ? await resolveCovers(canvasId, commands, nodeType, stagedCoverUploads)
+    : new Map<object, string | null>();
 
   const out: CanvasCommand[] = [];
   for (const cmd of commands) {
@@ -272,6 +299,9 @@ export async function importForeignNodeSources(
     }
     out.push(cmd);
   }
+  // After source normalization, which may have wanted the same upload.
+  if (!options.stagedCoverUploads)
+    await reclaimStagedUploads(stagedCoverUploads);
   return out;
 }
 
@@ -301,15 +331,16 @@ async function resolveCovers(
   canvasId: string,
   commands: readonly CanvasCommand[],
   storedNodeType: (nodeId: string) => Promise<string>,
+  stagedUploads: string[],
 ): Promise<Map<object, string | null>> {
   const covers = new Map<object, string | null>();
   // Nodes created earlier in this batch are not in the stored snapshot yet.
   const createdTypes = new Map<string, string>();
   // One import per distinct value, so two PDFs may share a staged upload.
   const keyByValue = new Map<string, string>();
-  // Staged uploads stay in place until every cover in the batch is valid: a
-  // rejected batch must leave them for the retry.
-  const stagedUploads: string[] = [];
+  // Staged uploads are only recorded here, never removed: a rejected batch
+  // must leave them for the retry, and the same upload may still be wanted as
+  // a node `src` later in this batch.
   const resolve = async (owner: object, type: string, raw: unknown) => {
     if (type !== 'pdf')
       throw new NodeCoverError('coverUrl is supported only on PDF nodes');
@@ -357,9 +388,6 @@ async function resolveCovers(
       }
     }
   }
-  await Promise.all(
-    stagedUploads.map((absPath) => rm(absPath, { force: true }).catch(noop)),
-  );
   return covers;
 }
 

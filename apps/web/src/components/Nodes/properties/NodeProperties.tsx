@@ -455,6 +455,13 @@ export function NodeProperties({
           composing.current = false;
         }}
         onKeyDown={(event) => {
+          // A focused button (a tag's remove control) keeps its own Enter.
+          if (
+            event.key === 'Enter' &&
+            event.target instanceof Element &&
+            event.target.closest('button')
+          )
+            return;
           if (event.key === 'Enter') {
             event.preventDefault();
             event.stopPropagation();

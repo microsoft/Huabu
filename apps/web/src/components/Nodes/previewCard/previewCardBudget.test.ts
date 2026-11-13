@@ -268,6 +268,49 @@ describe('tag fitting', () => {
     expect(visibleTagCount(widths, 130, 4, 0, 20)).toBe(0);
   });
 
+  it('agrees with trying every prefix, across widths, rows and marker sizes', () => {
+    const bruteForce = (
+      widths: number[],
+      rowWidth: number,
+      gap: number,
+      rows: number,
+      moreWidth: number,
+    ) => {
+      for (let count = widths.length; count > 0; count -= 1) {
+        const shown = widths.slice(0, count);
+        if (count < widths.length) shown.push(moreWidth);
+        if (tagRowsNeeded(shown, rowWidth, gap) <= rows) return count;
+      }
+      return 0;
+    };
+    // A small deterministic generator keeps the cases reproducible.
+    let seed = 7;
+    const next = (max: number) => {
+      seed = (seed * 1103515245 + 12345) % 2147483648;
+      return seed % max;
+    };
+    for (let round = 0; round < 400; round += 1) {
+      const widths = Array.from({ length: next(9) }, () => 10 + next(140));
+      const args = [
+        widths,
+        60 + next(200),
+        next(9),
+        1 + next(3),
+        10 + next(50),
+      ] as const;
+      expect(visibleTagCount(...args), JSON.stringify(args)).toBe(
+        bruteForce(...args),
+      );
+    }
+  });
+
+  it('fits thousands of tags without rescanning them', () => {
+    const widths = Array.from({ length: 20000 }, () => 40);
+    const started = performance.now();
+    expect(visibleTagCount(widths, 130, 4, 1, 20)).toBe(2);
+    expect(performance.now() - started).toBeLessThan(50);
+  });
+
   it('shows every tag before the card has been measured', () => {
     expect(visibleTagCount([40, 40], 0, 4, 1, 20)).toBe(2);
   });

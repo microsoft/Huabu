@@ -193,7 +193,8 @@ export function tagRowsNeeded(
 
 /**
  * How many leading tags fit in `rows` rows when the rest collapse into one
- * trailing "+N" marker of `moreWidth`.
+ * trailing "+N" marker of `moreWidth`. One pass: property lists are unbounded
+ * and this runs during card layout.
  */
 export function visibleTagCount(
   widths: readonly number[],
@@ -205,10 +206,24 @@ export function visibleTagCount(
   if (rows <= 0) return 0;
   // Unmeasured (not laid out yet): show everything rather than nothing.
   if (rowWidth <= 0) return widths.length;
-  for (let count = widths.length; count > 0; count -= 1) {
-    const shown = widths.slice(0, count);
-    if (count < widths.length) shown.push(moreWidth);
-    if (tagRowsNeeded(shown, rowWidth, gap) <= rows) return count;
+  // Where an item of `width` lands after `used` px on `row`.
+  const place = (row: number, used: number, width: number) => {
+    const next = used === 0 ? width : used + gap + width;
+    return next > rowWidth && used > 0
+      ? { row: row + 1, used: width }
+      : { row, used: next };
+  };
+  const marker = Math.min(moreWidth, rowWidth);
+  let row = 1;
+  let used = 0;
+  let fitting = 0;
+  for (let index = 0; index < widths.length; index += 1) {
+    ({ row, used } = place(row, used, Math.min(widths[index], rowWidth)));
+    if (row > rows) break;
+    const count = index + 1;
+    // A prefix counts only if the marker for the rest still fits after it.
+    if (count === widths.length || place(row, used, marker).row <= rows)
+      fitting = count;
   }
-  return 0;
+  return fitting;
 }

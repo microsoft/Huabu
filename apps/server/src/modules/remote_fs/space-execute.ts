@@ -169,6 +169,7 @@ export async function executeRfsCommands(
       ...(hostThreadId ? { threadId: hostThreadId } : {}),
     },
     runId,
+    agentCovers: true,
     ...(hostThreadId ? { computeChanges: true } : {}),
   });
 

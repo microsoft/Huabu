@@ -113,6 +113,7 @@ export async function handleCanvasCommands(
         ...(opts?.threadId ? { threadId: opts.threadId } : {}),
       },
       runId,
+      agentCovers: true,
       ...(opts?.threadId ? { computeChanges: true } : {}),
     });
 

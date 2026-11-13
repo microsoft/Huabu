@@ -594,3 +594,26 @@ it.each([
     expect(container.querySelector('form')).not.toBeNull();
   },
 );
+
+it("lets Enter on a tag's remove button remove the tag instead of saving", async () => {
+  render(false, [], { Keywords: ['ink', 'canvas'] });
+  click('node.editProperty:Keywords');
+  const remove = Array.from(container.querySelectorAll('button')).find(
+    (button) =>
+      button.getAttribute('aria-label') === 'node.removePropertyTag:ink',
+  );
+  const enter = new KeyboardEvent('keydown', {
+    key: 'Enter',
+    bubbles: true,
+    cancelable: true,
+  });
+  act(() => {
+    remove?.dispatchEvent(enter);
+  });
+  await act(async () => {});
+  // The form neither swallowed the key nor committed: the button's own
+  // activation is free to run.
+  expect(enter.defaultPrevented).toBe(false);
+  expect(save).not.toHaveBeenCalled();
+  expect(container.querySelector('form')).not.toBeNull();
+});
