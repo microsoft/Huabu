@@ -34,7 +34,7 @@ import type { CreateCanvasResponse } from '@huabu/shared';
  * Scenarios 1-8 end with the reverse check: B drags a bystander note and A
  * sees it, which proves B was left in a working state.
  *
- * Scenarios 9 and 10 are two pages editing at once. One page's `POST
+ * Scenarios 9 to 12 are two pages editing at once. One page's `POST
  * /execute` is held in the network, the other page's edit is committed, and
  * the held request is then released, in both orders.
  */
@@ -1328,146 +1328,448 @@ for (const heldPage of ['A', 'B'] as const) {
 }
 
 /**
- * Scenario 10 has no documented winner: the server runs each page's batch on
- * its latest state, so the request that arrives last decides. What is
- * required is that the result is one of the two edits as a whole.
+ * Scenarios 10-12: two pages place the same note at once, and one of them
+ * changes the note's container.
  *
- * - A's request last: A's batch names the parent and the Frame-local
- *   position together, so the note ends in the Frame where A dropped it.
- * - B's request last: KNOWN DEFECT, `test.fixme` below.
+ * Every edit states the parent its nodes had on the page that made it. The
+ * edit committed first stands. The later one is applied when the note is
+ * still in the container it was made in, and refused as a whole when it is
+ * not: the server never reads one page's coordinates inside the other
+ * page's container. The refused page is told once and shows the server's
+ * Space.
  */
-for (const heldPage of ['A', 'B'] as const) {
-  // DEFECT (B's request last). B's move is sent as `SET_NODE_GEOMETRY
-  // { position }` with canvas coordinates and no statement of the parent
-  // those coordinates are relative to; `position` and `parent` are separate
-  // property units on the page (`propertyUnits.ts`) and separate commands on
-  // the wire (`localDiffCommands.ts`). When A's reparent is committed first:
-  //  1. B, holding `position` for its unanswered move, applies A's `parent`
-  //     unit and keeps its own position, so it shows the note under the
-  //     Frame at Frame origin + B's canvas coordinates: a place neither
-  //     page chose (`fieldLevelDeltas.ts`).
-  //  2. The server then runs B's command against the reparented note and
-  //     reads the canvas coordinates as Frame-local (`setNodeGeometry.ts`).
-  //     Both pages and the server converge on it: the note is a child of
-  //     the Frame, several hundred pixels from where either page dropped
-  //     it, and the hug Frame has grown to contain it (220 x 225 becomes
-  //     about 559 x 462 in this seed).
-  // Nothing is lost, no page reloads and no toast is shown, but the parent
-  // is A's and the coordinates are B's. A fix needs the move to carry the
-  // parent its position is relative to (and the engine to convert or refuse
-  // on a mismatch), or the page to state parent and position together and
-  // hold them as one unit; either changes what every drag sends, so it is
-  // left for a decision rather than patched here.
-  // Set E2E_RUN_KNOWN_DEFECTS=1 to run it anyway.
-  const declare =
-    heldPage === 'B' && !process.env.E2E_RUN_KNOWN_DEFECTS ? test.fixme : test;
-  declare(
-    `10. A drags a note into a Frame while B moves it on the canvas (${heldPage}'s request arrives last): one consistent result`,
-    async ({ browser, request }, testInfo) => {
-      const session = await openBoth(
-        browser,
-        request,
-        'Race move',
-        freeFrameSeed,
-      );
-      const { a, b, canvasId } = session;
-      const loads = { a: a.spaceLoads(), b: b.spaceLoads() };
-      const frameRect = await rectOf(a.page, FRAME);
-      const noteOn = async (device: Device) =>
-        (await pageState(device.page)).scene.nodes[N];
-      /** A's edit; returns where it left the note, in canvas coordinates. */
-      const intoFrame = async () => {
-        await dragTo(a.page, N, {
-          x: frameRect.x + 30,
-          y: frameRect.y + frameRect.height - 50,
-        });
-        await expect.poll(async () => (await noteOn(a)).parentId).toBe(FRAME);
-        return (await domRects(a.page))[N];
-      };
-      /** B's edit; returns where it left the note, in canvas coordinates. */
-      const onCanvas = async () => {
-        const start = await noteOn(b);
-        await dragBy(b.page, N, 20, 220);
-        await expect
-          .poll(async () => (await noteOn(b)).y)
-          .toBeGreaterThan(start.y + 150);
-        return (await domRects(b.page))[N];
-      };
 
-      const holder = heldPage === 'A' ? a : b;
-      const held = await holder.hold();
-      let wantedByA: Rect;
-      let wantedByB: Rect;
-      if (heldPage === 'A') {
-        wantedByA = await intoFrame();
-        await expect.poll(held.held).toBeGreaterThan(0);
-        wantedByB = await onCanvas();
-      } else {
-        wantedByB = await onCanvas();
-        await expect.poll(held.held).toBeGreaterThan(0);
-        wantedByA = await intoFrame();
+const REFUSED_NOTICE =
+  'A change could not be applied because the item was changed elsewhere. This Space now shows the latest version.';
+
+/**
+ * Record every toast the page shows from now on (a notice dismisses itself
+ * after three seconds, so reading the DOM later would miss it).
+ */
+async function recordToasts(page: Page) {
+  await page.evaluate(() => {
+    const seen: string[] = [];
+    (window as unknown as { __mpfToasts: string[] }).__mpfToasts = seen;
+    const known = new WeakSet<Element>();
+    const collect = () => {
+      for (const element of document.querySelectorAll(
+        'body > div.fixed [role="status"]',
+      )) {
+        if (known.has(element)) continue;
+        known.add(element);
+        seen.push((element.textContent ?? '').trim());
       }
-      // The other page's edit is committed and has reached the page whose own
-      // request is still held.
-      await expect(async () => {
-        const server = await serverScene(request, canvasId);
-        expect((await pageState(holder.page)).version).toBe(server.version);
-        if (heldPage === 'A') expect(server.scene.nodes[N].parentId).toBeNull();
-        else expect(server.scene.nodes[N].parentId).toBe(FRAME);
-      }).toPass({ timeout: 10_000 });
-      const whileHeld = {
-        a: await noteOn(a),
-        b: await noteOn(b),
-        aDom: (await domRects(a.page))[N],
-        bDom: (await domRects(b.page))[N],
-      };
-      held.release();
+    };
+    collect();
+    new MutationObserver(collect).observe(document.body, {
+      childList: true,
+      subtree: true,
+    });
+  });
+  return () =>
+    page.evaluate(
+      () => (window as unknown as { __mpfToasts: string[] }).__mpfToasts,
+    );
+}
 
-      const { scene } = await expectRaceSettled(request, session, loads);
-      const at = absolute(scene, N);
-      const evidence = JSON.stringify(
-        {
-          wantedByA,
-          wantedByB,
-          whileHeld,
-          final: { note: scene.nodes[N], at, frame: scene.nodes[FRAME] },
-          aExecutes: a.executes,
-          bExecutes: b.executes,
-        },
-        null,
-        2,
-      );
-      await testInfo.attach('evidence', {
-        body: evidence,
-        contentType: 'application/json',
-      });
-      if (process.env.E2E_SYNC_EVIDENCE) console.log(`EVIDENCE\n${evidence}`);
+interface Race {
+  session: Session;
+  loads: { a: number; b: number };
+  shown: { a: () => Promise<string[]>; b: () => Promise<string[]> };
+}
 
-      // Nothing is lost.
-      expect(Object.keys(scene.nodes).sort()).toEqual(
-        [BYSTANDER, FRAME, INSIDE, N].sort(),
-      );
-      // One of the two edits, whole: in the Frame where A dropped it, or on the
-      // canvas where B dropped it. Never the parent of one edit with the
-      // coordinates of the other.
-      const isAt = (rect: Rect) => near(at.x, rect.x) && near(at.y, rect.y);
-      const outcome =
-        scene.nodes[N].parentId === FRAME && isAt(wantedByA)
-          ? "A's edit"
-          : scene.nodes[N].parentId === null && isAt(wantedByB)
-            ? "B's edit"
-            : `neither edit: parent ${scene.nodes[N].parentId}, at canvas ${at.x},${at.y}; A dropped it at ${wantedByA.x},${wantedByA.y} in the Frame, B at ${wantedByB.x},${wantedByB.y} on the canvas`;
-      expect(["A's edit", "B's edit"]).toContain(outcome);
-      // The page that waited never showed the mixture either.
-      const shown = heldPage === 'A' ? whileHeld.aDom : whileHeld.bDom;
-      const own = heldPage === 'A' ? wantedByA : wantedByB;
-      expect(
-        near(shown.x, own.x) && near(shown.y, own.y),
-        `${heldPage} kept showing its own edit while its request was unanswered: ${JSON.stringify({ shown, own })}`,
-      ).toBe(true);
-      // Which request arrives last decides, when the result is a whole edit.
-      if (heldPage === 'A') expect(outcome).toBe("A's edit");
-      await closeBoth(session);
-    },
+async function startRace(
+  browser: Browser,
+  request: APIRequestContext,
+  title: string,
+  seed: unknown[],
+): Promise<Race> {
+  const session = await openBoth(browser, request, title, seed);
+  const { a, b } = session;
+  return {
+    session,
+    loads: { a: a.spaceLoads(), b: b.spaceLoads() },
+    shown: { a: await recordToasts(a.page), b: await recordToasts(b.page) },
+  };
+}
+
+/**
+ * Both edits were taken: the pages converge, and neither loaded the Space
+ * again or was told anything.
+ */
+async function expectBothTaken(request: APIRequestContext, race: Race) {
+  const { scene } = await expectRaceSettled(request, race.session, race.loads);
+  expect(await race.shown.a(), 'A was shown no toast').toEqual([]);
+  expect(await race.shown.b(), 'B was shown no toast').toEqual([]);
+  return scene;
+}
+
+/**
+ * `refused`'s edit was refused: it was told once and loaded the server's
+ * Space once; the other page was left alone; and it ends there.
+ */
+async function expectRefused(
+  request: APIRequestContext,
+  race: Race,
+  refused: 'a' | 'b',
+) {
+  const { session, loads } = race;
+  const { canvasId, a, b } = session;
+  const other = refused === 'a' ? 'b' : 'a';
+  await expect
+    .poll(() => race.shown[refused](), { timeout: 15_000 })
+    .toEqual([REFUSED_NOTICE]);
+  const scene = await expectConverged(request, canvasId, [a, b]);
+  // No reload loop and no second notice: nothing more happens.
+  await a.page.waitForTimeout(2_500);
+  const again = await expectConverged(request, canvasId, [a, b]);
+  expectSameScene(again, scene, 'later', 'at convergence');
+  for (const device of [a, b])
+    expect(
+      (await pageState(device.page)).reloaded,
+      `${device.name}'s document was not reloaded`,
+    ).toBe(false);
+  expect(
+    { a: a.spaceLoads(), b: b.spaceLoads() },
+    'only the refused page loaded the Space again, once',
+  ).toEqual({ ...loads, [refused]: loads[refused] + 1 });
+  expect(await race.shown[refused](), 'told once').toEqual([REFUSED_NOTICE]);
+  expect(await race.shown[other](), 'the other page was told nothing').toEqual(
+    [],
   );
+  // The refused edit is not left in the page's history to be replayed.
+  const state = await pageState(session[refused].page);
+  expect({ canUndo: state.canUndo, canRedo: state.canRedo }).toEqual({
+    canUndo: false,
+    canRedo: false,
+  });
+  return scene;
+}
+
+/** The server holds `expected` for these nodes, to the pixel. */
+function expectUnchanged(scene: Scene, expected: Scene, ids: string[]) {
+  for (const id of ids)
+    expect(scene.nodes[id], `${id} is as the first edit left it`).toEqual(
+      expected.nodes[id],
+    );
+}
+
+function isAt(point: Point, rect: Rect) {
+  return near(point.x, rect.x) && near(point.y, rect.y);
+}
+
+for (const heldPage of ['A', 'B'] as const) {
+  test(`10. A drags a note into a Frame while B moves it on the canvas (${heldPage}'s request arrives last): ${
+    heldPage === 'A'
+      ? "A's drag is applied whole"
+      : "A's drag stands and B's move is refused"
+  }`, async ({ browser, request }, testInfo) => {
+    const race = await startRace(browser, request, 'Race move', freeFrameSeed);
+    const { session } = race;
+    const { a, b, canvasId } = session;
+    const frameRect = await rectOf(a.page, FRAME);
+    const noteOn = async (device: Device) =>
+      (await pageState(device.page)).scene.nodes[N];
+    /** A's edit; returns where it left the note, in canvas coordinates. */
+    const intoFrame = async () => {
+      await dragTo(a.page, N, {
+        x: frameRect.x + 30,
+        y: frameRect.y + frameRect.height - 50,
+      });
+      await expect.poll(async () => (await noteOn(a)).parentId).toBe(FRAME);
+      return (await domRects(a.page))[N];
+    };
+    /** B's edit; returns where it left the note, in canvas coordinates. */
+    const onCanvas = async () => {
+      const start = await noteOn(b);
+      await dragBy(b.page, N, 20, 220);
+      await expect
+        .poll(async () => (await noteOn(b)).y)
+        .toBeGreaterThan(start.y + 150);
+      return (await domRects(b.page))[N];
+    };
+
+    const holder = heldPage === 'A' ? a : b;
+    const held = await holder.hold();
+    let wantedByA: Rect;
+    let wantedByB: Rect;
+    if (heldPage === 'A') {
+      wantedByA = await intoFrame();
+      await expect.poll(held.held).toBeGreaterThan(0);
+      wantedByB = await onCanvas();
+    } else {
+      wantedByB = await onCanvas();
+      await expect.poll(held.held).toBeGreaterThan(0);
+      wantedByA = await intoFrame();
+    }
+    // The other page's edit is committed and has reached the page whose own
+    // request is still held.
+    let committed: Scene | undefined;
+    await expect(async () => {
+      const server = await serverScene(request, canvasId);
+      expect((await pageState(holder.page)).version).toBe(server.version);
+      if (heldPage === 'A') expect(server.scene.nodes[N].parentId).toBeNull();
+      else expect(server.scene.nodes[N].parentId).toBe(FRAME);
+      committed = server.scene;
+    }).toPass({ timeout: 10_000 });
+    if (!committed) throw new Error('unreachable');
+    const whileHeld = {
+      a: await noteOn(a),
+      b: await noteOn(b),
+      aDom: (await domRects(a.page))[N],
+      bDom: (await domRects(b.page))[N],
+    };
+    // The page that waits shows its own edit, whole: its own container with
+    // its own coordinates, never the other page's container with them.
+    const own = heldPage === 'A' ? wantedByA : wantedByB;
+    const shown = heldPage === 'A' ? whileHeld.aDom : whileHeld.bDom;
+    expect(
+      isAt(shown, own),
+      `${heldPage} kept showing its own edit while its request was unanswered: ${JSON.stringify({ shown, own })}`,
+    ).toBe(true);
+    expect((heldPage === 'A' ? whileHeld.a : whileHeld.b).parentId).toBe(
+      heldPage === 'A' ? FRAME : null,
+    );
+    held.release();
+
+    const scene =
+      heldPage === 'A'
+        ? await expectBothTaken(request, race)
+        : await expectRefused(request, race, 'b');
+    const at = absolute(scene, N);
+    const evidence = JSON.stringify(
+      {
+        wantedByA,
+        wantedByB,
+        whileHeld,
+        final: { note: scene.nodes[N], at, frame: scene.nodes[FRAME] },
+        aExecutes: a.executes,
+        bExecutes: b.executes,
+      },
+      null,
+      2,
+    );
+    await testInfo.attach('evidence', {
+      body: evidence,
+      contentType: 'application/json',
+    });
+    if (process.env.E2E_SYNC_EVIDENCE) console.log(`EVIDENCE\n${evidence}`);
+
+    // Nothing is lost.
+    expect(Object.keys(scene.nodes).sort()).toEqual(
+      [BYSTANDER, FRAME, INSIDE, N].sort(),
+    );
+    // Either way the note ends in the Frame where A dropped it: A's request
+    // names the parent it came from, which B's move did not change.
+    expect(scene.nodes[N].parentId).toBe(FRAME);
+    expect(
+      isAt(at, wantedByA),
+      `the note is where A dropped it: ${JSON.stringify({ at, wantedByA })}`,
+    ).toBe(true);
+    expect([...scene.children[FRAME]].sort()).toEqual([INSIDE, N].sort());
+    if (heldPage === 'B') {
+      // B's refused move changed nothing: the note and the Frame are exactly
+      // as A's drag left them, and the hug Frame did not grow.
+      expectUnchanged(scene, committed, [N, FRAME, INSIDE]);
+      // B's request said which container the move was made in.
+      const sent = (
+        b.executes as {
+          commands?: { type?: string }[];
+          expectedParents?: { parents: Record<string, string | null> }[];
+        }[]
+      ).find((body) =>
+        body.commands?.some((command) => command.type === 'SET_NODE_GEOMETRY'),
+      );
+      expect(sent?.expectedParents?.[0]?.parents).toEqual({ [N]: null });
+    }
+    await closeBoth(session);
+  });
+}
+
+for (const heldPage of ['A', 'B'] as const) {
+  test(`11. A drags a note out of a Frame while B moves it inside the Frame (${heldPage}'s request arrives last): ${
+    heldPage === 'A'
+      ? "A's drag is applied whole"
+      : "A's drag stands and B's move is refused"
+  }`, async ({ browser, request }) => {
+    const race = await startRace(
+      browser,
+      request,
+      'Race move inside',
+      filledFrameSeed,
+    );
+    const { session } = race;
+    const { a, b, canvasId } = session;
+    const noteOn = async (device: Device) =>
+      (await pageState(device.page)).scene.nodes[C[0]];
+    /** A's edit: onto empty canvas left of the Frame. */
+    const outOfFrame = async () => {
+      await dragTo(a.page, C[0], { x: 400, y: 330 });
+      await expect.poll(async () => (await noteOn(a)).parentId).toBeNull();
+      return (await domRects(a.page))[C[0]];
+    };
+    /** B's edit: a short move that stays inside the Frame. */
+    const insideFrame = async () => {
+      const start = (await domRects(b.page))[C[0]];
+      await dragBy(b.page, C[0], 30, 150);
+      await expect
+        .poll(async () => (await domRects(b.page))[C[0]].y)
+        .toBeGreaterThan(start.y + 100);
+      expect((await noteOn(b)).parentId).toBe(FRAME);
+      return (await domRects(b.page))[C[0]];
+    };
+
+    const holder = heldPage === 'A' ? a : b;
+    const held = await holder.hold();
+    let wantedByA: Rect;
+    let wantedByB: Rect;
+    if (heldPage === 'A') {
+      wantedByA = await outOfFrame();
+      await expect.poll(held.held).toBeGreaterThan(0);
+      wantedByB = await insideFrame();
+    } else {
+      wantedByB = await insideFrame();
+      await expect.poll(held.held).toBeGreaterThan(0);
+      wantedByA = await outOfFrame();
+    }
+    let committed: Scene | undefined;
+    await expect(async () => {
+      const server = await serverScene(request, canvasId);
+      expect((await pageState(holder.page)).version).toBe(server.version);
+      if (heldPage === 'A') {
+        expect(server.scene.nodes[C[0]].parentId).toBe(FRAME);
+        expect(isAt(absolute(server.scene, C[0]), wantedByB)).toBe(true);
+      } else expect(server.scene.nodes[C[0]].parentId).toBeNull();
+      committed = server.scene;
+    }).toPass({ timeout: 10_000 });
+    if (!committed) throw new Error('unreachable');
+    // The waiting page shows its own edit, whole.
+    const own = heldPage === 'A' ? wantedByA : wantedByB;
+    const shown = (await domRects(holder.page))[C[0]];
+    expect(
+      isAt(shown, own),
+      `${heldPage} kept showing its own edit while its request was unanswered: ${JSON.stringify({ shown, own })}`,
+    ).toBe(true);
+    expect((await noteOn(holder)).parentId).toBe(
+      heldPage === 'A' ? null : FRAME,
+    );
+    held.release();
+
+    const scene =
+      heldPage === 'A'
+        ? await expectBothTaken(request, race)
+        : await expectRefused(request, race, 'b');
+    expect(Object.keys(scene.nodes).sort()).toEqual(
+      [BYSTANDER, FRAME, C[0], C[1]].sort(),
+    );
+    // Either way the note ends on the canvas where A dropped it.
+    expect(scene.nodes[C[0]].parentId).toBeNull();
+    const at = absolute(scene, C[0]);
+    expect(
+      isAt(at, wantedByA),
+      `the note is where A dropped it: ${JSON.stringify({ at, wantedByA })}`,
+    ).toBe(true);
+    expect(scene.children[FRAME]).toEqual([C[1]]);
+    if (heldPage === 'B')
+      expectUnchanged(scene, committed, [C[0], C[1], FRAME]);
+    await closeBoth(session);
+  });
+}
+
+const FRAME_2 = 'node-mpf-frame2';
+
+/** Two free Frames, each holding a note, and one note above them. */
+const twoFramesSeed = [
+  {
+    type: 'CREATE_NODES',
+    nodes: [
+      frame(FRAME, 640, 220, { width: 300, height: 300 }),
+      frame(FRAME_2, 1000, 220, { width: 300, height: 300 }),
+      note(N, 380, 100),
+    ],
+  },
+  {
+    type: 'CREATE_NODES',
+    nodes: [
+      note(INSIDE, 40, 60, { parentId: FRAME }),
+      note(C[1], 40, 60, { parentId: FRAME_2 }),
+    ],
+  },
+];
+
+for (const heldPage of ['A', 'B'] as const) {
+  const other = heldPage === 'A' ? 'B' : 'A';
+  test(`12. A and B drag the same note into different Frames (${heldPage}'s request arrives last): ${other}'s drag stands and ${heldPage}'s is refused`, async ({
+    browser,
+    request,
+  }) => {
+    const race = await startRace(
+      browser,
+      request,
+      'Race two Frames',
+      twoFramesSeed,
+    );
+    const { session } = race;
+    const { a, b, canvasId } = session;
+    const targetOf = { A: FRAME, B: FRAME_2 } as const;
+    const deviceOf = { A: a, B: b } as const;
+    const noteOn = async (device: Device) =>
+      (await pageState(device.page)).scene.nodes[N];
+    /** Drag the note into the page's own Frame, below the note it holds. */
+    const into = async (name: 'A' | 'B') => {
+      const { page } = deviceOf[name];
+      const target = await rectOf(page, targetOf[name]);
+      await dragTo(page, N, {
+        x: target.x + 30,
+        y: target.y + target.height - 50,
+      });
+      await expect
+        .poll(async () => (await noteOn(deviceOf[name])).parentId)
+        .toBe(targetOf[name]);
+      return (await domRects(page))[N];
+    };
+
+    const holder = deviceOf[heldPage];
+    const held = await holder.hold();
+    const wantedByHeld = await into(heldPage);
+    await expect.poll(held.held).toBeGreaterThan(0);
+    const wantedByOther = await into(other);
+    let committed: Scene | undefined;
+    await expect(async () => {
+      const server = await serverScene(request, canvasId);
+      expect((await pageState(holder.page)).version).toBe(server.version);
+      expect(server.scene.nodes[N].parentId).toBe(targetOf[other]);
+      committed = server.scene;
+    }).toPass({ timeout: 10_000 });
+    if (!committed) throw new Error('unreachable');
+    // The waiting page shows the note in its own Frame where it dropped it.
+    expect((await noteOn(holder)).parentId).toBe(targetOf[heldPage]);
+    const shown = (await domRects(holder.page))[N];
+    expect(
+      isAt(shown, wantedByHeld),
+      `${heldPage} kept showing its own edit while its request was unanswered: ${JSON.stringify({ shown, wantedByHeld })}`,
+    ).toBe(true);
+    held.release();
+
+    const scene = await expectRefused(
+      request,
+      race,
+      heldPage === 'A' ? 'a' : 'b',
+    );
+    expect(Object.keys(scene.nodes).sort()).toEqual(
+      [BYSTANDER, FRAME, FRAME_2, INSIDE, C[1], N].sort(),
+    );
+    // The first drag stands, whole; the refused one moved nothing.
+    expect(scene.nodes[N].parentId).toBe(targetOf[other]);
+    const at = absolute(scene, N);
+    expect(
+      isAt(at, wantedByOther),
+      `the note is where ${other} dropped it: ${JSON.stringify({ at, wantedByOther })}`,
+    ).toBe(true);
+    expectUnchanged(scene, committed, [N, FRAME, FRAME_2, INSIDE, C[1]]);
+    expect(scene.children[targetOf[heldPage]]).toEqual([
+      heldPage === 'A' ? INSIDE : C[1],
+    ]);
+    await closeBoth(session);
+  });
 }
