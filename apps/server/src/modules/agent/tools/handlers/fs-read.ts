@@ -94,18 +94,13 @@ async function projectNodeRead(
   const rawId = parsed.meta['id'];
   const nodeId = typeof rawId === 'string' && rawId ? rawId : undefined;
   if (!nodeId) return undefined;
-  try {
-    const nc = (await space(canvasId).nodes.read(nodeId))?.record;
-    if (!nc) return undefined;
-    const rev = nodeRevisionOf({
-      content: nc.content,
-      src: typeof nc.src === 'string' ? nc.src : undefined,
-    });
-    readSet?.set(nodeId, rev);
-    return { content: nc.content, frontmatter: parsed.meta, rev };
-  } catch {
-    return undefined;
-  }
+  const nc = (await space(canvasId).nodes.read(nodeId))?.record;
+  if (!nc) throw new Error(`Node no longer exists: ${nodeId}`);
+  const rev = nodeRevisionOf(nc);
+  const { nodeId: id, content, ...metadata } = nc;
+  readSet?.set(nodeId, rev);
+  readSet?.set(`metadata:${nodeId}`, rev);
+  return { content, frontmatter: { ...metadata, id }, rev };
 }
 
 // ─── Implementation ───────────────────────────────────────────────

@@ -7,6 +7,7 @@ import {
   extractTitleFromText,
   normalizeAcpConversationTitle,
   normalizeConversationTitle,
+  stripInlineMarkdown,
 } from './conversation-title.js';
 
 const promptLikeTitle =
@@ -87,6 +88,29 @@ describe('conversation title normalization', () => {
     'does not guess from generic assistant or product language: %s',
     (value) => {
       expect(normalizeAcpConversationTitle(`  ${value}\t `)).toBe(value);
+    },
+  );
+});
+
+describe('stripInlineMarkdown links', () => {
+  it.each([
+    ['see [docs](https://example.com) now', 'see docs now'],
+    ['![alt](a.png) caption', 'alt caption'],
+    ['[Foo](https://en.wikipedia.org/wiki/Foo_(bar))', 'Foo'],
+    ['[unclosed](https://example.com', '[unclosed](https://example.com'],
+    ['![report \\[draft](image.png)', 'report \\[draft'],
+    ['[a \\[b\\] c](https://example.com) d', 'a \\[b\\] c d'],
+  ])('strips %s', (input, expected) => {
+    expect(stripInlineMarkdown(input)).toBe(expected);
+  });
+
+  it.each(['![', '![](', '[](', '![]((', '[a]((b', '![\\', '[\\[', '\\'])(
+    'stays linear on repeated unclosed %s',
+    (unit) => {
+      const input = unit.repeat(50_000);
+      const started = performance.now();
+      expect(stripInlineMarkdown(input)).toBe(input);
+      expect(performance.now() - started).toBeLessThan(1_000);
     },
   );
 });

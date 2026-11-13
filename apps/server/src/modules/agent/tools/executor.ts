@@ -229,11 +229,18 @@ export async function executeTool(
       );
 
     case 'inspect_nodes':
-      return withStableWorkspace(async () =>
-        handleInspectNodes(
-          await withReadCanvasId<InspectNodesArgs>(args, 'inspect_nodes'),
-        ),
-      );
+      return withStableWorkspace(async () => {
+        const inspectArgs = await withReadCanvasId<InspectNodesArgs>(
+          args,
+          'inspect_nodes',
+        );
+        return handleInspectNodes(
+          inspectArgs,
+          inspectArgs.canvasId === requireCanvasId('inspect_nodes')
+            ? context?.readSet
+            : undefined,
+        );
+      });
 
     case 'inspect_edges':
       return withStableWorkspace(async () =>

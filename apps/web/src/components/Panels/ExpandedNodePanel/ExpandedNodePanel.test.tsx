@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { act } from 'react';
+import { act, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -57,14 +57,26 @@ vi.mock('../../Nodes/NodePreviewContent.tsx', () => ({
     id,
     onDataChange,
     readOnly,
+    data,
+    scrollHeader,
+    searchNodeId,
   }: {
     id?: string;
     onDataChange?: (patch: Record<string, unknown>) => void;
     readOnly?: boolean;
+    data: Record<string, unknown>;
+    scrollHeader?: ReactNode;
+    searchNodeId?: string;
   }) => {
     previewCallbacks.onDataChange = onDataChange;
     return (
-      <div data-preview-node-id={id} data-preview-read-only={readOnly}>
+      <div
+        data-preview-node-id={id}
+        data-preview-read-only={readOnly}
+        data-preview-content={String(data.content ?? '')}
+        data-preview-search-id={searchNodeId}
+      >
+        {scrollHeader}
         <button
           type="button"
           data-testid="mutate-node"
@@ -132,11 +144,166 @@ function renderPanel(
   );
 }
 
+it('edits an owned Note with its real identity, preserving PDF text and provenance', () => {
+  const update = vi
+    .spyOn(useCanvasStore.getState(), 'updateNodeData')
+    .mockImplementation(() => {});
+  renderPanel(
+    [
+      {
+        ...canvasNode('a', 'Paper'),
+        type: 'note',
+        data: {
+          label: 'Paper',
+          content: 'Existing authored notes',
+        },
+      },
+      {
+        ...canvasNode('pdf', 'Paper'),
+        type: 'pdf',
+        data: { noteNodeId: 'a', content: 'Extracted' },
+      },
+    ],
+    [],
+    true,
+    undefined,
+  );
+  expect(
+    container
+      ?.querySelector('[data-preview-content]')
+      ?.getAttribute('data-preview-content'),
+  ).toBe('Existing authored notes');
+  expect(
+    container
+      ?.querySelector('[data-search-scope="node"]')
+      ?.getAttribute('data-search-node-id'),
+  ).toBe('a');
+  expect(
+    container
+      ?.querySelector('[data-preview-content]')
+      ?.getAttribute('data-preview-search-id'),
+  ).toBe('a');
+  expect(
+    container
+      ?.querySelector('[data-preview-content]')
+      ?.hasAttribute('data-preview-node-id'),
+  ).toBe(true);
+  act(() =>
+    previewCallbacks.onDataChange?.({
+      content: 'New owned notes',
+      provenance: {},
+    }),
+  );
+  expect(update).toHaveBeenCalledWith('a', {
+    content: 'New owned notes',
+    provenance: {},
+  });
+  expect(useCanvasStore.getState().nodes).toHaveLength(2);
+  expect(useCanvasStore.getState().nodes[1].data.content).toBe('Extracted');
+  update.mockRestore();
+});
+
+it.each([undefined, ''])(
+  'shows an empty editor for missing or cleared notes (%s), not extracted text',
+  (content) => {
+    renderPanel(
+      [
+        {
+          ...canvasNode('a', 'Paper'),
+          type: 'note',
+          data: { content },
+        },
+      ],
+      [],
+      true,
+      undefined,
+    );
+    expect(
+      container
+        ?.querySelector('[data-preview-content]')
+        ?.getAttribute('data-preview-content'),
+    ).toBe('');
+  },
+);
+
 function dispatchArrow(target: EventTarget, key: 'ArrowLeft' | 'ArrowRight') {
   act(() => {
     target.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
   });
 }
+
+it('keeps the PDF properties toggle in the toolbar and the list inside the renderer', () => {
+  renderPanel(
+    [
+      {
+        ...canvasNode('a', 'Paper'),
+        type: 'pdf',
+        data: { label: 'Paper', properties: { Venue: 'UIST' } },
+      },
+    ],
+    [],
+    true,
+  );
+  const header = container?.querySelector(
+    '[data-testid="expanded-node-header"]',
+  );
+  const toggle = header?.querySelector<HTMLButtonElement>(
+    '[aria-controls][aria-expanded]',
+  );
+  expect(toggle).not.toBeNull();
+  expect(toggle?.textContent).toBe('');
+  expect(
+    header?.querySelector('[data-preview-header-actions]')?.textContent,
+  ).not.toContain('Notes');
+  const region = document.getElementById(
+    toggle?.getAttribute('aria-controls') ?? '',
+  );
+  expect(region?.hidden).toBe(true);
+  expect(header?.contains(region)).toBe(false);
+  expect(
+    container?.querySelector('[data-preview-node-id]')?.contains(region),
+  ).toBe(true);
+  act(() => toggle?.click());
+  expect(region?.hidden).toBe(false);
+  expect(region?.querySelector('button')?.textContent).toBe('Add notes');
+  expect(region?.querySelector('[data-property-name="Add notes"]')).toBeNull();
+  expect(region?.textContent).toContain('UIST');
+  act(() => toggle?.click());
+  expect(region?.hidden).toBe(true);
+});
+
+it('uses an icon-only Note disclosure that opens properties without a PDF notes action', () => {
+  renderPanel(
+    [
+      {
+        ...canvasNode('a', 'Reading note'),
+        type: 'note',
+        data: { label: 'Reading note', properties: { Topic: 'Canvas' } },
+      },
+    ],
+    [],
+    true,
+  );
+  const toggle = container?.querySelector<HTMLButtonElement>(
+    '[aria-controls][aria-expanded]',
+  );
+  const region = document.getElementById(
+    toggle?.getAttribute('aria-controls') ?? '',
+  );
+  expect(toggle?.textContent).toBe('');
+  expect(toggle?.getAttribute('aria-label')).toBe('Expand properties');
+  expect(region?.hidden).toBe(true);
+  act(() => toggle?.click());
+  expect(toggle?.getAttribute('aria-label')).toBe('Collapse properties');
+  expect(toggle?.getAttribute('aria-expanded')).toBe('true');
+  expect(region?.hidden).toBe(false);
+  expect(region?.textContent).toContain('Canvas');
+  expect(region?.textContent).not.toContain('Add notes');
+  expect(region?.textContent).not.toContain('Open notes');
+  act(() => toggle?.click());
+  expect(toggle?.getAttribute('aria-label')).toBe('Expand properties');
+  expect(region?.hidden).toBe(true);
+});
 
 function previewBody() {
   const body = container?.querySelector(

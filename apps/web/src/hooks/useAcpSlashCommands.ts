@@ -5,10 +5,33 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { getAcpThreadCachedMeta, loadAcpProfileCapabilities } from '@/api/acp';
 
+import { createWorkspaceCache } from './workspaceCache';
+
 import type { AgentBinding, AvailableCommand } from '@huabu/shared';
 
 const STALE_TTL_MS = 10_000;
 const EMPTY_RETRY_TTL_MS = 1_500;
+
+interface CachedAcpSlashCommandsEntry {
+  commands: AvailableCommand[];
+  fetchedAt: number;
+}
+
+const useSlashCommandsCache =
+  createWorkspaceCache<CachedAcpSlashCommandsEntry>();
+
+function slashCommandsCacheKey(
+  canvasId: string | null | undefined,
+  threadId: string | null | undefined,
+  profileId: string,
+): string | null {
+  if (!threadId || !profileId) return null;
+  return JSON.stringify([canvasId ?? '', threadId, profileId]);
+}
+
+export function clearAcpSlashCommandsCache(): void {
+  useSlashCommandsCache.getState().clear();
+}
 
 export interface UseAcpSlashCommandsResult {
   commands: AvailableCommand[];
@@ -36,23 +59,35 @@ export function useAcpSlashCommands({
   canvasId,
   enabled = true,
 }: UseAcpSlashCommandsOptions): UseAcpSlashCommandsResult {
-  const [commands, setCommands] = useState<AvailableCommand[]>([]);
+  const slashCommandsCache = useSlashCommandsCache();
+  const bindingKind = binding.kind;
+  const profileId = binding.kind === 'external' ? binding.profileId : '';
+  const cacheKey =
+    bindingKind === 'external' && enabled
+      ? slashCommandsCacheKey(canvasId, threadId, profileId)
+      : null;
+  const initialCached = cacheKey ? slashCommandsCache.get(cacheKey) : undefined;
+
+  const [commands, setCommands] = useState<AvailableCommand[]>(
+    () => initialCached?.commands ?? [],
+  );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
   const epochRef = useRef(0);
   const loadingRef = useRef(false);
-  const lastFetchedAtRef = useRef(0);
+  const lastFetchedAtRef = useRef(initialCached?.fetchedAt ?? 0);
   const invalidatePending = useCallback(() => {
     epochRef.current++;
+    loadingRef.current = false;
   }, []);
-  const bindingKind = binding.kind;
-  const profileId = binding.kind === 'external' ? binding.profileId : '';
 
   const refresh = useCallback(async () => {
     const myEpoch = ++epochRef.current;
-    const isCurrent = () => epochRef.current === myEpoch;
+    const isCurrent = () =>
+      epochRef.current === myEpoch &&
+      useSlashCommandsCache.getState() === slashCommandsCache;
 
-    if (!threadId || bindingKind !== 'external' || !enabled) {
+    if (!threadId || bindingKind !== 'external' || !enabled || !cacheKey) {
       setCommands([]);
       setError(null);
       setLoading(false);
@@ -60,7 +95,8 @@ export function useAcpSlashCommands({
       return;
     }
 
-    setLoading(true);
+    const hasWarmCommands = slashCommandsCache.has(cacheKey);
+    if (!hasWarmCommands) setLoading(true);
     loadingRef.current = true;
     try {
       let response = await getAcpThreadCachedMeta(
@@ -81,9 +117,15 @@ export function useAcpSlashCommands({
       // can arrive without the field despite the response type saying
       // otherwise. Falling back to `[]` keeps `commands` an array so every
       // downstream `.length` read stays safe.
-      setCommands(response.availableCommands ?? []);
+      const nextCommands = response.availableCommands ?? [];
+      const fetchedAt = Date.now();
+      slashCommandsCache.set(cacheKey, {
+        commands: nextCommands,
+        fetchedAt,
+      });
+      setCommands(nextCommands);
       setError(null);
-      lastFetchedAtRef.current = Date.now();
+      lastFetchedAtRef.current = fetchedAt;
     } catch (value) {
       if (!isCurrent()) return;
       setError(value instanceof Error ? value : new Error(String(value)));
@@ -93,12 +135,22 @@ export function useAcpSlashCommands({
         loadingRef.current = false;
       }
     }
-  }, [threadId, bindingKind, enabled, canvasId, profileId]);
+  }, [
+    threadId,
+    bindingKind,
+    enabled,
+    canvasId,
+    profileId,
+    cacheKey,
+    slashCommandsCache,
+  ]);
 
   const refreshIfStale = useCallback(
     (ttlMs: number = STALE_TTL_MS) => {
       if (loadingRef.current) return;
-      const lastFetchedAt = lastFetchedAtRef.current;
+      const lastFetchedAt =
+        (cacheKey ? slashCommandsCache.get(cacheKey)?.fetchedAt : undefined) ??
+        lastFetchedAtRef.current;
       const effectiveTtl =
         commands.length > 0 ? ttlMs : Math.min(ttlMs, EMPTY_RETRY_TTL_MS);
       if (lastFetchedAt > 0 && Date.now() - lastFetchedAt < effectiveTtl) {
@@ -106,16 +158,41 @@ export function useAcpSlashCommands({
       }
       void refresh();
     },
-    [commands.length, refresh],
+    [cacheKey, commands.length, refresh, slashCommandsCache],
   );
 
   useEffect(() => {
+    if (!cacheKey) {
+      setCommands([]);
+      setError(null);
+      setLoading(false);
+      lastFetchedAtRef.current = 0;
+      return invalidatePending;
+    }
+
+    const cached = slashCommandsCache.get(cacheKey);
+
+    if (cached) {
+      setCommands(cached.commands);
+      setError(null);
+      setLoading(false);
+      lastFetchedAtRef.current = cached.fetchedAt;
+      const effectiveTtl =
+        cached.commands.length > 0
+          ? STALE_TTL_MS
+          : Math.min(STALE_TTL_MS, EMPTY_RETRY_TTL_MS);
+      if (Date.now() - cached.fetchedAt >= effectiveTtl) {
+        void refresh();
+      }
+      return invalidatePending;
+    }
+
     setCommands([]);
     setError(null);
     lastFetchedAtRef.current = 0;
-    if (threadId && bindingKind === 'external' && enabled) void refresh();
+    void refresh();
     return invalidatePending;
-  }, [threadId, bindingKind, profileId, enabled, refresh, invalidatePending]);
+  }, [cacheKey, refresh, invalidatePending, slashCommandsCache]);
 
   return { commands, loading, error, refresh, refreshIfStale };
 }

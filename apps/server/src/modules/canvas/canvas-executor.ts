@@ -49,6 +49,11 @@ import {
   diffCanvasState,
   executeCanvasCommands,
   extractCanvasChanges,
+  isChangeStale,
+  hasValidPdfNoteOwnership,
+  hidePdfNotes,
+  pdfNoteId,
+  replayChangedData,
   nodeRevision,
   preserveAgentNodeOwnedData,
   projectAgentNodeEditableData,
@@ -143,6 +148,8 @@ const NODE_CONTENT_KEYS = new Set([
   'summary',
   'keywords',
   'provenance',
+  'properties',
+  'propertyDisplayKeys',
 ]);
 
 function stripNodesForCanvas(nodes: readonly CanvasNode[]): CanvasNode[] {
@@ -184,6 +191,10 @@ export function hydrateCanvasNodes(
     if (content['keywords'] != null) data['keywords'] = content['keywords'];
     if (content['provenance'] != null)
       data['provenance'] = content['provenance'];
+    for (const key of ['properties', 'propertyDisplayKeys']) {
+      if (content[key] !== undefined) data[key] = content[key];
+      else delete data[key];
+    }
     if (content['labelSource'] != null) {
       data['labelSource'] = content['labelSource'];
     }
@@ -193,18 +204,18 @@ export function hydrateCanvasNodes(
 
 /**
  * Compare-and-swap pre-flight for agent content writes. For each
- * `MERGE_NODE_DATA` patch that rewrites the authored body (`content`),
+ * `MERGE_NODE_DATA` patch that rewrites authored content or custom metadata,
  * compare the writer's `expectRev` against the hydrated node's current
  * {@link nodeRevision}. A missing `expectRev` (the agent never read the
  * node this run) or a mismatch (edited since) is a conflict.
  *
- * Only `content` is guarded — NOT `src`. `src` is a short pointer (an
+ * Content, owned notes, properties, and display order are guarded — NOT `src`. `src` is a short pointer (an
  * external URL / `artifacts/<file>` handle), not a mergeable body, and a
  * media node's `src` is never reached via a `nodes/<label>.md` read (the
  * agent reads the artifact the `src` points at, not the sidecar), so the
  * read-set never holds its rev — guarding it would reject every legit
  * `src` rewrite as `not-read`. Patches touching only non-body fields
- * (`src` / label / summary / style) are unconditional, like ui writes.
+ * (`src` / label / summary / style) remain unconditional.
  */
 function collectMergeConflicts(
   commands: readonly CanvasCommand[],
@@ -216,7 +227,11 @@ function collectMergeConflicts(
     if (cmd.type !== 'MERGE_NODE_DATA') continue;
     for (const entry of cmd.patches) {
       const patch = entry.patch ?? {};
-      const rewritesContent = 'content' in patch;
+      const rewritesContent = [
+        'content',
+        'properties',
+        'propertyDisplayKeys',
+      ].some((key) => key in patch);
       if (!rewritesContent) continue;
       const node = byId.get(entry.nodeId);
       if (!node) continue; // missing node → engine emits 'not-found'
@@ -300,6 +315,10 @@ function buildNodeContent(node: CanvasNode): NodeContent | null {
   if (typeof data['summary'] === 'string') out['summary'] = data['summary'];
   if (Array.isArray(data['keywords'])) out['keywords'] = data['keywords'];
   if ('provenance' in data) out['provenance'] = data['provenance'];
+  for (const key of ['properties', 'propertyDisplayKeys'] as const) {
+    if (data[key] !== undefined)
+      (out as Record<string, unknown>)[key] = data[key];
+  }
   const labelSource = data['labelSource'];
   if (
     labelSource === 'user' ||
@@ -628,7 +647,7 @@ export interface ExecuteOnServerOutput {
      * CONNECT_NODES / SET_NODE_PARENT call instead of inventing ids. Image
      * nodes additionally carry their server-derived width/height/src for
      * exact follow-up layout. Also emitted for MERGE_NODE_DATA writes that
-     * change an image src.
+     * change an image src, and for INITIALIZE_PDF_NOTE (new or reused Note).
      */
     nodes?: Array<{
       nodeId: string;
@@ -673,6 +692,8 @@ export interface ExecuteOnServerOutput {
   conflicts?: ExecuteConflict[];
   viewConflicts?: InteractiveViewConflict[];
 }
+
+export class CanvasChangeConflictError extends Error {}
 
 export class CanvasNotFoundError extends Error {
   readonly canvasId: string;
@@ -1038,7 +1059,27 @@ async function executePreparedOnServerAlreadyLocked(
     // follow-up CONNECT_NODES / SET_NODE_PARENT call with the real,
     // server-assigned ids instead of inventing ids that collide across
     // runs. Image nodes also carry server-derived dimensions/src.
-    if (r.applied && r.command.type === 'CREATE_NODES') {
+    if (
+      r.command.type === 'INITIALIZE_PDF_NOTE' &&
+      (r.applied || r.reason === 'no-op')
+    ) {
+      const pdf = finalById.get(r.command.nodeId);
+      const noteId = pdf && pdfNoteId(pdf);
+      const note = noteId ? finalById.get(noteId) : undefined;
+      if (note?.type === 'note') {
+        result.nodes = [
+          {
+            nodeId: note.id,
+            ...(typeof note.data.label === 'string'
+              ? { label: note.data.label }
+              : {}),
+            width: typeof note.style?.width === 'number' ? note.style.width : 0,
+            height:
+              typeof note.style?.height === 'number' ? note.style.height : 0,
+          },
+        ];
+      }
+    } else if (r.applied && r.command.type === 'CREATE_NODES') {
       const nodes = r.command.nodes
         .map((n) => {
           const node = finalById.get(n.id as string);
@@ -1304,6 +1345,7 @@ export async function applyDeltasOnServer(input: {
   deltas: readonly Delta[];
   originator: ExecuteOriginator;
   runId?: string;
+  change?: CanvasChangeRecord;
 }): Promise<{
   canvasId: string;
   fromVersion: number;
@@ -1333,6 +1375,7 @@ export async function applyDeltasOnServerAlreadyLocked(input: {
   deltas: readonly Delta[];
   originator: ExecuteOriginator;
   runId?: string;
+  change?: CanvasChangeRecord;
   /** Only the internal lifecycle writer may bypass editable inverse projection. */
   agentNodeProjection?: boolean;
   /** Move compensation restores validated execution state after rehome-back. */
@@ -1366,12 +1409,37 @@ export async function applyDeltasOnServerAlreadyLocked(input: {
   );
   const prestateEdges = (canvas.state.edges ?? []) as CanvasEdge[];
 
+  if (
+    input.change &&
+    isChangeStale(input.change, prestateNodes, prestateEdges)
+  ) {
+    throw new CanvasChangeConflictError(
+      'Change can no longer be reverted safely',
+    );
+  }
   const liveNodes = new Map(prestateNodes.map((node) => [node.id, node]));
   const editableDeltas = input.agentNodeProjection
     ? input.deltas
     : input.deltas.map((delta): Delta => {
         if (delta.type !== 'REPLACE_NODE') return delta;
         const current = liveNodes.get(delta.next.id);
+        if (
+          input.change &&
+          current?.type === 'pdf' &&
+          delta.prev.type === 'pdf' &&
+          delta.next.type === 'pdf'
+        ) {
+          const next = {
+            ...delta.next,
+            data: replayChangedData(
+              current.data,
+              delta.prev.data,
+              delta.next.data,
+            ),
+          };
+          liveNodes.set(next.id, next);
+          return { ...delta, next };
+        }
         if (current?.type !== 'question') return delta;
         const next = {
           ...delta.next,
@@ -1388,6 +1456,10 @@ export async function applyDeltasOnServerAlreadyLocked(input: {
     { nodes: prestateNodes, edges: prestateEdges },
     editableDeltas,
   );
+  if (!hasValidPdfNoteOwnership(final.nodes, prestateNodes)) {
+    throw new CanvasChangeConflictError('Invalid PDF note ownership');
+  }
+  final.nodes = hidePdfNotes(final.nodes);
   const previousById = new Map(prestateNodes.map((node) => [node.id, node]));
   const replacedNodeIds = new Set(
     input.deltas.flatMap((delta) =>

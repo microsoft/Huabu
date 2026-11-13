@@ -16,6 +16,7 @@ function latestRenderer(nodeId: string): symbol | null {
 }
 
 interface PreviewSearchState {
+  /** Opaque search identity: a node ID or a view key for PDF-owned notes. */
   nodeId: string | null;
   query: string;
   isOpen: boolean;

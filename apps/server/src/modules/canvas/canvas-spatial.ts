@@ -196,6 +196,9 @@ function spatialNodeInput(
   const rawData = raw?.data as Record<string, unknown> | undefined;
   return {
     id: s.id,
+    ...(typeof rawData?.noteNodeId === 'string'
+      ? { noteNodeId: rawData.noteNodeId }
+      : {}),
     type: (s.type ?? raw?.type ?? 'note') as CanvasNodeType,
     ...(typeof rawData?.['content'] === 'string'
       ? { content: rawData['content'] as string }

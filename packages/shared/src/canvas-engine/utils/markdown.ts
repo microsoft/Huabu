@@ -75,6 +75,23 @@ export function stripMarkdown(input: string): string {
   ).trim();
 }
 
+/** Flatten prose and list paragraphs without headings, block code, or list markers. */
+export function markdownExcerptParagraphs(input: string): string[] {
+  const tree = fromMarkdown(input, {
+    extensions: [gfm()],
+    mdastExtensions: [gfmFromMarkdown()],
+  });
+  function collect(node: MarkdownNode): string[] {
+    if (node.type === 'heading' || node.type === 'code') return [];
+    if (BLOCK_CONTAINERS.has(node.type)) {
+      return (node.children ?? []).flatMap(collect);
+    }
+    const text = plainText(node).replace(/\s+/g, ' ').trim();
+    return text ? [text] : [];
+  }
+  return collect(tree);
+}
+
 export type MarkdownSummaryBlock =
   | { type: 'paragraph'; text: string }
   | { type: 'list'; ordered: boolean; start: number; items: string[] };

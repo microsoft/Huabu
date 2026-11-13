@@ -50,12 +50,12 @@ function buildConflictHint(conflicts: readonly ExecuteConflict[]): string {
   const parts: string[] = [];
   if (conflicts.some((c) => c.reason === 'not-read')) {
     parts.push(
-      'Read before write: `read` the conflicted node(s) first, then re-issue. Retrying as-is fails again.',
+      'Read before write: `read` the conflicted node(s) first (or `inspect_nodes` for properties/display keys only), then re-issue. Retrying as-is fails again.',
     );
   }
   if (conflicts.some((c) => c.reason === 'stale')) {
     parts.push(
-      'Node(s) changed since your last read — re-`read`, then re-issue.',
+      'Node(s) changed since your last read — re-`read` (or re-inspect metadata-only edits), then re-issue.',
     );
   }
   return parts.join(' ');

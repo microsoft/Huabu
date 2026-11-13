@@ -170,7 +170,11 @@ export async function persist(
       branch = 'full';
       isNew = !existing;
       return {
+        ...existing,
         ...(normalized.metadata ?? {}),
+        // Extraction metadata must never overwrite authored properties.
+        properties: existing?.properties,
+        propertyDisplayKeys: existing?.propertyDisplayKeys,
         nodeId,
         type: contentKind,
         label: normalized.label ?? null,

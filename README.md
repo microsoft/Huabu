@@ -11,7 +11,7 @@
 
 <p align="center">
 	<a href="https://microsoft.github.io/Huabu/docs/">User Handbook</a> ·
-	<a href="https://github.com/microsoft/Huabu/releases/latest">Download</a> ·
+	Download (coming soon) ·
 	<a href="https://github.com/microsoft/Huabu/issues">Feedback</a>
 </p>
 
@@ -25,15 +25,39 @@ Huabu gives you an infinite work surface where you and your agents think togethe
 - **Organize your thinking with AI** — work with AI to arrange information, uncover relationships, and clarify ideas while reviewing and controlling every proposed change.
 - **Let your agents work with richer context** — bring your own agents into a Space, where they can understand not only the materials you provide, but also how those materials relate to one another—helping them better grasp your intent and do more relevant work.
 
-## Download and Install
+## Building from source
 
-Packaged desktop applications are published through [GitHub Releases](https://github.com/microsoft/Huabu/releases/latest). You can also [build from source](#building-from-source).
+Running from source is the recommended way to use Huabu. Desktop installers are coming soon.
 
-1. Download the latest package for your platform from the Releases page.
-2. On macOS, open the `.dmg`; on Windows, run the `.exe` installer.
-3. Launch Huabu and choose a local folder as your **Home**.
+Requirements: Node.js 24.16.0+ and pnpm 10+. Use the version pinned in `.nvmrc` for development and CI.
 
-The current desktop packages target macOS on Apple silicon and Windows on x64. Available packages may vary by release; consult the release notes before installing.
+Install dependencies in the repository directory:
+
+```bash
+pnpm install
+```
+
+Then choose the desktop or web application.
+
+### Desktop
+
+```bash
+pnpm start:desktop
+```
+
+This builds and launches the desktop application. Choose your Home folder, then follow the [Quick Start](#quick-start) to connect your agents and create a Space.
+
+### Web
+
+```bash
+pnpm start:web
+```
+
+Open the server address printed in the terminal, choose your Home folder, and configure your agents or models in Settings. The web application and API share one server, accessible only from the same machine by default.
+
+`pnpm start:web` builds and then starts the application. To separate these steps, run `pnpm build:web` followed by `node scripts/start-web.mjs`. The launch-only entry point loads the existing repository-root `.env` and requires prepared build artifacts. For Linux boot startup, optional Caddy HTTPS, updates, and migration from the deprecated tmux workflow, see the [server deployment guide](docs/server-deployment.md).
+
+For development with hot reload and local quality checks, see [Contributing](CONTRIBUTING.md#local-development).
 
 ## Quick Start
 
@@ -45,34 +69,7 @@ Built-In Pi is an optional alternative, not a setup requirement. Some capabiliti
 
 Huabu does not provide an LLM service as part of the application. Use of a model or external capability may require a separate account, credentials, subscription, or usage charges from its provider.
 
-## Building from source
-
-### Getting Started
-
-Requirements: Node.js 24.16.0+ and pnpm 10+. Use the version pinned in `.nvmrc` for development and CI.
-
-```bash
-pnpm install
-pnpm start:desktop
-```
-
-This builds and launches the desktop application. Choose your Home folder, then follow the [Quick Start](#quick-start) to connect your agents and create a Space.
-
-For development with hot reload and local quality checks, see [Contributing](CONTRIBUTING.md#local-development).
-
-### Standalone web access
-
-To use Huabu in a browser, start the web application:
-
-```bash
-pnpm start:web
-```
-
-Open the server address printed in the terminal, choose your Home folder, and configure your agents or models in Settings. The web application and API share one server, accessible only from the same machine by default.
-
-`pnpm start:web` builds and then starts the application. To separate these steps, run `pnpm build:web` followed by `node scripts/start-web.mjs`. The launch-only entry point loads the existing repository-root `.env` and requires prepared build artifacts. For Linux boot startup, optional Caddy HTTPS, updates, and migration from the deprecated tmux workflow, see the [server deployment guide](docs/server-deployment.md).
-
-### Remote access
+## Remote access
 
 To use Huabu from another device, first stop any Huabu server and Vite development server using this instance's credential storage. Then run setup on the hosting machine, either directly or over SSH, and start the server:
 

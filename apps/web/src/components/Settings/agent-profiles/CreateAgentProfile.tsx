@@ -14,6 +14,21 @@ import { CommandProfileForm } from './CommandProfileForm';
 
 import type { AcpAgentCliInfo, ConnectedAgentletDevice } from '@huabu/shared';
 
+function hasLookupFailed(
+  cli: Pick<AcpAgentCliInfo, 'id' | 'diagnostics'>,
+): boolean {
+  return Boolean(
+    cli.diagnostics?.some((diagnostic) => diagnostic.code === 'lookup_failed'),
+  );
+}
+
+function cliSortPriority(cli: AcpAgentCliInfo): number {
+  if (hasLookupFailed(cli)) return 1;
+  if (cli.status === 'ready') return 0;
+  if (cli.status === 'adapter-missing') return 1;
+  return 2;
+}
+
 export function CreateAgentProfile({
   detectedClis,
   detectionLoaded,
@@ -45,7 +60,9 @@ export function CreateAgentProfile({
     (device) => device.agentletId === agentletId,
   );
   const options = [
-    ...detectedClis.filter((cli) => cli.id !== 'custom'),
+    ...detectedClis
+      .filter((cli) => cli.id !== 'custom')
+      .sort((a, b) => cliSortPriority(a) - cliSortPriority(b)),
     {
       id: 'custom',
       displayName: t('settings.customCommand'),
@@ -102,11 +119,7 @@ export function CreateAgentProfile({
               </div>
             )}
             {options.map((cli) => {
-              const lookupFailed =
-                'diagnostics' in cli &&
-                cli.diagnostics?.some(
-                  (diagnostic) => diagnostic.code === 'lookup_failed',
-                );
+              const lookupFailed = hasLookupFailed(cli);
               const status =
                 cli.id === 'custom'
                   ? ''

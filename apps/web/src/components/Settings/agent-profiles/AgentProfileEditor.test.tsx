@@ -469,9 +469,9 @@ describe('AgentProfileEditor', () => {
       launch: { kind: 'acp-command', command: 'new-agent --custom' },
       workingDirPath: '/new/work',
     });
-    expect(container?.textContent).toContain(
-      'settings.profileChangesNewExecutions',
-    );
+    expect(api.toast).toHaveBeenCalledWith('settings.profileUpdated', {
+      tone: 'success',
+    });
   });
 
   it('preserves an untouched structured recipe, including absent options', async () => {
@@ -554,6 +554,50 @@ describe('AgentProfileEditor', () => {
     expect(container?.textContent).not.toContain(
       'settings.profileExecutionEditingUnavailable',
     );
+  });
+
+  it('orders ready harnesses first, then warnings, then not-detected, keeping Custom command last', () => {
+    renderEditor(undefined, [
+      {
+        id: 'gemini',
+        displayName: 'Gemini',
+        status: 'not-found',
+        installHint: 'Install Gemini',
+        capabilities: { autoApprove: false, customLaunchCommand: false },
+      },
+      {
+        id: 'claude',
+        displayName: 'Claude Agent',
+        status: 'adapter-missing',
+        installHint: 'Install Claude',
+        capabilities: { autoApprove: false, customLaunchCommand: false },
+      },
+      {
+        id: 'codex',
+        displayName: 'Codex',
+        status: 'ready',
+        installHint: 'Install Codex',
+        capabilities: { autoApprove: true, customLaunchCommand: false },
+      },
+      {
+        id: 'copilot',
+        displayName: 'GitHub Copilot',
+        status: 'ready',
+        installHint: 'Install Copilot',
+        capabilities: { autoApprove: true, customLaunchCommand: false },
+      },
+    ]);
+    const labels = [
+      ...(container?.querySelectorAll<HTMLButtonElement>('[aria-pressed]') ??
+        []),
+    ].map((button) => button.textContent);
+    expect(labels).toEqual([
+      'Codexsettings.agentConfigurable',
+      'GitHub Copilotsettings.agentConfigurable',
+      'Claude Agentsettings.agentAdapterRequired',
+      'Geminisettings.agentNotDetected',
+      'settings.customCommand',
+    ]);
   });
 
   it('lists unavailable harnesses as selectable installation flows, without a dropdown', () => {

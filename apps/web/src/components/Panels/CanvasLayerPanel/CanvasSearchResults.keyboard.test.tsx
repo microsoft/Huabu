@@ -43,6 +43,7 @@ const {
     selectNodes,
     openPreviewNode: vi.fn(),
     canvasState: {
+      canvasId: 'canvas',
       selectNodes,
       nodes,
       rfInstance: null,
@@ -374,6 +375,54 @@ afterEach(() => {
 });
 
 describe('Canvas search field groups and preview navigation', () => {
+  it.each(['en', 'zh-CN'])(
+    'opens PDF notes matches in their own search view (%s)',
+    async (language) => {
+      await act(async () => testI18n.changeLanguage(language));
+      const source = { hash: 'a'.repeat(64), offset: 25, length: 4 };
+      act(() =>
+        useSearchStore.setState({
+          results: [
+            { ...results[0], match: { ...results[0].match, nodeType: 'pdf' } },
+            {
+              ...results[0],
+              key: 'first:noteContent:0',
+              match: {
+                ...results[0].match,
+                nodeType: 'note',
+                nodeId: 'notes',
+                field: 'content',
+                source,
+              },
+            },
+          ],
+        }),
+      );
+      expect(
+        container?.querySelector('[data-search-field="content"]')?.textContent,
+      ).toBeTruthy();
+      act(() => getRow(3).focus());
+      press(getRow(3), 'Enter');
+      expect(openPreviewNode).toHaveBeenLastCalledWith('notes', {
+        transient: true,
+        focusEditor: false,
+      });
+      expect(usePreviewSearchStore.getState()).toMatchObject({
+        nodeId: 'notes',
+        query: 'test',
+        focusInput: false,
+        navigationRequest: { occurrenceIndex: 0, source },
+      });
+      expect(document.activeElement).toBe(getRow(3));
+      act(() => getRow(1).click());
+      expect(openPreviewNode).toHaveBeenLastCalledWith('first', {
+        transient: true,
+        focusEditor: false,
+      });
+      expect(usePreviewSearchStore.getState().nodeId).toBe('first');
+    },
+  );
+
   it('does not activate a previous-query row during the next query debounce', () => {
     vi.useFakeTimers();
     try {

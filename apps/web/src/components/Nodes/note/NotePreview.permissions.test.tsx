@@ -6,6 +6,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, expect, it, vi } from 'vitest';
 
 import { NotePreview } from './NotePreview';
+import { PreviewHeaderSlotContext } from '../PreviewHeaderSlot';
 
 const editorProps = vi.hoisted(() => ({
   current: null as {
@@ -27,8 +28,21 @@ vi.mock('@/components/Milkdown', () => ({
   },
 }));
 vi.mock('@/components/CodeMirror/RawMarkdownEditor', () => ({
-  default: ({ readOnly, value }: { readOnly: boolean; value: string }) => (
-    <textarea readOnly={readOnly} value={value} onChange={() => undefined} />
+  default: ({
+    readOnly,
+    value,
+    searchNodeId,
+  }: {
+    readOnly: boolean;
+    value: string;
+    searchNodeId?: string;
+  }) => (
+    <textarea
+      data-search-id={searchNodeId}
+      readOnly={readOnly}
+      value={value}
+      onChange={() => undefined}
+    />
   ),
 }));
 vi.mock('./NoteCommentActions', () => ({ NoteCommentActions: () => null }));
@@ -72,6 +86,41 @@ it('a viewer receives a non-editable note and cannot emit content or provenance 
   );
   expect(onDataChange).not.toHaveBeenCalled();
 });
+
+it.each([
+  {
+    id: undefined,
+    searchNodeId: 'node:space:pdf:notes',
+    expected: 'node:space:pdf:notes',
+  },
+  { id: 'note', searchNodeId: undefined, expected: 'note' },
+])(
+  'passes the search identity to the source editor without requiring a node id: $expected',
+  async ({ id, searchNodeId, expected }) => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    act(() =>
+      root?.render(
+        <PreviewHeaderSlotContext.Provider value={{ el: container ?? null }}>
+          <NotePreview
+            id={id}
+            searchNodeId={searchNodeId}
+            data={{ content: 'Searchable notes' }}
+          />
+        </PreviewHeaderSlotContext.Provider>,
+      ),
+    );
+    const toggle = container.querySelector<HTMLButtonElement>(
+      '[aria-pressed="false"]',
+    );
+    expect(toggle).not.toBeNull();
+    await act(async () => toggle?.click());
+    expect(
+      container.querySelector('textarea')?.getAttribute('data-search-id'),
+    ).toBe(expected);
+  },
+);
 
 it('retained editor callbacks cannot emit after write permission is removed', () => {
   const onDataChange = vi.fn();

@@ -5,6 +5,8 @@ import { NodePreviews } from '@/components/Nodes/previews';
 
 import { AiSummaryButton } from './AiSummaryButton';
 
+import type { ReactNode } from 'react';
+
 export type PreviewData = {
   type: string;
   data: Record<string, unknown>;
@@ -14,8 +16,12 @@ export type PreviewData = {
 export interface NodePreviewContentProps {
   /** Canvas node id, when bound to a real node. */
   id?: string;
+  /** Search-only identity for views without an independent canvas node. */
+  searchNodeId?: string;
   /** Runtime identity used to restore this Preview target's scroll offset. */
   scrollViewKey?: string;
+  /** Content above the PDF pages, inside their scroll viewport. */
+  scrollHeader?: ReactNode;
   type: string;
   data: Record<string, unknown>;
   readOnly?: boolean;

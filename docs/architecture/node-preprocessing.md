@@ -60,7 +60,8 @@ Each `CanvasNodeType` declares `{ contentKind?, capabilities, watchFields }`. Se
 | -------------- | ------------ | ------------------------------------------- | ------- | --------------------------- |
 | note / text    | text         | —                                           | ✅      | content, title, labelSource |
 | web            | remote fetch | label + summary + keywords                  | ✅      | src, title, labelSource     |
-| pdf / office   | text         | label + summary + keywords                  | ✅      | src, title, labelSource     |
+| pdf            | text         | label                                       | ✅      | src, title, labelSource     |
+| office         | text         | label + summary + keywords                  | ✅      | src, title, labelSource     |
 | image          | —            | `generate_label` (vision)                   | ✅      | src, labelSource            |
 | video          | cover JPEG   | —                                           | ✅      | src                         |
 | frame          | —            | `generate_label` (summarise children)       | —       | childLabels, labelSource    |
@@ -70,6 +71,8 @@ Each `CanvasNodeType` declares `{ contentKind?, capabilities, watchFields }`. Se
 `question` declares only `resolve_input` + `build_patch`, watches `content`, and has no `persist_source` (not a knowledge source). Its pipeline entry calls `initializeQuestion(canvasId, nodeId, content, allowLLM)` and returns an empty patch and capability list: the shared service persists any accepted name through the canonical node writer and Canvas Sync, not through the preprocessing response. `allowPersistence=false` skips naming entirely; `allowLLM=false` or interactive mode permits fallback preparation without generation. Initialization checks the live Question content against the request before proceeding. `sketch` / `audio` only do `resolve_input` + `build_patch`. The `contentKind?` field (`web` / `pdf` / `office` / `note` / `text` / `image` / `video`) is just the Persist gate — set it and Stage 5 writes the node as a knowledge source; question has none. Registry: [profiles.ts](../../apps/server/src/modules/preprocessing/profiles.ts).
 
 Each profile also declares **`bodyOwnership`** (`types.ts`): `'authored'` for user-editable bodies (`note` / `text`) → the Persist write is rev-CAS-guarded so a concurrent edit can't clobber the user's body; `'derived'` for pipeline-extracted, in-app read-only bodies (`web` / `pdf` / `office`) → no CAS (last-extraction-wins). The Persist stage reads this flag rather than hardcoding node types.
+
+PDF preprocessing no longer generates automatic summaries or keywords, including forced runs. Extraction, local source snapshots, and label generation remain enabled; existing stored summaries/keywords remain readable. Office and Web enrichment are unchanged. Custom `properties` and `propertyDisplayKeys` are always authored: extraction retains their latest stored values and ignores same-named loader metadata. Content PUT applies revision checks to edits of these fields even on derived-body nodes. A PDF's owned Note is a separate node and record, reached through structural `noteNodeId`; PDF extraction never writes its body or revision. The Note uses ordinary Note preprocessing.
 
 ---
 

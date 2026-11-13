@@ -15,6 +15,7 @@ import {
   canvasSearchMatchSchema,
   canvasSearchRequestSchema,
 } from './canvas-search.js';
+import { nodePropertiesSchema, nodePropertiesPatchSchema } from './canvas.js';
 import {
   ACCENT_PALETTE,
   AGENT_CANVAS_COMMAND_TYPES,
@@ -105,6 +106,24 @@ const nodeStyleSchema = z
 
 const agentNodeDataSchema = z
   .object({
+    properties: nodePropertiesSchema
+      .optional()
+      .describe(
+        'Authored custom properties: strings, finite numbers, booleans, or string arrays. No schema registry.',
+      ),
+    propertyDisplayKeys: z
+      .array(z.string())
+      .optional()
+      .describe(
+        'Property display order for the property list and PDF card priority. Replaces the entire list; omitted existing keys follow, duplicates and missing keys are ignored. [] uses object-key order, not hidden visibility.',
+      ),
+    noteNodeId: z
+      .string()
+      .min(1)
+      .optional()
+      .describe(
+        'PDF-only link to its independently stored Note. Use INITIALIZE_PDF_NOTE to obtain a hidden Note; never link an existing Note or replace an existing link. Read and edit the Note by its own ID. It follows its PDF when copied, moved or deleted.',
+      ),
     label: z
       .string()
       .max(500)
@@ -218,7 +237,13 @@ export const deleteNodesCommandSchema = z
 const mergeNodeDataPatchSchema = z
   .object({
     nodeId: z.string().min(1),
-    patch: agentNodeDataSchema,
+    patch: agentNodeDataSchema.extend({
+      properties: nodePropertiesPatchSchema
+        .optional()
+        .describe(
+          'Merge individual property keys; null deletes that key, omitted keys survive, {} changes nothing. Example: {"year":2026,"obsolete":null}.',
+        ),
+    }),
   })
   .strict();
 
@@ -235,7 +260,7 @@ export const mergeNodeDataCommandSchema = z
   })
   .strict()
   .describe(
-    'Merge patches into node data. patch.content is the Markdown body only, never a downloaded node sidecar or YAML frontmatter. Use expectRev for optimistic concurrency when rewriting content or src.',
+    'Merge patches into node data. patch.content is the Markdown body only, never a downloaded node sidecar or YAML frontmatter. Content and authored metadata (properties, propertyDisplayKeys) require a fresh revision; use expectRev for src edits too. Read the node before content edits; inspect_nodes suffices for property edits. Native callers pass expectRev; the built-in agent injects it from the read or inspection.',
   );
 
 export const setNodeParentCommandSchema = z
@@ -394,8 +419,19 @@ export const setFrameLayoutCommandSchema = z
   .strict()
   .describe("Set a frame's layout mode, track count, or sizing.");
 
+export const initializePdfNoteCommandSchema = z
+  .object({
+    type: z.literal('INITIALIZE_PDF_NOTE'),
+    nodeId: z.string().min(1).describe('ID of the PDF that needs a Note.'),
+  })
+  .strict()
+  .describe(
+    'Create and link an empty hidden Note for a PDF in one operation, or reuse its existing Note without changing content. Returns the Note ID in results[].nodes[0].nodeId, including on an already-initialized no-op. Read/edit that Note normally afterward. Missing or non-PDF targets fail without creating anything. Example: {"type":"INITIALIZE_PDF_NOTE","nodeId":"node-paper"}.',
+  );
+
 export const AGENT_COMMAND_SCHEMAS = {
   CREATE_NODES: createNodesCommandSchema,
+  INITIALIZE_PDF_NOTE: initializePdfNoteCommandSchema,
   DELETE_NODES: deleteNodesCommandSchema,
   MERGE_NODE_DATA: mergeNodeDataCommandSchema,
   SET_NODE_PARENT: setNodeParentCommandSchema,
@@ -415,6 +451,7 @@ export const AGENT_COMMAND_SCHEMAS = {
 
 export const agentCanvasCommandSchema = z.discriminatedUnion('type', [
   createNodesCommandSchema,
+  initializePdfNoteCommandSchema,
   deleteNodesCommandSchema,
   mergeNodeDataCommandSchema,
   setNodeParentCommandSchema,
@@ -443,6 +480,7 @@ export const builtInMergeNodeDataCommandSchema = z
 
 export const builtInAgentCanvasCommandSchema = z.discriminatedUnion('type', [
   createNodesCommandSchema,
+  initializePdfNoteCommandSchema,
   deleteNodesCommandSchema,
   builtInMergeNodeDataCommandSchema,
   setNodeParentCommandSchema,
@@ -748,6 +786,9 @@ export type SpaceQuery = z.infer<typeof spaceQuerySchema>;
 
 const spaceNodeResultSchema = z
   .object({
+    noteNodeId: z.string().optional(),
+    properties: nodePropertiesSchema.optional(),
+    propertyDisplayKeys: z.array(z.string()).optional(),
     id: z.string(),
     type: z.enum(CANVAS_NODE_TYPES),
     label: z.string().optional(),

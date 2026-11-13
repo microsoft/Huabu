@@ -249,6 +249,7 @@ beforeEach(() => {
 
 afterEach(() => {
   act(() => root?.unmount());
+  vi.useRealTimers();
   container?.remove();
   root = undefined;
   container = undefined;
@@ -590,86 +591,322 @@ describe('bounded history refill and completion', () => {
     },
   );
 
-  it('does not drop a completed local tail before the server has persisted it', async () => {
-    seedPages();
-    useChatStore.getState().addMessage(THREAD_ID, {
-      id: 'live-user',
-      role: 'user',
-      content: 'New question',
-    });
-    useChatStore.getState().addMessage(THREAD_ID, {
-      id: 'live-answer',
-      role: 'assistant',
-      segments: [{ kind: 'text', text: 'New answer' }],
-    });
-    const scrollRoot = document.createElement('div');
-    const row = document.createElement('div');
-    row.dataset.chatMessageId = 'live-answer';
-    row.getBoundingClientRect = () => new DOMRect(0, 20, 100, 100);
-    scrollRoot.append(row);
-    const viewKey = messageListViewKey(CANVAS_ID, THREAD_ID);
-    rememberMessageListScrollAnchor(scrollRoot, viewKey);
-    apiMocks.fetchHistoryPage.mockResolvedValue({
-      threadId: THREAD_ID,
-      turns: [
-        {
-          id: 'latest',
-          messages: [
-            { role: 'user', content: 'Old question' },
+  it.each(['completed', 'interrupted', 'interrupted-active'] as const)(
+    'silently reconciles a %s local tail after persistence catches up',
+    async (outcome) => {
+      vi.useFakeTimers();
+      seedPages();
+      useChatStore.getState().addMessage(THREAD_ID, {
+        id: 'live-user',
+        role: 'user',
+        content: 'New question',
+      });
+      useChatStore.getState().addMessage(THREAD_ID, {
+        id: 'live-answer',
+        role: 'assistant',
+        segments: [{ kind: 'text', text: 'New answer' }],
+      });
+      const scrollRoot = document.createElement('div');
+      const row = document.createElement('div');
+      row.dataset.chatMessageId = 'live-answer';
+      row.getBoundingClientRect = () => new DOMRect(0, 20, 100, 100);
+      scrollRoot.append(row);
+      const viewKey = messageListViewKey(CANVAS_ID, THREAD_ID);
+      rememberMessageListScrollAnchor(scrollRoot, viewKey);
+      apiMocks.fetchHistoryPage.mockResolvedValue({
+        threadId: THREAD_ID,
+        turns: [
+          {
+            id: 'latest',
+            messages: [
+              { role: 'user', content: 'Old question' },
+              {
+                role: 'assistant',
+                parts: [{ kind: 'text', text: 'Latest answer' }],
+              },
+            ],
+          },
+        ],
+        hasMore: false,
+      });
+      if (outcome === 'interrupted-active') {
+        apiMocks.fetchHistoryPage.mockResolvedValue({
+          threadId: THREAD_ID,
+          turns: [
             {
-              role: 'assistant',
-              parts: [{ kind: 'text', text: 'Latest answer' }],
+              id: 'completed',
+              active: true,
+              messages: [
+                { role: 'user', content: 'New question' },
+                { role: 'assistant', parts: [{ kind: 'text', text: 'New' }] },
+              ],
             },
           ],
+          hasMore: false,
+        });
+      }
+      await renderHarness();
+      await act(async () => {
+        if (outcome === 'completed')
+          useChatStore.getState().markTurnCompleted(THREAD_ID, 'live-answer');
+        else
+          useChatStore.getState().addMessage(THREAD_ID, {
+            id: 'stopped',
+            role: 'status',
+            status: 'interrupted',
+          });
+      });
+      expect(
+        useChatStore
+          .getState()
+          .threadsById[
+            THREAD_ID
+          ]?.messages.some((message) => message.id === 'live-answer'),
+      ).toBe(true);
+      expect(latestHistory.historyPageError).toBeUndefined();
+      apiMocks.fetchHistoryPage.mockResolvedValue({
+        threadId: THREAD_ID,
+        turns: [
+          {
+            id: 'latest',
+            messages: [
+              { role: 'user', content: 'Old question' },
+              {
+                role: 'assistant',
+                parts: [{ kind: 'text', text: 'Latest answer' }],
+              },
+            ],
+          },
+          {
+            id: 'completed',
+            messages: [
+              { role: 'user', content: 'New question' },
+              {
+                role: 'assistant',
+                parts: [{ kind: 'text', text: 'New answer' }],
+              },
+            ],
+          },
+        ],
+        hasMore: false,
+      });
+      await act(async () => vi.advanceTimersByTimeAsync(500));
+      expect(
+        useChatStore.getState().threadsById[THREAD_ID]?.messages.at(-1)?.id,
+      ).toBe('completed:1');
+      expect(latestHistory.historyPageError).toBeUndefined();
+      expect(readMessageListScrollBookmark(viewKey)).toEqual({
+        messageId: 'completed:1',
+        offsetTop: 20,
+      });
+    },
+  );
+
+  it.each([false, true])(
+    'retains newer output and interruption after reconnect until history settles (exhaust retries=%s)',
+    async (exhaustRetries) => {
+      vi.useFakeTimers();
+      seedStore(true);
+      useChatStore.getState().setMessages(THREAD_ID, [
+        {
+          id: 'running:0',
+          historyTurnId: 'running',
+          historyTurnActive: true,
+          role: 'user',
+          content: 'hi',
         },
-      ],
+        {
+          id: 'running:1',
+          historyTurnId: 'running',
+          historyTurnActive: true,
+          role: 'assistant',
+          segments: [{ kind: 'text', text: 'Newer partial output' }],
+        },
+      ]);
+      apiMocks.fetchHistoryPage.mockResolvedValue({
+        threadId: THREAD_ID,
+        turns: [
+          {
+            id: 'running',
+            active: true,
+            messages: [
+              { role: 'user', content: 'hi' },
+              {
+                role: 'assistant',
+                parts: [{ kind: 'text', text: 'Older output' }],
+              },
+            ],
+          },
+        ],
+        hasMore: false,
+      });
+      useChatStore.getState().addMessage(THREAD_ID, {
+        id: 'stopped',
+        role: 'status',
+        status: 'interrupted',
+      });
+      useChatStore.getState().setThreadLoading(THREAD_ID, false);
+      await renderHarness();
+      const retained = useChatStore.getState().threadsById[THREAD_ID].messages;
+      expect(retained.at(-1)?.id).toBe('stopped');
+      expect(retained[1]).toMatchObject({
+        segments: [{ kind: 'text', text: 'Newer partial output' }],
+      });
+      expect(latestHistory.historyPageError).toBeUndefined();
+      if (exhaustRetries) {
+        await act(async () => vi.advanceTimersByTimeAsync(3_500));
+        expect(apiMocks.fetchHistoryPage).toHaveBeenCalledTimes(4);
+        expect(latestHistory.historyPageError).toContain(
+          'not available in history',
+        );
+        expect(useChatStore.getState().threadsById[THREAD_ID].messages).toBe(
+          retained,
+        );
+        return;
+      }
+      apiMocks.fetchHistoryPage.mockResolvedValue({
+        threadId: THREAD_ID,
+        turns: [
+          {
+            id: 'running',
+            messages: [
+              { role: 'user', content: 'hi' },
+              {
+                role: 'assistant',
+                parts: [{ kind: 'text', text: 'Newer partial output' }],
+              },
+              { role: 'status', status: 'interrupted' },
+            ],
+          },
+        ],
+        hasMore: false,
+      });
+      await act(async () => vi.advanceTimersByTimeAsync(500));
+      expect(useChatStore.getState().threadsById[THREAD_ID].messages).toEqual([
+        expect.objectContaining({ id: 'running:0', historyTurnActive: false }),
+        expect.objectContaining({
+          id: 'running:1',
+          segments: [{ kind: 'text', text: 'Newer partial output' }],
+          historyTurnActive: false,
+        }),
+        expect.objectContaining({ id: 'running:2', status: 'interrupted' }),
+      ]);
+      expect(latestHistory.historyPageError).toBeUndefined();
+    },
+  );
+
+  it('bounds persistence retries, retains stopped messages, and permits manual retry', async () => {
+    vi.useFakeTimers();
+    seedStore(false);
+    const stopped = {
+      id: 'stopped',
+      role: 'status' as const,
+      status: 'interrupted' as const,
+    };
+    useChatStore.getState().addMessage(THREAD_ID, stopped);
+    apiMocks.fetchHistoryPage.mockResolvedValue({
+      threadId: THREAD_ID,
+      turns: [],
       hasMore: false,
     });
     await renderHarness();
-    await act(async () =>
-      useChatStore.getState().markTurnCompleted(THREAD_ID, 'live-answer'),
-    );
-    expect(
-      useChatStore.getState().threadsById[THREAD_ID]?.messages.at(-1)?.id,
-    ).toBe('live-answer');
+    expect(latestHistory.historyPageError).toBeUndefined();
+    await act(async () => vi.advanceTimersByTimeAsync(3_500));
+    expect(apiMocks.fetchHistoryPage).toHaveBeenCalledTimes(4);
     expect(latestHistory.historyPageError).toContain(
       'not available in history',
     );
+    expect(useChatStore.getState().threadsById[THREAD_ID].messages.at(-1)).toBe(
+      stopped,
+    );
+    await act(async () => vi.advanceTimersByTimeAsync(30_000));
+    expect(apiMocks.fetchHistoryPage).toHaveBeenCalledTimes(4);
     apiMocks.fetchHistoryPage.mockResolvedValue({
       threadId: THREAD_ID,
       turns: [
         {
-          id: 'latest',
+          id: 'saved',
           messages: [
-            { role: 'user', content: 'Old question' },
-            {
-              role: 'assistant',
-              parts: [{ kind: 'text', text: 'Latest answer' }],
-            },
-          ],
-        },
-        {
-          id: 'completed',
-          messages: [
-            { role: 'user', content: 'New question' },
-            {
-              role: 'assistant',
-              parts: [{ kind: 'text', text: 'New answer' }],
-            },
+            { role: 'user', content: 'hi' },
+            { role: 'status', status: 'interrupted' },
           ],
         },
       ],
       hasMore: false,
     });
     await act(async () => latestHistory.retryHistoryPage());
-    expect(
-      useChatStore.getState().threadsById[THREAD_ID]?.messages.at(-1)?.id,
-    ).toBe('completed:1');
     expect(latestHistory.historyPageError).toBeUndefined();
-    expect(readMessageListScrollBookmark(viewKey)).toEqual({
-      messageId: 'completed:1',
-      offsetTop: 20,
+    expect(
+      useChatStore.getState().threadsById[THREAD_ID].messages.at(-1)?.id,
+    ).toBe('saved:1');
+  });
+
+  it.each(['new-turn', 'unmount'] as const)(
+    'cancels pending persistence retries on %s',
+    async (transition) => {
+      vi.useFakeTimers();
+      seedStore(false);
+      useChatStore.getState().addMessage(THREAD_ID, {
+        id: 'stopped',
+        role: 'status',
+        status: 'interrupted',
+      });
+      apiMocks.fetchHistoryPage.mockResolvedValue({
+        threadId: THREAD_ID,
+        turns: [],
+        hasMore: false,
+      });
+      await renderHarness();
+      expect(apiMocks.fetchHistoryPage).toHaveBeenCalledOnce();
+      act(() => {
+        if (transition === 'new-turn')
+          useChatStore.getState().setThreadLoading(THREAD_ID, true);
+        else {
+          root?.unmount();
+          root = undefined;
+        }
+      });
+      await act(async () => vi.advanceTimersByTimeAsync(10_000));
+      expect(apiMocks.fetchHistoryPage).toHaveBeenCalledOnce();
+      expect(latestHistory.historyPageError).toBeUndefined();
+    },
+  );
+
+  it('does not reuse a previous completion after a new stream closes without done', async () => {
+    seedStore(false);
+    useChatStore.getState().markTurnCompleted(THREAD_ID, 'previous-answer');
+    useChatStore.getState().setThreadLoading(THREAD_ID, true);
+    useChatStore.getState().addMessage(THREAD_ID, {
+      id: 'new-answer',
+      role: 'assistant',
+      segments: [{ kind: 'text', text: 'Partial response' }],
     });
+    await renderHarness();
+    expect(
+      useChatStore.getState().threadsById[THREAD_ID].completedTurnId,
+    ).toBeUndefined();
+    await act(async () =>
+      useChatStore.getState().setThreadLoading(THREAD_ID, false),
+    );
+    expect(apiMocks.fetchHistoryPage).not.toHaveBeenCalled();
+  });
+
+  it('reports real history request failures without hiding them behind persistence retries', async () => {
+    seedStore(false);
+    useChatStore.getState().addMessage(THREAD_ID, {
+      id: 'stopped',
+      role: 'status',
+      status: 'interrupted',
+    });
+    apiMocks.fetchHistoryPage.mockRejectedValue(
+      new Error('Network unavailable'),
+    );
+    await renderHarness();
+    expect(latestHistory.historyPageError).toBe('Network unavailable');
+    expect(apiMocks.fetchHistoryPage).toHaveBeenCalledOnce();
+    expect(
+      useChatStore.getState().threadsById[THREAD_ID].messages.at(-1)?.id,
+    ).toBe('stopped');
   });
 });
 

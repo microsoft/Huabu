@@ -437,7 +437,11 @@ export function CommandProfileForm({
             <>
               <SettingRow
                 title={t('settings.autoApproveAllToolCalls')}
-                description={t('settings.autoApproveAllToolCallsHint')}
+                description={t(
+                  detectionLoaded && !approvalSupported
+                    ? 'settings.profileApprovalUnsupported'
+                    : 'settings.autoApproveAllToolCallsHint',
+                )}
               >
                 <Toggle
                   label={t('settings.autoApproveAllToolCalls')}
@@ -446,11 +450,6 @@ export function CommandProfileForm({
                   onChange={setAllowAll}
                 />
               </SettingRow>
-              {detectionLoaded && !approvalSupported ? (
-                <p className="text-fg-muted px-3 py-2 text-xs">
-                  {t('settings.profileApprovalUnsupported')}
-                </p>
-              ) : null}
               {allowAll && !initialApproval ? (
                 <p className="text-warning-fg px-3 py-2 text-xs" role="alert">
                   {t('settings.profilePermissionIncrease')}
@@ -463,11 +462,6 @@ export function CommandProfileForm({
             (!custom && cliId && !structuredSupported)) ? (
             <p className="text-warning-fg px-3 py-2 text-xs">
               {t('settings.profileExecutionEditingUnavailable')}
-            </p>
-          ) : null}
-          {editing ? (
-            <p className="text-fg-muted px-3 py-2 text-xs">
-              {t('settings.profileChangesNewExecutions')}
             </p>
           ) : null}
         </>

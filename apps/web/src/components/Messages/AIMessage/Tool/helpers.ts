@@ -88,6 +88,17 @@ export function reconstructChangesFromCommands(
         }
         break;
       }
+      case 'INITIALIZE_PDF_NOTE': {
+        changes.push({
+          id: `hist-${counter++}`,
+          tool: 'space_commands',
+          label: 'Initialized PDF notes',
+          nodeType: 'pdf',
+          nodeId: cmd.nodeId as string,
+          revertible: false,
+        });
+        break;
+      }
       case 'DELETE_NODES': {
         const nodeIds = (cmd.nodeIds ?? []) as string[];
         for (const nodeId of nodeIds) {
