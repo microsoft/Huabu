@@ -9,6 +9,7 @@ import { ACCENT_PALETTE, EDGE_STROKE_WIDTHS } from '@huabu/shared';
 import {
   DEFAULT_EDGE_STROKE_TOKEN,
   DEFAULT_EDGE_STROKE_WIDTH,
+  getEdgeLineType,
 } from '@huabu/shared/canvas-engine';
 
 import { CanvasFloatingPopover } from '@/components/Common/CanvasFloatingPopover';
@@ -108,7 +109,7 @@ function LineTypeIcon({ type }: { type: EdgeLineType }) {
   const d =
     type === 'bezier'
       ? 'M2 14 C2 3, 14 14, 14 3'
-      : type === 'step'
+      : type === 'step' || type === 'auto'
         ? 'M2 12 H8 V4 H14'
         : 'M2 12 L14 4';
   return (
@@ -229,7 +230,10 @@ export const EdgeStyleToolbar = () => {
     [midpoint],
   );
 
-  const currentLineType: EdgeLineType = style.lineType ?? 'bezier';
+  const currentLineType: EdgeLineType = getEdgeLineType(
+    selectedEdge?.data,
+    selectedEdge?.type,
+  );
   const currentLineStyle: EdgeLineStyle = style.lineStyle ?? 'solid';
   const currentStroke = style.stroke ?? DEFAULT_EDGE_STROKE_TOKEN;
   const currentWidth = style.strokeWidth ?? DEFAULT_EDGE_STROKE_WIDTH;
@@ -241,6 +245,11 @@ export const EdgeStyleToolbar = () => {
 
   const lineTypeOptions = useMemo<SelectOption<EdgeLineType>[]>(
     () => [
+      {
+        value: 'auto',
+        label: t('edgeToolbar.lineType.auto'),
+        icon: <LineTypeIcon type="auto" />,
+      },
       {
         value: 'bezier',
         label: t('edgeToolbar.lineType.bezier'),

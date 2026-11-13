@@ -90,6 +90,7 @@ Adding a missing counterpart later is a two-command follow-up: create the node i
 ## Connecting layers
 
 - Use `CONNECT_NODES` with `direction: "forward"` for primary data flow.
+- Leave `lineType` omitted or use `"auto"` for rounded orthogonal arrows that avoid visible cards and update during dragging. Use `"straight"`, `"bezier"`, or `"step"` only when that explicit shape is intended; those shapes do not run automatic obstacle avoidance.
 - Use `lineStyle: "dashed"` for secondary / feedback / optional connections.
 - Use distinct `stroke` palette tokens to distinguish relationship types (e.g. one colour for "data flow", another for "control flow").
 - **Edges are noise.** Only draw an edge when the relationship is not obvious from layout. A clean column of nodes implies "these belong together"; you do not need a chain of arrows to say so.
