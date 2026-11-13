@@ -5,7 +5,7 @@ import { X } from 'lucide-react';
 import { useEffect, useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { POPOVER_SURFACE_CLASS } from '@/components/Common/Popover';
+import { Popover } from '@/components/Common/Popover';
 
 /** One outline for every property value editor, whatever its kind. */
 export const PROPERTY_FIELD_CLASS =
@@ -45,6 +45,7 @@ export function PropertyTagEditor({
   const { t } = useTranslation();
   const listId = useId();
   const [cursor, setCursor] = useState<number | null>(null);
+  const [field, setField] = useState<HTMLDivElement | null>(null);
   const query = text.trim();
   const needle = query.toLowerCase();
   const matches = options.filter(
@@ -82,6 +83,7 @@ export function PropertyTagEditor({
 
   return (
     <div
+      ref={setField}
       className={`${PROPERTY_FIELD_CLASS} relative z-10 min-h-full w-full min-w-0`}
     >
       <div className="flex flex-wrap items-center gap-1 px-1.5 py-1">
@@ -156,37 +158,49 @@ export function PropertyTagEditor({
           }}
         />
       </div>
-      {rows.length > 0 && (
-        <ul
-          id={listId}
-          role="listbox"
-          aria-label={t('node.propertyTagOptions')}
-          className={`${POPOVER_SURFACE_CLASS} absolute top-full left-0 z-20 mt-1 max-h-48 w-full min-w-40 overflow-y-auto p-1`}
-          // A pointer resting on the list must not turn Enter-to-save into
-          // adding whatever it happens to hover.
-          onMouseLeave={() => setCursor(null)}
+      {rows.length > 0 && field && (
+        // Floats above the page: a Note's properties sit in a short scrolling
+        // region that would otherwise clip all but the first option. No
+        // dismissal or focus handling: the field keeps focus and the form
+        // owns Escape and commit.
+        <Popover
+          reference={field}
+          placement="bottom-start"
+          offset={{ x: 0, y: 4 }}
+          className="max-h-[min(12rem,var(--popover-available-height))] overflow-y-auto p-1 text-xs"
+          style={{ width: field.offsetWidth, minWidth: '10rem' }}
         >
-          {rows.map((row, index) => (
-            // eslint-disable-next-line jsx-a11y/click-events-have-key-events -- The combobox field owns keyboard selection through aria-activedescendant.
-            <li
-              key={row.create ? `create:${row.value}` : row.value}
-              id={`${listId}-${index}`}
-              role="option"
-              aria-selected={index === active}
-              className={`flex cursor-pointer items-center gap-1.5 rounded px-1.5 py-1 ${index === active ? 'bg-hover' : ''}`}
-              onMouseDown={(event) => event.preventDefault()}
-              onMouseEnter={() => setCursor(index)}
-              onClick={() => add(row.value)}
-            >
-              {row.create && (
-                <span className="text-fg-muted shrink-0">
-                  {t('node.createPropertyTag')}
-                </span>
-              )}
-              <span className={PROPERTY_TAG_CLASS}>{row.value}</span>
-            </li>
-          ))}
-        </ul>
+          <ul
+            id={listId}
+            role="listbox"
+            aria-label={t('node.propertyTagOptions')}
+            // A pointer resting on the list must not turn Enter-to-save into
+            // adding whatever it happens to hover.
+            onMouseLeave={() => setCursor(null)}
+          >
+            {rows.map((row, index) => (
+              // eslint-disable-next-line jsx-a11y/click-events-have-key-events -- The combobox field owns keyboard selection through aria-activedescendant.
+              <li
+                key={row.create ? `create:${row.value}` : row.value}
+                id={`${listId}-${index}`}
+                role="option"
+                aria-selected={index === active}
+                className={`flex cursor-pointer items-center gap-1.5 rounded px-1.5 py-1 ${index === active ? 'bg-hover' : ''}`}
+                // Keep focus in the field: leaving it would commit the edit.
+                onMouseDown={(event) => event.preventDefault()}
+                onMouseEnter={() => setCursor(index)}
+                onClick={() => add(row.value)}
+              >
+                {row.create && (
+                  <span className="text-fg-muted shrink-0">
+                    {t('node.createPropertyTag')}
+                  </span>
+                )}
+                <span className={PROPERTY_TAG_CLASS}>{row.value}</span>
+              </li>
+            ))}
+          </ul>
+        </Popover>
       )}
     </div>
   );

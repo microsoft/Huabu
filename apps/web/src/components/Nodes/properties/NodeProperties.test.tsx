@@ -443,9 +443,10 @@ it.each([true, false])(
   },
 );
 
+// Options float in a popover outside the property list's own container.
 function option(text: string) {
   return Array.from(
-    container.querySelectorAll<HTMLElement>('[role="option"]'),
+    document.querySelectorAll<HTMLElement>('[role="option"]'),
   ).find((item) => item.textContent === text);
 }
 
@@ -466,7 +467,7 @@ it('picks known tags, creates new ones, and removes chosen ones in one save', as
   click('node.editProperty:Keywords');
   // Tags already chosen are not offered again.
   expect(
-    Array.from(container.querySelectorAll('[role="option"]')).map(
+    Array.from(document.querySelectorAll('[role="option"]')).map(
       (item) => item.textContent,
     ),
   ).toEqual(['agents', 'genui']);
