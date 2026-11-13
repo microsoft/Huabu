@@ -131,6 +131,21 @@ describe('PreviewCard', () => {
     expect(heading().style.getPropertyValue('--card-title-lines')).toBe('1');
   });
 
+  it('lays out a bounded number of tags and counts the rest in the marker', () => {
+    const many = Array.from({ length: 500 }, (_, index) => ({
+      name: 'Keywords',
+      value: `tag ${index}`,
+    }));
+    render({ tags: many });
+    // Neither the measuring copies nor the chips grow with the list.
+    expect(
+      container.querySelectorAll('[data-measure="tag"]').length,
+    ).toBeLessThan(100);
+    const chips = shown('.preview-card__tag');
+    expect(chips.length).toBeLessThan(100);
+    expect(chips.at(-1)?.textContent).toBe(`+${500 - (chips.length - 1)}`);
+  });
+
   it('keeps measuring copies out of the accessibility tree and out of non-PDF cards', () => {
     render({ tags, texts });
     const measurer = container.querySelector('.preview-card__measure');

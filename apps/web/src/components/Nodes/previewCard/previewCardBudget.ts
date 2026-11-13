@@ -26,6 +26,12 @@ export const CARD_TEXT_LINES = 2;
  * back to the cover, so a sparse card shows a larger page, not a blank band.
  */
 export const CARD_COVER_SHARE = 0.45;
+/**
+ * Tags laid out for measurement. A card shows a few rows at most, so tags
+ * past this never appear as chips; they are counted in the "+N" marker
+ * without being rendered or measured.
+ */
+export const CARD_MEASURED_TAGS = 48;
 
 export interface CardBudgetInput {
   /** Height available to all blocks, in px. */
@@ -195,7 +201,8 @@ export function tagRowsNeeded(
 /**
  * How many leading tags fit in `rows` rows when the rest collapse into one
  * trailing "+N" marker of `moreWidth`. One pass: property lists are unbounded
- * and this runs during card layout.
+ * and this runs during card layout. `moreFollow` says further tags exist
+ * beyond `widths`, so the marker is needed even when all of these fit.
  */
 export function visibleTagCount(
   widths: readonly number[],
@@ -203,6 +210,7 @@ export function visibleTagCount(
   gap: number,
   rows: number,
   moreWidth: number,
+  moreFollow = false,
 ): number {
   if (rows <= 0) return 0;
   // Unmeasured (not laid out yet): show everything rather than nothing.
@@ -223,7 +231,10 @@ export function visibleTagCount(
     if (row > rows) break;
     const count = index + 1;
     // A prefix counts only if the marker for the rest still fits after it.
-    if (count === widths.length || place(row, used, marker).row <= rows)
+    if (
+      (count === widths.length && !moreFollow) ||
+      place(row, used, marker).row <= rows
+    )
       fitting = count;
   }
   return fitting;

@@ -18,6 +18,7 @@ import {
   allocateCardLines,
   cardTextHeight,
   CARD_COVER_SHARE,
+  CARD_MEASURED_TAGS,
   CARD_TAG_ROWS,
   CARD_TEXT_LINES,
   CARD_TITLE_LINES,
@@ -79,6 +80,25 @@ interface CardLines {
   summaryLines: number;
   /** Height the shown blocks occupy, in px. */
   textHeight: number;
+}
+
+/**
+ * An element's border-box width with its fraction. `offsetWidth` rounds, and
+ * half a pixel decides whether a line or a tag wraps; bounding rects would
+ * include the canvas zoom transform.
+ */
+function layoutWidth(element: HTMLElement): number {
+  const style = getComputedStyle(element);
+  const width = parseFloat(style.width);
+  if (!(width > 0)) return element.offsetWidth;
+  if (style.boxSizing === 'border-box') return width;
+  return (
+    width +
+    (parseFloat(style.paddingLeft) || 0) +
+    (parseFloat(style.paddingRight) || 0) +
+    (parseFloat(style.borderLeftWidth) || 0) +
+    (parseFloat(style.borderRightWidth) || 0)
+  );
 }
 
 function sameLines(a: CardLines | null, b: CardLines): boolean {
@@ -273,7 +293,7 @@ function PreviewCardContent({
           // Before the first measurement, show each block's guaranteed share.
           titleLines: CARD_TITLE_LINES,
           tagRows: tagList.length ? CARD_TAG_ROWS : 0,
-          visibleTags: tagList.length,
+          visibleTags: Math.min(tagList.length, CARD_MEASURED_TAGS),
           textLines: textList.map((_, index) =>
             textList.length === 1
               ? CARD_TEXT_LINES
@@ -344,12 +364,15 @@ function PreviewCardContent({
               Math.round(element.offsetHeight / metrics.descriptionLine),
             ),
         );
+      // Rounded up a hair: a tag judged to fit that then wraps is clipped
+      // with no marker to say so, while one judged not to fit only joins it.
       const widths = Array.from(
         measurer?.querySelectorAll<HTMLElement>('[data-measure="tag"]') ?? [],
-      ).map((element) => element.offsetWidth);
-      const moreWidth =
-        measurer?.querySelector<HTMLElement>('[data-measure="more"]')
-          ?.offsetWidth ?? 0;
+      ).map((element) => layoutWidth(element) + 0.05);
+      const more = measurer?.querySelector<HTMLElement>(
+        '[data-measure="more"]',
+      );
+      const moreWidth = more ? layoutWidth(more) + 0.05 : 0;
       // A clamped heading still reports its full height.
       const heading = titleRef.current;
       const titleNeed = heading
@@ -385,6 +408,7 @@ function PreviewCardContent({
           tagChipGap,
           budget.tagRows,
           moreWidth,
+          tagList.length > widths.length,
         ),
       };
       setMeasuredLines((previous) =>
@@ -793,7 +817,7 @@ function PreviewCardContent({
         // full, independent of what the budget currently shows.
         <div ref={measureRef} className="preview-card__measure" aria-hidden>
           <div className="preview-card__measure-tags">
-            {tagList.map(({ name, value }) => (
+            {tagList.slice(0, CARD_MEASURED_TAGS).map(({ name, value }) => (
               <span
                 key={`${name}\0${value}`}
                 className="preview-card__measure-tag"

@@ -324,6 +324,14 @@ describe('tag fitting', () => {
     expect(performance.now() - started).toBeLessThan(50);
   });
 
+  it('reserves the marker when more tags follow the measured ones', () => {
+    // Three 40px tags fill 128px exactly; with unmeasured tags behind them
+    // the marker must fit too, so one gives way.
+    expect(visibleTagCount([40, 40, 40], 128, 4, 1, 20)).toBe(3);
+    expect(visibleTagCount([40, 40, 40], 128, 4, 1, 20, true)).toBe(2);
+    expect(visibleTagCount([40, 40, 40], 200, 4, 1, 20, true)).toBe(3);
+  });
+
   it('shows every tag before the card has been measured', () => {
     expect(visibleTagCount([40, 40], 0, 4, 1, 20)).toBe(2);
   });
