@@ -530,11 +530,36 @@ describe('canvasSyncStore stream recovery', () => {
       expect(mocks.canvasState.loadCanvas).not.toHaveBeenCalled();
     });
 
-    it('leaves it to the reload when the version moved as well', async () => {
+    it('leaves it to the reload when the version moved as well and the reload starts', async () => {
       mocks.canvasState.nodes = nodesOf(3);
+      // The real store is loading from the moment the reload begins.
+      mocks.canvasState.loadCanvas.mockImplementationOnce(async () => {
+        mocks.canvasState.isLoading = true;
+      });
       await connectWithSnapshot({ version: 2 });
-      expect(mocks.getCanvasContentChanges).not.toHaveBeenCalled();
       expect(mocks.canvasState.loadCanvas).toHaveBeenCalledTimes(1);
+      expect(mocks.getCanvasContentChanges).not.toHaveBeenCalled();
+      for (const listener of [...mocks.storeListeners])
+        listener(mocks.canvasState);
+
+      // The reload's end asks, from the position it brought.
+      await endLoad(2, { epoch: 'e', seq: 30 });
+      expect(mocks.getCanvasContentChanges.mock.calls).toEqual([
+        ['canvas-1', { epoch: 'e', seq: 30 }],
+      ]);
+    });
+
+    it('still asks when the version moved but the reload is held back', async () => {
+      // Unsent edits or unsaved text hold the reload; content saved by
+      // other pages does not wait for it.
+      mocks.canvasState.loadCanvas.mockImplementationOnce(
+        async () => undefined,
+      );
+      answer({ position: { epoch: 'e', seq: 9 }, changedNodeIds: ['n1'] });
+      await connectWithSnapshot({ version: 2 });
+      expect(mocks.adoptRemoteNodeContent.mock.calls).toEqual([
+        ['canvas-1', ['n1']],
+      ]);
     });
   });
 });

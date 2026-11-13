@@ -368,15 +368,6 @@ export const useCanvasSyncStore = create<CanvasSyncState>((set, get) => ({
 
       if (event.type === 'snapshot') {
         current.streamSeen = true;
-        // Content saved before this (re)connection: a content save does not
-        // change the version, so the comparison below does not see it.
-        // While a load is in flight its end asks instead. With the version
-        // moved too, the reload below reads everything.
-        if (
-          !canvasStore.isLoading &&
-          event.data.version === canvasStore.version
-        )
-          catchUpContent(current);
         // Skip the catch-up reload while an initial/primary load is
         // still in flight. On fresh open the CanvasPage mount load
         // is already fetching the latest state, but it hasn't set
@@ -388,6 +379,12 @@ export const useCanvasSyncStore = create<CanvasSyncState>((set, get) => ({
         // meaningful once we've settled.
         if (canvasStore.isLoading) return;
         if (event.data.version !== canvasStore.version) reload();
+        // Content saved before this (re)connection: a content save does not
+        // change the version, so the comparison above does not see it.
+        // While a load is in flight — the one in progress above, or the
+        // reload just started — its end asks instead. A reload that is held
+        // back (unsent edits, unsaved text) is not waited for.
+        catchUpContent(current);
         return;
       }
 
