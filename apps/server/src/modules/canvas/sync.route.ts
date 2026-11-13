@@ -8,7 +8,10 @@
  * connect it emits one `snapshot` event carrying the canvas's current
  * `version` (so a client that connected after a mutation can detect the
  * gap and `loadCanvas` to catch up), then forwards every subsequent
- * `update` published by `publishCanvasUpdate`.
+ * `update` published by `publishCanvasUpdate`. The snapshot also carries the
+ * content position, and for a page that reconnects with the position it
+ * last saw, the nodes whose content was saved meanwhile (see
+ * `content-watermark.ts`).
  *
  * The same stream carries `presence` events (see `canvas-presence.ts`). A
  * page that opens it with `?pageId=` is not sent its own presence, and that
@@ -24,6 +27,7 @@ import {
 
 import { canvasPresence } from './canvas-presence.js';
 import { subscribeCanvasUpdates } from './canvas-sync.js';
+import { contentSavedSince, contentWatermark } from './content-watermark.js';
 import { presenceSpaceKey } from './presence.route.js';
 import { space } from '../storage/index.js';
 
@@ -57,7 +61,7 @@ const syncRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
           message: query.error.issues[0]?.message ?? 'Invalid page ID',
         });
       const { canvasId } = params.data;
-      const { pageId } = query.data;
+      const { pageId, contentEpoch, contentSeq } = query.data;
       const presenceKey = presenceSpaceKey(canvasId);
       reply.hijack();
       reply.raw.writeHead(200, {
@@ -130,9 +134,30 @@ const syncRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
         return;
       }
       if (closed) return;
+      // Read in the same tick as the snapshot is written: every content
+      // save recorded so far is either named here or, being after the
+      // subscription above, also delivered as its own event.
+      const watermark = contentWatermark();
+      const savedSince =
+        contentEpoch !== undefined && contentSeq !== undefined
+          ? contentSavedSince(canvasId, {
+              epoch: contentEpoch,
+              seq: contentSeq,
+            })
+          : undefined;
       writeSSE(reply.raw, {
         type: 'snapshot',
-        data: { version: canvas?.version ?? 0 },
+        data: {
+          version: canvas?.version ?? 0,
+          content: {
+            ...watermark,
+            ...(savedSince === null
+              ? { reset: true }
+              : savedSince?.length
+                ? { changedNodeIds: savedSince }
+                : {}),
+          },
+        },
       });
       snapshotSent = true;
       for (const event of pending) writeSSE(reply.raw, event);

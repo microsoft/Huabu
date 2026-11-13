@@ -105,7 +105,7 @@ describe('PUT /nodes/:nodeId/content — content CAS', () => {
       ).toBe(200);
       expect(received).toHaveBeenCalledExactlyOnceWith({
         type: 'invalidate',
-        data: { nodeIds: ['n1'] },
+        data: { nodeIds: ['n1'], contentSeq: expect.any(Number) },
       });
       received.mockClear();
       expect(
@@ -124,7 +124,7 @@ describe('PUT /nodes/:nodeId/content — content CAS', () => {
       ).toBe(200);
       expect(received).toHaveBeenCalledExactlyOnceWith({
         type: 'invalidate',
-        data: { nodeIds: ['n1'] },
+        data: { nodeIds: ['n1'], contentSeq: expect.any(Number) },
       });
     } finally {
       unsubscribe();
@@ -153,7 +153,11 @@ describe('PUT /nodes/:nodeId/content — content CAS', () => {
       expect(saved.statusCode).toBe(200);
       expect(received).toHaveBeenCalledExactlyOnceWith({
         type: 'invalidate',
-        data: { nodeIds: ['n1'], originPageId: 'page-a' },
+        data: {
+          nodeIds: ['n1'],
+          originPageId: 'page-a',
+          contentSeq: expect.any(Number),
+        },
       });
 
       const fetched = await app.inject({

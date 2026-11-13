@@ -4,7 +4,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { CANVAS_PAGE_ID } from './canvasStore/sync/pageId';
-import { useCanvasSyncStore } from './canvasSyncStore';
+import {
+  CONTENT_REVALIDATE_LIMIT,
+  useCanvasSyncStore,
+} from './canvasSyncStore';
 
 const mocks = vi.hoisted(() => {
   const canvasState = {
@@ -308,6 +311,111 @@ describe('canvasSyncStore stream recovery', () => {
         ['canvas-1', ['n1', 'n2']],
       ]);
       expect(mocks.storeListeners.size).toBe(0);
+    });
+  });
+
+  describe('node content saved while the stream was down', () => {
+    const connectWithSnapshot = async (data: unknown) => {
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(
+            encoder.encode(
+              `event: snapshot\ndata: ${JSON.stringify(data)}\n\n`,
+            ),
+          );
+        },
+      });
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(stream)));
+      useCanvasSyncStore.getState().connect('canvas-1');
+      await vi.advanceTimersByTimeAsync(100);
+    };
+    const nodesOf = (count: number, type = 'note') =>
+      Array.from({ length: count }, (_, index) => ({
+        id: `${type}-${index}`,
+        type,
+      })) as never;
+
+    beforeEach(() => {
+      mocks.adoptRemoteNodeContent.mockClear();
+      mocks.storeListeners.clear();
+      mocks.canvasState.isLoading = false;
+      mocks.canvasState.version = 1;
+      mocks.canvasState.nodes = [];
+    });
+    afterEach(() => {
+      mocks.canvasState.nodes = [];
+    });
+
+    it('fetches the nodes the snapshot names, without loading the Space', async () => {
+      await connectWithSnapshot({
+        version: 1,
+        content: { epoch: 'e', seq: 9, changedNodeIds: ['n1', 'n2'] },
+      });
+      expect(mocks.adoptRemoteNodeContent.mock.calls).toEqual([
+        ['canvas-1', ['n1', 'n2']],
+      ]);
+      expect(mocks.canvasState.loadCanvas).not.toHaveBeenCalled();
+    });
+
+    it('does nothing for a snapshot that names nothing', async () => {
+      await connectWithSnapshot({
+        version: 1,
+        content: { epoch: 'e', seq: 9 },
+      });
+      expect(mocks.adoptRemoteNodeContent).not.toHaveBeenCalled();
+      expect(mocks.canvasState.loadCanvas).not.toHaveBeenCalled();
+    });
+
+    it('fetches the named nodes once a load in progress has ended', async () => {
+      mocks.canvasState.isLoading = true;
+      await connectWithSnapshot({
+        version: 5,
+        content: { epoch: 'e', seq: 9, changedNodeIds: ['n1'] },
+      });
+      expect(mocks.adoptRemoteNodeContent).not.toHaveBeenCalled();
+      mocks.canvasState.isLoading = false;
+      for (const listener of [...mocks.storeListeners])
+        listener(mocks.canvasState);
+      expect(mocks.adoptRemoteNodeContent.mock.calls).toEqual([
+        ['canvas-1', ['n1']],
+      ]);
+    });
+
+    it('checks every node with saved content, a few at a time, when the server cannot tell', async () => {
+      mocks.canvasState.nodes = [
+        ...(nodesOf(6) as never[]),
+        // A Space card has no saved content of its own.
+        ...(nodesOf(2, 'spacePreview') as never[]),
+      ] as never;
+      await connectWithSnapshot({
+        version: 1,
+        content: { epoch: 'e2', seq: 0, reset: true },
+      });
+      expect(mocks.adoptRemoteNodeContent.mock.calls).toEqual([
+        ['canvas-1', ['note-0', 'note-1', 'note-2', 'note-3']],
+        ['canvas-1', ['note-4', 'note-5']],
+      ]);
+      expect(mocks.canvasState.loadCanvas).not.toHaveBeenCalled();
+    });
+
+    it('loads the Space once instead when it has too many nodes to check one by one', async () => {
+      mocks.canvasState.nodes = nodesOf(CONTENT_REVALIDATE_LIMIT + 1);
+      await connectWithSnapshot({
+        version: 1,
+        content: { epoch: 'e2', seq: 0, reset: true },
+      });
+      expect(mocks.adoptRemoteNodeContent).not.toHaveBeenCalled();
+      expect(mocks.canvasState.loadCanvas).toHaveBeenCalledTimes(1);
+    });
+
+    it('leaves it to the reload when the version moved as well', async () => {
+      mocks.canvasState.nodes = nodesOf(3);
+      await connectWithSnapshot({
+        version: 2,
+        content: { epoch: 'e2', seq: 0, reset: true },
+      });
+      expect(mocks.adoptRemoteNodeContent).not.toHaveBeenCalled();
+      expect(mocks.canvasState.loadCanvas).toHaveBeenCalledTimes(1);
     });
   });
 });

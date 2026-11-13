@@ -4,6 +4,7 @@
 import Fastify from 'fastify';
 import { afterEach, expect, it, vi } from 'vitest';
 
+import { contentWatermark, recordContentSave } from './content-watermark.js';
 import syncRoutes from './sync.route.js';
 
 import type { CanvasSyncEvent } from '@huabu/shared';
@@ -79,3 +80,65 @@ it.each(['close', 'failure', 'snapshot'] as const)(
     }
   },
 );
+
+/** The `snapshot` event's data of a stream opened with `query`. */
+async function snapshotOf(query: string) {
+  mocks.read.mockResolvedValue({ version: 7 });
+  mocks.subscribe.mockReturnValue(mocks.unsubscribe);
+  const app = Fastify();
+  await app.register(syncRoutes);
+  const address = await app.listen({ port: 0, host: '127.0.0.1' });
+  const controller = new AbortController();
+  try {
+    const response = await fetch(`${address}/child/sync/stream${query}`, {
+      signal: controller.signal,
+    });
+    const reader = response.body?.getReader();
+    let body = '';
+    while (!/event: snapshot\ndata: .*\n\n/.test(body)) {
+      const chunk = await reader?.read();
+      if (!chunk || chunk.done) throw new Error('Stream ended early');
+      body += new TextDecoder().decode(chunk.value);
+    }
+    return JSON.parse(/event: snapshot\ndata: (.*)\n/.exec(body)?.[1] ?? '');
+  } finally {
+    controller.abort();
+    await vi.waitFor(() => expect(mocks.unsubscribe).toHaveBeenCalledOnce());
+    await app.close();
+  }
+}
+
+it('tells a first connection where the content sequence stands, and nothing more', async () => {
+  recordContentSave('child', ['n0']);
+  expect(await snapshotOf('')).toEqual({
+    version: 7,
+    content: contentWatermark(),
+  });
+});
+
+it('names the nodes whose content was saved since the position a reconnecting page gives', async () => {
+  const seen = contentWatermark();
+  recordContentSave('child', ['n1']);
+  recordContentSave('other-space', ['elsewhere']);
+  recordContentSave('child', ['n2']);
+  expect(
+    await snapshotOf(`?contentEpoch=${seen.epoch}&contentSeq=${seen.seq}`),
+  ).toEqual({
+    version: 7,
+    content: { ...contentWatermark(), changedNodeIds: ['n1', 'n2'] },
+  });
+});
+
+it('names nothing when nothing was saved since', async () => {
+  const seen = contentWatermark();
+  expect(
+    await snapshotOf(`?contentEpoch=${seen.epoch}&contentSeq=${seen.seq}`),
+  ).toEqual({ version: 7, content: contentWatermark() });
+});
+
+it('says so when it cannot tell what was saved since', async () => {
+  const seen = contentWatermark();
+  expect(
+    await snapshotOf(`?contentEpoch=before-restart&contentSeq=${seen.seq}`),
+  ).toEqual({ version: 7, content: { ...contentWatermark(), reset: true } });
+});

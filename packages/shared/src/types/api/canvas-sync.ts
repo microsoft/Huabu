@@ -56,11 +56,36 @@ export const canvasSyncEventSchema = z.discriminatedUnion('type', [
        * fetch it again; every other page does.
        */
       originPageId: z.string().optional(),
+      /**
+       * Position of this content save in the server's content sequence;
+       * present when `nodeIds` is. See `snapshot.content`.
+       */
+      contentSeq: z.number().int().optional(),
     }),
   }),
   z.object({
     type: z.literal('snapshot'),
-    data: z.object({ version: z.number() }),
+    data: z.object({
+      version: z.number(),
+      /**
+       * Where the server's content sequence stands. A content save (body,
+       * title, …) does not change `version`; a page keeps `epoch` and the
+       * highest `seq` it has seen and sends them when it reconnects
+       * (`contentEpoch` / `contentSeq` on the stream URL). The server then
+       * answers with `changedNodeIds`, the nodes whose content was saved
+       * since, or with `reset` when it cannot tell (it restarted, or too
+       * much was saved since): the page then checks every node it shows.
+       * Neither is present for a page that sent no position.
+       */
+      content: z
+        .object({
+          epoch: z.string(),
+          seq: z.number().int(),
+          changedNodeIds: z.array(z.string()).optional(),
+          reset: z.boolean().optional(),
+        })
+        .optional(),
+    }),
   }),
   z.object({
     type: z.literal('update'),

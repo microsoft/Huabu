@@ -10,6 +10,7 @@ import useCanvasStore, {
   adoptRemoteNodeContent,
   requestCanvasResync,
 } from '@/store/canvasStore';
+import { MD_BACKED_NODE_TYPES } from '@/store/canvasStore/save/nodeContentFields';
 import { CANVAS_PAGE_ID } from '@/store/canvasStore/sync/pageId';
 import { useChatStore } from '@/store/chatStore';
 import { usePanelStore } from '@/store/panelStore';
@@ -39,6 +40,13 @@ import type { Node } from '@xyflow/react';
  * A reload replaces the whole Space, so it never runs while this page still
  * has structure edits waiting to be sent: `requestCanvasResync` holds it
  * until the send queue has drained.
+ *
+ *  - `snapshot` after a reconnect also says which nodes had their content
+ *    saved while the stream was down (`content.changedNodeIds`); they are
+ *    fetched like the nodes of an `invalidate`. When the server cannot tell
+ *    (`content.reset`), every node with saved content is checked, a few at a
+ *    time; a Space with more than {@link CONTENT_REVALIDATE_LIMIT} of them
+ *    is reloaded instead.
  *
  *  - `invalidate` naming nodes: another page saved those nodes' content
  *    (body, label, summary, …) through the per-node content PUT, which no
@@ -78,6 +86,62 @@ function adoptAfterLoad(canvasId: string, nodeIds: readonly string[]): void {
     const ids = [...savedDuringLoad];
     forgetSavedDuringLoad();
     if (state.canvasId === canvasId) void adoptRemoteNodeContent(canvasId, ids);
+  });
+}
+
+/**
+ * The most nodes whose content is checked one by one when the server cannot
+ * say what was saved while the stream was down. Above it one whole-Space
+ * load costs less than the fetches.
+ */
+export const CONTENT_REVALIDATE_LIMIT = 200;
+const CONTENT_REVALIDATE_CONCURRENCY = 4;
+
+/** Run `action` now, or once the Space's load in progress has ended. */
+function afterLoad(canvasId: string, action: () => void): void {
+  if (!useCanvasStore.getState().isLoading) {
+    action();
+    return;
+  }
+  const stop = useCanvasStore.subscribe((state) => {
+    if (state.isLoading) return;
+    stop();
+    if (state.canvasId === canvasId) action();
+  });
+}
+
+/**
+ * The server could not say which content was saved while the stream was
+ * down: fetch every node that has saved content, a few at a time. Nodes
+ * with unsaved content on this page are left alone by the fetch itself.
+ */
+function revalidateAllContent(canvasId: string, reload: () => void): void {
+  afterLoad(canvasId, () => {
+    const isCurrent = (): boolean =>
+      useCanvasSyncStore.getState().canvasId === canvasId &&
+      useCanvasStore.getState().canvasId === canvasId;
+    if (!isCurrent()) return;
+    const ids = useCanvasStore
+      .getState()
+      .nodes.filter((node) => MD_BACKED_NODE_TYPES.has(node.type ?? ''))
+      .map((node) => node.id);
+    if (ids.length === 0) return;
+    if (ids.length > CONTENT_REVALIDATE_LIMIT) {
+      reload();
+      return;
+    }
+    void (async () => {
+      for (
+        let start = 0;
+        start < ids.length && isCurrent();
+        start += CONTENT_REVALIDATE_CONCURRENCY
+      ) {
+        await adoptRemoteNodeContent(
+          canvasId,
+          ids.slice(start, start + CONTENT_REVALIDATE_CONCURRENCY),
+        );
+      }
+    })();
   });
 }
 
@@ -188,6 +252,19 @@ export const useCanvasSyncStore = create<CanvasSyncState>((set, get) => ({
         });
 
       if (event.type === 'snapshot') {
+        // Content saved while the stream was down. A content save does not
+        // change the version, so the comparison below does not see it.
+        const { content } = event.data;
+        const versionMoved =
+          !canvasStore.isLoading && event.data.version !== canvasStore.version;
+        if (content?.changedNodeIds?.length) {
+          if (canvasStore.isLoading)
+            adoptAfterLoad(canvasId, content.changedNodeIds);
+          else void adoptRemoteNodeContent(canvasId, content.changedNodeIds);
+        } else if (content?.reset && !versionMoved) {
+          // With the version moved too, the reload below reads everything.
+          revalidateAllContent(canvasId, reload);
+        }
         // Skip the catch-up reload while an initial/primary load is
         // still in flight. On fresh open the CanvasPage mount load
         // is already fetching the latest state, but it hasn't set

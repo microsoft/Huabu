@@ -36,6 +36,13 @@ interface Subscription {
    */
   presencePages: Map<string, CanvasPresencePage> | null;
   version?: number;
+  /**
+   * The content position this stream has reached: the server's sequence of
+   * node-content saves, as of the last snapshot or `invalidate`. Sent when
+   * the stream is opened again, so the server can name the nodes saved while
+   * it was down.
+   */
+  content?: { epoch: string; seq: number };
 }
 
 const subscriptions = new Map<string, Subscription>();
@@ -100,7 +107,7 @@ function acquire(canvasId: string): Subscription {
         let nextDelay = delay;
         try {
           const response = await fetch(
-            canvasSyncStreamUrl(canvasId, CANVAS_PAGE_ID),
+            canvasSyncStreamUrl(canvasId, CANVAS_PAGE_ID, current.content),
             { signal },
           );
           if (!response.ok)
@@ -133,6 +140,20 @@ function acquire(canvasId: string): Subscription {
                   event.type === 'snapshot'
                     ? event.data.version
                     : event.data.toVersion;
+              if (event.type === 'snapshot' && event.data.content) {
+                const { epoch, seq } = event.data.content;
+                current.content = { epoch, seq };
+              } else if (
+                event.type === 'invalidate' &&
+                event.data.contentSeq !== undefined &&
+                current.content &&
+                event.data.contentSeq > current.content.seq
+              ) {
+                current.content = {
+                  ...current.content,
+                  seq: event.data.contentSeq,
+                };
+              }
               for (const receive of current.listeners) {
                 try {
                   receive(event);
