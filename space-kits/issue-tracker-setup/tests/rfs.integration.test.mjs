@@ -401,6 +401,13 @@ it('creates final instruction titles and an inline configuration table without a
   expect(creation[0].headers['X-Huabu-Host-Thread-Id']).toBeUndefined();
   expect(JSON.parse(creation[0].body)).not.toHaveProperty('prompt');
   expect(JSON.parse(creation[0].body)).not.toHaveProperty('parentThreadId');
+  expect(JSON.parse(creation[0].body).workingDirPath).toBe('/projects/example');
+  expect(
+    store()
+      .read()
+      .state.nodes.find((node) => node.id === result.coordinator.nodeId).data
+      .agentLaunchOverrides,
+  ).toEqual({ workingDirPath: '/projects/example' });
   expect(agentThreadService.invoke).not.toHaveBeenCalled();
   expect(agenetes.create).not.toHaveBeenCalled();
   expect(await agenetes.record(result.coordinator.threadId)).toBeUndefined();
@@ -425,7 +432,7 @@ it('validates edited configuration for a non-Huabu repository without recreating
   });
   const values = {
     repository: 'octo/example',
-    codebasePath: '/projects/example',
+    codebasePath: '/projects/other',
     worktreeRoot: '/projects/worktrees',
     coordinatorProfileId: 'project-profile',
     fixingProfileId: 'project-profile',
@@ -446,6 +453,12 @@ it('validates edited configuration for a non-Huabu repository without recreating
   const result = await install({ ...options(), apply: true });
   expect(result.state).toBe('ready');
   expect(result.coordinator).toEqual(ready.coordinator);
+  expect(
+    store()
+      .read()
+      .state.nodes.find((node) => node.id === ready.coordinator.nodeId).data
+      .agentLaunchOverrides,
+  ).toEqual({ workingDirPath: '/projects/example' });
   expect(writes).toEqual([]);
   expect(agentThreadService.invoke).not.toHaveBeenCalled();
   expect(agenetes.create).not.toHaveBeenCalled();
@@ -676,6 +689,12 @@ it('runs the cloned standalone CLI over huabu-rfs and 3-step workflow with --nod
   expect(step3.state).toBe('ready');
   expect(step3.coordinator?.threadId).toBeTruthy();
   expect(step3.nodes?.coordinator).toBe(step3.coordinator.nodeId);
+  expect(
+    store()
+      .read()
+      .state.nodes.find((node) => node.id === step3.coordinator.nodeId).data
+      .agentLaunchOverrides,
+  ).toEqual({ workingDirPath: configuration.values.codebasePath });
   expect(agentThreadService.invoke).not.toHaveBeenCalled();
   expect(agenetes.create).not.toHaveBeenCalled();
 });
