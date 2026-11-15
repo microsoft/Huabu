@@ -144,6 +144,14 @@ const agentNodeDataSchema = z
       .describe(
         'Source pointer for media nodes: a staged upload path, an artifact key, or an HTTPS URL.',
       ),
+    coverUrl: z
+      .string()
+      .max(4096)
+      .nullable()
+      .optional()
+      .describe(
+        'PDF-only cover image shown on the card instead of the first page: a staged upload path, an artifact key, or an HTTPS image URL (png, jpg, gif, webp, avif). Pass null to restore the first-page thumbnail. An unavailable image or a non-PDF target rejects the whole request.',
+      ),
     style: nodeStyleSchema.optional(),
   })
   .strict()

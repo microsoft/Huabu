@@ -64,13 +64,115 @@
   border-top: 0;
 }
 
-.preview-card__properties {
+/* Budgeted PDF cards: a fixed cover share, then a text area filled by priority. */
+.preview-card[data-budget] .preview-card__info {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.preview-card[data-budget] .preview-card__info > * {
+  flex-shrink: 0;
+}
+
+.preview-card[data-budget][data-orientation='vertical'] .preview-card__cover {
+  flex: 0 0 var(--card-cover-height);
+}
+
+.preview-card__tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--card-tag-gap);
   overflow: hidden;
   margin-top: var(--card-gap);
+  margin-bottom: var(--card-tag-trail);
+}
+
+/*
+ * The excerpt's rule spans its whole line box, so the box, not the glyphs,
+ * keeps the card gap from the block above.
+ */
+.preview-card[data-budget] .preview-card__summary {
+  margin-top: var(--card-gap);
+}
+
+/*
+ * The excerpt is quoted from the PDF's notes: a rule on its leading edge sets
+ * it apart from the authored properties above. The measuring copy carries the
+ * same inset so both wrap alike.
+ */
+.preview-card[data-budget] .preview-card__summary,
+.preview-card__measure [data-measure='summary'] {
+  box-sizing: border-box;
+  padding-inline-start: var(--card-gap);
+  /* Tied to the excerpt's own muted color, so it holds up in both themes. */
+  border-inline-start: 2px solid
+    color-mix(in srgb, currentColor 30%, transparent);
+}
+
+.preview-card__text + .preview-card__text {
+  margin-top: var(--card-text-inner-gap);
+}
+
+.preview-card__tag,
+.preview-card__measure-tag {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  padding-inline: 0.5em;
+  border-radius: 0.35em;
+  background: var(--edge-default);
   font-size: var(--card-description);
   line-height: var(--card-description-line);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.preview-card__text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: var(--card-text-lines, 2);
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  margin: var(--card-text-gap) 0 0;
+  font-size: var(--card-description);
+  line-height: var(--card-description-line);
+}
+
+/* Zero-height, invisible copies used only to measure full content sizes. */
+.preview-card[data-budget] {
+  position: relative;
+}
+
+.preview-card__measure {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 0;
+  overflow: hidden;
+  visibility: hidden;
+  pointer-events: none;
+  font-size: var(--card-description);
+  line-height: var(--card-description-line);
+  overflow-wrap: anywhere;
+}
+
+.preview-card__measure p {
+  margin: 0;
+}
+
+.preview-card__measure-tags {
+  display: flex;
+  gap: var(--card-tag-gap);
+  width: max-content;
+}
+
+.preview-card__measure-tag {
+  flex: none;
+  max-width: none;
 }
 
 .preview-card__metadata {
@@ -154,7 +256,8 @@
   font-size: var(--card-title);
   line-height: var(--card-title-line);
   font-weight: var(--card-title-weight);
-  text-wrap: balance;
+  /* Fill the first line; only keep a lone last word from being stranded. */
+  text-wrap: pretty;
 }
 
 .preview-card__summary {

@@ -38,6 +38,13 @@ import {
 import { TextArea } from '@/components/Common/TextArea';
 import { TextInput } from '@/components/Common/TextInput';
 
+import {
+  PROPERTY_FIELD_CLASS,
+  PROPERTY_TAG_CLASS,
+  PropertyTagEditor,
+  withTag,
+} from './PropertyTagEditor';
+
 import type { NodeMetadataPatch } from '@/store/canvasStore';
 import type { NodeData } from '@huabu/shared';
 import type { ReactNode } from 'react';
@@ -69,11 +76,36 @@ export function propertyText(value: PropertyValue): string {
   return Array.isArray(value) ? value.join(', ') : String(value);
 }
 
+/** List values read as neutral tags; other kinds stay plain text. */
+function PropertyValueView({ value }: { value: PropertyValue }) {
+  if (!Array.isArray(value)) return propertyText(value);
+  return (
+    <span className="flex min-w-0 flex-wrap gap-1">
+      {value.map((item, index) => (
+        <span
+          // Lists may repeat a value, so the position disambiguates the key.
+          key={`${index}:${item}`}
+          data-property-tag
+          className={PROPERTY_TAG_CLASS}
+        >
+          {item}
+        </span>
+      ))}
+    </span>
+  );
+}
+
+/** Vertical padding of a text value: one 16px line fills the 28px row. */
+const PROPERTY_TEXT_PADDING = 'py-1.5';
+
 type Draft = {
   mode: 'add' | 'name' | 'value';
   original?: string;
   name: string;
+  /** Field text; for a list, the tag being typed. */
   value: string;
+  /** Chosen tags of a list value. */
+  items: string[];
   kind: PropertyKind;
 };
 
@@ -101,6 +133,9 @@ function PropertyRow({
   const { t } = useTranslation();
   const [menuOpen, setMenuOpen] = useState(false);
   const Icon = PROPERTY_ICONS[kindOf(value)];
+  // Text keeps the same padding shown and edited, on one line or several, so
+  // entering the editor never moves it. Tag chips bring their own height.
+  const valuePadding = Array.isArray(value) ? 'py-1' : PROPERTY_TEXT_PADDING;
   const {
     setNodeRef,
     setActivatorNodeRef,
@@ -146,7 +181,7 @@ function PropertyRow({
                   {...listeners}
                   variant="ghost"
                   size="sm"
-                  className="group/property -ml-1.5 min-h-7 w-[calc(100%+0.75rem)] cursor-grab touch-none justify-start px-1.5 text-left whitespace-normal active:cursor-grabbing"
+                  className="group/property -ml-1.5 min-h-7 w-[calc(100%+0.75rem)] cursor-grab touch-none justify-start px-1.5 text-left whitespace-normal active:cursor-grabbing enabled:hover:bg-transparent"
                   aria-label={t('node.propertyOptions', { name })}
                   aria-description={t('node.reorderPropertyHint')}
                   disabled={disabled}
@@ -234,19 +269,23 @@ function PropertyRow({
           )}
         </div>
         {readOnly ? (
-          <span className="text-fg-default flex min-h-7 min-w-0 flex-1 items-center px-1.5 py-1 break-words">
-            {propertyText(value)}
+          <span
+            className={`text-fg-default flex min-h-7 min-w-0 flex-1 items-center px-1.5 break-words ${valuePadding}`}
+          >
+            <PropertyValueView value={value} />
           </span>
         ) : (
           <Button
             variant="ghost"
             size="sm"
-            className="text-fg-default min-h-7 min-w-0 flex-1 justify-start px-1.5 text-left break-words whitespace-normal"
+            className={`text-fg-default min-h-7 min-w-0 flex-1 justify-start px-1.5 text-left break-words whitespace-normal enabled:hover:bg-transparent ${valuePadding}`}
             aria-label={t('node.editProperty', { name })}
             disabled={disabled}
             onClick={() => onEdit('value')}
           >
-            {propertyText(value) || (
+            {propertyText(value) ? (
+              <PropertyValueView value={value} />
+            ) : (
               <span className="text-fg-subtle">{t('node.propertyEmpty')}</span>
             )}
           </Button>
@@ -261,17 +300,21 @@ export function NodeProperties({
   properties = {},
   displayKeys = [],
   readOnly,
+  tagOptions,
   onSave,
 }: {
   properties?: Properties;
   displayKeys?: string[];
   readOnly: boolean;
+  /** Known tags for a list property, read when its editor opens. */
+  tagOptions?: (name: string) => string[];
   onSave: (patch: PropertyEdit) => Promise<void>;
 }) {
   const { t } = useTranslation();
   const [draft, setDraft] = useState<Draft | null>(null);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
+  const [options, setOptions] = useState<string[]>([]);
   const pending = useRef(false);
   const cancelled = useRef(false);
   const composing = useRef(false);
@@ -335,10 +378,8 @@ export function NodeProperties({
     } else if (draft.kind === 'boolean') {
       value = draft.value === 'true';
     } else if (draft.kind === 'list') {
-      value = draft.value
-        .split('\n')
-        .map((item) => item.trim())
-        .filter(Boolean);
+      // Text still in the field counts as a tag, so blur never drops it.
+      value = withTag(draft.items, draft.value);
     }
     void save({
       properties: { [name]: value },
@@ -353,8 +394,10 @@ export function NodeProperties({
       original: name,
       name,
       kind: kindOf(value),
-      value: Array.isArray(value) ? value.join('\n') : String(value),
+      value: Array.isArray(value) ? '' : String(value),
+      items: Array.isArray(value) ? value : [],
     });
+    setOptions(Array.isArray(value) ? (tagOptions?.(name) ?? []) : []);
   };
   const changeType = (name: string, kind: PropertyKind) => {
     const current = properties[name];
@@ -412,11 +455,24 @@ export function NodeProperties({
           composing.current = false;
         }}
         onKeyDown={(event) => {
+          // A focused button (a tag's remove control) keeps its own Enter.
+          if (
+            event.key === 'Enter' &&
+            event.target instanceof Element &&
+            event.target.closest('button')
+          )
+            return;
           if (event.key === 'Enter') {
-            if (draft.kind === 'list' && event.shiftKey) return;
             event.preventDefault();
             event.stopPropagation();
-            if (!event.nativeEvent.isComposing && !composing.current) submit();
+            // 229: an IME still owns this key. Safari reports the Enter that
+            // confirms a candidate after composition has ended.
+            if (
+              !event.nativeEvent.isComposing &&
+              !composing.current &&
+              event.keyCode !== 229
+            )
+              submit();
           }
           if (event.key === 'Escape') {
             event.preventDefault();
@@ -463,7 +519,7 @@ export function NodeProperties({
         )}
         {draft.mode === 'name' ? (
           <span className="text-fg-default flex min-h-7 min-w-0 items-center px-1.5 py-1 break-words">
-            {propertyText(properties[draft.original ?? ''])}
+            <PropertyValueView value={properties[draft.original ?? '']} />
           </span>
         ) : draft.kind === 'boolean' ? (
           <label className="flex min-h-7 items-center gap-2 px-1.5">
@@ -479,16 +535,37 @@ export function NodeProperties({
             {t('node.propertyValue')}
           </label>
         ) : draft.kind === 'list' ? (
+          <PropertyTagEditor
+            autoFocus={!!draft.original}
+            items={draft.items}
+            text={draft.value}
+            options={options}
+            disabled={saving}
+            onChange={({ items, text }) =>
+              setDraft({ ...draft, items, value: text })
+            }
+          />
+        ) : draft.kind === 'text' ? (
+          // Wraps like the displayed value, so long text is edited in full
+          // rather than through a one-line window. Enter still saves.
           <TextArea
             autoFocus={!!draft.original}
             aria-label={t('node.propertyValue')}
-            placeholder={t('node.propertyListHint')}
+            placeholder={t('node.propertyValue')}
             rows={1}
-            className="ring-edge-default h-full min-h-0 w-full min-w-0 resize-none overflow-auto border-0 px-1.5 py-1 ring-1 ring-inset"
+            className={`${PROPERTY_FIELD_CLASS} relative z-10 block [field-sizing:content] min-h-full w-full min-w-0 resize-none overflow-y-auto px-1.5 break-words ${PROPERTY_TEXT_PADDING}`}
             value={draft.value}
             disabled={saving}
+            onFocus={(event) => {
+              const end = event.currentTarget.value.length;
+              event.currentTarget.setSelectionRange(end, end);
+            }}
             onChange={(event) =>
-              setDraft({ ...draft, value: event.target.value })
+              // A pasted line break would be invisible once saved.
+              setDraft({
+                ...draft,
+                value: event.target.value.replace(/\s*\n\s*/g, ' '),
+              })
             }
           />
         ) : (
@@ -496,10 +573,10 @@ export function NodeProperties({
             autoFocus={!!draft.original}
             aria-label={t('node.propertyValue')}
             placeholder={t('node.propertyValue')}
-            className="ring-edge-default h-full min-h-0 w-full min-w-0 border-0 px-1.5 py-1 ring-1 ring-inset"
+            className={`${PROPERTY_FIELD_CLASS} h-full min-h-0 w-full min-w-0 px-1.5 py-1`}
             value={draft.value}
             disabled={saving}
-            inputMode={draft.kind === 'number' ? 'decimal' : undefined}
+            inputMode="decimal"
             onChange={(event) =>
               setDraft({ ...draft, value: event.target.value })
             }
@@ -531,7 +608,15 @@ export function NodeProperties({
             <PropertyRow
               key={name}
               name={name}
-              value={properties[name]}
+              value={
+                // While text is edited, the hidden row mirrors the draft so
+                // the editor grows and shrinks with what is typed.
+                draft?.original === name &&
+                draft.mode === 'value' &&
+                draft.kind === 'text'
+                  ? draft.value
+                  : properties[name]
+              }
               readOnly={readOnly}
               disabled={saving || draft !== null}
               editor={draft?.original === name && !readOnly ? editor : null}
@@ -560,7 +645,13 @@ export function NodeProperties({
           onClick={() => {
             cancelled.current = false;
             setError('');
-            setDraft({ mode: 'add', name: '', value: '', kind: 'text' });
+            setDraft({
+              mode: 'add',
+              name: '',
+              value: '',
+              items: [],
+              kind: 'text',
+            });
           }}
         >
           <Plus />

@@ -118,6 +118,8 @@ const mergeNodeData: CommandDefinition<Cmd> = {
       };
       if (n.type === 'question' && patchRec.agentLaunchOverrides === null)
         delete mergedData.agentLaunchOverrides;
+      // JSON transports cannot carry `undefined`, so `null` clears the cover.
+      if (patchRec.coverUrl === null) delete mergedData.coverUrl;
       if (patchRec.properties !== undefined) {
         mergedData.properties = mergeNodeProperties(
           dataRec.properties as NodeProperties | undefined,

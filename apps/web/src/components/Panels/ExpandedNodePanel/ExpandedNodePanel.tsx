@@ -26,6 +26,7 @@ import { isNodeProperties } from '@huabu/shared/canvas-engine';
 import { Button } from '@/components/Common/Button';
 import { PDFNotesButton } from '@/components/Nodes/pdf/PDFNotesButton';
 import { NodeProperties } from '@/components/Nodes/properties/NodeProperties';
+import { propertyTagOptions } from '@/components/Nodes/properties/propertyTagOptions';
 import { getNodeIcon } from '@/config/nodeIcons.ts';
 import { formatShortcutById, matchesShortcut } from '@/config/shortcuts.ts';
 import {
@@ -241,10 +242,14 @@ export const ExpandedNodePanel = ({
   const edges = useCanvasStore((s) => s.edges);
   const canvasId = useCanvasStore((s) => s.canvasId);
   const canWrite = useCanvasStore(selectCanWriteCanvas);
-  const [propertiesNodeId, setPropertiesNodeId] = useState<string | null>(null);
+  // An explicit choice for one node; other nodes follow the default below.
+  const [propertiesChoice, setPropertiesChoice] = useState<{
+    nodeId: string;
+    open: boolean;
+  } | null>(null);
   const propertiesRegionId = useId();
   const propertiesRegionRef = useRef<HTMLDivElement>(null);
-  const propertiesOpen = propertiesNodeId === expandedNodeId;
+  const revealProperties = useRef(false);
   const updateNodeData = useCanvasStore((s) => s.updateNodeData);
   // Routed through `tryRename` so a sibling-label collision triggers the
   // shared alert + revert flow (same path used by the layer tree and
@@ -255,7 +260,29 @@ export const ExpandedNodePanel = ({
     if (!expandedNodeId) return null;
     return nodes.find((n) => n.id === expandedNodeId) ?? null;
   }, [expandedNodeId, nodes]);
+  // Properties start open when the node has some as it is opened. The answer
+  // is latched per node: properties written later (an agent filling in a
+  // paper being read) must not pop the list open and push the pages down.
+  const hasProperties =
+    isNodeProperties(node?.data.properties) &&
+    Object.keys(node.data.properties).length > 0;
+  const propertiesKey = node ? `${canvasId}:${node.id}` : null;
+  const [propertiesDefault, setPropertiesDefault] = useState<{
+    key: string;
+    open: boolean;
+  } | null>(null);
+  if (propertiesKey && propertiesDefault?.key !== propertiesKey)
+    setPropertiesDefault({ key: propertiesKey, open: hasProperties });
+  const propertiesOpen =
+    propertiesChoice?.nodeId === expandedNodeId
+      ? propertiesChoice.open
+      : propertiesDefault?.key === propertiesKey
+        ? propertiesDefault.open
+        : hasProperties;
   useLayoutEffect(() => {
+    // Only an explicit expand scrolls; a default-open PDF keeps its position.
+    if (!revealProperties.current) return;
+    revealProperties.current = false;
     if (propertiesOpen && node?.type === 'pdf') {
       propertiesRegionRef.current?.scrollIntoView({ block: 'start' });
     }
@@ -575,24 +602,14 @@ export const ExpandedNodePanel = ({
             : 'max-h-[40%] shrink-0 overflow-y-auto'
         }
       >
-        {activeItem.type === 'pdf' && (
-          <div className="px-5 pt-1">
-            <PDFNotesButton
-              key={expandedNodeId}
-              id={expandedNodeId}
-              noteNodeId={
-                typeof node?.data.noteNodeId === 'string'
-                  ? node.data.noteNodeId
-                  : undefined
-              }
-            />
-          </div>
-        )}
         <NodeProperties
           key={`${canvasId}:${expandedNodeId}`}
           properties={properties}
           displayKeys={propertyDisplayKeys}
           readOnly={!canWrite}
+          tagOptions={(name) =>
+            propertyTagOptions(useCanvasStore.getState().nodes, name)
+          }
           onSave={async (patch) => {
             if (await commitNodeProperties(expandedNodeId, patch)) onCommit?.();
           }}
@@ -651,30 +668,38 @@ export const ExpandedNodePanel = ({
             data-preview-header-leading-actions
             className="flex shrink-0 items-center gap-1 empty:hidden"
           />
+          {activeItem.type === 'pdf' && expandedNodeId && (
+            <PDFNotesButton
+              key={expandedNodeId}
+              id={expandedNodeId}
+              noteNodeId={
+                typeof node?.data.noteNodeId === 'string'
+                  ? node.data.noteNodeId
+                  : undefined
+              }
+            />
+          )}
           {supportsProperties && (
             <Button
               variant="ghost"
               size="sm"
               iconOnly
               className="shrink-0 px-1.5"
-              title={
-                activeItem.type === 'pdf'
-                  ? t(
-                      propertiesOpen
-                        ? 'node.collapsePdfDetails'
-                        : 'node.expandPdfDetails',
-                    )
-                  : t(
-                      propertiesOpen
-                        ? 'node.collapseProperties'
-                        : 'node.expandProperties',
-                    )
-              }
+              title={t(
+                propertiesOpen
+                  ? 'node.collapseProperties'
+                  : 'node.expandProperties',
+              )}
               aria-expanded={propertiesOpen}
               aria-controls={propertiesRegionId}
-              onClick={() =>
-                setPropertiesNodeId(propertiesOpen ? null : expandedNodeId)
-              }
+              onClick={() => {
+                if (!expandedNodeId) return;
+                revealProperties.current = !propertiesOpen;
+                setPropertiesChoice({
+                  nodeId: expandedNodeId,
+                  open: !propertiesOpen,
+                });
+              }}
             >
               {propertiesOpen ? <ChevronDown /> : <ChevronRight />}
             </Button>

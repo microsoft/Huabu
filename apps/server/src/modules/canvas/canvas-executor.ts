@@ -71,7 +71,10 @@ import {
   validateAgentNodeEditableData,
 } from './agent-node-edit.js';
 import { publishCanvasUpdate } from './canvas-sync.js';
-import { importForeignNodeSources } from './import-node-src.js';
+import {
+  importForeignNodeSources,
+  reclaimStagedUploads,
+} from './import-node-src.js';
 import {
   assertWorldPreviewMutationsAllowed,
   assertChildSpaceEntriesAllowed,
@@ -630,6 +633,13 @@ export interface ExecuteOnServerInput {
   publish?: boolean;
   /** Validated cross-Space move retains the original execution identity. */
   agentNodeMoveState?: ReadonlyMap<string, Record<string, unknown>>;
+  /**
+   * Hold `coverUrl` to the agent command contract: PDF only, resolved to an
+   * existing raster artifact, rejected otherwise. Set by the entry points
+   * that validate against that contract; other agent-origin callers keep
+   * their covers verbatim.
+   */
+  agentCovers?: boolean;
 }
 
 export interface ExecuteOnServerOutput {
@@ -744,17 +754,26 @@ export async function executeOnServer(
   // outside the mutex means a slow online download never stalls concurrent
   // writes to the same canvas. Idempotent for values that are already artifact
   // keys / `/api/` URLs / `data:` URIs.
+  const stagedCoverUploads: string[] = [];
   if (originator.source === 'agent') {
-    commands = await importForeignNodeSources(canvasId, commands);
+    commands = await importForeignNodeSources(canvasId, commands, {
+      agentCovers: input.agentCovers,
+      stagedCoverUploads,
+    });
 
     // For image nodes with only width specified, calculate height from actual
     // image aspect ratio. This ensures correct proportions for all image sources.
     commands = await normalizeImageNodeSizes(canvasId, commands);
   }
 
-  return await withCanvasMutex(canvasId, () =>
+  const output = await withCanvasMutex(canvasId, () =>
     executeOnServerAlreadyLocked({ ...input, commands }),
   );
+  // Cover uploads outlive a batch that threw or had a command rejected, so
+  // the corrected retry can still name them.
+  if (output.results.every((result) => result.applied))
+    await reclaimStagedUploads(stagedCoverUploads);
+  return output;
 }
 
 /**

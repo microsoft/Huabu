@@ -3,11 +3,12 @@
 
 import { useTranslation } from 'react-i18next';
 
-import { Button } from '@/components/Common/Button';
 import { FloatingToolbar } from '@/components/Common/FloatingToolbar';
 import { toast } from '@/components/Common/Toast';
 import { NODE_ICON } from '@/config/nodeIcons';
 import { openPdfNotes } from '@/store/previewWorkspace/actions';
+
+import { PreviewHeaderButton } from '../PreviewHeaderButton';
 
 import type { MouseEvent } from 'react';
 
@@ -43,20 +44,13 @@ export function PDFNotesButton({
       </FloatingToolbar.ActionButton>
     );
   }
+  // Preview header: always reachable, even while the properties are collapsed.
   return (
-    <Button
-      variant="ghost"
-      size="sm"
-      className="-ml-1.5 min-h-7 px-1.5"
+    <PreviewHeaderButton
+      title={t(noteNodeId ? 'node.openPdfNotes' : 'node.addPdfNotes')}
       onClick={onClick}
     >
-      <span
-        aria-hidden="true"
-        className="flex size-4 shrink-0 items-center justify-center"
-      >
-        <NoteIcon />
-      </span>
-      <span>{t(noteNodeId ? 'node.openPdfNotes' : 'node.addPdfNotes')}</span>
-    </Button>
+      <NoteIcon />
+    </PreviewHeaderButton>
   );
 }
