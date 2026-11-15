@@ -201,7 +201,7 @@ test.describe('canvas mouse mode', () => {
   }) => {
     const center = await paneCenter(page);
     await placeTextNode(page, { x: center.x - 250, y: center.y - 180 });
-    const toolbar = page.locator('.react-flow__panel.bottom.center');
+    const toolbar = page.locator('[data-canvas-main-toolbar]');
     await toolbar.getByRole('button', { name: /^Sketch/ }).click();
     await page.mouse.move(center.x - 45, center.y);
     await page.mouse.down();
@@ -243,7 +243,7 @@ test.describe('canvas mouse mode', () => {
     page,
   }) => {
     const center = await paneCenter(page);
-    const toolbar = page.locator('.react-flow__panel.bottom.center');
+    const toolbar = page.locator('[data-canvas-main-toolbar]');
     await toolbar.getByRole('button', { name: /^Sketch/ }).click();
     await page.mouse.move(center.x - 45, center.y);
     await page.mouse.down();
@@ -284,7 +284,9 @@ test.describe('canvas mouse mode', () => {
     await expect(sketch).toHaveClass(/\bselected\b/);
     await expect(sketch).toHaveClass(/\bdraggable\b/);
 
-    const pointerTarget = toolbar.getByRole('button', { name: /^Select/ });
+    // The toolbar itself outlives the switch to the touch layout, which has
+    // no Select button.
+    const pointerTarget = toolbar;
     await pointerTarget.dispatchEvent('pointerdown', {
       bubbles: true,
       pointerId: 41,
@@ -942,7 +944,7 @@ test.describe('canvas mouse mode', () => {
     const noteNodeId = await noteNode.getAttribute('data-id');
     if (!noteNodeId) throw new Error('note node has no id');
 
-    const toolbar = page.locator('.react-flow__panel.bottom.center');
+    const toolbar = page.locator('[data-canvas-main-toolbar]');
     await toolbar.getByRole('button', { name: /^Sketch/ }).click();
     const underlineY = noteBox.y + noteBox.height + 24;
     await page.mouse.move(noteBox.x + 18, underlineY);
@@ -955,15 +957,16 @@ test.describe('canvas mouse mode', () => {
 
     const canvasCenter = await paneCenter(page);
     await page.mouse.move(canvasCenter.x, canvasCenter.y);
-    const zoomOut = page.getByRole('button', { name: 'Zoom Out' });
-    for (let attempt = 0; attempt < 20; attempt += 1) {
-      const zoom = scaleOf(await readViewportTransform(page));
-      if (zoom < 0.25) break;
-      await zoomOut.click();
-      await expect
-        .poll(async () => scaleOf(await readViewportTransform(page)))
-        .toBeLessThan(zoom);
-    }
+    // Zoom lives in the compact zoom menu; enter a far-zoom level directly.
+    await page.getByRole('button', { name: /^Canvas zoom/ }).click();
+    const zoomLevel = page.getByRole('textbox', { name: 'Zoom level' });
+    await zoomLevel.fill('20');
+    await zoomLevel.press('Enter');
+    await expect
+      .poll(async () => scaleOf(await readViewportTransform(page)))
+      .toBeCloseTo(0.2, 3);
+    await page.keyboard.press('Escape');
+    await expect(zoomLevel).toBeHidden();
     await expect(noteNode.locator('.semantic-lod-node')).toHaveAttribute(
       'data-lod',
       'minimal',

@@ -30,16 +30,13 @@ test('production move anchor survives Ctrl, Cmd and Shift modifier combinations'
   await page.getByRole('menuitem', { name: en.moveSelection.action }).click();
   const panel = page.getByRole('dialog', { name: en.moveSelection.title });
   await expect(panel).toBeVisible();
-  await panel
-    .getByRole('button', { name: en.moveSelection.selectDestination })
-    .click();
-  await page
-    .getByRole('option', { name: en.moveSelection.createNewDestination })
-    .click();
-  const input = panel.getByRole('textbox', {
-    name: en.moveSelection.newSpaceName,
-  });
-  await input.fill('New destination');
+  // The panel is one searchable list of existing Spaces; search takes focus.
+  const input = panel.getByRole('textbox', { name: en.moveSelection.search });
+  await expect(input).toBeFocused();
+  await expect(
+    panel.getByRole('button', { name: 'Destination', exact: true }),
+  ).toBeVisible();
+  await input.fill('Dest');
   const initial = await panel.boundingBox();
   if (!initial) throw new Error('Missing move panel bounds');
   expect(initial.x).toBeGreaterThan(100);
@@ -94,11 +91,8 @@ for (const consumePointer of [false, true]) {
     await page.getByRole('menuitem', { name: en.moveSelection.action }).click();
     const panel = page.getByRole('dialog', { name: en.moveSelection.title });
     await expect(panel).toBeVisible();
-    await panel
-      .getByRole('button', { name: en.moveSelection.selectDestination })
-      .click();
     await expect(
-      page.getByRole('option', { name: 'Destination', exact: true }),
+      panel.getByRole('button', { name: 'Destination', exact: true }),
     ).toBeVisible();
     const pane = page.locator('.react-flow__pane');
     if (consumePointer) {
@@ -118,7 +112,6 @@ for (const consumePointer of [false, true]) {
     await page.mouse.move(bounds.x + 100, bounds.y + 650);
     await page.mouse.down();
     await expect(panel).toHaveCount(0);
-    await expect(page.getByRole('option')).toHaveCount(0);
     await page.mouse.up();
     await expect(toolbar).toHaveCount(0);
     await expect(page.locator('.react-flow__node.selected')).toHaveCount(0);
@@ -129,7 +122,7 @@ for (const [language, strings] of [
   ['en', en],
   ['zh-CN', zhCN],
 ] as const) {
-  test(`move popover uses matching controls and nested dismissal in ${language}`, async ({
+  test(`move popover uses matching controls and keyboard dismissal in ${language}`, async ({
     page,
   }) => {
     await page.addInitScript((locale) => {
@@ -142,19 +135,19 @@ for (const [language, strings] of [
     const panel = page.getByRole('dialog', {
       name: strings.moveSelection.title,
     });
-    const selector = panel.getByRole('button', {
-      name: strings.moveSelection.selectDestination,
+    const search = panel.getByRole('textbox', {
+      name: strings.moveSelection.search,
     });
-    const input = panel.getByRole('textbox', {
-      name: strings.moveSelection.newSpaceName,
-    });
+    const destinations = panel
+      .getByRole('list', { name: strings.moveSelection.spaces })
+      .getByRole('button');
     const open = async () => {
       await trigger.click();
       await page
         .getByRole('menuitem', { name: '移至其他 Space', exact: true })
         .click();
       await expect(panel).toBeVisible();
-      await expect(selector).toBeFocused();
+      await expect(search).toBeFocused();
     };
 
     for (const width of [1280, 320]) {
@@ -162,42 +155,29 @@ for (const [language, strings] of [
       await open();
       await expect(panel).not.toHaveAttribute('aria-modal', 'true');
       await expect(panel).not.toContainText(strings.moveSelection.frameNotice);
-      await selector.click();
-      const newSpace = page.getByRole('option', {
-        name: strings.moveSelection.createNewDestination,
-      });
-      await expect(newSpace).toBeVisible();
-      expect(
-        await newSpace.evaluate((el) =>
-          el.previousElementSibling?.getAttribute('role'),
-        ),
-      ).toBe('separator');
+      // Existing Spaces only: no creation step and no ownership controls.
+      await expect(panel.getByRole('textbox')).toHaveCount(1);
+      await expect(panel.getByRole('checkbox')).toHaveCount(0);
+      await expect(panel.getByRole('combobox')).toHaveCount(0);
       await expect(
-        page.getByText(language === 'en' ? 'New destination' : '新目标', {
-          exact: true,
-        }),
+        panel.getByText(strings.moveSelection.createNewDestination),
       ).toHaveCount(0);
-      await expect(newSpace).toHaveCSS('font-size', '13px');
-      await newSpace.focus();
-      await page.keyboard.press('Escape');
-      await expect(newSpace).toHaveCount(0);
-      await expect(selector).toBeFocused();
-      await expect(panel).toBeVisible();
-
-      await selector.click();
-      await newSpace.click();
-      await expect(input).toBeFocused();
-      const controls = panel.locator('button, input[type="text"]');
+      await expect(destinations).toHaveText([
+        'Design notebook',
+        'Research archive',
+      ]);
       expect(
-        await controls.evaluateAll((elements) =>
+        await destinations.evaluateAll((elements) =>
           elements.map((el) => ({
             height: el.getBoundingClientRect().height,
             fontSize: getComputedStyle(el).fontSize,
           })),
         ),
       ).toEqual(
-        Array.from({ length: 4 }, () => ({ height: 32, fontSize: '13px' })),
+        Array.from({ length: 2 }, () => ({ height: 32, fontSize: '13px' })),
       );
+      await expect(search).toHaveCSS('font-size', '13px');
+      await expect(search).toHaveCSS('height', '36px');
       await expect
         .poll(() =>
           panel.evaluate((el) => {
@@ -213,80 +193,57 @@ for (const [language, strings] of [
         )
         .toBe(true);
       const surface = panel.locator('..');
-      await expect(surface).toHaveCSS('padding', '12px');
-      await expect(panel).toHaveCSS('gap', '12px');
-      await expect(panel).toHaveCSS('line-height', '20px');
-      await expect(panel.getByRole('heading').locator('..')).toHaveCSS(
-        'gap',
-        '4px',
+      await expect(surface).toHaveCSS('padding', '8px');
+      const footer = panel.getByText(
+        strings.moveSelection.description.replace('{{count}}', '1'),
       );
-      for (const description of await panel.locator('p').all()) {
-        await expect(description).toHaveCSS('font-size', '12px');
-        await expect(description).toHaveCSS('line-height', '18px');
-      }
-      const fieldGap = await input.evaluate((el) => {
-        const selector = el.parentElement?.querySelector('button');
-        if (!selector) throw new Error('Missing grouped destination selector');
-        return (
-          el.getBoundingClientRect().top -
-          selector.getBoundingClientRect().bottom
-        );
-      });
-      expect(fieldGap).toBe(8);
-      const notice = panel.getByText(strings.moveSelection.boundaryNotice, {
-        exact: true,
-      });
-      const actions = notice.locator('..').getByRole('button');
-      await expect(actions).toHaveCount(2);
-      await expect(notice.locator('..')).toHaveCSS('gap', '8px');
-      await expect(
-        panel.getByRole('button', {
-          name: strings.moveSelection.confirm,
-          exact: true,
-        }),
-      ).toBeDisabled();
-      await input.fill('   ');
-      await expect(
-        panel.getByRole('button', {
-          name: strings.moveSelection.confirm,
-          exact: true,
-        }),
-      ).toBeDisabled();
-      await input.fill('New destination');
-      await expect(
-        panel.getByRole('button', {
-          name: strings.moveSelection.confirm,
-          exact: true,
-        }),
-      ).toBeEnabled();
+      await expect(footer).toHaveCSS('font-size', '12px');
+      await expect(footer).toHaveCSS('border-top-width', '1px');
+
+      // Arrow keys walk from search into the list and back.
+      await search.press('ArrowDown');
+      await expect(destinations.first()).toBeFocused();
+      await page.keyboard.press('ArrowDown');
+      await expect(destinations.nth(1)).toBeFocused();
+      await page.keyboard.press('ArrowUp');
+      await page.keyboard.press('ArrowUp');
+      await expect(search).toBeFocused();
+
+      await search.fill('research');
+      await expect(destinations).toHaveText(['Research archive']);
+      await search.fill('no such space');
+      await expect(destinations).toHaveCount(0);
+      await expect(panel).toContainText(strings.moveSelection.noTargets);
+      await search.fill('');
+      await expect(destinations).toHaveCount(2);
       await surface.screenshot({
         path: test.info().outputPath(`move-${language}-${width}.png`),
       });
-      await input.press('Escape');
+      await search.press('Escape');
       await expect(panel).toHaveCount(0);
       await expect(trigger).toBeFocused();
     }
 
+    // Choosing a destination submits at once.
     await open();
-    await selector.click();
-    await page
-      .getByRole('option', { name: strings.moveSelection.createNewDestination })
-      .click();
-    await input.fill('Created Space');
-    await input.press('Enter');
+    await destinations.filter({ hasText: 'Research archive' }).click();
     await expect(panel).toHaveCount(0);
     await expect(
-      page.getByRole('status').filter({ hasText: '样例目标：Created Space' }),
+      page
+        .getByRole('status')
+        .filter({ hasText: '样例目标：Research archive' }),
     ).toBeVisible();
 
+    // An outside press dismisses the panel and discards the search.
     await open();
-    await expect(input).toHaveCount(0);
-    await panel.getByRole('checkbox').check();
+    await search.fill('design');
+    await expect(destinations).toHaveCount(1);
     await page
       .getByRole('heading', { name: 'Node toolbars', exact: true })
       .click();
     await expect(panel).toHaveCount(0);
     await open();
-    await expect(panel.getByRole('checkbox')).not.toBeChecked();
+    await expect(search).toHaveValue('');
+    await expect(destinations).toHaveCount(2);
   });
 }

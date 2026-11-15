@@ -114,11 +114,13 @@ test('Ink excludes built-in Chat from new and recent destinations while retainin
     ]);
   });
   const trigger = page.locator('.ink-agent-destination-trigger');
-  await expect(trigger).toContainText('Conversation 2');
-  await expect(trigger.getByText('Continue', { exact: true })).toHaveCSS(
-    'font-size',
-    '12px',
+  // The trigger names the conversation alone; "Continue" and the Agent are
+  // carried by its accessible name, not by a secondary visible label.
+  await expect(trigger).toHaveText('Conversation 2');
+  await expect(trigger).toHaveAccessibleName(
+    /^Choose destination: Continue Conversation 2 with GitHub Copilot/,
   );
+  await expect(trigger).toHaveCSS('font-size', '13px');
   const send = page.locator('.ink-context-toolbar .canvas-context-submit');
   await expect(send).toBeEnabled();
   await trigger.tap();
@@ -405,10 +407,12 @@ for (const locale of ['zh-CN', 'en']) {
 
     const toolbar = page.locator('.ink-context-toolbar');
     const trigger = toolbar.locator('.ink-agent-destination-trigger');
-    await expect(trigger).toContainText('GitHub Copilot');
-    await expect(
-      trigger.getByText(locale === 'zh-CN' ? '新建' : 'New', { exact: true }),
-    ).toHaveCSS('font-size', '12px');
+    // "New" is part of the one trigger label, ahead of the Agent name.
+    await expect(trigger).toContainText(
+      `${locale === 'zh-CN' ? '新建' : 'New'} · GitHub Copilot`,
+    );
+    await expect(trigger.locator(':scope > span')).toHaveCount(2);
+    await expect(trigger).toHaveCSS('font-size', '13px');
     await expect(toolbar.locator('.node-toolbar-color')).toBeVisible();
     await expect(toolbar.locator('.lucide-pencil')).toBeVisible();
     await trigger.hover();

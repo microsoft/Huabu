@@ -287,9 +287,12 @@ test('World membership, Open Space, shortcut metadata refresh, and test-Space de
   const body = preview.locator('[data-space-shortcut]');
   await expect(body).toHaveAttribute('data-target-status', 'ready');
   await expect(body).toContainText(sourceTitle);
-  await expect(body.locator('[data-space-shortcut-summary]')).toContainText(
-    '1 node',
-  );
+  // The card summarizes the target's latest activity, not its node count.
+  const summary = body.locator('[data-space-shortcut-summary]');
+  await expect(summary).toHaveText('now');
+  const updatedBefore = await summary.getAttribute('aria-label');
+  if (!updatedBefore?.startsWith('Updated '))
+    throw new Error('Missing shortcut activity time');
   await expect(preview).not.toContainText('Before refresh marker');
   await expect(preview.locator('[data-preview-adaptive-text]')).toHaveCount(0);
   await expect(
@@ -331,9 +334,9 @@ test('World membership, Open Space, shortcut metadata refresh, and test-Space de
   await pasteNote(source, 'Second source note\n\nMetadata refresh marker');
   await page.bringToFront();
   await page.evaluate(() => window.dispatchEvent(new Event('focus')));
-  await expect(body.locator('[data-space-shortcut-summary]')).toContainText(
-    '2 nodes',
-  );
+  await expect(summary).not.toHaveAttribute('aria-label', updatedBefore);
+  await expect(summary).toHaveAttribute('aria-label', /^Updated /);
+  await expect(summary).toHaveText('now');
   await expect(preview).not.toContainText('After refresh marker');
   await expect(preview.locator('[data-preview-adaptive-text]')).toHaveCount(0);
   await page.screenshot({
@@ -411,7 +414,7 @@ test('World shortcut move, horizontal resize, reload, and source isolation', asy
   )!;
   await body.click();
   await expect(preview.locator('.node-resize-edge')).toHaveCount(2);
-  await expect(preview.locator('.node-resize-corner')).toHaveCount(0);
+  await expect(preview.locator('.node-resize-corner')).toHaveCount(4);
   const handle = preview.locator('.node-resize-edge.right');
   await expect(handle).toBeVisible();
   await drag(page, handle, 90, 0, 20);

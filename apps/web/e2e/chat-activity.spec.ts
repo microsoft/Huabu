@@ -863,21 +863,32 @@ test('collapsing a completed activity below the viewport does not move a paused 
 }) => {
   await mount(page, 28);
   const scroll = fixture(page).locator('[data-chat-thread-root]');
-  await scroll.evaluate(async (element) => {
-    element.dispatchEvent(
-      new WheelEvent('wheel', {
-        bubbles: true,
-        deltaY: -100,
-      }),
-    );
-    element.scrollTop = 120;
-    element.dispatchEvent(new Event('scroll', { bubbles: true }));
-    await new Promise<void>((resolve) =>
-      requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
-    );
-  });
-  const before = await scroll.evaluate((element) => element.scrollTop);
-  expect(before).toBe(120);
+  const position = () => scroll.evaluate((element) => element.scrollTop);
+  // How far the activity's top edge sits below the viewport's bottom edge.
+  const below = () =>
+    activity(page).evaluate((element) => {
+      const root = element.closest('[data-chat-thread-root]');
+      if (!root) throw new Error('Missing chat scroller');
+      return (
+        element.getBoundingClientRect().top -
+        root.getBoundingClientRect().bottom
+      );
+    });
+  // The history is virtualized and restores its own anchor after a scripted
+  // jump, so the reader scrolls away the way a person does: with the wheel.
+  await scroll.hover();
+  await expect(async () => {
+    await page.mouse.wheel(0, -120);
+    expect(await below()).toBeGreaterThan(0);
+  }).toPass();
+  await expect(header(page)).toHaveAttribute('aria-expanded', 'true');
+  let before = -1;
+  await expect(async () => {
+    const settled = before;
+    before = await position();
+    expect(before).toBe(settled);
+  }).toPass();
+  expect(await below()).toBeGreaterThan(0);
   await update(page, [...initial, tool('c'), prose], false);
   await expect(header(page)).toHaveAttribute('aria-expanded', 'false');
   await expect

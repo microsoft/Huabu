@@ -105,11 +105,19 @@ test('a visible label retains its highlight above the Frame after its source is 
   await expect(highlight).toHaveCount(1);
   const bounds = await highlight.boundingBox();
   if (!bounds) throw new Error('Missing culled-source highlight');
-  const [pixel] = await readScreenshotPixels(page, [
+  // The highlight is a translucent green wash (70% `--success-bg`), a few
+  // levels off the neutral Frame surface. Compare it with the Frame just past
+  // its edge: were it painted below the Frame, both samples would be the same
+  // neutral color.
+  const [pixel, frame] = await readScreenshotPixels(page, [
     { x: bounds.x + bounds.width - 10, y: bounds.y + bounds.height - 2 },
+    { x: bounds.x + bounds.width + 12, y: bounds.y + bounds.height - 2 },
   ]);
-  expect(pixel[1] - pixel[0]).toBeGreaterThan(10);
-  expect(pixel[1] - pixel[2]).toBeGreaterThan(5);
+  expect(
+    Math.max(...frame.slice(0, 3)) - Math.min(...frame.slice(0, 3)),
+  ).toBeLessThanOrEqual(1);
+  expect(pixel[1] - pixel[0]).toBeGreaterThanOrEqual(4);
+  expect(pixel[1] - pixel[2]).toBeGreaterThanOrEqual(3);
   await oneFingerDrag(client, { x: 1000, y: 650 }, box.x + box.width + 20, 0);
   await expect(
     page.locator(

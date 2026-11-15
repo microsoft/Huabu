@@ -4,6 +4,7 @@
 import { expect, test } from '@playwright/test';
 
 import { NODE_TYPOGRAPHY } from '../src/components/Nodes/design/nodeTypography';
+import { previewCardMetricsForSize } from '../src/components/Nodes/previewCard/previewCardDesign';
 
 test('Note uses fixed insets and cards retain width-scaled spacing across orientations', async ({
   page,
@@ -124,31 +125,46 @@ test('Note uses fixed insets and cards retain width-scaled spacing across orient
           'font-size',
           '18px',
         );
-        const metrics = await card.evaluate((el, horizontal) => {
-          const surface = horizontal
-            ? el
-            : el.querySelector('.preview-card__info');
-          if (!surface) throw new Error('Missing info');
-          const style = getComputedStyle(surface);
-          const summary = el.querySelector('.preview-card__summary');
-          return {
-            insets: [
-              style.paddingTop,
-              style.paddingRight,
-              style.paddingBottom,
-              style.paddingLeft,
-            ].map(parseFloat),
-            gap: parseFloat(getComputedStyle(el).columnGap),
-            summaryGap: summary
-              ? parseFloat(getComputedStyle(summary).marginTop)
-              : 0,
-          };
-        }, orientation === 'horizontal');
+        // Horizontal cards and vertical PDF cards pad the card itself.
+        const metrics = await card.evaluate(
+          (el, padsCard) => {
+            const surface = padsCard
+              ? el
+              : el.querySelector('.preview-card__info');
+            if (!surface) throw new Error('Missing info');
+            const style = getComputedStyle(surface);
+            const summary = el.querySelector('.preview-card__summary');
+            return {
+              insets: [
+                style.paddingTop,
+                style.paddingRight,
+                style.paddingBottom,
+                style.paddingLeft,
+              ].map(parseFloat),
+              gap: parseFloat(getComputedStyle(el).columnGap),
+              summaryGap: summary
+                ? parseFloat(getComputedStyle(summary).marginTop)
+                : 0,
+            };
+          },
+          orientation === 'horizontal' ||
+            (type === 'pdf' && orientation === 'vertical'),
+        );
         for (const inset of metrics.insets)
           expect(inset).toBeCloseTo(expectedPadding, 2);
         if (orientation === 'horizontal')
           expect(metrics.gap).toBeCloseTo((12 * (width - 2)) / 400, 2);
-        expect(metrics.summaryGap).toBeCloseTo((8 * (width - 2)) / 400, 2);
+        // A PDF's notes excerpt keeps the tier's block gap; a Web description
+        // keeps the width-scaled description gap.
+        expect(metrics.summaryGap).toBeCloseTo(
+          type === 'pdf'
+            ? previewCardMetricsForSize(
+                width,
+                orientation === 'horizontal' ? 214 : width,
+              ).gap
+            : (8 * (width - 2)) / 400,
+          2,
+        );
       }
     }
   }
@@ -328,6 +344,9 @@ for (const nodeType of ['web', 'pdf']) {
         { title: text, height, summary: description, image: cover },
       );
     };
+    // A PDF card budgets its lines: the title is guaranteed two, the notes
+    // excerpt then takes its line, and only what is left returns to the title.
+    const budgeted = nodeType === 'pdf';
     const threeLines = '研究材料标题'.repeat(4);
     await update(threeLines, 260);
     await expect(card).toHaveAttribute('data-orientation', 'horizontal');
@@ -339,19 +358,24 @@ for (const nodeType of ['web', 'pdf']) {
       )
       .toBeGreaterThan(2.8);
     await expect(summary).toBeVisible();
+    const clamp = () =>
+      title.evaluate((el) => Number(getComputedStyle(el).webkitLineClamp));
     await update(threeLines.repeat(10), 260);
-    await expect(summary).toBeHidden();
-    const largeBudget = await title.evaluate((el) =>
-      Number(getComputedStyle(el).webkitLineClamp),
-    );
-    expect(largeBudget).toBeGreaterThan(2);
+    if (budgeted) await expect(summary).toBeVisible();
+    else await expect(summary).toBeHidden();
+    await expect.poll(clamp).toBeGreaterThan(2);
+    const largeBudget = await clamp();
     await update(threeLines.repeat(10), 170);
-    await expect
-      .poll(() =>
-        title.evaluate((el) => Number(getComputedStyle(el).webkitLineClamp)),
-      )
-      .toBeLessThan(largeBudget);
-    await expect(summary).toBeHidden();
+    await expect.poll(clamp).toBeLessThan(largeBudget);
+    if (budgeted) {
+      expect(await clamp()).toBeGreaterThanOrEqual(2);
+      await expect(summary).toBeVisible();
+      // Once only one line is left, it names the document.
+      await update(threeLines.repeat(10), 120);
+      await expect(summary).toBeHidden();
+      await expect.poll(clamp).toBe(1);
+      await expect(title).toBeVisible();
+    } else await expect(summary).toBeHidden();
     await update(threeLines, 260);
     await expect(summary).toBeVisible();
     await update(threeLines, 260, '');
@@ -365,8 +389,13 @@ for (const nodeType of ['web', 'pdf']) {
       .toBeGreaterThan(2.8);
     await update(threeLines.repeat(10), 400);
     await expect(card).toHaveAttribute('data-orientation', 'vertical');
-    await expect(title).toHaveCSS('-webkit-line-clamp', '2');
-    await expect(summary).toBeHidden();
+    if (budgeted) {
+      await expect.poll(clamp).toBeGreaterThanOrEqual(2);
+      await expect(summary).toBeVisible();
+    } else {
+      await expect(title).toHaveCSS('-webkit-line-clamp', '2');
+      await expect(summary).toBeHidden();
+    }
   });
 }
 
@@ -432,7 +461,19 @@ test('Web and PDF descriptions disappear for clipped titles and return when titl
         'A long material title that cannot fit in two lines. '.repeat(12);
       (element as HTMLElement).style.width = '390px';
     });
-    await expect(summary).toBeHidden();
+    if (type === 'pdf') {
+      // The PDF line budget clips the title to its share instead of dropping
+      // the notes excerpt.
+      await expect(summary).toBeVisible();
+      await expect
+        .poll(() =>
+          card.locator('.preview-card__title').evaluate((el) => ({
+            lines: Number(getComputedStyle(el).webkitLineClamp),
+            clipped: el.scrollHeight > el.clientHeight + 1,
+          })),
+        )
+        .toEqual({ lines: expect.any(Number), clipped: true });
+    } else await expect(summary).toBeHidden();
     await card.evaluate((element) => {
       const heading = element.querySelector('.preview-card__title');
       if (!heading) throw new Error('Missing heading');
