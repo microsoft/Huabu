@@ -1864,7 +1864,7 @@ describe('split', () => {
       expect(separator?.dataset.resizing).toBe('true');
       expect(
         separator?.firstElementChild?.classList.contains(
-          'group-data-[resizing=true]:bg-info/50',
+          'group-data-[resizing=true]:bg-info-light',
         ),
       ).toBe(true);
       act(() => {
