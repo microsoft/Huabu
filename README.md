@@ -29,7 +29,7 @@ Huabu gives you an infinite work surface where you and your agents think togethe
 
 Running from source is the recommended way to use Huabu. Desktop installers are coming soon.
 
-Requirements: Node.js 24.16.0+ and pnpm 10+.
+Requirements: Node.js 24.16.0+ and pnpm 10+. Use the version pinned in `.nvmrc` for development and CI.
 
 Install dependencies in the repository directory:
 
@@ -54,6 +54,8 @@ pnpm start:web
 ```
 
 Open the server address printed in the terminal, choose your Home folder, and configure your agents or models in Settings. The web application and API share one server, accessible only from the same machine by default.
+
+`pnpm start:web` builds and then starts the application. To separate these steps, run `pnpm build:web` followed by `node scripts/start-web.mjs`. The launch-only entry point loads the existing repository-root `.env` and requires prepared build artifacts. For Linux boot startup, optional Caddy HTTPS, updates, and migration from the deprecated tmux workflow, see the [server deployment guide](docs/server-deployment.md).
 
 For development with hot reload and local quality checks, see [Contributing](CONTRIBUTING.md#local-development).
 

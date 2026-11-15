@@ -11,7 +11,11 @@ import { pathToFileURL } from 'node:url';
 
 import { CommanderError } from 'commander';
 
-import { RFS_HEADERS, RFS_SKILL_CLIENT_HEADER } from '@huabu/shared';
+import {
+  RFS_HEADERS,
+  RFS_SKILL_CLIENT_HEADER,
+  agentTurnAcceptedSchema,
+} from '@huabu/shared';
 import { serviceParamsSchema } from '@huabu/shared/service-package';
 
 import {
@@ -130,6 +134,61 @@ async function deliver(
   await pipeline(Readable.from(bytes()), destination, { end });
 }
 
+async function readAcceptance(response: Response, threadId: string) {
+  if (
+    !response.headers.get('content-type')?.includes('text/event-stream') ||
+    !response.body
+  ) {
+    throw new Error('Expected an Agent acceptance event stream');
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) throw new Error('Stream ended without confirmed acceptance');
+      buffer += decoder.decode(value, { stream: true });
+      let separator: RegExpExecArray | null;
+      while ((separator = /\r?\n\r?\n/.exec(buffer))) {
+        const frame = buffer.slice(0, separator.index);
+        buffer = buffer.slice(separator.index + separator[0].length);
+        if (frame.length > 65536)
+          throw new Error('Agent event exceeds size limit');
+        let type = '';
+        const data = [];
+        for (const line of frame.split(/\r?\n/)) {
+          if (line.startsWith('event:')) type = line.slice(6).trim();
+          if (line.startsWith('data:'))
+            data.push(line.slice(5).replace(/^ /, ''));
+        }
+        if (type === 'accepted') {
+          const acceptance = agentTurnAcceptedSchema.parse(
+            JSON.parse(data.join('\n')),
+          );
+          if (acceptance.threadId !== threadId) {
+            throw new Error(
+              'Acceptance Thread does not match the requested Thread',
+            );
+          }
+          return acceptance;
+        }
+        if (['error', 'done', 'end'].includes(type)) {
+          throw new Error(`Agent emitted ${type} before confirmed acceptance`);
+        }
+      }
+      if (buffer.length > 65536)
+        throw new Error('Agent event exceeds size limit');
+    }
+  } finally {
+    try {
+      await reader.cancel();
+    } finally {
+      reader.releaseLock();
+    }
+  }
+}
+
 function downloadRevision(response: Response): string | undefined {
   const etag = response.headers.get('etag');
   if (!etag) return undefined;
@@ -233,6 +292,7 @@ export async function runRfs(args: string[], io: RfsIO = {}): Promise<number> {
     download?: DownloadOptions;
     usage?: string;
     service?: { id: string; folder: string };
+    acceptedThread?: string;
   }
   async function send(request: Request) {
     const config = connection(env);
@@ -259,7 +319,9 @@ export async function runRfs(args: string[], io: RfsIO = {}): Promise<number> {
       body: request.body,
       duplex: request.duplex,
       redirect: 'manual',
-      signal,
+      signal: request.acceptedThread
+        ? AbortSignal.any([signal, AbortSignal.timeout(60000)])
+        : signal,
     };
     const response = await fetch(`${config.base}${request.path}`, init);
     const download = request.download;
@@ -286,7 +348,9 @@ export async function runRfs(args: string[], io: RfsIO = {}): Promise<number> {
       code = 1;
       return;
     }
-    if (response.ok && request.service) {
+    if (request.acceptedThread) {
+      event(await readAcceptance(response, request.acceptedThread));
+    } else if (response.ok && request.service) {
       const target = await installServicePackage(
         request.service.id,
         request.service.folder,
@@ -350,6 +414,7 @@ export async function runRfs(args: string[], io: RfsIO = {}): Promise<number> {
     options: InputOptions,
     jsonOnly: boolean,
     correlate = false,
+    acceptedThread?: string,
   ) {
     const source = await input(
       options,
@@ -364,9 +429,11 @@ export async function runRfs(args: string[], io: RfsIO = {}): Promise<number> {
       headers: {
         'Content-Type': source.contentType,
         ...(options.noStart ? { 'X-Huabu-Agent-Start': 'false' } : {}),
+        ...(acceptedThread ? { 'X-Huabu-Event-Mode': 'all' } : {}),
       },
       mutation: path !== '/query',
       correlate,
+      acceptedThread,
     });
   }
   function serviceId(id: string) {
@@ -475,7 +542,13 @@ export async function runRfs(args: string[], io: RfsIO = {}): Promise<number> {
       profiles: () => send({ path: '/agent/profiles' }),
       create: (options) => post('/agent', options, false, true),
       prompt: (thread, options) =>
-        post(`/agent/${segment(thread)}/prompt`, options, false),
+        post(
+          `/agent/${segment(thread)}/prompt`,
+          options,
+          false,
+          false,
+          options.untilAccepted ? thread : undefined,
+        ),
       services: () => send({ path: '/services' }),
       serviceSkill: (id) => send({ path: `/services/${serviceId(id)}/skill` }),
       serviceManifest: (id) =>

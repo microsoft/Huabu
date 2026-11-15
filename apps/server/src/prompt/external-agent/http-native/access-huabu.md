@@ -267,13 +267,15 @@ THREAD_ID="$(curl -fsS -H "$AUTH" -H "Content-Type: application/json" \
   "$HUABU_RFS_URL/query" \
   | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(JSON.parse(s).result.nodes[0]?.threadId ?? ""))')"
 
-SSE="$(curl -fsS -N -H "$AUTH" -H "Content-Type: text/plain" \
+curl -fsS -N -H "$AUTH" -H "Content-Type: text/plain" \
+  -H "X-Huabu-Event-Mode: all" \
   --data-binary @./follow-up.txt \
-  "$HUABU_RFS_URL/agent/$THREAD_ID/prompt")"
-printf '%s\n' "$SSE" | sed -n 's/^data: //p'
+  "$HUABU_RFS_URL/agent/$THREAD_ID/prompt"
 ```
 
 An absent `threadId` means the result is not a Question Node with an existing thread association. Inspection is read-only and never creates or realizes Agent state. Submitting the prompt continues the associated conversation without creating another Agent or changing its Profile.
+
+For asynchronous handoff, consume this stream incrementally through the matching `accepted` receipt, then disconnect without cancelling execution. The raw curl example streams until closed; do not wait for its final answer or buffer the whole response. Send the actual prompt bytes yourself; a local file path alone is not a dispatch. Load the `agents` guide for receipt validation, bounded submission, and ambiguous-outcome semantics.
 
 ### 8.3 Choose Profiles or create without starting
 

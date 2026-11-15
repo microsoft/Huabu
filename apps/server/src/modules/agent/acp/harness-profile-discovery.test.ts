@@ -102,6 +102,62 @@ function setup(initialMachines = ['machine-a']) {
 }
 
 describe('automatic ordinary Profile provisioning', () => {
+  it('provisions Pi only after both prerequisites are ready and preserves its Profile on reconnect', async () => {
+    const context = setup();
+    const pi = {
+      ...observation.harnesses[0]!,
+      id: 'pi',
+      displayName: 'Pi',
+      installHint: 'Install native Pi and one pi-acp adapter',
+      workingDirPath: '/home/user/.agentlet/workspace/pi',
+    };
+    context.gateway.discoverHarnesses.mockResolvedValue({
+      harnesses: [
+        {
+          ...pi,
+          status: 'not-found',
+          workingDirPath: undefined,
+          diagnostics: [
+            { code: 'native_runtime_missing', message: 'pi is not on PATH' },
+          ],
+        },
+      ],
+    });
+    const dispose = context.start();
+    await flush();
+    expect(context.registry.createProfile).not.toHaveBeenCalled();
+    context.gateway.discoverHarnesses.mockResolvedValue({
+      harnesses: [
+        { ...pi, status: 'adapter-missing', workingDirPath: undefined },
+      ],
+    });
+    context.emit({ agentletId: 'machine-a', status: 'connected' });
+    await flush();
+    expect(context.registry.createProfile).not.toHaveBeenCalled();
+    context.gateway.discoverHarnesses.mockResolvedValue({ harnesses: [pi] });
+    context.emit({ agentletId: 'machine-a', status: 'connected' });
+    await flush();
+    expect(context.profiles[0]).toMatchObject({
+      alias: 'Pi (machine-a: linux x64)',
+      workingDirPath: pi.workingDirPath,
+      launch: { kind: 'acp-harness', harnessId: 'pi', options: undefined },
+      customData: {
+        discoveredAgent: {
+          harnessId: 'pi',
+          agentletId: 'machine-a',
+          version: 1,
+        },
+      },
+    });
+    context.profiles[0]!.alias = 'My Pi';
+    context.emit({ agentletId: 'machine-a', status: 'disconnected' });
+    context.emit({ agentletId: 'machine-a', status: 'connected' });
+    await flush();
+    expect(context.registry.createProfile).toHaveBeenCalledOnce();
+    expect(context.profiles[0]!.alias).toBe('My Pi');
+    dispose();
+  });
+
   it('creates the filesystem proxy as a hidden Profile', async () => {
     const context = setup();
     context.gateway.discoverHarnesses.mockResolvedValue({

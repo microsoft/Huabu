@@ -114,6 +114,8 @@ export async function postEcho(body: EchoBody): Promise<EchoResponse> {
 
 ## RFS Skill delivery
 
+RFS Agent SSE in `all` mode reuses `AGENT_HOST_SSE_EVENTS.Accepted` and `agentTurnAcceptedSchema` from the existing Agent contract. The event is emitted only from the canonical durable acceptance promise, never from HTTP success or Thread creation; `final` mode retains its existing output. The CLI's acceptance-only option is local transport behavior, not a new HTTP response schema or cancellation operation.
+
 `rfsSkillParamsSchema` in `packages/shared/src/types/api/rfs.ts` validates canvas and Skill path parameters for the authenticated focused-guide route. Root and focused Skills keep the existing `GET /api/rfs/:canvasId/skill[/<skillId>]` URLs. `X-Huabu-Skill-Client` selects `http` or `rfs-cli`; absence defaults to `http`, unknown values return `400`, and variant responses include `Vary: X-Huabu-Skill-Client`. Both presentations append the same live Skill Frames at the root. The former Space-root `skill.md` override is ignored. HTTP exposes `agents`, `interactive-views`, `layout`, `services`, and `tasks`; CLI intentionally exposes only `agents`, `layout`, and `services` while Task/View abstractions await redesign. Unknown or unavailable IDs retain explicit 404 errors. CLI Service commands reuse the existing Service HTTP contracts; local extraction output is not a new wire response.
 
 ## Quoted Comment source evidence

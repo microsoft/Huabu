@@ -182,4 +182,34 @@ describe('ordinary command Profile contracts', () => {
     };
     expect(acpAgentCliListResponseSchema.parse(response)).toEqual(response);
   });
+
+  it('preserves Pi prerequisite diagnostics and platform guidance without adding a wire status', () => {
+    const response = {
+      agents: [
+        {
+          id: 'pi',
+          displayName: 'Pi',
+          installHint:
+            'Windows: install pi.cmd and one pi-acp adapter; see adapter known issues',
+          status: 'not-found',
+          capabilities: { autoApprove: false, customLaunchCommand: false },
+          diagnostics: [
+            {
+              code: 'native_runtime_missing',
+              message: 'pi.cmd is not on PATH',
+            },
+          ],
+        },
+      ],
+    };
+    expect(acpAgentCliListResponseSchema.parse(response)).toEqual(response);
+    expect(
+      createAcpProfileBodySchema.parse({
+        alias: 'Pi',
+        agentletId: 'device-1',
+        workingDirPath: '/work/pi',
+        launch: { kind: 'acp-harness', harnessId: 'pi' },
+      }),
+    ).toMatchObject({ launch: { kind: 'acp-harness', harnessId: 'pi' } });
+  });
 });

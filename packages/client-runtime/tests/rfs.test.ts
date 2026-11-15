@@ -134,6 +134,73 @@ function zip(
 }
 
 describe('optional raw RFS client', () => {
+  it('returns a validated acceptance without waiting for the answer or cancelling the turn', async () => {
+    let submissions = 0;
+    const env = await server(async (request, response) => {
+      submissions++;
+      expect(request.url).toBe('/rfs/space/agent/thread-existing/prompt');
+      expect(request.headers['x-huabu-event-mode']).toBe('all');
+      expect((await bytes(request)).toString()).toBe('investigate only');
+      response.writeHead(200, { 'content-type': 'text/event-stream' });
+      response.write(': threadId thread-existing\r\n\r\n');
+      response.write('event: accepted\r\ndata: {"threadId":"thread-');
+      await new Promise((resolve) => setImmediate(resolve));
+      response.write('existing","turnStartSeq":7}\r\n\r\n');
+      // The response deliberately stays open without a final answer.
+    });
+    const result = await call(
+      [
+        'agent',
+        'prompt',
+        'thread-existing',
+        '--until-accepted',
+        '--text',
+        'investigate only',
+      ],
+      env,
+    );
+    expect(result.code).toBe(0);
+    expect(JSON.parse(result.stdout.toString())).toEqual({
+      threadId: 'thread-existing',
+      turnStartSeq: 7,
+    });
+    expect(submissions).toBe(1);
+  });
+
+  it.each([
+    ': threadId thread-existing\n\n',
+    'event: done\ndata: {"message":"not an acceptance"}\n\n',
+    'event: error\ndata: {"error":"preparation failed"}\n\n',
+    'event: accepted\ndata: {"threadId":"wrong-thread","turnStartSeq":1}\n\n',
+    'event: accepted\ndata: {"threadId":"thread-existing","turnStartSeq":0}\n\n',
+    'event: accepted\ndata: not-json\n\n',
+  ])(
+    'does not confirm or retry an ambiguous submission: %s',
+    async (stream) => {
+      let submissions = 0;
+      const env = await server((_request, response) => {
+        submissions++;
+        response.writeHead(200, { 'content-type': 'text/event-stream' });
+        response.end(stream);
+      });
+      const result = await call(
+        [
+          'agent',
+          'prompt',
+          'thread-existing',
+          '--until-accepted',
+          '--text',
+          'investigate',
+        ],
+        env,
+      );
+      expect(result.code).toBe(1);
+      expect(result.stdout.toString()).toBe('');
+      expect(result.stderr).toContain('do not blindly resend');
+      expect(submissions).toBe(1);
+    },
+  );
+
   it.each([
     [['get-skill', 'services'], '/skill/services'],
     [['agent', 'profiles'], '/agent/profiles'],

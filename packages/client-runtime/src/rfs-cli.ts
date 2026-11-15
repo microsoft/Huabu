@@ -9,6 +9,7 @@ export interface InputOptions {
   text?: string;
   textFile?: string;
   noStart?: boolean;
+  untilAccepted?: boolean;
 }
 
 export interface DownloadOptions {
@@ -166,7 +167,11 @@ export function createRfsProgram(
     inputs(
       agent
         .command('prompt <threadId>')
-        .description('Continue an existing conversation'),
+        .description('Continue an existing conversation')
+        .option(
+          '--until-accepted',
+          'Return a validated durable acceptance receipt within 60s, without waiting for the answer',
+        ),
       true,
     ),
     'agents',

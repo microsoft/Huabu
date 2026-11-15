@@ -240,11 +240,12 @@ THREAD_ID="$(huabu-rfs query \
   --json '{"type":"INSPECT_NODES","ids":["node-123"]}' \
   | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(JSON.parse(s).result.nodes[0]?.threadId ?? ""))')"
 
-SSE="$(huabu-rfs agent prompt --text-file ./follow-up.txt "$THREAD_ID")"
-printf '%s\n' "$SSE" | sed -n 's/^data: //p'
+huabu-rfs agent prompt --until-accepted --text-file ./follow-up.txt "$THREAD_ID"
 ```
 
 An absent `threadId` means the result is not a Question Node with an existing thread association. Inspection is read-only and never creates or realizes Agent state. Submitting the prompt continues the associated conversation without creating another Agent or changing its Profile.
+
+For asynchronous handoff, `--until-accepted` prints a validated durable acceptance receipt and disconnects while the Agent continues. It does not wait for the final answer. Send the actual prompt content yourself; a local file path alone is not a dispatch. Load `agent --help` for receipt, timeout, and ambiguous-outcome semantics. Omit the option only when you deliberately want to consume the full response.
 
 ### 8.3 Choose Profiles or create without starting
 
