@@ -158,7 +158,9 @@ export function PropertyTagEditor({
           }}
         />
       </div>
-      {rows.length > 0 && field && (
+      {/* Not while saving: nothing can be picked then, and the list floats
+          outside the property region, so it would outlive a collapse. */}
+      {rows.length > 0 && field && !disabled && (
         // Floats above the page: a Note's properties sit in a short scrolling
         // region that would otherwise clip all but the first option. No
         // dismissal or focus handling: the field keeps focus and the form

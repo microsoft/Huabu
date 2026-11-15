@@ -642,7 +642,9 @@ it('ignores a tag option clicked while a save is in flight', async () => {
     properties: { Keywords: ['ink', 'agents'] },
   });
   // The pending save holds the list as it was: a later pick would be lost
-  // when that save clears the draft, so it is not taken at all.
+  // when that save clears the draft. The options are withdrawn meanwhile, so
+  // they can neither be picked nor linger over the page.
+  expect(document.querySelectorAll('[role="option"]')).toHaveLength(0);
   act(() => option('canvas')?.click());
   expect(
     Array.from(container.querySelectorAll('form [data-property-tag]')).map(
