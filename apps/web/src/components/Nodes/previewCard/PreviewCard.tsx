@@ -470,6 +470,16 @@ function PreviewCardContent({
     let active = true;
     const measure = () => {
       if (!active || !info.clientHeight) return;
+      // Space the card itself spends around cover and text. Web cards pad the
+      // text area, but a vertical PDF card pads itself and separates cover
+      // from text with a gap; budgeting text against the bare card height
+      // over-allocates it and squeezes the cover away.
+      const cardStyle = getComputedStyle(card);
+      const cardChrome = fitSummaryToHeight
+        ? 0
+        : (parseFloat(cardStyle.paddingTop) || 0) +
+          (parseFloat(cardStyle.paddingBottom) || 0) +
+          (parseFloat(cardStyle.rowGap) || 0);
       const heading = titleRef.current;
       if (heading) {
         if (far || (!textOnly && metrics.horizontal)) {
@@ -479,6 +489,7 @@ function PreviewCardContent({
           const headingStyle = getComputedStyle(heading);
           let titleHeight =
             (fitSummaryToHeight ? info.clientHeight : card.clientHeight) -
+            cardChrome -
             coverBudget -
             (parseFloat(infoStyle.paddingTop) || 0) -
             (parseFloat(infoStyle.paddingBottom) || 0) -
@@ -527,6 +538,7 @@ function PreviewCardContent({
         (parseFloat(style.paddingTop) || 0) -
         (parseFloat(style.paddingBottom) || 0) -
         metrics.descriptionGap -
+        cardChrome -
         coverBudget;
       for (const child of Array.from(info.children)) {
         if (!(child instanceof HTMLElement)) continue;
