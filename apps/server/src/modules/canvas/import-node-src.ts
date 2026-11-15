@@ -515,20 +515,26 @@ async function resolveImportedSrc(
     return null;
   }
 
+  // Where the file actually is, not how the reference was spelled: only a
+  // real `.upload/` descendant may be reclaimed after the copy.
   return await copyToArtifact(
     canvasId,
     absPath,
-    physicalRel,
+    resolvedPhysicalRel,
     deferredUploads,
     keptUploads,
   );
 }
 
-/** Copy a canvas-local file into blob storage, returning the new key. */
+/**
+ * Copy a canvas-local file into blob storage, returning the new key.
+ * `resolvedRel` is the file's location relative to the Space root after
+ * resolution, so `.upload/../notes/a.png` is judged as `notes/a.png`.
+ */
 async function copyToArtifact(
   canvasId: string,
   absPath: string,
-  physicalRel: string,
+  resolvedRel: string,
   deferredUploads?: string[],
   keptUploads?: readonly string[],
 ): Promise<string | null> {
@@ -542,7 +548,7 @@ async function copyToArtifact(
     // Move semantics: reclaim RFS scratch uploads once they are safely
     // stored. Never delete user node files or other canvas content —
     // only the hidden `.upload/` staging dir is fair game.
-    const normalized = physicalRel.split(path.sep).join('/');
+    const normalized = resolvedRel.split(path.sep).join('/');
     if (!normalized.startsWith(UPLOAD_DIR_NAME + '/')) return key;
     // A caller that may still reject the batch reclaims the upload itself.
     if (deferredUploads) deferredUploads.push(absPath);

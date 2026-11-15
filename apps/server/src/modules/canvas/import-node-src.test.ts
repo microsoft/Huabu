@@ -753,6 +753,60 @@ describe('importForeignNodeSources — PDF covers', () => {
     expect(stagedCoverUploads).toEqual([staged]);
   });
 
+  it('never reclaims an authored file reached through the upload directory', async () => {
+    seedNodes('pdf');
+    // A reference spelled under `.upload/` that resolves to the user's own
+    // file must be copied, not consumed.
+    const authoredDir = path.join(diskDirOf(canvasId), 'images');
+    mkdirSync(authoredDir, { recursive: true });
+    const authored = path.join(authoredDir, 'cover.png');
+    writeFileSync(authored, PNG);
+    const stagedCoverUploads: string[] = [];
+
+    const [cover] = patchedCovers(
+      await importForeignNodeSources(
+        canvasId,
+        mergeCovers('upload/../images/cover.png'),
+        { agentCovers: true, stagedCoverUploads },
+      ),
+    );
+
+    expect(cover).toMatch(/^artifact-.+\.png$/);
+    expect(stagedCoverUploads).toEqual([]);
+    expect(existsSync(authored)).toBe(true);
+    // The same holds for an ordinary source import, which reclaims at once.
+    const out = await importForeignNodeSources(canvasId, [
+      {
+        type: 'CREATE_NODES',
+        nodes: [
+          {
+            id: 'node-image',
+            nodeType: 'image',
+            position: { x: 0, y: 0 },
+            data: { src: 'upload/../images/cover.png' },
+          },
+        ],
+      } as unknown as CanvasCommand,
+    ]);
+    expect(firstSrc(out)).toMatch(/^artifact-.+\.png$/);
+    expect(existsSync(authored)).toBe(true);
+  });
+
+  it('tracks a staged upload however its path is spelled', async () => {
+    seedNodes('pdf');
+    const staged = stageBytes('cover.png', PNG);
+    const stagedCoverUploads: string[] = [];
+
+    await importForeignNodeSources(
+      canvasId,
+      mergeCovers('./.upload/cover.png'),
+      { agentCovers: true, stagedCoverUploads },
+    );
+
+    expect(stagedCoverUploads).toEqual([staged]);
+    expect(existsSync(staged)).toBe(true);
+  });
+
   it('hands consumed cover uploads to a caller that reclaims them itself', async () => {
     seedNodes('pdf');
     const staged = stageBytes('cover.png', PNG);
