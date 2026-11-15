@@ -263,7 +263,7 @@ export const MainLayout = ({
   const rightHandleDisabled =
     isRightCollapsed || displayedPreviewFullscreen || isRestoringCanvas;
 
-  const leftHandleClassName = `${resizeHandleClassName} hover:bg-info/30 active:bg-info/50 data-[resizing=true]:bg-info/50 border-edge-default right-0 w-1 border-r ${
+  const leftHandleClassName = `${resizeHandleClassName} hover:bg-info-light active:bg-info-light data-[resizing=true]:bg-info-light border-edge-default right-0 w-1 border-r ${
     leftHandleDisabled ? 'hidden' : 'cursor-col-resize'
   }`;
 
@@ -533,7 +533,7 @@ export const MainLayout = ({
           className={rightHandleClassName}
           onPointerDown={(event) => onResizePointerDown('right', event)}
         >
-          <div className="bg-edge-default group-hover:bg-info/30 group-data-[resizing=true]:bg-info/50 pointer-events-none absolute inset-y-0 left-1/2 w-px -translate-x-1/2 group-hover:w-1 group-data-[resizing=true]:w-1" />
+          <div className="bg-edge-default group-hover:bg-info-light group-data-[resizing=true]:bg-info-light pointer-events-none absolute inset-y-0 left-1/2 w-px -translate-x-1/2 group-hover:w-1 group-data-[resizing=true]:w-1" />
         </div>
       </div>
       {!displayedPreviewFullscreen && (

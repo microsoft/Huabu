@@ -283,8 +283,21 @@ test('composer and panel drag feedback reuse opaque system blues without changin
       document.documentElement.classList.toggle('dark', theme === 'dark');
     }, theme);
     for (const [index, handle] of (await handles.all()).entries()) {
+      // The left handle paints itself; the right one is a wider hit target
+      // around a 1px indicator that is the divider at rest.
+      const indicator = handle.locator('> div');
+      const hasIndicator = (await indicator.count()) > 0;
+      const paint = hasIndicator ? indicator : handle;
+      const divider = await page.evaluate(() => {
+        const probe = document.createElement('div');
+        probe.style.backgroundColor = 'var(--edge-default)';
+        document.body.append(probe);
+        const color = getComputedStyle(probe).backgroundColor;
+        probe.remove();
+        return color;
+      });
       await handle.hover();
-      await expect(handle).toHaveCSS('background-color', palette.light);
+      await expect(paint).toHaveCSS('background-color', palette.light);
       const bounds = await handle.boundingBox();
       if (!bounds) throw new Error('Missing panel drag handle');
       await page.mouse.down();
@@ -292,13 +305,17 @@ test('composer and panel drag feedback reuse opaque system blues without changin
         bounds.x + bounds.width / 2 + 16,
         bounds.y + bounds.height / 2,
       );
-      await expect(handle).toHaveCSS('background-color', palette.light);
+      await expect(paint).toHaveCSS('background-color', palette.light);
       await page.screenshot({
         path: test.info().outputPath(`panel-drag-${theme}-${index}.png`),
       });
       await page.mouse.up();
       await page.mouse.move(640, 400);
-      await expect(handle).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+      // At rest: a neutral divider, never a tinted fill.
+      await expect(paint).toHaveCSS(
+        'background-color',
+        hasIndicator ? divider : 'rgba(0, 0, 0, 0)',
+      );
     }
   }
 });
