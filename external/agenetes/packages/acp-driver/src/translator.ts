@@ -258,6 +258,7 @@ export function acpUpdateToStreamEvent(
         used: u.used,
         size: u.size,
         cost: u.cost ?? null,
+        receivedAt: Date.now(),
       };
       return { type: 'session_usage_update', data };
     }
