@@ -572,6 +572,42 @@ it('turns a chosen tag back into text where it stands and saves the correction t
   });
 });
 
+it('replaces an edited tag with the known tag it now names in full, not one that contains it', async () => {
+  act(() =>
+    root.render(
+      <NodeProperties
+        properties={{ Keywords: ['canvas', 'agents'] }}
+        displayKeys={[]}
+        readOnly={false}
+        tagOptions={() => ['agents', 'blink', 'canvas', 'Ink']}
+        onSave={save}
+      />,
+    ),
+  );
+  click('node.editProperty:Keywords');
+  click('node.editPropertyTag:canvas');
+  input('node.propertyValue', 'ink');
+  expect(
+    Array.from(document.querySelectorAll('[role="option"]')).map(
+      (item) => item.textContent,
+    ),
+  ).toEqual(['Ink', 'blink', 'node.createPropertyTagink']);
+  const enter = () =>
+    act(() => {
+      container
+        .querySelector('[role="combobox"]')
+        ?.dispatchEvent(
+          new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
+        );
+    });
+  enter();
+  enter();
+  await act(async () => {});
+  expect(save).toHaveBeenCalledExactlyOnceWith({
+    properties: { Keywords: ['Ink', 'agents'] },
+  });
+});
+
 it('removes one of two repeated tags and lets Enter save once the pointer leaves the options', async () => {
   act(() =>
     root.render(

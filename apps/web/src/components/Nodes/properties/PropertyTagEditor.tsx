@@ -60,10 +60,15 @@ export function PropertyTagEditor({
   const [field, setField] = useState<HTMLDivElement | null>(null);
   const query = text.trim();
   const needle = query.toLowerCase();
-  const matches = options.filter(
-    (option) =>
-      !items.includes(option) && option.toLowerCase().includes(needle),
-  );
+  const exact = (option: string) => option.toLowerCase() === needle;
+  const matches = options
+    .filter(
+      (option) =>
+        !items.includes(option) && option.toLowerCase().includes(needle),
+    )
+    // Enter takes the first row: text that names a tag in full must not pick
+    // a longer one that merely contains it.
+    .sort((a, b) => Number(exact(b)) - Number(exact(a)));
   const canCreate =
     query !== '' && !items.includes(query) && !options.includes(query);
   const rows = [
