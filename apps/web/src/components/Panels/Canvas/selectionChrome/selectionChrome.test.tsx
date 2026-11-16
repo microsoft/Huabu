@@ -74,12 +74,9 @@ describe('selection chrome visual primitives', () => {
   });
 
   it('preserves the collapsed mark outline offset and circular geometry', () => {
-    // Happy DOM misparses outline shorthand containing CSS variables.
-    const outlinePaint = vi.spyOn(
-      CSSStyleDeclaration.prototype,
-      'outline',
-      'set',
-    );
+    // Happy DOM misparses outline shorthand containing CSS variables, so
+    // inspect the assignment, which its style object forwards to setProperty.
+    const setProperty = vi.spyOn(CSSStyleDeclaration.prototype, 'setProperty');
     act(() =>
       root.render(
         <SelectionOutline
@@ -91,7 +88,8 @@ describe('selection chrome visual primitives', () => {
       ),
     );
     const outline = container.firstElementChild as HTMLElement;
-    expect(outlinePaint).toHaveBeenCalledWith(
+    expect(setProperty).toHaveBeenCalledWith(
+      'outline',
       `${NODE_SELECTION_CHROME.width}px solid ${NODE_SELECTION_CHROME.color}`,
     );
     expect(outline.style.outlineOffset).toBe('2px');

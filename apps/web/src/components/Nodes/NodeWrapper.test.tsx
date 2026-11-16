@@ -357,11 +357,11 @@ describe('NodeWrapper radius contract', () => {
     'shares the Note boundary color for %s in every presentation',
     (type) => {
       // Happy DOM drops modern CSS color values; assert the assigned CSS here
-      // and verify computed colors and overlay inheritance in Chromium.
-      const borderColor = vi.spyOn(
+      // and verify computed colors and overlay inheritance in Chromium. Its
+      // style object forwards every property assignment to setProperty.
+      const setProperty = vi.spyOn(
         CSSStyleDeclaration.prototype,
-        'borderColor',
-        'set',
+        'setProperty',
       );
       for (const accent of ['teal', 'white', '#008080', undefined]) {
         const resolved = nodeAccentToken(type, accent);
@@ -380,7 +380,11 @@ describe('NodeWrapper radius contract', () => {
                 typeof NodeWrapper
               >['data'],
             });
-            expect(borderColor).toHaveBeenLastCalledWith(
+            expect(
+              setProperty.mock.calls
+                .filter(([property]) => property === 'border-color')
+                .at(-1)?.[1],
+            ).toBe(
               suppressed
                 ? frameRegionSurfaceStyle(resolved, boundary.borderColor)
                     .borderColor

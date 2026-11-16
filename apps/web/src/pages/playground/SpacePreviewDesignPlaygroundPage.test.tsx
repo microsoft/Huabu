@@ -250,12 +250,6 @@ describe('Space shortcut design playground', () => {
   });
 
   it('uses production boundary, radius, spacing, and typography values', async () => {
-    // Happy DOM drops color-mix border values; inspect the assigned CSS.
-    const borderColor = vi.spyOn(
-      CSSStyleDeclaration.prototype,
-      'borderColor',
-      'set',
-    );
     await act(async () =>
       root.render(
         <MemoryRouter key="boundary">
@@ -266,12 +260,7 @@ describe('Space shortcut design playground', () => {
     const boundary = nodeBoundaryForAccent(null);
     const typography = SPACE_CARD_TYPOGRAPHY.title;
     expect(card().style.borderWidth).toBe(`${boundary.borderWidth}px`);
-    expect(
-      borderColor.mock.calls.filter(
-        (_, index) => borderColor.mock.contexts[index] === card().style,
-      ),
-    ).toEqual([[boundary.borderColor]]);
-    borderColor.mockRestore();
+    expect(card().style.borderColor).toBe(boundary.borderColor);
     expect(card().style.padding).toBe(`${CONVERSATION_CARD_SPACING.padding}px`);
     expect(card().style.fontSize).toBe(`${typography.size}px`);
     expect(card().style.fontWeight).toBe(`${typography.weight}`);

@@ -85,15 +85,24 @@ const measureCtx = {
   },
 };
 
-if (typeof HTMLCanvasElement !== 'undefined') {
-  const originalGetContext = HTMLCanvasElement.prototype.getContext;
-  HTMLCanvasElement.prototype.getContext = function getContext(
+// happy-dom 21 added a global `OffscreenCanvas`, which pretext prefers over a
+// DOM canvas, so both canvas kinds get the same stub.
+for (const Canvas of [
+  typeof HTMLCanvasElement !== 'undefined' ? HTMLCanvasElement : undefined,
+  typeof OffscreenCanvas !== 'undefined' ? OffscreenCanvas : undefined,
+]) {
+  if (!Canvas) continue;
+  const prototype = Canvas.prototype as {
+    getContext(contextId: string, options?: unknown): unknown;
+  };
+  const originalGetContext = prototype.getContext;
+  prototype.getContext = function getContext(
     contextId: string,
     options?: unknown,
   ): unknown {
     if (contextId === '2d') return measureCtx;
-    return originalGetContext.call(this, contextId as never, options as never);
-  } as HTMLCanvasElement['getContext'];
+    return originalGetContext.call(this, contextId, options);
+  };
 }
 
 export {};
