@@ -48,6 +48,7 @@ import { advanceDiskStamps, DiskSpaceSaveState } from './space-save.js';
 import { getWorkspacePath } from '../../../workspace.js';
 import {
   storedResultOutcome,
+  validateWriteAuthor,
   validateWriteReviews,
   validateWriteSaveResult,
 } from '../../ports/save.js';
@@ -233,6 +234,7 @@ export function createDiskSpaceWrite(
     validateInput(input);
     const responseJson = validateWriteSaveResult(input);
     const reviews = validateWriteReviews(input);
+    const author = validateWriteAuthor(input);
 
     // Everything from here to the end of the write is synchronous, including
     // recovery and the stored-result check: see the module note.
@@ -291,7 +293,7 @@ export function createDiskSpaceWrite(
     };
 
     const nextStamps = saveInUse
-      ? advanceDiskStamps(save, current, nextRecord)
+      ? advanceDiskStamps(save, current, nextRecord, author)
       : null;
     const reviewPlan = planReviews(store.canvasId, reviews);
     const storedReviews =

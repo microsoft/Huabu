@@ -37,7 +37,12 @@
  */
 
 import type { StorageHealth } from './common.js';
-import type { SaveResult, SpaceSave, StoredSaveResult } from './save.js';
+import type {
+  SaveResult,
+  SpaceSave,
+  StampAuthor,
+  StoredSaveResult,
+} from './save.js';
 import type {
   CanvasEvent,
   CanvasFile,
@@ -445,6 +450,14 @@ export interface SpaceWriteInput {
    * valid together with `allowCreate`.
    */
   readonly reviews?: readonly SpaceWriteReview[];
+  /**
+   * The browser page this write comes from, for the node stamps it advances:
+   * a node this write creates or re-parents is stamped as changed by
+   * `author.by`, so a later write of the same page is not refused for a
+   * change that page made itself (see `ports/save.ts`). Omitted, the stamps
+   * name nobody. Has no effect on a Space without a stamp baseline.
+   */
+  readonly author?: StampAuthor;
 }
 
 /** One thread's new Review records, carried by a {@link SpaceWriteInput}. */

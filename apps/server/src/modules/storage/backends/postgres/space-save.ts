@@ -39,6 +39,7 @@ import type {
   SaveKey,
   SaveResult,
   SpaceSave,
+  StampAuthor,
   StoredSaveResult,
 } from '../../ports/save.js';
 
@@ -108,12 +109,14 @@ export async function advancePostgresStamps(
   canvasId: string,
   current: CanvasFile,
   next: CanvasFile,
+  author?: StampAuthor,
 ): Promise<void> {
   const update = advanceSaveStampsParams(
     await database.get(SELECT_SAVE_HEAD, canvasId),
     canvasId,
     current,
     next,
+    author,
   );
   if (update) await database.run(UPDATE_SAVE_STAMPS, ...update);
 }

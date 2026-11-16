@@ -12,9 +12,11 @@
  *   state it describes, so a caller that lost the reply can ask again and be
  *   handed the same answer instead of applying the request twice;
  * - **version stamps** per node: the Space version at which each node was
- *   created and at which its membership (parent) last changed. They let a
+ *   created and at which its membership (parent) last changed, and — when the
+ *   write came from a browser page — which page made that change. They let a
  *   later write say "I read version N" and be checked against exactly the
- *   nodes it targets, without replaying history.
+ *   nodes it targets, without replaying history, and let a page's own
+ *   earlier change not count as one it has not seen.
  *
  * Both are maintained inside every backend's write and are invisible to a
  * caller that never asks for them: a Space has no stamps until the first
@@ -24,10 +26,15 @@
  * This file may not import a backend implementation.
  */
 
+import { advanceNodeStamps } from '@huabu/shared/canvas-engine';
+
 import { sanitizeId } from '../../../utils/fs.js';
 import { stringifyJson } from '../../../utils/json.js';
 
 import type { SpaceWriteInput, SpaceWriteReview } from './structured.js';
+import type { NodeStamp, StampAuthor } from '@huabu/shared/canvas-engine';
+
+export type { NodeStamp, StampAuthor };
 
 /** Who asked, and the id they chose for the request. */
 export interface SaveKey {
@@ -48,13 +55,6 @@ export interface StoredSaveResult {
   readonly response: unknown;
   /** Space version the result was stored at. */
   readonly atVersion: number;
-}
-
-export interface NodeStamp {
-  /** Space version at which this node id (last) came into existence. */
-  readonly created: number;
-  /** Space version at which this node's parent last changed. */
-  readonly membership: number;
 }
 
 export interface SpaceStamps {
@@ -224,6 +224,32 @@ export function validateWriteReviews(
   return input.reviews;
 }
 
+const AUTHOR_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
+
+/**
+ * Validate the author carried by a write, if any.
+ *
+ * The key is stored in every stamp the write advances, so it is kept short
+ * and free of anything that would need escaping.
+ */
+export function validateWriteAuthor(
+  input: SpaceWriteInput,
+): StampAuthor | undefined {
+  const { author } = input;
+  if (author === undefined) return undefined;
+  if (
+    author === null ||
+    typeof author !== 'object' ||
+    typeof author.by !== 'string' ||
+    !AUTHOR_PATTERN.test(author.by)
+  ) {
+    throw new TypeError(
+      'Write author must be 1-64 characters of [A-Za-z0-9_-]',
+    );
+  }
+  return author;
+}
+
 /** Request ids compare case-insensitively, the way UUIDs do. */
 export function normalizeSaveKey(key: SaveKey): SaveKey {
   validateSaveKey(key);
@@ -250,62 +276,28 @@ export function storedResultOutcome(
 
 // ─── Stamps ─────────────────────────────────────────────────────────────────
 
-function topologyOf(nodes: readonly unknown[]): Map<string, string | null> {
-  const topology = new Map<string, string | null>();
-  for (const node of nodes) {
-    if (node === null || typeof node !== 'object') continue;
-    const { id, parentId } = node as { id?: unknown; parentId?: unknown };
-    if (typeof id !== 'string' || id.length === 0) continue;
-    topology.set(
-      id,
-      typeof parentId === 'string' && parentId ? parentId : null,
-    );
-  }
-  return topology;
-}
-
 /**
  * Advance stamps across one committed write.
  *
  * Pure. A new id is stamped `{ to, to }`; an id whose `parentId` changed gets
  * `membership = to`; a removed id is dropped, so recreating it later stamps it
- * as new. When nothing about node existence or membership changed, the
- * returned `nodes` is the very object passed in — a backend uses that identity
- * to skip persisting an unchanged map.
+ * as new. A stamp set here names `author` as who made the change, or nobody
+ * when the write has none. When nothing about node existence or membership
+ * changed, the returned `nodes` is the very object passed in — a backend uses
+ * that identity to skip persisting an unchanged map.
  */
 export function advanceStamps(
   prev: SpaceStamps,
   prevNodes: readonly unknown[],
   nextNodes: readonly unknown[],
   toVersion: number,
+  author?: StampAuthor,
 ): SpaceStamps {
-  const before = topologyOf(prevNodes);
-  const after = topologyOf(nextNodes);
-  let nodes: Record<string, NodeStamp> | null = null;
-  const editable = (): Record<string, NodeStamp> => {
-    nodes ??= { ...prev.nodes };
-    return nodes;
-  };
-
-  for (const [id, parent] of after) {
-    if (!before.has(id)) {
-      editable()[id] = { created: toVersion, membership: toVersion };
-    } else if (before.get(id) !== parent) {
-      editable()[id] = {
-        created: prev.nodes[id]?.created ?? prev.floor,
-        membership: toVersion,
-      };
-    }
-  }
-  for (const id of Object.keys(prev.nodes)) {
-    if (!after.has(id)) delete editable()[id];
-  }
-
   return {
     lineage: prev.lineage,
     floor: prev.floor,
     version: toVersion,
-    nodes: nodes ?? prev.nodes,
+    nodes: advanceNodeStamps(prev, prevNodes, nextNodes, toVersion, author),
   };
 }
 
@@ -319,21 +311,30 @@ export function parseNodeStamps(
   }
   const nodes: Record<string, NodeStamp> = {};
   for (const [id, stamp] of Object.entries(value)) {
-    const { created, membership } = (stamp ?? {}) as {
+    const { created, membership, createdBy, membershipBy } = (stamp ?? {}) as {
       created?: unknown;
       membership?: unknown;
+      createdBy?: unknown;
+      membershipBy?: unknown;
     };
     if (
       typeof created !== 'number' ||
       typeof membership !== 'number' ||
       !Number.isSafeInteger(created) ||
-      !Number.isSafeInteger(membership)
+      !Number.isSafeInteger(membership) ||
+      (createdBy !== undefined && typeof createdBy !== 'string') ||
+      (membershipBy !== undefined && typeof membershipBy !== 'string')
     ) {
       throw new Error(
         `${context} holds an invalid stamp for ${JSON.stringify(id)}`,
       );
     }
-    nodes[id] = { created, membership };
+    nodes[id] = {
+      created,
+      membership,
+      ...(createdBy ? { createdBy } : {}),
+      ...(membershipBy ? { membershipBy } : {}),
+    };
   }
   return nodes;
 }

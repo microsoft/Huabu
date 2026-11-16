@@ -78,6 +78,56 @@ describe('advanceStamps', () => {
   });
 });
 
+describe('advanceStamps with an author', () => {
+  it('names the author on the stamps it sets and keeps the others', () => {
+    const next = advanceStamps(
+      {
+        ...base,
+        nodes: { stamped: { created: 6, membership: 7, membershipBy: 'A' } },
+      },
+      [{ id: 'old' }, { id: 'stamped' }, { id: 'frame' }],
+      [
+        { id: 'old', parentId: 'frame' },
+        { id: 'stamped' },
+        { id: 'frame' },
+        { id: 'fresh' },
+      ],
+      8,
+      { by: 'B' },
+    );
+    expect(next.nodes).toEqual({
+      stamped: { created: 6, membership: 7, membershipBy: 'A' },
+      old: { created: 5, membership: 8, membershipBy: 'B' },
+      fresh: { created: 8, membership: 8, createdBy: 'B', membershipBy: 'B' },
+    });
+  });
+
+  it('names nobody for a node in the exception list or without an author', () => {
+    const prev = {
+      ...base,
+      nodes: {
+        stamped: {
+          created: 6,
+          membership: 7,
+          createdBy: 'A',
+          membershipBy: 'A',
+        },
+      },
+    };
+    const before = [{ id: 'stamped' }, { id: 'frame' }];
+    const after = [{ id: 'stamped', parentId: 'frame' }, { id: 'frame' }];
+    expect(
+      advanceStamps(prev, before, after, 8, {
+        by: 'B',
+        except: new Set(['stamped']),
+      }).nodes,
+    ).toEqual({ stamped: { created: 6, membership: 8, createdBy: 'A' } });
+    expect(advanceStamps(prev, before, after, 8).nodes).toEqual({
+      stamped: { created: 6, membership: 8, createdBy: 'A' },
+    });
+  });
+});
+
 describe('save rules', () => {
   it('returns the serialized response it measured', () => {
     expect(
@@ -119,6 +169,17 @@ describe('save rules', () => {
     expect(parseNodeStamps({ a: { created: 1, membership: 2 } }, 'x')).toEqual({
       a: { created: 1, membership: 2 },
     });
+    expect(
+      parseNodeStamps(
+        { a: { created: 1, membership: 2, createdBy: 'p', membershipBy: 'q' } },
+        'x',
+      ),
+    ).toEqual({
+      a: { created: 1, membership: 2, createdBy: 'p', membershipBy: 'q' },
+    });
+    expect(() =>
+      parseNodeStamps({ a: { created: 1, membership: 2, createdBy: 3 } }, 'x'),
+    ).toThrow();
     expect(() => parseNodeStamps([], 'x')).toThrow();
     expect(() => parseNodeStamps({ a: { created: '1' } }, 'x')).toThrow();
   });

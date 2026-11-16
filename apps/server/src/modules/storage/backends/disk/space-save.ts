@@ -89,6 +89,7 @@ import type {
   SaveResult,
   SpaceSave,
   SpaceStamps,
+  StampAuthor,
   StoredSaveResult,
 } from '../../ports/save.js';
 import type { CanvasChangeRecord } from '@huabu/shared/canvas-engine';
@@ -573,6 +574,7 @@ export function advanceDiskStamps(
   state: DiskSpaceSaveState,
   current: CanvasFile,
   next: CanvasFile,
+  author?: StampAuthor,
 ): SpaceStamps | null {
   const head = state.headFor(current.version);
   if (head === null) return null;
@@ -581,6 +583,7 @@ export function advanceDiskStamps(
     current.state.nodes,
     next.state.nodes,
     next.version,
+    author,
   );
 }
 

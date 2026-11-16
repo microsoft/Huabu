@@ -38,6 +38,7 @@ import type {
   SaveKey,
   SaveResult,
   SpaceStamps,
+  StampAuthor,
   StoredSaveResult,
 } from '../../ports/save.js';
 
@@ -161,6 +162,7 @@ export function advanceSaveStampsParams(
   canvasId: string,
   current: CanvasFile,
   next: CanvasFile,
+  author?: StampAuthor,
 ): [string, string] | null {
   if (headRow === undefined) return null;
   const head = decodeSaveHeadRow(headRow);
@@ -169,6 +171,7 @@ export function advanceSaveStampsParams(
     current.state.nodes,
     next.state.nodes,
     next.version,
+    author,
   );
   if (advanced.nodes === head.nodes) return null;
   return [stringifyJson(advanced.nodes, `Space ${canvasId} stamps`), canvasId];

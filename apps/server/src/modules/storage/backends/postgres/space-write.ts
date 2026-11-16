@@ -18,6 +18,7 @@ import {
 } from './space-save.js';
 import {
   storedResultOutcome,
+  validateWriteAuthor,
   validateWriteReviews,
   validateWriteSaveResult,
 } from '../../ports/save.js';
@@ -100,6 +101,7 @@ export async function writePostgresSpaceInTransaction(
   validateInput(canvasId, input);
   const responseJson = validateWriteSaveResult(input);
   const reviews = validateWriteReviews(input);
+  const author = validateWriteAuthor(input);
   if (input.result !== undefined) {
     // First, before the version check: a retry of a committed write arrives
     // with a stale expected version and must be answered, not refused.
@@ -193,6 +195,7 @@ export async function writePostgresSpaceInTransaction(
     canvasId,
     current.record,
     input.nextRecord,
+    author,
   );
   let stored: Record<string, CanvasChangeRecord[]> | undefined;
   for (const review of reviews) {

@@ -41,6 +41,7 @@ import type {
   SaveKey,
   SaveResult,
   SpaceSave,
+  StampAuthor,
   StoredSaveResult,
 } from '../../ports/save.js';
 import type { DatabaseSync } from 'node:sqlite';
@@ -91,12 +92,14 @@ export function advanceSqliteStamps(
   canvasId: string,
   current: CanvasFile,
   next: CanvasFile,
+  author?: StampAuthor,
 ): void {
   const update = advanceSaveStampsParams(
     database.prepare(SELECT_SAVE_HEAD).get(canvasId),
     canvasId,
     current,
     next,
+    author,
   );
   if (update) database.prepare(UPDATE_SAVE_STAMPS).run(...update);
 }

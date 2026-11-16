@@ -922,6 +922,149 @@ export function describeSpaceWriteContract(
       await expect(space.save.stamps()).resolves.toEqual(before);
     });
 
+    it('stamps who made a change when the write names an author, and nobody otherwise', async () => {
+      const { space, concurrent } = await open();
+      const start = await requireRecord(space);
+      const baseline = await space.save.stamps();
+      if (!baseline) throw new Error('Contract fixture Space is missing');
+      const frames = [
+        { id: 'frame-a', type: 'frame' },
+        { id: 'frame-b', type: 'frame' },
+      ];
+
+      // An authored write: what it creates is the author's.
+      const created = nextRecord(start, {
+        ...start.state,
+        nodes: [...frames, { id: 'note', type: 'note', parentId: 'frame-a' }],
+      });
+      await expect(
+        space.write({
+          ...writeInput(start, { nextRecord: created }),
+          author: { by: 'page-A' },
+        }),
+      ).resolves.toEqual({ ok: true });
+      const mine = {
+        created: created.version,
+        membership: created.version,
+        createdBy: 'page-A',
+        membershipBy: 'page-A',
+      };
+      await expect(space.save.stamps()).resolves.toEqual({
+        ...baseline,
+        version: created.version,
+        nodes: { 'frame-a': mine, 'frame-b': mine, note: mine },
+      });
+
+      // A re-parent by another author keeps who created the node. A second
+      // handle reads the same stamps: they are stored, not remembered.
+      const moved = nextRecord(created, {
+        ...created.state,
+        nodes: [...frames, { id: 'note', type: 'note', parentId: 'frame-b' }],
+      });
+      await space.write({
+        ...writeInput(created, { nextRecord: moved }),
+        author: { by: 'page-B' },
+      });
+      expect((await concurrent.save.stamps())?.nodes['note']).toEqual({
+        created: created.version,
+        membership: moved.version,
+        createdBy: 'page-A',
+        membershipBy: 'page-B',
+      });
+
+      // A node the author is told it had not seen is re-parented by nobody.
+      const excepted = nextRecord(moved, {
+        ...moved.state,
+        nodes: [...frames, { id: 'note', type: 'note', parentId: 'frame-a' }],
+      });
+      await space.write({
+        ...writeInput(moved, { nextRecord: excepted }),
+        author: { by: 'page-A', except: new Set(['note']) },
+      });
+      expect((await space.save.stamps())?.nodes['note']).toEqual({
+        created: created.version,
+        membership: excepted.version,
+        createdBy: 'page-A',
+      });
+
+      // So is one re-parented by a write without an author, which also
+      // forgets who had moved it before.
+      const again = nextRecord(excepted, {
+        ...excepted.state,
+        nodes: [...frames, { id: 'note', type: 'note', parentId: 'frame-b' }],
+      });
+      await space.write({
+        ...writeInput(excepted, { nextRecord: again }),
+        author: { by: 'page-B' },
+      });
+      const anonymous = nextRecord(again, {
+        ...again.state,
+        nodes: [...frames, { id: 'note', type: 'note' }],
+      });
+      await space.write(writeInput(again, { nextRecord: anonymous }));
+      expect((await space.save.stamps())?.nodes['note']).toEqual({
+        created: created.version,
+        membership: anonymous.version,
+        createdBy: 'page-A',
+      });
+
+      // A write that changes no existence or membership leaves them alone.
+      const touched = nextRecord(anonymous, {
+        ...anonymous.state,
+        nodes: anonymous.state.nodes.map((node) => ({
+          ...(node as object),
+          position: { x: 3, y: 4 },
+        })),
+      });
+      const before = (await space.save.stamps())?.nodes;
+      await space.write({
+        ...writeInput(anonymous, { nextRecord: touched }),
+        author: { by: 'page-B' },
+      });
+      expect((await space.save.stamps())?.nodes).toEqual(before);
+    });
+
+    it('refuses an author key that is not a short plain token, before writing anything', async () => {
+      const { space } = await open();
+      const start = await requireRecord(space);
+      const next = nextRecord(start, {
+        ...start.state,
+        nodes: [{ id: 'note', type: 'note' }],
+      });
+      for (const by of ['', 'has space', 'x'.repeat(65), 'quote"']) {
+        await expect(
+          space.write({
+            ...writeInput(start, { nextRecord: next }),
+            author: { by },
+          }),
+        ).rejects.toThrow(/author/i);
+      }
+      await expect(requireRecord(space)).resolves.toMatchObject({
+        version: start.version,
+      });
+    });
+
+    it('carries an author on a Space without a baseline without creating one', async () => {
+      const { space } = await open();
+      const start = await requireRecord(space);
+      const next = nextRecord(start, {
+        ...start.state,
+        nodes: [{ id: 'note', type: 'note' }],
+      });
+      await expect(
+        space.write({
+          ...writeInput(start, { nextRecord: next }),
+          author: { by: 'page-A' },
+        }),
+      ).resolves.toEqual({ ok: true });
+      // The baseline is created by the first read of the stamps, after the
+      // write: the node predates it and carries no stamp.
+      await expect(space.save.stamps()).resolves.toMatchObject({
+        floor: next.version,
+        nodes: {},
+      });
+    });
+
     // ─── Review records ────────────────────────────────────────────────────
 
     it('stores Review records in the same write and returns the stored lists', async () => {
