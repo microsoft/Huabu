@@ -89,13 +89,22 @@ export function PropertyTagEditor({
     ...(canCreate ? [{ value: query, create: true }] : []),
   ];
   // Typed text targets the first row; an empty field targets nothing, so
-  // Enter falls through to the form and saves. So does text that names a
-  // tag already chosen: the rows left are other tags that only contain it.
+  // Enter falls through to the form and saves. Text that names a chosen tag
+  // is the exception: the matches left are other tags that only contain it.
+  // It targets the tag in its own spelling if that is on offer, else
+  // nothing, and Enter merges the two.
+  const chosen = items.some(exact);
+  const target =
+    !chosen || (matches.length > 0 && exact(matches[0]))
+      ? 0
+      : canCreate
+        ? rows.length - 1
+        : null;
   const active =
     cursor !== null && cursor < rows.length
       ? cursor
-      : query && rows.length > 0 && !items.includes(query)
-        ? 0
+      : query && rows.length > 0
+        ? target
         : null;
   const add = (tag: string) => {
     // A save is in flight with the list as it was; a change now would be

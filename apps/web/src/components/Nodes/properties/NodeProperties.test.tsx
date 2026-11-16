@@ -638,6 +638,42 @@ it('merges a tag corrected into one already chosen instead of picking a tag that
   });
 });
 
+it('does not pick a tag that contains text naming a chosen tag in another case', async () => {
+  act(() =>
+    root.render(
+      <NodeProperties
+        properties={{ Keywords: ['Ink', 'blink'] }}
+        displayKeys={[]}
+        readOnly={false}
+        tagOptions={() => ['blink', 'Ink']}
+        onSave={save}
+      />,
+    ),
+  );
+  click('node.editProperty:Keywords');
+  click('node.editPropertyTag:blink');
+  input('node.propertyValue', 'ink');
+  // Tags differ by case, so the typed spelling is its own tag, not `blink`.
+  expect(option('blink')?.getAttribute('aria-selected')).toBe('false');
+  expect(
+    option('node.createPropertyTagink')?.getAttribute('aria-selected'),
+  ).toBe('true');
+  const enter = () =>
+    act(() => {
+      container
+        .querySelector('[role="combobox"]')
+        ?.dispatchEvent(
+          new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
+        );
+    });
+  enter();
+  enter();
+  await act(async () => {});
+  expect(save).toHaveBeenCalledExactlyOnceWith({
+    properties: { Keywords: ['Ink', 'ink'] },
+  });
+});
+
 it('keeps a repeated tag that was opened and left unchanged', async () => {
   act(() =>
     root.render(
