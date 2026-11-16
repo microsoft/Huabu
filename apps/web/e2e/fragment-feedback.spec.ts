@@ -47,7 +47,9 @@ async function selectText(surface: Locator, from: string, to = from) {
 }
 
 async function comment(page: Page, text: string) {
-  await page.getByRole('button', { name: 'Comment', exact: true }).click();
+  await page
+    .getByRole('button', { name: 'Comment on selection', exact: true })
+    .click();
   const editor = page.getByRole('textbox', { name: 'Comment', exact: true });
   await expect(editor).toBeFocused();
   await editor.fill(text);
@@ -66,62 +68,31 @@ test.beforeEach(async ({ page }, info) => {
       body: JSON.stringify({ message: 'Fixture has no backend' }),
     }),
   );
+  // The sign-in gate mounts nothing until the Server says who is calling, so
+  // the backend-less fixture answers that one request as a local deployment.
+  await page.route('**/api/identity', (route) =>
+    route.fulfill({
+      json: {
+        provider: 'local',
+        principal: {
+          principalId: 'local-owner',
+          kind: 'user',
+          displayName: 'Local owner',
+        },
+        member: true,
+        owner: true,
+      },
+    }),
+  );
   await page.goto('/playground/chat-performance?mode=activation&turns=3');
   await expect(panel(page).locator('.ProseMirror').first()).toBeVisible();
 });
 
-test('collects inline and cross-paragraph comments, edits input and explicitly submits once', async ({
-  page,
-}) => {
-  const composer = panel(page).locator('textarea[name="agent-message"]');
-  await composer.fill('Existing draft');
-  const answer = panel(page)
-    .locator('[data-chat-message-id="a-turn-3-tool"] .ProseMirror')
-    .last();
-  await answer.locator('strong').dblclick();
-  await page.getByRole('button', { name: 'Comment', exact: true }).click();
-  await expect(
-    page.getByRole('button', { name: 'Add to input' }),
-  ).toBeDisabled();
-  await page
-    .getByRole('textbox', { name: 'Comment', exact: true })
-    .fill('Keep this.');
-  // The append must read the latest draft, not the one at selection time.
-  await composer.fill('Draft edited while commenting');
-  await page.getByRole('button', { name: 'Cancel', exact: true }).click();
-  // Reselect and add against the latest draft.
-  await selectText(answer, 'cached');
-  await comment(page, 'Keep this.');
-  await expect(composer).toBeFocused();
-  await expect(composer).toHaveValue(
-    /Draft edited while commenting\n\nQuote from an earlier reply:\n> cached/,
-  );
-  await selectText(
-    answer,
-    'Preserve full history',
-    'Older turns stay available.',
-  );
-  await comment(page, '请展开');
-  await expect(composer).toHaveValue(
-    /前面回答中的引用：\n> Preserve full history/,
-  );
-  await expect(composer).toHaveValue(
-    /> \n> Render recent turns\n> \n> Older turns stay available\./,
-  );
-  await expect(panel(page)).toHaveAttribute('data-submitted-draft', '');
-  const draft = (await composer.inputValue()).replace(
-    'Keep this.',
-    'Keep the reasoning.',
-  );
-  await composer.fill(`${draft}\n\nDiscuss only these points.`);
-  await composer.press('Enter');
-  await expect(panel(page)).toHaveAttribute(
-    'data-submitted-draft',
-    `${draft}\n\nDiscuss only these points.`,
-  );
-  await expect(composer).toHaveValue('');
-});
-
+// How a comment reaches the input is covered by quoted-comments.spec.ts.
+// Since #374 a comment is staged as a quoted-comment chip and the prompt
+// template is no longer written into the textarea, which is what the cases
+// that used to live here ("collects inline and cross-paragraph comments…",
+// "supports code and keyboard selection…") asserted.
 test('offers three selection icons and copies only the selected text while retaining whole-response actions', async ({
   page,
 }) => {
@@ -138,7 +109,7 @@ test('offers three selection icons and copies only the selected text while retai
     .last();
   await answer.locator('strong').dblclick();
   const commentButton = page.getByRole('button', {
-    name: 'Comment',
+    name: 'Comment on selection',
     exact: true,
   });
   await expect(commentButton).toBeVisible();
@@ -156,33 +127,6 @@ test('offers three selection icons and copies only the selected text while retai
   await expect(wholeNoteActions).toHaveCount(originalCount);
   await expect(composer).toHaveValue('Unchanged draft');
   await expect(answer.locator('strong')).toHaveText('cached');
-});
-
-test('supports code and keyboard selection and does not change the original answer', async ({
-  page,
-}) => {
-  const answer = panel(page).locator(
-    '[data-chat-message-id="a-turn-3-answer"] .ProseMirror',
-  );
-  const original = await answer.innerText();
-  await selectText(answer, 'const cachedTurn = 3;');
-  await comment(page, 'Explain this code.');
-  await expect(
-    panel(page).locator('textarea[name="agent-message"]'),
-  ).toHaveValue(/> const cachedTurn = 3;/);
-  await expect(answer).toHaveText(original, { useInnerText: true });
-  const paragraph = answer.locator('p').last();
-  await paragraph.click();
-  await page.keyboard.press('Home');
-  await page.keyboard.press('Shift+End');
-  await expect(
-    page.getByRole('button', { name: 'Comment', exact: true }),
-  ).toBeVisible();
-  await page.getByRole('button', { name: 'Comment', exact: true }).click();
-  await page.keyboard.press('Escape');
-  await expect(
-    page.getByRole('textbox', { name: 'Comment', exact: true }),
-  ).toHaveCount(0);
 });
 
 test('rejects selections spanning messages and excludes streaming output', async ({
@@ -204,7 +148,7 @@ test('rejects selections spanning messages and excludes streaming output', async
     last.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
   });
   await expect(
-    page.getByRole('button', { name: 'Comment', exact: true }),
+    page.getByRole('button', { name: 'Comment on selection', exact: true }),
   ).toHaveCount(0);
   await page.getByRole('button', { name: 'Start turn', exact: true }).click();
   const streaming = panel(page).locator(
@@ -212,7 +156,7 @@ test('rejects selections spanning messages and excludes streaming output', async
   );
   await selectText(streaming, 'const cachedTurn = 4;');
   await expect(
-    page.getByRole('button', { name: 'Comment', exact: true }),
+    page.getByRole('button', { name: 'Comment on selection', exact: true }),
   ).toHaveCount(0);
   await page
     .getByRole('button', { name: 'Complete turn', exact: true })
@@ -244,7 +188,9 @@ test('keeps comments thread-local through tab switching and drops unsent drafts 
     ),
     'const cachedTurn = 3;',
   );
-  await page.getByRole('button', { name: 'Comment', exact: true }).click();
+  await page
+    .getByRole('button', { name: 'Comment on selection', exact: true })
+    .click();
   await page
     .getByRole('textbox', { name: 'Comment', exact: true })
     .fill('Not appended.');
