@@ -53,13 +53,6 @@ export {
   type CommandReadTargets,
 } from './commandTargets.js';
 export {
-  commandPlacementTargets,
-  createExpectedParentsAdmit,
-  expectedParentsOf,
-  expectedParentsProblem,
-  type ExpectedParents,
-} from './expectedParents.js';
-export {
   advanceNodeStamps,
   createReadVersionAdmission,
   isRefusedResult,
