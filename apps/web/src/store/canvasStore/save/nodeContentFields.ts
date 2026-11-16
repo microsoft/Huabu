@@ -30,6 +30,8 @@ export const NODE_CONTENT_KEYS: ReadonlySet<string> = new Set([
   'summary',
   'keywords',
   'provenance',
+  'properties',
+  'propertyDisplayKeys',
 ]);
 
 /**
@@ -83,3 +85,14 @@ export const TEXT_BEARING_NODE_TYPES: ReadonlySet<string> = new Set([
   'office',
   'question',
 ]);
+
+/** `data` with `patch` laid over it; a key patched to `undefined` is removed. */
+export function withContentPatch(
+  data: Record<string, unknown> | undefined,
+  patch: Readonly<Record<string, unknown>>,
+): Record<string, unknown> {
+  const next: Record<string, unknown> = { ...data, ...patch };
+  for (const [key, value] of Object.entries(patch))
+    if (value === undefined) delete next[key];
+  return next;
+}

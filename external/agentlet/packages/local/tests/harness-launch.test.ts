@@ -40,6 +40,21 @@ describe('typed ACP harness launch', () => {
     })).toThrow('Invalid legacy')
   })
 
+  it.each([undefined, { autoApprove: false }])('compiles Pi without inferred approval or model flags: %j', (options) => {
+    expect(compileHarnessLaunch({ kind: 'acp-harness', harnessId: 'pi', options })).toEqual({
+      kind: 'shell', command: 'pi-acp',
+    })
+  })
+
+  it.each([
+    { options: { autoApprove: true } },
+    { options: { command: 'other' } },
+    { options: { model: 'other' } },
+    { command: 'other' },
+  ])('rejects unsupported Pi launch overrides: %j', (override) => {
+    expect(() => compileHarnessLaunch({ kind: 'acp-harness', harnessId: 'pi', ...override })).toThrow()
+  })
+
   it.each([
     { kind: 'acp-harness', harnessId: '../copilot' },
     { kind: 'native-print', harnessId: 'copilot' },

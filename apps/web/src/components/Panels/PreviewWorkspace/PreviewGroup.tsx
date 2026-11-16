@@ -58,6 +58,7 @@ type PreviewGroupProps = {
   onSplit: () => void;
   onCloseEmptyGroup: () => void;
   onNewChat: () => void;
+  onNewAgent?: () => void;
   tabDropIndicator: TabDropIndicator | null;
   isFullscreen: boolean;
   onToggleFullscreen?: () => void;
@@ -82,6 +83,7 @@ export function PreviewGroup({
   onSplit,
   onCloseEmptyGroup,
   onNewChat,
+  onNewAgent,
   tabDropIndicator,
   isFullscreen,
   onToggleFullscreen,
@@ -202,6 +204,7 @@ export function PreviewGroup({
             : undefined
         }
         onNewChat={onNewChat}
+        onNewAgent={onNewAgent}
         tabDropIndicator={tabDropIndicator}
         isFullscreen={isFullscreen}
         onToggleFullscreen={onToggleFullscreen}

@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+import { mergeNodeProperties } from '@huabu/shared/canvas-engine';
+
 import { isLabelProtected } from '../preprocessing/label-policy.js';
 
 import type { NodeContent } from './persistence-types.js';
@@ -52,5 +54,13 @@ export function resolveNodeContentUpdate(
   if (input.summary !== undefined) result['summary'] = input.summary;
   if (input.keywords !== undefined) result['keywords'] = input.keywords;
   if (input.provenance !== undefined) result['provenance'] = input.provenance;
+  // Keywise: null deletes one key and keys the patch omits are kept.
+  if (input.properties !== undefined)
+    result.properties = mergeNodeProperties(
+      existing?.properties,
+      input.properties,
+    );
+  if (input.propertyDisplayKeys !== undefined)
+    result.propertyDisplayKeys = input.propertyDisplayKeys;
   return result;
 }

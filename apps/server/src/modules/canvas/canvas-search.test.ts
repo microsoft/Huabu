@@ -12,6 +12,8 @@
  * off disk, but the scanner takes a callback so the two are wire-compatible.
  */
 
+import { createHash } from 'node:crypto';
+
 import { describe, expect, it, vi } from 'vitest';
 
 import {
@@ -140,6 +142,76 @@ async function collect(
 }
 
 describe('searchCanvas — tiered emission', () => {
+  it('searches PDF notes separately from extracted text with independent source addresses', async () => {
+    const noteContent = '# Reading\n\nNeedle notes, another needle.';
+    const events = await collect(
+      [mkNode('pdf', 'pdf'), mkNode('notes', 'note')],
+      [
+        mkContent('pdf', 'pdf', {
+          content: 'Extracted needle',
+        }),
+        mkContent('notes', 'note', { content: noteContent }),
+      ],
+      { query: 'needle' },
+    );
+    const matches = events.flatMap((event) =>
+      event.type === 'match' ? [event.match] : [],
+    );
+    expect(
+      matches.map(({ field, occurrenceIndex }) => [field, occurrenceIndex]),
+    ).toEqual([
+      ['content', 0],
+      ['content', 0],
+      ['content', 1],
+    ]);
+    expect(matches[1]).toMatchObject({
+      nodeId: 'notes',
+      nodeType: 'note',
+      source: {
+        hash: createHash('sha256').update(noteContent).digest('hex'),
+        offset: noteContent.indexOf('Needle'),
+        length: 6,
+      },
+    });
+  });
+
+  it.each([[['content'], ['content', 'content', 'content']]] as const)(
+    'respects PDF content field selection: %s',
+    async (fields, expected) => {
+      const events = await collect(
+        [mkNode('pdf', 'pdf'), mkNode('note', 'note'), mkNode('empty', 'pdf')],
+        [
+          mkContent('pdf', 'pdf', {
+            content: 'needle',
+          }),
+          mkContent('note', 'note', { content: 'needle needle' }),
+          mkContent('empty', 'pdf', { content: '' }),
+        ],
+        { query: 'needle', fields: [...fields] },
+      );
+      expect(
+        events.flatMap((event) =>
+          event.type === 'match' ? [event.match.field] : [],
+        ),
+      ).toEqual(expected);
+    },
+  );
+
+  it('applies the shared match limit across PDF text and notes', async () => {
+    const events = await collect(
+      [mkNode('pdf', 'pdf'), mkNode('notes', 'note')],
+      [
+        mkContent('pdf', 'pdf', {
+          content: 'needle',
+        }),
+        mkContent('notes', 'note', { content: 'needle needle' }),
+      ],
+      { query: 'needle', limit: 2 },
+    );
+    expect(events.filter((event) => event.type === 'match')).toHaveLength(2);
+    expect(events.at(-1)).toEqual({ type: 'done', total: 2, truncated: true });
+  });
+
   it.each([
     ['needle', 2, 6],
     ['i\u0307', 0, 1],

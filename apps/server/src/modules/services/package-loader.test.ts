@@ -16,6 +16,7 @@ describe('bundled Service packages', () => {
       'web-search',
       'youtube-transcripts',
       'ink-ocr',
+      'hackmd',
     ]);
     expect(packages.get('image-gen')?.manifest.storage.namespace).toBe(
       'llm.imageConfig',

@@ -86,7 +86,7 @@ export const canvasSearchRequestSchema = z.object({
    */
   nodeId: z.string().min(1).optional(),
   /**
-   * Which fields to scan. Defaults to all four. Omitting `content` keeps
+   * Which fields to scan. Defaults to all fields. Requesting only metadata keeps
    * the request entirely in the metadata tier (label/summary/keywords)
    * which the server can satisfy without reading any markdown body —
    * useful for "fast lookahead" suggestions.

@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+import { replayChangedData } from './delta.js';
+
 /** These values are observations, never ordinary Canvas edit operands. */
 export const AGENT_NODE_OWNED_DATA_KEYS = [
   'bindingState',
@@ -51,21 +53,10 @@ export function replayAgentNodeEditableData(
   before: Record<string, unknown>,
   after: Record<string, unknown>,
 ): Record<string, unknown> {
-  const result = { ...current };
-  const protectedKeys: ReadonlySet<string> = new Set(
-    AGENT_NODE_OWNED_DATA_KEYS,
+  return preserveAgentNodeOwnedData(
+    replayChangedData(current, before, after),
+    current,
   );
-  for (const key of new Set([...Object.keys(before), ...Object.keys(after)])) {
-    if (
-      protectedKeys.has(key) ||
-      JSON.stringify(before[key]) === JSON.stringify(after[key])
-    )
-      continue;
-    if (Object.prototype.hasOwnProperty.call(after, key))
-      result[key] = after[key];
-    else delete result[key];
-  }
-  return result;
 }
 
 function bindingIdentity(value: unknown): unknown {

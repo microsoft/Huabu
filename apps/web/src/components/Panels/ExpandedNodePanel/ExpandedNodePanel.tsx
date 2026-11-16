@@ -2,10 +2,31 @@
 // Licensed under the MIT license.
 
 import clsx from 'clsx';
-import { ArrowLeft, ArrowRight, TableOfContents, X } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  ArrowLeft,
+  ArrowRight,
+  ChevronDown,
+  ChevronRight,
+  TableOfContents,
+  X,
+} from 'lucide-react';
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { isNodeProperties } from '@huabu/shared/canvas-engine';
+
+import { Button } from '@/components/Common/Button';
+import { PDFNotesButton } from '@/components/Nodes/pdf/PDFNotesButton';
+import { NodeProperties } from '@/components/Nodes/properties/NodeProperties';
+import { propertyTagOptions } from '@/components/Nodes/properties/propertyTagOptions';
 import { getNodeIcon } from '@/config/nodeIcons.ts';
 import { formatShortcutById, matchesShortcut } from '@/config/shortcuts.ts';
 import {
@@ -13,7 +34,10 @@ import {
   showEditLockedHint,
   useEditLockHolder,
 } from '@/store/canvasPresence/editLock';
-import { selectCanWriteCanvas } from '@/store/canvasStore';
+import {
+  selectCanWriteCanvas,
+  commitNodeProperties,
+} from '@/store/canvasStore';
 
 import { InPreviewSearchBar } from './InPreviewSearchBar.tsx';
 import {
@@ -231,6 +255,14 @@ export const ExpandedNodePanel = ({
       editLockHolder.label.trim() ||
       t('canvasPresence.anotherDevice')
     : null;
+  // An explicit choice for one node; other nodes follow the default below.
+  const [propertiesChoice, setPropertiesChoice] = useState<{
+    nodeId: string;
+    open: boolean;
+  } | null>(null);
+  const propertiesRegionId = useId();
+  const propertiesRegionRef = useRef<HTMLDivElement>(null);
+  const revealProperties = useRef(false);
   const updateNodeData = useCanvasStore((s) => s.updateNodeData);
   // Routed through `tryRename` so a sibling-label collision triggers the
   // shared alert + revert flow (same path used by the layer tree and
@@ -241,6 +273,33 @@ export const ExpandedNodePanel = ({
     if (!expandedNodeId) return null;
     return nodes.find((n) => n.id === expandedNodeId) ?? null;
   }, [expandedNodeId, nodes]);
+  // Properties start open when the node has some as it is opened. The answer
+  // is latched per node: properties written later (an agent filling in a
+  // paper being read) must not pop the list open and push the pages down.
+  const hasProperties =
+    isNodeProperties(node?.data.properties) &&
+    Object.keys(node.data.properties).length > 0;
+  const propertiesKey = node ? `${canvasId}:${node.id}` : null;
+  const [propertiesDefault, setPropertiesDefault] = useState<{
+    key: string;
+    open: boolean;
+  } | null>(null);
+  if (propertiesKey && propertiesDefault?.key !== propertiesKey)
+    setPropertiesDefault({ key: propertiesKey, open: hasProperties });
+  const propertiesOpen =
+    propertiesChoice?.nodeId === expandedNodeId
+      ? propertiesChoice.open
+      : propertiesDefault?.key === propertiesKey
+        ? propertiesDefault.open
+        : hasProperties;
+  useLayoutEffect(() => {
+    // Only an explicit expand scrolls; a default-open PDF keeps its position.
+    if (!revealProperties.current) return;
+    revealProperties.current = false;
+    if (propertiesOpen && node?.type === 'pdf') {
+      propertiesRegionRef.current?.scrollIntoView({ block: 'start' });
+    }
+  }, [propertiesOpen, node?.type]);
   const incomingNeighbors = useMemo(
     () =>
       expandedNodeId
@@ -535,6 +594,41 @@ export const ExpandedNodePanel = ({
   // `useGlobalSearchHotkey`) requires a non-empty value to open the
   // in-preview find bar.
   const previewNodeId = expandedNodeId ?? '';
+  const supportsProperties = node?.type === 'pdf' || node?.type === 'note';
+  const properties = isNodeProperties(node?.data.properties)
+    ? node.data.properties
+    : undefined;
+  const propertyDisplayKeys = Array.isArray(node?.data.propertyDisplayKeys)
+    ? node.data.propertyDisplayKeys.filter(
+        (key): key is string => typeof key === 'string',
+      )
+    : [];
+  const propertiesPanel =
+    supportsProperties && expandedNodeId ? (
+      <div
+        id={propertiesRegionId}
+        ref={propertiesRegionRef}
+        hidden={!propertiesOpen}
+        className={
+          activeItem.type === 'pdf'
+            ? undefined
+            : 'max-h-[40%] shrink-0 overflow-y-auto'
+        }
+      >
+        <NodeProperties
+          key={`${canvasId}:${expandedNodeId}`}
+          properties={properties}
+          displayKeys={propertyDisplayKeys}
+          readOnly={!canWrite}
+          tagOptions={(name) =>
+            propertyTagOptions(useCanvasStore.getState().nodes, name)
+          }
+          onSave={async (patch) => {
+            if (await commitNodeProperties(expandedNodeId, patch)) onCommit?.();
+          }}
+        />
+      </div>
+    ) : null;
 
   return (
     <div
@@ -552,6 +646,7 @@ export const ExpandedNodePanel = ({
           embedded ? 'h-9 gap-2' : 'border-edge-default h-12 gap-3 border-b',
           embedded &&
             hideDuplicateTitle &&
+            !supportsProperties &&
             connectedNodeGroups.length === 0 &&
             '[&:not(:has([data-preview-header-actions]:not(:empty),[data-preview-header-leading-actions]:not(:empty)))]:hidden',
         )}
@@ -586,6 +681,42 @@ export const ExpandedNodePanel = ({
             data-preview-header-leading-actions
             className="flex shrink-0 items-center gap-1 empty:hidden"
           />
+          {activeItem.type === 'pdf' && expandedNodeId && (
+            <PDFNotesButton
+              key={expandedNodeId}
+              id={expandedNodeId}
+              noteNodeId={
+                typeof node?.data.noteNodeId === 'string'
+                  ? node.data.noteNodeId
+                  : undefined
+              }
+            />
+          )}
+          {supportsProperties && (
+            <Button
+              variant="ghost"
+              size="sm"
+              iconOnly
+              className="shrink-0 px-1.5"
+              title={t(
+                propertiesOpen
+                  ? 'node.collapseProperties'
+                  : 'node.expandProperties',
+              )}
+              aria-expanded={propertiesOpen}
+              aria-controls={propertiesRegionId}
+              onClick={() => {
+                if (!expandedNodeId) return;
+                revealProperties.current = !propertiesOpen;
+                setPropertiesChoice({
+                  nodeId: expandedNodeId,
+                  open: !propertiesOpen,
+                });
+              }}
+            >
+              {propertiesOpen ? <ChevronDown /> : <ChevronRight />}
+            </Button>
+          )}
           {(!hideDuplicateTitle || isEditingTitle) && (
             <div className="flex min-w-0 flex-1 items-center gap-2">
               <InlineEditableTitle
@@ -655,6 +786,8 @@ export const ExpandedNodePanel = ({
         </div>
       </div>
 
+      {activeItem.type !== 'pdf' ? propertiesPanel : null}
+
       {/* Content. `relative` anchors the floating in-preview find
           bar (Cmd+F) to the top-right of this body — keeps the
           preview document underneath fully visible instead of
@@ -682,20 +815,21 @@ export const ExpandedNodePanel = ({
             : undefined
         }
       >
-        <PreviewSearchAdapterProvider key={expandedNodeId}>
+        <PreviewSearchAdapterProvider key={previewNodeId}>
           {/* In-preview find bar — renders nothing unless search scope
               is `'node'`. Wires the highlight walk to the body element
               (via state-as-ref) so only the visible preview gets
               `::highlight()` ranges. */}
           <InPreviewSearchBar
             scopeEl={previewBodyEl}
-            nodeId={expandedNodeId}
+            nodeId={hasFocusPriority ? previewNodeId : null}
             requiresAdapter={activeItem.type === 'pdf'}
           />
           <PreviewHeaderSlotContext.Provider value={headerSlotValue}>
             <NodePreviewContent
               key={expandedNodeId}
               id={expandedNodeId ?? undefined}
+              searchNodeId={previewNodeId}
               scrollViewKey={
                 canvasId && expandedNodeId
                   ? nodePreviewViewKey(canvasId, expandedNodeId)
@@ -703,6 +837,9 @@ export const ExpandedNodePanel = ({
               }
               type={activeItem.type}
               data={activeItem.data}
+              scrollHeader={
+                activeItem.type === 'pdf' ? propertiesPanel : undefined
+              }
               readOnly={!canWrite || editLockHolder !== null}
               focusRequestNonce={nodeFocusRequestNonce}
               onFocusRequestHandled={onNodeFocusRequestHandled}

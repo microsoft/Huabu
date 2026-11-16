@@ -195,17 +195,18 @@ function scanNodeMeta(
   }
 }
 
-/** Emit all content-body matches for one node. */
+/** Emit matches from one independently addressed content field. */
 function scanNodeContent(
   node: SearchableNode,
   content: NodeContent | undefined,
+  field: 'content',
   needleLower: string,
   needleLen: number,
   tryEmit: (match: CanvasSearchMatch) => boolean,
 ): void {
-  const body = content?.content;
+  const body = content?.[field];
   if (typeof body === 'string' && body.length > 0) {
-    emitFieldHits('content', body, needleLower, needleLen, {
+    emitFieldHits(field, body, needleLower, needleLen, {
       nodeId: node.id,
       nodeType: node.type,
       label: content?.label ?? null,
@@ -752,9 +753,11 @@ export async function searchCanvas(
         break;
       }
       const content = contentByNodeId.get(node.id);
-      scanNodeContent(node, content, needleLower, needleLen, (m) =>
-        tryEmitMatch('content', m),
-      );
+      if (fields.has('content')) {
+        scanNodeContent(node, content, 'content', needleLower, needleLen, (m) =>
+          tryEmitMatch('content', m),
+        );
+      }
       scanned += 1;
       if (scanned % 25 === 0 && scanned < total) {
         emit({ type: 'progress', phase: 'content', scanned, total });

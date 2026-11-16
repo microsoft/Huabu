@@ -11,9 +11,28 @@
 
 import { z } from 'zod';
 
-import type { CanvasContentPosition } from './canvas-sync.js';
+import { canvasContentPositionSchema } from './canvas-sync.js';
+
 import type { videoCoverPatchSchema } from './preprocessing.js';
 import type { SetSiblingOrderEvent } from '../../canvas-engine/siblingOrder.js';
+
+export const nodePropertyValueSchema = z.union([
+  z.string(),
+  z.number().finite(),
+  z.boolean(),
+  z.array(z.string()),
+]);
+export const nodePropertiesSchema = z.record(
+  z.string(),
+  nodePropertyValueSchema,
+);
+export const nodePropertiesPatchSchema = z.record(
+  z.string(),
+  nodePropertyValueSchema.nullable(),
+);
+export type NodePropertyValue = z.infer<typeof nodePropertyValueSchema>;
+export type NodeProperties = z.infer<typeof nodePropertiesSchema>;
+export type NodePropertiesPatch = z.infer<typeof nodePropertiesPatchSchema>;
 
 export const recentCanvasConversationParamsSchema = z.object({
   canvasId: z.string().regex(/^[a-zA-Z0-9_-]+$/, 'Invalid canvas ID'),
@@ -43,27 +62,30 @@ export const canvasAccessSchema = z.object({
 });
 export type CanvasAccess = z.infer<typeof canvasAccessSchema>;
 
-export interface GetCanvasResponse {
-  canvasId: string;
-  title: string | null;
-  version: number;
-  state: unknown;
+export const getCanvasResponseSchema = z.object({
+  canvasId: z.string(),
+  title: z.string().nullable(),
+  version: z.number(),
+  state: z.unknown(),
   /** Co-delivered with the loaded content; refreshed independently without discarding edits. */
-  access: CanvasAccess;
+  access: canvasAccessSchema,
+  /** Canonical content revisions, including bodies omitted or normalized for rendering. */
+  nodeContentRevisions: z.record(z.string(), z.string()).optional(),
   /**
    * The content position `state`'s node content is valid from: every
    * content save up to it is in this response, and the page asks for the
    * saves after it once its stream is open
    * (`GET /api/canvas/:canvasId/content/changes`).
    */
-  contentPosition?: CanvasContentPosition;
+  contentPosition: canvasContentPositionSchema.optional(),
   /**
    * The read version of the Space, taken before `state` was read. A page
    * quotes it — with the version it has applied since — for the edits it
    * sends (`runs` of `POST /api/canvas/:canvasId/execute`).
    */
-  basis?: string;
-}
+  basis: z.string().optional(),
+});
+export type GetCanvasResponse = z.infer<typeof getCanvasResponseSchema>;
 
 export const deleteNodeParamsSchema =
   recentCanvasConversationParamsSchema.extend({
@@ -110,6 +132,9 @@ export const putNodeContentBodySchema = z.object({
   keywords: z.array(z.string()).optional(),
   /** Opaque pass-through frontmatter blob (e.g. AI provenance markers). */
   provenance: z.unknown().optional(),
+  /** Keywise patch; null deletes one key and omitted keys are preserved. */
+  properties: nodePropertiesPatchSchema.optional(),
+  propertyDisplayKeys: z.array(z.string()).optional(),
   /**
    * Optimistic-concurrency baseline: the {@link nodeRevision} the client's
    * edit descends from (a deterministic djb2 over the node's authored
@@ -184,6 +209,8 @@ export interface GetNodeContentResponse extends z.infer<
   keywords?: string[];
   /** Opaque frontmatter blob (block-level AI-edit markers), when stored. */
   provenance?: unknown;
+  properties?: NodeProperties;
+  propertyDisplayKeys?: string[];
   contentMissing?: boolean;
   artifactMissing?: boolean;
   /** Mirror of {@link BaseNodeData.contentDuplicate} for single-node refresh. */

@@ -26,10 +26,15 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { nodeRevisionOf } from '@huabu/shared/canvas-engine';
+import { builtInAgentCanvasCommandsParamsSchema } from '@huabu/shared';
+import {
+  nodeRevisionOf,
+  extractCanvasChanges,
+} from '@huabu/shared/canvas-engine';
 
 import { applyDeltasOnServer, executeOnServer } from './canvas-executor.js';
 import { setAgentChangeReviewConfig } from '../agent/change-review-config.js';
+import { handleCanvasCommands } from '../agent/tools/handlers/canvas-write.js';
 import {
   space,
   getCanvasStore,
@@ -39,7 +44,11 @@ import {
 } from '../storage/index.js';
 import { setWorkspacePath } from '../workspace.js';
 
-import type { CanvasCommand, ExecuteOriginator } from '@huabu/shared';
+import type {
+  CanvasCommand,
+  CanvasNodeId,
+  ExecuteOriginator,
+} from '@huabu/shared';
 
 let tmp: string;
 const originalDataDir = process.env.HUABU_DATA_DIR;
@@ -93,6 +102,47 @@ function currentRev(canvasId: string, id: string): string {
 function bodyOf(canvasId: string, id: string): string | undefined {
   return getCanvasStore(canvasId).readNode(id)?.content ?? undefined;
 }
+
+describe('agent property mutations', () => {
+  it('requires a current read and preserves unrelated authored fields across agent patches', async () => {
+    seedNote('properties', 'pdf', 'Extracted body', 'pdf');
+    const nodes = space('properties').nodes;
+    await updateNode(nodes, 'pdf', {
+      apply: (record) => ({
+        ...record!,
+        properties: { year: 2026, reviewed: false },
+      }),
+    });
+    const original = (await nodes.read('pdf'))!.record;
+    const apply = (expectRev?: string) =>
+      executeOnServer({
+        canvasId: 'properties',
+        originator: { source: 'agent', threadId: 'property-thread' },
+        commands: [
+          {
+            type: 'MERGE_NODE_DATA',
+            patches: [
+              {
+                nodeId: 'pdf' as never,
+                patch: { properties: { year: null, authors: ['Ada'] } },
+                expectRev,
+              },
+            ],
+          },
+        ],
+      });
+    expect((await apply()).conflicts).toHaveLength(1);
+    const revision = nodeRevisionOf(original);
+    expect((await apply(revision)).conflicts ?? []).toHaveLength(0);
+    const record = (await nodes.read('pdf'))!.record;
+    expect(record).toMatchObject({
+      properties: { reviewed: false, authors: ['Ada'] },
+      content: 'Extracted body',
+    });
+    expect(record.properties).not.toHaveProperty('year');
+    expect((await apply(revision)).conflicts).toHaveLength(1);
+  });
+});
 
 describe('atomic automatic label commits', () => {
   it('protects a queued user rename from automatic preprocessing under the Canvas mutex', async () => {
@@ -707,6 +757,179 @@ describe('executeOnServer — batch node writes use one ordered backend call', (
 });
 
 describe('executor tombstone resurrection', () => {
+  it.each(['initialize', 'delete'] as const)(
+    'preserves later PDF data when reverting Note %s',
+    async (operation) => {
+      seedNote('c1', 'node-pdf', 'Original extraction', 'pdf');
+      const initialized = await executeOnServer({
+        canvasId: 'c1',
+        commands: [{ type: 'INITIALIZE_PDF_NOTE', nodeId: 'node-pdf' }],
+        originator: UI,
+      });
+      const noteId = initialized.results[0].nodes?.[0].nodeId;
+      if (!noteId) throw new Error('Missing initialized Note');
+      const changed =
+        operation === 'initialize'
+          ? initialized
+          : await executeOnServer({
+              canvasId: 'c1',
+              commands: [
+                { type: 'DELETE_NODES', nodeIds: [noteId as CanvasNodeId] },
+              ],
+              originator: UI,
+            });
+      const [change] = extractCanvasChanges(changed.deltas);
+      await updateNode(space('c1').nodes, 'node-pdf', {
+        apply: (record) => {
+          if (!record) throw new Error('Missing PDF');
+          return {
+            ...record,
+            content: 'New extraction',
+            label: 'Renamed paper',
+            properties: { Status: 'Read' },
+            propertyDisplayKeys: ['Status'],
+          };
+        },
+      });
+      await applyDeltasOnServer({
+        canvasId: 'c1',
+        originator: UI,
+        deltas: change.revertDeltas,
+        change,
+      });
+      const store = getCanvasStore('c1');
+      expect(store.readNode('node-pdf')).toMatchObject({
+        content: 'New extraction',
+        label: 'Renamed paper',
+        properties: { Status: 'Read' },
+        propertyDisplayKeys: ['Status'],
+      });
+      expect(store.read()?.state.nodes).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: 'node-pdf',
+            data:
+              operation === 'delete'
+                ? expect.objectContaining({ noteNodeId: noteId })
+                : expect.not.objectContaining({ noteNodeId: noteId }),
+          }),
+        ]),
+      );
+      expect(store.readNode(noteId) !== null).toBe(operation === 'delete');
+    },
+  );
+
+  it('initializes through the built-in public schema and rolls back a failed pair commit', async () => {
+    seedNote('c1', 'node-pdf', 'PDF source text', 'pdf');
+    const store = getCanvasStore('c1');
+    const before = store.read();
+    const beforeIds = [...(await space('c1').nodes.list()).keys()].sort();
+    const args = builtInAgentCanvasCommandsParamsSchema.parse({
+      commands: [{ type: 'INITIALIZE_PDF_NOTE', nodeId: 'node-pdf' }],
+    });
+    const originalAppend = store.appendDeltaLogEntry;
+    store.appendDeltaLogEntry = (entry) => {
+      originalAppend.call(store, entry);
+      throw new Error('injected initialization failure');
+    };
+    try {
+      await expect(
+        handleCanvasCommands({ canvasId: 'c1', ...args }),
+      ).rejects.toThrow('injected initialization failure');
+    } finally {
+      store.appendDeltaLogEntry = originalAppend;
+    }
+    expect(store.read()).toEqual(before);
+    expect([...(await space('c1').nodes.list()).keys()].sort()).toEqual(
+      beforeIds,
+    );
+    const initialized = JSON.parse(
+      await handleCanvasCommands({ canvasId: 'c1', ...args }),
+    );
+    expect(initialized.results[0].applied).toBe(true);
+    const noteId = initialized.results[0].nodes[0].nodeId;
+    expect(store.readNode(noteId)?.content).toBe('');
+    const repeated = JSON.parse(
+      await handleCanvasCommands({ canvasId: 'c1', ...args }),
+    );
+    expect(repeated.results[0]).toMatchObject({
+      applied: false,
+      reason: 'no-op',
+      nodes: [{ nodeId: noteId }],
+    });
+    expect(repeated.toVersion).toBe(repeated.fromVersion);
+    expect(store.readNode('node-pdf')?.content).toBe('PDF source text');
+  });
+
+  it('restores an owned pair atomically and rejects partial or stale reverts', async () => {
+    seedNote('c1', 'seed', '');
+    await executeOnServer({
+      canvasId: 'c1',
+      commands: [
+        {
+          type: 'CREATE_NODES',
+          nodes: [
+            {
+              id: 'node-pdf',
+              nodeType: 'pdf',
+              position: { x: 0, y: 0 },
+              data: { noteNodeId: 'node-notes' },
+            },
+            {
+              id: 'node-notes',
+              nodeType: 'note',
+              position: { x: 0, y: 0 },
+              data: { content: 'Saved body' },
+            },
+          ],
+        },
+      ],
+      originator: UI,
+    });
+    const deleted = await executeOnServer({
+      canvasId: 'c1',
+      commands: [{ type: 'DELETE_NODES', nodeIds: ['node-pdf'] }],
+      originator: UI,
+    });
+    const [change] = extractCanvasChanges(deleted.deltas);
+    const store = getCanvasStore('c1');
+    const deletedVersion = store.read()?.version;
+    await expect(
+      applyDeltasOnServer({
+        canvasId: 'c1',
+        originator: UI,
+        deltas: [change.revertDeltas[0]],
+      }),
+    ).rejects.toThrow('Invalid PDF note ownership');
+    expect(store.read()?.version).toBe(deletedVersion);
+    await applyDeltasOnServer({
+      canvasId: 'c1',
+      originator: UI,
+      deltas: change.revertDeltas,
+      change,
+    });
+    expect(store.read()?.state.nodes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'node-pdf',
+          data: expect.objectContaining({ noteNodeId: 'node-notes' }),
+        }),
+        expect.objectContaining({ id: 'node-notes', hidden: true }),
+      ]),
+    );
+    expect(store.readNode('node-notes')?.content).toBe('Saved body');
+    const restoredVersion = store.read()?.version;
+    await expect(
+      applyDeltasOnServer({
+        canvasId: 'c1',
+        originator: UI,
+        deltas: change.revertDeltas,
+        change,
+      }),
+    ).rejects.toThrow('can no longer be reverted');
+    expect(store.read()?.version).toBe(restoredVersion);
+  });
+
   function restoredNode(content = 'restored') {
     return {
       id: 'n1',

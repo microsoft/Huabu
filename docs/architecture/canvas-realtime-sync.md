@@ -24,6 +24,8 @@ World preview reconciliation is a system-originated command batch against World 
 filter guarantees an incoming agent write never clobbers a node the user is
 mid-editing.
 
+Canvas loading co-delivers `nodeContentRevisions`, computed from the same canonical node records used for hydration. The browser seeds its content-save queue from those server revisions, not from the rendered node projection: PDF extracted bodies are omitted from Canvas responses, and Office bodies may be normalized. Hashing those incomplete or normalized projections would falsely reject the first property save. Successful writes advance the queue to the returned revision; genuine stale writes remain conflicts. These revisions use the structured node repository and are independent of Disk, SQLite, or Postgres serialization.
+
 > Request ids and read versions on `execute` are shipped; see [reliable save](./canvas-storage.md#42-reliable-save-in-the-write). The browser sends its own structure edits through `execute` too, so they reach every other open page; see [Browser structure edits](#browser-structure-edits). Node content (body, title and the other sidecar fields) is saved per node and reaches the other pages as described under [Node content between pages](#node-content-between-pages). Two pages typing in the same body at once is not supported; the remaining proposal is [canvas-realtime-sync-plan.md](../proposals/canvas-realtime-sync-plan.md), and multi-server fan-out is outside that scope. Which other pages have the Space open, and what they point at, select, drag or edit, is [Space presence](#space-presence).
 
 ## Data flow
@@ -311,6 +313,10 @@ generic operation — no per-command inverse logic:
   revert. Structural (create/delete/connect/…) records are existence-based.
 
 Records are persisted per thread in a mutable sidecar (`<threadId>.changes.json`, coalesced on read) and reach the frontend two ways: `load()` on thread open, and `replaceFromBroadcast()` (the broadcast carries the thread's full coalesced list, so the client replaces rather than appends). The global Settings → General preference **Automatically accept Agent Space changes** suppresses computation and persistence of new records for successful Agent batches when enabled; existing records remain available, and Canvas delta broadcast and current-session undo snapshots are unchanged.
+
+PDF ownership changes are an exception to one row per entity: the PDF change and its associated Note change share one row and all inverse deltas. Coalescing nets the constituent entities before regrouping them, preserving the pair through persistence and later edits. The shared freshness check examines every inverse delta, including the Note body for creation reverts. The revert endpoint repeats this check under the Canvas mutex and rejects stale rows with HTTP 409; server delta replay also rejects dangling links, replacement of existing Note links, and detachment of surviving owned Notes before writing.
+
+Reviewed PDF update inverses replay only the recorded `data` field changes onto the live canonical PDF data, using the same field-difference replay helper as Question editable-data inverses. Reverting Note initialization or restoring a deleted Note therefore preserves later PDF properties, display order, title, and extracted text that the original operation did not modify. Changes to fields touched by the reviewed operation still fail the shared freshness check.
 
 The [ChangeReviewCard](../../apps/web/src/components/Panels/ChatPanel/ChangeReviewCard.tsx)
 above the chat input renders the thread's records with per-item and bulk

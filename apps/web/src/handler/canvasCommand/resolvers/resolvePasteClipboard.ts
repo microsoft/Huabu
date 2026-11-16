@@ -13,6 +13,7 @@ import {
 } from '@huabu/shared';
 import {
   deduplicateLabel,
+  pdfNoteIds,
   generateNextLabel,
   resolveHeightMode,
   readLayoutOrder,
@@ -40,6 +41,7 @@ export default function resolvePasteClipboard(
     intent.clipboardEdges ?? [],
   );
   const clipboard = topology.nodes;
+  const ownedIds = pdfNoteIds(clipboard);
   if (clipboard.length === 0) {
     return { commands: [], trace: [] };
   }
@@ -53,7 +55,9 @@ export default function resolvePasteClipboard(
   // Compute the uniform offset for root nodes.
   // Anchor the chosen root node's top-left corner at flowPosition
   // (matches addNode placement semantics).
-  const rootNodes = clipboard.filter((node) => !node.parentId);
+  const rootNodes = clipboard.filter(
+    (node) => !node.parentId && !ownedIds.has(node.id),
+  );
   const anchorNode = rootNodes[0] ?? clipboard[0];
   const offsetX = intent.flowPosition
     ? intent.flowPosition.x - anchorNode.position.x
@@ -111,6 +115,11 @@ export default function resolvePasteClipboard(
       nodeType === 'frame' ? readLayoutOrder(node.data) : undefined;
     if (layoutOrder)
       clonedData.layoutOrder = remapLayoutOrder(layoutOrder, idMap);
+    if (typeof clonedData.noteNodeId === 'string') {
+      const mapped = idMap.get(clonedData.noteNodeId);
+      if (!mapped) throw new Error('The copied PDF is missing its owned Note');
+      clonedData.noteNodeId = mapped;
+    }
     if (nodeType === 'note') clonedData.heightMode = resolveHeightMode(node);
     clonedData.label = label;
     clonedData.origin = { type: 'user-pasted' };
@@ -185,11 +194,11 @@ export default function resolvePasteClipboard(
       data: clonedData,
       position,
       ...(size && { size }),
-      ...(parentId && { parentId }),
+      ...(parentId && !ownedIds.has(node.id) && { parentId }),
       // Paste / duplicate selects everything it created so the user can
       // immediately move it. `selectOnCreate: true` also opts question
       // nodes in, overriding their default no-auto-select policy.
-      selectOnCreate: true,
+      selectOnCreate: !ownedIds.has(node.id),
     });
     traceNodes.push({ id: nodeId, type: nodeType, label });
   }

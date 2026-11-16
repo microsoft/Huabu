@@ -131,6 +131,7 @@ function renderNoteReference(node: CanvasNode, record: NodeContent): string {
     label: recordLabel(record),
   });
   const rev = nodeRevisionOf({
+    ...record,
     content: record.content,
     ...(typeof record.src === 'string' ? { src: record.src } : {}),
   });
@@ -162,6 +163,7 @@ function renderPromptNote(
     label: recordLabel(record),
   });
   const rev = nodeRevisionOf({
+    ...record,
     content: record.content,
     ...(typeof record.src === 'string' ? { src: record.src } : {}),
   });

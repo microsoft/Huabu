@@ -218,6 +218,37 @@ describe('reliable canvas node bounds', () => {
     expect(setViewport).not.toHaveBeenCalled();
   });
 
+  it('caps a requested reveal zoom to the available fit without zooming out', () => {
+    const { instance, setViewport } = createInstance();
+    const wrapper = {
+      clientWidth: 100,
+      clientHeight: 100,
+      isConnected: true,
+    } as HTMLElement;
+    vi.spyOn(instance, 'getViewport').mockReturnValue({
+      x: 0,
+      y: 0,
+      zoom: 0.1,
+    });
+    revealNodesOnCanvas(instance, wrapper, ['first'], 400, 0.5);
+    vi.advanceTimersToNextFrame();
+    const focused = setViewport.mock.calls[0][0];
+    expect(focused.zoom).toBeGreaterThan(0.1);
+    expect(focused.zoom).toBeLessThan(0.5);
+    expect(1100 * focused.zoom + focused.x).toBeCloseTo(50);
+    expect(560 * focused.zoom + focused.y).toBeCloseTo(50);
+    expect(200 * focused.zoom).toBeLessThan(100);
+
+    vi.spyOn(instance, 'getViewport').mockReturnValue({
+      x: 0,
+      y: 0,
+      zoom: 0.49,
+    });
+    revealNodesOnCanvas(instance, wrapper, ['first'], 400, 0.5);
+    vi.advanceTimersToNextFrame();
+    expect(setViewport.mock.lastCall?.[0].zoom).toBe(0.49);
+  });
+
   it('reads panel insets after the pending layout has committed', () => {
     const { instance, setViewport } = createInstance();
     const wrapper = document.createElement('div');

@@ -192,7 +192,6 @@ function VirtualMessageList({
   const [localFind, setLocalFind] = useState(false);
   const materializeSearch =
     localFind || (search !== undefined && !search.source);
-  const [searchError, setSearchError] = useState(false);
   const scanned = useRef(new Set<string>());
   const heights = useRef(new Map<string, number>());
   const viewportSize = useRef<string | undefined>(undefined);
@@ -519,7 +518,14 @@ function VirtualMessageList({
     const explicit =
       openPositionRequestNonce !== undefined &&
       handledRequest.current !== openPositionRequestNonce;
-    const saved = anchor.current;
+    let saved = anchor.current;
+    if (saved && !ids.includes(saved.messageId)) {
+      const reconciled = readMessageListScrollBookmark(viewKey);
+      if (reconciled && ids.includes(reconciled.messageId)) {
+        anchor.current = reconciled;
+        saved = reconciled;
+      }
+    }
     if (explicit) {
       handledRequest.current = openPositionRequestNonce;
       jump(
@@ -530,7 +536,6 @@ function VirtualMessageList({
       onOpenPositionHandled?.(openPositionRequestNonce);
     } else if (!ready.current) {
       if (saved && !ids.includes(saved.messageId)) {
-        setSearchError(true);
         jump();
       } else {
         jump(saved?.messageId, saved?.offsetTop);
@@ -862,7 +867,6 @@ function VirtualMessageList({
     if (!scroller || !isActive) return;
     const reveal = (event: Event) => {
       event.preventDefault();
-      setSearchError(false);
       scanned.current.clear();
       setSearch({
         source: (event as CustomEvent<{ source?: CanvasSearchSource }>).detail
@@ -948,11 +952,11 @@ function VirtualMessageList({
         onLoadOlderHistory?.();
         return;
       }
-      if (search.source) setSearchError(true);
+      if (search.source) setSearch(undefined);
       else setSearch({ ...search, target: ids[0] });
     })().catch((error: unknown) => {
       console.warn('[MessageList] search navigation failed', error);
-      if (!cancelled) setSearchError(true);
+      if (!cancelled) setSearch(undefined);
     });
     return () => {
       cancelled = true;
@@ -1200,14 +1204,6 @@ function VirtualMessageList({
           </div>
         ) : null}
       </div>
-      {searchError ? (
-        <div
-          role="status"
-          className="bg-surface text-fg-muted absolute top-2 left-1/2 z-10 -translate-x-1/2 rounded-md px-3 py-1 text-xs"
-        >
-          {t('chat.readingPositionUnavailable')}
-        </div>
-      ) : null}
       {!isHistoryLoading && !isLoading && ids.length === 0 ? (
         <div
           className="text-fg-subtle pointer-events-none absolute inset-0 flex items-center justify-center px-6 text-center text-xs"

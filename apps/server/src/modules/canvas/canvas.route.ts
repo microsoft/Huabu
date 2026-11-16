@@ -32,6 +32,7 @@ import {
 import {
   readVersionRunsProblem,
   nodeRevisionOf,
+  hidePdfNotes,
 } from '@huabu/shared/canvas-engine';
 
 import {
@@ -45,11 +46,13 @@ import {
   ExecuteBasisError,
   ExecuteOutcomeUnknownError,
   ExecuteRequestReusedError,
+  CanvasChangeConflictError,
   applyDeltasOnServer,
   executeOnServer,
 } from './canvas-executor.js';
 import { searchCanvas } from './canvas-search.js';
 import { publishCanvasUpdate } from './canvas-sync.js';
+import { NodeCoverError } from './import-node-src.js';
 import { remapImportedSpace } from './import-space-identity.js';
 import { resolveNodeContentUpdate } from './node-content-update.js';
 import { registerSpaceCardRoutes } from './space-card.route.js';
@@ -450,6 +453,10 @@ function hydrateOneNode(
   if (persistedProvenance !== undefined) {
     data['provenance'] = persistedProvenance;
   }
+  for (const key of ['properties', 'propertyDisplayKeys']) {
+    if (nodeContent[key] !== undefined) data[key] = nodeContent[key];
+    else delete data[key];
+  }
 
   // Surface preprocessed AI summary / keywords from the per-node
   // markdown frontmatter so the client can render them without a
@@ -512,7 +519,10 @@ function hydrateOneNode(
 async function hydrateNodeContent(
   handle: Space,
   nodes: NodeLike[],
-): Promise<NodeLike[]> {
+): Promise<{
+  nodes: NodeLike[];
+  nodeContentRevisions: NonNullable<GetCanvasResponse['nodeContentRevisions']>;
+}> {
   // Read sidecars first because they are the source of truth for `src`.
   // Probe only the keys referenced by artifact-backed nodes; enumerating the
   // entire scope would make hydration cost grow with unrelated blob count.
@@ -536,15 +546,22 @@ async function hydrateNodeContent(
       : await handle.artifacts.hasMany([...referenced]);
   const artifactExists = (key: string): boolean => present.has(key);
 
-  return nodes.map((node) => {
+  const nodeContentRevisions: NonNullable<
+    GetCanvasResponse['nodeContentRevisions']
+  > = {};
+  const hydratedNodes = nodes.map((node) => {
     const nodeId = typeof node.id === 'string' ? node.id : '';
+    const record = contentByNodeId.get(nodeId);
+    // Hash the same record used for hydration, before omitting PDF text.
+    nodeContentRevisions[nodeId] = nodeRevisionOf(record ?? {});
     return hydrateOneNode(
       node,
       artifactExists,
-      contentByNodeId.get(nodeId) ?? null,
+      record ?? null,
       handle.diskTree?.duplicateSidecars(nodeId) ?? [],
     );
   });
+  return { nodes: hidePdfNotes(hydratedNodes), nodeContentRevisions };
 }
 
 /**
@@ -812,6 +829,8 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       content: incomingContent,
       labelSource,
       src: incomingSrc,
+      properties,
+      propertyDisplayKeys,
       expectRev,
     } = parsed.data;
     const storedNode = (canvas.state.nodes as NodeLike[] | undefined)?.find(
@@ -863,13 +882,18 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     // safety and only risk a false `NODE_CONTENT_CONFLICT` (e.g. a brand-new
     // image whose `expectRev` races its own `persist_source` write). The web
     // sends `expectRev` uniformly and need not know the classification; the
-    // server drops it for non-authored types.
+    // server drops it for non-authored types unless authored metadata is edited.
     const isAuthored =
       getProfile(nodeType as CanvasNodeType)?.bodyOwnership === 'authored';
     let outcome: UpdateNodeOutcome;
     try {
       outcome = await updateNode(handle.nodes, nodeId, {
-        expectRev: isAuthored ? expectRev : undefined,
+        expectRev:
+          isAuthored ||
+          properties !== undefined ||
+          propertyDisplayKeys !== undefined
+            ? expectRev
+            : undefined,
         apply,
         strictRename: labelSource === 'user',
       });
@@ -1052,11 +1076,10 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       content: resolvedContent,
       // Baseline revision co-delivered with the content, so a single-node
       // refresh re-seeds the client's CAS baseline atomically.
-      rev: nodeRevisionOf({
-        content: resolvedContent,
-        ...(typeof existing.src === 'string' ? { src: existing.src } : {}),
-      }),
+      rev: nodeRevisionOf(existing),
     };
+    response.properties = existing.properties;
+    response.propertyDisplayKeys = existing.propertyDisplayKeys;
     const ls = existing['labelSource'];
     if (ls === 'user' || ls === 'auto' || ls === 'agent') {
       response.labelSource = ls;
@@ -1237,7 +1260,12 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     Params: { canvasId: string };
     Reply: ApiResult<GetCanvasResponse>;
   }>('/:canvasId', async function (request, reply) {
-    const { canvasId } = request.params;
+    const parsed = recentCanvasConversationParamsSchema.safeParse(
+      request.params,
+    );
+    if (!parsed.success)
+      return reply.code(400).send({ message: 'Invalid canvas ID' });
+    const { canvasId } = parsed.data;
     if (isWorldCanvasId(canvasId)) {
       await reconcileWorldPreviews();
     }
@@ -1265,7 +1293,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     // Hydrate node content from the per-canvas store so clients always
     // receive fresh markdown bodies.
     const nodes = canvas.state.nodes as NodeLike[];
-    const hydratedNodes = await hydrateNodeContent(handle, nodes);
+    const hydrated = await hydrateNodeContent(handle, nodes);
 
     return reply.send({
       canvasId: canvas.canvasId,
@@ -1274,9 +1302,10 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       contentPosition,
       ...(basis ? { basis } : {}),
       access: await getSpaceAccess(request, canvasId),
+      nodeContentRevisions: hydrated.nodeContentRevisions,
       state: {
         ...canvas.state,
-        nodes: hydratedNodes,
+        nodes: hydrated.nodes,
       },
     });
   });
@@ -1550,7 +1579,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       if (err instanceof AgentNodeBindingError) {
         return reply.code(409).send({ code: err.code, message: err.message });
       }
-      if (err instanceof AgentNodeEditError) {
+      if (err instanceof AgentNodeEditError || err instanceof NodeCoverError) {
         return reply
           .code(400)
           .send({ code: 'INVALID_REQUEST', message: err.message });
@@ -1619,6 +1648,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         const out = await applyDeltasOnServer({
           canvasId,
           deltas: record.revertDeltas,
+          change: record,
           originator: { source: 'ui' },
         });
         if (out.toVersion > out.fromVersion) {
@@ -1639,7 +1669,10 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         if (err instanceof AgentNodeBindingError) {
           return reply.code(409).send({ code: err.code, message: err.message });
         }
-        if (err instanceof WorldPreviewMutationError) {
+        if (
+          err instanceof WorldPreviewMutationError ||
+          err instanceof CanvasChangeConflictError
+        ) {
           return reply.code(409).send({ message: err.message });
         }
         request.log.error(

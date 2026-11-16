@@ -226,6 +226,16 @@ export type CanvasCommand =
       type: 'CREATE_NODES';
       nodes: CanvasNodeCreateInput[];
     }
+  | {
+      type: 'INITIALIZE_PDF_NOTE';
+      nodeId: CanvasNodeId;
+      /**
+       * The id the new Note gets. A browser page states it so the Note it
+       * shows at once and the one the Server creates are the same node;
+       * `ui` only — an agent is told the id in the result.
+       */
+      noteId?: CanvasNodeId;
+    }
   | { type: 'DELETE_NODES'; nodeIds: CanvasNodeId[] }
   | { type: 'MERGE_NODE_DATA'; patches: CanvasNodeDataMergePatch[] }
   | {
@@ -433,6 +443,7 @@ export type AgentCanvasCommandType = AgentCanvasCommand['type'];
  */
 export const AGENT_CANVAS_COMMAND_TYPES = [
   'CREATE_NODES',
+  'INITIALIZE_PDF_NOTE',
   'DELETE_NODES',
   'MERGE_NODE_DATA',
   'SET_NODE_PARENT',

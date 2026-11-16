@@ -3,7 +3,7 @@
 
 import { create } from 'zustand';
 
-import { fingerprintNodeFields } from '@huabu/shared/canvas-engine';
+import { isChangeStale } from '@huabu/shared/canvas-engine';
 
 import {
   acceptThreadChange,
@@ -13,71 +13,7 @@ import {
 import useCanvasStore from '@/store/canvasStore';
 
 import type { CanvasChangeRecord } from '@huabu/shared/canvas-engine';
-import type { Node, Edge } from '@xyflow/react';
-
-/**
- * Pure revertability check for a single change against a canvas snapshot.
- *
- * Decided entirely by the change's inverse delta vs the CURRENT nodes /
- * edges — no "content vs system field" classification:
- *   • structural changes (create/delete/connect/disconnect/edge-update)
- *     are existence-based: the revert is meaningful only while its target
- *     is still in the state the agent left it.
- *   • an update compares ONLY the fields the agent actually changed
- *     (`fingerprintKeys`); fields the agent didn't touch can't conflict
- *     with reverting the agent's edit.
- *
- * Exported (not just the store method) so React components can call it
- * with reactively-subscribed `nodes` / `edges` and re-render when the
- * canvas changes — the store method reads a snapshot imperatively and
- * would not by itself trigger a re-render.
- */
-export function isChangeStale(
-  record: CanvasChangeRecord,
-  nodes: readonly Node[],
-  edges: readonly Edge[],
-): boolean {
-  const rd = record.revertDeltas[0];
-  if (!rd) return false;
-  const hasNode = (id: string) => nodes.some((n) => n.id === id);
-  const hasEdge = (id: string) => edges.some((e) => e.id === id);
-  switch (rd.type) {
-    // Revert of CREATE deletes the node → stale once it's gone, OR once
-    // its authored body (content / src) has been edited since (deleting
-    // it would then wipe the user's newer edit).
-    case 'DELETE_NODE': {
-      const cur = nodes.find((n) => n.id === rd.node.id);
-      if (!cur) return true;
-      const keys = record.fingerprintKeys ?? [];
-      if (keys.length === 0) return false;
-      return fingerprintNodeFields(cur, keys) !== record.appliedFingerprint;
-    }
-    // Revert of DELETE reinserts the node → only meaningful while absent.
-    case 'INSERT_NODE':
-      return hasNode(rd.node.id);
-    // Revert of an UPDATE restores the pre-agent node. `rd.prev` is the
-    // agent's applied state; stale iff the node is gone OR one of the
-    // fields this edit changed was modified again since.
-    case 'REPLACE_NODE': {
-      const cur = nodes.find((n) => n.id === rd.prev.id);
-      if (!cur) return true;
-      const keys = record.fingerprintKeys ?? [];
-      if (keys.length === 0) return false;
-      return fingerprintNodeFields(cur, keys) !== record.appliedFingerprint;
-    }
-    // Revert of CONNECT deletes the edge → only meaningful while it exists.
-    case 'DELETE_EDGE':
-      return !hasEdge(rd.edge.id);
-    // Revert of DISCONNECT reinserts the edge → only meaningful while absent.
-    case 'INSERT_EDGE':
-      return hasEdge(rd.edge.id);
-    // Revert of an edge-update restores the prior edge → needs it present.
-    case 'REPLACE_EDGE':
-      return !hasEdge(rd.prev.id);
-    default:
-      return false;
-  }
-}
+export { isChangeStale };
 
 /**
  * Per-conversation (ACP thread) change-review records — the "what the

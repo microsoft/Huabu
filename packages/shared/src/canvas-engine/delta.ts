@@ -49,6 +49,21 @@ export type Delta =
 
 /** Opt-in until hosts can consume atomic order batches rather than filtered rows. */
 export type OrderedDelta = Delta | SetSiblingOrderEvent;
+/** Replay recorded field changes without replacing later unrelated values. */
+export function replayChangedData(
+  current: Record<string, unknown>,
+  before: Record<string, unknown>,
+  after: Record<string, unknown>,
+): Record<string, unknown> {
+  const result = { ...current };
+  for (const key of new Set([...Object.keys(before), ...Object.keys(after)])) {
+    if (JSON.stringify(before[key]) === JSON.stringify(after[key])) continue;
+    if (Object.prototype.hasOwnProperty.call(after, key))
+      result[key] = after[key];
+    else delete result[key];
+  }
+  return result;
+}
 
 /**
  * Invert one row. Membership/order restoration requires the complete inverted

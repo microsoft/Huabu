@@ -3,6 +3,7 @@
 
 import { noop, type CommandDefinition } from './types.js';
 import { getHeightPolicy } from '../height/policy.js';
+import { pdfNoteIds } from '../pdfNotes.js';
 import { stripMarkdown } from '../utils/markdown.js';
 import { isAlwaysAutoHeightNodeType } from '../utils/nodeSizes.js';
 
@@ -48,6 +49,8 @@ const changeNodeType: CommandDefinition<Cmd> = {
   handler(cmd, state) {
     const target = state.nodes.find((n) => n.id === cmd.nodeId);
     if (!target) return noop(state, 'not-found');
+    if (pdfNoteIds(state.nodes).has(target.id))
+      return noop(state, 'invalid-target');
     if (target.type !== 'text' && target.type !== 'note') {
       return noop(state, 'invalid-target');
     }

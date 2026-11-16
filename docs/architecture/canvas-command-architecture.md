@@ -70,6 +70,8 @@ In a `grid` Frame, explicitly anchored creation selects the nearest existing col
 
 `UiIntentResolution.revealNodeIds` requests a reveal only for automatically placed additions. After execution, the store queues only IDs that were actually created, excluding rejected commands and pre-existing nodes. `useRevealCreatedNodes` consumes the latest request once Canvas is mounted and its initial viewport is ready; `revealNodesOnCanvas()` preserves zoom and pans only as much as needed to expose the bounds. These requests are transient and cleared on Space load/switch, not persisted or replayed through undo.
 
+A single selected, automatically placed Agent Node opts into a 30% minimum reveal zoom, as used by Preview's New Agent Node action. Below that zoom, the shared reveal helper centres and enlarges the target within the panel-adjusted viewport, capping zoom by the available fit; it never zooms out to meet this request. At or above 30%, ordinary minimal-pan behavior remains. Reduced motion disables the Agent reveal animation. Unselected Agent Nodes, other node types, explicit canvas placement, and agent/system creates retain their existing behavior.
+
 Fullscreen Preview unmounts Canvas. Saving there uses the stored viewport as a placement fallback, keeps the conversation fullscreen, and defers the reveal until the user returns to Canvas. If no viewport exists yet, placement falls back to `(0, 0)` and the same post-mount reveal makes the new node discoverable.
 
 Composite intent examples:
@@ -105,6 +107,7 @@ Same-parent move validation treats both a persisted `null` parent and an absent 
 `CanvasCommand` is the smallest shared executable domain instruction (not the smallest state diff). A command may own deterministic domain behavior inside execution:
 
 - `DELETE_NODES` automatically removes incident edges.
+- `INITIALIZE_PDF_NOTE` accepts a PDF `nodeId` and creates one empty, hidden, independently stored Note plus its ownership link in a single undoable operation. It reuses the ordinary Note creation handler and naming/defaults. Existing valid links are no-ops that preserve content; malformed links and missing/non-PDF targets fail without mutation. Server execution returns the created or reused Note in `results[].nodes[0]`, including on a no-op, so Agent callers never assign or coordinate Note IDs. The frontend notes action uses this same command. Persistence uses the executor's existing rollback-protected topology/sidecar commit and mutex.
 - `SET_NODE_PARENT` rejects invalid targets, non-Container parents, or cycles. Frames are the only persistent Container type; `spacePreview` nodes may be Frame children but cannot own children.
 - `CONNECT_NODES` rejects the command (`applied: false`, `reason: 'invalid-target'`) when any edge endpoint is not a live node — it never silently drops the edge.
 - `ALIGN_NODES` aligns provided nodes without relying on selection.

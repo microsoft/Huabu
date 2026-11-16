@@ -30,6 +30,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { listSkills } from '@/api/skills';
 
+import { createWorkspaceCache } from './workspaceCache';
+
 import type { AgentBinding, AvailableCommand, SkillScope } from '@huabu/shared';
 
 /**
@@ -41,10 +43,26 @@ import type { AgentBinding, AvailableCommand, SkillScope } from '@huabu/shared';
  */
 const STALE_TTL_MS = 10_000;
 
+interface CachedInternalSlashCommandsEntry {
+  commands: AvailableCommand[];
+  fetchedAt: number;
+}
+
+const useInternalSlashCommandsCache =
+  createWorkspaceCache<CachedInternalSlashCommandsEntry>();
+
+function internalSlashCacheKey(scope: SkillScope | undefined): string {
+  return scope ?? '__default__';
+}
+
+export function clearInternalSlashCommandsCache(): void {
+  useInternalSlashCommandsCache.getState().clear();
+}
+
 export interface UseInternalSlashCommandsResult {
   /** Currently-known slash commands. Empty until the first fetch resolves. */
   commands: AvailableCommand[];
-  /** True while a fetch is in flight. */
+  /** True while the initial catalogue is loading; warm refreshes stay silent. */
   loading: boolean;
   /** Last error from a fetch, or `null`. Errors degrade silently to an empty list. */
   error: Error | null;
@@ -85,7 +103,17 @@ export function useInternalSlashCommands({
   scope,
   enabled = true,
 }: UseInternalSlashCommandsOptions): UseInternalSlashCommandsResult {
-  const [commands, setCommands] = useState<AvailableCommand[]>([]);
+  const internalSlashCommandsCache = useInternalSlashCommandsCache();
+  const bindingKind = binding.kind;
+  const active = bindingKind === 'internal' && enabled;
+  const cacheKey = active ? internalSlashCacheKey(scope) : null;
+  const initialCached = cacheKey
+    ? internalSlashCommandsCache.get(cacheKey)
+    : undefined;
+
+  const [commands, setCommands] = useState<AvailableCommand[]>(
+    () => initialCached?.commands ?? [],
+  );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
 
@@ -94,16 +122,19 @@ export function useInternalSlashCommands({
   // their epoch is behind and skip state writes.
   const epochRef = useRef(0);
   const loadingRef = useRef(false);
-  const lastFetchedAtRef = useRef(0);
-
-  const bindingKind = binding.kind;
-  const active = bindingKind === 'internal' && enabled;
+  const lastFetchedAtRef = useRef(initialCached?.fetchedAt ?? 0);
+  const invalidatePending = useCallback(() => {
+    epochRef.current++;
+    loadingRef.current = false;
+  }, []);
 
   const refresh = useCallback(async () => {
     const myEpoch = ++epochRef.current;
-    const isCurrent = () => epochRef.current === myEpoch;
+    const isCurrent = () =>
+      epochRef.current === myEpoch &&
+      useInternalSlashCommandsCache.getState() === internalSlashCommandsCache;
 
-    if (!active) {
+    if (!active || !cacheKey) {
       // External binding (or master-disabled): mirror the ACP hook's
       // behaviour for symmetry — clear the list so a freshly-switched
       // external binding does not leave the previous user skills
@@ -114,7 +145,9 @@ export function useInternalSlashCommands({
       loadingRef.current = false;
       return;
     }
-    setLoading(true);
+    if (!internalSlashCommandsCache.has(cacheKey)) {
+      setLoading(true);
+    }
     loadingRef.current = true;
     try {
       const res = await listSkills(scope);
@@ -127,9 +160,14 @@ export function useInternalSlashCommands({
         name: s.id,
         description: s.description,
       }));
+      const fetchedAt = Date.now();
+      internalSlashCommandsCache.set(cacheKey, {
+        commands: mapped,
+        fetchedAt,
+      });
       setCommands(mapped);
       setError(null);
-      lastFetchedAtRef.current = Date.now();
+      lastFetchedAtRef.current = fetchedAt;
     } catch (err) {
       if (!isCurrent()) return;
       setError(err instanceof Error ? err : new Error(String(err)));
@@ -137,35 +175,61 @@ export function useInternalSlashCommands({
       // refreshIfStale retries rather than being throttled by a
       // poisoned timestamp.
     } finally {
-      if (isCurrent()) setLoading(false);
-      loadingRef.current = false;
+      if (isCurrent()) {
+        setLoading(false);
+        loadingRef.current = false;
+      }
     }
-  }, [active, scope]);
+  }, [active, scope, cacheKey, internalSlashCommandsCache]);
 
   const refreshIfStale = useCallback(
     (ttlMs: number = STALE_TTL_MS) => {
       if (loadingRef.current) return;
-      const last = lastFetchedAtRef.current;
-      if (last > 0 && Date.now() - last < ttlMs) return;
+      const cached = cacheKey
+        ? internalSlashCommandsCache.get(cacheKey)
+        : undefined;
+      const last = cached?.fetchedAt ?? lastFetchedAtRef.current;
+      if (last > 0 && Date.now() - last < ttlMs) {
+        if (cached) {
+          setCommands(cached.commands);
+          setError(null);
+          lastFetchedAtRef.current = cached.fetchedAt;
+        }
+        return;
+      }
       void refresh();
     },
-    [refresh],
+    [cacheKey, refresh, internalSlashCommandsCache],
   );
 
   useEffect(() => {
-    // Clear stale entries before the new fetch resolves so a
-    // binding/scope switch never momentarily shows the previous list.
+    if (!cacheKey) {
+      setCommands([]);
+      setError(null);
+      setLoading(false);
+      lastFetchedAtRef.current = 0;
+      return invalidatePending;
+    }
+
+    const cached = internalSlashCommandsCache.get(cacheKey);
+
+    if (cached) {
+      setCommands(cached.commands);
+      setError(null);
+      setLoading(false);
+      lastFetchedAtRef.current = cached.fetchedAt;
+      if (Date.now() - cached.fetchedAt >= STALE_TTL_MS) {
+        void refresh();
+      }
+      return invalidatePending;
+    }
+
     setCommands([]);
     setError(null);
+    lastFetchedAtRef.current = 0;
     void refresh();
-    return () => {
-      // Bump the epoch so any in-flight refresh becomes stale and
-      // skips its state writes. eslint-disable matches the ACP hook's
-      // rationale: epoch is intentionally a moving target across runs.
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-      epochRef.current++;
-    };
-  }, [refresh]);
+    return invalidatePending;
+  }, [cacheKey, refresh, internalSlashCommandsCache, invalidatePending]);
 
   return { commands, loading, error, refresh, refreshIfStale };
 }

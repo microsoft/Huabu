@@ -258,9 +258,15 @@ export const CanvasSearchResults = (): React.JSX.Element => {
 
   const focusNodeOnCanvas = useCallback(
     (nodeId: string) => {
-      selectNodes([nodeId], false);
+      const owner = useCanvasStore
+        .getState()
+        .nodes.find(
+          (node) => node.type === 'pdf' && node.data.noteNodeId === nodeId,
+        );
+      const visibleId = owner?.id ?? nodeId;
+      selectNodes([visibleId], false);
       if (rfInstance && canvasWrapper) {
-        revealNodesOnCanvas(rfInstance, canvasWrapper, [nodeId], 400);
+        revealNodesOnCanvas(rfInstance, canvasWrapper, [visibleId], 400);
       }
     },
     [selectNodes, rfInstance, canvasWrapper],
@@ -408,7 +414,10 @@ export const CanvasSearchResults = (): React.JSX.Element => {
       // without a `NodePreviews` entry leave the user's current preview alone.
       if (hasNodePreview(nodeType)) {
         // Browsing results reuses the group's inspection slot (§9.2).
-        openPreviewNode(nodeId, { transient: true, focusEditor: false });
+        openPreviewNode(nodeId, {
+          transient: true,
+          focusEditor: false,
+        });
         if (row.match.field === 'content') {
           usePreviewSearchStore
             .getState()

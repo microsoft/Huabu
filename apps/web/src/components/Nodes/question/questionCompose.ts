@@ -170,7 +170,7 @@ export function enterQuestionCompose(
   view: AgentConversationView,
   _canvasId: string | null,
   binding?: AgentBinding,
-  options?: { transient?: boolean },
+  options?: { transient?: boolean; groupId?: string },
 ): void {
   initializeQuestionBinding(view, binding, true);
   openPreviewNode(view.presentationAnchor.nodeId, options);
@@ -180,7 +180,7 @@ export function enterQuestionCompose(
 }
 
 /**
- * Create a question node bound to a fresh thread at `placementPoint` and
+ * Create a question node bound to a fresh thread at `placementPoint` (or the viewport centre) and
  * enter compose after loading the default Profile. Pass `id` to reuse a
  * pre-minted node id.
  *
@@ -192,9 +192,10 @@ export function enterQuestionCompose(
  */
 export async function createQuestionNodeAndCompose(opts: {
   addNode: (input: AddNodeInput) => void;
-  placementPoint: { x: number; y: number };
+  placementPoint?: { x: number; y: number };
   canvasId: string | null;
   id?: CanvasNodeId;
+  previewOptions?: { transient?: boolean; groupId?: string };
   /**
    * Additional caller-owned scope, checked before a retry and after loading
    * the binding, such as a connected source node still existing. `retry` is
@@ -222,7 +223,12 @@ export async function createQuestionNodeAndCompose(opts: {
       const binding = await loadDefaultAgentBinding();
       if (!isCurrent(attempt)) return;
       created = createQuestionNode({ ...opts, canvasId, binding });
-      enterQuestionCompose(created.conversationView, canvasId, binding);
+      enterQuestionCompose(
+        created.conversationView,
+        canvasId,
+        binding,
+        opts.previewOptions,
+      );
     } catch (error) {
       toastConversationStartError(error, () => {
         void create({ retry: true });
@@ -237,7 +243,7 @@ export async function createQuestionNodeAndCompose(opts: {
 
 export function createQuestionNode(opts: {
   addNode: (input: AddNodeInput) => void;
-  placementPoint: { x: number; y: number };
+  placementPoint?: { x: number; y: number };
   canvasId: string | null;
   id?: CanvasNodeId;
   binding?: AgentBinding;

@@ -131,6 +131,7 @@ export async function executeRfsCommands(
       ...(hostThreadId ? { threadId: hostThreadId } : {}),
     },
     runId,
+    agentCovers: true,
     ...(hostThreadId ? { computeChanges: true } : {}),
     ...(opts?.claimedThreadId ? { claimedThreadId: opts.claimedThreadId } : {}),
     ...(request.operationId !== undefined && opts?.principalId

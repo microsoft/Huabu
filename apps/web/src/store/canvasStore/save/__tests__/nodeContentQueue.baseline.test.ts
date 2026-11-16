@@ -26,6 +26,7 @@ import { holdSaveErrorRecovery } from '@/utils/saveErrorFeedback';
 import { createNodeContentQueue } from '../nodeContentQueue';
 
 import type * as CanvasApi from '@/api/canvas';
+import type { PutNodeContentRequest } from '@huabu/shared';
 import type { Node } from '@xyflow/react';
 
 vi.mock('@/api/canvas', async (importActual) => {
@@ -87,6 +88,211 @@ beforeEach(() => {
 });
 
 describe('nodeContentQueue baseline lifecycle', () => {
+  it('does not send clears for untouched optional metadata on a new node', async () => {
+    const node = noteNode('body');
+    const { queue } = makeQueue(node);
+    putMock.mockResolvedValue({ nodeId: 'n1', label: 'Note', rev: 'saved' });
+    queue.scheduleChanges('c1', [], [node]);
+    await queue.flushAll();
+    const body = putMock.mock.calls[0][2];
+    expect(body).not.toHaveProperty('noteContent');
+    expect(body).not.toHaveProperty('propertyDisplayKeys');
+  });
+  it.each<Pick<PutNodeContentRequest, 'properties' | 'propertyDisplayKeys'>>([
+    { properties: { Added: 'new' }, propertyDisplayKeys: ['Venue', 'Added'] },
+    {
+      properties: { Venue: null, Conference: 'UIST' },
+      propertyDisplayKeys: ['Conference'],
+    },
+    { properties: { Venue: null }, propertyDisplayKeys: [] },
+  ])(
+    'retracts a failed property operation without leaving it queued: %j',
+    async (patch) => {
+      const node = noteNode('body');
+      node.data.properties = { Venue: 'UIST' };
+      node.data.propertyDisplayKeys = ['Venue'];
+      const { queue, state } = makeQueue(node);
+      state._setStateNoAutosave.mockImplementation(({ nodes }) => {
+        state.nodes = nodes;
+      });
+      queue.seedBaselines([node]);
+      putMock.mockRejectedValueOnce(new Error('offline'));
+      await expect(queue.commitProperties('c1', 'n1', patch)).rejects.toThrow(
+        'offline',
+      );
+      expect(state.nodes[0].data).toEqual(node.data);
+      expect(queue.pendingFields('n1').size).toBe(0);
+      expect(queue.hasUnsavedContent('c1')).toBe(false);
+      queue.retryFailedSaves('c1');
+      await queue.flushAll();
+      expect(putMock).toHaveBeenCalledTimes(1);
+      putMock.mockResolvedValue({ nodeId: 'n1', label: 'Note', rev: 'next' });
+      const previous = state.nodes;
+      state.nodes = [
+        {
+          ...previous[0],
+          data: { ...previous[0].data, content: 'later body' },
+        },
+      ];
+      queue.scheduleChanges('c1', previous, state.nodes);
+      await queue.flushNow('c1', 'n1');
+      expect(putMock.mock.calls.at(-1)?.[2].properties).toEqual({
+        Venue: 'UIST',
+      });
+    },
+  );
+
+  it('keeps newer properties and unrelated pending content when retracting a failed edit', async () => {
+    const node = noteNode('body');
+    node.data.properties = { Venue: 'UIST', Score: 1 };
+    const { queue, state } = makeQueue(node);
+    state._setStateNoAutosave.mockImplementation(({ nodes }) => {
+      state.nodes = nodes;
+    });
+    queue.seedBaselines([node]);
+    putMock.mockImplementationOnce(async () => {
+      const previous = state.nodes;
+      state.nodes = [
+        {
+          ...previous[0],
+          data: {
+            ...previous[0].data,
+            content: 'new body',
+            properties: { Venue: 'Newest', Score: 2, Added: true },
+          },
+        },
+      ];
+      queue.scheduleChanges('c1', previous, state.nodes);
+      throw new Error('offline');
+    });
+    await expect(
+      queue.commitProperties('c1', 'n1', {
+        properties: { Venue: 'DIS', Score: 9 },
+      }),
+    ).rejects.toThrow('offline');
+    expect(state.nodes[0].data).toMatchObject({
+      content: 'new body',
+      properties: { Venue: 'Newest', Score: 2, Added: true },
+    });
+    expect(queue.pendingFields('n1')).toEqual(
+      new Set(['content', 'properties']),
+    );
+    putMock.mockResolvedValue({ nodeId: 'n1', label: 'Note', rev: 'next' });
+    await queue.flushNow('c1', 'n1');
+    expect(queue.pendingFields('n1').size).toBe(0);
+  });
+
+  it('captures the rollback state inside the serialized lane after earlier edits settle', async () => {
+    const node = noteNode('body');
+    node.data.properties = { Venue: 'UIST' };
+    const { queue, state } = makeQueue(node);
+    state._setStateNoAutosave.mockImplementation(({ nodes }) => {
+      state.nodes = nodes;
+    });
+    queue.seedBaselines([node]);
+    putMock.mockResolvedValueOnce({
+      nodeId: 'n1',
+      label: 'Note',
+      rev: 'saved',
+    });
+    putMock.mockRejectedValueOnce(new Error('offline'));
+    const first = queue.commitProperties('c1', 'n1', {
+      properties: { Venue: 'CHI' },
+    });
+    const second = queue.commitProperties('c1', 'n1', {
+      properties: { Venue: 'DIS' },
+    });
+    await first;
+    await expect(second).rejects.toThrow('offline');
+    expect(state.nodes[0].data.properties).toEqual({ Venue: 'CHI' });
+    expect(queue.hasUnsavedContent('c1')).toBe(false);
+  });
+
+  it('uses the loaded server revision when PDF content is deliberately omitted', async () => {
+    const node: Node = {
+      id: 'pdf',
+      type: 'pdf',
+      position: { x: 0, y: 0 },
+      data: {
+        label: 'Paper',
+        src: 'paper.pdf',
+        properties: { Venue: 'CHI 25' },
+      },
+    };
+    const serverRev = nodeRevisionOf({
+      ...node.data,
+      type: 'pdf',
+      content: 'Extracted text only available on the server',
+    });
+    const { queue, state } = makeQueue(node);
+    queue.seedBaselines([node], { pdf: serverRev });
+    const edited = {
+      ...node,
+      data: {
+        ...node.data,
+        properties: { Venue: 'CHI 25', Status: 'Reading' },
+      },
+    };
+    state.nodes = [edited];
+    queue.scheduleChanges('c1', [node], [edited]);
+    putMock.mockResolvedValue({ nodeId: 'pdf', label: 'Paper', rev: 'saved' });
+    await queue.flushNow('c1', 'pdf');
+    expect(putMock.mock.calls[0][2]).toMatchObject({
+      expectRev: serverRev,
+      properties: edited.data.properties,
+    });
+    expect(putMock.mock.calls[0][2]).not.toHaveProperty('content');
+    expect(toastMock).not.toHaveBeenCalled();
+    queue.seedBaselines([edited], { pdf: 'saved' });
+    const next = {
+      ...edited,
+      data: { ...edited.data, properties: { Venue: 'CHI 25', Status: 'Read' } },
+    };
+    state.nodes = [next];
+    queue.scheduleChanges('c1', [edited], [next]);
+    await queue.flushNow('c1', 'pdf');
+    expect(putMock.mock.calls.at(-1)?.[2].expectRev).toBe('saved');
+  });
+
+  it('sends property tombstones from the acknowledged baseline and retains edits made during a save', async () => {
+    const node = noteNode('body');
+    node.data.properties = { keep: 'yes', remove: 2026 };
+    const { queue, state } = makeQueue(node);
+    queue.seedBaselines([node]);
+    const edited = {
+      ...node,
+      data: { ...node.data, properties: { keep: 'yes' } },
+    };
+    state.nodes = [edited];
+    queue.scheduleChanges('c1', [node], [edited]);
+    let resolve!: (value: unknown) => void;
+    putMock.mockReturnValueOnce(
+      new Promise((done) => {
+        resolve = done;
+      }),
+    );
+    const saving = queue.flushNow('c1', 'n1');
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+    expect(putMock).toHaveBeenCalledOnce();
+    expect(putMock.mock.calls[0][2]).toMatchObject({
+      properties: { keep: 'yes', remove: null },
+      expectRev: nodeRevisionOf({
+        content: 'body',
+        properties: node.data.properties,
+      }),
+    });
+    const next = { ...edited, data: { ...edited.data, properties: {} } };
+    state.nodes = [next];
+    queue.scheduleChanges('c1', [edited], [next]);
+    resolve({ nodeId: 'n1', label: 'Note', rev: 'FIRST' });
+    await saving;
+    putMock.mockResolvedValue({ nodeId: 'n1', label: 'Note', rev: 'SECOND' });
+    await queue.flushNow('c1', 'n1');
+    expect(putMock.mock.calls.at(-1)?.[2]).toMatchObject({
+      properties: { keep: null },
+      expectRev: 'FIRST',
+    });
+  });
   it('suppresses the redundant Question creation PUT', async () => {
     const node = questionNode('');
     const { queue } = makeQueue(node);

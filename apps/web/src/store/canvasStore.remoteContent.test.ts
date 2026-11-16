@@ -34,6 +34,7 @@ import { CanvasConflictError } from '../api/canvas';
 import { useCanvasPresenceStore } from './canvasPresence/canvasPresenceStore';
 import useCanvasStore, {
   adoptRemoteNodeContent,
+  commitNodeProperties,
   hasUnsavedCanvasEdits,
   resetCanvasSyncForTests,
 } from './canvasStore';
@@ -305,6 +306,122 @@ describe('a body typed on this page while an update for another node arrives', (
     expect(api.putNodeContent.mock.calls[0][2]).toMatchObject({
       content: 'Typed while X moved',
       expectRev: nodeRevisionOf({ content: `Body ${Y}` }),
+    });
+  });
+});
+
+describe('properties another page saved', () => {
+  const withProperties = (
+    properties?: Record<string, string | string[]>,
+    propertyDisplayKeys?: string[],
+  ) => ({
+    ...savedOnServer(`Body ${Z}`, `Label ${Z}`),
+    nodeId: Z,
+    ...(properties ? { properties } : {}),
+    ...(propertyDisplayKeys ? { propertyDisplayKeys } : {}),
+    rev: nodeRevisionOf({
+      content: `Body ${Z}`,
+      ...(properties ? { properties } : {}),
+      ...(propertyDisplayKeys ? { propertyDisplayKeys } : {}),
+    }),
+  });
+
+  // The content queue outlives a test and other cases leave X unsaved, so
+  // these use a node of their own, one per case.
+  let Z: string;
+  let cases = 0;
+  beforeEach(() => {
+    Z = `node-content-z${++cases}`;
+    state()._setStateNoAutosave({ nodes: [...state().nodes, note(Z, 800)] });
+  });
+
+  it('are shown with their display order, without a save or an undo entry', async () => {
+    api.getNodeContent.mockResolvedValue(
+      withProperties({ tags: ['draft', 'physics'], status: 'read' }, ['tags']),
+    );
+
+    await expect(adoptRemoteNodeContent(SPACE, [Z])).resolves.toEqual([
+      'applied',
+    ]);
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    expect(node(Z).data).toMatchObject({
+      content: `Body ${Z}`,
+      properties: { tags: ['draft', 'physics'], status: 'read' },
+      propertyDisplayKeys: ['tags'],
+    });
+    expect(canvasHistoryManager.canUndo).toBe(false);
+    expect(api.putNodeContent).not.toHaveBeenCalled();
+    expect(api.postCanvasExecute).not.toHaveBeenCalled();
+  });
+
+  it('are removed here when the other page removed the last of them', async () => {
+    api.getNodeContent.mockResolvedValue(
+      withProperties({ status: 'read' }, ['status']),
+    );
+    await adoptRemoteNodeContent(SPACE, [Z]);
+    expect(node(Z).data.properties).toEqual({ status: 'read' });
+
+    api.getNodeContent.mockResolvedValue(withProperties());
+    await expect(adoptRemoteNodeContent(SPACE, [Z])).resolves.toEqual([
+      'applied',
+    ]);
+
+    expect(node(Z).data).not.toHaveProperty('properties');
+    expect(node(Z).data).not.toHaveProperty('propertyDisplayKeys');
+    expect(api.putNodeContent).not.toHaveBeenCalled();
+  });
+
+  it("leave this page's edit of another property of the node standing: it is sent as one key, from the adopted revision", async () => {
+    const theirs = withProperties({ status: 'read' });
+    api.getNodeContent.mockResolvedValue(theirs);
+    await adoptRemoteNodeContent(SPACE, [Z]);
+
+    await expect(
+      commitNodeProperties(Z, { properties: { tags: ['mine'] } }),
+    ).resolves.toBe(true);
+
+    expect(api.putNodeContent).toHaveBeenCalledTimes(1);
+    const sent = api.putNodeContent.mock.calls[0][2];
+    expect(sent.expectRev).toBe(theirs.rev);
+    expect(sent.pageId).toBe(CANVAS_PAGE_ID);
+    // Their key travels with the same value it has on the server; nothing
+    // of theirs is cleared.
+    expect(sent.properties).toEqual({ status: 'read', tags: ['mine'] });
+    expect(node(Z).data.properties).toEqual({
+      status: 'read',
+      tags: ['mine'],
+    });
+  });
+
+  it("are not fetched over this page's own property save in flight, and are fetched once it is answered", async () => {
+    let answer!: (value: unknown) => void;
+    api.putNodeContent.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          answer = resolve;
+        }),
+    );
+    const saving = commitNodeProperties(Z, { properties: { tags: ['mine'] } });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(api.putNodeContent).toHaveBeenCalledTimes(1);
+
+    api.getNodeContent.mockResolvedValue(
+      withProperties({ status: 'read', tags: ['mine'] }),
+    );
+    await expect(adoptRemoteNodeContent(SPACE, [Z])).resolves.toEqual([
+      'kept-local',
+    ]);
+    expect(api.getNodeContent).not.toHaveBeenCalled();
+
+    answer({ nodeId: Z, label: `Label ${Z}`, rev: 'after-mine' });
+    await expect(saving).resolves.toBe(true);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(api.getNodeContent).toHaveBeenCalledTimes(1);
+    expect(node(Z).data.properties).toEqual({
+      status: 'read',
+      tags: ['mine'],
     });
   });
 });

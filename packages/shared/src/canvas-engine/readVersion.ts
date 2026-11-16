@@ -293,6 +293,12 @@ export function createReadVersionAdmission(input: {
           if (node.id && !present.has(node.id)) made.add(node.id);
         }
       }
+      if (
+        command.type === 'INITIALIZE_PDF_NOTE' &&
+        command.noteId &&
+        !present.has(command.noteId)
+      )
+        made.add(command.noteId);
     }
     if (verdict === undefined)
       for (const id of membership) seenMembership.add(id);

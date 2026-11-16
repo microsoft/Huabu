@@ -23,6 +23,10 @@ export function collectCommandIds(
   edgeIds: Set<string>,
 ): void {
   switch (command.type) {
+    case 'INITIALIZE_PDF_NOTE':
+      nodeIds.add(command.nodeId);
+      if (command.noteId) nodeIds.add(command.noteId);
+      break;
     case 'CREATE_NODES':
       for (const node of command.nodes) if (node.id) nodeIds.add(node.id);
       break;
@@ -125,6 +129,8 @@ function unique(ids: Iterable<string | null | undefined>): string[] {
  *   carry no version stamps.
  * - `SET_NODE_SELECTION`, `APPLY_MEASURED_HEIGHT`: none. View state and
  *   renderer measurements tolerate missing nodes by design.
+ * - `INITIALIZE_PDF_NOTE`: `nodeId`, the PDF (existence). The Note it
+ *   creates is new, and always a root node, so nothing depends on a parent.
  * - `DELETE_NODES`: `nodeIds` (existence).
  * - `MERGE_NODE_DATA`: every `patches[].nodeId` (existence).
  * - `SET_NODE_LOCKED`: every `items[].nodeId` (existence).
@@ -170,6 +176,7 @@ export function commandReadTargets(command: CanvasCommand): CommandReadTargets {
         membership: [],
       };
     case 'CHANGE_NODE_TYPE':
+    case 'INITIALIZE_PDF_NOTE':
       return { existence: unique([command.nodeId]), membership: [] };
     case 'DISSOLVE_FRAME':
       return { existence: unique([command.frameId]), membership: [] };

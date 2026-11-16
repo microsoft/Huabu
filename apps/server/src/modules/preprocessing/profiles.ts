@@ -78,16 +78,12 @@ export const profiles: Record<CanvasNodeType, NodePreprocessProfile> = {
       'resolve_title',
       'merge_metadata',
       'generate_label',
-      'generate_summary',
-      'generate_keywords',
       'persist_source',
       'build_patch',
     ],
     watchFields: ['src', 'title', 'labelSource'],
     capabilityTriggers: {
       generate_label: ['src'],
-      generate_summary: ['src'],
-      generate_keywords: ['src'],
     },
   },
   office: {

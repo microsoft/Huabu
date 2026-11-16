@@ -30,6 +30,7 @@ import {
 } from '@huabu/shared';
 import {
   COMMAND_META,
+  hasValidNodeProperties,
   autoHeightContentWidth,
   preserveAgentNodeOwnedData,
   projectAgentNodeEditableData,
@@ -45,6 +46,7 @@ import {
   readAutoHeightHint,
   readMeasuredSizeHint,
   resolveHeightMode,
+  includePdfNotes,
   FRAME_POINTER_CAPTURE_MARGIN,
   getAbsolutePosition as getFrameAbsolutePosition,
   getFrameSizing,
@@ -128,7 +130,11 @@ import { getCanvas, postCanvasExecute, associateAgentNode } from '../api';
 import { ApiError } from '../api/_client';
 import { agentApi } from '../api/agent';
 import { cloneArtifactToCanvas, resolveArtifactUrl } from '../api/artifact';
-import { CanvasConflictError, getCanvasAccess } from '../api/canvas';
+import {
+  CanvasConflictError,
+  NodeDuplicateFilesError,
+  getCanvasAccess,
+} from '../api/canvas';
 import { renameSpace } from '../api/spaceCard';
 import { measureMissingAutoHeights } from './canvasStore/height/measureMissingAutoHeights';
 import { normalizeFrameHeaderInsets } from './canvasStore/load/normalizeFrameHeaderInsets';
@@ -221,6 +227,7 @@ import type {
   CanvasAccess,
   RecentAction,
   WireSelectionNode,
+  PutNodeContentRequest,
 } from '@huabu/shared';
 
 const PREPROCESS_DEBOUNCE_MS = 1000;
@@ -389,6 +396,139 @@ function writeMinimapEnabledToStorage(value: boolean): void {
 }
 
 // ─── Per-node content flush ────────────────────────────────────────────────
+
+export type NodeMetadataPatch = Pick<
+  PutNodeContentRequest,
+  'properties' | 'propertyDisplayKeys'
+>;
+
+/** Publish acknowledged property edits; only the toast retains a failed patch. */
+export async function commitNodeProperties(
+  nodeId: string,
+  patch: Pick<NodeMetadataPatch, 'properties' | 'propertyDisplayKeys'>,
+): Promise<boolean> {
+  const { canvasId, nodes } = useCanvasStore.getState();
+  const workspaceId = useWorkspaceStore.getState().workspaceId;
+  const original = nodes.find((node) => node.id === nodeId);
+  let pending = false;
+  const attempt = async (): Promise<boolean> => {
+    if (pending) return false;
+    pending = true;
+    let submitted = false;
+    try {
+      const state = useCanvasStore.getState();
+      const node = state.nodes.find((item) => item.id === nodeId);
+      if (
+        state.canvasId !== canvasId ||
+        useWorkspaceStore.getState().workspaceId !== workspaceId ||
+        !node ||
+        !original ||
+        !selectCanWriteCanvas(state) ||
+        state.isLoading
+      )
+        throw new Error(t('node.propertiesRetryUnavailable'));
+      const currentProperties = node.data.properties as
+        | Record<string, unknown>
+        | undefined;
+      const originalProperties = original.data.properties as
+        | Record<string, unknown>
+        | undefined;
+      if (
+        Object.keys(patch.properties ?? {}).some(
+          (key) =>
+            !deepEqual(currentProperties?.[key], originalProperties?.[key]),
+        ) ||
+        (patch.propertyDisplayKeys &&
+          !deepEqual(
+            node.data.propertyDisplayKeys,
+            original.data.propertyDisplayKeys,
+          ))
+      )
+        throw new Error(t('node.propertiesRetryUnavailable'));
+      if (!hasValidNodeProperties(patch, true))
+        throw new Error('Invalid node properties');
+      submitted = true;
+      await nodeContentQueue.commitProperties(state.canvasId, nodeId, patch);
+      if (
+        useCanvasStore.getState().canvasId !== canvasId ||
+        useWorkspaceStore.getState().workspaceId !== workspaceId
+      ) {
+        submitted = false;
+        throw new Error(t('node.propertiesRetryUnavailable'));
+      }
+      return true;
+    } catch (error) {
+      console.error('Property edit failed:', nodeId, error);
+      const retryable =
+        submitted &&
+        !(error instanceof CanvasConflictError) &&
+        !(error instanceof NodeDuplicateFilesError) &&
+        !(
+          error instanceof ApiError &&
+          error.status >= 400 &&
+          error.status < 500
+        );
+      toast(
+        submitted
+          ? t('node.propertiesSaveFailed')
+          : error instanceof Error
+            ? error.message
+            : String(error),
+        {
+          tone: 'danger',
+          duration: 0,
+          dismissible: true,
+          ...(retryable
+            ? {
+                action: {
+                  label: t('messages.retry'),
+                  onClick: () => {
+                    void attempt();
+                  },
+                },
+              }
+            : {}),
+        },
+      );
+      return false;
+    } finally {
+      pending = false;
+    }
+  };
+  return attempt();
+}
+
+/** Save through the ordinary queue; rejection leaves the optimistic edit intact. */
+export async function commitNodeMetadata(
+  nodeId: string,
+  patch: NodeMetadataPatch,
+): Promise<void> {
+  const state = useCanvasStore.getState();
+  const workspaceId = useWorkspaceStore.getState().workspaceId;
+  if (!selectCanWriteCanvas(state) || state.isLoading)
+    throw new Error('Canvas is not editable');
+  const node = state.nodes.find((candidate) => candidate.id === nodeId);
+  if (!node) throw new Error('Node no longer exists');
+  if (!hasValidNodeProperties(patch, true))
+    throw new Error('Invalid node metadata');
+  state.updateNodeData(nodeId, patch);
+  await nodeContentQueue.flushNow(state.canvasId, nodeId, { source: 'user' });
+  if (
+    useCanvasStore.getState().canvasId !== state.canvasId ||
+    useWorkspaceStore.getState().workspaceId !== workspaceId
+  )
+    throw new Error('Space changed while saving');
+  if (
+    !useCanvasStore
+      .getState()
+      .nodes.some((candidate) => candidate.id === nodeId) ||
+    nodeContentQueue.pendingFields(nodeId).size > 0
+  )
+    throw new Error(
+      'Node metadata is not saved; resolve the pending save before continuing',
+    );
+}
+
 //
 // Markdown sidecar persistence (debounced per-node PUT + serialized
 // in-flight chain) lives in `./canvasStore/save/nodeContentQueue.ts`.
@@ -995,6 +1135,8 @@ const nodeContentQueue = createNodeContentQueue({
   pageId: CANVAS_PAGE_ID,
   onRemoteContentAdopted: (canvasId, nodeId, patch) =>
     canvasHistoryManager.rebaseRemoteContent(canvasId, nodeId, patch),
+  onPropertiesSaved: (nodeId, patch) =>
+    useCanvasStore.getState().updateNodeData(nodeId, patch),
 });
 
 // ─── Structure edits through execute ──────────────────────────────────────
@@ -3213,11 +3355,16 @@ const useCanvasStore = create<RFState>()(
           for (const node of createdNodes) {
             const index = forServer.commands.findIndex(
               (command) =>
-                command.type === 'CREATE_NODES' &&
-                command.nodes.some((created) => created.id === node.id),
+                (command.type === 'CREATE_NODES' &&
+                  command.nodes.some((created) => created.id === node.id)) ||
+                // The Note a PDF was given. When another page gave the PDF
+                // its Note first the command is a no-op there, and this
+                // page's own Note was never created.
+                (command.type === 'INITIALIZE_PDF_NOTE' &&
+                  command.noteId === node.id),
             );
-            // A node a later command of the batch created (none today)
-            // has no CREATE_NODES to acknowledge.
+            // A node the engine created as a consequence has no creating
+            // command to acknowledge.
             if (index < 0) continue;
             const result =
               outcome.response.results[offset + prelude.length + index];
@@ -3464,8 +3611,13 @@ const useCanvasStore = create<RFState>()(
                     skippedNodeIds.push(d.next.id);
                     skippedRemoteNodes.push(serverNodeOf(d.next));
                   } else if (
-                    changedContentFields.some(
-                      (key) => key === 'content' || key === 'src',
+                    changedContentFields.some((key) =>
+                      [
+                        'content',
+                        'src',
+                        'properties',
+                        'propertyDisplayKeys',
+                      ].includes(key),
                     )
                   ) {
                     advancedRemoteBaselines.push(serverNodeOf(d.next));
@@ -4179,7 +4331,10 @@ const useCanvasStore = create<RFState>()(
         // the authoritative content we just loaded, so the first edit
         // carries the correct `expectRev` and the per-node content CAS can
         // catch a concurrent (cross-tab / cross-device / agent) write.
-        nodeContentQueue.seedBaselines(warmedNodes);
+        nodeContentQueue.seedBaselines(
+          warmedNodes,
+          response.nodeContentRevisions,
+        );
 
         // Backfill: any node with an empty label gets re-queued so the
         // server can regenerate one. The server's preprocessing
@@ -5938,6 +6093,7 @@ const useCanvasStore = create<RFState>()(
         if (n.type === 'frame') collectDescendants(n.id);
       }
 
+      for (const id of includePdfNotes(nodes, selectedIds)) selectedIds.add(id);
       const toCopy = nodes.filter((n) => selectedIds.has(n.id));
 
       // Keep original IDs in the clipboard so the paste helper can remap
@@ -6128,7 +6284,10 @@ const useCanvasStore = create<RFState>()(
           const data = (node.data ?? {}) as Record<string, unknown>;
           if (ARTIFACT_DATA_FIELDS.some((f) => parseArtifactRef(data[f])))
             return true;
-          return markdownArtifactFields(data).some((field) => {
+          return markdownArtifactFields({
+            ...data,
+            type: node.type ?? data.type,
+          }).some((field) => {
             const v = data[field];
             return (
               typeof v === 'string' && collectMarkdownArtifactRefs(v).length > 0
@@ -6206,7 +6365,10 @@ const useCanvasStore = create<RFState>()(
                 }
               }
 
-              for (const field of markdownArtifactFields(data)) {
+              for (const field of markdownArtifactFields({
+                ...data,
+                type: node.type ?? data.type,
+              })) {
                 const markdown = data[field];
                 if (typeof markdown !== 'string' || markdown.length === 0)
                   continue;

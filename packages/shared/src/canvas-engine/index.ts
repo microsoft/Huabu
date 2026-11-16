@@ -23,6 +23,12 @@ export {
 // ── Executor + runtime types ──────────────────────────────────────────────
 export * from './utils/inkSigil.js';
 export {
+  mergeNodeProperties,
+  hasValidNodeProperties,
+  isNodeProperties,
+  orderedPropertyKeys,
+} from './nodeProperties.js';
+export {
   computeAdjacentNodePlacement,
   type NodePlacementBounds,
   type NodePlacementSide,
@@ -87,6 +93,7 @@ export {
   applyDeltas,
   applyOrderedDeltas,
   invertDelta,
+  replayChangedData,
 } from './delta.js';
 export {
   type SetSiblingOrderEvent,
@@ -117,6 +124,7 @@ export {
   nodeRevision,
   nodeRevisionOf,
   invertDeltas,
+  isChangeStale,
 } from './change.js';
 
 // ── Command registry (handler / meta maps) ────────────────────────────────
@@ -184,6 +192,7 @@ export {
 } from './frame/design.js';
 export {
   stripMarkdown,
+  markdownExcerptParagraphs,
   markdownSearchTarget,
   markdownSummaryBlocks,
 } from './utils/markdown.js';
@@ -317,3 +326,11 @@ export {
   findTombstonesAfter,
   type StampInput,
 } from './provenance/noteProvenance.js';
+export {
+  pdfNoteId,
+  pdfNoteIds,
+  hasValidPdfNoteOwnership,
+  includePdfNotes,
+  hidePdfNotes,
+  validPdfNoteLink,
+} from './pdfNotes.js';

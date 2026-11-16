@@ -566,7 +566,7 @@ test('native scrolling, activation, resize, promotion and closing remain usable'
     .click();
   await expect(tabs).toHaveCount(4);
   await host
-    .getByRole('button', { name: 'New conversation', exact: true })
+    .getByRole('button', { name: 'New temporary chat', exact: true })
     .click();
   await expect(tabs).toHaveCount(5);
   await expect(tabs.last()).toHaveAttribute('aria-selected', 'true');

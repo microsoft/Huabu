@@ -470,6 +470,50 @@ test('Note far-zoom labels use 12px titles and fitting 10px descriptions in eith
   expect(audit.errors).toEqual([]);
 });
 
+test('tall Note far labels fill available height with later paragraphs', async ({
+  page,
+}) => {
+  const paragraphs = [
+    'First paragraph.',
+    ...Array.from(
+      { length: 12 },
+      (_, index) => `Later paragraph ${index + 1} fills the remaining space.`,
+    ),
+  ];
+  const audit = await mountNodes(page, {
+    zoom: 0.19,
+    width: 800,
+    height: 1400,
+    title: 'Tall note',
+    description: paragraphs.join('\n\n'),
+  });
+  const node = shell(page, 'note');
+  const description = node.locator('[data-study-description]');
+  for (const theme of ['light', 'dark']) {
+    await page.evaluate((theme) => {
+      document.documentElement.classList.toggle('dark', theme === 'dark');
+    }, theme);
+    await expect(description).toHaveText(paragraphs.join(' '));
+    const metrics = await description.evaluate((element) => {
+      const style = getComputedStyle(element);
+      return {
+        height: element.getBoundingClientRect().height,
+        budget: Number(style.webkitLineClamp) * parseFloat(style.lineHeight),
+      };
+    });
+    expect(metrics.height).toBeGreaterThan(100);
+    expect(metrics.height).toBeCloseTo(metrics.budget, 0);
+    await test.info().attach(`tall-note-paragraphs-${theme}`, {
+      body: await node.screenshot({
+        path: test.info().outputPath(`tall-note-paragraphs-${theme}.png`),
+      }),
+      contentType: 'image/png',
+    });
+  }
+  expect(audit.writes).toEqual([]);
+  expect(audit.errors).toEqual([]);
+});
+
 test('ordinary Note, Web, PDF and Office fonts stay fixed during resize and scale only with the viewport', async ({
   page,
 }) => {

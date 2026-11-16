@@ -1,11 +1,31 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+
+import { stripMarkdown } from '@huabu/shared/canvas-engine';
 
 import { noteFarDescription } from './noteFarDescription';
 
+vi.mock('@huabu/shared/canvas-engine', { spy: true });
+
 describe('noteFarDescription', () => {
+  it('does not reparse projected paragraphs when comparing them with the title', () => {
+    vi.mocked(stripMarkdown).mockClear();
+    const paragraphs = Array.from(
+      { length: 100 },
+      (_, index) => `Paragraph ${index} with **formatting**.`,
+    );
+    expect(noteFarDescription(paragraphs.join('\n\n'), '**Title**')).toBe(
+      paragraphs.map((text) => text.replaceAll('**', '')).join(' '),
+    );
+    expect(stripMarkdown).toHaveBeenCalledExactlyOnceWith('**Title**');
+  });
+
+  it('does not reinterpret literal Markdown text as a repeated title', () => {
+    expect(noteFarDescription('`**Title**`', 'Title')).toBe('**Title**');
+  });
+
   it.each([
     '![tmux 代表图](art_tmux.png)',
     '![tmux 代表图](images/tmux(v2).png "Preview")',
@@ -42,13 +62,13 @@ describe('noteFarDescription', () => {
     expect(noteFarDescription(markdown, 'Title')).toBeUndefined();
   });
 
-  it('skips headings and repeated titles, then selects only the first prose paragraph', () => {
+  it('skips headings and repeated titles while retaining later prose paragraphs', () => {
     expect(
       noteFarDescription(
         '# Title\n\n**TITLE:**\n\nFirst **useful** paragraph.\nContinues here.\n\nLater paragraph.',
         'Title',
       ),
-    ).toBe('First useful paragraph. Continues here.');
+    ).toBe('First useful paragraph. Continues here. Later paragraph.');
   });
 
   it('keeps prose immediately after ATX and setext headings', () => {
@@ -66,8 +86,18 @@ describe('noteFarDescription', () => {
         '  Read [the guide](https://example.com) with `code` and <b>bold</b>.\r\nNext line.\r\n\r\nLater.',
         'Title',
       ),
-    ).toBe('Read the guide with code and bold. Next line.');
+    ).toBe('Read the guide with code and bold. Next line. Later.');
   });
+
+  it.each(['## Code\n    const x = 1;', 'Code\n===\n\tconst x = 1;'])(
+    'skips code immediately after headings: %j',
+    (block) => {
+      expect(
+        noteFarDescription(`Intro prose.\n\n${block}\n\nLater prose.`, 'Title'),
+      ).toBe('Intro prose. Later prose.');
+      expect(noteFarDescription(block, 'Title')).toBeUndefined();
+    },
+  );
 
   it('skips fenced code with blank lines, longer fences, and tilde fences', () => {
     expect(
@@ -87,16 +117,37 @@ describe('noteFarDescription', () => {
     ).toBeUndefined();
   });
 
+  it.each(['    const x = 1;', '\tconst x = 1;'])(
+    'skips indented code: %j',
+    (block) => {
+      expect(noteFarDescription(`${block}\n\nActual prose.`, 'Title')).toBe(
+        'Actual prose.',
+      );
+      expect(noteFarDescription(block, 'Title')).toBeUndefined();
+    },
+  );
+
   it.each([
-    '- First\n  continuation\n- Second',
-    '1. First\n2. Second',
-    '- [ ] Task',
-    '    const x = 1;',
-  ])('skips lists and indented code: %j', (block) => {
-    expect(noteFarDescription(`${block}\n\nActual prose.`, 'Title')).toBe(
-      'Actual prose.',
-    );
-    expect(noteFarDescription(block, 'Title')).toBeUndefined();
+    ['- First\n  continuation\n- Second', 'First continuation Second'],
+    ['## Tasks\n- First\n- Second', 'First Second'],
+    ['Tasks\n---\n1. First\n2. Second', 'First Second'],
+    ['- [ ] Pending\n- [x] Done', 'Pending Done'],
+    ['- Item.\n\n  List continuation.', 'Item. List continuation.'],
+    ['10. Item.\n\n    List continuation.', 'Item. List continuation.'],
+    ['- Parent\n  - Child\n    - Grandchild', 'Parent Child Grandchild'],
+  ])('retains list text without markers: %j', (block, expected) => {
+    expect(
+      noteFarDescription(`Intro prose.\n\n${block}\n\nLater prose.`, 'Title'),
+    ).toBe(`Intro prose. ${expected} Later prose.`);
+  });
+
+  it('excludes nested list code while retaining following list paragraphs', () => {
+    expect(
+      noteFarDescription(
+        '- Item.\n\n  ```js\n  hidden();\n  ```\n\n  Continuation.\n\n      indented();\n\n  - Child with `inline` code.',
+        'Title',
+      ),
+    ).toBe('Item. Continuation. Child with inline code.');
   });
 
   it('preserves Chinese prose and skips a repeated Chinese title', () => {
@@ -105,7 +156,7 @@ describe('noteFarDescription', () => {
         '# 研究计划\n\n**研究计划**。\n\n通过访谈理解协作过程。\n\n后续安排。',
         '研究计划',
       ),
-    ).toBe('通过访谈理解协作过程。');
+    ).toBe('通过访谈理解协作过程。 后续安排。');
   });
 
   it('does not discard prose just because it begins with the title', () => {

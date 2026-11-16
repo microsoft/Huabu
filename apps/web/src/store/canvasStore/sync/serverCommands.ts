@@ -17,7 +17,7 @@ import type { CanvasCommand } from '@huabu/shared';
 
 /**
  * Give every node and edge a batch creates an explicit id (and every new
- * Question its thread id), so the server creates the entities this page
+ * Question its thread id, and the Note of `INITIALIZE_PDF_NOTE` its id), so the server creates the entities this page
  * already shows instead of minting its own.
  */
 export function withClientIds(commands: CanvasCommand[]): CanvasCommand[] {
@@ -43,6 +43,13 @@ export function withClientIds(commands: CanvasCommand[]): CanvasCommand[] {
       if (!touched) return command;
       changed = true;
       return { ...command, nodes };
+    }
+    if (command.type === 'INITIALIZE_PDF_NOTE') {
+      // The Note a PDF is given: this page shows it at once, so the server
+      // must create the same node.
+      if (command.noteId) return command;
+      changed = true;
+      return { ...command, noteId: createId('node') };
     }
     if (command.type === 'CONNECT_NODES') {
       if (command.edges.every((edge) => edge.id)) return command;

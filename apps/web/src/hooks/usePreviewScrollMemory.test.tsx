@@ -14,6 +14,10 @@ import {
 
 import { usePreviewScrollMemory } from './usePreviewScrollMemory';
 
+(
+  globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
+).IS_REACT_ACT_ENVIRONMENT = true;
+
 let root: Root | null = null;
 let host: HTMLDivElement | null = null;
 
@@ -21,13 +25,20 @@ function Harness({
   viewKey,
   initialScrollHeight = 500,
   active = true,
+  headerHeight,
 }: {
   viewKey: string;
   initialScrollHeight?: number;
   active?: boolean;
+  headerHeight?: number;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
-  usePreviewScrollMemory(containerRef, viewKey);
+  const headerRef = useRef<HTMLDivElement>(null);
+  usePreviewScrollMemory(
+    containerRef,
+    viewKey,
+    headerHeight === undefined ? undefined : headerRef,
+  );
   return (
     <div data-preview-active={active}>
       <div
@@ -43,7 +54,18 @@ function Harness({
           });
         }}
         data-testid="scroll-container"
-      />
+      >
+        <div
+          ref={(element) => {
+            headerRef.current = element;
+            if (element)
+              Object.defineProperty(element, 'offsetHeight', {
+                configurable: true,
+                value: headerHeight ?? 0,
+              });
+          }}
+        />
+      </div>
     </div>
   );
 }
@@ -56,6 +78,33 @@ afterEach(() => {
 });
 
 describe('usePreviewScrollMemory', () => {
+  it.each([
+    [240, 80, 0, 160],
+    [240, 80, 120, 280],
+    [20, 80, 120, 20],
+    [20, 80, 0, 0],
+  ])(
+    'restores scroll %i with a header changing from %i to %i at %i',
+    (scrollTop, oldHeight, newHeight, expected) => {
+      const viewKey = `node:canvas-1:header-${scrollTop}-${newHeight}`;
+      rememberPreviewScrollPosition(viewKey, scrollTop, oldHeight);
+      host = document.createElement('div');
+      document.body.appendChild(host);
+      root = createRoot(host);
+      act(() =>
+        root?.render(<Harness viewKey={viewKey} headerHeight={newHeight} />),
+      );
+      const container = host.querySelector<HTMLElement>(
+        '[data-testid="scroll-container"]',
+      );
+      if (!container) throw new Error('Expected scroll container');
+      expect(container.scrollTop).toBe(expected);
+      container.scrollTop = newHeight + 50;
+      container.dispatchEvent(new Event('scroll'));
+      expect(readPreviewScrollPosition(viewKey, 0)).toBe(50);
+    },
+  );
+
   it('restores and remembers a target scroll position', () => {
     rememberPreviewScrollPosition('node:canvas-1:note-1', 240);
     host = document.createElement('div');

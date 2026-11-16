@@ -10,6 +10,7 @@ import {
   type NestableNode,
 } from '../container/index.js';
 import { indexById } from '../container/tree.js';
+import { pdfNoteIds } from '../pdfNotes.js';
 import { hasUnlockedAncestry } from '../siblingOrder.js';
 
 import type { CanvasCommand } from '../../index.js';
@@ -25,6 +26,9 @@ const setNodeParent: CommandDefinition<Cmd> = {
 
   handler(cmd, state) {
     if (cmd.nodeIds.length === 0) return noop(state);
+    const ownedIds = pdfNoteIds(state.nodes);
+    if (cmd.nodeIds.some((id) => ownedIds.has(id)))
+      return noop(state, 'invalid-target');
 
     let result = state.nodes as NestableNode[];
     // Frames whose group label may need re-resolution because their

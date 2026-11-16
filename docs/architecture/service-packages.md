@@ -33,12 +33,13 @@ The manifest does not declare consumers. Internal Agent and Pipeline execution p
 
 Namespace IDs are opaque adapter keys rather than object paths:
 
-| Package               | Namespace                       | Existing authoritative owner                                                          |
-| --------------------- | ------------------------------- | ------------------------------------------------------------------------------------- |
-| `image-gen`           | `llm.imageConfig`               | `llm-config.json` top-level `imageConfig` plus SecretStore `llm:image:api-key`        |
-| `web-search`          | `integration.tavily`            | SecretStore `integration:tavily:api-key` with `TAVILY_API_KEY` fallback               |
-| `youtube-transcripts` | `integration.rapidapi`          | SecretStore `integration:rapidapi:api-key` with `RAPIDAPI_KEY` fallback               |
-| `ink-ocr`             | `integration.azureVisionInkOcr` | Existing versioned Azure Vision record and its legacy/environment compatibility reads |
+| Package               | Namespace                       | Existing authoritative owner                                                           |
+| --------------------- | ------------------------------- | -------------------------------------------------------------------------------------- |
+| `image-gen`           | `llm.imageConfig`               | `llm-config.json` top-level `imageConfig` plus SecretStore `llm:image:api-key`         |
+| `web-search`          | `integration.tavily`            | SecretStore `integration:tavily:api-key` with `TAVILY_API_KEY` fallback                |
+| `hackmd`              | `integration.hackmd`            | SecretStore `integration:hackmd:api-key` with operator `HMD_API_ACCESS_TOKEN` fallback |
+| `youtube-transcripts` | `integration.rapidapi`          | SecretStore `integration:rapidapi:api-key` with `RAPIDAPI_KEY` fallback                |
+| `ink-ocr`             | `integration.azureVisionInkOcr` | Existing versioned Azure Vision record and its legacy/environment compatibility reads  |
 
 This is a zero-persistent-data-migration compatibility layer. Reading Service status performs no write; saving delegates to the original owner; no second record is created; credentials are not copied, rewritten, or re-encrypted. The original owner retains validation, defaults, environment fallback, atomicity, rollback, and explicit-null semantics.
 
@@ -50,9 +51,11 @@ Internal Agent tools keep their high-level Huabu integrations. `generate_image` 
 
 Product pipelines also retain reviewed Server adapters. The YouTube loader and Ink OCR request path resolve their registered Service configuration but do not import Package entries.
 
-External Agent Packages provide a real `SKILL.md` and may provide an `entry.mjs` that imports `HUABU_SERVICE_SDK_URL`, leases one coherent runtime context containing the current Manifest and configuration, and implements only a useful baseline provider workflow. Every executable entry supports `-h` and `--help`; an Agent runs help before invocation because runtime Manifest constraints and configured defaults may not be derivable from the source alone. Entries define their own CLI mapping, use Manifest enum options as the authoritative choices, use explicitly mapped configuration fields as defaults, and let an explicit operation argument override only those defaults. The entry is not a complete provider SDK: the Skill links official provider documentation, and an Agent may modify its downloaded local copy for additional endpoints. The bundled Image and Tavily Packages are Agent-facing. YouTube Transcripts and Ink OCR are not Agent-facing and therefore publish neither placeholder file.
+External Agent Packages provide a real `SKILL.md` and may provide an `entry.mjs` that imports `HUABU_SERVICE_SDK_URL`, leases one coherent runtime context containing the current Manifest and configuration, and implements only a useful baseline provider workflow. Every executable entry supports `-h` and `--help`; an Agent runs help before invocation because runtime Manifest constraints and configured defaults may not be derivable from the source alone. Entries define their own CLI mapping, use Manifest enum options as the authoritative choices, use explicitly mapped configuration fields as defaults, and let an explicit operation argument override only those defaults. The entry is not a complete provider SDK: the Skill links official provider documentation, and an Agent may modify its downloaded local copy for additional endpoints. The bundled Image, Tavily, and HackMD Packages are Agent-facing. YouTube Transcripts and Ink OCR are not Agent-facing and therefore publish neither placeholder file.
 
 ## Owner Settings API
+
+The HackMD Package replaces the retired publisher Team. Its entry uses the existing Service SDK and official HTTPS API for reading, creating and updating a specified note, without `hackmd-cli` or a package-local `.env`. New notes default to owner-only access and disabled comments; updates preserve permissions unless the caller explicitly requests a visibility change. The entry returns provider update acceptance separately from read-back verification and makes no automatic retries. Sharing, content selection, assembly and Space write-back belong to the calling Agent and require user authorization. There is no dedicated publisher Agent, sync daemon, team administration, delete operation, credential migration, or new Huabu HTTP endpoint.
 
 The owner UI uses:
 

@@ -174,21 +174,22 @@ Add the header `X-Huabu-Host-Thread-Id: $HUABU_THREAD_ID` so your edits are attr
 
 The accepted command set is:
 
-| Command             | Purpose                                                                                 |
-| ------------------- | --------------------------------------------------------------------------------------- |
-| `CREATE_NODES`      | Create one or more nodes; Huabu assigns node IDs.                                       |
-| `DELETE_NODES`      | Delete nodes and their incident edges.                                                  |
-| `MERGE_NODE_DATA`   | Patch node label, content, source, or visual style; content writes require `expectRev`. |
-| `SET_NODE_PARENT`   | Move nodes into a frame or back to the root.                                            |
-| `DISSOLVE_FRAME`    | Remove a frame while keeping its children in the Space.                                 |
-| `SET_NODE_GEOMETRY` | Change node position and/or size.                                                       |
-| `REORDER_NODES`     | Change node z-order.                                                                    |
-| `CONNECT_NODES`     | Create edges between existing nodes; Huabu assigns edge IDs.                            |
-| `DISCONNECT_EDGES`  | Remove edges by ID or endpoint pair.                                                    |
-| `SET_EDGE_STYLE`    | Patch edge direction, line shape, dash style, stroke, width, or label.                  |
-| `ALIGN_NODES`       | Align existing nodes along one axis.                                                    |
-| `DISTRIBUTE_NODES`  | Spread three or more existing nodes apart.                                              |
-| `SET_FRAME_LAYOUT`  | Configure a frame's free, column, row, or grid layout.                                  |
+| Command               | Purpose                                                                                 |
+| --------------------- | --------------------------------------------------------------------------------------- |
+| `CREATE_NODES`        | Create one or more nodes; Huabu assigns node IDs.                                       |
+| `INITIALIZE_PDF_NOTE` | Create or reuse a PDF's hidden Note; see the command capability for result fields.      |
+| `DELETE_NODES`        | Delete nodes and their incident edges.                                                  |
+| `MERGE_NODE_DATA`     | Patch node label, content, source, or visual style; content writes require `expectRev`. |
+| `SET_NODE_PARENT`     | Move nodes into a frame or back to the root.                                            |
+| `DISSOLVE_FRAME`      | Remove a frame while keeping its children in the Space.                                 |
+| `SET_NODE_GEOMETRY`   | Change node position and/or size.                                                       |
+| `REORDER_NODES`       | Change node z-order.                                                                    |
+| `CONNECT_NODES`       | Create edges between existing nodes; Huabu assigns edge IDs.                            |
+| `DISCONNECT_EDGES`    | Remove edges by ID or endpoint pair.                                                    |
+| `SET_EDGE_STYLE`      | Patch edge direction, line shape, dash style, stroke, width, or label.                  |
+| `ALIGN_NODES`         | Align existing nodes along one axis.                                                    |
+| `DISTRIBUTE_NODES`    | Spread three or more existing nodes apart.                                              |
+| `SET_FRAME_LAYOUT`    | Configure a frame's free, column, row, or grid layout.                                  |
 
 This table is only a navigation summary. For the complete contract of one command—including required fields, parameter types, enums, limits, semantic constraints, result description, and a valid example—fetch its capability:
 
@@ -231,7 +232,7 @@ Commands run in order, failures do not roll back accepted commands, and an accep
 
 A command cannot refer to a server-assigned ID before you receive it. Create first, read the generated ID, then connect or reparent it in a follow-up request.
 
-For a `MERGE_NODE_DATA` patch that changes `content`, first download the node and copy its unquoted `ETag` into `expectRev`. A missing or stale revision produces an HTTP 200 business result with `applied: false`, `reason: "conflict"`, and a structured conflict. Re-download, reconcile, and submit a new request.
+For a `MERGE_NODE_DATA` patch that changes `content`, first download the node and copy its unquoted `ETag` into `expectRev`. PDF notes are separate Note nodes: inspect the PDF for `noteNodeId`, then read and edit that Note by its own ID, not the PDF's extracted body. Authored property edits (`properties`, `propertyDisplayKeys`) also require `expectRev`; `INSPECT_NODES` supplies the current `rev` without a filesystem download. A missing or stale revision produces an HTTP 200 business result with `applied: false`, `reason: "conflict"`, and a structured conflict. Re-read, reconcile, and submit a new request.
 
 Downloaded node Markdown is a complete Huabu sidecar: server-owned YAML frontmatter followed by the authored Markdown body. `CREATE_NODES.data.content` and `MERGE_NODE_DATA.patch.content` accept the Markdown body only. Never pass the downloaded file verbatim or copy its leading `---` block into `content`; remove exactly the first frontmatter block and preserve everything after its closing fence. Huabu serializes canonical node metadata itself. As a final safety net, an update whose submitted frontmatter `id` matches its target `nodeId` is unwrapped at the server boundary.
 
@@ -284,13 +285,15 @@ THREAD_ID="$(curl -fsS -H "$AUTH" -H "Content-Type: application/json" \
   "$HUABU_RFS_URL/query" \
   | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(JSON.parse(s).result.nodes[0]?.threadId ?? ""))')"
 
-SSE="$(curl -fsS -N -H "$AUTH" -H "Content-Type: text/plain" \
+curl -fsS -N -H "$AUTH" -H "Content-Type: text/plain" \
+  -H "X-Huabu-Event-Mode: all" \
   --data-binary @./follow-up.txt \
-  "$HUABU_RFS_URL/agent/$THREAD_ID/prompt")"
-printf '%s\n' "$SSE" | sed -n 's/^data: //p'
+  "$HUABU_RFS_URL/agent/$THREAD_ID/prompt"
 ```
 
 An absent `threadId` means the result is not a Question Node with an existing thread association. Inspection is read-only and never creates or realizes Agent state. Submitting the prompt continues the associated conversation without creating another Agent or changing its Profile.
+
+For asynchronous handoff, consume this stream incrementally through the matching `accepted` receipt, then disconnect without cancelling execution. The raw curl example streams until closed; do not wait for its final answer or buffer the whole response. Send the actual prompt bytes yourself; a local file path alone is not a dispatch. Load the `agents` guide for receipt validation, bounded submission, and ambiguous-outcome semantics.
 
 ### 8.3 Choose Profiles or create without starting
 

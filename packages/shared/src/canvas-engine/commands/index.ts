@@ -19,6 +19,7 @@ import deleteNodes from './deleteNodes.js';
 import disconnectEdges from './disconnectEdges.js';
 import dissolveFrame from './dissolveFrame.js';
 import distributeNodes from './distributeNodes.js';
+import initializePdfNote from './initializePdfNote.js';
 import mergeNodeData from './mergeNodeData.js';
 import reorderNodes from './reorderNodes.js';
 import restoreNodes from './restoreNodes.js';
@@ -47,6 +48,7 @@ type HandlerMap = {
 
 export const HANDLERS: HandlerMap = {
   CREATE_NODES: createNodes.handler,
+  INITIALIZE_PDF_NOTE: initializePdfNote.handler,
   DELETE_NODES: deleteNodes.handler,
   MERGE_NODE_DATA: mergeNodeData.handler,
   SET_NODE_PARENT: setNodeParent.handler,
@@ -73,6 +75,7 @@ export const HANDLERS: HandlerMap = {
 
 export const COMMAND_META: Record<CanvasCommandType, CommandMeta> = {
   CREATE_NODES: createNodes.meta,
+  INITIALIZE_PDF_NOTE: initializePdfNote.meta,
   DELETE_NODES: deleteNodes.meta,
   MERGE_NODE_DATA: mergeNodeData.meta,
   SET_NODE_PARENT: setNodeParent.meta,

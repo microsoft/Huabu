@@ -12,6 +12,7 @@ import {
 } from '@huabu/shared/canvas-engine';
 
 import { ApiError, deleteNode } from '../api';
+import { withContentPatch } from './canvasStore/save/nodeContentFields';
 import { toast } from '../components/Common/Toast';
 
 import type { RecentAction } from '@huabu/shared';
@@ -366,7 +367,7 @@ class CanvasHistoryManager {
     for (const snapshot of [...this.undoStack, ...this.redoStack]) {
       snapshot.nodes = snapshot.nodes.map((node) =>
         node.id === nodeId
-          ? { ...node, data: { ...node.data, ...patch } }
+          ? { ...node, data: withContentPatch(node.data, patch) }
           : node,
       );
     }

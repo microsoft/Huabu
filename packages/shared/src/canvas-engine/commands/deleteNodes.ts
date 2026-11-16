@@ -2,6 +2,7 @@
 // Licensed under the MIT license.
 
 import { noop, type CommandDefinition } from './types.js';
+import { pdfNoteId } from '../pdfNotes.js';
 
 import type { CanvasCommand } from '../../index.js';
 
@@ -22,6 +23,11 @@ const deleteNodes: CommandDefinition<Cmd> = {
     while (changed) {
       changed = false;
       for (const n of state.nodes) {
+        const noteId = pdfNoteId(n);
+        if (noteId && removedIds.has(n.id) && !removedIds.has(noteId)) {
+          removedIds.add(noteId);
+          changed = true;
+        }
         if (n.parentId && removedIds.has(n.parentId) && !removedIds.has(n.id)) {
           removedIds.add(n.id);
           changed = true;
@@ -41,7 +47,14 @@ const deleteNodes: CommandDefinition<Cmd> = {
       }
     }
 
-    const nextNodes = state.nodes.filter((n) => !removedIds.has(n.id));
+    const nextNodes = state.nodes
+      .filter((n) => !removedIds.has(n.id))
+      .map((node) => {
+        const noteId = pdfNoteId(node);
+        if (!noteId || !removedIds.has(noteId)) return node;
+        const { noteNodeId: _removed, ...data } = node.data;
+        return { ...node, data };
+      });
     const nextEdges = state.edges.filter(
       (e) => !removedIds.has(e.source) && !removedIds.has(e.target),
     );

@@ -400,6 +400,72 @@ describe('moveCanvasSelection', () => {
     );
   });
 
+  it('moves PDF notes with their embedded images and leaves extracted content alone', async () => {
+    createCanvas('source', 'Source');
+    createCanvas('destination', 'Destination');
+    await space('source').artifacts.put(
+      'artifact-note.png',
+      Buffer.from('image'),
+    );
+    const extracted = '![extracted](artifact-note.png)';
+    const seeded = await executeOnServer({
+      canvasId: 'source',
+      originator: { source: 'ui' },
+      commands: [
+        {
+          type: 'CREATE_NODES',
+          nodes: [
+            {
+              id: 'node-pdf',
+              nodeType: 'pdf',
+              position: { x: 0, y: 0 },
+              data: {
+                label: 'Paper',
+                noteNodeId: 'node-notes',
+              },
+            },
+            {
+              id: 'node-notes',
+              nodeType: 'note',
+              position: { x: 0, y: 0 },
+              data: { content: '![note](artifact-note.png)' },
+            },
+          ],
+        },
+      ],
+    });
+    const sourceStore = getCanvasStore('source');
+    const pdf = sourceStore.readNode('node-pdf');
+    if (!pdf) throw new Error('Missing source PDF');
+    sourceStore.writeNode('node-pdf', { ...pdf, content: extracted });
+    const moved = await moveCanvasSelection('source', {
+      selectedNodeIds: ['node-pdf'],
+      destination: { kind: 'existing', canvasId: 'destination' },
+      createSourcePreview: false,
+      expectedSourceVersion: seeded.toVersion,
+    });
+    const stored = await space('destination').nodes.read(
+      moved.roots[0].destinationNodeId,
+    );
+    if (!stored) throw new Error('Missing moved PDF');
+    const record = stored.record;
+    expect(record.content).toBe(extracted);
+    const movedPdf = (await space('destination').read())?.state.nodes.find(
+      (node) => (node as { type?: string }).type === 'pdf',
+    ) as { data: { noteNodeId: string } };
+    const movedNote = (
+      await space('destination').nodes.read(movedPdf.data.noteNodeId)
+    )?.record;
+    expect(movedNote?.content).not.toContain('artifact-note.png');
+    const key = movedNote?.content.match(/!\[note\]\(([^)]+)\)/)?.[1];
+    if (!key) throw new Error('Missing embedded image');
+    expect(await space('destination').artifacts.read(key)).toEqual(
+      Buffer.from('image'),
+    );
+    expect(await space('source').nodes.read('node-pdf')).toBeNull();
+    expect(await space('source').nodes.read('node-notes')).toBeNull();
+  });
+
   it('refuses to copy an artifact cited from a Space the caller may not read', async () => {
     createCanvas('source', 'Source');
     createCanvas('destination', 'Destination');

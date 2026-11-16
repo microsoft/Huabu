@@ -52,6 +52,8 @@ Summary source input is bounded to 6,000 JavaScript string code units, including
 Image labeling uses the same global-default functional runner with text plus canonical image parts; Built-In uses the `imageLabel` role with its vision guard, while external uses ACP image input. It reuses chat image resolution, supported MIME types, and the 4 MB decoded-image cap without introducing a separate renderer or file-transfer channel. Missing pixels, unsupported image input, Agent errors, and invalid labels fail explicitly so enrichment remains retryable; there is no cross-backend fallback.
 Agent `CREATE_NODES` and `MERGE_NODE_DATA` source imports preserve validated YouTube platform URLs verbatim only for `video` nodes, reusing the same ID parser as YouTube preprocessing. They never download the video page into an artifact, so embedding and cover extraction retain the platform source. Lookalike hosts and invalid video IDs do not receive this exception; other media and direct remote imports retain their existing download behavior. Content PUT already persists the supplied `src` verbatim without importing it; subsequent preprocessing uses that source.
 
+Agent `CREATE_NODES` and `MERGE_NODE_DATA` also accept a PDF-only `coverUrl` under the agent command contract. The two entry points that validate against that contract, RFS `execute` and the built-in agent's canvas tool, pass `agentCovers` to the executor; only then does the executor boundary resolve a staged upload, artifact key, or HTTPS image into an existing raster artifact key (png, jpg, gif, webp, avif) before any `src` import, with `null` clearing the cover and restoring the first-page thumbnail. Other agent-origin callers of `executeOnServer`, such as the internal `/api/canvas/:id/execute` route, predate the contract and keep storing whatever cover string they send, on any node type, unfetched and unchecked. Under the contract, unlike a failed `src` import, a non-PDF target or an unavailable image rejects the whole request (`NodeCoverError`, HTTP 400) rather than storing a dangling cover. Availability is judged by the stored bytes, which must parse as one of those formats, not by the name: a `.png` URL can answer with an HTML page. Each distinct value is imported once per request, so several PDFs may share one staged upload. Staged cover uploads are reclaimed only after the executor has run the batch and every command was applied, so a request that throws or has a command rejected leaves them for the retry, and an upload named both as a cover and as a node `src` in one request is still there when sources are normalized. The cover stays structural node data, exactly as when a user sets it from a PDF selection.
+
 ---
 
 ## 3. Node profiles
@@ -62,7 +64,8 @@ Each `CanvasNodeType` declares `{ contentKind?, capabilities, watchFields }`. Se
 | -------------- | ------------ | ------------------------------------------- | ------- | --------------------------- |
 | note / text    | text         | —                                           | ✅      | content, title, labelSource |
 | web            | remote fetch | label + summary + keywords                  | ✅      | src, title, labelSource     |
-| pdf / office   | text         | label + summary + keywords                  | ✅      | src, title, labelSource     |
+| pdf            | text         | label                                       | ✅      | src, title, labelSource     |
+| office         | text         | label + summary + keywords                  | ✅      | src, title, labelSource     |
 | image          | —            | `generate_label` (vision)                   | ✅      | src, labelSource            |
 | video          | cover JPEG   | —                                           | ✅      | src                         |
 | frame          | —            | `generate_label` (summarise children)       | —       | childLabels, labelSource    |
@@ -78,6 +81,8 @@ The ordinary `isLabelProtected` predicate is shared from `packages/shared/src/ut
 The YouTube loader resolves its Service provisioner only when fetching YouTube metadata/transcripts. Importing the shared loader registry does not initialize unrelated Service packages. Ordinary YouTube credential selection and requests are unchanged.
 
 The ordinary `preprocess()` entry holds a Workspace lease for the whole request, and in-flight coalescing includes Workspace identity.
+
+PDF preprocessing no longer generates automatic summaries or keywords, including forced runs. Extraction, local source snapshots, and label generation remain enabled; existing stored summaries/keywords remain readable. Office and Web enrichment are unchanged. Custom `properties` and `propertyDisplayKeys` are always authored: extraction retains their latest stored values and ignores same-named loader metadata. Content PUT applies revision checks to edits of these fields even on derived-body nodes. A PDF's owned Note is a separate node and record, reached through structural `noteNodeId`; PDF extraction never writes its body or revision. The Note uses ordinary Note preprocessing.
 
 ---
 

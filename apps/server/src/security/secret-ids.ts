@@ -4,6 +4,7 @@
 export const SECRET_IDS = {
   imageApiKey: 'llm:image:api-key',
   tavilyApiKey: 'integration:tavily:api-key',
+  hackmdApiKey: 'integration:hackmd:api-key',
   rapidApiKey: 'integration:rapidapi:api-key',
   // Retained for historical encrypted records, never used for connection auth.
   agentletConnectionToken: 'integration:agentlet:connection-token',
