@@ -17,6 +17,9 @@ type FilesPanelEntryMenuProps = {
   path: string;
   relativePath: string;
   onCopyResult: (copied: boolean) => void;
+  onOpen?: () => void;
+  onAdd?: () => void;
+  canAdd?: boolean;
   children: ReactNode;
 };
 
@@ -25,6 +28,9 @@ export function FilesPanelEntryMenu({
   path,
   relativePath,
   onCopyResult,
+  onOpen,
+  onAdd,
+  canAdd = false,
   children,
 }: FilesPanelEntryMenuProps) {
   const { t } = useTranslation();
@@ -44,7 +50,17 @@ export function FilesPanelEntryMenu({
     <div
       role="group"
       aria-label={name}
-      className="group/files-row flex items-center"
+      className="group/files-row hover:bg-hover focus-within:bg-hover/60 flex items-center rounded-sm"
+      onKeyDownCapture={(event) => {
+        if (
+          event.key === 'ContextMenu' ||
+          (event.shiftKey && event.key === 'F10')
+        ) {
+          event.preventDefault();
+          event.stopPropagation();
+          setOpen(true);
+        }
+      }}
       onContextMenu={(event) => {
         event.preventDefault();
         event.stopPropagation();
@@ -66,7 +82,7 @@ export function FilesPanelEntryMenu({
             className={
               open
                 ? undefined
-                : 'opacity-0 group-hover/files-row:opacity-100 focus-visible:opacity-100'
+                : 'opacity-0 group-focus-within/files-row:opacity-100 group-hover/files-row:opacity-100 [@media(hover:none)]:opacity-100'
             }
             onKeyDown={(event) => {
               if (
@@ -98,6 +114,27 @@ export function FilesPanelEntryMenu({
           <DropdownMenuItem onClick={() => void copy(path)}>
             {t('files.copyFullPath')}
           </DropdownMenuItem>
+          {onOpen ? (
+            <DropdownMenuItem
+              onClick={() => {
+                setOpen(false);
+                onOpen();
+              }}
+            >
+              {t('files.openPreview')}
+            </DropdownMenuItem>
+          ) : null}
+          {onAdd ? (
+            <DropdownMenuItem
+              disabled={!canAdd}
+              onClick={() => {
+                setOpen(false);
+                onAdd();
+              }}
+            >
+              {t('files.addToSpace')}
+            </DropdownMenuItem>
+          ) : null}
         </div>
       </DropdownMenu>
     </div>
