@@ -188,4 +188,56 @@ describe('toFieldLevelDeltas', () => {
     expect(result.deltas).toEqual([{ type: 'INSERT_EDGE', edge: other }]);
     expect(result.covered).toEqual(new Set([edgeKey('e1'), edgeKey('e2')]));
   });
+
+  it("keeps this page's edge selection when the server sends the edge back", () => {
+    const stored = { id: 'e1', source: 'x', target: 'y', sourceHandle: 'left' };
+    const local = { ...stored, selected: true };
+    const rerouted = { ...stored, sourceHandle: 'right' };
+    for (const delta of [
+      { type: 'REPLACE_EDGE', prev: stored, next: rerouted },
+      // The update for this page's own creation of the edge.
+      { type: 'INSERT_EDGE', edge: rerouted },
+    ] as unknown as Delta[]) {
+      const result = toFieldLevelDeltas({
+        deltas: [delta],
+        localNodes: [serverX, y],
+        localEdges: [local],
+        isHeld: () => false,
+      });
+      const { edges } = applyDeltas(
+        { nodes: [], edges: [local] } as never,
+        result.deltas,
+      );
+      expect(edges).toEqual([{ ...rerouted, selected: true }]);
+    }
+  });
+
+  it("does not take an edge's selection from another page", () => {
+    const stored = { id: 'e1', source: 'x', target: 'y' };
+    const result = toFieldLevelDeltas({
+      deltas: [
+        {
+          type: 'REPLACE_EDGE',
+          prev: stored,
+          next: { ...stored, selected: true },
+        },
+        {
+          type: 'INSERT_EDGE',
+          edge: { id: 'e2', source: 'y', target: 'x', selected: true },
+        },
+      ] as unknown as Delta[],
+      localNodes: [serverX, y],
+      localEdges: [{ ...stored, selected: false }],
+      isHeld: () => false,
+      stripInsertedSelection: true,
+    });
+    const { edges } = applyDeltas(
+      { nodes: [], edges: [{ ...stored, selected: false }] } as never,
+      result.deltas,
+    );
+    expect(edges).toEqual([
+      { ...stored, selected: false },
+      { id: 'e2', source: 'y', target: 'x' },
+    ]);
+  });
 });

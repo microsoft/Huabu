@@ -35,15 +35,18 @@ import {
 
 import type { Delta } from '@huabu/shared/canvas-engine';
 
+type LocalEdge = { id: string } & Record<string, unknown>;
+
 export interface FieldLevelInput {
   deltas: readonly Delta[];
   localNodes: readonly UnitNode[];
-  localEdges: readonly ({ id: string } & Record<string, unknown>)[];
+  localEdges: readonly LocalEdge[];
   /** Whether an unconfirmed local change holds this in-flight key. */
   isHeld: (key: string) => boolean;
   /**
-   * Drop React Flow selection state from nodes the update inserts, so a
-   * node another person created does not arrive selected on this page.
+   * Drop React Flow selection state from nodes and edges the update
+   * inserts, so what another person created does not arrive selected on
+   * this page.
    */
   stripInsertedSelection?: boolean;
 }
@@ -157,8 +160,20 @@ export function toFieldLevelDeltas(input: FieldLevelInput): FieldLevelResult {
         // of an edge this page already removed stays removed.
         if (isHeld(key)) break;
         if (delta.type === 'REPLACE_EDGE' && !edges.has(edge.id)) break;
-        edges.set(edge.id, edge as unknown as { id: string });
-        out.push(delta);
+        // Selection is this page's view state and is not in the saved
+        // record: the edge the server sends back must not clear it (the
+        // update for this page's own resize re-sends a selected edge), and
+        // an edge another person created does not arrive selected.
+        const localEdge = edges.get(edge.id);
+        const placed =
+          localEdge || input.stripInsertedSelection
+            ? withLocalEdgeSelection(edge as unknown as LocalEdge, localEdge)
+            : (edge as unknown as LocalEdge);
+        edges.set(edge.id, placed);
+        if (placed === (edge as unknown as LocalEdge)) out.push(delta);
+        else if (delta.type === 'INSERT_EDGE')
+          out.push({ type: 'INSERT_EDGE', edge: placed } as unknown as Delta);
+        else out.push({ ...delta, next: placed } as unknown as Delta);
         break;
       }
       case 'DELETE_EDGE': {
@@ -177,4 +192,18 @@ function withoutSelection(node: UnitNode): UnitNode {
   if (!('selected' in node) && !('dragging' in node)) return node;
   const { selected: _selected, dragging: _dragging, ...rest } = node;
   return rest as UnitNode;
+}
+
+/**
+ * The server's edge with this page's own `selected` flag: the local edge's
+ * when the page has the edge, none otherwise.
+ */
+function withLocalEdgeSelection(
+  incoming: LocalEdge,
+  local: LocalEdge | undefined,
+): LocalEdge {
+  const selected = local?.selected;
+  if (incoming.selected === selected) return incoming;
+  const { selected: _selected, ...rest } = incoming;
+  return (selected === undefined ? rest : { ...rest, selected }) as LocalEdge;
 }
