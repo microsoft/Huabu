@@ -385,6 +385,28 @@ describe('durable node metadata actions', () => {
       hidden: true,
       data: { content: '![note](artifact-cloned.png)' },
     });
+    // The pasted pair is one batch through the send queue: the server
+    // creates the same two nodes, linked, with the cloned image.
+    await vi.waitFor(() =>
+      expect(server.state.nodes).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: pdf?.id,
+            data: expect.objectContaining({
+              noteNodeId: pdf?.data.noteNodeId,
+            }),
+          }),
+          expect.objectContaining({
+            id: pdf?.data.noteNodeId,
+            type: 'note',
+            hidden: true,
+            data: expect.objectContaining({
+              content: '![note](artifact-cloned.png)',
+            }),
+          }),
+        ]),
+      ),
+    );
     dispatch.mockRestore();
   });
 
