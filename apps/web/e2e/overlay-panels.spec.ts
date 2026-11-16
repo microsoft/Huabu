@@ -48,17 +48,16 @@ async function geometry(page: Page) {
   });
 }
 
+// DESIGN.md: a side-panel resize handle is `info-light` during both hover
+// and dragging, as an opaque role rather than a local alpha variant.
 async function resizeFeedbackColors(page: Page) {
   return page.evaluate(() => {
     const probe = document.createElement('div');
     document.body.append(probe);
-    const readColor = (opacity: number) => {
-      probe.style.backgroundColor = `color-mix(in oklab, var(--color-info) ${opacity}%, transparent)`;
-      return getComputedStyle(probe).backgroundColor;
-    };
-    const colors = { hover: readColor(30), drag: readColor(50) };
+    probe.style.backgroundColor = 'var(--color-info-light)';
+    const color = getComputedStyle(probe).backgroundColor;
     probe.remove();
-    return colors;
+    return { hover: color, drag: color };
   });
 }
 
@@ -262,7 +261,7 @@ for (const pointerType of ['touch', 'pen', 'mouse'] as const) {
 test.describe('desktop resize feedback', () => {
   test.use({ hasTouch: false });
 
-  test('both rules use 4px translucent hover and active feedback', async ({
+  test('both rules use 4px opaque info-light hover and active feedback', async ({
     page,
   }) => {
     await openNewCanvas(page);
