@@ -132,6 +132,55 @@ function liveKey(agentletId: string, ownerId = mocks.workspaceOwner): string {
 }
 
 describe('ACP cached-meta across awaited persistence', () => {
+  it.each([false, true])(
+    'returns usage receipt times without refreshing them (live=%s)',
+    async (live) => {
+      const usage = {
+        used: 100,
+        size: 1000,
+        cost: { amount: 0, currency: 'credits' },
+        receivedAt: 10,
+      };
+      const tokenUsage = {
+        inputTokens: 3004,
+        outputTokens: 74,
+        totalTokens: 3078,
+        receivedAt: 20,
+      };
+      mocks.record = externalRecord('machine', {
+        usage,
+        tokenUsage,
+        metaUpdatedAt: 999,
+      });
+      if (live) {
+        mocks.live.set(liveKey('machine'), {
+          availableCommands: [],
+          commandsUpdatedAt: 0,
+          availableModes: [],
+          currentModeId: null,
+          availableModels: [],
+          currentModelId: null,
+          configOptions: [],
+          selections: {},
+          sessionInfo: null,
+          usage,
+          tokenUsage,
+          metaUpdatedAt: 999,
+        });
+      }
+      const server = await createApp();
+      const response = await server.inject({
+        method: 'GET',
+        url: CACHED_META_URL,
+      });
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({
+        source: 'thread',
+        sessionMeta: { usage, tokenUsage, updatedAt: 999 },
+      });
+    },
+  );
+
   it('finds the live session under the agentlet its durable record names', async () => {
     mocks.record = externalRecord('agentlet-from-record');
     mocks.live.set(liveKey('agentlet-from-record'), {

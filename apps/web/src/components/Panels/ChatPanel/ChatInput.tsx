@@ -20,12 +20,13 @@ import { ChatContextSources } from './ChatContextSources';
 import { ContextUsageRing } from './ContextUsageRing';
 import { NodeMentionMenu } from './NodeMentionMenu';
 import { QuotedCommentDraft } from './QuotedCommentDraft';
+import { SessionUsage } from './SessionUsage';
 import { SlashCommandMenu } from './SlashCommandMenu';
 import { useNodeMentionTypeahead } from './useNodeMentionTypeahead';
 import { useSlashCommandTypeahead } from './useSlashCommandTypeahead';
 import { Button } from '../../Common/Button';
 
-import type { ContextUsageOverride } from './ContextUsageRing';
+import type { SessionUsageProps } from './SessionUsage';
 import type { AgentMode, AvailableCommand, QuotedComment } from '@huabu/shared';
 
 export interface ChatInputProps {
@@ -81,14 +82,8 @@ export interface ChatInputProps {
    * the text the user is typing.
    */
   agentSelectorSlot?: React.ReactNode;
-  /**
-   * Authoritative context usage forwarded straight to
-   * `ContextUsageRing`. Set by ChatPanel for ACP-bound threads so the
-   * ring reflects the agent's own token budget instead of the
-   * built-in pi-agent's. See `ContextUsageRing` for the three-state
-   * semantics of this prop.
-   */
-  contextUsageOverride?: ContextUsageOverride | undefined;
+  /** External Agent observations; absence retains the built-in context display. */
+  sessionUsage?: SessionUsageProps;
   /** Active node shown in the other Preview split group. */
   adjacentNodeSourceId?: string;
   disabled?: boolean;
@@ -116,7 +111,7 @@ export const ChatInput = ({
   onSlashMenuIntent,
   acpSelectorsSlot,
   agentSelectorSlot,
-  contextUsageOverride,
+  sessionUsage,
   adjacentNodeSourceId,
   disabled = false,
   submitDisabled = false,
@@ -521,10 +516,14 @@ export const ChatInput = ({
             {agentSelectorSlot}
           </div>
           <span className="inline-flex shrink-0 items-center">
-            <ContextUsageRing
-              isStreaming={isStreaming}
-              usageOverride={contextUsageOverride}
-            />
+            {sessionUsage ? (
+              <SessionUsage
+                key={JSON.stringify([canvasId, threadId])}
+                {...sessionUsage}
+              />
+            ) : (
+              <ContextUsageRing isStreaming={isStreaming} />
+            )}
           </span>
         </div>
       </form>
