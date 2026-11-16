@@ -34,9 +34,10 @@ import type { CreateCanvasResponse } from '@huabu/shared';
  * Scenarios 1-8 end with the reverse check: B drags a bystander note and A
  * sees it, which proves B was left in a working state.
  *
- * Scenarios 9 to 12 are two pages editing at once. One page's `POST
+ * Scenarios 9 to 14 are two pages editing at once. One page's `POST
  * /execute` is held in the network, the other page's edit is committed, and
- * the held request is then released, in both orders.
+ * the held request is then released, in both orders. Scenario 15 is one page
+ * making several edits of one note before its first request is answered.
  */
 
 // Mouse input: the default project emulates touch for the gesture suites.
@@ -67,6 +68,8 @@ interface Device {
   spaceLoads: () => number;
   /** Bodies of every `POST …/execute` this page sent. */
   executes: unknown[];
+  /** Per answered `POST …/execute`: each command's outcome, in order. */
+  outcomes: string[][];
   /** Hold this page's `POST …/execute` requests until `release()`. */
   hold: () => Promise<{ held: () => number; release: () => void }>;
 }
@@ -469,6 +472,26 @@ async function openDevice(
       }
     }
   });
+  const outcomes: string[][] = [];
+  page.on('response', (response) => {
+    const sent = response.request();
+    if (
+      sent.method() !== 'POST' ||
+      !new URL(sent.url()).pathname.endsWith('/execute')
+    )
+      return;
+    void response
+      .json()
+      .then((body: { results?: { applied?: boolean; reason?: string }[] }) => {
+        if (!Array.isArray(body.results)) return;
+        outcomes.push(
+          body.results.map((result) =>
+            result.applied ? 'applied' : (result.reason ?? 'refused'),
+          ),
+        );
+      })
+      .catch(() => {});
+  });
   await page.goto(`/canvas/${canvasId}`);
   await expect(page.locator('[data-canvas-root]')).toHaveAttribute(
     'aria-busy',
@@ -498,7 +521,15 @@ async function openDevice(
       },
     };
   };
-  return { name, context, page, spaceLoads: () => spaceLoads, executes, hold };
+  return {
+    name,
+    context,
+    page,
+    spaceLoads: () => spaceLoads,
+    executes,
+    outcomes,
+    hold,
+  };
 }
 
 function nodeOn(page: Page, id: string) {
@@ -1328,15 +1359,15 @@ for (const heldPage of ['A', 'B'] as const) {
 }
 
 /**
- * Scenarios 10-12: two pages place the same note at once, and one of them
- * changes the note's container.
+ * Scenarios 10-14: two pages edit the same note at once, and one of them
+ * changes the note's container or deletes it.
  *
- * Every edit states the parent its nodes had on the page that made it. The
- * edit committed first stands. The later one is applied when the note is
- * still in the container it was made in, and refused as a whole when it is
- * not: the server never reads one page's coordinates inside the other
- * page's container. The refused page is told once and shows the server's
- * Space.
+ * Every edit states the read version it was made on. The edit committed
+ * first stands. The later one is applied when nobody else has deleted its
+ * note or changed the note's container since that version, and refused as a
+ * whole when somebody has: the server never reads one page's coordinates
+ * inside the other page's container. The refused page is told once and shows
+ * the server's Space.
  */
 
 const REFUSED_NOTICE =
@@ -1454,6 +1485,13 @@ function expectUnchanged(scene: Scene, expected: Scene, ids: string[]) {
     );
 }
 
+/** The Space version a read version (`b1.<lineage>.<version>`) names. */
+function readVersionOf(basis: string | undefined): number {
+  const version = Number(basis?.split('.').pop());
+  if (!Number.isInteger(version)) throw new Error(`Not a basis: ${basis}`);
+  return version;
+}
+
 function isAt(point: Point, rect: Rect) {
   return near(point.x, rect.x) && near(point.y, rect.y);
 }
@@ -1505,12 +1543,14 @@ for (const heldPage of ['A', 'B'] as const) {
     // The other page's edit is committed and has reached the page whose own
     // request is still held.
     let committed: Scene | undefined;
+    let committedVersion = 0;
     await expect(async () => {
       const server = await serverScene(request, canvasId);
       expect((await pageState(holder.page)).version).toBe(server.version);
       if (heldPage === 'A') expect(server.scene.nodes[N].parentId).toBeNull();
       else expect(server.scene.nodes[N].parentId).toBe(FRAME);
       committed = server.scene;
+      committedVersion = server.version;
     }).toPass({ timeout: 10_000 });
     if (!committed) throw new Error('unreachable');
     const whileHeld = {
@@ -1559,8 +1599,8 @@ for (const heldPage of ['A', 'B'] as const) {
     expect(Object.keys(scene.nodes).sort()).toEqual(
       [BYSTANDER, FRAME, INSIDE, N].sort(),
     );
-    // Either way the note ends in the Frame where A dropped it: A's request
-    // names the parent it came from, which B's move did not change.
+    // Either way the note ends in the Frame where A dropped it: B's move did
+    // not change the container A read the note in.
     expect(scene.nodes[N].parentId).toBe(FRAME);
     expect(
       isAt(at, wantedByA),
@@ -1571,16 +1611,21 @@ for (const heldPage of ['A', 'B'] as const) {
       // B's refused move changed nothing: the note and the Frame are exactly
       // as A's drag left them, and the hug Frame did not grow.
       expectUnchanged(scene, committed, [N, FRAME, INSIDE]);
-      // B's request said which container the move was made in.
+      // B's request said what the move was made on: the Space before A's
+      // drag, although B had received that drag by the time it was sent.
       const sent = (
         b.executes as {
           commands?: { type?: string }[];
-          expectedParents?: { parents: Record<string, string | null> }[];
+          runs?: { start: number; count: number; basis: string }[];
         }[]
       ).find((body) =>
         body.commands?.some((command) => command.type === 'SET_NODE_GEOMETRY'),
       );
-      expect(sent?.expectedParents?.[0]?.parents).toEqual({ [N]: null });
+      expect(sent?.runs).toHaveLength(1);
+      expect(readVersionOf(sent?.runs?.[0]?.basis)).toBeLessThan(
+        committedVersion,
+      );
+      expect(b.outcomes.flat()).toContain('stale-parent');
     }
     await closeBoth(session);
   });
@@ -1773,3 +1818,208 @@ for (const heldPage of ['A', 'B'] as const) {
     await closeBoth(session);
   });
 }
+
+test("13. B moves a note inside a Frame while A drags it out of the Frame and back in: the note is in the Frame again, but not as B read it, so B's move is refused", async ({
+  browser,
+  request,
+}) => {
+  const race = await startRace(
+    browser,
+    request,
+    'Race out and back',
+    filledFrameSeed,
+  );
+  const { session } = race;
+  const { a, b, canvasId } = session;
+  const noteOn = async (device: Device) =>
+    (await pageState(device.page)).scene.nodes[C[0]];
+  const before = await serverScene(request, canvasId);
+
+  const held = await b.hold();
+  const start = (await domRects(b.page))[C[0]];
+  await dragBy(b.page, C[0], 30, 150);
+  await expect
+    .poll(async () => (await domRects(b.page))[C[0]].y)
+    .toBeGreaterThan(start.y + 100);
+  const wantedByB = (await domRects(b.page))[C[0]];
+  await expect.poll(held.held).toBeGreaterThan(0);
+
+  // A: out of the Frame …
+  await dragTo(a.page, C[0], { x: 400, y: 330 });
+  await expect.poll(async () => (await noteOn(a)).parentId).toBeNull();
+  await expect
+    .poll(async () => (await serverScene(request, canvasId)).version)
+    .toBeGreaterThan(before.version);
+  // … and back in.
+  const frameRect = await rectOf(a.page, FRAME);
+  await dragTo(a.page, C[0], {
+    x: frameRect.x + 30,
+    y: frameRect.y + frameRect.height - 50,
+  });
+  await expect.poll(async () => (await noteOn(a)).parentId).toBe(FRAME);
+  const wantedByA = (await domRects(a.page))[C[0]];
+
+  // Both of A's edits are committed and have reached B.
+  let committed: Scene | undefined;
+  await expect(async () => {
+    const server = await serverScene(request, canvasId);
+    expect(server.version).toBeGreaterThanOrEqual(before.version + 2);
+    expect((await pageState(b.page)).version).toBe(server.version);
+    expect(server.scene.nodes[C[0]].parentId).toBe(FRAME);
+    expect(isAt(absolute(server.scene, C[0]), wantedByA)).toBe(true);
+    committed = server.scene;
+  }).toPass({ timeout: 10_000 });
+  if (!committed) throw new Error('unreachable');
+  // B still shows its own move, whole.
+  expect((await noteOn(b)).parentId).toBe(FRAME);
+  expect(isAt((await domRects(b.page))[C[0]], wantedByB)).toBe(true);
+  held.release();
+
+  const scene = await expectRefused(request, race, 'b');
+  expect(b.outcomes.flat()).toContain('stale-parent');
+  expect(b.outcomes.flat()).not.toContain('applied');
+  expect(Object.keys(scene.nodes).sort()).toEqual(
+    [BYSTANDER, FRAME, C[0], C[1]].sort(),
+  );
+  // The note is where A dropped it the second time; B's move changed nothing.
+  expect(scene.nodes[C[0]].parentId).toBe(FRAME);
+  const at = absolute(scene, C[0]);
+  expect(
+    isAt(at, wantedByA),
+    `the note is where A dropped it: ${JSON.stringify({ at, wantedByA })}`,
+  ).toBe(true);
+  expectUnchanged(scene, committed, [C[0], C[1], FRAME]);
+  await closeBoth(session);
+});
+
+for (const heldPage of ['A', 'B'] as const) {
+  test(`14. A deletes a note while B moves it (${heldPage}'s request arrives last): ${
+    heldPage === 'A'
+      ? 'both are taken and the note is gone'
+      : "the note is gone and B's move is refused"
+  }`, async ({ browser, request }) => {
+    const race = await startRace(
+      browser,
+      request,
+      'Race delete',
+      freeFrameSeed,
+    );
+    const { session } = race;
+    const { a, b, canvasId } = session;
+    /** A's edit. */
+    const remove = async () => {
+      await nodeOn(a.page, N).click({ position: { x: 80, y: 10 } });
+      await expect(nodeOn(a.page, N)).toHaveClass(/selected/);
+      await a.page.keyboard.press('Backspace');
+      await expect(nodeOn(a.page, N)).toHaveCount(0);
+    };
+    /** B's edit. */
+    const move = async () => {
+      const start = (await pageState(b.page)).scene.nodes[N];
+      await dragBy(b.page, N, 20, 220);
+      await expect
+        .poll(async () => (await pageState(b.page)).scene.nodes[N]?.y)
+        .toBeGreaterThan(start.y + 150);
+    };
+
+    const holder = heldPage === 'A' ? a : b;
+    const held = await holder.hold();
+    if (heldPage === 'A') {
+      await remove();
+      await expect.poll(held.held).toBeGreaterThan(0);
+      await move();
+    } else {
+      await move();
+      await expect.poll(held.held).toBeGreaterThan(0);
+      await remove();
+    }
+    // The other page's edit is committed and has reached the waiting page.
+    const before = await serverScene(request, canvasId);
+    await expect(async () => {
+      const server = await serverScene(request, canvasId);
+      expect((await pageState(holder.page)).version).toBe(server.version);
+      if (heldPage === 'A') expect(server.scene.nodes[N]).toBeDefined();
+      else expect(server.scene.nodes[N]).toBeUndefined();
+    }).toPass({ timeout: 10_000 });
+    expect(before.version).toBeGreaterThan(0);
+    held.release();
+
+    const scene =
+      heldPage === 'A'
+        ? await expectBothTaken(request, race)
+        : await expectRefused(request, race, 'b');
+    // Either way the note is gone, everywhere, and nothing else is.
+    expect(Object.keys(scene.nodes).sort()).toEqual(
+      [BYSTANDER, FRAME, INSIDE].sort(),
+    );
+    for (const device of [a, b])
+      await expect(nodeOn(device.page, N)).toHaveCount(0);
+    if (heldPage === 'B') {
+      expect(b.outcomes.flat()).toContain('stale-target');
+      expect(b.outcomes.flat()).not.toContain('applied');
+    } else {
+      expect(a.outcomes.flat()).toContain('applied');
+      expect(a.outcomes.flat()).not.toContain('stale-target');
+    }
+    await closeBoth(session);
+  });
+}
+
+test('15. A drags a note into a Frame, inside it and out again before its first request is answered: every drag is taken, and nobody is told anything', async ({
+  browser,
+  request,
+}) => {
+  const race = await startRace(
+    browser,
+    request,
+    'Consecutive drags',
+    freeFrameSeed,
+  );
+  const { session } = race;
+  const { a, canvasId } = session;
+  const noteOn = async () => (await pageState(a.page)).scene.nodes[N];
+  const before = await serverScene(request, canvasId);
+
+  const held = await a.hold();
+  const frameRect = await rectOf(a.page, FRAME);
+  await dragTo(a.page, N, {
+    x: frameRect.x + 30,
+    y: frameRect.y + frameRect.height - 50,
+  });
+  await expect.poll(async () => (await noteOn()).parentId).toBe(FRAME);
+  await expect.poll(held.held).toBeGreaterThan(0);
+  const inside = (await domRects(a.page))[N];
+  await dragBy(a.page, N, 150, -30);
+  await expect
+    .poll(async () => (await domRects(a.page))[N].x)
+    .toBeGreaterThan(inside.x + 100);
+  expect((await noteOn()).parentId).toBe(FRAME);
+  await dragTo(a.page, N, { x: 400, y: 330 });
+  await expect.poll(async () => (await noteOn()).parentId).toBeNull();
+  const wanted = (await domRects(a.page))[N];
+  // Nothing has reached the server yet.
+  expect((await serverScene(request, canvasId)).version).toBe(before.version);
+  held.release();
+
+  const scene = await expectBothTaken(request, race);
+  expect(scene.nodes[N].parentId).toBeNull();
+  const at = absolute(scene, N);
+  expect(
+    isAt(at, wanted),
+    `the note is where A dropped it last: ${JSON.stringify({ at, wanted })}`,
+  ).toBe(true);
+  expect(scene.children[FRAME]).toEqual([INSIDE]);
+  // The later drags were sent quoting the version from before the first,
+  // and the first — this page's own — was not held against them.
+  const outcomes = a.outcomes.flat();
+  expect(outcomes.length).toBeGreaterThan(1);
+  expect(
+    outcomes.filter((outcome) => outcome !== 'applied' && outcome !== 'no-op'),
+  ).toEqual([]);
+  const quoted = (a.executes as { runs?: { basis: string }[] }[]).flatMap(
+    (body) => (body.runs ?? []).map((run) => readVersionOf(run.basis)),
+  );
+  expect(quoted.length).toBeGreaterThan(1);
+  expect(new Set(quoted)).toEqual(new Set([before.version]));
+  await closeBoth(session);
+});
