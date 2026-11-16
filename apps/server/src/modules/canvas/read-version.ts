@@ -2,26 +2,34 @@
 // Licensed under the MIT license.
 
 /**
- * Read-version check for an executor batch.
+ * Read-version check for an executor batch — the Server's side of it.
  *
- * A caller that quotes the version it read (`basis`) is asking: "apply each
- * command only if the nodes it names are still the ones I saw". The answer is
- * given per command, from the Space's per-node version stamps — never by
- * comparing the basis with the head version, so unrelated writes by others do
- * not get in the way.
+ * A caller that quotes the version it read (`basis`, or one per edit in
+ * `runs`) is asking: "apply this only if the nodes it names are still the
+ * ones I saw". The answer comes from the Space's per-node version stamps —
+ * never by comparing the basis with the head version, so unrelated writes by
+ * others do not get in the way.
  *
- * Which nodes a command names is decided by `commandReadTargets` in the
- * shared engine; this file only compares them with the stamps.
+ * Which nodes a command names (`commandReadTargets`) and how they are
+ * compared with the stamps (`createReadVersionAdmission`) are decided in the
+ * shared engine. This file decodes what the caller sent against the Space's
+ * stamps: the basis strings, the page the request comes from, and the
+ * earlier requests an edit says it was made on top of.
  */
 
-import { parseBasis, type Basis, type CanvasCommand } from '@huabu/shared';
+import { createHash } from 'node:crypto';
+
+import { parseBasis, type Basis, type CanvasExecuteRun } from '@huabu/shared';
 import {
-  commandReadTargets,
-  type CanvasNode,
-  type ExecutorOptions,
+  isRefusedResult,
+  type ReadVersionRun,
 } from '@huabu/shared/canvas-engine';
 
-import type { SpaceStamps } from '../storage/ports/save.js';
+import type {
+  SaveKey,
+  SpaceStamps,
+  StoredSaveResult,
+} from '../storage/ports/save.js';
 
 /**
  * Decode a basis and check that it names a version of this Space's history.
@@ -43,58 +51,88 @@ export function resolveReadVersion(
 }
 
 /**
- * Build the engine's `admit` hook for one batch.
+ * The key node stamps name a browser page by: the authenticated principal
+ * together with the page's own id (`originator.tabId`).
  *
- * - A target that is missing from the state the command would run against,
- *   or that was created after the basis version, rejects the command with
- *   `stale-target`.
- * - A membership target whose parent changed after the basis version rejects
- *   it with `stale-parent`.
- * - A node this batch itself brought into existence — an id absent from the
- *   prestate, or one an earlier command of the batch removed and a later one
- *   created again — is never stale: its author is the caller.
- *
- * Stamps describe the prestate, so what earlier commands of the same batch
- * did to a node never counts against a later one.
- *
- * @param exempt commands the Server added to the batch itself; they follow
- *   from an authored command and are not checked on their own.
+ * Both parts count. The same person's other device or tab is another page,
+ * and its changes are foreign to this one; a page id is chosen by the page,
+ * so on its own it would let one caller pass for another. Hashed so a stamp
+ * stays small and holds no principal id.
  */
-export function createReadVersionAdmit(input: {
-  readonly basis: Basis;
+export function pageKeyOf(principalId: string, pageId: string): string {
+  return createHash('sha256')
+    .update(JSON.stringify([principalId, pageId]))
+    .digest('base64url')
+    .slice(0, 22);
+}
+
+/**
+ * Decode the runs of a request against the Space's stamps.
+ *
+ * Returns the basis that is not a read version of this Space, when there is
+ * one. An edit made on top of an edit of an *earlier* request is looked up
+ * in that request's stored response (`lookup`, by the caller's own key
+ * space): it is `blocked` unless that response is stored and none of the
+ * named commands was refused.
+ */
+export async function resolveRuns(input: {
+  readonly runs: readonly CanvasExecuteRun[];
   readonly stamps: SpaceStamps;
-  readonly prestateNodes: readonly CanvasNode[];
-  readonly exempt?: ReadonlySet<CanvasCommand>;
-}): NonNullable<ExecutorOptions['admit']> {
-  const { basis, stamps, exempt } = input;
-  const prestateIds = new Set(input.prestateNodes.map((node) => node.id));
-  /** Prestate ids seen absent at some point of the batch. */
-  const removedInBatch = new Set<string>();
-
-  return (command, state) => {
-    const present = new Set<string>(state.nodes.map((node) => node.id));
-    for (const id of prestateIds) {
-      if (!present.has(id)) removedInBatch.add(id);
+  readonly principalId: string | undefined;
+  readonly lookup: (key: SaveKey) => Promise<StoredSaveResult | null>;
+}): Promise<
+  { ok: true; runs: ReadVersionRun[] } | { ok: false; basis: string }
+> {
+  const earlier = new Map<string, Promise<StoredSaveResult | null>>();
+  const storedOf = (operationId: string): Promise<StoredSaveResult | null> => {
+    const key = operationId.toLowerCase();
+    let pending = earlier.get(key);
+    if (!pending) {
+      pending = input.principalId
+        ? input.lookup({ principalId: input.principalId, operationId: key })
+        : Promise.resolve(null);
+      earlier.set(key, pending);
     }
-    if (exempt?.has(command)) return undefined;
-
-    const targets = commandReadTargets(command);
-    if (targets.existence.length === 0) return undefined;
-
-    const madeByBatch = (id: string): boolean =>
-      !prestateIds.has(id) || removedInBatch.has(id);
-
-    for (const id of targets.existence) {
-      if (!present.has(id)) return 'stale-target';
-      if (madeByBatch(id)) continue;
-      const created = stamps.nodes[id]?.created ?? stamps.floor;
-      if (created > basis.version) return 'stale-target';
-    }
-    for (const id of targets.membership) {
-      if (madeByBatch(id)) continue;
-      const membership = stamps.nodes[id]?.membership ?? stamps.floor;
-      if (membership > basis.version) return 'stale-parent';
-    }
-    return undefined;
+    return pending;
   };
+
+  const runs: ReadVersionRun[] = [];
+  for (const run of input.runs) {
+    const read = resolveReadVersion(run.basis, input.stamps);
+    if (!read) return { ok: false, basis: run.basis };
+    let blocked = false;
+    const after: { start: number; count: number }[] = [];
+    for (const ref of run.after ?? []) {
+      if (ref.operationId === undefined) {
+        after.push({ start: ref.start, count: ref.count });
+        continue;
+      }
+      const stored = await storedOf(ref.operationId);
+      const results = (
+        stored?.response as { results?: unknown } | null | undefined
+      )?.results;
+      const named = Array.isArray(results)
+        ? results.slice(ref.start, ref.start + ref.count)
+        : [];
+      if (
+        named.length !== ref.count ||
+        named.some(
+          (result) =>
+            result === null ||
+            typeof result !== 'object' ||
+            isRefusedResult(result as { applied: boolean; reason?: string }),
+        )
+      ) {
+        blocked = true;
+      }
+    }
+    runs.push({
+      start: run.start,
+      count: run.count,
+      version: read.version,
+      ...(after.length > 0 ? { after } : {}),
+      ...(blocked ? { blocked: true } : {}),
+    });
+  }
+  return { ok: true, runs };
 }

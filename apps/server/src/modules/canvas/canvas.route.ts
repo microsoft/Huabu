@@ -30,7 +30,7 @@ import {
   deleteNodeParamsSchema,
 } from '@huabu/shared';
 import {
-  expectedParentsProblem,
+  readVersionRunsProblem,
   nodeRevisionOf,
 } from '@huabu/shared/canvas-engine';
 
@@ -64,6 +64,7 @@ import {
   getSpacePreviewScene,
   SpacePreviewSceneError,
 } from './space-preview-scene.js';
+import { currentBasis } from './space-query.js';
 import {
   assertCurrentCanvasCommands,
   assertChildSpaceEntriesAllowed,
@@ -1241,6 +1242,16 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       await reconcileWorldPreviews();
     }
     const handle = space(canvasId);
+    // Before the record is read: a write that lands in between makes the
+    // basis older than the state, which can only refuse an edit that did not
+    // need refusing, never let a stale one through. This is also what gives
+    // an opened Space its stamp baseline. A Space that cannot take one now
+    // (it is being moved or deleted) is still shown; the page then sends
+    // its edits without a read version.
+    const basis = await currentBasis(canvasId).catch((error: unknown) => {
+      request.log.warn({ canvasId, err: error }, 'No read version for load');
+      return null;
+    });
     // Before any node is read: a content save that lands while this request
     // is reading is after this position, so the page asks for it again
     // rather than missing it.
@@ -1261,6 +1272,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       title: canvas.title,
       version: canvas.version,
       contentPosition,
+      ...(basis ? { basis } : {}),
       access: await getSpaceAccess(request, canvasId),
       state: {
         ...canvas.state,
@@ -1408,13 +1420,24 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         message: 'System command origin is reserved for internal callers',
       });
     }
-    const { commands, originator, runId, operationId, basis, expectedParents } =
+    const { commands, originator, runId, operationId, basis, runs } =
       parsed.data;
-    if (expectedParents !== undefined) {
+    if (runs !== undefined) {
       const problem =
         originator.source !== 'ui'
-          ? 'expectedParents is accepted for ui batches only'
-          : expectedParentsProblem(expectedParents, commands.length);
+          ? 'runs is accepted for ui batches only'
+          : readVersionRunsProblem(
+              runs.map((run) => ({
+                start: run.start,
+                count: run.count,
+                version: 0,
+                // Runs of earlier requests are looked up, not addressed.
+                after: (run.after ?? []).filter(
+                  (ref) => ref.operationId === undefined,
+                ),
+              })),
+              commands.length,
+            );
       if (problem) return reply.code(400).send({ message: problem });
     }
     // Stored responses are kept per authenticated caller; the principal is
@@ -1457,10 +1480,15 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
           ? { request: { operationId, principalId } }
           : {}),
         ...(basis !== undefined ? { basis } : {}),
-        ...(expectedParents?.length ? { expectedParents } : {}),
-        // A caller using neither field gets exactly the legacy call: no
+        ...(runs?.length ? { runs } : {}),
+        // "The same page" is the authenticated caller's page: the page id
+        // alone is the page's own claim.
+        ...(originator.source === 'ui' && principalId && originator.tabId
+          ? { page: { principalId, pageId: originator.tabId } }
+          : {}),
+        // A caller using none of the fields gets exactly the legacy call: no
         // stamp baseline is created on its behalf.
-        ...(operationId !== undefined || basis !== undefined
+        ...(operationId !== undefined || basis !== undefined || runs?.length
           ? { issueBasis: true }
           : {}),
       });

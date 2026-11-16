@@ -38,6 +38,7 @@ import {
   interactiveViewRevision,
   type CanvasCommand,
   type CanvasCommandFailureReason,
+  type CanvasExecuteRun,
   type CanvasEdgeId,
   type CanvasNodeId,
   type ExecuteConflict,
@@ -50,7 +51,7 @@ import {
   diffCanvasState,
   diffSiblingOrderEvents,
   SiblingOrderReplayError,
-  createExpectedParentsAdmit,
+  createReadVersionAdmission,
   executeCanvasCommands,
   extractCanvasChanges,
   nodeRevision,
@@ -62,8 +63,8 @@ import {
   type CanvasEdge,
   type CanvasNode,
   type Delta,
-  type ExecutorOptions,
-  type ExpectedParents,
+  type ReadVersionAdmission,
+  type ReadVersionRun,
   type SetSiblingOrderEvent,
 } from '@huabu/shared/canvas-engine';
 
@@ -74,7 +75,7 @@ import {
 } from './agent-node-edit.js';
 import { publishCanvasUpdate } from './canvas-sync.js';
 import { importForeignNodeSources } from './import-node-src.js';
-import { createReadVersionAdmit, resolveReadVersion } from './read-version.js';
+import { pageKeyOf, resolveReadVersion, resolveRuns } from './read-version.js';
 import {
   assertWorldPreviewMutationsAllowed,
   assertChildSpaceEntriesAllowed,
@@ -672,14 +673,23 @@ export interface ExecuteOnServerInput {
   /** Return the read version of the state this call leaves behind. */
   issueBasis?: boolean;
   /**
-   * For `ui` batches: runs of commands that each form one edit, with the
-   * parent every node the edit places had when it was made. A run whose
-   * node is under another parent (or gone) when the run is reached is
-   * refused as a whole with `stale-parent` (`stale-target`); see
-   * `expectedParents.ts` in the shared engine. Ignored for other sources,
-   * whose batches the Server may extend.
+   * For `ui` batches: runs of commands that each form one edit, each with
+   * the read version it was made on. A run is checked like `basis`, but as a
+   * whole: when one of its targets is stale every command of the run is
+   * refused with `stale-target` / `stale-parent`. A run may also name
+   * earlier edits of the same page it was made on top of; it is refused
+   * when one of them did not take effect. Ignored for other sources, whose
+   * batches the Server may extend.
    */
-  expectedParents?: readonly ExpectedParents[];
+  runs?: readonly CanvasExecuteRun[];
+  /**
+   * The browser page the batch comes from: the transport's principal and
+   * the page's own id. A node this page created or re-parented itself is
+   * not stale for it, and what this batch creates or re-parents is recorded
+   * as its change — provided every command was checked against a read
+   * version.
+   */
+  page?: { principalId: string; pageId: string };
   /**
    * The thread id exactly as the caller sent it, when the entry point
    * checked it and `originator.threadId` holds only what survived the check.
@@ -826,9 +836,7 @@ function reliableRequestOf(input: ExecuteOnServerInput): ReliableRequest {
       threadId: input.claimedThreadId ?? input.originator.threadId ?? null,
       // Only when stated, so requests saved before the field existed still
       // match their retries.
-      ...(input.expectedParents?.length
-        ? { expectedParents: input.expectedParents }
-        : {}),
+      ...(input.runs?.length ? { runs: input.runs } : {}),
     }),
   };
 }
@@ -1206,10 +1214,23 @@ async function executePreparedOnServerAlreadyLocked(
   let commands = prepared.commands;
   const fromVersion = canvas.version;
 
+  // A `ui` batch reaches the engine command for command as it was sent, so
+  // the runs' indexes address it; any other batch may be extended below.
+  const statedRuns =
+    originator.source === 'ui' &&
+    input.runs?.length &&
+    commands.length === input.commands.length
+      ? input.runs
+      : undefined;
+
   // Stamps are read only when the caller quotes or asks for a read version;
   // the first such call is what gives a Space its baseline.
   let stamps: SpaceStamps | null = null;
-  if (input.basis !== undefined || input.issueBasis === true) {
+  if (
+    input.basis !== undefined ||
+    statedRuns !== undefined ||
+    input.issueBasis === true
+  ) {
     stamps = await handle.save.stamps();
     if (!stamps) throw new CanvasNotFoundError(canvasId);
   }
@@ -1220,6 +1241,20 @@ async function executePreparedOnServerAlreadyLocked(
   if (input.basis !== undefined && !readVersion) {
     throw new ExecuteBasisError(input.basis);
   }
+  let runs: ReadVersionRun[] | undefined;
+  if (statedRuns && stamps) {
+    const resolved = await resolveRuns({
+      runs: statedRuns,
+      stamps,
+      principalId: input.page?.principalId ?? request?.key.principalId,
+      lookup: (key) => handle.save.lookup(key),
+    });
+    if (!resolved.ok) throw new ExecuteBasisError(resolved.basis);
+    runs = resolved.runs;
+  }
+  const page = input.page
+    ? pageKeyOf(input.page.principalId, input.page.pageId)
+    : undefined;
   /** Commands the Server appends below; not checked on their own. */
   const serverAppended = new Set<CanvasCommand>();
 
@@ -1365,31 +1400,18 @@ async function executePreparedOnServerAlreadyLocked(
     });
   }
 
-  const readVersionAdmit =
-    readVersion && stamps
-      ? createReadVersionAdmit({
-          basis: readVersion,
+  const admission: ReadVersionAdmission | undefined =
+    stamps && (readVersion || runs)
+      ? createReadVersionAdmission({
+          commands,
+          ...(readVersion ? { version: readVersion.version } : {}),
+          ...(runs ? { runs } : {}),
           stamps,
           prestateNodes,
+          ...(page ? { page } : {}),
           exempt: serverAppended,
         })
       : undefined;
-  // A `ui` batch reaches the engine command for command as it was sent, so
-  // the runs' indexes still address it.
-  const expectedParentsAdmit =
-    originator.source === 'ui' &&
-    input.expectedParents?.length &&
-    commands.length === input.commands.length
-      ? createExpectedParentsAdmit(commands, input.expectedParents)
-      : undefined;
-  const admit: ExecutorOptions['admit'] =
-    readVersionAdmit && expectedParentsAdmit
-      ? (command, state) => {
-          // Both are asked: the read-version check follows the batch.
-          const stale = readVersionAdmit(command, state);
-          return expectedParentsAdmit(command, state) ?? stale;
-        }
-      : (readVersionAdmit ?? expectedParentsAdmit);
 
   const { writeResult, commandResults, pendingEffects } = executeCanvasCommands(
     { source: originator.source, commands },
@@ -1400,7 +1422,7 @@ async function executePreparedOnServerAlreadyLocked(
     },
     {
       forceFitFrames: originator.source === 'agent',
-      ...(admit ? { admit } : {}),
+      ...(admission ? { admit: admission.admit } : {}),
     },
   );
 
@@ -1679,6 +1701,19 @@ async function executePreparedOnServerAlreadyLocked(
     ? saveResultFor(canvasId, request, outputWith(changes))
     : null;
 
+  // What this batch creates or re-parents is the page's own change only when
+  // the page said what it had read for every command: an unchecked command
+  // could have moved a node its author had not seen moved.
+  const everyCommandChecked =
+    readVersion !== null ||
+    (runs !== undefined &&
+      runs.reduce((covered, run) => covered + run.count, 0) ===
+        commands.length);
+  const author =
+    page && admission && everyCommandChecked
+      ? { by: page, except: admission.unseenMoves(finalNodes) }
+      : undefined;
+
   let write: Awaited<ReturnType<SpaceHandle['write']>>;
   try {
     write = await handle.write({
@@ -1687,6 +1722,7 @@ async function executePreparedOnServerAlreadyLocked(
       nodeMutations,
       delta: logEntry,
       ...(result ? { result } : {}),
+      ...(author ? { author } : {}),
       ...(reviewThreadId && changes
         ? { reviews: [{ threadId: reviewThreadId, records: changes }] }
         : {}),
