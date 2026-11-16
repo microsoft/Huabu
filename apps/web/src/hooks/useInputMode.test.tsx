@@ -102,3 +102,22 @@ it('does not settle if another press begins before the deferred update', () => {
   act(() => vi.runAllTimers());
   expect(seen.settled).toBe(false);
 });
+
+it('settles after a release that a gesture handler stopped from propagating', () => {
+  const target = document.createElement('div');
+  document.body.append(target);
+  target.addEventListener('pointerup', (event) => event.stopPropagation());
+  try {
+    pointer('pointerdown', 'mouse', 1);
+    expect(seen.settled).toBe(true);
+    const release = new Event('pointerup', { bubbles: true });
+    Object.assign(release, { pointerType: 'mouse', pointerId: 1 });
+    act(() => {
+      target.dispatchEvent(release);
+    });
+    act(() => vi.runAllTimers());
+    expect(seen).toEqual({ live: false, settled: false });
+  } finally {
+    target.remove();
+  }
+});
