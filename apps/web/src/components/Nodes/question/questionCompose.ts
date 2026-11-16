@@ -150,7 +150,7 @@ export function enterQuestionConversation(
   binding: AgentBinding | undefined,
   _canvasId: string | null,
   openPosition: 'last-user' | 'bottom',
-  options?: { transient?: boolean },
+  options?: { transient?: boolean; userInitiated?: boolean },
 ): void {
   useChatStore
     .getState()

@@ -1371,6 +1371,7 @@
     "commentCapturedFile": "Captured file snapshot",
     "commentDestinationLoading": "Loading conversation…",
     "commentDestinationUnavailable": "This conversation is unavailable. Choose another destination.",
+    "commentTemporaryDestination": "Your last comment was added to a temporary chat. Choose a destination for this comment.",
     "commentNoDestinations": "Create a conversation separately before adding a comment.",
     "commentUntitledDestination": "Untitled conversation",
     "commentSelection": "Comment on selection",

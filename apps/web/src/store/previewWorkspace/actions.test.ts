@@ -6,6 +6,7 @@ import { beforeEach, expect, it, vi } from 'vitest';
 import { ApiError } from '@/api/_client';
 import { getAgentConversationOwner } from '@/api/agent';
 import useCanvasStore from '@/store/canvasStore';
+import { useCommentDestinationMemory } from '@/store/commentDestinationMemory';
 
 import {
   openConversationThread,
@@ -24,6 +25,7 @@ vi.mock('@/api/agent', async (original) => ({
 }));
 
 beforeEach(() => {
+  useCanvasStore.setState({ canvasId: '' });
   vi.mocked(getAgentConversationOwner).mockReset();
   useCanvasStore.setState({
     canvasId: 'space',
@@ -37,10 +39,25 @@ beforeEach(() => {
       },
     ],
   });
+
   usePreviewWorkspaceStore.setState({
     canvasId: 'space',
     workspace: createEmptyWorkspace('group'),
   });
+});
+
+it('records explicit Agent opens but not programmatic navigation or file previews', () => {
+  openPreviewNode('agent');
+  expect(useCommentDestinationMemory.getState().lastPreview).toBeNull();
+  openPreviewNode('agent', { userInitiated: true });
+  expect(useCommentDestinationMemory.getState().lastPreview).toEqual({
+    nodeId: 'agent',
+    threadId: 'owned-thread',
+  });
+  openPreviewNode('file', { userInitiated: true });
+  expect(useCommentDestinationMemory.getState().lastPreview?.nodeId).toBe(
+    'agent',
+  );
 });
 
 it.each(['node', 'conversation'] as const)(
