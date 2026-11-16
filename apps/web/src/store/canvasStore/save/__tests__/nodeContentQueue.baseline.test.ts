@@ -571,7 +571,8 @@ describe('nodeContentQueue baseline lifecycle', () => {
           currentRev: 'OTHER',
         }),
       );
-      getMock.mockResolvedValueOnce({
+      // Read twice: when the save is refused, and by Load latest.
+      getMock.mockResolvedValue({
         nodeId: 'n1',
         type: 'note',
         label: null,

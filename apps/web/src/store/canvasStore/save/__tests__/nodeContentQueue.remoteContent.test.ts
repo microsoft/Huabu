@@ -220,11 +220,14 @@ describe('adopting content another page saved', () => {
     });
     expect(data()['content']).toBe('typed here');
     expect(queue.pendingNodeIds()).toContain('n1');
-    // A conflicted node is not overwritten by a later save either.
+    // A conflicted node is not overwritten by a later save either: what
+    // the server holds is only compared with the text, never put into it.
+    getMock.mockResolvedValue(saved('from page A again', { rev: 'again' }));
     await expect(queue.adoptRemoteContent('c1', 'n1')).resolves.toBe(
       'kept-local',
     );
-    expect(getMock).not.toHaveBeenCalled();
+    expect(data()['content']).toBe('typed here');
+    expect(queue.pendingNodeIds()).toContain('n1');
   });
 
   it('does not overwrite text typed while the fetch was under way', async () => {

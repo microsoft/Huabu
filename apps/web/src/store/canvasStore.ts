@@ -3605,6 +3605,14 @@ const useCanvasStore = create<RFState>()(
                   pendingFields.has(key),
                 );
                 const local = localNodesById.get(d.next.id);
+                // A node frozen by a content conflict, and the update brings
+                // exactly the text this page shows: the conflict is over
+                // and nothing was skipped. The rest of the row applies with
+                // the local content fields kept, like a lifecycle update.
+                const settledIdentical =
+                  nodeContentQueue.settleConflictIfIdentical(
+                    serverNodeOf(d.next),
+                  );
                 if (local?.type === 'question') {
                   const localData = (local.data ?? {}) as Record<
                     string,
@@ -3616,7 +3624,7 @@ const useCanvasStore = create<RFState>()(
                     else delete mergedData[key];
                   }
                   preservedPendingNodeIds.add(d.next.id);
-                  if (changesPendingContent) {
+                  if (changesPendingContent && !settledIdentical) {
                     skippedNodeIds.push(d.next.id);
                     skippedRemoteNodes.push(serverNodeOf(d.next));
                   } else if (
@@ -3639,7 +3647,7 @@ const useCanvasStore = create<RFState>()(
                     },
                   ];
                 }
-                if (!changesPendingContent) {
+                if (!changesPendingContent || settledIdentical) {
                   // Coarse REPLACE_NODE deltas carry the server's full node,
                   // including stale content fields. A lifecycle-only update
                   // (for example Question running/done/viewed) is safe to

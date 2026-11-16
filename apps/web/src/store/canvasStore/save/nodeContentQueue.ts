@@ -158,6 +158,39 @@ function remoteContentPatch(
   return patch;
 }
 
+/** The sidecar fields the content revision covers. */
+const REVISION_KEYS = [
+  'content',
+  'src',
+  'properties',
+  'propertyDisplayKeys',
+] as const;
+
+/**
+ * Whether `node` shows exactly the authored content the server returned:
+ * the same revision, or no difference in any field the revision covers that
+ * a save of the node would carry (a PDF's extracted text is part of its
+ * revision but is not sent by a page that does not hold it). Compared as a
+ * save sends them; anything else, one character included, is a difference.
+ */
+function showsServerContent(node: Node, res: GetNodeContentResponse): boolean {
+  if (res.contentMissing) return false;
+  if (res.rev === revOfNode(node)) return true;
+  const data = (node.data ?? {}) as Record<string, unknown>;
+  if (
+    TEXT_BEARING_NODE_TYPES.has(node.type ?? '') &&
+    typeof data['content'] === 'string' &&
+    data['content'] !== res.content
+  )
+    return false;
+  if (typeof data['src'] === 'string' && data['src'] !== res.src) return false;
+  return (['properties', 'propertyDisplayKeys'] as const).every((key) =>
+    res[key] === undefined
+      ? data[key] === undefined
+      : sameValue(data[key], res[key]),
+  );
+}
+
 /** What {@link NodeContentQueue.adoptRemoteContent} did with a node. */
 export type RemoteContentOutcome =
   /** The node now shows the server's content. */
@@ -346,6 +379,16 @@ export type NodeContentQueue = {
    * the node is frozen; a node that is not is left to {@link seedBaselines}.
    */
   rebaseConflict(node: Node): boolean;
+
+  /**
+   * An update carried the server's content for `node` while it is frozen by
+   * a content conflict. When that content is exactly what this page shows,
+   * there is nothing left to choose between: the conflict and its toast are
+   * dismissed without a word, the server's revision becomes the baseline,
+   * and the text and caret stay as they are. Returns whether that happened;
+   * `false` leaves the node frozen (see {@link rebaseConflict}).
+   */
+  settleConflictIfIdentical(node: Node): boolean;
 
   /**
    * Another page saved `nodeId`'s sidecar: fetch it and show it, together
@@ -642,6 +685,7 @@ export function createNodeContentQueue(opts: {
     let propertyEdit = initialPropertyEdit;
     let propertyBase: PropertySide | undefined;
     let propertyMerges = 0;
+    let identicalSettled = false;
     while (true) {
       if (suspendedCanvases.has(canvasId)) return false;
       const requested = new Map(pendingFields.get(nodeId));
@@ -650,9 +694,8 @@ export function createNodeContentQueue(opts: {
         new Set([...requested.keys(), ...Object.keys(propertyEdit ?? {})]),
       );
       if (!body) return false;
-      const beforeProperties = opts
-        .getState()
-        .nodes.find((node) => node.id === nodeId)?.data;
+      const sentNode = opts.getState().nodes.find((node) => node.id === nodeId);
+      const beforeProperties = sentNode?.data;
       if (propertyEdit && !propertyBase)
         propertyBase = {
           properties: beforeProperties?.properties as
@@ -698,6 +741,24 @@ export function createNodeContentQueue(opts: {
               continue;
             }
           } else if (baselineGeneration.get(nodeId) !== baselineAtRequest) {
+            continue;
+          } else if (
+            !identicalSettled &&
+            !kOpts?.keepalive &&
+            sentNode &&
+            (await serverHoldsSameContent(
+              canvasId,
+              nodeId,
+              generation,
+              sentNode,
+              error.currentRev,
+            ))
+          ) {
+            // The server already holds exactly this content: nothing was
+            // overwritten and nothing would be. Its revision is the
+            // baseline now; send once more so the fields the revision does
+            // not cover (title, summary) are saved too.
+            identicalSettled = true;
             continue;
           }
         }
@@ -1380,6 +1441,137 @@ export function createNodeContentQueue(opts: {
     };
   }
 
+  /** Take `rev` as the baseline of a node whose content equals the server's. */
+  function adoptIdenticalBaseline(
+    nodeId: string,
+    rev: string,
+    properties: NodeProperties | undefined,
+  ): void {
+    baselineRev.set(nodeId, rev);
+    if (properties !== undefined)
+      baselineProperties.set(nodeId, structuredClone(properties));
+    else baselineProperties.delete(nodeId);
+    baselineGeneration.set(nodeId, {});
+  }
+
+  /**
+   * A save of `sent` was refused as stale. Whether the server nevertheless
+   * holds exactly that content (two writers arrived at the same text): by
+   * the revision the refusal names, or else by fetching the node. When it
+   * does, its revision is taken as the baseline and `true` is returned; the
+   * node is not frozen and nobody is told.
+   */
+  async function serverHoldsSameContent(
+    canvasId: string,
+    nodeId: string,
+    generation: object | undefined,
+    sent: Node,
+    currentRev: string | undefined,
+  ): Promise<boolean> {
+    if (currentRev !== undefined && currentRev === revOfNode(sent)) {
+      adoptIdenticalBaseline(
+        nodeId,
+        currentRev,
+        sent.data.properties as NodeProperties | undefined,
+      );
+      return true;
+    }
+    let res: GetNodeContentResponse | null;
+    try {
+      res = await getNodeContent(canvasId, nodeId);
+    } catch {
+      return false;
+    }
+    const state = opts.getState();
+    const live = state.nodes.find((n) => n.id === nodeId);
+    if (
+      !res ||
+      !live ||
+      state.canvasId !== canvasId ||
+      suspendedCanvases.has(canvasId) ||
+      generations.get(nodeId) !== generation ||
+      !showsServerContent(live, res)
+    )
+      return false;
+    adoptIdenticalBaseline(nodeId, res.rev, res.properties);
+    return true;
+  }
+
+  /**
+   * End the freeze of a node whose content turned out to equal the
+   * server's: no toast, the server's revision as the baseline, the text
+   * untouched. Fields the revision does not cover that are still unsaved go
+   * out with the next save, which is scheduled here.
+   */
+  function settleIdenticalConflict(
+    canvasId: string,
+    nodeId: string,
+    rev: string,
+    properties: NodeProperties | undefined,
+  ): void {
+    frozen.delete(nodeId);
+    contentConflictToasted.delete(nodeId);
+    dismissFailureToast(nodeId);
+    failures.delete(nodeId);
+    adoptIdenticalBaseline(nodeId, rev, properties);
+    // What the revision covers is on the server as this page shows it.
+    const pending = pendingFields.get(nodeId);
+    for (const key of REVISION_KEYS) pending?.delete(key);
+    if (pending?.size) {
+      schedule(canvasId, nodeId);
+    } else {
+      pendingFields.delete(nodeId);
+      debouncer.cancel(nodeId);
+      opts.onContentPersisted?.(canvasId, nodeId);
+    }
+  }
+
+  /** Checks of a frozen node against the server under way. */
+  const frozenChecks = new Map<string, Promise<RemoteContentOutcome>>();
+
+  /**
+   * Another page saved a node that is frozen here. Fetch it: identical
+   * content settles the conflict; anything else leaves the node frozen and
+   * moves the revision **Keep mine** will overwrite on to the fetched one.
+   */
+  function checkFrozenAgainstServer(
+    canvasId: string,
+    nodeId: string,
+  ): Promise<RemoteContentOutcome> {
+    const running = frozenChecks.get(nodeId);
+    if (running) return running;
+    const generation = generations.get(nodeId);
+    const check = (async (): Promise<RemoteContentOutcome> => {
+      const res = await getNodeContent(canvasId, nodeId);
+      const state = opts.getState();
+      const node = state.nodes.find((n) => n.id === nodeId);
+      if (
+        !node ||
+        state.canvasId !== canvasId ||
+        suspendedCanvases.has(canvasId) ||
+        generations.get(nodeId) !== generation
+      )
+        return 'absent';
+      if (!frozen.has(nodeId) || !res || res.contentMissing)
+        return 'kept-local';
+      if (inflight.has(nodeId) || !showsServerContent(node, res)) {
+        frozen.set(nodeId, res.rev);
+        return 'kept-local';
+      }
+      settleIdenticalConflict(canvasId, nodeId, res.rev, res.properties);
+      return 'unchanged';
+    })()
+      .catch((error: unknown): RemoteContentOutcome => {
+        console.error('[node-content] conflict check failed:', nodeId, error);
+        return 'kept-local';
+      })
+      .finally(() => {
+        if (frozenChecks.get(nodeId) === check) frozenChecks.delete(nodeId);
+      });
+    frozenChecks.set(nodeId, check);
+    return check;
+  }
+
   async function fetchRemoteContent(
     canvasId: string,
     nodeId: string,
@@ -1433,6 +1625,10 @@ export function createNodeContentQueue(opts: {
       return Promise.resolve('absent');
     if (hasUnsavedLocalContent(nodeId)) {
       remoteWhileUnsaved.add(nodeId);
+      // A conflict the user has not answered is over when the other save
+      // left exactly the text this page shows.
+      if (frozen.has(nodeId) && !inflight.has(nodeId))
+        return checkFrozenAgainstServer(canvasId, nodeId);
       return Promise.resolve('kept-local');
     }
     const running = remoteFetches.get(nodeId);
@@ -1769,6 +1965,7 @@ export function createNodeContentQueue(opts: {
       duplicateToasted.delete(nodeId);
       lastSuccessful.delete(nodeId);
       remoteWhileUnsaved.delete(nodeId);
+      frozenChecks.delete(nodeId);
     },
 
     adoptRemoteContent,
@@ -1800,6 +1997,21 @@ export function createNodeContentQueue(opts: {
     rebaseConflict(node) {
       if (!frozen.has(node.id)) return false;
       frozen.set(node.id, revOfNode(node));
+      return true;
+    },
+
+    settleConflictIfIdentical(node) {
+      if (!frozen.has(node.id) || inflight.has(node.id)) return false;
+      const state = opts.getState();
+      const local = state.nodes.find((n) => n.id === node.id);
+      const rev = revOfNode(node);
+      if (!local || revOfNode(local) !== rev) return false;
+      settleIdenticalConflict(
+        state.canvasId,
+        node.id,
+        rev,
+        node.data.properties as NodeProperties | undefined,
+      );
       return true;
     },
 

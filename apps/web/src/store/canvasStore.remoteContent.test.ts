@@ -716,7 +716,9 @@ describe('a node frozen by a content conflict the user has not answered', () => 
   });
 
   it('stays frozen through an update that moves it', async () => {
-    deliver(node(Y), { ...node(Y), position: { x: 900, y: 300 } }, 'ui');
+    // The server's copy of the node carries the body the server holds.
+    const server = { ...node(Y), data: { ...node(Y).data, content: 'Theirs' } };
+    deliver(server, { ...server, position: { x: 900, y: 300 } }, 'ui');
     expect(node(Y).position).toEqual({ x: 900, y: 300 });
     expect(dismissToast).not.toHaveBeenCalled();
     expect(await staysFrozen()).toBe(true);
@@ -748,16 +750,77 @@ describe('a node frozen by a content conflict the user has not answered', () => 
     });
   });
 
-  it('stays frozen when an update brings exactly what the user typed, until they choose', async () => {
+  it('is no longer a conflict when an update brings exactly what the user typed', async () => {
     const server = { ...node(Y), data: { ...node(Y).data, content: 'Theirs' } };
-    deliver(
+    const skipped = deliver(
       server,
-      { ...server, data: { ...server.data, content: 'Mine' } },
+      {
+        ...server,
+        position: { x: 900, y: 300 },
+        data: { ...server.data, content: 'Mine' },
+      },
       'agent',
     );
+    // Nothing of the user's was kept back from anybody: nothing is reported,
+    // the rest of the update applies, the text is the one they typed.
+    expect(skipped).toEqual([]);
+    expect(node(Y).data.content).toBe('Mine');
+    expect(node(Y).position).toEqual({ x: 900, y: 300 });
+    // The conflict toast is gone and no other toast took its place.
+    expect(dismissToast).toHaveBeenCalledWith('toast-id');
+    expect(vi.mocked(toast).mock.calls).toHaveLength(1);
+    // Typing goes on from the server's revision, without a choice.
+    expect(await staysFrozen()).toBe(false);
+    expect(api.putNodeContent.mock.calls.at(-1)?.[2]).toMatchObject({
+      content: 'Mine!',
+      expectRev: nodeRevisionOf({ content: 'Mine' }),
+    });
+  });
+
+  it('stays frozen when an update brings the text with one character more', async () => {
+    const server = { ...node(Y), data: { ...node(Y).data, content: 'Theirs' } };
+    const skipped = deliver(
+      server,
+      { ...server, data: { ...server.data, content: 'Mine.' } },
+      'agent',
+    );
+    expect(skipped).toEqual([Y]);
     expect(node(Y).data.content).toBe('Mine');
     expect(dismissToast).not.toHaveBeenCalled();
     expect(await staysFrozen()).toBe(true);
+  });
+
+  it("is no longer a conflict when another page's save left exactly what the user typed", async () => {
+    api.getNodeContent.mockResolvedValue({
+      ...savedOnServer('Mine', `Label ${Y}`),
+      nodeId: Y,
+    });
+    await adoptRemoteNodeContent(SPACE, [Y]);
+    expect(node(Y).data.content).toBe('Mine');
+    expect(dismissToast).toHaveBeenCalledWith('toast-id');
+    expect(vi.mocked(toast).mock.calls).toHaveLength(1);
+    expect(await staysFrozen()).toBe(false);
+    expect(api.putNodeContent.mock.calls.at(-1)?.[2]).toMatchObject({
+      content: 'Mine!',
+      expectRev: nodeRevisionOf({ content: 'Mine' }),
+    });
+  });
+
+  it("stays frozen when another page's save differs by one character, and Keep mine then replaces that save", async () => {
+    api.getNodeContent.mockResolvedValue({
+      ...savedOnServer('mine', `Label ${Y}`),
+      nodeId: Y,
+    });
+    await adoptRemoteNodeContent(SPACE, [Y]);
+    expect(node(Y).data.content).toBe('Mine');
+    expect(dismissToast).not.toHaveBeenCalled();
+    expect(await staysFrozen()).toBe(true);
+    conflictToast()[0][1]?.secondaryAction?.onClick();
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(api.putNodeContent.mock.calls.at(-1)?.[2]).toMatchObject({
+      content: 'Mine!',
+      expectRev: nodeRevisionOf({ content: 'mine' }),
+    });
   });
 
   it('stays frozen through a wanted reload and a gap', async () => {
