@@ -123,7 +123,10 @@ import {
 } from '@/utils/spaceHierarchy';
 
 import { canvasHistoryManager } from './canvasHistoryManager';
-import { canStartEditing } from './canvasPresence/editLock';
+import {
+  canStartEditing,
+  isEditedOnAnotherPage,
+} from './canvasPresence/editLock';
 import { useIdentityStore } from './identityStore';
 import { useWorkspaceStore } from './workspaceStore';
 import { getCanvas, postCanvasExecute, associateAgentNode } from '../api';
@@ -1137,6 +1140,7 @@ const nodeContentQueue = createNodeContentQueue({
     canvasHistoryManager.rebaseRemoteContent(canvasId, nodeId, patch),
   onPropertiesSaved: (nodeId, patch) =>
     useCanvasStore.getState().updateNodeData(nodeId, patch),
+  isEditedElsewhere: isEditedOnAnotherPage,
 });
 
 // ─── Structure edits through execute ──────────────────────────────────────

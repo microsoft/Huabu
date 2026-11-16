@@ -52,6 +52,11 @@ import {
   withContentPatch,
 } from './nodeContentFields';
 import { createPerKeyDebouncer } from './perKeyDebouncer';
+import {
+  rebasePropertyEdit,
+  type PropertyEdit,
+  type PropertySide,
+} from './propertyMerge';
 
 import type {
   GetNodeContentResponse,
@@ -68,6 +73,12 @@ import type { Node } from '@xyflow/react';
  * yet on the server — closing the create-race window.
  */
 const REV_EMPTY = nodeRevisionOf({});
+
+/**
+ * How often one property edit is made again on top of what the server holds
+ * after its save was refused as stale, before the refusal is reported.
+ */
+const MAX_PROPERTY_MERGES = 3;
 
 /** Compute a node's content revision (the CAS baseline) from its data. */
 function revOfNode(node: Node): string {
@@ -387,6 +398,8 @@ export function createNodeContentQueue(opts: {
     nodeId: string,
     patch: Pick<PutNodeContentRequest, 'properties' | 'propertyDisplayKeys'>,
   ) => void;
+  /** Whether another page reports `nodeId` as being edited right now. */
+  isEditedElsewhere?: (nodeId: string) => boolean;
 }): NodeContentQueue {
   const debouncer = createPerKeyDebouncer<string>(opts.delayMs);
   const suspendedCanvases = new Set<string>();
@@ -610,10 +623,7 @@ export function createNodeContentQueue(opts: {
     canvasId: string,
     nodeId: string,
     kOpts?: { keepalive?: boolean },
-    propertyEdit?: Pick<
-      PutNodeContentRequest,
-      'properties' | 'propertyDisplayKeys'
-    >,
+    initialPropertyEdit?: PropertyEdit,
   ): Promise<boolean> {
     if (
       opts.getState().canvasId !== canvasId ||
@@ -627,6 +637,11 @@ export function createNodeContentQueue(opts: {
       generations.get(nodeId) !== generation
     )
       return false;
+    // The property edit as it is sent: made again on top of the server's
+    // properties each time its save is refused as stale.
+    let propertyEdit = initialPropertyEdit;
+    let propertyBase: PropertySide | undefined;
+    let propertyMerges = 0;
     while (true) {
       if (suspendedCanvases.has(canvasId)) return false;
       const requested = new Map(pendingFields.get(nodeId));
@@ -638,6 +653,15 @@ export function createNodeContentQueue(opts: {
       const beforeProperties = opts
         .getState()
         .nodes.find((node) => node.id === nodeId)?.data;
+      if (propertyEdit && !propertyBase)
+        propertyBase = {
+          properties: beforeProperties?.properties as
+            | NodeProperties
+            | undefined,
+          propertyDisplayKeys: beforeProperties?.propertyDisplayKeys as
+            | string[]
+            | undefined,
+        };
       if (propertyEdit?.properties)
         body.properties = { ...body.properties, ...propertyEdit.properties };
       if (propertyEdit?.propertyDisplayKeys)
@@ -649,10 +673,33 @@ export function createNodeContentQueue(opts: {
       } catch (error) {
         if (
           error instanceof CanvasConflictError &&
-          error.code === 'NODE_CONTENT_CONFLICT' &&
-          baselineGeneration.get(nodeId) !== baselineAtRequest
+          error.code === 'NODE_CONTENT_CONFLICT'
         ) {
-          continue;
+          if (propertyEdit && propertyBase) {
+            // Another save moved the revision. Different properties of one
+            // node are independent: when that save left this edit's keys
+            // alone the edit is made again on top of it; when it changed one
+            // of them the refusal stands.
+            const rebased =
+              propertyMerges < MAX_PROPERTY_MERGES
+                ? await rebasePropertyEditOntoServer(
+                    canvasId,
+                    nodeId,
+                    generation,
+                    propertyEdit,
+                    propertyBase,
+                    requested.size > 0,
+                  )
+                : null;
+            if (rebased) {
+              propertyMerges += 1;
+              propertyEdit = rebased.edit;
+              propertyBase = rebased.base;
+              continue;
+            }
+          } else if (baselineGeneration.get(nodeId) !== baselineAtRequest) {
+            continue;
+          }
         }
         throw error;
       }
@@ -1238,6 +1285,101 @@ export function createNodeContentQueue(opts: {
     );
   }
 
+  /**
+   * Show the server's content of `nodeId` and take its revision as the
+   * baseline, in one step. `patch` is what differs from the node's data.
+   * Returns whether the node changed.
+   */
+  function installRemoteContent(
+    canvasId: string,
+    nodeId: string,
+    res: GetNodeContentResponse,
+    patch: Record<string, unknown>,
+  ): boolean {
+    const state = opts.getState();
+    const changed = Object.keys(patch).length > 0;
+    if (changed) {
+      state._setStateNoAutosave({
+        nodes: state.nodes.map((n) =>
+          n.id === nodeId ? { ...n, data: withContentPatch(n.data, patch) } : n,
+        ),
+      });
+    }
+    // Content and its baseline move together, as on every other path.
+    baselineRev.set(nodeId, res.rev);
+    if (res.properties !== undefined)
+      baselineProperties.set(nodeId, structuredClone(res.properties));
+    else baselineProperties.delete(nodeId);
+    baselineGeneration.set(nodeId, {});
+    lastSuccessful.set(nodeId, {
+      label: res.label,
+      labelSource: res.labelSource,
+    });
+    if (changed) opts.onRemoteContentAdopted?.(canvasId, nodeId, patch);
+    return changed;
+  }
+
+  /**
+   * A property save of `nodeId` was refused as stale. Fetch what the server
+   * holds and, when the other save did not change what `edit` changes, show
+   * the server's content and return the edit as it has to be sent on top of
+   * it. `null` leaves everything as it was, and the refusal is reported.
+   *
+   * Nothing is merged when this page has other unsaved content for the node,
+   * and when the other save changed the body or title while another page is
+   * still editing the node: its next save would then be the one refused.
+   */
+  async function rebasePropertyEditOntoServer(
+    canvasId: string,
+    nodeId: string,
+    generation: object | undefined,
+    edit: PropertyEdit,
+    base: PropertySide,
+    otherFieldsRequested: boolean,
+  ): Promise<{ edit: PropertyEdit; base: PropertySide } | null> {
+    if (otherFieldsRequested || restoredContent.has(nodeId)) return null;
+    let res: GetNodeContentResponse | null;
+    try {
+      res = await getNodeContent(canvasId, nodeId);
+    } catch {
+      return null;
+    }
+    const state = opts.getState();
+    const node = state.nodes.find((n) => n.id === nodeId);
+    if (
+      !res ||
+      res.contentMissing ||
+      !node ||
+      state.canvasId !== canvasId ||
+      suspendedCanvases.has(canvasId) ||
+      generations.get(nodeId) !== generation ||
+      pendingFields.get(nodeId)?.size
+    )
+      return null;
+    const rebased = rebasePropertyEdit(edit, base, res);
+    if (!rebased) return null;
+    const patch = remoteContentPatch(
+      node.type ?? '',
+      (node.data ?? {}) as Record<string, unknown>,
+      res,
+    );
+    const bodyChanged = Object.keys(patch).some(
+      (key) =>
+        key !== 'properties' &&
+        key !== 'propertyDisplayKeys' &&
+        key !== 'contentMissing',
+    );
+    if (bodyChanged && opts.isEditedElsewhere?.(nodeId)) return null;
+    installRemoteContent(canvasId, nodeId, res, patch);
+    return {
+      edit: rebased,
+      base: {
+        properties: res.properties,
+        propertyDisplayKeys: res.propertyDisplayKeys,
+      },
+    };
+  }
+
   async function fetchRemoteContent(
     canvasId: string,
     nodeId: string,
@@ -1269,27 +1411,7 @@ export function createNodeContentQueue(opts: {
       }
       const data = (node.data ?? {}) as Record<string, unknown>;
       const patch = remoteContentPatch(node.type ?? '', data, res);
-      const changed = Object.keys(patch).length > 0;
-      if (changed) {
-        state._setStateNoAutosave({
-          nodes: state.nodes.map((n) =>
-            n.id === nodeId
-              ? { ...n, data: withContentPatch(n.data, patch) }
-              : n,
-          ),
-        });
-      }
-      // Content and its baseline move together, as on every other path.
-      baselineRev.set(nodeId, res.rev);
-      if (res.properties !== undefined)
-        baselineProperties.set(nodeId, structuredClone(res.properties));
-      else baselineProperties.delete(nodeId);
-      baselineGeneration.set(nodeId, {});
-      lastSuccessful.set(nodeId, {
-        label: res.label,
-        labelSource: res.labelSource,
-      });
-      if (changed) opts.onRemoteContentAdopted?.(canvasId, nodeId, patch);
+      const changed = installRemoteContent(canvasId, nodeId, res, patch);
       if (entry.again) continue;
       return changed ? 'applied' : 'unchanged';
     }

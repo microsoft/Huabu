@@ -52,6 +52,16 @@ export function editLockHolder(
   return selectEditLockHolder(useCanvasPresenceStore.getState(), nodeId);
 }
 
+/**
+ * Whether any other page reports `nodeId` as being edited, also when this
+ * page is editing it too (two pages that started in the same instant).
+ */
+export function isEditedOnAnotherPage(nodeId: string): boolean {
+  return Object.values(useCanvasPresenceStore.getState().pages).some((page) =>
+    page.editingNodeIds.includes(nodeId),
+  );
+}
+
 let hintToastId: string | null = null;
 let hintShownAt = 0;
 

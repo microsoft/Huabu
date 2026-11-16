@@ -324,6 +324,33 @@ async function blur(page: Page) {
     .click({ position: { x: 40, y: 560 } });
 }
 
+/**
+ * Hold this page's next content save on its way to the server. `request`
+ * settles with its body once the page has sent it; `release` lets it through.
+ * Later saves are not held.
+ */
+async function holdNextContentSave(page: Page) {
+  let pass: (() => void) | undefined;
+  const passed = new Promise<void>((resolve) => (pass = resolve));
+  let sent: ((body: Record<string, unknown>) => void) | undefined;
+  const request = new Promise<Record<string, unknown>>(
+    (resolve) => (sent = resolve),
+  );
+  let taken = false;
+  const pattern = `**/api/canvas/*/nodes/${NOTE}/content`;
+  await page.route(pattern, async (route) => {
+    if (route.request().method() !== 'PUT' || taken) return route.fallback();
+    taken = true;
+    sent?.(route.request().postDataJSON() as Record<string, unknown>);
+    await passed;
+    await route.continue();
+  });
+  return {
+    request,
+    release: () => pass?.(),
+  };
+}
+
 const tags = (page: Page, id: string) =>
   panel(page, id).locator('[aria-label="Properties"] [data-property-tag]');
 
@@ -741,7 +768,7 @@ test('deleting a PDF with its note on page A and undoing brings both back on pag
   await b.context.close();
 });
 
-test('two pages editing different properties of one note: both survive when the second has read the first, and a simultaneous save is never lost silently', async ({
+test('two pages editing different properties of one note: both survive, also when the two saves leave in the same moment', async ({
   browser,
   request,
 }) => {
@@ -797,8 +824,11 @@ test('two pages editing different properties of one note: both survive when the 
     .poll(async () => (await storeState(a.page)).nodes[NOTE].properties)
     .toEqual({ tags: ['seed', 'physics'], status: 'done' });
   expect([...a.conflicts, ...b.conflicts]).toEqual([]);
+  const putsBefore = writes(b).filter((call) => call.startsWith('PUT')).length;
 
-  // Now both save at the same moment, each from the revision it shows.
+  // Now both save from the same revision. B's request is held on its way
+  // out until the server has taken A's, so B's is the one refused as stale —
+  // every time, not by chance.
   await blur(a.page);
   await blur(b.page);
   await expect(edit(a, 'status')).toBeVisible();
@@ -809,49 +839,114 @@ test('two pages editing different properties of one note: both survive when the 
   await statusField.fill('final');
   await tagField.fill('math');
   await tagField.press('Enter');
-  await Promise.all([statusField.press('Enter'), tagField.press('Enter')]);
-
-  // The server serializes the two saves. The one that arrives second quotes
-  // a revision the first has replaced — unless its page had already fetched
-  // the first — and is refused: that page reverts the edit and says so.
-  // Either way no edit disappears without its page being told.
-  await expect(async () => {
-    const saved = await serverProperties();
-    const statusSaved = saved?.status === 'final';
-    const tagsSaved = (saved?.tags as string[]).includes('math');
-    expect(statusSaved || tagsSaved).toBe(true);
-    if (!statusSaved) await expect(a.page.getByText(SAVE_FAILED)).toBeVisible();
-    if (!tagsSaved) await expect(b.page.getByText(SAVE_FAILED)).toBeVisible();
-    if (statusSaved) await expect(a.page.getByText(SAVE_FAILED)).toHaveCount(0);
-    if (tagsSaved) await expect(b.page.getByText(SAVE_FAILED)).toHaveCount(0);
-  }).toPass({ timeout: 10_000 });
-  const saved = await serverProperties();
-  const outcome = {
-    statusSaved: saved?.status === 'final',
-    tagsSaved: (saved?.tags as string[]).includes('math'),
-    refused: [...a.conflicts, ...b.conflicts].length,
-  };
-  console.log(`[simultaneous property saves] ${JSON.stringify(outcome)}`);
-  test.info().annotations.push({
-    type: 'simultaneous property saves',
-    description: JSON.stringify(outcome),
+  const held = await holdNextContentSave(b.page);
+  await tagField.press('Enter');
+  const heldBody = await held.request;
+  expect(heldBody.properties).toMatchObject({
+    tags: ['seed', 'physics', 'math'],
   });
-  // A refused save is exactly one 409, on the page whose edit is missing.
-  expect(outcome.refused).toBe(
-    outcome.statusSaved && outcome.tagsSaved ? 0 : 1,
-  );
-  expect(a.conflicts.length).toBe(outcome.statusSaved ? 0 : 1);
-  expect(b.conflicts.length).toBe(outcome.tagsSaved ? 0 : 1);
-  // The refused page shows what the server holds for the other property
-  // only after it has answered its conflict; its own value is reverted.
-  const loser = outcome.statusSaved ? (outcome.tagsSaved ? null : b) : a;
-  if (loser) {
-    const shown = (await storeState(loser.page)).nodes[NOTE].properties;
-    expect(shown?.status === 'final' && loser === a).toBe(false);
-    expect((shown?.tags as string[]).includes('math') && loser === b).toBe(
-      false,
-    );
+  await statusField.press('Enter');
+  await expect
+    .poll(serverProperties)
+    .toEqual({ tags: ['seed', 'physics'], status: 'final' });
+  held.release();
+
+  // B's save is refused once. A changed `status`, B changed `tags`: B takes
+  // A's value in, makes its own edit again on top of it and saves — nobody
+  // is asked anything, and nothing has to be done again.
+  await expect
+    .poll(serverProperties)
+    .toEqual({ tags: ['seed', 'physics', 'math'], status: 'final' });
+  for (const device of [a, b]) {
+    await expect
+      .poll(async () => (await storeState(device.page)).nodes[NOTE].properties)
+      .toEqual({ tags: ['seed', 'physics', 'math'], status: 'final' });
+    await expect(device.page.getByText(SAVE_FAILED)).toHaveCount(0);
+    await expect(
+      device.page.getByRole('button', { name: 'Keep mine' }),
+    ).toHaveCount(0);
   }
+  await expect(tags(b.page, NOTE)).toHaveText(['seed', 'physics', 'math']);
+  expect(a.conflicts).toEqual([]);
+  expect(b.conflicts).toEqual([
+    `PUT /api/canvas/${canvasId}/nodes/${NOTE}/content`,
+  ]);
+  // Refused once, fetched, sent again: two saves and no other write.
+  expect(writes(b).filter((call) => call.startsWith('PUT'))).toHaveLength(
+    putsBefore + 2,
+  );
+  await blur(a.page);
+  await blur(b.page);
+  await expect(async () => {
+    for (const device of [a, b]) {
+      const state = await storeState(device.page);
+      expect(state.unsaved).toBe(false);
+      expect(state.pendingContent).toEqual([]);
+      expect(state.reloaded).toBe(false);
+    }
+  }).toPass();
+
+  await a.context.close();
+  await b.context.close();
+});
+
+test('two pages editing the same property of one note at the same moment: the second is refused and told, and nothing is overwritten', async ({
+  browser,
+  request,
+}) => {
+  const { canvasId, a, b } = await openBoth(browser, request, 'Same property');
+  const serverProperties = async () =>
+    (await serverRecord(request, canvasId)).node(NOTE)?.data.properties;
+  const edit = (device: Device) =>
+    panel(device.page, NOTE).getByRole('button', { name: 'Edit status' });
+  const field = (device: Device) =>
+    panel(device.page, NOTE).getByRole('textbox', { name: 'Value' });
+
+  await openPreview(a.page, NOTE);
+  await blur(a.page);
+  await openPreview(b.page, NOTE);
+  await blur(b.page);
+  await expect(edit(a)).toBeVisible();
+  await expect(edit(b)).toBeVisible();
+  // Both start in the same instant, so neither is locked out by the other.
+  await Promise.all([
+    edit(a).dispatchEvent('click'),
+    edit(b).dispatchEvent('click'),
+  ]);
+  await expect(field(a)).toBeFocused();
+  await expect(field(b)).toBeFocused();
+
+  await field(a).fill('from A');
+  await field(b).fill('from B');
+  const held = await holdNextContentSave(b.page);
+  await field(b).press('Enter');
+  await held.request;
+  await field(a).press('Enter');
+  await expect
+    .poll(serverProperties)
+    .toEqual({ tags: ['seed'], status: 'from A' });
+  held.release();
+
+  // Both changed `status`: B's edit is not put on top of A's. B is told, its
+  // edit is taken back, and the server keeps what A saved.
+  await expect(b.page.getByText(SAVE_FAILED)).toBeVisible();
+  await expect(b.page.getByRole('button', { name: 'Keep mine' })).toBeVisible();
+  await expect(a.page.getByText(SAVE_FAILED)).toHaveCount(0);
+  expect(b.conflicts).toEqual([
+    `PUT /api/canvas/${canvasId}/nodes/${NOTE}/content`,
+  ]);
+  expect(a.conflicts).toEqual([]);
+  expect(writes(b).filter((call) => call.startsWith('PUT'))).toHaveLength(1);
+  expect((await storeState(b.page)).nodes[NOTE].properties?.status).not.toBe(
+    'from B',
+  );
+  // Still so a moment later: nothing resubmits behind the toast.
+  await b.page.waitForTimeout(1_500);
+  expect(await serverProperties()).toEqual({
+    tags: ['seed'],
+    status: 'from A',
+  });
+  expect(writes(b).filter((call) => call.startsWith('PUT'))).toHaveLength(1);
   expect((await storeState(a.page)).reloaded).toBe(false);
   expect((await storeState(b.page)).reloaded).toBe(false);
 
