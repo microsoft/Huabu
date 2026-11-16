@@ -93,10 +93,7 @@ import { openPreviewNode } from '@/store/previewWorkspace/actions';
 import { useWorkspaceStore } from '@/store/workspaceStore';
 import { anchorViewportCentre } from '@/utils/canvasViewport';
 import { isMac } from '@/utils/platform';
-import {
-  getEdgeIdsBetweenSelectedNodes,
-  selectionChangeForShownSelectedEdge,
-} from '@/utils/selection';
+import { getEdgeIdsBetweenSelectedNodes } from '@/utils/selection';
 import { isVisibleWorldNode } from '@/utils/spaceHierarchy';
 
 import { applyNodeGeometryPreviews } from './applyNodeGeometryPreview';
@@ -495,24 +492,6 @@ const CanvasContent: React.FC<CanvasProps> = ({
         getEdgeIdsBetweenSelectedNodes(Array.from(selectedNodeIds), edges),
       ),
     [edges, selectedNodeIds],
-  );
-
-  // Picking an edge that is only shown selected (both its ends are) must
-  // select the edge itself; React Flow reports no change for it.
-  const selectShownSelectedEdge = useCallback(
-    (edgeId: string, multiSelect: boolean) => {
-      const state = useCanvasStore.getState();
-      const changes = selectionChangeForShownSelectedEdge({
-        edgeId,
-        edges: state.edges,
-        selectedNodeIds: new Set(
-          state.nodes.filter((node) => node.selected).map((node) => node.id),
-        ),
-        multiSelect,
-      });
-      if (changes.length > 0) state.onEdgesChange(changes);
-    },
-    [],
   );
 
   const wrapperRef = useRef<HTMLDivElement | null>(null);
@@ -1483,28 +1462,6 @@ const CanvasContent: React.FC<CanvasProps> = ({
             if (EXPANDABLE_TYPES.has(node.type ?? '')) {
               openPreviewNode(node.id, { transient: true });
             }
-          }}
-          onEdgeClick={(event, edge) =>
-            selectShownSelectedEdge(
-              edge.id,
-              event.shiftKey || event.metaKey || event.ctrlKey,
-            )
-          }
-          onKeyDownCapture={(event) => {
-            // React Flow's own edge handler (Enter / Space) runs after this.
-            if (event.key !== 'Enter' && event.key !== ' ') return;
-            const target = event.target;
-            if (
-              !(target instanceof Element) ||
-              !target.matches('.react-flow__edge')
-            )
-              return;
-            const edgeId = target.getAttribute('data-id');
-            if (edgeId)
-              selectShownSelectedEdge(
-                edgeId,
-                event.shiftKey || event.metaKey || event.ctrlKey,
-              );
           }}
           onEdgeDoubleClick={(e, edge) => {
             // Jump straight into the label editor — saves the user the
