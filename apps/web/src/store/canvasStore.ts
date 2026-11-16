@@ -3744,8 +3744,11 @@ const useCanvasStore = create<RFState>()(
         if (nodeContentQueue.rebaseConflict(remoteNode.id, rev)) continue;
         if (rev !== undefined) rebasedRemoteNodes.push(remoteNode);
       }
+      // The baseline only: what is recorded about the node's own unsaved
+      // text — a failed save and its Retry toast — stays, because the text
+      // is still here and still unsaved.
       if (rebasedRemoteNodes.length > 0) {
-        nodeContentQueue.seedBaselines(rebasedRemoteNodes, serverRevisions);
+        nodeContentQueue.setBaselines(rebasedRemoteNodes, serverRevisions);
       }
 
       if (safeDeltas.length === 0 && orderEvents.length === 0) {
@@ -3917,7 +3920,11 @@ const useCanvasStore = create<RFState>()(
           else if (MD_BACKED_NODE_TYPES.has(node.type ?? ''))
             withoutRevision.add(id);
         }
-        nodeContentQueue.seedBaselines(adopted, serverRevisions);
+        // These nodes show the server's content and the page holds nothing
+        // unsaved for them: the baseline moves, and nothing is left to
+        // retry.
+        nodeContentQueue.setBaselines(adopted, serverRevisions);
+        nodeContentQueue.clearUnsavedStatus(adopted.map((node) => node.id));
         refreshContentWithoutRevision();
       }
 
@@ -4422,10 +4429,13 @@ const useCanvasStore = create<RFState>()(
         // the authoritative content we just loaded, so the first edit
         // carries the correct `expectRev` and the per-node content CAS can
         // catch a concurrent (cross-tab / cross-device / agent) write.
-        nodeContentQueue.seedBaselines(
+        // The load replaced whatever the page showed, so nothing unsaved is
+        // left to retry or to choose between either.
+        nodeContentQueue.setBaselines(
           warmedNodes,
           response.nodeContentRevisions,
         );
+        nodeContentQueue.clearUnsavedStatus(warmedNodes.map((node) => node.id));
 
         // Backfill: any node with an empty label gets re-queued so the
         // server can regenerate one. The server's preprocessing

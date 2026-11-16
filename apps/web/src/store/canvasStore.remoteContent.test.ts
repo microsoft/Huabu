@@ -702,6 +702,42 @@ describe("the revision an update brings for a node's content", () => {
     expect(state().pendingContentNodeIds()).toEqual([]);
   });
 
+  it('keeps a failed save and its Retry through updates, and Retry then saves on the revision the update brought', async () => {
+    const retryToasts = () =>
+      vi
+        .mocked(toast)
+        .mock.calls.filter(([, options]) => options?.action?.label === 'Retry');
+    api.putNodeContent.mockRejectedValueOnce(new Error('offline'));
+    state().updateNodeData(X, { content: 'Typing' });
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(api.putNodeContent).toHaveBeenCalledTimes(1);
+    expect(retryToasts()).toHaveLength(1);
+    vi.mocked(dismissToast).mockClear();
+
+    // An update to another node's content, then one that carries new
+    // content for the node whose text could not be saved.
+    expect(agentWrites(Y, 'Agent Y', { [Y]: 'stored-y' })).toEqual([]);
+    expect(node(Y).data.content).toBe('Agent Y');
+    serverHolds(STORED);
+    expect(agentWrites(X, 'Agent text', { [X]: STORED })).toEqual([X]);
+
+    // The text is still here and still unsaved: so is the failure.
+    expect(node(X).data.content).toBe('Typing');
+    expect(dismissToast).not.toHaveBeenCalled();
+    expect(hasUnsavedCanvasEdits()).toBe(true);
+    expect(state().pendingContentNodeIds()).toEqual([X]);
+
+    retryToasts()[0][1]?.action?.onClick();
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(api.putNodeContent.mock.calls.at(-1)?.[2]).toMatchObject({
+      content: 'Typing',
+      expectRev: STORED,
+    });
+    expect(dismissToast).toHaveBeenCalledWith('toast-id');
+    expect(conflictToasts()).toHaveLength(0);
+    expect(state().pendingContentNodeIds()).toEqual([]);
+  });
+
   it('is not replaced by a hash when the update names none: the node is fetched and takes the fetched revision', async () => {
     serverHolds(STORED);
     api.getNodeContent.mockResolvedValue({

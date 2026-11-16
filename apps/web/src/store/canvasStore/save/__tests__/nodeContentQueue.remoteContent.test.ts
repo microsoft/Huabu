@@ -69,7 +69,7 @@ function makeQueue(nodes: Node[]) {
     pageId: 'page-b',
     onRemoteContentAdopted: adopted,
   });
-  queue.seedBaselines(nodes);
+  queue.setBaselines(nodes);
   /** The person edits a node on this page. */
   const edit = (id: string, patch: Record<string, unknown>) => {
     const prev = state.nodes;

@@ -71,7 +71,7 @@ function setup(type: 'note' | 'pdf' = 'note') {
     getState: () => state,
     onContentPersisted: persisted,
   });
-  queue.seedBaselines([node], { n1: 'rev-seed' });
+  queue.setBaselines([node], { n1: 'rev-seed' });
   const edit = (data: Record<string, unknown>) => {
     const previous = state.nodes;
     state.nodes = [

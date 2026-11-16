@@ -71,7 +71,7 @@ function setup(options: { editedElsewhere?: boolean } = {}) {
     onRemoteContentAdopted: adopted,
     isEditedElsewhere: () => options.editedElsewhere === true,
   });
-  queue.seedBaselines([node], { n1: 'rev-0' });
+  queue.setBaselines([node], { n1: 'rev-0' });
   return { queue, state, node, adopted };
 }
 
@@ -226,7 +226,7 @@ describe('a property save refused as stale', () => {
     putMock.mockImplementationOnce(async () => {
       // The update for the agent's batch: the node is unsaved here, so the
       // store keeps its properties and only the baseline moves.
-      queue.seedBaselines([agentNode], { n1: 'rev-agent' });
+      queue.setBaselines([agentNode], { n1: 'rev-agent' });
       throw stale('rev-agent');
     });
     getMock.mockResolvedValueOnce(
@@ -265,7 +265,7 @@ describe('a property save refused as stale', () => {
       },
     } as Node;
     putMock.mockImplementationOnce(async () => {
-      queue.seedBaselines([agentNode], { n1: 'rev-agent' });
+      queue.setBaselines([agentNode], { n1: 'rev-agent' });
       throw stale('rev-agent');
     });
     getMock.mockResolvedValueOnce(

@@ -115,7 +115,7 @@ describe('nodeContentQueue baseline lifecycle', () => {
       state._setStateNoAutosave.mockImplementation(({ nodes }) => {
         state.nodes = nodes;
       });
-      queue.seedBaselines([node]);
+      queue.setBaselines([node]);
       putMock.mockRejectedValueOnce(new Error('offline'));
       await expect(queue.commitProperties('c1', 'n1', patch)).rejects.toThrow(
         'offline',
@@ -149,7 +149,7 @@ describe('nodeContentQueue baseline lifecycle', () => {
     state._setStateNoAutosave.mockImplementation(({ nodes }) => {
       state.nodes = nodes;
     });
-    queue.seedBaselines([node]);
+    queue.setBaselines([node]);
     putMock.mockImplementationOnce(async () => {
       const previous = state.nodes;
       state.nodes = [
@@ -189,7 +189,7 @@ describe('nodeContentQueue baseline lifecycle', () => {
     state._setStateNoAutosave.mockImplementation(({ nodes }) => {
       state.nodes = nodes;
     });
-    queue.seedBaselines([node]);
+    queue.setBaselines([node]);
     putMock.mockResolvedValueOnce({
       nodeId: 'n1',
       label: 'Note',
@@ -225,7 +225,7 @@ describe('nodeContentQueue baseline lifecycle', () => {
       content: 'Extracted text only available on the server',
     });
     const { queue, state } = makeQueue(node);
-    queue.seedBaselines([node], { pdf: serverRev });
+    queue.setBaselines([node], { pdf: serverRev });
     const edited = {
       ...node,
       data: {
@@ -243,7 +243,7 @@ describe('nodeContentQueue baseline lifecycle', () => {
     });
     expect(putMock.mock.calls[0][2]).not.toHaveProperty('content');
     expect(toastMock).not.toHaveBeenCalled();
-    queue.seedBaselines([edited], { pdf: 'saved' });
+    queue.setBaselines([edited], { pdf: 'saved' });
     const next = {
       ...edited,
       data: { ...edited.data, properties: { Venue: 'CHI 25', Status: 'Read' } },
@@ -258,7 +258,7 @@ describe('nodeContentQueue baseline lifecycle', () => {
     const node = noteNode('body');
     node.data.properties = { keep: 'yes', remove: 2026 };
     const { queue, state } = makeQueue(node);
-    queue.seedBaselines([node]);
+    queue.setBaselines([node]);
     const edited = {
       ...node,
       data: { ...node.data, properties: { keep: 'yes' } },
@@ -341,7 +341,7 @@ describe('nodeContentQueue baseline lifecycle', () => {
   it('sends only locally dirty Question fields', async () => {
     const node = questionNode('');
     const { queue, state } = makeQueue(node);
-    queue.seedBaselines([node]);
+    queue.setBaselines([node]);
     const edited = questionNode('Pending prompt');
     state.nodes = [edited];
     queue.scheduleChanges('c1', [node], [edited]);
@@ -367,7 +367,7 @@ describe('nodeContentQueue baseline lifecycle', () => {
     });
     const node = questionNode('');
     const { queue, state } = makeQueue(node);
-    queue.seedBaselines([node]);
+    queue.setBaselines([node]);
     const edited = questionNode('Mine');
     state.nodes = [edited];
     queue.scheduleChanges('c1', [node], [edited]);
@@ -377,7 +377,7 @@ describe('nodeContentQueue baseline lifecycle', () => {
 
     const flushing = queue.flushAll();
     await vi.waitFor(() => expect(putMock).toHaveBeenCalledOnce());
-    queue.seedBaselines([questionNode('Remote prompt', 'Remote')]);
+    queue.setBaselines([questionNode('Remote prompt', 'Remote')]);
     finishFirst({ nodeId: 'q1', label: 'Question 1', rev: 'OLD' });
     await flushing;
     await queue.flushAll();
@@ -402,7 +402,7 @@ describe('nodeContentQueue baseline lifecycle', () => {
     });
     const node = questionNode('');
     const { queue, state } = makeQueue(node);
-    queue.seedBaselines([node]);
+    queue.setBaselines([node]);
     const edited = questionNode('Mine');
     state.nodes = [edited];
     queue.scheduleChanges('c1', [node], [edited]);
@@ -412,7 +412,7 @@ describe('nodeContentQueue baseline lifecycle', () => {
 
     const flushing = queue.flushAll();
     await vi.waitFor(() => expect(putMock).toHaveBeenCalledOnce());
-    queue.seedBaselines([questionNode('Remote prompt', 'Remote')]);
+    queue.setBaselines([questionNode('Remote prompt', 'Remote')]);
     failFirst(
       new CanvasConflictError({
         code: 'NODE_CONTENT_CONFLICT',
@@ -453,7 +453,7 @@ describe('nodeContentQueue baseline lifecycle', () => {
   it('sends the seeded rev, then advances to the server-returned rev', async () => {
     const node = noteNode('v1');
     const { queue } = makeQueue(node);
-    queue.seedBaselines([node]);
+    queue.setBaselines([node]);
 
     putMock.mockResolvedValueOnce({ nodeId: 'n1', label: 'Note', rev: 'SRV1' });
     await queue.flushNow('c1', 'n1');
@@ -472,7 +472,7 @@ describe('nodeContentQueue baseline lifecycle', () => {
   it('sends the empty-content rev for a node with no seeded baseline', async () => {
     const node = noteNode('fresh');
     const { queue } = makeQueue(node);
-    // No seedBaselines() — brand-new node created this session.
+    // No setBaselines() — brand-new node created this session.
 
     putMock.mockResolvedValueOnce({ nodeId: 'n1', label: 'Note', rev: 'SRV1' });
     await queue.flushNow('c1', 'n1');
@@ -493,7 +493,7 @@ describe('nodeContentQueue baseline lifecycle', () => {
   it('on NODE_CONTENT_CONFLICT: no throw, keeps text, freezes, toasts once', async () => {
     const node = noteNode('v1');
     const { queue, state } = makeQueue(node);
-    queue.seedBaselines([node]);
+    queue.setBaselines([node]);
 
     const conflict = new CanvasConflictError({
       code: 'NODE_CONTENT_CONFLICT',
@@ -521,7 +521,7 @@ describe('nodeContentQueue baseline lifecycle', () => {
   it('a frozen node counts as unsaved content and keeps its conflict when the server content moves on', async () => {
     const node = noteNode('mine');
     const { queue } = makeQueue(node);
-    queue.seedBaselines([node]);
+    queue.setBaselines([node]);
     putMock.mockRejectedValueOnce(
       new CanvasConflictError({
         code: 'NODE_CONTENT_CONFLICT',
@@ -567,7 +567,7 @@ describe('nodeContentQueue baseline lifecycle', () => {
     async (deferred) => {
       const node = noteNode('mine');
       const { queue, state } = makeQueue(node);
-      queue.seedBaselines([node]);
+      queue.setBaselines([node]);
       putMock.mockRejectedValueOnce(
         new CanvasConflictError({
           code: 'NODE_CONTENT_CONFLICT',
@@ -612,7 +612,7 @@ describe('nodeContentQueue baseline lifecycle', () => {
   it('"Keep mine" re-baselines to the disk rev and force-writes over it', async () => {
     const node = noteNode('mine');
     const { queue } = makeQueue(node);
-    queue.seedBaselines([node]);
+    queue.setBaselines([node]);
 
     const conflict = new CanvasConflictError({
       code: 'NODE_CONTENT_CONFLICT',

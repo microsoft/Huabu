@@ -356,19 +356,38 @@ export type NodeContentQueue = {
   hasUnsavedContent(canvasId: string): boolean;
 
   /**
-   * Seed (or refresh) the optimistic-concurrency baseline revision for
-   * each given node from its current authored content. Called with the
-   * authoritative server state so content and its baseline are updated
-   * together (never through separate channels): on `loadCanvas` for every
-   * loaded node, and on `applyDeltasFromAgent` for the nodes an agent
-   * write actually applied. This is what keeps a subsequent user edit
-   * from a false `NODE_CONTENT_CONFLICT` after an agent write that was
-   * already reflected in the user's view.
+   * Move the save baseline of each given node: the revision its next
+   * content save quotes as `expectRev`, and the property bag that save
+   * computes removals against. **Nothing else**: a failed save stays
+   * recorded with its Retry toast, and a node frozen by a content conflict
+   * stays frozen. Called whenever the page learns the server's current
+   * revision of a node — a load, an update that changed the node's content
+   * and was applied, and an update whose content change was withheld
+   * because the user is editing the node (the baseline moves, the text
+   * stays).
+   *
+   * `revisions` are the server's (`nodeContentRevisions` of a load or an
+   * update). A node it does not name is hashed from `node` — a load from a
+   * server that sends none; callers on the update path pass only nodes the
+   * server named.
    */
-  seedBaselines(
+  setBaselines(
     nodes: readonly Node[],
     revisions?: Readonly<Record<string, string>>,
   ): void;
+
+  /**
+   * The page shows the server's content of these nodes and holds nothing
+   * unsaved for them — a load, or an update applied to a node with no local
+   * edit. Forget what was recorded about their saves: the failure record
+   * and its toast, the once-per-node toast guards, and a conflict freeze,
+   * since nothing is left to retry or to choose between.
+   *
+   * Never called for a node that still shows content of its own: a failure
+   * record is otherwise cleared only by a successful save, and a freeze only
+   * by the user's choice or by the identical-content rule.
+   */
+  clearUnsavedStatus(nodeIds: readonly string[]): void;
 
   /**
    * An update carried the server's new content for `nodeId` while this page
@@ -377,7 +396,7 @@ export type NodeContentQueue = {
    * the node stays frozen with its toast, and only the revision **Keep
    * mine** would overwrite moves on to `rev`, the revision the server stored
    * with that update. Without one nothing moves. Returns whether the node is
-   * frozen; a node that is not is left to {@link seedBaselines}.
+   * frozen; a node that is not is left to {@link setBaselines}.
    */
   rebaseConflict(nodeId: string, rev: string | undefined): boolean;
 
@@ -491,7 +510,7 @@ export function createNodeContentQueue(opts: {
   /**
    * Optimistic-concurrency baseline: the {@link nodeRevision} each node's
    * last server-agreed content had. Seeded on load / agent-sync (via
-   * {@link seedBaselines}) and updated to the server-returned rev after
+   * {@link setBaselines}) and updated to the server-returned rev after
    * every successful write, so content and its baseline always move
    * together. A node with no entry sends {@link REV_EMPTY} (treated as
    * "I believe this is a fresh create").
@@ -504,7 +523,8 @@ export function createNodeContentQueue(opts: {
    * Node ids for which the persistent `NODE_CONTENT_CONFLICT` toast is
    * registered (visible or deferred). Rate-limits it to once per node (autosave
    * would otherwise re-pop it on every keystroke while the node stays
-   * blocked). Cleared on a successful write or a baseline reseed.
+   * blocked). Cleared on a successful write, when the conflict is answered,
+   * and by {@link NodeContentQueue.clearUnsavedStatus}.
    */
   const contentConflictToasted = new Set<string>();
 
@@ -516,12 +536,14 @@ export function createNodeContentQueue(opts: {
    * "Load latest" (reload) resolution safe: reloading can never leak our
    * stale in-app version onto disk and clobber the newer server content.
    * The stored rev lets "Keep mine" re-baseline and force the overwrite.
-   * Cleared when the node is resolved (reseeded on load / agent-sync, or
-   * a successful forced write). An update that arrives meanwhile never
-   * clears it: a frozen node counts as having unsaved content
-   * ({@link NodeContentQueue.pendingNodeIds}), and an update that carries
-   * new server content for it only moves the stored rev
-   * ({@link NodeContentQueue.rebaseConflict}).
+   * Cleared by the user's choice (Keep mine, Load latest), by the
+   * identical-content rule, and when the page's copy is replaced by the
+   * server's ({@link NodeContentQueue.clearUnsavedStatus}, a load). An
+   * update that arrives meanwhile never clears it: a frozen node counts as
+   * having unsaved content ({@link NodeContentQueue.pendingNodeIds}), an
+   * update that carries new server content for it only moves the stored rev
+   * ({@link NodeContentQueue.rebaseConflict}), and moving a baseline
+   * ({@link NodeContentQueue.setBaselines}) does not touch it.
    */
   const frozen = new Map<string, string>();
 
@@ -1972,7 +1994,7 @@ export function createNodeContentQueue(opts: {
 
     adoptRemoteContent,
 
-    seedBaselines(nodes, revisions) {
+    setBaselines(nodes, revisions) {
       for (const node of nodes) {
         const nodeType = typeof node.type === 'string' ? node.type : '';
         if (!MD_BACKED_NODE_TYPES.has(nodeType)) continue;
@@ -1984,15 +2006,20 @@ export function createNodeContentQueue(opts: {
           );
         else baselineProperties.delete(node.id);
         baselineGeneration.set(node.id, {});
-        failures.delete(node.id);
-        dismissFailureToast(node.id);
-        saveErrorToasted.delete(node.id);
-        duplicateToasted.delete(node.id);
-        // A fresh authoritative baseline means any prior conflict for this
-        // node is resolved — drop the toast guard and unfreeze it so a
-        // later divergence alerts again and writes resume.
-        contentConflictToasted.delete(node.id);
-        frozen.delete(node.id);
+      }
+    },
+
+    clearUnsavedStatus(nodeIds) {
+      for (const nodeId of nodeIds) {
+        failures.delete(nodeId);
+        dismissFailureToast(nodeId);
+        saveErrorToasted.delete(nodeId);
+        duplicateToasted.delete(nodeId);
+        // The server's content replaced this page's: a conflict over it has
+        // nothing left to choose between. Drop the toast guard and the
+        // freeze so a later divergence alerts again and writes resume.
+        contentConflictToasted.delete(nodeId);
+        frozen.delete(nodeId);
       }
     },
 

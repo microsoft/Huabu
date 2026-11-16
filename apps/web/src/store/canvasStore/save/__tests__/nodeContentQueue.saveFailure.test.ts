@@ -156,7 +156,7 @@ describe('nodeContentQueue — save-failure surfacing', () => {
         );
         queue.scheduleChanges('c1', [], [node]);
         await expect(queue.flushAllForSubmission('c1')).rejects.toThrow();
-        queue.seedBaselines([node]);
+        queue.setBaselines([node]);
         queue.scheduleChanges('c1', [], [node]);
         await expect(queue.flushAllForSubmission('c1')).rejects.toThrow();
         expect(toastMock).not.toHaveBeenCalled();
@@ -283,7 +283,7 @@ describe('nodeContentQueue — save-failure surfacing', () => {
     const saving = queue.flushNow('c1', node.id);
     await tick();
     expect(putMock).toHaveBeenCalledOnce();
-    queue.seedBaselines([noteNode('server revision')]);
+    queue.setBaselines([noteNode('server revision')]);
     const resume = queue.suspendCanvas('c1');
     reject(
       new CanvasConflictError({
@@ -309,13 +309,15 @@ describe('nodeContentQueue — save-failure surfacing', () => {
       const node = noteNode('v1');
       const { queue } = makeQueue(node);
       toastMock.mockReturnValue('failed-save');
-      queue.seedBaselines([node]);
+      queue.setBaselines([node]);
       putMock.mockRejectedValue(failure);
       await expect(
         queue.flushNow('c1', node.id, { source: 'auto' }),
       ).rejects.toBe(failure);
       expect(toastMock).toHaveBeenCalledOnce();
-      queue.seedBaselines([node]);
+      // The page's copy is replaced by the server's, as on a load.
+      queue.setBaselines([node]);
+      queue.clearUnsavedStatus([node.id]);
       expect(dismissToast).toHaveBeenCalledWith('failed-save');
       await expect(
         queue.flushNow('c1', node.id, { source: 'auto' }),
@@ -330,10 +332,89 @@ describe('nodeContentQueue — save-failure surfacing', () => {
     },
   );
 
+  it('keeps a failed save recorded, with its Retry, when only the baseline moves', async () => {
+    const node = noteNode('v1');
+    const { queue } = makeQueue(node);
+    toastMock.mockReturnValue('failed-save');
+    queue.setBaselines([node]);
+    putMock.mockRejectedValueOnce(new Error('offline'));
+    await expect(
+      queue.flushNow('c1', node.id, { source: 'auto' }),
+    ).rejects.toThrow('offline');
+    expect(toastMock).toHaveBeenCalledOnce();
+    vi.mocked(dismissToast).mockClear();
+
+    // The server's revision of the node moved on; this page still shows,
+    // and has not saved, its own text.
+    queue.setBaselines([noteNode('newer on the server')], {
+      [node.id]: 'server-rev',
+    });
+
+    expect(dismissToast).not.toHaveBeenCalled();
+    expect(queue.unsavedNodeIds('c1')).toEqual([node.id]);
+    expect(queue.hasUnsavedContent('c1')).toBe(true);
+    // A second background failure is still throttled: the first was not
+    // forgotten.
+    putMock.mockRejectedValueOnce(new Error('offline'));
+    await queue.flushNow('c1', node.id, { source: 'auto' }).catch(() => {});
+    expect(toastMock).toHaveBeenCalledOnce();
+    expect(putMock.mock.calls.at(-1)?.[2].expectRev).toBe('server-rev');
+
+    // Retry saves on the moved baseline, and only that clears the record.
+    putMock.mockResolvedValueOnce({
+      nodeId: node.id,
+      label: 'Note',
+      rev: 'ok',
+    });
+    toastMock.mock.calls[0][1].action.onClick();
+    await tick();
+    expect(putMock.mock.calls.at(-1)?.[2]).toMatchObject({
+      content: 'v1',
+      expectRev: 'server-rev',
+    });
+    expect(dismissToast).toHaveBeenCalledWith('failed-save');
+    expect(queue.unsavedNodeIds('c1')).toEqual([]);
+  });
+
+  it("keeps a conflict frozen when only the baseline moves, and releases it when the page's copy is replaced", async () => {
+    const node = noteNode('mine');
+    const { queue } = makeQueue(node);
+    toastMock.mockReturnValue('conflict-toast');
+    queue.setBaselines([node]);
+    putMock.mockRejectedValueOnce(
+      new CanvasConflictError({
+        code: 'NODE_CONTENT_CONFLICT',
+        message: 'changed elsewhere',
+        nodeId: node.id,
+        currentRev: 'OTHER',
+      }),
+    );
+    await queue.flushNow('c1', node.id);
+    expect(queue.pendingNodeIds()).toEqual([node.id]);
+    expect(toastMock).toHaveBeenCalledOnce();
+    vi.mocked(dismissToast).mockClear();
+
+    queue.setBaselines([noteNode('newer on the server')], {
+      [node.id]: 'server-rev',
+    });
+
+    // Still frozen, with its choice: nothing is written.
+    expect(dismissToast).not.toHaveBeenCalled();
+    expect(queue.pendingNodeIds()).toEqual([node.id]);
+    await queue.flushNow('c1', node.id);
+    expect(putMock).toHaveBeenCalledOnce();
+
+    // A load replaces the page's text: nothing is left to choose between.
+    queue.clearUnsavedStatus([node.id]);
+    expect(dismissToast).toHaveBeenCalledWith('conflict-toast');
+    expect(queue.pendingNodeIds()).toEqual([]);
+    queue.discardCanvas('c1');
+  });
+
   it('retries retained failures without retrying new failures in the same drain', async () => {
     const node = noteNode('v1');
     const { queue } = makeQueue(node);
-    queue.seedBaselines([node]);
+    queue.setBaselines([node]);
     putMock.mockRejectedValue(new Error('offline'));
     queue.scheduleChanges('c1', [node], [noteNode('v2')]);
     await queue.flushAll();
@@ -430,7 +511,7 @@ describe('nodeContentQueue — save-failure surfacing', () => {
     );
     state.canvasId = 'c1';
     state.nodes = [node];
-    queue.seedBaselines([node]);
+    queue.setBaselines([node]);
     retry();
     await tick();
     expect(putMock).toHaveBeenCalledTimes(2);
@@ -453,7 +534,7 @@ describe('nodeContentQueue — save-failure surfacing', () => {
     queue.discardCanvas('c1');
     expect(dismissToast).toHaveBeenCalledWith('conflict-toast');
     state.nodes = [noteNode('server text')];
-    queue.seedBaselines(state.nodes);
+    queue.setBaselines(state.nodes);
     conflict.secondaryAction.onClick();
     conflict.action.onClick();
     await tick();
@@ -521,7 +602,7 @@ describe('nodeContentQueue — save-failure surfacing', () => {
   it('surfaces a retryable danger toast even on the auto path', async () => {
     const node = noteNode('v1');
     const { queue } = makeQueue(node);
-    queue.seedBaselines([node]);
+    queue.setBaselines([node]);
     putMock.mockRejectedValue(new Error('disk fail'));
 
     await queue.flushNow('c1', 'n1', { source: 'auto' }).catch(() => undefined);
@@ -535,7 +616,7 @@ describe('nodeContentQueue — save-failure surfacing', () => {
   it('throttles repeated auto failures to once per node', async () => {
     const node = noteNode('v1');
     const { queue } = makeQueue(node);
-    queue.seedBaselines([node]);
+    queue.setBaselines([node]);
     putMock.mockRejectedValue(new Error('disk fail'));
 
     await queue.flushNow('c1', 'n1', { source: 'auto' }).catch(() => undefined);
@@ -547,7 +628,7 @@ describe('nodeContentQueue — save-failure surfacing', () => {
   it('re-alerts after a success clears the throttle', async () => {
     const node = noteNode('v1');
     const { queue } = makeQueue(node);
-    queue.seedBaselines([node]);
+    queue.setBaselines([node]);
 
     putMock.mockRejectedValueOnce(new Error('disk fail'));
     await queue.flushNow('c1', 'n1', { source: 'auto' }).catch(() => undefined);
@@ -564,7 +645,7 @@ describe('nodeContentQueue — save-failure surfacing', () => {
   it('Retry action re-flushes the node', async () => {
     const node = noteNode('v1');
     const { queue } = makeQueue(node);
-    queue.seedBaselines([node]);
+    queue.setBaselines([node]);
 
     putMock.mockRejectedValueOnce(new Error('disk fail'));
     await queue.flushNow('c1', 'n1', { source: 'auto' }).catch(() => undefined);
