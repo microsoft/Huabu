@@ -1023,6 +1023,10 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
           propertyDisplayKeys !== undefined
             ? expectRev
             : undefined,
+        // A PDF's extracted text is not sent to the web (`hydrateOneNode`),
+        // so a write without a body may rest on the metadata alone. One that
+        // carries a body replaces the text and must have seen it.
+        derivedBody: nodeType === 'pdf' && incomingContent === undefined,
         apply,
         strictRename: labelSource === 'user',
       });
