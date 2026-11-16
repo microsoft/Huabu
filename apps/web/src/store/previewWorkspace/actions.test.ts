@@ -46,20 +46,6 @@ beforeEach(() => {
   });
 });
 
-it('records explicit Agent opens but not programmatic navigation or file previews', () => {
-  openPreviewNode('agent');
-  expect(useCommentDestinationMemory.getState().lastPreview).toBeNull();
-  openPreviewNode('agent', { userInitiated: true });
-  expect(useCommentDestinationMemory.getState().lastPreview).toEqual({
-    nodeId: 'agent',
-    threadId: 'owned-thread',
-  });
-  openPreviewNode('file', { userInitiated: true });
-  expect(useCommentDestinationMemory.getState().lastPreview?.nodeId).toBe(
-    'agent',
-  );
-});
-
 it.each(['node', 'conversation'] as const)(
   'reuses an existing %s owner tab',
   (kind) => {
@@ -256,4 +242,18 @@ it('does not open a source into a Space selected while its owner lookup was pend
   expect(
     Object.keys(usePreviewWorkspaceStore.getState().workspace.tabs),
   ).toHaveLength(0);
+});
+
+it('records explicit Agent opens but not programmatic navigation or file previews', () => {
+  openPreviewNode('agent');
+  expect(useCommentDestinationMemory.getState().lastPreview).toBeNull();
+  openPreviewNode('agent', { userInitiated: true });
+  expect(useCommentDestinationMemory.getState().lastPreview).toEqual({
+    nodeId: 'agent',
+    threadId: 'owned-thread',
+  });
+  openPreviewNode('file', { userInitiated: true });
+  expect(useCommentDestinationMemory.getState().lastPreview?.nodeId).toBe(
+    'agent',
+  );
 });
