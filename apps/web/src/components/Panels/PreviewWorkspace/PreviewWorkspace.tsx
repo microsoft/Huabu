@@ -466,7 +466,7 @@ export function PreviewWorkspace({
                 onKeyDown={onSeparatorKeyDown}
                 className="group focus-visible:outline-info z-10 -mx-1 flex w-2 shrink-0 cursor-col-resize touch-none items-center justify-center focus-visible:outline-1"
               >
-                <div className="bg-edge-default group-hover:bg-info-light group-data-[resizing=true]:bg-info-light h-full w-px group-hover:w-1 group-data-[resizing=true]:w-1" />
+                <div className="bg-edge-default group-hover:bg-info/30 group-data-[resizing=true]:bg-info/50 h-full w-px group-hover:w-1 group-data-[resizing=true]:w-1" />
               </div>
             )}
             <div
