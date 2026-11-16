@@ -24,6 +24,7 @@ vi.mock('@/components/Common/Toast', () => ({
   dismissToast: vi.fn(),
 }));
 
+import { encodeBasis } from '@huabu/shared';
 import {
   autoHeightKey,
   intrinsicToLayoutHeight,
@@ -39,10 +40,14 @@ import useCanvasStore, {
   hasUnsavedCanvasEdits,
   requestCanvasResync,
   resetCanvasSyncForTests,
+  setCanvasSyncLineageForTests,
 } from './canvasStore';
 import { DEFAULT_SEND_RETRY } from './canvasStore/sync/sendQueue';
 import { useCanvasSyncStatusStore } from './canvasStore/sync/syncStatus';
-import { createFakeSpaceServer } from './canvasStore/sync/testing/fakeExecuteServer';
+import {
+  createFakeSpaceServer,
+  FAKE_LINEAGE,
+} from './canvasStore/sync/testing/fakeExecuteServer';
 
 import type * as apiModule from '../api';
 import type * as canvasApiModule from '../api/canvas';
@@ -150,6 +155,9 @@ function saveOnServer(nodeId: string, content: string) {
   );
 }
 
+/** The read version a page that has applied `version` quotes. */
+const basisAt = (version: number) => encodeBasis(FAKE_LINEAGE, version);
+
 const moveCommand = (id: string, x: number, y = 0): CanvasCommand => ({
   type: 'SET_NODE_GEOMETRY',
   items: [{ nodeId: id as `node-${string}`, position: { x, y } }],
@@ -171,6 +179,7 @@ beforeEach(() => {
   vi.useFakeTimers();
   vi.clearAllMocks();
   resetCanvasSyncForTests();
+  setCanvasSyncLineageForTests(SPACE, FAKE_LINEAGE);
   own = [];
   const nodes = [note(X, 0, 0), note(Y, 0, 300)];
   server.reset(nodes, [], 1);
@@ -195,6 +204,7 @@ beforeEach(() => {
     canvasId,
     title: 'Sync',
     version: server.state.version,
+    basis: server.basis(),
     state: { nodes: server.state.nodes, edges: server.state.edges },
   }));
   api.deleteNode.mockResolvedValue({ success: true });
@@ -218,7 +228,7 @@ afterEach(async () => {
 });
 
 describe('sending a local edit', () => {
-  it('takes effect at once and is sent with a request id and no read version', async () => {
+  it('takes effect at once and is sent with a request id and the read version it was made on', async () => {
     moveHere(X, 500);
     expect(node(X).position).toEqual({ x: 500, y: 0 });
     expect(own).toHaveLength(1);
@@ -226,7 +236,11 @@ describe('sending a local edit', () => {
     expect(own[0].request.operationId).toMatch(/^[0-9a-f-]{36}$/);
     expect(own[0].request.originator.source).toBe('ui');
     expect(own[0].request.originator.tabId).toBeTruthy();
+    // One run per batch, quoting the version this page had applied.
     expect(own[0].request).not.toHaveProperty('basis');
+    expect(own[0].request.runs).toEqual([
+      { start: 0, count: 1, basis: basisAt(1) },
+    ]);
     expect(hasUnsavedCanvasEdits()).toBe(true);
 
     await answer(0);
@@ -1059,6 +1073,70 @@ describe('when a change cannot be sent', () => {
   });
 });
 
+describe('a read version the server does not know', () => {
+  const OTHER = '00000000-0000-4000-8000-000000000002';
+  /** The server refuses this page's `index`-th request as a whole. */
+  async function refuse(index: number) {
+    let error: unknown;
+    try {
+      commit(index);
+    } catch (thrown) {
+      error = thrown;
+    }
+    expect(error).toMatchObject({ status: 409, code: 'basis-unknown' });
+    own[index].reject(error);
+    await flush();
+  }
+
+  it('tells the user once, drops what was queued behind it and loads the Space, whose read versions are then accepted', async () => {
+    // As after the Space was given a new history behind this page's back.
+    setCanvasSyncLineageForTests(SPACE, OTHER);
+    moveHere(X, 500);
+    recolourHere(Y, 'red');
+    await refuse(0);
+    expect(toast).toHaveBeenCalledTimes(1);
+    // The queued recolour was made on the same unknown history: not sent.
+    expect(own).toHaveLength(1);
+    await flush();
+    expect(api.getCanvas).toHaveBeenCalledTimes(1);
+    expect(node(X).position).toEqual({ x: 0, y: 0 });
+    expect(hasUnsavedCanvasEdits()).toBe(false);
+
+    moveHere(X, 700);
+    expect(own[1].request.runs?.[0]?.basis).toBe(basisAt(1));
+    await answer(1);
+    expect(serverNode(X)?.position).toEqual({ x: 700, y: 0 });
+    expect(toast).toHaveBeenCalledTimes(1);
+    expect(api.getCanvas).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not load again for a lineage it has just loaded', async () => {
+    api.getCanvas.mockImplementation(async (canvasId: string) => ({
+      canvasId,
+      title: 'Sync',
+      version: server.state.version,
+      basis: encodeBasis(OTHER, server.state.version),
+      state: { nodes: server.state.nodes, edges: server.state.edges },
+    }));
+    setCanvasSyncLineageForTests(SPACE, OTHER);
+    moveHere(X, 500);
+    await refuse(0);
+    await flush();
+    expect(api.getCanvas).toHaveBeenCalledTimes(1);
+    moveHere(X, 600);
+    recolourHere(Y, 'red');
+    await refuse(1);
+    await vi.advanceTimersByTimeAsync(10_000);
+    // Told again, but no reload loop.
+    expect(api.getCanvas).toHaveBeenCalledTimes(1);
+    expect(own).toHaveLength(2);
+    // Nothing is left pending or shown that the server does not have.
+    expect(node(X).position).toEqual({ x: 0, y: 0 });
+    expect(accentOf(node(Y))).toBe('white');
+    expect(hasUnsavedCanvasEdits()).toBe(false);
+  });
+});
+
 describe('undo and redo', () => {
   it("takes back this page's move and keeps what another page changed since", async () => {
     moveHere(X, 500);
@@ -1663,16 +1741,27 @@ describe('a move made in a container the node has left', () => {
     server.reset(nodes, [], 1);
   }
 
-  it('states the parent each placed node had when the edit was made', async () => {
+  it('states the version each edit was made on, taken when the edit is made and not when it is sent', async () => {
     seed();
     moveHere(X, 500);
-    expect(own[0].request.expectedParents).toEqual([
-      { start: 0, count: 1, parents: { [X]: null } },
+    expect(own[0].request.runs).toEqual([
+      { start: 0, count: 1, basis: basisAt(1) },
     ]);
-    await answer(0);
-    // A change that places nothing states nothing.
+    // Made at version 1, sent only after another page's write (version 2)
+    // and this page's own (version 3) have been applied here.
     recolourHere(Y, 'red');
-    expect(own[1].request).not.toHaveProperty('expectedParents');
+    deliver(remote([accentCommand(Y, 'green')]), 'ui');
+    await answer(0);
+    expect(state().version).toBe(3);
+    expect(own[1].request.runs).toEqual([
+      { start: 0, count: 1, basis: basisAt(1) },
+    ]);
+    await answer(1);
+    // An edit made now quotes what the page has applied by now.
+    recolourHere(X, 'blue');
+    expect(own[2].request.runs).toEqual([
+      { start: 0, count: 1, basis: basisAt(state().version) },
+    ]);
   });
 
   it("is refused when another page put the node into a Frame first; the page shows its own whole edit until then and the server's afterwards", async () => {
@@ -1746,8 +1835,9 @@ describe('a move made in a container the node has left', () => {
       },
     ]);
     expect(parentOf(node(X))).toBe(G);
-    expect(own[0].request.expectedParents).toEqual([
-      { start: 0, count: 2, parents: { [X]: null, [Y]: F } },
+    // The whole gesture is one run.
+    expect(own[0].request.runs).toEqual([
+      { start: 0, count: 2, basis: basisAt(1) },
     ]);
     const mine = { ...node(X).position };
     deliver(remote(intoCommands(X, F)), 'ui');
@@ -1782,7 +1872,8 @@ describe('a move made in a container the node has left', () => {
       commands: [moveCommand(X, 700, 700)],
       originator: { source: 'ui', tabId: 'page-b' },
       operationId: crypto.randomUUID(),
-      expectedParents: [{ start: 0, count: 1, parents: { [X]: null } }],
+      // What B had read: the Space before this page's drag.
+      runs: [{ start: 0, count: 1, basis: basisAt(1) }],
     });
     expect(theirs.results.map((result) => result.reason)).toEqual([
       'stale-parent',
@@ -1793,7 +1884,7 @@ describe('a move made in a container the node has left', () => {
     expect(toast).not.toHaveBeenCalled();
   });
 
-  it('does not refuse its own consecutive drags: each states the parent the one before it left', async () => {
+  it('does not refuse its own consecutive drags: a change this page committed itself is not one it has not read', async () => {
     seed();
     reparentHere(X, F);
     // Before the first is answered: move inside F, then out again.
@@ -1804,10 +1895,24 @@ describe('a move made in a container the node has left', () => {
     await answer(0);
     // The edits made meanwhile were folded into one request.
     expect(own).toHaveLength(2);
-    expect(own[1].request.expectedParents).toEqual([
-      { start: 0, count: 1, parents: { [X]: F } },
-      { start: 1, count: 1, parents: { [X]: F } },
-      { start: 2, count: 1, parents: { [X]: null } },
+    // Each was made before the first was confirmed, so each quotes the
+    // version from before it (1) and names what it was made on top of. The
+    // first request has been answered by now and took effect, so it is not
+    // named any more.
+    expect(own[1].request.runs).toEqual([
+      { start: 0, count: 1, basis: basisAt(1) },
+      {
+        start: 1,
+        count: 1,
+        basis: basisAt(1),
+        after: [{ start: 0, count: 1 }],
+      },
+      {
+        start: 2,
+        count: 1,
+        basis: basisAt(1),
+        after: [{ start: 1, count: 1 }],
+      },
     ]);
     await answer(1);
     expect(
@@ -1841,6 +1946,112 @@ describe('a move made in a container the node has left', () => {
     expect(parentOf(node(X))).toBe(F);
   });
 
+  it('refuses an edit made on top of a refused one of an earlier request, although nobody else touched its node', async () => {
+    seed();
+    // One gesture: X into G, and X and Y placed. Y is what goes stale.
+    state().beginGesture('SET_NODE_GEOMETRY');
+    state().executeCommands([
+      ...intoCommands(X, G),
+      {
+        type: 'SET_NODE_GEOMETRY',
+        items: [
+          { nodeId: X as `node-${string}`, position: { x: 30, y: 60 } },
+          { nodeId: Y as `node-${string}`, position: { x: 90, y: 90 } },
+        ],
+      },
+    ]);
+    // Made while the first request is unanswered: X is in G on this page.
+    moveHere(X, 80, 120);
+    recolourHere(Y, 'red');
+    deliver(remote(intoCommands(Y, null)), 'ui');
+    await answer(0);
+    expect(refused(0)).toEqual(['stale-parent', 'stale-parent']);
+    // The second request names the refused edit it was made on top of.
+    expect(own[1].request.runs?.[0]?.after).toEqual([
+      { operationId: own[0].request.operationId, start: 0, count: 2 },
+    ]);
+    const before = { ...serverNode(X)?.position };
+    await answer(1);
+    // Not read as canvas coordinates: X never left the canvas on the server.
+    expect(refused(1)).toEqual(['stale-parent', 'applied']);
+    expect(parentOf(serverNode(X))).toBeNull();
+    expect(serverNode(X)?.position).toEqual(before);
+    expect(accentOf(serverNode(Y) as Node)).toBe('red');
+    await flush();
+    expect(api.getCanvas).toHaveBeenCalledTimes(1);
+    expect(parentOf(node(X))).toBeNull();
+  });
+
+  it('is refused when another page moved the node out of the Frame and back in meanwhile (the node is where it was, but not as this page read it)', async () => {
+    seed();
+    moveHere(Y, 200, 250);
+    deliver(remote(intoCommands(Y, null)), 'ui');
+    deliver(remote(intoCommands(Y, F)), 'ui');
+    // Held whole: this page still shows its own move.
+    expect(parentOf(node(Y))).toBe(F);
+    const placed = { ...serverNode(Y)?.position };
+
+    await answer(0);
+    expect(refused(0)).toEqual(['stale-parent']);
+    expect(parentOf(serverNode(Y))).toBe(F);
+    expect(serverNode(Y)?.position).toEqual(placed);
+    expect(toast).toHaveBeenCalledTimes(1);
+    await flush();
+    expect(api.getCanvas).toHaveBeenCalledTimes(1);
+    expect(node(Y).position).toEqual(placed);
+  });
+
+  it('is refused with stale-target when another page deleted the node first', async () => {
+    seed();
+    moveHere(X, 500, 700);
+    deliver(
+      remote([{ type: 'DELETE_NODES', nodeIds: [X as `node-${string}`] }]),
+      'ui',
+    );
+    await answer(0);
+    expect(refused(0)).toEqual(['stale-target']);
+    expect(serverNode(X)).toBeUndefined();
+    expect(toast).toHaveBeenCalledTimes(1);
+    await flush();
+    expect(api.getCanvas).toHaveBeenCalledTimes(1);
+    expect(state().nodes.some((candidate) => candidate.id === X)).toBe(false);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(toast).toHaveBeenCalledTimes(1);
+    expect(api.getCanvas).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses this page's next drag when another page moved the node between two of its own drags", async () => {
+    seed();
+    // Own (into F, version 2) …
+    reparentHere(X, F);
+    // … made before that is answered: a move inside F.
+    moveHere(X, 60, 120);
+    const first = commit(0);
+    // … foreign (out again, version 3), committed between the two.
+    const theirs = remote(intoCommands(X, null));
+    await answer(0, first);
+    deliver(theirs, 'ui');
+    await answer(1);
+    // The page's own change at version 2 is not held against it; the other
+    // page's at version 3 is.
+    expect(refused(1)).toEqual(['stale-parent']);
+    expect(parentOf(serverNode(X))).toBeNull();
+    expect(toast).toHaveBeenCalledTimes(1);
+  });
+
+  it('takes a size-only resize of a node another page has re-parented meanwhile', async () => {
+    seed();
+    state().beginGesture('SET_NODE_GEOMETRY');
+    state().setNodeGeometry([{ nodeId: X, size: { width: 320, height: 240 } }]);
+    deliver(remote(intoCommands(X, F)), 'ui');
+    await answer(0);
+    // A size means the same in any container: both edits stand.
+    expect(refused(0)).toEqual(['applied']);
+    expect(parentOf(serverNode(X))).toBe(F);
+    expect(serverNode(X)?.style).toMatchObject({ width: 320, height: 240 });
+    expect(toast).not.toHaveBeenCalled();
+  });
+
   const tick = (id: string, x: number, y: number, dragging = true) =>
     state().onNodesChange([
       { type: 'position', id, position: { x, y }, dragging },
@@ -1860,11 +2071,13 @@ describe('a move made in a container the node has left', () => {
     tick(X, 200, 700, false);
     state().onNodeDragStop(new MouseEvent('mouseup'), node(X), [node(X)]);
     expect(own).toHaveLength(1);
-    // The drop states the container the page showed during the drag.
-    expect(own[0].request.expectedParents).toHaveLength(1);
-    expect(own[0].request.expectedParents?.[0]?.parents).toMatchObject({
-      [X]: null,
-    });
+    // The drop was made on what the page showed during the drag: the Space
+    // before the other page's change, although the page has applied the
+    // rest of that update (version 2) by now.
+    expect(state().version).toBe(2);
+    expect(own[0].request.runs).toEqual([
+      { start: 0, count: own[0].request.commands.length, basis: basisAt(1) },
+    ]);
     await flush();
     expect(api.getCanvas).not.toHaveBeenCalled();
 

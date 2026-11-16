@@ -8,11 +8,13 @@
  * appended here and sent to `POST /api/canvas/:id/execute` one request at a
  * time, each with a request id (`operationId`). A transport failure repeats
  * the same request with the same id, which the server answers from its
- * stored result, so a batch never executes twice. No read version is sent:
- * the server runs every batch on its latest state, so edits to unrelated
- * nodes from two pages never reject each other. What is sent instead is, per
- * edit, the parent each node it places had on this page (`expectedParents`),
- * so an edit made in a container the node has left is refused as a whole.
+ * stored result, so a batch never executes twice.
+ *
+ * Every batch is one run of the request and states the read version it was
+ * made on (`runs`), and the earlier, still unconfirmed batches of this page
+ * it was made on top of. The server checks each run against the nodes it
+ * names only, so edits to unrelated nodes from two pages never reject each
+ * other, and takes or refuses a run as a whole.
  *
  * The queue only transports. Applying the result, releasing in-flight
  * holds and telling the user are the caller's, through `onSettled`.
@@ -32,7 +34,7 @@ import { ApiError } from '@/api/_client';
 
 import type {
   CanvasCommand,
-  CanvasExecuteExpectedParents,
+  CanvasExecuteRun,
   PostCanvasExecuteRequest,
   PostCanvasExecuteResponse,
 } from '@huabu/shared';
@@ -48,16 +50,33 @@ export type SendOutcome =
   /** The caller discarded the lane before the request was answered. */
   | { kind: 'discarded' };
 
+/** One queued batch, by the entry it is in and its place there. */
+export interface QueuedRunRef {
+  readonly entryId: string;
+  readonly start: number;
+  readonly count: number;
+}
+
+/** One queued batch as a run of its entry's commands. */
+export interface QueuedRun {
+  readonly start: number;
+  readonly count: number;
+  /** The read version the batch was made on. */
+  readonly basis: string;
+  /** Unconfirmed batches of this page the batch was made on top of. */
+  readonly after: readonly QueuedRunRef[];
+}
+
+/** Most earlier batches a run names; the newest are kept. */
+export const MAX_RUN_AFTER = 64;
+
 export interface SendQueueEntry {
   /** Request id sent as `operationId`. */
   readonly id: string;
   readonly canvasId: string;
   readonly commands: CanvasCommand[];
-  /**
-   * For each batch folded into the entry that places nodes: its run of
-   * commands and the parents those nodes had when the batch was made.
-   */
-  readonly expectedParents: CanvasExecuteExpectedParents[];
+  /** The batches folded into the entry that state a read version. */
+  readonly runs: QueuedRun[];
   /** Every batch in the entry is a derived report; see the module comment. */
   readonly derived: boolean;
   /** Resolves once the entry leaves the queue. Never rejects. */
@@ -113,6 +132,12 @@ export interface SendQueueOptions {
   retry?: SendQueueRetryPolicy;
   /** Largest merged batch; a longer run of edits is sent as several. */
   maxBatchCommands?: number;
+  /**
+   * What became of a batch of an earlier entry, when its answer is known. A
+   * batch that took effect is no longer named in `after`; any other is, and
+   * the server decides.
+   */
+  runOutcome?: (ref: QueuedRunRef) => 'applied' | 'refused' | undefined;
   now?: () => number;
   /**
    * Called synchronously when an entry leaves the queue, before the next
@@ -130,10 +155,10 @@ export interface EnqueueOptions {
   /** The batch is a derived report, not an edit the user made. */
   derived?: boolean;
   /**
-   * Node id → the parent the node had on this page when the batch was made
-   * (`null` is the canvas), for the nodes the batch places.
+   * The read version the batch was made on, and the unconfirmed batches of
+   * this page it was made on top of. Omitted, the batch is sent unchecked.
    */
-  expectedParents?: Record<string, string | null> | null;
+  run?: { basis: string; after?: readonly QueuedRunRef[] };
 }
 
 export interface EnqueueResult {
@@ -207,6 +232,11 @@ function isExecuteResponse(value: unknown): value is PostCanvasExecuteResponse {
 interface Entry extends SendQueueEntry {
   derived: boolean;
   gate?: Promise<unknown>;
+  /**
+   * The request as first sent. Every repeat sends exactly this: the server
+   * answers a request id only for the request it was first used for.
+   */
+  request?: PostCanvasExecuteRequest;
   sending: boolean;
   attempted: boolean;
   resolve: (outcome: SendOutcome) => void;
@@ -277,14 +307,40 @@ export function createSendQueue(options: SendQueueOptions): SendQueue {
     publish(lane);
   };
 
-  const requestOf = (entry: Entry): PostCanvasExecuteRequest => ({
-    commands: entry.commands,
-    originator: { source: 'ui', tabId: options.clientId },
-    operationId: entry.id,
-    ...(entry.expectedParents.length > 0
-      ? { expectedParents: entry.expectedParents }
-      : {}),
-  });
+  const wireRun = (entry: Entry, run: QueuedRun): CanvasExecuteRun => {
+    const after: NonNullable<CanvasExecuteRun['after']> = [];
+    for (const ref of run.after) {
+      if (ref.entryId === entry.id) {
+        after.push({ start: ref.start, count: ref.count });
+      } else if (options.runOutcome?.(ref) !== 'applied') {
+        after.push({
+          operationId: ref.entryId,
+          start: ref.start,
+          count: ref.count,
+        });
+      }
+    }
+    return {
+      start: run.start,
+      count: run.count,
+      basis: run.basis,
+      ...(after.length > 0 ? { after: after.slice(-MAX_RUN_AFTER) } : {}),
+    };
+  };
+
+  const requestOf = (entry: Entry): PostCanvasExecuteRequest => {
+    // From here on nothing may be folded into the entry either.
+    entry.attempted = true;
+    entry.request ??= {
+      commands: entry.commands,
+      originator: { source: 'ui', tabId: options.clientId },
+      operationId: entry.id,
+      ...(entry.runs.length > 0
+        ? { runs: entry.runs.map((run) => wireRun(entry, run)) }
+        : {}),
+    };
+    return entry.request;
+  };
 
   const settle = (lane: Lane, entry: Entry, outcome: SendOutcome): void => {
     const index = lane.entries.indexOf(entry);
@@ -402,11 +458,12 @@ export function createSendQueue(options: SendQueueOptions): SendQueue {
       ) {
         const offset = last.commands.length;
         last.commands.push(...commands);
-        if (enqueueOptions?.expectedParents && commands.length > 0) {
-          last.expectedParents.push({
+        if (enqueueOptions?.run && commands.length > 0) {
+          last.runs.push({
             start: offset,
             count: commands.length,
-            parents: enqueueOptions.expectedParents,
+            basis: enqueueOptions.run.basis,
+            after: enqueueOptions.run.after ?? [],
           });
         }
         last.derived &&= enqueueOptions?.derived === true;
@@ -421,13 +478,14 @@ export function createSendQueue(options: SendQueueOptions): SendQueue {
         id: createId(),
         canvasId,
         commands: [...commands],
-        expectedParents:
-          enqueueOptions?.expectedParents && commands.length > 0
+        runs:
+          enqueueOptions?.run && commands.length > 0
             ? [
                 {
                   start: 0,
                   count: commands.length,
-                  parents: enqueueOptions.expectedParents,
+                  basis: enqueueOptions.run.basis,
+                  after: enqueueOptions.run.after ?? [],
                 },
               ]
             : [],

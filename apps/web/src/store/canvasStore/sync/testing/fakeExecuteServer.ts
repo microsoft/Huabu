@@ -11,17 +11,29 @@
  *
  * A request id seen before is answered from the stored response
  * (`replayed: true`) without executing again.
+ *
+ * Read versions are checked the way the server checks them: the double keeps
+ * per-node stamps with the shared rules, judges every run of a request with
+ * the shared admission, and names a page by its `originator.tabId` (there is
+ * no principal here).
  */
 
+import { encodeBasis, parseBasis } from '@huabu/shared';
 import {
+  advanceNodeStamps,
   applySharedPostEffectsFromWriteResult,
-  createExpectedParentsAdmit,
+  createReadVersionAdmission,
   diffCanvasState,
   diffSiblingOrderEvents,
   executeCanvasCommands,
+  isRefusedResult,
   stripTransientNodeFields,
   type CanvasNode,
+  type NodeStamp,
+  type ReadVersionRun,
 } from '@huabu/shared/canvas-engine';
+
+import { ApiError } from '@/api/_client';
 
 import type {
   CanvasCommand,
@@ -36,6 +48,9 @@ export interface FakeServerState {
   version: number;
 }
 
+/** The lineage of every read version the double issues. */
+export const FAKE_LINEAGE = '00000000-0000-4000-8000-000000000001';
+
 export interface FakeExecuteServer {
   /** Answer one request, mutating the server copy through `write`. */
   execute(
@@ -44,6 +59,10 @@ export interface FakeExecuteServer {
   ): PostCanvasExecuteResponse;
   /** Every request received, in order (replays included). */
   readonly requests: PostCanvasExecuteRequest[];
+  /** The read version of the server copy as it is now. */
+  basis(): string;
+  /** Forget the stamps, as a Space given a new history would. */
+  resetStamps(): void;
 }
 
 /**
@@ -56,9 +75,22 @@ export function createFakeExecuteServer(
 ): FakeExecuteServer {
   const stored = new Map<string, PostCanvasExecuteResponse>();
   const requests: PostCanvasExecuteRequest[] = [];
+  let stamps: Readonly<Record<string, NodeStamp>> = {};
+  /** Version the stamps describe; a copy replaced behind them starts over. */
+  let stampedVersion: number | null = null;
+  const currentStamps = (): Readonly<Record<string, NodeStamp>> => {
+    if (stampedVersion !== read().version) stamps = {};
+    stampedVersion = read().version;
+    return stamps;
+  };
 
   return {
     requests,
+    basis: () => encodeBasis(FAKE_LINEAGE, read().version),
+    resetStamps() {
+      stamps = {};
+      stampedVersion = null;
+    },
     execute(canvasId, request) {
       requests.push(request);
       const { operationId } = request;
@@ -70,17 +102,60 @@ export function createFakeExecuteServer(
       const prevNodes = before.nodes.map((node) =>
         stripTransientNodeFields(node),
       );
+      const commands = request.commands as CanvasCommand[];
+      const page = request.originator.tabId;
+      const readStamps = { floor: 0, nodes: currentStamps() };
+      const runs: ReadVersionRun[] = (request.runs ?? []).map((run) => {
+        const read = parseBasis(run.basis);
+        if (
+          !read ||
+          read.lineage !== FAKE_LINEAGE ||
+          read.version > before.version
+        ) {
+          throw new ApiError(
+            409,
+            { code: 'basis-unknown', message: 'basis-unknown' },
+            'basis-unknown',
+          );
+        }
+        const earlier = (run.after ?? []).filter(
+          (ref) => ref.operationId !== undefined,
+        );
+        return {
+          start: run.start,
+          count: run.count,
+          version: read.version,
+          after: (run.after ?? []).filter(
+            (ref) => ref.operationId === undefined,
+          ),
+          ...(earlier.some((ref) => {
+            const results = stored
+              .get(ref.operationId as string)
+              ?.results.slice(ref.start, ref.start + ref.count);
+            return (
+              !results ||
+              results.length !== ref.count ||
+              results.some(isRefusedResult)
+            );
+          })
+            ? { blocked: true }
+            : {}),
+        };
+      });
+      const admission =
+        runs.length > 0
+          ? createReadVersionAdmission({
+              commands,
+              runs,
+              stamps: readStamps,
+              prestateNodes: prevNodes,
+              ...(page ? { page } : {}),
+            })
+          : null;
       const out = executeCanvasCommands(
-        { source: 'ui', commands: request.commands as CanvasCommand[] },
+        { source: 'ui', commands },
         { nodes: prevNodes, edges: before.edges, canvasId },
-        request.expectedParents?.length
-          ? {
-              admit: createExpectedParentsAdmit(
-                request.commands as CanvasCommand[],
-                request.expectedParents,
-              ),
-            }
-          : {},
+        admission ? { admit: admission.admit } : {},
       );
       const shared = applySharedPostEffectsFromWriteResult(out.writeResult);
       const nextNodes = out.writeResult.nodes.map((node) =>
@@ -106,7 +181,20 @@ export function createFakeExecuteServer(
           )
         : [];
       if (changed) {
+        const checked =
+          runs.reduce((covered, run) => covered + run.count, 0) ===
+          commands.length;
+        stamps = advanceNodeStamps(
+          readStamps,
+          prevNodes,
+          nextNodes,
+          toVersion,
+          page && admission && checked
+            ? { by: page, except: admission.unseenMoves(nextNodes) }
+            : undefined,
+        );
         write({ nodes: nextNodes, edges: shared.edges, version: toVersion });
+        stampedVersion = toVersion;
       }
       const response: PostCanvasExecuteResponse = {
         canvasId,
@@ -153,6 +241,8 @@ export function createFakeSpaceServer(): FakeSpaceServer {
   return {
     execute: server.execute,
     requests: server.requests,
+    basis: server.basis,
+    resetStamps: server.resetStamps,
     get state() {
       return state;
     },

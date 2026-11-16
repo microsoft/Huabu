@@ -338,23 +338,112 @@ describe('send queue', () => {
     expect(calls[1].request.commands).toEqual([move(2), move(3), move(4)]);
   });
 
-  it('sends, per folded batch, the parents it was made under and the commands they cover', async () => {
+  it('sends each folded batch as a run with the read version it was made on', async () => {
     const { queue, calls, flush } = harness();
     queue.enqueue('space', [move(1)]);
-    // No parents stated: the request carries no such field.
-    expect(calls[0].request).not.toHaveProperty('expectedParents');
-    queue.enqueue('space', [move(2), move(3)], {
-      expectedParents: { 'node-x': null },
-    });
+    // No read version stated: the request carries no runs.
+    expect(calls[0].request).not.toHaveProperty('runs');
+    queue.enqueue('space', [move(2), move(3)], { run: { basis: 'b-1' } });
     queue.enqueue('space', [move(4)], {
-      expectedParents: { 'node-x': 'node-frame' },
+      run: {
+        basis: 'b-2',
+        after: [
+          { entryId: 'op-1', start: 0, count: 1 },
+          { entryId: 'op-2', start: 0, count: 2 },
+        ],
+      },
     });
     calls[0].resolve(response(calls[0].request, 1));
     await flush();
-    expect(calls[1].request.expectedParents).toEqual([
-      { start: 0, count: 2, parents: { 'node-x': null } },
-      { start: 2, count: 1, parents: { 'node-x': 'node-frame' } },
+    expect(calls[1].request.runs).toEqual([
+      { start: 0, count: 2, basis: 'b-1' },
+      {
+        start: 2,
+        count: 1,
+        basis: 'b-2',
+        // A batch of the same request by its place in it; a batch of an
+        // earlier request by that request's id.
+        after: [
+          { operationId: 'op-1', start: 0, count: 1 },
+          { start: 0, count: 2 },
+        ],
+      },
     ]);
+  });
+
+  describe('a batch made on top of a batch of an earlier request', () => {
+    function queueWithOutcomes() {
+      const calls: Call[] = [];
+      const outcomes = new Map<string, 'applied' | 'refused'>();
+      let nextId = 0;
+      const queue = createSendQueue({
+        clientId: 'page-a',
+        createId: () => `op-${++nextId}`,
+        runOutcome: (ref) => outcomes.get(`${ref.entryId}:${ref.start}`),
+        send: (_canvasId, request, options) =>
+          new Promise((resolve, reject) => {
+            calls.push({
+              request: structuredClone(request),
+              keepalive: options?.keepalive === true,
+              resolve,
+              reject,
+            });
+          }),
+      });
+      queue.enqueue('space', [move(1), move(2)], { run: { basis: 'b-1' } });
+      const onTop = {
+        run: {
+          basis: 'b-1',
+          after: [{ entryId: 'op-1', start: 0, count: 2 }],
+        },
+      };
+      queue.enqueue('space', [move(3)], onTop);
+      queue.enqueue('space', [move(4)], onTop);
+      return { queue, calls, outcomes };
+    }
+
+    it('no longer names it once it is known to have taken effect', async () => {
+      const { calls, outcomes } = queueWithOutcomes();
+      outcomes.set('op-1:0', 'applied');
+      calls[0].resolve(response(calls[0].request, 1));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(calls[1].request.runs).toEqual([
+        { start: 0, count: 1, basis: 'b-1' },
+        { start: 1, count: 1, basis: 'b-1' },
+      ]);
+    });
+
+    it('names it when it was refused', async () => {
+      const { calls, outcomes } = queueWithOutcomes();
+      outcomes.set('op-1:0', 'refused');
+      calls[0].resolve(response(calls[0].request, 1));
+      await vi.advanceTimersByTimeAsync(0);
+      const named = [{ operationId: 'op-1', start: 0, count: 2 }];
+      expect(calls[1].request.runs).toEqual([
+        { start: 0, count: 1, basis: 'b-1', after: named },
+        { start: 1, count: 1, basis: 'b-1', after: named },
+      ]);
+    });
+
+    it('names it in a page-close flush, and repeats exactly that request afterwards', async () => {
+      const { queue, calls, outcomes } = queueWithOutcomes();
+      // Sent before the first answer is known.
+      queue.flushKeepalive();
+      const flushed = calls.filter((call) => call.keepalive);
+      expect(flushed).toHaveLength(2);
+      expect(flushed[1].request.runs?.[0]?.after).toEqual([
+        { operationId: 'op-1', start: 0, count: 2 },
+      ]);
+      // The page stayed open. A request id answers only the request it was
+      // first used for, so nothing is folded in and nothing is rewritten.
+      queue.enqueue('space', [move(5)], { run: { basis: 'b-2' } });
+      outcomes.set('op-1:0', 'applied');
+      calls[0].resolve(response(calls[0].request, 1));
+      await vi.advanceTimersByTimeAsync(0);
+      const repeated = calls[calls.length - 1];
+      expect(repeated.keepalive).toBe(false);
+      expect(repeated.request).toEqual(flushed[1].request);
+    });
   });
 
   it('waits for a gate and fails the entry without sending when it rejects', async () => {

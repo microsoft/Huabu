@@ -24,6 +24,7 @@ import {
   createId,
   markdownArtifactFields,
   parseArtifactRef,
+  parseBasis,
   rewriteMarkdownArtifactRefs,
   stripLegacyPortalTopology,
 } from '@huabu/shared';
@@ -1018,35 +1019,18 @@ let syncGestureBaseline: Node[] | null = null;
 
 /**
  * Nodes whose parent another page changed while the open gesture held their
- * placement. The page kept showing them under their own parent, so that is
- * the parent the gesture was made under — not the one `syncGestureBaseline`
- * has been brought up to since.
+ * placement. The page kept showing them under their own parent, which is no
+ * longer the one the server has (and `syncGestureBaseline` has been brought
+ * up to).
  */
 const gestureWithheldParents = new Set<string>();
-
-/**
- * The gesture's starting nodes, with the parent this page showed for every
- * node whose parent change it kept back: what the gesture's batch states as
- * the parents it was made under.
- */
-function gestureMadeIn(
-  baseline: readonly Node[],
-  shown: readonly Node[],
-): readonly Node[] {
-  if (gestureWithheldParents.size === 0) return baseline;
-  const live = new Map(shown.map((node) => [node.id, node]));
-  return baseline.map((node) => {
-    const current = gestureWithheldParents.has(node.id) && live.get(node.id);
-    return current ? { ...node, parentId: current.parentId } : node;
-  });
-}
 
 /**
  * Close the open gesture's sync bookkeeping (or restart it from `next`).
  *
  * A gesture that kept another page's parent change back has ended: whatever
- * it sent states the parent the page showed, so the server refuses it, and a
- * gesture that sent nothing left the page behind the server. Either way the
+ * it sent states a read version from before that change, so the server
+ * refuses it, and a gesture that sent nothing left the page behind the server. Either way the
  * page converges by loading the Space once nothing is left to send.
  */
 function endSyncGesture(next: Node[] | null = null): void {
@@ -1484,6 +1468,13 @@ async function persistFrameHeaderMigration(
   }
 }
 
+/**
+ * The lineage of the read versions the server issued for the loaded Space
+ * (`basis` of the load). A page's read version is this lineage with the
+ * version it has applied.
+ */
+let syncLineage: { canvasId: string; lineage: string } | null = null;
+
 let syncRejectedToastId: string | null = null;
 let afterCanvasResync: (() => void) | null = null;
 
@@ -1493,7 +1484,21 @@ const browserSync = createBrowserSync({
   clientId: SYNC_CLIENT_ID,
   getState: () => {
     const { canvasId, version } = useCanvasStore.getState();
-    return { canvasId, version };
+    return {
+      canvasId,
+      version,
+      lineage: syncLineage?.canvasId === canvasId ? syncLineage.lineage : null,
+    };
+  },
+  gestureHeld: () => {
+    if (!syncGestureBaseline) return null;
+    const { nodes, edges } = useCanvasStore.getState();
+    const keys = deriveHeldKeys(
+      syncView(syncGestureBaseline, edges),
+      syncView(nodes, edges),
+      isUnsentUnit,
+    );
+    return keys.size > 0 ? (key) => keys.has(key) : null;
   },
   applyOwnResponse: (response, operationId) => {
     useCanvasStore.getState().applyDeltasFromAgent(
@@ -1882,7 +1887,6 @@ function rebaseGestureBaseline(deltas: readonly Delta[]): void {
 function submitGestureTicks(edgesBefore: readonly Edge[]): void {
   const baseline = syncGestureBaseline;
   const state = useCanvasStore.getState();
-  const madeIn = baseline ? gestureMadeIn(baseline, state.nodes) : [];
   endSyncGesture();
   if (!baseline || !state.canvasId) return;
   const { commands } = commandsForLocalDiff(
@@ -1902,8 +1906,18 @@ function submitGestureTicks(edgesBefore: readonly Edge[]): void {
     commands,
     prev: syncView(baseline, edgesBefore),
     next: syncView(state.nodes, state.edges),
-    madeIn: madeIn as unknown as UnitNode[],
   });
+}
+
+/**
+ * Give the open Space the read-version lineage a load would have brought,
+ * for suites that put a Space into the store without loading it.
+ */
+export function setCanvasSyncLineageForTests(
+  canvasId: string,
+  lineage: string | null,
+): void {
+  syncLineage = lineage === null ? null : { canvasId, lineage };
 }
 
 /**
@@ -1912,6 +1926,7 @@ function submitGestureTicks(edgesBefore: readonly Edge[]): void {
  */
 export function resetCanvasSyncForTests(): void {
   browserSync.reset();
+  syncLineage = null;
   syncGestureBaseline = null;
   gestureWithheldParents.clear();
   heightsAwaitingContent.clear();
@@ -3048,11 +3063,6 @@ const useCanvasStore = create<RFState>()(
       // pointer (a resize a modifier key interrupted) goes on from here, so
       // what its later ticks change is measured from the state this batch
       // leaves.
-      // The parents the gesture was made under, read before its bookkeeping
-      // is closed.
-      const madeIn = gestureBaseline
-        ? (gestureMadeIn(gestureBaseline, state.nodes) as unknown as UnitNode[])
-        : undefined;
       const gestureTicksSent = (): void => {
         if (!openGesture) return;
         endSyncGesture(pointerGestureActive() ? get().nodes : null);
@@ -3071,7 +3081,6 @@ const useCanvasStore = create<RFState>()(
           commands: prelude,
           prev: syncView(gestureBaseline, state.edges),
           next: syncView(state.nodes, state.edges),
-          ...(madeIn ? { madeIn } : {}),
         });
       };
 
@@ -3222,7 +3231,6 @@ const useCanvasStore = create<RFState>()(
           commands: [...prelude, ...forServer.commands],
           prev: syncView(gestureBaseline ?? state.nodes, state.edges),
           next: syncView(get().nodes, get().edges),
-          ...(madeIn ? { madeIn } : {}),
           ...(forks.length > 0 ? { gate: Promise.all(forks) } : {}),
           ...(createdNodes.length > 0
             ? {
@@ -4115,6 +4123,10 @@ const useCanvasStore = create<RFState>()(
         // The loaded Space is the server's: nothing local is unconfirmed.
         syncGestureBaseline = null;
         gestureWithheldParents.clear();
+        const loadedBasis = response.basis ? parseBasis(response.basis) : null;
+        syncLineage = loadedBasis
+          ? { canvasId: targetId, lineage: loadedBasis.lineage }
+          : null;
         browserSync.adoptedServerState(targetId);
         heightsAwaitingContent.clear();
         reportedHeightKeys.clear();
