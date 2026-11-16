@@ -121,3 +121,21 @@ it('settles after a release that a gesture handler stopped from propagating', ()
     target.remove();
   }
 });
+
+it('gives up a press whose release was lost to another window', () => {
+  // The mouse goes down, the user switches window, and the release never
+  // reaches this page.
+  pointer('pointerdown', 'mouse', 1);
+  expect(seen).toEqual({ live: false, settled: true });
+  act(() => {
+    window.dispatchEvent(new Event('blur'));
+  });
+  act(() => vi.runAllTimers());
+  expect(seen).toEqual({ live: false, settled: false });
+  // A complete touch tap afterwards settles too, instead of waiting on the
+  // mouse press that will never end.
+  pointer('pointerdown', 'touch', 9);
+  pointer('pointerup', 'touch', 9);
+  act(() => vi.runAllTimers());
+  expect(seen).toEqual({ live: true, settled: true });
+});

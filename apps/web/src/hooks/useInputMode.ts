@@ -144,7 +144,22 @@ export function useInputModeListener(): void {
     window.addEventListener('pointerdown', press, true);
     window.addEventListener('pointerup', release, true);
     window.addEventListener('pointercancel', release, true);
+    // A release that happens while another window has focus never arrives.
+    // Its pointer would stay "pressed" for good and hold back every later
+    // settlement, so presses are abandoned when the window loses the user.
+    const abandon = () => {
+      if (pressedPointers.size === 0) return;
+      pressedPointers.clear();
+      window.dispatchEvent(new Event(PRESSES_ABANDONED_EVENT));
+    };
+    const abandonWhenHidden = () => {
+      if (document.visibilityState === 'hidden') abandon();
+    };
+    window.addEventListener('blur', abandon);
+    document.addEventListener('visibilitychange', abandonWhenHidden);
     return () => {
+      window.removeEventListener('blur', abandon);
+      document.removeEventListener('visibilitychange', abandonWhenHidden);
       window.removeEventListener('pointerdown', handler, true);
       window.removeEventListener('pointerdown', press, true);
       window.removeEventListener('pointerup', release, true);
@@ -156,6 +171,8 @@ export function useInputModeListener(): void {
 
 /** Pointers currently held down, maintained by {@link useInputModeListener}. */
 const pressedPointers = new Set<number>();
+/** Fired on window when held pointers are given up without a release. */
+const PRESSES_ABANDONED_EVENT = 'huabu:presses-abandoned';
 
 /**
  * {@link useIsNotMouse}, except that a change made by a press is adopted only
@@ -190,10 +207,12 @@ export function usePressSettledIsNotMouse(): boolean {
     // propagating must not leave the chrome at its old offset.
     window.addEventListener('pointerup', adopt, true);
     window.addEventListener('pointercancel', adopt, true);
+    window.addEventListener(PRESSES_ABANDONED_EVENT, adopt);
     return () => {
       window.clearTimeout(timer);
       window.removeEventListener('pointerup', adopt, true);
       window.removeEventListener('pointercancel', adopt, true);
+      window.removeEventListener(PRESSES_ABANDONED_EVENT, adopt);
     };
   }, [live, settled]);
   return settled;
