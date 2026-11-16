@@ -7,7 +7,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { selectThreadSettings, useChatStore } from '@/store/chatStore';
 
-import { useBuiltinThreadSettings } from './useBuiltinThreadSettings';
+import {
+  clearBuiltinThreadSettingsCache,
+  useBuiltinThreadSettings,
+} from './useBuiltinThreadSettings';
 
 (
   globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -91,6 +94,7 @@ let root: Root | undefined;
 let container: HTMLDivElement | undefined;
 
 beforeEach(() => {
+  clearBuiltinThreadSettingsCache();
   settingsSeenAfterSelection = undefined;
   apiMocks.getModels.mockClear();
   apiMocks.getSettings.mockReset();
@@ -113,6 +117,53 @@ afterEach(() => {
 });
 
 describe('useBuiltinThreadSettings', () => {
+  it.each(['rejected', 'canonical'] as const)(
+    'updates a remounted selector when a pending save is %s',
+    async (outcome) => {
+      let resolve!: (settings: {
+        modelId: string;
+        reasoningEffort: string;
+      }) => void;
+      let reject!: (error: Error) => void;
+      apiMocks.setModel.mockReturnValue(
+        new Promise((done, fail) => {
+          resolve = done;
+          reject = fail;
+        }),
+      );
+      container = document.createElement('div');
+      root = createRoot(container);
+      await act(async () => root?.render(<Harness threadHasMessages />));
+      let selection!: Promise<void>;
+      await act(async () => {
+        selection = currentSettings.selectModel('model-2');
+      });
+      act(() => root?.unmount());
+      root = createRoot(container);
+      await act(async () => root?.render(<Harness threadHasMessages />));
+      expect(currentSettings.settings.modelId).toBe('model-2');
+      expect(apiMocks.getSettings).toHaveBeenCalledOnce();
+      await act(async () => {
+        if (outcome === 'rejected') {
+          const rejected = expect(selection).rejects.toThrow('Rejected');
+          reject(new Error('Rejected'));
+          await rejected;
+        } else {
+          resolve({ modelId: 'canonical-model', reasoningEffort: 'low' });
+          await selection;
+        }
+      });
+      expect(currentSettings.settings).toEqual(
+        outcome === 'rejected'
+          ? { modelId: 'model-1', reasoningEffort: 'high' }
+          : { modelId: 'canonical-model', reasoningEffort: 'low' },
+      );
+      expect(selectThreadSettings(useChatStore.getState(), THREAD_ID)).toEqual(
+        currentSettings.settings,
+      );
+    },
+  );
+
   it.each(['model', 'effort'] as const)(
     'optimistically changes %s, rejects overlapping changes, and rolls back on failure',
     async (kind) => {

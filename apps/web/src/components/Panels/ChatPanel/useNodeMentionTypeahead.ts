@@ -138,7 +138,12 @@ export function useNodeMentionTypeahead({
       const textarea = textareaRef.current;
       if (!textarea) return;
       textarea.focus({ preventScroll: true });
-      textarea.setSelectionRange(caret, caret);
+      // Anything typed before this frame has already moved the caret; putting
+      // it back here would send the following keystrokes into the middle of
+      // the text. Restore it only while the text is still the accepted one
+      // (or has not been rendered yet).
+      if (textarea.value === next || textarea.value === value)
+        textarea.setSelectionRange(caret, caret);
     });
   }
 

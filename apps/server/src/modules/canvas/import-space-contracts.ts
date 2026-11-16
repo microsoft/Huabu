@@ -98,6 +98,7 @@ function isImportRecord(value: unknown): value is RecordValue {
 // Adding a command/action or field requires an explicit identity-versus-opaque decision.
 const commandFields = {
   CREATE_NODES: { nodes: 'nodes' },
+  INITIALIZE_PDF_NOTE: { nodeId: 'nodeId' },
   DELETE_NODES: { nodeIds: 'nodeIds' },
   MERGE_NODE_DATA: { patches: 'patches' },
   SET_NODE_PARENT: { nodeIds: 'nodeIds', parentId: 'nodeId' },

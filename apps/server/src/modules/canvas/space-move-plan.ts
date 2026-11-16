@@ -12,6 +12,8 @@ import {
 } from '@huabu/shared';
 import {
   deduplicateLabel,
+  includePdfNotes,
+  pdfNoteIds,
   getAbsolutePosition,
   getNodeDefaultSize,
   resolveHeightMode,
@@ -119,7 +121,7 @@ function expandedMoveIds(
       }
     }
   }
-  return moved;
+  return includePdfNotes(nodes, moved);
 }
 
 export function buildSpaceMovePlan(input: {
@@ -150,6 +152,14 @@ export function buildSpaceMovePlan(input: {
 
   const rootIds = normalizedRoots(selectedNodeIds, byId);
   const movedIds = expandedMoveIds(rootIds, sourceNodes);
+  for (const owner of sourceNodes) {
+    if (
+      typeof owner.data.noteNodeId === 'string' &&
+      movedIds.has(owner.data.noteNodeId) &&
+      !movedIds.has(owner.id)
+    )
+      throw new SpaceMovePlanError('not-movable', owner.data.noteNodeId);
+  }
   for (const nodeId of movedIds) {
     const node = byId.get(nodeId);
     if (!node || !MOVABLE_TYPES.has(node.type as CanvasNodeType)) {
@@ -160,7 +170,10 @@ export function buildSpaceMovePlan(input: {
   const nodeIdMap = new Map<string, CanvasNodeId>();
   for (const nodeId of movedIds) nodeIdMap.set(nodeId, createId('node'));
 
+  const sourceNoteIds = pdfNoteIds(sourceNodes);
+  const destinationNoteIds = pdfNoteIds(destinationNodes);
   const destinationRight = destinationNodes.reduce((right, node) => {
+    if (destinationNoteIds.has(node.id)) return right;
     const position = getAbsolutePosition(
       destinationNodes as NestableNode[],
       node.id,
@@ -168,13 +181,18 @@ export function buildSpaceMovePlan(input: {
     const width = typeof node.style?.width === 'number' ? node.style.width : 0;
     return position ? Math.max(right, position.x + width) : right;
   }, -DESTINATION_GAP);
-  const rootPositions = rootIds.map((nodeId) => {
-    const position = getAbsolutePosition(sourceNodes as NestableNode[], nodeId);
-    if (!position) {
-      throw new SpaceMovePlanError('invalid-hierarchy', nodeId);
-    }
-    return position;
-  });
+  const rootPositions = rootIds
+    .filter((nodeId) => !sourceNoteIds.has(nodeId))
+    .map((nodeId) => {
+      const position = getAbsolutePosition(
+        sourceNodes as NestableNode[],
+        nodeId,
+      );
+      if (!position) {
+        throw new SpaceMovePlanError('invalid-hierarchy', nodeId);
+      }
+      return position;
+    });
   const sourceLeft = Math.min(...rootPositions.map((position) => position.x));
   const sourceTop = Math.min(...rootPositions.map((position) => position.y));
   const offset = {
@@ -195,6 +213,8 @@ export function buildSpaceMovePlan(input: {
     if (!nodeId) continue;
     const nodeType = node.type as CanvasNodeType;
     const data = structuredClone(node.data ?? {});
+    if (typeof data.noteNodeId === 'string')
+      data.noteNodeId = nodeIdMap.get(data.noteNodeId);
     if (nodeType === 'note') data.heightMode = resolveHeightMode(node);
     const originalLabel =
       typeof data.label === 'string' ? data.label.trim() : '';
@@ -285,6 +305,7 @@ export function buildSpaceMovePlan(input: {
     let minX = Infinity;
     let minY = Infinity;
     for (const nodeId of movedIds) {
+      if (sourceNoteIds.has(nodeId)) continue;
       const node = byId.get(nodeId);
       const position = getAbsolutePosition(
         sourceNodes as NestableNode[],

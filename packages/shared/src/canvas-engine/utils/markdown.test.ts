@@ -7,7 +7,24 @@ import {
   stripMarkdown,
   markdownSearchTarget,
   markdownSummaryBlocks,
+  markdownExcerptParagraphs,
 } from './markdown.js';
+
+describe('markdownExcerptParagraphs', () => {
+  it('flattens loose and nested list paragraphs while omitting block code and headings', () => {
+    expect(
+      markdownExcerptParagraphs(
+        '# Title\n\nIntro.\n\n- [x] Item.\n\n  Continuation.\n\n  ```js\n  hidden();\n  ```\n\n  - Child with `inline` code.\n\nLater.\n\n    hidden();',
+      ),
+    ).toEqual([
+      'Intro.',
+      'Item.',
+      'Continuation.',
+      'Child with inline code.',
+      'Later.',
+    ]);
+  });
+});
 
 describe('markdownSummaryBlocks', () => {
   it('preserves paragraphs and flat lists without interactive markup', () => {

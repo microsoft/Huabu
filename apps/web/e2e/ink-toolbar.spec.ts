@@ -11,7 +11,7 @@ test('Ink submission spinner stays centered throughout rotation and respects red
     (route) => route.fulfill({ json: { conversation: null } }),
   );
   await page.goto('/playground/node-toolbars');
-  await expect(page.locator('.nt-toolbar')).toHaveCount(12);
+  await expect(page.locator('.nt-toolbar').first()).toBeVisible();
   await page.evaluate(async () => {
     const load = (path: string) => import(/* @vite-ignore */ path);
     const { mountInkToolbar } = await load('/e2e/fixtures/ink-toolbar.tsx');
@@ -97,7 +97,7 @@ test('Ink excludes built-in Chat from new and recent destinations while retainin
       }),
   );
   await page.goto('/playground/node-toolbars');
-  await expect(page.locator('.nt-toolbar')).toHaveCount(12);
+  await expect(page.locator('.nt-toolbar').first()).toBeVisible();
   await page.evaluate(async () => {
     const load = (path: string) => import(/* @vite-ignore */ path);
     const { mountInkToolbar } = await load('/e2e/fixtures/ink-toolbar.tsx');
@@ -114,11 +114,13 @@ test('Ink excludes built-in Chat from new and recent destinations while retainin
     ]);
   });
   const trigger = page.locator('.ink-agent-destination-trigger');
-  await expect(trigger).toContainText('Conversation 2');
-  await expect(trigger.getByText('Continue', { exact: true })).toHaveCSS(
-    'font-size',
-    '12px',
+  // The trigger names the conversation alone; "Continue" and the Agent are
+  // carried by its accessible name, not by a secondary visible label.
+  await expect(trigger).toHaveText('Conversation 2');
+  await expect(trigger).toHaveAccessibleName(
+    /^Choose destination: Continue Conversation 2 with GitHub Copilot/,
   );
+  await expect(trigger).toHaveCSS('font-size', '13px');
   const send = page.locator('.ink-context-toolbar .canvas-context-submit');
   await expect(send).toBeEnabled();
   await trigger.tap();
@@ -169,7 +171,7 @@ for (const pointerOpen of ['click', 'tap'] as const) {
       (route) => route.fulfill({ json: { conversation: null } }),
     );
     await page.goto('/playground/node-toolbars');
-    await expect(page.locator('.nt-toolbar')).toHaveCount(12);
+    await expect(page.locator('.nt-toolbar').first()).toBeVisible();
     await page.evaluate(async () => {
       const load = (path: string) => import(/* @vite-ignore */ path);
       const { mountInkToolbar } = await load('/e2e/fixtures/ink-toolbar.tsx');
@@ -264,7 +266,7 @@ test('canceling a replacement Lasso restores its manual conversation destination
     },
   );
   await page.goto('/playground/node-toolbars');
-  await expect(page.locator('.nt-toolbar')).toHaveCount(12);
+  await expect(page.locator('.nt-toolbar').first()).toBeVisible();
   await page.evaluate(async () => {
     const load = (path: string) => import(/* @vite-ignore */ path);
     const { mountInkToolbar } = await load('/e2e/fixtures/ink-toolbar.tsx');
@@ -302,7 +304,7 @@ test('conversation default reads server recency only for a fresh Lasso', async (
     },
   );
   await page.goto('/playground/node-toolbars');
-  await expect(page.locator('.nt-toolbar')).toHaveCount(12);
+  await expect(page.locator('.nt-toolbar').first()).toBeVisible();
   await page.evaluate(async () => {
     const load = (path: string) => import(/* @vite-ignore */ path);
     const { mountInkToolbar } = await load('/e2e/fixtures/ink-toolbar.tsx');
@@ -341,7 +343,7 @@ for (const locale of ['zh-CN', 'en']) {
       (route) => route.fulfill({ json: { conversation: null } }),
     );
     await page.goto('/playground/node-toolbars');
-    await expect(page.locator('.nt-toolbar')).toHaveCount(12);
+    await expect(page.locator('.nt-toolbar').first()).toBeVisible();
     await page.evaluate(async (language) => {
       const load = (path: string) => import(/* @vite-ignore */ path);
       const { mountInkToolbar } = await load('/e2e/fixtures/ink-toolbar.tsx');
@@ -396,7 +398,7 @@ for (const locale of ['zh-CN', 'en']) {
       (route) => route.fulfill({ json: { conversation: null } }),
     );
     await page.goto('/playground/node-toolbars');
-    await expect(page.locator('.nt-toolbar')).toHaveCount(12);
+    await expect(page.locator('.nt-toolbar').first()).toBeVisible();
     await page.evaluate(async (language) => {
       const load = (path: string) => import(/* @vite-ignore */ path);
       const { mountInkToolbar } = await load('/e2e/fixtures/ink-toolbar.tsx');
@@ -405,10 +407,12 @@ for (const locale of ['zh-CN', 'en']) {
 
     const toolbar = page.locator('.ink-context-toolbar');
     const trigger = toolbar.locator('.ink-agent-destination-trigger');
-    await expect(trigger).toContainText('GitHub Copilot');
-    await expect(
-      trigger.getByText(locale === 'zh-CN' ? '新建' : 'New', { exact: true }),
-    ).toHaveCSS('font-size', '12px');
+    // "New" is part of the one trigger label, ahead of the Agent name.
+    await expect(trigger).toContainText(
+      `${locale === 'zh-CN' ? '新建' : 'New'} · GitHub Copilot`,
+    );
+    await expect(trigger.locator(':scope > span')).toHaveCount(2);
+    await expect(trigger).toHaveCSS('font-size', '13px');
     await expect(toolbar.locator('.node-toolbar-color')).toBeVisible();
     await expect(toolbar.locator('.lucide-pencil')).toBeVisible();
     await trigger.hover();

@@ -783,4 +783,12 @@ describe('lookups', () => {
     expect(activateTab(ws, 'nope')).toBe(ws);
     expect(setActiveGroup(ws, 'nope')).toBe(ws);
   });
+
+  it('preserves pending-creation scope when focus returns to the active group', () => {
+    const ws = splitGroup(emptyWorkspace(), 'g2');
+    expect(setActiveGroup(ws, ws.activeGroupId)).toBe(ws);
+    const switched = setActiveGroup(ws, 'g1');
+    expect(switched).not.toBe(ws);
+    expect(switched.activeGroupId).toBe('g1');
+  });
 });

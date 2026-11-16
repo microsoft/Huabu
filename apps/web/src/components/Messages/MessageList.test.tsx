@@ -763,4 +763,82 @@ describe('manual virtual chat', () => {
     expect(container.querySelector('[data-chat-empty-disclaimer]')).toBeNull();
     expect(container.querySelector('[data-loading]')).not.toBeNull();
   });
+
+  it('reconciles a remapped scroll anchor while hidden and never shows readingPositionUnavailable', async () => {
+    const {
+      forgetPreviewScrollPosition,
+      remapMessageListScrollAnchor,
+      rememberMessageListScrollAnchor,
+    } = await import('@/store/previewWorkspace/scrollMemory');
+    const viewKey = 'chat:canvas-1:thread-remap';
+    const fakeScroller = document.createElement('div');
+    Object.defineProperty(fakeScroller, 'clientHeight', { value: 500 });
+    fakeScroller.getBoundingClientRect = () => new DOMRect(0, 0, 300, 500);
+    const fakeRow = document.createElement('div');
+    fakeRow.dataset.chatMessageId = 'temp-id';
+    fakeRow.getBoundingClientRect = () => new DOMRect(0, 24, 300, 100);
+    fakeScroller.append(fakeRow);
+    rememberMessageListScrollAnchor(fakeScroller, viewKey);
+
+    render({
+      viewKey,
+      isActive: true,
+      messages: [{ id: 'temp-id', role: 'user', content: 'Hello' }],
+    });
+    virtual.jump.mockClear();
+
+    // Hide the tab, then simulate background history completion remapping temp-id -> turn-1:0
+    render({
+      viewKey,
+      isActive: false,
+      messages: [{ id: 'temp-id', role: 'user', content: 'Hello' }],
+    });
+    remapMessageListScrollAnchor(viewKey, new Map([['temp-id', 'turn-1:0']]));
+    render({
+      viewKey,
+      isActive: false,
+      messages: [
+        {
+          id: 'turn-1:0',
+          historyTurnId: 'turn-1',
+          role: 'user',
+          content: 'Hello',
+        },
+        {
+          id: 'turn-1:1',
+          historyTurnId: 'turn-1',
+          role: 'assistant',
+          segments: [{ kind: 'text', text: 'Reply' }],
+        },
+      ],
+    });
+
+    // Reactivate the tab: should restore turn-1:0 (index 0, align 'start') without showing any unavailable banner
+    render({
+      viewKey,
+      isActive: true,
+      activationId: 2,
+      messages: [
+        {
+          id: 'turn-1:0',
+          historyTurnId: 'turn-1',
+          role: 'user',
+          content: 'Hello',
+        },
+        {
+          id: 'turn-1:1',
+          historyTurnId: 'turn-1',
+          role: 'assistant',
+          segments: [{ kind: 'text', text: 'Reply' }],
+        },
+      ],
+    });
+    expect(virtual.jump).toHaveBeenCalledWith(
+      expect.objectContaining({ index: 0, align: 'start' }),
+    );
+    expect(container.textContent).not.toContain(
+      'chat.readingPositionUnavailable',
+    );
+    forgetPreviewScrollPosition(viewKey);
+  });
 });

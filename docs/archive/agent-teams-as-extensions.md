@@ -1,6 +1,8 @@
 # Huabu Managed Agent Teams — Vision & Examples
 
-Status: Superseded. This is a historical description of the retired Agent Team runtime, not current implementation guidance. See [Agent Profiles and Harness Discovery](../architecture/agent-profiles.md). Manifest and Skill folders are retained as data only.
+Status: Superseded. This is a historical description of the retired Agent Team runtime, not current implementation guidance. See [Agent Profiles and Harness Discovery](../architecture/agent-profiles.md). The repository's Team manifest collection has also been retired.
+
+Issue Tracker, Paper Reviewer and Paper Scout now live in [Space Kits](../architecture/space-kits.md). HackMD is a [Service Package](../architecture/service-packages.md). Obsolete DeepV and HTML Slides Maker packages were removed; no user credentials or historical runtime data were deleted.
 
 > **Core thesis**: In the AI/Agent era, **the agent IS the plugin system**. Instead of designing extension points, hooks, event buses, and SDK APIs — you connect an agent. The agent reads context, reasons about intent, uses whatever tools exist in its environment (CLIs, APIs, SDKs), and writes results back. This is fundamentally more powerful than any plugin system because the interface is _natural language_ + _tool use_ — infinitely flexible, self-describing, and composable.
 
@@ -164,5 +166,5 @@ This is why "agent as the universal interface" is not just a nice idea for Huabu
 | [`packages/shared/src/types/api/agent-team.ts`](../../packages/shared/src/types/api/agent-team.ts)                   | Shared Zod wire contracts for Settings reads and mutations.                                                                  |
 | [`apps/web/src/components/Settings/agent-team/`](../../apps/web/src/components/Settings/agent-team/)                 | Unified Profile list and editor, bundled-member Configs, default/custom working-directory policy, and preparation UI.        |
 | [`external/agentlet/spec/agent-team.md`](../../external/agentlet/spec/agent-team.md)                                 | Generic package and daemon execution contract.                                                                               |
-| [`agent-teams/`](../../agent-teams)                                                                                  | Dual-mode bundled Agent Team packages and installable Skill adapters.                                                        |
-| [`scripts/check-agent-team-skills.mjs`](../../scripts/check-agent-team-skills.mjs)                                   | Validate bundled Skill discovery metadata, canonical references, portability, and package hygiene.                           |
+| [`space-kits/`](../../space-kits)                                                                                    | Current installation Skills and assets; the Team collection described here is retired.                                       |
+| [`scripts/check-space-kit-skills.mjs`](../../scripts/check-space-kit-skills.mjs)                                     | Current installation Skill metadata, portability and package hygiene checks.                                                 |

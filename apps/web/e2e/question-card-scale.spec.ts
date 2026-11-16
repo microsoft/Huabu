@@ -65,6 +65,10 @@ async function seed(page: Page) {
                 nodeType: 'question',
                 data: {
                   label: TITLE,
+                  // A user-owned title is never replaced by the server's
+                  // generated conversation title, which would otherwise
+                  // rewrite this node whenever the machine has an Agent.
+                  labelSource: 'user',
                   content: TITLE,
                   style: { fontSize: INITIAL_FONT },
                 },

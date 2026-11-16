@@ -14,6 +14,7 @@ export interface ChatViewportSnapshot {
 
 export interface PreviewScrollPosition {
   scrollTop: number;
+  scrollHeaderHeight?: number;
   chatViewport?: ChatViewportSnapshot;
   pdfView?: {
     source: string;
@@ -140,19 +141,27 @@ export function nodePreviewViewKey(canvasId: string, nodeId: string): string {
 
 export function readPreviewScrollPosition(
   viewKey: string | undefined,
+  headerHeight?: number,
 ): number | undefined {
-  return viewKey ? scrollPositionByViewKey.get(viewKey)?.scrollTop : undefined;
+  const position = viewKey ? scrollPositionByViewKey.get(viewKey) : undefined;
+  if (!position || headerHeight === undefined) return position?.scrollTop;
+  const previousHeaderHeight = position.scrollHeaderHeight ?? 0;
+  return position.scrollTop >= previousHeaderHeight
+    ? position.scrollTop - previousHeaderHeight + headerHeight
+    : Math.min(position.scrollTop, headerHeight);
 }
 
 export function rememberPreviewScrollPosition(
   viewKey: string | undefined,
   scrollTop: number,
+  headerHeight = 0,
 ): void {
   if (!viewKey || !Number.isFinite(scrollTop)) return;
   const previous = scrollPositionByViewKey.get(viewKey);
   scrollPositionByViewKey.set(viewKey, {
     ...previous,
     scrollTop: Math.max(0, scrollTop),
+    scrollHeaderHeight: headerHeight,
   });
 }
 
@@ -177,10 +186,13 @@ export function rememberMessageListScrollAnchor(
   viewKey: string | undefined,
 ): void {
   if (!viewKey) return;
+  const nextAnchor = captureMessageListScrollAnchor(container);
+  const existing = scrollPositionByViewKey.get(viewKey);
+  if (!nextAnchor && existing?.messageAnchor) return;
   scrollPositionByViewKey.set(viewKey, {
-    ...scrollPositionByViewKey.get(viewKey),
+    ...existing,
     scrollTop: Math.max(0, container.scrollTop),
-    messageAnchor: captureMessageListScrollAnchor(container),
+    messageAnchor: nextAnchor,
   });
 }
 

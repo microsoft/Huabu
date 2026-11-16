@@ -1626,6 +1626,7 @@ export function stopAgentTurn(session: ChatSession): void {
         id: createId('status'),
         role: 'status',
         status: 'interrupted',
+        localOnly: reconciled && response.request?.accepted === false,
       });
 
       // Mark any still-pending tool parts as cancelled so the renderer

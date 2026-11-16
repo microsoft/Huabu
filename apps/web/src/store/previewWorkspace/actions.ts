@@ -1,17 +1,22 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+import { t } from 'i18next';
+
 import { ApiError } from '@/api/_client';
 import { getAgentConversationOwner } from '@/api/agent';
 import { toast } from '@/components/Common/Toast';
 import { pageLifecycle } from '@/utils/pageLifecycle';
 
 import { loadDefaultAgentBinding } from '../acpProfilesStore';
+import { selectCanWriteCanvas } from '../canvasStore';
 import useCanvasStore from '../canvasStore';
 import { createConversation } from '../conversationPreparation';
 import { usePanelStore } from '../panelStore';
 import { findTabByTarget, groupOfTab, normalizePreviewTarget } from './model';
 import { selectActiveTab, usePreviewWorkspaceStore } from './store';
+
+import type { CanvasNodeId } from '@huabu/shared';
 
 function findConversationTab(
   canvasId: string,
@@ -102,15 +107,23 @@ export function openPreviewNode(
     transient?: boolean;
     focusEditor?: boolean;
     markReadIntent?: boolean;
+    openToSide?: boolean;
+    groupId?: string;
   },
 ): string {
   const canvas = useCanvasStore.getState();
   usePanelStore.getState().requestOpenRightPanel();
   const tabId = usePreviewWorkspaceStore.getState().openPreviewTarget(
-    { kind: 'node', canvasId: canvas.canvasId, nodeId },
+    {
+      kind: 'node',
+      canvasId: canvas.canvasId,
+      nodeId,
+    },
     {
       transient: options?.transient ?? true,
       markReadIntent: options?.markReadIntent,
+      openToSide: options?.openToSide,
+      groupId: options?.groupId,
     },
   );
   const openedNode = canvas.nodes.find((node) => node.id === nodeId);
@@ -124,6 +137,50 @@ export function openPreviewNode(
     }
   }
   return tabId;
+}
+
+/** Keep the PDF visible while reusing its owned notes view. */
+export function openPdfNotes(pdfId: string): string {
+  const canvas = useCanvasStore.getState();
+  const pdf = canvas.nodes.find(
+    (node) => node.id === pdfId && node.type === 'pdf',
+  );
+  if (!pdf) throw new Error('PDF not found');
+  let noteId =
+    typeof pdf.data.noteNodeId === 'string' ? pdf.data.noteNodeId : undefined;
+  if (!noteId) {
+    if (!selectCanWriteCanvas(canvas))
+      throw new Error(t('node.pdfNotesReadOnly'));
+    canvas.executeCommands(
+      [{ type: 'INITIALIZE_PDF_NOTE', nodeId: pdfId as CanvasNodeId }],
+      'ui',
+    );
+    const updatedPdf = useCanvasStore
+      .getState()
+      .nodes.find((node) => node.id === pdfId);
+    noteId =
+      typeof updatedPdf?.data.noteNodeId === 'string'
+        ? updatedPdf.data.noteNodeId
+        : undefined;
+  }
+  if (
+    !noteId ||
+    !useCanvasStore
+      .getState()
+      .nodes.some((node) => node.id === noteId && node.type === 'note')
+  )
+    throw new Error('PDF note is unavailable');
+  const sourceTab = openPreviewNode(pdfId, {
+    transient: false,
+    focusEditor: false,
+  });
+  const preview = usePreviewWorkspaceStore.getState();
+  const groupId = groupOfTab(preview.workspace, sourceTab)?.id;
+  return openPreviewNode(noteId, {
+    transient: false,
+    openToSide: true,
+    groupId,
+  });
 }
 
 /** Opens the most recently used Chat, creating one when none exists. */

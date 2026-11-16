@@ -32,6 +32,70 @@ function node(
 
 describe('buildSpaceMovePlan', () => {
   it.each([
+    { selectedNodeIds: ['pdf'] },
+    { selectedNodeIds: ['pdf', 'notes'] },
+  ])(
+    'moves PDF-owned notes without using them for placement ($selectedNodeIds)',
+    ({ selectedNodeIds }) => {
+      const pdf = node('pdf', 'pdf', 600, 400);
+      pdf.data = {
+        ...pdf.data,
+        noteNodeId: 'notes',
+        properties: { citation: 'note' },
+      };
+      const plan = buildSpaceMovePlan({
+        sourceNodes: [
+          pdf,
+          {
+            ...node('notes', 'note', 0, 0),
+            data: { content: 'Notes about note' },
+          },
+        ],
+        sourceEdges: [],
+        destinationNodes: [],
+        selectedNodeIds,
+        destinationCanvasId: 'destination',
+        createSourcePreview: true,
+      });
+      const moved = executeCanvasCommands(
+        { source: 'system', commands: plan.commands },
+        { nodes: [], edges: [], canvasId: 'destination' },
+      ).writeResult.nodes;
+      const movedPdf = moved.find((entry) => entry.type === 'pdf')!;
+      expect(moved).toHaveLength(2);
+      const notes = moved.find((entry) => entry.type === 'note');
+      expect(movedPdf.data.noteNodeId).toBe(notes?.id);
+      expect(notes?.data.content).toBe('Notes about note');
+      expect(notes?.hidden).toBe(true);
+      expect(movedPdf.data.properties).toEqual({ citation: 'note' });
+      expect(movedPdf.position).toEqual({ x: 0, y: 0 });
+      expect(plan.sourceCommands[1]).toMatchObject({
+        type: 'CREATE_NODES',
+        nodes: [{ nodeType: 'spacePreview', position: { x: 600, y: 400 } }],
+      });
+    },
+  );
+
+  it('ignores owned Notes when finding space to the right of destination nodes', () => {
+    const destinationPdf = node('existing-pdf', 'pdf', 200, 0);
+    destinationPdf.data.noteNodeId = 'existing-notes';
+    const plan = buildSpaceMovePlan({
+      sourceNodes: [node('pdf', 'pdf', 600, 400)],
+      sourceEdges: [],
+      destinationNodes: [
+        destinationPdf,
+        node('existing-notes', 'note', 10000, 0),
+      ],
+      selectedNodeIds: ['pdf'],
+      destinationCanvasId: 'destination',
+      createSourcePreview: false,
+    });
+    expect(plan.commands[0]).toMatchObject({
+      type: 'CREATE_NODES',
+      nodes: [{ nodeType: 'pdf', position: { x: 460, y: 0 } }],
+    });
+  });
+  it.each([
     { name: 'legacy auto', data: {}, height: undefined },
     {
       name: 'legacy auto with a stale measurement',

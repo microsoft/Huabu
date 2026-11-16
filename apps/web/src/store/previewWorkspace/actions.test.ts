@@ -7,7 +7,12 @@ import { ApiError } from '@/api/_client';
 import { getAgentConversationOwner } from '@/api/agent';
 import useCanvasStore from '@/store/canvasStore';
 
-import { openConversationThread, openSpaceConversation } from './actions';
+import {
+  openConversationThread,
+  openSpaceConversation,
+  openPdfNotes,
+  openPreviewNode,
+} from './actions';
 import { createEmptyWorkspace } from './model';
 import { usePreviewWorkspaceStore } from './store';
 
@@ -73,6 +78,66 @@ it('opens a new destination to the side when requested', () => {
     threadId: 'thread',
   });
   expect(chatOpenRequest?.tabId).toBe(tabId);
+});
+
+it('opens the real owned Note beside the PDF without duplicating nodes or tabs', () => {
+  useCanvasStore.setState({
+    nodes: [
+      {
+        id: 'pdf',
+        type: 'pdf',
+        position: { x: 0, y: 0 },
+        data: { noteNodeId: 'notes' },
+      },
+      {
+        id: 'notes',
+        type: 'note',
+        hidden: true,
+        position: { x: 0, y: 0 },
+        data: { content: 'My notes' },
+      },
+    ],
+  });
+
+  const noteTab = openPdfNotes('pdf');
+  expect(openPdfNotes('pdf')).toBe(noteTab);
+  const { workspace, nodeFocusRequest } = usePreviewWorkspaceStore.getState();
+  expect(workspace.groups).toHaveLength(2);
+  expect(Object.values(workspace.tabs)).toHaveLength(2);
+  expect(workspace.groups.every((group) => group.tabIds.length === 1)).toBe(
+    true,
+  );
+  expect(Object.values(workspace.tabs).every((tab) => !tab.transient)).toBe(
+    true,
+  );
+  expect(nodeFocusRequest?.tabId).toBe(noteTab);
+  expect(workspace.tabs[noteTab].target).toEqual({
+    kind: 'node',
+    canvasId: 'space',
+    nodeId: 'notes',
+  });
+  expect(useCanvasStore.getState().nodes).toHaveLength(2);
+});
+
+it('reuses PDF notes for search without retaining an editor-focus request', () => {
+  useCanvasStore.setState({
+    nodes: [{ id: 'notes', type: 'note', position: { x: 0, y: 0 }, data: {} }],
+  });
+  const searchTab = openPreviewNode('notes', {
+    focusEditor: false,
+  });
+  expect(
+    usePreviewWorkspaceStore.getState().workspace.tabs[searchTab],
+  ).toMatchObject({
+    target: { kind: 'node', canvasId: 'space', nodeId: 'notes' },
+    transient: true,
+  });
+  usePreviewWorkspaceStore.getState().requestNodeFocus(searchTab);
+  expect(openPreviewNode('notes', { focusEditor: false })).toBe(searchTab);
+  expect(usePreviewWorkspaceStore.getState().nodeFocusRequest).toBeNull();
+  expect(
+    Object.values(usePreviewWorkspaceStore.getState().workspace.tabs),
+  ).toHaveLength(1);
 });
 
 it.each(['node', 'conversation'] as const)(

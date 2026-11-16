@@ -68,6 +68,57 @@ export function describeSpaceNodesContract(
       await expect(repository.read('contract-missing')).resolves.toBeNull();
     });
 
+    it('round-trips authored properties, reordered keys and owned notes including explicit clearing', async () => {
+      const { repository } = await open();
+      const nodeId = 'contract-properties';
+      const record: NodeContent = {
+        ...note(nodeId, 'Properties', 'body'),
+        properties: {
+          title: 'Paper',
+          year: 2026,
+          reviewed: false,
+          authors: ['Ada', 'Grace'],
+          empty: '',
+        },
+        propertyDisplayKeys: ['year', 'reviewed'],
+      };
+      const first = await putSuccessfully(repository, { nodeId, record });
+      expect((await repository.read(nodeId))?.record).toEqual(record);
+      const reordered = await putSuccessfully(repository, {
+        nodeId,
+        record: { ...record, propertyDisplayKeys: ['reviewed', 'year'] },
+        expectedRevision: first.revision,
+      });
+      expect(
+        (await repository.read(nodeId))?.record.propertyDisplayKeys,
+      ).toEqual(['reviewed', 'year']);
+      expect(reordered.revision).not.toBe(first.revision);
+      const cleared = {
+        ...record,
+        properties: { reviewed: true },
+        propertyDisplayKeys: [],
+      };
+      const second = await putSuccessfully(repository, {
+        nodeId,
+        record: cleared,
+        expectedRevision: reordered.revision,
+      });
+      expect(second.revision).not.toBe(first.revision);
+      expect((await repository.list()).get(nodeId)?.record).toEqual(cleared);
+      expect((await repository.readMany([nodeId])).get(nodeId)?.record).toEqual(
+        cleared,
+      );
+      expect(
+        (await repository.stream(() => undefined)).get(nodeId)?.record,
+      ).toEqual(cleared);
+      const stale = await repository.put({
+        nodeId,
+        record,
+        expectedRevision: first.revision,
+      });
+      expect(stale).toMatchObject({ ok: false, reason: 'revision-conflict' });
+    });
+
     /**
      * The four read shapes are one view of one collection.
      *

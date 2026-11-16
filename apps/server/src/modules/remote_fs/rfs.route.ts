@@ -38,6 +38,7 @@ import path from 'node:path';
 import archiver from 'archiver';
 
 import {
+  AGENT_HOST_SSE_EVENTS,
   AGENT_SSE_EVENTS,
   RFS_HEARTBEAT_DEFAULT_SEC,
   RFS_HEARTBEAT_MAX_SEC,
@@ -121,6 +122,7 @@ import {
   reportInkIntent,
 } from '../agent/tools/handlers/report-ink-intent.js';
 import { CanvasNotFoundError } from '../canvas/canvas-executor.js';
+import { NodeCoverError } from '../canvas/import-node-src.js';
 import { executeSpaceQuery, SpaceQueryError } from '../canvas/space-query.js';
 import { WorldPreviewMutationError } from '../canvas/world-preview-policy.js';
 import {
@@ -828,6 +830,11 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
         }
         if (error instanceof WorldPreviewMutationError) {
           return reply.code(409).send(rfsError(error.message));
+        }
+        if (error instanceof NodeCoverError) {
+          return reply
+            .code(400)
+            .send(rfsError(error.message, 'validation_failed'));
         }
         request.log.error(
           { err: error, canvasId: request.params.canvasId },
@@ -1694,7 +1701,16 @@ async function streamAgent(
   const onClose = (): void => {
     clientConnected = false;
   };
+  raw.once('close', onClose);
   request.raw.socket?.once('close', onClose);
+
+  const acceptanceForwarded = invocation.acceptance.then((acceptance) => {
+    if (acceptance && clientConnected && eventMode === 'all') {
+      raw.write(
+        `event: ${AGENT_HOST_SSE_EVENTS.Accepted}\ndata: ${JSON.stringify(acceptance)}\n\n`,
+      );
+    }
+  });
 
   try {
     for await (const event of invocation.events) {
@@ -1720,6 +1736,8 @@ async function streamAgent(
         );
       }
     }
+    // A pre-start failure can settle acceptance only after its error is drained.
+    await acceptanceForwarded;
     if (clientConnected && eventMode === 'all' && outcome !== 'error') {
       raw.write(`event: ${AGENT_SSE_EVENTS.End}\ndata: {}\n\n`);
     }
@@ -1735,6 +1753,7 @@ async function streamAgent(
     }
   } finally {
     clearInterval(heartbeat);
+    raw.removeListener('close', onClose);
     request.raw.socket?.removeListener('close', onClose);
     if (clientConnected) raw.end();
     if (debug) {

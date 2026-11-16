@@ -5,11 +5,15 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { handleInspectNodes } from './canvas-query.js';
 import { handleRead } from './fs-read.js';
 import { toSafeFilename } from '../../../../utils/naming.js';
+import { prepareAgentCanvasCommands } from '../../../canvas/agent-command-preparation.js';
+import { executeOnServer } from '../../../canvas/canvas-executor.js';
 import { getCanvasStore } from '../../../storage/index.js';
+import * as storage from '../../../storage/index.js';
 import { setWorkspacePath } from '../../../workspace.js';
 
 interface ReadResult {
@@ -40,10 +44,157 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   rmSync(workspace, { recursive: true, force: true });
 });
 
 describe('handleRead node projection', () => {
+  it('pages an owned Note as an ordinary body and uses its own revision for Agent edits', async () => {
+    const store = getCanvasStore(canvasId);
+    const content = Array.from({ length: 2100 }, (_, i) => `Line ${i}`).join(
+      '\n',
+    );
+    store.write({
+      canvasId,
+      title: null,
+      version: 1,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      state: {
+        nodes: [
+          {
+            id: 'pdf',
+            type: 'pdf',
+            position: { x: 0, y: 0 },
+            data: { noteNodeId: 'notes' },
+          },
+          {
+            id: 'notes',
+            type: 'note',
+            hidden: true,
+            position: { x: 0, y: 0 },
+            data: {},
+          },
+        ],
+        edges: [],
+      },
+    });
+    store.writeNode('pdf', {
+      nodeId: 'pdf',
+      type: 'pdf',
+      label: 'Paper',
+      content: 'Extracted source',
+    });
+    store.writeNode('notes', {
+      nodeId: 'notes',
+      type: 'note',
+      label: 'Reading notes',
+      content,
+    });
+    const inspection = JSON.parse(
+      await handleInspectNodes({ canvasId, ids: ['pdf'] }),
+    );
+    expect(inspection.nodes[0].noteNodeId).toBe('notes');
+    const readSet = new Map<string, string>();
+    const first = parseResult(
+      await handleRead(
+        { canvasId, path: 'nodes/Reading notes.md', limit: 2 },
+        readSet,
+      ),
+    );
+    const next = parseResult(
+      await handleRead(
+        { canvasId, path: 'nodes/Reading notes.md', offset: 3, limit: 2 },
+        readSet,
+      ),
+    );
+    expect(first.content).toBe('Line 0\nLine 1');
+    expect(next.content).toBe('Line 2\nLine 3');
+    expect(first.frontmatter).not.toHaveProperty('content');
+    const edited = await executeOnServer({
+      canvasId,
+      originator: { source: 'agent' },
+      commands: prepareAgentCanvasCommands(
+        [
+          {
+            type: 'MERGE_NODE_DATA',
+            patches: [
+              { nodeId: 'notes', patch: { content: 'Agent-edited notes' } },
+            ],
+          },
+        ],
+        { readSet },
+      ),
+    });
+    expect(edited.results[0].applied).toBe(true);
+    expect(store.readNode('notes')?.content).toBe('Agent-edited notes');
+    expect(store.readNode('pdf')?.content).toBe('Extracted source');
+  });
+
+  it('refreshes metadata freshness after inspect, a remote edit, and a full read', async () => {
+    const store = getCanvasStore(canvasId);
+    store.write({
+      canvasId,
+      title: null,
+      version: 1,
+      state: {
+        nodes: [{ id: 'pdf', type: 'pdf', position: { x: 0, y: 0 }, data: {} }],
+        edges: [],
+      },
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+    const record = {
+      nodeId: 'pdf',
+      type: 'pdf',
+      label: 'Paper',
+      content: 'Extracted',
+      properties: { Venue: 'CHI' },
+    };
+    store.writeNode('pdf', record);
+    const readSet = new Map<string, string>();
+    await handleInspectNodes({ canvasId, ids: ['pdf'] }, readSet);
+    const inspected = readSet.get('metadata:pdf');
+    const originalSpace = storage.space;
+    vi.spyOn(storage, 'space').mockImplementationOnce((id) => {
+      // Simulate a remote edit between the file read and canonical record lookup.
+      store.writeNode('pdf', { ...record, properties: { Venue: 'UIST' } });
+      return originalSpace(id);
+    });
+    const read = parseResult(
+      await handleRead(
+        {
+          canvasId,
+          path: `nodes/${toSafeFilename('Paper', 'pdf')}.md`,
+        },
+        readSet,
+      ),
+    );
+    expect(read.frontmatter?.properties).toEqual({ Venue: 'UIST' });
+    expect(read.rev).not.toBe(inspected);
+    expect(readSet.get('metadata:pdf')).toBe(read.rev);
+    const result = await executeOnServer({
+      canvasId,
+      originator: { source: 'agent' },
+      commands: prepareAgentCanvasCommands(
+        [
+          {
+            type: 'MERGE_NODE_DATA',
+            patches: [
+              { nodeId: 'pdf', patch: { properties: { Status: 'Read' } } },
+            ],
+          },
+        ],
+        { readSet },
+      ),
+    });
+    expect(result.results[0].applied).toBe(true);
+    expect(store.readNode('pdf')?.properties).toEqual({
+      Venue: 'UIST',
+      Status: 'Read',
+    });
+  });
+
   it('returns node frontmatter once and paginates over the body', async () => {
     const store = getCanvasStore(canvasId);
     store.write({

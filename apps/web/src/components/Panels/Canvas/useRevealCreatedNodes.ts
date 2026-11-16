@@ -23,7 +23,23 @@ export function useRevealCreatedNodes(isInitialViewportPending: boolean) {
     ) {
       return;
     }
-    revealNodesOnCanvas(rfInstance, wrapper, nodeIds);
+    const node =
+      nodeIds.length === 1
+        ? useCanvasStore
+            .getState()
+            .nodes.find((entry) => entry.id === nodeIds[0])
+        : undefined;
+    const focusAgent = node?.type === 'question' && node.selected;
+    revealNodesOnCanvas(
+      rfInstance,
+      wrapper,
+      nodeIds,
+      focusAgent &&
+        window.matchMedia('(prefers-reduced-motion: reduce)').matches
+        ? 0
+        : 400,
+      focusAgent ? 0.3 : undefined,
+    );
     useCanvasStore.getState().consumeRevealRequest(nodeIds);
   }, [isLoading, isInitialViewportPending, rfInstance, wrapper, nodeIds]);
 }

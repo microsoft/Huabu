@@ -16,6 +16,7 @@
  */
 
 import { invertDelta, type Delta } from './delta.js';
+import { pdfNoteId } from './pdfNotes.js';
 import { createId } from '../utils/id.js';
 
 import type { CanvasNode, CanvasEdge } from './interfaces.js';
@@ -107,7 +108,7 @@ function changedKeys(
 }
 
 /**
- * The authored *body* payload keys. A CREATE has no `prev` to diff, so it
+ * The authored body and metadata keys. A CREATE has no `prev` to diff, so it
  * can't derive its changed keys the way an UPDATE does — instead it
  * fingerprints only the body here, which is what a revert (deleting the
  * node) would actually destroy. Cosmetic (`style`) and auto-derived
@@ -115,11 +116,18 @@ function changedKeys(
  * creation) fields are deliberately excluded so they never flip a fresh
  * create to "stale"; a genuine edit to the body still does.
  */
-const PRIMARY_CONTENT_KEYS = ['content', 'src'];
+const PRIMARY_CONTENT_KEYS = [
+  'content',
+  'src',
+  'properties',
+  'propertyDisplayKeys',
+];
 
 /** Body keys present on a node's `data`, for CREATE fingerprinting. */
 function primaryKeysOf(data: Record<string, unknown>): string[] {
-  return PRIMARY_CONTENT_KEYS.filter((k) => k in data);
+  return PRIMARY_CONTENT_KEYS.filter(
+    (k) => k in data || !['content', 'src'].includes(k),
+  );
 }
 
 /** djb2 hash over a canonical (sorted-key) projection of `data`. */
@@ -129,7 +137,17 @@ function hashDataFields(
 ): string {
   const picked: Record<string, unknown> = {};
   for (const k of [...keys].sort()) {
-    if (k in data) picked[k] = data[k];
+    if (k in data) {
+      const value = data[k];
+      picked[k] =
+        k === 'properties' && value && typeof value === 'object'
+          ? Object.fromEntries(
+              Object.entries(value).sort(([a], [b]) =>
+                a < b ? -1 : a > b ? 1 : 0,
+              ),
+            )
+          : value;
+    }
   }
   const json = JSON.stringify(picked);
   let h = 5381;
@@ -154,7 +172,7 @@ export function fingerprintNodeFields(
 
 /**
  * A node's **revision token**: a deterministic djb2 hash over its authored
- * content ({@link PRIMARY_CONTENT_KEYS} — `content` / `src`). Surfaced to
+ * content and metadata ({@link PRIMARY_CONTENT_KEYS}). Surfaced to
  * agents as an `ETag` on RFS downloads and as `rev` in per-turn refs /
  * neighbourhood, and (later) checked on the executor's content writes
  * (compare-and-swap).
@@ -175,24 +193,34 @@ export function fingerprintNodeFields(
  * three sites agree.
  */
 export function nodeRevision(node: CanvasNode | undefined): string {
-  return hashDataFields(nodeData(node), PRIMARY_CONTENT_KEYS);
+  return nodeRevisionOf({ ...nodeData(node), type: node?.type });
 }
 
 /**
  * {@link nodeRevision} for callers that hold the authored fields loosely
  * rather than a whole {@link CanvasNode} — e.g. a ref builder that already
- * extracted `content` / `src`, or the RFS lookup that hydrated the on-disk
+ * extracted authored fields, or the RFS lookup that hydrated the on-disk
  * body. Only defined fields are hashed, so the result matches
  * `nodeRevision(node)` for the equivalent node. Single source of truth for
  * "which fields define a node's revision".
  */
 export function nodeRevisionOf(fields: {
+  type?: string;
   content?: string;
   src?: string;
+  properties?: unknown;
+  propertyDisplayKeys?: unknown;
 }): string {
   const data: Record<string, unknown> = {};
-  if (typeof fields.content === 'string') data.content = fields.content;
+  const hasBody =
+    fields.type === undefined ||
+    ['note', 'text', 'web', 'pdf', 'office', 'question'].includes(fields.type);
+  if (hasBody && typeof fields.content === 'string')
+    data.content = fields.content;
   if (typeof fields.src === 'string') data.src = fields.src;
+  for (const key of ['properties', 'propertyDisplayKeys'] as const) {
+    if (fields[key] !== undefined) data[key] = fields[key];
+  }
   return hashDataFields(data, PRIMARY_CONTENT_KEYS);
 }
 
@@ -208,9 +236,84 @@ export function invertDeltas(deltas: readonly Delta[]): Delta[] {
   return out;
 }
 
+/** Check every member of an atomic review row against the same snapshot. */
+export function isChangeStale(
+  record: CanvasChangeRecord,
+  nodes: readonly CanvasNode[],
+  edges: readonly CanvasEdge[],
+): boolean {
+  return record.revertDeltas.some((delta, index) => {
+    switch (delta.type) {
+      case 'INSERT_NODE':
+        return nodes.some((node) => node.id === delta.node.id);
+      case 'DELETE_NODE':
+      case 'REPLACE_NODE': {
+        const applied = delta.type === 'DELETE_NODE' ? delta.node : delta.prev;
+        const current = nodes.find((node) => node.id === applied.id);
+        if (!current) return true;
+        const keys =
+          index === 0
+            ? (record.fingerprintKeys ?? [])
+            : delta.type === 'DELETE_NODE'
+              ? primaryKeysOf(nodeData(applied))
+              : changedKeys(nodeData(delta.next), nodeData(applied));
+        const expected =
+          index === 0
+            ? record.appliedFingerprint
+            : fingerprintNodeFields(applied, keys);
+        return (
+          keys.length > 0 && fingerprintNodeFields(current, keys) !== expected
+        );
+      }
+      case 'DELETE_EDGE':
+        return !edges.some((edge) => edge.id === delta.edge.id);
+      case 'INSERT_EDGE':
+        return edges.some((edge) => edge.id === delta.edge.id);
+      case 'REPLACE_EDGE':
+        return !edges.some((edge) => edge.id === delta.prev.id);
+      default:
+        return false;
+    }
+  });
+}
+
+function groupPdfNoteChanges(
+  records: CanvasChangeRecord[],
+): CanvasChangeRecord[] {
+  const byNodeId = new Map(records.map((record) => [record.nodeId, record]));
+  const grouped = new Set<CanvasChangeRecord>();
+  for (const record of records) {
+    const delta = record.revertDeltas[0];
+    if (!delta) continue;
+    const before =
+      delta.type === 'REPLACE_NODE'
+        ? delta.next
+        : delta.type === 'INSERT_NODE'
+          ? delta.node
+          : undefined;
+    const after =
+      delta.type === 'REPLACE_NODE'
+        ? delta.prev
+        : delta.type === 'DELETE_NODE'
+          ? delta.node
+          : undefined;
+    const beforeId = before && pdfNoteId(before);
+    const afterId = after && pdfNoteId(after);
+    if (beforeId === afterId) continue;
+    for (const id of new Set([beforeId, afterId])) {
+      const dependent = id && byNodeId.get(id);
+      if (!dependent || dependent === record || grouped.has(dependent))
+        continue;
+      record.revertDeltas.push(...dependent.revertDeltas);
+      grouped.add(dependent);
+    }
+  }
+  return records.filter((record) => !grouped.has(record));
+}
+
 /**
- * Build change records from a batch's deltas. One record per node/edge
- * delta. `revertDeltas` is the single inverse delta, ready to apply.
+ * Build change records from a batch's deltas. Ownership changes group the
+ * PDF and Note inverses; other rows represent one node or edge.
  *
  * @param deltas The batch deltas (server diff prestate → poststate).
  * @param opts.nodeLabelById Optional label lookup for edge endpoints
@@ -345,7 +448,7 @@ export function extractCanvasChanges(
     }
   }
 
-  return records;
+  return groupPdfNoteChanges(records);
 }
 
 // ── Coalescing (net effect per entity) ─────────────────────────────────────
@@ -455,7 +558,18 @@ export function coalesceChanges(
   const groups = new Map<string, CanvasChangeRecord[]>();
   const order: string[] = [];
   const labelById = new Map<string, string>();
-  for (const r of records) {
+  // Flatten grouped rows before netting each entity, then rebuild ownership groups.
+  const individual = records.flatMap((record) =>
+    record.revertDeltas.map((delta, index) => ({
+      ...record,
+      id:
+        index === 0
+          ? record.id
+          : `${record.id}:${forwardOf({ ...record, revertDeltas: [delta] })?.key}`,
+      revertDeltas: [delta],
+    })),
+  );
+  for (const r of individual) {
     if (r.nodeId && r.nodeLabel) labelById.set(r.nodeId, r.nodeLabel);
     if (r.sourceNodeId && r.sourceNodeLabel)
       labelById.set(r.sourceNodeId, r.sourceNodeLabel);

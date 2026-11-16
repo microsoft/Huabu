@@ -23,6 +23,7 @@ type ZoomMode = 'width' | 'page' | 'custom';
 
 export function usePdfZoom({
   containerRef,
+  headerRef,
   source,
   viewKey,
   embedded,
@@ -30,6 +31,7 @@ export function usePdfZoom({
   aspectRatio,
 }: {
   containerRef: React.RefObject<HTMLDivElement | null>;
+  headerRef?: React.RefObject<HTMLDivElement | null>;
   source: string;
   viewKey: string | undefined;
   embedded: boolean;
@@ -140,13 +142,19 @@ export function usePdfZoom({
         0,
         (anchor.scrollLeft + anchor.x - oldLeft) * ratio + newLeft - anchor.x,
       );
-      viewport.scrollTop = Math.max(
-        0,
-        (anchor.scrollTop + anchor.y) * ratio - anchor.y,
-      );
+      // The properties above the pages scroll with them but do not scale.
+      const contentTop = headerRef?.current?.offsetHeight ?? 0;
+      if (anchor.scrollTop + anchor.y >= contentTop) {
+        viewport.scrollTop = Math.max(
+          0,
+          (anchor.scrollTop + anchor.y - contentTop) * ratio +
+            contentTop -
+            anchor.y,
+        );
+      }
     }
     anchorRef.current = null;
-  }, [containerRef, memoryKey, pageWidth, size, source]);
+  }, [containerRef, headerRef, memoryKey, pageWidth, size, source]);
 
   useEffect(() => {
     const viewport = containerRef.current;

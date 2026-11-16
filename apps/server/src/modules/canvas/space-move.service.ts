@@ -264,7 +264,10 @@ async function cloneArtifacts(
         const key = await cloneRef(data[field]);
         if (key) data[field] = key;
       }
-      for (const field of markdownArtifactFields(data)) {
+      for (const field of markdownArtifactFields({
+        ...data,
+        type: node.type ?? data.type,
+      })) {
         const markdown = data[field];
         if (typeof markdown !== 'string') continue;
         const rewrites = new Map<string, string>();

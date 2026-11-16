@@ -34,7 +34,11 @@ import { nodeRevisionOf } from '@huabu/shared/canvas-engine';
 
 import { toSafeFilename } from '../../utils/naming.js';
 
-import type { CanvasNodeType, WireNodeRef } from '@huabu/shared';
+import type {
+  CanvasNodeType,
+  WireNodeRef,
+  NodeProperties,
+} from '@huabu/shared';
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -72,6 +76,8 @@ export interface AgentNodeRef extends WireNodeRef {
  *  - canvas outline (when the caller opts in to previews)
  */
 export interface AgentNodePreview extends AgentNodeRef {
+  properties?: NodeProperties;
+  propertyDisplayKeys?: string[];
   /** Frontmatter `summary` (authored abstract); ≤ ~120 chars. */
   summary?: string;
   /** Raw body excerpt (`content[:120]`); ≤ ~120 chars. */
@@ -104,6 +110,7 @@ export interface AgentNodePreview extends AgentNodeRef {
  *  - inspect_nodes results
  */
 export interface AgentNodeOutline extends AgentNodePreview {
+  noteNodeId?: string;
   /** Cross-Space address exposed by a Space preview. */
   targetCanvasId?: string;
   /** Parent frame, when the node lives inside one. */
@@ -147,6 +154,8 @@ export interface NodeRefInput {
  * have (any subset of `summary` / `content` / `src`).
  */
 export interface NodePreviewInput extends NodeRefInput {
+  properties?: NodeProperties;
+  propertyDisplayKeys?: string[];
   /** Frontmatter `summary` from `nodes/<file>.md`, when available. */
   summary?: string;
   /** Inline node body text (markdown / plain text). */
@@ -161,6 +170,7 @@ export interface NodePreviewInput extends NodeRefInput {
  * consumer needs them; everything else is optional.
  */
 export interface NodeOutlineInput extends NodePreviewInput {
+  noteNodeId?: string;
   targetCanvasId?: string;
   parentFrame?: { id: string; label?: string };
   position: { x: number; y: number };
@@ -241,10 +251,15 @@ function flattenPreview(raw: string): string {
  * the same node would return.
  */
 function revisionOfPreviewInput(input: NodePreviewInput): string | undefined {
-  if (typeof input.content !== 'string' && typeof input.src !== 'string') {
+  if (
+    typeof input.content !== 'string' &&
+    typeof input.src !== 'string' &&
+    input.properties === undefined &&
+    input.propertyDisplayKeys === undefined
+  ) {
     return undefined;
   }
-  return nodeRevisionOf({ content: input.content, src: input.src });
+  return nodeRevisionOf(input);
 }
 
 /** Build the L1 ref + preview. */
@@ -252,6 +267,9 @@ export function buildAgentNodePreview(
   input: NodePreviewInput,
 ): AgentNodePreview {
   const out: AgentNodePreview = buildAgentNodeRef(input);
+  if (input.properties !== undefined) out.properties = input.properties;
+  if (input.propertyDisplayKeys !== undefined)
+    out.propertyDisplayKeys = input.propertyDisplayKeys;
   if (typeof input.summary === 'string' && input.summary.trim()) {
     out.summary = flattenPreview(input.summary);
   }
@@ -278,5 +296,6 @@ export function buildAgentNodeOutline(
   if (input.parentFrame) out.parentFrame = input.parentFrame;
   if (input.style) out.style = input.style;
   if (input.targetCanvasId) out.targetCanvasId = input.targetCanvasId;
+  if (input.noteNodeId) out.noteNodeId = input.noteNodeId;
   return out;
 }

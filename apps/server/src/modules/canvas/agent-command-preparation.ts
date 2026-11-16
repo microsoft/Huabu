@@ -67,10 +67,16 @@ export function prepareAgentCanvasCommands(
             entry.patch.content,
             entry.nodeId,
           );
+          const editsMetadata = ['properties', 'propertyDisplayKeys'].some(
+            (key) => key in entry.patch,
+          );
           const injectedRev =
-            'content' in entry.patch && options.readSet
-              ? options.readSet.get(entry.nodeId)
-              : undefined;
+            'content' in entry.patch
+              ? options.readSet?.get(entry.nodeId)
+              : editsMetadata
+                ? (options.readSet?.get(`metadata:${entry.nodeId}`) ??
+                  options.readSet?.get(entry.nodeId))
+                : undefined;
           const revision =
             injectedRev ??
             (options.allowCallerRevisions ? callerRevision : undefined);

@@ -24,6 +24,8 @@ import {
 } from '@/api/llm';
 import { selectThreadSettings, useChatStore } from '@/store/chatStore';
 
+import { createWorkspaceCache } from './workspaceCache';
+
 import type { ChatThreadSettings, LLMModelInfo } from '@huabu/shared';
 
 interface UseBuiltinThreadSettingsArgs {
@@ -49,6 +51,36 @@ const EMPTY_SETTINGS: ChatThreadSettings = {
   reasoningEffort: null,
 };
 
+const STALE_TTL_MS = 10_000;
+
+interface CachedProviderModelsEntry {
+  models: LLMModelInfo[];
+  fetchedAt: number;
+}
+
+interface CachedThreadSettingsEntry {
+  settings: ChatThreadSettings;
+  fetchedAt: number;
+}
+
+const useProviderModelsCache =
+  createWorkspaceCache<CachedProviderModelsEntry>();
+const useThreadSettingsCache =
+  createWorkspaceCache<CachedThreadSettingsEntry>();
+
+function threadSettingsCacheKey(
+  canvasId: string | null | undefined,
+  threadId: string | null | undefined,
+): string | null {
+  if (!threadId) return null;
+  return JSON.stringify([canvasId ?? '', threadId]);
+}
+
+export function clearBuiltinThreadSettingsCache(): void {
+  useProviderModelsCache.getState().clear();
+  useThreadSettingsCache.getState().clear();
+}
+
 export function useBuiltinThreadSettings({
   threadId,
   canvasId,
@@ -57,35 +89,19 @@ export function useBuiltinThreadSettings({
   enabled,
   threadHasMessages,
 }: UseBuiltinThreadSettingsArgs) {
+  const providerModelsCache = useProviderModelsCache();
+  const threadSettingsCache = useThreadSettingsCache();
   const { t } = useTranslation();
-  const [models, setModels] = useState<LLMModelInfo[]>([]);
-  const [settingsState, setSettingsState] = useState<{
-    threadId: string | null;
-    settings: ChatThreadSettings;
-  }>(() => ({
-    threadId: threadId ?? null,
-    settings:
-      enabled && threadId
-        ? selectThreadSettings(useChatStore.getState(), threadId)
-        : EMPTY_SETTINGS,
-  }));
-  const settingsStateRef = useRef(settingsState);
-  const replaceSettingsState = useCallback(
-    (next: { threadId: string | null; settings: ChatThreadSettings }) => {
-      settingsStateRef.current = next;
-      setSettingsState(next);
-    },
-    [],
+  const [models, setModels] = useState<LLMModelInfo[]>(() =>
+    enabled && provider
+      ? (providerModelsCache.get(provider)?.models ?? [])
+      : [],
   );
   const cachedSettings = useChatStore((state) =>
     threadId ? selectThreadSettings(state, threadId) : EMPTY_SETTINGS,
   );
-  const settings =
-    enabled && settingsState.threadId === threadId
-      ? settingsState.settings
-      : enabled
-        ? cachedSettings
-        : EMPTY_SETTINGS;
+  const settings = enabled ? cachedSettings : EMPTY_SETTINGS;
+  const setThreadSettings = useChatStore((state) => state.setThreadSettings);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
@@ -103,18 +119,36 @@ export function useBuiltinThreadSettings({
       setModels([]);
       return;
     }
+    const cached = providerModelsCache.get(provider);
+    if (cached) {
+      setModels(cached.models);
+      if (Date.now() - cached.fetchedAt < STALE_TTL_MS) {
+        return;
+      }
+    } else {
+      setModels([]);
+    }
     let cancelled = false;
     void getLLMModels(provider)
       .then((next) => {
-        if (!cancelled) setModels(next);
+        if (
+          !cancelled &&
+          useProviderModelsCache.getState() === providerModelsCache
+        ) {
+          providerModelsCache.set(provider, {
+            models: next,
+            fetchedAt: Date.now(),
+          });
+          setModels(next);
+        }
       })
       .catch(() => {
-        if (!cancelled) setModels([]);
+        if (!cancelled && !cached) setModels([]);
       });
     return () => {
       cancelled = true;
     };
-  }, [enabled, provider]);
+  }, [enabled, provider, providerModelsCache]);
 
   // Fetch this thread's persisted selection.
   useEffect(() => {
@@ -129,10 +163,7 @@ export function useBuiltinThreadSettings({
     };
 
     if (!enabled || !threadId) {
-      replaceSettingsState({
-        threadId: threadId ?? null,
-        settings: EMPTY_SETTINGS,
-      });
+      if (threadId) setThreadSettings(threadId, EMPTY_SETTINGS);
       setLoading(false);
       return;
     }
@@ -144,23 +175,45 @@ export function useBuiltinThreadSettings({
       setLoading(false);
       return;
     }
-    const restored = selectThreadSettings(useChatStore.getState(), threadId);
-    replaceSettingsState({ threadId, settings: restored });
+    const settingsKey = threadSettingsCacheKey(canvasId, threadId);
+    const cachedThread = settingsKey
+      ? threadSettingsCache.get(settingsKey)
+      : undefined;
+    const restored =
+      cachedThread?.settings ??
+      selectThreadSettings(useChatStore.getState(), threadId);
+    setThreadSettings(threadId, restored);
     // Before first send there is no durable server record. The local thread
     // cache is authoritative and is carried on the first message.
     if (!threadHasMessages) {
       setLoading(false);
       return;
     }
+    if (cachedThread && Date.now() - cachedThread.fetchedAt < STALE_TTL_MS) {
+      setLoading(false);
+      return;
+    }
     let cancelled = false;
     const genAtStart = mutationGenRef.current;
-    setLoading(true);
+    if (!cachedThread) setLoading(true);
     void getChatThreadSettings(threadId, canvasId ?? undefined)
       .then((next) => {
         // Skip if the thread/enable changed, or the user picked a value
         // after this fetch started — the local choice wins (P1-2).
-        if (cancelled || mutationGenRef.current !== genAtStart) return;
-        replaceSettingsState({ threadId, settings: next });
+        if (
+          cancelled ||
+          mutationGenRef.current !== genAtStart ||
+          useThreadSettingsCache.getState() !== threadSettingsCache ||
+          (settingsKey && threadSettingsCache.get(settingsKey) !== cachedThread)
+        )
+          return;
+        if (settingsKey) {
+          threadSettingsCache.set(settingsKey, {
+            settings: next,
+            fetchedAt: Date.now(),
+          });
+        }
+        setThreadSettings(threadId, next);
       })
       .catch(() => {
         // Keep the restored cache (or a local pick that bumped the generation).
@@ -171,48 +224,50 @@ export function useBuiltinThreadSettings({
     return () => {
       cancelled = true;
     };
-  }, [enabled, threadId, canvasId, threadHasMessages, replaceSettingsState]);
-
-  // Mirror the current selection into the owning thread so the send path can
-  // carry it on the request (applies a pre-first-message pick on thread
-  // creation). Cleared for external bindings.
-  const setThreadSettings = useChatStore((s) => s.setThreadSettings);
-  useEffect(() => {
-    if (!threadId) return;
-    setThreadSettings(
-      threadId,
-      enabled
-        ? {
-            modelId: settings.modelId,
-            reasoningEffort: settings.reasoningEffort,
-          }
-        : { modelId: null, reasoningEffort: null },
-    );
-  }, [enabled, threadId, settings, setThreadSettings]);
+  }, [
+    enabled,
+    threadId,
+    canvasId,
+    threadHasMessages,
+    setThreadSettings,
+    threadSettingsCache,
+  ]);
 
   const selectSettings = useCallback(
     async (
       update: (current: ChatThreadSettings) => ChatThreadSettings,
       persist: (threadId: string) => Promise<ChatThreadSettings | void>,
     ): Promise<void> => {
-      if (!enabled || !threadId) throw new Error(t('chat.settingsUnavailable'));
+      if (
+        !enabled ||
+        !threadId ||
+        useThreadSettingsCache.getState() !== threadSettingsCache
+      ) {
+        throw new Error(t('chat.settingsUnavailable'));
+      }
       if (savingRef.current) throw new Error(t('chat.settingsUpdatePending'));
-      const current = settingsStateRef.current;
-      const previous =
-        current.threadId === threadId
-          ? current.settings
-          : selectThreadSettings(useChatStore.getState(), threadId);
+      const settingsKey = threadSettingsCacheKey(canvasId, threadId);
+      const previous = selectThreadSettings(useChatStore.getState(), threadId);
       mutationGenRef.current += 1;
       const nextSettings = update(previous);
-      replaceSettingsState({ threadId, settings: nextSettings });
+      if (settingsKey) {
+        threadSettingsCache.set(settingsKey, {
+          settings: nextSettings,
+          fetchedAt: Date.now(),
+        });
+      }
       setThreadSettings(threadId, nextSettings);
       if (!threadHasMessages) return;
 
       savingRef.current = true;
       setSaving(true);
       const applyResult = (settings: ChatThreadSettings) => {
-        if (settingsStateRef.current.threadId === threadId) {
-          replaceSettingsState({ threadId, settings });
+        if (useThreadSettingsCache.getState() !== threadSettingsCache) return;
+        if (settingsKey) {
+          threadSettingsCache.set(settingsKey, {
+            settings,
+            fetchedAt: Date.now(),
+          });
         }
         setThreadSettings(threadId, settings);
       };
@@ -229,11 +284,12 @@ export function useBuiltinThreadSettings({
       }
     },
     [
+      canvasId,
       enabled,
       threadId,
       threadHasMessages,
-      replaceSettingsState,
       setThreadSettings,
+      threadSettingsCache,
       t,
     ],
   );

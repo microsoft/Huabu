@@ -14,6 +14,7 @@ import type {
   AgentNodeLaunchOverrides,
 } from '../api/agent-node.js';
 import type { AgentIcon } from '../api/agent-profile.js';
+import type { NodeProperties } from '../api/canvas.js';
 import type { FileReference } from '../api/device-files.js';
 import type { InkResourceBinding } from '../api/ink-sigil.js';
 import type { InteractiveViewDefinitionV1 } from '../api/interactive-view.js';
@@ -307,6 +308,11 @@ export interface MarkdownProvenance {
 
 /** Common fields for all node types */
 export interface BaseNodeData {
+  properties?: NodeProperties;
+  /** Display priority; unlisted properties follow, and PDF cards prefer earlier nonempty values. */
+  propertyDisplayKeys?: string[];
+  /** The real Note owned by this PDF; its body is stored on that Note. */
+  noteNodeId?: string;
   /** Node origin/source */
   origin?: NodeOrigin;
   /** Display label */

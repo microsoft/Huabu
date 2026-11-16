@@ -37,8 +37,12 @@ import { useTranslation } from 'react-i18next';
 import { useShallow } from 'zustand/react/shallow';
 
 import { TabPointerSensor } from '@/components/Common/TabPointerSensor';
+import { createQuestionNodeAndCompose } from '@/components/Nodes/question/questionCompose';
 import { useConversationTitles } from '@/hooks/useConversationTitles';
-import useCanvasStore, { settleNodePreprocess } from '@/store/canvasStore';
+import useCanvasStore, {
+  selectCanWriteCanvas,
+  settleNodePreprocess,
+} from '@/store/canvasStore';
 import { conversationViewForNode } from '@/store/conversationOwner';
 import { openNewChat as createWorkspaceChat } from '@/store/previewWorkspace/actions';
 import {
@@ -169,6 +173,7 @@ export function PreviewWorkspace({
   );
   useConversationTitles(workspace);
   const canvasId = usePreviewWorkspaceStore((s) => s.canvasId);
+  const canWrite = useCanvasStore(selectCanWriteCanvas);
   const nodeFocusRequest = usePreviewWorkspaceStore((s) => s.nodeFocusRequest);
   const chatOpenRequest = usePreviewWorkspaceStore((s) => s.chatOpenRequest);
   const consumeNodeFocusRequest = usePreviewWorkspaceStore(
@@ -298,6 +303,16 @@ export function PreviewWorkspace({
     },
     [canvasId],
   );
+  const openNewAgent = (groupId: string) => {
+    const canvas = useCanvasStore.getState();
+    if (!canvasId || !selectCanWriteCanvas(canvas)) return;
+    void createQuestionNodeAndCompose({
+      addNode: (input) => canvas.addNode({ ...input, selectOnCreate: true }),
+      canvasId,
+      previewOptions: { groupId, transient: false },
+      isCurrent: () => selectCanWriteCanvas(useCanvasStore.getState()),
+    });
+  };
 
   const containerRef = useRef<HTMLDivElement>(null);
   const separatorDragCleanupRef = useRef<(() => void) | null>(null);
@@ -491,6 +506,7 @@ export function PreviewWorkspace({
                 onSplit={splitGroup}
                 onCloseEmptyGroup={() => closeWorkspaceEmptyGroup(group.id)}
                 onNewChat={() => openNewChat(group.id)}
+                onNewAgent={canWrite ? () => openNewAgent(group.id) : undefined}
                 tabDropIndicator={tabDropIndicator}
                 isFullscreen={isFullscreen}
                 onToggleFullscreen={
