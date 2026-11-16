@@ -2356,6 +2356,11 @@ export function flushNodeContent(nodeId: string): Promise<void> {
   const { canvasId } = useCanvasStore.getState();
   if (!canvasId || !nodeContentQueue.pendingNodeIds().includes(nodeId))
     return Promise.resolve();
+  // A save already on the wire with nothing queued behind it (a property
+  // edit, which is sent the moment it is committed) is what there is to
+  // wait for; another save would only repeat it.
+  const inFlight = nodeContentQueue.whenInFlightSaved(nodeId);
+  if (inFlight.onlyInFlight) return inFlight.done;
   return nodeContentQueue
     .flushNow(canvasId, nodeId, { source: 'auto' })
     .catch(() => undefined);

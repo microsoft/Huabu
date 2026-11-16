@@ -15,6 +15,7 @@ import { canvasHistoryManager } from './canvasHistoryManager';
 import useCanvasStore, {
   commitNodeMetadata,
   commitNodeProperties,
+  flushNodeContent,
   resetCanvasSyncForTests,
   setCanvasSyncLineageForTests,
 } from './canvasStore';
@@ -449,6 +450,41 @@ describe('durable node metadata actions', () => {
       expect(vi.mocked(toast).mock.calls.at(-1)?.[1]?.action).toBeUndefined();
     },
   );
+
+  it('is not saved a second time when the editor that committed it loses focus mid-save', async () => {
+    seed('properties-release');
+    let answer!: (value: {
+      nodeId: string;
+      label: string | null;
+      rev: string;
+    }) => void;
+    vi.mocked(putNodeContent).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          answer = resolve;
+        }),
+    );
+    const committed = commitNodeProperties('properties-release', {
+      properties: { reviewed: true },
+    });
+    await vi.waitFor(() => expect(putNodeContent).toHaveBeenCalledTimes(1));
+    // The field is disabled while saving, so focus leaves it: the page
+    // releases its edit lock once the node's content is on the server.
+    let released = false;
+    const release = flushNodeContent('properties-release').then(() => {
+      released = true;
+    });
+    await Promise.resolve();
+    expect(released).toBe(false);
+    answer({ nodeId: 'properties-release', label: 'Paper', rev: 'saved' });
+    await expect(committed).resolves.toBe(true);
+    await release;
+    expect(released).toBe(true);
+    expect(putNodeContent).toHaveBeenCalledTimes(1);
+    expect(useCanvasStore.getState().pendingContentNodeIds()).not.toContain(
+      'properties-release',
+    );
+  });
 
   it('retracts a conflicting property edit without offering an ordinary retry', async () => {
     seed('properties-conflict');

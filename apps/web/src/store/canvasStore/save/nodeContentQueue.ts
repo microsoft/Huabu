@@ -297,6 +297,17 @@ export type NodeContentQueue = {
    */
   unsavedNodeIds(canvasId: string): string[];
   pendingFields(nodeId: string): ReadonlySet<string>;
+  /**
+   * Settles when the save of `nodeId` now on the wire (and those chained
+   * behind it) has been answered. `true` when nothing else is waiting for
+   * the node — no queued field, no debounce, no held restore — so a caller
+   * that only wants "the Server has what this page shows" need not send
+   * another save.
+   */
+  whenInFlightSaved(nodeId: string): {
+    onlyInFlight: boolean;
+    done: Promise<void>;
+  };
   /** Whether a content edit has not reached the Server: queued, in flight or failed. */
   hasUnsavedContent(canvasId: string): boolean;
 
@@ -1704,6 +1715,22 @@ export function createNodeContentQueue(opts: {
     pendingFields(nodeId) {
       if (restoredContent.has(nodeId)) return new Set(NODE_CONTENT_KEYS);
       return new Set(pendingFields.get(nodeId)?.keys());
+    },
+
+    whenInFlightSaved(nodeId) {
+      const running = inflight.get(nodeId);
+      return {
+        onlyInFlight:
+          running !== undefined &&
+          !pendingFields.has(nodeId) &&
+          !restoredContent.has(nodeId) &&
+          !frozen.has(nodeId) &&
+          !debouncer.pendingKeys().includes(nodeId),
+        done: (running ?? Promise.resolve()).then(
+          () => undefined,
+          () => undefined,
+        ),
+      };
     },
 
     hasUnsavedContent(canvasId) {
