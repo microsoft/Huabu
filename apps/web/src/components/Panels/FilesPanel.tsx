@@ -180,7 +180,11 @@ export function FilesPanel() {
       if (visited.has(directory) || depth > 32) return;
       visited.add(directory);
       const page = pages[directory];
-      for (const entry of page?.entries ?? []) {
+      const entries = [...(page?.entries ?? [])].sort(
+        (a, b) =>
+          Number(b.kind === 'directory') - Number(a.kind === 'directory'),
+      );
+      for (const entry of entries) {
         const relativePath = parent
           ? `${parent}${separator}${entry.name}`
           : entry.name;
