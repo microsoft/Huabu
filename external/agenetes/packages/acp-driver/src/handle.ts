@@ -53,6 +53,7 @@ import {
   awaitSelectionReplay,
   ensureAcpSession,
   recordSessionSelection,
+  recordPromptUsage,
   registerAcpStateListener,
   reportEntryState,
 } from './session.js';
@@ -684,6 +685,7 @@ export class AcpAgentHandle<
           stateChanged = true;
         }
         if (stateChanged) reportEntryState(entry);
+        recordPromptUsage(entry, result.usage, logger);
         if (turnsToLoad) this.turnsToLoad = undefined;
       })
       .catch((err: unknown) => {

@@ -145,7 +145,10 @@ export type {
 // AgentStreamEvent `*_update` frames (fold into it); persisted on
 // AgentPersistentState behind the ThreadStore port and consumed uniformly
 // by L1 (e.g. the profile-schema cache).
-export { agentMetadataSchema } from './agent-metadata.js';
+export {
+  agentMetadataSchema,
+  reportedTokenUsageSchema,
+} from './agent-metadata.js';
 export type { AgentMetadata } from './agent-metadata.js';
 
 // AgentStateSnapshot (§5 / M5.5 / README I9.7): the full driver-owned durable

@@ -47,12 +47,21 @@ const agentSessionInfoSchema = z.object({
 });
 
 /**
- * Running token / cost budget snapshot (folds `session_usage_update`).
+ * Context occupancy and optional reported cost (folds `session_usage_update`).
  */
 const agentUsageSchema = z.object({
   used: z.number(),
   size: z.number(),
   cost: ZAcpCost.nullable(),
+  receivedAt: z.number().int().nonnegative().optional(),
+});
+
+/** Latest agent-reported token snapshot; no accounting scope is inferred. */
+export const reportedTokenUsageSchema = z.object({
+  inputTokens: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+  outputTokens: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+  totalTokens: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+  receivedAt: z.number().int().nonnegative(),
 });
 
 /**
@@ -100,6 +109,7 @@ export const agentMetadataSchema = z.object({
   sessionInfo: agentSessionInfoSchema.nullish(),
   /** Token / cost budget; `null` ⇒ explicitly cleared. */
   usage: agentUsageSchema.nullish(),
+  tokenUsage: reportedTokenUsageSchema.nullish(),
   /** Explicit per-thread user selections (see {@link agentSelectionsSchema}). */
   selections: agentSelectionsSchema.optional(),
   /** Epoch ms the selection map was last written by a set-RPC. */

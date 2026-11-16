@@ -118,6 +118,7 @@ function snapshotSessionMeta(entry: AcpSessionEntry): AcpSessionMetaSnapshot {
     selections: entry.selections,
     sessionInfo: entry.sessionInfo,
     usage: entry.usage,
+    tokenUsage: entry.tokenUsage,
     updatedAt: entry.metaUpdatedAt,
   };
 }
@@ -156,6 +157,7 @@ function snapshotMetaFromPersisted(
     selections: meta.selections ?? {},
     sessionInfo: meta.sessionInfo ?? null,
     usage: meta.usage ?? null,
+    tokenUsage: meta.tokenUsage,
     updatedAt: meta.metaUpdatedAt ?? 0,
   };
 }

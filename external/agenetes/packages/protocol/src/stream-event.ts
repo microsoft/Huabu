@@ -143,6 +143,7 @@ export const sessionUsageUpdateEventDataSchema = z.object({
   used: z.number(),
   size: z.number(),
   cost: ZAcpCost.nullish(),
+  receivedAt: z.number().int().nonnegative().optional(),
 });
 
 /** `done` — final assistant message + run-level metadata. */
