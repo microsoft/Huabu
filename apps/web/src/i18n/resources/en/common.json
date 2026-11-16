@@ -1668,6 +1668,8 @@
       "undo": "Undo",
       "redo": "Redo",
       "copySelectedNodes": "Copy selected nodes",
+      "cutSelectedNodes": "Cut selected nodes",
+      "selectAllNodes": "Select all nodes",
       "paste": "Paste nodes, files, URLs, or plain text",
       "deleteSelected": "Delete selected nodes or edges",
       "editEdgeLabel": "Edit the selected edge's label",

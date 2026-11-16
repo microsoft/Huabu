@@ -230,6 +230,20 @@ describe('CanvasPage node deep-link navigation', () => {
     },
   );
 
+  it('opens a newly created Space with Preview closed, leaving other opens alone', async () => {
+    usePanelStore.setState({ isRightCollapsed: false });
+    const { router } = await renderAt(`/canvas/${CANVAS_ID}`, node('note'));
+    expect(usePanelStore.getState().isRightCollapsed).toBe(false);
+    await act(async () =>
+      router.navigate('/canvas/created', {
+        state: {
+          newCanvasPlacement: { canvasId: 'created', nodeType: 'note' },
+        },
+      }),
+    );
+    expect(usePanelStore.getState().isRightCollapsed).toBe(true);
+  });
+
   it.each(['/spaces', '/canvas/other'])(
     'dismisses move feedback when navigating to %s despite the stale canvas store',
     async (destination) => {

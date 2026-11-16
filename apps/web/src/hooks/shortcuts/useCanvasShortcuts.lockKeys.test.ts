@@ -27,6 +27,7 @@ const { canvasActions } = vi.hoisted(() => ({
     disconnectEdges: vi.fn(),
     addNodes: vi.fn(),
     addNode: vi.fn(),
+    selectNodes: vi.fn(),
     canvasId: 'c1',
     nodes: [] as unknown[],
     edges: [] as unknown[],
@@ -197,6 +198,61 @@ describe('useCanvasShortcuts catalog key lock', () => {
 
     dispatchCombo('layer.bringFront');
     expect(canvasActions.sendSelectedToOrder).toHaveBeenLastCalledWith('top');
+  });
+
+  it('selects every selectable, visible node with Mod+A', () => {
+    canvasActions.nodes = [
+      { id: 'a' },
+      { id: 'b', selected: true },
+      { id: 'hidden', hidden: true },
+      { id: 'fixed', selectable: false },
+    ];
+    dispatchCombo('edit.selectAll');
+    expect(canvasActions.selectNodes).toHaveBeenCalledExactlyOnceWith(
+      ['a', 'b'],
+      false,
+    );
+  });
+
+  it('cuts the selection with Mod+X: copy first, then one deletion', () => {
+    dispatchCombo('edit.cut');
+    expect(canvasActions.copySelectedNodes).not.toHaveBeenCalled();
+    expect(canvasActions.deleteNodes).not.toHaveBeenCalled();
+
+    canvasActions.nodes = [{ id: 'selected', selected: true }, { id: 'other' }];
+    canvasActions.edges = [{ id: 'edge', selected: true }];
+    dispatchCombo('edit.cut');
+    expect(canvasActions.copySelectedNodes).toHaveBeenCalledOnce();
+    expect(canvasActions.deleteNodes).toHaveBeenCalledExactlyOnceWith(
+      ['selected'],
+      ['edge'],
+    );
+    expect(
+      canvasActions.copySelectedNodes.mock.invocationCallOrder[0],
+    ).toBeLessThan(canvasActions.deleteNodes.mock.invocationCallOrder[0]);
+  });
+
+  it('leaves Mod+A and Mod+X to a focused text field', () => {
+    canvasActions.nodes = [{ id: 'selected', selected: true }];
+    const input = document.createElement('input');
+    container.appendChild(input);
+    const events = ['a', 'x'].map(
+      (key) =>
+        new KeyboardEvent('keydown', {
+          key,
+          metaKey: true,
+          bubbles: true,
+          cancelable: true,
+        }),
+    );
+    act(() => events.forEach((event) => input.dispatchEvent(event)));
+    expect(events.map((event) => event.defaultPrevented)).toEqual([
+      false,
+      false,
+    ]);
+    expect(canvasActions.selectNodes).not.toHaveBeenCalled();
+    expect(canvasActions.copySelectedNodes).not.toHaveBeenCalled();
+    expect(canvasActions.deleteNodes).not.toHaveBeenCalled();
   });
 
   it('blocks Delete and Undo from a saving dialog before bubbling handlers run', () => {

@@ -1668,6 +1668,8 @@
       "undo": "撤销",
       "redo": "重做",
       "copySelectedNodes": "复制选中的节点",
+      "cutSelectedNodes": "剪切选中的节点",
+      "selectAllNodes": "全选所有节点",
       "paste": "粘贴节点、文件、URL 或纯文本",
       "deleteSelected": "删除选中的节点或边",
       "editEdgeLabel": "编辑选中边的标签",

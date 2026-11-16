@@ -178,7 +178,14 @@ export default function CanvasPage() {
       return;
     }
 
-    if (placement) newCanvasPlacementRef.current = placement;
+    if (placement) {
+      newCanvasPlacementRef.current = placement;
+      // A brand-new Space starts as a bare canvas: keep Preview closed (its
+      // open state is otherwise inherited from the previous Space) so the
+      // empty workspace never seeds a temporary Chat. This runs while the
+      // page still shows its loading surface, before the panel mounts.
+      usePanelStore.getState().setRightCollapsed(true);
+    }
     if (previewNodeId) previewNodeIntentRef.current = previewNodeId;
     const remainingState = { ...location.state };
     delete remainingState.newCanvasPlacement;
