@@ -516,5 +516,86 @@ for (const mode of ['mouse', 'touch'] as const) {
     await expect(page.locator('[data-chat-input-surface]')).not.toContainText(
       'contentVersion',
     );
+
+    const other = await page.evaluate(async (canvasId) => {
+      const canvasPath = '/src/store/canvasStore.ts';
+      const questionPath = '/src/components/Nodes/question/questionCompose.ts';
+      const actionsPath = '/src/store/previewWorkspace/actions.ts';
+      const { default: canvas, awaitQuestionCreation } = (await import(
+        canvasPath
+      )) as typeof CanvasModule;
+      const { createQuestionNode } = (await import(
+        questionPath
+      )) as typeof QuestionModule;
+      const { openPreviewNode } = (await import(
+        actionsPath
+      )) as typeof PreviewActions;
+      const created = createQuestionNode({
+        canvasId,
+        addNode: canvas.getState().addNode,
+        placementPoint: { x: 1000, y: 100 },
+        binding: { kind: 'internal' },
+        mode: 'ask',
+        label: 'Other reader',
+      });
+      await awaitQuestionCreation(canvasId, created.nodeId);
+      openPreviewNode(created.nodeId, { transient: false });
+      return created;
+    }, canvasId);
+    await page.getByRole('tab', { name: /Other reader/ }).click();
+    await page.getByRole('tab', { name: /Source file/ }).click();
+    await selectPassage();
+    await comment.click();
+    await expect(
+      page.getByRole('button', { name: 'File Reader', exact: true }),
+    ).toBeVisible();
+    await page
+      .getByRole('textbox', { name: 'Comment', exact: true })
+      .fill('Another passage');
+    await add.click();
+    await expect
+      .poll(() =>
+        page.evaluate(async (threadId) => {
+          const chatPath = '/src/store/chatStore.ts';
+          const { useChatStore } = (await import(
+            chatPath
+          )) as typeof ChatModule;
+          return useChatStore
+            .getState()
+            .threadsById[
+              threadId
+            ].pendingQuotedComments.map((item) => item.comment);
+        }, destination.threadId),
+      )
+      .toEqual(['Explain the file', 'Another passage']);
+    await selectPassage();
+    await comment.click();
+    await page
+      .getByRole('button', { name: 'File Reader', exact: true })
+      .click();
+    await page
+      .getByRole('menuitem', { name: 'Other reader', exact: true })
+      .click();
+    await page
+      .getByRole('textbox', { name: 'Comment', exact: true })
+      .fill('Explicit switch');
+    await add.click();
+    await expect
+      .poll(() =>
+        page.evaluate(async (threadId) => {
+          const chatPath = '/src/store/chatStore.ts';
+          const { useChatStore } = (await import(
+            chatPath
+          )) as typeof ChatModule;
+          return useChatStore
+            .getState()
+            .threadsById[
+              threadId
+            ]?.pendingQuotedComments.map((item) => item.comment);
+        }, other.threadId),
+      )
+      .toEqual(['Explicit switch']);
+    expect(turns).toBe(0);
+    expect(pageErrors).toEqual([]);
   });
 }

@@ -13,6 +13,7 @@ import { pageLifecycle } from '@/utils/pageLifecycle';
 import { loadDefaultAgentBinding } from '../acpProfilesStore';
 import { selectCanWriteCanvas } from '../canvasStore';
 import useCanvasStore from '../canvasStore';
+import { rememberPreviewedAgent } from '../commentDestinationMemory';
 import { createConversation } from '../conversationPreparation';
 import { usePanelStore } from '../panelStore';
 import { findTabByTarget, groupOfTab, normalizePreviewTarget } from './model';
@@ -174,6 +175,7 @@ export function openPreviewNode(
     markReadIntent?: boolean;
     openToSide?: boolean;
     groupId?: string;
+    userInitiated?: boolean;
   },
 ): string {
   const canvas = useCanvasStore.getState();
@@ -192,6 +194,9 @@ export function openPreviewNode(
     },
   );
   const openedNode = canvas.nodes.find((node) => node.id === nodeId);
+  if (tabId && options?.userInitiated) {
+    rememberPreviewedAgent({ kind: 'node', canvasId: canvas.canvasId, nodeId });
+  }
   if (tabId && openedNode?.type === 'note' && options?.focusEditor !== false) {
     usePreviewWorkspaceStore.getState().requestNodeFocus(tabId);
   } else if (tabId && options?.focusEditor === false) {

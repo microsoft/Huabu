@@ -11,7 +11,7 @@ import {
   DropdownMenuItem,
 } from '@/components/Common/DropdownMenu';
 import {
-  resolveCommentDestination,
+  commentDestinationTitle,
   useCommentDestination,
 } from '@/hooks/useCommentDestination';
 import { useChatStore } from '@/store/chatStore';
@@ -39,11 +39,19 @@ export function PreviewCommentEditor({
   const [stagingError, setStagingError] = useState(false);
   const [open, setOpen] = useState(false);
   const staged = useRef(false);
+  const titleFor = (item: (typeof target.candidates)[number]) =>
+    commentDestinationTitle(
+      item,
+      target.candidates,
+      t('messages.commentUntitledDestination'),
+    );
   const selected = target.candidates.find(
-    (item) => item.nodeId === target.destination?.nodeId,
+    (item) =>
+      item.nodeId === target.destination?.nodeId &&
+      item.threadId === target.destination.threadId,
   );
   const label = selected
-    ? selected.title || t('messages.commentUntitledDestination')
+    ? titleFor(selected)
     : t(
         target.loading
           ? 'messages.commentDestinationLoading'
@@ -58,10 +66,7 @@ export function PreviewCommentEditor({
       addDisabled={!target.available || target.loading}
       onAdd={(comment) => {
         if (staged.current) return;
-        const view = resolveCommentDestination(
-          capture.source.canvasId,
-          target.destination,
-        );
+        const view = target.resolve();
         if (!view) {
           setStagingError(true);
           return;
@@ -76,6 +81,7 @@ export function PreviewCommentEditor({
             comment,
             source: capture.source,
           });
+        target.rememberStaged(view.conversationOwner.threadId);
         onDismiss();
         revealQuotedCommentDraft(view, label);
       }}
@@ -94,6 +100,7 @@ export function PreviewCommentEditor({
             variant="ghost"
             size="sm"
             className="max-w-full"
+            title={label}
             data-popover-dismiss-ignore=""
           >
             <span className="truncate">{label}</span>
@@ -104,9 +111,13 @@ export function PreviewCommentEditor({
         {target.candidates.map((item) => (
           <DropdownMenuItem
             key={item.nodeId}
+            title={titleFor(item)}
             disabled={!item.available}
             aria-current={
-              target.destination?.nodeId === item.nodeId ? 'true' : undefined
+              target.destination?.nodeId === item.nodeId &&
+              target.destination.threadId === item.threadId
+                ? 'true'
+                : undefined
             }
             onClick={() => {
               target.choose({ nodeId: item.nodeId, threadId: item.threadId });
@@ -114,7 +125,7 @@ export function PreviewCommentEditor({
               setOpen(false);
             }}
           >
-            {item.title || t('messages.commentUntitledDestination')}
+            {titleFor(item)}
           </DropdownMenuItem>
         ))}
         {!target.candidates.length ? (
@@ -131,7 +142,14 @@ export function PreviewCommentEditor({
           </Button>
         </div>
       ) : null}
-      {stagingError || (target.destination && !target.available) ? (
+      {target.temporary ? (
+        <p role="status" className="text-fg-muted text-xs">
+          {t('messages.commentTemporaryDestination')}
+        </p>
+      ) : null}
+      {stagingError ||
+      !target.scopeValid ||
+      (target.destination && !target.available) ? (
         <p role="alert" className="text-danger text-xs">
           {t('messages.commentDestinationUnavailable')}
         </p>

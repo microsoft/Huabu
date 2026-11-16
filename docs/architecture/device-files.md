@@ -53,6 +53,8 @@ A single nonempty contiguous text selection offers the shared Copy, Add as note 
 
 CodeMirror's model owns capture even when selected lines are virtualized. New capture is unavailable during loading or a read error; an already opened Comment retains its original labeled snapshot across refresh/read-more/failure. Switching reference identity closes that editor rather than retargeting it. Capture never reads more bytes, edits/imports the file, creates an Agent, submits a turn or navigates to a hidden conversation. Hidden drafts reuse the explicit View input notification described in [Preview Workspace](./preview-workspace.md). Chat, Note, Ink and other Preview types retain their existing behavior.
 
+File comments reuse the shared visit-scoped destination policy: current picker choice, last successfully added non-Chat comment target, last user-previewed Agent, then the server's recent accepted conversation. Canvas selection is not destination intent. Opening another file or remounting its preview preserves the visit's last staged target, while an open form remains stable through background activity. Missing owners, pending forks and changed Workspace/Space scope block staging instead of silently choosing another Agent. Temporary-Chat history requires an explicit existing-Agent choice here; File does not create or implicitly realize conversations.
+
 ## Code entry points
 
 | File                                                                                           | Responsibility                                                    |

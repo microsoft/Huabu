@@ -1386,6 +1386,7 @@
     "commentCapturedFile": "已捕获的文件快照",
     "commentDestinationLoading": "正在加载对话…",
     "commentDestinationUnavailable": "此对话不可用，请选择其他目标。",
+    "commentTemporaryDestination": "上一条评论已加入临时聊天，请为当前评论选择目标。",
     "commentNoDestinations": "请先单独创建对话，再添加评论。",
     "commentUntitledDestination": "未命名对话",
     "commentSelection": "评论选中内容",
