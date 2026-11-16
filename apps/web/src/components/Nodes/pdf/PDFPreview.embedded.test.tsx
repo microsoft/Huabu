@@ -43,13 +43,19 @@ vi.mock('@/api/artifact', () => ({
   uploadImage: vi.fn(),
 }));
 vi.mock('@/store/canvasStore', () => ({
-  default: (select: (state: unknown) => unknown) =>
-    select({ canvasId: 'canvas-1', nodes: [] }),
+  default: Object.assign(
+    (select: (state: unknown) => unknown) =>
+      select({ canvasId: 'canvas-1', nodes: [] }),
+    { subscribe: () => () => {} },
+  ),
   selectCanWriteCanvas: () => false,
 }));
 vi.mock('@/store/chatStore', () => ({ useChatStore: {} }));
 vi.mock('@/store/workspaceStore', () => ({
-  useWorkspaceStore: { getState: () => ({ workspaceId: 'workspace-1' }) },
+  useWorkspaceStore: {
+    getState: () => ({ workspaceId: 'workspace-1' }),
+    subscribe: () => () => {},
+  },
 }));
 vi.mock('@/store/acpProfilesStore', () => ({
   loadDefaultAgentBinding: vi.fn(),
