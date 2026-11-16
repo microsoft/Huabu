@@ -619,7 +619,10 @@ export const ExpandedNodePanel = ({
           key={`${canvasId}:${expandedNodeId}`}
           properties={properties}
           displayKeys={propertyDisplayKeys}
-          readOnly={!canWrite}
+          // Properties are saved with the node's content and share its
+          // revision, so editing them is editing the node: while another
+          // page edits it they are read-only here, like its body and title.
+          readOnly={!canWrite || editLockHolder !== null}
           tagOptions={(name) =>
             propertyTagOptions(useCanvasStore.getState().nodes, name)
           }
