@@ -106,14 +106,29 @@ export function SignInGate({ children }: { children: ReactNode }) {
   const recheckTimer = useRef<number | undefined>(undefined);
   const recheckDelay = useRef(RECHECK_MIN_MS);
 
+  // What had focus when the app was last blocked. Making the app inert
+  // blurs it at once, before any sign-in dialog exists to remember it, so
+  // the gate keeps it and hands focus back when the app is usable again.
+  const focusBeforeBlock = useRef<HTMLElement | null>(null);
+  const setAppInert = useCallback((inert: boolean) => {
+    const root = app.current;
+    if (!root) return;
+    if (inert && !root.inert) {
+      const active = document.activeElement;
+      focusBeforeBlock.current =
+        active instanceof HTMLElement && root.contains(active) ? active : null;
+    }
+    root.inert = inert;
+  }, []);
+
   const blockApp = useCallback(() => {
     // Native focus/broadcast handlers must block controls immediately, before
     // React's next render and before the asynchronous identity response.
-    if (app.current) app.current.inert = true;
+    setAppInert(true);
     setState((prior) =>
       prior.kind === 'ready' ? { kind: 'verifying' } : prior,
     );
-  }, []);
+  }, [setAppInert]);
 
   /**
    * The Server could not say who is calling (a restart or a network blip), so
@@ -170,7 +185,7 @@ export function SignInGate({ children }: { children: ReactNode }) {
       const settle = (next: GateState) => {
         if (run !== latestCheck.current) return;
         if (next.kind === 'ready') appStarted.current = true;
-        if (app.current) app.current.inert = next.kind !== 'ready';
+        setAppInert(next.kind !== 'ready');
         setState((prior) =>
           next.kind === 'signIn' && prior.kind === 'signIn' && !loginError
             ? { ...next, error: next.error ?? prior.error }
@@ -315,7 +330,7 @@ export function SignInGate({ children }: { children: ReactNode }) {
         unsavedEdits,
       });
     },
-    [setIdentity, recheckLater, adopt],
+    [setIdentity, recheckLater, adopt, setAppInert],
   );
 
   /**
@@ -433,6 +448,21 @@ export function SignInGate({ children }: { children: ReactNode }) {
     [adopt, check, recover],
   );
 
+  const ready = state.kind === 'ready';
+  useEffect(() => {
+    if (!ready) return;
+    const target = focusBeforeBlock.current;
+    focusBeforeBlock.current = null;
+    if (!target) return;
+    // After the cover and its focus trap have gone. Only when nothing else
+    // took focus meanwhile: never pull it away from where the user went.
+    const frame = requestAnimationFrame(() => {
+      const active = document.activeElement;
+      if (target.isConnected && (!active || active === document.body))
+        target.focus({ preventScroll: true });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [ready]);
   const overlay = state.kind === 'signIn' && appStarted.current;
   const verifying = state.kind === 'verifying';
   const { refs, context } = useFloating({ open: overlay });
