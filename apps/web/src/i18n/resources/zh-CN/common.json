@@ -924,6 +924,7 @@
     "propertyTagHint": "选择或新建标签",
     "propertyTagOptions": "可选标签",
     "createPropertyTag": "新建",
+    "editPropertyTag": "编辑{{name}}",
     "removePropertyTag": "移除{{name}}",
     "propertyEmpty": "空",
     "propertiesNameError": "请输入非空且不重复的属性名称。",

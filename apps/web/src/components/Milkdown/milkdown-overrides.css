@@ -114,8 +114,13 @@
    between notes.
 
   The indicator is portalled to `document.body` so its fixed viewport
-  coordinates are not rebased by transformed Preview panel ancestors. */
+  coordinates are not rebased by transformed Preview panel ancestors.
+  Out there it competes with every positioned layer: the Preview panel is
+  an overlay at z-index 40, and an indicator left at `auto` is painted
+  underneath it, drawn in the right place but never seen. It sits above
+  panels and below popovers and the sign-in cover. */
 .crepe-drop-cursor.milkdown-drop-indicator {
+  z-index: 900;
   background: var(--info);
   opacity: 0.6;
 }

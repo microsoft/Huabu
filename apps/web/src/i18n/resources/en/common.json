@@ -924,6 +924,7 @@
     "propertyTagHint": "Choose or create a tag",
     "propertyTagOptions": "Tag options",
     "createPropertyTag": "Create",
+    "editPropertyTag": "Edit {{name}}",
     "removePropertyTag": "Remove {{name}}",
     "propertyEmpty": "Empty",
     "propertiesNameError": "Enter a unique, non-empty property name.",

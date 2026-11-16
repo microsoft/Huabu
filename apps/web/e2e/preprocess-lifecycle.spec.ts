@@ -441,7 +441,7 @@ test('Text creation and changed-content blur use the real preprocessing endpoint
   });
   const center = await paneCenter(page);
   await page
-    .locator('.react-flow__panel.bottom.center')
+    .locator('[data-canvas-main-toolbar]')
     .getByRole('button', { name: /^Text/ })
     .click();
   await expect(page.locator('.canvas-pending-text').first()).toBeVisible();

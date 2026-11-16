@@ -47,7 +47,7 @@ import { CARD_SCALE_RANGE } from '@/handler/canvasCommand/resolvers/resolveSetCa
 import { resolveUiIntent } from '@/handler/canvasCommand/uiIntent';
 import { handleCanvasNavigationKey } from '@/hooks/shortcuts/handleCanvasNavigationKey';
 import { handleCanvasFocusEscape } from '@/hooks/useCanvasFocusEscape';
-import { useIsNotMouse } from '@/hooks/useInputMode';
+import { usePressSettledIsNotMouse } from '@/hooks/useInputMode';
 import { useCanvasMultiSelectModifierHeld } from '@/hooks/useMultiSelectModifier';
 import { useTakeoverMarkDrag } from '@/hooks/useTakeoverMarkDrag';
 import { translateColorOptions } from '@/i18n/colors';
@@ -247,7 +247,9 @@ export const NodeFloatingToolbar = memo(
       selectIsNodeOpen(s, id),
     );
     const ingestion = useCanvasStore((s) => s.ingestionByNodeId[id]);
-    const isNotMouse = useIsNotMouse();
+    // The toolbar's distance from the node depends on the pointer. Hold it
+    // through a press so its controls stay under the pointer that hit them.
+    const offsetIsNotMouse = usePressSettledIsNotMouse();
     // While the user holds the multi-select modifier (Ctrl / Cmd) they are
     // reaching for *another* node to add to the selection — this toolbar,
     // pinned above the current node, would occlude that target. Stand it
@@ -393,7 +395,7 @@ export const NodeFloatingToolbar = memo(
       <CanvasFloatingPopover
         anchor={anchor}
         open={dragActive || moveSelectionOpen || !multiSelectModifierHeld}
-        offset={nodeToolbarOffset(isNotMouse)}
+        offset={nodeToolbarOffset(offsetIsNotMouse)}
         side="top"
         className={`${FLOATING_TOOLBAR_CLASS} node-floating-toolbar`}
         onKeyDown={(event) => {

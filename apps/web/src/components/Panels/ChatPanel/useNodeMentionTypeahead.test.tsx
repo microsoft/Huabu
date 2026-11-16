@@ -243,6 +243,29 @@ describe('node mention typeahead', () => {
       selectThreadPendingAttachments(useChatStore.getState(), 'other'),
     ).toEqual([]);
   });
+  it('restores the caret after accepting, but not over text typed before the frame', () => {
+    let frame: FrameRequestCallback = () => {};
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+      frame = callback;
+      return 1;
+    });
+    render();
+    type('Compare @Her notes', 12);
+    key('Tab');
+    expect(input().value).toBe('Compare @Herdr notes');
+    // Nothing typed yet: the frame puts the caret right after the mention.
+    act(() => input().setSelectionRange(0, 0));
+    act(() => frame(0));
+    expect(input().selectionStart).toBe('Compare @Herdr '.length);
+
+    type('Compare @Her notes', 12);
+    key('Tab');
+    // The user keeps typing before the frame arrives.
+    type('Compare @Herdr and notes');
+    act(() => frame(0));
+    expect(input().selectionStart).toBe('Compare @Herdr and notes'.length);
+  });
+
   it('adds a separate node reference without replacing an excerpt from that node', () => {
     useChatStore.getState().addPendingAttachment('thread', {
       type: 'text',

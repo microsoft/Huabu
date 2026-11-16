@@ -1274,9 +1274,18 @@ for (const type of [
     const { node, persisted } = await seed(page, type, 1);
     // Sketch blank space intentionally passes through; select a painted stroke.
     // Other nodes use their shell/header, never a preview or agent action.
-    await node.click({
-      position: type === 'sketch' ? { x: 180, y: 100 } : { x: 10, y: 10 },
-    });
+    if (type === 'sketch') {
+      // An unselected Sketch is pointer-transparent until the cursor is over
+      // a stroke, so hover the stroke with the real mouse before clicking.
+      const bounds = await box(node);
+      const stroke = { x: bounds.x + 180, y: bounds.y + 100 };
+      await page.mouse.move(stroke.x - 4, stroke.y);
+      await page.mouse.move(stroke.x, stroke.y);
+      await expect(node).toHaveAttribute('data-sketch-hover', 'true');
+      await page.mouse.click(stroke.x, stroke.y);
+    } else {
+      await node.click({ position: { x: 10, y: 10 } });
+    }
     await expect(node).toHaveClass(/selected/);
     const grip = page.locator('.node-floating-toolbar [data-node-drag-handle]');
     await expect(grip).toHaveCount(1);
@@ -1467,10 +1476,23 @@ test('context toolbars share chrome while edge controls expose readable values',
   await expect(align.getByRole('button')).toHaveCount(7);
   await expect(align.getByRole('separator')).toHaveCount(2);
   await expect(align.getByRole('button').first()).toHaveCSS('width', '32px');
+  // Each Escape is followed by the state it should produce. Pressed blind,
+  // the second could land before the panel had closed, and a closing panel
+  // hands focus back a frame later, taking it from the edge below.
+  // The marquee selected both nodes and the edge between them. Start the
+  // edge check from a known state instead of a second Escape: after the
+  // panel closes, focus returns to the Align button a frame later, and
+  // whether Escape then clears the selection depends on which side of that
+  // frame it lands. With the edge still selected, Enter would deselect it.
   await page.keyboard.press('Escape');
-  await page.keyboard.press('Escape');
+  await expect(align).toHaveCount(0);
+  await page.mouse.click(1100, 750);
+  await expect(page.locator('.react-flow__node.selected')).toHaveCount(0);
+  await expect(page.locator('.react-flow__edge.selected')).toHaveCount(0);
   const edge = page.locator('.react-flow__edge').first();
-  await edge.press('Enter');
+  await edge.focus();
+  await expect(edge).toBeFocused();
+  await page.keyboard.press('Enter');
   const toolbar = page.locator('.edge-context-toolbar');
   await expect(toolbar).toBeVisible();
   await expect(
@@ -1533,18 +1555,25 @@ test('stroke selection toolbar preserves emphasized submit and anchored style co
   ])
     await page.mouse.move(point.x, point.y, { steps: 6 });
   await page.mouse.up();
-  const toolbar = page.locator('.canvas-context-toolbar');
-  await expect(toolbar).toBeVisible();
-  await expect(toolbar).toHaveCSS('height', '46px');
-  await expect(toolbar).toHaveCSS('border-radius', '12px');
-  const submit = toolbar.locator('.canvas-context-submit');
+  // The Ink toolbar is two surfaces: stroke editing, then the Agent request.
+  const surfaces = page.locator('.canvas-context-toolbar');
+  await expect(surfaces).toHaveCount(2);
+  const edit = page.locator('.canvas-context-toolbar.ink-edit-group');
+  const agent = page.locator('.canvas-context-toolbar.ink-agent-group');
+  for (const toolbar of [edit, agent]) {
+    await expect(toolbar).toBeVisible();
+    await expect(toolbar).toHaveCSS('height', '46px');
+    await expect(toolbar).toHaveCSS('border-radius', '12px');
+  }
+  const submit = agent.locator('.canvas-context-submit');
   await expect(submit).toHaveCSS('width', '32px');
   await expect(submit).not.toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
-  await toolbar.getByRole('button', { name: /Stroke thickness/ }).click();
+  await edit.getByRole('button', { name: /Stroke thickness/ }).click();
   await expect(page.getByRole('slider')).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(page.getByRole('slider')).toHaveCount(0);
-  await expect(toolbar).toBeVisible();
+  await expect(edit).toBeVisible();
+  await expect(agent).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath('stroke-toolbar.png') });
 });
 

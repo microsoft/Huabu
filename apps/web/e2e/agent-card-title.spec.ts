@@ -245,10 +245,22 @@ test('Agent cards rename inline without changing the prompt or opening Chat', as
   await input.fill('   ');
   await input.press('Enter');
   await expect(node.getByRole('alert')).toHaveText('Enter a node name.');
-  const errorColor = await node
-    .getByRole('alert')
-    .evaluate((element) => getComputedStyle(element).color);
-  await expect(input).toHaveCSS('border-top-color', errorColor);
+  // Status roles: readable error text takes `danger-fg`, while the invalid
+  // field's boundary is graphical emphasis and takes the base `danger`.
+  const danger = await node.getByRole('alert').evaluate((element) => {
+    const resolve = (token: string) => {
+      const probe = document.createElement('span');
+      probe.style.color = `var(${token})`;
+      element.append(probe);
+      const color = getComputedStyle(probe).color;
+      probe.remove();
+      return color;
+    };
+    return { text: resolve('--danger-fg'), boundary: resolve('--danger') };
+  });
+  expect(danger.boundary).not.toBe(danger.text);
+  await expect(node.getByRole('alert')).toHaveCSS('color', danger.text);
+  await expect(input).toHaveCSS('border-top-color', danger.boundary);
   await input.fill('Taken title');
   await input.press('Enter');
   await expect(node.getByRole('alert')).toHaveText(

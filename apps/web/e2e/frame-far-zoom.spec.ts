@@ -146,7 +146,11 @@ async function mountFrames(
                 64,
                 'outer',
               ),
-              makeNode('leaf', 'note', 200, 200, 20, 64, 'inner'),
+              // Production z is depth-first, so a child is above its parent.
+              {
+                ...makeNode('leaf', 'note', 200, 200, 20, 64, 'inner'),
+                zIndex: 22,
+              },
             ]
           : [
               makeNode('outer', 'frame', 1400, 700, 0, 0),
@@ -472,18 +476,19 @@ test('Frame takeover retains the Question mark without restoring its card shell'
   const geometry = await page.evaluate(() =>
     window.frameZoomFixture.snapshot(),
   );
-  for (const [zoom, readable] of [
-    [0.24, true],
-    [0.2, false],
-    [0.14, false],
-    [0.1, false],
-    [0.19, false],
-    [0.2, false],
-    [0.22, false],
-    [5.5 / 24, true],
+  // Frame takeover enters below 10% and holds until 12%.
+  for (const [zoom, readable, suppressed] of [
+    [0.24, true, false],
+    [0.2, false, false],
+    [0.14, false, false],
+    [0.1, false, false],
+    [0.099, false, true],
+    [0.119, false, true],
+    [0.12, false, false],
+    [0.22, false, false],
+    [5.5 / 24, true, false],
   ] as const) {
     await zoomTo(page, zoom);
-    const suppressed = zoom >= 0.1 && zoom < 0.2;
     await expect(questionShell).toHaveCSS('opacity', readable ? '1' : '0');
     if (suppressed) {
       await expect(region(page, 'outer')).toBeVisible();
@@ -535,7 +540,7 @@ test('Frame takeover retains the Question mark without restoring its card shell'
     await page.screenshot({
       path: testInfo.outputPath(`question-frame-${zoom}.png`),
     });
-    if (zoom === 0.14) {
+    if (zoom === 0.099) {
       await page.evaluate(() => document.documentElement.classList.add('dark'));
       await expect(dot).toHaveCSS('background-color', 'oklch(0.87 0 0)');
       await page.screenshot({
@@ -651,11 +656,15 @@ test('Question large titles stay readable until Frame suppression takes over', a
   await zoomTo(page, 0.2);
   await expect(card).toHaveCSS('opacity', '1');
   await expect(portal).toHaveCSS('opacity', '0');
-  await zoomTo(page, 0.14);
+  // 48px stays above the 5px screen-font floor down to the Frame threshold.
+  await zoomTo(page, 0.105);
+  await expect(card).toHaveCSS('opacity', '1');
+  await expect(portal).toHaveCSS('opacity', '0');
+  await zoomTo(page, 0.099);
   await expect(card).toHaveCSS('opacity', '0');
   await expect(portal).toHaveCSS('opacity', '1');
   await expect(portal.locator('[data-question-takeover-dot]')).toBeVisible();
-  await zoomTo(page, 0.2);
+  await zoomTo(page, 0.12);
   await expect(card).toHaveCSS('opacity', '1');
   await expect(portal).toHaveCSS('opacity', '0');
   expect(audit.writes).toEqual([]);
@@ -673,7 +682,13 @@ test('region takeover preserves same-accent Text and Note structure and dims onl
     '#frame-zoom-fixture .react-flow__edge[data-id="cross-edge"]',
   );
   await expect(internal.locator('[data-frame-internal-edge]')).toHaveCount(0);
-  await zoomTo(page, 0.14);
+  const borderOf = (id: string) =>
+    shell(page, id).evaluate((el) => getComputedStyle(el).borderTopColor);
+  const [noteBorder, textBorderBefore] = await Promise.all([
+    borderOf('note'),
+    borderOf('text'),
+  ]);
+  await zoomTo(page, 0.099);
   for (const id of ['note', 'text', 'office']) {
     await expect(shell(page, id)).toHaveCSS('opacity', '1');
     await expect(shell(page, id).locator('.semantic-lod-content')).toHaveCSS(
@@ -689,15 +704,10 @@ test('region takeover preserves same-accent Text and Note structure and dims onl
   expect(backgrounds[0]).not.toBe('rgba(0, 0, 0, 0)');
   expect(new Set(backgrounds).size).toBe(1);
   expect(backgrounds[0]).toMatch(/^color\(srgb [^/]+(?:\/\s*1)?\)$/);
-  const border = await shell(page, 'note').evaluate(
-    (el) => getComputedStyle(el).borderTopColor,
-  );
-  // The canonical accent divider has 0.3 alpha; suppression multiplies it by 0.4.
-  expect(border).toMatch(/\/\s*0\.12\)/);
-  const textBorder = await shell(page, 'text').evaluate(
-    (el) => getComputedStyle(el).borderTopColor,
-  );
-  expect(textBorder).toMatch(/\/\s*0\)/);
+  // Suppression keeps each shell's own boundary; only the region veil dims it.
+  expect(noteBorder).not.toMatch(/\/\s*0\)|rgba\(0, 0, 0, 0\)/);
+  expect(await borderOf('note')).toBe(noteBorder);
+  expect(await borderOf('text')).toBe(textBorderBefore);
   await expect(internal.locator('[data-frame-internal-edge]')).toHaveAttribute(
     'opacity',
     '0.4',
@@ -833,7 +843,14 @@ test('Agent title starts on the first line before the count badge', async ({
       const label = element.closest('[data-frame-region-label]');
       if (!word || !label) throw new Error('Missing Frame title');
       const bounds = element.getBoundingClientRect();
+      const probe = document.createElement('span');
+      probe.textContent = word.textContent;
+      probe.style.cssText = `position:absolute;visibility:hidden;white-space:nowrap;font:${getComputedStyle(element).font}`;
+      label.append(probe);
+      const wordWidth = probe.getBoundingClientRect().width;
+      probe.remove();
       return {
+        wordWidth,
         height: bounds.height,
         availableHeight: Number.parseFloat(getComputedStyle(label).maxHeight),
         wordRects: [...word.getClientRects()].map((rect) => ({
@@ -848,12 +865,17 @@ test('Agent title starts on the first line before the count badge', async ({
       };
     });
     if (!result.inline)
-      expect(result.lines).toBe(Math.floor(result.availableHeight / 15) - 1);
+      expect(result.lines).toBe(Math.floor(result.availableHeight / 16) - 1);
     expect(result.height).toBeLessThanOrEqual(result.availableHeight);
-    expect(result.wordRects).toHaveLength(1);
-    expect(result.wordRects[0].width).toBeLessThanOrEqual(result.width);
-    expect(result.wordRects[0].bottom).toBeLessThanOrEqual(result.height);
-    expect(result.wordRects[0].top).toBeLessThan(15);
+    // A fitting Latin word wraps intact; only an overwide one may break.
+    if (result.wordWidth <= result.width)
+      expect(result.wordRects).toHaveLength(1);
+    else expect(result.wordRects.length).toBeGreaterThan(1);
+    for (const rect of result.wordRects) {
+      expect(rect.width).toBeLessThanOrEqual(result.width + 0.1);
+      expect(rect.bottom).toBeLessThanOrEqual(result.height + 0.1);
+    }
+    expect(result.wordRects[0].top).toBeLessThan(16);
     expect(result.wordRects[0].left).toBeCloseTo(0, 1);
     await expect(owner.locator('[data-frame-region-count]')).toHaveText('1');
     await owner.screenshot({ path: testInfo.outputPath(`agent-${zoom}.png`) });
@@ -1050,7 +1072,7 @@ for (const [titleText, narrow, height, count] of [
         scale: 'css',
       });
     }
-    await zoomTo(page, 0.1);
+    await zoomTo(page, 0.12);
     await expect(region(page, 'outer')).toHaveCount(0);
     expect(
       await page.evaluate(() => window.frameZoomFixture.snapshot()),
@@ -1068,8 +1090,25 @@ test('centers the painted CJK ellipsis without clipping it', async ({
     regionTitle: '终端基础研究资料',
   });
   await zoomTo(page, 0.07);
-  await zoomTo(page, 0.085);
   const owner = region(page, 'outer');
+  await expect(owner.locator('[data-frame-region-title]')).toBeVisible();
+  // Pick the zoom whose label width holds exactly two glyphs plus the ellipsis,
+  // so the clamped line is the widest painted line whatever the system font.
+  const zoom = await owner.evaluate((frame) => {
+    const title = frame.querySelector('[data-frame-region-title]');
+    const label = frame.querySelector<HTMLElement>('[data-frame-region-label]');
+    if (!title || !label) throw new Error('Missing Frame title');
+    const reference = document.createElement('span');
+    reference.textContent = '基础\u2026';
+    reference.style.cssText = `position:absolute;visibility:hidden;white-space:nowrap;font:${getComputedStyle(title).font}`;
+    label.append(reference);
+    const paintedWidth = reference.getBoundingClientRect().width;
+    reference.remove();
+    return (paintedWidth + 0.3) / (Number.parseFloat(label.style.width) / 0.07);
+  });
+  expect(zoom).toBeGreaterThan(0.07);
+  expect(zoom).toBeLessThan(0.1);
+  await zoomTo(page, zoom);
   await expect(owner.locator('[data-frame-region-title]')).toBeVisible();
   await expect
     .poll(() =>
@@ -1128,7 +1167,7 @@ test('blank-gap regression: root Frame fallback uses the rendered label area at 
   expect(labelBox.y + labelBox.height).toBeLessThanOrEqual(
     frameBox.y + frameBox.height + 0.1,
   );
-  await zoomTo(page, 0.1);
+  await zoomTo(page, 0.12);
   await expect(region(page, 'outer')).toHaveCount(0);
   expect(await page.evaluate(() => window.frameZoomFixture.snapshot())).toEqual(
     audit.snapshot,
@@ -1146,8 +1185,8 @@ test('blank-gap regression: standalone playground Frames share root fallback', a
     exact: true,
   });
   const regions = page.locator('#zoomed-overview [data-study-frame-region]');
-  await slider.fill('8');
-  await expect(regions).toHaveCount(3);
+  await slider.fill('12');
+  await expect(regions).not.toHaveCount(0);
   for (const region of await regions.all())
     await expect(region).toHaveAttribute('aria-hidden', 'true');
   await slider.fill('6');
@@ -1155,7 +1194,10 @@ test('blank-gap regression: standalone playground Frames share root fallback', a
     await expect(region).toHaveAttribute('aria-hidden', 'false');
     await expect(region.locator('[data-frame-region-label]')).toBeVisible();
   }
-  await slider.fill('10');
+  await slider.fill('11');
+  for (const region of await regions.all())
+    await expect(region).toHaveAttribute('aria-hidden', 'false');
+  await slider.fill('12');
   for (const region of await regions.all())
     await expect(region).toHaveAttribute('aria-hidden', 'true');
 });
@@ -1166,7 +1208,9 @@ test('single-column 440px Frames visibly take over before shrinking below readab
   const audit = await mountFrames(page, { narrow: true });
   await zoomTo(page, 0.18);
   await expect(region(page, 'outer')).toHaveCount(0);
-  for (const zoom of [0.14, 0.13, 0.12, 0.1]) {
+  await zoomTo(page, 0.1);
+  await expect(region(page, 'outer')).toHaveCount(0);
+  for (const zoom of [0.099, 0.09, 0.08, 0.07]) {
     await zoomTo(page, zoom);
     const label = region(page, 'outer').locator('[data-frame-region-label]');
     await expect(label).toBeVisible();
@@ -1178,7 +1222,7 @@ test('single-column 440px Frames visibly take over before shrinking below readab
       '-webkit-line-clamp',
       (await label.locator('[data-frame-region-inline]').count()) > 0
         ? 'none'
-        : String(Math.floor(availableHeight / 15) - 1),
+        : String(Math.floor(availableHeight / 16) - 1),
     );
     await expect(label.locator('[data-frame-region-count]')).toBeVisible();
     await expect(shell(page, 'note')).toHaveCSS('opacity', '1');
@@ -1197,14 +1241,15 @@ test('single-column 440px Frames visibly take over before shrinking below readab
       frameBounds.x + frameBounds.width - 8 * zoom + 0.1,
     );
   }
-  await zoomTo(page, 0.09);
-  await expect(region(page, 'outer')).toBeVisible();
   await zoomTo(page, 0.06);
+  await expect(region(page, 'outer')).toBeVisible();
+  // Below one title line even the best-effort root label is released.
+  await zoomTo(page, 0.02);
   await expect(region(page, 'outer')).toHaveCount(0);
   await expect(shell(page, 'note')).toHaveCSS('opacity', '1');
-  await zoomTo(page, 0.14);
+  await zoomTo(page, 0.119);
   await expect(region(page, 'outer')).toBeVisible();
-  await zoomTo(page, 0.2);
+  await zoomTo(page, 0.12);
   await expect(region(page, 'outer')).toHaveCount(0);
   expect(await page.evaluate(() => window.frameZoomFixture.snapshot())).toEqual(
     audit.snapshot,
@@ -1217,9 +1262,9 @@ test('Frame region replaces mixed child content, retains footprints and edges, a
   page,
 }, testInfo) => {
   const audit = await mountFrames(page);
-  await zoomTo(page, 0.18);
+  await zoomTo(page, 0.1);
   await expect(region(page, 'outer')).toHaveCount(0);
-  await zoomTo(page, 0.14);
+  await zoomTo(page, 0.099);
   await expect(region(page, 'outer')).toBeVisible();
   await expect(
     shell(page, 'outer').locator('[data-frame-header]'),
@@ -1285,9 +1330,9 @@ test('Frame region replaces mixed child content, retains footprints and edges, a
     page.locator('#frame-zoom-fixture .react-flow__edge-path'),
   ).toHaveCount(1);
   await page.screenshot({ path: testInfo.outputPath('frame-region.png') });
-  await zoomTo(page, 0.19);
+  await zoomTo(page, 0.119);
   await expect(region(page, 'outer')).toBeVisible();
-  await zoomTo(page, 0.2);
+  await zoomTo(page, 0.12);
   await expect(region(page, 'outer')).toHaveCount(0);
   await expect(shell(page, 'note')).toHaveCSS('opacity', '1');
   await expect(
@@ -1308,8 +1353,10 @@ for (const innerSize of [
     page,
   }) => {
     const audit = await mountFrames(page, { nested: true, innerSize });
-    const steps = Array.from({ length: 81 }, (_, i) => (140 - i) / 1000);
-    for (const zoom of [...steps, ...steps.toReversed()]) {
+    // Enter below 10%, sweep to 6%, then climb back through the 12% exit band.
+    const down = Array.from({ length: 40 }, (_, i) => (99 - i) / 1000);
+    const up = Array.from({ length: 60 }, (_, i) => (60 + i) / 1000);
+    for (const zoom of [...down, ...up]) {
       await zoomTo(page, zoom);
       const owners = page.locator(
         '#frame-zoom-fixture [data-frame-region-owner]',
@@ -1349,7 +1396,7 @@ test('visible outer Frame owns nested labels; too-small regions release descenda
   page,
 }) => {
   const audit = await mountFrames(page, { nested: true });
-  await zoomTo(page, 0.14);
+  await zoomTo(page, 0.099);
   await expect(region(page, 'inner')).toBeVisible();
   await expect(region(page, 'outer')).toHaveCount(0);
   await zoomTo(page, 0.1);
@@ -1365,11 +1412,16 @@ test('visible outer Frame owns nested labels; too-small regions release descenda
   await expect(region(page, 'inner')).toHaveCount(0);
   await expect(shell(page, 'inner')).toHaveCSS('opacity', '1');
   await expect(shell(page, 'leaf')).toHaveCSS('opacity', '1');
-  await zoomTo(page, 0.12);
+  await zoomTo(page, 0.119);
   await expect(region(page, 'inner')).toBeVisible();
   await expect(region(page, 'outer')).toHaveCount(0);
+  // With no fitting ancestor left, the root keeps a best-effort label while
+  // one complete line fits instead of leaving the branch blank.
   await zoomTo(page, 0.03);
-  await expect(region(page, 'outer')).toHaveCount(0);
+  await expect(region(page, 'outer')).toBeVisible();
+  await expect(
+    region(page, 'outer').locator('[data-frame-region-label]'),
+  ).toBeVisible();
   await expect(region(page, 'inner')).toHaveCount(0);
   await expect(shell(page, 'leaf')).toHaveCSS('opacity', '1');
   expect(await page.evaluate(() => window.frameZoomFixture.snapshot())).toEqual(
