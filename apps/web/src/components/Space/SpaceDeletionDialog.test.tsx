@@ -39,6 +39,8 @@ vi.mock('@/api/spaceHierarchy', () => ({
 vi.mock('@/api/canvas', async (importOriginal) => ({
   ...(await importOriginal<typeof CanvasApi>()),
   putNodeContent: vi.fn(),
+  // A refused save asks what the server holds; here it cannot be read.
+  getNodeContent: vi.fn(async () => null),
 }));
 vi.mock('@/store/canvasStore', () => ({
   drainPendingSaves: vi.fn(async () => undefined),
