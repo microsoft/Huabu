@@ -533,6 +533,45 @@ it('keeps numbers in a single-line field', () => {
   ).not.toBeNull();
 });
 
+it('turns a chosen tag back into text where it stands and saves the correction there', async () => {
+  act(() =>
+    root.render(
+      <NodeProperties
+        properties={{ Keywords: ['ink', 'canvas', 'ink', 'agents'] }}
+        displayKeys={[]}
+        readOnly={false}
+        onSave={save}
+      />,
+    ),
+  );
+  click('node.editProperty:Keywords');
+  const field = container.querySelector<HTMLInputElement>('[role="combobox"]');
+  const key = (name: string) =>
+    act(() => {
+      field?.dispatchEvent(
+        new KeyboardEvent('keydown', { key: name, bubbles: true }),
+      );
+    });
+  // Text already typed is kept as a tag rather than overwritten.
+  input('node.propertyValue', 'sketch');
+  click('node.editPropertyTag:canvas');
+  expect(field?.value).toBe('canvas');
+  expect(document.activeElement).toBe(field);
+  input('node.propertyValue', 'canvases');
+  key('Enter');
+  expect(field?.value).toBe('');
+  // Editing the second of two repeated tags leaves the first; Backspace in
+  // an emptied tag removes the one before it.
+  click('node.editPropertyTag:agents');
+  input('node.propertyValue', '');
+  key('Backspace');
+  key('Enter');
+  await act(async () => {});
+  expect(save).toHaveBeenCalledExactlyOnceWith({
+    properties: { Keywords: ['ink', 'canvases', 'sketch'] },
+  });
+});
+
 it('removes one of two repeated tags and lets Enter save once the pointer leaves the options', async () => {
   act(() =>
     root.render(

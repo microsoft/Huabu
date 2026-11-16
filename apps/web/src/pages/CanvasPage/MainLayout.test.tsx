@@ -2,6 +2,7 @@
 // Licensed under the MIT license.
 
 import { act } from 'react';
+import { createPortal } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -360,6 +361,44 @@ describe('MainLayout Chat motion', () => {
     act(() => usePanelStore.getState().toggleLeftPanel());
     expect(host.hasAttribute('inert')).toBe(false);
     menu.remove();
+  });
+
+  it('leaves focus alone for a press in a surface portalled out of a panel', () => {
+    usePanelStore.setState({ isRightCollapsed: false });
+    const Portalled = () => (
+      <div>
+        <input data-testid="panel-field" />
+        <span data-testid="panel-text" />
+        {createPortal(<span data-testid="portalled-option" />, document.body)}
+      </div>
+    );
+    act(() =>
+      root?.render(
+        <MainLayout
+          header={<LayoutChild />}
+          leftPanel={<LayoutChild />}
+          rightPanel={<Portalled />}
+        >
+          <LayoutChild />
+        </MainLayout>,
+      ),
+    );
+    const find = (id: string) =>
+      document.querySelector<HTMLElement>(`[data-testid="${id}"]`);
+    const press = (id: string) =>
+      act(() => {
+        find(id)?.dispatchEvent(
+          new PointerEvent('pointerdown', { bubbles: true }),
+        );
+      });
+    act(() => find('panel-field')?.focus());
+    // React bubbles the press to the panel although the option is not in it.
+    press('portalled-option');
+    expect(document.activeElement).toBe(find('panel-field'));
+    press('panel-text');
+    expect(document.activeElement).toBe(
+      document.querySelector('[data-canvas-panel="right"]'),
+    );
   });
 
   it('keeps fixed panel widths and a full-size canvas while toggling overlays', () => {

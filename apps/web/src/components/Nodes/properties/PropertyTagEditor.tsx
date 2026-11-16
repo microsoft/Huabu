@@ -2,7 +2,7 @@
 // Licensed under the MIT license.
 
 import { X } from 'lucide-react';
-import { useEffect, useId, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { Popover } from '@/components/Common/Popover';
@@ -14,21 +14,29 @@ export const PROPERTY_FIELD_CLASS =
 export const PROPERTY_TAG_CLASS =
   'bg-edge-default text-fg-default min-w-0 rounded px-1.5 py-0.5 leading-4 wrap-anywhere';
 
-/** Add `tag` unless it is blank or already present. */
-export function withTag(items: readonly string[], tag: string): string[] {
+/** Add `tag` at `at` (the end when unset) unless it is blank or present. */
+export function withTag(
+  items: readonly string[],
+  tag: string,
+  at = items.length,
+): string[] {
   const value = tag.trim();
-  return !value || items.includes(value) ? [...items] : [...items, value];
+  return !value || items.includes(value)
+    ? [...items]
+    : [...items.slice(0, at), value, ...items.slice(at)];
 }
 
 /**
  * Tag picker for one list property: chosen tags, a filter field, and the
  * values already used for this property elsewhere. Typed text that matches no
- * option can be created. The surrounding form owns submit and cancel; Enter
- * reaches it only when there is nothing to add.
+ * option can be created. Pressing a chosen tag turns it back into text in the
+ * field, in place, so it can be corrected. The surrounding form owns submit
+ * and cancel; Enter reaches it only when there is nothing to add.
  */
 export function PropertyTagEditor({
   items,
   text,
+  at,
   options,
   disabled,
   autoFocus,
@@ -36,14 +44,18 @@ export function PropertyTagEditor({
 }: {
   items: string[];
   text: string;
+  /** Where the typed tag belongs among `items`; the end when unset. */
+  at?: number;
   /** Known values for this property, in display order. */
   options: readonly string[];
   disabled: boolean;
   autoFocus: boolean;
-  onChange: (next: { items: string[]; text: string }) => void;
+  onChange: (next: { items: string[]; text: string; at?: number }) => void;
 }) {
   const { t } = useTranslation();
   const listId = useId();
+  const input = useRef<HTMLInputElement>(null);
+  const slot = at ?? items.length;
   const [cursor, setCursor] = useState<number | null>(null);
   const [field, setField] = useState<HTMLDivElement | null>(null);
   const query = text.trim();
@@ -71,7 +83,30 @@ export function PropertyTagEditor({
     // dropped when that save clears the draft.
     if (disabled) return;
     setCursor(null);
-    onChange({ items: withTag(items, tag), text: '' });
+    onChange({ items: withTag(items, tag, at), text: '' });
+  };
+  const remove = (index: number) =>
+    onChange({
+      items: items.filter((_, position) => position !== index),
+      text,
+      at: at === undefined ? undefined : index < at ? at - 1 : at,
+    });
+  /** Turn the tag at `index` back into field text, keeping what was typed. */
+  const edit = (index: number) => {
+    if (disabled) return;
+    // Lists may repeat a value, so the tag is followed by position, which
+    // shifts when the typed text lands before it.
+    const typed = withTag(items, text, at);
+    const position =
+      index + (typed.length > items.length && slot <= index ? 1 : 0);
+    // The tag's button is about to go; focus lost there would commit the edit.
+    input.current?.focus();
+    setCursor(null);
+    onChange({
+      items: typed.filter((_, other) => other !== position),
+      text: items[index],
+      at: position,
+    });
   };
   // Arrow keys can move the highlight past the list's visible rows.
   useEffect(() => {
@@ -93,8 +128,20 @@ export function PropertyTagEditor({
             key={`${index}:${item}`}
             data-property-tag
             className={`${PROPERTY_TAG_CLASS} flex items-center gap-0.5`}
+            // The field stays last in the DOM and is placed by `order`: moving
+            // a focused input would blur it and commit the edit.
+            style={{ order: index < slot ? 0 : 2 }}
           >
-            {item}
+            <button
+              type="button"
+              className="min-w-0 cursor-text text-left wrap-anywhere"
+              aria-label={t('node.editPropertyTag', { name: item })}
+              disabled={disabled}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => edit(index)}
+            >
+              {item}
+            </button>
             <button
               type="button"
               className="text-fg-muted hover:text-fg-default -mr-0.5 flex size-4 shrink-0 items-center justify-center rounded"
@@ -102,18 +149,14 @@ export function PropertyTagEditor({
               disabled={disabled}
               // Keep focus in the field so removing a tag does not submit.
               onMouseDown={(event) => event.preventDefault()}
-              onClick={() =>
-                onChange({
-                  items: items.filter((_, position) => position !== index),
-                  text,
-                })
-              }
+              onClick={() => remove(index)}
             >
               <X className="size-3" />
             </button>
           </span>
         ))}
         <input
+          ref={input}
           // eslint-disable-next-line jsx-a11y/no-autofocus -- Opening the editor is an explicit request to type here.
           autoFocus={autoFocus}
           role="combobox"
@@ -125,12 +168,14 @@ export function PropertyTagEditor({
           }
           aria-autocomplete="list"
           placeholder={items.length === 0 ? t('node.propertyTagHint') : ''}
-          className="text-fg-default placeholder:text-fg-subtle min-w-16 flex-1 bg-transparent py-0.5 leading-4 outline-none"
+          // Among the tags it is as wide as its text; at the end it takes the
+          // rest of the row.
+          className={`text-fg-default placeholder:text-fg-subtle order-1 max-w-full bg-transparent py-0.5 leading-4 outline-none ${slot < items.length ? '[field-sizing:content] min-w-4' : 'min-w-16 flex-1'}`}
           value={text}
           disabled={disabled}
           onChange={(event) => {
             setCursor(null);
-            onChange({ items, text: event.target.value });
+            onChange({ items, text: event.target.value, at });
           }}
           onKeyDown={(event) => {
             // 229: an IME is still handling this key (Safari reports the
@@ -151,9 +196,9 @@ export function PropertyTagEditor({
               event.preventDefault();
               event.stopPropagation();
               add(rows[active].value);
-            } else if (event.key === 'Backspace' && !text && items.length) {
+            } else if (event.key === 'Backspace' && !text && slot > 0) {
               event.preventDefault();
-              onChange({ items: items.slice(0, -1), text });
+              remove(slot - 1);
             }
           }}
         />
