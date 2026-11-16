@@ -1476,10 +1476,23 @@ test('context toolbars share chrome while edge controls expose readable values',
   await expect(align.getByRole('button')).toHaveCount(7);
   await expect(align.getByRole('separator')).toHaveCount(2);
   await expect(align.getByRole('button').first()).toHaveCSS('width', '32px');
+  // Each Escape is followed by the state it should produce. Pressed blind,
+  // the second could land before the panel had closed, and a closing panel
+  // hands focus back a frame later, taking it from the edge below.
+  // The marquee selected both nodes and the edge between them. Start the
+  // edge check from a known state instead of a second Escape: after the
+  // panel closes, focus returns to the Align button a frame later, and
+  // whether Escape then clears the selection depends on which side of that
+  // frame it lands. With the edge still selected, Enter would deselect it.
   await page.keyboard.press('Escape');
-  await page.keyboard.press('Escape');
+  await expect(align).toHaveCount(0);
+  await page.mouse.click(1100, 750);
+  await expect(page.locator('.react-flow__node.selected')).toHaveCount(0);
+  await expect(page.locator('.react-flow__edge.selected')).toHaveCount(0);
   const edge = page.locator('.react-flow__edge').first();
-  await edge.press('Enter');
+  await edge.focus();
+  await expect(edge).toBeFocused();
+  await page.keyboard.press('Enter');
   const toolbar = page.locator('.edge-context-toolbar');
   await expect(toolbar).toBeVisible();
   await expect(
