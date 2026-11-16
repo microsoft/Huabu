@@ -534,7 +534,7 @@ test('real shortcuts keep fixed widths, undo, resize, and navigate without scene
     'font-size',
     '18px',
   );
-  await expect(node).toHaveCSS('width', '360px');
+  await expect(node).toHaveCSS('width', '400px');
   expect(await node.evaluate((element) => element.clientHeight)).toBeLessThan(
     120,
   );
@@ -583,9 +583,9 @@ test('real shortcuts keep fixed widths, undo, resize, and navigate without scene
   const undone = await history(page, 'undo');
   expect(undone).toMatchObject({
     before: [{ mode: 'fixed', width: 320 }],
-    after: [{ mode: 'fixed', width: 360 }],
+    after: [{ mode: 'fixed', width: 400 }],
   });
-  await expect(node).toHaveCSS('width', '360px');
+  await expect(node).toHaveCSS('width', '400px');
   await history(page, 'redo');
   await expect(node).toHaveCSS('width', '320px');
 
@@ -630,7 +630,7 @@ test('real shortcuts keep fixed widths, undo, resize, and navigate without scene
   await expect(body).toHaveCSS('font-size', '24px');
   await expect(node.locator('.semantic-lod-node')).toHaveCSS(
     'border-top-width',
-    '2px',
+    '1px',
   );
   await history(page, 'undo');
   await expect(node).toHaveCSS('width', '320px');

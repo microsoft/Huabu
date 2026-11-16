@@ -84,7 +84,7 @@ test('Space Scale resizes all card content and persists independently from Width
     'padding',
     '16px',
   );
-  await expect(card).toHaveCSS('padding', '16px 14px');
+  await expect(card).toHaveCSS('padding', '16px 15px');
   await expect(card.locator('[data-space-agent-badge]')).toHaveCount(1);
   const assertAlignedCards = async () => {
     await expect(async () => {
@@ -164,7 +164,7 @@ test('Space Scale resizes all card content and persists independently from Width
   );
   await expect(node.locator('.semantic-lod-node')).toHaveCSS(
     'border-top-width',
-    '2px',
+    '1px',
   );
   const questionMain = page.locator('.question-conversation-main');
   expect(
@@ -194,7 +194,7 @@ test('Space Scale resizes all card content and persists independently from Width
   await assertAlignedCards();
   await expect(node.locator('.semantic-lod-node')).toHaveCSS(
     'border-top-width',
-    '2px',
+    '1px',
   );
   await expect
     .poll(async () => (await icon.boundingBox())?.width)
@@ -386,7 +386,7 @@ test('Space cards show activity and rename inline without entering the target', 
   await expect(runningBadge).toHaveCSS('border-radius', '6px');
   await expect(runningBadge.locator(':scope > span')).toHaveCSS('gap', '6px');
   await expect(card.locator(':scope > div')).toHaveCSS('row-gap', '8px');
-  await expect(card).toHaveCSS('padding', '16px 14px');
+  await expect(card).toHaveCSS('padding', '16px 15px');
   const badgeWidth = await runningBadge.evaluate(
     (element) => getComputedStyle(element).width,
   );

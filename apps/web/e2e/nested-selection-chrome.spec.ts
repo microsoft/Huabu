@@ -58,6 +58,28 @@ async function selectedIds(page: Page) {
     );
 }
 
+// Opening/closing Layers slides the panel over the Canvas and animates the
+// viewport. Wait for that handoff before measuring chrome or panning.
+async function viewportSettled(page: Page) {
+  await page.waitForFunction(
+    () =>
+      new Promise<boolean>((resolve) => {
+        let previous = '';
+        let stable = 0;
+        const tick = () => {
+          const current = (
+            document.querySelector('.react-flow__viewport') as HTMLElement
+          )?.style.transform;
+          stable = current === previous ? stable + 1 : 0;
+          previous = current;
+          if (stable >= 12) resolve(true);
+          else requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+      }),
+  );
+}
+
 async function toggleFrameInLayers(page: Page) {
   // The persistent native rectangle owns canvas hits after marquee. Use the
   // real layer row, not force-clicking through that rectangle or store writes.
@@ -74,6 +96,7 @@ async function toggleFrameInLayers(page: Page) {
   await expect(
     page.getByRole('button', { name: 'Show layers panel', exact: true }),
   ).toBeVisible();
+  await viewportSettled(page);
 }
 
 async function seed(page: Page, zoom: number): Promise<Ids> {
@@ -368,25 +391,7 @@ function assertChrome(
 }
 
 async function pan(page: Page) {
-  // Opening/closing Layers may animate the viewport; wait for that layout
-  // handoff before measuring a separate pan gesture.
-  await page.waitForFunction(
-    () =>
-      new Promise<boolean>((resolve) => {
-        let previous = '';
-        let stable = 0;
-        const tick = () => {
-          const current = (
-            document.querySelector('.react-flow__viewport') as HTMLElement
-          )?.style.transform;
-          stable = current === previous ? stable + 1 : 0;
-          previous = current;
-          if (stable >= 12) resolve(true);
-          else requestAnimationFrame(tick);
-        };
-        requestAnimationFrame(tick);
-      }),
-  );
+  await viewportSettled(page);
   const before = translateOf(await readViewportTransform(page));
   const pane = await page.locator('.react-flow').boundingBox();
   if (!pane) throw new Error('Missing canvas');

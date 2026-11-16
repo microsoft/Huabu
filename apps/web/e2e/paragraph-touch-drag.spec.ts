@@ -23,7 +23,8 @@ async function expectUnchangedTextInset(page: Page, editor: Locator) {
             Math.round(
               (bounds.left - editor.getBoundingClientRect().left) * 100,
             ) / 100,
-          width: bounds.width,
+          // Same rounding as `left`: sub-0.01px float noise is not an inset change.
+          width: Math.round(bounds.width * 100) / 100,
         };
       }),
     );
@@ -91,6 +92,9 @@ test('touch Note reading, scrolling, direct paragraph extraction and explicit ed
   });
   expect(created.ok(), await created.text()).toBe(true);
   await expect(page.locator('.react-flow__node-note')).toHaveCount(1);
+  const client = await page.context().newCDPSession(page);
+  // Reading mode follows the current pointer, so make touch the last one seen.
+  await touchTap(client, await emptyCanvasPoint(page));
   await page.evaluate(async () => {
     const path = '/src/store/previewWorkspace/actions.ts';
     const { openPreviewNode } = (await import(path)) as typeof PreviewActions;
@@ -104,7 +108,6 @@ test('touch Note reading, scrolling, direct paragraph extraction and explicit ed
     '.milkdown-note-preview .milkdown-touch-block-grip',
   );
   await expect(handle).toBeVisible();
-  const client = await page.context().newCDPSession(page);
 
   const second = editor.locator('p').nth(1);
   await second.tap();

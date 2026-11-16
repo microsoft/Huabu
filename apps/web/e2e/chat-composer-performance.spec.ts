@@ -68,10 +68,18 @@ async function openFixture(page: Page, messageCount: number) {
   await page.goto(`/playground/chat-performance?messages=${messageCount}`);
   await expect(
     page.locator(`[data-chat-performance-fixture="${messageCount}"]`),
-  ).toBeVisible();
-  await expect(page.locator('[data-chat-user-message]')).toHaveCount(
-    Math.ceil(messageCount / 2),
-  );
+  ).toHaveAttribute('data-chat-visible-messages', String(messageCount));
+  // The history is virtualized, so only the turns near the latest one are in
+  // the DOM. The whole thread is still handed to the list (asserted above);
+  // wait for its tail to settle before measuring the composer.
+  if (messageCount > 0) {
+    await expect(
+      page.locator(`[data-chat-message-id="assistant-${messageCount - 1}"]`),
+    ).toBeVisible();
+    await expect(page.locator('[data-chat-user-message]')).not.toHaveCount(0);
+  } else {
+    await expect(page.locator('[data-chat-user-message]')).toHaveCount(0);
+  }
   await expect(page.locator('textarea[name="agent-message"]')).toBeEditable();
   await page.waitForTimeout(500);
 }

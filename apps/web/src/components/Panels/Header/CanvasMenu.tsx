@@ -166,6 +166,10 @@ export const CanvasMenu: React.FC = () => {
           ref={inputRef}
           name="space-title"
           title={draftTitle}
+          // The tooltip wraps the input; without a bound of its own the
+          // wrapper takes the title's full width and pushes the menu arrow
+          // out of the clipped group.
+          wrapperClassName="inline-flex max-w-full min-w-0"
           autoComplete="off"
           className="text-fg-default focus:shadow-bottom m-0 h-7 max-w-full min-w-8 overflow-hidden bg-transparent py-0.5 pr-0.5 pl-1.5 text-[15px] leading-6 font-medium text-ellipsis outline-none"
           value={draftTitle}
