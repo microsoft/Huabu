@@ -717,6 +717,32 @@ it('keeps a repeated tag that was opened and left unchanged', async () => {
   });
 });
 
+it('keeps a stored tag with spaces of its own when it is opened and left unchanged', async () => {
+  act(() =>
+    root.render(
+      <NodeProperties
+        properties={{ Keywords: ['ink', ' ink ', 'canvas'] }}
+        displayKeys={[]}
+        readOnly={false}
+        onSave={save}
+      />,
+    ),
+  );
+  click('node.editProperty:Keywords');
+  click('node.editPropertyTag: ink ');
+  act(() => {
+    container
+      .querySelector('[role="combobox"]')
+      ?.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
+      );
+  });
+  await act(async () => {});
+  expect(save).toHaveBeenCalledExactlyOnceWith({
+    properties: { Keywords: ['ink', ' ink ', 'canvas'] },
+  });
+});
+
 it('removes one of two repeated tags and lets Enter save once the pointer leaves the options', async () => {
   act(() =>
     root.render(

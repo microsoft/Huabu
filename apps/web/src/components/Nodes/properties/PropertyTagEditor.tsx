@@ -25,8 +25,10 @@ export function withTag(
   at = items.length,
   original?: string,
 ): string[] {
-  const value = tag.trim();
-  return !value || (items.includes(value) && value !== original)
+  // Compared before trimming: a stored tag may carry spaces of its own, and
+  // opening it must not rewrite it into another tag.
+  const value = tag === original ? tag : tag.trim();
+  return !value || (items.includes(value) && tag !== original)
     ? [...items]
     : [...items.slice(0, at), value, ...items.slice(at)];
 }

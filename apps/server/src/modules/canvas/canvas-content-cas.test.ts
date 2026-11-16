@@ -497,6 +497,14 @@ describe('PUT /nodes/:nodeId/content — content CAS', () => {
         .nodes[0].data;
       const derived = nodeRevisionOf({ ...visible, type: 'pdf' });
       expect(derived).not.toBe(reordered.json().rev);
+      // A write that also replaces the body must have seen the body.
+      const withBody = await putContent(app, 'c1', 'pdf', {
+        nodeType: 'pdf',
+        content: 'Stale extraction.',
+        properties: { Status: 'Done' },
+        expectRev: derived,
+      });
+      expect(withBody.statusCode).toBe(409);
       const fromDerived = await putContent(app, 'c1', 'pdf', {
         nodeType: 'pdf',
         properties: { Status: 'Done' },
