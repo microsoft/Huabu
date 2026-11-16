@@ -1023,7 +1023,8 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
           propertyDisplayKeys !== undefined
             ? expectRev
             : undefined,
-        derivedBody: !isAuthored,
+        // A PDF's extracted text is not sent to the web (`hydrateOneNode`).
+        derivedBody: nodeType === 'pdf',
         apply,
         strictRename: labelSource === 'user',
       });
