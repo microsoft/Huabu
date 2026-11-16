@@ -168,6 +168,10 @@ test('rejects selections spanning messages and excludes streaming output', async
 test('keeps comments thread-local through tab switching and drops unsent drafts on reload', async ({
   page,
 }) => {
+  // A comment is staged as a quoted-comment card above the input, not as
+  // text in the textarea, so the cards are what must stay with their thread.
+  const staged = (tab: 'a' | 'b' = 'a') =>
+    panel(page, tab).locator('[data-chat-input-surface] [data-quoted-comment]');
   await selectText(
     panel(page).locator(
       '[data-chat-message-id="a-turn-3-answer"] .ProseMirror',
@@ -175,13 +179,12 @@ test('keeps comments thread-local through tab switching and drops unsent drafts 
     'const cachedTurn = 3;',
   );
   await comment(page, 'Keep in A.');
-  const draft = await panel(page)
-    .locator('textarea[name="agent-message"]')
-    .inputValue();
+  await expect(staged()).toHaveCount(1);
+  await expect(staged()).toContainText('Keep in A.');
+  await expect(staged()).toContainText('const cachedTurn = 3;');
+
   await page.getByRole('button', { name: 'Tab B', exact: true }).click();
-  await expect(
-    panel(page, 'b').locator('textarea[name="agent-message"]'),
-  ).toHaveValue('');
+  await expect(staged('b')).toHaveCount(0);
   await selectText(
     panel(page, 'b').locator(
       '[data-chat-message-id="b-turn-3-answer"] .ProseMirror',
@@ -195,14 +198,17 @@ test('keeps comments thread-local through tab switching and drops unsent drafts 
     .getByRole('textbox', { name: 'Comment', exact: true })
     .fill('Not appended.');
   await page.getByRole('button', { name: 'Tab A', exact: true }).click();
+  // The comment left open in B is dropped, not staged anywhere.
   await expect(
     page.getByRole('textbox', { name: 'Comment', exact: true }),
   ).toHaveCount(0);
-  await expect(
-    panel(page).locator('textarea[name="agent-message"]'),
-  ).toHaveValue(draft);
+  await expect(staged()).toHaveCount(1);
+  await expect(staged()).toContainText('Keep in A.');
+  await expect(staged()).not.toContainText('Not appended.');
+  await page.getByRole('button', { name: 'Tab B', exact: true }).click();
+  await expect(staged('b')).toHaveCount(0);
+
   await page.reload();
-  await expect(
-    panel(page).locator('textarea[name="agent-message"]'),
-  ).toHaveValue('');
+  await expect(panel(page).locator('.ProseMirror').first()).toBeVisible();
+  await expect(staged()).toHaveCount(0);
 });

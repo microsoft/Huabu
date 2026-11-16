@@ -76,3 +76,29 @@ it('releases on a cancelled press as well', () => {
   act(() => vi.runAllTimers());
   expect(seen.settled).toBe(false);
 });
+
+it('waits for every pointer when an unrelated one lifts first', () => {
+  // A finger rests on the screen, then the mouse presses the chrome.
+  pointer('pointerdown', 'touch', 7);
+  pointer('pointerdown', 'mouse', 1);
+  expect(seen).toEqual({ live: false, settled: true });
+  // The finger lifting must not move the chrome under the held mouse.
+  pointer('pointerup', 'touch', 7);
+  act(() => vi.runAllTimers());
+  expect(seen.settled).toBe(true);
+  pointer('pointerup', 'mouse', 1);
+  act(() => vi.runAllTimers());
+  expect(seen.settled).toBe(false);
+});
+
+it('does not settle if another press begins before the deferred update', () => {
+  pointer('pointerdown', 'mouse', 1);
+  pointer('pointerup', 'mouse', 1);
+  // A second press lands before the timer runs.
+  pointer('pointerdown', 'mouse', 2);
+  act(() => vi.runAllTimers());
+  expect(seen.settled).toBe(true);
+  pointer('pointerup', 'mouse', 2);
+  act(() => vi.runAllTimers());
+  expect(seen.settled).toBe(false);
+});

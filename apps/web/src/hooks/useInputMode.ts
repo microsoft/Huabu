@@ -173,26 +173,27 @@ export function usePressSettledIsNotMouse(): boolean {
   useEffect(() => {
     if (settled === live) return;
     let timer: number | undefined;
-    // After the click the release produces, which is dispatched in the same
-    // task as `pointerup`.
+    // Wait for every pointer, not the first to lift: on a hybrid device a
+    // finger can come up while the mouse that pressed the chrome is still
+    // down. Then defer past the click the last release produces, which is
+    // dispatched in the same task as `pointerup`, and look once more in case
+    // another press began meanwhile.
     const adopt = () => {
-      timer = window.setTimeout(() => setSettled(live), 0);
+      if (pressedPointers.size > 0) return;
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        if (pressedPointers.size === 0) setSettled(live);
+      }, 0);
     };
-    if (pressedPointers.size === 0) adopt();
-    else {
-      window.addEventListener('pointerup', adopt, {
-        capture: true,
-        once: true,
-      });
-      window.addEventListener('pointercancel', adopt, {
-        capture: true,
-        once: true,
-      });
-    }
+    adopt();
+    // Bubble phase on window: the listener that maintains `pressedPointers`
+    // is a capture listener there and has already run for this event.
+    window.addEventListener('pointerup', adopt);
+    window.addEventListener('pointercancel', adopt);
     return () => {
       window.clearTimeout(timer);
-      window.removeEventListener('pointerup', adopt, true);
-      window.removeEventListener('pointercancel', adopt, true);
+      window.removeEventListener('pointerup', adopt);
+      window.removeEventListener('pointercancel', adopt);
     };
   }, [live, settled]);
   return settled;
