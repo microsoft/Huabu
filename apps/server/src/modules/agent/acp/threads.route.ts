@@ -20,6 +20,7 @@ import {
   externalAgentRealization,
   realizationHttpError,
 } from './external-agent-realization.js';
+import { profileSessionMetaSnapshot } from './profile-capabilities.js';
 import { getProfileSchemaCache } from './profile-schema-cache.js';
 import {
   rememberProfileConfigPreference,
@@ -30,7 +31,6 @@ import { personalSettingsOwner } from '../../identity/personal-settings.js';
 import { canvasAcpNamespace } from '../../workspace/paths.js';
 import { agenetes } from '../agenetes/index.js';
 
-import type { AcpProfileSchemaCacheEntry } from './profile-schema-cache.js';
 import type { AcpWorkloadSpec } from '../agenetes/drivers.js';
 import type { AcpSessionEntry } from '@agenetes/acp-driver';
 import type { AgentMetadata } from '@agenetes/protocol';
@@ -171,22 +171,6 @@ function snapshotMetaFromPersisted(
  * `selections` stays empty for the same reason: a user choice belongs to
  * one thread and must never leak across threads of the same profile.
  */
-function snapshotMetaFromProfileCache(
-  entry: AcpProfileSchemaCacheEntry,
-): AcpSessionMetaSnapshot {
-  return {
-    availableModes: entry.availableModes ?? [],
-    currentModeId: entry.currentModeId ?? null,
-    availableModels: entry.availableModels ?? [],
-    currentModelId: entry.currentModelId ?? null,
-    configOptions: entry.configOptions ?? [],
-    selections: {},
-    sessionInfo: null,
-    usage: null,
-    updatedAt: entry.metaUpdatedAt ?? 0,
-  };
-}
-
 const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
   /**
    * Read-only **no-spawn** meta snapshot for a thread.
@@ -295,7 +279,7 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
           source: 'profile',
           availableCommands: profileCache.availableCommands ?? [],
           commandsUpdatedAt: profileCache.commandsUpdatedAt ?? 0,
-          sessionMeta: snapshotMetaFromProfileCache(profileCache),
+          sessionMeta: profileSessionMetaSnapshot(profileId, profileCache),
         };
       }
     }

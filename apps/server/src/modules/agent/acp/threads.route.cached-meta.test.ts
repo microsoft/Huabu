@@ -30,6 +30,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('@agenetes/acp-driver', () => ({
+  resolveInitialPreferenceSelections: () => ({}),
   acpSessionRegistry: {
     get: (agentletId: string, threadId: string, namespace?: Namespace) =>
       mocks.live.get(
@@ -60,6 +61,7 @@ vi.mock('./profile-schema-cache.js', () => ({
 }));
 
 vi.mock('./profile-session-preferences.js', () => ({
+  getProfileSessionPreferences: () => ({}),
   rememberProfileConfigPreference: vi.fn(),
   rememberProfileSessionPreference: vi.fn(),
 }));

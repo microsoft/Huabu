@@ -5,6 +5,7 @@ import {
   awaitSelectionReplay,
   hydrateSelectionsFromPersistedMeta,
   reconcileSessionSelections,
+  resolveInitialPreferenceSelections,
   seedInitialPreferences,
 } from './session.js';
 
@@ -172,6 +173,47 @@ describe('initial profile preferences', () => {
     });
 
     expect(e.selections).toEqual({ model: 'sonnet' });
+  });
+});
+
+describe('resolving initial preference selections without a session', () => {
+  const catalogue = {
+    availableModels: [{ modelId: 'sonnet' }],
+    configOptions: [
+      {
+        id: 'model_id',
+        category: 'model',
+        options: [{ options: [{ value: 'opus' }] }],
+      },
+      { id: 'effort', category: 'thought_level', options: [{ value: 'high' }] },
+    ],
+  };
+
+  it('names the config options that own each remembered value', () => {
+    expect(
+      resolveInitialPreferenceSelections(
+        { model: 'opus', thoughtLevel: 'high' },
+        catalogue,
+      ),
+    ).toEqual({ model_id: 'opus', effort: 'high' });
+  });
+
+  it('uses the legacy model channel for a model no config option offers', () => {
+    expect(
+      resolveInitialPreferenceSelections({ model: 'sonnet' }, catalogue),
+    ).toEqual({ model: 'sonnet' });
+  });
+
+  it('selects nothing for retired values or absent preferences', () => {
+    expect(
+      resolveInitialPreferenceSelections(
+        { model: 'retired', thoughtLevel: 'ultra' },
+        catalogue,
+      ),
+    ).toEqual({});
+    expect(resolveInitialPreferenceSelections(undefined, catalogue)).toEqual(
+      {},
+    );
   });
 });
 
