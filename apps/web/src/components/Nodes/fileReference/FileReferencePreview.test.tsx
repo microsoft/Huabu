@@ -7,13 +7,21 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 import { FileReferencePreview } from './FileReferencePreview';
 
+import type { MilkdownPreviewProps } from '@/components/Milkdown/MilkdownPreview';
 import type { FileReadResult } from '@huabu/shared';
 import type * as ReactI18next from 'react-i18next';
 
 const mocks = vi.hoisted(() => ({
   read: vi.fn(),
   viewer: vi.fn(),
+  markdown: vi.fn(),
   t: (key: string) => key,
+}));
+vi.mock('@/components/Milkdown/MilkdownPreview', () => ({
+  MilkdownPreview: (props: MilkdownPreviewProps) => {
+    mocks.markdown(props);
+    return <article>{props.markdown}</article>;
+  },
 }));
 vi.mock('@/api/device-files', () => ({ readDeviceFile: mocks.read }));
 vi.mock('react-i18next', async (original) => ({
@@ -110,4 +118,85 @@ it('keeps stale text visibly errored until manual refresh and drops the continua
   await act(async () => button('files.refresh').click());
   expect(mocks.read.mock.calls.at(-1)?.[1]).toEqual({ path: '/source.tex' });
   expect(host.querySelector('pre')?.textContent).toBe('replacement');
+});
+
+it('offers isolated reading for complete Markdown and keeps source actions in source mode', async () => {
+  mocks.read.mockResolvedValue({
+    ...result('# Heading'),
+    nextCursor: undefined,
+  });
+  await act(async () =>
+    root.render(
+      <FileReferencePreview
+        id="markdown"
+        data={{ fileReference: { ...reference, path: '/README.md' } }}
+      />,
+    ),
+  );
+  await act(async () => {
+    await vi.waitFor(() =>
+      expect(host.querySelector('article')).not.toBeNull(),
+    );
+  });
+  expect(mocks.markdown.mock.calls.at(-1)?.[0]).toMatchObject({
+    markdown: '# Heading',
+    singleFile: true,
+  });
+  await act(async () => button('files.source').click());
+  expect(host.querySelector('article')).toBeNull();
+  expect(mocks.viewer.mock.calls.at(-1)?.[0]).toMatchObject({
+    readOnly: true,
+    plainText: true,
+    languageFilename: '/README.md',
+  });
+  expect(mocks.read).toHaveBeenCalledOnce();
+});
+
+it('never renders a Markdown prefix as a complete document or automatically reads the remainder', async () => {
+  mocks.read.mockResolvedValue(result('| unfinished table'));
+  await act(async () =>
+    root.render(
+      <FileReferencePreview
+        id="partial"
+        data={{ fileReference: { ...reference, path: '/README.md' } }}
+      />,
+    ),
+  );
+  await act(async () => {
+    await vi.waitFor(() => expect(host.querySelector('pre')).not.toBeNull());
+  });
+  expect(host.textContent).toContain('files.partialMarkdown');
+  expect(button('files.reading').disabled).toBe(true);
+  expect(mocks.markdown).not.toHaveBeenCalled();
+  expect(mocks.read).toHaveBeenCalledOnce();
+});
+
+it('reports Markdown rendering failures and returns to source without another device read', async () => {
+  mocks.read.mockResolvedValue({
+    ...result('# Heading'),
+    nextCursor: undefined,
+  });
+  await act(async () =>
+    root.render(
+      <FileReferencePreview
+        id="markdown"
+        data={{ fileReference: { ...reference, path: '/README.md' } }}
+      />,
+    ),
+  );
+  await act(async () => {
+    await vi.waitFor(() =>
+      expect(host.querySelector('article')).not.toBeNull(),
+    );
+  });
+  const props: MilkdownPreviewProps = mocks.markdown.mock.calls.at(-1)?.[0];
+  if (!props?.onLoadError) throw new Error('Missing render failure handler');
+  await act(async () => props.onLoadError?.(new Error('Renderer unavailable')));
+  expect(host.querySelector('[role="alert"]')?.textContent).toContain(
+    'Renderer unavailable',
+  );
+  expect(host.querySelector('article')).toBeNull();
+  expect(host.querySelector('pre')?.textContent).toBe('# Heading');
+  expect(button('files.reading').disabled).toBe(true);
+  expect(mocks.read).toHaveBeenCalledOnce();
 });

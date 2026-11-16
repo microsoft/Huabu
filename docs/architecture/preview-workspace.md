@@ -2,7 +2,7 @@
 
 Preview Workspace is the only right-side presentation surface on a Canvas page. It hosts node previews, webpage URL tabs, and unbound Chat conversations in one or two tab groups while the Canvas remains mounted in the centre.
 
-File-reference nodes use a bounded, read-only plain-text renderer in this same Preview surface. The Chat folder popover's Browse files action opens the left Files sidebar without changing cwd; routing uses the frozen device for realized conversations. File bytes remain renderer-local, are loaded only for Preview, and are not imported into the Space. See [connected-device files](./device-files.md).
+File-reference nodes use bounded read-only source previews with lazy language highlighting and single-file Markdown Reading/Source modes in this same Preview surface. Double-clicking a file in Files (or keyboard activation) reuses a matching current-Space reference by exact device/path, creating a visible reference when necessary, then opens a permanent ordinary node tab. This introduces no node-free target, hidden node, or new Comment provenance contract. The Chat folder popover's Browse files action opens the left Files sidebar without changing cwd; routing uses the frozen device for realized conversations. File bytes remain renderer-local, are loaded only for Preview, and are not imported into the Space. See [connected-device files](./device-files.md).
 
 The implementation originated in the [Unified Preview Workspace proposal](../proposals/unified-preview-workspace.md). This document is authoritative for the shipped system; the proposal is retained as design and migration history.
 

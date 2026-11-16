@@ -3,6 +3,8 @@
 
 import { t } from 'i18next';
 
+import { createId, isFileReference } from '@huabu/shared';
+
 import { ApiError } from '@/api/_client';
 import { getAgentConversationOwner } from '@/api/agent';
 import { toast } from '@/components/Common/Toast';
@@ -16,7 +18,70 @@ import { usePanelStore } from '../panelStore';
 import { findTabByTarget, groupOfTab, normalizePreviewTarget } from './model';
 import { selectActiveTab, usePreviewWorkspaceStore } from './store';
 
-import type { CanvasNodeId } from '@huabu/shared';
+import type { CanvasNodeId, FileReference } from '@huabu/shared';
+
+export function addFileReferenceNode(
+  canvasId: string,
+  reference: FileReference,
+  label: string,
+): string {
+  const canvas = useCanvasStore.getState();
+  if (!isFileReference(reference)) throw new Error(t('files.invalidReference'));
+  if (canvas.canvasId !== canvasId || canvas.isLoading)
+    throw new Error(t('files.spaceChanged'));
+  if (!selectCanWriteCanvas(canvas))
+    throw new Error(t('files.creationReadOnly'));
+  const id = createId('node');
+  canvas.addNode({
+    id,
+    nodeType: 'fileReference',
+    data: {
+      label,
+      origin: { type: 'user-created' },
+      fileReference: reference,
+    },
+    size: { width: 400, height: 180 },
+  });
+  if (
+    useCanvasStore.getState().canvasId !== canvasId ||
+    !useCanvasStore.getState().nodes.some((node) => node.id === id)
+  )
+    throw new Error(t('files.creationFailed'));
+  return id;
+}
+
+export function openFileReference(
+  canvasId: string,
+  reference: FileReference,
+  label: string,
+): string {
+  const canvas = useCanvasStore.getState();
+  if (!isFileReference(reference)) throw new Error(t('files.invalidReference'));
+  if (canvas.canvasId !== canvasId || canvas.isLoading)
+    throw new Error(t('files.spaceChanged'));
+  const matches = canvas.nodes.filter(
+    (node) =>
+      node.type === 'fileReference' &&
+      isFileReference(node.data.fileReference) &&
+      node.data.fileReference.agentletId === reference.agentletId &&
+      node.data.fileReference.path === reference.path,
+  );
+  const openMatch = Object.values(
+    usePreviewWorkspaceStore.getState().workspace.tabs,
+  )
+    .sort((a, b) => b.lastActiveSeq - a.lastActiveSeq)
+    .find(
+      ({ target }) =>
+        target.kind === 'node' &&
+        target.canvasId === canvasId &&
+        matches.some((node) => node.id === target.nodeId),
+    );
+  const nodeId =
+    (openMatch?.target.kind === 'node' ? openMatch.target.nodeId : undefined) ??
+    matches[0]?.id ??
+    addFileReferenceNode(canvasId, reference, label);
+  return openPreviewNode(nodeId, { transient: false, focusEditor: false });
+}
 
 function findConversationTab(
   canvasId: string,

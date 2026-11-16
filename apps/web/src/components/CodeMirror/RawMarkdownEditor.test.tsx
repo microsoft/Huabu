@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+import { LanguageDescription, syntaxTree } from '@codemirror/language';
 import { EditorView } from '@codemirror/view';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -105,3 +106,110 @@ it.each([false, true])(
     external.remove();
   },
 );
+
+it.each([
+  ['source.ts', 'const greeting: string = "hello";'],
+  ['source.json', '{"greeting": "hello"}'],
+  ['C:\\project\\source.py', 'greeting = "hello"'],
+  ['source.cpp', 'const char* greeting = "hello";'],
+  ['source.rs', 'let greeting = "hello";'],
+])(
+  'loads syntax for %s without replacing the editor, changing text or losing selection',
+  async (filename, value) => {
+    let view: EditorView | null = null;
+    await act(async () =>
+      root.render(
+        <RawMarkdownEditor
+          value={value}
+          readOnly
+          plainText
+          onReady={(next) => {
+            view = next;
+          }}
+        />,
+      ),
+    );
+    const content = host.querySelector<HTMLElement>('.cm-content');
+    if (!content) throw new Error('Missing source');
+    const editor = EditorView.findFromDOM(content);
+    if (!editor) throw new Error('Missing CodeMirror editor');
+    await act(async () =>
+      editor.dispatch({ selection: { anchor: 1, head: 4 } }),
+    );
+    await act(async () =>
+      root.render(
+        <RawMarkdownEditor
+          value={value}
+          readOnly
+          plainText
+          languageFilename={filename}
+          onReady={(next) => {
+            view = next;
+          }}
+        />,
+      ),
+    );
+    await act(async () => {
+      await vi.waitFor(() =>
+        expect(syntaxTree(editor.state).toString()).toContain('String'),
+      );
+    });
+    expect(view).toBe(editor);
+    expect(editor.state.doc.toString()).toBe(value);
+    expect(editor.state.selection.main.from).toBe(1);
+    expect(editor.state.selection.main.to).toBe(4);
+    expect(editor.state.readOnly).toBe(true);
+  },
+);
+
+it('keeps unknown extensions readable without reporting a language failure', async () => {
+  await act(async () =>
+    root.render(
+      <RawMarkdownEditor
+        value="custom file text"
+        readOnly
+        plainText
+        languageFilename="file.unknown402"
+      />,
+    ),
+  );
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  });
+  expect(host.querySelector('.cm-content')?.textContent).toBe(
+    'custom file text',
+  );
+  expect(host.querySelector('[role="alert"]')).toBeNull();
+});
+
+it('keeps the source readable and reports a failed language download', async () => {
+  const failure = new Error('Language unavailable');
+  vi.spyOn(LanguageDescription, 'matchFilename').mockReturnValue(
+    LanguageDescription.of({
+      name: 'Unavailable',
+      load: async () => {
+        throw failure;
+      },
+    }),
+  );
+  const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+  await act(async () =>
+    root.render(
+      <RawMarkdownEditor
+        value="unmodified source"
+        readOnly
+        plainText
+        languageFilename="source.py"
+      />,
+    ),
+  );
+  await act(async () => {
+    await vi.waitFor(() =>
+      expect(host.querySelector('[role="alert"]')).not.toBeNull(),
+    );
+  });
+  expect(host.querySelector('.cm-content')?.textContent).toBe(
+    'unmodified source',
+  );
+  expect(log).toHaveBeenCalledWith('File syntax highlighting failed', failure);
+});

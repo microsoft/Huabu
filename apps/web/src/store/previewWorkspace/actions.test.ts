@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 import { ApiError } from '@/api/_client';
 import { getAgentConversationOwner } from '@/api/agent';
@@ -12,11 +12,18 @@ import {
   openSpaceConversation,
   openPdfNotes,
   openPreviewNode,
+  openFileReference,
 } from './actions';
 import { createEmptyWorkspace } from './model';
 import { usePreviewWorkspaceStore } from './store';
 
 import type * as AgentApi from '@/api/agent';
+import type { AddNodeInput } from '@/handler/canvasCommand/uiIntent';
+
+const originalAddNode = useCanvasStore.getState().addNode;
+afterEach(() => {
+  useCanvasStore.setState({ addNode: originalAddNode });
+});
 
 vi.mock('@/api/agent', async (original) => ({
   ...(await original<typeof AgentApi>()),
@@ -28,6 +35,7 @@ beforeEach(() => {
   useCanvasStore.setState({
     canvasId: 'space',
     isLoading: false,
+    canvasAccess: { canvasId: 'space', write: true, manage: true },
     nodes: [
       {
         id: 'agent',
@@ -37,12 +45,106 @@ beforeEach(() => {
       },
     ],
   });
+
   usePreviewWorkspaceStore.setState({
     canvasId: 'space',
     workspace: createEmptyWorkspace('group'),
   });
 });
 
+const reference = { agentletId: 'device-a', path: '/root/code.py' };
+const fileNode = (id: string, agentletId = reference.agentletId) => ({
+  id,
+  type: 'fileReference',
+  position: { x: 10, y: 20 },
+  data: {
+    fileReference: { ...reference, agentletId },
+    label: 'Original label',
+  },
+});
+
+it('creates one visible metadata-only reference and reuses a permanent tab on repeated activation', () => {
+  const add = vi.fn((input: AddNodeInput) => {
+    if (!input.id) throw new Error('Expected an explicit reference ID');
+    const id = input.id;
+    useCanvasStore.setState((state) => ({
+      nodes: [
+        ...state.nodes,
+        {
+          id,
+          type: input.nodeType,
+          position: { x: 0, y: 0 },
+          data: input.data ?? {},
+        },
+      ],
+    }));
+  });
+  useCanvasStore.setState({ addNode: add });
+  const tab = openFileReference('space', reference, 'code.py');
+  expect(openFileReference('space', reference, 'code.py')).toBe(tab);
+  expect(add).toHaveBeenCalledOnce();
+  expect(add.mock.calls[0][0]).toMatchObject({
+    nodeType: 'fileReference',
+    data: {
+      fileReference: reference,
+      label: 'code.py',
+      origin: { type: 'user-created' },
+    },
+  });
+  expect(add.mock.calls[0][0].data).not.toHaveProperty('content');
+  expect(add.mock.calls[0][0]).not.toHaveProperty('hidden');
+  expect(
+    usePreviewWorkspaceStore.getState().workspace.tabs[tab].transient,
+  ).toBe(false);
+});
+
+it('prefers an open matching reference without moving, renaming or deleting existing nodes', () => {
+  const nodes = [
+    fileNode('first'),
+    fileNode('second'),
+    fileNode('other-device', 'device-b'),
+  ];
+  useCanvasStore.setState({ nodes });
+  const tab = openPreviewNode('second');
+  expect(openFileReference('space', reference, 'New label')).toBe(tab);
+  expect(useCanvasStore.getState().nodes).toBe(nodes);
+  expect(
+    usePreviewWorkspaceStore.getState().workspace.tabs[tab].transient,
+  ).toBe(false);
+});
+
+it('opens existing references read-only but rejects creation, stale Spaces and failed node creation', () => {
+  const add = vi.fn();
+  useCanvasStore.setState({
+    nodes: [fileNode('existing')],
+    addNode: add,
+    canvasAccess: { canvasId: 'space', write: false, manage: false },
+  });
+  expect(openFileReference('space', reference, 'code.py')).toBeTruthy();
+  expect(() =>
+    openFileReference(
+      'space',
+      { ...reference, agentletId: 'another-device' },
+      'code.py',
+    ),
+  ).toThrow();
+  expect(() =>
+    openFileReference('other-space', reference, 'code.py'),
+  ).toThrow();
+  expect(add).not.toHaveBeenCalled();
+  useCanvasStore.setState({
+    canvasAccess: { canvasId: 'space', write: true, manage: true },
+  });
+  const before = usePreviewWorkspaceStore.getState().workspace;
+  expect(() =>
+    openFileReference(
+      'space',
+      { ...reference, path: '/missing.txt' },
+      'missing.txt',
+    ),
+  ).toThrow();
+  expect(usePreviewWorkspaceStore.getState().workspace).toBe(before);
+});
 it.each(['node', 'conversation'] as const)(
   'reuses an existing %s owner tab',
   (kind) => {
