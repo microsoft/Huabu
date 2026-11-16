@@ -618,7 +618,15 @@ test('a PDF property saved after the page moved another node is not refused', as
       return body.state.nodes.find((n) => n.id === NOTE)?.position.y;
     })
     .toBeGreaterThan(200);
-  expect((await storeState(a.page)).nodes[PDF].content).toBeUndefined();
+  // Whether the page holds the extracted text by now depends on whether
+  // preprocessing has answered it; the save must be taken either way. (The
+  // store test "is kept through a structure update" pins the case without.)
+  test.info().annotations.push({
+    type: 'page shows the extracted text',
+    description: String(
+      (await storeState(a.page)).nodes[PDF].content !== undefined,
+    ),
+  });
   await expect.poll(async () => (await storeState(a.page)).unsaved).toBe(false);
 
   await openPreview(a.page, PDF);
