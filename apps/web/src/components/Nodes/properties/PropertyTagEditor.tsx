@@ -76,14 +76,16 @@ export function PropertyTagEditor({
   const query = text.trim();
   const needle = query.toLowerCase();
   const exact = (option: string) => option.toLowerCase() === needle;
+  const rank = (option: string) =>
+    option === query ? 2 : exact(option) ? 1 : 0;
   const matches = options
     .filter(
       (option) =>
         !items.includes(option) && option.toLowerCase().includes(needle),
     )
     // Enter takes the first row: text that names a tag in full must not pick
-    // a longer one that merely contains it.
-    .sort((a, b) => Number(exact(b)) - Number(exact(a)));
+    // a longer one that merely contains it, nor another spelling of itself.
+    .sort((a, b) => rank(b) - rank(a));
   const canCreate =
     query !== '' && !items.includes(query) && !options.includes(query);
   const rows = [
@@ -95,13 +97,17 @@ export function PropertyTagEditor({
   // is the exception: the matches left are other tags that only contain it.
   // It targets the tag in its own spelling if that is on offer, else
   // nothing, and Enter merges the two.
+  // A tag opened and left as it was targets nothing either, so Enter puts
+  // it back exactly as stored.
   const chosen = items.some(exact);
   const target =
-    !chosen || (matches.length > 0 && exact(matches[0]))
-      ? 0
-      : canCreate
-        ? rows.length - 1
-        : null;
+    text === editing
+      ? null
+      : !chosen || (matches.length > 0 && exact(matches[0]))
+        ? 0
+        : canCreate
+          ? rows.length - 1
+          : null;
   const active =
     cursor !== null && cursor < rows.length
       ? cursor

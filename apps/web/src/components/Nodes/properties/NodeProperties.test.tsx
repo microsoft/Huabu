@@ -743,6 +743,43 @@ it('keeps a stored tag with spaces of its own when it is opened and left unchang
   });
 });
 
+it('keeps the spelling of an opened tag when a known tag differs only by case', async () => {
+  act(() =>
+    root.render(
+      <NodeProperties
+        properties={{ Keywords: ['Canvas', 'agents'] }}
+        displayKeys={[]}
+        readOnly={false}
+        tagOptions={() => ['agents', 'canvas', 'Canvas']}
+        onSave={save}
+      />,
+    ),
+  );
+  click('node.editProperty:Keywords');
+  click('node.editPropertyTag:Canvas');
+  // The stored spelling leads, and unchanged text targets no option.
+  expect(
+    Array.from(document.querySelectorAll('[role="option"]')).map((item) => [
+      item.textContent,
+      item.getAttribute('aria-selected'),
+    ]),
+  ).toEqual([
+    ['Canvas', 'false'],
+    ['canvas', 'false'],
+  ]);
+  act(() => {
+    container
+      .querySelector('[role="combobox"]')
+      ?.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
+      );
+  });
+  await act(async () => {});
+  expect(save).toHaveBeenCalledExactlyOnceWith({
+    properties: { Keywords: ['Canvas', 'agents'] },
+  });
+});
+
 it('removes one of two repeated tags and lets Enter save once the pointer leaves the options', async () => {
   act(() =>
     root.render(
