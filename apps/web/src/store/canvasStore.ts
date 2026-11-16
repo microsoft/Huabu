@@ -2717,9 +2717,20 @@ const useCanvasStore = create<RFState>()(
         // Loading a Space only restores an existing legacy conversation.
         // Creating a new Chat is an explicit action requiring Agent defaults.
         const chatThreadId = useChatStore.getState().threadMap[targetId];
+        const enteringSpace =
+          usePreviewWorkspaceStore.getState().canvasId !== targetId;
         usePreviewWorkspaceStore
           .getState()
           .loadForCanvas(targetId, { chatThreadId });
+        // A Space with nothing to preview (every new Space, however it was
+        // created) opens as a bare canvas instead of inheriting the open
+        // panel of the Space the user came from.
+        if (
+          enteringSpace &&
+          Object.keys(usePreviewWorkspaceStore.getState().workspace.tabs)
+            .length === 0
+        )
+          usePanelStore.getState().setRightCollapsed(true);
         canvasHistoryManager.activate(targetId, options?.resetHistory);
         if (canvasId && targetId !== get().canvasId) {
           useToolStore.getState().resetForCanvasSwitch();
