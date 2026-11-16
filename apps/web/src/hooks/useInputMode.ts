@@ -138,7 +138,62 @@ export function useInputModeListener(): void {
         useInputModeStore.setState({ mode: next });
       }
     };
+    const press = (e: PointerEvent) => pressedPointers.add(e.pointerId);
+    const release = (e: PointerEvent) => pressedPointers.delete(e.pointerId);
     window.addEventListener('pointerdown', handler, true);
-    return () => window.removeEventListener('pointerdown', handler, true);
+    window.addEventListener('pointerdown', press, true);
+    window.addEventListener('pointerup', release, true);
+    window.addEventListener('pointercancel', release, true);
+    return () => {
+      window.removeEventListener('pointerdown', handler, true);
+      window.removeEventListener('pointerdown', press, true);
+      window.removeEventListener('pointerup', release, true);
+      window.removeEventListener('pointercancel', release, true);
+      pressedPointers.clear();
+    };
   }, []);
+}
+
+/** Pointers currently held down, maintained by {@link useInputModeListener}. */
+const pressedPointers = new Set<number>();
+
+/**
+ * {@link useIsNotMouse}, except that a change made by a press is adopted only
+ * after that press has ended.
+ *
+ * The pointer mode flips on `pointerdown`. Chrome that is positioned by the
+ * mode would then move between the press and its release, and a control that
+ * was under the pointer no longer is: the click lands on nothing. Use this
+ * for geometry the user may be pressing on; use `useIsNotMouse` for
+ * everything else.
+ */
+export function usePressSettledIsNotMouse(): boolean {
+  const live = useIsNotMouse();
+  const [settled, setSettled] = useState(live);
+  useEffect(() => {
+    if (settled === live) return;
+    let timer: number | undefined;
+    // After the click the release produces, which is dispatched in the same
+    // task as `pointerup`.
+    const adopt = () => {
+      timer = window.setTimeout(() => setSettled(live), 0);
+    };
+    if (pressedPointers.size === 0) adopt();
+    else {
+      window.addEventListener('pointerup', adopt, {
+        capture: true,
+        once: true,
+      });
+      window.addEventListener('pointercancel', adopt, {
+        capture: true,
+        once: true,
+      });
+    }
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener('pointerup', adopt, true);
+      window.removeEventListener('pointercancel', adopt, true);
+    };
+  }, [live, settled]);
+  return settled;
 }

@@ -66,6 +66,7 @@ vi.mock('@/store/canvasStore', () => ({
 }));
 vi.mock('@/hooks/useInputMode', () => ({
   useIsNotMouse: () => mocks.isNotMouse,
+  usePressSettledIsNotMouse: () => mocks.isNotMouse,
   readEffectiveInputMode: () => 'pen',
 }));
 vi.mock('@/hooks/useMultiSelectModifier', () => ({
