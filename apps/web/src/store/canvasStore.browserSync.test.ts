@@ -129,6 +129,9 @@ function deliver(update: PostCanvasExecuteResponse, source: 'ui' | 'agent') {
     {
       ...(update.operationId ? { operationId: update.operationId } : {}),
       source,
+      ...(update.nodeContentRevisions
+        ? { nodeContentRevisions: update.nodeContentRevisions }
+        : {}),
     },
   );
   return true;

@@ -37,6 +37,7 @@ import useCanvasStore, {
   awaitQuestionCreation,
   resetCanvasSyncForTests,
 } from './canvasStore';
+import { contentRevisionsOf } from './canvasStore/sync/testing/contentRevisions';
 import { createFakeSpaceServer } from './canvasStore/sync/testing/fakeExecuteServer';
 
 import type * as CanvasApi from '../api';
@@ -231,7 +232,9 @@ describe('Question creation settlement', () => {
       // A genuinely newer server restoration is not the stale create echo.
       useCanvasStore
         .getState()
-        .applyDeltasFromAgent([delta], 5, pendingEffects);
+        .applyDeltasFromAgent([delta], 5, pendingEffects, false, undefined, {
+          nodeContentRevisions: contentRevisionsOf([delta]),
+        });
       expect(
         useCanvasStore.getState().nodes.some((item) => item.id === node.id),
       ).toBe(true);

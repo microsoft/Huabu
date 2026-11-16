@@ -527,6 +527,13 @@ export interface PostCanvasExecuteResponse {
    */
   orderEvents?: SetSiblingOrderEvent[];
   /**
+   * Stored content revision of every node whose saved content (a sidecar
+   * field) this batch created or changed, keyed by node id. The page that
+   * applies `deltas` takes it as the node's save baseline. Absent when the
+   * batch changed no node content.
+   */
+  nodeContentRevisions?: Record<string, string>;
+  /**
    * Optional run id; echoed from the request when supplied. On a replayed
    * response it is the run id of the original request.
    */

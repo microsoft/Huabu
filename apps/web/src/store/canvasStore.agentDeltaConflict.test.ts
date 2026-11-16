@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { canvasHistoryManager } from './canvasHistoryManager';
 import useCanvasStore from './canvasStore';
+import { contentRevisionsOf } from './canvasStore/sync/testing/contentRevisions';
 
 import type { Delta } from '@huabu/shared/canvas-engine';
 import type { Node } from '@xyflow/react';
@@ -24,6 +25,28 @@ const pendingEffects = {
   contentEditedNodeIds: [],
   deferredFitFrameIds: [],
 };
+
+/**
+ * Deliver an update as the server sends it: with the stored revision of
+ * every node whose content the batch changed.
+ */
+function applyUpdate(
+  deltas: Delta[],
+  toVersion: number,
+  agentNodeProjection?: boolean,
+): string[] {
+  const nodeContentRevisions = contentRevisionsOf(deltas);
+  return useCanvasStore
+    .getState()
+    .applyDeltasFromAgent(
+      deltas,
+      toVersion,
+      pendingEffects,
+      agentNodeProjection,
+      undefined,
+      nodeContentRevisions ? { nodeContentRevisions } : undefined,
+    );
+}
 
 const provenance = {
   version: 1,
@@ -87,7 +110,7 @@ describe('agent delta conflict protection', () => {
         data: { ...before.data, style: { fontSize: 36, accent: 'teal' } },
       };
       useCanvasStore.getState()._setStateNoAutosave({ nodes: [local] });
-      useCanvasStore.getState().applyDeltasFromAgent(
+      applyUpdate(
         [
           {
             type: 'REPLACE_NODE',
@@ -96,7 +119,6 @@ describe('agent delta conflict protection', () => {
           },
         ],
         2,
-        pendingEffects,
         true,
       );
       expect(useCanvasStore.getState().nodes[0]).toMatchObject({
@@ -121,14 +143,11 @@ describe('agent delta conflict protection', () => {
         invocationToken: 'first',
       },
     };
-    useCanvasStore
-      .getState()
-      .applyDeltasFromAgent(
-        [{ type: 'REPLACE_NODE', prev: moved, next: started }],
-        2,
-        pendingEffects,
-        true,
-      );
+    applyUpdate(
+      [{ type: 'REPLACE_NODE', prev: moved, next: started }],
+      2,
+      true,
+    );
     const undone = canvasHistoryManager.undo(
       useCanvasStore.getState().nodes,
       [],
@@ -145,7 +164,7 @@ describe('agent delta conflict protection', () => {
   });
 
   it('does not put FSM-only broadcasts into ordinary undo', () => {
-    useCanvasStore.getState().applyDeltasFromAgent(
+    applyUpdate(
       [
         {
           type: 'REPLACE_NODE',
@@ -161,7 +180,6 @@ describe('agent delta conflict protection', () => {
         },
       ],
       2,
-      pendingEffects,
     );
     expect(canvasHistoryManager.canUndo).toBe(false);
   });
@@ -205,9 +223,7 @@ describe('agent delta conflict protection', () => {
       useCanvasStore.getState().patchNodeSilent('question-1', localPatch);
 
       const delta = roundTripReplacement(prevMetadata, nextMetadata);
-      const skipped = useCanvasStore
-        .getState()
-        .applyDeltasFromAgent([delta], 2, pendingEffects);
+      const skipped = applyUpdate([delta], 2);
 
       expect(skipped).toEqual([]);
       expect(useCanvasStore.getState().nodes[0]?.data).toMatchObject({
@@ -258,9 +274,7 @@ describe('agent delta conflict protection', () => {
       const before = useCanvasStore.getState().nodes[0];
 
       const delta = roundTripReplacement(prevMetadata, nextMetadata);
-      const skipped = useCanvasStore
-        .getState()
-        .applyDeltasFromAgent([delta], 2, pendingEffects);
+      const skipped = applyUpdate([delta], 2);
 
       expect(skipped).toEqual([]);
       expect(useCanvasStore.getState().nodes[0]).toEqual({
@@ -291,14 +305,7 @@ describe('agent delta conflict protection', () => {
     };
 
     expect(
-      useCanvasStore
-        .getState()
-        .applyDeltasFromAgent(
-          [{ type: 'REPLACE_NODE', prev, next }],
-          2,
-          pendingEffects,
-          true,
-        ),
+      applyUpdate([{ type: 'REPLACE_NODE', prev, next }], 2, true),
     ).toEqual([]);
     expect(useCanvasStore.getState().nodes[0]?.data).toMatchObject({
       content: 'Pending prompt',
@@ -326,14 +333,7 @@ describe('agent delta conflict protection', () => {
     };
 
     expect(
-      useCanvasStore
-        .getState()
-        .applyDeltasFromAgent(
-          [{ type: 'REPLACE_NODE', prev, next }],
-          2,
-          pendingEffects,
-          true,
-        ),
+      applyUpdate([{ type: 'REPLACE_NODE', prev, next }], 2, true),
     ).toEqual(['question-1']);
     expect(useCanvasStore.getState().nodes[0]?.data).toMatchObject({
       content: 'First prompt',
@@ -354,9 +354,7 @@ describe('agent delta conflict protection', () => {
       prev: question('', 'idle'),
       next: question('', 'running'),
     };
-    const skipped = useCanvasStore
-      .getState()
-      .applyDeltasFromAgent([delta], 2, pendingEffects);
+    const skipped = applyUpdate([delta], 2);
 
     expect(skipped).toEqual([]);
     expect(useCanvasStore.getState().nodes[0]?.data).toMatchObject({
@@ -376,9 +374,7 @@ describe('agent delta conflict protection', () => {
       prev: question('', 'idle'),
       next: question('Remote prompt', 'running'),
     };
-    const skipped = useCanvasStore
-      .getState()
-      .applyDeltasFromAgent([delta], 2, pendingEffects);
+    const skipped = applyUpdate([delta], 2);
 
     expect(skipped).toEqual(['question-1']);
     expect(useCanvasStore.getState().nodes[0]?.data).toMatchObject({
@@ -406,13 +402,10 @@ describe('agent delta conflict protection', () => {
       },
     };
     expect(
-      useCanvasStore
-        .getState()
-        .applyDeltasFromAgent(
-          [{ type: 'REPLACE_NODE', prev: question('', 'idle'), next }],
-          2,
-          pendingEffects,
-        ),
+      applyUpdate(
+        [{ type: 'REPLACE_NODE', prev: question('', 'idle'), next }],
+        2,
+      ),
     ).toEqual(['question-1']);
     expect(useCanvasStore.getState().nodes[0]).toMatchObject({
       position: local.position,

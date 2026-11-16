@@ -203,7 +203,11 @@ describe('durable node metadata actions', () => {
       other.pendingEffects as Parameters<typeof state.applyDeltasFromAgent>[2],
       false,
       { events: other.orderEvents },
-      { operationId: other.operationId, source: 'ui' },
+      {
+        operationId: other.operationId,
+        source: 'ui',
+        nodeContentRevisions: other.nodeContentRevisions,
+      },
     );
     await vi.waitFor(() =>
       expect(

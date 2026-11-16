@@ -84,6 +84,15 @@ export const canvasSyncEventSchema = z.discriminatedUnion('type', [
         .array(z.custom<SetSiblingOrderEvent>(isSetSiblingOrderEvent))
         .optional(),
       /**
+       * Stored content revision of every node whose saved content (a
+       * sidecar field) this batch created or changed, keyed by node id — the
+       * same value a load returns in `nodeContentRevisions`. A page takes it
+       * as the node's save baseline instead of hashing the node in `deltas`,
+       * which is not always what is stored. Absent when the batch changed no
+       * node content.
+       */
+      nodeContentRevisions: z.record(z.string(), z.string()).optional(),
+      /**
        * ACP chat thread that initiated this batch, when known. Lets the
        * client attach `changes` to the right conversation's review card.
        */

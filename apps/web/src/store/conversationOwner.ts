@@ -258,6 +258,11 @@ async function applyConversationOwnerPatch(
       response.pendingEffects as Parameters<
         typeof current.applyDeltasFromAgent
       >[2],
+      false,
+      undefined,
+      response.nodeContentRevisions
+        ? { nodeContentRevisions: response.nodeContentRevisions }
+        : undefined,
     );
   }
   if (current.canvasId !== owner.canvasId) {

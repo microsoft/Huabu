@@ -1542,6 +1542,9 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
           deferredFitFrameIds: out.pendingEffects.deferredFitFrameIds,
         },
         ...(out.orderEvents ? { orderEvents: out.orderEvents } : {}),
+        ...(out.nodeContentRevisions
+          ? { nodeContentRevisions: out.nodeContentRevisions }
+          : {}),
         ...(effectiveRunId ? { runId: effectiveRunId } : {}),
         ...(out.operationId ? { operationId: out.operationId } : {}),
         ...(out.basis ? { basis: out.basis } : {}),
@@ -1663,6 +1666,9 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
               toVersion: out.toVersion,
               deltas: out.deltas,
               pendingEffects: out.pendingEffects,
+              ...(out.nodeContentRevisions
+                ? { nodeContentRevisions: out.nodeContentRevisions }
+                : {}),
             },
           });
         }

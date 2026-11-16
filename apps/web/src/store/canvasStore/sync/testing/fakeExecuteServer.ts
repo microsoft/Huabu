@@ -35,6 +35,8 @@ import {
 
 import { ApiError } from '@/api/_client';
 
+import { contentRevisionsOf } from './contentRevisions';
+
 import type {
   CanvasCommand,
   PostCanvasExecuteRequest,
@@ -196,6 +198,9 @@ export function createFakeExecuteServer(
         write({ nodes: nextNodes, edges: shared.edges, version: toVersion });
         stampedVersion = toVersion;
       }
+      const nodeContentRevisions = changed
+        ? contentRevisionsOf(deltas)
+        : undefined;
       const response: PostCanvasExecuteResponse = {
         canvasId,
         fromVersion: before.version,
@@ -214,6 +219,7 @@ export function createFakeExecuteServer(
           deferredFitFrameIds: out.pendingEffects.deferredFitFrameIds,
         },
         ...(orderEvents.length > 0 ? { orderEvents } : {}),
+        ...(nodeContentRevisions ? { nodeContentRevisions } : {}),
         ...(operationId ? { operationId } : {}),
       };
       if (operationId) stored.set(operationId, response);

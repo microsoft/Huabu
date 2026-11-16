@@ -146,7 +146,10 @@ import { reconcileQuestionStatus } from './canvasStore/load/reconcileQuestionSta
 import { shouldBackfillNodeLabel } from './canvasStore/load/shouldBackfillNodeLabel';
 import { warmupNodeHeights } from './canvasStore/load/warmupNodeHeights';
 import { createCanvasEventBuffer } from './canvasStore/save/eventBuffer';
-import { NODE_CONTENT_KEYS } from './canvasStore/save/nodeContentFields';
+import {
+  MD_BACKED_NODE_TYPES,
+  NODE_CONTENT_KEYS,
+} from './canvasStore/save/nodeContentFields';
 import {
   createNodeContentQueue,
   type RemoteContentOutcome,
@@ -1013,7 +1016,16 @@ type RFState = {
      * page recognises its own) and the writer's kind. A person's edit, from
      * this page or another, takes no undo snapshot here.
      */
-    sync?: { operationId?: string; source?: 'ui' | 'agent' | 'system' },
+    sync?: {
+      operationId?: string;
+      source?: 'ui' | 'agent' | 'system';
+      /**
+       * The server's stored content revision of every node whose saved
+       * content the batch created or changed. It becomes the node's save
+       * baseline; the page never hashes the node in `deltas` for that.
+       */
+      nodeContentRevisions?: Readonly<Record<string, string>>;
+    },
   ) => string[];
   /**
    * Ids of nodes with un-persisted local content edits (pending debounced
@@ -1656,7 +1668,13 @@ const browserSync = createBrowserSync({
         events: response.orderEvents,
         onDiverged: () => browserSync.deferReload(response.canvasId),
       },
-      { operationId, source: 'ui' },
+      {
+        operationId,
+        source: 'ui',
+        ...(response.nodeContentRevisions
+          ? { nodeContentRevisions: response.nodeContentRevisions }
+          : {}),
+      },
     );
   },
   applyWithheld: (canvasId, units) => {
@@ -3472,6 +3490,24 @@ const useCanvasStore = create<RFState>()(
       sync,
     ) => {
       const orderEvents = order?.events ?? [];
+      // The save baseline of a node whose content this batch changed is the
+      // revision the server stored for it, never a hash of the node in the
+      // batch: that copy is not always what is stored. A content change
+      // that comes without one (an older server) is handled like another
+      // page's save of that node: see `refreshContentWithoutRevision`.
+      const serverRevisions = sync?.nodeContentRevisions;
+      const withoutRevision = new Set<string>();
+      const refreshContentWithoutRevision = (): void => {
+        if (withoutRevision.size === 0) return;
+        const ids = [...withoutRevision];
+        withoutRevision.clear();
+        // The existing per-node path: a node that shows the server's
+        // content is fetched and takes the fetched revision; a node with
+        // unsaved content keeps its baseline, so its save is refused and
+        // settled by the identical-content rule or by the user; a frozen
+        // node is compared with what the server holds.
+        void adoptRemoteNodeContent(get().canvasId, ids);
+      };
       const reconcileIncomingVersion = (): void => {
         get()._setStateNoAutosave({
           version: Math.max(get().version, toVersion),
@@ -3612,6 +3648,7 @@ const useCanvasStore = create<RFState>()(
                 const settledIdentical =
                   nodeContentQueue.settleConflictIfIdentical(
                     serverNodeOf(d.next),
+                    serverRevisions?.[d.next.id],
                   );
                 if (local?.type === 'question') {
                   const localData = (local.data ?? {}) as Record<
@@ -3697,12 +3734,18 @@ const useCanvasStore = create<RFState>()(
       // chosen between their text and the server's yet, and an update must
       // not choose for them. It stays frozen; "Keep mine" will overwrite
       // the revision this update brought.
-      const rebasedRemoteNodes = [
+      const rebasedRemoteNodes: Node[] = [];
+      for (const remoteNode of [
         ...skippedRemoteNodes,
         ...advancedRemoteBaselines,
-      ].filter((remoteNode) => !nodeContentQueue.rebaseConflict(remoteNode));
+      ]) {
+        const rev = serverRevisions?.[remoteNode.id];
+        if (rev === undefined) withoutRevision.add(remoteNode.id);
+        if (nodeContentQueue.rebaseConflict(remoteNode.id, rev)) continue;
+        if (rev !== undefined) rebasedRemoteNodes.push(remoteNode);
+      }
       if (rebasedRemoteNodes.length > 0) {
-        nodeContentQueue.seedBaselines(rebasedRemoteNodes);
+        nodeContentQueue.seedBaselines(rebasedRemoteNodes, serverRevisions);
       }
 
       if (safeDeltas.length === 0 && orderEvents.length === 0) {
@@ -3712,6 +3755,7 @@ const useCanvasStore = create<RFState>()(
         reconcileIncomingVersion();
         rebaseGestureBaseline(incoming);
         remote.finish();
+        refreshContentWithoutRevision();
         return skippedNodeIds;
       }
 
@@ -3828,21 +3872,23 @@ const useCanvasStore = create<RFState>()(
       });
       reconcileIncomingVersion();
 
-      // Re-seed the content-CAS baseline of the nodes whose saved content
-      // this batch changed (or created), from the server's own copy of the
-      // node in the batch. A node the batch left alone, or changed only in
-      // structure, keeps the baseline it has: what the page shows is not
-      // always what the server stores (a PDF's extracted body is not sent
-      // with a load, an Office body is normalized), so a revision computed
-      // from it would refuse the node's next property save as a conflict —
-      // after every structure edit, since the page's own edits come back
-      // through here. Skipped mid-edit nodes had their baseline adopted to
-      // the agent's rev above (local-first rebase), and a node with unsaved
-      // content is not the server's; both are left out.
+      // Move the content-CAS baseline of the nodes whose saved content this
+      // batch changed (or created) to the revision the server stored for
+      // them. A node the batch left alone, or changed only in structure,
+      // keeps the baseline it has: what the page shows is not always what
+      // the server stores (a PDF's extracted body is not sent with a load,
+      // an Office body is normalized), so a revision computed from it would
+      // refuse the node's next property save as a conflict — after every
+      // structure edit, since the page's own edits come back through here.
+      // Skipped mid-edit nodes had their baseline adopted to the agent's rev
+      // above (local-first rebase), and a node with unsaved content is not
+      // the server's; both are left out.
       {
         const skippedSet = new Set(skippedNodeIds);
         const present = new Set((applied.nodes as Node[]).map((n) => n.id));
-        const contentChanged = new Set<string>();
+        const contentChanged = new Set<string>(
+          Object.keys(serverRevisions ?? {}),
+        );
         for (const delta of incoming) {
           if (delta.type === 'INSERT_NODE') contentChanged.add(delta.node.id);
           else if (delta.type === 'REPLACE_NODE') {
@@ -3856,18 +3902,23 @@ const useCanvasStore = create<RFState>()(
               contentChanged.add(delta.next.id);
           }
         }
-        nodeContentQueue.seedBaselines(
-          [...contentChanged]
-            .filter(
-              (id) =>
-                present.has(id) &&
-                remote.serverNodes.has(id) &&
-                !skippedSet.has(id) &&
-                !preservedPendingNodeIds.has(id) &&
-                !dirty.has(id),
-            )
-            .map((id) => serverNodeOf({ id })),
-        );
+        const adopted: Node[] = [];
+        for (const id of contentChanged) {
+          if (
+            !present.has(id) ||
+            !remote.serverNodes.has(id) ||
+            skippedSet.has(id) ||
+            preservedPendingNodeIds.has(id) ||
+            dirty.has(id)
+          )
+            continue;
+          const node = serverNodeOf({ id });
+          if (serverRevisions?.[id] !== undefined) adopted.push(node);
+          else if (MD_BACKED_NODE_TYPES.has(node.type ?? ''))
+            withoutRevision.add(id);
+        }
+        nodeContentQueue.seedBaselines(adopted, serverRevisions);
+        refreshContentWithoutRevision();
       }
 
       // Post-effects must not run for nodes whose delta we skipped — they

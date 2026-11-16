@@ -12,6 +12,7 @@ import {
 
 import { canvasHistoryManager } from './canvasHistoryManager';
 import useCanvasStore from './canvasStore';
+import { contentRevisionsOf } from './canvasStore/sync/testing/contentRevisions';
 
 import type { Node } from '@xyflow/react';
 
@@ -119,9 +120,14 @@ describe('sibling order from a server update', () => {
 
     useCanvasStore
       .getState()
-      .applyDeltasFromAgent(deltas, 2, pendingEffects, false, {
-        events: wireEvents(before, [before[0], created, before[1]]),
-      });
+      .applyDeltasFromAgent(
+        deltas,
+        2,
+        pendingEffects,
+        false,
+        { events: wireEvents(before, [before[0], created, before[1]]) },
+        { nodeContentRevisions: contentRevisionsOf(deltas) },
+      );
 
     expect(ids()).toEqual(['a', 'n', 'b']);
   });
@@ -132,15 +138,18 @@ describe('sibling order from a server update', () => {
     seed([...before, created]);
     const onDiverged = vi.fn();
 
-    useCanvasStore
-      .getState()
-      .applyDeltasFromAgent(
-        [{ type: 'INSERT_NODE', node: created }] as Delta[],
-        2,
-        pendingEffects,
-        false,
-        { events: wireEvents(before, [...before, created]), onDiverged },
-      );
+    useCanvasStore.getState().applyDeltasFromAgent(
+      [{ type: 'INSERT_NODE', node: created }] as Delta[],
+      2,
+      pendingEffects,
+      false,
+      { events: wireEvents(before, [...before, created]), onDiverged },
+      {
+        nodeContentRevisions: contentRevisionsOf([
+          { type: 'INSERT_NODE', node: created },
+        ] as Delta[]),
+      },
+    );
 
     expect(ids()).toEqual(['a', 'b', 'n']);
     expect(onDiverged).not.toHaveBeenCalled();

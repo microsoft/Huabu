@@ -427,6 +427,10 @@ export const useCanvasSyncStore = create<CanvasSyncState>((set, get) => ({
               ? { operationId: event.data.operationId }
               : {}),
             ...(event.data.source ? { source: event.data.source } : {}),
+            // The stored revision of every node whose content it changed.
+            ...(event.data.nodeContentRevisions
+              ? { nodeContentRevisions: event.data.nodeContentRevisions }
+              : {}),
           },
         );
       } else if (toVersion > canvasStore.version) {

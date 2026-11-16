@@ -275,6 +275,36 @@ describe('canvasSyncStore stream recovery', () => {
       mocks.canvasState.applyDeltasFromAgent.mockClear();
     });
 
+    it("hands an update's stored content revisions to the store with its deltas", async () => {
+      await connectWith(
+        ['snapshot', { version: 1 }],
+        [
+          'update',
+          {
+            fromVersion: 1,
+            toVersion: 2,
+            deltas: [],
+            pendingEffects: {
+              mutatedNodes: [],
+              deletedNodeIds: [],
+              contentEditedNodeIds: [],
+              deferredFitFrameIds: [],
+            },
+            source: 'agent',
+            nodeContentRevisions: { n1: 'stored-rev' },
+          },
+        ],
+      );
+
+      expect(mocks.canvasState.applyDeltasFromAgent).toHaveBeenCalledOnce();
+      const call = mocks.canvasState.applyDeltasFromAgent.mock
+        .calls[0] as unknown as unknown[];
+      expect(call[5]).toEqual({
+        source: 'agent',
+        nodeContentRevisions: { n1: 'stored-rev' },
+      });
+    });
+
     it("fetches the nodes another page's save names", async () => {
       await connectWith(
         ['snapshot', { version: 1 }],

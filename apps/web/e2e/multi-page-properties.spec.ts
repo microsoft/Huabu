@@ -953,3 +953,168 @@ test('two pages editing the same property of one note at the same moment: the se
   await a.context.close();
   await b.context.close();
 });
+
+/** The stored content revision a load reports for `nodeId`. */
+async function storedRevision(
+  request: APIRequestContext,
+  canvasId: string,
+  nodeId: string,
+) {
+  const response = await request.get(`/api/canvas/${canvasId}`);
+  expect(response.ok(), await response.text()).toBe(true);
+  const { nodeContentRevisions } = (await response.json()) as {
+    nodeContentRevisions?: Record<string, string>;
+  };
+  const revision = nodeContentRevisions?.[nodeId];
+  if (!revision) throw new Error(`No stored revision for ${nodeId}`);
+  return revision;
+}
+
+/** An agent writes `patch` into `nodeId` through `execute`, having read it. */
+async function agentWrites(
+  request: APIRequestContext,
+  canvasId: string,
+  nodeId: string,
+  patch: Record<string, unknown>,
+) {
+  const response = await request.post(`/api/canvas/${canvasId}/execute`, {
+    data: {
+      commands: [
+        {
+          type: 'MERGE_NODE_DATA',
+          patches: [
+            {
+              nodeId,
+              patch,
+              expectRev: await storedRevision(request, canvasId, nodeId),
+            },
+          ],
+        },
+      ],
+      originator: { source: 'agent', threadId: 'e2e-properties-agent' },
+    },
+  });
+  expect(response.ok(), await response.text()).toBe(true);
+  const body = (await response.json()) as {
+    results: Array<{ applied: boolean; reason?: string }>;
+    nodeContentRevisions?: Record<string, string>;
+  };
+  expect(body.results).toEqual([expect.objectContaining({ applied: true })]);
+  // The response names the revision of what the server stored.
+  expect(body.nodeContentRevisions?.[nodeId]).toBe(
+    await storedRevision(request, canvasId, nodeId),
+  );
+}
+
+/** Content saves of `nodeId` the server refused for this page. */
+const refusedSaves = (device: Device, nodeId: string) =>
+  device.conflicts.filter((call) => call.endsWith(`/nodes/${nodeId}/content`));
+
+test("an agent's write to a PDF's properties while page B has it open: B's next property save on that PDF is taken", async ({
+  browser,
+  request,
+}) => {
+  const { canvasId, a, b } = await openBoth(browser, request, 'PDF agent');
+  const venue = (page: Page) =>
+    panel(page, PDF).getByRole('button', { name: 'Edit venue' });
+
+  // B reads the PDF with its properties open.
+  await openPreview(b.page, PDF);
+  await panel(b.page, PDF)
+    .getByRole('button', { name: 'Expand properties' })
+    .click();
+  await expect(venue(b.page)).toHaveCount(0);
+  await blur(b.page);
+
+  // An agent sets a property on the PDF; nobody saved it from a page.
+  await agentWrites(request, canvasId, PDF, {
+    properties: { venue: 'NeurIPS' },
+    propertyDisplayKeys: ['venue'],
+  });
+  for (const device of [a, b]) {
+    await expect
+      .poll(async () => (await storeState(device.page)).nodes[PDF].properties)
+      .toEqual({ venue: 'NeurIPS' });
+  }
+  await expect(venue(b.page)).toHaveText('NeurIPS');
+  await expect.poll(async () => (await storeState(b.page)).unsaved).toBe(false);
+
+  // B adds another property: its save states the revision the update
+  // brought, and the server takes it at the first attempt.
+  await panel(b.page, PDF)
+    .getByRole('button', { name: 'Add property' })
+    .click();
+  await panel(b.page, PDF)
+    .getByRole('textbox', { name: 'Property name' })
+    .fill('year');
+  const value = panel(b.page, PDF).getByRole('textbox', { name: 'Value' });
+  await value.fill('2026');
+  await value.press('Enter');
+  await expect
+    .poll(
+      async () =>
+        (await serverRecord(request, canvasId)).node(PDF)?.data.properties,
+    )
+    .toEqual({ venue: 'NeurIPS', year: '2026' });
+  await expect
+    .poll(async () => (await storeState(a.page)).nodes[PDF].properties)
+    .toEqual({ venue: 'NeurIPS', year: '2026' });
+
+  await expect(b.page.getByText(SAVE_FAILED)).toHaveCount(0);
+  await expect(b.page.getByText('was changed elsewhere')).toHaveCount(0);
+  expect(refusedSaves(b, PDF)).toEqual([]);
+  expect(refusedSaves(a, PDF)).toEqual([]);
+  const state = await storeState(b.page);
+  expect(state.pendingContent).toEqual([]);
+  expect(state.reloaded).toBe(false);
+
+  await a.context.close();
+  await b.context.close();
+});
+
+test("a note body an agent wrote through execute is edited on page B afterwards: B's save is taken", async ({
+  browser,
+  request,
+}) => {
+  const { canvasId, a, b } = await openBoth(browser, request, 'Note agent');
+
+  await agentWrites(request, canvasId, NOTE, { content: 'Agent body' });
+  for (const device of [a, b]) {
+    await expect
+      .poll(async () =>
+        (await storeState(device.page)).nodes[NOTE].content?.trim(),
+      )
+      .toBe('Agent body');
+  }
+  // Let preprocessing of the agent's write settle on both pages.
+  await b.page.waitForTimeout(2_000);
+  await expect.poll(async () => (await storeState(b.page)).unsaved).toBe(false);
+  b.conflicts.length = 0;
+
+  // B then edits the body the agent wrote.
+  await openPreview(b.page, NOTE);
+  const editor = panel(b.page, NOTE).locator(
+    '.ProseMirror[contenteditable="true"]',
+  );
+  await expect(editor).toContainText('Agent body');
+  await editor.fill('Agent body, continued on B');
+  await expect
+    .poll(async () =>
+      (await serverRecord(request, canvasId)).node(NOTE)?.data.content?.trim(),
+    )
+    .toBe('Agent body, continued on B');
+  await blur(b.page);
+  await expect
+    .poll(async () => (await storeState(a.page)).nodes[NOTE].content?.trim())
+    .toBe('Agent body, continued on B');
+
+  await expect(b.page.getByText('was changed elsewhere')).toHaveCount(0);
+  expect(refusedSaves(b, NOTE)).toEqual([]);
+  await expect
+    .poll(async () => (await storeState(b.page)).pendingContent)
+    .toEqual([]);
+  expect((await storeState(b.page)).reloaded).toBe(false);
+
+  await a.context.close();
+  await b.context.close();
+});

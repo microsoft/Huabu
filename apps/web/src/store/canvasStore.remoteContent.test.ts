@@ -39,6 +39,7 @@ import useCanvasStore, {
   resetCanvasSyncForTests,
 } from './canvasStore';
 import { CANVAS_PAGE_ID } from './canvasStore/sync/pageId';
+import { contentRevisionsOf } from './canvasStore/sync/testing/contentRevisions';
 import { createFakeSpaceServer } from './canvasStore/sync/testing/fakeExecuteServer';
 
 import type * as apiModule from '../api';
@@ -521,7 +522,13 @@ describe("an agent's write to a PDF's properties and cover", () => {
       } as never,
       undefined,
       undefined,
-      { source: 'agent' },
+      {
+        source: 'agent',
+        // The server names the revision of what it stored for the PDF.
+        nodeContentRevisions: contentRevisionsOf([
+          { type: 'REPLACE_NODE', prev: stored, next: written },
+        ] as never),
+      },
     );
     expect(node(PDF).data).toMatchObject({
       coverUrl: 'cover.png',
@@ -572,6 +579,172 @@ describe("an agent's write to a PDF's properties and cover", () => {
       year: 2026,
       tags: ['physics'],
     });
+  });
+});
+
+describe("the revision an update brings for a node's content", () => {
+  const noEffects = {
+    mutatedNodes: [],
+    deletedNodeIds: [],
+    contentEditedNodeIds: [],
+    deferredFitFrameIds: [],
+  } as never;
+  /** A revision no hash of the node in the update would give. */
+  const STORED = 'stored-by-the-server';
+  /** An agent's `update` that rewrites the body of `id`. */
+  function agentWrites(
+    id: string,
+    content: string,
+    nodeContentRevisions?: Record<string, string>,
+  ) {
+    const prev = {
+      ...node(id),
+      data: { ...node(id).data, content: `Body ${id}` },
+    };
+    const next = { ...prev, data: { ...prev.data, content } };
+    return state().applyDeltasFromAgent(
+      [{ type: 'REPLACE_NODE', prev, next }] as never,
+      state().version + 1,
+      noEffects,
+      undefined,
+      undefined,
+      {
+        source: 'agent',
+        ...(nodeContentRevisions ? { nodeContentRevisions } : {}),
+      },
+    );
+  }
+  /** The server accepts a save only on the revision it holds. */
+  function serverHolds(rev: string) {
+    api.putNodeContent.mockImplementation(
+      async (
+        _canvasId: string,
+        nodeId: string,
+        body: { expectRev?: string },
+      ) => {
+        if (body.expectRev !== rev)
+          throw new CanvasConflictError({
+            code: 'NODE_CONTENT_CONFLICT',
+            message: 'changed elsewhere',
+            nodeId,
+            currentRev: rev,
+          });
+        return { nodeId, label: null, rev: `${rev}+1` };
+      },
+    );
+  }
+  const conflictToasts = () =>
+    vi
+      .mocked(toast)
+      .mock.calls.filter(
+        ([, options]) => options?.secondaryAction?.label === 'Keep mine',
+      );
+
+  beforeEach(async () => {
+    // The page shows what the server holds for X.
+    api.getNodeContent.mockResolvedValue(
+      savedOnServer(`Body ${X}`, `Label ${X}`),
+    );
+    // The content queue outlives a test: forget what earlier ones left
+    // unsaved for these nodes, the way a deletion does.
+    const { nodes } = state();
+    useCanvasStore.setState({ nodes: [], isLoading: false });
+    await vi.advanceTimersByTimeAsync(10_000);
+    state()._setStateNoAutosave({ nodes });
+    vi.clearAllMocks();
+    api.postCanvasExecute.mockImplementation(() => new Promise(() => {}));
+    expect(state().pendingContentNodeIds()).toEqual([]);
+    await adoptRemoteNodeContent(SPACE, [X]);
+    api.getNodeContent.mockClear();
+    api.getNodeContent.mockResolvedValue(null);
+  });
+
+  afterEach(async () => {
+    useCanvasStore.setState({ nodes: [], isLoading: false });
+    await vi.advanceTimersByTimeAsync(10_000);
+  });
+
+  it('becomes the baseline of the next save, although the node in the update hashes differently', async () => {
+    serverHolds(STORED);
+    expect(agentWrites(X, 'Agent text', { [X]: STORED })).toEqual([]);
+    expect(node(X).data.content).toBe('Agent text');
+    expect(STORED).not.toBe(nodeRevisionOf({ content: 'Agent text' }));
+    // Nothing is fetched: the update said what the server stored.
+    expect(api.getNodeContent).not.toHaveBeenCalled();
+
+    state().updateNodeData(X, { content: 'Agent text, edited' });
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    expect(api.putNodeContent).toHaveBeenCalledTimes(1);
+    expect(api.putNodeContent.mock.calls[0][2]).toMatchObject({
+      content: 'Agent text, edited',
+      expectRev: STORED,
+    });
+    expect(conflictToasts()).toHaveLength(0);
+    expect(state().pendingContentNodeIds()).toEqual([]);
+  });
+
+  it('moves the baseline of a body being typed without touching the text, and the save is accepted', async () => {
+    serverHolds(STORED);
+    state().updateNodeData(X, { content: 'Typing' });
+
+    expect(agentWrites(X, 'Agent text', { [X]: STORED })).toEqual([X]);
+    expect(node(X).data.content).toBe('Typing');
+    expect(api.getNodeContent).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(api.putNodeContent).toHaveBeenCalledTimes(1);
+    expect(api.putNodeContent.mock.calls[0][2]).toMatchObject({
+      content: 'Typing',
+      expectRev: STORED,
+    });
+    expect(conflictToasts()).toHaveLength(0);
+    expect(state().pendingContentNodeIds()).toEqual([]);
+  });
+
+  it('is not replaced by a hash when the update names none: the node is fetched and takes the fetched revision', async () => {
+    serverHolds(STORED);
+    api.getNodeContent.mockResolvedValue({
+      nodeId: X,
+      type: 'note',
+      label: `Label ${X}`,
+      content: 'Agent text',
+      rev: STORED,
+    });
+
+    expect(agentWrites(X, 'Agent text')).toEqual([]);
+    expect(node(X).data.content).toBe('Agent text');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(api.getNodeContent).toHaveBeenCalledExactlyOnceWith(SPACE, X);
+
+    state().updateNodeData(X, { content: 'Agent text, edited' });
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(api.putNodeContent).toHaveBeenCalledTimes(1);
+    expect(api.putNodeContent.mock.calls[0][2]).toMatchObject({
+      content: 'Agent text, edited',
+      expectRev: STORED,
+    });
+    expect(conflictToasts()).toHaveLength(0);
+  });
+
+  it("leaves the baseline of a body being typed alone when the update names none, so the refused save is the user's to answer", async () => {
+    serverHolds(STORED);
+    state().updateNodeData(X, { content: 'Typing' });
+
+    expect(agentWrites(X, 'Agent text')).toEqual([X]);
+    expect(node(X).data.content).toBe('Typing');
+    // A node with unsaved text is not fetched over.
+    expect(api.getNodeContent).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(10_000);
+    // The save quoted the revision the page had, not one it computed.
+    expect(api.putNodeContent.mock.calls[0][2]).toMatchObject({
+      content: 'Typing',
+      expectRev: nodeRevisionOf({ content: `Body ${X}` }),
+    });
+    // The server's body differs from the typed one: the user is asked.
+    expect(node(X).data.content).toBe('Typing');
+    expect(conflictToasts()).toHaveLength(1);
   });
 });
 
@@ -661,13 +834,16 @@ describe('a node frozen by a content conflict the user has not answered', () => 
   /** An `update` from the stream that replaces `prev` with `next`. */
   function deliver(prev: Node, next: Node, source: 'ui' | 'agent') {
     const { version } = state();
+    const deltas = [{ type: 'REPLACE_NODE', prev, next }] as never;
+    // The server names the stored revision of a node whose content changed.
+    const nodeContentRevisions = contentRevisionsOf(deltas);
     return state().applyDeltasFromAgent(
-      [{ type: 'REPLACE_NODE', prev, next }] as never,
+      deltas,
       version + 1,
       noEffects,
       undefined,
       undefined,
-      { source },
+      { source, ...(nodeContentRevisions ? { nodeContentRevisions } : {}) },
     );
   }
   /** Whether the page would still refuse to save Y on its own. */
@@ -820,6 +996,64 @@ describe('a node frozen by a content conflict the user has not answered', () => 
     expect(api.putNodeContent.mock.calls.at(-1)?.[2]).toMatchObject({
       content: 'Mine!',
       expectRev: nodeRevisionOf({ content: 'mine' }),
+    });
+  });
+
+  it('lets Keep mine overwrite the revision the update names, not a hash of the node it carries', async () => {
+    const server = { ...node(Y), data: { ...node(Y).data, content: 'Theirs' } };
+    const next = { ...server, data: { ...server.data, content: 'Agent' } };
+    api.getNodeContent.mockClear();
+    const skipped = state().applyDeltasFromAgent(
+      [{ type: 'REPLACE_NODE', prev: server, next }] as never,
+      state().version + 1,
+      noEffects,
+      undefined,
+      undefined,
+      { source: 'agent', nodeContentRevisions: { [Y]: 'stored-agent-rev' } },
+    );
+    expect(skipped).toEqual([Y]);
+    expect(dismissToast).not.toHaveBeenCalled();
+    expect(await staysFrozen()).toBe(true);
+    // Nothing is fetched: the update said what the server stored.
+    expect(api.getNodeContent).not.toHaveBeenCalled();
+
+    conflictToast()[0][1]?.secondaryAction?.onClick();
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(api.putNodeContent.mock.calls.at(-1)?.[2]).toMatchObject({
+      content: 'Mine!',
+      expectRev: 'stored-agent-rev',
+    });
+  });
+
+  it('asks the server what it holds when an update for it names no revision', async () => {
+    api.getNodeContent.mockClear();
+    api.getNodeContent.mockResolvedValue({
+      ...savedOnServer('Agent', `Label ${Y}`),
+      nodeId: Y,
+      rev: 'fetched-agent-rev',
+    });
+    const server = { ...node(Y), data: { ...node(Y).data, content: 'Theirs' } };
+    const next = { ...server, data: { ...server.data, content: 'Agent' } };
+    const skipped = state().applyDeltasFromAgent(
+      [{ type: 'REPLACE_NODE', prev: server, next }] as never,
+      state().version + 1,
+      noEffects,
+      undefined,
+      undefined,
+      { source: 'agent' },
+    );
+    expect(skipped).toEqual([Y]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(api.getNodeContent).toHaveBeenCalledExactlyOnceWith(SPACE, Y);
+    // The fetched body is not the user's: still theirs to answer.
+    expect(dismissToast).not.toHaveBeenCalled();
+    expect(await staysFrozen()).toBe(true);
+
+    conflictToast()[0][1]?.secondaryAction?.onClick();
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(api.putNodeContent.mock.calls.at(-1)?.[2]).toMatchObject({
+      content: 'Mine!',
+      expectRev: 'fetched-agent-rev',
     });
   });
 

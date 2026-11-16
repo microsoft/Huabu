@@ -537,7 +537,12 @@ describe('nodeContentQueue baseline lifecycle', () => {
     expect(queue.pendingNodeIds()).toEqual(['n1']);
 
     // An update carried newer server content for the node.
-    expect(queue.rebaseConflict(noteNode('newer on the server'))).toBe(true);
+    expect(
+      queue.rebaseConflict(
+        'n1',
+        nodeRevisionOf({ content: 'newer on the server' }),
+      ),
+    ).toBe(true);
     await queue.flushNow('c1', 'n1');
     expect(putMock).toHaveBeenCalledTimes(1);
 
@@ -554,7 +559,7 @@ describe('nodeContentQueue baseline lifecycle', () => {
     await queue.waitForIdle();
     expect(queue.pendingNodeIds()).toEqual([]);
     // A node that is not frozen is not this method's business.
-    expect(queue.rebaseConflict(noteNode('anything'))).toBe(false);
+    expect(queue.rebaseConflict('n1', 'anything')).toBe(false);
   });
 
   it.each([false, true])(

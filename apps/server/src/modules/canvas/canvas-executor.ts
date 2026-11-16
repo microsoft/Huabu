@@ -29,6 +29,8 @@
  *     fine-grained `SET_*` deltas.
  */
 
+import { isDeepStrictEqual } from 'node:util';
+
 import { imageSize } from 'image-size';
 
 import {
@@ -60,6 +62,7 @@ import {
   pdfNoteId,
   replayChangedData,
   nodeRevision,
+  nodeRevisionOf,
   preserveAgentNodeOwnedData,
   projectAgentNodeEditableData,
   replayAgentNodeEditableData,
@@ -372,6 +375,111 @@ function buildNodeContent(node: CanvasNode): NodeContent | null {
     out['labelSource'] = labelSource;
   }
   return out;
+}
+
+/** Sidecar fields compared as they travel: by value, `undefined` as absent. */
+function sameSidecarValue(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (a === undefined || b === undefined) return false;
+  if (typeof a !== 'object' || typeof b !== 'object') return false;
+  const plain = (value: unknown): unknown =>
+    JSON.parse(JSON.stringify(value)) as unknown;
+  return isDeepStrictEqual(plain(a), plain(b));
+}
+
+/**
+ * Ids of the sidecar-backed nodes whose saved content `deltas` created or
+ * changed: every inserted node, and every replaced node with a different
+ * {@link NODE_CONTENT_KEYS} field. A page decides the same from the same
+ * rows, so each node whose save baseline it has to move is named here.
+ */
+export function contentChangedNodeIds(deltas: readonly Delta[]): string[] {
+  const ids = new Set<string>();
+  for (const delta of deltas) {
+    if (delta.type === 'INSERT_NODE') {
+      if (MD_BACKED_NODE_TYPES.has(delta.node.type ?? ''))
+        ids.add(delta.node.id);
+    } else if (delta.type === 'REPLACE_NODE') {
+      if (!MD_BACKED_NODE_TYPES.has(delta.next.type ?? '')) continue;
+      const before = (delta.prev.data ?? {}) as Record<string, unknown>;
+      const after = (delta.next.data ?? {}) as Record<string, unknown>;
+      if (
+        [...NODE_CONTENT_KEYS].some(
+          (key) => !sameSidecarValue(before[key], after[key]),
+        )
+      )
+        ids.add(delta.next.id);
+    }
+  }
+  return [...ids];
+}
+
+/**
+ * Content revisions of `nodeIds` as the records handed to storage give
+ * them: the record this batch puts, or else the one read before it. Known
+ * before the commit, so it is what a stored result record carries.
+ */
+function plannedContentRevisions(
+  nodeIds: readonly string[],
+  nodeMutations: readonly SpaceNodeMutation[],
+  before: ReadonlyMap<string, NodeSnapshot>,
+): Record<string, string> | undefined {
+  if (nodeIds.length === 0) return undefined;
+  const written = new Map<string, NodeContent | null>();
+  for (const mutation of nodeMutations) {
+    written.set(
+      mutation.nodeId,
+      mutation.kind === 'put' ? mutation.record : null,
+    );
+  }
+  const revisions: Record<string, string> = {};
+  for (const nodeId of nodeIds) {
+    const record = written.has(nodeId)
+      ? written.get(nodeId)
+      : before.get(nodeId)?.record;
+    revisions[nodeId] = nodeRevisionOf(record ?? {});
+  }
+  return revisions;
+}
+
+/**
+ * Content revisions of `nodeIds` as stored: one read of exactly those
+ * records after the commit, hashed the way a load hashes them
+ * (`nodeContentRevisions` of `GET /api/canvas/:id`). The caller holds the
+ * Space's write mutex, so what is read is what this batch left.
+ *
+ * `planned` stands in when the read fails — the batch is committed and must
+ * not fail for it — and a difference from it is logged: it would mean the
+ * backend does not store a revision-covered field as it was given.
+ */
+async function storedContentRevisions(
+  handle: SpaceHandle,
+  canvasId: string,
+  nodeIds: readonly string[],
+  planned?: Record<string, string>,
+): Promise<Record<string, string> | undefined> {
+  if (nodeIds.length === 0) return undefined;
+  let stored: Map<string, NodeSnapshot>;
+  try {
+    stored = await handle.nodes.readMany(nodeIds);
+  } catch (error) {
+    log.warn(
+      { canvasId, error },
+      'Could not read back content revisions after a committed batch',
+    );
+    return planned;
+  }
+  const revisions: Record<string, string> = {};
+  for (const nodeId of nodeIds) {
+    revisions[nodeId] = nodeRevisionOf(stored.get(nodeId)?.record ?? {});
+    if (planned && planned[nodeId] !== revisions[nodeId]) {
+      log.warn(
+        { canvasId, nodeId },
+        'Stored content revision differs from the record handed to storage',
+      );
+    }
+  }
+  return revisions;
 }
 
 /**
@@ -793,6 +901,13 @@ export interface ExecuteOnServerOutput {
    * cannot express order; clients replay these after them.
    */
   orderEvents?: SetSiblingOrderEvent[];
+  /**
+   * Stored content revision of every node whose saved content this batch
+   * created or changed ({@link contentChangedNodeIds}), read back after the
+   * commit. A response answered from a result record carries the revisions
+   * of the records that commit handed to storage.
+   */
+  nodeContentRevisions?: Record<string, string>;
   /** Read version of the state this call left behind (`issueBasis`). */
   basis?: string;
   /** The request id this response is stored under, when one was supplied. */
@@ -1046,6 +1161,9 @@ export function publishCanvasExecution(output: ExecuteOnServerOutput): void {
       deltas: output.deltas,
       pendingEffects: output.pendingEffects,
       ...(output.orderEvents ? { orderEvents: output.orderEvents } : {}),
+      ...(output.nodeContentRevisions
+        ? { nodeContentRevisions: output.nodeContentRevisions }
+        : {}),
       ...(output.operationId ? { operationId: output.operationId } : {}),
     },
   });
@@ -1221,17 +1339,19 @@ async function executeLocked(
     const confirmedCanvas = await handle.read();
     if (!confirmedCanvas) throw new CanvasNotFoundError(canvasId);
     const promoted = confirmedCanvas.version !== canvas.version;
+    const confirmedRecords = promoted ? await handle.nodes.list() : records;
     return await executePreparedOnServerAlreadyLocked(input, request, {
       handle,
       canvas: confirmedCanvas,
       commands,
       prestateNodes: promoted
         ? hydrateCanvasNodes(
-            await handle.nodes.list(),
+            confirmedRecords,
             confirmedCanvas.state.nodes as CanvasNode[],
           )
         : prestateNodes,
       prestateEdges: (confirmedCanvas.state.edges ?? []) as CanvasEdge[],
+      records: confirmedRecords,
     });
   } finally {
     releaseDrafts();
@@ -1247,6 +1367,8 @@ async function executePreparedOnServerAlreadyLocked(
     commands: CanvasCommand[];
     prestateNodes: CanvasNode[];
     prestateEdges: CanvasEdge[];
+    /** The stored node records `prestateNodes` was hydrated from. */
+    records: ReadonlyMap<string, NodeSnapshot>;
   },
 ): Promise<ExecuteOnServerOutput> {
   const { canvasId, originator, runId } = input;
@@ -1730,8 +1852,10 @@ async function executePreparedOnServerAlreadyLocked(
     }
     return extractCanvasChanges(deltas, { nodeLabelById: labelById });
   };
+  const contentNodeIds = contentChangedNodeIds(deltas);
   const outputWith = (
     changes: CanvasChangeRecord[] | undefined,
+    nodeContentRevisions: Record<string, string> | undefined,
   ): ExecuteOnServerOutput => ({
     canvasId,
     fromVersion,
@@ -1747,6 +1871,7 @@ async function executePreparedOnServerAlreadyLocked(
     },
     ...(changes ? { changes } : {}),
     ...(orderEvents.length > 0 ? { orderEvents } : {}),
+    ...(nodeContentRevisions ? { nodeContentRevisions } : {}),
     ...envelope(toVersion),
   });
 
@@ -1757,8 +1882,13 @@ async function executePreparedOnServerAlreadyLocked(
     originator.threadId && changes && changes.length > 0
       ? originator.threadId
       : undefined;
+  // The result record is part of the commit, so it cannot hold what is read
+  // back after it: it carries the revisions of the records handed to storage.
+  const plannedRevisions = request
+    ? plannedContentRevisions(contentNodeIds, nodeMutations, prepared.records)
+    : undefined;
   const result = request
-    ? saveResultFor(canvasId, request, outputWith(changes))
+    ? saveResultFor(canvasId, request, outputWith(changes, plannedRevisions))
     : null;
 
   // What this batch creates or re-parents is the page's own change only when
@@ -1815,6 +1945,12 @@ async function executePreparedOnServerAlreadyLocked(
   // thread's coalesced change list (one net record per entity) by the write
   // itself; broadcast that full list so live cards replace their state with
   // it — matching what GET /changes returns.
+  const nodeContentRevisions = await storedContentRevisions(
+    handle,
+    canvasId,
+    contentNodeIds,
+    plannedRevisions,
+  );
   let broadcastChanges = changes;
   if (reviewThreadId) {
     broadcastChanges =
@@ -1837,6 +1973,7 @@ async function executePreparedOnServerAlreadyLocked(
           deferredFitFrameIds: pendingEffects.deferredFitFrameIds,
         },
         ...(orderEvents.length > 0 ? { orderEvents } : {}),
+        ...(nodeContentRevisions ? { nodeContentRevisions } : {}),
         ...(originator.threadId ? { threadId: originator.threadId } : {}),
         ...(broadcastChanges ? { changes: broadcastChanges } : {}),
         ...(request ? { operationId: request.key.operationId } : {}),
@@ -1845,7 +1982,7 @@ async function executePreparedOnServerAlreadyLocked(
     });
   }
 
-  return outputWith(changes);
+  return outputWith(changes, nodeContentRevisions);
 }
 
 /**
@@ -1876,6 +2013,8 @@ export async function applyDeltasOnServer(input: {
     contentEditedNodeIds: string[];
     deferredFitFrameIds: string[];
   };
+  /** As {@link ExecuteOnServerOutput.nodeContentRevisions}; publish it with the deltas. */
+  nodeContentRevisions?: Record<string, string>;
 }> {
   const { canvasId } = input;
 
@@ -1915,6 +2054,8 @@ export async function applyDeltasOnServerAlreadyLocked(input: {
     contentEditedNodeIds: string[];
     deferredFitFrameIds: string[];
   };
+  /** As {@link ExecuteOnServerOutput.nodeContentRevisions}; publish it with the deltas. */
+  nodeContentRevisions?: Record<string, string>;
 }> {
   const { canvasId, originator, runId } = input;
 
@@ -2191,6 +2332,11 @@ export async function applyDeltasOnServerAlreadyLocked(input: {
       );
     }
 
+    const nodeContentRevisions = await storedContentRevisions(
+      handle,
+      canvasId,
+      contentChangedNodeIds(deltas),
+    );
     return {
       canvasId,
       fromVersion,
@@ -2202,6 +2348,7 @@ export async function applyDeltasOnServerAlreadyLocked(input: {
         contentEditedNodeIds,
         deferredFitFrameIds: [],
       },
+      ...(nodeContentRevisions ? { nodeContentRevisions } : {}),
     };
   } finally {
     releaseDrafts();

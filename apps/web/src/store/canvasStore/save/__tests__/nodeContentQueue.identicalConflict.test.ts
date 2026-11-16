@@ -255,11 +255,21 @@ describe('a node frozen by a conflict', () => {
         ...state.nodes[0],
         data: { ...state.nodes[0].data, content },
       }) as Node;
-    expect(queue.settleConflictIfIdentical(remote('Mine.'))).toBe(false);
+    expect(
+      queue.settleConflictIfIdentical(
+        remote('Mine.'),
+        nodeRevisionOf({ content: 'Mine.' }),
+      ),
+    ).toBe(false);
     expect(queue.pendingNodeIds()).toEqual(['n1']);
     expect(dismissMock).not.toHaveBeenCalled();
 
-    expect(queue.settleConflictIfIdentical(remote('Mine'))).toBe(true);
+    expect(
+      queue.settleConflictIfIdentical(
+        remote('Mine'),
+        nodeRevisionOf({ content: 'Mine' }),
+      ),
+    ).toBe(true);
     expect(dismissMock).toHaveBeenCalledWith('conflict-toast');
     expect(queue.pendingNodeIds()).toEqual([]);
     expect(toastMock).toHaveBeenCalledTimes(1);

@@ -105,6 +105,9 @@ export async function projectAgentNodeStateAlreadyLocked(
         toVersion: output.toVersion,
         deltas: output.deltas,
         pendingEffects: output.pendingEffects,
+        ...(output.nodeContentRevisions
+          ? { nodeContentRevisions: output.nodeContentRevisions }
+          : {}),
         agentNodeProjection: true,
       },
     });

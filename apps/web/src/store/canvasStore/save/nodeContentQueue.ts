@@ -371,24 +371,26 @@ export type NodeContentQueue = {
   ): void;
 
   /**
-   * An update carried the server's new content for `node` while this page
+   * An update carried the server's new content for `nodeId` while this page
    * kept its own unsaved content. When the node is frozen by a content
    * conflict the user has not answered, the conflict stays theirs to answer:
    * the node stays frozen with its toast, and only the revision **Keep
-   * mine** would overwrite moves on to the server's new one. Returns whether
-   * the node is frozen; a node that is not is left to {@link seedBaselines}.
+   * mine** would overwrite moves on to `rev`, the revision the server stored
+   * with that update. Without one nothing moves. Returns whether the node is
+   * frozen; a node that is not is left to {@link seedBaselines}.
    */
-  rebaseConflict(node: Node): boolean;
+  rebaseConflict(nodeId: string, rev: string | undefined): boolean;
 
   /**
    * An update carried the server's content for `node` while it is frozen by
-   * a content conflict. When that content is exactly what this page shows,
-   * there is nothing left to choose between: the conflict and its toast are
-   * dismissed without a word, the server's revision becomes the baseline,
-   * and the text and caret stay as they are. Returns whether that happened;
-   * `false` leaves the node frozen (see {@link rebaseConflict}).
+   * a content conflict, stored under revision `rev`. When this page's own
+   * content has that revision there is nothing left to choose between: the
+   * conflict and its toast are dismissed without a word, `rev` becomes the
+   * baseline, and the text and caret stay as they are. Returns whether that
+   * happened; `false` leaves the node frozen (see {@link rebaseConflict}),
+   * as does an update that brought no revision.
    */
-  settleConflictIfIdentical(node: Node): boolean;
+  settleConflictIfIdentical(node: Node, rev: string | undefined): boolean;
 
   /**
    * Another page saved `nodeId`'s sidecar: fetch it and show it, together
@@ -1994,17 +1996,18 @@ export function createNodeContentQueue(opts: {
       }
     },
 
-    rebaseConflict(node) {
-      if (!frozen.has(node.id)) return false;
-      frozen.set(node.id, revOfNode(node));
+    rebaseConflict(nodeId, rev) {
+      if (!frozen.has(nodeId)) return false;
+      if (rev !== undefined) frozen.set(nodeId, rev);
       return true;
     },
 
-    settleConflictIfIdentical(node) {
+    settleConflictIfIdentical(node, rev) {
+      if (rev === undefined) return false;
       if (!frozen.has(node.id) || inflight.has(node.id)) return false;
       const state = opts.getState();
       const local = state.nodes.find((n) => n.id === node.id);
-      const rev = revOfNode(node);
+      // This page's own content, hashed, against the server's revision.
       if (!local || revOfNode(local) !== rev) return false;
       settleIdenticalConflict(
         state.canvasId,
