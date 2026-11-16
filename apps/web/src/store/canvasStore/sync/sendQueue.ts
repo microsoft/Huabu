@@ -30,6 +30,8 @@
  * them out of what they tell or ask the user.
  */
 
+import { createUuid } from '@huabu/shared';
+
 import { ApiError } from '@/api/_client';
 
 import type {
@@ -260,7 +262,8 @@ export function createSendQueue(options: SendQueueOptions): SendQueue {
   const retry = options.retry ?? DEFAULT_SEND_RETRY;
   // Read through `Date` at call time, so a replaced clock is honoured.
   const now = options.now ?? (() => Date.now());
-  const createId = options.createId ?? (() => crypto.randomUUID());
+  // Not `crypto.randomUUID`: it is missing outside a secure context.
+  const createId = options.createId ?? createUuid;
   const maxBatch = options.maxBatchCommands ?? 200;
   const lanes = new Map<string, Lane>();
   const listeners = new Set<(status: SendQueueStatus) => void>();

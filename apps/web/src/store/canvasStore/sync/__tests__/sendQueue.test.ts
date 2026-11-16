@@ -93,6 +93,32 @@ afterEach(() => {
 });
 
 describe('send queue', () => {
+  it('mints request ids where `crypto.randomUUID` does not exist (a page served over plain HTTP)', () => {
+    const original = Object.getOwnPropertyDescriptor(crypto, 'randomUUID');
+    Object.defineProperty(crypto, 'randomUUID', {
+      value: undefined,
+      configurable: true,
+    });
+    try {
+      const requests: PostCanvasExecuteRequest[] = [];
+      const queue = createSendQueue({
+        clientId: 'page-a',
+        send: (_canvasId, request) => {
+          requests.push(request);
+          return new Promise(() => {});
+        },
+      });
+      queue.enqueue('space', [move(1)]);
+      expect(requests).toHaveLength(1);
+      expect(requests[0].operationId).toMatch(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+      );
+    } finally {
+      if (original) Object.defineProperty(crypto, 'randomUUID', original);
+      else Reflect.deleteProperty(crypto, 'randomUUID');
+    }
+  });
+
   it('sends one request at a time, in order, each with its own request id', async () => {
     const { queue, calls, settled, flush } = harness();
     queue.enqueue('space', [move(1)]);
