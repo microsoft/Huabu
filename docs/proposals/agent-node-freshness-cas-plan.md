@@ -382,9 +382,16 @@ into the one writer.
      a per-node baseline map, seeded on `loadCanvas` and on
      `applyDeltasFromAgent` (for the nodes a broadcast actually applied) and
      advanced to the server-returned `rev` after every successful write.
-     **Co-delivery invariant** — content and its baseline always update through
-     the same payload/store-write, so there is no window where they diverge and
-     a false conflict becomes structurally impossible. On `NODE_CONTENT_CONFLICT`
+     **Co-delivery** — content and its baseline are meant to update through
+     the same payload/store-write. This holds for a load and for a write's own
+     response, which carry the server's revision. It does not hold by
+     construction for a broadcast `update`: the event carries no revision, so
+     the page computes one from the server's copy of the node in the batch, and
+     that is only right when the copy is exactly what is stored (a PDF's
+     extracted text is not sent, an Office body is normalized). False conflicts
+     from this path have occurred and were fixed case by case; see
+     [canvas-realtime-sync.md](../architecture/canvas-realtime-sync.md) for the
+     current rule. On `NODE_CONTENT_CONFLICT`
      the queue keeps the user's text, stops writing (never clobbers the newer
      server content), and shows a one-per-node persistent "reload" toast.
    - **Note**: `nodeRevision` covers authored `content` / `src` only, so this
