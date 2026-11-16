@@ -491,6 +491,24 @@ describe('PUT /nodes/:nodeId/content — content CAS', () => {
         ],
       });
       expect(afterReorder.nodeContentRevisions?.pdf).toBe(reordered.json().rev);
+      // After an agent write the web re-derives its baseline from the node it
+      // holds, which has no body. That revision still names this version.
+      const visible = (afterReorder.state as { nodes: Array<{ data: object }> })
+        .nodes[0].data;
+      const derived = nodeRevisionOf({ ...visible, type: 'pdf' });
+      expect(derived).not.toBe(reordered.json().rev);
+      const fromDerived = await putContent(app, 'c1', 'pdf', {
+        nodeType: 'pdf',
+        properties: { Status: 'Done' },
+        expectRev: derived,
+      });
+      expect(fromDerived.statusCode).toBe(200);
+      const staleDerived = await putContent(app, 'c1', 'pdf', {
+        nodeType: 'pdf',
+        properties: { Status: 'Stale' },
+        expectRev: derived,
+      });
+      expect(staleDerived.statusCode).toBe(409);
       const staleEdit = await putContent(app, 'c1', 'pdf', {
         nodeType: 'pdf',
         properties: { Status: 'Stale' },

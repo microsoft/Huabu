@@ -84,3 +84,61 @@ test('tags are picked with the pointer and corrected in place', async ({
       .locator('[data-property-tag]'),
   ).toHaveText(['canvases', 'widget', 'agents']);
 });
+
+test('a tag removed from a PDF an agent wrote saves without a conflict', async ({
+  page,
+}) => {
+  await openNewCanvas(page);
+  await page.keyboard.press('Escape');
+  const canvasId = page.url().split('/canvas/')[1]?.split(/[?#]/)[0];
+  // The agent write makes the web re-derive its save baseline from the node
+  // it holds, and a PDF's extracted body is never sent to it.
+  const response = await page.request.post(`/api/canvas/${canvasId}/execute`, {
+    data: {
+      commands: [
+        {
+          type: 'CREATE_NODES',
+          nodes: [
+            {
+              id: 'node-tags-pdf',
+              nodeType: 'pdf',
+              data: {
+                label: 'Paper',
+                src: 'https://example.test/paper.pdf',
+                properties: { keywords: ['canvas', 'widget'] },
+              },
+              position: { x: 100, y: 100 },
+              size: { width: 300, height: 300 },
+            },
+          ],
+        },
+      ],
+      originator: { source: 'agent', threadId: 'e2e-property-tags' },
+    },
+  });
+  expect(response.ok(), await response.text()).toBe(true);
+  await expect(page.locator('.react-flow__node-pdf')).toHaveCount(1);
+  await page.evaluate(async () => {
+    const previewPath = '/src/store/previewWorkspace/actions.ts';
+    const { openPreviewNode } = (await import(
+      previewPath
+    )) as typeof PreviewActions;
+    openPreviewNode('node-tags-pdf');
+  });
+
+  const row = page.getByRole('button', { name: 'Edit keywords' });
+  for (const [removed, left] of [
+    ['canvas', ['widget']],
+    ['widget', []],
+  ] as const) {
+    await row.click();
+    await page.getByRole('button', { name: `Remove ${removed}` }).click();
+    const saved = page.waitForResponse(
+      (candidate) => candidate.request().method() === 'PUT',
+    );
+    await page.getByRole('combobox', { name: 'Value' }).press('Enter');
+    expect((await saved).status()).toBe(200);
+    await expect(row.locator('[data-property-tag]')).toHaveText([...left]);
+  }
+  await expect(page.getByText('was changed elsewhere')).toHaveCount(0);
+});

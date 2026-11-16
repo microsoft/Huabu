@@ -1023,6 +1023,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
           propertyDisplayKeys !== undefined
             ? expectRev
             : undefined,
+        derivedBody: !isAuthored,
         apply,
         strictRename: labelSource === 'user',
       });
