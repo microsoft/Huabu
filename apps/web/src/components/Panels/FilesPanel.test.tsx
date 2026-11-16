@@ -189,6 +189,108 @@ it('discards late directory replies after the browsing target changes', async ()
   expect(host.textContent).not.toContain('file.txt');
 });
 
+it('groups folders first at every level without losing entries across pagination or changing cached order', async () => {
+  const entry = (
+    name: string,
+    kind: FileListResult['entries'][number]['kind'],
+    parent = '/root',
+  ) => ({ name, path: `${parent}/${name}`, kind });
+  const initial = [
+    entry('.hidden', 'file'),
+    entry('a.txt', 'file'),
+    entry('b-link', 'symlink'),
+    entry('c-special', 'other'),
+    entry('m-folder', 'directory'),
+    entry('n.txt', 'file'),
+  ];
+  const children = [
+    entry('a.txt', 'file', '/root/m-folder'),
+    entry('nested', 'directory', '/root/m-folder'),
+    entry('z.txt', 'file', '/root/m-folder'),
+  ];
+  const continuation = [
+    entry('n.txt', 'file'),
+    entry('y-folder', 'directory'),
+    entry('z.txt', 'file'),
+  ];
+  mocks.list
+    .mockResolvedValueOnce(page(initial, 'root-next'))
+    .mockResolvedValueOnce({
+      path: '/root/m-folder',
+      parentPath: '/root',
+      entries: children,
+    })
+    .mockResolvedValueOnce(page(continuation));
+  const visiblePaths = () =>
+    [...host.querySelectorAll('span[title]')].map((span) =>
+      span.getAttribute('title'),
+    );
+  await act(async () => root.render(<FilesPanel />));
+  expect(visiblePaths()).toEqual([
+    '/root/m-folder',
+    '/root/.hidden',
+    '/root/a.txt',
+    '/root/b-link',
+    '/root/c-special',
+    '/root/n.txt',
+  ]);
+  expect(mocks.list).toHaveBeenCalledOnce();
+  await click('m-folder');
+  expect(visiblePaths()).toEqual([
+    '/root/m-folder',
+    '/root/m-folder/nested',
+    '/root/m-folder/a.txt',
+    '/root/m-folder/z.txt',
+    '/root/.hidden',
+    '/root/a.txt',
+    '/root/b-link',
+    '/root/c-special',
+    '/root/n.txt',
+  ]);
+  expect(host.querySelector('[data-file-index="9"]')?.textContent).toBe(
+    'files.more',
+  );
+  await click('files.more');
+  expect(mocks.list.mock.calls.at(-1)?.[1]).toEqual({
+    path: '/root',
+    showHidden: false,
+    cursor: 'root-next',
+  });
+  expect(visiblePaths()).toEqual([
+    '/root/m-folder',
+    '/root/m-folder/nested',
+    '/root/m-folder/a.txt',
+    '/root/m-folder/z.txt',
+    '/root/y-folder',
+    '/root/.hidden',
+    '/root/a.txt',
+    '/root/b-link',
+    '/root/c-special',
+    '/root/n.txt',
+    '/root/z.txt',
+  ]);
+  expect(host.textContent).not.toContain('files.more');
+  expect(initial.map(({ name }) => name)).toEqual([
+    '.hidden',
+    'a.txt',
+    'b-link',
+    'c-special',
+    'm-folder',
+    'n.txt',
+  ]);
+  expect(children.map(({ name }) => name)).toEqual([
+    'a.txt',
+    'nested',
+    'z.txt',
+  ]);
+  expect(continuation.map(({ name }) => name)).toEqual([
+    'n.txt',
+    'y-folder',
+    'z.txt',
+  ]);
+  expect(mocks.list).toHaveBeenCalledTimes(3);
+});
+
 function rowFor(name: string) {
   const row = [...host.querySelectorAll<HTMLElement>('[role="group"]')].find(
     (element) => element.getAttribute('aria-label') === name,

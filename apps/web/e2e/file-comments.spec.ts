@@ -56,17 +56,20 @@ test('Files opens visible references once and renders single-file Markdown witho
           result: {
             path: '/repo',
             parentPath: '/',
-            entries: Array.from({ length: 80 }, (_, index) => {
-              const name =
-                index === 0
-                  ? 'README.md'
-                  : `file-${String(index).padStart(3, '0')}-with-a-long-name.py`;
-              return {
-                name,
-                path: `/repo/${name}`,
-                kind: index === 78 ? 'symlink' : 'file',
-              };
-            }),
+            entries: [
+              ...Array.from({ length: 80 }, (_, index) => {
+                const name =
+                  index === 0
+                    ? 'README.md'
+                    : `file-${String(index).padStart(3, '0')}-with-a-long-name.py`;
+                return {
+                  name,
+                  path: `/repo/${name}`,
+                  kind: index === 78 ? 'symlink' : 'file',
+                };
+              }),
+              { name: 'z-folder', path: '/repo/z-folder', kind: 'directory' },
+            ],
           },
         },
       });
@@ -118,6 +121,8 @@ test('Files opens visible references once and renders single-file Markdown witho
     });
   });
   const files = page.getByRole('region', { name: 'Files', exact: true });
+  const folder = files.getByRole('button', { name: 'z-folder', exact: true });
+  await expect(files.locator('[data-file-index="0"]')).toHaveText('z-folder');
   const first = files.getByRole('button', {
     name: 'Open README.md (adds a reference if needed)',
     exact: true,
@@ -164,10 +169,14 @@ test('Files opens visible references once and renders single-file Markdown witho
     page.getByRole('textbox', { name: 'Read-only file source' }),
   ).toContainText('greeting');
   await last.press('Home');
+  await expect(folder).toBeFocused();
+  await folder.press('ArrowDown');
   await expect(first).toBeFocused();
   await first.press('End');
   await expect(last).toBeFocused();
   await last.press('Home');
+  await expect(folder).toBeFocused();
+  await folder.press('ArrowDown');
   await expect(first).toBeFocused();
   await first.press('Shift+F10');
   await page
