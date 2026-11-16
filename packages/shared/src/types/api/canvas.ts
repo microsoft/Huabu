@@ -57,6 +57,12 @@ export interface GetCanvasResponse {
    * (`GET /api/canvas/:canvasId/content/changes`).
    */
   contentPosition?: CanvasContentPosition;
+  /**
+   * The read version of the Space, taken before `state` was read. A page
+   * quotes it — with the version it has applied since — for the edits it
+   * sends (`runs` of `POST /api/canvas/:canvasId/execute`).
+   */
+  basis?: string;
 }
 
 export const deleteNodeParamsSchema =
@@ -358,6 +364,48 @@ export const executeOriginatorSchema = z.object({
 export type ExecuteOriginator = z.infer<typeof executeOriginatorSchema>;
 
 /**
+ * An earlier edit of the same page that a run was made on top of: a run of
+ * this request (no `operationId`) or of an earlier request of the page.
+ */
+export const canvasExecuteRunRefSchema = z
+  .object({
+    /** The earlier request's id; omitted for a run of this request. */
+    operationId: z.uuid().optional(),
+    start: z.number().int().min(0),
+    count: z.number().int().min(1),
+  })
+  .strict();
+export type CanvasExecuteRunRef = z.infer<typeof canvasExecuteRunRefSchema>;
+
+/** Most earlier edits one run may name. */
+export const CANVAS_EXECUTE_RUN_AFTER_MAX = 64;
+
+/**
+ * One edit within an execute batch — a run of consecutive commands — and the
+ * read version it was made on. Mirrors `ReadVersionRun` in the canvas engine.
+ */
+export const canvasExecuteRunSchema = z
+  .object({
+    /** Index of the edit's first command in `commands`. */
+    start: z.number().int().min(0),
+    /** How many consecutive commands belong to the edit. */
+    count: z.number().int().min(1),
+    /** The read version the page had when the edit was made. */
+    basis: z.string().min(1).max(128),
+    /**
+     * Edits of this page, not yet confirmed when this one was made, whose
+     * result it was made on top of. When one of them did not take effect
+     * this run is refused too.
+     */
+    after: z
+      .array(canvasExecuteRunRefSchema)
+      .max(CANVAS_EXECUTE_RUN_AFTER_MAX)
+      .optional(),
+  })
+  .strict();
+export type CanvasExecuteRun = z.infer<typeof canvasExecuteRunSchema>;
+
+/**
  * One edit within an execute batch — a run of consecutive commands — and the
  * parent each node it places had when the edit was made (`null` is the
  * canvas). Mirrors `ExpectedParents` in the canvas engine.
@@ -395,6 +443,14 @@ export const postCanvasExecuteBodySchema = z.object({
   operationId: z.uuid().optional(),
   /** Read version the batch was built on; stale structural edits are rejected. */
   basis: z.string().min(1).max(128).optional(),
+  /**
+   * For `ui` batches: the edits the commands form, each with the read
+   * version it was made on. An edit whose target was deleted or re-parented
+   * by someone else after that version is refused as a whole
+   * (`stale-target` / `stale-parent`). Commands outside every run are
+   * checked against `basis`, when that is given.
+   */
+  runs: z.array(canvasExecuteRunSchema).optional(),
   /**
    * For `ui` batches: the parents each edit's nodes had when the edit was
    * made. An edit whose node is under another parent by the time it runs is
@@ -474,7 +530,7 @@ export interface PostCanvasExecuteResponse {
   runId?: string;
   /** Echo of the request id, when one was supplied. */
   operationId?: string;
-  /** Read version after this request; returned when `operationId` or `basis` was supplied. */
+  /** Read version after this request; returned when `operationId`, `basis` or `runs` was supplied. */
   basis?: string;
   /** Present when this is the stored response of an earlier request. */
   replayed?: true;

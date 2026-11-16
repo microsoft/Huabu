@@ -78,7 +78,8 @@ export interface ExecutorOptions {
   /**
    * Host admission check, asked once per command immediately before its
    * handler, with the state that command would run against (the evolving
-   * state, so it already reflects earlier commands of the batch).
+   * state, so it already reflects earlier commands of the batch) and the
+   * results of the commands before it, in batch order.
    *
    * Returning a reason rejects that one command — it is recorded as not
    * applied with that reason and its handler never runs; the rest of the
@@ -88,6 +89,7 @@ export interface ExecutorOptions {
   admit?: (
     command: CanvasCommand,
     state: Pick<CanvasReadState, 'nodes' | 'edges'>,
+    results?: readonly CanvasCommandResult[],
   ) => CanvasCommandFailureReason | undefined;
 }
 
@@ -145,10 +147,11 @@ export function executeCanvasCommands(
   let anyApplied = false;
 
   for (const cmd of execution.commands) {
-    const refused = options.admit?.(cmd, {
-      nodes: currentNodes,
-      edges: currentEdges,
-    });
+    const refused = options.admit?.(
+      cmd,
+      { nodes: currentNodes, edges: currentEdges },
+      commandResults,
+    );
     if (refused !== undefined) {
       commandResults.push({ command: cmd, applied: false, reason: refused });
       continue;

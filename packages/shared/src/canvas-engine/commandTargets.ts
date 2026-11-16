@@ -9,7 +9,9 @@
  * - {@link collectCommandIds} — every node and edge id a command mentions,
  *   for reporting what a batch touched;
  * - {@link commandReadTargets} — the nodes a command *depends on having read*,
- *   for checking a write against the version its author had seen.
+ *   for checking a write against the version its author had seen. It is the
+ *   one list for every writer: an agent's batch and a browser page's edit
+ *   are checked over the same targets.
  */
 
 import type { CanvasCommand } from '../index.js';
@@ -128,12 +130,17 @@ function unique(ids: Iterable<string | null | undefined>): string[] {
  * - `SET_NODE_LOCKED`: every `items[].nodeId` (existence).
  * - `CHANGE_NODE_TYPE`: `nodeId` (existence).
  * - `DISSOLVE_FRAME`: `frameId` (existence).
- * - `SET_FRAME_LAYOUT`: `frameId`, every `cells[].nodeId`, and every
- *   `placements[]` `nodeId` / `before` / `after` (existence).
- * - `SET_NODE_PARENT`: `nodeIds` (existence + membership) and a non-null
- *   `parentId` (existence only — where the destination frame itself sits
- *   does not change what "put these inside it" means).
- * - `SET_NODE_GEOMETRY`: every `items[].nodeId` (existence + membership).
+ * - `SET_FRAME_LAYOUT`: `frameId` (existence only), every `cells[].nodeId`
+ *   and every `placements[]` `nodeId` / `before` / `after` (existence +
+ *   membership — a cell or a track place belongs to that one Frame).
+ * - `SET_NODE_PARENT`: `nodeIds` (existence + membership — they are moved
+ *   *from* the parent they had, and the position each ends at is converted
+ *   from it) and a non-null `parentId` (existence only — where the
+ *   destination frame itself sits does not change what "put these inside
+ *   it" means).
+ * - `SET_NODE_GEOMETRY`: every `items[].nodeId` (existence); the items that
+ *   carry a `position` also membership — a position is parent-local, a size
+ *   alone means the same in any container.
  * - `REORDER_NODES`: `nodeIds` and the `to.before` / `to.after` reference
  *   node (existence + membership — "before X" is a position among X's
  *   siblings, so it depends on X's parent as much as on the moved nodes').
@@ -177,7 +184,10 @@ export function commandReadTargets(command: CanvasCommand): CommandReadTargets {
         };
         ids.push(named.nodeId, named.before, named.after);
       }
-      return { existence: unique(ids), membership: [] };
+      return {
+        existence: unique(ids),
+        membership: unique(ids.slice(1)),
+      };
     }
     case 'SET_NODE_PARENT': {
       const membership = unique(command.nodeIds);
@@ -186,10 +196,13 @@ export function commandReadTargets(command: CanvasCommand): CommandReadTargets {
         membership,
       };
     }
-    case 'SET_NODE_GEOMETRY': {
-      const ids = unique(command.items.map((item) => item.nodeId));
-      return { existence: ids, membership: ids };
-    }
+    case 'SET_NODE_GEOMETRY':
+      return {
+        existence: unique(command.items.map((item) => item.nodeId)),
+        membership: unique(
+          command.items.map((item) => (item.position ? item.nodeId : null)),
+        ),
+      };
     case 'REORDER_NODES': {
       const reference =
         typeof command.to === 'object'

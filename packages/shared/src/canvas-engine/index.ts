@@ -59,6 +59,18 @@ export {
   expectedParentsProblem,
   type ExpectedParents,
 } from './expectedParents.js';
+export {
+  advanceNodeStamps,
+  createReadVersionAdmission,
+  isRefusedResult,
+  readVersionRunsProblem,
+  type NodeStamp,
+  type ReadStamps,
+  type ReadVersionAdmission,
+  type ReadVersionRun,
+  type ReadVersionRunRef,
+  type StampAuthor,
+} from './readVersion.js';
 export type {
   CanvasNode,
   CanvasEdge,
