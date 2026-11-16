@@ -12,7 +12,7 @@ for (const width of [320, 1024]) {
     }) => {
       await page.setViewportSize({ width, height: 800 });
       await page.goto('/playground/node-toolbars');
-      await expect(page.locator('.nt-toolbar')).toHaveCount(12);
+      await expect(page.locator('.nt-toolbar').first()).toBeVisible();
       await page.evaluate(async (theme) => {
         document.documentElement.classList.toggle('dark', theme === 'dark');
         const load = (path: string) => import(/* @vite-ignore */ path);

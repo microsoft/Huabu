@@ -4,6 +4,7 @@
 import { expect, test } from '@playwright/test';
 
 import { openNewCanvas } from './helpers';
+import { installStreams } from './stream-helpers';
 
 import type * as CanvasStore from '../src/store/canvasStore';
 import type * as ChatStore from '../src/store/chatStore';
@@ -38,7 +39,52 @@ test('Chat status overlays its icon, shares the tab tooltip and retains visible 
           },
         });
   });
+  await installStreams(page);
   await openNewCanvas(page);
+  // Conversation ownership is server-authoritative, and this question exists
+  // only in client state: answer for it, or the panel reports the Agent node
+  // as gone and never mounts the chat whose status this test is about.
+  const canvasId = page.url().split('/canvas/')[1]?.split(/[?#]/)[0];
+  const owner = {
+    canvasId,
+    nodeId: 'status-question',
+    threadId: 'status-thread',
+    spaceTitle: 'Untitled',
+    source: {
+      label: 'Status question',
+      labelSource: 'user',
+      threadId: 'status-thread',
+      status: 'done',
+      bindingState: 'bound',
+      hasAuthoredContent: true,
+      agentBinding: {
+        kind: 'external',
+        profileId: 'status-profile',
+        alias: 'Status Agent',
+      },
+    },
+  };
+  await page.route('**/api/agent/owner/status-thread/stream?**', (route) =>
+    route.fulfill({
+      headers: { 'x-test-stream': 'true' },
+      json: {
+        key: 'owner:status-thread',
+        events: [
+          {
+            type: 'snapshot',
+            data: {
+              streamId: 'test-state-stream',
+              revision: 1,
+              value: { state: 'ready', owner },
+            },
+          },
+        ],
+      },
+    }),
+  );
+  await page.route('**/api/agent/owner/status-thread?**', (route) =>
+    route.fulfill({ json: owner }),
+  );
   await page.evaluate(async () => {
     const canvasPath = '/src/store/canvasStore.ts';
     const chatPath = '/src/store/chatStore.ts';
@@ -90,9 +136,12 @@ test('Chat status overlays its icon, shares the tab tooltip and retains visible 
   await expect(panel.locator('[data-preview-active="true"] .h-9')).toHaveCount(
     0,
   );
+  // The banner above the conversation; the composer repeats the same error
+  // beside its own "Retry loading options".
   const alert = panel
     .getByRole('alert')
-    .filter({ hasText: 'Cache unavailable' });
+    .filter({ hasText: 'Cache unavailable' })
+    .filter({ hasText: 'Status Agent' });
   await expect(alert).toBeVisible();
   const initialReads = metadataReads;
   await tab.hover();
@@ -281,7 +330,7 @@ test('tab-owned titles retain content actions and durable rename without duplica
   ).toBeVisible();
 });
 
-test('Web and PDF summaries share their real content toolbar and do not move the document', async ({
+test('Web summaries open from the real content toolbar without moving the document; PDFs offer notes instead', async ({
   page,
 }) => {
   await page.route('https://preview.example.test/**', (route) =>
@@ -366,10 +415,18 @@ test('Web and PDF summaries share their real content toolbar and do not move the
   await expect(
     pdf.getByRole('button', { name: 'Select area to capture', exact: true }),
   ).toBeVisible();
+  // Highlighting is offered beside a text selection, not in the toolbar.
+  // PDFs generate no summaries or keywords, so a stored legacy summary has no
+  // action; the header leads with the PDF's notes instead.
+  const pdfHeader = pdf.getByTestId('expanded-node-header');
+  await expect(pdfHeader).toHaveCount(1);
   await expect(
-    pdf.getByRole('button', { name: 'Highlight Text', exact: true }),
+    pdfHeader.getByRole('button', { name: 'AI Summary', exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    pdfHeader.getByRole('button', { name: 'Add notes', exact: true }),
   ).toBeVisible();
-  for (const [index, name] of ['Web', 'PDF'].entries()) {
+  for (const [index, name] of ['Web'].entries()) {
     const panel = page.getByRole('tabpanel').nth(index);
     const header = panel.getByTestId('expanded-node-header');
     await expect(header).toHaveCount(1);

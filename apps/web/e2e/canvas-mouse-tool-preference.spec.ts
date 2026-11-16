@@ -10,12 +10,29 @@ import {
   touchTap,
 } from './helpers';
 
+import type * as ToolModule from '../src/store/toolStore';
+
 async function savedTool(page: Page) {
   return page.evaluate(
     () =>
       JSON.parse(localStorage.getItem('huabu-sketch-tools') ?? '{}').state
         ?.mouseToolPreference,
   );
+}
+
+// A sibling tab adopts a preference when its `storage` event is handled, not
+// when localStorage changes. Acting before that would write the stale value
+// back, which no person switching tabs can do.
+async function expectLiveTool(page: Page, tool: string) {
+  await expect
+    .poll(() =>
+      page.evaluate(async () => {
+        const path = '/src/store/toolStore.ts';
+        const { useToolStore } = (await import(path)) as typeof ToolModule;
+        return useToolStore.getState().mouseToolPreference;
+      }),
+    )
+    .toBe(tool);
 }
 
 async function expectTool(page: Page, tool: string) {
@@ -199,7 +216,20 @@ test('Question and child-Space completion restore Pan without writing Select', a
   await page.locator('[data-canvas-root]').focus();
   await page.keyboard.press('5');
   const center = await paneCenter(page);
-  await page.mouse.click(center.x + 300, center.y + 180);
+  const target = { x: center.x + 300, y: center.y + 180 };
+  // The preview panel slides out over the Canvas; place once it has cleared.
+  await expect
+    .poll(() =>
+      page.evaluate(
+        ({ x, y }) =>
+          document
+            .elementFromPoint(x, y)
+            ?.classList.contains('react-flow__pane'),
+        target,
+      ),
+    )
+    .toBe(true);
+  await page.mouse.click(target.x, target.y);
   await expect(page.locator('.react-flow__node-spacePreview')).toHaveCount(1);
   await expectTool(page, 'Pan');
   expect(await savedTool(page)).toBe('pan');
@@ -253,12 +283,14 @@ test('browser sibling preference changes preserve placement and explicit Lasso s
     await expectTool(sibling, 'Pan');
     await sibling.keyboard.press('1');
     await page.keyboard.press('l');
+    await expectLiveTool(sibling, 'lasso');
     await expect(sibling.locator('.canvas-pending-note')).toBeVisible();
     await sibling.keyboard.press('Escape');
     await expectTool(sibling, 'Lasso');
     await sibling.keyboard.press('l');
     await page.keyboard.press('p');
     await expect.poll(() => savedTool(sibling)).toBe('pan');
+    await expectLiveTool(sibling, 'pan');
     await expectTool(sibling, 'Lasso');
     await sibling.keyboard.press('1');
     await sibling.keyboard.press('Escape');

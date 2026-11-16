@@ -316,8 +316,9 @@ test('local inline video plays below reader size, isolates controls and pauses a
     });
     await page.evaluate((reason) => {
       if (reason === 'multi') window.videoFixture.select(true, true);
+      // Video enters far zoom below 20%, later than text-bearing nodes.
       if (reason === 'far')
-        void window.videoFixture.rf.setViewport({ x: 40, y: 40, zoom: 0.24 });
+        void window.videoFixture.rf.setViewport({ x: 40, y: 40, zoom: 0.19 });
       if (reason === 'offscreen')
         void window.videoFixture.rf.setViewport({ x: -5000, y: 40, zoom: 0.5 });
     }, reason);

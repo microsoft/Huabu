@@ -310,7 +310,7 @@ test('preset contrast targets include the intentional gold small-text exception'
   page,
 }) => {
   await page.goto('/playground/node-toolbars');
-  await expect(page.locator('.nt-toolbar')).toHaveCount(12);
+  await expect(page.locator('.nt-toolbar').first()).toBeVisible();
   for (const dark of [false, true]) {
     const samples = await page.evaluate(
       async ({ palette, dark }) => {

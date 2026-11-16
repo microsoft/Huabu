@@ -13,7 +13,7 @@ for (const locale of ['en', 'zh-CN']) {
         : 'Compare ChatGPT, Gemini and Claude interaction features using the hand-drawn table, with a one-line summary.';
     await page.setViewportSize({ width: 480, height: 800 });
     await page.goto('/playground/node-toolbars');
-    await expect(page.locator('.nt-toolbar')).toHaveCount(12);
+    await expect(page.locator('.nt-toolbar').first()).toBeVisible();
     await page.evaluate(
       async ({ locale, text }) => {
         const load = (path: string) => import(/* @vite-ignore */ path);

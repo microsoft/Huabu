@@ -18,15 +18,25 @@ test.use({ hasTouch: false });
 test.beforeEach(async ({ page }) => {
   await page.goto('/setup');
   await page.evaluate(async () => {
-    const dependencyUrl = (file: string) => {
-      const resource = performance
-        .getEntriesByType('resource')
-        .find((entry) =>
-          new URL(entry.name).pathname.endsWith(`/deps/${file}.js`),
+    // Read each dependency URL from the Vite-transformed source of a module
+    // that imports it. The app shell is lazy, so the resource timeline does
+    // not list these chunks yet when the page first settles.
+    const dependencyUrl = async (importer: string, file: string) => {
+      const source = await (await fetch(importer)).text();
+      const url = source
+        .match(/"[^"]*\/deps\/[^"]*"/g)
+        ?.map((quoted) => quoted.slice(1, -1))
+        .find((candidate) =>
+          candidate.split('?')[0].endsWith(`/deps/${file}.js`),
         );
-      if (!resource) throw new Error(`Vite has not loaded ${file}`);
-      return resource.name;
+      if (!url) throw new Error(`${importer} does not import ${file}`);
+      return url;
     };
+    const [reactUrl, reactDomUrl, routerUrl] = await Promise.all([
+      dependencyUrl('/src/main.tsx', 'react'),
+      dependencyUrl('/src/main.tsx', 'react-dom_client'),
+      dependencyUrl('/src/App.tsx', 'react-router-dom'),
+    ]);
     const stripPath =
       '/src/components/Panels/PreviewWorkspace/PreviewTabStrip.tsx';
     const storePath = '/src/store/canvasStore.ts';
@@ -43,16 +53,16 @@ test.beforeEach(async ({ page }) => {
       { closeTabs },
       { PreviewHeaderButton },
     ] = await Promise.all([
-      import(dependencyUrl('react')) as Promise<{
+      import(reactUrl) as Promise<{
         default: typeof ReactModule;
       }>,
-      import(dependencyUrl('react-dom_client')) as Promise<{
+      import(reactDomUrl) as Promise<{
         default: typeof ReactDOMModule;
       }>,
       import(stripPath) as Promise<typeof StripModule>,
       import(storePath) as Promise<typeof CanvasStoreModule>,
       import(headerPath) as Promise<typeof HeaderModule>,
-      import(dependencyUrl('react-router-dom')) as Promise<typeof RouterModule>,
+      import(routerUrl) as Promise<typeof RouterModule>,
       import(modelPath) as Promise<typeof PreviewModelModule>,
       import(previewButtonPath) as Promise<typeof PreviewHeaderButtonModule>,
     ]);
@@ -318,7 +328,7 @@ test('headers share a 44px band with a bottom rule only on Preview', async ({
   expect(rightMetrics.ruleHeight).toBe('1px');
   await expect(right.getByRole('tab').first()).toHaveCSS(
     'border-radius',
-    '8px',
+    '6px',
   );
 });
 

@@ -4,11 +4,12 @@
 import { expect, test } from '@playwright/test';
 
 import { openNewCanvas, paneCenter, readViewportTransform } from './helpers';
+import { installStreams } from './stream-helpers';
 
 test('keeps a deep-linked Question unread after reload until conversation interaction', async ({
   page,
 }) => {
-  await page.addInitScript(() => localStorage.setItem('huabu.language', 'en'));
+  await installStreams(page);
   const created = await page.request.post('/api/canvas', {
     data: { title: 'Deep-link read intent' },
   });
@@ -58,6 +59,40 @@ test('keeps a deep-linked Question unread after reload until conversation intera
     });
     await route.fulfill({ response, json: body });
   });
+  // Result lifecycle (status, token, viewed) is read from the server's owner
+  // observation, not from the loaded Space, so the finished unread result has
+  // to be reported there as well.
+  const observed = await page.request.get(
+    `/api/agent/owner/${threadId}?canvasId=${canvasId}`,
+  );
+  expect(observed.ok(), await observed.text()).toBe(true);
+  const owner = await observed.json();
+  Object.assign(owner.source, {
+    status: 'done',
+    invocationToken: 'deep-link-run',
+    viewed: false,
+  });
+  await page.route(`**/api/agent/owner/${threadId}/stream?**`, (route) =>
+    route.fulfill({
+      headers: { 'x-test-stream': 'true' },
+      json: {
+        key: `owner:${threadId}`,
+        events: [
+          {
+            type: 'snapshot',
+            data: {
+              streamId: 'deep-link-owner-stream',
+              revision: 1,
+              value: { state: 'ready', owner },
+            },
+          },
+        ],
+      },
+    }),
+  );
+  await page.route(`**/api/agent/owner/${threadId}?**`, (route) =>
+    route.fulfill({ json: owner }),
+  );
   await page.route(`**/api/agent/history/${threadId}/page?**`, (route) =>
     route.fulfill({
       json: {

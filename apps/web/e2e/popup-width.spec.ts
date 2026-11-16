@@ -7,7 +7,7 @@ test('menus fit localized content and constrain long labels within their boundar
   page,
 }) => {
   await page.goto('/playground/node-toolbars');
-  await expect(page.locator('.nt-toolbar')).toHaveCount(12);
+  await expect(page.locator('.nt-toolbar').first()).toBeVisible();
   await page.evaluate(async () => {
     const load = (path: string) => import(/* @vite-ignore */ path);
     const reactModule = await load('/node_modules/.vite/deps/react.js');

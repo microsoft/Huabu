@@ -189,13 +189,27 @@ test('mounts Layers on demand and restores filtered scrolling and focus', async 
   const firstMatch = searchResults
     .locator('button:not([aria-expanded])')
     .first();
-  await expect(firstMatch).toHaveCSS('height', '40px');
+  // A match is one 28px snippet row; the field name is a caption above the
+  // first match of each field, not a second line inside every row.
+  await expect(firstMatch).toHaveCSS('height', '28px');
   await expect(firstMatch).toHaveCSS('padding-top', '4px');
   await expect(firstMatch).toHaveCSS('padding-bottom', '4px');
+  await expect(firstMatch.locator('.uppercase')).toHaveCount(0);
+  const fieldCaption = firstMatch.locator('..').locator(':scope > .uppercase');
+  await expect(fieldCaption).toHaveCount(1);
+  expect(
+    await fieldCaption.evaluate(
+      (element) => element.getBoundingClientRect().top,
+    ),
+  ).toBe(
+    await searchHeader.evaluate(
+      (element) => element.getBoundingClientRect().bottom,
+    ),
+  );
   expect(
     await firstMatch.evaluate((element) => element.getBoundingClientRect().top),
   ).toBe(
-    await searchHeader.evaluate(
+    await fieldCaption.evaluate(
       (element) => element.getBoundingClientRect().bottom,
     ),
   );
@@ -204,9 +218,11 @@ test('mounts Layers on demand and restores filtered scrolling and focus', async 
     .locator('span.truncate')
     .evaluate((element) => element.getBoundingClientRect().left);
   expect(
-    await firstMatch
-      .locator('.uppercase')
-      .evaluate((element) => element.getBoundingClientRect().left),
+    await fieldCaption.evaluate(
+      (element) =>
+        element.getBoundingClientRect().left +
+        parseFloat(getComputedStyle(element).paddingLeft),
+    ),
   ).toBe(titleLeft);
   expect(
     await firstMatch
@@ -318,9 +334,19 @@ test('keeps search visible without stealing focus and focuses it only on Find', 
         input.evaluate((element) => {
           const icon = element.previousElementSibling;
           if (!icon) throw new Error('Missing search icon');
+          const resolve = (token: string) => {
+            const probe = document.createElement('span');
+            probe.style.color = `var(${token})`;
+            document.body.appendChild(probe);
+            const color = getComputedStyle(probe).color;
+            probe.remove();
+            return color;
+          };
+          // The placeholder is muted text; the icon stays one step quieter.
           return (
             getComputedStyle(element, '::placeholder').color ===
-            getComputedStyle(icon).color
+              resolve('--fg-muted') &&
+            getComputedStyle(icon).color === resolve('--fg-subtle')
           );
         }),
       )
@@ -1515,7 +1541,7 @@ test('keeps type filters on one line and preserves overflow selections during re
   await expect(overflowIcon).toHaveCSS('width', '14px');
   await expect(overflowIcon).toHaveCSS('height', '14px');
   await expect(overflowIcon).toHaveCSS('stroke-width', '2px');
-  await expect(overflowIcon).toHaveCSS('color', 'rgb(118, 118, 118)');
+  await expect(overflowIcon).toHaveCSS('color', 'rgb(112, 112, 112)');
   const filterName = (await filter.getAttribute('aria-label'))?.replace(
     'Filter by ',
     '',
@@ -1597,7 +1623,7 @@ test('matches header icon color, size and stroke in both panel states and themes
           strokeWidth: getComputedStyle(element).strokeWidth,
         })),
       ).toEqual({
-        color: 'rgb(118, 118, 118)',
+        color: 'rgb(112, 112, 112)',
         width: 16,
         height: 16,
         strokeWidth: '2px',
@@ -1821,7 +1847,7 @@ test.describe('mouse header controls', () => {
         logoToTitle: 2,
         logoImageToTitle: 4,
         logoVerticalCenterOffset: 0,
-        titleToToggle: 12,
+        titleToToggle: 6,
       });
       await toggle.locator('xpath=ancestor::header').screenshot({
         path: testInfo.outputPath(

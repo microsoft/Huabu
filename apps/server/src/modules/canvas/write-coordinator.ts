@@ -106,6 +106,12 @@ export interface UpdateNodeOptions {
   /** Optimistic-concurrency baseline for authored content. */
   expectRev?: string;
   /**
+   * The body is derived and withheld from the writer (extracted PDF text), so
+   * a baseline the writer computed itself covers the metadata alone. Accept
+   * that revision as well as the full one.
+   */
+  derivedBody?: boolean;
+  /**
    * Return a complete replacement record, or null for no write.
    *
    * A full-record CAS conflict may cause this callback to run again with a
@@ -150,7 +156,13 @@ export async function updateNode(
 
     if (
       opts.expectRev !== undefined &&
-      opts.expectRev !== currentContentRevision
+      opts.expectRev !== currentContentRevision &&
+      !(
+        opts.derivedBody &&
+        current &&
+        opts.expectRev ===
+          nodeRevisionOf({ ...current.record, content: undefined })
+      )
     ) {
       return { status: 'rev-conflict', currentRev: currentContentRevision };
     }

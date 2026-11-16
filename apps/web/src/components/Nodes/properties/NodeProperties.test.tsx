@@ -533,6 +533,253 @@ it('keeps numbers in a single-line field', () => {
   ).not.toBeNull();
 });
 
+it('turns a chosen tag back into text where it stands and saves the correction there', async () => {
+  act(() =>
+    root.render(
+      <NodeProperties
+        properties={{ Keywords: ['ink', 'canvas', 'ink', 'agents'] }}
+        displayKeys={[]}
+        readOnly={false}
+        onSave={save}
+      />,
+    ),
+  );
+  click('node.editProperty:Keywords');
+  const field = container.querySelector<HTMLInputElement>('[role="combobox"]');
+  const key = (name: string) =>
+    act(() => {
+      field?.dispatchEvent(
+        new KeyboardEvent('keydown', { key: name, bubbles: true }),
+      );
+    });
+  // Text already typed is kept as a tag rather than overwritten.
+  input('node.propertyValue', 'sketch');
+  click('node.editPropertyTag:canvas');
+  expect(field?.value).toBe('canvas');
+  expect(document.activeElement).toBe(field);
+  input('node.propertyValue', 'canvases');
+  key('Enter');
+  expect(field?.value).toBe('');
+  // Editing the second of two repeated tags leaves the first; Backspace in
+  // an emptied tag removes the one before it.
+  click('node.editPropertyTag:agents');
+  input('node.propertyValue', '');
+  key('Backspace');
+  key('Enter');
+  await act(async () => {});
+  expect(save).toHaveBeenCalledExactlyOnceWith({
+    properties: { Keywords: ['ink', 'canvases', 'sketch'] },
+  });
+});
+
+it('replaces an edited tag with the known tag it now names in full, not one that contains it', async () => {
+  act(() =>
+    root.render(
+      <NodeProperties
+        properties={{ Keywords: ['canvas', 'agents'] }}
+        displayKeys={[]}
+        readOnly={false}
+        tagOptions={() => ['agents', 'blink', 'canvas', 'Ink']}
+        onSave={save}
+      />,
+    ),
+  );
+  click('node.editProperty:Keywords');
+  click('node.editPropertyTag:canvas');
+  input('node.propertyValue', 'ink');
+  expect(
+    Array.from(document.querySelectorAll('[role="option"]')).map(
+      (item) => item.textContent,
+    ),
+  ).toEqual(['Ink', 'blink', 'node.createPropertyTagink']);
+  const enter = () =>
+    act(() => {
+      container
+        .querySelector('[role="combobox"]')
+        ?.dispatchEvent(
+          new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
+        );
+    });
+  enter();
+  enter();
+  await act(async () => {});
+  expect(save).toHaveBeenCalledExactlyOnceWith({
+    properties: { Keywords: ['Ink', 'agents'] },
+  });
+});
+
+it('merges a tag corrected into one already chosen instead of picking a tag that contains it', async () => {
+  act(() =>
+    root.render(
+      <NodeProperties
+        properties={{ Keywords: ['ink', 'blink'] }}
+        displayKeys={[]}
+        readOnly={false}
+        tagOptions={() => ['blink', 'ink']}
+        onSave={save}
+      />,
+    ),
+  );
+  click('node.editProperty:Keywords');
+  click('node.editPropertyTag:blink');
+  input('node.propertyValue', 'ink');
+  // `blink` is offered again, but the text names a chosen tag in full.
+  expect(option('blink')?.getAttribute('aria-selected')).toBe('false');
+  act(() => {
+    container
+      .querySelector('[role="combobox"]')
+      ?.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
+      );
+  });
+  await act(async () => {});
+  expect(save).toHaveBeenCalledExactlyOnceWith({
+    properties: { Keywords: ['ink'] },
+  });
+});
+
+it('does not pick a tag that contains text naming a chosen tag in another case', async () => {
+  act(() =>
+    root.render(
+      <NodeProperties
+        properties={{ Keywords: ['Ink', 'blink'] }}
+        displayKeys={[]}
+        readOnly={false}
+        tagOptions={() => ['blink', 'Ink']}
+        onSave={save}
+      />,
+    ),
+  );
+  click('node.editProperty:Keywords');
+  click('node.editPropertyTag:blink');
+  input('node.propertyValue', 'ink');
+  // Tags differ by case, so the typed spelling is its own tag, not `blink`.
+  expect(option('blink')?.getAttribute('aria-selected')).toBe('false');
+  expect(
+    option('node.createPropertyTagink')?.getAttribute('aria-selected'),
+  ).toBe('true');
+  const enter = () =>
+    act(() => {
+      container
+        .querySelector('[role="combobox"]')
+        ?.dispatchEvent(
+          new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
+        );
+    });
+  enter();
+  enter();
+  await act(async () => {});
+  expect(save).toHaveBeenCalledExactlyOnceWith({
+    properties: { Keywords: ['Ink', 'ink'] },
+  });
+});
+
+it('keeps a repeated tag that was opened and left unchanged', async () => {
+  act(() =>
+    root.render(
+      <NodeProperties
+        properties={{ Keywords: ['ink', 'canvas', 'ink'] }}
+        displayKeys={[]}
+        readOnly={false}
+        onSave={save}
+      />,
+    ),
+  );
+  click('node.editProperty:Keywords');
+  // Open the second `ink`, then move on to another tag without changing it.
+  const second = Array.from(
+    container.querySelectorAll<HTMLElement>(
+      '[aria-label="node.editPropertyTag:ink"]',
+    ),
+  )[1];
+  act(() => second.click());
+  click('node.editPropertyTag:canvas');
+  input('node.propertyValue', 'canvases');
+  act(() => {
+    container
+      .querySelector('[role="combobox"]')
+      ?.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
+      );
+  });
+  // Open the first `ink` and save with it still open.
+  click('node.editPropertyTag:ink');
+  act(() => {
+    container
+      .querySelector('[role="combobox"]')
+      ?.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
+      );
+  });
+  await act(async () => {});
+  expect(save).toHaveBeenCalledExactlyOnceWith({
+    properties: { Keywords: ['ink', 'canvases', 'ink'] },
+  });
+});
+
+it('keeps a stored tag with spaces of its own when it is opened and left unchanged', async () => {
+  act(() =>
+    root.render(
+      <NodeProperties
+        properties={{ Keywords: ['ink', ' ink ', 'canvas'] }}
+        displayKeys={[]}
+        readOnly={false}
+        onSave={save}
+      />,
+    ),
+  );
+  click('node.editProperty:Keywords');
+  click('node.editPropertyTag: ink ');
+  act(() => {
+    container
+      .querySelector('[role="combobox"]')
+      ?.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
+      );
+  });
+  await act(async () => {});
+  expect(save).toHaveBeenCalledExactlyOnceWith({
+    properties: { Keywords: ['ink', ' ink ', 'canvas'] },
+  });
+});
+
+it('keeps the spelling of an opened tag when a known tag differs only by case', async () => {
+  act(() =>
+    root.render(
+      <NodeProperties
+        properties={{ Keywords: ['Canvas', 'agents'] }}
+        displayKeys={[]}
+        readOnly={false}
+        tagOptions={() => ['agents', 'canvas', 'Canvas']}
+        onSave={save}
+      />,
+    ),
+  );
+  click('node.editProperty:Keywords');
+  click('node.editPropertyTag:Canvas');
+  // The stored spelling leads, and unchanged text targets no option.
+  expect(
+    Array.from(document.querySelectorAll('[role="option"]')).map((item) => [
+      item.textContent,
+      item.getAttribute('aria-selected'),
+    ]),
+  ).toEqual([
+    ['Canvas', 'false'],
+    ['canvas', 'false'],
+  ]);
+  act(() => {
+    container
+      .querySelector('[role="combobox"]')
+      ?.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
+      );
+  });
+  await act(async () => {});
+  expect(save).toHaveBeenCalledExactlyOnceWith({
+    properties: { Keywords: ['Canvas', 'agents'] },
+  });
+});
+
 it('removes one of two repeated tags and lets Enter save once the pointer leaves the options', async () => {
   act(() =>
     root.render(

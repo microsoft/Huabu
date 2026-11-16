@@ -132,6 +132,19 @@ async function restoreTestViewport(page: Page, item: FixtureNode, zoom = 1) {
   await page.reload();
 }
 
+// A Space fades its Canvas in on entry (`space-canvas-enter`). Pixel baselines
+// must be taken from the settled Canvas, or the fade itself reads as a change.
+async function canvasEntrySettled(page: Page) {
+  await page
+    .locator('.react-flow')
+    .first()
+    .evaluate((element) =>
+      Promise.all(
+        element.getAnimations().map((animation) => animation.finished),
+      ),
+    );
+}
+
 test('Text content geometry stays fixed when selection chrome appears', async ({
   page,
 }) => {
@@ -139,6 +152,7 @@ test('Text content geometry stays fixed when selection chrome appears', async ({
   const [node] = await seed(page, [item]);
   await restoreTestViewport(page, item, 0.51);
   await expect(node.locator('textarea')).toBeVisible();
+  await canvasEntrySettled(page);
   await page.mouse.click(1000, 700);
   await expect(node).not.toHaveClass(/\bselected\b/);
   const measure = () =>
@@ -192,6 +206,7 @@ for (const zoom of [0.25, 0.51, 1]) {
     const [node] = await seed(page, [item]);
     await restoreTestViewport(page, item, zoom);
     await expect(node.locator('.ProseMirror')).toBeVisible();
+    await canvasEntrySettled(page);
     await page.mouse.click(120, 700);
     await expect(node).not.toHaveClass(/\bselected\b/);
     const viewport = node.locator('[data-note-content-viewport]');
@@ -495,7 +510,8 @@ async function contentMetrics(node: Locator) {
       font: Number.parseFloat(css.fontSize),
       insetX:
         Number.parseFloat(bodyCss.paddingLeft) +
-        (body.matches('.question-conversation-card') ? 0 : 3),
+        // Text's inset includes the 1px card border around its body.
+        (body.matches('.question-conversation-card') ? 0 : 1),
       insetY: Number.parseFloat(bodyCss.paddingTop),
       lineHeight: Number.parseFloat(css.lineHeight),
       lines: Math.round(title.clientHeight / Number.parseFloat(css.lineHeight)),
@@ -754,7 +770,8 @@ for (const type of ['text', 'question'] as const) {
           ),
         );
         expect(liveBody.height).toBeCloseTo(
-          liveSurface.height - (type === 'question' ? 0 : 6),
+          // Text keeps the 1px card border on both sides of its body.
+          liveSurface.height - (type === 'question' ? 0 : 2),
           1,
         );
         expect(liveOutline.x).toBeCloseTo(liveSurface.x, 1);
@@ -1926,7 +1943,8 @@ for (const nearTop of [false, true]) {
             ? bar.y - hitBox.y - hitBox.height
             : hitBox.y - bar.y - bar.height;
         })
-        .toBeGreaterThanOrEqual(7.5);
+        // nodeToolbarOffset: 8px past a touch hit area, 2px past a mouse one.
+        .toBeGreaterThanOrEqual(touch ? 7.5 : 1.5);
       const nodeBox = await box(node);
       const toolbarBox = await box(toolbar);
       if (nearTop)
@@ -2035,7 +2053,9 @@ for (const nearTop of [false, true]) {
             plus.y - menu.y - menu.height,
           );
         })
-        .toBeGreaterThanOrEqual(7.5);
+        // Keyboard activation anchors at the node boundary, so the picker sits
+        // nodeToolbarOffset away: 2px past the mouse-sized Plus.
+        .toBeGreaterThanOrEqual(input === 'keyboard' && !nearTop ? 1.5 : 7.5);
       const menu = await box(pickerChrome);
       const plus = await box(icon);
       if (nearTop) expect(menu.y).toBeGreaterThan(plus.y + plus.height);
