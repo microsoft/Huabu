@@ -608,6 +608,79 @@ it('replaces an edited tag with the known tag it now names in full, not one that
   });
 });
 
+it('merges a tag corrected into one already chosen instead of picking a tag that contains it', async () => {
+  act(() =>
+    root.render(
+      <NodeProperties
+        properties={{ Keywords: ['ink', 'blink'] }}
+        displayKeys={[]}
+        readOnly={false}
+        tagOptions={() => ['blink', 'ink']}
+        onSave={save}
+      />,
+    ),
+  );
+  click('node.editProperty:Keywords');
+  click('node.editPropertyTag:blink');
+  input('node.propertyValue', 'ink');
+  // `blink` is offered again, but the text names a chosen tag in full.
+  expect(option('blink')?.getAttribute('aria-selected')).toBe('false');
+  act(() => {
+    container
+      .querySelector('[role="combobox"]')
+      ?.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
+      );
+  });
+  await act(async () => {});
+  expect(save).toHaveBeenCalledExactlyOnceWith({
+    properties: { Keywords: ['ink'] },
+  });
+});
+
+it('keeps a repeated tag that was opened and left unchanged', async () => {
+  act(() =>
+    root.render(
+      <NodeProperties
+        properties={{ Keywords: ['ink', 'canvas', 'ink'] }}
+        displayKeys={[]}
+        readOnly={false}
+        onSave={save}
+      />,
+    ),
+  );
+  click('node.editProperty:Keywords');
+  // Open the second `ink`, then move on to another tag without changing it.
+  const second = Array.from(
+    container.querySelectorAll<HTMLElement>(
+      '[aria-label="node.editPropertyTag:ink"]',
+    ),
+  )[1];
+  act(() => second.click());
+  click('node.editPropertyTag:canvas');
+  input('node.propertyValue', 'canvases');
+  act(() => {
+    container
+      .querySelector('[role="combobox"]')
+      ?.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
+      );
+  });
+  // Open the first `ink` and save with it still open.
+  click('node.editPropertyTag:ink');
+  act(() => {
+    container
+      .querySelector('[role="combobox"]')
+      ?.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
+      );
+  });
+  await act(async () => {});
+  expect(save).toHaveBeenCalledExactlyOnceWith({
+    properties: { Keywords: ['ink', 'canvases', 'ink'] },
+  });
+});
+
 it('removes one of two repeated tags and lets Enter save once the pointer leaves the options', async () => {
   act(() =>
     root.render(

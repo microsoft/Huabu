@@ -14,14 +14,19 @@ export const PROPERTY_FIELD_CLASS =
 export const PROPERTY_TAG_CLASS =
   'bg-edge-default text-fg-default min-w-0 rounded px-1.5 py-0.5 leading-4 wrap-anywhere';
 
-/** Add `tag` at `at` (the end when unset) unless it is blank or present. */
+/**
+ * Add `tag` at `at` (the end when unset) unless it is blank or present.
+ * `original` is the stored tag the text came from: left unchanged it goes
+ * back even when the list repeats it, so opening a tag never removes it.
+ */
 export function withTag(
   items: readonly string[],
   tag: string,
   at = items.length,
+  original?: string,
 ): string[] {
   const value = tag.trim();
-  return !value || items.includes(value)
+  return !value || (items.includes(value) && value !== original)
     ? [...items]
     : [...items.slice(0, at), value, ...items.slice(at)];
 }
@@ -37,6 +42,7 @@ export function PropertyTagEditor({
   items,
   text,
   at,
+  editing,
   options,
   disabled,
   autoFocus,
@@ -46,11 +52,18 @@ export function PropertyTagEditor({
   text: string;
   /** Where the typed tag belongs among `items`; the end when unset. */
   at?: number;
+  /** The stored tag the text came from, while one is being corrected. */
+  editing?: string;
   /** Known values for this property, in display order. */
   options: readonly string[];
   disabled: boolean;
   autoFocus: boolean;
-  onChange: (next: { items: string[]; text: string; at?: number }) => void;
+  onChange: (next: {
+    items: string[];
+    text: string;
+    at?: number;
+    editing?: string;
+  }) => void;
 }) {
   const { t } = useTranslation();
   const listId = useId();
@@ -76,11 +89,12 @@ export function PropertyTagEditor({
     ...(canCreate ? [{ value: query, create: true }] : []),
   ];
   // Typed text targets the first row; an empty field targets nothing, so
-  // Enter falls through to the form and saves.
+  // Enter falls through to the form and saves. So does text that names a
+  // tag already chosen: the rows left are other tags that only contain it.
   const active =
     cursor !== null && cursor < rows.length
       ? cursor
-      : query && rows.length > 0
+      : query && rows.length > 0 && !items.includes(query)
         ? 0
         : null;
   const add = (tag: string) => {
@@ -95,13 +109,14 @@ export function PropertyTagEditor({
       items: items.filter((_, position) => position !== index),
       text,
       at: at === undefined ? undefined : index < at ? at - 1 : at,
+      editing,
     });
   /** Turn the tag at `index` back into field text, keeping what was typed. */
   const edit = (index: number) => {
     if (disabled) return;
     // Lists may repeat a value, so the tag is followed by position, which
     // shifts when the typed text lands before it.
-    const typed = withTag(items, text, at);
+    const typed = withTag(items, text, at, editing);
     const position =
       index + (typed.length > items.length && slot <= index ? 1 : 0);
     // The tag's button is about to go; focus lost there would commit the edit.
@@ -111,6 +126,7 @@ export function PropertyTagEditor({
       items: typed.filter((_, other) => other !== position),
       text: items[index],
       at: position,
+      editing: items[index],
     });
   };
   // Arrow keys can move the highlight past the list's visible rows.
@@ -180,7 +196,7 @@ export function PropertyTagEditor({
           disabled={disabled}
           onChange={(event) => {
             setCursor(null);
-            onChange({ items, text: event.target.value, at });
+            onChange({ items, text: event.target.value, at, editing });
           }}
           onKeyDown={(event) => {
             // 229: an IME is still handling this key (Safari reports the

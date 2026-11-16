@@ -108,6 +108,8 @@ type Draft = {
   items: string[];
   /** Where the tag being typed belongs among `items`; the end when unset. */
   at?: number;
+  /** The stored tag being corrected, kept if its text is left unchanged. */
+  editing?: string;
   kind: PropertyKind;
 };
 
@@ -381,7 +383,7 @@ export function NodeProperties({
       value = draft.value === 'true';
     } else if (draft.kind === 'list') {
       // Text still in the field counts as a tag, so blur never drops it.
-      value = withTag(draft.items, draft.value, draft.at);
+      value = withTag(draft.items, draft.value, draft.at, draft.editing);
     }
     void save({
       properties: { [name]: value },
@@ -542,10 +544,11 @@ export function NodeProperties({
             items={draft.items}
             text={draft.value}
             at={draft.at}
+            editing={draft.editing}
             options={options}
             disabled={saving}
-            onChange={({ items, text, at }) =>
-              setDraft({ ...draft, items, value: text, at })
+            onChange={({ items, text, at, editing }) =>
+              setDraft({ ...draft, items, value: text, at, editing })
             }
           />
         ) : draft.kind === 'text' ? (
