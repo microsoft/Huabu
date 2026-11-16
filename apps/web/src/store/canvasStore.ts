@@ -3811,22 +3811,45 @@ const useCanvasStore = create<RFState>()(
       });
       reconcileIncomingVersion();
 
-      // Re-seed the content-CAS baseline for the nodes this agent write
-      // actually applied. Skipped mid-edit nodes had their baseline adopted
-      // to the agent's rev above (local-first rebase), so exclude them here
-      // to avoid clobbering that with their own unchanged local content.
-      // A node with unsaved content that this batch did not touch is
-      // excluded too: its content is not the server's, and a baseline taken
-      // from it would have its own save refused as a conflict.
+      // Re-seed the content-CAS baseline of the nodes whose saved content
+      // this batch changed (or created), from the server's own copy of the
+      // node in the batch. A node the batch left alone, or changed only in
+      // structure, keeps the baseline it has: what the page shows is not
+      // always what the server stores (a PDF's extracted body is not sent
+      // with a load, an Office body is normalized), so a revision computed
+      // from it would refuse the node's next property save as a conflict —
+      // after every structure edit, since the page's own edits come back
+      // through here. Skipped mid-edit nodes had their baseline adopted to
+      // the agent's rev above (local-first rebase), and a node with unsaved
+      // content is not the server's; both are left out.
       {
         const skippedSet = new Set(skippedNodeIds);
+        const present = new Set((applied.nodes as Node[]).map((n) => n.id));
+        const contentChanged = new Set<string>();
+        for (const delta of incoming) {
+          if (delta.type === 'INSERT_NODE') contentChanged.add(delta.node.id);
+          else if (delta.type === 'REPLACE_NODE') {
+            const before = (delta.prev.data ?? {}) as Record<string, unknown>;
+            const after = (delta.next.data ?? {}) as Record<string, unknown>;
+            if (
+              [...NODE_CONTENT_KEYS].some(
+                (key) => !deepEqual(before[key], after[key]),
+              )
+            )
+              contentChanged.add(delta.next.id);
+          }
+        }
         nodeContentQueue.seedBaselines(
-          (applied.nodes as Node[]).filter(
-            (n) =>
-              !skippedSet.has(n.id) &&
-              !preservedPendingNodeIds.has(n.id) &&
-              !dirty.has(n.id),
-          ),
+          [...contentChanged]
+            .filter(
+              (id) =>
+                present.has(id) &&
+                remote.serverNodes.has(id) &&
+                !skippedSet.has(id) &&
+                !preservedPendingNodeIds.has(id) &&
+                !dirty.has(id),
+            )
+            .map((id) => serverNodeOf({ id })),
         );
       }
 

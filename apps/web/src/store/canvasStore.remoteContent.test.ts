@@ -426,6 +426,155 @@ describe('properties another page saved', () => {
   });
 });
 
+describe('the revision of a node whose stored body the page does not show', () => {
+  it('is kept through a structure update, so a property save of a PDF is not refused', async () => {
+    // A load brings the server's revision of the PDF; the page is not sent
+    // the extracted text it is computed from.
+    const PDF = 'node-content-pdf';
+    const pdf: Node = {
+      id: PDF,
+      type: 'pdf',
+      position: { x: 800, y: 0 },
+      style: { width: 300, height: 400 },
+      data: { type: 'pdf', label: 'Paper', src: 'paper.pdf' },
+    };
+    const canonical = nodeRevisionOf({
+      type: 'pdf',
+      content: 'Extracted text the page never received',
+      src: 'paper.pdf',
+    });
+    api.getCanvas.mockResolvedValue({
+      canvasId: SPACE,
+      title: 'Content',
+      version: 1,
+      access: { write: true, manage: true },
+      nodeContentRevisions: { [PDF]: canonical },
+      state: { nodes: [note(X, 0), note(Y, 400), pdf], edges: [] },
+    });
+    await state().loadCanvas(SPACE);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(node(PDF).data).not.toHaveProperty('content');
+
+    // Another page moves the PDF, and yet another node.
+    for (const [index, id] of [PDF, X].entries()) {
+      const moved = { ...node(id), position: { x: 40 * index, y: 300 } };
+      state().applyDeltasFromAgent(
+        [{ type: 'REPLACE_NODE', prev: node(id), next: moved }] as never,
+        state().version + 1,
+        {
+          mutatedNodes: [],
+          deletedNodeIds: [],
+          contentEditedNodeIds: [],
+          deferredFitFrameIds: [],
+        } as never,
+        undefined,
+        undefined,
+        { source: 'ui' },
+      );
+    }
+    expect(node(PDF).position).toEqual({ x: 0, y: 300 });
+
+    await expect(
+      commitNodeProperties(PDF, { properties: { tags: ['physics'] } }),
+    ).resolves.toBe(true);
+    expect(api.putNodeContent).toHaveBeenCalledTimes(1);
+    expect(api.putNodeContent.mock.calls[0][2]).toMatchObject({
+      properties: { tags: ['physics'] },
+      expectRev: canonical,
+    });
+  });
+});
+
+describe("an agent's write to a PDF's properties and cover", () => {
+  it('is shown, and the next property save here descends from what the agent wrote', async () => {
+    const PDF = 'node-content-pdf-agent';
+    const pdf: Node = {
+      id: PDF,
+      type: 'pdf',
+      position: { x: 800, y: 0 },
+      style: { width: 300, height: 400 },
+      data: { type: 'pdf', label: 'Paper', src: 'paper.pdf' },
+    };
+    state()._setStateNoAutosave({ nodes: [...state().nodes, pdf] });
+    // The server's copy carries the extracted text the page does not show.
+    const stored = {
+      ...pdf,
+      data: { ...pdf.data, content: 'Extracted text' },
+    };
+    const written = {
+      ...stored,
+      data: {
+        ...stored.data,
+        coverUrl: 'cover.png',
+        properties: { year: 2026 },
+        propertyDisplayKeys: ['year'],
+      },
+    };
+    state().applyDeltasFromAgent(
+      [{ type: 'REPLACE_NODE', prev: stored, next: written }] as never,
+      state().version + 1,
+      {
+        mutatedNodes: [],
+        deletedNodeIds: [],
+        contentEditedNodeIds: [],
+        deferredFitFrameIds: [],
+      } as never,
+      undefined,
+      undefined,
+      { source: 'agent' },
+    );
+    expect(node(PDF).data).toMatchObject({
+      coverUrl: 'cover.png',
+      properties: { year: 2026 },
+      propertyDisplayKeys: ['year'],
+    });
+    expect(node(PDF).data).not.toHaveProperty('content');
+    expect(api.putNodeContent).not.toHaveBeenCalled();
+
+    await expect(
+      commitNodeProperties(PDF, { properties: { tags: ['physics'] } }),
+    ).resolves.toBe(true);
+    expect(api.putNodeContent.mock.calls[0][2]).toMatchObject({
+      properties: { year: 2026, tags: ['physics'] },
+      expectRev: nodeRevisionOf({
+        type: 'pdf',
+        content: 'Extracted text',
+        src: 'paper.pdf',
+        properties: { year: 2026 },
+        propertyDisplayKeys: ['year'],
+      }),
+    });
+
+    // The agent clears the cover again; a page follows that too.
+    const { coverUrl: _cleared, ...withoutCover } = written.data;
+    void _cleared;
+    state().applyDeltasFromAgent(
+      [
+        {
+          type: 'REPLACE_NODE',
+          prev: written,
+          next: { ...written, data: withoutCover },
+        },
+      ] as never,
+      state().version + 1,
+      {
+        mutatedNodes: [],
+        deletedNodeIds: [],
+        contentEditedNodeIds: [],
+        deferredFitFrameIds: [],
+      } as never,
+      undefined,
+      undefined,
+      { source: 'agent' },
+    );
+    expect(node(PDF).data).not.toHaveProperty('coverUrl');
+    expect(node(PDF).data.properties).toEqual({
+      year: 2026,
+      tags: ['physics'],
+    });
+  });
+});
+
 describe('renaming a node another page is editing', () => {
   const editedBy = (editingNodeIds: string[]) =>
     useCanvasPresenceStore.getState().applyEvent({
