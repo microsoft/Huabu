@@ -6,7 +6,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const api = vi.hoisted(() => ({
   postCanvasExecute: vi.fn(),
   getCanvas: vi.fn(),
-  deleteNode: vi.fn(),
   putNodeContent: vi.fn(),
   getNodeContent: vi.fn(),
   preprocessNode: vi.fn(),
@@ -227,7 +226,6 @@ describe('content another page saved, in the store', () => {
       savedOnServer('Body from A', 'From A'),
     );
     await adoptRemoteNodeContent(SPACE, [X]);
-    api.deleteNode.mockResolvedValue({ success: true });
 
     state().deleteNodes([X]);
     expect(state().nodes.map((n) => n.id)).toEqual([Y]);

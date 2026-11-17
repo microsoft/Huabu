@@ -6,7 +6,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const api = vi.hoisted(() => ({
   postCanvasExecute: vi.fn(),
   getCanvas: vi.fn(),
-  deleteNode: vi.fn(),
   putNodeContent: vi.fn(),
   preprocessNode: vi.fn(),
   postCanvasEvents: vi.fn(),
@@ -210,7 +209,6 @@ beforeEach(() => {
     basis: server.basis(),
     state: { nodes: server.state.nodes, edges: server.state.edges },
   }));
-  api.deleteNode.mockResolvedValue({ success: true });
   api.putNodeContent.mockResolvedValue({ nodeId: X, label: null, rev: 'rev' });
   api.preprocessNode.mockResolvedValue({ success: true });
   api.postCanvasEvents.mockResolvedValue({ success: true });

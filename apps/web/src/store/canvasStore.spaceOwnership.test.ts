@@ -22,6 +22,17 @@ const entry: Node = {
 };
 // Structure edits are sent as execute requests; this stands in for the server.
 const server = createFakeSpaceServer();
+/** Node ids this page asked the server to delete (through `execute`). */
+function sentDeletions(): string[] {
+  return vi
+    .mocked(api.postCanvasExecute)
+    .mock.calls.flatMap(([, request]) =>
+      (request.commands as Array<{ type: string; nodeIds?: string[] }>).flatMap(
+        (command) =>
+          command.type === 'DELETE_NODES' ? (command.nodeIds ?? []) : [],
+      ),
+    );
+}
 const originalRefresh = useWorkspaceStore.getState().refreshSpaceTitles;
 const refresh = vi.fn(async () => undefined);
 const edge = {
@@ -40,7 +51,6 @@ const endpoints: Node[] = ['node-a', 'node-b'].map((id) => ({
 beforeEach(() => {
   vi.useFakeTimers();
   vi.clearAllMocks();
-  vi.spyOn(api, 'deleteNode').mockResolvedValue({ success: true });
   server.reset([], [], 0);
   resetCanvasSyncForTests();
   vi.spyOn(api, 'postCanvasExecute').mockImplementation(
@@ -99,7 +109,7 @@ it('does not undo a newly received child entry before or after ownership metadat
   knowChild();
   await useCanvasStore.getState().undo();
   expect(useCanvasStore.getState().nodes[0].id).toBe(entry.id);
-  expect(api.deleteNode).not.toHaveBeenCalled();
+  expect(sentDeletions()).toEqual([]);
   expect(notifications.toast).toHaveBeenCalled();
 });
 
@@ -138,8 +148,7 @@ it.each(['loading', 'error', 'ready'] as const)(
     useCanvasStore.getState().deleteNodes(['node-frame'], [edge.id]);
     expect(useCanvasStore.getState().nodes).toEqual(nodes);
     expect(useCanvasStore.getState().edges).toEqual([edge]);
-    expect(api.deleteNode).not.toHaveBeenCalled();
-    expect(canvasHistoryManager.hasPendingDeletes('parent')).toBe(false);
+    expect(sentDeletions()).toEqual([]);
     expect(refresh).toHaveBeenCalledOnce();
   },
 );
@@ -155,7 +164,7 @@ it('defers the complete mixed node/edge deletion while child confirmation is pen
     expect(confirm).toHaveBeenCalledOnce();
     expect(useCanvasStore.getState().nodes).toEqual(nodes);
     expect(useCanvasStore.getState().edges).toEqual([edge]);
-    expect(api.deleteNode).not.toHaveBeenCalled();
+    expect(sentDeletions()).toEqual([]);
     expect(canvasHistoryManager.canUndo).toBe(false);
   } finally {
     window.removeEventListener(REQUEST_DELETE_SPACE, confirm);
@@ -173,7 +182,7 @@ it('keeps selected edges when deleting a Frame with a known child entry is refus
   useCanvasStore.getState().deleteNodes(['node-frame'], [edge.id]);
   expect(useCanvasStore.getState().nodes).toEqual(nodes);
   expect(useCanvasStore.getState().edges).toEqual([edge]);
-  expect(api.deleteNode).not.toHaveBeenCalled();
+  expect(sentDeletions()).toEqual([]);
   expect(notifications.toast).toHaveBeenCalled();
   expect(canvasHistoryManager.canUndo).toBe(false);
 });
@@ -191,7 +200,7 @@ it('deletes ordinary nodes and selected edges in one undoable execution', async 
   useCanvasStore.getState().deleteNodes([note.id], [edge.id]);
   expect(useCanvasStore.getState().nodes).toEqual(endpoints);
   expect(useCanvasStore.getState().edges).toEqual([]);
-  await canvasHistoryManager.waitForDeletes('parent');
+  await vi.waitFor(() => expect(sentDeletions()).toEqual([note.id]));
   await useCanvasStore.getState().undo();
   expect(useCanvasStore.getState().nodes).toEqual(nodes);
   expect(useCanvasStore.getState().edges).toEqual([
@@ -207,7 +216,7 @@ it('also protects direct command deletion instead of relying on UI Delete', () =
     .getState()
     .executeCommands([{ type: 'DELETE_NODES', nodeIds: ['node-entry'] }]);
   expect(useCanvasStore.getState().nodes).toEqual([entry]);
-  expect(api.deleteNode).not.toHaveBeenCalled();
+  expect(sentDeletions()).toEqual([]);
 });
 
 it('does not consume a redo snapshot that would remove a now-canonical entry', async () => {
@@ -221,7 +230,7 @@ it('does not consume a redo snapshot that would remove a now-canonical entry', a
   await useCanvasStore.getState().redo();
   expect(useCanvasStore.getState().nodes).toEqual([entry]);
   expect(canvasHistoryManager.canRedo).toBe(true);
-  expect(api.deleteNode).not.toHaveBeenCalled();
+  expect(sentDeletions()).toEqual([]);
 });
 
 it('lets a confirmed missing-target shortcut be deleted after metadata settles', async () => {
@@ -232,6 +241,6 @@ it('lets a confirmed missing-target shortcut be deleted after metadata settles',
     .getState()
     .dispatchUiIntent({ type: 'DELETE_NODES', nodeIds: [entry.id] });
   expect(useCanvasStore.getState().nodes).toEqual([]);
-  await canvasHistoryManager.waitForDeletes('parent');
-  expect(api.deleteNode).toHaveBeenCalledWith('parent', entry.id);
+  // The deletion is one command batch; the server removes the record in it.
+  await vi.waitFor(() => expect(sentDeletions()).toEqual([entry.id]));
 });

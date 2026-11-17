@@ -778,6 +778,11 @@ describe('PUT /nodes/:nodeId/content — content CAS', () => {
         ).statusCode,
       ).toBe(409);
       expect(received).not.toHaveBeenCalled();
+      // The node has left the Space; its record is what the route removes.
+      const space = getCanvasStore('c1');
+      const stored = space.read();
+      if (!stored) throw new Error('Missing fixture');
+      space.write({ ...stored, state: { nodes: [], edges: [] } });
       expect(
         (await app.inject({ method: 'DELETE', url: '/canvas/c1/nodes/n1' }))
           .statusCode,
@@ -786,8 +791,43 @@ describe('PUT /nodes/:nodeId/content — content CAS', () => {
         type: 'invalidate',
         data: { nodeIds: ['n1'] },
       });
+      expect(space.readNode('n1')).toBeNull();
     } finally {
       unsubscribe();
+      await app.close();
+    }
+  });
+
+  it('does not unlink the record of a node that is in the Space', async () => {
+    // A page that only received a deletion used to send this request late,
+    // after another page's undo had restored the node and its body.
+    const app = await buildApp();
+    const received = vi.fn();
+    try {
+      seedCanvas('c1', 'n1', 'Note');
+      expect(
+        (
+          await putContent(app, 'c1', 'n1', {
+            nodeType: 'note',
+            content: 'the body',
+            expectRev: REV_EMPTY,
+          })
+        ).statusCode,
+      ).toBe(200);
+      const unsubscribe = subscribeCanvasUpdates('c1', received);
+      try {
+        const response = await app.inject({
+          method: 'DELETE',
+          url: '/canvas/c1/nodes/n1',
+        });
+        expect(response.statusCode, response.body).toBe(200);
+        expect(response.json()).toEqual({ success: true });
+      } finally {
+        unsubscribe();
+      }
+      expect(getCanvasStore('c1').readNode('n1')?.content).toBe('the body');
+      expect(received).not.toHaveBeenCalled();
+    } finally {
       await app.close();
     }
   });

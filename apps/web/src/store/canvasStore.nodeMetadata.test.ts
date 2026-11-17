@@ -53,7 +53,6 @@ vi.mock('@/components/Common/Toast', () => ({
 // real engine over a server copy of the Space); nothing saves the whole Space.
 const api = vi.hoisted(() => ({
   putNodeContent: vi.fn(),
-  deleteNode: vi.fn(),
   postCanvasExecute: vi.fn(),
 }));
 vi.mock('@/api/canvas', async (importActual) => ({
@@ -236,8 +235,6 @@ describe('durable node metadata actions', () => {
         rev: 'saved',
       }),
     );
-    api.deleteNode.mockReset();
-    api.deleteNode.mockResolvedValue({ success: true });
     resetCanvasSyncForTests();
     vi.mocked(postCanvasExecute).mockReset();
     vi.mocked(postCanvasExecute).mockImplementation(async (canvasId, request) =>

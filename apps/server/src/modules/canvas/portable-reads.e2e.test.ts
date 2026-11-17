@@ -957,11 +957,28 @@ describe('per-node content routes', () => {
         .content,
     ).toContain('repaired');
 
-    const deleted = await app.inject({
+    // The sidecar route leaves the record of a node of the Space alone …
+    const ignored = await app.inject({
       method: 'DELETE',
       url: '/canvas/canvas-content-broken/nodes/node-broken',
     });
-    expect(deleted.statusCode).toBe(200);
+    expect(ignored.statusCode).toBe(200);
+    expect(
+      await space('canvas-content-broken').nodes.read('node-broken'),
+    ).not.toBeNull();
+    // … the node is deleted, with its record, by a command.
+    const deleted = await app.inject({
+      method: 'POST',
+      url: '/canvas/canvas-content-broken/execute',
+      payload: {
+        commands: [{ type: 'DELETE_NODES', nodeIds: ['node-broken'] }],
+        originator: { source: 'ui' },
+      },
+    });
+    expect(deleted.statusCode, deleted.body).toBe(200);
+    expect(deleted.json().results).toEqual([
+      expect.objectContaining({ applied: true }),
+    ]);
     expect(
       await space('canvas-content-broken').nodes.read('node-broken'),
     ).toBeNull();

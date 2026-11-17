@@ -8,13 +8,26 @@ import { stripLegacyPortalTopology } from '@huabu/shared';
 const api = vi.hoisted(() => ({
   getCanvas: vi.fn(),
   postCanvasExecute: vi.fn(),
-  deleteNode: vi.fn(),
 }));
 
 vi.mock('../api', async (importOriginal) => ({
   ...(await importOriginal<typeof canvasApi>()),
   ...api,
 }));
+
+/** Node ids this page asked the server to delete (through `execute`). */
+function sentDeletions(): string[] {
+  return api.postCanvasExecute.mock.calls.flatMap(([, request]) =>
+    (
+      (request as PostCanvasExecuteRequest).commands as Array<{
+        type: string;
+        nodeIds?: string[];
+      }>
+    ).flatMap((command) =>
+      command.type === 'DELETE_NODES' ? (command.nodeIds ?? []) : [],
+    ),
+  );
+}
 
 import { useAcpProfilesStore } from './acpProfilesStore';
 import { canvasHistoryManager } from './canvasHistoryManager';
@@ -327,7 +340,7 @@ describe('legacy topology load boundary', () => {
     expect(loaded.version).toBe(9);
     expect(JSON.stringify(graph)).toBe(before);
     expect(localStorage.getItem('legacy-topology-fixture')).toBe(before);
-    expect(api.deleteNode).not.toHaveBeenCalled();
+    expect(sentDeletions()).toEqual([]);
   });
 
   it('pastes surviving ordinary content and Space previews through the store entry', () => {
@@ -349,7 +362,7 @@ describe('legacy topology load boundary', () => {
     expect(pasted.nodes[1].parentId).toBe(pasted.nodes[0].id);
     expect(pasted.edges).toHaveLength(1);
     expect(JSON.stringify(graph)).toBe(before);
-    expect(api.deleteNode).not.toHaveBeenCalled();
+    expect(sentDeletions()).toEqual([]);
   });
 
   it('drops stale preview tabs after a matching load without losing unbound chats', async () => {

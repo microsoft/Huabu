@@ -7,7 +7,6 @@ import { nodeRevisionOf } from '@huabu/shared/canvas-engine';
 
 const api = vi.hoisted(() => ({
   postCanvasExecute: vi.fn(),
-  deleteNode: vi.fn(),
   putNodeContent: vi.fn(),
   getCanvas: vi.fn(),
   preprocessNode: vi.fn(),
@@ -76,7 +75,6 @@ let body: string | undefined;
 let serverLabel: string;
 let tombstone: boolean;
 let executeGate: ReturnType<typeof deferred> | undefined;
-let deleteGate: ReturnType<typeof deferred> | undefined;
 let contentGate: ReturnType<typeof deferred> | undefined;
 let calls: string[];
 const state = () => useCanvasStore.getState();
@@ -131,7 +129,7 @@ beforeEach(() => {
     );
     return response;
   });
-  executeGate = deleteGate = contentGate = undefined;
+  executeGate = contentGate = undefined;
   version = 1;
   topology = [note];
   body = note.data.content as string;
@@ -146,16 +144,6 @@ beforeEach(() => {
     edges: [],
     version: 1,
     isLoading: false,
-  });
-  api.deleteNode.mockImplementation(async () => {
-    calls.push('delete:start');
-    const gate = deleteGate;
-    deleteGate = undefined;
-    await gate?.promise;
-    body = undefined;
-    tombstone = true;
-    calls.push('delete:committed');
-    return { success: true };
   });
   api.putNodeContent.mockImplementation(
     async (_canvas: string, _id: string, request: PutNodeContentRequest) => {
@@ -230,8 +218,8 @@ function remove() {
 /** The note is deleted, on this page and on the server. */
 async function deleted() {
   remove();
+  await vi.waitFor(() => expect(calls).toContain('delete:executed'));
   await tick();
-  await canvasHistoryManager.waitForDeletes('restore-canvas');
   calls = [];
   api.postCanvasExecute.mockClear();
   api.putNodeContent.mockClear();
@@ -322,12 +310,12 @@ describe('undo/redo persistence ordering', () => {
   });
 
   it('rapid redo while waiting for deletion ends with the note deleted and no content write', async () => {
-    const gate = (deleteGate = deferred());
+    const gate = (executeGate = deferred());
     remove();
     await tick();
     state().undo();
     await tick();
-    // The restore waits for the delete; nothing has been sent for it.
+    // The restore is queued behind the deletion; nothing has been sent for it.
     expect(calls.filter((call) => call === 'execute:start')).toHaveLength(1);
     state().redo();
     gate.resolve();
@@ -407,22 +395,27 @@ describe('undo/redo persistence ordering', () => {
     expect(state().pendingContentNodeIds()).toEqual([]);
   });
 
-  it('waits for a pending sidecar DELETE rather than restoring under it', async () => {
-    const gate = (deleteGate = deferred());
+  it('sends the restore only after the batch that deleted the node is answered, and nothing else unlinks it', async () => {
+    const gate = (executeGate = deferred());
     remove();
     await tick();
-    expect(calls).toContain('delete:start');
+    expect(calls).toEqual(['execute:start']);
     state().undo();
     await vi.advanceTimersByTimeAsync(2_000);
-    // The delete has not been answered: the restore is not sent yet.
+    // The deletion has not been answered: the restore is not sent yet.
     expect(calls).not.toContain('restore:committed');
     expect(calls.filter((call) => call === 'execute:start')).toHaveLength(1);
 
     gate.resolve();
     await drainPendingSaves();
-    expect(calls.indexOf('delete:committed')).toBeLessThan(
+    expect(calls.indexOf('delete:executed')).toBeLessThan(
       calls.indexOf('restore:committed'),
     );
+    // The server deleted the record in the batch; the page sent no request
+    // of its own that could land after the restore.
+    expect(calls.filter((call) => call.startsWith('delete:'))).toEqual([
+      'delete:executed',
+    ]);
     expect(body).toBe('The complete original body');
     expect(topology.map((node) => node.id)).toEqual([note.id]);
   });
@@ -545,12 +538,12 @@ describe('undo/redo persistence ordering', () => {
     await deleted();
     state().undo();
     await drainPendingSaves();
-    api.deleteNode.mockClear();
+    calls = [];
     state().redo();
     await drainPendingSaves();
     expect(topology).toEqual([]);
     expect(body).toBeUndefined();
-    expect(api.deleteNode).toHaveBeenCalledOnce();
+    expect(calls.filter((call) => call === 'delete:executed')).toHaveLength(1);
     expect(api.putNodeContent).not.toHaveBeenCalled();
   });
 

@@ -5,23 +5,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { nodeRevisionOf } from '@huabu/shared/canvas-engine';
 
-const {
-  associateNode,
-  deleteNode,
-  putNodeContent,
-  postCanvasExecute,
-  forkThread,
-} = vi.hoisted(() => ({
-  associateNode: vi.fn(),
-  deleteNode: vi.fn().mockResolvedValue({ success: true }),
-  putNodeContent: vi.fn(),
-  postCanvasExecute: vi.fn(),
-  forkThread: vi.fn(),
-}));
+const { associateNode, putNodeContent, postCanvasExecute, forkThread } =
+  vi.hoisted(() => ({
+    associateNode: vi.fn(),
+    putNodeContent: vi.fn(),
+    postCanvasExecute: vi.fn(),
+    forkThread: vi.fn(),
+  }));
 vi.mock('../api', async (importOriginal) => ({
   ...(await importOriginal<typeof CanvasApi>()),
   associateAgentNode: associateNode,
-  deleteNode,
   postCanvasExecute,
   postCanvasEvents: vi.fn().mockResolvedValue({ success: true }),
 }));
@@ -63,7 +56,6 @@ beforeEach(() => {
   vi.useFakeTimers();
   resetCanvasSyncForTests();
   associateNode.mockReset();
-  deleteNode.mockClear();
   postCanvasExecute.mockReset();
   putNodeContent.mockReset();
   putNodeContent.mockImplementation(
@@ -92,6 +84,16 @@ afterEach(() => {
   vi.clearAllTimers();
   vi.useRealTimers();
 });
+
+/** Node ids this page asked the server to delete (through `execute`). */
+function sentDeletions(): string[] {
+  return postCanvasExecute.mock.calls.flatMap(([, request]) =>
+    (request.commands as Array<{ type: string; nodeIds?: string[] }>).flatMap(
+      (command) =>
+        command.type === 'DELETE_NODES' ? (command.nodeIds ?? []) : [],
+    ),
+  );
+}
 
 const pendingEffects = {
   mutatedNodes: [],
@@ -192,7 +194,7 @@ describe('Question creation settlement', () => {
       );
       await useCanvasStore.getState().undo();
       expect(useCanvasStore.getState().nodes).toEqual([]);
-      expect(deleteNode).not.toHaveBeenCalled();
+      expect(sentDeletions()).toEqual([]);
       // The removal is queued behind the creation it undoes.
       expect(postCanvasExecute).toHaveBeenCalledTimes(1);
       const delta = { type: 'INSERT_NODE' as const, node };
@@ -219,7 +221,7 @@ describe('Question creation settlement', () => {
       expect(postCanvasExecute.mock.calls[1][1].commands).toEqual([
         { type: 'DELETE_NODES', nodeIds: [node.id] },
       ]);
-      await canvasHistoryManager.waitForDeletion('canvas-restore', node.id);
+      await vi.advanceTimersByTimeAsync(0);
       if (order === 'http-first') {
         useCanvasStore
           .getState()
@@ -227,8 +229,8 @@ describe('Question creation settlement', () => {
       }
       expect(useCanvasStore.getState().nodes).toEqual([]);
       expect(canvasHistoryManager.canUndo).toBe(false);
-      expect(deleteNode).toHaveBeenCalledTimes(1);
-      expect(deleteNode).toHaveBeenCalledWith('canvas-restore', node.id);
+      // The record leaves the server with that batch, and with nothing else.
+      expect(sentDeletions()).toEqual([node.id]);
       // A genuinely newer server restoration is not the stale create echo.
       useCanvasStore
         .getState()
@@ -252,7 +254,7 @@ describe('Question creation settlement', () => {
     await vi.waitFor(() => expect(postCanvasExecute).toHaveBeenCalledTimes(1));
     useCanvasStore.getState().deleteNodes([node.id]);
     expect(useCanvasStore.getState().nodes).toEqual([]);
-    expect(deleteNode).not.toHaveBeenCalled();
+    expect(sentDeletions()).toEqual([]);
     acknowledge({
       canvasId: 'canvas-restore',
       fromVersion: 1,
@@ -262,9 +264,8 @@ describe('Question creation settlement', () => {
       pendingEffects,
     });
     await awaitQuestionCreation('canvas-restore', node.id);
-    await canvasHistoryManager.waitForDeletion('canvas-restore', node.id);
+    await vi.waitFor(() => expect(sentDeletions()).toEqual([node.id]));
     expect(useCanvasStore.getState().nodes).toEqual([]);
-    expect(deleteNode).toHaveBeenCalledTimes(1);
   });
 
   it('can redo while the creation and its compensating deletion are still on their way', async () => {
@@ -289,9 +290,11 @@ describe('Question creation settlement', () => {
       pendingEffects,
     });
     await awaitQuestionCreation('canvas-restore', node.id);
-    expect(deleteNode).toHaveBeenCalledTimes(1);
-    expect(associateNode).toHaveBeenCalledTimes(1);
-    expect(deleteNode.mock.invocationCallOrder[0]).toBeLessThan(
+    await vi.waitFor(() => expect(associateNode).toHaveBeenCalledTimes(1));
+    // The removal was sent, as the second batch, before the node was
+    // associated again.
+    expect(sentDeletions()).toEqual([node.id]);
+    expect(postCanvasExecute.mock.invocationCallOrder[1]).toBeLessThan(
       associateNode.mock.invocationCallOrder[0],
     );
     expect(useCanvasStore.getState().nodes[0].data.threadId).toBe(
@@ -311,14 +314,12 @@ describe('Question creation settlement', () => {
     await useCanvasStore.getState().undo();
     await vi.waitFor(() => expect(associateNode).toHaveBeenCalledTimes(1));
     await useCanvasStore.getState().redo();
-    expect(deleteNode).not.toHaveBeenCalled();
     const delta = { type: 'INSERT_NODE' as const, node };
     useCanvasStore.getState().applyDeltasFromAgent([delta], 2, pendingEffects);
     acknowledge({ node, fromVersion: 1, toVersion: 2 });
     await awaitQuestionCreation('canvas-restore', node.id);
-    await canvasHistoryManager.waitForDeletion('canvas-restore', node.id);
+    await vi.waitFor(() => expect(sentDeletions()).toEqual([node.id]));
     expect(useCanvasStore.getState().nodes).toEqual([]);
-    expect(deleteNode).toHaveBeenCalledTimes(1);
   });
 
   it('preserves the PDF cover-clear helper and ordinary editable undo', async () => {
@@ -403,14 +404,24 @@ describe('Question undo identity reinsertion', () => {
   });
 
   it('awaits deletion and validates the old thread before autosave, without replaying old FSM', async () => {
+    // The batch that removed the node is still on its way to the server.
     let finishDelete!: () => void;
-    deleteNode.mockReturnValueOnce(
-      new Promise<void>((resolve) => {
-        finishDelete = resolve;
+    postCanvasExecute.mockReturnValueOnce(
+      new Promise((resolve) => {
+        finishDelete = () =>
+          resolve({
+            canvasId: 'canvas-restore',
+            fromVersion: 1,
+            toVersion: 1,
+            results: [{ applied: false, reason: 'no-op' }],
+            deltas: [],
+            pendingEffects,
+          });
       }),
     );
-    canvasHistoryManager.trackDelete('canvas-restore', question.id);
-    canvasHistoryManager.takeSnapshot([question], []);
+    useCanvasStore.getState()._setStateNoAutosave({ nodes: [question] });
+    useCanvasStore.getState().deleteNodes([question.id]);
+    await vi.waitFor(() => expect(sentDeletions()).toEqual([question.id]));
     const confirmed = {
       ...question,
       data: {

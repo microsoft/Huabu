@@ -2282,7 +2282,6 @@ export async function drainPendingSaves(
     // A re-association failure is reported, and rolled back, by its owner.
     await Promise.allSettled(pendingQuestionCreations(canvasId));
     if (isActive()) await nodeContentQueue.flushAll();
-    await canvasHistoryManager.waitForDeletes(canvasId);
     if (isActive() && nodeContentQueue.hasPendingRestoredContent()) {
       throw new Error(
         'Restored node content is waiting for its node to be restored. Retry before leaving this Canvas.',
@@ -2304,7 +2303,6 @@ export async function discardPendingSaves(canvasId: string): Promise<void> {
   try {
     // Keep failure records until every admitted writer has settled.
     await waitForSidecarWrites();
-    await canvasHistoryManager.waitForDeletes(canvasId);
     if (useCanvasStore.getState().canvasId !== canvasId)
       throw new Error('Space changed while discarding edits');
     preprocessQueue.cancelAll();
@@ -2774,6 +2772,31 @@ const questionCreations = new Map<
 >();
 const questionForks = new Map<string, Promise<unknown>>();
 
+/**
+ * Per node, the batch of this page that removes it from the Space and has
+ * not been answered. The server deletes the node's record in that batch, so
+ * no request is sent for it; a re-association of the same node (an Agent
+ * Node coming back by undo) waits for the removal to be answered.
+ */
+const nodeRemovals = new Map<string, Promise<void>>();
+
+function trackNodeRemoval(
+  canvasId: string,
+  nodeId: string,
+  answered: readonly (Promise<unknown> | undefined)[],
+): void {
+  const waits = answered.filter((wait) => wait !== undefined);
+  if (waits.length === 0) return;
+  const key = `${canvasId}\0${nodeId}`;
+  const pending: Promise<void> = Promise.allSettled([
+    nodeRemovals.get(key),
+    ...waits,
+  ]).then(() => {
+    if (nodeRemovals.get(key) === pending) nodeRemovals.delete(key);
+  });
+  nodeRemovals.set(key, pending);
+}
+
 export async function awaitQuestionCreation(
   canvasId: string,
   nodeId: string,
@@ -2839,7 +2862,7 @@ function restoreQuestionAssociations(
     // Wait only for already-issued writes, not saves that need this association.
     const creation = Promise.allSettled([
       after,
-      canvasHistoryManager.waitForDeletion(canvasId, node.id),
+      nodeRemovals.get(`${canvasId}\0${node.id}`),
     ]).then(async () => {
       const response = await associateAgentNode(canvasId, node.id, {
         kind: 'restore',
@@ -2919,14 +2942,12 @@ function sendRestore(
   commands: CanvasCommand[],
   restoredNodes: readonly Node[],
   held: Pick<Parameters<typeof browserSync.submit>[0], 'prev' | 'next'>,
-  deletions: readonly Promise<unknown>[],
 ): Promise<unknown> {
   for (const node of restoredNodes) restoringNodeIds.add(node.id);
   const restore = browserSync.submit({
     canvasId,
     commands,
     ...held,
-    ...(deletions.length > 0 ? { gate: Promise.all(deletions) } : {}),
     onSettled: () => {
       // Answered either way: a refusal is followed by a reload.
       for (const node of restoredNodes) {
@@ -2993,16 +3014,10 @@ function retryFailedRestores(canvasId: string, nodeId: string): void {
   const plan = planHistoryRestore(canvasId, before, state);
   if (plan.commands.length === 0) return;
   nodeContentQueue.prepareServerCreatedNodes(returning);
-  void sendRestore(
-    canvasId,
-    plan.commands,
-    returning,
-    {
-      prev: syncView(before.nodes, before.edges),
-      next: syncView(state.nodes, state.edges),
-    },
-    [],
-  );
+  void sendRestore(canvasId, plan.commands, returning, {
+    prev: syncView(before.nodes, before.edges),
+    next: syncView(state.nodes, state.edges),
+  });
 }
 
 /**
@@ -3078,19 +3093,12 @@ function restoreFromHistory(direction: 'undo' | 'redo'): void {
   let sent: Promise<unknown> | undefined;
   if (plan && plan.commands.length > 0) {
     const live = useCanvasStore.getState();
-    // A returning node's earlier sidecar delete must have landed first.
-    const deletions = restoredNodes.flatMap((node) =>
-      canvasHistoryManager.hasPendingDeletes(canvasId)
-        ? [canvasHistoryManager.waitForDeletion(canvasId, node.id)]
-        : [],
-    );
-    sent = sendRestore(
-      canvasId,
-      plan.commands,
-      restoredNodes,
-      { prev: syncView(nodes, edges), next: syncView(live.nodes, live.edges) },
-      deletions,
-    );
+    // The batch that removed a returning node is ahead of this one in the
+    // same serial lane, so the server has deleted before it restores.
+    sent = sendRestore(canvasId, plan.commands, restoredNodes, {
+      prev: syncView(nodes, edges),
+      next: syncView(live.nodes, live.edges),
+    });
   }
   if (plan && plan.restoredQuestionIds.length > 0) {
     restoreQuestionAssociations(canvasId, nodes, target.nodes, sent);
@@ -3111,18 +3119,15 @@ function restoreFromHistory(direction: 'undo' | 'redo'): void {
   preprocessQueue.reconcileHistory(nodes);
   canvasEvents.buffer(canvasId, action);
 
-  canvasHistoryManager.syncServerAfterRestore(
-    canvasId,
-    nodes,
-    target.nodes,
-    waitForSidecarWrites,
-    (nodeId) => {
-      const creation = questionCreations.get(`${canvasId}\0${nodeId}`)?.promise;
-      if (!sent) return creation;
-      // The sidecar is unlinked after the batch that removes the node.
-      return Promise.allSettled([creation, sent]).then(() => undefined);
-    },
-  );
+  // A node this undo removed leaves the server with the batch just queued.
+  const remainingIds = new Set(target.nodes.map((node) => node.id));
+  for (const node of nodes) {
+    if (remainingIds.has(node.id)) continue;
+    trackNodeRemoval(canvasId, node.id, [
+      questionCreations.get(`${canvasId}\0${node.id}`)?.promise,
+      sent,
+    ]);
+  }
 }
 
 const useCanvasStore = create<RFState>()(
@@ -3506,11 +3511,19 @@ const useCanvasStore = create<RFState>()(
         }
       }
 
-      // Drain web-only effects (preprocessing trigger, delete
-      // tracking, AI flag, transition cleanup, deferred frame fit).
+      // The server deletes a removed node's record in this batch; until it
+      // is answered the node must not be associated again.
+      for (const nodeId of pendingEffects.deletedNodeIds) {
+        trackNodeRemoval(state.canvasId, nodeId, [
+          questionCreations.get(`${state.canvasId}\0${nodeId}`)?.promise,
+          sent,
+        ]);
+      }
+
+      // Drain web-only effects (preprocessing trigger, save-queue cleanup
+      // for deleted nodes, deferred frame fit).
       runWebPostEffects({
         effects: pendingEffects,
-        canvasId: state.canvasId,
         getNodes: () => get().nodes,
         getEdges: () => get().edges,
         // A deferred Frame refit is this page's own layout around what its
@@ -3518,16 +3531,6 @@ const useCanvasStore = create<RFState>()(
         setNodes: (nodes) => set({ nodes }),
         triggerPreprocessing: scheduleAcknowledgedNodePreprocessing,
         forgetNodeContent: nodeContentQueue.forgetNode,
-        // The sidecar is unlinked only after the batch that removes the
-        // node from the Space has been answered.
-        getPendingCreation: (nodeId) => {
-          const creation = questionCreations.get(
-            `${state.canvasId}\0${nodeId}`,
-          )?.promise;
-          if (!sent) return creation;
-          return Promise.allSettled([creation, sent]).then(() => undefined);
-        },
-        waitForNodeContent: waitForSidecarWrites,
         validatePreviewNodes: (liveNodeIds) =>
           usePreviewWorkspaceStore.getState().validate(liveNodeIds),
       });
@@ -3861,7 +3864,6 @@ const useCanvasStore = create<RFState>()(
 
       const prevNodes = get().nodes;
       const prevEdges = get().edges;
-      const canvasId = get().canvasId;
       const insertedSpaceTargets = safeDeltas.flatMap((delta) =>
         delta.type === 'INSERT_NODE' &&
         delta.node.type === 'spacePreview' &&
@@ -4063,15 +4065,11 @@ const useCanvasStore = create<RFState>()(
                     ),
               deferredFitFrameIds: pendingEffects.deferredFitFrameIds,
             },
-        canvasId,
         getNodes: () => get().nodes,
         getEdges: () => get().edges,
         setNodes: (nodes) => get()._setStateNoAutosave({ nodes }),
         triggerPreprocessing: scheduleAcknowledgedNodePreprocessing,
         forgetNodeContent: nodeContentQueue.forgetNode,
-        getPendingCreation: (nodeId) =>
-          questionCreations.get(`${canvasId}\0${nodeId}`)?.promise,
-        waitForNodeContent: waitForSidecarWrites,
         validatePreviewNodes: (liveNodeIds) =>
           usePreviewWorkspaceStore.getState().validate(liveNodeIds),
       });

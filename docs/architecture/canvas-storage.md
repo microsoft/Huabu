@@ -275,7 +275,7 @@ Space hierarchy serialization also lives in `modules/canvas/write-coordinator.ts
 
 Standalone `deleteSpace()` lists membership to reject non-leaf deletion. Confirmed subtree deletion lists membership once under the hierarchy lock, validates the confirmation token, and uses `deleteSpaceFromValidatedTreeAlreadyLocked()` for its descendant-first plan instead of repeating that listing for every member. This internal path asserts active hierarchy-lock ownership and reuses the same per-Space deletion session and blob-first cleanup. The caller stops on the first failure and reports completed and remaining members; Canvas mutexes, Agent turn leases, and the Workspace lease remain held across the operation.
 
-Node-sidecar DELETE validates its shared Canvas/node identifier contract, acquires a Workspace operation lease, and captures the Workspace-bound Space handle before waiting on the Canvas mutex. Workspace activation is refused throughout queueing and deletion; the lease is released on every success or failure path.
+Node-sidecar DELETE removes the record of a node that is no longer in the Space; for a node that is in the Space it answers success and removes nothing (the batch that deletes a node deletes its record, see [canvas-realtime-sync.md](./canvas-realtime-sync.md#browser-structure-edits)). It validates its shared Canvas/node identifier contract, acquires a Workspace operation lease, and captures the Workspace-bound Space handle before waiting on the Canvas mutex. Workspace activation is refused throughout queueing and deletion; the lease is released on every success or failure path.
 
 ### 3.1 Task creation across persistence domains
 

@@ -74,7 +74,6 @@ import {
 import { currentBasis } from './space-query.js';
 import {
   assertCurrentCanvasCommands,
-  assertChildSpaceEntriesAllowed,
   WorldPreviewMutationError,
 } from './world-preview-policy.js';
 import { reconcileWorldPreviews } from './world-previews.js';
@@ -721,16 +720,16 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     },
   );
 
-  // Delete a node — removes its markdown sidecar.
+  // Remove the record (sidecar) of a node that is no longer in the Space.
   //
-  // This endpoint deliberately does not mutate structural state: the
-  // node leaves the structure through a `DELETE_NODES` command on
-  // `POST /:canvasId/execute`.
-  //
-  // What only the server can do — and therefore what this route
-  // exists for — is unlink the per-node markdown sidecar in
-  // `<canvasId>/nodes/<nodeId>.md`, since that file is invisible to
-  // the client's `state` payload.
+  // A node leaves the Space through a `DELETE_NODES` command on
+  // `POST /:canvasId/execute`, and that batch deletes the node's record in
+  // the same commit. Browser pages therefore send nothing here. The route
+  // remains for a record left without a node, and it never touches the
+  // record of a node that is in the Space: such a request is answered with
+  // success and changes nothing. (A page used to send it after a deletion,
+  // possibly seconds late, and could then unlink the body of a node another
+  // page's undo had just restored.)
   fastify.delete<{
     Params: DeleteNodeParams;
     Reply: ApiResult<DeleteNodeResponse>;
@@ -751,21 +750,9 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
           });
         }
 
-        try {
-          const nodes = canvas.state.nodes as NodeLike[];
-          await assertChildSpaceEntriesAllowed(
-            canvasId,
-            nodes,
-            nodes.filter((node) => node.id !== nodeId),
-          );
-        } catch (error) {
-          if (error instanceof WorldPreviewMutationError)
-            return reply.code(409).send({
-              code: 'SPACE_ENTRY_PROTECTED',
-              message: error.message,
-            });
-          throw error;
-        }
+        const nodes = canvas.state.nodes as NodeLike[];
+        if (nodes.some((node) => node.id === nodeId))
+          return reply.send({ success: true });
 
         try {
           await handle.nodes.delete(nodeId);

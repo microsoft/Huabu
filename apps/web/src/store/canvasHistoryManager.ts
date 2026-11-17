@@ -11,9 +11,7 @@ import {
   AGENT_NODE_PREPARATION_KEYS,
 } from '@huabu/shared/canvas-engine';
 
-import { ApiError, deleteNode } from '../api';
 import { withContentPatch } from './canvasStore/save/nodeContentFields';
-import { toast } from '../components/Common/Toast';
 
 import type { RecentAction } from '@huabu/shared';
 import type { Delta } from '@huabu/shared/canvas-engine';
@@ -48,39 +46,6 @@ export type CanvasSnapshot = {
 export type CanvasPreviewSnapshot = CanvasSnapshot & {
   actionHistory: RecentAction[];
 };
-
-// ---------------------------------------------------------------------------
-// Error message mapping
-// ---------------------------------------------------------------------------
-
-/**
- * Translate a thrown error from `deleteNode()` into a user-facing toast
- * string. Drives off the shared `CanvasErrorCode` contract — never off
- * the HTTP `message`, which the server only owns as a developer-facing
- * fallback. See `packages/shared/src/types/api/canvas.ts`.
- *
- * Buckets the three real failure modes:
- * - **`NODE_FILE_DELETE_FAILED` (500)** — `.md` unlink threw (Windows
- *   EPERM / EBUSY from AV or a file-watcher).
- * - **`CANVAS_NOT_FOUND` (404)** — canvas vanished server-side
- *   (deleted from another tab, reset, etc.).
- * - **Network / unknown** — `fetch` itself threw (offline, server
- *   down, origin guard, timeout), so there is no `ApiError` to read.
- */
-function describeDeleteFailure(error: unknown): string {
-  if (error instanceof ApiError) {
-    if (error.code === 'NODE_FILE_DELETE_FAILED') {
-      return "Couldn't delete a node's file on disk — it may be locked by another process.";
-    }
-    if (error.code === 'CANVAS_NOT_FOUND') {
-      return 'This Space no longer exists on the server.';
-    }
-    // Unknown server-emitted code: fall back to the server's English
-    // message so the user at least sees *something* meaningful.
-    return error.message;
-  }
-  return "Couldn't reach the server to delete this node.";
-}
 
 // ---------------------------------------------------------------------------
 // Snapshot helpers
@@ -210,13 +175,6 @@ class CanvasHistoryManager {
   // ---- Snapshot stacks (kept outside zustand to avoid subscriber noise) ----
   private undoStack: CanvasSnapshot[] = [];
   private redoStack: CanvasSnapshot[] = [];
-
-  // A fetch abort is not a server-side cancellation. Keep completion fences.
-  private inflightDeletes = new Map<string, Promise<void>>();
-
-  waitForDeletion(nodeId: string): Promise<void> {
-    return this.inflightDeletes.get(nodeId) ?? Promise.resolve();
-  }
 
   // ---- Gesture snapshot tracking ----
   /** True when `beginGesture` has been called but the resulting command
@@ -452,81 +410,6 @@ class CanvasHistoryManager {
 
     // History reset does not cancel persistence already admitted by the server.
   }
-
-  // ---------- Server-side sync after undo/redo ----------
-
-  /**
-   * After an undo/redo restores a snapshot, synchronise the server-side
-   * state:
-   * Reappearing nodes are held by the content queue until structure commits.
-   * Disappearing nodes use the same completion-tracked DELETE as commands.
-   */
-  syncServerAfterRestore(
-    canvasId: string,
-    prevNodes: Node[],
-    restoredNodes: Node[],
-    beforeDelete: () => Promise<void>,
-    getPendingCreation?: (nodeId: string) => Promise<void> | undefined,
-  ): void {
-    const restoredIds = new Set(restoredNodes.map((n) => n.id));
-
-    // Nodes that disappear after undo/redo
-    for (const node of prevNodes) {
-      if (!restoredIds.has(node.id)) {
-        this.trackDelete(
-          canvasId,
-          node.id,
-          beforeDelete(),
-          getPendingCreation?.(node.id),
-        );
-      }
-    }
-  }
-
-  // ---------- In-flight delete management (used by onNodesChange) ----------
-
-  /**
-   * Serialize repeated deletions and await already-issued content before unlink.
-   */
-  trackDelete(
-    canvasId: string,
-    nodeId: string,
-    beforeDelete = Promise.resolve(),
-    pendingCreation?: Promise<void>,
-  ): void {
-    const previous = this.inflightDeletes.get(nodeId);
-    // A failed creation acknowledgement may still have committed server-side.
-    const ready = pendingCreation
-      ? pendingCreation.then(
-          () => beforeDelete,
-          () => beforeDelete,
-        )
-      : beforeDelete;
-    const pending = Promise.all([previous, ready])
-      .then(async () => {
-        await deleteNode(canvasId, nodeId);
-      })
-      .catch((error) => {
-        console.error('Failed to delete node:', nodeId, error);
-        toast(describeDeleteFailure(error), { tone: 'danger' });
-      })
-      .finally(() => {
-        if (this.inflightDeletes.get(nodeId) === pending) {
-          this.inflightDeletes.delete(nodeId);
-        }
-      });
-    this.inflightDeletes.set(nodeId, pending);
-  }
-
-  async waitForDeletes(): Promise<void> {
-    while (this.inflightDeletes.size) {
-      await Promise.all(this.inflightDeletes.values());
-    }
-  }
-
-  get hasPendingDeletes(): boolean {
-    return this.inflightDeletes.size > 0;
-  }
 }
 
 export class CanvasHistoryRegistry {
@@ -629,45 +512,6 @@ export class CanvasHistoryRegistry {
 
   clearCanvas(canvasId: string): void {
     this.managers.get(canvasId)?.clear();
-  }
-
-  syncServerAfterRestore(
-    canvasId: string,
-    prevNodes: Node[],
-    restoredNodes: Node[],
-    beforeDelete: () => Promise<void>,
-    getPendingCreation?: (nodeId: string) => Promise<void> | undefined,
-  ): void {
-    this.active.syncServerAfterRestore(
-      canvasId,
-      prevNodes,
-      restoredNodes,
-      beforeDelete,
-      getPendingCreation,
-    );
-  }
-
-  trackDelete(
-    canvasId: string,
-    nodeId: string,
-    beforeDelete?: Promise<void>,
-    pendingCreation?: Promise<void>,
-  ): void {
-    this.active.trackDelete(canvasId, nodeId, beforeDelete, pendingCreation);
-  }
-
-  waitForDeletion(canvasId: string, nodeId: string): Promise<void> {
-    return (
-      this.managers.get(canvasId)?.waitForDeletion(nodeId) ?? Promise.resolve()
-    );
-  }
-
-  async waitForDeletes(canvasId: string): Promise<void> {
-    await this.managers.get(canvasId)?.waitForDeletes();
-  }
-
-  hasPendingDeletes(canvasId: string): boolean {
-    return this.managers.get(canvasId)?.hasPendingDeletes ?? false;
   }
 }
 

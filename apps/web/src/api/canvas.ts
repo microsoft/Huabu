@@ -18,7 +18,6 @@ import type {
   GetNodeContentResponse,
   PutNodeContentRequest,
   PutNodeContentResponse,
-  DeleteNodeResponse,
   ImportCanvasResponse,
   ListCanvasesResponse,
   CreateCanvasRequest,
@@ -224,18 +223,6 @@ export async function moveCanvasSelection(
     method: 'POST',
     json: request,
     fallbackMessage: 'Failed to move selection',
-  });
-}
-
-export async function deleteNode(
-  canvasId: string,
-  nodeId: string,
-  options?: { signal?: AbortSignal },
-): Promise<DeleteNodeResponse> {
-  return apiFetch<DeleteNodeResponse>(routes.canvasNode(canvasId, nodeId), {
-    method: 'DELETE',
-    signal: options?.signal,
-    fallbackMessage: 'Failed to delete node',
   });
 }
 
