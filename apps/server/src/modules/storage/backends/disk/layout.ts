@@ -182,3 +182,11 @@ export function savePendingPath(canvasId: string): string {
 export function saveResultsDir(canvasId: string): string {
   return path.join(saveDir(canvasId), 'results');
 }
+
+/**
+ * One directory per day, holding an empty marker per result record stored
+ * that day; see `DiskSpaceSaveState`'s pruning.
+ */
+export function saveResultExpiryDir(canvasId: string): string {
+  return path.join(saveDir(canvasId), 'expiry');
+}

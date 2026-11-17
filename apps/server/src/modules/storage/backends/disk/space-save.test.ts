@@ -10,7 +10,6 @@ import {
   readFileSync,
   rmSync,
   statSync,
-  utimesSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -28,6 +27,7 @@ import {
   saveDir,
   saveHeadPath,
   savePendingPath,
+  saveResultExpiryDir,
   saveResultsDir,
 } from './layout.js';
 import {
@@ -39,6 +39,10 @@ import { createDiskSpaceWrite } from './space-write.js';
 import { DiskStructuredStore } from './structured-store.js';
 import { ensureWorldCanvasOnDisk } from './world-canvas.js';
 import { setWorkspacePath } from '../../../workspace.js';
+import {
+  SAVE_RESULT_PRUNE_LIMIT,
+  SAVE_RESULT_RETENTION_MS,
+} from '../../ports/save.js';
 
 import type { DiskSaveStage } from './space-save.js';
 import type {
@@ -393,8 +397,8 @@ describe('Disk reliable save', () => {
     expect(readdirSync(saveResultsDir(CANVAS))).toHaveLength(1);
   });
 
-  it('sweeps expired results at most once an hour', async () => {
-    let clock = 10_000_000_000;
+  it('removes expired results with every write that stores one, oldest day first', async () => {
+    let clock = 400 * DAY_MS + 1_000;
     const save = createDiskSpaceSave(getCanvasStore(CANVAS), {
       now: () => clock,
     });
@@ -405,32 +409,120 @@ describe('Disk reliable save', () => {
       });
     }
     const directory = saveResultsDir(CANVAS);
-    const old = (clock - 15 * DAY_MS) / 1000;
-    for (const name of readdirSync(directory)) {
-      utimesSync(path.join(directory, name), old, old);
-    }
+    expect(readdirSync(directory)).toHaveLength(3);
 
-    // Within the hour of the first sweep nothing is scanned again.
+    // The documented window: still answered just before 14 days are over,
+    // however many writes happen meanwhile.
+    clock += SAVE_RESULT_RETENTION_MS - 1;
     await save.record({
       expectedVersion: 0,
       result: resultFor(operationId(3)),
     });
     expect(readdirSync(directory)).toHaveLength(4);
+    await expect(
+      save.lookup(resultFor(operationId(0)).key),
+    ).resolves.not.toBeNull();
 
-    clock += 2 * 60 * 60 * 1000;
+    // Once their whole day is past the window, the next write removes them
+    // — no hour to wait out, and nothing left behind.
+    clock += DAY_MS;
     await save.record({
       expectedVersion: 0,
       result: resultFor(operationId(4)),
     });
     expect(readdirSync(directory)).toHaveLength(2);
+    for (const index of [0, 1, 2]) {
+      await expect(
+        save.lookup(resultFor(operationId(index)).key),
+      ).resolves.toBeNull();
+    }
+    for (const index of [3, 4]) {
+      await expect(
+        save.lookup(resultFor(operationId(index)).key),
+      ).resolves.not.toBeNull();
+    }
+    expect(statSync(directory).isDirectory()).toBe(true);
+  });
+
+  it('stays bounded under sustained writes: a few thousand records do not outlive the window', async () => {
+    // A browser stores one record per edit. 150 edits a day for 24 days.
+    const PER_DAY = 150;
+    const DAYS = 24;
+    let clock = 400 * DAY_MS;
+    const save = createDiskSpaceSave(getCanvasStore(CANVAS), {
+      now: () => clock,
+    });
+    const directory = saveResultsDir(CANVAS);
+    let written = 0;
+    let largest = 0;
+    for (let day = 0; day < DAYS; day += 1) {
+      for (let edit = 0; edit < PER_DAY; edit += 1) {
+        clock = (400 + day) * DAY_MS + edit * 1_000;
+        await save.record({
+          expectedVersion: 0,
+          result: resultFor(operationId(written)),
+        });
+        written += 1;
+      }
+      largest = Math.max(largest, readdirSync(directory).length);
+    }
+    expect(written).toBe(3_600);
+    // Never more than the window holds: 14 days, plus the day in progress
+    // and the one that is expiring.
+    const windowDays = SAVE_RESULT_RETENTION_MS / DAY_MS;
+    expect(largest).toBeLessThanOrEqual((windowDays + 2) * PER_DAY);
+    expect(readdirSync(directory).length).toBeLessThanOrEqual(
+      (windowDays + 2) * PER_DAY,
+    );
+    // The first day's records are gone, the last day's are all there.
     await expect(
       save.lookup(resultFor(operationId(0)).key),
     ).resolves.toBeNull();
     await expect(
-      save.lookup(resultFor(operationId(4)).key),
+      save.lookup(resultFor(operationId(written - PER_DAY)).key),
     ).resolves.not.toBeNull();
-    expect(statSync(directory).isDirectory()).toBe(true);
-  });
+    // No bookkeeping is left for the days that are gone.
+    expect(readdirSync(saveResultExpiryDir(CANVAS)).length).toBeLessThanOrEqual(
+      windowDays + 2,
+    );
+  }, 120_000);
+
+  it('works off a backlog at a fixed rate per write, wherever the expired files sort', async () => {
+    // 1,000 records written in one day, then nothing for a month.
+    let clock = 400 * DAY_MS;
+    const save = createDiskSpaceSave(getCanvasStore(CANVAS), {
+      now: () => clock,
+    });
+    const BACKLOG = 1_000;
+    for (let index = 0; index < BACKLOG; index += 1) {
+      await save.record({
+        expectedVersion: 0,
+        result: resultFor(operationId(index)),
+      });
+    }
+    const directory = saveResultsDir(CANVAS);
+    expect(readdirSync(directory)).toHaveLength(BACKLOG);
+
+    clock += 30 * DAY_MS;
+    for (let write = 1; write <= 5; write += 1) {
+      await save.record({
+        expectedVersion: 0,
+        result: resultFor(operationId(BACKLOG + write)),
+      });
+      // Each write removes exactly the per-write limit of expired records.
+      expect(readdirSync(directory)).toHaveLength(
+        BACKLOG - write * SAVE_RESULT_PRUNE_LIMIT + write,
+      );
+    }
+    // And the rest follows with the writes after it.
+    for (let write = 6; write <= 20; write += 1) {
+      await save.record({
+        expectedVersion: 0,
+        result: resultFor(operationId(BACKLOG + write)),
+      });
+    }
+    expect(readdirSync(directory)).toHaveLength(20);
+  }, 120_000);
 
   // ─── Review records ───────────────────────────────────────────────────────
 

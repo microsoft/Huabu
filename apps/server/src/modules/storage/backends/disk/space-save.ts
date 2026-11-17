@@ -46,12 +46,14 @@ import {
   existsSync,
   fsyncSync,
   mkdirSync,
+  opendirSync,
   openSync,
   readdirSync,
   readFileSync,
   renameSync,
+  rmdirSync,
   rmSync,
-  statSync,
+  writeFileSync,
   writeSync,
 } from 'node:fs';
 import path from 'node:path';
@@ -61,6 +63,7 @@ import {
   saveDir,
   saveHeadPath,
   savePendingPath,
+  saveResultExpiryDir,
   saveResultsDir,
 } from './layout.js';
 import { writeDiskChanges } from './space-logs.js';
@@ -241,11 +244,23 @@ function storedOf(file: ResultFile): StoredSaveResult {
   };
 }
 
-/** When each Space's result directory was last swept, per process. */
-const lastPruneAt = new Map<string, number>();
-const PRUNE_INTERVAL_MS = 60 * 60 * 1000;
-/** Upper bound on `stat` calls one sweep may make. */
-const PRUNE_SCAN_LIMIT = 512;
+/**
+ * Result records are grouped for expiry by the day they were stored.
+ *
+ * Their files are named by a hash of the key, so a directory listing says
+ * nothing about age and "the oldest" cannot be found without reading them
+ * all. Each stored result therefore leaves an empty marker of the same name
+ * under `expiry/<day>/`, and expiry works by day: once a whole day is past
+ * the retention window, every marker in its directory names a result that
+ * may go. A prune reads a bounded number of entries from the oldest such
+ * directory and removes them — every entry it reads is one it removes, so
+ * it always makes progress, and it never lists the results directory.
+ */
+const EXPIRY_DAY_MS = 24 * 60 * 60 * 1000;
+
+function expiryDay(time: number): number {
+  return Math.floor(time / EXPIRY_DAY_MS);
+}
 
 /**
  * The reliable-save files of one Space, shared by its `write` and its `save`.
@@ -385,8 +400,23 @@ export class DiskSpaceSaveState {
     // First writer wins, and a recovery re-run must not replace the file a
     // previous run already installed.
     if (existsSync(target)) return;
+    // The marker first: a crash between the two leaves a marker without a
+    // result, which the prune removes, never a result nothing will expire.
+    this.#markForExpiry(file);
     durableWriteText(target, JSON.stringify(file));
     this.#prune();
+  }
+
+  #markForExpiry(file: ResultFile): void {
+    // The day the file is stored, not `createdAt`: an intent completed by a
+    // later recovery starts its window when its result becomes readable.
+    const directory = path.join(
+      saveResultExpiryDir(this.canvasId),
+      String(expiryDay(this.#now())),
+    );
+    mkdirSync(directory, { recursive: true });
+    // Not flushed: losing a marker costs one result its expiry, not its use.
+    writeFileSync(path.join(directory, resultFilename(file)), '');
   }
 
   #resultFile(
@@ -417,24 +447,52 @@ export class DiskSpaceSaveState {
     );
   }
 
-  /** Remove a bounded number of expired results, at most once an hour. */
+  /**
+   * Remove up to {@link SAVE_RESULT_PRUNE_LIMIT} expired results. Runs with
+   * every write that stores one, so results cannot be created faster than
+   * they expire for long: the directory holds what the retention window
+   * holds, plus the day that is expiring.
+   *
+   * Cost per call: one listing of `expiry/` (one entry per day that has
+   * results, so about as many as the window has days) and at most the limit
+   * of directory entries read and files removed. Never a listing of
+   * `results/`.
+   *
+   * A result is kept for at least {@link SAVE_RESULT_RETENTION_MS} and goes
+   * when the whole day it was stored in is past that, so for at most one
+   * day more.
+   */
   #prune(): void {
-    const now = this.#now();
-    const scope = `${this.#workspacePath}\0${this.canvasId}`;
-    const last = lastPruneAt.get(scope);
-    if (last !== undefined && now - last < PRUNE_INTERVAL_MS) return;
-    lastPruneAt.set(scope, now);
     try {
-      const directory = saveResultsDir(this.canvasId);
-      const cutoff = now - SAVE_RESULT_RETENTION_MS;
-      let removed = 0;
-      for (const name of readdirSync(directory).slice(0, PRUNE_SCAN_LIMIT)) {
-        if (removed >= SAVE_RESULT_PRUNE_LIMIT) break;
-        if (!name.endsWith('.json')) continue;
-        const target = path.join(directory, name);
-        if (statSync(target).mtimeMs >= cutoff) continue;
-        rmSync(target, { force: true });
-        removed += 1;
+      const root = saveResultExpiryDir(this.canvasId);
+      // Days before this one ended more than the retention ago.
+      const firstLiveDay = expiryDay(this.#now() - SAVE_RESULT_RETENTION_MS);
+      const expired = readdirSync(root)
+        .filter((name) => /^\d+$/.test(name) && Number(name) < firstLiveDay)
+        .sort((a, b) => Number(a) - Number(b));
+      const results = saveResultsDir(this.canvasId);
+      let budget = SAVE_RESULT_PRUNE_LIMIT;
+      for (const day of expired) {
+        if (budget <= 0) break;
+        const directory = path.join(root, day);
+        const names: string[] = [];
+        const handle = opendirSync(directory);
+        try {
+          while (names.length < budget) {
+            const entry = handle.readSync();
+            if (entry === null) break;
+            names.push(entry.name);
+          }
+        } finally {
+          handle.closeSync();
+        }
+        for (const name of names) {
+          rmSync(path.join(results, name), { force: true });
+          rmSync(path.join(directory, name), { force: true });
+        }
+        // Fewer than asked for: the day is empty now.
+        if (names.length < budget) rmdirSync(directory);
+        budget -= names.length;
       }
     } catch {
       // Housekeeping only: a result that outlives its retention is harmless.
