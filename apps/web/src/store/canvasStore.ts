@@ -4822,7 +4822,7 @@ const useCanvasStore = create<RFState>()(
     },
 
     cutSelectedNodes: async () => {
-      const { nodes, canvasId } = get();
+      const { nodes, edges, canvasId } = get();
       const nodeIds = nodes.filter((n) => n.selected).map((n) => n.id);
       // A stroke-level sketch selection is owned by StrokeSelectionToolbar.
       if (
@@ -4838,8 +4838,9 @@ const useCanvasStore = create<RFState>()(
         return;
       }
       // Everything deletion would take: the selection, what Frames contain,
-      // and the notes that follow a PDF. Captured as it is being copied.
-      const taken = (all: Node[]) => {
+      // the notes that follow a PDF, and every edge touching any of them.
+      // Captured as it is being copied.
+      const taken = (all: Node[], allEdges: Edge[]) => {
         const ids = new Set(nodeIds);
         let grew = true;
         while (grew) {
@@ -4852,9 +4853,12 @@ const useCanvasStore = create<RFState>()(
           }
         }
         for (const id of includePdfNotes(all, ids)) ids.add(id);
-        return all.filter((n) => ids.has(n.id));
+        return [
+          ...all.filter((n) => ids.has(n.id)),
+          ...allEdges.filter((e) => ids.has(e.source) || ids.has(e.target)),
+        ];
       };
-      const copied = taken(nodes);
+      const copied = taken(nodes, edges);
       // Nothing is removed until it is safely on the clipboard.
       if (!(await get().copySelectedNodes())) {
         toast(t('files.copyFailed'), { tone: 'danger' });
@@ -4862,9 +4866,9 @@ const useCanvasStore = create<RFState>()(
       }
       if (get().canvasId !== canvasId) return;
       // The write takes a moment, and an agent or another gesture may have
-      // touched these nodes meanwhile. Removing them now would delete content
+      // touched these nodes or their edges meanwhile. Removing them now would delete content
       // that never reached the clipboard, so the cut stops as a plain copy.
-      const current = taken(get().nodes);
+      const current = taken(get().nodes, get().edges);
       if (
         current.length !== copied.length ||
         current.some((node, index) => node !== copied[index])

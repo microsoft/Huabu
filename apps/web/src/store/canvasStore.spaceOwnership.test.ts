@@ -273,6 +273,19 @@ it('cuts an ordinary selection by copying it and then removing it, but not durin
   );
   copy.mockClear();
 
+  // So was an edge that reached the node while the write was pending.
+  copy.mockImplementationOnce(async () => {
+    useCanvasStore.getState()._setStateNoAutosave({
+      edges: [{ id: 'late', source: note.id, target: note.id }],
+    });
+    return true;
+  });
+  vi.mocked(notifications.toast).mockClear();
+  await useCanvasStore.getState().cutSelectedNodes();
+  expect(useCanvasStore.getState().nodes).toHaveLength(1);
+  expect(notifications.toast).toHaveBeenCalledOnce();
+  copy.mockClear();
+
   // A selected edge between nodes that stay never reaches the clipboard, so
   // cut must leave it alone.
   const stay = (id: string) => ({ ...note, id, selected: false });
