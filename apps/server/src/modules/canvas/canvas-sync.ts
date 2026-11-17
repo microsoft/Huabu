@@ -10,13 +10,12 @@
  * route); every live SSE subscriber (`GET /:canvasId/sync/stream`)
  * receives the event and replays the deltas locally.
  *
- * ALL canvas writes broadcast — the out-of-band HTTP `/execute` route
- * (ACP / headless) AND the built-in / question-node agents that mutate
- * in-process via `executeOnServer` (C2). The chat SSE tool result no
- * longer applies canvas state, so the initiating tab is a plain receiver
- * that applies its own change once, from this broadcast. There is no
- * per-client echo filtering yet (`clientId` is deferred to P2, needed
- * only once user hand-edits also broadcast).
+ * ALL canvas writes broadcast — the HTTP `/execute` route (browser pages,
+ * ACP, headless callers) AND the built-in / question-node agents that
+ * mutate in-process via `executeOnServer`. The chat SSE tool result does
+ * not apply canvas state, so the initiating tab is a plain receiver. A
+ * page is not filtered out of the broadcast: it recognises the update for
+ * its own batch by `operationId`.
  */
 
 import { AsyncResource } from 'node:async_hooks';

@@ -28,7 +28,7 @@ beforeEach(() => {
   vi.useFakeTimers();
   measure.mockReset();
   canvasHistoryManager.activate('height-test', true);
-  useCanvasStore.getState()._setStateNoAutosave({
+  useCanvasStore.getState()._setStateRaw({
     canvasId: 'height-test',
     nodes: [note()],
     edges: [],
@@ -56,7 +56,7 @@ describe('store Note height toggle', () => {
 
   it('does not replay the old width when a fixed Note resizes during measurement', async () => {
     measure.mockImplementation(async () => {
-      useCanvasStore.getState()._setStateNoAutosave({ nodes: [note(800)] });
+      useCanvasStore.getState()._setStateRaw({ nodes: [note(800)] });
       return { height: 120, provisional: false };
     });
     useCanvasStore.getState().setNoteHeightMode(['n1'], 'auto');
@@ -71,7 +71,7 @@ describe('store Note height toggle', () => {
     measure.mockImplementation(async () => {
       useCanvasStore
         .getState()
-        ._setStateNoAutosave({ canvasId: 'other-canvas', nodes: [note()] });
+        ._setStateRaw({ canvasId: 'other-canvas', nodes: [note()] });
       return { height: 120, provisional: false };
     });
     useCanvasStore.getState().setNoteHeightMode(['n1'], 'auto');

@@ -72,7 +72,7 @@ const server = createFakeSpaceServer();
 
 function seed(nodes: Node[], edges: Edge[]) {
   const routed = rerouteAllEdges(nodes, edges);
-  state()._setStateNoAutosave({ nodes, edges: routed });
+  state()._setStateRaw({ nodes, edges: routed });
   server.reset(nodes, routed);
 }
 
@@ -113,7 +113,7 @@ beforeEach(() => {
   vi.useFakeTimers();
   vi.clearAllMocks();
   canvasHistoryManager.activate('routing-canvas', true);
-  state()._setStateNoAutosave({
+  state()._setStateRaw({
     nodes: [],
     edges: [],
     canvasId: 'routing-canvas',
@@ -292,7 +292,7 @@ describe('edge routing after real node drags', () => {
         screenToFlowPosition: (point) => point,
         getZoom: () => 1,
       };
-      state()._setStateNoAutosave({
+      state()._setStateRaw({
         rfInstance: instance as ReactFlowInstance,
       });
       const first = node('child-0').position;

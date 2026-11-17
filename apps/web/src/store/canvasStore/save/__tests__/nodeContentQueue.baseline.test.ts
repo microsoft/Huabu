@@ -68,7 +68,7 @@ function makeQueue(
     canvasId: 'c1',
     isLoading: false,
     nodes: [node] as Node[],
-    _setStateNoAutosave: vi.fn(),
+    _setStateRaw: vi.fn(),
     patchNodeSilent: vi.fn(),
   };
   const queue = createNodeContentQueue({
@@ -131,7 +131,7 @@ describe('nodeContentQueue baseline lifecycle', () => {
       node.data.properties = { Venue: 'UIST' };
       node.data.propertyDisplayKeys = ['Venue'];
       const { queue, state } = makeQueue(node);
-      state._setStateNoAutosave.mockImplementation(({ nodes }) => {
+      state._setStateRaw.mockImplementation(({ nodes }) => {
         state.nodes = nodes;
       });
       queue.setBaselines([node]);
@@ -171,7 +171,7 @@ describe('nodeContentQueue baseline lifecycle', () => {
     const node = noteNode('body');
     node.data.properties = { Venue: 'UIST', Score: 1 };
     const { queue, state } = makeQueue(node);
-    state._setStateNoAutosave.mockImplementation(({ nodes }) => {
+    state._setStateRaw.mockImplementation(({ nodes }) => {
       state.nodes = nodes;
     });
     queue.setBaselines([node]);
@@ -211,7 +211,7 @@ describe('nodeContentQueue baseline lifecycle', () => {
     const node = noteNode('body');
     node.data.properties = { Venue: 'UIST' };
     const { queue, state } = makeQueue(node);
-    state._setStateNoAutosave.mockImplementation(({ nodes }) => {
+    state._setStateRaw.mockImplementation(({ nodes }) => {
       state.nodes = nodes;
     });
     queue.setBaselines([node]);
@@ -425,7 +425,7 @@ describe('nodeContentQueue baseline lifecycle', () => {
     expect(putMock.mock.calls[1][2].expectRev).toBe(
       nodeRevisionOf({ content: 'Remote prompt' }),
     );
-    expect(state._setStateNoAutosave).toHaveBeenCalledWith({
+    expect(state._setStateRaw).toHaveBeenCalledWith({
       nodes: [
         expect.objectContaining({
           data: expect.objectContaining({ label: 'Remote' }),
@@ -545,7 +545,7 @@ describe('nodeContentQueue baseline lifecycle', () => {
     // Must not reject (fire-and-forget autosave path).
     await expect(queue.flushNow('c1', 'n1')).resolves.toBeUndefined();
     // User's text is never reverted on a content conflict.
-    expect(state._setStateNoAutosave).not.toHaveBeenCalled();
+    expect(state._setStateRaw).not.toHaveBeenCalled();
     expect(toastMock).toHaveBeenCalledTimes(1);
     expect(putMock).toHaveBeenCalledTimes(1);
 
@@ -637,7 +637,7 @@ describe('nodeContentQueue baseline lifecycle', () => {
       };
       toastOpts.action.onClick();
       await vi.waitFor(() => {
-        expect(state._setStateNoAutosave).toHaveBeenCalledWith({
+        expect(state._setStateRaw).toHaveBeenCalledWith({
           nodes: [
             expect.objectContaining({
               data: expect.objectContaining({ contentMissing: true }),

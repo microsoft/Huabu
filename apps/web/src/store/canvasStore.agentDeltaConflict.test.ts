@@ -38,7 +38,7 @@ function applyUpdate(
   const nodeContentRevisions = contentRevisionsOf(deltas);
   return useCanvasStore
     .getState()
-    .applyDeltasFromAgent(
+    .applyServerDeltas(
       deltas,
       toVersion,
       pendingEffects,
@@ -76,7 +76,7 @@ function roundTripReplacement(
 beforeEach(() => {
   vi.useFakeTimers();
   canvasHistoryManager.activate('canvas-1', true);
-  useCanvasStore.getState()._setStateNoAutosave({
+  useCanvasStore.getState()._setStateRaw({
     canvasId: 'canvas-1',
     nodes: [question('', 'idle')],
     edges: [],
@@ -109,7 +109,7 @@ describe('agent delta conflict protection', () => {
         style: { width: 480 },
         data: { ...before.data, style: { fontSize: 36, accent: 'teal' } },
       };
-      useCanvasStore.getState()._setStateNoAutosave({ nodes: [local] });
+      useCanvasStore.getState()._setStateRaw({ nodes: [local] });
       applyUpdate(
         [
           {
@@ -133,7 +133,7 @@ describe('agent delta conflict protection', () => {
     const before = question('', 'idle');
     canvasHistoryManager.takeSnapshot([before], []);
     const moved = { ...before, position: { x: 30, y: 0 } };
-    useCanvasStore.getState()._setStateNoAutosave({ nodes: [moved] });
+    useCanvasStore.getState()._setStateRaw({ nodes: [moved] });
     const started = {
       ...moved,
       data: {

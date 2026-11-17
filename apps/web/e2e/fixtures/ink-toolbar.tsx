@@ -75,7 +75,7 @@ export async function mountInkToolbar(
     refresh: async () => {},
   });
   // Exercise the production toolbar without creating or modifying a Space.
-  useCanvasStore.getState()._setStateNoAutosave({
+  useCanvasStore.getState()._setStateRaw({
     canvasId: 'ink-layout-fixture',
     nodes: [
       {

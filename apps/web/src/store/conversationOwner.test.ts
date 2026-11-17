@@ -104,7 +104,7 @@ beforeEach(() => {
       deferredFitFrameIds: [],
     },
   });
-  useCanvasStore.getState()._setStateNoAutosave({
+  useCanvasStore.getState()._setStateRaw({
     canvasId: 'canvas-source',
     isLoading: false,
     version: 1,
@@ -130,9 +130,7 @@ beforeEach(() => {
 
 describe('conversation owner routing', () => {
   it('acknowledges a saved draft despite an older SSE snapshot arriving during post-write validation', async () => {
-    useCanvasStore
-      .getState()
-      ._setStateNoAutosave({ canvasId: 'parent', nodes: [] });
+    useCanvasStore.getState()._setStateRaw({ canvasId: 'parent', nodes: [] });
     const oldOwner: AgentConversationOwnerResponse = {
       ...ownerView.conversationOwner,
       observation: { epoch: 'server', revision: 1 },
@@ -198,7 +196,7 @@ describe('conversation owner routing', () => {
   it.each([false, true])(
     'verifies remote configuration using a read started after the write, with stale poll failure=%s',
     async (pollFails) => {
-      useCanvasStore.getState()._setStateNoAutosave({
+      useCanvasStore.getState()._setStateRaw({
         canvasId: 'parent',
         nodes: [],
       });
@@ -364,7 +362,7 @@ describe('conversation owner routing', () => {
       ...before,
       data: { ...before.data, agentBinding: binding, agentMode: 'ask' },
     };
-    useCanvasStore.getState()._setStateNoAutosave({
+    useCanvasStore.getState()._setStateRaw({
       canvasId: 'canvas-source',
       version: 1,
       nodes: [before],
@@ -410,7 +408,7 @@ describe('conversation owner routing', () => {
         threadId: 'create-thread',
       },
     };
-    useCanvasStore.getState()._setStateNoAutosave({
+    useCanvasStore.getState()._setStateRaw({
       canvasId: 'create-canvas',
       nodes: [],
       edges: [],
@@ -461,7 +459,7 @@ describe('conversation owner routing', () => {
         threadId: 'draft-thread',
       },
     };
-    useCanvasStore.getState()._setStateNoAutosave({
+    useCanvasStore.getState()._setStateRaw({
       canvasId: 'draft-conflict',
       version: 3,
       nodes: [
@@ -503,7 +501,7 @@ describe('conversation owner routing', () => {
   });
 
   it('persists only an explicit Node cwd and clears it back to inheritance', async () => {
-    useCanvasStore.getState()._setStateNoAutosave({
+    useCanvasStore.getState()._setStateRaw({
       nodes: [
         {
           id: 'node-source',
@@ -534,7 +532,7 @@ describe('conversation owner routing', () => {
       },
     });
 
-    useCanvasStore.getState()._setStateNoAutosave({
+    useCanvasStore.getState()._setStateRaw({
       nodes: [
         {
           id: 'node-source',
@@ -596,7 +594,7 @@ describe('conversation owner routing', () => {
   });
 
   it('persists a background lifecycle update without patching a different active Canvas', async () => {
-    useCanvasStore.getState()._setStateNoAutosave({ canvasId: 'canvas-other' });
+    useCanvasStore.getState()._setStateRaw({ canvasId: 'canvas-other' });
     const before = useCanvasStore.getState().nodes[0];
 
     await patchConversationOwnerNode(ownerView, {
@@ -632,7 +630,7 @@ describe('conversation owner routing', () => {
         threadId: 'thread-source',
       },
     };
-    useCanvasStore.getState()._setStateNoAutosave({
+    useCanvasStore.getState()._setStateRaw({
       canvasId: 'canvas-source',
       nodes: [
         {
@@ -699,9 +697,9 @@ describe('conversation owner routing', () => {
   });
 
   it('validates offscreen ownership remotely and defers live-node checks while loading', async () => {
-    useCanvasStore.getState()._setStateNoAutosave({ canvasId: 'canvas-other' });
+    useCanvasStore.getState()._setStateRaw({ canvasId: 'canvas-other' });
     await expect(validateConversationView(ownerView)).resolves.toBeUndefined();
-    useCanvasStore.getState()._setStateNoAutosave({
+    useCanvasStore.getState()._setStateRaw({
       canvasId: 'canvas-source',
       isLoading: true,
       nodes: [],
@@ -710,7 +708,7 @@ describe('conversation owner routing', () => {
   });
 
   it('validates remote ownership without changing the active Canvas and rejects a deleted owner', async () => {
-    useCanvasStore.getState()._setStateNoAutosave({ canvasId: 'canvas-other' });
+    useCanvasStore.getState()._setStateRaw({ canvasId: 'canvas-other' });
     await expect(validateConversationView(ownerView)).resolves.toBeUndefined();
     expect(getOwner).toHaveBeenCalledWith(
       'canvas-source',
@@ -730,14 +728,14 @@ describe('conversation owner routing', () => {
     );
     useCanvasStore
       .getState()
-      ._setStateNoAutosave({ canvasId: 'canvas-source', nodes: [] });
+      ._setStateRaw({ canvasId: 'canvas-source', nodes: [] });
     await expect(validateConversationView(ownerView)).rejects.toThrow(
       ConversationIntegrityError,
     );
   });
 
   it('rejects mismatched presentation anchors even when the owner is offscreen', async () => {
-    useCanvasStore.getState()._setStateNoAutosave({ canvasId: 'canvas-other' });
+    useCanvasStore.getState()._setStateRaw({ canvasId: 'canvas-other' });
     for (const presentationAnchor of [
       { canvasId: 'canvas-other', nodeId: 'node-source' },
       { canvasId: 'canvas-source', nodeId: 'node-other' },
@@ -749,9 +747,9 @@ describe('conversation owner routing', () => {
   });
 
   it('reconciles a routed lifecycle response when its source becomes active', async () => {
-    useCanvasStore.getState()._setStateNoAutosave({ canvasId: 'canvas-other' });
+    useCanvasStore.getState()._setStateRaw({ canvasId: 'canvas-other' });
     postCanvasExecute.mockImplementationOnce(async () => {
-      useCanvasStore.getState()._setStateNoAutosave({
+      useCanvasStore.getState()._setStateRaw({
         canvasId: 'canvas-source',
         version: 1,
         nodes: [
@@ -863,7 +861,7 @@ describe('conversation owner routing', () => {
       ...ownerView,
       presentationAnchor: { canvasId: 'canvas-source', nodeId: 'node-source' },
     };
-    useCanvasStore.getState()._setStateNoAutosave({
+    useCanvasStore.getState()._setStateRaw({
       canvasId: 'canvas-source',
       version: 3,
       nodes: [

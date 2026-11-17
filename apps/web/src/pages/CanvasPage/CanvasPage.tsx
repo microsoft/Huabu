@@ -120,7 +120,7 @@ export default function CanvasPage() {
     )
       return;
     // Visibility changes must not leave invisible selection in Preview or clipboard actions.
-    canvas._setStateNoAutosave({
+    canvas._setStateRaw({
       nodes: canvas.nodes.map((node) =>
         node.selected && hidden.has(node.id)
           ? { ...node, selected: false }

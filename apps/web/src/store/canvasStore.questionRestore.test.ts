@@ -71,7 +71,7 @@ beforeEach(() => {
   );
   forkThread.mockReset();
   canvasHistoryManager.activate('canvas-restore', true);
-  useCanvasStore.getState()._setStateNoAutosave({
+  useCanvasStore.getState()._setStateRaw({
     canvasId: 'canvas-restore',
     nodes: [],
     edges: [],
@@ -207,9 +207,7 @@ describe('Question creation settlement', () => {
         pendingEffects,
       };
       if (order === 'sse-first') {
-        useCanvasStore
-          .getState()
-          .applyDeltasFromAgent([delta], 2, pendingEffects);
+        useCanvasStore.getState().applyServerDeltas([delta], 2, pendingEffects);
         expect(useCanvasStore.getState().nodes).toEqual([]);
         expect(canvasHistoryManager.canUndo).toBe(false);
       }
@@ -223,9 +221,7 @@ describe('Question creation settlement', () => {
       ]);
       await vi.advanceTimersByTimeAsync(0);
       if (order === 'http-first') {
-        useCanvasStore
-          .getState()
-          .applyDeltasFromAgent([delta], 2, pendingEffects);
+        useCanvasStore.getState().applyServerDeltas([delta], 2, pendingEffects);
       }
       expect(useCanvasStore.getState().nodes).toEqual([]);
       expect(canvasHistoryManager.canUndo).toBe(false);
@@ -234,7 +230,7 @@ describe('Question creation settlement', () => {
       // A genuinely newer server restoration is not the stale create echo.
       useCanvasStore
         .getState()
-        .applyDeltasFromAgent([delta], 5, pendingEffects, false, undefined, {
+        .applyServerDeltas([delta], 5, pendingEffects, false, undefined, {
           nodeContentRevisions: contentRevisionsOf([delta]),
         });
       expect(
@@ -315,7 +311,7 @@ describe('Question creation settlement', () => {
     await vi.waitFor(() => expect(associateNode).toHaveBeenCalledTimes(1));
     await useCanvasStore.getState().redo();
     const delta = { type: 'INSERT_NODE' as const, node };
-    useCanvasStore.getState().applyDeltasFromAgent([delta], 2, pendingEffects);
+    useCanvasStore.getState().applyServerDeltas([delta], 2, pendingEffects);
     acknowledge({ node, fromVersion: 1, toVersion: 2 });
     await awaitQuestionCreation('canvas-restore', node.id);
     await vi.waitFor(() => expect(sentDeletions()).toEqual([node.id]));
@@ -323,7 +319,7 @@ describe('Question creation settlement', () => {
   });
 
   it('preserves the PDF cover-clear helper and ordinary editable undo', async () => {
-    useCanvasStore.getState()._setStateNoAutosave({
+    useCanvasStore.getState()._setStateRaw({
       nodes: [
         {
           id: 'node-pdf',
@@ -419,7 +415,7 @@ describe('Question undo identity reinsertion', () => {
           });
       }),
     );
-    useCanvasStore.getState()._setStateNoAutosave({ nodes: [question] });
+    useCanvasStore.getState()._setStateRaw({ nodes: [question] });
     useCanvasStore.getState().deleteNodes([question.id]);
     await vi.waitFor(() => expect(sentDeletions()).toEqual([question.id]));
     const confirmed = {

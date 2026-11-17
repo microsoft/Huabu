@@ -38,7 +38,7 @@ beforeEach(() => {
   environment.desktop = false;
   acknowledge.mockReset().mockResolvedValue({ acknowledged: true });
   useDesktopTabStore.setState({ isActive: false });
-  useCanvasStore.getState()._setStateNoAutosave({
+  useCanvasStore.getState()._setStateRaw({
     canvasId: 'canvas-1',
     nodes: [
       {

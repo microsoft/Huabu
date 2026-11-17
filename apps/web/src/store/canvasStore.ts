@@ -565,41 +565,6 @@ export async function commitNodeProperties(
   return attempt();
 }
 
-/** Save through the ordinary queue; rejection leaves the optimistic edit intact. */
-export async function commitNodeMetadata(
-  nodeId: string,
-  patch: NodeMetadataPatch,
-): Promise<void> {
-  const state = useCanvasStore.getState();
-  const workspaceId = useWorkspaceStore.getState().workspaceId;
-  if (!selectCanWriteCanvas(state) || state.isLoading)
-    throw new Error('Canvas is not editable');
-  const node = state.nodes.find((candidate) => candidate.id === nodeId);
-  if (!node) throw new Error('Node no longer exists');
-  if (!hasValidNodeProperties(patch, true))
-    throw new Error('Invalid node metadata');
-  state.updateNodeData(nodeId, patch);
-  await nodeContentQueue.flushNow(state.canvasId, nodeId, { source: 'user' });
-  if (
-    useCanvasStore.getState().canvasId !== state.canvasId ||
-    useWorkspaceStore.getState().workspaceId !== workspaceId
-  )
-    throw new Error('Space changed while saving');
-  // Properties are saved by themselves: an unsaved body of the node, or
-  // one frozen by a conflict, does not hold them back and is not theirs to
-  // report.
-  const pending = nodeContentQueue.pendingFields(nodeId);
-  if (
-    !useCanvasStore
-      .getState()
-      .nodes.some((candidate) => candidate.id === nodeId) ||
-    [...PROPERTY_CONTENT_KEYS].some((key) => pending.has(key))
-  )
-    throw new Error(
-      'Node metadata is not saved; resolve the pending save before continuing',
-    );
-}
-
 //
 // Markdown sidecar persistence (debounced per-node PUT + serialized
 // in-flight chain) lives in `./canvasStore/save/nodeContentQueue.ts`.
@@ -650,7 +615,7 @@ type RFState = {
    * save. Accepts both an object partial and Zustand's functional
    * updater form, mirroring the wrapped `set`.
    */
-  _setStateNoAutosave: (
+  _setStateRaw: (
     partial: Partial<RFState> | ((state: RFState) => Partial<RFState>),
   ) => void;
 
@@ -1056,7 +1021,8 @@ type RFState = {
     },
   ) => void;
   /**
-   * @internal Apply a server-authored delta batch (M2 headless executor).
+   * @internal Apply the deltas of a batch the server committed — any
+   * writer's: an agent's, another page's, or this page's own.
    *
    * Bypasses the local engine — the server has already executed the
    * commands, persisted topology and content, and given us the
@@ -1064,7 +1030,7 @@ type RFState = {
    * web-only post-effects (preprocessing trigger, AI-edit flag, etc.),
    * and reconcile our local `version` to `toVersion`.
    *
-   * Commits through `_setStateNoAutosave` because the server is already
+   * Commits through `_setStateRaw` because the server is already
    * authoritative for this batch.
    *
    * Returns the ids of nodes whose incoming REPLACE/DELETE delta was
@@ -1072,7 +1038,7 @@ type RFState = {
    * content edits). Callers surface these as a
    * conflict on the originating thread's change card.
    */
-  applyDeltasFromAgent: (
+  applyServerDeltas: (
     deltas: Delta[],
     toVersion: number,
     pendingEffects: {
@@ -1785,10 +1751,10 @@ const browserSync = createBrowserSync({
     return keys.size > 0 ? (key) => keys.has(key) : null;
   },
   applyOwnResponse: (response, operationId) => {
-    useCanvasStore.getState().applyDeltasFromAgent(
+    useCanvasStore.getState().applyServerDeltas(
       response.deltas as Delta[],
       response.toVersion,
-      response.pendingEffects as Parameters<RFState['applyDeltasFromAgent']>[2],
+      response.pendingEffects as Parameters<RFState['applyServerDeltas']>[2],
       false,
       {
         events: response.orderEvents,
@@ -1825,7 +1791,7 @@ const browserSync = createBrowserSync({
     // A parent put back to the server's needs the parent-before-child order
     // React Flow requires; sibling order follows with the reload a refusal
     // asks for.
-    state._setStateNoAutosave({
+    state._setStateRaw({
       nodes: units.some((unit) => unit.unit === PARENT_UNIT)
         ? (normalizeTreeOrder(nodes as NestableNode[]) as Node[])
         : nodes,
@@ -2068,9 +2034,7 @@ let discardingUnsentEdits = false;
  * or cancel (to copy it out, or to keep trying), which leaves the page
  * exactly as it was. Every path ends in something the user sees.
  */
-export async function discardUnsentCanvasEdits(
-  canvasId: string,
-): Promise<void> {
+async function discardUnsentCanvasEdits(canvasId: string): Promise<void> {
   if (discardingUnsentEdits) return;
   const isCurrent = () => useCanvasStore.getState().canvasId === canvasId;
   if (!isCurrent()) return;
@@ -2434,7 +2398,7 @@ export async function discardPendingSaves(canvasId: string): Promise<void> {
   const state = useCanvasStore.getState();
   if (state.canvasId !== canvasId)
     throw new Error('Cannot discard edits from a different Space');
-  state._setStateNoAutosave({ isLoading: true });
+  state._setStateRaw({ isLoading: true });
   preprocessQueue.cancelAll();
   browserSync.discard(canvasId);
   const resumeContentSaves = nodeContentQueue.suspendCanvas(canvasId);
@@ -2446,7 +2410,7 @@ export async function discardPendingSaves(canvasId: string): Promise<void> {
     preprocessQueue.cancelAll();
     nodeContentQueue.discardCanvas(canvasId);
     canvasHistoryManager.clearCanvas(canvasId);
-    useCanvasStore.getState()._setStateNoAutosave({
+    useCanvasStore.getState()._setStateRaw({
       canvasId: '',
       canvasTitle: '',
       nodes: [],
@@ -2462,7 +2426,7 @@ export async function discardPendingSaves(canvasId: string): Promise<void> {
     });
   } catch (error) {
     if (useCanvasStore.getState().canvasId === canvasId)
-      useCanvasStore.getState()._setStateNoAutosave({ isLoading: false });
+      useCanvasStore.getState()._setStateRaw({ isLoading: false });
     throw error;
   } finally {
     resumeContentSaves();
@@ -2499,13 +2463,11 @@ export async function savedBeforeSignOut(): Promise<boolean> {
 export function hasUnsavedCanvasEdits(): boolean {
   const { canvasId } = useCanvasStore.getState();
   if (!canvasId) return false;
-  return (
-    hasUnsavedStructureOrContent() || browserSync.queue.hasUserPending(canvasId)
-  );
+  return hasUnsavedContent() || browserSync.queue.hasUserPending(canvasId);
 }
 
 /** Unsaved work of the per-node content PUT. */
-function hasUnsavedStructureOrContent(): boolean {
+function hasUnsavedContent(): boolean {
   const { canvasId } = useCanvasStore.getState();
   if (!canvasId) return false;
   return nodeContentQueue.hasUnsavedContent(canvasId);
@@ -2641,7 +2603,7 @@ function settleDepartingPreviewEditors(
   }
 }
 
-export function drainNodePreprocessing(): Promise<void> {
+function drainNodePreprocessing(): Promise<void> {
   return preprocessQueue.flushAll();
 }
 
@@ -2711,16 +2673,17 @@ if (typeof window !== 'undefined') {
 
 /**
  * Middleware that:
- * 1. Automatically schedules a canvas save whenever a persisted field
- *    (nodes, edges, canvasTitle) changes.
- *    Skipped while `isLoading` is true to avoid triggering a save during load.
+ * 1. Hands every change of `nodes` to the per-node content queue, which
+ *    saves the content fields that changed. Structure is not saved from
+ *    here: structural writers send commands through the send queue.
+ *    Skipped while `isLoading` is true, so a load schedules nothing.
  * 2. Automatically syncs `canUndo` / `canRedo` with the history manager
  *    after every state update, so individual actions never need to set them.
  */
-const autoSaveMiddleware =
+const contentSaveMiddleware =
   (config: StateCreator<RFState>): StateCreator<RFState> =>
   (set, get, api) => {
-    // Shared post-set logic: autosave diff + history availability sync.
+    // Shared post-set logic: content diff + history availability sync.
     const afterSet = (prev: RFState) => {
       // --- Auto-sync undo/redo availability ---
       const cur = get();
@@ -2766,7 +2729,7 @@ const autoSaveMiddleware =
     };
 
     // Also wrap `api.setState` so that external callers
-    // (e.g. useCanvasStore.setState()) trigger autosave as well.
+    // (e.g. useCanvasStore.setState()) are diffed for content as well.
     const originalSetState = api.setState;
     api.setState = (...args) => {
       const prev = get();
@@ -2775,12 +2738,12 @@ const autoSaveMiddleware =
     };
 
     const baseState = config(wrappedSet, get, api);
-    // Inject a raw setter that skips both autosave scheduling AND the
-    // canUndo/canRedo sync. Use this when the store is acknowledging
-    // server-driven updates that should not feed back into another save.
+    // Inject a raw setter that skips both the content diff AND the
+    // canUndo/canRedo sync. Use this when the store is taking in what the
+    // server already holds, which must not be queued as a content save.
     return {
       ...baseState,
-      _setStateNoAutosave: (partial) => {
+      _setStateRaw: (partial) => {
         (set as (p: typeof partial) => void)(partial);
       },
     };
@@ -2794,7 +2757,7 @@ let _dragPreviewRafId: number | null = null;
 // Pre-drag node positions captured on `onNodeDragStart`, keyed by id.
 // Used by `onNodeDragStop` to decide whether a drag actually moved a
 // node and therefore has to be sent. This is required because live drag
-// ticks commit positions through `_setStateNoAutosave`, and the drag-stop
+// ticks commit positions through `_setStateRaw`, and the drag-stop
 // resolver only emits a `SET_NODE_GEOMETRY` command when a frame / parent
 // change is involved — so a plain free-node move produces no command of
 // its own (see `submitGestureTicks`).
@@ -3020,7 +2983,7 @@ function restoreQuestionAssociations(
       const current = useCanvasStore.getState();
       if (current.canvasId !== canvasId) return;
       const confirmed = response.node as Node;
-      current._setStateNoAutosave({
+      current._setStateRaw({
         nodes: current.nodes.map((live) =>
           live.id === node.id && current.version <= response.toVersion
             ? {
@@ -3270,7 +3233,7 @@ function restoreFromHistory(direction: 'undo' | 'redo'): void {
 }
 
 const useCanvasStore = create<RFState>()(
-  autoSaveMiddleware((set, get) => ({
+  contentSaveMiddleware((set, get) => ({
     nodes: [],
     edges: [],
     canvasId: '',
@@ -3312,12 +3275,11 @@ const useCanvasStore = create<RFState>()(
         moveSelectionDialogOpen: open,
         moveSelectionAnchor: open ? (anchor ?? null) : null,
       }),
-    // Placeholder — the autoSaveMiddleware injects the real raw setter
+    // Placeholder — the contentSaveMiddleware injects the real raw setter
     // that bypasses autosave scheduling. Calling it before middleware has
     // wrapped the store would be a programmer error, so fall back to the
     // wrapped `set` (which still works, just without the suppression).
-    _setStateNoAutosave: (partial) =>
-      (set as (p: typeof partial) => void)(partial),
+    _setStateRaw: (partial) => (set as (p: typeof partial) => void)(partial),
 
     canvasTitle: '',
 
@@ -3678,17 +3640,17 @@ const useCanvasStore = create<RFState>()(
     },
 
     /**
-     * Apply a server-authored delta batch (M2 headless executor).
+     * Apply the deltas of a batch the server committed, whoever wrote it.
      *
      * Differs from `executeCommands` in three ways:
      *   1. No engine execution — we replay `deltas` directly via the
      *      shared `applyDeltas` helper.
      *   2. Nothing is sent back — server is already authoritative for
-     *      this batch; commit via `_setStateNoAutosave` and reconcile
+     *      this batch; commit via `_setStateRaw` and reconcile
      *      local `version` to `toVersion`.
      *   3. Snapshot the pre-batch state for ordinary undo.
      */
-    applyDeltasFromAgent: (
+    applyServerDeltas: (
       deltas,
       toVersion,
       pendingEffects,
@@ -3716,7 +3678,7 @@ const useCanvasStore = create<RFState>()(
         void adoptRemoteNodeContent(get().canvasId, ids);
       };
       const reconcileIncomingVersion = (): void => {
-        get()._setStateNoAutosave({
+        get()._setStateRaw({
           version: Math.max(get().version, toVersion),
         });
       };
@@ -4109,7 +4071,7 @@ const useCanvasStore = create<RFState>()(
         canvasHistoryManager.takeSnapshot(prevNodes, prevEdges);
       }
 
-      get()._setStateNoAutosave({
+      get()._setStateRaw({
         nodes: orderedNodes as Node[],
         edges: applied.edges as Edge[],
       });
@@ -4208,7 +4170,7 @@ const useCanvasStore = create<RFState>()(
             },
         getNodes: () => get().nodes,
         getEdges: () => get().edges,
-        setNodes: (nodes) => get()._setStateNoAutosave({ nodes }),
+        setNodes: (nodes) => get()._setStateRaw({ nodes }),
         triggerPreprocessing: scheduleAcknowledgedNodePreprocessing,
         forgetNodeContent: nodeContentQueue.forgetNode,
         validatePreviewNodes: (liveNodeIds) =>
@@ -4250,7 +4212,7 @@ const useCanvasStore = create<RFState>()(
       if (
         orderReplay.diverged &&
         skipped.size === 0 &&
-        !hasUnsavedStructureOrContent() &&
+        !hasUnsavedContent() &&
         !orderEvents.some((event) => remote.orderHeld(event.parentId)) &&
         // A parent change kept back leaves the node among its local
         // siblings; the answer to the change that holds it settles both.
@@ -4516,7 +4478,7 @@ const useCanvasStore = create<RFState>()(
         if (canvasId && targetId !== get().canvasId) {
           spaceAwaitingFirstLoad = targetId;
           useToolStore.getState().resetForCanvasSwitch();
-          get()._setStateNoAutosave({
+          get()._setStateRaw({
             canvasId: targetId,
             canvasTitle: '',
           });
@@ -4559,7 +4521,7 @@ const useCanvasStore = create<RFState>()(
         // its parent makes React Flow throw "Parent node not found" on the
         // first mount. This is a defensive boundary guard on untrusted
         // on-disk state — see the same invariant enforced in
-        // `applyDeltasFromAgent`.
+        // `applyServerDeltas`.
         // Give every toggleable-height node an explicit `heightMode` and
         // a numeric `style.height` materialized from its stored
         // measurement hint, so geometry no longer depends on whether the
@@ -4694,7 +4656,7 @@ const useCanvasStore = create<RFState>()(
         }
         // Do not autosave the loaded baseline again. The no-autosave setter
         // also skips history availability sync, so restore those flags here.
-        get()._setStateNoAutosave({
+        get()._setStateRaw({
           nodes: warmedNodes,
           edges: warmedEdges,
           // A refresh leaves the view where the user has it.
@@ -4929,10 +4891,10 @@ const useCanvasStore = create<RFState>()(
           err.code === 'NODE_LABEL_CONFLICT'
         ) {
           // Revert the optimistic label and surface the conflict as a
-          // toast. `_setStateNoAutosave` skips both autosave scheduling
+          // toast. `_setStateRaw` skips both autosave scheduling
           // and the content-diff hook so reverting doesn't schedule
           // another doomed PUT.
-          get()._setStateNoAutosave({
+          get()._setStateRaw({
             nodes: get().nodes.map((n) => {
               if (n.id !== id) return n;
               // Strip the optimistic `labelSource: 'user'` first so we
@@ -5676,7 +5638,7 @@ const useCanvasStore = create<RFState>()(
       });
 
       // A plain free-node move yields no command: the final position is
-      // already in the store from the live `_setStateNoAutosave` ticks. The
+      // already in the store from the live `_setStateRaw` ticks. The
       // drop is then sent as the `SET_NODE_GEOMETRY` those ticks amount to.
       // When the resolver did emit commands, `executeCommands` has already
       // sent the ticks ahead of them and this finds nothing left.
@@ -5703,7 +5665,7 @@ const useCanvasStore = create<RFState>()(
             requiresEdgeReroute: true,
           });
           if (routed.edges !== edges) {
-            get()._setStateNoAutosave({ edges: routed.edges });
+            get()._setStateRaw({ edges: routed.edges });
           }
           submitGestureTicks(edges);
           // A real move: the pre-drag snapshot beginGesture took is a
@@ -5768,7 +5730,7 @@ const useCanvasStore = create<RFState>()(
             dragging: false,
           };
         });
-        get()._setStateNoAutosave({
+        get()._setStateRaw({
           nodes: reparented
             ? (normalizeTreeOrder(nodes as NestableNode[]) as Node[])
             : nodes,
@@ -6023,7 +5985,7 @@ const useCanvasStore = create<RFState>()(
       // it lays the same Frames out.
       const beforeMeasure = { nodes: get().nodes, edges: get().edges };
       if (frameGeometryChanged) set({ nodes: nextNodes });
-      else get()._setStateNoAutosave({ nodes: nextNodes });
+      else get()._setStateRaw({ nodes: nextNodes });
       if (!resizeCtx && !isSnapSessionActive()) {
         const measuredIds = sanitized.flatMap((change) =>
           change.type === 'dimensions' && !change.resizing && change.dimensions
@@ -6062,7 +6024,7 @@ const useCanvasStore = create<RFState>()(
         // Only edge `select` reaches this path (other persisted edge
         // mutations go through `CONNECT_NODES` / `DISCONNECT_EDGE`
         // commands above). Selection is transient UI state.
-        get()._setStateNoAutosave({
+        get()._setStateRaw({
           edges: applyEdgeChanges(internalChanges, get().edges),
         });
       }

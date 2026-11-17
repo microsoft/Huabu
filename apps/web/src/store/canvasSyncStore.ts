@@ -35,7 +35,7 @@ import type { Node } from '@xyflow/react';
  *  - `snapshot` (on connect): if the server version differs from local,
  *    a mutation happened before we subscribed → reload to catch up.
  *  - `update`: if `fromVersion === local version` replay the deltas via
- *    `applyDeltasFromAgent`; if we are behind (`toVersion > local`) fall
+ *    `applyServerDeltas`; if we are behind (`toVersion > local`) fall
  *    back to a reload; older/stale updates are ignored.
  *
  * A reload replaces the whole Space, so it never runs while this page still
@@ -202,7 +202,7 @@ function catchUpContent(current: Connection): void {
           current.checkAgain = true;
           continue;
         }
-        now._setStateNoAutosave({ contentPosition: answer.position });
+        now._setStateRaw({ contentPosition: answer.position });
         current.failedChecks = 0;
       } while (current.checkAgain);
     } catch (error) {
@@ -414,11 +414,11 @@ export const useCanvasSyncStore = create<CanvasSyncState>((set, get) => ({
         toVersion > canvasStore.version &&
         event.data.title !== null
       ) {
-        canvasStore._setStateNoAutosave({ canvasTitle: event.data.title });
+        canvasStore._setStateRaw({ canvasTitle: event.data.title });
         useWorkspaceStore.getState().setSpaceTitle(canvasId, event.data.title);
       }
       if (fromVersion === canvasStore.version) {
-        skippedNodeIds = canvasStore.applyDeltasFromAgent(
+        skippedNodeIds = canvasStore.applyServerDeltas(
           deltas as Delta[],
           toVersion,
           pendingEffects as SyncPendingEffects,
@@ -444,7 +444,6 @@ export const useCanvasSyncStore = create<CanvasSyncState>((set, get) => ({
         // clobber un-persisted local edits, so the reload is held — not
         // dropped — until queued structure edits have been sent and until
         // a body being edited has been saved (`requestCanvasResync`).
-        // Incremental gap-heal (delta-log backfill) is deferred to P2.
         reload();
       }
       // else: stale/older update — ignore.

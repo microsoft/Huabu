@@ -58,7 +58,7 @@ beforeEach(() => {
   );
   vi.spyOn(notifications, 'toast').mockImplementation(() => '');
   canvasHistoryManager.activate('parent', true);
-  useCanvasStore.getState()._setStateNoAutosave({
+  useCanvasStore.getState()._setStateRaw({
     canvasId: 'parent',
     nodes: [],
     edges: [],
@@ -95,7 +95,7 @@ function knowChild() {
 it('does not undo a newly received child entry before or after ownership metadata arrives', async () => {
   useCanvasStore
     .getState()
-    .applyDeltasFromAgent([{ type: 'INSERT_NODE', node: entry } as Delta], 1, {
+    .applyServerDeltas([{ type: 'INSERT_NODE', node: entry } as Delta], 1, {
       mutatedNodes: [],
       deletedNodeIds: [],
       contentEditedNodeIds: [],
@@ -116,7 +116,7 @@ it('does not undo a newly received child entry before or after ownership metadat
 it('allows geometry undo and redo for canonical entries', async () => {
   knowChild();
   canvasHistoryManager.takeSnapshot([entry], []);
-  useCanvasStore.getState()._setStateNoAutosave({
+  useCanvasStore.getState()._setStateRaw({
     nodes: [{ ...entry, position: { x: 50, y: 60 } }],
   });
   // Undo and redo of a move are sent as commands; the server has the entry.
@@ -144,7 +144,7 @@ it.each(['loading', 'error', 'ready'] as const)(
       },
     ];
     nodes.push(...endpoints);
-    useCanvasStore.getState()._setStateNoAutosave({ nodes, edges: [edge] });
+    useCanvasStore.getState()._setStateRaw({ nodes, edges: [edge] });
     useCanvasStore.getState().deleteNodes(['node-frame'], [edge.id]);
     expect(useCanvasStore.getState().nodes).toEqual(nodes);
     expect(useCanvasStore.getState().edges).toEqual([edge]);
@@ -156,7 +156,7 @@ it.each(['loading', 'error', 'ready'] as const)(
 it('defers the complete mixed node/edge deletion while child confirmation is pending', () => {
   knowChild();
   const nodes = [entry, ...endpoints];
-  useCanvasStore.getState()._setStateNoAutosave({ nodes, edges: [edge] });
+  useCanvasStore.getState()._setStateRaw({ nodes, edges: [edge] });
   const confirm = vi.fn();
   window.addEventListener(REQUEST_DELETE_SPACE, confirm);
   try {
@@ -178,7 +178,7 @@ it('keeps selected edges when deleting a Frame with a known child entry is refus
     { ...entry, parentId: 'node-frame' },
     ...endpoints,
   ];
-  useCanvasStore.getState()._setStateNoAutosave({ nodes, edges: [edge] });
+  useCanvasStore.getState()._setStateRaw({ nodes, edges: [edge] });
   useCanvasStore.getState().deleteNodes(['node-frame'], [edge.id]);
   expect(useCanvasStore.getState().nodes).toEqual(nodes);
   expect(useCanvasStore.getState().edges).toEqual([edge]);
@@ -195,7 +195,7 @@ it('deletes ordinary nodes and selected edges in one undoable execution', async 
     data: { content: 'Ordinary' },
   };
   const nodes = [note, ...endpoints];
-  useCanvasStore.getState()._setStateNoAutosave({ nodes, edges: [edge] });
+  useCanvasStore.getState()._setStateRaw({ nodes, edges: [edge] });
   server.reset(nodes, [edge], 0);
   useCanvasStore.getState().deleteNodes([note.id], [edge.id]);
   expect(useCanvasStore.getState().nodes).toEqual(endpoints);
@@ -211,7 +211,7 @@ it('deletes ordinary nodes and selected edges in one undoable execution', async 
 
 it('also protects direct command deletion instead of relying on UI Delete', () => {
   knowChild();
-  useCanvasStore.getState()._setStateNoAutosave({ nodes: [entry] });
+  useCanvasStore.getState()._setStateRaw({ nodes: [entry] });
   useCanvasStore
     .getState()
     .executeCommands([{ type: 'DELETE_NODES', nodeIds: ['node-entry'] }]);
@@ -235,7 +235,7 @@ it('does not consume a redo snapshot that would remove a now-canonical entry', a
 
 it('lets a confirmed missing-target shortcut be deleted after metadata settles', async () => {
   useWorkspaceStore.setState({ spaceTitlesStatus: 'ready', spaceTitles: {} });
-  useCanvasStore.getState()._setStateNoAutosave({ nodes: [entry] });
+  useCanvasStore.getState()._setStateRaw({ nodes: [entry] });
   server.reset([entry], [], 0);
   useCanvasStore
     .getState()

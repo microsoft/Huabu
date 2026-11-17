@@ -51,7 +51,7 @@ function wireEvents(before: Node[], after: Node[]): SetSiblingOrderEvent[] {
 const ids = (): string[] => useCanvasStore.getState().nodes.map((n) => n.id);
 
 function seed(nodes: Node[]): void {
-  useCanvasStore.getState()._setStateNoAutosave({
+  useCanvasStore.getState()._setStateRaw({
     canvasId: 'canvas-1',
     nodes,
     edges: [],
@@ -68,7 +68,7 @@ beforeEach(() => {
 afterEach(() => {
   // A plain setState would schedule a structure save that outlives the
   // cleared timers and reads as an unsaved edit in the next test.
-  useCanvasStore.getState()._setStateNoAutosave({
+  useCanvasStore.getState()._setStateRaw({
     nodes: [],
   });
   vi.clearAllTimers();
@@ -81,12 +81,10 @@ describe('sibling order from a server update', () => {
     seed(before);
     const onDiverged = vi.fn();
 
-    useCanvasStore
-      .getState()
-      .applyDeltasFromAgent([], 2, pendingEffects, false, {
-        events: wireEvents(before, [before[1], before[2], before[0]]),
-        onDiverged,
-      });
+    useCanvasStore.getState().applyServerDeltas([], 2, pendingEffects, false, {
+      events: wireEvents(before, [before[1], before[2], before[0]]),
+      onDiverged,
+    });
 
     expect(ids()).toEqual(['b', 'c', 'a']);
     expect(useCanvasStore.getState().version).toBe(2);
@@ -98,16 +96,9 @@ describe('sibling order from a server update', () => {
     const before = [frame('f'), note('x', 'f'), note('y', 'f'), note('a')];
     seed(before);
 
-    useCanvasStore
-      .getState()
-      .applyDeltasFromAgent([], 2, pendingEffects, false, {
-        events: wireEvents(before, [
-          before[3],
-          before[0],
-          before[2],
-          before[1],
-        ]),
-      });
+    useCanvasStore.getState().applyServerDeltas([], 2, pendingEffects, false, {
+      events: wireEvents(before, [before[3], before[0], before[2], before[1]]),
+    });
 
     expect(ids()).toEqual(['a', 'f', 'y', 'x']);
   });
@@ -120,7 +111,7 @@ describe('sibling order from a server update', () => {
 
     useCanvasStore
       .getState()
-      .applyDeltasFromAgent(
+      .applyServerDeltas(
         deltas,
         2,
         pendingEffects,
@@ -138,7 +129,7 @@ describe('sibling order from a server update', () => {
     seed([...before, created]);
     const onDiverged = vi.fn();
 
-    useCanvasStore.getState().applyDeltasFromAgent(
+    useCanvasStore.getState().applyServerDeltas(
       [{ type: 'INSERT_NODE', node: created }] as Delta[],
       2,
       pendingEffects,
@@ -160,16 +151,14 @@ describe('sibling order from a server update', () => {
     const serverBefore = [note('a'), note('b'), note('c')];
     const onDiverged = vi.fn();
 
-    useCanvasStore
-      .getState()
-      .applyDeltasFromAgent([], 2, pendingEffects, false, {
-        events: wireEvents(serverBefore, [
-          serverBefore[2],
-          serverBefore[0],
-          serverBefore[1],
-        ]),
-        onDiverged,
-      });
+    useCanvasStore.getState().applyServerDeltas([], 2, pendingEffects, false, {
+      events: wireEvents(serverBefore, [
+        serverBefore[2],
+        serverBefore[0],
+        serverBefore[1],
+      ]),
+      onDiverged,
+    });
 
     expect(ids()).toEqual(['b', 'a', 'c']);
     expect(useCanvasStore.getState().version).toBe(2);
@@ -181,16 +170,14 @@ describe('sibling order from a server update', () => {
     const serverBefore = [note('a'), note('b'), note('c')];
     const onDiverged = vi.fn();
 
-    useCanvasStore
-      .getState()
-      .applyDeltasFromAgent([], 2, pendingEffects, false, {
-        events: wireEvents(serverBefore, [
-          serverBefore[2],
-          serverBefore[0],
-          serverBefore[1],
-        ]),
-        onDiverged,
-      });
+    useCanvasStore.getState().applyServerDeltas([], 2, pendingEffects, false, {
+      events: wireEvents(serverBefore, [
+        serverBefore[2],
+        serverBefore[0],
+        serverBefore[1],
+      ]),
+      onDiverged,
+    });
 
     expect(ids()).toEqual(['c', 'a', 'b']);
     expect(onDiverged).not.toHaveBeenCalled();
@@ -203,16 +190,14 @@ describe('sibling order from a server update', () => {
     const serverBefore = [note('a'), note('b'), note('c')];
     const onDiverged = vi.fn();
 
-    useCanvasStore
-      .getState()
-      .applyDeltasFromAgent([], 2, pendingEffects, false, {
-        events: wireEvents(serverBefore, [
-          serverBefore[2],
-          serverBefore[0],
-          serverBefore[1],
-        ]),
-        onDiverged,
-      });
+    useCanvasStore.getState().applyServerDeltas([], 2, pendingEffects, false, {
+      events: wireEvents(serverBefore, [
+        serverBefore[2],
+        serverBefore[0],
+        serverBefore[1],
+      ]),
+      onDiverged,
+    });
 
     expect(ids()).toEqual(['b', 'a', 'c']);
     expect(onDiverged).not.toHaveBeenCalled();
@@ -221,7 +206,7 @@ describe('sibling order from a server update', () => {
   it('leaves an update without order events exactly as before', () => {
     seed([note('a'), note('b')]);
 
-    useCanvasStore.getState().applyDeltasFromAgent([], 2, pendingEffects);
+    useCanvasStore.getState().applyServerDeltas([], 2, pendingEffects);
 
     expect(ids()).toEqual(['a', 'b']);
     expect(useCanvasStore.getState().version).toBe(2);

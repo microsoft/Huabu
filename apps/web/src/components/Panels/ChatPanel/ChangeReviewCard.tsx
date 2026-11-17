@@ -73,7 +73,7 @@ export function ChangeReviewCard({
     const { nodes, edges } = useCanvasStore.getState();
     snapshotRef.current = { nodes, edges };
     const next = applyDeltas({ nodes, edges }, deltas);
-    useCanvasStore.getState()._setStateNoAutosave({
+    useCanvasStore.getState()._setStateRaw({
       nodes: next.nodes as Node[],
       edges: next.edges as Edge[],
     });
@@ -90,7 +90,7 @@ export function ChangeReviewCard({
     snapshotRef.current = null;
     useCanvasStore
       .getState()
-      ._setStateNoAutosave({ nodes: snap.nodes, edges: snap.edges });
+      ._setStateRaw({ nodes: snap.nodes, edges: snap.edges });
   }, []);
 
   if (records.length === 0) return null;

@@ -13,7 +13,7 @@ vi.mock('../api', async (importOriginal) => ({
 import { putNodeContent } from '@/api/canvas';
 
 import useCanvasStore from './canvasStore';
-import { commitNodeMetadata, flushNodeContent } from './canvasStore';
+import { flushNodeContent } from './canvasStore';
 import { useToolStore } from './toolStore';
 
 import type * as canvasApi from '../api';
@@ -27,7 +27,7 @@ vi.mock('@/api/canvas', async (original) => ({
 beforeEach(() => {
   vi.useFakeTimers();
   vi.clearAllMocks();
-  useCanvasStore.getState()._setStateNoAutosave({
+  useCanvasStore.getState()._setStateRaw({
     canvasId: 'previous',
     canvasTitle: 'Previous Space',
     nodes: [],
@@ -72,7 +72,10 @@ describe('canvas title ownership during loading', () => {
       rev: 'saved',
     });
     await useCanvasStore.getState().loadCanvas('pdf-space');
-    await commitNodeMetadata('pdf', { properties: { Status: 'Reading' } });
+    useCanvasStore
+      .getState()
+      .updateNodeData('pdf', { properties: { Status: 'Reading' } });
+    await flushNodeContent('pdf');
     // The one key that changed; no revision, no body, no title.
     const propertySave = vi.mocked(putNodeContent).mock.calls[0][2];
     expect(propertySave).toMatchObject({

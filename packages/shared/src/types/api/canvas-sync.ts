@@ -21,14 +21,14 @@
  *    separately, see {@link canvasContentChangesQuerySchema}.
  *  - `update` — sent after every persisted `/execute` batch. Carries the
  *    structural `deltas` + `pendingEffects` the client replays via
- *    `applyDeltasFromAgent`, gated on `fromVersion === local version`.
+ *    `applyServerDeltas`, gated on `fromVersion === local version`.
  *    A Space rename also publishes one, with no deltas and the new `title`.
  *
  * `deltas` / `pendingEffects.mutatedNodes` are modelled as `unknown` on
  * the wire — they mirror the same loosely-typed payload already used by
  * `PostCanvasExecuteResponse` (the engine `Delta` / `CanvasNode` shapes
  * live in the canvas-engine module, not the API layer). The web client
- * casts them back when handing off to `applyDeltasFromAgent`.
+ * casts them back when handing off to `applyServerDeltas`.
  */
 
 import { z } from 'zod';

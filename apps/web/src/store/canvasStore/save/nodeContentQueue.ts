@@ -8,8 +8,8 @@
  * keywords / provenance) are persisted via a dedicated per-node endpoint
  * (`PUT /api/canvas/:canvasId/nodes/:nodeId/content`) that never bumps
  * the canvas-level `version` counter. This decouples editor typing from
- * viewport drags / structure autosaves so the two flows can never
- * collide on the optimistic-concurrency check.
+ * structure edits, which are sent as command batches, so the two flows can
+ * never collide on a concurrency check.
  *
  * Each node gets:
  *   - a debounced timer (via {@link createPerKeyDebouncer}) so trailing
@@ -30,7 +30,8 @@
  * body's baseline, and a body save never carries a property nobody changed
  * here.
  *
- * See `docs/node-content-api-split.md`.
+ * See `docs/architecture/canvas-realtime-sync.md` (Node content between
+ * pages).
  */
 
 import deepEqual from 'fast-deep-equal';
@@ -243,7 +244,7 @@ export type NodeContentQueueState = {
   canvasId: string;
   isLoading: boolean;
   nodes: readonly Node[];
-  _setStateNoAutosave: (partial: { nodes: Node[] }) => void;
+  _setStateRaw: (partial: { nodes: Node[] }) => void;
   patchNodeSilent: (nodeId: string, patch: Record<string, unknown>) => void;
 };
 
@@ -470,7 +471,7 @@ export type NodeContentQueue = {
    * not overlap the unsaved body — except a property this page has itself
    * changed and not saved. The whole node is fetched once that save has been
    * acknowledged. The store is written
-   * through `_setStateNoAutosave`: no save, undo entry or preprocessing run
+   * through `_setStateRaw`: no save, undo entry or preprocessing run
    * follows on this page.
    */
   adoptRemoteContent(
@@ -959,7 +960,7 @@ export function createNodeContentQueue(opts: {
           ? (currentNode.data['label'] as string)
           : null;
       if (response.label !== null && response.label !== currentLabel) {
-        state._setStateNoAutosave({
+        state._setStateRaw({
           nodes: state.nodes.map((n) =>
             n.id === nodeId
               ? {
@@ -1060,7 +1061,7 @@ export function createNodeContentQueue(opts: {
    * in-app text to the clipboard as a safety net, refetches just this
    * node's persisted sidecar, and swaps it into the store in place.
    *
-   * The refreshed content is written through `_setStateNoAutosave`, so
+   * The refreshed content is written through `_setStateRaw`, so
    * adopting it cannot schedule a redundant PUT back; the node is then
    * re-baselined to the returned server rev and unfrozen so the next
    * user edit is checked against the version we just adopted. The open
@@ -1094,7 +1095,7 @@ export function createNodeContentQueue(opts: {
     }
 
     // Overlay only the content-owned keys; UI / geometry fields stay
-    // untouched. `_setStateNoAutosave` skips the content diff so adopting
+    // untouched. `_setStateRaw` skips the content diff so adopting
     // the server state never schedules a PUT back onto disk.
     const nextNodes = opts.getState().nodes.map((n) =>
       n.id === nodeId
@@ -1118,7 +1119,7 @@ export function createNodeContentQueue(opts: {
           }
         : n,
     );
-    opts.getState()._setStateNoAutosave({ nodes: nextNodes });
+    opts.getState()._setStateRaw({ nodes: nextNodes });
 
     // Re-baseline to the server rev and unfreeze so editing resumes.
     baselineRev.set(nodeId, res.rev);
@@ -1285,7 +1286,7 @@ export function createNodeContentQueue(opts: {
     // survive. labelSource is restored to whatever was attached to
     // the last successful PUT (or stripped entirely if none).
     if (lastGood && lastGood.label !== currentLabel) {
-      state._setStateNoAutosave({
+      state._setStateRaw({
         nodes: state.nodes.map((n) => {
           if (n.id !== nodeId) return n;
           const { labelSource: _omitted, ...rest } = (n.data ?? {}) as Record<
@@ -1408,7 +1409,7 @@ export function createNodeContentQueue(opts: {
     const state = opts.getState();
     const changed = Object.keys(patch).length > 0;
     if (changed) {
-      state._setStateNoAutosave({
+      state._setStateRaw({
         nodes: state.nodes.map((n) =>
           n.id === nodeId ? { ...n, data: withContentPatch(n.data, patch) } : n,
         ),
@@ -1468,7 +1469,7 @@ export function createNodeContentQueue(opts: {
 
     if (propertySaves.has(nodeId)) remoteDuringPropertySave.add(nodeId);
     if (Object.keys(patch).length === 0) return false;
-    state._setStateNoAutosave({
+    state._setStateRaw({
       nodes: state.nodes.map((n) =>
         n.id === nodeId ? { ...n, data: withContentPatch(n.data, patch) } : n,
       ),
@@ -1828,7 +1829,7 @@ export function createNodeContentQueue(opts: {
     try {
       if (opts.onPropertiesSaved) opts.onPropertiesSaved(nodeId, patch);
       else
-        state._setStateNoAutosave({
+        state._setStateRaw({
           nodes: state.nodes.map((node) =>
             node.id !== nodeId
               ? node

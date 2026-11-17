@@ -490,7 +490,7 @@ test('cancelling child-Space deletion preserves separately selected edges', asyn
   await page.evaluate(async (entryId) => {
     const path = '/src/store/canvasStore.ts';
     const { default: store } = (await import(path)) as typeof CanvasStore;
-    store.getState()._setStateNoAutosave({
+    store.getState()._setStateRaw({
       nodes: store
         .getState()
         .nodes.map((node) => ({ ...node, selected: node.id === entryId })),
@@ -966,7 +966,7 @@ test('World clears selection when a selected top-level Space becomes nested', as
         );
       if (!node || !rootNode) throw new Error('World entry missing');
       store.getState().selectNodes([node.id, rootNode.id]);
-      store.getState()._setStateNoAutosave({
+      store.getState()._setStateRaw({
         edges: [
           ...store.getState().edges,
           {

@@ -19,9 +19,9 @@ const mocks = vi.hoisted(() => {
     isLoading: false,
     nodes: [],
     pendingContentNodeIds: vi.fn(() => []),
-    applyDeltasFromAgent: vi.fn(() => []),
+    applyServerDeltas: vi.fn(() => []),
     loadCanvas: vi.fn(async () => undefined),
-    _setStateNoAutosave: vi.fn((partial: Record<string, unknown>) => {
+    _setStateRaw: vi.fn((partial: Record<string, unknown>) => {
       Object.assign(canvasState, partial);
     }),
   };
@@ -178,13 +178,13 @@ describe('canvasSyncStore stream recovery', () => {
       },
     });
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(stream)));
-    mocks.canvasState.applyDeltasFromAgent.mockClear();
+    mocks.canvasState.applyServerDeltas.mockClear();
 
     useCanvasSyncStore.getState().connect('canvas-1');
     await vi.advanceTimersByTimeAsync(100);
 
-    expect(mocks.canvasState.applyDeltasFromAgent).toHaveBeenCalledOnce();
-    const call = mocks.canvasState.applyDeltasFromAgent.mock
+    expect(mocks.canvasState.applyServerDeltas).toHaveBeenCalledOnce();
+    const call = mocks.canvasState.applyServerDeltas.mock
       .calls[0] as unknown as [
       unknown[],
       number,
@@ -226,13 +226,13 @@ describe('canvasSyncStore stream recovery', () => {
       },
     });
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(stream)));
-    mocks.canvasState.applyDeltasFromAgent.mockClear();
-    mocks.canvasState._setStateNoAutosave.mockClear();
+    mocks.canvasState.applyServerDeltas.mockClear();
+    mocks.canvasState._setStateRaw.mockClear();
 
     useCanvasSyncStore.getState().connect('canvas-1');
     await vi.advanceTimersByTimeAsync(100);
 
-    expect(mocks.canvasState._setStateNoAutosave).toHaveBeenCalledWith({
+    expect(mocks.canvasState._setStateRaw).toHaveBeenCalledWith({
       canvasTitle: 'Renamed elsewhere',
     });
     expect(mocks.setSpaceTitle).toHaveBeenCalledWith(
@@ -240,8 +240,8 @@ describe('canvasSyncStore stream recovery', () => {
       'Renamed elsewhere',
     );
     // The update itself advances the version through the normal path.
-    expect(mocks.canvasState.applyDeltasFromAgent).toHaveBeenCalledOnce();
-    expect(mocks.canvasState.applyDeltasFromAgent.mock.calls[0]).toEqual(
+    expect(mocks.canvasState.applyServerDeltas).toHaveBeenCalledOnce();
+    expect(mocks.canvasState.applyServerDeltas.mock.calls[0]).toEqual(
       expect.arrayContaining([[], 2]),
     );
     expect(mocks.canvasState.loadCanvas).not.toHaveBeenCalled();
@@ -272,7 +272,7 @@ describe('canvasSyncStore stream recovery', () => {
       mocks.adoptRemoteNodeContent.mockClear();
       mocks.storeListeners.clear();
       mocks.canvasState.isLoading = false;
-      mocks.canvasState.applyDeltasFromAgent.mockClear();
+      mocks.canvasState.applyServerDeltas.mockClear();
     });
 
     it("hands an update's stored content revisions to the store with its deltas", async () => {
@@ -296,8 +296,8 @@ describe('canvasSyncStore stream recovery', () => {
         ],
       );
 
-      expect(mocks.canvasState.applyDeltasFromAgent).toHaveBeenCalledOnce();
-      const call = mocks.canvasState.applyDeltasFromAgent.mock
+      expect(mocks.canvasState.applyServerDeltas).toHaveBeenCalledOnce();
+      const call = mocks.canvasState.applyServerDeltas.mock
         .calls[0] as unknown as unknown[];
       expect(call[5]).toEqual({
         source: 'agent',
@@ -318,7 +318,7 @@ describe('canvasSyncStore stream recovery', () => {
         ['canvas-1', ['n2']],
       ]);
       // Content is not a version change: nothing is replayed or reloaded.
-      expect(mocks.canvasState.applyDeltasFromAgent).not.toHaveBeenCalled();
+      expect(mocks.canvasState.applyServerDeltas).not.toHaveBeenCalled();
       expect(mocks.canvasState.loadCanvas).not.toHaveBeenCalled();
     });
 

@@ -252,11 +252,11 @@ async function applyConversationOwnerPatch(
     current.canvasId === response.canvasId &&
     current.version === response.fromVersion
   ) {
-    current.applyDeltasFromAgent(
+    current.applyServerDeltas(
       response.deltas as Delta[],
       response.toVersion,
       response.pendingEffects as Parameters<
-        typeof current.applyDeltasFromAgent
+        typeof current.applyServerDeltas
       >[2],
       false,
       undefined,

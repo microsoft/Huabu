@@ -137,7 +137,7 @@ beforeEach(() => {
   tombstone = false;
   calls = [];
   canvasHistoryManager.activate('restore-canvas', true);
-  state()._setStateNoAutosave({
+  state()._setStateRaw({
     canvasId: 'restore-canvas',
     canvasTitle: 'Restore',
     nodes: [note],
@@ -265,12 +265,12 @@ describe('undo/redo persistence ordering', () => {
         id: 'node-other',
         position: { x: 100, y: 0 },
       };
-      state()._setStateNoAutosave({
+      state()._setStateRaw({
         nodes: [note, other],
         ingestionByNodeId: {},
       });
       canvasHistoryManager.takeSnapshot([note, other], []);
-      state()._setStateNoAutosave({
+      state()._setStateRaw({
         nodes: [note, { ...other, position: { x: 200, y: 0 } }],
       });
       const gate = deferred();
@@ -360,7 +360,7 @@ describe('undo/redo persistence ordering', () => {
     };
     const child = { ...note, parentId: frame.id, selected: true };
     const other = { ...child, id: 'node-other', position: { x: 400, y: 0 } };
-    state()._setStateNoAutosave({ nodes: [frame, child, other] });
+    state()._setStateRaw({ nodes: [frame, child, other] });
     topology = [frame, child, other];
     const parents = () =>
       topology

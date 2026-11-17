@@ -380,7 +380,7 @@ into the one writer.
      skips the check (backward-compatible / non-CAS callers).
    - **Client** ([`nodeContentQueue.ts`](../../apps/web/src/store/canvasStore/save/nodeContentQueue.ts)):
      a per-node baseline map, set on `loadCanvas` and on
-     `applyDeltasFromAgent` (for the nodes whose content a broadcast changed)
+     `applyServerDeltas` (for the nodes whose content a broadcast changed)
      and advanced to the server-returned `rev` after every successful write.
      **Co-delivery** — content and its baseline update through the same
      payload/store-write, and the baseline is always a revision the server

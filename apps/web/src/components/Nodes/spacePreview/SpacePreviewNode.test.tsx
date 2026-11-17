@@ -51,7 +51,7 @@ const mocks = vi.hoisted(() => ({
   state: {
     canvasId: 'source',
     nodes: [] as Node[],
-    _setStateNoAutosave: vi.fn(),
+    _setStateRaw: vi.fn(),
   },
 }));
 vi.mock('react-i18next', () => ({
@@ -184,7 +184,7 @@ beforeEach(() => {
       style: { width: 360 },
     },
   ];
-  mocks.state._setStateNoAutosave.mockImplementation((patch) =>
+  mocks.state._setStateRaw.mockImplementation((patch) =>
     Object.assign(mocks.state, patch),
   );
   host = document.createElement('div');
@@ -699,7 +699,7 @@ describe('Space Shortcut production node', () => {
     mocks.target.title = 'A very long target title that cannot fit on one line';
     render();
     expect(mocks.state.nodes[0].style?.width).toBe(360);
-    expect(mocks.state._setStateNoAutosave).not.toHaveBeenCalled();
+    expect(mocks.state._setStateRaw).not.toHaveBeenCalled();
   });
 
   it('keeps custom width across target renames', () => {
@@ -707,7 +707,7 @@ describe('Space Shortcut production node', () => {
     mocks.target.title = 'Renamed Space';
     render('fixed');
     expect(mocks.state.nodes[0].style?.width).toBe(360);
-    expect(mocks.state._setStateNoAutosave).not.toHaveBeenCalled();
+    expect(mocks.state._setStateRaw).not.toHaveBeenCalled();
     expect(host.textContent).toContain('Renamed Space');
   });
 

@@ -10,7 +10,7 @@
  * structural deltas the engine produced, and appends one row per
  * mutating batch to `<canvasDir>/.history/delta-log.jsonl`.
  *
- * Wire entry point: `POST /api/canvas/:canvasId/execute` (M2).
+ * Wire entry point: `POST /api/canvas/:canvasId/execute`.
  * Internal entry point: the agent's `canvas_commands` tool handler.
  *
  * Concurrency model: one in-flight batch per canvas, enforced by a
@@ -18,15 +18,13 @@
  * with the canvas-level monotonic `version` counter so two parallel
  * callers never observe the same prestate.
  *
- * What this module does NOT do (Phase A scoping notes):
- *   - Trigger preprocessing. The web side already drives that via the
- *     dispatch endpoint based on `pendingEffects.mutatedNodes` in the
- *     response payload; pulling preprocessing fully server-side is
- *     part of M3 once cross-tab broadcast lands.
- *   - Broadcast deltas to other tabs. M3.
- *   - Per-command granular delta log rows. Phase A writes one row per
- *     /execute call. Per-command granularity arrives in M5 alongside
- *     fine-grained `SET_*` deltas.
+ * Every committed batch is broadcast to the open pages of the Space
+ * (`publishCanvasUpdate`) unless the caller defers publication.
+ *
+ * What this module does NOT do:
+ *   - Trigger preprocessing. The originating side drives that from
+ *     `pendingEffects.mutatedNodes`.
+ *   - Per-command delta log rows: one row is written per batch.
  */
 
 import { isDeepStrictEqual } from 'node:util';
@@ -161,7 +159,7 @@ function insertedNodeIds(deltas: readonly Delta[]): Set<string> {
 // are intentionally self-contained so an accidental import cycle
 // between the route and the executor cannot occur — when these sets
 // drift we have a single failing test (per-node content round-trip) that
-// surfaces the discrepancy. See `docs/node-content-api-split.md`.
+// surfaces the discrepancy. See `docs/architecture/canvas-storage.md`.
 
 const MD_BACKED_NODE_TYPES = new Set([
   'fileReference',
@@ -875,8 +873,7 @@ export interface ExecuteOnServerOutput {
    * Subset of `PendingEffects` that clients need to drain locally.
    *
    * `mutatedNodes` is included so the web's existing `triggerPreprocessing`
-   * pipeline can still run (Phase A keeps preprocessing on the web; M3
-   * will move it server-side once cross-tab broadcast lands).
+   * pipeline can still run (the originating page drives preprocessing).
    */
   pendingEffects: {
     mutatedNodes: CanvasNode[];

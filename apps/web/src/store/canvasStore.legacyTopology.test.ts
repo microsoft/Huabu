@@ -110,7 +110,7 @@ beforeEach(() => {
   vi.useFakeTimers();
   vi.clearAllMocks();
   canvasHistoryManager.activate('canvas-loaded', true);
-  useCanvasStore.getState()._setStateNoAutosave({
+  useCanvasStore.getState()._setStateRaw({
     canvasId: '',
     nodes: [],
     edges: [],
@@ -344,9 +344,7 @@ describe('legacy topology load boundary', () => {
   });
 
   it('pastes surviving ordinary content and Space previews through the store entry', () => {
-    useCanvasStore
-      .getState()
-      ._setStateNoAutosave({ canvasId: 'canvas-loaded' });
+    useCanvasStore.getState()._setStateRaw({ canvasId: 'canvas-loaded' });
     const graph = storedGraph();
     const before = JSON.stringify(graph);
     useCanvasStore

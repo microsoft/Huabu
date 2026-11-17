@@ -50,16 +50,14 @@ export const SELECT_SAVE_RESULT = `
   WHERE s.workspace_id = ? AND r.canvas_id = ?
     AND r.principal_id = ? AND r.operation_id = ?`;
 
-const INSERT_SAVE_RESULT_COLUMNS = `
+export const INSERT_SAVE_RESULT = `
   INSERT INTO space_save_results (
     canvas_id, principal_id, operation_id, digest, at_version, created_at,
     response_json
   ) VALUES (?, ?, ?, ?, ?, ?, ?)`;
 
-export const INSERT_SAVE_RESULT = INSERT_SAVE_RESULT_COLUMNS;
-
 /** Reports `changes = 0` instead of raising when the key is already stored. */
-export const INSERT_SAVE_RESULT_IF_ABSENT = `${INSERT_SAVE_RESULT_COLUMNS}
+export const INSERT_SAVE_RESULT_IF_ABSENT = `${INSERT_SAVE_RESULT}
   ON CONFLICT (canvas_id, principal_id, operation_id) DO NOTHING`;
 
 /** Parameters: canvas id, canvas id, cutoff timestamp, row limit. */

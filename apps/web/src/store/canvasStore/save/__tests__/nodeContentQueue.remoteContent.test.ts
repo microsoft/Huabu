@@ -58,7 +58,7 @@ function makeQueue(nodes: Node[]) {
     canvasId: 'c1',
     isLoading: false,
     nodes,
-    _setStateNoAutosave: vi.fn((partial: { nodes: Node[] }) => {
+    _setStateRaw: vi.fn((partial: { nodes: Node[] }) => {
       state.nodes = partial.nodes;
     }),
     patchNodeSilent: vi.fn(),
@@ -150,7 +150,7 @@ describe('adopting content another page saved', () => {
     await expect(queue.adoptRemoteContent('c1', 'n1')).resolves.toBe(
       'unchanged',
     );
-    expect(state._setStateNoAutosave).not.toHaveBeenCalled();
+    expect(state._setStateRaw).not.toHaveBeenCalled();
     expect(adopted).not.toHaveBeenCalled();
 
     putMock.mockResolvedValue({ nodeId: 'n1', label: 'Note', rev: 'next' });
@@ -191,7 +191,7 @@ describe('adopting content another page saved', () => {
       'kept-local',
     );
     expect(getMock).toHaveBeenCalledTimes(1);
-    expect(state._setStateNoAutosave).not.toHaveBeenCalled();
+    expect(state._setStateRaw).not.toHaveBeenCalled();
     expect(data()).toMatchObject({ content: 'typed here', label: 'Note' });
     expect(data()).not.toHaveProperty('summary');
 
@@ -258,7 +258,7 @@ describe('adopting content another page saved', () => {
     respond(saved('from page A'));
 
     await expect(outcome).resolves.toBe('kept-local');
-    expect(state._setStateNoAutosave).not.toHaveBeenCalled();
+    expect(state._setStateRaw).not.toHaveBeenCalled();
     expect(data()['content']).toBe('typed during the fetch');
   });
 
@@ -303,7 +303,7 @@ describe('adopting content another page saved', () => {
     getMock.mockResolvedValueOnce(null);
     await expect(queue.adoptRemoteContent('c1', 'n1')).resolves.toBe('failed');
 
-    expect(state._setStateNoAutosave).not.toHaveBeenCalled();
+    expect(state._setStateRaw).not.toHaveBeenCalled();
     expect(data()).toEqual({ content: 'old', label: 'Note' });
   });
 
@@ -326,6 +326,6 @@ describe('adopting content another page saved', () => {
     state.nodes = [];
     respond(saved('from page A'));
     await expect(outcome).resolves.toBe('absent');
-    expect(state._setStateNoAutosave).not.toHaveBeenCalled();
+    expect(state._setStateRaw).not.toHaveBeenCalled();
   });
 });

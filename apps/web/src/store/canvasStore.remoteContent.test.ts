@@ -89,7 +89,7 @@ beforeEach(() => {
   resetCanvasSyncForTests();
   const nodes = [{ ...note(X, 0), selected: true }, note(Y, 400)];
   canvasHistoryManager.activate(SPACE, true);
-  state()._setStateNoAutosave({
+  state()._setStateRaw({
     canvasId: SPACE,
     canvasTitle: 'Content',
     nodes,
@@ -287,7 +287,7 @@ describe('a body typed on this page while an update for another node arrives', (
     state().updateNodeData(Y, { content: 'Typed while X moved' });
     // Another page moved X before this page's save was sent.
     const moved = { ...node(X), position: { x: 400, y: 300 } };
-    state().applyDeltasFromAgent(
+    state().applyServerDeltas(
       [{ type: 'REPLACE_NODE', prev: node(X), next: moved }] as never,
       2,
       {
@@ -333,7 +333,7 @@ describe('properties another page saved', () => {
   let cases = 0;
   beforeEach(() => {
     Z = `node-content-z${++cases}`;
-    state()._setStateNoAutosave({ nodes: [...state().nodes, note(Z, 800)] });
+    state()._setStateRaw({ nodes: [...state().nodes, note(Z, 800)] });
   });
 
   it('are shown with their display order, without a save or an undo entry', async () => {
@@ -521,7 +521,7 @@ describe('the revision of a node whose stored body the page does not show', () =
     // Another page moves the PDF, and yet another node.
     for (const [index, id] of [PDF, X].entries()) {
       const moved = { ...node(id), position: { x: 40 * index, y: 300 } };
-      state().applyDeltasFromAgent(
+      state().applyServerDeltas(
         [{ type: 'REPLACE_NODE', prev: node(id), next: moved }] as never,
         state().version + 1,
         {
@@ -569,7 +569,7 @@ describe("an agent's write to a PDF's properties and cover", () => {
       style: { width: 300, height: 400 },
       data: { type: 'pdf', label: 'Paper', src: 'paper.pdf' },
     };
-    state()._setStateNoAutosave({ nodes: [...state().nodes, pdf] });
+    state()._setStateRaw({ nodes: [...state().nodes, pdf] });
     // The server's copy carries the extracted text the page does not show.
     const stored = {
       ...pdf,
@@ -584,7 +584,7 @@ describe("an agent's write to a PDF's properties and cover", () => {
         propertyDisplayKeys: ['year'],
       },
     };
-    state().applyDeltasFromAgent(
+    state().applyServerDeltas(
       [{ type: 'REPLACE_NODE', prev: stored, next: written }] as never,
       state().version + 1,
       {
@@ -624,7 +624,7 @@ describe("an agent's write to a PDF's properties and cover", () => {
     // The agent clears the cover again; a page follows that too.
     const { coverUrl: _cleared, ...withoutCover } = written.data;
     void _cleared;
-    state().applyDeltasFromAgent(
+    state().applyServerDeltas(
       [
         {
           type: 'REPLACE_NODE',
@@ -671,7 +671,7 @@ describe("the revision an update brings for a node's content", () => {
       data: { ...node(id).data, content: `Body ${id}` },
     };
     const next = { ...prev, data: { ...prev.data, content } };
-    return state().applyDeltasFromAgent(
+    return state().applyServerDeltas(
       [{ type: 'REPLACE_NODE', prev, next }] as never,
       state().version + 1,
       noEffects,
@@ -719,7 +719,7 @@ describe("the revision an update brings for a node's content", () => {
     const { nodes } = state();
     useCanvasStore.setState({ nodes: [], isLoading: false });
     await vi.advanceTimersByTimeAsync(10_000);
-    state()._setStateNoAutosave({ nodes });
+    state()._setStateRaw({ nodes });
     vi.clearAllMocks();
     api.postCanvasExecute.mockImplementation(() => new Promise(() => {}));
     expect(state().pendingContentNodeIds()).toEqual([]);
@@ -853,7 +853,7 @@ describe("the revision an update brings for a node's content", () => {
         ...(options.content !== undefined ? { content: options.content } : {}),
       },
     };
-    return state().applyDeltasFromAgent(
+    return state().applyServerDeltas(
       [{ type: 'REPLACE_NODE', prev, next }] as never,
       state().version + 1,
       noEffects,
@@ -1057,7 +1057,7 @@ describe('a node frozen by a content conflict the user has not answered', () => 
     const deltas = [{ type: 'REPLACE_NODE', prev, next }] as never;
     // The server names the stored revision of a node whose content changed.
     const nodeContentRevisions = contentRevisionsOf(deltas);
-    return state().applyDeltasFromAgent(
+    return state().applyServerDeltas(
       deltas,
       version + 1,
       noEffects,
@@ -1223,7 +1223,7 @@ describe('a node frozen by a content conflict the user has not answered', () => 
     const server = { ...node(Y), data: { ...node(Y).data, content: 'Theirs' } };
     const next = { ...server, data: { ...server.data, content: 'Agent' } };
     api.getNodeContent.mockClear();
-    const skipped = state().applyDeltasFromAgent(
+    const skipped = state().applyServerDeltas(
       [{ type: 'REPLACE_NODE', prev: server, next }] as never,
       state().version + 1,
       noEffects,
@@ -1254,7 +1254,7 @@ describe('a node frozen by a content conflict the user has not answered', () => 
     });
     const server = { ...node(Y), data: { ...node(Y).data, content: 'Theirs' } };
     const next = { ...server, data: { ...server.data, content: 'Agent' } };
-    const skipped = state().applyDeltasFromAgent(
+    const skipped = state().applyServerDeltas(
       [{ type: 'REPLACE_NODE', prev: server, next }] as never,
       state().version + 1,
       noEffects,

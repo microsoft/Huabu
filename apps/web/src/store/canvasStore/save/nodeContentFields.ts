@@ -13,7 +13,7 @@
  *     body and decide which nodes own a `.md` sidecar.
  *
  * Keep in sync with the server-side `MD_BACKED_NODE_TYPES` /
- * `putNodeContentBodySchema`. See `docs/node-content-api-split.md`.
+ * `putNodeContentBodySchema`. See `docs/architecture/canvas-realtime-sync.md`.
  */
 
 /**

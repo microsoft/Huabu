@@ -104,10 +104,6 @@ export class InFlightSet {
     }
   }
 
-  has(entryId: string): boolean {
-    return this.entries.has(entryId);
-  }
-
   get size(): number {
     return this.entries.size;
   }

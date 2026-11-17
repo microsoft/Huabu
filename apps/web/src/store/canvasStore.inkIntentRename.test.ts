@@ -55,7 +55,7 @@ describe('User rename ownership and save recovery', () => {
   });
 
   it('allows navigation after a rejected rename is reverted, preserving concurrent content edits', async () => {
-    useCanvasStore.getState()._setStateNoAutosave({
+    useCanvasStore.getState()._setStateRaw({
       canvasId: 'canvas-rename-conflict',
       isLoading: false,
       nodes: [
@@ -104,7 +104,7 @@ describe('User rename ownership and save recovery', () => {
   });
 
   it('clears pending inferred naming even for an unchanged user label', async () => {
-    useCanvasStore.getState()._setStateNoAutosave({
+    useCanvasStore.getState()._setStateRaw({
       canvasId: 'canvas-1',
       nodes: [
         {

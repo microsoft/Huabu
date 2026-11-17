@@ -95,7 +95,7 @@ function styleOf(node: UnitNode): Record<string, unknown> | undefined {
 }
 
 /** Every unit name `node` has a value for. */
-export function unitsOf(node: UnitNode): string[] {
+function unitsOf(node: UnitNode): string[] {
   const units: string[] = [POSITION_UNIT, SIZE_UNIT, PARENT_UNIT];
   const data = dataOf(node);
   for (const key of Object.keys(data)) {

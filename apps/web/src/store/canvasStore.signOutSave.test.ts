@@ -44,7 +44,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   api.preprocessNode.mockResolvedValue({ success: true });
   api.postCanvasEvents.mockResolvedValue({ ok: true });
-  state()._setStateNoAutosave({
+  state()._setStateRaw({
     canvasId: 'signout-canvas',
     canvasTitle: 'Sign-out',
     nodes: [note],

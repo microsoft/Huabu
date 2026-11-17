@@ -196,10 +196,6 @@ export interface BrowserSync {
   prepareRemote(input: PrepareRemoteInput): PreparedRemote;
   /** Run `reload` now, or as soon as the queue has nothing left to send. */
   deferReload(canvasId: string): void;
-  /** Unanswered entries, or confirmed ones whose update has not arrived. */
-  isBusy(canvasId: string): boolean;
-  /** Resolves when not busy, or as soon as the queue stalls. */
-  whenQuiet(canvasId: string): Promise<'quiet' | 'stalled'>;
   /** The page adopted a whole-Space server state: forget every hold. */
   adoptedServerState(canvasId: string): void;
   /** Drop unsent changes; a wanted reload then runs. */
@@ -228,7 +224,6 @@ export function createBrowserSync(deps: BrowserSyncDeps): BrowserSync {
     string,
     Array<{ offset: number; run: NonNullable<SubmitInput['onSettled']> }>
   >();
-  const quietWaiters = new Set<() => void>();
 
   /** A queued batch whose holds this page still has. */
   interface Batch extends QueuedRunRef {
@@ -325,10 +320,6 @@ export function createBrowserSync(deps: BrowserSyncDeps): BrowserSync {
       .map(({ entryId, start, count }) => ({ entryId, start, count }));
   };
 
-  const changed = (): void => {
-    for (const waiter of [...quietWaiters]) waiter();
-  };
-
   const release = (
     canvasId: string,
     entryId: string,
@@ -409,7 +400,6 @@ export function createBrowserSync(deps: BrowserSyncDeps): BrowserSync {
       const hooks = settleHooks.get(entry.id);
       settleHooks.delete(entry.id);
       for (const hook of hooks ?? []) hook.run(outcome, hook.offset);
-      changed();
     }
   };
 
@@ -421,7 +411,6 @@ export function createBrowserSync(deps: BrowserSyncDeps): BrowserSync {
       // The discard is followed by a reload, which clears the holds —
       // except where the caller says it is not.
       if (releaseDiscarded) release(canvasId, entry.id, new Set());
-      changed();
       return;
     }
     if (outcome.kind === 'failed') {
@@ -447,7 +436,6 @@ export function createBrowserSync(deps: BrowserSyncDeps): BrowserSync {
         } finally {
           releaseDiscarded = false;
         }
-        changed();
         return;
       }
       // A derived report the queue gave up is nothing the user did.
@@ -456,7 +444,6 @@ export function createBrowserSync(deps: BrowserSyncDeps): BrowserSync {
       // A request that was never sent changed nothing on the server; the
       // released holds already put this page back.
       if (outcome.sent) reloadWanted.add(canvasId);
-      changed();
       return;
     }
 
@@ -502,7 +489,6 @@ export function createBrowserSync(deps: BrowserSyncDeps): BrowserSync {
       deps.onRejected({ canvasId, entry, outcome });
       reloadWanted.add(canvasId);
     }
-    changed();
   };
 
   const queue = createSendQueue({
@@ -515,16 +501,7 @@ export function createBrowserSync(deps: BrowserSyncDeps): BrowserSync {
 
   queue.subscribe((status: SendQueueStatus) => {
     if (status.phase === 'idle') runReloadIfIdle(status.canvasId);
-    changed();
   });
-
-  const isBusy = (canvasId: string): boolean => {
-    if (queue.hasPending(canvasId)) return true;
-    for (const pending of awaitingEcho.values()) {
-      if (pending.canvasId === canvasId) return true;
-    }
-    return false;
-  };
 
   return {
     queue,
@@ -613,7 +590,6 @@ export function createBrowserSync(deps: BrowserSyncDeps): BrowserSync {
           }
           if (own && operationId !== undefined)
             release(deps.getState().canvasId, operationId, result.covered);
-          changed();
         },
       };
     },
@@ -621,25 +597,6 @@ export function createBrowserSync(deps: BrowserSyncDeps): BrowserSync {
     deferReload(canvasId) {
       reloadWanted.add(canvasId);
       runReloadIfIdle(canvasId);
-    },
-
-    isBusy,
-
-    whenQuiet(canvasId) {
-      return new Promise((resolve) => {
-        const check = (): boolean => {
-          if (queue.status(canvasId).phase === 'stalled') {
-            quietWaiters.delete(check);
-            resolve('stalled');
-            return true;
-          }
-          if (isBusy(canvasId)) return false;
-          quietWaiters.delete(check);
-          resolve('quiet');
-          return true;
-        };
-        if (!check()) quietWaiters.add(check);
-      });
     },
 
     adoptedServerState(canvasId) {
@@ -653,12 +610,10 @@ export function createBrowserSync(deps: BrowserSyncDeps): BrowserSync {
       }
       reloadWanted.delete(canvasId);
       forgetReloadRetry(canvasId);
-      changed();
     },
 
     discard(canvasId) {
       queue.discard(canvasId);
-      changed();
     },
 
     reset() {
@@ -676,7 +631,6 @@ export function createBrowserSync(deps: BrowserSyncDeps): BrowserSync {
       for (const canvasId of [...reloadRetries.keys()])
         forgetReloadRetry(canvasId);
       settleHooks.clear();
-      changed();
     },
   };
 }

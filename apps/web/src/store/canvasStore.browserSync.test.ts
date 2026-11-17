@@ -121,10 +121,10 @@ async function answer(index: number, response = commit(index)) {
 function deliver(update: PostCanvasExecuteResponse, source: 'ui' | 'agent') {
   const current = state();
   if (update.fromVersion !== current.version) return false;
-  current.applyDeltasFromAgent(
+  current.applyServerDeltas(
     update.deltas as Delta[],
     update.toVersion,
-    update.pendingEffects as Parameters<typeof current.applyDeltasFromAgent>[2],
+    update.pendingEffects as Parameters<typeof current.applyServerDeltas>[2],
     false,
     { events: update.orderEvents },
     {
@@ -188,7 +188,7 @@ beforeEach(() => {
   const nodes = [note(X, 0, 0), note(Y, 0, 300)];
   server.reset(nodes, [], 1);
   canvasHistoryManager.activate(SPACE, true);
-  state()._setStateNoAutosave({
+  state()._setStateRaw({
     canvasId: SPACE,
     canvasTitle: 'Sync',
     nodes,
@@ -717,7 +717,7 @@ describe('a free drag', () => {
 
   it('a gesture that ends without a command still sends what its ticks changed', async () => {
     state().onNodeResizeStart();
-    state()._setStateNoAutosave({
+    state()._setStateRaw({
       nodes: state().nodes.map((n) =>
         n.id === X ? { ...n, style: { width: 360, height: 200 } } : n,
       ),
@@ -1173,7 +1173,7 @@ describe('undo and redo beyond what commands can say', () => {
   it('records what a gesture changed even when its closing batch applies nothing', async () => {
     state().beginGesture('SET_NODE_GEOMETRY');
     // Live ticks put the node where the pointer is.
-    state()._setStateNoAutosave({
+    state()._setStateRaw({
       nodes: state().nodes.map((n) =>
         n.id === X ? { ...n, position: { x: 300, y: 0 } } : n,
       ),
@@ -1328,7 +1328,7 @@ describe('measured heights', () => {
 
   beforeEach(() => {
     const nodes = [...state().nodes, autoNote()];
-    state()._setStateNoAutosave({ nodes });
+    state()._setStateRaw({ nodes });
     server.reset(nodes, [], 1);
   });
 
@@ -1453,7 +1453,7 @@ describe('a derived report is not an unsent edit', () => {
         data: { type: 'note', content: 'Auto body', heightMode: 'auto' },
       } as Node,
     ];
-    state()._setStateNoAutosave({ nodes });
+    state()._setStateRaw({ nodes });
     server.reset(nodes, [], 1);
   });
 
@@ -1563,7 +1563,7 @@ describe('renderer-measured boxes', () => {
 
   function seed(textNode: Node = text()) {
     const nodes = [...state().nodes, frame(), textNode];
-    state()._setStateNoAutosave({ nodes });
+    state()._setStateRaw({ nodes });
     server.reset(nodes, [], 1);
   }
 
@@ -1740,7 +1740,7 @@ describe('a move made in a container the node has left', () => {
       { ...note(Y, 40, 80), parentId: F },
       frame(G, 2000),
     ];
-    state()._setStateNoAutosave({ nodes });
+    state()._setStateRaw({ nodes });
     server.reset(nodes, [], 1);
   }
 
@@ -2136,7 +2136,7 @@ describe('a move made in a container the node has left', () => {
 
 describe('a Space that is not loaded', () => {
   it('sends nothing for edits made while the Space is loading; they are replaced by the load', async () => {
-    state()._setStateNoAutosave({ isLoading: true });
+    state()._setStateRaw({ isLoading: true });
     moveHere(X, 500);
     recolourHere(Y, 'blue');
     state().patchNodeSilent(X, { pinnedForTest: 'yes' });
@@ -2165,7 +2165,7 @@ describe('a Space that is not loaded', () => {
     error.mockRestore();
     expect(state().canvasId).toBe('space-other');
     expect(state().isLoading).toBe(false);
-    state()._setStateNoAutosave({ nodes: [note(X, 0, 0)] });
+    state()._setStateRaw({ nodes: [note(X, 0, 0)] });
     moveHere(X, 500);
     state().patchNodeSilent(X, { pinnedForTest: 'yes' });
     await vi.advanceTimersByTimeAsync(3_000);

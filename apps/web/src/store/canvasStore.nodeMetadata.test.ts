@@ -13,7 +13,6 @@ import { toast } from '@/components/Common/Toast';
 
 import { canvasHistoryManager } from './canvasHistoryManager';
 import useCanvasStore, {
-  commitNodeMetadata,
   commitNodeProperties,
   flushNodeContent,
   resetCanvasSyncForTests,
@@ -196,10 +195,10 @@ describe('durable node metadata actions', () => {
     expect(mine).not.toBe('node-theirs');
     // The stream then brings page B's update.
     const state = useCanvasStore.getState();
-    state.applyDeltasFromAgent(
+    state.applyServerDeltas(
       other.deltas as Delta[],
       other.toVersion,
-      other.pendingEffects as Parameters<typeof state.applyDeltasFromAgent>[2],
+      other.pendingEffects as Parameters<typeof state.applyServerDeltas>[2],
       false,
       { events: other.orderEvents },
       {
@@ -259,7 +258,7 @@ describe('durable node metadata actions', () => {
     ];
     server.reset(structuredClone(nodes), [], 1);
     setCanvasSyncLineageForTests(id, FAKE_LINEAGE);
-    useCanvasStore.getState()._setStateNoAutosave({
+    useCanvasStore.getState()._setStateRaw({
       canvasId: id,
       isLoading: false,
       version: 1,
@@ -267,56 +266,6 @@ describe('durable node metadata actions', () => {
       edges: [],
     });
   }
-
-  it('rejects failures without rolling back authored edits, and reports a property saved although the body is frozen by a conflict', async () => {
-    seed('metadata-failure');
-    vi.mocked(putNodeContent).mockRejectedValueOnce(
-      new CanvasConflictError({
-        code: 'NODE_CONTENT_CONFLICT',
-        message: 'stale',
-        currentRev: 'remote',
-      }),
-    );
-    await expect(
-      commitNodeMetadata('metadata-failure', {
-        properties: { reviewed: true },
-      }),
-    ).rejects.toThrow();
-    expect(useCanvasStore.getState().nodes[0].data.properties).toEqual({
-      keep: 'yes',
-      reviewed: true,
-    });
-    // The refusal froze the node's body (this node had no baseline, so the
-    // request carried everything). Properties are not part of that: the
-    // next change goes out by itself and is saved.
-    await expect(
-      commitNodeMetadata('metadata-failure', {
-        properties: { reviewed: false },
-      }),
-    ).resolves.toBeUndefined();
-    expect(useCanvasStore.getState().nodes[0].data.properties).toEqual({
-      keep: 'yes',
-      reviewed: false,
-    });
-    const sent = vi.mocked(putNodeContent).mock.calls.at(-1)?.[2];
-    expect(sent?.properties).toEqual({ reviewed: false });
-    expect(sent).not.toHaveProperty('expectRev');
-    expect(sent).not.toHaveProperty('content');
-    // The body is still the user's to answer.
-    expect(useCanvasStore.getState().pendingContentNodeIds()).toContain(
-      'metadata-failure',
-    );
-
-    // A property that cannot be sent at all is not reported as saved.
-    useCanvasStore
-      .getState()
-      .patchNodeSilent('metadata-failure', { contentMissing: true });
-    await expect(
-      commitNodeMetadata('metadata-failure', {
-        properties: { reviewed: true },
-      }),
-    ).rejects.toThrow('not saved');
-  });
 
   it.each([{ field: 'propertyDisplayKeys', value: ['keep'], cleared: [] }])(
     'persists undo of the first $field edit before reload',
@@ -481,7 +430,7 @@ describe('durable node metadata actions', () => {
         useWorkspaceStore.setState({ workspaceId: 'other' });
       else {
         const state = useCanvasStore.getState();
-        state._setStateNoAutosave({
+        state._setStateRaw({
           nodes: state.nodes.map((node) => ({
             ...node,
             data: { ...node.data, properties: { keep: 'later' } },
@@ -549,18 +498,5 @@ describe('durable node metadata actions', () => {
     });
     expect(vi.mocked(toast).mock.calls.at(-1)?.[1]?.action).toBeUndefined();
     expect(putNodeContent).toHaveBeenCalledTimes(1);
-  });
-
-  it('does not report a save in a different backend Workspace as successful', async () => {
-    seed('metadata-scope');
-    vi.mocked(putNodeContent).mockImplementationOnce(
-      async (_canvasId, nodeId) => {
-        useWorkspaceStore.setState({ workspaceId: 'another-backend' });
-        return { nodeId, label: 'Paper', rev: 'saved' };
-      },
-    );
-    await expect(
-      commitNodeMetadata('metadata-scope', { properties: { Draft: true } }),
-    ).rejects.toThrow();
   });
 });

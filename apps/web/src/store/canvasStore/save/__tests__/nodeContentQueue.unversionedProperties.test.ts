@@ -63,7 +63,7 @@ function setup() {
     canvasId: 'c1',
     isLoading: false,
     nodes: [node] as Node[],
-    _setStateNoAutosave: vi.fn(({ nodes }: { nodes: Node[] }) => {
+    _setStateRaw: vi.fn(({ nodes }: { nodes: Node[] }) => {
       state.nodes = nodes;
     }),
     patchNodeSilent: vi.fn(),

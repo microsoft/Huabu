@@ -45,7 +45,7 @@ const profileSnapshot = {
 };
 
 function resetStore() {
-  useCanvasStore.getState()._setStateNoAutosave({
+  useCanvasStore.getState()._setStateRaw({
     nodes: [],
     edges: [],
     canvasId: 'test-canvas',
@@ -296,7 +296,7 @@ describe('post-create editing', () => {
   });
 
   it('does not edit an existing node when creation is rejected', () => {
-    useCanvasStore.getState()._setStateNoAutosave({
+    useCanvasStore.getState()._setStateRaw({
       nodes: [
         {
           id: 'node-existing',

@@ -795,7 +795,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
   // do not advance the Space's structural `version` counter. Structure
   // writes strip every per-node content field (`stripNodesForCanvas` in
   // `canvas-executor.ts`) — these endpoints are the browser's write path
-  // for `.md` sidecars. See `docs/node-content-api-split.md`.
+  // for `.md` sidecars. See `docs/architecture/canvas-realtime-sync.md`.
 
   fastify.put<{
     Params: { canvasId: string; nodeId: string };

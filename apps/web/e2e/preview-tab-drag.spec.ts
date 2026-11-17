@@ -67,7 +67,7 @@ test.beforeEach(async ({ page }) => {
       import(workspacePath) as Promise<typeof WorkspaceStoreModule>,
     ]);
     const canvasId = 'tab-drag-fixture';
-    canvasStore.getState()._setStateNoAutosave({
+    canvasStore.getState()._setStateRaw({
       canvasId,
       nodes: Array.from({ length: 6 }, (_, index) => ({
         id: `node-${index}`,

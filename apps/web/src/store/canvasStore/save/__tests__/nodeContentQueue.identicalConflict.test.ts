@@ -60,7 +60,7 @@ function setup(type: 'note' | 'pdf' = 'note') {
     canvasId: 'c1',
     isLoading: false,
     nodes: [node] as Node[],
-    _setStateNoAutosave: vi.fn(({ nodes }: { nodes: Node[] }) => {
+    _setStateRaw: vi.fn(({ nodes }: { nodes: Node[] }) => {
       state.nodes = nodes;
     }),
     patchNodeSilent: vi.fn(),
@@ -105,7 +105,7 @@ describe('a save refused although the server holds the same content', () => {
     expect(getMock).not.toHaveBeenCalled();
     // The text (and so the caret) is not touched.
     expect(state.nodes[0]).toBe(typed);
-    expect(state._setStateNoAutosave).not.toHaveBeenCalled();
+    expect(state._setStateRaw).not.toHaveBeenCalled();
     // The server's revision is the baseline; the title is saved on it.
     expect(putMock).toHaveBeenCalledTimes(2);
     expect(putMock.mock.calls[1][2]).toMatchObject({

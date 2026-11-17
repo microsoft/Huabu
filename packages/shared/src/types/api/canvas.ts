@@ -108,7 +108,8 @@ export type DeleteNodeResponse = z.infer<typeof deleteNodeResponseSchema>;
  * a callsite can write only the bits that actually changed; missing
  * fields are read from the existing `.md` and round-tripped untouched.
  *
- * See `docs/node-content-api-split.md`.
+ * See `docs/architecture/canvas-realtime-sync.md` (Node content between
+ * pages).
  */
 export const putNodeContentBodySchema = z.object({
   /** Node type (`note` / `text` / `web` / `pdf` / `image` / `video` / `frame` / `question` / `sketch`). */
@@ -382,7 +383,7 @@ export interface CreateCanvasResponse {
 
 // ─── Headless Executor: POST /api/canvas/:canvasId/execute ────────────────
 //
-// The headless executor (M2) accepts a batch of canvas commands and
+// The headless executor accepts a batch of canvas commands and
 // runs them server-side against authoritative structural state.
 // It returns the resulting structural deltas plus per-command outcomes
 // so clients can apply the diff locally without re-executing the
@@ -403,8 +404,6 @@ export const executeOriginatorSchema = z.object({
    * names the page whose own committed changes are not held against it.
    */
   tabId: canvasPageIdSchema.optional(),
-  /** Authenticated user id when known. */
-  userId: z.string().optional(),
   /**
    * ACP chat thread that initiated this batch (set by the reachback
    * tool). Lets the broadcast attribute the change to the right
@@ -507,10 +506,8 @@ export interface CanvasExecuteCommandOutcome {
  * Mirrors the subset of {@link PendingEffects} that has client-side
  * meaning.
  *
- * `mutatedNodes` is included for now because preprocessing dispatch
- * still runs on the web in Phase A; once cross-tab broadcast (M3)
- * lands and the server drives preprocessing directly, this field can
- * be dropped from the wire and the web preprocessing trigger removed.
+ * `mutatedNodes` is included because the originating page dispatches
+ * preprocessing for the nodes a batch created or changed.
  */
 export interface CanvasExecutePendingEffects {
   /** Final post-execution snapshots of nodes that were created or edited. */

@@ -37,7 +37,7 @@ const node = (id: string, type = 'note') => ({
 const scheduledIds = () => schedule.mock.calls.map(([value]) => value.id);
 
 beforeEach(() => {
-  useCanvasStore.getState()._setStateNoAutosave({
+  useCanvasStore.getState()._setStateRaw({
     canvasId: '',
     nodes: [],
     edges: [],
@@ -50,7 +50,7 @@ beforeEach(() => {
     readIntentByTab: {},
   });
   usePanelStore.setState({ isRightCollapsed: false });
-  useCanvasStore.getState()._setStateNoAutosave({
+  useCanvasStore.getState()._setStateRaw({
     canvasId: 'parent',
     nodes: [
       node('note'),
@@ -180,7 +180,7 @@ describe('preview editor departure', () => {
     openSpaceConversation('child', 'agent', 'thread');
     expect(schedule).not.toHaveBeenCalled();
     openPreviewNode('note', { transient: false });
-    useCanvasStore.getState()._setStateNoAutosave({ canvasId: 'different' });
+    useCanvasStore.getState()._setStateRaw({ canvasId: 'different' });
     openSpaceConversation('child', 'agent', 'thread');
     expect(schedule).not.toHaveBeenCalled();
   });

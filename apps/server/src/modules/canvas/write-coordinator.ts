@@ -131,14 +131,6 @@ export interface UpdateNodeOptions {
   strictRename?: boolean;
 }
 
-function contentRevisionOf(record: NodeContent | null): string {
-  return nodeRevisionOf({
-    ...record,
-    ...(typeof record?.content === 'string' ? { content: record.content } : {}),
-    ...(typeof record?.src === 'string' ? { src: record.src } : {}),
-  });
-}
-
 /**
  * Serialize read → decide → CAS-write for one node in this process.
  *
@@ -161,7 +153,7 @@ export async function updateNode(
       // conflict is still returned, never retried by guessing that re-running
       // the caller's `apply` would preserve its intent.
       const current = await nodes.read(nodeId);
-      const currentContentRevision = contentRevisionOf(current?.record ?? null);
+      const currentContentRevision = nodeRevisionOf(current?.record ?? {});
 
       if (
         opts.expectRev !== undefined &&
@@ -181,7 +173,7 @@ export async function updateNode(
         return {
           status: 'rev-conflict',
           currentRev: partial.ok
-            ? contentRevisionOf(partial.record)
+            ? nodeRevisionOf(partial.record ?? {})
             : currentContentRevision,
           unversionedApplied: partial.ok,
         };
@@ -201,7 +193,7 @@ export async function updateNode(
       if (result.ok) {
         return {
           status: 'ok',
-          rev: contentRevisionOf(result.record),
+          rev: nodeRevisionOf(result.record ?? {}),
           label: result.record.label,
         };
       }
@@ -214,7 +206,7 @@ export async function updateNode(
         const latest = await nodes.read(nodeId);
         return {
           status: 'rev-conflict',
-          currentRev: contentRevisionOf(latest?.record ?? null),
+          currentRev: nodeRevisionOf(latest?.record ?? {}),
         };
       }
       return { status: 'rejected', result };

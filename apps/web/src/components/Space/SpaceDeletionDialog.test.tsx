@@ -371,7 +371,7 @@ it('owns Note save failures from the initial local drain before desktop preparat
       canvasId: 'parent',
       isLoading: false,
       nodes: [node],
-      _setStateNoAutosave: vi.fn(),
+      _setStateRaw: vi.fn(),
       patchNodeSilent: vi.fn(),
     }),
   });
@@ -517,7 +517,7 @@ it.each([
         canvasId: 'parent',
         isLoading: false,
         nodes: [node],
-        _setStateNoAutosave: vi.fn(),
+        _setStateRaw: vi.fn(),
         patchNodeSilent,
       }),
     });

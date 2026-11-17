@@ -53,7 +53,9 @@ export function stringifyJson(value: unknown, context: string): string {
 
 /** Hash JSON values independently of object property insertion order. */
 export function digestJson(value: unknown): string {
-  const normalized: unknown = JSON.parse(stringifyJson(value, 'Operation'));
+  const normalized: unknown = JSON.parse(
+    stringifyJson(value, 'Digested value'),
+  );
   const canonical = (entry: unknown): string => {
     if (Array.isArray(entry)) return `[${entry.map(canonical).join(',')}]`;
     if (entry !== null && typeof entry === 'object')
