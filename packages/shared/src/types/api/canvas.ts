@@ -132,13 +132,22 @@ export const putNodeContentBodySchema = z.object({
   keywords: z.array(z.string()).optional(),
   /** Opaque pass-through frontmatter blob (e.g. AI provenance markers). */
   provenance: z.unknown().optional(),
-  /** Keywise patch; null deletes one key and omitted keys are preserved. */
+  /**
+   * Custom properties as a keywise patch: `null` deletes one key and omitted
+   * keys are preserved. Applied to the stored record as it is at the moment
+   * of the write, without a revision: different keys never conflict and the
+   * same key is last-writer-wins. `expectRev` does not cover it. A request
+   * that carries only this patch (and `propertyDisplayKeys`) is never
+   * refused as stale, and a request whose body is refused as stale still
+   * has the patch applied (`propertiesApplied` on the conflict response).
+   */
   properties: nodePropertiesPatchSchema.optional(),
+  /** Display order of the custom properties, replaced as a whole. Unversioned like `properties`. */
   propertyDisplayKeys: z.array(z.string()).optional(),
   /**
-   * Optimistic-concurrency baseline: the {@link nodeRevision} the client's
-   * edit descends from (a deterministic djb2 over the node's authored
-   * `content` / `src`). The server recomputes the on-disk node's revision
+   * Optimistic-concurrency baseline of the **body**: the {@link nodeRevision}
+   * the client's edit descends from (a deterministic djb2 over the node's
+   * `content` / `src`, and nothing else). The server recomputes the on-disk node's revision
    * and rejects the write with `NODE_CONTENT_CONFLICT` when it differs, so
    * a concurrent edit (another tab / device / an agent, or a Google-Drive
    * synced newer copy) is surfaced as a conflict instead of silently
@@ -146,6 +155,7 @@ export const putNodeContentBodySchema = z.object({
    * revision of empty content (`nodeRevisionOf({})`), so the create only
    * succeeds while no file exists yet (guards create-races too). Omit to
    * skip the check entirely (kept optional so non-CAS callers still work).
+   * Ignored on a request that carries only custom properties.
    */
   expectRev: z.string().optional(),
   /**
@@ -290,6 +300,12 @@ export interface CanvasConflictResponse {
    * was based on (echo of the request's `expectRev`).
    */
   expectedRev?: string;
+  /**
+   * For `NODE_CONTENT_CONFLICT`: the request also carried a custom-property
+   * patch (`properties` / `propertyDisplayKeys`) and that part **was
+   * written**; only the body and the other fields were refused.
+   */
+  propertiesApplied?: boolean;
 }
 
 export interface UpdateCanvasStateParams {

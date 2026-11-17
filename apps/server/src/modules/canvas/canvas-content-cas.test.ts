@@ -598,7 +598,7 @@ describe('PUT /nodes/:nodeId/content — content CAS', () => {
     }
   });
 
-  it('loads the canonical PDF revision without its extracted body and accepts repeated property saves', async () => {
+  it('loads the canonical PDF revision without its extracted body; property saves neither need nor move it', async () => {
     seedCanvas('c1', 'pdf', 'Paper');
     const store = getCanvasStore('c1');
     const canvas = store.read()!;
@@ -660,38 +660,33 @@ describe('PUT /nodes/:nodeId/content — content CAS', () => {
         ],
       });
       expect(afterReorder.nodeContentRevisions?.pdf).toBe(reordered.json().rev);
-      // After an agent write the web re-derives its baseline from the node it
-      // holds, which has no body. That revision still names this version.
+      // Four property saves later the revision is still the one of the text.
+      expect(reordered.json().rev).toBe(created.json().rev);
+      expect(reordered.json().rev).toBe(
+        nodeRevisionOf({
+          type: 'pdf',
+          content: 'Extracted PDF text that is not sent to the canvas.',
+        }),
+      );
+      // A page that hashes the node it holds (no body) has another revision.
+      // It does not matter: a property save is not checked against one.
       const visible = (afterReorder.state as { nodes: Array<{ data: object }> })
         .nodes[0].data;
       const derived = nodeRevisionOf({ ...visible, type: 'pdf' });
       expect(derived).not.toBe(reordered.json().rev);
-      // A write that also replaces the body must have seen the body.
-      const withBody = await putContent(app, 'c1', 'pdf', {
-        nodeType: 'pdf',
-        content: 'Stale extraction.',
-        properties: { Status: 'Done' },
-        expectRev: derived,
+      for (const expectRev of [derived, 'no-such-revision', undefined]) {
+        const edit = await putContent(app, 'c1', 'pdf', {
+          nodeType: 'pdf',
+          properties: { Status: `Done ${expectRev}` },
+          ...(expectRev !== undefined ? { expectRev } : {}),
+        });
+        expect(edit.statusCode).toBe(200);
+        expect(edit.json().rev).toBe(created.json().rev);
+      }
+      expect(store.readNode('pdf')?.properties).toEqual({
+        Venue: 'CHI 25',
+        Status: 'Done undefined',
       });
-      expect(withBody.statusCode).toBe(409);
-      const fromDerived = await putContent(app, 'c1', 'pdf', {
-        nodeType: 'pdf',
-        properties: { Status: 'Done' },
-        expectRev: derived,
-      });
-      expect(fromDerived.statusCode).toBe(200);
-      const staleDerived = await putContent(app, 'c1', 'pdf', {
-        nodeType: 'pdf',
-        properties: { Status: 'Stale' },
-        expectRev: derived,
-      });
-      expect(staleDerived.statusCode).toBe(409);
-      const staleEdit = await putContent(app, 'c1', 'pdf', {
-        nodeType: 'pdf',
-        properties: { Status: 'Stale' },
-        expectRev: response.nodeContentRevisions?.pdf,
-      });
-      expect(staleEdit.statusCode).toBe(409);
       expect(store.readNode('pdf')?.content).toBe(
         'Extracted PDF text that is not sent to the canvas.',
       );
@@ -700,7 +695,7 @@ describe('PUT /nodes/:nodeId/content — content CAS', () => {
     }
   });
 
-  it('round-trips PDF properties with key deletion and CAS', async () => {
+  it('round-trips PDF properties with key deletion, whatever revision the save quotes', async () => {
     seedCanvas('c1', 'pdf', 'Paper');
     const store = getCanvasStore('c1');
     const canvas = store.read()!;
@@ -736,15 +731,19 @@ describe('PUT /nodes/:nodeId/content — content CAS', () => {
         rev: second.json().rev,
       });
       expect(loaded.json().properties).not.toHaveProperty('year');
+      // The revision is the body's: the property save did not move it, and a
+      // property save that quotes any other is applied all the same.
+      expect(second.json().rev).toBe(first.json().rev);
       expect(
         (
           await putContent(app, 'c1', 'pdf', {
             nodeType: 'pdf',
-            expectRev: first.json().rev,
+            expectRev: 'a-revision-from-before',
             properties: { authors: null },
           })
         ).statusCode,
-      ).toBe(409);
+      ).toBe(200);
+      expect(store.readNode('pdf')?.properties).toEqual({ reviewed: true });
     } finally {
       await app.close();
     }
@@ -853,7 +852,7 @@ describe('PUT /nodes/:nodeId/content — content CAS', () => {
     }
   });
 
-  it('keeps both when two pages edit different properties of one node, and refuses the one that had not read the other', async () => {
+  it('keeps both when two pages edit different properties of one node, although neither had read the other', async () => {
     const app = await buildApp();
     const received = vi.fn();
     const unsubscribe = subscribeCanvasUpdates('c1', received);
@@ -870,7 +869,8 @@ describe('PUT /nodes/:nodeId/content — content CAS', () => {
       received.mockClear();
 
       // Page A adds tags. Page B, which has not fetched that yet, sets a
-      // status from the revision both started from: refused, nothing lost.
+      // status from the revision both started from: applied as well, since
+      // each save patches its own key of what the server holds.
       const fromA = await putContent(app, 'c1', 'n1', {
         nodeType: 'note',
         expectRev: base.json().rev,
@@ -878,41 +878,30 @@ describe('PUT /nodes/:nodeId/content — content CAS', () => {
         pageId: 'page-a',
       });
       expect(fromA.statusCode).toBe(200);
-      const stale = await putContent(app, 'c1', 'n1', {
+      const fromB = await putContent(app, 'c1', 'n1', {
         nodeType: 'note',
         expectRev: base.json().rev,
         properties: { status: 'read' },
         pageId: 'page-b',
       });
-      expect(stale.statusCode).toBe(409);
-      expect(stale.json()).toMatchObject({
-        code: 'NODE_CONTENT_CONFLICT',
-        currentRev: fromA.json().rev,
-      });
-      expect(received).toHaveBeenCalledExactlyOnceWith({
-        type: 'invalidate',
-        data: { nodeIds: ['n1'], originPageId: 'page-a' },
-      });
-
-      // B fetches what A's notification named, then sends its one key.
-      const fetched = (
-        await app.inject({ method: 'GET', url: '/canvas/c1/nodes/n1/content' })
-      ).json();
-      expect(fetched).toMatchObject({
-        properties: { tags: ['physics'] },
-        rev: fromA.json().rev,
-      });
-      const fromB = await putContent(app, 'c1', 'n1', {
-        nodeType: 'note',
-        expectRev: fetched.rev,
-        properties: { status: 'read' },
-        pageId: 'page-b',
-      });
       expect(fromB.statusCode).toBe(200);
-      expect(received).toHaveBeenLastCalledWith({
-        type: 'invalidate',
-        data: { nodeIds: ['n1'], originPageId: 'page-b' },
-      });
+      expect(received.mock.calls).toEqual([
+        [
+          {
+            type: 'invalidate',
+            data: { nodeIds: ['n1'], originPageId: 'page-a' },
+          },
+        ],
+        [
+          {
+            type: 'invalidate',
+            data: { nodeIds: ['n1'], originPageId: 'page-b' },
+          },
+        ],
+      ]);
+      // The body's revision is where it was.
+      expect(fromA.json().rev).toBe(base.json().rev);
+      expect(fromB.json().rev).toBe(base.json().rev);
       expect(
         (
           await app.inject({
@@ -923,7 +912,7 @@ describe('PUT /nodes/:nodeId/content — content CAS', () => {
       ).toMatchObject({
         content: 'body',
         properties: { tags: ['physics'], status: 'read' },
-        rev: fromB.json().rev,
+        rev: base.json().rev,
       });
 
       // A page that was not connected meanwhile is told to fetch the node.
@@ -937,6 +926,231 @@ describe('PUT /nodes/:nodeId/content — content CAS', () => {
       unsubscribe();
       await app.close();
     }
+  });
+
+  describe('custom properties are not versioned', () => {
+    const fetchNode = async (app: Awaited<ReturnType<typeof buildApp>>) =>
+      (
+        await app.inject({ method: 'GET', url: '/canvas/c1/nodes/n1/content' })
+      ).json();
+    const seedBody = async (app: Awaited<ReturnType<typeof buildApp>>) => {
+      seedCanvas('c1', 'n1', 'Note');
+      const saved = await putContent(app, 'c1', 'n1', {
+        nodeType: 'note',
+        content: 'v1',
+        expectRev: REV_EMPTY,
+      });
+      expect(saved.statusCode).toBe(200);
+      return saved.json().rev as string;
+    };
+
+    it('applies a property patch although the body revision it quotes is stale, or none is quoted', async () => {
+      const app = await buildApp();
+      try {
+        const rev1 = await seedBody(app);
+        // Someone else saves the body.
+        const body2 = await putContent(app, 'c1', 'n1', {
+          nodeType: 'note',
+          content: 'v2',
+          expectRev: rev1,
+        });
+        const rev2 = body2.json().rev as string;
+        expect(rev2).not.toBe(rev1);
+
+        const stale = await putContent(app, 'c1', 'n1', {
+          nodeType: 'note',
+          properties: { tags: ['physics'] },
+          propertyDisplayKeys: ['tags'],
+          expectRev: rev1,
+        });
+        expect(stale.statusCode).toBe(200);
+        // The answer names the body's current revision; the patch left it.
+        expect(stale.json().rev).toBe(rev2);
+        const unversioned = await putContent(app, 'c1', 'n1', {
+          nodeType: 'note',
+          properties: { status: 'read' },
+        });
+        expect(unversioned.statusCode).toBe(200);
+        expect(await fetchNode(app)).toMatchObject({
+          content: 'v2',
+          label: null,
+          properties: { tags: ['physics'], status: 'read' },
+          propertyDisplayKeys: ['tags'],
+          rev: rev2,
+        });
+      } finally {
+        await app.close();
+      }
+    });
+
+    it('accepts a body save that quotes the revision from before somebody changed a property', async () => {
+      const app = await buildApp();
+      try {
+        const rev1 = await seedBody(app);
+        // An agent, or another page, tags the note while this page types.
+        expect(
+          (
+            await putContent(app, 'c1', 'n1', {
+              nodeType: 'note',
+              properties: { tags: ['physics'] },
+            })
+          ).statusCode,
+        ).toBe(200);
+        await executeOnServer({
+          canvasId: 'c1',
+          originator: { source: 'agent', threadId: 't' },
+          commands: [
+            {
+              type: 'MERGE_NODE_DATA',
+              patches: [
+                {
+                  nodeId: 'n1' as never,
+                  patch: { properties: { status: 'read' } },
+                },
+              ],
+            },
+          ],
+        });
+        const typed = await putContent(app, 'c1', 'n1', {
+          nodeType: 'note',
+          content: 'v1, typed on',
+          expectRev: rev1,
+        });
+        expect(typed.statusCode).toBe(200);
+        expect(await fetchNode(app)).toMatchObject({
+          content: 'v1, typed on',
+          properties: { tags: ['physics'], status: 'read' },
+        });
+      } finally {
+        await app.close();
+      }
+    });
+
+    it('still refuses a stale body, with or without properties beside it', async () => {
+      const app = await buildApp();
+      const received = vi.fn();
+      const unsubscribe = subscribeCanvasUpdates('c1', received);
+      try {
+        const rev1 = await seedBody(app);
+        const body2 = await putContent(app, 'c1', 'n1', {
+          nodeType: 'note',
+          content: 'v2',
+          expectRev: rev1,
+        });
+        const rev2 = body2.json().rev as string;
+        received.mockClear();
+
+        const staleBody = await putContent(app, 'c1', 'n1', {
+          nodeType: 'note',
+          content: 'stale',
+          expectRev: rev1,
+        });
+        expect(staleBody.statusCode).toBe(409);
+        expect(staleBody.json()).toMatchObject({
+          code: 'NODE_CONTENT_CONFLICT',
+          currentRev: rev2,
+        });
+        expect(staleBody.json()).not.toHaveProperty('propertiesApplied');
+        expect(received).not.toHaveBeenCalled();
+
+        // Body and properties in one request, body stale: the body, title
+        // and summary are refused; the property patch is written.
+        const both = await putContent(app, 'c1', 'n1', {
+          nodeType: 'note',
+          content: 'stale',
+          label: 'Stale title',
+          summary: 'stale summary',
+          properties: { tags: ['physics'], gone: null },
+          propertyDisplayKeys: ['tags'],
+          expectRev: rev1,
+          pageId: 'page-a',
+        });
+        expect(both.statusCode).toBe(409);
+        expect(both.json()).toMatchObject({
+          code: 'NODE_CONTENT_CONFLICT',
+          currentRev: rev2,
+          expectedRev: rev1,
+          propertiesApplied: true,
+        });
+        expect(received).toHaveBeenCalledExactlyOnceWith({
+          type: 'invalidate',
+          data: { nodeIds: ['n1'], originPageId: 'page-a' },
+        });
+        const stored = await fetchNode(app);
+        expect(stored).toMatchObject({
+          content: 'v2',
+          label: null,
+          properties: { tags: ['physics'] },
+          propertyDisplayKeys: ['tags'],
+          rev: rev2,
+        });
+        expect(stored).not.toHaveProperty('summary');
+
+        // A label-only save of an authored node is checked as before.
+        expect(
+          (
+            await putContent(app, 'c1', 'n1', {
+              nodeType: 'note',
+              label: 'Renamed',
+              expectRev: rev1,
+            })
+          ).statusCode,
+        ).toBe(409);
+      } finally {
+        unsubscribe();
+        await app.close();
+      }
+    });
+
+    it('writes body and properties of one request together when the body revision is current', async () => {
+      const app = await buildApp();
+      try {
+        const rev1 = await seedBody(app);
+        const both = await putContent(app, 'c1', 'n1', {
+          nodeType: 'note',
+          content: 'v2',
+          properties: { tags: ['physics'] },
+          expectRev: rev1,
+        });
+        expect(both.statusCode).toBe(200);
+        expect(both.json().rev).toBe(nodeRevisionOf({ content: 'v2' }));
+        expect(await fetchNode(app)).toMatchObject({
+          content: 'v2',
+          properties: { tags: ['physics'] },
+        });
+      } finally {
+        await app.close();
+      }
+    });
+
+    it('lets the last writer of one key win, and keeps a whole list value as one value', async () => {
+      const app = await buildApp();
+      try {
+        const rev1 = await seedBody(app);
+        const put = (properties: Record<string, unknown>) =>
+          putContent(app, 'c1', 'n1', {
+            nodeType: 'note',
+            properties,
+            expectRev: rev1,
+          });
+        expect((await put({ status: 'first' })).statusCode).toBe(200);
+        expect((await put({ status: 'second' })).statusCode).toBe(200);
+        // A list is one value: two writers that each add an item to the list
+        // they saw replace it, they do not merge item by item.
+        expect((await put({ tags: ['a', 'b'] })).statusCode).toBe(200);
+        expect((await put({ tags: ['a', 'c'] })).statusCode).toBe(200);
+        expect((await fetchNode(app)).properties).toEqual({
+          status: 'second',
+          tags: ['a', 'c'],
+        });
+        // Removing a key that somebody else already removed is not an error.
+        expect((await put({ status: null })).statusCode).toBe(200);
+        expect((await put({ status: null })).statusCode).toBe(200);
+        expect((await fetchNode(app)).properties).toEqual({ tags: ['a', 'c'] });
+      } finally {
+        await app.close();
+      }
+    });
   });
 
   it('rejects source/body writes and type spoofing on metadata-only file references', async () => {

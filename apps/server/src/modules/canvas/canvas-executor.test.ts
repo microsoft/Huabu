@@ -104,7 +104,34 @@ function bodyOf(canvasId: string, id: string): string | undefined {
 }
 
 describe('agent property mutations', () => {
-  it('requires a current read and preserves unrelated authored fields across agent patches', async () => {
+  const AGENT: ExecuteOriginator = {
+    source: 'agent',
+    threadId: 'property-thread',
+  };
+  const merge = (
+    canvasId: string,
+    nodeId: string,
+    patch: Record<string, unknown>,
+    expectRev?: string,
+  ) =>
+    executeOnServer({
+      canvasId,
+      originator: AGENT,
+      commands: [
+        {
+          type: 'MERGE_NODE_DATA',
+          patches: [
+            {
+              nodeId: nodeId as never,
+              patch,
+              ...(expectRev !== undefined ? { expectRev } : {}),
+            },
+          ],
+        },
+      ],
+    });
+
+  it('applies a properties-only patch without a read or a revision and preserves unrelated authored fields', async () => {
     seedNote('properties', 'pdf', 'Extracted body', 'pdf');
     const nodes = space('properties').nodes;
     await updateNode(nodes, 'pdf', {
@@ -113,34 +140,109 @@ describe('agent property mutations', () => {
         properties: { year: 2026, reviewed: false },
       }),
     });
-    const original = (await nodes.read('pdf'))!.record;
-    const apply = (expectRev?: string) =>
-      executeOnServer({
-        canvasId: 'properties',
-        originator: { source: 'agent', threadId: 'property-thread' },
-        commands: [
-          {
-            type: 'MERGE_NODE_DATA',
-            patches: [
-              {
-                nodeId: 'pdf' as never,
-                patch: { properties: { year: null, authors: ['Ada'] } },
-                expectRev,
-              },
-            ],
-          },
-        ],
-      });
-    expect((await apply()).conflicts).toHaveLength(1);
-    const revision = nodeRevisionOf(original);
-    expect((await apply(revision)).conflicts ?? []).toHaveLength(0);
+    const revision = currentRev('properties', 'pdf');
+    // No `expectRev`: the agent never read the node.
+    const unread = await merge('properties', 'pdf', {
+      properties: { year: null, authors: ['Ada'] },
+    });
+    expect(unread.conflicts ?? []).toHaveLength(0);
+    expect(unread.results[0]?.applied).toBe(true);
     const record = (await nodes.read('pdf'))!.record;
     expect(record).toMatchObject({
       properties: { reviewed: false, authors: ['Ada'] },
       content: 'Extracted body',
     });
     expect(record.properties).not.toHaveProperty('year');
-    expect((await apply(revision)).conflicts).toHaveLength(1);
+    // Properties are not part of the revision: it is the one from before.
+    expect(currentRev('properties', 'pdf')).toBe(revision);
+    expect(unread.nodeContentRevisions).toEqual({ pdf: revision });
+  });
+
+  it('adds a tag although the body was edited since the agent read the node', async () => {
+    seedNote('tags', 'n1', 'body as the agent read it');
+    const readRev = currentRev('tags', 'n1');
+    // A person saves the body after the agent's read.
+    await updateNode(space('tags').nodes, 'n1', {
+      apply: (record) => ({ ...record!, content: 'body typed since' }),
+    });
+    expect(currentRev('tags', 'n1')).not.toBe(readRev);
+
+    // With the revision of its read (existing prompts and Kits send one)…
+    const stale = await merge(
+      'tags',
+      'n1',
+      { properties: { tags: ['physics'] }, propertyDisplayKeys: ['tags'] },
+      readRev,
+    );
+    expect(stale.conflicts ?? []).toHaveLength(0);
+    expect(stale.results[0]?.applied).toBe(true);
+    // …and with a revision that never existed: it is ignored, not checked.
+    const nonsense = await merge(
+      'tags',
+      'n1',
+      { properties: { status: 'read' } },
+      'not-a-revision',
+    );
+    expect(nonsense.conflicts ?? []).toHaveLength(0);
+    expect(getCanvasStore('tags').readNode('n1')).toMatchObject({
+      content: 'body typed since',
+      properties: { tags: ['physics'], status: 'read' },
+      propertyDisplayKeys: ['tags'],
+    });
+  });
+
+  it('still refuses a patch that rewrites the body together with properties', async () => {
+    seedNote('both', 'n1', 'original body');
+    const unread = await merge('both', 'n1', {
+      content: 'rewritten',
+      properties: { status: 'read' },
+    });
+    expect(unread.conflicts).toEqual([
+      expect.objectContaining({ nodeId: 'n1', reason: 'not-read' }),
+    ]);
+    const stale = await merge(
+      'both',
+      'n1',
+      { content: 'rewritten', properties: { status: 'read' } },
+      'stale-revision',
+    );
+    expect(stale.conflicts).toEqual([
+      expect.objectContaining({ nodeId: 'n1', reason: 'stale' }),
+    ]);
+    // The refused command changed nothing, its properties included.
+    const refused = getCanvasStore('both').readNode('n1');
+    expect(refused?.content).toBe('original body');
+    expect(refused?.properties).toBeUndefined();
+
+    const fresh = await merge(
+      'both',
+      'n1',
+      { content: 'rewritten', properties: { status: 'read' } },
+      currentRev('both', 'n1'),
+    );
+    expect(fresh.conflicts ?? []).toHaveLength(0);
+    expect(getCanvasStore('both').readNode('n1')).toMatchObject({
+      content: 'rewritten',
+      properties: { status: 'read' },
+    });
+  });
+
+  it('keeps both when two writers change different keys, and the last writer of one key', async () => {
+    seedNote('writers', 'n1', 'body');
+    // Neither writer has seen the other's write.
+    await merge('writers', 'n1', { properties: { tags: ['a'] } });
+    await merge('writers', 'n1', { properties: { status: 'read' } });
+    expect(getCanvasStore('writers').readNode('n1')?.properties).toEqual({
+      tags: ['a'],
+      status: 'read',
+    });
+    await merge('writers', 'n1', { properties: { status: 'first' } });
+    await merge('writers', 'n1', { properties: { status: 'second' } });
+    expect(getCanvasStore('writers').readNode('n1')?.properties).toEqual({
+      tags: ['a'],
+      status: 'second',
+    });
+    expect(bodyOf('writers', 'n1')).toBe('body');
   });
 });
 

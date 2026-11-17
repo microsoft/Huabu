@@ -272,7 +272,7 @@ export const mergeNodeDataCommandSchema = z
   })
   .strict()
   .describe(
-    'Merge patches into node data. patch.content is the Markdown body only, never a downloaded node sidecar or YAML frontmatter. Content and authored metadata (properties, propertyDisplayKeys) require a fresh revision; use expectRev for src edits too. Read the node before content edits; inspect_nodes suffices for property edits. Native callers pass expectRev; the built-in agent injects it from the read or inspection.',
+    'Merge patches into node data. patch.content is the Markdown body only, never a downloaded node sidecar or YAML frontmatter. Only a patch that rewrites content requires a fresh revision: read the node first; native callers pass the revision of that read as expectRev, the built-in agent has it injected from the read. Custom properties (patch.properties: a per-key patch, null deletes a key; patch.propertyDisplayKeys: the display order) need no read and no expectRev: they are merged into the node as it is now, different keys never conflict and the same key is last-writer-wins. An expectRev on a patch without content is ignored. A patch entry that carries both content and properties is refused as a whole when the body revision is stale, so send properties in their own patch entry.',
   );
 
 export const setNodeParentCommandSchema = z

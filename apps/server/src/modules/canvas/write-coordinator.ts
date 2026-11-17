@@ -97,20 +97,29 @@ type NodeRejection = Exclude<
 
 export type UpdateNodeOutcome =
   | { status: 'ok'; rev: string; label: string | null }
-  | { status: 'rev-conflict'; currentRev: string }
+  | {
+      status: 'rev-conflict';
+      currentRev: string;
+      /** `applyUnversioned` wrote its record although the rest was refused. */
+      unversionedApplied?: boolean;
+    }
   | { status: 'noop' }
   | { status: 'skipped-deleted' }
   | { status: 'rejected'; result: NodeRejection };
 
 export interface UpdateNodeOptions {
-  /** Optimistic-concurrency baseline for authored content. */
+  /**
+   * Optimistic-concurrency baseline for the body: the content revision
+   * (`content` and `src`) the writer last saw.
+   */
   expectRev?: string;
   /**
-   * The body is derived and withheld from the writer (extracted PDF text), so
-   * a baseline the writer computed itself covers the metadata alone. Accept
-   * that revision as well as the full one.
+   * The part of the write that no revision protects (custom properties),
+   * applied to the current record when `expectRev` is refused. Same contract
+   * as {@link apply}; `null` writes nothing. The outcome is still
+   * `rev-conflict`, with `unversionedApplied` set when the record was put.
    */
-  derivedBody?: boolean;
+  applyUnversioned?: (current: NodeContent | null) => NodeContent | null;
   /**
    * Return a complete replacement record, or null for no write.
    *
@@ -145,7 +154,7 @@ export async function updateNode(
   const lease = acquireWorkspaceOperationLease();
   try {
     return await withCanvasMutex(nodes.canvasId, async () => {
-      // Public Canvas revisions cover authored content and metadata; repository revisions are
+      // Public Canvas revisions cover the body and source pointer; repository revisions are
       // opaque full-record tokens. Both are checked, and neither is retried:
       // one pass is the whole operation. Nothing can move the record between
       // this read and this put through the same application mutex. A backend
@@ -156,15 +165,26 @@ export async function updateNode(
 
       if (
         opts.expectRev !== undefined &&
-        opts.expectRev !== currentContentRevision &&
-        !(
-          opts.derivedBody &&
-          current &&
-          opts.expectRev ===
-            nodeRevisionOf({ ...current.record, content: undefined })
-        )
+        opts.expectRev !== currentContentRevision
       ) {
-        return { status: 'rev-conflict', currentRev: currentContentRevision };
+        // The body is refused. What no revision protects is still written,
+        // in the same pass and under the same mutex.
+        const unversioned = opts.applyUnversioned?.(current?.record ?? null);
+        if (!unversioned) {
+          return { status: 'rev-conflict', currentRev: currentContentRevision };
+        }
+        const partial = await nodes.put({
+          nodeId,
+          record: unversioned,
+          expectedRevision: current?.revision ?? null,
+        });
+        return {
+          status: 'rev-conflict',
+          currentRev: partial.ok
+            ? contentRevisionOf(partial.record)
+            : currentContentRevision,
+          unversionedApplied: partial.ok,
+        };
       }
 
       const next = opts.apply(current?.record ?? null);

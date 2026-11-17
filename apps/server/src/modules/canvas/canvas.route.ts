@@ -54,7 +54,11 @@ import { searchCanvas } from './canvas-search.js';
 import { publishCanvasUpdate } from './canvas-sync.js';
 import { NodeCoverError } from './import-node-src.js';
 import { remapImportedSpace } from './import-space-identity.js';
-import { resolveNodeContentUpdate } from './node-content-update.js';
+import {
+  applyNodePropertyPatch,
+  NODE_BODY_REQUEST_KEYS,
+  resolveNodeContentUpdate,
+} from './node-content-update.js';
 import { registerSpaceCardRoutes } from './space-card.route.js';
 import {
   deletionPreview,
@@ -882,23 +886,32 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     // safety and only risk a false `NODE_CONTENT_CONFLICT` (e.g. a brand-new
     // image whose `expectRev` races its own `persist_source` write). The web
     // sends `expectRev` uniformly and need not know the classification; the
-    // server drops it for non-authored types unless authored metadata is edited.
+    // server drops it for non-authored types.
+    //
+    // Custom properties are not part of that: `properties` and
+    // `propertyDisplayKeys` are a per-key patch applied to the stored record
+    // as it is now, whatever revision the request quotes. A request that
+    // carries nothing else is never checked (a supplied `expectRev` is
+    // ignored), and one that also carries a refused body still has its
+    // property patch applied (`applyUnversioned`).
     const isAuthored =
       getProfile(nodeType as CanvasNodeType)?.bodyOwnership === 'authored';
+    const hasPropertyPatch =
+      properties !== undefined || propertyDisplayKeys !== undefined;
+    const propertiesOnly =
+      hasPropertyPatch &&
+      NODE_BODY_REQUEST_KEYS.every((key) => parsed.data[key] === undefined);
     let outcome: UpdateNodeOutcome;
     try {
       outcome = await updateNode(handle.nodes, nodeId, {
-        expectRev:
-          isAuthored ||
-          properties !== undefined ||
-          propertyDisplayKeys !== undefined
-            ? expectRev
-            : undefined,
-        // A PDF's extracted text is not sent to the web (`hydrateOneNode`),
-        // so a write without a body may rest on the metadata alone. One that
-        // carries a body replaces the text and must have seen it.
-        derivedBody: nodeType === 'pdf' && incomingContent === undefined,
+        expectRev: isAuthored && !propertiesOnly ? expectRev : undefined,
         apply,
+        ...(hasPropertyPatch
+          ? {
+              applyUnversioned: (existing) =>
+                existing ? applyNodePropertyPatch(existing, parsed.data) : null,
+            }
+          : {}),
         strictRename: labelSource === 'user',
       });
     } catch (error) {
@@ -915,6 +928,17 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     // a Google-Drive-synced copy) moved the on-disk body past the client's
     // baseline — surface instead of silently overwriting it.
     if (outcome.status === 'rev-conflict') {
+      // The property patch of the refused request was written: other pages
+      // fetch it like any other save.
+      if (outcome.unversionedApplied) {
+        publishCanvasUpdate(canvasId, {
+          type: 'invalidate',
+          data: {
+            nodeIds: [nodeId],
+            ...(parsed.data.pageId ? { originPageId: parsed.data.pageId } : {}),
+          },
+        });
+      }
       return reply.code(409).send({
         code: 'NODE_CONTENT_CONFLICT',
         message:
@@ -924,6 +948,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         nodeId,
         currentRev: outcome.currentRev,
         expectedRev: expectRev,
+        ...(outcome.unversionedApplied ? { propertiesApplied: true } : {}),
       } satisfies CanvasConflictResponse);
     }
     if (outcome.status === 'rejected') {

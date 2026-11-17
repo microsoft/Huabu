@@ -250,19 +250,26 @@ export function hydrateCanvasNodes(
 }
 
 /**
- * Compare-and-swap pre-flight for agent content writes. For each
- * `MERGE_NODE_DATA` patch that rewrites authored content or custom metadata,
- * compare the writer's `expectRev` against the hydrated node's current
- * {@link nodeRevision}. A missing `expectRev` (the agent never read the
- * node this run) or a mismatch (edited since) is a conflict.
+ * Compare-and-swap pre-flight for agent body writes. For each
+ * `MERGE_NODE_DATA` patch that rewrites `content` (a note's body, the body
+ * of a Note a PDF owns), compare the writer's `expectRev` against the
+ * hydrated node's current {@link nodeRevision}. A missing `expectRev` (the
+ * agent never read the node this run) or a mismatch (edited since) is a
+ * conflict, and refuses the whole patch entry, whatever else it carries.
  *
- * Content, owned notes, properties, and display order are guarded — NOT `src`. `src` is a short pointer (an
- * external URL / `artifacts/<file>` handle), not a mergeable body, and a
- * media node's `src` is never reached via a `nodes/<label>.md` read (the
- * agent reads the artifact the `src` points at, not the sidecar), so the
- * read-set never holds its rev — guarding it would reject every legit
- * `src` rewrite as `not-read`. Patches touching only non-body fields
- * (`src` / label / summary / style) remain unconditional.
+ * Only the body is guarded.
+ *
+ * - NOT custom properties (`properties`, `propertyDisplayKeys`): they are
+ *   independent small items merged per key into the node as it is now.
+ *   Different keys never conflict, the same key is last-writer-wins, and a
+ *   patch that touches only them needs neither a read nor a revision; an
+ *   `expectRev` it carries anyway is not looked at.
+ * - NOT `src`: a short pointer (an external URL / `artifacts/<file>`
+ *   handle), not a mergeable body, and a media node's `src` is never reached
+ *   via a `nodes/<label>.md` read (the agent reads the artifact the `src`
+ *   points at, not the sidecar), so the read-set never holds its rev —
+ *   guarding it would reject every legit `src` rewrite as `not-read`.
+ * - NOT label / summary / style.
  */
 function collectMergeConflicts(
   commands: readonly CanvasCommand[],
@@ -274,12 +281,7 @@ function collectMergeConflicts(
     if (cmd.type !== 'MERGE_NODE_DATA') continue;
     for (const entry of cmd.patches) {
       const patch = entry.patch ?? {};
-      const rewritesContent = [
-        'content',
-        'properties',
-        'propertyDisplayKeys',
-      ].some((key) => key in patch);
-      if (!rewritesContent) continue;
+      if (!('content' in patch)) continue;
       const node = byId.get(entry.nodeId);
       if (!node) continue; // missing node → engine emits 'not-found'
       const currentRev = nodeRevision(node);

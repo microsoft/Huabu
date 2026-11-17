@@ -133,6 +133,11 @@ const mergeProperties = (nodeId: string, properties: object) => ({
   patches: [{ nodeId, patch: { properties } }],
 });
 
+const mergeContent = (nodeId: string, content: string) => ({
+  type: 'MERGE_NODE_DATA',
+  patches: [{ nodeId, patch: { content } }],
+});
+
 const move = (nodeId: string, x: number) => ({
   type: 'SET_NODE_GEOMETRY',
   items: [{ nodeId, position: { x, y: 40 } }],
@@ -200,7 +205,6 @@ describe.each([['disk'], ['sqlite']] as const)(
           type: 'pdf',
           content: PDF_TEXT,
           src: 'artifacts/paper.pdf',
-          properties: { Venue: 'CHI 25', Status: 'Reading' },
         }),
       );
       expect(expected.office).toBe(
@@ -208,7 +212,6 @@ describe.each([['disk'], ['sqlite']] as const)(
           type: 'office',
           content: OFFICE_BODY,
           src: 'artifacts/deck.pptx',
-          properties: { Owner: 'Ada' },
         }),
       );
       // `other` moved: it is in the deltas but not among the revisions.
@@ -259,18 +262,29 @@ describe.each([['disk'], ['sqlite']] as const)(
 
     it('answers a repeated request with the same revisions, also after the node was saved again', async () => {
       const request = { operationId: randomUUID(), principalId: PRINCIPAL };
+      const pdfBefore = await storedRevision('pdf');
       const commands = [
         mergeProperties('pdf', { Venue: 'CHI 25', Status: 'Read' }),
+        mergeContent('note', 'first text'),
       ];
       const first = await run(commands, { request });
       expect(first.nodeContentRevisions).toEqual({
         pdf: await storedRevision('pdf'),
+        note: await storedRevision('note'),
       });
+      // The PDF is named because its saved content changed, with the
+      // revision it had: properties are not part of it.
+      expect(first.nodeContentRevisions?.pdf).toBe(pdfBefore);
 
-      // Another writer changes the PDF after the request was committed.
-      await run([mergeProperties('pdf', { Venue: 'UIST 26' })]);
-      expect(await storedRevision('pdf')).not.toBe(
-        first.nodeContentRevisions?.pdf,
+      // Another writer changes both nodes after the request was committed:
+      // a property of the PDF (no new revision) and the note's body (one).
+      await run([
+        mergeProperties('pdf', { Venue: 'UIST 26' }),
+        mergeContent('note', 'second text'),
+      ]);
+      expect(await storedRevision('pdf')).toBe(pdfBefore);
+      expect(await storedRevision('note')).not.toBe(
+        first.nodeContentRevisions?.note,
       );
 
       const replay = await run(commands, { request });
@@ -305,7 +319,10 @@ describe.each([['disk'], ['sqlite']] as const)(
         note: await storedRevision('note'),
       };
       expect(reverted.nodeContentRevisions).toEqual(expected);
-      expect(expected.pdf).not.toBe(before.pdf);
+      // Taking the properties back leaves the PDF's revision where it was;
+      // taking the text back moves the note's.
+      expect(expected.pdf).toBe(before.pdf);
+      expect(expected.note).not.toBe(before.note);
       expect(expected.note).toBe(
         nodeRevisionOf({ type: 'note', content: 'note body' }),
       );
@@ -377,8 +394,9 @@ describe('content revisions over HTTP', () => {
         response.nodeContentRevisions?.pdf,
       );
 
-      // A property save that also replaces the body must quote the full
-      // revision: the one the update brought is accepted.
+      // A save that quotes the revision the update brought is accepted (a
+      // PDF's extracted text is last-writer-wins and its properties are
+      // unversioned, so no revision could refuse it).
       const saved = await app.inject({
         method: 'PUT',
         url: `/canvas/${CANVAS}/nodes/pdf/content`,

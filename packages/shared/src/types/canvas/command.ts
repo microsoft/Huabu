@@ -117,7 +117,10 @@ export type CanvasNodeDataMergePatch = {
    * ({@link nodeRevision}) the writer last saw. Sibling of `patch` (never
    * merged into node data). The server compares it against the node's
    * current rev before applying a content rewrite and rejects on mismatch
-   * (a human / another turn edited it since). Auto-injected server-side for
+   * (a human / another turn edited it since). Looked at only when `patch`
+   * rewrites `content`: custom properties (`properties`,
+   * `propertyDisplayKeys`) are merged per key without a revision, and an
+   * `expectRev` beside a patch without `content` is ignored. Auto-injected server-side for
    * agent writes from the run's read-set; absent for ui / system writes,
    * which are unconditional.
    */

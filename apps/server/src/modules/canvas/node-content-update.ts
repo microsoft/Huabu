@@ -54,10 +54,37 @@ export function resolveNodeContentUpdate(
   if (input.summary !== undefined) result['summary'] = input.summary;
   if (input.keywords !== undefined) result['keywords'] = input.keywords;
   if (input.provenance !== undefined) result['provenance'] = input.provenance;
-  // Keywise: null deletes one key and keys the patch omits are kept.
+  return applyNodePropertyPatch(result, input);
+}
+
+/**
+ * The request fields besides the custom-property patch that change a record.
+ * A request that carries none of them is a property patch and nothing else.
+ */
+export const NODE_BODY_REQUEST_KEYS = [
+  'content',
+  'label',
+  'labelSource',
+  'src',
+  'summary',
+  'keywords',
+  'provenance',
+] as const satisfies readonly (keyof PutNodeContentRequest)[];
+
+/**
+ * `record` (the stored record as it is now) with the custom-property patch
+ * of `input` applied. Keywise: `null` deletes one key, keys the patch omits
+ * are kept. The display order is replaced as a whole. No revision is
+ * involved: the patch is applied to whatever the record holds.
+ */
+export function applyNodePropertyPatch(
+  record: NodeContent,
+  input: Pick<PutNodeContentRequest, 'properties' | 'propertyDisplayKeys'>,
+): NodeContent {
+  const result: NodeContent = { ...record };
   if (input.properties !== undefined)
     result.properties = mergeNodeProperties(
-      existing?.properties,
+      record.properties,
       input.properties,
     );
   if (input.propertyDisplayKeys !== undefined)
