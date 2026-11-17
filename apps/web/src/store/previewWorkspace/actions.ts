@@ -279,6 +279,21 @@ export function openPreviewUrl(
   return preview.openPreviewTarget(target, { groupId });
 }
 
+/** Inspect a device file in the reusable Preview slot without creating a node. */
+export function openPreviewFile(file: {
+  agentletId: string;
+  path: string;
+  deviceName?: string;
+}): string {
+  const preview = usePreviewWorkspaceStore.getState();
+  const canvasId = preview.canvasId;
+  if (!canvasId) return '';
+  const target = normalizePreviewTarget({ kind: 'file', canvasId, ...file });
+  if (!target) return '';
+  usePanelStore.getState().requestOpenRightPanel();
+  return preview.openPreviewTarget(target, { transient: true });
+}
+
 export function closeActivePreviewNode(): void {
   const preview = usePreviewWorkspaceStore.getState();
   const activeTab = selectActiveTab(preview);

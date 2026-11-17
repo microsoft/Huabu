@@ -17,6 +17,8 @@ type FilesPanelEntryMenuProps = {
   path: string;
   relativePath: string;
   onCopyResult: (copied: boolean) => void;
+  /** Files only: place a reference card for this entry in the Space. */
+  onAddToCanvas?: () => void;
   children: ReactNode;
 };
 
@@ -25,6 +27,7 @@ export function FilesPanelEntryMenu({
   path,
   relativePath,
   onCopyResult,
+  onAddToCanvas,
   children,
 }: FilesPanelEntryMenuProps) {
   const { t } = useTranslation();
@@ -89,6 +92,16 @@ export function FilesPanelEntryMenu({
             event.stopPropagation();
           }}
         >
+          {onAddToCanvas ? (
+            <DropdownMenuItem
+              onClick={() => {
+                onAddToCanvas();
+                setOpen(false);
+              }}
+            >
+              {t('files.addToCanvas')}
+            </DropdownMenuItem>
+          ) : null}
           <DropdownMenuItem onClick={() => void copy(name)}>
             {t('files.copyName')}
           </DropdownMenuItem>

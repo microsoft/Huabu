@@ -158,7 +158,7 @@ export function PreviewGroup({
         if (!tab) return [];
         if (tab.target.kind === 'chat' || tab.target.kind === 'conversation')
           return [tabId];
-        if (tab.target.kind === 'url') return [];
+        if (tab.target.kind === 'url' || tab.target.kind === 'file') return [];
         const nodeId = tab.target.nodeId;
         const node = state.nodes.find((candidate) => candidate.id === nodeId);
         return node && canRetainPreviewNode(node) ? [tabId] : [];

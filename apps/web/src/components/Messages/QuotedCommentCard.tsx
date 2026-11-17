@@ -10,6 +10,7 @@ import { Tooltip } from '@/components/Common/Tooltip';
 import { useSearchSource } from '@/hooks/useSearchSource';
 import useCanvasStore from '@/store/canvasStore';
 import { usePanelStore } from '@/store/panelStore';
+import { openPreviewFile } from '@/store/previewWorkspace/actions';
 import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store';
 import { useWorkspaceStore } from '@/store/workspaceStore';
 import { buildNodeDeepLink } from '@/utils/nodeDeepLink';
@@ -116,13 +117,17 @@ function QuoteSourceButton({
       className="text-fg-muted w-fit max-w-full px-0 text-xs"
       onClick={() => {
         const canvasId = useCanvasStore.getState().canvasId;
+        if (source.kind === 'file-reference' && !source.nodeId) {
+          // Captured from the file browser: the file lives on a device, not
+          // in any Space, so it reopens here whichever Space it came from.
+          openPreviewFile({ agentletId: source.agentletId, path: source.path });
+          return;
+        }
+        const nodeId = source.nodeId;
+        if (!nodeId) return;
         if (source.canvasId !== canvasId) {
           const url = new URL(
-            buildNodeDeepLink(
-              window.location.origin,
-              source.canvasId,
-              source.nodeId,
-            ),
+            buildNodeDeepLink(window.location.origin, source.canvasId, nodeId),
           );
           navigate(`${url.pathname}${url.search}`, {
             state: {
@@ -136,7 +141,7 @@ function QuoteSourceButton({
         usePreviewWorkspaceStore.getState().openPreviewTarget({
           kind: 'node',
           canvasId: source.canvasId,
-          nodeId: source.nodeId,
+          nodeId,
         });
       }}
     >

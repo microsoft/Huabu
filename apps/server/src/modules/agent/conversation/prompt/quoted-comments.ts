@@ -31,7 +31,10 @@ export function renderQuotedComments(
                 '<source>',
                 '<kind>file-reference</kind>',
                 `<canvas_id>${escapeXmlText(item.source.canvasId)}</canvas_id>`,
-                `<node_id>${escapeXmlText(item.source.nodeId)}</node_id>`,
+                // A file previewed from the file browser has no node in the Space.
+                ...(item.source.nodeId
+                  ? [`<node_id>${escapeXmlText(item.source.nodeId)}</node_id>`]
+                  : []),
                 `<agentlet_id>${escapeXmlText(item.source.agentletId)}</agentlet_id>`,
                 `<path>${escapeXmlText(item.source.path)}</path>`,
                 `<content_version>${escapeXmlText(item.source.contentVersion)}</content_version>`,

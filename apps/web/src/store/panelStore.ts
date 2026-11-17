@@ -9,6 +9,8 @@ import { desktopSpaceStorage } from '@/utils/desktopStorage';
 interface PanelState {
   leftMode: 'layers' | 'files';
   filesLocation: { canvasId: string; agentletId: string; path: string } | null;
+  /** Last directory browsed per Space and device; see {@link filesPathKey}. */
+  filesLastPaths: Record<string, string>;
   openFiles: (location: {
     canvasId: string;
     agentletId: string;
@@ -71,13 +73,36 @@ interface PanelState {
   requestFocusChatInput: (threadId: string) => void;
 }
 
+const MAX_REMEMBERED_FILE_PATHS = 100;
+
+export const filesPathKey = (canvasId: string, agentletId: string) =>
+  `${canvasId}\n${agentletId}`;
+
 export const usePanelStore = create<PanelState>()(
   persist(
     (set) => ({
       leftMode: 'layers',
       filesLocation: null,
+      filesLastPaths: {},
       openFiles: (filesLocation) =>
-        set({ filesLocation, leftMode: 'files', isLeftCollapsed: false }),
+        set((s) => {
+          const key = filesPathKey(
+            filesLocation.canvasId,
+            filesLocation.agentletId,
+          );
+          // Re-insert so the oldest remembered directory is evicted first.
+          const { [key]: _previous, ...others } = s.filesLastPaths;
+          const entries = [
+            ...Object.entries(others),
+            [key, filesLocation.path] as const,
+          ].slice(-MAX_REMEMBERED_FILE_PATHS);
+          return {
+            filesLocation,
+            filesLastPaths: Object.fromEntries(entries),
+            leftMode: 'files',
+            isLeftCollapsed: false,
+          };
+        }),
       setLeftMode: (leftMode) => set({ leftMode }),
       isLeftCollapsed: true,
       setLeftCollapsed: (collapsed) => set({ isLeftCollapsed: collapsed }),
@@ -139,6 +164,7 @@ export const usePanelStore = create<PanelState>()(
       partialize: (state) => ({
         isRightCollapsed: state.isRightCollapsed,
         rightWidthPx: state.rightWidthPx,
+        filesLastPaths: state.filesLastPaths,
       }),
     },
   ),

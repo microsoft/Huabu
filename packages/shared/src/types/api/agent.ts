@@ -358,7 +358,8 @@ export const quotedCommentSchema = z.object({
         .object({
           kind: z.literal('file-reference'),
           canvasId: z.string().min(1),
-          nodeId: z.string().min(1),
+          /** Absent when the file was previewed straight from the file browser. */
+          nodeId: z.string().min(1).optional(),
           agentletId: fileReferenceSchema.shape.agentletId,
           path: fileReferenceSchema.shape.path,
           contentVersion: z.string().regex(/^[a-f0-9]{64}$/),

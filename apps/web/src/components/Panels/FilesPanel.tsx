@@ -5,33 +5,41 @@ import {
   ChevronRight,
   ChevronDown,
   FileText,
-  Folder,
-  Plus,
   ArrowUp,
   RefreshCw,
 } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 import { useTranslation } from 'react-i18next';
 import { Virtuoso } from 'react-virtuoso';
 
-import { listDeviceFiles } from '@/api/device-files';
 import { Button } from '@/components/Common/Button';
+import { cn } from '@/components/Common/cn';
+import { FolderPickerButton } from '@/components/Common/FolderPickerButton';
 import { Select } from '@/components/Common/Select';
 import { TextInput } from '@/components/Common/TextInput';
 import { useAcpProfilesStore } from '@/store/acpProfilesStore';
-import useCanvasStore from '@/store/canvasStore';
-import { usePanelStore } from '@/store/panelStore';
+import useCanvasStore, { selectCanWriteCanvas } from '@/store/canvasStore';
+import { filesPathKey, usePanelStore } from '@/store/panelStore';
+import { openPreviewFile } from '@/store/previewWorkspace/actions';
+import {
+  selectActiveTab,
+  usePreviewWorkspaceStore,
+} from '@/store/previewWorkspace/store';
+import { addFileReferenceNode, fileReferenceData } from '@/utils/deviceFile';
 import { setDragPayload } from '@/utils/io/dragDrop';
 
+import {
+  buildFileTreeRows,
+  DeviceFileTree,
+  type FileEntry,
+} from './deviceFileTree';
 import { FilesPanelEntryMenu } from './FilesPanelEntryMenu';
-
-import type { FileListResult } from '@huabu/shared';
-
-type Entry = FileListResult['entries'][number];
-type Row =
-  | { entry: Entry; depth: number; relativePath: string }
-  | { more: string; depth: number };
-const MAX_TREE_ENTRIES = 2000;
 
 export function FilesPanel() {
   const { t } = useTranslation();
@@ -40,165 +48,112 @@ export function FilesPanel() {
   const openFiles = usePanelStore((state) => state.openFiles);
   const devices = useAcpProfilesStore((state) => state.connectedDevices);
   const profilesError = useAcpProfilesStore((state) => state.error);
+  const canWrite = useCanvasStore(selectCanWriteCanvas);
+  // The remembered directory browsing was started from, until it has loaded.
+  const [rememberedStart, setRememberedStart] = useState<string | null>(null);
+  const localDeviceId = useAcpProfilesStore(
+    (state) => state.folderPickerAgentletId,
+  );
   const source = location?.canvasId === canvasId ? location : null;
   const sourceAgentletId = source?.agentletId;
   const sourcePath = source?.path;
-  const [device, setDevice] = useState(source?.agentletId ?? '');
+  const previewedPath = usePreviewWorkspaceStore((state) => {
+    const target = selectActiveTab(state)?.target;
+    return target?.kind === 'file' && target.agentletId === sourceAgentletId
+      ? target.path
+      : null;
+  });
+  const device = sourceAgentletId ?? '';
   const [path, setPath] = useState(source?.path ?? '');
   const [showHidden, setShowHidden] = useState(false);
-  const [refresh, setRefresh] = useState(0);
-  const [pages, setPages] = useState<Record<string, FileListResult>>({});
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  const [error, setError] = useState<string | null>(null);
-  const [pending, setPending] = useState(false);
-  const pendingRef = useRef(false);
-  const abortRef = useRef<AbortController | null>(null);
-  const generation = useRef(0);
-  const entriesLoaded = useRef(0);
+  // Failures of panel actions (copy, folder picker); listing failures live
+  // in the tree.
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [tree] = useState(() => new DeviceFileTree());
+  const snapshot = useSyncExternalStore(tree.subscribe, tree.getSnapshot);
+  const { pages, expanded, loading, reloading } = snapshot;
+  const rows = useMemo(() => buildFileTreeRows(snapshot), [snapshot]);
   const selectedDevice = devices.find(
-    (candidate) => candidate.agentletId === source?.agentletId,
+    (candidate) => candidate.agentletId === sourceAgentletId,
   );
   useEffect(() => {
     void useAcpProfilesStore.getState().refresh();
   }, []);
   useEffect(() => {
-    setDevice(source?.agentletId ?? '');
-    setPath(source?.path ?? '');
-  }, [source?.agentletId, source?.path]);
+    setPath(sourcePath ?? '');
+    setActionError(null);
+  }, [sourceAgentletId, sourcePath]);
 
   useEffect(() => {
-    const current = ++generation.current;
-    abortRef.current?.abort();
-    const abort = new AbortController();
-    abortRef.current = abort;
-    setPages({});
-    setExpanded(new Set());
-    setError(null);
-    entriesLoaded.current = 0;
-    if (!sourceAgentletId || !sourcePath) {
-      pendingRef.current = false;
-      setPending(false);
-      return;
-    }
-    pendingRef.current = true;
-    setPending(true);
-    void listDeviceFiles(
-      sourceAgentletId,
-      { path: sourcePath, showHidden },
-      abort.signal,
-    )
-      .then((result) => {
-        if (current !== generation.current) return;
-        entriesLoaded.current = result.entries.length;
-        setPages({ [sourcePath]: result });
-      })
-      .catch((failure: unknown) => {
-        if (current === generation.current && !abort.signal.aborted)
-          setError(
-            failure instanceof Error ? failure.message : t('files.failed'),
-          );
-      })
-      .finally(() => {
-        if (current === generation.current) {
-          pendingRef.current = false;
-          setPending(false);
-        }
+    if (sourceAgentletId && sourcePath)
+      tree.open(sourceAgentletId, sourcePath, showHidden);
+    else tree.close();
+  }, [tree, sourceAgentletId, sourcePath, showHidden]);
+  useEffect(() => () => tree.close(), [tree]);
+
+  /** Where browsing starts on a device: its last directory here, else its root. */
+  const browse = useCallback(
+    (agentletId: string, useRemembered = true) => {
+      if (!canvasId) return;
+      const remembered = useRemembered
+        ? usePanelStore.getState().filesLastPaths[
+            filesPathKey(canvasId, agentletId)
+          ]
+        : undefined;
+      const platform = useAcpProfilesStore
+        .getState()
+        .connectedDevices.find(
+          (candidate) => candidate.agentletId === agentletId,
+        )?.platform;
+      setRememberedStart(remembered ?? null);
+      openFiles({
+        canvasId,
+        agentletId,
+        path: remembered ?? (platform?.startsWith('win') ? 'C:\\' : '/'),
       });
-    return () => {
-      generation.current = current + 1;
-      abort.abort();
-    };
-  }, [sourceAgentletId, sourcePath, showHidden, refresh, t]);
+    },
+    [canvasId, openFiles],
+  );
+  // Nobody should have to know a path to get started: with nothing open yet,
+  // start on this machine when it is connected, else on the first device.
+  const firstDeviceId =
+    devices.find((candidate) => candidate.agentletId === localDeviceId)
+      ?.agentletId ?? devices[0]?.agentletId;
+  useEffect(() => {
+    if (!source && firstDeviceId) browse(firstDeviceId);
+  }, [source, firstDeviceId, browse]);
+  // A remembered directory may be gone by now; start at the root instead.
+  const rootFailed =
+    snapshot.error?.kind === 'root' && snapshot.error.path === sourcePath;
+  const fallingBack = rootFailed && rememberedStart === sourcePath;
+  useEffect(() => {
+    if (rememberedStart === null) return;
+    if (fallingBack && sourceAgentletId) browse(sourceAgentletId, false);
+    else if (rememberedStart !== sourcePath || snapshot.root === sourcePath)
+      setRememberedStart(null);
+  }, [
+    fallingBack,
+    rememberedStart,
+    snapshot.root,
+    sourceAgentletId,
+    sourcePath,
+    browse,
+  ]);
 
-  const load = async (directory: string, cursor?: string) => {
-    if (!source || pendingRef.current) return;
-    if (entriesLoaded.current >= MAX_TREE_ENTRIES) {
-      setError(t('files.treeLimit'));
-      return;
-    }
-    const current = generation.current;
-    pendingRef.current = true;
-    setPending(true);
-    setError(null);
-    try {
-      const result = await listDeviceFiles(
-        source.agentletId,
-        { path: directory, showHidden, ...(cursor ? { cursor } : {}) },
-        abortRef.current?.signal,
-      );
-      if (current !== generation.current) return;
-      if (entriesLoaded.current + result.entries.length > MAX_TREE_ENTRIES)
-        throw new Error(t('files.treeLimit'));
-      entriesLoaded.current += result.entries.length;
-      setPages((previous) => ({
-        ...previous,
-        [directory]: {
-          ...result,
-          entries: cursor
-            ? [
-                ...new Map(
-                  [
-                    ...(previous[directory]?.entries ?? []),
-                    ...result.entries,
-                  ].map((entry) => [entry.path, entry]),
-                ).values(),
-              ]
-            : result.entries,
-        },
-      }));
-      setExpanded((previous) => new Set(previous).add(directory));
-    } catch (failure) {
-      if (current === generation.current)
-        setError(
-          failure instanceof Error ? failure.message : t('files.failed'),
-        );
-    } finally {
-      if (current === generation.current) {
-        pendingRef.current = false;
-        setPending(false);
-      }
-    }
-  };
-  const rows = useMemo(() => {
-    const result: Row[] = [];
-    const visited = new Set<string>();
-    const rootPath = sourcePath ? pages[sourcePath]?.path : undefined;
-    const separator = rootPath?.startsWith('/') ? '/' : '\\';
-    const visit = (directory: string, depth: number, parent: string) => {
-      if (visited.has(directory) || depth > 32) return;
-      visited.add(directory);
-      const page = pages[directory];
-      for (const entry of page?.entries ?? []) {
-        const relativePath = parent
-          ? `${parent}${separator}${entry.name}`
-          : entry.name;
-        result.push({ entry, depth, relativePath });
-        if (entry.kind === 'directory' && expanded.has(entry.path))
-          visit(entry.path, depth + 1, relativePath);
-      }
-      if (page?.nextCursor) result.push({ more: directory, depth });
-    };
-    if (sourcePath) visit(sourcePath, 0, '');
-    return result;
-  }, [pages, expanded, sourcePath]);
-
-  const add = (entry: Entry) => {
-    if (!source) return;
-    useCanvasStore.getState().addNode({
-      nodeType: 'fileReference',
-      data: {
-        label: entry.name,
-        origin: { type: 'user-created' },
-        fileReference: {
-          agentletId: source.agentletId,
-          path: entry.path,
-          deviceName: selectedDevice?.displayName,
-        },
-      },
-      size: { width: 400, height: 180 },
-    });
-  };
-  const root = source ? pages[source.path] : undefined;
+  const reference = (entry: FileEntry) => ({
+    agentletId: sourceAgentletId ?? '',
+    path: entry.path,
+    deviceName: selectedDevice?.displayName,
+  });
+  const root = source && snapshot.root ? pages[snapshot.root] : undefined;
+  const treeError = snapshot.error
+    ? snapshot.error.kind === 'limit'
+      ? t('files.treeLimit')
+      : (snapshot.error.message ?? t('files.failed'))
+    : null;
+  // While a remembered directory falls back to the root, its failure is not
+  // the user's to act on.
+  const error = actionError ?? (fallingBack ? null : treeError);
   return (
     <section
       className="flex min-h-0 flex-1 flex-col"
@@ -208,10 +163,10 @@ export function FilesPanel() {
         className="flex shrink-0 flex-col gap-2 p-3"
         onSubmit={(event) => {
           event.preventDefault();
-          if (canvasId && device && path) {
-            openFiles({ canvasId, agentletId: device, path });
-            setRefresh((value) => value + 1);
-          }
+          if (!canvasId || !device || !path) return;
+          // Opening the directory already on screen re-lists it.
+          if (path === sourcePath) tree.refresh();
+          else openFiles({ canvasId, agentletId: device, path });
         }}
       >
         <Select
@@ -220,10 +175,7 @@ export function FilesPanel() {
             label: candidate.displayName,
           }))}
           value={device}
-          onChange={(value) => {
-            setDevice(value);
-            setPath('');
-          }}
+          onChange={(value) => browse(value)}
           placeholder={t('files.selectDevice')}
           ariaLabel={t('files.selectDevice')}
         />
@@ -236,6 +188,15 @@ export function FilesPanel() {
             placeholder={t('files.path')}
             className="min-w-0 flex-1"
           />
+          <FolderPickerButton
+            targetAgentletId={device}
+            enabled={!!device}
+            onPicked={(picked) => {
+              if (canvasId && device)
+                openFiles({ canvasId, agentletId: device, path: picked });
+            }}
+            onError={setActionError}
+          />
           <Button size="sm" type="submit" disabled={!path || !device}>
             {t('files.open')}
           </Button>
@@ -246,16 +207,17 @@ export function FilesPanel() {
             size="sm"
             iconOnly
             title={t('files.up')}
-            disabled={
-              !source || !root || root.parentPath === root.path || pending
-            }
+            disabled={!source || !root || root.parentPath === root.path}
             onClick={() => {
-              if (source && root && canvasId)
+              if (source && root && canvasId) {
+                // Keep the directory being left open under its parent.
+                tree.keepOpen(root.path);
                 openFiles({
                   canvasId,
                   agentletId: source.agentletId,
                   path: root.parentPath,
                 });
+              }
             }}
           >
             <ArrowUp />
@@ -265,13 +227,15 @@ export function FilesPanel() {
             size="sm"
             iconOnly
             title={t('files.refresh')}
-            disabled={!source || pending}
+            disabled={!source}
             onClick={() => {
-              setRefresh((value) => value + 1);
+              tree.refresh();
               void useAcpProfilesStore.getState().refresh();
             }}
           >
-            <RefreshCw />
+            <RefreshCw
+              className={reloading ? 'motion-safe:animate-spin' : undefined}
+            />
           </Button>
           <label className="text-fg-muted ml-auto flex items-center gap-1 text-xs">
             <input
@@ -293,13 +257,15 @@ export function FilesPanel() {
           {t('files.offline')}
         </div>
       ) : null}
-      {pending ? (
-        <div role="status" className="text-fg-muted px-3 pb-2 text-xs">
+      {source && !snapshot.root && reloading ? (
+        <p role="status" className="text-fg-muted p-3 text-xs">
           {t('files.loading')}
-        </div>
+        </p>
       ) : null}
       {!source ? (
-        <p className="text-fg-muted p-3 text-xs">{t('files.choosePath')}</p>
+        <p className="text-fg-muted p-3 text-xs">
+          {devices.length ? t('files.choosePath') : t('files.noDevice')}
+        </p>
       ) : null}
       {root && !rows.length ? (
         <p className="text-fg-muted p-3 text-xs">{t('files.empty')}</p>
@@ -317,22 +283,26 @@ export function FilesPanel() {
                 className="m-1"
                 size="sm"
                 variant="ghost"
-                disabled={pending}
-                onClick={() => void load(row.more, pages[row.more]?.nextCursor)}
+                disabled={loading.has(row.more)}
+                onClick={() => tree.loadMore(row.more)}
               >
                 {t('files.more')}
               </Button>
             );
           const { entry, depth, relativePath } = row;
           const directory = entry.kind === 'directory';
-          const Icon = directory ? Folder : FileText;
           return (
             <FilesPanelEntryMenu
               name={entry.name}
               path={entry.path}
               relativePath={relativePath}
               onCopyResult={(copied) =>
-                setError(copied ? null : t('files.copyFailed'))
+                setActionError(copied ? null : t('files.copyFailed'))
+              }
+              onAddToCanvas={
+                entry.kind === 'file' && canWrite
+                  ? () => addFileReferenceNode(reference(entry))
+                  : undefined
               }
             >
               <div
@@ -344,68 +314,53 @@ export function FilesPanel() {
                     variant="ghost"
                     size="sm"
                     className="min-w-0 flex-1 justify-start truncate"
-                    disabled={pending}
+                    aria-busy={loading.has(entry.path)}
                     aria-expanded={expanded.has(entry.path)}
-                    onClick={() => {
-                      if (depth >= 32) {
-                        setError(t('files.treeLimit'));
-                        return;
-                      }
-                      if (!pages[entry.path]) void load(entry.path);
-                      else
-                        setExpanded((previous) => {
-                          const next = new Set(previous);
-                          if (!next.delete(entry.path)) next.add(entry.path);
-                          return next;
-                        });
-                    }}
+                    onClick={() => tree.toggle(entry.path, depth)}
                   >
-                    {expanded.has(entry.path) ? (
+                    {/* The arrow turns at once and stays put: swapping in a
+                        spinner flashes on every fast listing. Only a slow
+                        one starts to pulse. */}
+                    {loading.has(entry.path) ? (
+                      <ChevronDown className="motion-safe:animate-pulse motion-safe:[animation-delay:400ms]" />
+                    ) : expanded.has(entry.path) ? (
                       <ChevronDown />
                     ) : (
                       <ChevronRight />
                     )}
-                    <Icon />
+                    <span className="truncate">{entry.name}</span>
+                  </Button>
+                ) : entry.kind === 'file' ? (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className={cn(
+                      'min-w-0 flex-1 justify-start truncate font-normal',
+                      previewedPath === entry.path && 'bg-info-bg',
+                    )}
+                    aria-current={previewedPath === entry.path || undefined}
+                    title={entry.path}
+                    draggable
+                    onClick={() => openPreviewFile(reference(entry))}
+                    onDragStart={(event) =>
+                      setDragPayload(event, {
+                        kind: 'fileReference',
+                        origin: { type: 'user-created' },
+                        data: fileReferenceData(reference(entry)),
+                      })
+                    }
+                  >
+                    <FileText className="text-fg-muted" />
                     <span className="truncate">{entry.name}</span>
                   </Button>
                 ) : (
-                  <>
-                    <span
-                      className="text-fg-default flex min-w-0 flex-1 items-center gap-1.5 pl-2 text-xs"
-                      draggable={entry.kind === 'file'}
-                      onDragStart={(event) => {
-                        if (!source || entry.kind !== 'file') return;
-                        setDragPayload(event, {
-                          kind: 'fileReference',
-                          origin: { type: 'user-created' },
-                          data: {
-                            label: entry.name,
-                            fileReference: {
-                              agentletId: source.agentletId,
-                              path: entry.path,
-                              deviceName: selectedDevice?.displayName,
-                            },
-                          },
-                        });
-                      }}
-                    >
-                      <Icon className="text-fg-muted h-3.5 w-3.5 shrink-0" />
-                      <span className="truncate" title={entry.path}>
-                        {entry.name}
-                      </span>
-                    </span>
-                    {entry.kind === 'file' ? (
-                      <Button
-                        size="sm"
-                        iconOnly
-                        variant="ghost"
-                        title={t('files.add', { name: entry.name })}
-                        onClick={() => add(entry)}
-                      >
-                        <Plus />
-                      </Button>
-                    ) : null}
-                  </>
+                  <span
+                    className="text-fg-muted flex h-7 min-w-0 flex-1 items-center gap-1.5 px-2 text-xs"
+                    title={entry.path}
+                  >
+                    <FileText className="h-3.5 w-3.5 shrink-0" />
+                    <span className="truncate">{entry.name}</span>
+                  </span>
                 )}
               </div>
             </FilesPanelEntryMenu>

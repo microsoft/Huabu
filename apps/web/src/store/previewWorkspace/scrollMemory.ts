@@ -107,7 +107,9 @@ export function previewTargetKey(target: PreviewTarget): string {
         ? [target.kind, target.canvasId, target.threadId]
         : target.kind === 'node'
           ? [target.kind, target.canvasId, target.nodeId]
-          : [target.kind, target.canvasId, target.url],
+          : target.kind === 'file'
+            ? [target.kind, target.canvasId, target.agentletId, target.path]
+            : [target.kind, target.canvasId, target.url],
   );
 }
 
