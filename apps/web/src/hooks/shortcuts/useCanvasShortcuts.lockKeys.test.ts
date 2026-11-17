@@ -215,10 +215,7 @@ describe('useCanvasShortcuts catalog key lock', () => {
     );
   });
 
-  it('cuts with Mod+X only when something is selected', () => {
-    dispatchCombo('edit.cut');
-    expect(canvasActions.cutSelectedNodes).not.toHaveBeenCalled();
-    canvasActions.nodes = [{ id: 'selected', selected: true }, { id: 'other' }];
+  it('hands Mod+X to the store, which decides what may be cut', () => {
     dispatchCombo('edit.cut');
     expect(canvasActions.cutSelectedNodes).toHaveBeenCalledOnce();
   });

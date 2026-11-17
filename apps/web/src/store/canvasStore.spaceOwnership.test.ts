@@ -5,6 +5,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 import { canvasHistoryManager } from './canvasHistoryManager';
 import useCanvasStore from './canvasStore';
+import { useGesturePreviewStore } from './gesturePreviewStore';
 import { useWorkspaceStore } from './workspaceStore';
 import * as api from '../api';
 import * as notifications from '../components/Common/Toast';
@@ -222,6 +223,33 @@ it('refuses to cut a selection that owns a child Space, leaving nodes and clipbo
     expect.stringContaining('cannot be cut'),
     { tone: 'warning' },
   );
+});
+
+it('cuts an ordinary selection by copying it and then removing it, but not during a stroke selection', async () => {
+  const note = {
+    id: 'cut-note',
+    type: 'note',
+    position: { x: 0, y: 0 },
+    data: {},
+    selected: true,
+  };
+  useCanvasStore.getState()._setStateNoAutosave({ nodes: [note] });
+  const copy = vi
+    .spyOn(useCanvasStore.getState(), 'copySelectedNodes')
+    .mockImplementation(() => undefined);
+
+  useGesturePreviewStore.setState({
+    sketchStrokeSelection: { sketch: ['stroke'] },
+  });
+  useCanvasStore.getState().cutSelectedNodes();
+  expect(copy).not.toHaveBeenCalled();
+  expect(useCanvasStore.getState().nodes).toHaveLength(1);
+
+  useGesturePreviewStore.setState({ sketchStrokeSelection: {} });
+  useCanvasStore.getState().cutSelectedNodes();
+  expect(copy).toHaveBeenCalledOnce();
+  expect(useCanvasStore.getState().nodes).toEqual([]);
+  await canvasHistoryManager.waitForDeletes('parent');
 });
 
 it('does not consume a redo snapshot that would remove a now-canonical entry', async () => {

@@ -2741,20 +2741,9 @@ const useCanvasStore = create<RFState>()(
         // Loading a Space only restores an existing legacy conversation.
         // Creating a new Chat is an explicit action requiring Agent defaults.
         const chatThreadId = useChatStore.getState().threadMap[targetId];
-        const enteringSpace =
-          usePreviewWorkspaceStore.getState().canvasId !== targetId;
         usePreviewWorkspaceStore
           .getState()
           .loadForCanvas(targetId, { chatThreadId });
-        // A Space with nothing to preview (every new Space, however it was
-        // created) opens as a bare canvas instead of inheriting the open
-        // panel of the Space the user came from.
-        if (
-          enteringSpace &&
-          Object.keys(usePreviewWorkspaceStore.getState().workspace.tabs)
-            .length === 0
-        )
-          usePanelStore.getState().setRightCollapsed(true);
         canvasHistoryManager.activate(targetId, options?.resetHistory);
         if (canvasId && targetId !== get().canvasId) {
           useToolStore.getState().resetForCanvasSwitch();
@@ -4823,7 +4812,13 @@ const useCanvasStore = create<RFState>()(
     cutSelectedNodes: () => {
       const { nodes, edges } = get();
       const nodeIds = nodes.filter((n) => n.selected).map((n) => n.id);
-      if (nodeIds.length === 0) return;
+      // A stroke-level sketch selection is owned by StrokeSelectionToolbar.
+      if (
+        nodeIds.length === 0 ||
+        Object.keys(useGesturePreviewStore.getState().sketchStrokeSelection)
+          .length > 0
+      )
+        return;
       // Cutting an entry would delete the child Space itself, and pasting
       // cannot bring it back, so refuse before touching the clipboard.
       if (ownedChildSpaces(get(), nodeIds).length) {
@@ -5177,6 +5172,10 @@ usePreviewWorkspaceStore.subscribe((next, previous) => {
   }
 });
 usePanelStore.subscribe((next, previous) => {
+  // Open or closed is recorded with the Space's layout when the choice is
+  // made, not only on leaving the Space, so a reload restores it.
+  if (next.isRightCollapsed !== previous.isRightCollapsed)
+    usePreviewWorkspaceStore.getState().flush();
   if (next.isRightCollapsed && !previous.isRightCollapsed) {
     settleDepartingPreviewEditors(
       usePreviewWorkspaceStore.getState().workspace,

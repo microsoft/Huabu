@@ -14,7 +14,6 @@ import { putNodeContent } from '@/api/canvas';
 
 import useCanvasStore from './canvasStore';
 import { commitNodeMetadata } from './canvasStore';
-import { usePanelStore } from './panelStore';
 import { useToolStore } from './toolStore';
 
 import type * as canvasApi from '../api';
@@ -108,21 +107,6 @@ describe('canvas title ownership during loading', () => {
     await useCanvasStore.getState().loadCanvas('next');
     expect(useToolStore.getState().pendingNodeType).toBe('text');
   });
-  it('enters a Space with no previews with Preview closed, without closing it on reload', async () => {
-    api.getCanvas.mockResolvedValue({
-      canvasId: 'fresh',
-      title: 'Fresh',
-      version: 1,
-      state: { nodes: [], edges: [] },
-    });
-    usePanelStore.setState({ isRightCollapsed: false });
-    await useCanvasStore.getState().loadCanvas('fresh');
-    expect(usePanelStore.getState().isRightCollapsed).toBe(true);
-    usePanelStore.setState({ isRightCollapsed: false });
-    await useCanvasStore.getState().loadCanvas('fresh');
-    expect(usePanelStore.getState().isRightCollapsed).toBe(false);
-  });
-
   it('clears the outgoing title before fetching and installs the loaded title', async () => {
     let resolve!: (
       value: Awaited<ReturnType<typeof canvasApi.getCanvas>>,

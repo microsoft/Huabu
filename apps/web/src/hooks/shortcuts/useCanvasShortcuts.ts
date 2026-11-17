@@ -548,17 +548,10 @@ export function useCanvasShortcuts(
       } else if (lowerKey === 'x') {
         // Cut is destructive, so unlike copy it never reaches through a
         // focused editor or a live text selection: those keep native cut.
+        // What may be cut is the store's decision.
         if (editable || hasNativeCopySelection(e.target)) return;
-        // A stroke-level sketch selection is owned by StrokeSelectionToolbar.
-        if (
-          Object.keys(useGesturePreviewStore.getState().sketchStrokeSelection)
-            .length > 0
-        )
-          return;
-        const { nodes: cur, cutSelectedNodes } = useCanvasStore.getState();
-        if (!cur.some((n) => n.selected)) return;
         e.preventDefault();
-        cutSelectedNodes();
+        useCanvasStore.getState().cutSelectedNodes();
       } else if (lowerKey === 'v') {
         if (editable) return;
 

@@ -48,7 +48,7 @@ import {
 import {
   MD_BACKED_NODE_TYPES,
   NODE_CONTENT_KEYS,
-  SERVER_ONLY_BODY_NODE_TYPES,
+  SERVER_DERIVED_SIDECAR_NODE_TYPES,
   TEXT_BEARING_NODE_TYPES,
 } from './nodeContentFields';
 import { createPerKeyDebouncer } from './perKeyDebouncer';
@@ -1191,7 +1191,7 @@ export function createNodeContentQueue(opts: {
         if (
           node.data?.contentMissing === true ||
           (TEXT_BEARING_NODE_TYPES.has(node.type ?? '') &&
-            !SERVER_ONLY_BODY_NODE_TYPES.has(node.type ?? '') &&
+            !SERVER_DERIVED_SIDECAR_NODE_TYPES.has(node.type ?? '') &&
             typeof node.data?.content !== 'string')
         ) {
           restoredContent.delete(id);

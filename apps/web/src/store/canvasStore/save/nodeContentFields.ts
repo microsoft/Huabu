@@ -88,21 +88,14 @@ export const TEXT_BEARING_NODE_TYPES: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Text-bearing types whose body the server keeps to itself. A PDF's sidecar
- * holds extracted text for AI context, but the web renders from `data.src`
- * and never receives that body, so its absence in client state is normal
- * rather than a sign of an incomplete node. Mirrors the server's
- * `WIRE_INLINE_CONTENT_TYPES` exclusion.
- */
-export const SERVER_ONLY_BODY_NODE_TYPES: ReadonlySet<string> = new Set([
-  'pdf',
-]);
-
-/**
  * Types whose sidecar carries data only the server can produce and the web
- * never holds: a PDF's extracted text, a video's cover. Deleting the node
- * deletes that data, and an undo can only write back what the web has, so
- * these are preprocessed again once their restored sidecar is saved.
+ * never holds: a PDF's extracted text (the web renders from `data.src`; see
+ * the server's `WIRE_INLINE_CONTENT_TYPES`), a video's cover.
+ *
+ * Deleting the node deletes that data and an undo can only write back what
+ * the web has. So for these types a missing body does not mean an incomplete
+ * snapshot, and they are preprocessed again once the restored sidecar is
+ * saved.
  */
 export const SERVER_DERIVED_SIDECAR_NODE_TYPES: ReadonlySet<string> = new Set([
   'pdf',
