@@ -11,7 +11,10 @@
 
 import { z } from 'zod';
 
-import { canvasContentPositionSchema } from './canvas-sync.js';
+import {
+  canvasContentPositionSchema,
+  canvasPageIdSchema,
+} from './canvas-sync.js';
 
 import type { videoCoverPatchSchema } from './preprocessing.js';
 import type { SetSiblingOrderEvent } from '../../canvas-engine/siblingOrder.js';
@@ -161,9 +164,11 @@ export const putNodeContentBodySchema = z.object({
   /**
    * The saving page's id (its `originator.tabId` / presence page id). Echoed
    * as `originPageId` on the `invalidate` event so that page can tell its own
-   * save from another page's. Not a credential.
+   * save from another page's — to streams of the saving principal only, so
+   * another principal cannot make a page skip a save by quoting its id. Not
+   * a credential.
    */
-  pageId: z.string().min(1).max(64).optional(),
+  pageId: canvasPageIdSchema.optional(),
 });
 export type PutNodeContentRequest = z.infer<typeof putNodeContentBodySchema>;
 
@@ -393,8 +398,11 @@ export interface CreateCanvasResponse {
  */
 export const executeOriginatorSchema = z.object({
   source: z.enum(['ui', 'agent', 'system']),
-  /** Web tab/session identifier; opaque to the server. */
-  tabId: z.string().optional(),
+  /**
+   * The sending page's id. Together with the authenticated principal it
+   * names the page whose own committed changes are not held against it.
+   */
+  tabId: canvasPageIdSchema.optional(),
   /** Authenticated user id when known. */
   userId: z.string().optional(),
   /**

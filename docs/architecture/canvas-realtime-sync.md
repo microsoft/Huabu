@@ -237,7 +237,7 @@ One rule, for pages and agents alike:
 
 Consequences. A custom-property change, by anyone, never changes a node's content revision, so it never refuses a body save and never asks a person to choose. A body change never refuses a property write. The revision is computed from the stored record on demand and is not stored with the node, so existing Spaces need no migration: a node that has properties simply reports the revision of its body from now on.
 
-**Sending.** The queue adds this page's id (`CANVAS_PAGE_ID`) to the request as `pageId`. The server copies it to the event as `originPageId` and does not store it. It is routing information, not a credential.
+**Sending.** The queue adds this page's id (`CANVAS_PAGE_ID`) to the request as `pageId`. The server copies it to the event as `originPageId` and does not store it. It is routing information, not a credential: the event carries `originPageId` only on streams of the principal that made the save (`eventForSubscriber`), so a page cannot be made to skip another principal's save by that principal quoting its page id — every other principal's pages receive the event without it and fetch. One schema, `canvasPageIdSchema` (1–64 characters of `[A-Za-z0-9_-]`), is the shape of a page id everywhere: `originator.tabId`, the content PUT's `pageId`, presence and the stream's `pageId`.
 
 **Receiving** (`canvasSyncStore` → `adoptRemoteNodeContent` → `NodeContentQueue.adoptRemoteContent`). A page ignores an event whose `originPageId` is its own, so it does not fetch what it just wrote; an event without `originPageId` (another client) is fetched. For each named node that the page has and that has a sidecar, the page fetches `GET …/nodes/:nodeId/content` and:
 
@@ -544,7 +544,7 @@ The auto-accept preference still suppresses new Agent review records only. It do
 
 ## Space presence
 
-When a Space is open on several pages (tabs or devices), each page shows the others: a coloured cursor where the other page's mouse, pen or finger is, and an outline in the same colour around the nodes that page has selected, is dragging or is editing. There is one account, so a marker stands for a page, not a person: the server gives each page a colour and the page supplies a short device label such as `Chrome · Mac`.
+When a Space is open on several pages (tabs or devices), each page shows the others: a coloured cursor where the other page's mouse, pen or finger is, and an outline in the same colour around the nodes that page has selected, is dragging or is editing. A marker stands for a page: the server gives each page a colour and the page supplies a short device label such as `Chrome · Mac`. A page of another person is shown with that person's name, which comes from the identity provider and not from the page.
 
 Presence is ephemeral. It is held in server memory and in a browser store of its own; it is not part of the Space record, its `version`, the delta log, change records, undo/redo or anything an Agent reads, and reporting it neither marks the Space dirty nor schedules a save. A drag is reported only as "these nodes are being dragged": positions are not streamed, and the moved node arrives on drop through [browser structure edits](#browser-structure-edits).
 
@@ -552,7 +552,7 @@ Presence is ephemeral. It is held in server memory and in a browser store of its
 page A pointer / selection / drag / focus
    │  useReportCanvasPresence → presenceReporter (≤1 request / 80 ms)
    ▼
-POST /api/canvas/:id/presence ──► canvas-presence hub (memory, per Space, by page id)
+POST /api/canvas/:id/presence ──► canvas-presence hub (memory, per Space, by principal + page id)
                                         │  relay to every other subscriber
                                         ▼
 GET /api/canvas/:id/sync/stream?pageId=B ──► event: presence
@@ -564,32 +564,36 @@ canvasSyncSubscription → canvasPresenceStore → RemoteCursors / RemoteNodeOut
 
 Schemas and limits live in [canvas-presence.ts](../../packages/shared/src/types/api/canvas-presence.ts) and [canvas-presence-limits.ts](../../packages/shared/src/types/api/canvas-presence-limits.ts).
 
-| Endpoint                                    | Body                                                                                                                | Result                                                                                                     |
-| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| `POST /api/canvas/:canvasId/presence`       | `{ pageId, label?, displayName?, pointer?: { x, y } \| null, selectedNodeIds?, draggingNodeIds?, editingNodeIds? }` | 204; 400 invalid; 413 over 128 KiB; 429 `PRESENCE_RATE_LIMITED` / `PRESENCE_SPACE_FULL` with `Retry-After` |
-| `POST /api/canvas/:canvasId/presence/leave` | `{ pageId }`                                                                                                        | 204; 400 invalid                                                                                           |
-| `GET /api/canvas/:canvasId/sync/stream`     | query `pageId?`                                                                                                     | adds `presence` events to the stream; 400 for a malformed `pageId`                                         |
+| Endpoint                                    | Body                                                                                                  | Result                                                                                                                                 |
+| ------------------------------------------- | ----------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `POST /api/canvas/:canvasId/presence`       | `{ pageId, label?, pointer?: { x, y } \| null, selectedNodeIds?, draggingNodeIds?, editingNodeIds? }` | 204; 400 invalid; 413 over 128 KiB; 429 `PRESENCE_RATE_LIMITED` / `PRESENCE_SPACE_FULL` / `PRESENCE_TOO_MANY_PAGES` with `Retry-After` |
+| `POST /api/canvas/:canvasId/presence/leave` | `{ pageId }`                                                                                          | 204; 400 invalid                                                                                                                       |
+| `GET /api/canvas/:canvasId/sync/stream`     | query `pageId?`                                                                                       | adds `presence` events to the stream; 400 for a malformed `pageId`                                                                     |
 
-The report body is strict (unknown fields are rejected). An absent field leaves that part of the page's presence unchanged, so a pointer tick does not resend the selection. `pageId` is the page's `originator.tabId` (`CANVAS_PAGE_ID`); `pointer` is in canvas (flow) coordinates so it lands on the same canvas point under any pan and zoom, and is `null` when the pointer is not over the canvas. `displayName` is reserved for a person's name and is preferred over `label` when present.
+The report body is strict (unknown fields are rejected). An absent field leaves that part of the page's presence unchanged, so a pointer tick does not resend the selection. `pageId` is the page's `originator.tabId` (`CANVAS_PAGE_ID`); `pointer` is in canvas (flow) coordinates so it lands on the same canvas point under any pan and zoom, and is `null` when the pointer is not over the canvas. There is no name field: a report that carries `displayName` is rejected like any unknown field.
 
-A `presence` event's data is one of `{ op: 'snapshot', pages }` (sent once on connect: every other page present), `{ op: 'update', page }` (a page appeared or changed anything besides its pointer), `{ op: 'pointer', pageId, pointer }` and `{ op: 'leave', pageId }`. A page is `{ pageId, colorIndex, label, displayName?, pointer, selectedNodeIds, draggingNodeIds, editingNodeIds }`. A stream opened with `pageId` is never sent that page's own presence.
+A `presence` event's data is one of `{ op: 'snapshot', pages }` (sent once on connect: every other page present), `{ op: 'update', page }` (a page appeared or changed anything besides its pointer), `{ op: 'pointer', pageId, pointer }` and `{ op: 'leave', pageId }`. A page is `{ pageId, colorIndex, label, displayName?, pointer, selectedNodeIds, draggingNodeIds, editingNodeIds }`. A stream opened with `pageId` is never sent that page's own presence. What a page is shown as depends on who is looking: to a stream of the same principal (the person's other tabs and devices) `pageId` is the id the page reports with and there is no `displayName`; to a stream of another principal `pageId` is an id the server assigned for as long as the page is present, and `displayName` is the principal's name from the identity provider. Page ids therefore do not travel between principals, and `displayName` is preferred over `label` when present.
 
-Both POST routes need only read access to the Space (`spaceAccess: 'read'`), the same as the stream, and go through the same host, origin, identity and Space-access guards as every Canvas route. The page id is chosen by the page and is not a credential: any caller that may read the Space may report or withdraw presence under any page id in it.
+Both POST routes need only read access to the Space (`spaceAccess: 'read'`), the same as the stream, and go through the same host, origin, identity and Space-access guards as every Canvas route. The page id is chosen by the page and is not a credential, so it never acts alone: **an entry belongs to the authenticated principal together with the page id** (`callerPrincipalId`, [caller-principal.ts](../../apps/server/src/modules/canvas/caller-principal.ts)). A report, a `leave` and a closing stream reach only an entry of the caller's own principal; quoting another principal's page id creates or removes a separate entry of the caller's. A caller can therefore not overwrite another page's label, pointer or selection, evict it, or use up its rate window.
 
-| Limit                    | Value                                                                                  |
-| ------------------------ | -------------------------------------------------------------------------------------- |
-| Node ids per list        | 200, each at most 128 characters                                                       |
-| `label` / `displayName`  | 40 / 80 characters                                                                     |
-| Coordinates              | finite, magnitude at most 10,000,000                                                   |
-| Pages per Space          | 32; a further page is refused with 429 `PRESENCE_SPACE_FULL`                           |
-| Reports per page         | 30 per second on the server; the browser sends at most one per 80 ms and one at a time |
-| Reports per network peer | 3,000 per minute, counted apart from the application-wide request budget               |
-| Colours                  | 6 colour indices; the lowest unused one, kept while the page stays present             |
-| Heartbeat / expiry       | the page repeats its whole state every 20 s; a page silent for 75 s is dropped         |
+**The edit lock needs write access.** `editingNodeIds` is what makes the other pages show those nodes read-only ([One editor at a time](#one-editor-at-a-time)), so it is taken only from a caller who may write the Space; the route asks the identity provider whenever a report carries a non-empty list. From a read-only viewer the list is dropped — the rest of the report is accepted, so the viewer still shows a pointer and a selection — and a lock held by a caller whose write access was revoked ends with its next report.
+
+| Limit                    | Value                                                                                                                               |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
+| Node ids per list        | 200, each at most 128 characters                                                                                                    |
+| `label` / `displayName`  | 40 / 80 characters                                                                                                                  |
+| Coordinates              | finite, magnitude at most 10,000,000                                                                                                |
+| Pages per Space          | 32; a further page is refused with 429 `PRESENCE_SPACE_FULL`                                                                        |
+| Pages per principal      | 16 per Space; a further page of that principal is refused with 429 `PRESENCE_TOO_MANY_PAGES`, so one caller cannot take every place |
+| Reports per page         | 30 per second on the server; the browser sends at most one per 80 ms and one at a time                                              |
+| Reports per principal    | 120 per second across its pages of one Space                                                                                        |
+| Reports per network peer | 3,000 per minute, counted apart from the application-wide request budget                                                            |
+| Colours                  | 6 colour indices; the lowest unused one, kept while the page stays present                                                          |
+| Heartbeat / expiry       | the page repeats its whole state every 20 s; a page silent for 75 s is dropped                                                      |
 
 ### Server
 
-[canvas-presence.ts](../../apps/server/src/modules/canvas/canvas-presence.ts) keeps a map of pages per Space, keyed by Workspace id and Space id, and its own subscriber list; it does not use `publishCanvasUpdate`, so conversation observers and other server-side listeners of Canvas Sync never see presence. A page is removed, and the others are sent `leave`, when it posts `leave`, when the last stream opened with its `pageId` closes, or when it has not reported for the expiry time (a sweep runs while any page is present), so a crashed page or a dropped connection leaves no marker behind. The expiry is longer than a minute because a background tab's heartbeat timer may fire only once a minute. Pointer events are skipped for a stream whose unsent backlog exceeds 256 KiB.
+[canvas-presence.ts](../../apps/server/src/modules/canvas/canvas-presence.ts) keeps a map of pages per Space (the Space keyed by Workspace id and Space id, a page by principal and page id) and its own subscriber list; it does not use `publishCanvasUpdate`, so conversation observers and other server-side listeners of Canvas Sync never see presence. A page is removed, and the others are sent `leave`, when it posts `leave`, when the last stream its principal opened with its `pageId` closes, or when it has not reported for the expiry time (a sweep runs while any page is present), so a crashed page or a dropped connection leaves no marker behind. The expiry is longer than a minute because a background tab's heartbeat timer may fire only once a minute. Pointer events are skipped for a stream whose unsent backlog exceeds 256 KiB.
 
 ### Browser
 

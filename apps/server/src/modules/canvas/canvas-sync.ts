@@ -23,7 +23,15 @@ import { AsyncResource } from 'node:async_hooks';
 
 import type { CanvasSyncEvent } from '@huabu/shared';
 
-type Listener = (event: CanvasSyncEvent) => void;
+/**
+ * Who caused an event, for what a subscriber is told depends on it (see
+ * `eventForSubscriber` in `caller-principal.ts`). Never on the wire.
+ */
+export interface CanvasUpdateOrigin {
+  principalId: string;
+}
+
+type Listener = (event: CanvasSyncEvent, origin?: CanvasUpdateOrigin) => void;
 
 const listenersByCanvas = new Map<string, Set<Listener>>();
 
@@ -37,12 +45,14 @@ const listenersByCanvas = new Map<string, Set<Listener>>();
 export function publishCanvasUpdate(
   canvasId: string,
   event: CanvasSyncEvent,
+  origin?: CanvasUpdateOrigin,
 ): void {
   const set = listenersByCanvas.get(canvasId);
   if (!set) return;
   for (const fn of set) {
     try {
-      fn(event);
+      if (origin) fn(event, origin);
+      else fn(event);
     } catch {
       /* ignore listener errors — one bad subscriber must not stall others */
     }

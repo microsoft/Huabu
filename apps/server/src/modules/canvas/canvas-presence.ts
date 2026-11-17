@@ -5,16 +5,30 @@
  * Space presence: which pages have a Space open and what each is pointing at,
  * selecting, dragging or editing.
  *
- * Held in memory only, per Space, keyed by page id. Nothing here touches the
- * Space record, its version, the delta log or the Canvas Sync publisher that
- * Agents and conversation observers listen to; presence has its own
- * subscribers, which the Canvas Sync SSE route forwards on the same stream.
+ * Held in memory only, per Space. Nothing here touches the Space record, its
+ * version, the delta log or the Canvas Sync publisher that Agents and
+ * conversation observers listen to; presence has its own subscribers, which
+ * the Canvas Sync SSE route forwards on the same stream.
+ *
+ * **Who owns an entry.** A page chooses its own page id, so the id alone
+ * proves nothing. An entry is keyed by the authenticated principal together
+ * with the page id: a caller can create, change, rate-limit and remove only
+ * entries of its own principal, whatever page id it quotes. To a viewer of
+ * another principal a page is shown under an id the server assigned
+ * (`publicId`), so page ids are not learned across principals either, and
+ * with the name the identity provider gave its principal — never one the page
+ * sent. A viewer of the same principal (the person's other tabs and devices)
+ * sees the page id as reported and no name.
  *
  * A page leaves when it says so, when its last stream closes, or when it has
  * not reported for `expiryMs`, so a crashed page leaves no marker behind.
  */
 
+import { randomUUID } from 'node:crypto';
+
 import { CANVAS_PRESENCE_LIMITS } from '@huabu/shared';
+
+import { ANONYMOUS_PRINCIPAL } from './caller-principal.js';
 
 import type {
   CanvasPresenceEventData,
@@ -24,52 +38,100 @@ import type {
 
 type Listener = (event: CanvasPresenceEventData) => void;
 
-interface Entry {
-  page: CanvasPresencePage;
-  lastSeen: number;
-  /** Start of the current one-second rate window and reports counted in it. */
+/** The authenticated caller of a presence request. */
+export interface PresenceCaller {
+  principalId: string;
+  /** The principal's name as the identity provider gives it. */
+  displayName?: string;
+  /**
+   * Whether the caller may write the Space. Only then can it hold the edit
+   * lock: `editingNodeIds` of a caller without it are not taken.
+   */
+  mayHoldEditLock?: boolean;
+}
+
+const ANONYMOUS_CALLER: PresenceCaller = {
+  principalId: ANONYMOUS_PRINCIPAL,
+};
+
+/** One-second budget of reports. */
+interface RateWindow {
   windowStart: number;
   windowCount: number;
 }
 
+interface Entry extends RateWindow {
+  principalId: string;
+  /** The id the page reports with; shown to its own principal only. */
+  pageId: string;
+  /** The id other principals see the page under. */
+  publicId: string;
+  displayName: string | undefined;
+  /** Presence as the page's own principal sees it. */
+  page: CanvasPresencePage;
+  lastSeen: number;
+}
+
 interface Subscriber {
+  principalId: string;
   pageId: string | undefined;
   listener: Listener;
 }
 
 interface SpacePresence {
+  /** By `principalId \0 pageId`. */
   pages: Map<string, Entry>;
+  /** Reports of each principal across all its pages of the Space. */
+  principals: Map<string, RateWindow>;
   subscribers: Set<Subscriber>;
 }
 
-export type PresenceReportResult = 'accepted' | 'rate-limited' | 'full';
+export type PresenceReportResult =
+  | 'accepted'
+  | 'rate-limited'
+  | 'full'
+  | 'principal-full';
 
 export interface CanvasPresenceHubOptions {
   now?: () => number;
   expiryMs?: number;
   maxPagesPerSpace?: number;
+  maxPagesPerPrincipal?: number;
   maxReportsPerSecond?: number;
+  maxReportsPerPrincipalPerSecond?: number;
+  /** Mints the id another principal sees a page under. */
+  createPublicId?: () => string;
 }
 
 export interface CanvasPresenceHub {
-  /** Merge a page's report into its presence and relay it to the others. */
+  /**
+   * Merge a page's report into its presence and relay it to the others. The
+   * page is the caller's: another principal's page with the same page id is
+   * a different entry and is not touched.
+   */
   report(
     spaceKey: string,
     body: CanvasPresenceReportBody,
+    caller?: PresenceCaller,
   ): PresenceReportResult;
-  /** Drop a page and tell the others. */
-  leave(spaceKey: string, pageId: string): void;
+  /** Drop a page of `principalId` and tell the others. */
+  leave(spaceKey: string, pageId: string, principalId?: string): void;
   /**
-   * Receive the presence of every page but `pageId`. Closing the last
-   * subscription of a page drops that page.
+   * Receive the presence of every page but the subscriber's own (`pageId` of
+   * `principalId`). Closing the last subscription of a page drops that page.
    */
   subscribe(
     spaceKey: string,
     pageId: string | undefined,
     listener: Listener,
+    principalId?: string,
   ): () => void;
-  /** Pages currently present, without `exceptPageId`. */
-  snapshot(spaceKey: string, exceptPageId?: string): CanvasPresencePage[];
+  /** Pages currently present as `principalId` sees them, without its `exceptPageId`. */
+  snapshot(
+    spaceKey: string,
+    exceptPageId?: string,
+    principalId?: string,
+  ): CanvasPresencePage[];
   /** Drop every page that has not reported within `expiryMs`. */
   sweep(): void;
   /** Stop the expiry timer and forget everything. */
@@ -80,6 +142,18 @@ function sameIds(a: readonly string[], b: readonly string[]): boolean {
   return a.length === b.length && a.every((id, index) => id === b[index]);
 }
 
+const entryKey = (principalId: string, pageId: string): string =>
+  `${principalId}\u0000${pageId}`;
+
+/** Start a new one-second window if the last is over; whether one more report fits. */
+function hasRoom(window: RateWindow, at: number, max: number): boolean {
+  if (at - window.windowStart >= 1_000) {
+    window.windowStart = at;
+    window.windowCount = 0;
+  }
+  return window.windowCount < max;
+}
+
 export function createCanvasPresenceHub(
   options: CanvasPresenceHubOptions = {},
 ): CanvasPresenceHub {
@@ -87,15 +161,25 @@ export function createCanvasPresenceHub(
   const expiryMs = options.expiryMs ?? CANVAS_PRESENCE_LIMITS.expiryMs;
   const maxPages =
     options.maxPagesPerSpace ?? CANVAS_PRESENCE_LIMITS.maxPagesPerSpace;
+  const maxPagesPerPrincipal =
+    options.maxPagesPerPrincipal ?? CANVAS_PRESENCE_LIMITS.maxPagesPerPrincipal;
   const maxReports =
     options.maxReportsPerSecond ?? CANVAS_PRESENCE_LIMITS.maxReportsPerSecond;
+  const maxPrincipalReports =
+    options.maxReportsPerPrincipalPerSecond ??
+    CANVAS_PRESENCE_LIMITS.maxReportsPerPrincipalPerSecond;
+  const createPublicId = options.createPublicId ?? randomUUID;
   const spaces = new Map<string, SpacePresence>();
   let timer: ReturnType<typeof setInterval> | null = null;
 
   const spaceFor = (spaceKey: string): SpacePresence => {
     let space = spaces.get(spaceKey);
     if (!space) {
-      space = { pages: new Map(), subscribers: new Set() };
+      space = {
+        pages: new Map(),
+        principals: new Map(),
+        subscribers: new Set(),
+      };
       spaces.set(spaceKey, space);
     }
     return space;
@@ -110,15 +194,37 @@ export function createCanvasPresenceHub(
     }
   };
 
+  /** The id `viewerPrincipalId` knows `entry` by. */
+  const idFor = (entry: Entry, viewerPrincipalId: string): string =>
+    viewerPrincipalId === entry.principalId ? entry.pageId : entry.publicId;
+
+  /** `entry` as `viewerPrincipalId` is shown it. */
+  const viewOf = (
+    entry: Entry,
+    viewerPrincipalId: string,
+  ): CanvasPresencePage => {
+    const page = clonePage(entry.page);
+    if (viewerPrincipalId === entry.principalId) return page;
+    return {
+      ...page,
+      pageId: entry.publicId,
+      ...(entry.displayName ? { displayName: entry.displayName } : {}),
+    };
+  };
+
   const relay = (
     space: SpacePresence,
-    fromPageId: string,
-    event: CanvasPresenceEventData,
+    from: Entry,
+    event: (viewerPrincipalId: string) => CanvasPresenceEventData,
   ): void => {
     for (const subscriber of space.subscribers) {
-      if (subscriber.pageId === fromPageId) continue;
+      if (
+        subscriber.principalId === from.principalId &&
+        subscriber.pageId === from.pageId
+      )
+        continue;
       try {
-        subscriber.listener(event);
+        subscriber.listener(event(subscriber.principalId));
       } catch {
         /* one failing stream must not stall the others */
       }
@@ -128,18 +234,29 @@ export function createCanvasPresenceHub(
   const remove = (
     spaceKey: string,
     space: SpacePresence,
-    pageId: string,
+    key: string,
   ): void => {
-    if (!space.pages.delete(pageId)) return;
-    relay(space, pageId, { op: 'leave', pageId });
+    const entry = space.pages.get(key);
+    if (!entry) return;
+    space.pages.delete(key);
+    if (
+      ![...space.pages.values()].some(
+        (other) => other.principalId === entry.principalId,
+      )
+    )
+      space.principals.delete(entry.principalId);
+    relay(space, entry, (viewer) => ({
+      op: 'leave',
+      pageId: idFor(entry, viewer),
+    }));
     prune(spaceKey, space);
   };
 
   const sweep = (): void => {
     const deadline = now() - expiryMs;
     for (const [spaceKey, space] of spaces) {
-      for (const [pageId, entry] of space.pages) {
-        if (entry.lastSeen <= deadline) remove(spaceKey, space, pageId);
+      for (const [key, entry] of space.pages) {
+        if (entry.lastSeen <= deadline) remove(spaceKey, space, key);
       }
     }
   };
@@ -156,10 +273,10 @@ export function createCanvasPresenceHub(
     space: SpacePresence,
     entry: Entry,
     report: CanvasPresenceReportBody,
+    caller: PresenceCaller,
     at: number,
     isNew: boolean,
   ): void => {
-    entry.windowCount += 1;
     entry.lastSeen = at;
     const page = entry.page;
     // A new page is announced whole, whatever its first report carried.
@@ -168,19 +285,24 @@ export function createCanvasPresenceHub(
       page.label = report.label;
       changed = true;
     }
-    if (
-      report.displayName !== undefined &&
-      report.displayName !== page.displayName
-    ) {
-      page.displayName = report.displayName;
+    if (caller.displayName !== entry.displayName) {
+      entry.displayName = caller.displayName;
       changed = true;
     }
-    for (const key of [
-      'selectedNodeIds',
-      'draggingNodeIds',
-      'editingNodeIds',
+    // The edit lock is for callers who may edit. One who may not (any more)
+    // holds none, whatever it reports.
+    const editingNodeIds =
+      caller.mayHoldEditLock === false
+        ? report.editingNodeIds === undefined &&
+          page.editingNodeIds.length === 0
+          ? undefined
+          : []
+        : report.editingNodeIds;
+    for (const [key, ids] of [
+      ['selectedNodeIds', report.selectedNodeIds],
+      ['draggingNodeIds', report.draggingNodeIds],
+      ['editingNodeIds', editingNodeIds],
     ] as const) {
-      const ids = report[key];
       if (ids === undefined || sameIds(ids, page[key])) continue;
       page[key] = [...ids];
       changed = true;
@@ -191,13 +313,16 @@ export function createCanvasPresenceHub(
       (pointer?.x !== page.pointer?.x || pointer?.y !== page.pointer?.y);
     if (pointerChanged) page.pointer = pointer ? { ...pointer } : null;
     if (changed) {
-      relay(space, page.pageId, { op: 'update', page: clonePage(page) });
+      relay(space, entry, (viewer) => ({
+        op: 'update',
+        page: viewOf(entry, viewer),
+      }));
     } else if (pointerChanged) {
-      relay(space, page.pageId, {
+      relay(space, entry, (viewer) => ({
         op: 'pointer',
-        pageId: page.pageId,
-        pointer: page.pointer,
-      });
+        pageId: idFor(entry, viewer),
+        pointer: page.pointer ? { ...page.pointer } : null,
+      }));
     }
   };
 
@@ -208,24 +333,42 @@ export function createCanvasPresenceHub(
   };
 
   return {
-    report(spaceKey, body) {
+    report(spaceKey, body, caller = ANONYMOUS_CALLER) {
       const space = spaceFor(spaceKey);
       const at = now();
-      const existing = space.pages.get(body.pageId);
-      if (existing) {
-        if (at - existing.windowStart >= 1_000) {
-          existing.windowStart = at;
-          existing.windowCount = 0;
+      const key = entryKey(caller.principalId, body.pageId);
+      const existing = space.pages.get(key);
+      if (!existing) {
+        // A place is refused before anything is recorded for the caller.
+        const own = [...space.pages.values()].filter(
+          (entry) => entry.principalId === caller.principalId,
+        ).length;
+        if (own >= maxPagesPerPrincipal || space.pages.size >= maxPages) {
+          prune(spaceKey, space);
+          return own >= maxPagesPerPrincipal ? 'principal-full' : 'full';
         }
-        if (existing.windowCount >= maxReports) return 'rate-limited';
-        apply(space, existing, body, at, false);
+      }
+      // The page's own budget, then the caller's across its pages — so many
+      // pages of one principal do not multiply what it may send, and nobody
+      // else's budget is involved.
+      if (existing && !hasRoom(existing, at, maxReports)) return 'rate-limited';
+      const principal = space.principals.get(caller.principalId) ?? {
+        windowStart: at,
+        windowCount: 0,
+      };
+      if (!hasRoom(principal, at, maxPrincipalReports)) return 'rate-limited';
+      principal.windowCount += 1;
+      space.principals.set(caller.principalId, principal);
+      if (existing) {
+        existing.windowCount += 1;
+        apply(space, existing, body, caller, at, false);
         return 'accepted';
       }
-      if (space.pages.size >= maxPages) {
-        prune(spaceKey, space);
-        return 'full';
-      }
       const entry: Entry = {
+        principalId: caller.principalId,
+        pageId: body.pageId,
+        publicId: createPublicId(),
+        displayName: caller.displayName,
         page: {
           pageId: body.pageId,
           colorIndex: pickColor(space),
@@ -237,40 +380,48 @@ export function createCanvasPresenceHub(
         },
         lastSeen: at,
         windowStart: at,
-        windowCount: 0,
+        windowCount: 1,
       };
-      space.pages.set(body.pageId, entry);
-      apply(space, entry, body, at, true);
+      space.pages.set(key, entry);
+      apply(space, entry, body, caller, at, true);
       startTimer();
       return 'accepted';
     },
 
-    leave(spaceKey, pageId) {
+    leave(spaceKey, pageId, principalId = ANONYMOUS_PRINCIPAL) {
       const space = spaces.get(spaceKey);
-      if (space) remove(spaceKey, space, pageId);
+      if (space) remove(spaceKey, space, entryKey(principalId, pageId));
     },
 
-    subscribe(spaceKey, pageId, listener) {
+    subscribe(spaceKey, pageId, listener, principalId = ANONYMOUS_PRINCIPAL) {
       const space = spaceFor(spaceKey);
-      const subscriber: Subscriber = { pageId, listener };
+      const subscriber: Subscriber = { principalId, pageId, listener };
       space.subscribers.add(subscriber);
       return () => {
         if (!space.subscribers.delete(subscriber)) return;
         const stillConnected =
           pageId !== undefined &&
-          [...space.subscribers].some((other) => other.pageId === pageId);
+          [...space.subscribers].some(
+            (other) =>
+              other.pageId === pageId && other.principalId === principalId,
+          );
         if (pageId !== undefined && !stillConnected)
-          remove(spaceKey, space, pageId);
+          remove(spaceKey, space, entryKey(principalId, pageId));
         prune(spaceKey, space);
       };
     },
 
-    snapshot(spaceKey, exceptPageId) {
+    snapshot(spaceKey, exceptPageId, principalId = ANONYMOUS_PRINCIPAL) {
       const space = spaces.get(spaceKey);
       if (!space) return [];
       return [...space.pages.values()]
-        .filter((entry) => entry.page.pageId !== exceptPageId)
-        .map((entry) => clonePage(entry.page));
+        .filter(
+          (entry) =>
+            !(
+              entry.principalId === principalId && entry.pageId === exceptPageId
+            ),
+        )
+        .map((entry) => viewOf(entry, principalId));
     },
 
     sweep,

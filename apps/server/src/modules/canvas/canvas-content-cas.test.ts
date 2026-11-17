@@ -31,6 +31,8 @@ import { executeOnServer } from './canvas-executor.js';
 import { subscribeCanvasUpdates } from './canvas-sync.js';
 import canvasRoutes from './canvas.route.js';
 import syncRoutes from './sync.route.js';
+import { setRequestIdentity } from '../identity/request.js';
+import { UNRESTRICTED_ACCESS } from '../identity/service.js';
 import {
   getCanvasStore,
   getStorage,
@@ -763,10 +765,11 @@ describe('PUT /nodes/:nodeId/content — content CAS', () => {
           })
         ).statusCode,
       ).toBe(200);
-      expect(received).toHaveBeenCalledExactlyOnceWith({
-        type: 'invalidate',
-        data: { nodeIds: ['n1'] },
-      });
+      expect(received).toHaveBeenCalledExactlyOnceWith(
+        { type: 'invalidate', data: { nodeIds: ['n1'] } },
+        // Who saved; this app has no identity layer.
+        { principalId: 'anonymous' },
+      );
       received.mockClear();
       expect(
         (
@@ -792,6 +795,61 @@ describe('PUT /nodes/:nodeId/content — content CAS', () => {
         data: { nodeIds: ['n1'] },
       });
       expect(space.readNode('n1')).toBeNull();
+    } finally {
+      unsubscribe();
+      await app.close();
+    }
+  });
+
+  it('names the saving principal with the notification, and refuses a page id of another shape', async () => {
+    const app = fastify();
+    app.addHook('onRequest', async (request) => {
+      setRequestIdentity(request, {
+        principal: {
+          principalId: String(request.headers['x-principal']),
+          kind: 'user',
+        },
+        member: true,
+        owner: false,
+        access: UNRESTRICTED_ACCESS,
+      });
+    });
+    await app.register(canvasRoutes, { prefix: '/canvas' });
+    await app.ready();
+    const received = vi.fn();
+    const unsubscribe = subscribeCanvasUpdates('c1', received);
+    try {
+      seedCanvas('c1', 'n1', 'Note');
+      const saved = await app.inject({
+        method: 'PUT',
+        url: '/canvas/c1/nodes/n1/content',
+        headers: { 'x-principal': 'mallory' },
+        payload: {
+          nodeType: 'note',
+          content: 'first',
+          expectRev: REV_EMPTY,
+          pageId: 'page-of-alice',
+        },
+      });
+      expect(saved.statusCode, saved.body).toBe(200);
+      // The page id is passed on as given, but with who gave it: the stream
+      // route sends it to that principal's streams only.
+      expect(received).toHaveBeenCalledExactlyOnceWith(
+        {
+          type: 'invalidate',
+          data: { nodeIds: ['n1'], originPageId: 'page-of-alice' },
+        },
+        { principalId: 'mallory' },
+      );
+      for (const pageId of ['a b', '', 'p'.repeat(65), 'a/b']) {
+        const refused = await app.inject({
+          method: 'PUT',
+          url: '/canvas/c1/nodes/n1/content',
+          headers: { 'x-principal': 'mallory' },
+          payload: { nodeType: 'note', content: 'x', pageId },
+        });
+        expect(refused.statusCode, pageId).toBe(400);
+      }
     } finally {
       unsubscribe();
       await app.close();
@@ -851,10 +909,13 @@ describe('PUT /nodes/:nodeId/content — content CAS', () => {
         pageId: 'page-a',
       });
       expect(saved.statusCode).toBe(200);
-      expect(received).toHaveBeenCalledExactlyOnceWith({
-        type: 'invalidate',
-        data: { nodeIds: ['n1'], originPageId: 'page-a' },
-      });
+      expect(received).toHaveBeenCalledExactlyOnceWith(
+        {
+          type: 'invalidate',
+          data: { nodeIds: ['n1'], originPageId: 'page-a' },
+        },
+        { principalId: 'anonymous' },
+      );
 
       const fetched = await app.inject({
         method: 'GET',
@@ -931,12 +992,14 @@ describe('PUT /nodes/:nodeId/content — content CAS', () => {
             type: 'invalidate',
             data: { nodeIds: ['n1'], originPageId: 'page-a' },
           },
+          { principalId: 'anonymous' },
         ],
         [
           {
             type: 'invalidate',
             data: { nodeIds: ['n1'], originPageId: 'page-b' },
           },
+          { principalId: 'anonymous' },
         ],
       ]);
       // The body's revision is where it was.
@@ -1112,10 +1175,13 @@ describe('PUT /nodes/:nodeId/content — content CAS', () => {
           expectedRev: rev1,
           propertiesApplied: true,
         });
-        expect(received).toHaveBeenCalledExactlyOnceWith({
-          type: 'invalidate',
-          data: { nodeIds: ['n1'], originPageId: 'page-a' },
-        });
+        expect(received).toHaveBeenCalledExactlyOnceWith(
+          {
+            type: 'invalidate',
+            data: { nodeIds: ['n1'], originPageId: 'page-a' },
+          },
+          { principalId: 'anonymous' },
+        );
         const stored = await fetchNode(app);
         expect(stored).toMatchObject({
           content: 'v2',

@@ -16,6 +16,11 @@ export const CANVAS_PRESENCE_LIMITS = {
   /** Flow coordinates beyond this magnitude are rejected. */
   maxCoordinate: 10_000_000,
   maxPagesPerSpace: 32,
+  /**
+   * Pages one principal may have present in a Space (its tabs and devices),
+   * so one caller cannot take every place of the Space.
+   */
+  maxPagesPerPrincipal: 16,
   /** Number of marker colours; `colorIndex` is in `[0, colorCount)`. */
   colorCount: 6,
   /**
@@ -29,6 +34,8 @@ export const CANVAS_PRESENCE_LIMITS = {
   reportIntervalMs: 80,
   /** Reports the server accepts from one page per second. */
   maxReportsPerSecond: 30,
+  /** Reports the server accepts from one principal, across its pages of a Space, per second. */
+  maxReportsPerPrincipalPerSecond: 120,
   /** Reports the server accepts from one network peer per minute. */
   maxReportsPerPeerPerMinute: 3_000,
 } as const;

@@ -18,12 +18,9 @@
 import { z } from 'zod';
 
 import { CANVAS_PRESENCE_LIMITS } from './canvas-presence-limits.js';
+import { canvasPageIdSchema } from './canvas-sync.js';
 
-const pageIdSchema = z
-  .string()
-  .min(1)
-  .max(CANVAS_PRESENCE_LIMITS.pageIdMaxLength)
-  .regex(/^[a-zA-Z0-9_-]+$/, 'Invalid page ID');
+const pageIdSchema = canvasPageIdSchema;
 
 const coordinateSchema = z
   .number()
@@ -52,13 +49,16 @@ const displayNameSchema = z
  * Body of `POST /api/canvas/:canvasId/presence`. Every field but `pageId` is
  * optional and an absent field leaves that part of the page's presence as it
  * was, so a pointer tick does not resend the selection.
+ *
+ * The page is the caller's own (principal and `pageId` together). There is
+ * no name field: the name others see comes from the caller's identity.
+ * `editingNodeIds` is the other pages' edit lock and is taken only from a
+ * caller with write access to the Space.
  */
 export const canvasPresenceReportBodySchema = z.strictObject({
   pageId: pageIdSchema,
   /** Short device/browser label shown next to the marker. */
   label: labelSchema.optional(),
-  /** Reserved for a person's name once there is more than one account. */
-  displayName: displayNameSchema.optional(),
   /** `null` when the pointer is not over the canvas. */
   pointer: canvasPresencePointSchema.nullable().optional(),
   selectedNodeIds: nodeIdsSchema.optional(),
@@ -83,7 +83,15 @@ export const canvasSyncStreamQuerySchema = z.object({
 });
 export type CanvasSyncStreamQuery = z.infer<typeof canvasSyncStreamQuerySchema>;
 
-/** One other page's presence, as relayed to subscribers. */
+/**
+ * One other page's presence, as relayed to subscribers.
+ *
+ * `pageId` identifies the page for the viewer only: a page of the viewer's
+ * own principal carries the id it reports with, a page of another principal
+ * an id the server assigned. `displayName` is the other principal's name as
+ * the identity provider gives it — a page cannot set it — and is absent for
+ * the viewer's own pages.
+ */
 export const canvasPresencePageSchema = z.object({
   pageId: pageIdSchema,
   /** Stable for as long as the page stays present; assigned by the server. */

@@ -41,6 +41,7 @@ import {
 } from './agent-node-association.js';
 import { AgentNodeEditError } from './agent-node-edit.js';
 import { acknowledgeAgentNodeResult } from './agent-node-projection.js';
+import { callerPrincipalId } from './caller-principal.js';
 import {
   CanvasNotFoundError,
   ExecuteBasisError,
@@ -918,13 +919,19 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       // The property patch of the refused request was written: other pages
       // fetch it like any other save.
       if (outcome.unversionedApplied) {
-        publishCanvasUpdate(canvasId, {
-          type: 'invalidate',
-          data: {
-            nodeIds: [nodeId],
-            ...(parsed.data.pageId ? { originPageId: parsed.data.pageId } : {}),
+        publishCanvasUpdate(
+          canvasId,
+          {
+            type: 'invalidate',
+            data: {
+              nodeIds: [nodeId],
+              ...(parsed.data.pageId
+                ? { originPageId: parsed.data.pageId }
+                : {}),
+            },
           },
-        });
+          { principalId: callerPrincipalId(request) },
+        );
       }
       return reply.code(409).send({
         code: 'NODE_CONTENT_CONFLICT',
@@ -985,14 +992,19 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       return reply.code(500).send({ message: 'Failed to write node content' });
     }
 
-    publishCanvasUpdate(canvasId, {
-      type: 'invalidate',
-      data: {
-        nodeIds: [nodeId],
-        // Lets the saving page skip the refetch every other page makes.
-        ...(parsed.data.pageId ? { originPageId: parsed.data.pageId } : {}),
+    publishCanvasUpdate(
+      canvasId,
+      {
+        type: 'invalidate',
+        data: {
+          nodeIds: [nodeId],
+          // Lets the saving page skip the refetch every other page makes.
+          // Passed on only to streams of this caller's principal.
+          ...(parsed.data.pageId ? { originPageId: parsed.data.pageId } : {}),
+        },
       },
-    });
+      { principalId: callerPrincipalId(request) },
+    );
     const response: PutNodeContentResponse = {
       nodeId,
       label: outcome.label,

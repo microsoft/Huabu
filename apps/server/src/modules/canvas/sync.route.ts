@@ -29,6 +29,7 @@ import {
   recentCanvasConversationParamsSchema,
 } from '@huabu/shared';
 
+import { callerPrincipalId, eventForSubscriber } from './caller-principal.js';
 import { canvasPresence } from './canvas-presence.js';
 import { subscribeCanvasUpdates } from './canvas-sync.js';
 import { presenceSpaceKey } from './presence.route.js';
@@ -70,6 +71,9 @@ const syncRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
       const { canvasId } = params.data;
       const { pageId } = query.data;
       const presenceKey = presenceSpaceKey(canvasId);
+      // Who this stream belongs to: the page id is the caller's own choice,
+      // so it identifies a page only together with the caller's principal.
+      const principalId = callerPrincipalId(request);
       reply.hijack();
       reply.raw.writeHead(200, {
         'Content-Type': 'text/event-stream',
@@ -83,14 +87,18 @@ const syncRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
       const pending: CanvasSyncEvent[] = [];
       let snapshotSent = false;
       let closed = false;
-      const unsubscribe = subscribeCanvasUpdates(canvasId, (event) => {
-        if (closed) return;
-        if (!snapshotSent) {
-          pending.push(event);
-          return;
-        }
-        writeSSE(reply.raw, event);
-      });
+      const unsubscribe = subscribeCanvasUpdates(
+        canvasId,
+        (published, origin) => {
+          if (closed) return;
+          const event = eventForSubscriber(published, origin, principalId);
+          if (!snapshotSent) {
+            pending.push(event);
+            return;
+          }
+          writeSSE(reply.raw, event);
+        },
+      );
       // Presence is independent of the Space version, so it is not held back
       // for the baseline: subscribe, then send who is already here.
       const unsubscribePresence = canvasPresence.subscribe(
@@ -105,12 +113,13 @@ const syncRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
             return;
           writeSSE(reply.raw, { type: 'presence', data });
         },
+        principalId,
       );
       writeSSE(reply.raw, {
         type: 'presence',
         data: {
           op: 'snapshot',
-          pages: canvasPresence.snapshot(presenceKey, pageId),
+          pages: canvasPresence.snapshot(presenceKey, pageId, principalId),
         },
       });
       const heartbeat = setInterval(() => {

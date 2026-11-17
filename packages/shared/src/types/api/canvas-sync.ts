@@ -33,10 +33,26 @@
 
 import { z } from 'zod';
 
+import { CANVAS_PRESENCE_LIMITS } from './canvas-presence-limits.js';
 import { isSetSiblingOrderEvent } from '../../canvas-engine/siblingOrder.js';
 
 import type { CanvasChangeRecord } from '../../canvas-engine/change.js';
 import type { SetSiblingOrderEvent } from '../../canvas-engine/siblingOrder.js';
+
+/**
+ * The id a browser page gives itself (one per loaded document). The one shape
+ * for every place a page names itself: `originator.tabId` of an execute
+ * request, `pageId` of a node-content save and of a presence report, and the
+ * `pageId` of the Canvas Sync stream. It is chosen by the page, so it
+ * identifies a page only together with the authenticated principal of the
+ * request that carries it; on its own it is routing information, never a
+ * credential.
+ */
+export const canvasPageIdSchema = z
+  .string()
+  .min(1)
+  .max(CANVAS_PRESENCE_LIMITS.pageIdMaxLength)
+  .regex(/^[a-zA-Z0-9_-]+$/, 'Invalid page ID');
 
 export const canvasSyncPendingEffectsSchema = z.object({
   /** Final post-execution snapshots of nodes that were created or edited. */
@@ -57,7 +73,7 @@ export const canvasSyncEventSchema = z.discriminatedUnion('type', [
        * named itself. That page already has what it wrote and does not
        * fetch it again; every other page does.
        */
-      originPageId: z.string().optional(),
+      originPageId: canvasPageIdSchema.optional(),
     }),
   }),
   z.object({

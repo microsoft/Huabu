@@ -8,8 +8,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CANVAS_PRESENCE_LIMITS } from '@huabu/shared';
 
 import { canvasPresence } from './canvas-presence.js';
+import { publishCanvasUpdate } from './canvas-sync.js';
 import presenceRoutes from './presence.route.js';
 import syncRoutes from './sync.route.js';
+import { setRequestIdentity } from '../identity/request.js';
 import { createApplicationRateLimitOptions } from '../security/rate-limit.js';
 
 const mocks = vi.hoisted(() => ({ read: vi.fn() }));
@@ -268,5 +270,271 @@ describe('presence on the Canvas Sync stream', () => {
     });
     expect(response.statusCode).toBe(400);
     await app.close();
+  });
+});
+
+describe("presence and the caller's principal", () => {
+  /**
+   * The routes behind an identity layer: `x-principal` names the caller and
+   * `x-access` its access to the Space (`write` by default).
+   */
+  async function buildIdentifiedApp() {
+    const app = Fastify();
+    app.addHook('onRequest', async (request) => {
+      const principalId = String(request.headers['x-principal'] ?? 'alice');
+      const mayWrite = request.headers['x-access'] !== 'read';
+      setRequestIdentity(request, {
+        principal: {
+          principalId,
+          kind: 'user',
+          displayName: `Name of ${principalId}`,
+        },
+        member: true,
+        owner: false,
+        access: {
+          can: async (level) => level === 'read' || mayWrite,
+          claim: async () => {},
+          workspaces: async () => 'all',
+        },
+      });
+    });
+    await app.register(presenceRoutes);
+    await app.register(syncRoutes);
+    return app;
+  }
+  const as = (principal: string, access: 'read' | 'write' = 'write') => ({
+    'x-principal': principal,
+    'x-access': access,
+  });
+  const key = '\u0000space-1';
+
+  it("refuses a name sent by the page and shows the identity's name to other principals", async () => {
+    const app = await buildIdentifiedApp();
+    const named = await app.inject({
+      method: 'POST',
+      url: '/space-1/presence',
+      headers: as('mallory'),
+      payload: { pageId: 'page-m', displayName: 'Alice' },
+    });
+    expect(named.statusCode).toBe(400);
+    expect(canvasPresence.snapshot(key, undefined, 'alice')).toEqual([]);
+
+    const accepted = await app.inject({
+      method: 'POST',
+      url: '/space-1/presence',
+      headers: as('mallory'),
+      payload: { pageId: 'page-m', label: 'Phone' },
+    });
+    expect(accepted.statusCode).toBe(204);
+    expect(canvasPresence.snapshot(key, undefined, 'alice')).toEqual([
+      expect.objectContaining({
+        label: 'Phone',
+        displayName: 'Name of mallory',
+        pageId: expect.not.stringMatching(/^page-m$/),
+      }),
+    ]);
+    await app.close();
+  });
+
+  it("acts on the caller's own page only, whatever page id is quoted", async () => {
+    const app = await buildIdentifiedApp();
+    const post = (principal: string, url: string, payload: object) =>
+      app.inject({ method: 'POST', url, headers: as(principal), payload });
+    await post('alice', '/space-1/presence', {
+      pageId: 'page-a',
+      label: 'Alice laptop',
+      selectedNodeIds: ['n1'],
+    });
+
+    // Overwrite, evict, exhaust: none of it reaches Alice's entry.
+    await post('mallory', '/space-1/presence', {
+      pageId: 'page-a',
+      label: 'Spoofed',
+      selectedNodeIds: [],
+    });
+    expect(
+      (await post('mallory', '/space-1/presence/leave', { pageId: 'page-a' }))
+        .statusCode,
+    ).toBe(204);
+    for (
+      let index = 0;
+      index < CANVAS_PRESENCE_LIMITS.maxReportsPerSecond + 5;
+      index += 1
+    )
+      await post('mallory', '/space-1/presence', {
+        pageId: 'page-a',
+        pointer: { x: index, y: 0 },
+      });
+
+    // Alice's other device sees her page untouched, next to Mallory's own.
+    const seen = canvasPresence.snapshot(key, 'page-a2', 'alice');
+    expect(seen).toHaveLength(2);
+    expect(seen.find((page) => page.pageId === 'page-a')).toMatchObject({
+      label: 'Alice laptop',
+      selectedNodeIds: ['n1'],
+    });
+    const again = await post('alice', '/space-1/presence', {
+      pageId: 'page-a',
+      pointer: { x: 1, y: 1 },
+    });
+    expect(again.statusCode).toBe(204);
+    await app.close();
+  });
+
+  it('lets a read-only viewer show a pointer and a selection, but not hold the edit lock', async () => {
+    const app = await buildIdentifiedApp();
+    const response = await app.inject({
+      method: 'POST',
+      url: '/space-1/presence',
+      headers: as('viewer', 'read'),
+      payload: {
+        pageId: 'page-v',
+        pointer: { x: 3, y: 4 },
+        selectedNodeIds: ['n1'],
+        editingNodeIds: Array.from(
+          { length: CANVAS_PRESENCE_LIMITS.maxNodeIds },
+          (_, index) => `n${index}`,
+        ),
+      },
+    });
+    expect(response.statusCode).toBe(204);
+    expect(canvasPresence.snapshot(key, undefined, 'alice')).toEqual([
+      expect.objectContaining({
+        pointer: { x: 3, y: 4 },
+        selectedNodeIds: ['n1'],
+        editingNodeIds: [],
+      }),
+    ]);
+
+    // A caller who may write does hold it.
+    await app.inject({
+      method: 'POST',
+      url: '/space-1/presence',
+      headers: as('editor'),
+      payload: { pageId: 'page-e', editingNodeIds: ['n7'] },
+    });
+    expect(
+      canvasPresence
+        .snapshot(key, undefined, 'alice')
+        .map((page) => page.editingNodeIds),
+    ).toEqual([[], ['n7']]);
+    await app.close();
+  });
+
+  it('answers 429 when one principal has too many pages, and still admits others', async () => {
+    const app = await buildIdentifiedApp();
+    let last = 204;
+    for (
+      let index = 0;
+      index <= CANVAS_PRESENCE_LIMITS.maxPagesPerPrincipal;
+      index += 1
+    ) {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/space-1/presence',
+        headers: as('mallory'),
+        payload: { pageId: `squat-${index}` },
+      });
+      last = response.statusCode;
+      if (index === CANVAS_PRESENCE_LIMITS.maxPagesPerPrincipal)
+        expect(response.json()).toMatchObject({
+          code: 'PRESENCE_TOO_MANY_PAGES',
+        });
+    }
+    expect(last).toBe(429);
+    const other = await app.inject({
+      method: 'POST',
+      url: '/space-1/presence',
+      headers: as('alice'),
+      payload: { pageId: 'page-a' },
+    });
+    expect(other.statusCode).toBe(204);
+    await app.close();
+  });
+
+  it("tells a stream which page made a content save only when the save was its own principal's", async () => {
+    mocks.read.mockResolvedValue({ version: 1 });
+    const app = await buildIdentifiedApp();
+    const address = await app.listen({ port: 0, host: '127.0.0.1' });
+    /** Collect the stream's `invalidate` events. */
+    async function invalidations(principal: string) {
+      const controller = new AbortController();
+      const response = await fetch(
+        `${address}/space-1/sync/stream?pageId=page-a`,
+        { signal: controller.signal, headers: as(principal) },
+      );
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error('Stream has no body');
+      const events: unknown[] = [];
+      let snapshot = false;
+      let buffer = '';
+      void (async () => {
+        try {
+          for (;;) {
+            const chunk = await reader.read();
+            if (chunk.done) return;
+            buffer += new TextDecoder().decode(chunk.value);
+            const parts = buffer.split('\n\n');
+            buffer = parts.pop() ?? '';
+            for (const part of parts) {
+              if (part.startsWith('event: snapshot')) snapshot = true;
+              const data = /^event: invalidate\ndata: (.*)$/.exec(part)?.[1];
+              if (data) events.push(JSON.parse(data));
+            }
+          }
+        } catch {
+          /* aborted */
+        }
+      })();
+      await vi.waitFor(() => expect(snapshot).toBe(true));
+      return { events, close: () => controller.abort() };
+    }
+    try {
+      // Alice's page and Mallory's page happen to use the same page id.
+      const alice = await invalidations('alice');
+      const mallory = await invalidations('mallory');
+
+      // Mallory saves, quoting that page id.
+      publishCanvasUpdate(
+        'space-1',
+        {
+          type: 'invalidate',
+          data: { nodeIds: ['n1'], originPageId: 'page-a' },
+        },
+        { principalId: 'mallory' },
+      );
+      // Alice saves.
+      publishCanvasUpdate(
+        'space-1',
+        {
+          type: 'invalidate',
+          data: { nodeIds: ['n2'], originPageId: 'page-a' },
+        },
+        { principalId: 'alice' },
+      );
+      // A writer that names no principal.
+      publishCanvasUpdate('space-1', {
+        type: 'invalidate',
+        data: { nodeIds: ['n3'], originPageId: 'page-a' },
+      });
+
+      await vi.waitFor(() => expect(alice.events).toHaveLength(3));
+      await vi.waitFor(() => expect(mallory.events).toHaveLength(3));
+      // Alice's page fetches Mallory's save; it skips only its own.
+      expect(alice.events).toEqual([
+        { nodeIds: ['n1'] },
+        { nodeIds: ['n2'], originPageId: 'page-a' },
+        { nodeIds: ['n3'] },
+      ]);
+      expect(mallory.events).toEqual([
+        { nodeIds: ['n1'], originPageId: 'page-a' },
+        { nodeIds: ['n2'] },
+        { nodeIds: ['n3'] },
+      ]);
+      alice.close();
+      mallory.close();
+    } finally {
+      await app.close();
+    }
   });
 });

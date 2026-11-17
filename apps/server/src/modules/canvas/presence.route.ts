@@ -9,6 +9,14 @@
  * only need read access to the Space, the same as the Canvas Sync stream that
  * delivers presence to the other pages, and neither reads nor writes the
  * Space: presence lives in memory (see `canvas-presence.ts`).
+ *
+ * The page a request speaks for is the caller's own: entries are keyed by the
+ * authenticated principal and the page id, so quoting another principal's
+ * page id reaches nothing of theirs. The name shown to other people comes
+ * from the identity provider, not from the request. `editingNodeIds` — the
+ * other pages' edit lock — is taken only from a caller who may write the
+ * Space; a read-only viewer shows a pointer and a selection and holds no
+ * lock.
  */
 
 import {
@@ -18,7 +26,9 @@ import {
   recentCanvasConversationParamsSchema,
 } from '@huabu/shared';
 
+import { callerPrincipalId } from './caller-principal.js';
 import { canvasPresence } from './canvas-presence.js';
+import { getRequestIdentity } from '../identity/request.js';
 import { getWorkspaceHandle } from '../workspace.js';
 
 import type {
@@ -67,9 +77,26 @@ const presenceRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
         return reply.code(400).send({
           message: body.error.issues[0]?.message ?? 'Invalid presence report',
         });
+      const identity = getRequestIdentity(request);
+      // Asked only when the report claims a lock, and afresh each time, so a
+      // revoked grant ends the lock with the page's next report.
+      const mayHoldEditLock =
+        !body.data.editingNodeIds?.length ||
+        !identity ||
+        (await identity.access.can('write', {
+          type: 'space',
+          id: params.data.canvasId,
+        }));
       const result = canvasPresence.report(
         presenceSpaceKey(params.data.canvasId),
         body.data,
+        {
+          principalId: callerPrincipalId(request),
+          ...(identity?.principal.displayName
+            ? { displayName: identity.principal.displayName }
+            : {}),
+          mayHoldEditLock,
+        },
       );
       if (result === 'rate-limited')
         return reply
@@ -79,6 +106,15 @@ const presenceRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
             message: 'Presence is reported too often',
             code: 'PRESENCE_RATE_LIMITED',
             details: { retryAfterSeconds: 1 },
+          });
+      if (result === 'principal-full')
+        return reply
+          .code(429)
+          .header('Retry-After', '30')
+          .send({
+            message: 'Too many of your pages have this Space open',
+            code: 'PRESENCE_TOO_MANY_PAGES',
+            details: { retryAfterSeconds: 30 },
           });
       if (result === 'full')
         return reply
@@ -115,6 +151,7 @@ const presenceRoutes: FastifyPluginAsync = async (fastify): Promise<void> => {
       canvasPresence.leave(
         presenceSpaceKey(params.data.canvasId),
         body.data.pageId,
+        callerPrincipalId(request),
       );
       return reply.code(204).send();
     },
