@@ -3,11 +3,20 @@
 
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  cpSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 const require = createRequire(import.meta.url);
 
@@ -110,31 +119,36 @@ test('loads a revision from .env while platform settings keep precedence', () =>
   });
 });
 
+function initializeCheckout(root) {
+  execFileSync('git', ['init', '-q', root]);
+  execFileSync(
+    'git',
+    [
+      '-c',
+      'user.name=Huabu Test',
+      '-c',
+      'user.email=test@example.invalid',
+      '-c',
+      'commit.gpgsign=false',
+      '-c',
+      `core.hooksPath=${join(root, 'no-hooks')}`,
+      'commit',
+      '--allow-empty',
+      '-qm',
+      'fixture',
+    ],
+    { cwd: root },
+  );
+  const sha = execFileSync('git', ['rev-parse', 'HEAD'], {
+    cwd: root,
+    encoding: 'utf8',
+  }).trim();
+  return sha;
+}
+
 test('discovers the startup revision in a source checkout', () => {
   fixture((root) => {
-    execFileSync('git', ['init', '-q', root]);
-    execFileSync(
-      'git',
-      [
-        '-c',
-        'user.name=Huabu Test',
-        '-c',
-        'user.email=test@example.invalid',
-        '-c',
-        'commit.gpgsign=false',
-        '-c',
-        `core.hooksPath=${join(root, 'no-hooks')}`,
-        'commit',
-        '--allow-empty',
-        '-qm',
-        'fixture',
-      ],
-      { cwd: root },
-    );
-    const sha = execFileSync('git', ['rev-parse', 'HEAD'], {
-      cwd: root,
-      encoding: 'utf8',
-    }).trim();
+    const sha = initializeCheckout(root);
     assert.equal(launch(root, {}, true).sha, sha);
     assert.equal(
       launch(root, { HUABU_DEPLOYED_SHA: 'd'.repeat(40) }, true).sha,
@@ -142,3 +156,68 @@ test('discovers the startup revision in a source checkout', () => {
     );
   });
 });
+
+// The legacy tmux entry is executable on Unix; Windows only uses the launcher.
+test(
+  'legacy redeployment discovers the new checkout revision in both environment modes',
+  {
+    skip: process.platform === 'win32',
+  },
+  () => {
+    fixture((root) => {
+      const sha = initializeCheckout(root);
+      // Replace the destructive tmux/update boundary with a direct launch of the
+      // real launcher. The real runner must drop the old server's revision in
+      // both environment handoff modes before invoking this replacement entry.
+      const hook = join(root, 'scripts', 'restart.mjs');
+      writeFileSync(
+        hook,
+        `#!${process.execPath}\nawait import('./start-web.mjs');\n`,
+      );
+      chmodSync(hook, 0o755);
+      for (const stdin of [false, true]) {
+        const log = join(root, `runner-${stdin}.log`);
+        const environment = {
+          ...process.env,
+          HUABU_SERVICE_MANAGER: '',
+          HUABU_DEPLOYED_SHA: 'e'.repeat(40),
+        };
+        const result = spawnSync(
+          process.execPath,
+          [
+            fileURLToPath(
+              new URL('./canary-redeploy-runner.mjs', import.meta.url),
+            ),
+            hook,
+            join(root, `status-${stdin}.json`),
+            log,
+            '100',
+            'alpha',
+            ...(stdin ? ['--environment-stdin'] : []),
+          ],
+          {
+            env: environment,
+            encoding: 'utf8',
+            timeout: 10_000,
+            ...(stdin
+              ? {
+                  input: `${JSON.stringify(environment)}\nHuabu redeploy runner accepted\n`,
+                }
+              : {}),
+          },
+        );
+        assert.ifError(result.error);
+        assert.equal(result.status, 0, result.stderr);
+        const output = readFileSync(log, 'utf8');
+        const launched = output
+          .split(/\r?\n/u)
+          .find((line) => line.startsWith('LAUNCH_RESULT='));
+        assert.ok(launched, output);
+        assert.equal(
+          JSON.parse(launched.slice('LAUNCH_RESULT='.length)).sha,
+          sha,
+        );
+      }
+    });
+  },
+);
