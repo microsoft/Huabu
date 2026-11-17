@@ -82,7 +82,7 @@ The YouTube loader resolves its Service provisioner only when fetching YouTube m
 
 The ordinary `preprocess()` entry holds a Workspace lease for the whole request, and in-flight coalescing includes Workspace identity.
 
-PDF preprocessing no longer generates automatic summaries or keywords, including forced runs. Extraction, local source snapshots, and label generation remain enabled; existing stored summaries/keywords remain readable. Office and Web enrichment are unchanged. Custom `properties` and `propertyDisplayKeys` are always authored: extraction retains their latest stored values and ignores same-named loader metadata. Content PUT applies revision checks to edits of these fields even on derived-body nodes. A PDF's owned Note is a separate node and record, reached through structural `noteNodeId`; PDF extraction never writes its body or revision. The Note uses ordinary Note preprocessing.
+PDF preprocessing no longer generates automatic summaries or keywords, including forced runs. Extraction, local source snapshots, and label generation remain enabled; existing stored summaries/keywords remain readable. Office and Web enrichment are unchanged. Custom `properties` and `propertyDisplayKeys` are always authored: extraction retains their latest stored values and ignores same-named loader metadata. Content PUT applies no revision check to edits of these fields, on any node type: they are a per-key patch of the stored record ([what is versioned](./canvas-realtime-sync.md#what-is-versioned-and-what-is-not)). A PDF's owned Note is a separate node and record, reached through structural `noteNodeId`; PDF extraction never writes its body or revision. The Note uses ordinary Note preprocessing.
 
 ---
 
