@@ -17,8 +17,10 @@ import {
  * advisory and lives only in presence: it is gone as soon as the other page
  * stops reporting the node (its editor lost focus or closed), leaves, expires
  * or this page's stream drops. Nothing is stored and the server enforces
- * nothing; a save from a page that edited anyway is still checked by the
- * content revision (`NODE_CONTENT_CONFLICT`).
+ * nothing; a body save from a page that edited anyway is still checked by
+ * the content revision (`NODE_CONTENT_CONFLICT`). Custom properties have no
+ * revision: two pages that edit the same property anyway are
+ * last-writer-wins.
  *
  * A page that is itself editing the node is never locked: when two pages
  * start at the same moment both keep their editor, and the revision check
@@ -50,16 +52,6 @@ export function editLockHolder(
   nodeId: string | null | undefined,
 ): RemotePresencePage | null {
   return selectEditLockHolder(useCanvasPresenceStore.getState(), nodeId);
-}
-
-/**
- * Whether any other page reports `nodeId` as being edited, also when this
- * page is editing it too (two pages that started in the same instant).
- */
-export function isEditedOnAnotherPage(nodeId: string): boolean {
-  return Object.values(useCanvasPresenceStore.getState().pages).some((page) =>
-    page.editingNodeIds.includes(nodeId),
-  );
 }
 
 let hintToastId: string | null = null;
