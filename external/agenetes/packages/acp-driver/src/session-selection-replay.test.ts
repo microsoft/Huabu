@@ -176,6 +176,39 @@ describe('initial profile preferences', () => {
   });
 });
 
+describe('seeding a fresh thread from host-resolved selections', () => {
+  const sessionCatalogue = [
+    {
+      ...configOption('model_id', 'sonnet'),
+      category: 'model',
+      options: [{ value: 'sonnet' }, { value: 'opus' }],
+    },
+  ] as unknown as AcpSessionEntry['configOptions'];
+
+  it('still matches a preference the host could not resolve', () => {
+    const e = entry({ configOptions: sessionCatalogue });
+
+    seedInitialPreferences(e, { model: 'opus' }, logger, {});
+
+    expect(e.selections).toEqual({ model_id: 'opus' });
+  });
+
+  it('keeps host selections the session has no catalogue for yet', () => {
+    const e = entry();
+    const warn = vi.fn();
+
+    seedInitialPreferences(
+      e,
+      { model: 'opus' },
+      { ...logger, warn },
+      { model_id: 'opus' },
+    );
+
+    expect(e.selections).toEqual({ model_id: 'opus' });
+    expect(warn).not.toHaveBeenCalled();
+  });
+});
+
 describe('resolving initial preference selections without a session', () => {
   const catalogue = {
     availableModels: [{ modelId: 'sonnet' }],
@@ -202,6 +235,25 @@ describe('resolving initial preference selections without a session', () => {
     expect(
       resolveInitialPreferenceSelections({ model: 'sonnet' }, catalogue),
     ).toEqual({ model: 'sonnet' });
+  });
+
+  it('recognises choices published as bare strings or by id', () => {
+    expect(
+      resolveInitialPreferenceSelections(
+        { model: 'opus', thoughtLevel: 'high' },
+        {
+          availableModels: [],
+          configOptions: [
+            { id: 'model_id', category: 'model', options: ['sonnet', 'opus'] },
+            {
+              id: 'effort',
+              category: 'thought_level',
+              options: [{ id: 'high', label: 'High' }],
+            },
+          ],
+        },
+      ),
+    ).toEqual({ model_id: 'opus', effort: 'high' });
   });
 
   it('selects nothing for retired values or absent preferences', () => {

@@ -238,10 +238,10 @@ export interface EnsureAcpSessionOptions {
   };
   /**
    * Selections a fresh thread starts with, already resolved by the host
-   * against the catalogue it showed the user. Used as given instead of
-   * matching `initialPreferences` against this session's own catalogue, so
-   * the first turn runs on what was displayed even when the agent advertises
-   * its catalogue only after `session/new` returns.
+   * against the catalogue it showed the user. Laid over whatever
+   * `initialPreferences` match in this session's own catalogue, so the first
+   * turn runs on what was displayed even when the agent advertises its
+   * catalogue only after `session/new` returns.
    */
   initialSelections?: Readonly<Record<string, string>>;
   /**
@@ -397,14 +397,27 @@ export interface AcpSelectionCatalogue {
   readonly availableModels: readonly unknown[];
 }
 
+/**
+ * Every value a select option list offers. Accepts the shapes hosts render:
+ * bare strings, `{ value }` / `{ id }` records, and group records whose
+ * `options` hold the choices.
+ */
 function offeredValues(raw: unknown): Set<string> {
   const values = new Set<string>();
   if (!Array.isArray(raw)) return values;
   for (const item of raw) {
+    if (typeof item === 'string') {
+      if (item) values.add(item);
+      continue;
+    }
     if (!item || typeof item !== 'object') continue;
-    const record = item as { value?: unknown; options?: unknown };
-    if (typeof record.value === 'string') values.add(record.value);
-    for (const nested of offeredValues(record.options)) values.add(nested);
+    const record = item as { value?: unknown; id?: unknown; options?: unknown };
+    if (Array.isArray(record.options)) {
+      for (const nested of offeredValues(record.options)) values.add(nested);
+      continue;
+    }
+    const value = String(record.value ?? record.id ?? '');
+    if (value) values.add(value);
   }
   return values;
 }
@@ -466,24 +479,40 @@ export function resolveInitialPreferenceSelections(
     : {};
 }
 
+/**
+ * Give a fresh thread its starting selections.
+ *
+ * `preferences` are matched against the catalogue this session advertises.
+ * `resolved` are selections the host already matched against the catalogue it
+ * showed the user; they are laid over the session's own matches. Neither
+ * source replaces the other: the host's cover an agent that has not
+ * advertised its catalogue yet, the session's cover a preference the host's
+ * catalogue no longer held.
+ */
 function seedInitialPreferences(
   entry: AcpSessionEntry,
   preferences: EnsureAcpSessionOptions['initialPreferences'],
   logger?: AcpSessionLogger,
+  resolved?: Readonly<Record<string, string>>,
 ): void {
-  if (!preferences) return;
-
-  const { selections, modelMatched } = matchInitialPreferences(
-    preferences,
-    entry,
-  );
-  Object.assign(entry.selections, selections);
-  if (preferences.model && !modelMatched) {
-    logger?.warn(
-      { profileId: entry.profileId, model: preferences.model },
-      '[acp] requested initial model is not advertised; using the harness default',
+  if (preferences) {
+    const { selections, modelMatched } = matchInitialPreferences(
+      preferences,
+      entry,
     );
+    Object.assign(entry.selections, selections);
+    if (
+      preferences.model &&
+      !modelMatched &&
+      !Object.values(resolved ?? {}).includes(preferences.model)
+    ) {
+      logger?.warn(
+        { profileId: entry.profileId, model: preferences.model },
+        '[acp] requested initial model is not advertised; using the harness default',
+      );
+    }
   }
+  if (resolved) Object.assign(entry.selections, resolved);
   if (Object.keys(entry.selections).length > 0) {
     entry.selectionsUpdatedAt = Date.now();
   }
@@ -1123,14 +1152,12 @@ async function ensureAcpSessionInner(
   // the user's remembered choices.
   hydrateSelectionsFromPersistedMeta(created, priorState?.metadata);
   if (!priorState?.metadata) {
-    if (opts.initialSelections) {
-      Object.assign(created.selections, opts.initialSelections);
-      if (Object.keys(created.selections).length > 0) {
-        created.selectionsUpdatedAt = Date.now();
-      }
-    } else {
-      seedInitialPreferences(created, opts.initialPreferences, logger);
-    }
+    seedInitialPreferences(
+      created,
+      opts.initialPreferences,
+      logger,
+      opts.initialSelections,
+    );
   }
 
   // Installing the listener synchronously drains Gateway pre-attach messages

@@ -166,8 +166,8 @@ export interface AcpSpec {
   };
   /**
    * Selections a fresh thread starts with, keyed like `AgentMetadata.selections`.
-   * When present they are used as given instead of matching
-   * `initialPreferences` against the catalogue this session advertises.
+   * Laid over whatever `initialPreferences` match in the catalogue this
+   * session advertises.
    */
   readonly initialSelections?: Readonly<Record<string, string>>;
   /** External binding (alias + profileId) for the thread. */

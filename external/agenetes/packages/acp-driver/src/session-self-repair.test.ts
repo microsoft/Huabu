@@ -234,7 +234,7 @@ describe('ACP Handle session self-repair', () => {
 
     const entry = await ensureAcpSession({
       ...ensureOptions(),
-      initialPreferences: { model: 'ignored' },
+      initialPreferences: { model: 'opus', thoughtLevel: 'high' },
       initialSelections: { model_id: 'opus', effort: 'high' },
     });
     await entry.selectionsReplay;
