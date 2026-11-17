@@ -285,6 +285,9 @@ describe('optional raw RFS client', () => {
     ['download', '../file', '--output', 'file'],
     ['download', 'nodes//file', '--output', 'file'],
     ['download', 'nodes/file'],
+    ['get-skill', '--output'],
+    ['get-skill', '--output', ''],
+    ['get-skill', 'layout', '--output', ''],
     ['upload', 'a/b', '--file', '-'],
     ['upload', 'a'],
     ['capabilities'],
@@ -520,61 +523,67 @@ describe('optional raw RFS client', () => {
     expect(await readdir(folder)).toEqual(['body']);
   });
 
-  it('announces a download before body completion and preserves the target on failure', async () => {
-    const folder = await directory();
-    const target = join(folder, 'body');
-    await writeFile(target, 'old');
-    let finish!: () => void;
-    const observed = new Promise<void>((resolve) => {
-      finish = resolve;
-    });
-    const env = await server((_request, response) => {
-      response.setHeader('content-length', '100');
-      response.flushHeaders();
-      void observed.then(() => {
-        response.write('partial');
-        response.destroy();
+  it.each([['download', 'nodes/a'], ['get-skill'], ['get-skill', 'layout']])(
+    'announces file output before body completion and preserves the target on failure: %j',
+    async (...command) => {
+      const folder = await directory();
+      const target = join(folder, 'body');
+      await writeFile(target, 'old');
+      let finish!: () => void;
+      const observed = new Promise<void>((resolve) => {
+        finish = resolve;
       });
-    });
-    const args = ['download', 'nodes/a', '--output', target];
-    const stdout = output();
-    const pending = runRfs(args, {
-      env,
-      stdout: stdout.stream,
-      stderr: output().stream,
-    });
-    await vi.waitFor(() =>
-      expect(stdout.text()).toContain('"event":"download_started"'),
-    );
-    expect(await readFile(target, 'utf8')).toBe('old');
-    finish();
-    expect(await pending).toBe(1);
-    expect(await readFile(target, 'utf8')).toBe('old');
-    expect(stdout.text()).not.toContain('"event":"download_completed"');
-    expect(await readdir(folder)).toEqual(['body']);
-  });
-
-  it('keeps download error bodies off stdout and adapts the recovery command', async () => {
-    const folder = await directory();
-    const target = join(folder, 'body');
-    await writeFile(target, 'old');
-    const env = await server((_request, response) => {
-      response.writeHead(403, { 'content-type': 'application/json' });
-      response.end(
-        JSON.stringify({
-          message:
-            'Denied. To see how to use this Space, run: curl -fsS "$HUABU_RFS_URL/skill"',
-        }),
+      const env = await server((_request, response) => {
+        response.setHeader('content-length', '100');
+        response.flushHeaders();
+        void observed.then(() => {
+          response.write('partial');
+          response.destroy();
+        });
+      });
+      const args = [...command, '--output', target];
+      const stdout = output();
+      const pending = runRfs(args, {
+        env,
+        stdout: stdout.stream,
+        stderr: output().stream,
+      });
+      await vi.waitFor(() =>
+        expect(stdout.text()).toContain('"event":"download_started"'),
       );
-    });
-    const result = await call(['download', 'nodes/a', '--output', target], env);
-    expect(result.code).toBe(1);
-    expect(result.stdout.length).toBe(0);
-    expect(result.stderr).toContain('huabu-rfs get-skill');
-    expect(result.stderr).not.toContain('HUABU_RFS_URL');
-    expect(await readFile(target, 'utf8')).toBe('old');
-    expect(await readdir(folder)).toEqual(['body']);
-  });
+      expect(await readFile(target, 'utf8')).toBe('old');
+      finish();
+      expect(await pending).toBe(1);
+      expect(await readFile(target, 'utf8')).toBe('old');
+      expect(stdout.text()).not.toContain('"event":"download_completed"');
+      expect(await readdir(folder)).toEqual(['body']);
+    },
+  );
+
+  it.each([['download', 'nodes/a'], ['get-skill'], ['get-skill', 'layout']])(
+    'keeps file-output error bodies off stdout and adapts the recovery command: %j',
+    async (...command) => {
+      const folder = await directory();
+      const target = join(folder, 'body');
+      await writeFile(target, 'old');
+      const env = await server((_request, response) => {
+        response.writeHead(403, { 'content-type': 'application/json' });
+        response.end(
+          JSON.stringify({
+            message:
+              'Denied. To see how to use this Space, run: curl -fsS "$HUABU_RFS_URL/skill"',
+          }),
+        );
+      });
+      const result = await call([...command, '--output', target], env);
+      expect(result.code).toBe(1);
+      expect(result.stdout.length).toBe(0);
+      expect(result.stderr).toContain('huabu-rfs get-skill');
+      expect(result.stderr).not.toContain('HUABU_RFS_URL');
+      expect(await readFile(target, 'utf8')).toBe('old');
+      expect(await readdir(folder)).toEqual(['body']);
+    },
+  );
 
   it('does not follow redirects or forward credentials to another server', async () => {
     let redirected = 0;
@@ -659,6 +668,54 @@ describe('optional raw RFS client', () => {
     expect(result.code).toBe(1);
     expect(result.stdout.toString()).toBe('authentication failed');
   });
+
+  it.each([undefined, 'layout'])(
+    'saves the complete Skill output atomically with its actual byte size: %s',
+    async (id) => {
+      const folder = await directory();
+      const target = join(folder, 'guide with spaces.md');
+      await writeFile(target, 'previous guide');
+      const guide = '# Guide\n\n' + 'Guide text \u4e2d\n'.repeat(2048);
+      const env = await server((request, response) => {
+        expect(request.url).toBe(
+          id ? `/rfs/space/skill/${id}` : '/rfs/space/skill',
+        );
+        expect(request.headers.authorization).toBe('Bearer private-token');
+        expect(request.headers['x-huabu-skill-client']).toBe('rfs-cli');
+        response.setHeader('content-type', 'text/markdown; charset=utf-8');
+        response.setHeader('content-length', Buffer.byteLength(guide));
+        response.end(guide);
+      });
+      const args = ['get-skill', ...(id ? [id] : [])];
+      const direct = await call(args, env);
+      const saved = await call([...args, '--output', target], env);
+      const bytes = await readFile(target);
+      expect(direct.code).toBe(0);
+      expect(saved.code).toBe(0);
+      expect(saved.stderr).toBe('');
+      expect(bytes).toEqual(direct.stdout);
+      expect(bytes.toString()).toContain(guide);
+      expect(bytes.toString().startsWith('Usage: huabu-rfs')).toBe(!id);
+      const events = saved.stdout
+        .toString()
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line));
+      expect(events[0]).toMatchObject({
+        event: 'download_started',
+        output: target,
+        size: bytes.byteLength,
+      });
+      expect(events.at(-1)).toMatchObject({
+        event: 'download_completed',
+        output: target,
+        size: bytes.byteLength,
+        received: bytes.byteLength,
+      });
+      expect(saved.stdout.toString()).not.toContain('# Guide');
+      expect(await readdir(folder)).toEqual(['guide with spaces.md']);
+    },
+  );
 
   it('adapts Server recovery guidance to the CLI without exposing connection environment', async () => {
     const env = await server((_request, response) => {
