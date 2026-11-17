@@ -95,6 +95,7 @@ export {
   MODE_SELECTION_ID,
   MODEL_SELECTION_ID,
   ensureAcpSession,
+  resolveInitialPreferenceSelections,
   setAcpProfileCachePort,
 } from './session.js';
 export type {

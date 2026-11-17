@@ -1,7 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { probeAcpCapabilities } from '@agenetes/acp-driver';
+import {
+  probeAcpCapabilities,
+  resolveInitialPreferenceSelections,
+} from '@agenetes/acp-driver';
 import {
   getAgentProfileRegistry,
   resolveConnectedAgentletId,
@@ -11,13 +14,17 @@ import {
   getProfileSchemaCache,
   mergeProfileSchemaCache,
 } from './profile-schema-cache.js';
+import { getProfileSessionPreferences } from './profile-session-preferences.js';
 import {
   recipeFromProfileSnapshot,
   resolveProfileSnapshot,
 } from './profile-snapshot.js';
 
 import type { AcpProfileSchemaCacheEntry } from './profile-schema-cache.js';
-import type { AcpProfileCapabilitiesResponse } from '@huabu/shared';
+import type {
+  AcpProfileCapabilitiesResponse,
+  AcpSessionMetaSnapshot,
+} from '@huabu/shared';
 import type { FastifyBaseLogger } from 'fastify';
 
 export class ProfileCapabilitiesError extends Error {
@@ -30,7 +37,39 @@ export class ProfileCapabilitiesError extends Error {
   }
 }
 
+/**
+ * Session metadata for a conversation of this Profile that has no session yet.
+ *
+ * The catalogue is the Profile's last observation, whose current values
+ * belong to whichever thread reported last. A new session starts from the
+ * Profile's remembered preferences instead, so they are carried as selections:
+ * otherwise the selectors would name one model and the first turn would run
+ * on another.
+ */
+export function profileSessionMetaSnapshot(
+  profileId: string,
+  cache: AcpProfileSchemaCacheEntry | null,
+): AcpSessionMetaSnapshot {
+  const availableModels = cache?.availableModels ?? [];
+  const configOptions = cache?.configOptions ?? [];
+  return {
+    availableModes: cache?.availableModes ?? [],
+    currentModeId: cache?.currentModeId ?? null,
+    availableModels,
+    currentModelId: cache?.currentModelId ?? null,
+    configOptions,
+    selections: resolveInitialPreferenceSelections(
+      getProfileSessionPreferences(profileId),
+      { configOptions, availableModels },
+    ),
+    sessionInfo: null,
+    usage: null,
+    updatedAt: cache?.metaUpdatedAt ?? 0,
+  };
+}
+
 export function projectProfileCapabilities(
+  profileId: string,
   cache: AcpProfileSchemaCacheEntry | null,
 ): AcpProfileCapabilitiesResponse {
   const observed = Boolean(cache && (cache.metaUpdatedAt ?? 0) > 0);
@@ -38,37 +77,41 @@ export function projectProfileCapabilities(
     source: observed ? 'profile' : 'none',
     availableCommands: cache?.availableCommands ?? [],
     commandsUpdatedAt: cache?.commandsUpdatedAt ?? 0,
-    sessionMeta: {
-      availableModes: cache?.availableModes ?? [],
-      currentModeId: cache?.currentModeId ?? null,
-      availableModels: cache?.availableModels ?? [],
-      currentModelId: cache?.currentModelId ?? null,
-      configOptions: cache?.configOptions ?? [],
-      selections: {},
-      sessionInfo: null,
-      usage: null,
-      updatedAt: cache?.metaUpdatedAt ?? 0,
-    },
+    sessionMeta: profileSessionMetaSnapshot(profileId, cache),
   };
+}
+
+/**
+ * The Profile's observed catalogue, or `null` when nothing usable is cached.
+ *
+ * An observation recorded under another execution revision describes a
+ * launch the Profile no longer has, so it is treated as absent.
+ */
+export function readProfileObservation(
+  profileId: string,
+): AcpProfileSchemaCacheEntry | null {
+  const profile = resolveProfileSnapshot(profileId);
+  const cache = getProfileSchemaCache(profileId);
+  if (!profile || !cache) return null;
+  return cache.executionRevision !== undefined &&
+    cache.executionRevision !== profile.executionRevision
+    ? null
+    : cache;
 }
 
 export function readProfileCapabilities(
   profileId: string,
 ): AcpProfileCapabilitiesResponse {
-  const profile = resolveProfileSnapshot(profileId);
-  if (!profile) {
+  if (!resolveProfileSnapshot(profileId)) {
     throw new ProfileCapabilitiesError(
       404,
       'profile_not_found',
       'Agent Profile is unavailable',
     );
   }
-  const cache = getProfileSchemaCache(profileId);
   return projectProfileCapabilities(
-    cache?.executionRevision !== undefined &&
-      cache.executionRevision !== profile.executionRevision
-      ? null
-      : cache,
+    profileId,
+    readProfileObservation(profileId),
   );
 }
 
@@ -129,7 +172,7 @@ export async function discoverProfileCapabilities(
         executionRevision: profile.executionRevision,
       };
       mergeProfileSchemaCache(profileId, entry);
-      return projectProfileCapabilities(entry);
+      return projectProfileCapabilities(profileId, entry);
     })();
     discoveries.set(key, operation);
   }

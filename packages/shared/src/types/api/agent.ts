@@ -18,7 +18,10 @@
 
 import { z } from 'zod';
 
-import { agentWorkingDirectorySchema } from './agent-profile.js';
+import {
+  agentInitialPreferencesSchema,
+  agentWorkingDirectorySchema,
+} from './agent-profile.js';
 import { fileReferenceSchema } from './device-files.js';
 import { inkResourceReferencesSchema } from './ink-sigil.js';
 import { REASONING_EFFORT_VALUES } from './llm.js';
@@ -413,6 +416,11 @@ export const agentRequestSchema = z
     agentBinding: agentBindingSchema.optional(),
     /** External conversation directory, frozen at first realization. */
     cwd: agentWorkingDirectorySchema.optional(),
+    /**
+     * Model and thought level an external conversation is showing before its
+     * first turn. Honoured only when this request realizes the conversation.
+     */
+    initialPreferences: agentInitialPreferencesSchema.optional(),
     /**
      * User-invoked skill ids parsed from leading `/<id>` tokens in the
      * chat input (see `useInternalSlashCommands` on the web side). The

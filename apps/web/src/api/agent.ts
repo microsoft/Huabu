@@ -373,6 +373,8 @@ export const agentApi = {
        */
       agentBinding?: AgentBinding;
       cwd?: string;
+      /** What an external draft is showing; see `AgentRequest`. */
+      initialPreferences?: AgentRequest['initialPreferences'];
       /**
        * Skill ids the user explicitly invoked by typing `/<id>` in the
        * chat input (parsed by `useInternalSlashCommands`). Forwarded
@@ -412,6 +414,7 @@ export const agentApi = {
       anchorNodeId: options?.anchorNodeId,
       agentBinding: options?.agentBinding,
       cwd: options?.cwd,
+      initialPreferences: options?.initialPreferences,
       invokedSkills: options?.invokedSkills?.length
         ? options.invokedSkills
         : undefined,

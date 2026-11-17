@@ -226,6 +226,24 @@ describe('ACP Handle session self-repair', () => {
     },
   );
 
+  it('starts a fresh thread on the selections the host resolved, before any catalogue arrives', async () => {
+    orchestrator.ensureAgentForThread.mockResolvedValueOnce({
+      sessionId: 'fresh-session',
+      pid: 43,
+    });
+
+    const entry = await ensureAcpSession({
+      ...ensureOptions(),
+      initialPreferences: { model: 'opus', thoughtLevel: 'high' },
+      initialSelections: { model_id: 'opus', effort: 'high' },
+    });
+    await entry.selectionsReplay;
+
+    expect(entry.configOptions).toEqual([]);
+    expect(entry.selections).toEqual({ model_id: 'opus', effort: 'high' });
+    expect(entry.selectionsUpdatedAt).toBeGreaterThan(0);
+  });
+
   it('repairs a closed committed entry from its latest session state', async () => {
     const oldEntry = closedEntry();
     acpSessionRegistry.set(agentletId, threadId, oldEntry);

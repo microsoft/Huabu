@@ -23,6 +23,7 @@ import { InlineEditableTitle } from '@/components/Common/InlineEditableTitle';
 import { toast } from '@/components/Common/Toast';
 import { PermissionTray } from '@/components/Messages/AIMessage/PermissionCard';
 import { PreviewHeaderButton } from '@/components/Nodes/PreviewHeaderButton';
+import { readDisplayedInitialPreferences } from '@/hooks/acpSessionMetaCache';
 import { useAcpProfiles } from '@/hooks/useAcpProfiles';
 import { useAcpSessionMeta } from '@/hooks/useAcpSessionMeta';
 import { useAcpSlashCommands } from '@/hooks/useAcpSlashCommands';
@@ -589,11 +590,26 @@ export const ChatPanel = ({
   // on-demand instead of rejecting the switch with `session_not_found`.
   const runAcpControl = useCallback(
     (control: Parameters<typeof runConversationControl>[1]) =>
-      runConversationControl(session, control, async () => {
-        if (acpControlAddressRef.current === preparationAddress) {
-          await refreshAcpSessionMeta();
-        }
-      }),
+      runConversationControl(
+        session,
+        (target) => {
+          // A control on a draft realizes its session, which must start on
+          // what the other selectors are showing.
+          const initialPreferences = readDisplayedInitialPreferences(
+            target.canvasId,
+            session.threadId,
+            target.binding.profileId,
+          );
+          return control(
+            initialPreferences ? { ...target, initialPreferences } : target,
+          );
+        },
+        async () => {
+          if (acpControlAddressRef.current === preparationAddress) {
+            await refreshAcpSessionMeta();
+          }
+        },
+      ),
     [session, refreshAcpSessionMeta, preparationAddress],
   );
   const runAcpSelectionControl = useCallback(

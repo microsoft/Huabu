@@ -57,6 +57,7 @@ import {
 import { useGesturePreviewStore } from '@/store/gesturePreviewStore';
 import { isPageUnloading, pageLifecycle } from '@/utils/pageLifecycle';
 
+import { readDisplayedInitialPreferences } from './acpSessionMetaCache';
 import {
   abortAgentStreamClaim,
   claimAgentStream,
@@ -1168,6 +1169,7 @@ async function executePreparedAgentTurn(
     useChatStore.getState();
   const result: AgentTurnResult = { status: 'rejected' };
   let requestedCwd: string | undefined;
+  let requestedPreferences: AgentRequest['initialPreferences'];
   let requestDispatched = false;
   let releasePreparation: ((attempted?: boolean) => void) | undefined;
   const run = async (): Promise<void> => {
@@ -1471,6 +1473,7 @@ async function executePreparedAgentTurn(
           attachments,
           agentBinding,
           cwd: requestedCwd,
+          initialPreferences: requestedPreferences,
           anchorNodeId: requestScope.anchorNodeId,
           invokedSkills,
           quotedComments,
@@ -1549,6 +1552,11 @@ async function executePreparedAgentTurn(
     (prompt.trim() || quotedComments?.length || isCanvasIntent(inputKind))
   ) {
     requestedCwd = conversationControlTarget(session).cwd;
+    requestedPreferences = readDisplayedInitialPreferences(
+      session.ownerCanvasId,
+      session.threadId,
+      preparation.binding.profileId,
+    );
     try {
       releasePreparation = beginConversationRealization(session);
     } catch (error) {

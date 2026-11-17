@@ -17,8 +17,12 @@ const mocks = vi.hoisted(() => ({
   probe: vi.fn(),
   read: vi.fn(),
   write: vi.fn(),
+  resolveSelections: vi.fn(),
 }));
-vi.mock('@agenetes/acp-driver', () => ({ probeAcpCapabilities: mocks.probe }));
+vi.mock('@agenetes/acp-driver', () => ({
+  probeAcpCapabilities: mocks.probe,
+  resolveInitialPreferenceSelections: mocks.resolveSelections,
+}));
 vi.mock('@agenetes/agentlet-host', () => ({
   getAgentProfileRegistry: () => ({ getProfile: mocks.getProfile }),
   resolveConnectedAgentletId: mocks.connected,
@@ -44,6 +48,7 @@ beforeEach(() => {
   cache = null;
   mocks.getProfile.mockReturnValue(profile);
   mocks.connected.mockReturnValue('machine');
+  mocks.resolveSelections.mockReturnValue({});
   mocks.read.mockImplementation(() => cache);
   mocks.write.mockImplementation((_id, entry: AcpProfileSchemaCacheEntry) => {
     cache = entry;
@@ -63,6 +68,24 @@ describe('Profile capability discovery', () => {
       'profile',
     );
     expect(mocks.probe).not.toHaveBeenCalled();
+  });
+
+  it('carries the remembered preferences a new session will start with', () => {
+    mocks.getProfile.mockReturnValue({
+      ...profile,
+      customData: { sessionPreferences: { model: 'fast' } },
+    });
+    const availableModels = [{ modelId: 'fast', name: 'Fast' }];
+    cache = { metaUpdatedAt: 1, executionRevision: 1, availableModels };
+    mocks.resolveSelections.mockReturnValue({ model: 'fast' });
+
+    expect(readProfileCapabilities('profile').sessionMeta.selections).toEqual({
+      model: 'fast',
+    });
+    expect(mocks.resolveSelections).toHaveBeenCalledWith(
+      { model: 'fast' },
+      { configOptions: [], availableModels },
+    );
   });
 
   it('coalesces concurrent callers, without realizing or addressing any user thread', async () => {

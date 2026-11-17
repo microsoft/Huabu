@@ -20,7 +20,10 @@ import {
   useConversationPreparationStore,
 } from '@/store/conversationPreparation';
 
-import { createWorkspaceCache } from './workspaceCache';
+import {
+  sessionMetaCacheKey,
+  useSessionMetaCache,
+} from './acpSessionMetaCache';
 
 import type {
   AcpSessionMetaSnapshot,
@@ -42,23 +45,6 @@ const EMPTY_META: AcpSessionMetaSnapshot = {
   usage: null,
   updatedAt: 0,
 };
-
-interface CachedAcpSessionMetaEntry {
-  meta: AcpSessionMetaSnapshot;
-  source: AcpThreadCachedMetaResponse['source'];
-  fetchedAt: number;
-}
-
-const useSessionMetaCache = createWorkspaceCache<CachedAcpSessionMetaEntry>();
-
-function sessionMetaCacheKey(
-  canvasId: string | null | undefined,
-  threadId: string | null | undefined,
-  profileId: string,
-): string | null {
-  if (!threadId || !profileId) return null;
-  return JSON.stringify([canvasId ?? '', threadId, profileId]);
-}
 
 export function clearAcpSessionMetaCache(): void {
   useSessionMetaCache.getState().clear();

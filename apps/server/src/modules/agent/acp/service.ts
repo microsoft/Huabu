@@ -22,13 +22,17 @@
 
 import { randomUUID } from 'node:crypto';
 
-import { AcpServiceError } from '@agenetes/acp-driver';
+import {
+  AcpServiceError,
+  resolveInitialPreferenceSelections,
+} from '@agenetes/acp-driver';
 import { getAgentProfileRegistry } from '@agenetes/agentlet-host';
 
 import { isCanvasIntent } from '@huabu/shared';
 import { chatInputText } from '@huabu/shared';
 
 import { renderExternalAgentInputs } from './preprocessor.js';
+import { readProfileObservation } from './profile-capabilities.js';
 import { getProfileSessionPreferences } from './profile-session-preferences.js';
 import {
   recipeFromProfileSnapshot,
@@ -56,6 +60,7 @@ import type {
   AgentLaunchOverrides,
   AgentStreamEvent,
   AgentTurnAccepted,
+  AgentInitialPreferences,
 } from '@huabu/shared';
 import type { FastifyBaseLogger } from 'fastify';
 
@@ -174,6 +179,11 @@ export interface BuildAcpWorkloadSpecOptions {
   threadId: string;
   canvasId?: string;
   cwd?: string;
+  /**
+   * What the conversation was showing when it was first realized. Absent for
+   * callers with no interface, which start from the Profile's preferences.
+   */
+  initialPreferences?: AgentInitialPreferences;
   launchOverrides?: AgentLaunchOverrides;
   spacePrompt?: string;
 }
@@ -201,6 +211,18 @@ export function buildAcpWorkloadSpec(
   cwd = workingDirPath ?? cwd;
   recipe = applyWorkingDirectoryOverride(recipe, workingDirPath);
 
+  const initialPreferences =
+    opts.initialPreferences ?? getProfileSessionPreferences(binding.profileId);
+  // Resolved against the catalogue the user was shown, so the session starts
+  // on those values without waiting for the agent to advertise its own.
+  const observation = readProfileObservation(binding.profileId);
+  const initialSelections = observation
+    ? resolveInitialPreferenceSelections(initialPreferences, {
+        configOptions: observation.configOptions ?? [],
+        availableModels: observation.availableModels ?? [],
+      })
+    : undefined;
+
   return {
     threadId,
     kind: EXTERNAL_DRIVER_KIND,
@@ -214,7 +236,8 @@ export function buildAcpWorkloadSpec(
           ? [opts.launchOverrides.additionalInitialPreamble]
           : []),
       ],
-      initialPreferences: getProfileSessionPreferences(binding.profileId),
+      initialPreferences,
+      ...(initialSelections && { initialSelections }),
       profileExecutionRevision: profile?.executionRevision ?? 0,
       binding,
       agentletId,

@@ -36,7 +36,7 @@ import { buildAcpWorkloadSpec } from './service.js';
 
 import type { AcpSessionEntry } from '@agenetes/acp-driver';
 import type { Namespace } from '@agenetes/protocol';
-import type { AgentBinding } from '@huabu/shared';
+import type { AgentBinding, AgentInitialPreferences } from '@huabu/shared';
 import type { FastifyBaseLogger } from 'fastify';
 
 type ExternalBinding = Extract<AgentBinding, { kind: 'external' }>;
@@ -62,6 +62,8 @@ export interface RealizeExternalAgentThreadOptions {
   canvasId?: string;
   requestedBinding?: ExternalBinding;
   requestedCwd?: string;
+  /** What the conversation is showing; used only if this call realizes it. */
+  requestedPreferences?: AgentInitialPreferences;
   agentTarget?: AgentNodeTarget | null;
   fixedTarget?: FixedAgentNodeTarget | null;
   logger: FastifyBaseLogger;
@@ -168,6 +170,9 @@ async function ensureSessionFromCanonicalSpec(
     }),
     ...(spec.spec.initialPreferences !== undefined && {
       initialPreferences: spec.spec.initialPreferences,
+    }),
+    ...(spec.spec.initialSelections !== undefined && {
+      initialSelections: spec.spec.initialSelections,
     }),
     idleTimeoutSecs: getExternalAgentRuntimeConfig().idleTimeoutSecs,
     logger,
@@ -397,6 +402,9 @@ export class ExternalAgentRealizationService {
       threadId: options.threadId,
       canvasId: options.canvasId,
       cwd: agentTarget ? undefined : options.requestedCwd,
+      ...(options.requestedPreferences && {
+        initialPreferences: options.requestedPreferences,
+      }),
       ...((agentTarget?.launchOverrides ?? fixedTarget?.launchOverrides)
         ? {
             launchOverrides:
