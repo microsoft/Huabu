@@ -21,6 +21,7 @@ on:
       - assets/**
       - packages/**
       - external/**
+      - scripts/build-web.mjs
       - scripts/start-web.mjs
       - scripts/test-web-container.mjs
 
