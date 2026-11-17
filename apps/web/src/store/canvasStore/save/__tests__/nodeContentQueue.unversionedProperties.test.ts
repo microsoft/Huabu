@@ -16,7 +16,7 @@ import {
   getNodeContent,
   putNodeContent,
 } from '@/api/canvas';
-import { toast } from '@/components/Common/Toast';
+import { dismissToast, toast } from '@/components/Common/Toast';
 
 import { createNodeContentQueue } from '../nodeContentQueue';
 
@@ -37,6 +37,7 @@ vi.mock('@/components/Common/Toast', () => ({
 const putMock = putNodeContent as unknown as Mock;
 const getMock = getNodeContent as unknown as Mock;
 const toastMock = toast as unknown as Mock;
+const dismissMock = dismissToast as unknown as Mock;
 
 const stale = (extra: { propertiesApplied?: boolean } = {}) =>
   new CanvasConflictError({
@@ -123,6 +124,7 @@ beforeEach(() => {
   putMock.mockReset();
   getMock.mockReset();
   toastMock.mockReset();
+  dismissMock.mockReset();
 });
 
 describe('a property edit', () => {
@@ -248,6 +250,46 @@ describe('a property edit', () => {
     expect(toastMock).toHaveBeenCalledTimes(1);
     await queue.flushNow('c1', 'n1').catch(() => undefined);
     expect(putMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('changed in the store for a frozen node keeps the conflict and its choice when its save fails', async () => {
+    const { queue, edit } = setup();
+    toastMock.mockReturnValue('conflict-toast');
+    putMock.mockRejectedValueOnce(stale());
+    getMock.mockResolvedValueOnce(server({ content: 'theirs', rev: 'rev-x' }));
+    edit({ content: 'mine' });
+    await queue.flushNow('c1', 'n1').catch(() => undefined);
+    expect(toastMock).toHaveBeenCalledTimes(1);
+    dismissMock.mockClear();
+
+    // An undo of a property edit while the conflict is open; offline.
+    putMock.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    edit({ properties: { Venue: 'UIST', Year: 2025 } });
+    await queue.flushNow('c1', 'n1').catch(() => undefined);
+    expect(putMock.mock.calls[1][2]).toEqual({
+      nodeType: 'note',
+      properties: { Year: 2025 },
+      pageId: 'page-1',
+    });
+    // No second toast, and the Keep mine / Load latest one is still there.
+    expect(toastMock).toHaveBeenCalledTimes(1);
+    expect(dismissMock).not.toHaveBeenCalled();
+    expect([...queue.pendingFields('n1')].sort()).toEqual([
+      'content',
+      'properties',
+    ]);
+
+    // Keep mine sends the body, and the property that is still unsaved.
+    putMock.mockResolvedValueOnce(saved('rev-2'));
+    toastMock.mock.calls[0][1].secondaryAction.onClick();
+    await tick();
+    await queue.waitForIdle();
+    expect(putMock.mock.calls[2][2]).toMatchObject({
+      content: 'mine',
+      expectRev: 'rev-other',
+      properties: { Year: 2025 },
+    });
+    expect(queue.pendingNodeIds()).toEqual([]);
   });
 
   it('that genuinely fails is reported to its caller, changes nothing and records no body failure', async () => {

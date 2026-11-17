@@ -1164,6 +1164,19 @@ export function createNodeContentQueue(opts: {
         generations.get(nodeId) !== generation
       )
         return;
+      // A node frozen by a body conflict only sends its properties. When
+      // that fails, the conflict and its toast stay the record of the node:
+      // the properties are still queued and go out with the next save.
+      if (
+        frozen.has(nodeId) &&
+        !(
+          err instanceof CanvasConflictError &&
+          err.code === 'NODE_CONTENT_CONFLICT'
+        )
+      ) {
+        console.error('Node property save failed:', nodeId, err);
+        throw err;
+      }
       failures.set(nodeId, { canvasId, error: err });
       if (err instanceof NodeDuplicateFilesError) {
         notifyDuplicate(nodeId, err);
