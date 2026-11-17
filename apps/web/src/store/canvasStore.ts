@@ -1213,6 +1213,20 @@ function ownedChildSpaces(
   );
 }
 
+/** A question node that already carries a conversation, not a blank draft. */
+function questionHasConversation(node: Node): boolean {
+  const data = (node.data ?? {}) as Record<string, unknown>;
+  return (
+    (node.type === 'question' || data.type === 'question') &&
+    typeof data.threadId === 'string' &&
+    !!data.threadId &&
+    (data.bindingState === 'bound' ||
+      data.status === 'done' ||
+      data.status === 'error' ||
+      data.status === 'running')
+  );
+}
+
 const canvasEvents = createCanvasEventBuffer();
 
 /**
@@ -4859,6 +4873,19 @@ const useCanvasStore = create<RFState>()(
         ];
       };
       const copied = taken(nodes, edges);
+      // A pasted Agent node gets its history by forking the conversation,
+      // which the server does not offer yet. Cutting one would leave only a
+      // copy with no history, so it is refused like a child Space.
+      if (
+        copied.some(
+          (item) => 'position' in item && questionHasConversation(item),
+        )
+      ) {
+        toast(t('spaceHierarchy.cutConversationUnsupported'), {
+          tone: 'warning',
+        });
+        return;
+      }
       // Nothing is removed until it is safely on the clipboard.
       if (!(await get().copySelectedNodes())) {
         toast(t('files.copyFailed'), { tone: 'danger' });
@@ -4906,17 +4933,9 @@ const useCanvasStore = create<RFState>()(
       const prepared: Node[] = [];
       for (const node of clipboardNodes) {
         const data = (node.data ?? {}) as Record<string, unknown>;
-        const isQuestion = node.type === 'question' || data.type === 'question';
         const threadId =
           typeof data.threadId === 'string' ? data.threadId : undefined;
-        const status = data.status;
-        const hasConversation =
-          isQuestion &&
-          !!threadId &&
-          (data.bindingState === 'bound' ||
-            status === 'done' ||
-            status === 'error' ||
-            status === 'running');
+        const hasConversation = !!threadId && questionHasConversation(node);
         if (hasConversation) {
           const dstThreadId = createId('thread');
           forkTasks.push({ srcThreadId: threadId, dstThreadId });

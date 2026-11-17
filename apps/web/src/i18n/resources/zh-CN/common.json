@@ -768,6 +768,7 @@
     "collect": "收纳为子 Space（在这里保留入口）",
     "childEntry": "子 Space",
     "cutSelectionChanged": "复制过程中选中的内容发生了变化，所以没有移除任何内容。请重新剪切。",
+    "cutConversationUnsupported": "带有对话的 Agent 节点暂时不能剪切，因为粘贴后对话记录无法恢复。请先取消选中它，或直接拖动。",
     "cutEntryUnsupported": "子 Space 不能剪切。请先取消选中它，或用它自己的操作来移动。",
     "deleteEntrySeparately": "请先逐个确认删除子 Space，再删除这组选中内容。",
     "ownershipUnavailable": "Space 归属信息尚不可用，正在刷新；请加载完成后重试。",

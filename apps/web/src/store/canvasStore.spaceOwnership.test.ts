@@ -257,6 +257,24 @@ it('cuts an ordinary selection by copying it and then removing it, but not durin
   );
   copy.mockClear();
 
+  // An Agent node with a conversation cannot get its history back on paste.
+  const agent = {
+    ...note,
+    id: 'cut-agent',
+    type: 'question',
+    data: { threadId: 'thread-1', status: 'done' },
+  };
+  useCanvasStore.getState()._setStateNoAutosave({ nodes: [note, agent] });
+  vi.mocked(notifications.toast).mockClear();
+  await useCanvasStore.getState().cutSelectedNodes();
+  expect(copy).not.toHaveBeenCalled();
+  expect(useCanvasStore.getState().nodes).toHaveLength(2);
+  expect(notifications.toast).toHaveBeenCalledExactlyOnceWith(
+    expect.stringContaining('conversation cannot be cut'),
+    { tone: 'warning' },
+  );
+  useCanvasStore.getState()._setStateNoAutosave({ nodes: [note] });
+
   // A node edited while the write was pending was not copied in that form.
   copy.mockImplementationOnce(async () => {
     useCanvasStore.getState()._setStateNoAutosave({

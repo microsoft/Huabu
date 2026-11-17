@@ -768,6 +768,7 @@
     "collect": "Collect as a child Space (keeps an entry here)",
     "childEntry": "Child Space",
     "cutSelectionChanged": "The selection changed while it was being copied, so nothing was removed. Cut again to remove it.",
+    "cutConversationUnsupported": "An Agent node with a conversation cannot be cut yet, because its history would not come back on paste. Deselect it, or drag it instead.",
     "cutEntryUnsupported": "A child Space cannot be cut. Deselect it, or move it with its own actions.",
     "deleteEntrySeparately": "Delete child Spaces individually with confirmation before deleting this selection.",
     "ownershipUnavailable": "Space ownership is not available yet. Refreshing; retry once it has loaded.",
