@@ -2131,3 +2131,47 @@ describe('a move made in a container the node has left', () => {
     await vi.advanceTimersByTimeAsync(5_000);
   });
 });
+
+describe('a Space that is not loaded', () => {
+  it('sends nothing for edits made while the Space is loading; they are replaced by the load', async () => {
+    state()._setStateNoAutosave({ isLoading: true });
+    moveHere(X, 500);
+    recolourHere(Y, 'blue');
+    state().patchNodeSilent(X, { pinnedForTest: 'yes' });
+    state().deleteNodes([Y]);
+    state().undo();
+    await vi.advanceTimersByTimeAsync(3_000);
+    // The page shows them, as it did before structure was sent by command …
+    expect(node(X).position).toEqual({ x: 500, y: 0 });
+    // … and nothing was sent for them.
+    expect(own).toHaveLength(0);
+    expect(hasUnsavedCanvasEdits()).toBe(false);
+
+    // The load that was under way brings the server's Space.
+    await state().loadCanvas(SPACE);
+    expect(node(X).position).toEqual({ x: 0, y: 0 });
+    expect(own).toHaveLength(0);
+    // From here on edits are sent.
+    moveHere(X, 700);
+    expect(own).toHaveLength(1);
+  });
+
+  it('sends nothing for a Space whose first load failed, until a load succeeds', async () => {
+    api.getCanvas.mockRejectedValueOnce(new Error('offline'));
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    await state().loadCanvas('space-other');
+    error.mockRestore();
+    expect(state().canvasId).toBe('space-other');
+    expect(state().isLoading).toBe(false);
+    state()._setStateNoAutosave({ nodes: [note(X, 0, 0)] });
+    moveHere(X, 500);
+    state().patchNodeSilent(X, { pinnedForTest: 'yes' });
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(own).toHaveLength(0);
+
+    await state().loadCanvas('space-other');
+    moveHere(X, 700);
+    expect(own).toHaveLength(1);
+    expect(own[0].request.commands).toEqual([moveCommand(X, 700)]);
+  });
+});

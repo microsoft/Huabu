@@ -76,7 +76,7 @@ beforeEach(() => {
     nodes: [],
     edges: [],
     version: 1,
-    isLoading: true,
+    isLoading: false,
   });
 });
 

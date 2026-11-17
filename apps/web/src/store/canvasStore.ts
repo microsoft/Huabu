@@ -1440,7 +1440,7 @@ function reportMeasuredHeights(
   savedNodeId?: string,
 ): void {
   const state = useCanvasStore.getState();
-  if (!state.canvasId) return;
+  if (!spaceAcceptsEdits(state.canvasId)) return;
   const wanted = new Set(nodeIds);
   if (wanted.size === 0) return;
   const unsaved = new Set(nodeContentQueue.pendingNodeIds());
@@ -1550,7 +1550,7 @@ function reportMeasuredSizes(
   savedNodeId?: string,
 ): void {
   const state = useCanvasStore.getState();
-  if (!state.canvasId || state.isLoading || !selectCanWriteCanvas(state))
+  if (!spaceAcceptsEdits(state.canvasId) || !selectCanWriteCanvas(state))
     return;
   const wanted = new Set(nodeIds);
   if (wanted.size === 0) return;
@@ -1693,6 +1693,29 @@ async function persistFrameHeaderMigration(
  * version it has applied.
  */
 let syncLineage: { canvasId: string; lineage: string } | null = null;
+
+/**
+ * The Space the store was switched to whose load has not succeeded (it is
+ * under way, or it failed). What the page shows for it is not the server's
+ * Space, so nothing is sent for it.
+ */
+let spaceAwaitingFirstLoad: string | null = null;
+
+/**
+ * Whether edits to `canvasId` are sent to the server: it is the open Space,
+ * it has been loaded, and no load of it is replacing the page right now.
+ *
+ * An edit made while this is false changes this page only and is **dropped,
+ * not queued**: the load that ends the state replaces what the page shows
+ * with the server's Space. This is what the whole-Space autosave did (it
+ * skipped while `isLoading`); nothing is sent then — no command batch, no
+ * gesture prelude, no undo/redo restore, no measurement report.
+ */
+function spaceAcceptsEdits(canvasId: string): boolean {
+  if (!canvasId || canvasId === spaceAwaitingFirstLoad) return false;
+  const state = useCanvasStore.getState();
+  return state.canvasId === canvasId && !state.isLoading;
+}
 
 let syncRejectedToastId: string | null = null;
 let afterCanvasResync: (() => void) | null = null;
@@ -2113,7 +2136,7 @@ function submitGestureTicks(edgesBefore: readonly Edge[]): void {
   const baseline = syncGestureBaseline;
   const state = useCanvasStore.getState();
   endSyncGesture();
-  if (!baseline || !state.canvasId) return;
+  if (!baseline || !spaceAcceptsEdits(state.canvasId)) return;
   const { commands } = commandsForLocalDiff(
     baseline as unknown as UnitNode[],
     state.nodes as unknown as UnitNode[],
@@ -2152,6 +2175,7 @@ export function setCanvasSyncLineageForTests(
 export function resetCanvasSyncForTests(): void {
   browserSync.reset();
   syncLineage = null;
+  spaceAwaitingFirstLoad = null;
   syncGestureBaseline = null;
   gestureWithheldParents.clear();
   heightsAwaitingContent.clear();
@@ -3073,7 +3097,8 @@ function restoreFromHistory(direction: 'undo' | 'redo'): void {
   const action: RecentAction = {
     action: direction === 'undo' ? 'canvas_undone' : 'canvas_redone',
   };
-  const plan = canvasId
+  // An undo made on a Space that is not loaded changes this page only.
+  const plan = spaceAcceptsEdits(canvasId)
     ? planHistoryRestore(canvasId, { nodes, edges }, snapshotTarget)
     : null;
   // No command list reproduces the snapshot exactly (the engine fits a
@@ -3272,7 +3297,9 @@ const useCanvasStore = create<RFState>()(
       // A `ui` batch is persisted by sending these same commands to the
       // server, so the ids it creates must be decided here.
       const closesGesture = resolvedSource === 'ui' && !localOnly;
-      const queueable = closesGesture && !!state.canvasId;
+      // Nothing is sent for a Space that is not loaded: the batch then
+      // changes this page only, like one made before a canvas id is set.
+      const queueable = closesGesture && spaceAcceptsEdits(state.canvasId);
       const commands = queueable ? withClientIds(inputCommands) : inputCommands;
       const forServer = queueable
         ? commandsForServer(
@@ -4338,6 +4365,7 @@ const useCanvasStore = create<RFState>()(
           .loadForCanvas(targetId, { chatThreadId });
         canvasHistoryManager.activate(targetId, options?.resetHistory);
         if (canvasId && targetId !== get().canvasId) {
+          spaceAwaitingFirstLoad = targetId;
           useToolStore.getState().resetForCanvasSwitch();
           get()._setStateNoAutosave({
             canvasId: targetId,
@@ -4473,6 +4501,7 @@ const useCanvasStore = create<RFState>()(
           ? { canvasId: targetId, lineage: loadedBasis.lineage }
           : null;
         browserSync.adoptedServerState(targetId);
+        if (spaceAwaitingFirstLoad === targetId) spaceAwaitingFirstLoad = null;
         heightsAwaitingContent.clear();
         reportedHeightKeys.clear();
         sizesAwaitingContent.clear();
@@ -6115,7 +6144,7 @@ const useCanvasStore = create<RFState>()(
       // Structure fields go to the server as the commands that reproduce
       // them. Content fields have their own save, and read-model hints are
       // only shown: a patch that carries nothing else sends nothing.
-      const commands = get().canvasId
+      const commands = spaceAcceptsEdits(get().canvasId)
         ? commandsReproducing(get().canvasId, before, {
             nodes,
             edges: before.edges,

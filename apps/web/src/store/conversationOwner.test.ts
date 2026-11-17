@@ -415,7 +415,7 @@ describe('conversation owner routing', () => {
       nodes: [],
       edges: [],
       version: 1,
-      isLoading: true,
+      isLoading: false,
     });
     let rejectCreation: ((error: Error) => void) | undefined;
     postCanvasExecute.mockImplementationOnce(
