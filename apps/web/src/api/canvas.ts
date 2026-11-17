@@ -180,6 +180,11 @@ export async function createCanvas(
   });
 }
 
+/**
+ * Load a Space. `null` means the server has no such Space (404); any other
+ * failure — the network, a 5xx — is thrown, so a caller can tell a Space
+ * that is gone from one that could not be reached just now.
+ */
 export async function getCanvas(
   canvasId: string,
 ): Promise<GetCanvasResponse | null> {
@@ -189,8 +194,7 @@ export async function getCanvas(
     });
   } catch (error) {
     if (error instanceof ApiError && error.status === 404) return null;
-    console.error('Failed to get canvas:', error);
-    return null;
+    throw error;
   }
 }
 

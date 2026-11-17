@@ -11,7 +11,10 @@
  *   property units it changed, keep back the ones this page holds, and on
  *   `finish` release the holds of this page's own confirmed batch.
  * - `deferReload` — a whole-Space reload is wanted (version gap, snapshot
- *   mismatch, rejected command): run it only once nothing is left to send.
+ *   mismatch, rejected command, an update that never arrived): run it only
+ *   once nothing is left to send, one at a time, and again — after a backoff
+ *   — when its load failed. A wanted reload is given up only by a load that
+ *   succeeded or by leaving the Space.
  *
  * **Read version.** A batch states the Space version this page had applied
  * when the batch was made — taken at `submit`, which runs in the same task
@@ -73,6 +76,21 @@ type UnitEdge = { id: string } & Record<string, unknown>;
  */
 export const ECHO_TIMEOUT_MS = 8_000;
 
+/** Waits between attempts of a wanted reload whose load keeps failing. */
+export const RELOAD_RETRY = { initialMs: 500, maxMs: 10_000 } as const;
+
+/**
+ * What became of a reload:
+ * - `loaded` — the Space was loaded (or there is nothing left to load: the
+ *   user left it);
+ * - `held` — not started; its owner asks again (`deferReload`) when what
+ *   holds it is over;
+ * - `failed` — the load failed; it is tried again after a backoff;
+ * - `again` — the load was overtaken by this page's own work and its result
+ *   was not used; it is asked for again at once.
+ */
+export type ReloadOutcome = 'loaded' | 'held' | 'failed' | 'again';
+
 export interface BrowserSyncDeps {
   send: SendQueueOptions['send'];
   clientId: string;
@@ -109,8 +127,11 @@ export interface BrowserSyncDeps {
     entry: SendQueueEntry;
     outcome: SendOutcome;
   }) => void;
-  /** Adopt the server's whole Space; called only with an empty queue. */
-  reload: (canvasId: string) => void;
+  /**
+   * Adopt the server's whole Space; called only with an empty queue and
+   * never while an earlier call for the Space is unsettled.
+   */
+  reload: (canvasId: string) => ReloadOutcome | Promise<ReloadOutcome>;
   /** Units saved by another writer, never held by the queue. */
   ignoreUnit?: (unit: string) => boolean;
   /** Overrides {@link ECHO_TIMEOUT_MS}. */
@@ -196,6 +217,13 @@ export function createBrowserSync(deps: BrowserSyncDeps): BrowserSync {
     { canvasId: string; timer: ReturnType<typeof setTimeout> }
   >();
   const reloadWanted = new Set<string>();
+  /** Spaces whose reload is running. */
+  const reloading = new Set<string>();
+  /** Failed loads in a row per Space, and the wait before the next attempt. */
+  const reloadRetries = new Map<
+    string,
+    { failures: number; timer: ReturnType<typeof setTimeout> | null }
+  >();
   const settleHooks = new Map<
     string,
     Array<{ offset: number; run: NonNullable<SubmitInput['onSettled']> }>
@@ -317,10 +345,61 @@ export function createBrowserSync(deps: BrowserSyncDeps): BrowserSync {
     sweepKeptBack();
   };
 
+  const forgetReloadRetry = (canvasId: string): void => {
+    const retry = reloadRetries.get(canvasId);
+    if (retry?.timer) clearTimeout(retry.timer);
+    reloadRetries.delete(canvasId);
+  };
+
   const runReloadIfIdle = (canvasId: string): void => {
-    if (!reloadWanted.has(canvasId) || queue.hasPending(canvasId)) return;
+    if (
+      !reloadWanted.has(canvasId) ||
+      queue.hasPending(canvasId) ||
+      reloading.has(canvasId) ||
+      reloadRetries.get(canvasId)?.timer
+    )
+      return;
     reloadWanted.delete(canvasId);
-    deps.reload(canvasId);
+    reloading.add(canvasId);
+    let started: ReloadOutcome | Promise<ReloadOutcome>;
+    try {
+      started = deps.reload(canvasId);
+    } catch {
+      started = 'failed';
+    }
+    const settle = (outcome: ReloadOutcome): void => {
+      // `reset` or a manual load ended this attempt's bookkeeping.
+      if (!reloading.delete(canvasId)) return;
+      if (outcome === 'failed') {
+        // Nothing else asks again: after a refused command the version is
+        // in step, so no later event would notice the page is behind.
+        reloadWanted.add(canvasId);
+        const retry = reloadRetries.get(canvasId) ?? {
+          failures: 0,
+          timer: null,
+        };
+        const wait = Math.min(
+          RELOAD_RETRY.initialMs * 2 ** retry.failures,
+          RELOAD_RETRY.maxMs,
+        );
+        retry.failures += 1;
+        retry.timer = setTimeout(() => {
+          retry.timer = null;
+          runReloadIfIdle(canvasId);
+        }, wait);
+        reloadRetries.set(canvasId, retry);
+        return;
+      }
+      forgetReloadRetry(canvasId);
+      if (outcome === 'again') reloadWanted.add(canvasId);
+      // Also a reload that became wanted while this one was running.
+      if (outcome !== 'held') runReloadIfIdle(canvasId);
+    };
+    if (typeof started === 'string') settle(started);
+    else
+      void started.then(settle, () => {
+        settle('failed');
+      });
   };
 
   const onSettled = (entry: SendQueueEntry, outcome: SendOutcome): void => {
@@ -573,6 +652,7 @@ export function createBrowserSync(deps: BrowserSyncDeps): BrowserSync {
         awaitingEcho.delete(entryId);
       }
       reloadWanted.delete(canvasId);
+      forgetReloadRetry(canvasId);
       changed();
     },
 
@@ -592,6 +672,9 @@ export function createBrowserSync(deps: BrowserSyncDeps): BrowserSync {
       for (const pending of awaitingEcho.values()) clearTimeout(pending.timer);
       awaitingEcho.clear();
       reloadWanted.clear();
+      reloading.clear();
+      for (const canvasId of [...reloadRetries.keys()])
+        forgetReloadRetry(canvasId);
       settleHooks.clear();
       changed();
     },

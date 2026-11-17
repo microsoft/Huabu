@@ -133,7 +133,7 @@ async function renderAt(
   state: unknown = null,
 ) {
   const selectNodes = vi.fn();
-  const loadCanvas = vi.fn(async () => undefined);
+  const loadCanvas = vi.fn(async () => 'loaded' as const);
   useCanvasStore.setState({
     canvasId: CANVAS_ID,
     canvasNotFound: false,

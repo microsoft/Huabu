@@ -41,6 +41,7 @@ import useCanvasStore, {
   resetCanvasSyncForTests,
   setCanvasSyncLineageForTests,
 } from './canvasStore';
+import { RELOAD_RETRY } from './canvasStore/sync/browserSync';
 import { DEFAULT_SEND_RETRY } from './canvasStore/sync/sendQueue';
 import { useCanvasSyncStatusStore } from './canvasStore/sync/syncStatus';
 import {
@@ -2173,5 +2174,50 @@ describe('a Space that is not loaded', () => {
     moveHere(X, 700);
     expect(own).toHaveLength(1);
     expect(own[0].request.commands).toEqual([moveCommand(X, 700)]);
+  });
+});
+
+describe('a wanted reload whose load fails', () => {
+  it('keeps the page as it is, is asked for again after a backoff, and runs what follows a reload only once it has loaded', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    // Another page moved X; this page missed the update.
+    remote([moveCommand(X, 900)]);
+    api.getCanvas.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    const reloaded = vi.fn();
+    requestCanvasResync(SPACE, reloaded);
+    await flush();
+    expect(api.getCanvas).toHaveBeenCalledTimes(1);
+    // Not replaced by an empty or a "not found" page, and not reported done.
+    expect(reloaded).not.toHaveBeenCalled();
+    expect(state().canvasNotFound).toBe(false);
+    expect(state().isLoading).toBe(false);
+    expect(node(X).position).toEqual({ x: 0, y: 0 });
+    expect(state().version).toBe(1);
+
+    await vi.advanceTimersByTimeAsync(RELOAD_RETRY.initialMs);
+    expect(api.getCanvas).toHaveBeenCalledTimes(2);
+    expect(reloaded).toHaveBeenCalledTimes(1);
+    expect(node(X).position).toEqual({ x: 900, y: 0 });
+    expect(state().version).toBe(2);
+    // Nothing asks a third time.
+    await vi.advanceTimersByTimeAsync(RELOAD_RETRY.maxMs * 3);
+    expect(api.getCanvas).toHaveBeenCalledTimes(2);
+    error.mockRestore();
+  });
+
+  it('is asked for again after a refused command too, where no later event would', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    // Another page deletes X while this page's move of it is on its way.
+    moveHere(X, 500);
+    const deletion = remote([{ type: 'DELETE_NODES', nodeIds: [X as never] }]);
+    deliver(deletion, 'ui');
+    api.getCanvas.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    await answer(0);
+    await flush();
+    expect(api.getCanvas).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(RELOAD_RETRY.initialMs);
+    expect(api.getCanvas).toHaveBeenCalledTimes(2);
+    expect(state().nodes.map((n) => n.id)).toEqual([Y]);
+    error.mockRestore();
   });
 });

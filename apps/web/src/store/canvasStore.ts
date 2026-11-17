@@ -160,6 +160,7 @@ import { createResizePreviewController } from './canvasStore/slices/resizePrevie
 import {
   createBrowserSync,
   type PreparedRemote,
+  type ReloadOutcome,
 } from './canvasStore/sync/browserSync';
 import { restoreChanged } from './canvasStore/sync/historyRestore';
 import { deriveHeldKeys, nodeUnitKey } from './canvasStore/sync/inFlight';
@@ -1002,7 +1003,7 @@ type RFState = {
   loadCanvas: (
     canvasId?: string,
     options?: { resetHistory?: boolean },
-  ) => Promise<void>;
+  ) => Promise<LoadCanvasResult>;
   switchCanvas: (canvasId: string) => Promise<void>;
 
   /**
@@ -1695,6 +1696,16 @@ async function persistFrameHeaderMigration(
 let syncLineage: { canvasId: string; lineage: string } | null = null;
 
 /**
+ * How a load of a Space ended.
+ * - `loaded` — the page shows the server's Space.
+ * - `not-found` — the server has no such Space.
+ * - `failed` — the Space could not be fetched or prepared; the page shows
+ *   what it showed before (for a first load: the not-found surface).
+ * - `superseded` — the user moved to another Space meanwhile.
+ */
+export type LoadCanvasResult = 'loaded' | 'not-found' | 'failed' | 'superseded';
+
+/**
  * The Space the store was switched to whose load has not succeeded (it is
  * under way, or it failed). What the page shows for it is not the server's
  * Space, so nothing is sent for it.
@@ -1806,18 +1817,28 @@ const browserSync = createBrowserSync({
   },
   reload: (canvasId) => {
     const state = useCanvasStore.getState();
-    if (state.canvasId !== canvasId) return;
+    // The user left the Space; the next visit loads it anyway.
+    if (state.canvasId !== canvasId) return 'loaded';
     // A reload would drop a body the user is still typing. It is not given
     // up: it runs as soon as that text has been saved.
     if (nodeContentQueue.pendingNodeIds().length > 0) {
       holdReloadForContent(canvasId);
-      return;
+      return 'held';
     }
     releaseReloadHeldForContent();
     const done = afterCanvasResync;
-    void state
+    return state
       .loadCanvas(canvasId, { resetHistory: true })
-      .then(() => done?.());
+      .then((result): ReloadOutcome => {
+        // `failed` is asked for again by the caller, after a backoff.
+        if (result === 'failed') return 'failed';
+        // What follows a reload follows a Space that was in fact loaded.
+        if (result === 'loaded') {
+          done?.();
+          announceDiscardedReload(canvasId);
+        }
+        return 'loaded';
+      });
   },
   ignoreUnit: isContentUnit,
 });
@@ -2078,8 +2099,28 @@ async function reloadDiscardingUnsent(
     }
   }
   const done = afterCanvasResync;
-  await useCanvasStore.getState().loadCanvas(canvasId, { resetHistory: true });
+  const result = await useCanvasStore
+    .getState()
+    .loadCanvas(canvasId, { resetHistory: true });
+  if (result === 'failed') {
+    // The unsent edits are given up, but the server's Space could not be
+    // fetched just now: keep asking, and say so once it has been loaded.
+    discardedReloadToAnnounce = canvasId;
+    browserSync.deferReload(canvasId);
+    return;
+  }
+  if (result !== 'loaded') return;
   done?.();
+  if (useCanvasStore.getState().canvasId === canvasId)
+    toast(t('canvasSync.reloadedDiscarded'), { tone: 'info' });
+}
+
+/** A Space whose "reloaded, unsent changes discarded" notice is still owed. */
+let discardedReloadToAnnounce: string | null = null;
+
+function announceDiscardedReload(canvasId: string): void {
+  if (discardedReloadToAnnounce !== canvasId) return;
+  discardedReloadToAnnounce = null;
   if (useCanvasStore.getState().canvasId === canvasId)
     toast(t('canvasSync.reloadedDiscarded'), { tone: 'info' });
 }
@@ -2176,6 +2217,7 @@ export function resetCanvasSyncForTests(): void {
   browserSync.reset();
   syncLineage = null;
   spaceAwaitingFirstLoad = null;
+  discardedReloadToAnnounce = null;
   syncGestureBaseline = null;
   gestureWithheldParents.clear();
   heightsAwaitingContent.clear();
@@ -4355,8 +4397,8 @@ const useCanvasStore = create<RFState>()(
         pendingRevealNodeIds: [],
         canvasNotFound: false,
       });
+      const targetId = canvasId ?? get().canvasId;
       try {
-        const targetId = canvasId ?? get().canvasId;
         // Loading a Space only restores an existing legacy conversation.
         // Creating a new Chat is an explicit action requiring Agent defaults.
         const chatThreadId = useChatStore.getState().threadMap[targetId];
@@ -4373,7 +4415,7 @@ const useCanvasStore = create<RFState>()(
           });
         }
         const response = await getCanvas(targetId);
-        if (get().canvasId !== targetId) return;
+        if (get().canvasId !== targetId) return 'superseded';
         if (!response) {
           console.warn('Canvas not found:', targetId);
           canvasHistoryManager.clear();
@@ -4383,7 +4425,7 @@ const useCanvasStore = create<RFState>()(
             ingestionByNodeId: {},
             pendingForkThreadIds: {},
           });
-          return;
+          return 'not-found';
         }
 
         set({
@@ -4458,7 +4500,7 @@ const useCanvasStore = create<RFState>()(
           warmedNodes === warmedCanvas.nodes
             ? warmedCanvas.edges
             : rerouteAllEdges(warmedNodes, warmedCanvas.edges);
-        if (get().canvasId !== targetId) return;
+        if (get().canvasId !== targetId) return 'superseded';
         const loadedVersion = response.version;
         let headerSaveFailed = false;
         if (warmedNodes !== warmedCanvas.nodes) {
@@ -4473,7 +4515,7 @@ const useCanvasStore = create<RFState>()(
               warmedCanvas.nodes,
               warmedNodes,
             ));
-          if (get().canvasId !== targetId) return;
+          if (get().canvasId !== targetId) return 'superseded';
           if (migrated) {
             headerMigrationTried.add(targetId);
             try {
@@ -4486,7 +4528,7 @@ const useCanvasStore = create<RFState>()(
           warmedNodes = loadedNodes;
           warmedEdges = loadedEdges;
         }
-        if (get().canvasId !== targetId) return;
+        if (get().canvasId !== targetId) return 'superseded';
         // An authoritative node replacement invalidates every transient that
         // points at the previous in-memory geometry. This applies both to a
         // different-canvas switch and to a same-canvas SSE gap/snapshot heal:
@@ -4569,9 +4611,26 @@ const useCanvasStore = create<RFState>()(
           if (!shouldBackfillNodeLabel(node)) continue;
           preprocessQueue.schedule(node);
         }
+        return 'loaded';
       } catch (error) {
         console.error('Failed to load canvas:', error);
-        set({ isLoading: false });
+        if (get().canvasId !== targetId) return 'superseded';
+        if (spaceAwaitingFirstLoad === targetId) {
+          // Nothing of this Space is on the page, so there is nothing to
+          // keep showing: the same surface as for a Space that is gone.
+          canvasHistoryManager.clear();
+          set({
+            isLoading: false,
+            canvasNotFound: true,
+            ingestionByNodeId: {},
+            pendingForkThreadIds: {},
+          });
+        } else {
+          // The page keeps the Space it shows; whoever asked decides
+          // whether to ask again.
+          set({ isLoading: false });
+        }
+        return 'failed';
       }
     },
 
