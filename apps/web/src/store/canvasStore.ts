@@ -4810,7 +4810,7 @@ const useCanvasStore = create<RFState>()(
     },
 
     cutSelectedNodes: () => {
-      const { nodes, edges } = get();
+      const { nodes } = get();
       const nodeIds = nodes.filter((n) => n.selected).map((n) => n.id);
       // A stroke-level sketch selection is owned by StrokeSelectionToolbar.
       if (
@@ -4825,11 +4825,11 @@ const useCanvasStore = create<RFState>()(
         toast(t('spaceHierarchy.cutEntryUnsupported'), { tone: 'warning' });
         return;
       }
+      // Only what reaches the clipboard is removed. Deleting the nodes takes
+      // their edges with them; a selected edge between nodes that stay is
+      // not copied, so it stays too.
       get().copySelectedNodes();
-      get().deleteNodes(
-        nodeIds,
-        edges.filter((edge) => edge.selected).map((edge) => edge.id),
-      );
+      get().deleteNodes(nodeIds);
     },
 
     pasteNodes: (flowPosition, clipboardNodes, clipboardEdges, srcCanvasId) => {

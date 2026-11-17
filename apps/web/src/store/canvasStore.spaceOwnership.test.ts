@@ -245,10 +245,20 @@ it('cuts an ordinary selection by copying it and then removing it, but not durin
   expect(copy).not.toHaveBeenCalled();
   expect(useCanvasStore.getState().nodes).toHaveLength(1);
 
+  // A selected edge between nodes that stay never reaches the clipboard, so
+  // cut must leave it alone.
+  const stay = (id: string) => ({ ...note, id, selected: false });
+  const kept = { id: 'kept', source: 'a', target: 'b', selected: true };
+  const taken = { id: 'taken', source: 'a', target: note.id };
+  useCanvasStore.getState()._setStateNoAutosave({
+    nodes: [note, stay('a'), stay('b')],
+    edges: [kept, taken],
+  });
   useGesturePreviewStore.setState({ sketchStrokeSelection: {} });
   useCanvasStore.getState().cutSelectedNodes();
   expect(copy).toHaveBeenCalledOnce();
-  expect(useCanvasStore.getState().nodes).toEqual([]);
+  expect(useCanvasStore.getState().nodes.map((n) => n.id)).toEqual(['a', 'b']);
+  expect(useCanvasStore.getState().edges.map((e) => e.id)).toEqual(['kept']);
   await canvasHistoryManager.waitForDeletes('parent');
 });
 

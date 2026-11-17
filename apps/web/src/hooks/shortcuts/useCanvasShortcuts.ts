@@ -538,6 +538,9 @@ export function useCanvasShortcuts(
         // Typing surfaces keep native "select all text".
         if (editable) return;
         e.preventDefault();
+        // Whole nodes replace a stroke-level selection, which would
+        // otherwise keep owning Delete and block cut.
+        useGesturePreviewStore.getState().clearSketchStrokeSelection();
         const { nodes: cur, selectNodes } = useCanvasStore.getState();
         selectNodes(
           cur

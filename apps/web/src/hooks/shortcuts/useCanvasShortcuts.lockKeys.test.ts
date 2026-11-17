@@ -49,6 +49,7 @@ import {
 import { OPEN_SPACE_SHORTCUT_EVENT } from '../../components/Nodes/spacePreview/spaceShortcutEvents';
 import { REQUEST_CREATE_CHILD_SPACE } from '../../components/Space/createChildSpaceAction';
 import { getCombo } from '../../config/shortcuts';
+import { useGesturePreviewStore } from '../../store/gesturePreviewStore';
 import { useToolStore } from '../../store/toolStore';
 import {
   installDesktopInputGuard,
@@ -208,11 +209,15 @@ describe('useCanvasShortcuts catalog key lock', () => {
       { id: 'hidden', hidden: true },
       { id: 'fixed', selectable: false },
     ];
+    useGesturePreviewStore.setState({
+      sketchStrokeSelection: { sketch: ['stroke'] },
+    });
     dispatchCombo('edit.selectAll');
     expect(canvasActions.selectNodes).toHaveBeenCalledExactlyOnceWith(
       ['a', 'b'],
       false,
     );
+    expect(useGesturePreviewStore.getState().sketchStrokeSelection).toEqual({});
   });
 
   it('hands Mod+X to the store, which decides what may be cut', () => {
