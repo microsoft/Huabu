@@ -1350,8 +1350,32 @@ describe('PUT /nodes/:nodeId/content — content CAS', () => {
           ],
         },
       });
-      expect(invalid.statusCode).toBe(200);
-      expect(invalid.json().results[0].applied).toBe(false);
+      // A page does not write a body through execute at all.
+      expect(invalid.statusCode).toBe(400);
+      expect(invalid.json()).toMatchObject({ code: 'UI_BODY_WRITE' });
+      // An agent's attempt reaches the engine, which refuses it for this
+      // node type.
+      const byAgent = await app.inject({
+        method: 'POST',
+        url: '/canvas/c1/execute',
+        payload: {
+          originator: { source: 'agent' },
+          commands: [
+            {
+              type: 'MERGE_NODE_DATA',
+              patches: [
+                {
+                  nodeId: 'ref',
+                  patch: { content: 'type-omitted bypass' },
+                  expectRev: nodeRevisionOf({}),
+                },
+              ],
+            },
+          ],
+        },
+      });
+      expect(byAgent.statusCode).toBe(200);
+      expect(byAgent.json().results[0].applied).toBe(false);
       expect(store.read()?.version).toBe(version);
       expect(store.readNode('ref')).toMatchObject({ content: '' });
     } finally {

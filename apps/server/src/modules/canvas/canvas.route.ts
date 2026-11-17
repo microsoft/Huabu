@@ -53,6 +53,7 @@ import {
 } from './canvas-executor.js';
 import { searchCanvas } from './canvas-search.js';
 import { publishCanvasUpdate } from './canvas-sync.js';
+import { admitExecuteRequest } from './execute-admission.js';
 import { NodeCoverError } from './import-node-src.js';
 import { remapImportedSpace } from './import-space-identity.js';
 import {
@@ -73,10 +74,7 @@ import {
   SpacePreviewSceneError,
 } from './space-preview-scene.js';
 import { currentBasis } from './space-query.js';
-import {
-  assertCurrentCanvasCommands,
-  WorldPreviewMutationError,
-} from './world-preview-policy.js';
+import { WorldPreviewMutationError } from './world-preview-policy.js';
 import { reconcileWorldPreviews } from './world-previews.js';
 import {
   withCanvasMutex,
@@ -88,7 +86,10 @@ import { AgentNodeBindingError } from '../agent/agent-node-binding.js';
 import { agentThreadService } from '../agent/agent-thread.service.js';
 import { readRecentCanvasConversation } from '../agent/recent-conversation.js';
 import { ARTIFACT_URL_REGEX } from '../artifact/utils.js';
-import { getRequestIdentity } from '../identity/request.js';
+import {
+  arrivedWithAgentCredential,
+  getRequestIdentity,
+} from '../identity/request.js';
 import { getPreprocessDispatcher, getProfile } from '../preprocessing/index.js';
 import { stripOfficeparserPreamble } from '../preprocessing/loaders/office-strip.js';
 import {
@@ -120,7 +121,6 @@ import { acquireWorkspaceOperationLease } from '../workspace.js';
 import type { CanvasNodeType } from '@huabu/shared';
 import type {
   ApiResult,
-  CanvasCommand,
   CanvasConflictResponse,
   CanvasSearchEvent,
   CreateCanvasRequest,
@@ -1472,13 +1472,21 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         message: parsed.error.issues[0]?.message ?? 'Invalid request body',
       });
     }
-    if (parsed.data.originator.source === 'system') {
-      return reply.code(403).send({
-        message: 'System command origin is reserved for internal callers',
-      });
+    // Who the request speaks for and whether its commands may run for them
+    // is decided here, once; see `execute-admission.ts`.
+    const admission = admitExecuteRequest({
+      claimedSource: parsed.data.originator.source,
+      viaAgentCredential: arrivedWithAgentCredential(request),
+      commands: parsed.data.commands,
+    });
+    if (!admission.ok) {
+      return reply
+        .code(admission.status)
+        .send({ code: admission.code, message: admission.message });
     }
-    const { commands, originator, runId, operationId, basis, runs } =
-      parsed.data;
+    const { commands } = admission;
+    const { runId, operationId, basis, runs } = parsed.data;
+    const originator = { ...parsed.data.originator, source: admission.source };
     if (runs !== undefined) {
       const problem =
         originator.source !== 'ui'
@@ -1507,15 +1515,6 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       });
     }
     try {
-      assertCurrentCanvasCommands(commands);
-    } catch (error) {
-      if (error instanceof WorldPreviewMutationError) {
-        return reply.code(400).send({ message: error.message });
-      }
-      throw error;
-    }
-
-    try {
       // The thread id comes from the body, so it is attributed only when it
       // names a conversation of this Space; otherwise the batch still
       // applies, unattributed. (Known limitation: this does not prove the
@@ -1526,7 +1525,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         (await agentThreadService.ownsThread(canvasId, claimedThreadId));
       const out = await executeOnServer({
         canvasId,
-        commands: commands as CanvasCommand[],
+        commands,
         originator: attributed ? originator : unattributed,
         ...(claimedThreadId !== undefined ? { claimedThreadId } : {}),
         ...(runId ? { runId } : {}),

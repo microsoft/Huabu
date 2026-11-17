@@ -136,6 +136,7 @@ export {
   type CommandHandlerResult,
   type CommandDefinition,
 } from './commands/index.js';
+export { isAllowedFor } from './commandScope.js';
 
 // ── Frame grid layout (column / row / grid child packing) ───────────────
 // The engine no longer ships a fallback layout for free-form nodes — every

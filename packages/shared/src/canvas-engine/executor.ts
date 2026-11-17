@@ -34,6 +34,7 @@
 
 import { applyStructuredFrameRelayout } from './autoLayout/gridLayout.js';
 import { HANDLERS, COMMAND_META } from './commands/index.js';
+import { isAllowedFor } from './commandScope.js';
 import {
   fitFrameToChildren,
   normalizeTreeOrder,
@@ -155,6 +156,16 @@ export function executeCanvasCommands(
     );
     if (refused !== undefined) {
       commandResults.push({ command: cmd, applied: false, reason: refused });
+      continue;
+    }
+
+    // What this source may issue at all; see `commandScope.ts`.
+    if (!isAllowedFor(source, cmd)) {
+      commandResults.push({
+        command: cmd,
+        applied: false,
+        reason: 'invalid-scope',
+      });
       continue;
     }
 

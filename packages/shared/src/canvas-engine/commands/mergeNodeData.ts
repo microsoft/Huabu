@@ -61,8 +61,8 @@ const mergeNodeData: CommandDefinition<Cmd> = {
         (candidate) => candidate.id === entry.nodeId,
       );
       if (entry.unset?.length) {
-        // A page's way to state a removal; an agent clears with `null`.
-        if (state.source === 'agent') return noop(state, 'invalid-scope');
+        // A page's way to state a removal; an agent clears with `null`
+        // and may not send one (`commandScope.ts`).
         if (!entry.unset.every((key) => typeof key === 'string' && key))
           return noop(state, 'invalid-target');
         // A removal is admitted like a write of the same key.

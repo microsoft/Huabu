@@ -520,21 +520,17 @@ describe('GET /api/rfs/:canvasId/execute/:operationId for another entry point', 
           operationId: OP_1,
           commands: [
             {
-              type: 'CREATE_NODES',
-              nodes: [
-                {
-                  id: 'node-ui',
-                  type: 'note',
-                  position: { x: 900, y: 0 },
-                  data: { label: 'UI' },
-                },
-              ],
+              type: 'SET_NODE_LOCKED',
+              items: [{ nodeId: 'node-1', locked: true }],
             },
           ],
         },
       });
       expect(viaCanvas.statusCode).toBe(200);
-      expect(viaCanvas.json()).toMatchObject({ operationId: OP_1 });
+      expect(viaCanvas.json()).toMatchObject({
+        operationId: OP_1,
+        results: [expect.objectContaining({ applied: true })],
+      });
 
       const lookup = await app.inject({
         method: 'GET',
@@ -798,7 +794,7 @@ describe('POST /api/canvas/:canvasId/execute with a request id', () => {
     nodes: [
       {
         id: 'node-ui',
-        type: 'note',
+        nodeType: 'note',
         position: { x: 900, y: 0 },
         data: { label: 'UI' },
       },

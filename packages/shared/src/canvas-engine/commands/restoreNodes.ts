@@ -17,8 +17,8 @@
  *
  * The command is all-or-nothing: one item that is not admitted refuses the
  * whole command. It is UI-only — not in the agent schema, and refused for
- * an `agent` batch — because only a page's own history can vouch for the
- * snapshot.
+ * an `agent` batch before it gets here (`commandScope.ts`) — because only a
+ * page's own history can vouch for the snapshot.
  *
  * It fits no Frame and reroutes no edge: the snapshot is the state to
  * reach, not a starting point.
@@ -77,7 +77,6 @@ const restoreNodes: CommandDefinition<Cmd> = {
   },
 
   handler(cmd, state) {
-    if (state.source === 'agent') return noop(state, 'invalid-scope');
     const inputNodes: unknown[] = Array.isArray(cmd.nodes) ? cmd.nodes : [];
     const inputEdges: unknown[] = Array.isArray(cmd.edges) ? cmd.edges : [];
     if (inputNodes.length === 0 && inputEdges.length === 0)

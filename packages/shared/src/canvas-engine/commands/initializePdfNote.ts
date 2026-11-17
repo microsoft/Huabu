@@ -25,9 +25,8 @@ const initializePdfNote: CommandDefinition<Cmd> = {
     }
     if (pdf.data.noteNodeId !== undefined) return noop(state, 'invalid-target');
     if (cmd.noteId !== undefined) {
-      // A page's way to agree on the id with the Server; an agent reads it
-      // from the result instead.
-      if (state.source === 'agent') return noop(state, 'invalid-scope');
+      // A page's way to agree on the id with the Server. An agent reads it
+      // from the result instead and may not state one (`commandScope.ts`).
       if (
         typeof cmd.noteId !== 'string' ||
         !cmd.noteId ||

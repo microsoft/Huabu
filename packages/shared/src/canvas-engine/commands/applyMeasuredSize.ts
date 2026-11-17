@@ -42,7 +42,6 @@ const applyMeasuredSize: CommandDefinition<Cmd> = {
   },
 
   handler(cmd, state) {
-    if (state.source === 'agent') return noop(state, 'invalid-scope');
     if (!Array.isArray(cmd.items) || cmd.items.length === 0)
       return noop(state, 'no-op');
 
