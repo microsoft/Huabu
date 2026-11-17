@@ -2,7 +2,8 @@ name: Web container
 
 on:
   schedule:
-    # 08:37 Asia/Shanghai (UTC+8); schedules run from the default branch.
+    # Daily at 00:37 UTC, away from the top-of-hour scheduling peak.
+    # Schedules run from the default branch.
     - cron: '37 0 * * *'
   workflow_dispatch:
   pull_request:
@@ -51,7 +52,9 @@ jobs:
           pull: true
           no-cache-filters: base
           tags: huabu-web:verify
-          build-args: SOURCE_REVISION=${{ github.sha }}
+          build-args: |
+            SOURCE_REVISION=${{ github.sha }}
+            NPM_REGISTRY=https://registry.npmjs.org/
           cache-from: type=gha,scope=web-container
           cache-to: type=gha,mode=max,scope=web-container
           provenance: false
@@ -83,7 +86,9 @@ jobs:
           pull: true
           no-cache-filters: base
           tags: huabu-web:verify
-          build-args: SOURCE_REVISION=${{ github.sha }}
+          build-args: |
+            SOURCE_REVISION=${{ github.sha }}
+            NPM_REGISTRY=https://registry.npmjs.org/
           cache-from: type=gha,scope=web-container
           cache-to: type=gha,mode=max,scope=web-container
           provenance: false

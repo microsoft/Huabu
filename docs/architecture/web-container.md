@@ -4,7 +4,7 @@ The root `Dockerfile` builds the standalone web app for Linux. Its runtime conta
 
 ## Daily image
 
-[Web container](../../.github/workflows/container.yml) builds `main` every day at **08:37 Asia/Shanghai (00:37 UTC)** and supports manual runs from `main`. GitHub schedules can be delayed. The schedule becomes active after the workflow is merged into the default branch. Pull requests affecting the image build and test it without registry credentials or package-write permission.
+[Web container](../../.github/workflows/container.yml) builds `main` every day at **00:37 UTC** and supports manual runs from `main`. Minute 37 avoids the top-of-hour scheduling peak; GitHub schedules can still be delayed. The schedule becomes active after the workflow is merged into the default branch. Pull requests affecting the image build and test it without registry credentials or package-write permission.
 
 The scheduled/manual job builds and tests a `linux/amd64` image before publishing those same local image bytes to GHCR:
 
@@ -12,7 +12,7 @@ The scheduled/manual job builds and tests a `linux/amd64` image before publishin
 - `ghcr.io/microsoft/huabu:sha-<full-sha>-run-<run-id>-<attempt>` identifies one build.
 - The run summary records the digest. Pin that digest when deploying to App Service.
 
-The workflow refreshes the base image and OS certificate packages on each run. Builds use the Microsoft npm proxy by default, including local builds on managed devices. Publication uses `GITHUB_TOKEN` with job-scoped `packages: write`; organization policy must permit this. Package visibility and App Service pull authorization are separate registry settings: use anonymous pulls for a public package or configure a dedicated `read:packages` credential for a private package. The workflow does not change package visibility, Azure resources, or the running App Service image.
+The workflow refreshes the base image and OS certificate packages on each run. Local builds use the Microsoft npm proxy by default for managed devices. GitHub-hosted builds explicitly use the public npm registry so a lagging proxy mirror cannot block installation of the locked public packages. Publication uses `GITHUB_TOKEN` with job-scoped `packages: write`; organization policy must permit this. Package visibility and App Service pull authorization are separate registry settings: use anonymous pulls for a public package or configure a dedicated `read:packages` credential for a private package. The workflow does not change package visibility, Azure resources, or the running App Service image.
 
 ## Local build and verification
 
