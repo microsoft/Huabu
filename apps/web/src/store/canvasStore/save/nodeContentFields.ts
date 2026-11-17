@@ -86,3 +86,14 @@ export const TEXT_BEARING_NODE_TYPES: ReadonlySet<string> = new Set([
   'office',
   'question',
 ]);
+
+/**
+ * Text-bearing types whose body the server keeps to itself. A PDF's sidecar
+ * holds extracted text for AI context, but the web renders from `data.src`
+ * and never receives that body, so its absence in client state is normal
+ * rather than a sign of an incomplete node. Mirrors the server's
+ * `WIRE_INLINE_CONTENT_TYPES` exclusion.
+ */
+export const SERVER_ONLY_BODY_NODE_TYPES: ReadonlySet<string> = new Set([
+  'pdf',
+]);

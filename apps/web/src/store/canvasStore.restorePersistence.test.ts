@@ -786,6 +786,23 @@ describe('undo/redo persistence ordering', () => {
     },
   );
 
+  it('restores a deleted PDF, whose body never reaches the web, without calling it missing', async () => {
+    const pdf = {
+      ...note,
+      type: 'pdf',
+      data: { label: 'Paper', src: 'artifacts/paper.pdf' },
+    };
+    state()._setStateNoAutosave({ nodes: [pdf] });
+    await deleted();
+    state().undo();
+    await drainPendingSaves();
+    expect(api.putNodeContent).toHaveBeenCalledOnce();
+    const request = api.putNodeContent.mock.calls[0][2];
+    expect(request).toMatchObject({ nodeType: 'pdf', src: pdf.data.src });
+    expect(request).not.toHaveProperty('content');
+    expect(state().nodes[0].data.contentMissing).toBeUndefined();
+  });
+
   it('ordinary typing still saves on its own cadence without a structure PUT', async () => {
     // Seed the authoritative baseline through the real load boundary.
     await state().loadCanvas('restore-canvas');
