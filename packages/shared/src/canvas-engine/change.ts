@@ -109,13 +109,15 @@ function changedKeys(
 }
 
 /**
- * The authored body and metadata keys. A CREATE has no `prev` to diff, so it
- * can't derive its changed keys the way an UPDATE does — instead it
- * fingerprints only the body here, which is what a revert (deleting the
- * node) would actually destroy. Cosmetic (`style`) and auto-derived
+ * What a CREATE review record fingerprints. A CREATE has no `prev` to diff,
+ * so it can't derive its changed keys the way an UPDATE does — instead it
+ * fingerprints what a revert (deleting the node) would actually destroy: the
+ * body and the custom properties. Cosmetic (`style`) and auto-derived
  * (`label` / `summary` / `keywords`, stamped by preprocessing AFTER
  * creation) fields are deliberately excluded so they never flip a fresh
- * create to "stale"; a genuine edit to the body still does.
+ * create to "stale"; a genuine edit to the body or a property still does.
+ *
+ * Not the content revision: see {@link CONTENT_REVISION_KEYS}.
  */
 const PRIMARY_CONTENT_KEYS = [
   'content',
@@ -123,6 +125,15 @@ const PRIMARY_CONTENT_KEYS = [
   'properties',
   'propertyDisplayKeys',
 ];
+
+/**
+ * The fields a node's content revision covers: the body and the source
+ * pointer, and nothing else. Custom properties (`properties`,
+ * `propertyDisplayKeys`) are independent small items written per key without
+ * a revision, like colour or position; title, summary and keywords are
+ * derived or renamed separately.
+ */
+export const CONTENT_REVISION_KEYS = ['content', 'src'] as const;
 
 /** Body keys present on a node's `data`, for CREATE fingerprinting. */
 function primaryKeysOf(data: Record<string, unknown>): string[] {
@@ -172,18 +183,19 @@ export function fingerprintNodeFields(
 }
 
 /**
- * A node's **revision token**: a deterministic djb2 hash over its authored
- * content and metadata ({@link PRIMARY_CONTENT_KEYS}). Surfaced to
+ * A node's **revision token**: a deterministic djb2 hash over its body and
+ * source pointer ({@link CONTENT_REVISION_KEYS}). Surfaced to
  * agents as an `ETag` on RFS downloads and as `rev` in per-turn refs /
  * neighbourhood, and (later) checked on the executor's content writes
  * (compare-and-swap).
  *
  * Stateless and host-agnostic: recomputed from the node on demand, yielding
  * the identical string on server (producer) and web / agent (consumer).
- * Cosmetic (`style`), geometry, and auto-derived (`label` / `summary` /
- * `keywords`) fields are excluded — the same discipline as CREATE
- * fingerprinting — so a re-measure or a preprocessing regen never moves the
- * revision and forces a needless re-read.
+ * Cosmetic (`style`), geometry, auto-derived (`label` / `summary` /
+ * `keywords`) fields and custom properties (`properties`,
+ * `propertyDisplayKeys`) are excluded, so a re-measure, a preprocessing
+ * regen or a tag added by somebody else never moves the revision and forces
+ * a needless re-read or refuses a body save.
  *
  * IMPORTANT: `data.content` must be **hydrated** (the canonical on-disk
  * `nodes/<label>.md` body). Persisted topology deliberately strips `content` from
@@ -209,8 +221,6 @@ export function nodeRevisionOf(fields: {
   type?: string;
   content?: string;
   src?: string;
-  properties?: unknown;
-  propertyDisplayKeys?: unknown;
 }): string {
   const data: Record<string, unknown> = {};
   const hasBody =
@@ -219,10 +229,7 @@ export function nodeRevisionOf(fields: {
   if (hasBody && typeof fields.content === 'string')
     data.content = fields.content;
   if (typeof fields.src === 'string') data.src = fields.src;
-  for (const key of ['properties', 'propertyDisplayKeys'] as const) {
-    if (fields[key] !== undefined) data[key] = fields[key];
-  }
-  return hashDataFields(data, PRIMARY_CONTENT_KEYS);
+  return hashDataFields(data, CONTENT_REVISION_KEYS);
 }
 
 /**

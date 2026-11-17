@@ -121,6 +121,7 @@ export {
   extractCanvasChanges,
   coalesceChanges,
   fingerprintNodeFields,
+  CONTENT_REVISION_KEYS,
   nodeRevision,
   nodeRevisionOf,
   invertDeltas,
