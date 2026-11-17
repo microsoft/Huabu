@@ -138,7 +138,10 @@ import { reconcileQuestionStatus } from './canvasStore/load/reconcileQuestionSta
 import { shouldBackfillNodeLabel } from './canvasStore/load/shouldBackfillNodeLabel';
 import { warmupNodeHeights } from './canvasStore/load/warmupNodeHeights';
 import { createCanvasEventBuffer } from './canvasStore/save/eventBuffer';
-import { NODE_CONTENT_KEYS } from './canvasStore/save/nodeContentFields';
+import {
+  NODE_CONTENT_KEYS,
+  SERVER_DERIVED_SIDECAR_NODE_TYPES,
+} from './canvasStore/save/nodeContentFields';
 import { createNodeContentQueue } from './canvasStore/save/nodeContentQueue';
 import { createPreprocessQueue } from './canvasStore/save/preprocessQueue';
 import { shouldScheduleStructureSave } from './canvasStore/save/structureDirtyDetector';
@@ -1229,8 +1232,18 @@ const nodeContentQueue = createNodeContentQueue({
   getState: () => useCanvasStore.getState(),
   waitForCreation: awaitQuestionCreation,
   retryStructure: () => useCanvasStore.getState().saveCanvas(),
-  onRestoredContentPersisted: (canvasId, nodeId) =>
-    preprocessQueue.resumeRestored(canvasId, nodeId),
+  onRestoredContentPersisted: (canvasId, nodeId) => {
+    const state = useCanvasStore.getState();
+    const node =
+      state.canvasId === canvasId
+        ? state.nodes.find((candidate) => candidate.id === nodeId)
+        : undefined;
+    // The rewritten sidecar holds only what the web knew. Ask the server to
+    // derive the rest again, whether or not work was pending at deletion.
+    if (node && SERVER_DERIVED_SIDECAR_NODE_TYPES.has(node.type ?? ''))
+      preprocessQueue.schedule(node);
+    else preprocessQueue.resumeRestored(canvasId, nodeId);
+  },
   onPropertiesSaved: (nodeId, patch) =>
     useCanvasStore.getState().updateNodeData(nodeId, patch),
 });

@@ -801,6 +801,27 @@ describe('undo/redo persistence ordering', () => {
     expect(request).toMatchObject({ nodeType: 'pdf', src: pdf.data.src });
     expect(request).not.toHaveProperty('content');
     expect(state().nodes[0].data.contentMissing).toBeUndefined();
+    // The extracted text went with the deleted sidecar; only the server can
+    // produce it again, so the restore asks for it.
+    expect(api.preprocessNode).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(api.preprocessNode).toHaveBeenCalledExactlyOnceWith(
+      'restore-canvas',
+      pdf.id,
+      expect.objectContaining({
+        nodeType: 'pdf',
+        snapshot: expect.objectContaining({ src: pdf.data.src }),
+      }),
+    );
+  });
+
+  it('does not preprocess a restored Note that had no work pending', async () => {
+    await deleted();
+    state().undo();
+    await drainPendingSaves();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(api.putNodeContent).toHaveBeenCalledOnce();
+    expect(api.preprocessNode).not.toHaveBeenCalled();
   });
 
   it('ordinary typing still saves on its own cadence without a structure PUT', async () => {

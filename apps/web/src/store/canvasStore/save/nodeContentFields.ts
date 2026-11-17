@@ -97,3 +97,14 @@ export const TEXT_BEARING_NODE_TYPES: ReadonlySet<string> = new Set([
 export const SERVER_ONLY_BODY_NODE_TYPES: ReadonlySet<string> = new Set([
   'pdf',
 ]);
+
+/**
+ * Types whose sidecar carries data only the server can produce and the web
+ * never holds: a PDF's extracted text, a video's cover. Deleting the node
+ * deletes that data, and an undo can only write back what the web has, so
+ * these are preprocessed again once their restored sidecar is saved.
+ */
+export const SERVER_DERIVED_SIDECAR_NODE_TYPES: ReadonlySet<string> = new Set([
+  'pdf',
+  'video',
+]);
