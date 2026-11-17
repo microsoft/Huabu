@@ -67,6 +67,12 @@ import type { Delta } from '@huabu/shared/canvas-engine';
 
 type UnitEdge = { id: string } & Record<string, unknown>;
 
+/**
+ * How long the update for a confirmed batch is awaited on the stream before
+ * the Space is reloaded instead.
+ */
+export const ECHO_TIMEOUT_MS = 8_000;
+
 export interface BrowserSyncDeps {
   send: SendQueueOptions['send'];
   clientId: string;
@@ -107,7 +113,7 @@ export interface BrowserSyncDeps {
   reload: (canvasId: string) => void;
   /** Units saved by another writer, never held by the queue. */
   ignoreUnit?: (unit: string) => boolean;
-  /** How long to wait for a confirmed batch's update before reloading. */
+  /** Overrides {@link ECHO_TIMEOUT_MS}. */
   echoTimeoutMs?: number;
 }
 
@@ -183,7 +189,7 @@ export interface BrowserSync {
 
 export function createBrowserSync(deps: BrowserSyncDeps): BrowserSync {
   const inFlight = new InFlightSet();
-  const echoTimeoutMs = deps.echoTimeoutMs ?? 8_000;
+  const echoTimeoutMs = deps.echoTimeoutMs ?? ECHO_TIMEOUT_MS;
   /** Confirmed entries whose update this page has not applied yet. */
   const awaitingEcho = new Map<
     string,
