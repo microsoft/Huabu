@@ -44,6 +44,7 @@ import type {
   SetAcpSessionConfigOptionResponse,
   SetAcpSessionModelResponse,
   SetAcpSessionModeResponse,
+  AgentInitialPreferences,
 } from '@huabu/shared';
 import type { FastifyBaseLogger, FastifyPluginAsync } from 'fastify';
 
@@ -65,6 +66,7 @@ async function realizeControlThread(
     binding: { kind: 'external'; alias: string; profileId: string };
     canvasId?: string;
     cwd?: string;
+    initialPreferences?: AgentInitialPreferences;
   },
   logger: FastifyBaseLogger,
 ) {
@@ -74,6 +76,7 @@ async function realizeControlThread(
       canvasId: target.canvasId,
       requestedBinding: target.binding,
       requestedCwd: target.cwd,
+      requestedPreferences: target.initialPreferences,
       logger,
     });
     const entry = await externalAgentRealization.ensureSession(

@@ -164,6 +164,12 @@ export interface AcpSpec {
     readonly model?: string;
     readonly thoughtLevel?: string;
   };
+  /**
+   * Selections a fresh thread starts with, keyed like `AgentMetadata.selections`.
+   * When present they are used as given instead of matching
+   * `initialPreferences` against the catalogue this session advertises.
+   */
+  readonly initialSelections?: Readonly<Record<string, string>>;
   /** External binding (alias + profileId) for the thread. */
   readonly binding: { readonly alias: string; readonly profileId: string };
   /** Frozen Profile configuration identity; absent legacy revisions mean zero. */
@@ -351,6 +357,9 @@ export class AcpAgentHandle<
         ...(spec.spec.initialPreferences
           ? { initialPreferences: { ...spec.spec.initialPreferences } }
           : {}),
+        ...(spec.spec.initialSelections
+          ? { initialSelections: { ...spec.spec.initialSelections } }
+          : {}),
       }),
     };
     this.requestedAgentletId = resolveAcpAgentletId(spec);
@@ -476,6 +485,9 @@ export class AcpAgentHandle<
       ...(priorState !== undefined && { priorState }),
       ...(this.spec.spec.initialPreferences !== undefined && {
         initialPreferences: this.spec.spec.initialPreferences,
+      }),
+      ...(this.spec.spec.initialSelections !== undefined && {
+        initialSelections: this.spec.spec.initialSelections,
       }),
       repairFromClosedEntry,
       idleTimeoutSecs: this.runtimePolicy.getIdleTimeoutSecs(),

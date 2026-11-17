@@ -237,6 +237,14 @@ export interface EnsureAcpSessionOptions {
     thoughtLevel?: string;
   };
   /**
+   * Selections a fresh thread starts with, already resolved by the host
+   * against the catalogue it showed the user. Used as given instead of
+   * matching `initialPreferences` against this session's own catalogue, so
+   * the first turn runs on what was displayed even when the agent advertises
+   * its catalogue only after `session/new` returns.
+   */
+  initialSelections?: Readonly<Record<string, string>>;
+  /**
    * Whether a matching closed live entry may override `priorState` during
    * Handle self-repair. Disabled only for the history fallback after native
    * resume/load has already returned `session_resume_unavailable`.
@@ -1115,7 +1123,14 @@ async function ensureAcpSessionInner(
   // the user's remembered choices.
   hydrateSelectionsFromPersistedMeta(created, priorState?.metadata);
   if (!priorState?.metadata) {
-    seedInitialPreferences(created, opts.initialPreferences, logger);
+    if (opts.initialSelections) {
+      Object.assign(created.selections, opts.initialSelections);
+      if (Object.keys(created.selections).length > 0) {
+        created.selectionsUpdatedAt = Date.now();
+      }
+    } else {
+      seedInitialPreferences(created, opts.initialPreferences, logger);
+    }
   }
 
   // Installing the listener synchronously drains Gateway pre-attach messages

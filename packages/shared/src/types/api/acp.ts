@@ -30,6 +30,7 @@ import {
 import { agentDefaultsSchema } from './agent-defaults.js';
 import {
   agentProfileSchema,
+  agentInitialPreferencesSchema,
   agentWorkingDirectorySchema,
 } from './agent-profile.js';
 
@@ -471,6 +472,8 @@ const externalAgentInteractionTargetSchema = z.object({
   }),
   canvasId: z.string().min(1).optional(),
   cwd: agentWorkingDirectorySchema.optional(),
+  /** Honoured only by the request that first realizes the conversation. */
+  initialPreferences: agentInitialPreferencesSchema.optional(),
 });
 export type ExternalAgentInteractionTarget = z.infer<
   typeof externalAgentInteractionTargetSchema

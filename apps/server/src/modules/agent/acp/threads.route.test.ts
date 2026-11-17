@@ -114,12 +114,14 @@ describe('ACP cached capability route', () => {
           binding: { kind: 'external', profileId: 'profile-1', alias: 'Agent' },
           canvasId: 'canvas-1',
           cwd: '/chat/project',
+          initialPreferences: { model: 'opus', thoughtLevel: 'high' },
         },
       });
       expect(response.statusCode).toBe(200);
       expect(mocks.realize).toHaveBeenCalledWith(
         expect.objectContaining({
           requestedCwd: '/chat/project',
+          requestedPreferences: { model: 'opus', thoughtLevel: 'high' },
         }),
       );
     },
