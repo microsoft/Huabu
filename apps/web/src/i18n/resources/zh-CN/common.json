@@ -767,6 +767,7 @@
     "moved": "已将「{{name}}」移至「{{destination}}」",
     "collect": "收纳为子 Space（在这里保留入口）",
     "childEntry": "子 Space",
+    "cutEntryUnsupported": "子 Space 不能剪切。请先取消选中它，或用它自己的操作来移动。",
     "deleteEntrySeparately": "请先逐个确认删除子 Space，再删除这组选中内容。",
     "ownershipUnavailable": "Space 归属信息尚不可用，正在刷新；请加载完成后重试。",
     "entryProtected": "此操作会移除或改变子 Space 入口。请使用“删除 Space”或“移入其他 Space”。",

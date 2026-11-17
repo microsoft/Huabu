@@ -28,6 +28,7 @@ const { canvasActions } = vi.hoisted(() => ({
     addNodes: vi.fn(),
     addNode: vi.fn(),
     selectNodes: vi.fn(),
+    cutSelectedNodes: vi.fn(),
     canvasId: 'c1',
     nodes: [] as unknown[],
     edges: [] as unknown[],
@@ -214,22 +215,12 @@ describe('useCanvasShortcuts catalog key lock', () => {
     );
   });
 
-  it('cuts the selection with Mod+X: copy first, then one deletion', () => {
+  it('cuts with Mod+X only when something is selected', () => {
     dispatchCombo('edit.cut');
-    expect(canvasActions.copySelectedNodes).not.toHaveBeenCalled();
-    expect(canvasActions.deleteNodes).not.toHaveBeenCalled();
-
+    expect(canvasActions.cutSelectedNodes).not.toHaveBeenCalled();
     canvasActions.nodes = [{ id: 'selected', selected: true }, { id: 'other' }];
-    canvasActions.edges = [{ id: 'edge', selected: true }];
     dispatchCombo('edit.cut');
-    expect(canvasActions.copySelectedNodes).toHaveBeenCalledOnce();
-    expect(canvasActions.deleteNodes).toHaveBeenCalledExactlyOnceWith(
-      ['selected'],
-      ['edge'],
-    );
-    expect(
-      canvasActions.copySelectedNodes.mock.invocationCallOrder[0],
-    ).toBeLessThan(canvasActions.deleteNodes.mock.invocationCallOrder[0]);
+    expect(canvasActions.cutSelectedNodes).toHaveBeenCalledOnce();
   });
 
   it('leaves Mod+A and Mod+X to a focused text field', () => {
@@ -251,8 +242,7 @@ describe('useCanvasShortcuts catalog key lock', () => {
       false,
     ]);
     expect(canvasActions.selectNodes).not.toHaveBeenCalled();
-    expect(canvasActions.copySelectedNodes).not.toHaveBeenCalled();
-    expect(canvasActions.deleteNodes).not.toHaveBeenCalled();
+    expect(canvasActions.cutSelectedNodes).not.toHaveBeenCalled();
   });
 
   it('blocks Delete and Undo from a saving dialog before bubbling handlers run', () => {

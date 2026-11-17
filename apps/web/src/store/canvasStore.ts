@@ -983,6 +983,8 @@ type RFState = {
   ) => void;
 
   copySelectedNodes: () => void;
+  /** Copy the selection, then delete it; refuses selections that own a child Space. */
+  cutSelectedNodes: () => void;
   pasteNodes: (
     flowPosition: { x: number; y: number },
     clipboardNodes: Node[],
@@ -1173,6 +1175,37 @@ const structureSaveErrors = new Map<string, unknown>();
  * external triggers (structure-save piggy-back, pre-agent flush,
  * `beforeunload` keepalive POST).
  */
+/**
+ * Child Spaces whose entry node is among `nodeIds` or their descendants.
+ * Removing such an entry deletes a whole Space, so callers gate on this.
+ */
+function ownedChildSpaces(
+  state: { canvasId: string | null; nodes: Node[] },
+  nodeIds: string[],
+) {
+  const affected = new Set(nodeIds);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const node of state.nodes) {
+      if (
+        node.parentId &&
+        affected.has(node.parentId) &&
+        !affected.has(node.id)
+      ) {
+        affected.add(node.id);
+        changed = true;
+      }
+    }
+  }
+  return Object.entries(useWorkspaceStore.getState().spaceSummaries).filter(
+    ([, summary]) =>
+      summary?.parentSpaceId === state.canvasId &&
+      summary.parentEntryNodeId &&
+      affected.has(summary.parentEntryNodeId),
+  );
+}
+
 const canvasEvents = createCanvasEventBuffer();
 
 /**
@@ -2505,29 +2538,7 @@ const useCanvasStore = create<RFState>()(
     /** Resolve a web-only UiIntent and execute the resulting commands. */
     dispatchUiIntent: (intent) => {
       if (intent.type === 'DELETE_NODES') {
-        const state = get();
-        const summaries = useWorkspaceStore.getState().spaceSummaries;
-        const affected = new Set(intent.nodeIds);
-        let changed = true;
-        while (changed) {
-          changed = false;
-          for (const node of state.nodes) {
-            if (
-              node.parentId &&
-              affected.has(node.parentId) &&
-              !affected.has(node.id)
-            ) {
-              affected.add(node.id);
-              changed = true;
-            }
-          }
-        }
-        const owned = Object.entries(summaries).filter(
-          ([, summary]) =>
-            summary?.parentSpaceId === state.canvasId &&
-            summary.parentEntryNodeId &&
-            affected.has(summary.parentEntryNodeId),
-        );
+        const owned = ownedChildSpaces(get(), intent.nodeIds);
         if (owned.length) {
           const [childId, child] = owned[0]!;
           if (
@@ -4794,6 +4805,23 @@ const useCanvasStore = create<RFState>()(
         plainText: nodesToPlainText(cloned),
         image: singleImage,
       });
+    },
+
+    cutSelectedNodes: () => {
+      const { nodes, edges } = get();
+      const nodeIds = nodes.filter((n) => n.selected).map((n) => n.id);
+      if (nodeIds.length === 0) return;
+      // Cutting an entry would delete the child Space itself, and pasting
+      // cannot bring it back, so refuse before touching the clipboard.
+      if (ownedChildSpaces(get(), nodeIds).length) {
+        toast(t('spaceHierarchy.cutEntryUnsupported'), { tone: 'warning' });
+        return;
+      }
+      get().copySelectedNodes();
+      get().deleteNodes(
+        nodeIds,
+        edges.filter((edge) => edge.selected).map((edge) => edge.id),
+      );
     },
 
     pasteNodes: (flowPosition, clipboardNodes, clipboardEdges, srcCanvasId) => {

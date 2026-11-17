@@ -201,6 +201,29 @@ it('also protects direct command deletion instead of relying on UI Delete', () =
   expect(api.deleteNode).not.toHaveBeenCalled();
 });
 
+it('refuses to cut a selection that owns a child Space, leaving nodes and clipboard alone', () => {
+  knowChild();
+  const note = {
+    id: 'cut-note',
+    type: 'note',
+    position: { x: 0, y: 0 },
+    data: {},
+    selected: true,
+  };
+  useCanvasStore
+    .getState()
+    ._setStateNoAutosave({ nodes: [{ ...entry, selected: true }, note] });
+  const copy = vi.spyOn(useCanvasStore.getState(), 'copySelectedNodes');
+  vi.mocked(notifications.toast).mockClear();
+  useCanvasStore.getState().cutSelectedNodes();
+  expect(useCanvasStore.getState().nodes).toHaveLength(2);
+  expect(copy).not.toHaveBeenCalled();
+  expect(notifications.toast).toHaveBeenCalledExactlyOnceWith(
+    expect.stringContaining('cannot be cut'),
+    { tone: 'warning' },
+  );
+});
+
 it('does not consume a redo snapshot that would remove a now-canonical entry', async () => {
   useWorkspaceStore.setState({
     spaceTitlesStatus: 'ready',

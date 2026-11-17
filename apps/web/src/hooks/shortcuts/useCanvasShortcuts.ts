@@ -555,15 +555,10 @@ export function useCanvasShortcuts(
             .length > 0
         )
           return;
-        const { nodes: cur, edges: curEdges } = useCanvasStore.getState();
-        const selectedNodeIds = cur.filter((n) => n.selected).map((n) => n.id);
-        if (selectedNodeIds.length === 0) return;
+        const { nodes: cur, cutSelectedNodes } = useCanvasStore.getState();
+        if (!cur.some((n) => n.selected)) return;
         e.preventDefault();
-        copySelectedNodes();
-        deleteNodes(
-          selectedNodeIds,
-          curEdges.filter((edge) => edge.selected).map((edge) => edge.id),
-        );
+        cutSelectedNodes();
       } else if (lowerKey === 'v') {
         if (editable) return;
 

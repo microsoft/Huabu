@@ -767,6 +767,7 @@
     "moved": "Moved {{name}} to {{destination}}",
     "collect": "Collect as a child Space (keeps an entry here)",
     "childEntry": "Child Space",
+    "cutEntryUnsupported": "A child Space cannot be cut. Deselect it, or move it with its own actions.",
     "deleteEntrySeparately": "Delete child Spaces individually with confirmation before deleting this selection.",
     "ownershipUnavailable": "Space ownership is not available yet. Refreshing; retry once it has loaded.",
     "entryProtected": "This change would remove or retarget a child Space entry. Use Delete Space or Move into another Space instead.",
