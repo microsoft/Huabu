@@ -323,6 +323,7 @@ export const useCanvasSyncStore = create<CanvasSyncState>((set, get) => ({
         }
       });
     let wasLoading = useCanvasStore.getState().isLoading;
+    let seenGeneration = useCanvasStore.getState().loadGeneration;
     const current: Connection = {
       canvasId,
       streamSeen: false,
@@ -335,9 +336,14 @@ export const useCanvasSyncStore = create<CanvasSyncState>((set, get) => ({
       // A load that ends while the stream is open. Its content is valid from
       // its own position, which may be before the subscription; and its
       // version may be behind what the stream named while it was in flight.
+      // A refresh in place never enters `isLoading`; it is seen through the
+      // load counter.
       stopWatchingLoads: useCanvasStore.subscribe((state) => {
-        const ended = wasLoading && !state.isLoading;
+        const ended =
+          (wasLoading && !state.isLoading) ||
+          (!state.isLoading && state.loadGeneration !== seenGeneration);
         wasLoading = state.isLoading;
+        seenGeneration = state.loadGeneration;
         if (!ended || state.canvasId !== canvasId || !current.streamSeen)
           return;
         if (

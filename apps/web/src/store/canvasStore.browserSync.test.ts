@@ -34,6 +34,7 @@ import {
 import { dismissToast, toast } from '@/components/Common/Toast';
 
 import { canvasHistoryManager } from './canvasHistoryManager';
+import { useCanvasPresenceStore } from './canvasPresence/canvasPresenceStore';
 import useCanvasStore, {
   drainPendingSaves,
   hasUnsavedCanvasEdits,
@@ -2219,5 +2220,128 @@ describe('a wanted reload whose load fails', () => {
     expect(api.getCanvas).toHaveBeenCalledTimes(2);
     expect(state().nodes.map((n) => n.id)).toEqual([Y]);
     error.mockRestore();
+  });
+});
+
+describe('a wanted reload and what the user is doing', () => {
+  afterEach(() => {
+    useCanvasPresenceStore.getState().setLocalEditingNodeId(null);
+  });
+
+  it('is held while this page edits a node, whose typed text is not in the store yet, and runs when the editing ends', async () => {
+    // A text node keeps its draft in the control until blur: nothing is
+    // pending in the content queue while the user types.
+    useCanvasPresenceStore.getState().setLocalEditingNodeId(X);
+    remote([moveCommand(Y, 800)]);
+    const reloaded = vi.fn();
+    // A refused command, a snapshot that does not match, a missing update.
+    requestCanvasResync(SPACE, reloaded);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(api.getCanvas).not.toHaveBeenCalled();
+    expect(reloaded).not.toHaveBeenCalled();
+    expect(node(Y).position).toEqual({ x: 0, y: 300 });
+    // Editing is not something to warn about.
+    expect(
+      vi
+        .mocked(toast)
+        .mock.calls.filter(([message]) =>
+          /newer changes/i.test(String(message)),
+        ),
+    ).toHaveLength(0);
+
+    useCanvasPresenceStore.getState().setLocalEditingNodeId(null);
+    await flush();
+    expect(api.getCanvas).toHaveBeenCalledTimes(1);
+    expect(reloaded).toHaveBeenCalledTimes(1);
+    expect(node(Y).position).toEqual({ x: 800, y: 0 });
+  });
+
+  it('then waits for the text the control committed on blur to be saved', async () => {
+    api.putNodeContent.mockImplementation(
+      async (
+        _canvasId: string,
+        nodeId: string,
+        request: { content?: string },
+      ) => {
+        saveOnServer(nodeId, request.content ?? '');
+        return { nodeId, label: null, rev: 'rev-saved' };
+      },
+    );
+    useCanvasPresenceStore.getState().setLocalEditingNodeId(X);
+    requestCanvasResync(SPACE);
+    await flush();
+    // Blur: the draft goes to the store, then the tracker reports the end.
+    state().updateNodeData(X, { content: 'Typed, then blurred' });
+    useCanvasPresenceStore.getState().setLocalEditingNodeId(null);
+    await flush();
+    expect(api.getCanvas).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(api.getCanvas).toHaveBeenCalledTimes(1);
+    expect(node(X).data.content).toBe('Typed, then blurred');
+  });
+
+  it('refreshes the open Space in place: never loading, viewport and surviving selection kept, history reset', async () => {
+    moveHere(Y, 0, 600);
+    await answer(0);
+    expect(state().canUndo).toBe(true);
+    state().selectNodes([X, Y]);
+    state().setViewport({ x: 120, y: -40, zoom: 1.5 });
+    const loading: boolean[] = [];
+    const stop = useCanvasStore.subscribe((next) => {
+      loading.push(next.isLoading);
+    });
+    const generation = state().loadGeneration;
+    // Another page deletes Y and moves X; this page missed both.
+    remote([
+      { type: 'DELETE_NODES', nodeIds: [Y as never] },
+      moveCommand(X, 900),
+    ]);
+    requestCanvasResync(SPACE);
+    await flush();
+    stop();
+
+    expect(api.getCanvas).toHaveBeenCalledTimes(1);
+    expect(loading).not.toContain(true);
+    expect(state().nodes.map((n) => n.id)).toEqual([X]);
+    expect(node(X).position).toEqual({ x: 900, y: 0 });
+    expect(node(X).selected).toBe(true);
+    expect(state().viewport).toEqual({ x: 120, y: -40, zoom: 1.5 });
+    expect(state().version).toBe(server.state.version);
+    expect(state().loadGeneration).toBe(generation + 1);
+    expect(canvasHistoryManager.canUndo).toBe(false);
+  });
+
+  it('does not use a load that an edit of this page overtook, and asks again once the edit is answered', async () => {
+    let respond: (value: unknown) => void = () => undefined;
+    api.getCanvas.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          respond = resolve;
+        }),
+    );
+    requestCanvasResync(SPACE);
+    await flush();
+    expect(api.getCanvas).toHaveBeenCalledTimes(1);
+    // The canvas is still there, so the user goes on working.
+    moveHere(X, 500);
+    expect(own).toHaveLength(1);
+    // The load answers with the Space from before that edit.
+    respond({
+      canvasId: SPACE,
+      title: 'Sync',
+      version: 1,
+      basis: server.basis(),
+      state: { nodes: server.state.nodes, edges: server.state.edges },
+    });
+    await flush();
+    expect(node(X).position).toEqual({ x: 500, y: 0 });
+    expect(hasUnsavedCanvasEdits()).toBe(true);
+
+    await answer(0);
+    await flush();
+    // Asked again, now with nothing of this page's on the way.
+    expect(api.getCanvas).toHaveBeenCalledTimes(2);
+    expect(node(X).position).toEqual({ x: 500, y: 0 });
+    expect(state().version).toBe(2);
   });
 });

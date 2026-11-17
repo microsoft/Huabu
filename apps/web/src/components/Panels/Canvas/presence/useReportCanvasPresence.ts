@@ -16,15 +16,13 @@ import {
   selectEditLockHolder,
   showEditLockedHint,
 } from '@/store/canvasPresence/editLock';
+import { EDITABLE } from '@/store/canvasPresence/localEditing';
 import { createPresencePointerTracker } from '@/store/canvasPresence/pointerTracker';
 import { createPresenceReporter } from '@/store/canvasPresence/presenceReporter';
 import useCanvasStore, { flushNodeContent } from '@/store/canvasStore';
 import { CANVAS_PAGE_ID } from '@/store/canvasStore/sync/pageId';
 
 import type { Node } from '@xyflow/react';
-
-const EDITABLE =
-  'textarea, input, select, [contenteditable]:not([contenteditable="false"])';
 
 /** What counts as the person still working in an editor. */
 const ACTIVITY_EVENTS = ['keydown', 'pointerdown', 'input'] as const;

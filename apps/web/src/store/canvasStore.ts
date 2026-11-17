@@ -124,7 +124,9 @@ import {
 } from '@/utils/spaceHierarchy';
 
 import { canvasHistoryManager } from './canvasHistoryManager';
+import { useCanvasPresenceStore } from './canvasPresence/canvasPresenceStore';
 import { canStartEditing } from './canvasPresence/editLock';
+import { pageIsEditing } from './canvasPresence/localEditing';
 import { useIdentityStore } from './identityStore';
 import { useWorkspaceStore } from './workspaceStore';
 import { getCanvas, postCanvasExecute, associateAgentNode } from '../api';
@@ -1002,8 +1004,24 @@ type RFState = {
 
   loadCanvas: (
     canvasId?: string,
-    options?: { resetHistory?: boolean },
+    options?: {
+      resetHistory?: boolean;
+      /**
+       * Refresh the open, loaded Space without leaving it: `isLoading` stays
+       * false (the page keeps the canvas mounted), the viewport is left
+       * alone and nodes and edges that still exist stay selected. Used by
+       * sync-triggered reloads; ignored for a first load or another Space.
+       * The result is `stale`, and nothing is replaced, when this page's own
+       * work overtook the load.
+       */
+      inPlace?: boolean;
+    },
   ) => Promise<LoadCanvasResult>;
+  /**
+   * Counts the loads of a Space this page has adopted. A load that keeps
+   * `isLoading` false (`inPlace`) is seen through it.
+   */
+  loadGeneration: number;
   switchCanvas: (canvasId: string) => Promise<void>;
 
   /**
@@ -1202,7 +1220,7 @@ const nodeContentQueue = createNodeContentQueue({
     preprocessQueue.resumeRestored(canvasId, nodeId),
   onContentPersisted: (canvasId, nodeId) => {
     // A reload that was waiting for this text can run now.
-    resumeReloadHeldForContent();
+    resumeHeldReload();
     // The server now has the body this node was measured against.
     if (useCanvasStore.getState().canvasId !== canvasId) return;
     if (heightsAwaitingContent.delete(nodeId))
@@ -1701,9 +1719,18 @@ let syncLineage: { canvasId: string; lineage: string } | null = null;
  * - `not-found` — the server has no such Space.
  * - `failed` — the Space could not be fetched or prepared; the page shows
  *   what it showed before (for a first load: the not-found surface).
- * - `superseded` — the user moved to another Space meanwhile.
+ * - `superseded` — the user moved to another Space meanwhile, or another
+ *   load of this Space took over.
+ * - `stale` — an in-place load whose result was not used: this page has
+ *   sent or typed something since it was requested, or has applied a newer
+ *   version. The caller asks again.
  */
-export type LoadCanvasResult = 'loaded' | 'not-found' | 'failed' | 'superseded';
+export type LoadCanvasResult =
+  | 'loaded'
+  | 'not-found'
+  | 'failed'
+  | 'superseded'
+  | 'stale';
 
 /**
  * The Space the store was switched to whose load has not succeeded (it is
@@ -1819,19 +1846,22 @@ const browserSync = createBrowserSync({
     const state = useCanvasStore.getState();
     // The user left the Space; the next visit loads it anyway.
     if (state.canvasId !== canvasId) return 'loaded';
-    // A reload would drop a body the user is still typing. It is not given
-    // up: it runs as soon as that text has been saved.
-    if (nodeContentQueue.pendingNodeIds().length > 0) {
-      holdReloadForContent(canvasId);
+    // A reload replaces what the page shows. It is not given up, but it
+    // waits for text the server does not have, for a control the user is
+    // typing into, and for a drag or resize under the pointer.
+    if (reloadBlockedBy() !== null) {
+      holdReload(canvasId);
       return 'held';
     }
-    releaseReloadHeldForContent();
+    releaseHeldReload();
     const done = afterCanvasResync;
     return state
-      .loadCanvas(canvasId, { resetHistory: true })
+      .loadCanvas(canvasId, { resetHistory: true, inPlace: true })
       .then((result): ReloadOutcome => {
         // `failed` is asked for again by the caller, after a backoff.
         if (result === 'failed') return 'failed';
+        // Overtaken by this page's own work: through the gates again.
+        if (result === 'stale') return 'again';
         // What follows a reload follows a Space that was in fact loaded.
         if (result === 'loaded') {
           done?.();
@@ -1843,65 +1873,78 @@ const browserSync = createBrowserSync({
   ignoreUnit: isContentUnit,
 });
 
-// ─── A reload that waits for unsaved note text ────────────────────────────
+// ─── A reload that waits for what the user is doing ───────────────────────
 //
 // Every reload the sync layer asks for (a version gap, a snapshot that does
 // not match, a paint order that could not be installed, an update that never
 // arrived, a rejected command) ends in `reload` above, which will not replace
-// a body the server does not have. Such a reload is held here instead of
-// being dropped: it runs by itself when the content queue has nothing unsaved
-// left — normally a moment later, when the debounced save is acknowledged.
-// When the text cannot be saved (a failing save, a conflict the user has not
-// answered) the page says what the reload is waiting for.
+// a body the server does not have, a control the user is typing into (a text
+// node's draft, a title, a property field: text that lives in the control
+// until it is committed), or a node under the pointer. Such a reload is held
+// here instead of being dropped: it runs by itself when nothing of that is
+// left — normally a moment later, when the debounced save is acknowledged or
+// the control loses focus. When text cannot be saved (a failing save, a
+// conflict the user has not answered) the page says what the reload is
+// waiting for.
 
 /** How long a held reload waits quietly before the page says why. */
 const RELOAD_HELD_NOTICE_MS = 5_000;
-/** How often a held reload looks whether the text has been dealt with. */
+/** How often a held reload looks whether it can run. */
 const RELOAD_HELD_POLL_MS = 1_000;
 
-let reloadHeldForContent: {
+/** What a reload of the open Space would destroy right now, if anything. */
+function reloadBlockedBy(): 'content' | 'editing' | 'gesture' | null {
+  if (nodeContentQueue.pendingNodeIds().length > 0) return 'content';
+  if (pageIsEditing()) return 'editing';
+  if (pointerGestureActive()) return 'gesture';
+  return null;
+}
+
+let heldReload: {
   canvasId: string;
   poll: ReturnType<typeof setInterval>;
   noticeTimer: ReturnType<typeof setTimeout> | null;
   toastId: string | null;
 } | null = null;
 
-function releaseReloadHeldForContent(): void {
-  const held = reloadHeldForContent;
+function releaseHeldReload(): void {
+  const held = heldReload;
   if (!held) return;
-  reloadHeldForContent = null;
+  heldReload = null;
   clearInterval(held.poll);
   if (held.noticeTimer) clearTimeout(held.noticeTimer);
   if (held.toastId) dismissToast(held.toastId);
 }
 
 /** Run the held reload if nothing stands in its way any more. */
-function resumeReloadHeldForContent(): void {
-  const held = reloadHeldForContent;
+function resumeHeldReload(): void {
+  const held = heldReload;
   if (!held) return;
   if (useCanvasStore.getState().canvasId !== held.canvasId) {
     // The user left the Space; the next visit loads it anyway.
-    releaseReloadHeldForContent();
+    releaseHeldReload();
     return;
   }
-  if (nodeContentQueue.pendingNodeIds().length > 0) return;
-  releaseReloadHeldForContent();
+  if (reloadBlockedBy() !== null) return;
+  releaseHeldReload();
   // Through the queue's own gate again: not over unsent structure edits.
   browserSync.deferReload(held.canvasId);
 }
 
-function holdReloadForContent(canvasId: string): void {
-  if (reloadHeldForContent?.canvasId === canvasId) return;
-  releaseReloadHeldForContent();
-  const held: NonNullable<typeof reloadHeldForContent> = {
+function holdReload(canvasId: string): void {
+  if (heldReload?.canvasId === canvasId) return;
+  releaseHeldReload();
+  const held: NonNullable<typeof heldReload> = {
     canvasId,
-    // A save's acknowledgement resumes at once; this also catches text that
-    // stops being unsaved another way (a conflict answered with the server's
-    // version, the node deleted).
-    poll: setInterval(resumeReloadHeldForContent, RELOAD_HELD_POLL_MS),
+    // A save's acknowledgement and the end of editing resume at once; this
+    // also catches what ends another way (a conflict answered with the
+    // server's version, the node deleted, a drag released).
+    poll: setInterval(resumeHeldReload, RELOAD_HELD_POLL_MS),
     noticeTimer: setTimeout(() => {
       held.noticeTimer = null;
-      if (reloadHeldForContent !== held) return;
+      if (heldReload !== held) return;
+      // Only text that cannot be saved is worth a notice; editing ends by
+      // itself.
       const names = unsavedNoteNames(canvasId);
       if (names === null) return;
       held.toastId = toast(t('canvasSync.reloadWaiting', { notes: names }), {
@@ -1911,8 +1954,21 @@ function holdReloadForContent(canvasId: string): void {
     }, RELOAD_HELD_NOTICE_MS),
     toastId: null,
   };
-  reloadHeldForContent = held;
+  heldReload = held;
 }
+
+// The control lost focus (or the tracker gave the node up as idle): what was
+// typed has been committed to the store, so a held reload can go on — after
+// that text has been saved, which the content hold above sees to.
+useCanvasPresenceStore.subscribe((state, previous) => {
+  if (
+    previous.localEditingNodeId !== null &&
+    state.localEditingNodeId === null &&
+    heldReload
+  )
+    // After the blur handlers of the control have committed its draft.
+    queueMicrotask(resumeHeldReload);
+});
 
 /**
  * The notes of `canvasId` whose text is not saved, as one phrase for a
@@ -2078,7 +2134,7 @@ async function reloadDiscardingUnsent(
     void discardUnsentCanvasEdits(canvasId);
     return;
   }
-  releaseReloadHeldForContent();
+  releaseHeldReload();
   browserSync.discard(canvasId);
   if (discardContent) {
     preprocessQueue.cancelAll();
@@ -2228,7 +2284,7 @@ export function resetCanvasSyncForTests(): void {
   restoringNodeIds.clear();
   failedRestores.clear();
   dismissSyncNotice();
-  releaseReloadHeldForContent();
+  releaseHeldReload();
   discardingUnsentEdits = false;
   useCanvasSyncStatusStore.setState({ state: 'synced', pending: 0 });
 }
@@ -4391,13 +4447,44 @@ const useCanvasStore = create<RFState>()(
       // SSE gap reloads already skip dirty nodes; this also covers manual load.
       if (nodeContentQueue.hasPendingRestoredContent())
         await drainPendingSaves();
-      set({
-        isLoading: true,
-        canvasAccess: null,
-        pendingRevealNodeIds: [],
-        canvasNotFound: false,
-      });
       const targetId = canvasId ?? get().canvasId;
+      // A refresh of the Space the page already shows: the canvas stays
+      // mounted and usable while the request is under way, so the loading
+      // state is not entered and nothing is reset before the answer is in.
+      const before = get();
+      const inPlace =
+        options?.inPlace === true &&
+        !!targetId &&
+        before.canvasId === targetId &&
+        !before.isLoading &&
+        !before.canvasNotFound &&
+        spaceAwaitingFirstLoad !== targetId;
+      const versionAtStart = before.version;
+      if (!inPlace)
+        set({
+          isLoading: true,
+          canvasAccess: null,
+          pendingRevealNodeIds: [],
+          canvasNotFound: false,
+        });
+      /**
+       * An in-place load must not replace what this page did while it was
+       * under way: an edit sent or still to be sent, text typed, a drag in
+       * progress, or a newer version applied from the stream.
+       */
+      const overtaken = (loadedVersion: number): LoadCanvasResult | null => {
+        if (!inPlace) return null;
+        const now = get();
+        // A full load of this Space began meanwhile and brings its own.
+        if (now.isLoading) return 'superseded';
+        if (
+          browserSync.queue.hasPending(targetId) ||
+          reloadBlockedBy() !== null ||
+          (now.version !== versionAtStart && now.version > loadedVersion)
+        )
+          return 'stale';
+        return null;
+      };
       try {
         // Loading a Space only restores an existing legacy conversation.
         // Creating a new Chat is an explicit action requiring Agent defaults.
@@ -4405,7 +4492,11 @@ const useCanvasStore = create<RFState>()(
         usePreviewWorkspaceStore
           .getState()
           .loadForCanvas(targetId, { chatThreadId });
-        canvasHistoryManager.activate(targetId, options?.resetHistory);
+        // An in-place load clears the history when its result is adopted.
+        canvasHistoryManager.activate(
+          targetId,
+          options?.resetHistory && !inPlace,
+        );
         if (canvasId && targetId !== get().canvasId) {
           spaceAwaitingFirstLoad = targetId;
           useToolStore.getState().resetForCanvasSwitch();
@@ -4529,6 +4620,35 @@ const useCanvasStore = create<RFState>()(
           warmedEdges = loadedEdges;
         }
         if (get().canvasId !== targetId) return 'superseded';
+        const notUsed = overtaken(loadedVersion);
+        if (notUsed) return notUsed;
+        if (inPlace && options?.resetHistory) canvasHistoryManager.clear();
+        // What the page keeps across a refresh: its selection, where the
+        // node or edge still exists, and the box the renderer measured for
+        // a node the server stores none for (so it is not hidden until it
+        // is measured again).
+        if (inPlace) {
+          const live = get();
+          const liveNodes = new Map(live.nodes.map((node) => [node.id, node]));
+          warmedNodes = warmedNodes.map((node) => {
+            const shown = liveNodes.get(node.id);
+            if (!shown) return node;
+            const keepMeasured = !node.measured && shown.measured;
+            if (!shown.selected && !keepMeasured) return node;
+            return {
+              ...node,
+              ...(shown.selected ? { selected: true } : {}),
+              ...(keepMeasured ? { measured: shown.measured } : {}),
+            };
+          });
+          const selectedEdges = new Set(
+            live.edges.filter((edge) => edge.selected).map((edge) => edge.id),
+          );
+          if (selectedEdges.size > 0)
+            warmedEdges = warmedEdges.map((edge) =>
+              selectedEdges.has(edge.id) ? { ...edge, selected: true } : edge,
+            );
+        }
         // An authoritative node replacement invalidates every transient that
         // points at the previous in-memory geometry. This applies both to a
         // different-canvas switch and to a same-canvas SSE gap/snapshot heal:
@@ -4561,7 +4681,9 @@ const useCanvasStore = create<RFState>()(
         get()._setStateNoAutosave({
           nodes: warmedNodes,
           edges: warmedEdges,
-          viewport: loadedViewport,
+          // A refresh leaves the view where the user has it.
+          ...(inPlace ? {} : { viewport: loadedViewport }),
+          loadGeneration: get().loadGeneration + 1,
           canvasTitle: response.title || 'Untitled',
           version: loadedVersion,
           contentPosition: response.contentPosition ?? null,
@@ -5943,6 +6065,7 @@ const useCanvasStore = create<RFState>()(
     canvasWrapper: null,
     setCanvasWrapper: (el) => set({ canvasWrapper: el }),
 
+    loadGeneration: 0,
     viewport: null,
     setViewport: (viewport) => {
       // Skip no-op writes so passive `onMoveEnd` events (e.g. fired
