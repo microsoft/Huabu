@@ -156,6 +156,13 @@ function sameValue(a: unknown, b: unknown): boolean {
  * The sidecar fields of `data` that differ from what the server returned.
  * A field the response leaves out is left alone, an absent label equals
  * `null`, and a body is only taken by a node that carries one.
+ *
+ * A PDF's extracted text is not such a body: a load leaves it out (the page
+ * renders the file, see `SERVER_DERIVED_SIDECAR_NODE_TYPES`), so a fetch
+ * does not bring it in either. A page that holds no body for a PDF then
+ * copies, cuts and restores it without one, and the server derives the text
+ * again; a page that does hold one (it preprocessed the PDF itself) keeps it
+ * current.
  */
 function remoteContentPatch(
   nodeType: string,
@@ -164,7 +171,8 @@ function remoteContentPatch(
 ): Record<string, unknown> {
   const patch: Record<string, unknown> = {};
   if (
-    (TEXT_BEARING_NODE_TYPES.has(nodeType) ||
+    ((TEXT_BEARING_NODE_TYPES.has(nodeType) &&
+      !SERVER_DERIVED_SIDECAR_NODE_TYPES.has(nodeType)) ||
       typeof data['content'] === 'string') &&
     data['content'] !== res.content
   )

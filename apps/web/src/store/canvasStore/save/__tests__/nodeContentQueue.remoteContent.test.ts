@@ -172,6 +172,46 @@ describe('adopting content another page saved', () => {
     expect(data()).toEqual({ label: 'Renamed frame', summary: 'kept' });
   });
 
+  it("does not bring a PDF's extracted text into a page that holds none, and keeps one it holds current", async () => {
+    const response = saved('Extracted text', {
+      type: 'pdf',
+      label: 'Renamed paper',
+      src: 'artifacts/paper.pdf',
+      rev: nodeRevisionOf({
+        content: 'Extracted text',
+        src: 'artifacts/paper.pdf',
+      }),
+    });
+    // As a load leaves it: the file, no body.
+    const without = makeQueue([
+      note({ label: 'Paper', src: 'artifacts/paper.pdf' }, 'n1', 'pdf'),
+    ]);
+    getMock.mockResolvedValue(response);
+    await expect(without.queue.adoptRemoteContent('c1', 'n1')).resolves.toBe(
+      'applied',
+    );
+    expect(without.data()).toEqual({
+      label: 'Renamed paper',
+      src: 'artifacts/paper.pdf',
+    });
+    expect(without.adopted).toHaveBeenCalledWith('c1', 'n1', {
+      label: 'Renamed paper',
+    });
+    await without.queue.flushAll();
+    expect(putMock).not.toHaveBeenCalled();
+
+    // A page that holds a body for the PDF follows the server's.
+    const holding = makeQueue([
+      note(
+        { label: 'Paper', src: 'artifacts/paper.pdf', content: 'Older text' },
+        'n1',
+        'pdf',
+      ),
+    ]);
+    await holding.queue.adoptRemoteContent('c1', 'n1');
+    expect(holding.data()).toMatchObject({ content: 'Extracted text' });
+  });
+
   it('keeps the body and title of a node with a queued edit untouched, and fetches them once that edit is saved', async () => {
     const { queue, state, edit, data } = makeQueue([
       note({ content: 'old', label: 'Note' }),
