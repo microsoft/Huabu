@@ -17,6 +17,7 @@
 
 import { create } from 'zustand';
 
+import { usePanelStore } from '../panelStore';
 import { findObservedConversation } from '../remoteConversationOwner';
 import {
   activateTab,
@@ -44,6 +45,7 @@ import {
 import {
   readWorkspace,
   seedWorkspaceFromLegacyChat,
+  readWorkspaceCollapsed,
   writeWorkspace,
 } from './persistence';
 import { previewTargetKey } from './scrollMemory';
@@ -183,11 +185,24 @@ export const usePreviewWorkspaceStore = create<PreviewWorkspaceState>(
         nodeFocusRequest: null,
         chatOpenRequest: null,
       });
+      // Open or closed belongs to the Canvas, like its tabs. One that never
+      // recorded a choice starts closed when it has nothing to show (every
+      // new Canvas) and otherwise keeps the panel as the user has it.
+      const panel = usePanelStore.getState();
+      panel.setRightCollapsed(
+        readWorkspaceCollapsed(canvasId) ??
+          (Object.keys(workspace.tabs).length === 0 || panel.isRightCollapsed),
+      );
     },
 
     flush: () => {
       const { canvasId, workspace } = get();
-      if (canvasId) writeWorkspace(canvasId, workspace);
+      if (canvasId)
+        writeWorkspace(
+          canvasId,
+          workspace,
+          usePanelStore.getState().isRightCollapsed,
+        );
     },
 
     openPreviewTarget: (target, options, beforeTabRemoved) => {

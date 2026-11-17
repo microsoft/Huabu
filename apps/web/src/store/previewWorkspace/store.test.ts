@@ -11,6 +11,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createEmptyWorkspace, openTarget, type PreviewTarget } from './model';
+import { usePanelStore } from '../panelStore';
 import { useRemoteConversationOwnerStore } from '../remoteConversationOwner';
 import { readWorkspace, writeWorkspace } from './persistence';
 import {
@@ -134,6 +135,36 @@ describe('loading a Canvas', () => {
     store().closeTab(tabId);
     expect(store().readIntentByTab[tabId]).toBeUndefined();
   });
+  it('remembers open or closed per Canvas and starts an empty one closed', () => {
+    const panel = () => usePanelStore.getState();
+    panel().setRightCollapsed(false);
+
+    // Never seen, nothing to show: closed, whatever the previous Canvas had.
+    store().loadForCanvas(CANVAS);
+    expect(panel().isRightCollapsed).toBe(true);
+
+    // Opening it is this Canvas's choice, kept even while it stays empty.
+    panel().setRightCollapsed(false);
+    store().loadForCanvas(OTHER);
+    expect(panel().isRightCollapsed).toBe(true);
+    store().loadForCanvas(CANVAS);
+    expect(panel().isRightCollapsed).toBe(false);
+
+    panel().setRightCollapsed(true);
+    store().loadForCanvas(OTHER);
+    panel().setRightCollapsed(false);
+    store().loadForCanvas(CANVAS);
+    expect(panel().isRightCollapsed).toBe(true);
+  });
+
+  it('keeps the current panel state for a Canvas with tabs but no recorded choice', () => {
+    const { workspace } = openTarget(createEmptyWorkspace(), node('legacy'));
+    writeWorkspace(CANVAS, workspace);
+    usePanelStore.getState().setRightCollapsed(false);
+    store().loadForCanvas(CANVAS);
+    expect(usePanelStore.getState().isRightCollapsed).toBe(false);
+  });
+
   it('restores a persisted layout', () => {
     const persisted = openTarget(
       createEmptyWorkspace('g1'),

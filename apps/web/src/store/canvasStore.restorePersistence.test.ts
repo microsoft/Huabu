@@ -786,6 +786,43 @@ describe('undo/redo persistence ordering', () => {
     },
   );
 
+  it('restores a deleted PDF, whose body never reaches the web, without calling it missing', async () => {
+    const pdf = {
+      ...note,
+      type: 'pdf',
+      data: { label: 'Paper', src: 'artifacts/paper.pdf' },
+    };
+    state()._setStateNoAutosave({ nodes: [pdf] });
+    await deleted();
+    state().undo();
+    await drainPendingSaves();
+    expect(api.putNodeContent).toHaveBeenCalledOnce();
+    const request = api.putNodeContent.mock.calls[0][2];
+    expect(request).toMatchObject({ nodeType: 'pdf', src: pdf.data.src });
+    expect(request).not.toHaveProperty('content');
+    expect(state().nodes[0].data.contentMissing).toBeUndefined();
+    // The extracted text went with the deleted sidecar; only the server can
+    // produce it again. The request is issued with the save rather than
+    // debounced, so leaving the Space straight away cannot cancel it.
+    expect(api.preprocessNode).toHaveBeenCalledExactlyOnceWith(
+      'restore-canvas',
+      pdf.id,
+      expect.objectContaining({
+        nodeType: 'pdf',
+        snapshot: expect.objectContaining({ src: pdf.data.src }),
+      }),
+    );
+  });
+
+  it('does not preprocess a restored Note that had no work pending', async () => {
+    await deleted();
+    state().undo();
+    await drainPendingSaves();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(api.putNodeContent).toHaveBeenCalledOnce();
+    expect(api.preprocessNode).not.toHaveBeenCalled();
+  });
+
   it('ordinary typing still saves on its own cadence without a structure PUT', async () => {
     // Seed the authoritative baseline through the real load boundary.
     await state().loadCanvas('restore-canvas');

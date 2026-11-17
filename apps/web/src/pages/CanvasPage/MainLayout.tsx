@@ -18,7 +18,6 @@ interface MainLayoutProps {
 interface LayoutInjectedProps {
   isCollapsed?: boolean;
   isContentMounted?: boolean;
-  isHostCollapsed?: boolean;
   isFullscreen?: boolean;
   compact?: boolean;
   vertical?: boolean;
@@ -523,7 +522,6 @@ export const MainLayout = ({
                 rightPanel as React.ReactElement<LayoutInjectedProps>,
                 {
                   isCollapsed: false,
-                  isHostCollapsed: isRightCollapsed,
                   onToggle: toggleRightPanel,
                   isFullscreen: displayedPreviewFullscreen,
                   onToggleFullscreen: handleTogglePreviewFullscreen,
