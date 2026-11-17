@@ -39,6 +39,7 @@ import {
   applyDeltas,
   applySharedPostEffects,
   applySharedPostEffectsFromWriteResult,
+  CONTENT_REVISION_KEYS,
   executeCanvasCommands,
   autoHeightKey,
   getHeightPolicy,
@@ -123,10 +124,7 @@ import {
 } from '@/utils/spaceHierarchy';
 
 import { canvasHistoryManager } from './canvasHistoryManager';
-import {
-  canStartEditing,
-  isEditedOnAnotherPage,
-} from './canvasPresence/editLock';
+import { canStartEditing } from './canvasPresence/editLock';
 import { useIdentityStore } from './identityStore';
 import { useWorkspaceStore } from './workspaceStore';
 import { getCanvas, postCanvasExecute, associateAgentNode } from '../api';
@@ -149,6 +147,7 @@ import { createCanvasEventBuffer } from './canvasStore/save/eventBuffer';
 import {
   MD_BACKED_NODE_TYPES,
   NODE_CONTENT_KEYS,
+  withContentPatch,
 } from './canvasStore/save/nodeContentFields';
 import {
   createNodeContentQueue,
@@ -408,6 +407,65 @@ export type NodeMetadataPatch = Pick<
   'properties' | 'propertyDisplayKeys'
 >;
 
+/** The content keys that hold custom properties: unversioned, per key. */
+const PROPERTY_CONTENT_KEYS: ReadonlySet<string> = new Set([
+  'properties',
+  'propertyDisplayKeys',
+]);
+
+/**
+ * The custom-property changes of one `REPLACE_NODE` (`prev` → `next`), as a
+ * patch of the data this page shows (`local`): each property key the batch
+ * set, changed or removed, and the display order when it changed. A key this
+ * page has changed and not saved (`pendingKeys`), and a display order it has
+ * (`pendingFields`), are left as they are here. An absent result key means
+ * no change; `undefined` removes the field.
+ */
+function remotePropertyChanges(
+  prev: Record<string, unknown>,
+  next: Record<string, unknown>,
+  local: Record<string, unknown>,
+  pendingFields: ReadonlySet<string>,
+  pendingKeys: ReadonlySet<string>,
+): Record<string, unknown> {
+  const patch: Record<string, unknown> = {};
+  const before = (prev['properties'] ?? {}) as Record<string, unknown>;
+  const after = (next['properties'] ?? {}) as Record<string, unknown>;
+  const changed = [
+    ...new Set([...Object.keys(before), ...Object.keys(after)]),
+  ].filter(
+    (key) =>
+      !pendingKeys.has(key) &&
+      (Object.hasOwn(before, key) !== Object.hasOwn(after, key) ||
+        !deepEqual(before[key], after[key])),
+  );
+  if (changed.length > 0) {
+    const bag = {
+      ...(local['properties'] as Record<string, unknown> | undefined),
+    };
+    for (const key of changed) {
+      if (Object.hasOwn(after, key))
+        Object.defineProperty(bag, key, {
+          value: after[key],
+          enumerable: true,
+          configurable: true,
+          writable: true,
+        });
+      else delete bag[key];
+    }
+    patch['properties'] =
+      Object.keys(bag).length > 0 || next['properties'] !== undefined
+        ? bag
+        : undefined;
+  }
+  if (
+    !pendingFields.has('propertyDisplayKeys') &&
+    !deepEqual(prev['propertyDisplayKeys'], next['propertyDisplayKeys'])
+  )
+    patch['propertyDisplayKeys'] = next['propertyDisplayKeys'];
+  return patch;
+}
+
 /** Publish acknowledged property edits; only the toast retains a failed patch. */
 export async function commitNodeProperties(
   nodeId: string,
@@ -524,11 +582,15 @@ export async function commitNodeMetadata(
     useWorkspaceStore.getState().workspaceId !== workspaceId
   )
     throw new Error('Space changed while saving');
+  // Properties are saved by themselves: an unsaved body of the node, or
+  // one frozen by a conflict, does not hold them back and is not theirs to
+  // report.
+  const pending = nodeContentQueue.pendingFields(nodeId);
   if (
     !useCanvasStore
       .getState()
       .nodes.some((candidate) => candidate.id === nodeId) ||
-    nodeContentQueue.pendingFields(nodeId).size > 0
+    [...PROPERTY_CONTENT_KEYS].some((key) => pending.has(key))
   )
     throw new Error(
       'Node metadata is not saved; resolve the pending save before continuing',
@@ -1152,7 +1214,6 @@ const nodeContentQueue = createNodeContentQueue({
     canvasHistoryManager.rebaseRemoteContent(canvasId, nodeId, patch),
   onPropertiesSaved: (nodeId, patch) =>
     useCanvasStore.getState().updateNodeData(nodeId, patch),
-  isEditedElsewhere: isEditedOnAnotherPage,
 });
 
 // ─── Structure edits through execute ──────────────────────────────────────
@@ -2376,13 +2437,15 @@ export function adoptRemoteNodeContent(
 /** Save `nodeId`'s queued content now; settles once the server has answered. */
 export function flushNodeContent(nodeId: string): Promise<void> {
   const { canvasId } = useCanvasStore.getState();
-  if (!canvasId || !nodeContentQueue.pendingNodeIds().includes(nodeId))
-    return Promise.resolve();
+  if (!canvasId) return Promise.resolve();
   // A save already on the wire with nothing queued behind it (a property
-  // edit, which is sent the moment it is committed) is what there is to
-  // wait for; another save would only repeat it.
+  // edit, which is sent the moment it is committed and is not unsaved
+  // content of the node) is what there is to wait for; another save would
+  // only repeat it.
   const inFlight = nodeContentQueue.whenInFlightSaved(nodeId);
   if (inFlight.onlyInFlight) return inFlight.done;
+  if (!nodeContentQueue.pendingNodeIds().includes(nodeId))
+    return Promise.resolve();
   return nodeContentQueue
     .flushNow(canvasId, nodeId, { source: 'auto' })
     .catch(() => undefined);
@@ -3637,10 +3700,26 @@ const useCanvasStore = create<RFState>()(
                 const changedContentFields = [...NODE_CONTENT_KEYS].filter(
                   (key) => !deepEqual(prevData[key], nextData[key]),
                 );
-                const changesPendingContent = changedContentFields.some((key) =>
-                  pendingFields.has(key),
+                // Only the body's fields can collide with unsaved content.
+                // Custom properties are per-key items without a revision:
+                // the keys this batch changed are shown beside the unsaved
+                // body, and a key this page has itself changed and not
+                // saved keeps its local value (its save follows and is the
+                // last writer).
+                const changesPendingContent = changedContentFields.some(
+                  (key) =>
+                    !PROPERTY_CONTENT_KEYS.has(key) && pendingFields.has(key),
                 );
                 const local = localNodesById.get(d.next.id);
+                const remoteProperties = remotePropertyChanges(
+                  prevData,
+                  nextData,
+                  (local?.data ?? {}) as Record<string, unknown>,
+                  pendingFields,
+                  nodeContentQueue.pendingPropertyKeys(d.next.id),
+                );
+                if (Object.keys(remoteProperties).length > 0)
+                  nodeContentQueue.remotePropertiesShown(d.next.id);
                 // A node frozen by a content conflict, and the update brings
                 // exactly the text this page shows: the conflict is over
                 // and nothing was skipped. The rest of the row applies with
@@ -3655,23 +3734,24 @@ const useCanvasStore = create<RFState>()(
                     string,
                     unknown
                   >;
-                  const mergedData = { ...nextData };
+                  const pendingData = { ...nextData };
                   for (const key of pendingFields) {
-                    if (key in localData) mergedData[key] = localData[key];
-                    else delete mergedData[key];
+                    if (key in localData) pendingData[key] = localData[key];
+                    else delete pendingData[key];
                   }
+                  const mergedData = withContentPatch(
+                    pendingData,
+                    remoteProperties,
+                  );
                   preservedPendingNodeIds.add(d.next.id);
                   if (changesPendingContent && !settledIdentical) {
                     skippedNodeIds.push(d.next.id);
                     skippedRemoteNodes.push(serverNodeOf(d.next));
                   } else if (
                     changedContentFields.some((key) =>
-                      [
-                        'content',
-                        'src',
-                        'properties',
-                        'propertyDisplayKeys',
-                      ].includes(key),
+                      (CONTENT_REVISION_KEYS as readonly string[]).includes(
+                        key,
+                      ),
                     )
                   ) {
                     advancedRemoteBaselines.push(serverNodeOf(d.next));
@@ -3695,11 +3775,15 @@ const useCanvasStore = create<RFState>()(
                       string,
                       unknown
                     >;
-                    const mergedData = { ...nextData };
+                    const localContent = { ...nextData };
                     for (const key of NODE_CONTENT_KEYS) {
-                      if (key in localData) mergedData[key] = localData[key];
-                      else delete mergedData[key];
+                      if (key in localData) localContent[key] = localData[key];
+                      else delete localContent[key];
                     }
+                    const mergedData = withContentPatch(
+                      localContent,
+                      remoteProperties,
+                    );
                     preservedPendingNodeIds.add(d.next.id);
                     return [
                       {
@@ -3712,6 +3796,19 @@ const useCanvasStore = create<RFState>()(
                 }
                 skippedNodeIds.push(d.next.id);
                 skippedRemoteNodes.push(serverNodeOf(d.next));
+                // The body of this row is withheld. The properties it
+                // changed are not part of that and are shown.
+                if (local && Object.keys(remoteProperties).length > 0)
+                  return [
+                    {
+                      ...d,
+                      prev: local,
+                      next: {
+                        ...local,
+                        data: withContentPatch(local.data, remoteProperties),
+                      },
+                    },
+                  ];
                 return [];
               }
               if (d.type === 'DELETE_NODE' && dirty.has(d.node.id)) {

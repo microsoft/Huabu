@@ -35,8 +35,6 @@ export function storedContentRevision(node: NodeLike): string {
         ? data['content']
         : '',
     ...(typeof data['src'] === 'string' ? { src: data['src'] } : {}),
-    properties: data['properties'],
-    propertyDisplayKeys: data['propertyDisplayKeys'],
   });
 }
 

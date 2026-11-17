@@ -258,7 +258,7 @@ describe('content another page saved, in the store', () => {
     expect(hasUnsavedCanvasEdits()).toBe(false);
   });
 
-  it('leaves a node this page is still saving exactly as typed', async () => {
+  it('leaves the body and title of a node this page is still saving exactly as typed', async () => {
     state().updateNodeData(X, { content: 'Typed on this page' });
     api.getNodeContent.mockResolvedValue(
       savedOnServer('Body from A', 'From A'),
@@ -268,11 +268,13 @@ describe('content another page saved, in the store', () => {
       'kept-local',
     ]);
 
-    expect(api.getNodeContent).not.toHaveBeenCalled();
+    // The node is read for its custom properties only.
+    expect(api.getNodeContent).toHaveBeenCalledTimes(1);
     expect(node(X).data).toMatchObject({
       content: 'Typed on this page',
       label: `Label ${X}`,
     });
+    expect(api.putNodeContent).not.toHaveBeenCalled();
   });
 });
 
@@ -373,7 +375,62 @@ describe('properties another page saved', () => {
     expect(api.putNodeContent).not.toHaveBeenCalled();
   });
 
-  it("leave this page's edit of another property of the node standing: it is sent as one key, from the adopted revision", async () => {
+  it('shows the tag another page added while a body is being typed here, and saves that body without a prompt', async () => {
+    // The page shows what the server holds, and knows its revision.
+    api.getNodeContent.mockResolvedValue(withProperties());
+    await adoptRemoteNodeContent(SPACE, [Z]);
+    state().updateNodeData(Z, { content: 'Typed on this page' });
+    // The other page changed a property; the body is as this page loaded it.
+    api.getNodeContent.mockResolvedValue(
+      withProperties({ tags: ['physics'] }, ['tags']),
+    );
+    await expect(adoptRemoteNodeContent(SPACE, [Z])).resolves.toEqual([
+      'kept-local',
+    ]);
+    expect(node(Z).data).toMatchObject({
+      content: 'Typed on this page',
+      properties: { tags: ['physics'] },
+      propertyDisplayKeys: ['tags'],
+    });
+
+    // The server accepts a body save only on the revision it holds, which
+    // the property change did not move.
+    api.putNodeContent.mockImplementation(
+      async (
+        _canvasId: string,
+        nodeId: string,
+        body: { expectRev?: string },
+      ) => {
+        if (body.expectRev !== nodeRevisionOf({ content: `Body ${Z}` }))
+          throw new CanvasConflictError({
+            code: 'NODE_CONTENT_CONFLICT',
+            message: 'changed elsewhere',
+            nodeId,
+          });
+        return { nodeId, label: null, rev: 'after-typing' };
+      },
+    );
+    api.getNodeContent.mockResolvedValue({
+      ...withProperties({ tags: ['physics'] }, ['tags']),
+      content: 'Typed on this page',
+      rev: 'after-typing',
+    });
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    expect(api.putNodeContent).toHaveBeenCalledTimes(1);
+    const sent = api.putNodeContent.mock.calls[0][2];
+    expect(sent.content).toBe('Typed on this page');
+    expect(sent).not.toHaveProperty('properties');
+    expect(toast).not.toHaveBeenCalled();
+    expect(state().pendingContentNodeIds()).not.toContain(Z);
+    expect(node(Z).data).toMatchObject({
+      content: 'Typed on this page',
+      properties: { tags: ['physics'] },
+    });
+    expect(canvasHistoryManager.canUndo).toBe(true);
+  });
+
+  it("leave this page's edit of another property of the node standing: it is sent as that one key, without a revision", async () => {
     const theirs = withProperties({ status: 'read' });
     api.getNodeContent.mockResolvedValue(theirs);
     await adoptRemoteNodeContent(SPACE, [Z]);
@@ -384,18 +441,17 @@ describe('properties another page saved', () => {
 
     expect(api.putNodeContent).toHaveBeenCalledTimes(1);
     const sent = api.putNodeContent.mock.calls[0][2];
-    expect(sent.expectRev).toBe(theirs.rev);
+    expect(sent).not.toHaveProperty('expectRev');
     expect(sent.pageId).toBe(CANVAS_PAGE_ID);
-    // Their key travels with the same value it has on the server; nothing
-    // of theirs is cleared.
-    expect(sent.properties).toEqual({ status: 'read', tags: ['mine'] });
+    // Their key is not in the request at all: the server keeps it.
+    expect(sent.properties).toEqual({ tags: ['mine'] });
     expect(node(Z).data.properties).toEqual({
       status: 'read',
       tags: ['mine'],
     });
   });
 
-  it("are not fetched over this page's own property save in flight, and are fetched once it is answered", async () => {
+  it("are fetched and shown while this page's own save of another property is in flight, and read once more when it is answered", async () => {
     let answer!: (value: unknown) => void;
     api.putNodeContent.mockImplementationOnce(
       () =>
@@ -407,28 +463,36 @@ describe('properties another page saved', () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(api.putNodeContent).toHaveBeenCalledTimes(1);
 
+    // A property save on the wire is not unsaved content of the node: the
+    // other page's save is shown at once. (This fetch read the server
+    // before this page's patch was written.)
+    api.getNodeContent.mockResolvedValue(withProperties({ status: 'read' }));
+    await expect(adoptRemoteNodeContent(SPACE, [Z])).resolves.toEqual([
+      'applied',
+    ]);
+    expect(api.getNodeContent).toHaveBeenCalledTimes(1);
+    expect(node(Z).data.properties).toEqual({ status: 'read' });
+
     api.getNodeContent.mockResolvedValue(
       withProperties({ status: 'read', tags: ['mine'] }),
     );
-    await expect(adoptRemoteNodeContent(SPACE, [Z])).resolves.toEqual([
-      'kept-local',
-    ]);
-    expect(api.getNodeContent).not.toHaveBeenCalled();
-
     answer({ nodeId: Z, label: `Label ${Z}`, rev: 'after-mine' });
     await expect(saving).resolves.toBe(true);
     await vi.advanceTimersByTimeAsync(0);
 
-    expect(api.getNodeContent).toHaveBeenCalledTimes(1);
+    // One more read, since properties arrived while the save was under way.
+    expect(api.getNodeContent).toHaveBeenCalledTimes(2);
     expect(node(Z).data.properties).toEqual({
       status: 'read',
       tags: ['mine'],
     });
+    expect(api.putNodeContent).toHaveBeenCalledTimes(1);
+    expect(state().pendingContentNodeIds()).not.toContain(Z);
   });
 });
 
 describe('the revision of a node whose stored body the page does not show', () => {
-  it('is kept through a structure update, so a property save of a PDF is not refused', async () => {
+  it('is kept through a structure update: a title save of a PDF quotes it, and a property save quotes none', async () => {
     // A load brings the server's revision of the PDF; the page is not sent
     // the extracted text it is computed from.
     const PDF = 'node-content-pdf';
@@ -481,13 +545,24 @@ describe('the revision of a node whose stored body the page does not show', () =
     expect(api.putNodeContent).toHaveBeenCalledTimes(1);
     expect(api.putNodeContent.mock.calls[0][2]).toMatchObject({
       properties: { tags: ['physics'] },
+    });
+    expect(api.putNodeContent.mock.calls[0][2]).not.toHaveProperty('expectRev');
+
+    // The baseline is still the load's: a save that carries the title
+    // quotes it, not a hash of the node without its extracted text, and not
+    // the revision the property save's answer named.
+    state().updateNodeData(PDF, { label: 'Paper, final' });
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(api.putNodeContent).toHaveBeenCalledTimes(2);
+    expect(api.putNodeContent.mock.calls[1][2]).toMatchObject({
+      label: 'Paper, final',
       expectRev: canonical,
     });
   });
 });
 
 describe("an agent's write to a PDF's properties and cover", () => {
-  it('is shown, and the next property save here descends from what the agent wrote', async () => {
+  it('is shown, and the next property save here sends its own key and leaves what the agent wrote', async () => {
     const PDF = 'node-content-pdf-agent';
     const pdf: Node = {
       id: PDF,
@@ -541,15 +616,11 @@ describe("an agent's write to a PDF's properties and cover", () => {
     await expect(
       commitNodeProperties(PDF, { properties: { tags: ['physics'] } }),
     ).resolves.toBe(true);
-    expect(api.putNodeContent.mock.calls[0][2]).toMatchObject({
-      properties: { year: 2026, tags: ['physics'] },
-      expectRev: nodeRevisionOf({
-        type: 'pdf',
-        content: 'Extracted text',
-        src: 'paper.pdf',
-        properties: { year: 2026 },
-        propertyDisplayKeys: ['year'],
-      }),
+    // Its own key, no revision; the agent's key is not sent back.
+    expect(api.putNodeContent.mock.calls[0][2]).toEqual({
+      nodeType: 'pdf',
+      properties: { tags: ['physics'] },
+      pageId: CANVAS_PAGE_ID,
     });
 
     // The agent clears the cover again; a page follows that too.
@@ -763,14 +834,129 @@ describe("the revision an update brings for a node's content", () => {
     expect(conflictToasts()).toHaveLength(0);
   });
 
+  /** An agent's `update` that changes custom properties of `id`, and its body when given. */
+  function agentTags(
+    id: string,
+    properties: Record<string, unknown>,
+    options: { content?: string; rev: string },
+  ) {
+    const prev = {
+      ...node(id),
+      data: { ...node(id).data, content: `Body ${id}` },
+    };
+    delete (prev.data as Record<string, unknown>)['properties'];
+    delete (prev.data as Record<string, unknown>)['propertyDisplayKeys'];
+    const next = {
+      ...prev,
+      data: {
+        ...prev.data,
+        properties,
+        propertyDisplayKeys: Object.keys(properties),
+        ...(options.content !== undefined ? { content: options.content } : {}),
+      },
+    };
+    return state().applyDeltasFromAgent(
+      [{ type: 'REPLACE_NODE', prev, next }] as never,
+      state().version + 1,
+      noEffects,
+      undefined,
+      undefined,
+      { source: 'agent', nodeContentRevisions: { [id]: options.rev } },
+    );
+  }
+
+  it('shows a property an agent changed while a body is being typed, keeps the text, and the body save is accepted without a prompt', async () => {
+    // The property change does not move the revision the server holds.
+    const rev = nodeRevisionOf({ content: `Body ${X}` });
+    serverHolds(rev);
+    state().updateNodeData(X, { content: 'Typing' });
+
+    // Nothing was withheld: the row is applied beside the unsaved body.
+    expect(agentTags(X, { tags: ['physics'] }, { rev })).toEqual([]);
+    expect(node(X).data).toMatchObject({
+      content: 'Typing',
+      properties: { tags: ['physics'] },
+      propertyDisplayKeys: ['tags'],
+    });
+
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(api.putNodeContent).toHaveBeenCalledTimes(1);
+    const sent = api.putNodeContent.mock.calls[0][2];
+    expect(sent).toMatchObject({ content: 'Typing', expectRev: rev });
+    // The agent's tag is not sent back.
+    expect(sent).not.toHaveProperty('properties');
+    expect(sent).not.toHaveProperty('propertyDisplayKeys');
+    expect(toast).not.toHaveBeenCalled();
+    expect(node(X).data).toMatchObject({
+      content: 'Typing',
+      properties: { tags: ['physics'] },
+    });
+    expect(state().pendingContentNodeIds()).not.toContain(X);
+  });
+
+  it('shows the properties of an update whose body it withholds from a node being typed', async () => {
+    serverHolds(STORED);
+    state().updateNodeData(X, { content: 'Typing' });
+
+    // The body is the overlap: reported as kept. The tag is not part of it.
+    expect(
+      agentTags(
+        X,
+        { tags: ['physics'] },
+        { content: 'Agent text', rev: STORED },
+      ),
+    ).toEqual([X]);
+    expect(node(X).data).toMatchObject({
+      content: 'Typing',
+      properties: { tags: ['physics'] },
+      propertyDisplayKeys: ['tags'],
+    });
+
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(api.putNodeContent.mock.calls[0][2]).toMatchObject({
+      content: 'Typing',
+      expectRev: STORED,
+    });
+    expect(api.putNodeContent.mock.calls[0][2]).not.toHaveProperty(
+      'properties',
+    );
+    expect(conflictToasts()).toHaveLength(0);
+  });
+
+  it('keeps a property key changed and not saved here, and shows the other keys of the update', async () => {
+    const rev = nodeRevisionOf({ content: `Body ${X}` });
+    // A store change of a property (an undo, say), still queued.
+    state().updateNodeData(X, { properties: { status: 'mine' } });
+
+    expect(
+      agentTags(X, { status: 'theirs', tags: ['physics'] }, { rev }),
+    ).toEqual([]);
+    expect(node(X).data.properties).toEqual({
+      status: 'mine',
+      tags: ['physics'],
+    });
+
+    await vi.advanceTimersByTimeAsync(10_000);
+    // This page's key goes out by itself and is the last writer of it.
+    expect(api.putNodeContent).toHaveBeenCalledTimes(1);
+    expect(api.putNodeContent.mock.calls[0][2]).toEqual({
+      nodeType: 'note',
+      properties: { status: 'mine' },
+      pageId: CANVAS_PAGE_ID,
+    });
+    expect(toast).not.toHaveBeenCalled();
+  });
+
   it("leaves the baseline of a body being typed alone when the update names none, so the refused save is the user's to answer", async () => {
     serverHolds(STORED);
     state().updateNodeData(X, { content: 'Typing' });
 
     expect(agentWrites(X, 'Agent text')).toEqual([X]);
     expect(node(X).data.content).toBe('Typing');
-    // A node with unsaved text is not fetched over.
-    expect(api.getNodeContent).not.toHaveBeenCalled();
+    // A node with unsaved text is not fetched over: it is read for its
+    // custom properties only, and neither its text nor its baseline moves.
+    expect(api.getNodeContent).toHaveBeenCalledTimes(1);
+    expect(node(X).data.content).toBe('Typing');
 
     await vi.advanceTimersByTimeAsync(10_000);
     // The save quoted the revision the page had, not one it computed.

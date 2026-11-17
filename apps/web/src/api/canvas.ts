@@ -98,6 +98,11 @@ export class CanvasConflictError extends Error {
   readonly nodeId?: string;
   /** For `NODE_CONTENT_CONFLICT`: the on-disk node's current revision. */
   readonly currentRev?: string;
+  /**
+   * For `NODE_CONTENT_CONFLICT`: the custom-property patch of the refused
+   * request was written; only the body and the other fields were refused.
+   */
+  readonly propertiesApplied: boolean;
 
   constructor(payload: CanvasConflictResponse) {
     super(payload.message);
@@ -106,6 +111,7 @@ export class CanvasConflictError extends Error {
     this.conflictWith = payload.conflictWith;
     this.nodeId = payload.nodeId;
     this.currentRev = payload.currentRev;
+    this.propertiesApplied = payload.propertiesApplied === true;
   }
 }
 

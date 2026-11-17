@@ -13,7 +13,7 @@ vi.mock('../api', async (importOriginal) => ({
 import { putNodeContent } from '@/api/canvas';
 
 import useCanvasStore from './canvasStore';
-import { commitNodeMetadata } from './canvasStore';
+import { commitNodeMetadata, flushNodeContent } from './canvasStore';
 import { useToolStore } from './toolStore';
 
 import type * as canvasApi from '../api';
@@ -43,7 +43,7 @@ afterEach(() => {
 });
 
 describe('canvas title ownership during loading', () => {
-  it('passes the canonical loaded PDF revision into the first property save', async () => {
+  it('saves a PDF property without a revision, and quotes the canonical loaded revision when it saves the title', async () => {
     api.getCanvas.mockResolvedValue({
       canvasId: 'pdf-space',
       title: 'Papers',
@@ -73,18 +73,28 @@ describe('canvas title ownership during loading', () => {
     });
     await useCanvasStore.getState().loadCanvas('pdf-space');
     await commitNodeMetadata('pdf', { properties: { Status: 'Reading' } });
-    expect(putNodeContent).toHaveBeenCalledWith(
-      'pdf-space',
-      'pdf',
-      expect.objectContaining({
-        expectRev: 'canonical-server-revision',
-        properties: { Venue: 'CHI 25', Status: 'Reading' },
-      }),
-      undefined,
+    // The one key that changed; no revision, no body, no title.
+    const propertySave = vi.mocked(putNodeContent).mock.calls[0][2];
+    expect(propertySave).toMatchObject({
+      nodeType: 'pdf',
+      properties: { Status: 'Reading' },
+    });
+    expect(Object.keys(propertySave).sort()).toEqual(
+      ['nodeType', 'pageId', 'properties'].sort(),
     );
-    expect(vi.mocked(putNodeContent).mock.calls[0][2]).not.toHaveProperty(
-      'content',
-    );
+
+    // A save that carries more than properties quotes the revision the load
+    // named, not a hash of the node without its extracted text, and not the
+    // revision the property save's answer named.
+    useCanvasStore.getState().updateNodeData('pdf', { label: 'Paper, final' });
+    await flushNodeContent('pdf');
+    const titleSave = vi.mocked(putNodeContent).mock.calls[1][2];
+    expect(titleSave).toMatchObject({
+      label: 'Paper, final',
+      expectRev: 'canonical-server-revision',
+    });
+    expect(titleSave).not.toHaveProperty('content');
+    expect(titleSave).not.toHaveProperty('properties');
   });
 
   it('resets tool intent on a direct Space change but preserves preferences and same-Space placement', async () => {

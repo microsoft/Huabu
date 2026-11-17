@@ -20,12 +20,23 @@
  *     a queue of pending bodies never builds up — trailing edits
  *     collapse into a single later PUT.
  *
+ * **What the revision covers.** `expectRev` is the revision of the node's
+ * body (`content`, `src`) and nothing else. Custom properties (`properties`,
+ * `propertyDisplayKeys`) are independent small items: they are sent as a
+ * per-key patch without a revision, either by themselves
+ * ({@link NodeContentQueue.commitProperties}, and a store change of
+ * properties alone) or beside a body in one request, where the server
+ * applies them whatever becomes of the body. A property save never moves the
+ * body's baseline, and a body save never carries a property nobody changed
+ * here.
+ *
  * See `docs/node-content-api-split.md`.
  */
 
 import deepEqual from 'fast-deep-equal';
 
 import {
+  CONTENT_REVISION_KEYS,
   nodeRevisionOf,
   mergeNodeProperties,
 } from '@huabu/shared/canvas-engine';
@@ -52,11 +63,6 @@ import {
   withContentPatch,
 } from './nodeContentFields';
 import { createPerKeyDebouncer } from './perKeyDebouncer';
-import {
-  rebasePropertyEdit,
-  type PropertyEdit,
-  type PropertySide,
-} from './propertyMerge';
 
 import type {
   GetNodeContentResponse,
@@ -74,11 +80,42 @@ import type { Node } from '@xyflow/react';
  */
 const REV_EMPTY = nodeRevisionOf({});
 
+/** A custom-property edit: the keys it sets or removes, and the display order. */
+type PropertyEdit = Pick<
+  PutNodeContentRequest,
+  'properties' | 'propertyDisplayKeys'
+>;
+
 /**
- * How often one property edit is made again on top of what the server holds
- * after its save was refused as stale, before the refusal is reported.
+ * The sidecar fields that hold a node's custom properties. No revision
+ * covers them and they are saved per key; every other content field belongs
+ * to the body's save.
  */
-const MAX_PROPERTY_MERGES = 3;
+const PROPERTY_FIELDS: ReadonlySet<string> = new Set([
+  'properties',
+  'propertyDisplayKeys',
+]);
+
+/** The keys of a property bag whose value differs between `before` and `after`. */
+function changedPropertyKeys(before: unknown, after: unknown): string[] {
+  const a = (before ?? {}) as Record<string, unknown>;
+  const b = (after ?? {}) as Record<string, unknown>;
+  return [...new Set([...Object.keys(a), ...Object.keys(b)])].filter(
+    (key) =>
+      Object.hasOwn(a, key) !== Object.hasOwn(b, key) ||
+      !deepEqual(a[key], b[key]),
+  );
+}
+
+/** Set `key` on a property bag or patch, also when it is named like a prototype member. */
+function setOwn(target: object, key: string, value: unknown): void {
+  Object.defineProperty(target, key, {
+    value,
+    enumerable: true,
+    configurable: true,
+    writable: true,
+  });
+}
 
 /** Compute a node's content revision (the CAS baseline) from its data. */
 function revOfNode(node: Node): string {
@@ -158,20 +195,14 @@ function remoteContentPatch(
   return patch;
 }
 
-/** The sidecar fields the content revision covers. */
-const REVISION_KEYS = [
-  'content',
-  'src',
-  'properties',
-  'propertyDisplayKeys',
-] as const;
-
 /**
- * Whether `node` shows exactly the authored content the server returned:
- * the same revision, or no difference in any field the revision covers that
- * a save of the node would carry (a PDF's extracted text is part of its
- * revision but is not sent by a page that does not hold it). Compared as a
- * save sends them; anything else, one character included, is a difference.
+ * Whether `node` shows exactly the body the server returned: the same
+ * revision, or no difference in any field the revision covers
+ * (`CONTENT_REVISION_KEYS`: `content`, `src`) that a save of the node would
+ * carry (a PDF's extracted text is part of its revision but is not sent by a
+ * page that does not hold it). Compared as a save sends them; anything else,
+ * one character included, is a difference. Custom properties are not part of
+ * it: they have no revision and cannot be in conflict.
  */
 function showsServerContent(node: Node, res: GetNodeContentResponse): boolean {
   if (res.contentMissing) return false;
@@ -183,12 +214,7 @@ function showsServerContent(node: Node, res: GetNodeContentResponse): boolean {
     data['content'] !== res.content
   )
     return false;
-  if (typeof data['src'] === 'string' && data['src'] !== res.src) return false;
-  return (['properties', 'propertyDisplayKeys'] as const).every((key) =>
-    res[key] === undefined
-      ? data[key] === undefined
-      : sameValue(data[key], res[key]),
-  );
+  return !(typeof data['src'] === 'string' && data['src'] !== res.src);
 }
 
 /** What {@link NodeContentQueue.adoptRemoteContent} did with a node. */
@@ -197,7 +223,11 @@ export type RemoteContentOutcome =
   | 'applied'
   /** The node already showed it; only the baseline revision moved. */
   | 'unchanged'
-  /** This page has its own unsaved content for the node; nothing was touched. */
+  /**
+   * This page has its own unsaved body for the node: the text, title and
+   * baseline were not touched. Custom properties the page has not changed
+   * itself were taken from the server.
+   */
   | 'kept-local'
   /** The node, its sidecar or the Space is not there (any more). */
   | 'absent'
@@ -221,7 +251,13 @@ export type NodeContentQueueState = {
  * Public shape returned by {@link createNodeContentQueue}.
  */
 export type NodeContentQueue = {
-  /** Stage a property edit in the write lane; publish locally only on success. */
+  /**
+   * Save a custom-property edit now, as a per-key patch without a revision,
+   * and publish it locally only when the server has answered. Independent of
+   * the node's body: it is sent while a body is unsaved, in flight or frozen
+   * by a conflict, and moves no baseline. Rejects when the save fails; the
+   * store is then as it was and the caller reports it.
+   */
   commitProperties(
     canvasId: string,
     nodeId: string,
@@ -342,6 +378,18 @@ export type NodeContentQueue = {
   unsavedNodeIds(canvasId: string): string[];
   pendingFields(nodeId: string): ReadonlySet<string>;
   /**
+   * The custom-property keys of `nodeId` this page changed and has not
+   * saved. An update keeps those as they are here and shows every other
+   * property it changed.
+   */
+  pendingPropertyKeys(nodeId: string): ReadonlySet<string>;
+  /**
+   * Properties an update brought for `nodeId` were put into the store by
+   * the caller. A property edit of the node that is on the wire is followed
+   * by one fetch, so the page ends with what the server holds.
+   */
+  remotePropertiesShown(nodeId: string): void;
+  /**
    * Settles when the save of `nodeId` now on the wire (and those chained
    * behind it) has been answered. `true` when nothing else is waiting for
    * the node — no queued field, no debounce, no held restore — so a caller
@@ -357,8 +405,7 @@ export type NodeContentQueue = {
 
   /**
    * Move the save baseline of each given node: the revision its next
-   * content save quotes as `expectRev`, and the property bag that save
-   * computes removals against. **Nothing else**: a failed save stays
+   * body save quotes as `expectRev`. **Nothing else**: a failed save stays
    * recorded with its Retry toast, and a node frozen by a content conflict
    * stays frozen. Called whenever the page learns the server's current
    * revision of a node — a load, an update that changed the node's content
@@ -416,10 +463,13 @@ export type NodeContentQueue = {
    * with its revision as the new baseline, so this page's next save of the
    * node descends from what it now shows.
    *
-   * A node with content this page has not saved yet (queued, in flight,
-   * failed, conflicted or held for a restore) is left exactly as it is, so
-   * the existing `NODE_CONTENT_CONFLICT` choice still decides it; the node is
-   * fetched once that save has been acknowledged. The store is written
+   * A node with a body this page has not saved yet (queued, in flight,
+   * failed, conflicted or held for a restore) keeps its text, title and
+   * baseline, so the existing `NODE_CONTENT_CONFLICT` choice still decides
+   * it. Its custom properties are fetched and shown all the same — they do
+   * not overlap the unsaved body — except a property this page has itself
+   * changed and not saved. The whole node is fetched once that save has been
+   * acknowledged. The store is written
    * through `_setStateNoAutosave`: no save, undo entry or preprocessing run
    * follows on this page.
    */
@@ -462,8 +512,6 @@ export function createNodeContentQueue(opts: {
     nodeId: string,
     patch: Pick<PutNodeContentRequest, 'properties' | 'propertyDisplayKeys'>,
   ) => void;
-  /** Whether another page reports `nodeId` as being edited right now. */
-  isEditedElsewhere?: (nodeId: string) => boolean;
 }): NodeContentQueue {
   const debouncer = createPerKeyDebouncer<string>(opts.delayMs);
   const suspendedCanvases = new Set<string>();
@@ -490,6 +538,25 @@ export function createNodeContentQueue(opts: {
     if (cancel) pendingFailureRecovery.set(nodeId, cancel);
   }
   const pendingFields = new Map<string, Map<string, { removed?: boolean }>>();
+  /**
+   * The custom-property keys of each node that a store change set, changed
+   * or removed and that have not been saved, each with the token of its
+   * latest change. They are what a save sends as `properties`: the key's
+   * value now, or `null` when it is gone. A node has an entry only together
+   * with a `properties` entry in {@link pendingFields}.
+   */
+  const pendingPropertyKeys = new Map<string, Map<string, object>>();
+  /**
+   * {@link NodeContentQueue.commitProperties} saves under way, one chain per
+   * node. Not unsaved content of the node: the edit is not in the store
+   * until it is answered, and the body's lane ({@link inflight}) does not
+   * wait for it.
+   */
+  const propertySaves = new Map<string, Promise<void>>();
+  /** Nodes whose properties arrived from the server while such a save was under way. */
+  const remoteDuringPropertySave = new Set<string>();
+  /** The node whose acknowledged property edit is being put into the store. */
+  let publishingProperties: string | undefined;
   const suppressNextNewNodeSave = new Set<string>();
   /**
    * Last `(label, labelSource)` the server confirmed it persisted for
@@ -516,7 +583,6 @@ export function createNodeContentQueue(opts: {
    * "I believe this is a fresh create").
    */
   const baselineRev = new Map<string, string>();
-  const baselineProperties = new Map<string, NodeProperties>();
   const baselineGeneration = new Map<string, object>();
 
   /**
@@ -569,32 +635,100 @@ export function createNodeContentQueue(opts: {
   const saveErrorToasted = new Set<string>();
 
   /**
+   * The custom-property part of a save of `nodeId`: the keys a store change
+   * touched and that are not saved yet, each with its value now (`null` when
+   * it is gone), and the display order when that changed. A restored node
+   * sends its whole bag, since its sidecar starts absent. Keys nobody
+   * changed here are never sent, so another writer's keys are never
+   * overwritten or removed by this page.
+   */
+  function propertyPatchOf(
+    nodeId: string,
+    data: Record<string, unknown>,
+    requestFields: ReadonlySet<string> | undefined,
+  ): PropertyEdit {
+    const patch: PropertyEdit = {};
+    const local = data['properties'] as NodeProperties | undefined;
+    if (restoredContent.has(nodeId)) {
+      if (local !== undefined) patch.properties = { ...local };
+      if (data['propertyDisplayKeys'] !== undefined)
+        patch.propertyDisplayKeys = data['propertyDisplayKeys'] as string[];
+      return patch;
+    }
+    if (requestFields?.has('properties')) {
+      const keys = [...(pendingPropertyKeys.get(nodeId)?.keys() ?? [])];
+      if (keys.length > 0) {
+        patch.properties = {};
+        for (const key of keys)
+          setOwn(
+            patch.properties,
+            key,
+            local && Object.hasOwn(local, key) ? local[key] : null,
+          );
+      }
+    }
+    // An order that was removed is sent as the empty one; a node that
+    // never had one sends nothing.
+    if (
+      requestFields?.has('propertyDisplayKeys') &&
+      (data['propertyDisplayKeys'] !== undefined ||
+        pendingFields.get(nodeId)?.get('propertyDisplayKeys')?.removed)
+    )
+      patch.propertyDisplayKeys =
+        (data['propertyDisplayKeys'] as string[] | undefined) ?? [];
+    return patch;
+  }
+
+  /**
    * Build the `PutNodeContentRequest` body for `nodeId` from the
    * latest store snapshot. Returns `null` when the node has gone
    * away (e.g. deleted between debounce-schedule and flush) or its
    * type is not markdown-backed.
+   *
+   * `propertyOnly` says the request carries custom properties and nothing
+   * else — no body, no title and no `expectRev`: when properties are all
+   * that is unsaved, and for a node frozen by a body conflict, whose
+   * properties are saved while the body waits for the user's choice.
    */
   function buildRequest(
     nodeId: string,
     requestFields: ReadonlySet<string> | undefined,
-  ): PutNodeContentRequest | null {
+  ): { body: PutNodeContentRequest; propertyOnly: boolean } | null {
     const node = opts.getState().nodes.find((n) => n.id === nodeId);
     if (!node) return null;
     const nodeType = typeof node.type === 'string' ? node.type : '';
     if (!MD_BACKED_NODE_TYPES.has(nodeType)) return null;
 
-    // Frozen after a content conflict: refuse every write path until the
-    // user resolves it, so neither a debounced autosave nor the unload
-    // keepalive can clobber the newer server content.
-    if (frozen.has(nodeId) || restores.has(nodeId)) return null;
+    // Held until the batch that brings the node back is acknowledged.
+    if (restores.has(nodeId)) return null;
 
     const data = (node.data ?? {}) as Record<string, unknown>;
     if (data['contentMissing'] === true) return null;
-    const partialQuestionWrite =
-      nodeType === 'question' && !restoredContent.has(nodeId);
+    const restored = restoredContent.has(nodeId);
+    const propertyPatch = propertyPatchOf(nodeId, data, requestFields);
+    const hasPropertyPatch =
+      propertyPatch.properties !== undefined ||
+      propertyPatch.propertyDisplayKeys !== undefined;
+
+    // Frozen after a content conflict: refuse every write path for the body
+    // until the user resolves it, so neither a debounced autosave nor the
+    // unload keepalive can clobber the newer server content. Properties are
+    // not part of that conflict and go out by themselves.
+    const frozenBody = frozen.has(nodeId);
+    if (frozenBody && !hasPropertyPatch) return null;
+    const onlyPropertiesRequested =
+      (requestFields?.size ?? 0) > 0 &&
+      [...(requestFields ?? [])].every((key) => PROPERTY_FIELDS.has(key));
+    // A node this page has not saved yet (no baseline) is sent whole.
+    const propertyOnly =
+      !restored &&
+      (frozenBody || (onlyPropertiesRequested && baselineRev.has(nodeId)));
+
+    const partialQuestionWrite = nodeType === 'question' && !restored;
     if (partialQuestionWrite && !requestFields?.size) return null;
     const includes = (key: string) =>
-      !partialQuestionWrite || requestFields?.has(key) === true;
+      !propertyOnly &&
+      (!partialQuestionWrite || requestFields?.has(key) === true);
     const body: PutNodeContentRequest = { nodeType };
 
     if (TEXT_BEARING_NODE_TYPES.has(nodeType) && includes('content')) {
@@ -637,42 +771,22 @@ export function createNodeContentQueue(opts: {
     if (includes('provenance') && 'provenance' in data) {
       body.provenance = data['provenance'];
     }
-    if (
-      includes('properties') &&
-      (data.properties !== undefined || baselineProperties.has(nodeId))
-    ) {
-      body.properties = { ...(data.properties as NodeProperties | undefined) };
-      for (const key of Object.keys(baselineProperties.get(nodeId) ?? {})) {
-        if (!Object.hasOwn(body.properties, key)) {
-          Object.defineProperty(body.properties, key, {
-            value: null,
-            enumerable: true,
-            configurable: true,
-            writable: true,
-          });
-        }
-      }
-    }
-    if (
-      includes('propertyDisplayKeys') &&
-      (data.propertyDisplayKeys !== undefined ||
-        pendingFields.get(nodeId)?.get('propertyDisplayKeys')?.removed)
-    )
-      body.propertyDisplayKeys =
-        (data.propertyDisplayKeys as string[] | undefined) ?? [];
+    // The per-key property patch. The server applies it to the properties
+    // it holds, whatever revision the request quotes.
+    Object.assign(body, propertyPatch);
 
-    // Optimistic-concurrency baseline. A node we've loaded / synced has a
-    // seeded rev; a brand-new node (no entry) sends the empty-content rev
-    // so its create only lands while no `.md` exists yet on the server.
-    // The web sends this uniformly for every md-backed node; the server
-    // applies rev-CAS for authored bodies and custom metadata; derived
-    // body-only edits remain last-write-wins —
+    // Optimistic-concurrency baseline of the body. A node we've loaded /
+    // synced has a seeded rev; a brand-new node (no entry) sends the
+    // empty-content rev so its create only lands while no `.md` exists yet
+    // on the server. The web sends this uniformly for every md-backed node
+    // whose request carries more than properties; the server applies rev-CAS
+    // for authored bodies; derived body-only edits remain last-write-wins —
     // `bodyOwnership` in the preprocessing profiles is the single source
     // of truth, so the client need not know the classification.
-    body.expectRev = baselineRev.get(nodeId) ?? REV_EMPTY;
+    if (!propertyOnly) body.expectRev = baselineRev.get(nodeId) ?? REV_EMPTY;
     if (opts.pageId) body.pageId = opts.pageId;
 
-    return body;
+    return { body, propertyOnly };
   }
 
   /**
@@ -690,7 +804,6 @@ export function createNodeContentQueue(opts: {
     canvasId: string,
     nodeId: string,
     kOpts?: { keepalive?: boolean },
-    initialPropertyEdit?: PropertyEdit,
   ): Promise<boolean> {
     if (
       opts.getState().canvasId !== canvasId ||
@@ -704,35 +817,39 @@ export function createNodeContentQueue(opts: {
       generations.get(nodeId) !== generation
     )
       return false;
-    // The property edit as it is sent: made again on top of the server's
-    // properties each time its save is refused as stale.
-    let propertyEdit = initialPropertyEdit;
-    let propertyBase: PropertySide | undefined;
-    let propertyMerges = 0;
     let identicalSettled = false;
     while (true) {
       if (suspendedCanvases.has(canvasId)) return false;
       const requested = new Map(pendingFields.get(nodeId));
-      const body = buildRequest(
-        nodeId,
-        new Set([...requested.keys(), ...Object.keys(propertyEdit ?? {})]),
+      const request = buildRequest(nodeId, new Set(requested.keys()));
+      if (!request) return false;
+      const { body, propertyOnly } = request;
+      // A request of properties alone settles those fields and no others.
+      if (propertyOnly) {
+        for (const key of [...requested.keys()])
+          if (!PROPERTY_FIELDS.has(key)) requested.delete(key);
+      }
+      const sentPropertyKeys = new Map(
+        body.properties ? pendingPropertyKeys.get(nodeId) : undefined,
       );
-      if (!body) return false;
+      /** The property fields of this request are on the server. */
+      const settleProperties = (): void => {
+        const pendingKeys = pendingPropertyKeys.get(nodeId);
+        for (const [key, token] of sentPropertyKeys) {
+          if (pendingKeys?.get(key) === token) pendingKeys.delete(key);
+        }
+        if (pendingKeys?.size === 0) pendingPropertyKeys.delete(nodeId);
+        const livePending = pendingFields.get(nodeId);
+        for (const key of PROPERTY_FIELDS) {
+          const token = requested.get(key);
+          if (!token || livePending?.get(key) !== token) continue;
+          // A key changed again while the request was on the wire.
+          if (key === 'properties' && pendingPropertyKeys.has(nodeId)) continue;
+          livePending.delete(key);
+        }
+        if (livePending?.size === 0) pendingFields.delete(nodeId);
+      };
       const sentNode = opts.getState().nodes.find((node) => node.id === nodeId);
-      const beforeProperties = sentNode?.data;
-      if (propertyEdit && !propertyBase)
-        propertyBase = {
-          properties: beforeProperties?.properties as
-            | NodeProperties
-            | undefined,
-          propertyDisplayKeys: beforeProperties?.propertyDisplayKeys as
-            | string[]
-            | undefined,
-        };
-      if (propertyEdit?.properties)
-        body.properties = { ...body.properties, ...propertyEdit.properties };
-      if (propertyEdit?.propertyDisplayKeys)
-        body.propertyDisplayKeys = propertyEdit.propertyDisplayKeys;
       const baselineAtRequest = baselineGeneration.get(nodeId);
       let response: PutNodeContentResponse;
       try {
@@ -742,31 +859,12 @@ export function createNodeContentQueue(opts: {
           error instanceof CanvasConflictError &&
           error.code === 'NODE_CONTENT_CONFLICT'
         ) {
-          if (propertyEdit && propertyBase) {
-            // Another save moved the revision. Different properties of one
-            // node are independent: when that save left this edit's keys
-            // alone the edit is made again on top of it; when it changed one
-            // of them the refusal stands.
-            const rebased =
-              propertyMerges < MAX_PROPERTY_MERGES
-                ? await rebasePropertyEditOntoServer(
-                    canvasId,
-                    nodeId,
-                    generation,
-                    propertyEdit,
-                    propertyBase,
-                    requested.size > 0,
-                  )
-                : null;
-            if (rebased) {
-              propertyMerges += 1;
-              propertyEdit = rebased.edit;
-              propertyBase = rebased.base;
-              continue;
-            }
-          } else if (baselineGeneration.get(nodeId) !== baselineAtRequest) {
+          // The body was refused; the property patch beside it was written.
+          if (error.propertiesApplied) settleProperties();
+          if (baselineGeneration.get(nodeId) !== baselineAtRequest) {
             continue;
           } else if (
+            !propertyOnly &&
             !identicalSettled &&
             !kOpts?.keepalive &&
             sentNode &&
@@ -794,86 +892,37 @@ export function createNodeContentQueue(opts: {
         !opts.getState().nodes.some((node) => node.id === nodeId)
       )
         return false;
-      if (baselineGeneration.get(nodeId) !== baselineAtRequest) continue;
-
-      if (propertyEdit) {
-        const state = opts.getState();
-        const live = state.nodes.find((node) => node.id === nodeId);
-        if (!live) return false;
-        const previous = beforeProperties?.properties as
-          | NodeProperties
-          | undefined;
-        const current = live.data.properties as NodeProperties | undefined;
-        const patch: Pick<
-          PutNodeContentRequest,
-          'properties' | 'propertyDisplayKeys'
-        > = {};
-        if (propertyEdit.properties)
-          patch.properties = Object.fromEntries(
-            Object.entries(propertyEdit.properties).filter(([key]) =>
-              deepEqual(current?.[key], previous?.[key]),
-            ),
-          );
-        if (
-          propertyEdit.propertyDisplayKeys &&
-          deepEqual(
-            live.data.propertyDisplayKeys,
-            beforeProperties?.propertyDisplayKeys,
-          )
-        )
-          patch.propertyDisplayKeys = propertyEdit.propertyDisplayKeys;
-        const pendingBeforeCommit = new Map(pendingFields.get(nodeId));
-        if (opts.onPropertiesSaved) opts.onPropertiesSaved(nodeId, patch);
-        else
-          state._setStateNoAutosave({
-            nodes: state.nodes.map((node) =>
-              node.id !== nodeId
-                ? node
-                : {
-                    ...node,
-                    data: {
-                      ...node.data,
-                      ...(patch.properties
-                        ? {
-                            properties: mergeNodeProperties(
-                              current,
-                              patch.properties,
-                            ),
-                          }
-                        : {}),
-                      ...(patch.propertyDisplayKeys
-                        ? { propertyDisplayKeys: patch.propertyDisplayKeys }
-                        : {}),
-                    },
-                  },
-            ),
-          });
-        // The acknowledged UI commit can schedule autosave; consume only its tokens.
-        for (const key of Object.keys(patch)) {
-          if (pendingBeforeCommit.get(key) !== requested.get(key)) continue;
-          const token = pendingFields.get(nodeId)?.get(key);
-          if (token) requested.set(key, token);
+      if (propertyOnly) {
+        // Properties have no baseline: the body's revision, its failure
+        // record and a conflict freeze are as they were. The answer names
+        // the revision of the body the server holds, which is not
+        // necessarily the body this page shows.
+        settleProperties();
+        if (!frozen.has(nodeId)) {
+          failures.delete(nodeId);
+          dismissFailureToast(nodeId);
+          saveErrorToasted.delete(nodeId);
+          if (pendingFields.get(nodeId)?.size) schedule(canvasId, nodeId);
+          else opts.onContentPersisted?.(canvasId, nodeId);
         }
+        return true;
       }
+      if (baselineGeneration.get(nodeId) !== baselineAtRequest) continue;
+      settleProperties();
+
       // Content and its baseline update together: record the rev the server
       // actually persisted so the next edit's `expectRev` is fresh (and a
       // rapid follow-up edit doesn't 409 against our own just-committed
       // write). Also clear any content-conflict toast guard — a success
       // means the node is no longer blocked.
       baselineRev.set(nodeId, response.rev);
-      if (body.properties !== undefined)
-        baselineProperties.set(
-          nodeId,
-          mergeNodeProperties(baselineProperties.get(nodeId), body.properties),
-        );
       baselineGeneration.set(nodeId, {});
       const livePending = pendingFields.get(nodeId);
       for (const [key, token] of requested) {
+        if (PROPERTY_FIELDS.has(key)) continue;
         if (livePending?.get(key) === token) livePending.delete(key);
       }
       if (livePending?.size === 0) pendingFields.delete(nodeId);
-      if (propertyEdit && !pendingFields.get(nodeId)?.size)
-        debouncer.cancel(nodeId);
       const completedRestore = restoredContent.delete(nodeId);
       failures.delete(nodeId);
       dismissFailureToast(nodeId);
@@ -1073,9 +1122,6 @@ export function createNodeContentQueue(opts: {
 
     // Re-baseline to the server rev and unfreeze so editing resumes.
     baselineRev.set(nodeId, res.rev);
-    if (res.properties !== undefined)
-      baselineProperties.set(nodeId, res.properties);
-    else baselineProperties.delete(nodeId);
     lastSuccessful.set(nodeId, {
       label: res.label,
       labelSource: res.labelSource,
@@ -1105,53 +1151,20 @@ export function createNodeContentQueue(opts: {
     nodeId: string,
     source: 'user' | 'auto',
     kOpts?: { keepalive?: boolean },
-    propertyEdit?: Pick<
-      PutNodeContentRequest,
-      'properties' | 'propertyDisplayKeys'
-    >,
   ): Promise<void> {
     const generation = generations.get(nodeId);
     try {
       if (opts.getState().canvasId !== canvasId) {
         throw new Error(`Content save Canvas changed: ${canvasId}`);
       }
-      if (propertyEdit) {
-        const state = opts.getState();
-        const node = state.nodes.find((item) => item.id === nodeId);
-        if (
-          !node ||
-          state.isLoading ||
-          suspendedCanvases.has(canvasId) ||
-          restores.has(nodeId) ||
-          node.data.contentMissing
-        )
-          throw new Error('Node is not available for property editing');
-        if (frozen.has(nodeId))
-          throw new CanvasConflictError({
-            code: 'NODE_CONTENT_CONFLICT',
-            message: 'Resolve the content conflict before editing properties',
-            currentRev: frozen.get(nodeId),
-          });
-      }
-      const saved = await performSave(canvasId, nodeId, kOpts, propertyEdit);
-      if (
-        propertyEdit &&
-        (!saved ||
-          opts.getState().canvasId !== canvasId ||
-          generations.get(nodeId) !== generation)
-      )
-        throw new Error('Property edit was not saved');
+      await performSave(canvasId, nodeId, kOpts);
     } catch (err) {
       if (
         opts.getState().canvasId !== canvasId ||
         generations.get(nodeId) !== generation
-      ) {
-        if (propertyEdit) throw err;
+      )
         return;
-      }
-      if (!propertyEdit || pendingFields.get(nodeId)?.size)
-        failures.set(nodeId, { canvasId, error: err });
-      else failures.delete(nodeId);
+      failures.set(nodeId, { canvasId, error: err });
       if (err instanceof NodeDuplicateFilesError) {
         notifyDuplicate(nodeId, err);
         throw err;
@@ -1166,13 +1179,11 @@ export function createNodeContentQueue(opts: {
         // further autosaves keep being refused until the user reloads.
         if (err.code === 'NODE_CONTENT_CONFLICT') {
           handleContentConflict(nodeId, err.currentRev ?? REV_EMPTY);
-          if (propertyEdit) throw err;
           return;
         }
         throw err;
       }
-      if (!propertyEdit || pendingFields.get(nodeId)?.size)
-        handleSaveFailure(canvasId, nodeId, source, err);
+      handleSaveFailure(canvasId, nodeId, source, err);
       throw err;
     }
   }
@@ -1392,89 +1403,70 @@ export function createNodeContentQueue(opts: {
     }
     // Content and its baseline move together, as on every other path.
     baselineRev.set(nodeId, res.rev);
-    if (res.properties !== undefined)
-      baselineProperties.set(nodeId, structuredClone(res.properties));
-    else baselineProperties.delete(nodeId);
     baselineGeneration.set(nodeId, {});
     lastSuccessful.set(nodeId, {
       label: res.label,
       labelSource: res.labelSource,
     });
+    if (propertySaves.has(nodeId)) remoteDuringPropertySave.add(nodeId);
     if (changed) opts.onRemoteContentAdopted?.(canvasId, nodeId, patch);
     return changed;
   }
 
   /**
-   * A property save of `nodeId` was refused as stale. Fetch what the server
-   * holds and, when the other save did not change what `edit` changes, show
-   * the server's content and return the edit as it has to be sent on top of
-   * it. `null` leaves everything as it was, and the refusal is reported.
-   *
-   * Nothing is merged when this page has other unsaved content for the node,
-   * and when the other save changed the body or title while another page is
-   * still editing the node: its next save would then be the one refused.
+   * Show the server's custom properties of a node whose body this page
+   * keeps: its text, title and baseline are not touched. A property key this
+   * page changed and has not saved keeps the value it has here, and so does
+   * the display order when this page changed that. Returns whether the node
+   * changed.
    */
-  async function rebasePropertyEditOntoServer(
+  function installRemoteProperties(
     canvasId: string,
     nodeId: string,
-    generation: object | undefined,
-    edit: PropertyEdit,
-    base: PropertySide,
-    otherFieldsRequested: boolean,
-  ): Promise<{ edit: PropertyEdit; base: PropertySide } | null> {
-    if (otherFieldsRequested || restoredContent.has(nodeId)) return null;
-    let res: GetNodeContentResponse | null;
-    try {
-      res = await getNodeContent(canvasId, nodeId);
-    } catch {
-      return null;
-    }
+    res: GetNodeContentResponse,
+  ): boolean {
+    if (res.contentMissing) return false;
     const state = opts.getState();
     const node = state.nodes.find((n) => n.id === nodeId);
+    if (!node) return false;
+    const data = (node.data ?? {}) as Record<string, unknown>;
+    const local = data['properties'] as NodeProperties | undefined;
+    const patch: Record<string, unknown> = {};
+
+    let properties = res.properties;
+    const unsavedKeys = pendingPropertyKeys.get(nodeId);
+    if (unsavedKeys?.size) {
+      const merged: NodeProperties = { ...res.properties };
+      for (const key of unsavedKeys.keys()) {
+        if (local && Object.hasOwn(local, key)) setOwn(merged, key, local[key]);
+        else delete merged[key];
+      }
+      properties =
+        Object.keys(merged).length > 0 || local !== undefined
+          ? merged
+          : undefined;
+    }
+    if (!sameValue(local, properties)) patch['properties'] = properties;
     if (
-      !res ||
-      res.contentMissing ||
-      !node ||
-      state.canvasId !== canvasId ||
-      suspendedCanvases.has(canvasId) ||
-      generations.get(nodeId) !== generation ||
-      pendingFields.get(nodeId)?.size
+      !pendingFields.get(nodeId)?.has('propertyDisplayKeys') &&
+      !sameValue(data['propertyDisplayKeys'], res.propertyDisplayKeys)
     )
-      return null;
-    const rebased = rebasePropertyEdit(edit, base, res);
-    if (!rebased) return null;
-    const patch = remoteContentPatch(
-      node.type ?? '',
-      (node.data ?? {}) as Record<string, unknown>,
-      res,
-    );
-    const bodyChanged = Object.keys(patch).some(
-      (key) =>
-        key !== 'properties' &&
-        key !== 'propertyDisplayKeys' &&
-        key !== 'contentMissing',
-    );
-    if (bodyChanged && opts.isEditedElsewhere?.(nodeId)) return null;
-    installRemoteContent(canvasId, nodeId, res, patch);
-    return {
-      edit: rebased,
-      base: {
-        properties: res.properties,
-        propertyDisplayKeys: res.propertyDisplayKeys,
-      },
-    };
+      patch['propertyDisplayKeys'] = res.propertyDisplayKeys;
+
+    if (propertySaves.has(nodeId)) remoteDuringPropertySave.add(nodeId);
+    if (Object.keys(patch).length === 0) return false;
+    state._setStateNoAutosave({
+      nodes: state.nodes.map((n) =>
+        n.id === nodeId ? { ...n, data: withContentPatch(n.data, patch) } : n,
+      ),
+    });
+    opts.onRemoteContentAdopted?.(canvasId, nodeId, patch);
+    return true;
   }
 
   /** Take `rev` as the baseline of a node whose content equals the server's. */
-  function adoptIdenticalBaseline(
-    nodeId: string,
-    rev: string,
-    properties: NodeProperties | undefined,
-  ): void {
+  function adoptIdenticalBaseline(nodeId: string, rev: string): void {
     baselineRev.set(nodeId, rev);
-    if (properties !== undefined)
-      baselineProperties.set(nodeId, structuredClone(properties));
-    else baselineProperties.delete(nodeId);
     baselineGeneration.set(nodeId, {});
   }
 
@@ -1493,11 +1485,7 @@ export function createNodeContentQueue(opts: {
     currentRev: string | undefined,
   ): Promise<boolean> {
     if (currentRev !== undefined && currentRev === revOfNode(sent)) {
-      adoptIdenticalBaseline(
-        nodeId,
-        currentRev,
-        sent.data.properties as NodeProperties | undefined,
-      );
+      adoptIdenticalBaseline(nodeId, currentRev);
       return true;
     }
     let res: GetNodeContentResponse | null;
@@ -1517,30 +1505,30 @@ export function createNodeContentQueue(opts: {
       !showsServerContent(live, res)
     )
       return false;
-    adoptIdenticalBaseline(nodeId, res.rev, res.properties);
+    adoptIdenticalBaseline(nodeId, res.rev);
     return true;
   }
 
   /**
    * End the freeze of a node whose content turned out to equal the
    * server's: no toast, the server's revision as the baseline, the text
-   * untouched. Fields the revision does not cover that are still unsaved go
-   * out with the next save, which is scheduled here.
+   * untouched. Fields the revision does not cover that are still unsaved (a
+   * title, a summary, a property) go out with the next save, which is
+   * scheduled here.
    */
   function settleIdenticalConflict(
     canvasId: string,
     nodeId: string,
     rev: string,
-    properties: NodeProperties | undefined,
   ): void {
     frozen.delete(nodeId);
     contentConflictToasted.delete(nodeId);
     dismissFailureToast(nodeId);
     failures.delete(nodeId);
-    adoptIdenticalBaseline(nodeId, rev, properties);
+    adoptIdenticalBaseline(nodeId, rev);
     // What the revision covers is on the server as this page shows it.
     const pending = pendingFields.get(nodeId);
-    for (const key of REVISION_KEYS) pending?.delete(key);
+    for (const key of CONTENT_REVISION_KEYS) pending?.delete(key);
     if (pending?.size) {
       schedule(canvasId, nodeId);
     } else {
@@ -1578,11 +1566,14 @@ export function createNodeContentQueue(opts: {
         return 'absent';
       if (!frozen.has(nodeId) || !res || res.contentMissing)
         return 'kept-local';
+      // The conflict is about the body. The other save's properties are
+      // shown whichever way it ends.
+      installRemoteProperties(canvasId, nodeId, res);
       if (inflight.has(nodeId) || !showsServerContent(node, res)) {
         frozen.set(nodeId, res.rev);
         return 'kept-local';
       }
-      settleIdenticalConflict(canvasId, nodeId, res.rev, res.properties);
+      settleIdenticalConflict(canvasId, nodeId, res.rev);
       return 'unchanged';
     })()
       .catch((error: unknown): RemoteContentOutcome => {
@@ -1611,8 +1602,13 @@ export function createNodeContentQueue(opts: {
       const node = state.nodes.find((n) => n.id === nodeId);
       if (!node || generations.get(nodeId) !== generation) return 'absent';
       if (hasUnsavedLocalContent(nodeId)) {
-        // The person started typing while the fetch was under way.
+        // This page has a body of its own for the node (also when the
+        // person started typing while the fetch was under way): the text
+        // stays, and the whole node is fetched after its save. The other
+        // save's properties do not overlap it and are shown now.
         remoteWhileUnsaved.add(nodeId);
+        if (res) installRemoteProperties(canvasId, nodeId, res);
+        if (entry.again) continue;
         return 'kept-local';
       }
       if (!res) {
@@ -1653,7 +1649,7 @@ export function createNodeContentQueue(opts: {
       // left exactly the text this page shows.
       if (frozen.has(nodeId) && !inflight.has(nodeId))
         return checkFrozenAgainstServer(canvasId, nodeId);
-      return Promise.resolve('kept-local');
+      // Otherwise the fetch below brings the other save's properties only.
     }
     const running = remoteFetches.get(nodeId);
     if (running) {
@@ -1689,10 +1685,6 @@ export function createNodeContentQueue(opts: {
     nodeId: string,
     source: 'user' | 'auto',
     kOpts?: { keepalive?: boolean },
-    propertyEdit?: Pick<
-      PutNodeContentRequest,
-      'properties' | 'propertyDisplayKeys'
-    >,
   ): Promise<void> {
     if (!generations.has(nodeId)) generations.set(nodeId, {});
     const prev = inflight.get(nodeId) ?? Promise.resolve();
@@ -1701,9 +1693,7 @@ export function createNodeContentQueue(opts: {
       // the chain — tryRename has already handled that error via its
       // own await.
       .catch(() => undefined)
-      .then(() =>
-        performSaveSafely(canvasId, nodeId, source, kOpts, propertyEdit),
-      );
+      .then(() => performSaveSafely(canvasId, nodeId, source, kOpts));
     inflight.set(nodeId, next);
     // `.finally()` returns a new promise that re-rejects when `next`
     // rejects. The outer caller (`schedule` / `flushNow` / `flushAll`)
@@ -1722,6 +1712,161 @@ export function createNodeContentQueue(opts: {
           !hasUnsavedLocalContent(nodeId) &&
           remoteWhileUnsaved.delete(nodeId)
         )
+          void adoptRemoteContent(canvasId, nodeId);
+      })
+      .catch(() => undefined);
+    return next;
+  }
+
+  /**
+   * One {@link NodeContentQueue.commitProperties} save: the edit's keys and
+   * display order, sent by themselves without a revision, and put into the
+   * store once the server has answered. Throws when it was not saved.
+   */
+  async function performPropertySave(
+    canvasId: string,
+    nodeId: string,
+    edit: PropertyEdit,
+  ): Promise<void> {
+    const unavailable = (): boolean => {
+      const state = opts.getState();
+      const node = state.nodes.find((item) => item.id === nodeId);
+      return (
+        state.canvasId !== canvasId ||
+        !node ||
+        state.isLoading ||
+        suspendedCanvases.has(canvasId) ||
+        restores.has(nodeId) ||
+        node.data.contentMissing === true ||
+        !MD_BACKED_NODE_TYPES.has(node.type ?? '')
+      );
+    };
+    if (unavailable())
+      throw new Error('Node is not available for property editing');
+    const generation = generations.get(nodeId);
+    await opts.waitForCreation?.(canvasId, nodeId);
+    // A node this page created and has not saved yet has no sidecar to
+    // patch: its first save, which is still queued, goes out before the
+    // edit, and the edit is not made when that fails. (A patch that created
+    // the sidecar itself would leave an empty body there, and the first
+    // save would then be refused as a create race.)
+    const unsavedCreation = (): boolean =>
+      !baselineRev.has(nodeId) && pendingFields.has(nodeId);
+    if (unsavedCreation() && !unavailable()) {
+      debouncer.cancel(nodeId);
+      await serializedFlush(canvasId, nodeId, 'auto').catch(() => undefined);
+    }
+    if (
+      unavailable() ||
+      generations.get(nodeId) !== generation ||
+      unsavedCreation()
+    )
+      throw new Error('Property edit was not saved');
+
+    const sent = opts.getState().nodes.find((node) => node.id === nodeId);
+    const body: PutNodeContentRequest = {
+      nodeType: sent?.type ?? '',
+      ...(edit.properties ? { properties: edit.properties } : {}),
+      ...(edit.propertyDisplayKeys
+        ? { propertyDisplayKeys: edit.propertyDisplayKeys }
+        : {}),
+      ...(opts.pageId ? { pageId: opts.pageId } : {}),
+    };
+    try {
+      // The answer names the revision of the body the server holds. It is
+      // not a baseline: this page may show another body.
+      await putNodeContent(canvasId, nodeId, body);
+    } catch (error) {
+      if (
+        error instanceof NodeDuplicateFilesError &&
+        opts.getState().canvasId === canvasId &&
+        generations.get(nodeId) === generation
+      )
+        notifyDuplicate(nodeId, error);
+      throw error;
+    }
+
+    const state = opts.getState();
+    const live = state.nodes.find((node) => node.id === nodeId);
+    if (
+      state.canvasId !== canvasId ||
+      generations.get(nodeId) !== generation ||
+      !live
+    )
+      throw new Error('Property edit was not saved');
+    // Publish the keys this page has not changed again meanwhile.
+    const previous = sent?.data.properties as NodeProperties | undefined;
+    const current = live.data.properties as NodeProperties | undefined;
+    const patch: PropertyEdit = {};
+    if (edit.properties)
+      patch.properties = Object.fromEntries(
+        Object.entries(edit.properties).filter(([key]) =>
+          deepEqual(current?.[key], previous?.[key]),
+        ),
+      );
+    if (
+      edit.propertyDisplayKeys &&
+      deepEqual(live.data.propertyDisplayKeys, sent?.data.propertyDisplayKeys)
+    )
+      patch.propertyDisplayKeys = edit.propertyDisplayKeys;
+    // The store change below is the acknowledged edit, not a new one: it
+    // must not be queued as unsaved properties.
+    publishingProperties = nodeId;
+    try {
+      if (opts.onPropertiesSaved) opts.onPropertiesSaved(nodeId, patch);
+      else
+        state._setStateNoAutosave({
+          nodes: state.nodes.map((node) =>
+            node.id !== nodeId
+              ? node
+              : {
+                  ...node,
+                  data: {
+                    ...node.data,
+                    ...(patch.properties
+                      ? {
+                          properties: mergeNodeProperties(
+                            current,
+                            patch.properties,
+                          ),
+                        }
+                      : {}),
+                    ...(patch.propertyDisplayKeys
+                      ? { propertyDisplayKeys: patch.propertyDisplayKeys }
+                      : {}),
+                  },
+                },
+          ),
+        });
+    } finally {
+      publishingProperties = undefined;
+    }
+  }
+
+  /**
+   * Chain a property save behind the node's earlier ones, so two edits of
+   * one key from this page reach the server in the order they were made.
+   * The body's lane ({@link serializedFlush}) is separate.
+   */
+  function serializedPropertySave(
+    canvasId: string,
+    nodeId: string,
+    edit: PropertyEdit,
+  ): Promise<void> {
+    if (!generations.has(nodeId)) generations.set(nodeId, {});
+    const prev = propertySaves.get(nodeId) ?? Promise.resolve();
+    const next = prev
+      .catch(() => undefined)
+      .then(() => performPropertySave(canvasId, nodeId, edit));
+    propertySaves.set(nodeId, next);
+    void next
+      .finally(() => {
+        if (propertySaves.get(nodeId) !== next) return;
+        propertySaves.delete(nodeId);
+        // Properties fetched while the save was under way may predate it or
+        // follow it. Read the node once more: what the server holds is what
+        // the last writer of each key left.
+        if (remoteDuringPropertySave.delete(nodeId))
           void adoptRemoteContent(canvasId, nodeId);
       })
       .catch(() => undefined);
@@ -1749,8 +1894,7 @@ export function createNodeContentQueue(opts: {
 
   return {
     commitProperties(canvasId, nodeId, patch) {
-      debouncer.cancel(nodeId);
-      return serializedFlush(canvasId, nodeId, 'user', undefined, patch);
+      return serializedPropertySave(canvasId, nodeId, patch);
     },
     prepareServerCreatedNodes(nodes) {
       for (const node of nodes) {
@@ -1795,7 +1939,6 @@ export function createNodeContentQueue(opts: {
         // The deletion has settled. Only this resurrection starts from an
         // absent sidecar; ordinary edits retain their authoritative baseline.
         baselineRev.delete(id);
-        baselineProperties.delete(id);
         frozen.delete(id);
         if (
           node.data?.contentMissing === true ||
@@ -1819,7 +1962,9 @@ export function createNodeContentQueue(opts: {
 
     async waitForIdle() {
       await Promise.all(
-        [...inflight.values()].map((p) => p.catch(() => undefined)),
+        [...inflight.values(), ...propertySaves.values()].map((p) =>
+          p.catch(() => undefined),
+        ),
       );
     },
 
@@ -1837,6 +1982,14 @@ export function createNodeContentQueue(opts: {
             next.id,
             new Map([...NODE_CONTENT_KEYS].map((key) => [key, {}])),
           );
+          const created = Object.keys(
+            ((next.data ?? {}) as Record<string, unknown>)['properties'] ?? {},
+          );
+          if (created.length > 0)
+            pendingPropertyKeys.set(
+              next.id,
+              new Map(created.map((key) => [key, {}])),
+            );
           schedule(canvasId, next.id);
           continue;
         }
@@ -1844,6 +1997,23 @@ export function createNodeContentQueue(opts: {
         const beforeData = (before.data ?? {}) as Record<string, unknown>;
         const afterData = (next.data ?? {}) as Record<string, unknown>;
         for (const key of NODE_CONTENT_KEYS) {
+          if (PROPERTY_FIELDS.has(key)) {
+            // An acknowledged property edit being published is saved already.
+            if (publishingProperties === next.id) continue;
+            if (key === 'properties') {
+              // Per key: only what changed here is unsaved, and only that
+              // is sent.
+              const changed = changedPropertyKeys(
+                beforeData[key],
+                afterData[key],
+              );
+              if (changed.length === 0) continue;
+              const keys =
+                pendingPropertyKeys.get(next.id) ?? new Map<string, object>();
+              for (const changedKey of changed) keys.set(changedKey, {});
+              pendingPropertyKeys.set(next.id, keys);
+            } else if (deepEqual(beforeData[key], afterData[key])) continue;
+          }
           if (beforeData[key] !== afterData[key]) {
             const fields =
               pendingFields.get(next.id) ??
@@ -1897,7 +2067,9 @@ export function createNodeContentQueue(opts: {
         void serializedFlush(canvasId, nodeId, 'auto').catch(() => undefined);
       }
       await Promise.all(
-        Array.from(inflight.values()).map((p) => p.catch(() => undefined)),
+        [...inflight.values(), ...propertySaves.values()].map((p) =>
+          p.catch(() => undefined),
+        ),
       );
     },
 
@@ -1905,7 +2077,12 @@ export function createNodeContentQueue(opts: {
       // Navigation drains the outgoing Space; never flush the new Space for it.
       while (opts.getState().canvasId === canvasId) {
         await this.flushAll();
-        if (debouncer.pendingKeys().length === 0 && inflight.size === 0) break;
+        if (
+          debouncer.pendingKeys().length === 0 &&
+          inflight.size === 0 &&
+          propertySaves.size === 0
+        )
+          break;
       }
       const state = opts.getState();
       const nodeIds =
@@ -1979,9 +2156,11 @@ export function createNodeContentQueue(opts: {
       failures.delete(nodeId);
       debouncer.cancel(nodeId);
       baselineRev.delete(nodeId);
-      baselineProperties.delete(nodeId);
       baselineGeneration.delete(nodeId);
       pendingFields.delete(nodeId);
+      pendingPropertyKeys.delete(nodeId);
+      propertySaves.delete(nodeId);
+      remoteDuringPropertySave.delete(nodeId);
       suppressNextNewNodeSave.delete(nodeId);
       frozen.delete(nodeId);
       contentConflictToasted.delete(nodeId);
@@ -1999,13 +2178,9 @@ export function createNodeContentQueue(opts: {
         const nodeType = typeof node.type === 'string' ? node.type : '';
         if (!MD_BACKED_NODE_TYPES.has(nodeType)) continue;
         baselineRev.set(node.id, revisions?.[node.id] ?? revOfNode(node));
-        if (node.data.properties !== undefined)
-          baselineProperties.set(
-            node.id,
-            structuredClone(node.data.properties as NodeProperties),
-          );
-        else baselineProperties.delete(node.id);
         baselineGeneration.set(node.id, {});
+        // The update that moved the baseline may have brought properties.
+        if (propertySaves.has(node.id)) remoteDuringPropertySave.add(node.id);
       }
     },
 
@@ -2036,12 +2211,7 @@ export function createNodeContentQueue(opts: {
       const local = state.nodes.find((n) => n.id === node.id);
       // This page's own content, hashed, against the server's revision.
       if (!local || revOfNode(local) !== rev) return false;
-      settleIdenticalConflict(
-        state.canvasId,
-        node.id,
-        rev,
-        node.data.properties as NodeProperties | undefined,
-      );
+      settleIdenticalConflict(state.canvasId, node.id, rev);
       return true;
     },
 
@@ -2081,8 +2251,19 @@ export function createNodeContentQueue(opts: {
       return new Set(pendingFields.get(nodeId)?.keys());
     },
 
+    pendingPropertyKeys(nodeId) {
+      return new Set(pendingPropertyKeys.get(nodeId)?.keys());
+    },
+
+    remotePropertiesShown(nodeId) {
+      if (propertySaves.has(nodeId)) remoteDuringPropertySave.add(nodeId);
+    },
+
     whenInFlightSaved(nodeId) {
-      const running = inflight.get(nodeId);
+      const saves = [inflight.get(nodeId), propertySaves.get(nodeId)].filter(
+        (save) => save !== undefined,
+      );
+      const running = saves.length > 0 ? Promise.all(saves) : undefined;
       return {
         onlyInFlight:
           running !== undefined &&
@@ -2100,6 +2281,7 @@ export function createNodeContentQueue(opts: {
     hasUnsavedContent(canvasId) {
       return (
         this.pendingNodeIds().length > 0 ||
+        propertySaves.size > 0 ||
         [...failures.values()].some((failure) => failure.canvasId === canvasId)
       );
     },

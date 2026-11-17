@@ -271,7 +271,7 @@ describe('durable node metadata actions', () => {
     });
   }
 
-  it('rejects failures without rolling back authored edits and does not report frozen retries as saved', async () => {
+  it('rejects failures without rolling back authored edits, and reports a property saved although the body is frozen by a conflict', async () => {
     seed('metadata-failure');
     vi.mocked(putNodeContent).mockRejectedValueOnce(
       new CanvasConflictError({
@@ -289,15 +289,36 @@ describe('durable node metadata actions', () => {
       keep: 'yes',
       reviewed: true,
     });
+    // The refusal froze the node's body (this node had no baseline, so the
+    // request carried everything). Properties are not part of that: the
+    // next change goes out by itself and is saved.
     await expect(
       commitNodeMetadata('metadata-failure', {
         properties: { reviewed: false },
       }),
-    ).rejects.toThrow('not saved');
+    ).resolves.toBeUndefined();
     expect(useCanvasStore.getState().nodes[0].data.properties).toEqual({
       keep: 'yes',
       reviewed: false,
     });
+    const sent = vi.mocked(putNodeContent).mock.calls.at(-1)?.[2];
+    expect(sent?.properties).toEqual({ reviewed: false });
+    expect(sent).not.toHaveProperty('expectRev');
+    expect(sent).not.toHaveProperty('content');
+    // The body is still the user's to answer.
+    expect(useCanvasStore.getState().pendingContentNodeIds()).toContain(
+      'metadata-failure',
+    );
+
+    // A property that cannot be sent at all is not reported as saved.
+    useCanvasStore
+      .getState()
+      .patchNodeSilent('metadata-failure', { contentMissing: true });
+    await expect(
+      commitNodeMetadata('metadata-failure', {
+        properties: { reviewed: true },
+      }),
+    ).rejects.toThrow('not saved');
   });
 
   it.each([{ field: 'propertyDisplayKeys', value: ['keep'], cleared: [] }])(

@@ -96,7 +96,26 @@ describe('nodeContentQueue baseline lifecycle', () => {
     await queue.flushAll();
     const body = putMock.mock.calls[0][2];
     expect(body).not.toHaveProperty('noteContent');
+    expect(body).not.toHaveProperty('properties');
     expect(body).not.toHaveProperty('propertyDisplayKeys');
+  });
+
+  it('sends the properties a new node is created with beside its body, in its first save', async () => {
+    const node = noteNode('body');
+    node.data.properties = { Venue: 'UIST' };
+    node.data.propertyDisplayKeys = ['Venue'];
+    const { queue } = makeQueue(node);
+    putMock.mockResolvedValue({ nodeId: 'n1', label: 'Note', rev: 'saved' });
+    queue.scheduleChanges('c1', [], [node]);
+    await queue.flushAll();
+    expect(putMock).toHaveBeenCalledTimes(1);
+    expect(putMock.mock.calls[0][2]).toMatchObject({
+      content: 'body',
+      properties: { Venue: 'UIST' },
+      propertyDisplayKeys: ['Venue'],
+      expectRev: nodeRevisionOf({}),
+    });
+    expect(queue.pendingNodeIds()).toEqual([]);
   });
   it.each<Pick<PutNodeContentRequest, 'properties' | 'propertyDisplayKeys'>>([
     { properties: { Added: 'new' }, propertyDisplayKeys: ['Venue', 'Added'] },
@@ -136,9 +155,15 @@ describe('nodeContentQueue baseline lifecycle', () => {
       ];
       queue.scheduleChanges('c1', previous, state.nodes);
       await queue.flushNow('c1', 'n1');
-      expect(putMock.mock.calls.at(-1)?.[2].properties).toEqual({
-        Venue: 'UIST',
+      // The later body save says nothing about properties: neither the
+      // retracted edit nor the bag as it stands.
+      expect(putMock.mock.calls.at(-1)?.[2]).toMatchObject({
+        content: 'later body',
       });
+      expect(putMock.mock.calls.at(-1)?.[2]).not.toHaveProperty('properties');
+      expect(putMock.mock.calls.at(-1)?.[2]).not.toHaveProperty(
+        'propertyDisplayKeys',
+      );
     },
   );
 
@@ -208,7 +233,7 @@ describe('nodeContentQueue baseline lifecycle', () => {
     expect(queue.hasUnsavedContent('c1')).toBe(false);
   });
 
-  it('uses the loaded server revision when PDF content is deliberately omitted', async () => {
+  it('saves a PDF property changed in the store as that key alone, without a revision and without the content the page does not hold', async () => {
     const node: Node = {
       id: 'pdf',
       type: 'pdf',
@@ -237,11 +262,10 @@ describe('nodeContentQueue baseline lifecycle', () => {
     queue.scheduleChanges('c1', [node], [edited]);
     putMock.mockResolvedValue({ nodeId: 'pdf', label: 'Paper', rev: 'saved' });
     await queue.flushNow('c1', 'pdf');
-    expect(putMock.mock.calls[0][2]).toMatchObject({
-      expectRev: serverRev,
-      properties: edited.data.properties,
+    expect(putMock.mock.calls[0][2]).toEqual({
+      nodeType: 'pdf',
+      properties: { Status: 'Reading' },
     });
-    expect(putMock.mock.calls[0][2]).not.toHaveProperty('content');
     expect(toastMock).not.toHaveBeenCalled();
     queue.setBaselines([edited], { pdf: 'saved' });
     const next = {
@@ -251,10 +275,25 @@ describe('nodeContentQueue baseline lifecycle', () => {
     state.nodes = [next];
     queue.scheduleChanges('c1', [edited], [next]);
     await queue.flushNow('c1', 'pdf');
-    expect(putMock.mock.calls.at(-1)?.[2].expectRev).toBe('saved');
+    expect(putMock.mock.calls.at(-1)?.[2]).toEqual({
+      nodeType: 'pdf',
+      properties: { Status: 'Read' },
+    });
+    // A save that carries more than properties still quotes the revision
+    // the server named, never one hashed from the node without its text.
+    const renamed = { ...next, data: { ...next.data, label: 'Paper, final' } };
+    state.nodes = [renamed];
+    queue.scheduleChanges('c1', [next], [renamed]);
+    await queue.flushNow('c1', 'pdf');
+    expect(putMock.mock.calls.at(-1)?.[2]).toMatchObject({
+      label: 'Paper, final',
+      expectRev: 'saved',
+    });
+    expect(putMock.mock.calls.at(-1)?.[2]).not.toHaveProperty('content');
+    expect(putMock.mock.calls.at(-1)?.[2]).not.toHaveProperty('properties');
   });
 
-  it('sends property tombstones from the acknowledged baseline and retains edits made during a save', async () => {
+  it('sends a removed property as a tombstone of that key alone and retains edits made during a save', async () => {
     const node = noteNode('body');
     node.data.properties = { keep: 'yes', remove: 2026 };
     const { queue, state } = makeQueue(node);
@@ -274,12 +313,11 @@ describe('nodeContentQueue baseline lifecycle', () => {
     const saving = queue.flushNow('c1', 'n1');
     for (let i = 0; i < 5; i++) await Promise.resolve();
     expect(putMock).toHaveBeenCalledOnce();
-    expect(putMock.mock.calls[0][2]).toMatchObject({
-      properties: { keep: 'yes', remove: null },
-      expectRev: nodeRevisionOf({
-        content: 'body',
-        properties: node.data.properties,
-      }),
+    // The key that was removed, as a removal; the key nobody touched is
+    // not in the request, and neither is a revision.
+    expect(putMock.mock.calls[0][2]).toEqual({
+      nodeType: 'note',
+      properties: { remove: null },
     });
     const next = { ...edited, data: { ...edited.data, properties: {} } };
     state.nodes = [next];
@@ -288,10 +326,11 @@ describe('nodeContentQueue baseline lifecycle', () => {
     await saving;
     putMock.mockResolvedValue({ nodeId: 'n1', label: 'Note', rev: 'SECOND' });
     await queue.flushNow('c1', 'n1');
-    expect(putMock.mock.calls.at(-1)?.[2]).toMatchObject({
+    expect(putMock.mock.calls.at(-1)?.[2]).toEqual({
+      nodeType: 'note',
       properties: { keep: null },
-      expectRev: 'FIRST',
     });
+    expect(queue.pendingNodeIds()).toEqual([]);
   });
   it('suppresses the redundant Question creation PUT', async () => {
     const node = questionNode('');

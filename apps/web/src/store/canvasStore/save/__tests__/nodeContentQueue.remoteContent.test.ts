@@ -172,18 +172,28 @@ describe('adopting content another page saved', () => {
     expect(data()).toEqual({ label: 'Renamed frame', summary: 'kept' });
   });
 
-  it('keeps a node with a queued edit untouched and fetches it once that edit is saved', async () => {
+  it('keeps the body and title of a node with a queued edit untouched, and fetches them once that edit is saved', async () => {
     const { queue, state, edit, data } = makeQueue([
       note({ content: 'old', label: 'Note' }),
     ]);
     edit('n1', { content: 'typed here' });
 
+    // The fetch is made for the custom properties alone; the other page's
+    // body, title and summary are not taken while this page's are unsaved.
+    getMock.mockResolvedValueOnce(
+      saved('their body', {
+        label: 'Their title',
+        summary: 'their summary',
+        rev: 'theirs',
+      }),
+    );
     await expect(queue.adoptRemoteContent('c1', 'n1')).resolves.toBe(
       'kept-local',
     );
-    expect(getMock).not.toHaveBeenCalled();
+    expect(getMock).toHaveBeenCalledTimes(1);
     expect(state._setStateNoAutosave).not.toHaveBeenCalled();
-    expect(data()['content']).toBe('typed here');
+    expect(data()).toMatchObject({ content: 'typed here', label: 'Note' });
+    expect(data()).not.toHaveProperty('summary');
 
     putMock.mockResolvedValue({ nodeId: 'n1', label: 'Note', rev: 'mine' });
     getMock.mockResolvedValue(
@@ -195,6 +205,8 @@ describe('adopting content another page saved', () => {
     );
     expect(data()['content']).toBe('typed here');
     expect(putMock).toHaveBeenCalledTimes(1);
+    // The baseline was not moved by the fetch made while the body was unsaved.
+    expect(putMock.mock.calls[0][2].expectRev).not.toBe('theirs');
   });
 
   it('keeps the existing conflict choice when this page saves over a body it never adopted', async () => {
