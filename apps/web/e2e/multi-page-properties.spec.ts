@@ -26,10 +26,15 @@ import type {
  * - A PDF's Note is created by one `INITIALIZE_PDF_NOTE` command through the
  *   send queue, with the id the creating page already shows; the other page
  *   receives the Note and the link as an update.
- * - Properties (tags and other values) are saved with the node's content
- *   (`PUT …/nodes/:id/content`) and reach the other page as a node-scoped
- *   fetch. No page ever saves the whole Space, and a receiving page neither
- *   writes nor reloads.
+ * - Properties (tags and other values) are saved through the node's content
+ *   endpoint (`PUT …/nodes/:id/content`) as a patch of the keys that changed,
+ *   without a revision, and reach the other page as a node-scoped fetch. No
+ *   page ever saves the whole Space, and a receiving page neither writes nor
+ *   reloads.
+ * - The content revision belongs to the body. A property changed by another
+ *   page or an agent never refuses a body save, two writers of different
+ *   properties never refuse each other, and the last writer of one property
+ *   wins without a prompt.
  * - Editing a node's properties is editing the node: while one page has a
  *   property editor open, the other shows the properties read-only.
  */
@@ -826,9 +831,9 @@ test('two pages editing different properties of one note: both survive, also whe
   expect([...a.conflicts, ...b.conflicts]).toEqual([]);
   const putsBefore = writes(b).filter((call) => call.startsWith('PUT')).length;
 
-  // Now both save from the same revision. B's request is held on its way
-  // out until the server has taken A's, so B's is the one refused as stale —
-  // every time, not by chance.
+  // Now both save in the same moment. B's request is held on its way out
+  // until the server has taken A's, so B's patch always arrives second, at
+  // a server that has changed since B's page last heard from it.
   await blur(a.page);
   await blur(b.page);
   await expect(edit(a, 'status')).toBeVisible();
@@ -842,18 +847,20 @@ test('two pages editing different properties of one note: both survive, also whe
   const held = await holdNextContentSave(b.page);
   await tagField.press('Enter');
   const heldBody = await held.request;
-  expect(heldBody.properties).toMatchObject({
-    tags: ['seed', 'physics', 'math'],
-  });
+  // B's request is its own key and nothing else: no `status`, no body, no
+  // revision that A's save could have made stale.
+  expect(heldBody.properties).toEqual({ tags: ['seed', 'physics', 'math'] });
+  expect(heldBody).not.toHaveProperty('expectRev');
+  expect(heldBody).not.toHaveProperty('content');
   await statusField.press('Enter');
   await expect
     .poll(serverProperties)
     .toEqual({ tags: ['seed', 'physics'], status: 'final' });
   held.release();
 
-  // B's save is refused once. A changed `status`, B changed `tags`: B takes
-  // A's value in, makes its own edit again on top of it and saves — nobody
-  // is asked anything, and nothing has to be done again.
+  // A changed `status`, B changed `tags`: the server applies B's patch to
+  // what it holds, A's value included. Nothing is refused, nobody is asked
+  // anything, and nothing is sent twice.
   await expect
     .poll(serverProperties)
     .toEqual({ tags: ['seed', 'physics', 'math'], status: 'final' });
@@ -868,12 +875,10 @@ test('two pages editing different properties of one note: both survive, also whe
   }
   await expect(tags(b.page, NOTE)).toHaveText(['seed', 'physics', 'math']);
   expect(a.conflicts).toEqual([]);
-  expect(b.conflicts).toEqual([
-    `PUT /api/canvas/${canvasId}/nodes/${NOTE}/content`,
-  ]);
-  // Refused once, fetched, sent again: two saves and no other write.
+  expect(b.conflicts).toEqual([]);
+  // One save for the one edit, and no other write.
   expect(writes(b).filter((call) => call.startsWith('PUT'))).toHaveLength(
-    putsBefore + 2,
+    putsBefore + 1,
   );
   await blur(a.page);
   await blur(b.page);
@@ -890,7 +895,7 @@ test('two pages editing different properties of one note: both survive, also whe
   await b.context.close();
 });
 
-test('two pages editing the same property of one note at the same moment: the second is refused and told, and nothing is overwritten', async ({
+test('two pages editing the same property of one note at the same moment: the last writer wins on both pages and the server, and nobody is asked', async ({
   browser,
   request,
 }) => {
@@ -927,28 +932,43 @@ test('two pages editing the same property of one note at the same moment: the se
     .toEqual({ tags: ['seed'], status: 'from A' });
   held.release();
 
-  // Both changed `status`: B's edit is not put on top of A's. B is told, its
-  // edit is taken back, and the server keeps what A saved.
-  await expect(b.page.getByText(SAVE_FAILED)).toBeVisible();
-  await expect(b.page.getByRole('button', { name: 'Keep mine' })).toBeVisible();
-  await expect(a.page.getByText(SAVE_FAILED)).toHaveCount(0);
-  expect(b.conflicts).toEqual([
-    `PUT /api/canvas/${canvasId}/nodes/${NOTE}/content`,
-  ]);
+  // Both changed `status`. B's patch reaches the server after A's and is
+  // the last writer: the server holds B's value, and so do both pages. No
+  // save is refused, no edit is taken back and no choice is offered.
+  await expect
+    .poll(serverProperties)
+    .toEqual({ tags: ['seed'], status: 'from B' });
+  for (const device of [a, b]) {
+    await expect
+      .poll(async () => (await storeState(device.page)).nodes[NOTE].properties)
+      .toEqual({ tags: ['seed'], status: 'from B' });
+    await expect(device.page.getByText(SAVE_FAILED)).toHaveCount(0);
+    await expect(
+      device.page.getByRole('button', { name: 'Keep mine' }),
+    ).toHaveCount(0);
+    await expect(device.page.getByText('was changed elsewhere')).toHaveCount(0);
+  }
   expect(a.conflicts).toEqual([]);
+  expect(b.conflicts).toEqual([]);
   expect(writes(b).filter((call) => call.startsWith('PUT'))).toHaveLength(1);
-  expect((await storeState(b.page)).nodes[NOTE].properties?.status).not.toBe(
-    'from B',
-  );
-  // Still so a moment later: nothing resubmits behind the toast.
+  expect(writes(a).filter((call) => call.startsWith('PUT'))).toHaveLength(1);
+  // Still so a moment later: nothing is sent behind it, and neither page
+  // goes back to the value that lost.
   await b.page.waitForTimeout(1_500);
   expect(await serverProperties()).toEqual({
     tags: ['seed'],
-    status: 'from A',
+    status: 'from B',
   });
+  for (const device of [a, b]) {
+    const state = await storeState(device.page);
+    expect(state.nodes[NOTE].properties).toEqual({
+      tags: ['seed'],
+      status: 'from B',
+    });
+    expect(state.reloaded).toBe(false);
+  }
   expect(writes(b).filter((call) => call.startsWith('PUT'))).toHaveLength(1);
-  expect((await storeState(a.page)).reloaded).toBe(false);
-  expect((await storeState(b.page)).reloaded).toBe(false);
+  expect(writes(a).filter((call) => call.startsWith('PUT'))).toHaveLength(1);
 
   await a.context.close();
   await b.context.close();
@@ -970,13 +990,22 @@ async function storedRevision(
   return revision;
 }
 
-/** An agent writes `patch` into `nodeId` through `execute`, having read it. */
+/**
+ * An agent writes `patch` into `nodeId` through `execute`. By default it has
+ * read the node and quotes the revision of that read; `expectRev: null`
+ * sends none (it never read the node), and a string is sent as it is.
+ */
 async function agentWrites(
   request: APIRequestContext,
   canvasId: string,
   nodeId: string,
   patch: Record<string, unknown>,
+  options: { expectRev?: string | null } = {},
 ) {
+  const expectRev =
+    options.expectRev === undefined
+      ? await storedRevision(request, canvasId, nodeId)
+      : options.expectRev;
   const response = await request.post(`/api/canvas/${canvasId}/execute`, {
     data: {
       commands: [
@@ -986,7 +1015,7 @@ async function agentWrites(
             {
               nodeId,
               patch,
-              expectRev: await storedRevision(request, canvasId, nodeId),
+              ...(expectRev !== null ? { expectRev } : {}),
             },
           ],
         },
@@ -1039,8 +1068,8 @@ test("an agent's write to a PDF's properties while page B has it open: B's next 
   await expect(venue(b.page)).toHaveText('NeurIPS');
   await expect.poll(async () => (await storeState(b.page)).unsaved).toBe(false);
 
-  // B adds another property: its save states the revision the update
-  // brought, and the server takes it at the first attempt.
+  // B adds another property: its save is that one key, and the server
+  // takes it at the first attempt and keeps the agent's.
   await panel(b.page, PDF)
     .getByRole('button', { name: 'Add property' })
     .click();
@@ -1114,6 +1143,213 @@ test("a note body an agent wrote through execute is edited on page B afterwards:
     .poll(async () => (await storeState(b.page)).pendingContent)
     .toEqual([]);
   expect((await storeState(b.page)).reloaded).toBe(false);
+
+  await a.context.close();
+  await b.context.close();
+});
+
+test("an agent changes a property of a note while page A is typing its body: A's save is taken without a prompt, and body and property both stand", async ({
+  browser,
+  request,
+}) => {
+  const { canvasId, a, b } = await openBoth(browser, request, 'Typing');
+  const serverNote = async () => {
+    const data = (await serverRecord(request, canvasId)).node(NOTE)?.data;
+    return { content: data?.content?.trim(), properties: data?.properties };
+  };
+
+  // A types. Its save is held on its way to the server: the body is
+  // unsaved on A for as long as the test wants.
+  await openPreview(a.page, NOTE);
+  const editor = panel(a.page, NOTE).locator(
+    '.ProseMirror[contenteditable="true"]',
+  );
+  await expect(editor).toContainText('Seed body');
+  const revisionBefore = await storedRevision(request, canvasId, NOTE);
+  const held = await holdNextContentSave(a.page);
+  await editor.fill('Typed on A while an agent tags the note');
+  const heldBody = await held.request;
+  expect(String(heldBody.content).trim()).toBe(
+    'Typed on A while an agent tags the note',
+  );
+  expect(heldBody.expectRev).toBe(revisionBefore);
+  expect((await serverNote()).content).toBe('Seed body');
+
+  // Meanwhile an agent that never read the note changes a property and
+  // adds another, through execute and without a revision.
+  await agentWrites(
+    request,
+    canvasId,
+    NOTE,
+    { properties: { status: 'reviewed', priority: 'high' } },
+    { expectRev: null },
+  );
+  // The body's revision is where it was: properties are not part of it.
+  expect(await storedRevision(request, canvasId, NOTE)).toBe(revisionBefore);
+
+  // A shows the agent's properties beside the text it has not saved; B,
+  // which edits nothing, shows them too.
+  const tagged = { tags: ['seed'], status: 'reviewed', priority: 'high' };
+  for (const device of [a, b]) {
+    await expect
+      .poll(async () => (await storeState(device.page)).nodes[NOTE].properties)
+      .toEqual(tagged);
+  }
+  expect((await storeState(a.page)).nodes[NOTE].content?.trim()).toBe(
+    'Typed on A while an agent tags the note',
+  );
+  await expect(editor).toContainText('Typed on A while an agent tags the note');
+  await expect(a.page.getByText('was changed elsewhere')).toHaveCount(0);
+
+  // A's save goes through: the server takes the body on the revision A
+  // quoted, and keeps the agent's properties.
+  held.release();
+  await expect.poll(serverNote).toEqual({
+    content: 'Typed on A while an agent tags the note',
+    properties: tagged,
+  });
+  await blur(a.page);
+  for (const device of [a, b]) {
+    await expect
+      .poll(async () => {
+        const node = (await storeState(device.page)).nodes[NOTE];
+        return { content: node.content?.trim(), properties: node.properties };
+      })
+      .toEqual({
+        content: 'Typed on A while an agent tags the note',
+        properties: tagged,
+      });
+    await expect(device.page.getByText('was changed elsewhere')).toHaveCount(0);
+    await expect(
+      device.page.getByRole('button', { name: 'Keep mine' }),
+    ).toHaveCount(0);
+    await expect(device.page.getByText(SAVE_FAILED)).toHaveCount(0);
+  }
+  expect(refusedSaves(a, NOTE)).toEqual([]);
+  expect(refusedSaves(b, NOTE)).toEqual([]);
+  // A sent its body once and never sent the agent's properties back.
+  const saves = writes(a).filter(
+    (call) => call === `PUT <space>/nodes/${NOTE}/content`,
+  );
+  expect(saves.length).toBeGreaterThanOrEqual(1);
+  await expect(async () => {
+    for (const device of [a, b]) {
+      const state = await storeState(device.page);
+      expect(state.pendingContent).toEqual([]);
+      expect(state.reloaded).toBe(false);
+    }
+  }).toPass();
+  expect(await serverNote()).toEqual({
+    content: 'Typed on A while an agent tags the note',
+    properties: tagged,
+  });
+
+  await a.context.close();
+  await b.context.close();
+});
+
+test('an agent adds a tag right after page B saved the body, without a revision and with a stale one: both are applied, and B goes on typing', async ({
+  browser,
+  request,
+}) => {
+  const { canvasId, a, b } = await openBoth(browser, request, 'Tag after body');
+  const serverNote = async () => {
+    const data = (await serverRecord(request, canvasId)).node(NOTE)?.data;
+    return { content: data?.content?.trim(), properties: data?.properties };
+  };
+  // The revision an agent read before B typed.
+  const readBefore = await storedRevision(request, canvasId, NOTE);
+
+  await openPreview(b.page, NOTE);
+  const editor = panel(b.page, NOTE).locator(
+    '.ProseMirror[contenteditable="true"]',
+  );
+  await expect(editor).toContainText('Seed body');
+  await editor.fill('Body saved on B');
+  await expect
+    .poll(async () => (await serverNote()).content)
+    .toBe('Body saved on B');
+  expect(await storedRevision(request, canvasId, NOTE)).not.toBe(readBefore);
+
+  // The agent adds a tag at once: without any revision…
+  await agentWrites(
+    request,
+    canvasId,
+    NOTE,
+    { properties: { tags: ['seed', 'agent'] } },
+    { expectRev: null },
+  );
+  // …and, as prompts written before this rule do, with the revision of a
+  // read the body has moved past. Neither is refused.
+  await agentWrites(
+    request,
+    canvasId,
+    NOTE,
+    { properties: { reviewed: 'yes' } },
+    { expectRev: readBefore },
+  );
+  const tagged = { tags: ['seed', 'agent'], status: 'new', reviewed: 'yes' };
+  await expect.poll(serverNote).toEqual({
+    content: 'Body saved on B',
+    properties: tagged,
+  });
+  for (const device of [a, b]) {
+    await expect
+      .poll(async () => (await storeState(device.page)).nodes[NOTE].properties)
+      .toEqual(tagged);
+  }
+
+  // A body rewrite by that agent, with the same stale revision or none, is
+  // still refused.
+  for (const expectRev of [readBefore, undefined]) {
+    const refused = await request.post(`/api/canvas/${canvasId}/execute`, {
+      data: {
+        commands: [
+          {
+            type: 'MERGE_NODE_DATA',
+            patches: [
+              {
+                nodeId: NOTE,
+                patch: { content: 'Agent overwrite' },
+                ...(expectRev ? { expectRev } : {}),
+              },
+            ],
+          },
+        ],
+        originator: { source: 'agent', threadId: 'e2e-properties-agent' },
+      },
+    });
+    expect(refused.ok(), await refused.text()).toBe(true);
+    const body = (await refused.json()) as {
+      results: Array<{ applied: boolean; reason?: string }>;
+    };
+    expect(body.results).toEqual([
+      expect.objectContaining({ applied: false, reason: 'conflict' }),
+    ]);
+  }
+  expect((await serverNote()).content).toBe('Body saved on B');
+
+  // B types on in the editor it never left: its save is taken.
+  await editor.fill('Body saved on B, and continued');
+  await expect.poll(serverNote).toEqual({
+    content: 'Body saved on B, and continued',
+    properties: tagged,
+  });
+  await blur(b.page);
+  await expect
+    .poll(async () => (await storeState(a.page)).nodes[NOTE].content?.trim())
+    .toBe('Body saved on B, and continued');
+  for (const device of [a, b]) {
+    await expect(device.page.getByText('was changed elsewhere')).toHaveCount(0);
+    await expect(
+      device.page.getByRole('button', { name: 'Keep mine' }),
+    ).toHaveCount(0);
+    expect(refusedSaves(device, NOTE)).toEqual([]);
+    expect((await storeState(device.page)).reloaded).toBe(false);
+  }
+  await expect
+    .poll(async () => (await storeState(b.page)).pendingContent)
+    .toEqual([]);
 
   await a.context.close();
   await b.context.close();
