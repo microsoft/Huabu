@@ -4837,17 +4837,45 @@ const useCanvasStore = create<RFState>()(
         toast(t('spaceHierarchy.cutEntryUnsupported'), { tone: 'warning' });
         return;
       }
+      // Everything deletion would take: the selection, what Frames contain,
+      // and the notes that follow a PDF. Captured as it is being copied.
+      const taken = (all: Node[]) => {
+        const ids = new Set(nodeIds);
+        let grew = true;
+        while (grew) {
+          grew = false;
+          for (const n of all) {
+            if (n.parentId && ids.has(n.parentId) && !ids.has(n.id)) {
+              ids.add(n.id);
+              grew = true;
+            }
+          }
+        }
+        for (const id of includePdfNotes(all, ids)) ids.add(id);
+        return all.filter((n) => ids.has(n.id));
+      };
+      const copied = taken(nodes);
       // Nothing is removed until it is safely on the clipboard.
       if (!(await get().copySelectedNodes())) {
         toast(t('files.copyFailed'), { tone: 'danger' });
         return;
       }
       if (get().canvasId !== canvasId) return;
+      // The write takes a moment, and an agent or another gesture may have
+      // touched these nodes meanwhile. Removing them now would delete content
+      // that never reached the clipboard, so the cut stops as a plain copy.
+      const current = taken(get().nodes);
+      if (
+        current.length !== copied.length ||
+        current.some((node, index) => node !== copied[index])
+      ) {
+        toast(t('spaceHierarchy.cutSelectionChanged'), { tone: 'warning' });
+        return;
+      }
       // Only what reaches the clipboard is removed. Deleting the nodes takes
       // their edges with them; a selected edge between nodes that stay is
       // not copied, so it stays too.
-      const live = new Set(get().nodes.map((n) => n.id));
-      get().deleteNodes(nodeIds.filter((id) => live.has(id)));
+      get().deleteNodes(nodeIds);
     },
 
     pasteNodes: (flowPosition, clipboardNodes, clipboardEdges, srcCanvasId) => {
