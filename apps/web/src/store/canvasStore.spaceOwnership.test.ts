@@ -260,6 +260,22 @@ it('cuts an ordinary selection by copying it and then removing it, but not durin
   expect(useCanvasStore.getState().nodes.map((n) => n.id)).toEqual(['a', 'b']);
   expect(useCanvasStore.getState().edges.map((e) => e.id)).toEqual(['kept']);
   await canvasHistoryManager.waitForDeletes('parent');
+
+  // One undo brings back the cut node together with the edge it took.
+  await useCanvasStore.getState().undo();
+  expect(
+    useCanvasStore
+      .getState()
+      .nodes.map((n) => n.id)
+      .sort(),
+  ).toEqual(['a', 'b', note.id]);
+  expect(
+    useCanvasStore
+      .getState()
+      .edges.map((e) => e.id)
+      .sort(),
+  ).toEqual(['kept', 'taken']);
+  expect(canvasHistoryManager.canUndo).toBe(false);
 });
 
 it('does not consume a redo snapshot that would remove a now-canonical entry', async () => {
