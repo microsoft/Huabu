@@ -96,3 +96,18 @@ export function withContentPatch(
     if (value === undefined) delete next[key];
   return next;
 }
+
+/**
+ * Types whose sidecar carries data only the server can produce and the web
+ * never holds: a PDF's extracted text (the web renders from `data.src`; see
+ * the server's `WIRE_INLINE_CONTENT_TYPES`), a video's cover.
+ *
+ * Deleting the node deletes that data and an undo can only write back what
+ * the web has. So for these types a missing body does not mean an incomplete
+ * snapshot, and they are preprocessed again once the restored sidecar is
+ * saved.
+ */
+export const SERVER_DERIVED_SIDECAR_NODE_TYPES: ReadonlySet<string> = new Set([
+  'pdf',
+  'video',
+]);

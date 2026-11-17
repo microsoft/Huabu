@@ -53,6 +53,7 @@ import type {
   AgentTurnAccepted,
   ReasoningEffort,
   StopThreadResponse,
+  AgentInitialPreferences,
 } from '@huabu/shared';
 import type { FastifyBaseLogger } from 'fastify';
 
@@ -227,6 +228,7 @@ export interface AgentThreadInvocationOptions {
   submission?: HuabuSubmission;
   requestBinding?: AgentBinding;
   requestedCwd?: string;
+  requestedPreferences?: AgentInitialPreferences;
   agentTarget?: AgentNodeTarget | null;
   fixedTarget?: FixedAgentNodeTarget | null;
   modelId?: string;
@@ -738,6 +740,7 @@ export class AgentThreadService {
           canvasId: options.canvasId,
           requestedBinding: binding,
           requestedCwd: options.requestedCwd,
+          requestedPreferences: options.requestedPreferences,
           agentTarget,
           fixedTarget,
           logger: options.logger,

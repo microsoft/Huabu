@@ -237,6 +237,14 @@ export interface EnsureAcpSessionOptions {
     thoughtLevel?: string;
   };
   /**
+   * Selections a fresh thread starts with, already resolved by the host
+   * against the catalogue it showed the user. Laid over whatever
+   * `initialPreferences` match in this session's own catalogue, so the first
+   * turn runs on what was displayed even when the agent advertises its
+   * catalogue only after `session/new` returns.
+   */
+  initialSelections?: Readonly<Record<string, string>>;
+  /**
    * Whether a matching closed live entry may override `priorState` during
    * Handle self-repair. Disabled only for the history fallback after native
    * resume/load has already returned `session_resume_unavailable`.
@@ -383,70 +391,128 @@ function hydrateSelectionsFromPersistedMeta(
 /** @internal Exported for tests. */
 export { hydrateSelectionsFromPersistedMeta };
 
-function seedInitialPreferences(
-  entry: AcpSessionEntry,
-  preferences: EnsureAcpSessionOptions['initialPreferences'],
-  logger?: AcpSessionLogger,
-): void {
-  if (!preferences) return;
+/** The selector catalogue an agent advertises for a session. */
+export interface AcpSelectionCatalogue {
+  readonly configOptions: readonly unknown[];
+  readonly availableModels: readonly unknown[];
+}
 
-  const selectors = entry.configOptions.map((option) => ({
-    id: String((option as { id?: unknown }).id ?? ''),
-    category: normalizeSelectionKey(
-      (option as { category?: unknown }).category,
-    ),
-    currentValue: (option as { currentValue?: string | boolean }).currentValue,
-    options: (option as { options?: unknown }).options,
-  }));
-  const offeredValues = (raw: unknown): Set<string> => {
-    if (!Array.isArray(raw)) return new Set();
-    const values = new Set<string>();
-    for (const item of raw) {
-      if (!item || typeof item !== 'object') continue;
-      const record = item as { value?: unknown; options?: unknown };
-      if (typeof record.value === 'string') values.add(record.value);
-      for (const nested of offeredValues(record.options)) values.add(nested);
+/**
+ * Every value a select option list offers. Accepts the shapes hosts render:
+ * bare strings, `{ value }` / `{ id }` records, and group records whose
+ * `options` hold the choices.
+ */
+function offeredValues(raw: unknown): Set<string> {
+  const values = new Set<string>();
+  if (!Array.isArray(raw)) return values;
+  for (const item of raw) {
+    if (typeof item === 'string') {
+      if (item) values.add(item);
+      continue;
     }
-    return values;
-  };
-  const seedConfigPreference = (
+    if (!item || typeof item !== 'object') continue;
+    const record = item as { value?: unknown; id?: unknown; options?: unknown };
+    if (Array.isArray(record.options)) {
+      for (const nested of offeredValues(record.options)) values.add(nested);
+      continue;
+    }
+    const value = String(record.value ?? record.id ?? '');
+    if (value) values.add(value);
+  }
+  return values;
+}
+
+function matchInitialPreferences(
+  preferences: NonNullable<EnsureAcpSessionOptions['initialPreferences']>,
+  catalogue: AcpSelectionCatalogue,
+): { selections: Record<string, string>; modelMatched: boolean } {
+  const selections: Record<string, string> = {};
+  const selectConfigOption = (
     category: 'model' | 'thought_level',
     value: string | undefined,
   ): boolean => {
     if (!value) return false;
-    const selector = selectors.find(
-      (candidate) => candidate.category === category,
-    );
-    if (!selector?.id || !offeredValues(selector.options).has(value)) {
-      return false;
-    }
-    entry.selections[selector.id] = value;
+    const option = catalogue.configOptions.find(
+      (candidate) =>
+        normalizeSelectionKey(
+          (candidate as { category?: unknown } | null)?.category,
+        ) === category,
+    ) as { id?: unknown; options?: unknown } | undefined;
+    const id = String(option?.id ?? '');
+    if (!id || !offeredValues(option?.options).has(value)) return false;
+    selections[id] = value;
     return true;
   };
 
-  const modelSeeded = seedConfigPreference('model', preferences.model);
+  let modelMatched = selectConfigOption('model', preferences.model);
   if (
-    !modelSeeded &&
+    !modelMatched &&
     preferences.model &&
-    entry.availableModels.some(
+    catalogue.availableModels.some(
       (model) =>
-        String((model as { modelId?: unknown }).modelId ?? '') ===
+        String((model as { modelId?: unknown } | null)?.modelId ?? '') ===
         preferences.model,
     )
   ) {
-    entry.selections[MODEL_SELECTION_ID] = preferences.model;
+    selections[MODEL_SELECTION_ID] = preferences.model;
+    modelMatched = true;
   }
-  if (
-    preferences.model &&
-    !modelSeeded &&
-    entry.selections[MODEL_SELECTION_ID] !== preferences.model
-  ) {
-    logger?.warn(
-      { profileId: entry.profileId, model: preferences.model },
-      '[acp] requested initial model is not advertised; using the harness default',
+  selectConfigOption('thought_level', preferences.thoughtLevel);
+  return { selections, modelMatched };
+}
+
+/**
+ * The selections a fresh session starts with, given the host's remembered
+ * preferences and the catalogue the agent advertises. A preference applies
+ * only when the agent still offers it: through the config option that owns
+ * its category, or for a model through the legacy model channel.
+ *
+ * Hosts call this to show a conversation that has no session yet the values
+ * its first turn will run on; session creation seeds from the same rules.
+ */
+export function resolveInitialPreferenceSelections(
+  preferences: EnsureAcpSessionOptions['initialPreferences'],
+  catalogue: AcpSelectionCatalogue,
+): Record<string, string> {
+  return preferences
+    ? matchInitialPreferences(preferences, catalogue).selections
+    : {};
+}
+
+/**
+ * Give a fresh thread its starting selections.
+ *
+ * `preferences` are matched against the catalogue this session advertises.
+ * `resolved` are selections the host already matched against the catalogue it
+ * showed the user; they are laid over the session's own matches. Neither
+ * source replaces the other: the host's cover an agent that has not
+ * advertised its catalogue yet, the session's cover a preference the host's
+ * catalogue no longer held.
+ */
+function seedInitialPreferences(
+  entry: AcpSessionEntry,
+  preferences: EnsureAcpSessionOptions['initialPreferences'],
+  logger?: AcpSessionLogger,
+  resolved?: Readonly<Record<string, string>>,
+): void {
+  if (preferences) {
+    const { selections, modelMatched } = matchInitialPreferences(
+      preferences,
+      entry,
     );
+    Object.assign(entry.selections, selections);
+    if (
+      preferences.model &&
+      !modelMatched &&
+      !Object.values(resolved ?? {}).includes(preferences.model)
+    ) {
+      logger?.warn(
+        { profileId: entry.profileId, model: preferences.model },
+        '[acp] requested initial model is not advertised; using the harness default',
+      );
+    }
   }
-  seedConfigPreference('thought_level', preferences.thoughtLevel);
+  if (resolved) Object.assign(entry.selections, resolved);
   if (Object.keys(entry.selections).length > 0) {
     entry.selectionsUpdatedAt = Date.now();
   }
@@ -1086,7 +1152,12 @@ async function ensureAcpSessionInner(
   // the user's remembered choices.
   hydrateSelectionsFromPersistedMeta(created, priorState?.metadata);
   if (!priorState?.metadata) {
-    seedInitialPreferences(created, opts.initialPreferences, logger);
+    seedInitialPreferences(
+      created,
+      opts.initialPreferences,
+      logger,
+      opts.initialSelections,
+    );
   }
 
   // Installing the listener synchronously drains Gateway pre-attach messages

@@ -149,6 +149,7 @@ import { createCanvasEventBuffer } from './canvasStore/save/eventBuffer';
 import {
   MD_BACKED_NODE_TYPES,
   NODE_CONTENT_KEYS,
+  SERVER_DERIVED_SIDECAR_NODE_TYPES,
   withContentPatch,
 } from './canvasStore/save/nodeContentFields';
 import {
@@ -953,7 +954,13 @@ type RFState = {
     reorderTarget?: { nodeId: string; position: 'before' | 'after' },
   ) => void;
 
-  copySelectedNodes: () => void;
+  /** Resolves to whether the selection reached the clipboard. */
+  copySelectedNodes: () => Promise<boolean>;
+  /**
+   * Copy the selection and, once it is on the clipboard, delete it. Refuses
+   * selections that own a child Space.
+   */
+  cutSelectedNodes: () => Promise<void>;
   pasteNodes: (
     flowPosition: { x: number; y: number },
     clipboardNodes: Node[],
@@ -1157,7 +1164,75 @@ function canChangeSpaceEntries(
  * external triggers (structure-save piggy-back, pre-agent flush,
  * `beforeunload` keepalive POST).
  */
+/**
+ * Child Spaces whose entry node is among `nodeIds` or their descendants.
+ * Removing such an entry deletes a whole Space, so callers gate on this.
+ */
+function ownedChildSpaces(
+  state: { canvasId: string | null; nodes: Node[] },
+  nodeIds: string[],
+) {
+  const affected = new Set(nodeIds);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const node of state.nodes) {
+      if (
+        node.parentId &&
+        affected.has(node.parentId) &&
+        !affected.has(node.id)
+      ) {
+        affected.add(node.id);
+        changed = true;
+      }
+    }
+  }
+  return Object.entries(useWorkspaceStore.getState().spaceSummaries).filter(
+    ([, summary]) =>
+      summary?.parentSpaceId === state.canvasId &&
+      summary.parentEntryNodeId &&
+      affected.has(summary.parentEntryNodeId),
+  );
+}
+
+/** A question node that already carries a conversation, not a blank draft. */
+function questionHasConversation(node: Node): boolean {
+  const data = (node.data ?? {}) as Record<string, unknown>;
+  return (
+    (node.type === 'question' || data.type === 'question') &&
+    typeof data.threadId === 'string' &&
+    !!data.threadId &&
+    (data.bindingState === 'bound' ||
+      data.status === 'done' ||
+      data.status === 'error' ||
+      data.status === 'running')
+  );
+}
+
 const canvasEvents = createCanvasEventBuffer();
+
+/**
+ * Preprocessing for a node an undo or redo brought back, once the server
+ * holds it again.
+ *
+ * A PDF's extracted text and a video's cover exist only in the record the
+ * deleting batch removed; the restoring batch writes back what the web
+ * holds, which never included them. So those types are asked to be derived
+ * again, whether or not work was pending at deletion, and at once rather
+ * than debounced: leaving the Space cancels debounced work, and nothing
+ * would ask for this repair again. Every other type only resumes work that
+ * was waiting.
+ */
+function resumePreprocessAfterRestore(canvasId: string, nodeId: string): void {
+  const state = useCanvasStore.getState();
+  const node =
+    state.canvasId === canvasId
+      ? state.nodes.find((candidate) => candidate.id === nodeId)
+      : undefined;
+  if (node && SERVER_DERIVED_SIDECAR_NODE_TYPES.has(node.type ?? ''))
+    preprocessQueue.schedule(node, { immediate: true });
+  else preprocessQueue.resumeRestored(canvasId, nodeId);
+}
 
 /**
  * Module-scoped per-node preprocessing queue. Each store mutation
@@ -1183,7 +1258,7 @@ const nodeContentQueue = createNodeContentQueue({
   waitForCreation: awaitQuestionCreation,
   retryCreation: (canvasId, nodeId) => retryFailedRestores(canvasId, nodeId),
   onRestoredContentPersisted: (canvasId, nodeId) =>
-    preprocessQueue.resumeRestored(canvasId, nodeId),
+    resumePreprocessAfterRestore(canvasId, nodeId),
   onContentPersisted: (canvasId, nodeId) => {
     // A reload that was waiting for this text can run now.
     resumeHeldReload();
@@ -3049,11 +3124,24 @@ function sendRestore(
     canvasId,
     commands,
     ...held,
-    onSettled: () => {
+    onSettled: (outcome, offset) => {
       // Answered either way: a refusal is followed by a reload.
+      const results =
+        outcome.kind === 'response'
+          ? outcome.response.results.slice(offset, offset + commands.length)
+          : undefined;
+      const returned = new Set<string>();
+      commands.forEach((command, index) => {
+        if (command.type !== 'RESTORE_NODES' || !results?.[index]?.applied)
+          return;
+        for (const node of command.nodes) returned.add(node.id);
+      });
       for (const node of restoredNodes) {
         restoringNodeIds.delete(node.id);
-        preprocessQueue.resumeRestored(canvasId, node.id);
+        // Only a node the server took back can have its text derived again.
+        if (returned.has(node.id))
+          resumePreprocessAfterRestore(canvasId, node.id);
+        else preprocessQueue.resumeRestored(canvasId, node.id);
       }
     },
   });
@@ -4229,29 +4317,7 @@ const useCanvasStore = create<RFState>()(
     /** Resolve a web-only UiIntent and execute the resulting commands. */
     dispatchUiIntent: (intent) => {
       if (intent.type === 'DELETE_NODES') {
-        const state = get();
-        const summaries = useWorkspaceStore.getState().spaceSummaries;
-        const affected = new Set(intent.nodeIds);
-        let changed = true;
-        while (changed) {
-          changed = false;
-          for (const node of state.nodes) {
-            if (
-              node.parentId &&
-              affected.has(node.parentId) &&
-              !affected.has(node.id)
-            ) {
-              affected.add(node.id);
-              changed = true;
-            }
-          }
-        }
-        const owned = Object.entries(summaries).filter(
-          ([, summary]) =>
-            summary?.parentSpaceId === state.canvasId &&
-            summary.parentEntryNodeId &&
-            affected.has(summary.parentEntryNodeId),
-        );
+        const owned = ownedChildSpaces(get(), intent.nodeIds);
         if (owned.length) {
           const [childId, child] = owned[0]!;
           if (
@@ -6466,7 +6532,7 @@ const useCanvasStore = create<RFState>()(
     copySelectedNodes: () => {
       const { nodes, edges } = get();
       const selected = nodes.filter((n) => n.selected);
-      if (selected.length === 0) return;
+      if (selected.length === 0) return Promise.resolve(false);
 
       // When a frame is selected, also include all its descendant nodes
       // so that copying a frame copies the entire group.
@@ -6543,11 +6609,91 @@ const useCanvasStore = create<RFState>()(
             }
           : undefined;
 
-      void copyCanvasClipboard({
+      return copyCanvasClipboard({
         payload,
         plainText: nodesToPlainText(cloned),
         image: singleImage,
-      });
+      }).then(
+        () => true,
+        (error: unknown) => {
+          console.warn('[clipboard] could not copy the selection', error);
+          return false;
+        },
+      );
+    },
+
+    cutSelectedNodes: async () => {
+      const { nodes, edges, canvasId } = get();
+      const nodeIds = nodes.filter((n) => n.selected).map((n) => n.id);
+      // A stroke-level sketch selection is owned by StrokeSelectionToolbar.
+      if (
+        nodeIds.length === 0 ||
+        Object.keys(useGesturePreviewStore.getState().sketchStrokeSelection)
+          .length > 0
+      )
+        return;
+      // Cutting an entry would delete the child Space itself, and pasting
+      // cannot bring it back, so refuse before touching the clipboard.
+      if (ownedChildSpaces(get(), nodeIds).length) {
+        toast(t('spaceHierarchy.cutEntryUnsupported'), { tone: 'warning' });
+        return;
+      }
+      // Everything deletion would take: the selection, what Frames contain,
+      // the notes that follow a PDF, and every edge touching any of them.
+      // Captured as it is being copied.
+      const taken = (all: Node[], allEdges: Edge[]) => {
+        const ids = new Set(nodeIds);
+        let grew = true;
+        while (grew) {
+          grew = false;
+          for (const n of all) {
+            if (n.parentId && ids.has(n.parentId) && !ids.has(n.id)) {
+              ids.add(n.id);
+              grew = true;
+            }
+          }
+        }
+        for (const id of includePdfNotes(all, ids)) ids.add(id);
+        return [
+          ...all.filter((n) => ids.has(n.id)),
+          ...allEdges.filter((e) => ids.has(e.source) || ids.has(e.target)),
+        ];
+      };
+      const copied = taken(nodes, edges);
+      // A pasted Agent node gets its history by forking the conversation,
+      // which the server does not offer yet. Cutting one would leave only a
+      // copy with no history, so it is refused like a child Space.
+      if (
+        copied.some(
+          (item) => 'position' in item && questionHasConversation(item),
+        )
+      ) {
+        toast(t('spaceHierarchy.cutConversationUnsupported'), {
+          tone: 'warning',
+        });
+        return;
+      }
+      // Nothing is removed until it is safely on the clipboard.
+      if (!(await get().copySelectedNodes())) {
+        toast(t('files.copyFailed'), { tone: 'danger' });
+        return;
+      }
+      if (get().canvasId !== canvasId) return;
+      // The write takes a moment, and an agent or another gesture may have
+      // touched these nodes or their edges meanwhile. Removing them now would delete content
+      // that never reached the clipboard, so the cut stops as a plain copy.
+      const current = taken(get().nodes, get().edges);
+      if (
+        current.length !== copied.length ||
+        current.some((node, index) => node !== copied[index])
+      ) {
+        toast(t('spaceHierarchy.cutSelectionChanged'), { tone: 'warning' });
+        return;
+      }
+      // Only what reaches the clipboard is removed. Deleting the nodes takes
+      // their edges with them; a selected edge between nodes that stay is
+      // not copied, so it stays too.
+      get().deleteNodes(nodeIds);
     },
 
     pasteNodes: (flowPosition, clipboardNodes, clipboardEdges, srcCanvasId) => {
@@ -6574,17 +6720,9 @@ const useCanvasStore = create<RFState>()(
       const prepared: Node[] = [];
       for (const node of clipboardNodes) {
         const data = (node.data ?? {}) as Record<string, unknown>;
-        const isQuestion = node.type === 'question' || data.type === 'question';
         const threadId =
           typeof data.threadId === 'string' ? data.threadId : undefined;
-        const status = data.status;
-        const hasConversation =
-          isQuestion &&
-          !!threadId &&
-          (data.bindingState === 'bound' ||
-            status === 'done' ||
-            status === 'error' ||
-            status === 'running');
+        const hasConversation = !!threadId && questionHasConversation(node);
         if (hasConversation) {
           const dstThreadId = createId('thread');
           forkTasks.push({ srcThreadId: threadId, dstThreadId });
@@ -6825,6 +6963,10 @@ usePreviewWorkspaceStore.subscribe((next, previous) => {
   }
 });
 usePanelStore.subscribe((next, previous) => {
+  // Open or closed is recorded with the Space's layout when the choice is
+  // made, not only on leaving the Space, so a reload restores it.
+  if (next.isRightCollapsed !== previous.isRightCollapsed)
+    usePreviewWorkspaceStore.getState().flush();
   if (next.isRightCollapsed && !previous.isRightCollapsed) {
     settleDepartingPreviewEditors(
       usePreviewWorkspaceStore.getState().workspace,

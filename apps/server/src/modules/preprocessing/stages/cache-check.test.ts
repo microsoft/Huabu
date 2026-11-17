@@ -80,6 +80,46 @@ describe('tryCacheShortCircuit remote PDF migration', () => {
     ]);
   });
 
+  it('re-extracts a PDF whose sidecar came back without its body', async () => {
+    // An undone deletion rewrites the sidecar from what the web holds, which
+    // never includes the extracted text. Same src must not count as cached.
+    const src = 'artifact-paper.pdf';
+    const request: PreprocessNodeRequest = {
+      canvasId: 'canvas-test',
+      nodeId: 'pdf-1',
+      nodeType: 'pdf',
+      trigger: 'node_updated',
+      snapshot: { src },
+    };
+    const ctx: PipelineContext = {};
+    const diagnostics: PreprocessDiagnostic[] = [];
+    const nodes = {
+      canvasId: request.canvasId,
+      read: vi.fn().mockResolvedValue({
+        record: {
+          nodeId: 'pdf-1',
+          type: 'pdf',
+          label: 'Paper',
+          src,
+          content: '',
+        },
+        revision: 'opaque-revision',
+      }),
+    } as unknown as SpaceNodes;
+
+    await expect(
+      tryCacheShortCircuit(
+        request,
+        { nodeId: 'pdf-1', nodeType: 'pdf', artifactUri: src },
+        ctx,
+        diagnostics,
+        nodes,
+      ),
+    ).resolves.toBe(false);
+    expect(ctx).toEqual({});
+    expect(diagnostics).toEqual([]);
+  });
+
   it('propagates repository read failures instead of reporting a cache miss', async () => {
     const src = 'artifact-paper.pdf';
     const request: PreprocessNodeRequest = {

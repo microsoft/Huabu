@@ -1994,18 +1994,7 @@ describe('target resolution', () => {
 });
 
 describe('right panel host', () => {
-  it('does not seed a Chat into a restored empty split', () => {
-    store().splitGroup();
-    useCanvasStore.setState({ nodes: [], canvasId: CANVAS_ID });
-    container = document.createElement('div');
-    document.body.appendChild(container);
-    root = createRoot(container);
-    act(() => root?.render(<PreviewWorkspacePanel />));
-    expect(Object.keys(store().workspace.tabs)).toHaveLength(0);
-    expect(container.querySelectorAll('[role="tablist"]')).toHaveLength(2);
-  });
-
-  it('seeds one Chat only when the host becomes visible', () => {
+  it('never seeds a Chat into an empty workspace, split or not', () => {
     useCanvasStore.setState({ nodes: [], canvasId: CANVAS_ID });
     const onToggle = vi.fn();
     container = document.createElement('div');
@@ -2015,22 +2004,13 @@ describe('right panel host', () => {
     act(() =>
       root?.render(
         <StrictMode>
-          <PreviewWorkspacePanel isHostCollapsed />
+          <PreviewWorkspacePanel onToggle={onToggle} />
         </StrictMode>,
       ),
     );
+
     expect(Object.keys(store().workspace.tabs)).toHaveLength(0);
-
-    act(() =>
-      root?.render(
-        <StrictMode>
-          <PreviewWorkspacePanel isHostCollapsed={false} onToggle={onToggle} />
-        </StrictMode>,
-      ),
-    );
-
-    expect(Object.values(store().workspace.tabs)).toHaveLength(1);
-    expect(Object.values(store().workspace.tabs)[0].target.kind).toBe('chat');
+    expect(container?.textContent).toContain('No preview open in this group');
     const collapse = container?.querySelector<HTMLButtonElement>(
       '[data-testid="collapse-preview"]',
     );
@@ -2049,6 +2029,10 @@ describe('right panel host', () => {
       expect(button?.classList.contains('[&_svg]:w-4')).toBe(true);
       expect(button?.querySelector('svg')?.matches('.lucide')).toBe(true);
     }
+
+    act(() => store().splitGroup());
+    expect(Object.keys(store().workspace.tabs)).toHaveLength(0);
+    expect(container.querySelectorAll('[role="tablist"]')).toHaveLength(2);
   });
 
   it('toggles fullscreen from the tab strip and exits with Escape', () => {
@@ -2065,7 +2049,6 @@ describe('right panel host', () => {
     act(() =>
       root?.render(
         <PreviewWorkspacePanel
-          isHostCollapsed={false}
           isFullscreen
           onToggleFullscreen={onToggleFullscreen}
         />,
@@ -2108,7 +2091,6 @@ describe('right panel host', () => {
     act(() =>
       root?.render(
         <PreviewWorkspacePanel
-          isHostCollapsed={false}
           isFullscreen={false}
           onToggleFullscreen={onToggleFullscreen}
         />,

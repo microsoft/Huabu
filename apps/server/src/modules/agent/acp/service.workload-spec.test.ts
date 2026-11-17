@@ -11,9 +11,18 @@ const mocks = vi.hoisted(() => ({
         agentletId: string;
         executionRevision?: number;
         workingDirPath: string;
-        launch: { kind: 'acp-command'; command: string };
+        launch:
+          | { kind: 'acp-command'; command: string }
+          | { kind: 'acp-harness'; harnessId: string };
+        customData?: Record<string, unknown>;
       }
     | undefined,
+  observation: null as Record<string, unknown> | null,
+}));
+
+vi.mock('./profile-schema-cache.js', () => ({
+  getProfileSchemaCache: () => mocks.observation,
+  mergeProfileSchemaCache: vi.fn(),
 }));
 
 vi.mock('@agenetes/agentlet-host', () => ({
@@ -44,6 +53,72 @@ import { buildAcpWorkloadSpec } from './service.js';
 describe('buildAcpWorkloadSpec', () => {
   beforeEach(() => {
     mocks.profile = undefined;
+    mocks.observation = null;
+  });
+
+  describe('initial selections of a new conversation', () => {
+    const observation = {
+      metaUpdatedAt: 1,
+      configOptions: [
+        {
+          id: 'model_id',
+          category: 'model',
+          options: [{ value: 'opus' }, { value: 'sonnet' }],
+        },
+        {
+          id: 'effort',
+          category: 'thought_level',
+          options: [{ value: 'low' }, { value: 'high' }],
+        },
+      ],
+    };
+    const build = (
+      initialPreferences?: Parameters<
+        typeof buildAcpWorkloadSpec
+      >[0]['initialPreferences'],
+    ) =>
+      buildAcpWorkloadSpec({
+        binding: { profileId: 'profile-a', alias: 'Claude' },
+        threadId: 'thread-a',
+        canvasId: 'canvas-a',
+        ...(initialPreferences && { initialPreferences }),
+      }).spec;
+
+    beforeEach(() => {
+      mocks.profile = {
+        id: 'profile-a',
+        alias: 'Claude',
+        agentletId: 'agentlet-a',
+        workingDirPath: '/work',
+        launch: { kind: 'acp-harness', harnessId: 'claude' },
+        customData: { sessionPreferences: { model: 'sonnet' } },
+      };
+    });
+
+    it('starts on what the conversation displayed, not what the Profile remembers now', () => {
+      mocks.observation = observation;
+
+      expect(build({ model: 'opus', thoughtLevel: 'high' })).toMatchObject({
+        initialPreferences: { model: 'opus', thoughtLevel: 'high' },
+        initialSelections: { model_id: 'opus', effort: 'high' },
+      });
+    });
+
+    it('falls back to the remembered preferences for callers with no interface', () => {
+      mocks.observation = observation;
+
+      expect(build()).toMatchObject({
+        initialPreferences: { model: 'sonnet' },
+        initialSelections: { model_id: 'sonnet' },
+      });
+    });
+
+    it('leaves matching to the session when the Profile has no observed catalogue', () => {
+      const spec = build({ model: 'opus' });
+
+      expect(spec.initialPreferences).toEqual({ model: 'opus' });
+      expect(spec).not.toHaveProperty('initialSelections');
+    });
   });
 
   it.each(['node', 'chat'])(

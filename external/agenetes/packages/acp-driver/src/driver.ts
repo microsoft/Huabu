@@ -57,6 +57,7 @@ export const acpSpecSchema = agentSpecSchema.extend({
     })
     .strict()
     .optional(),
+  initialSelections: z.record(z.string(), z.string()).optional(),
   binding: z.object({
     alias: z.string(),
     profileId: z.string(),

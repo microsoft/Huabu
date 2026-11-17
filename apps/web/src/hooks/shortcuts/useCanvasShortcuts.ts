@@ -86,7 +86,8 @@ function hasNativeCopySelection(target: EventTarget | null): boolean {
  *
  * Registers:
  *  - global mousemove tracker (for paste-at-cursor)
- *  - keydown listener (z-order, delete, undo, redo, frame, copy, intent)
+ *  - keydown listener (z-order, delete, undo, redo, frame, select all,
+ *    copy, cut, intent)
  *  - paste listener (internal clipboard → files → images → URLs → text)
  *  - Space key: temporarily switch to pan mode while held
  *
@@ -532,7 +533,28 @@ export function useCanvasShortcuts(
         // otherwise copy the selected Canvas nodes.
         if (hasNativeCopySelection(e.target)) return;
         e.preventDefault();
-        copySelectedNodes();
+        void copySelectedNodes();
+      } else if (lowerKey === 'a') {
+        // Typing surfaces keep native "select all text".
+        if (editable) return;
+        e.preventDefault();
+        // Whole nodes replace a stroke-level selection, which would
+        // otherwise keep owning Delete and block cut.
+        useGesturePreviewStore.getState().clearSketchStrokeSelection();
+        const { nodes: cur, selectNodes } = useCanvasStore.getState();
+        selectNodes(
+          cur
+            .filter((n) => !n.hidden && n.selectable !== false)
+            .map((n) => n.id),
+          false,
+        );
+      } else if (lowerKey === 'x') {
+        // Cut is destructive, so unlike copy it never reaches through a
+        // focused editor or a live text selection: those keep native cut.
+        // What may be cut is the store's decision.
+        if (editable || hasNativeCopySelection(e.target)) return;
+        e.preventDefault();
+        void useCanvasStore.getState().cutSelectedNodes();
       } else if (lowerKey === 'v') {
         if (editable) return;
 

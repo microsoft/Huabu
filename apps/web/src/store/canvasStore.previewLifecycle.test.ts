@@ -12,6 +12,7 @@ import {
   openSpaceConversation,
 } from './previewWorkspace/actions';
 import { createEmptyWorkspace } from './previewWorkspace/model';
+import { readWorkspaceCollapsed } from './previewWorkspace/persistence';
 import { usePreviewWorkspaceStore } from './previewWorkspace/store';
 
 import type * as PreprocessQueueModule from './canvasStore/save/preprocessQueue';
@@ -60,6 +61,13 @@ beforeEach(() => {
     ],
   });
   schedule.mockClear();
+});
+
+it('records the panel choice with the Space layout as soon as it is made', () => {
+  usePanelStore.getState().setRightCollapsed(true);
+  expect(readWorkspaceCollapsed('parent')).toBe(true);
+  usePanelStore.getState().requestOpenRightPanel();
+  expect(readWorkspaceCollapsed('parent')).toBe(false);
 });
 
 describe('preview editor departure', () => {

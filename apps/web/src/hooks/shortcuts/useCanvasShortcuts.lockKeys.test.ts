@@ -27,6 +27,8 @@ const { canvasActions } = vi.hoisted(() => ({
     disconnectEdges: vi.fn(),
     addNodes: vi.fn(),
     addNode: vi.fn(),
+    selectNodes: vi.fn(),
+    cutSelectedNodes: vi.fn(),
     canvasId: 'c1',
     nodes: [] as unknown[],
     edges: [] as unknown[],
@@ -47,6 +49,7 @@ import {
 import { OPEN_SPACE_SHORTCUT_EVENT } from '../../components/Nodes/spacePreview/spaceShortcutEvents';
 import { REQUEST_CREATE_CHILD_SPACE } from '../../components/Space/createChildSpaceAction';
 import { getCombo } from '../../config/shortcuts';
+import { useGesturePreviewStore } from '../../store/gesturePreviewStore';
 import { useToolStore } from '../../store/toolStore';
 import {
   installDesktopInputGuard,
@@ -197,6 +200,51 @@ describe('useCanvasShortcuts catalog key lock', () => {
 
     dispatchCombo('layer.bringFront');
     expect(canvasActions.sendSelectedToOrder).toHaveBeenLastCalledWith('top');
+  });
+
+  it('selects every selectable, visible node with Mod+A', () => {
+    canvasActions.nodes = [
+      { id: 'a' },
+      { id: 'b', selected: true },
+      { id: 'hidden', hidden: true },
+      { id: 'fixed', selectable: false },
+    ];
+    useGesturePreviewStore.setState({
+      sketchStrokeSelection: { sketch: ['stroke'] },
+    });
+    dispatchCombo('edit.selectAll');
+    expect(canvasActions.selectNodes).toHaveBeenCalledExactlyOnceWith(
+      ['a', 'b'],
+      false,
+    );
+    expect(useGesturePreviewStore.getState().sketchStrokeSelection).toEqual({});
+  });
+
+  it('hands Mod+X to the store, which decides what may be cut', () => {
+    dispatchCombo('edit.cut');
+    expect(canvasActions.cutSelectedNodes).toHaveBeenCalledOnce();
+  });
+
+  it('leaves Mod+A and Mod+X to a focused text field', () => {
+    canvasActions.nodes = [{ id: 'selected', selected: true }];
+    const input = document.createElement('input');
+    container.appendChild(input);
+    const events = ['a', 'x'].map(
+      (key) =>
+        new KeyboardEvent('keydown', {
+          key,
+          metaKey: true,
+          bubbles: true,
+          cancelable: true,
+        }),
+    );
+    act(() => events.forEach((event) => input.dispatchEvent(event)));
+    expect(events.map((event) => event.defaultPrevented)).toEqual([
+      false,
+      false,
+    ]);
+    expect(canvasActions.selectNodes).not.toHaveBeenCalled();
+    expect(canvasActions.cutSelectedNodes).not.toHaveBeenCalled();
   });
 
   it('blocks Delete and Undo from a saving dialog before bubbling handlers run', () => {
