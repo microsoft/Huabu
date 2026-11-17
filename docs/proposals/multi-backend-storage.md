@@ -2755,7 +2755,7 @@ Configuration (credentials belong in deployment environment/secret management):
 - `HUABU_STRUCTURED_BACKEND=disk|sqlite|postgres` (default `disk`).
 - `HUABU_BLOB_BACKEND=disk|azure` (default `disk`).
 - Postgres requires `HUABU_POSTGRES_URL`, a `pg` connection URL. The selected database/schema must be dedicated to Huabu and permit table, index, and extension-owner table creation. TLS is configured through the connection URL.
-- Azure requires `HUABU_AZURE_STORAGE_CONNECTION_STRING` and `HUABU_AZURE_BLOB_CONTAINER` for an existing private container. Optional `HUABU_AZURE_BLOB_PREFIX` defaults to `huabu`; use a distinct prefix/container for each deployment. The connection must permit read, list, write, and delete.
+- Azure requires `HUABU_AZURE_BLOB_CONTAINER` and exactly one of `HUABU_AZURE_STORAGE_ACCOUNT_URL` (HTTPS service root with `DefaultAzureCredential`) or `HUABU_AZURE_STORAGE_CONNECTION_STRING` for an existing private container. Managed identity uses the account URL and Storage Blob Data Contributor on the container; `AZURE_TOKEN_CREDENTIALS=ManagedIdentityCredential` restricts the SDK to managed identity, and `AZURE_CLIENT_ID` selects a user-assigned identity. Browser transfers continue through Huabu without Blob SAS. Optional `HUABU_AZURE_BLOB_PREFIX` defaults to `huabu`; use a distinct prefix/container for each deployment. The connection must permit read, list, write, and delete.
 - SQL records with Disk blobs still use `HUABU_BLOB_ROOT` (or the existing data-directory default). Local runtime state and temporary materializations require local disk even with Postgres and Azure.
 
 ### 12.11 Later phases — provisional

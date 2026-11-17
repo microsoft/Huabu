@@ -34,6 +34,7 @@ function harness() {
 afterEach(() => vi.unstubAllEnvs());
 it('requires configuration, validates prefixes, and does not own the container lifecycle', async () => {
   vi.stubEnv('HUABU_AZURE_STORAGE_CONNECTION_STRING', '');
+  vi.stubEnv('HUABU_AZURE_STORAGE_ACCOUNT_URL', '');
   vi.stubEnv('HUABU_AZURE_BLOB_CONTAINER', '');
   expect(() => AzureBlobStore.fromEnvironment()).toThrow(/require/);
   const h = harness();

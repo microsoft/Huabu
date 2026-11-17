@@ -9,6 +9,7 @@ import path from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 
+import { DefaultAzureCredential } from '@azure/identity';
 import { BlobServiceClient, type ContainerClient } from '@azure/storage-blob';
 
 import { sanitizeId } from '../../../../utils/fs.js';
@@ -84,16 +85,47 @@ export class AzureBlobStore implements BlobStore {
       throw new Error('Azure blob prefix must be a non-empty single segment');
   }
   static fromEnvironment(): AzureBlobStore {
-    const connection = process.env['HUABU_AZURE_STORAGE_CONNECTION_STRING'];
+    const connection =
+      process.env['HUABU_AZURE_STORAGE_CONNECTION_STRING']?.trim();
+    const accountUrl = process.env['HUABU_AZURE_STORAGE_ACCOUNT_URL']?.trim();
     const container = process.env['HUABU_AZURE_BLOB_CONTAINER']?.trim();
-    if (!connection || !container)
+    if (!container || Boolean(connection) === Boolean(accountUrl))
       throw new Error(
-        'Azure blobs require HUABU_AZURE_STORAGE_CONNECTION_STRING and HUABU_AZURE_BLOB_CONTAINER',
+        'Azure blobs require HUABU_AZURE_BLOB_CONTAINER and exactly one of HUABU_AZURE_STORAGE_ACCOUNT_URL or HUABU_AZURE_STORAGE_CONNECTION_STRING',
       );
+
+    let service: BlobServiceClient;
+    if (accountUrl) {
+      // This mode authenticates every server-side Blob request with Entra.
+      // Refuse credentials and SAS query data in the endpoint itself.
+      let endpoint: URL;
+      try {
+        endpoint = new URL(accountUrl);
+      } catch {
+        throw new Error('HUABU_AZURE_STORAGE_ACCOUNT_URL must be a valid URL');
+      }
+      if (
+        endpoint.protocol !== 'https:' ||
+        endpoint.username ||
+        endpoint.password ||
+        endpoint.pathname !== '/' ||
+        endpoint.search ||
+        endpoint.hash
+      )
+        throw new Error(
+          'HUABU_AZURE_STORAGE_ACCOUNT_URL must be an HTTPS account URL without credentials, a path, query, or fragment',
+        );
+      // The SDK owns token caching/refresh and standard Azure identity settings,
+      // including AZURE_CLIENT_ID for a user-assigned managed identity.
+      service = new BlobServiceClient(
+        endpoint.href,
+        new DefaultAzureCredential(),
+      );
+    } else {
+      service = BlobServiceClient.fromConnectionString(connection!);
+    }
     return new AzureBlobStore(
-      BlobServiceClient.fromConnectionString(connection).getContainerClient(
-        container,
-      ),
+      service.getContainerClient(container),
       getWorkspaceKey,
       process.env['HUABU_AZURE_BLOB_PREFIX']?.trim() || 'huabu',
     );
