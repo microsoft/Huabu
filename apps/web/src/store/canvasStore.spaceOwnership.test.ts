@@ -202,7 +202,7 @@ it('also protects direct command deletion instead of relying on UI Delete', () =
   expect(api.deleteNode).not.toHaveBeenCalled();
 });
 
-it('refuses to cut a selection that owns a child Space, leaving nodes and clipboard alone', () => {
+it('refuses to cut a selection that owns a child Space, leaving nodes and clipboard alone', async () => {
   knowChild();
   const note = {
     id: 'cut-note',
@@ -216,7 +216,7 @@ it('refuses to cut a selection that owns a child Space, leaving nodes and clipbo
     ._setStateNoAutosave({ nodes: [{ ...entry, selected: true }, note] });
   const copy = vi.spyOn(useCanvasStore.getState(), 'copySelectedNodes');
   vi.mocked(notifications.toast).mockClear();
-  useCanvasStore.getState().cutSelectedNodes();
+  await useCanvasStore.getState().cutSelectedNodes();
   expect(useCanvasStore.getState().nodes).toHaveLength(2);
   expect(copy).not.toHaveBeenCalled();
   expect(notifications.toast).toHaveBeenCalledExactlyOnceWith(
@@ -236,14 +236,26 @@ it('cuts an ordinary selection by copying it and then removing it, but not durin
   useCanvasStore.getState()._setStateNoAutosave({ nodes: [note] });
   const copy = vi
     .spyOn(useCanvasStore.getState(), 'copySelectedNodes')
-    .mockImplementation(() => undefined);
+    .mockResolvedValue(true);
 
   useGesturePreviewStore.setState({
     sketchStrokeSelection: { sketch: ['stroke'] },
   });
-  useCanvasStore.getState().cutSelectedNodes();
+  await useCanvasStore.getState().cutSelectedNodes();
   expect(copy).not.toHaveBeenCalled();
   expect(useCanvasStore.getState().nodes).toHaveLength(1);
+  useGesturePreviewStore.setState({ sketchStrokeSelection: {} });
+
+  // A clipboard that refuses the write keeps the nodes and says so.
+  copy.mockResolvedValueOnce(false);
+  vi.mocked(notifications.toast).mockClear();
+  await useCanvasStore.getState().cutSelectedNodes();
+  expect(useCanvasStore.getState().nodes).toHaveLength(1);
+  expect(notifications.toast).toHaveBeenCalledExactlyOnceWith(
+    expect.any(String),
+    { tone: 'danger' },
+  );
+  copy.mockClear();
 
   // A selected edge between nodes that stay never reaches the clipboard, so
   // cut must leave it alone.
@@ -254,8 +266,7 @@ it('cuts an ordinary selection by copying it and then removing it, but not durin
     nodes: [note, stay('a'), stay('b')],
     edges: [kept, taken],
   });
-  useGesturePreviewStore.setState({ sketchStrokeSelection: {} });
-  useCanvasStore.getState().cutSelectedNodes();
+  await useCanvasStore.getState().cutSelectedNodes();
   expect(copy).toHaveBeenCalledOnce();
   expect(useCanvasStore.getState().nodes.map((n) => n.id)).toEqual(['a', 'b']);
   expect(useCanvasStore.getState().edges.map((e) => e.id)).toEqual(['kept']);

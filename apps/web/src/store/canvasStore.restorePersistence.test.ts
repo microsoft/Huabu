@@ -802,9 +802,8 @@ describe('undo/redo persistence ordering', () => {
     expect(request).not.toHaveProperty('content');
     expect(state().nodes[0].data.contentMissing).toBeUndefined();
     // The extracted text went with the deleted sidecar; only the server can
-    // produce it again, so the restore asks for it.
-    expect(api.preprocessNode).not.toHaveBeenCalled();
-    await vi.advanceTimersByTimeAsync(1000);
+    // produce it again. The request is issued with the save rather than
+    // debounced, so leaving the Space straight away cannot cancel it.
     expect(api.preprocessNode).toHaveBeenCalledExactlyOnceWith(
       'restore-canvas',
       pdf.id,

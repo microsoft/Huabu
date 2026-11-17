@@ -533,7 +533,7 @@ export function useCanvasShortcuts(
         // otherwise copy the selected Canvas nodes.
         if (hasNativeCopySelection(e.target)) return;
         e.preventDefault();
-        copySelectedNodes();
+        void copySelectedNodes();
       } else if (lowerKey === 'a') {
         // Typing surfaces keep native "select all text".
         if (editable) return;
@@ -554,7 +554,7 @@ export function useCanvasShortcuts(
         // What may be cut is the store's decision.
         if (editable || hasNativeCopySelection(e.target)) return;
         e.preventDefault();
-        useCanvasStore.getState().cutSelectedNodes();
+        void useCanvasStore.getState().cutSelectedNodes();
       } else if (lowerKey === 'v') {
         if (editable) return;
 

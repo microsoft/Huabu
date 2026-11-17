@@ -79,9 +79,10 @@ export type PreprocessQueue = {
   /**
    * Schedule (or reschedule) a debounced preprocess for `node`. The
    * latest store state is re-read at fire time so trailing edits
-   * are reflected in the snapshot sent to the server.
+   * are reflected in the snapshot sent to the server. `immediate` issues the
+   * request now, for work that must survive a Canvas switch.
    */
-  schedule(node: Node): void;
+  schedule(node: Node, options?: { immediate?: boolean }): void;
 
   /**
    * Cancel every pending preprocess timer without firing and invalidate
@@ -317,7 +318,7 @@ export function createPreprocessQueue(opts: {
       queue.schedule(node);
     },
 
-    schedule(node) {
+    schedule(node, options) {
       const scheduledState = opts.getState();
       if (!scheduledState.canvasId) return;
       const nodeId = node.id;
@@ -332,8 +333,9 @@ export function createPreprocessQueue(opts: {
       };
       tasks.set(nodeId, task);
       markPending(nodeId);
-      if (task.phase === 'queued')
-        debouncer.schedule(nodeId, () => start(nodeId, task));
+      if (task.phase !== 'queued') return;
+      if (options?.immediate) start(nodeId, task);
+      else debouncer.schedule(nodeId, () => start(nodeId, task));
     },
 
     cancelAll() {

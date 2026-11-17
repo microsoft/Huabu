@@ -985,9 +985,13 @@ type RFState = {
     reorderTarget?: { nodeId: string; position: 'before' | 'after' },
   ) => void;
 
-  copySelectedNodes: () => void;
-  /** Copy the selection, then delete it; refuses selections that own a child Space. */
-  cutSelectedNodes: () => void;
+  /** Resolves to whether the selection reached the clipboard. */
+  copySelectedNodes: () => Promise<boolean>;
+  /**
+   * Copy the selection and, once it is on the clipboard, delete it. Refuses
+   * selections that own a child Space.
+   */
+  cutSelectedNodes: () => Promise<void>;
   pasteNodes: (
     flowPosition: { x: number; y: number },
     clipboardNodes: Node[],
@@ -1240,8 +1244,10 @@ const nodeContentQueue = createNodeContentQueue({
         : undefined;
     // The rewritten sidecar holds only what the web knew. Ask the server to
     // derive the rest again, whether or not work was pending at deletion.
+    // Issued at once rather than debounced: leaving the Space cancels
+    // debounced work, and nothing would ask for this repair again.
     if (node && SERVER_DERIVED_SIDECAR_NODE_TYPES.has(node.type ?? ''))
-      preprocessQueue.schedule(node);
+      preprocessQueue.schedule(node, { immediate: true });
     else preprocessQueue.resumeRestored(canvasId, nodeId);
   },
   onPropertiesSaved: (nodeId, patch) =>
@@ -4725,7 +4731,7 @@ const useCanvasStore = create<RFState>()(
     copySelectedNodes: () => {
       const { nodes, edges } = get();
       const selected = nodes.filter((n) => n.selected);
-      if (selected.length === 0) return;
+      if (selected.length === 0) return Promise.resolve(false);
 
       // When a frame is selected, also include all its descendant nodes
       // so that copying a frame copies the entire group.
@@ -4802,15 +4808,21 @@ const useCanvasStore = create<RFState>()(
             }
           : undefined;
 
-      void copyCanvasClipboard({
+      return copyCanvasClipboard({
         payload,
         plainText: nodesToPlainText(cloned),
         image: singleImage,
-      });
+      }).then(
+        () => true,
+        (error: unknown) => {
+          console.warn('[clipboard] could not copy the selection', error);
+          return false;
+        },
+      );
     },
 
-    cutSelectedNodes: () => {
-      const { nodes } = get();
+    cutSelectedNodes: async () => {
+      const { nodes, canvasId } = get();
       const nodeIds = nodes.filter((n) => n.selected).map((n) => n.id);
       // A stroke-level sketch selection is owned by StrokeSelectionToolbar.
       if (
@@ -4825,11 +4837,17 @@ const useCanvasStore = create<RFState>()(
         toast(t('spaceHierarchy.cutEntryUnsupported'), { tone: 'warning' });
         return;
       }
+      // Nothing is removed until it is safely on the clipboard.
+      if (!(await get().copySelectedNodes())) {
+        toast(t('files.copyFailed'), { tone: 'danger' });
+        return;
+      }
+      if (get().canvasId !== canvasId) return;
       // Only what reaches the clipboard is removed. Deleting the nodes takes
       // their edges with them; a selected edge between nodes that stay is
       // not copied, so it stays too.
-      get().copySelectedNodes();
-      get().deleteNodes(nodeIds);
+      const live = new Set(get().nodes.map((n) => n.id));
+      get().deleteNodes(nodeIds.filter((id) => live.has(id)));
     },
 
     pasteNodes: (flowPosition, clipboardNodes, clipboardEdges, srcCanvasId) => {
