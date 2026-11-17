@@ -1311,7 +1311,11 @@ const READ_MODEL_DATA_KEYS: ReadonlySet<string> = new Set([
   'measuredSize',
 ]);
 
-/** Units the send queue neither sends nor holds. */
+/**
+ * Units the send queue neither sends nor holds. This is the one rule for
+ * "sent or not": command batches, gesture preludes and tick submissions,
+ * `patchNodeSilent`, undo/redo plans and the in-flight holds all use it.
+ */
 function isUnsentUnit(unit: string): boolean {
   return (
     isContentUnit(unit) ||
@@ -1870,7 +1874,7 @@ const browserSync = createBrowserSync({
         return 'loaded';
       });
   },
-  ignoreUnit: isContentUnit,
+  ignoreUnit: isUnsentUnit,
 });
 
 // ─── A reload that waits for what the user is doing ───────────────────────
@@ -2225,11 +2229,20 @@ function rebaseGestureBaseline(deltas: readonly Delta[]): void {
 
 /**
  * Send what the open pointer gesture changed without a command — the
- * positions its live ticks left in the store — and close the gesture.
+ * positions its live ticks left in the store, and whatever
+ * `patchNodeSilent` left to the gesture meanwhile — and close the gesture.
  *
  * @param edgesBefore Edges before the drop re-routed them.
+ * @param kind `move`: the gesture moved or resized something and is one of
+ *   the user's edits. `leftovers`: it did not (a click, a cancelled drag
+ *   whose nodes are back where they were), so only what else reached the
+ *   store during it is sent — never a placement — and no undo entry is
+ *   touched.
  */
-function submitGestureTicks(edgesBefore: readonly Edge[]): void {
+function submitGestureTicks(
+  edgesBefore: readonly Edge[],
+  kind: 'move' | 'leftovers' = 'move',
+): void {
   const baseline = syncGestureBaseline;
   const state = useCanvasStore.getState();
   endSyncGesture();
@@ -2237,15 +2250,18 @@ function submitGestureTicks(edgesBefore: readonly Edge[]): void {
   const { commands } = commandsForLocalDiff(
     baseline as unknown as UnitNode[],
     state.nodes as unknown as UnitNode[],
-    isContentUnit,
+    kind === 'move'
+      ? isUnsentUnit
+      : (unit) => isUnsentUnit(unit) || PLACEMENT_UNITS.includes(unit),
   );
   if (commands.length === 0) return;
-  canvasHistoryManager.noteChange(
-    deriveHeldKeys(
-      syncView(baseline, edgesBefore),
-      syncView(state.nodes, state.edges),
-    ).keys(),
-  );
+  if (kind === 'move')
+    canvasHistoryManager.noteChange(
+      deriveHeldKeys(
+        syncView(baseline, edgesBefore),
+        syncView(state.nodes, state.edges),
+      ).keys(),
+    );
   browserSync.submit({
     canvasId: state.canvasId,
     commands,
@@ -3433,7 +3449,7 @@ const useCanvasStore = create<RFState>()(
         ? commandsForLocalDiff(
             gestureBaseline as unknown as UnitNode[],
             state.nodes as unknown as UnitNode[],
-            isContentUnit,
+            isUnsentUnit,
           ).commands
         : [];
       const submitPreludeOnly = (): void => {
@@ -5702,6 +5718,8 @@ const useCanvasStore = create<RFState>()(
           // captures the result of a prior un-snapshotted free move and
           // becomes a phantom empty undo step.
           canvasHistoryManager.rollbackGestureSnapshot();
+          // What `patchNodeSilent` left to the gesture is still to be sent.
+          submitGestureTicks(get().edges, 'leftovers');
         }
       }
       endSyncGesture();
@@ -5758,7 +5776,10 @@ const useCanvasStore = create<RFState>()(
       }
 
       endSnapSession();
-      endSyncGesture();
+      // The nodes are back where they were, so no move is sent. A structure
+      // patch that reached the store during the drag was left to the batch
+      // that would have closed it; send it now.
+      submitGestureTicks(get().edges, 'leftovers');
       canvasHistoryManager.rollbackGestureSnapshot();
       set({
         canUndo: canvasHistoryManager.canUndo,

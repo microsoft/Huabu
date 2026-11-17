@@ -2345,3 +2345,96 @@ describe('a wanted reload and what the user is doing', () => {
     expect(state().version).toBe(2);
   });
 });
+
+describe('what is sent is decided by one rule, also around a pointer gesture', () => {
+  const dataPatches = (index: number) =>
+    (own[index].request.commands as CanvasCommand[]).flatMap((command) =>
+      command.type === 'MERGE_NODE_DATA' ? command.patches : [],
+    );
+  const startDrag = () => {
+    const dragged = [node(X)];
+    state().onNodeDragStart(new MouseEvent('mousedown'), dragged[0], dragged);
+  };
+  const tick = (x: number, y: number, dragging = true) =>
+    state().onNodesChange([
+      { type: 'position', id: X, position: { x, y }, dragging },
+    ]);
+
+  it('does not send a read-model hint that was patched in during a drag', async () => {
+    startDrag();
+    tick(240, 60);
+    // The content queue's own patch after a save: the hints of a node whose
+    // sidecar is no longer duplicated. Shown, never sent.
+    state().patchNodeSilent(X, {
+      contentMissing: false,
+      contentDuplicate: false,
+      duplicateFiles: [],
+      measuredSize: { width: 10, height: 10, measuredFor: 'k' },
+    });
+    tick(240, 60, false);
+    state().onNodeDragStop(new MouseEvent('mouseup'), node(X), [node(X)]);
+
+    expect(own).toHaveLength(1);
+    expect(own[0].request.commands).toEqual([moveCommand(X, 240, 60)]);
+    expect(dataPatches(0)).toEqual([]);
+    // Shown all the same.
+    expect(node(X).data.contentDuplicate).toBe(false);
+    await answer(0);
+    expect(serverNode(X)?.data).not.toHaveProperty('contentDuplicate');
+    expect(serverNode(X)?.data).not.toHaveProperty('duplicateFiles');
+  });
+
+  it('does not send such a hint with the batch that closes a programmatic gesture either', async () => {
+    state().beginGesture('SET_NODE_GEOMETRY');
+    state().patchNodeSilent(X, { contentDuplicate: false, duplicateFiles: [] });
+    state().setNodeGeometry([{ nodeId: X, position: { x: 500, y: 0 } }]);
+    expect(own).toHaveLength(1);
+    expect(own[0].request.commands).toEqual([moveCommand(X, 500)]);
+  });
+
+  it('sends a structure patch that landed during a drag that is then cancelled', async () => {
+    startDrag();
+    tick(240, 60);
+    state().patchNodeSilent(X, { pinnedForTest: 'yes' });
+    state().cancelActiveNodeDrag();
+
+    // The node is back where it was, and the move is not sent …
+    expect(node(X).position).toEqual({ x: 0, y: 0 });
+    // … but the patch, which the drag had taken charge of, is.
+    expect(own).toHaveLength(1);
+    expect(own[0].request.commands).toEqual([
+      {
+        type: 'MERGE_NODE_DATA',
+        patches: [{ nodeId: X, patch: { pinnedForTest: 'yes' } }],
+      },
+    ]);
+    await answer(0);
+    expect(serverNode(X)?.data.pinnedForTest).toBe('yes');
+    expect(serverNode(X)?.position).toEqual({ x: 0, y: 0 });
+    expect(hasUnsavedCanvasEdits()).toBe(false);
+  });
+
+  it('sends nothing for a cancelled drag during which nothing else changed', async () => {
+    startDrag();
+    tick(240, 60);
+    state().patchNodeSilent(X, { contentDuplicate: false });
+    state().cancelActiveNodeDrag();
+    await flush();
+    expect(own).toHaveLength(0);
+  });
+
+  it('sends a structure patch that landed during a click that moved nothing', async () => {
+    startDrag();
+    state().patchNodeSilent(X, { pinnedForTest: 'yes' });
+    state().onNodeDragStop(new MouseEvent('mouseup'), node(X), [node(X)]);
+
+    expect(own).toHaveLength(1);
+    expect(dataPatches(0)).toEqual([
+      { nodeId: X, patch: { pinnedForTest: 'yes' } },
+    ]);
+    // A click is not an edit: no undo entry.
+    expect(canvasHistoryManager.canUndo).toBe(false);
+    await answer(0);
+    expect(serverNode(X)?.data.pinnedForTest).toBe('yes');
+  });
+});
