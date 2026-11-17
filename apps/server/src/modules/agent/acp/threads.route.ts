@@ -20,8 +20,10 @@ import {
   externalAgentRealization,
   realizationHttpError,
 } from './external-agent-realization.js';
-import { profileSessionMetaSnapshot } from './profile-capabilities.js';
-import { getProfileSchemaCache } from './profile-schema-cache.js';
+import {
+  profileSessionMetaSnapshot,
+  readProfileObservation,
+} from './profile-capabilities.js';
 import {
   rememberProfileConfigPreference,
   rememberProfileSessionPreference,
@@ -269,7 +271,7 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
         return reply
           .code(404)
           .send({ message: 'Agent Profile is unavailable' });
-      const profileCache = getProfileSchemaCache(profileId);
+      const profileCache = readProfileObservation(profileId);
       if (
         profileCache &&
         ((profileCache.metaUpdatedAt ?? 0) > 0 ||

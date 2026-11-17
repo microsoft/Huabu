@@ -273,6 +273,25 @@ describe('ACP cached capability route', () => {
     );
   });
 
+  it('ignores a Profile observation recorded before the launch was edited', async () => {
+    mocks.profileCache = {
+      availableModels: [{ modelId: 'model-1', name: 'Model 1' }],
+      metaUpdatedAt: 12,
+      executionRevision: 3,
+    };
+    const server = await createApp();
+
+    const response = await server.inject({
+      method: 'GET',
+      url: '/api/acp/threads/thread-1/cached-meta?canvasId=canvas-1&profileId=profile-1',
+    });
+
+    expect(response.json()).toMatchObject({
+      source: 'none',
+      sessionMeta: { availableModels: [], updatedAt: 0 },
+    });
+  });
+
   it('returns a successful empty observation on a cold cache', async () => {
     const server = await createApp();
 

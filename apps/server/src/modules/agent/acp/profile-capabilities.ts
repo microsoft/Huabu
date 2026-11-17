@@ -81,24 +81,37 @@ export function projectProfileCapabilities(
   };
 }
 
+/**
+ * The Profile's observed catalogue, or `null` when nothing usable is cached.
+ *
+ * An observation recorded under another execution revision describes a
+ * launch the Profile no longer has, so it is treated as absent.
+ */
+export function readProfileObservation(
+  profileId: string,
+): AcpProfileSchemaCacheEntry | null {
+  const profile = resolveProfileSnapshot(profileId);
+  const cache = getProfileSchemaCache(profileId);
+  if (!profile || !cache) return null;
+  return cache.executionRevision !== undefined &&
+    cache.executionRevision !== profile.executionRevision
+    ? null
+    : cache;
+}
+
 export function readProfileCapabilities(
   profileId: string,
 ): AcpProfileCapabilitiesResponse {
-  const profile = resolveProfileSnapshot(profileId);
-  if (!profile) {
+  if (!resolveProfileSnapshot(profileId)) {
     throw new ProfileCapabilitiesError(
       404,
       'profile_not_found',
       'Agent Profile is unavailable',
     );
   }
-  const cache = getProfileSchemaCache(profileId);
   return projectProfileCapabilities(
     profileId,
-    cache?.executionRevision !== undefined &&
-      cache.executionRevision !== profile.executionRevision
-      ? null
-      : cache,
+    readProfileObservation(profileId),
   );
 }
 
