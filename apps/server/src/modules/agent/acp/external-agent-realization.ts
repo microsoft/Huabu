@@ -147,7 +147,14 @@ async function ensureSessionFromCanonicalSpec(
     await acpRuntimePolicy.resolveRuntimeEnvironment?.(spec.spec);
   const env =
     resolvedEnvironment || spec.spec.env
-      ? { ...resolvedEnvironment, ...spec.spec.env }
+      ? Object.fromEntries(
+          Object.entries({
+            ...resolvedEnvironment,
+            ...spec.spec.env,
+          }).filter(
+            (entry): entry is [string, string] => entry[1] !== undefined,
+          ),
+        )
       : undefined;
   const record = await agenetes.record(spec.namespace, spec.threadId);
   const requestedAgentletId = resolveAcpAgentletId(spec);
