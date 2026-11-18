@@ -255,7 +255,10 @@ export interface AtomicWriteOptions {
   mode?: number;
   /**
    * Flush the contents to stable storage before the rename publishes them,
-   * so a crash cannot leave a renamed but empty file. Costs one `fsync`.
+   * so a crash cannot leave a renamed but empty file, and flush the directory
+   * after it, so a crash cannot revert the rename to the previous file.
+   * Costs two `fsync`s; the directory flush is skipped on Windows, which
+   * cannot open a directory for it.
    */
   durable?: boolean;
 }
@@ -298,6 +301,14 @@ export function atomicWriteText(
       // only if it does not hide why the durable write itself failed.
     }
     throw error;
+  }
+  if (options.durable && process.platform !== 'win32') {
+    const directory = openSync(path.dirname(filePath), 'r');
+    try {
+      fsyncSync(directory);
+    } finally {
+      closeSync(directory);
+    }
   }
 }
 

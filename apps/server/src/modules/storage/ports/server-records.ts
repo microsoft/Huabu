@@ -100,14 +100,15 @@ export function serverRecordId(key: ServerRecordKey): string {
 
 /**
  * Serialize a value the way every adapter stores it. `null` is reserved for
- * "never written", so a record cannot hold it.
+ * "never written", so a record cannot hold it, nor anything that serializes
+ * to it, such as `NaN` or an object whose `toJSON()` returns `null`.
  */
 export function encodeServerRecord(
   key: ServerRecordKey,
   value: unknown,
 ): string {
-  const text = value === null ? undefined : JSON.stringify(value);
-  if (text === undefined)
+  const text = JSON.stringify(value) as string | undefined;
+  if (text === undefined || text === 'null')
     throw new ServerRecordError(
       `Server record ${key.name} must be a JSON value other than null`,
     );

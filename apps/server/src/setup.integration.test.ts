@@ -12,6 +12,9 @@ import { fileURLToPath } from 'node:url';
 import { parse } from 'dotenv';
 import { expect, it } from 'vitest';
 
+import { SqliteStoreContext } from './modules/storage/backends/sqlite/database.js';
+import { SqliteServerRecordStore } from './modules/storage/backends/sqlite/server-records.js';
+import { ServerRecords } from './modules/storage/server-records.js';
 import { diskServerRecords } from './modules/storage/testing.js';
 import { EncryptedSecretStore } from './security/encrypted-secret-store.js';
 import { resolveStandaloneMasterKey } from './security/private-config.js';
@@ -214,13 +217,25 @@ it('bootstraps locally, survives restart, authenticates setup remote mode, and r
     await exit;
     vite = undefined;
   };
+  // Credentials live in the structured backend the setup under test used.
   const readCredentials = async () => {
-    const store = new EncryptedSecretStore(
-      diskServerRecords(join(directory, 'data')),
-      resolveStandaloneMasterKey(true, env),
-    );
-    await store.initialize();
-    return store;
+    const sqlite =
+      env.HUABU_STRUCTURED_BACKEND === 'sqlite' && env.HUABU_SQLITE_PATH
+        ? new SqliteStoreContext(env.HUABU_SQLITE_PATH)
+        : null;
+    sqlite?.init();
+    try {
+      const store = new EncryptedSecretStore(
+        sqlite
+          ? new ServerRecords(new SqliteServerRecordStore(sqlite))
+          : diskServerRecords(join(directory, 'data')),
+        resolveStandaloneMasterKey(true, env),
+      );
+      await store.initialize();
+      return store;
+    } finally {
+      sqlite?.close();
+    }
   };
   try {
     const initialCredentials = new EncryptedSecretStore(

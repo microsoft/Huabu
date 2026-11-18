@@ -114,6 +114,11 @@ export function describeServerRecordStoreContract(
       await expect(
         store.put({ owner: null, name: 'agent-defaults' }, undefined),
       ).rejects.toThrow('other than null');
+      // Each serializes to `null`, which would read back as damage.
+      for (const value of [NaN, Infinity, { toJSON: () => null }])
+        await expect(
+          store.put({ owner: null, name: 'agent-defaults' }, value),
+        ).rejects.toThrow('other than null');
       expect(
         await store.get({ owner: null, name: 'agent-defaults' }),
       ).toBeNull();

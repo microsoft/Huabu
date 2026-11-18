@@ -119,9 +119,10 @@ export type { DiskSpaceImport } from './backends/disk/space-import.js';
 export {
   getServerRecords,
   initServerRecords,
+  readDataDirectoryRecord,
   ServerRecords,
   setServerRecordsForTesting,
-} from './storage.js';
+} from './server-records.js';
 export {
   isServerRecordOwner,
   SERVER_RECORDS,

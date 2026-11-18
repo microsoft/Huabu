@@ -12,7 +12,7 @@
  * credential envelope is one of these files.
  */
 
-import { existsSync, readdirSync } from 'node:fs';
+import { readdirSync, statSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 
 import { diskPeopleDir, diskServerRecordPath } from './data-dir.js';
@@ -30,6 +30,22 @@ import type {
   ServerRecordKey,
   ServerRecordStore,
 } from '../../ports/server-records.js';
+
+/**
+ * Whether a record's file exists. Only a missing path is absent: an
+ * unreadable one fails the caller rather than being skipped as if it were
+ * never written, because an import would then silently leave it behind.
+ */
+function recordFileExists(file: string): boolean {
+  try {
+    statSync(file);
+    return true;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT' || code === 'ENOTDIR') return false;
+    throw error;
+  }
+}
 
 export class DiskServerRecordStore implements ServerRecordStore {
   readonly kind = 'disk' as const;
@@ -73,7 +89,8 @@ export class DiskServerRecordStore implements ServerRecordStore {
       for (const name of SERVER_RECORD_NAMES) {
         if (owner !== null && !SERVER_RECORDS[name].personal) continue;
         const key = { owner, name };
-        if (existsSync(diskServerRecordPath(key, dataDir))) keys.push(key);
+        if (recordFileExists(diskServerRecordPath(key, dataDir)))
+          keys.push(key);
       }
     };
     collect(null);

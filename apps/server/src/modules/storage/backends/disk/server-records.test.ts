@@ -2,6 +2,7 @@
 // Licensed under the MIT license.
 
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -120,6 +121,22 @@ describe('Disk server records', () => {
       await expect(
         store.get({ owner: null, name: 'model-settings' }),
       ).rejects.toThrow('Server record model-settings');
+    },
+  );
+
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
+    'fails to list records it cannot see rather than omit them',
+    async () => {
+      const dataDir = dataDirectory();
+      const store = new DiskServerRecordStore(() => dataDir);
+      await store.put({ owner: OWNER, name: 'model-settings' }, { v: 1 });
+      const person = join(dataDir, 'people', OWNER);
+      chmodSync(person, 0o600);
+      try {
+        await expect(store.keys()).rejects.toThrow(/EACCES/);
+      } finally {
+        chmodSync(person, 0o700);
+      }
     },
   );
 

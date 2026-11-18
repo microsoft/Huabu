@@ -7,7 +7,7 @@
  * earlier version's data-directory files into a database backend.
  */
 
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -16,11 +16,11 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { DiskServerRecordStore } from './backends/disk/server-records.js';
 import { StorageProfileError } from './profile.js';
 import {
-  closeStorage,
   getServerRecords,
   initServerRecords,
   ServerRecords,
-} from './storage.js';
+} from './server-records.js';
+import { closeStorage } from './storage.js';
 
 import type { ServerRecordStore } from './ports/server-records.js';
 
@@ -84,6 +84,43 @@ it('writes nothing when a change throws, and keeps serving later changes', async
   }));
 
   expect(await records.get(VERSIONS)).toEqual({ alice: 1, bob: 1 });
+});
+
+it('replaces a damaged record without reading it, while a change still refuses it', async () => {
+  const dataDir = dataDirectory();
+  writeFileSync(join(dataDir, 'agent-credential-versions.json'), '{broken');
+  const records = new ServerRecords(new DiskServerRecordStore(() => dataDir));
+
+  await expect(records.update(VERSIONS, () => ({}))).rejects.toThrow(
+    'not valid JSON',
+  );
+  await records.put(VERSIONS, { alice: 1 });
+  expect(await records.get(VERSIONS)).toEqual({ alice: 1 });
+});
+
+it('opens the database the supplied environment names, and no other', async () => {
+  const processDir = dataDirectory();
+  const suppliedDir = dataDirectory();
+  const legacy = new DiskServerRecordStore(() => suppliedDir);
+  await legacy.put(VERSIONS, { alice: 1 });
+  vi.stubEnv('HUABU_DATA_DIR', processDir);
+  vi.stubEnv('HUABU_STRUCTURED_BACKEND', 'disk');
+  const env = {
+    HUABU_STRUCTURED_BACKEND: 'sqlite',
+    HUABU_DATA_DIR: suppliedDir,
+  };
+
+  const records = await initServerRecords(env);
+  expect(await records.get(VERSIONS)).toEqual({ alice: 1 });
+  expect(
+    existsSync(join(suppliedDir, 'storage', 'sqlite', 'huabu.sqlite')),
+  ).toBe(true);
+  expect(existsSync(join(processDir, 'storage'))).toBe(false);
+  // One process holds one SQLite connection; another database is refused
+  // rather than served from the open one.
+  await expect(
+    initServerRecords({ ...env, HUABU_DATA_DIR: processDir }),
+  ).rejects.toThrow(StorageProfileError);
 });
 
 it('requires an awaited open before a database backend serves records', () => {

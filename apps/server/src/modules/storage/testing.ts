@@ -27,7 +27,8 @@ import { setWorkspacePath } from '../workspace.js';
 import { prepareAzureTestEnvironment } from './backends/azure/test-support.js';
 import { DiskServerRecordStore } from './backends/disk/server-records.js';
 import { preparePostgresTestEnvironment } from './backends/postgres/test-support.js';
-import { closeStorage, initStorage, ServerRecords } from './storage.js';
+import { ServerRecords } from './server-records.js';
+import { closeStorage, initStorage } from './storage.js';
 
 import type { StorageProfile } from './profile.js';
 import type { Storage } from './storage.js';
