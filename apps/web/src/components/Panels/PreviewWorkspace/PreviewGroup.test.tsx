@@ -6,6 +6,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import useCanvasStore from '@/store/canvasStore';
+import { useCommentDestinationMemory } from '@/store/commentDestinationMemory';
 import {
   activateTab,
   createEmptyWorkspace,
@@ -39,6 +40,7 @@ const trackers = vi.hoisted(() => ({
   tabStripRenders: 0,
   stripConnection: null as AcpConnectionInfo | null,
   connectionHandlers: new Map<string, ChatConnectionChangeHandler>(),
+  activate: (_tabId: string) => {},
 }));
 
 vi.mock('./PreviewTabStrip', () => ({
@@ -46,9 +48,12 @@ vi.mock('./PreviewTabStrip', () => ({
   tabElementId: (groupId: string, tabId: string) => `tab-${groupId}-${tabId}`,
   PreviewTabStrip: ({
     activeChatConnection,
+    onActivate,
   }: {
     activeChatConnection?: AcpConnectionInfo;
+    onActivate: (tabId: string) => void;
   }) => {
+    trackers.activate = onActivate;
     trackers.tabStripRenders += 1;
     trackers.stripConnection = activeChatConnection ?? null;
     return <div data-testid="tab-strip" />;
@@ -181,6 +186,37 @@ afterEach(() => {
   act(() => root.unmount());
   container.remove();
   useCanvasStore.setState({ canvasId: '', nodes: [] });
+});
+
+it('records actual tab activation and panel interaction, not restored layout or programmatic focus', async () => {
+  useCanvasStore.setState({
+    nodes: ['a', 'b'].map((id) => ({
+      ...node(id),
+      type: 'question',
+      data: { threadId: `thread-${id}` },
+    })),
+  });
+  const workspace = workspaceWithTwoTabs();
+  await act(async () => renderGroup(workspace));
+  const memory = () => useCommentDestinationMemory.getState().lastPreview;
+  expect(memory()).toBeNull();
+  const panel = container.querySelector('[role="tabpanel"]');
+  if (!panel) throw new Error('Missing preview panel');
+  act(() => panel.dispatchEvent(new FocusEvent('focusin', { bubbles: true })));
+  expect(memory()).toBeNull();
+  act(() => trackers.activate('a'));
+  expect(memory()?.nodeId).toBe('a');
+  act(() =>
+    panel.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })),
+  );
+  expect(memory()?.nodeId).toBe('b');
+  act(() => trackers.activate('a'));
+  act(() =>
+    panel.dispatchEvent(
+      new KeyboardEvent('keyup', { key: 'Tab', bubbles: true }),
+    ),
+  );
+  expect(memory()?.nodeId).toBe('b');
 });
 
 describe('PreviewGroup retention', () => {

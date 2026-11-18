@@ -199,6 +199,8 @@ export interface MilkdownFactoryOptions {
    * (used by test / preview surfaces that have no canvas context).
    */
   resolveImageSrc?: (src: string) => string;
+  /** Render only this document: no image resources or navigable links. */
+  singleFile?: boolean;
   /**
    * Upload a pasted or dropped image file and resolve to the bare
    * artifact key to persist (e.g. `art_abc.png`). When omitted, image
@@ -2225,8 +2227,32 @@ export async function createMilkdown(
       () =>
         new Plugin({
           props: {
+            markViews: options.singleFile
+              ? {
+                  link: () => {
+                    const dom = document.createElement('span');
+                    return { dom, contentDOM: dom };
+                  },
+                }
+              : {},
             nodeViews: {
               image: (node) => {
+                if (options.singleFile) {
+                  const dom = document.createElement('span');
+                  dom.className = 'text-fg-muted';
+                  const applyAlt = (n: ProseNode) => {
+                    dom.textContent = `[${String(n.attrs.alt ?? '')}]`;
+                  };
+                  applyAlt(node);
+                  return {
+                    dom,
+                    update: (updated: ProseNode) => {
+                      if (updated.type.name !== 'image') return false;
+                      applyAlt(updated);
+                      return true;
+                    },
+                  };
+                }
                 const dom = document.createElement('img');
                 const applyAttrs = (n: ProseNode): void => {
                   dom.setAttribute(

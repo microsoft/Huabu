@@ -28,6 +28,7 @@
  */
 
 import { getAgentletGateway } from '@agenetes/agentlet-host';
+import { reportedTokenUsageSchema } from '@agenetes/protocol';
 import { RequestError } from '@agentclientprotocol/sdk';
 
 import { acpBindingRecipeSchema } from './binding-recipe.js';
@@ -304,8 +305,40 @@ function snapshotEntryMeta(entry: AcpSessionEntry): AgentMetadata {
     selectionsUpdatedAt: entry.selectionsUpdatedAt,
     sessionInfo: entry.sessionInfo,
     usage: entry.usage,
+    tokenUsage: entry.tokenUsage,
     metaUpdatedAt: entry.metaUpdatedAt,
   };
+}
+
+export function recordPromptUsage(
+  entry: AcpSessionEntry,
+  usage: unknown,
+  logger: AcpSessionLogger,
+): void {
+  if (usage == null) return;
+  const parsed = reportedTokenUsageSchema.safeParse(
+    typeof usage === 'object' ? { ...usage, receivedAt: Date.now() } : usage,
+  );
+  if (!parsed.success) {
+    logger.warn(
+      { sessionId: entry.sessionId, issues: parsed.error.issues },
+      '[acp] invalid prompt usage ignored',
+    );
+    return;
+  }
+  entry.tokenUsage = parsed.data;
+  entry.metaUpdatedAt = parsed.data.receivedAt;
+  reportEntryState(entry);
+}
+
+/** Restore historical usage only for the same native session, without retimestamping. */
+export function restoreSessionUsage(
+  entry: AcpSessionEntry,
+  priorState: AgentStateSnapshot<AcpDurableState> | undefined,
+): void {
+  if (priorState?.driverState.sessionId !== entry.sessionId) return;
+  entry.usage ??= priorState.metadata?.usage ?? null;
+  entry.tokenUsage ??= priorState.metadata?.tokenUsage ?? null;
 }
 
 /**
@@ -797,7 +830,6 @@ function hydrateEntryFromPersistedMeta(
   }
   if (meta.configOptions) entry.configOptions = meta.configOptions;
   if (meta.sessionInfo !== undefined) entry.sessionInfo = meta.sessionInfo;
-  if (meta.usage !== undefined) entry.usage = meta.usage;
   if (typeof meta.metaUpdatedAt === 'number') {
     entry.metaUpdatedAt = meta.metaUpdatedAt;
   }
@@ -1123,6 +1155,7 @@ async function ensureAcpSessionInner(
     selectionsReplay: null,
     sessionInfo: null,
     usage: null,
+    tokenUsage: null,
     metaUpdatedAt: 0,
   };
 
@@ -1165,6 +1198,7 @@ async function ensureAcpSessionInner(
   client.registerSessionListener(sessionId, (update) => {
     handleSessionMetaUpdate(created, update, logger);
   });
+  restoreSessionUsage(created, priorState);
 
   // If the down-fed snapshot has a meta payload (e.g. from a previous
   // server lifetime), use it as a fallback seed — it may carry
@@ -1475,8 +1509,9 @@ function applyUsageUpdate(
       cost = { amount: c.amount, currency: c.currency };
     }
   }
-  entry.usage = { used, size, cost };
-  entry.metaUpdatedAt = Date.now();
+  const receivedAt = Date.now();
+  entry.usage = { used, size, cost, receivedAt };
+  entry.metaUpdatedAt = receivedAt;
   // Up-report (I9.7): push the folded snapshot up so the instance
   // persists it (sole ThreadStore writer) and re-emits via notifications().
   reportEntryState(entry);

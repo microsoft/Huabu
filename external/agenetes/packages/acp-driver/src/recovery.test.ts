@@ -5,7 +5,12 @@ import { AcpAgentHandle, lowerAcpInputs } from './handle.js';
 import { emptyAcpOverlay } from './overlay.js';
 import { acpSessionRegistry } from './session-registry.js';
 
-import type { AcpCreateSpec, AcpDurableState } from './handle.js';
+import type {
+  AcpCreateSpec,
+  AcpDurableState,
+  AcpSpec,
+  AcpRuntimeLaunchContext,
+} from './handle.js';
 import type { AcpSessionEntry } from './session-registry.js';
 import type {
   AgentTurn,
@@ -20,6 +25,7 @@ const sessionMocks = vi.hoisted(() => ({
   reportEntryState: vi.fn(),
   awaitSelectionReplay: vi.fn(async () => {}),
   recordSessionSelection: vi.fn(),
+  recordPromptUsage: vi.fn(),
   MODE_SELECTION_ID: 'mode',
   MODEL_SELECTION_ID: 'model',
 }));
@@ -76,9 +82,13 @@ function durableContext(
 }
 
 function sessionEntry() {
-  const prompt = vi.fn(async (..._args: unknown[]) => ({
-    stopReason: 'end_turn',
-  }));
+  const prompt = vi.fn(
+    async (
+      ..._args: unknown[]
+    ): Promise<{ stopReason: string; usage?: unknown }> => ({
+      stopReason: 'end_turn',
+    }),
+  );
   return {
     entry: {
       client: { prompt },
@@ -104,6 +114,65 @@ describe('ACP durable history recovery', () => {
     acpSessionRegistry.remove('machine-a', spec.threadId, spec.namespace);
   });
 
+  it.each(['Deployment', 'Job'] as const)(
+    'resolves %s runtime context without replaying saved environment',
+    async (workloadType) => {
+      const saved: AcpCreateSpec = {
+        ...spec,
+        workloadType,
+        threadId: workloadType === 'Job' ? '' : 'imported-thread',
+        namespace: { name: 'imported-space', ownerId: 'target-workspace' },
+        spec: {
+          ...spec.spec,
+          env: { ENDPOINT: 'old', OBSOLETE: 'old', CUSTOM: 'user' },
+        },
+      };
+      const { entry } = sessionEntry();
+      sessionMocks.ensureAcpSession.mockResolvedValue(entry);
+      const resolveRuntimeEnvironment = vi.fn(
+        async (_spec: AcpSpec, context: AcpRuntimeLaunchContext) => {
+          expect(context.namespace).toEqual(saved.namespace);
+          expect(context.agentletId).toBe('machine-a');
+          expect(context.threadId).toEqual(
+            workloadType === 'Job'
+              ? expect.stringMatching(/^acp-job-/)
+              : 'imported-thread',
+          );
+          return { ENDPOINT: 'current', OBSOLETE: undefined };
+        },
+      );
+      const handle = new AcpAgentHandle(
+        saved,
+        durableContext(async () => ({ allowed: true, estimatedSize: 0 }), []),
+        { getIdleTimeoutSecs: () => 600, resolveRuntimeEnvironment },
+      );
+      for await (const event of handle.run(submission, {
+        overlay: emptyAcpOverlay(),
+        logger,
+      })) {
+        expect(event.type).not.toBe('error');
+      }
+      expect(sessionMocks.ensureAcpSession).toHaveBeenCalledWith(
+        expect.objectContaining({
+          namespace: saved.namespace,
+          recipe: saved.spec.recipe,
+          env: { ENDPOINT: 'current', CUSTOM: 'user' },
+          priorState: expect.objectContaining({
+            driverState: expect.objectContaining({
+              sessionId: 'stale_session',
+            }),
+          }),
+        }),
+      );
+      expect(resolveRuntimeEnvironment).toHaveBeenCalledOnce();
+      expect(saved.spec.env).toEqual({
+        ENDPOINT: 'old',
+        OBSOLETE: 'old',
+        CUSTOM: 'user',
+      });
+    },
+  );
+
   it('folds host side-channel events into the driver stream before termination', async () => {
     const { entry } = sessionEntry();
     sessionMocks.ensureAcpSession.mockResolvedValue(entry);
@@ -112,6 +181,7 @@ describe('ACP durable history recovery', () => {
         authorizeHistoryLoad: async () => ({ allowed: true, estimatedSize: 0 }),
       },
     });
+
     const hostEvent = {
       type: 'tool_call' as const,
       data: {
@@ -134,6 +204,33 @@ describe('ACP durable history recovery', () => {
     expect(events).toContainEqual(hostEvent);
     expect(events.at(-1)?.type).toBe('done');
     expect(events.indexOf(hostEvent)).toBeLessThan(events.length - 1);
+  });
+
+  it('passes prompt-response usage to the existing state writer before completion', async () => {
+    const { entry, prompt } = sessionEntry();
+    const usage = { inputTokens: 3004, outputTokens: 74, totalTokens: 3078 };
+    prompt.mockResolvedValue({ stopReason: 'end_turn', usage });
+    sessionMocks.ensureAcpSession.mockResolvedValue(entry);
+    const handle = new AcpAgentHandle(spec, {
+      recovery: {
+        authorizeHistoryLoad: async () => ({ allowed: true, estimatedSize: 0 }),
+      },
+    });
+    for await (const event of handle.run(submission, {
+      overlay: emptyAcpOverlay(),
+      logger,
+    })) {
+      if (event.type === 'done') {
+        expect(sessionMocks.recordPromptUsage).toHaveBeenCalledWith(
+          entry,
+          usage,
+          logger,
+        );
+        expect(entry.persistedToDisk).toBe(true);
+        expect(event.data.meta?.usage).toBeUndefined();
+      }
+    }
+    expect(sessionMocks.recordPromptUsage).toHaveBeenCalledOnce();
   });
 
   describe('ACP canonical input lowering', () => {

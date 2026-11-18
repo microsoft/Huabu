@@ -11,6 +11,8 @@ import { usePanelStore } from '@/store/panelStore';
 
 import { FilesPanel } from './FilesPanel';
 
+import type { AddNodeInput } from '@/handler/canvasCommand/uiIntent';
+import type * as PreviewActions from '@/store/previewWorkspace/actions';
 import type { FileListResult } from '@huabu/shared';
 import type * as ReactI18next from 'react-i18next';
 
@@ -18,10 +20,15 @@ const mocks = vi.hoisted(() => ({
   list: vi.fn(),
   add: vi.fn(),
   copy: vi.fn(),
+  open: vi.fn(),
   t: (key: string) => key,
 }));
 vi.mock('@/api/device-files', () => ({ listDeviceFiles: mocks.list }));
 vi.mock('@/utils/io/clipboard', () => ({ copyToClipboard: mocks.copy }));
+vi.mock('@/store/previewWorkspace/actions', async (original) => ({
+  ...(await original<typeof PreviewActions>()),
+  openFileReference: mocks.open,
+}));
 vi.mock('react-i18next', async (importOriginal) => ({
   ...(await importOriginal<typeof ReactI18next>()),
   useTranslation: () => ({ t: mocks.t }),
@@ -61,7 +68,26 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.copy.mockResolvedValue(undefined);
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
-  useCanvasStore.setState({ canvasId: 'canvas-files', addNode: mocks.add });
+  mocks.add.mockImplementation((input: AddNodeInput) => {
+    useCanvasStore.setState((state) => ({
+      nodes: [
+        ...state.nodes,
+        {
+          id: input.id ?? 'new-file',
+          type: input.nodeType,
+          position: { x: 0, y: 0 },
+          data: input.data ?? {},
+        },
+      ],
+    }));
+  });
+  useCanvasStore.setState({
+    canvasId: 'canvas-files',
+    addNode: mocks.add,
+    nodes: [],
+    isLoading: false,
+    canvasAccess: { canvasId: 'canvas-files', write: true, manage: true },
+  });
   usePanelStore.getState().openFiles({
     canvasId: 'canvas-files',
     agentletId: 'device',
@@ -90,7 +116,7 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 const click = async (label: string) => {
-  const found = [...host.querySelectorAll('button')].find(
+  const found = [...document.querySelectorAll('button')].find(
     (button) =>
       button.textContent === label ||
       button.title === label ||
@@ -119,7 +145,8 @@ it('loads directories lazily, deduplicates mutation-overlapping pages and create
     path: '/root/folder',
     showHidden: false,
   });
-  await click('files.add');
+  await openMenu(file.name);
+  await click('files.addToSpace');
   expect(mocks.add).toHaveBeenCalledWith(
     expect.objectContaining({
       nodeType: 'fileReference',
@@ -160,6 +187,108 @@ it('discards late directory replies after the browsing target changes', async ()
   expect(signal.aborted).toBe(true);
   await act(async () => resolve(page([file])));
   expect(host.textContent).not.toContain('file.txt');
+});
+
+it('groups folders first at every level without losing entries across pagination or changing cached order', async () => {
+  const entry = (
+    name: string,
+    kind: FileListResult['entries'][number]['kind'],
+    parent = '/root',
+  ) => ({ name, path: `${parent}/${name}`, kind });
+  const initial = [
+    entry('.hidden', 'file'),
+    entry('a.txt', 'file'),
+    entry('b-link', 'symlink'),
+    entry('c-special', 'other'),
+    entry('m-folder', 'directory'),
+    entry('n.txt', 'file'),
+  ];
+  const children = [
+    entry('a.txt', 'file', '/root/m-folder'),
+    entry('nested', 'directory', '/root/m-folder'),
+    entry('z.txt', 'file', '/root/m-folder'),
+  ];
+  const continuation = [
+    entry('n.txt', 'file'),
+    entry('y-folder', 'directory'),
+    entry('z.txt', 'file'),
+  ];
+  mocks.list
+    .mockResolvedValueOnce(page(initial, 'root-next'))
+    .mockResolvedValueOnce({
+      path: '/root/m-folder',
+      parentPath: '/root',
+      entries: children,
+    })
+    .mockResolvedValueOnce(page(continuation));
+  const visiblePaths = () =>
+    [...host.querySelectorAll('span[title]')].map((span) =>
+      span.getAttribute('title'),
+    );
+  await act(async () => root.render(<FilesPanel />));
+  expect(visiblePaths()).toEqual([
+    '/root/m-folder',
+    '/root/.hidden',
+    '/root/a.txt',
+    '/root/b-link',
+    '/root/c-special',
+    '/root/n.txt',
+  ]);
+  expect(mocks.list).toHaveBeenCalledOnce();
+  await click('m-folder');
+  expect(visiblePaths()).toEqual([
+    '/root/m-folder',
+    '/root/m-folder/nested',
+    '/root/m-folder/a.txt',
+    '/root/m-folder/z.txt',
+    '/root/.hidden',
+    '/root/a.txt',
+    '/root/b-link',
+    '/root/c-special',
+    '/root/n.txt',
+  ]);
+  expect(host.querySelector('[data-file-index="9"]')?.textContent).toBe(
+    'files.more',
+  );
+  await click('files.more');
+  expect(mocks.list.mock.calls.at(-1)?.[1]).toEqual({
+    path: '/root',
+    showHidden: false,
+    cursor: 'root-next',
+  });
+  expect(visiblePaths()).toEqual([
+    '/root/m-folder',
+    '/root/m-folder/nested',
+    '/root/m-folder/a.txt',
+    '/root/m-folder/z.txt',
+    '/root/y-folder',
+    '/root/.hidden',
+    '/root/a.txt',
+    '/root/b-link',
+    '/root/c-special',
+    '/root/n.txt',
+    '/root/z.txt',
+  ]);
+  expect(host.textContent).not.toContain('files.more');
+  expect(initial.map(({ name }) => name)).toEqual([
+    '.hidden',
+    'a.txt',
+    'b-link',
+    'c-special',
+    'm-folder',
+    'n.txt',
+  ]);
+  expect(children.map(({ name }) => name)).toEqual([
+    'a.txt',
+    'nested',
+    'z.txt',
+  ]);
+  expect(continuation.map(({ name }) => name)).toEqual([
+    'n.txt',
+    'y-folder',
+    'z.txt',
+  ]);
+  expect(mocks.list).toHaveBeenCalledTimes(3);
 });
 
 function rowFor(name: string) {
@@ -220,6 +349,9 @@ it('replaces native row menus with three metadata copy actions but retains nativ
       'files.copyName',
       'files.copyRelativePath',
       'files.copyFullPath',
+      ...(entry.kind === 'file'
+        ? ['files.openPreview', 'files.addToSpace']
+        : []),
     ]);
     await selectCopy('files.copyName', entry.name);
     await openMenu(entry.name);
@@ -233,12 +365,67 @@ it('replaces native row menus with three metadata copy actions but retains nativ
     bubbles: true,
     cancelable: true,
   });
+
   await act(async () => input.dispatchEvent(nativeMenu));
   expect(nativeMenu.defaultPrevented).toBe(false);
   expect(mocks.list).toHaveBeenCalledOnce();
   expect(mocks.add).not.toHaveBeenCalled();
 });
 
+it('opens files on double-click and keyboard activation, not a single pointer click or menu interaction', async () => {
+  mocks.list.mockResolvedValueOnce(page([file]));
+  await act(async () => root.render(<FilesPanel />));
+  const button = rowFor(file.name).querySelector('button[aria-pressed]');
+  if (!button) throw new Error('Missing file button');
+  await act(async () =>
+    button.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 })),
+  );
+  expect(mocks.open).not.toHaveBeenCalled();
+  await act(async () =>
+    button.dispatchEvent(
+      new MouseEvent('dblclick', { bubbles: true, detail: 2 }),
+    ),
+  );
+  expect(mocks.open).toHaveBeenLastCalledWith(
+    'canvas-files',
+    {
+      agentletId: 'device',
+      path: file.path,
+      deviceName: 'Remote',
+    },
+    file.name,
+  );
+  await act(async () =>
+    button.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 0 })),
+  );
+  expect(mocks.open).toHaveBeenCalledTimes(2);
+  await openMenu(file.name);
+  await selectCopy('files.copyFullPath', file.path);
+  expect(mocks.open).toHaveBeenCalledTimes(2);
+  expect(mocks.add).not.toHaveBeenCalled();
+});
+
+it('disables explicit creation and dragging in read-only Spaces and displays open failures', async () => {
+  useCanvasStore.setState({
+    canvasAccess: { canvasId: 'canvas-files', write: false, manage: false },
+  });
+  mocks.list.mockResolvedValueOnce(page([file]));
+  mocks.open.mockImplementationOnce(() => {
+    throw new Error('Read-only Space');
+  });
+  await act(async () => root.render(<FilesPanel />));
+  expect(host.querySelector('[draggable="true"]')).toBeNull();
+  await openMenu(file.name);
+  const add = [
+    ...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'),
+  ].find((item) => item.textContent === 'files.addToSpace');
+  expect(add?.disabled).toBe(true);
+  await click('files.openPreview');
+  expect(host.querySelector('[role="alert"]')?.textContent).toBe(
+    'Read-only Space',
+  );
+  expect(mocks.add).not.toHaveBeenCalled();
+});
 it.each([
   {
     source: '/alias',

@@ -1292,15 +1292,23 @@ export const ChatPanel = ({
                   )}
                 </div>
               }
-              // For external (ACP) bindings, defer to the agent's own
-              // `session_usage_update`; the internal context-token fetch
-              // would return 0 and the hardcoded 128k window is wrong
-              // for non-GPT-4o models. `undefined` keeps the legacy
-              // built-in path; `null` hides the ring until the agent
-              // pushes its first usage snapshot.
-              contextUsageOverride={
+              sessionUsage={
                 agentBinding.kind === 'external'
-                  ? acpSessionMeta.usage
+                  ? {
+                      usage:
+                        acpSessionMetaSource === 'thread'
+                          ? acpSessionMeta.usage
+                          : null,
+                      tokenUsage:
+                        acpSessionMetaSource === 'thread'
+                          ? acpSessionMeta.tokenUsage
+                          : null,
+                      loading: acpSessionMetaLoading,
+                      unavailable:
+                        !!acpSessionMetaError ||
+                        !acpExternalReachable ||
+                        !ownerScopeReady,
+                    }
                   : undefined
               }
               // Profile deletion no longer blocks Send: the thread carries

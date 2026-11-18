@@ -53,13 +53,21 @@ export function resolveRuntimeArtifacts(options: {
   };
 }
 
+export const HUABU_BOOTSTRAP_ENV_KEYS = {
+  serviceSdkEntry: 'HUABU_SERVICE_SDK_URL',
+  rfsEntry: 'HUABU_RFS_ENTRY',
+} as const;
+
 export function buildHuabuBootstrapEnv(
   artifacts: RuntimeArtifacts,
 ): Readonly<Record<string, string>> {
   const env: Record<string, string> = {};
   if (artifacts.serviceSdkEntry)
-    env.HUABU_SERVICE_SDK_URL = pathToFileURL(artifacts.serviceSdkEntry).href;
-  if (artifacts.rfsEntry) env.HUABU_RFS_ENTRY = artifacts.rfsEntry;
+    env[HUABU_BOOTSTRAP_ENV_KEYS.serviceSdkEntry] = pathToFileURL(
+      artifacts.serviceSdkEntry,
+    ).href;
+  if (artifacts.rfsEntry)
+    env[HUABU_BOOTSTRAP_ENV_KEYS.rfsEntry] = artifacts.rfsEntry;
   return Object.freeze(env);
 }
 

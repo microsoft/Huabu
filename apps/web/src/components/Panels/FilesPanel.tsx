@@ -6,21 +6,26 @@ import {
   ChevronDown,
   FileText,
   Folder,
-  Plus,
+  FolderOpen,
+  FileCode2,
   ArrowUp,
   RefreshCw,
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Virtuoso } from 'react-virtuoso';
+import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 
 import { listDeviceFiles } from '@/api/device-files';
 import { Button } from '@/components/Common/Button';
 import { Select } from '@/components/Common/Select';
 import { TextInput } from '@/components/Common/TextInput';
 import { useAcpProfilesStore } from '@/store/acpProfilesStore';
-import useCanvasStore from '@/store/canvasStore';
+import useCanvasStore, { selectCanWriteCanvas } from '@/store/canvasStore';
 import { usePanelStore } from '@/store/panelStore';
+import {
+  addFileReferenceNode,
+  openFileReference,
+} from '@/store/previewWorkspace/actions';
 import { setDragPayload } from '@/utils/io/dragDrop';
 
 import { FilesPanelEntryMenu } from './FilesPanelEntryMenu';
@@ -36,6 +41,7 @@ const MAX_TREE_ENTRIES = 2000;
 export function FilesPanel() {
   const { t } = useTranslation();
   const canvasId = useCanvasStore((state) => state.canvasId);
+  const canWrite = useCanvasStore(selectCanWriteCanvas);
   const location = usePanelStore((state) => state.filesLocation);
   const openFiles = usePanelStore((state) => state.openFiles);
   const devices = useAcpProfilesStore((state) => state.connectedDevices);
@@ -51,6 +57,10 @@ export function FilesPanel() {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const [focusIndex, setFocusIndex] = useState<number | null>(null);
+  const panelRef = useRef<HTMLElement>(null);
+  const listRef = useRef<VirtuosoHandle>(null);
   const pendingRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
   const generation = useRef(0);
@@ -72,6 +82,8 @@ export function FilesPanel() {
     const abort = new AbortController();
     abortRef.current = abort;
     setPages({});
+    setSelectedPath(null);
+    setFocusIndex(null);
     setExpanded(new Set());
     setError(null);
     entriesLoaded.current = 0;
@@ -168,7 +180,11 @@ export function FilesPanel() {
       if (visited.has(directory) || depth > 32) return;
       visited.add(directory);
       const page = pages[directory];
-      for (const entry of page?.entries ?? []) {
+      const entries = [...(page?.entries ?? [])].sort(
+        (a, b) =>
+          Number(b.kind === 'directory') - Number(a.kind === 'directory'),
+      );
+      for (const entry of entries) {
         const relativePath = parent
           ? `${parent}${separator}${entry.name}`
           : entry.name;
@@ -182,27 +198,100 @@ export function FilesPanel() {
     return result;
   }, [pages, expanded, sourcePath]);
 
-  const add = (entry: Entry) => {
+  useEffect(() => {
+    if (focusIndex === null || !rows[focusIndex]) return;
+    const panel = panelRef.current;
+    const focused = document.activeElement;
+    let cancelled = false;
+    listRef.current?.scrollIntoView({
+      index: focusIndex,
+      done: () => {
+        if (cancelled || !panel) return;
+        if (
+          panel.contains(document.activeElement) ||
+          (focused &&
+            !focused.isConnected &&
+            document.activeElement === document.body)
+        )
+          panel
+            .querySelector<HTMLElement>(`[data-file-index="${focusIndex}"]`)
+            ?.focus({ preventScroll: true });
+        setFocusIndex(null);
+      },
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [focusIndex, rows]);
+
+  const activate = (entry: Entry, preview: boolean) => {
     if (!source) return;
-    useCanvasStore.getState().addNode({
-      nodeType: 'fileReference',
-      data: {
-        label: entry.name,
-        origin: { type: 'user-created' },
-        fileReference: {
+    try {
+      const action = preview ? openFileReference : addFileReferenceNode;
+      action(
+        source.canvasId,
+        {
           agentletId: source.agentletId,
           path: entry.path,
           deviceName: selectedDevice?.displayName,
         },
-      },
-      size: { width: 400, height: 180 },
-    });
+        entry.name,
+      );
+      setError(null);
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : t('files.failed'));
+    }
   };
   const root = source ? pages[source.path] : undefined;
   return (
     <section
+      ref={panelRef}
       className="flex min-h-0 flex-1 flex-col"
       aria-label={t('files.title')}
+      onKeyDownCapture={(event) => {
+        if (!(event.target instanceof HTMLElement)) return;
+        const indexValue = event.target
+          .closest('[data-file-index]')
+          ?.getAttribute('data-file-index');
+        if (
+          indexValue === undefined ||
+          indexValue === null ||
+          event.altKey ||
+          event.ctrlKey ||
+          event.metaKey ||
+          event.shiftKey
+        )
+          return;
+        const index = Number(indexValue);
+        let next =
+          event.key === 'ArrowDown'
+            ? Math.min(rows.length - 1, index + 1)
+            : event.key === 'ArrowUp'
+              ? Math.max(0, index - 1)
+              : event.key === 'Home'
+                ? 0
+                : event.key === 'End'
+                  ? rows.length - 1
+                  : null;
+        if (next === null) return;
+        event.preventDefault();
+        event.stopPropagation();
+        const step = event.key === 'ArrowUp' || event.key === 'End' ? -1 : 1;
+        while (next >= 0 && next < rows.length) {
+          const row = rows[next];
+          if (
+            row &&
+            ('more' in row
+              ? !pending
+              : row.entry.kind === 'file' ||
+                (row.entry.kind === 'directory' && !pending))
+          ) {
+            setFocusIndex(next);
+            return;
+          }
+          next += step;
+        }
+      }}
     >
       <form
         className="flex shrink-0 flex-col gap-2 p-3"
@@ -305,16 +394,18 @@ export function FilesPanel() {
         <p className="text-fg-muted p-3 text-xs">{t('files.empty')}</p>
       ) : null}
       <Virtuoso
+        ref={listRef}
         className="min-h-0 flex-1"
         data={rows}
         computeItemKey={(_, row) =>
           'entry' in row ? `${row.depth}:${row.entry.path}` : `more:${row.more}`
         }
-        itemContent={(_, row) => {
+        itemContent={(index, row) => {
           if ('more' in row)
             return (
               <Button
                 className="m-1"
+                data-file-index={index}
                 size="sm"
                 variant="ghost"
                 disabled={pending}
@@ -325,25 +416,41 @@ export function FilesPanel() {
             );
           const { entry, depth, relativePath } = row;
           const directory = entry.kind === 'directory';
-          const Icon = directory ? Folder : FileText;
+          const Icon = directory
+            ? expanded.has(entry.path)
+              ? FolderOpen
+              : Folder
+            : /\.(?:[cm]?[jt]sx?|json|py|rs|[ch](?:pp|xx)?|go|java|css|html|sh|ya?ml)$/i.test(
+                  entry.name,
+                )
+              ? FileCode2
+              : FileText;
           return (
             <FilesPanelEntryMenu
               name={entry.name}
               path={entry.path}
               relativePath={relativePath}
+              onOpen={
+                entry.kind === 'file' ? () => activate(entry, true) : undefined
+              }
+              onAdd={
+                entry.kind === 'file' ? () => activate(entry, false) : undefined
+              }
+              canAdd={canWrite}
               onCopyResult={(copied) =>
                 setError(copied ? null : t('files.copyFailed'))
               }
             >
               <div
-                className="hover:bg-hover flex h-8 items-center gap-1 pr-2"
+                className={`flex h-7 items-center gap-1 ${selectedPath === entry.path ? 'bg-hover' : ''}`}
                 style={{ paddingLeft: depth * 14 + 8 }}
               >
                 {directory ? (
                   <Button
                     variant="ghost"
+                    data-file-index={index}
                     size="sm"
-                    className="min-w-0 flex-1 justify-start truncate"
+                    className="text-fg-default h-7 min-w-0 flex-1 justify-start rounded-sm px-1 text-xs"
                     disabled={pending}
                     aria-expanded={expanded.has(entry.path)}
                     onClick={() => {
@@ -366,15 +473,38 @@ export function FilesPanel() {
                       <ChevronRight />
                     )}
                     <Icon />
-                    <span className="truncate">{entry.name}</span>
+                    <span className="truncate" title={entry.path}>
+                      {entry.name}
+                    </span>
                   </Button>
                 ) : (
                   <>
-                    <span
-                      className="text-fg-default flex min-w-0 flex-1 items-center gap-1.5 pl-2 text-xs"
-                      draggable={entry.kind === 'file'}
+                    <Button
+                      variant="ghost"
+                      data-file-index={index}
+                      size="sm"
+                      className="text-fg-default h-7 min-w-0 flex-1 justify-start rounded-sm pr-1 pl-6 text-xs"
+                      disabled={entry.kind !== 'file'}
+                      aria-label={t('files.openFile', { name: entry.name })}
+                      aria-pressed={selectedPath === entry.path}
+                      title={t('files.openHint')}
+                      onFocus={() => setSelectedPath(entry.path)}
+                      onClick={(event) => {
+                        setSelectedPath(entry.path);
+                        if (event.detail === 0) activate(entry, true);
+                      }}
+                      onDoubleClick={() => activate(entry, true)}
+                      draggable={entry.kind === 'file' && canWrite}
                       onDragStart={(event) => {
                         if (!source || entry.kind !== 'file') return;
+                        if (
+                          !selectCanWriteCanvas(useCanvasStore.getState()) ||
+                          useCanvasStore.getState().canvasId !== source.canvasId
+                        ) {
+                          event.preventDefault();
+                          setError(t('files.creationReadOnly'));
+                          return;
+                        }
                         setDragPayload(event, {
                           kind: 'fileReference',
                           origin: { type: 'user-created' },
@@ -393,18 +523,7 @@ export function FilesPanel() {
                       <span className="truncate" title={entry.path}>
                         {entry.name}
                       </span>
-                    </span>
-                    {entry.kind === 'file' ? (
-                      <Button
-                        size="sm"
-                        iconOnly
-                        variant="ghost"
-                        title={t('files.add', { name: entry.name })}
-                        onClick={() => add(entry)}
-                      >
-                        <Plus />
-                      </Button>
-                    ) : null}
+                    </Button>
                   </>
                 )}
               </div>

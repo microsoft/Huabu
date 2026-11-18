@@ -277,10 +277,32 @@ export default defineConfig(async ({ mode, command }) => {
             ) {
               return 'vendor-ui';
             }
+            // Preserve lazy language loads. Markdown's static HTML/JS/CSS
+            // dependencies stay with the editor core to avoid chunk cycles.
+            const syntaxPackage = id.match(
+              /node_modules\/(?:@codemirror\/lang-|@lezer\/)([^/]+)\//,
+            )?.[1];
+            if (
+              syntaxPackage &&
+              ![
+                'common',
+                'highlight',
+                'lr',
+                'markdown',
+                'html',
+                'javascript',
+                'css',
+              ].includes(syntaxPackage)
+            )
+              return `syntax-${syntaxPackage}`;
+            const legacyMode = id.match(
+              /node_modules\/@codemirror\/legacy-modes\/mode\/([^/]+)\.js$/,
+            )?.[1];
+            if (legacyMode) return `syntax-legacy-${legacyMode}`;
             // Editor stack: Milkdown/ProseMirror and CodeMirror/Lezer are
             // interdependent (Milkdown's code-block plugin embeds CodeMirror),
             // so keeping them in separate manual chunks creates a circular
-            // chunk graph. Group the whole editor toolchain into one chunk.
+            // chunk graph. Keep the shared core together, not lazy languages.
             if (
               id.includes('@milkdown') ||
               id.includes('prosemirror') ||

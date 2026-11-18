@@ -29,10 +29,12 @@
  */
 
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
+import { LanguageDescription } from '@codemirror/language';
 import { Compartment, EditorState, Prec } from '@codemirror/state';
 import { EditorView, keymap } from '@codemirror/view';
 import { basicSetup } from 'codemirror';
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { literalTextMatches } from '@huabu/shared';
 
@@ -82,6 +84,8 @@ export interface RawMarkdownEditorProps {
   ariaLabel?: string;
   searchNodeId?: string;
   plainText?: boolean;
+  /** Loads only the language matching this device-native filename. */
+  languageFilename?: string;
   /** Reports the mounted view and null on teardown for opt-in integrations. */
   onReady?: (view: EditorView | null) => void;
 }
@@ -94,8 +98,10 @@ export default function RawMarkdownEditor({
   ariaLabel,
   searchNodeId,
   plainText = false,
+  languageFilename,
   onReady,
 }: RawMarkdownEditorProps): React.JSX.Element {
+  const { t } = useTranslation();
   const hostRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const lastSyncedRef = useRef<string>(value);
@@ -106,6 +112,8 @@ export default function RawMarkdownEditor({
   onReadyRef.current = onReady;
   /** Compartment that lets us hot-swap the read-only facet at runtime. */
   const readOnlyCompartmentRef = useRef<Compartment>(new Compartment());
+  const languageCompartment = useRef(new Compartment()).current;
+  const [languageFailed, setLanguageFailed] = useState(false);
   const query = usePreviewSearchStore((state) =>
     state.isOpen && state.nodeId === searchNodeId ? state.query : '',
   );
@@ -188,9 +196,11 @@ export default function RawMarkdownEditor({
       doc: value,
       extensions: [
         basicSetup,
-        ...(plainText
-          ? []
-          : [markdown({ base: markdownLanguage, codeLanguages: [] })]),
+        languageCompartment.of(
+          plainText || languageFilename
+            ? []
+            : markdown({ base: markdownLanguage, codeLanguages: [] }),
+        ),
         EditorView.lineWrapping,
         huabuLightTheme,
         tabIndentKeymap,
@@ -249,7 +259,44 @@ export default function RawMarkdownEditor({
     });
   }, [readOnly]);
 
+  useEffect(() => {
+    if (!languageFilename) return;
+    const view = viewRef.current;
+    if (!view) return;
+    let cancelled = false;
+    setLanguageFailed(false);
+    view.dispatch({ effects: languageCompartment.reconfigure([]) });
+    void import('@codemirror/language-data')
+      .then(({ languages }) =>
+        LanguageDescription.matchFilename(
+          languages,
+          languageFilename.split(/[\\/]/).at(-1) ?? languageFilename,
+        )?.load(),
+      )
+      .then((support) => {
+        if (!cancelled && support)
+          view.dispatch({ effects: languageCompartment.reconfigure(support) });
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        console.error('File syntax highlighting failed', error);
+        setLanguageFailed(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [languageFilename, languageCompartment]);
+
   useRegisterPreviewSearchAdapter(adapter);
 
-  return <div ref={hostRef} className={className} data-search-renderer />;
+  return (
+    <>
+      {languageFailed ? (
+        <div role="alert" className="text-warning p-2 text-xs">
+          {t('files.highlightFailed')}
+        </div>
+      ) : null}
+      <div ref={hostRef} className={className} data-search-renderer />
+    </>
+  );
 }

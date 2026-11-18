@@ -77,7 +77,7 @@ describe('agentlet daemon integration', () => {
     const mockAgentPath = join(fixtureDir, 'mock-acp-agent.cjs')
     const envPath = join(fixtureDir, 'environment.json')
     writeFileSync(mockAgentPath, [
-      `require('node:fs').writeFileSync(${JSON.stringify(envPath)}, JSON.stringify({ entry: process.env.TOOL_ENTRY, token: process.env.AGENTLET_TOKEN, rfs: process.env.HUABU_RFS_URL, thread: process.env.HUABU_THREAD_ID }))`,
+      `require('node:fs').writeFileSync(${JSON.stringify(envPath)}, JSON.stringify({ entry: process.env.TOOL_ENTRY, token: process.env.AGENTLET_TOKEN, server: process.env.AGENTLET_SERVER, rfs: process.env.HUABU_RFS_URL, thread: process.env.HUABU_THREAD_ID }))`,
       "const readline = require('node:readline')",
       'const rl = readline.createInterface({ input: process.stdin })',
       "rl.on('line', (line) => {",
@@ -172,7 +172,7 @@ describe('agentlet daemon integration', () => {
       rootPath: fixtureDir,
     })).toMatchObject({ error: { code: -32602 } })
 
-    for (const [id, env] of [[20, { TOOL_ENTRY: ' relative entry=a=b ' }], [21, { AGENTLET_TOKEN: 'test-token' }]] as const) {
+    for (const [id, env] of [[20, { TOOL_ENTRY: ' relative entry=a=b ' }], [21, { AGENTLET_TOKEN: 'test-token' }], [22, { AGENTLET_SERVER: 'ws://obsolete.example' }]] as const) {
       expect(await request(id, ServerMethods.SPAWN, {
         appId: 'invalid-env', sessionSpec: { command: `node ${JSON.stringify(mockAgentPath)}`, env },
       })).toMatchObject({ error: { code: -32602, message: expect.stringContaining('protected environment key') } })
@@ -192,7 +192,7 @@ describe('agentlet daemon integration', () => {
       } },
     })).toMatchObject({ result: { sessionId: 'native-bootstrap', pid: expect.any(Number) } })
     expect(JSON.parse(readFileSync(envPath, 'utf8'))).toEqual({
-      entry: ' relative entry=a=b ', token: 'test-token', rfs: 'http://host/rfs/space', thread: 'thread-a',
+      entry: ' relative entry=a=b ', token: 'test-token', server: `ws://127.0.0.1:${port}/api/bridge`, rfs: 'http://host/rfs/space', thread: 'thread-a',
     })
     expect(sessionSocket).toBeUndefined()
     await waitUntil(() => sessionHello !== undefined)

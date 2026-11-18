@@ -26,7 +26,7 @@ describe('opaque bootstrap environment', () => {
       .toEqual({ ENTRY: ' a=b ', EMPTY: '' })
   })
 
-  it.each(['NO_EQUALS', '=secret', 'BAD-KEY=secret', '1KEY=secret', 'KEY=secret\0value', 'BAD\0KEY=secret', 'AGENTLET_TOKEN=secret'])(
+  it.each(['NO_EQUALS', '=secret', 'BAD-KEY=secret', '1KEY=secret', 'KEY=secret\0value', 'BAD\0KEY=secret', 'AGENTLET_TOKEN=secret', 'AGENTLET_SERVER=secret'])(
     'rejects malformed or reserved declarations without logging values (%s)', declaration => {
       let message = ''
       try { parseBootstrapEnv([declaration]) } catch (error) {
@@ -42,6 +42,7 @@ describe('opaque bootstrap environment', () => {
     expect(() => parseBootstrapEnv(['KEY=a', 'key=b'], 'win32')).toThrow('Duplicate')
     expect(parseBootstrapEnv(['KEY=a', 'key=b'], 'linux')).toEqual({ KEY: 'a', key: 'b' })
     expect(() => parseBootstrapEnv(['agentlet_token=secret'], 'win32')).toThrow('Reserved')
+    expect(() => parseBootstrapEnv(['agentlet_server=secret'], 'win32')).toThrow('Reserved')
     expect(parseBootstrapEnv(['agentlet_token=value'], 'linux')).toEqual({ agentlet_token: 'value' })
   })
 
@@ -56,28 +57,30 @@ describe('opaque bootstrap environment', () => {
 describe('final child environment', () => {
   it('preserves inherited toolchain, session context and opaque authoritative bootstrap', () => {
     expect(buildAgentProcessEnv('ws://daemon', 'token', { TOOL: ' relative=a=b ' }, {
-      HUABU_RFS_URL: 'http://host/rfs/space', HUABU_THREAD_ID: 'thread', AGENTLET_SERVER: 'ws://session',
+      HUABU_RFS_URL: 'http://host/rfs/space', HUABU_THREAD_ID: 'thread',
     }, { PATH: '/tools', TOOL: 'ambient', AGENTLET_TOKEN: 'ambient-token' })).toMatchObject({
-      PATH: '/tools', TOOL: ' relative=a=b ', AGENTLET_TOKEN: 'token', AGENTLET_SERVER: 'ws://session',
+      PATH: '/tools', TOOL: ' relative=a=b ', AGENTLET_TOKEN: 'token', AGENTLET_SERVER: 'ws://daemon',
       HUABU_RFS_URL: 'http://host/rfs/space', HUABU_THREAD_ID: 'thread',
     })
   })
 
-  it.each(['bootstrap', 'token'])('rejects even an equal session declaration for %s', kind => {
+  it.each(['TOOL', 'AGENTLET_TOKEN', 'AGENTLET_SERVER'])('rejects even an equal session declaration for %s', key => {
     const bootstrap = { TOOL: 'value' }
-    const session = kind === 'bootstrap' ? { TOOL: 'value' } : { AGENTLET_TOKEN: 'token' }
+    const session = { [key]: key === 'TOOL' ? 'value' : key === 'AGENTLET_TOKEN' ? 'token' : 'ws://daemon' }
     expect(() => buildAgentProcessEnv('ws://daemon', 'token', bootstrap, session, {})).toThrow('protected environment key')
   })
 
   it('normalizes authoritative keys at the final Windows merge without changing inherited input', () => {
-    const inherited = { PATH: '/tools', Tool: 'ambient', agentlet_token: 'ambient-token' }
+    const inherited = { PATH: '/tools', Tool: 'ambient', agentlet_token: 'ambient-token', agentlet_server: 'ws://old' }
     const result = buildAgentProcessEnv('ws://daemon', 'token', { TOOL: 'entry' }, {}, inherited, 'win32')
-    expect(result).toMatchObject({ PATH: '/tools', TOOL: 'entry', AGENTLET_TOKEN: 'token' })
+    expect(result).toMatchObject({ PATH: '/tools', TOOL: 'entry', AGENTLET_TOKEN: 'token', AGENTLET_SERVER: 'ws://daemon' })
     expect(result).not.toHaveProperty('Tool')
     expect(result).not.toHaveProperty('agentlet_token')
+    expect(result).not.toHaveProperty('agentlet_server')
     expect(inherited.Tool).toBe('ambient')
     expect(() => buildAgentProcessEnv('ws://daemon', 'token', { TOOL: 'entry' }, { tool: 'entry' }, {}, 'win32')).toThrow('protected')
     expect(() => buildAgentProcessEnv('ws://daemon', 'token', {}, { agentlet_token: 'token' }, {}, 'win32')).toThrow('protected')
+    expect(() => buildAgentProcessEnv('ws://daemon', 'token', {}, { agentlet_server: 'ws://old' }, {}, 'win32')).toThrow('protected')
   })
 
   it('preserves Unix case distinctions', () => {

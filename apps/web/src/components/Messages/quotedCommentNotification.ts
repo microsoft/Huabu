@@ -5,6 +5,10 @@ import { dismissToast, toast } from '@/components/Common/Toast';
 import { i18n } from '@/i18n';
 import useCanvasStore from '@/store/canvasStore';
 import { useChatStore, selectThreadQuotedComments } from '@/store/chatStore';
+import {
+  isCommentScopeCurrent,
+  useCommentDestinationMemory,
+} from '@/store/commentDestinationMemory';
 import { usePanelStore } from '@/store/panelStore';
 import { openPreviewNode } from '@/store/previewWorkspace/actions';
 import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store';
@@ -18,6 +22,7 @@ export function revealQuotedCommentDraft(
   title: string,
 ) {
   const { canvasId, nodeId, threadId } = view.conversationOwner;
+  const scope = useCommentDestinationMemory.getState().scope;
   const key = `${canvasId}\0${threadId}`;
   pendingNotifications.get(key)?.();
   const preview = usePreviewWorkspaceStore.getState();
@@ -31,7 +36,8 @@ export function revealQuotedCommentDraft(
       return (
         target?.canvasId === canvasId &&
         ((target.kind === 'node' && target.nodeId === nodeId) ||
-          (target.kind === 'chat' && target.threadId === threadId))
+          ((target.kind === 'chat' || target.kind === 'conversation') &&
+            target.threadId === threadId))
       );
     });
   if (visible) {
@@ -46,7 +52,7 @@ export function revealQuotedCommentDraft(
   const validOwner = () => {
     const canvas = useCanvasStore.getState();
     return (
-      canvas.canvasId === canvasId &&
+      isCommentScopeCurrent(canvasId, scope) &&
       canvas.nodes.some(
         (node) =>
           node.type === 'question' &&
@@ -73,6 +79,7 @@ export function revealQuotedCommentDraft(
           const tabId = openPreviewNode(nodeId, {
             transient: false,
             focusEditor: false,
+            userInitiated: true,
           });
           usePreviewWorkspaceStore.getState().requestChatOpen(tabId, 'bottom');
           usePanelStore.getState().requestFocusChatInput(threadId);
@@ -86,10 +93,12 @@ export function revealQuotedCommentDraft(
   };
   const unsubscribeChat = useChatStore.subscribe(onChange);
   const unsubscribeCanvas = useCanvasStore.subscribe(onChange);
+  const unsubscribeScope = useCommentDestinationMemory.subscribe(onChange);
   const cleanup = () => {
     dismissToast(id);
     unsubscribeChat();
     unsubscribeCanvas();
+    unsubscribeScope();
     pendingNotifications.delete(key);
   };
   pendingNotifications.set(key, cleanup);

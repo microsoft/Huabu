@@ -12,7 +12,7 @@ import { openDocumentLink } from './openDocumentLink';
 
 vi.mock('@/hooks/useElectron', () => ({ isElectron: vi.fn() }));
 vi.mock('@/store/canvasStore', () => ({
-  default: { getState: vi.fn() },
+  default: { getState: vi.fn(), subscribe: () => () => {} },
 }));
 vi.mock('@/store/chatStore', () => ({ useChatStore: { getState: vi.fn() } }));
 vi.mock('@/store/panelStore', () => {

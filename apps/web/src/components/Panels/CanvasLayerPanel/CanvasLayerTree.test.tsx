@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { CanvasLayerTree, resolveCollisionY } from './CanvasLayerTree';
 import useCanvasStore from '../../../store/canvasStore';
+import { useCommentDestinationMemory } from '../../../store/commentDestinationMemory';
 import { usePanelStore } from '../../../store/panelStore';
 import { createEmptyWorkspace } from '../../../store/previewWorkspace/model';
 import { usePreviewWorkspaceStore } from '../../../store/previewWorkspace/store';
@@ -233,6 +234,33 @@ afterEach(() => {
 });
 
 describe('CanvasLayerTree activation', () => {
+  it('records activation of an already visible Agent but not range selection', async () => {
+    await renderTree([
+      item('question-1', 'question', undefined, { threadId: 'thread-1' }),
+      item('question-2', 'question', undefined, { threadId: 'thread-2' }),
+    ]);
+    act(() =>
+      usePreviewWorkspaceStore.getState().openPreviewTarget({
+        kind: 'node',
+        canvasId: CANVAS_ID,
+        nodeId: 'question-1',
+      }),
+    );
+    act(() => row('question-1').click());
+    expect(useCommentDestinationMemory.getState().lastPreview?.nodeId).toBe(
+      'question-1',
+    );
+    expect(mocks.openPreviewNode).not.toHaveBeenCalled();
+    act(() =>
+      row('question-2').dispatchEvent(
+        new MouseEvent('click', { bubbles: true, shiftKey: true }),
+      ),
+    );
+    expect(useCommentDestinationMemory.getState().lastPreview?.nodeId).toBe(
+      'question-1',
+    );
+  });
+
   it('leaves vertical list padding to its host instead of adding a second inset', async () => {
     await renderTree([item('note-1', 'note')]);
     const tree = container.querySelector('[role="tree"]');
@@ -368,6 +396,7 @@ describe('CanvasLayerTree activation', () => {
     act(() => row('question-1').click());
     expect(mocks.openPreviewNode).toHaveBeenCalledWith('question-1', {
       transient: true,
+      userInitiated: true,
     });
     expect(mocks.requestChatOpen).toHaveBeenCalledWith('tab-1', 'bottom');
 
