@@ -31,10 +31,6 @@ vi.mock('../../../prompt/external-agent/system-preamble.js', () => ({
   renderExternalAgentSystemPreamble: () => 'Mandatory preamble',
 }));
 
-vi.mock('./reachback-env.js', () => ({
-  buildReachbackEnv: () => ({ REACHBACK: '1' }),
-}));
-
 vi.mock('../../workspace/paths.js', () => ({
   canvasAcpNamespace: (canvasId: string) => `/canvases/${canvasId}/acp`,
 }));
@@ -103,6 +99,7 @@ describe('buildAcpWorkloadSpec', () => {
       threadId: 'thread-a',
       canvasId: 'canvas-a',
     });
+    expect(workload.spec).not.toHaveProperty('env');
 
     expect(workload.spec).toMatchObject({
       agentletId: 'agentlet-a',

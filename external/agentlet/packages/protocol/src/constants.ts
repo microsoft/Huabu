@@ -38,3 +38,6 @@ export const ErrorCodes = {
   INVALID_REQUEST: -32600,
   PARSE_ERROR: -32700,
 } as const
+
+/** Daemon-owned coordinates and credentials; never session/bootstrap overrides. */
+export const DAEMON_ENV_KEYS = ['AGENTLET_SERVER', 'AGENTLET_TOKEN'] as const

@@ -49,10 +49,6 @@ vi.mock('../../utils/logger.js', async (original) => ({
   getLogger: () => ({ warn, error: errorLog }),
 }));
 
-vi.mock('../agent/acp/reachback-env.js', () => ({
-  buildReachbackEnv: () => ({ HUABU_RFS_URL: '<destination-reachback-url>' }),
-}));
-
 const SOURCE = 'source-test';
 const DESTINATION = 'destination-test';
 const THREAD = 'thread-test';
@@ -441,7 +437,6 @@ forEachProductProfile((profile, label) => {
             ? { hostContext: { canvasId: DESTINATION } }
             : {
                 env: {
-                  HUABU_RFS_URL: '<destination-reachback-url>',
                   KEEP: '<synthetic-env>',
                 },
               },

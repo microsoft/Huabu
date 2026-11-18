@@ -5,7 +5,12 @@ import { AcpAgentHandle, lowerAcpInputs } from './handle.js';
 import { emptyAcpOverlay } from './overlay.js';
 import { acpSessionRegistry } from './session-registry.js';
 
-import type { AcpCreateSpec, AcpDurableState } from './handle.js';
+import type {
+  AcpCreateSpec,
+  AcpDurableState,
+  AcpSpec,
+  AcpRuntimeLaunchContext,
+} from './handle.js';
 import type { AcpSessionEntry } from './session-registry.js';
 import type {
   AgentTurn,
@@ -108,6 +113,65 @@ describe('ACP durable history recovery', () => {
     vi.clearAllMocks();
     acpSessionRegistry.remove('machine-a', spec.threadId, spec.namespace);
   });
+
+  it.each(['Deployment', 'Job'] as const)(
+    'resolves %s runtime context without replaying saved environment',
+    async (workloadType) => {
+      const saved: AcpCreateSpec = {
+        ...spec,
+        workloadType,
+        threadId: workloadType === 'Job' ? '' : 'imported-thread',
+        namespace: { name: 'imported-space', ownerId: 'target-workspace' },
+        spec: {
+          ...spec.spec,
+          env: { ENDPOINT: 'old', OBSOLETE: 'old', CUSTOM: 'user' },
+        },
+      };
+      const { entry } = sessionEntry();
+      sessionMocks.ensureAcpSession.mockResolvedValue(entry);
+      const resolveRuntimeEnvironment = vi.fn(
+        async (_spec: AcpSpec, context: AcpRuntimeLaunchContext) => {
+          expect(context.namespace).toEqual(saved.namespace);
+          expect(context.agentletId).toBe('machine-a');
+          expect(context.threadId).toEqual(
+            workloadType === 'Job'
+              ? expect.stringMatching(/^acp-job-/)
+              : 'imported-thread',
+          );
+          return { ENDPOINT: 'current', OBSOLETE: undefined };
+        },
+      );
+      const handle = new AcpAgentHandle(
+        saved,
+        durableContext(async () => ({ allowed: true, estimatedSize: 0 }), []),
+        { getIdleTimeoutSecs: () => 600, resolveRuntimeEnvironment },
+      );
+      for await (const event of handle.run(submission, {
+        overlay: emptyAcpOverlay(),
+        logger,
+      })) {
+        expect(event.type).not.toBe('error');
+      }
+      expect(sessionMocks.ensureAcpSession).toHaveBeenCalledWith(
+        expect.objectContaining({
+          namespace: saved.namespace,
+          recipe: saved.spec.recipe,
+          env: { ENDPOINT: 'current', CUSTOM: 'user' },
+          priorState: expect.objectContaining({
+            driverState: expect.objectContaining({
+              sessionId: 'stale_session',
+            }),
+          }),
+        }),
+      );
+      expect(resolveRuntimeEnvironment).toHaveBeenCalledOnce();
+      expect(saved.spec.env).toEqual({
+        ENDPOINT: 'old',
+        OBSOLETE: 'old',
+        CUSTOM: 'user',
+      });
+    },
+  );
 
   it('folds host side-channel events into the driver stream before termination', async () => {
     const { entry } = sessionEntry();

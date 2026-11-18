@@ -27,6 +27,12 @@ const freshContext = {
   },
 };
 
+const launchContext = {
+  namespace: { name: 'space-current', ownerId: 'workspace-current' },
+  threadId: 'thread-current',
+  agentletId: 'device-current',
+};
+
 describe('acpDriverFactory (M5 FACTORY)', () => {
   it('accepts Jobs as well as Deployments without selecting a different transport', () => {
     expect(acpDriverFactory().workloadTypes).toEqual(['Job', 'Deployment']);
@@ -105,7 +111,11 @@ describe('acpDriverFactory (M5 FACTORY)', () => {
       env: { HOST: 'value' },
     };
     await expect(
-      resolveAcpRuntimeLaunch(spec, { getIdleTimeoutSecs: () => 0 }),
+      resolveAcpRuntimeLaunch(
+        spec,
+        { getIdleTimeoutSecs: () => 0 },
+        launchContext,
+      ),
     ).resolves.toEqual({
       recipe,
       env: { RUNTIME: 'value', HOST: 'value' },
@@ -118,6 +128,7 @@ describe('acpDriverFactory (M5 FACTORY)', () => {
           resolveRecipe: async () => ({ recipe: retiredRecipe }),
         },
         { getIdleTimeoutSecs: () => 0 },
+        launchContext,
       ),
     ).rejects.toThrow();
   });
@@ -233,19 +244,66 @@ describe('acpDriverFactory (M5 FACTORY)', () => {
       },
       env: { HUABU_THREAD_ID: 'thread-1', SHARED: 'host' },
     };
-    const launch = await resolveAcpRuntimeLaunch(spec, {
-      getIdleTimeoutSecs: () => 600,
-      resolveRuntimeEnvironment: async (received) => {
-        expect(received).toBe(spec);
-        return { SECRET_CONFIG: 'secret', SHARED: 'runtime' };
+    const launch = await resolveAcpRuntimeLaunch(
+      spec,
+      {
+        getIdleTimeoutSecs: () => 600,
+        resolveRuntimeEnvironment: async (received, context) => {
+          expect(received).toBe(spec);
+          expect(context).toBe(launchContext);
+          return { SECRET_CONFIG: 'secret', SHARED: 'runtime' };
+        },
       },
-    });
+      launchContext,
+    );
 
     expect(spec.env).not.toHaveProperty('SECRET_CONFIG');
     expect(launch.env).toEqual({
       SECRET_CONFIG: 'secret',
-      SHARED: 'host',
+      SHARED: 'runtime',
       HUABU_THREAD_ID: 'thread-1',
+    });
+  });
+
+  it('applies runtime removals after recipe and frozen values without mutating either', async () => {
+    const spec = {
+      binding: { alias: 'Agent', profileId: 'profile' },
+      env: { REMOVED: 'old', KEEP: 'user', SHARED: 'saved' },
+      resolveRecipe: async () => ({
+        recipe: { command: 'agent', alias: 'Agent', autoRestart: false },
+        env: { RECIPE: 'value', SHARED: 'recipe', REMOVED: 'recipe' },
+      }),
+    };
+    const launch = await resolveAcpRuntimeLaunch(
+      spec,
+      {
+        getIdleTimeoutSecs: () => 0,
+        resolveRuntimeEnvironment: async () => ({
+          REMOVED: undefined,
+          SHARED: 'current',
+        }),
+      },
+      launchContext,
+    );
+    expect(launch.env).toEqual({
+      KEEP: 'user',
+      RECIPE: 'value',
+      SHARED: 'current',
+    });
+    expect(spec.env).toEqual({ REMOVED: 'old', KEEP: 'user', SHARED: 'saved' });
+    expect(
+      (
+        await resolveAcpRuntimeLaunch(
+          spec,
+          { getIdleTimeoutSecs: () => 0 },
+          launchContext,
+        )
+      ).env,
+    ).toEqual({
+      KEEP: 'user',
+      RECIPE: 'value',
+      REMOVED: 'old',
+      SHARED: 'saved',
     });
   });
 });
