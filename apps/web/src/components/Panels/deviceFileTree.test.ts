@@ -9,15 +9,20 @@ import type { FileListResult } from '@huabu/shared';
 
 type Call = {
   path: string;
+  cursor?: string;
   signal: AbortSignal;
-  resolve: (entries: string[]) => void;
+  resolve: (entries: string[], nextCursor?: string) => void;
   reject: (failure: Error) => void;
 };
 
 function harness() {
   const calls: Call[] = [];
   const list = vi.fn(
-    (_agentletId: string, args: { path: string }, signal?: AbortSignal) =>
+    (
+      _agentletId: string,
+      args: { path: string; cursor?: string },
+      signal?: AbortSignal,
+    ) =>
       new Promise<FileListResult>((done, fail) => {
         if (!signal) throw new Error('Every listing must be cancellable');
         signal.addEventListener('abort', () =>
@@ -25,10 +30,12 @@ function harness() {
         );
         calls.push({
           path: args.path,
+          cursor: args.cursor,
           signal,
           reject: fail,
-          resolve: (names) =>
+          resolve: (names, nextCursor) =>
             done({
+              ...(nextCursor ? { nextCursor } : {}),
               path: args.path,
               parentPath: '/',
               entries: names.map((name) => ({
@@ -206,4 +213,35 @@ it('follows the latest click: a listing never reopens a folder closed meanwhile'
   await settle();
   expect(tree.getSnapshot().expanded.has('/b')).toBe(false);
   expect(tree.getSnapshot().error).toMatchObject({ kind: 'folder' });
+});
+
+it('drops a next page that was requested before a refresh replaced the listing', async () => {
+  const { tree, calls, settle } = harness();
+  tree.open('device', '/', false);
+  calls[0]?.resolve(['a1', 'a2'], 'page-2');
+  await settle();
+  tree.loadMore('/');
+  await settle();
+  expect(calls[1]?.cursor).toBe('page-2');
+  calls[1]?.resolve(['b1'], 'page-3');
+  await settle();
+  expect(names(tree)).toEqual(['/a1', '/a2', '/b1', 'more:/']);
+
+  // Page three is on its way when the listing is refreshed.
+  tree.loadMore('/');
+  await settle();
+  expect(calls[2]?.cursor).toBe('page-3');
+  tree.refresh();
+  await settle();
+  calls[3]?.resolve(['a1', 'a2'], 'page-2');
+  await settle();
+  calls[2]?.resolve(['c1']);
+  await settle();
+
+  // The stale page is not appended, and the rest can still be loaded.
+  expect(names(tree)).toEqual(['/a1', '/a2', 'more:/']);
+  expect(tree.getSnapshot().loading.size).toBe(0);
+  tree.loadMore('/');
+  await settle();
+  expect(calls[4]?.cursor).toBe('page-2');
 });

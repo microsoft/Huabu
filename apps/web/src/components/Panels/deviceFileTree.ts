@@ -335,6 +335,9 @@ export class DeviceFileTree {
       return;
     }
     const { signal } = this.session;
+    // The listing a next page continues. A refresh replaces it, and a page
+    // fetched for the old one must not be appended to the new.
+    const continued = this.snapshot.pages[directory];
     this.update({
       loading: new Set(this.snapshot.loading).add(directory),
       error: null,
@@ -349,6 +352,7 @@ export class DeviceFileTree {
       );
       if (signal.aborted) return;
       const { pages } = this.snapshot;
+      if (cursor && pages[directory] !== continued) return;
       if (countEntries(pages) + result.entries.length > MAX_TREE_ENTRIES) {
         this.update({ error: { kind: 'limit' } });
         if (!cursor) this.collapse(directory);
