@@ -39,7 +39,12 @@ import {
   type AutoRecoverPolicy,
 } from './recovery.js';
 import { type ThreadRecord, type ThreadStore } from './thread-store.js';
-import { InMemoryTurnStore, type TurnStore } from './turn-store.js';
+import {
+  decodeTurnCursor,
+  encodeTurnCursor,
+  InMemoryTurnStore,
+  type TurnStore,
+} from './turn-store.js';
 
 import type {
   AgentMetadata,
@@ -193,6 +198,12 @@ export interface Agenetes {
     threadId: string,
     options: HistoryPageOptions,
   ): Promise<ThreadHistoryPage>;
+  /** Read a single persisted turn without materializing the live tail. */
+  historyTurn(
+    namespace: Namespace,
+    threadId: string,
+    reference: string,
+  ): Promise<AgentTurn | undefined>;
   /**
    * Follow a thread's LIVE tail: the Tier-1 events appended after the last
    * folded turn (the uncommitted in-flight turn, replayed on connect) plus
@@ -228,6 +239,8 @@ export interface HistoryPageOptions {
 export interface ThreadHistoryGroup {
   readonly id: string;
   readonly turns: ObservedAgentTurn[];
+  /** Persisted-turn references, aligned with turns; the live tail has none. */
+  readonly turnRefs?: string[];
   readonly isActive?: true;
   /** Index of the first Tier-1 turn within an active display group. */
   readonly activeTurnIndex?: number;
@@ -1262,6 +1275,15 @@ export function createAgenetesInstance(
         ),
       };
     },
+    async historyTurn(namespace, threadId, reference) {
+      await readRecord(namespace, threadId);
+      if (!turnStore.get) {
+        throw new Error(
+          'Configured turn store does not support single-turn history reads',
+        );
+      }
+      return (await turnStore.get(namespace, threadId, reference))?.turn;
+    },
     async historyPage(
       namespace: Namespace,
       threadId: string,
@@ -1307,6 +1329,13 @@ export function createAgenetesInstance(
         let groups: ThreadHistoryGroup[] = page.groups.map((group) => ({
           id: group.id,
           turns: group.turns.map(({ turn }) => turn),
+          turnRefs: group.turns.map((_, index) => {
+            const cursor = decodeTurnCursor(group.id, threadId);
+            return encodeTurnCursor({
+              ...cursor,
+              ordinal: cursor.ordinal + index,
+            });
+          }),
         }));
         let before = page.before;
         let hasMore = page.hasMore;
