@@ -491,3 +491,110 @@ test('page B cannot start editing a text node in place while page A is editing i
 
   await b.context.close();
 });
+
+test("page A renames a note while page B's body conflict is open: Keep mine on B saves B's body and A's title stands", async ({
+  browser,
+  request,
+}) => {
+  const { canvasId, a, b } = await openBoth(browser, request, 'Keep mine');
+  const contentUrl = `/api/canvas/${canvasId}/nodes/${X}/content`;
+
+  // B types into X. Its save is held on the way out, so that another
+  // writer's body reaches the server first.
+  const saves: Record<string, unknown>[] = [];
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await b.page.route(`**${contentUrl}`, async (route) => {
+    if (route.request().method() !== 'PUT') return route.continue();
+    saves.push(route.request().postDataJSON() as Record<string, unknown>);
+    if (saves.length === 1) await held;
+    await route.continue();
+  });
+  await openPreview(b.page, X);
+  await editablePreview(b.page).fill('Body typed on page B');
+  await expect.poll(() => saves.length).toBe(1);
+
+  // A third client saves another body on the revision the server holds.
+  const stored = (await (await request.get(contentUrl)).json()) as {
+    rev: string;
+  };
+  const other = await request.put(contentUrl, {
+    data: {
+      nodeType: 'note',
+      content: 'Body from a third client',
+      expectRev: stored.rev,
+    },
+  });
+  expect(other.ok(), await other.text()).toBe(true);
+  await expect(cardBody(a.page, X)).toHaveText('Body from a third client');
+
+  // B's save arrives second and is refused: B is asked, and keeps its text.
+  release();
+  const keepMine = b.page.getByRole('button', { name: 'Keep mine' });
+  await expect(keepMine).toBeVisible();
+  expect(b.conflicts).toHaveLength(1);
+  await expect(previewEditor(b.page)).toHaveText('Body typed on page B');
+
+  // B leaves the editor with the choice still open; A renames the note.
+  await closePreview(b.page);
+  await openPreview(a.page, X);
+  const title = a.page.getByRole('textbox', { name: 'Rename node' });
+  await expect(async () => {
+    await a.page.getByRole('tab', { selected: true }).focus();
+    await a.page.keyboard.press('F2');
+    await expect(title).toBeVisible({ timeout: 1_000 });
+  }).toPass();
+  await title.fill('Title from page A');
+  await title.press('Enter');
+  await closePreview(a.page);
+  await expect
+    .poll(async () => (await serverRecord(request, canvasId)).node(X)?.data)
+    .toMatchObject({ label: 'Title from page A' });
+
+  // B shows A's title beside its own unsaved body, and is still asked.
+  await expect
+    .poll(async () => (await storeState(b.page)).label[X])
+    .toBe('Title from page A');
+  expect((await storeState(b.page)).content[X]?.trim()).toBe(
+    'Body typed on page B',
+  );
+  await expect(keepMine).toBeVisible();
+
+  // Keep mine sends B's body on the server's revision — and no title.
+  await keepMine.click();
+  await expect.poll(() => saves.length).toBe(2);
+  expect(saves[1]).toMatchObject({ nodeType: 'note' });
+  expect(String(saves[1]?.content).trim()).toBe('Body typed on page B');
+  expect(saves[1]).toHaveProperty('expectRev');
+  expect(saves[1]).not.toHaveProperty('label');
+  expect(saves[1]).not.toHaveProperty('labelSource');
+
+  // The server holds B's body under A's title, and both pages show that.
+  await expect
+    .poll(async () => {
+      const node = (await serverRecord(request, canvasId)).node(X);
+      return [node?.data.label, node?.data.content?.trim()];
+    })
+    .toEqual(['Title from page A', 'Body typed on page B']);
+  await expect(cardBody(a.page, X)).toHaveText('Body typed on page B');
+  for (const device of [a, b]) {
+    await expect
+      .poll(async () => {
+        const state = await storeState(device.page);
+        return [state.label[X], state.content[X]?.trim(), state.pendingContent];
+      })
+      .toEqual(['Title from page A', 'Body typed on page B', []]);
+    await expect(
+      device.page.getByRole('button', { name: /^(Keep mine|Load latest)$/ }),
+    ).toHaveCount(0);
+    expect((await storeState(device.page)).reloaded).toBe(false);
+  }
+  // The one refusal was B's first save; nothing was refused after it.
+  expect(a.conflicts).toEqual([]);
+  expect(b.conflicts).toHaveLength(1);
+
+  await a.context.close();
+  await b.context.close();
+});
