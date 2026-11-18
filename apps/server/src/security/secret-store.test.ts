@@ -289,6 +289,10 @@ describe('initializeSecretStore — master key isolation', () => {
       process.env.HUABU_SECRET_KEY = Buffer.alloc(32, 4).toString('base64');
 
       const mod = await import('./secret-store.js');
+      // Setup's saved-password lookup opens the database too.
+      await expect(
+        mod.readPersistedSecret('integration:test:key'),
+      ).rejects.toThrow('HUABU_SECRET_KEY does not match');
       await expect(mod.initializeSecretStore()).rejects.toThrow(
         'HUABU_SECRET_KEY does not match',
       );
@@ -301,6 +305,43 @@ describe('initializeSecretStore — master key isolation', () => {
       );
       const { closeStorage } = await import('../modules/storage/index.js');
       await closeStorage();
+    },
+    MODULE_RELOAD_TIMEOUT_MS,
+  );
+
+  it(
+    'ignores the credentials file once a database has imported it',
+    async () => {
+      const dataDir = createDataDir();
+      const key = Buffer.alloc(32, 5).toString('base64');
+      const { EncryptedSecretStore } =
+        await import('./encrypted-secret-store.js');
+      const { diskServerRecords } =
+        await import('../modules/storage/testing.js');
+      const earlier = new EncryptedSecretStore(
+        diskServerRecords(dataDir),
+        Buffer.from(key, 'base64'),
+      );
+      await earlier.initialize();
+      await earlier.set('integration:test:key', 'imported');
+      process.env.HUABU_DATA_DIR = dataDir;
+      vi.stubEnv('HUABU_STRUCTURED_BACKEND', 'sqlite');
+      process.env.HUABU_SECRET_KEY = key;
+      const mod = await import('./secret-store.js');
+      await mod.initializeSecretStore();
+      await mod.setSecret('integration:test:key', 'saved-later');
+      const { closeStorage } = await import('../modules/storage/index.js');
+      await closeStorage();
+
+      writeFileSync(join(dataDir, 'encrypted-secrets.json'), '{broken');
+      vi.resetModules();
+      process.env.HUABU_SECRET_KEY = key;
+      const restarted = await import('./secret-store.js');
+      await restarted.initializeSecretStore();
+      expect(restarted.getPersistedSecret('integration:test:key')).toBe(
+        'saved-later',
+      );
+      await (await import('../modules/storage/index.js')).closeStorage();
     },
     MODULE_RELOAD_TIMEOUT_MS,
   );

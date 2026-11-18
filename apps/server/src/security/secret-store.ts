@@ -20,7 +20,7 @@ import { personalSecretId } from '../modules/identity/personal-settings.js';
 import { parseStorageProfile } from '../modules/storage/profile.js';
 import {
   initServerRecords,
-  readDataDirectoryRecord,
+  readPendingImport,
 } from '../modules/storage/server-records.js';
 
 import type { SecretStore } from './secret-store-types.js';
@@ -28,6 +28,44 @@ import type { SecretStore } from './secret-store-types.js';
 const environmentStore = new EnvironmentSecretStore();
 let primaryStore: SecretStore | null = null;
 let initialized = false;
+
+/**
+ * The master key `env` supplies, or `null`, checked before anything opens a
+ * database. Initialization and the saved-password lookup both open one, and
+ * opening upgrades its schema and imports the credentials an earlier version
+ * kept in the data directory, which that version could then no longer open.
+ * So a PostgreSQL deployment without a supplied key, or a key that cannot
+ * open those credentials, fails here with nothing changed. Only credentials
+ * still waiting to be imported are checked: once imported, the database's
+ * copy is the one in use and the file is left alone.
+ */
+async function preflightMasterKey(
+  env: NodeJS.ProcessEnv,
+): Promise<Buffer | null> {
+  const encodedKey = env.HUABU_SECRET_KEY?.trim();
+  if (!encodedKey && parseStorageProfile(env).structured.kind === 'postgres') {
+    // A generated key is a file in the private configuration directory. With
+    // the ciphertext in PostgreSQL that file would be the one thing a
+    // replaced container loses, leaving every credential unreadable.
+    throw new Error(
+      'PostgreSQL credential storage requires HUABU_SECRET_KEY. Set it to a ' +
+        'Base64 32-byte key from your secret manager; an instance that ' +
+        "already has a generated key keeps it in HUABU_CONFIG_DIR's master-key file.",
+    );
+  }
+  const key = encodedKey ? parseServerMasterKey(encodedKey) : null;
+  const legacy = (await readPendingImport(env)).find(
+    ({ key: record }) =>
+      record.owner === CREDENTIALS_RECORD.owner &&
+      record.name === CREDENTIALS_RECORD.name,
+  );
+  if (legacy)
+    openCredentialEnvelope(
+      legacy.value,
+      key ?? resolveStandaloneMasterKey(true, env),
+    );
+  return key;
+}
 
 /** Select and initialize the runtime backend before accepting requests. */
 export async function initializeSecretStore(
@@ -43,33 +81,9 @@ export async function initializeSecretStore(
     return;
   }
 
-  const encodedKey = env.HUABU_SECRET_KEY?.trim();
+  let key = await preflightMasterKey(env);
   // Never let a deployment-owned master key reach forked external agents.
   delete env.HUABU_SECRET_KEY;
-  const backend = parseStorageProfile(env).structured.kind;
-  if (!encodedKey && backend === 'postgres') {
-    // A generated key is a file in the private configuration directory. With
-    // the ciphertext in PostgreSQL that file would be the one thing a
-    // replaced container loses, leaving every credential unreadable.
-    throw new Error(
-      'PostgreSQL credential storage requires HUABU_SECRET_KEY. Set it to a ' +
-        'Base64 32-byte key from your secret manager; an instance that ' +
-        "already has a generated key keeps it in HUABU_CONFIG_DIR's master-key file.",
-    );
-  }
-  let key = encodedKey ? parseServerMasterKey(encodedKey) : null;
-  // Opening a database upgrades its schema and imports the credentials an
-  // earlier version kept in the data directory, and the earlier version
-  // cannot open the upgraded database. Check the key against those
-  // credentials first, so a wrong key fails with nothing changed.
-  const legacy =
-    backend === 'disk'
-      ? null
-      : await readDataDirectoryRecord(CREDENTIALS_RECORD, env);
-  if (legacy !== null) {
-    key ??= resolveStandaloneMasterKey(true, env);
-    openCredentialEnvelope(legacy, key);
-  }
   const records = await initServerRecords(env);
   key ??= resolveStandaloneMasterKey(
     (await records.get(CREDENTIALS_RECORD)) !== null,
@@ -127,12 +141,10 @@ export async function readPersistedSecret(
   id: string,
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<string | null> {
-  if (
-    !initialized &&
-    !isDesktopSecretBridgeEnabled() &&
-    (await (await initServerRecords(env)).get(CREDENTIALS_RECORD)) === null
-  ) {
-    return null;
+  if (!initialized && !isDesktopSecretBridgeEnabled()) {
+    await preflightMasterKey(env);
+    const records = await initServerRecords(env);
+    if ((await records.get(CREDENTIALS_RECORD)) === null) return null;
   }
   await initializeSecretStore(env);
   return getPersistedSecret(id);
