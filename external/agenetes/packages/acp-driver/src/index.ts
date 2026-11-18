@@ -65,8 +65,14 @@ export {
   ACP_CAPABILITIES,
   lowerAcpInputs,
   resolveAcpAgentletId,
+  resolveAcpRuntimeLaunch,
 } from './handle.js';
-export type { AcpRuntimePolicy, InStreamEvent, AcpTurnCtx } from './handle.js';
+export type {
+  AcpRuntimePolicy,
+  AcpRuntimeLaunchContext,
+  InStreamEvent,
+  AcpTurnCtx,
+} from './handle.js';
 
 export {
   acpDriverFactory,
