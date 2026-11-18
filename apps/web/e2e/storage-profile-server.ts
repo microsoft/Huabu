@@ -177,9 +177,18 @@ export async function startBackend(
   env: Record<string, string>,
 ): Promise<BackendState> {
   const output = openSync(backendLogFile(), 'a');
+  // The run's minted key goes to the backend as its master key and nowhere
+  // else: not into `env`, which is persisted below for restarts, and not
+  // under its own name, which the backend would pass on to its agents.
+  const { E2E_SECRET_KEY: mintedKey, ...inherited } = process.env;
   const child = spawn('pnpm', ['--filter', '@huabu/server', 'start'], {
     cwd: repoRoot,
-    env: { ...process.env, ...env, SERVER_PORT: port },
+    env: {
+      ...inherited,
+      ...env,
+      ...(mintedKey ? { HUABU_SECRET_KEY: mintedKey } : {}),
+      SERVER_PORT: port,
+    },
     stdio: ['ignore', output, output],
     detached: true,
   });

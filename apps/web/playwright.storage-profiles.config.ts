@@ -68,17 +68,18 @@ if (!process.env.E2E_BACKEND_STATE) {
     `huabu-profile-e2e-${runId}.json`,
   );
   process.env.E2E_STORAGE_PROFILE = `${structured}/${blobs}`;
+  // PostgreSQL requires a supplied key, and every backend start in the run
+  // (the restart included) must use the same one to read the credentials the
+  // first wrote. One minted for the run serves when the operator gives none;
+  // staged provider credentials need the operator's own. It stays in this
+  // process's environment, which workers inherit, and out of
+  // E2E_BACKEND_ENV, which the harness writes to a state file.
+  if (!process.env.HUABU_SECRET_KEY?.trim())
+    process.env.E2E_SECRET_KEY ??= randomBytes(32).toString('base64');
   process.env.E2E_BACKEND_ENV = JSON.stringify({
     HUABU_STRUCTURED_BACKEND: structured,
     HUABU_BLOB_BACKEND: blobs,
     HUABU_DATA_DIR: dataDir,
-    // PostgreSQL requires a supplied key, and every backend start in the run
-    // (the restart included) must use the same one to read the credentials
-    // the first wrote. One minted for the run serves when the operator gives
-    // none; staged provider credentials need the operator's own.
-    HUABU_SECRET_KEY:
-      process.env.HUABU_SECRET_KEY?.trim() ||
-      randomBytes(32).toString('base64'),
     ...(workspaceIsAFolder
       ? { HUABU_WORKSPACE: process.env.E2E_WORKSPACE_DIR }
       : {}),
