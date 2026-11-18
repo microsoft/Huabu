@@ -39,13 +39,21 @@ async function persisted(page: Page) {
   };
 }
 
-async function execute(page: Page, commands: CanvasCommand[]) {
+async function execute(
+  page: Page,
+  commands: CanvasCommand[],
+  // Locking is a person's command; an agent batch may not carry it.
+  source: 'agent' | 'ui' = 'agent',
+) {
   const response = await page.request.post(
     `/api/canvas/${canvasId(page)}/execute`,
     {
       data: {
         edits: editsPerCommand(commands),
-        originator: { source: 'agent', threadId: 'e2e-frame-marquee' },
+        originator:
+          source === 'agent'
+            ? { source: 'agent', threadId: 'e2e-frame-marquee' }
+            : { tabId: 'e2e-frame-marquee' },
       },
     },
   );
@@ -637,9 +645,11 @@ test('a locked press in a mixed Frame selection cannot auto-pan or leak a click'
     (entry) => entry.data.label === 'Locked probe',
   );
   if (!locked) throw new Error('Missing locked probe');
-  await execute(page, [
-    { type: 'SET_NODE_LOCKED', items: [{ nodeId: locked.id, locked: true }] },
-  ]);
+  await execute(
+    page,
+    [{ type: 'SET_NODE_LOCKED', items: [{ nodeId: locked.id, locked: true }] }],
+    'ui',
+  );
   await expect(node(page, locked.id)).toBeVisible();
   await stableViewport(page);
   const before = await rects(page, ids);
