@@ -13,18 +13,18 @@ import {
 import React, { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import {
-  LAYER_ROW_ACTION_CLASS,
-  LAYER_ROW_ICON_CLASS,
-  LAYER_ROW_INSET_CLASS,
-  LAYER_ROW_SELECTED_FOREGROUND_CLASS,
-  LAYER_ROW_SURFACE_CLASS,
-  layerRowBackground,
-} from './layerRowStyles';
 import { isKeyboardInteractiveTarget } from '../../../hooks/shortcuts/isKeyboardInteractiveTarget';
 import { Button } from '../../Common/Button';
 import { TextInput } from '../../Common/TextInput';
 import { Tooltip } from '../../Common/Tooltip';
+import {
+  SIDEBAR_ROW_ACTION_CLASS,
+  SIDEBAR_ROW_ICON_CLASS,
+  SIDEBAR_ROW_INSET_CLASS,
+  SIDEBAR_ROW_SELECTED_FOREGROUND_CLASS,
+  SIDEBAR_ROW_SURFACE_CLASS,
+  sidebarRowBackground,
+} from '../sidebarRowStyles';
 
 import type { DraggableSyntheticListeners } from '@dnd-kit/core';
 import type { ReactNode } from 'react';
@@ -205,7 +205,7 @@ export const TreeRowItem = React.memo(
       onImport?.();
     };
 
-    const bgColor = layerRowBackground({
+    const bgColor = sidebarRowBackground({
       selected: isSelected,
       highlighted: isHighlighted,
       dragActive: isDragActive,
@@ -239,8 +239,8 @@ export const TreeRowItem = React.memo(
         onClick={onClick}
         onDoubleClick={handleDoubleClick}
         className={clsx(
-          'group/layer-row bg-surface flex h-8.5 w-full items-center outline-none',
-          LAYER_ROW_INSET_CLASS,
+          'group/sidebar-row bg-surface flex h-8.5 w-full items-center outline-none',
+          SIDEBAR_ROW_INSET_CLASS,
           isDragging ? 'cursor-grabbing' : 'cursor-pointer',
           className,
         )}
@@ -266,8 +266,8 @@ export const TreeRowItem = React.memo(
         <div
           style={{ paddingLeft: ROW_INSET_PX + depth * TREE_INDENT_PX }}
           className={clsx(
-            'group group-focus-visible/layer-row:ring-info flex h-8 w-full min-w-0 items-center gap-2 px-2 text-sm font-normal group-focus-visible/layer-row:ring-2 group-focus-visible/layer-row:ring-inset',
-            LAYER_ROW_SURFACE_CLASS,
+            'group group-focus-visible/sidebar-row:ring-info flex h-8 w-full min-w-0 items-center gap-2 px-2 text-sm font-normal group-focus-visible/sidebar-row:ring-2 group-focus-visible/sidebar-row:ring-inset',
+            SIDEBAR_ROW_SURFACE_CLASS,
             bgColor,
             isCollapsible &&
               isCollapsed &&
@@ -303,8 +303,8 @@ export const TreeRowItem = React.memo(
             className={clsx(
               'pointer-events-none flex shrink-0 items-center',
               isSelected && !isEditing
-                ? LAYER_ROW_SELECTED_FOREGROUND_CLASS
-                : LAYER_ROW_ICON_CLASS,
+                ? SIDEBAR_ROW_SELECTED_FOREGROUND_CLASS
+                : SIDEBAR_ROW_ICON_CLASS,
             )}
           >
             {icon}
@@ -332,7 +332,7 @@ export const TreeRowItem = React.memo(
               className={clsx(
                 'min-w-0 flex-1 truncate select-none',
                 isSelected
-                  ? LAYER_ROW_SELECTED_FOREGROUND_CLASS
+                  ? SIDEBAR_ROW_SELECTED_FOREGROUND_CLASS
                   : isExternal
                     ? 'text-fg-subtle italic'
                     : 'text-fg-default',
@@ -361,7 +361,7 @@ export const TreeRowItem = React.memo(
                 iconOnly
                 size="sm"
                 onClick={handleImport}
-                className={LAYER_ROW_ACTION_CLASS}
+                className={SIDEBAR_ROW_ACTION_CLASS}
                 title={t('layers.addToCanvas')}
                 aria-label={t('layers.addToCanvas')}
               >
@@ -379,7 +379,7 @@ export const TreeRowItem = React.memo(
                   'transition-opacity',
                   isLocked
                     ? 'text-fg-default opacity-100'
-                    : LAYER_ROW_ACTION_CLASS,
+                    : SIDEBAR_ROW_ACTION_CLASS,
                 )}
                 aria-label={isLocked ? t('actions.unlock') : t('actions.lock')}
               >

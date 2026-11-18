@@ -66,10 +66,12 @@ describe('Layers row presentation', () => {
       );
       const action = container.querySelector('button');
       expect(
-        action?.classList.contains('group-focus-within/layer-row:opacity-100'),
+        action?.classList.contains(
+          'group-focus-within/sidebar-row:opacity-100',
+        ),
       ).toBe(true);
       expect(
-        action?.classList.contains('group-hover/layer-row:opacity-100'),
+        action?.classList.contains('group-hover/sidebar-row:opacity-100'),
       ).toBe(true);
     },
   );
@@ -267,16 +269,16 @@ describe('Layers row presentation', () => {
     const row = container.firstElementChild;
     const surface = container.querySelector('.group.bg-info-bg');
     if (!row || !surface) throw new Error('Missing row or surface');
-    expect(row.classList.contains('group/layer-row')).toBe(true);
+    expect(row.classList.contains('group/sidebar-row')).toBe(true);
     expect(row.classList.contains('h-8.5')).toBe(true);
     expect(surface.classList.contains('h-8')).toBe(true);
     expect(row.classList.contains('focus-visible:ring-2')).toBe(false);
     expect(surface.classList.contains('rounded-md')).toBe(true);
     expect(
-      surface.classList.contains('group-focus-visible/layer-row:ring-2'),
+      surface.classList.contains('group-focus-visible/sidebar-row:ring-2'),
     ).toBe(true);
     expect(
-      surface.classList.contains('group-focus-visible/layer-row:ring-inset'),
+      surface.classList.contains('group-focus-visible/sidebar-row:ring-inset'),
     ).toBe(true);
     expect(surface.classList.contains('ring-1')).toBe(false);
   });

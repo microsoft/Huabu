@@ -16,6 +16,7 @@ describe('panel store width persistence', () => {
     const saved = localStorage.getItem('huabu-panel');
     if (saved === null) throw new Error('Expected saved panel preferences');
     expect(JSON.parse(saved).state).toEqual({
+      filesLastPaths: {},
       isRightCollapsed: true,
       rightWidthPx: 720,
     });

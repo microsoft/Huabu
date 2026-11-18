@@ -227,7 +227,8 @@ export function PreviewWorkspace({
           return messageListViewKey(target.canvasId, target.threadId);
         }
         // Cross-origin frame scroll state is neither accessible nor retained.
-        if (target.kind === 'url') return undefined;
+        // Neither has a node to key by, and a device file is re-read on open.
+        if (target.kind === 'url' || target.kind === 'file') return undefined;
 
         const node = state.nodes.find(
           (candidate) => candidate.id === target.nodeId,
