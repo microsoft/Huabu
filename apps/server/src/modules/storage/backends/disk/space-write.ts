@@ -45,7 +45,9 @@ import {
 import { canvasFileShapeError } from './space-record-validation.js';
 import { readDiskSpaceRecord } from './space-record.js';
 import { advanceDiskStamps, DiskSpaceSaveState } from './space-save.js';
+import { getLogger } from '../../../../utils/logger.js';
 import { getWorkspacePath } from '../../../workspace.js';
+import { boundedDeltaLogEntry } from '../../ports/delta-log.js';
 import {
   storedResultOutcome,
   validateWriteAuthor,
@@ -63,6 +65,8 @@ import type {
   SpaceWriteReview,
 } from '../../ports/structured.js';
 import type { CanvasChangeRecord } from '@huabu/shared/canvas-engine';
+
+const log = getLogger('storage.disk.space-write');
 
 /** One thread's Review list across a write: what to store, what to put back. */
 interface ReviewPlan {
@@ -232,6 +236,9 @@ export function createDiskSpaceWrite(
   ): Promise<SpaceWriteResult> {
     assertActiveWorkspace();
     validateInput(input);
+    // The row as it is stored; see `ports/delta-log.ts`.
+    const delta =
+      input.delta !== undefined ? boundedDeltaLogEntry(input.delta) : undefined;
     const responseJson = validateWriteSaveResult(input);
     const reviews = validateWriteReviews(input);
     const author = validateWriteAuthor(input);
@@ -309,7 +316,7 @@ export function createDiskSpaceWrite(
             responseJson,
             expectedVersion: input.expectedVersion,
             toVersion: nextRecord.version,
-            delta: input.delta,
+            delta,
             stamps: nextStamps,
             reviews: storedReviews,
           })
@@ -345,6 +352,19 @@ export function createDiskSpaceWrite(
       return { ok: true };
     }
 
+    if (delta !== undefined) {
+      // Before the transaction takes its before-image of the log. A log
+      // that cannot be cut is left as it is: the bound is housekeeping and
+      // never a reason to refuse the write.
+      try {
+        store.trimDeltaLog(delta.version);
+      } catch (error) {
+        log.warn(
+          { canvasId: store.canvasId, error },
+          'Could not trim the delta log',
+        );
+      }
+    }
     const affectedNodeIds = new Set(input.nodeMutations.map(mutationNodeId));
     const insertedNodeIds = new Set(
       input.nodeMutations.flatMap((mutation) =>
@@ -370,9 +390,7 @@ export function createDiskSpaceWrite(
               save.stage('sidecars');
               store.write(nextRecord);
               save.stage('record');
-              if (input.delta !== undefined) {
-                store.appendDeltaLogEntry(input.delta);
-              }
+              if (delta !== undefined) store.appendDeltaLogEntry(delta);
               save.stage('delta');
               for (const [threadId, { merged }] of reviewPlan) {
                 writeDiskChanges(store.canvasId, threadId, merged);

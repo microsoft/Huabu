@@ -16,6 +16,10 @@ import {
   readSqliteSaveResult,
 } from './space-save.js';
 import {
+  boundedDeltaLogEntry,
+  DELTA_LOG_MAX_ROWS,
+} from '../../ports/delta-log.js';
+import {
   storedResultOutcome,
   validateWriteAuthor,
   validateWriteReviews,
@@ -156,8 +160,16 @@ export function writeSqliteSpaceInTransaction(
       .run(
         canvasId,
         input.delta.version,
-        stringifyJson(input.delta, `Space ${canvasId} delta`),
+        stringifyJson(
+          boundedDeltaLogEntry(input.delta),
+          `Space ${canvasId} delta`,
+        ),
       );
+    // Keep the rows of the newest versions only: one range delete on the
+    // primary key, whatever the log held before.
+    database
+      .prepare(`DELETE FROM delta_log WHERE canvas_id = ? AND version <= ?`)
+      .run(canvasId, input.delta.version - DELTA_LOG_MAX_ROWS);
   }
   advanceSqliteStamps(
     database,

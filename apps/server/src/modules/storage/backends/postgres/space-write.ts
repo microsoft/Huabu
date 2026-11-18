@@ -17,6 +17,10 @@ import {
   resolvePostgresSaveResultRace,
 } from './space-save.js';
 import {
+  boundedDeltaLogEntry,
+  DELTA_LOG_MAX_ROWS,
+} from '../../ports/delta-log.js';
+import {
   storedResultOutcome,
   validateWriteAuthor,
   validateWriteReviews,
@@ -187,7 +191,17 @@ export async function writePostgresSpaceInTransaction(
              VALUES (?, ?, ?)`,
       canvasId,
       input.delta.version,
-      stringifyJson(input.delta, `Space ${canvasId} delta`),
+      stringifyJson(
+        boundedDeltaLogEntry(input.delta),
+        `Space ${canvasId} delta`,
+      ),
+    );
+    // Keep the rows of the newest versions only: one range delete on the
+    // primary key, whatever the log held before.
+    await database.run(
+      `DELETE FROM delta_log WHERE canvas_id = ? AND version <= ?`,
+      canvasId,
+      input.delta.version - DELTA_LOG_MAX_ROWS,
     );
   }
   await advancePostgresStamps(

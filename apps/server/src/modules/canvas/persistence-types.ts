@@ -80,9 +80,21 @@ export interface DeltaLogEntry {
   ts: number;
   /** Optional run id; multiple rows can share one runId in M3 batches. */
   runId?: string;
-  /** Annotated commands the executor actually applied (origin/labelSource stamped). */
+  /**
+   * Which commands ran: one `{ type }` per command. What they changed is in
+   * `deltas`; a command's payload is not journalled a second time. (Rows
+   * written before this hold the whole commands.)
+   */
   commands: unknown[];
-  /** Coarse `Delta[]` produced by diffing prestate → poststate. */
+  /**
+   * What the batch changed, as it travelled: per node only the fields that
+   * changed, a deletion as an id. (Older rows hold whole nodes.)
+   */
   deltas: unknown[];
   originator: ExecuteOriginator;
+  /**
+   * Set when the row would have been larger than a row may be: `commands`
+   * and `deltas` are empty and this says what they amounted to.
+   */
+  omitted?: { bytes: number; commands: number; deltas: number };
 }

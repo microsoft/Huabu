@@ -14,6 +14,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { extractCanvasChanges } from '@huabu/shared/canvas-engine';
 
+import { DELTA_LOG_MAX_ROWS, DELTA_LOG_ROW_MAX_BYTES } from '../delta-log.js';
 import { SaveIdReusedError } from '../save.js';
 
 import type {
@@ -187,6 +188,79 @@ export function describeSpaceWriteContract(
       });
       await expect(space.read()).resolves.toEqual(next);
       await expect(readJournal()).resolves.toEqual([delta]);
+    });
+
+    it('keeps the journal short: the newest rows only, and the last one always', async () => {
+      const { space, readJournal } = await open();
+      let current = await requireRecord(space);
+      const writes = DELTA_LOG_MAX_ROWS + 25;
+      for (let index = 0; index < writes; index++) {
+        const next = nextRecord(current, current.state);
+        await expect(
+          space.write({
+            expectedVersion: current.version,
+            nextRecord: next,
+            nodeMutations: [],
+            delta: deltaFor(next.version, `row-${next.version}`),
+          }),
+        ).resolves.toEqual({ ok: true });
+        current = next;
+        if (index % 40 === 0 || index === writes - 1) {
+          const journal = await readJournal();
+          // Never more than the limit, at any point of the run.
+          expect(journal.length).toBeLessThanOrEqual(DELTA_LOG_MAX_ROWS);
+          expect(journal[journal.length - 1]).toEqual(
+            deltaFor(next.version, `row-${next.version}`),
+          );
+        }
+      }
+      const journal = await readJournal();
+      const versions = journal.map((entry) => entry.version);
+      // A contiguous run that ends at the head: old rows went, in order.
+      expect(versions[versions.length - 1]).toBe(current.version);
+      expect(versions).toEqual(
+        versions.map((_, index) => (versions[0] ?? 0) + index),
+      );
+      expect(versions.length).toBeGreaterThanOrEqual(
+        Math.floor(DELTA_LOG_MAX_ROWS / 2),
+      );
+      expect(versions[0]).toBeGreaterThan(current.version - DELTA_LOG_MAX_ROWS);
+    });
+
+    it('journals a row that is too large without what it changed', async () => {
+      const { space, readJournal } = await open();
+      const current = await requireRecord(space);
+      const next = nextRecord(current, current.state);
+      const body = 'x'.repeat(DELTA_LOG_ROW_MAX_BYTES);
+      const delta: DeltaLogEntry = {
+        ...deltaFor(next.version, 'large'),
+        runId: 'run-large',
+        deltas: [{ contract: 'large', body }, { contract: 'second' }],
+      };
+      await expect(
+        space.write({
+          expectedVersion: current.version,
+          nextRecord: next,
+          nodeMutations: [],
+          delta,
+        }),
+      ).resolves.toEqual({ ok: true });
+
+      const [row] = await readJournal();
+      expect(row).toEqual({
+        version: next.version,
+        ts: delta.ts,
+        runId: 'run-large',
+        commands: [],
+        deltas: [],
+        originator: delta.originator,
+        omitted: {
+          bytes: Buffer.byteLength(JSON.stringify(delta), 'utf8'),
+          commands: 1,
+          deltas: 2,
+        },
+      });
+      expect(JSON.stringify(row).length).toBeLessThan(400);
     });
 
     it('makes the Space version check a side-effect-free business outcome', async () => {
