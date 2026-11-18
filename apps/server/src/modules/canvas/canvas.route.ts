@@ -29,10 +29,7 @@ import {
   recentCanvasConversationParamsSchema,
   deleteNodeParamsSchema,
 } from '@huabu/shared';
-import {
-  nodeRevisionOf,
-  hidePdfNotes,
-} from '@huabu/shared/canvas-engine';
+import { nodeRevisionOf, hidePdfNotes } from '@huabu/shared/canvas-engine';
 
 import {
   associateAgentNode,

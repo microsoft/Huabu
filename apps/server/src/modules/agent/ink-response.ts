@@ -12,7 +12,6 @@ import {
 
 import { subscribeCanvasUpdates } from '../canvas/canvas-sync.js';
 
-
 export class InkAgentModeError extends Error {
   readonly code = 'ink_agent_read_only';
 
