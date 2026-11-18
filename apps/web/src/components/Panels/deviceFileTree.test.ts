@@ -177,3 +177,33 @@ it('lists only the new directory when navigating, and every open folder on refre
       .sort(),
   ).toEqual(['/', '/root', '/root/a', '/root/b']);
 });
+
+it('follows the latest click: a listing never reopens a folder closed meanwhile', async () => {
+  const { tree, calls, settle } = harness();
+  tree.open('device', '/', false);
+  calls[0]?.resolve(['a', 'b']);
+  await settle();
+
+  // Opened and closed again before its first listing arrives.
+  tree.toggle('/a', 0);
+  expect(tree.getSnapshot().expanded.has('/a')).toBe(true);
+  tree.toggle('/a', 0);
+  await settle();
+  calls[1]?.resolve(['x']);
+  await settle();
+  expect(tree.getSnapshot().expanded.has('/a')).toBe(false);
+  expect(names(tree)).toEqual(['/a', '/b']);
+
+  // The listing was kept, so reopening needs no second request.
+  tree.toggle('/a', 0);
+  expect(names(tree)).toEqual(['/a', '/a/x', '/b']);
+  expect(calls).toHaveLength(2);
+
+  // A folder that cannot be listed closes again.
+  tree.toggle('/b', 0);
+  await settle();
+  calls[2]?.reject(new Error('EACCES'));
+  await settle();
+  expect(tree.getSnapshot().expanded.has('/b')).toBe(false);
+  expect(tree.getSnapshot().error).toMatchObject({ kind: 'folder' });
+});

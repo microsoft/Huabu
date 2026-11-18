@@ -181,19 +181,27 @@ export class DeviceFileTree {
     this.update({ expanded: new Set(this.snapshot.expanded).add(directory) });
   }
 
-  /** Open or close a folder row, listing it the first time. */
+  /**
+   * Open or close a folder row, listing it the first time. The row follows
+   * the click at once; a listing that arrives later fills the folder in but
+   * never reopens one that was closed in the meantime.
+   */
   toggle(directory: string, depth: number): void {
     if (depth >= MAX_TREE_DEPTH) {
       this.update({ error: { kind: 'limit' } });
       return;
     }
-    if (!this.snapshot.pages[directory]) {
-      void this.loadFolder(directory);
-      return;
-    }
     const expanded = new Set(this.snapshot.expanded);
-    if (!expanded.delete(directory)) expanded.add(directory);
+    const opening = !expanded.delete(directory);
+    if (opening) expanded.add(directory);
     this.update({ expanded });
+    if (opening && !this.snapshot.pages[directory])
+      void this.loadFolder(directory);
+  }
+
+  private collapse(directory: string): void {
+    const expanded = new Set(this.snapshot.expanded);
+    if (expanded.delete(directory)) this.update({ expanded });
   }
 
   /** Fetch the next page of a partially listed folder. */
@@ -340,9 +348,10 @@ export class DeviceFileTree {
         ),
       );
       if (signal.aborted) return;
-      const { pages, expanded } = this.snapshot;
+      const { pages } = this.snapshot;
       if (countEntries(pages) + result.entries.length > MAX_TREE_ENTRIES) {
         this.update({ error: { kind: 'limit' } });
+        if (!cursor) this.collapse(directory);
         return;
       }
       // Paging can overlap when the directory changed between requests.
@@ -358,13 +367,15 @@ export class DeviceFileTree {
       this.freshSinceReload.add(directory);
       this.update({
         pages: { ...pages, [directory]: { ...result, entries } },
-        expanded: new Set(expanded).add(directory),
       });
     } catch (failure) {
-      if (!signal.aborted)
+      if (!signal.aborted) {
         this.update({
           error: { kind: 'folder', message: messageOf(failure) },
         });
+        // A folder that could not be listed has nothing to show open.
+        if (!cursor) this.collapse(directory);
+      }
     } finally {
       // A new session starts with an empty set; leave it alone.
       if (!signal.aborted) {

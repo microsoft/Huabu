@@ -477,14 +477,18 @@ export function FilesPanel() {
                   aria-expanded={expanded.has(entry.path)}
                   onClick={() => tree.toggle(entry.path, depth)}
                 >
-                  {/* The arrow turns at once and stays put: swapping in a
-                      spinner flashes on every fast listing. Only a slow one
-                      starts to pulse. */}
+                  {/* The arrow follows the click at once and stays put:
+                      swapping in a spinner flashes on every fast listing.
+                      Only a slow one starts to pulse. */}
                   <span className={ROW_ICON_SLOT_CLASS}>
-                    {loading.has(entry.path) ? (
-                      <ChevronDown className="h-3 w-3 motion-safe:animate-pulse motion-safe:[animation-delay:400ms]" />
-                    ) : expanded.has(entry.path) ? (
-                      <ChevronDown className="h-3 w-3" />
+                    {expanded.has(entry.path) ? (
+                      <ChevronDown
+                        className={cn(
+                          'h-3 w-3',
+                          loading.has(entry.path) &&
+                            'motion-safe:animate-pulse motion-safe:[animation-delay:400ms]',
+                        )}
+                      />
                     ) : (
                       <ChevronRight className="h-3 w-3" />
                     )}
