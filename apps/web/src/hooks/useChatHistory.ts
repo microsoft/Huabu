@@ -54,6 +54,7 @@ import {
   observeAgentTurnAcceptance,
   reconcileAgentTurnAfterReconnect,
   settleTurnInkInterpretation,
+  pauseAgentTurnQueueAfterFailure,
   settleAgentTurnQueue,
 } from './agentTurnController';
 import { handleStreamEvent } from './useAgentStream';
@@ -325,8 +326,9 @@ function applyLatestHistoryWindow(
       ? [
           message.role,
           message.content,
-          message.quotedComments,
-          message.attachments,
+          // A live message carries empty lists where history omits the field.
+          message.quotedComments?.length ? message.quotedComments : undefined,
+          message.attachments?.length ? message.attachments : undefined,
         ]
       : message.role === 'assistant'
         ? [message.role, message.segments]
@@ -940,8 +942,9 @@ export function useChatHistory(
         setAttachAttempt((attempt) => attempt + 1),
       );
     }
-    let queueCompletedNormally = false;
     let retryInactive = false;
+    // Known bad ending of the observed turn; a lost connection is not one.
+    let turnFailed = false;
 
     const tryReconnect = async () => {
       if (ownerView) {
@@ -1021,7 +1024,8 @@ export function useChatHistory(
               if (cancelled) return;
               if (event.type === 'done') {
                 outcome = inkTurnOutcome(event.data.meta?.stopReason);
-                queueCompletedNormally = outcome === 'done';
+                turnFailed = outcome !== 'done';
+                if (turnFailed) pauseAgentTurnQueueAfterFailure(ownerThreadId);
               }
               if (!streaming) {
                 streaming = true;
@@ -1043,7 +1047,8 @@ export function useChatHistory(
             onError: (err) => {
               if (cancelled) return;
               outcome = 'error';
-              queueCompletedNormally = false;
+              turnFailed = true;
+              pauseAgentTurnQueueAfterFailure(ownerThreadId);
               settleTurnInkInterpretation(streamContext, 'error');
               addMessage(ownerThreadId, {
                 id: createId('status'),
@@ -1071,7 +1076,6 @@ export function useChatHistory(
         )
         .finally(() => clearInkInterpretationStream(streamContext));
 
-      if (result.status !== 'completed') queueCompletedNormally = false;
       if (result.status === 'inactive' && !cancelled) {
         retryInactive = ownerStatus === 'running';
         outcome = 'interrupted';
@@ -1098,7 +1102,6 @@ export function useChatHistory(
 
     void tryReconnect()
       .catch(async (error) => {
-        queueCompletedNormally = false;
         if (cancelled || claim.signal.aborted) return;
         console.error('[useChatHistory] reconnect failed', error);
         const ownerStillRunning = ownerStatus === 'running';
@@ -1126,7 +1129,7 @@ export function useChatHistory(
         if (cancelled) return;
         settleAgentTurnQueue(
           { threadId: ownerThreadId, ownerCanvasId },
-          queueCompletedNormally,
+          turnFailed,
         );
         if (retryInactive) {
           const delay =
@@ -1174,8 +1177,7 @@ export function useChatHistory(
       !useChatStore.getState().threadsById[threadId]?.queuedTurns.length
     )
       return;
-    // A terminal owner snapshot is not proof of normal stream completion.
-    settleAgentTurnQueue({ threadId, ownerCanvasId }, false);
+    settleAgentTurnQueue({ threadId, ownerCanvasId }, ownerStatus === 'error');
   }, [
     ownerStatus,
     hydratedOwnerKey,

@@ -5,7 +5,7 @@ import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { ApiError } from '@/api/_client';
+import { AgentTurnFailedError, ApiError } from '@/api/_client';
 import { getAgentConversationOwner } from '@/api/agent';
 import { ThreadChatInput } from '@/components/Panels/ChatPanel/ThreadChatInput';
 import { ChatSessionProvider } from '@/hooks/useChatSession';
@@ -37,6 +37,7 @@ import {
   prepareAgentTurn,
   prepareAgentTurnRetry,
   reconcileAgentTurnAfterReconnect,
+  holdAgentTurnQueue,
   resetAgentTurnAcceptanceObserversForTests,
   resumeAgentTurnQueue,
   settleAgentTurnQueue,
@@ -321,18 +322,22 @@ describe('queued composer turns', () => {
     });
   });
 
-  it.each(['error', 'aborted', 'cancelled', 'transport-close'])(
-    'pauses instead of advancing on %s',
+  it.each(['error', 'aborted', 'cancelled', 'server-error'])(
+    'pauses instead of advancing when the previous turn fails with %s',
     async (reason) => {
       const gate = deferred();
       mocks.stream.mockImplementationOnce(
-        async (_content, _thread, _mode, callbacks: AgentStreamCallbacks) => {
+        async (_content, threadId, _mode, callbacks: AgentStreamCallbacks) => {
           await gate.promise;
-          if (reason !== 'transport-close')
-            callbacks.onEvent({
-              type: 'done',
-              data: { message: '', meta: { stopReason: reason } },
-            });
+          callbacks.onAccepted?.({ threadId, turnStartSeq: 10 });
+          if (reason === 'server-error') {
+            callbacks.onError(new AgentTurnFailedError('Agent crashed'));
+            return;
+          }
+          callbacks.onEvent({
+            type: 'done',
+            data: { message: '', meta: { stopReason: reason } },
+          });
           callbacks.onComplete();
         },
       );
@@ -351,6 +356,76 @@ describe('queued composer turns', () => {
       expect(mocks.stream).toHaveBeenCalledTimes(1);
     },
   );
+
+  it('sends the queued turn after the connection to an accepted turn is lost', async () => {
+    {
+      const gate = deferred();
+      mocks.stream.mockImplementationOnce(
+        async (_content, threadId, _mode, callbacks: AgentStreamCallbacks) => {
+          await gate.promise;
+          callbacks.onAccepted?.({ threadId, turnStartSeq: 10 });
+          callbacks.onError(new TypeError('Failed to fetch'));
+        },
+      );
+      let running!: Promise<void>;
+      await act(async () => {
+        running = hook.startStream('First', 'operate');
+      });
+      await enqueue('Second');
+      gate.resolve();
+      await act(async () => {
+        await running;
+      });
+      // The dropped turn is re-attached through a history reload rather than
+      // reported as an error.
+      const dropped = useChatStore.getState().threadsById[session.threadId];
+      expect(dropped.historyLoaded).toBe(false);
+      expect(
+        dropped.messages.some((message) => message.role === 'status'),
+      ).toBe(false);
+      await waitForQueue();
+      const thread = useChatStore.getState().threadsById[session.threadId];
+      expect(thread.queuePaused).toBe(false);
+      expect(mocks.stream.mock.calls.map(([content]) => content)).toEqual([
+        'First',
+        'Second',
+      ]);
+    }
+  });
+
+  it('waits out a held composer and a server-side busy thread instead of pausing', async () => {
+    const release = holdAgentTurnQueue(session);
+    await act(async () => {
+      await hook.startStream('Held', 'operate', undefined, { defer: true });
+    });
+    expect(mocks.stream).not.toHaveBeenCalled();
+    expect(
+      useChatStore.getState().threadsById[session.threadId].queuePaused,
+    ).toBe(false);
+    mocks.stream.mockImplementationOnce(
+      async (_content, _thread, _mode, callbacks: AgentStreamCallbacks) =>
+        callbacks.onError(new ApiError(409, { code: 'thread_busy' }, 'Busy')),
+    );
+    mocks.stream.mockImplementationOnce(
+      async (_content, threadId, _mode, callbacks: AgentStreamCallbacks) =>
+        finish(callbacks, threadId),
+    );
+    await act(async () => release());
+    await act(async () => {
+      await vi.waitFor(() => expect(mocks.stream).toHaveBeenCalledTimes(2), {
+        timeout: 5000,
+      });
+    });
+    await waitForQueue();
+    const thread = useChatStore.getState().threadsById[session.threadId];
+    expect(thread.queuePaused).toBe(false);
+    expect(
+      thread.messages.filter((message) => message.role === 'user'),
+    ).toHaveLength(1);
+    expect(thread.messages.some((message) => message.role === 'status')).toBe(
+      false,
+    );
+  });
 
   it('keeps Stop paused even if completion wins the stop race, and resumes explicitly', async () => {
     const gate = deferred();
@@ -406,7 +481,7 @@ describe('queued composer turns', () => {
         callbacks.onError(new ApiError(400, {}, 'Rejected')),
     );
     await act(async () => {
-      settleAgentTurnQueue(session, true);
+      settleAgentTurnQueue(session);
       await vi.waitFor(() =>
         expect(
           useChatStore.getState().threadsById[session.threadId].queuePaused,
@@ -439,7 +514,7 @@ describe('queued composer turns', () => {
             : callbacks.onComplete(),
       );
       await act(async () => {
-        settleAgentTurnQueue(session, true);
+        settleAgentTurnQueue(session);
         await vi.waitFor(() =>
           expect(
             useChatStore.getState().threadsById[session.threadId].queuedTurns[0]
@@ -1244,7 +1319,7 @@ describe('queued composer turns', () => {
         async (_content, threadId, _mode, callbacks: AgentStreamCallbacks) =>
           finish(callbacks, threadId),
       );
-      await act(async () => settleAgentTurnQueue(owner, true));
+      await act(async () => settleAgentTurnQueue(owner));
       await waitForQueue();
       expect(mocks.stream.mock.calls.map(([content]) => content)).toEqual([
         'Second',
@@ -1351,7 +1426,7 @@ describe('queued composer turns', () => {
       },
     );
     await act(async () => {
-      settleAgentTurnQueue(questionSession, true);
+      settleAgentTurnQueue(questionSession);
       await vi.waitFor(() =>
         expect(
           useChatStore.getState().threadsById[session.threadId],
@@ -1408,7 +1483,7 @@ describe('queued composer turns', () => {
       status: 'pending',
     });
     try {
-      await act(async () => settleAgentTurnQueue(session, true));
+      await act(async () => settleAgentTurnQueue(session));
       await act(async () => {
         await vi.waitFor(() =>
           expect(
@@ -1575,6 +1650,8 @@ it.each([
         prepared: request(),
         status: 'pending',
       });
+      // Keep the later turn out of the picture: this test is about page close.
+      useChatStore.getState().setQueuePaused(session.threadId, true);
       const closed = vi.fn();
       const close = lifecycle
         .prepare(controller.signal)

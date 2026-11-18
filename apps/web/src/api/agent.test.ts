@@ -3,13 +3,13 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { AgentTurnFailedError, type ApiError } from './_client';
 import {
   agentApi,
   getAgentConversationOwner,
   streamAgentConversationOwner,
 } from './agent';
 
-import type { ApiError } from './_client';
 import type { AgentStreamCallbacks } from './agent';
 import type { AgentHostStreamEvent } from '@huabu/shared';
 
@@ -372,7 +372,7 @@ describe('agent API host acceptance', () => {
     });
     expect(handlers.onAccepted).not.toHaveBeenCalled();
     expect(handlers.onError).toHaveBeenCalledExactlyOnceWith(
-      new Error('Ink could not be prepared'),
+      new AgentTurnFailedError('Ink could not be prepared'),
     );
     expect(handlers.onComplete).not.toHaveBeenCalled();
   });

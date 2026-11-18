@@ -87,6 +87,7 @@ import { parseSlashInvocations } from './parseSlashInvocations';
 import { saveChatAsQuestion } from './saveChatAsQuestion';
 import { ThreadChatInput } from './ThreadChatInput';
 import { WorkingDirectoryOverride } from './WorkingDirectoryOverride';
+import { holdAgentTurnQueue } from '../../../hooks/agentTurnController';
 import { useAgentStream } from '../../../hooks/useAgentStream';
 import { useChatHistory } from '../../../hooks/useChatHistory';
 import { MessageList } from '../../Messages/MessageList';
@@ -818,11 +819,26 @@ export const ChatPanel = ({
     onRenameRequestHandled,
   ]);
 
+  // Never block Send on a transient state: the turn is queued and sent as soon
+  // as the thread is ready.
+  const deferSubmission =
+    builtinThreadSettings.saving ||
+    !isHistoryLoaded ||
+    preparation.pending ||
+    savingAgentDraft ||
+    savingWorkingDirectory;
+  useEffect(
+    () =>
+      deferSubmission
+        ? holdAgentTurnQueue({ threadId, ownerCanvasId })
+        : undefined,
+    [deferSubmission, threadId, ownerCanvasId],
+  );
   const handleSubmit = useCallback(
     async (e: React.FormEvent, agentMode: AgentMode, draft: string) => {
       e.preventDefault();
-      if (!ownerScopeReady || builtinThreadSettings.saving) return;
-      if (!selectThreadHistoryLoaded(useChatStore.getState(), threadId)) return;
+      if (!ownerScopeReady) return;
+      const options = { defer: deferSubmission };
       // Strip leading `/<id>` tokens that match a known slash command
       // and forward them as `invokedSkills`. Skill invocation is gated
       // to **internal + operate mode** only:
@@ -845,7 +861,7 @@ export const ChatPanel = ({
       if (!isSkillInvocationAllowed) {
         const prompt = raw.trim();
         onCommit?.();
-        await startStream(prompt, agentMode);
+        await startStream(prompt, agentMode, undefined, options);
         return;
       }
       const { invokedSkills, message } = parseSlashInvocations(
@@ -858,6 +874,7 @@ export const ChatPanel = ({
         prompt,
         agentMode,
         invokedSkills.length > 0 ? invokedSkills : undefined,
+        options,
       );
     },
     [
@@ -865,9 +882,8 @@ export const ChatPanel = ({
       knownSlashIds,
       onCommit,
       startStream,
-      threadId,
       ownerScopeReady,
-      builtinThreadSettings.saving,
+      deferSubmission,
     ],
   );
 
@@ -1316,13 +1332,12 @@ export const ChatPanel = ({
               // snapshot. Transport-health gating is now expressed via the
               // connection badge above; we keep the input enabled so the
               // user can retry / trigger a re-ensure on the next send.
-              submitDisabled={
-                !ownerScopeReady ||
-                builtinThreadSettings.saving ||
-                !isHistoryLoaded ||
-                preparation.pending ||
-                savingAgentDraft ||
-                savingWorkingDirectory
+              submitDisabled={!ownerScopeReady}
+              deferSubmission={deferSubmission}
+              queueBlockedReason={
+                historyError && !isHistoryLoaded
+                  ? t('chat.queueBlockedByHistory')
+                  : undefined
               }
             >
               {!remote && ownerCanvasId && threadId ? (

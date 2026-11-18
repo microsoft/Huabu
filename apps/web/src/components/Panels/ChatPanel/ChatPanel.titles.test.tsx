@@ -201,10 +201,12 @@ vi.mock('./ThreadChatInput', () => ({
     agentSelectorSlot,
     acpSelectorsSlot,
     submitDisabled,
+    deferSubmission,
   }: {
     agentSelectorSlot?: React.ReactNode;
     acpSelectorsSlot?: React.ReactNode;
     submitDisabled?: boolean;
+    deferSubmission?: boolean;
     onSubmit: (
       event: React.FormEvent,
       mode: 'ask',
@@ -213,6 +215,7 @@ vi.mock('./ThreadChatInput', () => ({
   }) => (
     <form
       data-submit-disabled={String(submitDisabled)}
+      data-defer-submission={String(deferSubmission)}
       onSubmit={(event) => {
         void onSubmit(event, 'ask', 'First prompt\nMore detail');
       }}
@@ -696,7 +699,7 @@ describe('rendered conversation titles', () => {
     const selectors = vi.mocked(BuiltinSessionSelectors).mock.lastCall?.[0];
     assert(selectors);
     expect(selectors.disabled).toBe(true);
-    expect(container.querySelector('form')?.dataset.submitDisabled).toBe(
+    expect(container.querySelector('form')?.dataset.deferSubmission).toBe(
       'true',
     );
     await act(async () => {
@@ -763,7 +766,7 @@ describe('rendered conversation titles', () => {
       });
       expect(calls).toEqual(['model-a']);
       expect(
-        container.querySelector('form')?.getAttribute('data-submit-disabled'),
+        container.querySelector('form')?.getAttribute('data-defer-submission'),
       ).toBe('true');
       await act(async () => {
         finish();
@@ -779,7 +782,7 @@ describe('rendered conversation titles', () => {
         );
       });
       expect(
-        container.querySelector('form')?.getAttribute('data-submit-disabled'),
+        container.querySelector('form')?.getAttribute('data-defer-submission'),
       ).toBe('false');
       expect(
         sessionMetaState.applyOptimistic.mock.calls.map(([patch]) => patch),
@@ -893,12 +896,12 @@ describe('rendered conversation titles', () => {
     );
   });
 
-  it('gates panel submission independently from draft editing when history is not ready', async () => {
+  it('queues a submission instead of blocking it while history is not ready', async () => {
     useChatStore.getState().setHistoryLoaded('thread', false);
     await renderPanel();
-    expect(
-      container.querySelector('form')?.getAttribute('data-submit-disabled'),
-    ).toBe('true');
+    const form = container.querySelector('form');
+    expect(form?.getAttribute('data-submit-disabled')).toBe('false');
+    expect(form?.getAttribute('data-defer-submission')).toBe('true');
     await act(async () => {
       container
         .querySelector('form')
@@ -907,6 +910,15 @@ describe('rendered conversation titles', () => {
         );
     });
     expect(agentApi.streamMessage).not.toHaveBeenCalled();
+    expect(useChatStore.getState().threadsById.thread.queuedTurns).toHaveLength(
+      1,
+    );
+    await act(async () => {
+      useChatStore.getState().setHistoryLoaded('thread', true);
+      await vi.waitFor(() =>
+        expect(agentApi.streamMessage).toHaveBeenCalledTimes(1),
+      );
+    });
   });
 
   it('keeps scroll readiness false after history fails until retry succeeds', async () => {

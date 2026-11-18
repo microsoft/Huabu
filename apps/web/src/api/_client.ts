@@ -49,6 +49,14 @@ export class ApiError extends Error {
   }
 }
 
+/** The server reported that the turn itself failed, as opposed to a lost connection. */
+export class AgentTurnFailedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'AgentTurnFailedError';
+  }
+}
+
 export interface ApiFetchOptions extends Omit<RequestInit, 'body' | 'method'> {
   method?: RequestInit['method'];
   /** JSON-serialisable request body. Mutually exclusive with `formData`. */

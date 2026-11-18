@@ -26,6 +26,7 @@ import {
   prepareAgentTurn,
   prepareAgentTurnRetry,
   resumeAgentTurnQueue,
+  settleAgentTurnQueue,
   stopAgentTurn,
 } from './agentTurnController';
 
@@ -46,6 +47,7 @@ export interface UseAgentStreamReturn {
     prompt: string,
     mode: AgentMode,
     invokedSkills?: string[],
+    options?: { defer?: boolean },
   ) => Promise<void>;
   retryStream: (
     message: Extract<ChatMessage, { role: 'user' }>,
@@ -83,13 +85,21 @@ export function useAgentStream(
           target.threadId === session.threadId;
   }, [previewTabId, session]);
   const startStream = useCallback(
-    async (prompt: string, mode: AgentMode, invokedSkills?: string[]) => {
+    async (
+      prompt: string,
+      mode: AgentMode,
+      invokedSkills?: string[],
+      options?: { defer?: boolean },
+    ) => {
       const chat = useChatStore.getState();
       const quotedComments = selectThreadQuotedComments(chat, session.threadId);
       if (!prompt.trim() && !quotedComments.length) return;
       if (quotedComments.some((item) => !item.comment.trim())) return;
       const queuedTurns = selectThreadQueuedTurns(chat, session.threadId);
+      // `defer`: the surface is not ready to send yet, so the turn waits in
+      // the queue instead of blocking the user.
       const shouldQueue =
+        options?.defer === true ||
         selectThreadIsLoading(chat, session.threadId) ||
         queuedTurns.length > 0 ||
         hasAgentStreamClaim(session.ownerCanvasId, session.threadId);
@@ -143,6 +153,7 @@ export function useAgentStream(
           chat.setExcludeCanvasSelection(session.threadId, false);
           chat.clearPendingAttachments(session.threadId);
           if (excerpt) chat.setSelectionAttachment(null);
+          settleAgentTurnQueue(session);
           return;
         }
         chat.setQueuePaused(session.threadId, false);
