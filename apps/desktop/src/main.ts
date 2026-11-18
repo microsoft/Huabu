@@ -77,6 +77,7 @@ import {
 import { ensureShellPath } from './shell-path.js';
 import { TITLE_BAR_HEIGHT } from './title-bar.js';
 import { registerUpdaterIpc, startAutoUpdateChecks } from './updater.js';
+import { guardSession } from './web-guards.js';
 
 import type * as DesktopAgentRuntime from '@huabu/client-runtime/desktop' with {
   'resolution-mode': 'import',
@@ -1056,6 +1057,7 @@ function configureWebSession(
   serverOrigin: string,
   webSession = session.defaultSession,
 ): void {
+  guardSession(webSession, serverOrigin);
   const filter = { urls: ['<all_urls>'] };
   webSession.webRequest.onHeadersReceived(filter, (details, callback) => {
     // Leave our own origin alone — stripping CSP from our SPA would be
