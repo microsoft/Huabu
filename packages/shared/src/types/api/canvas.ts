@@ -84,7 +84,7 @@ export const getCanvasResponseSchema = z.object({
   /**
    * The read version of the Space, taken before `state` was read. A page
    * quotes it — with the version it has applied since — for the edits it
-   * sends (`runs` of `POST /api/canvas/:canvasId/execute`).
+   * sends (`edits[].basis` of `POST /api/canvas/:canvasId/execute`).
    */
   basis: z.string().optional(),
 });
