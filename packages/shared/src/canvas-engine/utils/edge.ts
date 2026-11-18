@@ -113,6 +113,7 @@ const MAX_OBSTACLE_HITS = 3;
  * it on every edge update during canvas re-renders.
  */
 const LINE_TYPE_TO_RF: Record<string, string> = {
+  auto: 'default',
   bezier: 'default',
   straight: 'straight',
   step: 'smoothstep',

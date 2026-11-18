@@ -49,6 +49,7 @@ import {
 } from '@huabu/shared';
 import {
   getLayoutNodeSize,
+  getEdgeLineType,
   type CanvasNode,
 } from '@huabu/shared/canvas-engine';
 
@@ -911,7 +912,10 @@ export async function inspectEdges(
       if (!lineStyles.has(ls)) continue;
     }
     if (lineTypes) {
-      const lt = style?.lineType ?? 'bezier';
+      const lt = getEdgeLineType(
+        e.data,
+        typeof e.type === 'string' ? e.type : undefined,
+      );
       if (!lineTypes.has(lt)) continue;
     }
     if (labelNeedle) {

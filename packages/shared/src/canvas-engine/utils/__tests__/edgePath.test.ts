@@ -45,7 +45,12 @@ describe('shared edge geometry', () => {
     ).toBe('straight');
     expect(getEdgeLineType(undefined, 'smoothstep')).toBe('step');
     expect(getEdgeLineType(undefined, 'straight')).toBe('straight');
-    expect(getEdgeLineType(undefined, 'default')).toBe('bezier');
+    expect(getEdgeLineType(undefined, 'default')).toBe('auto');
+    expect(getEdgeLineType()).toBe('auto');
+    expect(getEdgeLineType({ edgeStyle: { lineType: 'auto' } })).toBe('auto');
+    expect(getEdgeLineType({ edgeStyle: { lineType: 'bezier' } })).toBe(
+      'bezier',
+    );
   });
 
   it('samples cubic curvature instead of treating the endpoints as a chord', () => {
