@@ -39,7 +39,6 @@ import {
   applyDeltas,
   applySharedPostEffects,
   applySharedPostEffectsFromWriteResult,
-  CONTENT_REVISION_KEYS,
   executeCanvasCommands,
   autoHeightKey,
   getHeightPolicy,
@@ -147,10 +146,11 @@ import { shouldBackfillNodeLabel } from './canvasStore/load/shouldBackfillNodeLa
 import { warmupNodeHeights } from './canvasStore/load/warmupNodeHeights';
 import { createCanvasEventBuffer } from './canvasStore/save/eventBuffer';
 import {
+  contentFieldOfUnit,
   MD_BACKED_NODE_TYPES,
   NODE_CONTENT_KEYS,
+  PROPERTY_CONTENT_KEYS,
   SERVER_DERIVED_SIDECAR_NODE_TYPES,
-  withContentPatch,
 } from './canvasStore/save/nodeContentFields';
 import {
   createNodeContentQueue,
@@ -167,7 +167,11 @@ import {
 } from './canvasStore/sync/browserSync';
 import { expandNodeRows } from './canvasStore/sync/fieldLevelDeltas';
 import { restoreChanged } from './canvasStore/sync/historyRestore';
-import { deriveHeldKeys, nodeUnitKey } from './canvasStore/sync/inFlight';
+import {
+  deriveHeldKeys,
+  EXISTENCE_UNIT,
+  nodeUnitKey,
+} from './canvasStore/sync/inFlight';
 import {
   commandsForLocalDiff,
   commandsForStateDiff,
@@ -182,6 +186,16 @@ import {
   type UnitNode,
 } from './canvasStore/sync/propertyUnits';
 import {
+  contentChangesOf,
+  heldByNodeUnit,
+  NO_REMOTE_CONTENT,
+  remoteContentOutcome,
+  remoteContentRow,
+  withheldByNode,
+  withoutNodes,
+  type RemoteContentApplied,
+} from './canvasStore/sync/remoteContent';
+import {
   planRestore,
   type PlanState,
   type RestorePlan,
@@ -190,6 +204,11 @@ import {
   commandsForServer,
   withClientIds,
 } from './canvasStore/sync/serverCommands';
+import {
+  syncStateOf,
+  useCanvasSyncStatusStore,
+  type CanvasSyncState,
+} from './canvasStore/sync/syncStatus';
 import { useChatStore } from './chatStore';
 import { useGesturePreviewStore } from './gesturePreviewStore';
 import { usePanelStore } from './panelStore';
@@ -206,13 +225,8 @@ import {
   resumeHeightCommits,
   suspendHeightCommits,
 } from '../components/Nodes/shared/height/commitSuspension';
-import { copyCanvasClipboard } from '../utils/io/clipboard';
+import { copyCanvasClipboard, copyToClipboard } from '../utils/io/clipboard';
 import { nodesToPlainText } from '../utils/io/nodeToPlainText';
-import {
-  syncStateOf,
-  useCanvasSyncStatusStore,
-  type CanvasSyncState,
-} from './canvasStore/sync/syncStatus';
 
 import type { SendOutcome } from './canvasStore/sync/sendQueue';
 import type {
@@ -411,65 +425,6 @@ export type NodeMetadataPatch = Pick<
   PutNodeContentRequest,
   'properties' | 'propertyDisplayKeys'
 >;
-
-/** The content keys that hold custom properties: unversioned, per key. */
-const PROPERTY_CONTENT_KEYS: ReadonlySet<string> = new Set([
-  'properties',
-  'propertyDisplayKeys',
-]);
-
-/**
- * The custom-property changes of one `REPLACE_NODE` (`prev` → `next`), as a
- * patch of the data this page shows (`local`): each property key the batch
- * set, changed or removed, and the display order when it changed. A key this
- * page has changed and not saved (`pendingKeys`), and a display order it has
- * (`pendingFields`), are left as they are here. An absent result key means
- * no change; `undefined` removes the field.
- */
-function remotePropertyChanges(
-  prev: Record<string, unknown>,
-  next: Record<string, unknown>,
-  local: Record<string, unknown>,
-  pendingFields: ReadonlySet<string>,
-  pendingKeys: ReadonlySet<string>,
-): Record<string, unknown> {
-  const patch: Record<string, unknown> = {};
-  const before = (prev['properties'] ?? {}) as Record<string, unknown>;
-  const after = (next['properties'] ?? {}) as Record<string, unknown>;
-  const changed = [
-    ...new Set([...Object.keys(before), ...Object.keys(after)]),
-  ].filter(
-    (key) =>
-      !pendingKeys.has(key) &&
-      (Object.hasOwn(before, key) !== Object.hasOwn(after, key) ||
-        !deepEqual(before[key], after[key])),
-  );
-  if (changed.length > 0) {
-    const bag = {
-      ...(local['properties'] as Record<string, unknown> | undefined),
-    };
-    for (const key of changed) {
-      if (Object.hasOwn(after, key))
-        Object.defineProperty(bag, key, {
-          value: after[key],
-          enumerable: true,
-          configurable: true,
-          writable: true,
-        });
-      else delete bag[key];
-    }
-    patch['properties'] =
-      Object.keys(bag).length > 0 || next['properties'] !== undefined
-        ? bag
-        : undefined;
-  }
-  if (
-    !pendingFields.has('propertyDisplayKeys') &&
-    !deepEqual(prev['propertyDisplayKeys'], next['propertyDisplayKeys'])
-  )
-    patch['propertyDisplayKeys'] = next['propertyDisplayKeys'];
-  return patch;
-}
 
 /** Publish acknowledged property edits; only the toast retains a failed patch. */
 export async function commitNodeProperties(
@@ -1275,6 +1230,14 @@ const nodeContentQueue = createNodeContentQueue({
       reportMeasuredSizes([nodeId], undefined, nodeId);
   },
   pageId: CANVAS_PAGE_ID,
+  applyRemoteContent: (canvasId, nodeId, patch) =>
+    applyFetchedNodeContent(canvasId, nodeId, patch),
+  onHoldsEnded: (canvasId, nodeId, saved) =>
+    browserSync.localHoldsEnded(canvasId, nodeId, {
+      owns: isContentUnit,
+      held: heldLocally,
+      superseded: (unit) => saved(contentFieldOfUnit(unit)?.field ?? ''),
+    }),
   onRemoteContentAdopted: (canvasId, nodeId, patch) =>
     canvasHistoryManager.rebaseRemoteContent(canvasId, nodeId, patch),
   onPropertiesSaved: (nodeId, patch) =>
@@ -1342,7 +1305,13 @@ function syncView(
 
 /** Content fields are saved by the per-node content PUT, not the queue. */
 function isContentUnit(unit: string): boolean {
-  return unit.startsWith('data.') && NODE_CONTENT_KEYS.has(unit.slice(5));
+  return contentFieldOfUnit(unit) !== null;
+}
+
+/** A content unit other than a custom property or their display order. */
+function isVersionedContentUnit(unit: string): boolean {
+  const field = contentFieldOfUnit(unit)?.field;
+  return field !== undefined && !PROPERTY_CONTENT_KEYS.has(field);
 }
 
 /**
@@ -1512,7 +1481,6 @@ function reportMeasuredHeights(
   if (!spaceAcceptsEdits(state.canvasId)) return;
   const wanted = new Set(nodeIds);
   if (wanted.size === 0) return;
-  const unsaved = new Set(nodeContentQueue.pendingNodeIds());
   const items: CanvasNodeMeasuredHeightUpdate[] = [];
   for (const node of state.nodes) {
     if (!wanted.has(node.id)) continue;
@@ -1527,7 +1495,7 @@ function reportMeasuredHeights(
       reportedHeightKeys.get(node.id) === hint.measuredFor
     )
       continue;
-    if (unsaved.has(node.id) && node.id !== savedNodeId) {
+    if (nodeContentQueue.hasUnsaved(node.id) && node.id !== savedNodeId) {
       heightsAwaitingContent.add(node.id);
       continue;
     }
@@ -1623,7 +1591,6 @@ function reportMeasuredSizes(
     return;
   const wanted = new Set(nodeIds);
   if (wanted.size === 0) return;
-  const unsaved = new Set(nodeContentQueue.pendingNodeIds());
   const items: CanvasNodeMeasuredSizeUpdate[] = [];
   for (const node of state.nodes) {
     if (!wanted.has(node.id)) continue;
@@ -1645,7 +1612,7 @@ function reportMeasuredSizes(
       if (sameBox({ ...stored, key: stored.measuredFor }, box)) continue;
       if (before?.key !== box.key || sameBox(before, box)) continue;
     }
-    if (unsaved.has(node.id) && node.id !== savedNodeId) {
+    if (nodeContentQueue.hasUnsaved(node.id) && node.id !== savedNodeId) {
       sizesAwaitingContent.add(node.id);
       continue;
     }
@@ -1850,10 +1817,16 @@ const browserSync = createBrowserSync({
     );
   },
   applyWithheld: (canvasId, units) => {
+    if (useCanvasStore.getState().canvasId !== canvasId) return;
+    // A deletion that was kept back: the node goes now.
+    const deleted = units
+      .filter((unit) => unit.unit === EXISTENCE_UNIT && !unit.value.present)
+      .map((unit) => unit.nodeId);
+    if (deleted.length > 0) removeNodesDeletedElsewhere(deleted);
     const state = useCanvasStore.getState();
-    if (state.canvasId !== canvasId) return;
     const byNode = new Map<string, typeof units>();
     for (const unit of units) {
+      if (unit.unit === EXISTENCE_UNIT) continue;
       byNode.set(unit.nodeId, [...(byNode.get(unit.nodeId) ?? []), unit]);
     }
     let touched = false;
@@ -1923,6 +1896,385 @@ const browserSync = createBrowserSync({
   ignoreUnit: isUnsentUnit,
 });
 
+// ─── What this page holds against incoming changes ────────────────────────
+//
+// One rule decides what a remote change may touch: a property unit this page
+// has changed and not had confirmed keeps its value here, the remote value
+// is kept back, and everything else of the change is applied
+// (`sync/fieldLevelDeltas.ts`). The send queue knows the structure units of
+// its unanswered batches. The holders it does not know are answered here:
+// what the open pointer gesture has moved, the content fields the content
+// queue has not saved, and the existence of the node being edited.
+
+/**
+ * Whether a holder other than the send queue holds in-flight key `key`:
+ * unsaved content of the node, or — for its existence — the node being
+ * edited on this page.
+ */
+const heldLocally = heldByNodeUnit((nodeId, unit) =>
+  unit === EXISTENCE_UNIT
+    ? useCanvasPresenceStore.getState().localEditingNodeId === nodeId
+    : nodeContentQueue.holdsUnit(nodeId, unit),
+);
+
+/** {@link heldLocally}, and what the open pointer gesture has changed. */
+function localHolds(): {
+  held: (key: string) => boolean;
+  gestureKeys: ReadonlyMap<string, unknown> | null;
+} {
+  const { nodes, edges } = useCanvasStore.getState();
+  const gestureKeys = syncGestureBaseline
+    ? deriveHeldKeys(
+        syncView(syncGestureBaseline, edges),
+        syncView(nodes, edges),
+        isUnsentUnit,
+      )
+    : null;
+  return {
+    held: (key) => gestureKeys?.has(key) === true || heldLocally(key),
+    gestureKeys,
+  };
+}
+
+/**
+ * Show content of `nodeId` that was fetched after another page's save. The
+ * fetched fields go through the same partition as an update's row: what
+ * this page holds is kept back (and buffered), the rest is written. No save,
+ * no undo entry, no version change.
+ */
+function applyFetchedNodeContent(
+  canvasId: string,
+  nodeId: string,
+  patch: Readonly<Record<string, unknown>>,
+): RemoteContentApplied {
+  const state = useCanvasStore.getState();
+  const local = state.nodes.find((node) => node.id === nodeId);
+  if (state.canvasId !== canvasId || !local) return NO_REMOTE_CONTENT;
+  const view = syncView(state.nodes, state.edges);
+  const remote = browserSync.prepareRemote({
+    deltas: [remoteContentRow(local, patch)],
+    localNodes: view.nodes,
+    localEdges: view.edges,
+    alsoHeld: localHolds().held,
+  });
+  const row = remote.deltas[0];
+  const next =
+    row?.type === 'REPLACE_NODE' ? (row.next as unknown as Node) : local;
+  if (next !== local)
+    state._setStateRaw({
+      nodes: state.nodes.map((node) => (node.id === nodeId ? next : node)),
+    });
+  remote.finish();
+  return remoteContentOutcome(local, next, patch, remote.withheld);
+}
+
+// ─── Steps of applying an update ──────────────────────────────────────────
+
+/** The page has applied the Space up to `version`. */
+function adoptVersion(version: number): void {
+  const state = useCanvasStore.getState();
+  state._setStateRaw({ version: Math.max(state.version, version) });
+}
+
+/**
+ * Optimistic Questions this page removed again before their creation
+ * arrived. They must not reappear when it does, over HTTP or the stream;
+ * their tracked DELETE waits for that same creation, so the server
+ * converges to the removal too.
+ */
+function removedOptimisticQuestions(
+  deltas: readonly Delta[],
+  toVersion: number,
+): Set<string> {
+  const { canvasId, nodes } = useCanvasStore.getState();
+  const removed = new Set<string>();
+  for (const delta of deltas) {
+    if (delta.type !== 'INSERT_NODE' || delta.node.type !== 'question')
+      continue;
+    const creation = questionCreations.get(`${canvasId}\0${delta.node.id}`);
+    if (
+      creation &&
+      (creation.toVersion === undefined || toVersion <= creation.toVersion) &&
+      !nodes.some((node) => node.id === delta.node.id)
+    )
+      removed.add(delta.node.id);
+  }
+  return removed;
+}
+
+/**
+ * A lifecycle or title projection of an Agent Node carries its data effects
+ * only: they are replayed onto the live node, so local geometry and undo
+ * state are not replaced by the projection's copy.
+ */
+function projectionRowsOntoLive(
+  rows: readonly Delta[],
+  nodes: readonly Node[],
+): Delta[] {
+  const live = new Map(nodes.map((node) => [node.id, node]));
+  return rows.map((delta) => {
+    if (
+      delta.type !== 'REPLACE_NODE' ||
+      delta.prev.type !== 'question' ||
+      delta.next.type !== 'question'
+    )
+      return delta;
+    const node = live.get(delta.next.id);
+    if (node?.type !== 'question') return delta;
+    return {
+      ...delta,
+      prev: node,
+      next: {
+        ...node,
+        data: preserveAgentNodeOwnedData(
+          replayAgentNodeEditableData(
+            node.data,
+            delta.prev.data ?? {},
+            delta.next.data ?? {},
+          ),
+          delta.next.data ?? {},
+        ),
+      },
+    } as Delta;
+  });
+}
+
+/**
+ * Whether a row changes something an undo entry records. An Agent Node's
+ * lifecycle fields are the server's and are not; its editable data is.
+ */
+function changesEditableState(
+  prevNodes: readonly Node[],
+): (delta: Delta) => boolean {
+  const editable = (node: { data?: unknown }): unknown => ({
+    ...node,
+    data: projectAgentNodeEditableData(
+      (node.data ?? {}) as Record<string, unknown>,
+    ),
+  });
+  return (delta) => {
+    if (delta.type === 'INSERT_NODE' && delta.node.type === 'question') {
+      const live = prevNodes.find((node) => node.id === delta.node.id);
+      if (!live) return true;
+      return !deepEqual(
+        editable(stripTransientNodeFields(live)),
+        editable(stripTransientNodeFields(delta.node)),
+      );
+    }
+    if (delta.type !== 'REPLACE_NODE' || delta.next.type !== 'question')
+      return true;
+    return !deepEqual(editable(delta.prev), editable(delta.next));
+  };
+}
+
+/** Whether a row changed custom properties or their display order. */
+function changesProperties(
+  row: Extract<Delta, { type: 'REPLACE_NODE' }>,
+): boolean {
+  const before = (row.prev.data ?? {}) as Record<string, unknown>;
+  const after = (row.next.data ?? {}) as Record<string, unknown>;
+  return [...PROPERTY_CONTENT_KEYS].some(
+    (key) => !deepEqual(before[key], after[key]),
+  );
+}
+
+/**
+ * Move the content baselines an applied batch moved, to the revisions the
+ * server stored (`revisions`), never to a hash of the node in the batch.
+ *
+ * - A node the page holds nothing unsaved for shows the server's content
+ *   now: its baseline moves and nothing is left to retry.
+ * - A node with unsaved content keeps its baseline unless the batch changed
+ *   the body. Then the baseline moves to the batch's revision whether the
+ *   body was applied or kept back — kept back, the person's text is saved
+ *   over the writer's on its next save (local-first) instead of being
+ *   refused. What is recorded about the unsaved text (a failed save and its
+ *   Retry) stays. A node frozen by a conflict stays frozen; only the
+ *   revision **Keep mine** overwrites moves.
+ * - A content change that names no revision (an older server) is handled
+ *   like another page's save of the node: it is fetched.
+ */
+function settleContentBaselines(
+  incoming: readonly Delta[],
+  remote: PreparedRemote,
+  revisions: Readonly<Record<string, string>> | undefined,
+  unsavedBefore: ReadonlySet<string>,
+): void {
+  const state = useCanvasStore.getState();
+  const shown = new Map(state.nodes.map((node) => [node.id, node]));
+  const adopted: Node[] = [];
+  const withoutRevision: string[] = [];
+  const changes = contentChangesOf(
+    incoming,
+    revisions,
+    (id) => shown.get(id),
+    deepEqual,
+  );
+  for (const [id, bodyChanged] of changes) {
+    const serverNode = remote.serverNodes.get(id) as unknown as
+      | Node
+      | undefined;
+    if (!shown.has(id) || !serverNode) continue;
+    const rev = revisions?.[id];
+    if (unsavedBefore.has(id)) {
+      if (!bodyChanged) continue;
+      if (rev === undefined) withoutRevision.push(id);
+      else if (!nodeContentQueue.rebaseConflict(id, rev))
+        nodeContentQueue.setBaselines([serverNode], revisions);
+    } else if (rev !== undefined) adopted.push(serverNode);
+    else if (MD_BACKED_NODE_TYPES.has(serverNode.type ?? ''))
+      withoutRevision.push(id);
+  }
+  nodeContentQueue.setBaselines(adopted, revisions);
+  nodeContentQueue.clearUnsavedStatus(adopted.map((node) => node.id));
+  if (withoutRevision.length > 0)
+    void adoptRemoteNodeContent(state.canvasId, withoutRevision);
+}
+
+/** A measurement the server holds needs no second report from here. */
+function noteServerMeasurements(rows: readonly Delta[]): void {
+  for (const delta of rows) {
+    const reportedNode =
+      delta.type === 'REPLACE_NODE'
+        ? delta.next
+        : delta.type === 'INSERT_NODE'
+          ? delta.node
+          : undefined;
+    if (!reportedNode) continue;
+    const { hint } = readAutoHeightHint(reportedNode as unknown as Node);
+    if (hint && !hint.provisional)
+      reportedHeightKeys.set(reportedNode.id, hint.measuredFor);
+    // The server holds a box for this node now: this page's own report, or
+    // another page's.
+    if (readMeasuredSizeHint(reportedNode as unknown as Node))
+      reportedSizes.delete(reportedNode.id);
+  }
+}
+
+/**
+ * Nodes another writer deleted while they were being edited here, with the
+ * notice that says so. Such a node stays, with what was typed, until its
+ * editing ends; nothing is sent for it meanwhile.
+ */
+const deletedElsewhere = new Map<string, string>();
+
+function noticeNameOf(node: Node | undefined): string {
+  const label = (node?.data as { label?: unknown } | undefined)?.label;
+  return typeof label === 'string' && label.trim()
+    ? t('canvasSync.noteName', { name: label.trim() })
+    : t('canvasSync.untitledNote');
+}
+
+/** A deletion of `nodeId` was kept back because it is being edited here. */
+function holdDeletedNode(nodeId: string): void {
+  if (deletedElsewhere.has(nodeId)) return;
+  nodeContentQueue.setDeletedElsewhere(nodeId, true);
+  const node = useCanvasStore.getState().nodes.find((n) => n.id === nodeId);
+  deletedElsewhere.set(
+    nodeId,
+    toast(t('canvasSync.deletedWhileEditing', { name: noticeNameOf(node) }), {
+      tone: 'warning',
+      duration: 0,
+    }),
+  );
+}
+
+/** The node exists on the server again (the deletion was reverted). */
+function unholdDeletedNode(nodeId: string): void {
+  const toastId = deletedElsewhere.get(nodeId);
+  if (toastId === undefined) return;
+  deletedElsewhere.delete(nodeId);
+  dismissToast(toastId);
+  nodeContentQueue.setDeletedElsewhere(nodeId, false);
+}
+
+function forgetDeletedElsewhere(): void {
+  for (const toastId of deletedElsewhere.values()) dismissToast(toastId);
+  deletedElsewhere.clear();
+}
+
+/** Whether `nodeId` was deleted elsewhere and stays here while it is edited. */
+export function isDeletedElsewhere(nodeId: string): boolean {
+  return deletedElsewhere.has(nodeId);
+}
+
+/**
+ * Take away nodes whose deletion was kept back. Text of theirs the server
+ * never received is offered once, for copying; nothing is sent for them.
+ */
+function removeNodesDeletedElsewhere(nodeIds: readonly string[]): void {
+  const state = useCanvasStore.getState();
+  const gone = state.nodes.filter((node) => nodeIds.includes(node.id));
+  if (gone.length === 0) return;
+  const goneIds = new Set(gone.map((node) => node.id));
+  const notices = gone.map((node) => {
+    const content = (node.data as { content?: unknown } | undefined)?.content;
+    return {
+      name: noticeNameOf(node),
+      text:
+        nodeContentQueue.hasUnsaved(node.id) &&
+        typeof content === 'string' &&
+        content.trim()
+          ? content
+          : null,
+    };
+  });
+  const nodes = state.nodes.filter(
+    (node) => !goneIds.has(node.id) && !goneIds.has(node.parentId ?? ''),
+  );
+  state._setStateRaw({
+    nodes,
+    edges: state.edges.filter(
+      (edge) => !goneIds.has(edge.source) && !goneIds.has(edge.target),
+    ),
+  });
+  for (const node of state.nodes) {
+    if (nodes.includes(node)) continue;
+    nodeContentQueue.forgetNode(node.id);
+    preprocessQueue.forgetNode(node.id);
+    const toastId = deletedElsewhere.get(node.id);
+    if (toastId !== undefined) dismissToast(toastId);
+    deletedElsewhere.delete(node.id);
+  }
+  usePreviewWorkspaceStore
+    .getState()
+    .validate(new Set(nodes.map((node) => node.id)));
+  for (const { name, text } of notices) {
+    toast(t('canvasSync.deletedElsewhere', { name }), {
+      tone: 'warning',
+      duration: 0,
+      ...(text !== null
+        ? {
+            action: {
+              label: t('canvasSync.copyMyText'),
+              onClick: () => void copyToClipboard(text),
+            },
+          }
+        : {}),
+    });
+  }
+  // A reload that waited for this node's text has nothing to wait for.
+  resumeHeldReload();
+}
+
+// The editing of a node that was deleted elsewhere is over: it goes now.
+useCanvasPresenceStore.subscribe((state, previous) => {
+  if (
+    deletedElsewhere.size === 0 ||
+    state.localEditingNodeId === previous.localEditingNodeId
+  )
+    return;
+  // After the blur handlers of the control have committed its draft.
+  queueMicrotask(() => {
+    const { canvasId } = useCanvasStore.getState();
+    for (const nodeId of [...deletedElsewhere.keys()])
+      browserSync.localHoldsEnded(canvasId, nodeId, {
+        owns: (unit) => unit === EXISTENCE_UNIT,
+        held: heldLocally,
+      });
+  });
+});
+
 // ─── A reload that waits for what the user is doing ───────────────────────
 //
 // Every reload the sync layer asks for (a version gap, a snapshot that does
@@ -1944,7 +2296,8 @@ const RELOAD_HELD_POLL_MS = 1_000;
 
 /** What a reload of the open Space would destroy right now, if anything. */
 function reloadBlockedBy(): 'content' | 'editing' | 'gesture' | null {
-  if (nodeContentQueue.pendingNodeIds().length > 0) return 'content';
+  const { canvasId } = useCanvasStore.getState();
+  if (nodeContentQueue.unsavedNodeIds(canvasId).length > 0) return 'content';
   if (pageIsEditing()) return 'editing';
   if (pointerGestureActive()) return 'gesture';
   return null;
@@ -2343,6 +2696,7 @@ export function resetCanvasSyncForTests(): void {
   discardedReloadToAnnounce = null;
   syncGestureBaseline = null;
   gestureWithheldParents.clear();
+  forgetDeletedElsewhere();
   heightsAwaitingContent.clear();
   reportedHeightKeys.clear();
   sizesAwaitingContent.clear();
@@ -2629,8 +2983,7 @@ export function flushNodeContent(nodeId: string): Promise<void> {
   // only repeat it.
   const inFlight = nodeContentQueue.whenInFlightSaved(nodeId);
   if (inFlight.onlyInFlight) return inFlight.done;
-  if (!nodeContentQueue.pendingNodeIds().includes(nodeId))
-    return Promise.resolve();
+  if (!nodeContentQueue.hasUnsaved(nodeId)) return Promise.resolve();
   return nodeContentQueue
     .flushNow(canvasId, nodeId, { source: 'auto' })
     .catch(() => undefined);
@@ -3755,318 +4108,97 @@ const useCanvasStore = create<RFState>()(
       sync,
     ) => {
       const orderEvents = order?.events ?? [];
-      // Rows name only what changed; from here on each is about the whole
-      // node as this page holds it.
-      deltas = expandNodeRows(deltas, get().nodes);
-      // The save baseline of a node whose content this batch changed is the
-      // revision the server stored for it, never a hash of the node in the
-      // batch: that copy is not always what is stored. A content change
-      // that comes without one (an older server) is handled like another
-      // page's save of that node: see `refreshContentWithoutRevision`.
       const serverRevisions = sync?.nodeContentRevisions;
-      const withoutRevision = new Set<string>();
-      const refreshContentWithoutRevision = (): void => {
-        if (withoutRevision.size === 0) return;
-        const ids = [...withoutRevision];
-        withoutRevision.clear();
-        // The existing per-node path: a node that shows the server's
-        // content is fetched and takes the fetched revision; a node with
-        // unsaved content keeps its baseline, so its save is refused and
-        // settled by the identical-content rule or by the user; a frozen
-        // node is compared with what the server holds.
-        void adoptRemoteNodeContent(get().canvasId, ids);
-      };
-      const reconcileIncomingVersion = (): void => {
-        get()._setStateRaw({
-          version: Math.max(get().version, toVersion),
-        });
-      };
 
-      // A locally removed optimistic Question must not reappear when its
-      // delayed creation arrives over HTTP or SSE. Its tracked DELETE waits
-      // for that same creation, so the server converges to the removal too.
-      const removedQuestionIds = new Set(
-        deltas.flatMap((delta) => {
-          if (delta.type !== 'INSERT_NODE' || delta.node.type !== 'question')
-            return [];
-          const creation = questionCreations.get(
-            `${get().canvasId}\0${delta.node.id}`,
-          );
-          return creation &&
-            (creation.toVersion === undefined ||
-              toVersion <= creation.toVersion) &&
-            !get().nodes.some((node) => node.id === delta.node.id)
-            ? [delta.node.id]
-            : [];
-        }),
+      // 1. Rows name only what changed; from here on each is about the
+      //    whole node as this page holds it.
+      const removedQuestionIds = removedOptimisticQuestions(deltas, toVersion);
+      let rows = withoutNodes(
+        expandNodeRows(deltas, get().nodes),
+        removedQuestionIds,
       );
-      deltas = deltas.filter(
-        (delta) =>
-          !(
-            delta.type === 'INSERT_NODE' &&
-            removedQuestionIds.has(delta.node.id)
-          ) &&
-          !(
-            delta.type === 'INSERT_EDGE' &&
-            (removedQuestionIds.has(delta.edge.source) ||
-              removedQuestionIds.has(delta.edge.target))
-          ),
-      );
+      if (agentNodeProjection) rows = projectionRowsOntoLive(rows, get().nodes);
+      const incoming = rows;
 
-      // Never let an incoming agent write clobber a
-      // node the user is mid-editing. Skip REPLACE/DELETE deltas that
-      // target a node with un-persisted local content edits (INSERT is a
-      // fresh id, never a collision). Report the skipped ids so the UI
-      // can flag the conflict on the originating thread's change card.
-      const dirty = new Set(nodeContentQueue.pendingNodeIds());
-      const skippedNodeIds: string[] = [];
-      const skippedRemoteNodes: Node[] = [];
-      const advancedRemoteBaselines: Node[] = [];
-      const preservedPendingNodeIds = new Set<string>();
-      const localNodesById = new Map(
-        get().nodes.map((node) => [node.id, node]),
-      );
-      if (agentNodeProjection) {
-        deltas = deltas.map((delta) => {
-          if (
-            delta.type !== 'REPLACE_NODE' ||
-            delta.prev.type !== 'question' ||
-            delta.next.type !== 'question'
-          )
-            return delta;
-          const live = localNodesById.get(delta.next.id);
-          if (live?.type !== 'question') return delta;
-          // Lifecycle/title projections carry stale geometry in coarse deltas.
-          // Apply their data effects without replacing local resize/undo state.
-          return {
-            ...delta,
-            prev: live,
-            next: {
-              ...live,
-              data: preserveAgentNodeOwnedData(
-                replayAgentNodeEditableData(
-                  live.data,
-                  delta.prev.data ?? {},
-                  delta.next.data ?? {},
-                ),
-                delta.next.data ?? {},
-              ),
-            },
-          };
-        });
+      // 2. A conflict the update itself settles — it brings exactly the text
+      //    this page shows — is over before the holds are read.
+      for (const row of rows) {
+        if (row.type !== 'REPLACE_NODE') continue;
+        nodeContentQueue.settleConflictIfIdentical(
+          row.next as unknown as Node,
+          serverRevisions?.[row.next.id],
+        );
       }
-      // Apply the batch property by property: write only what it changed,
-      // and leave alone what this page changed and has not had confirmed.
-      // A gesture under the pointer holds what its ticks have changed so
-      // far, exactly as a queued batch would: the update must not move a
-      // node out from under the hand.
-      const incoming = deltas;
-      const gestureKeys = syncGestureBaseline
-        ? deriveHeldKeys(
-            syncView(syncGestureBaseline, get().edges),
-            syncView(get().nodes, get().edges),
-            isUnsentUnit,
-          )
-        : null;
-      const locallyHeld = (key: string): boolean =>
-        gestureKeys?.has(key) === true;
+      const unsavedBefore = new Set(
+        nodeContentQueue.unsavedNodeIds(get().canvasId),
+      );
+
+      // 3. Partition by holds: write only what the batch changed, and keep
+      //    back what this page changed and has not had confirmed — by an
+      //    unanswered batch, the gesture under the pointer, unsaved content,
+      //    or (a deletion) the node being edited.
+      const holds = localHolds();
+      const view = syncView(get().nodes, get().edges);
       const remote: PreparedRemote = browserSync.prepareRemote({
-        deltas,
-        localNodes: syncView(get().nodes, get().edges).nodes,
-        localEdges: syncView(get().nodes, get().edges).edges,
-        ...((gestureKeys?.size ?? 0) > 0 ? { alsoHeld: locallyHeld } : {}),
+        deltas: rows,
+        localNodes: view.nodes,
+        localEdges: view.edges,
+        alsoHeld: holds.held,
         ...(sync?.operationId ? { operationId: sync.operationId } : {}),
         ...(sync?.source ? { source: sync.source } : {}),
       });
-      deltas = remote.deltas;
-      // The gesture goes on under the parent this page shows; remember that
-      // its batch was made there.
-      for (const unit of remote.withheld) {
+      rows = remote.deltas;
+      const withheld = withheldByNode(remote.withheld);
+      for (const [nodeId, units] of withheld) {
+        // The gesture goes on under the parent this page shows; remember
+        // that its batch was made there.
         if (
-          unit.unit === PARENT_UNIT &&
-          gestureKeys?.has(nodeUnitKey(unit.nodeId, PARENT_UNIT))
+          units.has(PARENT_UNIT) &&
+          holds.gestureKeys?.has(nodeUnitKey(nodeId, PARENT_UNIT))
         )
-          gestureWithheldParents.add(unit.nodeId);
+          gestureWithheldParents.add(nodeId);
+        if (
+          units.has(EXISTENCE_UNIT) &&
+          heldLocally(nodeUnitKey(nodeId, EXISTENCE_UNIT))
+        )
+          holdDeletedNode(nodeId);
       }
-      // A person's edit is theirs to undo, not this page's.
-      const recordUndo = !remote.own && sync?.source !== 'ui';
-      const serverNodeOf = (node: { id: string }): Node =>
-        (remote.serverNodes.get(node.id) ?? node) as unknown as Node;
-      const safeDeltas =
-        dirty.size === 0
-          ? deltas
-          : deltas.flatMap((d): Delta[] => {
-              if (d.type === 'REPLACE_NODE' && dirty.has(d.next.id)) {
-                const prevData = (d.prev.data ?? {}) as Record<string, unknown>;
-                const nextData = (d.next.data ?? {}) as Record<string, unknown>;
-                const pendingFields = nodeContentQueue.pendingFields(d.next.id);
-                // JSON transport gives unchanged keywords/provenance separate
-                // object identities; compare their values, not references.
-                const changedContentFields = [...NODE_CONTENT_KEYS].filter(
-                  (key) => !deepEqual(prevData[key], nextData[key]),
-                );
-                // Only the body's fields can collide with unsaved content.
-                // Custom properties are per-key items without a revision:
-                // the keys this batch changed are shown beside the unsaved
-                // body, and a key this page has itself changed and not
-                // saved keeps its local value (its save follows and is the
-                // last writer).
-                const changesPendingContent = changedContentFields.some(
-                  (key) =>
-                    !PROPERTY_CONTENT_KEYS.has(key) && pendingFields.has(key),
-                );
-                const local = localNodesById.get(d.next.id);
-                const remoteProperties = remotePropertyChanges(
-                  prevData,
-                  nextData,
-                  (local?.data ?? {}) as Record<string, unknown>,
-                  pendingFields,
-                  nodeContentQueue.pendingPropertyKeys(d.next.id),
-                );
-                if (Object.keys(remoteProperties).length > 0)
-                  nodeContentQueue.remotePropertiesShown(d.next.id);
-                // A node frozen by a content conflict, and the update brings
-                // exactly the text this page shows: the conflict is over
-                // and nothing was skipped. The rest of the row applies with
-                // the local content fields kept, like a lifecycle update.
-                const settledIdentical =
-                  nodeContentQueue.settleConflictIfIdentical(
-                    serverNodeOf(d.next),
-                    serverRevisions?.[d.next.id],
-                  );
-                if (local?.type === 'question') {
-                  const localData = (local.data ?? {}) as Record<
-                    string,
-                    unknown
-                  >;
-                  const pendingData = { ...nextData };
-                  for (const key of pendingFields) {
-                    if (key in localData) pendingData[key] = localData[key];
-                    else delete pendingData[key];
-                  }
-                  const mergedData = withContentPatch(
-                    pendingData,
-                    remoteProperties,
-                  );
-                  preservedPendingNodeIds.add(d.next.id);
-                  if (changesPendingContent && !settledIdentical) {
-                    skippedNodeIds.push(d.next.id);
-                    skippedRemoteNodes.push(serverNodeOf(d.next));
-                  } else if (
-                    changedContentFields.some((key) =>
-                      (CONTENT_REVISION_KEYS as readonly string[]).includes(
-                        key,
-                      ),
-                    )
-                  ) {
-                    advancedRemoteBaselines.push(serverNodeOf(d.next));
-                  }
-                  return [
-                    {
-                      ...d,
-                      prev: local,
-                      next: { ...local, data: mergedData },
-                    },
-                  ];
-                }
-                if (!changesPendingContent || settledIdentical) {
-                  // Coarse REPLACE_NODE deltas carry the server's full node,
-                  // including stale content fields. A lifecycle-only update
-                  // (for example Question running/done/viewed) is safe to
-                  // apply while preserving every locally pending content
-                  // field; otherwise applying `next` would erase the edit.
-                  if (local) {
-                    const localData = (local.data ?? {}) as Record<
-                      string,
-                      unknown
-                    >;
-                    const localContent = { ...nextData };
-                    for (const key of NODE_CONTENT_KEYS) {
-                      if (key in localData) localContent[key] = localData[key];
-                      else delete localContent[key];
-                    }
-                    const mergedData = withContentPatch(
-                      localContent,
-                      remoteProperties,
-                    );
-                    preservedPendingNodeIds.add(d.next.id);
-                    return [
-                      {
-                        ...d,
-                        prev: local,
-                        next: { ...d.next, data: mergedData },
-                      },
-                    ];
-                  }
-                }
-                skippedNodeIds.push(d.next.id);
-                skippedRemoteNodes.push(serverNodeOf(d.next));
-                // The body of this row is withheld. The properties it
-                // changed are not part of that and are shown.
-                if (local && Object.keys(remoteProperties).length > 0)
-                  return [
-                    {
-                      ...d,
-                      prev: local,
-                      next: {
-                        ...local,
-                        data: withContentPatch(local.data, remoteProperties),
-                      },
-                    },
-                  ];
-                return [];
-              }
-              if (d.type === 'DELETE_NODE' && dirty.has(d.node.id)) {
-                skippedNodeIds.push(d.node.id);
-                return [];
-              }
-              return [d];
-            });
+      for (const nodeId of remote.insertedNodeIds) unholdDeletedNode(nodeId);
+      // The nodes of which a body, title or summary value — or the deletion
+      // — was kept back for this page's own text: what the person is told
+      // about, and what the conversation's change card marks. A custom
+      // property kept back is not among them: the later writer of a
+      // property wins without a notice, here as everywhere.
+      const skippedNodeIds = [...withheld]
+        .filter(
+          ([nodeId, units]) =>
+            deletedElsewhere.has(nodeId) ||
+            [...units].some(isVersionedContentUnit),
+        )
+        .map(([nodeId]) => nodeId);
+      const skipped = new Set([...skippedNodeIds, ...removedQuestionIds]);
 
-      // Local-first rebase for a node the user is mid-editing: we keep their
-      // in-memory version (skipped above) but adopt the agent's just-written
-      // revision as the save baseline. The user's next autosave then rebases
-      // on top (expectRev = agent's rev) and cleanly overwrites the agent's
-      // version, instead of tripping a false NODE_CONTENT_CONFLICT against a
-      // change the local-first policy already decided the user wins. The
-      // "your version was kept" notice tells the user what happened; the
-      // change-review card lets them inspect the agent's dropped edit.
-      //
-      // Not so for a node frozen by a content conflict: the user has not
-      // chosen between their text and the server's yet, and an update must
-      // not choose for them. It stays frozen; "Keep mine" will overwrite
-      // the revision this update brought.
-      const rebasedRemoteNodes: Node[] = [];
-      for (const remoteNode of [
-        ...skippedRemoteNodes,
-        ...advancedRemoteBaselines,
-      ]) {
-        const rev = serverRevisions?.[remoteNode.id];
-        if (rev === undefined) withoutRevision.add(remoteNode.id);
-        if (nodeContentQueue.rebaseConflict(remoteNode.id, rev)) continue;
-        if (rev !== undefined) rebasedRemoteNodes.push(remoteNode);
-      }
-      // The baseline only: what is recorded about the node's own unsaved
-      // text — a failed save and its Retry toast — stays, because the text
-      // is still here and still unsaved.
-      if (rebasedRemoteNodes.length > 0) {
-        nodeContentQueue.setBaselines(rebasedRemoteNodes, serverRevisions);
-      }
-
-      if (safeDeltas.length === 0 && orderEvents.length === 0) {
-        // Nothing to apply locally (empty batch, or every row protected).
-        // Still reconcile the version so the next local edit's autosave
-        // doesn't 409 against our stale view of server state.
-        reconcileIncomingVersion();
+      const finishWithoutRows = (): string[] => {
+        adoptVersion(toVersion);
+        settleContentBaselines(
+          incoming,
+          remote,
+          serverRevisions,
+          unsavedBefore,
+        );
         rebaseGestureBaseline(incoming);
         remote.finish();
-        refreshContentWithoutRevision();
         return skippedNodeIds;
-      }
+      };
+      // Nothing to apply locally (empty batch, or every row held). The
+      // version still moves, so the next update is contiguous.
+      if (rows.length === 0 && orderEvents.length === 0)
+        return finishWithoutRows();
 
+      // 4. Apply.
       const prevNodes = get().nodes;
       const prevEdges = get().edges;
-      const insertedSpaceTargets = safeDeltas.flatMap((delta) =>
+      const insertedSpaceTargets = rows.flatMap((delta) =>
         delta.type === 'INSERT_NODE' &&
         delta.node.type === 'spacePreview' &&
         typeof delta.node.data.targetCanvasId === 'string'
@@ -4077,40 +4209,12 @@ const useCanvasStore = create<RFState>()(
         void useWorkspaceStore
           .getState()
           .refreshSpaceTitles(insertedSpaceTargets);
+      // A person's edit is theirs to undo, not this page's.
+      const recordUndo = !remote.own && sync?.source !== 'ui';
       let undoSnapshotTaken = false;
       if (agentNodeProjection) {
-        canvasHistoryManager.rebaseAgentInitialContent(safeDeltas);
-      } else if (
-        recordUndo &&
-        safeDeltas.some((delta) => {
-          if (delta.type === 'INSERT_NODE' && delta.node.type === 'question') {
-            const live = prevNodes.find((node) => node.id === delta.node.id);
-            if (!live) return true;
-            return !deepEqual(
-              {
-                ...stripTransientNodeFields(live),
-                data: projectAgentNodeEditableData(live.data),
-              },
-              {
-                ...stripTransientNodeFields(delta.node),
-                data: projectAgentNodeEditableData(delta.node.data ?? {}),
-              },
-            );
-          }
-          if (delta.type !== 'REPLACE_NODE' || delta.next.type !== 'question')
-            return true;
-          return !deepEqual(
-            {
-              ...delta.prev,
-              data: projectAgentNodeEditableData(delta.prev.data ?? {}),
-            },
-            {
-              ...delta.next,
-              data: projectAgentNodeEditableData(delta.next.data ?? {}),
-            },
-          );
-        })
-      ) {
+        canvasHistoryManager.rebaseAgentInitialContent(rows);
+      } else if (recordUndo && rows.some(changesEditableState(prevNodes))) {
         canvasHistoryManager.takeSnapshot(prevNodes, prevEdges);
         canvasHistoryManager.noteChange(remote.covered);
         undoSnapshotTaken = true;
@@ -4120,33 +4224,23 @@ const useCanvasStore = create<RFState>()(
       if (!remote.own && sync?.source === 'ui')
         canvasHistoryManager.markRemoteChange();
 
-      // Replay the structural diff. The shared helper tolerates
-      // missing targets (REPLACE/DELETE against an already-absent
-      // node/edge) so out-of-order delivery in future broadcast
-      // scenarios fails open.
+      // The shared helper tolerates missing targets (REPLACE/DELETE against
+      // an already-absent node/edge). The server already ran the shared
+      // post-effects before computing the diff, so any reroute is in it.
       const applied = applyDeltas(
         { nodes: prevNodes as NestableNode[], edges: prevEdges },
-        safeDeltas,
+        rows,
       );
-
-      // No host-agnostic post-effects here — the server already ran
-      // `applySharedPostEffectsFromWriteResult` before computing the
-      // diff, so any reroute is folded into the delta payload.
-
-      // Re-establish the parent-before-child + frame-child zIndex invariant.
-      // `applyDeltas` replays coarse deltas through an insertion-ordered
-      // `Map`, so a reparent (REPLACE_NODE keeps the child's old slot) or a
-      // frame created in the same batch (INSERT_NODE appended last) can leave
-      // a child ahead of its parent — React Flow then throws "Parent node not
-      // found". This delta-replay path bypasses the server executor entirely,
-      // so we normalize here at the client state-producer boundary.
+      // `applyDeltas` replays through an insertion-ordered `Map`, so a
+      // reparent or a frame created in the same batch can leave a child
+      // ahead of its parent — React Flow then throws "Parent node not
+      // found". Re-establish parent-before-child here.
       const entityOrderedNodes = normalizeTreeOrder(
         applied.nodes as NestableNode[],
       );
 
-      // Entity deltas cannot express sibling paint order, so the server's
-      // order is installed over their result. A failed replay keeps that
-      // result unchanged.
+      // 5. Sibling paint order, which entity deltas cannot express. A
+      //    failed replay keeps the entity-only result.
       const orderReplay =
         orderEvents.length > 0
           ? replaySiblingOrder(
@@ -4174,65 +4268,19 @@ const useCanvasStore = create<RFState>()(
         nodes: orderedNodes as Node[],
         edges: applied.edges as Edge[],
       });
-      reconcileIncomingVersion();
+      adoptVersion(toVersion);
 
-      // Move the content-CAS baseline of the nodes whose saved content this
-      // batch changed (or created) to the revision the server stored for
-      // them. A node the batch left alone, or changed only in structure,
-      // keeps the baseline it has: what the page shows is not always what
-      // the server stores (a PDF's extracted body is not sent with a load,
-      // an Office body is normalized), so a revision computed from it would
-      // refuse the node's next property save as a conflict — after every
-      // structure edit, since the page's own edits come back through here.
-      // Skipped mid-edit nodes had their baseline adopted to the agent's rev
-      // above (local-first rebase), and a node with unsaved content is not
-      // the server's; both are left out.
-      {
-        const skippedSet = new Set(skippedNodeIds);
-        const present = new Set((applied.nodes as Node[]).map((n) => n.id));
-        const contentChanged = new Set<string>(
-          Object.keys(serverRevisions ?? {}),
-        );
-        for (const delta of incoming) {
-          if (delta.type === 'INSERT_NODE') contentChanged.add(delta.node.id);
-          else if (delta.type === 'REPLACE_NODE') {
-            const before = (delta.prev.data ?? {}) as Record<string, unknown>;
-            const after = (delta.next.data ?? {}) as Record<string, unknown>;
-            if (
-              [...NODE_CONTENT_KEYS].some(
-                (key) => !deepEqual(before[key], after[key]),
-              )
-            )
-              contentChanged.add(delta.next.id);
-          }
-        }
-        const adopted: Node[] = [];
-        for (const id of contentChanged) {
-          if (
-            !present.has(id) ||
-            !remote.serverNodes.has(id) ||
-            skippedSet.has(id) ||
-            preservedPendingNodeIds.has(id) ||
-            dirty.has(id)
-          )
-            continue;
-          const node = serverNodeOf({ id });
-          if (serverRevisions?.[id] !== undefined) adopted.push(node);
-          else if (MD_BACKED_NODE_TYPES.has(node.type ?? ''))
-            withoutRevision.add(id);
-        }
-        // These nodes show the server's content and the page holds nothing
-        // unsaved for them: the baseline moves, and nothing is left to
-        // retry.
-        nodeContentQueue.setBaselines(adopted, serverRevisions);
-        nodeContentQueue.clearUnsavedStatus(adopted.map((node) => node.id));
-        refreshContentWithoutRevision();
+      // 6. Baselines and revisions of the nodes whose content it changed.
+      settleContentBaselines(incoming, remote, serverRevisions, unsavedBefore);
+      for (const row of rows) {
+        if (row.type === 'REPLACE_NODE' && changesProperties(row))
+          nodeContentQueue.remotePropertiesShown(row.next.id);
       }
 
-      // Post-effects must not run for nodes whose delta we skipped — they
-      // were not actually mutated locally, so preprocessing / fit them is
-      // wrong.
-      const skipped = new Set([...skippedNodeIds, ...removedQuestionIds]);
+      // 7. Post-effects. They do not run for a node of which something was
+      //    kept back: it was not changed here as the batch says.
+      const without = <T extends string>(ids: readonly T[]): T[] =>
+        skipped.size === 0 ? [...ids] : ids.filter((id) => !skipped.has(id));
       runWebPostEffects({
         // This page already ran the effects of its own batch when it
         // executed it. Preprocessing of another person's edit is triggered
@@ -4252,22 +4300,12 @@ const useCanvasStore = create<RFState>()(
                   ? []
                   : nodesById(
                       get().nodes,
-                      pendingEffects.mutatedNodeIds.filter(
-                        (id) => !skipped.has(id),
-                      ),
+                      without(pendingEffects.mutatedNodeIds),
                     ),
-              deletedNodeIds:
-                skipped.size === 0
-                  ? pendingEffects.deletedNodeIds
-                  : pendingEffects.deletedNodeIds.filter(
-                      (id) => !skipped.has(id),
-                    ),
-              contentEditedNodeIds:
-                skipped.size === 0
-                  ? pendingEffects.contentEditedNodeIds
-                  : pendingEffects.contentEditedNodeIds.filter(
-                      (id) => !skipped.has(id),
-                    ),
+              deletedNodeIds: without(pendingEffects.deletedNodeIds),
+              contentEditedNodeIds: without(
+                pendingEffects.contentEditedNodeIds,
+              ),
               deferredFitFrameIds: pendingEffects.deferredFitFrameIds,
             },
         getNodes: () => get().nodes,
@@ -4284,33 +4322,16 @@ const useCanvasStore = create<RFState>()(
       // only what the gesture itself changed, and a cancelled gesture goes
       // back to the server's values.
       rebaseGestureBaseline(incoming);
+      noteServerMeasurements(rows);
 
-      // A measurement the server holds needs no second report from here.
-      for (const delta of safeDeltas) {
-        const reportedNode =
-          delta.type === 'REPLACE_NODE'
-            ? delta.next
-            : delta.type === 'INSERT_NODE'
-              ? delta.node
-              : undefined;
-        if (!reportedNode) continue;
-        const { hint } = readAutoHeightHint(reportedNode as unknown as Node);
-        if (hint && !hint.provisional)
-          reportedHeightKeys.set(reportedNode.id, hint.measuredFor);
-        // The server holds a box for this node now: this page's own report,
-        // or another page's.
-        if (readMeasuredSizeHint(reportedNode as unknown as Node))
-          reportedSizes.delete(reportedNode.id);
-      }
-
-      // Release what this batch confirmed and install what it left to the
-      // server's earlier value.
+      // Buffer what was kept back, release what this batch confirmed and
+      // install what it left to the server's earlier value.
       remote.finish();
 
-      // Rows withheld for local-first reasons and unsaved edits make the
-      // local order differ on purpose; the next save settles it. So does an
-      // unconfirmed local change to the same parent's children: the update
-      // for that change carries the order the server ended with.
+      // Values kept back and unsaved edits make the local order differ on
+      // purpose; the next save settles it. So does an unconfirmed local
+      // change to the same parent's children: the update for that change
+      // carries the order the server ended with.
       if (
         orderReplay.diverged &&
         skipped.size === 0 &&
@@ -4326,7 +4347,8 @@ const useCanvasStore = create<RFState>()(
       return skippedNodeIds;
     },
 
-    pendingContentNodeIds: () => nodeContentQueue.pendingNodeIds(),
+    pendingContentNodeIds: () =>
+      nodeContentQueue.unsavedNodeIds(get().canvasId),
 
     /** Resolve a web-only UiIntent and execute the resulting commands. */
     dispatchUiIntent: (intent) => {
@@ -4721,6 +4743,7 @@ const useCanvasStore = create<RFState>()(
           ? { canvasId: targetId, lineage: loadedBasis.lineage }
           : null;
         browserSync.adoptedServerState(targetId);
+        forgetDeletedElsewhere();
         if (spaceAwaitingFirstLoad === targetId) spaceAwaitingFirstLoad = null;
         heightsAwaitingContent.clear();
         reportedHeightKeys.clear();

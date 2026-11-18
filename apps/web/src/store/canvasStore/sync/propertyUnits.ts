@@ -17,6 +17,7 @@
  * | `size`               | `width`, `height`, top-level `style`          |
  * | `parent`             | `parentId`, `extent`, `expandParent`          |
  * | `data.style.<leaf>`  | one key of `data.style`                       |
+ * | `data.properties.<k>`| one custom property of `data.properties`      |
  * | `data.<key>`         | any other `data` key (`label`, `content`, …)  |
  * | `node.<key>`         | any other top-level key (`type`, `zIndex`, …) |
  *
@@ -47,6 +48,8 @@ export const PARENT_UNIT = 'parent';
  */
 export const PLACEMENT_UNITS: readonly string[] = [POSITION_UNIT, PARENT_UNIT];
 const DATA_STYLE_PREFIX = 'data.style.';
+/** One custom property: two writers of different keys never meet. */
+export const DATA_PROPERTIES_PREFIX = 'data.properties.';
 const DATA_PREFIX = 'data.';
 const NODE_PREFIX = 'node.';
 
@@ -94,14 +97,31 @@ function styleOf(node: UnitNode): Record<string, unknown> | undefined {
   return isRecord(style) ? style : undefined;
 }
 
+function propertiesOf(node: UnitNode): Record<string, unknown> | undefined {
+  const properties = dataOf(node).properties;
+  return isRecord(properties) ? properties : undefined;
+}
+
+/** `data` keys whose value is a bag of independent leaves, with their prefix. */
+const LEAF_BAGS: readonly {
+  key: string;
+  prefix: string;
+  of: (node: UnitNode) => Record<string, unknown> | undefined;
+}[] = [
+  { key: 'style', prefix: DATA_STYLE_PREFIX, of: styleOf },
+  { key: 'properties', prefix: DATA_PROPERTIES_PREFIX, of: propertiesOf },
+];
+
 /** Every unit name `node` has a value for. */
 function unitsOf(node: UnitNode): string[] {
   const units: string[] = [POSITION_UNIT, SIZE_UNIT, PARENT_UNIT];
   const data = dataOf(node);
   for (const key of Object.keys(data)) {
-    if (key === 'style' && isRecord(data.style)) {
-      for (const leaf of Object.keys(data.style))
-        units.push(`${DATA_STYLE_PREFIX}${leaf}`);
+    const bag = LEAF_BAGS.find((entry) => entry.key === key);
+    const leaves = bag?.of(node);
+    if (bag && leaves) {
+      for (const leaf of Object.keys(leaves))
+        units.push(`${bag.prefix}${leaf}`);
     } else {
       units.push(`${DATA_PREFIX}${key}`);
     }
@@ -121,11 +141,12 @@ export function readUnit(node: UnitNode, unit: string): UnitValue {
   }
   if (unit === SIZE_UNIT) return pick(node, SIZE_FIELDS);
   if (unit === PARENT_UNIT) return pick(node, PARENT_FIELDS);
-  if (unit.startsWith(DATA_STYLE_PREFIX)) {
-    const leaf = unit.slice(DATA_STYLE_PREFIX.length);
-    const style = styleOf(node);
-    return style && leaf in style && style[leaf] !== undefined
-      ? { present: true, value: style[leaf] }
+  const bag = LEAF_BAGS.find((entry) => unit.startsWith(entry.prefix));
+  if (bag) {
+    const leaf = unit.slice(bag.prefix.length);
+    const leaves = bag.of(node);
+    return leaves && Object.hasOwn(leaves, leaf) && leaves[leaf] !== undefined
+      ? { present: true, value: leaves[leaf] }
       : { present: false };
   }
   if (unit.startsWith(DATA_PREFIX)) {
@@ -186,16 +207,24 @@ export function writeUnit<T extends UnitNode>(
   }
   if (unit === SIZE_UNIT) return writeFields(node, SIZE_FIELDS, value);
   if (unit === PARENT_UNIT) return writeFields(node, PARENT_FIELDS, value);
-  if (unit.startsWith(DATA_STYLE_PREFIX)) {
-    const leaf = unit.slice(DATA_STYLE_PREFIX.length);
-    const style = { ...(styleOf(node) ?? {}) };
-    if (value.present) style[leaf] = value.value;
-    else delete style[leaf];
+  const bag = LEAF_BAGS.find((entry) => unit.startsWith(entry.prefix));
+  if (bag) {
+    const leaf = unit.slice(bag.prefix.length);
+    const leaves = { ...(bag.of(node) ?? {}) };
+    // A leaf may be named like a prototype member (`__proto__`).
+    if (value.present)
+      Object.defineProperty(leaves, leaf, {
+        value: value.value,
+        enumerable: true,
+        configurable: true,
+        writable: true,
+      });
+    else delete leaves[leaf];
     const data = { ...dataOf(node) };
-    // An emptied style object is dropped so removing the last leaf matches a
-    // node that never had one.
-    if (Object.keys(style).length > 0) data.style = style;
-    else delete data.style;
+    // An emptied bag is dropped so removing the last leaf matches a node
+    // that never had one.
+    if (Object.keys(leaves).length > 0) data[bag.key] = leaves;
+    else delete data[bag.key];
     return { ...node, data };
   }
   if (unit.startsWith(DATA_PREFIX)) {

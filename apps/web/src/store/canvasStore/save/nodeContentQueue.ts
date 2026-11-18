@@ -58,14 +58,27 @@ import {
 } from '@/utils/saveErrorFeedback';
 
 import {
+  BODY_CONTENT_KEYS,
+  contentFieldOfUnit,
   MD_BACKED_NODE_TYPES,
   NODE_CONTENT_KEYS,
+  PROPERTY_CONTENT_KEYS,
   SERVER_DERIVED_SIDECAR_NODE_TYPES,
   TEXT_BEARING_NODE_TYPES,
-  withContentPatch,
 } from './nodeContentFields';
 import { createPerKeyDebouncer } from './perKeyDebouncer';
+import { toFieldLevelDeltas } from '../sync/fieldLevelDeltas';
+import {
+  heldByNodeUnit,
+  namesBody,
+  NO_REMOTE_CONTENT,
+  remoteContentOutcome,
+  remoteContentRow,
+  type RemoteContentApplied as AppliedRemoteContent,
+} from '../sync/remoteContent';
 
+
+import type { UnitNode } from '../sync/propertyUnits';
 import type {
   GetNodeContentResponse,
   PutNodeContentRequest,
@@ -87,16 +100,6 @@ type PropertyEdit = Pick<
   PutNodeContentRequest,
   'properties' | 'propertyDisplayKeys'
 >;
-
-/**
- * The sidecar fields that hold a node's custom properties. No revision
- * covers them and they are saved per key; every other content field belongs
- * to the body's save.
- */
-const PROPERTY_FIELDS: ReadonlySet<string> = new Set([
-  'properties',
-  'propertyDisplayKeys',
-]);
 
 /** The keys of a property bag whose value differs between `before` and `after`. */
 function changedPropertyKeys(before: unknown, after: unknown): string[] {
@@ -234,9 +237,10 @@ export type RemoteContentOutcome =
   /** The node already showed it; only the baseline revision moved. */
   | 'unchanged'
   /**
-   * This page has its own unsaved body for the node: the text, title and
-   * baseline were not touched. Custom properties the page has not changed
-   * itself were taken from the server.
+   * This page holds something unsaved for the node. The fields it has not
+   * changed itself were taken from the server; the ones it has keep their
+   * value here, and the baseline stays unless the server's body is now the
+   * one shown.
    */
   | 'kept-local'
   /** The node, its sidecar or the Space is not there (any more). */
@@ -376,23 +380,35 @@ export type NodeContentQueue = {
   forgetNode(nodeId: string): void;
 
   /**
-   * Node ids with un-persisted content edits — pending debounced saves
-   * plus in-flight PUTs. Used by the sync applier to protect a node the
-   * user is mid-editing from an incoming agent write.
+   * **The** predicate for "this page holds content of `nodeId` the server
+   * has not acknowledged": a save that is debounced, on the wire, failed or
+   * refused (a conflict the user has not answered), or a body held for a
+   * restore. Everything that asks whether a node has something unsaved asks
+   * this; the members below are this predicate over a Space
+   * ({@link unsavedNodeIds}), widened by requests that are not content of a
+   * node ({@link hasUnsavedContent}), or narrowed to one moment of a save
+   * ({@link whenInFlightSaved}).
    */
-  pendingNodeIds(): string[];
-  /**
-   * Nodes of `canvasId` whose content exists only on this page: everything
-   * {@link pendingNodeIds} names, and the nodes whose last save failed.
-   */
+  hasUnsaved(nodeId: string): boolean;
+  /** The nodes of `canvasId` {@link hasUnsaved} holds for. */
   unsavedNodeIds(canvasId: string): string[];
-  pendingFields(nodeId: string): ReadonlySet<string>;
   /**
-   * The custom-property keys of `nodeId` this page changed and has not
-   * saved. An update keeps those as they are here and shows every other
-   * property it changed.
+   * Whether this page holds property unit `unit` of `nodeId` (see
+   * `sync/propertyUnits.ts`) against incoming changes: the content field it
+   * belongs to was changed here and is not saved. A remote value for a held
+   * unit is kept back; every other field of the same change is shown. A
+   * title and its source are held together, the body's fields are held
+   * while a conflict over them is unanswered, and a custom property is held
+   * per key.
    */
-  pendingPropertyKeys(nodeId: string): ReadonlySet<string>;
+  holdsUnit(nodeId: string, unit: string): boolean;
+  /**
+   * The node was deleted elsewhere while it is being edited here. It stays
+   * on this page until the editing ends, and nothing more is sent for it:
+   * the server has no node to write to. Undone by `false` (the node came
+   * back) and by {@link forgetNode}.
+   */
+  setDeletedElsewhere(nodeId: string, deleted: boolean): void;
   /**
    * Properties an update brought for `nodeId` were put into the store by
    * the caller. A property edit of the node that is on the wire is followed
@@ -401,16 +417,23 @@ export type NodeContentQueue = {
   remotePropertiesShown(nodeId: string): void;
   /**
    * Settles when the save of `nodeId` now on the wire (and those chained
-   * behind it) has been answered. `true` when nothing else is waiting for
-   * the node — no queued field, no debounce, no held restore — so a caller
-   * that only wants "the Server has what this page shows" need not send
-   * another save.
+   * behind it) has been answered. `onlyInFlight` is the narrow case of
+   * {@link hasUnsaved} in which a request is on the wire and nothing waits
+   * behind it — no queued field, no debounce, no held restore, no conflict
+   * — so a caller that only wants "the Server has what this page shows"
+   * need not send another save. (A property edit on the wire counts as such
+   * a request although it is not unsaved content of the node.)
    */
   whenInFlightSaved(nodeId: string): {
     onlyInFlight: boolean;
     done: Promise<void>;
   };
-  /** Whether a content edit has not reached the Server: queued, in flight or failed. */
+  /**
+   * Whether any request of `canvasId`'s content has not been answered:
+   * {@link hasUnsaved} for one of its nodes, or a property edit on the wire.
+   * The latter is not unsaved content of a node — the store does not hold
+   * the edit until it is answered — but the page must not leave before it.
+   */
   hasUnsavedContent(canvasId: string): boolean;
 
   /**
@@ -512,6 +535,29 @@ export function createNodeContentQueue(opts: {
   onContentPersisted?: (canvasId: string, nodeId: string) => void;
   /** Sent with every save so this page can recognise its own `invalidate`. */
   pageId?: string;
+  /**
+   * Show fetched content of `nodeId`: `patch` is what differs from the
+   * node's data (`undefined` removes a key). The page's one rule for what a
+   * remote change may touch decides which fields are written and which are
+   * kept back. Without it the queue applies the same rule with its own
+   * holds only (no send queue, no gesture).
+   */
+  applyRemoteContent?: (
+    canvasId: string,
+    nodeId: string,
+    patch: Readonly<Record<string, unknown>>,
+  ) => AppliedRemoteContent;
+  /**
+   * Fields of `nodeId` this page was holding are held no longer. `saved`
+   * says which content fields the server now has from this page (or this
+   * page took from the server): a remote value kept back for one of those
+   * is superseded; one kept back for any other field is shown.
+   */
+  onHoldsEnded?: (
+    canvasId: string,
+    nodeId: string,
+    saved: (field: string) => boolean,
+  ) => void;
   /** Another page's content was put into the store for `nodeId`. */
   onRemoteContentAdopted?: (
     canvasId: string,
@@ -548,6 +594,8 @@ export function createNodeContentQueue(opts: {
     if (cancel) pendingFailureRecovery.set(nodeId, cancel);
   }
   const pendingFields = new Map<string, Map<string, { removed?: boolean }>>();
+  /** Nodes deleted elsewhere that stay here until their editing ends. */
+  const deletedElsewhere = new Set<string>();
   /**
    * The custom-property keys of each node that a store change set, changed
    * or removed and that have not been saved, each with the token of its
@@ -616,7 +664,7 @@ export function createNodeContentQueue(opts: {
    * identical-content rule, and when the page's copy is replaced by the
    * server's ({@link NodeContentQueue.clearUnsavedStatus}, a load). An
    * update that arrives meanwhile never clears it: a frozen node counts as
-   * having unsaved content ({@link NodeContentQueue.pendingNodeIds}), an
+   * having unsaved content ({@link NodeContentQueue.hasUnsaved}), an
    * update that carries new server content for it only moves the stored rev
    * ({@link NodeContentQueue.rebaseConflict}), and moving a baseline
    * ({@link NodeContentQueue.setBaselines}) does not touch it.
@@ -711,6 +759,8 @@ export function createNodeContentQueue(opts: {
 
     // Held until the batch that brings the node back is acknowledged.
     if (restores.has(nodeId)) return null;
+    // The server no longer has the node; nothing is written for it.
+    if (deletedElsewhere.has(nodeId)) return null;
 
     const data = (node.data ?? {}) as Record<string, unknown>;
     if (data['contentMissing'] === true) return null;
@@ -728,7 +778,7 @@ export function createNodeContentQueue(opts: {
     if (frozenBody && !hasPropertyPatch) return null;
     const onlyPropertiesRequested =
       (requestFields?.size ?? 0) > 0 &&
-      [...(requestFields ?? [])].every((key) => PROPERTY_FIELDS.has(key));
+      [...(requestFields ?? [])].every((key) => PROPERTY_CONTENT_KEYS.has(key));
     // A node this page has not saved yet (no baseline) is sent whole.
     const propertyOnly =
       !restored &&
@@ -837,7 +887,7 @@ export function createNodeContentQueue(opts: {
       // A request of properties alone settles those fields and no others.
       if (propertyOnly) {
         for (const key of [...requested.keys()])
-          if (!PROPERTY_FIELDS.has(key)) requested.delete(key);
+          if (!PROPERTY_CONTENT_KEYS.has(key)) requested.delete(key);
       }
       const sentPropertyKeys = new Map(
         body.properties ? pendingPropertyKeys.get(nodeId) : undefined,
@@ -850,7 +900,7 @@ export function createNodeContentQueue(opts: {
         }
         if (pendingKeys?.size === 0) pendingPropertyKeys.delete(nodeId);
         const livePending = pendingFields.get(nodeId);
-        for (const key of PROPERTY_FIELDS) {
+        for (const key of PROPERTY_CONTENT_KEYS) {
           const token = requested.get(key);
           if (!token || livePending?.get(key) !== token) continue;
           // A key changed again while the request was on the wire.
@@ -908,6 +958,9 @@ export function createNodeContentQueue(opts: {
         // the revision of the body the server holds, which is not
         // necessarily the body this page shows.
         settleProperties();
+        opts.onHoldsEnded?.(canvasId, nodeId, (field) =>
+          PROPERTY_CONTENT_KEYS.has(field),
+        );
         if (!frozen.has(nodeId)) {
           failures.delete(nodeId);
           dismissFailureToast(nodeId);
@@ -929,11 +982,17 @@ export function createNodeContentQueue(opts: {
       baselineGeneration.set(nodeId, {});
       const livePending = pendingFields.get(nodeId);
       for (const [key, token] of requested) {
-        if (PROPERTY_FIELDS.has(key)) continue;
+        if (PROPERTY_CONTENT_KEYS.has(key)) continue;
         if (livePending?.get(key) === token) livePending.delete(key);
       }
       if (livePending?.size === 0) pendingFields.delete(nodeId);
       const completedRestore = restoredContent.delete(nodeId);
+      // What this request carried is the server's value now.
+      opts.onHoldsEnded?.(
+        canvasId,
+        nodeId,
+        (field) => completedRestore || requested.has(field),
+      );
       failures.delete(nodeId);
       dismissFailureToast(nodeId);
       contentConflictToasted.delete(nodeId);
@@ -1141,6 +1200,8 @@ export function createNodeContentQueue(opts: {
     toast(i18n.t('node.contentConflictLoaded'), { tone: 'success' });
     restoredContent.delete(nodeId);
     failures.delete(nodeId);
+    // The page shows what the server holds now.
+    opts.onHoldsEnded?.(canvasId, nodeId, () => true);
   }
 
   /**
@@ -1391,8 +1452,8 @@ export function createNodeContentQueue(opts: {
     { again: boolean; done: Promise<RemoteContentOutcome> }
   >();
 
-  /** Content of `nodeId` the server has not acknowledged from this page. */
-  function hasUnsavedLocalContent(nodeId: string): boolean {
+  /** See {@link NodeContentQueue.hasUnsaved}: the one definition. */
+  function hasUnsaved(nodeId: string): boolean {
     return (
       inflight.has(nodeId) ||
       pendingFields.has(nodeId) ||
@@ -1404,91 +1465,80 @@ export function createNodeContentQueue(opts: {
     );
   }
 
-  /**
-   * Show the server's content of `nodeId` and take its revision as the
-   * baseline, in one step. `patch` is what differs from the node's data.
-   * Returns whether the node changed.
-   */
-  function installRemoteContent(
+  /** See {@link NodeContentQueue.holdsUnit}. */
+  function holdsUnit(nodeId: string, unit: string): boolean {
+    const named = contentFieldOfUnit(unit);
+    if (!named) return false;
+    // A returning node's sidecar starts absent: all of it is this page's.
+    if (restoredContent.has(nodeId)) return true;
+    const pending = pendingFields.get(nodeId);
+    if (named.field === 'properties')
+      return named.propertyKey === undefined
+        ? pending?.has('properties') === true
+        : pendingPropertyKeys.get(nodeId)?.has(named.propertyKey) === true;
+    // A conflict over the body is the user's to answer.
+    if (frozen.has(nodeId) && BODY_CONTENT_KEYS.has(named.field)) return true;
+    // A title without its source (or the reverse) is not a title.
+    if (named.field === 'label' || named.field === 'labelSource')
+      return (
+        pending?.has('label') === true || pending?.has('labelSource') === true
+      );
+    return pending?.has(named.field) === true;
+  }
+
+  /** {@link opts.applyRemoteContent}, or the same rule with this queue's holds. */
+  function applyRemote(
     canvasId: string,
     nodeId: string,
-    res: GetNodeContentResponse,
-    patch: Record<string, unknown>,
-  ): boolean {
+    patch: Readonly<Record<string, unknown>>,
+  ): AppliedRemoteContent {
+    if (opts.applyRemoteContent)
+      return opts.applyRemoteContent(canvasId, nodeId, patch);
     const state = opts.getState();
-    const changed = Object.keys(patch).length > 0;
-    if (changed) {
+    const local = state.nodes.find((n) => n.id === nodeId);
+    if (!local) return NO_REMOTE_CONTENT;
+    const result = toFieldLevelDeltas({
+      deltas: [remoteContentRow(local, patch)],
+      localNodes: [local as unknown as UnitNode],
+      localEdges: [],
+      isHeld: heldByNodeUnit(holdsUnit),
+    });
+    const row = result.deltas[0];
+    const next =
+      row?.type === 'REPLACE_NODE' ? (row.next as unknown as Node) : local;
+    if (next !== local)
       state._setStateRaw({
-        nodes: state.nodes.map((n) =>
-          n.id === nodeId ? { ...n, data: withContentPatch(n.data, patch) } : n,
-        ),
+        nodes: state.nodes.map((n) => (n.id === nodeId ? next : n)),
       });
-    }
-    // Content and its baseline move together, as on every other path.
-    baselineRev.set(nodeId, res.rev);
-    baselineGeneration.set(nodeId, {});
-    lastSuccessful.set(nodeId, {
-      label: res.label,
-      labelSource: res.labelSource,
-    });
-    if (propertySaves.has(nodeId)) remoteDuringPropertySave.add(nodeId);
-    if (changed) opts.onRemoteContentAdopted?.(canvasId, nodeId, patch);
-    return changed;
+    return remoteContentOutcome(local, next, patch, result.withheld);
   }
 
   /**
-   * Show the server's custom properties of a node whose body this page
-   * keeps: its text, title and baseline are not touched. A property key this
-   * page changed and has not saved keeps the value it has here, and so does
-   * the display order when this page changed that. Returns whether the node
-   * changed.
+   * Show what the server holds for `node`, as far as this page does not
+   * hold the field itself, and say what became of it. Moves no baseline.
    */
-  function installRemoteProperties(
+  function showRemoteContent(
     canvasId: string,
-    nodeId: string,
+    node: Node,
     res: GetNodeContentResponse,
-  ): boolean {
-    if (res.contentMissing) return false;
-    const state = opts.getState();
-    const node = state.nodes.find((n) => n.id === nodeId);
-    if (!node) return false;
-    const data = (node.data ?? {}) as Record<string, unknown>;
-    const local = data['properties'] as NodeProperties | undefined;
-    const patch: Record<string, unknown> = {};
-
-    let properties = res.properties;
-    const unsavedKeys = pendingPropertyKeys.get(nodeId);
-    if (unsavedKeys?.size) {
-      const merged: NodeProperties = { ...res.properties };
-      for (const key of unsavedKeys.keys()) {
-        if (local && Object.hasOwn(local, key)) setOwn(merged, key, local[key]);
-        else delete merged[key];
-      }
-      properties =
-        Object.keys(merged).length > 0 || local !== undefined
-          ? merged
-          : undefined;
-    }
-    if (!sameValue(local, properties)) patch['properties'] = properties;
-    if (
-      !pendingFields.get(nodeId)?.has('propertyDisplayKeys') &&
-      !sameValue(data['propertyDisplayKeys'], res.propertyDisplayKeys)
-    )
-      patch['propertyDisplayKeys'] = res.propertyDisplayKeys;
-
-    if (propertySaves.has(nodeId)) remoteDuringPropertySave.add(nodeId);
-    if (Object.keys(patch).length === 0) return false;
-    state._setStateRaw({
-      nodes: state.nodes.map((n) =>
-        n.id === nodeId ? { ...n, data: withContentPatch(n.data, patch) } : n,
-      ),
-    });
-    opts.onRemoteContentAdopted?.(canvasId, nodeId, patch);
-    return true;
+  ): AppliedRemoteContent {
+    const patch = remoteContentPatch(
+      node.type ?? '',
+      (node.data ?? {}) as Record<string, unknown>,
+      res,
+    );
+    const outcome =
+      Object.keys(patch).length > 0
+        ? applyRemote(canvasId, node.id, patch)
+        : NO_REMOTE_CONTENT;
+    if (propertySaves.has(node.id)) remoteDuringPropertySave.add(node.id);
+    if (Object.keys(outcome.applied).length > 0)
+      opts.onRemoteContentAdopted?.(canvasId, node.id, outcome.applied);
+    return outcome;
   }
 
-  /** Take `rev` as the baseline of a node whose content equals the server's. */
-  function adoptIdenticalBaseline(nodeId: string, rev: string): void {
+  /** Take `rev`, the server's revision of what the node shows, as its baseline. */
+  function moveBaseline(nodeId: string, rev: string): void {
     baselineRev.set(nodeId, rev);
     baselineGeneration.set(nodeId, {});
   }
@@ -1508,7 +1558,7 @@ export function createNodeContentQueue(opts: {
     currentRev: string | undefined,
   ): Promise<boolean> {
     if (currentRev !== undefined && currentRev === revOfNode(sent)) {
-      adoptIdenticalBaseline(nodeId, currentRev);
+      moveBaseline(nodeId, currentRev);
       return true;
     }
     let res: GetNodeContentResponse | null;
@@ -1528,7 +1578,7 @@ export function createNodeContentQueue(opts: {
       !showsServerContent(live, res)
     )
       return false;
-    adoptIdenticalBaseline(nodeId, res.rev);
+    moveBaseline(nodeId, res.rev);
     return true;
   }
 
@@ -1548,10 +1598,13 @@ export function createNodeContentQueue(opts: {
     contentConflictToasted.delete(nodeId);
     dismissFailureToast(nodeId);
     failures.delete(nodeId);
-    adoptIdenticalBaseline(nodeId, rev);
+    moveBaseline(nodeId, rev);
     // What the revision covers is on the server as this page shows it.
     const pending = pendingFields.get(nodeId);
     for (const key of CONTENT_REVISION_KEYS) pending?.delete(key);
+    opts.onHoldsEnded?.(canvasId, nodeId, (field) =>
+      BODY_CONTENT_KEYS.has(field),
+    );
     if (pending?.size) {
       schedule(canvasId, nodeId);
     } else {
@@ -1589,9 +1642,9 @@ export function createNodeContentQueue(opts: {
         return 'absent';
       if (!frozen.has(nodeId) || !res || res.contentMissing)
         return 'kept-local';
-      // The conflict is about the body. The other save's properties are
-      // shown whichever way it ends.
-      installRemoteProperties(canvasId, nodeId, res);
+      // The conflict is about the body. What else the other save changed
+      // is shown whichever way it ends.
+      showRemoteContent(canvasId, node, res);
       if (inflight.has(nodeId) || !showsServerContent(node, res)) {
         frozen.set(nodeId, res.rev);
         return 'kept-local';
@@ -1624,31 +1677,36 @@ export function createNodeContentQueue(opts: {
         return 'absent';
       const node = state.nodes.find((n) => n.id === nodeId);
       if (!node || generations.get(nodeId) !== generation) return 'absent';
-      if (hasUnsavedLocalContent(nodeId)) {
-        // This page has a body of its own for the node (also when the
-        // person started typing while the fetch was under way): the text
-        // stays, and the whole node is fetched after its save. The other
-        // save's properties do not overlap it and are shown now.
-        remoteWhileUnsaved.add(nodeId);
-        if (res) installRemoteProperties(canvasId, nodeId, res);
-        if (entry.again) continue;
-        return 'kept-local';
-      }
+      // Content of its own for the node (also when the person started
+      // typing while the fetch was under way): the whole node is fetched
+      // once more after its save.
+      const unsaved = hasUnsaved(nodeId);
+      if (unsaved) remoteWhileUnsaved.add(nodeId);
       if (!res) {
         if (entry.again) continue;
-        return 'failed';
+        return unsaved ? 'kept-local' : 'failed';
       }
       // A sidecar that is gone belongs to a deletion; the structure update
       // removes the node, and an absent body is never adopted as an empty one.
       if (res.contentMissing) {
         if (entry.again) continue;
-        return 'absent';
+        return unsaved ? 'kept-local' : 'absent';
       }
-      const data = (node.data ?? {}) as Record<string, unknown>;
-      const patch = remoteContentPatch(node.type ?? '', data, res);
-      const changed = installRemoteContent(canvasId, nodeId, res, patch);
+      const { applied, withheld } = showRemoteContent(canvasId, node, res);
+      // Content and its baseline move together. A body this page holds back
+      // keeps the baseline it was typed on, so its save is refused and the
+      // person chooses; a node that shows the server's body takes its
+      // revision, whatever else of it is still unsaved here.
+      if (!unsaved || (namesBody(Object.keys(applied)) && !namesBody(withheld)))
+        moveBaseline(nodeId, res.rev);
+      if (!withheld.has('label'))
+        lastSuccessful.set(nodeId, {
+          label: res.label,
+          labelSource: res.labelSource,
+        });
       if (entry.again) continue;
-      return changed ? 'applied' : 'unchanged';
+      if (unsaved) return 'kept-local';
+      return Object.keys(applied).length > 0 ? 'applied' : 'unchanged';
     }
   }
 
@@ -1666,13 +1724,13 @@ export function createNodeContentQueue(opts: {
     const node = state.nodes.find((n) => n.id === nodeId);
     if (!node || !MD_BACKED_NODE_TYPES.has(node.type ?? ''))
       return Promise.resolve('absent');
-    if (hasUnsavedLocalContent(nodeId)) {
+    if (hasUnsaved(nodeId)) {
       remoteWhileUnsaved.add(nodeId);
       // A conflict the user has not answered is over when the other save
       // left exactly the text this page shows.
       if (frozen.has(nodeId) && !inflight.has(nodeId))
         return checkFrozenAgainstServer(canvasId, nodeId);
-      // Otherwise the fetch below brings the other save's properties only.
+      // Otherwise the fetch below brings what this page does not hold.
     }
     const running = remoteFetches.get(nodeId);
     if (running) {
@@ -1732,7 +1790,7 @@ export function createNodeContentQueue(opts: {
         // server has taken ours, pick up what that save left besides it.
         if (
           remoteWhileUnsaved.has(nodeId) &&
-          !hasUnsavedLocalContent(nodeId) &&
+          !hasUnsaved(nodeId) &&
           remoteWhileUnsaved.delete(nodeId)
         )
           void adoptRemoteContent(canvasId, nodeId);
@@ -1760,6 +1818,7 @@ export function createNodeContentQueue(opts: {
         state.isLoading ||
         suspendedCanvases.has(canvasId) ||
         restores.has(nodeId) ||
+        deletedElsewhere.has(nodeId) ||
         node.data.contentMissing === true ||
         !MD_BACKED_NODE_TYPES.has(node.type ?? '')
       );
@@ -2021,7 +2080,7 @@ export function createNodeContentQueue(opts: {
         const beforeData = (before.data ?? {}) as Record<string, unknown>;
         const afterData = (next.data ?? {}) as Record<string, unknown>;
         for (const key of NODE_CONTENT_KEYS) {
-          if (PROPERTY_FIELDS.has(key)) {
+          if (PROPERTY_CONTENT_KEYS.has(key)) {
             // An acknowledged property edit being published is saved already.
             if (publishingProperties === next.id) continue;
             if (key === 'properties') {
@@ -2193,6 +2252,10 @@ export function createNodeContentQueue(opts: {
       lastSuccessful.delete(nodeId);
       remoteWhileUnsaved.delete(nodeId);
       frozenChecks.delete(nodeId);
+      deletedElsewhere.delete(nodeId);
+      // Nothing is held for a node that is gone; what was kept back for it
+      // is dropped with it.
+      opts.onHoldsEnded?.(opts.getState().canvasId, nodeId, () => true);
     },
 
     adoptRemoteContent,
@@ -2219,6 +2282,7 @@ export function createNodeContentQueue(opts: {
         // freeze so a later divergence alerts again and writes resume.
         contentConflictToasted.delete(nodeId);
         frozen.delete(nodeId);
+        opts.onHoldsEnded?.(opts.getState().canvasId, nodeId, () => true);
       }
     },
 
@@ -2239,44 +2303,44 @@ export function createNodeContentQueue(opts: {
       return true;
     },
 
-    pendingNodeIds() {
-      // Debounced-but-not-yet-fired saves plus in-flight PUTs: both mean
-      // the node holds a local edit the server hasn't acknowledged. So does
-      // a conflict the user has not answered, whatever else is recorded
-      // for the node: its text must not be replaced or re-baselined.
-      return Array.from(
-        new Set([
-          ...debouncer.pendingKeys(),
-          ...inflight.keys(),
-          ...pendingFields.keys(),
-          ...frozen.keys(),
-          ...[...restoredContent]
-            .filter(([, canvasId]) => canvasId === opts.getState().canvasId)
-            .map(([id]) => id),
-        ]),
-      );
-    },
+    hasUnsaved,
 
     unsavedNodeIds(canvasId) {
-      return Array.from(
-        new Set([
-          ...(opts.getState().canvasId === canvasId
-            ? this.pendingNodeIds()
-            : []),
-          ...[...failures]
-            .filter(([, failure]) => failure.canvasId === canvasId)
-            .map(([id]) => id),
-        ]),
+      // Failure records and held restores belong to the Space they were
+      // made in; everything else is of the open Space.
+      const open = opts.getState().canvasId === canvasId;
+      const candidates = new Set([
+        ...debouncer.pendingKeys(),
+        ...inflight.keys(),
+        ...pendingFields.keys(),
+        ...frozen.keys(),
+        ...restoredContent.keys(),
+        ...restores.keys(),
+        ...failures.keys(),
+      ]);
+      return [...candidates].filter(
+        (nodeId) =>
+          hasUnsaved(nodeId) &&
+          ((open &&
+            (inflight.has(nodeId) ||
+              pendingFields.has(nodeId) ||
+              frozen.has(nodeId) ||
+              debouncer.pendingKeys().includes(nodeId))) ||
+            failures.get(nodeId)?.canvasId === canvasId ||
+            restoredContent.get(nodeId) === canvasId ||
+            restores.get(nodeId)?.canvasId === canvasId),
       );
     },
 
-    pendingFields(nodeId) {
-      if (restoredContent.has(nodeId)) return new Set(NODE_CONTENT_KEYS);
-      return new Set(pendingFields.get(nodeId)?.keys());
-    },
+    holdsUnit,
 
-    pendingPropertyKeys(nodeId) {
-      return new Set(pendingPropertyKeys.get(nodeId)?.keys());
+    setDeletedElsewhere(nodeId, deleted) {
+      if (!deleted) {
+        deletedElsewhere.delete(nodeId);
+        return;
+      }
+      deletedElsewhere.add(nodeId);
+      debouncer.cancel(nodeId);
     },
 
     remotePropertiesShown(nodeId) {
@@ -2303,11 +2367,7 @@ export function createNodeContentQueue(opts: {
     },
 
     hasUnsavedContent(canvasId) {
-      return (
-        this.pendingNodeIds().length > 0 ||
-        propertySaves.size > 0 ||
-        [...failures.values()].some((failure) => failure.canvasId === canvasId)
-      );
+      return this.unsavedNodeIds(canvasId).length > 0 || propertySaves.size > 0;
     },
   };
 }

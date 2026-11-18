@@ -114,7 +114,7 @@ describe('adopting content another page saved', () => {
       label: 'Renamed',
       labelSource: 'user',
     });
-    expect(queue.pendingNodeIds()).toEqual([]);
+    expect(queue.unsavedNodeIds('c1')).toEqual([]);
     expect(queue.hasUnsavedContent('c1')).toBe(false);
     await queue.flushAll();
     expect(putMock).not.toHaveBeenCalled();
@@ -212,14 +212,14 @@ describe('adopting content another page saved', () => {
     expect(holding.data()).toMatchObject({ content: 'Extracted text' });
   });
 
-  it('keeps the body and title of a node with a queued edit untouched, and fetches them once that edit is saved', async () => {
+  it('keeps the body of a node with a queued edit, shows what else the other page saved, and fetches the node once that edit is saved', async () => {
     const { queue, state, edit, data } = makeQueue([
       note({ content: 'old', label: 'Note' }),
     ]);
     edit('n1', { content: 'typed here' });
 
-    // The fetch is made for the custom properties alone; the other page's
-    // body, title and summary are not taken while this page's are unsaved.
+    // The other page's body is not taken while this page's is unsaved; its
+    // title and summary, which this page has not changed, are shown.
     getMock.mockResolvedValueOnce(
       saved('their body', {
         label: 'Their title',
@@ -231,9 +231,12 @@ describe('adopting content another page saved', () => {
       'kept-local',
     );
     expect(getMock).toHaveBeenCalledTimes(1);
-    expect(state._setStateRaw).not.toHaveBeenCalled();
-    expect(data()).toMatchObject({ content: 'typed here', label: 'Note' });
-    expect(data()).not.toHaveProperty('summary');
+    expect(state._setStateRaw).toHaveBeenCalledTimes(1);
+    expect(data()).toMatchObject({
+      content: 'typed here',
+      label: 'Their title',
+      summary: 'their summary',
+    });
 
     putMock.mockResolvedValue({ nodeId: 'n1', label: 'Note', rev: 'mine' });
     getMock.mockResolvedValue(
@@ -271,7 +274,7 @@ describe('adopting content another page saved', () => {
       expectRev: nodeRevisionOf({ content: 'old' }),
     });
     expect(data()['content']).toBe('typed here');
-    expect(queue.pendingNodeIds()).toContain('n1');
+    expect(queue.unsavedNodeIds('c1')).toContain('n1');
     // A conflicted node is not overwritten by a later save either: what
     // the server holds is only compared with the text, never put into it.
     getMock.mockResolvedValue(saved('from page A again', { rev: 'again' }));
@@ -279,7 +282,7 @@ describe('adopting content another page saved', () => {
       'kept-local',
     );
     expect(data()['content']).toBe('typed here');
-    expect(queue.pendingNodeIds()).toContain('n1');
+    expect(queue.unsavedNodeIds('c1')).toContain('n1');
   });
 
   it('does not overwrite text typed while the fetch was under way', async () => {

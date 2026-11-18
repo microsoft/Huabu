@@ -9,6 +9,7 @@ import { hasAgentStreamClaim } from '@/hooks/agentStreamCoordinator';
 import { useAcpThreadChangesStore } from '@/store/acpThreadChangesStore';
 import useCanvasStore, {
   adoptRemoteNodeContent,
+  isDeletedElsewhere,
   requestCanvasResync,
 } from '@/store/canvasStore';
 import { MD_BACKED_NODE_TYPES } from '@/store/canvasStore/save/nodeContentFields';
@@ -255,10 +256,14 @@ function openConflictThread(threadId: string, _canvasId: string): void {
 }
 
 function notifySkippedAgentWrites(
-  skippedNodeIds: readonly string[],
+  withheldNodeIds: readonly string[],
   threadId: string | undefined,
   canvasId: string,
 ): void {
+  // A deletion kept back for a node being edited has its own notice.
+  const skippedNodeIds = withheldNodeIds.filter(
+    (id) => !isDeletedElsewhere(id),
+  );
   if (skippedNodeIds.length === 0) return;
   const nodes = useCanvasStore.getState().nodes;
   const labelOf = (id: string): string => {

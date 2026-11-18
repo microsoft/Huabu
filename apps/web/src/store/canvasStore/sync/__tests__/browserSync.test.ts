@@ -471,3 +471,115 @@ describe('a refused edit', () => {
     expect(onRejected).not.toHaveBeenCalled();
   });
 });
+
+describe('a hold the queue does not own', () => {
+  const noReload = (): ReloadOutcome => 'loaded';
+  const TITLE = 'data.label';
+  const titleKey = `n\u0000${X}\u0000${TITLE}`;
+  const existenceKey = `n\u0000${X}\u0000existence`;
+  const local = {
+    id: X,
+    type: 'note',
+    position: { x: 0, y: 0 },
+    data: { label: 'Mine' },
+  };
+
+  function withRemoteTitle(held: Set<string>) {
+    const applyWithheld = vi.fn();
+    const sync = createBrowserSync({
+      send: () => new Promise(() => {}),
+      clientId: 'page-a',
+      getState: () => ({ canvasId: SPACE, version: 1 }),
+      applyOwnResponse: vi.fn(),
+      applyWithheld,
+      onRejected: vi.fn(),
+      reload: noReload,
+    });
+    const remote = sync.prepareRemote({
+      deltas: [
+        {
+          type: 'REPLACE_NODE',
+          prev: { ...local, data: { label: 'Was' } },
+          next: { ...local, data: { label: 'Theirs' } },
+        },
+        { type: 'DELETE_NODE', node: { id: X, type: 'note' } },
+      ] as never,
+      localNodes: [local],
+      localEdges: [],
+      alsoHeld: (key) => held.has(key),
+    });
+    remote.finish();
+    return { sync, remote, applyWithheld };
+  }
+
+  it('keeps the remote value back, and shows it when the hold ends without this page’s value having been saved', () => {
+    const held = new Set([titleKey]);
+    const { sync, remote, applyWithheld } = withRemoteTitle(held);
+    expect(remote.withheld.map((unit) => unit.unit)).toEqual([TITLE]);
+
+    // Still held: nothing is shown.
+    sync.localHoldsEnded(SPACE, X, {
+      owns: (unit) => unit === TITLE,
+      held: (key) => held.has(key),
+    });
+    expect(applyWithheld).not.toHaveBeenCalled();
+
+    held.clear();
+    sync.localHoldsEnded(SPACE, X, {
+      owns: (unit) => unit === TITLE,
+      held: (key) => held.has(key),
+    });
+    expect(applyWithheld).toHaveBeenCalledWith(SPACE, [
+      { nodeId: X, unit: TITLE, value: { present: true, value: 'Theirs' } },
+    ]);
+    // Once: the buffer is spent.
+    sync.localHoldsEnded(SPACE, X, {
+      owns: () => true,
+      held: () => false,
+    });
+    expect(applyWithheld).toHaveBeenCalledTimes(1);
+  });
+
+  it('drops the remote value when this page’s own value replaced it on the server', () => {
+    const held = new Set([titleKey]);
+    const { sync, applyWithheld } = withRemoteTitle(held);
+    held.clear();
+    sync.localHoldsEnded(SPACE, X, {
+      owns: (unit) => unit === TITLE,
+      held: () => false,
+      superseded: () => true,
+    });
+    sync.localHoldsEnded(SPACE, X, { owns: () => true, held: () => false });
+    expect(applyWithheld).not.toHaveBeenCalled();
+  });
+
+  it('keeps a deletion back the same way, and forgets it when the node is created again', () => {
+    const held = new Set([existenceKey]);
+    const first = withRemoteTitle(held);
+    expect(first.remote.deltas.some((row) => row.type === 'DELETE_NODE')).toBe(
+      false,
+    );
+    held.clear();
+    first.sync.localHoldsEnded(SPACE, X, {
+      owns: (unit) => unit === 'existence',
+      held: () => false,
+    });
+    expect(first.applyWithheld).toHaveBeenCalledWith(SPACE, [
+      { nodeId: X, unit: 'existence', value: { present: false } },
+    ]);
+
+    const again = withRemoteTitle(new Set([existenceKey]));
+    again.sync
+      .prepareRemote({
+        deltas: [{ type: 'INSERT_NODE', node: local }] as never,
+        localNodes: [local],
+        localEdges: [],
+      })
+      .finish();
+    again.sync.localHoldsEnded(SPACE, X, {
+      owns: (unit) => unit === 'existence',
+      held: () => false,
+    });
+    expect(again.applyWithheld).not.toHaveBeenCalled();
+  });
+});

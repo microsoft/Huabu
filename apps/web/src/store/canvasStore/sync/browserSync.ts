@@ -7,9 +7,14 @@
  *
  * - `submit` — a batch already ran locally: hold what it changed and queue
  *   the commands as one edit, with the read version it was made on.
- * - `prepareRemote` — an update is about to be replayed: rewrite it to the
- *   property units it changed, keep back the ones this page holds, and on
- *   `finish` release the holds of this page's own confirmed batch.
+ * - `prepareRemote` — a remote change is about to be applied (an update, or
+ *   content fetched after another page's save): rewrite it to the property
+ *   units it changed, keep back the ones this page holds — by an unanswered
+ *   batch, or by a holder the caller names (`alsoHeld`: an open gesture,
+ *   unsaved content, a node being edited) — and on `finish` buffer what was
+ *   kept back and release the holds of this page's own confirmed batch.
+ * - `localHoldsEnded` — one of those other holders let go: show what was
+ *   kept back for it, unless this page's change replaced it.
  * - `deferReload` — a whole-Space reload is wanted (version gap, snapshot
  *   mismatch, rejected command, an update that never arrived): run it only
  *   once nothing is left to send, one at a time, and again — after a backoff
@@ -174,7 +179,8 @@ export interface PrepareRemoteInput {
   source?: 'ui' | 'agent' | 'system';
   /**
    * Keys held for a reason the queue does not know: what a pointer gesture
-   * has changed so far and not sent yet.
+   * has changed so far and not sent yet, content fields the content queue
+   * has not saved, the existence of a node being edited.
    */
   alsoHeld?: (key: string) => boolean;
 }
@@ -192,6 +198,22 @@ export interface BrowserSync {
   readonly queue: SendQueue;
   submit(input: SubmitInput): EnqueueResult;
   prepareRemote(input: PrepareRemoteInput): PreparedRemote;
+  /**
+   * A hold the queue does not own has ended for `nodeId` — its content was
+   * saved or given up, its editing is over. The server values kept back for
+   * the units `owns` names that nothing holds any more (`held` is the
+   * owner's own predicate) are shown, except the ones `superseded` says
+   * this page's change replaced on the server.
+   */
+  localHoldsEnded(
+    canvasId: string,
+    nodeId: string,
+    hold: {
+      owns: (unit: string) => boolean;
+      held: (key: string) => boolean;
+      superseded?: (unit: string) => boolean;
+    },
+  ): void;
   /** Run `reload` now, or as soon as the queue has nothing left to send. */
   deferReload(canvasId: string): void;
   /** The page adopted a whole-Space server state: forget every hold. */
@@ -582,10 +604,23 @@ export function createBrowserSync(deps: BrowserSyncDeps): BrowserSync {
             )
               keptBackSince.set(unit.nodeId, versionBefore);
           }
+          // A node the update (re)creates is no longer deleted elsewhere.
+          for (const nodeId of result.insertedNodeIds)
+            inFlight.forgetWithheld(nodeUnitKey(nodeId, EXISTENCE_UNIT));
           if (own && operationId !== undefined)
             release(deps.getState().canvasId, operationId, result.covered);
         },
       };
+    },
+
+    localHoldsEnded(canvasId, nodeId, hold) {
+      const freed = inFlight
+        .takeWithheld(
+          nodeId,
+          (key, unit) => hold.owns(unit.unit) && !hold.held(key),
+        )
+        .filter((unit) => hold.superseded?.(unit.unit) !== true);
+      if (freed.length > 0) deps.applyWithheld(canvasId, freed);
     },
 
     deferReload(canvasId) {

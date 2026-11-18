@@ -19,6 +19,7 @@ import {
 import { dismissToast, toast } from '@/components/Common/Toast';
 
 import { createNodeContentQueue } from '../nodeContentQueue';
+import { unsavedFields } from './unsavedFields';
 
 import type * as CanvasApi from '@/api/canvas';
 import type { GetNodeContentResponse } from '@huabu/shared';
@@ -154,7 +155,7 @@ describe('a property edit', () => {
     ]);
     expect(getMock).not.toHaveBeenCalled();
     expect(toastMock).not.toHaveBeenCalled();
-    expect(queue.pendingNodeIds()).toEqual([]);
+    expect(queue.unsavedNodeIds('c1')).toEqual([]);
     expect(queue.hasUnsavedContent('c1')).toBe(false);
   });
 
@@ -213,7 +214,7 @@ describe('a property edit', () => {
       pageId: 'page-1',
     });
     // The body is still unsaved and still goes out, by itself.
-    expect(queue.pendingNodeIds()).toEqual(['n1']);
+    expect(queue.unsavedNodeIds('c1')).toEqual(['n1']);
     putMock.mockResolvedValueOnce(saved('rev-1'));
     await queue.flushNow('c1', 'n1');
     expect(putMock.mock.calls[1][2]).toMatchObject({
@@ -246,7 +247,7 @@ describe('a property edit', () => {
       properties: { Status: 'Read' },
     });
     // Still the user's to answer: nothing more was sent for the body.
-    expect(queue.pendingNodeIds()).toEqual(['n1']);
+    expect(queue.unsavedNodeIds('c1')).toEqual(['n1']);
     expect(toastMock).toHaveBeenCalledTimes(1);
     await queue.flushNow('c1', 'n1').catch(() => undefined);
     expect(putMock).toHaveBeenCalledTimes(2);
@@ -274,10 +275,7 @@ describe('a property edit', () => {
     // No second toast, and the Keep mine / Load latest one is still there.
     expect(toastMock).toHaveBeenCalledTimes(1);
     expect(dismissMock).not.toHaveBeenCalled();
-    expect([...queue.pendingFields('n1')].sort()).toEqual([
-      'content',
-      'properties',
-    ]);
+    expect(unsavedFields(queue, 'n1')).toEqual(['content', 'properties']);
 
     // Keep mine sends the body, and the property that is still unsaved.
     putMock.mockResolvedValueOnce(saved('rev-2'));
@@ -289,7 +287,7 @@ describe('a property edit', () => {
       expectRev: 'rev-other',
       properties: { Year: 2025 },
     });
-    expect(queue.pendingNodeIds()).toEqual([]);
+    expect(queue.unsavedNodeIds('c1')).toEqual([]);
   });
 
   it('that genuinely fails is reported to its caller, changes nothing and records no body failure', async () => {
@@ -312,7 +310,7 @@ describe('a property edit', () => {
     // holds nothing unsaved for the node.
     expect(toastMock).not.toHaveBeenCalled();
     expect(queue.hasUnsavedContent('c1')).toBe(false);
-    expect(queue.pendingNodeIds()).toEqual([]);
+    expect(queue.unsavedNodeIds('c1')).toEqual([]);
 
     // The same edit, made again, is sent again.
     putMock.mockResolvedValueOnce(saved('rev-0'));
@@ -365,7 +363,7 @@ describe('a property changed by somebody else while a body is unsaved here', () 
     expect(body).not.toHaveProperty('properties');
     expect(toastMock).not.toHaveBeenCalled();
     await tick();
-    expect(queue.pendingNodeIds()).toEqual([]);
+    expect(queue.unsavedNodeIds('c1')).toEqual([]);
     expect(state.nodes[0].data).toMatchObject({
       content: 'typing',
       properties: { tags: ['physics'] },
@@ -459,7 +457,7 @@ describe('a body changed by somebody else while a property edit is on the wire',
     await tick();
     expect(putMock).toHaveBeenCalledTimes(1);
     // A property edit on the wire is not unsaved content of the node.
-    expect(queue.pendingNodeIds()).toEqual([]);
+    expect(queue.unsavedNodeIds('c1')).toEqual([]);
 
     getMock.mockResolvedValueOnce(
       server({ content: 'their body', label: 'Theirs', rev: 'rev-theirs' }),
@@ -551,7 +549,7 @@ describe('a property changed in the store (undo, redo, a paste)', () => {
       propertyDisplayKeys: ['Status', 'Venue'],
       pageId: 'page-1',
     });
-    expect(queue.pendingNodeIds()).toEqual([]);
+    expect(queue.unsavedNodeIds('c1')).toEqual([]);
 
     // The body's baseline did not move with it.
     putMock.mockResolvedValueOnce(saved('rev-1'));
@@ -587,7 +585,7 @@ describe('a property changed in the store (undo, redo, a paste)', () => {
     });
     // The body is the user's to answer; the property is saved.
     expect(toastMock).toHaveBeenCalledTimes(1);
-    expect([...queue.pendingFields('n1')].sort()).toEqual(['content']);
+    expect(unsavedFields(queue, 'n1')).toEqual(['content']);
     expect(state.nodes[0].data).toMatchObject({
       content: 'mine',
       properties: { Venue: 'CHI', Year: 2024 },

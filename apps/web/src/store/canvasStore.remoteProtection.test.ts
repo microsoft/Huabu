@@ -329,14 +329,27 @@ describe('a body being typed here, and a change arriving from an agent', () => {
       },
     );
 
+    // Only the body is this page's: the title is not held and is shown.
     expect(data(X).content).toBe('Typing');
-    // Before the unification the whole content of a node with unsaved text
-    // was kept, the title included, without a notice.
-    expect(data(X).label).toBe(`Label ${X}`);
+    expect(data(X)).toMatchObject({
+      label: 'Agent title',
+      labelSource: 'agent',
+    });
     expect(toastsWith('your version was kept')).toHaveLength(0);
+    expect(
+      useAcpThreadChangesStore.getState().conflictedByThread[THREAD],
+    ).toEqual([]);
+
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(savesOf(X)).toHaveLength(1);
+    expect(savesOf(X)[0]).toMatchObject({
+      content: 'Typing',
+      expectRev: nodeRevisionOf({ content: `Body ${X}` }),
+    });
+    expect(conflictToasts()).toHaveLength(0);
   });
 
-  it('keeps a title being saved here when the agent rewrites the body', async () => {
+  it('keeps a title being saved here and shows the body the agent wrote', async () => {
     serverHolds(STORED);
     state().updateNodeData(X, { label: 'My title', labelSource: 'user' });
 
@@ -345,13 +358,24 @@ describe('a body being typed here, and a change arriving from an agent', () => {
       { nodeContentRevisions: { [X]: STORED } },
     );
 
+    // Only the title is this page's: the body is not held and is shown,
+    // with the revision the server stored for it.
     expect(data(X).label).toBe('My title');
-    // Before the unification the agent's body was dropped here, silently.
-    expect(data(X).content).toBe(`Body ${X}`);
+    expect(data(X).content).toBe('Agent text');
     expect(toastsWith('your version was kept')).toHaveLength(0);
+
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(savesOf(X)).toHaveLength(1);
+    expect(savesOf(X)[0]).toMatchObject({
+      label: 'My title',
+      labelSource: 'user',
+      expectRev: STORED,
+    });
+    expect(conflictToasts()).toHaveLength(0);
+    expect(data(X).content).toBe('Agent text');
   });
 
-  it('does not take the note away when the agent deletes it', async () => {
+  it('keeps a note the agent deletes for as long as it is being edited, says so, and sends nothing for it', async () => {
     state().updateNodeData(X, { content: 'Typing' });
     useCanvasPresenceStore.setState({ localEditingNodeId: X });
 
@@ -373,19 +397,53 @@ describe('a body being typed here, and a change arriving from an agent', () => {
       ],
     });
 
+    // The node is not taken away from under the caret.
     expect(data(X).content).toBe('Typing');
     expect(state().version).toBe(2);
     expect(
       useAcpThreadChangesStore.getState().conflictedByThread[THREAD],
     ).toEqual([X]);
-    // Before the unification: the generic "your version was kept" notice,
-    // the node stayed for good and its text was sent to the server.
-    expect(toastsWith('your version was kept')).toHaveLength(1);
-    useCanvasPresenceStore.setState({ localEditingNodeId: null });
+    // One notice, about the deletion; not the "your version was kept" one.
+    expect(
+      toastsWith('was deleted elsewhere while you are editing'),
+    ).toHaveLength(1);
+    expect(toastsWith('your version was kept')).toHaveLength(0);
+
+    // What is typed meanwhile stays on the page and is not sent: the server
+    // has no node to write it to.
+    state().updateNodeData(X, { content: 'Typing more' });
     await vi.advanceTimersByTimeAsync(10_000);
     expect(node(X)).toBeDefined();
-    expect(savesOf(X)).toHaveLength(1);
-    expect(copyToClipboard).not.toHaveBeenCalled();
+    expect(savesOf(X)).toHaveLength(0);
+
+    // Leaving the editor lets the deletion through; the text is offered.
+    useCanvasPresenceStore.setState({ localEditingNodeId: null });
+    await vi.advanceTimersByTimeAsync(10);
+    expect(node(X)).toBeUndefined();
+    expect(node(Y)).toBeDefined();
+    const removed = toastsWith('has been removed from this Space');
+    expect(removed).toHaveLength(1);
+    removed[0]?.[1]?.action?.onClick();
+    expect(copyToClipboard).toHaveBeenCalledWith('Typing more');
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(savesOf(X)).toHaveLength(0);
+    expect(state().pendingContentNodeIds()).toEqual([]);
+  });
+
+  it('removes a note the agent deletes at once when it is not being edited, and offers text that was not saved', async () => {
+    state().updateNodeData(X, { content: 'Typed a moment ago' });
+
+    await push('update', {
+      fromVersion: state().version,
+      toVersion: state().version + 1,
+      deltas: [{ type: 'DELETE_NODE', node: { id: X, type: 'note' } }],
+      pendingEffects: { ...NO_EFFECTS, deletedNodeIds: [X] },
+      source: 'agent',
+    });
+
+    expect(node(X)).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(savesOf(X)).toHaveLength(0);
   });
 });
 
@@ -405,7 +463,7 @@ describe('a body being typed here, and another person’s save of that note', ()
     await push('invalidate', { nodeIds: [X] });
   }
 
-  it('keeps the text, asks when its save is refused, and Keep mine saves it over the other body', async () => {
+  it('keeps the text, shows the other title, asks when its save is refused, and Keep mine saves the text over the other body', async () => {
     serverHolds(STORED);
     state().updateNodeData(X, { content: 'Typing' });
 
@@ -413,9 +471,8 @@ describe('a body being typed here, and another person’s save of that note', ()
 
     expect(api.getNodeContent).toHaveBeenCalledTimes(1);
     expect(data(X).content).toBe('Typing');
-    // Before the unification nothing of the other save but its properties
-    // was shown while the body was unsaved.
-    expect(data(X).label).toBe(`Label ${X}`);
+    // The title is not this page's change: it is shown at once.
+    expect(data(X).label).toBe('Their title');
     expect(toastsWith('your version was kept')).toHaveLength(0);
 
     // Another person's save is not rebased over: the choice is the user's.
@@ -432,8 +489,6 @@ describe('a body being typed here, and another person’s save of that note', ()
       content: 'Typing',
       expectRev: STORED,
     });
-    // Before the body-save rule the request carried this page's title too
-    // and wrote it over the other person's.
-    expect(savesOf(X)[1]).toMatchObject({ label: `Label ${X}` });
+    expect(data(X).label).toBe('Their title');
   });
 });

@@ -240,4 +240,69 @@ describe('toFieldLevelDeltas', () => {
       { id: 'e2', source: 'y', target: 'x' },
     ]);
   });
+
+  it('keeps a deletion back for a node this page holds, and applies it for one it does not', () => {
+    const deletion = (id: string): Delta =>
+      ({ type: 'DELETE_NODE', node: { id, type: 'note' } }) as unknown as Delta;
+    const result = toFieldLevelDeltas({
+      deltas: [deletion('x'), deletion('y')],
+      localNodes: [serverX, y],
+      localEdges: [],
+      isHeld: held(nodeUnitKey('x', EXISTENCE_UNIT)),
+    });
+    expect(apply([serverX, y], result.deltas)).toEqual([serverX]);
+    expect(result.withheld).toEqual([
+      { nodeId: 'x', unit: EXISTENCE_UNIT, value: { present: false } },
+    ]);
+    expect(result.covered.has(nodeUnitKey('x', EXISTENCE_UNIT))).toBe(true);
+  });
+
+  it('holds content units like any other: the held title stays, the body and another property land', () => {
+    const local: Node = {
+      ...serverX,
+      data: {
+        label: 'Mine',
+        content: 'old',
+        properties: { Year: 1, Tag: 'a' },
+      },
+    };
+    const prev: Node = {
+      ...serverX,
+      data: { label: 'X', content: 'old', properties: { Year: 1, Tag: 'a' } },
+    };
+    const next: Node = {
+      ...serverX,
+      data: {
+        label: 'Theirs',
+        content: 'new',
+        properties: { Year: 2, Tag: 'b' },
+      },
+    };
+    const result = toFieldLevelDeltas({
+      deltas: [replace(prev, next)],
+      localNodes: [local],
+      localEdges: [],
+      isHeld: held(
+        nodeUnitKey('x', 'data.label'),
+        nodeUnitKey('x', 'data.properties.Tag'),
+      ),
+    });
+    expect(apply([local], result.deltas)[0]?.data).toEqual({
+      label: 'Mine',
+      content: 'new',
+      properties: { Year: 2, Tag: 'a' },
+    });
+    expect(result.withheld).toEqual([
+      {
+        nodeId: 'x',
+        unit: 'data.label',
+        value: { present: true, value: 'Theirs' },
+      },
+      {
+        nodeId: 'x',
+        unit: 'data.properties.Tag',
+        value: { present: true, value: 'b' },
+      },
+    ]);
+  });
 });

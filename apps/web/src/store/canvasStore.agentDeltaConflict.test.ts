@@ -385,11 +385,10 @@ describe('agent delta conflict protection', () => {
     expect(useCanvasStore.getState().version).toBe(2);
   });
 
-  it('accepts mixed FSM metadata without replacing dirty content or local geometry', () => {
+  it('accepts mixed FSM metadata and a move without replacing dirty content', () => {
     useCanvasStore
       .getState()
       .patchNodeSilent('question-1', { content: 'Pending prompt' });
-    const local = useCanvasStore.getState().nodes[0];
     const next = {
       ...question('Remote prompt', 'done'),
       position: { x: 500, y: 500 },
@@ -407,8 +406,10 @@ describe('agent delta conflict protection', () => {
         2,
       ),
     ).toEqual(['question-1']);
+    // Only the body is kept back; the rest of the row, its move included,
+    // applies (rows name exactly what the batch changed).
     expect(useCanvasStore.getState().nodes[0]).toMatchObject({
-      position: local.position,
+      position: { x: 500, y: 500 },
       data: {
         content: 'Pending prompt',
         status: 'done',

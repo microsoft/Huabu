@@ -259,7 +259,7 @@ describe('content another page saved, in the store', () => {
     expect(hasUnsavedCanvasEdits()).toBe(false);
   });
 
-  it('leaves the body and title of a node this page is still saving exactly as typed', async () => {
+  it('leaves the body of a node this page is still saving exactly as typed, and shows the title the other page gave it', async () => {
     state().updateNodeData(X, { content: 'Typed on this page' });
     api.getNodeContent.mockResolvedValue(
       savedOnServer('Body from A', 'From A'),
@@ -269,11 +269,11 @@ describe('content another page saved, in the store', () => {
       'kept-local',
     ]);
 
-    // The node is read for its custom properties only.
+    // The body is this page's until it is saved; the title is not held.
     expect(api.getNodeContent).toHaveBeenCalledTimes(1);
     expect(node(X).data).toMatchObject({
       content: 'Typed on this page',
-      label: `Label ${X}`,
+      label: 'From A',
     });
     expect(api.putNodeContent).not.toHaveBeenCalled();
   });

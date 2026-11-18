@@ -71,6 +71,7 @@ vi.mock('@/store/canvasStore', () => ({
     },
   },
   adoptRemoteNodeContent: mocks.adoptRemoteNodeContent,
+  isDeletedElsewhere: () => false,
   // The store holds a reload back while edits are waiting to be sent; with
   // nothing queued it reloads at once, which is what this stand-in does.
   requestCanvasResync: (canvasId: string, afterReload?: () => void) => {

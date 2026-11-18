@@ -35,6 +35,38 @@ export const NODE_CONTENT_KEYS: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * The content keys that hold a node's custom properties. No revision covers
+ * them and they are saved per key; every other content field belongs to the
+ * body's save.
+ */
+export const PROPERTY_CONTENT_KEYS: ReadonlySet<string> = new Set([
+  'properties',
+  'propertyDisplayKeys',
+]);
+
+/** The body's fields: the ones a node's content revision covers. */
+export const BODY_CONTENT_KEYS: ReadonlySet<string> = new Set([
+  'content',
+  'src',
+]);
+
+/**
+ * The content field a property unit belongs to (see `sync/propertyUnits.ts`):
+ * `data.label` is `label`, `data.properties.<key>` is the custom property
+ * `<key>` of `properties`. `null` for a unit that is not node content.
+ */
+export function contentFieldOfUnit(
+  unit: string,
+): { field: string; propertyKey?: string } | null {
+  if (!unit.startsWith('data.')) return null;
+  const rest = unit.slice(5);
+  if (NODE_CONTENT_KEYS.has(rest)) return { field: rest };
+  if (rest.startsWith('properties.'))
+    return { field: 'properties', propertyKey: rest.slice(11) };
+  return null;
+}
+
+/**
  * Node types that own a markdown sidecar. Mirrors the server-side
  * `MD_BACKED_NODE_TYPES`. Patches to nodes whose type is not in this
  * set still update the in-memory store but do not schedule a content

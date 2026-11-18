@@ -13,9 +13,15 @@
  * are written, and units held by an unconfirmed local change are left alone
  * and reported as withheld.
  *
- * The output is still a `Delta[]`, so the existing replay
- * (`applyDeltas`, dirty-content protection, order replay) runs unchanged on
- * top of it. When the local node equals the delta's `prev` and nothing is
+ * This is the one place that decides what a remote change may touch, for
+ * structure and content alike and for both ways a change arrives (an
+ * `update`, and content fetched after an `invalidate`, see
+ * `remoteContent.ts`): `isHeld` answers for every holder — the send queue's
+ * in-flight set, an open pointer gesture, unsaved content, a node being
+ * edited.
+ *
+ * The output is still a `Delta[]`, so the existing replay (`applyDeltas`,
+ * order replay) runs unchanged on top of it. When the local node equals the delta's `prev` and nothing is
  * held, the rewritten delta produces exactly the delta's `next`.
  *
  * Pure functions only.
@@ -182,7 +188,19 @@ export function toFieldLevelDeltas(input: FieldLevelInput): FieldLevelResult {
         break;
       }
       case 'DELETE_NODE': {
-        covered.add(nodeUnitKey(delta.node.id, EXISTENCE_UNIT));
+        const key = nodeUnitKey(delta.node.id, EXISTENCE_UNIT);
+        covered.add(key);
+        // A node this page holds (it is being edited, or a later local
+        // batch brought it back) is not taken away: the deletion is kept
+        // back like any other held value.
+        if (nodes.has(delta.node.id) && isHeld(key)) {
+          withheld.push({
+            nodeId: delta.node.id,
+            unit: EXISTENCE_UNIT,
+            value: { present: false },
+          });
+          break;
+        }
         nodes.delete(delta.node.id);
         out.push(delta);
         break;

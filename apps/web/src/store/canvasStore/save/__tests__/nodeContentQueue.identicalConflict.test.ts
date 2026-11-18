@@ -113,7 +113,7 @@ describe('a save refused although the server holds the same content', () => {
       label: 'My title',
       expectRev: serverRev,
     });
-    expect(queue.pendingNodeIds()).toEqual([]);
+    expect(queue.unsavedNodeIds('c1')).toEqual([]);
     expect(queue.hasUnsavedContent('c1')).toBe(false);
   });
 
@@ -142,7 +142,7 @@ describe('a save refused although the server holds the same content', () => {
 
     expect(toastMock).not.toHaveBeenCalled();
     expect(putMock.mock.calls[1][2].expectRev).toBe('rev-with-extracted-text');
-    expect(queue.pendingNodeIds()).toEqual([]);
+    expect(queue.unsavedNodeIds('c1')).toEqual([]);
   });
 
   it('is a conflict when the server content differs by one character', async () => {
@@ -164,7 +164,7 @@ describe('a save refused although the server holds the same content', () => {
     expect(toastMock).toHaveBeenCalledTimes(1);
     expect(toastMock.mock.calls[0][1]).toMatchObject({ tone: 'danger' });
     expect(state.nodes[0].data.content).toBe('same text');
-    expect(queue.pendingNodeIds()).toEqual(['n1']);
+    expect(queue.unsavedNodeIds('c1')).toEqual(['n1']);
   });
 
   it('is a conflict when the server moves again before the second save', async () => {
@@ -178,7 +178,7 @@ describe('a save refused although the server holds the same content', () => {
 
     expect(putMock).toHaveBeenCalledTimes(2);
     expect(toastMock).toHaveBeenCalledTimes(1);
-    expect(queue.pendingNodeIds()).toEqual(['n1']);
+    expect(queue.unsavedNodeIds('c1')).toEqual(['n1']);
   });
 });
 
@@ -195,7 +195,7 @@ describe('a node frozen by a conflict', () => {
     });
     await context.queue.flushNow('c1', 'n1').catch(() => undefined);
     expect(toastMock).toHaveBeenCalledTimes(1);
-    expect(context.queue.pendingNodeIds()).toEqual(['n1']);
+    expect(context.queue.unsavedNodeIds('c1')).toEqual(['n1']);
     putMock.mockReset();
     getMock.mockReset();
     return context;
@@ -217,7 +217,7 @@ describe('a node frozen by a conflict', () => {
     expect(dismissMock).toHaveBeenCalledWith('conflict-toast');
     expect(toastMock).toHaveBeenCalledTimes(1);
     expect(state.nodes[0]).toBe(typed);
-    expect(queue.pendingNodeIds()).toEqual([]);
+    expect(queue.unsavedNodeIds('c1')).toEqual([]);
     expect(persisted).toHaveBeenCalledWith('c1', 'n1');
     // The next edit descends from the server's revision.
     putMock.mockResolvedValue(saved('rev-next'));
@@ -246,7 +246,7 @@ describe('a node frozen by a conflict', () => {
 
     expect(dismissMock).not.toHaveBeenCalled();
     expect(state.nodes[0].data.content).toBe('Mine');
-    expect(queue.pendingNodeIds()).toEqual(['n1']);
+    expect(queue.unsavedNodeIds('c1')).toEqual(['n1']);
     await queue.flushNow('c1', 'n1').catch(() => undefined);
     expect(putMock).not.toHaveBeenCalled();
   });
@@ -264,7 +264,7 @@ describe('a node frozen by a conflict', () => {
         nodeRevisionOf({ content: 'Mine.' }),
       ),
     ).toBe(false);
-    expect(queue.pendingNodeIds()).toEqual(['n1']);
+    expect(queue.unsavedNodeIds('c1')).toEqual(['n1']);
     expect(dismissMock).not.toHaveBeenCalled();
 
     expect(
@@ -274,7 +274,7 @@ describe('a node frozen by a conflict', () => {
       ),
     ).toBe(true);
     expect(dismissMock).toHaveBeenCalledWith('conflict-toast');
-    expect(queue.pendingNodeIds()).toEqual([]);
+    expect(queue.unsavedNodeIds('c1')).toEqual([]);
     expect(toastMock).toHaveBeenCalledTimes(1);
   });
 });

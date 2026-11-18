@@ -124,4 +124,51 @@ describe('property units', () => {
       height: 260,
     });
   });
+
+  it('treats every custom property as a unit of its own', () => {
+    const prev: UnitNode = {
+      ...base,
+      data: {
+        ...(base.data as object),
+        properties: { Year: 2024, Venue: 'CHI' },
+      },
+    };
+    const next: UnitNode = {
+      ...base,
+      data: {
+        ...(base.data as object),
+        properties: { Year: 2025, Tag: ['a'] },
+      },
+    };
+    expect(changedUnits(prev, next).sort()).toEqual([
+      'data.properties.Tag',
+      'data.properties.Venue',
+      'data.properties.Year',
+    ]);
+    // One writer's key is applied beside another's.
+    const merged = applyUnits(prev, next, ['data.properties.Tag']);
+    expect((merged.data as { properties: unknown }).properties).toEqual({
+      Year: 2024,
+      Venue: 'CHI',
+      Tag: ['a'],
+    });
+    expect(applyUnits(prev, next, changedUnits(prev, next))).toEqual(next);
+  });
+
+  it('drops the property bag with its last key, and takes a key named like a prototype member', () => {
+    const one: UnitNode = { id: 'n', data: { properties: { Year: 2024 } } };
+    const none = writeUnit(one, 'data.properties.Year', { present: false });
+    expect(none.data).toEqual({});
+    const odd = writeUnit(one, 'data.properties.__proto__', {
+      present: true,
+      value: 'x',
+    });
+    expect(readUnit(odd, 'data.properties.__proto__')).toEqual({
+      present: true,
+      value: 'x',
+    });
+    expect(
+      Object.keys((odd.data as { properties: object }).properties),
+    ).toEqual(['Year', '__proto__']);
+  });
 });

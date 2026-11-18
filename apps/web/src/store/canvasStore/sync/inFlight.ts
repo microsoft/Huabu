@@ -14,6 +14,12 @@
  * A remote value for a held key is not applied; it is kept here so it can
  * be installed if the local change turns out not to have taken effect on
  * the server (rejected, or a no-op that emitted no update).
+ *
+ * The same buffer serves the holds this set has no entry for — a pointer
+ * gesture, content the content queue has not saved, a node being edited:
+ * their owner answers "is it held" (`BrowserSync.prepareRemote`'s
+ * `alsoHeld`) and says when the hold ends (`BrowserSync.localHoldsEnded`).
+ * A deletion kept back is the existence unit with an absent value.
  */
 
 import deepEqual from 'fast-deep-equal';
@@ -146,6 +152,30 @@ export class InFlightSet {
       if (!covered.has(key)) freed.push(value);
     }
     return freed;
+  }
+
+  /**
+   * Take the server values kept back for `nodeId` that `take` accepts and
+   * that no entry holds any more. For holds the entries do not know —
+   * unsaved content, a node being edited — whose owner says when they end.
+   */
+  takeWithheld(
+    nodeId: string,
+    take: (key: string, unit: WithheldUnit) => boolean,
+  ): WithheldUnit[] {
+    const taken: WithheldUnit[] = [];
+    for (const [key, unit] of this.confirmed) {
+      if (unit.nodeId !== nodeId || this.isHeld(key) || !take(key, unit))
+        continue;
+      this.confirmed.delete(key);
+      taken.push(unit);
+    }
+    return taken;
+  }
+
+  /** Drop the server value kept back for `key`: a newer one was applied. */
+  forgetWithheld(key: string): void {
+    if (!this.isHeld(key)) this.confirmed.delete(key);
   }
 
   /** Forget everything: the page adopted a whole-Space server state. */

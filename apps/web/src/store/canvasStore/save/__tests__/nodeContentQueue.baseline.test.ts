@@ -24,6 +24,7 @@ import { toast } from '@/components/Common/Toast';
 import { holdSaveErrorRecovery } from '@/utils/saveErrorFeedback';
 
 import { createNodeContentQueue } from '../nodeContentQueue';
+import { unsavedFields } from './unsavedFields';
 
 import type * as CanvasApi from '@/api/canvas';
 import type { PutNodeContentRequest } from '@huabu/shared';
@@ -115,7 +116,7 @@ describe('nodeContentQueue baseline lifecycle', () => {
       propertyDisplayKeys: ['Venue'],
       expectRev: nodeRevisionOf({}),
     });
-    expect(queue.pendingNodeIds()).toEqual([]);
+    expect(queue.unsavedNodeIds('c1')).toEqual([]);
   });
   it.each<Pick<PutNodeContentRequest, 'properties' | 'propertyDisplayKeys'>>([
     { properties: { Added: 'new' }, propertyDisplayKeys: ['Venue', 'Added'] },
@@ -140,7 +141,7 @@ describe('nodeContentQueue baseline lifecycle', () => {
         'offline',
       );
       expect(state.nodes[0].data).toEqual(node.data);
-      expect(queue.pendingFields('n1').size).toBe(0);
+      expect(unsavedFields(queue, 'n1')).toEqual([]);
       expect(queue.hasUnsavedContent('c1')).toBe(false);
       queue.retryFailedSaves('c1');
       await queue.flushAll();
@@ -199,12 +200,10 @@ describe('nodeContentQueue baseline lifecycle', () => {
       content: 'new body',
       properties: { Venue: 'Newest', Score: 2, Added: true },
     });
-    expect(queue.pendingFields('n1')).toEqual(
-      new Set(['content', 'properties']),
-    );
+    expect(unsavedFields(queue, 'n1')).toEqual(['content', 'properties']);
     putMock.mockResolvedValue({ nodeId: 'n1', label: 'Note', rev: 'next' });
     await queue.flushNow('c1', 'n1');
-    expect(queue.pendingFields('n1').size).toBe(0);
+    expect(unsavedFields(queue, 'n1')).toEqual([]);
   });
 
   it('captures the rollback state inside the serialized lane after earlier edits settle', async () => {
@@ -330,7 +329,7 @@ describe('nodeContentQueue baseline lifecycle', () => {
       nodeType: 'note',
       properties: { keep: null },
     });
-    expect(queue.pendingNodeIds()).toEqual([]);
+    expect(queue.unsavedNodeIds('c1')).toEqual([]);
   });
   it('suppresses the redundant Question creation PUT', async () => {
     const node = questionNode('');
@@ -341,7 +340,7 @@ describe('nodeContentQueue baseline lifecycle', () => {
     await queue.flushAll();
 
     expect(putMock).not.toHaveBeenCalled();
-    expect(queue.pendingNodeIds()).toEqual([]);
+    expect(queue.unsavedNodeIds('c1')).toEqual([]);
   });
 
   it('waits for Question creation before persisting a real pre-acknowledgement edit', async () => {
@@ -483,7 +482,7 @@ describe('nodeContentQueue baseline lifecycle', () => {
     expect(queue.hasRestore(node.id)).toBe(false);
     expect(queue.hasPendingRestoredContent()).toBe(false);
     expect(queue.restoreTokens().size).toBe(0);
-    expect(queue.pendingNodeIds()).toEqual([]);
+    expect(queue.unsavedNodeIds('c1')).toEqual([]);
     await queue.waitForIdle();
     await queue.flushAll();
     expect(putMock).not.toHaveBeenCalled();
@@ -573,7 +572,7 @@ describe('nodeContentQueue baseline lifecycle', () => {
     await queue.flushNow('c1', 'n1');
     expect(toastMock).toHaveBeenCalledTimes(1);
     // The sync applier reads this to leave the node's text alone.
-    expect(queue.pendingNodeIds()).toEqual(['n1']);
+    expect(queue.unsavedNodeIds('c1')).toEqual(['n1']);
 
     // An update carried newer server content for the node.
     expect(
@@ -596,7 +595,7 @@ describe('nodeContentQueue baseline lifecycle', () => {
       nodeRevisionOf({ content: 'newer on the server' }),
     );
     await queue.waitForIdle();
-    expect(queue.pendingNodeIds()).toEqual([]);
+    expect(queue.unsavedNodeIds('c1')).toEqual([]);
     // A node that is not frozen is not this method's business.
     expect(queue.rebaseConflict('n1', 'anything')).toBe(false);
   });

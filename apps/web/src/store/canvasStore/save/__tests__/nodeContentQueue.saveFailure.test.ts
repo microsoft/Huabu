@@ -390,7 +390,7 @@ describe('nodeContentQueue — save-failure surfacing', () => {
       }),
     );
     await queue.flushNow('c1', node.id);
-    expect(queue.pendingNodeIds()).toEqual([node.id]);
+    expect(queue.unsavedNodeIds('c1')).toEqual([node.id]);
     expect(toastMock).toHaveBeenCalledOnce();
     vi.mocked(dismissToast).mockClear();
 
@@ -400,14 +400,14 @@ describe('nodeContentQueue — save-failure surfacing', () => {
 
     // Still frozen, with its choice: nothing is written.
     expect(dismissToast).not.toHaveBeenCalled();
-    expect(queue.pendingNodeIds()).toEqual([node.id]);
+    expect(queue.unsavedNodeIds('c1')).toEqual([node.id]);
     await queue.flushNow('c1', node.id);
     expect(putMock).toHaveBeenCalledOnce();
 
     // A load replaces the page's text: nothing is left to choose between.
     queue.clearUnsavedStatus([node.id]);
     expect(dismissToast).toHaveBeenCalledWith('conflict-toast');
-    expect(queue.pendingNodeIds()).toEqual([]);
+    expect(queue.unsavedNodeIds('c1')).toEqual([]);
     queue.discardCanvas('c1');
   });
 
@@ -539,7 +539,7 @@ describe('nodeContentQueue — save-failure surfacing', () => {
     conflict.action.onClick();
     await tick();
     expect(putMock).toHaveBeenCalledOnce();
-    expect(queue.pendingNodeIds()).toEqual([]);
+    expect(queue.unsavedNodeIds('c1')).toEqual([]);
     await expect(queue.flushAllForSubmission('c1')).resolves.toBeUndefined();
   });
 
