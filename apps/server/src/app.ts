@@ -271,11 +271,17 @@ const agentletGateway = mountAgenetes(app, {
         : 'agent-profiles',
     ),
     // Profiles name devices that may be offline: read ownership once per
-    // registry operation.
-    resolveAccess: async () => {
-      const access = await readDeviceAccess();
-      return (profile) => access.canUse(profile.agentletId);
-    },
+    // registry operation. Only Bubble restricts devices to their owners;
+    // local mode has one person, who may use every device, so it reads none.
+    ...(identity.service.provider === 'bubble'
+      ? {
+          resolveAccess: async () => {
+            const access = await readDeviceAccess();
+            return (profile: { agentletId: string }) =>
+              access.canUse(profile.agentletId);
+          },
+        }
+      : {}),
     ...(identity.service.provider === 'local'
       ? { legacyStorageDir: join(getDataDir(), 'agent-team') }
       : {}),

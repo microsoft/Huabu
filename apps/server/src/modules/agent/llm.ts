@@ -47,7 +47,7 @@ import {
   settingsRecordKey,
 } from '../identity/personal-settings.js';
 import { outboundFetch, withPublicNetworkOnly } from '../security/outbound.js';
-import { getServerRecords } from '../storage/index.js';
+import { getServerRecords, ServerRecordError } from '../storage/index.js';
 
 import type { ServerRecordKey } from '../storage/index.js';
 import type {
@@ -315,8 +315,18 @@ interface UtilityConfigPersisted {
  * The migrated shape is only written back on the next `setLLMConfig`\n * / `setImageConfig` call \u2014 we never write on a pure load.
  */
 async function loadPersistedStore(): Promise<PersistedStore> {
+  let stored: unknown;
   try {
-    const stored = await getServerRecords().get(configRecord());
+    stored = await getServerRecords().get(configRecord());
+  } catch (error) {
+    // A failed read is not an empty document: a setter that went on with
+    // one would replace every saved provider with its own edit. Only a
+    // damaged record reads as empty, as a corrupt file always did, so that
+    // saving the settings again repairs it.
+    if (!(error instanceof ServerRecordError)) throw error;
+    return { providers: {} };
+  }
+  try {
     if (!stored || typeof stored !== 'object' || Array.isArray(stored))
       return { providers: {} };
     const parsed = stored as Record<string, unknown>;
@@ -390,7 +400,7 @@ async function loadPersistedStore(): Promise<PersistedStore> {
     }
     return store;
   } catch {
-    // Corrupted or missing file — fall through
+    // A document of an unrecognised shape — fall through
     return { providers: {} };
   }
 }
@@ -426,8 +436,9 @@ function extractLegacyImageConfig(
 }
 
 /** Resolves once the settings are durable. */
-function savePersistedStore(store: PersistedStore): Promise<void> {
-  return getServerRecords().put(configRecord(), store);
+async function savePersistedStore(store: PersistedStore): Promise<void> {
+  await getServerRecords().put(configRecord(), store);
+  runtime().savedGeneration += 1;
 }
 
 const serializeSettings = createKeyedMutex<string>();
@@ -471,12 +482,19 @@ interface RuntimeState {
   cachedModel: Model<Api> | null;
   activeConfig: PersistedConfig | null;
   /**
-   * Cached utility-tier model. Built from `store.utilityConfig` and
-   * invalidated whenever {@link setUtilityConfig} writes. When utility is
+   * Cached utility-tier model and the serialized `store.utilityConfig` it
+   * was built from; served only for that same configuration, and dropped
+   * whenever {@link setUtilityConfig} writes. When utility is
    * following the chat model (no utility config), the resolver returns the
    * chat model directly and this stays null.
    */
-  cachedUtilityModel: Model<Api> | null;
+  cachedUtilityModel: { config: string; model: Model<Api> } | null;
+  /**
+   * How many settings saves this process has acknowledged. A cache filled
+   * from a read is published only if no save landed while it was read, so
+   * a read that began before a save cannot replace what the save published.
+   */
+  savedGeneration: number;
   openAIModelIdsCache: { ids: string[]; expiresAt: number } | null;
   openAIModelIdsRequest: Promise<string[] | null> | null;
   /** Reject cache publication after this owner changes credentials. */
@@ -494,6 +512,7 @@ function runtime(): RuntimeState {
       cachedModel: null,
       activeConfig: null,
       cachedUtilityModel: null,
+      savedGeneration: 0,
       openAIModelIdsCache: null,
       openAIModelIdsRequest: null,
       openAIModelIdsEpoch: 0,
@@ -625,13 +644,20 @@ function buildProviderModel(cfg: PersistedConfig): Model<Api> {
 async function ensureConfig(): Promise<PersistedConfig> {
   const state = runtime();
   if (state.activeConfig) return state.activeConfig;
+  const generation = state.savedGeneration;
+  const config = await readActiveConfig();
+  // A save that landed meanwhile published its own configuration; this
+  // read may predate it.
+  if (state.savedGeneration !== generation) return state.activeConfig ?? config;
+  state.activeConfig = config;
+  return config;
+}
 
+/** The active configuration from persisted config or env vars, uncached. */
+async function readActiveConfig(): Promise<PersistedConfig> {
   // Try persisted config
   const persisted = await loadPersistedConfig();
-  if (persisted) {
-    state.activeConfig = persisted;
-    return persisted;
-  }
+  if (persisted) return persisted;
 
   // The deployment's environment is the operator's, never a member's.
   if (personalSettingsOwner())
@@ -649,23 +675,14 @@ async function ensureConfig(): Promise<PersistedConfig> {
   );
 
   if (azureKey && azureEndpoint && azureDeployment) {
-    const azure: PersistedConfig = {
-      provider: 'azure-openai',
-      model: azureDeployment,
-    };
-    state.activeConfig = azure;
-    return azure;
+    return { provider: 'azure-openai', model: azureDeployment };
   }
 
   // Try other providers from env vars
   for (const p of getProviderCatalog()) {
     if (p.builtIn && environmentStore.get(llmProviderApiKeySecretId(p.id))) {
       const models = await getModelsForProvider(p.id);
-      if (models.length > 0) {
-        const found: PersistedConfig = { provider: p.id, model: models[0].id };
-        state.activeConfig = found;
-        return found;
-      }
+      if (models.length > 0) return { provider: p.id, model: models[0].id };
     }
   }
 
@@ -1390,9 +1407,13 @@ async function getUtilityModel(
 ): Promise<Model<Api>> {
   if (!cfg) return getLLMModel();
   const state = runtime();
-  if (state.cachedUtilityModel) return state.cachedUtilityModel;
+  // Keyed by the configuration the caller just read, so a model built from
+  // a read that a save overtook is never served for the saved one.
+  const config = JSON.stringify(cfg);
+  if (state.cachedUtilityModel?.config === config)
+    return state.cachedUtilityModel.model;
   const model = buildModel(cfg);
-  state.cachedUtilityModel = model;
+  state.cachedUtilityModel = { config, model };
   return model;
 }
 
@@ -1688,6 +1709,7 @@ export async function getLLMModel(): Promise<Model<Api>> {
   const state = runtime();
   if (state.cachedModel) return state.cachedModel;
 
+  const generation = state.savedGeneration;
   const cfg = await ensureConfig();
   const apiKey = resolveApiKey(cfg.provider);
 
@@ -1704,7 +1726,7 @@ export async function getLLMModel(): Promise<Model<Api>> {
   }
 
   const model = buildModel(cfg);
-  state.cachedModel = model;
+  if (state.savedGeneration === generation) state.cachedModel = model;
   return model;
 }
 
