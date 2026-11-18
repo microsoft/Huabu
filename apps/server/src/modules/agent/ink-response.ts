@@ -3,13 +3,15 @@
 
 import { isDeepStrictEqual } from 'node:util';
 
+import {
+  replacedNodeType,
+  type CanvasEdge,
+  type Delta,
+  type NodeFields,
+} from '@huabu/shared/canvas-engine';
+
 import { subscribeCanvasUpdates } from '../canvas/canvas-sync.js';
 
-import type {
-  CanvasEdge,
-  CanvasNode,
-  Delta,
-} from '@huabu/shared/canvas-engine';
 
 export class InkAgentModeError extends Error {
   readonly code = 'ink_agent_read_only';
@@ -27,7 +29,11 @@ export interface InkResponseOutcome {
   interrupted: boolean;
 }
 
-function visibleFields(node: CanvasNode) {
+/**
+ * @param nodeType the node's type when `node` is one side of a row, which
+ *   names a type only when it changed.
+ */
+function visibleFields(node: NodeFields, nodeType = node.type) {
   return {
     type: node.type,
     position: node.position,
@@ -35,7 +41,7 @@ function visibleFields(node: CanvasNode) {
     parentId: node.parentId,
     hidden: node.hidden,
     data: Object.fromEntries(
-      Object.entries(node.data).filter(
+      Object.entries(node.data ?? {}).filter(
         ([key]) =>
           [
             'content',
@@ -44,7 +50,7 @@ function visibleFields(node: CanvasNode) {
             'interactiveView',
             'label',
             'style',
-          ].includes(key) && !(key === 'label' && node.type === 'question'),
+          ].includes(key) && !(key === 'label' && nodeType === 'question'),
       ),
     ),
   };
@@ -83,8 +89,13 @@ export function isInkCanvasResult(delta: Delta): boolean {
       return !delta.node.hidden;
     case 'REPLACE_NODE':
       return (
-        !(delta.prev.hidden && delta.next.hidden) &&
-        !isDeepStrictEqual(visibleFields(delta.prev), visibleFields(delta.next))
+        // A row names only what changed; `hidden` on the row says the node
+        // stayed hidden (whole-node rows of the old format say it per side).
+        !(delta.hidden ?? (delta.prev.hidden && delta.next.hidden)) &&
+        !isDeepStrictEqual(
+          visibleFields(delta.prev, delta.prev.type ?? delta.nodeType),
+          visibleFields(delta.next, replacedNodeType(delta)),
+        )
       );
     case 'INSERT_EDGE':
     case 'DELETE_EDGE':

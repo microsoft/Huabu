@@ -89,11 +89,19 @@ export {
 // ── Deltas (server → client wire diff) ────────────────────────────────────
 export {
   type Delta,
+  type NodeFields,
   type OrderedDelta,
   applyDeltas,
   applyOrderedDeltas,
   invertDelta,
+  isWholeNode,
+  mergeNodeFields,
+  nodeFieldChanges,
+  replacedNodeType,
   replayChangedData,
+  slimDelta,
+  slimDeltas,
+  toWireDeltas,
 } from './delta.js';
 export {
   type SetSiblingOrderEvent,

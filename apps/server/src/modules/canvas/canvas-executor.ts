@@ -58,12 +58,15 @@ import {
   hasValidPdfNoteOwnership,
   hidePdfNotes,
   pdfNoteId,
-  replayChangedData,
+  mergeNodeFields,
   nodeRevision,
   nodeRevisionOf,
   preserveAgentNodeOwnedData,
   projectAgentNodeEditableData,
   replayAgentNodeEditableData,
+  replacedNodeType,
+  slimDeltas,
+  toWireDeltas,
   changesAgentNodePreparation,
   type CanvasChangeRecord,
   type CanvasEdge,
@@ -400,7 +403,7 @@ export function contentChangedNodeIds(deltas: readonly Delta[]): string[] {
       if (MD_BACKED_NODE_TYPES.has(delta.node.type ?? ''))
         ids.add(delta.node.id);
     } else if (delta.type === 'REPLACE_NODE') {
-      if (!MD_BACKED_NODE_TYPES.has(delta.next.type ?? '')) continue;
+      if (!MD_BACKED_NODE_TYPES.has(replacedNodeType(delta) ?? '')) continue;
       const before = (delta.prev.data ?? {}) as Record<string, unknown>;
       const after = (delta.next.data ?? {}) as Record<string, unknown>;
       if (
@@ -1772,6 +1775,10 @@ async function executePreparedOnServerAlreadyLocked(
     finalNodes,
     toVersion,
   );
+  // What travels and is journalled: a deletion as an id. `deltas` keeps the
+  // deleted nodes for the Review records and for in-process callers that
+  // invert the batch.
+  const wireDeltas = toWireDeltas(deltas);
 
   // Persist .md sidecars first so topology never references a markdown
   // file that does not exist on disk. The synchronous commit section is
@@ -1831,7 +1838,7 @@ async function executePreparedOnServerAlreadyLocked(
     ts: Date.now(),
     ...(runId ? { runId } : {}),
     commands: commands as unknown[],
-    deltas: deltas as unknown[],
+    deltas: wireDeltas as unknown[],
     originator,
   };
   // Derive review records (ACP change cards) only when asked. Edge
@@ -1849,7 +1856,14 @@ async function executePreparedOnServerAlreadyLocked(
       const lbl = (node.data as Record<string, unknown> | undefined)?.['label'];
       if (typeof lbl === 'string' && lbl) labelById.set(node.id, lbl);
     }
-    return extractCanvasChanges(deltas, { nodeLabelById: labelById });
+    return extractCanvasChanges(deltas, {
+      nodeLabelById: labelById,
+      nodeTypeById: new Map(
+        finalNodes.flatMap((node) =>
+          typeof node.type === 'string' ? [[node.id, node.type] as const] : [],
+        ),
+      ),
+    });
   };
   const contentNodeIds = contentChangedNodeIds(deltas);
   const outputWith = (
@@ -1887,7 +1901,10 @@ async function executePreparedOnServerAlreadyLocked(
     ? plannedContentRevisions(contentNodeIds, nodeMutations, prepared.records)
     : undefined;
   const result = request
-    ? saveResultFor(canvasId, request, outputWith(changes, plannedRevisions))
+    ? saveResultFor(canvasId, request, {
+        ...outputWith(changes, plannedRevisions),
+        deltas: wireDeltas,
+      })
     : null;
 
   // What this batch creates or re-parents is the page's own change only when
@@ -1964,7 +1981,7 @@ async function executePreparedOnServerAlreadyLocked(
       data: {
         fromVersion,
         toVersion,
-        deltas,
+        deltas: wireDeltas,
         pendingEffects: {
           mutatedNodes: pendingEffects.mutatedNodes,
           deletedNodeIds: pendingEffects.deletedNodeIds,
@@ -2082,39 +2099,39 @@ export async function applyDeltasOnServerAlreadyLocked(input: {
     );
   }
   const liveNodes = new Map(prestateNodes.map((node) => [node.id, node]));
+  // Every row is merged into the node as it is now, so a revert puts back
+  // the fields its change touched and leaves later edits of other fields
+  // alone. A whole-node row (a Review record stored before rows became
+  // partial, or one a caller built from two node objects) is reduced to the
+  // fields that differ first.
+  const incomingDeltas = slimDeltas(input.deltas);
   const editableDeltas = input.agentNodeProjection
-    ? input.deltas
-    : input.deltas.map((delta): Delta => {
+    ? incomingDeltas
+    : incomingDeltas.map((delta): Delta => {
         if (delta.type !== 'REPLACE_NODE') return delta;
         const current = liveNodes.get(delta.next.id);
-        if (
-          input.change &&
-          current?.type === 'pdf' &&
-          delta.prev.type === 'pdf' &&
-          delta.next.type === 'pdf'
-        ) {
-          const next = {
-            ...delta.next,
-            data: replayChangedData(
-              current.data,
-              delta.prev.data,
-              delta.next.data,
-            ),
-          };
-          liveNodes.set(next.id, next);
-          return { ...delta, next };
+        if (current?.type !== 'question') {
+          if (current)
+            liveNodes.set(
+              current.id,
+              mergeNodeFields(current, delta.prev, delta.next),
+            );
+          return delta;
         }
-        if (current?.type !== 'question') return delta;
-        const next = {
-          ...delta.next,
-          data: replayAgentNodeEditableData(
-            current.data,
-            delta.prev.data,
-            delta.next.data,
-          ),
+        // An Agent Node takes only its editable data from a replay; the
+        // row names the whole `data` so the merge installs exactly that.
+        const data = replayAgentNodeEditableData(
+          current.data,
+          delta.prev.data ?? {},
+          delta.next.data ?? {},
+        );
+        const row: Delta = {
+          ...delta,
+          prev: { ...delta.prev, data: current.data },
+          next: { ...delta.next, data },
         };
-        liveNodes.set(next.id, next);
-        return { ...delta, next };
+        liveNodes.set(current.id, mergeNodeFields(current, row.prev, row.next));
+        return row;
       });
   const final = applyDeltas(
     { nodes: prestateNodes, edges: prestateEdges },
@@ -2126,7 +2143,7 @@ export async function applyDeltasOnServerAlreadyLocked(input: {
   final.nodes = hidePdfNotes(final.nodes);
   const previousById = new Map(prestateNodes.map((node) => [node.id, node]));
   const replacedNodeIds = new Set(
-    input.deltas.flatMap((delta) =>
+    incomingDeltas.flatMap((delta) =>
       delta.type === 'REPLACE_NODE' ? [delta.next.id] : [],
     ),
   );
@@ -2270,9 +2287,18 @@ export async function applyDeltasOnServerAlreadyLocked(input: {
 
     const toVersion = fromVersion + 1;
 
+    // A replace row names only what changed; the node it leaves is the one
+    // in the final state.
+    const finalById = new Map(finalNodes.map((node) => [node.id, node]));
+    const writtenNode = (d: Delta): CanvasNode | undefined =>
+      d.type === 'INSERT_NODE'
+        ? d.node
+        : d.type === 'REPLACE_NODE'
+          ? finalById.get(d.next.id)
+          : undefined;
     for (const d of deltas) {
-      if (d.type === 'INSERT_NODE' || d.type === 'REPLACE_NODE') {
-        const node = d.type === 'INSERT_NODE' ? d.node : d.next;
+      const node = writtenNode(d);
+      if (node) {
         mutatedNodes.push(node);
         if (d.type === 'REPLACE_NODE') contentEditedNodeIds.push(node.id);
       } else if (d.type === 'DELETE_NODE') {
@@ -2282,8 +2308,8 @@ export async function applyDeltasOnServerAlreadyLocked(input: {
     const insertedIds = insertedNodeIds(deltas);
     const nodeMutations: SpaceNodeMutation[] = [];
     for (const d of deltas) {
-      if (d.type === 'INSERT_NODE' || d.type === 'REPLACE_NODE') {
-        const node = d.type === 'INSERT_NODE' ? d.node : d.next;
+      const node = writtenNode(d);
+      if (node) {
         const record = buildNodeContent(node);
         if (record) {
           nodeMutations.push({
@@ -2318,7 +2344,7 @@ export async function applyDeltasOnServerAlreadyLocked(input: {
         ts: Date.now(),
         ...(runId ? { runId } : {}),
         commands: [],
-        deltas: deltas as unknown[],
+        deltas: toWireDeltas(deltas) as unknown[],
         originator,
       },
     });

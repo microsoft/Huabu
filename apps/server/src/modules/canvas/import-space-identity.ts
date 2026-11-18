@@ -386,7 +386,8 @@ export async function remapImportedSpace(
             !['interactiveView', 'origin', 'strokes'].includes(key)
           )
             return [key, typeof item === 'string' ? rewriteLinks(item) : item];
-          // Replacement deltas contain complete nodes/edges, not arbitrary prev/next values.
+          // Replacement deltas contain nodes/edges — a node whole (old
+          // history) or only its changed fields — not arbitrary prev/next values.
           if (
             (key === 'prev' || key === 'next') &&
             value.type === 'REPLACE_NODE'

@@ -31,6 +31,7 @@ import {
 } from '@huabu/shared';
 import {
   readVersionRunsProblem,
+  toWireDeltas,
   nodeRevisionOf,
   hidePdfNotes,
 } from '@huabu/shared/canvas-engine';
@@ -1555,7 +1556,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         canvasId: out.canvasId,
         fromVersion: out.fromVersion,
         toVersion: out.toVersion,
-        deltas: out.deltas,
+        deltas: toWireDeltas(out.deltas),
         results: out.results,
         commands: out.commands,
         pendingEffects: {

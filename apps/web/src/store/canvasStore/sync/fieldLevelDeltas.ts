@@ -4,13 +4,14 @@
 /**
  * Field-level application of a server update.
  *
- * The server's deltas are coarse: an in-place edit is a `REPLACE_NODE`
- * carrying the whole previous and next node. Installing `next` as is would
- * overwrite every property of the local node, including ones this page has
- * changed and not yet had confirmed. This module rewrites each delta against
- * the live local entity so that only the property units the update actually
- * changed are written, and units held by an unconfirmed local change are
- * left alone and reported as withheld.
+ * An in-place edit arrives as a `REPLACE_NODE` that names the fields the
+ * batch changed, with their previous and new values. {@link expandNodeRows}
+ * merges such a row into the live local node (the shared applier,
+ * `mergeNodeFields`), giving the node before and after the change as this
+ * page would hold it. This module then rewrites each row against the live
+ * local entity so that only the property units the update actually changed
+ * are written, and units held by an unconfirmed local change are left alone
+ * and reported as withheld.
  *
  * The output is still a `Delta[]`, so the existing replay
  * (`applyDeltas`, dirty-content protection, order replay) runs unchanged on
@@ -19,6 +20,8 @@
  *
  * Pure functions only.
  */
+
+import { mergeNodeFields } from '@huabu/shared/canvas-engine';
 
 import {
   EXISTENCE_UNIT,
@@ -33,7 +36,41 @@ import {
   type UnitNode,
 } from './propertyUnits';
 
-import type { Delta } from '@huabu/shared/canvas-engine';
+
+import type { CanvasNode, Delta } from '@huabu/shared/canvas-engine';
+
+/**
+ * Give every node row the whole node it is about, as this page holds it.
+ *
+ * A `REPLACE_NODE` names only the fields that changed. Merged into the live
+ * local node it becomes `prev` = that node with the fields' previous values
+ * and `next` = that node with their new values, so everything downstream
+ * reads whole nodes and the two differ in exactly what the batch changed. A
+ * `DELETE_NODE` carries an id; it is given the local node. A row for a node
+ * this page does not have is left as it is — nothing is applied for it.
+ */
+export function expandNodeRows(
+  deltas: readonly Delta[],
+  localNodes: readonly { id: string }[],
+): Delta[] {
+  const local = new Map(localNodes.map((node) => [node.id, node]));
+  return deltas.map((delta): Delta => {
+    if (delta.type === 'REPLACE_NODE') {
+      const node = local.get(delta.next.id) as CanvasNode | undefined;
+      if (!node) return delta;
+      return {
+        ...delta,
+        prev: mergeNodeFields(node, delta.next, delta.prev),
+        next: mergeNodeFields(node, delta.prev, delta.next),
+      };
+    }
+    if (delta.type === 'DELETE_NODE') {
+      const node = local.get(delta.node.id) as CanvasNode | undefined;
+      return node ? { ...delta, node } : delta;
+    }
+    return delta;
+  });
+}
 
 type LocalEdge = { id: string } & Record<string, unknown>;
 

@@ -165,6 +165,7 @@ import {
   type PreparedRemote,
   type ReloadOutcome,
 } from './canvasStore/sync/browserSync';
+import { expandNodeRows } from './canvasStore/sync/fieldLevelDeltas';
 import { restoreChanged } from './canvasStore/sync/historyRestore';
 import { deriveHeldKeys, nodeUnitKey } from './canvasStore/sync/inFlight';
 import {
@@ -3747,6 +3748,9 @@ const useCanvasStore = create<RFState>()(
       sync,
     ) => {
       const orderEvents = order?.events ?? [];
+      // Rows name only what changed; from here on each is about the whole
+      // node as this page holds it.
+      deltas = expandNodeRows(deltas, get().nodes);
       // The save baseline of a node whose content this batch changed is the
       // revision the server stored for it, never a hash of the node in the
       // batch: that copy is not always what is stored. A content change
@@ -3835,10 +3839,10 @@ const useCanvasStore = create<RFState>()(
               data: preserveAgentNodeOwnedData(
                 replayAgentNodeEditableData(
                   live.data,
-                  delta.prev.data,
-                  delta.next.data,
+                  delta.prev.data ?? {},
+                  delta.next.data ?? {},
                 ),
-                delta.next.data,
+                delta.next.data ?? {},
               ),
             },
           };

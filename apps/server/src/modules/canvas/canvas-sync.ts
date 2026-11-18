@@ -20,6 +20,8 @@
 
 import { AsyncResource } from 'node:async_hooks';
 
+import { toWireDeltas, type Delta } from '@huabu/shared/canvas-engine';
+
 import type { CanvasSyncEvent } from '@huabu/shared';
 
 /**
@@ -48,10 +50,22 @@ export function publishCanvasUpdate(
 ): void {
   const set = listenersByCanvas.get(canvasId);
   if (!set) return;
+  // The one place an update leaves the writer: whoever built it, its rows
+  // travel reduced to what changed, and a deletion as an id.
+  const sent: CanvasSyncEvent =
+    event.type === 'update'
+      ? {
+          ...event,
+          data: {
+            ...event.data,
+            deltas: toWireDeltas(event.data.deltas as Delta[]),
+          },
+        }
+      : event;
   for (const fn of set) {
     try {
-      if (origin) fn(event, origin);
-      else fn(event);
+      if (origin) fn(sent, origin);
+      else fn(sent);
     } catch {
       /* ignore listener errors — one bad subscriber must not stall others */
     }

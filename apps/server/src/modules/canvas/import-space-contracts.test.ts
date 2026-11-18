@@ -15,8 +15,10 @@ import {
   recentActionSchema,
 } from '@huabu/shared';
 import {
+  applyDeltas,
   extractCanvasChanges,
   fingerprintNodeFields,
+  isChangeStale,
 } from '@huabu/shared/canvas-engine';
 
 import { remapImportedSpace } from './import-space-identity.js';
@@ -40,7 +42,10 @@ import type {
   ChatEnvelope,
   ChatHistoryItem,
 } from '@huabu/shared';
-import type { CanvasNode } from '@huabu/shared/canvas-engine';
+import type {
+  CanvasChangeRecord,
+  CanvasNode,
+} from '@huabu/shared/canvas-engine';
 
 let root: string;
 beforeEach(async () => {
@@ -707,3 +712,76 @@ it('rejects an inconsistent historical fingerprint instead of making it revertib
     'Imported change fingerprint does not match its applied snapshot',
   );
 });
+
+it.each([
+  { format: 'old whole-node rows', whole: true },
+  { format: 'partial rows', whole: false },
+])(
+  'imports a history of $format and keeps it revertible',
+  async ({ whole }) => {
+    const source = record();
+    const note = source.state.nodes[0] as CanvasNode;
+    note.data.content = 'After';
+    const before = { ...note, data: { ...note.data, content: 'Before' } };
+    const [extracted] = extractCanvasChanges([
+      { type: 'REPLACE_NODE', prev: before, next: structuredClone(note) },
+    ]);
+    // What a Space exported before rows became partial holds: the whole
+    // node on both sides of the revert row.
+    const change = whole
+      ? {
+          ...extracted,
+          revertDeltas: [
+            {
+              type: 'REPLACE_NODE',
+              prev: structuredClone(note),
+              next: before,
+            },
+          ],
+        }
+      : extracted;
+    // A change that touched no `data` key has no `data` on its row.
+    const [moved] = extractCanvasChanges([
+      {
+        type: 'REPLACE_NODE',
+        prev: { id: note.id, position: { x: 0, y: 0 } },
+        next: { id: note.id, position: { x: 9, y: 9 } },
+      },
+    ]);
+    await mkdir(path.join(root, '.history', 'chat'), { recursive: true });
+    await writeFile(
+      path.join(root, '.history', 'chat', 'thread-original.changes.json'),
+      JSON.stringify([change, moved]),
+    );
+    const imported = await remapImportedSpace(root, source, 'target');
+    const nodes = imported.state.nodes as CanvasNode[];
+    const mapped = JSON.parse(
+      await readFile(
+        path.join(
+          root,
+          '.history',
+          'chat',
+          `${nodes[2].data.threadId}.changes.json`,
+        ),
+        'utf8',
+      ),
+    ) as CanvasChangeRecord[];
+    expect(mapped).toHaveLength(2);
+    for (const item of mapped) {
+      const row = item.revertDeltas[0];
+      expect(row?.type).toBe('REPLACE_NODE');
+      if (row?.type === 'REPLACE_NODE') expect(row.prev.id).toBe(nodes[0].id);
+      expect(isChangeStale(item, nodes, [])).toBe(false);
+    }
+    const reverted = applyDeltas(
+      { nodes, edges: [] },
+      mapped[0].revertDeltas,
+    ).nodes.find((node) => node.id === nodes[0].id);
+    expect(reverted?.data.content).toBe('Before');
+    // Everything the change did not touch is still what the Space holds.
+    expect({
+      ...reverted,
+      data: { ...reverted?.data, content: 'After' },
+    }).toEqual(nodes[0]);
+  },
+);

@@ -291,13 +291,16 @@ export function rewriteImportedChange(
           ? delta.prev
           : undefined
       : undefined;
+    // A row holds the whole node (history written before rows became
+    // partial) or only the fields the change touched; a change that touched
+    // no `data` key has no `data` and fingerprints as empty.
     if (
       !isImportRecord(node) ||
       typeof node.id !== 'string' ||
-      !isImportRecord(node.data)
+      (node.data !== undefined && !isImportRecord(node.data))
     )
       throw new Error('Invalid imported change applied snapshot');
-    return { id: node.id, data: node.data, position: { x: 0, y: 0 } };
+    return { id: node.id, data: node.data ?? {}, position: { x: 0, y: 0 } };
   };
   if (
     fingerprintNodeFields(applied(original), original.fingerprintKeys) !==

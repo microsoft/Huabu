@@ -290,6 +290,8 @@ class CanvasHistoryManager {
       if (
         delta.type !== 'REPLACE_NODE' ||
         delta.next.type !== 'question' ||
+        !delta.prev.data ||
+        !delta.next.data ||
         delta.prev.data.invocationToken ||
         !delta.next.data.invocationToken ||
         typeof delta.prev.data.content !== 'string' ||
@@ -297,15 +299,17 @@ class CanvasHistoryManager {
         delta.prev.data.content === delta.next.data.content
       )
         continue;
+      const before = delta.prev.data.content;
+      const after = delta.next.data.content;
       for (const snapshot of [...this.undoStack, ...this.redoStack]) {
         snapshot.nodes = snapshot.nodes.map((node) =>
           node.id === delta.next.id &&
           node.type === 'question' &&
           !node.data.invocationToken &&
-          node.data.content === delta.prev.data.content
+          node.data.content === before
             ? {
                 ...node,
-                data: { ...node.data, content: delta.next.data.content },
+                data: { ...node.data, content: after },
               }
             : node,
         );
