@@ -229,13 +229,19 @@ describe('personal settings', () => {
     // Administrators have personal credentials too.
     expect(as(person('admin', true), () => store.getSecret(tavily))).toBeNull();
 
-    // Settings files go under the member's own directory.
-    expect(as(person('carol'), () => scope.settingsFilePath('x.json'))).toMatch(
-      new RegExp(`^${tmp}/people/[0-9a-f]{32}/x\\.json$`),
+    // Settings records belong to the member's own opaque key.
+    const carol = as(person('carol'), () =>
+      scope.settingsRecordKey('agent-defaults'),
     );
-    expect(as(null, () => scope.settingsFilePath('x.json'))).toBe(
-      join(tmp, 'x.json'),
-    );
+    expect(carol).toEqual({
+      owner: expect.stringMatching(/^[0-9a-f]{32}$/),
+      name: 'agent-defaults',
+    });
+    expect(carol.owner).not.toContain('carol');
+    expect(as(null, () => scope.settingsRecordKey('agent-defaults'))).toEqual({
+      owner: null,
+      name: 'agent-defaults',
+    });
   });
 
   it('never namespaces the deployment’s own credentials', async () => {
@@ -255,16 +261,16 @@ describe('personal settings', () => {
   it('persists independent Agent defaults for members and administrators', async () => {
     const scope = await import('./personal-settings.js');
     const defaults = await import('../agent/agent-defaults.js');
-    defaults.setAgentDefaults({
+    await defaults.setAgentDefaults({
       profileId: 'legacy-external',
       functionalModel: '',
     });
     for (const owner of [false, true]) {
       for (const id of ['carol', 'dave']) {
-        scope.openPersonalSettings(() => {
+        await scope.openPersonalSettings(async () => {
           scope.useCaller(person(`${id}-${owner}`, owner));
           expect(defaults.getAgentDefaults().profileId).toBe('huabu');
-          defaults.setAgentDefaults({
+          await defaults.setAgentDefaults({
             profileId: `${id}-agent`,
             functionalModel: `${id}-model`,
           });

@@ -167,7 +167,7 @@ const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
         });
       }
       try {
-        renameDevice(params.data.agentletId, body.data.displayName);
+        await renameDevice(params.data.agentletId, body.data.displayName);
         return body.data;
       } catch (error) {
         request.log.error({ err: error }, 'Failed to save device name');
@@ -393,7 +393,7 @@ const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
           ? {}
           : { customData: parsed.data.customData }),
       };
-      const created = registry.createProfile(
+      const created = await registry.createProfile(
         launch.kind === 'acp-command'
           ? { ...common, launchKind: 'acp-command', command: launch.command }
           : {
@@ -403,7 +403,7 @@ const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
               options: launch.options,
             },
       );
-      initializeAgentDefaults(registry.listProfiles());
+      await initializeAgentDefaults(registry.listProfiles());
       return created;
     },
   );
@@ -490,7 +490,7 @@ const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
       }
     }
     try {
-      const updated = registry.patchProfile(params.data.id, {
+      const updated = await registry.patchProfile(params.data.id, {
         expectedRevision: parsed.data.expectedRevision,
         ...(parsed.data.alias === undefined
           ? {}
@@ -544,7 +544,7 @@ const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
         code: 'profile_registry_unavailable',
       });
     }
-    const deleted = registry.deleteProfile(params.data.id);
+    const deleted = await registry.deleteProfile(params.data.id);
     if (!deleted) {
       return reply.status(404).send({
         message: `No profile with id ${request.params.id}`,

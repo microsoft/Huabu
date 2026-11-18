@@ -31,15 +31,18 @@ describe('external-agent runtime config', () => {
     rmSync(dataDir, { recursive: true, force: true });
   });
 
-  it('uses ten minutes and ten agents when no config has been persisted', () => {
+  it('uses ten minutes and ten agents when no config has been persisted', async () => {
     expect(getExternalAgentRuntimeConfig()).toEqual(
       DEFAULT_EXTERNAL_AGENT_RUNTIME_CONFIG,
     );
   });
 
-  it('persists disabled idle suspension atomically', () => {
+  it('persists disabled idle suspension atomically', async () => {
     expect(
-      setExternalAgentRuntimeConfig({ idleTimeoutSecs: 0, maxAgents: 25 }),
+      await setExternalAgentRuntimeConfig({
+        idleTimeoutSecs: 0,
+        maxAgents: 25,
+      }),
     ).toEqual({
       idleTimeoutSecs: 0,
       maxAgents: 25,
@@ -58,26 +61,26 @@ describe('external-agent runtime config', () => {
     ).toEqual({ idleTimeoutSecs: 0, maxAgents: 25 });
   });
 
-  it('rejects finite timeouts outside one minute through one day', () => {
-    expect(() =>
+  it('rejects finite timeouts outside one minute through one day', async () => {
+    await expect(
       setExternalAgentRuntimeConfig({ idleTimeoutSecs: 59, maxAgents: 10 }),
-    ).toThrow();
-    expect(() =>
+    ).rejects.toThrow();
+    await expect(
       setExternalAgentRuntimeConfig({
         idleTimeoutSecs: 86_401,
         maxAgents: 10,
       }),
-    ).toThrow();
-    expect(() =>
+    ).rejects.toThrow();
+    await expect(
       setExternalAgentRuntimeConfig({ idleTimeoutSecs: 61, maxAgents: 10 }),
-    ).toThrow();
+    ).rejects.toThrow();
   });
 
-  it('rejects non-positive, fractional, and unsafe agent limits', () => {
+  it('rejects non-positive, fractional, and unsafe agent limits', async () => {
     for (const maxAgents of [0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
-      expect(() =>
+      await expect(
         setExternalAgentRuntimeConfig({ idleTimeoutSecs: 600, maxAgents }),
-      ).toThrow();
+      ).rejects.toThrow();
     }
   });
 });

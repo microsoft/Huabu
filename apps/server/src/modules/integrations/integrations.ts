@@ -47,7 +47,7 @@ export async function setIntegrationsConfig(
   update: IntegrationsConfigUpdate,
 ): Promise<IntegrationsConfig> {
   // Collect all touched keys and write them in one batch. On the
-  // encrypted-file backend this is a single atomic file replacement; on the
+  // encrypted backend this is a single atomic record replacement; on the
   // Electron bridge backend it currently degrades to a sequential per-key
   // write, so a mid-batch failure there can still leave an earlier key
   // committed (see ElectronSecretStore.setMany). Batching keeps the call site

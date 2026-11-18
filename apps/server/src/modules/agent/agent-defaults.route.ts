@@ -119,7 +119,7 @@ const agentDefaultsRoutes: FastifyPluginAsync = async (app) => {
           });
         }
       }
-      return projectDefaults(setAgentDefaults(parsed.data));
+      return projectDefaults(await setAgentDefaults(parsed.data));
     },
   );
 };

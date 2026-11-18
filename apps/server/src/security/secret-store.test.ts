@@ -281,7 +281,7 @@ describe('initializeSecretStore — master key isolation', () => {
       // The parsed key now lives only inside the store; the raw env var is
       // gone so it can never be inherited by a forked child process.
       expect(process.env.HUABU_SECRET_KEY).toBeUndefined();
-      expect(mod.getSecretStoreKind()).toBe('encrypted-file');
+      expect(mod.getSecretStoreKind()).toBe('encrypted');
     },
     MODULE_RELOAD_TIMEOUT_MS,
   );

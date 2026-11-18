@@ -32,12 +32,12 @@ export function getProfileSessionPreferences(
   return parsePreferences(profile?.customData?.[CUSTOM_DATA_KEY]);
 }
 
-export function rememberProfileSessionPreference(
+export async function rememberProfileSessionPreference(
   profileId: string,
   key: keyof AcpProfileSessionPreferences,
   value: string,
   executionRevision = 0,
-): void {
+): Promise<void> {
   const registry = getAgentProfileRegistry();
   const profile = registry?.getProfile(profileId);
   if (!registry || !profile) return;
@@ -52,16 +52,16 @@ export function rememberProfileSessionPreference(
     ...parsePreferences(customData[CUSTOM_DATA_KEY]),
     [key]: value,
   };
-  registry.patchProfile(profileId, { customData });
+  await registry.patchProfile(profileId, { customData });
 }
 
-export function rememberProfileConfigPreference(
+export async function rememberProfileConfigPreference(
   profileId: string,
   configOptions: readonly unknown[],
   optionId: string,
   value: string | boolean,
   executionRevision = 0,
-): void {
+): Promise<void> {
   if (typeof value !== 'string') return;
   const option = configOptions.find((candidate) => {
     if (!candidate || typeof candidate !== 'object') return false;
@@ -71,14 +71,14 @@ export function rememberProfileConfigPreference(
     .trim()
     .toLowerCase();
   if (category === 'model') {
-    rememberProfileSessionPreference(
+    await rememberProfileSessionPreference(
       profileId,
       'model',
       value,
       executionRevision,
     );
   } else if (category === 'thought_level') {
-    rememberProfileSessionPreference(
+    await rememberProfileSessionPreference(
       profileId,
       'thoughtLevel',
       value,

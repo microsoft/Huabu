@@ -7,20 +7,12 @@ import {
   createHash,
   randomBytes,
 } from 'node:crypto';
-import {
-  chmodSync,
-  closeSync,
-  existsSync,
-  fsyncSync,
-  mkdirSync,
-  openSync,
-  readFileSync,
-  renameSync,
-  writeFileSync,
-} from 'node:fs';
-import { dirname, join } from 'node:path';
 
 import type { SecretStore } from './secret-store-types.js';
+import type {
+  ServerRecordKey,
+  ServerRecords,
+} from '../modules/storage/index.js';
 
 interface EncryptedEntry {
   iv: string;
@@ -28,6 +20,7 @@ interface EncryptedEntry {
   tag: string;
 }
 
+/** The persisted envelope; one record holds every credential. */
 interface EncryptedSecretFile {
   version: 1;
   algorithm: 'aes-256-gcm';
@@ -35,28 +28,13 @@ interface EncryptedSecretFile {
   entries: Record<string, EncryptedEntry>;
 }
 
-const FILE_NAME = 'encrypted-secrets.json';
+/** The server record holding the envelope (`encrypted-secrets.json` on Disk). */
+export const CREDENTIALS_RECORD: ServerRecordKey = Object.freeze({
+  owner: null,
+  name: 'credentials',
+});
 const ALGORITHM = 'aes-256-gcm';
 const AAD_PREFIX = 'huabu-secret-v1:';
-
-function writeJsonAtomic(path: string, value: unknown): void {
-  const dir = dirname(path);
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  const temporary = `${path}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`;
-  const fd = openSync(temporary, 'wx', 0o600);
-  try {
-    writeFileSync(fd, JSON.stringify(value, null, 2), 'utf-8');
-    fsyncSync(fd);
-  } finally {
-    closeSync(fd);
-  }
-  try {
-    chmodSync(temporary, 0o600);
-  } catch {
-    // Best effort on platforms that support POSIX modes.
-  }
-  renameSync(temporary, path);
-}
 
 function parseEntry(value: unknown, id: string): EncryptedEntry {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -77,8 +55,7 @@ function parseEntry(value: unknown, id: string): EncryptedEntry {
   };
 }
 
-function parseEncryptedFile(raw: string): EncryptedSecretFile {
-  const value = JSON.parse(raw) as unknown;
+function parseEncryptedFile(value: unknown): EncryptedSecretFile {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error('Invalid encrypted credential file');
   }
@@ -120,23 +97,27 @@ export function parseServerMasterKey(encoded: string): Buffer {
   return key;
 }
 
-/** AES-256-GCM encrypted file backend for a standalone single-user server. */
-export class EncryptedFileSecretStore implements SecretStore {
+/**
+ * AES-256-GCM credentials for a standalone Server, kept as one envelope in the
+ * deployment's `credentials` server record — a file on Disk, a row on SQLite
+ * and PostgreSQL. Each credential is encrypted separately with a random IV
+ * and its id as additional authenticated data; the key never enters the
+ * record, only its fingerprint.
+ */
+export class EncryptedSecretStore implements SecretStore {
   readonly writable = true;
-  readonly kind = 'encrypted-file';
-  readonly path: string;
+  readonly kind = 'encrypted';
 
   private readonly keyId: string;
   private secrets = new Map<string, string>();
 
   constructor(
-    dataDir: string,
+    private readonly records: ServerRecords,
     private readonly masterKey: Buffer,
   ) {
     if (masterKey.length !== 32) {
-      throw new Error('EncryptedFileSecretStore requires a 32-byte master key');
+      throw new Error('EncryptedSecretStore requires a 32-byte master key');
     }
-    this.path = join(dataDir, FILE_NAME);
     this.keyId = createHash('sha256')
       .update(masterKey)
       .digest('hex')
@@ -144,14 +125,9 @@ export class EncryptedFileSecretStore implements SecretStore {
   }
 
   async initialize(): Promise<void> {
-    if (!existsSync(this.path)) return;
-    const persisted = parseEncryptedFile(readFileSync(this.path, 'utf-8'));
-    if (persisted.keyId !== this.keyId) {
-      throw new Error(
-        'HUABU_SECRET_KEY does not match the existing encrypted credential file',
-      );
-    }
-    this.secrets = this.decryptAll(persisted);
+    const stored = this.records.get(CREDENTIALS_RECORD);
+    if (stored === null) return;
+    this.secrets = this.decryptAll(this.parseOwn(stored));
   }
 
   get(id: string): string | null {
@@ -162,22 +138,30 @@ export class EncryptedFileSecretStore implements SecretStore {
     await this.setMany({ [id]: value }, true);
   }
 
-  /** Persist several values in one authenticated, atomic file replacement. */
+  /**
+   * Persist several values in one record replacement, then read the
+   * acknowledged record back, authenticate and decrypt every entry, and only
+   * then publish the new values.
+   */
   async setMany(
     updates: Record<string, string | null>,
     overwrite = true,
   ): Promise<void> {
-    const next = new Map(this.secrets);
-    for (const [id, value] of Object.entries(updates)) {
-      if (!overwrite && next.has(id)) continue;
-      if (value === null) next.delete(id);
-      else next.set(id, value);
-    }
-    const persisted = this.encryptAll(next);
-    writeJsonAtomic(this.path, persisted);
+    let next = new Map<string, string>();
+    await this.records.update(CREDENTIALS_RECORD, (current) => {
+      next =
+        current === null ? new Map() : this.decryptAll(this.parseOwn(current));
+      for (const [id, value] of Object.entries(updates)) {
+        if (!overwrite && next.has(id)) continue;
+        if (value === null) next.delete(id);
+        else next.set(id, value);
+      }
+      return this.encryptAll(next);
+    });
 
-    const verified = parseEncryptedFile(readFileSync(this.path, 'utf-8'));
-    const verifiedSecrets = this.decryptAll(verified);
+    const verifiedSecrets = this.decryptAll(
+      this.parseOwn(this.records.get(CREDENTIALS_RECORD)),
+    );
     for (const [id, value] of next) {
       if (verifiedSecrets.get(id) !== value) {
         throw new Error(`Encrypted credential verification failed for ${id}`);
@@ -189,6 +173,17 @@ export class EncryptedFileSecretStore implements SecretStore {
       );
     }
     this.secrets = verifiedSecrets;
+  }
+
+  /** Parse an envelope and refuse one written under a different key. */
+  private parseOwn(value: unknown): EncryptedSecretFile {
+    const persisted = parseEncryptedFile(value);
+    if (persisted.keyId !== this.keyId) {
+      throw new Error(
+        'HUABU_SECRET_KEY does not match the existing encrypted credentials',
+      );
+    }
+    return persisted;
   }
 
   private encryptAll(secrets: Map<string, string>): EncryptedSecretFile {

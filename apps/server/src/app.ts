@@ -30,6 +30,7 @@ import {
   mountAgenetes,
   resolveDaemonRuntime,
 } from './modules/agent/acp/index.js';
+import { agentProfileRecordStore } from './modules/agent/acp/profile-registry-store.js';
 import { isCurrentReachback } from './modules/agent/acp/reachback-conversation.js';
 import { initializeAgentDefaults } from './modules/agent/agent-defaults.js';
 import agentDefaultsRoutes from './modules/agent/agent-defaults.route.js';
@@ -260,8 +261,7 @@ const agentletGateway = mountAgenetes(app, {
   hostEnvPrefix: 'HUABU_',
   hostEnvAllowlist: [],
   profiles: {
-    storageDir: join(
-      getDataDir(),
+    store: agentProfileRecordStore(
       identity.service.provider === 'bubble'
         ? 'user-agent-profiles'
         : 'agent-profiles',
@@ -276,7 +276,7 @@ const agentletGateway = mountAgenetes(app, {
 let unregisterHarnessDiscovery: (() => void) | undefined;
 app.addHook('onReady', async () => {
   const registry = getAgentProfileRegistry();
-  if (registry) initializeAgentDefaults(registry.listProfiles());
+  if (registry) await initializeAgentDefaults(registry.listProfiles());
   unregisterHarnessDiscovery = registerHarnessProfileDiscovery({
     gateway: agentletGateway,
     getRegistry: getAgentProfileRegistry,

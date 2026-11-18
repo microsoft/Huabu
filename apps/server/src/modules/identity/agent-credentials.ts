@@ -2,16 +2,13 @@
 // Licensed under the MIT license.
 
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import { statSync } from 'node:fs';
-import { join } from 'node:path';
 
 import { getAgentletGateway } from '@agenetes/agentlet-host';
 import { z } from 'zod';
 
 import { personalSettingsOwner } from './personal-settings.js';
 import { getConnectionToken } from '../../connection-token.js';
-import { getDataDir } from '../../data-dir.js';
-import { atomicWriteJson, readJsonStrict } from '../../utils/fs.js';
+import { getServerRecords } from '../storage/index.js';
 
 import type { IdentityService } from './service.js';
 import type { FastifyInstance } from 'fastify';
@@ -147,54 +144,27 @@ const PREFIX = 'huabu-agent.v1.';
 const ownersSchema = z.record(z.string(), z.string().min(1));
 const versionsSchema = z.record(z.string(), version);
 
-function ownersPath(): string {
-  return join(getDataDir(), 'agentlet-owners.json');
+/** `agentletId -> principalId` for every device that ever connected as a user's. */
+const OWNERS = { owner: null, name: 'device-owners' } as const;
+/** `principalId -> version`; absent means version 0. */
+const VERSIONS = { owner: null, name: 'agent-credential-versions' } as const;
+
+function readOwners(): z.infer<typeof ownersSchema> {
+  return ownersSchema.parse(getServerRecords().get(OWNERS) ?? {});
 }
 
-function versionsPath(): string {
-  return join(getDataDir(), 'agent-credential-versions.json');
-}
-
-const parsed = new Map<string, { stamp: string; value: unknown }>();
-
-/**
- * A durable map, parsed again only when its file changes. Ownership checks
- * run once per device and Profile on every listing; a write replaces the file
- * by rename, so its stamp changes with it.
- */
-function readMap<T extends Record<string, unknown>>(
-  file: string,
-  schema: z.ZodType<T>,
-): T {
-  let stamp: string;
-  try {
-    const stat = statSync(file);
-    stamp = `${stat.ino}:${stat.mtimeMs}:${stat.size}`;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-    parsed.delete(file);
-    return {} as T;
-  }
-  const cached = parsed.get(file);
-  if (cached?.stamp === stamp) return cached.value as T;
-  const value = schema.parse(readJsonStrict(file) ?? {});
-  parsed.set(file, { stamp, value });
-  return value;
-}
-
-function writeMap(file: string, value: Record<string, unknown>): void {
-  atomicWriteJson(file, value);
-  parsed.delete(file);
+function readVersions(): z.infer<typeof versionsSchema> {
+  return versionsSchema.parse(getServerRecords().get(VERSIONS) ?? {});
 }
 
 /** Device ownership is durable and never changes on reconnect or role changes. */
 export function agentletOwner(agentletId: string): string | null {
-  const owners = readMap(ownersPath(), ownersSchema);
+  const owners = readOwners();
   return Object.hasOwn(owners, agentletId) ? owners[agentletId] : null;
 }
 
 function credentialVersion(principalId: string): number {
-  const versions = readMap(versionsPath(), versionsSchema);
+  const versions = readVersions();
   return Object.hasOwn(versions, principalId) ? versions[principalId] : 0;
 }
 
@@ -206,11 +176,15 @@ function credentialVersion(principalId: string): number {
  * Their devices stay theirs: a device's Profiles and conversations are
  * authorized through its owner, so handing the device on would hand them on.
  */
-export function resetAgentCredentials(principalId: string): void {
-  const versions = readMap(versionsPath(), versionsSchema);
-  writeMap(versionsPath(), {
-    ...versions,
-    [principalId]: credentialVersion(principalId) + 1,
+export async function resetAgentCredentials(
+  principalId: string,
+): Promise<void> {
+  await getServerRecords().update(VERSIONS, (current) => {
+    const versions = versionsSchema.parse(current ?? {});
+    const previous = Object.hasOwn(versions, principalId)
+      ? versions[principalId]
+      : 0;
+    return { ...versions, [principalId]: previous + 1 };
   });
   disconnectAgentlets(principalId, 'Device credentials were reset');
 }
@@ -342,17 +316,25 @@ export function authenticateUserAgentlet(service: IdentityService) {
     if (!(await service.resolvePrincipal?.(claims.principalId))?.member)
       throw new Error('Device owner is not admitted');
     if (!readAgentCredential(token)) throw refusedDeviceCredential(token);
-    const owners = readMap(ownersPath(), ownersSchema);
-    if (
-      Object.hasOwn(owners, agentletId) &&
-      owners[agentletId] !== claims.principalId
-    )
+    const owner = agentletOwner(agentletId);
+    if (owner !== null && owner !== claims.principalId)
       throw new Error('Device belongs to another user');
-    if (!Object.hasOwn(owners, agentletId))
-      writeMap(ownersPath(), {
-        ...owners,
-        [agentletId]: claims.principalId,
+    if (owner === null) {
+      // Claims are serialized, so of two people racing for a new device the
+      // second sees the first's claim here and is refused.
+      await getServerRecords().update(OWNERS, (current) => {
+        const owners = ownersSchema.parse(current ?? {});
+        if (
+          Object.hasOwn(owners, agentletId) &&
+          owners[agentletId] !== claims.principalId
+        )
+          throw new Error('Device belongs to another user');
+        return { ...owners, [agentletId]: claims.principalId };
       });
+      // A reset that completed while the claim was being written has already
+      // swept connected devices; this one is not connected yet.
+      if (!readAgentCredential(token)) throw refusedDeviceCredential(token);
+    }
     return { metadata: { principalId: claims.principalId } };
   };
 }

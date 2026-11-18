@@ -45,6 +45,7 @@ import {
 } from '../../connection-token.js';
 import connectionRoutes from '../agent/acp/connection-token.route.js';
 import deviceFilesRoutes from '../agent/acp/device-files.route.js';
+import { agentProfileRecordStore } from '../agent/acp/profile-registry-store.js';
 import profilesRoutes from '../agent/acp/profiles.route.js';
 import { resolveReachbackRuntimeEnvironment } from '../agent/acp/reachback-env.js';
 import threadsRoutes from '../agent/acp/threads.route.js';
@@ -193,7 +194,7 @@ async function host(
     canAccessAgentlet: canUseAgentlet,
     authenticate: authenticateUserAgentlet(bubble.service),
     profiles: {
-      storageDir: join(tmp, 'profiles'),
+      store: agentProfileRecordStore('user-agent-profiles'),
       canAccess: (p) => canUseAgentlet(p.agentletId),
     },
   });
@@ -615,7 +616,7 @@ it("resets one person's device and reachback credentials without touching others
     401,
   );
 
-  resetAgentCredentials('alice');
+  await resetAgentCredentials('alice');
 
   expect(readAgentCredential(alice)).toBeNull();
   expect((await probe(reachback)).statusCode).toBe(401);
@@ -670,7 +671,7 @@ it('closes open RFS streams once their credentials are reset', async () => {
   const device = await open(alice);
   const others = await open(bob);
 
-  resetAgentCredentials('alice');
+  await resetAgentCredentials('alice');
 
   expect((await scoped.read()).done).toBe(true);
   expect((await device.read()).done).toBe(true);
@@ -737,7 +738,7 @@ it.each([false, true])(
       expect(await connect('alice-device', bob)).toHaveProperty('error');
       expect(await connect('alice-device', alice)).toHaveProperty('result');
       // Resetting Alice's credentials drops her live device, not Bob's.
-      resetAgentCredentials('alice');
+      await resetAgentCredentials('alice');
       await expect
         .poll(() => getAgentletGateway()?.getAgentlet('alice-device')?.status)
         .toBe('disconnected');
@@ -766,7 +767,7 @@ it.each([false, true])(
         });
       const late = connect('late-device', renewed);
       await lookup;
-      resetAgentCredentials('alice');
+      await resetAgentCredentials('alice');
       admit();
       expect(await late).toHaveProperty('error');
       expect(getAgentletGateway()?.getAgentlet('late-device')).toBeUndefined();

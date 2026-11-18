@@ -475,7 +475,7 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
         code: controlFailureCode('set_model', ack.code),
       });
     }
-    rememberProfileSessionPreference(
+    await rememberProfileSessionPreference(
       resolved.entry.profileId,
       'model',
       parsed.data.modelId,
@@ -533,7 +533,7 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
         code: controlFailureCode('set_config_option', ack.code),
       });
     }
-    rememberProfileConfigPreference(
+    await rememberProfileConfigPreference(
       resolved.entry.profileId,
       resolved.entry.configOptions,
       parsed.data.configOptionId,

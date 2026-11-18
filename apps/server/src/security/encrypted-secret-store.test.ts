@@ -7,7 +7,8 @@ import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { EncryptedFileSecretStore } from './encrypted-file-secret-store.js';
+import { EncryptedSecretStore } from './encrypted-secret-store.js';
+import { diskServerRecords } from '../modules/storage/testing.js';
 
 const directories: string[] = [];
 const key = Buffer.alloc(32, 7);
@@ -23,24 +24,24 @@ afterEach(() => {
   directories.length = 0;
 });
 
-describe('EncryptedFileSecretStore', () => {
+describe('EncryptedSecretStore', () => {
   it('persists authenticated ciphertext without plaintext', async () => {
     const dataDir = createDataDir();
-    const store = new EncryptedFileSecretStore(dataDir, key);
+    const store = new EncryptedSecretStore(diskServerRecords(dataDir), key);
     await store.initialize();
     await store.set('test:credential', 'private-value');
 
     const raw = readFileSync(join(dataDir, 'encrypted-secrets.json'), 'utf-8');
     expect(raw).not.toContain('private-value');
 
-    const restored = new EncryptedFileSecretStore(dataDir, key);
+    const restored = new EncryptedSecretStore(diskServerRecords(dataDir), key);
     await restored.initialize();
     expect(restored.get('test:credential')).toBe('private-value');
   });
 
   it('fails closed when ciphertext is modified or the key is wrong', async () => {
     const dataDir = createDataDir();
-    const store = new EncryptedFileSecretStore(dataDir, key);
+    const store = new EncryptedSecretStore(diskServerRecords(dataDir), key);
     await store.initialize();
     await store.set('test:credential', 'private-value');
 
@@ -51,10 +52,13 @@ describe('EncryptedFileSecretStore', () => {
     writeFileSync(path, JSON.stringify(persisted));
 
     await expect(
-      new EncryptedFileSecretStore(dataDir, key).initialize(),
+      new EncryptedSecretStore(diskServerRecords(dataDir), key).initialize(),
     ).rejects.toThrow('Failed to decrypt credential');
     await expect(
-      new EncryptedFileSecretStore(dataDir, Buffer.alloc(32, 8)).initialize(),
+      new EncryptedSecretStore(
+        diskServerRecords(dataDir),
+        Buffer.alloc(32, 8),
+      ).initialize(),
     ).rejects.toThrow('does not match');
   });
 });

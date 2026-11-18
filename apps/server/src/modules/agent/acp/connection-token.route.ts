@@ -36,7 +36,7 @@ const connectionTokenRoutes: FastifyPluginAsync = async (app) => {
       return reply.status(409).send({
         message: 'Device credentials are reset per user in Bubble mode only',
       });
-    resetAgentCredentials(principalId);
+    await resetAgentCredentials(principalId);
     return reply.code(204).send();
   });
 

@@ -45,7 +45,7 @@ const agentChangeReviewConfigRoutes: FastifyPluginAsync = async (app) => {
         code: 'validation_failed',
       });
     }
-    return setAgentChangeReviewConfig(parsed.data);
+    return await setAgentChangeReviewConfig(parsed.data);
   });
 };
 

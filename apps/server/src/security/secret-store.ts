@@ -1,22 +1,23 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { existsSync } from 'node:fs';
-import { join } from 'node:path';
-
-import { getDataDir } from '../data-dir.js';
 import {
   ElectronSecretStore,
   isDesktopSecretBridgeEnabled,
 } from './desktop-secret-bridge.js';
 import {
-  EncryptedFileSecretStore,
+  CREDENTIALS_RECORD,
+  EncryptedSecretStore,
   parseServerMasterKey,
-} from './encrypted-file-secret-store.js';
+} from './encrypted-secret-store.js';
 import { EnvironmentSecretStore } from './environment-secret-store.js';
 import { resolveStandaloneMasterKey } from './private-config.js';
 import { SECRET_IDS } from './secret-ids.js';
 import { personalSecretId } from '../modules/identity/personal-settings.js';
+import {
+  initServerRecords,
+  parseStorageProfile,
+} from '../modules/storage/index.js';
 
 import type { SecretStore } from './secret-store-types.js';
 
@@ -38,15 +39,24 @@ export async function initializeSecretStore(
     return;
   }
 
-  const dataDir = getDataDir(env);
-  const encryptedPath = join(dataDir, 'encrypted-secrets.json');
   const encodedKey = env.HUABU_SECRET_KEY?.trim();
   // Never let a deployment-owned master key reach forked external agents.
   delete env.HUABU_SECRET_KEY;
+  if (!encodedKey && parseStorageProfile(env).structured.kind === 'postgres') {
+    // A generated key is a file in the private configuration directory. With
+    // the ciphertext in PostgreSQL that file would be the one thing a
+    // replaced container loses, leaving every credential unreadable.
+    throw new Error(
+      'PostgreSQL credential storage requires HUABU_SECRET_KEY. Set it to a ' +
+        'Base64 32-byte key from your secret manager; an instance that ' +
+        "already has a generated key keeps it in HUABU_CONFIG_DIR's master-key file.",
+    );
+  }
+  const records = await initServerRecords(env);
   const key = encodedKey
     ? parseServerMasterKey(encodedKey)
-    : resolveStandaloneMasterKey(existsSync(encryptedPath), env);
-  const store = new EncryptedFileSecretStore(dataDir, key);
+    : resolveStandaloneMasterKey(records.get(CREDENTIALS_RECORD) !== null, env);
+  const store = new EncryptedSecretStore(records, key);
   await store.initialize();
   primaryStore = store;
   initialized = true;
@@ -101,7 +111,7 @@ export async function readPersistedSecret(
   if (
     !initialized &&
     !isDesktopSecretBridgeEnabled() &&
-    !existsSync(join(getDataDir(env), 'encrypted-secrets.json'))
+    (await initServerRecords(env)).get(CREDENTIALS_RECORD) === null
   ) {
     return null;
   }
@@ -124,7 +134,7 @@ export async function setSecret(
 }
 
 /**
- * Write several credentials in one operation. On the encrypted-file backend
+ * Write several credentials in one operation. On the encrypted backend
  * this is atomic (all-or-nothing); on the desktop bridge it degrades to a
  * sequential apply. Prefer this over multiple {@link setSecret} calls when a
  * single settings update touches more than one secret.

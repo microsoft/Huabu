@@ -31,15 +31,15 @@ describe('Agent change-review config', () => {
     rmSync(dataDir, { recursive: true, force: true });
   });
 
-  it('defaults to explicit review when no config has been persisted', () => {
+  it('defaults to explicit review when no config has been persisted', async () => {
     expect(getAgentChangeReviewConfig()).toEqual(
       DEFAULT_AGENT_CHANGE_REVIEW_CONFIG,
     );
   });
 
-  it('persists automatic acceptance atomically', () => {
+  it('persists automatic acceptance atomically', async () => {
     expect(
-      setAgentChangeReviewConfig({ autoAcceptSpaceChanges: true }),
+      await setAgentChangeReviewConfig({ autoAcceptSpaceChanges: true }),
     ).toEqual({ autoAcceptSpaceChanges: true });
     expect(getAgentChangeReviewConfig()).toEqual({
       autoAcceptSpaceChanges: true,
@@ -51,7 +51,7 @@ describe('Agent change-review config', () => {
     ).toEqual({ autoAcceptSpaceChanges: true });
   });
 
-  it('uses the conservative default for invalid persisted data', () => {
+  it('uses the conservative default for invalid persisted data', async () => {
     writeFileSync(
       join(dataDir, 'agent-change-review-config.json'),
       JSON.stringify({ autoAcceptSpaceChanges: 'yes' }),
@@ -63,12 +63,12 @@ describe('Agent change-review config', () => {
     );
   });
 
-  it('rejects unknown configuration fields', () => {
-    expect(() =>
+  it('rejects unknown configuration fields', async () => {
+    await expect(
       setAgentChangeReviewConfig({
         autoAcceptSpaceChanges: true,
         extra: true,
       } as never),
-    ).toThrow();
+    ).rejects.toThrow();
   });
 });

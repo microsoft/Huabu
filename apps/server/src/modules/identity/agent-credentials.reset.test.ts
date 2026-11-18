@@ -43,7 +43,7 @@ it('disconnects a device whose admitted handshake registers just after a reset',
   const bob = { agentletId: 'bob-device', disconnect: vi.fn() };
   gateway.agentlets = [live, bob];
 
-  resetAgentCredentials('alice');
+  await resetAgentCredentials('alice');
   expect(live.disconnect).toHaveBeenCalledOnce();
   // The Gateway registers a handshake authenticated before the reset only
   // once its authentication resolves, which is after the first sweep.

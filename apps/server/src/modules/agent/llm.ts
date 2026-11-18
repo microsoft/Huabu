@@ -9,15 +9,6 @@
  * use the runtime SecretStore. All settings are changed via the /api/llm routes.
  */
 
-import {
-  chmodSync,
-  existsSync,
-  readFileSync,
-  writeFileSync,
-  mkdirSync,
-} from 'node:fs';
-import { dirname, join } from 'node:path';
-
 import { getSupportedThinkingLevels } from '@earendil-works/pi-ai';
 import {
   complete as piComplete,
@@ -39,7 +30,6 @@ import {
   getCopilotStaticHeaders,
 } from './oauth.js';
 import { getPiModels, isOAuthProvider } from './pi-models.js';
-import { getDataDir } from '../../data-dir.js';
 import { EnvironmentSecretStore } from '../../security/environment-secret-store.js';
 import {
   llmProviderApiKeySecretId,
@@ -53,10 +43,12 @@ import {
 import { getLogger } from '../../utils/logger.js';
 import {
   personalSettingsOwner,
-  settingsFilePath,
+  settingsRecordKey,
 } from '../identity/personal-settings.js';
 import { outboundFetch, withPublicNetworkOnly } from '../security/outbound.js';
+import { getServerRecords } from '../storage/index.js';
 
+import type { ServerRecordKey } from '../storage/index.js';
 import type {
   Api,
   Context,
@@ -211,19 +203,12 @@ function getProviderCatalog(): LLMProviderInfo[] {
 
 // ==================== Persisted Config ====================
 
-/** Resolve a data file path relative to the project root. */
-function getDataFilePath(filename: string): string {
-  return join(getDataDir(), filename);
-}
-
 /**
  * The deployment's model settings, or a member's own in their personal
  * settings namespace (`../identity/personal-settings.ts`).
  */
-function configFile(): string {
-  return personalSettingsOwner()
-    ? settingsFilePath('llm-config.json')
-    : getDataFilePath('llm-config.json');
+function configRecord(): ServerRecordKey {
+  return settingsRecordKey('model-settings');
 }
 
 /**
@@ -330,9 +315,10 @@ interface UtilityConfigPersisted {
  */
 function loadPersistedStore(): PersistedStore {
   try {
-    if (!existsSync(configFile())) return { providers: {} };
-    const raw = readFileSync(configFile(), 'utf-8');
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const stored = getServerRecords().get(configRecord());
+    if (!stored || typeof stored !== 'object' || Array.isArray(stored))
+      return { providers: {} };
+    const parsed = stored as Record<string, unknown>;
 
     // Legacy shape — single active provider, fields at top level.
     if (
@@ -438,17 +424,9 @@ function extractLegacyImageConfig(
   return migrated;
 }
 
-function savePersistedStore(store: PersistedStore): void {
-  const dir = dirname(configFile());
-  if (!existsSync(dir)) {
-    mkdirSync(dir, { recursive: true });
-  }
-  writeFileSync(configFile(), JSON.stringify(store, null, 2), 'utf-8');
-  try {
-    chmodSync(configFile(), 0o600);
-  } catch {
-    // Non-critical — best effort on platforms that support it
-  }
+/** Resolves once the settings are durable. */
+function savePersistedStore(store: PersistedStore): Promise<void> {
+  return getServerRecords().put(configRecord(), store);
 }
 
 /** Project a persisted store + provider id down to the effective `PersistedConfig`. */
@@ -1034,7 +1012,7 @@ export async function setLLMConfig(
   store.providers[update.provider] = entry;
   store.active = update.provider;
   try {
-    savePersistedStore(store);
+    await savePersistedStore(store);
   } catch (error) {
     if (apiKeySecretId !== null) {
       try {
@@ -1165,7 +1143,7 @@ export async function setImageConfig(
   }
 
   store.imageConfig = next;
-  savePersistedStore(store);
+  await savePersistedStore(store);
   return getImageConfig();
 }
 
@@ -1324,7 +1302,7 @@ export async function setUtilityConfig(
   // Empty provider → follow the chat model: drop the utility entry.
   if (!update.provider) {
     delete store.utilityConfig;
-    savePersistedStore(store);
+    await savePersistedStore(store);
     runtime().cachedUtilityModel = null;
     return getUtilityConfig();
   }
@@ -1366,7 +1344,7 @@ export async function setUtilityConfig(
     );
   }
 
-  savePersistedStore(store);
+  await savePersistedStore(store);
   runtime().cachedUtilityModel = null;
   return getUtilityConfig();
 }
