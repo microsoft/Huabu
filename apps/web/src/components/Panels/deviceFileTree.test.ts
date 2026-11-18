@@ -139,3 +139,41 @@ it('closes folders that disappear on refresh and keeps the rest open', async () 
   expect(names(tree)).toEqual(['/a', '/a/x2']);
   expect([...tree.getSnapshot().expanded]).toEqual(['/a']);
 });
+
+it('lists only the new directory when navigating, and every open folder on refresh', async () => {
+  const { tree, calls, settle } = harness();
+  tree.open('device', '/root', false);
+  calls[0]?.resolve(['a', 'b']);
+  await settle();
+  tree.toggle('/root/a', 0);
+  tree.toggle('/root/b', 0);
+  await settle();
+  calls[1]?.resolve(['x']);
+  calls[2]?.resolve(['y']);
+  await settle();
+
+  // Going up: only the parent is new. The directory just left and the two
+  // folders open inside it keep the listings they already have.
+  tree.keepOpen('/root');
+  tree.open('device', '/', false);
+  await settle();
+  expect(calls.slice(3).map((call) => call.path)).toEqual(['/']);
+  calls[3]?.resolve(['root']);
+  await settle();
+  expect(names(tree)).toEqual([
+    '/root',
+    '/root/a',
+    '/root/a/x',
+    '/root/b',
+    '/root/b/y',
+  ]);
+
+  tree.refresh();
+  await settle();
+  expect(
+    calls
+      .slice(4)
+      .map((call) => call.path)
+      .sort(),
+  ).toEqual(['/', '/root', '/root/a', '/root/b']);
+});

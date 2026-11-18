@@ -148,7 +148,8 @@ export class DeviceFileTree {
    */
   open(agentletId: string, path: string, showHidden: boolean): void {
     const sameDevice = agentletId === this.agentletId;
-    if (!sameDevice || showHidden !== this.showHidden) {
+    const sameListing = sameDevice && showHidden === this.showHidden;
+    if (!sameListing) {
       // Replies requested under the old device or visibility are now wrong.
       this.endSession();
       this.update({ loading: new Set() });
@@ -157,12 +158,14 @@ export class DeviceFileTree {
     this.agentletId = agentletId;
     this.path = path;
     this.showHidden = showHidden;
-    void this.reloadTree();
+    // Moving to another directory only needs that directory: the folders
+    // already open keep the listing they have.
+    void this.reloadTree(!sameListing);
   }
 
   /** Re-list the current directory and every open folder in place. */
   refresh(): void {
-    if (this.agentletId && this.path) void this.reloadTree();
+    if (this.agentletId && this.path) void this.reloadTree(true);
   }
 
   /** Stop all work and forget the tree. */
@@ -231,7 +234,12 @@ export class DeviceFileTree {
     }
   }
 
-  private async reloadTree(): Promise<void> {
+  /**
+   * List the current directory and swap it in. `relist` also re-reads every
+   * open folder, because their contents may have changed too; otherwise only
+   * open folders without a listing are fetched.
+   */
+  private async reloadTree(relist: boolean): Promise<void> {
     const { agentletId, path, showHidden } = this;
     if (!agentletId || !path) return;
     this.reload?.abort();
@@ -243,7 +251,10 @@ export class DeviceFileTree {
 
     const directories = [
       path,
-      ...[...this.snapshot.expanded].filter((directory) => directory !== path),
+      ...[...this.snapshot.expanded].filter(
+        (directory) =>
+          directory !== path && (relist || !this.snapshot.pages[directory]),
+      ),
     ];
     const results = await Promise.allSettled(
       directories.map((directory) =>
@@ -269,29 +280,35 @@ export class DeviceFileTree {
       return;
     }
 
-    const fetched: Record<string, FileListResult> = {};
-    let total = 0;
-    let limited = false;
+    // Listings to build the tree from: what was just fetched, plus what is
+    // still valid on screen. A re-list trusts only folders listed since it
+    // began.
+    const available: Record<string, FileListResult> = {};
+    for (const [directory, page] of Object.entries(this.snapshot.pages))
+      if (!relist || this.freshSinceReload.has(directory))
+        available[directory] = page;
     results.forEach((result, index) => {
       const directory = directories[index];
-      if (result.status !== 'fulfilled' || directory === undefined) return;
-      if (total + result.value.entries.length > MAX_TREE_ENTRIES) {
-        limited = true;
-        return;
-      }
-      total += result.value.entries.length;
-      fetched[directory] = result.value;
+      if (result.status === 'fulfilled' && directory !== undefined)
+        available[directory] = result.value;
+      // A folder that can no longer be listed must not keep its old rows.
+      else if (directory !== undefined) delete available[directory];
     });
-    for (const directory of this.freshSinceReload) {
-      const page = this.snapshot.pages[directory];
-      if (page && !fetched[directory]) fetched[directory] = page;
-    }
     // Drop folders that vanished, failed, or are no longer under this root.
-    const expanded = reachableExpanded(path, fetched, this.snapshot.expanded);
+    const expanded = reachableExpanded(path, available, this.snapshot.expanded);
     const pages: Record<string, FileListResult> = {};
+    let total = 0;
+    let limited = false;
     for (const directory of [path, ...expanded]) {
-      const page = fetched[directory];
-      if (page) pages[directory] = page;
+      const page = available[directory];
+      if (!page) continue;
+      if (total + page.entries.length > MAX_TREE_ENTRIES) {
+        limited = true;
+        expanded.delete(directory);
+        continue;
+      }
+      total += page.entries.length;
+      pages[directory] = page;
     }
     this.update({
       root: path,

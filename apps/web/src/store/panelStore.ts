@@ -9,7 +9,11 @@ import { desktopSpaceStorage } from '@/utils/desktopStorage';
 interface PanelState {
   leftMode: 'layers' | 'files';
   filesLocation: { canvasId: string; agentletId: string; path: string } | null;
-  /** Last directory browsed per Space and device; see {@link filesPathKey}. */
+  /**
+   * Last directory browsed per Space and device; see {@link filesPathKey}.
+   * Entries are kept oldest first, so the order also records which device a
+   * Space browsed last.
+   */
   filesLastPaths: Record<string, string>;
   openFiles: (location: {
     canvasId: string;
@@ -77,6 +81,18 @@ const MAX_REMEMBERED_FILE_PATHS = 100;
 
 export const filesPathKey = (canvasId: string, agentletId: string) =>
   `${canvasId}\n${agentletId}`;
+
+/** The device a Space browsed most recently, if it browsed any. */
+export function lastFilesDevice(
+  canvasId: string,
+  filesLastPaths: Record<string, string>,
+): string | undefined {
+  const prefix = filesPathKey(canvasId, '');
+  return Object.keys(filesLastPaths)
+    .filter((key) => key.startsWith(prefix))
+    .pop()
+    ?.slice(prefix.length);
+}
 
 export const usePanelStore = create<PanelState>()(
   persist(

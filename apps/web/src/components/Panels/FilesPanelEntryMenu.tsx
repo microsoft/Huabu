@@ -6,17 +6,29 @@ import { useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { Button } from '@/components/Common/Button';
+import { cn } from '@/components/Common/cn';
 import {
   DropdownMenu,
   DropdownMenuItem,
 } from '@/components/Common/DropdownMenu';
 import { copyToClipboard } from '@/utils/io/clipboard';
 
+import {
+  SIDEBAR_ROW_ACTION_CLASS,
+  SIDEBAR_ROW_INSET_CLASS,
+  SIDEBAR_ROW_SURFACE_CLASS,
+  sidebarRowBackground,
+} from './sidebarRowStyles';
+
 type FilesPanelEntryMenuProps = {
   name: string;
   path: string;
   relativePath: string;
   onCopyResult: (copied: boolean) => void;
+  /** The entry is the one open in Preview. */
+  selected?: boolean;
+  /** Folders only: make this folder the root of the tree. */
+  onOpenHere?: () => void;
   /** Files only: place a reference card for this entry in the Space. */
   onAddToCanvas?: () => void;
   children: ReactNode;
@@ -27,6 +39,8 @@ export function FilesPanelEntryMenu({
   path,
   relativePath,
   onCopyResult,
+  selected,
+  onOpenHere,
   onAddToCanvas,
   children,
 }: FilesPanelEntryMenuProps) {
@@ -47,72 +61,98 @@ export function FilesPanelEntryMenu({
     <div
       role="group"
       aria-label={name}
-      className="group/files-row flex items-center"
+      // A sidebar row like those in Layers, only a little shorter: a
+      // directory has far more rows than a Space.
+      className={cn(
+        'group/sidebar-row flex h-7.5 items-center',
+        SIDEBAR_ROW_INSET_CLASS,
+      )}
       onContextMenu={(event) => {
         event.preventDefault();
         event.stopPropagation();
         setOpen(true);
       }}
     >
-      <div className="min-w-0 flex-1">{children}</div>
-      <DropdownMenu
-        aria-label={name}
-        open={open}
-        onOpenChange={setOpen}
-        triggerWrapperClassName="shrink-0 pr-1"
-        trigger={
-          <Button
-            variant="ghost"
-            size="sm"
-            iconOnly
-            title={t('files.entryActions', { name })}
-            className={
-              open
-                ? undefined
-                : 'opacity-0 group-hover/files-row:opacity-100 focus-visible:opacity-100'
-            }
-            onKeyDown={(event) => {
-              if (
-                event.key === 'ContextMenu' ||
-                (event.shiftKey && event.key === 'F10')
-              ) {
-                event.preventDefault();
-                event.stopPropagation();
-                setOpen(true);
-              }
-            }}
-          >
-            <MoreHorizontal />
-          </Button>
-        }
+      {/* One surface for the entry and its actions, so hovering either
+          lights the whole row. */}
+      <div
+        className={cn(
+          // Keyboard focus rings the whole row, not just the name inside it.
+          'has-[:focus-visible]:ring-info flex h-7 w-full min-w-0 items-center has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-inset',
+          SIDEBAR_ROW_SURFACE_CLASS,
+          sidebarRowBackground({ selected }),
+          open && !selected && 'bg-hover',
+        )}
       >
-        <div
-          onContextMenu={(event) => {
-            event.preventDefault();
-            event.stopPropagation();
-          }}
-        >
-          {onAddToCanvas ? (
-            <DropdownMenuItem
-              onClick={() => {
-                onAddToCanvas();
-                setOpen(false);
+        <div className="h-full min-w-0 flex-1">{children}</div>
+        <DropdownMenu
+          aria-label={name}
+          open={open}
+          onOpenChange={setOpen}
+          triggerWrapperClassName="flex shrink-0 pr-1"
+          trigger={
+            <Button
+              variant="ghost"
+              size="sm"
+              iconOnly
+              title={t('files.entryActions', { name })}
+              className={cn(
+                'min-h-5! min-w-5! p-0.5!',
+                open ? 'text-fg-default' : SIDEBAR_ROW_ACTION_CLASS,
+              )}
+              onKeyDown={(event) => {
+                if (
+                  event.key === 'ContextMenu' ||
+                  (event.shiftKey && event.key === 'F10')
+                ) {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  setOpen(true);
+                }
               }}
             >
-              {t('files.addToCanvas')}
+              <MoreHorizontal />
+            </Button>
+          }
+        >
+          <div
+            onContextMenu={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+            }}
+          >
+            {onOpenHere ? (
+              <DropdownMenuItem
+                onClick={() => {
+                  onOpenHere();
+                  setOpen(false);
+                }}
+              >
+                {t('files.openHere')}
+              </DropdownMenuItem>
+            ) : null}
+            {onAddToCanvas ? (
+              <DropdownMenuItem
+                onClick={() => {
+                  onAddToCanvas();
+                  setOpen(false);
+                }}
+              >
+                {t('files.addToCanvas')}
+              </DropdownMenuItem>
+            ) : null}
+            <DropdownMenuItem onClick={() => void copy(name)}>
+              {t('files.copyName')}
             </DropdownMenuItem>
-          ) : null}
-          <DropdownMenuItem onClick={() => void copy(name)}>
-            {t('files.copyName')}
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => void copy(relativePath)}>
-            {t('files.copyRelativePath')}
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => void copy(path)}>
-            {t('files.copyFullPath')}
-          </DropdownMenuItem>
-        </div>
-      </DropdownMenu>
+            <DropdownMenuItem onClick={() => void copy(relativePath)}>
+              {t('files.copyRelativePath')}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => void copy(path)}>
+              {t('files.copyFullPath')}
+            </DropdownMenuItem>
+          </div>
+        </DropdownMenu>
+      </div>
     </div>
   );
 }

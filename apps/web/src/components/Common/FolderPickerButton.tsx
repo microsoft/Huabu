@@ -25,6 +25,8 @@ interface FolderPickerButtonProps {
   enabled?: boolean;
   disabled?: boolean;
   size?: 'sm' | 'md' | 'field';
+  /** Defaults to the outlined field companion; toolbars pass `ghost`. */
+  variant?: 'outline' | 'ghost';
   title?: string;
   className?: string;
   onPicked: (path: string) => void;
@@ -37,6 +39,7 @@ export function FolderPickerButton({
   enabled = true,
   disabled,
   size = 'sm',
+  variant = 'outline',
   title,
   className,
   onPicked,
@@ -121,7 +124,7 @@ export function FolderPickerButton({
   if (!enabled || !supported) return null;
   return (
     <Button
-      variant="outline"
+      variant={variant}
       tone="neutral"
       size={size}
       iconOnly
