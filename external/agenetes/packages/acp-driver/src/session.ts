@@ -1236,13 +1236,27 @@ async function ensureAcpSessionInner(
   // optimistic localStorage cache the web client maintains for the
   // same purpose.
   if (created.availableCommands.length === 0 && binding.profileId) {
-    const warm = await profileCachePort?.readCommands(
-      binding.profileId,
-      opts.profileExecutionRevision,
-    );
-    // The agent's own list may have arrived while the cache was read; it
-    // always wins.
-    if (warm && created.availableCommands.length === 0) {
+    const before = created.commandsUpdatedAt;
+    let warm: WarmCommands | null | undefined = null;
+    try {
+      warm = await profileCachePort?.readCommands(
+        binding.profileId,
+        opts.profileExecutionRevision,
+      );
+    } catch (err) {
+      // Only suggestions are lost; the session must still be registered.
+      logger.warn(
+        {
+          threadId,
+          sessionId,
+          err: err instanceof Error ? err.message : String(err),
+        },
+        '[acp] per-profile command cache unavailable',
+      );
+    }
+    // The agent's own list may have arrived while the cache was read, empty
+    // or not; it always wins.
+    if (warm && created.commandsUpdatedAt === before) {
       created.availableCommands = warm.availableCommands;
       created.commandsUpdatedAt = warm.commandsUpdatedAt;
       logger.info(

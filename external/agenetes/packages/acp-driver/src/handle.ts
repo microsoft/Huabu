@@ -500,7 +500,8 @@ export class AcpAgentHandle<
         agentletId,
       },
     );
-    // close may have finished while a host-owned launch port was still pending.
+    const idleTimeoutSecs = await this.runtimePolicy.getIdleTimeoutSecs();
+    // close may have finished while a host-owned port was still pending.
     if (this.closing) throw new Error('ACP handle is closed');
     return ensureAcpSession({
       agentletId,
@@ -520,7 +521,7 @@ export class AcpAgentHandle<
         initialSelections: this.spec.spec.initialSelections,
       }),
       repairFromClosedEntry,
-      idleTimeoutSecs: await this.runtimePolicy.getIdleTimeoutSecs(),
+      idleTimeoutSecs,
       logger,
     });
   }
