@@ -74,11 +74,23 @@ export class AgentProfileRegistry {
     store: AgentProfileRegistryStore,
     options: AgentProfileRegistryOptions = {},
   ): Promise<AgentProfileRegistry> {
-    return new AgentProfileRegistry(
+    return AgentProfileRegistry.fromState(
       store,
-      parseState((await store.load()) ?? { profiles: [] }),
+      (await store.load()) ?? { profiles: [] },
       options,
     );
+  }
+
+  /**
+   * Open a registry over `state`, which the caller has just loaded from
+   * `store` or saved to it, without reading the store again.
+   */
+  static fromState(
+    store: AgentProfileRegistryStore,
+    state: AgentProfileRegistryState,
+    options: AgentProfileRegistryOptions = {},
+  ): AgentProfileRegistry {
+    return new AgentProfileRegistry(store, parseState(state), options);
   }
 
   private state: AgentProfileRegistryState;

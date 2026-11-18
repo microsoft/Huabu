@@ -20,12 +20,17 @@ export interface CreateAgentProfileRegistryOptions {
   legacyCommandProfiles?: CreateAcpCommandProfileInput[];
 }
 
-/** Initialize once, including an empty registry, without modifying legacy files. */
+/**
+ * Initialize once, including an empty registry, without modifying legacy
+ * files. Reads the store once: the state it loads, or the state it seeds an
+ * empty store with, is the state the registry opens on.
+ */
 export async function createAgentProfileRegistry(
   options: CreateAgentProfileRegistryOptions,
 ): Promise<AgentProfileRegistry> {
   const { store } = options;
-  if ((await store.load()) === null) {
+  let state = await store.load();
+  if (state === null) {
     const profiles = options.legacyStorageDir
       ? readLegacyProfiles(options.legacyStorageDir)
       : [];
@@ -33,9 +38,10 @@ export async function createAgentProfileRegistry(
       new InMemoryAgentProfileRegistryStore({ profiles }),
     );
     await imported.importCommandProfiles(options.legacyCommandProfiles ?? []);
-    await store.save({ profiles: await imported.listProfiles() });
+    state = { profiles: await imported.listProfiles() };
+    await store.save(state);
   }
-  return AgentProfileRegistry.open(store, {
+  return AgentProfileRegistry.fromState(store, state, {
     resolveAccess: options.resolveAccess,
   });
 }

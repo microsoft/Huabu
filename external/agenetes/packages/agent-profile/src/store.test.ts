@@ -11,7 +11,10 @@ import { resolve, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { createAgentProfileRegistry } from './create.js';
-import { FileAgentProfileRegistryStore } from './store.js';
+import {
+  FileAgentProfileRegistryStore,
+  InMemoryAgentProfileRegistryStore,
+} from './store.js';
 
 import type {
   AcpCommandProfile,
@@ -54,6 +57,33 @@ const profile: AcpCommandProfile = {
 };
 
 describe('Profile storage and one-time migration', () => {
+  it('reads the store once to open, whether it seeds it or not', async () => {
+    const memory = new InMemoryAgentProfileRegistryStore();
+    let loads = 0;
+    const store = {
+      load: () => {
+        loads += 1;
+        return memory.load();
+      },
+      save: memory.save.bind(memory),
+    };
+    const seeded = await createAgentProfileRegistry({ store });
+    expect(loads).toBe(1);
+    await seeded.createProfile({
+      launchKind: 'acp-harness',
+      harnessId: 'copilot',
+      alias: 'Copilot',
+      agentletId: 'device',
+      workingDirPath: '/work',
+    });
+
+    const reopened = await createAgentProfileRegistry({ store });
+    expect(loads).toBe(2);
+    expect((await reopened.listProfiles()).map((p) => p.alias)).toEqual([
+      'Copilot',
+    ]);
+  });
+
   it.each([2, 3])(
     'imports only commands from old schema %s without modifying its bytes',
     async (schemaVersion) => {
