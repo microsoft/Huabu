@@ -851,6 +851,7 @@
     "notFoundTitle": "Space not found",
     "notFoundDescription": "This Space doesn't exist or may have been deleted.",
     "backToList": "Back to Space list",
+    "openListInNewTab": "Open Space list in new tab",
     "nodeTargetUnavailable": "This linked node is unavailable.",
     "nodeFocusedNoPreview": "Node focused. This node has no expanded preview."
   },

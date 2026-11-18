@@ -4,6 +4,95 @@
 import { expect, test } from '@playwright/test';
 
 import type * as CanvasStore from '../src/store/canvasStore';
+import type * as WorkspaceStore from '../src/store/workspaceStore';
+
+for (const activation of [
+  'click',
+  'Enter',
+  'ControlOrMeta',
+  'middle',
+] as const) {
+  test(`Space list new-tab link preserves the source Space (${activation})`, async ({
+    page,
+    context,
+  }) => {
+    await page.addInitScript(() =>
+      localStorage.setItem('huabu.language', 'en'),
+    );
+    const title = `New-tab navigation ${activation}`;
+    const response = await page.request.post('/api/canvas', {
+      data: { title },
+    });
+    expect(response.ok(), await response.text()).toBe(true);
+    const { canvasId } = (await response.json()) as { canvasId: string };
+    await page.goto(`/canvas/${canvasId}`);
+    await expect(page.locator('[data-canvas-root]')).toHaveAttribute(
+      'aria-busy',
+      'false',
+    );
+    const workspaceId = await page.evaluate(async () => {
+      const path = '/src/store/workspaceStore.ts';
+      const { useWorkspaceStore } = (await import(
+        path
+      )) as typeof WorkspaceStore;
+      return useWorkspaceStore.getState().workspaceId;
+    });
+    expect(workspaceId).toBeTruthy();
+
+    const trigger = page.getByRole('button', {
+      name: 'Application menu',
+      exact: true,
+    });
+    await trigger.press('ArrowDown');
+    const back = page.getByRole('menuitem', {
+      name: 'Back to Space list',
+      exact: true,
+    });
+    const newTab = page.getByRole('menuitem', {
+      name: 'Open Space list in new tab',
+      exact: true,
+    });
+    await expect(newTab).toHaveAttribute('href', '/spaces');
+    await back.focus();
+    await back.press('ArrowDown');
+    await expect(newTab).toBeFocused();
+
+    const opened = context.waitForEvent('page');
+    if (activation === 'Enter') await newTab.press('Enter');
+    else if (activation === 'middle') await newTab.click({ button: 'middle' });
+    else if (activation === 'ControlOrMeta')
+      await newTab.click({ modifiers: ['ControlOrMeta'] });
+    else await newTab.click();
+    const list = await opened;
+    await expect(list).toHaveURL(/\/spaces$/);
+    await expect(list.locator(`a[href="/canvas/${canvasId}"]`)).toContainText(
+      title,
+    );
+    expect(
+      await list.evaluate(async () => {
+        const path = '/src/store/workspaceStore.ts';
+        const { useWorkspaceStore } = (await import(
+          path
+        )) as typeof WorkspaceStore;
+        return useWorkspaceStore.getState().workspaceId;
+      }),
+    ).toBe(workspaceId);
+    expect(await list.evaluate(() => window.opener === null)).toBe(true);
+    await expect(page).toHaveURL(new RegExp(`/canvas/${canvasId}$`));
+    await expect(page.locator('[data-canvas-root]')).toHaveAttribute(
+      'aria-busy',
+      'false',
+    );
+    await list.close();
+
+    if (activation === 'click') {
+      await expect(page.getByRole('menu')).toHaveCount(0);
+      await trigger.click();
+      await back.click();
+      await expect(page).toHaveURL(/\/spaces$/);
+    }
+  });
+}
 
 for (const failure of ['content', 'structure'] as const) {
   for (const recover of [false, true]) {

@@ -851,6 +851,7 @@
     "notFoundTitle": "未找到 Space",
     "notFoundDescription": "该 Space 不存在，或已被删除。",
     "backToList": "返回 Space 列表",
+    "openListInNewTab": "在新标签页打开 Space 列表",
     "nodeTargetUnavailable": "链接指向的节点不可用。",
     "nodeFocusedNoPreview": "已定位到节点，但该节点没有展开预览。"
   },
