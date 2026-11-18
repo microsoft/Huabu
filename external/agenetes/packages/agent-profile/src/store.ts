@@ -157,7 +157,7 @@ export class InMemoryAgentProfileRegistryStore implements AgentProfileRegistrySt
   constructor(initialState: AgentProfileRegistryState = { profiles: [] }) {
     this.state = parseState(initialState);
   }
-  load(): AgentProfileRegistryState {
+  async load(): Promise<AgentProfileRegistryState> {
     return structuredClone(this.state);
   }
   async save(state: AgentProfileRegistryState): Promise<void> {
@@ -176,7 +176,7 @@ export class FileAgentProfileRegistryStore implements AgentProfileRegistryStore 
       );
     this.filePath = join(storageDir, 'registry.json');
   }
-  load(): AgentProfileRegistryState | null {
+  async load(): Promise<AgentProfileRegistryState | null> {
     if (!existsSync(this.filePath)) return null;
     return decodeAgentProfileRegistry(readJson(this.filePath));
   }

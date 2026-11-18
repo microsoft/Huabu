@@ -210,8 +210,11 @@ export interface AcpDurableState {
 }
 
 export interface AcpRuntimePolicy {
-  /** Return the current host policy for newly spawned or resumed sessions. */
-  getIdleTimeoutSecs(): number;
+  /**
+   * Return the current host policy for newly spawned or resumed sessions.
+   * Resolved once per session spawn, so a host may read it from storage.
+   */
+  getIdleTimeoutSecs(): number | Promise<number>;
   /**
    * Resolve non-durable environment values immediately before session spawn.
    * Runtime values override recipe and frozen environment. An undefined value
@@ -517,7 +520,7 @@ export class AcpAgentHandle<
         initialSelections: this.spec.spec.initialSelections,
       }),
       repairFromClosedEntry,
-      idleTimeoutSecs: this.runtimePolicy.getIdleTimeoutSecs(),
+      idleTimeoutSecs: await this.runtimePolicy.getIdleTimeoutSecs(),
       logger,
     });
   }

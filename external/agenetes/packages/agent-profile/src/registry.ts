@@ -53,8 +53,39 @@ export function harnessProfile(
   });
 }
 
+/** Host authorization for the Profiles one registry operation touches. */
+export type AgentProfileAccess = (profile: AgentProfile) => boolean;
+
+export interface AgentProfileRegistryOptions {
+  generateId?: () => string;
+  /**
+   * Resolve the host's authorization. Called once at the start of every read
+   * and mutation; the predicate it returns answers for every Profile that
+   * operation touches, so a host that reads ownership from storage reads it
+   * once per operation rather than once per Profile. Defaults to allowing
+   * every Profile.
+   */
+  resolveAccess?: () => AgentProfileAccess | Promise<AgentProfileAccess>;
+}
+
 export class AgentProfileRegistry {
+  /** Open a registry over the state `store` last acknowledged. */
+  static async open(
+    store: AgentProfileRegistryStore,
+    options: AgentProfileRegistryOptions = {},
+  ): Promise<AgentProfileRegistry> {
+    return new AgentProfileRegistry(
+      store,
+      parseState((await store.load()) ?? { profiles: [] }),
+      options,
+    );
+  }
+
   private state: AgentProfileRegistryState;
+  private readonly generateId: () => string;
+  private readonly resolveAccess: () =>
+    | AgentProfileAccess
+    | Promise<AgentProfileAccess>;
   /**
    * Mutations run one at a time, each against the state the previous one
    * committed, because a store acknowledges a save asynchronously.
@@ -64,12 +95,14 @@ export class AgentProfileRegistry {
     handler: AgentProfileRegistryChangeHandler;
     onError: AgentProfileRegistryChangeErrorHandler;
   }>();
-  constructor(
+  private constructor(
     private readonly store: AgentProfileRegistryStore,
-    private readonly generateId: () => string = randomUUID,
-    private readonly canAccess: (profile: AgentProfile) => boolean = () => true,
+    state: AgentProfileRegistryState,
+    options: AgentProfileRegistryOptions,
   ) {
-    this.state = parseState(store.load() ?? { profiles: [] });
+    this.state = state;
+    this.generateId = options.generateId ?? randomUUID;
+    this.resolveAccess = options.resolveAccess ?? (() => () => true);
   }
   dispose(): void {
     this.subscriptions.clear();
@@ -82,23 +115,24 @@ export class AgentProfileRegistry {
     this.subscriptions.add(subscription);
     return () => this.subscriptions.delete(subscription);
   }
-  getProfile(id: string): AgentProfile | undefined {
-    const profile = this.state.profiles.find((entry) => entry.id === id);
-    return profile && this.canAccess(profile)
-      ? structuredClone(profile)
-      : undefined;
+  async getProfile(id: string): Promise<AgentProfile | undefined> {
+    const profile = this.findProfile(id, await this.resolveAccess());
+    return profile && structuredClone(profile);
   }
-  listProfiles(): AgentProfile[] {
-    return structuredClone(this.state.profiles.filter(this.canAccess));
+  async listProfiles(): Promise<AgentProfile[]> {
+    return structuredClone(
+      this.state.profiles.filter(await this.resolveAccess()),
+    );
   }
-  listSelectableProfileIds(): string[] {
+  async listSelectableProfileIds(): Promise<string[]> {
+    const canAccess = await this.resolveAccess();
     return this.state.profiles
-      .filter((profile) => profile.visible !== false && this.canAccess(profile))
+      .filter((profile) => profile.visible !== false && canAccess(profile))
       .map(({ id }) => id);
   }
-  snapshotProfile(id: string): AgentProfileSnapshot {
+  async snapshotProfile(id: string): Promise<AgentProfileSnapshot> {
     const { agentletId, workingDirPath, launch, executionRevision } =
-      this.requireProfile(id);
+      structuredClone(this.requireProfile(id, await this.resolveAccess()));
     return {
       profileId: id,
       agentletId,
@@ -108,7 +142,7 @@ export class AgentProfileRegistry {
     };
   }
   createProfile(input: CreateAgentProfileInput): Promise<AgentProfile> {
-    return this.mutate(async () => {
+    return this.mutate(async (canAccess) => {
       if (
         input.launchKind !== 'acp-command' &&
         input.launchKind !== 'acp-harness'
@@ -123,7 +157,7 @@ export class AgentProfileRegistry {
           : harnessProfile(input, this.generateId);
       profile.revision = 0;
       profile.executionRevision = 0;
-      if (!this.canAccess(profile))
+      if (!canAccess(profile))
         throw new AgentProfileError(
           'profile_not_found',
           'Agent Profile is unavailable',
@@ -140,19 +174,19 @@ export class AgentProfileRegistry {
   importCommandProfiles(
     inputs: CreateAcpCommandProfileInput[],
   ): Promise<string[]> {
-    return this.mutate(async () => {
+    return this.mutate(async (canAccess) => {
       const profiles = structuredClone(this.state.profiles);
       const imported = inputs.map((input) =>
         commandProfile(input, this.generateId),
       );
       for (const profile of imported) {
-        if (!this.canAccess(profile))
+        if (!canAccess(profile))
           throw new AgentProfileError(
             'profile_not_found',
             'Agent Profile is unavailable',
           );
         const existing = profiles.find(({ id }) => id === profile.id);
-        if (existing && !this.canAccess(existing))
+        if (existing && !canAccess(existing))
           throw new AgentProfileError(
             'profile_conflict',
             `Agent Profile already exists: ${profile.id}`,
@@ -177,7 +211,7 @@ export class AgentProfileRegistry {
     id: string,
     input: PatchAgentProfileInput,
   ): Promise<AgentProfile> {
-    return this.mutate(async () => {
+    return this.mutate(async (canAccess) => {
       if (
         Object.keys(input).some(
           (key) =>
@@ -195,7 +229,7 @@ export class AgentProfileRegistry {
           'invalid_profile_patch',
           'Profile launch identity is immutable',
         );
-      const current = this.requireProfile(id);
+      const current = this.requireProfile(id, canAccess);
       if (input.expectedRevision !== undefined) {
         if (
           !Number.isSafeInteger(input.expectedRevision) ||
@@ -248,8 +282,8 @@ export class AgentProfileRegistry {
     });
   }
   deleteProfile(id: string): Promise<boolean> {
-    return this.mutate(async () => {
-      if (!this.getProfile(id)) return false;
+    return this.mutate(async (canAccess) => {
+      if (!this.findProfile(id, canAccess)) return false;
       const profiles = this.state.profiles.filter(
         (profile) => profile.id !== id,
       );
@@ -258,14 +292,31 @@ export class AgentProfileRegistry {
       return true;
     });
   }
-  /** Run one mutation after every earlier one has committed or failed. */
-  private mutate<T>(operation: () => Promise<T>): Promise<T> {
-    const result = this.mutations.then(operation, operation);
+  /**
+   * Run one mutation after every earlier one has committed or failed, with
+   * the host's authorization resolved for it.
+   */
+  private mutate<T>(
+    operation: (canAccess: AgentProfileAccess) => Promise<T>,
+  ): Promise<T> {
+    const run = async () => operation(await this.resolveAccess());
+    const result = this.mutations.then(run, run);
     this.mutations = result.catch(() => undefined);
     return result;
   }
-  private requireProfile(id: string): AgentProfile {
-    const profile = this.getProfile(id);
+  /** The stored Profile, uncloned, when `canAccess` allows it. */
+  private findProfile(
+    id: string,
+    canAccess: AgentProfileAccess,
+  ): AgentProfile | undefined {
+    const profile = this.state.profiles.find((entry) => entry.id === id);
+    return profile && canAccess(profile) ? profile : undefined;
+  }
+  private requireProfile(
+    id: string,
+    canAccess: AgentProfileAccess,
+  ): AgentProfile {
+    const profile = this.findProfile(id, canAccess);
     if (!profile)
       throw new AgentProfileError(
         'profile_not_found',

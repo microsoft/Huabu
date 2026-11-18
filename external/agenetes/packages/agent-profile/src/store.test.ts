@@ -79,13 +79,13 @@ describe('Profile storage and one-time migration', () => {
       const registry = await fileRegistry(storageDir, {
         legacyStorageDir,
       });
-      expect(registry.listProfiles()).toEqual([profile]);
+      expect(await registry.listProfiles()).toEqual([profile]);
       expect(
         readFileSync(join(legacyStorageDir, 'registry.json'), 'utf8'),
       ).toBe(original);
       await registry.deleteProfile('stable');
       const reopened = await fileRegistry(storageDir, { legacyStorageDir });
-      expect(reopened.listProfiles()).toEqual([]);
+      expect(await reopened.listProfiles()).toEqual([]);
     },
   );
 
@@ -109,7 +109,7 @@ describe('Profile storage and one-time migration', () => {
         },
       ],
     });
-    expect(registry.listProfiles()).toEqual([]);
+    expect(await registry.listProfiles()).toEqual([]);
     expect(
       JSON.parse(readFileSync(join(storageDir, 'registry.json'), 'utf8')),
     ).toEqual({ schemaVersion: 1, state: { profiles: [] } });
@@ -126,7 +126,7 @@ describe('Profile storage and one-time migration', () => {
       }),
     );
     const registry = await fileRegistry(storageDir, { legacyStorageDir });
-    expect(registry.listProfiles()).toEqual([]);
+    expect(await registry.listProfiles()).toEqual([]);
     expect(existsSync(join(storageDir, 'registry.json'))).toBe(true);
   });
 
@@ -197,16 +197,18 @@ describe('Profile storage and one-time migration', () => {
         },
       ],
     });
-    expect(registry.listProfiles()).toEqual([profile]);
-    expect((await fileRegistry(storageDir)).listProfiles()).toEqual([profile]);
+    expect(await registry.listProfiles()).toEqual([profile]);
+    expect(await (await fileRegistry(storageDir)).listProfiles()).toEqual([
+      profile,
+    ]);
   });
 
   it('round trips snapshots atomically and rejects retired launches in the neutral file', async () => {
     const storageDir = directory();
     const store = new FileAgentProfileRegistryStore(storageDir);
-    expect(store.load()).toBeNull();
+    expect(await store.load()).toBeNull();
     await store.save({ profiles: [profile] });
-    expect(store.load()).toEqual({ profiles: [profile] });
+    expect(await store.load()).toEqual({ profiles: [profile] });
     expect(existsSync(join(storageDir, 'registry.json.pending'))).toBe(false);
     writeFileSync(
       join(storageDir, 'registry.json'),

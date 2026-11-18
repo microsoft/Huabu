@@ -30,16 +30,16 @@ describe('Profile mounting', () => {
     try {
       mountAgentProfileRegistry(app, options);
       await app.ready();
-      expect(getAgentProfileRegistry()?.listSelectableProfileIds()).toEqual([
-        'legacy',
-      ]);
+      expect(
+        await getAgentProfileRegistry()?.listSelectableProfileIds(),
+      ).toEqual(['legacy']);
       await getAgentProfileRegistry()?.deleteProfile('legacy');
       await app.close();
       expect(getAgentProfileRegistry()).toBeNull();
       app = Fastify();
       mountAgentProfileRegistry(app, options);
       await app.ready();
-      expect(getAgentProfileRegistry()?.listProfiles()).toEqual([]);
+      expect(await getAgentProfileRegistry()?.listProfiles()).toEqual([]);
     } finally {
       await app.close();
       rmSync(storageDir, { recursive: true, force: true });
