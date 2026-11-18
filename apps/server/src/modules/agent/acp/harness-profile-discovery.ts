@@ -140,7 +140,11 @@ export function registerHarnessProfileDiscovery({
     generation: number,
     result: HarnessDiscoveryResult,
   ) => {
-    if (disposed || generations.get(agentletId) !== generation) return;
+    // A disconnect, reconnect, or disposal makes this discovery obsolete; it
+    // is checked again after every await, because one may land during any.
+    const obsolete = () =>
+      disposed || generations.get(agentletId) !== generation;
+    if (obsolete()) return;
     const registry = getRegistry();
     if (!registry) throw new Error('Agent Profile registry is not ready');
 
@@ -163,6 +167,7 @@ export function registerHarnessProfileDiscovery({
       // Every create for this device runs inside this commit, so the lookup
       // sees each Profile an earlier harness or discovery created.
       const profiles = await registry.listProfiles();
+      if (obsolete()) return;
       const existing = profiles.find((profile) => {
         const source = parseSource(profile.customData?.[SOURCE_KEY]);
         return (
@@ -204,8 +209,11 @@ export function registerHarnessProfileDiscovery({
         { agentletId, harnessId: harness.id, profileId: profile.id },
         '[acp] automatically created Profile',
       );
+      if (obsolete()) return;
     }
-    await onProfilesDiscovered?.(await registry.listProfiles());
+    const profiles = await registry.listProfiles();
+    if (obsolete()) return;
+    await onProfilesDiscovered?.(profiles);
   };
 
   const onChanged: Parameters<DiscoveryGateway['onAgentletsChanged']>[0] = ({

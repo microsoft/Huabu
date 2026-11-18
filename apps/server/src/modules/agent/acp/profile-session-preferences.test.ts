@@ -1,6 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+import {
+  AgentProfileRegistry,
+  InMemoryAgentProfileRegistryStore,
+} from '@agenetes/agent-profile';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -60,6 +64,7 @@ describe('ACP Profile session preferences', () => {
         icon: { shape: 'circle', color: 'blue' },
         sessionPreferences: { model: 'gpt-5', thoughtLevel: 'high' },
       },
+      expectedRevision: 0,
     });
   });
 
@@ -99,6 +104,7 @@ describe('ACP Profile session preferences', () => {
       customData: {
         sessionPreferences: { model: 'claude-opus' },
       },
+      expectedRevision: 0,
     });
   });
 
@@ -122,5 +128,56 @@ describe('ACP Profile session preferences', () => {
     expect(mocks.patchProfile).not.toHaveBeenCalled();
     await rememberProfileSessionPreference('profile', 'model', 'current', 2);
     expect(mocks.patchProfile).toHaveBeenCalledOnce();
+  });
+
+  describe('against a registry with concurrent edits', () => {
+    async function harness() {
+      const registry = await AgentProfileRegistry.open(
+        new InMemoryAgentProfileRegistryStore(),
+      );
+      const profile = await registry.createProfile({
+        launchKind: 'acp-harness',
+        harnessId: 'copilot',
+        alias: 'Copilot',
+        agentletId: 'device',
+        workingDirPath: '/work',
+      });
+      mocks.getProfile.mockImplementation((id: string) =>
+        registry.getProfile(id),
+      );
+      mocks.patchProfile.mockImplementation(
+        (id: string, input: Parameters<typeof registry.patchProfile>[1]) =>
+          registry.patchProfile(id, input),
+      );
+      return { registry, id: profile.id };
+    }
+
+    it('keeps both of two preferences remembered at once', async () => {
+      const { id } = await harness();
+      await Promise.all([
+        rememberProfileSessionPreference(id, 'model', 'claude-opus'),
+        rememberProfileSessionPreference(id, 'thoughtLevel', 'high'),
+      ]);
+      expect(await getProfileSessionPreferences(id)).toEqual({
+        model: 'claude-opus',
+        thoughtLevel: 'high',
+      });
+    });
+
+    it('drops a preference whose execution was relaunched while it was merged', async () => {
+      const { registry, id } = await harness();
+      const read = registry.getProfile.bind(registry);
+      let reads = 0;
+      mocks.getProfile.mockImplementation(async (profileId: string) => {
+        const profile = await read(profileId);
+        // The working directory changes after the first read.
+        if (++reads === 1)
+          await registry.patchProfile(id, { workingDirPath: '/elsewhere' });
+        return profile;
+      });
+      await rememberProfileSessionPreference(id, 'model', 'stale', 0);
+      expect(await getProfileSessionPreferences(id)).toEqual({});
+      expect((await registry.getProfile(id))?.executionRevision).toBe(1);
+    });
   });
 });

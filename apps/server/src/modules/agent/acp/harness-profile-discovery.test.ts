@@ -367,6 +367,7 @@ describe('automatic ordinary Profile provisioning', () => {
       const defaults = new AgentDefaultsService({
         read: async () => savedDefaults,
         write,
+        initialize: async () => savedDefaults,
       });
       context.gateway.discoverHarnesses.mockResolvedValue({
         harnesses: observation.harnesses.map((harness) => ({

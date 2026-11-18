@@ -752,7 +752,7 @@ describe('Task RFS adapters', () => {
 
 describe('third-party Services', () => {
   it('publishes discovery and package files without configuration secrets', async () => {
-    serviceMocks.list.mockReturnValue([
+    serviceMocks.list.mockResolvedValue([
       {
         id: 'image-gen',
         version: '1.0.0',

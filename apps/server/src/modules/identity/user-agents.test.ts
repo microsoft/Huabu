@@ -53,7 +53,7 @@ import threadsRoutes from '../agent/acp/threads.route.js';
 import { agenetes } from '../agent/agenetes/index.js';
 import defaultsRoutes from '../agent/agent-defaults.route.js';
 import { registerSpaceAccess } from '../security/space-access.js';
-import { createSpace } from '../storage/index.js';
+import { createSpace, getServerRecords } from '../storage/index.js';
 import { mountTestWorkspace } from '../storage/testing.js';
 import { runInWorkspace } from '../workspace/context.js';
 import { canvasAcpNamespace } from '../workspace/paths.js';
@@ -885,6 +885,55 @@ it('refuses a handshake whose initial admission result was retained across membe
     expect(await agentletOwner('late-device')).toBeNull();
   } finally {
     release();
+    for (const socket of sockets) socket.close();
+  }
+});
+
+it('disconnects a returning device whose last credential read preceded a reset', async () => {
+  const h = await host(false);
+  await app.listen({ port: 0, host: '127.0.0.1' });
+  const port = (app.server.address() as { port: number }).port;
+  const sockets: WebSocket[] = [];
+  const alice = await h.as('alice', ownDeviceCredential);
+  try {
+    expect(
+      await connectDevice(port, sockets, 'late-device', alice),
+    ).not.toHaveProperty('error');
+    sockets[0].close();
+    await vi.waitFor(() =>
+      expect(getAgentletGateway()?.getAgentlet('late-device')?.status).toBe(
+        'disconnected',
+      ),
+    );
+    const records = getServerRecords();
+    const get = records.get.bind(records);
+    let versionReads = 0;
+    let entered!: () => void;
+    const checking = new Promise<void>((resolve) => (entered = resolve));
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    // A returning device's third credential read is its last check; its
+    // ownership is read after it. Hold that answer, read before the reset,
+    // until the reset has swept.
+    vi.spyOn(records, 'get').mockImplementation(async (key) => {
+      const value = await get(key);
+      if (key.name === 'agent-credential-versions' && ++versionReads === 3) {
+        entered();
+        await held;
+      }
+      return value;
+    });
+    const handshake = connectDevice(port, sockets, 'late-device', alice);
+    await checking;
+    await resetAgentCredentials('alice');
+    release();
+    expect(await handshake).not.toHaveProperty('error');
+    await vi.waitFor(() =>
+      expect(getAgentletGateway()?.getAgentlet('late-device')?.status).toBe(
+        'disconnected',
+      ),
+    );
+  } finally {
     for (const socket of sockets) socket.close();
   }
 });

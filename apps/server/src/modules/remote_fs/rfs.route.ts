@@ -571,7 +571,7 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
   // `/capabilities` already owns direct Space-operation discovery. Keep the
   // configured third-party services under a separate unambiguous root.
   app.get('/:canvasId/services', async (_request, reply) =>
-    reply.send({ services: serviceProvisioner.list() }),
+    reply.send({ services: await serviceProvisioner.list() }),
   );
 
   app.get<{

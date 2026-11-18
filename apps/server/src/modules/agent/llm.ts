@@ -40,6 +40,7 @@ import {
   getSecret,
   setSecret,
 } from '../../security/secret-store.js';
+import { createKeyedMutex } from '../../utils/keyed-mutex.js';
 import { getLogger } from '../../utils/logger.js';
 import {
   personalSettingsOwner,
@@ -427,6 +428,19 @@ function extractLegacyImageConfig(
 /** Resolves once the settings are durable. */
 function savePersistedStore(store: PersistedStore): Promise<void> {
   return getServerRecords().put(configRecord(), store);
+}
+
+const serializeSettings = createKeyedMutex<string>();
+
+/**
+ * Run one edit of the settings document at a time per owner. Chat, image,
+ * and utility settings share the document, and each setter reads all of it,
+ * may wait on the model catalogue or the credential store, and writes all of
+ * it back; two edits at once would each discard the other's.
+ */
+function editSettings<T>(edit: () => Promise<T>): Promise<T> {
+  const { owner, name } = configRecord();
+  return serializeSettings(`${owner ?? ''}/${name}`, edit);
 }
 
 /** Project a persisted store + provider id down to the effective `PersistedConfig`. */
@@ -968,9 +982,11 @@ export async function getLLMConfig(): Promise<LLMConfig> {
  * Returns an authoritative `authenticated` flag for OAuth providers —
  * see {@link getLLMConfig} for the rationale.
  */
-export async function setLLMConfig(
-  update: LLMConfigUpdate,
-): Promise<LLMConfig> {
+export function setLLMConfig(update: LLMConfigUpdate): Promise<LLMConfig> {
+  return editSettings(() => saveLLMConfig(update));
+}
+
+async function saveLLMConfig(update: LLMConfigUpdate): Promise<LLMConfig> {
   const store = await loadPersistedStore();
   const existingEntry: ProviderPersisted =
     store.providers[update.provider] ?? {};
@@ -1110,7 +1126,13 @@ export async function getImageConfig(): Promise<LLMImageConfig> {
  * as {@link setLLMConfig}: a field that is `undefined` in `update`
  * keeps its previously-saved value; an empty string clears it.
  */
-export async function setImageConfig(
+export function setImageConfig(
+  update: LLMImageConfigUpdate,
+): Promise<LLMImageConfig> {
+  return editSettings(() => saveImageConfig(update));
+}
+
+async function saveImageConfig(
   update: LLMImageConfigUpdate,
 ): Promise<LLMImageConfig> {
   const store = await loadPersistedStore();
@@ -1297,7 +1319,13 @@ export async function getUtilityConfig(): Promise<LLMUtilityConfig> {
  * authenticates that provider for both chat and utility (v1.5 inline-key
  * flow).
  */
-export async function setUtilityConfig(
+export function setUtilityConfig(
+  update: LLMUtilityConfigUpdate,
+): Promise<LLMUtilityConfig> {
+  return editSettings(() => saveUtilityConfig(update));
+}
+
+async function saveUtilityConfig(
   update: LLMUtilityConfigUpdate,
 ): Promise<LLMUtilityConfig> {
   const store = await loadPersistedStore();
@@ -1542,13 +1570,24 @@ async function resolveForRole(
   return resolved;
 }
 
+/**
+ * The explicit utility model a role runs on, or `null`. Only a utility-tier
+ * role reads the settings for it; a chat-tier role never uses it.
+ */
+async function utilityConfigForRole(
+  role: ModelRole,
+): Promise<PersistedConfig | null> {
+  return MODEL_ROLES[role].defaultTier === 'utility'
+    ? utilityPersistedConfig(await loadPersistedStore())
+    : null;
+}
+
 /** Resolve a role for runtime use, including account-aware auto selection. */
 async function resolveForRoleAsync(
   role: ModelRole,
   opts?: { hasImage?: boolean },
 ): Promise<{ cfg: PersistedConfig; model: Model<Api> }> {
-  // One read of the settings serves the whole resolution.
-  const utilityCfg = utilityPersistedConfig(await loadPersistedStore());
+  const utilityCfg = await utilityConfigForRole(role);
   let resolved = await resolveForRole(role, opts, utilityCfg);
   const info = MODEL_ROLES[role];
 
@@ -1637,7 +1676,7 @@ export async function ensureApiKeyForRole(
   const { cfg } = await resolveForRole(
     role,
     opts,
-    utilityPersistedConfig(await loadPersistedStore()),
+    await utilityConfigForRole(role),
   );
   return ensureApiKeyFor(cfg);
 }

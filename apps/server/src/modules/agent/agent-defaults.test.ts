@@ -33,11 +33,16 @@ function profile(
 
 function setup(initial?: unknown) {
   let persisted = initial;
+  const write = vi.fn(async (config: AgentDefaults) => {
+    persisted = structuredClone(config);
+  });
   const storage = {
-    read: async () => persisted,
-    write: vi.fn(async (config: AgentDefaults) => {
-      persisted = structuredClone(config);
-    }),
+    read: vi.fn(async () => persisted),
+    write,
+    initialize: async (config: AgentDefaults) => {
+      if (persisted === undefined) await write(config);
+      return persisted;
+    },
   };
   return { storage, service: new AgentDefaultsService(storage) };
 }
@@ -189,6 +194,30 @@ describe('installation Agent defaults', () => {
       ]),
     ).toEqual({ profileId: null, functionalModel: 'fast' });
     expect(storage.write).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps an explicit save that lands while initialization is choosing', async () => {
+    const { service, storage } = setup();
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    storage.read.mockImplementationOnce(async () => {
+      await held;
+      return undefined;
+    });
+    const initializing = service.initializeAgentDefaults([profile('auto')]);
+    await service.setAgentDefaults({
+      profileId: 'chosen',
+      functionalModel: 'small',
+    });
+    release();
+    expect(await initializing).toEqual({
+      profileId: 'chosen',
+      functionalModel: 'small',
+    });
+    expect(await service.getAgentDefaults()).toEqual({
+      profileId: 'chosen',
+      functionalModel: 'small',
+    });
   });
 
   it('preserves explicit Built-In selection and the external model across discovery and restart', async () => {

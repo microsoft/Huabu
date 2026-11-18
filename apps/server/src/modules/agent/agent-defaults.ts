@@ -34,6 +34,21 @@ interface AgentDefaultsStorage {
   read: () => Promise<unknown>;
   /** Resolves once `config` is durable. */
   write: (config: AgentDefaults) => Promise<void>;
+  /**
+   * Write `config` only if nothing was ever saved, deciding that in the same
+   * serialized step as the write, so an explicit save that lands first wins.
+   * Resolves to what is stored afterwards.
+   */
+  initialize: (config: AgentDefaults) => Promise<unknown>;
+}
+
+function corruptDefaults(error: unknown): unknown {
+  if (!(error instanceof ServerRecordError)) return error;
+  return new AgentDefaultsError(
+    'agent_defaults_corrupt',
+    'Invalid Agent defaults file: malformed JSON',
+    { cause: error },
+  );
 }
 
 const recordStorage: AgentDefaultsStorage = {
@@ -44,16 +59,21 @@ const recordStorage: AgentDefaultsStorage = {
         undefined
       );
     } catch (error) {
-      if (!(error instanceof ServerRecordError)) throw error;
-      throw new AgentDefaultsError(
-        'agent_defaults_corrupt',
-        'Invalid Agent defaults file: malformed JSON',
-        { cause: error },
-      );
+      throw corruptDefaults(error);
     }
   },
   write: (config) =>
     getServerRecords().put(settingsRecordKey('agent-defaults'), config),
+  async initialize(config) {
+    try {
+      return await getServerRecords().update(
+        settingsRecordKey('agent-defaults'),
+        (current) => current ?? config,
+      );
+    } catch (error) {
+      throw corruptDefaults(error);
+    }
+  },
 };
 
 export class AgentDefaultsService {
@@ -122,7 +142,11 @@ export class AgentDefaultsService {
       return 0;
     });
     if (!candidates[0]) return current;
-    return this.setAgentDefaults({ ...current, profileId: candidates[0].id });
+    return this.parseDefaults(
+      await this.storage.initialize(
+        agentDefaultsSchema.parse({ ...current, profileId: candidates[0].id }),
+      ),
+    );
   }
 }
 

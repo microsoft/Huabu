@@ -16,8 +16,6 @@ import { FS_MAX_RESPONSE_BYTES, supportsFsProtocol } from '@agentlet/protocol';
 
 import { proxyFsResponseSchema } from '@huabu/shared';
 
-import { requireOwnAgentlet } from '../../identity/agent-credentials.js';
-
 import type { AcpSessionEntry } from '@agenetes/acp-driver';
 import type { Namespace } from '@agenetes/protocol';
 import type { DeviceFilesBody, DeviceFilesResponse } from '@huabu/shared';
@@ -143,8 +141,8 @@ export class DeviceFilesService {
     );
   }
 
+  /** The caller has checked that it may use `body.agentletId`. */
   async execute(body: DeviceFilesBody): Promise<DeviceFilesResponse> {
-    await requireOwnAgentlet(body.agentletId);
     if (
       this.disposed ||
       getAgentletGateway()?.getAgentlet(body.agentletId)?.status !== 'connected'
@@ -254,6 +252,9 @@ export class DeviceFilesService {
             'Update Agentlet and detect installed Agents to enable Files',
           );
         }
+        // Cleanup may have run while the Profile was being looked up, before
+        // there was a proxy for it to stop.
+        this.assertCurrent(session);
         session.starting = true;
         try {
           session.entry = await ensureAcpSession({

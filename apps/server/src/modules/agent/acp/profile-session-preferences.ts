@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+import { AgentProfileError } from '@agenetes/agent-profile';
 import { getAgentProfileRegistry } from '@agenetes/agentlet-host';
 
 import type { AgentProfile } from '@agenetes/agent-profile';
@@ -42,6 +43,15 @@ export async function getProfileSessionPreferences(
   );
 }
 
+/**
+ * Remember a session preference on the Profile it was chosen for, unless the
+ * Profile has since been relaunched under another execution revision.
+ *
+ * The patch is fenced on the revision it was merged against, so a concurrent
+ * preference or launch edit is never overwritten with a stale copy: on a
+ * conflict the Profile is read again, its execution revision rechecked, and
+ * the preference merged into what is now stored.
+ */
 export async function rememberProfileSessionPreference(
   profileId: string,
   key: keyof AcpProfileSessionPreferences,
@@ -49,20 +59,37 @@ export async function rememberProfileSessionPreference(
   executionRevision = 0,
 ): Promise<void> {
   const registry = getAgentProfileRegistry();
-  const profile = await registry?.getProfile(profileId);
-  if (!registry || !profile) return;
-  if (
-    profile.launch.kind !== 'acp-harness' ||
-    (profile.executionRevision ?? 0) !== executionRevision
-  )
-    return;
-
-  const customData: CustomData = { ...profile.customData };
-  customData[CUSTOM_DATA_KEY] = {
-    ...parsePreferences(customData[CUSTOM_DATA_KEY]),
-    [key]: value,
-  };
-  await registry.patchProfile(profileId, { customData });
+  if (!registry) return;
+  for (;;) {
+    const profile = await registry.getProfile(profileId);
+    if (
+      !profile ||
+      profile.launch.kind !== 'acp-harness' ||
+      (profile.executionRevision ?? 0) !== executionRevision
+    )
+      return;
+    const customData: CustomData = { ...profile.customData };
+    customData[CUSTOM_DATA_KEY] = {
+      ...parsePreferences(customData[CUSTOM_DATA_KEY]),
+      [key]: value,
+    };
+    try {
+      await registry.patchProfile(profileId, {
+        customData,
+        expectedRevision: profile.revision ?? 0,
+      });
+      return;
+    } catch (error) {
+      // Another edit committed first; every retry follows one that did.
+      if (
+        !(
+          error instanceof AgentProfileError &&
+          error.code === 'profile_conflict'
+        )
+      )
+        throw error;
+    }
+  }
 }
 
 export async function rememberProfileConfigPreference(

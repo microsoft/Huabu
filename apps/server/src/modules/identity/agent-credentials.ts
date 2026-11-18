@@ -275,6 +275,33 @@ export async function resetAgentCredentials(
   disconnectAgentlets(principalId, 'Device credentials were reset');
 }
 
+/**
+ * Device admissions still deciding, by the owner their credential names.
+ *
+ * An admission reads the credential version and membership from storage, so
+ * a reset or a revocation can land after its last read and before the
+ * Gateway registers its connection, where no sweep of the Gateway sees it.
+ * A disconnect therefore waits for the admissions in flight when it starts;
+ * any admission that starts later reads the reset or revocation itself.
+ */
+const admitting = new Map<string, Set<Promise<unknown>>>();
+
+function trackAdmission<T>(
+  principalId: string,
+  admission: Promise<T>,
+): Promise<T> {
+  let pending = admitting.get(principalId);
+  if (!pending) admitting.set(principalId, (pending = new Set()));
+  const settle = () => {
+    pending.delete(admission);
+    if (pending.size === 0 && admitting.get(principalId) === pending)
+      admitting.delete(principalId);
+  };
+  pending.add(admission);
+  admission.then(settle, settle);
+  return admission;
+}
+
 /** Disconnect this owner's current and just-admitted connections without rotating credentials. */
 export function disconnectAgentlets(principalId: string, reason: string): void {
   const disconnect = () => {
@@ -287,10 +314,12 @@ export function disconnectAgentlets(principalId: string, reason: string): void {
         connection.disconnect(reason);
   };
   disconnect();
-  // A handshake admitted just before disconnection registers its connection
-  // once its authentication resolves, without another macrotask between
-  // them; it is not in the Gateway yet, so sweep again once it is.
-  setImmediate(disconnect);
+  // An admission registers its connection once its authentication resolves,
+  // without another macrotask between them, so sweep again after every
+  // admission in flight now has settled and registered.
+  void Promise.allSettled([...(admitting.get(principalId) ?? [])]).then(() =>
+    setImmediate(disconnect),
+  );
 }
 
 type Unsigned = {
@@ -377,15 +406,21 @@ export async function ownDeviceCredential(): Promise<string> {
     : getConnectionToken();
 }
 
-/** Called by the Gateway's existing host-owned authentication port. */
+/**
+ * Called by the Gateway's existing host-owned authentication port.
+ *
+ * A reset or revocation that lands during the lookups below is caught by the
+ * checks after them, so the handshake is refused before it claims a device.
+ * One that lands after the last check is not: {@link disconnectAgentlets}
+ * waits for this admission and disconnects the connection it registers.
+ */
 export function authenticateUserAgentlet(service: IdentityService) {
-  return async (agentletId: string, token: string) => {
+  const admit = async (agentletId: string, token: string) => {
     const admitted = await readAgentCredential(token);
     if (admitted?.aud !== 'device') throw refusedDeviceCredential(token);
     const identity = await service.resolvePrincipal?.(admitted.principalId);
     if (!identity?.member) throw new Error('Device owner is not admitted');
-    // The credential may have been reset during the lookup, after its
-    // devices were disconnected; this one is not connected yet.
+    // The credential may have been reset during the lookup.
     const claims = await readAgentCredential(token);
     if (claims?.aud !== 'device') throw refusedDeviceCredential(token);
     // An admission mutation may have completed while a handshake's initial
@@ -409,12 +444,16 @@ export function authenticateUserAgentlet(service: IdentityService) {
           throw new Error('Device belongs to another user');
         return { ...owners, [agentletId]: claims.principalId };
       });
-      // A reset that completed while the claim was being written has already
-      // swept connected devices; this one is not connected yet.
+      // A reset may have completed while the claim was being written.
       if (!(await readAgentCredential(token)))
         throw refusedDeviceCredential(token);
     }
     return { metadata: { principalId: claims.principalId } };
+  };
+  return (agentletId: string, token: string) => {
+    const principalId = signedClaims(token)?.principalId;
+    const admission = admit(agentletId, token);
+    return principalId ? trackAdmission(principalId, admission) : admission;
   };
 }
 

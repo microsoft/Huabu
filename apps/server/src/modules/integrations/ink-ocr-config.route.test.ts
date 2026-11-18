@@ -18,6 +18,7 @@ import { inkOcrConfigSchema } from '@huabu/shared';
 
 import {
   getInkOcrConfig,
+  importLegacyInkOcrConfig,
   resolveInkOcrConfiguration,
   setInkOcrConfig,
 } from './ink-ocr-config.js';
@@ -354,6 +355,25 @@ describe('Azure Ink OCR settings', () => {
         hasStoredKey: false,
         keySource: 'none',
         configured: false,
+      });
+    });
+
+    it('keeps the effective legacy settings once the data directory is gone', async () => {
+      storeLegacy();
+      await importLegacyInkOcrConfig();
+      await importLegacyInkOcrConfig();
+      expect(setSecret).toHaveBeenCalledExactlyOnceWith(
+        SECRET_IDS.inkOcrConfig,
+        JSON.stringify({
+          version: 1,
+          endpoint: oldEndpoint,
+          apiKey: 'old-private-key',
+        }),
+      );
+      rmSync(join(dataDir, 'ink-ocr-config.json'));
+      expect(resolveInkOcrConfiguration()).toEqual({
+        endpoint: oldEndpoint,
+        key: 'old-private-key',
       });
     });
 

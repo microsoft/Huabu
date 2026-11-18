@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { z } from 'zod';
@@ -105,6 +106,26 @@ function maskRecord(record: ConfigRecord): InkOcrConfig {
     hasStoredKey,
     configured: parsedEndpoint.success && hasKey,
   };
+}
+
+/**
+ * Keep an Ink OCR endpoint an earlier version saved in the data directory.
+ *
+ * Until the first save, the effective endpoint is read from the legacy
+ * `ink-ocr-config.json`, which a deployment without mounted storage loses on
+ * replacement. Saving the effective configuration once moves it into the
+ * credential record; afterwards the legacy file is never read. A damaged
+ * legacy file fails here as it would on first use.
+ */
+export async function importLegacyInkOcrConfig(): Promise<void> {
+  if (!existsSync(configPath()) || !isSecretStoreWritable()) return;
+  await withConfigLock(personalSecretId(SECRET_IDS.inkOcrConfig), async () => {
+    if (getPersistedSecret(SECRET_IDS.inkOcrConfig) !== null) return;
+    await setSecret(
+      SECRET_IDS.inkOcrConfig,
+      JSON.stringify(readStoredRecord()),
+    );
+  });
 }
 
 export function getInkOcrConfig(): InkOcrConfig {
