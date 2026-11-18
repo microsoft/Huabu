@@ -166,11 +166,13 @@ NODE
 
   rm -f "$log_file"
   touch "$log_file"
+  # A surviving tmux server can restore a SHA absent from this client's env.
+  # Clear it inside the session so the launcher reads the deployed checkout.
   tmux new-session \
     -d \
     -s "$tmux_session" \
     -c "$huabu_dir" \
-    "set -o pipefail; pnpm start:web 2>&1 | tee '$log_file'"
+    "set -o pipefail; unset HUABU_DEPLOYED_SHA; pnpm start:web 2>&1 | tee '$log_file'"
   tmux set-option -t "$tmux_session" remain-on-exit on
 
   if (( interactive )); then

@@ -185,6 +185,16 @@ export const AppMenu: React.FC<AppMenuProps> = ({
             <DropdownMenuLink to="/spaces" onClick={() => setIsOpen(false)}>
               {t('canvasPage.backToList')}
             </DropdownMenuLink>
+            {!isElectron() && (
+              <DropdownMenuLink
+                to="/spaces"
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={() => setIsOpen(false)}
+              >
+                {t('canvasPage.openListInNewTab')}
+              </DropdownMenuLink>
+            )}
             <div role="separator" className={MENU_SEPARATOR_CLASS} />
           </>
         )}

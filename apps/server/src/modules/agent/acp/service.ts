@@ -38,7 +38,6 @@ import {
   recipeFromProfileSnapshot,
   resolveProfileSnapshot,
 } from './profile-snapshot.js';
-import { buildReachbackEnv } from './reachback-env.js';
 import { renderExternalAgentSystemPreamble } from '../../../prompt/external-agent/system-preamble.js';
 import { canvasAcpNamespace } from '../../workspace/paths.js';
 import {
@@ -244,7 +243,6 @@ export function buildAcpWorkloadSpec(
       ...(cwd !== undefined && { cwd }),
       workingDirectoryOverride: workingDirPath ?? null,
       recipe,
-      env: buildReachbackEnv(threadId, canvasId),
     },
   };
 }

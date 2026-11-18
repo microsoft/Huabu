@@ -1,9 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { Activity, act } from 'react';
+import { Activity, act, useLayoutEffect } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, assert, describe, expect, it, vi } from 'vitest';
 
 import { useChatStore } from '@/store/chatStore';
 import {
@@ -16,6 +16,8 @@ import {
   clearAcpSessionMetaCache,
   useAcpSessionMeta,
 } from './useAcpSessionMeta';
+
+import type { AcpSessionMetaSnapshot } from '@huabu/shared';
 
 const apiMocks = vi.hoisted(() => ({
   getCached: vi.fn(),
@@ -52,18 +54,37 @@ const session = {
 };
 const preparationKey = '["canvas-1","thread-1"]';
 
-function Harness({ profileId = 'profile-1' }: { profileId?: string }) {
+function Harness({
+  profileId = 'profile-1',
+  threadId = 'thread-1',
+  canvasId = 'canvas-1',
+  enabled = true,
+  onCommit,
+}: {
+  profileId?: string;
+  threadId?: string;
+  canvasId?: string;
+  enabled?: boolean;
+  onCommit?: (meta: AcpSessionMetaSnapshot) => void;
+}) {
   const { loading, source, meta, error, refresh } = useAcpSessionMeta({
-    threadId: 'thread-1',
+    threadId,
     binding: {
       kind: 'external',
       profileId,
       alias: 'Profile',
     },
-    canvasId: 'canvas-1',
+    canvasId,
+    enabled,
   });
+  useLayoutEffect(() => onCommit?.(meta), [meta, onCommit]);
   return (
-    <button data-updated-at={meta.updatedAt} onClick={() => void refresh()}>
+    <button
+      data-updated-at={meta.updatedAt}
+      data-usage={JSON.stringify(meta.usage)}
+      data-tokens={JSON.stringify(meta.tokenUsage ?? null)}
+      onClick={() => void refresh()}
+    >
       {loading
         ? 'loading'
         : (error?.message ?? `${source}:${meta.configOptions.length}`)}
@@ -106,6 +127,103 @@ async function renderHarness(): Promise<void> {
 }
 
 describe('useAcpSessionMeta', () => {
+  it('uses server receipt times for streamed context and refreshes prompt usage after completion', async () => {
+    apiMocks.getCached.mockResolvedValue({
+      source: 'thread',
+      sessionMeta: EMPTY_META,
+    });
+    await renderHarness();
+    await act(async () =>
+      useChatStore.getState().setThreadLoading('thread-1', true),
+    );
+    const data = { used: 123, size: 1000, cost: null, receivedAt: 42 };
+    const sink = apiMocks.sink.mock.calls.at(-1)?.[1];
+    assert(sink);
+    await act(async () =>
+      sink({
+        type: 'session_usage_update',
+        data,
+      }),
+    );
+    expect(container?.querySelector('button')?.dataset.usage).toBe(
+      JSON.stringify(data),
+    );
+    const tokenUsage = {
+      inputTokens: 3004,
+      outputTokens: 74,
+      totalTokens: 3078,
+      receivedAt: 43,
+    };
+    apiMocks.getCached.mockResolvedValue({
+      source: 'thread',
+      sessionMeta: { ...EMPTY_META, usage: data, tokenUsage, updatedAt: 999 },
+    });
+    await act(async () =>
+      useChatStore.getState().setThreadLoading('thread-1', false),
+    );
+    expect(container?.querySelector('button')?.dataset.tokens).toBe(
+      JSON.stringify(tokenUsage),
+    );
+    expect(container?.querySelector('button')?.dataset.usage).toContain(
+      '"receivedAt":42',
+    );
+    await act(async () => root?.render(<Harness enabled={false} />));
+    expect(container?.querySelector('button')?.dataset.tokens).toBe(
+      JSON.stringify(tokenUsage),
+    );
+    const reads = apiMocks.getCached.mock.calls.length;
+    await act(async () => root?.render(<Harness />));
+    expect(apiMocks.getCached.mock.calls.length).toBeGreaterThan(reads);
+  });
+
+  it.each([
+    { threadId: 'thread-2' },
+    { canvasId: 'canvas-2' },
+    { profileId: 'profile-2' },
+  ])(
+    'does not display another conversation snapshot during a pending scope change (%j)',
+    async (props) => {
+      const tokenUsage = {
+        inputTokens: 3004,
+        outputTokens: 74,
+        totalTokens: 3078,
+        receivedAt: 43,
+      };
+      apiMocks.getCached.mockResolvedValue({
+        source: 'thread',
+        sessionMeta: { ...EMPTY_META, tokenUsage, updatedAt: 100 },
+      });
+      await renderHarness();
+      expect(container?.querySelector('button')?.dataset.tokens).toBe(
+        JSON.stringify(tokenUsage),
+      );
+      let finish!: (value: unknown) => void;
+      apiMocks.getCached.mockReturnValue(
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+      );
+      const observed: AcpSessionMetaSnapshot[] = [];
+      await act(async () =>
+        root?.render(
+          <Harness
+            {...props}
+            onCommit={(meta) => {
+              observed.push(meta);
+            }}
+          />,
+        ),
+      );
+      expect(observed.length).toBeGreaterThan(0);
+      expect(observed.every((meta) => !meta.tokenUsage)).toBe(true);
+      expect(container?.querySelector('button')?.dataset.tokens).toBe('null');
+      await act(async () =>
+        finish({ source: 'thread', sessionMeta: EMPTY_META }),
+      );
+      expect(container?.querySelector('button')?.dataset.tokens).toBe('null');
+    },
+  );
+
   it.each([
     { remount: false, stillStreaming: true },
     { remount: false, stillStreaming: false },

@@ -32,7 +32,6 @@ import {
 import { remapImportedSpace } from './import-space-identity.js';
 import { parseFrontmatter } from '../../utils/markdown-frontmatter.js';
 import { toFrontmatter } from '../../utils/markdown-frontmatter.js';
-import { buildReachbackEnv } from '../agent/acp/reachback-env.js';
 import { createChatSubmission } from '../agent/agenetes/handle.js';
 import { buildHistoryFromTurns } from '../agent/conversation/transcript/history.js';
 
@@ -360,7 +359,7 @@ it('imports an independent deployment and rekeys durable thread records and log 
     threadId,
     namespace: { name: 'target' },
     spec: {
-      env: { ...buildReachbackEnv(String(threadId), 'target'), CUSTOM: 'note' },
+      env: { CUSTOM: 'note' },
     },
   });
   expect(copied.state.driverState).toEqual({ initialPreambleDelivered: false });

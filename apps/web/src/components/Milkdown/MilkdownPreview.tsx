@@ -26,6 +26,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { resolveArtifactUrl } from '@/api/artifact';
+import { toast } from '@/components/Common/Toast';
 import { useEffectiveInputMode } from '@/hooks/useInputMode';
 import { useLinkFollowModifierHeld } from '@/hooks/useMultiSelectModifier';
 import { useSearchSource } from '@/hooks/useSearchSource';
@@ -57,6 +58,9 @@ export interface MilkdownPreviewProps {
    * omitted, image srcs render verbatim.
    */
   canvasId?: string;
+  /** Disable resources and navigation outside this document. */
+  singleFile?: boolean;
+  onLoadError?: (error: Error) => void;
   /**
    * Show Crepe's block drag handle and call `onBlockDragStart` when the
    * user starts dragging a block out of the editor. Default `false`.
@@ -121,6 +125,8 @@ export function MilkdownPreview(
     className,
     ariaLabel,
     canvasId,
+    singleFile = false,
+    onLoadError,
     enableBlockDrag = false,
     onBlockDragStart,
     getTouchDragPayload,
@@ -156,6 +162,8 @@ export function MilkdownPreview(
   const ariaLabelRef = useRef(resolvedAriaLabel);
   ariaLabelRef.current = resolvedAriaLabel;
   const onLinkClickRef = useRef(onLinkClick);
+  const onLoadErrorRef = useRef(onLoadError);
+  onLoadErrorRef.current = onLoadError;
   onLinkClickRef.current = onLinkClick;
   const hasLinkCallback = !!onLinkClick;
   const onTextSelectionRef = useRef(onTextSelection);
@@ -197,11 +205,12 @@ export function MilkdownPreview(
         // initiate a native drag. Input mutations are still blocked by
         // the wrapper's capture handlers below.
         editable: editableRef.current,
+        singleFile,
         ariaLabel: ariaLabelRef.current,
         // Disable Crepe's edit-time chrome (Toolbar / LinkTooltip /
         // Table reorder handles) when the surface is drag-only. See
         // `MilkdownFactoryOptions.previewMode`.
-        previewMode: enableBlockDrag,
+        previewMode: enableBlockDrag || singleFile,
         toolbarMode: 'none',
         linkActivation,
         onLinkClick: hasLinkCallback
@@ -230,7 +239,15 @@ export function MilkdownPreview(
         lastSyncedRef.current = pending;
         instance.setMarkdown(pending);
       }
-    })();
+    })().catch((error: unknown) => {
+      if (cancelled) return;
+      const failure = error instanceof Error ? error : new Error(String(error));
+      if (onLoadErrorRef.current) onLoadErrorRef.current(failure);
+      else {
+        console.error('Markdown preview failed', failure);
+        toast(failure.message, { tone: 'danger' });
+      }
+    });
 
     return () => {
       cancelled = true;
@@ -242,7 +259,7 @@ export function MilkdownPreview(
       if (instance) void instance.destroy();
     };
     // Re-mount when drag mode toggles (rare, expected).
-  }, [enableBlockDrag, linkActivation, hasLinkCallback]);
+  }, [enableBlockDrag, linkActivation, hasLinkCallback, singleFile]);
 
   useEffect(() => {
     instanceRef.current?.setReadonly(!nativeDragEditable);

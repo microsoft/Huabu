@@ -3,7 +3,7 @@
 
 import { useTranslation } from 'react-i18next';
 
-import { Button } from '@/components/Common/Button';
+import { TabGroup } from '@/components/Common/TabGroup';
 import { usePanelStore } from '@/store/panelStore';
 
 import { CanvasLayerPanel } from './CanvasLayerPanel';
@@ -24,26 +24,17 @@ export function CanvasSidebar({
   return (
     <div className="bg-surface flex h-full min-h-0 flex-col">
       {!isCollapsed ? (
-        <div className="flex shrink-0 gap-1 px-3 pb-2">
-          <Button
-            size="sm"
-            variant="ghost"
-            tone={mode === 'layers' ? 'info' : 'neutral'}
-            aria-pressed={mode === 'layers'}
-            onClick={() => setMode('layers')}
-          >
-            {t('layers.title')}
-          </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            tone={mode === 'files' ? 'info' : 'neutral'}
-            aria-pressed={mode === 'files'}
-            onClick={() => setMode('files')}
-          >
-            {t('files.title')}
-          </Button>
-        </div>
+        <TabGroup
+          size="sm"
+          aria-label={t('layers.sidebarViews')}
+          className="shrink-0 px-2 pb-1.5"
+          options={[
+            { value: 'layers', label: t('layers.title') },
+            { value: 'files', label: t('files.title') },
+          ]}
+          value={mode}
+          onChange={setMode}
+        />
       ) : null}
       <div className={mode === 'layers' ? 'min-h-0 flex-1' : 'hidden'}>
         <CanvasLayerPanel

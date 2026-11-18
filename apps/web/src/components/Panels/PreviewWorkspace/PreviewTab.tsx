@@ -27,6 +27,7 @@ import {
   getConversationTitle,
   useConversationTitleStore,
 } from '@/store/conversationTitleStore';
+import { deviceFileName } from '@/utils/deviceFile';
 
 import { Button } from '../../Common/Button';
 import { cn } from '../../Common/cn';
@@ -99,19 +100,25 @@ function usePreviewTabPresentation(
     ? label || t('node.untitled')
     : target.kind === 'url'
       ? new URL(target.url).host
-      : chatTitle || t('chat.newConversation');
+      : target.kind === 'file'
+        ? deviceFileName(target.path)
+        : chatTitle || t('chat.newConversation');
   const Icon = isNode
     ? getNodeIcon(node?.type, node?.data)
     : target.kind === 'conversation'
       ? getNodeIcon('question')
       : target.kind === 'url'
         ? Globe
-        : MessageCircle;
+        : target.kind === 'file'
+          ? getNodeIcon('fileReference')
+          : MessageCircle;
   const accessibleName = isNode
     ? `${title} (${node?.type ?? 'node'})`
     : target.kind === 'url'
       ? target.url
-      : title;
+      : target.kind === 'file'
+        ? target.path
+        : title;
   const nodeType =
     target.kind === 'conversation'
       ? 'question'
@@ -124,20 +131,27 @@ function usePreviewTabPresentation(
       ? t('preview.chatTab')
       : target.kind === 'url'
         ? t('layers.filterLabels.web')
-        : nodeType
-          ? t(
-              getFilterKeyLabelKey(
-                nodeType === 'office' && officeFormat
-                  ? buildOfficeFilterKey(officeFormat)
-                  : nodeType,
-              ),
-            )
-          : t('preview.nodeUnavailable');
+        : target.kind === 'file'
+          ? t('files.file')
+          : nodeType
+            ? t(
+                getFilterKeyLabelKey(
+                  nodeType === 'office' && officeFormat
+                    ? buildOfficeFilterKey(officeFormat)
+                    : nodeType,
+                ),
+              )
+            : t('preview.nodeUnavailable');
 
   return {
     title,
     accessibleName,
-    tabDescription: target.kind === 'url' ? target.url : title,
+    tabDescription:
+      target.kind === 'url'
+        ? target.url
+        : target.kind === 'file'
+          ? target.path
+          : title,
     typeLabel,
     Icon,
     canRename:

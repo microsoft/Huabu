@@ -23,11 +23,9 @@
  * so it rides straight into `state.metadata` after a schema safe-parse.
  *
  * The reconstructed spec omits `env`: the reachback env is host-port
- * dependent and rebuilt live per turn (`buildReachbackEnv`), never a durable
- * spec field. It is enough that the record survives `isPersistableSpec`
- * (threadId / kind / workloadType / namespace) and carries binding + recipe
- * + cwd so the first cold resume can spawn; the live path re-bakes a fresh
- * spec on the next turn.
+ * dependent and resolved by the host's runtime environment port before spawn.
+ * The durable namespace/thread identity supplies reachback scope while the
+ * binding, recipe, placement and cwd retain their frozen launch semantics.
  *
  * ### Idempotent, launch-only
  *

@@ -13,6 +13,7 @@ import { useTranslation } from 'react-i18next';
 import { useShallow } from 'zustand/react/shallow';
 
 import useCanvasStore from '@/store/canvasStore';
+import { rememberPreviewedAgent } from '@/store/commentDestinationMemory';
 import { previewTargetKey } from '@/store/previewWorkspace/scrollMemory';
 import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store';
 
@@ -158,7 +159,7 @@ export function PreviewGroup({
         if (!tab) return [];
         if (tab.target.kind === 'chat' || tab.target.kind === 'conversation')
           return [tabId];
-        if (tab.target.kind === 'url') return [];
+        if (tab.target.kind === 'url' || tab.target.kind === 'file') return [];
         const nodeId = tab.target.nodeId;
         const node = state.nodes.find((candidate) => candidate.id === nodeId);
         return node && canRetainPreviewNode(node) ? [tabId] : [];
@@ -178,13 +179,26 @@ export function PreviewGroup({
       // focused group" rather than assuming a single instance.
       onFocusCapture={onFocus}
       onPointerDownCapture={onFocus}
+      onKeyUpCapture={(event) => {
+        if (
+          event.key === 'Tab' &&
+          activeTab &&
+          event.target instanceof Element &&
+          event.target.closest('[role="tab"], [role="tabpanel"]')
+        )
+          rememberPreviewedAgent(activeTab.target);
+      }}
       className="flex h-full min-w-0 flex-1 flex-col"
     >
       <PreviewTabStrip
         groupId={group.id}
         tabs={tabs}
         activeTabId={group.activeTabId}
-        onActivate={onActivate}
+        onActivate={(tabId) => {
+          const tab = workspace.tabs[tabId];
+          if (tab) rememberPreviewedAgent(tab.target);
+          onActivate(tabId);
+        }}
         onClose={onClose}
         onCloseTabs={onCloseTabs}
         onPromote={onPromote}
@@ -212,14 +226,16 @@ export function PreviewGroup({
       />
       <div
         role="tabpanel"
-        onPointerDownCapture={() =>
-          activeTab &&
-          usePreviewWorkspaceStore.getState().markTabInteracted(activeTab.id)
-        }
-        onKeyDownCapture={() =>
-          activeTab &&
-          usePreviewWorkspaceStore.getState().markTabInteracted(activeTab.id)
-        }
+        onPointerDownCapture={() => {
+          if (!activeTab) return;
+          rememberPreviewedAgent(activeTab.target);
+          usePreviewWorkspaceStore.getState().markTabInteracted(activeTab.id);
+        }}
+        onKeyDownCapture={() => {
+          if (!activeTab) return;
+          rememberPreviewedAgent(activeTab.target);
+          usePreviewWorkspaceStore.getState().markTabInteracted(activeTab.id);
+        }}
         onWheelCapture={() =>
           activeTab &&
           usePreviewWorkspaceStore.getState().markTabInteracted(activeTab.id)

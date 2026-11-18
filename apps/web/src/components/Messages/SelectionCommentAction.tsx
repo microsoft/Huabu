@@ -10,7 +10,7 @@ import { toast } from '@/components/Common/Toast';
 import { InkAgentDestinationPicker } from '@/components/Panels/Canvas/FloatingToolbars/InkAgentDestinationPicker';
 import { useAcpProfiles } from '@/hooks/useAcpProfiles';
 import {
-  resolveCommentDestination,
+  commentDestinationTitle,
   useCommentDestination,
 } from '@/hooks/useCommentDestination';
 import { rememberConversationAgentBinding } from '@/store/acpProfilesStore';
@@ -149,7 +149,11 @@ function DocumentCommentEditor({
       return [
         {
           nodeId: item.nodeId,
-          title: item.title || t('messages.commentUntitledDestination'),
+          title: commentDestinationTitle(
+            item,
+            target.candidates,
+            t('messages.commentUntitledDestination'),
+          ),
           binding: source?.agentBinding ?? { kind: 'internal' },
           mode: source?.agentMode ?? 'ask',
           fallbackIcon: source?.agentIcon,
@@ -163,7 +167,13 @@ function DocumentCommentEditor({
       ];
     },
   );
-  const unavailable = !!target.destination && !target.available;
+  const unavailable =
+    !target.scopeValid || (!!target.destination && !target.available);
+  const selected = target.candidates.find(
+    (item) =>
+      item.nodeId === target.destination?.nodeId &&
+      item.threadId === target.destination.threadId,
+  );
   const issue = target.error || profiles.error;
 
   function rejectDestination() {
@@ -181,6 +191,7 @@ function DocumentCommentEditor({
         ? agentChoice.binding.profileId
         : null;
     if (
+      !target.isCurrent() ||
       canvas.canvasId !== canvasId ||
       (!destination &&
         (!agentChoice ||
@@ -193,7 +204,7 @@ function DocumentCommentEditor({
       return;
     }
     let threadId = destination?.threadId;
-    const view = resolveCommentDestination(canvasId, destination);
+    const view = target.resolve();
     if (destination && !view) {
       rejectDestination();
       return;
@@ -207,6 +218,7 @@ function DocumentCommentEditor({
       rememberConversationAgentBinding(agentChoice.binding);
     }
     useChatStore.getState().addQuotedComment(threadId, { ...quote, comment });
+    target.rememberStaged(threadId);
     staged.current = true;
     onDismiss();
     if (view) {
@@ -239,13 +251,20 @@ function DocumentCommentEditor({
         target.loading || unavailable || (!target.destination && !newChoice)
       }
     >
+      {target.temporary ? (
+        <p role="status" className="text-fg-muted text-xs">
+          {t('messages.commentTemporaryDestination')}
+        </p>
+      ) : null}
       <InkAgentDestinationPicker
         binding={newChoice?.binding ?? null}
         mode={newChoice?.mode ?? 'operate'}
         profiles={profiles.profiles}
         conversations={conversations}
-        selectedNodeId={target.destination?.nodeId}
-        unresolved={target.loading || (!target.destination && !newChoice)}
+        selectedNodeId={selected?.nodeId}
+        unresolved={
+          target.loading || unavailable || (!target.destination && !newChoice)
+        }
         loading={target.loading}
         builtInModes={['operate', 'ask']}
         menuLabel={t('messages.commentDestination')}
@@ -279,6 +298,11 @@ function DocumentCommentEditor({
           return profiles.refresh();
         }}
       />
+      {unavailable || error ? (
+        <p role="alert" className="text-danger text-xs">
+          {t('messages.commentDestinationUnavailable')}
+        </p>
+      ) : null}
     </FragmentCommentPopover>
   );
 }

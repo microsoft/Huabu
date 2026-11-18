@@ -1,9 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   MODEL_SELECTION_ID,
   MODE_SELECTION_ID,
   recordSessionSelection,
+  recordPromptUsage,
+  restoreSessionUsage,
   snapshotEntryState,
 } from './session.js';
 
@@ -31,6 +33,89 @@ function entry(overrides: Partial<AcpSessionEntry> = {}): AcpSessionEntry {
 }
 
 describe('ACP durable state snapshot', () => {
+  const logger = {
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    debug: vi.fn(),
+  };
+
+  it('replaces reported token snapshots, including a lower value after recovery', () => {
+    const e = entry();
+    recordPromptUsage(
+      e,
+      { inputTokens: 3004, outputTokens: 74, totalTokens: 3078 },
+      logger,
+    );
+    const first = snapshotEntryState(e);
+    expect(first.metadata?.tokenUsage).toMatchObject({
+      inputTokens: 3004,
+      outputTokens: 74,
+      totalTokens: 3078,
+      receivedAt: expect.any(Number),
+    });
+    recordPromptUsage(
+      e,
+      { inputTokens: 10, outputTokens: 2, totalTokens: 12 },
+      logger,
+    );
+    expect(e.tokenUsage?.inputTokens).toBe(10);
+    expect(first.metadata?.tokenUsage?.inputTokens).toBe(3004);
+  });
+
+  it('keeps the previous report and its timestamp when usage is absent or invalid', () => {
+    const e = entry();
+    recordPromptUsage(
+      e,
+      { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+      logger,
+    );
+    const report = e.tokenUsage;
+    for (const value of [
+      undefined,
+      null,
+      {},
+      { inputTokens: -1, outputTokens: 2, totalTokens: 1 },
+      ...[NaN, Infinity, 1.5, Number.MAX_SAFE_INTEGER + 1].map(
+        (inputTokens) => ({
+          inputTokens,
+          outputTokens: 2,
+          totalTokens: 3,
+        }),
+      ),
+    ]) {
+      recordPromptUsage(e, value, logger);
+      expect(e.tokenUsage).toBe(report);
+    }
+    expect(logger.warn).toHaveBeenCalled();
+  });
+
+  it('restores same-session usage independently of config updates, never to a replacement session', () => {
+    const prior = snapshotEntryState(
+      entry({
+        usage: { used: 100, size: 1000, cost: null, receivedAt: 123 },
+        tokenUsage: {
+          inputTokens: 200,
+          outputTokens: 30,
+          totalTokens: 230,
+          receivedAt: 124,
+        },
+      }),
+    );
+    const resumed = entry({ metaUpdatedAt: 999, tokenUsage: null });
+    restoreSessionUsage(resumed, prior);
+    expect(resumed.usage?.receivedAt).toBe(123);
+    expect(resumed.tokenUsage?.receivedAt).toBe(124);
+    const replacement = entry({ sessionId: 'session_2', tokenUsage: null });
+    restoreSessionUsage(replacement, prior);
+    expect(replacement.usage).toBeNull();
+    expect(replacement.tokenUsage).toBeNull();
+    const liveUsage = { used: 50, size: 1000, cost: null, receivedAt: 125 };
+    resumed.usage = liveUsage;
+    restoreSessionUsage(resumed, prior);
+    expect(resumed.usage).toBe(liveUsage);
+  });
+
   it('does not persist compiled harness arguments for new executions', () => {
     const launchPlan = {
       version: 1 as const,

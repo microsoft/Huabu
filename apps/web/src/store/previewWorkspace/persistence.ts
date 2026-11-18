@@ -114,6 +114,21 @@ function parseTarget(value: unknown, canvasId: string): PreviewTarget | null {
   ) {
     return { kind: 'chat', canvasId, threadId: candidate.threadId };
   }
+  if (
+    candidate.kind === 'file' &&
+    typeof candidate.agentletId === 'string' &&
+    typeof candidate.path === 'string'
+  ) {
+    return normalizePreviewTarget({
+      kind: 'file',
+      canvasId,
+      agentletId: candidate.agentletId,
+      path: candidate.path,
+      ...(typeof candidate.deviceName === 'string'
+        ? { deviceName: candidate.deviceName }
+        : {}),
+    });
+  }
   if (candidate.kind === 'url' && typeof candidate.url === 'string') {
     return normalizePreviewTarget({
       kind: 'url',

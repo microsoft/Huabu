@@ -24,7 +24,7 @@ import {
   parseFrontmatter,
   toFrontmatter,
 } from '../../utils/markdown-frontmatter.js';
-import { buildReachbackEnv } from '../agent/acp/reachback-env.js';
+import { frozenAgentEnvironment } from '../agent/acp/reachback-env.js';
 import { parseMigratableV3Records } from '../workspace/migrations/legacy/acp-sessions-v3.js';
 import { migrateAcpSessionsFile } from '../workspace/migrations/migrate-acp-sessions.js';
 
@@ -474,13 +474,12 @@ export async function remapImportedSpace(
               },
             };
           } else if (isRecord(spec) && workload.kind === 'external') {
-            const env = { ...(isRecord(spec.env) ? spec.env : {}) };
-            delete env.HUABU_RFS_URL;
-            delete env.HUABU_RFS_TOKEN;
-            delete env.HUABU_THREAD_ID;
+            const env = frozenAgentEnvironment(
+              isRecord(spec.env) ? spec.env : {},
+            );
             spec = {
               ...spec,
-              env: { ...env, ...buildReachbackEnv(threadId, canvasId) },
+              env,
             };
             state = {
               ...(isRecord(state) ? state : {}),

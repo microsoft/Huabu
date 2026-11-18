@@ -29,7 +29,7 @@ import '@/components/Panels/Canvas/FloatingToolbars/NodeToolbar.css';
 
 export function captureFileComment(
   view: EditorView,
-  source: { canvasId: string; nodeId: string; agentletId: string },
+  source: { canvasId: string; nodeId?: string; agentletId: string },
   file: FileReadResult,
 ): PreviewCommentCapture | null {
   const { doc, selection } = view.state;
@@ -84,7 +84,8 @@ export function FileCommentActions({
   view: EditorView | null;
   surfaceRef: RefObject<HTMLElement | null>;
   canvasId: string;
-  nodeId: string;
+  /** Absent when the file is previewed without a node in the Space. */
+  nodeId?: string;
   agentletId: string;
   file: FileReadResult | null;
   disabled: boolean;

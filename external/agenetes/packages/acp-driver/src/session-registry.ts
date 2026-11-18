@@ -35,7 +35,7 @@ import { threadIdentityKey } from '@agenetes/runtime';
 
 import type { AcpBindingRecipe } from './binding-recipe.js';
 import type { AcpAgentClient } from './client.js';
-import type { Namespace } from '@agenetes/protocol';
+import type { AgentMetadata, Namespace } from '@agenetes/protocol';
 import type {
   Cost as AcpCost,
   ModelInfo as AcpModelInfo,
@@ -206,7 +206,13 @@ export interface AcpSessionEntry {
    * Last `usage_update` payload — context-window / cost gauge.
    * `null` until the agent pushes one.
    */
-  usage: { used: number; size: number; cost: AcpCost | null } | null;
+  usage: {
+    used: number;
+    size: number;
+    cost: AcpCost | null;
+    receivedAt?: number;
+  } | null;
+  tokenUsage?: AgentMetadata['tokenUsage'];
   /**
    * Epoch ms of the most recent meta touch (any of the five fields
    * above). UI uses this to detect stale snapshots after reconnect.

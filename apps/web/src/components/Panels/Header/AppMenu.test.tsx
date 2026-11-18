@@ -7,6 +7,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { AppMenu } from './AppMenu';
+import { isElectron } from '../../../hooks/useElectron';
 import { useIdentityStore } from '../../../store/identityStore';
 import {
   isDesktopInputFrozen,
@@ -50,7 +51,7 @@ vi.mock('../../../hooks/useElectron', () => ({
   copySystemInfo: vi.fn(),
   desktopDiagnosticsAvailable: () => false,
   getElectronBridge: () => null,
-  isElectron: () => false,
+  isElectron: vi.fn(() => false),
   openDeveloperTools: vi.fn(),
   openServerLog: vi.fn(),
 }));
@@ -109,6 +110,7 @@ let root: Root | undefined;
 let container: HTMLDivElement | undefined;
 
 afterEach(() => {
+  vi.mocked(isElectron).mockReturnValue(false);
   creation.allowed = true;
   act(() => root?.unmount());
   container?.remove();
@@ -199,6 +201,48 @@ describe('AppMenu', () => {
     );
     expect(link?.getAttribute('href')).toBe('/spaces');
   });
+
+  it.each([
+    { desktop: false, path: '/canvas/c1', visible: true },
+    { desktop: true, path: '/canvas/c1', visible: false },
+    { desktop: false, path: '/spaces', visible: false },
+  ])(
+    'offers a separate new-tab link only outside the browser list ($desktop, $path)',
+    ({ desktop, path, visible }) => {
+      vi.mocked(isElectron).mockReturnValue(desktop);
+      container = document.createElement('div');
+      document.body.appendChild(container);
+      root = createRoot(container);
+      act(() =>
+        root?.render(
+          <MemoryRouter initialEntries={[path]}>
+            <AppMenu />
+          </MemoryRouter>,
+        ),
+      );
+      const links = Array.from(
+        container.querySelectorAll<HTMLAnchorElement>('a[role="menuitem"]'),
+      );
+      const back = links.find(
+        (link) => link.textContent === 'canvasPage.backToList',
+      );
+      const newTab = links.find(
+        (link) => link.textContent === 'canvasPage.openListInNewTab',
+      );
+      expect(Boolean(back)).toBe(path !== '/spaces');
+      expect(Boolean(newTab)).toBe(visible);
+      if (back) {
+        expect(back.getAttribute('href')).toBe('/spaces');
+        expect(back.getAttribute('target')).toBeNull();
+      }
+      if (newTab) {
+        expect(back?.nextElementSibling).toBe(newTab);
+        expect(newTab.getAttribute('href')).toBe(back?.getAttribute('href'));
+        expect(newTab.target).toBe('_blank');
+        expect(newTab.rel).toBe('noopener noreferrer');
+      }
+    },
+  );
 
   it('offers sign-out only to a Bubble-signed-in caller', () => {
     const items = (identity: IdentityResponse | null) => {

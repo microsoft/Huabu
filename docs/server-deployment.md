@@ -17,7 +17,7 @@ Settings update -> independent update unit -> build-web.mjs --branch <branch>
 | `pnpm build:web --branch <branch>` | Require a clean worktree, fetch the exact branch from `origin`, check it out, fast-forward without discarding local work, install locked dependencies, and build. |
 | `pnpm start:web`                   | Build the current checkout and then start it; intended for foreground/manual use, not systemd boot startup.                                                       |
 | `node scripts/start-web.mjs`       | Load repository `.env` and existing instance configuration, then launch prepared artifacts without building.                                                      |
-| `scripts/start-huabu.sh`           | Deprecated, unchanged tmux-only deployment helper; never use it to manage a systemd deployment.                                                                   |
+| `scripts/start-huabu.sh`           | Deprecated tmux-only deployment helper; never use it to manage a systemd deployment.                                                                              |
 
 Keep the existing non-root runtime account when migrating. Do not run Huabu as root. Obtain explicit operator approval before stopping services, installing units or Caddy, enabling linger, opening ports, changing DNS, or rebooting. Do not kill arbitrary listeners by port, overwrite an existing Caddyfile, reset Git history, delete data, or expose credentials while collecting diagnostics. Inspect existing configuration before editing it, and keep unrelated host services intact.
 

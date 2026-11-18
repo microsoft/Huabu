@@ -1,7 +1,13 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+import { ensureAcpSession } from '@agenetes/acp-driver';
 import { describe, expect, it, vi } from 'vitest';
+
+vi.mock(import('@agenetes/acp-driver'), async (importOriginal) => ({
+  ...(await importOriginal()),
+  ensureAcpSession: vi.fn(),
+}));
 
 vi.mock('../../workspace/paths.js', () => ({
   canvasAcpNamespace: (canvasId: string) => ({
@@ -11,6 +17,7 @@ vi.mock('../../workspace/paths.js', () => ({
 }));
 
 import { ExternalAgentRealizationService } from './external-agent-realization.js';
+import { acpRuntimePolicy, agenetes } from '../agenetes/drivers.js';
 import { AgentNodeBindingCoordinator } from '../agent-node-binding.js';
 
 import type { ExternalAgentRealizationError } from './external-agent-realization.js';
@@ -200,6 +207,54 @@ function createHarness(options?: {
 }
 
 describe('ExternalAgentRealizationService', () => {
+  it('uses the shared runtime launch precedence for control-first reconstruction', async () => {
+    const harness = createHarness();
+    const realized = await harness.service.realize({
+      canvasId: target.canvasId,
+      threadId: target.threadId,
+      logger,
+    });
+    const spec = {
+      ...realized.spec,
+      spec: {
+        ...realized.spec.spec,
+        env: { ENDPOINT: 'old', REMOVED: 'old', KEEP: 'user' },
+      },
+    };
+    const runtime = vi
+      .spyOn(acpRuntimePolicy, 'resolveRuntimeEnvironment')
+      .mockResolvedValue({
+        ENDPOINT: 'current',
+        REMOVED: undefined,
+      });
+    const record = vi.spyOn(agenetes, 'record').mockResolvedValue(undefined);
+    try {
+      await new ExternalAgentRealizationService().ensureSession(
+        { ...realized, spec },
+        logger,
+      );
+      expect(runtime).toHaveBeenCalledWith(spec.spec, {
+        namespace: spec.namespace,
+        threadId: spec.threadId,
+        agentletId: spec.spec.agentletId,
+      });
+      expect(ensureAcpSession).toHaveBeenCalledWith(
+        expect.objectContaining({
+          env: { ENDPOINT: 'current', KEEP: 'user' },
+          cwd: '/fixed/work',
+        }),
+      );
+      expect(spec.spec.env).toEqual({
+        ENDPOINT: 'old',
+        REMOVED: 'old',
+        KEEP: 'user',
+      });
+    } finally {
+      runtime.mockRestore();
+      record.mockRestore();
+    }
+  });
+
   it('freezes an unbound Chat directory and rejects later changes without replacing the workload', async () => {
     const harness = createHarness({ agentTarget: null });
     const options = {

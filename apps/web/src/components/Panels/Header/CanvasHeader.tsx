@@ -107,6 +107,10 @@ export const CanvasHeader: React.FC<CanvasHeaderProps> = ({
         className={clsx(
           'flex shrink-0 items-center gap-1 empty:hidden',
           vertical ? 'flex-col' : 'ml-1',
+          // The icon is drawn inside its button's padding. Pull the button
+          // out by that much so the icon itself, not its box, meets the right
+          // edge of the panel content below.
+          !vertical && !isCollapsed && '-mr-[5px]',
         )}
       >
         {!vertical && <SpaceReturnButton />}

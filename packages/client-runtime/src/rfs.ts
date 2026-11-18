@@ -111,13 +111,21 @@ async function deliver(
   end: boolean,
   maximumBytes = Infinity,
   onChunk?: (received: number) => void,
+  prefix = '',
 ) {
   async function* bytes() {
-    if (!response.body) return;
-    const reader = response.body.getReader();
+    const reader = response.body?.getReader();
     let received = 0;
     try {
-      while (true) {
+      if (prefix) {
+        const bytes = Buffer.from(prefix);
+        received += bytes.byteLength;
+        if (received > maximumBytes)
+          throw new Error('Service archive exceeds download size limit');
+        onChunk?.(received);
+        yield bytes;
+      }
+      while (reader) {
         const result = await reader.read();
         if (result.done) return;
         received += result.value.byteLength;
@@ -127,10 +135,12 @@ async function deliver(
         yield result.value;
       }
     } finally {
-      try {
-        await reader.cancel();
-      } finally {
-        reader.releaseLock();
+      if (reader) {
+        try {
+          await reader.cancel();
+        } finally {
+          reader.releaseLock();
+        }
       }
     }
   }
@@ -347,6 +357,8 @@ export async function runRfs(args: string[], io: RfsIO = {}): Promise<number> {
     acceptedThread?: string;
   }
   async function send(request: Request) {
+    if (request.download && !request.download.output)
+      throw new Error('--output must be nonempty');
     const config = connection(env);
     const headers: Record<string, string> = {
       ...config.headers,
@@ -419,6 +431,8 @@ export async function runRfs(args: string[], io: RfsIO = {}): Promise<number> {
     } else if (download) {
       const target = resolve(download.output);
       const metadata = downloadMetadata(response);
+      if (metadata.size !== undefined)
+        metadata.size += Buffer.byteLength(request.usage ?? '');
       temporary = await mkdtemp(join(dirname(target), '.huabu-rfs-'));
       let received = 0;
       event({
@@ -444,6 +458,7 @@ export async function runRfs(args: string[], io: RfsIO = {}): Promise<number> {
           (value) => {
             received = value;
           },
+          request.usage,
         );
         await rename(join(temporary, 'body'), target);
       } finally {
@@ -658,11 +673,12 @@ export async function runRfs(args: string[], io: RfsIO = {}): Promise<number> {
         cli.program.outputHelp();
         await liveHelp();
       },
-      getSkill: (id, usage) =>
+      getSkill: (id, usage, output) =>
         send({
           path: id ? `/skill/${segment(id)}` : '/skill',
           headers: SKILL_CLIENT_HEADERS,
           usage: id ? undefined : usage,
+          download: output === undefined ? undefined : { output },
         }),
       query: (options) => post('/query', options, true),
       execute,
@@ -673,7 +689,6 @@ export async function runRfs(args: string[], io: RfsIO = {}): Promise<number> {
       },
       download: async (path, options) => {
         const url = `/download/${path.split('/').map(segment).join('/')}`;
-        if (!options.output) throw new Error('--output must be nonempty');
         await send({
           path: url,
           download: options,

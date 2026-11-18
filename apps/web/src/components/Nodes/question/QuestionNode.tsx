@@ -26,6 +26,7 @@ import {
   useChatStore,
 } from '@/store/chatStore.ts';
 import { findPendingPermissionRequestId } from '@/store/chatTypes.ts';
+import { rememberPreviewedAgent } from '@/store/commentDestinationMemory';
 import { resolveConversationAgentBinding } from '@/store/conversationOwner';
 import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store';
 import {
@@ -245,7 +246,7 @@ export const QuestionNode = memo(
           data.agentBinding,
           canvasId,
           'bottom',
-          { transient },
+          { transient, userInitiated: true },
         );
       },
       [id, data.threadId, data.agentBinding, canvasId],
@@ -258,6 +259,7 @@ export const QuestionNode = memo(
     // ------------------------------------------------------------------
     const openInCompose = useCallback(
       (transient = false) => {
+        rememberPreviewedAgent({ kind: 'node', canvasId, nodeId: id });
         void ensureQuestionThread(canvasId, id)
           .then((threadId) =>
             enterQuestionCompose(
