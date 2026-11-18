@@ -77,7 +77,6 @@ import {
   type RemoteContentApplied as AppliedRemoteContent,
 } from '../sync/remoteContent';
 
-
 import type { UnitNode } from '../sync/propertyUnits';
 import type {
   GetNodeContentResponse,
@@ -739,9 +738,10 @@ export function createNodeContentQueue(opts: {
 
   /**
    * Build the `PutNodeContentRequest` body for `nodeId` from the
-   * latest store snapshot. Returns `null` when the node has gone
-   * away (e.g. deleted between debounce-schedule and flush) or its
-   * type is not markdown-backed.
+   * latest store snapshot: the fields in `requestFields` — the ones this
+   * page changed and has not saved — with their values now. Returns `null`
+   * when the node has gone away (e.g. deleted between debounce-schedule and
+   * flush), its type is not markdown-backed, or nothing of it is unsaved.
    *
    * `propertyOnly` says the request carries custom properties and nothing
    * else — no body, no title and no `expectRev`: when properties are all
@@ -784,11 +784,24 @@ export function createNodeContentQueue(opts: {
       !restored &&
       (frozenBody || (onlyPropertiesRequested && baselineRev.has(nodeId)));
 
-    const partialQuestionWrite = nodeType === 'question' && !restored;
-    if (partialQuestionWrite && !requestFields?.size) return null;
+    // A save carries what this page changed and nothing else: the server
+    // keeps every field a request leaves out, so a title, summary or body
+    // another writer changed meanwhile is not written back from this
+    // page's copy. Only a node whose record this page is creating — one it
+    // has not saved yet, or one an undo brings back — is sent whole.
+    const whole = restored || !baselineRev.has(nodeId);
+    if (!whole && !requestFields?.size) return null;
+    // A title travels with its source: the server protects a title a person
+    // gave from an automatic one by the source the request states.
+    const titleChanged =
+      requestFields?.has('label') === true ||
+      requestFields?.has('labelSource') === true;
     const includes = (key: string) =>
       !propertyOnly &&
-      (!partialQuestionWrite || requestFields?.has(key) === true);
+      (whole ||
+        (key === 'label' || key === 'labelSource'
+          ? titleChanged
+          : requestFields?.has(key) === true));
     const body: PutNodeContentRequest = { nodeType };
 
     if (TEXT_BEARING_NODE_TYPES.has(nodeType) && includes('content')) {
@@ -1012,10 +1025,16 @@ export function createNodeContentQueue(opts: {
       // failure can revert to it. Capture `labelSource` from the body
       // we just sent — it's the provenance attached to that label
       // server-side.
+      // A request without a title did not change it: the answer names the
+      // title the server holds, which need not be the one shown here.
+      const sentTitle = 'label' in body;
       lastSuccessful.set(nodeId, {
         label: response.label,
-        labelSource:
-          typeof body.labelSource === 'string' ? body.labelSource : undefined,
+        labelSource: sentTitle
+          ? typeof body.labelSource === 'string'
+            ? body.labelSource
+            : undefined
+          : lastSuccessful.get(nodeId)?.labelSource,
       });
       // Only patch when the resolved label actually differs from what's
       // in the store right now — avoids spurious re-renders when the
@@ -1027,7 +1046,13 @@ export function createNodeContentQueue(opts: {
         typeof currentNode.data?.['label'] === 'string'
           ? (currentNode.data['label'] as string)
           : null;
-      if (response.label !== null && response.label !== currentLabel) {
+      // The server's title is shown when this request set it (it may have
+      // been de-duplicated), and when the page holds no title of its own.
+      if (
+        (sentTitle || !holdsUnit(nodeId, 'data.label')) &&
+        response.label !== null &&
+        response.label !== currentLabel
+      ) {
         state._setStateRaw({
           nodes: state.nodes.map((n) =>
             n.id === nodeId

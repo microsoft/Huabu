@@ -21,7 +21,6 @@ import {
   withContentPatch,
 } from '../save/nodeContentFields';
 
-
 import type { Delta } from '@huabu/shared/canvas-engine';
 
 /** What became of fetched content fields. */

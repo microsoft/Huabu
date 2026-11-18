@@ -62,6 +62,20 @@ function makeQueue(node: Node) {
     patchNodeSilent: vi.fn(),
   };
   const queue = createNodeContentQueue({ delayMs: 0, getState: () => state });
+  // A save is of something the person changed. Where a test has made no
+  // edit of its own, `flushNow` stands for "the body was typed, and is
+  // saved now".
+  const flushNow = queue.flushNow.bind(queue);
+  queue.flushNow = (canvasId, nodeId, flushOpts) => {
+    const typed = state.nodes.find((candidate) => candidate.id === nodeId);
+    if (typed && !queue.hasUnsaved(nodeId))
+      queue.scheduleChanges(
+        canvasId,
+        [{ ...typed, data: { ...typed.data, content: undefined } }],
+        [typed],
+      );
+    return flushNow(canvasId, nodeId, flushOpts);
+  };
   return { queue, state };
 }
 
@@ -407,6 +421,14 @@ describe('nodeContentQueue — save-failure surfacing', () => {
     // A load replaces the page's text: nothing is left to choose between.
     queue.clearUnsavedStatus([node.id]);
     expect(dismissToast).toHaveBeenCalledWith('conflict-toast');
+    // No longer frozen: nothing stands between the body and its save.
+    putMock.mockResolvedValueOnce({
+      nodeId: node.id,
+      label: 'Note',
+      rev: 'next',
+    });
+    await queue.flushNow('c1', node.id);
+    expect(putMock).toHaveBeenCalledTimes(2);
     expect(queue.unsavedNodeIds('c1')).toEqual([]);
     queue.discardCanvas('c1');
   });

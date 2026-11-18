@@ -157,9 +157,10 @@ describe('content another page saved, in the store', () => {
     await vi.advanceTimersByTimeAsync(10_000);
 
     expect(api.putNodeContent).toHaveBeenCalledTimes(1);
-    expect(api.putNodeContent.mock.calls[0][2]).toMatchObject({
+    // The body this page changed, and nothing it did not.
+    expect(api.putNodeContent.mock.calls[0][2]).toEqual({
+      nodeType: 'note',
       content: 'Body from A, then B',
-      label: 'From A',
       expectRev: nodeRevisionOf({ content: 'Body from A' }),
       pageId: CANVAS_PAGE_ID,
     });

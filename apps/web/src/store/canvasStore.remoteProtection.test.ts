@@ -346,6 +346,8 @@ describe('a body being typed here, and a change arriving from an agent', () => {
       content: 'Typing',
       expectRev: nodeRevisionOf({ content: `Body ${X}` }),
     });
+    // The body save does not write this page's copy of the title back.
+    expect(savesOf(X)[0]).not.toHaveProperty('label');
     expect(conflictToasts()).toHaveLength(0);
   });
 
@@ -371,6 +373,8 @@ describe('a body being typed here, and a change arriving from an agent', () => {
       labelSource: 'user',
       expectRev: STORED,
     });
+    // The title save does not write the body back.
+    expect(savesOf(X)[0]).not.toHaveProperty('content');
     expect(conflictToasts()).toHaveLength(0);
     expect(data(X).content).toBe('Agent text');
   });
@@ -485,10 +489,15 @@ describe('a body being typed here, and another person’s save of that note', ()
     keepMine?.();
     await vi.advanceTimersByTimeAsync(10_000);
     expect(savesOf(X)).toHaveLength(2);
+    // Keep mine is about the body: the request carries nothing else, so the
+    // other person's title stands on the server and on this page.
     expect(savesOf(X)[1]).toMatchObject({
       content: 'Typing',
       expectRev: STORED,
     });
+    expect(savesOf(X)[1]).not.toHaveProperty('label');
+    expect(savesOf(X)[1]).not.toHaveProperty('labelSource');
+    expect(savesOf(X)[1]).not.toHaveProperty('summary');
     expect(data(X).label).toBe('Their title');
   });
 });
