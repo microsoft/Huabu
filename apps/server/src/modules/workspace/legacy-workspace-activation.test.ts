@@ -441,7 +441,6 @@ describe('activating a legacy workspace on the new storage boundary', () => {
         // the path that has to keep reaching the blob port after the move.
         headers: AGENT_CREDENTIAL,
         payload: {
-          originator: { threadId: PLAIN_THREAD },
           edits: editsPerCommand([
             {
               type: 'CREATE_NODES',

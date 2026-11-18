@@ -665,17 +665,17 @@ describe('Review attribution', () => {
     }
   });
 
-  it('applies the same check to the thread id in a canvas execute body', async () => {
+  it('refuses a thread id in a canvas execute body, from any credential', async () => {
     seedBoth();
     const app = await buildApp();
     try {
-      const post = (threadId: string, id: string) =>
+      const post = (headers: Record<string, string>, id: string) =>
         app.inject({
           method: 'POST',
           url: '/canvas/c1/execute',
-          headers: { ...ALICE, ...AGENT_CREDENTIAL },
+          headers,
           payload: {
-            originator: { threadId },
+            originator: { threadId: THREAD },
             edits: editsPerCommand([
               {
                 type: 'CREATE_NODES',
@@ -691,16 +691,17 @@ describe('Review attribution', () => {
             ]),
           },
         });
+      const before = nodeCount();
 
-      const foreign = await post(ELSEWHERE, 'node-foreign');
-      expect(foreign.statusCode).toBe(200);
-      expect(foreign.json()).toMatchObject({ toVersion: 2 });
-      expect(changesOf('c1', ELSEWHERE)).toEqual([]);
+      // The page route has no field for a conversation: a person's session
+      // cannot file its batch under one, and neither can an agent here.
+      const person = await post(ALICE, 'node-person');
+      expect(person.statusCode).toBe(400);
+      const agent = await post({ ...ALICE, ...AGENT_CREDENTIAL }, 'node-agent');
+      expect(agent.statusCode).toBe(400);
 
-      const own = await post(THREAD, 'node-own');
-      expect(own.statusCode).toBe(200);
-      expect(own.json()).toMatchObject({ toVersion: 3 });
-      expect(changesOf('c1', THREAD)).toHaveLength(1);
+      expect(nodeCount()).toBe(before);
+      expect(changesOf('c1', THREAD)).toEqual([]);
     } finally {
       await app.close();
     }

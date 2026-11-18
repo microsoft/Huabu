@@ -516,6 +516,8 @@ To attach a canvas change to the right conversation's card, the initiating
   header is distinct from the thread ID in `/agent/:threadId/prompt` (which continues an
   internal built-in-agent turn — a different thread space).
 
+A browser page cannot attribute a batch: the page route's `originator` is `{ tabId? }` and a body that names a `threadId` is refused with 400, whatever credential it arrived with. A person's edit therefore never produces Review records.
+
 `executeOnServer` computes review records only when `computeChanges` is set (i.e. thread-attributed batches) and the global Agent Change Review configuration does not auto-accept Agent writes, so untagged and auto-accepted writers pay no extraction cost. When a `threadId` is present and explicit review is enabled, the batch's records are folded into the thread's coalesced sidecar and that full list is broadcast as `changes`.
 
 ## Preprocessing cost dedup

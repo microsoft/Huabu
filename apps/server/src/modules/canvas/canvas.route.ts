@@ -81,7 +81,6 @@ import {
 import { MAX_UPLOAD_BYTES } from '../../upload-limits.js';
 import { conversationEventLogStore } from '../agent/agenetes/conversation-stores.js';
 import { AgentNodeBindingError } from '../agent/agent-node-binding.js';
-import { agentThreadService } from '../agent/agent-thread.service.js';
 import { readRecentCanvasConversation } from '../agent/recent-conversation.js';
 import { ARTIFACT_URL_REGEX } from '../artifact/utils.js';
 import {
@@ -1494,23 +1493,14 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       });
     }
     try {
-      // The thread id comes from the body, so it is attributed only when it
-      // names a conversation of this Space; otherwise the batch still
-      // applies, unattributed. (Known limitation: this does not prove the
-      // caller is that conversation.)
-      const { threadId: claimedThreadId, ...unattributed } = originator;
-      const attributed =
-        claimedThreadId !== undefined &&
-        (await agentThreadService.ownsThread(canvasId, claimedThreadId));
       const out = await executeOnServer({
         canvasId,
         edits,
-        originator: attributed ? originator : unattributed,
-        ...(claimedThreadId !== undefined ? { claimedThreadId } : {}),
+        // This route attributes nothing to a conversation: its body has no
+        // field for one. Review records are computed for batches that reach
+        // the Agent route with a host thread, and for the built-in agent.
+        originator,
         ...(runId ? { runId } : {}),
-        // Derive review records only for thread-attributed (ACP) batches —
-        // they feed that conversation's change card. Other callers skip it.
-        computeChanges: attributed,
         ...(operationId !== undefined && principalId
           ? { request: { operationId, principalId } }
           : {}),

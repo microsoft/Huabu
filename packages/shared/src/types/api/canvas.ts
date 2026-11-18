@@ -405,8 +405,10 @@ export const executeOriginatorSchema = z.object({
    */
   tabId: canvasPageIdSchema.optional(),
   /**
-   * ACP chat thread that initiated this batch (set by the reachback
-   * tool). Lets the broadcast attribute the change to the right
+   * Conversation that initiated this batch. Set by the Server only: by the
+   * built-in agent's tool context, or by the Agent route from the
+   * `X-Huabu-Host-Thread-Id` header of a request that arrived with an agent
+   * credential. Lets the broadcast attribute the change to the right
    * conversation's review card.
    */
   threadId: z.string().optional(),
@@ -414,15 +416,17 @@ export const executeOriginatorSchema = z.object({
 export type ExecuteOriginator = z.infer<typeof executeOriginatorSchema>;
 
 /**
- * What an execute request may say about its sender: which page it is and,
- * for an agent, which conversation the batch belongs to. Who the request
- * speaks for is not among them — that follows the credential it arrived
- * with (a person's session is `ui`, an agent or machine credential is
- * `agent`; `execute-admission.ts`). The object is strict, so a request that
- * states a `source` is refused.
+ * What an execute request to the page route may say about its sender: which
+ * page it is, and nothing else. Who the request speaks for follows the
+ * credential it arrived with (a person's session is `ui`, an agent or
+ * machine credential is `agent`; `execute-admission.ts`), and which
+ * conversation a batch belongs to is said only on the Agent route, by a
+ * caller that arrived with an agent credential (`X-Huabu-Host-Thread-Id`).
+ * The object is strict, so a request that states a `source` or a `threadId`
+ * is refused.
  */
 export const executeRequestOriginatorSchema = executeOriginatorSchema
-  .omit({ source: true })
+  .omit({ source: true, threadId: true })
   .strict();
 export type ExecuteRequestOriginator = z.infer<
   typeof executeRequestOriginatorSchema
