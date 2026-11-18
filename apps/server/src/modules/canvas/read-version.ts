@@ -4,8 +4,7 @@
 /**
  * Read-version check for an executor batch — the Server's side of it.
  *
- * A caller that quotes the version it read (`basis`, or one per edit in
- * `runs`) is asking: "apply this only if the nodes it names are still the
+ * A caller that quotes the version it read (an edit's `basis`) is asking: "apply this only if the nodes it names are still the
  * ones I saw". The answer comes from the Space's per-node version stamps —
  * never by comparing the basis with the head version, so unrelated writes by
  * others do not get in the way.
@@ -19,11 +18,11 @@
 
 import { createHash } from 'node:crypto';
 
-import { parseBasis, type Basis, type CanvasExecuteRun } from '@huabu/shared';
 import {
-  isRefusedResult,
-  type ReadVersionRun,
-} from '@huabu/shared/canvas-engine';
+  parseBasis,
+  type Basis,
+  type CanvasExecuteEditRef,
+} from '@huabu/shared';
 
 import type {
   SaveKey,
@@ -66,22 +65,41 @@ export function pageKeyOf(principalId: string, pageId: string): string {
     .slice(0, 22);
 }
 
+/** One edit of a request, decoded. */
+export interface ResolvedEdit {
+  /** The Space version the edit was made on, when it quoted one. */
+  readonly version?: number;
+  /** Earlier edits of this request it was made on top of, by position. */
+  readonly after: number[];
+  /**
+   * It was made on top of an edit of an earlier request that did not take
+   * effect, or whose outcome is not stored.
+   */
+  readonly blocked: boolean;
+}
+
 /**
- * Decode the runs of a request against the Space's stamps.
+ * Decode the edits of a request: each `basis` against the Space's stamps,
+ * each `after` into positions of this request or a lookup of an earlier one.
  *
  * Returns the basis that is not a read version of this Space, when there is
  * one. An edit made on top of an edit of an *earlier* request is looked up
- * in that request's stored response (`lookup`, by the caller's own key
- * space): it is `blocked` unless that response is stored and none of the
- * named commands was refused.
+ * in that request's stored outcome (`lookup`, by the caller's own key
+ * space): it is `blocked` unless that outcome is stored and says the named
+ * edit took effect.
+ *
+ * @param input.stamps required when an edit quotes a `basis`.
  */
-export async function resolveRuns(input: {
-  readonly runs: readonly CanvasExecuteRun[];
-  readonly stamps: SpaceStamps;
+export async function resolveEdits(input: {
+  readonly edits: readonly {
+    readonly basis?: string | undefined;
+    readonly after?: readonly CanvasExecuteEditRef[] | undefined;
+  }[];
+  readonly stamps: SpaceStamps | null;
   readonly principalId: string | undefined;
   readonly lookup: (key: SaveKey) => Promise<StoredSaveResult | null>;
 }): Promise<
-  { ok: true; runs: ReadVersionRun[] } | { ok: false; basis: string }
+  { ok: true; edits: ResolvedEdit[] } | { ok: false; basis: string }
 > {
   const earlier = new Map<string, Promise<StoredSaveResult | null>>();
   const storedOf = (operationId: string): Promise<StoredSaveResult | null> => {
@@ -96,43 +114,41 @@ export async function resolveRuns(input: {
     return pending;
   };
 
-  const runs: ReadVersionRun[] = [];
-  for (const run of input.runs) {
-    const read = resolveReadVersion(run.basis, input.stamps);
-    if (!read) return { ok: false, basis: run.basis };
+  const edits: ResolvedEdit[] = [];
+  for (const [index, edit] of input.edits.entries()) {
+    let version: number | undefined;
+    if (edit.basis !== undefined) {
+      const read = input.stamps
+        ? resolveReadVersion(edit.basis, input.stamps)
+        : null;
+      if (!read) return { ok: false, basis: edit.basis };
+      version = read.version;
+    }
     let blocked = false;
-    const after: { start: number; count: number }[] = [];
-    for (const ref of run.after ?? []) {
+    const after: number[] = [];
+    for (const ref of edit.after ?? []) {
       if (ref.operationId === undefined) {
-        after.push({ start: ref.start, count: ref.count });
+        // Only an earlier edit of the request can have been built on.
+        if (ref.edit < index) after.push(ref.edit);
+        else blocked = true;
         continue;
       }
       const stored = await storedOf(ref.operationId);
-      const results = (
-        stored?.response as { results?: unknown } | null | undefined
-      )?.results;
-      const named = Array.isArray(results)
-        ? results.slice(ref.start, ref.start + ref.count)
-        : [];
-      if (
-        named.length !== ref.count ||
-        named.some(
-          (result) =>
-            result === null ||
-            typeof result !== 'object' ||
-            isRefusedResult(result as { applied: boolean; reason?: string }),
-        )
-      ) {
-        blocked = true;
-      }
+      if (!storedEditApplied(stored?.response, ref.edit)) blocked = true;
     }
-    runs.push({
-      start: run.start,
-      count: run.count,
-      version: read.version,
-      ...(after.length > 0 ? { after } : {}),
-      ...(blocked ? { blocked: true } : {}),
+    edits.push({
+      ...(version !== undefined ? { version } : {}),
+      after,
+      blocked,
     });
   }
-  return { ok: true, runs };
+  return { ok: true, edits };
+}
+
+/** Whether a stored outcome says its edit at `index` took effect. */
+function storedEditApplied(response: unknown, index: number): boolean {
+  const edits = (response as { edits?: unknown } | null | undefined)?.edits;
+  if (!Array.isArray(edits)) return false;
+  const edit = edits[index] as { applied?: unknown } | undefined;
+  return edit?.applied === true;
 }

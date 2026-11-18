@@ -30,8 +30,6 @@ import {
   deleteNodeParamsSchema,
 } from '@huabu/shared';
 import {
-  readVersionRunsProblem,
-  toWireDeltas,
   nodeRevisionOf,
   hidePdfNotes,
 } from '@huabu/shared/canvas-engine';
@@ -51,6 +49,8 @@ import {
   CanvasChangeConflictError,
   applyDeltasOnServer,
   executeOnServer,
+  toExecuteResponse,
+  toWirePendingEffects,
 } from './canvas-executor.js';
 import { searchCanvas } from './canvas-search.js';
 import { publishCanvasUpdate } from './canvas-sync.js';
@@ -1476,36 +1476,18 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     // Who the request speaks for and whether its commands may run for them
     // is decided here, once; see `execute-admission.ts`.
     const admission = admitExecuteRequest({
-      claimedSource: parsed.data.originator.source,
+      claimedSource: parsed.data.originator?.source,
       viaAgentCredential: arrivedWithAgentCredential(request),
-      commands: parsed.data.commands,
+      edits: parsed.data.edits,
     });
     if (!admission.ok) {
       return reply
         .code(admission.status)
         .send({ code: admission.code, message: admission.message });
     }
-    const { commands } = admission;
-    const { runId, operationId, basis, runs } = parsed.data;
+    const { edits } = admission;
+    const { runId, operationId } = parsed.data;
     const originator = { ...parsed.data.originator, source: admission.source };
-    if (runs !== undefined) {
-      const problem =
-        originator.source !== 'ui'
-          ? 'runs is accepted for ui batches only'
-          : readVersionRunsProblem(
-              runs.map((run) => ({
-                start: run.start,
-                count: run.count,
-                version: 0,
-                // Runs of earlier requests are looked up, not addressed.
-                after: (run.after ?? []).filter(
-                  (ref) => ref.operationId === undefined,
-                ),
-              })),
-              commands.length,
-            );
-      if (problem) return reply.code(400).send({ message: problem });
-    }
     // Stored responses are kept per authenticated caller; the principal is
     // the transport's, never a value the request supplies.
     const principalId = getRequestIdentity(request)?.principal.principalId;
@@ -1526,7 +1508,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         (await agentThreadService.ownsThread(canvasId, claimedThreadId));
       const out = await executeOnServer({
         canvasId,
-        commands,
+        edits,
         originator: attributed ? originator : unattributed,
         ...(claimedThreadId !== undefined ? { claimedThreadId } : {}),
         ...(runId ? { runId } : {}),
@@ -1536,46 +1518,22 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         ...(operationId !== undefined && principalId
           ? { request: { operationId, principalId } }
           : {}),
-        ...(basis !== undefined ? { basis } : {}),
-        ...(runs?.length ? { runs } : {}),
         // "The same page" is the authenticated caller's page: the page id
         // alone is the page's own claim.
         ...(originator.source === 'ui' && principalId && originator.tabId
           ? { page: { principalId, pageId: originator.tabId } }
           : {}),
-        // A caller using none of the fields gets exactly the legacy call: no
-        // stamp baseline is created on its behalf.
-        ...(operationId !== undefined || basis !== undefined || runs?.length
+        // A caller that names neither a request id nor a read version gets
+        // no stamp baseline created on its behalf.
+        ...(operationId !== undefined ||
+        edits.some((edit) => edit.basis !== undefined)
           ? { issueBasis: true }
           : {}),
       });
       // With a request id the executor's run id is the stored one, so a
       // replay reports the original run.
       const effectiveRunId = out.runId ?? runId;
-      const response: PostCanvasExecuteResponse = {
-        canvasId: out.canvasId,
-        fromVersion: out.fromVersion,
-        toVersion: out.toVersion,
-        deltas: toWireDeltas(out.deltas),
-        results: out.results,
-        commands: out.commands,
-        pendingEffects: {
-          mutatedNodes: out.pendingEffects.mutatedNodes,
-          deletedNodeIds: out.pendingEffects.deletedNodeIds,
-          contentEditedNodeIds: out.pendingEffects.contentEditedNodeIds,
-          deferredFitFrameIds: out.pendingEffects.deferredFitFrameIds,
-        },
-        ...(out.orderEvents ? { orderEvents: out.orderEvents } : {}),
-        ...(out.nodeContentRevisions
-          ? { nodeContentRevisions: out.nodeContentRevisions }
-          : {}),
-        ...(effectiveRunId ? { runId: effectiveRunId } : {}),
-        ...(out.operationId ? { operationId: out.operationId } : {}),
-        ...(out.basis ? { basis: out.basis } : {}),
-        ...(out.replayed ? { replayed: true as const } : {}),
-      };
-
-      return reply.send(response);
+      return reply.send(toExecuteResponse(out, effectiveRunId));
     } catch (err) {
       if (err instanceof CanvasNotFoundError) {
         return reply.code(404).send({ message: 'Canvas not found' });
@@ -1689,7 +1647,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
               fromVersion: out.fromVersion,
               toVersion: out.toVersion,
               deltas: out.deltas,
-              pendingEffects: out.pendingEffects,
+              pendingEffects: toWirePendingEffects(out.pendingEffects),
               ...(out.nodeContentRevisions
                 ? { nodeContentRevisions: out.nodeContentRevisions }
                 : {}),

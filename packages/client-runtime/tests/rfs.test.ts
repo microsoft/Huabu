@@ -1037,6 +1037,54 @@ describe('optional raw RFS client', () => {
       );
     });
 
+    it('sends a command list and a list of edits as they are, and prints a replayed answer as it is', async () => {
+      const { env, seen } = await recorder((attempt, request, response) => {
+        // The first attempt of each call is dropped, so each is retried
+        // under its request id and answered from the stored outcome.
+        if (attempt % 2 === 1) {
+          request.socket.destroy();
+          return;
+        }
+        response.end(
+          JSON.stringify({
+            canvasId: 'space',
+            operationId: request.headers['x-huabu-operation-id'],
+            replayed: true,
+            results: [{ index: 0, type: 'DELETE_NODES', applied: true }],
+          }),
+        );
+      });
+      // The documented form: the server runs it as one edit per command.
+      const commands =
+        '{"commands":[{"type":"DELETE_NODES","nodeIds":["a"]}],"basis":"b1.read"}';
+      // The edits spelled out: forwarded untouched as well, never rewritten
+      // into the other form on the way.
+      const edits =
+        '{"edits":[{"basis":"b1.read","commands":[{"type":"DELETE_NODES","nodeIds":["a"]}]}]}';
+      for (const [index, body] of [commands, edits].entries()) {
+        const result = await call(
+          ['execute', '--json', body],
+          env,
+          undefined,
+          fast,
+        );
+        expect(result.code).toBe(0);
+        const attempts = seen.slice(index * 2, index * 2 + 2);
+        expect(attempts.map((attempt) => attempt.body)).toEqual([body, body]);
+        // One request id for both attempts.
+        expect(attempts[0]?.id).toMatch(UUID);
+        expect(attempts[1]?.id).toBe(attempts[0]?.id);
+        // The replayed answer is the answer: printed raw, exit code 0.
+        expect(JSON.parse(result.stdout.toString())).toEqual({
+          canvasId: 'space',
+          operationId: attempts[0]?.id,
+          replayed: true,
+          results: [{ index: 0, type: 'DELETE_NODES', applied: true }],
+        });
+      }
+      expect(seen).toHaveLength(4);
+    });
+
     it('forwards --operation-id and --basis, and keeps a request id the body names', async () => {
       const { env, seen } = await recorder((_attempt, request, response) =>
         echo(request, response),

@@ -20,7 +20,7 @@ import archiver from 'archiver';
 import fastify from 'fastify';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { encodeBasis, parseBasis } from '@huabu/shared';
+import { editsPerCommand, encodeBasis, parseBasis } from '@huabu/shared';
 import { extractCanvasChanges } from '@huabu/shared/canvas-engine';
 
 vi.mock('../storage/index.js', async (importOriginal) => {
@@ -229,7 +229,7 @@ describe('POST /api/canvas lifecycle', () => {
             toVersion: after?.version,
             deltas: [],
             pendingEffects: {
-              mutatedNodes: [],
+              mutatedNodeIds: [],
               deletedNodeIds: [],
               contentEditedNodeIds: [],
               deferredFitFrameIds: [],
@@ -500,7 +500,10 @@ describe('POST /api/canvas/:canvasId/execute storage outcomes', () => {
     app.inject({
       method: 'POST',
       url: `/canvas/${canvasId}/execute`,
-      payload: { commands, originator: { source: 'ui' } },
+      payload: {
+        edits: editsPerCommand(commands),
+        originator: { source: 'ui' },
+      },
     });
 
   it('keeps node content out of the Space record', async () => {
@@ -596,7 +599,7 @@ describe('POST /api/canvas/:canvasId/execute storage outcomes', () => {
         },
       ]);
       expect(seed.statusCode).toBe(200);
-      expect(seed.json().results[0].applied).toBe(true);
+      expect(seed.json().edits[0].results[0].applied).toBe(true);
       const before = await space('c1').read();
       const response = await execute(app, 'c1', [
         {
@@ -623,7 +626,7 @@ describe('POST /api/canvas/:canvasId/execute storage outcomes', () => {
         },
       ]);
       expect(response.statusCode).toBe(200);
-      expect(response.json().results[0].applied).toBe(false);
+      expect(response.json().edits[0].results[0].applied).toBe(false);
       expect(await space('c1').read()).toEqual(before);
     } finally {
       await app.close();

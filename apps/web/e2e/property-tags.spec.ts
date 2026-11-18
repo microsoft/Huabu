@@ -3,7 +3,7 @@
 
 import { expect, test } from '@playwright/test';
 
-import { openNewCanvas } from './helpers';
+import { openNewCanvas, editsPerCommand } from './helpers';
 
 import type * as PreviewActions from '../src/store/previewWorkspace/actions';
 
@@ -17,7 +17,7 @@ test('tags are picked with the pointer and corrected in place', async ({
   const canvasId = page.url().split('/canvas/')[1]?.split(/[?#]/)[0];
   const response = await page.request.post(`/api/canvas/${canvasId}/execute`, {
     data: {
-      commands: [
+      edits: editsPerCommand([
         {
           type: 'CREATE_NODES',
           nodes: [
@@ -43,7 +43,7 @@ test('tags are picked with the pointer and corrected in place', async ({
             },
           ],
         },
-      ],
+      ]),
       originator: { source: 'agent', threadId: 'e2e-property-tags' },
     },
   });
@@ -95,7 +95,7 @@ test('a tag removed from a PDF an agent wrote saves without a conflict', async (
   // it holds, and a PDF's extracted body is never sent to it.
   const response = await page.request.post(`/api/canvas/${canvasId}/execute`, {
     data: {
-      commands: [
+      edits: editsPerCommand([
         {
           type: 'CREATE_NODES',
           nodes: [
@@ -112,7 +112,7 @@ test('a tag removed from a PDF an agent wrote saves without a conflict', async (
             },
           ],
         },
-      ],
+      ]),
       originator: { source: 'agent', threadId: 'e2e-property-tags' },
     },
   });

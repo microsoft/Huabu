@@ -1169,7 +1169,7 @@ try {
     title: 'Navigation child',
   });
   await request(`/canvas/${navigationParent.canvasId}/execute`, 'POST', {
-    commands: [
+    edits: [
       {
         type: 'CREATE_NODES',
         nodes: [
@@ -1181,7 +1181,7 @@ try {
           },
         ],
       },
-    ],
+    ].map((command) => ({ commands: [command] })),
     originator: { source: 'ui', tabId: 'tabs-smoke' },
   });
   const parentPage = await open(shell, navigationParent.canvasId);

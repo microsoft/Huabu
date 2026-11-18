@@ -17,7 +17,7 @@ import { contentRevisionsOf } from './canvasStore/sync/testing/contentRevisions'
 import type { Node } from '@xyflow/react';
 
 const pendingEffects = {
-  mutatedNodes: [],
+  mutatedNodeIds: [],
   deletedNodeIds: [],
   contentEditedNodeIds: [],
   deferredFitFrameIds: [],

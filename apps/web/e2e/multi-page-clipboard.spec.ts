@@ -10,6 +10,8 @@ import {
   type Page,
 } from '@playwright/test';
 
+import { editsPerCommand } from './helpers';
+
 import type * as CanvasStore from '../src/store/canvasStore';
 import type {
   ArtifactUploadResponse,
@@ -207,9 +209,11 @@ async function openDevice(
     );
     if (path.endsWith('/execute')) {
       const body = request.postDataJSON() as {
-        commands?: Array<Record<string, unknown>>;
+        edits?: Array<{ commands?: Array<Record<string, unknown>> }>;
       } | null;
-      commands.push(...(body?.commands ?? []));
+      commands.push(
+        ...(body?.edits ?? []).flatMap((edit) => edit.commands ?? []),
+      );
     }
   });
   await page.goto(`/canvas/${canvasId}`);
@@ -380,16 +384,18 @@ async function seed(
 ) {
   const seeded = await request.post(`/api/canvas/${canvasId}/execute`, {
     data: {
-      commands,
+      edits: editsPerCommand(commands),
       originator: { source: 'ui', tabId: 'e2e-multi-page-clipboard-seed' },
     },
   });
   expect(seeded.ok(), await seeded.text()).toBe(true);
   const body = (await seeded.json()) as {
-    results?: { applied?: boolean; reason?: string }[];
+    edits?: { results: { applied?: boolean; reason?: string }[] }[];
   };
   expect(
-    (body.results ?? []).filter((result) => result.applied === false),
+    (body.edits ?? [])
+      .map((edit) => edit.results[0])
+      .filter((result) => result?.applied === false),
     'every seed command applied',
   ).toEqual([]);
 }

@@ -3,6 +3,8 @@
 
 import { expect, test, type Page } from '@playwright/test';
 
+import { editsPerCommand } from './helpers';
+
 import type * as StoreModule from '../src/store/canvasStore';
 import type {
   CreateCanvasResponse,
@@ -32,7 +34,7 @@ async function seedNode(
 ) {
   const response = await page.request.post(`/api/canvas/${canvasId}/execute`, {
     data: {
-      commands: [
+      edits: editsPerCommand([
         {
           type: 'CREATE_NODES',
           nodes: [
@@ -45,7 +47,7 @@ async function seedNode(
             },
           ],
         },
-      ],
+      ]),
       originator: { source: 'ui', tabId: 'e2e-space-shortcut' },
     },
   });
@@ -319,7 +321,7 @@ test('mixed collection reparents child Spaces and the tree picker blocks cyclic 
   await seedNode(page, source, 'text', { content: 'Mixed content' });
   const shortcut = await page.request.post(`/api/canvas/${source}/execute`, {
     data: {
-      commands: [
+      edits: editsPerCommand([
         {
           type: 'CREATE_NODES',
           nodes: [
@@ -331,7 +333,7 @@ test('mixed collection reparents child Spaces and the tree picker blocks cyclic 
             },
           ],
         },
-      ],
+      ]),
       originator: { source: 'ui', tabId: 'mixed-move-e2e' },
     },
   });

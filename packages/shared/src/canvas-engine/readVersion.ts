@@ -10,13 +10,11 @@
  * command names ({@link commandReadTargets}) — never by comparing the quoted
  * version with the head, so unrelated writes by others do not get in the way.
  *
- * Two ways to quote a version, one set of rules:
- *
- * - one version for the whole batch (an agent): each command is judged on its
- *   own, against the state it would run against;
- * - one version per **run** (a browser page): a run is the consecutive
- *   commands of one edit, and is judged once, before its first command, so an
- *   edit is taken or refused as a whole.
+ * A version is quoted per **edit**: the commands of one intent. An edit is
+ * judged once, before its first command, against the state it would run
+ * against, so it is taken or refused as a whole. A legacy `{ commands }`
+ * request is one edit per command, each quoting the request's version, so
+ * there each command is judged on its own.
  *
  * A change the same page committed itself is not a change it has not seen:
  * a stamp newer than the quoted version does not make a target stale when
@@ -127,69 +125,19 @@ export function advanceNodeStamps(
   return nodes ?? prev.nodes;
 }
 
-/** An earlier run this one was made on top of, by its place in the batch. */
-export interface ReadVersionRunRef {
-  readonly start: number;
-  readonly count: number;
-}
-
-/** One edit of a batch and the version its author read. */
-export interface ReadVersionRun {
-  /** Index of the edit's first command in the batch. */
-  readonly start: number;
-  /** How many consecutive commands belong to the edit. */
-  readonly count: number;
-  /** The Space version the edit was made on. */
-  readonly version: number;
+/** One edit of a batch as the read-version check sees it. */
+export interface ReadVersionEdit {
+  readonly commands: readonly CanvasCommand[];
   /**
-   * Earlier runs of the same batch whose result this edit was made on top
-   * of. When one of them did not take effect, neither does this one.
+   * The Space version the edit was made on. Without one the edit is admitted
+   * unchecked.
    */
-  readonly after?: readonly ReadVersionRunRef[];
-  /**
-   * The edit was made on top of an edit of an earlier request that did not
-   * take effect (or whose outcome is not known).
-   */
-  readonly blocked?: boolean;
-}
-
-/**
- * Why `runs` cannot describe a batch of `commandCount` commands, or `null`
- * when they can: every run lies inside the batch, no two overlap, they are
- * in batch order, and a run names only earlier runs of the batch.
- */
-export function readVersionRunsProblem(
-  runs: readonly ReadVersionRun[],
-  commandCount: number,
-): string | null {
-  let end = 0;
-  const earlier = new Set<string>();
-  for (const run of runs) {
-    if (run.start < end)
-      return 'runs must be in command order and must not overlap';
-    if (run.start + run.count > commandCount)
-      return 'runs names commands the request does not have';
-    for (const ref of run.after ?? []) {
-      if (!earlier.has(`${ref.start}:${ref.count}`))
-        return 'a run can only come after an earlier run of the same request';
-    }
-    earlier.add(`${run.start}:${run.count}`);
-    end = run.start + run.count;
-  }
-  return null;
-}
-
-/** Whether a command result means the command did not take effect. */
-export function isRefusedResult(result: {
-  applied: boolean;
-  reason?: string | undefined;
-}): boolean {
-  return !result.applied && result.reason !== 'no-op';
+  readonly version?: number;
 }
 
 export interface ReadVersionAdmission {
-  /** The engine's `admit` hook for the batch. */
-  readonly admit: NonNullable<ExecutorOptions['admit']>;
+  /** The engine's `admitEdit` hook for the batch. */
+  readonly admitEdit: NonNullable<ExecutorOptions['admitEdit']>;
   /**
    * After the batch ran: the nodes whose parent it changed without the
    * author having seen their last parent change — {@link StampAuthor.except}.
@@ -198,59 +146,41 @@ export interface ReadVersionAdmission {
 }
 
 /**
- * Build the engine's `admit` hook for one batch.
+ * Build the engine's `admitEdit` hook for one batch.
  *
- * - A target that is missing from the state the command (or run) starts
- *   from, or that was created after the quoted version by someone else,
- *   refuses with `stale-target`.
+ * - A target that is missing from the state the edit starts from, or that
+ *   was created after the quoted version by someone else, refuses with
+ *   `stale-target`.
  * - A membership target whose parent changed after the quoted version, by
  *   someone else, refuses with `stale-parent`.
  * - A node this batch itself brought into existence — an id absent from the
- *   prestate, or one an earlier command of the batch removed and a later one
+ *   prestate, or one an earlier edit of the batch removed and a later one
  *   created again — is never stale: its author is the caller.
- * - A run is judged once, over all its commands, against the state its first
- *   command would run against; the verdict applies to every command of the
- *   run. A run made on top of a run that did not take effect is refused with
- *   `stale-parent`.
+ * - An edit is judged once, over all its commands, against the state its
+ *   first command would run against; the verdict applies to the whole edit.
  *
- * Stamps describe the prestate, so what earlier commands of the same batch
- * did to a node never counts against a later one.
+ * Stamps describe the prestate, so what earlier edits of the same batch did
+ * to a node never counts against a later one. (An edit made on top of an
+ * edit that did not take effect is refused by the engine itself.)
  *
- * @param input.version the version quoted for commands outside every run;
- *   without it those commands are admitted unchecked.
+ * @param input.edits the batch, edit for edit as the engine will run it.
  * @param input.page the page the batch comes from, as stamps name it.
  * @param input.exempt commands the host added to the batch itself; they
  *   follow from an authored command and are not checked on their own.
  */
 export function createReadVersionAdmission(input: {
-  readonly commands: readonly CanvasCommand[];
-  readonly version?: number;
-  readonly runs?: readonly ReadVersionRun[];
+  readonly edits: readonly ReadVersionEdit[];
   readonly stamps: ReadStamps;
   readonly prestateNodes: readonly { id: string; parentId?: unknown }[];
   readonly page?: string;
   readonly exempt?: ReadonlySet<CanvasCommand>;
 }): ReadVersionAdmission {
-  const { stamps, exempt, page, commands } = input;
+  const { stamps, exempt, page, edits } = input;
   const prestateIds = new Set(input.prestateNodes.map((node) => node.id));
   /** Prestate ids seen absent at some point of the batch. */
   const removedInBatch = new Set<string>();
-  /** Membership targets of admitted commands: their author saw them. */
+  /** Membership targets of admitted edits: their author saw them. */
   const seenMembership = new Set<string>();
-
-  const runAt = new Map<number, ReadVersionRun>();
-  const runOf = new Map<CanvasCommand, ReadVersionRun>();
-  for (const run of input.runs ?? []) {
-    runAt.set(run.start, run);
-    for (let index = run.start; index < run.start + run.count; index++) {
-      const command = commands[index];
-      if (command && !runOf.has(command)) runOf.set(command, run);
-    }
-  }
-  const verdicts = new Map<
-    ReadVersionRun,
-    CanvasCommandFailureReason | undefined
-  >();
 
   const madeByBatch = (id: string): boolean =>
     !prestateIds.has(id) || removedInBatch.has(id);
@@ -305,50 +235,29 @@ export function createReadVersionAdmission(input: {
     return verdict;
   };
 
-  const admit: ReadVersionAdmission['admit'] = (command, state, results) => {
+  const admitEdit: ReadVersionAdmission['admitEdit'] = (
+    _edit,
+    index,
+    state,
+  ) => {
     const present = new Set<string>(state.nodes.map((node) => node.id));
     for (const id of prestateIds) {
       if (!present.has(id)) removedInBatch.add(id);
     }
-    if (exempt?.has(command)) return undefined;
-
-    const run = runOf.get(command);
-    if (!run) {
-      return input.version === undefined
-        ? undefined
-        : judge([command], present, input.version);
-    }
-    if (verdicts.has(run)) return verdicts.get(run);
-
-    let verdict: CanvasCommandFailureReason | undefined;
-    if (run.blocked) verdict = 'stale-parent';
-    for (const ref of run.after ?? []) {
-      if (verdict) break;
-      const earlier = runAt.get(ref.start);
-      const refused =
-        !earlier ||
-        verdicts.get(earlier) !== undefined ||
-        (results ?? [])
-          .slice(ref.start, ref.start + ref.count)
-          .some(isRefusedResult);
-      if (refused) verdict = 'stale-parent';
-    }
-    verdict ??= judge(
-      commands.slice(run.start, run.start + run.count),
-      present,
-      run.version,
-    );
-    verdicts.set(run, verdict);
-    return verdict;
+    const edit = edits[index];
+    if (!edit || edit.version === undefined) return undefined;
+    const judged = exempt
+      ? edit.commands.filter((command) => !exempt.has(command))
+      : edit.commands;
+    return judge(judged, present, edit.version);
   };
 
   return {
-    admit,
+    admitEdit,
     unseenMoves(finalNodes) {
-      const versions = [
-        ...(input.version === undefined ? [] : [input.version]),
-        ...(input.runs ?? []).map((run) => run.version),
-      ];
+      const versions = edits.flatMap((edit) =>
+        edit.version === undefined ? [] : [edit.version],
+      );
       const oldest = versions.length > 0 ? Math.min(...versions) : -1;
       const before = topologyOf(input.prestateNodes);
       const unseen = new Set<string>();

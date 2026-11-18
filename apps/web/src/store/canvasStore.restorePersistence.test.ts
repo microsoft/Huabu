@@ -44,7 +44,10 @@ import { usePreviewWorkspaceStore } from './previewWorkspace/store';
 
 import type * as apiModule from '../api';
 import type * as canvasApiModule from '../api/canvas';
-import type { PutNodeContentRequest } from '@huabu/shared';
+import type {
+  PostCanvasExecuteRequest,
+  PutNodeContentRequest,
+} from '@huabu/shared';
 import type { Node } from '@xyflow/react';
 
 function deferred() {
@@ -105,28 +108,37 @@ beforeEach(() => {
     executeGate = undefined;
     await gate?.promise;
     const response = executeServer.execute(canvasId, request);
-    (request.commands as Array<Record<string, unknown>>).forEach(
-      (command, index) => {
-        if (!response.results[index]?.applied) return;
-        if (
-          command.type === 'DELETE_NODES' &&
-          (command.nodeIds as string[]).includes(note.id)
-        ) {
-          body = undefined;
-          tombstone = true;
-          calls.push('delete:executed');
-        }
-        const restored =
-          command.type === 'RESTORE_NODES'
-            ? (command.nodes as Node[]).find((n) => n.id === note.id)
-            : undefined;
-        if (restored) {
-          body = restored.data.content as string;
-          tombstone = false;
-          calls.push('restore:committed');
-        }
-      },
+    const sent = (request as PostCanvasExecuteRequest).edits.flatMap(
+      (edit, position) =>
+        (edit.commands as Array<Record<string, unknown>>).map(
+          (command, index) => ({
+            command,
+            applied:
+              response.edits[position]?.applied === true &&
+              response.edits[position]?.results[index]?.applied === true,
+          }),
+        ),
     );
+    sent.forEach(({ command, applied }) => {
+      if (!applied) return;
+      if (
+        command.type === 'DELETE_NODES' &&
+        (command.nodeIds as string[]).includes(note.id)
+      ) {
+        body = undefined;
+        tombstone = true;
+        calls.push('delete:executed');
+      }
+      const restored =
+        command.type === 'RESTORE_NODES'
+          ? (command.nodes as Node[]).find((n) => n.id === note.id)
+          : undefined;
+      if (restored) {
+        body = restored.data.content as string;
+        tombstone = false;
+        calls.push('restore:committed');
+      }
+    });
     return response;
   });
   executeGate = contentGate = undefined;
@@ -347,9 +359,11 @@ describe('undo/redo persistence ordering', () => {
     // no body: the web never held one. Nothing writes the record a second
     // time.
     const restores = api.postCanvasExecute.mock.calls.flatMap(([, request]) =>
-      (request.commands as Array<{ type: string; nodes?: Node[] }>).filter(
-        (command) => command.type === 'RESTORE_NODES',
-      ),
+      (
+        (request as PostCanvasExecuteRequest).edits.flatMap(
+          (edit) => edit.commands,
+        ) as Array<{ type: string; nodes?: Node[] }>
+      ).filter((command) => command.type === 'RESTORE_NODES'),
     );
     expect(restores).toHaveLength(1);
     expect(restores[0].nodes).toHaveLength(1);

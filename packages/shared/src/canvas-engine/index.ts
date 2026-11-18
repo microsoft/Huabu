@@ -48,8 +48,10 @@ export {
   replayAgentNodeEditableData,
   changesAgentNodePreparation,
 } from './agentNodeOwnership.js';
+export { isRefusedResult } from '../types/canvas/execution.js';
 export {
   executeCanvasCommands,
+  executeCanvasEdits,
   type ExecutorOutput,
   type ExecutorOptions,
 } from './executor.js';
@@ -61,13 +63,10 @@ export {
 export {
   advanceNodeStamps,
   createReadVersionAdmission,
-  isRefusedResult,
-  readVersionRunsProblem,
   type NodeStamp,
   type ReadStamps,
   type ReadVersionAdmission,
-  type ReadVersionRun,
-  type ReadVersionRunRef,
+  type ReadVersionEdit,
   type StampAuthor,
 } from './readVersion.js';
 export type {

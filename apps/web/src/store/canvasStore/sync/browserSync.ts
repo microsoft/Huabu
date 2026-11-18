@@ -6,7 +6,7 @@
  * Canvas Sync apply channel.
  *
  * - `submit` — a batch already ran locally: hold what it changed and queue
- *   the commands, with the read version it was made on.
+ *   the commands as one edit, with the read version it was made on.
  * - `prepareRemote` — an update is about to be replayed: rewrite it to the
  *   property units it changed, keep back the ones this page holds, and on
  *   `finish` release the holds of this page's own confirmed batch.
@@ -35,10 +35,7 @@
  */
 
 import { encodeBasis } from '@huabu/shared';
-import {
-  commandReadTargets,
-  isRefusedResult,
-} from '@huabu/shared/canvas-engine';
+import { commandReadTargets } from '@huabu/shared/canvas-engine';
 
 import { ApiError } from '@/api/_client';
 
@@ -57,7 +54,7 @@ import { PLACEMENT_UNITS, type UnitNode } from './propertyUnits';
 import {
   createSendQueue,
   type EnqueueResult,
-  type QueuedRunRef,
+  type QueuedEditRef,
   type SendOutcome,
   type SendQueue,
   type SendQueueEntry,
@@ -161,9 +158,10 @@ export interface SubmitInput {
   /**
    * Called synchronously when the batch's request is answered or dropped,
    * after its holds are released and before the next request is sent.
-   * `offset` is the index of this batch's first command in the response.
+   * `edit` is the position of this batch's outcome in the response's
+   * `edits` (`-1` for a batch without commands).
    */
-  onSettled?: (outcome: SendOutcome, offset: number) => void;
+  onSettled?: (outcome: SendOutcome, edit: number) => void;
 }
 
 export interface PrepareRemoteInput {
@@ -222,11 +220,11 @@ export function createBrowserSync(deps: BrowserSyncDeps): BrowserSync {
   >();
   const settleHooks = new Map<
     string,
-    Array<{ offset: number; run: NonNullable<SubmitInput['onSettled']> }>
+    Array<{ edit: number; run: NonNullable<SubmitInput['onSettled']> }>
   >();
 
   /** A queued batch whose holds this page still has. */
-  interface Batch extends QueuedRunRef {
+  interface Batch extends QueuedEditRef {
     /** Nodes the batch placed: named for it, or changed here by it. */
     readonly placed: ReadonlySet<string>;
     /** Nodes whose parent the batch's commands depend on. */
@@ -242,10 +240,10 @@ export function createBrowserSync(deps: BrowserSyncDeps): BrowserSync {
    * `batches` because the update for an entry can release its holds before
    * its response arrives.
    */
-  const unanswered = new Map<string, QueuedRunRef[]>();
+  const unanswered = new Map<string, QueuedEditRef[]>();
   /** Discarded entries are not followed by a load: put their holds back. */
   let releaseDiscarded = false;
-  /** `entryId:start` → whether the batch took effect on the server. */
+  /** `entryId:edit` → whether the batch took effect on the server. */
   const outcomes = new Map<string, 'applied' | 'refused'>();
   const MAX_REMEMBERED_OUTCOMES = 5_000;
   /**
@@ -256,10 +254,10 @@ export function createBrowserSync(deps: BrowserSyncDeps): BrowserSync {
   /** Lineages the server did not know although this page had loaded them. */
   const refusedLineages = new Set<string>();
 
-  const outcomeKey = (ref: QueuedRunRef): string =>
-    `${ref.entryId}:${ref.start}`;
+  const outcomeKey = (ref: QueuedEditRef): string =>
+    `${ref.entryId}:${ref.edit}`;
 
-  const noteOutcome = (ref: QueuedRunRef, applied: boolean): void => {
+  const noteOutcome = (ref: QueuedEditRef, applied: boolean): void => {
     outcomes.set(outcomeKey(ref), applied ? 'applied' : 'refused');
     if (outcomes.size > MAX_REMEMBERED_OUTCOMES)
       outcomes.delete(outcomes.keys().next().value as string);
@@ -304,7 +302,7 @@ export function createBrowserSync(deps: BrowserSyncDeps): BrowserSync {
    * per node, the latest ones that placed it, back to the first that itself
    * depended on the node's parent (which named the ones before it).
    */
-  const madeOnTopOf = (moved: ReadonlySet<string>): QueuedRunRef[] => {
+  const madeOnTopOf = (moved: ReadonlySet<string>): QueuedEditRef[] => {
     const refs = new Set<Batch>();
     for (const nodeId of moved) {
       for (let index = batches.length - 1; index >= 0; index--) {
@@ -317,7 +315,7 @@ export function createBrowserSync(deps: BrowserSyncDeps): BrowserSync {
     }
     return batches
       .filter((batch) => refs.has(batch))
-      .map(({ entryId, start, count }) => ({ entryId, start, count }));
+      .map(({ entryId, edit }) => ({ entryId, edit }));
   };
 
   const release = (
@@ -399,7 +397,7 @@ export function createBrowserSync(deps: BrowserSyncDeps): BrowserSync {
     } finally {
       const hooks = settleHooks.get(entry.id);
       settleHooks.delete(entry.id);
-      for (const hook of hooks ?? []) hook.run(outcome, hook.offset);
+      for (const hook of hooks ?? []) hook.run(outcome, hook.edit);
     }
   };
 
@@ -448,14 +446,10 @@ export function createBrowserSync(deps: BrowserSyncDeps): BrowserSync {
     }
 
     const { response } = outcome;
-    const refused = response.results.some(isRefusedResult);
+    // An edit is taken whole or not at all, and the response says which.
+    const refused = response.edits.some((edit) => !edit.applied);
     for (const batch of answered) {
-      noteOutcome(
-        batch,
-        !response.results
-          .slice(batch.start, batch.start + batch.count)
-          .some(isRefusedResult),
-      );
+      noteOutcome(batch, response.edits[batch.edit]?.applied === true);
     }
     const state = deps.getState();
     if (response.toVersion === response.fromVersion) {
@@ -463,7 +457,13 @@ export function createBrowserSync(deps: BrowserSyncDeps): BrowserSync {
       // wrote to the held units meanwhile is the server's value.
       release(canvasId, entry.id, new Set());
     } else if (state.canvasId === canvasId) {
-      if (state.version === response.fromVersion) {
+      // A replayed response has no deltas: what the request changed comes
+      // with the update on the stream, like for any response that is not
+      // the next contiguous version.
+      if (
+        state.version === response.fromVersion &&
+        response.deltas !== undefined
+      ) {
         deps.applyOwnResponse(response, entry.id);
       } else if (state.version < response.toVersion) {
         awaitingEcho.set(entry.id, {
@@ -495,7 +495,7 @@ export function createBrowserSync(deps: BrowserSyncDeps): BrowserSync {
     send: deps.send,
     clientId: deps.clientId,
     ...(deps.retry ? { retry: deps.retry } : {}),
-    runOutcome: (ref) => outcomes.get(outcomeKey(ref)),
+    editOutcome: (ref) => outcomes.get(outcomeKey(ref)),
     onSettled,
   });
 
@@ -521,22 +521,16 @@ export function createBrowserSync(deps: BrowserSyncDeps): BrowserSync {
         ...(input.derived ? { derived: true } : {}),
         ...(lineage !== null
           ? {
-              run: {
-                basis: encodeBasis(lineage, version),
-                after: madeOnTopOf(moved),
-              },
+              basis: encodeBasis(lineage, version),
+              after: madeOnTopOf(moved),
             }
           : {}),
       });
       const keys = deriveHeldKeys(input.prev, input.next, deps.ignoreUnit);
       if (input.derived) for (const key of keys.keys()) keys.set(key, null);
       inFlight.hold(result.entry.id, keys);
-      if (input.commands.length > 0) {
-        const ref = {
-          entryId: result.entry.id,
-          start: result.offset,
-          count: input.commands.length,
-        };
+      if (result.edit >= 0) {
+        const ref = { entryId: result.entry.id, edit: result.edit };
         unanswered.set(ref.entryId, [
           ...(unanswered.get(ref.entryId) ?? []),
           ref,
@@ -553,7 +547,7 @@ export function createBrowserSync(deps: BrowserSyncDeps): BrowserSync {
       }
       if (input.onSettled) {
         const hooks = settleHooks.get(result.entry.id) ?? [];
-        hooks.push({ offset: result.offset, run: input.onSettled });
+        hooks.push({ edit: result.edit, run: input.onSettled });
         settleHooks.set(result.entry.id, hooks);
       }
       return result;

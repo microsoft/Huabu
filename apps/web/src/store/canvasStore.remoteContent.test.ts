@@ -240,7 +240,10 @@ describe('content another page saved, in the store', () => {
     const restored = server.requests
       .flatMap(
         (request) =>
-          request.commands as Array<{ type: string; nodes?: Node[] }>,
+          request.edits.flatMap((edit) => edit.commands) as Array<{
+            type: string;
+            nodes?: Node[];
+          }>,
       )
       .filter((command) => command.type === 'RESTORE_NODES')
       .flatMap((command) => command.nodes ?? [])
@@ -291,7 +294,7 @@ describe('a body typed on this page while an update for another node arrives', (
       [{ type: 'REPLACE_NODE', prev: node(X), next: moved }] as never,
       2,
       {
-        mutatedNodes: [],
+        mutatedNodeIds: [],
         deletedNodeIds: [],
         contentEditedNodeIds: [],
         deferredFitFrameIds: [],
@@ -525,7 +528,7 @@ describe('the revision of a node whose stored body the page does not show', () =
         [{ type: 'REPLACE_NODE', prev: node(id), next: moved }] as never,
         state().version + 1,
         {
-          mutatedNodes: [],
+          mutatedNodeIds: [],
           deletedNodeIds: [],
           contentEditedNodeIds: [],
           deferredFitFrameIds: [],
@@ -588,7 +591,7 @@ describe("an agent's write to a PDF's properties and cover", () => {
       [{ type: 'REPLACE_NODE', prev: stored, next: written }] as never,
       state().version + 1,
       {
-        mutatedNodes: [],
+        mutatedNodeIds: [],
         deletedNodeIds: [],
         contentEditedNodeIds: [],
         deferredFitFrameIds: [],
@@ -634,7 +637,7 @@ describe("an agent's write to a PDF's properties and cover", () => {
       ] as never,
       state().version + 1,
       {
-        mutatedNodes: [],
+        mutatedNodeIds: [],
         deletedNodeIds: [],
         contentEditedNodeIds: [],
         deferredFitFrameIds: [],
@@ -653,7 +656,7 @@ describe("an agent's write to a PDF's properties and cover", () => {
 
 describe("the revision an update brings for a node's content", () => {
   const noEffects = {
-    mutatedNodes: [],
+    mutatedNodeIds: [],
     deletedNodeIds: [],
     contentEditedNodeIds: [],
     deferredFitFrameIds: [],
@@ -1040,7 +1043,7 @@ describe('renaming a node another page is editing', () => {
 
 describe('a node frozen by a content conflict the user has not answered', () => {
   const noEffects = {
-    mutatedNodes: [],
+    mutatedNodeIds: [],
     deletedNodeIds: [],
     contentEditedNodeIds: [],
     deferredFitFrameIds: [],

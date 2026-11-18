@@ -115,14 +115,16 @@ describe('durable node metadata actions', () => {
     // The undo is saved as one RESTORE_NODES batch that carries both nodes,
     // the Note's body and the ownership link; no whole-Space save exists.
     await vi.waitFor(() => expect(server.state.nodes).toEqual(pair));
-    expect(server.requests.at(-1)?.commands).toEqual([
-      expect.objectContaining({
-        type: 'RESTORE_NODES',
-        nodes: expect.arrayContaining([
-          expect.objectContaining({ id: 'node-paper' }),
-          expect.objectContaining({ id: noteId }),
-        ]),
-      }),
+    expect(server.requests.at(-1)?.edits.map((edit) => edit.commands)).toEqual([
+      [
+        expect.objectContaining({
+          type: 'RESTORE_NODES',
+          nodes: expect.arrayContaining([
+            expect.objectContaining({ id: 'node-paper' }),
+            expect.objectContaining({ id: noteId }),
+          ]),
+        }),
+      ],
     ]);
     expect(useCanvasStore.getState().nodes).toEqual(pair);
   });
@@ -133,8 +135,8 @@ describe('durable node metadata actions', () => {
     const noteId = useCanvasStore
       .getState()
       .nodes.find((node) => node.id === 'node-paper')?.data.noteNodeId;
-    expect(server.requests.at(-1)?.commands).toEqual([
-      { type: 'INITIALIZE_PDF_NOTE', nodeId: 'node-paper', noteId },
+    expect(server.requests.at(-1)?.edits.map((edit) => edit.commands)).toEqual([
+      [{ type: 'INITIALIZE_PDF_NOTE', nodeId: 'node-paper', noteId }],
     ]);
     const linked = expect.arrayContaining([
       expect.objectContaining({
@@ -160,7 +162,9 @@ describe('durable node metadata actions', () => {
     expect(useCanvasStore.getState().nodes).toEqual(linked);
     expect(
       server.requests.flatMap((request) =>
-        (request.commands as CanvasCommand[]).flatMap((command, index) =>
+        (
+          request.edits.flatMap((edit) => edit.commands) as CanvasCommand[]
+        ).flatMap((command, index) =>
           command.type === 'SET_NODE_SELECTION' ? [] : [[command.type, index]],
         ),
       ),
@@ -178,15 +182,19 @@ describe('durable node metadata actions', () => {
     seed('node-paper');
     // Page B's request is committed before this page's.
     const other = server.execute('node-paper', {
-      commands: [
+      operationId: crypto.randomUUID(),
+      originator: { tabId: 'page-b' },
+      edits: [
         {
-          type: 'INITIALIZE_PDF_NOTE',
-          nodeId: 'node-paper' as CanvasNodeId,
-          noteId: 'node-theirs' as CanvasNodeId,
+          commands: [
+            {
+              type: 'INITIALIZE_PDF_NOTE',
+              nodeId: 'node-paper' as CanvasNodeId,
+              noteId: 'node-theirs' as CanvasNodeId,
+            },
+          ],
         },
       ],
-      originator: { source: 'ui', tabId: 'page-b' },
-      operationId: crypto.randomUUID(),
     });
     openPdfNotes('node-paper');
     const mine = useCanvasStore

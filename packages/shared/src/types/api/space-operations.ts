@@ -1098,6 +1098,74 @@ export const rfsExecuteRequestSchema = z
 
 export type RfsExecuteRequest = z.infer<typeof rfsExecuteRequestSchema>;
 
+/**
+ * One edit of {@link rfsExecuteEditsRequestSchema}: the commands of one step
+ * that take effect together or not at all.
+ */
+export const rfsExecuteEditSchema = z
+  .object({
+    /** Read version this edit was made on; without one it is not checked. */
+    basis: basisSchema.optional(),
+    /** Earlier edits this one was made on top of. */
+    after: z
+      .array(
+        z
+          .object({
+            operationId: z.uuid().optional(),
+            edit: z.number().int().min(0),
+          })
+          .strict(),
+      )
+      .max(64)
+      .optional(),
+    commands: z.array(agentCanvasCommandSchema).min(1),
+  })
+  .strict();
+
+/**
+ * The same request as a list of edits, the shape a page sends. The
+ * `{ commands }` form above is this with one edit per command, each quoting
+ * the request's `basis` — which is why a failed command there does not undo
+ * the others.
+ */
+export const rfsExecuteEditsRequestSchema = z
+  .object({
+    runId: z.string().min(1).max(256).optional(),
+    operationId: z.uuid().optional(),
+    edits: z
+      .array(rfsExecuteEditSchema)
+      .min(1)
+      .superRefine((edits, context) => {
+        const total = edits.reduce(
+          (sum, edit) => sum + edit.commands.length,
+          0,
+        );
+        if (total > SPACE_EXECUTE_MAX_COMMANDS) {
+          context.addIssue({
+            code: 'custom',
+            message: `A request accepts at most ${SPACE_EXECUTE_MAX_COMMANDS} commands in total`,
+          });
+        }
+        edits.forEach((edit, index) => {
+          (edit.after ?? []).forEach((ref, refIndex) => {
+            if (ref.operationId === undefined && ref.edit >= index) {
+              context.addIssue({
+                code: 'custom',
+                path: [index, 'after', refIndex, 'edit'],
+                message:
+                  'an edit can only come after an earlier edit of the request',
+              });
+            }
+          });
+        });
+      }),
+  })
+  .strict();
+
+export type RfsExecuteEditsRequest = z.infer<
+  typeof rfsExecuteEditsRequestSchema
+>;
+
 const executeResultNodeSchema = z
   .object({
     nodeId: z.string(),
@@ -1182,6 +1250,30 @@ export const rfsExecuteResponseSchema = z
             reason: z.enum(['not-read', 'stale']),
             expectedRev: z.string().optional(),
             currentRev: z.string(),
+          })
+          .strict(),
+      )
+      .optional(),
+    /**
+     * Only on a replayed response whose outcome was too large to store
+     * whole: `commands` is empty and the per-command node and edge lists
+     * are missing. The results and versions are always there.
+     */
+    incomplete: z.literal(true).optional(),
+    /**
+     * Present only when the request was sent as `edits`: what became of each
+     * edit. `results` above stays one entry per command across all edits;
+     * `start` and `count` say which of them belong to the edit.
+     */
+    edits: z
+      .array(
+        z
+          .object({
+            applied: z.boolean(),
+            reason: z.string().optional(),
+            failedAt: z.number().int().nonnegative().optional(),
+            start: z.number().int().nonnegative(),
+            count: z.number().int().nonnegative(),
           })
           .strict(),
       )

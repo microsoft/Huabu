@@ -354,13 +354,7 @@ const conversationOwnerRoutes: FastifyPluginAsync = async (fastify) => {
           event.data.threadId === threadId ||
           pendingEffects.deletedNodeIds.includes(nodeId) ||
           pendingEffects.contentEditedNodeIds.includes(nodeId) ||
-          pendingEffects.mutatedNodes.some(
-            (node) =>
-              typeof node === 'object' &&
-              node !== null &&
-              'id' in node &&
-              node.id === nodeId,
-          )
+          pendingEffects.mutatedNodeIds.includes(nodeId)
         )
           refresh();
       }

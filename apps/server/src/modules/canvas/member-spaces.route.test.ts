@@ -8,6 +8,8 @@ import { join } from 'node:path';
 import fastify from 'fastify';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { editsPerCommand } from '@huabu/shared';
+
 import canvasRoutes from './canvas.route.js';
 import { createChildSpace } from './space-hierarchy.js';
 import {
@@ -99,7 +101,7 @@ describe('a member’s Spaces', () => {
         method: 'POST',
         url: '/canvas/root/execute',
         payload: {
-          commands: [
+          edits: editsPerCommand([
             {
               type: 'CREATE_NODES',
               nodes: [
@@ -112,7 +114,7 @@ describe('a member’s Spaces', () => {
                 },
               ],
             },
-          ],
+          ]),
           originator: { source },
         },
       });

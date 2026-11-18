@@ -5,7 +5,7 @@ import { writeFile } from 'node:fs/promises';
 
 import { expect, test } from '@playwright/test';
 
-import { openNewCanvas } from './helpers';
+import { openNewCanvas, editsPerCommand } from './helpers';
 
 import type * as StoreModule from '../src/store/canvasStore';
 import type * as PreviewActions from '../src/store/previewWorkspace/actions';
@@ -138,7 +138,7 @@ for (const interactive of [false, true]) {
       `/api/canvas/${canvasId}/execute`,
       {
         data: {
-          commands: [
+          edits: editsPerCommand([
             {
               type: 'CREATE_NODES',
               nodes: [
@@ -155,7 +155,7 @@ for (const interactive of [false, true]) {
                 },
               ],
             },
-          ],
+          ]),
           originator: { source: 'agent', threadId: 'e2e-web-reading' },
         },
       },
@@ -332,7 +332,7 @@ test('bounds the lifecycle of twelve DOM-heavy interactive pages on one canvas',
   const canvasId = page.url().split('/canvas/')[1]?.split(/[?#]/)[0];
   const response = await page.request.post(`/api/canvas/${canvasId}/execute`, {
     data: {
-      commands: [
+      edits: editsPerCommand([
         {
           type: 'CREATE_NODES',
           nodes: Array.from({ length: 12 }, (_, index) => ({
@@ -349,7 +349,7 @@ test('bounds the lifecycle of twelve DOM-heavy interactive pages on one canvas',
             size: { width: 580, height: 370 },
           })),
         },
-      ],
+      ]),
       originator: { source: 'agent', threadId: 'e2e-web-load' },
     },
   });

@@ -197,3 +197,14 @@ export function translateOf(transform: string): Point {
   if (!match) throw new Error(`no translate in transform: ${transform}`);
   return { x: Number(match[1]), y: Number(match[2]) };
 }
+
+/** A plain command list as edits: one edit per command (a failing command does not undo the others). */
+export function editsPerCommand<T>(
+  commands: readonly T[],
+  basis?: string,
+): { basis?: string; commands: T[] }[] {
+  return commands.map((command) => ({
+    ...(basis !== undefined ? { basis } : {}),
+    commands: [command],
+  }));
+}

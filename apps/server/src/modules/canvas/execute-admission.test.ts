@@ -14,6 +14,7 @@ import { join } from 'node:path';
 import fastify from 'fastify';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { editsPerCommand } from '@huabu/shared';
 import { nodeRevisionOf } from '@huabu/shared/canvas-engine';
 
 import canvasRoutes from './canvas.route.js';
@@ -86,6 +87,18 @@ async function buildApp() {
 
 type App = Awaited<ReturnType<typeof buildApp>>;
 
+/**
+ * The command results of a page `execute` response, flat. These requests
+ * send one edit per command, so entry i answers command i.
+ */
+function resultsOf(body: {
+  edits: Array<{
+    results: Array<{ applied: boolean; reason?: string }>;
+  }>;
+}): Array<{ applied: boolean; reason?: string }> {
+  return body.edits.flatMap((edit) => edit.results);
+}
+
 function execute(
   app: App,
   payload: Record<string, unknown>,
@@ -112,7 +125,7 @@ describe('the source of an execute request', () => {
     try {
       const claimed = await execute(
         app,
-        { originator: { source: 'ui' }, commands: [lock] },
+        { originator: { source: 'ui' }, edits: editsPerCommand([lock]) },
         'agent',
       );
       expect(claimed.statusCode).toBe(403);
@@ -122,11 +135,11 @@ describe('the source of an execute request', () => {
       // As an agent it is heard, and a page-only command is out of scope.
       const asAgent = await execute(
         app,
-        { originator: { source: 'agent' }, commands: [lock] },
+        { originator: { source: 'agent' }, edits: editsPerCommand([lock]) },
         'agent',
       );
       expect(asAgent.statusCode).toBe(200);
-      expect(asAgent.json().results).toEqual([
+      expect(resultsOf(asAgent.json())).toEqual([
         expect.objectContaining({ applied: false, reason: 'invalid-scope' }),
       ]);
       expect(version()).toBe(1);
@@ -134,10 +147,10 @@ describe('the source of an execute request', () => {
       // A person's session is ui.
       const session = await execute(app, {
         originator: { source: 'ui' },
-        commands: [lock],
+        edits: editsPerCommand([lock]),
       });
       expect(session.statusCode).toBe(200);
-      expect(session.json().results[0].applied).toBe(true);
+      expect(resultsOf(session.json())[0].applied).toBe(true);
     } finally {
       await app.close();
     }
@@ -149,7 +162,7 @@ describe('the source of an execute request', () => {
       for (const credential of ['session', 'agent'] as const) {
         const response = await execute(
           app,
-          { originator: { source: 'system' }, commands: [lock] },
+          { originator: { source: 'system' }, edits: editsPerCommand([lock]) },
           credential,
         );
         expect(response.statusCode).toBe(403);
@@ -195,10 +208,10 @@ describe('the source of an execute request', () => {
     try {
       const response = await execute(app, {
         originator: { source: 'agent' },
-        commands: [commands[type]],
+        edits: editsPerCommand([commands[type]]),
       });
       expect(response.statusCode, response.body).toBe(200);
-      expect(response.json().results).toEqual([
+      expect(resultsOf(response.json())).toEqual([
         expect.objectContaining({ applied: false, reason: 'invalid-scope' }),
       ]);
       expect(version()).toBe(1);
@@ -222,12 +235,12 @@ describe('a page does not overwrite a body through execute', () => {
     try {
       const response = await execute(app, {
         originator: { source: 'ui' },
-        commands: [
+        edits: editsPerCommand([
           {
             type: 'MERGE_NODE_DATA',
             patches: [{ nodeId: 'node-a', ...entry }],
           },
-        ],
+        ]),
       });
       expect(response.statusCode).toBe(400);
       expect(response.json()).toMatchObject({ code: 'UI_BODY_WRITE' });
@@ -243,33 +256,33 @@ describe('a page does not overwrite a body through execute', () => {
     try {
       const structure = await execute(app, {
         originator: { source: 'ui' },
-        commands: [
+        edits: editsPerCommand([
           {
             type: 'MERGE_NODE_DATA',
             patches: [{ nodeId: 'node-a', patch: { pinned: true } }],
           },
-        ],
+        ]),
       });
       expect(structure.statusCode).toBe(200);
-      expect(structure.json().results[0].applied).toBe(true);
+      expect(resultsOf(structure.json())[0].applied).toBe(true);
       expect(body()).toBe('the body');
 
       const stale = await execute(app, {
         originator: { source: 'agent' },
-        commands: [
+        edits: editsPerCommand([
           {
             type: 'MERGE_NODE_DATA',
             patches: [{ nodeId: 'node-a', patch: { content: 'by agent' } }],
           },
-        ],
+        ]),
       });
-      expect(stale.json().results[0]).toMatchObject({
+      expect(resultsOf(stale.json())[0]).toMatchObject({
         applied: false,
         reason: 'conflict',
       });
       const read = await execute(app, {
         originator: { source: 'agent' },
-        commands: [
+        edits: editsPerCommand([
           {
             type: 'MERGE_NODE_DATA',
             patches: [
@@ -280,9 +293,9 @@ describe('a page does not overwrite a body through execute', () => {
               },
             ],
           },
-        ],
+        ]),
       });
-      expect(read.json().results[0].applied).toBe(true);
+      expect(resultsOf(read.json())[0].applied).toBe(true);
       expect(body()).toBe('by agent');
     } finally {
       await app.close();
@@ -301,14 +314,14 @@ describe('a page does not overwrite a body through execute', () => {
       for (const keepDataKeys of [undefined, [], ['label'], ['content']]) {
         const response = await execute(app, {
           originator: { source: 'ui' },
-          commands: [
+          edits: editsPerCommand([
             {
               type: 'RESTORE_NODES',
               nodes: [snapshot],
               replace: ['node-a'],
               ...(keepDataKeys ? { keepDataKeys } : {}),
             },
-          ],
+          ]),
         });
         expect(response.statusCode, String(keepDataKeys)).toBe(400);
         expect(response.json()).toMatchObject({ code: 'UI_BODY_WRITE' });
@@ -319,17 +332,17 @@ describe('a page does not overwrite a body through execute', () => {
       // What the browser sends: the content fields are kept.
       const kept = await execute(app, {
         originator: { source: 'ui' },
-        commands: [
+        edits: editsPerCommand([
           {
             type: 'RESTORE_NODES',
             nodes: [snapshot],
             replace: ['node-a'],
             keepDataKeys: ['content', 'src', 'label'],
           },
-        ],
+        ]),
       });
       expect(kept.statusCode, kept.body).toBe(200);
-      expect(kept.json().results[0].applied).toBe(true);
+      expect(resultsOf(kept.json())[0].applied).toBe(true);
       expect(body()).toBe('the body');
       expect(getCanvasStore('c1').read()?.state.nodes[0]).toMatchObject({
         position: { x: 40, y: 40 },
@@ -344,7 +357,7 @@ describe('a page does not overwrite a body through execute', () => {
     try {
       const response = await execute(app, {
         originator: { source: 'ui' },
-        commands: [
+        edits: editsPerCommand([
           {
             type: 'CREATE_NODES',
             nodes: [
@@ -367,10 +380,10 @@ describe('a page does not overwrite a body through execute', () => {
               },
             ],
           },
-        ],
+        ]),
       });
       expect(response.statusCode, response.body).toBe(200);
-      expect(response.json().results).toEqual([
+      expect(resultsOf(response.json())).toEqual([
         expect.objectContaining({ applied: true }),
         expect.objectContaining({ applied: true }),
       ]);
@@ -425,12 +438,12 @@ describe('malformed commands', () => {
       for (const source of ['ui', 'agent']) {
         const response = await execute(app, {
           originator: { source },
-          commands: [lock, command],
+          edits: editsPerCommand([lock, command]),
         });
         expect(response.statusCode, response.body).toBe(400);
         expect(response.json()).toMatchObject({
           code: 'INVALID_COMMAND',
-          message: expect.stringContaining('commands[1]'),
+          message: expect.stringContaining('edits[1].commands[0]'),
         });
       }
       // Nothing of the batch ran.
@@ -446,13 +459,13 @@ describe('malformed commands', () => {
       for (const tabId of ['a b', '', 'p'.repeat(65), 'a/b']) {
         const response = await execute(app, {
           originator: { source: 'ui', tabId },
-          commands: [lock],
+          edits: editsPerCommand([lock]),
         });
         expect(response.statusCode, tabId).toBe(400);
       }
       const accepted = await execute(app, {
         originator: { source: 'ui', tabId: 'page_A-1' },
-        commands: [lock],
+        edits: editsPerCommand([lock]),
       });
       expect(accepted.statusCode).toBe(200);
     } finally {
@@ -467,15 +480,30 @@ describe('admitExecuteRequest', () => {
       admitExecuteRequest({
         claimedSource: 'agent',
         viaAgentCredential: false,
-        commands: [],
+        edits: [],
       }),
-    ).toEqual({ ok: true, source: 'agent', commands: [] });
+    ).toEqual({ ok: true, source: 'agent', edits: [] });
     expect(
       admitExecuteRequest({
         claimedSource: 'ui',
         viaAgentCredential: true,
-        commands: [],
+        edits: [],
       }),
     ).toMatchObject({ ok: false, status: 403 });
+    // Stating nothing, the source is the credential's.
+    expect(
+      admitExecuteRequest({
+        claimedSource: undefined,
+        viaAgentCredential: false,
+        edits: [],
+      }),
+    ).toMatchObject({ ok: true, source: 'ui' });
+    expect(
+      admitExecuteRequest({
+        claimedSource: undefined,
+        viaAgentCredential: true,
+        edits: [],
+      }),
+    ).toMatchObject({ ok: true, source: 'agent' });
   });
 });

@@ -10,6 +10,8 @@ import {
   type Page,
 } from '@playwright/test';
 
+import { editsPerCommand } from './helpers';
+
 import type * as CanvasStore from '../src/store/canvasStore';
 import type { CreateCanvasResponse } from '@huabu/shared';
 
@@ -169,22 +171,24 @@ async function seedSpace(
   const { canvasId } = (await created.json()) as CreateCanvasResponse;
   const seeded = await request.post(`/api/canvas/${canvasId}/execute`, {
     data: {
-      commands: [
+      edits: editsPerCommand([
         {
           type: 'CREATE_NODES',
           nodes: [note(BYSTANDER, BYSTANDER_AT.x, BYSTANDER_AT.y)],
         },
         ...commands,
-      ],
+      ]),
       originator: { source: 'ui', tabId: 'e2e-multi-page-frames-seed' },
     },
   });
   expect(seeded.ok(), await seeded.text()).toBe(true);
   const body = (await seeded.json()) as {
-    results?: { applied?: boolean; reason?: string }[];
+    edits?: { results: { applied?: boolean; reason?: string }[] }[];
   };
   expect(
-    (body.results ?? []).filter((result) => result.applied === false),
+    (body.edits ?? [])
+      .map((edit) => edit.results[0])
+      .filter((result) => result?.applied === false),
     'every seed command applied',
   ).toEqual([]);
   return canvasId;
@@ -482,14 +486,20 @@ async function openDevice(
       return;
     void response
       .json()
-      .then((body: { results?: { applied?: boolean; reason?: string }[] }) => {
-        if (!Array.isArray(body.results)) return;
-        outcomes.push(
-          body.results.map((result) =>
-            result.applied ? 'applied' : (result.reason ?? 'refused'),
-          ),
-        );
-      })
+      .then(
+        (body: {
+          edits?: { results: { applied?: boolean; reason?: string }[] }[];
+        }) => {
+          if (!Array.isArray(body.edits)) return;
+          outcomes.push(
+            body.edits.flatMap((edit) =>
+              edit.results.map((result) =>
+                result.applied ? 'applied' : (result.reason ?? 'refused'),
+              ),
+            ),
+          );
+        },
+      )
       .catch(() => {});
   });
   await page.goto(`/canvas/${canvasId}`);
@@ -1615,14 +1625,17 @@ for (const heldPage of ['A', 'B'] as const) {
       // drag, although B had received that drag by the time it was sent.
       const sent = (
         b.executes as {
-          commands?: { type?: string }[];
-          runs?: { start: number; count: number; basis: string }[];
+          edits?: { basis?: string; commands?: { type?: string }[] }[];
         }[]
       ).find((body) =>
-        body.commands?.some((command) => command.type === 'SET_NODE_GEOMETRY'),
+        body.edits?.some((edit) =>
+          edit.commands?.some(
+            (command) => command.type === 'SET_NODE_GEOMETRY',
+          ),
+        ),
       );
-      expect(sent?.runs).toHaveLength(1);
-      expect(readVersionOf(sent?.runs?.[0]?.basis)).toBeLessThan(
+      expect(sent?.edits).toHaveLength(1);
+      expect(readVersionOf(sent?.edits?.[0]?.basis)).toBeLessThan(
         committedVersion,
       );
       expect(b.outcomes.flat()).toContain('stale-parent');
@@ -2016,8 +2029,8 @@ test('15. A drags a note into a Frame, inside it and out again before its first 
   expect(
     outcomes.filter((outcome) => outcome !== 'applied' && outcome !== 'no-op'),
   ).toEqual([]);
-  const quoted = (a.executes as { runs?: { basis: string }[] }[]).flatMap(
-    (body) => (body.runs ?? []).map((run) => readVersionOf(run.basis)),
+  const quoted = (a.executes as { edits?: { basis?: string }[] }[]).flatMap(
+    (body) => (body.edits ?? []).map((edit) => readVersionOf(edit.basis)),
   );
   expect(quoted.length).toBeGreaterThan(1);
   expect(new Set(quoted)).toEqual(new Set([before.version]));

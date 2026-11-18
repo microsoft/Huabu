@@ -158,9 +158,13 @@ export {
 } from './command.js';
 
 // Execution types
+export { isRefusedResult } from './execution.js';
 export type {
   CanvasExecutionSource,
   CanvasExecution,
+  CanvasEdit,
+  CanvasEditsExecution,
+  CanvasEditResult,
   CanvasCommandFailureReason,
   CanvasCommandResult,
   ExecuteConflict,

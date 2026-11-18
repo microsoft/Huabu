@@ -17,6 +17,7 @@ import { join } from 'node:path';
 import fastify from 'fastify';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { editsPerCommand } from '@huabu/shared';
 import { nodeRevisionOf } from '@huabu/shared/canvas-engine';
 
 import {
@@ -27,6 +28,7 @@ import {
 } from './canvas-executor.js';
 import { subscribeCanvasUpdates } from './canvas-sync.js';
 import canvasRoutes from './canvas.route.js';
+import { expectReplayOf } from './execute-replay.test-support.js';
 import {
   closeStorage,
   createSpace,
@@ -288,7 +290,7 @@ describe.each([['disk'], ['sqlite']] as const)(
       );
 
       const replay = await run(commands, { request });
-      expect(replay).toEqual({ ...first, replayed: true });
+      expectReplayOf(first, replay);
       expect(replay.nodeContentRevisions).toEqual(first.nodeContentRevisions);
       // Only the two commits were published.
       expect(updates()).toHaveLength(2);
@@ -363,10 +365,10 @@ describe('content revisions over HTTP', () => {
         url: `/canvas/${CANVAS}/execute`,
         payload: {
           originator: { source: 'ui' },
-          commands: [
+          edits: editsPerCommand([
             mergeProperties('pdf', { Venue: 'CHI 25', Status: 'Reading' }),
             move('note', 640),
-          ],
+          ]),
         },
       });
       expect(executed.statusCode).toBe(200);

@@ -4,16 +4,20 @@
 /**
  * Test double for `POST /api/canvas/:id/execute`.
  *
- * Runs the request's commands through the real shared engine against a
- * server-side copy of the Space and answers with the real diff, the way the
- * server does, so store tests exercise the same reconcile path as the
- * product. Only persistence, authentication and the sync stream are absent.
+ * Runs the request's edits through the real shared engine
+ * (`executeCanvasEdits`, so an edit is taken whole or not at all exactly as
+ * on the server) against a server-side copy of the Space and answers with
+ * the real diff in the real response shape: results per edit, rows that name
+ * only what changed, mutated nodes by id, no echo of the commands. Store
+ * tests therefore exercise the same reconcile path as the product. Only
+ * persistence, authentication and the sync stream are absent. The double
+ * computes nothing the server does not.
  *
- * A request id seen before is answered from the stored response
- * (`replayed: true`) without executing again.
+ * A request id seen before is answered from the stored outcome
+ * (`replayed: true`, no `deltas`) without executing again.
  *
  * Read versions are checked the way the server checks them: the double keeps
- * per-node stamps with the shared rules, judges every run of a request with
+ * per-node stamps with the shared rules, judges every edit of a request with
  * the shared admission, and names a page by its `originator.tabId` (there is
  * no principal here).
  */
@@ -25,12 +29,11 @@ import {
   createReadVersionAdmission,
   diffCanvasState,
   diffSiblingOrderEvents,
-  executeCanvasCommands,
-  isRefusedResult,
+  executeCanvasEdits,
   stripTransientNodeFields,
+  toWireDeltas,
   type CanvasNode,
   type NodeStamp,
-  type ReadVersionRun,
 } from '@huabu/shared/canvas-engine';
 
 import { ApiError } from '@/api/_client';
@@ -98,66 +101,66 @@ export function createFakeExecuteServer(
       const { operationId } = request;
       if (operationId) {
         const earlier = stored.get(operationId);
-        if (earlier) return { ...earlier, replayed: true };
+        if (earlier) {
+          // The stored outcome: what the request changed is not kept.
+          const { deltas: _deltas, ...outcome } = earlier;
+          return { ...outcome, replayed: true };
+        }
       }
       const before = read();
       const prevNodes = before.nodes.map((node) =>
         stripTransientNodeFields(node),
       );
-      const commands = request.commands as CanvasCommand[];
-      const page = request.originator.tabId;
+      const page = request.originator?.tabId;
       const readStamps = { floor: 0, nodes: currentStamps() };
-      const runs: ReadVersionRun[] = (request.runs ?? []).map((run) => {
-        const read = parseBasis(run.basis);
-        if (
-          !read ||
-          read.lineage !== FAKE_LINEAGE ||
-          read.version > before.version
-        ) {
-          throw new ApiError(
-            409,
-            { code: 'basis-unknown', message: 'basis-unknown' },
-            'basis-unknown',
-          );
-        }
-        const earlier = (run.after ?? []).filter(
-          (ref) => ref.operationId !== undefined,
-        );
-        return {
-          start: run.start,
-          count: run.count,
-          version: read.version,
-          after: (run.after ?? []).filter(
-            (ref) => ref.operationId === undefined,
-          ),
-          ...(earlier.some((ref) => {
-            const results = stored
-              .get(ref.operationId as string)
-              ?.results.slice(ref.start, ref.start + ref.count);
-            return (
-              !results ||
-              results.length !== ref.count ||
-              results.some(isRefusedResult)
+      const edits = request.edits.map((edit, index) => {
+        let version: number | undefined;
+        if (edit.basis !== undefined) {
+          const read = parseBasis(edit.basis);
+          if (
+            !read ||
+            read.lineage !== FAKE_LINEAGE ||
+            read.version > before.version
+          ) {
+            throw new ApiError(
+              409,
+              { code: 'basis-unknown', message: 'basis-unknown' },
+              'basis-unknown',
             );
-          })
-            ? { blocked: true }
-            : {}),
+          }
+          version = read.version;
+        }
+        const after: number[] = [];
+        let blocked = false;
+        for (const ref of edit.after ?? []) {
+          if (ref.operationId === undefined) {
+            if (ref.edit < index) after.push(ref.edit);
+            else blocked = true;
+          } else if (
+            stored.get(ref.operationId)?.edits[ref.edit]?.applied !== true
+          ) {
+            blocked = true;
+          }
+        }
+        return {
+          commands: edit.commands as CanvasCommand[],
+          ...(version !== undefined ? { version } : {}),
+          ...(after.length > 0 ? { after } : {}),
+          ...(blocked ? { blocked } : {}),
         };
       });
-      const admission =
-        runs.length > 0
-          ? createReadVersionAdmission({
-              commands,
-              runs,
-              stamps: readStamps,
-              prestateNodes: prevNodes,
-              ...(page ? { page } : {}),
-            })
-          : null;
-      const out = executeCanvasCommands(
-        { source: 'ui', commands },
+      const admission = edits.some((edit) => edit.version !== undefined)
+        ? createReadVersionAdmission({
+            edits,
+            stamps: readStamps,
+            prestateNodes: prevNodes,
+            ...(page ? { page } : {}),
+          })
+        : null;
+      const out = executeCanvasEdits(
+        { source: 'ui', edits },
         { nodes: prevNodes, edges: before.edges, canvasId },
-        admission ? { admit: admission.admit } : {},
+        admission ? { admitEdit: admission.admitEdit } : {},
       );
       const shared = applySharedPostEffectsFromWriteResult(out.writeResult);
       const nextNodes = out.writeResult.nodes.map((node) =>
@@ -183,9 +186,7 @@ export function createFakeExecuteServer(
           )
         : [];
       if (changed) {
-        const checked =
-          runs.reduce((covered, run) => covered + run.count, 0) ===
-          commands.length;
+        const checked = edits.every((edit) => edit.version !== undefined);
         stamps = advanceNodeStamps(
           readStamps,
           prevNodes,
@@ -199,21 +200,26 @@ export function createFakeExecuteServer(
         stampedVersion = toVersion;
       }
       const nodeContentRevisions = changed
-        ? contentRevisionsOf(deltas)
+        ? contentRevisionsOf(deltas, nextNodes)
         : undefined;
       const response: PostCanvasExecuteResponse = {
         canvasId,
         fromVersion: before.version,
         toVersion,
-        deltas,
-        results: out.commandResults.map((result) => ({
-          command: result.command,
-          applied: result.applied,
-          ...(result.reason ? { reason: result.reason } : {}),
+        deltas: toWireDeltas(deltas),
+        edits: out.editResults.map((edit) => ({
+          applied: edit.applied,
+          ...(edit.reason ? { reason: edit.reason } : {}),
+          ...(edit.failedAt !== undefined ? { failedAt: edit.failedAt } : {}),
+          results: edit.results.map((result) => ({
+            applied: result.applied,
+            ...(result.reason ? { reason: result.reason } : {}),
+          })),
         })),
-        commands: request.commands,
         pendingEffects: {
-          mutatedNodes: out.pendingEffects.mutatedNodes,
+          mutatedNodeIds: [
+            ...new Set(out.pendingEffects.mutatedNodes.map((node) => node.id)),
+          ],
           deletedNodeIds: out.pendingEffects.deletedNodeIds,
           contentEditedNodeIds: out.pendingEffects.contentEditedNodeIds,
           deferredFitFrameIds: out.pendingEffects.deferredFitFrameIds,

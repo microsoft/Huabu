@@ -414,87 +414,175 @@ export const executeOriginatorSchema = z.object({
 export type ExecuteOriginator = z.infer<typeof executeOriginatorSchema>;
 
 /**
- * An earlier edit of the same page that a run was made on top of: a run of
- * this request (no `operationId`) or of an earlier request of the page.
+ * What an execute request may say about its sender. Who the request speaks
+ * for follows the credential it arrived with: a person's session is `ui`, an
+ * agent or machine credential is `agent`. `source` is not needed and a page
+ * does not send it; the one thing it can still do is narrow a person's
+ * session to `agent` (`execute-admission.ts`).
  */
-export const canvasExecuteRunRefSchema = z
-  .object({
-    /** The earlier request's id; omitted for a run of this request. */
-    operationId: z.uuid().optional(),
-    start: z.number().int().min(0),
-    count: z.number().int().min(1),
-  })
-  .strict();
-export type CanvasExecuteRunRef = z.infer<typeof canvasExecuteRunRefSchema>;
-
-/** Most earlier edits one run may name. */
-export const CANVAS_EXECUTE_RUN_AFTER_MAX = 64;
+export const executeRequestOriginatorSchema = executeOriginatorSchema.partial({
+  source: true,
+});
+export type ExecuteRequestOriginator = z.infer<
+  typeof executeRequestOriginatorSchema
+>;
 
 /**
- * One edit within an execute batch — a run of consecutive commands — and the
- * read version it was made on. Mirrors `ReadVersionRun` in the canvas engine.
+ * An earlier edit of the same caller that an edit was made on top of: an
+ * edit of this request (no `operationId`) or of an earlier request.
  */
-export const canvasExecuteRunSchema = z
+export const canvasExecuteEditRefSchema = z
   .object({
-    /** Index of the edit's first command in `commands`. */
-    start: z.number().int().min(0),
-    /** How many consecutive commands belong to the edit. */
-    count: z.number().int().min(1),
-    /** The read version the page had when the edit was made. */
-    basis: z.string().min(1).max(128),
-    /**
-     * Edits of this page, not yet confirmed when this one was made, whose
-     * result it was made on top of. When one of them did not take effect
-     * this run is refused too.
-     */
-    after: z
-      .array(canvasExecuteRunRefSchema)
-      .max(CANVAS_EXECUTE_RUN_AFTER_MAX)
-      .optional(),
+    /** The earlier request's id; omitted for an edit of this request. */
+    operationId: z.uuid().optional(),
+    /** Position of the edit in that request's `edits`. */
+    edit: z.number().int().min(0),
   })
   .strict();
-export type CanvasExecuteRun = z.infer<typeof canvasExecuteRunSchema>;
+export type CanvasExecuteEditRef = z.infer<typeof canvasExecuteEditRefSchema>;
+
+/** Most earlier edits one edit may name. */
+export const CANVAS_EXECUTE_EDIT_AFTER_MAX = 64;
+
+/**
+ * One edit of an execute request: the commands of one intent — one gesture
+ * of a page, one step of an Agent — with the read version it was made on.
+ * It takes effect as a whole or not at all.
+ *
+ * `commands` is intentionally `z.array(z.unknown())` — the canvas command
+ * union is large and is validated by the route against the shape of each
+ * command type before it touches state.
+ */
+export const canvasExecuteEditSchema = z
+  .object({
+    /**
+     * The read version the edit was made on. An edit whose target was
+     * deleted or re-parented by someone else after that version is refused
+     * (`stale-target` / `stale-parent`). Omitted, the edit is not checked.
+     */
+    basis: z.string().min(1).max(128).optional(),
+    /**
+     * Edits of this caller, not yet confirmed when this one was made, whose
+     * result it was made on top of. When one of them did not take effect
+     * this edit does not run.
+     */
+    after: z
+      .array(canvasExecuteEditRefSchema)
+      .max(CANVAS_EXECUTE_EDIT_AFTER_MAX)
+      .optional(),
+    commands: z.array(z.unknown()).min(1),
+  })
+  .strict();
+export type CanvasExecuteEdit = z.infer<typeof canvasExecuteEditSchema>;
+
+/** An edit of this request can only come after an earlier edit of it. */
+function refineEditOrder(
+  edits: readonly { after?: readonly CanvasExecuteEditRef[] | undefined }[],
+  context: z.RefinementCtx,
+): void {
+  edits.forEach((edit, index) => {
+    (edit.after ?? []).forEach((ref, refIndex) => {
+      if (ref.operationId === undefined && ref.edit >= index) {
+        context.addIssue({
+          code: 'custom',
+          path: [index, 'after', refIndex, 'edit'],
+          message: 'an edit can only come after an earlier edit of the request',
+        });
+      }
+    });
+  });
+}
+
+/** The `edits` of an execute request: at least one, in order. */
+export const canvasExecuteEditsSchema = z
+  .array(canvasExecuteEditSchema)
+  .min(1)
+  .superRefine(refineEditOrder);
+
+/**
+ * A plain command list as edits: one edit per command, each quoting `basis`.
+ * This is what `{ commands, basis? }` means wherever it is still accepted
+ * (the Agent route, the Server's own callers) — which is why a command that
+ * fails there does not undo the others.
+ */
+export function editsPerCommand<Command>(
+  commands: readonly Command[],
+  basis?: string,
+): { basis?: string; commands: Command[] }[] {
+  return commands.map((command) => ({
+    ...(basis !== undefined ? { basis } : {}),
+    commands: [command],
+  }));
+}
 
 /**
  * Body for `POST /api/canvas/:canvasId/execute`.
  *
- * `commands` is intentionally `z.array(z.unknown())` — the canvas
- * command union is large and is validated by the engine's per-handler
- * guards. The server still parses each command against the engine's
- * runtime narrowing before it touches state.
+ * The request is a list of edits. They run in order, each on the state the
+ * ones before it left; an edit that does not take effect leaves no trace and
+ * the others still apply.
  */
 export const postCanvasExecuteBodySchema = z.object({
-  commands: z.array(z.unknown()),
-  originator: executeOriginatorSchema,
-  /** Optional client-supplied run id for tracing / multi-batch grouping. */
-  runId: z.string().optional(),
   /**
    * Request id. Sending the same id with the same request again returns the
-   * stored response instead of executing twice.
+   * stored outcome instead of executing twice.
    */
   operationId: z.uuid().optional(),
-  /** Read version the batch was built on; stale structural edits are rejected. */
-  basis: z.string().min(1).max(128).optional(),
-  /**
-   * For `ui` batches: the edits the commands form, each with the read
-   * version it was made on. An edit whose target was deleted or re-parented
-   * by someone else after that version is refused as a whole
-   * (`stale-target` / `stale-parent`). Commands outside every run are
-   * checked against `basis`, when that is given.
-   */
-  runs: z.array(canvasExecuteRunSchema).optional(),
+  /** Optional client-supplied run id for tracing / multi-batch grouping. */
+  runId: z.string().optional(),
+  originator: executeRequestOriginatorSchema.optional(),
+  edits: canvasExecuteEditsSchema,
 });
 export type PostCanvasExecuteRequest = z.infer<
   typeof postCanvasExecuteBodySchema
 >;
 
-/** Per-command outcome returned alongside the structural deltas. */
+/** A node a command created or re-sized, as the server left it. */
+export interface CanvasExecuteResultNode {
+  nodeId: string;
+  label?: string;
+  width: number;
+  height: number;
+  src?: string;
+}
+
+/** An edge a command created, with the id the server gave it. */
+export interface CanvasExecuteResultEdge {
+  edgeId: string;
+  source: string;
+  target: string;
+}
+
+/** Outcome of one command of an edit. */
 export interface CanvasExecuteCommandOutcome {
-  /** The (possibly annotated) command the server actually executed. */
-  command: unknown;
   applied: boolean;
   /** Engine-supplied failure reason when `applied === false`. */
   reason?: string;
+  /**
+   * Nodes the command created, with their server-assigned ids, and nodes
+   * whose image it changed. The command itself is not echoed.
+   */
+  nodes?: CanvasExecuteResultNode[];
+  /** Edges the command created, with their server-assigned ids. */
+  edges?: CanvasExecuteResultEdge[];
+}
+
+/** Outcome of one edit of the request, at the same position. */
+export interface CanvasExecuteEditOutcome {
+  /**
+   * The edit took effect: none of its commands failed (a `no-op` is not a
+   * failure). When false, nothing of the edit was applied.
+   */
+  applied: boolean;
+  /** Why the edit did not take effect. */
+  reason?: string;
+  /**
+   * Position, within the edit, of the command that failed. Absent when the
+   * edit was refused before its first command ran.
+   */
+  failedAt?: number;
+  /** One outcome per command of the edit, in order. */
+  results: CanvasExecuteCommandOutcome[];
 }
 
 /**
@@ -503,15 +591,12 @@ export interface CanvasExecuteCommandOutcome {
  * frame fit, preprocessing dispatch) without re-running the shared
  * engine.
  *
- * Mirrors the subset of {@link PendingEffects} that has client-side
- * meaning.
- *
- * `mutatedNodes` is included because the originating page dispatches
- * preprocessing for the nodes a batch created or changed.
+ * Ids only. A page that applies the batch has the nodes: it reads a mutated
+ * node from its own state after the deltas are applied.
  */
 export interface CanvasExecutePendingEffects {
-  /** Final post-execution snapshots of nodes that were created or edited. */
-  mutatedNodes: unknown[];
+  /** Ids of the nodes the batch created or whose `data` it changed. */
+  mutatedNodeIds: string[];
   deletedNodeIds: string[];
   contentEditedNodeIds: string[];
   deferredFitFrameIds: string[];
@@ -521,24 +606,25 @@ export interface CanvasExecutePendingEffects {
  * Response body for `POST /api/canvas/:canvasId/execute`.
  *
  * `fromVersion` is the canvas version observed at the start of the
- * batch; `toVersion` is the version after persistence. A no-op batch
- * (`deltas: []`) leaves the version unchanged so concurrent clients
- * don't get spurious 409s from idempotent calls.
+ * batch; `toVersion` is the version after persistence. A request that
+ * changed nothing leaves the version unchanged.
+ *
+ * A **replayed** response (`replayed: true`) answers a request id that was
+ * already executed. It is rebuilt from the stored outcome and carries no
+ * `deltas`: a page that has not applied `toVersion` yet receives them with
+ * the `update` event, or loads the Space.
  */
 export interface PostCanvasExecuteResponse {
   canvasId: string;
   fromVersion: number;
   toVersion: number;
-  /** Deltas observed between prestate and poststate, in apply order. */
-  deltas: unknown[];
-  /** Per-command outcomes (one entry per submitted command). */
-  results: CanvasExecuteCommandOutcome[];
   /**
-   * Annotated commands as the server executed them. Carries any
-   * server-assigned ids and `origin` / `labelSource` tags so the
-   * client's revert UX can still derive `revertCommand` per-batch.
+   * What the request changed, in apply order: per node only the fields that
+   * changed. Absent on a replayed response.
    */
-  commands: unknown[];
+  deltas?: unknown[];
+  /** One outcome per edit of the request, in order. */
+  edits: CanvasExecuteEditOutcome[];
   /** Subset of engine-pending effects that clients should drain. */
   pendingEffects: CanvasExecutePendingEffects;
   /**
@@ -561,8 +647,14 @@ export interface PostCanvasExecuteResponse {
   runId?: string;
   /** Echo of the request id, when one was supplied. */
   operationId?: string;
-  /** Read version after this request; returned when `operationId`, `basis` or `runs` was supplied. */
+  /** Read version after this request; returned when `operationId` or an edit's `basis` was supplied. */
   basis?: string;
-  /** Present when this is the stored response of an earlier request. */
+  /** Present when this is the stored outcome of an earlier request. */
   replayed?: true;
+  /**
+   * Only on a replayed response whose outcome was too large to store whole:
+   * order events and the per-command node and edge lists are missing. The
+   * per-edit results and versions are always there.
+   */
+  incomplete?: true;
 }

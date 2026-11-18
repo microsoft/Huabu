@@ -19,7 +19,9 @@ vi.mock('../api', async (importOriginal) => ({
 function sentDeletions(): string[] {
   return api.postCanvasExecute.mock.calls.flatMap(([, request]) =>
     (
-      (request as PostCanvasExecuteRequest).commands as Array<{
+      (request as PostCanvasExecuteRequest).edits.flatMap(
+        (edit) => edit.commands,
+      ) as Array<{
         type: string;
         nodeIds?: string[];
       }>
@@ -216,8 +218,10 @@ describe('legacy topology load boundary', () => {
       version: 0,
     });
     const sent = api.postCanvasExecute.mock.calls[0][1];
-    expect(sent.originator.source).toBe('ui');
-    expect(sent.commands).toEqual([
+    // Sent as this page, and as one edit: the header shift is all or nothing.
+    expect(sent.originator).toEqual({ tabId: expect.stringMatching(/.+/) });
+    expect(sent.edits).toHaveLength(1);
+    expect(sent.edits[0].commands).toEqual([
       {
         type: 'SET_NODE_GEOMETRY',
         items: expect.arrayContaining([

@@ -5,7 +5,7 @@
  * Read versions of a browser page on `POST /api/canvas/:canvasId/execute`.
  *
  * A page loads the Space (`basis` of `GET /api/canvas/:canvasId`), and sends
- * every edit as a run that quotes the version the edit was made on. The
+ * every edit with the version the edit was made on (its `basis`). The
  * server refuses an edit whose node was deleted (`stale-target`) or moved
  * into or out of a container (`stale-parent`) by someone else after that
  * version, as a whole — and does not hold a page's own committed changes
@@ -25,7 +25,7 @@ import { join } from 'node:path';
 import fastify from 'fastify';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { encodeBasis, parseBasis } from '@huabu/shared';
+import { editsPerCommand, encodeBasis, parseBasis } from '@huabu/shared';
 
 import canvasRoutes from './canvas.route.js';
 import { setRequestIdentity } from '../identity/request.js';
@@ -125,16 +125,23 @@ const create = (id: string) => ({
   ],
 });
 
-interface RunSpec {
-  start: number;
-  count: number;
-  basis: string;
-  after?: Array<{ operationId?: string; start: number; count: number }>;
+interface EditSpec {
+  basis?: string;
+  after?: Array<{ operationId?: string; edit: number }>;
+  commands: unknown[];
+}
+
+interface EditAnswer {
+  applied: boolean;
+  reason?: string;
+  failedAt?: number;
+  results: Array<{ applied: boolean; reason?: string }>;
 }
 
 /**
  * One browser page: it has a principal and a page id, has applied the Space
- * up to `version`, and sends every edit with a request id and its runs.
+ * up to `version`, and sends every edit with a request id and the read
+ * version it was made on.
  */
 class Page {
   lineage = '';
@@ -166,38 +173,53 @@ class Page {
     return encodeBasis(this.lineage, this.version);
   }
 
-  /** Send `commands`; by default as one edit made on what the page shows. */
-  send(
-    commands: unknown[],
-    options: { runs?: RunSpec[]; operationId?: string } = {},
-  ) {
+  /** Send `edits` as one request. */
+  sendEdits(edits: EditSpec[], options: { operationId?: string } = {}) {
     return app.inject({
       method: 'POST',
       url: `/canvas/${CANVAS}/execute`,
       headers: { 'x-test-principal': this.principalId },
       payload: {
-        commands,
         originator: { source: 'ui', tabId: this.pageId },
         operationId: options.operationId ?? randomUUID(),
-        runs: options.runs ?? [
-          { start: 0, count: commands.length, basis: this.basis },
-        ],
+        edits,
       },
     });
   }
 
-  /** {@link send}, answered: the reasons, `applied` for a taken command. */
-  async edit(
-    commands: unknown[],
-    options: { runs?: RunSpec[]; operationId?: string } = {},
+  /** Send `commands` as one edit made on what the page shows. */
+  send(commands: unknown[], options: { operationId?: string } = {}) {
+    return this.sendEdits([{ basis: this.basis, commands }], options);
+  }
+
+  /**
+   * {@link sendEdits}, answered: per command, in request order, the reason,
+   * or `applied` for a taken command.
+   */
+  async edits(
+    edits: EditSpec[],
+    options: { operationId?: string } = {},
   ): Promise<string[]> {
-    const response = await this.send(commands, options);
+    const response = await this.sendEdits(edits, options);
     expect(response.statusCode).toBe(200);
-    return (
-      response.json().results as Array<{ applied: boolean; reason?: string }>
-    ).map((result) =>
-      result.applied ? 'applied' : (result.reason ?? 'refused'),
+    const answers = response.json().edits as EditAnswer[];
+    // Each edit of the request is answered, each of its commands in it.
+    expect(answers.map((answer) => answer.results.length)).toEqual(
+      edits.map((edit) => edit.commands.length),
     );
+    return answers.flatMap((answer) =>
+      answer.results.map((result) =>
+        result.applied ? 'applied' : (result.reason ?? 'refused'),
+      ),
+    );
+  }
+
+  /** {@link send}, answered like {@link edits}. */
+  edit(
+    commands: unknown[],
+    options: { operationId?: string } = {},
+  ): Promise<string[]> {
+    return this.edits([{ basis: this.basis, commands }], options);
   }
 
   /** The page has applied every update up to the head. */
@@ -254,7 +276,7 @@ describe('the read version a page gets and sends', () => {
     });
   });
 
-  it('answers a request that states runs with the read version it left', async () => {
+  it('answers a request that states a read version with the read version it left', async () => {
     const response = await a.send([move(N, 700, 650)]);
     expect(response.json()).toMatchObject({
       toVersion: 2,
@@ -263,9 +285,9 @@ describe('the read version a page gets and sends', () => {
   });
 
   it('refuses the whole request, applying nothing, for a basis of another lineage', async () => {
-    const response = await a.send([move(N, 700, 650)], {
-      runs: [{ start: 0, count: 1, basis: encodeBasis(randomUUID(), 1) }],
-    });
+    const response = await a.sendEdits([
+      { basis: encodeBasis(randomUUID(), 1), commands: [move(N, 700, 650)] },
+    ]);
     expect(response.statusCode).toBe(409);
     expect(response.json()).toMatchObject({ code: 'basis-unknown' });
     expect(stored(N).position).toEqual({ x: 600, y: 600 });
@@ -280,69 +302,80 @@ describe('the read version a page gets and sends', () => {
     expect((await a.send([move(N, 1, 1)])).statusCode).toBe(409);
   });
 
-  it('rejects runs that do not fit the commands, and runs on a non-ui batch', async () => {
-    const outOfRange = await a.send([move(N, 1, 1)], {
-      runs: [{ start: 0, count: 2, basis: a.basis }],
+  it('rejects a request that is not a list of well-formed edits', async () => {
+    const raw = (payload: Record<string, unknown>) =>
+      app.inject({
+        method: 'POST',
+        url: `/canvas/${CANVAS}/execute`,
+        headers: { 'x-test-principal': ALICE },
+        payload: { originator: { source: 'ui' }, ...payload },
+      });
+    // The former shape — top-level commands, with or without runs — is not
+    // a request any more.
+    const formerRuns = await raw({
+      commands: [move(N, 1, 1)],
+      runs: [{ start: 0, count: 1, basis: a.basis }],
     });
-    expect(outOfRange.statusCode).toBe(400);
-    const overlapping = await a.send([move(N, 1, 1), move(N, 2, 2)], {
-      runs: [
-        { start: 0, count: 2, basis: a.basis },
-        { start: 1, count: 1, basis: a.basis },
+    expect(formerRuns.statusCode).toBe(400);
+    const formerCommands = await raw({
+      commands: [move(N, 1, 1)],
+      basis: a.basis,
+    });
+    expect(formerCommands.statusCode).toBe(400);
+    // A request holds an edit, and an edit holds a command.
+    expect((await raw({ edits: [] })).statusCode).toBe(400);
+    const empty = await a.sendEdits([{ basis: a.basis, commands: [] }]);
+    expect(empty.statusCode).toBe(400);
+    // A run is no part of an edit.
+    const strayRun = await raw({
+      edits: [
+        { start: 0, count: 1, basis: a.basis, commands: [move(N, 1, 1)] },
       ],
     });
-    expect(overlapping.statusCode).toBe(400);
-    const forward = await a.send([move(N, 1, 1), move(N, 2, 2)], {
-      runs: [
-        {
-          start: 0,
-          count: 1,
-          basis: a.basis,
-          after: [{ start: 1, count: 1 }],
-        },
-        { start: 1, count: 1, basis: a.basis },
-      ],
-    });
+    expect(strayRun.statusCode).toBe(400);
+    // An edit can only be made on top of an earlier edit of the request.
+    const forward = await a.sendEdits([
+      { basis: a.basis, after: [{ edit: 1 }], commands: [move(N, 1, 1)] },
+      { basis: a.basis, commands: [move(N, 2, 2)] },
+    ]);
     expect(forward.statusCode).toBe(400);
-    const malformed = await app.inject({
-      method: 'POST',
-      url: `/canvas/${CANVAS}/execute`,
-      headers: { 'x-test-principal': ALICE },
-      payload: {
-        commands: [move(N, 1, 1)],
-        originator: { source: 'ui' },
-        runs: [{ start: 0, count: 1 }],
-      },
+    expect(forward.json().message).toMatch(/earlier edit/);
+    const onItself = await a.sendEdits([
+      { basis: a.basis, after: [{ edit: 0 }], commands: [move(N, 1, 1)] },
+    ]);
+    expect(onItself.statusCode).toBe(400);
+    expect(onItself.json().message).toMatch(/earlier edit/);
+    const malformed = await raw({
+      edits: [{ basis: 1, commands: [move(N, 1, 1)] }],
     });
     expect(malformed.statusCode).toBe(400);
-    const agent = await app.inject({
-      method: 'POST',
-      url: `/canvas/${CANVAS}/execute`,
-      headers: { 'x-test-principal': ALICE },
-      payload: {
-        commands: [move(N, 1, 1)],
-        originator: { source: 'agent' },
-        runs: [{ start: 0, count: 1, basis: a.basis }],
-      },
+    const malformedAfter = await raw({
+      edits: [
+        { basis: a.basis, commands: [move(N, 1, 1)] },
+        { basis: a.basis, after: [{}], commands: [move(N, 2, 2)] },
+      ],
     });
-    expect(agent.statusCode).toBe(400);
+    expect(malformedAfter.statusCode).toBe(400);
     expect(stored(N).position).toEqual({ x: 600, y: 600 });
+    expect(version()).toBe(1);
   });
 
-  it('executes a request without runs exactly as before: unchecked, and nobody’s change', async () => {
+  it('executes edits without a read version unchecked, and as nobody’s change', async () => {
     const plain = (commands: unknown[]) =>
       app.inject({
         method: 'POST',
         url: `/canvas/${CANVAS}/execute`,
         headers: { 'x-test-principal': ALICE },
         payload: {
-          commands,
+          edits: editsPerCommand(commands),
           originator: { source: 'ui', tabId: 'page-a' },
         },
       });
     await plain([reparent(N, F)]);
     const response = await plain([move(N, 30, 150)]);
-    expect(response.json().results).toMatchObject([{ applied: true }]);
+    expect(response.json().edits).toMatchObject([
+      { applied: true, results: [{ applied: true }] },
+    ]);
     // Read as Frame-local: the behaviour callers without the field keep.
     expect(stored(N).parentId).toBe(F);
     expect(await stamp(N)).toEqual({ created: 1, membership: 2 });
@@ -363,8 +396,13 @@ describe('an edit against what another page committed first', () => {
     const second = await b.send([move(N, 620, 820)]);
     expect(second.statusCode).toBe(200);
     const body = second.json();
-    expect(body.results).toMatchObject([
-      { applied: false, reason: 'stale-parent' },
+    // The edit is refused for its read version: no command of it failed.
+    expect(body.edits).toEqual([
+      {
+        applied: false,
+        reason: 'stale-parent',
+        results: [{ applied: false, reason: 'stale-parent' }],
+      },
     ]);
     expect(body.toVersion).toBe(body.fromVersion);
     expect(body.deltas).toEqual([]);
@@ -431,12 +469,10 @@ describe('an edit against what another page committed first', () => {
   it('refuses one edit and applies the other edits of the same request', async () => {
     await a.edit([reparent(N, F)]);
     expect(
-      await b.edit([move(N, 620, 820), move(INSIDE, 25, 65)], {
-        runs: [
-          { start: 0, count: 1, basis: b.basis },
-          { start: 1, count: 1, basis: b.basis },
-        ],
-      }),
+      await b.edits([
+        { basis: b.basis, commands: [move(N, 620, 820)] },
+        { basis: b.basis, commands: [move(INSIDE, 25, 65)] },
+      ]),
     ).toEqual(['stale-parent', 'applied']);
     expect(stored(N).parentId).toBe(F);
   });
@@ -565,18 +601,11 @@ describe("a page's own committed change is not held against it", () => {
 
 describe('an edit made on top of an earlier, unconfirmed one', () => {
   const groupThenMove = (page: Page) =>
-    page.edit([reparent(N, G), move(INSIDE, 25, 65), move(N, 10, 70)], {
-      runs: [
-        { start: 0, count: 1, basis: page.basis },
-        { start: 1, count: 1, basis: page.basis },
-        {
-          start: 2,
-          count: 1,
-          basis: page.basis,
-          after: [{ start: 0, count: 1 }],
-        },
-      ],
-    });
+    page.edits([
+      { basis: page.basis, commands: [reparent(N, G)] },
+      { basis: page.basis, commands: [move(INSIDE, 25, 65)] },
+      { basis: page.basis, after: [{ edit: 0 }], commands: [move(N, 10, 70)] },
+    ]);
 
   it('is taken when the one it was made on was', async () => {
     expect(await groupThenMove(a)).toEqual(['applied', 'applied', 'applied']);
@@ -603,27 +632,27 @@ describe('an edit made on top of an earlier, unconfirmed one', () => {
       'stale-target',
     ]);
     const before = structuredClone(stored(N));
-    const onTop = (operationId: string) => [
+    /** `command`, made on top of the first edit of request `operationId`. */
+    const onTop = (operationId: string, command: unknown): EditSpec[] => [
       {
-        start: 0,
-        count: 1,
         basis: a.basis,
-        after: [{ operationId, start: 0, count: 1 }],
+        after: [{ operationId, edit: 0 }],
+        commands: [command],
       },
     ];
     // Made on the refused drag: refused too.
-    expect(await a.edit([move(N, 10, 70)], { runs: onTop(first) })).toEqual([
+    expect(await a.edits(onTop(first, move(N, 10, 70)))).toEqual([
       'stale-parent',
     ]);
     expect(stored(N)).toEqual(before);
     // Made on a request the server has no answer for: refused as well.
-    expect(
-      await a.edit([move(N, 10, 70)], { runs: onTop(randomUUID()) }),
-    ).toEqual(['stale-parent']);
+    expect(await a.edits(onTop(randomUUID(), move(N, 10, 70)))).toEqual([
+      'stale-parent',
+    ]);
     // Another caller's request id is not this caller's request.
     const theirs = randomUUID();
     await b.catchUp().edit([move(INSIDE, 25, 65)], { operationId: theirs });
-    expect(await a.edit([move(N, 10, 70)], { runs: onTop(theirs) })).toEqual([
+    expect(await a.edits(onTop(theirs, move(N, 10, 70)))).toEqual([
       'stale-parent',
     ]);
     // Made on one that was taken: taken.
@@ -631,25 +660,68 @@ describe('an edit made on top of an earlier, unconfirmed one', () => {
     expect(await a.edit([reparent(N, F)], { operationId: taken })).toEqual([
       'applied',
     ]);
-    expect(await a.edit([move(N, 30, 150)], { runs: onTop(taken) })).toEqual([
-      'applied',
-    ]);
+    expect(await a.edits(onTop(taken, move(N, 30, 150)))).toEqual(['applied']);
   });
 
-  it('answers a repeated request from the stored refusal, and treats other runs as another request', async () => {
+  it('answers a repeated request from the stored refusal, and treats another read version as another request', async () => {
     await b.edit([reparent(N, F)]);
     const operationId = randomUUID();
     const first = await a.send([move(N, 620, 820)], { operationId });
-    expect(first.json().results).toMatchObject([
-      { applied: false, reason: 'stale-parent' },
+    expect(first.json().edits).toMatchObject([
+      {
+        applied: false,
+        reason: 'stale-parent',
+        results: [{ applied: false, reason: 'stale-parent' }],
+      },
     ]);
     const again = await a.send([move(N, 620, 820)], { operationId });
     expect(again.json()).toMatchObject({
       replayed: true,
-      results: [{ applied: false, reason: 'stale-parent' }],
+      edits: [
+        {
+          applied: false,
+          reason: 'stale-parent',
+          results: [{ applied: false, reason: 'stale-parent' }],
+        },
+      ],
     });
     const other = await a.catchUp().send([move(N, 620, 820)], { operationId });
     expect(other.statusCode).toBe(409);
     expect(other.json()).toMatchObject({ code: 'operation-id-reused' });
+  });
+});
+
+describe('an edit takes effect as a whole', () => {
+  it('undoes the commands of an edit when one of them fails, and applies the other edits', async () => {
+    const response = await a.sendEdits([
+      // The move is fine on its own; a node cannot be its own parent.
+      { basis: a.basis, commands: [move(N, 700, 700), reparent(N, N)] },
+      { basis: a.basis, commands: [move(INSIDE, 25, 65)] },
+    ]);
+    expect(response.statusCode).toBe(200);
+    const body = response.json();
+    expect(body.edits).toEqual([
+      {
+        applied: false,
+        reason: 'invalid-parent',
+        failedAt: 1,
+        results: [
+          { applied: false },
+          { applied: false, reason: 'invalid-parent' },
+        ],
+      },
+      { applied: true, results: [{ applied: true }] },
+    ]);
+    // Not the move alone, as a command list would have left it.
+    expect(stored(N).position).toEqual({ x: 600, y: 600 });
+    expect(stored(N).parentId).toBeUndefined();
+    const changed = (body.deltas as Array<{ next?: { id?: string } }>).map(
+      (delta) => delta.next?.id,
+    );
+    expect(changed).not.toContain(N);
+    // The second edit is what the request committed (F hugs INSIDE).
+    expect(changed).toContain(INSIDE);
+    expect(body.toVersion).toBe(2);
+    expect(version()).toBe(2);
   });
 });

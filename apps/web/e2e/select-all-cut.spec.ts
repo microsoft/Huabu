@@ -3,7 +3,7 @@
 
 import { expect, test, type Page } from '@playwright/test';
 
-import { openNewCanvas } from './helpers';
+import { openNewCanvas, editsPerCommand } from './helpers';
 
 import type {
   ArtifactUploadResponse,
@@ -38,13 +38,13 @@ async function createSpace(page: Page, title: string) {
 async function execute(page: Page, canvasId: string, commands: unknown[]) {
   const response = await page.request.post(`/api/canvas/${canvasId}/execute`, {
     data: {
-      commands,
+      edits: editsPerCommand(commands),
       originator: { source: 'agent', threadId: 'e2e-select-all-cut' },
     },
   });
   expect(response.ok(), await response.text()).toBe(true);
   return (await response.json()) as {
-    results: { nodes?: { nodeId: string }[] }[];
+    edits: { results: { nodes?: { nodeId: string }[] }[] }[];
   };
 }
 
@@ -156,7 +156,7 @@ test('a cut PDF comes back on undo with its file and its extracted text', async 
       ],
     },
   ]);
-  const nodeId = created.results[0]?.nodes?.[0]?.nodeId;
+  const nodeId = created.edits[0]?.results[0]?.nodes?.[0]?.nodeId;
   expect(nodeId).toBeTruthy();
   const body = async () => {
     const response = await page.request.get(

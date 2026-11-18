@@ -3,6 +3,8 @@
 
 import { expect, test } from '@playwright/test';
 
+import { editsPerCommand } from './helpers';
+
 import type * as CanvasStore from '../src/store/canvasStore';
 
 for (const failure of ['content', 'structure'] as const) {
@@ -27,7 +29,7 @@ for (const failure of ['content', 'structure'] as const) {
       const child = (await childResponse.json()).canvasId as string;
       const seeded = await page.request.post(`/api/canvas/${child}/execute`, {
         data: {
-          commands: [
+          edits: editsPerCommand([
             {
               type: 'CREATE_NODES',
               nodes: [
@@ -39,7 +41,7 @@ for (const failure of ['content', 'structure'] as const) {
                 },
               ],
             },
-          ],
+          ]),
           originator: { source: 'ui', tabId: 'e2e-save-navigation' },
         },
       });

@@ -20,7 +20,7 @@ function question(content: string, status: string): Node {
 }
 
 const pendingEffects = {
-  mutatedNodes: [],
+  mutatedNodeIds: [],
   deletedNodeIds: [],
   contentEditedNodeIds: [],
   deferredFitFrameIds: [],

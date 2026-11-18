@@ -3,6 +3,8 @@
 
 import { expect, test, type Page } from '@playwright/test';
 
+import { editsPerCommand } from './helpers';
+
 import type * as CanvasStore from '../src/store/canvasStore';
 import type * as WorkspaceStore from '../src/store/workspaceStore';
 import type { CanvasSummary } from '@huabu/shared';
@@ -39,7 +41,7 @@ test('Add Content brings an existing Space into the visible destination and sele
   ).json();
   const seeded = await page.request.post(`/api/canvas/${destination}/execute`, {
     data: {
-      commands: [
+      edits: editsPerCommand([
         {
           type: 'CREATE_NODES',
           nodes: [
@@ -58,7 +60,7 @@ test('Add Content brings an existing Space into the visible destination and sele
             },
           ],
         },
-      ],
+      ]),
       originator: { source: 'ui', tabId: 'e2e-bring-space' },
     },
   });
@@ -224,7 +226,7 @@ test('Home moves an existing Space subtree and the current Space menu promotes i
   const child = (await childResponse.json()).canvasId;
   const seeded = await page.request.post(`/api/canvas/${source}/execute`, {
     data: {
-      commands: [
+      edits: editsPerCommand([
         {
           type: 'CREATE_NODES',
           nodes: [
@@ -236,7 +238,7 @@ test('Home moves an existing Space subtree and the current Space menu promotes i
             },
           ],
         },
-      ],
+      ]),
       originator: { source: 'ui', tabId: 'e2e-organize' },
     },
   });
@@ -451,7 +453,7 @@ test('cancelling child-Space deletion preserves separately selected edges', asyn
   const child = await response.json();
   const seeded = await page.request.post(`/api/canvas/${parent}/execute`, {
     data: {
-      commands: [
+      edits: editsPerCommand([
         {
           type: 'CREATE_NODES',
           nodes: ['node-a', 'node-b'].map((id, index) => ({
@@ -465,7 +467,7 @@ test('cancelling child-Space deletion preserves separately selected edges', asyn
           type: 'CONNECT_NODES',
           edges: [{ id: 'edge-selected', source: 'node-a', target: 'node-b' }],
         },
-      ],
+      ]),
       originator: { source: 'ui', tabId: 'e2e-guarded-delete' },
     },
   });
@@ -1032,7 +1034,7 @@ test('World first fit waits for hierarchy metadata', async ({ page }) => {
   }));
   const moved = await page.request.post(`/api/canvas/${world}/execute`, {
     data: {
-      commands: [{ type: 'SET_NODE_GEOMETRY', items }],
+      edits: editsPerCommand([{ type: 'SET_NODE_GEOMETRY', items }]),
       originator: { source: 'ui' },
     },
   });

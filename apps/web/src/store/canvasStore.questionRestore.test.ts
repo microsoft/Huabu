@@ -34,7 +34,10 @@ import { contentRevisionsOf } from './canvasStore/sync/testing/contentRevisions'
 import { createFakeSpaceServer } from './canvasStore/sync/testing/fakeExecuteServer';
 
 import type * as CanvasApi from '../api';
-import type { PutNodeContentRequest } from '@huabu/shared';
+import type {
+  PostCanvasExecuteRequest,
+  PutNodeContentRequest,
+} from '@huabu/shared';
 import type { Node } from '@xyflow/react';
 
 const question: Node = {
@@ -85,18 +88,31 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+/** The commands of this page's `index`-th request, edit by edit. */
+function sentBatches(index: number): unknown[][] {
+  const request = postCanvasExecute.mock.calls[
+    index
+  ][1] as PostCanvasExecuteRequest;
+  return request.edits.map((edit) => edit.commands);
+}
+/** The commands of this page's `index`-th request, in order. */
+const sentCommands = (index: number): unknown[] => sentBatches(index).flat();
+
 /** Node ids this page asked the server to delete (through `execute`). */
 function sentDeletions(): string[] {
   return postCanvasExecute.mock.calls.flatMap(([, request]) =>
-    (request.commands as Array<{ type: string; nodeIds?: string[] }>).flatMap(
-      (command) =>
-        command.type === 'DELETE_NODES' ? (command.nodeIds ?? []) : [],
+    (
+      (request as PostCanvasExecuteRequest).edits.flatMap(
+        (edit) => edit.commands,
+      ) as Array<{ type: string; nodeIds?: string[] }>
+    ).flatMap((command) =>
+      command.type === 'DELETE_NODES' ? (command.nodeIds ?? []) : [],
     ),
   );
 }
 
 const pendingEffects = {
-  mutatedNodes: [],
+  mutatedNodeIds: [],
   deletedNodeIds: [],
   contentEditedNodeIds: [],
   deferredFitFrameIds: [],
@@ -127,7 +143,7 @@ describe('Question creation settlement', () => {
       canvasId: 'canvas-restore',
       fromVersion: 1,
       toVersion: 2,
-      results: [{ applied: true }],
+      edits: [{ applied: true, results: [{ applied: true }] }],
       deltas: [],
       pendingEffects,
     });
@@ -164,9 +180,10 @@ describe('Question creation settlement', () => {
     // it in the queue is sent on its own.
     expect(postCanvasExecute).toHaveBeenCalledTimes(1);
     expect(
-      postCanvasExecute.mock.calls[0][1].commands.flatMap(
-        (command: { nodes?: Array<{ nodeType: string }> }) =>
-          (command.nodes ?? []).map((node) => node.nodeType),
+      sentCommands(0).flatMap((command) =>
+        ((command as { nodes?: Array<{ nodeType: string }> }).nodes ?? []).map(
+          (node) => node.nodeType,
+        ),
       ),
     ).toEqual(['note']);
     await vi.advanceTimersByTimeAsync(0);
@@ -202,7 +219,7 @@ describe('Question creation settlement', () => {
         canvasId: 'canvas-restore',
         fromVersion: 1,
         toVersion: 2,
-        results: [{ applied: true }],
+        edits: [{ applied: true, results: [{ applied: true }] }],
         deltas: [delta],
         pendingEffects,
       };
@@ -216,8 +233,8 @@ describe('Question creation settlement', () => {
       await vi.waitFor(() =>
         expect(postCanvasExecute).toHaveBeenCalledTimes(2),
       );
-      expect(postCanvasExecute.mock.calls[1][1].commands).toEqual([
-        { type: 'DELETE_NODES', nodeIds: [node.id] },
+      expect(sentBatches(1)).toEqual([
+        [{ type: 'DELETE_NODES', nodeIds: [node.id] }],
       ]);
       await vi.advanceTimersByTimeAsync(0);
       if (order === 'http-first') {
@@ -255,7 +272,7 @@ describe('Question creation settlement', () => {
       canvasId: 'canvas-restore',
       fromVersion: 1,
       toVersion: 2,
-      results: [{ applied: true }],
+      edits: [{ applied: true, results: [{ applied: true }] }],
       deltas: [{ type: 'INSERT_NODE', node }],
       pendingEffects,
     });
@@ -281,7 +298,7 @@ describe('Question creation settlement', () => {
       canvasId: 'canvas-restore',
       fromVersion: 1,
       toVersion: 2,
-      results: [{ applied: true }],
+      edits: [{ applied: true, results: [{ applied: true }] }],
       deltas: [{ type: 'INSERT_NODE', node }],
       pendingEffects,
     });
@@ -378,11 +395,13 @@ describe('Question undo identity reinsertion', () => {
     ]);
     await vi.waitFor(() => expect(postCanvasExecute).toHaveBeenCalledTimes(1));
     // The Frame comes back with a command; the Agent Node is not in it.
-    expect(postCanvasExecute.mock.calls[0][1].commands).toEqual([
-      {
-        type: 'RESTORE_NODES',
-        nodes: [expect.objectContaining({ id: frame.id })],
-      },
+    expect(sentBatches(0)).toEqual([
+      [
+        {
+          type: 'RESTORE_NODES',
+          nodes: [expect.objectContaining({ id: frame.id })],
+        },
+      ],
     ]);
     expect(associateNode).not.toHaveBeenCalled();
 
@@ -390,7 +409,7 @@ describe('Question undo identity reinsertion', () => {
       canvasId: 'canvas-restore',
       fromVersion: 1,
       toVersion: 2,
-      results: [{ applied: true }],
+      edits: [{ applied: true, results: [{ applied: true }] }],
       deltas: [{ type: 'INSERT_NODE', node: frame }],
       pendingEffects,
     });
@@ -409,7 +428,9 @@ describe('Question undo identity reinsertion', () => {
             canvasId: 'canvas-restore',
             fromVersion: 1,
             toVersion: 1,
-            results: [{ applied: false, reason: 'no-op' }],
+            edits: [
+              { applied: true, results: [{ applied: false, reason: 'no-op' }] },
+            ],
             deltas: [],
             pendingEffects,
           });

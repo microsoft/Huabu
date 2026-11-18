@@ -7,11 +7,12 @@
  * commands may be run for them.
  *
  * 1. **The source follows the credential, not the body.** A request that
- *    arrived with an agent or machine credential is an agent's and may not
- *    call itself `ui`; `system` is for the Server's own callers and is never
- *    accepted from outside. A person's session is `ui`, and may ask to be
- *    treated as an `agent` — the narrower scope — but that is all the body
- *    can change.
+ *    arrived with an agent or machine credential is an agent's, a person's
+ *    session is `ui`; a request need not say either, and a page does not.
+ *    An agent credential may not call itself `ui`; `system` is for the
+ *    Server's own callers and is never accepted from outside. A person's
+ *    session may ask to be treated as an `agent` — the narrower scope — and
+ *    that is all the body can change.
  * 2. **Commands are well formed.** Each is checked against the shape of its
  *    type (`canvasCommandShapeProblem`); a malformed command refuses the
  *    request with 400 instead of failing inside a handler.
@@ -27,11 +28,22 @@
  * (`isAllowedFor`), reported per command as `invalid-scope`.
  */
 
-import { canvasCommandShapeProblem, type CanvasCommand } from '@huabu/shared';
+import {
+  canvasCommandShapeProblem,
+  type CanvasCommand,
+  type CanvasExecuteEditRef,
+} from '@huabu/shared';
 import { CONTENT_REVISION_KEYS } from '@huabu/shared/canvas-engine';
 
+/** One edit of an admitted request. */
+export interface AdmittedEdit {
+  basis?: string;
+  after?: CanvasExecuteEditRef[];
+  commands: CanvasCommand[];
+}
+
 export type ExecuteAdmission =
-  | { ok: true; source: 'ui' | 'agent'; commands: CanvasCommand[] }
+  | { ok: true; source: 'ui' | 'agent'; edits: AdmittedEdit[] }
   | { ok: false; status: 400 | 403; code: string; message: string };
 
 const BODY_KEYS: ReadonlySet<string> = new Set(CONTENT_REVISION_KEYS);
@@ -53,11 +65,19 @@ function uiBodyWrite(command: CanvasCommand): string | null {
 }
 
 export function admitExecuteRequest(input: {
-  /** `originator.source` as the body states it. */
-  claimedSource: 'ui' | 'agent' | 'system';
+  /**
+   * `originator.source` as the body states it, if it does. Omitted, the
+   * source is the credential's: `agent` for an agent or machine credential,
+   * `ui` for a person's session.
+   */
+  claimedSource: 'ui' | 'agent' | 'system' | undefined;
   /** The request arrived with an agent or machine credential. */
   viaAgentCredential: boolean;
-  commands: readonly unknown[];
+  edits: readonly {
+    basis?: string | undefined;
+    after?: CanvasExecuteEditRef[] | undefined;
+    commands: readonly unknown[];
+  }[];
 }): ExecuteAdmission {
   if (input.claimedSource === 'system')
     return {
@@ -66,7 +86,7 @@ export function admitExecuteRequest(input: {
       code: 'SOURCE_NOT_ALLOWED',
       message: 'System command origin is reserved for internal callers',
     };
-  if (input.viaAgentCredential && input.claimedSource !== 'agent')
+  if (input.viaAgentCredential && input.claimedSource === 'ui')
     return {
       ok: false,
       status: 403,
@@ -74,31 +94,40 @@ export function admitExecuteRequest(input: {
       message:
         'A request made with an agent credential is an agent request; it cannot use the ui origin',
     };
-  const source = input.claimedSource;
-  for (const [index, command] of input.commands.entries()) {
-    const problem = canvasCommandShapeProblem(command);
-    if (problem)
-      return {
-        ok: false,
-        status: 400,
-        code: 'INVALID_COMMAND',
-        message: `commands[${index}]: ${problem}`,
-      };
-  }
-  const commands = input.commands as CanvasCommand[];
-  if (source === 'ui') {
-    for (const [index, command] of commands.entries()) {
-      const key = uiBodyWrite(command);
-      if (key)
+  const source =
+    input.claimedSource ?? (input.viaAgentCredential ? 'agent' : 'ui');
+  for (const [editIndex, edit] of input.edits.entries()) {
+    for (const [index, command] of edit.commands.entries()) {
+      const problem = canvasCommandShapeProblem(command);
+      if (problem)
         return {
           ok: false,
           status: 400,
-          code: 'UI_BODY_WRITE',
-          message:
-            `commands[${index}]: a page saves a node's ${key} through the node content request, ` +
-            'which checks its revision; execute does not overwrite it',
+          code: 'INVALID_COMMAND',
+          message: `edits[${editIndex}].commands[${index}]: ${problem}`,
         };
     }
   }
-  return { ok: true, source, commands };
+  const edits: AdmittedEdit[] = input.edits.map((edit) => ({
+    ...(edit.basis !== undefined ? { basis: edit.basis } : {}),
+    ...(edit.after?.length ? { after: edit.after } : {}),
+    commands: edit.commands as CanvasCommand[],
+  }));
+  if (source === 'ui') {
+    for (const [editIndex, edit] of edits.entries()) {
+      for (const [index, command] of edit.commands.entries()) {
+        const key = uiBodyWrite(command);
+        if (key)
+          return {
+            ok: false,
+            status: 400,
+            code: 'UI_BODY_WRITE',
+            message:
+              `edits[${editIndex}].commands[${index}]: a page saves a node's ${key} through the node content request, ` +
+              'which checks its revision; execute does not overwrite it',
+          };
+      }
+    }
+  }
+  return { ok: true, source, edits };
 }

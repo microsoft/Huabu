@@ -8,6 +8,7 @@ import {
   openNewCanvas,
   readViewportTransform,
   translateOf,
+  editsPerCommand,
 } from './helpers';
 
 import type {
@@ -43,7 +44,7 @@ async function execute(page: Page, commands: CanvasCommand[]) {
     `/api/canvas/${canvasId(page)}/execute`,
     {
       data: {
-        commands,
+        edits: editsPerCommand(commands),
         originator: { source: 'agent', threadId: 'e2e-frame-marquee' },
       },
     },

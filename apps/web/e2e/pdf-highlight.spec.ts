@@ -6,6 +6,7 @@ import { expect, test, type Locator } from '@playwright/test';
 import {
   expectSelectionToolbarOutsideSelection,
   openNewCanvas,
+  editsPerCommand,
 } from './helpers';
 
 import type * as CanvasModule from '../src/store/canvasStore';
@@ -109,7 +110,7 @@ for (const direction of [
         `/api/canvas/${canvasId}/execute`,
         {
           data: {
-            commands: [
+            edits: editsPerCommand([
               {
                 type: 'CREATE_NODES',
                 nodes: [
@@ -125,7 +126,7 @@ for (const direction of [
                   },
                 ],
               },
-            ],
+            ]),
             originator: { source: 'agent', threadId: 'e2e-pdf-highlight' },
           },
         },

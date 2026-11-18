@@ -6,6 +6,7 @@ import { expect, test } from '@playwright/test';
 import {
   expectSelectionToolbarOutsideSelection,
   openNewCanvas,
+  editsPerCommand,
 } from './helpers';
 
 import type * as QuestionModule from '../src/components/Nodes/question/questionCompose';
@@ -28,7 +29,7 @@ for (const mode of ['mouse', 'touch'] as const) {
       `/api/canvas/${canvasId}/execute`,
       {
         data: {
-          commands: [
+          edits: editsPerCommand([
             {
               type: 'CREATE_NODES',
               nodes: [
@@ -44,7 +45,7 @@ for (const mode of ['mouse', 'touch'] as const) {
                 },
               ],
             },
-          ],
+          ]),
           originator: { source: 'agent', threadId: 'e2e-note-comments' },
         },
       },

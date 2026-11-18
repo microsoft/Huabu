@@ -3,7 +3,7 @@
 
 import { expect, test, type Locator } from '@playwright/test';
 
-import { openNewCanvas } from './helpers';
+import { openNewCanvas, editsPerCommand } from './helpers';
 
 import type * as GesturePreviewModule from '../src/store/gesturePreviewStore';
 
@@ -136,7 +136,7 @@ test('a real Note preserves drop feedback and distinguishes editor selection mat
   expect(canvasId).toBeTruthy();
   const response = await page.request.post(`/api/canvas/${canvasId}/execute`, {
     data: {
-      commands: [
+      edits: editsPerCommand([
         {
           type: 'CREATE_NODES',
           nodes: [
@@ -153,7 +153,7 @@ test('a real Note preserves drop feedback and distinguishes editor selection mat
             },
           ],
         },
-      ],
+      ]),
       originator: { source: 'agent', threadId: 'e2e-system-blue' },
     },
   });
@@ -340,7 +340,7 @@ test('real Canvas overlays use shared transparent fills in both themes', async (
   expect(canvasId).toBeTruthy();
   const response = await page.request.post(`/api/canvas/${canvasId}/execute`, {
     data: {
-      commands: [
+      edits: editsPerCommand([
         {
           type: 'CREATE_NODES',
           nodes: [
@@ -365,7 +365,7 @@ test('real Canvas overlays use shared transparent fills in both themes', async (
             },
           ],
         },
-      ],
+      ]),
       originator: { source: 'agent', threadId: 'e2e-blue-overlays' },
     },
   });

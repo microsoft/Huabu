@@ -3,7 +3,12 @@
 
 import { expect, test } from '@playwright/test';
 
-import { openNewCanvas, paneCenter, readViewportTransform } from './helpers';
+import {
+  openNewCanvas,
+  paneCenter,
+  readViewportTransform,
+  editsPerCommand,
+} from './helpers';
 import { installStreams } from './stream-helpers';
 
 test('keeps a deep-linked Question unread after reload until conversation interaction', async ({
@@ -18,7 +23,7 @@ test('keeps a deep-linked Question unread after reload until conversation intera
   const nodeId = 'node-deep-link-agent';
   const added = await page.request.post(`/api/canvas/${canvasId}/execute`, {
     data: {
-      commands: [
+      edits: editsPerCommand([
         {
           type: 'CREATE_NODES',
           nodes: [
@@ -34,7 +39,7 @@ test('keeps a deep-linked Question unread after reload until conversation intera
             },
           ],
         },
-      ],
+      ]),
       originator: { source: 'ui', tabId: 'deep-link-read-test' },
     },
   });

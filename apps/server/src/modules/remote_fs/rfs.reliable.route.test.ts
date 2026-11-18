@@ -21,6 +21,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   RFS_HEADERS,
+  editsPerCommand,
   parseBasis,
   rfsCapabilitiesResponseSchema,
   rfsExecuteResponseSchema,
@@ -518,18 +519,23 @@ describe('GET /api/rfs/:canvasId/execute/:operationId for another entry point', 
         payload: {
           originator: { source: 'ui' },
           operationId: OP_1,
-          commands: [
+          edits: editsPerCommand([
             {
               type: 'SET_NODE_LOCKED',
               items: [{ nodeId: 'node-1', locked: true }],
             },
-          ],
+          ]),
         },
       });
       expect(viaCanvas.statusCode).toBe(200);
       expect(viaCanvas.json()).toMatchObject({
         operationId: OP_1,
-        results: [expect.objectContaining({ applied: true })],
+        edits: [
+          expect.objectContaining({
+            applied: true,
+            results: [expect.objectContaining({ applied: true })],
+          }),
+        ],
       });
 
       const lookup = await app.inject({
@@ -666,7 +672,7 @@ describe('Review attribution', () => {
           headers: ALICE,
           payload: {
             originator: { source: 'agent', threadId },
-            commands: [
+            edits: editsPerCommand([
               {
                 type: 'CREATE_NODES',
                 nodes: [
@@ -678,7 +684,7 @@ describe('Review attribution', () => {
                   },
                 ],
               },
-            ],
+            ]),
           },
         });
 
@@ -816,7 +822,11 @@ describe('POST /api/canvas/:canvasId/execute with a request id', () => {
     seed();
     const app = await buildApp();
     try {
-      const legacy = await post(app, { commands: [uiCreate] }, {});
+      const legacy = await post(
+        app,
+        { edits: editsPerCommand([uiCreate]) },
+        {},
+      );
       expect(legacy.statusCode).toBe(200);
       expect(legacy.json()).not.toHaveProperty('operationId');
       expect(legacy.json()).not.toHaveProperty('basis');
@@ -824,13 +834,13 @@ describe('POST /api/canvas/:canvasId/execute with a request id', () => {
 
       const payload = {
         operationId: OP_1,
-        commands: [
+        edits: editsPerCommand([
           {
             type: 'SET_NODE_PARENT',
             nodeIds: ['node-ui'],
             parentId: 'frame-1',
           },
-        ],
+        ]),
       };
       const first = await post(app, payload);
       expect(first.statusCode).toBe(200);
@@ -841,7 +851,10 @@ describe('POST /api/canvas/:canvasId/execute with a request id', () => {
         basis: expect.any(String),
       });
       const second = await post(app, payload);
-      expect(second.json()).toEqual({ ...first.json(), replayed: true });
+      // A replay is the stored outcome: the first answer without deltas.
+      const { deltas, ...answer } = first.json();
+      expect(deltas).toHaveLength(1);
+      expect(second.json()).toEqual({ ...answer, replayed: true });
       expect(getCanvasStore('c1').read()?.version).toBe(3);
 
       const anonymous = await post(app, payload, {});
@@ -855,17 +868,22 @@ describe('POST /api/canvas/:canvasId/execute with a request id', () => {
     seed();
     const app = await buildApp();
     try {
-      await post(app, { operationId: OP_1, commands: [uiCreate] });
+      await post(app, {
+        operationId: OP_1,
+        edits: editsPerCommand([uiCreate]),
+      });
       const reused = await post(app, {
         operationId: OP_1,
-        commands: [{ type: 'DELETE_NODES', nodeIds: ['node-1'] }],
+        edits: editsPerCommand([{ type: 'DELETE_NODES', nodeIds: ['node-1'] }]),
       });
       expect(reused.statusCode).toBe(409);
       expect(reused.json()).toMatchObject({ code: 'operation-id-reused' });
 
       const unknownBasis = await post(app, {
-        basis: 'b1.00000000-0000-4000-8000-000000000000.1',
-        commands: [{ type: 'DELETE_NODES', nodeIds: ['node-1'] }],
+        edits: editsPerCommand(
+          [{ type: 'DELETE_NODES', nodeIds: ['node-1'] }],
+          'b1.00000000-0000-4000-8000-000000000000.1',
+        ),
       });
       expect(unknownBasis.statusCode).toBe(409);
       expect(unknownBasis.json()).toMatchObject({ code: 'basis-unknown' });
@@ -881,12 +899,182 @@ describe('POST /api/canvas/:canvasId/execute with a request id', () => {
       };
       const unknown = await post(app, {
         operationId: OP_2,
-        commands: [{ type: 'DELETE_NODES', nodeIds: ['node-1'] }],
+        edits: editsPerCommand([{ type: 'DELETE_NODES', nodeIds: ['node-1'] }]),
       });
       expect(unknown.statusCode).toBe(503);
       expect(unknown.json()).toMatchObject({
         code: 'operation-outcome-unknown',
       });
+    } finally {
+      await app.close();
+    }
+  });
+});
+
+describe('the two request forms of POST /api/rfs/:canvasId/execute', () => {
+  const move = (nodeId: string, x: number) => ({
+    type: 'SET_NODE_GEOMETRY',
+    items: [{ nodeId, position: { x, y: 0 } }],
+  });
+  /** A Frame cannot become its own child. */
+  const impossible = {
+    type: 'SET_NODE_PARENT',
+    nodeIds: ['frame-1'],
+    parentId: 'frame-1',
+  };
+  const recolour = {
+    type: 'MERGE_NODE_DATA',
+    patches: [{ nodeId: 'node-1', patch: { style: { accent: 'teal' } } }],
+  };
+  const stored = (id: string) =>
+    (
+      getCanvasStore('c1').read()?.state.nodes as {
+        id: string;
+        position: { x: number };
+        data: { style?: { accent?: string } };
+      }[]
+    ).find((node) => node.id === id);
+
+  it('{ commands }: the middle command fails, the first and the third apply, results are per command', async () => {
+    seed();
+    const app = await buildApp();
+    try {
+      const payload = {
+        operationId: OP_1,
+        commands: [move('node-1', 50), impossible, recolour],
+      };
+      const first = await execute(app, payload);
+      expect(first.statusCode).toBe(200);
+      const body = first.json();
+      // The response the documented form always had: flat, per command,
+      // with the echo of the commands and no per-edit part.
+      expect(Object.keys(body).sort()).toEqual([
+        'affected',
+        'basis',
+        'canvasId',
+        'commands',
+        'fromVersion',
+        'operationId',
+        'results',
+        'revisions',
+        'runId',
+        'toVersion',
+      ]);
+      expect(body.results).toEqual([
+        { index: 0, type: 'SET_NODE_GEOMETRY', applied: true },
+        {
+          index: 1,
+          type: 'SET_NODE_PARENT',
+          applied: false,
+          reason: 'invalid-parent',
+        },
+        { index: 2, type: 'MERGE_NODE_DATA', applied: true },
+      ]);
+      expect(
+        body.commands.map((command: { type: string }) => command.type),
+      ).toEqual(['SET_NODE_GEOMETRY', 'SET_NODE_PARENT', 'MERGE_NODE_DATA']);
+      expect(body.toVersion).toBe(body.fromVersion + 1);
+      expect(stored('node-1')?.position.x).toBe(50);
+      expect(stored('node-1')?.data.style?.accent).toBe('teal');
+
+      // A repeat is answered with the same response, field for field.
+      const second = await execute(app, payload);
+      expect(second.json()).toEqual({ ...body, replayed: true });
+      expect(getCanvasStore('c1').read()?.version).toBe(body.toVersion);
+      // And so is the stored-result lookup.
+      const lookup = await app.inject({
+        method: 'GET',
+        url: `/rfs/c1/execute/${OP_1}`,
+        headers: ALICE,
+      });
+      expect(lookup.json()).toEqual({ ...body, replayed: true });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('{ edits }: the same three commands as one edit apply together or not at all', async () => {
+    seed();
+    const app = await buildApp();
+    try {
+      const refused = await execute(app, {
+        edits: [
+          { commands: [move('node-1', 50), impossible, recolour] },
+          { commands: [move('node-1', 70)] },
+        ],
+      });
+      expect(refused.statusCode).toBe(200);
+      const body = refused.json();
+      expect(body.edits).toEqual([
+        {
+          applied: false,
+          reason: 'invalid-parent',
+          failedAt: 1,
+          start: 0,
+          count: 3,
+        },
+        { applied: true, start: 3, count: 1 },
+      ]);
+      expect(
+        body.results.map((result: { applied: boolean; reason?: string }) => [
+          result.applied,
+          result.reason,
+        ]),
+      ).toEqual([
+        [false, undefined],
+        [false, 'invalid-parent'],
+        [false, undefined],
+        [true, undefined],
+      ]);
+      // Nothing of the first edit: no colour, and the position is the
+      // second edit's.
+      expect(stored('node-1')?.data.style?.accent).toBeUndefined();
+      expect(stored('node-1')?.position.x).toBe(70);
+
+      // An edit made on top of one that did not take effect does not run.
+      const chained = await execute(app, {
+        edits: [
+          { commands: [impossible] },
+          { commands: [move('node-1', 90)], after: [{ edit: 0 }] },
+        ],
+      });
+      expect(
+        chained
+          .json()
+          .edits.map((edit: { applied: boolean; reason?: string }) => [
+            edit.applied,
+            edit.reason,
+          ]),
+      ).toEqual([
+        [false, 'invalid-parent'],
+        [false, 'stale-parent'],
+      ]);
+      expect(stored('node-1')?.position.x).toBe(70);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('{ edits }: limits and shape are checked as a whole', async () => {
+    seed();
+    const app = await buildApp();
+    try {
+      const tooMany = await execute(app, {
+        edits: Array.from({ length: 51 }, (_, index) => ({
+          commands: [move('node-1', index)],
+        })),
+      });
+      expect(tooMany.statusCode).toBe(400);
+      const both = await execute(app, {
+        commands: [move('node-1', 1)],
+        edits: [{ commands: [move('node-1', 1)] }],
+      });
+      expect(both.statusCode).toBe(400);
+      const forward = await execute(app, {
+        edits: [{ commands: [move('node-1', 1)], after: [{ edit: 0 }] }],
+      });
+      expect(forward.statusCode).toBe(400);
+      expect(getCanvasStore('c1').read()?.version).toBe(1);
     } finally {
       await app.close();
     }

@@ -38,7 +38,9 @@ import {
   interactiveViewRevision,
   type CanvasCommand,
   type CanvasCommandFailureReason,
-  type CanvasExecuteRun,
+  editsPerCommand,
+  type CanvasExecuteEditRef,
+  type PostCanvasExecuteResponse,
   type CanvasEdgeId,
   type CanvasNodeId,
   type ExecuteConflict,
@@ -52,7 +54,7 @@ import {
   diffSiblingOrderEvents,
   SiblingOrderReplayError,
   createReadVersionAdmission,
-  executeCanvasCommands,
+  executeCanvasEdits,
   extractCanvasChanges,
   isChangeStale,
   hasValidPdfNoteOwnership,
@@ -73,7 +75,6 @@ import {
   type CanvasNode,
   type Delta,
   type ReadVersionAdmission,
-  type ReadVersionRun,
   type SetSiblingOrderEvent,
 } from '@huabu/shared/canvas-engine';
 
@@ -84,10 +85,22 @@ import {
 } from './agent-node-edit.js';
 import { publishCanvasUpdate } from './canvas-sync.js';
 import {
+  outcomeOf,
+  readStoredOutcome,
+  replayedOutput,
+  storableOutcome,
+  type ExecuteOutcome,
+} from './execute-outcome.js';
+import {
   importForeignNodeSources,
   reclaimStagedUploads,
 } from './import-node-src.js';
-import { pageKeyOf, resolveReadVersion, resolveRuns } from './read-version.js';
+import {
+  pageKeyOf,
+  resolveEdits,
+  resolveReadVersion,
+  type ResolvedEdit,
+} from './read-version.js';
 import {
   assertWorldPreviewMutationsAllowed,
   assertChildSpaceEntriesAllowed,
@@ -96,7 +109,7 @@ import {
   assertCurrentCanvasCommands,
   readLiveSpaceIds,
 } from './world-preview-policy.js';
-import { digestJson, stringifyJson } from '../../utils/json.js';
+import { digestJson } from '../../utils/json.js';
 import { getLogger } from '../../utils/logger.js';
 import { getAgentChangeReviewConfig } from '../agent/change-review-config.js';
 import { isLabelProtected } from '../preprocessing/label-policy.js';
@@ -112,7 +125,6 @@ import {
   type SpaceNodeMutation,
 } from '../storage/index.js';
 import {
-  SAVE_RESPONSE_MAX_BYTES,
   SaveIdReusedError,
   normalizeSaveKey,
   type SaveKey,
@@ -659,13 +671,15 @@ async function normalizeMergeImageGeometry(
   canvasId: string,
   commands: readonly CanvasCommand[],
   prestateNodes: readonly CanvasNode[],
+  /** Every command of the request, when `commands` is one edit of it. */
+  allCommands: readonly CanvasCommand[] = commands,
 ): Promise<CanvasCommand[]> {
   const nodeById = new Map<string, CanvasNode>();
   for (const node of prestateNodes) {
     if (typeof node.id === 'string') nodeById.set(node.id, node);
   }
   const explicitGeometry = new Set<string>();
-  for (const cmd of commands) {
+  for (const cmd of allCommands) {
     if (cmd.type === 'SET_NODE_GEOMETRY') {
       for (const item of cmd.items) explicitGeometry.add(item.nodeId);
     }
@@ -767,11 +781,101 @@ async function normalizeSetGeometryImageSizes(
   return out;
 }
 
+// ── Edits ────────────────────────────────────────────────────────────────
+
+/** A request's edits while the Server prepares them. */
+interface PreparedEdits {
+  edits: ExecuteEditInput[];
+  /**
+   * The request was a plain command list: every command is its own edit,
+   * also one the Server adds while preparing.
+   */
+  perCommand: boolean;
+}
+
+/**
+ * The one place a plain command list becomes edits: one edit per command,
+ * each quoting the request's `basis`.
+ */
+function preparedEditsOf(input: ExecuteOnServerInput): PreparedEdits {
+  if (input.edits) {
+    if (input.commands !== undefined)
+      throw new Error('Give an execute request edits or commands, not both');
+    return {
+      edits: input.edits.map((edit) => ({ ...edit })),
+      perCommand: false,
+    };
+  }
+  return {
+    edits: editsPerCommand(input.commands ?? [], input.basis),
+    perCommand: true,
+  };
+}
+
+function flatCommands(edits: readonly ExecuteEditInput[]): CanvasCommand[] {
+  return edits.flatMap((edit) => edit.commands);
+}
+
+/**
+ * Run a transform over all commands of the request at once and put the
+ * result back into the edits. The transform returns one command per command.
+ */
+async function transformCommands(
+  prepared: PreparedEdits,
+  transform: (
+    commands: readonly CanvasCommand[],
+  ) => CanvasCommand[] | Promise<CanvasCommand[]>,
+): Promise<PreparedEdits> {
+  const before = flatCommands(prepared.edits);
+  const after = await transform(before);
+  if (after.length !== before.length)
+    throw new Error('A command transform changed the number of commands');
+  let offset = 0;
+  return {
+    ...prepared,
+    edits: prepared.edits.map((edit) => {
+      const commands = after.slice(offset, offset + edit.commands.length);
+      offset += edit.commands.length;
+      return { ...edit, commands };
+    }),
+  };
+}
+
 // ── Public entry ─────────────────────────────────────────────────────────
+
+/** One edit of a request: the commands of one intent, taken or refused whole. */
+export interface ExecuteEditInput {
+  /**
+   * The read version the edit was made on (an opaque string from an earlier
+   * `basis` output). When given, the edit is checked against the nodes it
+   * targets — see `read-version.ts` — and refused with `stale-target` /
+   * `stale-parent` if they changed since.
+   */
+  basis?: string;
+  /**
+   * Earlier edits of the same caller this one was made on top of: of this
+   * request, or of an earlier one by its request id. It does not run when
+   * one of them did not take effect.
+   */
+  after?: readonly CanvasExecuteEditRef[];
+  commands: readonly CanvasCommand[];
+}
 
 export interface ExecuteOnServerInput {
   canvasId: string;
-  commands: readonly CanvasCommand[];
+  /**
+   * The request as edits. Each takes effect as a whole or not at all, and
+   * an edit that does not leaves the others to apply.
+   */
+  edits?: readonly ExecuteEditInput[];
+  /**
+   * The request as a plain command list — the Agent route's `{ commands }`
+   * and the Server's own callers. It is {@link edits} with one edit per
+   * command (each quoting {@link basis}), so a command that fails is
+   * skipped and the others still apply. Give `edits` or `commands`, not
+   * both.
+   */
+  commands?: readonly CanvasCommand[];
   originator: ExecuteOriginator;
   runId?: string;
   /**
@@ -796,25 +900,10 @@ export interface ExecuteOnServerInput {
    * and nothing is stored.
    */
   request?: { operationId: string; principalId: string };
-  /**
-   * The read version the caller built this batch on (an opaque string from
-   * an earlier `basis` output). When given, each command is checked against
-   * the nodes it targets — see `read-version.ts` — and rejected with
-   * `stale-target` / `stale-parent` if they changed since.
-   */
+  /** With {@link commands}: the read version every command is checked against. */
   basis?: string;
   /** Return the read version of the state this call leaves behind. */
   issueBasis?: boolean;
-  /**
-   * For `ui` batches: runs of commands that each form one edit, each with
-   * the read version it was made on. A run is checked like `basis`, but as a
-   * whole: when one of its targets is stale every command of the run is
-   * refused with `stale-target` / `stale-parent`. A run may also name
-   * earlier edits of the same page it was made on top of; it is refused
-   * when one of them did not take effect. Ignored for other sources, whose
-   * batches the Server may extend.
-   */
-  runs?: readonly CanvasExecuteRun[];
   /**
    * The browser page the batch comes from: the transport's principal and
    * the page's own id. A node this page created or re-parented itself is
@@ -831,6 +920,12 @@ export interface ExecuteOnServerInput {
    */
   claimedThreadId?: string;
   /**
+   * Keep the executed commands in the stored outcome, for an entry point
+   * whose response echoes them (the Agent route). Without it a result
+   * record holds no command.
+   */
+  echoCommands?: boolean;
+  /**
    * Hold `coverUrl` to the agent command contract: PDF only, resolved to an
    * existing raster artifact, rejected otherwise. Set by the entry points
    * that validate against that contract; other agent-origin callers keep
@@ -839,13 +934,42 @@ export interface ExecuteOnServerInput {
   agentCovers?: boolean;
 }
 
+/** What became of one edit; mirrors `CanvasExecuteEditOutcome` on the wire. */
+export interface ExecuteEditOutcome {
+  /** None of the edit's commands failed. When false, nothing of it applied. */
+  applied: boolean;
+  reason?: CanvasCommandFailureReason;
+  /** Position, within the edit, of the command that failed. */
+  failedAt?: number;
+  /** The edit's commands, as positions in the flat `results`. */
+  start: number;
+  count: number;
+}
+
 export interface ExecuteOnServerOutput {
   canvasId: string;
   fromVersion: number;
   toVersion: number;
+  /**
+   * In-memory rows: a replace names only the fields that changed, a
+   * deletion still holds the node (so a caller can invert the batch). Use
+   * `toWireDeltas` before sending them anywhere.
+   */
   deltas: Delta[];
+  /** One outcome per edit of the request, in order. */
+  edits: ExecuteEditOutcome[];
+  /**
+   * The request stated its edits itself (not a plain command list), so its
+   * caller is answered per edit.
+   */
+  statedAsEdits?: true;
+  /** One entry per command across all edits, in order. */
   results: Array<{
-    command: CanvasCommand;
+    /**
+     * The command as executed. Absent on a replayed output whose stored
+     * outcome does not keep the commands.
+     */
+    command?: CanvasCommand;
     applied: boolean;
     reason?: CanvasCommandFailureReason;
     /**
@@ -919,8 +1043,14 @@ export interface ExecuteOnServerOutput {
    * id was supplied, so a replay reports the original run and not a new one.
    */
   runId?: string;
-  /** This is the stored response of an earlier call with the same id. */
+  /**
+   * This answers an earlier call with the same request id, from its stored
+   * outcome: `deltas` and `pendingEffects.mutatedNodes` are empty, and
+   * {@link outcome} is what a caller is told.
+   */
   replayed?: true;
+  /** The stored outcome a replayed output was built from. */
+  outcome?: ExecuteOutcome;
 }
 
 /** The request id was already used for a different request. */
@@ -976,18 +1106,18 @@ function reliableRequestOf(input: ExecuteOnServerInput): ReliableRequest {
     // `runId` is correlation, not content: a retry may carry a new one.
     digest: digestJson({
       canvasId: input.canvasId,
-      commands: input.commands,
-      basis: input.basis ?? null,
+      // A plain command list keeps the digest it always had, so a retry of
+      // a request made before edits existed still matches its record.
+      ...(input.edits
+        ? { edits: input.edits }
+        : { commands: input.commands ?? [], basis: input.basis ?? null }),
       source: input.originator.source,
       threadId: input.claimedThreadId ?? input.originator.threadId ?? null,
-      // Only when stated, so requests saved before the field existed still
-      // match their retries.
-      ...(input.runs?.length ? { runs: input.runs } : {}),
     }),
   };
 }
 
-/** Hand back a stored response, or refuse an id reused for something else. */
+/** Hand back a stored outcome, or refuse an id reused for something else. */
 function replayStored(
   request: ReliableRequest,
   stored: StoredSaveResult,
@@ -995,10 +1125,13 @@ function replayStored(
   if (stored.digest !== request.digest) {
     throw new ExecuteRequestReusedError(request.key.operationId);
   }
-  return {
-    ...(stored.response as ExecuteOnServerOutput),
-    replayed: true,
-  };
+  const outcome = readStoredOutcome(stored.response);
+  if (!outcome) {
+    throw new Error(
+      `The stored result of request ${request.key.operationId} cannot be read`,
+    );
+  }
+  return replayedOutput(outcome);
 }
 
 async function lookupReplay(
@@ -1010,38 +1143,35 @@ async function lookupReplay(
 }
 
 /**
- * The result record for `output`, or null when it cannot be stored.
- *
- * An unstorable response — larger than a result record may be, or not plain
- * JSON — does not fail the batch: it is saved the ordinary way, and a retry
- * of that request is then simply a new request.
+ * The result record for `output`: its outcome, never the deltas or nodes of
+ * the call. An outcome too large for a record is stored without its
+ * optional parts, so a repeat of the request still finds it and does not
+ * execute again. `null` — the batch is then saved the ordinary way, and a
+ * retry is a new request — is left for an outcome that cannot be stored at
+ * all.
  */
 function saveResultFor(
   canvasId: string,
   request: ReliableRequest,
   output: ExecuteOnServerOutput,
+  echoCommands: boolean,
 ): SaveResult | null {
-  let bytes: number;
-  try {
-    bytes = Buffer.byteLength(
-      stringifyJson(output, 'Execute response'),
-      'utf8',
-    );
-  } catch (error) {
+  const whole = outcomeOf(output, echoCommands);
+  const outcome = storableOutcome(whole);
+  if (!outcome) {
     log.warn(
-      { canvasId, operationId: request.key.operationId, error },
-      'Execute response is not storable; saving without a result record',
+      { canvasId, operationId: request.key.operationId },
+      'Execute outcome is not storable; saving without a result record',
     );
     return null;
   }
-  if (bytes > SAVE_RESPONSE_MAX_BYTES) {
+  if (outcome !== whole) {
     log.warn(
-      { canvasId, operationId: request.key.operationId, bytes },
-      'Execute response exceeds the result record limit; saving without one',
+      { canvasId, operationId: request.key.operationId },
+      'Execute outcome exceeds the result record limit; stored without its optional parts',
     );
-    return null;
   }
-  return { key: request.key, digest: request.digest, response: output };
+  return { key: request.key, digest: request.digest, response: outcome };
 }
 
 /**
@@ -1083,9 +1213,10 @@ async function recordUnchangedOutcome(
   handle: SpaceHandle,
   request: ReliableRequest | undefined,
   output: ExecuteOnServerOutput,
+  echoCommands: boolean,
 ): Promise<ExecuteOnServerOutput> {
   if (!request) return output;
-  const result = saveResultFor(output.canvasId, request, output);
+  const result = saveResultFor(output.canvasId, request, output, echoCommands);
   if (!result) return output;
   try {
     const recorded = await handle.save.record({
@@ -1152,6 +1283,69 @@ export class CanvasNotFoundError extends Error {
   }
 }
 
+/** Pending effects as they travel: the mutated nodes by id. */
+export function toWirePendingEffects(effects: {
+  mutatedNodes: readonly CanvasNode[];
+  deletedNodeIds: readonly string[];
+  contentEditedNodeIds: readonly string[];
+  deferredFitFrameIds: readonly string[];
+}): {
+  mutatedNodeIds: string[];
+  deletedNodeIds: string[];
+  contentEditedNodeIds: string[];
+  deferredFitFrameIds: string[];
+} {
+  return {
+    mutatedNodeIds: [...new Set(effects.mutatedNodes.map((node) => node.id))],
+    deletedNodeIds: [...effects.deletedNodeIds],
+    contentEditedNodeIds: [...effects.contentEditedNodeIds],
+    deferredFitFrameIds: [...effects.deferredFitFrameIds],
+  };
+}
+
+/**
+ * The answer of `POST /api/canvas/:canvasId/execute` for `output`: results
+ * per edit, rows reduced to what changed, mutated nodes by id, and no echo
+ * of the commands.
+ */
+export function toExecuteResponse(
+  output: ExecuteOnServerOutput,
+  runId?: string,
+): PostCanvasExecuteResponse {
+  // Everything but the deltas comes from the outcome, so a repeated request
+  // (answered from the stored outcome) is told the same as the first call.
+  const outcome = outcomeOf(output, false);
+  return {
+    canvasId: outcome.canvasId,
+    fromVersion: outcome.fromVersion,
+    toVersion: outcome.toVersion,
+    ...(output.replayed ? {} : { deltas: toWireDeltas(output.deltas) }),
+    edits: outcome.edits.map((edit) => ({
+      applied: edit.applied,
+      ...(edit.reason ? { reason: edit.reason } : {}),
+      ...(edit.failedAt !== undefined ? { failedAt: edit.failedAt } : {}),
+      results: outcome.results
+        .slice(edit.start, edit.start + edit.count)
+        .map((result) => ({
+          applied: result.applied,
+          ...(result.reason ? { reason: result.reason } : {}),
+          ...(result.nodes ? { nodes: result.nodes } : {}),
+          ...(result.edges ? { edges: result.edges } : {}),
+        })),
+    })),
+    pendingEffects: outcome.pendingEffects,
+    ...(outcome.orderEvents ? { orderEvents: outcome.orderEvents } : {}),
+    ...(outcome.nodeContentRevisions
+      ? { nodeContentRevisions: outcome.nodeContentRevisions }
+      : {}),
+    ...((outcome.runId ?? runId) ? { runId: outcome.runId ?? runId } : {}),
+    ...(outcome.operationId ? { operationId: outcome.operationId } : {}),
+    ...(outcome.basis ? { basis: outcome.basis } : {}),
+    ...(output.replayed ? { replayed: true as const } : {}),
+    ...(outcome.incomplete ? { incomplete: true as const } : {}),
+  };
+}
+
 /** Publish a system lifecycle batch after its related metadata has settled. */
 export function publishCanvasExecution(output: ExecuteOnServerOutput): void {
   if (output.toVersion === output.fromVersion) return;
@@ -1161,7 +1355,7 @@ export function publishCanvasExecution(output: ExecuteOnServerOutput): void {
       fromVersion: output.fromVersion,
       toVersion: output.toVersion,
       deltas: output.deltas,
-      pendingEffects: output.pendingEffects,
+      pendingEffects: toWirePendingEffects(output.pendingEffects),
       ...(output.orderEvents ? { orderEvents: output.orderEvents } : {}),
       ...(output.nodeContentRevisions
         ? { nodeContentRevisions: output.nodeContentRevisions }
@@ -1184,7 +1378,7 @@ export function publishCanvasExecution(output: ExecuteOnServerOutput): void {
 export async function executeOnServer(
   input: ExecuteOnServerInput,
 ): Promise<ExecuteOnServerOutput> {
-  assertCurrentCanvasCommands(input.commands);
+  assertCurrentCanvasCommands(flatCommands(preparedEditsOf(input).edits));
   const lease = acquireWorkspaceOperationLease();
   try {
     if (!input.request) return await executeUnlocked(input, undefined);
@@ -1220,7 +1414,7 @@ async function executeUnlocked(
   request: ReliableRequest | undefined,
 ): Promise<ExecuteOnServerOutput> {
   const { canvasId, originator } = input;
-  let commands = preAssignIds(input.commands);
+  let prepared = await transformCommands(preparedEditsOf(input), preAssignIds);
 
   // Normalize agent-authored `data.src` values into artifact keys BEFORE the
   // per-canvas mutex: an ACP agent may point a node at an RFS upload
@@ -1233,18 +1427,22 @@ async function executeUnlocked(
   // keys / `/api/` URLs / `data:` URIs.
   const stagedCoverUploads: string[] = [];
   if (originator.source === 'agent') {
-    commands = await importForeignNodeSources(canvasId, commands, {
-      agentCovers: input.agentCovers,
-      stagedCoverUploads,
-    });
+    prepared = await transformCommands(prepared, (commands) =>
+      importForeignNodeSources(canvasId, commands, {
+        agentCovers: input.agentCovers,
+        stagedCoverUploads,
+      }),
+    );
 
     // For image nodes with only width specified, calculate height from actual
     // image aspect ratio. This ensures correct proportions for all image sources.
-    commands = await normalizeImageNodeSizes(canvasId, commands);
+    prepared = await transformCommands(prepared, (commands) =>
+      normalizeImageNodeSizes(canvasId, commands),
+    );
   }
 
   const output = await withCanvasMutex(canvasId, () =>
-    executeLocked({ ...input, commands }, request),
+    executeLocked(input, prepared, request),
   );
   // Cover uploads outlive a batch that threw or had a command rejected, so
   // the corrected retry can still name them.
@@ -1263,16 +1461,17 @@ async function executeUnlocked(
 export async function executeOnServerAlreadyLocked(
   input: ExecuteOnServerInput,
 ): Promise<ExecuteOnServerOutput> {
-  return executeLocked(input, undefined);
+  return executeLocked(input, preparedEditsOf(input), undefined);
 }
 
 async function executeLocked(
   input: ExecuteOnServerInput,
+  preparedEdits: PreparedEdits,
   request: ReliableRequest | undefined,
 ): Promise<ExecuteOnServerOutput> {
   const { canvasId } = input;
-  assertCurrentCanvasCommands(input.commands);
-  const commands = [...input.commands];
+  const commands = flatCommands(preparedEdits.edits);
+  assertCurrentCanvasCommands(commands);
 
   const handle = space(canvasId);
   if (request) {
@@ -1345,7 +1544,7 @@ async function executeLocked(
     return await executePreparedOnServerAlreadyLocked(input, request, {
       handle,
       canvas: confirmedCanvas,
-      commands,
+      edits: preparedEdits,
       prestateNodes: promoted
         ? hydrateCanvasNodes(
             confirmedRecords,
@@ -1366,7 +1565,7 @@ async function executePreparedOnServerAlreadyLocked(
   prepared: {
     handle: ReturnType<typeof space>;
     canvas: CanvasFile;
-    commands: CanvasCommand[];
+    edits: PreparedEdits;
     prestateNodes: CanvasNode[];
     prestateEdges: CanvasEdge[];
     /** The stored node records `prestateNodes` was hydrated from. */
@@ -1375,47 +1574,40 @@ async function executePreparedOnServerAlreadyLocked(
 ): Promise<ExecuteOnServerOutput> {
   const { canvasId, originator, runId } = input;
   const { handle, canvas, prestateNodes, prestateEdges } = prepared;
-  let commands = prepared.commands;
+  let edits = prepared.edits.edits;
+  const { perCommand } = prepared.edits;
   const fromVersion = canvas.version;
-
-  // A `ui` batch reaches the engine command for command as it was sent, so
-  // the runs' indexes address it; any other batch may be extended below.
-  const statedRuns =
-    originator.source === 'ui' &&
-    input.runs?.length &&
-    commands.length === input.commands.length
-      ? input.runs
-      : undefined;
 
   // Stamps are read only when the caller quotes or asks for a read version;
   // the first such call is what gives a Space its baseline.
   let stamps: SpaceStamps | null = null;
   if (
+    edits.some((edit) => edit.basis !== undefined) ||
     input.basis !== undefined ||
-    statedRuns !== undefined ||
     input.issueBasis === true
   ) {
     stamps = await handle.save.stamps();
     if (!stamps) throw new CanvasNotFoundError(canvasId);
   }
-  const readVersion =
-    input.basis !== undefined && stamps
-      ? resolveReadVersion(input.basis, stamps)
-      : null;
-  if (input.basis !== undefined && !readVersion) {
+  // A plain command list quotes its read version once, for the request: it
+  // has to be one of this Space's also when the list is empty.
+  if (
+    input.basis !== undefined &&
+    !(stamps && resolveReadVersion(input.basis, stamps))
+  ) {
     throw new ExecuteBasisError(input.basis);
   }
-  let runs: ReadVersionRun[] | undefined;
-  if (statedRuns && stamps) {
-    const resolved = await resolveRuns({
-      runs: statedRuns,
-      stamps,
-      principalId: input.page?.principalId ?? request?.key.principalId,
-      lookup: (key) => handle.save.lookup(key),
-    });
-    if (!resolved.ok) throw new ExecuteBasisError(resolved.basis);
-    runs = resolved.runs;
-  }
+  const resolved = await resolveEdits({
+    edits,
+    stamps,
+    principalId: input.page?.principalId ?? request?.key.principalId,
+    lookup: (key) => handle.save.lookup(key),
+  });
+  if (!resolved.ok) throw new ExecuteBasisError(resolved.basis);
+  /** Decoded read version and `after` of each edit, by the edit object. */
+  const resolvedOf = new Map<ExecuteEditInput, ResolvedEdit | undefined>(
+    edits.map((edit, index) => [edit, resolved.edits[index]] as const),
+  );
   const page = input.page
     ? pageKeyOf(input.page.principalId, input.page.pageId)
     : undefined;
@@ -1424,6 +1616,7 @@ async function executePreparedOnServerAlreadyLocked(
 
   /** Fields every response of this call carries, whatever its outcome. */
   const envelope = (version: number): Partial<ExecuteOnServerOutput> => ({
+    ...(perCommand ? {} : { statedAsEdits: true as const }),
     ...(stamps && input.issueBasis === true
       ? { basis: encodeBasis(stamps.lineage, version) }
       : {}),
@@ -1435,9 +1628,23 @@ async function executePreparedOnServerAlreadyLocked(
       : {}),
   });
 
+  /**
+   * Replace the commands of every edit, one for one. The decoded read
+   * version follows the edit.
+   */
+  const mapCommands = (
+    transform: (command: CanvasCommand) => CanvasCommand,
+  ): void => {
+    edits = edits.map((edit) => {
+      const next = { ...edit, commands: edit.commands.map(transform) };
+      resolvedOf.set(next, resolvedOf.get(edit));
+      return next;
+    });
+  };
+
   // Automatic preprocessing can arrive after an agent or user rename.
   // Filter only its label fields at the actual commit, not at request time.
-  commands = commands.map((command) =>
+  mapCommands((command) =>
     command.type !== 'MERGE_NODE_DATA'
       ? command
       : {
@@ -1469,7 +1676,7 @@ async function executePreparedOnServerAlreadyLocked(
 
   assertWorldPreviewMutationsAllowed(
     canvasId,
-    commands,
+    flatCommands(edits),
     prestateNodes,
     originator.source,
     liveCanvasIds,
@@ -1479,23 +1686,65 @@ async function executePreparedOnServerAlreadyLocked(
     // Order matters: fix explicit image resizes first (edits items in
     // place), then let the merge pass append geometry for src-swaps that
     // have no explicit resize. The two target disjoint node sets.
-    commands = await normalizeSetGeometryImageSizes(
+    const resized = await normalizeSetGeometryImageSizes(
       canvasId,
-      commands,
+      flatCommands(edits),
       prestateNodes,
     );
-    const authored = readVersion ? new Set(commands) : null;
-    commands = await normalizeMergeImageGeometry(
-      canvasId,
-      commands,
-      prestateNodes,
-    );
-    if (authored) {
+    let offset = 0;
+    mapCommands(() => resized[offset++] as CanvasCommand);
+    const authored = flatCommands(edits);
+    const authoredSet = new Set(authored);
+    const extended: ExecuteEditInput[] = [];
+    for (const edit of edits) {
+      const commands = await normalizeMergeImageGeometry(
+        canvasId,
+        edit.commands,
+        prestateNodes,
+        authored,
+      );
       for (const command of commands) {
-        if (!authored.has(command)) serverAppended.add(command);
+        if (!authoredSet.has(command)) serverAppended.add(command);
+      }
+      // What the Server adds follows from the command before it. In a plain
+      // command list it is an edit of its own like every other command, so a
+      // command that fails never undoes another; among stated edits it
+      // belongs to the edit of the command it follows from.
+      const pieces: ExecuteEditInput[] = perCommand
+        ? commands.map((command) => ({ ...edit, commands: [command] }))
+        : [{ ...edit, commands }];
+      for (const piece of pieces) {
+        resolvedOf.set(piece, resolvedOf.get(edit));
+        extended.push(piece);
       }
     }
+    edits = extended;
   }
+
+  const commands = flatCommands(edits);
+  /** Position of each edit's first command in `commands`. */
+  const editStarts: number[] = [];
+  edits.reduce((start, edit) => {
+    editStarts.push(start);
+    return start + edit.commands.length;
+  }, 0);
+  /** The outcome of a request refused before the engine ran. */
+  const refusedEdits = (
+    conflictIds: ReadonlySet<string>,
+  ): ExecuteEditOutcome[] =>
+    edits.map((edit, index) => {
+      const failedAt = edit.commands.findIndex(
+        (command) =>
+          command.type === 'MERGE_NODE_DATA' &&
+          command.patches.some((patch) => conflictIds.has(patch.nodeId)),
+      );
+      return {
+        applied: false,
+        ...(failedAt >= 0 ? { reason: 'conflict' as const, failedAt } : {}),
+        start: editStarts[index] ?? 0,
+        count: edit.commands.length,
+      };
+    });
 
   // Compare-and-swap pre-flight (agent writes only). A stale or
   // never-read content rewrite mutates NOTHING — the whole batch is a
@@ -1505,29 +1754,35 @@ async function executePreparedOnServerAlreadyLocked(
     const conflicts = collectMergeConflicts(commands, prestateNodes);
     if (conflicts.length > 0) {
       const conflictIds = new Set(conflicts.map((c) => c.nodeId));
-      return recordUnchangedOutcome(handle, request, {
-        canvasId,
-        fromVersion,
-        toVersion: fromVersion,
-        deltas: [],
-        results: commands.map((command) => ({
-          command,
-          applied: false,
-          ...(command.type === 'MERGE_NODE_DATA' &&
-          command.patches.some((p) => conflictIds.has(p.nodeId))
-            ? { reason: 'conflict' as const }
-            : {}),
-        })),
-        commands,
-        pendingEffects: {
-          mutatedNodes: [],
-          deletedNodeIds: [],
-          contentEditedNodeIds: [],
-          deferredFitFrameIds: [],
+      return recordUnchangedOutcome(
+        handle,
+        request,
+        {
+          canvasId,
+          fromVersion,
+          toVersion: fromVersion,
+          deltas: [],
+          edits: refusedEdits(conflictIds),
+          results: commands.map((command) => ({
+            command,
+            applied: false,
+            ...(command.type === 'MERGE_NODE_DATA' &&
+            command.patches.some((p) => conflictIds.has(p.nodeId))
+              ? { reason: 'conflict' as const }
+              : {}),
+          })),
+          commands,
+          pendingEffects: {
+            mutatedNodes: [],
+            deletedNodeIds: [],
+            contentEditedNodeIds: [],
+            deferredFitFrameIds: [],
+          },
+          conflicts,
+          ...envelope(fromVersion),
         },
-        conflicts,
-        ...envelope(fromVersion),
-      });
+        input.echoCommands === true,
+      );
     }
   }
 
@@ -1539,37 +1794,50 @@ async function executePreparedOnServerAlreadyLocked(
     const conflictIds = new Set(
       viewConflicts.map((conflict) => conflict.nodeId),
     );
-    return recordUnchangedOutcome(handle, request, {
-      canvasId,
-      fromVersion,
-      toVersion: fromVersion,
-      deltas: [],
-      results: commands.map((command) => ({
-        command,
-        applied: false,
-        ...(command.type === 'MERGE_NODE_DATA' &&
-        command.patches.some((patch) => conflictIds.has(patch.nodeId))
-          ? { reason: 'conflict' as const }
-          : {}),
-      })),
-      commands,
-      pendingEffects: {
-        mutatedNodes: [],
-        deletedNodeIds: [],
-        contentEditedNodeIds: [],
-        deferredFitFrameIds: [],
+    return recordUnchangedOutcome(
+      handle,
+      request,
+      {
+        canvasId,
+        fromVersion,
+        toVersion: fromVersion,
+        deltas: [],
+        edits: refusedEdits(conflictIds),
+        results: commands.map((command) => ({
+          command,
+          applied: false,
+          ...(command.type === 'MERGE_NODE_DATA' &&
+          command.patches.some((patch) => conflictIds.has(patch.nodeId))
+            ? { reason: 'conflict' as const }
+            : {}),
+        })),
+        commands,
+        pendingEffects: {
+          mutatedNodes: [],
+          deletedNodeIds: [],
+          contentEditedNodeIds: [],
+          deferredFitFrameIds: [],
+        },
+        viewConflicts,
+        ...envelope(fromVersion),
       },
-      viewConflicts,
-      ...envelope(fromVersion),
-    });
+      input.echoCommands === true,
+    );
   }
 
+  const everyEditChecked = edits.every(
+    (edit) => resolvedOf.get(edit)?.version !== undefined,
+  );
   const admission: ReadVersionAdmission | undefined =
-    stamps && (readVersion || runs)
+    stamps && edits.some((edit) => resolvedOf.get(edit)?.version !== undefined)
       ? createReadVersionAdmission({
-          commands,
-          ...(readVersion ? { version: readVersion.version } : {}),
-          ...(runs ? { runs } : {}),
+          edits: edits.map((edit) => {
+            const version = resolvedOf.get(edit)?.version;
+            return {
+              commands: edit.commands,
+              ...(version !== undefined ? { version } : {}),
+            };
+          }),
           stamps,
           prestateNodes,
           ...(page ? { page } : {}),
@@ -1577,18 +1845,39 @@ async function executePreparedOnServerAlreadyLocked(
         })
       : undefined;
 
-  const { writeResult, commandResults, pendingEffects } = executeCanvasCommands(
-    { source: originator.source, commands },
-    {
-      nodes: prestateNodes,
-      edges: prestateEdges,
-      canvasId,
-    },
-    {
-      forceFitFrames: originator.source === 'agent',
-      ...(admission ? { admit: admission.admit } : {}),
-    },
-  );
+  // Positions named by `after` are those of the request as it was sent. A
+  // plain command list names none, so the edits the Server added to one
+  // shift nothing.
+  const { writeResult, commandResults, editResults, pendingEffects } =
+    executeCanvasEdits(
+      {
+        source: originator.source,
+        edits: edits.map((edit) => {
+          const decoded = resolvedOf.get(edit);
+          return {
+            commands: edit.commands,
+            ...(decoded?.after.length ? { after: decoded.after } : {}),
+            ...(decoded?.blocked ? { blocked: true } : {}),
+          };
+        }),
+      },
+      {
+        nodes: prestateNodes,
+        edges: prestateEdges,
+        canvasId,
+      },
+      {
+        forceFitFrames: originator.source === 'agent',
+        ...(admission ? { admitEdit: admission.admitEdit } : {}),
+      },
+    );
+  const editOutcomes: ExecuteEditOutcome[] = editResults.map((edit, index) => ({
+    applied: edit.applied,
+    ...(edit.reason ? { reason: edit.reason } : {}),
+    ...(edit.failedAt !== undefined ? { failedAt: edit.failedAt } : {}),
+    start: editStarts[index] ?? 0,
+    count: edit.results.length,
+  }));
 
   // Pure host-agnostic cleanups (edge handle reroute) — same path the
   // web's `executeCommands` runs before its set().
@@ -1752,21 +2041,27 @@ async function executePreparedOnServerAlreadyLocked(
   // No-op fast path. Returning early preserves the invariant that
   // `toVersion === fromVersion` IFF no row was appended to the log.
   if (deltas.length === 0 && !orderChanged) {
-    return recordUnchangedOutcome(handle, request, {
-      canvasId,
-      fromVersion,
-      toVersion: fromVersion,
-      deltas,
-      results,
-      commands,
-      pendingEffects: {
-        mutatedNodes: pendingEffects.mutatedNodes,
-        deletedNodeIds: pendingEffects.deletedNodeIds,
-        contentEditedNodeIds: pendingEffects.contentEditedNodeIds,
-        deferredFitFrameIds: pendingEffects.deferredFitFrameIds,
+    return recordUnchangedOutcome(
+      handle,
+      request,
+      {
+        canvasId,
+        fromVersion,
+        toVersion: fromVersion,
+        deltas,
+        edits: editOutcomes,
+        results,
+        commands,
+        pendingEffects: {
+          mutatedNodes: pendingEffects.mutatedNodes,
+          deletedNodeIds: pendingEffects.deletedNodeIds,
+          contentEditedNodeIds: pendingEffects.contentEditedNodeIds,
+          deferredFitFrameIds: pendingEffects.deferredFitFrameIds,
+        },
+        ...envelope(fromVersion),
       },
-      ...envelope(fromVersion),
-    });
+      input.echoCommands === true,
+    );
   }
 
   const toVersion = fromVersion + 1;
@@ -1837,7 +2132,9 @@ async function executePreparedOnServerAlreadyLocked(
     version: toVersion,
     ts: Date.now(),
     ...(runId ? { runId } : {}),
-    commands: commands as unknown[],
+    // The row says which commands ran; what they changed is in `deltas`,
+    // and a command's payload (a created body) is not journalled twice.
+    commands: commands.map((command) => ({ type: command.type })),
     deltas: wireDeltas as unknown[],
     originator,
   };
@@ -1874,6 +2171,7 @@ async function executePreparedOnServerAlreadyLocked(
     fromVersion,
     toVersion,
     deltas,
+    edits: editOutcomes,
     results,
     commands,
     pendingEffects: {
@@ -1901,22 +2199,19 @@ async function executePreparedOnServerAlreadyLocked(
     ? plannedContentRevisions(contentNodeIds, nodeMutations, prepared.records)
     : undefined;
   const result = request
-    ? saveResultFor(canvasId, request, {
-        ...outputWith(changes, plannedRevisions),
-        deltas: wireDeltas,
-      })
+    ? saveResultFor(
+        canvasId,
+        request,
+        outputWith(changes, plannedRevisions),
+        input.echoCommands === true,
+      )
     : null;
 
   // What this batch creates or re-parents is the page's own change only when
-  // the page said what it had read for every command: an unchecked command
+  // the page said what it had read for every edit: an unchecked edit
   // could have moved a node its author had not seen moved.
-  const everyCommandChecked =
-    readVersion !== null ||
-    (runs !== undefined &&
-      runs.reduce((covered, run) => covered + run.count, 0) ===
-        commands.length);
   const author =
-    page && admission && everyCommandChecked
+    page && admission && everyEditChecked
       ? { by: page, except: admission.unseenMoves(finalNodes) }
       : undefined;
 
@@ -1982,12 +2277,7 @@ async function executePreparedOnServerAlreadyLocked(
         fromVersion,
         toVersion,
         deltas: wireDeltas,
-        pendingEffects: {
-          mutatedNodes: pendingEffects.mutatedNodes,
-          deletedNodeIds: pendingEffects.deletedNodeIds,
-          contentEditedNodeIds: pendingEffects.contentEditedNodeIds,
-          deferredFitFrameIds: pendingEffects.deferredFitFrameIds,
-        },
+        pendingEffects: toWirePendingEffects(pendingEffects),
         ...(orderEvents.length > 0 ? { orderEvents } : {}),
         ...(nodeContentRevisions ? { nodeContentRevisions } : {}),
         ...(originator.threadId ? { threadId: originator.threadId } : {}),

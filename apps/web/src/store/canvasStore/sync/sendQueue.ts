@@ -10,11 +10,16 @@
  * the same request with the same id, which the server answers from its
  * stored result, so a batch never executes twice.
  *
- * Every batch is one run of the request and states the read version it was
- * made on (`runs`), and the earlier, still unconfirmed batches of this page
- * it was made on top of. The server checks each run against the nodes it
- * names only, so edits to unrelated nodes from two pages never reject each
- * other, and takes or refuses a run as a whole.
+ * An entry holds edits. Every batch handed to the queue is one edit — the
+ * commands of one gesture — with the read version it was made on and the
+ * earlier, still unconfirmed edits of this page it was made on top of. The
+ * request is exactly the entry's edits (`edits`), so nothing is addressed by
+ * command index. The server checks each edit against the nodes it names
+ * only, so edits to unrelated nodes from two pages never reject each other,
+ * and takes or refuses an edit as a whole.
+ *
+ * An entry is frozen when it is first sent: later batches start a new entry,
+ * so "request id + position in `edits`" names the same edit for good.
  *
  * The queue only transports. Applying the result, releasing in-flight
  * holds and telling the user are the caller's, through `onSettled`.
@@ -36,13 +41,13 @@ import { ApiError } from '@/api/_client';
 
 import type {
   CanvasCommand,
-  CanvasExecuteRun,
+  CanvasExecuteEdit,
   PostCanvasExecuteRequest,
   PostCanvasExecuteResponse,
 } from '@huabu/shared';
 
 export type SendOutcome =
-  /** The server answered; per-command results are in the response. */
+  /** The server answered; per-edit outcomes are in the response. */
   | { kind: 'response'; response: PostCanvasExecuteResponse }
   /**
    * The server refused the request (`sent: true`), or the entry's gate
@@ -52,33 +57,31 @@ export type SendOutcome =
   /** The caller discarded the lane before the request was answered. */
   | { kind: 'discarded' };
 
-/** One queued batch, by the entry it is in and its place there. */
-export interface QueuedRunRef {
+/** One queued edit, by the entry (request) it is in and its place there. */
+export interface QueuedEditRef {
   readonly entryId: string;
-  readonly start: number;
-  readonly count: number;
+  /** Position in the entry's `edits`. */
+  readonly edit: number;
 }
 
-/** One queued batch as a run of its entry's commands. */
-export interface QueuedRun {
-  readonly start: number;
-  readonly count: number;
-  /** The read version the batch was made on. */
-  readonly basis: string;
-  /** Unconfirmed batches of this page the batch was made on top of. */
-  readonly after: readonly QueuedRunRef[];
+/** One queued edit: the commands of one batch. */
+export interface QueuedEdit {
+  readonly commands: CanvasCommand[];
+  /** The read version the batch was made on; without one it is unchecked. */
+  readonly basis?: string;
+  /** Unconfirmed edits of this page the batch was made on top of. */
+  readonly after: readonly QueuedEditRef[];
 }
 
-/** Most earlier batches a run names; the newest are kept. */
-export const MAX_RUN_AFTER = 64;
+/** Most earlier edits an edit names; the newest are kept. */
+export const MAX_EDIT_AFTER = 64;
 
 export interface SendQueueEntry {
   /** Request id sent as `operationId`. */
   readonly id: string;
   readonly canvasId: string;
-  readonly commands: CanvasCommand[];
-  /** The batches folded into the entry that state a read version. */
-  readonly runs: QueuedRun[];
+  /** The batches folded into the entry, in the order they were made. */
+  readonly edits: QueuedEdit[];
   /** Every batch in the entry is a derived report; see the module comment. */
   readonly derived: boolean;
   /** Resolves once the entry leaves the queue. Never rejects. */
@@ -135,11 +138,11 @@ export interface SendQueueOptions {
   /** Largest merged batch; a longer run of edits is sent as several. */
   maxBatchCommands?: number;
   /**
-   * What became of a batch of an earlier entry, when its answer is known. A
-   * batch that took effect is no longer named in `after`; any other is, and
-   * the server decides.
+   * What became of an edit of an earlier entry, when its answer is known.
+   * An edit that took effect is no longer named in `after`; any other is,
+   * and the server decides.
    */
-  runOutcome?: (ref: QueuedRunRef) => 'applied' | 'refused' | undefined;
+  editOutcome?: (ref: QueuedEditRef) => 'applied' | 'refused' | undefined;
   now?: () => number;
   /**
    * Called synchronously when an entry leaves the queue, before the next
@@ -156,17 +159,19 @@ export interface EnqueueOptions {
   gate?: Promise<unknown>;
   /** The batch is a derived report, not an edit the user made. */
   derived?: boolean;
-  /**
-   * The read version the batch was made on, and the unconfirmed batches of
-   * this page it was made on top of. Omitted, the batch is sent unchecked.
-   */
-  run?: { basis: string; after?: readonly QueuedRunRef[] };
+  /** The read version the batch was made on. Omitted, it is sent unchecked. */
+  basis?: string;
+  /** The unconfirmed edits of this page the batch was made on top of. */
+  after?: readonly QueuedEditRef[];
 }
 
 export interface EnqueueResult {
   entry: SendQueueEntry;
-  /** Index of the first of these commands within `entry.commands`. */
-  offset: number;
+  /**
+   * Position of this batch in `entry.edits`, and of its outcome in the
+   * response's `edits`. `-1` for a batch without commands, which is no edit.
+   */
+  edit: number;
 }
 
 export interface SendQueue {
@@ -224,8 +229,9 @@ function isExecuteResponse(value: unknown): value is PostCanvasExecuteResponse {
   return (
     typeof response === 'object' &&
     response !== null &&
-    Array.isArray(response.results) &&
-    Array.isArray(response.deltas) &&
+    Array.isArray(response.edits) &&
+    // A replayed response carries no deltas.
+    (response.deltas === undefined || Array.isArray(response.deltas)) &&
     typeof response.fromVersion === 'number' &&
     typeof response.toVersion === 'number'
   );
@@ -310,37 +316,30 @@ export function createSendQueue(options: SendQueueOptions): SendQueue {
     publish(lane);
   };
 
-  const wireRun = (entry: Entry, run: QueuedRun): CanvasExecuteRun => {
-    const after: NonNullable<CanvasExecuteRun['after']> = [];
-    for (const ref of run.after) {
+  const wireEdit = (entry: Entry, edit: QueuedEdit): CanvasExecuteEdit => {
+    const after: NonNullable<CanvasExecuteEdit['after']> = [];
+    for (const ref of edit.after) {
       if (ref.entryId === entry.id) {
-        after.push({ start: ref.start, count: ref.count });
-      } else if (options.runOutcome?.(ref) !== 'applied') {
-        after.push({
-          operationId: ref.entryId,
-          start: ref.start,
-          count: ref.count,
-        });
+        after.push({ edit: ref.edit });
+      } else if (options.editOutcome?.(ref) !== 'applied') {
+        after.push({ operationId: ref.entryId, edit: ref.edit });
       }
     }
     return {
-      start: run.start,
-      count: run.count,
-      basis: run.basis,
-      ...(after.length > 0 ? { after: after.slice(-MAX_RUN_AFTER) } : {}),
+      ...(edit.basis !== undefined ? { basis: edit.basis } : {}),
+      ...(after.length > 0 ? { after: after.slice(-MAX_EDIT_AFTER) } : {}),
+      commands: edit.commands,
     };
   };
 
   const requestOf = (entry: Entry): PostCanvasExecuteRequest => {
-    // From here on nothing may be folded into the entry either.
+    // From here on nothing may be folded into the entry either: the request
+    // is fixed, and so is the position of each of its edits.
     entry.attempted = true;
     entry.request ??= {
-      commands: entry.commands,
-      originator: { source: 'ui', tabId: options.clientId },
       operationId: entry.id,
-      ...(entry.runs.length > 0
-        ? { runs: entry.runs.map((run) => wireRun(entry, run)) }
-        : {}),
+      originator: { tabId: options.clientId },
+      edits: entry.edits.map((edit) => wireEdit(entry, edit)),
     };
     return entry.request;
   };
@@ -380,6 +379,27 @@ export function createSendQueue(options: SendQueueOptions): SendQueue {
             continue;
           }
           if (lane.entries[0] !== entry) continue;
+        }
+        if (entry.edits.length === 0) {
+          // A batch without commands holds units and has nothing to send:
+          // nothing was written, which is what this answer says.
+          settle(lane, entry, {
+            kind: 'response',
+            response: {
+              canvasId: lane.canvasId,
+              fromVersion: 0,
+              toVersion: 0,
+              deltas: [],
+              edits: [],
+              pendingEffects: {
+                mutatedNodeIds: [],
+                deletedNodeIds: [],
+                contentEditedNodeIds: [],
+                deferredFitFrameIds: [],
+              },
+            },
+          });
+          continue;
         }
         entry.sending = true;
         entry.attempted = true;
@@ -450,28 +470,32 @@ export function createSendQueue(options: SendQueueOptions): SendQueue {
     enqueue(canvasId, commands, enqueueOptions) {
       const lane = laneOf(canvasId);
       const last = lane.entries[lane.entries.length - 1];
-      // Fold a run of edits made while a request is on the wire into one
-      // batch, so a slider drag does not become one round trip per tick.
+      const edit: QueuedEdit | null =
+        commands.length > 0
+          ? {
+              commands: [...commands],
+              ...(enqueueOptions?.basis !== undefined
+                ? { basis: enqueueOptions.basis }
+                : {}),
+              after: enqueueOptions?.after ?? [],
+            }
+          : null;
+      // Fold edits made while a request is on the wire into one request, so
+      // a slider drag does not become one round trip per tick. Only an entry
+      // that was never sent takes more: a sent one is fixed.
       if (
         last &&
         !last.attempted &&
         !last.gate &&
         !enqueueOptions?.gate &&
-        last.commands.length + commands.length <= maxBatch
+        last.edits.reduce((sum, queued) => sum + queued.commands.length, 0) +
+          commands.length <=
+          maxBatch
       ) {
-        const offset = last.commands.length;
-        last.commands.push(...commands);
-        if (enqueueOptions?.run && commands.length > 0) {
-          last.runs.push({
-            start: offset,
-            count: commands.length,
-            basis: enqueueOptions.run.basis,
-            after: enqueueOptions.run.after ?? [],
-          });
-        }
+        if (edit) last.edits.push(edit);
         last.derived &&= enqueueOptions?.derived === true;
         publish(lane);
-        return { entry: last, offset };
+        return { entry: last, edit: edit ? last.edits.length - 1 : -1 };
       }
       let resolve!: (outcome: SendOutcome) => void;
       const settled = new Promise<SendOutcome>((r) => {
@@ -480,18 +504,7 @@ export function createSendQueue(options: SendQueueOptions): SendQueue {
       const entry: Entry = {
         id: createId(),
         canvasId,
-        commands: [...commands],
-        runs:
-          enqueueOptions?.run && commands.length > 0
-            ? [
-                {
-                  start: 0,
-                  count: commands.length,
-                  basis: enqueueOptions.run.basis,
-                  after: enqueueOptions.run.after ?? [],
-                },
-              ]
-            : [],
+        edits: edit ? [edit] : [],
         derived: enqueueOptions?.derived === true,
         settled,
         ...(enqueueOptions?.gate ? { gate: enqueueOptions.gate } : {}),
@@ -507,7 +520,7 @@ export function createSendQueue(options: SendQueueOptions): SendQueue {
       if (lane.phase === 'idle') lane.phase = 'sending';
       publish(lane);
       void pump(lane);
-      return { entry, offset: 0 };
+      return { entry, edit: edit ? 0 : -1 };
     },
 
     status: (canvasId) => statusOf(laneOf(canvasId)),

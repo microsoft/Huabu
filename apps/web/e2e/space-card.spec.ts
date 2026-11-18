@@ -5,6 +5,8 @@ import { expect, test } from '@playwright/test';
 
 import { SPACE_SHORTCUT_SIZE } from '@huabu/shared/canvas-engine';
 
+import { editsPerCommand } from './helpers';
+
 import type { SpaceCardAgent } from '@huabu/shared';
 
 test.afterEach(async ({ page }) => {
@@ -26,7 +28,7 @@ test('Space Scale resizes all card content and persists independently from Width
   );
   const created = await page.request.post(`/api/canvas/${source}/execute`, {
     data: {
-      commands: [
+      edits: editsPerCommand([
         {
           type: 'CREATE_NODES',
           nodes: [
@@ -49,7 +51,7 @@ test('Space Scale resizes all card content and persists independently from Width
             },
           ],
         },
-      ],
+      ]),
       originator: { source: 'ui', tabId: 'card-scale-test' },
     },
   });
@@ -270,7 +272,7 @@ test('Space cards show activity and rename inline without entering the target', 
     `/api/canvas/${target}/execute`,
     {
       data: {
-        commands: [
+        edits: editsPerCommand([
           {
             type: 'CREATE_NODES',
             nodes: [
@@ -290,7 +292,7 @@ test('Space cards show activity and rename inline without entering the target', 
               data: { label, agentBinding: { kind: 'internal' } },
             })),
           },
-        ],
+        ]),
         originator: { source: 'ui', tabId: 'space-card-test' },
       },
     },
@@ -302,7 +304,7 @@ test('Space cards show activity and rename inline without entering the target', 
   const { canvasId: source } = await sourceResponse.json();
   const created = await page.request.post(`/api/canvas/${source}/execute`, {
     data: {
-      commands: [
+      edits: editsPerCommand([
         {
           type: 'CREATE_NODES',
           nodes: [
@@ -315,7 +317,7 @@ test('Space cards show activity and rename inline without entering the target', 
             },
           ],
         },
-      ],
+      ]),
       originator: { source: 'ui', tabId: 'space-card-test' },
     },
   });

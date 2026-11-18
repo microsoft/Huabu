@@ -4,7 +4,7 @@
 import fastify, { type FastifyInstance } from 'fastify';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { createId } from '@huabu/shared';
+import { createId, editsPerCommand } from '@huabu/shared';
 
 import {
   projectAgentNodeState,
@@ -96,7 +96,10 @@ forEachProductProfile((profile, label) => {
       return app.inject({
         method: 'POST',
         url: `/canvas/${canvasId}/execute`,
-        payload: { commands, originator: { source: 'ui' } },
+        payload: {
+          edits: editsPerCommand(commands),
+          originator: { source: 'ui' },
+        },
       });
     }
 
@@ -151,7 +154,7 @@ forEachProductProfile((profile, label) => {
         const version = (await currentCanvas()).version;
         const forged = await execute([merge({ lastActivityAt: 1 })]);
         expect(forged.statusCode).toBe(200);
-        expect(forged.json().results[0].applied).toBe(false);
+        expect(forged.json().edits[0].results[0].applied).toBe(false);
         expect((await current()).data.lastActivityAt).toBe(ended.ts);
         expect((await currentCanvas()).version).toBe(version);
         const moved = await execute([move(100, 100)]);
@@ -555,7 +558,7 @@ forEachProductProfile((profile, label) => {
       // The patch names no node type: what the stored node is decides.
       const forged = await execute([merge({ status: 'idle' })]);
       expect(forged.statusCode).toBe(200);
-      expect(forged.json().results[0].applied).toBe(false);
+      expect(forged.json().edits[0].results[0].applied).toBe(false);
       expect((await current()).data.status).toBe('done');
       expect((await currentCanvas()).version).toBe(version);
       const merged = await executeOnServer({

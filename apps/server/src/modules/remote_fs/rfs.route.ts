@@ -55,6 +55,7 @@ import {
   rfsAgentHeadersSchema,
   rfsAgentPromptRequestSchema,
   rfsExecuteHeadersSchema,
+  rfsExecuteEditsRequestSchema,
   rfsExecuteRequestSchema,
   recentCanvasConversationParamsSchema,
   rfsUploadParamsSchema,
@@ -831,7 +832,17 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
           .code(400)
           .send(rfsError('Request body is not valid JSON.', 'invalid_json'));
       }
-      const parsed = rfsExecuteRequestSchema.safeParse(json);
+      // `{ commands }` is the documented form and is parsed exactly as
+      // before. A body that states `edits` is the same request with the
+      // edits spelled out.
+      const statesEdits =
+        json !== null &&
+        typeof json === 'object' &&
+        !Array.isArray(json) &&
+        'edits' in json;
+      const parsed = statesEdits
+        ? rfsExecuteEditsRequestSchema.safeParse(json)
+        : rfsExecuteRequestSchema.safeParse(json);
       if (!parsed.success) {
         return reply
           .code(400)
@@ -878,7 +889,8 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
           );
       }
       const operationId = parsed.data.operationId ?? parsedOperationId.data;
-      const basis = parsed.data.basis ?? parsedBasis.data;
+      const bodyBasis = 'basis' in parsed.data ? parsed.data.basis : undefined;
+      const basis = bodyBasis ?? parsedBasis.data;
       if (
         (parsedOperationId.data !== undefined &&
           parsedOperationId.data.toLowerCase() !==
@@ -922,11 +934,24 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
         return reply.send(
           await executeRfsCommands(
             params.data.canvasId,
-            {
-              ...parsed.data,
-              ...(operationId !== undefined ? { operationId } : {}),
-              ...(basis !== undefined ? { basis } : {}),
-            },
+            'edits' in parsed.data
+              ? {
+                  ...parsed.data,
+                  ...(operationId !== undefined ? { operationId } : {}),
+                  // A read version in the header is the one of every edit
+                  // that states none.
+                  edits: parsed.data.edits.map((edit) => ({
+                    ...edit,
+                    ...(edit.basis === undefined && basis !== undefined
+                      ? { basis }
+                      : {}),
+                  })),
+                }
+              : {
+                  ...parsed.data,
+                  ...(operationId !== undefined ? { operationId } : {}),
+                  ...(basis !== undefined ? { basis } : {}),
+                },
             { hostThreadId, claimedThreadId, principalId },
           ),
         );

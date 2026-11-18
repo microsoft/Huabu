@@ -11,10 +11,13 @@
 import { randomUUID } from 'node:crypto';
 import {
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
   rmSync,
+  statSync,
+  writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -33,6 +36,7 @@ import {
   type ExecuteOnServerOutput,
 } from './canvas-executor.js';
 import { subscribeCanvasUpdates } from './canvas-sync.js';
+import { expectReplayOf } from './execute-replay.test-support.js';
 import { importForeignNodeSources } from './import-node-src.js';
 import { setAgentChangeReviewConfig } from '../agent/change-review-config.js';
 import { getCanvasStore, space } from '../storage/index.js';
@@ -243,7 +247,7 @@ async function basisNow(): Promise<string> {
   return encodeBasis(stamps.lineage, stamps.version);
 }
 
-const createNote = (label: string, id?: string) => ({
+const createNote = (label: string, id?: string, content?: string) => ({
   type: 'CREATE_NODES',
   nodes: [
     {
@@ -251,7 +255,7 @@ const createNote = (label: string, id?: string) => ({
       nodeType: 'note',
       position: { x: 0, y: 900 },
       size: { width: 200, height: 100 },
-      data: { label, content: `${label} body` },
+      data: { label, content: content ?? `${label} body` },
     },
   ],
 });
@@ -274,7 +278,7 @@ describe('request ids', () => {
     expect(first.operationId).toBe(request.operationId);
     expect(first.runId).toEqual(expect.any(String));
     expect(first.results[0]?.nodes).toHaveLength(1);
-    expect(second).toEqual({ ...first, replayed: true });
+    expectReplayOf(first, second);
     expect(second.results[0]?.nodes?.[0]?.nodeId).toBe(
       first.results[0]?.nodes?.[0]?.nodeId,
     );
@@ -359,7 +363,7 @@ describe('request ids', () => {
     await run(cmds(createNote('Ghost', 'ghost')));
     const second = await run(command, { request });
 
-    expect(second).toEqual({ ...first, replayed: true });
+    expectReplayOf(first, second);
     expect((await nodesNow()).map((node) => node.id)).toContain('ghost');
     expect(await versionNow()).toBe(2);
     expect(events).toHaveLength(1);
@@ -382,7 +386,7 @@ describe('request ids', () => {
     });
 
     const second = await run(command, { request, originator: AGENT });
-    expect(second).toEqual({ ...first, replayed: true });
+    expectReplayOf(first, second);
     expect(await versionNow()).toBe(1);
     expect(events).toHaveLength(0);
   });
@@ -419,7 +423,8 @@ describe('request ids', () => {
     expect(outputs.filter((output) => output.replayed)).toHaveLength(2);
     const [original] = outputs.filter((output) => !output.replayed);
     for (const output of outputs) {
-      expect(output).toEqual({ ...original, replayed: output.replayed });
+      if (output.replayed) expectReplayOf(original as typeof output, output);
+      else expect(output).toBe(original);
     }
     expect(await nodesNow()).toHaveLength(6);
     expect(deltaRows()).toHaveLength(1);
@@ -450,7 +455,7 @@ describe('request ids', () => {
     expect(await nodesNow()).toHaveLength(6);
   });
 
-  it('saves without a result record when the response is too large', async () => {
+  it('stores a small outcome for a request that changed megabytes, and replays it', async () => {
     seed();
     const request = requestOf();
     const big = {
@@ -464,8 +469,54 @@ describe('request ids', () => {
 
     expect(out.toVersion).toBe(2);
     expect(out.operationId).toBe(request.operationId);
-    expect(await space(CANVAS).save.lookup(request)).toBeNull();
-    expect(resultFiles()).toEqual([]);
+    // The record holds what became of the request, not what it changed.
+    const stored = await space(CANVAS).save.lookup(request);
+    expect(stored).not.toBeNull();
+    expect(JSON.stringify(stored?.response).length).toBeLessThan(2_000);
+    expect(resultFiles()).toHaveLength(1);
+
+    const again = await run(cmds(big), { request });
+    expectReplayOf(out, again);
+    expect(await versionNow()).toBe(2);
+  });
+
+  it('still stores an outcome when the command echo alone exceeds a record, so a retry does not execute again', async () => {
+    seed();
+    const request = requestOf();
+    // An Agent request whose response echoes its commands: two bodies of
+    // 2.5 MiB make that echo larger than a result record may be.
+    const body = (letter: string) => letter.repeat(2.5 * 1024 * 1024);
+    const commands = cmds(
+      createNote('Big one', 'big-1', body('a')),
+      createNote('Big two', 'big-2', body('b')),
+    );
+    const input = { request, originator: AGENT, echoCommands: true };
+
+    const first = await run(commands, input);
+    expect(first.toVersion).toBe(2);
+    expect(first.results.map((result) => result.applied)).toEqual([true, true]);
+
+    const stored = await space(CANVAS).save.lookup(request);
+    expect(stored).not.toBeNull();
+    const outcome = stored?.response as {
+      incomplete?: boolean;
+      commands?: unknown;
+      edits: { applied: boolean }[];
+    };
+    expect(outcome.incomplete).toBe(true);
+    expect(outcome.commands).toBeUndefined();
+    expect(outcome.edits.map((edit) => edit.applied)).toEqual([true, true]);
+    expect(JSON.stringify(outcome).length).toBeLessThan(4_000);
+
+    // The retry is answered, not executed: same version, same two notes.
+    const nodesBefore = (await nodesNow()).length;
+    const second = await run(commands, input);
+    expect(second.replayed).toBe(true);
+    expect(second.outcome?.incomplete).toBe(true);
+    expect(second.toVersion).toBe(2);
+    expect(second.edits).toEqual(first.edits);
+    expect(await versionNow()).toBe(2);
+    expect(await nodesNow()).toHaveLength(nodesBefore);
   });
 });
 
@@ -527,7 +578,7 @@ describe('storage failures with a request id', () => {
     expect(events).toHaveLength(1);
 
     const second = await run(cmds(createNote('New')), { request });
-    expect(second).toEqual({ ...first, replayed: true });
+    expectReplayOf(first, second);
     expect(await nodesNow()).toHaveLength(6);
     expect(events).toHaveLength(1);
   });
@@ -566,7 +617,7 @@ describe('storage failures with a request id', () => {
     expect(first.replayed).toBeUndefined();
     expect(first.results).toMatchObject([{ applied: false }]);
     faults.record = null;
-    expect(await run(ghost, { request })).toEqual({ ...first, replayed: true });
+    expectReplayOf(first, await run(ghost, { request }));
 
     // Cannot tell: unknown.
     faults.record = () => {
@@ -988,7 +1039,7 @@ describe('Review records', () => {
     const first = await run(cmds(createNote('New')), input);
     const second = await run(cmds(createNote('New')), input);
 
-    expect(second).toEqual({ ...first, replayed: true });
+    expectReplayOf(first, second);
     expect(await storedChanges()).toEqual(first.changes);
     expect(events).toHaveLength(1);
   });
@@ -1106,5 +1157,60 @@ describe('sibling order in the update notification', () => {
     expect(moved.toVersion).toBe(3);
     expect(moved).not.toHaveProperty('orderEvents');
     expect(events[1]?.data).not.toHaveProperty('orderEvents');
+  });
+});
+
+describe('the delta log on Disk', () => {
+  const logPath = () => join(tmp, CANVAS, '.history', 'delta-log.jsonl');
+
+  it('cuts a log left over from before the bound on the next write, and keeps recovery working', async () => {
+    seed();
+    // 6 MiB of rows as they used to be written: whole nodes, never pruned.
+    mkdirSync(join(tmp, CANVAS, '.history'), { recursive: true });
+    const old = (version: number) =>
+      JSON.stringify({
+        version,
+        ts: version,
+        commands: [{ type: 'MERGE_NODE_DATA' }],
+        deltas: [{ type: 'REPLACE_NODE', body: 'x'.repeat(60_000) }],
+        originator: { source: 'agent' },
+      });
+    writeFileSync(
+      logPath(),
+      Array.from({ length: 100 }, (_, index) => `${old(index - 500)}\n`).join(
+        '',
+      ),
+    );
+    expect(statSync(logPath()).size).toBeGreaterThan(5 * 1024 * 1024);
+
+    const out = await run(cmds(createNote('After the cut')));
+    expect(out.toVersion).toBe(2);
+
+    // At most half the byte limit of old rows, plus the new one, which is
+    // last: the row crash recovery looks for.
+    expect(statSync(logPath()).size).toBeLessThan(2 * 1024 * 1024 + 4096);
+    const rows = deltaRows();
+    expect(rows.length).toBeLessThan(40);
+    expect(rows[rows.length - 1]?.version).toBe(2);
+    // Whole rows only: the cut never leaves a torn first line.
+    expect(rows.every((row) => typeof row.version === 'number')).toBe(true);
+
+    // The next writes append to the cut log.
+    await run(cmds(createNote('And again')));
+    expect(deltaRows()[deltaRows().length - 1]?.version).toBe(3);
+  });
+
+  it('journals which commands ran and what changed, not the commands themselves', async () => {
+    seed();
+    const body = 'created body '.repeat(200);
+    await run(cmds(createNote('Journalled', 'journalled', body)));
+    const [row] = deltaRows() as unknown as Array<{
+      commands: unknown[];
+      deltas: Array<{ type: string }>;
+    }>;
+    expect(row?.commands).toEqual([{ type: 'CREATE_NODES' }]);
+    expect(row?.deltas.map((delta) => delta.type)).toEqual(['INSERT_NODE']);
+    // The created body is in the row once, in the inserted node.
+    expect(readFileSync(logPath(), 'utf8').split(body).length - 1).toBe(1);
   });
 });

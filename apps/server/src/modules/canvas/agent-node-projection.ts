@@ -10,6 +10,7 @@ import {
 import {
   applyDeltasOnServerAlreadyLocked,
   hydrateCanvasNodes,
+  toWirePendingEffects,
 } from './canvas-executor.js';
 import { publishCanvasUpdate } from './canvas-sync.js';
 import { withCanvasMutex } from './write-coordinator.js';
@@ -104,7 +105,7 @@ export async function projectAgentNodeStateAlreadyLocked(
         fromVersion: output.fromVersion,
         toVersion: output.toVersion,
         deltas: output.deltas,
-        pendingEffects: output.pendingEffects,
+        pendingEffects: toWirePendingEffects(output.pendingEffects),
         ...(output.nodeContentRevisions
           ? { nodeContentRevisions: output.nodeContentRevisions }
           : {}),

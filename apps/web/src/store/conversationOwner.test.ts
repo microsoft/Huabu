@@ -95,10 +95,9 @@ beforeEach(() => {
     fromVersion: 1,
     toVersion: 2,
     deltas: [],
-    results: [{ command: {}, applied: true }],
-    commands: [],
+    edits: [{ applied: true, results: [{ applied: true }] }],
     pendingEffects: {
-      mutatedNodes: [],
+      mutatedNodeIds: [],
       deletedNodeIds: [],
       contentEditedNodeIds: [],
       deferredFitFrameIds: [],
@@ -319,7 +318,9 @@ describe('conversation owner routing', () => {
       spaceTitle: 'Draft',
       source: { agentBinding: { kind: 'internal' } },
     });
-    postCanvasExecute.mockResolvedValueOnce({ results: [{ applied: false }] });
+    postCanvasExecute.mockResolvedValueOnce({
+      edits: [{ applied: false, failedAt: 0, results: [{ applied: false }] }],
+    });
     await expect(
       saveConversationDraft(view, {
         agentBinding: { kind: 'internal' },
@@ -373,9 +374,9 @@ describe('conversation owner routing', () => {
       fromVersion: 1,
       toVersion: 2,
       deltas: [{ type: 'REPLACE_NODE', prev: before, next: after }],
-      results: [{ applied: true }],
+      edits: [{ applied: true, results: [{ applied: true }] }],
       pendingEffects: {
-        mutatedNodes: [],
+        mutatedNodeIds: [],
         deletedNodeIds: [],
         contentEditedNodeIds: [],
         deferredFitFrameIds: [],
@@ -392,7 +393,7 @@ describe('conversation owner routing', () => {
       }),
     ).toEqual(binding);
     expect(
-      postCanvasExecute.mock.calls[0][1].commands[0].patches[0].patch,
+      postCanvasExecute.mock.calls[0][1].edits[0].commands[0].patches[0].patch,
     ).toEqual({
       agentBinding: binding,
       agentMode: 'ask',
@@ -440,7 +441,7 @@ describe('conversation owner routing', () => {
       agentMode: 'operate',
     });
     await vi.waitFor(() => expect(postCanvasExecute).toHaveBeenCalledTimes(1));
-    expect(postCanvasExecute.mock.calls[0][1].commands[0].type).toBe(
+    expect(postCanvasExecute.mock.calls[0][1].edits[0].commands[0].type).toBe(
       'CREATE_NODES',
     );
     // A refusal, not a transport failure: the queue repeats the latter with
@@ -524,7 +525,7 @@ describe('conversation owner routing', () => {
       '  /work/project  ',
     );
     expect(
-      postCanvasExecute.mock.calls[0][1].commands[0].patches[0].patch,
+      postCanvasExecute.mock.calls[0][1].edits[0].commands[0].patches[0].patch,
     ).toEqual({
       agentLaunchOverrides: {
         additionalInitialPreamble: 'Keep this instruction.',
@@ -551,7 +552,7 @@ describe('conversation owner routing', () => {
     });
     await saveConversationWorkingDirectoryOverride(ownerView, null);
     expect(
-      postCanvasExecute.mock.calls[1][1].commands[0].patches[0].patch,
+      postCanvasExecute.mock.calls[1][1].edits[0].commands[0].patches[0].patch,
     ).toEqual({ agentLaunchOverrides: null });
   });
 
@@ -603,18 +604,21 @@ describe('conversation owner routing', () => {
 
     expect(useCanvasStore.getState().nodes[0]).toBe(before);
     expect(postCanvasExecute).toHaveBeenCalledWith('canvas-source', {
-      commands: [
+      edits: [
         {
-          type: 'MERGE_NODE_DATA',
-          patches: [
+          commands: [
             {
-              nodeId: 'node-source',
-              patch: { agentMode: 'operate' },
+              type: 'MERGE_NODE_DATA',
+              patches: [
+                {
+                  nodeId: 'node-source',
+                  patch: { agentMode: 'operate' },
+                },
+              ],
             },
           ],
         },
       ],
-      originator: { source: 'ui' },
     });
   });
 
@@ -782,10 +786,9 @@ describe('conversation owner routing', () => {
             },
           },
         ],
-        results: [{ command: {}, applied: true }],
-        commands: [],
+        edits: [{ applied: true, results: [{ applied: true }] }],
         pendingEffects: {
-          mutatedNodes: [],
+          mutatedNodeIds: [],
           deletedNodeIds: [],
           contentEditedNodeIds: [],
           deferredFitFrameIds: [],
@@ -811,10 +814,9 @@ describe('conversation owner routing', () => {
                 fromVersion: 1,
                 toVersion: 2,
                 deltas: [],
-                results: [{ command: {}, applied: true }],
-                commands: [],
+                edits: [{ applied: true, results: [{ applied: true }] }],
                 pendingEffects: {
-                  mutatedNodes: [],
+                  mutatedNodeIds: [],
                   deletedNodeIds: [],
                   contentEditedNodeIds: [],
                   deferredFitFrameIds: [],
@@ -827,10 +829,9 @@ describe('conversation owner routing', () => {
         fromVersion: 2,
         toVersion: 3,
         deltas: [],
-        results: [{ command: {}, applied: true }],
-        commands: [],
+        edits: [{ applied: true, results: [{ applied: true }] }],
         pendingEffects: {
-          mutatedNodes: [],
+          mutatedNodeIds: [],
           deletedNodeIds: [],
           contentEditedNodeIds: [],
           deferredFitFrameIds: [],
@@ -848,9 +849,13 @@ describe('conversation owner routing', () => {
 
     expect(postCanvasExecute).toHaveBeenCalledTimes(2);
     expect(postCanvasExecute.mock.calls[1]?.[1]).toMatchObject({
-      commands: [
+      edits: [
         {
-          patches: [{ patch: { agentMode: 'operate' } }],
+          commands: [
+            {
+              patches: [{ patch: { agentMode: 'operate' } }],
+            },
+          ],
         },
       ],
     });

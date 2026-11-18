@@ -7,6 +7,7 @@ import { dedupeName, toSafeFilename } from '../../utils/naming.js';
 import {
   applyDeltasOnServerAlreadyLocked,
   hydrateCanvasNodes,
+  toWirePendingEffects,
 } from '../canvas/canvas-executor.js';
 import { publishCanvasUpdate } from '../canvas/canvas-sync.js';
 import { withCanvasMutex } from '../canvas/write-coordinator.js';
@@ -122,7 +123,7 @@ export const conversationTitleNodeStore = {
             fromVersion: output.fromVersion,
             toVersion: output.toVersion,
             deltas: output.deltas,
-            pendingEffects: output.pendingEffects,
+            pendingEffects: toWirePendingEffects(output.pendingEffects),
             ...(output.nodeContentRevisions
               ? { nodeContentRevisions: output.nodeContentRevisions }
               : {}),

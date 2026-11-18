@@ -11,6 +11,8 @@ import {
   type Route,
 } from '@playwright/test';
 
+import { editsPerCommand } from './helpers';
+
 import type * as CanvasStore from '../src/store/canvasStore';
 import type { CreateCanvasResponse } from '@huabu/shared';
 
@@ -60,7 +62,7 @@ async function seedSpace(request: APIRequestContext) {
   });
   const seeded = await request.post(`/api/canvas/${canvasId}/execute`, {
     data: {
-      commands: [
+      edits: editsPerCommand([
         {
           type: 'CREATE_NODES',
           nodes: [
@@ -90,7 +92,7 @@ async function seedSpace(request: APIRequestContext) {
             },
           ],
         },
-      ],
+      ]),
       originator: { source: 'ui', tabId: 'e2e-sync-convergence-seed' },
     },
   });
@@ -180,9 +182,13 @@ test('closing with only an unanswered measured box does not ask to stay; an unse
   const batches: string[][] = [];
   await device.context.route('**/api/canvas/*/execute', async (route) => {
     const body = route.request().postDataJSON() as {
-      commands: Array<{ type: string }>;
+      edits: Array<{ commands: Array<{ type: string }> }>;
     };
-    batches.push(body.commands.map((command) => command.type));
+    batches.push(
+      body.edits.flatMap((edit) =>
+        edit.commands.map((command) => command.type),
+      ),
+    );
     held.push(route);
   });
   await device.open();
@@ -416,12 +422,12 @@ for (const change of ['body', 'move'] as const) {
       // A move advances the Space version.
       const moved = await request.post(`/api/canvas/${canvasId}/execute`, {
         data: {
-          commands: [
+          edits: editsPerCommand([
             {
               type: 'SET_NODE_GEOMETRY',
               items: [{ nodeId: Y, position: { x: 40, y: 480 } }],
             },
-          ],
+          ]),
           originator: { source: 'ui', tabId: 'e2e-another-page' },
         },
       });

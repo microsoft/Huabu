@@ -24,11 +24,12 @@
  *    `applyServerDeltas`, gated on `fromVersion === local version`.
  *    A Space rename also publishes one, with no deltas and the new `title`.
  *
- * `deltas` / `pendingEffects.mutatedNodes` are modelled as `unknown` on
- * the wire — they mirror the same loosely-typed payload already used by
- * `PostCanvasExecuteResponse` (the engine `Delta` / `CanvasNode` shapes
- * live in the canvas-engine module, not the API layer). The web client
- * casts them back when handing off to `applyServerDeltas`.
+ * `deltas` are modelled as `unknown` on the wire — they mirror the same
+ * loosely-typed payload already used by `PostCanvasExecuteResponse` (the
+ * engine `Delta` shape lives in the canvas-engine module, not the API
+ * layer). The web client casts them back when handing off to
+ * `applyServerDeltas`. A node row names only the fields that changed; a
+ * deletion names the node's id.
  */
 
 import { z } from 'zod';
@@ -55,8 +56,11 @@ export const canvasPageIdSchema = z
   .regex(/^[a-zA-Z0-9_-]+$/, 'Invalid page ID');
 
 export const canvasSyncPendingEffectsSchema = z.object({
-  /** Final post-execution snapshots of nodes that were created or edited. */
-  mutatedNodes: z.array(z.unknown()),
+  /**
+   * Ids of the nodes the batch created or whose `data` it changed. The
+   * receiving page reads them from its own state once `deltas` are applied.
+   */
+  mutatedNodeIds: z.array(z.string()),
   deletedNodeIds: z.array(z.string()),
   contentEditedNodeIds: z.array(z.string()),
   deferredFitFrameIds: z.array(z.string()),

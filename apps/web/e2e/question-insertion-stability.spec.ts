@@ -3,7 +3,7 @@
 
 import { expect, test } from '@playwright/test';
 
-import { openNewCanvas } from './helpers';
+import { openNewCanvas, editsPerCommand } from './helpers';
 
 import type * as StoreModule from '../src/store/canvasStore';
 
@@ -22,7 +22,7 @@ for (const { nodeType, peerHeight } of (
     const canvasId = new URL(page.url()).pathname.split('/canvas/')[1];
     const seeded = await page.request.post(`/api/canvas/${canvasId}/execute`, {
       data: {
-        commands: [
+        edits: editsPerCommand([
           {
             type: 'CREATE_NODES',
             nodes: [
@@ -58,7 +58,7 @@ for (const { nodeType, peerHeight } of (
               },
             ],
           },
-        ],
+        ]),
         originator: { source: 'ui' },
       },
     });

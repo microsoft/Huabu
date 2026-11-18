@@ -161,7 +161,7 @@ describe('canvasSyncStore stream recovery', () => {
       toVersion: 2,
       deltas: [],
       pendingEffects: {
-        mutatedNodes: [],
+        mutatedNodeIds: [],
         deletedNodeIds: [],
         contentEditedNodeIds: [],
         deferredFitFrameIds: [],
@@ -209,7 +209,7 @@ describe('canvasSyncStore stream recovery', () => {
       toVersion: 2,
       deltas: [],
       pendingEffects: {
-        mutatedNodes: [],
+        mutatedNodeIds: [],
         deletedNodeIds: [],
         contentEditedNodeIds: [],
         deferredFitFrameIds: [],
@@ -285,7 +285,7 @@ describe('canvasSyncStore stream recovery', () => {
             toVersion: 2,
             deltas: [],
             pendingEffects: {
-              mutatedNodes: [],
+              mutatedNodeIds: [],
               deletedNodeIds: [],
               contentEditedNodeIds: [],
               deferredFitFrameIds: [],

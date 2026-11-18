@@ -9,6 +9,7 @@ import {
   readViewportTransform,
   scaleOf,
   translateOf,
+  editsPerCommand,
 } from './helpers';
 
 import type * as PanelModule from '../src/store/panelStore';
@@ -602,7 +603,7 @@ test.describe('canvas mouse mode', () => {
       `/api/canvas/${canvasId}/execute`,
       {
         data: {
-          commands: [
+          edits: editsPerCommand([
             {
               type: 'CREATE_NODES',
               nodes: [
@@ -617,7 +618,7 @@ test.describe('canvas mouse mode', () => {
                 },
               ],
             },
-          ],
+          ]),
           originator: { source: 'agent', threadId: 'e2e-lasso-audio-seek' },
         },
       },

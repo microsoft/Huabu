@@ -15,7 +15,7 @@ const update = (toVersion: number): CanvasSyncEvent => ({
     toVersion,
     deltas: [],
     pendingEffects: {
-      mutatedNodes: [],
+      mutatedNodeIds: [],
       deletedNodeIds: [],
       contentEditedNodeIds: [],
       deferredFitFrameIds: [],

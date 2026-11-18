@@ -5,7 +5,7 @@ import multipart from '@fastify/multipart';
 import fastify from 'fastify';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { createId } from '@huabu/shared';
+import { createId, editsPerCommand } from '@huabu/shared';
 
 import { agenetes } from './agenetes/drivers.js';
 import { buildHuabuPiWorkloadSpec } from './agenetes/pi-driver.js';
@@ -482,12 +482,12 @@ forEachProductProfile((profile, label) => {
           url: `/canvas/${target.canvasId}/execute`,
           payload: {
             originator: { source: 'ui' },
-            commands: [
+            edits: editsPerCommand([
               {
                 type: 'SET_NODE_GEOMETRY',
                 items: [{ nodeId: target.nodeId, position: { x: 42, y: 0 } }],
               },
-            ],
+            ]),
           },
         });
         expect(response.statusCode, response.body).toBe(200);

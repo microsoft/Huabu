@@ -193,7 +193,7 @@ export function registerSpaceCardRoutes(app: FastifyInstance): void {
               toVersion: record.version,
               deltas: [],
               pendingEffects: {
-                mutatedNodes: [],
+                mutatedNodeIds: [],
                 deletedNodeIds: [],
                 contentEditedNodeIds: [],
                 deferredFitFrameIds: [],

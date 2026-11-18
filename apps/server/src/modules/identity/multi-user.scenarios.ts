@@ -8,6 +8,8 @@ import { InMemoryBubbleStore } from '@octostaff/bubble';
 import Fastify from 'fastify';
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { editsPerCommand } from '@huabu/shared';
+
 import { openBubbleIdentity } from './bubble.js';
 import { registerIdentity } from './http.js';
 import peopleRoutes from './people.route.js';
@@ -523,7 +525,7 @@ export function describeSeveralPeople(
       ).toMatchObject({ title: 'Root', version: before.version });
       const saved = await call('dave', 'POST', `/api/canvas/${id}/execute`, {
         originator: { source: 'ui' },
-        commands: [
+        edits: editsPerCommand([
           {
             type: 'CREATE_NODES',
             nodes: [
@@ -535,7 +537,7 @@ export function describeSeveralPeople(
               },
             ],
           },
-        ],
+        ]),
       });
       expect(saved.status).toBe(200);
       expect(saved.body.toVersion).toBe(before.version + 1);

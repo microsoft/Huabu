@@ -3,7 +3,7 @@
 
 import { expect, test } from '@playwright/test';
 
-import { openNewCanvas } from './helpers';
+import { openNewCanvas, editsPerCommand } from './helpers';
 
 import type * as ProfilesStore from '../src/store/acpProfilesStore';
 import type * as CanvasStore from '../src/store/canvasStore';
@@ -209,7 +209,7 @@ test('empty splits persist and canvas double-clicks follow the last interacted g
     });
   const response = await page.request.post(`/api/canvas/${canvasId}/execute`, {
     data: {
-      commands: [
+      edits: editsPerCommand([
         {
           type: 'CREATE_NODES',
           nodes: positions.map((position, index) => ({
@@ -222,7 +222,7 @@ test('empty splits persist and canvas double-clicks follow the last interacted g
             size: { width: 300, height: 200 },
           })),
         },
-      ],
+      ]),
       originator: { source: 'agent', threadId: 'e2e-preview-groups' },
     },
   });

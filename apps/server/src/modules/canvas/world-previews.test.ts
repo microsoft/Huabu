@@ -15,6 +15,7 @@ import path from 'node:path';
 import Fastify from 'fastify';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { editsPerCommand } from '@huabu/shared';
 import {
   COMMAND_META,
   extractCanvasChanges,
@@ -427,7 +428,7 @@ describe('World preview reconciliation', () => {
         const result = await execute({ ...input, commands: [] });
         return {
           ...result,
-          results: input.commands.map((command) => ({
+          results: (input.commands ?? []).map((command) => ({
             command,
             applied: false,
           })),
@@ -804,10 +805,13 @@ describe('Canonical canvas write boundaries', () => {
             const response = await app.inject({
               method: 'POST',
               url: `/canvas/${canvasId}/execute`,
-              payload: { commands: [command], originator: { source: 'ui' } },
+              payload: {
+                edits: editsPerCommand([command]),
+                originator: { source: 'ui' },
+              },
             });
             if (response.statusCode === 200) {
-              expect(response.json().results[0].applied).toBe(false);
+              expect(response.json().edits[0].results[0].applied).toBe(false);
               expect(response.json().toVersion).toBe(before?.version);
             } else {
               expect(response.statusCode).toBe(409);
@@ -845,12 +849,12 @@ describe('Canonical canvas write boundaries', () => {
         url: '/canvas/canvas-a/execute',
         payload: {
           originator: { source: 'ui' },
-          commands: [
+          edits: editsPerCommand([
             {
               type: 'SET_NODE_GEOMETRY',
               items: [{ nodeId: node.id, position: { x: 9, y: 9 } }],
             },
-          ],
+          ]),
         },
       });
       expect(moved.statusCode).toBe(409);

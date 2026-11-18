@@ -1050,7 +1050,11 @@ type RFState = {
     deltas: Delta[],
     toVersion: number,
     pendingEffects: {
-      mutatedNodes: Node[];
+      /**
+       * Ids of the nodes the batch created or whose `data` it changed; they
+       * are read from this page's state once the deltas are applied.
+       */
+      mutatedNodeIds: string[];
       deletedNodeIds: string[];
       contentEditedNodeIds: string[];
       deferredFitFrameIds: string[];
@@ -1739,13 +1743,13 @@ async function persistFrameHeaderMigration(
   );
   if (commands.length === 0) return false;
   try {
+    // One migration, one edit: the header shift is taken whole or not at
+    // all, never for some Frames only.
     const response = await postCanvasExecute(canvasId, {
-      commands,
-      originator: { source: 'ui', tabId: SYNC_CLIENT_ID },
+      originator: { tabId: SYNC_CLIENT_ID },
+      edits: [{ commands }],
     });
-    return response.results.every(
-      (result) => result.applied || result.reason === 'no-op',
-    );
+    return response.edits.every((edit) => edit.applied);
   } catch (error) {
     console.warn('Frame header update deferred:', error);
     return false;
@@ -1828,9 +1832,9 @@ const browserSync = createBrowserSync({
   },
   applyOwnResponse: (response, operationId) => {
     useCanvasStore.getState().applyServerDeltas(
-      response.deltas as Delta[],
+      (response.deltas ?? []) as Delta[],
       response.toVersion,
-      response.pendingEffects as Parameters<RFState['applyServerDeltas']>[2],
+      response.pendingEffects,
       false,
       {
         events: response.orderEvents,
@@ -2245,6 +2249,13 @@ function pointerGestureActive(): boolean {
 }
 
 /** Apply what a server update changed to the open gesture's starting point. */
+/** The nodes of `nodes` named by `ids`, in the order of `nodes`. */
+function nodesById(nodes: readonly Node[], ids: readonly string[]): Node[] {
+  if (ids.length === 0) return [];
+  const wanted = new Set(ids);
+  return nodes.filter((node) => wanted.has(node.id));
+}
+
 function rebaseGestureBaseline(deltas: readonly Delta[]): void {
   if (!syncGestureBaseline) return;
   const changes = new Map(
@@ -3125,11 +3136,11 @@ function sendRestore(
     canvasId,
     commands,
     ...held,
-    onSettled: (outcome, offset) => {
+    onSettled: (outcome, edit) => {
       // Answered either way: a refusal is followed by a reload.
       const results =
         outcome.kind === 'response'
-          ? outcome.response.results.slice(offset, offset + commands.length)
+          ? outcome.response.edits[edit]?.results
           : undefined;
       const returned = new Set<string>();
       commands.forEach((command, index) => {
@@ -3151,12 +3162,11 @@ function sendRestore(
       if (outcome.kind === 'failed') throw outcome.error;
       if (outcome.kind === 'discarded')
         throw new Error('The restore was discarded before it was sent');
-      const refused = outcome.response.results
-        .slice(restore.offset, restore.offset + commands.length)
-        .some(
-          (result, index) =>
-            commands[index].type === 'RESTORE_NODES' && !result.applied,
-        );
+      const results = outcome.response.edits[restore.edit]?.results ?? [];
+      const refused = commands.some(
+        (command, index) =>
+          command.type === 'RESTORE_NODES' && !results[index]?.applied,
+      );
       if (refused) throw new Error('The node could not be restored');
     });
     for (const node of restoredNodes) {
@@ -3632,10 +3642,7 @@ const useCanvasStore = create<RFState>()(
           return fork ? [fork] : [];
         });
         // Whether the server took every node this batch created.
-        const creationError = (
-          outcome: SendOutcome,
-          offset: number,
-        ): unknown => {
+        const creationError = (outcome: SendOutcome, edit: number): unknown => {
           if (outcome.kind === 'failed') return outcome.error;
           if (outcome.kind === 'discarded')
             return new Error('Creation was discarded before it was sent');
@@ -3654,13 +3661,13 @@ const useCanvasStore = create<RFState>()(
             // command to acknowledge.
             if (index < 0) continue;
             const result =
-              outcome.response.results[offset + prelude.length + index];
+              outcome.response.edits[edit]?.results[prelude.length + index];
             if (!result?.applied)
               return new Error('Node creation was not acknowledged');
           }
           return undefined;
         };
-        const { entry, offset } = browserSync.submit({
+        const { entry, edit: sentEdit } = browserSync.submit({
           canvasId: state.canvasId,
           commands: [...prelude, ...forServer.commands],
           prev: syncView(gestureBaseline ?? state.nodes, state.edges),
@@ -3691,7 +3698,7 @@ const useCanvasStore = create<RFState>()(
                   pending.toVersion = outcome.response.toVersion;
               }
             }
-            const error = creationError(outcome, offset);
+            const error = creationError(outcome, sentEdit);
             if (error !== undefined) throw error;
           });
           for (const node of createdNodes) {
@@ -4238,14 +4245,17 @@ const useCanvasStore = create<RFState>()(
               deferredFitFrameIds: [],
             }
           : {
+              // The nodes as this page holds them now that the batch is
+              // applied; the update names them by id.
               mutatedNodes:
                 sync?.source === 'ui'
                   ? []
-                  : skipped.size === 0
-                    ? pendingEffects.mutatedNodes
-                    : pendingEffects.mutatedNodes.filter(
-                        (n) => !skipped.has(n.id),
+                  : nodesById(
+                      get().nodes,
+                      pendingEffects.mutatedNodeIds.filter(
+                        (id) => !skipped.has(id),
                       ),
+                    ),
               deletedNodeIds:
                 skipped.size === 0
                   ? pendingEffects.deletedNodeIds

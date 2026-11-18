@@ -42,7 +42,7 @@ import useCanvasStore, {
   resetCanvasSyncForTests,
   setCanvasSyncLineageForTests,
 } from './canvasStore';
-import { RELOAD_RETRY } from './canvasStore/sync/browserSync';
+import { ECHO_TIMEOUT_MS, RELOAD_RETRY } from './canvasStore/sync/browserSync';
 import { DEFAULT_SEND_RETRY } from './canvasStore/sync/sendQueue';
 import { useCanvasSyncStatusStore } from './canvasStore/sync/syncStatus';
 import {
@@ -140,11 +140,40 @@ function deliver(update: PostCanvasExecuteResponse, source: 'ui' | 'agent') {
 /** Another page (or an agent) writes; the server commits it at once. */
 function remote(commands: CanvasCommand[]): PostCanvasExecuteResponse {
   return server.execute(SPACE, {
-    commands,
-    originator: { source: 'ui', tabId: 'page-b' },
     operationId: crypto.randomUUID(),
+    originator: { tabId: 'page-b' },
+    edits: [{ commands }],
   });
 }
+/** A request's commands in order, across its edits. */
+const commandsOf = (request: PostCanvasExecuteRequest): unknown[] =>
+  request.edits.flatMap((edit) => edit.commands);
+/** What each edit of a request says it was made on: `basis` and `after`. */
+const readsOf = (request: PostCanvasExecuteRequest) =>
+  request.edits.map(({ commands: _commands, ...read }) => read);
+/** An answer in which the server wrote nothing. */
+function unchanged(
+  version: number,
+  edits: PostCanvasExecuteResponse['edits'],
+): PostCanvasExecuteResponse {
+  return {
+    canvasId: SPACE,
+    fromVersion: version,
+    toVersion: version,
+    deltas: [],
+    edits,
+    pendingEffects: {
+      mutatedNodeIds: [],
+      deletedNodeIds: [],
+      contentEditedNodeIds: [],
+      deferredFitFrameIds: [],
+    },
+  };
+}
+/** One edit of one command that the engine answered as a no-op. */
+const NO_OP_EDIT: PostCanvasExecuteResponse['edits'] = [
+  { applied: true, results: [{ applied: false, reason: 'no-op' }] },
+];
 /** The server stores a body a page saved through the content request. */
 function saveOnServer(nodeId: string, content: string) {
   const { nodes, edges, version } = server.state;
@@ -235,14 +264,19 @@ describe('sending a local edit', () => {
     moveHere(X, 500);
     expect(node(X).position).toEqual({ x: 500, y: 0 });
     expect(own).toHaveLength(1);
-    expect(own[0].request.commands).toEqual([moveCommand(X, 500)]);
+    expect(commandsOf(own[0].request)).toEqual([moveCommand(X, 500)]);
     expect(own[0].request.operationId).toMatch(/^[0-9a-f-]{36}$/);
-    expect(own[0].request.originator.source).toBe('ui');
-    expect(own[0].request.originator.tabId).toBeTruthy();
-    // One run per batch, quoting the version this page had applied.
+    // The page says which page it is, not what kind of writer it is.
+    expect(own[0].request.originator).toEqual({
+      tabId: expect.stringMatching(/.+/),
+    });
+    // One edit per batch, quoting the version this page had applied; the
+    // request is its edits and nothing beside them.
     expect(own[0].request).not.toHaveProperty('basis');
-    expect(own[0].request.runs).toEqual([
-      { start: 0, count: 1, basis: basisAt(1) },
+    expect(own[0].request).not.toHaveProperty('commands');
+    expect(own[0].request).not.toHaveProperty('runs');
+    expect(own[0].request.edits).toEqual([
+      { basis: basisAt(1), commands: [moveCommand(X, 500)] },
     ]);
     expect(hasUnsavedCanvasEdits()).toBe(true);
 
@@ -265,7 +299,7 @@ describe('sending a local edit', () => {
     // A patch that mixes both is sent without the content fields.
     state().updateNodeData(X, { label: 'Renamed', style: { accent: 'blue' } });
     expect(own).toHaveLength(1);
-    expect(own[0].request.commands).toEqual([accentCommand(X, 'blue')]);
+    expect(commandsOf(own[0].request)).toEqual([accentCommand(X, 'blue')]);
   });
 
   it('creates a node under the id this page already shows', async () => {
@@ -277,7 +311,7 @@ describe('sending a local edit', () => {
     const created = state().nodes.find((n) => n.id !== X && n.id !== Y);
     expect(created).toBeDefined();
     expect(created?.selected).toBe(true);
-    const sent = own[0].request.commands[0] as Extract<
+    const sent = commandsOf(own[0].request)[0] as Extract<
       CanvasCommand,
       { type: 'CREATE_NODES' }
     >;
@@ -304,7 +338,7 @@ describe('sending a local edit', () => {
     });
     const [edge] = state().edges;
     expect(edge).toBeDefined();
-    const sent = own[0].request.commands[0] as Extract<
+    const sent = commandsOf(own[0].request)[0] as Extract<
       CanvasCommand,
       { type: 'CONNECT_NODES' }
     >;
@@ -363,7 +397,7 @@ describe('receiving while a local change is in flight', () => {
     await answer(0, first);
     expect(node(X).position).toEqual({ x: 200, y: 0 });
     expect(own).toHaveLength(2);
-    expect(own[1].request.commands).toEqual([moveCommand(X, 200)]);
+    expect(commandsOf(own[1].request)).toEqual([moveCommand(X, 200)]);
 
     await answer(1);
     expect(state().version).toBe(3);
@@ -388,26 +422,7 @@ describe('receiving while a local change is in flight', () => {
     expect(accentOf(node(X))).toBe('red');
 
     // The server answers that this page's batch wrote nothing.
-    await answer(0, {
-      canvasId: SPACE,
-      fromVersion: 2,
-      toVersion: 2,
-      deltas: [],
-      results: [
-        {
-          command: own[0].request.commands[0],
-          applied: false,
-          reason: 'no-op',
-        },
-      ],
-      commands: own[0].request.commands,
-      pendingEffects: {
-        mutatedNodes: [],
-        deletedNodeIds: [],
-        contentEditedNodeIds: [],
-        deferredFitFrameIds: [],
-      },
-    });
+    await answer(0, unchanged(2, NO_OP_EDIT));
     expect(accentOf(node(X))).toBe('blue');
     expect(state().version).toBe(2);
     expect(toast).not.toHaveBeenCalled();
@@ -419,24 +434,21 @@ describe('receiving while a local change is in flight', () => {
     deliver(remote([accentCommand(X, 'blue')]), 'ui');
     expect(accentOf(node(X))).toBe('red');
 
-    await answer(0, {
-      canvasId: SPACE,
-      fromVersion: 2,
-      toVersion: 2,
-      deltas: [],
-      results: own[0].request.commands.map((command) => ({
-        command,
-        applied: false,
-        reason: 'not-found',
-      })),
-      commands: own[0].request.commands,
-      pendingEffects: {
-        mutatedNodes: [],
-        deletedNodeIds: [],
-        contentEditedNodeIds: [],
-        deferredFitFrameIds: [],
-      },
-    });
+    await answer(
+      0,
+      unchanged(
+        2,
+        own[0].request.edits.map((edit) => ({
+          applied: false,
+          reason: 'not-found',
+          failedAt: 0,
+          results: edit.commands.map(() => ({
+            applied: false,
+            reason: 'not-found',
+          })),
+        })),
+      ),
+    );
     // X shows B's colour; nothing remote was withheld for Y, so it goes back
     // to the colour it had before the rejected change.
     expect(accentOf(node(X))).toBe('blue');
@@ -485,8 +497,8 @@ describe('receiving while a local change is in flight', () => {
 
   it("still takes an undo snapshot for an agent's batch", () => {
     const update = server.execute(SPACE, {
-      commands: [moveCommand(X, 640)],
       originator: { source: 'agent' },
+      edits: [{ commands: [moveCommand(X, 640)] }],
     });
     deliver(update, 'agent');
     expect(node(X).position).toEqual({ x: 640, y: 0 });
@@ -642,7 +654,7 @@ describe('a free drag', () => {
     state().onNodeDragStop(new MouseEvent('mouseup'), node(X), [node(X)]);
 
     expect(own).toHaveLength(1);
-    expect(own[0].request.commands).toEqual([moveCommand(X, 240, 60)]);
+    expect(commandsOf(own[0].request)).toEqual([moveCommand(X, 240, 60)]);
     // B recolours X meanwhile: the drop is held, the colour lands.
     deliver(remote([accentCommand(X, 'blue')]), 'ui');
     expect(node(X).position).toEqual({ x: 240, y: 60 });
@@ -673,7 +685,7 @@ describe('a free drag', () => {
     tick(X, 200, false);
     state().onNodeDragStop(new MouseEvent('mouseup'), node(X), [node(X)]);
     expect(own).toHaveLength(1);
-    expect(own[0].request.commands).toEqual([moveCommand(X, 200)]);
+    expect(commandsOf(own[0].request)).toEqual([moveCommand(X, 200)]);
     await answer(0);
     expect(serverNode(X)?.position).toEqual({ x: 200, y: 0 });
     expect(node(X).position).toEqual({ x: 200, y: 0 });
@@ -709,7 +721,7 @@ describe('a free drag', () => {
     tick(X, 260, false);
     state().onNodeDragStop(new MouseEvent('mouseup'), node(X), [node(X)]);
     expect(own).toHaveLength(2);
-    expect(own[1].request.commands).toEqual([moveCommand(X, 260)]);
+    expect(commandsOf(own[1].request)).toEqual([moveCommand(X, 260)]);
     await answer(1);
     expect(serverNode(X)?.position).toEqual({ x: 260, y: 0 });
     expect(node(X).position).toEqual({ x: 260, y: 0 });
@@ -725,7 +737,7 @@ describe('a free drag', () => {
     expect(own).toHaveLength(0);
     state().closePointerGesture();
     expect(own).toHaveLength(1);
-    expect(own[0].request.commands).toEqual([
+    expect(commandsOf(own[0].request)).toEqual([
       {
         type: 'SET_NODE_GEOMETRY',
         items: [{ nodeId: X, size: { width: 360, height: 200 } }],
@@ -1064,7 +1076,96 @@ describe('when a change cannot be sent', () => {
       // The second batch had not been sent yet; it goes out with its own id.
       expect.stringMatching(/^[0-9a-f-]{36}$/),
     ]);
-    expect(flushed[1][1].commands).toEqual([moveCommand(Y, 500, 300)]);
+    expect(commandsOf(flushed[1][1])).toEqual([moveCommand(Y, 500, 300)]);
+  });
+
+  it('fixes a request when it is first sent: the page-close flush is repeated as it was, and a later edit goes out in a request of its own', async () => {
+    moveHere(X, 500);
+    // Made on top of the unanswered move; waits its turn.
+    moveHere(X, 600);
+    window.dispatchEvent(new Event('beforeunload', { cancelable: true }));
+    const flushed = api.postCanvasExecute.mock.calls
+      .filter(([, , options]) => options?.keepalive === true)
+      .map(([, request]) => structuredClone(request));
+    expect(flushed).toHaveLength(2);
+    expect(flushed[0]).toEqual(own[0].request);
+    expect(flushed[1].edits).toEqual([
+      {
+        basis: basisAt(1),
+        after: [{ operationId: own[0].request.operationId, edit: 0 }],
+        commands: [moveCommand(X, 600)],
+      },
+    ]);
+
+    // The page stayed open, and the user goes on.
+    const sends = own.length;
+    moveHere(X, 700);
+    await answer(0);
+    // The second request goes out exactly as the flush sent it, although
+    // the first is known to have taken effect by now.
+    expect(own).toHaveLength(sends + 1);
+    expect(JSON.stringify(own[sends].request)).toBe(JSON.stringify(flushed[1]));
+    await answer(sends);
+    expect(commit(sends).edits.map((edit) => edit.applied)).toEqual([true]);
+    // The edit made after the flush was not folded into it.
+    expect(own).toHaveLength(sends + 2);
+    expect(own[sends + 1].request.operationId).not.toBe(flushed[1].operationId);
+    expect(commandsOf(own[sends + 1].request)).toEqual([moveCommand(X, 700)]);
+    await answer(sends + 1);
+    expect(serverNode(X)?.position).toEqual({ x: 700, y: 0 });
+    expect(node(X).position).toEqual({ x: 700, y: 0 });
+    expect(api.getCanvas).not.toHaveBeenCalled();
+  });
+
+  describe('a repeat the server answers from its stored outcome', () => {
+    /** The server ran the request; its answer was lost and the repeat is answered. */
+    async function answeredByReplay() {
+      moveHere(X, 500);
+      const first = commit(0);
+      expect(server.state.version).toBe(2);
+      await failOnce();
+      expect(own).toHaveLength(2);
+      expect(own[1].request).toEqual(own[0].request);
+      const replay = commit(1);
+      expect(replay.replayed).toBe(true);
+      expect(replay).not.toHaveProperty('deltas');
+      expect(replay.edits).toEqual(first.edits);
+      expect([replay.fromVersion, replay.toVersion]).toEqual([1, 2]);
+      await answer(1, replay);
+      // The server ran the batch once.
+      expect(server.state.version).toBe(2);
+      return first;
+    }
+
+    it('is not applied as an update; the page converges with the update on the stream', async () => {
+      const first = await answeredByReplay();
+      // Nothing to apply: the page is where it was, showing its own move.
+      expect(state().version).toBe(1);
+      expect(node(X).position).toEqual({ x: 500, y: 0 });
+      expect(syncState()).toBe('synced');
+
+      expect(deliver(first, 'ui')).toBe(true);
+      expect(state().version).toBe(2);
+      expect(node(X).position).toEqual({ x: 500, y: 0 });
+      expect(hasUnsavedCanvasEdits()).toBe(false);
+      await vi.advanceTimersByTimeAsync(ECHO_TIMEOUT_MS * 2);
+      expect(api.getCanvas).not.toHaveBeenCalled();
+      // The move is still this page's to undo.
+      state().undo();
+      expect(node(X).position).toEqual({ x: 0, y: 0 });
+    });
+
+    it('loads the Space when the update does not arrive either', async () => {
+      await answeredByReplay();
+      await vi.advanceTimersByTimeAsync(ECHO_TIMEOUT_MS - 1);
+      expect(api.getCanvas).not.toHaveBeenCalled();
+      expect(state().version).toBe(1);
+      await vi.advanceTimersByTimeAsync(1);
+      await flush();
+      expect(api.getCanvas).toHaveBeenCalledTimes(1);
+      expect(state().version).toBe(2);
+      expect(node(X).position).toEqual({ x: 500, y: 0 });
+    });
   });
 
   it('does not warn when everything has been sent', async () => {
@@ -1106,7 +1207,7 @@ describe('a read version the server does not know', () => {
     expect(hasUnsavedCanvasEdits()).toBe(false);
 
     moveHere(X, 700);
-    expect(own[1].request.runs?.[0]?.basis).toBe(basisAt(1));
+    expect(own[1].request.edits[0]?.basis).toBe(basisAt(1));
     await answer(1);
     expect(serverNode(X)?.position).toEqual({ x: 700, y: 0 });
     expect(toast).toHaveBeenCalledTimes(1);
@@ -1154,7 +1255,7 @@ describe('undo and redo', () => {
     expect(node(Y).position).toEqual({ x: 40, y: 300 });
     // It is sent as the command that reproduces it.
     expect(own).toHaveLength(2);
-    expect(own[1].request.commands).toEqual([moveCommand(X, 0)]);
+    expect(commandsOf(own[1].request)).toEqual([moveCommand(X, 0)]);
     await answer(1);
     expect(serverNode(X)?.position).toEqual({ x: 0, y: 0 });
     expect(accentOf(serverNode(X) as Node)).toBe('blue');
@@ -1162,7 +1263,7 @@ describe('undo and redo', () => {
     state().redo();
     expect(node(X).position).toEqual({ x: 500, y: 0 });
     expect(accentOf(node(X))).toBe('blue');
-    expect(own[2].request.commands).toEqual([moveCommand(X, 500)]);
+    expect(commandsOf(own[2].request)).toEqual([moveCommand(X, 500)]);
     await answer(2);
     expect(serverNode(X)?.position).toEqual({ x: 500, y: 0 });
     await vi.advanceTimersByTimeAsync(5_000);
@@ -1182,7 +1283,7 @@ describe('undo and redo beyond what commands can say', () => {
     state().executeCommands([
       { type: 'DELETE_NODES', nodeIds: ['node-not-there'] },
     ]);
-    expect(own[0].request.commands).toEqual([moveCommand(X, 300)]);
+    expect(commandsOf(own[0].request)).toEqual([moveCommand(X, 300)]);
     await answer(0);
     deliver(remote([accentCommand(X, 'blue')]), 'ui');
 
@@ -1205,7 +1306,7 @@ describe('undo and redo beyond what commands can say', () => {
         .sort(),
     ).toEqual([X, Y].sort());
     expect(own).toHaveLength(2);
-    expect(own[1].request.commands).toEqual([
+    expect(commandsOf(own[1].request)).toEqual([
       {
         type: 'RESTORE_NODES',
         nodes: [expect.objectContaining({ id: X, data: original.data })],
@@ -1233,7 +1334,7 @@ describe('undo and redo beyond what commands can say', () => {
     state().updateNodeData(X, { pinned: undefined });
     expect(node(X).data.pinned).toBeUndefined();
     expect(own).toHaveLength(2);
-    expect(own[1].request.commands).toEqual([
+    expect(commandsOf(own[1].request)).toEqual([
       {
         type: 'MERGE_NODE_DATA',
         patches: [{ nodeId: X, patch: {}, unset: ['pinned'] }],
@@ -1249,7 +1350,7 @@ describe('undo and redo beyond what commands can say', () => {
     await answer(0);
     state().undo();
     expect(node(X).data).not.toHaveProperty('pinned');
-    expect(own[1].request.commands).toEqual([
+    expect(commandsOf(own[1].request)).toEqual([
       {
         type: 'MERGE_NODE_DATA',
         patches: [{ nodeId: X, patch: {}, unset: ['pinned'] }],
@@ -1266,7 +1367,7 @@ describe('writers that used to save only through the whole-Space PUT', () => {
       style: { ...(node(X).data.style as object), fontSize: 22 },
     });
     expect(own).toHaveLength(1);
-    expect(own[0].request.commands).toEqual([
+    expect(commandsOf(own[0].request)).toEqual([
       {
         type: 'MERGE_NODE_DATA',
         patches: [{ nodeId: X, patch: { style: { fontSize: 22 } } }],
@@ -1297,7 +1398,7 @@ describe('writers that used to save only through the whole-Space PUT', () => {
     expect(own).toHaveLength(0);
     state().setNodeGeometry([{ nodeId: X, position: { x: 80, y: 0 } }]);
     expect(own).toHaveLength(1);
-    expect(own[0].request.commands).toEqual([
+    expect(commandsOf(own[0].request)).toEqual([
       {
         type: 'MERGE_NODE_DATA',
         patches: [{ nodeId: X, patch: { style: { fontSize: 30 } } }],
@@ -1336,10 +1437,13 @@ describe('measured heights', () => {
     state().applyMeasuredHeights([measurement(400)]);
     expect(heightOf(node(AUTO))).toBe(layoutHeight(400));
     expect(own).toHaveLength(1);
-    expect(own[0].request.commands).toEqual([
+    expect(commandsOf(own[0].request)).toEqual([
       { type: 'APPLY_MEASURED_HEIGHT', items: [measurement(400)] },
     ]);
-    expect(own[0].request.originator.source).toBe('ui');
+    // Sent as this page, like any edit of it.
+    expect(own[0].request.originator).toEqual({
+      tabId: expect.stringMatching(/.+/),
+    });
 
     await answer(0);
     expect(heightOf(serverNode(AUTO))).toBe(layoutHeight(400));
@@ -1391,33 +1495,14 @@ describe('measured heights', () => {
     saved();
     await flush();
     expect(own).toHaveLength(1);
-    expect(own[0].request.commands).toEqual([
+    expect(commandsOf(own[0].request)).toEqual([
       { type: 'APPLY_MEASURED_HEIGHT', items: [measurement(500)] },
     ]);
   });
 
   it('keeps the measured height here when the server refuses the report', async () => {
     state().applyMeasuredHeights([measurement(400)]);
-    await answer(0, {
-      canvasId: SPACE,
-      fromVersion: 1,
-      toVersion: 1,
-      deltas: [],
-      results: [
-        {
-          command: own[0].request.commands[0],
-          applied: false,
-          reason: 'no-op',
-        },
-      ],
-      commands: own[0].request.commands,
-      pendingEffects: {
-        mutatedNodes: [],
-        deletedNodeIds: [],
-        contentEditedNodeIds: [],
-        deferredFitFrameIds: [],
-      },
-    });
+    await answer(0, unchanged(1, NO_OP_EDIT));
     expect(heightOf(node(AUTO))).toBe(layoutHeight(400));
     expect(toast).not.toHaveBeenCalled();
   });
@@ -1462,9 +1547,9 @@ describe('a derived report is not an unsent edit', () => {
     expect(own).toHaveLength(1);
     expect(leave().defaultPrevented).toBe(false);
     // Best effort: the report is still sent on the way out.
-    expect(keepaliveRequests().map(([, request]) => request.commands)).toEqual([
-      [{ type: 'APPLY_MEASURED_HEIGHT', items: [measurement(400)] }],
-    ]);
+    expect(
+      keepaliveRequests().map(([, request]) => commandsOf(request)),
+    ).toEqual([[{ type: 'APPLY_MEASURED_HEIGHT', items: [measurement(400)] }]]);
     expect(hasUnsavedCanvasEdits()).toBe(false);
   });
 
@@ -1511,7 +1596,7 @@ describe('a derived report is not an unsent edit', () => {
     // The height was not left marked as reported: the next measurement of
     // the same content goes out.
     state().applyMeasuredHeights([measurement(420)]);
-    expect(own.at(-1)?.request.commands).toEqual([
+    expect(commandsOf(own[own.length - 1].request)).toEqual([
       { type: 'APPLY_MEASURED_HEIGHT', items: [measurement(420)] },
     ]);
   });
@@ -1571,7 +1656,7 @@ describe('renderer-measured boxes', () => {
     seed();
     measure(200, 340);
     expect(own).toHaveLength(1);
-    expect(own[0].request.commands).toEqual([
+    expect(commandsOf(own[0].request)).toEqual([
       { type: 'APPLY_MEASURED_SIZE', items: [item(200, 340)] },
     ]);
     // The same measurement again says nothing new.
@@ -1638,7 +1723,7 @@ describe('renderer-measured boxes', () => {
     // A larger font: same body, same width, another box.
     measure(200, 420);
     expect(own).toHaveLength(2);
-    expect(own[1].request.commands).toEqual([
+    expect(commandsOf(own[1].request)).toEqual([
       { type: 'APPLY_MEASURED_SIZE', items: [item(200, 420)] },
     ]);
   });
@@ -1661,7 +1746,7 @@ describe('renderer-measured boxes', () => {
     saved();
     await flush();
     expect(own).toHaveLength(1);
-    expect(own[0].request.commands).toEqual([
+    expect(commandsOf(own[0].request)).toEqual([
       { type: 'APPLY_MEASURED_SIZE', items: [item(200, 380)] },
     ]);
   });
@@ -1670,26 +1755,7 @@ describe('renderer-measured boxes', () => {
     seed();
     measure(200, 340);
     const local = frameHeight(node(FRAME));
-    await answer(0, {
-      canvasId: SPACE,
-      fromVersion: 1,
-      toVersion: 1,
-      deltas: [],
-      results: [
-        {
-          command: own[0].request.commands[0],
-          applied: false,
-          reason: 'no-op',
-        },
-      ],
-      commands: own[0].request.commands,
-      pendingEffects: {
-        mutatedNodes: [],
-        deletedNodeIds: [],
-        contentEditedNodeIds: [],
-        deferredFitFrameIds: [],
-      },
-    });
+    await answer(0, unchanged(1, NO_OP_EDIT));
     expect(frameHeight(node(FRAME))).toBe(local);
     expect(toast).not.toHaveBeenCalled();
     expect(api.getCanvas).not.toHaveBeenCalled();
@@ -1700,6 +1766,57 @@ describe('renderer-measured boxes', () => {
       { type: 'dimensions', id: X, dimensions: { width: 300, height: 180 } },
     ]);
     expect(own).toHaveLength(0);
+  });
+});
+
+describe('an edit of which one command fails', () => {
+  it("is undone whole on the server; the page says so once and shows the server's Space", async () => {
+    // Sent without a read version, nothing is judged up front: the engine
+    // runs the commands.
+    setCanvasSyncLineageForTests(SPACE, null);
+    // Another page deleted X; this page has not heard of it.
+    remote([{ type: 'DELETE_NODES', nodeIds: [X as `node-${string}`] }]);
+    // One batch: a recolour of Y, which could stand, and one of X.
+    state().executeCommands([accentCommand(Y, 'red'), accentCommand(X, 'red')]);
+    // An unrelated batch behind it.
+    moveHere(Y, 40, 300);
+    expect(own[0].request.edits).toEqual([
+      { commands: [accentCommand(Y, 'red'), accentCommand(X, 'red')] },
+    ]);
+    expect(accentOf(node(Y))).toBe('red');
+
+    await answer(0);
+    // The failing command carries the reason; the other one is undone.
+    expect(commit(0).edits).toEqual([
+      {
+        applied: false,
+        reason: 'not-found',
+        failedAt: 1,
+        results: [{ applied: false }, { applied: false, reason: 'not-found' }],
+      },
+    ]);
+    // Not even the recolour of Y was kept.
+    expect(commit(0).toVersion).toBe(commit(0).fromVersion);
+    expect(accentOf(serverNode(Y) as Node)).toBe('white');
+    expect(toast).toHaveBeenCalledTimes(1);
+    // The held colour is put back; the reload waits for the queue.
+    expect(accentOf(node(Y))).toBe('white');
+    expect(api.getCanvas).not.toHaveBeenCalled();
+
+    // The batch behind it is its own edit and is taken.
+    await answer(1);
+    expect(commit(1).edits).toEqual([
+      { applied: true, results: [{ applied: true }] },
+    ]);
+    await flush();
+    expect(api.getCanvas).toHaveBeenCalledTimes(1);
+    expect(toast).toHaveBeenCalledTimes(1);
+    expect(state().nodes.map((n) => n.id)).toEqual([Y]);
+    expect(accentOf(node(Y))).toBe('white');
+    expect(node(Y).position).toEqual({ x: 40, y: 300 });
+    expect(serverNode(Y)?.position).toEqual({ x: 40, y: 300 });
+    expect(state().version).toBe(server.state.version);
+    expect(hasUnsavedCanvasEdits()).toBe(false);
   });
 });
 
@@ -1729,8 +1846,13 @@ describe('a move made in a container the node has left', () => {
   function reparentHere(id: string, parentId: string | null) {
     state().executeCommands(intoCommands(id, parentId));
   }
+  /** Per command of the request: why it was refused, or that it applied. */
   const refused = (index: number) =>
-    commit(index).results.map((result) => result.reason ?? 'applied');
+    commit(index).edits.flatMap((edit) =>
+      edit.results.map(
+        (result) => result.reason ?? (result.applied ? 'applied' : 'undone'),
+      ),
+    );
 
   /** X on the canvas, Y inside F, G empty. */
   function seed() {
@@ -1747,23 +1869,19 @@ describe('a move made in a container the node has left', () => {
   it('states the version each edit was made on, taken when the edit is made and not when it is sent', async () => {
     seed();
     moveHere(X, 500);
-    expect(own[0].request.runs).toEqual([
-      { start: 0, count: 1, basis: basisAt(1) },
-    ]);
+    expect(readsOf(own[0].request)).toEqual([{ basis: basisAt(1) }]);
     // Made at version 1, sent only after another page's write (version 2)
     // and this page's own (version 3) have been applied here.
     recolourHere(Y, 'red');
     deliver(remote([accentCommand(Y, 'green')]), 'ui');
     await answer(0);
     expect(state().version).toBe(3);
-    expect(own[1].request.runs).toEqual([
-      { start: 0, count: 1, basis: basisAt(1) },
-    ]);
+    expect(readsOf(own[1].request)).toEqual([{ basis: basisAt(1) }]);
     await answer(1);
     // An edit made now quotes what the page has applied by now.
     recolourHere(X, 'blue');
-    expect(own[2].request.runs).toEqual([
-      { start: 0, count: 1, basis: basisAt(state().version) },
+    expect(readsOf(own[2].request)).toEqual([
+      { basis: basisAt(state().version) },
     ]);
   });
 
@@ -1838,10 +1956,9 @@ describe('a move made in a container the node has left', () => {
       },
     ]);
     expect(parentOf(node(X))).toBe(G);
-    // The whole gesture is one run.
-    expect(own[0].request.runs).toEqual([
-      { start: 0, count: 2, basis: basisAt(1) },
-    ]);
+    // The whole gesture is one edit of two commands.
+    expect(readsOf(own[0].request)).toEqual([{ basis: basisAt(1) }]);
+    expect(own[0].request.edits[0]?.commands).toHaveLength(2);
     const mine = { ...node(X).position };
     deliver(remote(intoCommands(X, F)), 'ui');
     expect(parentOf(node(X))).toBe(G);
@@ -1872,14 +1989,17 @@ describe('a move made in a container the node has left', () => {
     const placed = { ...serverNode(X)?.position };
     // B had not heard of it and moved X on the canvas.
     const theirs = server.execute(SPACE, {
-      commands: [moveCommand(X, 700, 700)],
-      originator: { source: 'ui', tabId: 'page-b' },
       operationId: crypto.randomUUID(),
+      originator: { tabId: 'page-b' },
       // What B had read: the Space before this page's drag.
-      runs: [{ start: 0, count: 1, basis: basisAt(1) }],
+      edits: [{ basis: basisAt(1), commands: [moveCommand(X, 700, 700)] }],
     });
-    expect(theirs.results.map((result) => result.reason)).toEqual([
-      'stale-parent',
+    expect(theirs.edits).toEqual([
+      {
+        applied: false,
+        reason: 'stale-parent',
+        results: [{ applied: false, reason: 'stale-parent' }],
+      },
     ]);
     expect(theirs.toVersion).toBe(theirs.fromVersion);
     expect(serverNode(X)?.position).toEqual(placed);
@@ -1902,25 +2022,19 @@ describe('a move made in a container the node has left', () => {
     // version from before it (1) and names what it was made on top of. The
     // first request has been answered by now and took effect, so it is not
     // named any more.
-    expect(own[1].request.runs).toEqual([
-      { start: 0, count: 1, basis: basisAt(1) },
-      {
-        start: 1,
-        count: 1,
-        basis: basisAt(1),
-        after: [{ start: 0, count: 1 }],
-      },
-      {
-        start: 2,
-        count: 1,
-        basis: basisAt(1),
-        after: [{ start: 1, count: 1 }],
-      },
+    expect(readsOf(own[1].request)).toEqual([
+      { basis: basisAt(1) },
+      { basis: basisAt(1), after: [{ edit: 0 }] },
+      { basis: basisAt(1), after: [{ edit: 1 }] },
+    ]);
+    expect(own[1].request.edits.map((edit) => edit.commands.length)).toEqual([
+      1, 1, 1,
     ]);
     await answer(1);
     expect(
-      [...commit(0).results, ...commit(1).results].every(
-        (result) => result.applied,
+      [...commit(0).edits, ...commit(1).edits].every(
+        (edit) =>
+          edit.applied && edit.results.every((result) => result.applied),
       ),
     ).toBe(true);
     expect(toast).not.toHaveBeenCalled();
@@ -1939,8 +2053,30 @@ describe('a move made in a container the node has left', () => {
     deliver(remote(intoCommands(X, F)), 'ui');
     await answer(0);
     expect(refused(0)).toEqual(['stale-parent']);
+    // Told once for the refused request; the reload waits for the queue.
+    expect(toast).toHaveBeenCalledTimes(1);
+    expect(api.getCanvas).not.toHaveBeenCalled();
+    // The second request: the move names the refused edit of the first
+    // request; the recolour, of the same request, names nothing.
+    expect(readsOf(own[1].request)).toEqual([
+      {
+        basis: basisAt(1),
+        after: [{ operationId: own[0].request.operationId, edit: 0 }],
+      },
+      { basis: basisAt(1) },
+    ]);
     await answer(1);
     expect(refused(1)).toEqual(['stale-parent', 'applied']);
+    expect(commit(1).edits).toEqual([
+      {
+        applied: false,
+        reason: 'stale-parent',
+        results: [{ applied: false, reason: 'stale-parent' }],
+      },
+      { applied: true, results: [{ applied: true }] },
+    ]);
+    // One notice per refused request, and one reload for both.
+    expect(toast).toHaveBeenCalledTimes(2);
     expect(accentOf(serverNode(Y) as Node)).toBe('red');
     expect(parentOf(serverNode(X))).toBe(F);
     await flush();
@@ -1970,8 +2106,8 @@ describe('a move made in a container the node has left', () => {
     await answer(0);
     expect(refused(0)).toEqual(['stale-parent', 'stale-parent']);
     // The second request names the refused edit it was made on top of.
-    expect(own[1].request.runs?.[0]?.after).toEqual([
-      { operationId: own[0].request.operationId, start: 0, count: 2 },
+    expect(own[1].request.edits[0]?.after).toEqual([
+      { operationId: own[0].request.operationId, edit: 0 },
     ]);
     const before = { ...serverNode(X)?.position };
     await answer(1);
@@ -2078,14 +2214,16 @@ describe('a move made in a container the node has left', () => {
     // before the other page's change, although the page has applied the
     // rest of that update (version 2) by now.
     expect(state().version).toBe(2);
-    expect(own[0].request.runs).toEqual([
-      { start: 0, count: own[0].request.commands.length, basis: basisAt(1) },
-    ]);
+    expect(readsOf(own[0].request)).toEqual([{ basis: basisAt(1) }]);
     await flush();
     expect(api.getCanvas).not.toHaveBeenCalled();
 
     await answer(0);
-    expect(commit(0).results.every((result) => !result.applied)).toBe(true);
+    expect(commit(0).edits).toHaveLength(1);
+    expect(commit(0).edits[0]?.applied).toBe(false);
+    expect(commit(0).edits[0]?.results.every((result) => !result.applied)).toBe(
+      true,
+    );
     expect(parentOf(serverNode(X))).toBe(F);
     expect(serverNode(X)?.position).toEqual(placed);
     expect(toast).toHaveBeenCalledTimes(1);
@@ -2127,7 +2265,12 @@ describe('a move made in a container the node has left', () => {
     expect(parentOf(node(X))).toBeNull();
     expect(node(X).position).toEqual({ x: 0, y: 0 });
     await answer(1);
-    expect(commit(1).results.every((result) => result.applied)).toBe(true);
+    expect(
+      commit(1).edits.every(
+        (edit) =>
+          edit.applied && edit.results.every((result) => result.applied),
+      ),
+    ).toBe(true);
     expect(parentOf(serverNode(X))).toBeNull();
     expect(serverNode(X)?.position).toEqual({ x: 0, y: 0 });
     await vi.advanceTimersByTimeAsync(5_000);
@@ -2174,7 +2317,7 @@ describe('a Space that is not loaded', () => {
     await state().loadCanvas('space-other');
     moveHere(X, 700);
     expect(own).toHaveLength(1);
-    expect(own[0].request.commands).toEqual([moveCommand(X, 700)]);
+    expect(commandsOf(own[0].request)).toEqual([moveCommand(X, 700)]);
   });
 });
 
@@ -2348,7 +2491,7 @@ describe('a wanted reload and what the user is doing', () => {
 
 describe('what is sent is decided by one rule, also around a pointer gesture', () => {
   const dataPatches = (index: number) =>
-    (own[index].request.commands as CanvasCommand[]).flatMap((command) =>
+    (commandsOf(own[index].request) as CanvasCommand[]).flatMap((command) =>
       command.type === 'MERGE_NODE_DATA' ? command.patches : [],
     );
   const startDrag = () => {
@@ -2375,7 +2518,7 @@ describe('what is sent is decided by one rule, also around a pointer gesture', (
     state().onNodeDragStop(new MouseEvent('mouseup'), node(X), [node(X)]);
 
     expect(own).toHaveLength(1);
-    expect(own[0].request.commands).toEqual([moveCommand(X, 240, 60)]);
+    expect(commandsOf(own[0].request)).toEqual([moveCommand(X, 240, 60)]);
     expect(dataPatches(0)).toEqual([]);
     // Shown all the same.
     expect(node(X).data.contentDuplicate).toBe(false);
@@ -2389,7 +2532,7 @@ describe('what is sent is decided by one rule, also around a pointer gesture', (
     state().patchNodeSilent(X, { contentDuplicate: false, duplicateFiles: [] });
     state().setNodeGeometry([{ nodeId: X, position: { x: 500, y: 0 } }]);
     expect(own).toHaveLength(1);
-    expect(own[0].request.commands).toEqual([moveCommand(X, 500)]);
+    expect(commandsOf(own[0].request)).toEqual([moveCommand(X, 500)]);
   });
 
   it('sends a structure patch that landed during a drag that is then cancelled', async () => {
@@ -2402,7 +2545,7 @@ describe('what is sent is decided by one rule, also around a pointer gesture', (
     expect(node(X).position).toEqual({ x: 0, y: 0 });
     // … but the patch, which the drag had taken charge of, is.
     expect(own).toHaveLength(1);
-    expect(own[0].request.commands).toEqual([
+    expect(commandsOf(own[0].request)).toEqual([
       {
         type: 'MERGE_NODE_DATA',
         patches: [{ nodeId: X, patch: { pinnedForTest: 'yes' } }],

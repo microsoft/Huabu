@@ -34,6 +34,7 @@ import archiver from 'archiver';
 import fastify from 'fastify';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { editsPerCommand } from '@huabu/shared';
 import { autoHeightKey } from '@huabu/shared/canvas-engine';
 
 import canvasRoutes from './canvas.route.js';
@@ -971,13 +972,18 @@ describe('per-node content routes', () => {
       method: 'POST',
       url: '/canvas/canvas-content-broken/execute',
       payload: {
-        commands: [{ type: 'DELETE_NODES', nodeIds: ['node-broken'] }],
+        edits: editsPerCommand([
+          { type: 'DELETE_NODES', nodeIds: ['node-broken'] },
+        ]),
         originator: { source: 'ui' },
       },
     });
     expect(deleted.statusCode, deleted.body).toBe(200);
-    expect(deleted.json().results).toEqual([
-      expect.objectContaining({ applied: true }),
+    expect(deleted.json().edits).toEqual([
+      expect.objectContaining({
+        applied: true,
+        results: [expect.objectContaining({ applied: true })],
+      }),
     ]);
     expect(
       await space('canvas-content-broken').nodes.read('node-broken'),
@@ -1034,7 +1040,7 @@ describe('POST /canvas/:canvasId/execute', () => {
         url: '/canvas/canvas-height/execute',
         payload: {
           originator: { source },
-          commands: [
+          edits: editsPerCommand([
             {
               type: 'CREATE_NODES',
               nodes: [
@@ -1059,7 +1065,7 @@ describe('POST /canvas/:canvasId/execute', () => {
                 },
               ],
             },
-          ],
+          ]),
         },
       });
       expect(response.statusCode, response.body).toBe(200);
@@ -1088,7 +1094,7 @@ describe('POST /canvas/:canvasId/execute', () => {
         url: '/canvas/canvas-height/execute',
         payload: {
           originator: { source: 'ui' },
-          commands: [
+          edits: editsPerCommand([
             {
               type: 'APPLY_MEASURED_HEIGHT',
               items: [
@@ -1099,7 +1105,7 @@ describe('POST /canvas/:canvasId/execute', () => {
                 },
               ],
             },
-          ],
+          ]),
         },
       });
       expect(measured.statusCode, measured.body).toBe(200);
@@ -1128,7 +1134,7 @@ describe('POST /canvas/:canvasId/execute', () => {
       url: '/canvas/canvas-exec/execute',
       payload: {
         originator: { source: 'ui' },
-        commands: [
+        edits: editsPerCommand([
           {
             type: 'CREATE_NODES',
             nodes: [
@@ -1140,7 +1146,7 @@ describe('POST /canvas/:canvasId/execute', () => {
               },
             ],
           },
-        ],
+        ]),
       },
     });
 
@@ -1164,7 +1170,14 @@ describe('POST /canvas/:canvasId/execute', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/canvas/canvas-absent/execute',
-      payload: { originator: { source: 'ui' }, commands: [] },
+      payload: {
+        originator: { source: 'ui' },
+        // A request holds at least one edit; an empty one is a 400 before
+        // the Space is looked at.
+        edits: editsPerCommand([
+          { type: 'DELETE_NODES', nodeIds: ['node-absent'] },
+        ]),
+      },
     });
 
     expect(response.statusCode).toBe(404);

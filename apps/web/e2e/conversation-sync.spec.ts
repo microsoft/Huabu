@@ -3,6 +3,7 @@
 
 import { expect, test } from '@playwright/test';
 
+import { editsPerCommand } from './helpers';
 import { installStreams, publish } from './stream-helpers';
 
 import type {
@@ -38,7 +39,7 @@ for (const direction of ['parent-to-child', 'child-to-parent']) {
     expect(child).toBeTruthy();
     const creation = await request.post(`/api/canvas/${child}/execute`, {
       data: {
-        commands: [
+        edits: editsPerCommand([
           {
             type: 'CREATE_NODES',
             nodes: [
@@ -54,7 +55,7 @@ for (const direction of ['parent-to-child', 'child-to-parent']) {
               },
             ],
           },
-        ],
+        ]),
         originator: { source: 'ui' },
       },
     });
@@ -143,7 +144,7 @@ for (const direction of ['parent-to-child', 'child-to-parent']) {
           toVersion: ++version,
           deltas: [{ type: 'REPLACE_NODE', prev: previous, next: node }],
           pendingEffects: {
-            mutatedNodes: [node],
+            mutatedNodeIds: [node.id],
             deletedNodeIds: [],
             contentEditedNodeIds: [],
             deferredFitFrameIds: [],
@@ -440,7 +441,7 @@ for (const direction of ['parent-to-child', 'child-to-parent']) {
         toVersion: ++version,
         deltas: [{ type: 'DELETE_NODE', node }],
         pendingEffects: {
-          mutatedNodes: [],
+          mutatedNodeIds: [],
           deletedNodeIds: [node.id],
           contentEditedNodeIds: [],
           deferredFitFrameIds: [],

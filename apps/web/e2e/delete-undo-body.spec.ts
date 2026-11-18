@@ -10,6 +10,8 @@ import {
   type Page,
 } from '@playwright/test';
 
+import { editsPerCommand } from './helpers';
+
 import type * as CanvasStore from '../src/store/canvasStore';
 import type { CreateCanvasResponse } from '@huabu/shared';
 
@@ -54,9 +56,9 @@ async function seedSpace(request: APIRequestContext): Promise<string> {
   });
   const seeded = await request.post(`/api/canvas/${canvasId}/execute`, {
     data: {
-      commands: [
+      edits: editsPerCommand([
         { type: 'CREATE_NODES', nodes: [note(KEPT, 380), note(DELETED, 700)] },
-      ],
+      ]),
       originator: { source: 'ui', tabId: 'e2e-delete-undo-body-seed' },
     },
   });

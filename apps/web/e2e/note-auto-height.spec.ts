@@ -3,7 +3,7 @@
 
 import { test, expect, type Page } from '@playwright/test';
 
-import { openNewCanvas, paneCenter } from './helpers';
+import { openNewCanvas, paneCenter, editsPerCommand } from './helpers';
 
 /**
  * The auto-height invariant, asserted in a real browser.
@@ -91,7 +91,7 @@ async function executeAgentCommands(
 
   const response = await page.request.post(`/api/canvas/${canvasId}/execute`, {
     data: {
-      commands,
+      edits: editsPerCommand(commands),
       originator: { source: 'agent', threadId: 'e2e-auto-height' },
     },
   });
@@ -267,10 +267,10 @@ test.describe('note auto height', () => {
         ],
       },
     ]);
-    const results = frameResponse.results as Array<{
-      nodes?: Array<{ nodeId: string }>;
+    const edits = frameResponse.edits as Array<{
+      results: Array<{ nodes?: Array<{ nodeId: string }> }>;
     }>;
-    const frameId = results[0]?.nodes?.[0]?.nodeId;
+    const frameId = edits[0]?.results[0]?.nodes?.[0]?.nodeId;
     expect(frameId).toBeTruthy();
 
     await executeAgentCommands(page, [

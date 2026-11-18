@@ -10,7 +10,11 @@
 
 import deepEqual from 'fast-deep-equal';
 
-import { nodeRevisionOf, type Delta } from '@huabu/shared/canvas-engine';
+import {
+  nodeRevisionOf,
+  replacedNodeType,
+  type Delta,
+} from '@huabu/shared/canvas-engine';
 
 import {
   MD_BACKED_NODE_TYPES,
@@ -38,9 +42,16 @@ export function storedContentRevision(node: NodeLike): string {
   });
 }
 
-/** The `nodeContentRevisions` the server attaches to a batch of `deltas`. */
+/**
+ * The `nodeContentRevisions` the server attaches to a batch of `deltas`.
+ *
+ * @param nodes the Space after the batch. A replace row names only what
+ *   changed, so the stored revision is the one of the node it left; without
+ *   `nodes` the row's `next` must be the whole node (rows a test wrote out).
+ */
 export function contentRevisionsOf(
   deltas: readonly Delta[],
+  nodes?: readonly NodeLike[],
 ): Record<string, string> | undefined {
   const revisions: Record<string, string> = {};
   for (const delta of deltas) {
@@ -50,7 +61,11 @@ export function contentRevisionsOf(
         revisions[node.id] = storedContentRevision(node);
     } else if (delta.type === 'REPLACE_NODE') {
       const next = delta.next as unknown as NodeLike;
-      if (!MD_BACKED_NODE_TYPES.has(next.type ?? '')) continue;
+      const whole = nodes?.find((node) => node.id === next.id) ?? {
+        ...next,
+        type: replacedNodeType(delta),
+      };
+      if (!MD_BACKED_NODE_TYPES.has(whole.type ?? '')) continue;
       const before = (delta.prev.data ?? {}) as Record<string, unknown>;
       const after = next.data ?? {};
       if (
@@ -58,7 +73,7 @@ export function contentRevisionsOf(
           (key) => !deepEqual(before[key], after[key]),
         )
       )
-        revisions[next.id] = storedContentRevision(next);
+        revisions[next.id] = storedContentRevision(whole);
     }
   }
   return Object.keys(revisions).length > 0 ? revisions : undefined;

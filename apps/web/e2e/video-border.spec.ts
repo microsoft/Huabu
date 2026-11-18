@@ -5,6 +5,8 @@ import { writeFile } from 'node:fs/promises';
 
 import { expect, test, type Locator } from '@playwright/test';
 
+import { editsPerCommand } from './helpers';
+
 import type { CreateCanvasResponse, GetCanvasResponse } from '@huabu/shared';
 
 async function readBounds(shell: Locator) {
@@ -115,7 +117,7 @@ for (const theme of ['light', 'dark'] as const) {
         `/api/canvas/${canvasId}/execute`,
         {
           data: {
-            commands: [
+            edits: editsPerCommand([
               {
                 type: 'CREATE_NODES',
                 nodes: [
@@ -133,7 +135,7 @@ for (const theme of ['light', 'dark'] as const) {
                   },
                 ],
               },
-            ],
+            ]),
             originator: { source: 'agent', threadId: 'e2e-video-border' },
           },
         },

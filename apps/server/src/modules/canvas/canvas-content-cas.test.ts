@@ -22,6 +22,7 @@ import { join } from 'node:path';
 import fastify from 'fastify';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { editsPerCommand } from '@huabu/shared';
 import {
   nodeRevisionOf,
   extractCanvasChanges,
@@ -48,6 +49,18 @@ import type { GetCanvasResponse } from '@huabu/shared';
 let tmp: string;
 
 const REV_EMPTY = nodeRevisionOf({});
+
+/**
+ * The command results of a page `execute` response, flat. These requests
+ * send one edit per command, so entry i answers command i.
+ */
+function resultsOf(body: {
+  edits: Array<{
+    results: Array<{ applied: boolean; reason?: string }>;
+  }>;
+}): Array<{ applied: boolean; reason?: string }> {
+  return body.edits.flatMap((edit) => edit.results);
+}
 
 async function buildApp() {
   const app = fastify();
@@ -234,7 +247,7 @@ describe('PUT /nodes/:nodeId/content — content CAS', () => {
           url: '/canvas/c1/execute',
           payload: {
             originator: { source: 'ui' },
-            commands: [
+            edits: editsPerCommand([
               {
                 type: 'CREATE_NODES',
                 nodes: [
@@ -247,19 +260,19 @@ describe('PUT /nodes/:nodeId/content — content CAS', () => {
                   },
                 ],
               },
-            ],
+            ]),
           },
         });
       expect(independent).toMatchObject({ id: 'node-existing' });
       const claimed = await create({ noteNodeId: 'node-existing' });
       expect(claimed.statusCode).toBe(200);
-      expect(claimed.json().results).toEqual([
+      expect(resultsOf(claimed.json())).toEqual([
         expect.objectContaining({ applied: false, reason: 'invalid-target' }),
       ]);
       expect(store.read()?.version).toBe(1);
       const addedPdf = await create({});
       expect(addedPdf.statusCode).toBe(200);
-      expect(addedPdf.json().results).toEqual([
+      expect(resultsOf(addedPdf.json())).toEqual([
         expect.objectContaining({ applied: true }),
       ]);
       const patch = (id: string) => ({
@@ -271,11 +284,11 @@ describe('PUT /nodes/:nodeId/content — content CAS', () => {
         url: '/canvas/c1/execute',
         payload: {
           originator: { source: 'agent' },
-          commands: [patch('node-existing')],
+          edits: editsPerCommand([patch('node-existing')]),
         },
       });
       expect(rejected.statusCode).toBe(200);
-      expect(rejected.json().results).toEqual([
+      expect(resultsOf(rejected.json())).toEqual([
         expect.objectContaining({ applied: false, reason: 'invalid-target' }),
       ]);
       const initialized = await app.inject({
@@ -283,7 +296,7 @@ describe('PUT /nodes/:nodeId/content — content CAS', () => {
         url: '/canvas/c1/execute',
         payload: {
           originator: { source: 'agent' },
-          commands: [
+          edits: editsPerCommand([
             {
               type: 'CREATE_NODES',
               nodes: [
@@ -296,11 +309,11 @@ describe('PUT /nodes/:nodeId/content — content CAS', () => {
               ],
             },
             patch('node-new'),
-          ],
+          ]),
         },
       });
       expect(initialized.statusCode).toBe(200);
-      expect(initialized.json().results).toEqual([
+      expect(resultsOf(initialized.json())).toEqual([
         expect.objectContaining({ applied: true }),
         expect.objectContaining({ applied: true }),
       ]);
@@ -454,14 +467,20 @@ describe('PUT /nodes/:nodeId/content — content CAS', () => {
         const response = await app.inject({
           method: 'POST',
           url: '/canvas/c1/execute',
-          payload: { originator: { source: 'ui' }, commands },
+          payload: {
+            originator: { source: 'ui' },
+            edits: editsPerCommand(commands),
+          },
         });
         expect(response.statusCode).toBe(200);
-        return response.json<{
+        const body = response.json<{
           toVersion: number;
           fromVersion: number;
-          results: Array<{ applied: boolean; reason?: string }>;
+          edits: Array<{
+            results: Array<{ applied: boolean; reason?: string }>;
+          }>;
         }>();
+        return { ...body, results: resultsOf(body) };
       };
       const load = async () =>
         (
@@ -1312,12 +1331,12 @@ describe('PUT /nodes/:nodeId/content — content CAS', () => {
         url: '/canvas/c1/execute',
         payload: {
           originator: { source: 'ui' },
-          commands: [
+          edits: editsPerCommand([
             {
               type: 'SET_NODE_GEOMETRY',
               items: [{ nodeId: 'ref', position: { x: 5, y: 5 } }],
             },
-          ],
+          ]),
         },
       });
       expect(move.statusCode).toBe(200);
@@ -1340,14 +1359,14 @@ describe('PUT /nodes/:nodeId/content — content CAS', () => {
         url: '/canvas/c1/execute',
         payload: {
           originator: { source: 'ui' },
-          commands: [
+          edits: editsPerCommand([
             {
               type: 'MERGE_NODE_DATA',
               patches: [
                 { nodeId: 'ref', patch: { content: 'type-omitted bypass' } },
               ],
             },
-          ],
+          ]),
         },
       });
       // A page does not write a body through execute at all.
@@ -1360,7 +1379,7 @@ describe('PUT /nodes/:nodeId/content — content CAS', () => {
         url: '/canvas/c1/execute',
         payload: {
           originator: { source: 'agent' },
-          commands: [
+          edits: editsPerCommand([
             {
               type: 'MERGE_NODE_DATA',
               patches: [
@@ -1371,11 +1390,11 @@ describe('PUT /nodes/:nodeId/content — content CAS', () => {
                 },
               ],
             },
-          ],
+          ]),
         },
       });
       expect(byAgent.statusCode).toBe(200);
-      expect(byAgent.json().results[0].applied).toBe(false);
+      expect(resultsOf(byAgent.json())[0].applied).toBe(false);
       expect(store.read()?.version).toBe(version);
       expect(store.readNode('ref')).toMatchObject({ content: '' });
     } finally {

@@ -3,7 +3,7 @@
 
 import { expect, test, type Locator, type Page } from '@playwright/test';
 
-import { openNewCanvas } from './helpers';
+import { openNewCanvas, editsPerCommand } from './helpers';
 
 import type { MilkdownInstance } from '../src/components/Milkdown/createMilkdown';
 import type * as EditorModule from '../src/components/Milkdown/MilkdownEditor';
@@ -546,7 +546,7 @@ async function createCanvasNote(
   // Reuse note-auto-height's headless creation pattern: real backend, sync, and NoteNode.
   const response = await page.request.post(`/api/canvas/${canvasId}/execute`, {
     data: {
-      commands: [
+      edits: editsPerCommand([
         {
           type: 'CREATE_NODES',
           nodes: [
@@ -561,7 +561,7 @@ async function createCanvasNote(
             },
           ],
         },
-      ],
+      ]),
       originator: { source: 'agent', threadId: 'e2e-unified-links' },
     },
   });

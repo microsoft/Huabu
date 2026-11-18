@@ -10,6 +10,8 @@ import {
   type Page,
 } from '@playwright/test';
 
+import { editsPerCommand } from './helpers';
+
 import type * as CanvasStore from '../src/store/canvasStore';
 import type { CreateCanvasResponse } from '@huabu/shared';
 
@@ -46,7 +48,7 @@ async function seedSpace(request: APIRequestContext): Promise<string> {
   const { canvasId } = (await created.json()) as CreateCanvasResponse;
   const seeded = await request.post(`/api/canvas/${canvasId}/execute`, {
     data: {
-      commands: [
+      edits: editsPerCommand([
         {
           type: 'CREATE_NODES',
           nodes: [
@@ -72,7 +74,7 @@ async function seedSpace(request: APIRequestContext): Promise<string> {
             },
           ],
         },
-      ],
+      ]),
       originator: { source: 'ui', tabId: 'e2e-reload-editing-seed' },
     },
   });
@@ -267,12 +269,12 @@ test('a reload wanted while a text node is being typed into waits for the contro
   await dropped;
   const moved = await request.post(`/api/canvas/${canvasId}/execute`, {
     data: {
-      commands: [
+      edits: editsPerCommand([
         {
           type: 'SET_NODE_GEOMETRY',
           items: [{ nodeId: NOTE, position: { x: 420, y: 520 } }],
         },
-      ],
+      ]),
       originator: { source: 'ui', tabId: 'e2e-reload-editing-other' },
     },
   });

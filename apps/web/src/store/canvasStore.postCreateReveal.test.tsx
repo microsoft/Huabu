@@ -24,14 +24,20 @@ vi.mock('@/handler/canvasCommand/postEffects.web', () => ({
 vi.mock('../api', async (importOriginal) => ({
   ...(await importOriginal<typeof CanvasApi>()),
   postCanvasExecute: vi.fn(
-    async (canvasId: string, request: { commands: unknown[] }) => ({
+    async (
+      canvasId: string,
+      request: { edits: Array<{ commands: unknown[] }> },
+    ) => ({
       canvasId,
       fromVersion: 1,
       toVersion: 2,
-      results: request.commands.map(() => ({ applied: true })),
+      edits: request.edits.map((edit) => ({
+        applied: true,
+        results: edit.commands.map(() => ({ applied: true })),
+      })),
       deltas: [],
       pendingEffects: {
-        mutatedNodes: [],
+        mutatedNodeIds: [],
         deletedNodeIds: [],
         contentEditedNodeIds: [],
         deferredFitFrameIds: [],

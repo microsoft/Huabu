@@ -3,7 +3,7 @@
 
 import { expect, test } from '@playwright/test';
 
-import { openNewCanvas } from './helpers';
+import { openNewCanvas, editsPerCommand } from './helpers';
 
 test('Text defaults to 24px while preserving authored fonts', async ({
   page,
@@ -13,7 +13,7 @@ test('Text defaults to 24px while preserving authored fonts', async ({
   const canvasId = page.url().split('/canvas/')[1]?.split(/[?#]/)[0];
   const response = await page.request.post(`/api/canvas/${canvasId}/execute`, {
     data: {
-      commands: [
+      edits: editsPerCommand([
         {
           type: 'CREATE_NODES',
           nodes: [undefined, 16].map((fontSize, index) => ({
@@ -24,7 +24,7 @@ test('Text defaults to 24px while preserving authored fonts', async ({
             size: { width: 300 },
           })),
         },
-      ],
+      ]),
       originator: { source: 'agent', threadId: 'e2e-text-fonts' },
     },
   });
@@ -57,7 +57,7 @@ test('Text shares the Note tint without a painted border and keeps unaccented te
   const canvasId = page.url().split('/canvas/')[1]?.split(/[?#]/)[0];
   const response = await page.request.post(`/api/canvas/${canvasId}/execute`, {
     data: {
-      commands: [
+      edits: editsPerCommand([
         {
           type: 'CREATE_NODES',
           nodes: [
@@ -84,7 +84,7 @@ test('Text shares the Note tint without a painted border and keeps unaccented te
             },
           ],
         },
-      ],
+      ]),
       originator: { source: 'agent', threadId: 'e2e-text-surfaces' },
     },
   });

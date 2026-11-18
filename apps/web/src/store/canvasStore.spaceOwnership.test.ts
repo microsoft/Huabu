@@ -25,14 +25,16 @@ const entry: Node = {
 const server = createFakeSpaceServer();
 /** Node ids this page asked the server to delete (through `execute`). */
 function sentDeletions(): string[] {
-  return vi
-    .mocked(api.postCanvasExecute)
-    .mock.calls.flatMap(([, request]) =>
-      (request.commands as Array<{ type: string; nodeIds?: string[] }>).flatMap(
-        (command) =>
-          command.type === 'DELETE_NODES' ? (command.nodeIds ?? []) : [],
-      ),
-    );
+  return vi.mocked(api.postCanvasExecute).mock.calls.flatMap(([, request]) =>
+    (
+      request.edits.flatMap((edit) => edit.commands) as Array<{
+        type: string;
+        nodeIds?: string[];
+      }>
+    ).flatMap((command) =>
+      command.type === 'DELETE_NODES' ? (command.nodeIds ?? []) : [],
+    ),
+  );
 }
 /** Every command this page sent to the server. */
 function sentCommands(): Array<{ type: string } & Record<string, unknown>> {
@@ -40,7 +42,9 @@ function sentCommands(): Array<{ type: string } & Record<string, unknown>> {
     .mocked(api.postCanvasExecute)
     .mock.calls.flatMap(
       ([, request]) =>
-        request.commands as Array<{ type: string } & Record<string, unknown>>,
+        request.edits.flatMap((edit) => edit.commands) as Array<
+          { type: string } & Record<string, unknown>
+        >,
     );
 }
 const originalRefresh = useWorkspaceStore.getState().refreshSpaceTitles;
@@ -106,7 +110,7 @@ it('does not undo a newly received child entry before or after ownership metadat
   useCanvasStore
     .getState()
     .applyServerDeltas([{ type: 'INSERT_NODE', node: entry } as Delta], 1, {
-      mutatedNodes: [],
+      mutatedNodeIds: [],
       deletedNodeIds: [],
       contentEditedNodeIds: [],
       deferredFitFrameIds: [],
@@ -383,7 +387,7 @@ it('cuts an ordinary selection by copying it and then removing it, but not durin
     .mocked(api.postCanvasExecute)
     .mock.calls.map(
       ([, request]) =>
-        request.commands as Array<{
+        request.edits.flatMap((edit) => edit.commands) as Array<{
           type: string;
           nodes?: Array<{ id: string }>;
           edges?: Array<{ id: string }>;

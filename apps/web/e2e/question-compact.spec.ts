@@ -3,7 +3,12 @@
 
 import { expect, test, type Locator } from '@playwright/test';
 
-import { openNewCanvas, readViewportTransform, scaleOf } from './helpers';
+import {
+  openNewCanvas,
+  readViewportTransform,
+  scaleOf,
+  editsPerCommand,
+} from './helpers';
 import { NODE_BORDER_WIDTH } from '../src/components/Nodes/design/nodeBoundary';
 
 import type * as ChangesModule from '../src/store/acpThreadChangesStore';
@@ -687,7 +692,7 @@ test('layout Frame Questions stay readable when zoomed out and react to layout c
   const canvasId = new URL(page.url()).pathname.split('/canvas/')[1];
   const created = await page.request.post(`/api/canvas/${canvasId}/execute`, {
     data: {
-      commands: [
+      edits: editsPerCommand([
         {
           type: 'CREATE_NODES',
           nodes: [
@@ -710,7 +715,7 @@ test('layout Frame Questions stay readable when zoomed out and react to layout c
           nodeIds: ['layout-question'],
           parentId: 'layout-frame',
         },
-      ],
+      ]),
       originator: { source: 'agent', threadId: 'layout-card-test' },
     },
   });
@@ -728,12 +733,12 @@ test('layout Frame Questions stay readable when zoomed out and react to layout c
   for (const layoutMode of ['column', 'free', 'row', 'grid', 'column']) {
     const changed = await page.request.post(`/api/canvas/${canvasId}/execute`, {
       data: {
-        commands: [
+        edits: editsPerCommand([
           {
             type: 'MERGE_NODE_DATA',
             patches: [{ nodeId: 'layout-frame', patch: { layoutMode } }],
           },
-        ],
+        ]),
         originator: { source: 'agent', threadId: 'layout-card-test' },
       },
     });
@@ -756,13 +761,13 @@ test('layout Frame Questions stay readable when zoomed out and react to layout c
   for (const parentId of [null, 'layout-frame', null, 'layout-frame']) {
     const changed = await page.request.post(`/api/canvas/${canvasId}/execute`, {
       data: {
-        commands: [
+        edits: editsPerCommand([
           {
             type: 'SET_NODE_PARENT',
             nodeIds: ['layout-question'],
             parentId,
           },
-        ],
+        ]),
         originator: { source: 'agent', threadId: 'layout-card-test' },
       },
     });
@@ -791,7 +796,7 @@ test('real Canvas Question reload keeps the card and takeover mutually exclusive
   const canvasId = new URL(page.url()).pathname.split('/canvas/')[1];
   const response = await page.request.post(`/api/canvas/${canvasId}/execute`, {
     data: {
-      commands: [
+      edits: editsPerCommand([
         {
           type: 'CREATE_NODES',
           nodes: [
@@ -802,7 +807,7 @@ test('real Canvas Question reload keeps the card and takeover mutually exclusive
             },
           ],
         },
-      ],
+      ]),
       originator: { source: 'agent', threadId: 'e2e-question-reload' },
     },
   });
@@ -870,7 +875,7 @@ test('real Canvas C questions preserve authored width and open without moving co
   // mocked Canvas responses and no forced width on the natural-size node.
   const response = await page.request.post(`/api/canvas/${canvasId}/execute`, {
     data: {
-      commands: [
+      edits: editsPerCommand([
         {
           type: 'CREATE_NODES',
           nodes: [
@@ -887,7 +892,7 @@ test('real Canvas C questions preserve authored width and open without moving co
             },
           ],
         },
-      ],
+      ]),
       originator: { source: 'agent', threadId: 'e2e-question-compact-c' },
     },
   });

@@ -17,6 +17,7 @@ function output(applied: boolean): ExecuteOnServerOutput {
     fromVersion: 1,
     toVersion: 2,
     deltas: [],
+    edits: [],
     commands: [],
     results: [
       {

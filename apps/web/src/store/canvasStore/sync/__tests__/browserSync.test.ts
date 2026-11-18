@@ -3,6 +3,8 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { encodeBasis } from '@huabu/shared';
+
 import {
   createBrowserSync,
   ECHO_TIMEOUT_MS,
@@ -40,16 +42,18 @@ function responseTo(
     fromVersion,
     toVersion: fromVersion + 1,
     deltas: [],
-    results: request.commands.map((command) => ({ command, applied: true })),
-    commands: request.commands,
+    edits: request.edits.map((edit) => ({
+      applied: true,
+      results: edit.commands.map(() => ({ applied: true })),
+    })),
     pendingEffects: {
-      mutatedNodes: [],
+      mutatedNodeIds: [],
       deletedNodeIds: [],
       contentEditedNodeIds: [],
       deferredFitFrameIds: [],
     },
     operationId: request.operationId,
-  } as PostCanvasExecuteResponse;
+  };
 }
 
 interface Sent {
@@ -57,10 +61,11 @@ interface Sent {
   resolve: (response: PostCanvasExecuteResponse) => void;
 }
 
-function harness(reload: BrowserSyncDeps['reload']) {
+function harness(reload: BrowserSyncDeps['reload'], lineage?: string) {
   const sent: Sent[] = [];
-  const page = { canvasId: SPACE, version: 1 };
+  const page = { canvasId: SPACE, version: 1, ...(lineage ? { lineage } : {}) };
   const applyOwnResponse = vi.fn();
+  const onRejected = vi.fn();
   const sync = createBrowserSync({
     send: (_canvasId, request) =>
       new Promise((resolve) => {
@@ -70,10 +75,10 @@ function harness(reload: BrowserSyncDeps['reload']) {
     getState: () => page,
     applyOwnResponse,
     applyWithheld: vi.fn(),
-    onRejected: vi.fn(),
+    onRejected,
     reload,
   });
-  return { sync, sent, page, applyOwnResponse };
+  return { sync, sent, page, applyOwnResponse, onRejected };
 }
 
 beforeEach(() => {
@@ -228,5 +233,241 @@ describe('the update for a confirmed batch that does not arrive', () => {
     expect(reload).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(RELOAD_RETRY.initialMs);
     expect(reload).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('a replayed answer', () => {
+  /** The first answer was lost; the repeat is answered from the stored outcome. */
+  async function answeredByReplay(reload: BrowserSyncDeps['reload']) {
+    const page = harness(reload);
+    page.sync.submit({
+      canvasId: SPACE,
+      commands: [move(100)],
+      prev: nodeAt(0),
+      next: nodeAt(100),
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    // The version the page has applied is the one the request started from:
+    // with deltas this answer would be applied as the update.
+    const { deltas: _deltas, ...stored } = responseTo(page.sent[0].request, 1);
+    page.sent[0].resolve({ ...stored, replayed: true });
+    await vi.advanceTimersByTimeAsync(0);
+    return page;
+  }
+
+  it('is applied as the update when it is the first answer and carries the deltas', async () => {
+    const reload = vi.fn(async (): Promise<ReloadOutcome> => 'loaded');
+    const { sync, sent, applyOwnResponse } = harness(reload);
+    sync.submit({
+      canvasId: SPACE,
+      commands: [move(100)],
+      prev: nodeAt(0),
+      next: nodeAt(100),
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    const answer = responseTo(sent[0].request, 1);
+    sent[0].resolve(answer);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(applyOwnResponse).toHaveBeenCalledExactlyOnceWith(
+      answer,
+      sent[0].request.operationId,
+    );
+  });
+
+  it('carries no deltas and is not applied as the update; the update on the stream settles the batch', async () => {
+    const reload = vi.fn(async (): Promise<ReloadOutcome> => 'loaded');
+    const { sync, sent, page, applyOwnResponse, onRejected } =
+      await answeredByReplay(reload);
+    expect(applyOwnResponse).not.toHaveBeenCalled();
+    expect(onRejected).not.toHaveBeenCalled();
+    expect(sync.queue.hasPending(SPACE)).toBe(false);
+
+    const own = sync.prepareRemote({
+      deltas: [],
+      localNodes: nodeAt(100).nodes,
+      localEdges: [],
+      operationId: sent[0].request.operationId as string,
+      source: 'ui',
+    });
+    expect(own.own).toBe(true);
+    own.finish();
+    page.version = 2;
+    await vi.advanceTimersByTimeAsync(ECHO_TIMEOUT_MS * 2);
+    expect(reload).not.toHaveBeenCalled();
+    expect(applyOwnResponse).not.toHaveBeenCalled();
+  });
+
+  it('reloads the Space when the update does not arrive either', async () => {
+    const reload = vi.fn(async (): Promise<ReloadOutcome> => 'loaded');
+    const { applyOwnResponse } = await answeredByReplay(reload);
+    await vi.advanceTimersByTimeAsync(ECHO_TIMEOUT_MS - 1);
+    expect(reload).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(reload).toHaveBeenCalledExactlyOnceWith(SPACE);
+    expect(applyOwnResponse).not.toHaveBeenCalled();
+  });
+});
+
+describe('a refused edit', () => {
+  const LINEAGE = '00000000-0000-4000-8000-000000000001';
+  const Y = 'node-y';
+  const recolour = {
+    type: 'MERGE_NODE_DATA',
+    patches: [{ nodeId: Y, patch: { style: { accent: 'red' } } }],
+  } as CanvasCommand;
+  const both = (x: number, accent: string) => ({
+    nodes: [
+      ...nodeAt(x).nodes,
+      {
+        id: Y,
+        type: 'note',
+        position: { x: 0, y: 300 },
+        data: { style: { accent } },
+      },
+    ],
+    edges: [],
+  });
+  const REFUSED = {
+    applied: false,
+    reason: 'stale-parent',
+    results: [{ applied: false, reason: 'stale-parent' }],
+  };
+  const APPLIED = { applied: true, results: [{ applied: true }] };
+
+  it('is reported once per request; each batch is told its own outcome by its position, and an edit made on top of it names it', async () => {
+    const reload = vi.fn(async (): Promise<ReloadOutcome> => 'loaded');
+    const { sync, sent, applyOwnResponse, onRejected } = harness(
+      reload,
+      LINEAGE,
+    );
+    const basis = encodeBasis(LINEAGE, 1);
+    const told: unknown[] = [];
+    const tell =
+      (name: string) =>
+      (
+        outcome: Parameters<
+          NonNullable<Parameters<typeof sync.submit>[0]['onSettled']>
+        >[0],
+        edit: number,
+      ) =>
+        told.push([
+          name,
+          edit,
+          outcome.kind === 'response'
+            ? outcome.response.edits[edit]
+            : outcome.kind,
+        ]);
+
+    const first = sync.submit({
+      canvasId: SPACE,
+      commands: [move(100)],
+      prev: both(0, 'white'),
+      next: both(100, 'white'),
+      onSettled: tell('first'),
+    });
+    // Made while the first request is on the wire: a move of the same node,
+    // and a change to another node.
+    const onTop = sync.submit({
+      canvasId: SPACE,
+      commands: [move(200)],
+      prev: both(100, 'white'),
+      next: both(200, 'white'),
+      onSettled: tell('on top'),
+    });
+    const unrelated = sync.submit({
+      canvasId: SPACE,
+      commands: [recolour],
+      prev: both(200, 'white'),
+      next: both(200, 'red'),
+      onSettled: tell('unrelated'),
+    });
+    expect(first.edit).toBe(0);
+    expect(onTop.entry).not.toBe(first.entry);
+    expect(unrelated.entry).toBe(onTop.entry);
+    expect([onTop.edit, unrelated.edit]).toEqual([0, 1]);
+    expect(sent[0].request.edits).toEqual([{ basis, commands: [move(100)] }]);
+
+    // The server refuses the first move and writes nothing.
+    sent[0].resolve({
+      ...responseTo(sent[0].request, 1),
+      toVersion: 1,
+      edits: [REFUSED],
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(onRejected).toHaveBeenCalledTimes(1);
+    expect(onRejected.mock.calls[0][0]).toMatchObject({
+      canvasId: SPACE,
+      entry: { id: first.entry.id },
+      outcome: { kind: 'response' },
+    });
+    expect(applyOwnResponse).not.toHaveBeenCalled();
+    // The reload waits for what is still to be sent.
+    expect(reload).not.toHaveBeenCalled();
+
+    // The second request: the move names the refused edit it was made on
+    // top of, by request id and position; the recolour names nothing.
+    expect(sent[1].request.edits).toEqual([
+      {
+        basis,
+        after: [{ operationId: first.entry.id, edit: 0 }],
+        commands: [move(200)],
+      },
+      { basis, commands: [recolour] },
+    ]);
+    const second = {
+      ...responseTo(sent[1].request, 1),
+      edits: [REFUSED, APPLIED],
+    };
+    sent[1].resolve(second);
+    await vi.advanceTimersByTimeAsync(0);
+    // What the request did change is applied; its refused edit is reported.
+    expect(applyOwnResponse).toHaveBeenCalledExactlyOnceWith(
+      second,
+      onTop.entry.id,
+    );
+    expect(onRejected).toHaveBeenCalledTimes(2);
+    expect(onRejected.mock.calls[1][0]).toMatchObject({
+      entry: { id: onTop.entry.id },
+    });
+    expect(told).toEqual([
+      ['first', 0, REFUSED],
+      ['on top', 0, REFUSED],
+      ['unrelated', 1, APPLIED],
+    ]);
+    // One reload for both, once nothing is left to send.
+    expect(reload).toHaveBeenCalledExactlyOnceWith(SPACE);
+  });
+
+  it('is no longer named by an edit made on top of an edit that took effect', async () => {
+    const reload = vi.fn(async (): Promise<ReloadOutcome> => 'loaded');
+    const { sync, sent, onRejected } = harness(reload, LINEAGE);
+    const basis = encodeBasis(LINEAGE, 1);
+    sync.submit({
+      canvasId: SPACE,
+      commands: [move(100)],
+      prev: nodeAt(0),
+      next: nodeAt(100),
+    });
+    sync.submit({
+      canvasId: SPACE,
+      commands: [move(200)],
+      prev: nodeAt(100),
+      next: nodeAt(200),
+    });
+    sync.submit({
+      canvasId: SPACE,
+      commands: [move(300)],
+      prev: nodeAt(200),
+      next: nodeAt(300),
+    });
+    sent[0].resolve(responseTo(sent[0].request, 1));
+    await vi.advanceTimersByTimeAsync(0);
+    // The first request took effect, so only the edit of the same request
+    // is named, by its position alone.
+    expect(sent[1].request.edits).toEqual([
+      { basis, commands: [move(200)] },
+      { basis, after: [{ edit: 0 }], commands: [move(300)] },
+    ]);
+    expect(onRejected).not.toHaveBeenCalled();
   });
 });

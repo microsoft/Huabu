@@ -23,6 +23,7 @@ import {
   type ExecuteOnServerOutput,
 } from './canvas-executor.js';
 import { subscribeCanvasUpdates } from './canvas-sync.js';
+import { expectReplayOf } from './execute-replay.test-support.js';
 import {
   closeStorage,
   createSpace,
@@ -160,7 +161,7 @@ describe('reliable save on SQLite', () => {
 
     expect(first.replayed).toBeUndefined();
     expect(first.toVersion).toBe(2);
-    expect(second).toEqual({ ...first, replayed: true });
+    expectReplayOf(first, second);
     const record = await recordNow();
     expect(record.version).toBe(2);
     expect(record.state.nodes).toHaveLength(4);
@@ -220,7 +221,7 @@ describe('reliable save on SQLite', () => {
     const first = await run([createNote('New')], reviewed);
     const replay = await run([createNote('New')], reviewed);
 
-    expect(replay).toEqual({ ...first, replayed: true });
+    expectReplayOf(first, replay);
     const stored = await space(CANVAS).changes.read(THREAD);
     expect(stored).toEqual(first.changes);
     expect(stored).toHaveLength(1);

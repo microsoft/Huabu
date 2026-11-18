@@ -11,6 +11,8 @@ import {
   type TestInfo,
 } from '@playwright/test';
 
+import { editsPerCommand } from './helpers';
+
 import type * as CanvasStore from '../src/store/canvasStore';
 import type { CreateCanvasResponse } from '@huabu/shared';
 
@@ -94,7 +96,7 @@ async function seedSpace(request: APIRequestContext, title: string) {
   const { canvasId } = (await created.json()) as CreateCanvasResponse;
   const seeded = await request.post(`/api/canvas/${canvasId}/execute`, {
     data: {
-      commands: [
+      edits: editsPerCommand([
         {
           type: 'CREATE_NODES',
           nodes: [X, Y, Z].map((id) => ({
@@ -110,7 +112,7 @@ async function seedSpace(request: APIRequestContext, title: string) {
             size: { width: 300, height: 200 },
           })),
         },
-      ],
+      ]),
       originator: { source: 'ui', tabId: 'e2e-multi-page-sync-seed' },
     },
   });
@@ -877,12 +879,12 @@ async function executeScenario(
   const destination = { x: 600, y: 420 };
   const moved = await request.post(`/api/canvas/${canvasId}/execute`, {
     data: {
-      commands: [
+      edits: editsPerCommand([
         {
           type: 'SET_NODE_GEOMETRY',
           items: [{ nodeId: X, position: destination }],
         },
-      ],
+      ]),
       originator: { source: 'ui', tabId: 'e2e-multi-page-sync-execute' },
     },
   });
@@ -1115,7 +1117,7 @@ test('(j) two pages that measure the same auto-height note report it once and do
   // An auto-height note nobody has rendered yet: it has no measured height.
   const seeded = await request.post(`/api/canvas/${canvasId}/execute`, {
     data: {
-      commands: [
+      edits: editsPerCommand([
         {
           type: 'CREATE_NODES',
           nodes: [
@@ -1137,7 +1139,7 @@ test('(j) two pages that measure the same auto-height note report it once and do
             },
           ],
         },
-      ],
+      ]),
       originator: { source: 'ui', tabId: 'e2e-multi-page-sync-seed' },
     },
   });

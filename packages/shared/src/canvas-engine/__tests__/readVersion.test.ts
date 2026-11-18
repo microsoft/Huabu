@@ -8,10 +8,8 @@ import {
   advanceNodeStamps,
   commandReadTargets,
   createReadVersionAdmission,
-  executeCanvasCommands,
-  readVersionRunsProblem,
+  executeCanvasEdits,
   type NodeStamp,
-  type ReadVersionRun,
 } from '../index.js';
 
 import type { CanvasCommand } from '../../types/canvas/index.js';
@@ -103,37 +101,41 @@ class Space {
   }
 
   /**
-   * One request. `read` is a version for the whole batch (an agent), or one
-   * run per edit (a page); omitted, nothing is checked.
+   * One request. `read` is a version for the whole batch — the legacy
+   * `{ commands, basis }` form, one edit per command — or the edits
+   * themselves; omitted, nothing is checked (one edit per command).
    */
   write(
     commands: CanvasCommand[],
-    read?: number | ReadVersionRun[],
+    read?: number | TestEdit[],
     page?: string,
   ): string[] {
+    const edits: TestEdit[] =
+      typeof read === 'object'
+        ? read
+        : commands.map((command) => ({
+            commands: [command],
+            ...(read === undefined ? {} : { version: read }),
+          }));
     const stamps = { floor: this.floor, nodes: this.stamps };
     const admission =
       read === undefined
         ? null
         : createReadVersionAdmission({
-            commands,
-            ...(typeof read === 'number' ? { version: read } : { runs: read }),
+            edits,
             stamps,
             prestateNodes: this.nodes,
             ...(page ? { page } : {}),
           });
-    const out = executeCanvasCommands(
-      { source: 'ui', commands },
+    const out = executeCanvasEdits(
+      { source: 'ui', edits },
       { nodes: this.nodes, edges: [], canvasId: 'c1' },
-      admission ? { admit: admission.admit } : {},
+      admission ? { admitEdit: admission.admitEdit } : {},
     );
     const next = out.writeResult.nodes;
     if (next !== this.nodes) {
       this.version += 1;
-      const checked =
-        typeof read === 'number' ||
-        (read ?? []).reduce((sum, run) => sum + run.count, 0) ===
-          commands.length;
+      const checked = edits.every((edit) => edit.version !== undefined);
       this.stamps = advanceNodeStamps(
         stamps,
         this.nodes,
@@ -150,18 +152,21 @@ class Space {
     );
   }
 
-  /** A page's edit: one run over all the commands. */
+  /** A page's edit: all the commands, one read version. */
   edit(page: string, version: number, commands: CanvasCommand[]): string[] {
-    return this.write(
-      commands,
-      [{ start: 0, count: commands.length, version }],
-      page,
-    );
+    return this.write(commands, [{ commands, version }], page);
   }
 
   node(id: string): CanvasNode | undefined {
     return this.nodes.find((node) => node.id === id);
   }
+}
+
+interface TestEdit {
+  commands: CanvasCommand[];
+  version?: number;
+  after?: number[];
+  blocked?: boolean;
 }
 
 describe('commandReadTargets — the one list for agents and pages', () => {
@@ -365,15 +370,16 @@ describe('one read version per edit (a page)', () => {
     expect(space.edit(B, 10, [move(M, 50, 60)])).toEqual(['applied']);
   });
 
-  it('judges each run on its own and leaves commands outside every run alone', () => {
+  it('judges each edit on its own and leaves an edit without a read version alone', () => {
     const space = new Space();
     space.write([reparent(N, F)]);
     expect(
       space.write(
-        [move(N, 700, 700), recolour(N), move(M, 50, 60)],
+        [],
         [
-          { start: 0, count: 1, version: 10 },
-          { start: 2, count: 1, version: 10 },
+          { commands: [move(N, 700, 700)], version: 10 },
+          { commands: [recolour(N)] },
+          { commands: [move(M, 50, 60)], version: 10 },
         ],
         B,
       ),
@@ -387,19 +393,14 @@ describe('one read version per edit (a page)', () => {
     ).toEqual(['applied', 'applied']);
   });
 
-  describe('a run made on top of an earlier one', () => {
+  describe('an edit made on top of an earlier one', () => {
     const onTop = (space: Space, version = 10) =>
       space.write(
-        [reparent(N, G), move(M, 5, 5), move(N, 7, 7)],
+        [],
         [
-          { start: 0, count: 1, version },
-          { start: 1, count: 1, version },
-          {
-            start: 2,
-            count: 1,
-            version,
-            after: [{ start: 0, count: 1 }],
-          },
+          { commands: [reparent(N, G)], version },
+          { commands: [move(M, 5, 5)], version },
+          { commands: [move(N, 7, 7)], version, after: [0] },
         ],
         B,
       );
@@ -424,16 +425,11 @@ describe('one read version per edit (a page)', () => {
       const space = new Space();
       expect(
         space.write(
-          // A Frame cannot go into itself.
-          [reparent(F, F), move(F, 7, 7)],
+          [],
           [
-            { start: 0, count: 1, version: 10 },
-            {
-              start: 1,
-              count: 1,
-              version: 10,
-              after: [{ start: 0, count: 1 }],
-            },
+            // A Frame cannot go into itself.
+            { commands: [reparent(F, F)], version: 10 },
+            { commands: [move(F, 7, 7)], version: 10, after: [0] },
           ],
           B,
         ),
@@ -447,10 +443,10 @@ describe('one read version per edit (a page)', () => {
       const space = new Space();
       expect(
         space.write(
-          [move(N, 7, 7), recolour(M)],
+          [],
           [
-            { start: 0, count: 1, version: 10, blocked: true },
-            { start: 1, count: 1, version: 10 },
+            { commands: [move(N, 7, 7)], version: 10, blocked: true },
+            { commands: [recolour(M)], version: 10 },
           ],
           B,
         ),
@@ -551,87 +547,86 @@ describe("a page's own change is not one it has not read", () => {
   });
 });
 
-describe('runs on the wire', () => {
-  const body = (runs: unknown) => ({
-    commands: [move(N, 1, 2)],
-    originator: { source: 'ui' },
-    runs,
-  });
+describe('edits on the wire', () => {
+  const body = (edits: unknown) => ({ edits });
   const OPERATION = '6f1c1e0e-52a5-4f2c-9d0b-7c1d1c9a8a11';
 
-  it('is optional', () => {
-    expect(
-      postCanvasExecuteBodySchema.safeParse({
-        commands: [],
-        originator: { source: 'ui' },
-      }).success,
-    ).toBe(true);
+  it('takes edits with and without a read version, naming earlier edits', () => {
     expect(
       postCanvasExecuteBodySchema.safeParse(
-        body([
-          {
-            start: 0,
-            count: 1,
-            basis: 'b1.x',
-            after: [
-              { start: 0, count: 1 },
-              { operationId: OPERATION, start: 2, count: 3 },
-            ],
-          },
-        ]),
+        body([{ commands: [move(N, 1, 2)] }]),
       ).success,
+    ).toBe(true);
+    expect(
+      postCanvasExecuteBodySchema.safeParse({
+        operationId: OPERATION,
+        originator: { tabId: 'page-1' },
+        edits: [
+          { basis: 'b1.x', commands: [move(N, 1, 2)] },
+          {
+            basis: 'b1.x',
+            commands: [move(N, 3, 4)],
+            after: [{ edit: 0 }, { operationId: OPERATION, edit: 2 }],
+          },
+        ],
+      }).success,
     ).toBe(true);
   });
 
-  it('rejects a malformed run', () => {
-    for (const run of [
-      { start: -1, count: 1, basis: 'b' },
-      { start: 0, count: 0, basis: 'b' },
-      { start: 0, count: 1 },
-      { start: 0, count: 1, basis: '' },
-      { start: 0, count: 1, basis: 'b', extra: true },
-      { start: 0, count: 1, basis: 'b', after: [{ start: 0 }] },
-      {
-        start: 0,
-        count: 1,
-        basis: 'b',
-        after: [{ operationId: 'nope', start: 0, count: 1 }],
-      },
+  it('has no other way to state commands or a read version', () => {
+    // The flat form: no `edits`.
+    expect(
+      postCanvasExecuteBodySchema.safeParse({
+        commands: [move(N, 1, 2)],
+        originator: { source: 'ui' },
+      }).success,
+    ).toBe(false);
+    // An edit holds its commands itself; index arithmetic is gone.
+    expect(
+      postCanvasExecuteBodySchema.safeParse(
+        body([{ start: 0, count: 1, basis: 'b', commands: [move(N, 1, 2)] }]),
+      ).success,
+    ).toBe(false);
+  });
+
+  it('rejects a malformed edit', () => {
+    const commands = [move(N, 1, 2)];
+    for (const edit of [
+      { commands: [] },
+      { basis: 'b' },
+      { basis: '', commands },
+      { basis: 'b', commands, extra: true },
+      { basis: 'b', commands, after: [{}] },
+      { basis: 'b', commands, after: [{ edit: -1 }] },
+      { basis: 'b', commands, after: [{ operationId: 'nope', edit: 0 }] },
     ]) {
-      expect(postCanvasExecuteBodySchema.safeParse(body([run])).success).toBe(
+      expect(postCanvasExecuteBodySchema.safeParse(body([edit])).success).toBe(
         false,
       );
     }
+    expect(postCanvasExecuteBodySchema.safeParse(body([])).success).toBe(false);
   });
 
-  it('reports runs that do not fit the batch', () => {
-    const run = (
-      start: number,
-      count: number,
-      after?: ReadVersionRun['after'],
-    ) => ({
-      start,
-      count,
-      version: 0,
-      ...(after ? { after } : {}),
-    });
-    expect(readVersionRunsProblem([run(0, 2)], 2)).toBeNull();
-    expect(readVersionRunsProblem([run(1, 2)], 2)).toMatch(/does not have/);
-    expect(readVersionRunsProblem([run(0, 2), run(1, 1)], 2)).toMatch(
-      /overlap/,
-    );
-    expect(readVersionRunsProblem([run(1, 1), run(0, 1)], 2)).toMatch(/order/);
+  it('lets an edit of the request come only after an earlier one', () => {
+    const commands = [move(N, 1, 2)];
     expect(
-      readVersionRunsProblem(
-        [run(0, 1), run(1, 1, [{ start: 0, count: 1 }])],
-        2,
-      ),
-    ).toBeNull();
+      postCanvasExecuteBodySchema.safeParse(
+        body([{ commands }, { commands, after: [{ edit: 0 }] }]),
+      ).success,
+    ).toBe(true);
+    for (const edits of [
+      [{ commands, after: [{ edit: 0 }] }],
+      [{ commands, after: [{ edit: 1 }] }, { commands }],
+    ]) {
+      const parsed = postCanvasExecuteBodySchema.safeParse(body(edits));
+      expect(parsed.success).toBe(false);
+      expect(parsed.error?.issues[0]?.message).toMatch(/earlier edit/);
+    }
+    // An edit of an earlier request is looked up, not addressed.
     expect(
-      readVersionRunsProblem(
-        [run(0, 1, [{ start: 1, count: 1 }]), run(1, 1)],
-        2,
-      ),
-    ).toMatch(/earlier run/);
+      postCanvasExecuteBodySchema.safeParse(
+        body([{ commands, after: [{ operationId: OPERATION, edit: 7 }] }]),
+      ).success,
+    ).toBe(true);
   });
 });

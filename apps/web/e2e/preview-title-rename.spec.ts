@@ -3,7 +3,7 @@
 
 import { expect, test } from '@playwright/test';
 
-import { openNewCanvas } from './helpers';
+import { openNewCanvas, editsPerCommand } from './helpers';
 import { installStreams } from './stream-helpers';
 
 import type * as CanvasStore from '../src/store/canvasStore';
@@ -205,7 +205,7 @@ test('tab-owned titles retain content actions and durable rename without duplica
   const canvasId = new URL(page.url()).pathname.split('/').pop();
   const response = await page.request.post(`/api/canvas/${canvasId}/execute`, {
     data: {
-      commands: [
+      edits: editsPerCommand([
         {
           type: 'CREATE_NODES',
           nodes: [
@@ -231,7 +231,7 @@ test('tab-owned titles retain content actions and durable rename without duplica
             },
           ],
         },
-      ],
+      ]),
       originator: { source: 'agent', threadId: 'e2e-preview-title-rename' },
     },
   });

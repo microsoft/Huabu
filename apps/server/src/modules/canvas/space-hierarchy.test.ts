@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import Fastify from 'fastify';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { editsPerCommand } from '@huabu/shared';
 import { invertDelta } from '@huabu/shared/canvas-engine';
 
 import { applyDeltasOnServer, executeOnServer } from './canvas-executor.js';
@@ -496,7 +497,10 @@ describe('Space ownership', () => {
       app.inject({
         method: 'POST',
         url: '/root/execute',
-        payload: { commands: [command], originator: { source: 'ui' } },
+        payload: {
+          edits: editsPerCommand([command]),
+          originator: { source: 'ui' },
+        },
       });
     try {
       const moved = await execute({
@@ -591,14 +595,14 @@ describe('Space ownership', () => {
         url: '/root/execute',
         payload: {
           originator: { source: 'ui' },
-          commands: [
+          edits: editsPerCommand([
             {
               type: 'SET_NODE_GEOMETRY',
               items: [
                 { nodeId: child.parentEntryNodeId, position: { x: 20, y: 30 } },
               ],
             },
-          ],
+          ]),
         },
       });
       expect(response.statusCode, response.body).toBe(200);

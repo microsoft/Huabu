@@ -10,6 +10,8 @@ import {
   type Page,
 } from '@playwright/test';
 
+import { editsPerCommand } from './helpers';
+
 import type * as CanvasStore from '../src/store/canvasStore';
 import type { CreateCanvasResponse } from '@huabu/shared';
 
@@ -58,7 +60,7 @@ async function seedSpace(request: APIRequestContext, title: string) {
   const { canvasId } = (await created.json()) as CreateCanvasResponse;
   const seeded = await request.post(`/api/canvas/${canvasId}/execute`, {
     data: {
-      commands: [
+      edits: editsPerCommand([
         {
           type: 'CREATE_NODES',
           nodes: [
@@ -98,7 +100,7 @@ async function seedSpace(request: APIRequestContext, title: string) {
             },
           ],
         },
-      ],
+      ]),
       originator: { source: 'ui', tabId: 'e2e-content-sync-seed' },
     },
   });

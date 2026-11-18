@@ -2,23 +2,25 @@
 // Licensed under the MIT license.
 
 import {
+  AGENT_CANVAS_COMMAND_TYPES,
   agentCanvasCommandSchema,
   createId,
   type AgentOperationCommand,
+  type RfsExecuteEditsRequest,
   type RfsExecuteRequest,
   type RfsExecuteResponse,
 } from '@huabu/shared';
-import {
-  collectCommandIds,
-  nodeRevision,
-  type Delta,
-} from '@huabu/shared/canvas-engine';
 
 import { prepareAgentCanvasCommands } from '../canvas/agent-command-preparation.js';
 import {
   executeOnServer,
   type ExecuteOnServerOutput,
 } from '../canvas/canvas-executor.js';
+import {
+  outcomeOf,
+  readStoredOutcome,
+  replayedOutput,
+} from '../canvas/execute-outcome.js';
 import { space } from '../storage/index.js';
 import { normalizeSaveKey, type SaveKey } from '../storage/ports/save.js';
 
@@ -70,28 +72,6 @@ function projectCommand(command: CanvasCommand): AgentOperationCommand {
   return agentCanvasCommandSchema.parse(command);
 }
 
-function collectDeltaIds(
-  deltas: readonly Delta[],
-  nodeIds: Set<string>,
-  edgeIds: Set<string>,
-  deletedNodeIds: Set<string>,
-  deletedEdgeIds: Set<string>,
-): void {
-  for (const delta of deltas) {
-    if (delta.type === 'INSERT_NODE') nodeIds.add(delta.node.id);
-    else if (delta.type === 'REPLACE_NODE') nodeIds.add(delta.next.id);
-    else if (delta.type === 'DELETE_NODE') {
-      nodeIds.add(delta.node.id);
-      deletedNodeIds.add(delta.node.id);
-    } else if (delta.type === 'INSERT_EDGE') edgeIds.add(delta.edge.id);
-    else if (delta.type === 'REPLACE_EDGE') edgeIds.add(delta.next.id);
-    else if (delta.type === 'DELETE_EDGE') {
-      edgeIds.add(delta.edge.id);
-      deletedEdgeIds.add(delta.edge.id);
-    }
-  }
-}
-
 export interface ExecuteRfsOptions {
   /** Thread to attribute Review records to; the caller has verified it. */
   hostThreadId?: string;
@@ -104,9 +84,18 @@ export interface ExecuteRfsOptions {
   principalId?: string;
 }
 
+/**
+ * Execute an Agent's request.
+ *
+ * `{ commands, basis? }` is the form Agents are told about. It is run as
+ * one edit per command, each quoting `basis`: a command that fails is
+ * skipped and the others still apply (the conversion is the executor's,
+ * `preparedEditsOf`). `{ edits }` states the edits itself; there an edit
+ * takes effect as a whole or not at all.
+ */
 export async function executeRfsCommands(
   canvasId: string,
-  request: RfsExecuteRequest,
+  request: RfsExecuteRequest | RfsExecuteEditsRequest,
   opts?: ExecuteRfsOptions,
 ): Promise<RfsExecuteResponse> {
   // Only a label. With a request id the executor stores the label it ran
@@ -118,9 +107,22 @@ export async function executeRfsCommands(
   }
   const output = await executeOnServer({
     canvasId,
-    commands: prepareAgentCanvasCommands(request.commands, {
-      allowCallerRevisions: true,
-    }),
+    ...('edits' in request
+      ? {
+          edits: request.edits.map((edit) => ({
+            ...(edit.basis !== undefined ? { basis: edit.basis } : {}),
+            ...(edit.after?.length ? { after: edit.after } : {}),
+            commands: prepareAgentCanvasCommands(edit.commands, {
+              allowCallerRevisions: true,
+            }),
+          })),
+        }
+      : {
+          commands: prepareAgentCanvasCommands(request.commands, {
+            allowCallerRevisions: true,
+          }),
+          ...(request.basis !== undefined ? { basis: request.basis } : {}),
+        }),
     // Authorship stays server-owned (`source: 'agent'`); the caller only
     // correlates which host conversation the write belongs to via the
     // `X-Huabu-Host-Thread-Id` header. When the route found that thread in
@@ -134,6 +136,9 @@ export async function executeRfsCommands(
     agentCovers: true,
     ...(hostThreadId ? { computeChanges: true } : {}),
     ...(opts?.claimedThreadId ? { claimedThreadId: opts.claimedThreadId } : {}),
+    // This entry's response echoes the executed commands, so a repeat of
+    // the request has to find them in the stored outcome.
+    echoCommands: true,
     ...(request.operationId !== undefined && opts?.principalId
       ? {
           request: {
@@ -142,7 +147,6 @@ export async function executeRfsCommands(
           },
         }
       : {}),
-    ...(request.basis !== undefined ? { basis: request.basis } : {}),
     issueBasis: true,
   });
   return projectRfsExecuteResponse(output, runId);
@@ -170,13 +174,17 @@ export async function lookupRfsExecuteResponse(
 ): Promise<RfsExecuteResponse | null> {
   const stored = await space(canvasId).save.lookup(normalizeSaveKey(key));
   if (!stored) return null;
-  const output = stored.response as ExecuteOnServerOutput;
-  if (typeof output.runId !== 'string') return null;
-  try {
-    return projectRfsExecuteResponse(
-      { ...output, replayed: true },
-      output.runId,
+  const outcome = readStoredOutcome(stored.response);
+  if (!outcome || typeof outcome.runId !== 'string') return null;
+  // Stored by an entry point whose response has no command echo.
+  if (!outcome.commands && !outcome.incomplete) {
+    throw new NotAnRfsExecuteResultError(
+      key.operationId,
+      new Error('The stored outcome keeps no commands'),
     );
+  }
+  try {
+    return projectRfsExecuteResponse(replayedOutput(outcome), outcome.runId);
   } catch (error) {
     throw new NotAnRfsExecuteResultError(key.operationId, error);
   }
@@ -192,67 +200,52 @@ function projectRfsExecuteResponse(
   output: ExecuteOnServerOutput,
   fallbackRunId: string,
 ): RfsExecuteResponse {
-  const nodeIds = new Set<string>();
-  const edgeIds = new Set<string>();
-  const deletedNodeIds = new Set<string>();
-  const deletedEdgeIds = new Set<string>();
-  collectDeltaIds(
-    output.deltas,
-    nodeIds,
-    edgeIds,
-    deletedNodeIds,
-    deletedEdgeIds,
-  );
-  for (const result of output.results) {
-    if (result.applied) collectCommandIds(result.command, nodeIds, edgeIds);
-  }
-  const commands = output.commands.map(projectCommand);
-  const revisionByNodeId = new Map(
-    output.pendingEffects.mutatedNodes.map((node) => [
-      node.id,
-      nodeRevision(node),
-    ]),
-  );
+  // Built from the outcome only, so a repeated request — answered from the
+  // stored outcome — gets the response the first call got.
+  const outcome = outcomeOf(output, true);
+  const commands = (outcome.commands ?? []).map(projectCommand);
 
   return {
-    canvasId: output.canvasId,
-    runId: output.runId ?? fallbackRunId,
-    ...(output.operationId ? { operationId: output.operationId } : {}),
-    ...(output.basis ? { basis: output.basis } : {}),
+    canvasId: outcome.canvasId,
+    runId: outcome.runId ?? fallbackRunId,
+    ...(outcome.operationId ? { operationId: outcome.operationId } : {}),
+    ...(outcome.basis ? { basis: outcome.basis } : {}),
     ...(output.replayed ? { replayed: true as const } : {}),
-    fromVersion: output.fromVersion,
-    toVersion: output.toVersion,
+    fromVersion: outcome.fromVersion,
+    toVersion: outcome.toVersion,
     commands,
-    results: output.results.map((result, index) => {
-      const command = commands[index];
-      if (!command) {
+    results: outcome.results.map((result, index) => {
+      const type = commands[index]?.type ?? result.type;
+      if (!(AGENT_CANVAS_COMMAND_TYPES as readonly string[]).includes(type)) {
         throw new Error('Executor returned a result without a command');
       }
       return {
         index,
-        type: command.type,
+        type: type as (typeof AGENT_CANVAS_COMMAND_TYPES)[number],
         applied: result.applied,
         ...(result.reason ? { reason: result.reason } : {}),
         ...(result.nodes ? { nodes: result.nodes } : {}),
         ...(result.edges ? { edges: result.edges } : {}),
       };
     }),
-    revisions: [...revisionByNodeId].map(([nodeId, rev]) => ({
-      nodeId,
-      rev,
-    })),
-    affected: {
-      nodeIds: [...nodeIds],
-      edgeIds: [...edgeIds],
-      deletedNodeIds: [...deletedNodeIds],
-      deletedEdgeIds: [...deletedEdgeIds],
-    },
-    ...(output.conflicts && output.conflicts.length > 0
+    revisions: outcome.revisions,
+    affected: outcome.affected,
+    ...(outcome.conflicts && outcome.conflicts.length > 0
+      ? { conflicts: outcome.conflicts }
+      : {}),
+    // Only a request that stated its edits is answered per edit; the plain
+    // command list keeps the response it always had.
+    ...(outcome.statedAsEdits
       ? {
-          conflicts: output.conflicts.map(
-            ({ currentContent: _currentContent, ...conflict }) => conflict,
-          ),
+          edits: outcome.edits.map((edit) => ({
+            applied: edit.applied,
+            ...(edit.reason ? { reason: edit.reason } : {}),
+            ...(edit.failedAt !== undefined ? { failedAt: edit.failedAt } : {}),
+            start: edit.start,
+            count: edit.count,
+          })),
         }
       : {}),
+    ...(outcome.incomplete ? { incomplete: true as const } : {}),
   };
 }

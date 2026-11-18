@@ -222,7 +222,7 @@ function catchUpContent(current: Connection): void {
 }
 
 type SyncPendingEffects = {
-  mutatedNodes: Node[];
+  mutatedNodeIds: string[];
   deletedNodeIds: string[];
   contentEditedNodeIds: string[];
   deferredFitFrameIds: string[];
@@ -467,13 +467,20 @@ export const useCanvasSyncStore = create<CanvasSyncState>((set, get) => ({
             skippedNodeIds,
           );
       }
+      // The update names the nodes it changed; this page holds them now.
+      const mutatedIds = new Set(
+        (pendingEffects as SyncPendingEffects).mutatedNodeIds,
+      );
       invalidateUnclaimedAgentHistories(
         canvasId,
-        (pendingEffects as SyncPendingEffects).mutatedNodes.filter(
-          (node) =>
-            (node.data as { status?: unknown } | undefined)?.status ===
-            'running',
-        ),
+        useCanvasStore
+          .getState()
+          .nodes.filter(
+            (node) =>
+              mutatedIds.has(node.id) &&
+              (node.data as { status?: unknown } | undefined)?.status ===
+                'running',
+          ),
       );
     });
   },

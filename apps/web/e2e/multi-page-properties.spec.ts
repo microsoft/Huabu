@@ -10,6 +10,8 @@ import {
   type Page,
 } from '@playwright/test';
 
+import { editsPerCommand } from './helpers';
+
 import type * as CanvasStore from '../src/store/canvasStore';
 import type {
   ArtifactUploadResponse,
@@ -98,7 +100,7 @@ async function seedSpace(request: APIRequestContext, title: string) {
   const { uri } = (await upload.json()) as ArtifactUploadResponse;
   const seeded = await request.post(`/api/canvas/${canvasId}/execute`, {
     data: {
-      commands: [
+      edits: editsPerCommand([
         {
           type: 'CREATE_NODES',
           nodes: [
@@ -134,13 +136,17 @@ async function seedSpace(request: APIRequestContext, title: string) {
             },
           ],
         },
-      ],
+      ]),
       originator: { source: 'ui', tabId: 'e2e-properties-seed' },
     },
   });
   expect(seeded.ok(), await seeded.text()).toBe(true);
   expect(
-    ((await seeded.json()) as { results: Array<{ applied: boolean }> }).results,
+    (
+      (await seeded.json()) as {
+        edits: Array<{ results: Array<{ applied: boolean }> }>;
+      }
+    ).edits.map((edit) => edit.results[0]),
   ).toEqual([expect.objectContaining({ applied: true })]);
   return canvasId;
 }
@@ -208,9 +214,11 @@ async function openDevice(browser: Browser, canvasId: string): Promise<Device> {
     );
     if (path.endsWith('/execute')) {
       const body = request.postDataJSON() as {
-        commands?: Array<Record<string, unknown>>;
+        edits?: Array<{ commands?: Array<Record<string, unknown>> }>;
       } | null;
-      commands.push(...(body?.commands ?? []));
+      commands.push(
+        ...(body?.edits ?? []).flatMap((edit) => edit.commands ?? []),
+      );
     }
   });
   const conflicts: string[] = [];
@@ -1008,7 +1016,7 @@ async function agentWrites(
       : options.expectRev;
   const response = await request.post(`/api/canvas/${canvasId}/execute`, {
     data: {
-      commands: [
+      edits: editsPerCommand([
         {
           type: 'MERGE_NODE_DATA',
           patches: [
@@ -1019,16 +1027,18 @@ async function agentWrites(
             },
           ],
         },
-      ],
+      ]),
       originator: { source: 'agent', threadId: 'e2e-properties-agent' },
     },
   });
   expect(response.ok(), await response.text()).toBe(true);
   const body = (await response.json()) as {
-    results: Array<{ applied: boolean; reason?: string }>;
+    edits: Array<{ results: Array<{ applied: boolean; reason?: string }> }>;
     nodeContentRevisions?: Record<string, string>;
   };
-  expect(body.results).toEqual([expect.objectContaining({ applied: true })]);
+  expect(body.edits.map((edit) => edit.results[0])).toEqual([
+    expect.objectContaining({ applied: true }),
+  ]);
   // The response names the revision of what the server stored.
   expect(body.nodeContentRevisions?.[nodeId]).toBe(
     await storedRevision(request, canvasId, nodeId),
@@ -1304,7 +1314,7 @@ test('an agent adds a tag right after page B saved the body, without a revision 
   for (const expectRev of [readBefore, undefined]) {
     const refused = await request.post(`/api/canvas/${canvasId}/execute`, {
       data: {
-        commands: [
+        edits: editsPerCommand([
           {
             type: 'MERGE_NODE_DATA',
             patches: [
@@ -1315,15 +1325,15 @@ test('an agent adds a tag right after page B saved the body, without a revision 
               },
             ],
           },
-        ],
+        ]),
         originator: { source: 'agent', threadId: 'e2e-properties-agent' },
       },
     });
     expect(refused.ok(), await refused.text()).toBe(true);
     const body = (await refused.json()) as {
-      results: Array<{ applied: boolean; reason?: string }>;
+      edits: Array<{ results: Array<{ applied: boolean; reason?: string }> }>;
     };
-    expect(body.results).toEqual([
+    expect(body.edits.map((edit) => edit.results[0])).toEqual([
       expect.objectContaining({ applied: false, reason: 'conflict' }),
     ]);
   }

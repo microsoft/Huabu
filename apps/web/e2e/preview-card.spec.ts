@@ -5,7 +5,7 @@ import { readFile } from 'node:fs/promises';
 
 import { expect, test } from '@playwright/test';
 
-import { openNewCanvas } from './helpers';
+import { openNewCanvas, editsPerCommand } from './helpers';
 
 for (const nodeType of ['pdf', 'web']) {
   test(`${nodeType} Retry owns keyboard navigation and preserves native activation`, async ({
@@ -32,7 +32,7 @@ for (const nodeType of ['pdf', 'web']) {
       `/api/canvas/${canvasId}/execute`,
       {
         data: {
-          commands: [
+          edits: editsPerCommand([
             {
               type: 'CREATE_NODES',
               nodes: [
@@ -48,7 +48,7 @@ for (const nodeType of ['pdf', 'web']) {
                 },
               ],
             },
-          ],
+          ]),
           originator: { source: 'agent', threadId: 'e2e-preview-retry' },
         },
       },
@@ -149,7 +149,7 @@ for (const accent of ['white', 'teal']) {
       `/api/canvas/${canvasId}/execute`,
       {
         data: {
-          commands: [
+          edits: editsPerCommand([
             {
               type: 'CREATE_NODES',
               nodes: [
@@ -166,7 +166,7 @@ for (const accent of ['white', 'teal']) {
                 },
               ],
             },
-          ],
+          ]),
           originator: { source: 'agent', threadId: 'e2e-preview-divider' },
         },
       },
@@ -277,7 +277,7 @@ for (const nodeType of ['pdf', 'web']) {
       `/api/canvas/${canvasId}/execute`,
       {
         data: {
-          commands: [
+          edits: editsPerCommand([
             {
               type: 'CREATE_NODES',
               nodes: [
@@ -295,7 +295,7 @@ for (const nodeType of ['pdf', 'web']) {
                 },
               ],
             },
-          ],
+          ]),
           originator: { source: 'agent', threadId: 'e2e-reading-corners' },
         },
       },
