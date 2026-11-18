@@ -1098,10 +1098,11 @@ export function buildAgentProcessEnv(
   platform: NodeJS.Platform = process.platform,
 ): NodeJS.ProcessEnv {
   return mergeAgentEnvironment(
-    { ...inherited, AGENTLET_SERVER: server },
+    inherited,
     sessionEnv,
     createBootstrapEnv(Object.entries(bootstrapEnv), platform),
     {
+      AGENTLET_SERVER: server,
       AGENTLET_TOKEN: token,
     },
     platform,

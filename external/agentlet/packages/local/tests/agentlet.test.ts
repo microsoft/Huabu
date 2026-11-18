@@ -122,11 +122,10 @@ describe('spawned agent environment', () => {
   it('preserves ordinary session overrides without any host-specific SDK injection', () => {
     expect(
       buildAgentProcessEnv('ws://daemon.test', 'daemon-token', {}, {
-        AGENTLET_SERVER: 'ws://host.test',
         AGENTLET_SERVICE_SDK_URL: 'file:///tmp/untrusted.js',
       }, {}),
     ).toMatchObject({
-      AGENTLET_SERVER: 'ws://host.test',
+      AGENTLET_SERVER: 'ws://daemon.test',
       AGENTLET_TOKEN: 'daemon-token',
       AGENTLET_SERVICE_SDK_URL: 'file:///tmp/untrusted.js',
     })
