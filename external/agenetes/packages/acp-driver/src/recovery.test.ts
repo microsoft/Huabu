@@ -130,8 +130,7 @@ describe('ACP durable history recovery', () => {
       const { entry } = sessionEntry();
       sessionMocks.ensureAcpSession.mockResolvedValue(entry);
       const resolveRuntimeEnvironment = vi.fn(
-        async (_spec: AcpSpec, context?: AcpRuntimeLaunchContext) => {
-          if (!context) throw new Error('Runtime context was not provided');
+        async (_spec: AcpSpec, context: AcpRuntimeLaunchContext) => {
           expect(context.namespace).toEqual(saved.namespace);
           expect(context.agentletId).toBe('machine-a');
           expect(context.threadId).toEqual(

@@ -213,7 +213,7 @@ export interface AcpRuntimePolicy {
    */
   resolveRuntimeEnvironment?(
     spec: AcpSpec,
-    context?: AcpRuntimeLaunchContext,
+    context: AcpRuntimeLaunchContext,
   ): Promise<Record<string, string | undefined> | undefined>;
 }
 
