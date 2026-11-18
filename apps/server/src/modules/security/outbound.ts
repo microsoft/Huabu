@@ -106,21 +106,124 @@ export function withPublicNetworkOnly<T>(operation: () => Promise<T>) {
   return scope.run(true, operation);
 }
 
-export function isPublicNetworkOnly(): boolean {
-  // Member work also reaches this transport outside the preprocessing pipeline.
+/** Member work also reaches this transport outside the preprocessing pipeline. */
+function isMemberWork(): boolean {
   return scope.getStore() === true || personalSettingsOwner() !== null;
 }
 
 /**
- * `fetch`, restricted for members and inside {@link withPublicNetworkOnly}.
+ * Whether this deployment keeps every content fetch on the public network,
+ * the owner's included. The desktop app sets it: there the Server shares a
+ * machine and a network with the user's other services, and the URLs it
+ * fetches come from web pages and Agent output as often as from the user.
+ */
+function isPublicOnlyDeployment(): boolean {
+  return process.env.HUABU_PUBLIC_NETWORK_ONLY === '1';
+}
+
+export function isPublicNetworkOnly(): boolean {
+  return isMemberWork() || isPublicOnlyDeployment();
+}
+
+function usesProxy(): boolean {
+  const env = process.env;
+  return Boolean(
+    env.HTTPS_PROXY || env.https_proxy || env.HTTP_PROXY || env.http_proxy,
+  );
+}
+
+function fetchFailed(cause: Error): TypeError {
+  return new TypeError('fetch failed', { cause });
+}
+
+/**
+ * Refuse a host this machine knows to be non-public. A name this machine
+ * cannot resolve is left to the proxy: it names nothing on this network.
+ */
+async function assertPublicHost(hostname: string): Promise<void> {
+  const host = hostname.replace(/^\[|\]$/g, '');
+  if (isIP(host)) {
+    if (!isPublicAddress(host)) throw fetchFailed(refused(host));
+    return;
+  }
+  const addresses = await new Promise<LookupAddress[]>((resolve) =>
+    dnsLookup(host, { all: true }, (error, found) =>
+      resolve(error ? [] : found),
+    ),
+  );
+  if (addresses.some(({ address }) => !isPublicAddress(address)))
+    throw fetchFailed(refused(host));
+}
+
+const REDIRECTS = new Set([301, 302, 303, 307, 308]);
+const MAX_REDIRECTS = 20;
+
+/**
+ * A proxy makes the connection, so no address can be checked where it is
+ * made. Each hop is checked before it is sent instead, redirects included.
+ * Unlike the direct guard this leaves the gap between the check and the
+ * proxy's own lookup.
+ */
+async function fetchThroughProxy(
+  input: Parameters<typeof fetch>[0],
+  init?: RequestInit,
+): Promise<Response> {
+  const request = new Request(input, init);
+  if (request.redirect !== 'follow') {
+    await assertPublicHost(new URL(request.url).hostname);
+    return fetch(request);
+  }
+  let url = new URL(request.url);
+  let method = request.method;
+  const headers = new Headers(request.headers);
+  let body = request.body ? await request.arrayBuffer() : undefined;
+  for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+    await assertPublicHost(url.hostname);
+    const response = await fetch(url, {
+      method,
+      headers,
+      body,
+      signal: request.signal,
+      redirect: 'manual',
+    });
+    const location = response.headers.get('location');
+    if (!REDIRECTS.has(response.status) || !location) return response;
+    await response.body?.cancel();
+    const next = new URL(location, url);
+    if (next.protocol !== 'http:' && next.protocol !== 'https:')
+      throw fetchFailed(new Error('Redirect to an unsupported scheme'));
+    if (
+      response.status === 303 ||
+      (response.status !== 307 && response.status !== 308 && method === 'POST')
+    ) {
+      if (method !== 'HEAD') method = 'GET';
+      body = undefined;
+      for (const name of ['content-type', 'content-length', 'content-encoding'])
+        headers.delete(name);
+    }
+    if (next.origin !== url.origin)
+      for (const name of ['authorization', 'cookie', 'proxy-authorization'])
+        headers.delete(name);
+    url = next;
+  }
+  throw fetchFailed(new Error('Too many redirects'));
+}
+
+/**
+ * `fetch`, kept to public addresses for members, inside
+ * {@link withPublicNetworkOnly}, and throughout a public-only deployment.
  * The built-in `fetch` takes the guarded dispatcher, so callers keep its
  * `Response` and `FormData`: SDKs that probe for multipart support (image
  * edits) reject npm undici's, which cannot serialize Node's `FormData`.
+ *
+ * Member work always connects directly, as it did before a deployment could
+ * be public-only. The owner's fetches keep the configured proxy.
  */
-export const outboundFetch: typeof fetch = (input, init) =>
-  isPublicNetworkOnly()
-    ? fetch(input, {
-        ...init,
-        dispatcher: publicOnlyAgent,
-      } as RequestInit)
-    : fetch(input, init);
+export const outboundFetch: typeof fetch = (input, init) => {
+  if (!isPublicNetworkOnly()) return fetch(input, init);
+  if (!isMemberWork() && usesProxy()) return fetchThroughProxy(input, init);
+  return fetch(input, {
+    ...init,
+    dispatcher: publicOnlyAgent,
+  } as RequestInit);
+};

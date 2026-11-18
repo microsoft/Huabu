@@ -3,7 +3,16 @@
 
 import { createServer } from 'node:http';
 
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from 'vitest';
 
 import {
   isPublicAddress,
@@ -196,5 +205,125 @@ it('applies the same connection-time guard to member model discovery and inferen
       },
     });
     await expect(memberModelFetch(url)).rejects.toThrow(REFUSED);
+  });
+});
+
+describe('public-only deployment', () => {
+  const PROXY_NAMES = [
+    'HTTPS_PROXY',
+    'https_proxy',
+    'HTTP_PROXY',
+    'http_proxy',
+  ];
+  let saved: Record<string, string | undefined>;
+  beforeEach(() => {
+    saved = Object.fromEntries(
+      ['HUABU_PUBLIC_NETWORK_ONLY', ...PROXY_NAMES].map((name) => [
+        name,
+        process.env[name],
+      ]),
+    );
+    for (const name of PROXY_NAMES) delete process.env[name];
+    process.env.HUABU_PUBLIC_NETWORK_ONLY = '1';
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    for (const [name, value] of Object.entries(saved))
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+  });
+
+  it('refuses the owner the Server network, by address, by name and by redirect', async () => {
+    const before = requests;
+    await expect(outboundFetch(`http://127.0.0.1:${port}/`)).rejects.toThrow(
+      REFUSED,
+    );
+    await expect(outboundFetch(`http://localhost:${port}/`)).rejects.toThrow(
+      REFUSED,
+    );
+    const loader = new WebLoader();
+    await expect(loader.load(`http://localhost:${port}/hop`)).rejects.toThrow();
+    expect(requests).toBe(before);
+  });
+
+  it('checks every hop itself when a proxy makes the connections', async () => {
+    process.env.HTTPS_PROXY = 'http://proxy.invalid:8080';
+    const hops: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: URL, init: RequestInit) => {
+        hops.push(`${init.method} ${url}`);
+        expect(init.redirect).toBe('manual');
+        if (url.pathname === '/final') return new Response('public page');
+        return new Response(null, {
+          status: 302,
+          headers: {
+            Location:
+              url.pathname === '/inward'
+                ? `http://127.0.0.1:${port}/`
+                : 'http://93.184.215.14/final',
+          },
+        });
+      }),
+    );
+    const before = requests;
+
+    await expect(outboundFetch(`http://127.0.0.1:${port}/`)).rejects.toThrow(
+      REFUSED,
+    );
+    await expect(outboundFetch(`http://localhost:${port}/`)).rejects.toThrow(
+      REFUSED,
+    );
+    expect(hops).toEqual([]);
+
+    const response = await outboundFetch('http://93.184.215.14/start');
+    expect(await response.text()).toBe('public page');
+    await expect(outboundFetch('http://93.184.215.14/inward')).rejects.toThrow(
+      REFUSED,
+    );
+    expect(hops).toEqual([
+      'GET http://93.184.215.14/start',
+      'GET http://93.184.215.14/final',
+      'GET http://93.184.215.14/inward',
+    ]);
+    expect(requests).toBe(before);
+  });
+
+  it('leaves a name this machine cannot resolve to the proxy', async () => {
+    process.env.HTTPS_PROXY = 'http://proxy.invalid:8080';
+    const proxied = vi.fn(async () => new Response('resolved by the proxy'));
+    vi.stubGlobal('fetch', proxied);
+    const response = await outboundFetch('http://unresolvable.invalid/');
+    expect(await response.text()).toBe('resolved by the proxy');
+  });
+
+  it('drops credentials when a proxied redirect changes origin', async () => {
+    process.env.HTTPS_PROXY = 'http://proxy.invalid:8080';
+    const seen: (string | null)[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: URL, init: RequestInit) => {
+        seen.push(new Headers(init.headers).get('authorization'));
+        return url.hostname === '93.184.215.14'
+          ? new Response(null, {
+              status: 307,
+              headers: { Location: 'http://8.8.8.8/' },
+            })
+          : new Response('ok');
+      }),
+    );
+    await outboundFetch('http://93.184.215.14/', {
+      headers: { Authorization: 'Bearer secret' },
+    });
+    expect(seen).toEqual(['Bearer secret', null]);
+  });
+
+  it('still connects member work directly behind a proxy', async () => {
+    process.env.HTTPS_PROXY = 'http://proxy.invalid:8080';
+    const before = requests;
+    await expect(
+      withPublicNetworkOnly(() => outboundFetch(`http://127.0.0.1:${port}/`)),
+    ).rejects.toThrow(REFUSED);
+    expect(requests).toBe(before);
   });
 });

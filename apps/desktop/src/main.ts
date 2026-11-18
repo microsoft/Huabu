@@ -632,6 +632,9 @@ function buildServerEnv(port: number): NodeJS.ProcessEnv {
     // when its authoritative storage/disk/workspaces.json does not exist.
     HUABU_LEGACY_WORKSPACE_STORE: join(userData, 'workspace.json'),
     HUABU_SECRET_BRIDGE: '1',
+    // Content fetches (web pages, imported files, inlined images) stay off
+    // this machine and its network. Model endpoints are not content fetches.
+    HUABU_PUBLIC_NETWORK_ONLY: '1',
     ...(webDistPath ? { WEB_DIST_PATH: webDistPath } : {}),
     NODE_ENV: IS_DEV ? 'development' : 'production',
   };
