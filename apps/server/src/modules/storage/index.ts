@@ -112,6 +112,26 @@ export type {
 export type { SqliteSpaceSubstrate } from './backends/sqlite/space-extension.js';
 export type { DiskSpaceTree } from './backends/disk/space-tree.js';
 export type { DiskSpaceImport } from './backends/disk/space-import.js';
+/**
+ * Server records: the Server's own state, owned by no Workspace, kept by the
+ * configured structured backend (docs/proposals/server-records.md).
+ */
+export {
+  getServerRecords,
+  initServerRecords,
+  ServerRecords,
+  setServerRecordsForTesting,
+} from './storage.js';
+export {
+  isServerRecordOwner,
+  SERVER_RECORDS,
+  ServerRecordError,
+} from './ports/server-records.js';
+export type {
+  ServerRecordKey,
+  ServerRecordName,
+  ServerRecordStore,
+} from './ports/server-records.js';
 export {
   parseStorageProfile,
   StorageProfileError,

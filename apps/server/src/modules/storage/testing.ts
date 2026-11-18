@@ -25,8 +25,9 @@ import { inject } from 'vitest';
 
 import { setWorkspacePath } from '../workspace.js';
 import { prepareAzureTestEnvironment } from './backends/azure/test-support.js';
+import { DiskServerRecordStore } from './backends/disk/server-records.js';
 import { preparePostgresTestEnvironment } from './backends/postgres/test-support.js';
-import { closeStorage, initStorage } from './storage.js';
+import { closeStorage, initStorage, ServerRecords } from './storage.js';
 
 import type { StorageProfile } from './profile.js';
 import type { Storage } from './storage.js';
@@ -217,4 +218,9 @@ export function forEachProductProfile(
   for (const profile of PRODUCT_STORAGE_PROFILES) {
     body(profile, describeProfile(profile));
   }
+}
+
+/** Server records kept as files in `dataDir`, exactly as the Disk profile keeps them. */
+export function diskServerRecords(dataDir: string): ServerRecords {
+  return new ServerRecords(new DiskServerRecordStore(() => dataDir));
 }

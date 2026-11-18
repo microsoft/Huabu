@@ -2,6 +2,7 @@
 // Licensed under the MIT license.
 
 import { SqliteStoreContext } from './database.js';
+import { SqliteServerRecordStore } from './server-records.js';
 import {
   createSqliteTestFile,
   installDeltaAbortTrigger,
@@ -10,6 +11,7 @@ import {
   readSqliteDeltaLog,
 } from './test-support.js';
 import { SqliteWorkspaceRepository } from './workspace-repository.js';
+import { describeServerRecordStoreContract } from '../../ports/contracts/server-records.contract.js';
 import { describeSpaceExtensionContract } from '../../ports/contracts/space-extension.contract.js';
 import { describeSpaceLogsContract } from '../../ports/contracts/space-logs.contract.js';
 import { describeSpaceNodesContract } from '../../ports/contracts/space-nodes.contract.js';
@@ -213,6 +215,28 @@ describeWorkspaceRepositoryContract('SQLite', async () => {
     create: (name: string) => repository.create(name),
     cleanup: () => {
       context.close();
+      file.remove();
+    },
+  };
+});
+
+describeServerRecordStoreContract('SQLite', async () => {
+  const file = createSqliteTestFile('huabu-sqlite-server-records-contract-');
+  const contexts = [new SqliteStoreContext(file.filename)];
+  const open = async () => {
+    const context = contexts.at(-1)!;
+    const store = new SqliteServerRecordStore(context);
+    await store.init();
+    return store;
+  };
+  return {
+    store: await open(),
+    reopen: async () => {
+      contexts.push(new SqliteStoreContext(file.filename));
+      return open();
+    },
+    cleanup: () => {
+      for (const context of contexts) context.close();
       file.remove();
     },
   };

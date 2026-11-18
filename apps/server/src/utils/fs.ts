@@ -16,7 +16,9 @@
 import { randomUUID } from 'node:crypto';
 import {
   appendFileSync,
+  chmodSync,
   closeSync,
+  fsyncSync,
   fstatSync,
   ftruncateSync,
   mkdirSync,
@@ -243,15 +245,47 @@ export async function renameOverWithRetry(
   }
 }
 
+/** How {@link atomicWriteText} creates the file it publishes. */
+export interface AtomicWriteOptions {
+  /**
+   * POSIX permission bits for the new file, such as `0o600` for credentials.
+   * Omitted, the file gets the default mode filtered by the process umask.
+   * Applied best effort on platforms without POSIX modes.
+   */
+  mode?: number;
+  /**
+   * Flush the contents to stable storage before the rename publishes them,
+   * so a crash cannot leave a renamed but empty file. Costs one `fsync`.
+   */
+  durable?: boolean;
+}
+
 /** Atomic write of a UTF-8 text file. */
-export function atomicWriteText(filePath: string, contents: string): void {
+export function atomicWriteText(
+  filePath: string,
+  contents: string,
+  options: AtomicWriteOptions = {},
+): void {
   mkdirp(path.dirname(filePath));
   const tmp = path.join(
     path.dirname(filePath),
     `.${path.basename(filePath)}.tmp-${process.pid}-${randomUUID()}`,
   );
   try {
-    writeFileSync(tmp, contents, 'utf-8');
+    const fd = openSync(tmp, 'wx', options.mode ?? 0o666);
+    try {
+      writeFileSync(fd, contents, 'utf-8');
+      if (options.durable) fsyncSync(fd);
+    } finally {
+      closeSync(fd);
+    }
+    if (options.mode !== undefined) {
+      try {
+        chmodSync(tmp, options.mode);
+      } catch {
+        // Best effort on platforms that do not support POSIX modes.
+      }
+    }
     renameOverWithRetrySync(tmp, filePath);
   } catch (error) {
     // A failed rename (locked destination, EISDIR, permissions, ...) must not

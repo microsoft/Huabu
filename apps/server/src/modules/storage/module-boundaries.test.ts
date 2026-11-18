@@ -99,6 +99,7 @@ describe('storage module tree', () => {
       'space-lifecycle-admission.ts',
       'storage.delete-space.remote.test.ts',
       'storage.lifecycle.remote.test.ts',
+      'storage.server-records.test.ts',
       'storage.ts',
       'storage.workspaces.remote.test.ts',
       'testing.ts',

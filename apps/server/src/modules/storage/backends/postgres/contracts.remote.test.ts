@@ -2,9 +2,11 @@
 // Licensed under the MIT license.
 
 import { PostgresStoreContext } from './database.js';
+import { PostgresServerRecordStore } from './server-records.js';
 import { PostgresStructuredStore } from './structured-store.js';
 import { openPostgresTestStore } from './test-support.js';
 import { PostgresWorkspaceRepository } from './workspace-repository.js';
+import { describeServerRecordStoreContract } from '../../ports/contracts/server-records.contract.js';
 import { describeSpaceExtensionContract } from '../../ports/contracts/space-extension.contract.js';
 import { describeSpaceLogsContract } from '../../ports/contracts/space-logs.contract.js';
 import { describeSpaceNodesContract } from '../../ports/contracts/space-nodes.contract.js';
@@ -201,5 +203,29 @@ describeWorkspaceRepositoryContract('Postgres', async () => {
     repository,
     create: (name: string) => repository.create(name),
     cleanup: h.cleanup,
+  };
+});
+
+describeServerRecordStoreContract('Postgres', async () => {
+  const h = await openPostgresTestStore(false);
+  const peers: PostgresStoreContext[] = [];
+  const store = new PostgresServerRecordStore(h.context);
+  await store.init();
+  return {
+    store,
+    reopen: async () => {
+      const context = new PostgresStoreContext(h.config);
+      peers.push(context);
+      const reopened = new PostgresServerRecordStore(context);
+      await reopened.init();
+      return reopened;
+    },
+    cleanup: async () => {
+      try {
+        for (const peer of peers) await peer.close();
+      } finally {
+        await h.cleanup();
+      }
+    },
   };
 });

@@ -27,6 +27,9 @@ import { rm } from 'node:fs/promises';
 
 import { stripLegacyPortalTopology } from '@huabu/shared';
 
+import { getDataDir } from '../../data-dir.js';
+import { createKeyedMutex } from '../../utils/keyed-mutex.js';
+import { getLogger } from '../../utils/logger.js';
 import {
   commitWorkspaceIdentity,
   getWorkspaceHandle,
@@ -40,17 +43,20 @@ import {
   workspaceRegistryPath,
 } from './backends/disk/data-dir.js';
 import { canvasRoot } from './backends/disk/layout.js';
+import { DiskServerRecordStore } from './backends/disk/server-records.js';
 import { stageDiskSpaceImport } from './backends/disk/space-import.js';
 import { diskSpaceTree } from './backends/disk/space-tree.js';
 import { DiskStructuredStore } from './backends/disk/structured-store.js';
 import { DiskWorkspaceRepository } from './backends/disk/workspace-repository.js';
 import { PostgresStoreContext } from './backends/postgres/database.js';
+import { PostgresServerRecordStore } from './backends/postgres/server-records.js';
 import { PostgresStructuredStore } from './backends/postgres/structured-store.js';
 import { PostgresWorkspaceRepository } from './backends/postgres/workspace-repository.js';
 import {
   SqliteStoreContext,
   sqliteDatabasePath,
 } from './backends/sqlite/database.js';
+import { SqliteServerRecordStore } from './backends/sqlite/server-records.js';
 import { SqliteStructuredStore } from './backends/sqlite/structured-store.js';
 import { SqliteWorkspaceRepository } from './backends/sqlite/workspace-repository.js';
 import { hasStorageCapability } from './capabilities.js';
@@ -59,6 +65,10 @@ import {
   withSpaceHierarchyLock,
 } from '../canvas/write-coordinator.js';
 import { spaceBlobAreas } from './ports/blob.js';
+import {
+  assertServerRecordKey,
+  serverRecordId,
+} from './ports/server-records.js';
 import {
   parseStorageProfile,
   requiresExplicitInit,
@@ -86,9 +96,14 @@ import type {
 } from './ports/blob.js';
 import type { StorageHealth } from './ports/common.js';
 import type {
+  ServerRecordKey,
+  ServerRecordStore,
+} from './ports/server-records.js';
+import type {
   SpaceCreateResult,
   SpaceDeleteFinishResult,
   SpaceHandle,
+  StructuredBackendKind,
   StructuredStore,
 } from './ports/structured.js';
 import type {
@@ -374,6 +389,9 @@ let current: Storage | null = null;
 let workspaces: WorkspaceRepository | null = null;
 let sqlite: SqliteStoreContext | null = null;
 let postgres: PostgresStoreContext | null = null;
+let serverRecords: ServerRecords | null = null;
+/** The environment {@link serverRecords} was opened from, when opened explicitly. */
+let serverRecordsEnvironment: NodeJS.ProcessEnv | null = null;
 // World ids per Workspace for backends without folders. Several Workspaces
 // are open at once in Bubble mode, each with its own World.
 const worldCanvasIds = new Map<string, string>();
@@ -661,6 +679,12 @@ export async function initStorage(
     ]);
     const failure = initialized.find((result) => result.status === 'rejected');
     if (failure?.status === 'rejected') throw failure.reason;
+    // Normally opened already, before credentials; a caller that chose an
+    // explicit profile gets records for that profile too.
+    if (serverRecords?.kind !== profile.structured.kind) {
+      serverRecords = await openServerRecords(profile, process.env);
+      serverRecordsEnvironment = null;
+    }
     await ensureActiveWorkspace(profile);
     return storage;
   } catch (error) {
@@ -824,6 +848,8 @@ export async function closeStorage(): Promise<void> {
   const postgresContext = postgres;
   current = null;
   workspaces = null;
+  serverRecords = null;
+  serverRecordsEnvironment = null;
   sqlite = null;
   postgres = null;
   worldCanvasIds.clear();
@@ -1062,5 +1088,176 @@ export function setStorageForTesting(storage: Storage | null): () => void {
   current = storage;
   return () => {
     current = previous;
+  };
+}
+
+// ─── Server records ─────────────────────────────────────────────────────────
+//
+// The Server's own state, owned by no Workspace (ports/server-records.ts,
+// docs/proposals/server-records.md). Records follow the structured backend
+// and borrow its connection, so a database profile keeps them as rows beside
+// the Workspaces. Credentials are records and are read before the Server
+// binds, so records open before the rest of storage: they need only the
+// profile, which comes from the environment alone.
+
+const log = getLogger('storage');
+
+/**
+ * The application's view of server records: the adapter's synchronous reads,
+ * plus writes that never lose one another.
+ */
+export class ServerRecords {
+  readonly #serialize = createKeyedMutex<string>();
+
+  constructor(readonly store: ServerRecordStore) {}
+
+  get kind(): StructuredBackendKind {
+    return this.store.kind;
+  }
+
+  /** The latest acknowledged value, or `null` when never written. */
+  get(key: ServerRecordKey): unknown {
+    return this.store.get(assertServerRecordKey(key));
+  }
+
+  /** Replace a record, after every earlier write to it has settled. */
+  async put(key: ServerRecordKey, value: unknown): Promise<void> {
+    await this.update(key, () => value);
+  }
+
+  /**
+   * Read-modify-write one record. `change` receives the latest acknowledged
+   * value (`null` when never written) and returns the replacement; it runs
+   * only after every earlier write to this record has settled, so two
+   * concurrent changes both apply. A throwing `change` writes nothing.
+   *
+   * @returns the value written.
+   */
+  update<T>(key: ServerRecordKey, change: (current: unknown) => T): Promise<T> {
+    assertServerRecordKey(key);
+    return this.#serialize(serverRecordId(key), async () => {
+      const next = change(this.store.get(key));
+      await this.store.put(key, next);
+      return next;
+    });
+  }
+}
+
+function buildServerRecordStore(
+  profile: StorageProfile,
+  dataDir: () => string,
+): ServerRecordStore {
+  switch (profile.structured.kind) {
+    case 'disk':
+      return new DiskServerRecordStore(dataDir);
+    case 'sqlite':
+      return new SqliteServerRecordStore(sqliteConnection());
+    case 'postgres':
+      return new PostgresServerRecordStore(postgresConnection());
+    default:
+      throw new Error(
+        `Unsupported structured backend: ${profile.structured.kind}`,
+      );
+  }
+}
+
+/**
+ * Copy every record that exists in `source` and not yet in `target`.
+ *
+ * Records are never deleted, so a record present in `target` is newer than
+ * any file an earlier version wrote, and once every file has been copied this
+ * does nothing: running it on each start is the same as running it once. A
+ * damaged file fails startup rather than being dropped, because it may be the
+ * only copy of a credential.
+ *
+ * @returns how many records were copied.
+ */
+export async function importServerRecords(
+  target: ServerRecordStore,
+  source: ServerRecordStore,
+): Promise<number> {
+  let imported = 0;
+  for (const key of await source.keys()) {
+    if (target.get(key) !== null) continue;
+    await target.put(key, source.get(key));
+    imported += 1;
+  }
+  return imported;
+}
+
+/**
+ * Open server records for the structured backend `env` selects. Idempotent
+ * for the same environment.
+ *
+ * `env` chooses the backend and the data directory, which setup passes
+ * explicitly; database connections are the process's, as they are for the
+ * rest of storage. On a database backend this also imports the records an
+ * earlier version kept as files in the data directory.
+ */
+export async function initServerRecords(
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<ServerRecords> {
+  if (serverRecords && serverRecordsEnvironment === env) return serverRecords;
+  const profile = parseStorageProfile(env);
+  validateStorageProfile(profile);
+  serverRecords = await openServerRecords(profile, env);
+  serverRecordsEnvironment = env;
+  return serverRecords;
+}
+
+async function openServerRecords(
+  profile: StorageProfile,
+  env: NodeJS.ProcessEnv,
+): Promise<ServerRecords> {
+  const dataDir = () => getDataDir(env);
+  const store = buildServerRecordStore(profile, dataDir);
+  await store.init();
+  if (store.kind !== 'disk') {
+    const imported = await importServerRecords(
+      store,
+      new DiskServerRecordStore(dataDir),
+    );
+    if (imported > 0)
+      log.info(
+        { imported, backend: store.kind },
+        'Imported server records from the data directory',
+      );
+  }
+  return new ServerRecords(store);
+}
+
+/**
+ * The process's server records.
+ *
+ * Disk needs no connection, so it opens on first use, exactly as the Disk
+ * profile does on the on-demand path. A database backend must have been
+ * opened by an awaited {@link initServerRecords} during startup.
+ */
+export function getServerRecords(): ServerRecords {
+  if (serverRecords) return serverRecords;
+  const profile = activeProfile();
+  if (profile.structured.kind !== 'disk')
+    throw new StorageProfileError(
+      `Server records were used before initServerRecords(). The ` +
+        `"${profile.structured.kind}" structured backend has a connection to ` +
+        `open. Call initServerRecords() during startup.`,
+    );
+  serverRecords = new ServerRecords(new DiskServerRecordStore());
+  return serverRecords;
+}
+
+/** For tests that need specific records. Returns the restore function. */
+export function setServerRecordsForTesting(
+  records: ServerRecords | null,
+): () => void {
+  const previous = {
+    records: serverRecords,
+    environment: serverRecordsEnvironment,
+  };
+  serverRecords = records;
+  serverRecordsEnvironment = null;
+  return () => {
+    serverRecords = previous.records;
+    serverRecordsEnvironment = previous.environment;
   };
 }
