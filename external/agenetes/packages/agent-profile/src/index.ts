@@ -4,6 +4,8 @@ export {
 } from './create.js';
 export { AgentProfileRegistry } from './registry.js';
 export {
+  decodeAgentProfileRegistry,
+  encodeAgentProfileRegistry,
   FileAgentProfileRegistryStore,
   InMemoryAgentProfileRegistryStore,
 } from './store.js';

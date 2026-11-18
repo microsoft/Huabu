@@ -18,7 +18,7 @@ export function mountAgentProfileRegistry(
   if (configured) return;
   configured = true;
   app.addHook('onReady', async () => {
-    instance = createAgentProfileRegistry(options);
+    instance = await createAgentProfileRegistry(options);
   });
   app.addHook('preClose', async () => {
     instance?.dispose();

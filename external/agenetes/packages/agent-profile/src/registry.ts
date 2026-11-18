@@ -55,6 +55,11 @@ export function harnessProfile(
 
 export class AgentProfileRegistry {
   private state: AgentProfileRegistryState;
+  /**
+   * Mutations run one at a time, each against the state the previous one
+   * committed, because a store acknowledges a save asynchronously.
+   */
+  private mutations: Promise<unknown> = Promise.resolve();
   private readonly subscriptions = new Set<{
     handler: AgentProfileRegistryChangeHandler;
     onError: AgentProfileRegistryChangeErrorHandler;
@@ -64,7 +69,7 @@ export class AgentProfileRegistry {
     private readonly generateId: () => string = randomUUID,
     private readonly canAccess: (profile: AgentProfile) => boolean = () => true,
   ) {
-    this.state = parseState(store.load());
+    this.state = parseState(store.load() ?? { profiles: [] });
   }
   dispose(): void {
     this.subscriptions.clear();
@@ -102,140 +107,162 @@ export class AgentProfileRegistry {
       ...(executionRevision === undefined ? {} : { executionRevision }),
     };
   }
-  createProfile(input: CreateAgentProfileInput): AgentProfile {
-    if (
-      input.launchKind !== 'acp-command' &&
-      input.launchKind !== 'acp-harness'
-    )
-      throw new AgentProfileError(
-        'invalid_profile_kind',
-        'Only ACP command or harness Profiles are supported',
-      );
-    const profile =
-      input.launchKind === 'acp-command'
-        ? commandProfile(input, this.generateId)
-        : harnessProfile(input, this.generateId);
-    profile.revision = 0;
-    profile.executionRevision = 0;
-    if (!this.canAccess(profile))
-      throw new AgentProfileError(
-        'profile_not_found',
-        'Agent Profile is unavailable',
-      );
-    if (this.state.profiles.some((entry) => entry.id === profile.id))
-      throw new AgentProfileError(
-        'profile_conflict',
-        `Agent Profile already exists: ${profile.id}`,
-      );
-    this.commit({ profiles: [...this.state.profiles, profile] });
-    return structuredClone(profile);
-  }
-  importCommandProfiles(inputs: CreateAcpCommandProfileInput[]): string[] {
-    const profiles = structuredClone(this.state.profiles);
-    const imported = inputs.map((input) =>
-      commandProfile(input, this.generateId),
-    );
-    for (const profile of imported) {
+  createProfile(input: CreateAgentProfileInput): Promise<AgentProfile> {
+    return this.mutate(async () => {
+      if (
+        input.launchKind !== 'acp-command' &&
+        input.launchKind !== 'acp-harness'
+      )
+        throw new AgentProfileError(
+          'invalid_profile_kind',
+          'Only ACP command or harness Profiles are supported',
+        );
+      const profile =
+        input.launchKind === 'acp-command'
+          ? commandProfile(input, this.generateId)
+          : harnessProfile(input, this.generateId);
+      profile.revision = 0;
+      profile.executionRevision = 0;
       if (!this.canAccess(profile))
         throw new AgentProfileError(
           'profile_not_found',
           'Agent Profile is unavailable',
         );
-      const existing = profiles.find(({ id }) => id === profile.id);
-      if (existing && !this.canAccess(existing))
+      if (this.state.profiles.some((entry) => entry.id === profile.id))
         throw new AgentProfileError(
           'profile_conflict',
           `Agent Profile already exists: ${profile.id}`,
         );
-      if (existing?.revision !== undefined)
-        profile.revision = existing.revision;
-      if (existing?.executionRevision !== undefined)
-        profile.executionRevision = existing.executionRevision;
-      if (existing && !isDeepStrictEqual(existing, profile))
-        throw new AgentProfileError(
-          'profile_conflict',
-          `Conflicting Agent Profile ID: ${profile.id}`,
-        );
-      if (!existing) profiles.push(profile);
-    }
-    if (profiles.length !== this.state.profiles.length)
-      this.commit({ profiles });
-    return imported.map(({ id }) => id);
+      await this.commit({ profiles: [...this.state.profiles, profile] });
+      return structuredClone(profile);
+    });
   }
-  patchProfile(id: string, input: PatchAgentProfileInput): AgentProfile {
-    if (
-      Object.keys(input).some(
-        (key) =>
-          ![
-            'alias',
-            'metadata',
-            'customData',
-            'workingDirPath',
-            'launch',
-            'expectedRevision',
-          ].includes(key),
-      )
-    )
-      throw new AgentProfileError(
-        'invalid_profile_patch',
-        'Profile launch identity is immutable',
+  importCommandProfiles(
+    inputs: CreateAcpCommandProfileInput[],
+  ): Promise<string[]> {
+    return this.mutate(async () => {
+      const profiles = structuredClone(this.state.profiles);
+      const imported = inputs.map((input) =>
+        commandProfile(input, this.generateId),
       );
-    const current = this.requireProfile(id);
-    if (input.expectedRevision !== undefined) {
+      for (const profile of imported) {
+        if (!this.canAccess(profile))
+          throw new AgentProfileError(
+            'profile_not_found',
+            'Agent Profile is unavailable',
+          );
+        const existing = profiles.find(({ id }) => id === profile.id);
+        if (existing && !this.canAccess(existing))
+          throw new AgentProfileError(
+            'profile_conflict',
+            `Agent Profile already exists: ${profile.id}`,
+          );
+        if (existing?.revision !== undefined)
+          profile.revision = existing.revision;
+        if (existing?.executionRevision !== undefined)
+          profile.executionRevision = existing.executionRevision;
+        if (existing && !isDeepStrictEqual(existing, profile))
+          throw new AgentProfileError(
+            'profile_conflict',
+            `Conflicting Agent Profile ID: ${profile.id}`,
+          );
+        if (!existing) profiles.push(profile);
+      }
+      if (profiles.length !== this.state.profiles.length)
+        await this.commit({ profiles });
+      return imported.map(({ id }) => id);
+    });
+  }
+  patchProfile(
+    id: string,
+    input: PatchAgentProfileInput,
+  ): Promise<AgentProfile> {
+    return this.mutate(async () => {
       if (
-        !Number.isSafeInteger(input.expectedRevision) ||
-        input.expectedRevision < 0
+        Object.keys(input).some(
+          (key) =>
+            ![
+              'alias',
+              'metadata',
+              'customData',
+              'workingDirPath',
+              'launch',
+              'expectedRevision',
+            ].includes(key),
+        )
       )
         throw new AgentProfileError(
           'invalid_profile_patch',
-          'expectedRevision must be a nonnegative safe integer',
+          'Profile launch identity is immutable',
         );
-      if (input.expectedRevision !== (current.revision ?? 0))
+      const current = this.requireProfile(id);
+      if (input.expectedRevision !== undefined) {
+        if (
+          !Number.isSafeInteger(input.expectedRevision) ||
+          input.expectedRevision < 0
+        )
+          throw new AgentProfileError(
+            'invalid_profile_patch',
+            'expectedRevision must be a nonnegative safe integer',
+          );
+        if (input.expectedRevision !== (current.revision ?? 0))
+          throw new AgentProfileError(
+            'profile_conflict',
+            'Agent Profile changed; reload before editing',
+          );
+      }
+      const next = structuredClone(current);
+      if (input.workingDirPath !== undefined)
+        next.workingDirPath = input.workingDirPath;
+      if (input.launch !== undefined) next.launch = input.launch;
+      if (input.alias !== undefined) next.alias = input.alias;
+      if (input.metadata === null) delete next.metadata;
+      else if (input.metadata !== undefined) next.metadata = input.metadata;
+      if (input.customData === null) delete next.customData;
+      else if (input.customData !== undefined)
+        next.customData = input.customData;
+      const profile = parseProfile(next);
+      if (
+        profile.launch.kind !== current.launch.kind ||
+        (profile.launch.kind === 'acp-harness' &&
+          current.launch.kind === 'acp-harness' &&
+          profile.launch.harnessId !== current.launch.harnessId)
+      )
         throw new AgentProfileError(
-          'profile_conflict',
-          'Agent Profile changed; reload before editing',
+          'invalid_profile_patch',
+          'Profile wrapper identity is immutable',
         );
-    }
-    const next = structuredClone(current);
-    if (input.workingDirPath !== undefined)
-      next.workingDirPath = input.workingDirPath;
-    if (input.launch !== undefined) next.launch = input.launch;
-    if (input.alias !== undefined) next.alias = input.alias;
-    if (input.metadata === null) delete next.metadata;
-    else if (input.metadata !== undefined) next.metadata = input.metadata;
-    if (input.customData === null) delete next.customData;
-    else if (input.customData !== undefined) next.customData = input.customData;
-    const profile = parseProfile(next);
-    if (
-      profile.launch.kind !== current.launch.kind ||
-      (profile.launch.kind === 'acp-harness' &&
-        current.launch.kind === 'acp-harness' &&
-        profile.launch.harnessId !== current.launch.harnessId)
-    )
-      throw new AgentProfileError(
-        'invalid_profile_patch',
-        'Profile wrapper identity is immutable',
-      );
-    if (isDeepStrictEqual(current, profile)) return structuredClone(current);
-    profile.revision = (current.revision ?? 0) + 1;
-    if (
-      profile.workingDirPath !== current.workingDirPath ||
-      !isDeepStrictEqual(profile.launch, current.launch)
-    )
-      profile.executionRevision = (current.executionRevision ?? 0) + 1;
-    this.commit({
-      profiles: this.state.profiles.map((entry) =>
-        entry.id === id ? profile : entry,
-      ),
+      if (isDeepStrictEqual(current, profile)) return structuredClone(current);
+      profile.revision = (current.revision ?? 0) + 1;
+      if (
+        profile.workingDirPath !== current.workingDirPath ||
+        !isDeepStrictEqual(profile.launch, current.launch)
+      )
+        profile.executionRevision = (current.executionRevision ?? 0) + 1;
+      await this.commit({
+        profiles: this.state.profiles.map((entry) =>
+          entry.id === id ? profile : entry,
+        ),
+      });
+      return structuredClone(profile);
     });
-    return structuredClone(profile);
   }
-  deleteProfile(id: string): boolean {
-    if (!this.getProfile(id)) return false;
-    const profiles = this.state.profiles.filter((profile) => profile.id !== id);
-    if (profiles.length === this.state.profiles.length) return false;
-    this.commit({ profiles });
-    return true;
+  deleteProfile(id: string): Promise<boolean> {
+    return this.mutate(async () => {
+      if (!this.getProfile(id)) return false;
+      const profiles = this.state.profiles.filter(
+        (profile) => profile.id !== id,
+      );
+      if (profiles.length === this.state.profiles.length) return false;
+      await this.commit({ profiles });
+      return true;
+    });
+  }
+  /** Run one mutation after every earlier one has committed or failed. */
+  private mutate<T>(operation: () => Promise<T>): Promise<T> {
+    const result = this.mutations.then(operation, operation);
+    this.mutations = result.catch(() => undefined);
+    return result;
   }
   private requireProfile(id: string): AgentProfile {
     const profile = this.getProfile(id);
@@ -246,9 +273,10 @@ export class AgentProfileRegistry {
       );
     return profile;
   }
-  private commit(state: AgentProfileRegistryState): void {
+  /** Publish `state` only after the store has acknowledged it. */
+  private async commit(state: AgentProfileRegistryState): Promise<void> {
     const next = parseState(state);
-    this.store.save(next);
+    await this.store.save(next);
     this.state = next;
     for (const { handler, onError } of this.subscriptions) {
       try {

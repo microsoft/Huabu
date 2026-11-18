@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { rmSync } from 'node:fs';
 import { resolve } from 'node:path';
 
+import { FileAgentProfileRegistryStore } from '@agenetes/agent-profile';
 import Fastify from 'fastify';
 import { describe, expect, it } from 'vitest';
 
@@ -14,7 +15,7 @@ describe('Profile mounting', () => {
   it('mounts without machine control or SecretStore and does not resurrect deleted legacy Profiles', async () => {
     const storageDir = resolve(`.mount-test-${randomUUID()}`);
     const options = {
-      storageDir,
+      store: new FileAgentProfileRegistryStore(storageDir),
       legacyCommandProfiles: [
         {
           id: 'legacy',
@@ -32,7 +33,7 @@ describe('Profile mounting', () => {
       expect(getAgentProfileRegistry()?.listSelectableProfileIds()).toEqual([
         'legacy',
       ]);
-      getAgentProfileRegistry()?.deleteProfile('legacy');
+      await getAgentProfileRegistry()?.deleteProfile('legacy');
       await app.close();
       expect(getAgentProfileRegistry()).toBeNull();
       app = Fastify();

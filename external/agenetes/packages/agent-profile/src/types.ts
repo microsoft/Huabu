@@ -70,9 +70,16 @@ export interface AgentProfileRegistryState {
   profiles: AgentProfile[];
 }
 
+/**
+ * Where a registry keeps its state. The host chooses the medium; the
+ * registry only needs a synchronous read of the last acknowledged state and
+ * an acknowledged write.
+ */
 export interface AgentProfileRegistryStore {
-  load(): AgentProfileRegistryState;
-  save(state: AgentProfileRegistryState): void;
+  /** The last saved state, or `null` when nothing was ever saved. */
+  load(): AgentProfileRegistryState | null;
+  /** Resolves once `state` is durable and `load()` returns it. */
+  save(state: AgentProfileRegistryState): Promise<void>;
 }
 
 export type AgentProfileRegistryChangeHandler = () => void;

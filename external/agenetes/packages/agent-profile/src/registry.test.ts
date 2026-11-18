@@ -23,21 +23,21 @@ const input: CreateAgentProfileInput = {
 };
 
 describe('AgentProfileRegistry', () => {
-  it('persists hidden Profiles without selecting them and preserves legacy visibility', () => {
+  it('persists hidden Profiles without selecting them and preserves legacy visibility', async () => {
     const store = new InMemoryAgentProfileRegistryStore();
     const registry = new AgentProfileRegistry(store);
-    registry.createProfile(input);
-    registry.createProfile({ ...input, id: 'hidden', visible: false });
+    await registry.createProfile(input);
+    await registry.createProfile({ ...input, id: 'hidden', visible: false });
     const restored = new AgentProfileRegistry(store);
     expect(restored.listProfiles()).toHaveLength(2);
     expect(restored.getProfile('hidden')?.visible).toBe(false);
     expect(restored.listSelectableProfileIds()).toEqual(['ordinary']);
     expect(restored.snapshotProfile('hidden').profileId).toBe('hidden');
   });
-  it('persists structured launch separately from editable metadata and clones immutable snapshots', () => {
+  it('persists structured launch separately from editable metadata and clones immutable snapshots', async () => {
     const store = new InMemoryAgentProfileRegistryStore();
     const registry = new AgentProfileRegistry(store);
-    const created = registry.createProfile({
+    const created = await registry.createProfile({
       launchKind: 'acp-harness',
       id: 'harness',
       alias: 'Typed',
@@ -56,12 +56,12 @@ describe('AgentProfileRegistry', () => {
     const snapshot = registry.snapshotProfile('harness');
     if (created.launch.kind === 'acp-harness')
       created.launch.options!.autoApprove = false;
-    registry.patchProfile('harness', { metadata: { cliId: 'custom' } });
+    await registry.patchProfile('harness', { metadata: { cliId: 'custom' } });
     expect(registry.snapshotProfile('harness')).toEqual(snapshot);
     expect(
       new AgentProfileRegistry(store).getProfile('harness')?.launch,
     ).toEqual(expected);
-    registry.patchProfile('harness', {
+    await registry.patchProfile('harness', {
       launch: {
         kind: 'acp-harness',
         harnessId: 'copilot',
@@ -79,11 +79,11 @@ describe('AgentProfileRegistry', () => {
     { autoApprove: 'yes' },
     { model: 'not-a-launch-option' },
     { argv: [] },
-  ])('rejects unsupported harness options %j', (options) => {
+  ])('rejects unsupported harness options %j', async (options) => {
     const registry = new AgentProfileRegistry(
       new InMemoryAgentProfileRegistryStore(),
     );
-    expect(() =>
+    await expect(
       registry.createProfile({
         launchKind: 'acp-harness',
         alias: 'Invalid',
@@ -92,22 +92,22 @@ describe('AgentProfileRegistry', () => {
         harnessId: 'copilot',
         options,
       } as CreateAgentProfileInput),
-    ).toThrow();
+    ).rejects.toThrow();
     expect(registry.listProfiles()).toEqual([]);
   });
 
-  it('preserves immutable launch identity, opaque data and stable IDs through CRUD', () => {
+  it('preserves immutable launch identity, opaque data and stable IDs through CRUD', async () => {
     const store = new InMemoryAgentProfileRegistryStore();
     const registry = new AgentProfileRegistry(store);
     const changed = vi.fn();
     const unsubscribe = registry.onChange(changed);
-    const created = registry.createProfile(input);
+    const created = await registry.createProfile(input);
     expect(registry.listSelectableProfileIds()).toEqual(['ordinary']);
     expect(created.customData).toEqual(input.customData);
     created.alias = 'not persisted';
     expect(registry.getProfile('ordinary')?.alias).toBe('My agent');
     const snapshot = registry.snapshotProfile('ordinary');
-    registry.patchProfile('ordinary', {
+    await registry.patchProfile('ordinary', {
       alias: 'Renamed',
       customData: { untouched: ' value ' },
     });
@@ -121,54 +121,57 @@ describe('AgentProfileRegistry', () => {
     expect(restored.getProfile('ordinary')).toEqual(
       registry.getProfile('ordinary'),
     );
-    registry.patchProfile('ordinary', { metadata: null, customData: null });
+    await registry.patchProfile('ordinary', {
+      metadata: null,
+      customData: null,
+    });
     expect(registry.getProfile('ordinary')).not.toHaveProperty('customData');
     expect(registry.getProfile('ordinary')).not.toHaveProperty('metadata');
-    expect(registry.deleteProfile('ordinary')).toBe(true);
-    expect(registry.deleteProfile('ordinary')).toBe(false);
+    expect(await registry.deleteProfile('ordinary')).toBe(true);
+    expect(await registry.deleteProfile('ordinary')).toBe(false);
     expect(snapshot.launch).toEqual({
       kind: 'acp-command',
       command: input.command,
     });
     expect(changed).toHaveBeenCalledTimes(4);
     unsubscribe();
-    registry.createProfile(input);
+    await registry.createProfile(input);
     expect(changed).toHaveBeenCalledTimes(4);
   });
 
-  it('imports atomically and fails explicitly for conflicting IDs', () => {
+  it('imports atomically and fails explicitly for conflicting IDs', async () => {
     const registry = new AgentProfileRegistry(
       new InMemoryAgentProfileRegistryStore(),
     );
-    expect(registry.importCommandProfiles([input])).toEqual(['ordinary']);
-    expect(registry.importCommandProfiles([input])).toEqual(['ordinary']);
-    expect(() =>
+    expect(await registry.importCommandProfiles([input])).toEqual(['ordinary']);
+    expect(await registry.importCommandProfiles([input])).toEqual(['ordinary']);
+    await expect(
       registry.importCommandProfiles([
         { ...input, id: 'new' },
         { ...input, command: 'different' },
       ]),
-    ).toThrow(expect.objectContaining({ code: 'profile_conflict' }));
+    ).rejects.toThrow(expect.objectContaining({ code: 'profile_conflict' }));
     expect(registry.listSelectableProfileIds()).toEqual(['ordinary']);
   });
 
-  it('does not conflict on revision fields when importing an identical existing Profile', () => {
+  it('does not conflict on revision fields when importing an identical existing Profile', async () => {
     const registry = new AgentProfileRegistry(
       new InMemoryAgentProfileRegistryStore(),
     );
-    registry.createProfile(input);
-    registry.patchProfile('ordinary', { alias: 'Another alias' });
-    registry.patchProfile('ordinary', { alias: input.alias });
-    expect(registry.importCommandProfiles([input])).toEqual(['ordinary']);
+    await registry.createProfile(input);
+    await registry.patchProfile('ordinary', { alias: 'Another alias' });
+    await registry.patchProfile('ordinary', { alias: input.alias });
+    expect(await registry.importCommandProfiles([input])).toEqual(['ordinary']);
     expect(registry.getProfile('ordinary')).toMatchObject({
       revision: 2,
       executionRevision: 0,
     });
   });
 
-  it('edits commands and cwd with revision fencing while preserving snapshots and opaque data', () => {
+  it('edits commands and cwd with revision fencing while preserving snapshots and opaque data', async () => {
     const store = new InMemoryAgentProfileRegistryStore();
     const registry = new AgentProfileRegistry(store);
-    expect(registry.createProfile(input)).toMatchObject({
+    expect(await registry.createProfile(input)).toMatchObject({
       revision: 0,
       executionRevision: 0,
     });
@@ -177,7 +180,7 @@ describe('AgentProfileRegistry', () => {
     const save = vi.spyOn(store, 'save');
     registry.onChange(changed);
     expect(
-      registry.patchProfile('ordinary', {
+      await registry.patchProfile('ordinary', {
         expectedRevision: 0,
         alias: input.alias,
       }),
@@ -185,7 +188,7 @@ describe('AgentProfileRegistry', () => {
     expect(save).not.toHaveBeenCalled();
     expect(changed).not.toHaveBeenCalled();
     expect(
-      registry.patchProfile('ordinary', {
+      await registry.patchProfile('ordinary', {
         expectedRevision: 0,
         workingDirPath: '/new',
         launch: { kind: 'acp-command', command: 'new-agent --acp' },
@@ -195,17 +198,17 @@ describe('AgentProfileRegistry', () => {
       executionRevision: 1,
       customData: input.customData,
     });
-    expect(() =>
+    await expect(
       registry.patchProfile('ordinary', {
         expectedRevision: 0,
         alias: 'Stale',
       }),
-    ).toThrow(expect.objectContaining({ code: 'profile_conflict' }));
-    expect(() =>
+    ).rejects.toThrow(expect.objectContaining({ code: 'profile_conflict' }));
+    await expect(
       registry.patchProfile('ordinary', { expectedRevision: 0 }),
-    ).toThrow(expect.objectContaining({ code: 'profile_conflict' }));
+    ).rejects.toThrow(expect.objectContaining({ code: 'profile_conflict' }));
     expect(
-      registry.patchProfile('ordinary', {
+      await registry.patchProfile('ordinary', {
         expectedRevision: 1,
         alias: 'Fresh',
       }),
@@ -226,7 +229,7 @@ describe('AgentProfileRegistry', () => {
     expect(changed).toHaveBeenCalledTimes(2);
   });
 
-  it('loads legacy revisions without migrating and treats absence as zero', () => {
+  it('loads legacy revisions without migrating and treats absence as zero', async () => {
     const original = {
       id: 'legacy',
       alias: 'Legacy',
@@ -243,24 +246,24 @@ describe('AgentProfileRegistry', () => {
     expect(registry.snapshotProfile('legacy')).not.toHaveProperty(
       'executionRevision',
     );
-    expect(registry.patchProfile('legacy', { expectedRevision: 0 })).toEqual(
-      original,
-    );
+    expect(
+      await registry.patchProfile('legacy', { expectedRevision: 0 }),
+    ).toEqual(original);
     expect(save).not.toHaveBeenCalled();
     expect(
-      registry.patchProfile('legacy', {
+      await registry.patchProfile('legacy', {
         expectedRevision: 0,
         workingDirPath: '/other',
       }),
     ).toMatchObject({ revision: 1, executionRevision: 1 });
   });
 
-  it('rejects wrapper/machine switching and malformed revision guards', () => {
+  it('rejects wrapper/machine switching and malformed revision guards', async () => {
     const registry = new AgentProfileRegistry(
       new InMemoryAgentProfileRegistryStore(),
     );
-    registry.createProfile(input);
-    registry.createProfile({
+    await registry.createProfile(input);
+    await registry.createProfile({
       launchKind: 'acp-harness',
       id: 'typed',
       alias: 'Typed',
@@ -277,13 +280,15 @@ describe('AgentProfileRegistry', () => {
       ['ordinary', { expectedRevision: 0.5 }],
       ['ordinary', { expectedRevision: '0' }],
     ] as const) {
-      expect(() =>
+      await expect(
         registry.patchProfile(id, patch as unknown as PatchAgentProfileInput),
-      ).toThrow(expect.objectContaining({ code: 'invalid_profile_patch' }));
+      ).rejects.toThrow(
+        expect.objectContaining({ code: 'invalid_profile_patch' }),
+      );
     }
   });
 
-  it('does not mutate memory or notify listeners when persistence fails', () => {
+  it('does not mutate memory or notify listeners when persistence fails', async () => {
     const store = new InMemoryAgentProfileRegistryStore();
     const registry = new AgentProfileRegistry(store);
     const changed = vi.fn();
@@ -291,12 +296,40 @@ describe('AgentProfileRegistry', () => {
     vi.spyOn(store, 'save').mockImplementation(() => {
       throw new Error('disk full');
     });
-    expect(() => registry.createProfile(input)).toThrow('disk full');
+    await expect(registry.createProfile(input)).rejects.toThrow('disk full');
     expect(registry.listProfiles()).toEqual([]);
     expect(changed).not.toHaveBeenCalled();
   });
 
-  it('validates ordinary inputs and isolates failing subscribers', () => {
+  it('runs concurrent mutations in order against acknowledged state', async () => {
+    const store = new InMemoryAgentProfileRegistryStore();
+    const save = store.save.bind(store);
+    const saved: string[][] = [];
+    vi.spyOn(store, 'save').mockImplementation(async (state) => {
+      // Acknowledge on a later macrotask, as a database round trip would.
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      saved.push(state.profiles.map(({ id }) => id));
+      await save(state);
+    });
+    const registry = new AgentProfileRegistry(store);
+    const failed = registry.patchProfile('missing', { alias: 'x' });
+    await Promise.all([
+      registry.createProfile(input),
+      registry.createProfile({ ...input, id: 'second' }),
+      expect(failed).rejects.toThrow('not found'),
+      registry.patchProfile('second', { alias: 'Renamed' }),
+    ]);
+    expect(saved).toEqual([
+      ['ordinary'],
+      ['ordinary', 'second'],
+      ['ordinary', 'second'],
+    ]);
+    expect(new AgentProfileRegistry(store).getProfile('second')?.alias).toBe(
+      'Renamed',
+    );
+  });
+
+  it('validates ordinary inputs and isolates failing subscribers', async () => {
     const registry = new AgentProfileRegistry(
       new InMemoryAgentProfileRegistryStore(),
     );
@@ -305,25 +338,29 @@ describe('AgentProfileRegistry', () => {
     registry.onChange(() => {
       throw failure;
     }, onError);
-    registry.createProfile(input);
+    await registry.createProfile(input);
     expect(onError).toHaveBeenCalledWith(failure);
-    expect(() => registry.createProfile(input)).toThrow(
+    await expect(registry.createProfile(input)).rejects.toThrow(
       expect.objectContaining({ code: 'profile_conflict' }),
     );
-    expect(() => registry.patchProfile('missing', {})).toThrow(
+    await expect(registry.patchProfile('missing', {})).rejects.toThrow(
       expect.objectContaining({ code: 'profile_not_found' }),
     );
-    expect(() =>
+    await expect(
       registry.createProfile({ ...input, id: 'bad', command: ' ' }),
-    ).toThrow();
+    ).rejects.toThrow();
   });
 });
 
-it('applies host ownership to reads and mutations without discarding other owners', () => {
+it('applies host ownership to reads and mutations without discarding other owners', async () => {
   const store = new InMemoryAgentProfileRegistryStore();
   const all = new AgentProfileRegistry(store);
-  all.createProfile({ ...input, id: 'alice', agentletId: 'alice-device' });
-  all.createProfile({ ...input, id: 'bob', agentletId: 'bob-device' });
+  await all.createProfile({
+    ...input,
+    id: 'alice',
+    agentletId: 'alice-device',
+  });
+  await all.createProfile({ ...input, id: 'bob', agentletId: 'bob-device' });
   const alice = new AgentProfileRegistry(
     store,
     undefined,
@@ -333,22 +370,30 @@ it('applies host ownership to reads and mutations without discarding other owner
   expect(alice.listSelectableProfileIds()).toEqual(['alice']);
   expect(alice.getProfile('bob')).toBeUndefined();
   expect(() => alice.snapshotProfile('bob')).toThrow('not found');
-  expect(() => alice.patchProfile('bob', { alias: 'Stolen' })).toThrow(
+  await expect(alice.patchProfile('bob', { alias: 'Stolen' })).rejects.toThrow(
     'not found',
   );
-  expect(alice.deleteProfile('bob')).toBe(false);
-  expect(() =>
-    alice.createProfile({ ...input, id: 'stolen', agentletId: 'bob-device' }),
-  ).toThrow('unavailable');
-  expect(() =>
-    alice.createProfile({ ...input, id: 'bob', agentletId: 'alice-device' }),
-  ).toThrow('already exists');
-  expect(() =>
+  expect(await alice.deleteProfile('bob')).toBe(false);
+  await expect(
+    alice.createProfile({
+      ...input,
+      id: 'stolen',
+      agentletId: 'bob-device',
+    }),
+  ).rejects.toThrow('unavailable');
+  await expect(
+    alice.createProfile({
+      ...input,
+      id: 'bob',
+      agentletId: 'alice-device',
+    }),
+  ).rejects.toThrow('already exists');
+  await expect(
     alice.importCommandProfiles([
       { ...input, id: 'bob', agentletId: 'alice-device' },
     ]),
-  ).toThrow('already exists');
-  alice.importCommandProfiles([
+  ).rejects.toThrow('already exists');
+  await alice.importCommandProfiles([
     { ...input, id: 'alice-two', agentletId: 'alice-device' },
   ]);
   expect(
