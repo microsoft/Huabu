@@ -135,7 +135,10 @@ export async function runFunctionalText(
         () => ({ ok: true as const }),
         (error: unknown) => {
           cleanupFailure = error;
-          logger.error({ error, profileId }, 'External text task cleanup failed');
+          logger.error(
+            { error, profileId },
+            'External text task cleanup failed',
+          );
           return { ok: false as const, error };
         },
       );
