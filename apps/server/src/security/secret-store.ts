@@ -8,16 +8,20 @@ import {
 import {
   CREDENTIALS_RECORD,
   EncryptedSecretStore,
+  openCredentialEnvelope,
   parseServerMasterKey,
 } from './encrypted-secret-store.js';
 import { EnvironmentSecretStore } from './environment-secret-store.js';
 import { resolveStandaloneMasterKey } from './private-config.js';
 import { SECRET_IDS } from './secret-ids.js';
 import { personalSecretId } from '../modules/identity/personal-settings.js';
+// Not the storage barrel: the Vite dev server loads this module, and only
+// the record composition root loads without the rest of the storage graph.
+import { parseStorageProfile } from '../modules/storage/profile.js';
 import {
   initServerRecords,
-  parseStorageProfile,
-} from '../modules/storage/index.js';
+  readDataDirectoryRecord,
+} from '../modules/storage/server-records.js';
 
 import type { SecretStore } from './secret-store-types.js';
 
@@ -42,7 +46,8 @@ export async function initializeSecretStore(
   const encodedKey = env.HUABU_SECRET_KEY?.trim();
   // Never let a deployment-owned master key reach forked external agents.
   delete env.HUABU_SECRET_KEY;
-  if (!encodedKey && parseStorageProfile(env).structured.kind === 'postgres') {
+  const backend = parseStorageProfile(env).structured.kind;
+  if (!encodedKey && backend === 'postgres') {
     // A generated key is a file in the private configuration directory. With
     // the ciphertext in PostgreSQL that file would be the one thing a
     // replaced container loses, leaving every credential unreadable.
@@ -52,13 +57,24 @@ export async function initializeSecretStore(
         "already has a generated key keeps it in HUABU_CONFIG_DIR's master-key file.",
     );
   }
+  let key = encodedKey ? parseServerMasterKey(encodedKey) : null;
+  // Opening a database upgrades its schema and imports the credentials an
+  // earlier version kept in the data directory, and the earlier version
+  // cannot open the upgraded database. Check the key against those
+  // credentials first, so a wrong key fails with nothing changed.
+  const legacy =
+    backend === 'disk'
+      ? null
+      : await readDataDirectoryRecord(CREDENTIALS_RECORD, env);
+  if (legacy !== null) {
+    key ??= resolveStandaloneMasterKey(true, env);
+    openCredentialEnvelope(legacy, key);
+  }
   const records = await initServerRecords(env);
-  const key = encodedKey
-    ? parseServerMasterKey(encodedKey)
-    : resolveStandaloneMasterKey(
-        (await records.get(CREDENTIALS_RECORD)) !== null,
-        env,
-      );
+  key ??= resolveStandaloneMasterKey(
+    (await records.get(CREDENTIALS_RECORD)) !== null,
+    env,
+  );
   const store = new EncryptedSecretStore(records, key);
   await store.initialize();
   primaryStore = store;

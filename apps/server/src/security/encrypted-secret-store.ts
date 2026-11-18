@@ -97,6 +97,49 @@ export function parseServerMasterKey(encoded: string): Buffer {
   return key;
 }
 
+/** The fingerprint an envelope records for the key it was written under. */
+function credentialKeyId(masterKey: Buffer): string {
+  return createHash('sha256').update(masterKey).digest('hex').slice(0, 16);
+}
+
+/**
+ * Authenticate and decrypt every credential in a stored envelope.
+ *
+ * @throws when the envelope is malformed, was written under another key, or
+ *   any entry fails authentication.
+ */
+export function openCredentialEnvelope(
+  envelope: unknown,
+  masterKey: Buffer,
+): Map<string, string> {
+  const file = parseEncryptedFile(envelope);
+  if (file.keyId !== credentialKeyId(masterKey)) {
+    throw new Error(
+      'HUABU_SECRET_KEY does not match the existing encrypted credentials',
+    );
+  }
+  const result = new Map<string, string>();
+  for (const [id, entry] of Object.entries(file.entries)) {
+    try {
+      const decipher = createDecipheriv(
+        ALGORITHM,
+        masterKey,
+        Buffer.from(entry.iv, 'base64'),
+      );
+      decipher.setAAD(Buffer.from(`${AAD_PREFIX}${id}`, 'utf-8'));
+      decipher.setAuthTag(Buffer.from(entry.tag, 'base64'));
+      const plaintext = Buffer.concat([
+        decipher.update(Buffer.from(entry.ciphertext, 'base64')),
+        decipher.final(),
+      ]).toString('utf-8');
+      result.set(id, plaintext);
+    } catch {
+      throw new Error(`Failed to decrypt credential ${id}`);
+    }
+  }
+  return result;
+}
+
 /**
  * AES-256-GCM credentials for a standalone Server, kept as one envelope in the
  * deployment's `credentials` server record — a file on Disk, a row on SQLite
@@ -110,6 +153,12 @@ export class EncryptedSecretStore implements SecretStore {
 
   private readonly keyId: string;
   private secrets = new Map<string, string>();
+  /**
+   * The previous write, settled. Each write runs from its update through its
+   * read-back to publishing {@link secrets} before the next starts, so a
+   * slower, older verification cannot publish over a newer one.
+   */
+  private writes: Promise<unknown> = Promise.resolve();
 
   constructor(
     private readonly records: ServerRecords,
@@ -118,16 +167,13 @@ export class EncryptedSecretStore implements SecretStore {
     if (masterKey.length !== 32) {
       throw new Error('EncryptedSecretStore requires a 32-byte master key');
     }
-    this.keyId = createHash('sha256')
-      .update(masterKey)
-      .digest('hex')
-      .slice(0, 16);
+    this.keyId = credentialKeyId(masterKey);
   }
 
   async initialize(): Promise<void> {
     const stored = await this.records.get(CREDENTIALS_RECORD);
     if (stored === null) return;
-    this.secrets = this.decryptAll(this.parseOwn(stored));
+    this.secrets = openCredentialEnvelope(stored, this.masterKey);
   }
 
   get(id: string): string | null {
@@ -141,16 +187,28 @@ export class EncryptedSecretStore implements SecretStore {
   /**
    * Persist several values in one record replacement, then read the
    * acknowledged record back, authenticate and decrypt every entry, and only
-   * then publish the new values.
+   * then publish the new values. Writes run one at a time.
    */
-  async setMany(
+  setMany(
     updates: Record<string, string | null>,
     overwrite = true,
+  ): Promise<void> {
+    const write = () => this.write(updates, overwrite);
+    const result = this.writes.then(write, write);
+    this.writes = result.catch(() => undefined);
+    return result;
+  }
+
+  private async write(
+    updates: Record<string, string | null>,
+    overwrite: boolean,
   ): Promise<void> {
     let next = new Map<string, string>();
     await this.records.update(CREDENTIALS_RECORD, (current) => {
       next =
-        current === null ? new Map() : this.decryptAll(this.parseOwn(current));
+        current === null
+          ? new Map()
+          : openCredentialEnvelope(current, this.masterKey);
       for (const [id, value] of Object.entries(updates)) {
         if (!overwrite && next.has(id)) continue;
         if (value === null) next.delete(id);
@@ -159,8 +217,9 @@ export class EncryptedSecretStore implements SecretStore {
       return this.encryptAll(next);
     });
 
-    const verifiedSecrets = this.decryptAll(
-      this.parseOwn(await this.records.get(CREDENTIALS_RECORD)),
+    const verifiedSecrets = openCredentialEnvelope(
+      await this.records.get(CREDENTIALS_RECORD),
+      this.masterKey,
     );
     for (const [id, value] of next) {
       if (verifiedSecrets.get(id) !== value) {
@@ -173,17 +232,6 @@ export class EncryptedSecretStore implements SecretStore {
       );
     }
     this.secrets = verifiedSecrets;
-  }
-
-  /** Parse an envelope and refuse one written under a different key. */
-  private parseOwn(value: unknown): EncryptedSecretFile {
-    const persisted = parseEncryptedFile(value);
-    if (persisted.keyId !== this.keyId) {
-      throw new Error(
-        'HUABU_SECRET_KEY does not match the existing encrypted credentials',
-      );
-    }
-    return persisted;
   }
 
   private encryptAll(secrets: Map<string, string>): EncryptedSecretFile {
@@ -208,28 +256,5 @@ export class EncryptedSecretStore implements SecretStore {
       keyId: this.keyId,
       entries,
     };
-  }
-
-  private decryptAll(file: EncryptedSecretFile): Map<string, string> {
-    const result = new Map<string, string>();
-    for (const [id, entry] of Object.entries(file.entries)) {
-      try {
-        const decipher = createDecipheriv(
-          ALGORITHM,
-          this.masterKey,
-          Buffer.from(entry.iv, 'base64'),
-        );
-        decipher.setAAD(Buffer.from(`${AAD_PREFIX}${id}`, 'utf-8'));
-        decipher.setAuthTag(Buffer.from(entry.tag, 'base64'));
-        const plaintext = Buffer.concat([
-          decipher.update(Buffer.from(entry.ciphertext, 'base64')),
-          decipher.final(),
-        ]).toString('utf-8');
-        result.set(id, plaintext);
-      } catch {
-        throw new Error(`Failed to decrypt credential ${id}`);
-      }
-    }
-    return result;
   }
 }

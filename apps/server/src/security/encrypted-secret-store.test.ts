@@ -5,9 +5,11 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { EncryptedSecretStore } from './encrypted-secret-store.js';
+import { DiskServerRecordStore } from '../modules/storage/backends/disk/server-records.js';
+import { ServerRecords } from '../modules/storage/server-records.js';
 import { diskServerRecords } from '../modules/storage/testing.js';
 
 const directories: string[] = [];
@@ -25,6 +27,28 @@ afterEach(() => {
 });
 
 describe('EncryptedSecretStore', () => {
+  it('publishes both of two concurrent saves', async () => {
+    const dataDir = createDataDir();
+    const records = new ServerRecords(new DiskServerRecordStore(() => dataDir));
+    // A save reads its write back through `get`; the first save's read-back
+    // (after initialization's read) answers last, as a database's may.
+    const get = records.get.bind(records);
+    let reads = 0;
+    vi.spyOn(records, 'get').mockImplementation(async (recordKey) => {
+      const value = await get(recordKey);
+      if (reads++ === 1)
+        await new Promise((resolve) => setTimeout(resolve, 30));
+      return value;
+    });
+    const store = new EncryptedSecretStore(records, key);
+    await store.initialize();
+
+    const ids = ['test:a', 'test:b'];
+    await Promise.all(ids.map((id) => store.set(id, `value-${id}`)));
+
+    for (const id of ids) expect(store.get(id)).toBe(`value-${id}`);
+  });
+
   it('persists authenticated ciphertext without plaintext', async () => {
     const dataDir = createDataDir();
     const store = new EncryptedSecretStore(diskServerRecords(dataDir), key);

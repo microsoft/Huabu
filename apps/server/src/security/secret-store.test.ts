@@ -270,6 +270,42 @@ describe('initializeSecretStore — master key isolation', () => {
   );
 
   it(
+    'refuses a wrong key before a database imports or upgrades anything',
+    async () => {
+      const dataDir = createDataDir();
+      const rightKey = Buffer.alloc(32, 3);
+      const { EncryptedSecretStore } =
+        await import('./encrypted-secret-store.js');
+      const { diskServerRecords } =
+        await import('../modules/storage/testing.js');
+      const earlier = new EncryptedSecretStore(
+        diskServerRecords(dataDir),
+        rightKey,
+      );
+      await earlier.initialize();
+      await earlier.set('integration:test:key', 'private-test-value');
+      process.env.HUABU_DATA_DIR = dataDir;
+      vi.stubEnv('HUABU_STRUCTURED_BACKEND', 'sqlite');
+      process.env.HUABU_SECRET_KEY = Buffer.alloc(32, 4).toString('base64');
+
+      const mod = await import('./secret-store.js');
+      await expect(mod.initializeSecretStore()).rejects.toThrow(
+        'HUABU_SECRET_KEY does not match',
+      );
+      expect(existsSync(join(dataDir, 'storage'))).toBe(false);
+
+      process.env.HUABU_SECRET_KEY = rightKey.toString('base64');
+      await mod.initializeSecretStore();
+      expect(mod.getPersistedSecret('integration:test:key')).toBe(
+        'private-test-value',
+      );
+      const { closeStorage } = await import('../modules/storage/index.js');
+      await closeStorage();
+    },
+    MODULE_RELOAD_TIMEOUT_MS,
+  );
+
+  it(
     'scrubs HUABU_SECRET_KEY from the environment after consuming it',
     async () => {
       process.env.HUABU_DATA_DIR = createDataDir();
