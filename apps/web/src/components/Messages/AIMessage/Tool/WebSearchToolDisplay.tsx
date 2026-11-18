@@ -13,6 +13,7 @@ import { useTranslation } from 'react-i18next';
 
 import { SourceCard, type Source } from './SourceCard';
 import { Button } from '../../../Common/Button';
+import { DeferredDetails } from '../../DeferredDetails';
 
 import type { WebSearchToolPart } from '@huabu/shared';
 
@@ -31,7 +32,11 @@ export function WebSearchToolDisplay({ part }: { part: WebSearchToolPart }) {
 
   if (!toolResponse || toolResponse.status !== 'success') return null;
 
-  if (sources.length === 0) {
+  const count =
+    part.detail?.state === 'deferred'
+      ? (part.detail.summary.count ?? 0)
+      : sources.length;
+  if (count === 0) {
     return (
       <div className="flex justify-start">
         <div className="text-fg-muted border-edge-default bg-surface rounded-md border px-2 py-1 text-xs whitespace-pre-wrap">
@@ -41,7 +46,6 @@ export function WebSearchToolDisplay({ part }: { part: WebSearchToolPart }) {
     );
   }
 
-  const count = sources.length;
   const label = t('messages.reference', { count });
 
   return (
@@ -64,15 +68,19 @@ export function WebSearchToolDisplay({ part }: { part: WebSearchToolPart }) {
 
         {isExpanded && (
           <div className="w-full">
-            <ul className="space-y-2">
-              {sources.map((s) => {
-                return (
-                  <li key={s.url} className="min-w-0">
-                    <SourceCard source={s} />
-                  </li>
-                );
-              })}
-            </ul>
+            {part.detail?.state === 'deferred' ? (
+              <DeferredDetails turnRef={part.detail.turnRef} />
+            ) : (
+              <ul className="space-y-2">
+                {sources.map((s) => {
+                  return (
+                    <li key={s.url} className="min-w-0">
+                      <SourceCard source={s} />
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
           </div>
         )}
       </div>

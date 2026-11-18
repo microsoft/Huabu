@@ -310,6 +310,11 @@ export function describeActivity(groups: SegmentGroup[]): {
     visibleGroupCount++;
     stepCount += group.parts.length;
     for (const part of group.parts) {
+      if (part.detail?.state === 'deferred') {
+        for (const path of part.detail.summary.changedPaths ?? [])
+          recordChangedPath(path);
+        continue;
+      }
       if (part.variant === 'generic') {
         if (part.status !== 'completed' || part.toolKind !== 'edit') continue;
         for (const content of part.content ?? []) {

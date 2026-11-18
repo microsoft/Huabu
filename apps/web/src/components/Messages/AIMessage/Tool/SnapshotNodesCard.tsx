@@ -22,6 +22,7 @@ import { partIsExecuting } from './helpers';
 import { resolveArtifactUrl } from '../../../../api/artifact';
 import { Loading } from '../../../Common/Loading';
 import { AssistantDisclosure } from '../../AssistantDisclosure';
+import { DeferredDetails } from '../../DeferredDetails';
 
 import type { SnapshotEntry, SnapshotNodesToolPart } from '@huabu/shared';
 
@@ -62,8 +63,14 @@ export function SnapshotNodesCard({ part }: SnapshotNodesCardProps) {
   const error = rawError ?? (failed ? t('messages.snapshotFailed') : undefined);
 
   // ── Title ──────────────────────────────────────────────────────────
-  const nodeCount = nodeIds.length;
-  const imageCount = snapshots.length;
+  const nodeCount =
+    part.detail?.state === 'deferred'
+      ? (part.detail.summary.nodeCount ?? 0)
+      : nodeIds.length;
+  const imageCount =
+    part.detail?.state === 'deferred'
+      ? (part.detail.summary.imageCount ?? 0)
+      : snapshots.length;
   const nodesLabel = t('messages.node', { count: nodeCount });
   const imagesLabel = t('messages.image', { count: imageCount });
 
@@ -153,7 +160,11 @@ export function SnapshotNodesCard({ part }: SnapshotNodesCardProps) {
 
   return (
     <AssistantDisclosure icon={icon} title={title} collapseSignal={!executing}>
-      {body}
+      {part.detail?.state === 'deferred' ? (
+        <DeferredDetails turnRef={part.detail.turnRef} />
+      ) : (
+        body
+      )}
     </AssistantDisclosure>
   );
 }

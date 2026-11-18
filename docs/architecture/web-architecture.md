@@ -93,6 +93,8 @@ Ink reference paints retain the semantic `--ink-reference-bg` and `--ink-broken-
 
 ### Shared interface behavior
 
+Historical tool details use explicit See more controls, independent of disclosure expansion. Page requests select the summary projection: titles, status, counts and grouping metadata remain available, but deferred tool bodies are represented by a shared `DeferredDetails` placeholder with no initial preview. Mounting, scrolling into view, and expanding a card never fetch details. Clicking See more loads the full display projection of the referenced physical turn, with a local loading/error/retry state and an in-flight request shared by Workspace/Space/thread/reference. Hydration updates matching tool segments without changing message IDs, tool identities, grouping or disclosure keys; live messages and obsolete requests cannot be replaced. Complete tool bodies reside in the existing message/page cache, survive summary refreshes, and are released with page eviction rather than duplicated in an unbounded detail cache. Thinking is not truncated. Rich tools retain their existing renderers; Space changes and final-answer tool projections remain visible without loading.
+
 Readable secondary copy uses opaque `fg-muted`: active NodeRef labels, Agentlet auto-retry countdowns, and Text node placeholders must not use attenuated `fg-subtle`. Disabled references retain their separate disabled treatment. These role changes do not alter authored Text colors or node geometry.
 
 Neutral Question status copy also uses `fg-muted` directly instead of a local foreground mixture; colored statuses retain their `*-fg` roles. Neutral far-zoom Frame count badges use opaque `bg-hover`, while colored Frame badges retain their Accent `highlightBg`.

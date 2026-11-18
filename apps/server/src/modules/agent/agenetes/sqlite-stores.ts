@@ -356,6 +356,38 @@ export class SqliteEventLogStore implements EventLogStore {
 }
 
 export class SqliteTurnStore implements TurnStore {
+  get(
+    namespace: Namespace,
+    threadId: string,
+    reference: string,
+  ): PersistedTurn | undefined {
+    const cursor = decodeTurnCursor(reference, threadId);
+    const substrate = conversationTables(namespace);
+    if (!substrate) return undefined;
+    const { database, extensionId } = substrate;
+    if (
+      cursor.generation !== this.#generation(database, extensionId, threadId)
+    ) {
+      throw new StaleTurnCursorError('History cursor is stale');
+    }
+    const row = database
+      .prepare(
+        `SELECT seq_start, seq_end, turn_json FROM agenetes_turns
+       WHERE extension_id = ? AND thread_id = ? AND ordinal = ?`,
+      )
+      .get(extensionId, threadId, cursor.ordinal);
+    return row
+      ? {
+          turn: decode<PersistedTurn['turn']>(
+            row['turn_json'],
+            `Turn for thread ${threadId}`,
+          ),
+          seqStart: Number(row['seq_start']),
+          seqEnd: Number(row['seq_end']),
+        }
+      : undefined;
+  }
+
   #generation(
     database: DatabaseSync,
     extensionId: number,

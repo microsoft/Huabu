@@ -26,6 +26,7 @@ import type {
   AgentTurnAccepted,
   AgentChatContext,
   AgentHistoryPageResponse,
+  AgentHistoryTurnResponse,
   ChatAttachment,
   VisibleCanvasGrounding,
   ChatHistoryResponse,
@@ -257,6 +258,21 @@ export const agentApi = {
       { fallbackMessage: 'Failed to load history' },
     );
   },
+
+  fetchHistoryTurn: (
+    threadId: string,
+    canvasId: string,
+    turnRef: string,
+    signal?: AbortSignal,
+  ): Promise<AgentHistoryTurnResponse> =>
+    apiFetch<AgentHistoryTurnResponse>(
+      routes.agentHistoryTurn(threadId, canvasId, turnRef),
+      {
+        signal,
+        cache: 'no-store',
+        fallbackMessage: 'Failed to load tool details',
+      },
+    ),
 
   /**
    * Realize a new thread from a source conversation so a duplicated question

@@ -1,10 +1,14 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+import { createHash } from 'node:crypto';
+import { createServer } from 'node:http';
+
 import { expect, test, type Locator, type Page } from '@playwright/test';
 
 import type * as MessageListModule from '../src/components/Messages/MessageList';
 import type * as SessionModule from '../src/hooks/useChatSession';
+import type * as StoreModule from '../src/store/chatStore';
 import type { AssistantSegment, ChatMessage } from '../src/store/chatTypes';
 import type { GenericToolPart } from '@huabu/shared';
 import type * as ReactModule from 'react';
@@ -94,6 +98,20 @@ async function update(
 }
 
 async function mount(page: Page, historyCount = 0, segments = initial) {
+  await page.route('**/api/identity', (route) =>
+    route.fulfill({
+      json: {
+        provider: 'local',
+        principal: {
+          principalId: 'local-owner',
+          kind: 'user',
+          displayName: 'Local owner',
+        },
+        member: true,
+        owner: true,
+      },
+    }),
+  );
   await page.addInitScript(() => performance.setResourceTimingBufferSize(2000));
   await page.goto('/playground/chat-performance?messages=2');
   await expect(page.locator('textarea[name="agent-message"]')).toBeVisible();
@@ -111,6 +129,7 @@ async function mount(page: Page, historyCount = 0, segments = initial) {
         { default: ReactDOM },
         { MessageList },
         { ChatSessionProvider },
+        { useChatStore },
       ] = await Promise.all([
         import(loaded('/deps/react.js')) as Promise<{
           default: typeof ReactModule;
@@ -122,6 +141,7 @@ async function mount(page: Page, historyCount = 0, segments = initial) {
           typeof MessageListModule
         >,
         import(loaded('/useChatSession.ts')) as Promise<typeof SessionModule>,
+        import(loaded('/store/chatStore.ts')) as Promise<typeof StoreModule>,
       ]);
       const original = document.querySelector<HTMLElement>(
         '[data-chat-performance-fixture]',
@@ -154,6 +174,16 @@ async function mount(page: Page, historyCount = 0, segments = initial) {
         ownerCanvasId: 'activity-canvas',
         conversationView: null,
       };
+      function StoreMessageList({ streaming }: { streaming: boolean }) {
+        const messages = useChatStore(
+          (state) => state.threadsById[session.threadId]!.messages,
+        );
+        return React.createElement(MessageList, {
+          messages,
+          isLoading: streaming,
+          viewKey: 'activity-test-view',
+        });
+      }
       window.activityFixture = {
         render(segments, streaming, endStatus) {
           const messages: ChatMessage[] = [
@@ -168,15 +198,12 @@ async function mount(page: Page, historyCount = 0, segments = initial) {
               status: endStatus,
             });
           }
+          useChatStore.getState().setMessages(session.threadId, messages);
           root.render(
             React.createElement(
               ChatSessionProvider,
               { value: session },
-              React.createElement(MessageList, {
-                messages,
-                isLoading: streaming,
-                viewKey: 'activity-test-view',
-              }),
+              React.createElement(StoreMessageList, { streaming }),
               React.createElement('textarea', {
                 'aria-label': 'Fixture draft',
                 defaultValue: 'Keep this draft',
@@ -193,6 +220,146 @@ async function mount(page: Page, historyCount = 0, segments = initial) {
     fixture(page).locator('[data-chat-message-id="current-assistant"]'),
   ).toBeVisible();
 }
+
+test('deferred details preserve the reading anchor and avoid transferring collapsed bodies on a throttled connection', async ({
+  page,
+}, info) => {
+  test.setTimeout(60_000);
+  const body = Array.from({ length: 2048 }, (_, index) =>
+    createHash('sha256').update(`tool-output-${index}`).digest('hex'),
+  ).join('\n');
+  const complete: GenericToolPart = {
+    ...tool('a'),
+    detail: { state: 'inline', turnRef: 'ref' },
+    content: [{ type: 'content', content: { type: 'text', text: body } }],
+  };
+  const { content: _content, ...headerOnly } = complete;
+  const summary: GenericToolPart = {
+    ...headerOnly,
+    detail: { state: 'deferred', turnRef: 'ref', summary: {} },
+  };
+  const projection = (part: GenericToolPart) => ({
+    threadId: 'activity-test',
+    hasMore: false,
+    turns: [
+      { id: 'group', messages: [{ role: 'assistant', parts: [part, prose] }] },
+    ],
+  });
+  const bodies = {
+    full: JSON.stringify(projection(complete)),
+    summary: JSON.stringify(projection(summary)),
+    detail: JSON.stringify({
+      threadId: 'activity-test',
+      turnRef: 'ref',
+      messages: [{ role: 'assistant', parts: [complete, prose] }],
+    }),
+  };
+  let detailRequests = 0;
+  const server = createServer((request, response) => {
+    const kind = request.url?.includes('/turn/')
+      ? 'detail'
+      : request.url?.includes('detailLevel=summary')
+        ? 'summary'
+        : 'full';
+    if (kind === 'detail') detailRequests++;
+    response.writeHead(200, {
+      'Content-Type': 'application/json',
+      'Content-Length': Buffer.byteLength(bodies[kind]),
+      'Access-Control-Allow-Origin': '*',
+      'Cache-Control': 'no-store',
+    });
+    response.end(bodies[kind]);
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  if (!address || typeof address === 'string')
+    throw new Error('Missing fixture address');
+  try {
+    await page.route('**/api/agent/history/activity-test/**', (route) => {
+      const url = new URL(route.request().url());
+      return route.continue({
+        url: `http://127.0.0.1:${address.port}${url.pathname}${url.search}`,
+      });
+    });
+    await mount(page, 30, [summary, prose]);
+    await update(page, [summary, prose], false);
+    const connection = await page.context().newCDPSession(page);
+    await connection.send('Network.enable');
+    await connection.send('Network.emulateNetworkConditions', {
+      offline: false,
+      latency: 150,
+      downloadThroughput: 64 * 1024,
+      uploadThroughput: 64 * 1024,
+    });
+    const timings = await page.evaluate(async () => {
+      const result: Record<string, number> = {};
+      for (const level of ['full', 'summary']) {
+        const start = performance.now();
+        const response = await fetch(
+          `/api/agent/history/activity-test/page?canvasId=activity-canvas&limit=1&detailLevel=${level}`,
+        );
+        const page = await response.json();
+        if (page.turns.length !== 1) throw new Error('Invalid fixture page');
+        result[level] = performance.now() - start;
+      }
+      return result;
+    });
+    const card = fixture(page).getByRole('button', {
+      name: 'Reading file a',
+      exact: true,
+    });
+    await card.click();
+    const seeMore = fixture(page).getByRole('button', {
+      name: 'See more',
+      exact: true,
+    });
+    await expect(seeMore).toBeVisible();
+    expect(detailRequests).toBe(0);
+    await card.evaluate((element) => {
+      element.setAttribute('data-hydration-identity', 'retained');
+    });
+    const scroll = fixture(page).locator('[data-chat-thread-root]');
+    await scroll.evaluate((element) => {
+      element.dispatchEvent(
+        new WheelEvent('wheel', { bubbles: true, deltaY: -10 }),
+      );
+      element.scrollTop -= 20;
+    });
+    await seeMore.click();
+    const before = await card.boundingBox();
+    await expect(
+      fixture(page).getByText(body.slice(0, 64), { exact: false }),
+    ).toBeVisible({
+      timeout: 15_000,
+    });
+    await expect(card).toHaveAttribute('aria-expanded', 'true');
+    await expect(card).toHaveAttribute('data-hydration-identity', 'retained');
+    const after = await card.boundingBox();
+    expect(Math.abs(after!.y - before!.y)).toBeLessThanOrEqual(2);
+    expect(detailRequests).toBe(1);
+    expect(timings.summary).toBeLessThan(timings.full!);
+    await info.attach('throttled-history-transfer.json', {
+      contentType: 'application/json',
+      body: JSON.stringify(
+        {
+          fixture: 'Synthetic uncompressed JSON; 150ms latency, 64 KiB/s',
+          bytes: {
+            full: Buffer.byteLength(bodies.full),
+            summary: Buffer.byteLength(bodies.summary),
+          },
+          transferAndParseMs: timings,
+          anchorDriftPx: Math.abs(after!.y - before!.y),
+        },
+        null,
+        2,
+      ),
+    });
+  } finally {
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+  }
+});
 
 test('live operations form one visible block; prose closes it without losing calls', async ({
   page,
