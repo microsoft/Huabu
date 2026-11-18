@@ -5,6 +5,7 @@
 
 export {
   PROTOCOL_VERSION,
+  DAEMON_ENV_KEYS,
   AgentletMethods,
   AgentMethods,
   ServerMethods,

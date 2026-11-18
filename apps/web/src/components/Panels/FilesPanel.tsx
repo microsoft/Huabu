@@ -8,6 +8,7 @@ import {
   ChevronRight,
   Copy,
   Eye,
+  FileCode2,
   FileText,
   Monitor,
   RefreshCw,
@@ -17,11 +18,12 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   useSyncExternalStore,
 } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Virtuoso } from 'react-virtuoso';
+import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 
 import { Button } from '@/components/Common/Button';
 import { cn } from '@/components/Common/cn';
@@ -43,16 +45,17 @@ import {
   lastFilesDevice,
   usePanelStore,
 } from '@/store/panelStore';
-import { openPreviewFile } from '@/store/previewWorkspace/actions';
+import {
+  addFileReferenceNode,
+  closePreviewFile,
+  openFileReference,
+  openPreviewFile,
+} from '@/store/previewWorkspace/actions';
 import {
   selectActiveTab,
   usePreviewWorkspaceStore,
 } from '@/store/previewWorkspace/store';
-import {
-  addFileReferenceNode,
-  deviceFileName,
-  fileReferenceData,
-} from '@/utils/deviceFile';
+import { deviceFileName, fileReferenceData } from '@/utils/deviceFile';
 import { copyToClipboard } from '@/utils/io/clipboard';
 import { setDragPayload } from '@/utils/io/dragDrop';
 
@@ -77,6 +80,9 @@ const ROW_ICON_SLOT_CLASS = cn(
   'flex h-6 w-4 shrink-0 items-center justify-center',
   SIDEBAR_ROW_ICON_CLASS,
 );
+
+const CODE_FILE =
+  /\.(?:[cm]?[jt]sx?|json|py|rs|[ch](?:pp|xx)?|go|java|css|html|sh|ya?ml)$/i;
 
 export function FilesPanel() {
   const { t } = useTranslation();
@@ -112,6 +118,10 @@ export function FilesPanel() {
   const snapshot = useSyncExternalStore(tree.subscribe, tree.getSnapshot);
   const { pages, expanded, loading, reloading } = snapshot;
   const rows = useMemo(() => buildFileTreeRows(snapshot), [snapshot]);
+  // The row keyboard navigation is moving to; it may not be mounted yet.
+  const [focusIndex, setFocusIndex] = useState<number | null>(null);
+  const panelRef = useRef<HTMLElement>(null);
+  const listRef = useRef<VirtuosoHandle>(null);
   const selectedDevice = devices.find(
     (candidate) => candidate.agentletId === sourceAgentletId,
   );
@@ -120,7 +130,33 @@ export function FilesPanel() {
   }, []);
   useEffect(() => {
     setActionError(null);
+    setFocusIndex(null);
   }, [sourceAgentletId, sourcePath]);
+  useEffect(() => {
+    if (focusIndex === null || !rows[focusIndex]) return;
+    const panel = panelRef.current;
+    const focused = document.activeElement;
+    let cancelled = false;
+    listRef.current?.scrollIntoView({
+      index: focusIndex,
+      done: () => {
+        if (cancelled || !panel) return;
+        if (
+          panel.contains(document.activeElement) ||
+          (focused &&
+            !focused.isConnected &&
+            document.activeElement === document.body)
+        )
+          panel
+            .querySelector<HTMLElement>(`[data-file-index="${focusIndex}"]`)
+            ?.focus({ preventScroll: true });
+        setFocusIndex(null);
+      },
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [focusIndex, rows]);
 
   useEffect(() => {
     if (sourceAgentletId && sourcePath)
@@ -189,6 +225,24 @@ export function FilesPanel() {
     path: entry.path,
     deviceName: selectedDevice?.displayName,
   });
+  /** Put a reference card for `entry` in the Space, opening it when asked. */
+  const addToSpace = (entry: FileEntry, open: boolean) => {
+    if (!source) return;
+    try {
+      (open ? openFileReference : addFileReferenceNode)(
+        source.canvasId,
+        reference(entry),
+        entry.name,
+      );
+      // The node's own Preview takes over from the node-free one.
+      if (open) closePreviewFile(reference(entry));
+      setActionError(null);
+    } catch (failure) {
+      setActionError(
+        failure instanceof Error ? failure.message : t('files.failed'),
+      );
+    }
+  };
   const root = source && snapshot.root ? pages[snapshot.root] : undefined;
   // The listing reports the directory's real path; until it arrives, show
   // the one that was asked for.
@@ -220,8 +274,53 @@ export function FilesPanel() {
   const error = actionError ?? (fallingBack ? null : treeError);
   return (
     <section
+      ref={panelRef}
       className="flex min-h-0 flex-1 flex-col"
       aria-label={t('files.title')}
+      onKeyDownCapture={(event) => {
+        if (!(event.target instanceof HTMLElement)) return;
+        const indexValue = event.target
+          .closest('[data-file-index]')
+          ?.getAttribute('data-file-index');
+        if (
+          indexValue === undefined ||
+          indexValue === null ||
+          event.altKey ||
+          event.ctrlKey ||
+          event.metaKey ||
+          event.shiftKey
+        )
+          return;
+        const index = Number(indexValue);
+        let next =
+          event.key === 'ArrowDown'
+            ? Math.min(rows.length - 1, index + 1)
+            : event.key === 'ArrowUp'
+              ? Math.max(0, index - 1)
+              : event.key === 'Home'
+                ? 0
+                : event.key === 'End'
+                  ? rows.length - 1
+                  : null;
+        if (next === null) return;
+        event.preventDefault();
+        event.stopPropagation();
+        // Rows that are neither a file nor a folder have nothing to focus.
+        const step = event.key === 'ArrowUp' || event.key === 'End' ? -1 : 1;
+        while (next >= 0 && next < rows.length) {
+          const row = rows[next];
+          if (
+            row &&
+            ('more' in row ||
+              row.entry.kind === 'file' ||
+              row.entry.kind === 'directory')
+          ) {
+            setFocusIndex(next);
+            return;
+          }
+          next += step;
+        }
+      }}
     >
       {/* Insets match the Layers panel, so both line up under the tabs. */}
       <div className="flex h-8 shrink-0 items-center gap-0.5 px-2">
@@ -428,15 +527,17 @@ export function FilesPanel() {
         <p className="text-fg-muted px-4.5 py-3 text-xs">{t('files.empty')}</p>
       ) : null}
       <Virtuoso
+        ref={listRef}
         className="min-h-0 flex-1"
         data={rows}
         computeItemKey={(_, row) =>
           'entry' in row ? `${row.depth}:${row.entry.path}` : `more:${row.more}`
         }
-        itemContent={(_, row) => {
+        itemContent={(index, row) => {
           if ('more' in row)
             return (
               <Button
+                data-file-index={index}
                 className="text-fg-muted my-px"
                 style={{ marginLeft: 8 + row.depth * ROW_INDENT_PX }}
                 size="sm"
@@ -462,15 +563,22 @@ export function FilesPanel() {
               }
               selected={previewedPath === entry.path}
               onOpenHere={directory ? () => go(entry.path) : undefined}
-              onAddToCanvas={
-                entry.kind === 'file' && canWrite
-                  ? () => addFileReferenceNode(reference(entry))
+              onOpen={
+                entry.kind === 'file'
+                  ? () => addToSpace(entry, true)
                   : undefined
               }
+              onAdd={
+                entry.kind === 'file'
+                  ? () => addToSpace(entry, false)
+                  : undefined
+              }
+              canAdd={canWrite}
             >
               {directory ? (
                 <button
                   type="button"
+                  data-file-index={index}
                   className={ROW_CLASS}
                   style={{ paddingLeft: indent }}
                   aria-busy={loading.has(entry.path)}
@@ -493,11 +601,14 @@ export function FilesPanel() {
                       <ChevronRight className="h-3 w-3" />
                     )}
                   </span>
-                  <span className="truncate">{entry.name}</span>
+                  <span className="truncate" title={entry.path}>
+                    {entry.name}
+                  </span>
                 </button>
               ) : entry.kind === 'file' ? (
                 <button
                   type="button"
+                  data-file-index={index}
                   className={cn(
                     ROW_CLASS,
                     previewedPath === entry.path &&
@@ -505,16 +616,25 @@ export function FilesPanel() {
                   )}
                   style={{ paddingLeft: indent }}
                   aria-current={previewedPath === entry.path || undefined}
-                  title={entry.path}
-                  draggable
+                  draggable={canWrite}
                   onClick={() => openPreviewFile(reference(entry))}
-                  onDragStart={(event) =>
+                  onDragStart={(event) => {
+                    // Write access may have changed since this row rendered.
+                    const canvas = useCanvasStore.getState();
+                    if (
+                      !selectCanWriteCanvas(canvas) ||
+                      canvas.canvasId !== source?.canvasId
+                    ) {
+                      event.preventDefault();
+                      setActionError(t('files.creationReadOnly'));
+                      return;
+                    }
                     setDragPayload(event, {
                       kind: 'fileReference',
                       origin: { type: 'user-created' },
                       data: fileReferenceData(reference(entry)),
-                    })
-                  }
+                    });
+                  }}
                 >
                   <span
                     className={cn(
@@ -522,20 +642,27 @@ export function FilesPanel() {
                       previewedPath === entry.path && 'text-inherit',
                     )}
                   >
-                    <FileText className="h-3.5 w-3.5" />
+                    {CODE_FILE.test(entry.name) ? (
+                      <FileCode2 className="h-3.5 w-3.5" />
+                    ) : (
+                      <FileText className="h-3.5 w-3.5" />
+                    )}
                   </span>
-                  <span className="truncate">{entry.name}</span>
+                  <span className="truncate" title={entry.path}>
+                    {entry.name}
+                  </span>
                 </button>
               ) : (
                 <span
                   className={cn(ROW_CLASS, 'text-fg-subtle cursor-default')}
                   style={{ paddingLeft: indent }}
-                  title={entry.path}
                 >
                   <span className={ROW_ICON_SLOT_CLASS}>
                     <FileText className="h-3.5 w-3.5" />
                   </span>
-                  <span className="truncate">{entry.name}</span>
+                  <span className="truncate" title={entry.path}>
+                    {entry.name}
+                  </span>
                 </span>
               )}
             </FilesPanelEntryMenu>

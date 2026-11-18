@@ -10,6 +10,7 @@ import {
 } from './helpers';
 
 import type * as QuestionModule from '../src/components/Nodes/question/questionCompose';
+import type * as ProfilesModule from '../src/store/acpProfilesStore';
 import type * as CanvasModule from '../src/store/canvasStore';
 import type * as ChatModule from '../src/store/chatStore';
 import type * as PanelModule from '../src/store/panelStore';
@@ -18,6 +19,184 @@ import type * as PreviewModule from '../src/store/previewWorkspace/store';
 import type * as ToolModule from '../src/store/toolStore';
 
 const sourceText = `Before selected passage after. ${'Wrapped source text. '.repeat(16)}\n\nSecond line.`;
+
+test('Files opens visible references once and renders single-file Markdown without resource requests', async ({
+  page,
+}) => {
+  await openNewCanvas(page);
+  const markdown = [
+    '# Device document',
+    '',
+    '| Name | Value |',
+    '| --- | --- |',
+    '| hello | world |',
+    '',
+    '```python',
+    'print("hello")',
+    '```',
+    '',
+    '![external](https://outside.invalid/image.png)',
+    '![relative](./image.png)',
+    '[external link](https://outside.invalid/other)',
+    '[relative link](./other.md)',
+    '<iframe src="https://outside.invalid/frame"></iframe>',
+  ].join('\n');
+  let externalRequests = 0;
+  let reads = 0;
+  await page.route('https://outside.invalid/**', (route) => {
+    externalRequests++;
+    return route.abort();
+  });
+  await page.route('**/api/acp/files', (route) => {
+    const request = route.request().postDataJSON();
+    if (request.operation === 'fs-list')
+      return route.fulfill({
+        json: {
+          operation: 'fs-list',
+          result: {
+            path: '/repo',
+            parentPath: '/',
+            entries: [
+              ...Array.from({ length: 80 }, (_, index) => {
+                const name =
+                  index === 0
+                    ? 'README.md'
+                    : `file-${String(index).padStart(3, '0')}-with-a-long-name.py`;
+                return {
+                  name,
+                  path: `/repo/${name}`,
+                  kind: index === 78 ? 'symlink' : 'file',
+                };
+              }),
+              { name: 'z-folder', path: '/repo/z-folder', kind: 'directory' },
+            ],
+          },
+        },
+      });
+    reads++;
+    const text = request.args.path.endsWith('.md')
+      ? markdown
+      : 'greeting = "hello"';
+    return route.fulfill({
+      json: {
+        operation: 'fs-read',
+        result: {
+          path: request.args.path,
+          encoding: 'utf-8',
+          text,
+          size: Buffer.byteLength(text),
+          byteLength: Buffer.byteLength(text),
+          contentVersion: 'a'.repeat(64),
+        },
+      },
+    });
+  });
+  await page.evaluate(async () => {
+    const canvasPath = '/src/store/canvasStore.ts';
+    const panelPath = '/src/store/panelStore.ts';
+    const profilesPath = '/src/store/acpProfilesStore.ts';
+    const { default: canvas } = (await import(
+      canvasPath
+    )) as typeof CanvasModule;
+    const { usePanelStore } = (await import(panelPath)) as typeof PanelModule;
+    const { useAcpProfilesStore } = (await import(
+      profilesPath
+    )) as typeof ProfilesModule;
+    useAcpProfilesStore.setState({
+      refresh: async () => {},
+      connectedDevices: [
+        {
+          agentletId: 'device-files',
+          displayName: 'Test device',
+          connectedAt: '',
+          version: '1',
+          profileCount: 0,
+        },
+      ],
+    });
+    usePanelStore.getState().openFiles({
+      canvasId: canvas.getState().canvasId,
+      agentletId: 'device-files',
+      path: '/repo',
+    });
+  });
+  const files = page.getByRole('region', { name: 'Files', exact: true });
+  const folder = files.getByRole('button', { name: 'z-folder', exact: true });
+  await expect(files.locator('[data-file-index="0"]')).toHaveText('z-folder');
+  const first = files.getByRole('button', {
+    name: 'Open README.md (adds a reference if needed)',
+    exact: true,
+  });
+  await first.click();
+  await expect(page.locator('.react-flow__node-fileReference')).toHaveCount(0);
+  await first.dblclick();
+  await expect(page.locator('.react-flow__node-fileReference')).toHaveCount(1);
+  const reading = page.getByRole('textbox', {
+    name: 'Read-only Markdown file',
+  });
+  await expect(reading).toBeVisible();
+  await expect(reading.getByRole('table')).toContainText('hello');
+  await expect(reading).toContainText('print("hello")');
+  await expect(
+    reading.locator('img[src], img[srcset], a[href], iframe'),
+  ).toHaveCount(0);
+  const initialReads = reads;
+  await first.dblclick();
+  await expect(page.locator('.react-flow__node-fileReference')).toHaveCount(1);
+  expect(reads).toBe(initialReads);
+  await page.getByRole('button', { name: 'Source', exact: true }).click();
+  await expect(
+    page.getByRole('textbox', { name: 'Read-only file source' }),
+  ).toContainText('# Device document');
+  await first.focus();
+  await first.press('End');
+  const last = files.getByRole('button', {
+    name: 'Open file-079-with-a-long-name.py (adds a reference if needed)',
+    exact: true,
+  });
+  await expect(last).toBeFocused();
+  await last.press('ArrowUp');
+  const previous = files.getByRole('button', {
+    name: 'Open file-077-with-a-long-name.py (adds a reference if needed)',
+    exact: true,
+  });
+  await expect(previous).toBeFocused();
+  await previous.press('ArrowDown');
+  await expect(last).toBeFocused();
+  await last.press('Enter');
+  await expect(page.locator('.react-flow__node-fileReference')).toHaveCount(2);
+  await expect(
+    page.getByRole('textbox', { name: 'Read-only file source' }),
+  ).toContainText('greeting');
+  await last.press('Home');
+  await expect(folder).toBeFocused();
+  await folder.press('ArrowDown');
+  await expect(first).toBeFocused();
+  await first.press('End');
+  await expect(last).toBeFocused();
+  await last.press('Home');
+  await expect(folder).toBeFocused();
+  await folder.press('ArrowDown');
+  await expect(first).toBeFocused();
+  await first.press('Shift+F10');
+  await page
+    .getByRole('menuitem', { name: 'Add to Space', exact: true })
+    .click();
+  await expect(page.locator('.react-flow__node-fileReference')).toHaveCount(3);
+  expect(externalRequests).toBe(0);
+  const references = await page.evaluate(async () => {
+    const canvasPath = '/src/store/canvasStore.ts';
+    const { default: canvas } = (await import(
+      canvasPath
+    )) as typeof CanvasModule;
+    return canvas
+      .getState()
+      .nodes.filter((node) => node.type === 'fileReference');
+  });
+  expect(
+    references.every((node) => !node.hidden && node.data.content === undefined),
+  ).toBe(true);
+});
 
 for (const mode of ['mouse', 'touch'] as const) {
   test(`file preview ${mode} stages a frozen partial-file Comment without a read, send or navigation`, async ({
@@ -346,5 +525,86 @@ for (const mode of ['mouse', 'touch'] as const) {
     await expect(page.locator('[data-chat-input-surface]')).not.toContainText(
       'contentVersion',
     );
+
+    const other = await page.evaluate(async (canvasId) => {
+      const canvasPath = '/src/store/canvasStore.ts';
+      const questionPath = '/src/components/Nodes/question/questionCompose.ts';
+      const actionsPath = '/src/store/previewWorkspace/actions.ts';
+      const { default: canvas, awaitQuestionCreation } = (await import(
+        canvasPath
+      )) as typeof CanvasModule;
+      const { createQuestionNode } = (await import(
+        questionPath
+      )) as typeof QuestionModule;
+      const { openPreviewNode } = (await import(
+        actionsPath
+      )) as typeof PreviewActions;
+      const created = createQuestionNode({
+        canvasId,
+        addNode: canvas.getState().addNode,
+        placementPoint: { x: 1000, y: 100 },
+        binding: { kind: 'internal' },
+        mode: 'ask',
+        label: 'Other reader',
+      });
+      await awaitQuestionCreation(canvasId, created.nodeId);
+      openPreviewNode(created.nodeId, { transient: false });
+      return created;
+    }, canvasId);
+    await page.getByRole('tab', { name: /Other reader/ }).click();
+    await page.getByRole('tab', { name: /Source file/ }).click();
+    await selectPassage();
+    await comment.click();
+    await expect(
+      page.getByRole('button', { name: 'File Reader', exact: true }),
+    ).toBeVisible();
+    await page
+      .getByRole('textbox', { name: 'Comment', exact: true })
+      .fill('Another passage');
+    await add.click();
+    await expect
+      .poll(() =>
+        page.evaluate(async (threadId) => {
+          const chatPath = '/src/store/chatStore.ts';
+          const { useChatStore } = (await import(
+            chatPath
+          )) as typeof ChatModule;
+          return useChatStore
+            .getState()
+            .threadsById[
+              threadId
+            ].pendingQuotedComments.map((item) => item.comment);
+        }, destination.threadId),
+      )
+      .toEqual(['Explain the file', 'Another passage']);
+    await selectPassage();
+    await comment.click();
+    await page
+      .getByRole('button', { name: 'File Reader', exact: true })
+      .click();
+    await page
+      .getByRole('menuitem', { name: 'Other reader', exact: true })
+      .click();
+    await page
+      .getByRole('textbox', { name: 'Comment', exact: true })
+      .fill('Explicit switch');
+    await add.click();
+    await expect
+      .poll(() =>
+        page.evaluate(async (threadId) => {
+          const chatPath = '/src/store/chatStore.ts';
+          const { useChatStore } = (await import(
+            chatPath
+          )) as typeof ChatModule;
+          return useChatStore
+            .getState()
+            .threadsById[
+              threadId
+            ]?.pendingQuotedComments.map((item) => item.comment);
+        }, other.threadId),
+      )
+      .toEqual(['Explicit switch']);
+    expect(turns).toBe(0);
+    expect(pageErrors).toEqual([]);
   });
 }

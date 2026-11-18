@@ -133,6 +133,7 @@ export interface AcpLoadSessionResult {
 
 /** Subset of the ACP session/prompt response. */
 export interface AcpPromptResult {
+  usage?: unknown;
   stopReason:
     | 'end_turn'
     | 'max_tokens'

@@ -327,3 +327,26 @@ it('re-lists open folders after the hidden-file setting changed, even across a n
   await settle();
   expect(calls.slice(before).map((call) => call.path)).toEqual(['/root']);
 });
+
+it('keeps the refreshed listing when an older first listing of the same folder arrives late', async () => {
+  const { tree, calls, settle } = harness();
+  tree.open('device', '/', false);
+  calls[0]?.resolve(['a']);
+  await settle();
+
+  // The folder's first listing is still pending when a refresh re-lists it.
+  tree.toggle('/a', 0);
+  await settle();
+  tree.refresh();
+  await settle();
+  expect(calls.slice(2).map((call) => call.path)).toEqual(['/', '/a']);
+  calls[2]?.resolve(['a']);
+  calls[3]?.resolve(['new']);
+  await settle();
+  expect(names(tree)).toEqual(['/a', '/a/new']);
+
+  calls[1]?.resolve(['old', 'removed']);
+  await settle();
+  expect(names(tree)).toEqual(['/a', '/a/new']);
+  expect(tree.getSnapshot().loading.size).toBe(0);
+});

@@ -97,20 +97,23 @@ vi.mock('../../store/toolStore', () => ({
   ) => selector({ setPendingNodeType: mocks.setPendingNodeType }),
 }));
 vi.mock('../../store/workspaceStore', () => ({
-  useWorkspaceStore: (
-    selector: (state: {
-      workspaceId: string | undefined;
-      worldCanvasId: string | null;
-      spaceSummaries: typeof mocks.spaceSummaries;
-      refreshSpaceTitles: () => Promise<void>;
-    }) => unknown,
-  ) =>
-    selector({
-      workspaceId: mocks.workspaceId,
-      worldCanvasId: mocks.worldCanvasId,
-      spaceSummaries: mocks.spaceSummaries,
-      refreshSpaceTitles: mocks.refreshSpaceTitles,
-    }),
+  useWorkspaceStore: Object.assign(
+    (
+      selector: (state: {
+        workspaceId: string | undefined;
+        worldCanvasId: string | null;
+        spaceSummaries: typeof mocks.spaceSummaries;
+        refreshSpaceTitles: () => Promise<void>;
+      }) => unknown,
+    ) =>
+      selector({
+        workspaceId: mocks.workspaceId,
+        worldCanvasId: mocks.worldCanvasId,
+        spaceSummaries: mocks.spaceSummaries,
+        refreshSpaceTitles: mocks.refreshSpaceTitles,
+      }),
+    { subscribe: () => () => {} },
+  ),
 }));
 
 const CANVAS_ID = 'canvas-1';

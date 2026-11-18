@@ -5,6 +5,7 @@ import {
   AcpServiceError,
   ensureAcpSession,
   resolveAcpAgentletId,
+  resolveAcpRuntimeLaunch,
 } from '@agenetes/acp-driver';
 import { resolveConnectedAgentletId } from '@agenetes/agentlet-host';
 import { threadIdentityKey } from '@agenetes/runtime';
@@ -145,23 +146,27 @@ async function ensureSessionFromCanonicalSpec(
   logger: FastifyBaseLogger,
 ): Promise<AcpSessionEntry> {
   const { spec } = realized;
-  const resolvedEnvironment =
-    await acpRuntimePolicy.resolveRuntimeEnvironment?.(spec.spec);
-  const env =
-    resolvedEnvironment || spec.spec.env
-      ? { ...resolvedEnvironment, ...spec.spec.env }
-      : undefined;
-  const record = await agenetes.record(spec.namespace, spec.threadId);
   const requestedAgentletId = resolveAcpAgentletId(spec);
+  const agentletId =
+    resolveConnectedAgentletId(requestedAgentletId) ?? requestedAgentletId;
+  const { recipe, env } = await resolveAcpRuntimeLaunch(
+    spec.spec,
+    acpRuntimePolicy,
+    {
+      namespace: spec.namespace,
+      threadId: spec.threadId,
+      agentletId,
+    },
+  );
+  const record = await agenetes.record(spec.namespace, spec.threadId);
   return ensureAcpSession({
-    agentletId:
-      resolveConnectedAgentletId(requestedAgentletId) ?? requestedAgentletId,
+    agentletId,
     threadId: spec.threadId,
     binding: spec.spec.binding,
     namespace: spec.namespace,
     profileExecutionRevision: spec.spec.profileExecutionRevision ?? 0,
     ...(spec.spec.cwd !== undefined && { cwd: spec.spec.cwd }),
-    ...(spec.spec.recipe !== undefined && { recipe: spec.spec.recipe }),
+    ...(recipe !== undefined && { recipe }),
     ...(env !== undefined && { env }),
     ...(record?.state !== undefined && {
       priorState: record.state as Parameters<

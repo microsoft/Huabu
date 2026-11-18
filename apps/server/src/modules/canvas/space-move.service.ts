@@ -40,7 +40,7 @@ import {
   withSpaceHierarchyLock,
 } from './write-coordinator.js';
 import { getLogger } from '../../utils/logger.js';
-import { buildReachbackEnv } from '../agent/acp/reachback-env.js';
+import { frozenAgentEnvironment } from '../agent/acp/reachback-env.js';
 import {
   agenetes,
   EXTERNAL_DRIVER_KIND,
@@ -194,10 +194,9 @@ function movedWorkloadSpec(
           : {};
       spec.hostContext = { ...hostContext, canvasId: destinationCanvasId };
     } else if (source.kind === EXTERNAL_DRIVER_KIND) {
-      spec.env = {
-        ...(spec.env && typeof spec.env === 'object' ? spec.env : {}),
-        ...buildReachbackEnv(source.threadId, destinationCanvasId),
-      };
+      spec.env = frozenAgentEnvironment(
+        spec.env && typeof spec.env === 'object' ? { ...spec.env } : {},
+      );
     }
   }
   return {

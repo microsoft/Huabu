@@ -46,6 +46,7 @@ import {
 import connectionRoutes from '../agent/acp/connection-token.route.js';
 import deviceFilesRoutes from '../agent/acp/device-files.route.js';
 import profilesRoutes from '../agent/acp/profiles.route.js';
+import { resolveReachbackRuntimeEnvironment } from '../agent/acp/reachback-env.js';
 import threadsRoutes from '../agent/acp/threads.route.js';
 import { agenetes } from '../agent/agenetes/index.js';
 import defaultsRoutes from '../agent/agent-defaults.route.js';
@@ -433,19 +434,42 @@ it('separates device transport from user and Space-scoped reachback, with fresh 
   await expect(
     agentReachbackEnvironment({ agentletId: 'legacy-unowned-device' }),
   ).rejects.toMatchObject({ code: 'DEVICE_ACCESS_REQUIRED' });
+  vi.stubEnv('HUABU_PUBLIC_ORIGIN', 'https://current.example');
   const environment = await h.as('alice', () =>
-    agentReachbackEnvironment({
-      agentletId: 'alice-device',
-      env: {
-        HUABU_RFS_URL: 'https://huabu.example/api/rfs/w/w1/space-a',
-        HUABU_THREAD_ID: 'thread-a',
+    runInWorkspace(
+      {
+        handle: { workspaceId: 'w1', name: 'Owner workspace' },
+        path: null,
       },
-    }),
+      () =>
+        resolveReachbackRuntimeEnvironment(
+          {
+            agentletId: 'alice-device',
+            binding: { alias: 'Agent', profileId: 'frozen-profile' },
+            env: {
+              HUABU_RFS_URL:
+                'https://stale.example/api/rfs/w/source/source-space',
+              HUABU_THREAD_ID: 'source-thread',
+              HUABU_RFS_TOKEN: 'synthetic-stale-token',
+            },
+          },
+          {
+            namespace: { name: 'space-a', ownerId: 'w1' },
+            threadId: 'thread-a',
+            agentletId: 'alice-device',
+          },
+        ),
+    ),
   );
-  const token = environment!.HUABU_RFS_TOKEN;
+  expect(environment?.HUABU_RFS_URL).toBe(
+    'https://current.example/api/rfs/w/w1/space-a',
+  );
+  const token = environment!.HUABU_RFS_TOKEN!;
   expect(readAgentCredential(token)).toMatchObject({
     aud: 'rfs',
     principalId: 'alice',
+    workspaceId: 'w1',
+    canvasId: 'space-a',
     threadId: 'thread-a',
   });
   const probe = (credential: string, path = '/api/rfs/w/w1/space-a/probe') =>

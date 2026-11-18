@@ -26,6 +26,7 @@ import { getMissingFileKind } from '@/components/Nodes/missingFile';
 import { hasNodePreview } from '@/components/Nodes/previews';
 import { canMoveNodesToParent } from '@/handler/canvasCommand/uiIntent';
 import useCanvasStore from '@/store/canvasStore.ts';
+import { rememberPreviewedAgent } from '@/store/commentDestinationMemory';
 import { useExternalImportsStore } from '@/store/externalImportsStore';
 import { usePanelStore } from '@/store/panelStore';
 import { openPreviewNode } from '@/store/previewWorkspace/actions';
@@ -971,7 +972,10 @@ export const CanvasLayerTree = ({
         if (node.type === 'question') {
           const threadId = node.data.threadId;
           if (typeof threadId === 'string' && threadId) {
-            const tabId = openPreviewNode(id, { transient: true });
+            const tabId = openPreviewNode(id, {
+              transient: true,
+              userInitiated: true,
+            });
             if (tabId) {
               usePreviewWorkspaceStore
                 .getState()
@@ -985,6 +989,14 @@ export const CanvasLayerTree = ({
         } else {
           toast(t('layers.nodeFocusedNoPreview'), { tone: 'info' });
         }
+      }
+
+      if (!structural && previewVisibleIdSet.has(id)) {
+        rememberPreviewedAgent({
+          kind: 'node',
+          canvasId: snapshot.canvasId,
+          nodeId: id,
+        });
       }
 
       if (snapshot.rfInstance && snapshot.canvasWrapper) {

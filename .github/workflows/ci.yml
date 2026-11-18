@@ -56,8 +56,15 @@ jobs:
       - name: Unit tests
         run: pnpm -r --if-present --no-bail run test
 
+      # The legacy environment regression uses a real, privately scoped tmux
+      # server. Install it when the runner image does not already provide it.
       - name: Web deployment scripts
-        run: pnpm run test:deployment
+        run: |
+          if ! command -v tmux >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends tmux
+          fi
+          pnpm run test:deployment
 
       - name: Storage backend contracts (PostgreSQL and Azurite)
         run: pnpm run test:storage-backends

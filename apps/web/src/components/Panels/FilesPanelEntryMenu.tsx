@@ -29,8 +29,12 @@ type FilesPanelEntryMenuProps = {
   selected?: boolean;
   /** Folders only: make this folder the root of the tree. */
   onOpenHere?: () => void;
+  /** Files only: open a reference card for this entry, adding one if needed. */
+  onOpen?: () => void;
   /** Files only: place a reference card for this entry in the Space. */
-  onAddToCanvas?: () => void;
+  onAdd?: () => void;
+  /** Whether the Space can take a new reference card. */
+  canAdd?: boolean;
   children: ReactNode;
 };
 
@@ -41,7 +45,9 @@ export function FilesPanelEntryMenu({
   onCopyResult,
   selected,
   onOpenHere,
-  onAddToCanvas,
+  onOpen,
+  onAdd,
+  canAdd = false,
   children,
 }: FilesPanelEntryMenuProps) {
   const { t } = useTranslation();
@@ -67,6 +73,16 @@ export function FilesPanelEntryMenu({
         'group/sidebar-row flex h-7.5 items-center',
         SIDEBAR_ROW_INSET_CLASS,
       )}
+      onKeyDownCapture={(event) => {
+        if (
+          event.key === 'ContextMenu' ||
+          (event.shiftKey && event.key === 'F10')
+        ) {
+          event.preventDefault();
+          event.stopPropagation();
+          setOpen(true);
+        }
+      }}
       onContextMenu={(event) => {
         event.preventDefault();
         event.stopPropagation();
@@ -98,7 +114,13 @@ export function FilesPanelEntryMenu({
               title={t('files.entryActions', { name })}
               className={cn(
                 'min-h-5! min-w-5! p-0.5!',
-                open ? 'text-fg-default' : SIDEBAR_ROW_ACTION_CLASS,
+                // Touch has no hover to reveal the button with.
+                open
+                  ? 'text-fg-default'
+                  : cn(
+                      SIDEBAR_ROW_ACTION_CLASS,
+                      '[@media(hover:none)]:opacity-100',
+                    ),
               )}
               onKeyDown={(event) => {
                 if (
@@ -121,26 +143,6 @@ export function FilesPanelEntryMenu({
               event.stopPropagation();
             }}
           >
-            {onOpenHere ? (
-              <DropdownMenuItem
-                onClick={() => {
-                  onOpenHere();
-                  setOpen(false);
-                }}
-              >
-                {t('files.openHere')}
-              </DropdownMenuItem>
-            ) : null}
-            {onAddToCanvas ? (
-              <DropdownMenuItem
-                onClick={() => {
-                  onAddToCanvas();
-                  setOpen(false);
-                }}
-              >
-                {t('files.addToCanvas')}
-              </DropdownMenuItem>
-            ) : null}
             <DropdownMenuItem onClick={() => void copy(name)}>
               {t('files.copyName')}
             </DropdownMenuItem>
@@ -150,6 +152,37 @@ export function FilesPanelEntryMenu({
             <DropdownMenuItem onClick={() => void copy(path)}>
               {t('files.copyFullPath')}
             </DropdownMenuItem>
+            {onOpenHere ? (
+              <DropdownMenuItem
+                onClick={() => {
+                  setOpen(false);
+                  onOpenHere();
+                }}
+              >
+                {t('files.openHere')}
+              </DropdownMenuItem>
+            ) : null}
+            {onOpen ? (
+              <DropdownMenuItem
+                onClick={() => {
+                  setOpen(false);
+                  onOpen();
+                }}
+              >
+                {t('files.openPreview')}
+              </DropdownMenuItem>
+            ) : null}
+            {onAdd ? (
+              <DropdownMenuItem
+                disabled={!canAdd}
+                onClick={() => {
+                  setOpen(false);
+                  onAdd();
+                }}
+              >
+                {t('files.addToSpace')}
+              </DropdownMenuItem>
+            ) : null}
           </div>
         </DropdownMenu>
       </div>

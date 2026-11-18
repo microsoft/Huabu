@@ -40,7 +40,7 @@ if (
 ) {
   process.exitCode = 2;
 } else {
-  let environment = process.env;
+  let environment = { ...process.env };
   if (environmentMode === '--environment-stdin') {
     let input = '';
     process.stdin.setEncoding('utf8');
@@ -86,6 +86,11 @@ if (
       process.stdin.destroy();
     }
   }
+  // This SHA identifies the old server. A new tmux server can inherit the
+  // runner's environment, so let the replacement launcher discover its own
+  // checkout revision instead of preserving the previous process's value.
+  delete environment.HUABU_DEPLOYED_SHA;
+
   await mkdir(path.dirname(statusPath), { recursive: true });
   await mkdir(path.dirname(logPath), { recursive: true });
 

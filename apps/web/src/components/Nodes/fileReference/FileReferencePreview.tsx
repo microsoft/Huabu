@@ -9,7 +9,11 @@ import { isFileReference } from '@huabu/shared';
 import { readDeviceFile } from '@/api/device-files';
 import { Button } from '@/components/Common/Button';
 import useCanvasStore, { selectCanWriteCanvas } from '@/store/canvasStore';
-import { addFileReferenceNode } from '@/utils/deviceFile';
+import {
+  closePreviewFile,
+  openFileReference,
+} from '@/store/previewWorkspace/actions';
+import { deviceFileName } from '@/utils/deviceFile';
 
 import type { PreviewComponentProps } from '../previews';
 import type { EditorView } from '@codemirror/view';
@@ -20,6 +24,10 @@ const SourceViewer = lazy(
 );
 const CommentActions = lazy(async () => ({
   default: (await import('./FileCommentActions')).FileCommentActions,
+}));
+const MarkdownViewer = lazy(async () => ({
+  default: (await import('@/components/Milkdown/MilkdownPreview'))
+    .MilkdownPreview,
 }));
 const MAX_PREVIEW_BYTES = 262_144;
 
@@ -41,6 +49,15 @@ export function FileReferencePreview({ id, data }: PreviewComponentProps) {
   const canvasId = useCanvasStore((state) => state.canvasId);
   const canWrite = useCanvasStore(selectCanWriteCanvas);
   const [view, setView] = useState<EditorView | null>(null);
+  const [mode, setMode] = useState<'reading' | 'source'>('reading');
+  const [renderError, setRenderError] = useState<string | null>(null);
+  const isMarkdown = /\.(?:md|markdown|mdown|mkd)$/i.test(path ?? '');
+  const canReadMarkdown =
+    isMarkdown && !!result && !result.nextCursor && !pending && !error;
+  const reading = canReadMarkdown && mode === 'reading' && !renderError;
+  useEffect(() => {
+    setMode('reading');
+  }, [agentletId, path]);
   useEffect(() => {
     const current = ++generation.current;
     controller.current?.abort();
@@ -49,12 +66,14 @@ export function FileReferencePreview({ id, data }: PreviewComponentProps) {
     loadedBytes.current = 0;
     setResult(null);
     setError(null);
+    setRenderError(null);
     if (!agentletId || !path) return;
     setPending(true);
     void readDeviceFile(agentletId, { path }, abort.signal)
       .then((value) => {
         if (current !== generation.current) return;
         loadedBytes.current = value.byteLength;
+        if (value.nextCursor) setMode('source');
         setResult(value);
       })
       .catch((failure: unknown) => {
@@ -126,7 +145,7 @@ export function FileReferencePreview({ id, data }: PreviewComponentProps) {
             nodeId={id}
             agentletId={agentletId}
             file={result}
-            disabled={pending || !!error}
+            disabled={pending || !!error || reading}
           />
         </Suspense>
       ) : null}
@@ -134,16 +153,57 @@ export function FileReferencePreview({ id, data }: PreviewComponentProps) {
         <span className="text-fg-muted min-w-0 flex-1 break-all">
           {reference.deviceName ?? agentletId} · {path}
         </span>
-        {id || !canWrite ? null : (
+        {id || !canWrite || !canvasId ? null : (
           // Opened straight from the file browser: nothing is in the Space yet.
+          // Adding a reference hands this Preview over to the new node.
           <Button
             size="sm"
             variant="ghost"
-            onClick={() => addFileReferenceNode(reference)}
+            onClick={() => {
+              try {
+                openFileReference(
+                  canvasId,
+                  reference,
+                  deviceFileName(reference.path),
+                );
+                closePreviewFile(reference);
+              } catch (failure) {
+                setError(
+                  failure instanceof Error
+                    ? failure.message
+                    : t('files.creationFailed'),
+                );
+              }
+            }}
           >
-            {t('files.addToCanvas')}
+            {t('files.addToSpace')}
           </Button>
         )}
+        {isMarkdown ? (
+          <div
+            className="flex items-center gap-1"
+            role="group"
+            aria-label={t('files.viewMode')}
+          >
+            <Button
+              size="sm"
+              variant="ghost"
+              aria-pressed={reading}
+              disabled={!canReadMarkdown || !!renderError}
+              onClick={() => setMode('reading')}
+            >
+              {t('files.reading')}
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              aria-pressed={!reading}
+              onClick={() => setMode('source')}
+            >
+              {t('files.source')}
+            </Button>
+          </div>
+        ) : null}
         <Button
           size="sm"
           variant="ghost"
@@ -153,6 +213,18 @@ export function FileReferencePreview({ id, data }: PreviewComponentProps) {
           {t('files.refresh')}
         </Button>
       </div>
+      {isMarkdown ? (
+        <p className="text-fg-muted px-3 py-2 text-xs">
+          {result?.nextCursor
+            ? t('files.partialMarkdown')
+            : t('files.singleFileMarkdown')}
+        </p>
+      ) : null}
+      {renderError ? (
+        <div role="alert" className="text-danger p-3 text-xs">
+          {t('files.renderFailed')} {renderError}
+        </div>
+      ) : null}
       {error ? (
         <div role="alert" className="text-danger p-3 text-xs">
           {error}
@@ -165,16 +237,28 @@ export function FileReferencePreview({ id, data }: PreviewComponentProps) {
       ) : null}
       {result ? (
         <Suspense fallback={<div className="p-3">{t('files.loading')}</div>}>
-          <SourceViewer
-            key={`${agentletId}:${path}`}
-            value={result.text}
-            readOnly
-            plainText
-            onReady={setView}
-            searchNodeId={id}
-            ariaLabel={t('files.readOnlyText')}
-            className="min-h-0 flex-1 overflow-auto"
-          />
+          {reading ? (
+            <MarkdownViewer
+              key={`${agentletId}:${path}:${refresh}`}
+              markdown={result.text}
+              singleFile
+              ariaLabel={t('files.readOnlyMarkdown')}
+              className="min-h-0 flex-1 overflow-auto p-4"
+              onLoadError={(failure) => setRenderError(failure.message)}
+            />
+          ) : (
+            <SourceViewer
+              key={`${agentletId}:${path}`}
+              value={result.text}
+              readOnly
+              plainText
+              languageFilename={path}
+              onReady={setView}
+              searchNodeId={id}
+              ariaLabel={t('files.readOnlyText')}
+              className="min-h-0 flex-1 overflow-auto"
+            />
+          )}
         </Suspense>
       ) : null}
       {result?.nextCursor ? (

@@ -104,7 +104,12 @@ export function buildFileTreeRows(snapshot: FileTreeSnapshot): FileTreeRow[] {
     if (visited.has(directory) || depth > MAX_TREE_DEPTH) return;
     visited.add(directory);
     const page = pages[directory];
-    for (const entry of page?.entries ?? []) {
+    // Folders first; the sort is stable, so each group keeps the order the
+    // device listed it in.
+    const entries = [...(page?.entries ?? [])].sort(
+      (a, b) => Number(b.kind === 'directory') - Number(a.kind === 'directory'),
+    );
+    for (const entry of entries) {
       const relativePath = parent
         ? `${parent}${separator}${entry.name}`
         : entry.name;
@@ -358,8 +363,10 @@ export class DeviceFileTree {
       return;
     }
     const { signal } = this.session;
-    // The listing a next page continues. A refresh replaces it, and a page
-    // fetched for the old one must not be appended to the new.
+    // The listing this reply builds on: the one a next page continues, or
+    // none for a first listing. A refresh may install a newer one meanwhile,
+    // and a reply requested before it must neither be appended to that nor
+    // overwrite it.
     const continued = this.snapshot.pages[directory];
     this.update({
       loading: new Set(this.snapshot.loading).add(directory),
@@ -375,7 +382,7 @@ export class DeviceFileTree {
       );
       if (signal.aborted) return;
       const { pages } = this.snapshot;
-      if (cursor && pages[directory] !== continued) return;
+      if (pages[directory] !== continued) return;
       if (countEntries(pages) + result.entries.length > MAX_TREE_ENTRIES) {
         this.update({ error: { kind: 'limit' } });
         if (!cursor) this.collapse(directory);

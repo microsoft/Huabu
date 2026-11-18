@@ -126,6 +126,34 @@ afterEach(() => {
 });
 
 describe('ACP Handle session self-repair', () => {
+  it.each(['session-from-create-context', 'replacement-session'])(
+    'restores usage only for the resumed native identity (%s)',
+    async (sessionId) => {
+      const usage = { used: 100, size: 1000, cost: null, receivedAt: 123 };
+      const tokenUsage = {
+        inputTokens: 200,
+        outputTokens: 30,
+        totalTokens: 230,
+        receivedAt: 124,
+      };
+      const options = ensureOptions();
+      orchestrator.ensureAgentForThread.mockResolvedValueOnce({
+        sessionId,
+        pid: 43,
+      });
+      const entry = await ensureAcpSession({
+        ...options,
+        priorState: {
+          ...options.priorState,
+          metadata: { usage, tokenUsage, metaUpdatedAt: 999 },
+        },
+      });
+      const resumed = sessionId === options.priorState.driverState.sessionId;
+      expect(entry.usage).toEqual(resumed ? usage : null);
+      expect(entry.tokenUsage).toEqual(resumed ? tokenUsage : null);
+    },
+  );
+
   it('recovers the frozen recipe while ignoring the legacy resolved plan', async () => {
     const profile = {
       executionRevision: 1,

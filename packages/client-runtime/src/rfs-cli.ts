@@ -24,7 +24,11 @@ export interface UploadOptions {
 
 export interface RfsActions {
   rootHelp: () => Promise<void>;
-  getSkill: (id: string | undefined, usage: string) => Promise<void>;
+  getSkill: (
+    id: string | undefined,
+    usage: string,
+    output?: string,
+  ) => Promise<void>;
   query: (options: InputOptions) => Promise<void>;
   execute: (options: InputOptions) => Promise<void>;
   download: (path: string, options: DownloadOptions) => Promise<void>;
@@ -92,12 +96,21 @@ export function createRfsProgram(
     return command;
   }
   guide(program, '').action(actions.rootHelp);
-  guide(
+  const getSkill = guide(
     program
       .command('get-skill [skillId]')
-      .description('Load root or focused Skill'),
-  ).action((id: string | undefined) =>
-    actions.getSkill(id, program.helpInformation()),
+      .description('Load root or focused Skill')
+      .option(
+        '--output <path>',
+        'Save the guide atomically; report file metadata as NDJSON',
+      ),
+  );
+  getSkill.action((id: string | undefined) =>
+    actions.getSkill(
+      id,
+      program.helpInformation(),
+      getSkill.opts<{ output?: string }>().output,
+    ),
   );
 
   for (const [name, action] of [

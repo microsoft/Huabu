@@ -226,7 +226,12 @@ describe('acpUpdateToStreamEvent — active discriminators', () => {
     });
     expect(evt).toEqual({
       type: 'session_usage_update',
-      data: { used: 1024, size: 200_000, cost: null },
+      data: {
+        used: 1024,
+        size: 200_000,
+        cost: null,
+        receivedAt: expect.any(Number),
+      },
     });
   });
 });
