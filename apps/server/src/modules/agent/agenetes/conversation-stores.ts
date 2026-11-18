@@ -66,7 +66,11 @@ import type { AgentSubmission, Namespace } from '@agenetes/protocol';
 interface Backing {
   readonly threads: ThreadStore;
   readonly events: EventLogStore;
-  readonly turns: TurnStore;
+  readonly turns:
+    | FileTurnStore
+    | InMemoryTurnStore
+    | SqliteTurnStore
+    | PostgresTurnStore;
 }
 
 const fileTurns = new FileTurnStore();
@@ -259,7 +263,11 @@ export const conversationEventLogStore: EventLogStore = {
     }),
 };
 
-export const conversationTurnStore: TurnStore = {
+export const conversationTurnStore = {
+  get: (namespace, threadId, reference) =>
+    inNamespace(namespace, (current, backing) =>
+      backing.turns.get(current, threadId, reference),
+    ),
   append: (namespace, threadId, persisted: PersistedTurn) =>
     inNamespace(namespace, (current, backing) =>
       backing.turns.append(current, threadId, persisted),
@@ -288,4 +296,4 @@ export const conversationTurnStore: TurnStore = {
     inNamespace(namespace, (current, backing) =>
       backing.turns.delete(current, threadId),
     ),
-};
+} satisfies TurnStore;

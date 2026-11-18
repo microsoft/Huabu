@@ -25,6 +25,7 @@ import { partIsExecuting, truncate } from './helpers';
 import { resolveArtifactUrl } from '../../../../api/artifact';
 import { Loading } from '../../../Common/Loading';
 import { AssistantDisclosure } from '../../AssistantDisclosure';
+import { DeferredDetails } from '../../DeferredDetails';
 
 import type { ImageGenerationToolPart } from '@huabu/shared';
 
@@ -73,7 +74,11 @@ export function ImageGenerationCard({ part }: ImageGenerationCardProps) {
 
   // ── Title ──────────────────────────────────────────────────────────
   const promptSnippet = prompt ? truncate(prompt, 60) : undefined;
-  const mode = refs.length > 0 ? 'edit' : 'generate';
+  const referenceCount =
+    part.detail?.state === 'deferred'
+      ? (part.detail.summary.referenceCount ?? 0)
+      : refs.length;
+  const mode = referenceCount > 0 ? 'edit' : 'generate';
   let title: string;
   if (executing) {
     title = promptSnippet
@@ -86,7 +91,7 @@ export function ImageGenerationCard({ part }: ImageGenerationCardProps) {
   } else if (mode === 'edit') {
     title = promptSnippet
       ? t('messages.editedImage', { prompt: promptSnippet })
-      : t('messages.editedImageFromRefs', { count: refs.length });
+      : t('messages.editedImageFromRefs', { count: referenceCount });
   } else {
     title = promptSnippet
       ? t('messages.generatedImageWithPrompt', { prompt: promptSnippet })
@@ -212,7 +217,11 @@ export function ImageGenerationCard({ part }: ImageGenerationCardProps) {
       titleTooltip={prompt}
       collapseSignal={!executing}
     >
-      {body}
+      {part.detail?.state === 'deferred' ? (
+        <DeferredDetails turnRef={part.detail.turnRef} />
+      ) : (
+        body
+      )}
     </AssistantDisclosure>
   );
 }
