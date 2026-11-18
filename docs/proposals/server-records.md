@@ -27,7 +27,7 @@ Server records become a third storage port, served by the **structured** backend
 `modules/storage/ports/server-records.ts` defines `ServerRecordStore`:
 
 - A record is a JSON document addressed by `{ owner, name }`. `name` comes from a closed registry (`SERVER_RECORDS`) that also says whether a member may hold a personal copy. `owner` is `null` for the deployment and otherwise the existing opaque 32-hex person key from `identity/personal-settings.ts`, so no principal id becomes a path or a column value.
-- `get(key)` is synchronous and returns a private copy of the latest acknowledged value, or `null` when the record was never written. Every current caller reads synchronously (credential lookup during agent tool calls, ownership checks while listing devices), so the port keeps that contract instead of turning a wide read surface async.
+- `get(key)` is asynchronous and returns a private copy of the latest acknowledged value, or `null` when the record was never written. It reads the medium on every call; no adapter keeps a copy between calls. Before this change every record was a file read on each use, so a value one Server process wrote was visible to the next read in any other; an in-process copy would have added a new way for processes sharing a database to disagree (a device credential reset that another process never sees, for example).
 - `put(key, value)` is asynchronous and resolves only after the value is durable and visible to `get`.
 - `keys()` lists stored records; the composition root uses it to import existing files.
 - Records are never deleted. Every owner replaces its whole document, so "absent" always means "never written", which keeps import idempotent.
@@ -36,13 +36,13 @@ Server records become a third storage port, served by the **structured** backend
 
 One file per structured backend, each beside that backend's other adapters:
 
-| Backend    | File                                  | Persistence                                                                                                                       | Reads                                                                     |
-| ---------- | ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| `disk`     | `backends/disk/server-records.ts`     | The existing files at their existing paths (`backends/disk/data-dir.ts` owns the name → file mapping); atomic, fsynced, mode 0600 | Read-through on every call                                                |
-| `sqlite`   | `backends/sqlite/server-records.ts`   | `server_records` table in `huabu.sqlite` (schema v3)                                                                              | Synchronous `SELECT` on the shared `node:sqlite` connection               |
-| `postgres` | `backends/postgres/server-records.ts` | `server_records` table in the Huabu database/schema (schema v3)                                                                   | Snapshot loaded by `init()`, replaced only after each acknowledged upsert |
+| Backend    | File                                  | Persistence                                                                                                                       | Reads                                  |
+| ---------- | ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- |
+| `disk`     | `backends/disk/server-records.ts`     | The existing files at their existing paths (`backends/disk/data-dir.ts` owns the name → file mapping); atomic, fsynced, mode 0600 | The file, on every call                |
+| `sqlite`   | `backends/sqlite/server-records.ts`   | `server_records` table in `huabu.sqlite` (schema v3)                                                                              | `SELECT` by primary key, on every call |
+| `postgres` | `backends/postgres/server-records.ts` | `server_records` table in the Huabu database/schema (schema v3)                                                                   | `SELECT` by primary key, on every call |
 
-Both SQL tables have the same shape: `(owner_key TEXT, name TEXT, record_json TEXT, updated_at)` with primary key `(owner_key, name)` and `''` for the deployment. Each adapter reads the way its medium allows: files and SQLite can answer synchronously, while `pg` cannot, so only PostgreSQL keeps an in-memory snapshot. That snapshot is correct under the already documented single-writer deployment rule ("keep one active Huabu writer"). Running several Server replicas against one database remains unsupported.
+Both SQL tables have the same shape: `(owner_key TEXT, name TEXT, record_json TEXT, updated_at)` with primary key `(owner_key, name)` and `''` for the deployment. The three adapters differ only in their medium.
 
 A reusable contract suite (`ports/contracts/server-records.contract.ts`) runs against all three adapters.
 
@@ -56,13 +56,26 @@ A reusable contract suite (`ports/contracts/server-records.contract.ts`) runs ag
 - For `sqlite` and `postgres`, opening also imports every record that exists in the legacy data-directory files and is absent from the database. Because records are never deleted, the import is a no-op once a record exists. An unreadable legacy file fails startup instead of being silently dropped.
 - Disk remains usable without explicit initialization, matching the lazy Disk path of `storage.ts`.
 
+### Reads per operation
+
+Because a read now reaches storage (a primary-key round trip on PostgreSQL), owners read a record once per operation and derive everything that operation needs from it, never once per item. The places that previously looked up the same record repeatedly within one operation now read it once:
+
+- Device access is a `DeviceAccess` view over one read of `device-owners`. A Profile listing, a registry lookup or mutation, and the Settings device list each read ownership once and filter every Profile or device against it.
+- A connected device's owner is the principal its handshake admitted, which the Gateway already keeps as the connection's `metadata.principalId`; the handshake records or matches the ownership record before admitting it, and ownership never changes. Placement among connected devices (`resolveConnectedAgentletId`), connection filters, revalidation sweeps, and credential-reset disconnects therefore read no record.
+- Model-role resolution reads `model-settings` once per resolution. Building an ACP workload spec reads its Profile once and derives the snapshot, remembered preferences, and observed catalogue from it. A full-Canvas save resolves the default Agent binding at most once for all new conversations in it. Tool binding reads the image model family only when the `generate_image` tool is bound.
+- Credential checks read `agent-credential-versions` once per check, as they read the file before. HTTP requests classify a bearer token by signature alone and read its version once.
+
+The per-operation cost matches the file deployments it replaces on App Service, where the data directory was a network share read on every use.
+
 ### Owners
 
 - `EncryptedFileSecretStore` becomes `EncryptedSecretStore`, persisting its unchanged AES-256-GCM envelope as the deployment's `credentials` record. Its read-back verification decrypts the acknowledged record before publishing new values.
 - On `postgres`, the master key must come from `HUABU_SECRET_KEY`. An automatically generated key would live in the local private-config directory while the ciphertext lives in the database, recreating the dependency this change removes; startup fails with instructions before connecting. Disk and SQLite keep the automatic key because their ciphertext is local too.
-- Settings modules replace `settingsFilePath(file)` with `settingsRecordKey(name)` and persist through the facade; their parsing, defaults, and error behavior are unchanged. Their setters become async.
-- `agent-credentials.ts` keeps ownership and credential versions as `device-owners` and `agent-credential-versions` records. Ownership claims and resets use `update`. A device handshake rechecks its credential after its ownership claim is acknowledged, because a reset may complete during that write and has already swept connected devices.
-- The Agenetes `AgentProfileRegistryStore` gains an async `save` and a nullable `load`; registry mutations become async and serialized, and the registry document codec is exported so Huabu's server-record store and Agenetes' file store share one format. Huabu supplies a store over the `agent-profiles` or `user-agent-profiles` record. Automatic harness discovery serializes each device's lookup-and-create, which used to rely on having no `await` between them.
+- Settings modules replace `settingsFilePath(file)` with `settingsRecordKey(name)` and persist through the facade; their parsing, defaults, and error behavior are unchanged. Their getters and setters become async, and so do the model-settings readers in `agent/llm.ts` (`getLLMModel`, `getModelsForProvider`, the image-configuration readers) and the service-provisioner adapters that project them.
+- `agent-credentials.ts` keeps ownership and credential versions as `device-owners` and `agent-credential-versions` records. Ownership claims and resets use `update`. A device handshake rechecks its credential after its ownership claim is acknowledged, because a reset may complete during that write and has already swept connected devices. `canUseAgentlet` is replaced by `readDeviceAccess()` (one read, for devices that may be offline) and `connectedDeviceAccess()` (connected devices, no read), which share one access rule; `readAgentCredential`, `agentletOwner`, `requireOwnAgentlet`, and `ownDeviceCredential` become async.
+- The Agenetes `AgentProfileRegistryStore` gains an async `save` and an async, nullable `load`; a registry opens through `AgentProfileRegistry.open(store, options)`. Registry mutations become async and serialized, and the registry document codec is exported so Huabu's server-record store and Agenetes' file store share one format. Huabu supplies a store over the `agent-profiles` or `user-agent-profiles` record. Automatic harness discovery serializes each device's lookup-and-create, which used to rely on having no `await` between them.
+- The registry's synchronous `canAccess` predicate becomes `resolveAccess`, resolved once at the start of each read and mutation, so a host that reads ownership from storage reads it once per operation. Registry reads (`getProfile`, `listProfiles`, `listSelectableProfileIds`, `snapshotProfile`) become async; the registry still serves Profiles from the state it opened with.
+- Three other Agenetes host hooks that read settings may now resolve asynchronously: the supervisor's `getMaxAgents` (read before forking the daemon), the ACP runtime policy's `getIdleTimeoutSecs` (read once per session spawn), and the profile cache port's `readCommands` (the warm-start command list, which an agent's own list that arrives meanwhile still overrides).
 
 ### What stays local, and why that is safe
 
@@ -85,6 +98,6 @@ With `postgres` + `azure` and `HUABU_SECRET_KEY` supplied, the container no long
 
 ## Not in scope
 
-- Multiple concurrent Server replicas. They also need cross-process invalidation for every in-memory view, not only server records.
+- Multiple concurrent Server replicas. This change adds no in-process copy of a server record, but existing in-process views remain: live Space sync, Canvas write locks, agent turn leases, device connections, the Agent Profile registry's state, the decrypted credential map, and the active model configuration. Replicas would need cross-process coordination for those, and cross-process serialization of `update`, which is per process here as file writes were before.
 - Moving logs off local disk.
 - Desktop's Electron `safeStorage` vault, which belongs to the desktop process rather than the Server.
