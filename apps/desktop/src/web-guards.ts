@@ -3,7 +3,7 @@
 
 import { isSameOrigin } from './server-target.js';
 
-import type { Session } from 'electron';
+import type { Session, WebFrameMain } from 'electron';
 
 /**
  * Device permissions and downloads are denied unless the application itself
@@ -95,5 +95,72 @@ export function guardSession(webSession: Session, serverOrigin: string): void {
     if (isDownloadAllowed(item.getURL(), serverOrigin)) return;
     event.preventDefault();
     console.warn('[desktop] Blocked a download from outside the application.');
+  });
+}
+
+/** The request header the local Server admits the desktop app's windows by. */
+export const DESKTOP_TOKEN_HEADER = 'X-Huabu-Desktop-Token';
+
+export interface OutgoingRequest {
+  url: string;
+  resourceType: string;
+  /**
+   * The document URL of the frame making the request, then of each ancestor.
+   * `null` when no frame makes it: a worker, or the main process.
+   */
+  frameUrls: readonly string[] | null;
+}
+
+/**
+ * Whether a request is the application's own call to its local Server.
+ *
+ * The Server's Host, Origin and CORS guards already keep a framed web page
+ * from reading the API or writing to it, token or not. This only withholds
+ * the token where the caller is plainly not the application.
+ */
+export function carriesLaunchToken(
+  request: OutgoingRequest,
+  serverOrigins: readonly string[],
+): boolean {
+  const isServer = (url: string) =>
+    serverOrigins.some((origin) => isSameOrigin(url, origin));
+  if (!isServer(request.url)) return false;
+  // The navigation guard lets a window load nothing but the application.
+  if (request.resourceType === 'mainFrame') return true;
+  if (!request.frameUrls) return true;
+  // `about:srcdoc` and `blob:` documents belong to the page that made them.
+  const document = request.frameUrls.find((url) => /^https?:/i.test(url));
+  return document === undefined || isServer(document);
+}
+
+export function sendLaunchToken(
+  webSession: Session,
+  token: string,
+  serverOrigins: readonly string[],
+): void {
+  webSession.webRequest.onBeforeSendHeaders((details, callback) => {
+    let frameUrls: string[] | null = null;
+    try {
+      let frame: WebFrameMain | null = details.frame ?? null;
+      if (frame) frameUrls = [];
+      for (; frame; frame = frame.parent) frameUrls?.push(frame.url);
+    } catch {
+      // The frame was disposed mid-request. A page's last save while it
+      // closes must still arrive, so this request is treated as frameless.
+      frameUrls = null;
+    }
+    callback(
+      carriesLaunchToken(
+        { url: details.url, resourceType: details.resourceType, frameUrls },
+        serverOrigins,
+      )
+        ? {
+            requestHeaders: {
+              ...details.requestHeaders,
+              [DESKTOP_TOKEN_HEADER]: token,
+            },
+          }
+        : {},
+    );
   });
 }

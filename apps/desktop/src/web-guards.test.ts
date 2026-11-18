@@ -4,9 +4,11 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import {
+  carriesLaunchToken,
   guardSession,
   isDownloadAllowed,
   isPermissionAllowed,
+  sendLaunchToken,
 } from './web-guards';
 
 import type { Session } from 'electron';
@@ -151,5 +153,144 @@ describe('guardSession', () => {
     listener(kept, { getURL: () => `${ORIGIN}/api/canvas/a/artifact/x.pdf` });
     expect(kept.preventDefault).not.toHaveBeenCalled();
     warn.mockRestore();
+  });
+});
+
+describe('carriesLaunchToken', () => {
+  const API = `${ORIGIN}/api/canvas/one`;
+  const carries = (
+    url: string,
+    resourceType: string,
+    frameUrls: string[] | null,
+  ) => carriesLaunchToken({ url, resourceType, frameUrls }, [ORIGIN]);
+
+  it('accompanies the application to its Server', () => {
+    expect(carries(`${ORIGIN}/_desktop`, 'mainFrame', ['about:blank'])).toBe(
+      true,
+    );
+    expect(carries(API, 'xhr', [APP])).toBe(true);
+    expect(carries(`${ORIGIN}/assets/app.js`, 'script', [APP])).toBe(true);
+    // A worker, or the main process itself.
+    expect(carries(API, 'xhr', null)).toBe(true);
+  });
+
+  it('accompanies documents the application frames from its own Server', () => {
+    // A new frame is blank until its first navigation commits.
+    expect(
+      carries(`${ORIGIN}/api/canvas/one/artifact/page.html`, 'subFrame', [
+        'about:blank',
+        APP,
+      ]),
+    ).toBe(true);
+    // Sandboxed, so its origin is opaque, yet its document is the Server's.
+    expect(
+      carries(`${ORIGIN}/api/canvas/one/artifact/style.css`, 'stylesheet', [
+        `${ORIGIN}/api/canvas/one/artifact/page.html`,
+        APP,
+      ]),
+    ).toBe(true);
+    expect(carries(API, 'image', ['about:srcdoc', APP])).toBe(true);
+  });
+
+  it('never leaves for another origin', () => {
+    expect(carries('https://evil.example/api', 'xhr', [APP])).toBe(false);
+    expect(carries('http://127.0.0.1:9999/api', 'xhr', [APP])).toBe(false);
+    expect(carries('not a url', 'xhr', [APP])).toBe(false);
+  });
+
+  it('is withheld from a web page framed on the Canvas', () => {
+    const page = 'https://evil.example/page';
+    expect(carries(API, 'xhr', [page, APP])).toBe(false);
+    expect(carries(API, 'image', [page, APP])).toBe(false);
+    // The page pointing its own frame, or one it made, at the Server.
+    expect(carries(API, 'subFrame', [page, APP])).toBe(false);
+    expect(carries(API, 'subFrame', ['about:blank', page, APP])).toBe(false);
+    expect(carries(API, 'xhr', ['about:srcdoc', page, APP])).toBe(false);
+  });
+
+  it('covers a development web server that proxies to the Server', () => {
+    const dev = 'http://localhost:5173';
+    const origins = [dev, ORIGIN];
+    expect(
+      carriesLaunchToken(
+        { url: `${dev}/api/x`, resourceType: 'xhr', frameUrls: [`${dev}/`] },
+        origins,
+      ),
+    ).toBe(true);
+    expect(
+      carriesLaunchToken(
+        { url: API, resourceType: 'xhr', frameUrls: [`${dev}/`] },
+        origins,
+      ),
+    ).toBe(true);
+  });
+});
+
+describe('sendLaunchToken', () => {
+  function listener() {
+    const onBeforeSendHeaders = vi.fn();
+    sendLaunchToken(
+      { webRequest: { onBeforeSendHeaders } } as unknown as Session,
+      'launch',
+      [ORIGIN],
+    );
+    return onBeforeSendHeaders.mock.calls[0][0] as (
+      details: unknown,
+      callback: (response: unknown) => void,
+    ) => void;
+  }
+  const frame = (url: string, parent: unknown = null) => ({ url, parent });
+
+  it("adds the token to the application's requests and keeps their headers", () => {
+    const callback = vi.fn();
+    listener()(
+      {
+        url: `${ORIGIN}/api/x`,
+        resourceType: 'xhr',
+        requestHeaders: { Accept: 'application/json' },
+        frame: frame(APP),
+      },
+      callback,
+    );
+    expect(callback).toHaveBeenCalledWith({
+      requestHeaders: {
+        Accept: 'application/json',
+        'X-Huabu-Desktop-Token': 'launch',
+      },
+    });
+  });
+
+  it('leaves every other request untouched', () => {
+    const send = listener();
+    for (const details of [
+      { url: 'https://example.com/', resourceType: 'xhr', frame: frame(APP) },
+      {
+        url: `${ORIGIN}/api/x`,
+        resourceType: 'xhr',
+        frame: frame('https://evil.example/', frame(APP)),
+      },
+    ]) {
+      const callback = vi.fn();
+      send({ ...details, requestHeaders: {} }, callback);
+      expect(callback).toHaveBeenCalledWith({});
+    }
+  });
+
+  it("still sends a closing page's last request once its frame is gone", () => {
+    const callback = vi.fn();
+    listener()(
+      {
+        url: `${ORIGIN}/api/x`,
+        resourceType: 'xhr',
+        requestHeaders: {},
+        get frame() {
+          throw new Error('Render frame was disposed');
+        },
+      },
+      callback,
+    );
+    expect(callback).toHaveBeenCalledWith({
+      requestHeaders: { 'X-Huabu-Desktop-Token': 'launch' },
+    });
   });
 });

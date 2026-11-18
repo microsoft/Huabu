@@ -27,7 +27,7 @@
  * user can see it (window title, installer, Start Menu entry, log dir, etc.).
  */
 
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import {
   existsSync,
   mkdirSync,
@@ -77,7 +77,7 @@ import {
 import { ensureShellPath } from './shell-path.js';
 import { TITLE_BAR_HEIGHT } from './title-bar.js';
 import { registerUpdaterIpc, startAutoUpdateChecks } from './updater.js';
-import { guardSession } from './web-guards.js';
+import { guardSession, sendLaunchToken } from './web-guards.js';
 
 import type * as DesktopAgentRuntime from '@huabu/client-runtime/desktop' with {
   'resolution-mode': 'import',
@@ -582,6 +582,14 @@ function resolveServerEntry(): string {
  * All HUABU_* vars are injected here — the server code reads them
  * via process.env and has fallbacks for the standalone (non-Electron) case.
  */
+/**
+ * Admits this app's windows to the Server it starts, and nothing else on the
+ * machine: loopback is reachable by every local program and every local user.
+ * New on each launch and held in memory only. Absent when the Server is not
+ * ours to configure (`--server`, or a development Server already running).
+ */
+let launchToken: string | null = null;
+
 function buildServerEnv(port: number): NodeJS.ProcessEnv {
   const userData = app.getPath('userData');
 
@@ -632,6 +640,7 @@ function buildServerEnv(port: number): NodeJS.ProcessEnv {
     // when its authoritative storage/disk/workspaces.json does not exist.
     HUABU_LEGACY_WORKSPACE_STORE: join(userData, 'workspace.json'),
     HUABU_SECRET_BRIDGE: '1',
+    ...(launchToken ? { HUABU_DESKTOP_TOKEN: launchToken } : {}),
     // Content fetches (web pages, imported files, inlined images) stay off
     // this machine and its network. Model endpoints are not content fetches.
     HUABU_PUBLIC_NETWORK_ONLY: '1',
@@ -1090,6 +1099,12 @@ function configureWebSession(
   webSession = session.defaultSession,
 ): void {
   guardSession(webSession, serverOrigin);
+  if (launchToken)
+    // With a development web server in front, the page reaches the Server
+    // through that server's proxy as well as directly.
+    sendLaunchToken(webSession, launchToken, [
+      ...new Set([serverOrigin, `http://127.0.0.1:${serverPort}`]),
+    ]);
   const filter = { urls: ['<all_urls>'] };
   webSession.webRequest.onHeadersReceived(filter, (details, callback) => {
     // Leave our own origin alone — stripping CSP from our SPA would be
@@ -1460,6 +1475,7 @@ app.whenReady().then(async () => {
       // service that just bound 3001). When that happens the child
       // crashes with EADDRINUSE — retry with a fresh port instead of
       // surfacing the error to the user.
+      launchToken = randomBytes(32).toString('base64url');
       const tried = new Set<number>();
       let lastErr: Error | null = null;
       // `get-port` is an ESM-only package; load it via dynamic import so
