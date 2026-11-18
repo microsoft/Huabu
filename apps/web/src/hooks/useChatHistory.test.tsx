@@ -1388,10 +1388,11 @@ describe('useChatHistory paging', () => {
           false,
         );
         expect(latestOwnerHistoryReady).toBe(true);
-        // The idle thread hands its queue back for sending instead of pausing.
+        // A finished owner hands its queue back for sending; one that failed
+        // mid-run pauses it without waiting for history to hydrate.
         expect(settle).toHaveBeenCalled();
         expect(useChatStore.getState().threadsById[THREAD_ID].queuePaused).toBe(
-          false,
+          status === 'error',
         );
         expect(apiMocks.fetchHistoryPage).toHaveBeenLastCalledWith(
           THREAD_ID,

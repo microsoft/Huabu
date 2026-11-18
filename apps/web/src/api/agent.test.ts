@@ -359,6 +359,20 @@ describe('agent API host acceptance', () => {
     expect(handlers.onComplete).toHaveBeenCalledOnce();
   });
 
+  it('reports a stream that closes without a terminal event as an error', async () => {
+    respond([
+      { type: 'accepted', data: { threadId: 'thread-a', turnStartSeq: 1 } },
+      { type: 'text_delta', data: { content: 'Partial' } },
+    ]);
+    const handlers = callbacks();
+    await agentApi.streamMessage('Hi', 'thread-a', 'operate', handlers);
+    expect(handlers.onAccepted).toHaveBeenCalledOnce();
+    expect(handlers.onError).toHaveBeenCalledExactlyOnceWith(
+      new Error('Agent stream ended before a terminal event'),
+    );
+    expect(handlers.onComplete).not.toHaveBeenCalled();
+  });
+
   it('does not infer acceptance from meta or from a preparation error', async () => {
     respond([
       { type: 'meta', data: { threadId: 'thread-a', mode: 'operate' } },

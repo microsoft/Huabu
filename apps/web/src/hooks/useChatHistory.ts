@@ -1168,6 +1168,30 @@ export function useChatHistory(
     ownerUnavailable,
   ]);
 
+  // An owner seen running that then reports an error has failed. Pause in the
+  // same commit that releases the attachment, before a waiting queue can wake;
+  // the token keeps a stale snapshot of an older run from pausing a newer one.
+  const runningInvocation = useRef<{ threadId: string; token: string | null }>(
+    undefined,
+  );
+  useEffect(() => {
+    if (ownerUnavailable) return;
+    const token = ownerInvocationToken ?? null;
+    if (ownerStatus === 'running') {
+      runningInvocation.current = { threadId, token };
+      return;
+    }
+    const observed = runningInvocation.current;
+    if (
+      ownerStatus === 'error' &&
+      observed?.threadId === threadId &&
+      observed.token === token
+    ) {
+      pauseAgentTurnQueueAfterFailure(threadId);
+    }
+    runningInvocation.current = undefined;
+  }, [ownerStatus, ownerInvocationToken, threadId, ownerUnavailable]);
+
   useEffect(() => {
     if (
       ownerUnavailable ||

@@ -457,7 +457,10 @@ export const agentApi = {
         callbacks,
         options?.signal,
       );
-      if (!terminal) callbacks.onComplete();
+      if (!terminal) {
+        // The connection closed mid-turn; the turn may still be running.
+        throw new Error('Agent stream ended before a terminal event');
+      }
     } catch (error) {
       // Treat any error while the signal is aborted as an intentional stop
       if (options?.signal?.aborted) {

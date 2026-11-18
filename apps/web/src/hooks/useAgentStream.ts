@@ -47,7 +47,7 @@ export interface UseAgentStreamReturn {
     prompt: string,
     mode: AgentMode,
     invokedSkills?: string[],
-    options?: { defer?: boolean },
+    options?: { defer?: boolean; settingsPending?: boolean },
   ) => Promise<void>;
   retryStream: (
     message: Extract<ChatMessage, { role: 'user' }>,
@@ -89,7 +89,7 @@ export function useAgentStream(
       prompt: string,
       mode: AgentMode,
       invokedSkills?: string[],
-      options?: { defer?: boolean },
+      options?: { defer?: boolean; settingsPending?: boolean },
     ) => {
       const chat = useChatStore.getState();
       const quotedComments = selectThreadQuotedComments(chat, session.threadId);
@@ -148,6 +148,7 @@ export function useAgentStream(
             id: createId('queued-turn'),
             prepared,
             status: 'pending',
+            ...(options?.settingsPending ? { settingsPending: true } : {}),
           });
           chat.consumeDraft(session.threadId, draft, quotedComments);
           chat.setExcludeCanvasSelection(session.threadId, false);

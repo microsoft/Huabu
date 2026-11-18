@@ -838,7 +838,10 @@ export const ChatPanel = ({
     async (e: React.FormEvent, agentMode: AgentMode, draft: string) => {
       e.preventDefault();
       if (!ownerScopeReady) return;
-      const options = { defer: deferSubmission };
+      const options = {
+        defer: deferSubmission,
+        settingsPending: builtinThreadSettings.saving,
+      };
       // Strip leading `/<id>` tokens that match a known slash command
       // and forward them as `invokedSkills`. Skill invocation is gated
       // to **internal + operate mode** only:
@@ -884,6 +887,7 @@ export const ChatPanel = ({
       startStream,
       ownerScopeReady,
       deferSubmission,
+      builtinThreadSettings.saving,
     ],
   );
 

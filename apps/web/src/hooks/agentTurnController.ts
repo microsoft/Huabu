@@ -1757,7 +1757,6 @@ export function holdAgentTurnQueue(
 /** Resolves on the next state change that may let the queue advance. */
 function waitForQueueChange(
   session: Pick<ChatSession, 'threadId' | 'ownerCanvasId'>,
-  timeoutMs = QUEUE_RECHECK_MS,
 ): Promise<void> {
   return new Promise((resolve) => {
     const cleanups: Array<() => void> = [];
@@ -1766,7 +1765,7 @@ function waitForQueueChange(
       resolve();
     };
     // Acceptance reconciliation has no change signal; the timer covers it.
-    const timer = setTimeout(done, timeoutMs);
+    const timer = setTimeout(done, QUEUE_RECHECK_MS);
     cleanups.push(
       () => clearTimeout(timer),
       useChatStore.subscribe(done),
@@ -1826,6 +1825,9 @@ async function drainAgentTurnQueue(
       }
       if (
         queueHolds.has(threadId) ||
+        // Sending needs the user to retry a failed history load first, whether
+        // or not the panel that reported it is still mounted.
+        !!thread.historyError ||
         selectThreadIsLoading(chat, threadId) ||
         hasAgentStreamClaim(ownerCanvasId, threadId) ||
         turnAcceptanceSinks.has(key) ||
@@ -1842,7 +1844,13 @@ async function drainAgentTurnQueue(
         current.setQueuePaused(threadId, true);
       };
       try {
-        const result = await executeAgentTurn(next.prepared, {
+        const prepared = next.settingsPending
+          ? {
+              ...next.prepared,
+              settings: selectThreadSettings(useChatStore.getState(), threadId),
+            }
+          : next.prepared;
+        const result = await executeAgentTurn(prepared, {
           queuedTurnId: next.id,
           onAccepted: () =>
             useChatStore.getState().removeQueuedTurn(threadId, next.id),
@@ -1855,7 +1863,10 @@ async function drainAgentTurnQueue(
             useChatStore
               .getState()
               .setQueuedTurnStatus(threadId, next.id, 'pending');
-            await waitForQueueChange(session, THREAD_BUSY_RETRY_MS);
+            // A fixed delay: unrelated store updates must not shorten it.
+            await new Promise((resolve) =>
+              setTimeout(resolve, THREAD_BUSY_RETRY_MS),
+            );
             continue;
           }
           if (result.status === 'unknown') {

@@ -393,6 +393,65 @@ describe('queued composer turns', () => {
     }
   });
 
+  it('keeps a queued turn back while its history load has failed, without a mounted panel', async () => {
+    const release = holdAgentTurnQueue(session);
+    await act(async () => {
+      await hook.startStream('Blocked', 'operate', undefined, { defer: true });
+    });
+    act(() =>
+      useChatStore.getState().setHistoryError(session.threadId, 'offline'),
+    );
+    // Closing the panel drops its hold; the failed history still blocks.
+    await act(async () => release());
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    expect(mocks.stream).not.toHaveBeenCalled();
+    expect(
+      useChatStore.getState().threadsById[session.threadId].queuePaused,
+    ).toBe(false);
+    mocks.stream.mockImplementationOnce(
+      async (_content, threadId, _mode, callbacks: AgentStreamCallbacks) =>
+        finish(callbacks, threadId),
+    );
+    act(() => useChatStore.getState().setHistoryError(session.threadId, null));
+    await waitForQueue();
+    expect(mocks.stream).toHaveBeenCalledTimes(1);
+  });
+
+  it('sends a turn queued during a settings save with the settings that save settled on', async () => {
+    const release = holdAgentTurnQueue(session);
+    act(() =>
+      useChatStore.getState().setThreadSettings(session.threadId, {
+        modelId: 'optimistic-model',
+        reasoningEffort: 'high',
+      }),
+    );
+    await act(async () => {
+      await hook.startStream('Saving', 'operate', undefined, {
+        defer: true,
+        settingsPending: true,
+      });
+    });
+    // The save is rejected and the selection rolls back before the hold ends.
+    act(() =>
+      useChatStore.getState().setThreadSettings(session.threadId, {
+        modelId: 'settled-model',
+        reasoningEffort: 'low',
+      }),
+    );
+    mocks.stream.mockImplementationOnce(
+      async (_content, threadId, _mode, callbacks: AgentStreamCallbacks) =>
+        finish(callbacks, threadId),
+    );
+    await act(async () => release());
+    await waitForQueue();
+    expect(mocks.stream.mock.calls[0]?.[4]).toMatchObject({
+      modelId: 'settled-model',
+      reasoningEffort: 'low',
+    });
+  });
+
   it('waits out a held composer and a server-side busy thread instead of pausing', async () => {
     const release = holdAgentTurnQueue(session);
     await act(async () => {
