@@ -245,3 +245,28 @@ it('drops a next page that was requested before a refresh replaced the listing',
   await settle();
   expect(calls[4]?.cursor).toBe('page-2');
 });
+
+it('leaves a refresh under way to finish instead of starting another', async () => {
+  const { tree, calls, settle } = harness();
+  tree.open('device', '/', false);
+  calls[0]?.resolve(['a']);
+  await settle();
+  tree.toggle('/a', 0);
+  await settle();
+  calls[1]?.resolve([]);
+  await settle();
+
+  tree.refresh();
+  tree.refresh();
+  tree.refresh();
+  await settle();
+  expect(calls.slice(2).map((call) => call.path)).toEqual(['/', '/a']);
+  expect(calls.every((call) => !call.signal.aborted)).toBe(true);
+
+  calls[2]?.resolve(['a']);
+  calls[3]?.resolve([]);
+  await settle();
+  tree.refresh();
+  await settle();
+  expect(calls).toHaveLength(6);
+});

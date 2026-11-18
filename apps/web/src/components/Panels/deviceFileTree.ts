@@ -163,9 +163,15 @@ export class DeviceFileTree {
     void this.reloadTree(!sameListing);
   }
 
-  /** Re-list the current directory and every open folder in place. */
+  /**
+   * Re-list the current directory and every open folder in place. A refresh
+   * already under way is left to finish: cancelling a request here does not
+   * cancel it on the server, so restarting would stack a second batch on the
+   * device's queue.
+   */
   refresh(): void {
-    if (this.agentletId && this.path) void this.reloadTree(true);
+    if (!this.agentletId || !this.path || this.snapshot.reloading) return;
+    void this.reloadTree(true);
   }
 
   /** Stop all work and forget the tree. */

@@ -294,7 +294,7 @@ export function FilesPanel() {
             </DropdownMenuItem>
             <DropdownMenuItem
               icon={<RefreshCw />}
-              disabled={!source}
+              disabled={!source || reloading}
               onClick={() => {
                 setMenuOpen(false);
                 tree.refresh();
