@@ -57,7 +57,12 @@ async function main() {
   }
   if (!/^\d+$/.test(pr)) fail(`Invalid PR number: ${pr}`);
 
-  const repo = ghJson(['repo', 'view', '--json', 'nameWithOwner']).nameWithOwner;
+  const repo = ghJson([
+    'repo',
+    'view',
+    '--json',
+    'nameWithOwner',
+  ]).nameWithOwner;
   const deadline = Date.now() + TIMEOUT_MS;
 
   let checks = readChecks(pr);
@@ -75,7 +80,9 @@ async function main() {
     fail(`Timed out waiting for checks on #${pr}.`);
   }
 
-  const failed = checks.filter((c) => c.bucket === 'fail' || c.bucket === 'cancel');
+  const failed = checks.filter(
+    (c) => c.bucket === 'fail' || c.bucket === 'cancel',
+  );
   const hasCodeQlCheck = checks.some((c) => c.name === 'CodeQL');
 
   const alerts = ghJson([
@@ -83,10 +90,14 @@ async function main() {
     `repos/${repo}/code-scanning/alerts?ref=refs/pull/${pr}/head&state=open&per_page=100`,
   ]);
 
-  console.log(`\nChecks on #${pr}: ${checks.length - failed.length} ok, ${failed.length} failing`);
+  console.log(
+    `\nChecks on #${pr}: ${checks.length - failed.length} ok, ${failed.length} failing`,
+  );
   for (const c of failed) console.log(`  FAIL ${c.name}  ${c.link}`);
   if (!hasCodeQlCheck) {
-    console.log('  WARN no `CodeQL` check found; code scanning may not have run on this PR yet.');
+    console.log(
+      '  WARN no `CodeQL` check found; code scanning may not have run on this PR yet.',
+    );
   }
 
   console.log(`\nOpen CodeQL alerts on refs/pull/${pr}/head: ${alerts.length}`);
@@ -94,10 +105,14 @@ async function main() {
     const loc = a.most_recent_instance?.location;
     const where = loc ? `${loc.path}:${loc.start_line}` : '?';
     const severity = a.rule?.security_severity_level ?? a.rule?.severity ?? '?';
-    console.log(`  [${severity}] ${a.rule?.id} ${where}\n    ${a.most_recent_instance?.message?.text ?? ''}\n    ${a.html_url}`);
+    console.log(
+      `  [${severity}] ${a.rule?.id} ${where}\n    ${a.most_recent_instance?.message?.text ?? ''}\n    ${a.html_url}`,
+    );
   }
 
   process.exit(failed.length > 0 || alerts.length > 0 ? 1 : 0);
 }
 
-main().catch((error) => fail(`pr:check failed: ${error.stderr || error.message}`));
+main().catch((error) =>
+  fail(`pr:check failed: ${error.stderr || error.message}`),
+);
