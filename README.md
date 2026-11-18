@@ -98,7 +98,7 @@ Environment variables and `.env` override setup choices and are never rewritten 
 
 For Linux containers and the daily App Service image, see [Web container](docs/architecture/web-container.md).
 
-Back up and persist both server data and private credential configuration on Disk and SQLite deployments. A PostgreSQL deployment keeps credentials and settings in the database and needs only `HUABU_SECRET_KEY` from the environment. See [Credential storage](docs/architecture/credential-storage.md).
+Back up and persist both server data and private credential configuration on Disk and SQLite deployments. A PostgreSQL deployment keeps credentials and settings in the database and needs `HUABU_SECRET_KEY` from the environment. With Disk blobs it still stores uploaded materials under the data directory, so persist that directory; only PostgreSQL with Azure blobs, with its configuration supplied by the environment, needs no persistent storage. See [Credential storage](docs/architecture/credential-storage.md).
 
 ## Data, Credentials, and Connected Services
 
