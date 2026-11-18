@@ -81,9 +81,9 @@ describe('isPermissionAllowed', () => {
 
 describe('isDownloadAllowed', () => {
   it('saves only files the application serves or creates', () => {
-    expect(isDownloadAllowed(`${ORIGIN}/api/canvas/a/artifact/x.pdf`, ORIGIN)).toBe(
-      true,
-    );
+    expect(
+      isDownloadAllowed(`${ORIGIN}/api/canvas/a/artifact/x.pdf`, ORIGIN),
+    ).toBe(true);
     expect(isDownloadAllowed(`blob:${ORIGIN}/7f3c`, ORIGIN)).toBe(true);
     expect(isDownloadAllowed('https://evil.example/setup.exe', ORIGIN)).toBe(
       false,
@@ -126,9 +126,9 @@ describe('guardSession', () => {
     expect(denied).toHaveBeenCalledWith(false);
 
     const check = session.setPermissionCheckHandler.mock.calls[0][0];
-    expect(
-      check(null, 'clipboard-read', ORIGIN, { isMainFrame: true }),
-    ).toBe(true);
+    expect(check(null, 'clipboard-read', ORIGIN, { isMainFrame: true })).toBe(
+      true,
+    );
     expect(
       check(null, 'media', ORIGIN, { isMainFrame: true, mediaType: 'video' }),
     ).toBe(false);

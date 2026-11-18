@@ -837,8 +837,31 @@ function waitForPort(
   });
 }
 
+/**
+ * Privileged channels answer only the application's own top-level pages.
+ *
+ * The preload bridge is injected into main frames alone and the navigation
+ * guard keeps those on the application origin, so a framed web page has no
+ * bridge to call. This is the check that still holds if either assumption
+ * stops being true.
+ */
+function assertApplicationSender(
+  event: Electron.IpcMainInvokeEvent | Electron.IpcMainEvent,
+): void {
+  const frame = event.senderFrame;
+  if (
+    !applicationUrl ||
+    !desktopTabs?.owns(event.sender) ||
+    !frame ||
+    frame !== event.sender.mainFrame ||
+    !isSameOrigin(frame.url, new URL(applicationUrl).origin)
+  )
+    throw new Error('This operation is available only to the Huabu window.');
+}
+
 function registerWindowIpc(): void {
-  ipcMain.handle('window:is-fullscreen', () => {
+  ipcMain.handle('window:is-fullscreen', (event) => {
+    assertApplicationSender(event);
     return mainWindow ? mainWindow.isFullScreen() : false;
   });
 }
@@ -851,7 +874,8 @@ function registerWindowIpc(): void {
 function registerDiagnosticsIpc(): void {
   ipcMain.handle(
     'diagnostics:open-server-log',
-    async (): Promise<{ ok: true } | { ok: false; error: string }> => {
+    async (event): Promise<{ ok: true } | { ok: false; error: string }> => {
+      assertApplicationSender(event);
       const configuredDataDir = process.env.HUABU_DATA_DIR?.trim();
       if (
         (getExternalServerUrl() || remoteServerOrigin) &&
@@ -883,6 +907,7 @@ function registerDiagnosticsIpc(): void {
   ipcMain.handle(
     'diagnostics:open-developer-tools',
     (event): { ok: true } | { ok: false; error: string } => {
+      assertApplicationSender(event);
       const win = BrowserWindow.getFocusedWindow() ?? mainWindow;
       if (!win || win.webContents.isDestroyed()) {
         return { ok: false, error: 'No application window is available.' };
@@ -895,13 +920,16 @@ function registerDiagnosticsIpc(): void {
     },
   );
 
-  ipcMain.handle('diagnostics:get-system-info', () => ({
-    appVersion: app.getVersion(),
-    platform: process.platform,
-    osRelease: getOsRelease(),
-    architecture: process.arch,
-    electronVersion: process.versions.electron,
-  }));
+  ipcMain.handle('diagnostics:get-system-info', (event) => {
+    assertApplicationSender(event);
+    return {
+      appVersion: app.getVersion(),
+      platform: process.platform,
+      osRelease: getOsRelease(),
+      architecture: process.arch,
+      electronVersion: process.versions.electron,
+    };
+  });
 }
 
 /**
@@ -933,11 +961,12 @@ function registerDialogIpc(): void {
   ipcMain.handle(
     'dialog:pick-folder',
     async (
-      _event,
+      event,
       rawTitle: unknown,
     ): Promise<
       { ok: true; path: string } | { ok: false; reason: 'cancelled' }
     > => {
+      assertApplicationSender(event);
       const title =
         typeof rawTitle === 'string' && rawTitle.length > 0
           ? rawTitle
@@ -1314,12 +1343,12 @@ app.whenReady().then(async () => {
   if (!requestedRemoteOrigin) {
     registerDialogIpc();
   }
-  registerMenuIpc(() => mainWindow);
+  registerMenuIpc(() => mainWindow, assertApplicationSender);
   registerDesktopTabsIpc(() => desktopTabs);
   // Auto-update IPC must exist before the first render so the preload
   // bridge's `update:get-state` / `update:check` calls always resolve.
   // The actual GitHub-feed checks only run in a packaged app.
-  registerUpdaterIpc(() => mainWindow, {
+  registerUpdaterIpc(() => mainWindow, assertApplicationSender, {
     broadcast: (status) => desktopTabs?.broadcast('update:status', status),
     prepareInstall: prepareDesktopQuit,
     cancelInstall: cancelDesktopQuit,
