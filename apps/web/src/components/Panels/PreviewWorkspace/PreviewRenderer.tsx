@@ -16,6 +16,7 @@
 import { useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { FileReferencePreview } from '@/components/Nodes/fileReference/FileReferencePreview';
 import useCanvasStore from '@/store/canvasStore';
 import { conversationViewForNode } from '@/store/conversationOwner';
 import { previewTargetKey } from '@/store/previewWorkspace/scrollMemory';
@@ -137,6 +138,19 @@ export function PreviewRenderer({
   }, [target, node]);
 
   if (target.kind === 'url') return <UrlPreview url={target.url} />;
+
+  if (target.kind === 'file')
+    return (
+      <FileReferencePreview
+        data={{
+          fileReference: {
+            agentletId: target.agentletId,
+            path: target.path,
+            ...(target.deviceName ? { deviceName: target.deviceName } : {}),
+          },
+        }}
+      />
+    );
 
   if (target.kind === 'conversation') {
     return (

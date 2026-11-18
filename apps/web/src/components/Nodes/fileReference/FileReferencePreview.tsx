@@ -8,7 +8,12 @@ import { isFileReference } from '@huabu/shared';
 
 import { readDeviceFile } from '@/api/device-files';
 import { Button } from '@/components/Common/Button';
-import useCanvasStore from '@/store/canvasStore';
+import useCanvasStore, { selectCanWriteCanvas } from '@/store/canvasStore';
+import {
+  closePreviewFile,
+  openFileReference,
+} from '@/store/previewWorkspace/actions';
+import { deviceFileName } from '@/utils/deviceFile';
 
 import type { PreviewComponentProps } from '../previews';
 import type { EditorView } from '@codemirror/view';
@@ -42,6 +47,7 @@ export function FileReferencePreview({ id, data }: PreviewComponentProps) {
   const loadedBytes = useRef(0);
   const surfaceRef = useRef<HTMLDivElement>(null);
   const canvasId = useCanvasStore((state) => state.canvasId);
+  const canWrite = useCanvasStore(selectCanWriteCanvas);
   const [view, setView] = useState<EditorView | null>(null);
   const [mode, setMode] = useState<'reading' | 'source'>('reading');
   const [renderError, setRenderError] = useState<string | null>(null);
@@ -129,10 +135,10 @@ export function FileReferencePreview({ id, data }: PreviewComponentProps) {
     );
   return (
     <div ref={surfaceRef} className="flex h-full min-h-0 flex-col">
-      {id && canvasId && agentletId ? (
+      {canvasId && agentletId ? (
         <Suspense fallback={null}>
           <CommentActions
-            key={`${canvasId}\0${id}\0${agentletId}\0${path}`}
+            key={`${canvasId}\0${id ?? ''}\0${agentletId}\0${path}`}
             view={view}
             surfaceRef={surfaceRef}
             canvasId={canvasId}
@@ -147,6 +153,32 @@ export function FileReferencePreview({ id, data }: PreviewComponentProps) {
         <span className="text-fg-muted min-w-0 flex-1 break-all">
           {reference.deviceName ?? agentletId} · {path}
         </span>
+        {id || !canWrite || !canvasId ? null : (
+          // Opened straight from the file browser: nothing is in the Space yet.
+          // Adding a reference hands this Preview over to the new node.
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => {
+              try {
+                openFileReference(
+                  canvasId,
+                  reference,
+                  deviceFileName(reference.path),
+                );
+                closePreviewFile(reference);
+              } catch (failure) {
+                setError(
+                  failure instanceof Error
+                    ? failure.message
+                    : t('files.creationFailed'),
+                );
+              }
+            }}
+          >
+            {t('files.addToSpace')}
+          </Button>
+        )}
         {isMarkdown ? (
           <div
             className="flex items-center gap-1"

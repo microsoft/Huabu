@@ -14,6 +14,8 @@ import {
   openPdfNotes,
   openPreviewNode,
   openFileReference,
+  openPreviewFile,
+  closePreviewFile,
 } from './actions';
 import { createEmptyWorkspace } from './model';
 import { usePreviewWorkspaceStore } from './store';
@@ -357,4 +359,28 @@ it('records explicit Agent opens but not programmatic navigation or file preview
   expect(useCommentDestinationMemory.getState().lastPreview?.nodeId).toBe(
     'agent',
   );
+});
+
+it('previews a device file without a node, and hands over to a reference node when one opens', () => {
+  const tabs = () =>
+    Object.values(usePreviewWorkspaceStore.getState().workspace.tabs).map(
+      ({ target }) => target.kind,
+    );
+  const fileTab = openPreviewFile(reference);
+  expect(tabs()).toEqual(['file']);
+  expect(
+    usePreviewWorkspaceStore.getState().workspace.tabs[fileTab].transient,
+  ).toBe(true);
+  expect(useCanvasStore.getState().nodes).toHaveLength(1);
+
+  // A reference node for the same file takes over; the other file stays.
+  openPreviewFile({ ...reference, path: '/root/other.py' });
+  useCanvasStore.setState((state) => ({
+    nodes: [...state.nodes, fileNode('reference')],
+  }));
+  openFileReference('space', reference, 'code.py');
+  closePreviewFile({ ...reference, path: '/root/missing.py' });
+  expect(tabs().sort()).toEqual(['file', 'node']);
+  closePreviewFile({ ...reference, path: '/root/other.py' });
+  expect(tabs()).toEqual(['node']);
 });

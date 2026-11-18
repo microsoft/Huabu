@@ -40,12 +40,6 @@ import { revealNodesOnCanvas } from '@/utils/canvasViewport';
 
 import { shouldCanvasSearchOwnKeyboard } from './canvasSearchKeyboard';
 import { CanvasSearchNodeIcon } from './LayerNodeIcon';
-import {
-  LAYER_ROW_ICON_CLASS,
-  LAYER_ROW_SELECTED_FOREGROUND_CLASS,
-  LAYER_ROW_SURFACE_CLASS,
-  layerRowBackground,
-} from './layerRowStyles';
 import { scheduleScrollToMatch } from '../../../hooks/searchDom';
 import { useTextHighlight } from '../../../hooks/useTextHighlight';
 import useCanvasStore from '../../../store/canvasStore';
@@ -62,6 +56,12 @@ import { Button } from '../../Common/Button';
 import { cn } from '../../Common/cn';
 import { toast } from '../../Common/Toast';
 import { hasNodePreview } from '../../Nodes/previews';
+import {
+  SIDEBAR_ROW_ICON_CLASS,
+  SIDEBAR_ROW_SELECTED_FOREGROUND_CLASS,
+  SIDEBAR_ROW_SURFACE_CLASS,
+  sidebarRowBackground,
+} from '../sidebarRowStyles';
 
 const ROW_HEIGHT = 28;
 
@@ -705,8 +705,8 @@ const NodeHeaderItem = ({
         aria-expanded={!collapsed}
         className={cn(
           'flex h-7 w-full items-center justify-start gap-2 px-2 py-0 text-left text-xs font-normal',
-          LAYER_ROW_SURFACE_CLASS,
-          layerRowBackground({ selected: active }),
+          SIDEBAR_ROW_SURFACE_CLASS,
+          sidebarRowBackground({ selected: active }),
         )}
       >
         <span className="flex h-6 w-4 shrink-0 items-center justify-center">
@@ -727,7 +727,9 @@ const NodeHeaderItem = ({
         <span
           className={cn(
             'flex shrink-0 [&_svg]:h-3.5! [&_svg]:w-3.5!',
-            active ? LAYER_ROW_SELECTED_FOREGROUND_CLASS : LAYER_ROW_ICON_CLASS,
+            active
+              ? SIDEBAR_ROW_SELECTED_FOREGROUND_CLASS
+              : SIDEBAR_ROW_ICON_CLASS,
           )}
         >
           <CanvasSearchNodeIcon
@@ -739,7 +741,7 @@ const NodeHeaderItem = ({
         <span
           className={cn(
             'min-w-0 flex-1 truncate text-sm font-normal',
-            active ? LAYER_ROW_SELECTED_FOREGROUND_CLASS : 'text-fg-default',
+            active ? SIDEBAR_ROW_SELECTED_FOREGROUND_CLASS : 'text-fg-default',
           )}
         >
           {displayLabel}
@@ -784,8 +786,8 @@ const NodeMatchItem = ({
         style={{ minHeight: ROW_HEIGHT }}
         className={cn(
           'flex w-full cursor-pointer flex-col items-stretch justify-start gap-0 px-3 py-1 pl-[54px] text-left font-normal',
-          LAYER_ROW_SURFACE_CLASS,
-          layerRowBackground({ selected: active }),
+          SIDEBAR_ROW_SURFACE_CLASS,
+          sidebarRowBackground({ selected: active }),
         )}
         onClick={onClick}
         onFocus={onFocus}
