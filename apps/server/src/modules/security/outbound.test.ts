@@ -17,6 +17,8 @@ import {
 import {
   isPublicAddress,
   outboundFetch,
+  readBodyWithin,
+  ResponseTooLargeError,
   withPublicNetworkOnly,
 } from './outbound.js';
 import { resolveImageUrl } from '../agent/conversation/prompt/image-inlining.js';
@@ -46,6 +48,16 @@ beforeAll(async () => {
     if (request.url === '/hop') {
       response.writeHead(302, { Location: `http://127.0.0.1:${port}/` });
       return response.end();
+    }
+    if (request.url === '/endless') {
+      // No declared length: only reading can discover the size.
+      response.writeHead(200, { 'Content-Type': 'text/html' });
+      const chunk = Buffer.alloc(1024 * 1024, 'a');
+      const send = () => {
+        while (!response.destroyed && response.write(chunk));
+        if (!response.destroyed) response.once('drain', send);
+      };
+      return send();
     }
     if (request.url === '/image.png') {
       response.writeHead(200, { 'Content-Type': 'image/png' });
@@ -325,5 +337,73 @@ describe('public-only deployment', () => {
       withPublicNetworkOnly(() => outboundFetch(`http://127.0.0.1:${port}/`)),
     ).rejects.toThrow(REFUSED);
     expect(requests).toBe(before);
+  });
+});
+
+describe('bounded response bodies', () => {
+  it('returns a body within the limit', async () => {
+    const body = await readBodyWithin(new Response('hello'), 5);
+    expect(body.toString()).toBe('hello');
+    expect((await readBodyWithin(new Response(null), 5)).length).toBe(0);
+  });
+
+  it('refuses a declared length over the limit without reading', async () => {
+    const cancel = vi.fn();
+    const stream = new ReadableStream({
+      pull: () => {
+        throw new Error('The body must not be read');
+      },
+      cancel,
+    });
+    const response = new Response(stream, {
+      headers: { 'Content-Length': '6' },
+    });
+    await expect(readBodyWithin(response, 5)).rejects.toBeInstanceOf(
+      ResponseTooLargeError,
+    );
+    expect(cancel).toHaveBeenCalled();
+  });
+
+  it('abandons a body of undeclared length once it passes the limit', async () => {
+    const response = await outboundFetch(`http://127.0.0.1:${port}/endless`);
+    expect(response.headers.get('content-length')).toBeNull();
+    await expect(readBodyWithin(response, 3 * 1024 * 1024)).rejects.toThrow(
+      'exceeds 3145728 bytes',
+    );
+  });
+
+  it('keeps the web loader from buffering an endless page', async () => {
+    await expect(
+      new WebLoader().load(`http://127.0.0.1:${port}/endless`),
+    ).rejects.toThrow(/exceeds \d+ bytes/);
+  });
+
+  it('keeps a node-source download from buffering an endless file', async () => {
+    const opened = await mountTestWorkspace(
+      { structured: { kind: 'disk' }, blobs: { kind: 'disk' } },
+      'huabu-endless-import-',
+    );
+    try {
+      await opened.storage.structured
+        .spaces()
+        .create({ canvasId: 'own', title: 'Own Space' });
+      const command: CanvasCommand = {
+        type: 'CREATE_NODES',
+        nodes: [
+          {
+            id: 'node-image',
+            nodeType: 'image',
+            position: { x: 0, y: 0 },
+            data: { src: `http://127.0.0.1:${port}/endless` },
+          },
+        ],
+      };
+      // Left as it was: the download was refused, not stored.
+      expect(await importForeignNodeSources('own', [command])).toEqual([
+        command,
+      ]);
+    } finally {
+      await opened.close();
+    }
   });
 });

@@ -227,3 +227,44 @@ export const outboundFetch: typeof fetch = (input, init) => {
     dispatcher: publicOnlyAgent,
   } as RequestInit);
 };
+
+export class ResponseTooLargeError extends Error {
+  constructor(readonly limit: number) {
+    super(`Response body exceeds ${limit} bytes`);
+    this.name = 'ResponseTooLargeError';
+  }
+}
+
+/**
+ * The whole body of `response`, refused once it passes `limit` bytes.
+ *
+ * `arrayBuffer()` and `text()` buffer whatever a server chooses to send, so a
+ * fetched URL decides how much memory the Server spends. A declared length is
+ * refused up front; a body without one is abandoned at the limit.
+ */
+export async function readBodyWithin(
+  response: Response,
+  limit: number,
+): Promise<Buffer> {
+  const declared = Number(response.headers.get('content-length') ?? '');
+  if (Number.isFinite(declared) && declared > limit) {
+    await response.body?.cancel().catch(() => {});
+    throw new ResponseTooLargeError(limit);
+  }
+  if (!response.body) return Buffer.alloc(0);
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > limit) {
+      // Release the stream so the underlying connection can close.
+      await reader.cancel().catch(() => {});
+      throw new ResponseTooLargeError(limit);
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks);
+}
