@@ -27,6 +27,8 @@
     "reading": "Reading",
     "source": "Source",
     "readOnlyMarkdown": "Read-only Markdown file",
+    "frontmatter": "Frontmatter",
+    "emptyFrontmatter": "Empty frontmatter",
     "singleFileMarkdown": "Single-file preview: images and link navigation are disabled. Use Source for excerpts and comments.",
     "partialMarkdown": "Only part of this file is loaded. Reading mode requires the complete file within the 256 KiB preview limit.",
     "renderFailed": "Markdown rendering failed. Source is shown instead; refresh to retry.",
