@@ -52,12 +52,6 @@ vi.mock('./agenetes/drivers.js', () => ({
   EXTERNAL_DRIVER_KIND: 'external',
   agenetes: { create: mocks.create },
 }));
-vi.mock('./acp/reachback-env.js', () => ({
-  buildReachbackEnv: (threadId: string, canvasId: string) => ({
-    HUABU_THREAD_ID: threadId,
-    CANVAS: canvasId,
-  }),
-}));
 vi.mock('../workspace/paths.js', () => ({
   canvasAcpNamespace: (name: string) => ({ name }),
 }));
@@ -303,9 +297,8 @@ describe('external functional text', () => {
     );
     expect(mocks.close).not.toHaveBeenCalled();
     await runFunctionalText('second task', context);
-    expect(mocks.create.mock.calls[1][0].spec.env.HUABU_THREAD_ID).not.toBe(
-      spec.spec.env?.HUABU_THREAD_ID,
-    );
+    expect(spec.spec).not.toHaveProperty('env');
+    expect(mocks.create.mock.calls[1][0].spec).not.toHaveProperty('env');
     expect(profile.launch).toMatchObject({ options: { autoApprove: false } });
   });
 
