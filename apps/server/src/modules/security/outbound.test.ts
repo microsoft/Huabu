@@ -23,6 +23,11 @@ import type { CanvasCommand } from '@huabu/shared';
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 
+/** A refusal by the guard, as opposed to any other failed fetch. */
+const REFUSED = expect.objectContaining({
+  cause: expect.objectContaining({ code: 'NON_PUBLIC_ADDRESS' }),
+});
+
 let server: Server;
 let port: number;
 let requests = 0;
@@ -66,7 +71,7 @@ function asMember<T>(operation: () => Promise<T>): Promise<T> {
 it('applies public-network checks to member calls without a preprocessing scope', async () => {
   await expect(
     asMember(() => outboundFetch(`http://localhost:${port}/hop`)),
-  ).rejects.toThrow();
+  ).rejects.toThrow(REFUSED);
 });
 
 it('keeps the built-in Response and FormData for member multipart uploads', async () => {
@@ -150,13 +155,13 @@ describe('public-network-only outbound fetch', () => {
     expect((await outboundFetch(url)).status).toBe(200);
     await expect(
       withPublicNetworkOnly(() => outboundFetch(url)),
-    ).rejects.toThrow();
+    ).rejects.toThrow(REFUSED);
     // A host name that resolves to loopback is refused at connect time too.
     await expect(
       withPublicNetworkOnly(() =>
         outboundFetch(`http://localhost:${port}/hop`),
       ),
-    ).rejects.toThrow();
+    ).rejects.toThrow(REFUSED);
   });
 
   it('keeps the web loader from reading the Server network inside the scope', async () => {
@@ -190,6 +195,6 @@ it('applies the same connection-time guard to member model discovery and inferen
         workspaces: async () => [],
       },
     });
-    await expect(memberModelFetch(url)).rejects.toThrow();
+    await expect(memberModelFetch(url)).rejects.toThrow(REFUSED);
   });
 });

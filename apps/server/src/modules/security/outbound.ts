@@ -5,7 +5,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { lookup as dnsLookup } from 'node:dns';
 import { BlockList, isIP } from 'node:net';
 
-import { Agent, buildConnector } from 'undici';
+import { Agent, buildConnector, Dispatcher1Wrapper } from 'undici';
 
 import { personalSettingsOwner } from '../identity/personal-settings.js';
 
@@ -79,15 +79,21 @@ function publicLookup(
 const connect = buildConnector({ lookup: publicLookup } as never);
 // Every connection, including each redirect hop, is checked where it is
 // made, so a name that resolves differently on a second lookup gains nothing.
-const publicOnlyAgent = new Agent({
-  connect: (options, callback) => {
-    const host = options.hostname.replace(/^\[|\]$/g, '');
-    // A literal address is never looked up, so it is checked here.
-    if (isIP(host) && !isPublicAddress(host))
-      return callback(refused(host), null);
-    return connect(options, callback);
-  },
-});
+//
+// Node's built-in `fetch` speaks the handler protocol of the undici it
+// bundles, which this package's undici no longer accepts unwrapped: without
+// the wrapper every request fails, whatever its address.
+const publicOnlyAgent = new Dispatcher1Wrapper(
+  new Agent({
+    connect: (options, callback) => {
+      const host = options.hostname.replace(/^\[|\]$/g, '');
+      // A literal address is never looked up, so it is checked here.
+      if (isIP(host) && !isPublicAddress(host))
+        return callback(refused(host), null);
+      return connect(options, callback);
+    },
+  }),
+);
 
 const scope = new AsyncLocalStorage<true>();
 
