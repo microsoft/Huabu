@@ -5,9 +5,13 @@ import useCanvasStore from '@/store/canvasStore';
 
 import type { FileReference } from '@huabu/shared';
 
-/** Last segment of a device path, whichever separator the device uses. */
+/**
+ * Last segment of a device path. Only Windows paths split on a backslash: on
+ * other devices it is an ordinary character in a file name.
+ */
 export function deviceFileName(path: string): string {
-  return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
+  const separator = path.startsWith('/') ? '/' : /[\\/]/;
+  return path.split(separator).filter(Boolean).pop() ?? path;
 }
 
 /** Node data shared by every way a device file becomes a reference card. */

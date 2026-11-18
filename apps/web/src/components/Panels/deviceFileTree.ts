@@ -63,11 +63,16 @@ const countEntries = (pages: FilePages) =>
 const messageOf = (failure: unknown) =>
   failure instanceof Error ? failure.message : undefined;
 
-/** Expanded directories still reachable from `root` through loaded pages. */
+/**
+ * Expanded directories still reachable from `root` through loaded pages. A
+ * folder whose first listing is still `pending` stays open: it was just
+ * clicked, and its rows are on their way.
+ */
 function reachableExpanded(
   root: string,
   pages: FilePages,
   expanded: ReadonlySet<string>,
+  pending: ReadonlySet<string>,
 ) {
   const reachable = new Set<string>();
   const visit = (directory: string, depth: number) => {
@@ -76,7 +81,7 @@ function reachableExpanded(
       if (
         entry.kind !== 'directory' ||
         !expanded.has(entry.path) ||
-        !pages[entry.path] ||
+        (!pages[entry.path] && !pending.has(entry.path)) ||
         reachable.has(entry.path)
       )
         continue;
@@ -125,6 +130,11 @@ export class DeviceFileTree {
   private session = new AbortController();
   /** Cancels the reload in flight; a newer reload replaces it. */
   private reload: AbortController | null = null;
+  /**
+   * The listings on screen may predate the current hidden-file setting: it
+   * changed, and no re-list has completed since.
+   */
+  private stale = false;
   /** Folders listed while a reload was in flight; they are already fresh. */
   private freshSinceReload = new Set<string>();
 
@@ -153,14 +163,15 @@ export class DeviceFileTree {
       // Replies requested under the old device or visibility are now wrong.
       this.endSession();
       this.update({ loading: new Set() });
+      this.stale = true;
     }
     if (!sameDevice) this.update({ ...EMPTY });
     this.agentletId = agentletId;
     this.path = path;
     this.showHidden = showHidden;
     // Moving to another directory only needs that directory: the folders
-    // already open keep the listing they have.
-    void this.reloadTree(!sameListing);
+    // already open keep the listing they have, unless it is stale.
+    void this.reloadTree(this.stale);
   }
 
   /**
@@ -309,7 +320,12 @@ export class DeviceFileTree {
       else if (directory !== undefined) delete available[directory];
     });
     // Drop folders that vanished, failed, or are no longer under this root.
-    const expanded = reachableExpanded(path, available, this.snapshot.expanded);
+    const expanded = reachableExpanded(
+      path,
+      available,
+      this.snapshot.expanded,
+      this.snapshot.loading,
+    );
     const pages: Record<string, FileListResult> = {};
     let total = 0;
     let limited = false;
@@ -324,6 +340,7 @@ export class DeviceFileTree {
       total += page.entries.length;
       pages[directory] = page;
     }
+    if (relist) this.stale = false;
     this.update({
       root: path,
       pages,

@@ -270,3 +270,60 @@ it('leaves a refresh under way to finish instead of starting another', async () 
   await settle();
   expect(calls).toHaveLength(6);
 });
+
+it('keeps a folder open when a refresh finishes before its first listing', async () => {
+  const { tree, calls, settle } = harness();
+  tree.open('device', '/', false);
+  calls[0]?.resolve(['a']);
+  await settle();
+
+  tree.refresh();
+  await settle();
+  tree.toggle('/a', 0);
+  await settle();
+  // The refresh, which began before the click, finishes first.
+  calls[1]?.resolve(['a']);
+  await settle();
+  expect(tree.getSnapshot().expanded.has('/a')).toBe(true);
+  calls[2]?.resolve(['x']);
+  await settle();
+  expect(names(tree)).toEqual(['/a', '/a/x']);
+});
+
+it('re-lists open folders after the hidden-file setting changed, even across a navigation', async () => {
+  const { tree, calls, settle } = harness();
+  tree.open('device', '/root', false);
+  calls[0]?.resolve(['a']);
+  await settle();
+  tree.toggle('/root/a', 0);
+  await settle();
+  calls[1]?.resolve(['.secret', 'x']);
+  await settle();
+
+  // Hidden files are switched off, and the parent is opened before that
+  // re-list has finished.
+  tree.open('device', '/root', true);
+  await settle();
+  tree.keepOpen('/root');
+  tree.open('device', '/', true);
+  await settle();
+  // Two listings at the start, two for the abandoned re-list, then these.
+  const relisted = calls.slice(4);
+  expect(relisted.map((call) => call.path).sort()).toEqual([
+    '/',
+    '/root',
+    '/root/a',
+  ]);
+  for (const call of relisted)
+    call.resolve(
+      call.path === '/' ? ['root'] : call.path === '/root' ? ['a'] : ['x'],
+    );
+  await settle();
+  expect(names(tree)).toEqual(['/root', '/root/a', '/root/a/x']);
+
+  // Once re-listed, moving around reuses the listings again.
+  const before = calls.length;
+  tree.open('device', '/root', true);
+  await settle();
+  expect(calls.slice(before).map((call) => call.path)).toEqual(['/root']);
+});
