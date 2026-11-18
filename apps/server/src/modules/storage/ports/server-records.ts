@@ -144,13 +144,15 @@ export interface ServerRecordStore {
    */
   init(): Promise<void>;
   /**
-   * The latest acknowledged value, freshly parsed so the caller may mutate
-   * it, or `null` when the record was never written. Synchronous because
-   * credentials and ownership are read on paths that cannot await.
+   * The latest acknowledged value, read from storage on every call and
+   * freshly parsed so the caller may mutate it, or `null` when the record
+   * was never written. Adapters keep no copy between calls: a value another
+   * process committed is visible to the next read, as it was when every
+   * record was a file read on each use.
    *
    * @throws ServerRecordError when stored bytes are not valid JSON.
    */
-  get(key: ServerRecordKey): unknown;
+  get(key: ServerRecordKey): Promise<unknown>;
   /**
    * Replace the record. Resolves once the value is durable and `get` returns
    * it. Concurrent `put`s to one key are not ordered here; the composition

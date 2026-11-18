@@ -24,9 +24,10 @@ import {
   agentletOwner,
   agentReachbackEnvironment,
   authenticateUserAgentlet,
-  canUseAgentlet,
+  connectedDeviceAccess,
   ownDeviceCredential,
   readAgentCredential,
+  readDeviceAccess,
   resetAgentCredentials,
 } from './agent-credentials.js';
 import { openBubbleIdentity } from './bubble.js';
@@ -191,11 +192,15 @@ async function host(
     dataDir: tmp,
     daemonEntryPath: '',
     supervise: false,
-    canAccessAgentlet: canUseAgentlet,
+    canAccessAgentlet: (agentletId, requestedId) =>
+      connectedDeviceAccess().canUse(agentletId, requestedId),
     authenticate: authenticateUserAgentlet(bubble.service),
     profiles: {
       store: agentProfileRecordStore('user-agent-profiles'),
-      canAccess: (p) => canUseAgentlet(p.agentletId),
+      resolveAccess: async () => {
+        const access = await readDeviceAccess();
+        return (p) => access.canUse(p.agentletId);
+      },
     },
   });
   app.register(profilesRoutes, { prefix: '/api/acp' });
@@ -430,8 +435,9 @@ it('separates device transport from user and Space-scoped reachback, with fresh 
   const device = await h.as('alice', ownDeviceCredential);
   const authenticate = authenticateUserAgentlet(h.service);
   await authenticate('alice-device', device);
-  expect(canUseAgentlet('alice-device')).toBe(true);
-  expect(canUseAgentlet('alice-device', 'legacy-unowned-device')).toBe(false);
+  const access = await readDeviceAccess();
+  expect(access.canUse('alice-device')).toBe(true);
+  expect(access.canUse('alice-device', 'legacy-unowned-device')).toBe(false);
   await expect(
     agentReachbackEnvironment({ agentletId: 'legacy-unowned-device' }),
   ).rejects.toMatchObject({ code: 'DEVICE_ACCESS_REQUIRED' });
@@ -466,7 +472,7 @@ it('separates device transport from user and Space-scoped reachback, with fresh 
     'https://current.example/api/rfs/w/w1/space-a',
   );
   const token = environment!.HUABU_RFS_TOKEN!;
-  expect(readAgentCredential(token)).toMatchObject({
+  expect(await readAgentCredential(token)).toMatchObject({
     aud: 'rfs',
     principalId: 'alice',
     workspaceId: 'w1',
@@ -618,12 +624,12 @@ it("resets one person's device and reachback credentials without touching others
 
   await resetAgentCredentials('alice');
 
-  expect(readAgentCredential(alice)).toBeNull();
+  expect(await readAgentCredential(alice)).toBeNull();
   expect((await probe(reachback)).statusCode).toBe(401);
   expect((await probe(alice)).statusCode).toBe(401);
   // Her devices stay hers, with their Profiles and conversations.
-  expect(agentletOwner('alice-device')).toBe('alice');
-  expect(agentletOwner('bob-device')).toBe('bob');
+  expect(await agentletOwner('alice-device')).toBe('alice');
+  expect(await agentletOwner('bob-device')).toBe('bob');
   await expect(authenticate('shared-box', bob)).rejects.toThrow('another user');
   // Her revoked command says so, instead of looking malformed.
   await expect(authenticate('alice-device', alice)).rejects.toThrow(
@@ -771,7 +777,7 @@ it.each([false, true])(
       admit();
       expect(await late).toHaveProperty('error');
       expect(getAgentletGateway()?.getAgentlet('late-device')).toBeUndefined();
-      expect(agentletOwner('late-device')).toBeNull();
+      expect(await agentletOwner('late-device')).toBeNull();
       gate.mockRestore();
     } finally {
       for (const socket of sockets) socket.close();
@@ -802,8 +808,8 @@ it.each(['disabled', 'external-revocation', 'lookup-unavailable'] as const)(
       expect(getAgentletGateway()?.getAgentlet('bob-device')?.status).toBe(
         'connected',
       );
-      expect(readAgentCredential(alice)).not.toBeNull();
-      expect(agentletOwner('alice-device')).toBe('alice');
+      expect(await readAgentCredential(alice)).not.toBeNull();
+      expect(await agentletOwner('alice-device')).toBe('alice');
       await h.service.people!.setMember('alice', true, 'bob');
       expect(
         await connectDevice(port, sockets, 'alice-device', alice),
@@ -846,7 +852,7 @@ it('keeps actual local-mode reachback even when the process provider variable sa
     getConnectionToken,
   });
   await app.ready();
-  expect(canUseAgentlet('local-device')).toBe(true);
+  expect((await readDeviceAccess()).canUse('local-device')).toBe(true);
   await expect(
     agentReachbackEnvironment({ agentletId: 'local-device' }),
   ).resolves.toEqual({ HUABU_RFS_TOKEN: getConnectionToken() });
@@ -876,7 +882,7 @@ it('refuses a handshake whose initial admission result was retained across membe
     release();
     expect(await handshake).toHaveProperty('error');
     expect(getAgentletGateway()?.getAgentlet('late-device')).toBeUndefined();
-    expect(agentletOwner('late-device')).toBeNull();
+    expect(await agentletOwner('late-device')).toBeNull();
   } finally {
     release();
     for (const socket of sockets) socket.close();
@@ -941,8 +947,8 @@ it('revalidates other owners during a stalled lookup, fails it closed, and stops
     // Alice's lookup remains held throughout both disconnections, and the
     // deadline must not repeatedly launch queries for that same pending owner.
     expect(calls.alice).toBe(1);
-    expect(readAgentCredential(alice)).not.toBeNull();
-    expect(agentletOwner('alice-device')).toBe('alice');
+    expect(await readAgentCredential(alice)).not.toBeNull();
+    expect(await agentletOwner('alice-device')).toBe('alice');
 
     await h.store.principals.update('alice', {
       disabledAt: new Date().toISOString(),

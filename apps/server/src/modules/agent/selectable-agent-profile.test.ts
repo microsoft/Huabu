@@ -15,9 +15,9 @@ const host = vi.hoisted(() => ({
 
 vi.mock('@agenetes/agentlet-host', () => ({
   getAgentProfileRegistry: () => ({
-    getProfile: (profileId: string) =>
+    getProfile: async (profileId: string) =>
       host.profiles.find((profile) => profile.id === profileId),
-    listProfiles: () => host.profiles,
+    listProfiles: async () => host.profiles,
   }),
   resolveConnectedAgentletId: (target: string) => {
     if (host.connectedIds.includes(target)) return target;
@@ -39,36 +39,27 @@ afterEach(() => {
 });
 
 describe('listAvailableAgentProfiles', () => {
-  it('does not offer or invoke a hidden connected Profile as an ordinary Agent', () => {
+  it('does not offer or invoke a hidden connected Profile as an ordinary Agent', async () => {
     host.profiles = [
       { id: 'proxy', alias: 'Proxy', agentletId: 'device', visible: false },
     ];
     host.connectedIds = ['device'];
-    expect(listAvailableAgentProfiles()).toEqual([
+    expect(await listAvailableAgentProfiles()).toEqual([
       { id: 'huabu', alias: 'Built-In Pi' },
     ]);
-    expect(() => requireAvailableAgentProfile('proxy')).toThrow(
+    await expect(requireAvailableAgentProfile('proxy')).rejects.toThrow(
       expect.objectContaining({ code: 'profile_not_selectable' }),
     );
   });
-  it('prepends Huabu and projects available Profile identities', () => {
-    const profiles = new Map([
-      [
-        'profile-a',
-        {
-          id: 'profile-a',
-          alias: 'Researcher',
-          customData: { icon: 'search' },
-        },
-      ],
-      ['profile-b', { id: 'profile-b', alias: 'Builder' }],
-      ['profile-hidden', { id: 'profile-hidden', alias: 'Hidden' }],
-    ]);
+  it('prepends Huabu and projects available Profile identities', async () => {
+    const selectable = [
+      { id: 'profile-a', alias: 'Researcher', customData: { icon: 'search' } },
+      { id: 'profile-b', alias: 'Builder' },
+    ];
 
     expect(
-      listAvailableAgentProfiles({
-        getProfile: (id: string) => profiles.get(id),
-        listSelectableProfileIds: () => ['profile-a', 'profile-b'],
+      await listAvailableAgentProfiles({
+        listSelectableProfiles: async () => selectable,
       }),
     ).toEqual([
       { id: 'huabu', alias: 'Built-In Pi' },
@@ -77,38 +68,40 @@ describe('listAvailableAgentProfiles', () => {
     ]);
   });
 
-  it('keeps the Huabu Profile available while the registry is unavailable', () => {
-    expect(listAvailableAgentProfiles(null)).toEqual([
+  it('keeps the Huabu Profile available while the registry is unavailable', async () => {
+    expect(await listAvailableAgentProfiles(null)).toEqual([
       { id: 'huabu', alias: 'Built-In Pi' },
     ]);
   });
 
-  it('projects only Profiles on currently connected Agentlets by default', () => {
+  it('projects only Profiles on currently connected Agentlets by default', async () => {
     host.profiles = [
       { id: 'online', alias: 'Online', agentletId: 'device-a' },
       { id: 'offline', alias: 'Offline', agentletId: 'device-b' },
     ];
     host.connectedIds = ['device-a'];
 
-    expect(listAvailableAgentProfiles()).toEqual([
+    expect(await listAvailableAgentProfiles()).toEqual([
       { id: 'huabu', alias: 'Built-In Pi' },
       { id: 'online', alias: 'Online', default: true },
     ]);
   });
 
-  it('projects a hostname-era Profile when exactly one device reports that hostname', () => {
+  it('projects a hostname-era Profile when exactly one device reports that hostname', async () => {
     host.profiles = [
       { id: 'legacy', alias: 'Legacy', agentletId: 'device-a-host' },
     ];
     host.connectedIds = ['device-a'];
 
-    expect(listAvailableAgentProfiles()).toEqual([
+    expect(await listAvailableAgentProfiles()).toEqual([
       { id: 'huabu', alias: 'Built-In Pi' },
       { id: 'legacy', alias: 'Legacy', default: true },
     ]);
   });
 
-  it('accepts the Huabu Profile without an external registry', () => {
-    expect(() => requireAvailableAgentProfile('huabu', null)).not.toThrow();
+  it('accepts the Huabu Profile without an external registry', async () => {
+    await expect(
+      requireAvailableAgentProfile('huabu', null),
+    ).resolves.toBeUndefined();
   });
 });

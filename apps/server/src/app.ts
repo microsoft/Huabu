@@ -46,7 +46,8 @@ import externalNoteRoutes from './modules/canvas/external.route.js';
 import syncRoutes from './modules/canvas/sync.route.js';
 import {
   authenticateUserAgentlet,
-  canUseAgentlet,
+  connectedDeviceAccess,
+  readDeviceAccess,
 } from './modules/identity/agent-credentials.js';
 import { createIdentity, registerIdentity } from './modules/identity/index.js';
 import peopleRoutes from './modules/identity/people.route.js';
@@ -239,7 +240,10 @@ if (!daemonRuntime.artifacts.serviceSdkEntry) {
 }
 const agentletGateway = mountAgenetes(app, {
   connectionToken: getConnectionToken(),
-  canAccessAgentlet: canUseAgentlet,
+  // Placement only ever chooses among connected devices, whose owner the
+  // handshake already established, so it reads no storage.
+  canAccessAgentlet: (agentletId, requestedId) =>
+    connectedDeviceAccess().canUse(agentletId, requestedId),
   ...(identity.service.provider === 'bubble'
     ? {
         authenticate: authenticateUserAgentlet(identity.service),
@@ -249,7 +253,7 @@ const agentletGateway = mountAgenetes(app, {
   dataDir: getDataDir(),
   daemonEntryPath: daemonRuntime.artifacts.daemonEntry ?? '',
   bootstrapEnv: daemonRuntime.bootstrapEnv,
-  getMaxAgents: () => getExternalAgentRuntimeConfig().maxAgents,
+  getMaxAgents: async () => (await getExternalAgentRuntimeConfig()).maxAgents,
   // Host-namespaced env isolation: the agentlet daemon and every external
   // agent it spawns are host-agnostic and must receive their Huabu
   // coordinates only through explicit injection (per-agent reachback env),
@@ -266,7 +270,12 @@ const agentletGateway = mountAgenetes(app, {
         ? 'user-agent-profiles'
         : 'agent-profiles',
     ),
-    canAccess: (profile) => canUseAgentlet(profile.agentletId),
+    // Profiles name devices that may be offline: read ownership once per
+    // registry operation.
+    resolveAccess: async () => {
+      const access = await readDeviceAccess();
+      return (profile) => access.canUse(profile.agentletId);
+    },
     ...(identity.service.provider === 'local'
       ? { legacyStorageDir: join(getDataDir(), 'agent-team') }
       : {}),
@@ -276,7 +285,7 @@ const agentletGateway = mountAgenetes(app, {
 let unregisterHarnessDiscovery: (() => void) | undefined;
 app.addHook('onReady', async () => {
   const registry = getAgentProfileRegistry();
-  if (registry) await initializeAgentDefaults(registry.listProfiles());
+  if (registry) await initializeAgentDefaults(await registry.listProfiles());
   unregisterHarnessDiscovery = registerHarnessProfileDiscovery({
     gateway: agentletGateway,
     getRegistry: getAgentProfileRegistry,

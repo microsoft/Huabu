@@ -5,15 +5,15 @@
  * Disk implementation of the server-record port: one JSON file per record,
  * at the path `data-dir.ts` assigns it.
  *
- * Reads go to the file every time. Files are the one medium that can answer
- * synchronously without a cache, and reading through keeps a record correct
- * when the data directory changes underneath (tests point `HUABU_DATA_DIR`
- * at a new directory per case). Writes replace the file atomically, flush it
+ * Reads go to the file every time, which also keeps a record correct when
+ * the data directory changes underneath (tests point `HUABU_DATA_DIR` at a
+ * new directory per case). Writes replace the file atomically, flush it
  * before publishing, and leave it readable by the owner alone, because the
  * credential envelope is one of these files.
  */
 
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 
 import { diskPeopleDir, diskServerRecordPath } from './data-dir.js';
 import { getDataDir } from '../../../../data-dir.js';
@@ -44,10 +44,10 @@ export class DiskServerRecordStore implements ServerRecordStore {
     // Files need no preparation; a record's directory is made on first write.
   }
 
-  get(key: ServerRecordKey): unknown {
+  async get(key: ServerRecordKey): Promise<unknown> {
     let text: string;
     try {
-      text = readFileSync(diskServerRecordPath(key, this.dataDir()), 'utf-8');
+      text = await readFile(diskServerRecordPath(key, this.dataDir()), 'utf-8');
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
       throw error;

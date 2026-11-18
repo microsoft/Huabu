@@ -66,7 +66,7 @@ it('applies concurrent changes to one record in turn, each on the last acknowled
 
   await Promise.all([bump('alice'), bump('bob'), bump('alice')]);
 
-  expect(records.get(VERSIONS)).toEqual({ alice: 2, bob: 1 });
+  expect(await records.get(VERSIONS)).toEqual({ alice: 2, bob: 1 });
 });
 
 it('writes nothing when a change throws, and keeps serving later changes', async () => {
@@ -83,7 +83,7 @@ it('writes nothing when a change throws, and keeps serving later changes', async
     bob: 1,
   }));
 
-  expect(records.get(VERSIONS)).toEqual({ alice: 1, bob: 1 });
+  expect(await records.get(VERSIONS)).toEqual({ alice: 1, bob: 1 });
 });
 
 it('requires an awaited open before a database backend serves records', () => {
@@ -102,10 +102,10 @@ it('moves data-directory records into a database once, never over newer rows', a
 
   const records = await initServerRecords();
   expect(records.kind).toBe('sqlite');
-  expect(records.get({ owner: null, name: 'credentials' })).toEqual({
+  expect(await records.get({ owner: null, name: 'credentials' })).toEqual({
     v: 'file',
   });
-  expect(records.get({ owner, name: 'model-settings' })).toEqual({
+  expect(await records.get({ owner, name: 'model-settings' })).toEqual({
     active: 'openai',
   });
 
@@ -113,7 +113,7 @@ it('moves data-directory records into a database once, never over newer rows', a
   await records.put({ owner: null, name: 'credentials' }, { v: 'database' });
   await closeStorage();
   const restarted = await initServerRecords();
-  expect(restarted.get({ owner: null, name: 'credentials' })).toEqual({
+  expect(await restarted.get({ owner: null, name: 'credentials' })).toEqual({
     v: 'database',
   });
 });

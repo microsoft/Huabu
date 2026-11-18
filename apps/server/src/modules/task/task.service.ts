@@ -22,7 +22,7 @@ import type { SpaceTasks } from '../storage/index.js';
 
 interface TaskServiceDependencies {
   canvasExists: (canvasId: string) => Promise<boolean>;
-  requireProfile: (profileId: string) => void;
+  requireProfile: (profileId: string) => Promise<void>;
   repository: (canvasId: string) => SpaceTasks;
   execute: (input: {
     canvasId: string;
@@ -35,9 +35,7 @@ interface TaskServiceDependencies {
 const DEFAULT_DEPENDENCIES: TaskServiceDependencies = {
   canvasExists: async (canvasId) =>
     (await getStructuredStore().space(canvasId).read()) !== null,
-  requireProfile: (profileId) => {
-    requireAvailableAgentProfile(profileId);
-  },
+  requireProfile: (profileId) => requireAvailableAgentProfile(profileId),
   repository: (canvasId) => getStructuredStore().space(canvasId).tasks,
   execute: executeOnServer,
   now: Date.now,
@@ -85,7 +83,7 @@ export class TaskService {
       );
     }
     try {
-      this.dependencies.requireProfile(parsed.data.defaultRootProfileId);
+      await this.dependencies.requireProfile(parsed.data.defaultRootProfileId);
     } catch (error) {
       if (error instanceof SelectableAgentProfileError) {
         throw new TaskCreationError(

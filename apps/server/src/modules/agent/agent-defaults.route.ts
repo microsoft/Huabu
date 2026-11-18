@@ -23,7 +23,9 @@ import type {
 } from '@huabu/shared';
 import type { FastifyPluginAsync } from 'fastify';
 
-function projectDefaults(defaults: AgentDefaults): AgentDefaultsResponse {
+async function projectDefaults(
+  defaults: AgentDefaults,
+): Promise<AgentDefaultsResponse> {
   if (defaults.profileId === HUABU_AGENT_PROFILE_ID) {
     return {
       defaults,
@@ -33,7 +35,7 @@ function projectDefaults(defaults: AgentDefaults): AgentDefaultsResponse {
   }
   const registry = getAgentProfileRegistry();
   const profile = defaults.profileId
-    ? registry?.getProfile(defaults.profileId)
+    ? await registry?.getProfile(defaults.profileId)
     : undefined;
   const cached = profile ? getProfileSchemaCache(profile.id) : null;
   const modelSelector = cached
@@ -86,7 +88,7 @@ const agentDefaultsRoutes: FastifyPluginAsync = async (app) => {
   app.get<{ Reply: ApiResult<AgentDefaultsResponse> }>(
     '/',
     { prefixTrailingSlash: 'both' },
-    async () => projectDefaults(getAgentDefaults()),
+    async () => projectDefaults(await getAgentDefaults()),
   );
 
   app.put<{ Reply: ApiResult<AgentDefaultsResponse> }>(
@@ -112,7 +114,7 @@ const agentDefaultsRoutes: FastifyPluginAsync = async (app) => {
             code: 'profile_registry_unavailable',
           });
         }
-        if (!registry.getProfile(parsed.data.profileId)) {
+        if (!(await registry.getProfile(parsed.data.profileId))) {
           return reply.status(400).send({
             message: 'Select Built-In Pi or an existing external Agent Profile',
             code: 'profile_not_found',

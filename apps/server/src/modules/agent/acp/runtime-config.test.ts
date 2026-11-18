@@ -32,7 +32,7 @@ describe('external-agent runtime config', () => {
   });
 
   it('uses ten minutes and ten agents when no config has been persisted', async () => {
-    expect(getExternalAgentRuntimeConfig()).toEqual(
+    expect(await getExternalAgentRuntimeConfig()).toEqual(
       DEFAULT_EXTERNAL_AGENT_RUNTIME_CONFIG,
     );
   });
@@ -47,7 +47,7 @@ describe('external-agent runtime config', () => {
       idleTimeoutSecs: 0,
       maxAgents: 25,
     });
-    expect(getExternalAgentRuntimeConfig()).toEqual({
+    expect(await getExternalAgentRuntimeConfig()).toEqual({
       idleTimeoutSecs: 0,
       maxAgents: 25,
     });

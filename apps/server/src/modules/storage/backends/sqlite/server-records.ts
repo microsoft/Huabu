@@ -5,9 +5,8 @@
  * SQLite implementation of the server-record port: one row per record in
  * `server_records`, on the connection the Workspace and Space adapters share.
  *
- * `node:sqlite` is synchronous, so reads query the table directly and need no
- * cache. Records are not Workspace data, so nothing here is scoped to the
- * active Workspace.
+ * Every read queries the table. Records are not Workspace data, so nothing
+ * here is scoped to the active Workspace.
  */
 
 import {
@@ -35,7 +34,7 @@ export class SqliteServerRecordStore implements ServerRecordStore {
     this.context.init();
   }
 
-  get(key: ServerRecordKey): unknown {
+  async get(key: ServerRecordKey): Promise<unknown> {
     const { ownerKey, name } = serverRecordColumns(key);
     const text = this.context
       .database()

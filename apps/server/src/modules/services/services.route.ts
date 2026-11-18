@@ -29,7 +29,7 @@ function statusFor(error: ServiceProvisionError): number {
 
 const serviceRoutes: FastifyPluginAsync = async (app) => {
   app.get<{ Reply: ApiResult<ServiceListResponse> }>('/', async () => ({
-    services: serviceProvisioner.list(),
+    services: await serviceProvisioner.list(),
   }));
 
   app.get<{
@@ -43,7 +43,9 @@ const serviceRoutes: FastifyPluginAsync = async (app) => {
       });
     }
     try {
-      return reply.send(serviceProvisioner.getConfig(parsed.data.serviceId));
+      return reply.send(
+        await serviceProvisioner.getConfig(parsed.data.serviceId),
+      );
     } catch (error) {
       if (error instanceof ServiceProvisionError) {
         return reply

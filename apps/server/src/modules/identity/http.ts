@@ -4,6 +4,7 @@
 import { timingSafeEqual } from 'node:crypto';
 
 import {
+  isAgentCredential,
   readAgentCredential,
   registerAgentIdentity,
 } from './agent-credentials.js';
@@ -163,13 +164,15 @@ export function registerIdentity(
       },
     };
     const bearer = authorization?.match(/^Bearer (\S+)$/)?.[1] ?? '';
+    // Classify by signature alone; whether the credential is still honored
+    // is read once, in `resolveIdentity`, which runs on every revalidation.
     const agentCredential =
-      service.provider === 'bubble' && readAgentCredential(bearer) !== null;
+      service.provider === 'bubble' && isAgentCredential(bearer);
     const resolveIdentity = async () => {
       if (!agentCredential) return service.authenticate(credentials);
       // Read afresh on every revalidation too: resetting its owner's
       // credentials revokes it, and closes the responses it holds open.
-      const agentClaims = readAgentCredential(bearer);
+      const agentClaims = await readAgentCredential(bearer);
       if (!agentClaims) return null;
       const params = request.params as {
         workspaceId?: string;

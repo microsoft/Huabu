@@ -531,7 +531,7 @@ export async function buildChatEnvelope(
     if (
       requireInkVisuals &&
       derived.preparedNodes &&
-      isInkOcrConfigured(logger)
+      (await isInkOcrConfigured(logger))
     ) {
       signal?.throwIfAborted();
       let raster: Awaited<ReturnType<typeof renderInkOcrRaster>> | undefined;

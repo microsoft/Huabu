@@ -80,10 +80,10 @@ afterEach(() => {
 
 describe('Ink OCR configuration', () => {
   it('reads configuration lazily and disables when both values are absent', async () => {
-    expect(isInkOcrConfigured()).toBe(true);
+    expect(await isInkOcrConfigured()).toBe(true);
     vi.stubEnv('VISION_KEY', '');
     vi.stubEnv('VISION_ENDPOINT', '');
-    expect(isInkOcrConfigured()).toBe(false);
+    expect(await isInkOcrConfigured()).toBe(false);
     expect(await recognizeInk(params)).toBeUndefined();
     expect(lastOutcome()).toMatchObject({ outcome: 'disabled' });
     expect(fetchMock).not.toHaveBeenCalled();
@@ -115,7 +115,7 @@ describe('Ink OCR configuration', () => {
   ])('rejects unsafe or partial configuration (%#)', async (key, endpoint) => {
     vi.stubEnv('VISION_KEY', key);
     vi.stubEnv('VISION_ENDPOINT', endpoint);
-    expect(isInkOcrConfigured(logger)).toBe(false);
+    expect(await isInkOcrConfigured(logger)).toBe(false);
     expect(warn).toHaveBeenCalledWith(
       { outcome: 'config_error' },
       expect.any(String),

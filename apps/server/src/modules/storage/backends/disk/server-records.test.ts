@@ -113,13 +113,13 @@ describe('Disk server records', () => {
 
   it.each(['{broken', 'null'])(
     'reports damaged file %s instead of treating it as absent',
-    (content) => {
+    async (content) => {
       const dataDir = dataDirectory();
       writeFileSync(join(dataDir, 'llm-config.json'), content);
       const store = new DiskServerRecordStore(() => dataDir);
-      expect(() => store.get({ owner: null, name: 'model-settings' })).toThrow(
-        'Server record model-settings',
-      );
+      await expect(
+        store.get({ owner: null, name: 'model-settings' }),
+      ).rejects.toThrow('Server record model-settings');
     },
   );
 
@@ -128,6 +128,6 @@ describe('Disk server records', () => {
     const store = new DiskServerRecordStore(() => dataDir);
     await store.put({ owner: null, name: 'agent-defaults' }, { first: true });
     dataDir = dataDirectory();
-    expect(store.get({ owner: null, name: 'agent-defaults' })).toBeNull();
+    expect(await store.get({ owner: null, name: 'agent-defaults' })).toBeNull();
   });
 });

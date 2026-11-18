@@ -40,8 +40,12 @@ export function describeServerRecordStoreContract(
     it('reports a record that was never written as null', async () => {
       const { store } = await open();
 
-      expect(store.get({ owner: null, name: 'model-settings' })).toBeNull();
-      expect(store.get({ owner: ALICE, name: 'model-settings' })).toBeNull();
+      expect(
+        await store.get({ owner: null, name: 'model-settings' }),
+      ).toBeNull();
+      expect(
+        await store.get({ owner: ALICE, name: 'model-settings' }),
+      ).toBeNull();
       await expect(store.keys()).resolves.toEqual([]);
     });
 
@@ -51,16 +55,20 @@ export function describeServerRecordStoreContract(
       await store.put({ owner: ALICE, name: 'model-settings' }, { who: 'a' });
       await store.put({ owner: BOB, name: 'model-settings' }, { who: 'b' });
 
-      expect(store.get({ owner: null, name: 'model-settings' })).toEqual({
+      expect(await store.get({ owner: null, name: 'model-settings' })).toEqual({
         who: 'ops',
       });
-      expect(store.get({ owner: ALICE, name: 'model-settings' })).toEqual({
-        who: 'a',
-      });
-      expect(store.get({ owner: BOB, name: 'model-settings' })).toEqual({
+      expect(await store.get({ owner: ALICE, name: 'model-settings' })).toEqual(
+        {
+          who: 'a',
+        },
+      );
+      expect(await store.get({ owner: BOB, name: 'model-settings' })).toEqual({
         who: 'b',
       });
-      expect(store.get({ owner: ALICE, name: 'agent-defaults' })).toBeNull();
+      expect(
+        await store.get({ owner: ALICE, name: 'agent-defaults' }),
+      ).toBeNull();
     });
 
     it('replaces a record whole and returns a copy the caller may mutate', async () => {
@@ -69,10 +77,10 @@ export function describeServerRecordStoreContract(
       await store.put(key, { first: 'alice', second: 'bob' });
       await store.put(key, { third: 'carol' });
 
-      const read = store.get(key) as Record<string, string>;
+      const read = (await store.get(key)) as Record<string, string>;
       expect(read).toEqual({ third: 'carol' });
       read['fourth'] = 'dave';
-      expect(store.get(key)).toEqual({ third: 'carol' });
+      expect(await store.get(key)).toEqual({ third: 'carol' });
     });
 
     it('round-trips every JSON shape except null', async () => {
@@ -98,7 +106,7 @@ export function describeServerRecordStoreContract(
           )[index],
         };
         await store.put(key, value);
-        expect(store.get(key)).toEqual(value);
+        expect(await store.get(key)).toEqual(value);
       }
       await expect(
         store.put({ owner: null, name: 'agent-defaults' }, null),
@@ -106,7 +114,9 @@ export function describeServerRecordStoreContract(
       await expect(
         store.put({ owner: null, name: 'agent-defaults' }, undefined),
       ).rejects.toThrow('other than null');
-      expect(store.get({ owner: null, name: 'agent-defaults' })).toBeNull();
+      expect(
+        await store.get({ owner: null, name: 'agent-defaults' }),
+      ).toBeNull();
     });
 
     it('serves acknowledged records to a reopened adapter', async () => {
@@ -121,11 +131,26 @@ export function describeServerRecordStoreContract(
 
       const restarted = await reopen();
       expect(
-        restarted.get({ owner: null, name: 'agent-credential-versions' }),
+        await restarted.get({ owner: null, name: 'agent-credential-versions' }),
       ).toEqual({ alice: 3 });
-      expect(restarted.get({ owner: BOB, name: 'device-names' })).toEqual({
-        d: 'Desk',
-      });
+      expect(await restarted.get({ owner: BOB, name: 'device-names' })).toEqual(
+        {
+          d: 'Desk',
+        },
+      );
+    });
+
+    it('shows a write to an adapter that was already open, without reopening it', async () => {
+      const { store, reopen } = await open();
+      // Two processes over one database: each has its own adapter.
+      const other = await reopen();
+      const key = { owner: null, name: 'agent-credential-versions' } as const;
+      expect(await other.get(key)).toBeNull();
+
+      await store.put(key, { alice: 1 });
+      expect(await other.get(key)).toEqual({ alice: 1 });
+      await store.put(key, { alice: 2 });
+      expect(await other.get(key)).toEqual({ alice: 2 });
     });
 
     it('lists exactly the stored keys', async () => {
@@ -158,7 +183,7 @@ export function describeServerRecordStoreContract(
       ] as const;
       for (const key of invalid) {
         // @ts-expect-error -- deliberately invalid keys
-        expect(() => store.get(key)).toThrow();
+        await expect(store.get(key)).rejects.toThrow();
         // @ts-expect-error -- deliberately invalid keys
         await expect(store.put(key, { v: 1 })).rejects.toThrow();
       }

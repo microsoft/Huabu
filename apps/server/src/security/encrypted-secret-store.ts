@@ -125,7 +125,7 @@ export class EncryptedSecretStore implements SecretStore {
   }
 
   async initialize(): Promise<void> {
-    const stored = this.records.get(CREDENTIALS_RECORD);
+    const stored = await this.records.get(CREDENTIALS_RECORD);
     if (stored === null) return;
     this.secrets = this.decryptAll(this.parseOwn(stored));
   }
@@ -160,7 +160,7 @@ export class EncryptedSecretStore implements SecretStore {
     });
 
     const verifiedSecrets = this.decryptAll(
-      this.parseOwn(this.records.get(CREDENTIALS_RECORD)),
+      this.parseOwn(await this.records.get(CREDENTIALS_RECORD)),
     );
     for (const [id, value] of next) {
       if (verifiedSecrets.get(id) !== value) {

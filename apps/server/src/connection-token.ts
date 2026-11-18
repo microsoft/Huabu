@@ -111,13 +111,13 @@ function dotenvValue(key: string, value: string): string {
   );
 }
 
-export function buildAgentletConnectionCommand(
+export async function buildAgentletConnectionCommand(
   request: AgentletConnectionCommandRequest,
   credential: { token: string; source: ConnectionTokenSource } = {
     token: getConnectionToken(),
     source: activeSource ?? 'generated',
   },
-): AgentletConnectionCommandResponse {
+): Promise<AgentletConnectionCommandResponse> {
   let normalizedOrigin: string;
   try {
     const browserOrigin = normalizePublicOrigin(request.origin);
@@ -136,10 +136,10 @@ export function buildAgentletConnectionCommand(
       dotenvValue('HUABU_PUBLIC_ORIGIN', normalizedOrigin) +
       dotenvValue('HUABU_CONNECTION_TOKEN', token);
   } else if (request.shell === 'posix') {
-    const maxAgents = getExternalAgentRuntimeConfig().maxAgents;
+    const { maxAgents } = await getExternalAgentRuntimeConfig();
     content = `HUABU_PUBLIC_ORIGIN=${quotePosix(normalizedOrigin)} HUABU_CONNECTION_TOKEN=${quotePosix(token)} pnpm start:daemon --max-agents ${maxAgents}`;
   } else {
-    const maxAgents = getExternalAgentRuntimeConfig().maxAgents;
+    const { maxAgents } = await getExternalAgentRuntimeConfig();
     content = [
       '& {',
       "  $huabuPreviousOrigin = [Environment]::GetEnvironmentVariable('HUABU_PUBLIC_ORIGIN', 'Process')",

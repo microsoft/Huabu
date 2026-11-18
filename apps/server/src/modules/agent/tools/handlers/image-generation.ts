@@ -98,7 +98,7 @@ export async function handleGenerateImage(
   }
 
   const refs = args.referenceArtifactSrcs ?? [];
-  const resolved = serviceProvisioner.resolveForServer('image-gen');
+  const resolved = await serviceProvisioner.resolveForServer('image-gen');
   const azure = {
     endpoint: String(resolved.baseUrl),
     deployment: String(resolved.model),

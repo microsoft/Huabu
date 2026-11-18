@@ -102,7 +102,7 @@ function createHarness(options?: {
   });
   const subscribeTitles = vi.fn();
   const buildSpec = vi.fn(
-    ({
+    async ({
       binding,
       threadId,
       canvasId,
@@ -119,7 +119,7 @@ function createHarness(options?: {
         additionalInitialPreamble?: string;
       };
       spacePrompt?: string;
-    }): AcpWorkloadSpec => ({
+    }): Promise<AcpWorkloadSpec> => ({
       threadId,
       namespace: {
         name: canvasId ?? '',

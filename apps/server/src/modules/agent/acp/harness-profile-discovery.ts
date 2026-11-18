@@ -162,7 +162,7 @@ export function registerHarnessProfileDiscovery({
       }
       // Every create for this device runs inside this commit, so the lookup
       // sees each Profile an earlier harness or discovery created.
-      const profiles = registry.listProfiles();
+      const profiles = await registry.listProfiles();
       const existing = profiles.find((profile) => {
         const source = parseSource(profile.customData?.[SOURCE_KEY]);
         return (
@@ -205,7 +205,7 @@ export function registerHarnessProfileDiscovery({
         '[acp] automatically created Profile',
       );
     }
-    await onProfilesDiscovered?.(registry.listProfiles());
+    await onProfilesDiscovered?.(await registry.listProfiles());
   };
 
   const onChanged: Parameters<DiscoveryGateway['onAgentletsChanged']>[0] = ({

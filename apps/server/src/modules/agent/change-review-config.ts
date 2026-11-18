@@ -15,10 +15,10 @@ export const DEFAULT_AGENT_CHANGE_REVIEW_CONFIG: AgentChangeReviewConfig = {
 
 const log = getLogger('agent-change-review-config');
 
-export function getAgentChangeReviewConfig(): AgentChangeReviewConfig {
+export async function getAgentChangeReviewConfig(): Promise<AgentChangeReviewConfig> {
   const key = settingsRecordKey('change-review');
   try {
-    const stored = getServerRecords().get(key);
+    const stored = await getServerRecords().get(key);
     if (stored === null) return DEFAULT_AGENT_CHANGE_REVIEW_CONFIG;
     const parsed = agentChangeReviewConfigSchema.safeParse(stored);
     if (parsed.success) return parsed.data;

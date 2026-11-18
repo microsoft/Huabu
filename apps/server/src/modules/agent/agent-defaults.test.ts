@@ -34,7 +34,7 @@ function profile(
 function setup(initial?: unknown) {
   let persisted = initial;
   const storage = {
-    read: () => persisted,
+    read: async () => persisted,
     write: vi.fn(async (config: AgentDefaults) => {
       persisted = structuredClone(config);
     }),
@@ -89,10 +89,10 @@ describe('installation Agent defaults', () => {
 
   it('requires an explicit external default instead of falling back to Huabu', async () => {
     const { service, storage } = setup();
-    expect(() => service.requireDefaultAgentProfileId()).toThrow(
+    await expect(service.requireDefaultAgentProfileId()).rejects.toThrow(
       AgentDefaultsError,
     );
-    expect(() => service.requireDefaultAgentProfileId()).toThrow(
+    await expect(service.requireDefaultAgentProfileId()).rejects.toThrow(
       expect.objectContaining({ code: 'default_profile_unconfigured' }),
     );
     expect(storage.write).not.toHaveBeenCalled();
@@ -103,12 +103,14 @@ describe('installation Agent defaults', () => {
       profileId: 'deleted-or-offline',
       functionalModel: '',
     });
-    expect(service.requireDefaultAgentProfileId()).toBe('deleted-or-offline');
+    expect(await service.requireDefaultAgentProfileId()).toBe(
+      'deleted-or-offline',
+    );
   });
 
   it('does not write on GET or when discovery has no candidates', async () => {
     const { service, storage } = setup();
-    expect(service.getAgentDefaults()).toEqual({
+    expect(await service.getAgentDefaults()).toEqual({
       profileId: null,
       functionalModel: '',
     });
@@ -124,7 +126,7 @@ describe('installation Agent defaults', () => {
       profileId: 'profile-a',
       functionalModel: '  fast  ',
     });
-    expect(new AgentDefaultsService(storage).getAgentDefaults()).toEqual({
+    expect(await new AgentDefaultsService(storage).getAgentDefaults()).toEqual({
       profileId: 'profile-a',
       functionalModel: 'fast',
     });
@@ -133,7 +135,7 @@ describe('installation Agent defaults', () => {
       profileId: 'profile-a',
       functionalModel: ' \t ',
     });
-    expect(service.getAgentDefaults().functionalModel).toBe('');
+    expect((await service.getAgentDefaults()).functionalModel).toBe('');
   });
 
   it('initializes once in deterministic machine, harness, then ID order', async () => {
@@ -152,7 +154,7 @@ describe('installation Agent defaults', () => {
     await service.initializeAgentDefaults([
       profile('new-earlier', 'a-machine'),
     ]);
-    expect(service.getAgentDefaults().profileId).toBe('b-id');
+    expect((await service.getAgentDefaults()).profileId).toBe('b-id');
     expect(storage.write).toHaveBeenCalledTimes(1);
   });
 
@@ -162,7 +164,7 @@ describe('installation Agent defaults', () => {
       functionalModel: 'small',
     });
     await service.initializeAgentDefaults([profile('replacement')]);
-    expect(new AgentDefaultsService(storage).getAgentDefaults()).toEqual({
+    expect(await new AgentDefaultsService(storage).getAgentDefaults()).toEqual({
       profileId: 'deleted',
       functionalModel: 'small',
     });
@@ -202,7 +204,7 @@ describe('installation Agent defaults', () => {
       functionalModel: 'external-model',
     });
     expect(
-      new AgentDefaultsService(storage).requireDefaultAgentProfileId(),
+      await new AgentDefaultsService(storage).requireDefaultAgentProfileId(),
     ).toBe('huabu');
     expect(storage.write).toHaveBeenCalledTimes(1);
   });
@@ -211,7 +213,7 @@ describe('installation Agent defaults', () => {
     'fails explicitly for corrupt persisted configuration %j',
     async (value) => {
       const { service, storage } = setup(value);
-      expect(() => service.getAgentDefaults()).toThrow(
+      await expect(service.getAgentDefaults()).rejects.toThrow(
         'Invalid Agent defaults file',
       );
       await expect(

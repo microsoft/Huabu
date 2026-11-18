@@ -269,7 +269,7 @@ describe('personal settings', () => {
       for (const id of ['carol', 'dave']) {
         await scope.openPersonalSettings(async () => {
           scope.useCaller(person(`${id}-${owner}`, owner));
-          expect(defaults.getAgentDefaults().profileId).toBe('huabu');
+          expect((await defaults.getAgentDefaults()).profileId).toBe('huabu');
           await defaults.setAgentDefaults({
             profileId: `${id}-agent`,
             functionalModel: `${id}-model`,
@@ -277,16 +277,18 @@ describe('personal settings', () => {
         });
       }
       for (const id of ['carol', 'dave']) {
-        scope.openPersonalSettings(() => {
+        await scope.openPersonalSettings(async () => {
           scope.useCaller(person(`${id}-${owner}`, owner));
-          expect(defaults.getAgentDefaults()).toEqual({
+          expect(await defaults.getAgentDefaults()).toEqual({
             profileId: `${id}-agent`,
             functionalModel: `${id}-model`,
           });
         });
       }
     }
-    expect(defaults.getAgentDefaults().profileId).toBe('legacy-external');
+    expect((await defaults.getAgentDefaults()).profileId).toBe(
+      'legacy-external',
+    );
   });
 });
 
@@ -300,16 +302,16 @@ it('does not expose Azure deployment names or endpoints from the operator enviro
   try {
     await scope.openPersonalSettings(async () => {
       scope.useCaller(person('carol'));
-      expect(llm.getModelsForProvider('azure-openai')).toEqual([]);
+      expect(await llm.getModelsForProvider('azure-openai')).toEqual([]);
       await llm.setLLMConfig({
         provider: 'azure-openai',
         model: 'carol-model',
         apiKey: 'carol-key',
       });
-      expect(llm.getLLMModel().baseUrl).not.toContain('operator');
-      expect(llm.getModelsForProvider('azure-openai').map((m) => m.id)).toEqual(
-        ['carol-model'],
-      );
+      expect((await llm.getLLMModel()).baseUrl).not.toContain('operator');
+      expect(
+        (await llm.getModelsForProvider('azure-openai')).map((m) => m.id),
+      ).toEqual(['carol-model']);
     });
   } finally {
     vi.unstubAllEnvs();
@@ -345,7 +347,7 @@ it('offers members only provider adapters that can honor the guarded transport',
       .getAvailableProviders()
       .some((provider) => provider.api === 'bedrock-converse-stream'),
   ).toBe(true);
-  scope.openPersonalSettings(() => {
+  await scope.openPersonalSettings(async () => {
     scope.useCaller(person('carol'));
     const providers = llm.getAvailableProviders();
     expect(providers.some((provider) => provider.id === 'openai')).toBe(true);
@@ -358,6 +360,6 @@ it('offers members only provider adapters that can honor the guarded transport',
         ].includes(provider.api),
       ),
     ).toBe(false);
-    expect(llm.getModelsForProvider('amazon-bedrock')).toEqual([]);
+    expect(await llm.getModelsForProvider('amazon-bedrock')).toEqual([]);
   });
 });

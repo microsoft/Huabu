@@ -313,9 +313,9 @@ interface UtilityConfigPersisted {
  *
  * The migrated shape is only written back on the next `setLLMConfig`\n * / `setImageConfig` call \u2014 we never write on a pure load.
  */
-function loadPersistedStore(): PersistedStore {
+async function loadPersistedStore(): Promise<PersistedStore> {
   try {
-    const stored = getServerRecords().get(configRecord());
+    const stored = await getServerRecords().get(configRecord());
     if (!stored || typeof stored !== 'object' || Array.isArray(stored))
       return { providers: {} };
     const parsed = stored as Record<string, unknown>;
@@ -445,8 +445,8 @@ function buildPersistedConfig(
 }
 
 /** Active persisted config (or `null` if no provider has ever been configured). */
-function loadPersistedConfig(): PersistedConfig | null {
-  const store = loadPersistedStore();
+async function loadPersistedConfig(): Promise<PersistedConfig | null> {
+  const store = await loadPersistedStore();
   if (!store.active) return null;
   return buildPersistedConfig(store, store.active);
 }
@@ -608,12 +608,12 @@ function buildProviderModel(cfg: PersistedConfig): Model<Api> {
 }
 
 /** Initialize the active configuration from persisted config or env vars. */
-function ensureConfig(): PersistedConfig {
+async function ensureConfig(): Promise<PersistedConfig> {
   const state = runtime();
   if (state.activeConfig) return state.activeConfig;
 
   // Try persisted config
-  const persisted = loadPersistedConfig();
+  const persisted = await loadPersistedConfig();
   if (persisted) {
     state.activeConfig = persisted;
     return persisted;
@@ -646,7 +646,7 @@ function ensureConfig(): PersistedConfig {
   // Try other providers from env vars
   for (const p of getProviderCatalog()) {
     if (p.builtIn && environmentStore.get(llmProviderApiKeySecretId(p.id))) {
-      const models = getModelsForProvider(p.id);
+      const models = await getModelsForProvider(p.id);
       if (models.length > 0) {
         const found: PersistedConfig = { provider: p.id, model: models[0].id };
         state.activeConfig = found;
@@ -672,7 +672,9 @@ export function getAvailableProviders(): LLMProviderInfo[] {
 /**
  * Get available models for a given provider.
  */
-export function getModelsForProvider(providerId: string): LLMModelInfo[] {
+export async function getModelsForProvider(
+  providerId: string,
+): Promise<LLMModelInfo[]> {
   const providerInfo = getProviderCatalog().find((p) => p.id === providerId);
   if (!providerInfo) return [];
 
@@ -705,7 +707,7 @@ export function getModelsForProvider(providerId: string): LLMModelInfo[] {
     // Fall back to the saved Azure entry regardless of which provider is
     // currently active — keeps the deployment visible after switching away
     // and back.
-    const azureEntry = loadPersistedStore().providers['azure-openai'];
+    const azureEntry = (await loadPersistedStore()).providers['azure-openai'];
     if (azureEntry?.model) {
       return [
         {
@@ -831,7 +833,8 @@ async function fetchOpenAIModelIdsUncached(): Promise<string[] | null> {
   if (!apiKey) return null;
 
   const providerInfo = getProviderCatalog().find((p) => p.id === 'openai');
-  const persistedBaseUrl = loadPersistedStore().providers['openai']?.baseUrl;
+  const persistedBaseUrl = (await loadPersistedStore()).providers['openai']
+    ?.baseUrl;
   const baseUrl = (
     persistedBaseUrl ??
     providerInfo?.baseUrl.default ??
@@ -888,7 +891,7 @@ async function fetchOpenAIModelIdsUncached(): Promise<string[] | null> {
 export async function getModelsForProviderLive(
   providerId: string,
 ): Promise<LLMModelInfo[]> {
-  const staticModels = getModelsForProvider(providerId);
+  const staticModels = await getModelsForProvider(providerId);
 
   // OpenAI: prefer the account's live `/v1/models` entitlement, merged with
   // the static pi-ai metadata; fall back to the static catalogue on failure.
@@ -924,7 +927,7 @@ export async function getModelsForProviderLive(
  */
 export async function getLLMConfig(): Promise<LLMConfig> {
   try {
-    const cfg = ensureConfig();
+    const cfg = await ensureConfig();
     const catalog = getProviderCatalog();
     const providerInfo = catalog.find((p) => p.id === cfg.provider);
     const isOAuth = providerInfo?.authType === 'oauth';
@@ -968,7 +971,7 @@ export async function getLLMConfig(): Promise<LLMConfig> {
 export async function setLLMConfig(
   update: LLMConfigUpdate,
 ): Promise<LLMConfig> {
-  const store = loadPersistedStore();
+  const store = await loadPersistedStore();
   const existingEntry: ProviderPersisted =
     store.providers[update.provider] ?? {};
 
@@ -981,7 +984,7 @@ export async function setLLMConfig(
       (p) => p.id === update.provider,
     );
     if (providerInfo?.builtIn) {
-      const models = getModelsForProvider(update.provider);
+      const models = await getModelsForProvider(update.provider);
       if (models.length > 0) resolvedModel = models[0].id;
     }
   }
@@ -1086,8 +1089,8 @@ export async function setLLMConfig(
  * nothing has been saved yet — callers should treat that as "image
  * generation not configured" rather than an error.
  */
-export function getImageConfig(): LLMImageConfig {
-  const image = loadPersistedStore().imageConfig;
+export async function getImageConfig(): Promise<LLMImageConfig> {
+  const image = (await loadPersistedStore()).imageConfig;
   if (!image) {
     return { provider: '', authenticated: false };
   }
@@ -1110,7 +1113,7 @@ export function getImageConfig(): LLMImageConfig {
 export async function setImageConfig(
   update: LLMImageConfigUpdate,
 ): Promise<LLMImageConfig> {
-  const store = loadPersistedStore();
+  const store = await loadPersistedStore();
   const existing: ImageConfigPersisted = store.imageConfig ?? {};
   const next: ImageConfigPersisted = { ...existing };
 
@@ -1157,7 +1160,7 @@ export async function setImageConfig(
  * so the agent tool surfaces a clear "open Settings" message in chat
  * instead of a cryptic 4xx from Azure.
  */
-export function getAzureImageConfig(): {
+export async function getAzureImageConfig(): Promise<{
   endpoint: string;
   deployment: string;
   apiKey: string;
@@ -1170,8 +1173,8 @@ export function getAzureImageConfig(): {
    * shared capability registry.
    */
   quality?: 'low' | 'medium' | 'high' | 'auto';
-} {
-  const image = loadPersistedStore().imageConfig;
+}> {
+  const image = (await loadPersistedStore()).imageConfig;
   const provider = image?.provider ?? '';
   if (provider && provider !== 'azure-openai') {
     throw new Error(
@@ -1224,8 +1227,8 @@ export function getAzureImageConfig(): {
  * when image generation is unconfigured. Falls back to
  * {@link DEFAULT_IMAGE_MODEL_FAMILY}.
  */
-export function getConfiguredImageModelFamily(): ImageModelFamily {
-  const family = loadPersistedStore().imageConfig?.modelFamily;
+export async function getConfiguredImageModelFamily(): Promise<ImageModelFamily> {
+  const family = (await loadPersistedStore()).imageConfig?.modelFamily;
   return isImageModelFamily(family) ? family : DEFAULT_IMAGE_MODEL_FAMILY;
 }
 
@@ -1239,8 +1242,8 @@ export function getConfiguredImageModelFamily(): ImageModelFamily {
  * {@link resolveApiKey} / {@link resolveApiKeyAsync}, so the key entered in
  * the utility panel (stored in the SecretStore) is reused.
  */
-function loadUtilityPersistedConfig(): PersistedConfig | null {
-  const u = loadPersistedStore().utilityConfig;
+function utilityPersistedConfig(store: PersistedStore): PersistedConfig | null {
+  const u = store.utilityConfig;
   if (!u || !u.provider) return null;
   return {
     provider: u.provider,
@@ -1263,7 +1266,7 @@ function loadUtilityPersistedConfig(): PersistedConfig | null {
  * providers for a key.
  */
 export async function getUtilityConfig(): Promise<LLMUtilityConfig> {
-  const u = loadPersistedStore().utilityConfig;
+  const u = (await loadPersistedStore()).utilityConfig;
   if (!u || !u.provider) {
     return { provider: '', model: '', authenticated: false };
   }
@@ -1297,7 +1300,7 @@ export async function getUtilityConfig(): Promise<LLMUtilityConfig> {
 export async function setUtilityConfig(
   update: LLMUtilityConfigUpdate,
 ): Promise<LLMUtilityConfig> {
-  const store = loadPersistedStore();
+  const store = await loadPersistedStore();
 
   // Empty provider → follow the chat model: drop the utility entry.
   if (!update.provider) {
@@ -1320,7 +1323,7 @@ export async function setUtilityConfig(
       (p) => p.id === update.provider,
     );
     if (providerInfo?.builtIn) {
-      const models = getModelsForProvider(update.provider);
+      const models = await getModelsForProvider(update.provider);
       if (models.length > 0) resolvedModel = models[0].id;
     }
   }
@@ -1354,8 +1357,9 @@ export async function setUtilityConfig(
  * following chat. Built like any chat model; the key is applied at call
  * time, so key changes need not invalidate this cache.
  */
-function getUtilityModel(): Model<Api> {
-  const cfg = loadUtilityPersistedConfig();
+async function getUtilityModel(
+  cfg: PersistedConfig | null,
+): Promise<Model<Api>> {
   if (!cfg) return getLLMModel();
   const state = runtime();
   if (state.cachedUtilityModel) return state.cachedUtilityModel;
@@ -1510,28 +1514,29 @@ async function resolveAutoCheapUtility(
  * **vision guard** then steps a resolved model up to chat when the role may
  * carry an image (`hasImage`) but the model cannot accept image input.
  */
-function resolveForRole(
+async function resolveForRole(
   role: ModelRole,
-  opts?: { hasImage?: boolean },
-): { cfg: PersistedConfig; model: Model<Api> } {
-  const chat = (): { cfg: PersistedConfig; model: Model<Api> } => ({
-    cfg: ensureConfig(),
-    model: getLLMModel(),
+  opts: { hasImage?: boolean } | undefined,
+  utilityCfg: PersistedConfig | null,
+): Promise<{ cfg: PersistedConfig; model: Model<Api> }> {
+  const chat = async (): Promise<{
+    cfg: PersistedConfig;
+    model: Model<Api>;
+  }> => ({
+    cfg: await ensureConfig(),
+    model: await getLLMModel(),
   });
 
   const info = MODEL_ROLES[role];
-  let resolved = chat();
-  if (info.defaultTier === 'utility') {
-    const utilityCfg = loadUtilityPersistedConfig();
-    if (utilityCfg) {
-      // Explicit utility model wins.
-      resolved = { cfg: utilityCfg, model: getUtilityModel() };
-    }
+  let resolved = await chat();
+  if (info.defaultTier === 'utility' && utilityCfg) {
+    // Explicit utility model wins.
+    resolved = { cfg: utilityCfg, model: await getUtilityModel(utilityCfg) };
   }
 
   // Vision guard: only relevant when an image is actually being sent.
   if (shouldStepUpForVision(role, resolved.model.input, opts?.hasImage)) {
-    resolved = chat();
+    resolved = await chat();
   }
 
   return resolved;
@@ -1542,16 +1547,18 @@ async function resolveForRoleAsync(
   role: ModelRole,
   opts?: { hasImage?: boolean },
 ): Promise<{ cfg: PersistedConfig; model: Model<Api> }> {
-  let resolved = resolveForRole(role, opts);
+  // One read of the settings serves the whole resolution.
+  const utilityCfg = utilityPersistedConfig(await loadPersistedStore());
+  let resolved = await resolveForRole(role, opts, utilityCfg);
   const info = MODEL_ROLES[role];
 
-  if (info.defaultTier === 'utility' && loadUtilityPersistedConfig() === null) {
-    const autoCheap = await resolveAutoCheapUtility(ensureConfig());
+  if (info.defaultTier === 'utility' && utilityCfg === null) {
+    const autoCheap = await resolveAutoCheapUtility(await ensureConfig());
     if (autoCheap) resolved = autoCheap;
   }
 
   if (shouldStepUpForVision(role, resolved.model.input, opts?.hasImage)) {
-    resolved = { cfg: ensureConfig(), model: getLLMModel() };
+    resolved = { cfg: await ensureConfig(), model: await getLLMModel() };
   }
 
   return resolved;
@@ -1614,7 +1621,7 @@ export async function resolveModelForRoleAsync(
 export async function resolveModelByIdAsync(
   modelId: string,
 ): Promise<Model<Api>> {
-  const cfg: PersistedConfig = { ...ensureConfig(), model: modelId };
+  const cfg: PersistedConfig = { ...(await ensureConfig()), model: modelId };
   const model = buildModel(cfg);
   return applyCopilotAuthToModel(cfg, model);
 }
@@ -1627,18 +1634,22 @@ export async function ensureApiKeyForRole(
   // Automatic utility selection stays within the chat provider, so resolving
   // the provider synchronously avoids repeating its entitlement lookup after
   // resolveModelForRoleAsync() has already selected the model.
-  const { cfg } = resolveForRole(role, opts);
+  const { cfg } = await resolveForRole(
+    role,
+    opts,
+    utilityPersistedConfig(await loadPersistedStore()),
+  );
   return ensureApiKeyFor(cfg);
 }
 
 /**
  * Get a configured pi-ai Model instance for the active provider/model.
  */
-export function getLLMModel(): Model<Api> {
+export async function getLLMModel(): Promise<Model<Api>> {
   const state = runtime();
   if (state.cachedModel) return state.cachedModel;
 
-  const cfg = ensureConfig();
+  const cfg = await ensureConfig();
   const apiKey = resolveApiKey(cfg.provider);
 
   // For OAuth providers, resolveApiKey may return null (async refresh needed)
@@ -1666,7 +1677,7 @@ export function getLLMModel(): Model<Api> {
  * OAuth refresh logic without going through `llmComplete`.
  */
 export async function ensureApiKey(): Promise<string> {
-  const cfg = ensureConfig();
+  const cfg = await ensureConfig();
   const key = await resolveApiKeyAsync(cfg.provider);
   if (!key) {
     const provInfo = getProviderCatalog().find((p) => p.id === cfg.provider);

@@ -55,7 +55,10 @@ export async function initializeSecretStore(
   const records = await initServerRecords(env);
   const key = encodedKey
     ? parseServerMasterKey(encodedKey)
-    : resolveStandaloneMasterKey(records.get(CREDENTIALS_RECORD) !== null, env);
+    : resolveStandaloneMasterKey(
+        (await records.get(CREDENTIALS_RECORD)) !== null,
+        env,
+      );
   const store = new EncryptedSecretStore(records, key);
   await store.initialize();
   primaryStore = store;
@@ -111,7 +114,7 @@ export async function readPersistedSecret(
   if (
     !initialized &&
     !isDesktopSecretBridgeEnabled() &&
-    (await initServerRecords(env)).get(CREDENTIALS_RECORD) === null
+    (await (await initServerRecords(env)).get(CREDENTIALS_RECORD)) === null
   ) {
     return null;
   }

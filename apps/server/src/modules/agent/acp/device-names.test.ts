@@ -23,11 +23,14 @@ describe('persisted device names', () => {
   });
 
   it('persists independent names by exact identity across subsequent reads', async () => {
-    expect(getDeviceNames()).toEqual({});
+    expect(await getDeviceNames()).toEqual({});
     await renameDevice('windows', 'Office PC');
     await renameDevice('wsl', 'Linux');
     await renameDevice('windows', '  Desktop  ');
-    expect(getDeviceNames()).toEqual({ windows: 'Desktop', wsl: 'Linux' });
+    expect(await getDeviceNames()).toEqual({
+      windows: 'Desktop',
+      wsl: 'Linux',
+    });
     expect(
       JSON.parse(
         readFileSync(join(dataDir, 'agentlet-device-names.json'), 'utf8'),
@@ -43,7 +46,7 @@ describe('persisted device names', () => {
     async (content) => {
       const path = join(dataDir, 'agentlet-device-names.json');
       writeFileSync(path, content);
-      expect(() => getDeviceNames()).toThrow();
+      await expect(getDeviceNames()).rejects.toThrow();
       await expect(renameDevice('windows', 'New')).rejects.toThrow();
       expect(readFileSync(path, 'utf8')).toBe(content);
     },

@@ -16,25 +16,25 @@ export interface SelectableAgentProfile {
   customData?: CustomData;
 }
 
-interface AgentProfileRegistryPort {
-  getProfile(profileId: string): SelectableAgentProfile | null | undefined;
-  listSelectableProfileIds(): string[];
+/** The registry as Agent selection sees it. */
+export interface AgentProfileRegistryPort {
+  /**
+   * Visible Profiles the caller may use whose device is connected, in
+   * registry order. One call reads the registry once.
+   */
+  listSelectableProfiles(): Promise<SelectableAgentProfile[]>;
 }
 
 function getConnectedProfileRegistry(): AgentProfileRegistryPort | null {
   const registry = getAgentProfileRegistry();
   if (!registry) return null;
   return {
-    getProfile: (profileId) => registry.getProfile(profileId),
-    listSelectableProfileIds: () =>
-      registry
-        .listProfiles()
-        .filter(
-          (profile) =>
-            profile.visible !== false &&
-            resolveConnectedAgentletId(profile.agentletId),
-        )
-        .map((profile) => profile.id),
+    listSelectableProfiles: async () =>
+      (await registry.listProfiles()).filter(
+        (profile) =>
+          profile.visible !== false &&
+          resolveConnectedAgentletId(profile.agentletId),
+      ),
   };
 }
 
@@ -54,10 +54,10 @@ export class SelectableAgentProfileError extends Error {
   }
 }
 
-export function requireSelectableAgentProfile(
+export async function requireSelectableAgentProfile(
   profileId: string,
   registry: AgentProfileRegistryPort | null = getConnectedProfileRegistry(),
-): SelectableAgentProfile {
+): Promise<SelectableAgentProfile> {
   if (!registry) {
     throw new SelectableAgentProfileError(
       'registry_unavailable',
@@ -65,11 +65,10 @@ export function requireSelectableAgentProfile(
     );
   }
 
-  const profile = registry.getProfile(profileId);
-  if (
-    !profile ||
-    !new Set(registry.listSelectableProfileIds()).has(profile.id)
-  ) {
+  const profile = (await registry.listSelectableProfiles()).find(
+    ({ id }) => id === profileId,
+  );
+  if (!profile) {
     throw new SelectableAgentProfileError(
       'profile_not_selectable',
       `Agent Profile ${profileId} is not selectable`,
@@ -78,24 +77,30 @@ export function requireSelectableAgentProfile(
   return profile;
 }
 
-export function requireAvailableAgentProfile(
+export async function requireAvailableAgentProfile(
   profileId: string,
   registry: AgentProfileRegistryPort | null = getConnectedProfileRegistry(),
-): void {
+): Promise<void> {
   if (profileId === HUABU_AGENT_PROFILE_ID) return;
-  requireSelectableAgentProfile(profileId, registry);
+  await requireSelectableAgentProfile(profileId, registry);
 }
 
-export function getFirstSelectableAgentProfileId(
+/** The Profile a new conversation uses when none is chosen. */
+export async function getFirstSelectableAgentProfile(
   registry: AgentProfileRegistryPort | null = getConnectedProfileRegistry(),
-): string | null {
-  return registry?.listSelectableProfileIds()[0] ?? null;
+): Promise<SelectableAgentProfile | null> {
+  return (await registry?.listSelectableProfiles())?.[0] ?? null;
 }
 
-export function listAvailableAgentProfiles(
+export async function getFirstSelectableAgentProfileId(
   registry: AgentProfileRegistryPort | null = getConnectedProfileRegistry(),
-): AvailableAgentProfileSummary[] {
-  const defaultProfileId = getFirstSelectableAgentProfileId(registry);
+): Promise<string | null> {
+  return (await getFirstSelectableAgentProfile(registry))?.id ?? null;
+}
+
+export async function listAvailableAgentProfiles(
+  registry: AgentProfileRegistryPort | null = getConnectedProfileRegistry(),
+): Promise<AvailableAgentProfileSummary[]> {
   const huabu = {
     id: HUABU_AGENT_PROFILE_ID,
     alias: 'Built-In Pi',
@@ -103,20 +108,13 @@ export function listAvailableAgentProfiles(
   if (!registry) {
     return [huabu];
   }
+  const selectable = await registry.listSelectableProfiles();
   return [
     huabu,
-    ...registry.listSelectableProfileIds().map((profileId) => {
-      const profile = registry.getProfile(profileId);
-      if (!profile) {
-        throw new Error(
-          `Selectable Agent Profile ${profileId} is missing from the registry`,
-        );
-      }
-      return {
-        id: profile.id,
-        alias: profile.alias,
-        ...(profile.id === defaultProfileId ? { default: true } : {}),
-      };
-    }),
+    ...selectable.map((profile, index) => ({
+      id: profile.id,
+      alias: profile.alias,
+      ...(index === 0 ? { default: true } : {}),
+    })),
   ];
 }

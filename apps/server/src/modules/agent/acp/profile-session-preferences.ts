@@ -3,6 +3,7 @@
 
 import { getAgentProfileRegistry } from '@agenetes/agentlet-host';
 
+import type { AgentProfile } from '@agenetes/agent-profile';
 import type { CustomData, JsonValue } from '@huabu/shared';
 
 const CUSTOM_DATA_KEY = 'sessionPreferences';
@@ -24,12 +25,21 @@ function parsePreferences(
   };
 }
 
-export function getProfileSessionPreferences(
-  profileId: string,
+/** The session preferences remembered on `profile`. */
+export function profileSessionPreferences(
+  profile: AgentProfile | undefined,
 ): AcpProfileSessionPreferences {
-  const profile = getAgentProfileRegistry()?.getProfile(profileId);
   if (profile?.launch.kind !== 'acp-harness') return {};
-  return parsePreferences(profile?.customData?.[CUSTOM_DATA_KEY]);
+  return parsePreferences(profile.customData?.[CUSTOM_DATA_KEY]);
+}
+
+/** {@link profileSessionPreferences} for a Profile read from the registry. */
+export async function getProfileSessionPreferences(
+  profileId: string,
+): Promise<AcpProfileSessionPreferences> {
+  return profileSessionPreferences(
+    await getAgentProfileRegistry()?.getProfile(profileId),
+  );
 }
 
 export async function rememberProfileSessionPreference(
@@ -39,7 +49,7 @@ export async function rememberProfileSessionPreference(
   executionRevision = 0,
 ): Promise<void> {
   const registry = getAgentProfileRegistry();
-  const profile = registry?.getProfile(profileId);
+  const profile = await registry?.getProfile(profileId);
   if (!registry || !profile) return;
   if (
     profile.launch.kind !== 'acp-harness' ||

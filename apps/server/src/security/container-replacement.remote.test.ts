@@ -82,14 +82,14 @@ it('keeps credentials, settings, and revocations across a replaced container', a
     expect(second.secrets.getSecret('integration:tavily:api-key')).toBe(
       'tavily-key',
     );
-    expect(second.defaults.getAgentDefaults()).toEqual({
+    expect(await second.defaults.getAgentDefaults()).toEqual({
       profileId: 'utility-profile',
       functionalModel: 'small-model',
     });
     await second.credentials.resetAgentCredentials('alice');
     const { getServerRecords } = await import('../modules/storage/index.js');
     expect(
-      getServerRecords().get({
+      await getServerRecords().get({
         owner: null,
         name: 'agent-credential-versions',
       }),

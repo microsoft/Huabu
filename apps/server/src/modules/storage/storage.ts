@@ -1103,8 +1103,8 @@ export function setStorageForTesting(storage: Storage | null): () => void {
 const log = getLogger('storage');
 
 /**
- * The application's view of server records: the adapter's synchronous reads,
- * plus writes that never lose one another.
+ * The application's view of server records: the adapter's reads, which always
+ * go to storage, plus writes this process never loses to one another.
  */
 export class ServerRecords {
   readonly #serialize = createKeyedMutex<string>();
@@ -1116,7 +1116,7 @@ export class ServerRecords {
   }
 
   /** The latest acknowledged value, or `null` when never written. */
-  get(key: ServerRecordKey): unknown {
+  get(key: ServerRecordKey): Promise<unknown> {
     return this.store.get(assertServerRecordKey(key));
   }
 
@@ -1136,7 +1136,7 @@ export class ServerRecords {
   update<T>(key: ServerRecordKey, change: (current: unknown) => T): Promise<T> {
     assertServerRecordKey(key);
     return this.#serialize(serverRecordId(key), async () => {
-      const next = change(this.store.get(key));
+      const next = change(await this.store.get(key));
       await this.store.put(key, next);
       return next;
     });
@@ -1178,8 +1178,8 @@ export async function importServerRecords(
 ): Promise<number> {
   let imported = 0;
   for (const key of await source.keys()) {
-    if (target.get(key) !== null) continue;
-    await target.put(key, source.get(key));
+    if ((await target.get(key)) !== null) continue;
+    await target.put(key, await source.get(key));
     imported += 1;
   }
   return imported;

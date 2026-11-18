@@ -1280,7 +1280,7 @@ async function executePreparedOnServerAlreadyLocked(
     input.computeChanges === true &&
     !(
       originator.source === 'agent' &&
-      getAgentChangeReviewConfig().autoAcceptSpaceChanges
+      (await getAgentChangeReviewConfig()).autoAcceptSpaceChanges
     );
   let changes: CanvasChangeRecord[] | undefined;
   if (shouldComputeChanges) {

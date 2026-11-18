@@ -32,7 +32,7 @@ describe('Agent change-review config', () => {
   });
 
   it('defaults to explicit review when no config has been persisted', async () => {
-    expect(getAgentChangeReviewConfig()).toEqual(
+    expect(await getAgentChangeReviewConfig()).toEqual(
       DEFAULT_AGENT_CHANGE_REVIEW_CONFIG,
     );
   });
@@ -41,7 +41,7 @@ describe('Agent change-review config', () => {
     expect(
       await setAgentChangeReviewConfig({ autoAcceptSpaceChanges: true }),
     ).toEqual({ autoAcceptSpaceChanges: true });
-    expect(getAgentChangeReviewConfig()).toEqual({
+    expect(await getAgentChangeReviewConfig()).toEqual({
       autoAcceptSpaceChanges: true,
     });
     expect(
@@ -58,7 +58,7 @@ describe('Agent change-review config', () => {
       'utf8',
     );
 
-    expect(getAgentChangeReviewConfig()).toEqual(
+    expect(await getAgentChangeReviewConfig()).toEqual(
       DEFAULT_AGENT_CHANGE_REVIEW_CONFIG,
     );
   });

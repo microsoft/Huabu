@@ -8,7 +8,11 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 const gateway = vi.hoisted(() => ({
-  agentlets: [] as Array<{ agentletId: string; disconnect: () => void }>,
+  agentlets: [] as Array<{
+    agentletId: string;
+    metadata: Record<string, unknown>;
+    disconnect: () => void;
+  }>,
 }));
 
 vi.mock('@agenetes/agentlet-host', () => ({
@@ -38,9 +42,23 @@ afterEach(() => {
 });
 
 it('disconnects a device whose admitted handshake registers just after a reset', async () => {
-  const live = { agentletId: 'alice-device', disconnect: vi.fn() };
-  const late = { agentletId: 'alice-device', disconnect: vi.fn() };
-  const bob = { agentletId: 'bob-device', disconnect: vi.fn() };
+  // A connection carries the owner its handshake admitted it for.
+  const alice = { principalId: 'alice' };
+  const live = {
+    agentletId: 'alice-device',
+    metadata: alice,
+    disconnect: vi.fn(),
+  };
+  const late = {
+    agentletId: 'alice-device',
+    metadata: alice,
+    disconnect: vi.fn(),
+  };
+  const bob = {
+    agentletId: 'bob-device',
+    metadata: { principalId: 'bob' },
+    disconnect: vi.fn(),
+  };
   gateway.agentlets = [live, bob];
 
   await resetAgentCredentials('alice');

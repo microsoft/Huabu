@@ -36,8 +36,8 @@ import type { Namespace } from '@agenetes/protocol';
 /** Install the L1 read-side profile-schema-cache port into the ACP shell. */
 export function installAcpProfileCachePort(): void {
   setAcpProfileCachePort({
-    readCommands: (profileId, executionRevision = 0) => {
-      const profile = getAgentProfileRegistry()?.getProfile(profileId);
+    readCommands: async (profileId, executionRevision = 0) => {
+      const profile = await getAgentProfileRegistry()?.getProfile(profileId);
       if (!profile || (profile.executionRevision ?? 0) !== executionRevision)
         return null;
       const cache = getProfileSchemaCache(profileId);
@@ -83,7 +83,7 @@ export function ensureProfileCacheSubscription(
   void (async () => {
     try {
       for await (const meta of agenetes.notifications(threadId, namespace)) {
-        const profile = getAgentProfileRegistry()?.getProfile(profileId);
+        const profile = await getAgentProfileRegistry()?.getProfile(profileId);
         if (!profile || (profile.executionRevision ?? 0) !== executionRevision)
           continue;
         foldMetadataIntoProfileCache(profileId, meta);

@@ -26,8 +26,8 @@ export function agentProfileRecordStore(
 ): AgentProfileRegistryStore {
   const key = { owner: null, name } as const;
   return {
-    load(): AgentProfileRegistryState | null {
-      const value = getServerRecords().get(key);
+    async load(): Promise<AgentProfileRegistryState | null> {
+      const value = await getServerRecords().get(key);
       return value === null ? null : decodeAgentProfileRegistry(value);
     },
     save(state: AgentProfileRegistryState): Promise<void> {

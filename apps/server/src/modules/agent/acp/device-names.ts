@@ -10,9 +10,9 @@ import { getServerRecords } from '../../storage/index.js';
 
 const deviceNamesSchema = z.record(z.string(), agentletDeviceNameSchema);
 
-export function getDeviceNames(): Record<string, string> {
+export async function getDeviceNames(): Promise<Record<string, string>> {
   return deviceNamesSchema.parse(
-    getServerRecords().get(settingsRecordKey('device-names')) ?? {},
+    (await getServerRecords().get(settingsRecordKey('device-names'))) ?? {},
   );
 }
 

@@ -683,7 +683,7 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
     try {
       return reply
         .header('Cache-Control', 'no-store')
-        .send(serviceProvisioner.lease(parsed.data.serviceId));
+        .send(await serviceProvisioner.lease(parsed.data.serviceId));
     } catch (error) {
       if (error instanceof ServiceProvisionError) {
         const status =
@@ -1027,7 +1027,7 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
     async (_request, reply) => {
       try {
         const response: RfsAgentProfilesResponse = {
-          profiles: listAvailableAgentProfiles(),
+          profiles: await listAvailableAgentProfiles(),
         };
         return reply.send(response);
       } catch (error) {

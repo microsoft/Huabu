@@ -31,16 +31,17 @@ export class AgentDefaultsError extends Error {
 
 interface AgentDefaultsStorage {
   /** The stored value, or `undefined` when nothing was ever saved. */
-  read: () => unknown;
+  read: () => Promise<unknown>;
   /** Resolves once `config` is durable. */
   write: (config: AgentDefaults) => Promise<void>;
 }
 
 const recordStorage: AgentDefaultsStorage = {
-  read() {
+  async read() {
     try {
       return (
-        getServerRecords().get(settingsRecordKey('agent-defaults')) ?? undefined
+        (await getServerRecords().get(settingsRecordKey('agent-defaults'))) ??
+        undefined
       );
     } catch (error) {
       if (!(error instanceof ServerRecordError)) throw error;
@@ -58,8 +59,8 @@ const recordStorage: AgentDefaultsStorage = {
 export class AgentDefaultsService {
   constructor(private readonly storage: AgentDefaultsStorage = recordStorage) {}
 
-  getAgentDefaults(): AgentDefaults {
-    return this.parseDefaults(this.storage.read());
+  async getAgentDefaults(): Promise<AgentDefaults> {
+    return this.parseDefaults(await this.storage.read());
   }
 
   private parseDefaults(stored: unknown): AgentDefaults {
@@ -79,8 +80,8 @@ export class AgentDefaultsService {
     return parsed.data;
   }
 
-  requireDefaultAgentProfileId(): string {
-    const { profileId } = this.getAgentDefaults();
+  async requireDefaultAgentProfileId(): Promise<string> {
+    const { profileId } = await this.getAgentDefaults();
     if (profileId === null) {
       throw new AgentDefaultsError(
         'default_profile_unconfigured',
@@ -99,7 +100,7 @@ export class AgentDefaultsService {
   async initializeAgentDefaults(
     profiles: readonly AgentProfileView[],
   ): Promise<AgentDefaults> {
-    const stored = this.storage.read();
+    const stored = await this.storage.read();
     const current = this.parseDefaults(stored);
     if (stored !== undefined) return current;
     const candidates = profiles.filter(
@@ -126,8 +127,9 @@ export class AgentDefaultsService {
 }
 
 const service = new AgentDefaultsService();
-export const getAgentDefaults = (): AgentDefaults => service.getAgentDefaults();
-export const requireDefaultAgentProfileId = (): string =>
+export const getAgentDefaults = (): Promise<AgentDefaults> =>
+  service.getAgentDefaults();
+export const requireDefaultAgentProfileId = (): Promise<string> =>
   service.requireDefaultAgentProfileId();
 export const setAgentDefaults = (
   config: AgentDefaults,

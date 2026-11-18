@@ -17,10 +17,10 @@ export const DEFAULT_EXTERNAL_AGENT_RUNTIME_CONFIG: ExternalAgentRuntimeConfig =
 
 const log = getLogger('external-agent-runtime-config');
 
-export function getExternalAgentRuntimeConfig(): ExternalAgentRuntimeConfig {
+export async function getExternalAgentRuntimeConfig(): Promise<ExternalAgentRuntimeConfig> {
   const key = settingsRecordKey('external-agent-runtime');
   try {
-    const stored = getServerRecords().get(key);
+    const stored = await getServerRecords().get(key);
     if (stored === null) return DEFAULT_EXTERNAL_AGENT_RUNTIME_CONFIG;
     const parsed = externalAgentRuntimeConfigSchema.safeParse(stored);
     if (parsed.success) return parsed.data;
