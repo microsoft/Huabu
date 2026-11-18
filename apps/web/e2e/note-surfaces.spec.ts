@@ -3,7 +3,7 @@
 
 import { expect, test } from '@playwright/test';
 
-import { openNewCanvas, editsPerCommand } from './helpers';
+import { openNewCanvas, personEdits } from './helpers';
 
 test('Full and Minimal Notes share a weaker accent surface inside and outside Frames', async ({
   page,
@@ -15,7 +15,7 @@ test('Full and Minimal Notes share a weaker accent surface inside and outside Fr
     '# Neutral Note\n\n' + 'Readable document content.\n\n'.repeat(30);
   const response = await page.request.post(`/api/canvas/${canvasId}/execute`, {
     data: {
-      edits: editsPerCommand([
+      edits: personEdits([
         {
           type: 'CREATE_NODES',
           nodes: [
@@ -63,7 +63,6 @@ test('Full and Minimal Notes share a weaker accent surface inside and outside Fr
           ],
         },
       ]),
-      originator: { source: 'agent', threadId: 'e2e-note-surfaces' },
     },
   });
   expect(response.ok(), await response.text()).toBe(true);

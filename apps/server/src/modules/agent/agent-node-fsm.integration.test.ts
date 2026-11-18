@@ -481,7 +481,6 @@ forEachProductProfile((profile, label) => {
           method: 'POST',
           url: `/canvas/${target.canvasId}/execute`,
           payload: {
-            originator: { source: 'ui' },
             edits: editsPerCommand([
               {
                 type: 'SET_NODE_GEOMETRY',

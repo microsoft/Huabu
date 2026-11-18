@@ -3,11 +3,8 @@
 
 import { expect, test, type Page, type TestInfo } from '@playwright/test';
 
-import {
-  openNewCanvas,
-  readViewportTransform,
-  editsPerCommand,
-} from './helpers';
+import { agentExecute, type AgentExecuteResponse } from './agent-execute';
+import { openNewCanvas, readViewportTransform, personEdits } from './helpers';
 
 import type {
   CanvasCommand,
@@ -31,17 +28,25 @@ async function persisted(page: Page) {
   expect(response.ok(), await response.text()).toBe(true);
   return ((await response.json()) as GetCanvasResponse).state.nodes as Node[];
 }
+/** A person's batch, through the page route. */
 async function execute(page: Page, commands: CanvasCommand[]) {
   const response = await page.request.post(
     `/api/canvas/${canvasId(page)}/execute`,
-    {
-      data: {
-        edits: editsPerCommand(commands),
-        originator: { source: 'agent', threadId: 'e2e-cross-frame-marquee' },
-      },
-    },
+    { data: { edits: personEdits(commands) } },
   );
   expect(response.ok(), await response.text()).toBe(true);
+}
+/**
+ * An Agent's batch, through the Agent route. The Server fits a Frame to the
+ * children an Agent gives it; a person's batch leaves that to the page.
+ */
+async function agentExecutes(page: Page, commands: CanvasCommand[]) {
+  const response = await agentExecute(page.request, canvasId(page), commands);
+  expect(response.ok(), await response.text()).toBe(true);
+  const { results } = (await response.json()) as AgentExecuteResponse;
+  expect(results.map((result) => result.applied)).toEqual(
+    commands.map(() => true),
+  );
 }
 function node(page: Page, id: string) {
   return page.locator(`.react-flow__node[data-id="${id}"]`);
@@ -190,7 +195,9 @@ async function seed(page: Page, zoom: number, overlapping = true) {
     }),
   ) as Ids;
   fixtures.set(page, ids);
-  await execute(page, [
+  // A person made the Frames and Notes; an Agent groups them, so each Frame
+  // is fitted to its children by the Server.
+  await agentExecutes(page, [
     {
       type: 'SET_NODE_PARENT',
       nodeIds: [ids.first, ids.second],

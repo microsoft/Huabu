@@ -807,7 +807,6 @@ describe('Canonical canvas write boundaries', () => {
               url: `/canvas/${canvasId}/execute`,
               payload: {
                 edits: editsPerCommand([command]),
-                originator: { source: 'ui' },
               },
             });
             if (response.statusCode === 200) {
@@ -848,7 +847,6 @@ describe('Canonical canvas write boundaries', () => {
         method: 'POST',
         url: '/canvas/canvas-a/execute',
         payload: {
-          originator: { source: 'ui' },
           edits: editsPerCommand([
             {
               type: 'SET_NODE_GEOMETRY',

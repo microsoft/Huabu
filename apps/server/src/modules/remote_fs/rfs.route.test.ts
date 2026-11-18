@@ -1897,7 +1897,6 @@ describe('POST /api/rfs/:canvasId/execute', () => {
         url: '/rfs/c1/execute',
         headers: { 'content-type': 'application/json' },
         payload: {
-          originator: { source: 'ui' },
           commands: [{ type: 'SET_NODE_SELECTION', nodeIds: ['node-1'] }],
         },
       });

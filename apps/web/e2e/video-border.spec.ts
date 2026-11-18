@@ -5,7 +5,7 @@ import { writeFile } from 'node:fs/promises';
 
 import { expect, test, type Locator } from '@playwright/test';
 
-import { editsPerCommand } from './helpers';
+import { personEdits } from './helpers';
 
 import type { CreateCanvasResponse, GetCanvasResponse } from '@huabu/shared';
 
@@ -117,7 +117,7 @@ for (const theme of ['light', 'dark'] as const) {
         `/api/canvas/${canvasId}/execute`,
         {
           data: {
-            edits: editsPerCommand([
+            edits: personEdits([
               {
                 type: 'CREATE_NODES',
                 nodes: [
@@ -136,7 +136,6 @@ for (const theme of ['light', 'dark'] as const) {
                 ],
               },
             ]),
-            originator: { source: 'agent', threadId: 'e2e-video-border' },
           },
         },
       );

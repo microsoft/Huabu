@@ -1182,7 +1182,7 @@ try {
         ],
       },
     ].map((command) => ({ commands: [command] })),
-    originator: { source: 'ui', tabId: 'tabs-smoke' },
+    originator: { tabId: 'tabs-smoke' },
   });
   const parentPage = await open(shell, navigationParent.canvasId);
   const parentSnapshot = await shell.evaluate(() =>

@@ -101,7 +101,7 @@ async function seedSpace(request: APIRequestContext, title: string) {
           ],
         },
       ]),
-      originator: { source: 'ui', tabId: 'e2e-content-sync-seed' },
+      originator: { tabId: 'e2e-content-sync-seed' },
     },
   });
   expect(seeded.ok(), await seeded.text()).toBe(true);

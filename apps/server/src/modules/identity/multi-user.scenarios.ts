@@ -528,7 +528,6 @@ export function describeSeveralPeople(
         (await call('carol', 'GET', `/api/canvas/${id}`)).body,
       ).toMatchObject({ title: 'Root', version: before.version });
       const saved = await call('dave', 'POST', `/api/canvas/${id}/execute`, {
-        originator: { source: 'ui' },
         edits: editsPerCommand([
           {
             type: 'CREATE_NODES',

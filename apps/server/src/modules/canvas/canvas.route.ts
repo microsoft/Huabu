@@ -1473,7 +1473,6 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     // Who the request speaks for and whether its commands may run for them
     // is decided here, once; see `execute-admission.ts`.
     const admission = admitExecuteRequest({
-      claimedSource: parsed.data.originator?.source,
       viaAgentCredential: arrivedWithAgentCredential(request),
       edits: parsed.data.edits,
     });

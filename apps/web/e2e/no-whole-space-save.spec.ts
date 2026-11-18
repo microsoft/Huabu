@@ -116,7 +116,7 @@ async function seedSpace(request: APIRequestContext) {
           ],
         },
       ]),
-      originator: { source: 'ui', tabId: 'e2e-no-whole-space-save-seed' },
+      originator: { tabId: 'e2e-no-whole-space-save-seed' },
     },
   });
   expect(seeded.ok(), await seeded.text()).toBe(true);

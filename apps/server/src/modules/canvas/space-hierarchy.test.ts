@@ -499,7 +499,6 @@ describe('Space ownership', () => {
         url: '/root/execute',
         payload: {
           edits: editsPerCommand([command]),
-          originator: { source: 'ui' },
         },
       });
     try {
@@ -594,7 +593,6 @@ describe('Space ownership', () => {
         method: 'POST',
         url: '/root/execute',
         payload: {
-          originator: { source: 'ui' },
           edits: editsPerCommand([
             {
               type: 'SET_NODE_GEOMETRY',

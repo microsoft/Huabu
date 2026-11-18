@@ -414,15 +414,16 @@ export const executeOriginatorSchema = z.object({
 export type ExecuteOriginator = z.infer<typeof executeOriginatorSchema>;
 
 /**
- * What an execute request may say about its sender. Who the request speaks
- * for follows the credential it arrived with: a person's session is `ui`, an
- * agent or machine credential is `agent`. `source` is not needed and a page
- * does not send it; the one thing it can still do is narrow a person's
- * session to `agent` (`execute-admission.ts`).
+ * What an execute request may say about its sender: which page it is and,
+ * for an agent, which conversation the batch belongs to. Who the request
+ * speaks for is not among them — that follows the credential it arrived
+ * with (a person's session is `ui`, an agent or machine credential is
+ * `agent`; `execute-admission.ts`). The object is strict, so a request that
+ * states a `source` is refused.
  */
-export const executeRequestOriginatorSchema = executeOriginatorSchema.partial({
-  source: true,
-});
+export const executeRequestOriginatorSchema = executeOriginatorSchema
+  .omit({ source: true })
+  .strict();
 export type ExecuteRequestOriginator = z.infer<
   typeof executeRequestOriginatorSchema
 >;

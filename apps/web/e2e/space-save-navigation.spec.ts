@@ -131,7 +131,7 @@ for (const failure of ['content', 'structure'] as const) {
               ],
             },
           ]),
-          originator: { source: 'ui', tabId: 'e2e-save-navigation' },
+          originator: { tabId: 'e2e-save-navigation' },
         },
       });
       expect(seeded.ok()).toBe(true);

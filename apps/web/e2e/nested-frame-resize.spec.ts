@@ -3,11 +3,7 @@
 
 import { expect, test, type Page } from '@playwright/test';
 
-import {
-  openNewCanvas,
-  readViewportTransform,
-  editsPerCommand,
-} from './helpers';
+import { openNewCanvas, readViewportTransform, personEdits } from './helpers';
 
 import type {
   CanvasCommand,
@@ -43,8 +39,7 @@ async function execute(page: Page, commands: CanvasCommand[]) {
     `/api/canvas/${canvasId(page)}/execute`,
     {
       data: {
-        edits: editsPerCommand(commands),
-        originator: { source: 'agent', threadId: 'e2e-nested-frame-resize' },
+        edits: personEdits(commands),
       },
     },
   );

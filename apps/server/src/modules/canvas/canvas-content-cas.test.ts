@@ -32,6 +32,10 @@ import { executeOnServer } from './canvas-executor.js';
 import { subscribeCanvasUpdates } from './canvas-sync.js';
 import canvasRoutes from './canvas.route.js';
 import syncRoutes from './sync.route.js';
+import {
+  AGENT_CREDENTIAL,
+  registerTestAgentCredential,
+} from '../../test-support/agent-credential.js';
 import { setRequestIdentity } from '../identity/request.js';
 import { UNRESTRICTED_ACCESS } from '../identity/service.js';
 import {
@@ -64,6 +68,7 @@ function resultsOf(body: {
 
 async function buildApp() {
   const app = fastify();
+  registerTestAgentCredential(app);
   await app.register(canvasRoutes, { prefix: '/canvas' });
   await app.register(syncRoutes, { prefix: '/canvas' });
   await app.ready();
@@ -246,7 +251,6 @@ describe('PUT /nodes/:nodeId/content — content CAS', () => {
           method: 'POST',
           url: '/canvas/c1/execute',
           payload: {
-            originator: { source: 'ui' },
             edits: editsPerCommand([
               {
                 type: 'CREATE_NODES',
@@ -282,8 +286,8 @@ describe('PUT /nodes/:nodeId/content — content CAS', () => {
       const rejected = await app.inject({
         method: 'POST',
         url: '/canvas/c1/execute',
+        headers: AGENT_CREDENTIAL,
         payload: {
-          originator: { source: 'agent' },
           edits: editsPerCommand([patch('node-existing')]),
         },
       });
@@ -294,8 +298,8 @@ describe('PUT /nodes/:nodeId/content — content CAS', () => {
       const initialized = await app.inject({
         method: 'POST',
         url: '/canvas/c1/execute',
+        headers: AGENT_CREDENTIAL,
         payload: {
-          originator: { source: 'agent' },
           edits: editsPerCommand([
             {
               type: 'CREATE_NODES',
@@ -468,7 +472,6 @@ describe('PUT /nodes/:nodeId/content — content CAS', () => {
           method: 'POST',
           url: '/canvas/c1/execute',
           payload: {
-            originator: { source: 'ui' },
             edits: editsPerCommand(commands),
           },
         });
@@ -1330,7 +1333,6 @@ describe('PUT /nodes/:nodeId/content — content CAS', () => {
         method: 'POST',
         url: '/canvas/c1/execute',
         payload: {
-          originator: { source: 'ui' },
           edits: editsPerCommand([
             {
               type: 'SET_NODE_GEOMETRY',
@@ -1358,7 +1360,6 @@ describe('PUT /nodes/:nodeId/content — content CAS', () => {
         method: 'POST',
         url: '/canvas/c1/execute',
         payload: {
-          originator: { source: 'ui' },
           edits: editsPerCommand([
             {
               type: 'MERGE_NODE_DATA',
@@ -1377,8 +1378,8 @@ describe('PUT /nodes/:nodeId/content — content CAS', () => {
       const byAgent = await app.inject({
         method: 'POST',
         url: '/canvas/c1/execute',
+        headers: AGENT_CREDENTIAL,
         payload: {
-          originator: { source: 'agent' },
           edits: editsPerCommand([
             {
               type: 'MERGE_NODE_DATA',

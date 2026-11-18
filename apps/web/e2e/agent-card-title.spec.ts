@@ -3,7 +3,7 @@
 
 import { expect, test } from '@playwright/test';
 
-import { openNewCanvas, editsPerCommand } from './helpers';
+import { openNewCanvas, personEdits } from './helpers';
 
 for (const nodeType of ['question', 'spacePreview'] as const) {
   for (const gesture of [
@@ -30,7 +30,7 @@ for (const nodeType of ['question', 'spacePreview'] as const) {
         `/api/canvas/${source}/execute`,
         {
           data: {
-            edits: editsPerCommand([
+            edits: personEdits([
               {
                 type: 'CREATE_NODES',
                 nodes: [
@@ -52,7 +52,7 @@ for (const nodeType of ['question', 'spacePreview'] as const) {
                 ],
               },
             ]),
-            originator: { source: 'ui', tabId: 'title-gesture-test' },
+            originator: { tabId: 'title-gesture-test' },
           },
         },
       );
@@ -120,7 +120,7 @@ test('Agent cards rename inline without changing the prompt or opening Chat', as
   const canvasId = page.url().split('/canvas/')[1]?.split(/[?#]/)[0];
   const response = await page.request.post(`/api/canvas/${canvasId}/execute`, {
     data: {
-      edits: editsPerCommand([
+      edits: personEdits([
         {
           type: 'CREATE_NODES',
           nodes: [
@@ -149,7 +149,6 @@ test('Agent cards rename inline without changing the prompt or opening Chat', as
           ],
         },
       ]),
-      originator: { source: 'agent', threadId: 'e2e-card-title' },
     },
   });
   expect(response.ok(), await response.text()).toBe(true);
@@ -324,7 +323,7 @@ test('Space cards retain selected-title editing, F2 and navigation isolation', a
   const source = page.url().split('/canvas/')[1]?.split(/[?#]/)[0];
   const created = await page.request.post(`/api/canvas/${source}/execute`, {
     data: {
-      edits: editsPerCommand([
+      edits: personEdits([
         {
           type: 'CREATE_NODES',
           nodes: [
@@ -338,7 +337,7 @@ test('Space cards retain selected-title editing, F2 and navigation isolation', a
           ],
         },
       ]),
-      originator: { source: 'ui', tabId: 'e2e-space-title' },
+      originator: { tabId: 'e2e-space-title' },
     },
   });
   expect(created.ok(), await created.text()).toBe(true);

@@ -75,7 +75,7 @@ async function seedSpace(request: APIRequestContext): Promise<string> {
           ],
         },
       ]),
-      originator: { source: 'ui', tabId: 'e2e-reload-editing-seed' },
+      originator: { tabId: 'e2e-reload-editing-seed' },
     },
   });
   expect(seeded.ok(), await seeded.text()).toBe(true);
@@ -275,7 +275,7 @@ test('a reload wanted while a text node is being typed into waits for the contro
           items: [{ nodeId: NOTE, position: { x: 420, y: 520 } }],
         },
       ]),
-      originator: { source: 'ui', tabId: 'e2e-reload-editing-other' },
+      originator: { tabId: 'e2e-reload-editing-other' },
     },
   });
   expect(moved.ok(), await moved.text()).toBe(true);

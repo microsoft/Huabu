@@ -224,7 +224,7 @@ async function seed(
           ],
         },
       ]),
-      originator: { source: 'ui', tabId: 'e2e-interactive-node-drag' },
+      originator: { tabId: 'e2e-interactive-node-drag' },
     },
   });
   expect(inserted.ok(), await inserted.text()).toBe(true);

@@ -385,7 +385,7 @@ async function seed(
   const seeded = await request.post(`/api/canvas/${canvasId}/execute`, {
     data: {
       edits: editsPerCommand(commands),
-      originator: { source: 'ui', tabId: 'e2e-multi-page-clipboard-seed' },
+      originator: { tabId: 'e2e-multi-page-clipboard-seed' },
     },
   });
   expect(seeded.ok(), await seeded.text()).toBe(true);

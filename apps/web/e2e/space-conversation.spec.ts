@@ -46,7 +46,7 @@ test('opens and continues a child Agent in the parent without leaking canvas sel
           ],
         },
       ]),
-      originator: { source: 'ui', tabId: 'remote-conversation-test' },
+      originator: { tabId: 'remote-conversation-test' },
     },
   });
   expect(createAgent.ok(), await createAgent.text()).toBe(true);
@@ -76,7 +76,7 @@ test('opens and continues a child Agent in the parent without leaking canvas sel
           ],
         },
       ]),
-      originator: { source: 'ui', tabId: 'remote-conversation-test' },
+      originator: { tabId: 'remote-conversation-test' },
     },
   });
   expect(createNote.ok(), await createNote.text()).toBe(true);

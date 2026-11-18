@@ -496,8 +496,9 @@ describe('receiving while a local change is in flight', () => {
   });
 
   it("still takes an undo snapshot for an agent's batch", () => {
+    // The fake server has no credentials; who wrote the batch is what the
+    // `update` event says, which is all a page ever sees of it.
     const update = server.execute(SPACE, {
-      originator: { source: 'agent' },
       edits: [{ commands: [moveCommand(X, 640)] }],
     });
     deliver(update, 'agent');

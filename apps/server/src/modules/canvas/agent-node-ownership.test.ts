@@ -98,7 +98,6 @@ forEachProductProfile((profile, label) => {
         url: `/canvas/${canvasId}/execute`,
         payload: {
           edits: editsPerCommand(commands),
-          originator: { source: 'ui' },
         },
       });
     }

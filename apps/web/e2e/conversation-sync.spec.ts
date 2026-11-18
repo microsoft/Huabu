@@ -56,7 +56,6 @@ for (const direction of ['parent-to-child', 'child-to-parent']) {
             ],
           },
         ]),
-        originator: { source: 'ui' },
       },
     });
     expect(creation.ok()).toBe(true);

@@ -13,7 +13,7 @@ import {
   translateOf,
   oneFingerDrag,
   touchTap,
-  editsPerCommand,
+  personEdits,
 } from './helpers';
 
 import type * as CanvasStore from '../src/store/canvasStore';
@@ -33,7 +33,7 @@ test('mounts Layers on demand and restores filtered scrolling and focus', async 
   const canvasId = page.url().split('/canvas/')[1]?.split(/[?#]/)[0];
   const response = await page.request.post(`/api/canvas/${canvasId}/execute`, {
     data: {
-      edits: editsPerCommand([
+      edits: personEdits([
         {
           type: 'CREATE_NODES',
           nodes: Array.from({ length: 50 }, (_, index) => ({
@@ -44,7 +44,6 @@ test('mounts Layers on demand and restores filtered scrolling and focus', async 
           })),
         },
       ]),
-      originator: { source: 'agent', threadId: 'e2e-layers-lifecycle' },
     },
   });
   expect(response.ok(), await response.text()).toBe(true);
@@ -110,7 +109,8 @@ test('mounts Layers on demand and restores filtered scrolling and focus', async 
   const reopenedRow = tree.locator(`[data-layer-id="${focusedId}"]`);
   await reopenedRow.click({ position: { x: 50, y: 18 } });
   await expect(reopenedRow).toHaveAttribute('aria-selected', 'true');
-  await expect(page.getByRole('tab', { name: /^Body 37/ })).toBeVisible();
+  // A person named the Note, so its preview tab carries that name.
+  await expect(page.getByRole('tab', { name: /^Layer 37/ })).toBeVisible();
   expect(
     await reopenedRow.evaluate((row) => {
       const surface = row.querySelector<HTMLElement>(':scope > .group');
@@ -400,7 +400,7 @@ test('uses the Canvas typography hierarchy for Layers and search results', async
   const canvasId = page.url().split('/canvas/')[1]?.split(/[?#]/)[0];
   const response = await page.request.post(`/api/canvas/${canvasId}/execute`, {
     data: {
-      edits: editsPerCommand([
+      edits: personEdits([
         {
           type: 'CREATE_NODES',
           nodes: [
@@ -417,7 +417,6 @@ test('uses the Canvas typography hierarchy for Layers and search results', async
           ],
         },
       ]),
-      originator: { source: 'agent', threadId: 'e2e-canvas-typography' },
     },
   });
   expect(response.ok(), await response.text()).toBe(true);
@@ -744,7 +743,7 @@ for (const input of ['mouse', 'touch'] as const) {
       `/api/canvas/${canvasId}/execute`,
       {
         data: {
-          edits: editsPerCommand([
+          edits: personEdits([
             {
               type: 'CREATE_NODES',
               nodes: Array.from({ length: 5 }, (_, index) => ({
@@ -755,10 +754,6 @@ for (const input of ['mouse', 'touch'] as const) {
               })),
             },
           ]),
-          originator: {
-            source: 'agent',
-            threadId: `e2e-layers-multi-${input}`,
-          },
         },
       },
     );
@@ -880,11 +875,7 @@ for (const count of [1, 2]) {
               `/api/canvas/${canvasId}/execute`,
               {
                 data: {
-                  edits: editsPerCommand(commands),
-                  originator: {
-                    source: 'agent',
-                    threadId: `e2e-group-frame-${count}-${input}`,
-                  },
+                  edits: personEdits(commands),
                 },
               },
             );
@@ -1232,7 +1223,7 @@ test('taps Layers to activate, long-presses to reorder, and swipes to scroll wit
   const canvasId = new URL(page.url()).pathname.split('/canvas/')[1];
   const response = await page.request.post(`/api/canvas/${canvasId}/execute`, {
     data: {
-      edits: editsPerCommand([
+      edits: personEdits([
         {
           type: 'CREATE_NODES',
           nodes: Array.from({ length: 40 }, (_, index) => ({
@@ -1243,7 +1234,6 @@ test('taps Layers to activate, long-presses to reorder, and swipes to scroll wit
           })),
         },
       ]),
-      originator: { source: 'agent', threadId: 'e2e-layers-touch' },
     },
   });
   expect(response.ok(), await response.text()).toBe(true);
@@ -1345,7 +1335,7 @@ test('keeps type filters on one line and preserves overflow selections during re
   const canvasId = new URL(page.url()).pathname.split('/canvas/')[1];
   const response = await page.request.post(`/api/canvas/${canvasId}/execute`, {
     data: {
-      edits: editsPerCommand([
+      edits: personEdits([
         {
           type: 'CREATE_NODES',
           nodes: [
@@ -1365,7 +1355,6 @@ test('keeps type filters on one line and preserves overflow selections during re
           })),
         },
       ]),
-      originator: { source: 'agent', threadId: 'e2e-layer-filter-overflow' },
     },
   });
   expect(response.ok(), await response.text()).toBe(true);

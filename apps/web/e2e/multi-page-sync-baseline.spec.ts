@@ -113,7 +113,7 @@ async function seedSpace(request: APIRequestContext, title: string) {
           })),
         },
       ]),
-      originator: { source: 'ui', tabId: 'e2e-multi-page-sync-seed' },
+      originator: { tabId: 'e2e-multi-page-sync-seed' },
     },
   });
   expect(seeded.ok(), await seeded.text()).toBe(true);
@@ -885,7 +885,7 @@ async function executeScenario(
           items: [{ nodeId: X, position: destination }],
         },
       ]),
-      originator: { source: 'ui', tabId: 'e2e-multi-page-sync-execute' },
+      originator: { tabId: 'e2e-multi-page-sync-execute' },
     },
   });
   expect(moved.ok(), await moved.text()).toBe(true);
@@ -1140,7 +1140,7 @@ test('(j) two pages that measure the same auto-height note report it once and do
           ],
         },
       ]),
-      originator: { source: 'ui', tabId: 'e2e-multi-page-sync-seed' },
+      originator: { tabId: 'e2e-multi-page-sync-seed' },
     },
   });
   expect(seeded.ok(), await seeded.text()).toBe(true);

@@ -48,7 +48,6 @@ for (const outcome of ['delayed', 'unavailable'] as const) {
             ],
           },
         ]),
-        originator: { source: 'ui' },
       },
     });
     expect(nodes.ok()).toBe(true);

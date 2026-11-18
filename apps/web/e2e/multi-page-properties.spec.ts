@@ -10,6 +10,7 @@ import {
   type Page,
 } from '@playwright/test';
 
+import { agentExecute, type AgentExecuteResponse } from './agent-execute';
 import { editsPerCommand } from './helpers';
 
 import type * as CanvasStore from '../src/store/canvasStore';
@@ -137,7 +138,7 @@ async function seedSpace(request: APIRequestContext, title: string) {
           ],
         },
       ]),
-      originator: { source: 'ui', tabId: 'e2e-properties-seed' },
+      originator: { tabId: 'e2e-properties-seed' },
     },
   });
   expect(seeded.ok(), await seeded.text()).toBe(true);
@@ -999,7 +1000,8 @@ async function storedRevision(
 }
 
 /**
- * An agent writes `patch` into `nodeId` through `execute`. By default it has
+ * An agent writes `patch` into `nodeId` through the Agent route, with the
+ * machine credential (`agentExecute`). By default it has
  * read the node and quotes the revision of that read; `expectRev: null`
  * sends none (it never read the node), and a string is sent as it is.
  */
@@ -1014,33 +1016,23 @@ async function agentWrites(
     options.expectRev === undefined
       ? await storedRevision(request, canvasId, nodeId)
       : options.expectRev;
-  const response = await request.post(`/api/canvas/${canvasId}/execute`, {
-    data: {
-      edits: editsPerCommand([
+  const response = await agentExecute(request, canvasId, [
+    {
+      type: 'MERGE_NODE_DATA',
+      patches: [
         {
-          type: 'MERGE_NODE_DATA',
-          patches: [
-            {
-              nodeId,
-              patch,
-              ...(expectRev !== null ? { expectRev } : {}),
-            },
-          ],
+          nodeId,
+          patch,
+          ...(expectRev !== null ? { expectRev } : {}),
         },
-      ]),
-      originator: { source: 'agent', threadId: 'e2e-properties-agent' },
+      ],
     },
-  });
-  expect(response.ok(), await response.text()).toBe(true);
-  const body = (await response.json()) as {
-    edits: Array<{ results: Array<{ applied: boolean; reason?: string }> }>;
-    nodeContentRevisions?: Record<string, string>;
-  };
-  expect(body.edits.map((edit) => edit.results[0])).toEqual([
-    expect.objectContaining({ applied: true }),
   ]);
+  expect(response.ok(), await response.text()).toBe(true);
+  const body = (await response.json()) as AgentExecuteResponse;
+  expect(body.results).toEqual([expect.objectContaining({ applied: true })]);
   // The response names the revision of what the server stored.
-  expect(body.nodeContentRevisions?.[nodeId]).toBe(
+  expect(body.revisions.find((entry) => entry.nodeId === nodeId)?.rev).toBe(
     await storedRevision(request, canvasId, nodeId),
   );
 }
@@ -1312,28 +1304,21 @@ test('an agent adds a tag right after page B saved the body, without a revision 
   // A body rewrite by that agent, with the same stale revision or none, is
   // still refused.
   for (const expectRev of [readBefore, undefined]) {
-    const refused = await request.post(`/api/canvas/${canvasId}/execute`, {
-      data: {
-        edits: editsPerCommand([
+    const refused = await agentExecute(request, canvasId, [
+      {
+        type: 'MERGE_NODE_DATA',
+        patches: [
           {
-            type: 'MERGE_NODE_DATA',
-            patches: [
-              {
-                nodeId: NOTE,
-                patch: { content: 'Agent overwrite' },
-                ...(expectRev ? { expectRev } : {}),
-              },
-            ],
+            nodeId: NOTE,
+            patch: { content: 'Agent overwrite' },
+            ...(expectRev ? { expectRev } : {}),
           },
-        ]),
-        originator: { source: 'agent', threadId: 'e2e-properties-agent' },
+        ],
       },
-    });
+    ]);
     expect(refused.ok(), await refused.text()).toBe(true);
-    const body = (await refused.json()) as {
-      edits: Array<{ results: Array<{ applied: boolean; reason?: string }> }>;
-    };
-    expect(body.edits.map((edit) => edit.results[0])).toEqual([
+    const body = (await refused.json()) as AgentExecuteResponse;
+    expect(body.results).toEqual([
       expect.objectContaining({ applied: false, reason: 'conflict' }),
     ]);
   }

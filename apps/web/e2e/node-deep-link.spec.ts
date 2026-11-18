@@ -40,7 +40,7 @@ test('keeps a deep-linked Question unread after reload until conversation intera
           ],
         },
       ]),
-      originator: { source: 'ui', tabId: 'deep-link-read-test' },
+      originator: { tabId: 'deep-link-read-test' },
     },
   });
   expect(added.ok(), await added.text()).toBe(true);

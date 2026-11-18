@@ -75,7 +75,7 @@ async function seedSpace(request: APIRequestContext) {
           })),
         },
       ]),
-      originator: { source: 'ui', tabId: 'e2e-space-presence-seed' },
+      originator: { tabId: 'e2e-space-presence-seed' },
     },
   });
   expect(seeded.ok(), await seeded.text()).toBe(true);

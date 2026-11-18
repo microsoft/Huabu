@@ -93,7 +93,7 @@ async function seedSpace(request: APIRequestContext) {
           ],
         },
       ]),
-      originator: { source: 'ui', tabId: 'e2e-sync-convergence-seed' },
+      originator: { tabId: 'e2e-sync-convergence-seed' },
     },
   });
   expect(seeded.ok(), await seeded.text()).toBe(true);
@@ -428,7 +428,7 @@ for (const change of ['body', 'move'] as const) {
               items: [{ nodeId: Y, position: { x: 40, y: 480 } }],
             },
           ]),
-          originator: { source: 'ui', tabId: 'e2e-another-page' },
+          originator: { tabId: 'e2e-another-page' },
         },
       });
       expect(moved.ok(), await moved.text()).toBe(true);

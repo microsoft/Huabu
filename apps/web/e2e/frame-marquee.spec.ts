@@ -3,12 +3,13 @@
 
 import { expect, test, type Page, type TestInfo } from '@playwright/test';
 
+import { agentExecute, type AgentExecuteResponse } from './agent-execute';
 import {
   oneFingerDrag,
   openNewCanvas,
   readViewportTransform,
   translateOf,
-  editsPerCommand,
+  personEdits,
 } from './helpers';
 
 import type {
@@ -39,23 +40,10 @@ async function persisted(page: Page) {
   };
 }
 
-async function execute(
-  page: Page,
-  commands: CanvasCommand[],
-  // Locking is a person's command; an agent batch may not carry it.
-  source: 'agent' | 'ui' = 'agent',
-) {
+async function execute(page: Page, commands: CanvasCommand[]) {
   const response = await page.request.post(
     `/api/canvas/${canvasId(page)}/execute`,
-    {
-      data: {
-        edits: editsPerCommand(commands),
-        originator:
-          source === 'agent'
-            ? { source: 'agent', threadId: 'e2e-frame-marquee' }
-            : { tabId: 'e2e-frame-marquee' },
-      },
-    },
+    { data: { edits: personEdits(commands) } },
   );
   expect(response.ok(), await response.text()).toBe(true);
 }
@@ -479,7 +467,8 @@ test.describe('Finger-mode inferred Frame presses', () => {
         '2',
       );
       await expect(
-        page.getByRole('tab', { name: /^first child \(note\)/ }),
+        // A person named the Note, so the tab carries that name.
+        page.getByRole('tab', { name: /^first \(note\)/ }),
       ).toBeVisible();
       expect((await rects(page, ids)).frame.x).toBeCloseTo(before.frame.x, 1);
     });
@@ -645,11 +634,9 @@ test('a locked press in a mixed Frame selection cannot auto-pan or leak a click'
     (entry) => entry.data.label === 'Locked probe',
   );
   if (!locked) throw new Error('Missing locked probe');
-  await execute(
-    page,
-    [{ type: 'SET_NODE_LOCKED', items: [{ nodeId: locked.id, locked: true }] }],
-    'ui',
-  );
+  await execute(page, [
+    { type: 'SET_NODE_LOCKED', items: [{ nodeId: locked.id, locked: true }] },
+  ]);
   await expect(node(page, locked.id)).toBeVisible();
   await stableViewport(page);
   const before = await rects(page, ids);
@@ -756,9 +743,15 @@ for (const tool of ['s', 'l']) {
       (entry) => entry.data.label === 'outer',
     );
     if (!outer) throw new Error('Missing outer Frame');
-    await execute(page, [
+    // An Agent nests the Frame: the Server fits the outer Frame to it, which
+    // a person's batch leaves to the page.
+    const nested = await agentExecute(page.request, canvasId(page), [
       { type: 'SET_NODE_PARENT', nodeIds: [ids.frame], parentId: outer.id },
     ]);
+    expect(nested.ok(), await nested.text()).toBe(true);
+    expect(
+      ((await nested.json()) as AgentExecuteResponse).results[0]?.applied,
+    ).toBe(true);
     await page.reload();
     await expect(page.locator('.react-flow__node')).toHaveCount(4);
     await stableViewport(page);

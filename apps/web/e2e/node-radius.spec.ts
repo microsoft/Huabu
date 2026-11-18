@@ -3,7 +3,7 @@
 
 import { expect, test } from '@playwright/test';
 
-import { openNewCanvas, editsPerCommand } from './helpers';
+import { openNewCanvas, personEdits } from './helpers';
 
 const cardTypes = [
   'image',
@@ -31,7 +31,7 @@ for (const [size, radius] of [
       `/api/canvas/${canvasId}/execute`,
       {
         data: {
-          edits: editsPerCommand([
+          edits: personEdits([
             {
               type: 'CREATE_NODES',
               nodes: cardTypes.map((nodeType, index) => ({
@@ -46,7 +46,6 @@ for (const [size, radius] of [
               })),
             },
           ]),
-          originator: { source: 'agent', threadId: 'e2e-node-radius' },
         },
       },
     );
@@ -123,7 +122,7 @@ test('image loading and loaded pixels use the same shared rounded clip', async (
   });
   const response = await page.request.post(`/api/canvas/${canvasId}/execute`, {
     data: {
-      edits: editsPerCommand([
+      edits: personEdits([
         {
           type: 'CREATE_NODES',
           nodes: [
@@ -139,7 +138,6 @@ test('image loading and loaded pixels use the same shared rounded clip', async (
           ],
         },
       ]),
-      originator: { source: 'agent', threadId: 'e2e-image-radius' },
     },
   });
   expect(response.ok(), await response.text()).toBe(true);

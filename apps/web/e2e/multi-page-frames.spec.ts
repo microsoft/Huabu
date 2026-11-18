@@ -178,7 +178,7 @@ async function seedSpace(
         },
         ...commands,
       ]),
-      originator: { source: 'ui', tabId: 'e2e-multi-page-frames-seed' },
+      originator: { tabId: 'e2e-multi-page-frames-seed' },
     },
   });
   expect(seeded.ok(), await seeded.text()).toBe(true);

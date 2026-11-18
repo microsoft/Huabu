@@ -502,7 +502,6 @@ describe('POST /api/canvas/:canvasId/execute storage outcomes', () => {
       url: `/canvas/${canvasId}/execute`,
       payload: {
         edits: editsPerCommand(commands),
-        originator: { source: 'ui' },
       },
     });
 

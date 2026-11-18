@@ -180,7 +180,7 @@ class Page {
       url: `/canvas/${CANVAS}/execute`,
       headers: { 'x-test-principal': this.principalId },
       payload: {
-        originator: { source: 'ui', tabId: this.pageId },
+        originator: { tabId: this.pageId },
         operationId: options.operationId ?? randomUUID(),
         edits,
       },
@@ -308,7 +308,7 @@ describe('the read version a page gets and sends', () => {
         method: 'POST',
         url: `/canvas/${CANVAS}/execute`,
         headers: { 'x-test-principal': ALICE },
-        payload: { originator: { source: 'ui' }, ...payload },
+        payload,
       });
     // The former shape — top-level commands, with or without runs — is not
     // a request any more.
@@ -368,7 +368,7 @@ describe('the read version a page gets and sends', () => {
         headers: { 'x-test-principal': ALICE },
         payload: {
           edits: editsPerCommand(commands),
-          originator: { source: 'ui', tabId: 'page-a' },
+          originator: { tabId: 'page-a' },
         },
       });
     await plain([reparent(N, F)]);

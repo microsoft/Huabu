@@ -6,13 +6,11 @@
  * decides, before the engine runs, who a request speaks for and whether its
  * commands may be run for them.
  *
- * 1. **The source follows the credential, not the body.** A request that
- *    arrived with an agent or machine credential is an agent's, a person's
- *    session is `ui`; a request need not say either, and a page does not.
- *    An agent credential may not call itself `ui`; `system` is for the
- *    Server's own callers and is never accepted from outside. A person's
- *    session may ask to be treated as an `agent` — the narrower scope — and
- *    that is all the body can change.
+ * 1. **The source follows the credential.** A request that arrived with an
+ *    agent or machine credential is an agent's, a person's session is `ui`.
+ *    A request cannot say which: its body has no field for it
+ *    (`executeRequestOriginatorSchema` refuses one), and `system` is only
+ *    ever the Server's own callers.
  * 2. **Commands are well formed.** Each is checked against the shape of its
  *    type (`canvasCommandShapeProblem`); a malformed command refuses the
  *    request with 400 instead of failing inside a handler.
@@ -44,7 +42,7 @@ export interface AdmittedEdit {
 
 export type ExecuteAdmission =
   | { ok: true; source: 'ui' | 'agent'; edits: AdmittedEdit[] }
-  | { ok: false; status: 400 | 403; code: string; message: string };
+  | { ok: false; status: 400; code: string; message: string };
 
 const BODY_KEYS: ReadonlySet<string> = new Set(CONTENT_REVISION_KEYS);
 
@@ -65,12 +63,6 @@ function uiBodyWrite(command: CanvasCommand): string | null {
 }
 
 export function admitExecuteRequest(input: {
-  /**
-   * `originator.source` as the body states it, if it does. Omitted, the
-   * source is the credential's: `agent` for an agent or machine credential,
-   * `ui` for a person's session.
-   */
-  claimedSource: 'ui' | 'agent' | 'system' | undefined;
   /** The request arrived with an agent or machine credential. */
   viaAgentCredential: boolean;
   edits: readonly {
@@ -79,23 +71,7 @@ export function admitExecuteRequest(input: {
     commands: readonly unknown[];
   }[];
 }): ExecuteAdmission {
-  if (input.claimedSource === 'system')
-    return {
-      ok: false,
-      status: 403,
-      code: 'SOURCE_NOT_ALLOWED',
-      message: 'System command origin is reserved for internal callers',
-    };
-  if (input.viaAgentCredential && input.claimedSource === 'ui')
-    return {
-      ok: false,
-      status: 403,
-      code: 'SOURCE_NOT_ALLOWED',
-      message:
-        'A request made with an agent credential is an agent request; it cannot use the ui origin',
-    };
-  const source =
-    input.claimedSource ?? (input.viaAgentCredential ? 'agent' : 'ui');
+  const source = input.viaAgentCredential ? 'agent' : 'ui';
   for (const [editIndex, edit] of input.edits.entries()) {
     for (const [index, command] of edit.commands.entries()) {
       const problem = canvasCommandShapeProblem(command);

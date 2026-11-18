@@ -3,11 +3,7 @@
 
 import { expect, test } from '@playwright/test';
 
-import {
-  openNewCanvas,
-  readViewportTransform,
-  editsPerCommand,
-} from './helpers';
+import { openNewCanvas, readViewportTransform, personEdits } from './helpers';
 
 for (const size of [
   { width: 400, height: 200 },
@@ -23,7 +19,7 @@ for (const size of [
       `/api/canvas/${canvasId}/execute`,
       {
         data: {
-          edits: editsPerCommand([
+          edits: personEdits([
             {
               type: 'CREATE_NODES',
               nodes: [
@@ -46,7 +42,6 @@ for (const size of [
               ],
             },
           ]),
-          originator: { source: 'agent', threadId: 'e2e-note-scroll' },
         },
       },
     );

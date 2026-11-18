@@ -59,7 +59,7 @@ async function seedSpace(request: APIRequestContext): Promise<string> {
       edits: editsPerCommand([
         { type: 'CREATE_NODES', nodes: [note(KEPT, 380), note(DELETED, 700)] },
       ]),
-      originator: { source: 'ui', tabId: 'e2e-delete-undo-body-seed' },
+      originator: { tabId: 'e2e-delete-undo-body-seed' },
     },
   });
   expect(seeded.ok(), await seeded.text()).toBe(true);

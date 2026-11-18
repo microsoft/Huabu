@@ -38,6 +38,10 @@ import { editsPerCommand } from '@huabu/shared';
 import { autoHeightKey } from '@huabu/shared/canvas-engine';
 
 import canvasRoutes from './canvas.route.js';
+import {
+  AGENT_CREDENTIAL,
+  registerTestAgentCredential,
+} from '../../test-support/agent-credential.js';
 import { registerLocalTestIdentity } from '../../test-support/local-identity.js';
 import { refreshCanvasDirIndex } from '../storage/backends/disk/canvas-dirs.js';
 import {
@@ -87,6 +91,7 @@ function freshWorkspace(): string {
 async function buildApp(): Promise<FastifyInstance> {
   const instance = fastify();
   registerLocalTestIdentity(instance);
+  registerTestAgentCredential(instance);
   await instance.register(multipart);
   await instance.register(canvasRoutes, { prefix: '/canvas' });
   await instance.ready();
@@ -975,7 +980,6 @@ describe('per-node content routes', () => {
         edits: editsPerCommand([
           { type: 'DELETE_NODES', nodeIds: ['node-broken'] },
         ]),
-        originator: { source: 'ui' },
       },
     });
     expect(deleted.statusCode, deleted.body).toBe(200);
@@ -1038,8 +1042,8 @@ describe('POST /canvas/:canvasId/execute', () => {
       const response = await app.inject({
         method: 'POST',
         url: '/canvas/canvas-height/execute',
+        headers: source === 'agent' ? AGENT_CREDENTIAL : {},
         payload: {
-          originator: { source },
           edits: editsPerCommand([
             {
               type: 'CREATE_NODES',
@@ -1093,7 +1097,6 @@ describe('POST /canvas/:canvasId/execute', () => {
         method: 'POST',
         url: '/canvas/canvas-height/execute',
         payload: {
-          originator: { source: 'ui' },
           edits: editsPerCommand([
             {
               type: 'APPLY_MEASURED_HEIGHT',
@@ -1133,7 +1136,6 @@ describe('POST /canvas/:canvasId/execute', () => {
       method: 'POST',
       url: '/canvas/canvas-exec/execute',
       payload: {
-        originator: { source: 'ui' },
         edits: editsPerCommand([
           {
             type: 'CREATE_NODES',
@@ -1171,7 +1173,6 @@ describe('POST /canvas/:canvasId/execute', () => {
       method: 'POST',
       url: '/canvas/canvas-absent/execute',
       payload: {
-        originator: { source: 'ui' },
         // A request holds at least one edit; an empty one is a 400 before
         // the Space is looked at.
         edits: editsPerCommand([

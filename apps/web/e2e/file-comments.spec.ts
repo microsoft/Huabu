@@ -7,7 +7,7 @@ import {
   expectSelectionToolbarOutsideSelection,
   openNewCanvas,
   readScreenshotPixels,
-  editsPerCommand,
+  personEdits,
 } from './helpers';
 
 import type * as QuestionModule from '../src/components/Nodes/question/questionCompose';
@@ -236,7 +236,7 @@ for (const mode of ['mouse', 'touch'] as const) {
       `/api/canvas/${canvasId}/execute`,
       {
         data: {
-          edits: editsPerCommand([
+          edits: personEdits([
             {
               type: 'CREATE_NODES',
               nodes: [
@@ -255,7 +255,6 @@ for (const mode of ['mouse', 'touch'] as const) {
               ],
             },
           ]),
-          originator: { source: 'agent', threadId: 'e2e-file-comments' },
         },
       },
     );

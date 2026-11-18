@@ -3,7 +3,7 @@
 
 import { expect, test, type Page } from '@playwright/test';
 
-import { openNewCanvas, editsPerCommand } from './helpers';
+import { openNewCanvas, personEdits } from './helpers';
 
 import type {
   ArtifactUploadResponse,
@@ -38,8 +38,7 @@ async function createSpace(page: Page, title: string) {
 async function execute(page: Page, canvasId: string, commands: unknown[]) {
   const response = await page.request.post(`/api/canvas/${canvasId}/execute`, {
     data: {
-      edits: editsPerCommand(commands),
-      originator: { source: 'agent', threadId: 'e2e-select-all-cut' },
+      edits: personEdits(commands),
     },
   });
   expect(response.ok(), await response.text()).toBe(true);

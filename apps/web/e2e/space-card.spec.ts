@@ -52,7 +52,7 @@ test('Space Scale resizes all card content and persists independently from Width
           ],
         },
       ]),
-      originator: { source: 'ui', tabId: 'card-scale-test' },
+      originator: { tabId: 'card-scale-test' },
     },
   });
   expect(created.ok(), await created.text()).toBe(true);
@@ -293,7 +293,7 @@ test('Space cards show activity and rename inline without entering the target', 
             })),
           },
         ]),
-        originator: { source: 'ui', tabId: 'space-card-test' },
+        originator: { tabId: 'space-card-test' },
       },
     },
   );
@@ -318,7 +318,7 @@ test('Space cards show activity and rename inline without entering the target', 
           ],
         },
       ]),
-      originator: { source: 'ui', tabId: 'space-card-test' },
+      originator: { tabId: 'space-card-test' },
     },
   });
   expect(created.ok(), await created.text()).toBe(true);

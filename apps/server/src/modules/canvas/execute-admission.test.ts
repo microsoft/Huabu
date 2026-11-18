@@ -120,22 +120,13 @@ const lock = {
 };
 
 describe('the source of an execute request', () => {
-  it('refuses the ui origin from a request made with an agent credential', async () => {
+  it('is the credential: a session is ui, an agent credential is an agent', async () => {
     const app = await buildApp();
     try {
-      const claimed = await execute(
-        app,
-        { originator: { source: 'ui' }, edits: editsPerCommand([lock]) },
-        'agent',
-      );
-      expect(claimed.statusCode).toBe(403);
-      expect(claimed.json()).toMatchObject({ code: 'SOURCE_NOT_ALLOWED' });
-      expect(version()).toBe(1);
-
-      // As an agent it is heard, and a page-only command is out of scope.
+      // A page-only command is out of scope for an agent credential.
       const asAgent = await execute(
         app,
-        { originator: { source: 'agent' }, edits: editsPerCommand([lock]) },
+        { edits: editsPerCommand([lock]) },
         'agent',
       );
       expect(asAgent.statusCode).toBe(200);
@@ -145,10 +136,7 @@ describe('the source of an execute request', () => {
       expect(version()).toBe(1);
 
       // A person's session is ui.
-      const session = await execute(app, {
-        originator: { source: 'ui' },
-        edits: editsPerCommand([lock]),
-      });
+      const session = await execute(app, { edits: editsPerCommand([lock]) });
       expect(session.statusCode).toBe(200);
       expect(resultsOf(session.json())[0].applied).toBe(true);
     } finally {
@@ -156,17 +144,20 @@ describe('the source of an execute request', () => {
     }
   });
 
-  it('never accepts the system origin', async () => {
+  it('refuses a request that states a source, whatever it states', async () => {
     const app = await buildApp();
     try {
       for (const credential of ['session', 'agent'] as const) {
-        const response = await execute(
-          app,
-          { originator: { source: 'system' }, edits: editsPerCommand([lock]) },
-          credential,
-        );
-        expect(response.statusCode).toBe(403);
+        for (const source of ['ui', 'agent', 'system']) {
+          const response = await execute(
+            app,
+            { originator: { source }, edits: editsPerCommand([lock]) },
+            credential,
+          );
+          expect(response.statusCode, `${credential} ${source}`).toBe(400);
+        }
       }
+      expect(version()).toBe(1);
     } finally {
       await app.close();
     }
@@ -206,10 +197,11 @@ describe('the source of an execute request', () => {
     };
     const app = await buildApp();
     try {
-      const response = await execute(app, {
-        originator: { source: 'agent' },
-        edits: editsPerCommand([commands[type]]),
-      });
+      const response = await execute(
+        app,
+        { edits: editsPerCommand([commands[type]]) },
+        'agent',
+      );
       expect(response.statusCode, response.body).toBe(200);
       expect(resultsOf(response.json())).toEqual([
         expect.objectContaining({ applied: false, reason: 'invalid-scope' }),
@@ -234,7 +226,6 @@ describe('a page does not overwrite a body through execute', () => {
     const app = await buildApp();
     try {
       const response = await execute(app, {
-        originator: { source: 'ui' },
         edits: editsPerCommand([
           {
             type: 'MERGE_NODE_DATA',
@@ -255,7 +246,6 @@ describe('a page does not overwrite a body through execute', () => {
     const app = await buildApp();
     try {
       const structure = await execute(app, {
-        originator: { source: 'ui' },
         edits: editsPerCommand([
           {
             type: 'MERGE_NODE_DATA',
@@ -267,34 +257,40 @@ describe('a page does not overwrite a body through execute', () => {
       expect(resultsOf(structure.json())[0].applied).toBe(true);
       expect(body()).toBe('the body');
 
-      const stale = await execute(app, {
-        originator: { source: 'agent' },
-        edits: editsPerCommand([
-          {
-            type: 'MERGE_NODE_DATA',
-            patches: [{ nodeId: 'node-a', patch: { content: 'by agent' } }],
-          },
-        ]),
-      });
+      const stale = await execute(
+        app,
+        {
+          edits: editsPerCommand([
+            {
+              type: 'MERGE_NODE_DATA',
+              patches: [{ nodeId: 'node-a', patch: { content: 'by agent' } }],
+            },
+          ]),
+        },
+        'agent',
+      );
       expect(resultsOf(stale.json())[0]).toMatchObject({
         applied: false,
         reason: 'conflict',
       });
-      const read = await execute(app, {
-        originator: { source: 'agent' },
-        edits: editsPerCommand([
-          {
-            type: 'MERGE_NODE_DATA',
-            patches: [
-              {
-                nodeId: 'node-a',
-                patch: { content: 'by agent' },
-                expectRev: nodeRevisionOf({ content: 'the body' }),
-              },
-            ],
-          },
-        ]),
-      });
+      const read = await execute(
+        app,
+        {
+          edits: editsPerCommand([
+            {
+              type: 'MERGE_NODE_DATA',
+              patches: [
+                {
+                  nodeId: 'node-a',
+                  patch: { content: 'by agent' },
+                  expectRev: nodeRevisionOf({ content: 'the body' }),
+                },
+              ],
+            },
+          ]),
+        },
+        'agent',
+      );
       expect(resultsOf(read.json())[0].applied).toBe(true);
       expect(body()).toBe('by agent');
     } finally {
@@ -313,7 +309,6 @@ describe('a page does not overwrite a body through execute', () => {
     try {
       for (const keepDataKeys of [undefined, [], ['label'], ['content']]) {
         const response = await execute(app, {
-          originator: { source: 'ui' },
           edits: editsPerCommand([
             {
               type: 'RESTORE_NODES',
@@ -331,7 +326,6 @@ describe('a page does not overwrite a body through execute', () => {
 
       // What the browser sends: the content fields are kept.
       const kept = await execute(app, {
-        originator: { source: 'ui' },
         edits: editsPerCommand([
           {
             type: 'RESTORE_NODES',
@@ -356,7 +350,6 @@ describe('a page does not overwrite a body through execute', () => {
     const app = await buildApp();
     try {
       const response = await execute(app, {
-        originator: { source: 'ui' },
         edits: editsPerCommand([
           {
             type: 'CREATE_NODES',
@@ -435,11 +428,12 @@ describe('malformed commands', () => {
   ])('answers 400, not 500, for %s', async (_name, command) => {
     const app = await buildApp();
     try {
-      for (const source of ['ui', 'agent']) {
-        const response = await execute(app, {
-          originator: { source },
-          edits: editsPerCommand([lock, command]),
-        });
+      for (const credential of ['session', 'agent'] as const) {
+        const response = await execute(
+          app,
+          { edits: editsPerCommand([lock, command]) },
+          credential,
+        );
         expect(response.statusCode, response.body).toBe(400);
         expect(response.json()).toMatchObject({
           code: 'INVALID_COMMAND',
@@ -458,13 +452,13 @@ describe('malformed commands', () => {
     try {
       for (const tabId of ['a b', '', 'p'.repeat(65), 'a/b']) {
         const response = await execute(app, {
-          originator: { source: 'ui', tabId },
+          originator: { tabId },
           edits: editsPerCommand([lock]),
         });
         expect(response.statusCode, tabId).toBe(400);
       }
       const accepted = await execute(app, {
-        originator: { source: 'ui', tabId: 'page_A-1' },
+        originator: { tabId: 'page_A-1' },
         edits: editsPerCommand([lock]),
       });
       expect(accepted.statusCode).toBe(200);
@@ -475,35 +469,12 @@ describe('malformed commands', () => {
 });
 
 describe('admitExecuteRequest', () => {
-  it('lets a session ask for the narrower agent scope, and nothing else', () => {
+  it('takes the source from the credential alone', () => {
     expect(
-      admitExecuteRequest({
-        claimedSource: 'agent',
-        viaAgentCredential: false,
-        edits: [],
-      }),
+      admitExecuteRequest({ viaAgentCredential: false, edits: [] }),
+    ).toEqual({ ok: true, source: 'ui', edits: [] });
+    expect(
+      admitExecuteRequest({ viaAgentCredential: true, edits: [] }),
     ).toEqual({ ok: true, source: 'agent', edits: [] });
-    expect(
-      admitExecuteRequest({
-        claimedSource: 'ui',
-        viaAgentCredential: true,
-        edits: [],
-      }),
-    ).toMatchObject({ ok: false, status: 403 });
-    // Stating nothing, the source is the credential's.
-    expect(
-      admitExecuteRequest({
-        claimedSource: undefined,
-        viaAgentCredential: false,
-        edits: [],
-      }),
-    ).toMatchObject({ ok: true, source: 'ui' });
-    expect(
-      admitExecuteRequest({
-        claimedSource: undefined,
-        viaAgentCredential: true,
-        edits: [],
-      }),
-    ).toMatchObject({ ok: true, source: 'agent' });
   });
 });

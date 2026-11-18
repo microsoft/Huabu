@@ -59,7 +59,6 @@ for (const { nodeType, peerHeight } of (
             ],
           },
         ]),
-        originator: { source: 'ui' },
       },
     });
     expect(seeded.ok(), await seeded.text()).toBe(true);

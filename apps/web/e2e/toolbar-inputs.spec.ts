@@ -3,7 +3,7 @@
 
 import { expect, test } from '@playwright/test';
 
-import { openNewCanvas, editsPerCommand } from './helpers';
+import { openNewCanvas, personEdits } from './helpers';
 
 for (const nodeType of ['note', 'text'] as const) {
   test(`${nodeType} toolbar inputs preserve selection, shortcuts and draft cancellation`, async ({
@@ -16,7 +16,7 @@ for (const nodeType of ['note', 'text'] as const) {
       `/api/canvas/${canvasId}/execute`,
       {
         data: {
-          edits: editsPerCommand([
+          edits: personEdits([
             {
               type: 'CREATE_NODES',
               nodes: [
@@ -30,7 +30,6 @@ for (const nodeType of ['note', 'text'] as const) {
               ],
             },
           ]),
-          originator: { source: 'agent', threadId: 'e2e-toolbar-inputs' },
         },
       },
     );

@@ -61,7 +61,7 @@ test('Add Content brings an existing Space into the visible destination and sele
           ],
         },
       ]),
-      originator: { source: 'ui', tabId: 'e2e-bring-space' },
+      originator: { tabId: 'e2e-bring-space' },
     },
   });
   expect(seeded.ok()).toBe(true);
@@ -239,7 +239,7 @@ test('Home moves an existing Space subtree and the current Space menu promotes i
           ],
         },
       ]),
-      originator: { source: 'ui', tabId: 'e2e-organize' },
+      originator: { tabId: 'e2e-organize' },
     },
   });
   expect(seeded.ok()).toBe(true);
@@ -468,7 +468,7 @@ test('cancelling child-Space deletion preserves separately selected edges', asyn
           edges: [{ id: 'edge-selected', source: 'node-a', target: 'node-b' }],
         },
       ]),
-      originator: { source: 'ui', tabId: 'e2e-guarded-delete' },
+      originator: { tabId: 'e2e-guarded-delete' },
     },
   });
   expect(seeded.ok(), await seeded.text()).toBe(true);
@@ -1035,7 +1035,6 @@ test('World first fit waits for hierarchy metadata', async ({ page }) => {
   const moved = await page.request.post(`/api/canvas/${world}/execute`, {
     data: {
       edits: editsPerCommand([{ type: 'SET_NODE_GEOMETRY', items }]),
-      originator: { source: 'ui' },
     },
   });
   expect(moved.ok(), await moved.text()).toBe(true);

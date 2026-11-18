@@ -7,7 +7,7 @@ import {
   openNewCanvas,
   readViewportTransform,
   oneFingerDrag,
-  editsPerCommand,
+  personEdits,
 } from './helpers';
 
 import type * as ToolModule from '../src/store/toolStore';
@@ -359,7 +359,7 @@ test('node preview never moves Canvas even when the target is obstructed', async
   const id = page.url().split('/canvas/')[1];
   const response = await page.request.post(`/api/canvas/${id}/execute`, {
     data: {
-      edits: editsPerCommand([
+      edits: personEdits([
         {
           type: 'CREATE_NODES',
           nodes: [
@@ -372,7 +372,6 @@ test('node preview never moves Canvas even when the target is obstructed', async
           ],
         },
       ]),
-      originator: { source: 'agent', threadId: 'overlay-test' },
     },
   });
   expect(response.ok(), await response.text()).toBe(true);
@@ -457,7 +456,7 @@ for (const navigation of ['layer', 'deep-link'] as const) {
       `/api/canvas/${canvasId}/execute`,
       {
         data: {
-          edits: editsPerCommand([
+          edits: personEdits([
             {
               type: 'CREATE_NODES',
               nodes: [
@@ -470,7 +469,6 @@ for (const navigation of ['layer', 'deep-link'] as const) {
               ],
             },
           ]),
-          originator: { source: 'agent', threadId: 'overlay-reveal-test' },
         },
       },
     );
@@ -645,8 +643,7 @@ for (const zoom of [0.5, 1]) {
     const execute = async (commands: unknown[]) => {
       const response = await page.request.post(`/api/canvas/${id}/execute`, {
         data: {
-          edits: editsPerCommand(commands),
-          originator: { source: 'agent', threadId: 'overlay-edges' },
+          edits: personEdits(commands),
         },
       });
       expect(response.ok(), await response.text()).toBe(true);

@@ -13,6 +13,10 @@ import { editsPerCommand } from '@huabu/shared';
 import canvasRoutes from './canvas.route.js';
 import { createChildSpace } from './space-hierarchy.js';
 import {
+  AGENT_CREDENTIAL,
+  registerTestAgentCredential,
+} from '../../test-support/agent-credential.js';
+import {
   openPersonalSettings,
   useCaller,
 } from '../identity/personal-settings.js';
@@ -79,6 +83,7 @@ describe('a member’s Spaces', () => {
   it("allows agent batches under each user's own credentials, including administrators", async () => {
     const execute = async (owner: boolean, source: 'agent' | 'ui') => {
       const app = fastify();
+      registerTestAgentCredential(app);
       app.addHook('onRequest', (_request, _reply, done) =>
         openPersonalSettings(done),
       );
@@ -100,6 +105,7 @@ describe('a member’s Spaces', () => {
       const response = await app.inject({
         method: 'POST',
         url: '/canvas/root/execute',
+        headers: source === 'agent' ? AGENT_CREDENTIAL : {},
         payload: {
           edits: editsPerCommand([
             {
@@ -115,7 +121,6 @@ describe('a member’s Spaces', () => {
               ],
             },
           ]),
-          originator: { source },
         },
       });
       await app.close();

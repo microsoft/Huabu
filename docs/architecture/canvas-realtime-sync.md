@@ -78,7 +78,7 @@ schema + `z.infer`, web imports as `import type` only):
 - `orderEvents` is present only when an `executeOnServer` batch changed a parent's direct-child list; see [Sibling paint order](#sibling-paint-order).
 - `nodeContentRevisions` (`{ [nodeId]: rev }`) is present when the batch created a sidecar-backed node or changed a sidecar field of one; see [Content revisions of a batch](#content-revisions-of-a-batch).
 - `agentNodeProjection` identifies trusted server binding/lifecycle/association effects for browser undo handling; it is output metadata, not client authorization to submit those writes.
-- `operationId` is the request id the writer supplied, when it supplied one; a page uses it to recognise the update for its own batch. `source` is the batch's `originator.source` (`ui`, `agent` or `system`), set on every `executeOnServer` batch and absent on `applyDeltasOnServer` replays; a page uses it to tell another person's edit from an agent's.
+- `operationId` is the request id the writer supplied, when it supplied one; a page uses it to recognise the update for its own batch. `source` is who the Server took the batch to be from (`ui`, `agent` or `system`; it follows the credential and is never read from the request), set on every `executeOnServer` batch and absent on `applyDeltasOnServer` replays; a page uses it to tell another person's edit from an agent's.
 
 ### What an update carries
 

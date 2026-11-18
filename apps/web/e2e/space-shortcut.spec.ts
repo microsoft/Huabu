@@ -48,7 +48,7 @@ async function seedNode(
           ],
         },
       ]),
-      originator: { source: 'ui', tabId: 'e2e-space-shortcut' },
+      originator: { tabId: 'e2e-space-shortcut' },
     },
   });
   expect(response.ok(), await response.text()).toBe(true);
@@ -334,7 +334,7 @@ test('mixed collection reparents child Spaces and the tree picker blocks cyclic 
           ],
         },
       ]),
-      originator: { source: 'ui', tabId: 'mixed-move-e2e' },
+      originator: { tabId: 'mixed-move-e2e' },
     },
   });
   expect(shortcut.ok(), await shortcut.text()).toBe(true);

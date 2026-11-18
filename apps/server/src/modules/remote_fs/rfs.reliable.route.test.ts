@@ -29,6 +29,10 @@ import {
 } from '@huabu/shared';
 
 import rfsRoutes from './rfs.route.js';
+import {
+  AGENT_CREDENTIAL,
+  registerTestAgentCredential,
+} from '../../test-support/agent-credential.js';
 import { toSafeFilename } from '../../utils/naming.js';
 import canvasRoutes from '../canvas/canvas.route.js';
 import { setRequestIdentity } from '../identity/request.js';
@@ -78,6 +82,7 @@ let tmp: string;
 
 async function buildApp() {
   const app = fastify();
+  registerTestAgentCredential(app);
   // The principal is the transport's. A request without the test header is
   // an unauthenticated one, as in the suites that register no identity.
   app.addHook('onRequest', async (request) => {
@@ -517,7 +522,6 @@ describe('GET /api/rfs/:canvasId/execute/:operationId for another entry point', 
         url: '/canvas/c1/execute',
         headers: ALICE,
         payload: {
-          originator: { source: 'ui' },
           operationId: OP_1,
           edits: editsPerCommand([
             {
@@ -669,9 +673,9 @@ describe('Review attribution', () => {
         app.inject({
           method: 'POST',
           url: '/canvas/c1/execute',
-          headers: ALICE,
+          headers: { ...ALICE, ...AGENT_CREDENTIAL },
           payload: {
-            originator: { source: 'agent', threadId },
+            originator: { threadId },
             edits: editsPerCommand([
               {
                 type: 'CREATE_NODES',
@@ -815,7 +819,7 @@ describe('POST /api/canvas/:canvasId/execute with a request id', () => {
       method: 'POST',
       url: '/canvas/c1/execute',
       headers,
-      payload: { originator: { source: 'ui' }, ...payload },
+      payload,
     });
 
   it('replays a repeated request and leaves the legacy call unchanged', async () => {

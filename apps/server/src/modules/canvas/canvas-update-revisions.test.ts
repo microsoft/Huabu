@@ -364,7 +364,6 @@ describe('content revisions over HTTP', () => {
         method: 'POST',
         url: `/canvas/${CANVAS}/execute`,
         payload: {
-          originator: { source: 'ui' },
           edits: editsPerCommand([
             mergeProperties('pdf', { Venue: 'CHI 25', Status: 'Reading' }),
             move('note', 640),
