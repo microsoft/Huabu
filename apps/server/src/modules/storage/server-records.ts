@@ -22,9 +22,19 @@ import { getDataDir } from '../../data-dir.js';
 import { createKeyedMutex } from '../../utils/keyed-mutex.js';
 import { getLogger } from '../../utils/logger.js';
 import { DiskServerRecordStore } from './backends/disk/server-records.js';
-import { PostgresServerRecordStore } from './backends/postgres/server-records.js';
-import { SqliteServerRecordStore } from './backends/sqlite/server-records.js';
-import { postgresConnection, sqliteConnection } from './connections.js';
+import {
+  PostgresServerRecordStore,
+  postgresDatabaseHoldsServerRecords,
+} from './backends/postgres/server-records.js';
+import {
+  SqliteServerRecordStore,
+  sqliteDatabaseHoldsServerRecords,
+} from './backends/sqlite/server-records.js';
+import {
+  postgresConnection,
+  sqliteConnection,
+  sqliteFilename,
+} from './connections.js';
 import {
   assertServerRecordKey,
   serverRecordId,
@@ -37,6 +47,8 @@ import {
 } from './profile.js';
 
 import type {
+  ServerRecordEntry,
+  ServerRecordImportTarget,
   ServerRecordKey,
   ServerRecordStore,
 } from './ports/server-records.js';
@@ -103,9 +115,8 @@ function buildServerRecordStore(
     case 'disk':
       return new DiskServerRecordStore(() => getDataDir(env));
     case 'sqlite':
-      return new SqliteServerRecordStore(sqliteConnection(env));
     case 'postgres':
-      return new PostgresServerRecordStore(postgresConnection(env));
+      return buildDatabaseStore(profile.structured.kind, env);
     default:
       throw new Error(
         `Unsupported structured backend: ${profile.structured.kind}`,
@@ -113,40 +124,44 @@ function buildServerRecordStore(
   }
 }
 
-/**
- * Copy every record that exists in `source` and not yet in `target`.
- *
- * Records are never deleted, so a record present in `target` is newer than
- * any file an earlier version wrote, and once every file has been copied this
- * does nothing: running it on each start is the same as running it once. A
- * damaged file fails startup rather than being dropped, because it may be the
- * only copy of a credential.
- *
- * @returns how many records were copied.
- */
-export async function importServerRecords(
-  target: ServerRecordStore,
-  source: ServerRecordStore,
-): Promise<number> {
-  let imported = 0;
-  for (const key of await source.keys()) {
-    if ((await target.get(key)) !== null) continue;
-    await target.put(key, await source.get(key));
-    imported += 1;
-  }
-  return imported;
+function buildDatabaseStore(
+  kind: ServerRecordImportTarget['kind'],
+  env: NodeJS.ProcessEnv,
+): ServerRecordImportTarget {
+  return kind === 'sqlite'
+    ? new SqliteServerRecordStore(sqliteConnection(env))
+    : new PostgresServerRecordStore(postgresConnection(env));
 }
 
 /**
- * A record an earlier version kept as a file in `env`'s data directory, or
- * `null`. Read without opening any backend, so a caller can check what a
- * database backend is about to import before anything is changed.
+ * The records opening `env`'s database would import from the files an
+ * earlier version kept in its data directory, read without changing anything.
+ *
+ * Opening a database upgrades its schema, and the earlier version cannot open
+ * the upgraded database, so everything the import needs is read and checked
+ * here first: a damaged file fails startup with the database as it was,
+ * rather than dropping what may be the only copy of a credential.
+ *
+ * Empty for Disk, where the files are the records, and for a database that
+ * already holds server records. The import commits all of its records in one
+ * transaction, so a database holding any record has had its import, and the
+ * files it was taken from are never read or checked again.
  */
-export function readDataDirectoryRecord(
-  key: ServerRecordKey,
+export async function readPendingImport(
   env: NodeJS.ProcessEnv = process.env,
-): Promise<unknown> {
-  return new DiskServerRecordStore(() => getDataDir(env)).get(key);
+): Promise<readonly ServerRecordEntry[]> {
+  const { kind } = parseStorageProfile(env).structured;
+  if (kind === 'disk') return [];
+  const held =
+    kind === 'sqlite'
+      ? sqliteDatabaseHoldsServerRecords(sqliteFilename(env))
+      : await postgresDatabaseHoldsServerRecords(postgresConnection(env));
+  if (held) return [];
+  const files = new DiskServerRecordStore(() => getDataDir(env));
+  const records: ServerRecordEntry[] = [];
+  for (const key of await files.keys())
+    records.push({ key, value: await files.get(key) });
+  return records;
 }
 
 /**
@@ -154,8 +169,8 @@ export function readDataDirectoryRecord(
  * for the same environment.
  *
  * `env` chooses the backend, its database, and the data directory; setup and
- * the Vite dev server pass their own. On a database backend this also imports
- * the records an earlier version kept as files in the data directory.
+ * the Vite dev server pass their own. On a database backend this also
+ * imports {@link readPendingImport}'s records.
  */
 export async function initServerRecords(
   env: NodeJS.ProcessEnv = process.env,
@@ -184,18 +199,24 @@ async function openServerRecords(
   profile: StorageProfile,
   env: NodeJS.ProcessEnv,
 ): Promise<ServerRecords> {
-  const store = buildServerRecordStore(profile, env);
+  const { kind } = profile.structured;
+  if (kind !== 'sqlite' && kind !== 'postgres') {
+    const store = buildServerRecordStore(profile, env);
+    await store.init();
+    return new ServerRecords(store);
+  }
+  // Read before the store opens: opening upgrades the database.
+  const pending = await readPendingImport(env);
+  const store = buildDatabaseStore(kind, env);
   await store.init();
-  if (store.kind !== 'disk') {
-    const imported = await importServerRecords(
-      store,
-      new DiskServerRecordStore(() => getDataDir(env)),
+  if (pending.length > 0) {
+    // Conditional, so a process that imported first keeps whatever has
+    // been written since.
+    const imported = await store.insertMissing(pending);
+    log.info(
+      { imported, backend: kind },
+      'Imported server records from the data directory',
     );
-    if (imported > 0)
-      log.info(
-        { imported, backend: store.kind },
-        'Imported server records from the data directory',
-      );
   }
   return new ServerRecords(store);
 }

@@ -2,11 +2,17 @@
 // Licensed under the MIT license.
 
 import { PostgresStoreContext } from './database.js';
-import { PostgresServerRecordStore } from './server-records.js';
+import {
+  PostgresServerRecordStore,
+  postgresDatabaseHoldsServerRecords,
+} from './server-records.js';
 import { PostgresStructuredStore } from './structured-store.js';
 import { openPostgresTestStore } from './test-support.js';
 import { PostgresWorkspaceRepository } from './workspace-repository.js';
-import { describeServerRecordStoreContract } from '../../ports/contracts/server-records.contract.js';
+import {
+  describeServerRecordImportContract,
+  describeServerRecordStoreContract,
+} from '../../ports/contracts/server-records.contract.js';
 import { describeSpaceExtensionContract } from '../../ports/contracts/space-extension.contract.js';
 import { describeSpaceLogsContract } from '../../ports/contracts/space-logs.contract.js';
 import { describeSpaceNodesContract } from '../../ports/contracts/space-nodes.contract.js';
@@ -223,6 +229,25 @@ describeServerRecordStoreContract('Postgres', async () => {
     cleanup: async () => {
       try {
         for (const peer of peers) await peer.close();
+      } finally {
+        await h.cleanup();
+      }
+    },
+  };
+});
+
+describeServerRecordImportContract('Postgres', async () => {
+  const h = await openPostgresTestStore(false);
+  const store = new PostgresServerRecordStore(h.context);
+  await store.init();
+  // Startup asks before it opens, on a connection that has not migrated.
+  const unopened = new PostgresStoreContext(h.config);
+  return {
+    store,
+    holdsRecords: () => postgresDatabaseHoldsServerRecords(unopened),
+    cleanup: async () => {
+      try {
+        await unopened.close();
       } finally {
         await h.cleanup();
       }

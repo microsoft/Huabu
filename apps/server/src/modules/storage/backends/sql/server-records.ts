@@ -9,11 +9,7 @@
  * `''` so the primary key stays two plain non-null columns.
  */
 
-import {
-  SERVER_RECORDS,
-  assertServerRecordKey,
-  isServerRecordOwner,
-} from '../../ports/server-records.js';
+import { assertServerRecordKey } from '../../ports/server-records.js';
 
 import type {
   ServerRecordKey,
@@ -27,24 +23,4 @@ export function serverRecordColumns(key: ServerRecordKey): {
 } {
   const { owner, name } = assertServerRecordKey(key);
   return { ownerKey: owner ?? '', name };
-}
-
-/**
- * Read a key back from its columns. A row neither adapter could have written
- * (an unknown name, a malformed owner) is skipped rather than reported.
- */
-export function serverRecordKeyFromRow(
-  row: Record<string, unknown>,
-): ServerRecordKey[] {
-  const ownerKey = row['owner_key'];
-  const name = row['name'];
-  if (typeof ownerKey !== 'string' || typeof name !== 'string') return [];
-  if (!Object.hasOwn(SERVER_RECORDS, name)) return [];
-  if (ownerKey !== '' && !isServerRecordOwner(ownerKey)) return [];
-  return [
-    {
-      owner: ownerKey === '' ? null : ownerKey,
-      name: name as ServerRecordName,
-    },
-  ];
 }

@@ -119,7 +119,7 @@ export type { DiskSpaceImport } from './backends/disk/space-import.js';
 export {
   getServerRecords,
   initServerRecords,
-  readDataDirectoryRecord,
+  readPendingImport,
   ServerRecords,
   setServerRecordsForTesting,
 } from './server-records.js';

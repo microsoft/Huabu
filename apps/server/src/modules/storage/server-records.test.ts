@@ -7,17 +7,29 @@
  * earlier version's data-directory files into a database backend.
  */
 
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 
 import { afterEach, expect, it, vi } from 'vitest';
 
 import { DiskServerRecordStore } from './backends/disk/server-records.js';
+import {
+  applySqliteMigrations,
+  SQLITE_MIGRATIONS,
+} from './backends/sqlite/database.js';
 import { StorageProfileError } from './profile.js';
 import {
   getServerRecords,
   initServerRecords,
+  readPendingImport,
   ServerRecords,
 } from './server-records.js';
 import { closeStorage } from './storage.js';
@@ -46,7 +58,6 @@ function slowStore(): ServerRecordStore {
     kind: store.kind,
     init: () => store.init(),
     get: (key) => store.get(key),
-    keys: () => store.keys(),
     put: async (key, value) => {
       await new Promise((resolve) => setTimeout(resolve, 5));
       await store.put(key, value);
@@ -155,13 +166,75 @@ it('moves data-directory records into a database once, never over newer rows', a
   });
 });
 
-it('fails to start rather than skip a damaged data-directory record', async () => {
+it('fails to start with the database untouched when a file it would import is damaged', async () => {
   const dataDir = dataDirectory();
-  writeFileSync(join(dataDir, 'encrypted-secrets.json'), '{broken');
+  const legacy = new DiskServerRecordStore(() => dataDir);
+  await legacy.put({ owner: null, name: 'credentials' }, { v: 'file' });
+  writeFileSync(join(dataDir, 'llm-config.json'), '{"active":');
   vi.stubEnv('HUABU_DATA_DIR', dataDir);
   vi.stubEnv('HUABU_STRUCTURED_BACKEND', 'sqlite');
 
   await expect(initServerRecords()).rejects.toThrow(
-    'Server record credentials is not valid JSON',
+    'Server record model-settings is not valid JSON',
   );
+  // Read before opening: the database was neither created nor upgraded.
+  expect(existsSync(join(dataDir, 'storage', 'sqlite', 'huabu.sqlite'))).toBe(
+    false,
+  );
+});
+
+it("leaves an earlier version's database at its schema when the import cannot run", async () => {
+  const dataDir = dataDirectory();
+  const file = join(dataDir, 'storage', 'sqlite', 'huabu.sqlite');
+  mkdirSync(dirname(file), { recursive: true });
+  const earlier = new DatabaseSync(file);
+  applySqliteMigrations(earlier, SQLITE_MIGRATIONS.slice(0, 2));
+  earlier.close();
+  writeFileSync(join(dataDir, 'llm-config.json'), '{"active":');
+  vi.stubEnv('HUABU_DATA_DIR', dataDir);
+  vi.stubEnv('HUABU_STRUCTURED_BACKEND', 'sqlite');
+
+  await expect(initServerRecords()).rejects.toThrow('not valid JSON');
+  const after = new DatabaseSync(file);
+  try {
+    expect(after.prepare('PRAGMA user_version').get()).toEqual({
+      user_version: 2,
+    });
+  } finally {
+    after.close();
+  }
+});
+
+it('never reads the files again once a database holds its records', async () => {
+  const dataDir = dataDirectory();
+  const legacy = new DiskServerRecordStore(() => dataDir);
+  await legacy.put({ owner: null, name: 'credentials' }, { v: 'file' });
+  vi.stubEnv('HUABU_DATA_DIR', dataDir);
+  vi.stubEnv('HUABU_STRUCTURED_BACKEND', 'sqlite');
+  await initServerRecords();
+  await closeStorage();
+
+  // The imported file is obsolete; its damage is not the database's.
+  writeFileSync(join(dataDir, 'encrypted-secrets.json'), '{broken');
+  expect(await readPendingImport()).toEqual([]);
+  const restarted = await initServerRecords();
+  expect(await restarted.get({ owner: null, name: 'credentials' })).toEqual({
+    v: 'file',
+  });
+});
+
+it('opens an in-memory SQLite database without creating a file of that name', async () => {
+  const env = {
+    HUABU_STRUCTURED_BACKEND: 'sqlite',
+    HUABU_DATA_DIR: dataDirectory(),
+    HUABU_SQLITE_PATH: ':memory:',
+  };
+  const records = await initServerRecords(env);
+  await records.put(VERSIONS, { alice: 1 });
+  // The same database for another environment object naming it.
+  expect(await (await initServerRecords({ ...env })).get(VERSIONS)).toEqual({
+    alice: 1,
+  });
+  await closeStorage();
+  expect(existsSync(resolve(':memory:'))).toBe(false);
 });

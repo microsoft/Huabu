@@ -13,18 +13,35 @@ import {
   decodeServerRecord,
   encodeServerRecord,
 } from '../../ports/server-records.js';
-import {
-  serverRecordColumns,
-  serverRecordKeyFromRow,
-} from '../sql/server-records.js';
+import { serverRecordColumns } from '../sql/server-records.js';
 
 import type { PostgresStoreContext } from './database.js';
 import type {
+  ServerRecordEntry,
+  ServerRecordImportTarget,
   ServerRecordKey,
-  ServerRecordStore,
 } from '../../ports/server-records.js';
 
-export class PostgresServerRecordStore implements ServerRecordStore {
+/**
+ * Whether the database `context` connects to holds any server record, asked
+ * before `context.init()` so the database is not upgraded. A database
+ * without the table, as an earlier version left it, holds none.
+ */
+export async function postgresDatabaseHoldsServerRecords(
+  context: PostgresStoreContext,
+): Promise<boolean> {
+  const database = context.beforeInit();
+  const table = await database.get(
+    "SELECT to_regclass('server_records') IS NOT NULL AS present",
+  );
+  if (table?.['present'] !== true) return false;
+  const held = await database.get(
+    'SELECT EXISTS (SELECT 1 FROM server_records) AS held',
+  );
+  return held?.['held'] === true;
+}
+
+export class PostgresServerRecordStore implements ServerRecordImportTarget {
   readonly kind = 'postgres' as const;
   /** @param context Borrowed; the composition root opens and closes it. */
   constructor(private readonly context: PostgresStoreContext) {}
@@ -65,11 +82,27 @@ export class PostgresServerRecordStore implements ServerRecordStore {
     );
   }
 
-  async keys(): Promise<readonly ServerRecordKey[]> {
-    return (
-      await this.context
-        .database()
-        .all('SELECT owner_key, name FROM server_records')
-    ).flatMap(serverRecordKeyFromRow);
+  async insertMissing(records: readonly ServerRecordEntry[]): Promise<number> {
+    const rows = records.map(({ key, value }) => ({
+      ...serverRecordColumns(key),
+      text: encodeServerRecord(key, value),
+    }));
+    const now = this.context.now();
+    return this.context.transaction(async (database) => {
+      let written = 0;
+      for (const { ownerKey, name, text } of rows)
+        written += (
+          await database.run(
+            `INSERT INTO server_records (owner_key, name, record_json, updated_at)
+               VALUES (?, ?, ?, ?)
+             ON CONFLICT (owner_key, name) DO NOTHING`,
+            ownerKey,
+            name,
+            text,
+            now,
+          )
+        ).changes;
+      return written;
+    });
   }
 }

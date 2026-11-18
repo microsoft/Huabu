@@ -9,22 +9,50 @@
  * here is scoped to the active Workspace.
  */
 
+import { existsSync } from 'node:fs';
+import { DatabaseSync } from 'node:sqlite';
+
+import { withImmediateTransaction } from './database.js';
 import {
   decodeServerRecord,
   encodeServerRecord,
 } from '../../ports/server-records.js';
-import {
-  serverRecordColumns,
-  serverRecordKeyFromRow,
-} from '../sql/server-records.js';
+import { serverRecordColumns } from '../sql/server-records.js';
 
 import type { SqliteStoreContext } from './database.js';
 import type {
+  ServerRecordEntry,
+  ServerRecordImportTarget,
   ServerRecordKey,
-  ServerRecordStore,
 } from '../../ports/server-records.js';
 
-export class SqliteServerRecordStore implements ServerRecordStore {
+/**
+ * Whether the database file at `filename` holds any server record, read on a
+ * short-lived connection of its own so the database is neither created nor
+ * upgraded. An in-memory or URI filename names no file to inspect, and a
+ * file without the table holds none.
+ */
+export function sqliteDatabaseHoldsServerRecords(filename: string): boolean {
+  if (filename.startsWith(':') || filename.startsWith('file:')) return false;
+  if (!existsSync(filename)) return false;
+  const database = new DatabaseSync(filename);
+  try {
+    const table = database
+      .prepare(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'server_records'",
+      )
+      .get();
+    return (
+      table !== undefined &&
+      database.prepare('SELECT 1 FROM server_records LIMIT 1').get() !==
+        undefined
+    );
+  } finally {
+    database.close();
+  }
+}
+
+export class SqliteServerRecordStore implements ServerRecordImportTarget {
   readonly kind = 'sqlite' as const;
 
   /** @param context Borrowed; the composition root opens and closes it. */
@@ -62,11 +90,24 @@ export class SqliteServerRecordStore implements ServerRecordStore {
       .run(ownerKey, name, encodeServerRecord(key, value), this.context.now());
   }
 
-  async keys(): Promise<readonly ServerRecordKey[]> {
-    return this.context
-      .database()
-      .prepare('SELECT owner_key, name FROM server_records')
-      .all()
-      .flatMap(serverRecordKeyFromRow);
+  async insertMissing(records: readonly ServerRecordEntry[]): Promise<number> {
+    const rows = records.map(({ key, value }) => ({
+      ...serverRecordColumns(key),
+      text: encodeServerRecord(key, value),
+    }));
+    const database = this.context.database();
+    const insert = database.prepare(
+      `INSERT INTO server_records (owner_key, name, record_json, updated_at)
+         VALUES (?, ?, ?, ?)
+       ON CONFLICT (owner_key, name) DO NOTHING`,
+    );
+    const now = this.context.now();
+    return withImmediateTransaction(database, () =>
+      rows.reduce(
+        (written, { ownerKey, name, text }) =>
+          written + Number(insert.run(ownerKey, name, text, now).changes),
+        0,
+      ),
+    );
   }
 }

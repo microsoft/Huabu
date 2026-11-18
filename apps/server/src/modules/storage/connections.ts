@@ -29,11 +29,23 @@ let sqlite: SqliteStoreContext | null = null;
 /** The open pool and the URL it was opened for, compared but never printed. */
 let postgres: { context: PostgresStoreContext; url: string } | null = null;
 
+/**
+ * The SQLite filename `env` selects, as the process opens it. A file path is
+ * made absolute so two spellings of one file compare equal; an in-memory or
+ * URI filename is passed to SQLite unchanged, as it names no path.
+ */
+export function sqliteFilename(env: NodeJS.ProcessEnv = process.env): string {
+  const filename = sqliteDatabasePath(env);
+  return filename.startsWith(':') || filename.startsWith('file:')
+    ? filename
+    : path.resolve(filename);
+}
+
 /** The SQLite database `env` selects, opened once for the process. */
 export function sqliteConnection(
   env: NodeJS.ProcessEnv = process.env,
 ): SqliteStoreContext {
-  const filename = path.resolve(sqliteDatabasePath(env));
+  const filename = sqliteFilename(env);
   if (sqlite) {
     if (sqlite.filename !== filename)
       throw new StorageProfileError(

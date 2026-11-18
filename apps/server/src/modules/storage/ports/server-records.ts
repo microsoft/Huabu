@@ -99,15 +99,22 @@ export function serverRecordId(key: ServerRecordKey): string {
 }
 
 /**
- * Serialize a value the way every adapter stores it. `null` is reserved for
- * "never written", so a record cannot hold it, nor anything that serializes
- * to it, such as `NaN` or an object whose `toJSON()` returns `null`.
+ * Serialize a value the way every adapter stores it, as the exact text the
+ * adapter writes. `null` is reserved for "never written", so a record cannot
+ * hold it, nor anything that serializes to it, such as `NaN` or an object
+ * whose `toJSON()` returns `null`. The value is serialized once and the
+ * checked text is the one stored, so a `toJSON()` that answers differently
+ * on a second call cannot slip past the check.
+ *
+ * @param indent Spaces per level, for a file an operator may read; SQL
+ *   adapters store the compact form.
  */
 export function encodeServerRecord(
   key: ServerRecordKey,
   value: unknown,
+  indent?: number,
 ): string {
-  const text = JSON.stringify(value) as string | undefined;
+  const text = JSON.stringify(value, null, indent) as string | undefined;
   if (text === undefined || text === 'null')
     throw new ServerRecordError(
       `Server record ${key.name} must be a JSON value other than null`,
@@ -155,11 +162,38 @@ export interface ServerRecordStore {
    */
   get(key: ServerRecordKey): Promise<unknown>;
   /**
-   * Replace the record. Resolves once the value is durable and `get` returns
-   * it. Concurrent `put`s to one key are not ordered here; the composition
+   * Replace the record. Resolves once the value is committed: `get` returns
+   * it, and it survives the process exiting or its container being
+   * replaced. Surviving a power loss is the backend's own guarantee:
+   * PostgreSQL commits durably and Disk flushes the file and its directory,
+   * while SQLite runs WAL with `synchronous=NORMAL` for every table, so a
+   * machine crash may lose its most recent commits.
+   *
+   * Concurrent `put`s to one key are not ordered here; the composition
    * root's `update` serializes read-modify-write.
    */
   put(key: ServerRecordKey, value: unknown): Promise<void>;
-  /** Every stored record's key, in no particular order. */
-  keys(): Promise<readonly ServerRecordKey[]>;
+}
+
+/** One record and its value, as an import carries it. */
+export interface ServerRecordEntry {
+  readonly key: ServerRecordKey;
+  readonly value: unknown;
+}
+
+/**
+ * A database adapter, which can take in the records an earlier version kept
+ * as files in the data directory (docs/proposals/server-records.md,
+ * Migration). Disk is where those files already are, so it has no import.
+ */
+export interface ServerRecordImportTarget extends ServerRecordStore {
+  readonly kind: Exclude<StructuredBackendKind, 'disk'>;
+  /**
+   * Write each record this store does not hold yet, all in one transaction,
+   * leaving every record it holds as it is. Each entry is validated before
+   * anything is written, so a value no record may hold writes nothing.
+   *
+   * @returns how many records were written.
+   */
+  insertMissing(records: readonly ServerRecordEntry[]): Promise<number>;
 }

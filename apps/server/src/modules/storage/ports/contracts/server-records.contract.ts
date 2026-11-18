@@ -5,7 +5,10 @@
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import type { ServerRecordStore } from '../server-records.js';
+import type {
+  ServerRecordImportTarget,
+  ServerRecordStore,
+} from '../server-records.js';
 
 export interface ServerRecordStoreContractHarness {
   /** An initialized adapter over empty storage. */
@@ -46,7 +49,6 @@ export function describeServerRecordStoreContract(
       expect(
         await store.get({ owner: ALICE, name: 'model-settings' }),
       ).toBeNull();
-      await expect(store.keys()).resolves.toEqual([]);
     });
 
     it('keeps the deployment record apart from every person’s copy', async () => {
@@ -158,24 +160,6 @@ export function describeServerRecordStoreContract(
       expect(await other.get(key)).toEqual({ alice: 2 });
     });
 
-    it('lists exactly the stored keys', async () => {
-      const { store } = await open();
-      await store.put({ owner: null, name: 'credentials' }, { v: 1 });
-      await store.put({ owner: null, name: 'user-agent-profiles' }, { v: 1 });
-      await store.put({ owner: ALICE, name: 'change-review' }, { v: 1 });
-      await store.put({ owner: ALICE, name: 'change-review' }, { v: 2 });
-
-      const keys = await store.keys();
-      expect(keys).toHaveLength(3);
-      expect(keys).toEqual(
-        expect.arrayContaining([
-          { owner: null, name: 'credentials' },
-          { owner: null, name: 'user-agent-profiles' },
-          { owner: ALICE, name: 'change-review' },
-        ]),
-      );
-    });
-
     it('refuses keys no adapter may store', async () => {
       const { store } = await open();
       const invalid = [
@@ -192,7 +176,67 @@ export function describeServerRecordStoreContract(
         // @ts-expect-error -- deliberately invalid keys
         await expect(store.put(key, { v: 1 })).rejects.toThrow();
       }
-      await expect(store.keys()).resolves.toEqual([]);
+    });
+  });
+}
+
+export interface ServerRecordImportContractHarness {
+  /** An initialized database adapter over an empty database. */
+  readonly store: ServerRecordImportTarget;
+  /** Whether the database holds any record, asked as startup asks it. */
+  readonly holdsRecords: () => Promise<boolean>;
+  readonly cleanup?: () => Promise<void> | void;
+}
+
+/** The import every database adapter offers for an earlier version's files. */
+export function describeServerRecordImportContract(
+  name: string,
+  createHarness: () =>
+    | Promise<ServerRecordImportContractHarness>
+    | ServerRecordImportContractHarness,
+): void {
+  describe(`ServerRecordImportTarget contract: ${name}`, () => {
+    let harness: ServerRecordImportContractHarness | null = null;
+
+    async function open(): Promise<ServerRecordImportContractHarness> {
+      harness = await createHarness();
+      return harness;
+    }
+
+    afterEach(async () => {
+      await harness?.cleanup?.();
+      harness = null;
+    });
+
+    it('inserts the records it lacks and keeps every record it holds', async () => {
+      const { store, holdsRecords } = await open();
+      expect(await holdsRecords()).toBe(false);
+      const limit = { owner: ALICE, name: 'external-agent-runtime' } as const;
+      await store.put(limit, { maxAgents: 17 });
+
+      const written = await store.insertMissing([
+        { key: limit, value: { maxAgents: 13 } },
+        { key: { owner: null, name: 'credentials' }, value: { v: 'file' } },
+      ]);
+
+      expect(written).toBe(1);
+      expect(await store.get(limit)).toEqual({ maxAgents: 17 });
+      expect(await store.get({ owner: null, name: 'credentials' })).toEqual({
+        v: 'file',
+      });
+      expect(await holdsRecords()).toBe(true);
+    });
+
+    it('writes nothing when any record is one no adapter may hold', async () => {
+      const { store, holdsRecords } = await open();
+      await expect(
+        store.insertMissing([
+          { key: { owner: null, name: 'credentials' }, value: { v: 1 } },
+          { key: { owner: null, name: 'agent-defaults' }, value: NaN },
+        ]),
+      ).rejects.toThrow('other than null');
+      expect(await store.get({ owner: null, name: 'credentials' })).toBeNull();
+      expect(await holdsRecords()).toBe(false);
     });
   });
 }

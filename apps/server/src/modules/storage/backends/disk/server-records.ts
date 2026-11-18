@@ -72,16 +72,18 @@ export class DiskServerRecordStore implements ServerRecordStore {
   }
 
   async put(key: ServerRecordKey, value: unknown): Promise<void> {
-    // Validate exactly as the SQL adapters do; the file itself stays
-    // indented, as these files always were, for an operator reading them.
-    encodeServerRecord(key, value);
+    // Indented, as these files always were, for an operator reading them.
     atomicWriteText(
       diskServerRecordPath(key, this.dataDir()),
-      `${JSON.stringify(value, null, 2)}\n`,
+      `${encodeServerRecord(key, value, 2)}\n`,
       { mode: 0o600, durable: true },
     );
   }
 
+  /**
+   * Every record with a file, in no particular order. Not part of the port:
+   * only the import that moves these files into a database enumerates them.
+   */
   async keys(): Promise<readonly ServerRecordKey[]> {
     const dataDir = this.dataDir();
     const keys: ServerRecordKey[] = [];
