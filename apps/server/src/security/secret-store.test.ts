@@ -270,6 +270,53 @@ describe('initializeSecretStore — master key isolation', () => {
   );
 
   it(
+    "looks up setup's saved password from the credential record alone",
+    async () => {
+      const key = Buffer.alloc(32, 7);
+      process.env.HUABU_SECRET_KEY = key.toString('base64');
+      vi.stubEnv('HUABU_STRUCTURED_BACKEND', 'sqlite');
+      const { EncryptedSecretStore } =
+        await import('./encrypted-secret-store.js');
+      const { diskServerRecords } =
+        await import('../modules/storage/testing.js');
+      const dataDir = createDataDir();
+      process.env.HUABU_DATA_DIR = dataDir;
+      const earlier = new EncryptedSecretStore(diskServerRecords(dataDir), key);
+      await earlier.initialize();
+      await earlier.set('remote:password', 'saved-password');
+      // Another record's damage is the import's concern, not this lookup's.
+      writeFileSync(join(dataDir, 'agentlet-device-names.json'), '{broken');
+
+      const mod = await import('./secret-store.js');
+      expect(await mod.readPersistedSecret('remote:password')).toBe(
+        'saved-password',
+      );
+      await expect(mod.initializeSecretStore()).rejects.toThrow(
+        /Cannot import .*agentlet-device-names\.json/,
+      );
+    },
+    MODULE_RELOAD_TIMEOUT_MS,
+  );
+
+  it(
+    'refuses PostgreSQL without a supplied key before reaching the database',
+    async () => {
+      vi.stubEnv('HUABU_STRUCTURED_BACKEND', 'postgres');
+      // Nothing listens here; reaching it would fail with ECONNREFUSED.
+      vi.stubEnv('HUABU_POSTGRES_URL', 'postgresql://user:pass@127.0.0.1:1/db');
+      process.env.HUABU_DATA_DIR = createDataDir();
+      const mod = await import('./secret-store.js');
+      await expect(mod.initializeSecretStore()).rejects.toThrow(
+        'PostgreSQL credential storage requires HUABU_SECRET_KEY',
+      );
+      await expect(mod.readPersistedSecret('remote:password')).rejects.toThrow(
+        'PostgreSQL credential storage requires HUABU_SECRET_KEY',
+      );
+    },
+    MODULE_RELOAD_TIMEOUT_MS,
+  );
+
+  it(
     "looks up setup's saved password without creating, upgrading, or importing into a database",
     async () => {
       const key = Buffer.alloc(32, 5);

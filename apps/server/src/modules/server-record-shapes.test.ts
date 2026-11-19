@@ -8,12 +8,16 @@ import { DatabaseSync } from 'node:sqlite';
 
 import { afterEach, expect, it, vi } from 'vitest';
 
-import { checkPendingImport } from './server-record-shapes.js';
+import { assertImportableShapes } from './server-record-shapes.js';
 import {
   applySqliteMigrations,
   SQLITE_MIGRATIONS,
 } from './storage/backends/sqlite/database.js';
-import { closeStorage, initServerRecords } from './storage/index.js';
+import {
+  closeStorage,
+  initServerRecords,
+  readPendingImport,
+} from './storage/index.js';
 import { diskServerRecords } from './storage/testing.js';
 
 const directories: string[] = [];
@@ -75,15 +79,18 @@ it.each([
     const files = diskServerRecords(dataDir);
     await files.put(key, damaged);
 
-    await expect(checkPendingImport()).rejects.toThrow(
+    await expect(
+      initServerRecords(process.env, { checkImport: assertImportableShapes }),
+    ).rejects.toThrow(
       /^Cannot import \/.+ into the database: .+ The database was not changed/,
     );
     expect(userVersion(file)).toEqual({ user_version: 2 });
 
     // Repairing the file is enough, because nothing was imported.
     await files.put(key, repaired);
-    expect(await checkPendingImport()).toHaveLength(1);
-    const records = await initServerRecords();
+    const records = await initServerRecords(process.env, {
+      checkImport: assertImportableShapes,
+    });
     expect(await records.get(key)).toEqual(repaired);
   },
 );
@@ -94,7 +101,9 @@ it('leaves the records an owner falls back from to be repaired by the next save'
   vi.stubEnv('HUABU_STRUCTURED_BACKEND', 'sqlite');
   const settings = { owner: null, name: 'change-review' } as const;
   await diskServerRecords(dataDir).put(settings, { unexpected: true });
-  expect(await checkPendingImport()).toEqual([
+  const pending = await readPendingImport();
+  expect(pending).toEqual([
     expect.objectContaining({ key: settings, value: { unexpected: true } }),
   ]);
+  expect(() => assertImportableShapes(pending)).not.toThrow();
 });

@@ -4,10 +4,10 @@
 /**
  * The shapes of the server records whose owners refuse a malformed value.
  *
- * Each owner reads its record through the schema here, and the Server and
- * `setup` check every legacy file the one-time import
- * (`storage/server-records.ts`) would take against the same schema, before
- * either opens the database ({@link checkPendingImport}). That check is what keeps an import
+ * Each owner reads its record through the schema here, and the secret store,
+ * which opens records first, checks every legacy file the one-time import
+ * (`storage/server-records.ts`) takes against the same schema, before the
+ * database is upgraded ({@link assertImportableShapes}). That check is what keeps an import
  * recoverable: on Disk a damaged file is repaired by editing the file, but
  * once a database holds the record, the file is never read again, so a
  * value the owner refuses would be stuck in the database.
@@ -19,7 +19,8 @@
  *
  * Kept above storage, which knows no owner's schema. The Vite dev server
  * cannot load it (`@huabu/shared` is TypeScript source), and needs no check:
- * it only reads the saved password, without opening the database.
+ * it reads the saved password through `security/saved-secret.ts`, without
+ * opening the database.
  */
 
 import { decodeAgentProfileRegistry } from '@agenetes/agent-profile';
@@ -27,10 +28,7 @@ import { z } from 'zod';
 
 import { agentDefaultsSchema, agentletDeviceNameSchema } from '@huabu/shared';
 
-import {
-  readPendingImport,
-  unimportableRecord,
-} from './storage/server-records.js';
+import { unimportableRecord } from './storage/server-records.js';
 
 import type { ServerRecordName } from './storage/ports/server-records.js';
 import type { PendingImportEntry } from './storage/server-records.js';
@@ -92,20 +90,18 @@ export function refusedServerRecordShape(
 }
 
 /**
- * The records opening `env`'s database would import (`readPendingImport`),
- * each checked as its owner reads it. Run before anything opens the
- * database: opening upgrades it and imports these, after which repairing a
- * file no longer reaches the database's copy.
+ * Refuse a snapshot of records to import (`storage/server-records.ts`) when
+ * any owner would refuse its value. Run on the snapshot the open will
+ * import, before the database is upgraded: once imported, repairing a file
+ * no longer reaches the database's copy.
  *
  * @throws ServerRecordError naming the first file an owner would refuse.
  */
-export async function checkPendingImport(
-  env: NodeJS.ProcessEnv = process.env,
-): Promise<readonly PendingImportEntry[]> {
-  const pending = await readPendingImport(env);
+export function assertImportableShapes(
+  pending: readonly PendingImportEntry[],
+): void {
   for (const { key, value, file } of pending) {
     const refused = refusedServerRecordShape(key.name, value);
     if (refused !== null) throw unimportableRecord(file, refused);
   }
-  return pending;
 }

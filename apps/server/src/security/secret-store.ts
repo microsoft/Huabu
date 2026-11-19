@@ -9,65 +9,49 @@ import {
   CREDENTIALS_RECORD,
   EncryptedSecretStore,
   openCredentialEnvelope,
-  parseServerMasterKey,
 } from './encrypted-secret-store.js';
 import { EnvironmentSecretStore } from './environment-secret-store.js';
 import { resolveStandaloneMasterKey } from './private-config.js';
+import { masterKeyPrerequisite, readSavedSecret } from './saved-secret.js';
 import { SECRET_IDS } from './secret-ids.js';
 import { personalSecretId } from '../modules/identity/personal-settings.js';
-// Not the storage barrel: the Vite dev server loads this module, and only
-// the record composition root loads without the rest of the storage graph.
-import { parseStorageProfile } from '../modules/storage/profile.js';
-import {
-  initServerRecords,
-  peekServerRecord,
-  readPendingImport,
-} from '../modules/storage/server-records.js';
+import { assertImportableShapes } from '../modules/server-record-shapes.js';
+// Not the storage barrel: setup loads this module, and only the record
+// composition root loads without the rest of the storage graph.
+import { initServerRecords } from '../modules/storage/server-records.js';
 
 import type { SecretStore } from './secret-store-types.js';
+import type { ServerRecordImportCheck } from '../modules/storage/server-records.js';
 
 const environmentStore = new EnvironmentSecretStore();
 let primaryStore: SecretStore | null = null;
 let initialized = false;
 
 /**
- * The master key `env` supplies, or `null`, checked before anything opens a
- * database. Initialization and the saved-password lookup both open one, and
- * opening upgrades its schema and imports the credentials an earlier version
- * kept in the data directory, which that version could then no longer open.
- * So a PostgreSQL deployment without a supplied key, or a key that cannot
- * open those credentials, fails here with nothing changed. Only credentials
- * still waiting to be imported are checked: once imported, the database's
- * copy is the one in use and the file is left alone. The startup entry points
- * check the other records waiting to be imported the same way
- * (`modules/server-record-shapes.ts`).
+ * The check the first open of records runs on what it would import, before
+ * it upgrades the database: every owner must be able to read its record,
+ * and the master key must open the credentials. Opening upgrades the schema,
+ * which the earlier version can then no longer open, and the import is the
+ * only copy the Server reads from then on. Records already imported are not
+ * checked again: the database's copy is the one in use.
  */
-async function preflightMasterKey(
+function importCheck(
+  key: Buffer | null,
   env: NodeJS.ProcessEnv,
-): Promise<Buffer | null> {
-  const encodedKey = env.HUABU_SECRET_KEY?.trim();
-  if (!encodedKey && parseStorageProfile(env).structured.kind === 'postgres') {
-    // A generated key is a file in the private configuration directory. With
-    // the ciphertext in PostgreSQL that file would be the one thing a
-    // replaced container loses, leaving every credential unreadable.
-    throw new Error(
-      'PostgreSQL credential storage requires HUABU_SECRET_KEY. Set it to a ' +
-        'Base64 32-byte key from your secret manager; an instance that ' +
-        "already has a generated key keeps it in HUABU_CONFIG_DIR's master-key file.",
+): ServerRecordImportCheck {
+  return (pending) => {
+    assertImportableShapes(pending);
+    const legacy = pending.find(
+      ({ key: record }) =>
+        record.owner === CREDENTIALS_RECORD.owner &&
+        record.name === CREDENTIALS_RECORD.name,
     );
-  }
-  const key = encodedKey ? parseServerMasterKey(encodedKey) : null;
-  const legacy = (await readPendingImport(env)).find(
-    ({ key: record }) =>
-      record.owner === CREDENTIALS_RECORD.owner &&
-      record.name === CREDENTIALS_RECORD.name,
-  );
-  if (legacy)
-    openCredentialEnvelope(
-      legacy.value,
-      key ?? resolveStandaloneMasterKey(true, env),
-    );
-  return key;
+    if (legacy)
+      openCredentialEnvelope(
+        legacy.value,
+        key ?? resolveStandaloneMasterKey(true, env),
+      );
+  };
 }
 
 /** Select and initialize the runtime backend before accepting requests. */
@@ -80,14 +64,20 @@ export async function initializeSecretStore(
   if (isDesktopSecretBridgeEnabled()) {
     primaryStore = new ElectronSecretStore();
     await primaryStore.initialize();
+    // Credentials live in the desktop's own store, but the other records
+    // are opened here all the same, so their import is checked first.
+    await initServerRecords(env, { checkImport: assertImportableShapes });
     initialized = true;
     return;
   }
 
-  let key = await preflightMasterKey(env);
+  // Before anything reaches a database.
+  let key = masterKeyPrerequisite(env);
   // Never let a deployment-owned master key reach forked external agents.
   delete env.HUABU_SECRET_KEY;
-  const records = await initServerRecords(env);
+  const records = await initServerRecords(env, {
+    checkImport: importCheck(key, env),
+  });
   key ??= resolveStandaloneMasterKey(
     (await records.get(CREDENTIALS_RECORD)) !== null,
     env,
@@ -154,15 +144,7 @@ export async function readPersistedSecret(
     await initializeSecretStore(env);
     return getPersistedSecret(id);
   }
-  const key = await preflightMasterKey(env);
-  const envelope = await peekServerRecord(CREDENTIALS_RECORD, env);
-  if (envelope === null) return null;
-  return (
-    openCredentialEnvelope(
-      envelope,
-      key ?? resolveStandaloneMasterKey(true, env),
-    ).get(scopedId(id).id) ?? null
-  );
+  return readSavedSecret(scopedId(id).id, env);
 }
 
 /** Write only to the secure primary backend. */

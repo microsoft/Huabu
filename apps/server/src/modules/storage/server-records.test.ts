@@ -345,3 +345,40 @@ it('peeks at a record without creating, upgrading, or importing into a database'
     v: 'database',
   });
 });
+
+it('imports exactly the snapshot its check passed, however the files change afterwards', async () => {
+  const dataDir = dataDirectory();
+  const legacy = new DiskServerRecordStore(() => dataDir);
+  const names = { owner: null, name: 'device-names' } as const;
+  await legacy.put(names, { 'desk-1': 'Desk' });
+  vi.stubEnv('HUABU_DATA_DIR', dataDir);
+  vi.stubEnv('HUABU_STRUCTURED_BACKEND', 'sqlite');
+  let checked: unknown;
+
+  const records = await initServerRecords(process.env, {
+    checkImport: async (pending) => {
+      checked = pending.find(({ key }) => key.name === 'device-names')?.value;
+      // The file changes after it was checked.
+      await legacy.put(names, { 'desk-1': 7 });
+    },
+  });
+  expect(checked).toEqual({ 'desk-1': 'Desk' });
+  expect(await records.get(names)).toEqual({ 'desk-1': 'Desk' });
+});
+
+it('leaves the database as it was when the import check refuses', async () => {
+  const dataDir = dataDirectory();
+  const file = earlierDatabase(dataDir);
+  await new DiskServerRecordStore(() => dataDir).put(VERSIONS, { alice: 1 });
+  vi.stubEnv('HUABU_DATA_DIR', dataDir);
+  vi.stubEnv('HUABU_STRUCTURED_BACKEND', 'sqlite');
+
+  await expect(
+    initServerRecords(process.env, {
+      checkImport: () => {
+        throw new Error('refused');
+      },
+    }),
+  ).rejects.toThrow('refused');
+  expect(userVersion(file)).toEqual({ user_version: 2 });
+});

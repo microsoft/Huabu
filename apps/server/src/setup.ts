@@ -24,7 +24,6 @@ import {
   isLoopbackHost,
   resolveDeploymentConfig,
 } from './modules/security/deployment-config.js';
-import { checkPendingImport } from './modules/server-record-shapes.js';
 import { parseStorageProfile } from './modules/storage/profile.js';
 import { closeServerRecords } from './modules/storage/server-records.js';
 import {
@@ -561,8 +560,6 @@ export async function configureDeployment(
     mkdirSync(workspace, { recursive: true });
     accessSync(workspace, constants.R_OK | constants.W_OK | constants.X_OK);
   }
-  // Opening records imports an earlier version's files; see server.ts.
-  await checkPendingImport(env);
   await initializeSecretStore(env);
   if (
     input.remote &&
@@ -678,7 +675,6 @@ Configuration
         'HUABU_CONNECTION_TOKEN controls the active token. Change that deployment override instead.',
       );
     }
-    await checkPendingImport();
     await initializeSecretStore();
     await setSecret(
       SECRET_IDS.managedConnectionToken,

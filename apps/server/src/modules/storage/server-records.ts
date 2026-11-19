@@ -173,9 +173,9 @@ async function databaseHoldsServerRecords(
  * the upgraded database, so everything the import needs is read first: a
  * file that is not valid JSON fails here with the database as it was, rather
  * than leaving the only copy of a record where repairing the file no longer
- * reaches it. Whether each owner can read its value is checked above
- * storage, before startup opens anything (`modules/server-record-shapes.ts`),
- * since storage knows no owner's schema.
+ * reaches it. Whether each owner can read its value, and whether the master
+ * key opens the credentials, is checked above storage on this same snapshot
+ * ({@link ServerRecordOpenOptions.checkImport}), since storage knows neither.
  *
  * Empty for Disk, where the files are the records, and for a database that
  * already holds server records. The import commits all of its records in one
@@ -253,6 +253,27 @@ export async function peekServerRecord(
 }
 
 /**
+ * Checks a caller above storage runs on the records an open would import,
+ * before the database is upgraded: storage knows no owner's schema and no
+ * master key.
+ *
+ * @param pending Exactly the records that will be imported if the check
+ *   returns; a throw leaves the database as it was.
+ */
+export type ServerRecordImportCheck = (
+  pending: readonly PendingImportEntry[],
+) => void | Promise<void>;
+
+/** How {@link initServerRecords} opens records. */
+export interface ServerRecordOpenOptions {
+  /**
+   * Run on the records the open would import, if it imports any. The first
+   * open of a target decides; a later open of the same target reuses it.
+   */
+  readonly checkImport?: ServerRecordImportCheck;
+}
+
+/**
  * Open server records for `kind`, the database or data directory taken from
  * `env`. Every caller asking for one target, at once or later, gets the same
  * {@link ServerRecords}. On a database this also imports
@@ -261,11 +282,12 @@ export async function peekServerRecord(
 function openRecords(
   kind: StructuredBackendKind,
   env: NodeJS.ProcessEnv,
+  checkImport?: ServerRecordImportCheck,
 ): Promise<ServerRecords> {
   const target = recordTarget(kind, env);
   if (open?.target === target) return Promise.resolve(open.records);
   if (opening?.target === target) return opening.records;
-  const records = openServerRecords(kind, env).then(
+  const records = openServerRecords(kind, env, checkImport).then(
     (opened) => {
       if (opening?.records === records) {
         open = { target, records: opened };
@@ -285,15 +307,16 @@ function openRecords(
 /**
  * Open server records for the structured backend `env` selects.
  *
- * `env` chooses the backend, its database, and the data directory; setup and
- * the Vite dev server pass their own.
+ * `env` chooses the backend, its database, and the data directory; setup
+ * passes its own.
  */
 export async function initServerRecords(
   env: NodeJS.ProcessEnv = process.env,
+  options: ServerRecordOpenOptions = {},
 ): Promise<ServerRecords> {
   const profile = parseStorageProfile(env);
   validateStorageProfile(profile);
-  return openRecords(profile.structured.kind, env);
+  return openRecords(profile.structured.kind, env, options.checkImport);
 }
 
 /**
@@ -310,14 +333,17 @@ export async function ensureServerRecords(
 async function openServerRecords(
   kind: StructuredBackendKind,
   env: NodeJS.ProcessEnv,
+  checkImport?: ServerRecordImportCheck,
 ): Promise<ServerRecords> {
   if (!isDatabaseKind(kind)) {
     if (kind !== 'disk')
       throw new Error(`Unsupported structured backend: ${String(kind)}`);
     return new ServerRecords(new DiskServerRecordStore(() => getDataDir(env)));
   }
-  // Read before the store opens: opening upgrades the database.
+  // Read and checked before the store opens, since opening upgrades the
+  // database; the snapshot checked is the one imported.
   const pending = await readPendingImport(env, kind);
+  if (pending.length > 0) await checkImport?.(pending);
   const store = buildDatabaseStore(kind, env);
   await store.init();
   if (pending.length > 0) {

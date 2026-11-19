@@ -8,7 +8,6 @@ import { initializeConnectionToken } from './connection-token.js';
 import { prewarmOAuthCredentials } from './modules/agent/oauth.js';
 import { importLegacyInkOcrConfig } from './modules/integrations/ink-ocr-config.js';
 import { resolveDeploymentConfig } from './modules/security/deployment-config.js';
-import { checkPendingImport } from './modules/server-record-shapes.js';
 import {
   describeUnavailableCapabilities,
   closeStorage,
@@ -36,10 +35,6 @@ let app: typeof serverApp | undefined;
 async function start(): Promise<void> {
   try {
     const port = resolveServerPort();
-    // Before the secret store opens records: opening a database imports what
-    // an earlier version left in the data directory, and only a value its
-    // owner can read may go where repairing the file no longer reaches it.
-    await checkPendingImport();
     await initializeSecretStore();
     await importLegacyInkOcrConfig();
     const settings = readDeploymentSettings();

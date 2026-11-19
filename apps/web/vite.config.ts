@@ -101,15 +101,12 @@ export default defineConfig(async ({ mode, command }) => {
     ) {
       // Read-only: the dev server neither opens, upgrades, nor imports into
       // the Server's database; the Server does that when it starts.
-      const { readPersistedSecret } =
-        await import('../server/src/security/secret-store');
+      const { readSavedSecret } =
+        await import('../server/src/security/saved-secret');
       const { closeServerRecords } =
         await import('../server/src/modules/storage/server-records');
       try {
-        password = await readPersistedSecret(
-          SECRET_IDS.remoteAccessPassword,
-          env,
-        );
+        password = await readSavedSecret(SECRET_IDS.remoteAccessPassword, env);
       } finally {
         await closeServerRecords();
       }
