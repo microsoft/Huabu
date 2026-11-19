@@ -16,6 +16,8 @@ import { execFileSync } from 'node:child_process';
 
 const POLL_MS = 15_000;
 const TIMEOUT_MS = 30 * 60_000;
+const CODEQL_CHECK = 'CodeQL';
+const PR_REFS = ['head', 'merge'];
 
 function gh(args) {
   return execFileSync('gh', args, {
@@ -37,15 +39,43 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// `gh pr checks` exits 8 while checks are pending but still prints the JSON.
+// `gh pr checks` exits 8 while checks are pending but still prints the JSON,
+// and exits 1 with "no checks reported" before any check has registered.
 function readChecks(pr) {
   try {
     return ghJson(['pr', 'checks', pr, '--json', 'name,bucket,link']);
   } catch (error) {
     const stdout = error.stdout?.toString().trim();
     if (stdout) return JSON.parse(stdout);
+    if (/no checks reported/i.test(error.stderr?.toString() ?? '')) return [];
     throw error;
   }
+}
+
+// This repository's code scanning records PR analyses against
+// `refs/pull/<n>/head`; other setups use `refs/pull/<n>/merge`. Read both so
+// neither layout can hide findings, following pagination for each.
+function readAlerts(repo, pr) {
+  const byNumber = new Map();
+  for (const ref of PR_REFS) {
+    const pages = ghJson([
+      'api',
+      '--paginate',
+      '--slurp',
+      `repos/${repo}/code-scanning/alerts?ref=refs/pull/${pr}/${ref}&state=open&per_page=100`,
+    ]);
+    for (const alert of pages.flat()) byNumber.set(alert.number, alert);
+  }
+  return [...byNumber.values()];
+}
+
+// Settled means every check has finished and the `CodeQL` check is among
+// them. Without that check the scan is unverified and must not count as clean.
+function isSettled(checks) {
+  return (
+    checks.some((c) => c.name === CODEQL_CHECK) &&
+    !checks.some((c) => c.bucket === 'pending')
+  );
 }
 
 async function main() {
@@ -66,41 +96,37 @@ async function main() {
   const deadline = Date.now() + TIMEOUT_MS;
 
   let checks = readChecks(pr);
-  // Right after a push, checks may not be registered yet.
-  while (
-    (checks.length === 0 || checks.some((c) => c.bucket === 'pending')) &&
-    Date.now() < deadline
-  ) {
+  while (!isSettled(checks) && Date.now() < deadline) {
     const pending = checks.filter((c) => c.bucket === 'pending').length;
-    console.log(`Waiting for checks on #${pr} (${pending} pending)...`);
+    const codeql = checks.some((c) => c.name === CODEQL_CHECK)
+      ? ''
+      : `, \`${CODEQL_CHECK}\` check not registered yet`;
+    console.log(
+      `Waiting for checks on #${pr} (${pending} pending${codeql})...`,
+    );
     await sleep(POLL_MS);
     checks = readChecks(pr);
   }
   if (checks.some((c) => c.bucket === 'pending')) {
     fail(`Timed out waiting for checks on #${pr}.`);
   }
+  if (!checks.some((c) => c.name === CODEQL_CHECK)) {
+    fail(
+      `No \`${CODEQL_CHECK}\` check appeared on #${pr}; code scanning is unverified, so this is not a clean result.`,
+    );
+  }
 
   const failed = checks.filter(
     (c) => c.bucket === 'fail' || c.bucket === 'cancel',
   );
-  const hasCodeQlCheck = checks.some((c) => c.name === 'CodeQL');
-
-  const alerts = ghJson([
-    'api',
-    `repos/${repo}/code-scanning/alerts?ref=refs/pull/${pr}/head&state=open&per_page=100`,
-  ]);
+  const alerts = readAlerts(repo, pr);
 
   console.log(
     `\nChecks on #${pr}: ${checks.length - failed.length} ok, ${failed.length} failing`,
   );
   for (const c of failed) console.log(`  FAIL ${c.name}  ${c.link}`);
-  if (!hasCodeQlCheck) {
-    console.log(
-      '  WARN no `CodeQL` check found; code scanning may not have run on this PR yet.',
-    );
-  }
 
-  console.log(`\nOpen CodeQL alerts on refs/pull/${pr}/head: ${alerts.length}`);
+  console.log(`\nOpen CodeQL alerts on #${pr}: ${alerts.length}`);
   for (const a of alerts) {
     const loc = a.most_recent_instance?.location;
     const where = loc ? `${loc.path}:${loc.start_line}` : '?';
