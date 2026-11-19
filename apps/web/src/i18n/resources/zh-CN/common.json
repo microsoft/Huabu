@@ -1102,6 +1102,7 @@
     "previewFailed": "预览加载失败",
     "processing": "正在处理…",
     "download": "下载",
+    "downloadFailed": "下载失败",
     "officeFileMissing": "{{label}} 文件缺失",
     "untitledTypedDocument": "未命名 {{label}}",
     "noOfficeSource": "无 Office 来源",

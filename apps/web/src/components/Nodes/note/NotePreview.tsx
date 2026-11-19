@@ -22,7 +22,14 @@
  * during iteration).
  */
 
-import { Check, Code2, FileText, Pencil, Sparkles } from 'lucide-react';
+import {
+  Check,
+  Code2,
+  Download,
+  FileText,
+  Pencil,
+  Sparkles,
+} from 'lucide-react';
 import {
   lazy,
   Suspense,
@@ -56,11 +63,13 @@ import {
   getHuabuPayload,
   setDragPayload,
 } from '@/utils/io/dragDrop';
+import { triggerNoteDownload } from '@/utils/io/nodeDownload';
 import { dragPayloadToMarkdown } from '@/utils/io/payloadToMarkdown';
 import { openDocumentLink } from '@/utils/openDocumentLink';
 
 import { NoteCommentActions } from './NoteCommentActions';
 import { ProvenanceOverlay } from './ProvenanceOverlay';
+import { getMissingFileKind } from '../MissingFileBanner';
 
 import type {
   MilkdownBlockDragEvent,
@@ -588,8 +597,19 @@ export const NotePreview = ({
   // Host header slot — rendered by `ExpandedNodePanel`. When present
   // and the preview is editable, we portal the rich/raw toggle into
   // it so it sits next to the universal Split view / Close buttons
-  // instead of floating over the editor content.
+  // instead of floating over the editor content. Download remains
+  // available in read-only views as long as the note body is present.
   const { el: headerSlotEl } = usePreviewHeaderSlot();
+  const isMissing = Boolean(getMissingFileKind(data));
+  const rawLabel = typeof data.label === 'string' ? data.label : undefined;
+  const handleDownload = useCallback(() => {
+    triggerNoteDownload({
+      content: markdown,
+      label: rawLabel,
+      missing: isMissing,
+    });
+  }, [markdown, rawLabel, isMissing]);
+
   const toggleButton = editable ? (
     <PreviewHeaderButton
       className={
@@ -613,6 +633,22 @@ export const NotePreview = ({
       {editMode === 'wysiwyg' ? <Code2 /> : <FileText />}
     </PreviewHeaderButton>
   ) : null;
+  const downloadButton = !isMissing ? (
+    <PreviewHeaderButton
+      title={t('node.download')}
+      aria-label={t('node.download')}
+      onClick={handleDownload}
+    >
+      <Download />
+    </PreviewHeaderButton>
+  ) : null;
+  const headerActions =
+    toggleButton || downloadButton ? (
+      <>
+        {toggleButton}
+        {downloadButton}
+      </>
+    ) : null;
   const editButton =
     touchMode && !readOnly ? (
       <PreviewHeaderButton
@@ -644,8 +680,8 @@ export const NotePreview = ({
 
   return (
     <div className="bg-surface relative h-full w-full">
-      {headerSlotEl && toggleButton
-        ? createPortal(toggleButton, headerSlotEl)
+      {headerSlotEl && headerActions
+        ? createPortal(headerActions, headerSlotEl)
         : null}
       {editButton ? (
         headerSlotEl ? (

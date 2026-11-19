@@ -2,7 +2,7 @@
 // Licensed under the MIT license.
 
 import clsx from 'clsx';
-import { Highlighter, Scan, Trash2 } from 'lucide-react';
+import { Download, Highlighter, Scan, Trash2 } from 'lucide-react';
 import {
   startTransition,
   useCallback,
@@ -44,10 +44,15 @@ import { readPdfPreviewView } from '@/store/previewWorkspace/scrollMemory';
 import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store';
 import { useWorkspaceStore } from '@/store/workspaceStore';
 import { setDragPayload } from '@/utils/io/dragDrop';
+import {
+  canDownloadMediaSource,
+  triggerMediaDownload,
+} from '@/utils/io/nodeDownload';
 import { pageLifecycle } from '@/utils/pageLifecycle';
 import { trackTextSelectionGesture } from '@/utils/textSelectionGesture';
 
 import { FloatingDragHandle } from '../FloatingDragHandle';
+import { getMissingFileKind } from '../MissingFileBanner';
 import {
   DEFAULT_PDF_PAGE_ASPECT_RATIO,
   updateRetainedPdfPages,
@@ -700,6 +705,19 @@ export const PDFPreview = ({
   // slot (e.g. the canvas node form), `el` is null and the toolbar
   // simply isn't rendered.
   const { el: headerSlotEl } = usePreviewHeaderSlot();
+  const isMissing = Boolean(getMissingFileKind(data));
+  const canDownload = canDownloadMediaSource(src, isMissing);
+  const handleDownload = useCallback(() => {
+    triggerMediaDownload({
+      src,
+      canvasId,
+      label: typeof data.label === 'string' ? data.label : undefined,
+      defaultExt: '.pdf',
+      fallbackStem: 'document',
+      missing: isMissing,
+    });
+  }, [src, canvasId, data.label, isMissing]);
+
   const headerActions = (
     <>
       <PDFZoomControls zoom={zoom} disabled={!docLoaded} />
@@ -720,6 +738,15 @@ export const PDFPreview = ({
       >
         <Scan />
       </PreviewHeaderButton>
+      {canDownload ? (
+        <PreviewHeaderButton
+          title={t('node.download')}
+          aria-label={t('node.download')}
+          onClick={handleDownload}
+        >
+          <Download />
+        </PreviewHeaderButton>
+      ) : null}
     </>
   );
 

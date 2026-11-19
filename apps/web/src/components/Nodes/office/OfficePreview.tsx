@@ -6,11 +6,17 @@ import { useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 
-import { resolveArtifactUrl } from '@/api/artifact';
 import { MilkdownPreview } from '@/components/Milkdown';
 import { usePreviewScrollMemory } from '@/hooks/usePreviewScrollMemory';
 import useCanvasStore from '@/store/canvasStore';
+import {
+  canDownloadMediaSource,
+  officeDefaultExtension,
+  officeFallbackStem,
+  triggerMediaDownload,
+} from '@/utils/io/nodeDownload';
 
+import { getMissingFileKind } from '../MissingFileBanner';
 import { PreviewHeaderButton } from '../PreviewHeaderButton';
 import { usePreviewHeaderSlot } from '../PreviewHeaderSlot';
 
@@ -32,26 +38,27 @@ export const OfficePreview = ({
   const { t } = useTranslation();
   const src = typeof data.src === 'string' ? data.src : '';
   const markdown = typeof data.content === 'string' ? data.content : '';
-  const label =
-    typeof data.label === 'string' && data.label.trim().length > 0
-      ? data.label.trim()
-      : t('node.untitledOfficeDocument');
+  const rawLabel = typeof data.label === 'string' ? data.label : undefined;
+  const format = typeof data.format === 'string' ? data.format : undefined;
   const canvasId = useCanvasStore((s) => s.canvasId);
   const { el: headerSlotEl } = usePreviewHeaderSlot();
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   usePreviewScrollMemory(scrollContainerRef, scrollViewKey);
+  const isMissing = Boolean(getMissingFileKind(data));
+  const canDownload = canDownloadMediaSource(src, isMissing);
 
   const handleDownload = () => {
-    if (!src) return;
-    const link = document.createElement('a');
-    link.href = resolveArtifactUrl(src, canvasId);
-    link.download = label;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    triggerMediaDownload({
+      src,
+      canvasId,
+      label: rawLabel,
+      defaultExt: officeDefaultExtension(format),
+      fallbackStem: officeFallbackStem(format),
+      missing: isMissing,
+    });
   };
 
-  const headerActions = src ? (
+  const headerActions = canDownload ? (
     <PreviewHeaderButton
       title={t('node.downloadOriginalFile')}
       aria-label={t('node.downloadOriginalFile')}
