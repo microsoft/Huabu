@@ -335,16 +335,26 @@ test('tab-owned titles retain content actions and durable rename without duplica
   ).toBeVisible();
 });
 
-// Known gap, found when this file stopped seeding as a pretend Agent. With
-// two nodes a person made (a page-route batch, also after a reload), Rename
-// from the context menu of the Note tab in the background activates the tab
-// but does not open the title editor. Observed in the dev build this suite
-// runs: revealing the Note's panel sets up its effects twice in a row, and
-// the second pass of ExpandedNodePanel's "always exit edit mode" effect
-// clears the rename the first pass had just started. It did not happen while
-// the fixture claimed `source: 'agent'` on the page route, nor for nodes a
-// real Agent created through the Agent route. Not yet checked against a
-// production build. The test above renames from the menu of the tab on show.
+// Known gap of the development build, inherited from `main` (reproduced
+// there at 7645d4e97 with the same steps); a production build is not
+// affected. Rename from the context menu of a tab that is not on show
+// activates the tab and focuses it, and no title editor opens.
+//
+// Cause: the tab's panel is kept in a hidden `<Activity>`. Showing it sets up
+// its effects, and under `React.StrictMode` (development only) React then
+// tears them down and sets them up a second time. In `ExpandedNodePanel` the
+// first pass starts the rename (the rename-request effect), and the second
+// pass runs the "always exit edit mode" effect again while the
+// rename-request effect skips a request it has already handled
+// (`handledRenameNonce`), so the editor is closed and never reopened. Who
+// created the nodes does not matter: it happens for a person's nodes and for
+// an Agent's. It does not happen for a moment after the batch that created
+// the nodes has arrived, when React does not repeat the effects of that
+// reveal — which is why this passed while the fixture acted right after an
+// Agent's batch. The fix belongs on `main`: make the rename-request effect
+// repeatable (forget the handled request in its cleanup), in
+// `ExpandedNodePanel` and in `ChatPanel`, which has the same pair of effects.
+// The test above renames from the menu of the tab on show.
 test.fixme('Rename from the context menu of a background Note tab opens its title editor', async ({
   page,
 }) => {
@@ -358,13 +368,22 @@ test.fixme('Rename from the context menu of a background Note tab opens its titl
           nodes: [
             {
               nodeType: 'note',
-              data: { label: 'Alpha title', content: 'Note body' },
+              // A person's title: without it the Note is named after its body.
+              data: {
+                label: 'Alpha title',
+                labelSource: 'user',
+                content: 'Note body',
+              },
               position: { x: 0, y: 0 },
               size: { width: 300, height: 200 },
             },
             {
               nodeType: 'text',
-              data: { label: 'Beta title', content: 'Text body' },
+              data: {
+                label: 'Beta title',
+                labelSource: 'user',
+                content: 'Text body',
+              },
               position: { x: 400, y: 0 },
               size: { width: 300, height: 200 },
             },
@@ -397,6 +416,8 @@ test.fixme('Rename from the context menu of a background Note tab opens its titl
   await expect(
     page.getByRole('tab', { name: 'Beta title (text)', exact: true }),
   ).toHaveAttribute('aria-selected', 'true');
+  // Outlast the moment after the creating batch in which this still works.
+  await page.waitForTimeout(2_500);
   await alpha.click({ button: 'right' });
   await page.getByRole('menuitem', { name: /Rename node/ }).click();
   await expect(alpha).toHaveAttribute('aria-selected', 'true');
