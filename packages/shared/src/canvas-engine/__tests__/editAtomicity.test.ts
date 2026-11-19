@@ -341,3 +341,55 @@ describe('a list of commands is one edit per command', () => {
     expect(atomic.writeResult.nodes).toBe(nodes);
   });
 });
+
+describe('deleting nodes together with the edges between them', () => {
+  const edge = { id: 'edge-ab', source: 'a', target: 'b' };
+  const disconnect: CanvasCommand = {
+    type: 'DISCONNECT_EDGES',
+    edges: ['edge-ab'],
+  } as CanvasCommand;
+  const state = () => ({ nodes: start(), edges: [edge], canvasId: 'c1' });
+
+  it('takes effect as one edit when the edges are removed first', () => {
+    const out = executeCanvasEdits(
+      { source: 'ui', edits: [{ commands: [disconnect, remove('a', 'b')] }] },
+      state(),
+    );
+    expect(out.editResults.map((result) => result.applied)).toEqual([true]);
+    expect(out.writeResult.nodes.map((node) => node.id)).toEqual([
+      'f',
+      'child',
+    ]);
+    expect(out.writeResult.edges).toEqual([]);
+  });
+
+  it('is refused as one edit when the nodes go first: their edges are gone with them', () => {
+    const before = state();
+    const out = executeCanvasEdits(
+      { source: 'ui', edits: [{ commands: [remove('a', 'b'), disconnect] }] },
+      before,
+    );
+    expect(out.editResults).toEqual([
+      expect.objectContaining({
+        applied: false,
+        failedAt: 1,
+        reason: 'not-found',
+      }),
+    ]);
+    expect(out.writeResult.nodes).toBe(before.nodes);
+    expect(out.writeResult.edges).toBe(before.edges);
+  });
+
+  it('still reports an edge that is not there as not-found to a plain command list', () => {
+    const out = executeCanvasCommands(
+      { source: 'agent', commands: [remove('a', 'b'), disconnect] },
+      state(),
+    );
+    expect(
+      out.commandResults.map((result) => [result.applied, result.reason]),
+    ).toEqual([
+      [true, undefined],
+      [false, 'not-found'],
+    ]);
+  });
+});

@@ -349,6 +349,74 @@ describe('sending a local edit', () => {
   });
 });
 
+describe('a gesture is one edit here as on the server', () => {
+  it('deletes two connected nodes together with the selected edge between them', async () => {
+    state().onConnect({
+      source: X,
+      target: Y,
+      sourceHandle: null,
+      targetHandle: null,
+    });
+    await answer(0);
+    const [edge] = state().edges;
+    vi.mocked(toast).mockClear();
+
+    // What the Delete key does with both nodes and the edge selected.
+    state().deleteNodes([X, Y], [edge.id]);
+    expect(state().nodes).toEqual([]);
+    expect(state().edges).toEqual([]);
+    expect(own).toHaveLength(2);
+    expect(own[1].request.edits).toHaveLength(1);
+
+    const response = commit(1);
+    expect(response.edits).toEqual([
+      expect.objectContaining({ applied: true }),
+    ]);
+    await answer(1, response);
+    await flush();
+    expect(server.state.nodes).toEqual([]);
+    expect(server.state.edges).toEqual([]);
+    expect(state().nodes).toEqual([]);
+    expect(toast).not.toHaveBeenCalled();
+    expect(api.getCanvas).not.toHaveBeenCalled();
+  });
+
+  it('also removes a selected edge the deletion leaves in place', async () => {
+    const Z = 'node-sync-z';
+    state()._setStateRaw({ nodes: [...state().nodes, note(Z, 400, 0)] });
+    server.reset(state().nodes, [], 1);
+    state().onConnect({
+      source: Y,
+      target: Z,
+      sourceHandle: null,
+      targetHandle: null,
+    });
+    await answer(0);
+    const [edge] = state().edges;
+
+    state().deleteNodes([X], [edge.id]);
+    await answer(1);
+    expect(state().nodes.map((n) => n.id)).toEqual([Y, Z]);
+    expect(state().edges).toEqual([]);
+    expect(server.state.nodes.map((n) => n.id)).toEqual([Y, Z]);
+    expect(server.state.edges).toEqual([]);
+  });
+
+  it('applies nothing and sends nothing when one command of the gesture is refused', async () => {
+    state().executeCommands([
+      accentCommand(X, 'red'),
+      {
+        type: 'DISCONNECT_EDGES',
+        edges: ['edge-not-there' as `edge-${string}`],
+      },
+    ]);
+    // The server would refuse the whole edit; the page does the same.
+    expect(accentOf(node(X))).toBe('white');
+    expect(own).toHaveLength(0);
+    expect(state().canUndo).toBe(false);
+  });
+});
+
 describe('receiving while a local change is in flight', () => {
   it('A moves X while B recolours X: both survive on both sides', async () => {
     state().selectNodes([Y]);

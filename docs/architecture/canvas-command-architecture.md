@@ -30,7 +30,7 @@ selection.
 
 `CanvasUiIntent` must not be shared with the agent because it depends on ephemeral frontend state.
 
-The web `DELETE_NODES` intent accepts optional explicit `edgeIds` for a mixed selection and resolves node deletion plus the existing edge-disconnection resolver into one execution. Delete/Backspace uses this combined path whenever whole nodes are selected; ownership refusal or child-Space confirmation defers the entire action, with no edge-only follow-up. Ordinary mixed deletion records one undo snapshot. Edge-only deletion retains its existing intent.
+The web `DELETE_NODES` intent accepts optional explicit `edgeIds` for a mixed selection and resolves the existing edge-disconnection resolver plus node deletion into one execution, the edges first: `DELETE_NODES` removes the edges of the nodes it deletes, and a `DISCONNECT_EDGES` that came after it would find none, report `not-found` and refuse the whole edit. Delete/Backspace uses this combined path whenever whole nodes are selected; ownership refusal or child-Space confirmation defers the entire action, with no edge-only follow-up. Ordinary mixed deletion records one undo snapshot. Edge-only deletion retains its existing intent.
 
 ### UI intent design rules
 
@@ -314,7 +314,7 @@ Node ids use `node-<uuid>`, edge ids use `edge-<uuid>`.
 
 ### Edits
 
-The engine runs **edits**. An edit is the commands of one intent — one gesture of a page, one step of an Agent — and takes effect as a whole or not at all. `executeCanvasEdits({ source, edits: [{ commands, after?, blocked? }] }, state, { admitEdit? })` is the engine's entry ([executor.ts](../../packages/shared/src/canvas-engine/executor.ts)); `executeCanvasCommands({ source, commands })` is the same run with one edit per command, which is what the page's local run and a plain command list (`{ commands }` on the Agent route, the Server's own callers) mean.
+The engine runs **edits**. An edit is the commands of one intent — one gesture of a page, one step of an Agent — and takes effect as a whole or not at all. `executeCanvasEdits({ source, edits: [{ commands, after?, blocked? }] }, state, { admitEdit? })` is the engine's entry ([executor.ts](../../packages/shared/src/canvas-engine/executor.ts)); `executeCanvasCommands({ source, commands })` is the same run with one edit per command, which is what a plain command list (`{ commands }` on the Agent route, the Server's own callers) means. A page runs a gesture's commands as one edit, the grouping it sends them in (`executeGesture` in `canvasStore.ts`: the gesture's batch, the commands a silent patch is read back as, and an undo or redo plan), so a command the Server would refuse leaves nothing of the gesture on the page either and nothing is sent; only what is not sent as an edit — live preview ticks (`localOnly`) and `agent` / `system` batches applied on the page — runs one edit per command.
 
 - **Order.** Edits run in order; each sees the state after the previous ones.
 - **Admission.** `admitEdit(edit, index, state)` is asked once per edit, before its first command. Returning a reason refuses the edit: every command of it is reported with that reason and no handler runs. The read-version check is this hook (`createReadVersionAdmission`).

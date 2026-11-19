@@ -526,12 +526,15 @@ function resolveDeleteNodes(
       )
     : { commands: [], trace: [] };
   return {
+    // The edges go first. Deleting a node removes its edges, and an edge
+    // named after that is gone: `DISCONNECT_EDGES` would report `not-found`
+    // and the gesture, which is one edit, would be refused as a whole.
     commands: [
+      ...disconnected.commands,
       {
         type: 'DELETE_NODES',
         nodeIds: intent.nodeIds as CanvasNodeId[],
       },
-      ...disconnected.commands,
     ],
     trace: [
       ...(toDelete.length > 0

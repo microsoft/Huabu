@@ -40,6 +40,7 @@ import {
   applySharedPostEffects,
   applySharedPostEffectsFromWriteResult,
   executeCanvasCommands,
+  executeCanvasEdits,
   autoHeightKey,
   getHeightPolicy,
   measuredSizeKey,
@@ -1340,6 +1341,26 @@ function isUnsentUnit(unit: string): boolean {
 
 type SyncState = { nodes: readonly Node[]; edges: readonly Edge[] };
 
+type EngineRun = (
+  source: NonNullable<CanvasExecution['source']>,
+  commands: CanvasCommand[],
+  state: Parameters<typeof executeCanvasEdits>[1],
+  options?: ExecutorOptions,
+) => ReturnType<typeof executeCanvasEdits>;
+
+/**
+ * Run the commands of one gesture the way they are sent: as one edit, taken
+ * whole or not at all. The server runs the same engine on the same grouping,
+ * so a command it would refuse leaves nothing of the gesture on this page
+ * either.
+ */
+const executeGesture: EngineRun = (source, commands, state, options) =>
+  executeCanvasEdits({ source, edits: [{ commands }] }, state, options);
+
+/** Run commands that are not sent as an edit: each one on its own. */
+const executeEachCommand: EngineRun = (source, commands, state, options) =>
+  executeCanvasCommands({ source, commands }, state, options);
+
 /**
  * Commands that turn `before` into `after`, or `null` when no command list
  * does. The proposal read from the difference is run through the engine and
@@ -1371,14 +1392,11 @@ function commandsReproducing(
       ? []
       : null;
   }
-  const run = executeCanvasCommands(
-    { source: 'ui', commands },
-    {
-      nodes: before.nodes as Node[],
-      edges: before.edges as Edge[],
-      canvasId,
-    },
-  );
+  const run = executeGesture('ui', commands, {
+    nodes: before.nodes as Node[],
+    edges: before.edges as Edge[],
+    canvasId,
+  });
   const routed = applySharedPostEffectsFromWriteResult(run.writeResult);
   const difference = deriveHeldKeys(
     syncView(run.writeResult.nodes, routed.edges),
@@ -1400,14 +1418,11 @@ function planHistoryRestore(
     ignoreUnit: isUnsentUnit,
     contentKeys: NODE_CONTENT_KEYS,
     run: (commands) => {
-      const out = executeCanvasCommands(
-        { source: 'ui', commands },
-        {
-          nodes: before.nodes as Node[],
-          edges: before.edges as Edge[],
-          canvasId,
-        },
-      );
+      const out = executeGesture('ui', commands, {
+        nodes: before.nodes as Node[],
+        edges: before.edges as Edge[],
+        canvasId,
+      });
       const routed = applySharedPostEffectsFromWriteResult(out.writeResult);
       return syncView(out.writeResult.nodes, routed.edges) as PlanState;
     },
@@ -3839,10 +3854,6 @@ const useCanvasStore = create<RFState>()(
           )
         : { commands: [], sourceIndex: [] };
       const routed = queueable;
-      const execution: CanvasExecution = {
-        source: resolvedSource,
-        commands,
-      };
 
       // The batch that closes a pointer gesture also carries what the
       // gesture's live ticks changed without a command.
@@ -3876,13 +3887,14 @@ const useCanvasStore = create<RFState>()(
         });
       };
 
-      const { writeResult, commandResults, pendingEffects } =
-        executeCanvasCommands(execution, state, {
-          ...engineOptions,
-          // Agent batches must always refit parent frames because the
-          // LLM cannot accurately predict rendered dimensions.
-          forceFitFrames: resolvedSource === 'agent',
-        });
+      const { writeResult, commandResults, pendingEffects } = (
+        closesGesture ? executeGesture : executeEachCommand
+      )(resolvedSource, commands, state, {
+        ...engineOptions,
+        // Agent batches must always refit parent frames because the
+        // LLM cannot accurately predict rendered dimensions.
+        forceFitFrames: resolvedSource === 'agent',
+      });
 
       // Only commit if at least one command was applied.
       if (
