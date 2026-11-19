@@ -121,7 +121,7 @@ it('creates a Workspace by name here, and says why it cannot on Disk', async () 
   expect(created.name).toBe('Second');
   expect(
     (await getWorkspaceRepository().list()).map((entry) => entry.name).sort(),
-  ).toEqual(['Second', 'Workspace']);
+  ).toEqual(['Default', 'Second']);
 
   await closeStorage();
   const mounted = await mountTestWorkspace(DISK, 'huabu-named-workspace-');

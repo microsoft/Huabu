@@ -233,7 +233,7 @@ test('Bubble administrators see People in the current Settings navigation', asyn
   ).toBeVisible();
   await expect(dialog.getByText('Carol', { exact: true })).toBeVisible();
   await expect(
-    dialog.getByRole('switch', { name: `${en.people.access}: Carol` }),
+    dialog.getByRole('switch', { name: `${en.people.serviceAccess}: Carol` }),
   ).toBeEnabled();
   await expect(
     dialog.getByRole('button', {
