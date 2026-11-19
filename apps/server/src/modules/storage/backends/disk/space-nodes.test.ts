@@ -139,10 +139,11 @@ describe('DiskSpaceNodes', () => {
       const repository = new DiskSpaceNodes(getCanvasStore('canvas-a'));
       await put(repository, 'ahead', 'Ahead');
       dateSidecar('Ahead', new Date(Date.now() + 3_600_000));
-      const before = Date.now();
       const { position } = await repository.changes();
-      expect(position.seq).toBeLessThanOrEqual(Date.now());
-      expect(position.seq).toBeGreaterThanOrEqual(before);
+      // Behind the clock, so a write stamped by a coarser file clock right
+      // after it is not dated before the position.
+      expect(position.seq).toBeLessThan(Date.now());
+      expect(position.seq).toBeGreaterThan(Date.now() - 60_000);
 
       await put(repository, 'later', 'Later');
       expect((await repository.changes(position)).nodeIds).toEqual(

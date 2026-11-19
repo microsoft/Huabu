@@ -48,6 +48,14 @@ function snapshotsOf(
  */
 const DISK_CHANGE_EPOCH = 'disk:mtime-ms';
 
+/**
+ * How far behind the clock a position taken from the clock is placed. A file
+ * system stamps a write with a time that can be earlier than the clock read
+ * just before it: the kernel's file clock ticks a few milliseconds apart, and
+ * some volumes keep whole seconds or two-second steps.
+ */
+const DISK_CLOCK_SLACK_MS = 2_000;
+
 export class DiskSpaceNodes implements SpaceNodes {
   readonly canvasId: string;
 
@@ -201,14 +209,16 @@ export class DiskSpaceNodes implements SpaceNodes {
    * Sidecars modified at or after `since`.
    *
    * The position is the latest modification time among the sidecars, but
-   * never later than the clock. "At or after" covers a file system whose
+   * never later than the clock less {@link DISK_CLOCK_SLACK_MS}. "At or after" covers a file system whose
    * times are coarser than the gap between two writes: a write in the same
    * tick as the position is named (again) rather than missed. The clock
    * bound covers a sidecar dated in the future — copied in from a machine
    * whose clock runs ahead, say — which would otherwise put the position
    * beyond every write made until that date, and a clock that was set back:
    * the position then follows the clock down. Such a sidecar is simply named
-   * on every call until the clock passes it.
+   * on every call until the clock passes it. The slack is there because that
+   * bound is the one place the clock is compared with file times: a write
+   * made right after it can be stamped slightly earlier than the clock read.
    *
    * What it cannot see is a write dated before the position: a clock set
    * back past the Space's most recent write and not yet caught up, or a file
@@ -226,7 +236,7 @@ export class DiskSpaceNodes implements SpaceNodes {
     for (const time of times.values()) latest = Math.max(latest, time);
     const position = {
       epoch: DISK_CHANGE_EPOCH,
-      seq: Math.min(latest, Date.now()),
+      seq: Math.min(latest, Date.now() - DISK_CLOCK_SLACK_MS),
     };
     if (
       since === undefined ||
