@@ -89,7 +89,7 @@ The per-operation cost matches the file deployments it replaces on App Service, 
 | `storage/disk/`, `storage/sqlite/`, `workspaces/`       | Only used by the Disk and SQLite backends                                                                      |
 | `HUABU_CONFIG_DIR` (`master-key`, `deployment.json`)    | Not created when `HUABU_SECRET_KEY` (required on PostgreSQL) and deployment settings come from the environment |
 
-With `postgres` + `azure` and `HUABU_SECRET_KEY` supplied, the container no longer needs `WEBSITES_ENABLE_APP_SERVICE_STORAGE`.
+With `postgres` + `azure` and `HUABU_SECRET_KEY` supplied, a Bubble deployment's container no longer needs `WEBSITES_ENABLE_APP_SERVICE_STORAGE`. In local identity mode the Server supervises a bundled Agentlet whose device identity lives in the `node` user's home, so that deployment keeps persistent storage ([web container](../architecture/web-container.md#app-service-configuration)).
 
 ## Migration
 
