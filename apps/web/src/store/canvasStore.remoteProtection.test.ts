@@ -293,6 +293,35 @@ describe('a body being typed here, and a change arriving from an agent', () => {
     expect(state().pendingContentNodeIds()).toEqual([]);
   });
 
+  it('holds what is typed into a text node in place the same way, as one undo entry for the whole session', async () => {
+    serverHolds(STORED);
+    // What the text node's control does: the first change of an editing
+    // session is an edit with an undo entry, the rest are written silently.
+    state().updateNodeData(X, { content: 'T' });
+    state().patchNodeSilent(X, { content: 'Ty' });
+    state().patchNodeSilent(X, { content: 'Typing' });
+    expect(state().pendingContentNodeIds()).toEqual([X]);
+
+    await agentChanges(
+      { content: 'Agent text' },
+      { nodeContentRevisions: { [X]: STORED } },
+    );
+    expect(data(X).content).toBe('Typing');
+    expect(toastsWith('your version was kept')).toHaveLength(1);
+
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(savesOf(X).at(-1)).toMatchObject({
+      content: 'Typing',
+      expectRev: STORED,
+    });
+    expect(conflictToasts()).toHaveLength(0);
+
+    // One undo takes the whole session back.
+    state().undo();
+    expect(data(X).content).toBe(`Body ${X}`);
+    expect(state().canUndo).toBe(false);
+  });
+
   it('applies a move and a recolour of that note at once, without a notice, and the body is saved as usual', async () => {
     state().updateNodeData(X, { content: 'Typing' });
 

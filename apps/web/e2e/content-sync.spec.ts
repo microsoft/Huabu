@@ -10,6 +10,7 @@ import {
   type Page,
 } from '@playwright/test';
 
+import { agentExecute, type AgentExecuteResponse } from './agent-execute';
 import { editsPerCommand } from './helpers';
 
 import type * as CanvasPresenceStore from '../src/store/canvasPresence/canvasPresenceStore';
@@ -40,6 +41,8 @@ const X = 'node-content-x';
 const Y = 'node-content-y';
 const AUTO = 'node-content-auto';
 const TEXT = 'node-content-text';
+const AGENT_SKIPPED =
+  /was skipped because you were editing it — your version was kept/;
 const LOCKED_HINT = /is editing this\. You can edit it when they finish\./;
 const SEED = {
   [X]: { x: 380, y: 90 },
@@ -598,6 +601,86 @@ test('searching in the preview of a note another page is editing does not take t
 
   await a.context.close();
   await b.context.close();
+});
+
+test("an Agent changes a text node's body while it is being typed into: the draft is kept, the person is told, and leaving the field saves the draft", async ({
+  browser,
+  request,
+}) => {
+  const canvasId = await seedSpace(request, 'Text draft and an Agent');
+  const device = await openDevice(browser, canvasId);
+  const { page } = device;
+  await page.waitForTimeout(2_000);
+  const text = page.locator(`.react-flow__node[data-id="${TEXT}"]`);
+
+  // The Agent reads the node: the body and its revision.
+  const read = await request.get(`/api/canvas/${canvasId}`);
+  expect(read.ok(), await read.text()).toBe(true);
+  const { nodeContentRevisions, state } = (await read.json()) as {
+    nodeContentRevisions: Record<string, string>;
+    state: { nodes: ServerNode[] };
+  };
+  const seeded = state.nodes.find((node) => node.id === TEXT)?.data.content;
+
+  // The person types into the text node and does not leave it.
+  await text.dblclick();
+  const control = text.locator('textarea');
+  await expect(control).toBeFocused();
+  await page.keyboard.press('End');
+  await page.keyboard.type(' typed');
+  // What is typed is the node's unsaved content from the first keystroke.
+  const typing = await storeState(page);
+  expect(typing.content[TEXT]).toBe(`${seeded} typed`);
+  expect(typing.pendingContent).toEqual([TEXT]);
+
+  // While the person goes on typing, the Agent rewrites the body it read,
+  // through the Agent route.
+  const more = ' and typed on while the Agent was writing its own body';
+  const [written] = await Promise.all([
+    agentExecute(request, canvasId, [
+      {
+        type: 'MERGE_NODE_DATA',
+        patches: [
+          {
+            nodeId: TEXT,
+            patch: { content: 'Written by the Agent' },
+            expectRev: nodeContentRevisions[TEXT],
+          },
+        ],
+      },
+    ]),
+    page.keyboard.type(more, { delay: 40 }),
+  ]);
+  expect(written.ok(), await written.text()).toBe(true);
+  const { results, toVersion } = (await written.json()) as AgentExecuteResponse;
+  expect(results).toEqual([expect.objectContaining({ applied: true })]);
+  await expect
+    .poll(async () => (await storeState(page)).version)
+    .toBe(toVersion);
+
+  // The draft is held against it, and the person is told it was kept.
+  const draft = `${seeded} typed${more}`;
+  await expect(page.getByText(AGENT_SKIPPED)).toHaveCount(1);
+  expect((await storeState(page)).content[TEXT]).toBe(draft);
+  expect(await control.inputValue()).toBe(draft);
+  await expect(control).toBeFocused();
+
+  // Leaving the field saves the draft; nobody is asked to choose.
+  await page.keyboard.type('!');
+  await page.evaluate(() => (document.activeElement as HTMLElement).blur());
+  await expect
+    .poll(
+      async () =>
+        (await serverRecord(request, canvasId)).node(TEXT)?.data.content,
+    )
+    .toBe(`${draft}!`);
+  expect((await storeState(page)).content[TEXT]).toBe(`${draft}!`);
+  expect(device.conflicts).toEqual([]);
+  await expect(
+    page.getByRole('button', { name: /^(Keep mine|Load latest)$/ }),
+  ).toHaveCount(0);
+
+  await device.context.close();
 });
 
 test("page A renames a note while page B's body conflict is open: Keep mine on B saves B's body and A's title stands", async ({

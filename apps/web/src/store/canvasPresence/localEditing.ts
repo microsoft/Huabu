@@ -65,9 +65,8 @@ export function editingNodeId(
 /**
  * Whether the person is typing into something of the open Space right now,
  * so that replacing the Space under them (a sync-triggered reload) would
- * lose text that exists only in the control or in component state: a text
- * node's draft before blur, a title being renamed, a property field, an edge
- * label.
+ * lose text that exists only in the control or in component state: a title
+ * being renamed, a property field, an edge label.
  *
  * - A control of a node — body, title or property, on the canvas or in the
  *   preview — counts while the editing tracker reports the node

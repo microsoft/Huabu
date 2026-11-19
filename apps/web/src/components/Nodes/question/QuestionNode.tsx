@@ -142,7 +142,6 @@ export const QuestionNode = memo(
     const surface = useTextNodeSurface({
       nodeId: id,
       width,
-      isEditing: false,
       content: displayText,
       baseFontSize: QUESTION_NODE_DEFAULT_FONT_SIZE,
       fontSizing: 'proportional',

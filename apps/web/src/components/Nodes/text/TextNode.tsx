@@ -51,6 +51,7 @@ export const TextNode = memo(
   ({ id, data, selected, width }: NodeProps<TextNodeType>) => {
     const { t } = useTranslation();
     const updateNodeData = useCanvasStore((state) => state.updateNodeData);
+    const patchNodeSilent = useCanvasStore((state) => state.patchNodeSilent);
     const inlineEditRequested = useCanvasStore(
       (state) => state.pendingInlineEditNodeId === id,
     );
@@ -99,7 +100,6 @@ export const TextNode = memo(
     const surface = useTextNodeSurface({
       nodeId: id,
       width,
-      isEditing,
       content,
       baseFontSize: TEXT_NODE_DEFAULT_FONT_SIZE,
       fontSizing: 'proportional',
@@ -157,16 +157,33 @@ export const TextNode = memo(
       [id],
     );
 
+    // What is typed is the node's content from the first keystroke, as in a
+    // note: it reaches the store, so the content queue saves it and holds it
+    // against a change that arrives meanwhile.
+    const editedInSession = useRef(false);
+    const { setDraft } = surface;
+    const handleChange = useCallback(
+      (next: string) => {
+        setDraft(next);
+        // One undo entry per editing session: its first change records the
+        // text before the session, the rest of the session adds none.
+        if (editedInSession.current) patchNodeSilent(id, { content: next });
+        else updateNodeData(id, { content: next });
+        editedInSession.current = true;
+      },
+      [id, patchNodeSilent, setDraft, updateNodeData],
+    );
+
     const handleBlur = useCallback(() => {
       setIsEditing(false);
-      if (surface.draft === content) return;
-      updateNodeData(id, { content: surface.draft });
+      if (!editedInSession.current) return;
+      editedInSession.current = false;
       // Exit-edit "settle": commit the auto-derived label (the `.md`
       // filename) now that the user left the inline editor, instead of on
       // every keystroke pause. See
       // `docs/architecture/node-preprocessing.md` §4 (Triggers & state).
       settleNodePreprocess(id);
-    }, [surface.draft, content, id, updateNodeData]);
+    }, [id]);
 
     const TextToolbar = (
       <>
@@ -286,7 +303,7 @@ export const TextNode = memo(
             ref={textareaRef}
             {...surface.bodyProps}
             draft={surface.draft}
-            onChange={surface.setDraft}
+            onChange={handleChange}
             onBlur={handleBlur}
             isEditing={isEditing}
             onRequestEdit={handleDoubleClick}

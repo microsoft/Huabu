@@ -252,8 +252,8 @@ test('a reload wanted while a text node is being typed into waits for the contro
   await page.keyboard.type(' — typed and not left');
   const typed = await control.inputValue();
   expect(typed).toContain('typed and not left');
-  // Nothing of it is in the store yet: it lives in the control.
-  expect((await shown(page)).textContent).toBe('Seed text');
+  // It is the node's content already, before the control is left.
+  expect((await shown(page)).textContent).toBe(typed);
 
   // The page falls behind: its stream is down while another client moves
   // the note, and the reconnect snapshot names a version it does not have.

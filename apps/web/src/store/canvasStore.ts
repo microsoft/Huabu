@@ -2295,9 +2295,9 @@ useCanvasPresenceStore.subscribe((state, previous) => {
 // Every reload the sync layer asks for (a version gap, a snapshot that does
 // not match, a paint order that could not be installed, an update that never
 // arrived, a rejected command) ends in `reload` above, which will not replace
-// a body the server does not have, a control the user is typing into (a text
-// node's draft, a title, a property field: text that lives in the control
-// until it is committed), or a node under the pointer. Such a reload is held
+// a body the server does not have, a control the user is typing into (a
+// body being typed, and a title or a property field, whose text lives in the
+// control until it is committed), or a node under the pointer. Such a reload is held
 // here instead of being dropped: it runs by itself when nothing of that is
 // left — normally a moment later, when the debounced save is acknowledged or
 // the control loses focus. When text cannot be saved (a failing save, a
