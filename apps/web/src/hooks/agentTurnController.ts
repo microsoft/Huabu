@@ -893,7 +893,7 @@ export interface AgentTurnCallbacks {
    */
   waitUntilReady?: boolean;
   /** Read built-in settings again after waiting, once their save has settled. */
-  refreshSettings?: boolean;
+  settingsPending?: boolean;
   canDispatch?: () => boolean;
   onStarted?: () => void;
   onAccepted?: (accepted: AgentTurnAcceptance) => void;
@@ -1127,10 +1127,10 @@ export async function dispatchAgentTurn(
 ): Promise<AgentTurnResult> {
   try {
     const result = await executeAgentTurn(input, callbacks);
-    settleAgentTurnQueue(input.session, agentTurnFailed(result));
+    settleAgentTurnQueue(input.session);
     return result;
   } catch (error) {
-    settleAgentTurnQueue(input.session, true);
+    pauseAgentTurnQueueAfterFailure(input.session.threadId);
     throw error;
   }
 }
@@ -1236,6 +1236,13 @@ async function executePreparedAgentTurn(
       result.status = 'busy';
       return;
     }
+    // Every exit gives up the claim here. A known failure pauses the queue
+    // first, so a drain waiting for the thread to go idle cannot send the next
+    // turn in between.
+    const releaseTurn = () => {
+      if (agentTurnFailed(result)) pauseAgentTurnQueueAfterFailure(threadId);
+      streamClaim.release();
+    };
     preparingTurnCancellations.set(acceptanceKey, () =>
       abortAgentStreamClaim(requestScope.canvasId, threadId),
     );
@@ -1312,11 +1319,10 @@ async function executePreparedAgentTurn(
         streamClaim.signal.aborted ||
         callbacks.canDispatch?.() === false
       ) {
-        if (result.error) pauseAgentTurnQueueAfterFailure(threadId);
         preparingTurnCancellations.delete(acceptanceKey);
         useChatStore.getState().setThreadPreparing(threadId, false);
         activeTurnRequests.delete(acceptanceKey);
-        streamClaim.release();
+        releaseTurn();
       }
     }
     setThreadLastAction(threadId, agentMode);
@@ -1334,11 +1340,6 @@ async function executePreparedAgentTurn(
 
     // Guard: ensure only one of onError / catch adds an error status
     let errorHandled = false;
-    let reattachAfterConnectionLoss = false;
-
-    const releaseAbort = () => {
-      streamClaim.release();
-    };
 
     // Canvas Sync owns all Question lifecycle projection. This controller
     // maintains request feedback, durable acceptance, and the transcript.
@@ -1465,22 +1466,13 @@ async function executePreparedAgentTurn(
             if (callbacks.queuedTurnId && isThreadBusyError(err)) {
               // The queue retries once the server-side turn ends; leave no
               // trace of this attempt in the transcript.
-              const chat = useChatStore.getState();
-              chat.setMessages(
-                threadId,
-                selectThreadMessages(chat, threadId).filter(
-                  (message) => message.id !== userMessageId,
-                ),
-              );
+              removeThreadMessage(threadId, userMessageId);
               return;
             }
             console.error(`${agentMode} error:`, err);
-            if (result.accepted && result.connectionLost) {
-              // The server keeps running an accepted turn. Re-attach to it
-              // instead of telling the user it failed.
-              reattachAfterConnectionLoss = true;
-              return;
-            }
+            // The server keeps running an accepted turn; it is re-attached on
+            // release instead of being reported as failed.
+            if (result.accepted && result.connectionLost) return;
             addMessage(threadId, {
               id: createId('status'),
               role: 'status',
@@ -1576,12 +1568,9 @@ async function executePreparedAgentTurn(
         ) {
           turnAcceptanceSinks.delete(acceptanceKey);
         }
-        // Decide before the thread looks idle, so a waiting queue cannot slip
-        // its next turn in after a failure.
-        if (agentTurnFailed(result)) pauseAgentTurnQueueAfterFailure(threadId);
         setThreadLoading(threadId, false);
-        releaseAbort();
-        if (reattachAfterConnectionLoss) {
+        releaseTurn();
+        if (result.accepted && result.connectionLost) {
           // Reloading history rediscovers the still-running turn and resumes
           // its stream, the same path a page refresh takes.
           useChatStore.getState().setHistoryLoaded(threadId, false);
@@ -1655,10 +1644,10 @@ async function executePreparedAgentTurn(
       }
     }
     if (cancelled) {
-      hideShownMessage(threadId, shownMessage);
+      removeThreadMessage(threadId, shownMessage.id);
       return { status: 'stopped' };
     }
-    if (callbacks.refreshSettings) {
+    if (callbacks.settingsPending) {
       prepared.settings = selectThreadSettings(
         useChatStore.getState(),
         threadId,
@@ -1671,29 +1660,31 @@ async function executePreparedAgentTurn(
     // The turn ended before adopting the message it showed early; the caller
     // restores the draft, so the transcript must not keep a second copy.
     if (shownMessage) {
-      hideShownMessage(threadId, shownMessage);
+      removeThreadMessage(threadId, shownMessage.id);
       useChatStore.getState().setThreadPreparing(threadId, false);
     }
   }
 }
 
-/** True while a mounted composer or a pending control keeps sends back. */
+/**
+ * True while the thread cannot take a send: a mounted composer reports a
+ * transient state, a control is pending, or a failed history load awaits the
+ * user's retry (whether or not the panel that reported it is still mounted).
+ */
 function sendNotReady(session: ChatSession): boolean {
   return (
     queueHolds.has(session.threadId) ||
+    !!useChatStore.getState().threadsById[session.threadId]?.historyError ||
     resolveConversationPreparation(session).pending
   );
 }
 
-function hideShownMessage(
-  threadId: string,
-  message: Extract<ChatMessage, { role: 'user' }>,
-): void {
+function removeThreadMessage(threadId: string, messageId: string): void {
   const chat = useChatStore.getState();
   chat.setMessages(
     threadId,
     selectThreadMessages(chat, threadId).filter(
-      (candidate) => candidate.id !== message.id,
+      (message) => message.id !== messageId,
     ),
   );
 }
@@ -1872,19 +1863,13 @@ function waitForQueueChange(
 
 /**
  * Called after the stream claim and preparation lease have been released.
- * Queued turns are sent as soon as the thread is idle. The queue pauses only
- * when the previous turn is known to have failed (`failed`), on an explicit
- * Stop, or when a queued send itself fails.
+ * Queued turns are sent as soon as the thread is idle. A turn known to have
+ * failed has already paused the queue by then, as has an explicit Stop.
  */
 export function settleAgentTurnQueue(
   session: Pick<ChatSession, 'threadId' | 'ownerCanvasId'>,
-  failed = false,
 ): void {
   const chat = useChatStore.getState();
-  if (failed) {
-    pauseAgentTurnQueueAfterFailure(session.threadId);
-    return;
-  }
   if (!selectThreadQueuedTurns(chat, session.threadId).length) return;
   void drainAgentTurnQueue(session);
 }
@@ -1913,16 +1898,12 @@ async function drainAgentTurnQueue(
         return;
       }
       if (
-        queueHolds.has(threadId) ||
-        // A direct send is waiting for readiness and goes first.
+        sendNotReady(next.prepared.session) ||
+        // A turn is in progress, including a direct send waiting to go first.
         !!thread.isPreparing ||
-        // Sending needs the user to retry a failed history load first, whether
-        // or not the panel that reported it is still mounted.
-        !!thread.historyError ||
         selectThreadIsLoading(chat, threadId) ||
         hasAgentStreamClaim(ownerCanvasId, threadId) ||
-        turnAcceptanceSinks.has(key) ||
-        resolveConversationPreparation(next.prepared.session).pending
+        turnAcceptanceSinks.has(key)
       ) {
         // Not ready yet: wait rather than making the user resume by hand.
         await waitForQueueChange(session);
@@ -1974,8 +1955,7 @@ async function drainAgentTurnQueue(
           // Older transports can complete without an acceptance envelope.
           useChatStore.getState().removeQueuedTurn(threadId, next.id);
         }
-        if (result.status === 'stopped' || agentTurnFailed(result)) {
-          // Do not feed the rest of the queue to a turn that just failed.
+        if (result.status === 'stopped') {
           useChatStore.getState().setQueuePaused(threadId, true);
           return;
         }

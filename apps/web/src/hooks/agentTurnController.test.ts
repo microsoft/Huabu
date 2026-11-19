@@ -396,7 +396,9 @@ describe('queued composer turns', () => {
   it('keeps a queued turn back while its history load has failed, without a mounted panel', async () => {
     const release = holdAgentTurnQueue(session);
     await act(async () => {
-      await hook.startStream('Blocked', 'operate', undefined, { defer: true });
+      await hook.startStream('Blocked', 'operate', undefined, {
+        notReady: 'queue',
+      });
     });
     act(() =>
       useChatStore.getState().setHistoryError(session.threadId, 'offline'),
@@ -429,7 +431,7 @@ describe('queued composer turns', () => {
     );
     await act(async () => {
       await hook.startStream('Saving', 'operate', undefined, {
-        defer: true,
+        notReady: 'queue',
         settingsPending: true,
       });
     });
@@ -462,7 +464,7 @@ describe('queued composer turns', () => {
     await act(async () => {
       useChatStore.getState().setDraft(session.threadId, 'Warm-up');
       sending = hook.startStream('Warm-up', 'operate', undefined, {
-        waitUntilReady: true,
+        notReady: 'wait',
       });
     });
     let thread = useChatStore.getState().threadsById[session.threadId];
@@ -502,7 +504,7 @@ describe('queued composer turns', () => {
     await act(async () => {
       useChatStore.getState().setDraft(session.threadId, 'Withdrawn');
       sending = hook.startStream('Withdrawn', 'operate', undefined, {
-        waitUntilReady: true,
+        notReady: 'wait',
       });
     });
     await act(async () => {
@@ -523,7 +525,9 @@ describe('queued composer turns', () => {
   it('waits out a held composer and a server-side busy thread instead of pausing', async () => {
     const release = holdAgentTurnQueue(session);
     await act(async () => {
-      await hook.startStream('Held', 'operate', undefined, { defer: true });
+      await hook.startStream('Held', 'operate', undefined, {
+        notReady: 'queue',
+      });
     });
     expect(mocks.stream).not.toHaveBeenCalled();
     expect(

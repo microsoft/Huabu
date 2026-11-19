@@ -943,8 +943,6 @@ export function useChatHistory(
       );
     }
     let retryInactive = false;
-    // Known bad ending of the observed turn; a lost connection is not one.
-    let turnFailed = false;
 
     const tryReconnect = async () => {
       if (ownerView) {
@@ -1024,8 +1022,10 @@ export function useChatHistory(
               if (cancelled) return;
               if (event.type === 'done') {
                 outcome = inkTurnOutcome(event.data.meta?.stopReason);
-                turnFailed = outcome !== 'done';
-                if (turnFailed) pauseAgentTurnQueueAfterFailure(ownerThreadId);
+                // A known bad ending pauses the queue; a lost connection is
+                // not one.
+                if (outcome !== 'done')
+                  pauseAgentTurnQueueAfterFailure(ownerThreadId);
               }
               if (!streaming) {
                 streaming = true;
@@ -1047,7 +1047,6 @@ export function useChatHistory(
             onError: (err) => {
               if (cancelled) return;
               outcome = 'error';
-              turnFailed = true;
               pauseAgentTurnQueueAfterFailure(ownerThreadId);
               settleTurnInkInterpretation(streamContext, 'error');
               addMessage(ownerThreadId, {
@@ -1127,10 +1126,7 @@ export function useChatHistory(
         claim.release();
         // A disposed observer must not settle a successor's queue.
         if (cancelled) return;
-        settleAgentTurnQueue(
-          { threadId: ownerThreadId, ownerCanvasId },
-          turnFailed,
-        );
+        settleAgentTurnQueue({ threadId: ownerThreadId, ownerCanvasId });
         if (retryInactive) {
           const delay =
             attachRetryDelayByThread.get(ownerThreadId) ??
@@ -1201,7 +1197,7 @@ export function useChatHistory(
       !useChatStore.getState().threadsById[threadId]?.queuedTurns.length
     )
       return;
-    settleAgentTurnQueue({ threadId, ownerCanvasId }, ownerStatus === 'error');
+    settleAgentTurnQueue({ threadId, ownerCanvasId });
   }, [
     ownerStatus,
     hydratedOwnerKey,

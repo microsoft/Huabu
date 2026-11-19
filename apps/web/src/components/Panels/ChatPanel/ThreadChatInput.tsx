@@ -30,15 +30,12 @@ interface ThreadChatInputProps extends Omit<
   onSubmit: (event: React.FormEvent, mode: AgentMode, draft: string) => void;
   /** The thread is not ready to send yet; submissions join the queue. */
   deferSubmission?: boolean;
-  /** Shown when the queue cannot advance until the user acts. */
-  queueBlockedReason?: string;
 }
 
 export function ThreadChatInput({
   children,
   onSubmit,
   deferSubmission = false,
-  queueBlockedReason,
   ...props
 }: ThreadChatInputProps) {
   const session = useChatSession();
@@ -104,7 +101,7 @@ export function ThreadChatInput({
             </div>
           ) : (
             <p className="text-fg-muted text-right" role="status">
-              {queueBlockedReason ?? t('chat.queuePending')}
+              {t('chat.queuePending')}
             </p>
           )}
           <ol className="-mx-2 max-h-60 overflow-y-auto overscroll-contain px-2 pt-2">

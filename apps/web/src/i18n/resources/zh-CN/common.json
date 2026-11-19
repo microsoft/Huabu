@@ -1281,7 +1281,6 @@
     "addToQueueHint": "加入队列（Enter）",
     "queuedMessages": "待发送消息",
     "queuePending": "待发送",
-    "queueBlockedByHistory": "历史加载失败，重试后自动发送",
     "queuePaused": "队列已暂停（{{count}}）",
     "resumeQueue": "继续发送",
     "removeFromQueue": "从队列移除",

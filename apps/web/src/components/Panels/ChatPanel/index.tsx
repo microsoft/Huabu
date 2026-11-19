@@ -88,7 +88,10 @@ import { saveChatAsQuestion } from './saveChatAsQuestion';
 import { ThreadChatInput } from './ThreadChatInput';
 import { WorkingDirectoryOverride } from './WorkingDirectoryOverride';
 import { holdAgentTurnQueue } from '../../../hooks/agentTurnController';
-import { useAgentStream } from '../../../hooks/useAgentStream';
+import {
+  useAgentStream,
+  type AgentSubmitOptions,
+} from '../../../hooks/useAgentStream';
 import { useChatHistory } from '../../../hooks/useChatHistory';
 import { MessageList } from '../../Messages/MessageList';
 import { SidebarPanel } from '../SidebarPanel';
@@ -828,7 +831,12 @@ export const ChatPanel = ({
     preparation.pending ||
     savingAgentDraft ||
     savingWorkingDirectory;
-  const deferSubmission = !isHistoryLoaded || awaitingReadiness;
+  const notReady = !isHistoryLoaded
+    ? 'queue'
+    : awaitingReadiness
+      ? 'wait'
+      : undefined;
+  const holdQueue = notReady !== undefined;
   const sendingWhenReady = useChatStore((state) => {
     const thread = state.threadsById[threadId];
     const last = thread?.messages.at(-1);
@@ -836,18 +844,15 @@ export const ChatPanel = ({
   });
   useEffect(
     () =>
-      deferSubmission
-        ? holdAgentTurnQueue({ threadId, ownerCanvasId })
-        : undefined,
-    [deferSubmission, threadId, ownerCanvasId],
+      holdQueue ? holdAgentTurnQueue({ threadId, ownerCanvasId }) : undefined,
+    [holdQueue, threadId, ownerCanvasId],
   );
   const handleSubmit = useCallback(
     async (e: React.FormEvent, agentMode: AgentMode, draft: string) => {
       e.preventDefault();
       if (!ownerScopeReady) return;
-      const options = {
-        defer: !isHistoryLoaded,
-        waitUntilReady: awaitingReadiness,
+      const options: AgentSubmitOptions = {
+        notReady,
         settingsPending: builtinThreadSettings.saving,
       };
       // Strip leading `/<id>` tokens that match a known slash command
@@ -894,8 +899,7 @@ export const ChatPanel = ({
       onCommit,
       startStream,
       ownerScopeReady,
-      isHistoryLoaded,
-      awaitingReadiness,
+      notReady,
       builtinThreadSettings.saving,
     ],
   );
@@ -1346,12 +1350,7 @@ export const ChatPanel = ({
               // connection badge above; we keep the input enabled so the
               // user can retry / trigger a re-ensure on the next send.
               submitDisabled={!ownerScopeReady}
-              deferSubmission={!isHistoryLoaded}
-              queueBlockedReason={
-                historyError && !isHistoryLoaded
-                  ? t('chat.queueBlockedByHistory')
-                  : undefined
-              }
+              deferSubmission={notReady === 'queue'}
             >
               {!remote && ownerCanvasId && threadId ? (
                 <ChangeReviewCard

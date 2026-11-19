@@ -1281,7 +1281,6 @@
     "addToQueueHint": "Add to queue (Enter)",
     "queuedMessages": "Queued messages",
     "queuePending": "Queued",
-    "queueBlockedByHistory": "History failed to load. Retry to send.",
     "queuePaused": "Queue paused ({{count}})",
     "resumeQueue": "Resume queue",
     "removeFromQueue": "Remove from queue",

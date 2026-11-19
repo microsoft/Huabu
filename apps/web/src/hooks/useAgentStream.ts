@@ -40,6 +40,17 @@ export {
 } from './agentTurnController';
 export type { AcpSessionMetaStreamEvent } from './agentTurnController';
 
+export interface AgentSubmitOptions {
+  /**
+   * The thread cannot take a send yet. `queue` holds the turn in the visible
+   * queue (history is still loading); `wait` shows it as sent and dispatches it
+   * once the transient state clears (Agent warm-up, a save in flight).
+   */
+  notReady?: 'queue' | 'wait';
+  /** A built-in settings save is in flight; read them again at send. */
+  settingsPending?: boolean;
+}
+
 export interface UseAgentStreamReturn {
   isLoading: boolean;
   setIsLoading: (threadId: string, loading: boolean) => void;
@@ -47,11 +58,7 @@ export interface UseAgentStreamReturn {
     prompt: string,
     mode: AgentMode,
     invokedSkills?: string[],
-    options?: {
-      defer?: boolean;
-      waitUntilReady?: boolean;
-      settingsPending?: boolean;
-    },
+    options?: AgentSubmitOptions,
   ) => Promise<void>;
   retryStream: (
     message: Extract<ChatMessage, { role: 'user' }>,
@@ -93,21 +100,15 @@ export function useAgentStream(
       prompt: string,
       mode: AgentMode,
       invokedSkills?: string[],
-      options?: {
-        defer?: boolean;
-        waitUntilReady?: boolean;
-        settingsPending?: boolean;
-      },
+      options?: AgentSubmitOptions,
     ) => {
       const chat = useChatStore.getState();
       const quotedComments = selectThreadQuotedComments(chat, session.threadId);
       if (!prompt.trim() && !quotedComments.length) return;
       if (quotedComments.some((item) => !item.comment.trim())) return;
       const queuedTurns = selectThreadQueuedTurns(chat, session.threadId);
-      // `defer`: the surface is not ready to send yet, so the turn waits in
-      // the queue instead of blocking the user.
       const shouldQueue =
-        options?.defer === true ||
+        options?.notReady === 'queue' ||
         !!chat.threadsById[session.threadId]?.isPreparing ||
         selectThreadIsLoading(chat, session.threadId) ||
         queuedTurns.length > 0 ||
@@ -210,8 +211,8 @@ export function useAgentStream(
         if (excerpt) chat.setSelectionAttachment(null);
         const result = await dispatchAgentTurn(prepared, {
           canDispatch,
-          waitUntilReady: options?.waitUntilReady,
-          refreshSettings: options?.settingsPending,
+          waitUntilReady: options?.notReady === 'wait',
+          settingsPending: options?.settingsPending,
           onStarted: () => {
             started = true;
           },
