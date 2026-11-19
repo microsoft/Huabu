@@ -24,9 +24,11 @@ import {
   agentletOwner,
   agentReachbackEnvironment,
   authenticateUserAgentlet,
-  canUseAgentlet,
+  connectedDeviceAccess,
+  disconnectAgentlets,
   ownDeviceCredential,
   readAgentCredential,
+  readDeviceAccess,
   resetAgentCredentials,
 } from './agent-credentials.js';
 import { openBubbleIdentity } from './bubble.js';
@@ -45,13 +47,14 @@ import {
 } from '../../connection-token.js';
 import connectionRoutes from '../agent/acp/connection-token.route.js';
 import deviceFilesRoutes from '../agent/acp/device-files.route.js';
+import { agentProfileRecordStore } from '../agent/acp/profile-registry-store.js';
 import profilesRoutes from '../agent/acp/profiles.route.js';
 import { resolveReachbackRuntimeEnvironment } from '../agent/acp/reachback-env.js';
 import threadsRoutes from '../agent/acp/threads.route.js';
 import { agenetes } from '../agent/agenetes/index.js';
 import defaultsRoutes from '../agent/agent-defaults.route.js';
 import { registerSpaceAccess } from '../security/space-access.js';
-import { createSpace } from '../storage/index.js';
+import { createSpace, getServerRecords } from '../storage/index.js';
 import { mountTestWorkspace } from '../storage/testing.js';
 import { runInWorkspace } from '../workspace/context.js';
 import { canvasAcpNamespace } from '../workspace/paths.js';
@@ -190,11 +193,15 @@ async function host(
     dataDir: tmp,
     daemonEntryPath: '',
     supervise: false,
-    canAccessAgentlet: canUseAgentlet,
+    canAccessAgentlet: (agentletId, requestedId) =>
+      connectedDeviceAccess().canUse(agentletId, requestedId),
     authenticate: authenticateUserAgentlet(bubble.service),
     profiles: {
-      storageDir: join(tmp, 'profiles'),
-      canAccess: (p) => canUseAgentlet(p.agentletId),
+      store: agentProfileRecordStore('user-agent-profiles'),
+      resolveAccess: async () => {
+        const access = await readDeviceAccess();
+        return (p) => access.canUse(p.agentletId);
+      },
     },
   });
   app.register(profilesRoutes, { prefix: '/api/acp' });
@@ -429,8 +436,9 @@ it('separates device transport from user and Space-scoped reachback, with fresh 
   const device = await h.as('alice', ownDeviceCredential);
   const authenticate = authenticateUserAgentlet(h.service);
   await authenticate('alice-device', device);
-  expect(canUseAgentlet('alice-device')).toBe(true);
-  expect(canUseAgentlet('alice-device', 'legacy-unowned-device')).toBe(false);
+  const access = await readDeviceAccess();
+  expect(access.canUse('alice-device')).toBe(true);
+  expect(access.canUse('alice-device', 'legacy-unowned-device')).toBe(false);
   await expect(
     agentReachbackEnvironment({ agentletId: 'legacy-unowned-device' }),
   ).rejects.toMatchObject({ code: 'DEVICE_ACCESS_REQUIRED' });
@@ -465,7 +473,7 @@ it('separates device transport from user and Space-scoped reachback, with fresh 
     'https://current.example/api/rfs/w/w1/space-a',
   );
   const token = environment!.HUABU_RFS_TOKEN!;
-  expect(readAgentCredential(token)).toMatchObject({
+  expect(await readAgentCredential(token)).toMatchObject({
     aud: 'rfs',
     principalId: 'alice',
     workspaceId: 'w1',
@@ -615,14 +623,14 @@ it("resets one person's device and reachback credentials without touching others
     401,
   );
 
-  resetAgentCredentials('alice');
+  await resetAgentCredentials('alice');
 
-  expect(readAgentCredential(alice)).toBeNull();
+  expect(await readAgentCredential(alice)).toBeNull();
   expect((await probe(reachback)).statusCode).toBe(401);
   expect((await probe(alice)).statusCode).toBe(401);
   // Her devices stay hers, with their Profiles and conversations.
-  expect(agentletOwner('alice-device')).toBe('alice');
-  expect(agentletOwner('bob-device')).toBe('bob');
+  expect(await agentletOwner('alice-device')).toBe('alice');
+  expect(await agentletOwner('bob-device')).toBe('bob');
   await expect(authenticate('shared-box', bob)).rejects.toThrow('another user');
   // Her revoked command says so, instead of looking malformed.
   await expect(authenticate('alice-device', alice)).rejects.toThrow(
@@ -670,7 +678,7 @@ it('closes open RFS streams once their credentials are reset', async () => {
   const device = await open(alice);
   const others = await open(bob);
 
-  resetAgentCredentials('alice');
+  await resetAgentCredentials('alice');
 
   expect((await scoped.read()).done).toBe(true);
   expect((await device.read()).done).toBe(true);
@@ -737,7 +745,7 @@ it.each([false, true])(
       expect(await connect('alice-device', bob)).toHaveProperty('error');
       expect(await connect('alice-device', alice)).toHaveProperty('result');
       // Resetting Alice's credentials drops her live device, not Bob's.
-      resetAgentCredentials('alice');
+      await resetAgentCredentials('alice');
       await expect
         .poll(() => getAgentletGateway()?.getAgentlet('alice-device')?.status)
         .toBe('disconnected');
@@ -766,11 +774,11 @@ it.each([false, true])(
         });
       const late = connect('late-device', renewed);
       await lookup;
-      resetAgentCredentials('alice');
+      await resetAgentCredentials('alice');
       admit();
       expect(await late).toHaveProperty('error');
       expect(getAgentletGateway()?.getAgentlet('late-device')).toBeUndefined();
-      expect(agentletOwner('late-device')).toBeNull();
+      expect(await agentletOwner('late-device')).toBeNull();
       gate.mockRestore();
     } finally {
       for (const socket of sockets) socket.close();
@@ -801,8 +809,8 @@ it.each(['disabled', 'external-revocation', 'lookup-unavailable'] as const)(
       expect(getAgentletGateway()?.getAgentlet('bob-device')?.status).toBe(
         'connected',
       );
-      expect(readAgentCredential(alice)).not.toBeNull();
-      expect(agentletOwner('alice-device')).toBe('alice');
+      expect(await readAgentCredential(alice)).not.toBeNull();
+      expect(await agentletOwner('alice-device')).toBe('alice');
       await h.service.people!.setMember('alice', true, 'bob');
       expect(
         await connectDevice(port, sockets, 'alice-device', alice),
@@ -845,7 +853,7 @@ it('keeps actual local-mode reachback even when the process provider variable sa
     getConnectionToken,
   });
   await app.ready();
-  expect(canUseAgentlet('local-device')).toBe(true);
+  expect((await readDeviceAccess()).canUse('local-device')).toBe(true);
   await expect(
     agentReachbackEnvironment({ agentletId: 'local-device' }),
   ).resolves.toEqual({ HUABU_RFS_TOKEN: getConnectionToken() });
@@ -861,7 +869,8 @@ it('refuses a handshake whose initial admission result was retained across membe
   const checking = new Promise<void>((resolve) => (entered = resolve));
   let release!: () => void;
   const held = new Promise<void>((resolve) => (release = resolve));
-  const resolvePrincipal = h.service.resolvePrincipal!.bind(h.service);
+  const resolvePrincipal = h.service.resolvePrincipal?.bind(h.service);
+  if (!resolvePrincipal) throw new Error('Bubble resolves principals');
   vi.spyOn(h.service, 'resolvePrincipal').mockImplementationOnce(async (id) => {
     const identity = await resolvePrincipal(id);
     entered();
@@ -875,9 +884,289 @@ it('refuses a handshake whose initial admission result was retained across membe
     release();
     expect(await handshake).toHaveProperty('error');
     expect(getAgentletGateway()?.getAgentlet('late-device')).toBeUndefined();
-    expect(agentletOwner('late-device')).toBeNull();
+    expect(await agentletOwner('late-device')).toBeNull();
   } finally {
     release();
+    for (const socket of sockets) socket.close();
+  }
+});
+
+it('refuses a returning device whose last credential read preceded a reset', async () => {
+  const h = await host(false);
+  await app.listen({ port: 0, host: '127.0.0.1' });
+  const port = (app.server.address() as { port: number }).port;
+  const sockets: WebSocket[] = [];
+  const alice = await h.as('alice', ownDeviceCredential);
+  try {
+    expect(
+      await connectDevice(port, sockets, 'late-device', alice),
+    ).not.toHaveProperty('error');
+    sockets[0].close();
+    await vi.waitFor(() =>
+      expect(getAgentletGateway()?.getAgentlet('late-device')?.status).toBe(
+        'disconnected',
+      ),
+    );
+    const records = getServerRecords();
+    const get = records.get.bind(records);
+    let versionReads = 0;
+    let entered!: () => void;
+    const checking = new Promise<void>((resolve) => (entered = resolve));
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    // A returning device's third credential read is its last check; its
+    // ownership is read after it. Hold that answer, read before the reset,
+    // until the reset has swept.
+    vi.spyOn(records, 'get').mockImplementation(async (key) => {
+      const value = await get(key);
+      if (key.name === 'agent-credential-versions' && ++versionReads === 3) {
+        entered();
+        await held;
+      }
+      return value;
+    });
+    const handshake = connectDevice(port, sockets, 'late-device', alice);
+    await checking;
+    await resetAgentCredentials('alice');
+    release();
+    // The reset revoked the admission in flight, so it never registers.
+    expect(await handshake).toMatchObject({
+      error: {
+        message: expect.stringContaining('Device credentials were reset'),
+      },
+    });
+    expect(getAgentletGateway()?.getAgentlet('late-device')?.status).toBe(
+      'disconnected',
+    );
+  } finally {
+    for (const socket of sockets) socket.close();
+  }
+});
+
+it('revokes a stalled admission on its own, keeping a device admitted with the new credential', async () => {
+  const h = await host(false);
+  await app.listen({ port: 0, host: '127.0.0.1' });
+  const port = (app.server.address() as { port: number }).port;
+  const sockets: WebSocket[] = [];
+  const old = await h.as('alice', ownDeviceCredential);
+  const resolvePrincipal = h.service.resolvePrincipal!.bind(h.service);
+  let entered!: () => void;
+  const stalled = new Promise<void>((resolve) => (entered = resolve));
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => (release = resolve));
+  let holding = true;
+  // Stall the old credential's membership lookup, as a slow identity store
+  // would, until the reset and a new device's admission have both finished.
+  vi.spyOn(h.service, 'resolvePrincipal').mockImplementation(async (id) => {
+    if (holding) {
+      holding = false;
+      entered();
+      await held;
+    }
+    return resolvePrincipal(id);
+  });
+  try {
+    const stale = connectDevice(port, sockets, 'old-device', old);
+    await stalled;
+    await resetAgentCredentials('alice');
+    const fresh = await h.as('alice', ownDeviceCredential);
+    // Not delayed by the stalled admission of the same owner.
+    expect(
+      await connectDevice(port, sockets, 'new-device', fresh),
+    ).not.toHaveProperty('error');
+    release();
+    expect(await stale).toMatchObject({
+      error: {
+        message: expect.stringContaining('Device credentials were reset'),
+      },
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(getAgentletGateway()?.getAgentlet('old-device')).toBeUndefined();
+    expect(getAgentletGateway()?.getAgentlet('new-device')?.status).toBe(
+      'connected',
+    );
+  } finally {
+    for (const socket of sockets) socket.close();
+  }
+});
+
+it('orders a first-time claim behind a reset that is still committing', async () => {
+  const h = await host(false);
+  await app.listen({ port: 0, host: '127.0.0.1' });
+  const port = (app.server.address() as { port: number }).port;
+  const sockets: WebSocket[] = [];
+  const alice = await h.as('alice', ownDeviceCredential);
+  const records = getServerRecords();
+  const put = records.store.put.bind(records.store);
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => (release = resolve));
+  let writing!: () => void;
+  const resetWriting = new Promise<void>((resolve) => (writing = resolve));
+  // Hold the reset's version write until the handshake waits to claim.
+  vi.spyOn(records.store, 'put').mockImplementation(async (key, value) => {
+    if (key.name === 'agent-credential-versions') {
+      writing();
+      await held;
+    }
+    return put(key, value);
+  });
+  const get = records.get.bind(records);
+  let claiming!: () => void;
+  const readOwners = new Promise<void>((resolve) => (claiming = resolve));
+  vi.spyOn(records, 'get').mockImplementation(async (key) => {
+    const value = await get(key);
+    if (key.name === 'device-owners') claiming();
+    return value;
+  });
+  try {
+    const reset = resetAgentCredentials('alice');
+    await resetWriting;
+    // Started after the reset revoked what was in flight, with a credential
+    // whose version is not yet replaced in storage.
+    const handshake = connectDevice(port, sockets, 'racing-device', alice);
+    await readOwners;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    release();
+    await reset;
+    expect(await handshake).toMatchObject({
+      error: {
+        message: expect.stringContaining('Device credentials were reset'),
+      },
+    });
+    vi.mocked(records.get).mockRestore();
+    expect(
+      (await getServerRecords().get({ owner: null, name: 'device-owners' })) ??
+        {},
+    ).not.toHaveProperty('racing-device');
+  } finally {
+    for (const socket of sockets) socket.close();
+  }
+});
+
+it('leaves admissions in flight alone when a reset fails to commit', async () => {
+  const h = await host(false);
+  await app.listen({ port: 0, host: '127.0.0.1' });
+  const port = (app.server.address() as { port: number }).port;
+  const sockets: WebSocket[] = [];
+  const alice = await h.as('alice', ownDeviceCredential);
+  const resolvePrincipal = h.service.resolvePrincipal?.bind(h.service);
+  if (!resolvePrincipal) throw new Error('Bubble resolves principals');
+  let entered!: () => void;
+  const stalled = new Promise<void>((resolve) => (entered = resolve));
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => (release = resolve));
+  let holding = true;
+  vi.spyOn(h.service, 'resolvePrincipal').mockImplementation(async (id) => {
+    if (holding) {
+      holding = false;
+      entered();
+      await held;
+    }
+    return resolvePrincipal(id);
+  });
+  const records = getServerRecords();
+  try {
+    const handshake = connectDevice(port, sockets, 'steady-device', alice);
+    await stalled;
+    vi.spyOn(records.store, 'put').mockRejectedValueOnce(
+      new Error('storage unavailable'),
+    );
+    await expect(resetAgentCredentials('alice')).rejects.toThrow(
+      'storage unavailable',
+    );
+    release();
+    // No reset committed, so the credential is still current.
+    expect(await handshake).not.toHaveProperty('error');
+  } finally {
+    for (const socket of sockets) socket.close();
+  }
+});
+
+it('leaves no ownership behind for a first-time claim a membership removal overtakes', async () => {
+  const h = await host(false);
+  await app.listen({ port: 0, host: '127.0.0.1' });
+  const port = (app.server.address() as { port: number }).port;
+  const sockets: WebSocket[] = [];
+  const alice = await h.as('alice', ownDeviceCredential);
+  const records = getServerRecords();
+  const get = records.store.get.bind(records.store);
+  let ownerReads = 0;
+  let entered!: () => void;
+  const writing = new Promise<void>((resolve) => (entered = resolve));
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => (release = resolve));
+  // The second ownership read is the claim's own, inside its update: hold
+  // it, after every check that precedes the write.
+  vi.spyOn(records.store, 'get').mockImplementation(async (key) => {
+    const value = await get(key);
+    if (key.name === 'device-owners' && ++ownerReads === 2) {
+      entered();
+      await held;
+    }
+    return value;
+  });
+  try {
+    const handshake = connectDevice(port, sockets, 'new-device', alice);
+    await writing;
+    // As removing membership does: no reset, so no credential version change.
+    disconnectAgentlets('alice', 'Device owner is not admitted');
+    release();
+    expect(await handshake).toMatchObject({
+      error: {
+        message: expect.stringContaining('Device owner is not admitted'),
+      },
+    });
+    vi.mocked(records.store.get).mockRestore();
+    expect(
+      (await getServerRecords().get({ owner: null, name: 'device-owners' })) ??
+        {},
+    ).not.toHaveProperty('new-device');
+  } finally {
+    for (const socket of sockets) socket.close();
+  }
+});
+
+it('leaves no ownership behind for a first-time claim a reset overtakes', async () => {
+  const h = await host(false);
+  await app.listen({ port: 0, host: '127.0.0.1' });
+  const port = (app.server.address() as { port: number }).port;
+  const sockets: WebSocket[] = [];
+  const alice = await h.as('alice', ownDeviceCredential);
+  const records = getServerRecords();
+  const get = records.get.bind(records);
+  let entered!: () => void;
+  const reading = new Promise<void>((resolve) => (entered = resolve));
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => (release = resolve));
+  let holding = true;
+  // Hold the handshake's read of device ownership, after its last credential
+  // check and before it claims the new device.
+  vi.spyOn(records, 'get').mockImplementation(async (key) => {
+    const value = await get(key);
+    if (key.name === 'device-owners' && holding) {
+      holding = false;
+      entered();
+      await held;
+    }
+    return value;
+  });
+  try {
+    const handshake = connectDevice(port, sockets, 'new-device', alice);
+    await reading;
+    await resetAgentCredentials('alice');
+    release();
+    expect(await handshake).toMatchObject({
+      error: {
+        message: expect.stringContaining('Device credentials were reset'),
+      },
+    });
+    vi.mocked(records.get).mockRestore();
+    expect(
+      (await getServerRecords().get({ owner: null, name: 'device-owners' })) ??
+        {},
+    ).not.toHaveProperty('new-device');
+  } finally {
     for (const socket of sockets) socket.close();
   }
 });
@@ -940,8 +1229,8 @@ it('revalidates other owners during a stalled lookup, fails it closed, and stops
     // Alice's lookup remains held throughout both disconnections, and the
     // deadline must not repeatedly launch queries for that same pending owner.
     expect(calls.alice).toBe(1);
-    expect(readAgentCredential(alice)).not.toBeNull();
-    expect(agentletOwner('alice-device')).toBe('alice');
+    expect(await readAgentCredential(alice)).not.toBeNull();
+    expect(await agentletOwner('alice-device')).toBe('alice');
 
     await h.store.principals.update('alice', {
       disabledAt: new Date().toISOString(),

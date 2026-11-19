@@ -61,7 +61,7 @@ beforeEach(() => {
 
 describe('Profile capability discovery', () => {
   it('keeps cold reads side-effect free and reuses observed cache', async () => {
-    expect(readProfileCapabilities('profile').source).toBe('none');
+    expect((await readProfileCapabilities('profile')).source).toBe('none');
     expect(mocks.probe).not.toHaveBeenCalled();
     cache = { metaUpdatedAt: 1, executionRevision: 1, availableModels: [] };
     expect((await discoverProfileCapabilities('profile', logger)).source).toBe(
@@ -70,7 +70,7 @@ describe('Profile capability discovery', () => {
     expect(mocks.probe).not.toHaveBeenCalled();
   });
 
-  it('carries the remembered preferences a new session will start with', () => {
+  it('carries the remembered preferences a new session will start with', async () => {
     mocks.getProfile.mockReturnValue({
       ...profile,
       customData: { sessionPreferences: { model: 'fast' } },
@@ -79,7 +79,9 @@ describe('Profile capability discovery', () => {
     cache = { metaUpdatedAt: 1, executionRevision: 1, availableModels };
     mocks.resolveSelections.mockReturnValue({ model: 'fast' });
 
-    expect(readProfileCapabilities('profile').sessionMeta.selections).toEqual({
+    expect(
+      (await readProfileCapabilities('profile')).sessionMeta.selections,
+    ).toEqual({
       model: 'fast',
     });
     expect(mocks.resolveSelections).toHaveBeenCalledWith(
@@ -147,7 +149,7 @@ describe('Profile capability discovery', () => {
 
   it('ignores cache from a different execution revision', async () => {
     cache = { executionRevision: 0, metaUpdatedAt: 1 };
-    expect(readProfileCapabilities('profile').source).toBe('none');
+    expect((await readProfileCapabilities('profile')).source).toBe('none');
     await discoverProfileCapabilities('profile', logger);
     expect(cache?.executionRevision).toBe(1);
   });

@@ -248,7 +248,7 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
         }
       : undefined;
     const agentletId = resolveThreadAgentletId(record);
-    if (agentletId) requireOwnAgentlet(agentletId);
+    if (agentletId) await requireOwnAgentlet(agentletId);
     const live = agentletId
       ? acpSessionRegistry.get(agentletId, threadId, namespace)
       : undefined;
@@ -272,11 +272,12 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
       };
     }
     if (profileId) {
-      if (!getAgentProfileRegistry()?.getProfile(profileId))
+      const profile = await getAgentProfileRegistry()?.getProfile(profileId);
+      if (!profile)
         return reply
           .code(404)
           .send({ message: 'Agent Profile is unavailable' });
-      const profileCache = readProfileObservation(profileId);
+      const profileCache = readProfileObservation(profile);
       if (
         profileCache &&
         ((profileCache.metaUpdatedAt ?? 0) > 0 ||
@@ -286,7 +287,7 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
           source: 'profile',
           availableCommands: profileCache.availableCommands ?? [],
           commandsUpdatedAt: profileCache.commandsUpdatedAt ?? 0,
-          sessionMeta: profileSessionMetaSnapshot(profileId, profileCache),
+          sessionMeta: profileSessionMetaSnapshot(profile, profileCache),
         };
       }
     }
@@ -337,7 +338,7 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
         code: 'session_not_found',
       });
     }
-    if (agentletId) requireOwnAgentlet(agentletId);
+    if (agentletId) await requireOwnAgentlet(agentletId);
     const handle = agenetes.get(threadId, namespace);
     if (!handle) {
       return reply.status(404).send({
@@ -475,7 +476,7 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
         code: controlFailureCode('set_model', ack.code),
       });
     }
-    rememberProfileSessionPreference(
+    await rememberProfileSessionPreference(
       resolved.entry.profileId,
       'model',
       parsed.data.modelId,
@@ -533,7 +534,7 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
         code: controlFailureCode('set_config_option', ack.code),
       });
     }
-    rememberProfileConfigPreference(
+    await rememberProfileConfigPreference(
       resolved.entry.profileId,
       resolved.entry.configOptions,
       parsed.data.configOptionId,

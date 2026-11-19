@@ -112,7 +112,7 @@ function createHarness(options?: {
   const times = [100, 200];
   const service = new RunLauncher({
     repository: () => repository,
-    requireProfile: vi.fn(() => {
+    requireProfile: vi.fn(async () => {
       if (options?.profileError) throw options.profileError;
     }),
     resolveRootPosition: vi.fn(async () => {

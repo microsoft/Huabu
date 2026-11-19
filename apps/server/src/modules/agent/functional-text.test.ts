@@ -10,10 +10,10 @@ import {
   runFunctionalText,
 } from './functional-text.js';
 
-import type * as ProfileSnapshot from './acp/profile-snapshot.js';
 import type * as AgentDefaults from './agent-defaults.js';
 import type { AcpCreateSpec, AcpTurnCtx } from '@agenetes/acp-driver';
 import type { AgentProfileSnapshot } from '@agenetes/agent-profile';
+import type * as AgentletHost from '@agenetes/agentlet-host';
 import type { AgentStreamEvent, AgentSubmission } from '@agenetes/protocol';
 
 const mocks = vi.hoisted(() => ({
@@ -42,11 +42,29 @@ vi.mock('./selectable-agent-profile.js', () => ({
   requireSelectableAgentProfile: mocks.selectable,
 }));
 vi.mock('./acp/profile-session-preferences.js', () => ({
-  getProfileSessionPreferences: mocks.preferences,
+  profileSessionPreferences: mocks.preferences,
 }));
-vi.mock('./acp/profile-snapshot.js', async (original) => ({
-  ...(await original<typeof ProfileSnapshot>()),
-  resolveProfileSnapshot: mocks.snapshot,
+// The registry serves the Profile whose launch snapshot `mocks.snapshot` names.
+vi.mock('@agenetes/agentlet-host', async (original) => ({
+  ...(await original<typeof AgentletHost>()),
+  getAgentProfileRegistry: () => ({
+    getProfile: async (profileId: string) => {
+      const snapshot = mocks.snapshot(profileId) as
+        | AgentProfileSnapshot
+        | null
+        | undefined;
+      return snapshot
+        ? {
+            id: snapshot.profileId,
+            alias: 'Agent',
+            agentletId: snapshot.agentletId,
+            workingDirPath: snapshot.workingDirPath,
+            launch: snapshot.launch,
+            executionRevision: snapshot.executionRevision,
+          }
+        : undefined;
+    },
+  }),
 }));
 vi.mock('./agenetes/drivers.js', () => ({
   EXTERNAL_DRIVER_KIND: 'external',
@@ -83,11 +101,11 @@ const done: AgentStreamEvent = {
 
 beforeEach(() => {
   vi.resetAllMocks();
-  mocks.defaults.mockReturnValue({
+  mocks.defaults.mockResolvedValue({
     profileId: 'profile-a',
     functionalModel: 'small-model',
   });
-  mocks.selectable.mockReturnValue({ id: 'profile-a', alias: 'Agent' });
+  mocks.selectable.mockResolvedValue({ id: 'profile-a', alias: 'Agent' });
   mocks.snapshot.mockReturnValue(profile);
   mocks.preferences.mockReturnValue({
     model: 'profile-model',
@@ -106,7 +124,7 @@ describe('external functional text', () => {
   it.each(['contentMeta', 'frameLabel', 'imageLabel'] as const)(
     'uses Built-In %s role without resolving any external Profile or injecting its model',
     async (role) => {
-      mocks.defaults.mockReturnValue({
+      mocks.defaults.mockResolvedValue({
         profileId: 'huabu',
         functionalModel: 'external-model',
       });
@@ -147,9 +165,12 @@ describe('external functional text', () => {
   );
 
   it('keeps an admitted Built-In task on Pi after the default changes', async () => {
-    mocks.defaults.mockReturnValue({ profileId: 'huabu', functionalModel: '' });
+    mocks.defaults.mockResolvedValue({
+      profileId: 'huabu',
+      functionalModel: '',
+    });
     const task = runFunctionalText('task', context);
-    mocks.defaults.mockReturnValue({
+    mocks.defaults.mockResolvedValue({
       profileId: 'profile-a',
       functionalModel: '',
     });
@@ -172,7 +193,7 @@ describe('external functional text', () => {
   ])(
     'rejects unsuccessful Built-In output without switching to ACP',
     async (result) => {
-      mocks.defaults.mockReturnValue({
+      mocks.defaults.mockResolvedValue({
         profileId: 'huabu',
         functionalModel: '',
       });
@@ -303,7 +324,7 @@ describe('external functional text', () => {
   });
 
   it('inherits the Profile model when no functional override is selected', async () => {
-    mocks.defaults.mockReturnValue({
+    mocks.defaults.mockResolvedValue({
       profileId: 'profile-a',
       functionalModel: '',
     });
@@ -314,7 +335,7 @@ describe('external functional text', () => {
   });
 
   it('inherits the harness default when neither model preference is selected', async () => {
-    mocks.defaults.mockReturnValue({
+    mocks.defaults.mockResolvedValue({
       profileId: 'profile-a',
       functionalModel: '',
     });
@@ -338,7 +359,7 @@ describe('external functional text', () => {
   });
 
   it('fails without a default instead of invoking any driver', async () => {
-    mocks.defaults.mockReturnValue({ profileId: null, functionalModel: '' });
+    mocks.defaults.mockResolvedValue({ profileId: null, functionalModel: '' });
     await expect(runFunctionalText('task', context)).rejects.toMatchObject({
       code: 'default_profile_unconfigured',
     });

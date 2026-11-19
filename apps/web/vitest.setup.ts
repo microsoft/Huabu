@@ -96,4 +96,18 @@ if (typeof HTMLCanvasElement !== 'undefined') {
   } as HTMLCanvasElement['getContext'];
 }
 
+// happy-dom 21 also exposes `OffscreenCanvas`, which pretext prefers over a
+// DOM canvas. Without a canvas adapter its `getContext` returns null too, so
+// it needs the same stub.
+if (typeof OffscreenCanvas !== 'undefined') {
+  const originalGetContext = OffscreenCanvas.prototype.getContext;
+  OffscreenCanvas.prototype.getContext = function getContext(
+    contextId: string,
+    options?: unknown,
+  ): unknown {
+    if (contextId === '2d') return measureCtx;
+    return originalGetContext.call(this, contextId as never, options as never);
+  } as OffscreenCanvas['getContext'];
+}
+
 export {};

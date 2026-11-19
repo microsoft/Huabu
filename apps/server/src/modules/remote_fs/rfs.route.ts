@@ -571,7 +571,7 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
   // `/capabilities` already owns direct Space-operation discovery. Keep the
   // configured third-party services under a separate unambiguous root.
   app.get('/:canvasId/services', async (_request, reply) =>
-    reply.send({ services: serviceProvisioner.list() }),
+    reply.send({ services: await serviceProvisioner.list() }),
   );
 
   app.get<{
@@ -683,7 +683,7 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
     try {
       return reply
         .header('Cache-Control', 'no-store')
-        .send(serviceProvisioner.lease(parsed.data.serviceId));
+        .send(await serviceProvisioner.lease(parsed.data.serviceId));
     } catch (error) {
       if (error instanceof ServiceProvisionError) {
         const status =
@@ -1027,7 +1027,7 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
     async (_request, reply) => {
       try {
         const response: RfsAgentProfilesResponse = {
-          profiles: listAvailableAgentProfiles(),
+          profiles: await listAvailableAgentProfiles(),
         };
         return reply.send(response);
       } catch (error) {

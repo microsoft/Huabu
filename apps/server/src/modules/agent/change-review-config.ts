@@ -1,13 +1,11 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { existsSync, readFileSync } from 'node:fs';
-
 import { agentChangeReviewConfigSchema } from '@huabu/shared';
 
-import { atomicWriteJson } from '../../utils/fs.js';
 import { getLogger } from '../../utils/logger.js';
-import { settingsFilePath } from '../identity/personal-settings.js';
+import { settingsRecordKey } from '../identity/personal-settings.js';
+import { getServerRecords } from '../storage/index.js';
 
 import type { AgentChangeReviewConfig } from '@huabu/shared';
 
@@ -17,36 +15,30 @@ export const DEFAULT_AGENT_CHANGE_REVIEW_CONFIG: AgentChangeReviewConfig = {
 
 const log = getLogger('agent-change-review-config');
 
-function configPath(): string {
-  return settingsFilePath('agent-change-review-config.json');
-}
-
-export function getAgentChangeReviewConfig(): AgentChangeReviewConfig {
-  const path = configPath();
-  if (!existsSync(path)) return DEFAULT_AGENT_CHANGE_REVIEW_CONFIG;
-
+export async function getAgentChangeReviewConfig(): Promise<AgentChangeReviewConfig> {
+  const key = settingsRecordKey('change-review');
   try {
-    const parsed = agentChangeReviewConfigSchema.safeParse(
-      JSON.parse(readFileSync(path, 'utf8')),
-    );
+    const stored = await getServerRecords().get(key);
+    if (stored === null) return DEFAULT_AGENT_CHANGE_REVIEW_CONFIG;
+    const parsed = agentChangeReviewConfigSchema.safeParse(stored);
     if (parsed.success) return parsed.data;
     log.warn(
-      { path, issues: parsed.error.issues },
+      { record: key.name, issues: parsed.error.issues },
       'Invalid Agent change-review config; using defaults',
     );
   } catch (error) {
     log.warn(
-      { path, error },
+      { record: key.name, error },
       'Unreadable Agent change-review config; using defaults',
     );
   }
   return DEFAULT_AGENT_CHANGE_REVIEW_CONFIG;
 }
 
-export function setAgentChangeReviewConfig(
+export async function setAgentChangeReviewConfig(
   value: AgentChangeReviewConfig,
-): AgentChangeReviewConfig {
+): Promise<AgentChangeReviewConfig> {
   const parsed = agentChangeReviewConfigSchema.parse(value);
-  atomicWriteJson(configPath(), parsed);
+  await getServerRecords().put(settingsRecordKey('change-review'), parsed);
   return parsed;
 }

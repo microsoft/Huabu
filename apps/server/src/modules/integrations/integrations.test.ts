@@ -53,7 +53,7 @@ describe('setIntegrationsConfig', () => {
     setSecrets.mockRejectedValueOnce(new Error('disk full'));
 
     // NOTE: this asserts the service layer surfaces the error, not backend
-    // atomicity. The encrypted-file backend replaces the file atomically, but
+    // atomicity. The encrypted backend replaces its record atomically, but
     // the Electron bridge writes sequentially, so a real partial commit is
     // still possible there until a batch IPC message exists.
     await expect(

@@ -52,6 +52,7 @@ import {
 import {
   AgentNodeEditError,
   guardAgentNodeDraftEditsAlreadyLocked,
+  defaultAgentBinding,
   withDefaultAgentBinding,
 } from './agent-node-edit.js';
 import { acknowledgeAgentNodeResult } from './agent-node-projection.js';
@@ -1675,6 +1676,11 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         for (const node of (existing?.state.nodes ?? []) as NodeLike[])
           currentById.set(node.id, node);
         const composedNodes: NodeLike[] = [];
+        // Every new conversation in this write gets the same default,
+        // resolved from the registry at most once.
+        let defaultBinding: Promise<Record<string, unknown>> | undefined;
+        const resolveDefaultBinding = () =>
+          (defaultBinding ??= defaultAgentBinding());
         for (const node of rawState.nodes ?? []) {
           const current = currentById.get(node.id ?? '');
           if (current?.type === 'question') {
@@ -1708,11 +1714,12 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
               ...node,
               data: {
                 ...(node.type === 'question'
-                  ? withDefaultAgentBinding(
+                  ? await withDefaultAgentBinding(
                       projectAgentNodeEditableData({
                         ...current?.data,
                         ...node.data,
                       }),
+                      resolveDefaultBinding,
                     )
                   : { ...current?.data, ...node.data }),
                 ...(node.type === 'question'

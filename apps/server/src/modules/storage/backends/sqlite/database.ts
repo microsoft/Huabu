@@ -44,7 +44,7 @@ export type { SqliteMigration } from './schema.js';
 export const SQLITE_WORLD_COLLISION_KEY = '.world';
 
 /** Milliseconds a statement waits for a lock before reporting SQLITE_BUSY. */
-const BUSY_TIMEOUT_MS = 5_000;
+export const BUSY_TIMEOUT_MS = 5_000;
 
 /**
  * Where this backend keeps its records in the Server data directory.
@@ -58,10 +58,12 @@ const BUSY_TIMEOUT_MS = 5_000;
  * backend is selected, and this backend never learns where they went — see
  * `backends/disk/data-dir.ts`.
  */
-export function sqliteDatabasePath(dataDir: string = getDataDir()): string {
-  const configured = process.env['HUABU_SQLITE_PATH']?.trim();
+export function sqliteDatabasePath(
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  const configured = env['HUABU_SQLITE_PATH']?.trim();
   if (configured) return configured;
-  return path.join(dataDir, 'storage', 'sqlite', 'huabu.sqlite');
+  return path.join(getDataDir(env), 'storage', 'sqlite', 'huabu.sqlite');
 }
 
 function readUserVersion(database: DatabaseSync): number {

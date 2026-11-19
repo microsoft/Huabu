@@ -44,7 +44,7 @@ function createHarness(options?: {
   const execute = vi.fn().mockResolvedValue(output(options?.applied ?? true));
   const service = new TaskService({
     canvasExists: vi.fn().mockResolvedValue(options?.canvasExists ?? true),
-    requireProfile: vi.fn(() => {
+    requireProfile: vi.fn(async () => {
       if (options?.profileError) throw options.profileError;
     }),
     repository: () => repository,

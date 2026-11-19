@@ -25,6 +25,7 @@ import {
   resolveDeploymentConfig,
 } from './modules/security/deployment-config.js';
 import { parseStorageProfile } from './modules/storage/profile.js';
+import { closeServerRecords } from './modules/storage/server-records.js';
 import {
   deploymentUsernameSchema,
   readDeploymentSettings,
@@ -755,16 +756,22 @@ if (
   process.argv[1] &&
   pathToFileURL(resolve(process.argv[1])).href === import.meta.url
 ) {
-  main().catch((error: unknown) => {
-    if (error instanceof SetupCancelled) {
-      prompts.cancel('Setup cancelled. No configuration saved.');
-    } else if (process.stdin.isTTY && process.stdout.isTTY) {
-      prompts.log.error(
-        error instanceof Error ? error.message : 'Huabu setup failed',
-      );
-    } else {
-      printError(error instanceof Error ? error.message : 'Huabu setup failed');
-    }
-    process.exitCode = 1;
-  });
+  main()
+    .catch((error: unknown) => {
+      if (error instanceof SetupCancelled) {
+        prompts.cancel('Setup cancelled. No configuration saved.');
+      } else if (process.stdin.isTTY && process.stdout.isTTY) {
+        prompts.log.error(
+          error instanceof Error ? error.message : 'Huabu setup failed',
+        );
+      } else {
+        printError(
+          error instanceof Error ? error.message : 'Huabu setup failed',
+        );
+      }
+      process.exitCode = 1;
+    })
+    // Saving a credential opens the records' database; an idle PostgreSQL
+    // pool would keep the process alive after it printed its result.
+    .finally(() => closeServerRecords().catch(() => {}));
 }

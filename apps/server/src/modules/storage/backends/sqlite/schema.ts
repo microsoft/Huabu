@@ -129,6 +129,23 @@ export const SQLITE_MIGRATIONS: readonly SqliteMigration[] = Object.freeze([
       CREATE INDEX spaces_by_parent ON spaces(workspace_id, parent_space_id);
     `,
   }),
+  /**
+   * Version 3 — server records: the Server's own state, owned by no
+   * Workspace (ports/server-records.ts). `owner_key` is a person's opaque
+   * key, or '' for the deployment's record.
+   */
+  Object.freeze({
+    version: 3,
+    sql: `
+      CREATE TABLE server_records (
+        owner_key TEXT NOT NULL,
+        name TEXT NOT NULL,
+        record_json TEXT NOT NULL CHECK (json_valid(record_json)),
+        updated_at REAL NOT NULL,
+        PRIMARY KEY (owner_key, name)
+      ) STRICT;
+    `,
+  }),
 ]);
 
 export const SQLITE_SCHEMA_VERSION =

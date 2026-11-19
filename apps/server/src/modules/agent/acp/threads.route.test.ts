@@ -43,7 +43,8 @@ vi.mock('./profile-schema-cache.js', () => ({
 }));
 
 vi.mock('./profile-session-preferences.js', () => ({
-  getProfileSessionPreferences: () => mocks.preferences,
+  getProfileSessionPreferences: async () => mocks.preferences,
+  profileSessionPreferences: () => mocks.preferences,
   rememberProfileConfigPreference: vi.fn(),
   rememberProfileSessionPreference: mocks.rememberModel,
 }));

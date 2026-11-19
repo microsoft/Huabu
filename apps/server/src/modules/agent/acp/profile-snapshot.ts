@@ -4,13 +4,13 @@
 import { getAgentProfileRegistry } from '@agenetes/agentlet-host';
 
 import type { AcpBindingRecipe } from '@agenetes/acp-driver';
-import type { AgentProfileSnapshot } from '@agenetes/agent-profile';
+import type {
+  AgentProfile,
+  AgentProfileSnapshot,
+} from '@agenetes/agent-profile';
 
-export function resolveProfileSnapshot(
-  profileId: string,
-): AgentProfileSnapshot | null {
-  const profile = getAgentProfileRegistry()?.getProfile(profileId);
-  if (!profile) return null;
+/** The launch identity a conversation freezes from `profile`. */
+export function profileSnapshot(profile: AgentProfile): AgentProfileSnapshot {
   return {
     profileId: profile.id,
     agentletId: profile.agentletId,
@@ -18,6 +18,18 @@ export function resolveProfileSnapshot(
     launch: profile.launch,
     executionRevision: profile.executionRevision ?? 0,
   };
+}
+
+/**
+ * {@link profileSnapshot} of a Profile the caller may use, or `null`. Reads
+ * the registry; a caller that also needs the Profile's other fields reads
+ * the Profile once and calls {@link profileSnapshot} instead.
+ */
+export async function resolveProfileSnapshot(
+  profileId: string,
+): Promise<AgentProfileSnapshot | null> {
+  const profile = await getAgentProfileRegistry()?.getProfile(profileId);
+  return profile ? profileSnapshot(profile) : null;
 }
 
 export function recipeFromProfileSnapshot(

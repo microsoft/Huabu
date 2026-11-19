@@ -1,28 +1,58 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { existsSync } from 'node:fs';
-import { join } from 'node:path';
-
-import { getDataDir } from '../data-dir.js';
 import {
   ElectronSecretStore,
   isDesktopSecretBridgeEnabled,
 } from './desktop-secret-bridge.js';
 import {
-  EncryptedFileSecretStore,
-  parseServerMasterKey,
-} from './encrypted-file-secret-store.js';
+  CREDENTIALS_RECORD,
+  EncryptedSecretStore,
+  openCredentialEnvelope,
+} from './encrypted-secret-store.js';
 import { EnvironmentSecretStore } from './environment-secret-store.js';
 import { resolveStandaloneMasterKey } from './private-config.js';
+import { masterKeyPrerequisite, readSavedSecret } from './saved-secret.js';
 import { SECRET_IDS } from './secret-ids.js';
 import { personalSecretId } from '../modules/identity/personal-settings.js';
+import { assertImportableShapes } from '../modules/server-record-shapes.js';
+// Not the storage barrel: setup loads this module, and only the record
+// composition root loads without the rest of the storage graph.
+import { initServerRecords } from '../modules/storage/server-records.js';
 
 import type { SecretStore } from './secret-store-types.js';
+import type { ServerRecordImportCheck } from '../modules/storage/server-records.js';
 
 const environmentStore = new EnvironmentSecretStore();
 let primaryStore: SecretStore | null = null;
 let initialized = false;
+
+/**
+ * The check the first open of records runs on what it would import, before
+ * it upgrades the database: every owner must be able to read its record,
+ * and the master key must open the credentials. Opening upgrades the schema,
+ * which the earlier version can then no longer open, and the import is the
+ * only copy the Server reads from then on. Records already imported are not
+ * checked again: the database's copy is the one in use.
+ */
+function importCheck(
+  key: Buffer | null,
+  env: NodeJS.ProcessEnv,
+): ServerRecordImportCheck {
+  return (pending) => {
+    assertImportableShapes(pending);
+    const legacy = pending.find(
+      ({ key: record }) =>
+        record.owner === CREDENTIALS_RECORD.owner &&
+        record.name === CREDENTIALS_RECORD.name,
+    );
+    if (legacy)
+      openCredentialEnvelope(
+        legacy.value,
+        key ?? resolveStandaloneMasterKey(true, env),
+      );
+  };
+}
 
 /** Select and initialize the runtime backend before accepting requests. */
 export async function initializeSecretStore(
@@ -34,19 +64,25 @@ export async function initializeSecretStore(
   if (isDesktopSecretBridgeEnabled()) {
     primaryStore = new ElectronSecretStore();
     await primaryStore.initialize();
+    // Credentials live in the desktop's own store, but the other records
+    // are opened here all the same, so their import is checked first.
+    await initServerRecords(env, { checkImport: assertImportableShapes });
     initialized = true;
     return;
   }
 
-  const dataDir = getDataDir(env);
-  const encryptedPath = join(dataDir, 'encrypted-secrets.json');
-  const encodedKey = env.HUABU_SECRET_KEY?.trim();
+  // Before anything reaches a database.
+  let key = masterKeyPrerequisite(env);
   // Never let a deployment-owned master key reach forked external agents.
   delete env.HUABU_SECRET_KEY;
-  const key = encodedKey
-    ? parseServerMasterKey(encodedKey)
-    : resolveStandaloneMasterKey(existsSync(encryptedPath), env);
-  const store = new EncryptedFileSecretStore(dataDir, key);
+  const records = await initServerRecords(env, {
+    checkImport: importCheck(key, env),
+  });
+  key ??= resolveStandaloneMasterKey(
+    (await records.get(CREDENTIALS_RECORD)) !== null,
+    env,
+  );
+  const store = new EncryptedSecretStore(records, key);
   await store.initialize();
   primaryStore = store;
   initialized = true;
@@ -93,20 +129,22 @@ export function getPersistedSecret(id: string): string | null {
   return primaryStore?.get(scopedId(id).id) ?? null;
 }
 
-/** Read saved credentials without creating storage for a new instance. */
+/**
+ * Read a saved credential without changing storage: nothing is created for
+ * a new instance, and a database an earlier version left is neither upgraded
+ * nor imported into, so `setup` can ask before the operator confirms
+ * anything and a cancelled run leaves storage as it found it. Once the
+ * secret store is initialized, this reads that store.
+ */
 export async function readPersistedSecret(
   id: string,
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<string | null> {
-  if (
-    !initialized &&
-    !isDesktopSecretBridgeEnabled() &&
-    !existsSync(join(getDataDir(env), 'encrypted-secrets.json'))
-  ) {
-    return null;
+  if (initialized || isDesktopSecretBridgeEnabled()) {
+    await initializeSecretStore(env);
+    return getPersistedSecret(id);
   }
-  await initializeSecretStore(env);
-  return getPersistedSecret(id);
+  return readSavedSecret(scopedId(id).id, env);
 }
 
 /** Write only to the secure primary backend. */
@@ -124,7 +162,7 @@ export async function setSecret(
 }
 
 /**
- * Write several credentials in one operation. On the encrypted-file backend
+ * Write several credentials in one operation. On the encrypted backend
  * this is atomic (all-or-nothing); on the desktop bridge it degrades to a
  * sequential apply. Prefer this over multiple {@link setSecret} calls when a
  * single settings update touches more than one secret.

@@ -6,6 +6,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { spyOnAssignedStyle } from '@/__tests__/spyOnAssignedStyle';
 import { nodeBoundaryForAccent } from '@/components/Nodes/design/nodeBoundary';
 import { nodeMetricsForSize } from '@/components/Nodes/design/nodeDesign';
 import { CONVERSATION_CARD_SPACING } from '@/components/Nodes/design/nodeSpacing';
@@ -251,11 +252,7 @@ describe('Space shortcut design playground', () => {
 
   it('uses production boundary, radius, spacing, and typography values', async () => {
     // Happy DOM drops color-mix border values; inspect the assigned CSS.
-    const borderColor = vi.spyOn(
-      CSSStyleDeclaration.prototype,
-      'borderColor',
-      'set',
-    );
+    const borderColor = spyOnAssignedStyle('border-color');
     await act(async () =>
       root.render(
         <MemoryRouter key="boundary">
@@ -268,10 +265,10 @@ describe('Space shortcut design playground', () => {
     expect(card().style.borderWidth).toBe(`${boundary.borderWidth}px`);
     expect(
       borderColor.mock.calls.filter(
-        (_, index) => borderColor.mock.contexts[index] === card().style,
+        (_, index) => borderColor.mock.contexts[index] === card(),
       ),
     ).toEqual([[boundary.borderColor]]);
-    borderColor.mockRestore();
+    borderColor.restore();
     expect(card().style.padding).toBe(`${CONVERSATION_CARD_SPACING.padding}px`);
     expect(card().style.fontSize).toBe(`${typography.size}px`);
     expect(card().style.fontWeight).toBe(`${typography.weight}`);

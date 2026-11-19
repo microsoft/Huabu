@@ -31,6 +31,6 @@
     "png2icons": "^2.0.1",
     "sharp": "^0.35.5",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.11"
+    "vitest": "^4.1.12"
   }
 }

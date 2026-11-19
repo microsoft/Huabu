@@ -99,10 +99,17 @@ export default defineConfig(async ({ mode, command }) => {
       env.HUABU_BASIC_AUTH_USER === undefined &&
       env.HUABU_BASIC_AUTH_PASS === undefined
     ) {
-      const { initializeSecretStore, getPersistedSecret } =
-        await import('../server/src/security/secret-store');
-      await initializeSecretStore(env);
-      password = getPersistedSecret(SECRET_IDS.remoteAccessPassword);
+      // Read-only: the dev server neither opens, upgrades, nor imports into
+      // the Server's database; the Server does that when it starts.
+      const { readSavedSecret } =
+        await import('../server/src/security/saved-secret');
+      const { closeServerRecords } =
+        await import('../server/src/modules/storage/server-records');
+      try {
+        password = await readSavedSecret(SECRET_IDS.remoteAccessPassword, env);
+      } finally {
+        await closeServerRecords();
+      }
     }
     deploymentEnv = resolveDeploymentEnvironment(env, settings, password);
   }

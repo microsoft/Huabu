@@ -2,16 +2,19 @@
 // Licensed under the MIT license.
 
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import { statSync } from 'node:fs';
-import { join } from 'node:path';
 
 import { getAgentletGateway } from '@agenetes/agentlet-host';
 import { z } from 'zod';
 
 import { personalSettingsOwner } from './personal-settings.js';
 import { getConnectionToken } from '../../connection-token.js';
-import { getDataDir } from '../../data-dir.js';
-import { atomicWriteJson, readJsonStrict } from '../../utils/fs.js';
+import { createKeyedMutex } from '../../utils/keyed-mutex.js';
+import {
+  credentialVersionSchema as version,
+  credentialVersionsSchema as versionsSchema,
+  deviceOwnersSchema as ownersSchema,
+} from '../server-record-shapes.js';
+import { getServerRecords } from '../storage/index.js';
 
 import type { IdentityService } from './service.js';
 import type { FastifyInstance } from 'fastify';
@@ -51,14 +54,12 @@ export function registerAgentIdentity(
       ...(gateway?.getAgentlets({ status: 'connected' }) ?? []),
     ];
     try {
-      const owners = new Set(
-        connections.map((connection) => agentletOwner(connection.agentletId)),
-      );
+      const owners = new Set(connections.map(connectedAgentletOwner));
       await Promise.all(
         [...owners].map(async (owner) => {
           if (!owner) {
             for (const connection of connections)
-              if (!agentletOwner(connection.agentletId))
+              if (!connectedAgentletOwner(connection))
                 connection.disconnect('User device owner required');
             return;
           }
@@ -121,7 +122,6 @@ export function registerAgentIdentity(
  * Every credential names its owner's credential version: resetting it revokes
  * that person's device and reachback credentials, and nobody else's.
  */
-const version = z.number().int().nonnegative();
 const claimsSchema = z.discriminatedUnion('aud', [
   z
     .object({
@@ -144,57 +144,116 @@ const claimsSchema = z.discriminatedUnion('aud', [
 type Claims = z.infer<typeof claimsSchema>;
 export type AgentReachback = Extract<Claims, { aud: 'rfs' }>;
 const PREFIX = 'huabu-agent.v1.';
-const ownersSchema = z.record(z.string(), z.string().min(1));
-const versionsSchema = z.record(z.string(), version);
 
-function ownersPath(): string {
-  return join(getDataDir(), 'agentlet-owners.json');
-}
-
-function versionsPath(): string {
-  return join(getDataDir(), 'agent-credential-versions.json');
-}
-
-const parsed = new Map<string, { stamp: string; value: unknown }>();
+/** `agentletId -> principalId` for every device that ever connected as a user's. */
+const OWNERS = { owner: null, name: 'device-owners' } as const;
+/** `principalId -> version`; absent means version 0. */
+const VERSIONS = { owner: null, name: 'agent-credential-versions' } as const;
 
 /**
- * A durable map, parsed again only when its file changes. Ownership checks
- * run once per device and Profile on every listing; a write replaces the file
- * by rename, so its stamp changes with it.
+ * Which devices one operation may use, decided against one view of device
+ * ownership. Local mode retains its single-owner devices; Bubble users have
+ * private ones.
  */
-function readMap<T extends Record<string, unknown>>(
-  file: string,
-  schema: z.ZodType<T>,
-): T {
-  let stamp: string;
-  try {
-    const stat = statSync(file);
-    stamp = `${stat.ino}:${stat.mtimeMs}:${stat.size}`;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-    parsed.delete(file);
-    return {} as T;
-  }
-  const cached = parsed.get(file);
-  if (cached?.stamp === stamp) return cached.value as T;
-  const value = schema.parse(readJsonStrict(file) ?? {});
-  parsed.set(file, { stamp, value });
-  return value;
+export interface DeviceAccess {
+  /** The device's durable owner, or `null` for an unowned device. */
+  owner(agentletId: string): string | null;
+  /**
+   * Whether the caller may use `agentletId`, and, when the caller asked for
+   * `requestedId` and was placed on `agentletId`, whether both belong to the
+   * same owner.
+   */
+  canUse(agentletId: string, requestedId?: string): boolean;
+  /** @throws a 403 error when {@link canUse} refuses `agentletId`. */
+  require(agentletId: string): void;
 }
 
-function writeMap(file: string, value: Record<string, unknown>): void {
-  atomicWriteJson(file, value);
-  parsed.delete(file);
+function deviceAccess(
+  owner: (agentletId: string) => string | null,
+): DeviceAccess {
+  const canUse = (agentletId: string, requestedId?: string) => {
+    const person = personalSettingsOwner();
+    // Background recovery has no HTTP caller, but Bubble still requires a
+    // durable owner. An old unowned workload must never receive the signing key.
+    if (!person && hostIdentity?.provider === 'bubble') {
+      const expected = owner(requestedId ?? agentletId);
+      return expected !== null && owner(agentletId) === expected;
+    }
+    const expected = requestedId ? owner(requestedId) : null;
+    if (!person && !expected) return true;
+    const actual = owner(agentletId);
+    return (!person || actual === person) && (!expected || actual === expected);
+  };
+  return {
+    owner,
+    canUse,
+    require(agentletId) {
+      if (canUse(agentletId)) return;
+      const error = new Error('Device is unavailable to this user');
+      Object.assign(error, { statusCode: 403, code: 'DEVICE_ACCESS_REQUIRED' });
+      throw error;
+    },
+  };
+}
+
+/**
+ * Device access as recorded in storage, read once. Use it for devices that
+ * may not be connected, and keep the result for the rest of one operation
+ * rather than reading again per device.
+ */
+export async function readDeviceAccess(): Promise<DeviceAccess> {
+  const owners = ownersSchema.parse(
+    (await getServerRecords().get(OWNERS)) ?? {},
+  );
+  return deviceAccess((agentletId) =>
+    Object.hasOwn(owners, agentletId) ? owners[agentletId] : null,
+  );
+}
+
+/**
+ * The owner a connection was admitted for. A handshake records the device's
+ * owner, or refuses a credential that does not match it, before admitting
+ * the connection, and ownership never changes, so this is the recorded owner
+ * without reading it. `null` for a device that needs no owner, as in local
+ * mode.
+ */
+export function connectedAgentletOwner(connection: {
+  readonly metadata: Readonly<Record<string, unknown>>;
+}): string | null {
+  const principalId = connection.metadata['principalId'];
+  return typeof principalId === 'string' ? principalId : null;
+}
+
+/**
+ * Device access decided from the Gateway's live connections, without reading
+ * storage. Only connected devices have an owner here, so use it only where
+ * the devices in question are connected ones, such as placing work on a
+ * connected device.
+ */
+export function connectedDeviceAccess(): DeviceAccess {
+  const gateway = getAgentletGateway();
+  return deviceAccess((agentletId) => {
+    const connection = gateway?.getAgentlet(agentletId);
+    return connection ? connectedAgentletOwner(connection) : null;
+  });
 }
 
 /** Device ownership is durable and never changes on reconnect or role changes. */
-export function agentletOwner(agentletId: string): string | null {
-  const owners = readMap(ownersPath(), ownersSchema);
-  return Object.hasOwn(owners, agentletId) ? owners[agentletId] : null;
+export async function agentletOwner(
+  agentletId: string,
+): Promise<string | null> {
+  return (await readDeviceAccess()).owner(agentletId);
 }
 
-function credentialVersion(principalId: string): number {
-  const versions = readMap(versionsPath(), versionsSchema);
+/** {@link DeviceAccess.require} for one device, reading ownership once. */
+export async function requireOwnAgentlet(agentletId: string): Promise<void> {
+  (await readDeviceAccess()).require(agentletId);
+}
+
+async function credentialVersion(principalId: string): Promise<number> {
+  const versions = versionsSchema.parse(
+    (await getServerRecords().get(VERSIONS)) ?? {},
+  );
   return Object.hasOwn(versions, principalId) ? versions[principalId] : 0;
 }
 
@@ -206,40 +265,156 @@ function credentialVersion(principalId: string): number {
  * Their devices stay theirs: a device's Profiles and conversations are
  * authorized through its owner, so handing the device on would hand them on.
  */
-export function resetAgentCredentials(principalId: string): void {
-  const versions = readMap(versionsPath(), versionsSchema);
-  writeMap(versionsPath(), {
-    ...versions,
-    [principalId]: credentialVersion(principalId) + 1,
+export async function resetAgentCredentials(
+  principalId: string,
+): Promise<void> {
+  const reason = 'Device credentials were reset';
+  let version = 0;
+  // Ordered with this owner's first-time device claims, through commit: a
+  // claim that committed first stands, and its device is disconnected
+  // below like any other; one waiting behind the reset sees it and writes
+  // nothing.
+  await claimsAndResets(principalId, async () => {
+    await getServerRecords().update(VERSIONS, (current) => {
+      const versions = versionsSchema.parse(current ?? {});
+      const previous = Object.hasOwn(versions, principalId)
+        ? versions[principalId]
+        : 0;
+      version = previous + 1;
+      return { ...versions, [principalId]: version };
+    });
+    // Only once the reset has committed, and still before any claim waiting
+    // on the lock can commit: every admission in flight now carries a
+    // credential this reset revoked.
+    revokeAdmissions(principalId, reason);
   });
-  disconnectAgentlets(principalId, 'Device credentials were reset');
+  disconnectAgentlets(principalId, reason, version);
 }
 
-/** Disconnect this owner's current and just-admitted connections without rotating credentials. */
-export function disconnectAgentlets(principalId: string, reason: string): void {
-  const disconnect = () => {
-    const gateway = getAgentletGateway();
-    for (const connection of [
-      ...(gateway?.getSessions() ?? []),
-      ...(gateway?.getAgentlets() ?? []),
-    ])
-      if (agentletOwner(connection.agentletId) === principalId)
-        connection.disconnect(reason);
-  };
-  disconnect();
-  // A handshake admitted just before disconnection registers its connection
-  // once its authentication resolves, without another macrotask between
-  // them; it is not in the Gateway yet, so sweep again once it is.
-  setImmediate(disconnect);
+/**
+ * One owner's credential resets and first-time device claims, one at a time,
+ * each through its commit. A device's ownership is immutable, so a claim
+ * must never commit for an admission a reset has already overtaken.
+ */
+const claimsAndResets = createKeyedMutex<string>();
+
+/**
+ * One device admission: deciding, or decided and about to be registered.
+ *
+ * An admission reads the credential version and membership from storage, so
+ * a reset or a revocation can land after its last read and before the
+ * Gateway registers its connection, where no sweep of the Gateway sees it.
+ * Each admission is therefore revoked on its own: one still deciding refuses
+ * the handshake when it finishes, and one already decided has the connection
+ * it registers closed. Nothing waits for other admissions, so a stalled
+ * lookup delays only its own handshake, and an admission that starts later,
+ * with a newer credential, is never caught by an older revocation.
+ */
+interface Admission {
+  readonly agentletId: string;
+  /** The credential version the handshake's token carries. */
+  readonly version: number;
+  /** Why the admission was revoked while in flight, or `null`. */
+  revoked: string | null;
+  /** Set once the admission has decided to admit, just before it returns. */
+  decided: boolean;
+}
+
+/** Admissions in flight, by the owner their credential names. */
+const admitting = new Map<string, Set<Admission>>();
+
+/**
+ * Track `admission` until the Gateway has registered what it admitted. The
+ * Gateway registers a connection once its authentication resolves, with no
+ * macrotask in between, so the admission stays visible to a revocation
+ * until the next macrotask after it settles.
+ */
+function trackAdmission<T>(
+  principalId: string,
+  admission: Admission,
+  decision: Promise<T>,
+): Promise<T> {
+  let pending = admitting.get(principalId);
+  if (!pending) admitting.set(principalId, (pending = new Set()));
+  pending.add(admission);
+  const settle = () =>
+    setImmediate(() => {
+      pending.delete(admission);
+      if (pending.size === 0 && admitting.get(principalId) === pending)
+        admitting.delete(principalId);
+    });
+  decision.then(settle, settle);
+  return decision;
+}
+
+/**
+ * Revoke this owner's admissions in flight whose credential is older than
+ * `below` (every one, by default). See {@link Admission}.
+ */
+function revokeAdmissions(
+  principalId: string,
+  reason: string,
+  below = Number.POSITIVE_INFINITY,
+): void {
+  for (const admission of admitting.get(principalId) ?? []) {
+    if (admission.revoked !== null || admission.version >= below) continue;
+    admission.revoked = reason;
+    if (admission.decided)
+      setImmediate(() =>
+        disconnectMatching(
+          (connection) =>
+            connection.agentletId === admission.agentletId &&
+            connectedAgentletOwner(connection) === principalId,
+          reason,
+        ),
+      );
+  }
+}
+
+function disconnectMatching(
+  matches: (connection: {
+    readonly agentletId: string;
+    readonly metadata: Readonly<Record<string, unknown>>;
+  }) => boolean,
+  reason: string,
+): void {
+  const gateway = getAgentletGateway();
+  for (const connection of [
+    ...(gateway?.getSessions() ?? []),
+    ...(gateway?.getAgentlets() ?? []),
+  ])
+    if (matches(connection)) connection.disconnect(reason);
+}
+
+/**
+ * Disconnect this owner's current connections and revoke their admissions in
+ * flight, without rotating credentials.
+ *
+ * @param below Revoke only admissions whose credential version is older,
+ *   for a reset that wrote version `below`; by default every admission.
+ */
+export function disconnectAgentlets(
+  principalId: string,
+  reason: string,
+  below?: number,
+): void {
+  disconnectMatching(
+    (connection) => connectedAgentletOwner(connection) === principalId,
+    reason,
+  );
+  revokeAdmissions(principalId, reason, below);
 }
 
 type Unsigned = {
   [A in Claims['aud']]: Omit<Extract<Claims, { aud: A }>, 'v'>;
 }[Claims['aud']];
 
-function sign(claims: Unsigned): string {
+async function sign(claims: Unsigned): Promise<string> {
   const payload = Buffer.from(
-    JSON.stringify({ ...claims, v: credentialVersion(claims.principalId) }),
+    JSON.stringify({
+      ...claims,
+      v: await credentialVersion(claims.principalId),
+    }),
   ).toString('base64url');
   const message = PREFIX + payload;
   const signature = createHmac('sha256', getConnectionToken())
@@ -276,10 +451,24 @@ function signedClaims(token: string): Claims | null {
   }
 }
 
-/** Purpose-separated credentials never expose the host's machine credential. */
-export function readAgentCredential(token: string): Claims | null {
+/**
+ * Whether `token` is a credential this Server signed, revoked or not. It
+ * reads nothing; only {@link readAgentCredential} decides whether to honor it.
+ */
+export function isAgentCredential(token: string): boolean {
+  return signedClaims(token) !== null;
+}
+
+/**
+ * Purpose-separated credentials never expose the host's machine credential.
+ * Reads the owner's current credential version on every call, so a reset
+ * made by any process revokes the credential at its next use.
+ */
+export async function readAgentCredential(
+  token: string,
+): Promise<Claims | null> {
   const claims = signedClaims(token);
-  return claims && claims.v === credentialVersion(claims.principalId)
+  return claims && claims.v === (await credentialVersion(claims.principalId))
     ? claims
     : null;
 }
@@ -293,67 +482,94 @@ function refusedDeviceCredential(token: string): Error {
   );
 }
 
-export function ownDeviceCredential(): string {
+export async function ownDeviceCredential(): Promise<string> {
   const principalId = personalSettingsOwner();
   return principalId
     ? sign({ aud: 'device', principalId })
     : getConnectionToken();
 }
 
-/** Local mode retains its single-owner devices; Bubble users have private ones. */
-export function canUseAgentlet(
-  agentletId: string,
-  requestedId?: string,
-): boolean {
-  const owner = personalSettingsOwner();
-  // Background recovery has no HTTP caller, but Bubble still requires a
-  // durable owner. An old unowned workload must never receive the signing key.
-  if (!owner && hostIdentity?.provider === 'bubble') {
-    const expected = agentletOwner(requestedId ?? agentletId);
-    return expected !== null && agentletOwner(agentletId) === expected;
-  }
-  const expected = requestedId ? agentletOwner(requestedId) : null;
-  if (!owner && !expected) return true;
-  const actual = agentletOwner(agentletId);
-  return (!owner || actual === owner) && (!expected || actual === expected);
-}
-
-export function requireOwnAgentlet(agentletId: string): void {
-  if (!canUseAgentlet(agentletId)) {
-    const error = new Error('Device is unavailable to this user');
-    Object.assign(error, { statusCode: 403, code: 'DEVICE_ACCESS_REQUIRED' });
-    throw error;
-  }
-}
-
-/** Called by the Gateway's existing host-owned authentication port. */
+/**
+ * Called by the Gateway's existing host-owned authentication port.
+ *
+ * A reset or revocation in this process revokes the handshake's
+ * {@link Admission}: before it has decided, the handshake is refused; after,
+ * the connection it registers is closed. A first-time device claim is
+ * ordered with this owner's resets through commit, so either the claim
+ * stands or it writes nothing. A reset in another process is seen through
+ * the stored credential version, read again after each lookup and after
+ * the claim.
+ */
 export function authenticateUserAgentlet(service: IdentityService) {
-  return async (agentletId: string, token: string) => {
-    const admitted = readAgentCredential(token);
+  const admit = async (
+    agentletId: string,
+    token: string,
+    admission: Admission | null,
+  ) => {
+    const refuseIfRevoked = () => {
+      if (admission?.revoked) throw new Error(admission.revoked);
+    };
+    const admitted = await readAgentCredential(token);
     if (admitted?.aud !== 'device') throw refusedDeviceCredential(token);
     const identity = await service.resolvePrincipal?.(admitted.principalId);
     if (!identity?.member) throw new Error('Device owner is not admitted');
-    // The credential may have been reset during the lookup, after its
-    // devices were disconnected; this one is not connected yet.
-    const claims = readAgentCredential(token);
+    // The credential may have been reset during the lookup.
+    const claims = await readAgentCredential(token);
     if (claims?.aud !== 'device') throw refusedDeviceCredential(token);
     // An admission mutation may have completed while a handshake's initial
     // lookup was pending; reusable credentials alone do not admit its owner.
     if (!(await service.resolvePrincipal?.(claims.principalId))?.member)
       throw new Error('Device owner is not admitted');
-    if (!readAgentCredential(token)) throw refusedDeviceCredential(token);
-    const owners = readMap(ownersPath(), ownersSchema);
-    if (
-      Object.hasOwn(owners, agentletId) &&
-      owners[agentletId] !== claims.principalId
-    )
+    if (!(await readAgentCredential(token)))
+      throw refusedDeviceCredential(token);
+    const owner = await agentletOwner(agentletId);
+    if (owner !== null && owner !== claims.principalId)
       throw new Error('Device belongs to another user');
-    if (!Object.hasOwn(owners, agentletId))
-      writeMap(ownersPath(), {
-        ...owners,
-        [agentletId]: claims.principalId,
+    if (owner === null) {
+      await claimsAndResets(claims.principalId, async () => {
+        // No reset of this owner runs until the claim commits, so a claim
+        // that passes these checks is never overtaken by one.
+        refuseIfRevoked();
+        if (!(await readAgentCredential(token)))
+          throw refusedDeviceCredential(token);
+        // Claims are serialized, so of two people racing for a new device
+        // the second sees the first's claim here and is refused.
+        await getServerRecords().update(OWNERS, (current) => {
+          // Checked again as the claim is written: a membership removal
+          // revokes the admission without a reset, and so without waiting
+          // for the lock, so a claim it overtook writes nothing.
+          refuseIfRevoked();
+          const owners = ownersSchema.parse(current ?? {});
+          if (
+            Object.hasOwn(owners, agentletId) &&
+            owners[agentletId] !== claims.principalId
+          )
+            throw new Error('Device belongs to another user');
+          return { ...owners, [agentletId]: claims.principalId };
+        });
       });
+      // Another process's reset reaches this one only through storage.
+      if (!(await readAgentCredential(token)))
+        throw refusedDeviceCredential(token);
+    }
+    refuseIfRevoked();
+    if (admission) admission.decided = true;
     return { metadata: { principalId: claims.principalId } };
+  };
+  return (agentletId: string, token: string) => {
+    const claims = signedClaims(token);
+    if (!claims) return admit(agentletId, token, null);
+    const admission: Admission = {
+      agentletId,
+      version: claims.v,
+      revoked: null,
+      decided: false,
+    };
+    return trackAdmission(
+      claims.principalId,
+      admission,
+      admit(agentletId, token, admission),
+    );
   };
 }
 
@@ -363,8 +579,9 @@ export async function agentReachbackEnvironment(spec: {
   env?: Record<string, string>;
 }): Promise<Record<string, string> | undefined> {
   if (!spec.agentletId) return undefined;
-  const principalId = agentletOwner(spec.agentletId);
-  requireOwnAgentlet(spec.agentletId);
+  const access = await readDeviceAccess();
+  const principalId = access.owner(spec.agentletId);
+  access.require(spec.agentletId);
   if (
     hostIdentity?.provider === 'bubble' &&
     (!principalId ||
@@ -393,7 +610,7 @@ export async function agentReachbackEnvironment(spec: {
       'A personal agent must have a Workspace, Space and conversation',
     );
   return {
-    HUABU_RFS_TOKEN: sign({
+    HUABU_RFS_TOKEN: await sign({
       aud: 'rfs',
       principalId,
       workspaceId: path[4],

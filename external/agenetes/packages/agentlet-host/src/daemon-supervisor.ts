@@ -229,8 +229,11 @@ export interface AttachOptions {
   bootstrapEnv?: Readonly<Record<string, string>>;
   /** Absolute directory for host-owned persistent state. */
   dataDir: string;
-  /** Resolve the host-owned process limit each time the daemon starts. */
-  getMaxAgents?: () => number;
+  /**
+   * Resolve the host-owned process limit each time the daemon starts. The
+   * daemon is forked once it resolves, so a host may read it from storage.
+   */
+  getMaxAgents?: () => number | Promise<number>;
   /**
    * Host-namespaced environment isolation for the forked daemon (and,
    * transitively, every agent it spawns). When `hostEnvPrefix` is set,
@@ -298,7 +301,9 @@ class DaemonSupervisor {
    * {@link attach} time. Used only for legacy-ticket cleanup here.
    */
   private dataDir = '';
-  private getMaxAgents: (() => number) | undefined;
+  private getMaxAgents: (() => number | Promise<number>) | undefined;
+  /** A start is waiting for the host's process limit before forking. */
+  private launching = false;
   private hostEnvPrefix: string | undefined;
   private hostEnvAllowlist: readonly string[] | undefined;
 
@@ -423,6 +428,7 @@ class DaemonSupervisor {
     if (!this.app) return;
     if (this.state.shuttingDown) return;
     if (this.state.child) return; // already running
+    if (this.launching) return; // already resolving its process limit
 
     const entry = this.daemonEntryPath;
     if (!entry || !existsSync(entry)) {
@@ -441,8 +447,40 @@ class DaemonSupervisor {
       this.app.log.warn(`[acp/supervisor] ${this.state.lastError}`);
       return;
     }
+    this.state.starting = true;
+    this.state.nextRestartAt = null;
+    const getMaxAgents = this.getMaxAgents;
+    if (!getMaxAgents) {
+      this.fork(entry, token, undefined);
+      return;
+    }
+    this.launching = true;
+    void (async () => {
+      let maxAgents: number | undefined;
+      try {
+        maxAgents = await getMaxAgents();
+      } catch (err) {
+        // The daemon's own default limit applies, as when the host sets none.
+        this.app?.log.warn(
+          { err },
+          '[acp/supervisor] process limit unavailable; using the daemon default',
+        );
+      } finally {
+        this.launching = false;
+      }
+      // close() may have run, or restart() found nothing to start, meanwhile.
+      if (this.state.shuttingDown || this.state.child) return;
+      this.fork(entry, token, maxAgents);
+    })();
+  }
+
+  private fork(
+    entry: string,
+    token: string,
+    maxAgents: number | undefined,
+  ): void {
+    if (!this.app) return;
     const serverUrl = `ws://127.0.0.1:${this.serverPort}/api/acp/agent`;
-    const maxAgents = this.getMaxAgents?.();
     const args = [
       'daemon',
       '--server',
@@ -454,9 +492,6 @@ class DaemonSupervisor {
       ...(maxAgents === undefined ? [] : ['--max-agents', String(maxAgents)]),
       '--allow-insecure',
     ];
-
-    this.state.starting = true;
-    this.state.nextRestartAt = null;
 
     const childEnv = filterHostNamespacedEnv(
       process.env,

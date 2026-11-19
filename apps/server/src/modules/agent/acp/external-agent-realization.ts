@@ -179,7 +179,7 @@ async function ensureSessionFromCanonicalSpec(
     ...(spec.spec.initialSelections !== undefined && {
       initialSelections: spec.spec.initialSelections,
     }),
-    idleTimeoutSecs: getExternalAgentRuntimeConfig().idleTimeoutSecs,
+    idleTimeoutSecs: (await getExternalAgentRuntimeConfig()).idleTimeoutSecs,
     logger,
   });
 }
@@ -252,7 +252,7 @@ export class ExternalAgentRealizationService {
     try {
       const realized = await pending;
       if (realized.spec.spec.agentletId)
-        requireOwnAgentlet(realized.spec.spec.agentletId);
+        await requireOwnAgentlet(realized.spec.spec.agentletId);
       this.validateRequest(realized, options);
       return realized;
     } finally {
@@ -260,12 +260,12 @@ export class ExternalAgentRealizationService {
     }
   }
 
-  ensureSession(
+  async ensureSession(
     realized: RealizedExternalAgentThread,
     logger: FastifyBaseLogger,
   ): Promise<AcpSessionEntry> {
     if (realized.spec.spec.agentletId)
-      requireOwnAgentlet(realized.spec.spec.agentletId);
+      await requireOwnAgentlet(realized.spec.spec.agentletId);
     return this.dependencies.ensureSession(realized, logger);
   }
 
@@ -331,7 +331,7 @@ export class ExternalAgentRealizationService {
         );
       }
       const spec = record.spec as AcpWorkloadSpec;
-      if (spec.spec.agentletId) requireOwnAgentlet(spec.spec.agentletId);
+      if (spec.spec.agentletId) await requireOwnAgentlet(spec.spec.agentletId);
       validateRequestedExecution(spec, options);
       const binding = bindingFromSpec(spec);
       const realized = {
@@ -402,7 +402,7 @@ export class ExternalAgentRealizationService {
       );
     }
 
-    const spec = this.dependencies.buildSpec({
+    const spec = await this.dependencies.buildSpec({
       binding,
       threadId: options.threadId,
       canvasId: options.canvasId,
