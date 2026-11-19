@@ -51,11 +51,6 @@ const mocks = vi.hoisted(() => ({
   showErrorBox: vi.fn(),
   showMessageBox: vi.fn(),
   openExternal: vi.fn().mockResolvedValue(undefined),
-  openImageViewer: vi.fn(),
-}));
-
-vi.mock('./image-viewer.js', () => ({
-  openImageViewer: mocks.openImageViewer,
 }));
 
 vi.mock('electron', () => ({
@@ -999,7 +994,7 @@ describe('desktop Space Tab lifecycle', () => {
     expect(mocks.options[0].webPreferences?.partition).toBeUndefined();
   });
 
-  it('keeps what the local Server serves inside the app when a page opens it in a new window', () => {
+  it('does nothing with a Server file a page opens in a new window, whoever asks', () => {
     const a = open('a');
     const contents = a.webContents as typeof a.webContents & {
       downloadURL: ReturnType<typeof vi.fn>;
@@ -1009,18 +1004,11 @@ describe('desktop Space Tab lifecycle', () => {
       .calls[0][0] as (details: { url: string }) => { action: string };
     const artifact = 'http://localhost:3001/api/canvas/a/artifact';
 
-    // The system browser has no launch token and would be shown a 401.
-    expect(handler({ url: `${artifact}/shot.png` })).toEqual({
-      action: 'deny',
-    });
-    expect(mocks.openImageViewer).toHaveBeenCalledWith(
-      `${artifact}/shot.png`,
-      a.webContents,
-    );
-    expect(handler({ url: `${artifact}/report.pdf` })).toEqual({
-      action: 'deny',
-    });
-    expect(contents.downloadURL).toHaveBeenCalledWith(`${artifact}/report.pdf`);
+    // A page framed on the Canvas can open a window too, so this is no
+    // place to save or show a file; the browser would only be shown a 401.
+    for (const url of [`${artifact}/shot.png`, `${artifact}/report.pdf`])
+      expect(handler({ url })).toEqual({ action: 'deny' });
+    expect(contents.downloadURL).not.toHaveBeenCalled();
     expect(mocks.openExternal).not.toHaveBeenCalled();
 
     expect(handler({ url: 'https://example.com/page' })).toEqual({
@@ -1029,7 +1017,6 @@ describe('desktop Space Tab lifecycle', () => {
     expect(mocks.openExternal).toHaveBeenCalledWith('https://example.com/page');
     expect(handler({ url: 'file:///etc/passwd' })).toEqual({ action: 'deny' });
     expect(mocks.openExternal).toHaveBeenCalledTimes(1);
-    expect(mocks.openImageViewer).toHaveBeenCalledTimes(1);
   });
 
   it('opens native cross-Space navigation in another Tab without saving the source page', async () => {

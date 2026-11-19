@@ -68,6 +68,7 @@ import {
   DesktopSecureSecretStore,
   isDesktopSecretId,
 } from './secure-secrets.js';
+import { openServerFile } from './server-files.js';
 import {
   isSameOrigin,
   parseServerOption,
@@ -1362,6 +1363,11 @@ app.whenReady().then(async () => {
   registerDiagnosticsIpc();
   if (!requestedRemoteOrigin) {
     registerDialogIpc();
+    ipcMain.handle('files:open', (event, url: unknown) => {
+      assertApplicationSender(event);
+      if (!applicationUrl) throw new Error('The application is not ready.');
+      openServerFile(url, event.sender, new URL(applicationUrl).origin);
+    });
   }
   registerMenuIpc(() => mainWindow, assertApplicationSender);
   registerDesktopTabsIpc(() => desktopTabs);

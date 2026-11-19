@@ -7,7 +7,6 @@ import { join } from 'node:path';
 
 import { dialog, ipcMain, shell, WebContentsView } from 'electron';
 
-import { openImageViewer } from './image-viewer.js';
 import { classifyLink } from './link-targets.js';
 import { isSameOrigin } from './server-target.js';
 import {
@@ -272,17 +271,13 @@ export class DesktopTabs {
         this.runAction(async () => this.open(tabNavigationFromUrl(url)));
         return { action: 'deny' };
       }
-      // The system browser holds no launch token, so it would be refused what
-      // the local Server serves. A remote Server authenticates the browser
-      // itself, as before.
-      if (!this.remote && target === 'image') {
-        openImageViewer(url, contents);
+      // The system browser holds no launch token, so it would only be refused
+      // what the local Server serves; the application opens those files over
+      // its IPC bridge instead (`server-files.ts`). Nothing is done for them
+      // here, where a page framed on the Canvas can also ask. A remote Server
+      // authenticates the browser itself, as before.
+      if (!this.remote && (target === 'image' || target === 'file'))
         return { action: 'deny' };
-      }
-      if (!this.remote && target === 'file') {
-        contents.downloadURL(url);
-        return { action: 'deny' };
-      }
       if (target !== 'none') {
         void shell
           .openExternal(url)
