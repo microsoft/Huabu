@@ -428,3 +428,26 @@ it('resolves host access once per read or mutation, whatever the number of Profi
   await registry.patchProfile('one', { alias: 'Renamed' });
   expect(resolveAccess).toHaveBeenCalledTimes(6);
 });
+
+it('lists the Profiles committed by the time access is resolved', async () => {
+  const store = new InMemoryAgentProfileRegistryStore();
+  const all = await AgentProfileRegistry.open(store);
+  for (const id of ['kept', 'deleted'])
+    await all.createProfile({ ...input, id });
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => (release = resolve));
+  let holding = false;
+  const registry = await AgentProfileRegistry.open(store, {
+    resolveAccess: async () => {
+      if (holding) await held;
+      return () => true;
+    },
+  });
+  holding = true;
+  // Access resolves only after a deletion has committed.
+  const listing = registry.listProfiles();
+  holding = false;
+  expect(await registry.deleteProfile('deleted')).toBe(true);
+  release();
+  expect((await listing).map(({ id }) => id)).toEqual(['kept']);
+});

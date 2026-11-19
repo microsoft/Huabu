@@ -132,9 +132,10 @@ export class AgentProfileRegistry {
     return profile && structuredClone(profile);
   }
   async listProfiles(): Promise<AgentProfile[]> {
-    return structuredClone(
-      this.state.profiles.filter(await this.resolveAccess()),
-    );
+    // Resolve access before reading the list: `state.profiles` is replaced
+    // by every committed change, and one may commit during the lookup.
+    const canAccess = await this.resolveAccess();
+    return structuredClone(this.state.profiles.filter(canAccess));
   }
   async listSelectableProfileIds(): Promise<string[]> {
     const canAccess = await this.resolveAccess();
