@@ -25,6 +25,7 @@ import {
   usePreviewWorkspaceStore,
 } from './previewWorkspace/store';
 import { useSettingsUiStore } from './settingsUiStore';
+import { useWorkspaceStore } from './workspaceStore';
 
 /** The action of the setup toast a missing Agent raised. */
 function configureModelAction() {
@@ -202,6 +203,27 @@ describe('post-create editing', () => {
     await Promise.resolve();
     expect(listProfiles).toHaveBeenCalledOnce();
     expect(usePreviewWorkspaceStore.getState().workspace.tabs).toEqual({});
+  });
+
+  it('does not open a Chat from a setup toast after a Workspace switch to the same Space id', async () => {
+    listProfiles.mockResolvedValue({
+      ...profileSnapshot,
+      profiles: [],
+      selectableProfileIds: [],
+    });
+    const workspaceId = useWorkspaceStore.getState().workspaceId;
+    useWorkspaceStore.setState({ workspaceId: 'workspace-a' });
+    try {
+      expect(await openNewChat()).toBe('');
+      // Space ids are per Workspace: the destination has one with this id.
+      useWorkspaceStore.setState({ workspaceId: 'workspace-b' });
+      configureModelAction().onClick();
+      await Promise.resolve();
+      expect(listProfiles).toHaveBeenCalledOnce();
+      expect(usePreviewWorkspaceStore.getState().workspace.tabs).toEqual({});
+    } finally {
+      useWorkspaceStore.setState({ workspaceId });
+    }
   });
 
   it('does not open a delayed Chat in a different Canvas or changed workspace', async () => {
