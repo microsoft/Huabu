@@ -1740,12 +1740,12 @@
     }
   },
   "errors": {
-    "connectAnAgent": "Connect an Agent",
-    "conversationAgentUnconfigured": "Connect an external Agent or use Built-In Pi to start a new conversation.",
+    "configureModel": "Configure model",
+    "connectDevice": "Connect device",
+    "conversationAgentUnconfigured": "To start a conversation, configure a model for Built-In Pi or connect a device with an external Agent.",
     "nodeSaveFailed": "Could not save \"{{name}}\". Your changes are still here; try again.",
     "rateLimited": "Too many requests. Try again in {{seconds}} seconds.",
-    "spaceSaveAccessDenied": "This Space is read-only for your account. Your changes were not saved.",
-    "useBuiltInPi": "Use Built-In Pi"
+    "spaceSaveAccessDenied": "This Space is read-only for your account. Your changes were not saved."
   },
   "people": {
     "loading": "Loading people…",

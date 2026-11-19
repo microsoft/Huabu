@@ -7,10 +7,12 @@ import { createId, isFileReference } from '@huabu/shared';
 
 import { ApiError } from '@/api/_client';
 import { getAgentConversationOwner } from '@/api/agent';
-import { toast } from '@/components/Common/Toast';
 import { pageLifecycle } from '@/utils/pageLifecycle';
 
-import { loadDefaultAgentBinding } from '../acpProfilesStore';
+import {
+  loadDefaultAgentBinding,
+  toastConversationStartError,
+} from '../acpProfilesStore';
 import { selectCanWriteCanvas } from '../canvasStore';
 import useCanvasStore from '../canvasStore';
 import { rememberPreviewedAgent } from '../commentDestinationMemory';
@@ -303,8 +305,11 @@ export async function openNewChat(groupId?: string): Promise<string> {
       return tabId;
     });
   } catch (error) {
-    toast(error instanceof Error ? error.message : String(error), {
-      tone: 'danger',
+    // A missing Agent offers setup. The toast outlives this call, so its retry
+    // opens the requested Chat only while the same Space is still open.
+    toastConversationStartError(error, () => {
+      if (useCanvasStore.getState().canvasId === canvasId)
+        void openNewChat(groupId);
     });
     return '';
   }

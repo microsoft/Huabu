@@ -24,6 +24,14 @@ import {
   selectActiveNodeId,
   usePreviewWorkspaceStore,
 } from './previewWorkspace/store';
+import { useSettingsUiStore } from './settingsUiStore';
+
+/** The action of the setup toast a missing Agent raised. */
+function configureModelAction() {
+  const action = vi.mocked(toast).mock.calls[0]?.[1]?.action;
+  if (!action) throw new Error('Expected the setup toast');
+  return action;
+}
 
 /** The node the workspace is showing; presentation moved off `canvasStore`. */
 const expandedNodeId = () =>
@@ -75,6 +83,8 @@ beforeEach(() => {
   vi.useFakeTimers();
   vi.mocked(toast).mockClear();
   listProfiles.mockReset().mockResolvedValue(profileSnapshot);
+  localStorage.clear();
+  useSettingsUiStore.getState().close();
   resetStore();
 });
 
@@ -134,18 +144,64 @@ describe('post-create editing', () => {
     expect(listProfiles).not.toHaveBeenCalled();
   });
 
-  it('prompts to configure defaults without creating a fallback Chat', async () => {
-    listProfiles.mockResolvedValueOnce({
+  it('offers setup without creating a fallback Chat', async () => {
+    const unconfigured = {
       ...profileSnapshot,
       profiles: [],
       selectableProfileIds: [],
-    });
+    };
+    listProfiles.mockResolvedValue(unconfigured);
     const threads = useChatStore.getState().threadsById;
     expect(await openChat()).toBe('');
     expect(useChatStore.getState().threadsById).toBe(threads);
     expect(usePreviewWorkspaceStore.getState().workspace.tabs).toEqual({});
-    expect(toast).toHaveBeenCalledWith(expect.any(String), { tone: 'danger' });
+    expect(toast).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        tone: 'info',
+        action: expect.objectContaining({ label: 'Configure model' }),
+        secondaryAction: expect.objectContaining({ label: 'Connect device' }),
+      }),
+    );
     expect(usePanelStore.getState().isRightCollapsed).toBe(true);
+  });
+
+  it('opens the requested Chat with Built-In Pi when the user configures a model', async () => {
+    listProfiles.mockResolvedValue({
+      ...profileSnapshot,
+      profiles: [],
+      selectableProfileIds: [],
+    });
+    expect(await openNewChat()).toBe('');
+    configureModelAction().onClick();
+    expect(useSettingsUiStore.getState()).toMatchObject({
+      isOpen: true,
+      requestedTab: 'builtIn',
+    });
+    await vi.waitFor(() =>
+      expect(
+        Object.values(usePreviewWorkspaceStore.getState().workspace.tabs),
+      ).toEqual([
+        expect.objectContaining({
+          target: expect.objectContaining({ kind: 'chat' }),
+        }),
+      ]),
+    );
+  });
+
+  it('does not open a Chat from a setup toast that outlived its Space', async () => {
+    listProfiles.mockResolvedValue({
+      ...profileSnapshot,
+      profiles: [],
+      selectableProfileIds: [],
+    });
+    expect(await openNewChat()).toBe('');
+    useCanvasStore.getState()._setStateNoAutosave({ canvasId: 'other-canvas' });
+    usePreviewWorkspaceStore.setState({ canvasId: 'other-canvas' });
+    configureModelAction().onClick();
+    await Promise.resolve();
+    expect(listProfiles).toHaveBeenCalledOnce();
+    expect(usePreviewWorkspaceStore.getState().workspace.tabs).toEqual({});
   });
 
   it('does not open a delayed Chat in a different Canvas or changed workspace', async () => {
