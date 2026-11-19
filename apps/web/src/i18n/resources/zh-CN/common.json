@@ -621,6 +621,8 @@
     "agentletPrepareDevice": "准备运行环境",
     "agentletRequirements": "环境要求：Node.js 24.16+、pnpm。",
     "agentletSourceSetup": "下载与服务器版本一致的 Huabu 源码，并安装依赖：",
+    "agentletSourceSetupPinned": "下载与服务器运行版本完全一致的 Huabu 源码（{{revision}}），并安装依赖：",
+    "agentletSourceSetupRevisionUnknown": "下载与服务器版本一致的 Huabu 源码，并安装依赖。此服务器未报告其确切版本；如不确定应使用哪个版本，请咨询管理员：",
     "agentletRunConnection": "运行连接命令",
     "agentletRunConnectionDescription": "在该设备上打开终端，进入 Huabu 源码目录。根据所用终端选择类型，复制对应的连接命令并在终端中运行。",
     "agentletLocalAccessSetup": "当前服务器仅监听本机。如需远程访问，请停止服务器，运行 pnpm run setup 后重新启动。",

@@ -891,4 +891,60 @@ describe('ExternalAgentRuntimeSettings', () => {
     expect(container.textContent).not.toContain('secret');
     expect(document.querySelector('textarea')).toBeNull();
   });
+
+  describe('source matching the Server', () => {
+    const sha = '0b4438c81f7fb5562dac8f96b19a80302c7f5d15';
+    const setupText = () =>
+      container.querySelector('ol > li p:nth-of-type(2)')?.textContent;
+    const commands = () => container.querySelector('ol > li pre')?.textContent;
+
+    it('checks out the exact revision the Server reports', async () => {
+      useDeploymentReadinessStore.setState({
+        readiness: { ...loopbackReadiness, revision: sha },
+      });
+      await act(async () => root.render(<AgentConnectionSettings />));
+      expect(setupText()).toBe('settings.agentletSourceSetupPinned');
+      expect(commands()).toBe(
+        `git clone https://github.com/microsoft/Huabu.git\ncd Huabu\ngit checkout ${sha}\npnpm install`,
+      );
+    });
+
+    it.each([null, undefined])(
+      'keeps the unpinned commands and says the revision is unknown (%s)',
+      async (revision) => {
+        useDeploymentReadinessStore.setState({
+          readiness: { ...loopbackReadiness, revision },
+        });
+        await act(async () => root.render(<AgentConnectionSettings />));
+        expect(setupText()).toBe('settings.agentletSourceSetupRevisionUnknown');
+        expect(commands()).not.toContain('git checkout');
+      },
+    );
+
+    it('stays generic while readiness has not loaded', async () => {
+      await act(async () => root.render(<AgentConnectionSettings />));
+      expect(setupText()).toBe('settings.agentletSourceSetup');
+      expect(commands()).not.toContain('git checkout');
+    });
+  });
+
+  describe('default shell', () => {
+    afterEach(() => {
+      Reflect.deleteProperty(navigator, 'platform');
+    });
+
+    it.each([
+      ['Win32', 'powershell'],
+      ['Linux x86_64', 'posix'],
+      ['MacIntel', 'posix'],
+    ])('on %s copies the %s command', async (platform, shell) => {
+      Object.defineProperty(navigator, 'platform', {
+        configurable: true,
+        value: platform,
+      });
+      await act(async () => root.render(<AgentConnectionSettings />));
+      await act(async () => button('settings.agentletCommandCopy').click());
+      expect(createConnectionCommand).toHaveBeenCalledWith(shell, 'command');
+    });
+  });
 });
