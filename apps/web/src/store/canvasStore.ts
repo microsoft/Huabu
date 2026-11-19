@@ -5145,6 +5145,8 @@ const useCanvasStore = create<RFState>()(
         // are recorded, the resolver sees an empty cache for those
         // ids and short-circuits via `intent.bypassReparent`.
         clearDragDecisions();
+        // Frame each dragged node would belong to if released this tick.
+        const landingFrameById = new Map<string, string | undefined>();
 
         for (const dn of draggedNodes) {
           const originalNode = nodes.find((n) => n.id === dn.id);
@@ -5260,6 +5262,11 @@ const useCanvasStore = create<RFState>()(
               enterFrameId: targetFrameId ?? null,
             });
           }
+          landingFrameById.set(
+            dn.id,
+            targetFrameId ??
+              (wouldUnframeNow ? undefined : originalNode.parentId),
+          );
         }
 
         let projectedSourceNodes = liveNodes;
@@ -5461,6 +5468,35 @@ const useCanvasStore = create<RFState>()(
                 }
               : undefined;
 
+          // The rest of the selection that lands in this Frame with it, so
+          // a Column / Row previews the whole block the release will place.
+          const companions =
+            frameAbs && gridCfg.axis !== 'grid'
+              ? draggedNodes.flatMap((node) => {
+                  if (
+                    node.id === draggedNode.id ||
+                    landingFrameById.get(node.id) !== targetFrameId
+                  )
+                    return [];
+                  const abs = getFrameAbsolutePosition(
+                    projectedGestureNodes,
+                    node.id,
+                  );
+                  const projected = projectedGestureNodes.find(
+                    (candidate) => candidate.id === node.id,
+                  );
+                  if (!abs || !projected) return [];
+                  return [
+                    {
+                      id: node.id,
+                      x: abs.x - frameAbs.x,
+                      y: abs.y - frameAbs.y,
+                      ...getNodeSize(projected),
+                    },
+                  ];
+                })
+              : [];
+
           const draggedNodeIds = [
             draggedNode.id,
             ...draggedNodes
@@ -5533,7 +5569,13 @@ const useCanvasStore = create<RFState>()(
                 gridCfg.axis,
                 count,
                 draggedRect,
-                { edges, target: masonry?.target, rowTarget, requests },
+                {
+                  edges,
+                  target: masonry?.target,
+                  rowTarget,
+                  requests,
+                  companions,
+                },
               )
             : null;
 
