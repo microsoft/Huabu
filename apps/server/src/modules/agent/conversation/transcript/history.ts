@@ -27,6 +27,7 @@ import {
 } from '@huabu/shared/ink-interpretation';
 
 import { projectUserVisibleAttachments } from './attachment-chips.js';
+import { summarizeToolPart } from './tool-summary.js';
 import {
   chatEnvelopeFromSubmission,
   interactiveViewEventFromSubmission,
@@ -36,6 +37,8 @@ import type { ChatEnvelope } from '../envelope.js';
 import type { AgentTurn, FoldedMessage } from '@agenetes/protocol';
 import type {
   AssistantHistoryPart,
+  AssistantToolPart,
+  HistoryDetailLevel,
   ChatAttachment,
   ChatHistoryItem,
   ImageGenerationData,
@@ -168,7 +171,19 @@ function mergeInternalToolArgs(
 function buildToolPart(
   data: FoldedToolCallData,
   recoverInternalToolName: boolean,
-): AssistantHistoryPart {
+  options: { detailLevel?: HistoryDetailLevel; turnRef?: string } = {},
+): AssistantToolPart {
+  const full = buildFullToolPart(data, recoverInternalToolName);
+  if (!options.turnRef) return full;
+  return options.detailLevel === 'summary'
+    ? summarizeToolPart(full, options.turnRef)
+    : { ...full, detail: { state: 'inline', turnRef: options.turnRef } };
+}
+
+function buildFullToolPart(
+  data: FoldedToolCallData,
+  recoverInternalToolName: boolean,
+): AssistantToolPart {
   const toolCallId = data.toolCallId;
   const internalName =
     data.internalToolName ?? (recoverInternalToolName ? data.title : undefined);
@@ -295,6 +310,8 @@ export function buildHistoryFromTurns(
   options: {
     recoverInternalToolNames?: boolean;
     activeTurnIndex?: number;
+    detailLevel?: HistoryDetailLevel;
+    turnRef?: string;
   } = {},
 ): void {
   for (const [turnIndex, turn] of turns.entries()) {
@@ -429,6 +446,7 @@ export function buildHistoryFromTurns(
             buildToolPart(
               msg.data as FoldedToolCallData,
               options.recoverInternalToolNames === true,
+              options,
             ),
           ]);
           break;

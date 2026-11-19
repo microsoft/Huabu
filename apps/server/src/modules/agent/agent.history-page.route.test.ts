@@ -11,6 +11,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   history: vi.fn(),
   historyPage: vi.fn(),
+  historyTurn: vi.fn(),
   record: vi.fn(() => undefined),
   isActive: vi.fn(() => false),
   waitForTurnStart: vi.fn(),
@@ -21,6 +22,7 @@ vi.mock('../agent/agenetes/drivers.js', () => ({
   agenetes: {
     history: mocks.history,
     historyPage: mocks.historyPage,
+    historyTurn: mocks.historyTurn,
     record: mocks.record,
   },
 }));
@@ -36,9 +38,15 @@ vi.mock('../agent/agent-thread.service.js', () => ({
 vi.mock('../workspace/paths.js', () => ({
   canvasAcpNamespace: (canvasId: string) => ({ name: canvasId }),
 }));
+vi.mock('../workspace.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof WorkspaceModule>()),
+  acquireWorkspaceOperationLease: () => ({ release: vi.fn() }),
+}));
 
 import { createChatSubmission } from './agenetes/handle.js';
 import agentRoutes from './agent.route.js';
+
+import type * as WorkspaceModule from '../workspace.js';
 
 async function request(url: string) {
   const app = Fastify();
@@ -52,6 +60,7 @@ describe('GET /agent/history/:threadId/page', () => {
   beforeEach(() => {
     mocks.history.mockReset();
     mocks.historyPage.mockReset();
+    mocks.historyTurn.mockReset();
     mocks.record.mockReset();
     mocks.record.mockReturnValue(undefined);
     mocks.isActive.mockReturnValue(false);
@@ -174,5 +183,84 @@ describe('GET /agent/history/:threadId/page', () => {
     );
     expect(response.statusCode).toBe(status);
     expect(response.json()).toMatchObject({ code });
+  });
+
+  it('uses summaries only for persisted turns and loads one complete projected turn on demand', async () => {
+    const turn = {
+      request: null,
+      transcript: [
+        {
+          type: 'tool_call',
+          data: {
+            toolCallId: 'tool',
+            title: 'Read file',
+            content: [
+              {
+                type: 'content',
+                content: { type: 'text', text: 'body-only-on-demand' },
+              },
+            ],
+          },
+        },
+      ],
+    };
+    mocks.historyPage.mockResolvedValue({
+      groups: [
+        {
+          id: 'group',
+          turns: [turn, { ...turn, isIncomplete: true }],
+          turnRefs: ['ref'],
+          isActive: true,
+          activeTurnIndex: 1,
+        },
+      ],
+      hasMore: false,
+    });
+    const page = await request(
+      '/agent/history/thread-1/page?canvasId=canvas-1&limit=3&detailLevel=summary',
+    );
+    expect(page.statusCode).toBe(200);
+    const messages = page.json().turns[0].messages;
+    expect(messages[0].parts[0]).toMatchObject({
+      detail: { state: 'deferred', turnRef: 'ref' },
+    });
+    expect(messages[0].parts[0].content).toBeUndefined();
+    expect(messages[1].parts[0].content[0].content.text).toBe(
+      'body-only-on-demand',
+    );
+    mocks.historyTurn.mockResolvedValue(turn);
+    const detail = await request(
+      '/agent/history/thread-1/turn/ref?canvasId=canvas-1',
+    );
+    expect(detail.statusCode, detail.body).toBe(200);
+    expect(detail.json().messages[0].parts[0]).toMatchObject({
+      content: [{ content: { text: 'body-only-on-demand' } }],
+      detail: { state: 'inline', turnRef: 'ref' },
+    });
+    expect(mocks.historyTurn).toHaveBeenCalledWith(
+      { name: 'canvas-1' },
+      'thread-1',
+      'ref',
+    );
+    expect(mocks.history).not.toHaveBeenCalled();
+  });
+
+  it('rejects invalid detail requests and distinguishes missing and stale turns', async () => {
+    expect((await request('/agent/history/thread-1/turn/ref')).statusCode).toBe(
+      400,
+    );
+    expect(mocks.historyTurn).not.toHaveBeenCalled();
+    mocks.historyTurn.mockResolvedValue(undefined);
+    expect(
+      (await request('/agent/history/thread-1/turn/ref?canvasId=canvas-1'))
+        .statusCode,
+    ).toBe(404);
+    mocks.historyTurn.mockRejectedValue(
+      new StaleTurnCursorError('History cursor is stale'),
+    );
+    expect(
+      (await request('/agent/history/thread-1/turn/ref?canvasId=canvas-1'))
+        .statusCode,
+    ).toBe(409);
   });
 });

@@ -23,6 +23,8 @@ import {
   agentCanvasIdQuerySchema,
   agentHistoryPageParamsSchema,
   agentHistoryPageQuerySchema,
+  agentHistoryTurnParamsSchema,
+  agentHistoryTurnQuerySchema,
   agentRequestSchema,
   createId,
   forkThreadBodySchema,
@@ -63,6 +65,7 @@ import { resolveProfileSnapshot } from './acp/profile-snapshot.js';
 import { getRequestIdentity } from '../identity/request.js';
 import { isRestrictedRequest } from '../security/space-access.js';
 import { canvasAcpNamespace } from '../workspace/paths.js';
+import { acquireWorkspaceOperationLease } from '../workspace.js';
 
 import type { ControlMsg, Namespace } from '@agenetes/protocol';
 import type {
@@ -70,6 +73,9 @@ import type {
   AgentHistoryPageParams,
   AgentHistoryPageQuery,
   AgentHistoryPageResponse,
+  AgentHistoryTurnParams,
+  AgentHistoryTurnQuery,
+  AgentHistoryTurnResponse,
   AgentHostStreamEvent,
   AgentRequest,
   AgentStreamEvent,
@@ -262,7 +268,7 @@ const agentRoutes: FastifyPluginAsync = async (
     }
 
     const { threadId } = parsedParams.data;
-    const { canvasId, limit, before } = parsedQuery.data;
+    const { canvasId, limit, before, detailLevel } = parsedQuery.data;
     const namespace = canvasAcpNamespace(canvasId);
     if (
       before === undefined &&
@@ -284,11 +290,21 @@ const agentRoutes: FastifyPluginAsync = async (
         const messages: ChatHistoryItem[] = [];
         let activeMessageStart: number | undefined;
         group.turns.forEach((turn, index) => {
+          if (
+            detailLevel === 'summary' &&
+            !turn.isIncomplete &&
+            !group.turnRefs?.[index]
+          ) {
+            throw new Error('Persisted history turn has no detail reference');
+          }
           if (index === group.activeTurnIndex) {
             activeMessageStart = messages.length;
           }
           buildHistoryFromTurns([turn], messages, {
             recoverInternalToolNames,
+            ...(detailLevel === 'summary' && !turn.isIncomplete
+              ? { detailLevel, turnRef: group.turnRefs?.[index] }
+              : {}),
             ...(index === group.activeTurnIndex &&
             agentThreadService.isActive(threadId, canvasId)
               ? { activeTurnIndex: 0 }
@@ -322,6 +338,53 @@ const agentRoutes: FastifyPluginAsync = async (
         });
       }
       throw error;
+    }
+  });
+  fastify.get<{
+    Params: AgentHistoryTurnParams;
+    Querystring: AgentHistoryTurnQuery;
+    Reply: ApiResult<AgentHistoryTurnResponse>;
+  }>('/history/:threadId/turn/:turnRef', async (request, reply) => {
+    const params = agentHistoryTurnParamsSchema.safeParse(request.params);
+    const query = agentHistoryTurnQuerySchema.safeParse(request.query);
+    if (!params.success || !query.success) {
+      return reply.code(400).send({
+        message: 'Invalid history turn request',
+        code: 'malformed_history_request',
+      });
+    }
+    const { threadId, turnRef } = params.data;
+    const lease = acquireWorkspaceOperationLease();
+    try {
+      const namespace = canvasAcpNamespace(query.data.canvasId);
+      const turn = await agenetes.historyTurn(namespace, threadId, turnRef);
+      if (!turn)
+        return reply.code(404).send({
+          message: 'History turn not found',
+          code: 'history_turn_not_found',
+        });
+      const record = await agenetes.record(namespace, threadId);
+      const messages: ChatHistoryItem[] = [];
+      buildHistoryFromTurns([turn], messages, {
+        recoverInternalToolNames: record?.spec.kind === INTERNAL_DRIVER_KIND,
+        detailLevel: 'full',
+        turnRef,
+      });
+      return reply.send({ threadId, turnRef, messages });
+    } catch (error) {
+      if (error instanceof MalformedTurnCursorError) {
+        return reply
+          .code(400)
+          .send({ message: error.message, code: 'malformed_history_cursor' });
+      }
+      if (error instanceof StaleTurnCursorError) {
+        return reply
+          .code(409)
+          .send({ message: error.message, code: 'stale_history_cursor' });
+      }
+      throw error;
+    } finally {
+      lease.release();
     }
   });
   /**

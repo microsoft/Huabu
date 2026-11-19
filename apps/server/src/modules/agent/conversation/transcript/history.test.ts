@@ -18,6 +18,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { buildHistoryFromTurns } from './history.js';
+import { summarizeToolPart } from './tool-summary.js';
 import {
   createChatSubmission,
   createInteractiveViewSubmission,
@@ -26,6 +27,136 @@ import {
 import type { ChatEnvelope } from '../envelope.js';
 import type { AgentTurn, FoldedMessage } from '@agenetes/protocol';
 import type { ChatHistoryItem } from '@huabu/shared';
+
+it('omits historical tool bodies but preserves visible answers, thinking, identity and full projection', () => {
+  const body = 'large tool output\n'.repeat(10_000);
+  const turn: AgentTurn = {
+    request: null,
+    transcript: [
+      { type: 'thinking', data: { content: 'Keep thinking' } },
+      {
+        type: 'tool_call',
+        data: {
+          toolCallId: 'read-1',
+          title: 'Read file',
+          status: 'completed',
+          command: 'cat file',
+          rawOutput: body,
+          content: [{ type: 'content', content: { type: 'text', text: body } }],
+        },
+      },
+      {
+        type: 'tool_call',
+        data: {
+          toolCallId: 'answer',
+          title: 'task_complete',
+          status: 'completed',
+          content: [
+            {
+              type: 'content',
+              content: { type: 'text', text: 'Visible answer' },
+            },
+          ],
+        },
+      },
+    ],
+  };
+  const original = JSON.stringify(turn);
+  const summary: ChatHistoryItem[] = [];
+  const full: ChatHistoryItem[] = [];
+  buildHistoryFromTurns([turn], summary, {
+    detailLevel: 'summary',
+    turnRef: 'ref',
+  });
+  buildHistoryFromTurns([turn], full);
+  expect(summary[0]).toMatchObject({
+    role: 'assistant',
+    parts: [
+      { kind: 'thinking', text: 'Keep thinking' },
+      {
+        kind: 'tool',
+        toolCallId: 'read-1',
+        title: 'Read file',
+        detail: { state: 'deferred', turnRef: 'ref' },
+      },
+      {
+        kind: 'tool',
+        title: 'task_complete',
+        content: [{ content: { text: 'Visible answer' } }],
+      },
+    ],
+  });
+  expect(JSON.stringify(summary)).not.toContain('large tool output');
+  expect(JSON.stringify(summary)).not.toContain('cat file');
+  expect(JSON.stringify(full)).toContain(body.slice(0, 17));
+  expect(Buffer.byteLength(JSON.stringify(summary))).toBeLessThan(
+    Buffer.byteLength(JSON.stringify(full)),
+  );
+  expect(JSON.stringify(turn)).toBe(original);
+});
+
+it('retains rich-tool header counts without sending result arrays', () => {
+  const part = summarizeToolPart(
+    {
+      kind: 'tool',
+      variant: 'agent_tool',
+      toolName: 'inspect_nodes',
+      toolCallId: 'inspect',
+      title: 'inspect_nodes',
+      status: 'completed',
+      data: {
+        tool: 'inspect_nodes',
+        status: 'success',
+        data: {
+          nodes: [
+            { id: 'one', content: 'large body' },
+            { id: 'two', content: 'another body' },
+          ],
+        },
+      },
+    },
+    'ref',
+  );
+  expect(part).toMatchObject({
+    detail: { summary: { count: 2, detailCount: 2 } },
+    data: { data: { nodes: [] } },
+  });
+  expect(JSON.stringify(part)).not.toContain('large body');
+});
+
+it('preserves visible failed-read text and does not offer loading for an empty generic tool', () => {
+  const failed = summarizeToolPart(
+    {
+      kind: 'tool',
+      variant: 'agent_tool',
+      toolName: 'read',
+      toolCallId: 'read',
+      title: 'read',
+      status: 'failed',
+      data: {
+        tool: 'read',
+        status: 'error',
+        error: 'Path not found: nodes/missing.md',
+      },
+    },
+    'ref',
+  );
+  expect(failed).toMatchObject({
+    data: { status: 'error', error: 'Path not found: nodes/missing.md' },
+  });
+  const empty = summarizeToolPart(
+    {
+      kind: 'tool',
+      variant: 'generic',
+      toolCallId: 'empty',
+      title: 'No output',
+      rawOutput: 'Not rendered by the generic card',
+    },
+    'ref',
+  );
+  expect(empty.detail).toBeUndefined();
+  expect(empty.rawOutput).toBeUndefined();
+});
 
 function makeEnvelope(text: string): ChatEnvelope {
   return {

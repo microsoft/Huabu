@@ -151,6 +151,12 @@ export function groupPersistedTurns(
  * change.
  */
 export interface TurnStore {
+  /** Optional targeted lookup; required by historyTurn, not by full history. */
+  get?(
+    namespace: Namespace,
+    threadId: string,
+    reference: string,
+  ): PersistedTurn | undefined | Promise<PersistedTurn | undefined>;
   /** Append one folded turn record to the thread's Tier-2 log. */
   append(
     namespace: Namespace,
@@ -252,6 +258,22 @@ export class InMemoryTurnStore implements TurnStore {
       .get(threadIdentityKey({ namespace, threadId: '' }))
       ?.get(threadId);
     return log ? [...log] : [];
+  }
+
+  get(
+    namespace: Namespace,
+    threadId: string,
+    reference: string,
+  ): PersistedTurn | undefined {
+    const cursor = decodeTurnCursor(reference, threadId);
+    const generation =
+      this.#generations.get(threadIdentityKey({ namespace, threadId })) ?? 1;
+    if (cursor.generation !== generation) {
+      throw new StaleTurnCursorError('History cursor is stale');
+    }
+    return this.#byNamespace
+      .get(threadIdentityKey({ namespace, threadId: '' }))
+      ?.get(threadId)?.[cursor.ordinal - 1];
   }
 
   page(
@@ -539,6 +561,30 @@ export class FileTurnStore implements TurnStore {
         seqStart: Number(row['seq_start']),
         seqEnd: Number(row['seq_end']),
       }));
+  }
+
+  get(
+    namespace: Namespace,
+    threadId: string,
+    reference: string,
+  ): PersistedTurn | undefined {
+    const cursor = decodeTurnCursor(reference, threadId);
+    const database = this.#prepare(namespace, threadId);
+    if (cursor.generation !== this.#generation(database, threadId)) {
+      throw new StaleTurnCursorError('History cursor is stale');
+    }
+    const row = database
+      .prepare(
+        'SELECT seq_start, seq_end, turn_json FROM turns WHERE thread_id = ? AND ordinal = ?',
+      )
+      .get(threadId, cursor.ordinal);
+    return row
+      ? {
+          turn: JSON.parse(String(row['turn_json'])) as AgentTurn,
+          seqStart: Number(row['seq_start']),
+          seqEnd: Number(row['seq_end']),
+        }
+      : undefined;
   }
 
   page(

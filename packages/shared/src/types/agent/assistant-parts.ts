@@ -24,6 +24,7 @@ import type {
   AcpToolKind,
 } from './acp-tool.js';
 import type { ToolResponse, WebSearchToolResponse } from './tools.js';
+import type { ToolDetail } from '../api/agent-history.js';
 
 // ─── Permission outcome ───────────────────────────────────────────────
 //
@@ -175,6 +176,8 @@ export type AssistantToolPart =
 
 /** Shared lifecycle/identity fields carried by every tool variant. */
 interface ToolPartBase {
+  /** Display-only hydration state; absent on live events and legacy full history. */
+  detail?: ToolDetail;
   kind: 'tool';
   /** Stable per-call id; pairs `tool_call` with later `tool_call_update`. */
   toolCallId: string;

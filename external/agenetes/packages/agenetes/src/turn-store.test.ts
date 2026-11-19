@@ -23,6 +23,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   FileTurnStore,
   InMemoryTurnStore,
+  decodeTurnCursor,
+  encodeTurnCursor,
   type PersistedTurn,
   type TurnStore,
 } from './index.js';
@@ -82,6 +84,39 @@ describe.each<[string, () => TurnStore]>([
   ['InMemoryTurnStore', () => new InMemoryTurnStore()],
   ['FileTurnStore', () => fileStore()],
 ])('%s — TurnStore contract', (_name, make) => {
+  it('loads one physical continuation turn and fences its reference after replacement', async () => {
+    const store = make();
+    const n = ns('canvas-1');
+    const first = persisted('first', 1, 3);
+    const continuation = {
+      ...persisted('resume', 4, 6),
+      turn: { ...turn('resume'), request: null },
+    };
+    await store.append(n, 'thread-1', first);
+    await store.append(n, 'thread-1', continuation);
+    const page = await store.page(n, 'thread-1', { limit: 1 });
+    const reference = encodeTurnCursor({
+      ...decodeTurnCursor(page.groups[0]!.id, 'thread-1'),
+      ordinal: 2,
+    });
+    expect(await store.get(n, 'thread-1', reference)).toEqual(continuation);
+    await store.append(n, 'thread-1', persisted('later', 7, 9));
+    expect(await store.get(n, 'thread-1', reference)).toEqual(continuation);
+    await expect(async () =>
+      store.get(n, 'other-thread', reference),
+    ).rejects.toThrow('Malformed');
+    expect(await store.get(ns('empty'), 'thread-1', reference)).toBeUndefined();
+    await store.replace(n, 'thread-1', [first, continuation]);
+    await expect(async () =>
+      store.get(n, 'thread-1', reference),
+    ).rejects.toThrow('stale');
+    const fresh = (await store.page(n, 'thread-1', { limit: 1 })).groups[0]!.id;
+    await store.delete(n, 'thread-1');
+    await expect(async () => store.get(n, 'thread-1', fresh)).rejects.toThrow(
+      'stale',
+    );
+  });
+
   it('appends and lists folded turns in fold order', () => {
     const store = make();
     const n = ns('canvas-1');
