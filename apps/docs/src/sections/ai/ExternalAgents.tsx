@@ -166,7 +166,7 @@ export default function ExternalAgents() {
           ],
           [
             <strong>Auto-approve all tool calls</strong>,
-            'Available only for harnesses that support it. Newly discovered automatic Profiles enable it when supported; review this setting because it bypasses tool confirmations.',
+            'Available only for harnesses that support it, and off by default: the agent asks before each tool call. Turn it on only in trusted environments, because it bypasses tool confirmations.',
           ],
           [
             <strong>Working directory</strong>,

@@ -180,9 +180,9 @@ export function registerHarnessProfileDiscovery({
         ...common,
         launchKind: 'acp-harness',
         harnessId: harness.id,
-        ...(harness.capabilities.autoApprove
-          ? { options: { autoApprove: true } }
-          : {}),
+        // Auto-approval is never a default: it lets whatever an Agent reads
+        // run commands unasked. The user turns it on in Settings or in the
+        // conversation.
       });
       log.info(
         { agentletId, harnessId: harness.id, profileId: profile.id },
