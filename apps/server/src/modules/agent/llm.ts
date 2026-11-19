@@ -479,7 +479,13 @@ async function loadPersistedConfig(): Promise<PersistedConfig | null> {
 // ==================== Runtime State ====================
 
 interface RuntimeState {
-  cachedModel: Model<Api> | null;
+  /**
+   * Cached chat model and the serialized {@link PersistedConfig} it was
+   * built from; served only for that same configuration, so a model is
+   * always paired with the configuration (and so the provider credential)
+   * its caller resolved.
+   */
+  cachedModel: { config: string; model: Model<Api> } | null;
   activeConfig: PersistedConfig | null;
   /**
    * Cached utility-tier model and the serialized `store.utilityConfig` it
@@ -1568,13 +1574,16 @@ async function resolveForRole(
   opts: { hasImage?: boolean } | undefined,
   utilityCfg: PersistedConfig | null,
 ): Promise<{ cfg: PersistedConfig; model: Model<Api> }> {
+  // The model is built from the configuration read here, so the provider
+  // whose credential the caller resolves from `cfg` is the model's own even
+  // when a provider switch lands in between.
   const chat = async (): Promise<{
     cfg: PersistedConfig;
     model: Model<Api>;
-  }> => ({
-    cfg: await ensureConfig(),
-    model: await getLLMModel(),
-  });
+  }> => {
+    const cfg = await ensureConfig();
+    return { cfg, model: chatModelFor(cfg) };
+  };
 
   const info = MODEL_ROLES[role];
   let resolved = await chat();
@@ -1618,7 +1627,8 @@ async function resolveForRoleAsync(
   }
 
   if (shouldStepUpForVision(role, resolved.model.input, opts?.hasImage)) {
-    resolved = { cfg: await ensureConfig(), model: await getLLMModel() };
+    const cfg = await ensureConfig();
+    resolved = { cfg, model: chatModelFor(cfg) };
   }
 
   return resolved;
@@ -1706,11 +1716,19 @@ export async function ensureApiKeyForRole(
  * Get a configured pi-ai Model instance for the active provider/model.
  */
 export async function getLLMModel(): Promise<Model<Api>> {
-  const state = runtime();
-  if (state.cachedModel) return state.cachedModel;
+  return chatModelFor(await ensureConfig());
+}
 
-  const generation = state.savedGeneration;
-  const cfg = await ensureConfig();
+/**
+ * The chat model for `cfg`, the configuration the caller already holds.
+ * Keyed by that configuration, so a model built from a read that a save
+ * overtook is never served for the saved one, nor the reverse.
+ */
+function chatModelFor(cfg: PersistedConfig): Model<Api> {
+  const state = runtime();
+  const config = JSON.stringify(cfg);
+  if (state.cachedModel?.config === config) return state.cachedModel.model;
+
   const apiKey = resolveApiKey(cfg.provider);
 
   // For OAuth providers, resolveApiKey may return null (async refresh needed)
@@ -1726,7 +1744,7 @@ export async function getLLMModel(): Promise<Model<Api>> {
   }
 
   const model = buildModel(cfg);
-  if (state.savedGeneration === generation) state.cachedModel = model;
+  state.cachedModel = { config, model };
   return model;
 }
 
