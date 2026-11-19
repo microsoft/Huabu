@@ -377,6 +377,18 @@ describe('Azure Ink OCR settings', () => {
       });
     });
 
+    it('starts past a damaged legacy file, which keeps failing Ink OCR alone on use', async () => {
+      writeFileSync(
+        join(dataDir, 'ink-ocr-config.json'),
+        'damaged legacy configuration',
+      );
+      await expect(importLegacyInkOcrConfig()).resolves.toBeUndefined();
+      expect(setSecret).not.toHaveBeenCalled();
+      expect(() => getInkOcrConfig()).toThrow(
+        'Invalid stored Ink OCR configuration',
+      );
+    });
+
     it('migrates on the first successful patch without changing legacy data', async () => {
       const legacy = storeLegacy();
       expect(resolveInkOcrConfiguration()).toEqual({

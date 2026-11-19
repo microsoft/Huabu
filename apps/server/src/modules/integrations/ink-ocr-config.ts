@@ -18,6 +18,7 @@ import {
 } from '../../security/secret-store.js';
 import { readJsonStrict } from '../../utils/fs.js';
 import { createKeyedMutex } from '../../utils/keyed-mutex.js';
+import { getLogger } from '../../utils/logger.js';
 import {
   personalSettingsOwner,
   personalSecretId,
@@ -41,6 +42,7 @@ type ConfigRecord = z.infer<typeof configRecordSchema>;
 const MAX_RECORD_LENGTH = 32 * 1024;
 const environmentStore = new EnvironmentSecretStore();
 const withConfigLock = createKeyedMutex();
+const log = getLogger('ink-ocr-config');
 
 function configPath(): string {
   return join(getDataDir(), 'ink-ocr-config.json');
@@ -114,17 +116,27 @@ function maskRecord(record: ConfigRecord): InkOcrConfig {
  * Until the first save, the effective endpoint is read from the legacy
  * `ink-ocr-config.json`, which a deployment without mounted storage loses on
  * replacement. Saving the effective configuration once moves it into the
- * credential record; afterwards the legacy file is never read. A damaged
- * legacy file fails here as it would on first use.
+ * credential record; afterwards the legacy file is never read.
+ *
+ * Ink OCR is an optional integration, so a damaged legacy file never stops
+ * the Server here: it is left where it is and keeps failing Ink OCR alone,
+ * on use, as it always has, until the settings are saved again.
  */
 export async function importLegacyInkOcrConfig(): Promise<void> {
   if (!existsSync(configPath()) || !isSecretStoreWritable()) return;
   await withConfigLock(personalSecretId(SECRET_IDS.inkOcrConfig), async () => {
     if (getPersistedSecret(SECRET_IDS.inkOcrConfig) !== null) return;
-    await setSecret(
-      SECRET_IDS.inkOcrConfig,
-      JSON.stringify(readStoredRecord()),
-    );
+    let record: ConfigRecord;
+    try {
+      record = readStoredRecord();
+    } catch (error) {
+      log.warn(
+        { err: error },
+        'Legacy Ink OCR configuration is damaged; Ink OCR reports it on use until its settings are saved',
+      );
+      return;
+    }
+    await setSecret(SECRET_IDS.inkOcrConfig, JSON.stringify(record));
   });
 }
 
