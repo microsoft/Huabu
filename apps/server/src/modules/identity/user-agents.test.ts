@@ -868,7 +868,8 @@ it('refuses a handshake whose initial admission result was retained across membe
   const checking = new Promise<void>((resolve) => (entered = resolve));
   let release!: () => void;
   const held = new Promise<void>((resolve) => (release = resolve));
-  const resolvePrincipal = h.service.resolvePrincipal!.bind(h.service);
+  const resolvePrincipal = h.service.resolvePrincipal?.bind(h.service);
+  if (!resolvePrincipal) throw new Error('Bubble resolves principals');
   vi.spyOn(h.service, 'resolvePrincipal').mockImplementationOnce(async (id) => {
     const identity = await resolvePrincipal(id);
     entered();
@@ -889,7 +890,7 @@ it('refuses a handshake whose initial admission result was retained across membe
   }
 });
 
-it('disconnects a returning device whose last credential read preceded a reset', async () => {
+it('refuses a returning device whose last credential read preceded a reset', async () => {
   const h = await host(false);
   await app.listen({ port: 0, host: '127.0.0.1' });
   const port = (app.server.address() as { port: number }).port;
@@ -927,12 +928,107 @@ it('disconnects a returning device whose last credential read preceded a reset',
     await checking;
     await resetAgentCredentials('alice');
     release();
-    expect(await handshake).not.toHaveProperty('error');
-    await vi.waitFor(() =>
-      expect(getAgentletGateway()?.getAgentlet('late-device')?.status).toBe(
-        'disconnected',
-      ),
+    // The reset revoked the admission in flight, so it never registers.
+    expect(await handshake).toMatchObject({
+      error: {
+        message: expect.stringContaining('Device credentials were reset'),
+      },
+    });
+    expect(getAgentletGateway()?.getAgentlet('late-device')?.status).toBe(
+      'disconnected',
     );
+  } finally {
+    for (const socket of sockets) socket.close();
+  }
+});
+
+it('revokes a stalled admission on its own, keeping a device admitted with the new credential', async () => {
+  const h = await host(false);
+  await app.listen({ port: 0, host: '127.0.0.1' });
+  const port = (app.server.address() as { port: number }).port;
+  const sockets: WebSocket[] = [];
+  const old = await h.as('alice', ownDeviceCredential);
+  const resolvePrincipal = h.service.resolvePrincipal!.bind(h.service);
+  let entered!: () => void;
+  const stalled = new Promise<void>((resolve) => (entered = resolve));
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => (release = resolve));
+  let holding = true;
+  // Stall the old credential's membership lookup, as a slow identity store
+  // would, until the reset and a new device's admission have both finished.
+  vi.spyOn(h.service, 'resolvePrincipal').mockImplementation(async (id) => {
+    if (holding) {
+      holding = false;
+      entered();
+      await held;
+    }
+    return resolvePrincipal(id);
+  });
+  try {
+    const stale = connectDevice(port, sockets, 'old-device', old);
+    await stalled;
+    await resetAgentCredentials('alice');
+    const fresh = await h.as('alice', ownDeviceCredential);
+    // Not delayed by the stalled admission of the same owner.
+    expect(
+      await connectDevice(port, sockets, 'new-device', fresh),
+    ).not.toHaveProperty('error');
+    release();
+    expect(await stale).toMatchObject({
+      error: {
+        message: expect.stringContaining('Device credentials were reset'),
+      },
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(getAgentletGateway()?.getAgentlet('old-device')).toBeUndefined();
+    expect(getAgentletGateway()?.getAgentlet('new-device')?.status).toBe(
+      'connected',
+    );
+  } finally {
+    for (const socket of sockets) socket.close();
+  }
+});
+
+it('leaves no ownership behind for a first-time claim a reset overtakes', async () => {
+  const h = await host(false);
+  await app.listen({ port: 0, host: '127.0.0.1' });
+  const port = (app.server.address() as { port: number }).port;
+  const sockets: WebSocket[] = [];
+  const alice = await h.as('alice', ownDeviceCredential);
+  const records = getServerRecords();
+  const get = records.get.bind(records);
+  let entered!: () => void;
+  const reading = new Promise<void>((resolve) => (entered = resolve));
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => (release = resolve));
+  let holding = true;
+  // Hold the handshake's read of device ownership, after its last credential
+  // check and before it claims the new device.
+  vi.spyOn(records, 'get').mockImplementation(async (key) => {
+    const value = await get(key);
+    if (key.name === 'device-owners' && holding) {
+      holding = false;
+      entered();
+      await held;
+    }
+    return value;
+  });
+  try {
+    const handshake = connectDevice(port, sockets, 'new-device', alice);
+    await reading;
+    await resetAgentCredentials('alice');
+    release();
+    expect(await handshake).toMatchObject({
+      error: {
+        message: expect.stringContaining('Device credentials were reset'),
+      },
+    });
+    vi.mocked(records.get).mockRestore();
+    expect(
+      (await getServerRecords().get({ owner: null, name: 'device-owners' })) ??
+        {},
+    ).not.toHaveProperty('new-device');
   } finally {
     for (const socket of sockets) socket.close();
   }

@@ -267,61 +267,129 @@ async function credentialVersion(principalId: string): Promise<number> {
 export async function resetAgentCredentials(
   principalId: string,
 ): Promise<void> {
+  const reason = 'Device credentials were reset';
+  // Every admission in flight now carries a credential this reset revokes.
+  // Revoking them before the version is written fences their first-time
+  // device claims: a claim checks its admission inside the ownership write,
+  // so one that has not committed yet commits nothing.
+  revokeAdmissions(principalId, reason);
+  let version = 0;
   await getServerRecords().update(VERSIONS, (current) => {
     const versions = versionsSchema.parse(current ?? {});
     const previous = Object.hasOwn(versions, principalId)
       ? versions[principalId]
       : 0;
-    return { ...versions, [principalId]: previous + 1 };
+    version = previous + 1;
+    return { ...versions, [principalId]: version };
   });
-  disconnectAgentlets(principalId, 'Device credentials were reset');
+  disconnectAgentlets(principalId, reason, version);
 }
 
 /**
- * Device admissions still deciding, by the owner their credential names.
+ * One device admission: deciding, or decided and about to be registered.
  *
  * An admission reads the credential version and membership from storage, so
  * a reset or a revocation can land after its last read and before the
  * Gateway registers its connection, where no sweep of the Gateway sees it.
- * A disconnect therefore waits for the admissions in flight when it starts;
- * any admission that starts later reads the reset or revocation itself.
+ * Each admission is therefore revoked on its own: one still deciding refuses
+ * the handshake when it finishes, and one already decided has the connection
+ * it registers closed. Nothing waits for other admissions, so a stalled
+ * lookup delays only its own handshake, and an admission that starts later,
+ * with a newer credential, is never caught by an older revocation.
  */
-const admitting = new Map<string, Set<Promise<unknown>>>();
+interface Admission {
+  readonly agentletId: string;
+  /** The credential version the handshake's token carries. */
+  readonly version: number;
+  /** Why the admission was revoked while in flight, or `null`. */
+  revoked: string | null;
+  /** Set once the admission has decided to admit, just before it returns. */
+  decided: boolean;
+}
 
+/** Admissions in flight, by the owner their credential names. */
+const admitting = new Map<string, Set<Admission>>();
+
+/**
+ * Track `admission` until the Gateway has registered what it admitted. The
+ * Gateway registers a connection once its authentication resolves, with no
+ * macrotask in between, so the admission stays visible to a revocation
+ * until the next macrotask after it settles.
+ */
 function trackAdmission<T>(
   principalId: string,
-  admission: Promise<T>,
+  admission: Admission,
+  decision: Promise<T>,
 ): Promise<T> {
   let pending = admitting.get(principalId);
   if (!pending) admitting.set(principalId, (pending = new Set()));
-  const settle = () => {
-    pending.delete(admission);
-    if (pending.size === 0 && admitting.get(principalId) === pending)
-      admitting.delete(principalId);
-  };
   pending.add(admission);
-  admission.then(settle, settle);
-  return admission;
+  const settle = () =>
+    setImmediate(() => {
+      pending.delete(admission);
+      if (pending.size === 0 && admitting.get(principalId) === pending)
+        admitting.delete(principalId);
+    });
+  decision.then(settle, settle);
+  return decision;
 }
 
-/** Disconnect this owner's current and just-admitted connections without rotating credentials. */
-export function disconnectAgentlets(principalId: string, reason: string): void {
-  const disconnect = () => {
-    const gateway = getAgentletGateway();
-    for (const connection of [
-      ...(gateway?.getSessions() ?? []),
-      ...(gateway?.getAgentlets() ?? []),
-    ])
-      if (connectedAgentletOwner(connection) === principalId)
-        connection.disconnect(reason);
-  };
-  disconnect();
-  // An admission registers its connection once its authentication resolves,
-  // without another macrotask between them, so sweep again after every
-  // admission in flight now has settled and registered.
-  void Promise.allSettled([...(admitting.get(principalId) ?? [])]).then(() =>
-    setImmediate(disconnect),
+/**
+ * Revoke this owner's admissions in flight whose credential is older than
+ * `below` (every one, by default). See {@link Admission}.
+ */
+function revokeAdmissions(
+  principalId: string,
+  reason: string,
+  below = Number.POSITIVE_INFINITY,
+): void {
+  for (const admission of admitting.get(principalId) ?? []) {
+    if (admission.revoked !== null || admission.version >= below) continue;
+    admission.revoked = reason;
+    if (admission.decided)
+      setImmediate(() =>
+        disconnectMatching(
+          (connection) =>
+            connection.agentletId === admission.agentletId &&
+            connectedAgentletOwner(connection) === principalId,
+          reason,
+        ),
+      );
+  }
+}
+
+function disconnectMatching(
+  matches: (connection: {
+    readonly agentletId: string;
+    readonly metadata: Readonly<Record<string, unknown>>;
+  }) => boolean,
+  reason: string,
+): void {
+  const gateway = getAgentletGateway();
+  for (const connection of [
+    ...(gateway?.getSessions() ?? []),
+    ...(gateway?.getAgentlets() ?? []),
+  ])
+    if (matches(connection)) connection.disconnect(reason);
+}
+
+/**
+ * Disconnect this owner's current connections and revoke their admissions in
+ * flight, without rotating credentials.
+ *
+ * @param below Revoke only admissions whose credential version is older,
+ *   for a reset that wrote version `below`; by default every admission.
+ */
+export function disconnectAgentlets(
+  principalId: string,
+  reason: string,
+  below?: number,
+): void {
+  disconnectMatching(
+    (connection) => connectedAgentletOwner(connection) === principalId,
+    reason,
   );
+  revokeAdmissions(principalId, reason, below);
 }
 
 type Unsigned = {
@@ -411,13 +479,22 @@ export async function ownDeviceCredential(): Promise<string> {
 /**
  * Called by the Gateway's existing host-owned authentication port.
  *
- * A reset or revocation that lands during the lookups below is caught by the
- * checks after them, so the handshake is refused before it claims a device.
- * One that lands after the last check is not: {@link disconnectAgentlets}
- * waits for this admission and disconnects the connection it registers.
+ * A reset or revocation in this process revokes the handshake's
+ * {@link Admission}: before the device claim is written, the claim writes
+ * nothing and the handshake is refused; after it has decided, the connection
+ * it registers is closed. A reset in another process is seen through the
+ * stored credential version, read again after each lookup and after the
+ * claim.
  */
 export function authenticateUserAgentlet(service: IdentityService) {
-  const admit = async (agentletId: string, token: string) => {
+  const admit = async (
+    agentletId: string,
+    token: string,
+    admission: Admission | null,
+  ) => {
+    const refuseIfRevoked = () => {
+      if (admission?.revoked) throw new Error(admission.revoked);
+    };
     const admitted = await readAgentCredential(token);
     if (admitted?.aud !== 'device') throw refusedDeviceCredential(token);
     const identity = await service.resolvePrincipal?.(admitted.principalId);
@@ -438,6 +515,9 @@ export function authenticateUserAgentlet(service: IdentityService) {
       // Claims are serialized, so of two people racing for a new device the
       // second sees the first's claim here and is refused.
       await getServerRecords().update(OWNERS, (current) => {
+        // Checked as the claim is written: a reset in this process revokes
+        // the admission before it writes, so a revoked claim writes nothing.
+        refuseIfRevoked();
         const owners = ownersSchema.parse(current ?? {});
         if (
           Object.hasOwn(owners, agentletId) &&
@@ -446,16 +526,28 @@ export function authenticateUserAgentlet(service: IdentityService) {
           throw new Error('Device belongs to another user');
         return { ...owners, [agentletId]: claims.principalId };
       });
-      // A reset may have completed while the claim was being written.
+      // Another process's reset reaches this one only through storage.
       if (!(await readAgentCredential(token)))
         throw refusedDeviceCredential(token);
     }
+    refuseIfRevoked();
+    if (admission) admission.decided = true;
     return { metadata: { principalId: claims.principalId } };
   };
   return (agentletId: string, token: string) => {
-    const principalId = signedClaims(token)?.principalId;
-    const admission = admit(agentletId, token);
-    return principalId ? trackAdmission(principalId, admission) : admission;
+    const claims = signedClaims(token);
+    if (!claims) return admit(agentletId, token, null);
+    const admission: Admission = {
+      agentletId,
+      version: claims.v,
+      revoked: null,
+      decided: false,
+    };
+    return trackAdmission(
+      claims.principalId,
+      admission,
+      admit(agentletId, token, admission),
+    );
   };
 }
 
