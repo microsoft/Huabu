@@ -65,12 +65,17 @@ describe('Milkdown read-only chrome', () => {
     expect(root.querySelector('.milkdown-table-block')).not.toBeNull();
     expect(root.textContent).toContain('print("hello")');
     expect(root.textContent).toContain('[local]');
-    expect(root.querySelector('img, a[href], iframe, script')).toBeNull();
+    // ProseMirror's own empty separator <img> carries no resource.
+    const resources =
+      'img:not(.ProseMirror-separator), a[href], iframe, script';
+    expect(root.querySelector(resources)).toBeNull();
+    expect(root.querySelector('img[src]')).toBeNull();
     expect(resolveImageSrc).not.toHaveBeenCalled();
     instance.setMarkdown(
       '![replacement](https://example.com/next.png) [link](https://example.com)',
     );
-    expect(root.querySelector('img, a[href]')).toBeNull();
+    expect(root.querySelector(resources)).toBeNull();
+    expect(root.querySelector('img[src]')).toBeNull();
     expect(root.textContent).toContain('[replacement]');
     expect(resolveImageSrc).not.toHaveBeenCalled();
   });
