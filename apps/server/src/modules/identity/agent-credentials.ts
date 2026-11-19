@@ -275,8 +275,6 @@ export async function resetAgentCredentials(
   // below like any other; one waiting behind the reset sees it and writes
   // nothing.
   await claimsAndResets(principalId, async () => {
-    // Every admission in flight now carries a credential this reset revokes.
-    revokeAdmissions(principalId, reason);
     await getServerRecords().update(VERSIONS, (current) => {
       const versions = versionsSchema.parse(current ?? {});
       const previous = Object.hasOwn(versions, principalId)
@@ -285,6 +283,10 @@ export async function resetAgentCredentials(
       version = previous + 1;
       return { ...versions, [principalId]: version };
     });
+    // Only once the reset has committed, and still before any claim waiting
+    // on the lock can commit: every admission in flight now carries a
+    // credential this reset revoked.
+    revokeAdmissions(principalId, reason);
   });
   disconnectAgentlets(principalId, reason, version);
 }

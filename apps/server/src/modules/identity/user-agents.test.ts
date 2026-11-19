@@ -1044,6 +1044,45 @@ it('orders a first-time claim behind a reset that is still committing', async ()
   }
 });
 
+it('leaves admissions in flight alone when a reset fails to commit', async () => {
+  const h = await host(false);
+  await app.listen({ port: 0, host: '127.0.0.1' });
+  const port = (app.server.address() as { port: number }).port;
+  const sockets: WebSocket[] = [];
+  const alice = await h.as('alice', ownDeviceCredential);
+  const resolvePrincipal = h.service.resolvePrincipal?.bind(h.service);
+  if (!resolvePrincipal) throw new Error('Bubble resolves principals');
+  let entered!: () => void;
+  const stalled = new Promise<void>((resolve) => (entered = resolve));
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => (release = resolve));
+  let holding = true;
+  vi.spyOn(h.service, 'resolvePrincipal').mockImplementation(async (id) => {
+    if (holding) {
+      holding = false;
+      entered();
+      await held;
+    }
+    return resolvePrincipal(id);
+  });
+  const records = getServerRecords();
+  try {
+    const handshake = connectDevice(port, sockets, 'steady-device', alice);
+    await stalled;
+    vi.spyOn(records.store, 'put').mockRejectedValueOnce(
+      new Error('storage unavailable'),
+    );
+    await expect(resetAgentCredentials('alice')).rejects.toThrow(
+      'storage unavailable',
+    );
+    release();
+    // No reset committed, so the credential is still current.
+    expect(await handshake).not.toHaveProperty('error');
+  } finally {
+    for (const socket of sockets) socket.close();
+  }
+});
+
 it('leaves no ownership behind for a first-time claim a membership removal overtakes', async () => {
   const h = await host(false);
   await app.listen({ port: 0, host: '127.0.0.1' });
