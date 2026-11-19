@@ -1,13 +1,19 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+import { expect, it } from 'vitest';
+
 import { PostgresStoreContext } from './database.js';
 import {
   PostgresServerRecordStore,
   postgresDatabaseHoldsServerRecords,
+  postgresServerRecordBeforeInit,
 } from './server-records.js';
 import { PostgresStructuredStore } from './structured-store.js';
-import { openPostgresTestStore } from './test-support.js';
+import {
+  openPostgresTestDatabase,
+  openPostgresTestStore,
+} from './test-support.js';
 import { PostgresWorkspaceRepository } from './workspace-repository.js';
 import {
   describeServerRecordImportContract,
@@ -253,4 +259,43 @@ describeServerRecordImportContract('Postgres', async () => {
       }
     },
   };
+});
+
+it('asks the schema it would upgrade about records, not another on the search_path', async () => {
+  const key = { owner: null, name: 'credentials' } as const;
+  const tenant = await openPostgresTestDatabase();
+  const shared = await openPostgresTestDatabase();
+  const schemaOf = (database: { config: { options: string } }) =>
+    database.config.options.replace('-c search_path=', '');
+  const contexts: PostgresStoreContext[] = [];
+  try {
+    // A later schema on the path already holds records.
+    const holder = new PostgresStoreContext(shared.config);
+    contexts.push(holder);
+    const held = new PostgresServerRecordStore(holder);
+    await held.init();
+    await held.put(key, { v: 'shared' });
+
+    // The tenant schema, first on the path, holds none yet.
+    const context = new PostgresStoreContext({
+      ...tenant.config,
+      options: `-c search_path=${schemaOf(tenant)},${schemaOf(shared)}`,
+    });
+    contexts.push(context);
+    expect(await postgresDatabaseHoldsServerRecords(context)).toBe(false);
+    expect(await postgresServerRecordBeforeInit(context, key)).toBeNull();
+
+    // Opening migrates the tenant schema, and its own rows answer from then on.
+    const store = new PostgresServerRecordStore(context);
+    await store.init();
+    await store.put(key, { v: 'tenant' });
+    expect(await postgresDatabaseHoldsServerRecords(context)).toBe(true);
+    expect(await postgresServerRecordBeforeInit(context, key)).toEqual({
+      v: 'tenant',
+    });
+  } finally {
+    for (const context of contexts) await context.close();
+    await tenant.cleanup();
+    await shared.cleanup();
+  }
 });

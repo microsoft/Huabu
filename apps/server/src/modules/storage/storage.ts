@@ -618,6 +618,13 @@ export async function initStorage(
   // answer for the wrong backend.
   workspaces = null;
   try {
+    // Records first. Building a database backend opens its connection, which
+    // upgrades the schema, so the import is read and checked against the
+    // database as it was. Normally they are open already, before
+    // credentials; a caller that chose an explicit profile gets records for
+    // that profile here.
+    validateStorageProfile(profile);
+    await ensureServerRecords(profile);
     const storage = createStorage(profile);
     current = storage;
     const initialized = await Promise.allSettled([
@@ -626,9 +633,6 @@ export async function initStorage(
     ]);
     const failure = initialized.find((result) => result.status === 'rejected');
     if (failure?.status === 'rejected') throw failure.reason;
-    // Normally opened already, before credentials; a caller that chose an
-    // explicit profile gets records for that profile too.
-    await ensureServerRecords(profile);
     await ensureActiveWorkspace(profile);
     return storage;
   } catch (error) {

@@ -23,22 +23,68 @@ import type {
 } from '../../ports/server-records.js';
 
 /**
- * Whether the database `context` connects to holds any server record, asked
- * before `context.init()` so the database is not upgraded. A database
- * without the table, as an earlier version left it, holds none.
+ * The `server_records` table of the schema `context.init()` would upgrade,
+ * schema-qualified and quoted, or `null` when that schema has none yet, as
+ * an earlier version left it. Asked before `context.init()`, so the
+ * database is not upgraded.
+ *
+ * The migrations create their tables in `current_schema()`, the first schema
+ * of the `search_path` that exists. An unqualified name would instead resolve
+ * through the whole path, and find another schema's table while the one being
+ * upgraded still has none.
+ */
+async function serverRecordsTableBeforeInit(
+  context: PostgresStoreContext,
+): Promise<string | null> {
+  const row = await context.beforeInit().get(
+    `SELECT quote_ident(current_schema()) AS schema,
+            to_regclass(quote_ident(current_schema()) || '.server_records')
+              IS NOT NULL AS present`,
+  );
+  const schema = row?.['schema'];
+  return row?.['present'] === true && typeof schema === 'string'
+    ? `${schema}.server_records`
+    : null;
+}
+
+/**
+ * Whether the schema `context` would upgrade holds any server record, asked
+ * without upgrading it.
  */
 export async function postgresDatabaseHoldsServerRecords(
   context: PostgresStoreContext,
 ): Promise<boolean> {
-  const database = context.beforeInit();
-  const table = await database.get(
-    "SELECT to_regclass('server_records') IS NOT NULL AS present",
-  );
-  if (table?.['present'] !== true) return false;
-  const held = await database.get(
-    'SELECT EXISTS (SELECT 1 FROM server_records) AS held',
-  );
+  const table = await serverRecordsTableBeforeInit(context);
+  if (table === null) return false;
+  const held = await context
+    .beforeInit()
+    .get(`SELECT EXISTS (SELECT 1 FROM ${table}) AS held`);
   return held?.['held'] === true;
+}
+
+/**
+ * One record of the schema `context` would upgrade, read without upgrading
+ * it, or `null` when it holds no such record.
+ */
+export async function postgresServerRecordBeforeInit(
+  context: PostgresStoreContext,
+  key: ServerRecordKey,
+): Promise<unknown> {
+  const table = await serverRecordsTableBeforeInit(context);
+  if (table === null) return null;
+  const { ownerKey, name } = serverRecordColumns(key);
+  const row = await context
+    .beforeInit()
+    .get(
+      `SELECT record_json FROM ${table} WHERE owner_key = ? AND name = ?`,
+      ownerKey,
+      name,
+    );
+  const text = row?.['record_json'];
+  if (text === undefined) return null;
+  if (typeof text !== 'string')
+    throw new TypeError('Invalid PostgreSQL server record row');
+  return decodeServerRecord(key, text);
 }
 
 export class PostgresServerRecordStore implements ServerRecordImportTarget {

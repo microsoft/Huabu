@@ -18,25 +18,32 @@
  * graph does not load.
  */
 
+import path from 'node:path';
+
 import { getDataDir } from '../../data-dir.js';
 import { createKeyedMutex } from '../../utils/keyed-mutex.js';
 import { getLogger } from '../../utils/logger.js';
+import { diskServerRecordPath } from './backends/disk/data-dir.js';
 import { DiskServerRecordStore } from './backends/disk/server-records.js';
 import {
   PostgresServerRecordStore,
   postgresDatabaseHoldsServerRecords,
+  postgresServerRecordBeforeInit,
 } from './backends/postgres/server-records.js';
 import {
   SqliteServerRecordStore,
   sqliteDatabaseHoldsServerRecords,
+  sqliteServerRecordWithoutOpening,
 } from './backends/sqlite/server-records.js';
 import {
   postgresConnection,
+  releaseConnections,
   sqliteConnection,
   sqliteFilename,
 } from './connections.js';
 import {
   assertServerRecordKey,
+  ServerRecordError,
   serverRecordId,
 } from './ports/server-records.js';
 import {
@@ -103,26 +110,33 @@ export class ServerRecords {
   }
 }
 
-let serverRecords: ServerRecords | null = null;
-/** The environment {@link serverRecords} was opened from, when opened explicitly. */
-let serverRecordsEnvironment: NodeJS.ProcessEnv | null = null;
-
-function buildServerRecordStore(
-  profile: StorageProfile,
+/**
+ * Which records an open answers for: the backend and the database or data
+ * directory it reads, as the process resolves them. Two opens of one target
+ * share one {@link ServerRecords}, and with it the mutex that keeps their
+ * read-modify-writes from losing one another. Compared, never printed: a
+ * PostgreSQL target holds the connection URL.
+ */
+function recordTarget(
+  kind: StructuredBackendKind,
   env: NodeJS.ProcessEnv,
-): ServerRecordStore {
-  switch (profile.structured.kind) {
+): string {
+  switch (kind) {
     case 'disk':
-      return new DiskServerRecordStore(() => getDataDir(env));
+      return `disk:${path.resolve(getDataDir(env))}`;
     case 'sqlite':
+      return `sqlite:${sqliteFilename(env)}`;
     case 'postgres':
-      return buildDatabaseStore(profile.structured.kind, env);
+      return `postgres:${env['HUABU_POSTGRES_URL'] ?? ''}`;
     default:
-      throw new Error(
-        `Unsupported structured backend: ${profile.structured.kind}`,
-      );
+      throw new Error(`Unsupported structured backend: ${String(kind)}`);
   }
 }
+
+/** The open records and the target they answer for. */
+let open: { target: string; records: ServerRecords } | null = null;
+/** An open in flight, shared by every caller asking for the same target. */
+let opening: { target: string; records: Promise<ServerRecords> } | null = null;
 
 function buildDatabaseStore(
   kind: ServerRecordImportTarget['kind'],
@@ -133,80 +147,177 @@ function buildDatabaseStore(
     : new PostgresServerRecordStore(postgresConnection(env));
 }
 
+/** The database kinds, which keep records as rows and import legacy files. */
+function isDatabaseKind(
+  kind: StructuredBackendKind,
+): kind is ServerRecordImportTarget['kind'] {
+  return kind === 'sqlite' || kind === 'postgres';
+}
+
+/** Whether `kind`'s database, as `env` names it, holds any record, asked without opening it. */
+async function databaseHoldsServerRecords(
+  kind: ServerRecordImportTarget['kind'],
+  env: NodeJS.ProcessEnv,
+): Promise<boolean> {
+  return kind === 'sqlite'
+    ? sqliteDatabaseHoldsServerRecords(sqliteFilename(env))
+    : postgresDatabaseHoldsServerRecords(postgresConnection(env));
+}
+
 /**
- * The records opening `env`'s database would import from the files an
- * earlier version kept in its data directory, read without changing anything.
+ * The records opening `kind`'s database would import from the files an
+ * earlier version kept in `env`'s data directory, read without changing
+ * anything.
  *
  * Opening a database upgrades its schema, and the earlier version cannot open
- * the upgraded database, so everything the import needs is read and checked
- * here first: a damaged file fails startup with the database as it was,
- * rather than dropping what may be the only copy of a credential.
+ * the upgraded database, so everything the import needs is read first: a
+ * file that is not valid JSON fails here with the database as it was, rather
+ * than leaving the only copy of a record where repairing the file no longer
+ * reaches it. Whether each owner can read its value is checked above
+ * storage, before startup opens anything (`modules/server-record-shapes.ts`),
+ * since storage knows no owner's schema.
  *
  * Empty for Disk, where the files are the records, and for a database that
  * already holds server records. The import commits all of its records in one
  * transaction, so a database holding any record has had its import, and the
  * files it was taken from are never read or checked again.
+ *
+ * @param kind The structured backend being opened; defaults to the one `env`
+ *   selects. A caller with an explicit storage profile passes its kind, so
+ *   the import is read for the backend that is actually opened.
+ * @throws ServerRecordError naming the file, when one cannot be read.
  */
 export async function readPendingImport(
   env: NodeJS.ProcessEnv = process.env,
-): Promise<readonly ServerRecordEntry[]> {
+  kind: StructuredBackendKind = parseStorageProfile(env).structured.kind,
+): Promise<readonly PendingImportEntry[]> {
+  if (!isDatabaseKind(kind)) return [];
+  if (await databaseHoldsServerRecords(kind, env)) return [];
+  const dataDir = getDataDir(env);
+  const files = new DiskServerRecordStore(() => dataDir);
+  const records: PendingImportEntry[] = [];
+  for (const key of await files.keys()) {
+    const file = diskServerRecordPath(key, dataDir);
+    let value: unknown;
+    try {
+      value = await files.get(key);
+    } catch (error) {
+      throw unimportableRecord(file, (error as Error).message, error);
+    }
+    records.push({ key, value, file });
+  }
+  return records;
+}
+
+/** One record {@link readPendingImport} found, and the file it was read from. */
+export interface PendingImportEntry extends ServerRecordEntry {
+  /** The file's absolute path, for an operator to repair. */
+  readonly file: string;
+}
+
+/**
+ * The startup error for a file an import cannot take, raised before the
+ * database is opened.
+ */
+export function unimportableRecord(
+  file: string,
+  reason: string,
+  cause?: unknown,
+): ServerRecordError {
+  return new ServerRecordError(
+    `Cannot import ${file} into the database: ${reason}. The database was ` +
+      `not changed. Repair or remove the file, then start again.`,
+    { cause },
+  );
+}
+
+/**
+ * One record as the next open of `env`'s backend would serve it, read
+ * without opening, creating, or upgrading anything: the database's row once
+ * it holds records, else the file an import would take it from. For a
+ * lookup that must leave storage exactly as it found it, such as `setup`
+ * asking whether a password is saved before the operator confirms anything.
+ */
+export async function peekServerRecord(
+  key: ServerRecordKey,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<unknown> {
+  assertServerRecordKey(key);
   const { kind } = parseStorageProfile(env).structured;
-  if (kind === 'disk') return [];
-  const held =
-    kind === 'sqlite'
-      ? sqliteDatabaseHoldsServerRecords(sqliteFilename(env))
-      : await postgresDatabaseHoldsServerRecords(postgresConnection(env));
-  if (held) return [];
-  const files = new DiskServerRecordStore(() => getDataDir(env));
-  const records: ServerRecordEntry[] = [];
-  for (const key of await files.keys())
-    records.push({ key, value: await files.get(key) });
+  const dataDir = getDataDir(env);
+  if (isDatabaseKind(kind) && (await databaseHoldsServerRecords(kind, env)))
+    return kind === 'sqlite'
+      ? sqliteServerRecordWithoutOpening(sqliteFilename(env), key)
+      : postgresServerRecordBeforeInit(postgresConnection(env), key);
+  return new DiskServerRecordStore(() => dataDir).get(key);
+}
+
+/**
+ * Open server records for `kind`, the database or data directory taken from
+ * `env`. Every caller asking for one target, at once or later, gets the same
+ * {@link ServerRecords}. On a database this also imports
+ * {@link readPendingImport}'s records.
+ */
+function openRecords(
+  kind: StructuredBackendKind,
+  env: NodeJS.ProcessEnv,
+): Promise<ServerRecords> {
+  const target = recordTarget(kind, env);
+  if (open?.target === target) return Promise.resolve(open.records);
+  if (opening?.target === target) return opening.records;
+  const records = openServerRecords(kind, env).then(
+    (opened) => {
+      if (opening?.records === records) {
+        open = { target, records: opened };
+        opening = null;
+      }
+      return opened;
+    },
+    (error: unknown) => {
+      if (opening?.records === records) opening = null;
+      throw error;
+    },
+  );
+  opening = { target, records };
   return records;
 }
 
 /**
- * Open server records for the structured backend `env` selects. Idempotent
- * for the same environment.
+ * Open server records for the structured backend `env` selects.
  *
  * `env` chooses the backend, its database, and the data directory; setup and
- * the Vite dev server pass their own. On a database backend this also
- * imports {@link readPendingImport}'s records.
+ * the Vite dev server pass their own.
  */
 export async function initServerRecords(
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<ServerRecords> {
-  if (serverRecords && serverRecordsEnvironment === env) return serverRecords;
   const profile = parseStorageProfile(env);
   validateStorageProfile(profile);
-  serverRecords = await openServerRecords(profile, env);
-  serverRecordsEnvironment = env;
-  return serverRecords;
+  return openRecords(profile.structured.kind, env);
 }
 
 /**
- * Records for `profile`, for storage opened with an explicit profile. Keeps
- * the records already open when they are for the same backend.
+ * Records for `profile`, for storage opened with an explicit profile, on the
+ * process environment's database. Keeps the records already open when they
+ * answer for the same target.
  */
 export async function ensureServerRecords(
   profile: StorageProfile,
 ): Promise<void> {
-  if (serverRecords?.kind === profile.structured.kind) return;
-  serverRecords = await openServerRecords(profile, process.env);
-  serverRecordsEnvironment = null;
+  await openRecords(profile.structured.kind, process.env);
 }
 
 async function openServerRecords(
-  profile: StorageProfile,
+  kind: StructuredBackendKind,
   env: NodeJS.ProcessEnv,
 ): Promise<ServerRecords> {
-  const { kind } = profile.structured;
-  if (kind !== 'sqlite' && kind !== 'postgres') {
-    const store = buildServerRecordStore(profile, env);
-    await store.init();
-    return new ServerRecords(store);
+  if (!isDatabaseKind(kind)) {
+    if (kind !== 'disk')
+      throw new Error(`Unsupported structured backend: ${String(kind)}`);
+    return new ServerRecords(new DiskServerRecordStore(() => getDataDir(env)));
   }
   // Read before the store opens: opening upgrades the database.
-  const pending = await readPendingImport(env);
+  const pending = await readPendingImport(env, kind);
   const store = buildDatabaseStore(kind, env);
   await store.init();
   if (pending.length > 0) {
@@ -229,7 +340,7 @@ async function openServerRecords(
  * opened by an awaited {@link initServerRecords} during startup.
  */
 export function getServerRecords(): ServerRecords {
-  if (serverRecords) return serverRecords;
+  if (open) return open.records;
   const profile = parseStorageProfile();
   if (profile.structured.kind !== 'disk')
     throw new StorageProfileError(
@@ -237,28 +348,39 @@ export function getServerRecords(): ServerRecords {
         `"${profile.structured.kind}" structured backend has a connection to ` +
         `open. Call initServerRecords() during startup.`,
     );
-  serverRecords = new ServerRecords(new DiskServerRecordStore());
-  return serverRecords;
+  const records = new ServerRecords(new DiskServerRecordStore());
+  open = { target: recordTarget('disk', process.env), records };
+  return records;
 }
 
 /** Forget the open records, when storage closes its connections. */
 export function forgetServerRecords(): void {
-  serverRecords = null;
-  serverRecordsEnvironment = null;
+  open = null;
+  opening = null;
 }
 
-/** For tests that need specific records. Returns the restore function. */
+/**
+ * Forget the open records and close the connections they borrowed, for a
+ * process that opened records without the rest of storage, such as `setup`,
+ * which would otherwise stay alive on an idle PostgreSQL pool.
+ */
+export async function closeServerRecords(): Promise<void> {
+  forgetServerRecords();
+  await releaseConnections()();
+}
+
+/**
+ * For tests that need specific records. Returns the restore function. The
+ * records answer for no target, so the next open reopens.
+ */
 export function setServerRecordsForTesting(
   records: ServerRecords | null,
 ): () => void {
-  const previous = {
-    records: serverRecords,
-    environment: serverRecordsEnvironment,
-  };
-  serverRecords = records;
-  serverRecordsEnvironment = null;
+  const previous = { open, opening };
+  open = records ? { target: 'testing', records } : null;
+  opening = null;
   return () => {
-    serverRecords = previous.records;
-    serverRecordsEnvironment = previous.environment;
+    open = previous.open;
+    opening = previous.opening;
   };
 }

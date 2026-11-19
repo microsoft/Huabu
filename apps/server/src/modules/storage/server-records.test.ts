@@ -29,10 +29,11 @@ import { StorageProfileError } from './profile.js';
 import {
   getServerRecords,
   initServerRecords,
+  peekServerRecord,
   readPendingImport,
   ServerRecords,
 } from './server-records.js';
-import { closeStorage } from './storage.js';
+import { closeStorage, initStorage } from './storage.js';
 
 import type { ServerRecordStore } from './ports/server-records.js';
 
@@ -237,4 +238,110 @@ it('opens an in-memory SQLite database without creating a file of that name', as
   });
   await closeStorage();
   expect(existsSync(resolve(':memory:'))).toBe(false);
+});
+
+/** An earlier version's SQLite database (schema 2, no server records) in `dataDir`. */
+function earlierDatabase(dataDir: string): string {
+  const file = join(dataDir, 'storage', 'sqlite', 'huabu.sqlite');
+  mkdirSync(dirname(file), { recursive: true });
+  const earlier = new DatabaseSync(file);
+  applySqliteMigrations(earlier, SQLITE_MIGRATIONS.slice(0, 2));
+  earlier.close();
+  return file;
+}
+
+function userVersion(file: string): unknown {
+  const database = new DatabaseSync(file, { readOnly: true });
+  try {
+    return database.prepare('PRAGMA user_version').get();
+  } finally {
+    database.close();
+  }
+}
+
+it('shares one record mutex between environments naming one database', async () => {
+  const env = {
+    HUABU_STRUCTURED_BACKEND: 'sqlite',
+    HUABU_DATA_DIR: dataDirectory(),
+  };
+  const [first, second] = await Promise.all([
+    initServerRecords(env),
+    initServerRecords({ ...env }),
+  ]);
+  expect(second).toBe(first);
+  const bump = (records: ServerRecords, id: string) =>
+    records.update(VERSIONS, (current) => ({
+      ...((current ?? {}) as Record<string, number>),
+      [id]: 1,
+    }));
+  await Promise.all([bump(first, 'alice'), bump(second, 'bob')]);
+  expect(await first.get(VERSIONS)).toEqual({ alice: 1, bob: 1 });
+});
+
+it('imports for the backend an explicit storage profile opens', async () => {
+  const dataDir = dataDirectory();
+  const legacy = new DiskServerRecordStore(() => dataDir);
+  const names = { owner: null, name: 'device-names' } as const;
+  await legacy.put(names, { 'desk-1': 'Desk' });
+  vi.stubEnv('HUABU_DATA_DIR', dataDir);
+  vi.stubEnv('HUABU_STRUCTURED_BACKEND', 'disk');
+
+  await initStorage({
+    structured: { kind: 'sqlite' },
+    blobs: { kind: 'disk' },
+  });
+  const records = getServerRecords();
+  expect(records.kind).toBe('sqlite');
+  expect(await records.get(names)).toEqual({ 'desk-1': 'Desk' });
+});
+
+it('never reads the files again once a database named by a file: URI holds its records', async () => {
+  const dataDir = dataDirectory();
+  const legacy = new DiskServerRecordStore(() => dataDir);
+  await legacy.put({ owner: null, name: 'credentials' }, { v: 'file' });
+  const env = {
+    HUABU_STRUCTURED_BACKEND: 'sqlite',
+    HUABU_DATA_DIR: dataDir,
+    HUABU_SQLITE_PATH: `file:${join(dataDir, 'records.sqlite')}?cache=private`,
+  };
+  await initServerRecords(env);
+  await closeStorage();
+
+  writeFileSync(join(dataDir, 'encrypted-secrets.json'), '{broken');
+  expect(await readPendingImport(env)).toEqual([]);
+  const restarted = await initServerRecords(env);
+  expect(await restarted.get({ owner: null, name: 'credentials' })).toEqual({
+    v: 'file',
+  });
+});
+
+it('peeks at a record without creating, upgrading, or importing into a database', async () => {
+  const credentials = { owner: null, name: 'credentials' } as const;
+  const empty = {
+    HUABU_STRUCTURED_BACKEND: 'sqlite',
+    HUABU_DATA_DIR: dataDirectory(),
+  };
+  expect(await peekServerRecord(credentials, empty)).toBeNull();
+  expect(existsSync(join(empty.HUABU_DATA_DIR, 'storage'))).toBe(false);
+
+  const dataDir = dataDirectory();
+  const file = earlierDatabase(dataDir);
+  await new DiskServerRecordStore(() => dataDir).put(credentials, {
+    v: 'file',
+  });
+  const earlier = {
+    HUABU_STRUCTURED_BACKEND: 'sqlite',
+    HUABU_DATA_DIR: dataDir,
+  };
+  // Before the import, the file the import would take it from.
+  expect(await peekServerRecord(credentials, earlier)).toEqual({ v: 'file' });
+  expect(userVersion(file)).toEqual({ user_version: 2 });
+
+  // After it, the database's row.
+  const records = await initServerRecords(earlier);
+  await records.put(credentials, { v: 'database' });
+  await closeStorage();
+  expect(await peekServerRecord(credentials, earlier)).toEqual({
+    v: 'database',
+  });
 });

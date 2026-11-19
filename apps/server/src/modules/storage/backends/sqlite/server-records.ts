@@ -9,7 +9,6 @@
  * here is scoped to the active Workspace.
  */
 
-import { existsSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 
 import { withImmediateTransaction } from './database.js';
@@ -26,30 +25,76 @@ import type {
   ServerRecordKey,
 } from '../../ports/server-records.js';
 
+/** SQLite's `SQLITE_CANTOPEN`: a read-only open found no database there. */
+const SQLITE_CANTOPEN = 14;
+
 /**
- * Whether the database file at `filename` holds any server record, read on a
- * short-lived connection of its own so the database is neither created nor
- * upgraded. An in-memory or URI filename names no file to inspect, and a
- * file without the table holds none.
+ * Run `read` against the `server_records` table of the database `filename`
+ * names, on a short-lived read-only connection of its own, so the database
+ * is neither created nor upgraded. `filename` is anything the process would
+ * open: a path, a `file:` URI, or an in-memory name, which opens empty.
+ *
+ * @returns `undefined` when there is no database there or it has no
+ *   `server_records` table yet, as an earlier version left it.
  */
-export function sqliteDatabaseHoldsServerRecords(filename: string): boolean {
-  if (filename.startsWith(':') || filename.startsWith('file:')) return false;
-  if (!existsSync(filename)) return false;
-  const database = new DatabaseSync(filename);
+function readWithoutOpening<T>(
+  filename: string,
+  read: (database: DatabaseSync) => T,
+): T | undefined {
+  let database: DatabaseSync;
+  try {
+    database = new DatabaseSync(filename, { readOnly: true });
+  } catch (error) {
+    if ((error as { errcode?: unknown }).errcode === SQLITE_CANTOPEN)
+      return undefined;
+    throw error;
+  }
   try {
     const table = database
       .prepare(
         "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'server_records'",
       )
       .get();
-    return (
-      table !== undefined &&
-      database.prepare('SELECT 1 FROM server_records LIMIT 1').get() !==
-        undefined
-    );
+    return table === undefined ? undefined : read(database);
   } finally {
     database.close();
   }
+}
+
+/** Whether the database `filename` names holds any server record, read without opening it. */
+export function sqliteDatabaseHoldsServerRecords(filename: string): boolean {
+  return (
+    readWithoutOpening(
+      filename,
+      (database) =>
+        database.prepare('SELECT 1 FROM server_records LIMIT 1').get() !==
+        undefined,
+    ) ?? false
+  );
+}
+
+/**
+ * One record of the database `filename` names, read without opening it, or
+ * `null` when it holds no such record.
+ */
+export function sqliteServerRecordWithoutOpening(
+  filename: string,
+  key: ServerRecordKey,
+): unknown {
+  const { ownerKey, name } = serverRecordColumns(key);
+  const text = readWithoutOpening(
+    filename,
+    (database) =>
+      database
+        .prepare(
+          'SELECT record_json FROM server_records WHERE owner_key = ? AND name = ?',
+        )
+        .get(ownerKey, name)?.['record_json'],
+  );
+  if (text === undefined) return null;
+  if (typeof text !== 'string')
+    throw new TypeError('Invalid SQLite server record row');
+  return decodeServerRecord(key, text);
 }
 
 export class SqliteServerRecordStore implements ServerRecordImportTarget {
