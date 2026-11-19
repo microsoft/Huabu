@@ -67,6 +67,13 @@ export const workspaceDescriptorSchema = z.object({
   /** Disk folder, where Workspaces have one; hidden for managed deployments. */
   path: z.string().nullable(),
   active: z.boolean(),
+  /**
+   * Whether the caller may rename or unregister this Workspace: a Bubble
+   * person with manage access to it, or a local caller on the Server's own
+   * machine outside managed mode. Sent by the list, get and rename routes;
+   * absent elsewhere and from older servers, where it should be read as no.
+   */
+  canManage: z.boolean().optional(),
 });
 export type WorkspaceDescriptor = z.infer<typeof workspaceDescriptorSchema>;
 

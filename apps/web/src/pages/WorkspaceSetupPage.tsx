@@ -1,8 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { Check, FolderOpen, Layers, X } from 'lucide-react';
-import { useState } from 'react';
+import { Check, FolderOpen, Layers, Pencil, X } from 'lucide-react';
+import { useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Navigate, useNavigate } from 'react-router-dom';
 
@@ -43,6 +43,7 @@ export default function WorkspaceSetupPage() {
   const selectWorkspace = useWorkspaceStore((s) => s.selectWorkspace);
   const createWorkspace = useWorkspaceStore((s) => s.createWorkspace);
   const openFolderWorkspace = useWorkspaceStore((s) => s.openFolderWorkspace);
+  const renameWorkspace = useWorkspaceStore((s) => s.renameWorkspace);
   const named = useWorkspaceStore(
     (s) => s.capabilities?.namedWorkspaces === true,
   );
@@ -84,6 +85,7 @@ export default function WorkspaceSetupPage() {
             workspaces={recentWorkspaces}
             activateWorkspace={activateRecentWorkspace}
             createWorkspace={createWorkspace}
+            renameWorkspace={renameWorkspace}
             openFolder={folders ? openFolderWorkspace : undefined}
             onActivated={() => navigate('/', { replace: true })}
           />
@@ -94,11 +96,119 @@ export default function WorkspaceSetupPage() {
             recentWorkspaces={recentWorkspaces}
             activateRecentWorkspace={activateRecentWorkspace}
             removeRecentWorkspace={removeRecentWorkspace}
+            renameWorkspace={renameWorkspace}
             selectWorkspace={selectWorkspace}
             onActivated={() => navigate('/', { replace: true })}
           />
         )}
       </div>
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// Rename: an inline editor for a Workspace the caller may manage
+// ──────────────────────────────────────────────────────────────────────
+
+type RenameWorkspace = (workspaceId: string, name: string) => Promise<void>;
+
+/**
+ * A chooser row that can turn into a name field. The row's own button
+ * (`children`) is shown until the pencil is pressed; the pencil is offered
+ * only when the server says the caller may manage this Workspace.
+ */
+function RenamableWorkspaceRow({
+  workspace,
+  renameWorkspace,
+  disabled,
+  children,
+}: {
+  workspace: WorkspaceDescriptor;
+  renameWorkspace: RenameWorkspace;
+  disabled: boolean;
+  children: ReactNode;
+}) {
+  const { t } = useTranslation();
+  const [draft, setDraft] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const save = async () => {
+    const trimmed = draft?.trim();
+    if (!trimmed) return;
+    if (trimmed === workspace.name) {
+      setDraft(null);
+      return;
+    }
+    setSaving(true);
+    try {
+      await renameWorkspace(workspace.workspaceId, trimmed);
+      setDraft(null);
+    } catch (error) {
+      console.error('[workspace-setup] Could not rename Workspace:', error);
+      toast(
+        error instanceof Error && error.message
+          ? error.message
+          : t('workspace.renameFailed'),
+        { tone: 'danger' },
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (draft !== null) {
+    return (
+      <div className="flex items-center gap-1">
+        <TextInput
+          autoFocus
+          aria-label={t('workspace.renameLabel', { workspace: workspace.name })}
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') void save();
+            if (event.key === 'Escape') setDraft(null);
+          }}
+          disabled={saving}
+          className="min-w-0 flex-1"
+        />
+        <Button
+          size="sm"
+          onClick={() => void save()}
+          disabled={saving || !draft.trim()}
+        >
+          {t('workspace.renameSave')}
+        </Button>
+        <Button
+          variant="ghost"
+          iconOnly
+          size="sm"
+          onClick={() => setDraft(null)}
+          disabled={saving}
+          title={t('workspace.renameCancel')}
+          aria-label={t('workspace.renameCancel')}
+        >
+          <X size={14} />
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="group flex items-center gap-1">
+      {children}
+      {workspace.canManage && (
+        <Button
+          variant="ghost"
+          iconOnly
+          size="sm"
+          onClick={() => setDraft(workspace.name)}
+          disabled={disabled}
+          title={t('workspace.rename')}
+          aria-label={t('workspace.renameLabel', { workspace: workspace.name })}
+        >
+          <Pencil size={14} />
+        </Button>
+      )}
     </div>
   );
 }
@@ -112,6 +222,7 @@ interface NamedSetupProps {
   workspaces: WorkspaceDescriptor[];
   activateWorkspace: (workspaceId: string) => Promise<void>;
   createWorkspace: (name: string) => Promise<void>;
+  renameWorkspace: RenameWorkspace;
   /** Where Workspaces are Disk folders: open one by its path on the Server. */
   openFolder?: (path: string) => Promise<void>;
   onActivated: () => void;
@@ -122,6 +233,7 @@ function NamedSetup({
   workspaces,
   activateWorkspace,
   createWorkspace,
+  renameWorkspace,
   openFolder,
   onActivated,
 }: NamedSetupProps) {
@@ -161,27 +273,33 @@ function NamedSetup({
           <ul className="space-y-1">
             {workspaces.map((workspace) => (
               <li key={workspace.workspaceId}>
-                <Button
-                  variant="ghost"
-                  tone="neutral"
-                  size="sm"
-                  onClick={() =>
-                    void run(() => activateWorkspace(workspace.workspaceId))
-                  }
+                <RenamableWorkspaceRow
+                  workspace={workspace}
+                  renameWorkspace={renameWorkspace}
                   disabled={isSyncing}
-                  className="w-full justify-start rounded-lg text-left"
                 >
-                  <Layers size={14} className="text-fg-subtle shrink-0" />
-                  <span className="text-fg-muted min-w-0 flex-1 truncate text-sm">
-                    {workspace.name}
-                  </span>
-                  {workspace.active && (
-                    <span className="text-fg-subtle flex shrink-0 items-center gap-1 text-xs">
-                      <Check size={12} />
-                      {t('workspace.current')}
+                  <Button
+                    variant="ghost"
+                    tone="neutral"
+                    size="sm"
+                    onClick={() =>
+                      void run(() => activateWorkspace(workspace.workspaceId))
+                    }
+                    disabled={isSyncing}
+                    className="min-w-0 flex-1 justify-start rounded-lg text-left"
+                  >
+                    <Layers size={14} className="text-fg-subtle shrink-0" />
+                    <span className="text-fg-muted min-w-0 flex-1 truncate text-sm">
+                      {workspace.name}
                     </span>
-                  )}
-                </Button>
+                    {workspace.active && (
+                      <span className="text-fg-subtle flex shrink-0 items-center gap-1 text-xs">
+                        <Check size={12} />
+                        {t('workspace.current')}
+                      </span>
+                    )}
+                  </Button>
+                </RenamableWorkspaceRow>
               </li>
             ))}
           </ul>
@@ -253,6 +371,7 @@ interface FreeSetupProps {
   recentWorkspaces: WorkspaceDescriptor[];
   activateRecentWorkspace: (workspaceId: string) => Promise<void>;
   removeRecentWorkspace: (workspaceId: string) => void;
+  renameWorkspace: RenameWorkspace;
   selectWorkspace: (path: string) => Promise<void>;
   onActivated: () => void;
 }
@@ -263,6 +382,7 @@ function FreeSetup({
   recentWorkspaces,
   activateRecentWorkspace,
   removeRecentWorkspace,
+  renameWorkspace,
   selectWorkspace,
   onActivated,
 }: FreeSetupProps) {
@@ -333,35 +453,49 @@ function FreeSetup({
           </div>
           <ul className="space-y-1">
             {recentWorkspaces.map((workspace) => (
-              <li
-                key={workspace.workspaceId}
-                className="group flex items-center gap-1"
-              >
-                <Button
-                  variant="ghost"
-                  tone="neutral"
-                  size="sm"
-                  onClick={() => void handleSelectRecent(workspace.workspaceId)}
+              <li key={workspace.workspaceId}>
+                {/* A folder Workspace is known by its path; one without a
+                    folder (SQL storage) only by its name, so that is the
+                    one worth renaming here. */}
+                <RenamableWorkspaceRow
+                  workspace={
+                    workspace.path === null
+                      ? workspace
+                      : { ...workspace, canManage: false }
+                  }
+                  renameWorkspace={renameWorkspace}
                   disabled={isLoading}
-                  className="min-w-0 flex-1 justify-start rounded-lg text-left"
                 >
-                  <FolderOpen size={14} className="text-fg-subtle shrink-0" />
-                  <span className="text-fg-muted truncate text-sm">
-                    {workspace.path ?? workspace.name}
-                  </span>
-                </Button>
-                {!workspace.active && (
                   <Button
                     variant="ghost"
-                    iconOnly
+                    tone="neutral"
                     size="sm"
-                    onClick={() => removeRecentWorkspace(workspace.workspaceId)}
-                    className="opacity-0 transition-all group-hover:opacity-100"
-                    title={t('workspace.removeRecent')}
+                    onClick={() =>
+                      void handleSelectRecent(workspace.workspaceId)
+                    }
+                    disabled={isLoading}
+                    className="min-w-0 flex-1 justify-start rounded-lg text-left"
                   >
-                    <X size={14} />
+                    <FolderOpen size={14} className="text-fg-subtle shrink-0" />
+                    <span className="text-fg-muted truncate text-sm">
+                      {workspace.path ?? workspace.name}
+                    </span>
                   </Button>
-                )}
+                  {!workspace.active && (
+                    <Button
+                      variant="ghost"
+                      iconOnly
+                      size="sm"
+                      onClick={() =>
+                        removeRecentWorkspace(workspace.workspaceId)
+                      }
+                      className="opacity-0 transition-all group-hover:opacity-100"
+                      title={t('workspace.removeRecent')}
+                    >
+                      <X size={14} />
+                    </Button>
+                  )}
+                </RenamableWorkspaceRow>
               </li>
             ))}
           </ul>

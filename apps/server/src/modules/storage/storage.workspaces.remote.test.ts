@@ -89,7 +89,7 @@ it('starts a first Workspace on an empty database and reopens that same one', as
   await initStorage(POSTGRES);
   const first = getWorkspaceHandle();
   const world = getWorldCanvasId();
-  expect(first?.name).toBe('Workspace');
+  expect(first?.name).toBe('Default');
   expect(world).not.toBeNull();
   expect(await getWorkspaceRepository().list()).toHaveLength(1);
   expect((await createSpace('space-first-start', 'First')).ok).toBe(true);

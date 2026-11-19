@@ -21,12 +21,19 @@ const mocks = vi.hoisted(() => ({
         path: '/tmp/second',
         active: false,
       },
-    ],
+    ] as Array<{
+      workspaceId: string;
+      name: string;
+      path: string | null;
+      active: boolean;
+      canManage?: boolean;
+    }>,
     removeRecentWorkspace: vi.fn(),
     activateRecentWorkspace: vi.fn(),
     selectWorkspace: vi.fn(),
     createWorkspace: vi.fn(),
     openFolderWorkspace: vi.fn(),
+    renameWorkspace: vi.fn(),
     capabilities: null as null | {
       namedWorkspaces: boolean;
       folderWorkspaces: boolean;
@@ -141,3 +148,64 @@ it.each([false, true])(
     );
   },
 );
+
+it('renames only the Workspaces the caller may manage', async () => {
+  const original = mocks.state.recentWorkspaces;
+  mocks.state.capabilities = { namedWorkspaces: true, folderWorkspaces: false };
+  mocks.state.recentWorkspaces = [
+    {
+      workspaceId: 'mine',
+      name: 'Workspace',
+      path: null,
+      active: true,
+      canManage: true,
+    },
+    {
+      workspaceId: 'shared',
+      name: 'Shared',
+      path: null,
+      active: false,
+      canManage: false,
+    },
+  ];
+  mocks.state.renameWorkspace.mockResolvedValue(undefined);
+  try {
+    await act(async () =>
+      root.render(
+        <MemoryRouter>
+          <WorkspaceSetupPage key="rename" />
+        </MemoryRouter>,
+      ),
+    );
+    const pencils = container.querySelectorAll(
+      'button[aria-label="workspace.renameLabel"]',
+    );
+    expect(pencils).toHaveLength(1);
+    await act(async () => (pencils[0] as HTMLButtonElement).click());
+    const input = container.querySelector<HTMLInputElement>(
+      'input[aria-label="workspace.renameLabel"]',
+    )!;
+    expect(input.value).toBe('Workspace');
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(
+        HTMLInputElement.prototype,
+        'value',
+      )!.set!.call(input, '  Default ');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () =>
+      input.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
+      ),
+    );
+    expect(mocks.state.renameWorkspace).toHaveBeenCalledExactlyOnceWith(
+      'mine',
+      'Default',
+    );
+    expect(
+      container.querySelector('input[aria-label="workspace.renameLabel"]'),
+    ).toBeNull();
+  } finally {
+    mocks.state.recentWorkspaces = original;
+  }
+});

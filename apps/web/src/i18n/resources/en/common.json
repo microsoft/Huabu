@@ -760,7 +760,11 @@
     "create": "Create",
     "current": "Current",
     "named": "Workspace: {{workspace}}",
-    "namedPrefix": "Workspace: "
+    "rename": "Rename",
+    "renameLabel": "Rename Workspace “{{workspace}}”",
+    "renameSave": "Save",
+    "renameCancel": "Cancel rename",
+    "renameFailed": "Could not rename the Workspace. Please try again."
   },
   "spaceHierarchy": {
     "deleteFromContainer": "Delete this Space from Home or its parent Space.",

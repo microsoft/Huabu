@@ -760,7 +760,11 @@
     "create": "创建",
     "current": "当前",
     "named": "工作区：{{workspace}}",
-    "namedPrefix": "工作区："
+    "rename": "重命名",
+    "renameLabel": "重命名工作区“{{workspace}}”",
+    "renameSave": "保存",
+    "renameCancel": "取消重命名",
+    "renameFailed": "无法重命名工作区，请重试。"
   },
   "spaceHierarchy": {
     "deleteFromContainer": "请从 Home 或父 Space 中删除此 Space。",

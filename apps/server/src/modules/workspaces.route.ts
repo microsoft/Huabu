@@ -244,6 +244,22 @@ async function canManage(
   });
 }
 
+/**
+ * A descriptor that also says whether the caller may rename or unregister the
+ * Workspace, by the same rules the PATCH and DELETE routes apply.
+ */
+async function describeFor(
+  request: FastifyRequest,
+  workspace: WorkspaceHandle,
+): Promise<WorkspaceDescriptor> {
+  const manageable = isManagedMode()
+    ? false
+    : personal(request)
+      ? await canManage(request, workspace.workspaceId)
+      : isLocalhost(request.ip);
+  return { ...descriptor(workspace), canManage: manageable };
+}
+
 const workspacesRoutes: FastifyPluginAsync = async (app) => {
   let legacyDesktopStoreImported = false;
 
@@ -280,9 +296,10 @@ const workspacesRoutes: FastifyPluginAsync = async (app) => {
   });
 
   app.get('/', async (request) => {
-    if (!personal(request))
-      return (await visibleWorkspaces()).map((w) => descriptor(w));
-    return (await enterable(request)).map((w) => descriptor(w));
+    const workspaces = personal(request)
+      ? await enterable(request)
+      : await visibleWorkspaces();
+    return Promise.all(workspaces.map((w) => describeFor(request, w)));
   });
 
   /**
@@ -504,11 +521,11 @@ const workspacesRoutes: FastifyPluginAsync = async (app) => {
           (w) => w.workspaceId === parsedId,
         );
         if (!workspace) return sendError(reply, 404, 'Workspace not found');
-        return reply.send(descriptor(workspace));
+        return reply.send(await describeFor(request, workspace));
       }
       const workspace = await findVisible(parsedId);
       if (!workspace) return sendError(reply, 404, 'Workspace not found');
-      return reply.send(descriptor(workspace));
+      return reply.send(await describeFor(request, workspace));
     },
   );
 
@@ -594,7 +611,8 @@ const workspacesRoutes: FastifyPluginAsync = async (app) => {
         );
         if (!workspace) return sendError(reply, 404, 'Workspace not found');
         updateActiveWorkspaceHandle(workspace);
-        return reply.send(descriptor(workspace));
+        // Only a caller who may manage it gets this far.
+        return reply.send({ ...descriptor(workspace), canManage: true });
       } catch (error) {
         return sendError(reply, 400, (error as Error).message);
       }

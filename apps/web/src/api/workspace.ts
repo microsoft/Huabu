@@ -98,6 +98,21 @@ export async function activateWorkspace(
   });
 }
 
+/**
+ * Rename a Workspace the caller may manage (`WorkspaceDescriptor.canManage`).
+ * Only the display name changes; its Spaces and identity stay where they are.
+ */
+export async function renameWorkspace(
+  workspaceId: string,
+  name: string,
+): Promise<WorkspaceDescriptor> {
+  return apiFetch<WorkspaceDescriptor>(routes.workspaceById(workspaceId), {
+    method: 'PATCH',
+    json: { name },
+    fallbackMessage: 'Failed to rename Workspace',
+  });
+}
+
 /** Unregister a Workspace without deleting its directory or contents. */
 export async function removeWorkspace(workspaceId: string): Promise<void> {
   await apiFetch<void>(routes.workspaceById(workspaceId), {
