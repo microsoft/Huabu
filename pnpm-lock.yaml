@@ -290,8 +290,8 @@ importers:
         specifier: ^7.2.4
         version: 7.2.4
       undici:
-        specifier: ^8.12.4
-        version: 8.12.4
+        specifier: ^7.30.2
+        version: 7.30.2
       yaml:
         specifier: ^2.8.4
         version: 2.9.0
@@ -14819,8 +14819,7 @@ snapshots:
 
   undici@6.29.1: {}
 
-  undici@7.30.2:
-    optional: true
+  undici@7.30.2: {}
 
   undici@8.12.4: {}
 
