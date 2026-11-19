@@ -5,6 +5,8 @@ import { act, type ComponentProps } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { spyOnAssignedStyle } from '@/__tests__/spyOnAssignedStyle';
+
 import { nodeAccentToken } from './design/nodeAccentPolicy';
 import { nodeBoundaryForAccent } from './design/nodeBoundary';
 import { frameRegionSurfaceStyle } from './frame/frameRegionStyle';
@@ -358,11 +360,7 @@ describe('NodeWrapper radius contract', () => {
     (type) => {
       // Happy DOM drops modern CSS color values; assert the assigned CSS here
       // and verify computed colors and overlay inheritance in Chromium.
-      const borderColor = vi.spyOn(
-        CSSStyleDeclaration.prototype,
-        'borderColor',
-        'set',
-      );
+      const borderColor = spyOnAssignedStyle('border-color');
       for (const accent of ['teal', 'white', '#008080', undefined]) {
         const resolved = nodeAccentToken(type, accent);
         const boundary = {
