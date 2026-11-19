@@ -1100,6 +1100,7 @@
     "previewFailed": "Preview failed to load",
     "processing": "Processing…",
     "download": "Download",
+    "downloadFailed": "Download failed",
     "officeFileMissing": "{{label}} file missing",
     "untitledTypedDocument": "Untitled {{label}}",
     "noOfficeSource": "No Office Source",
