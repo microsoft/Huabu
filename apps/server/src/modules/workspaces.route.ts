@@ -245,19 +245,33 @@ async function canManage(
 }
 
 /**
- * A descriptor that also says whether the caller may rename or unregister the
- * Workspace, by the same rules the PATCH and DELETE routes apply.
+ * Descriptors that also say whether the caller may rename or unregister each
+ * Workspace, by the same rules the PATCH and DELETE routes apply. A personal
+ * caller's checks share one access snapshot where the provider batches them.
  */
 async function describeFor(
   request: FastifyRequest,
-  workspace: WorkspaceHandle,
-): Promise<WorkspaceDescriptor> {
-  const manageable = isManagedMode()
-    ? false
-    : personal(request)
-      ? await canManage(request, workspace.workspaceId)
-      : isLocalhost(request.ip);
-  return { ...descriptor(workspace), canManage: manageable };
+  workspaces: readonly WorkspaceHandle[],
+): Promise<WorkspaceDescriptor[]> {
+  const manageable = await (async (): Promise<readonly boolean[]> => {
+    if (isManagedMode()) return workspaces.map(() => false);
+    if (!personal(request))
+      return workspaces.map(() => isLocalhost(request.ip));
+    const { access } = requireRequestIdentity(request);
+    const resources = workspaces.map((workspace) => ({
+      type: 'workspace' as const,
+      id: workspace.workspaceId,
+    }));
+    return access.canMany
+      ? access.canMany('manage', resources)
+      : Promise.all(
+          resources.map((resource) => access.can('manage', resource)),
+        );
+  })();
+  return workspaces.map((workspace, index) => ({
+    ...descriptor(workspace),
+    canManage: manageable[index]!,
+  }));
 }
 
 const workspacesRoutes: FastifyPluginAsync = async (app) => {
@@ -299,7 +313,7 @@ const workspacesRoutes: FastifyPluginAsync = async (app) => {
     const workspaces = personal(request)
       ? await enterable(request)
       : await visibleWorkspaces();
-    return Promise.all(workspaces.map((w) => describeFor(request, w)));
+    return describeFor(request, workspaces);
   });
 
   /**
@@ -521,11 +535,11 @@ const workspacesRoutes: FastifyPluginAsync = async (app) => {
           (w) => w.workspaceId === parsedId,
         );
         if (!workspace) return sendError(reply, 404, 'Workspace not found');
-        return reply.send(await describeFor(request, workspace));
+        return reply.send((await describeFor(request, [workspace]))[0]);
       }
       const workspace = await findVisible(parsedId);
       if (!workspace) return sendError(reply, 404, 'Workspace not found');
-      return reply.send(await describeFor(request, workspace));
+      return reply.send((await describeFor(request, [workspace]))[0]);
     },
   );
 

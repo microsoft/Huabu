@@ -226,6 +226,49 @@ it('tells each person which Workspaces they may rename, and enforces it', async 
   expect(await listed('dave')).toMatchObject({ name: 'Team notes' });
 });
 
+it('decides every listed Workspace from one access snapshot', async () => {
+  const { call, store, workspaceOf } = await host();
+  await workspaceOf('dave');
+  const share = async (name: string) => {
+    const made = await call('carol', 'POST', '/api/workspaces', {
+      path: path.join(root, name),
+      name,
+    });
+    await store.grants.add({
+      target: { type: 'huabu.workspace', id: made.body.workspaceId as string },
+      principalId: 'dave',
+      role: 'huabu.workspace.viewer',
+      grantedByPrincipalId: 'carol',
+    });
+  };
+  const reads = vi.spyOn(store.principals, 'get');
+  const list = async () => {
+    reads.mockClear();
+    const { body } = await call('dave', 'GET', '/api/workspaces');
+    return {
+      reads: reads.mock.calls.length,
+      canManage: Object.fromEntries(
+        (body as Array<{ name: string; canManage: boolean }>).map((entry) => [
+          entry.name,
+          entry.canManage,
+        ]),
+      ),
+    };
+  };
+
+  await share('First shared');
+  const two = await list();
+  await share('Second shared');
+  const three = await list();
+
+  expect(three.canManage).toMatchObject({
+    'First shared': false,
+    'Second shared': false,
+  });
+  expect(Object.values(three.canManage).filter(Boolean)).toHaveLength(1);
+  expect(three.reads).toBe(two.reads);
+});
+
 it('keeps damaged foreign directory paths out of adoption errors', async () => {
   const { call, workspaceOf } = await host();
   await workspaceOf('dave');
