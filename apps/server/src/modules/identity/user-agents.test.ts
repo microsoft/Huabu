@@ -25,6 +25,7 @@ import {
   agentReachbackEnvironment,
   authenticateUserAgentlet,
   connectedDeviceAccess,
+  disconnectAgentlets,
   ownDeviceCredential,
   readAgentCredential,
   readDeviceAccess,
@@ -1038,6 +1039,50 @@ it('orders a first-time claim behind a reset that is still committing', async ()
       (await getServerRecords().get({ owner: null, name: 'device-owners' })) ??
         {},
     ).not.toHaveProperty('racing-device');
+  } finally {
+    for (const socket of sockets) socket.close();
+  }
+});
+
+it('leaves no ownership behind for a first-time claim a membership removal overtakes', async () => {
+  const h = await host(false);
+  await app.listen({ port: 0, host: '127.0.0.1' });
+  const port = (app.server.address() as { port: number }).port;
+  const sockets: WebSocket[] = [];
+  const alice = await h.as('alice', ownDeviceCredential);
+  const records = getServerRecords();
+  const get = records.store.get.bind(records.store);
+  let ownerReads = 0;
+  let entered!: () => void;
+  const writing = new Promise<void>((resolve) => (entered = resolve));
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => (release = resolve));
+  // The second ownership read is the claim's own, inside its update: hold
+  // it, after every check that precedes the write.
+  vi.spyOn(records.store, 'get').mockImplementation(async (key) => {
+    const value = await get(key);
+    if (key.name === 'device-owners' && ++ownerReads === 2) {
+      entered();
+      await held;
+    }
+    return value;
+  });
+  try {
+    const handshake = connectDevice(port, sockets, 'new-device', alice);
+    await writing;
+    // As removing membership does: no reset, so no credential version change.
+    disconnectAgentlets('alice', 'Device owner is not admitted');
+    release();
+    expect(await handshake).toMatchObject({
+      error: {
+        message: expect.stringContaining('Device owner is not admitted'),
+      },
+    });
+    vi.mocked(records.store.get).mockRestore();
+    expect(
+      (await getServerRecords().get({ owner: null, name: 'device-owners' })) ??
+        {},
+    ).not.toHaveProperty('new-device');
   } finally {
     for (const socket of sockets) socket.close();
   }

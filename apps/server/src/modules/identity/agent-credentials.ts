@@ -533,6 +533,10 @@ export function authenticateUserAgentlet(service: IdentityService) {
         // Claims are serialized, so of two people racing for a new device
         // the second sees the first's claim here and is refused.
         await getServerRecords().update(OWNERS, (current) => {
+          // Checked again as the claim is written: a membership removal
+          // revokes the admission without a reset, and so without waiting
+          // for the lock, so a claim it overtook writes nothing.
+          refuseIfRevoked();
           const owners = ownersSchema.parse(current ?? {});
           if (
             Object.hasOwn(owners, agentletId) &&
