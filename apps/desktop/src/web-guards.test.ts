@@ -94,7 +94,10 @@ describe('isDownloadAllowed', () => {
       false,
     );
     expect(isDownloadAllowed('blob:null/7f3c', ORIGIN)).toBe(false);
-    expect(isDownloadAllowed('data:text/plain,hello', ORIGIN)).toBe(false);
+    // An image node may hold its picture as a data URL; only the application
+    // can start a download of one.
+    expect(isDownloadAllowed('data:image/png;base64,AAAA', ORIGIN)).toBe(true);
+    expect(isDownloadAllowed('file:///etc/passwd', ORIGIN)).toBe(false);
   });
 });
 
@@ -141,6 +144,14 @@ describe('guardSession', () => {
     ).toBe(false);
   });
 
+  it('guards a session once, however often its Space is reopened', () => {
+    const session = guarded();
+    guardSession(session as unknown as Session, ORIGIN);
+    guardSession(session as unknown as Session, ORIGIN);
+    expect(session.on).toHaveBeenCalledTimes(1);
+    expect(session.setPermissionRequestHandler).toHaveBeenCalledTimes(1);
+  });
+
   it('cancels a download from outside the application', () => {
     const session = guarded();
     const [event, listener] = session.on.mock.calls[0];
@@ -170,7 +181,7 @@ describe('carriesLaunchToken', () => {
     );
     expect(carries(API, 'xhr', [APP])).toBe(true);
     expect(carries(`${ORIGIN}/assets/app.js`, 'script', [APP])).toBe(true);
-    // A worker, or the main process itself.
+    // The main process itself.
     expect(carries(API, 'xhr', null)).toBe(true);
   });
 
@@ -182,6 +193,16 @@ describe('carriesLaunchToken', () => {
         APP,
       ]),
     ).toBe(true);
+    // Electron reports no URL at all for a frame on its first navigation.
+    expect(
+      carries(`${ORIGIN}/api/canvas/one/artifact/page.html`, 'subFrame', [
+        '',
+        APP,
+      ]),
+    ).toBe(true);
+    expect(
+      carries(API, 'subFrame', ['', 'https://evil.example/page', APP]),
+    ).toBe(false);
     // Sandboxed, so its origin is opaque, yet its document is the Server's.
     expect(
       carries(`${ORIGIN}/api/canvas/one/artifact/style.css`, 'stylesheet', [
@@ -206,6 +227,44 @@ describe('carriesLaunchToken', () => {
     expect(carries(API, 'subFrame', [page, APP])).toBe(false);
     expect(carries(API, 'subFrame', ['about:blank', page, APP])).toBe(false);
     expect(carries(API, 'xhr', ['about:srcdoc', page, APP])).toBe(false);
+  });
+
+  it('is not gained by a framed page that moves itself to a blob or data document', () => {
+    expect(carries(API, 'xhr', ['blob:https://evil.example/7f3c', APP])).toBe(
+      false,
+    );
+    expect(carries(API, 'xhr', ['blob:null/7f3c', APP])).toBe(false);
+    expect(carries(API, 'xhr', ['data:text/html,<p>x</p>', APP])).toBe(false);
+    // The application's own blob documents are still its own.
+    expect(carries(API, 'xhr', [`blob:${ORIGIN}/7f3c`, APP])).toBe(true);
+    // Nothing but `about:` documents all the way up names no application.
+    expect(carries(API, 'xhr', ['about:blank'])).toBe(false);
+  });
+
+  it('judges a request with no frame by the referrer it states', () => {
+    const frameless = (referrer: string | undefined, fromRenderer: boolean) =>
+      carriesLaunchToken(
+        {
+          url: API,
+          resourceType: 'xhr',
+          frameUrls: null,
+          referrer,
+          fromRenderer,
+        },
+        [ORIGIN],
+      );
+    // The application's worker, and its last save as a Tab closes.
+    expect(frameless(`${ORIGIN}/assets/worker.js`, true)).toBe(true);
+    expect(frameless(APP, true)).toBe(true);
+    // A framed page's worker, whether a file or a blob it made.
+    expect(frameless('https://evil.example/worker.js', true)).toBe(false);
+    expect(frameless('http://127.0.0.1:9999/worker.js', true)).toBe(false);
+    expect(frameless('blob:https://evil.example/7f3c', true)).toBe(false);
+    // A renderer that hides its referrer is not taken on trust.
+    expect(frameless(undefined, true)).toBe(false);
+    expect(frameless('', true)).toBe(false);
+    // The main process states none and is the application.
+    expect(frameless(undefined, false)).toBe(true);
   });
 
   it('covers a development web server that proxies to the Server', () => {
@@ -283,6 +342,8 @@ describe('sendLaunchToken', () => {
         url: `${ORIGIN}/api/x`,
         resourceType: 'xhr',
         requestHeaders: {},
+        referrer: APP,
+        webContentsId: 7,
         get frame() {
           throw new Error('Render frame was disposed');
         },

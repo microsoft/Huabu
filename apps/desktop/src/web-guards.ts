@@ -53,13 +53,21 @@ export function isPermissionAllowed(
 
 /**
  * Only the application's own files may be saved. A `blob:` URL has the origin
- * of the page that created it, so the same comparison covers it.
+ * of the page that created it, so the same comparison covers it. A `data:`
+ * URL names no origin, and only the application can start a download of one:
+ * framed pages are sandboxed without `allow-downloads`. Image nodes hold such
+ * URLs, and their Download action saves them.
  */
 export function isDownloadAllowed(url: string, serverOrigin: string): boolean {
-  return isSameOrigin(url, serverOrigin);
+  return isSameOrigin(url, serverOrigin) || /^data:/i.test(url);
 }
 
+/** A Space's session outlives its Tab, and each reopening guards it again. */
+const guarded = new WeakSet<Session>();
+
 export function guardSession(webSession: Session, serverOrigin: string): void {
+  if (guarded.has(webSession)) return;
+  guarded.add(webSession);
   webSession.setPermissionRequestHandler(
     (_contents, permission, callback, details) => {
       const media = details as { mediaTypes?: readonly string[] };
@@ -106,31 +114,46 @@ export interface OutgoingRequest {
   resourceType: string;
   /**
    * The document URL of the frame making the request, then of each ancestor.
-   * `null` when no frame makes it: a worker, or the main process.
+   * `null` when no frame is known: a worker, the main process, or a page
+   * that has just closed.
    */
   frameUrls: readonly string[] | null;
+  /** The `Referer` the request states, if any. */
+  referrer?: string;
+  /** Whether a renderer, rather than the main process, makes the request. */
+  fromRenderer?: boolean;
 }
 
 /**
  * Whether a request is the application's own call to its local Server.
  *
  * The Server's Host, Origin and CORS guards already keep a framed web page
- * from reading the API or writing to it, token or not. This only withholds
- * the token where the caller is plainly not the application.
+ * from reading the API or writing to it, token or not. This withholds the
+ * token wherever the caller cannot be shown to be the application.
  */
 export function carriesLaunchToken(
   request: OutgoingRequest,
   serverOrigins: readonly string[],
 ): boolean {
+  // `URL.origin` is the creating page's origin for a `blob:` URL, so a page
+  // gains nothing by moving itself to one.
   const isServer = (url: string) =>
     serverOrigins.some((origin) => isSameOrigin(url, origin));
   if (!isServer(request.url)) return false;
   // The navigation guard lets a window load nothing but the application.
   if (request.resourceType === 'mainFrame') return true;
-  if (!request.frameUrls) return true;
-  // `about:srcdoc` and `blob:` documents belong to the page that made them.
-  const document = request.frameUrls.find((url) => /^https?:/i.test(url));
-  return document === undefined || isServer(document);
+  if (request.frameUrls) {
+    // A frame not yet loaded (no URL) and an `about:` document act for the
+    // frame that holds them.
+    const document = request.frameUrls.find(
+      (url) => url !== '' && !/^about:/i.test(url),
+    );
+    return document !== undefined && isServer(document);
+  }
+  // No frame to judge by. A worker, and a page's last request as it closes,
+  // name the application as their referrer; the main process names none.
+  if (request.referrer) return isServer(request.referrer);
+  return !request.fromRenderer;
 }
 
 export function sendLaunchToken(
@@ -145,13 +168,19 @@ export function sendLaunchToken(
       if (frame) frameUrls = [];
       for (; frame; frame = frame.parent) frameUrls?.push(frame.url);
     } catch {
-      // The frame was disposed mid-request. A page's last save while it
-      // closes must still arrive, so this request is treated as frameless.
+      // The frame was disposed mid-request: judged as frameless, so a page's
+      // last save while it closes still arrives.
       frameUrls = null;
     }
     callback(
       carriesLaunchToken(
-        { url: details.url, resourceType: details.resourceType, frameUrls },
+        {
+          url: details.url,
+          resourceType: details.resourceType,
+          frameUrls,
+          referrer: details.referrer,
+          fromRenderer: details.webContentsId !== undefined,
+        },
         serverOrigins,
       )
         ? {

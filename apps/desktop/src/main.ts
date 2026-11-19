@@ -1098,7 +1098,9 @@ function configureWebSession(
   serverOrigin: string,
   webSession = session.defaultSession,
 ): void {
-  guardSession(webSession, serverOrigin);
+  // A remote Server's session is left as it was: this policy is part of
+  // hardening the local one.
+  if (!remoteServerOrigin) guardSession(webSession, serverOrigin);
   if (launchToken)
     // With a development web server in front, the page reaches the Server
     // through that server's proxy as well as directly.
