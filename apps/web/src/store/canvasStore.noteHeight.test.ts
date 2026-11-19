@@ -10,7 +10,15 @@ import { measureNoteHeightOffscreen } from '@/components/Nodes/shared/height/mea
 import { canvasHistoryManager } from './canvasHistoryManager';
 import useCanvasStore from './canvasStore';
 
+import type * as canvasApi from '../api';
 import type { Node } from '@xyflow/react';
+
+// These tests are about the page's own state; the edits it sends are never
+// answered, so nothing reaches the network.
+vi.mock('../api', async (importOriginal) => ({
+  ...(await importOriginal<typeof canvasApi>()),
+  postCanvasExecute: vi.fn(() => new Promise<never>(() => {})),
+}));
 
 vi.mock('@/components/Nodes/shared/height/measure/offscreenMeasurer', () => ({
   measureNoteHeightOffscreen: vi.fn(),
