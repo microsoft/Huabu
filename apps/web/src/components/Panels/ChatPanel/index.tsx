@@ -819,14 +819,21 @@ export const ChatPanel = ({
     onRenameRequestHandled,
   ]);
 
-  // Never block Send on a transient state: the turn is queued and sent as soon
-  // as the thread is ready.
-  const deferSubmission =
+  // Never block Send on a transient state. While history is loading the turn
+  // waits in the queue, since hydration replaces the transcript. For Agent
+  // warm-up or a save in flight it is shown as sent and dispatched once ready:
+  // nothing is ahead of it, so a queue would only raise the question why.
+  const awaitingReadiness =
     builtinThreadSettings.saving ||
-    !isHistoryLoaded ||
     preparation.pending ||
     savingAgentDraft ||
     savingWorkingDirectory;
+  const deferSubmission = !isHistoryLoaded || awaitingReadiness;
+  const sendingWhenReady = useChatStore((state) => {
+    const thread = state.threadsById[threadId];
+    const last = thread?.messages.at(-1);
+    return !!thread?.isPreparing && last?.role === 'user';
+  });
   useEffect(
     () =>
       deferSubmission
@@ -839,7 +846,8 @@ export const ChatPanel = ({
       e.preventDefault();
       if (!ownerScopeReady) return;
       const options = {
-        defer: deferSubmission,
+        defer: !isHistoryLoaded,
+        waitUntilReady: awaitingReadiness,
         settingsPending: builtinThreadSettings.saving,
       };
       // Strip leading `/<id>` tokens that match a known slash command
@@ -886,7 +894,8 @@ export const ChatPanel = ({
       onCommit,
       startStream,
       ownerScopeReady,
-      deferSubmission,
+      isHistoryLoaded,
+      awaitingReadiness,
       builtinThreadSettings.saving,
     ],
   );
@@ -1195,7 +1204,7 @@ export const ChatPanel = ({
             onRetryHistoryPage={historyWindow?.retryHistoryPage}
             activationId={activationId}
             threadId={threadId}
-            isLoading={isLoading}
+            isLoading={isLoading || sendingWhenReady}
             isHistoryLoading={
               !ownerUnavailable && !isHistoryLoaded && !historyError
             }
@@ -1337,7 +1346,7 @@ export const ChatPanel = ({
               // connection badge above; we keep the input enabled so the
               // user can retry / trigger a re-ensure on the next send.
               submitDisabled={!ownerScopeReady}
-              deferSubmission={deferSubmission}
+              deferSubmission={!isHistoryLoaded}
               queueBlockedReason={
                 historyError && !isHistoryLoaded
                   ? t('chat.queueBlockedByHistory')

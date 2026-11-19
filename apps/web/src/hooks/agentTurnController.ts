@@ -886,6 +886,14 @@ type AgentTurnAcceptance = AgentTurnAccepted | { requestId: string };
 
 export interface AgentTurnCallbacks {
   queuedTurnId?: string;
+  /**
+   * The composer reported a transient state (Agent warm-up, a save in flight).
+   * Show the message as sent and dispatch it once that state clears, rather
+   * than making the user wait in the queue behind nothing.
+   */
+  waitUntilReady?: boolean;
+  /** Read built-in settings again after waiting, once their save has settled. */
+  refreshSettings?: boolean;
   canDispatch?: () => boolean;
   onStarted?: () => void;
   onAccepted?: (accepted: AgentTurnAcceptance) => void;
@@ -1174,6 +1182,9 @@ async function executePreparedAgentTurn(
   let requestedPreferences: AgentRequest['initialPreferences'];
   let requestDispatched = false;
   let releasePreparation: ((attempted?: boolean) => void) | undefined;
+  // Set while a message is displayed ahead of dispatch; cleared once `run`
+  // adopts it as the turn's user message.
+  let shownMessage: Extract<ChatMessage, { role: 'user' }> | undefined;
   const run = async (): Promise<void> => {
     // Per-thread guard: this thread's own loading flag, not any other
     // thread's. The user may already have a stream running in a
@@ -1231,7 +1242,7 @@ async function executePreparedAgentTurn(
     const requestId = createId('request');
     activeTurnRequests.set(acceptanceKey, requestId);
     useChatStore.getState().setThreadPreparing(threadId, true);
-    const userMessage = createAgentTurnUserMessage(prepared);
+    const userMessage = shownMessage ?? createAgentTurnUserMessage(prepared);
     userMessage.queuedTurnId = callbacks.queuedTurnId;
     try {
       if (
@@ -1312,7 +1323,9 @@ async function executePreparedAgentTurn(
     callbacks.onStarted?.();
 
     const userMessageId = userMessage.id;
-    addMessage(threadId, userMessage);
+    // A message shown while waiting for readiness is already in the transcript.
+    if (shownMessage) shownMessage = undefined;
+    else addMessage(threadId, userMessage);
 
     setThreadLoading(threadId, true);
 
@@ -1576,37 +1589,113 @@ async function executePreparedAgentTurn(
       }
     }
   };
-  const preparation = resolveConversationPreparation(session);
-  if (preparation.pending) {
-    return { status: 'busy' };
-  }
-  if (
-    preparation.binding.kind === 'external' &&
-    (prompt.trim() || quotedComments?.length || isCanvasIntent(inputKind))
-  ) {
-    requestedCwd = conversationControlTarget(session).cwd;
-    requestedPreferences = readDisplayedInitialPreferences(
-      session.ownerCanvasId,
-      session.threadId,
-      preparation.binding.profileId,
-    );
-    try {
-      releasePreparation = beginConversationRealization(session);
-    } catch (error) {
-      return {
-        status: 'busy',
-        error: error instanceof Error ? error : new Error(String(error)),
-      };
+  const dispatch = async (): Promise<AgentTurnResult> => {
+    const preparation = resolveConversationPreparation(session);
+    if (preparation.pending) {
+      return { status: 'busy' };
     }
-    try {
+    if (
+      preparation.binding.kind === 'external' &&
+      (prompt.trim() || quotedComments?.length || isCanvasIntent(inputKind))
+    ) {
+      requestedCwd = conversationControlTarget(session).cwd;
+      requestedPreferences = readDisplayedInitialPreferences(
+        session.ownerCanvasId,
+        session.threadId,
+        preparation.binding.profileId,
+      );
+      try {
+        releasePreparation = beginConversationRealization(session);
+      } catch (error) {
+        return {
+          status: 'busy',
+          error: error instanceof Error ? error : new Error(String(error)),
+        };
+      }
+      try {
+        await run();
+      } finally {
+        releasePreparation?.(requestDispatched);
+      }
+    } else {
       await run();
-    } finally {
-      releasePreparation?.(requestDispatched);
     }
-  } else {
-    await run();
+    return result;
+  };
+  if (callbacks.waitUntilReady && sendNotReady(session)) {
+    const key = turnKey(
+      conversationRequestScope(conversationView, session.canvasId).canvasId,
+      threadId,
+    );
+    const thread = useChatStore.getState().threadsById[threadId];
+    if (
+      thread?.isStreaming ||
+      thread?.isPreparing ||
+      preparingTurnCancellations.has(key)
+    ) {
+      return { status: 'busy' };
+    }
+    let cancelled = false;
+    const cancel = () => {
+      cancelled = true;
+      // The store change also wakes the wait below.
+      useChatStore.getState().setThreadPreparing(threadId, false);
+    };
+    preparingTurnCancellations.set(key, cancel);
+    useChatStore.getState().setThreadPreparing(threadId, true);
+    shownMessage = createAgentTurnUserMessage(prepared);
+    addMessage(threadId, shownMessage);
+    try {
+      while (!cancelled && sendNotReady(session)) {
+        await waitForQueueChange(session);
+      }
+    } finally {
+      if (preparingTurnCancellations.get(key) === cancel) {
+        preparingTurnCancellations.delete(key);
+      }
+    }
+    if (cancelled) {
+      hideShownMessage(threadId, shownMessage);
+      return { status: 'stopped' };
+    }
+    if (callbacks.refreshSettings) {
+      prepared.settings = selectThreadSettings(
+        useChatStore.getState(),
+        threadId,
+      );
+    }
   }
-  return result;
+  try {
+    return await dispatch();
+  } finally {
+    // The turn ended before adopting the message it showed early; the caller
+    // restores the draft, so the transcript must not keep a second copy.
+    if (shownMessage) {
+      hideShownMessage(threadId, shownMessage);
+      useChatStore.getState().setThreadPreparing(threadId, false);
+    }
+  }
+}
+
+/** True while a mounted composer or a pending control keeps sends back. */
+function sendNotReady(session: ChatSession): boolean {
+  return (
+    queueHolds.has(session.threadId) ||
+    resolveConversationPreparation(session).pending
+  );
+}
+
+function hideShownMessage(
+  threadId: string,
+  message: Extract<ChatMessage, { role: 'user' }>,
+): void {
+  const chat = useChatStore.getState();
+  chat.setMessages(
+    threadId,
+    selectThreadMessages(chat, threadId).filter(
+      (candidate) => candidate.id !== message.id,
+    ),
+  );
 }
 
 export function stopAgentTurn(session: ChatSession): void {
@@ -1825,6 +1914,8 @@ async function drainAgentTurnQueue(
       }
       if (
         queueHolds.has(threadId) ||
+        // A direct send is waiting for readiness and goes first.
+        !!thread.isPreparing ||
         // Sending needs the user to retry a failed history load first, whether
         // or not the panel that reported it is still mounted.
         !!thread.historyError ||

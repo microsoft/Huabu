@@ -47,7 +47,11 @@ export interface UseAgentStreamReturn {
     prompt: string,
     mode: AgentMode,
     invokedSkills?: string[],
-    options?: { defer?: boolean; settingsPending?: boolean },
+    options?: {
+      defer?: boolean;
+      waitUntilReady?: boolean;
+      settingsPending?: boolean;
+    },
   ) => Promise<void>;
   retryStream: (
     message: Extract<ChatMessage, { role: 'user' }>,
@@ -89,7 +93,11 @@ export function useAgentStream(
       prompt: string,
       mode: AgentMode,
       invokedSkills?: string[],
-      options?: { defer?: boolean; settingsPending?: boolean },
+      options?: {
+        defer?: boolean;
+        waitUntilReady?: boolean;
+        settingsPending?: boolean;
+      },
     ) => {
       const chat = useChatStore.getState();
       const quotedComments = selectThreadQuotedComments(chat, session.threadId);
@@ -100,6 +108,7 @@ export function useAgentStream(
       // the queue instead of blocking the user.
       const shouldQueue =
         options?.defer === true ||
+        !!chat.threadsById[session.threadId]?.isPreparing ||
         selectThreadIsLoading(chat, session.threadId) ||
         queuedTurns.length > 0 ||
         hasAgentStreamClaim(session.ownerCanvasId, session.threadId);
@@ -201,6 +210,8 @@ export function useAgentStream(
         if (excerpt) chat.setSelectionAttachment(null);
         const result = await dispatchAgentTurn(prepared, {
           canDispatch,
+          waitUntilReady: options?.waitUntilReady,
+          refreshSettings: options?.settingsPending,
           onStarted: () => {
             started = true;
           },

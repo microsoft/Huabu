@@ -452,6 +452,74 @@ describe('queued composer turns', () => {
     });
   });
 
+  it('shows a send made during a transient state as sent, and dispatches it once ready', async () => {
+    const release = holdAgentTurnQueue(session);
+    mocks.stream.mockImplementation(
+      async (_content, threadId, _mode, callbacks: AgentStreamCallbacks) =>
+        finish(callbacks, threadId),
+    );
+    let sending!: Promise<void>;
+    await act(async () => {
+      useChatStore.getState().setDraft(session.threadId, 'Warm-up');
+      sending = hook.startStream('Warm-up', 'operate', undefined, {
+        waitUntilReady: true,
+      });
+    });
+    let thread = useChatStore.getState().threadsById[session.threadId];
+    // In the transcript, not in the queue, and nothing dispatched yet.
+    expect(thread.queuedTurns).toEqual([]);
+    expect(thread.isPreparing).toBe(true);
+    expect(thread.draft).toBe('');
+    expect(
+      thread.messages.filter((message) => message.role === 'user'),
+    ).toMatchObject([{ content: 'Warm-up' }]);
+    expect(mocks.stream).not.toHaveBeenCalled();
+    // A later submission queues behind it and keeps its place.
+    await enqueue('Next');
+    expect(
+      useChatStore.getState().threadsById[session.threadId].queuedTurns,
+    ).toHaveLength(1);
+    await act(async () => {
+      release();
+      await sending;
+    });
+    await waitForQueue();
+    thread = useChatStore.getState().threadsById[session.threadId];
+    expect(mocks.stream.mock.calls.map(([content]) => content)).toEqual([
+      'Warm-up',
+      'Next',
+    ]);
+    expect(
+      thread.messages.filter(
+        (message) => message.role === 'user' && message.content === 'Warm-up',
+      ),
+    ).toHaveLength(1);
+  });
+
+  it('withdraws a send that is stopped while waiting to become ready', async () => {
+    const release = holdAgentTurnQueue(session);
+    let sending!: Promise<void>;
+    await act(async () => {
+      useChatStore.getState().setDraft(session.threadId, 'Withdrawn');
+      sending = hook.startStream('Withdrawn', 'operate', undefined, {
+        waitUntilReady: true,
+      });
+    });
+    await act(async () => {
+      hook.stopStream();
+      await sending;
+    });
+    const thread = useChatStore.getState().threadsById[session.threadId];
+    expect(mocks.stream).not.toHaveBeenCalled();
+    expect(mocks.stop).not.toHaveBeenCalled();
+    expect(thread.isPreparing).toBe(false);
+    expect(thread.messages.some((message) => message.role === 'user')).toBe(
+      false,
+    );
+    expect(thread.draft).toBe('Withdrawn');
+    release();
+  });
+
   it('waits out a held composer and a server-side busy thread instead of pausing', async () => {
     const release = holdAgentTurnQueue(session);
     await act(async () => {

@@ -699,9 +699,10 @@ describe('rendered conversation titles', () => {
     const selectors = vi.mocked(BuiltinSessionSelectors).mock.lastCall?.[0];
     assert(selectors);
     expect(selectors.disabled).toBe(true);
-    expect(container.querySelector('form')?.dataset.deferSubmission).toBe(
-      'true',
-    );
+    // A save in flight neither blocks Send nor routes it through the queue.
+    const form = container.querySelector('form');
+    expect(form?.dataset.submitDisabled).toBe('false');
+    expect(form?.dataset.deferSubmission).toBe('false');
     await act(async () => {
       await selectors.onSelectModel('model-2');
       await selectors.onSelectReasoningEffort('low');
@@ -766,8 +767,8 @@ describe('rendered conversation titles', () => {
       });
       expect(calls).toEqual(['model-a']);
       expect(
-        container.querySelector('form')?.getAttribute('data-defer-submission'),
-      ).toBe('true');
+        container.querySelector('form')?.getAttribute('data-submit-disabled'),
+      ).toBe('false');
       await act(async () => {
         finish();
         await vi.waitFor(() =>
@@ -782,7 +783,7 @@ describe('rendered conversation titles', () => {
         );
       });
       expect(
-        container.querySelector('form')?.getAttribute('data-defer-submission'),
+        container.querySelector('form')?.getAttribute('data-submit-disabled'),
       ).toBe('false');
       expect(
         sessionMetaState.applyOptimistic.mock.calls.map(([patch]) => patch),
