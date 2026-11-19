@@ -20,6 +20,7 @@ import { personalSecretId } from '../modules/identity/personal-settings.js';
 import { parseStorageProfile } from '../modules/storage/profile.js';
 import {
   initServerRecords,
+  peekServerRecord,
   readPendingImport,
 } from '../modules/storage/server-records.js';
 
@@ -37,7 +38,9 @@ let initialized = false;
  * So a PostgreSQL deployment without a supplied key, or a key that cannot
  * open those credentials, fails here with nothing changed. Only credentials
  * still waiting to be imported are checked: once imported, the database's
- * copy is the one in use and the file is left alone.
+ * copy is the one in use and the file is left alone. The startup entry points
+ * check the other records waiting to be imported the same way
+ * (`modules/server-record-shapes.ts`).
  */
 async function preflightMasterKey(
   env: NodeJS.ProcessEnv,
@@ -136,18 +139,30 @@ export function getPersistedSecret(id: string): string | null {
   return primaryStore?.get(scopedId(id).id) ?? null;
 }
 
-/** Read saved credentials without creating storage for a new instance. */
+/**
+ * Read a saved credential without changing storage: nothing is created for
+ * a new instance, and a database an earlier version left is neither upgraded
+ * nor imported into, so `setup` can ask before the operator confirms
+ * anything and a cancelled run leaves storage as it found it. Once the
+ * secret store is initialized, this reads that store.
+ */
 export async function readPersistedSecret(
   id: string,
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<string | null> {
-  if (!initialized && !isDesktopSecretBridgeEnabled()) {
-    await preflightMasterKey(env);
-    const records = await initServerRecords(env);
-    if ((await records.get(CREDENTIALS_RECORD)) === null) return null;
+  if (initialized || isDesktopSecretBridgeEnabled()) {
+    await initializeSecretStore(env);
+    return getPersistedSecret(id);
   }
-  await initializeSecretStore(env);
-  return getPersistedSecret(id);
+  const key = await preflightMasterKey(env);
+  const envelope = await peekServerRecord(CREDENTIALS_RECORD, env);
+  if (envelope === null) return null;
+  return (
+    openCredentialEnvelope(
+      envelope,
+      key ?? resolveStandaloneMasterKey(true, env),
+    ).get(scopedId(id).id) ?? null
+  );
 }
 
 /** Write only to the secure primary backend. */

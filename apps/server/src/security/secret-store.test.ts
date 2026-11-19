@@ -270,6 +270,55 @@ describe('initializeSecretStore — master key isolation', () => {
   );
 
   it(
+    "looks up setup's saved password without creating, upgrading, or importing into a database",
+    async () => {
+      const key = Buffer.alloc(32, 5);
+      process.env.HUABU_SECRET_KEY = key.toString('base64');
+      vi.stubEnv('HUABU_STRUCTURED_BACKEND', 'sqlite');
+      const { mkdirSync } = await import('node:fs');
+      const { DatabaseSync } = await import('node:sqlite');
+      const { applySqliteMigrations, SQLITE_MIGRATIONS } =
+        await import('../modules/storage/backends/sqlite/database.js');
+      const { EncryptedSecretStore } =
+        await import('./encrypted-secret-store.js');
+      const { diskServerRecords } =
+        await import('../modules/storage/testing.js');
+
+      // A new instance: nothing to read, and nothing is created.
+      const fresh = createDataDir();
+      process.env.HUABU_DATA_DIR = fresh;
+      const mod = await import('./secret-store.js');
+      expect(await mod.readPersistedSecret('remote:password')).toBeNull();
+      expect(existsSync(join(fresh, 'storage'))).toBe(false);
+
+      // An earlier version's database, with the password still in its file.
+      const dataDir = createDataDir();
+      const earlier = new EncryptedSecretStore(diskServerRecords(dataDir), key);
+      await earlier.initialize();
+      await earlier.set('remote:password', 'saved-password');
+      const file = join(dataDir, 'storage', 'sqlite', 'huabu.sqlite');
+      mkdirSync(join(dataDir, 'storage', 'sqlite'), { recursive: true });
+      const database = new DatabaseSync(file);
+      applySqliteMigrations(database, SQLITE_MIGRATIONS.slice(0, 2));
+      database.close();
+      process.env.HUABU_DATA_DIR = dataDir;
+      expect(await mod.readPersistedSecret('remote:password')).toBe(
+        'saved-password',
+      );
+      const after = new DatabaseSync(file, { readOnly: true });
+      try {
+        // Still the earlier version's schema, with nothing imported.
+        expect(after.prepare('PRAGMA user_version').get()).toEqual({
+          user_version: 2,
+        });
+      } finally {
+        after.close();
+      }
+    },
+    MODULE_RELOAD_TIMEOUT_MS,
+  );
+
+  it(
     'refuses a wrong key before a database imports or upgrades anything',
     async () => {
       const dataDir = createDataDir();
@@ -289,7 +338,7 @@ describe('initializeSecretStore — master key isolation', () => {
       process.env.HUABU_SECRET_KEY = Buffer.alloc(32, 4).toString('base64');
 
       const mod = await import('./secret-store.js');
-      // Setup's saved-password lookup opens the database too.
+      // Setup's saved-password lookup checks the key the same way.
       await expect(
         mod.readPersistedSecret('integration:test:key'),
       ).rejects.toThrow('HUABU_SECRET_KEY does not match');
