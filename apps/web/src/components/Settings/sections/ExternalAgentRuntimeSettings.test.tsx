@@ -15,8 +15,10 @@ const {
   updateRuntimeConfig,
   toast,
   resetCredentials,
+  getReadiness,
 } = vi.hoisted(() => ({
   resetCredentials: vi.fn(),
+  getReadiness: vi.fn(),
   createConnectionCommand: vi.fn(),
   getRuntimeConfig: vi.fn(),
   updateRuntimeConfig: vi.fn(),
@@ -32,6 +34,7 @@ vi.mock('@/api/acp', () => ({
   updateExternalAgentRuntimeConfig: updateRuntimeConfig,
   resetOwnDeviceCredentials: resetCredentials,
 }));
+vi.mock('@/api/deployment', () => ({ getDeploymentReadiness: getReadiness }));
 vi.mock('@/components/Common/Toast', () => ({ toast }));
 vi.mock('@/hooks/useElectron', () => ({ getElectronBridge: vi.fn() }));
 
@@ -65,7 +68,13 @@ const loopbackReadiness: DeploymentReadinessResponse = {
 };
 beforeEach(() => {
   vi.mocked(getElectronBridge).mockReturnValue(null);
-  useDeploymentReadinessStore.setState({ readiness: null, error: null });
+  useDeploymentReadinessStore.setState({
+    readiness: null,
+    loading: false,
+    error: null,
+  });
+  // Readiness stays pending unless a test resolves it.
+  getReadiness.mockReturnValue(new Promise(() => {}));
   getRuntimeConfig.mockResolvedValue({ idleTimeoutSecs: 600, maxAgents: 10 });
   updateRuntimeConfig.mockImplementation(
     async (config: ExternalAgentRuntimeConfig) => config,
@@ -925,6 +934,21 @@ describe('ExternalAgentRuntimeSettings', () => {
       await act(async () => root.render(<AgentConnectionSettings />));
       expect(setupText()).toBe('settings.agentletSourceSetup');
       expect(commands()).not.toContain('git checkout');
+    });
+
+    it('loads readiness itself when Settings has not, as for a member', async () => {
+      getReadiness.mockResolvedValue({ ...loopbackReadiness, revision: sha });
+      await act(async () => root.render(<AgentConnectionSettings />));
+      expect(getReadiness).toHaveBeenCalledTimes(1);
+      expect(commands()).toContain(`git checkout ${sha}`);
+    });
+
+    it('does not reload readiness that is already loaded', async () => {
+      useDeploymentReadinessStore.setState({
+        readiness: { ...loopbackReadiness, revision: sha },
+      });
+      await act(async () => root.render(<AgentConnectionSettings />));
+      expect(getReadiness).not.toHaveBeenCalled();
     });
   });
 

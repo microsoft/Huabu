@@ -386,6 +386,13 @@ export function AgentConnectionSettings() {
   const revision = useDeploymentReadinessStore((state) =>
     state.readiness ? (state.readiness.revision ?? null) : undefined,
   );
+  // Settings loads readiness only for people who manage the deployment, but
+  // everyone connecting a device needs the revision, so load it here when
+  // nothing else has. Once per mount: a failed load leaves the generic text.
+  useEffect(() => {
+    const { readiness, loading, load } = useDeploymentReadinessStore.getState();
+    if (!readiness && !loading) void load();
+  }, []);
   const [copying, setCopying] = useState<ConnectionCopyFormat | null>(null);
   const [connectionInfo, setConnectionInfo] = useState<Pick<
     AgentletConnectionCommandResponse,
