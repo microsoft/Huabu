@@ -80,14 +80,12 @@ export async function rememberProfileSessionPreference(
       });
       return;
     } catch (error) {
+      if (!(error instanceof AgentProfileError)) throw error;
+      // Deleted since it was read: the preference has no Profile to go to,
+      // as when the read finds none. The selection itself was already applied.
+      if (error.code === 'profile_not_found') return;
       // Another edit committed first; every retry follows one that did.
-      if (
-        !(
-          error instanceof AgentProfileError &&
-          error.code === 'profile_conflict'
-        )
-      )
-        throw error;
+      if (error.code !== 'profile_conflict') throw error;
     }
   }
 }

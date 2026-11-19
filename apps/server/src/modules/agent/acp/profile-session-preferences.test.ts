@@ -179,5 +179,20 @@ describe('ACP Profile session preferences', () => {
       expect(await getProfileSessionPreferences(id)).toEqual({});
       expect((await registry.getProfile(id))?.executionRevision).toBe(1);
     });
+
+    it('drops a preference whose Profile was deleted while it was merged', async () => {
+      const { registry, id } = await harness();
+      const read = registry.getProfile.bind(registry);
+      mocks.getProfile.mockImplementation(async (profileId: string) => {
+        const profile = await read(profileId);
+        // Deleted after the read, before the patch.
+        await registry.deleteProfile(id);
+        return profile;
+      });
+      await expect(
+        rememberProfileSessionPreference(id, 'model', 'orphan', 0),
+      ).resolves.toBeUndefined();
+      expect(await registry.getProfile(id)).toBeUndefined();
+    });
   });
 });
