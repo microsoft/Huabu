@@ -73,8 +73,11 @@ beforeEach(() => {
     loading: false,
     error: null,
   });
-  // Readiness stays pending unless a test resolves it.
-  getReadiness.mockReturnValue(new Promise(() => {}));
+  // The Server answers with what the test put in the store, or not at all.
+  getReadiness.mockImplementation(
+    () =>
+      useDeploymentReadinessStore.getState().readiness ?? new Promise(() => {}),
+  );
   getRuntimeConfig.mockResolvedValue({ idleTimeoutSecs: 600, maxAgents: 10 });
   updateRuntimeConfig.mockImplementation(
     async (config: ExternalAgentRuntimeConfig) => config,
@@ -943,12 +946,31 @@ describe('ExternalAgentRuntimeSettings', () => {
       expect(commands()).toContain(`git checkout ${sha}`);
     });
 
-    it('does not reload readiness that is already loaded', async () => {
+    it('revalidates a revision an earlier load left in the store', async () => {
+      const redeployed = '1111111111111111111111111111111111111111';
       useDeploymentReadinessStore.setState({
         readiness: { ...loopbackReadiness, revision: sha },
       });
+      let answer!: (value: DeploymentReadinessResponse) => void;
+      getReadiness.mockReturnValue(
+        new Promise((resolve) => {
+          answer = resolve;
+        }),
+      );
+      await act(async () => root.render(<AgentConnectionSettings />));
+      // The earlier revision is not offered while the Server is asked again.
+      expect(commands()).not.toContain('git checkout');
+      await act(async () =>
+        answer({ ...loopbackReadiness, revision: redeployed }),
+      );
+      expect(commands()).toContain(`git checkout ${redeployed}`);
+    });
+
+    it('joins a readiness load already in flight', async () => {
+      useDeploymentReadinessStore.setState({ loading: true });
       await act(async () => root.render(<AgentConnectionSettings />));
       expect(getReadiness).not.toHaveBeenCalled();
+      expect(commands()).not.toContain('git checkout');
     });
   });
 

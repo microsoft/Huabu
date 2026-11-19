@@ -381,17 +381,21 @@ export function AgentConnectionSettings() {
   const [connectionShell, setConnectionShell] = useState<ConnectionShell>(() =>
     isWindows() ? 'powershell' : 'posix',
   );
-  // `undefined` until readiness loads; then the Server's commit, or null when
-  // it does not report one.
+  // `undefined` while readiness loads; then the Server's commit, or null when
+  // it does not report one. A revision from an earlier load is not shown while
+  // a newer one is on its way: the Server may have been redeployed since.
   const revision = useDeploymentReadinessStore((state) =>
-    state.readiness ? (state.readiness.revision ?? null) : undefined,
+    state.readiness && !state.loading
+      ? (state.readiness.revision ?? null)
+      : undefined,
   );
-  // Settings loads readiness only for people who manage the deployment, but
-  // everyone connecting a device needs the revision, so load it here when
-  // nothing else has. Once per mount: a failed load leaves the generic text.
+  // Settings loads readiness only for people who manage the deployment, and
+  // the store outlives this page, so revalidate each time the instructions
+  // open, joining a load already in flight. A failed load leaves the generic
+  // text.
   useEffect(() => {
-    const { readiness, loading, load } = useDeploymentReadinessStore.getState();
-    if (!readiness && !loading) void load();
+    const { loading, load } = useDeploymentReadinessStore.getState();
+    if (!loading) void load();
   }, []);
   const [copying, setCopying] = useState<ConnectionCopyFormat | null>(null);
   const [connectionInfo, setConnectionInfo] = useState<Pick<
