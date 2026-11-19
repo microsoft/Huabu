@@ -89,6 +89,18 @@ function validSha(value: string | undefined): string | null {
   return SHA_PATTERN.test(normalized) ? normalized : null;
 }
 
+/**
+ * The full Git commit this Server runs, from `HUABU_DEPLOYED_SHA`, or null
+ * when it is unset or not a 40-character SHA. Images bake it in from the
+ * `SOURCE_REVISION` build argument; `scripts/start-web.mjs` fills it from a
+ * source checkout's `git rev-parse HEAD`.
+ */
+export function deployedSha(
+  env: NodeJS.ProcessEnv = process.env,
+): string | null {
+  return validSha(env.HUABU_DEPLOYED_SHA);
+}
+
 export function resolveCanaryCapability(
   env: NodeJS.ProcessEnv = process.env,
 ): CanaryCapability {
@@ -99,7 +111,7 @@ export function resolveCanaryCapability(
       repoRoot: null,
       scriptPath: null,
       runnerPath: null,
-      runningSha: validSha(env.HUABU_DEPLOYED_SHA),
+      runningSha: deployedSha(env),
     };
   }
 
@@ -111,7 +123,7 @@ export function resolveCanaryCapability(
       repoRoot: null,
       scriptPath: null,
       runnerPath: null,
-      runningSha: validSha(env.HUABU_DEPLOYED_SHA),
+      runningSha: deployedSha(env),
     };
   }
 
@@ -131,7 +143,7 @@ export function resolveCanaryCapability(
       repoRoot,
       scriptPath,
       runnerPath,
-      runningSha: validSha(env.HUABU_DEPLOYED_SHA),
+      runningSha: deployedSha(env),
     };
   }
   try {
@@ -148,7 +160,7 @@ export function resolveCanaryCapability(
       repoRoot,
       scriptPath,
       runnerPath,
-      runningSha: validSha(env.HUABU_DEPLOYED_SHA),
+      runningSha: deployedSha(env),
     };
   }
 
@@ -158,7 +170,7 @@ export function resolveCanaryCapability(
     repoRoot,
     scriptPath,
     runnerPath,
-    runningSha: validSha(env.HUABU_DEPLOYED_SHA),
+    runningSha: deployedSha(env),
   };
 }
 

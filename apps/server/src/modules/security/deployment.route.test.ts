@@ -3,6 +3,7 @@
 
 import { describe, expect, it } from 'vitest';
 
+import { deployedSha } from './canary-redeploy.js';
 import { buildDeploymentReadiness } from './deployment.route.js';
 
 describe('deployment readiness', () => {
@@ -73,5 +74,31 @@ describe('deployment readiness', () => {
       policy: 'bubble-system-owner',
       allowedForRequest: true,
     });
+  });
+
+  it('reports the running revision for a matching device checkout', () => {
+    const base = {
+      allowedHostsConfigured: false,
+      basicAuthConfigured: false,
+      bindHost: '127.0.0.1',
+      bindScope: 'loopback' as const,
+      ownerAllowed: false,
+      credentialStoreWritable: true,
+    };
+    const sha = 'a'.repeat(40);
+    expect(buildDeploymentReadiness({ ...base, revision: sha }).revision).toBe(
+      sha,
+    );
+    expect(buildDeploymentReadiness(base).revision).toBeNull();
+  });
+
+  it('accepts only a full commit as the deployed revision', () => {
+    const sha = '0b4438c81f7fb5562dac8f96b19a80302c7f5d15';
+    expect(deployedSha({ HUABU_DEPLOYED_SHA: ` ${sha.toUpperCase()}\n` })).toBe(
+      sha,
+    );
+    expect(deployedSha({ HUABU_DEPLOYED_SHA: '0b4438c81' })).toBeNull();
+    expect(deployedSha({ HUABU_DEPLOYED_SHA: 'main' })).toBeNull();
+    expect(deployedSha({})).toBeNull();
   });
 });
