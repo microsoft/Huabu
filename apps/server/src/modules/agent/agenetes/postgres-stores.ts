@@ -323,6 +323,38 @@ export class PostgresEventLogStore implements EventLogStore {
 }
 
 export class PostgresTurnStore implements TurnStore {
+  async get(
+    namespace: Namespace,
+    threadId: string,
+    reference: string,
+  ): Promise<PersistedTurn | undefined> {
+    const cursor = decodeTurnCursor(reference, threadId);
+    return readLocked<PersistedTurn | undefined>(
+      namespace,
+      threadId,
+      undefined,
+      async (db, id) => {
+        if (cursor.generation !== (await this.#generation(db, id, threadId))) {
+          throw new StaleTurnCursorError('History cursor is stale');
+        }
+        const row = (
+          await db.query(
+            `SELECT seq_start, seq_end, turn_json FROM agenetes_turns
+         WHERE extension_id=$1 AND thread_id=$2 AND ordinal=$3`,
+            [id, threadId, cursor.ordinal],
+          )
+        ).rows[0];
+        return row
+          ? {
+              turn: JSON.parse(row.turn_json) as PersistedTurn['turn'],
+              seqStart: Number(row.seq_start),
+              seqEnd: Number(row.seq_end),
+            }
+          : undefined;
+      },
+    );
+  }
+
   /**
    * The thread's cursor generation, created on first use.
    *

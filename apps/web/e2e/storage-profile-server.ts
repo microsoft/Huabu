@@ -19,7 +19,6 @@
 
 import { spawn, spawnSync } from 'node:child_process';
 import {
-  copyFileSync,
   existsSync,
   mkdirSync,
   openSync,
@@ -138,16 +137,22 @@ async function waitForExit(pid: number, timeoutMs = 30_000): Promise<void> {
 }
 
 /**
- * Put the LLM credentials this deployment already holds into the throwaway
- * data dir.
+ * Put the one model credential the Agent test uses into the throwaway data
+ * dir, and nothing else of the source's credentials.
  *
  * The suite drives a *real* model turn, because a stubbed one would prove
  * nothing about whether a turn survives a restart — a recovered conversation
- * is only evidence if something actually generated it. The credentials stay
- * where they are; the run copies the two files it needs into its own data dir
- * and the teardown deletes that dir with them.
+ * is only evidence if something actually generated it. The source files stay
+ * where they are. The run stages the active provider's settings from
+ * `llm-config.json` and that provider's API key from `encrypted-secrets.json`,
+ * and only those: on a database profile, startup imports the staged envelope
+ * into the database, and teardown leaves a remote database intact, so any
+ * other credential staged here (another provider's key, a remote-login
+ * password, a connection token) would outlive the run there. Entries are
+ * kept whole, without decrypting them; each is bound to its own id, so the
+ * kept one still decrypts under the same key.
  *
- * Returns whether the copy happened, so a machine without credentials runs the
+ * Returns whether staging happened, so a machine without credentials runs the
  * storage half of the suite and skips the model half instead of failing.
  *
  * Readiness is the whole decryptable set, not the two filenames.
@@ -157,7 +162,8 @@ async function waitForExit(pid: number, timeoutMs = 30_000): Promise<void> {
  * staging the file without `HUABU_SECRET_KEY` would fail the backend's start
  * inside globalSetup, before any `test.skip` could be reached — taking the
  * credential-free storage test down with it, on the common machine that has
- * the files checked out but no key exported.
+ * the files checked out but no key exported. A source whose active provider
+ * has no saved API key (an OAuth provider, say) is not staged either.
  */
 export function stageLlmCredentials(dataDir: string): boolean {
   const from = process.env.E2E_LLM_CREDENTIALS_FROM
@@ -166,8 +172,32 @@ export function stageLlmCredentials(dataDir: string): boolean {
   const files = ['llm-config.json', 'encrypted-secrets.json'];
   if (!files.every((name) => existsSync(join(from, name)))) return false;
   if (!process.env.HUABU_SECRET_KEY?.trim()) return false;
+  const config = JSON.parse(
+    readFileSync(join(from, 'llm-config.json'), 'utf8'),
+  ) as { active?: unknown; providers?: Record<string, unknown> };
+  const envelope = JSON.parse(
+    readFileSync(join(from, 'encrypted-secrets.json'), 'utf8'),
+  ) as { entries?: Record<string, unknown> };
+  const provider = config.active;
+  if (typeof provider !== 'string' || !config.providers?.[provider])
+    return false;
+  const keyId = `llm:provider:${provider}:api-key`;
+  const entry = envelope.entries?.[keyId];
+  if (!entry) return false;
   mkdirSync(dataDir, { recursive: true });
-  for (const name of files) copyFileSync(join(from, name), join(dataDir, name));
+  writeFileSync(
+    join(dataDir, 'llm-config.json'),
+    JSON.stringify({
+      active: provider,
+      providers: { [provider]: config.providers[provider] },
+    }),
+    { mode: 0o600 },
+  );
+  writeFileSync(
+    join(dataDir, 'encrypted-secrets.json'),
+    JSON.stringify({ ...envelope, entries: { [keyId]: entry } }),
+    { mode: 0o600 },
+  );
   return true;
 }
 
@@ -177,9 +207,18 @@ export async function startBackend(
   env: Record<string, string>,
 ): Promise<BackendState> {
   const output = openSync(backendLogFile(), 'a');
+  // The run's minted key goes to the backend as its master key and nowhere
+  // else: not into `env`, which is persisted below for restarts, and not
+  // under its own name, which the backend would pass on to its agents.
+  const { E2E_SECRET_KEY: mintedKey, ...inherited } = process.env;
   const child = spawn('pnpm', ['--filter', '@huabu/server', 'start'], {
     cwd: repoRoot,
-    env: { ...process.env, ...env, SERVER_PORT: port },
+    env: {
+      ...inherited,
+      ...env,
+      ...(mintedKey ? { HUABU_SECRET_KEY: mintedKey } : {}),
+      SERVER_PORT: port,
+    },
     stdio: ['ignore', output, output],
     detached: true,
   });

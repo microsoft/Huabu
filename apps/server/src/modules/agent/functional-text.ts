@@ -3,11 +3,12 @@
 
 import { emptyAcpOverlay } from '@agenetes/acp-driver';
 import { createTranscriptFolder } from '@agenetes/agenetes';
+import { getAgentProfileRegistry } from '@agenetes/agentlet-host';
 
-import { getProfileSessionPreferences } from './acp/profile-session-preferences.js';
+import { profileSessionPreferences } from './acp/profile-session-preferences.js';
 import {
+  profileSnapshot,
   recipeFromProfileSnapshot,
-  resolveProfileSnapshot,
 } from './acp/profile-snapshot.js';
 import { getAgentDefaults, AgentDefaultsError } from './agent-defaults.js';
 import { requireSelectableAgentProfile } from './selectable-agent-profile.js';
@@ -31,7 +32,7 @@ export async function runFunctionalText(
   context: FunctionalTextContext,
 ): Promise<string> {
   context.signal?.throwIfAborted();
-  const { profileId, functionalModel } = getAgentDefaults();
+  const { profileId, functionalModel } = await getAgentDefaults();
   if (!profileId) {
     throw new AgentDefaultsError(
       'default_profile_unconfigured',
@@ -76,12 +77,13 @@ export async function runFunctionalText(
     if (!text) throw new Error('Built-In text task returned empty text');
     return text;
   }
-  const selected = requireSelectableAgentProfile(profileId);
-  const profile = resolveProfileSnapshot(profileId);
-  if (!profile) throw new Error(`Agent Profile ${profileId} is unavailable`);
+  const selected = await requireSelectableAgentProfile(profileId);
+  const stored = await getAgentProfileRegistry()?.getProfile(profileId);
+  if (!stored) throw new Error(`Agent Profile ${profileId} is unavailable`);
+  const profile = profileSnapshot(stored);
   const model =
     profile.launch.kind === 'acp-harness'
-      ? functionalModel || getProfileSessionPreferences(profileId).model || ''
+      ? functionalModel || profileSessionPreferences(stored).model || ''
       : '';
   // Runtime composition imports title/preprocessing consumers; resolve it only on execution.
   const { agenetes, EXTERNAL_DRIVER_KIND } =

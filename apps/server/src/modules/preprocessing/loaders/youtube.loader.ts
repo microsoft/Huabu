@@ -3,14 +3,16 @@
 
 import { extractYoutubeVideoId } from './youtube-id.js';
 import { getLogger } from '../../../utils/logger.js';
+import { serviceProvisioner } from '../../services/index.js';
 
 import type { IDocumentLoader, LoadResult } from './loader.interface.js';
 
 const log = getLogger('preprocessing.youtube');
 
 async function resolveRapidApiKey(): Promise<string> {
-  const { serviceProvisioner } = await import('../../services/index.js');
-  const resolved = serviceProvisioner.resolveForServer('youtube-transcripts');
+  const resolved = await serviceProvisioner.resolveForServer(
+    'youtube-transcripts',
+  );
   return typeof resolved.apiKey === 'string' ? resolved.apiKey : '';
 }
 

@@ -77,7 +77,7 @@ const peopleRoutes: FastifyPluginAsync<{ service: IdentityService }> = async (
         )
       )
         return reply.code(404).send({ message: 'No such person' });
-      resetAgentCredentials(principalId);
+      await resetAgentCredentials(principalId);
       return reply.code(204).send();
     },
   );

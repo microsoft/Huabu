@@ -18,6 +18,7 @@ import { inkOcrConfigSchema } from '@huabu/shared';
 
 import {
   getInkOcrConfig,
+  importLegacyInkOcrConfig,
   resolveInkOcrConfiguration,
   setInkOcrConfig,
 } from './ink-ocr-config.js';
@@ -355,6 +356,37 @@ describe('Azure Ink OCR settings', () => {
         keySource: 'none',
         configured: false,
       });
+    });
+
+    it('keeps the effective legacy settings once the data directory is gone', async () => {
+      storeLegacy();
+      await importLegacyInkOcrConfig();
+      await importLegacyInkOcrConfig();
+      expect(setSecret).toHaveBeenCalledExactlyOnceWith(
+        SECRET_IDS.inkOcrConfig,
+        JSON.stringify({
+          version: 1,
+          endpoint: oldEndpoint,
+          apiKey: 'old-private-key',
+        }),
+      );
+      rmSync(join(dataDir, 'ink-ocr-config.json'));
+      expect(resolveInkOcrConfiguration()).toEqual({
+        endpoint: oldEndpoint,
+        key: 'old-private-key',
+      });
+    });
+
+    it('starts past a damaged legacy file, which keeps failing Ink OCR alone on use', async () => {
+      writeFileSync(
+        join(dataDir, 'ink-ocr-config.json'),
+        'damaged legacy configuration',
+      );
+      await expect(importLegacyInkOcrConfig()).resolves.toBeUndefined();
+      expect(setSecret).not.toHaveBeenCalled();
+      expect(() => getInkOcrConfig()).toThrow(
+        'Invalid stored Ink OCR configuration',
+      );
     });
 
     it('migrates on the first successful patch without changing legacy data', async () => {

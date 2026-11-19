@@ -2140,13 +2140,13 @@ async function executePreparedOnServerAlreadyLocked(
   };
   // Derive review records (ACP change cards) only when asked. Edge
   // endpoint labels are resolved against the post-state nodes.
+  const autoAcceptSpaceChanges =
+    input.computeChanges === true && originator.source === 'agent'
+      ? (await getAgentChangeReviewConfig()).autoAcceptSpaceChanges
+      : false;
   const deriveChanges = (): CanvasChangeRecord[] | undefined => {
     const shouldComputeChanges =
-      input.computeChanges === true &&
-      !(
-        originator.source === 'agent' &&
-        getAgentChangeReviewConfig().autoAcceptSpaceChanges
-      );
+      input.computeChanges === true && !autoAcceptSpaceChanges;
     if (!shouldComputeChanges) return undefined;
     const labelById = new Map<string, string>();
     for (const node of finalNodes) {

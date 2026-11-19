@@ -33,106 +33,117 @@ function profile(
 
 function setup(initial?: unknown) {
   let persisted = initial;
+  const write = vi.fn(async (config: AgentDefaults) => {
+    persisted = structuredClone(config);
+  });
   const storage = {
-    read: () => persisted,
-    write: vi.fn((config: AgentDefaults) => {
-      persisted = structuredClone(config);
-    }),
+    read: vi.fn(async () => persisted),
+    write,
+    initialize: async (config: AgentDefaults) => {
+      if (persisted === undefined) await write(config);
+      return persisted;
+    },
   };
   return { storage, service: new AgentDefaultsService(storage) };
 }
 
 describe('installation Agent defaults', () => {
-  it('offers only connected external candidates to automatic initialization', () => {
+  it('offers only connected external candidates to automatic initialization', async () => {
     const initialize = vi
       .spyOn(AgentDefaultsService.prototype, 'initializeAgentDefaults')
-      .mockReturnValue({ profileId: null, functionalModel: '' });
+      .mockResolvedValue({ profileId: null, functionalModel: '' });
     try {
       const online = profile('online', 'connected');
-      initializeAgentDefaults([profile('offline', 'offline'), online]);
+      await initializeAgentDefaults([profile('offline', 'offline'), online]);
       expect(initialize).toHaveBeenCalledWith([online]);
     } finally {
       initialize.mockRestore();
     }
   });
 
-  it('excludes hidden Profiles from absent-only Utility initialization', () => {
+  it('excludes hidden Profiles from absent-only Utility initialization', async () => {
     const hidden = { ...profile('proxy'), visible: false };
     const empty = setup();
     expect(
-      empty.service.initializeAgentDefaults([hidden]).profileId,
+      (await empty.service.initializeAgentDefaults([hidden])).profileId,
     ).toBeNull();
     expect(empty.storage.write).not.toHaveBeenCalled();
     const ready = setup();
     expect(
-      ready.service.initializeAgentDefaults([hidden, profile('ordinary')])
-        .profileId,
+      (
+        await ready.service.initializeAgentDefaults([
+          hidden,
+          profile('ordinary'),
+        ])
+      ).profileId,
     ).toBe('ordinary');
   });
 
-  it('offers a uniquely resolved hostname-era candidate to initialization', () => {
+  it('offers a uniquely resolved hostname-era candidate to initialization', async () => {
     const initialize = vi
       .spyOn(AgentDefaultsService.prototype, 'initializeAgentDefaults')
-      .mockReturnValue({ profileId: null, functionalModel: '' });
+      .mockResolvedValue({ profileId: null, functionalModel: '' });
     try {
       const legacy = profile('legacy', 'legacy-host');
-      initializeAgentDefaults([legacy]);
+      await initializeAgentDefaults([legacy]);
       expect(initialize).toHaveBeenCalledWith([legacy]);
     } finally {
       initialize.mockRestore();
     }
   });
 
-  it('requires an explicit external default instead of falling back to Huabu', () => {
+  it('requires an explicit external default instead of falling back to Huabu', async () => {
     const { service, storage } = setup();
-    expect(() => service.requireDefaultAgentProfileId()).toThrow(
+    await expect(service.requireDefaultAgentProfileId()).rejects.toThrow(
       AgentDefaultsError,
     );
-    expect(() => service.requireDefaultAgentProfileId()).toThrow(
+    await expect(service.requireDefaultAgentProfileId()).rejects.toThrow(
       expect.objectContaining({ code: 'default_profile_unconfigured' }),
     );
     expect(storage.write).not.toHaveBeenCalled();
   });
 
-  it('returns the saved identity for independent registry validation', () => {
+  it('returns the saved identity for independent registry validation', async () => {
     const { service } = setup({
       profileId: 'deleted-or-offline',
       functionalModel: '',
     });
-    expect(service.requireDefaultAgentProfileId()).toBe('deleted-or-offline');
+    expect(await service.requireDefaultAgentProfileId()).toBe(
+      'deleted-or-offline',
+    );
   });
 
-  it('does not write on GET or when discovery has no candidates', () => {
+  it('does not write on GET or when discovery has no candidates', async () => {
     const { service, storage } = setup();
-    expect(service.getAgentDefaults()).toEqual({
+    expect(await service.getAgentDefaults()).toEqual({
       profileId: null,
       functionalModel: '',
     });
-    service.initializeAgentDefaults([]);
+    await service.initializeAgentDefaults([]);
     expect(storage.write).not.toHaveBeenCalled();
   });
 
-  it('persists trimmed overrides independently of Profile data', () => {
+  it('persists trimmed overrides independently of Profile data', async () => {
     const { service, storage } = setup();
     const candidate = profile('profile-a');
-    service.initializeAgentDefaults([candidate]);
-    service.setAgentDefaults({
+    await service.initializeAgentDefaults([candidate]);
+    await service.setAgentDefaults({
       profileId: 'profile-a',
       functionalModel: '  fast  ',
     });
-    expect(new AgentDefaultsService(storage).getAgentDefaults()).toEqual({
+    expect(await new AgentDefaultsService(storage).getAgentDefaults()).toEqual({
       profileId: 'profile-a',
       functionalModel: 'fast',
     });
     expect(candidate).toEqual(profile('profile-a'));
-    service.setAgentDefaults({
+    await service.setAgentDefaults({
       profileId: 'profile-a',
       functionalModel: ' \t ',
     });
-    expect(service.getAgentDefaults().functionalModel).toBe('');
+    expect((await service.getAgentDefaults()).functionalModel).toBe('');
   });
 
-  it('initializes once in deterministic machine, harness, then ID order', () => {
+  it('initializes once in deterministic machine, harness, then ID order', async () => {
     const { service, storage } = setup();
     const candidates = [
       profile('first', 'machine-b', 'aaa'),
@@ -140,79 +151,114 @@ describe('installation Agent defaults', () => {
       profile('a-id', 'machine-a', 'bbb'),
       profile('b-id', 'machine-a', 'aaa'),
     ];
-    expect(service.initializeAgentDefaults(candidates).profileId).toBe('b-id');
+    expect((await service.initializeAgentDefaults(candidates)).profileId).toBe(
+      'b-id',
+    );
     expect(candidates[0].id).toBe('first');
-    service.initializeAgentDefaults([...candidates].reverse());
-    service.initializeAgentDefaults([profile('new-earlier', 'a-machine')]);
-    expect(service.getAgentDefaults().profileId).toBe('b-id');
+    await service.initializeAgentDefaults([...candidates].reverse());
+    await service.initializeAgentDefaults([
+      profile('new-earlier', 'a-machine'),
+    ]);
+    expect((await service.getAgentDefaults()).profileId).toBe('b-id');
     expect(storage.write).toHaveBeenCalledTimes(1);
   });
 
-  it('retains a deleted Profile ID across restarts and discovery', () => {
+  it('retains a deleted Profile ID across restarts and discovery', async () => {
     const { service, storage } = setup({
       profileId: 'deleted',
       functionalModel: 'small',
     });
-    service.initializeAgentDefaults([profile('replacement')]);
-    expect(new AgentDefaultsService(storage).getAgentDefaults()).toEqual({
+    await service.initializeAgentDefaults([profile('replacement')]);
+    expect(await new AgentDefaultsService(storage).getAgentDefaults()).toEqual({
       profileId: 'deleted',
       functionalModel: 'small',
     });
     expect(storage.write).not.toHaveBeenCalled();
   });
 
-  it('does not overwrite an explicit null selection or its model', () => {
+  it('does not overwrite an explicit null selection or its model', async () => {
     const { service, storage } = setup();
-    service.setAgentDefaults({ profileId: null, functionalModel: 'fast' });
-    expect(service.initializeAgentDefaults([profile('external')])).toEqual({
+    await service.setAgentDefaults({
       profileId: null,
       functionalModel: 'fast',
     });
     expect(
-      new AgentDefaultsService(storage).initializeAgentDefaults([
+      await service.initializeAgentDefaults([profile('external')]),
+    ).toEqual({
+      profileId: null,
+      functionalModel: 'fast',
+    });
+    expect(
+      await new AgentDefaultsService(storage).initializeAgentDefaults([
         profile('another'),
       ]),
     ).toEqual({ profileId: null, functionalModel: 'fast' });
     expect(storage.write).toHaveBeenCalledTimes(1);
   });
 
-  it('preserves explicit Built-In selection and the external model across discovery and restart', () => {
+  it('keeps an explicit save that lands while initialization is choosing', async () => {
     const { service, storage } = setup();
-    service.setAgentDefaults({
-      profileId: 'huabu',
-      functionalModel: 'external-model',
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    storage.read.mockImplementationOnce(async () => {
+      await held;
+      return undefined;
     });
-    expect(service.initializeAgentDefaults([profile('external')])).toEqual({
+    const initializing = service.initializeAgentDefaults([profile('auto')]);
+    await service.setAgentDefaults({
+      profileId: 'chosen',
+      functionalModel: 'small',
+    });
+    release();
+    expect(await initializing).toEqual({
+      profileId: 'chosen',
+      functionalModel: 'small',
+    });
+    expect(await service.getAgentDefaults()).toEqual({
+      profileId: 'chosen',
+      functionalModel: 'small',
+    });
+  });
+
+  it('preserves explicit Built-In selection and the external model across discovery and restart', async () => {
+    const { service, storage } = setup();
+    await service.setAgentDefaults({
       profileId: 'huabu',
       functionalModel: 'external-model',
     });
     expect(
-      new AgentDefaultsService(storage).requireDefaultAgentProfileId(),
+      await service.initializeAgentDefaults([profile('external')]),
+    ).toEqual({
+      profileId: 'huabu',
+      functionalModel: 'external-model',
+    });
+    expect(
+      await new AgentDefaultsService(storage).requireDefaultAgentProfileId(),
     ).toBe('huabu');
     expect(storage.write).toHaveBeenCalledTimes(1);
   });
 
   it.each([null, 'broken', { profileId: 2 }])(
     'fails explicitly for corrupt persisted configuration %j',
-    (value) => {
+    async (value) => {
       const { service, storage } = setup(value);
-      expect(() => service.getAgentDefaults()).toThrow(
+      await expect(service.getAgentDefaults()).rejects.toThrow(
         'Invalid Agent defaults file',
       );
-      expect(() =>
+      await expect(
         service.initializeAgentDefaults([profile('external')]),
-      ).toThrow();
+      ).rejects.toThrow();
       expect(storage.write).not.toHaveBeenCalled();
     },
   );
 
-  it('propagates persistence failures', () => {
+  it('propagates persistence failures', async () => {
     const { service, storage } = setup();
     storage.write.mockImplementation(() => {
       throw new Error('disk full');
     });
-    expect(() =>
+    await expect(
       service.setAgentDefaults({ profileId: 'external', functionalModel: '' }),
-    ).toThrow('disk full');
+    ).rejects.toThrow('disk full');
   });
 });

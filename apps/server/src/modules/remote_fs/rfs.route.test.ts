@@ -535,7 +535,10 @@ describe('GET /api/rfs/:canvasId/skill', () => {
 
 describe('GET /api/rfs/:canvasId/agent/profiles', () => {
   it('returns the available Profile catalogue', async () => {
-    vi.spyOn(selectableProfiles, 'listAvailableAgentProfiles').mockReturnValue([
+    vi.spyOn(
+      selectableProfiles,
+      'listAvailableAgentProfiles',
+    ).mockResolvedValue([
       { id: 'profile-a', alias: 'Researcher' },
       { id: 'profile-b', alias: 'Builder' },
     ]);
@@ -762,7 +765,7 @@ describe('Task RFS adapters', () => {
 
 describe('third-party Services', () => {
   it('publishes discovery and package files without configuration secrets', async () => {
-    serviceMocks.list.mockReturnValue([
+    serviceMocks.list.mockResolvedValue([
       {
         id: 'image-gen',
         version: '1.0.0',

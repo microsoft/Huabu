@@ -19,7 +19,7 @@ import { homedir } from 'node:os';
 import { isAbsolute, join, resolve } from 'node:path';
 
 import { getDataDir } from '../data-dir.js';
-import { parseServerMasterKey } from './encrypted-file-secret-store.js';
+import { parseServerMasterKey } from './encrypted-secret-store.js';
 import { resolveDirectChildPath } from '../utils/fs.js';
 
 export function getConfigDir(env: NodeJS.ProcessEnv = process.env): string {

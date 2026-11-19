@@ -229,13 +229,19 @@ describe('personal settings', () => {
     // Administrators have personal credentials too.
     expect(as(person('admin', true), () => store.getSecret(tavily))).toBeNull();
 
-    // Settings files go under the member's own directory.
-    expect(as(person('carol'), () => scope.settingsFilePath('x.json'))).toMatch(
-      new RegExp(`^${tmp}/people/[0-9a-f]{32}/x\\.json$`),
+    // Settings records belong to the member's own opaque key.
+    const carol = as(person('carol'), () =>
+      scope.settingsRecordKey('agent-defaults'),
     );
-    expect(as(null, () => scope.settingsFilePath('x.json'))).toBe(
-      join(tmp, 'x.json'),
-    );
+    expect(carol).toEqual({
+      owner: expect.stringMatching(/^[0-9a-f]{32}$/),
+      name: 'agent-defaults',
+    });
+    expect(carol.owner).not.toContain('carol');
+    expect(as(null, () => scope.settingsRecordKey('agent-defaults'))).toEqual({
+      owner: null,
+      name: 'agent-defaults',
+    });
   });
 
   it('never namespaces the deployment’s own credentials', async () => {
@@ -255,32 +261,34 @@ describe('personal settings', () => {
   it('persists independent Agent defaults for members and administrators', async () => {
     const scope = await import('./personal-settings.js');
     const defaults = await import('../agent/agent-defaults.js');
-    defaults.setAgentDefaults({
+    await defaults.setAgentDefaults({
       profileId: 'legacy-external',
       functionalModel: '',
     });
     for (const owner of [false, true]) {
       for (const id of ['carol', 'dave']) {
-        scope.openPersonalSettings(() => {
+        await scope.openPersonalSettings(async () => {
           scope.useCaller(person(`${id}-${owner}`, owner));
-          expect(defaults.getAgentDefaults().profileId).toBe('huabu');
-          defaults.setAgentDefaults({
+          expect((await defaults.getAgentDefaults()).profileId).toBe('huabu');
+          await defaults.setAgentDefaults({
             profileId: `${id}-agent`,
             functionalModel: `${id}-model`,
           });
         });
       }
       for (const id of ['carol', 'dave']) {
-        scope.openPersonalSettings(() => {
+        await scope.openPersonalSettings(async () => {
           scope.useCaller(person(`${id}-${owner}`, owner));
-          expect(defaults.getAgentDefaults()).toEqual({
+          expect(await defaults.getAgentDefaults()).toEqual({
             profileId: `${id}-agent`,
             functionalModel: `${id}-model`,
           });
         });
       }
     }
-    expect(defaults.getAgentDefaults().profileId).toBe('legacy-external');
+    expect((await defaults.getAgentDefaults()).profileId).toBe(
+      'legacy-external',
+    );
   });
 });
 
@@ -294,16 +302,16 @@ it('does not expose Azure deployment names or endpoints from the operator enviro
   try {
     await scope.openPersonalSettings(async () => {
       scope.useCaller(person('carol'));
-      expect(llm.getModelsForProvider('azure-openai')).toEqual([]);
+      expect(await llm.getModelsForProvider('azure-openai')).toEqual([]);
       await llm.setLLMConfig({
         provider: 'azure-openai',
         model: 'carol-model',
         apiKey: 'carol-key',
       });
-      expect(llm.getLLMModel().baseUrl).not.toContain('operator');
-      expect(llm.getModelsForProvider('azure-openai').map((m) => m.id)).toEqual(
-        ['carol-model'],
-      );
+      expect((await llm.getLLMModel()).baseUrl).not.toContain('operator');
+      expect(
+        (await llm.getModelsForProvider('azure-openai')).map((m) => m.id),
+      ).toEqual(['carol-model']);
     });
   } finally {
     vi.unstubAllEnvs();
@@ -339,7 +347,7 @@ it('offers members only provider adapters that can honor the guarded transport',
       .getAvailableProviders()
       .some((provider) => provider.api === 'bedrock-converse-stream'),
   ).toBe(true);
-  scope.openPersonalSettings(() => {
+  await scope.openPersonalSettings(async () => {
     scope.useCaller(person('carol'));
     const providers = llm.getAvailableProviders();
     expect(providers.some((provider) => provider.id === 'openai')).toBe(true);
@@ -352,6 +360,6 @@ it('offers members only provider adapters that can honor the guarded transport',
         ].includes(provider.api),
       ),
     ).toBe(false);
-    expect(llm.getModelsForProvider('amazon-bedrock')).toEqual([]);
+    expect(await llm.getModelsForProvider('amazon-bedrock')).toEqual([]);
   });
 });

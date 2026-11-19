@@ -12,6 +12,7 @@ import { useChatStore } from './chatStore';
 
 import type { ChatHistoryPage } from './chatHistoryCache';
 import type { ChatMessage } from './chatTypes';
+import type { AssistantToolPart } from '@huabu/shared';
 
 function fixture() {
   const messages: ChatMessage[] = Array.from({ length: 30 }, (_, index) => ({
@@ -33,6 +34,47 @@ function fixture() {
 
 describe('cursor-backed history cache', () => {
   beforeEach(() => useChatStore.setState({ threadsById: {}, threadMap: {} }));
+  it('retains loaded tool details on summary refresh but not across turn generations', () => {
+    const full: AssistantToolPart = {
+      kind: 'tool',
+      variant: 'generic',
+      toolCallId: 'tool',
+      title: 'Read',
+      content: [
+        { type: 'content', content: { type: 'text', text: 'loaded body' } },
+      ],
+      detail: { state: 'inline', turnRef: 'generation-1' },
+    };
+    const message = (part: AssistantToolPart): ChatMessage => ({
+      id: 'message',
+      historyTurnId: 'group',
+      role: 'assistant',
+      segments: [part],
+    });
+    const { content: _content, ...base } = full;
+    const summary: AssistantToolPart = {
+      ...base,
+      detail: { state: 'deferred', turnRef: 'generation-1', summary: {} },
+    };
+    const store = useChatStore.getState();
+    store.setMessages('thread', [message(full)]);
+    store.mergeLatestHistoryMessages('thread', [message(summary)]);
+    expect(useChatStore.getState().threadsById.thread?.messages).toEqual([
+      message(full),
+    ]);
+    store.setMessages('thread', [message(summary)]);
+    expect(useChatStore.getState().threadsById.thread?.messages).toEqual([
+      message(full),
+    ]);
+    const replaced: AssistantToolPart = {
+      ...summary,
+      detail: { state: 'deferred', turnRef: 'generation-2', summary: {} },
+    };
+    store.setMessages('thread', [message(replaced)]);
+    expect(useChatStore.getState().threadsById.thread?.messages).toEqual([
+      message(replaced),
+    ]);
+  });
   it('bounds page bodies, retaining the directory, visible page and newest page', () => {
     const { messages, pages } = fixture();
     const result = trimHistoryPages(pages, messages, ['message-0']);

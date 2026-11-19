@@ -6,6 +6,7 @@ import './setup-proxy.js';
 import { resolveBindHost } from './bind-host.js';
 import { initializeConnectionToken } from './connection-token.js';
 import { prewarmOAuthCredentials } from './modules/agent/oauth.js';
+import { importLegacyInkOcrConfig } from './modules/integrations/ink-ocr-config.js';
 import { resolveDeploymentConfig } from './modules/security/deployment-config.js';
 import {
   describeUnavailableCapabilities,
@@ -35,6 +36,7 @@ async function start(): Promise<void> {
   try {
     const port = resolveServerPort();
     await initializeSecretStore();
+    await importLegacyInkOcrConfig();
     const settings = readDeploymentSettings();
     installDeploymentEnvironment(
       resolveDeploymentEnvironment(

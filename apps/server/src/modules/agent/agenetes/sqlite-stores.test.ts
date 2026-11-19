@@ -10,7 +10,11 @@
  * so a broken extension substrate or a missing cascade fails here.
  */
 
-import { mountAgenetes } from '@agenetes/agenetes';
+import {
+  mountAgenetes,
+  decodeTurnCursor,
+  encodeTurnCursor,
+} from '@agenetes/agenetes';
 import { defineDriver } from '@agenetes/runtime';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
@@ -677,6 +681,14 @@ describe.each(
       [{ content: 'c' }],
     ]);
     expect(newest.hasMore).toBe(true);
+    const continuationRef = encodeTurnCursor({
+      ...decodeTurnCursor(newest.groups[0]!.id, THREAD_ID),
+      ordinal: 4,
+    });
+    expect(
+      (await conversationTurnStore.get(namespace, THREAD_ID, continuationRef))
+        ?.turn.transcript,
+    ).toEqual([{ type: 'text', data: { content: 'resume-b' } }]);
 
     const older = await conversationTurnStore.page(namespace, THREAD_ID, {
       limit: 2,
@@ -724,6 +736,9 @@ describe.each(
     ).toMatchObject({ content: 'q1' });
 
     await conversationTurnStore.replace(namespace, THREAD_ID, []);
+    await expect(async () =>
+      conversationTurnStore.get(namespace, THREAD_ID, cursor),
+    ).rejects.toThrow('stale');
     // A synchronous store refuses the stale cursor by throwing, so the call
     // is made inside the thunk rather than handed over as a promise.
     await expect(async () =>

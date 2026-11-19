@@ -26,6 +26,7 @@ import { X as XIcon } from 'lucide-react';
 import { ToolKindIcon } from './ToolKindIcon';
 import { CommandBlock } from '../../../Common/CommandBlock';
 import { AssistantDisclosure } from '../../AssistantDisclosure';
+import { DeferredDetails } from '../../DeferredDetails';
 
 import type {
   AcpContentBlock,
@@ -185,7 +186,11 @@ export function ToolCallCard({ part, showIcon = false }: ToolCallCardProps) {
       title={part.title}
       bodyClassName="border-edge-default/40 ml-4 flex max-h-80 flex-col gap-1 overflow-y-auto border-l py-1 pl-3"
     >
-      {body}
+      {part.detail?.state === 'deferred' ? (
+        <DeferredDetails turnRef={part.detail.turnRef} />
+      ) : (
+        body
+      )}
     </AssistantDisclosure>
   );
 }

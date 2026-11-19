@@ -117,10 +117,10 @@ describe('immutable connection token', () => {
 describe('source-daemon copy text', () => {
   it.skipIf(process.platform === 'win32')(
     'uses invocation-scoped env without token argv, and preserves metacharacters in a real POSIX shell',
-    () => {
+    async () => {
       const token = 'quote\'"$HOME \\n `tick` # literal';
       vi.stubEnv('HUABU_CONNECTION_TOKEN', token);
-      const result = buildAgentletConnectionCommand(request);
+      const result = await buildAgentletConnectionCommand(request);
       expect(result.source).toBe('environment');
       expect(result.warnings).toEqual([]);
       expect(result.content).toContain('pnpm start:daemon --max-agents 7');
@@ -173,9 +173,9 @@ console.log(JSON.stringify({origin: process.env.HUABU_PUBLIC_ORIGIN, token: proc
       }
     },
   );
-  it('quotes PowerShell literally and restores both previous process env values in finally', () => {
+  it('quotes PowerShell literally and restores both previous process env values in finally', async () => {
     vi.stubEnv('HUABU_CONNECTION_TOKEN', "token'$HOME`quoted");
-    const result = buildAgentletConnectionCommand({
+    const result = await buildAgentletConnectionCommand({
       ...request,
       shell: 'powershell',
     });
@@ -199,9 +199,9 @@ console.log(JSON.stringify({origin: process.env.HUABU_PUBLIC_ORIGIN, token: proc
     'all\'"`quotes',
   ])(
     'round-trips private env files through the real daemon parser: %s',
-    (token) => {
+    async (token) => {
       vi.stubEnv('HUABU_CONNECTION_TOKEN', token);
-      const result = buildAgentletConnectionCommand({
+      const result = await buildAgentletConnectionCommand({
         ...request,
         format: 'env-file',
       });
@@ -212,17 +212,17 @@ console.log(JSON.stringify({origin: process.env.HUABU_PUBLIC_ORIGIN, token: proc
       expect(result.content).not.toContain('--max-agents');
     },
   );
-  it('rejects an unrepresentable env file explicitly without blocking the command format', () => {
+  it('rejects an unrepresentable env file explicitly without blocking the command format', async () => {
     vi.stubEnv('HUABU_CONNECTION_TOKEN', 'all\'"`quotes # with comment');
-    expect(() =>
+    await expect(
       buildAgentletConnectionCommand({ ...request, format: 'env-file' }),
-    ).toThrow('use Copy connection command instead');
-    expect(buildAgentletConnectionCommand(request).content).toContain(
+    ).rejects.toThrow('use Copy connection command instead');
+    expect((await buildAgentletConnectionCommand(request)).content).toContain(
       'pnpm start:daemon',
     );
   });
-  it('reports HTTP/loopback warnings and a stable managed-token source', () => {
-    const result = buildAgentletConnectionCommand({
+  it('reports HTTP/loopback warnings and a stable managed-token source', async () => {
+    const result = await buildAgentletConnectionCommand({
       ...request,
       origin: 'http://localhost:3001',
     });
@@ -232,9 +232,9 @@ console.log(JSON.stringify({origin: process.env.HUABU_PUBLIC_ORIGIN, token: proc
       "HUABU_PUBLIC_ORIGIN='http://localhost:3001'",
     );
   });
-  it('uses the configured public origin rather than the local browser origin', () => {
+  it('uses the configured public origin rather than the local browser origin', async () => {
     vi.stubEnv('HUABU_PUBLIC_ORIGIN', 'https://public.huabu.example:8443/');
-    const result = buildAgentletConnectionCommand({
+    const result = await buildAgentletConnectionCommand({
       ...request,
       origin: 'http://localhost:5173',
     });
@@ -242,21 +242,21 @@ console.log(JSON.stringify({origin: process.env.HUABU_PUBLIC_ORIGIN, token: proc
       "HUABU_PUBLIC_ORIGIN='https://public.huabu.example:8443'",
     );
     expect(result.warnings).toEqual([]);
-    expect(() =>
+    await expect(
       buildAgentletConnectionCommand({
         ...request,
         origin: 'file:///tmp/huabu',
       }),
-    ).toThrow('Origin must be an HTTP(S) origin without a path');
+    ).rejects.toThrow('Origin must be an HTTP(S) origin without a path');
   });
   it.each([
     'https://example.com/path',
     'file:///tmp/huabu',
     'https://user:secret@example.com',
     'https://example.com/?x=1',
-  ])('rejects invalid root origins: %s', (origin) => {
-    expect(() =>
+  ])('rejects invalid root origins: %s', async (origin) => {
+    await expect(
       buildAgentletConnectionCommand({ ...request, origin }),
-    ).toThrow('Origin must be an HTTP(S) origin without a path');
+    ).rejects.toThrow('Origin must be an HTTP(S) origin without a path');
   });
 });

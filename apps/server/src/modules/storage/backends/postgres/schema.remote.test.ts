@@ -90,7 +90,7 @@ it('runs on PostgreSQL 18 and serializes simultaneous fresh migrations', async (
     ]),
   );
 });
-it('reaches the same v3 schema from a fresh database and from a v2 database', async () => {
+it('reaches the same v4 schema from a fresh database and from a v2 database', async () => {
   const fresh = await openPostgresTestStore(false);
   cleanup.push(fresh.cleanup);
   const h = await openPostgresTestDatabase();
@@ -114,9 +114,9 @@ it('reaches the same v3 schema from a fresh database and from a v2 database', as
   cleanup.push(() => context.close());
   await context.init();
   const db = context.connection();
-  expect(POSTGRES_MIGRATIONS.length).toBe(3);
+  expect(POSTGRES_MIGRATIONS.length).toBe(4);
   expect((await db.query('SELECT * FROM huabu_schema_version')).rows).toEqual([
-    { id: 1, version: 3 },
+    { id: 1, version: 4 },
   ]);
   expect(
     (await db.query('SELECT canvas_id, version, node_change_seq FROM spaces'))

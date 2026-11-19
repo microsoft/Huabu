@@ -5,7 +5,10 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { createAgentProfileRegistry } from '@agenetes/agent-profile';
+import {
+  createAgentProfileRegistry,
+  FileAgentProfileRegistryStore,
+} from '@agenetes/agent-profile';
 import { describe, expect, it, vi } from 'vitest';
 
 import { registerHarnessProfileDiscovery } from './harness-profile-discovery.js';
@@ -41,28 +44,30 @@ function setup(initialMachines = ['machine-a']) {
   let nextId = 0;
   const profiles: AgentProfile[] = [];
   const registry = {
-    listProfiles: () => profiles,
-    createProfile: vi.fn((input: CreateAgentProfileInput): AgentProfile => {
-      const profile: AgentProfile = {
-        id: `profile-${++nextId}`,
-        alias: input.alias,
-        agentletId: input.agentletId,
-        visible: input.visible,
-        workingDirPath: input.workingDirPath,
-        launch:
-          input.launchKind === 'acp-command'
-            ? { kind: 'acp-command', command: input.command }
-            : {
-                kind: 'acp-harness',
-                harnessId: input.harnessId,
-                options: input.options,
-              },
-        metadata: input.metadata,
-        customData: input.customData,
-      };
-      profiles.push(profile);
-      return profile;
-    }),
+    listProfiles: async () => profiles,
+    createProfile: vi.fn(
+      async (input: CreateAgentProfileInput): Promise<AgentProfile> => {
+        const profile: AgentProfile = {
+          id: `profile-${++nextId}`,
+          alias: input.alias,
+          agentletId: input.agentletId,
+          visible: input.visible,
+          workingDirPath: input.workingDirPath,
+          launch:
+            input.launchKind === 'acp-command'
+              ? { kind: 'acp-command', command: input.command }
+              : {
+                  kind: 'acp-harness',
+                  harnessId: input.harnessId,
+                  options: input.options,
+                },
+          metadata: input.metadata,
+          customData: input.customData,
+        };
+        profiles.push(profile);
+        return profile;
+      },
+    ),
   };
   const gateway = {
     getAgentlets: () =>
@@ -334,8 +339,10 @@ describe('automatic ordinary Profile provisioning', () => {
     const context = setup();
     let dispose: (() => void) | undefined;
     try {
-      const registry = createAgentProfileRegistry({ storageDir });
-      const legacy = registry.createProfile({
+      const registry = await createAgentProfileRegistry({
+        store: new FileAgentProfileRegistryStore(storageDir),
+      });
+      const legacy = await registry.createProfile({
         launchKind: 'acp-command',
         alias: 'GitHub Copilot (machine-a: linux x64)',
         agentletId: 'machine-a',
@@ -351,15 +358,16 @@ describe('automatic ordinary Profile provisioning', () => {
           preference: 'preserved',
         },
       });
-      const snapshot = registry.snapshotProfile(legacy.id);
+      const snapshot = await registry.snapshotProfile(legacy.id);
       const savedDefaults = {
         profileId: legacy.id,
         functionalModel: 'saved-model',
       };
-      const write = vi.fn();
+      const write = vi.fn(async () => {});
       const defaults = new AgentDefaultsService({
-        read: () => savedDefaults,
+        read: async () => savedDefaults,
         write,
+        initialize: async () => savedDefaults,
       });
       context.gateway.discoverHarnesses.mockResolvedValue({
         harnesses: observation.harnesses.map((harness) => ({
@@ -381,10 +389,10 @@ describe('automatic ordinary Profile provisioning', () => {
       dispose = start(registry);
       await flush();
       expect(context.log.warn).not.toHaveBeenCalled();
-      expect(registry.listProfiles()).toHaveLength(2);
-      const typed = registry
-        .listProfiles()
-        .find((profile) => profile.launch.kind === 'acp-harness');
+      expect(await registry.listProfiles()).toHaveLength(2);
+      const typed = (await registry.listProfiles()).find(
+        (profile) => profile.launch.kind === 'acp-harness',
+      );
       expect(typed).toMatchObject({
         alias: 'GitHub Copilot (machine-a: linux x64) [copilot]',
         workingDirPath: observation.harnesses[0].workingDirPath,
@@ -396,26 +404,28 @@ describe('automatic ordinary Profile provisioning', () => {
         customData: { discoveredAgent: legacy.customData?.discoveredAgent },
       });
       expect(typed?.id).not.toBe(legacy.id);
-      expect(registry.getProfile(legacy.id)).toEqual(legacy);
-      expect(registry.snapshotProfile(legacy.id)).toEqual(snapshot);
+      expect(await registry.getProfile(legacy.id)).toEqual(legacy);
+      expect(await registry.snapshotProfile(legacy.id)).toEqual(snapshot);
       if (!typed || typed.launch.kind !== 'acp-harness') {
         throw new Error('Expected a typed Profile');
       }
-      registry.patchProfile(typed.id, {
+      await registry.patchProfile(typed.id, {
         alias: legacy.alias,
         launch: { ...typed.launch, options: { autoApprove: false } },
       });
       context.emit({ agentletId: 'machine-a', status: 'connected' });
       context.emit({ agentletId: 'machine-a', status: 'connected' });
       await flush();
-      expect(registry.listProfiles()).toHaveLength(2);
-      const beforeRestart = registry.listProfiles();
+      expect(await registry.listProfiles()).toHaveLength(2);
+      const beforeRestart = await registry.listProfiles();
       dispose();
-      const restored = createAgentProfileRegistry({ storageDir });
+      const restored = await createAgentProfileRegistry({
+        store: new FileAgentProfileRegistryStore(storageDir),
+      });
       dispose = start(restored);
       await flush();
-      expect(restored.listProfiles()).toEqual(beforeRestart);
-      expect(defaults.getAgentDefaults()).toEqual(savedDefaults);
+      expect(await restored.listProfiles()).toEqual(beforeRestart);
+      expect(await defaults.getAgentDefaults()).toEqual(savedDefaults);
       expect(write).not.toHaveBeenCalled();
     } finally {
       dispose?.();
@@ -464,26 +474,30 @@ describe('automatic ordinary Profile provisioning', () => {
     const context = setup();
     let dispose: (() => void) | undefined;
     try {
-      const registry = createAgentProfileRegistry({ storageDir });
+      const registry = await createAgentProfileRegistry({
+        store: new FileAgentProfileRegistryStore(storageDir),
+      });
       dispose = registerHarnessProfileDiscovery({
         gateway: context.gateway,
         getRegistry: () => registry,
         log: context.log,
       });
       await flush();
-      const original = registry.listProfiles()[0]!;
-      registry.patchProfile(original.id, { alias: 'Kept after restart' });
+      const original = (await registry.listProfiles())[0]!;
+      await registry.patchProfile(original.id, { alias: 'Kept after restart' });
       dispose();
 
-      const restored = createAgentProfileRegistry({ storageDir });
+      const restored = await createAgentProfileRegistry({
+        store: new FileAgentProfileRegistryStore(storageDir),
+      });
       dispose = registerHarnessProfileDiscovery({
         gateway: context.gateway,
         getRegistry: () => restored,
         log: context.log,
       });
       await flush();
-      expect(restored.listProfiles()).toHaveLength(1);
-      expect(restored.listProfiles()[0]).toMatchObject({
+      expect(await restored.listProfiles()).toHaveLength(1);
+      expect((await restored.listProfiles())[0]).toMatchObject({
         id: original.id,
         alias: 'Kept after restart',
       });
@@ -507,14 +521,16 @@ describe('automatic ordinary Profile provisioning', () => {
     });
     let dispose: (() => void) | undefined;
     try {
-      const registry = createAgentProfileRegistry({ storageDir });
+      const registry = await createAgentProfileRegistry({
+        store: new FileAgentProfileRegistryStore(storageDir),
+      });
       dispose = registerHarnessProfileDiscovery({
         gateway: context.gateway,
         getRegistry: () => registry,
         log: context.log,
       });
       await flush();
-      const profile = registry.listProfiles()[0];
+      const profile = (await registry.listProfiles())[0];
       if (!profile)
         throw new Error('Expected an automatically discovered Profile');
       expect(profile.launch).toEqual({
@@ -522,10 +538,14 @@ describe('automatic ordinary Profile provisioning', () => {
         harnessId: 'copilot',
         options: { autoApprove: true },
       });
-      expect(
-        createAgentProfileRegistry({ storageDir }).getProfile(profile.id),
-      ).toEqual(profile);
-      const edited = registry.patchProfile(profile.id, {
+      await expect(
+        (
+          await createAgentProfileRegistry({
+            store: new FileAgentProfileRegistryStore(storageDir),
+          })
+        ).getProfile(profile.id),
+      ).resolves.toEqual(profile);
+      const edited = await registry.patchProfile(profile.id, {
         expectedRevision: profile.revision ?? 0,
         launch: {
           kind: 'acp-harness',
@@ -535,15 +555,17 @@ describe('automatic ordinary Profile provisioning', () => {
       });
       expect(profile.launch).toMatchObject({ options: { autoApprove: true } });
       dispose();
-      const restored = createAgentProfileRegistry({ storageDir });
+      const restored = await createAgentProfileRegistry({
+        store: new FileAgentProfileRegistryStore(storageDir),
+      });
       dispose = registerHarnessProfileDiscovery({
         gateway: context.gateway,
         getRegistry: () => restored,
         log: context.log,
       });
       await flush();
-      expect(restored.listProfiles()).toEqual([edited]);
-      expect(restored.getProfile(profile.id)?.launch).toMatchObject({
+      expect(await restored.listProfiles()).toEqual([edited]);
+      expect((await restored.getProfile(profile.id))?.launch).toMatchObject({
         options: { autoApprove: false },
       });
     } finally {

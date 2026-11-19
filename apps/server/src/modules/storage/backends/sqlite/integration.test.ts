@@ -365,13 +365,13 @@ describe('SqliteStructuredStore lifecycle and schema', () => {
     ]);
   });
 
-  it('reaches the pinned v3 schema from a fresh database and from a v2 database', () => {
-    // `fixtures/v3-schema.json` is every table and index of the released
+  it('reaches the pinned v4 schema from a fresh database and from a v2 database', () => {
+    // `fixtures/v4-schema.json` is every table and index of the released
     // schema, as SQLite records it. A fresh database and one upgraded from
     // v2 must both arrive at exactly that.
     const pinned: unknown = JSON.parse(
       readFileSync(
-        new URL('./fixtures/v3-schema.json', import.meta.url),
+        new URL('./fixtures/v4-schema.json', import.meta.url),
         'utf8',
       ),
     );
@@ -426,8 +426,8 @@ describe('SqliteStructuredStore lifecycle and schema', () => {
       return schemaOf(database);
     });
 
-    expect(freshSchema.version).toBe(3);
-    expect(SQLITE_SCHEMA_VERSION).toBe(3);
+    expect(freshSchema.version).toBe(4);
+    expect(SQLITE_SCHEMA_VERSION).toBe(4);
     expect(freshSchema.objects).toEqual(pinned);
     expect(upgradedSchema).toEqual(freshSchema);
   });

@@ -21,6 +21,7 @@ import {
   getFirstSelectableAgentProfileId,
   requireSelectableAgentProfile,
   SelectableAgentProfileError,
+  type AgentProfileRegistryPort,
   type SelectableAgentProfile,
 } from './selectable-agent-profile.js';
 import { getLogger } from '../../utils/logger.js';
@@ -76,11 +77,6 @@ export class AgentNodeCreationError extends Error {
   }
 }
 
-interface AgentProfileRegistryPort {
-  getProfile(profileId: string): SelectableAgentProfile | null | undefined;
-  listSelectableProfileIds(): string[];
-}
-
 interface StoredNode {
   id: string;
   type?: string;
@@ -89,7 +85,7 @@ interface StoredNode {
 
 interface AgentNodeServiceDependencies {
   getProfileRegistry: () => AgentProfileRegistryPort | null;
-  getFallbackProfileId?: () => string | null;
+  getFallbackProfileId?: () => Promise<string | null>;
   readCanvasNodes: (canvasId: string) => Promise<StoredNode[] | null>;
   execute: (input: {
     canvasId: string;
@@ -218,9 +214,9 @@ export class AgentNodeService {
 
     const profileId =
       input.profileId ??
-      (this.dependencies.getFallbackProfileId
+      (await (this.dependencies.getFallbackProfileId
         ? this.dependencies.getFallbackProfileId()
-        : getFirstSelectableAgentProfileId());
+        : getFirstSelectableAgentProfileId()));
     if (!profileId) {
       throw new AgentNodeCreationError(
         'default_profile_unconfigured',
@@ -243,8 +239,8 @@ export class AgentNodeService {
       try {
         const registry = this.dependencies.getProfileRegistry();
         profile = registry
-          ? requireSelectableAgentProfile(profileId, registry)
-          : requireSelectableAgentProfile(profileId);
+          ? await requireSelectableAgentProfile(profileId, registry)
+          : await requireSelectableAgentProfile(profileId);
       } catch (error) {
         if (error instanceof SelectableAgentProfileError) {
           throw new AgentNodeCreationError(

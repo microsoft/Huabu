@@ -22,6 +22,7 @@ import {
   ASSISTANT_DISCLOSURE_BUTTON_CLASS_NAME,
   ASSISTANT_ROW_CLASS_NAME,
 } from '../../AssistantDisclosure';
+import { DeferredDetails } from '../../DeferredDetails';
 
 import type { AgentToolPart } from '@huabu/shared';
 
@@ -248,7 +249,10 @@ export function MergedAgentToolRow({
         const nodes = Array.isArray(d.nodes)
           ? (d.nodes as Array<Record<string, unknown>>)
           : [];
-        totalMatched += nodes.length;
+        totalMatched +=
+          e.part.detail?.state === 'deferred'
+            ? (e.part.detail.summary.count ?? nodes.length)
+            : nodes.length;
         for (const n of nodes) {
           refs.push({
             nodeId: typeof n.id === 'string' ? n.id : undefined,
@@ -524,7 +528,19 @@ export function MergedAgentToolRow({
     tool === 'read'
       ? readEntries.length
       : tool === 'inspect_nodes'
-        ? nodeRefs.length + failedEntries.length
+        ? entries.reduce((sum, { part }) => {
+            if (part.detail?.state === 'deferred')
+              return sum + (part.detail.summary.detailCount ?? 0);
+            const data =
+              part.data?.status === 'success'
+                ? ((part.data.data ?? {}) as Record<string, unknown>)
+                : {};
+            return (
+              sum +
+              (Array.isArray(data.nodes) ? data.nodes.length : 0) +
+              (partFailed(part) ? 1 : 0)
+            );
+          }, 0)
         : callEntries.length;
   if (detailCount <= 1) {
     return (
@@ -565,7 +581,21 @@ export function MergedAgentToolRow({
         </div>
         {isExpanded && (
           <div className="border-edge-default/40 ml-4 flex flex-col gap-1 border-l py-1 pl-3">
-            {tool === 'read' ? (
+            {entries.some(
+              (entry) => entry.part.detail?.state === 'deferred',
+            ) ? (
+              [
+                ...new Set(
+                  entries.flatMap(({ part }) =>
+                    part.detail?.state === 'deferred'
+                      ? [part.detail.turnRef]
+                      : [],
+                  ),
+                ),
+              ].map((turnRef) => (
+                <DeferredDetails key={turnRef} turnRef={turnRef} />
+              ))
+            ) : tool === 'read' ? (
               // read merges N calls; list each file with its outcome —
               // a successful node read renders a clickable NodeRef, a
               // failed one shows the attempted path with an error mark.

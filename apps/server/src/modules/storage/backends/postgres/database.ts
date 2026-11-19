@@ -158,6 +158,14 @@ export class PostgresStoreContext {
     this.assertOpen();
     return new PgExecutor(this.#pool);
   }
+  /**
+   * Statements on the pool whether or not {@link init} has run, for reading
+   * what a database holds before deciding to upgrade it. Never for writes.
+   */
+  beforeInit(): PgExecutor {
+    if (this.#state === 'closed') throw new Error('Postgres store is closed');
+    return new PgExecutor(this.#pool);
+  }
   assertOpen(): void {
     if (this.#state !== 'open')
       throw new Error(

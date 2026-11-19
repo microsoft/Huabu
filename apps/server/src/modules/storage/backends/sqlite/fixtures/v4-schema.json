@@ -55,6 +55,12 @@
   },
   {
     "type": "table",
+    "name": "server_records",
+    "tbl_name": "server_records",
+    "sql": "CREATE TABLE server_records (\n        owner_key TEXT NOT NULL,\n        name TEXT NOT NULL,\n        record_json TEXT NOT NULL CHECK (json_valid(record_json)),\n        updated_at REAL NOT NULL,\n        PRIMARY KEY (owner_key, name)\n      ) STRICT"
+  },
+  {
+    "type": "table",
     "name": "space_extensions",
     "tbl_name": "space_extensions",
     "sql": "CREATE TABLE space_extensions (\n    extension_id INTEGER PRIMARY KEY AUTOINCREMENT,\n    canvas_id TEXT NOT NULL,\n    namespace TEXT NOT NULL,\n    UNIQUE (canvas_id, namespace),\n    FOREIGN KEY (canvas_id) REFERENCES spaces(canvas_id) ON DELETE CASCADE\n  ) STRICT"

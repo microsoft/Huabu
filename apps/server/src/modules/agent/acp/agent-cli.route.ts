@@ -44,13 +44,13 @@ async function detectAgentClis(target: {
   const gateway = getAgentletGateway();
   if (!gateway) throw new Error('Agentlet Gateway is not ready');
   const profile = target.profileId
-    ? getAgentProfileRegistry()?.getProfile(target.profileId)
+    ? await getAgentProfileRegistry()?.getProfile(target.profileId)
     : undefined;
   if (target.profileId && !profile)
     throw new Error('Agent Profile is unavailable');
   const requestedAgentletId = profile?.agentletId ?? target.agentletId;
   if (!requestedAgentletId) throw new Error('Agentlet target is required');
-  requireOwnAgentlet(requestedAgentletId);
+  await requireOwnAgentlet(requestedAgentletId);
   const agentletId = profile
     ? resolveConnectedAgentletId(requestedAgentletId)
     : requestedAgentletId;
@@ -97,14 +97,15 @@ export function createAcpAgentCliRoutes(
         }
         if (
           parsed.data.profileId &&
-          !getAgentProfileRegistry()?.getProfile(parsed.data.profileId)
+          !(await getAgentProfileRegistry()?.getProfile(parsed.data.profileId))
         ) {
           return reply.status(404).send({
             code: 'profile_not_found',
             message: 'Agent Profile is unavailable',
           });
         }
-        if (parsed.data.agentletId) requireOwnAgentlet(parsed.data.agentletId);
+        if (parsed.data.agentletId)
+          await requireOwnAgentlet(parsed.data.agentletId);
         try {
           return {
             agents: (await detect(parsed.data)).filter(

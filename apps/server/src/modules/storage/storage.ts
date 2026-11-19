@@ -46,17 +46,18 @@ import { stageDiskSpaceImport } from './backends/disk/space-import.js';
 import { diskSpaceTree } from './backends/disk/space-tree.js';
 import { DiskStructuredStore } from './backends/disk/structured-store.js';
 import { DiskWorkspaceRepository } from './backends/disk/workspace-repository.js';
-import { PostgresStoreContext } from './backends/postgres/database.js';
 import { PostgresStructuredStore } from './backends/postgres/structured-store.js';
 import { PostgresWorkspaceRepository } from './backends/postgres/workspace-repository.js';
-import {
-  SqliteStoreContext,
-  sqliteDatabasePath,
-} from './backends/sqlite/database.js';
 import { SqliteStructuredStore } from './backends/sqlite/structured-store.js';
 import { SqliteWorkspaceRepository } from './backends/sqlite/workspace-repository.js';
 import { refreshCanvasDirIndex } from './canvas-dirs.js';
 import { hasStorageCapability } from './capabilities.js';
+import {
+  openConnections,
+  postgresConnection,
+  releaseConnections,
+  sqliteConnection,
+} from './connections.js';
 import {
   assertSpaceHierarchyLocked,
   withSpaceHierarchyLock,
@@ -69,6 +70,7 @@ import {
   validateStorageProfile,
   type StorageProfile,
 } from './profile.js';
+import { ensureServerRecords, forgetServerRecords } from './server-records.js';
 import { withSpacePutAdmission } from './space-lifecycle-admission.js';
 
 import type { WorkspaceScope } from '../workspace/context.js';
@@ -373,8 +375,6 @@ export function createStorage(profile: StorageProfile): Storage {
 
 let current: Storage | null = null;
 let workspaces: WorkspaceRepository | null = null;
-let sqlite: SqliteStoreContext | null = null;
-let postgres: PostgresStoreContext | null = null;
 // World ids per Workspace for backends without folders. Several Workspaces
 // are open at once in Bubble mode, each with its own World.
 const worldCanvasIds = new Map<string, string>();
@@ -382,41 +382,6 @@ const worldCanvasIds = new Map<string, string>();
 // folder. A failure is removed so repaired/offline folders can be retried.
 const diskWorkspacePreparations = new Map<string, Promise<void>>();
 let spaceCreateTail: Promise<void> = Promise.resolve();
-
-/**
- * The one Postgres context this process holds, opened on first need.
- *
- * Shared for a sharper reason than SQLite's: a context is also the scope that
- * fences Space deletion against in-flight writes, so a second one for the same
- * database would let one context delete what the other just acknowledged.
- * Connecting is asynchronous, which is why `requiresExplicitInit` keeps this
- * profile off the lazy path — there is an `await` here that must not be
- * skipped.
- */
-function postgresConnection(): PostgresStoreContext {
-  if (postgres) return postgres;
-  const connectionString = process.env['HUABU_POSTGRES_URL'];
-  if (!connectionString)
-    throw new StorageProfileError('Postgres requires HUABU_POSTGRES_URL');
-  postgres = new PostgresStoreContext({ connectionString });
-  return postgres;
-}
-
-/**
- * The one SQLite connection this process holds, opened on first need.
- *
- * Opening it is synchronous, which is why the on-demand path stays legal for
- * this profile: there is no `await` to skip. The structured store and the
- * Workspace repository both borrow it, because they are one database file and
- * a second connection would be a second writer.
- */
-function sqliteConnection(): SqliteStoreContext {
-  if (sqlite) return sqlite;
-  const context = new SqliteStoreContext(sqliteDatabasePath());
-  context.init();
-  sqlite = context;
-  return context;
-}
 
 /**
  * The Workspace repository for the configured structured backend.
@@ -654,6 +619,13 @@ export async function initStorage(
   // answer for the wrong backend.
   workspaces = null;
   try {
+    // Records first. Building a database backend opens its connection, which
+    // upgrades the schema, so the import is read and checked against the
+    // database as it was. Normally they are open already, before
+    // credentials; a caller that chose an explicit profile gets records for
+    // that profile here.
+    validateStorageProfile(profile);
+    await ensureServerRecords(profile);
     const storage = createStorage(profile);
     current = storage;
     const initialized = await Promise.allSettled([
@@ -716,8 +688,8 @@ export async function activateWorkspace(
   // The lease guard must accept the switch before either cached World state
   // or the SQLite connection moves away from the current Workspace.
   commitWorkspaceIdentity(workspace);
-  if (sqlite) sqlite.useWorkspace(workspace.workspaceId);
-  if (postgres) postgres.useWorkspace(workspace.workspaceId);
+  for (const connection of openConnections())
+    connection.useWorkspace(workspace.workspaceId);
   worldCanvasIds.delete(workspace.workspaceId);
   if (
     workspaces instanceof SqliteWorkspaceRepository ||
@@ -821,12 +793,10 @@ export function getStorage(): Storage {
  */
 export async function closeStorage(): Promise<void> {
   const storage = current;
-  const connection = sqlite;
-  const postgresContext = postgres;
+  const closeConnections = releaseConnections();
   current = null;
   workspaces = null;
-  sqlite = null;
-  postgres = null;
+  forgetServerRecords();
   worldCanvasIds.clear();
   diskWorkspacePreparations.clear();
   try {
@@ -840,11 +810,7 @@ export async function closeStorage(): Promise<void> {
     }
   } finally {
     // Composition owns shared connections, including failed initialization.
-    try {
-      connection?.close();
-    } finally {
-      await postgresContext?.close();
-    }
+    await closeConnections();
   }
 }
 

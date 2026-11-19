@@ -129,6 +129,23 @@ export const SQLITE_MIGRATIONS: readonly SqliteMigration[] = Object.freeze([
       CREATE INDEX spaces_by_parent ON spaces(workspace_id, parent_space_id);
     `,
   }),
+  /**
+   * Version 3 — server records: the Server's own state, owned by no
+   * Workspace (ports/server-records.ts). `owner_key` is a person's opaque
+   * key, or '' for the deployment's record.
+   */
+  Object.freeze({
+    version: 3,
+    sql: `
+      CREATE TABLE server_records (
+        owner_key TEXT NOT NULL,
+        name TEXT NOT NULL,
+        record_json TEXT NOT NULL CHECK (json_valid(record_json)),
+        updated_at REAL NOT NULL,
+        PRIMARY KEY (owner_key, name)
+      ) STRICT;
+    `,
+  }),
   // Reliable save and node change tracking.
   //
   // `space_save_heads` holds a Space's version stamps and `space_save_results`
@@ -139,7 +156,7 @@ export const SQLITE_MIGRATIONS: readonly SqliteMigration[] = Object.freeze([
   // per Space, advanced by every node write, and the value it had at each
   // node's last write. Rows that predate the columns share position 0.
   Object.freeze({
-    version: 3,
+    version: 4,
     sql: `
       CREATE TABLE space_save_heads (
         canvas_id TEXT PRIMARY KEY,
