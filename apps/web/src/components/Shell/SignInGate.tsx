@@ -608,6 +608,11 @@ export function SignInScreen({
             {title}
           </h1>
           <p className="text-fg-subtle mt-2 text-sm">{intro}</p>
+          {state.kind === 'noAccess' && (
+            <p className="text-fg-subtle mt-3 text-xs">
+              {t('auth.noAccessHowTo', { appName: APP_NAME })}
+            </p>
+          )}
         </div>
 
         {state.kind === 'signIn' && state.authenticators.length === 0 ? (
