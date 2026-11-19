@@ -414,6 +414,11 @@
     "agentIcon": {
       "label": "图标",
       "change": "更改“{{alias}}”的图标",
+      "style": "样式",
+      "styles": {
+        "logo": "品牌标志",
+        "shape": "形状"
+      },
       "shape": "形状",
       "color": "颜色",
       "shapes": {

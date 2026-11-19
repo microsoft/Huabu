@@ -29,6 +29,7 @@
     "@fontsource/caveat": "^5.2.5",
     "@huabu/shared": "workspace:*",
     "@lezer/highlight": "^1.2.3",
+    "@lobehub/icons-static-svg": "^1.104.0",
     "@milkdown/core": "^7.21.1",
     "@milkdown/crepe": "^7.21.1",
     "@milkdown/ctx": "^7.21.1",

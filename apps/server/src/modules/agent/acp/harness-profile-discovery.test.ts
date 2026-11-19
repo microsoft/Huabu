@@ -216,6 +216,8 @@ describe('automatic ordinary Profile provisioning', () => {
           agentletId: 'machine-a',
           harnessId: 'copilot',
         },
+        // A harness with a bundled logo starts on it.
+        icon: { brand: 'copilot' },
       },
     });
     dispose();

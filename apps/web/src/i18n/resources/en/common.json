@@ -414,6 +414,11 @@
     "agentIcon": {
       "label": "Icon",
       "change": "Change icon for {{alias}}",
+      "style": "Style",
+      "styles": {
+        "logo": "Logo",
+        "shape": "Shape"
+      },
       "shape": "Shape",
       "color": "Color",
       "shapes": {

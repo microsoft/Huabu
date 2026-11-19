@@ -9,13 +9,16 @@ import type { AgentIconValue } from '@/components/Common/AgentIcon';
 
 interface PersistedAgentIconPickerProps {
   value: AgentIconValue;
+  /** Harness the Profile launches; offers its logo when one is bundled. */
+  harnessId?: string;
   alias: string;
   onSave: (value: AgentIconValue) => Promise<void>;
 }
 
-/** Optimistically composes rapid shape/color changes and persists them in order. */
+/** Optimistically composes rapid icon changes and persists them in order. */
 export function PersistedAgentIconPicker({
   value,
+  harnessId,
   alias,
   onSave,
 }: PersistedAgentIconPickerProps) {
@@ -72,6 +75,7 @@ export function PersistedAgentIconPicker({
   return (
     <AgentIconPicker
       value={optimisticValue}
+      harnessId={harnessId}
       alias={alias}
       onChange={handleChange}
     />

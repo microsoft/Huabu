@@ -3,9 +3,12 @@
 
 /**
  * `AgentIconPicker` — a compact popover that lets the user choose the avatar
- * (shape + color) for a single external agent. The trigger shows the current
- * icon; opening it reveals a shape row and a color row that preview the choice
- * live. It is fully controlled: the parent owns the value and persists changes.
+ * for a single external agent. The trigger shows the current icon; opening it
+ * reveals a shape row and a color row that preview the choice live. When the
+ * agent's harness has a bundled logo, a style row switches between that logo
+ * and the shape avatar; the shape and color rows apply to the shape avatar, so
+ * they are hidden while the logo is selected. It is fully controlled: the
+ * parent owns the value and persists changes.
  */
 
 import { useTranslation } from 'react-i18next';
@@ -22,12 +25,18 @@ import { Button } from '@/components/Common/Button';
 import { cn } from '@/components/Common/cn';
 import { DropdownMenu } from '@/components/Common/DropdownMenu';
 import { MENU_SECTION_LABEL_CLASS } from '@/components/Common/menuStyles';
+import { getHarnessAgentIconBrand } from '@/utils/agentIcon';
+
+const AGENT_ICON_STYLES = ['logo', 'shape'] as const;
+type AgentIconStyle = (typeof AGENT_ICON_STYLES)[number];
 
 type AgentIconPickerProps = {
   /** Current icon. */
   value: AgentIconValue;
-  /** Called with the next icon when the user changes shape or color. */
+  /** Called with the next icon when the user changes style, shape or color. */
   onChange: (next: AgentIconValue) => void;
+  /** Harness the Profile launches; offers its logo when one is bundled. */
+  harnessId?: string;
   /** Agent alias, used to build accessible labels. */
   alias: string;
   /** Disables the trigger (e.g. while a save is in flight). */
@@ -37,10 +46,16 @@ type AgentIconPickerProps = {
 export function AgentIconPicker({
   value,
   onChange,
+  harnessId,
   alias,
   disabled,
 }: AgentIconPickerProps) {
   const { t } = useTranslation();
+  // A saved logo stays selectable even if the harness can no longer be
+  // resolved, so opening the picker never silently drops it.
+  const logo = getHarnessAgentIconBrand(harnessId) ?? value.brand;
+  const style: AgentIconStyle = value.brand ? 'logo' : 'shape';
+  const shapeValue = { shape: value.shape, color: value.color };
 
   return (
     <DropdownMenu
@@ -64,6 +79,7 @@ export function AgentIconPicker({
           <AgentIcon
             shape={value.shape}
             color={value.color}
+            brand={value.brand}
             size={20}
             withFace
           />
@@ -71,26 +87,61 @@ export function AgentIconPicker({
       }
     >
       <div className="flex flex-col gap-2">
-        <IconOptionRow
-          label={t('settings.agentIcon.shape')}
-          options={AGENT_ICON_SELECTABLE_SHAPES}
-          isSelected={(shape) => shape === value.shape}
-          optionLabel={(shape) => t(`settings.agentIcon.shapes.${shape}`)}
-          onSelect={(shape) => onChange({ ...value, shape })}
-          renderIcon={(shape: AgentIconShape) => (
-            <AgentIcon shape={shape} color={value.color} size={20} withFace />
-          )}
-        />
-        <IconOptionRow
-          label={t('settings.agentIcon.color')}
-          options={AGENT_ICON_COLORS}
-          isSelected={(color) => color === value.color}
-          optionLabel={(color) => t(`settings.agentIcon.colors.${color}`)}
-          onSelect={(color) => onChange({ ...value, color })}
-          renderIcon={(color: AgentIconColor) => (
-            <AgentIcon shape={value.shape} color={color} size={20} withFace />
-          )}
-        />
+        {logo ? (
+          <IconOptionRow
+            label={t('settings.agentIcon.style')}
+            options={AGENT_ICON_STYLES}
+            isSelected={(option) => option === style}
+            optionLabel={(option) => t(`settings.agentIcon.styles.${option}`)}
+            onSelect={(option) =>
+              onChange(
+                option === 'logo' ? { ...shapeValue, brand: logo } : shapeValue,
+              )
+            }
+            renderIcon={(option: AgentIconStyle) => (
+              <AgentIcon
+                {...shapeValue}
+                brand={option === 'logo' ? logo : undefined}
+                size={20}
+                withFace
+              />
+            )}
+          />
+        ) : null}
+        {style === 'shape' ? (
+          <>
+            <IconOptionRow
+              label={t('settings.agentIcon.shape')}
+              options={AGENT_ICON_SELECTABLE_SHAPES}
+              isSelected={(shape) => shape === value.shape}
+              optionLabel={(shape) => t(`settings.agentIcon.shapes.${shape}`)}
+              onSelect={(shape) => onChange({ ...value, shape })}
+              renderIcon={(shape: AgentIconShape) => (
+                <AgentIcon
+                  shape={shape}
+                  color={value.color}
+                  size={20}
+                  withFace
+                />
+              )}
+            />
+            <IconOptionRow
+              label={t('settings.agentIcon.color')}
+              options={AGENT_ICON_COLORS}
+              isSelected={(color) => color === value.color}
+              optionLabel={(color) => t(`settings.agentIcon.colors.${color}`)}
+              onSelect={(color) => onChange({ ...value, color })}
+              renderIcon={(color: AgentIconColor) => (
+                <AgentIcon
+                  shape={value.shape}
+                  color={color}
+                  size={20}
+                  withFace
+                />
+              )}
+            />
+          </>
+        ) : null}
       </div>
     </DropdownMenu>
   );

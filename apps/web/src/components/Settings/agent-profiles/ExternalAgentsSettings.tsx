@@ -264,6 +264,11 @@ export function ExternalAgentsSettings({
           leading={
             <PersistedAgentIconPicker
               value={readAgentIcon(profile)}
+              harnessId={
+                profile.launch.kind === 'acp-harness'
+                  ? profile.launch.harnessId
+                  : undefined
+              }
               alias={profile.alias}
               onSave={(icon) => saveIcon(profile, icon)}
             />

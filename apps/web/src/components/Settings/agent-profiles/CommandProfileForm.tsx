@@ -103,7 +103,7 @@ export function CommandProfileForm({
       : false;
   const [allowAll, setAllowAll] = useState(initialApproval);
   const [icon, setIcon] = useState(() =>
-    editing ? readAgentIcon(editing) : randomAgentIcon(),
+    editing ? readAgentIcon(editing) : randomAgentIcon(cliId),
   );
   const [saving, setSaving] = useState(false);
   const [persisted, setPersisted] = useState(false);
@@ -410,6 +410,7 @@ export function CommandProfileForm({
           <AgentIconField
             value={icon}
             onChange={setIcon}
+            harnessId={cliId}
             alias={displayName || defaultName}
             disabled={fieldsDisabled}
           />

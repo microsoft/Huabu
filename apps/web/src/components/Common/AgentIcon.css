@@ -15,6 +15,21 @@
   transform-origin: center;
 }
 
+/* A brand logo keeps its orientation and breathes instead of rotating. */
+.agent-icon-working-brand {
+  animation: agent-icon-working-breathe 1.8s ease-in-out infinite;
+}
+
+@keyframes agent-icon-working-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(0.86);
+  }
+}
+
 @keyframes agent-icon-working-windmill {
   from {
     transform: rotate(0deg);
@@ -26,7 +41,8 @@
 
 @media (prefers-reduced-motion: reduce) {
   .agent-icon-working-body,
-  .agent-icon-working-avatar {
+  .agent-icon-working-avatar,
+  .agent-icon-working-brand {
     animation: none;
   }
 }

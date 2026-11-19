@@ -183,6 +183,7 @@ export function AgentMenuOptions({
                   <AgentIcon
                     shape={icon.shape}
                     color={icon.color}
+                    brand={icon.brand}
                     size={16}
                     withFace
                   />

@@ -96,6 +96,7 @@ function describeBinding(
         <AgentIcon
           shape={presentation.icon.shape}
           color={presentation.icon.color}
+          brand={presentation.icon.brand}
           size={16}
           withFace
         />

@@ -71,14 +71,35 @@ const jsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>
 export const customDataSchema = z.record(z.string(), jsonValueSchema);
 export type CustomData = z.infer<typeof customDataSchema>;
 
-/** The basic-shape agent avatars. */
+/**
+ * Agent avatars. Every avatar carries a basic shape and color; `brand`
+ * optionally replaces the drawn shape with the logo of the harness the agent
+ * runs on, while the shape and color remain the identity fallback (compact
+ * dots, clients that do not know the brand, and switching back to a shape).
+ */
 export const agentIconSchema = z
   .object({
     shape: z.enum(['circle', 'diamond', 'spark', 'flower', 'cloud']),
     color: z.enum(['blue', 'red', 'yellow', 'green']),
+    brand: z
+      .enum([
+        'claude',
+        'codebuddy',
+        'codex',
+        'copilot',
+        'cursor',
+        'gemini',
+        'hermes',
+        'kimi',
+        'opencode',
+        'pi',
+        'qwen',
+      ])
+      .optional(),
   })
   .strict();
 export type AgentIcon = z.infer<typeof agentIconSchema>;
+export type AgentIconBrand = NonNullable<AgentIcon['brand']>;
 
 /** Reserved `customData` key under which the agent avatar is stored. */
 export const AGENT_ICON_CUSTOM_DATA_KEY = 'icon';

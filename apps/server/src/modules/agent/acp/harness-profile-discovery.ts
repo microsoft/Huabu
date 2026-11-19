@@ -3,6 +3,13 @@
 
 import { CUSTOM_COMMAND_WRAPPER_ID } from '@agentlet/protocol';
 
+import {
+  AGENT_ICON_CUSTOM_DATA_KEY,
+  getDefaultAgentIcon,
+  getHarnessAgentIconBrand,
+  withHarnessAgentIconBrand,
+} from '@huabu/shared';
+
 import { formatAgentletDeviceDisplayName } from '../agentlet-device-display.js';
 
 import type {
@@ -174,6 +181,16 @@ export function registerHarnessProfileDiscovery({
         metadata: { cliId: harness.id },
         customData: {
           [SOURCE_KEY]: { version: 1, agentletId, harnessId: harness.id },
+          // A new Profile for a harness with a bundled logo starts on that
+          // logo. Others store no icon and keep the id-derived shape default.
+          ...(getHarnessAgentIconBrand(harness.id)
+            ? {
+                [AGENT_ICON_CUSTOM_DATA_KEY]: withHarnessAgentIconBrand(
+                  getDefaultAgentIcon(`${agentletId}:${harness.id}`),
+                  harness.id,
+                ),
+              }
+            : {}),
         },
       };
       const profile = registry.createProfile({

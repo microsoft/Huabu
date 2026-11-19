@@ -12,12 +12,24 @@
  * than UI chrome — they are exempt from the semantic design-token rule that
  * applies to normal component styling.
  *
+ * An avatar may instead carry a `brand`: the logo of the harness the agent runs
+ * on (see `agentBrandArt.ts`). The logo replaces the drawn shape and face,
+ * while the shape and color stay on the value as the identity fallback.
+ *
  * The icon is static by default because it appears in dense lists and menus.
  * Callers that represent live execution may opt into the working motion. The
- * shape body animates while the face stays upright.
+ * shape body animates while the face stays upright; a brand logo is never
+ * rotated or redrawn, so it pulses gently instead.
  */
 
+import { AGENT_BRAND_ART } from './agentBrandArt';
+import { cn } from './cn';
+
 import './AgentIcon.css';
+
+import type { AgentIconBrand } from '@huabu/shared';
+
+export type { AgentIconBrand };
 
 export const AGENT_ICON_SHAPES = [
   'circle',
@@ -47,6 +59,8 @@ export type AgentIconColor = (typeof AGENT_ICON_COLORS)[number];
 export type AgentIconValue = {
   shape: AgentIconShape;
   color: AgentIconColor;
+  /** Harness logo drawn in place of the shape, when set. */
+  brand?: AgentIconBrand;
 };
 
 export type AgentIconMotion = 'none' | 'working';
@@ -159,9 +173,20 @@ function ShapeBody({ shape, fill }: { shape: AgentIconShape; fill: string }) {
   }
 }
 
+/**
+ * Share of the avatar box a logo fills. Logo files are drawn edge to edge, so
+ * the margin matches the optical size of the drawn shapes in mixed lists.
+ */
+const BRAND_LOGO_SCALE = '89%';
+
 export type AgentIconProps = {
   shape: AgentIconShape;
   color: AgentIconColor;
+  /**
+   * Harness logo to draw in place of the shape and face. An id without
+   * bundled artwork falls back to the shape.
+   */
+  brand?: AgentIconBrand;
   /** Rendered pixel size (width and height). Defaults to 16. */
   size?: number;
   /**
@@ -179,12 +204,47 @@ export type AgentIconProps = {
 export function AgentIcon({
   shape,
   color,
+  brand,
   size = 16,
   withFace,
   title,
   motion = 'none',
   className,
 }: AgentIconProps) {
+  const brandArt = brand ? AGENT_BRAND_ART[brand] : undefined;
+  if (brandArt) {
+    const image = `url("${brandArt.src}") center / ${BRAND_LOGO_SCALE} no-repeat`;
+    return (
+      // An empty root `<svg>` painted through CSS, so the logo is sized by the
+      // same `svg` rules (e.g. Button icon sizing) as the drawn shapes while
+      // the third-party file stays an image and is never inlined as markup.
+      <svg
+        width={size}
+        height={size}
+        // Single-color logos are masked in the current color; pin it to the
+        // default foreground so they read on both themes in any context.
+        className={cn(
+          'text-fg-default',
+          motion === 'working' && 'agent-icon-working-brand',
+          className,
+        )}
+        style={
+          brandArt.mono
+            ? {
+                backgroundColor: 'currentColor',
+                mask: image,
+                WebkitMask: image,
+              }
+            : { background: image }
+        }
+        role={title ? 'img' : undefined}
+        aria-hidden={title ? undefined : true}
+        aria-label={title}
+        data-agent-brand={brand}
+      />
+    );
+  }
+
   const showFace = withFace ?? size >= 20;
   const face = FACE_PATHS[shape];
   const faceElement = showFace ? (

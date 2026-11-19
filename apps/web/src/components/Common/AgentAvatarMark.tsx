@@ -79,6 +79,7 @@ export function AgentAvatarMark({
     <AgentIcon
       shape={agent.icon.shape}
       color={agent.icon.color}
+      brand={agent.icon.brand}
       size={size}
       withFace={withFace}
       motion={motion}

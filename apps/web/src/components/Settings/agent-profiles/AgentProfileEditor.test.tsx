@@ -636,7 +636,13 @@ describe('AgentProfileEditor', () => {
       },
       metadata: { cliId: 'copilot' },
       customData: {
-        icon: { shape: expect.any(String), color: expect.any(String) },
+        // A harness with a bundled logo starts on it; the shape and color
+        // remain as the fallback identity.
+        icon: {
+          shape: expect.any(String),
+          color: expect.any(String),
+          brand: 'copilot',
+        },
       },
     });
     expect(onSaved).toHaveBeenCalledOnce();

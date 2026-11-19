@@ -384,6 +384,9 @@ importers:
       '@lezer/highlight':
         specifier: ^1.2.3
         version: 1.2.3
+      '@lobehub/icons-static-svg':
+        specifier: ^1.104.0
+        version: 1.104.0
       '@milkdown/core':
         specifier: ^7.21.1
         version: 7.21.2
@@ -2193,6 +2196,9 @@ packages:
 
   '@lezer/yaml@1.0.4':
     resolution: {integrity: sha512-2lrrHqxalACEbxIbsjhqGpSW8kWpUKuY6RHgnSAFZa6qK62wvnPxA8hGOwOoDbwHcOFs5M4o27mjGu+P7TvBmw==}
+
+  '@lobehub/icons-static-svg@1.104.0':
+    resolution: {integrity: sha512-iIZ7qd77hIx9fsbLysXmFYHYKT+cLgSuQVb8/hOfGH06clDpcSo+u7RWcyiBeq9MAcUai+4qvCQXqVDdVe8g3Q==}
 
   '@lukeed/ms@2.0.2':
     resolution: {integrity: sha512-9I2Zn6+NJLfaGoz9jN3lpwDgAYvfGeNYdbAIjJOqzs4Tpc+VU3Jqq4IofSUBKajiDS8k9fZIg18/z13mpk1bsA==}
@@ -9144,6 +9150,8 @@ snapshots:
       '@lezer/common': 1.5.2
       '@lezer/highlight': 1.2.3
       '@lezer/lr': 1.4.10
+
+  '@lobehub/icons-static-svg@1.104.0': {}
 
   '@lukeed/ms@2.0.2': {}
 

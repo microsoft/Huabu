@@ -11,7 +11,12 @@
  * build the `customData` patch used to save a new choice.
  */
 
-import { getDefaultAgentIcon, readAgentIcon } from '@huabu/shared';
+import {
+  getDefaultAgentIcon,
+  getHarnessAgentIconBrand,
+  readAgentIcon,
+  withHarnessAgentIconBrand,
+} from '@huabu/shared';
 
 import {
   AGENT_ICON_COLORS,
@@ -21,7 +26,12 @@ import {
 
 import type { AgentBinding, CustomData } from '@huabu/shared';
 
-export { getDefaultAgentIcon, readAgentIcon };
+export {
+  getDefaultAgentIcon,
+  getHarnessAgentIconBrand,
+  readAgentIcon,
+  withHarnessAgentIconBrand,
+};
 
 /**
  * Reserved `customData` key holding the avatar. Kept as a local literal (rather
@@ -32,15 +42,19 @@ const ICON_KEY = 'icon';
 /**
  * A random icon, used to seed the create form so each new agent starts with a
  * distinct-looking avatar the user can then adjust (there is no Profile id to
- * derive a stable default from yet).
+ * derive a stable default from yet). A harness with a bundled logo starts on
+ * that logo; the random shape and color remain its fallback identity.
  */
-export function randomAgentIcon(): AgentIconValue {
+export function randomAgentIcon(harnessId?: string): AgentIconValue {
   const pick = <T>(list: readonly T[]): T =>
     list[Math.floor(Math.random() * list.length)];
-  return {
-    shape: pick(AGENT_ICON_SELECTABLE_SHAPES),
-    color: pick(AGENT_ICON_COLORS),
-  };
+  return withHarnessAgentIconBrand(
+    {
+      shape: pick(AGENT_ICON_SELECTABLE_SHAPES),
+      color: pick(AGENT_ICON_COLORS),
+    },
+    harnessId,
+  );
 }
 
 /** Snapshot the effective external-agent icon when binding a conversation. */

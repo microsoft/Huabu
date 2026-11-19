@@ -17,6 +17,8 @@ import type { AgentIconValue } from '@/components/Common/AgentIcon';
 type AgentIconFieldProps = {
   value: AgentIconValue;
   onChange: (next: AgentIconValue) => void;
+  /** Harness the Profile launches; offers its logo when one is bundled. */
+  harnessId?: string;
   /** Agent alias, used to build accessible labels. */
   alias: string;
   disabled?: boolean;
@@ -25,6 +27,7 @@ type AgentIconFieldProps = {
 export function AgentIconField({
   value,
   onChange,
+  harnessId,
   alias,
   disabled,
 }: AgentIconFieldProps) {
@@ -34,6 +37,7 @@ export function AgentIconField({
       <AgentIconPicker
         value={value}
         onChange={onChange}
+        harnessId={harnessId}
         alias={alias}
         disabled={disabled}
       />
