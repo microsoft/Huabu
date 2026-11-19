@@ -286,22 +286,21 @@ export function resolveMediaDownloadTarget({
 export interface WebDownloadSourceParams {
   src?: string;
   mhtmlArtifact?: string;
-  isInteractiveView?: boolean;
   missing?: boolean;
 }
 
 /**
- * Web nodes are downloadable when backed by an uploaded HTML/MHTML artifact,
- * inline `data:text/html` markup, or a captured `.mhtml` page snapshot.
- * Interactive View apps and external URLs without snapshots are excluded.
+ * Web nodes are downloadable when backed by an uploaded HTML/MHTML artifact
+ * (including Interactive View HTML artifacts), inline `data:text/html` markup,
+ * or a captured `.mhtml` page snapshot. External URLs without snapshots are
+ * excluded.
  */
 export function canDownloadWebSource({
   src,
   mhtmlArtifact,
-  isInteractiveView = false,
   missing = false,
 }: WebDownloadSourceParams): boolean {
-  if (isInteractiveView || missing) return false;
+  if (missing) return false;
   if (canDownloadMediaSource(src, false)) return true;
   return Boolean(mhtmlArtifact && parseArtifactRef(mhtmlArtifact.trim()));
 }
@@ -316,10 +315,9 @@ export function resolveWebDownloadTarget({
   mhtmlArtifact,
   canvasId,
   label,
-  isInteractiveView = false,
   missing = false,
 }: ResolveWebDownloadParams): MediaDownloadTarget | null {
-  if (isInteractiveView || missing) return null;
+  if (missing) return null;
   const direct = resolveMediaDownloadTarget({
     src,
     canvasId,
