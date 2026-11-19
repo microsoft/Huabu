@@ -371,8 +371,9 @@ describe('a body being typed here, and a change arriving from an agent', () => {
     expect(savesOf(X)[0]).toMatchObject({
       label: 'My title',
       labelSource: 'user',
-      expectRev: STORED,
     });
+    // A rename quotes no revision: the body is not its concern.
+    expect(savesOf(X)[0]).not.toHaveProperty('expectRev');
     // The title save does not write the body back.
     expect(savesOf(X)[0]).not.toHaveProperty('content');
     expect(conflictToasts()).toHaveLength(0);

@@ -55,8 +55,9 @@ import { admitExecuteRequest } from './execute-admission.js';
 import { NodeCoverError } from './import-node-src.js';
 import { remapImportedSpace } from './import-space-identity.js';
 import {
-  applyNodePropertyPatch,
-  NODE_BODY_REQUEST_KEYS,
+  applyNodeUnversionedPatch,
+  carriesAuthoredTitle,
+  isRevisionCheckedRequest,
   resolveNodeContentUpdate,
 } from './node-content-update.js';
 import { registerSpaceCardRoutes } from './space-card.route.js';
@@ -870,31 +871,35 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     // which writes without CAS, so honoring `expectRev` for them would buy no
     // safety and only risk a false `NODE_CONTENT_CONFLICT` (e.g. a brand-new
     // image whose `expectRev` races its own `persist_source` write). The web
-    // sends `expectRev` uniformly and need not know the classification; the
-    // server drops it for non-authored types.
+    // sends `expectRev` with every body save and need not know the
+    // classification; the server drops it for non-authored types.
     //
-    // Custom properties are not part of that: `properties` and
-    // `propertyDisplayKeys` are a per-key patch applied to the stored record
-    // as it is now, whatever revision the request quotes. A request that
-    // carries nothing else is never checked (a supplied `expectRev` is
-    // ignored), and one that also carries a refused body still has its
-    // property patch applied (`applyUnversioned`).
+    // The revision protects the body and what is derived from one (see
+    // `isRevisionCheckedRequest`). An authored title and custom properties
+    // are independent small items, applied to the stored record as it is
+    // now whatever revision the request quotes: a request that carries
+    // nothing else is never checked (a supplied `expectRev` is ignored), and
+    // one that also carries a refused body still has them applied
+    // (`applyUnversioned`), so a rename never conflicts with a body edit.
     const isAuthored =
       getProfile(nodeType as CanvasNodeType)?.bodyOwnership === 'authored';
     const hasPropertyPatch =
       properties !== undefined || propertyDisplayKeys !== undefined;
-    const propertiesOnly =
-      hasPropertyPatch &&
-      NODE_BODY_REQUEST_KEYS.every((key) => parsed.data[key] === undefined);
+    const hasAuthoredTitle = carriesAuthoredTitle(parsed.data);
     let outcome: UpdateNodeOutcome;
     try {
       outcome = await updateNode(handle.nodes, nodeId, {
-        expectRev: isAuthored && !propertiesOnly ? expectRev : undefined,
+        expectRev:
+          isAuthored && isRevisionCheckedRequest(parsed.data)
+            ? expectRev
+            : undefined,
         apply,
-        ...(hasPropertyPatch
+        ...(hasPropertyPatch || hasAuthoredTitle
           ? {
               applyUnversioned: (existing) =>
-                existing ? applyNodePropertyPatch(existing, parsed.data) : null,
+                existing
+                  ? applyNodeUnversionedPatch(existing, parsed.data)
+                  : null,
             }
           : {}),
         strictRename: labelSource === 'user',
@@ -913,8 +918,8 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     // a Google-Drive-synced copy) moved the on-disk body past the client's
     // baseline — surface instead of silently overwriting it.
     if (outcome.status === 'rev-conflict') {
-      // The property patch of the refused request was written: other pages
-      // fetch it like any other save.
+      // The title and the property patch of the refused request were
+      // written: other pages fetch them like any other save.
       if (outcome.unversionedApplied) {
         publishCanvasUpdate(
           canvasId,
@@ -939,7 +944,12 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         nodeId,
         currentRev: outcome.currentRev,
         expectedRev: expectRev,
-        ...(outcome.unversionedApplied ? { propertiesApplied: true } : {}),
+        ...(outcome.unversionedApplied && hasPropertyPatch
+          ? { propertiesApplied: true }
+          : {}),
+        ...(outcome.unversionedApplied && hasAuthoredTitle
+          ? { titleApplied: true }
+          : {}),
       } satisfies CanvasConflictResponse);
     }
     if (outcome.status === 'rejected') {

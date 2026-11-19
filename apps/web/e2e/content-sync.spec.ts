@@ -598,3 +598,221 @@ test("page A renames a note while page B's body conflict is open: Keep mine on B
   await a.context.close();
   await b.context.close();
 });
+
+/** Open X in the preview and rename it from its tab (F2), as a person does. */
+async function renameFromPreview(page: Page, id: string, next: string) {
+  await openPreview(page, id);
+  const title = page.getByRole('textbox', { name: 'Rename node' });
+  await expect(async () => {
+    await page.getByRole('tab', { selected: true }).focus();
+    await page.keyboard.press('F2');
+    await expect(title).toBeVisible({ timeout: 1_000 });
+  }).toPass();
+  await title.fill(next);
+  await title.press('Enter');
+}
+
+/** Pause every request of `page` that `matches`, until `release` is called. */
+async function holdRequests(
+  page: Page,
+  url: string,
+  matches: (method: string) => boolean,
+) {
+  const seen: Record<string, unknown>[] = [];
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route(`**${url}`, async (route) => {
+    const request = route.request();
+    if (!matches(request.method())) return route.continue();
+    seen.push((request.postDataJSON() ?? {}) as Record<string, unknown>);
+    await held;
+    await route.continue();
+  });
+  return { seen, release };
+}
+
+test('a rename is not checked against the body: page A renames a note whose new body, saved by page B, it has not received yet', async ({
+  browser,
+  request,
+}) => {
+  const { canvasId, a, b } = await openBoth(browser, request, 'Rename, body');
+  const contentUrl = `/api/canvas/${canvasId}/nodes/${X}/content`;
+
+  // A's reads of the node are slow: it will not have B's body in time.
+  const reads = await holdRequests(a.page, contentUrl, (m) => m === 'GET');
+  const renames: Record<string, unknown>[] = [];
+  a.page.on('request', (sent) => {
+    if (sent.method() === 'PUT' && sent.url().endsWith(contentUrl))
+      renames.push(sent.postDataJSON() as Record<string, unknown>);
+  });
+
+  // B rewrites the body and leaves the editor; the server has it.
+  await openPreview(b.page, X);
+  await editablePreview(b.page).fill('Body typed on page B');
+  await closePreview(b.page);
+  await expect
+    .poll(async () =>
+      (await serverRecord(request, canvasId)).node(X)?.data.content?.trim(),
+    )
+    .toBe('Body typed on page B');
+  // A was told and asked, and still shows the body it loaded.
+  await expect.poll(() => reads.seen.length).toBeGreaterThan(0);
+  expect((await storeState(a.page)).content[X]).toBe(`Seed body ${X}`);
+
+  // A renames the note. Nothing is refused and nobody is asked.
+  await renameFromPreview(a.page, X, 'Title from page A');
+  await expect
+    .poll(async () => (await serverRecord(request, canvasId)).node(X)?.data)
+    .toMatchObject({ label: 'Title from page A' });
+  expect(renames).toHaveLength(1);
+  expect(renames[0]).toMatchObject({
+    nodeType: 'note',
+    label: 'Title from page A',
+    labelSource: 'user',
+  });
+  // The rename carries neither a body nor a revision of one.
+  expect(renames[0]).not.toHaveProperty('expectRev');
+  expect(renames[0]).not.toHaveProperty('content');
+  expect(a.conflicts).toEqual([]);
+
+  // A's reads arrive: both pages and the server hold B's body under A's
+  // title, and neither page was asked anything.
+  reads.release();
+  await closePreview(a.page);
+  await expect
+    .poll(async () => {
+      const node = (await serverRecord(request, canvasId)).node(X);
+      return [node?.data.label, node?.data.content?.trim()];
+    })
+    .toEqual(['Title from page A', 'Body typed on page B']);
+  for (const device of [a, b]) {
+    await expect
+      .poll(async () => {
+        const state = await storeState(device.page);
+        return [state.label[X], state.content[X]?.trim(), state.pendingContent];
+      })
+      .toEqual(['Title from page A', 'Body typed on page B', []]);
+    await expect(
+      device.page.getByRole('button', { name: /^(Keep mine|Load latest)$/ }),
+    ).toHaveCount(0);
+    expect(device.conflicts).toEqual([]);
+    expect((await storeState(device.page)).reloaded).toBe(false);
+  }
+
+  await a.context.close();
+  await b.context.close();
+});
+
+test('page A renames a note while page B has an unsaved body in it: both are saved and nobody is asked', async ({
+  browser,
+  request,
+}) => {
+  const { canvasId, a, b } = await openBoth(browser, request, 'Rename, typing');
+  const contentUrl = `/api/canvas/${canvasId}/nodes/${X}/content`;
+
+  // B types into X and leaves the editor; its save is still on its way.
+  const saves = await holdRequests(b.page, contentUrl, (m) => m === 'PUT');
+  await openPreview(b.page, X);
+  await editablePreview(b.page).fill('Body typed on page B');
+  await expect.poll(() => saves.seen.length).toBe(1);
+  await closePreview(b.page);
+  expect((await storeState(b.page)).pendingContent).toEqual([X]);
+
+  // A renames the note meanwhile.
+  await renameFromPreview(a.page, X, 'Title from page A');
+  await closePreview(a.page);
+  await expect
+    .poll(async () => (await serverRecord(request, canvasId)).node(X)?.data)
+    .toMatchObject({ label: 'Title from page A' });
+  // B shows A's title beside its own unsaved body.
+  await expect
+    .poll(async () => (await storeState(b.page)).label[X])
+    .toBe('Title from page A');
+  expect((await storeState(b.page)).content[X]?.trim()).toBe(
+    'Body typed on page B',
+  );
+
+  // B's body arrives after the rename and is accepted.
+  saves.release();
+  await expect
+    .poll(async () => {
+      const node = (await serverRecord(request, canvasId)).node(X);
+      return [node?.data.label, node?.data.content?.trim()];
+    })
+    .toEqual(['Title from page A', 'Body typed on page B']);
+  for (const device of [a, b]) {
+    await expect
+      .poll(async () => {
+        const state = await storeState(device.page);
+        return [state.label[X], state.content[X]?.trim(), state.pendingContent];
+      })
+      .toEqual(['Title from page A', 'Body typed on page B', []]);
+    await expect(
+      device.page.getByRole('button', { name: /^(Keep mine|Load latest)$/ }),
+    ).toHaveCount(0);
+    expect(device.conflicts).toEqual([]);
+    expect((await storeState(device.page)).reloaded).toBe(false);
+  }
+  // B's body save carried no title: it could not undo A's rename.
+  expect(saves.seen).toHaveLength(1);
+  expect(saves.seen[0]).not.toHaveProperty('label');
+
+  await a.context.close();
+  await b.context.close();
+});
+
+test('two pages rename the same note at once: the later rename wins on the server and on both pages, and nobody is asked', async ({
+  browser,
+  request,
+}) => {
+  const { canvasId, a, b } = await openBoth(browser, request, 'Two renames');
+  const contentUrl = `/api/canvas/${canvasId}/nodes/${X}/content`;
+
+  // A's rename is slow on its way to the server.
+  const fromA = await holdRequests(a.page, contentUrl, (m) => m === 'PUT');
+  await renameFromPreview(a.page, X, 'Title from page A');
+  await expect.poll(() => fromA.seen.length).toBe(1);
+  await closePreview(a.page);
+
+  // B renames the same note meanwhile; its rename reaches the server first.
+  await renameFromPreview(b.page, X, 'Title from page B');
+  await closePreview(b.page);
+  await expect
+    .poll(async () => (await serverRecord(request, canvasId)).node(X)?.data)
+    .toMatchObject({ label: 'Title from page B' });
+  // A keeps showing the title it is saving.
+  await a.page.waitForTimeout(1_000);
+  expect((await storeState(a.page)).label[X]).toBe('Title from page A');
+
+  // A's rename arrives last: it is the title everywhere.
+  fromA.release();
+  await expect
+    .poll(async () => (await serverRecord(request, canvasId)).node(X)?.data)
+    .toMatchObject({ label: 'Title from page A' });
+  for (const device of [a, b]) {
+    await expect
+      .poll(async () => {
+        const state = await storeState(device.page);
+        return [state.label[X], state.pendingContent];
+      })
+      .toEqual(['Title from page A', []]);
+    await expect(
+      device.page.locator(`.react-flow__node[data-id="${X}"]`),
+    ).toContainText('Title from page A');
+    await expect(
+      device.page.getByRole('button', { name: /^(Keep mine|Load latest)$/ }),
+    ).toHaveCount(0);
+    expect(device.conflicts).toEqual([]);
+    expect((await storeState(device.page)).reloaded).toBe(false);
+  }
+  // Neither rename quoted a revision; the body was never part of it.
+  expect(fromA.seen[0]).not.toHaveProperty('expectRev');
+  expect(
+    (await serverRecord(request, canvasId)).node(X)?.data.content?.trim(),
+  ).toBe(`Seed body ${X}`);
+
+  await a.context.close();
+  await b.context.close();
+});

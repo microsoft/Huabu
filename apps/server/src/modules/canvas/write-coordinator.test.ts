@@ -448,6 +448,63 @@ describe('updateNode', () => {
     });
   });
 
+  it('writes the unversioned part of a refused write, strictly when the caller renames strictly', async () => {
+    const fixture = fakeRepository();
+    fixture.seed(note('disk-newer'));
+    let strict: boolean | undefined;
+    fixture.onPut((input) => {
+      strict = input.strictLabel;
+      return undefined;
+    });
+
+    const result = await updateNode(fixture.nodes, 'n1', {
+      expectRev: nodeRevisionOf({ content: 'stale' }),
+      apply: () => note('would-clobber', 'Renamed'),
+      applyUnversioned: (current) =>
+        current ? { ...current, label: 'Renamed' } : null,
+      strictRename: true,
+    });
+
+    expect(result).toEqual({
+      status: 'rev-conflict',
+      currentRev: nodeRevisionOf({ content: 'disk-newer' }),
+      unversionedApplied: true,
+    });
+    expect(strict).toBe(true);
+    expect(fixture.get()).toMatchObject({
+      content: 'disk-newer',
+      label: 'Renamed',
+    });
+  });
+
+  it('rejects a refused write whose title another node uses, and writes nothing of it', async () => {
+    const fixture = fakeRepository();
+    fixture.seed(note('disk-newer'));
+    fixture.onPut(() => ({
+      ok: false,
+      reason: 'label-conflict',
+      conflictingNodeId: 'other',
+      conflictingLabel: 'Taken',
+    }));
+
+    const result = await updateNode(fixture.nodes, 'n1', {
+      expectRev: nodeRevisionOf({ content: 'stale' }),
+      apply: () => note('would-clobber', 'Taken'),
+      applyUnversioned: (current) =>
+        current ? { ...current, label: 'Taken' } : null,
+      strictRename: true,
+    });
+
+    expect(result).toMatchObject({
+      status: 'rejected',
+      result: { reason: 'label-conflict' },
+    });
+    expect(fixture.get()).toMatchObject({
+      content: 'disk-newer',
+      label: 'Note',
+    });
+  });
+
   it('does not persist a write suppressed after deletion', async () => {
     const fixture = fakeRepository();
     fixture.seed(note('on-disk'));

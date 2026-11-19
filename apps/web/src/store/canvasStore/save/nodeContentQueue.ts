@@ -30,6 +30,14 @@
  * body's baseline, and a body save never carries a property nobody changed
  * here.
  *
+ * A title a person gave (`label` with a `labelSource` other than `auto`) is
+ * such an item too: a rename is sent without a revision, is never refused
+ * because somebody changed the body, and its answer never moves the body's
+ * baseline. Two pages renaming one node are last-writer-wins. A summary,
+ * keywords, provenance and an automatic title are derived from one
+ * particular body: a save of them quotes the body's revision and is refused
+ * when that body has changed.
+ *
  * See `docs/architecture/canvas-realtime-sync.md` (Node content between
  * pages).
  */
@@ -65,6 +73,7 @@ import {
   PROPERTY_CONTENT_KEYS,
   SERVER_DERIVED_SIDECAR_NODE_TYPES,
   TEXT_BEARING_NODE_TYPES,
+  TITLE_CONTENT_KEYS,
 } from './nodeContentFields';
 import { createPerKeyDebouncer } from './perKeyDebouncer';
 import { toFieldLevelDeltas } from '../sync/fieldLevelDeltas';
@@ -743,15 +752,16 @@ export function createNodeContentQueue(opts: {
    * when the node has gone away (e.g. deleted between debounce-schedule and
    * flush), its type is not markdown-backed, or nothing of it is unsaved.
    *
-   * `propertyOnly` says the request carries custom properties and nothing
-   * else — no body, no title and no `expectRev`: when properties are all
-   * that is unsaved, and for a node frozen by a body conflict, whose
-   * properties are saved while the body waits for the user's choice.
+   * `unversionedOnly` says the request carries nothing the body's revision
+   * protects — an authored title and/or custom properties, and no
+   * `expectRev`: when those are all that is unsaved, and for a node frozen
+   * by a body conflict, whose title and properties are saved while the body
+   * waits for the user's choice.
    */
   function buildRequest(
     nodeId: string,
     requestFields: ReadonlySet<string> | undefined,
-  ): { body: PutNodeContentRequest; propertyOnly: boolean } | null {
+  ): { body: PutNodeContentRequest; unversionedOnly: boolean } | null {
     const node = opts.getState().nodes.find((n) => n.id === nodeId);
     if (!node) return null;
     const nodeType = typeof node.type === 'string' ? node.type : '';
@@ -770,19 +780,35 @@ export function createNodeContentQueue(opts: {
       propertyPatch.properties !== undefined ||
       propertyPatch.propertyDisplayKeys !== undefined;
 
+    // A title travels with its source: the server protects a title a person
+    // gave from an automatic one by the source the request states.
+    const titleChanged =
+      requestFields?.has('label') === true ||
+      requestFields?.has('labelSource') === true;
+    // A title a person (or an agent) gave is an independent item, like a
+    // property. An automatic one is derived from the body and saved with
+    // the body's revision, and so is every field of a node this page is
+    // still creating (no baseline): its record is sent whole.
+    const authoredTitleChanged =
+      titleChanged && data['labelSource'] !== 'auto' && baselineRev.has(nodeId);
+
     // Frozen after a content conflict: refuse every write path for the body
     // until the user resolves it, so neither a debounced autosave nor the
-    // unload keepalive can clobber the newer server content. Properties are
-    // not part of that conflict and go out by themselves.
+    // unload keepalive can clobber the newer server content. A rename and
+    // properties are not part of that conflict and go out by themselves.
     const frozenBody = frozen.has(nodeId);
-    if (frozenBody && !hasPropertyPatch) return null;
-    const onlyPropertiesRequested =
+    if (frozenBody && !hasPropertyPatch && !authoredTitleChanged) return null;
+    const onlyUnversionedRequested =
       (requestFields?.size ?? 0) > 0 &&
-      [...(requestFields ?? [])].every((key) => PROPERTY_CONTENT_KEYS.has(key));
+      [...(requestFields ?? [])].every(
+        (key) =>
+          PROPERTY_CONTENT_KEYS.has(key) ||
+          (authoredTitleChanged && TITLE_CONTENT_KEYS.has(key)),
+      );
     // A node this page has not saved yet (no baseline) is sent whole.
-    const propertyOnly =
+    const unversionedOnly =
       !restored &&
-      (frozenBody || (onlyPropertiesRequested && baselineRev.has(nodeId)));
+      (frozenBody || (onlyUnversionedRequested && baselineRev.has(nodeId)));
 
     // A save carries what this page changed and nothing else: the server
     // keeps every field a request leaves out, so a title, summary or body
@@ -791,17 +817,13 @@ export function createNodeContentQueue(opts: {
     // has not saved yet, or one an undo brings back — is sent whole.
     const whole = restored || !baselineRev.has(nodeId);
     if (!whole && !requestFields?.size) return null;
-    // A title travels with its source: the server protects a title a person
-    // gave from an automatic one by the source the request states.
-    const titleChanged =
-      requestFields?.has('label') === true ||
-      requestFields?.has('labelSource') === true;
     const includes = (key: string) =>
-      !propertyOnly &&
-      (whole ||
-        (key === 'label' || key === 'labelSource'
-          ? titleChanged
-          : requestFields?.has(key) === true));
+      unversionedOnly
+        ? authoredTitleChanged && TITLE_CONTENT_KEYS.has(key)
+        : whole ||
+          (TITLE_CONTENT_KEYS.has(key)
+            ? titleChanged
+            : requestFields?.has(key) === true);
     const body: PutNodeContentRequest = { nodeType };
 
     if (TEXT_BEARING_NODE_TYPES.has(nodeType) && includes('content')) {
@@ -852,14 +874,16 @@ export function createNodeContentQueue(opts: {
     // synced has a seeded rev; a brand-new node (no entry) sends the
     // empty-content rev so its create only lands while no `.md` exists yet
     // on the server. The web sends this uniformly for every md-backed node
-    // whose request carries more than properties; the server applies rev-CAS
-    // for authored bodies; derived body-only edits remain last-write-wins —
-    // `bodyOwnership` in the preprocessing profiles is the single source
-    // of truth, so the client need not know the classification.
-    if (!propertyOnly) body.expectRev = baselineRev.get(nodeId) ?? REV_EMPTY;
+    // whose request carries the body or something derived from one
+    // (summary, keywords, provenance, an automatic title); the server
+    // applies rev-CAS for authored bodies; derived body-only edits remain
+    // last-write-wins — `bodyOwnership` in the preprocessing profiles is
+    // the single source of truth, so the client need not know the
+    // classification. A rename or a property edit quotes no revision.
+    if (!unversionedOnly) body.expectRev = baselineRev.get(nodeId) ?? REV_EMPTY;
     if (opts.pageId) body.pageId = opts.pageId;
 
-    return { body, propertyOnly };
+    return { body, unversionedOnly };
   }
 
   /**
@@ -896,11 +920,17 @@ export function createNodeContentQueue(opts: {
       const requested = new Map(pendingFields.get(nodeId));
       const request = buildRequest(nodeId, new Set(requested.keys()));
       if (!request) return false;
-      const { body, propertyOnly } = request;
-      // A request of properties alone settles those fields and no others.
-      if (propertyOnly) {
+      const { body, unversionedOnly } = request;
+      const sentTitle = 'label' in body || 'labelSource' in body;
+      // A request of a title and properties alone settles those fields and
+      // no others.
+      if (unversionedOnly) {
         for (const key of [...requested.keys()])
-          if (!PROPERTY_CONTENT_KEYS.has(key)) requested.delete(key);
+          if (
+            !PROPERTY_CONTENT_KEYS.has(key) &&
+            !(sentTitle && TITLE_CONTENT_KEYS.has(key))
+          )
+            requested.delete(key);
       }
       const sentPropertyKeys = new Map(
         body.properties ? pendingPropertyKeys.get(nodeId) : undefined,
@@ -922,6 +952,27 @@ export function createNodeContentQueue(opts: {
         }
         if (livePending?.size === 0) pendingFields.delete(nodeId);
       };
+      /**
+       * The title of this request is on the server: it is no longer unsaved
+       * here, and what was kept back for it is dropped. `shownLabel` is the
+       * title the server holds for the node.
+       */
+      const settleTitle = (shownLabel: string | null): void => {
+        const livePending = pendingFields.get(nodeId);
+        for (const key of TITLE_CONTENT_KEYS) {
+          const token = requested.get(key);
+          if (token && livePending?.get(key) === token) livePending.delete(key);
+        }
+        if (livePending?.size === 0) pendingFields.delete(nodeId);
+        // Record the label the server actually persisted so a later
+        // failure can revert to it, with the provenance this request
+        // attached to it.
+        lastSuccessful.set(nodeId, {
+          label: shownLabel,
+          labelSource:
+            typeof body.labelSource === 'string' ? body.labelSource : undefined,
+        });
+      };
       const sentNode = opts.getState().nodes.find((node) => node.id === nodeId);
       const baselineAtRequest = baselineGeneration.get(nodeId);
       let response: PutNodeContentResponse;
@@ -934,10 +985,17 @@ export function createNodeContentQueue(opts: {
         ) {
           // The body was refused; the property patch beside it was written.
           if (error.propertiesApplied) settleProperties();
+          // So was the rename: only the body is left for the user's choice.
+          if (error.titleApplied && sentTitle) {
+            settleTitle(typeof body.label === 'string' ? body.label : null);
+            opts.onHoldsEnded?.(canvasId, nodeId, (field) =>
+              TITLE_CONTENT_KEYS.has(field),
+            );
+          }
           if (baselineGeneration.get(nodeId) !== baselineAtRequest) {
             continue;
           } else if (
-            !propertyOnly &&
+            !unversionedOnly &&
             !identicalSettled &&
             !kOpts?.keepalive &&
             sentNode &&
@@ -965,14 +1023,24 @@ export function createNodeContentQueue(opts: {
         !opts.getState().nodes.some((node) => node.id === nodeId)
       )
         return false;
-      if (propertyOnly) {
-        // Properties have no baseline: the body's revision, its failure
-        // record and a conflict freeze are as they were. The answer names
-        // the revision of the body the server holds, which is not
-        // necessarily the body this page shows.
+      if (unversionedOnly) {
+        // A title and properties have no baseline: the body's revision, its
+        // failure record and a conflict freeze are as they were. The answer
+        // names the revision of the body the server holds, which is not
+        // necessarily the body this page shows — somebody else may have
+        // saved one this page has not fetched yet, and a baseline moved to
+        // it would let this page's next body save overwrite it unseen.
         settleProperties();
-        opts.onHoldsEnded?.(canvasId, nodeId, (field) =>
-          PROPERTY_CONTENT_KEYS.has(field),
+        if (sentTitle) {
+          settleTitle(response.label);
+          showServerTitle(nodeId, response.label);
+        }
+        opts.onHoldsEnded?.(
+          canvasId,
+          nodeId,
+          (field) =>
+            PROPERTY_CONTENT_KEYS.has(field) ||
+            (sentTitle && TITLE_CONTENT_KEYS.has(field)),
         );
         if (!frozen.has(nodeId)) {
           failures.delete(nodeId);
@@ -1027,7 +1095,6 @@ export function createNodeContentQueue(opts: {
       // server-side.
       // A request without a title did not change it: the answer names the
       // title the server holds, which need not be the one shown here.
-      const sentTitle = 'label' in body;
       lastSuccessful.set(nodeId, {
         label: response.label,
         labelSource: sentTitle
@@ -1036,40 +1103,38 @@ export function createNodeContentQueue(opts: {
             : undefined
           : lastSuccessful.get(nodeId)?.labelSource,
       });
-      // Only patch when the resolved label actually differs from what's
-      // in the store right now — avoids spurious re-renders when the
-      // server echoes back exactly what we sent.
-      const state = opts.getState();
-      const currentNode = state.nodes.find((n) => n.id === nodeId);
-      if (!currentNode) return false;
-      const currentLabel =
-        typeof currentNode.data?.['label'] === 'string'
-          ? (currentNode.data['label'] as string)
-          : null;
+      if (!opts.getState().nodes.some((n) => n.id === nodeId)) return false;
       // The server's title is shown when this request set it (it may have
       // been de-duplicated), and when the page holds no title of its own.
-      if (
-        (sentTitle || !holdsUnit(nodeId, 'data.label')) &&
-        response.label !== null &&
-        response.label !== currentLabel
-      ) {
-        state._setStateRaw({
-          nodes: state.nodes.map((n) =>
-            n.id === nodeId
-              ? {
-                  ...n,
-                  data: { ...(n.data ?? {}), label: response.label },
-                }
-              : n,
-          ),
-        });
-      }
+      if (sentTitle || !holdsUnit(nodeId, 'data.label'))
+        showServerTitle(nodeId, response.label);
       if (pendingFields.get(nodeId)?.size) schedule(canvasId, nodeId);
       else opts.onContentPersisted?.(canvasId, nodeId);
       if (completedRestore && !suspendedCanvases.has(canvasId))
         opts.onRestoredContentPersisted?.(canvasId, nodeId);
       return true;
     }
+  }
+
+  /**
+   * Show `label`, the title the server holds for the node, when it differs
+   * from the one in the store — avoiding a spurious re-render when the
+   * server echoes back exactly what was sent. Schedules no save.
+   */
+  function showServerTitle(nodeId: string, label: string | null): void {
+    const state = opts.getState();
+    const currentNode = state.nodes.find((n) => n.id === nodeId);
+    if (!currentNode) return;
+    const currentLabel =
+      typeof currentNode.data?.['label'] === 'string'
+        ? (currentNode.data['label'] as string)
+        : null;
+    if (label === null || label === currentLabel) return;
+    state._setStateRaw({
+      nodes: state.nodes.map((n) =>
+        n.id === nodeId ? { ...n, data: { ...(n.data ?? {}), label } } : n,
+      ),
+    });
   }
 
   /**
@@ -1260,9 +1325,11 @@ export function createNodeContentQueue(opts: {
         generations.get(nodeId) !== generation
       )
         return;
-      // A node frozen by a body conflict only sends its properties. When
-      // that fails, the conflict and its toast stay the record of the node:
-      // the properties are still queued and go out with the next save.
+      // A node frozen by a body conflict only sends its title and its
+      // properties. When that fails, the conflict and its toast stay the
+      // record of the node: what was not saved is still queued and goes out
+      // with the next save. (A name another node uses is thrown on to
+      // `tryRename`, which puts the previous title back.)
       if (
         frozen.has(nodeId) &&
         !(
@@ -1749,6 +1816,11 @@ export function createNodeContentQueue(opts: {
     const node = state.nodes.find((n) => n.id === nodeId);
     if (!node || !MD_BACKED_NODE_TYPES.has(node.type ?? ''))
       return Promise.resolve('absent');
+    // The fetch is dropped when the node is forgotten or brought back
+    // meanwhile (a new generation). Give the node its generation now, so
+    // this page's first save of it during the fetch — a rename, say — is
+    // not mistaken for that and the fetched body is still shown.
+    if (!generations.has(nodeId)) generations.set(nodeId, {});
     if (hasUnsaved(nodeId)) {
       remoteWhileUnsaved.add(nodeId);
       // A conflict the user has not answered is over when the other save

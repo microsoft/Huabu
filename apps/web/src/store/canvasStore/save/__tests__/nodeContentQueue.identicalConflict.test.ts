@@ -119,10 +119,10 @@ describe('a save refused although the server holds the same content', () => {
 
   it('is settled by a fetch when the page cannot compute the server revision', async () => {
     // A PDF's extracted text is part of its revision and is not on the page.
-    // The save carries a title, so it quotes a revision. The properties the
-    // server holds differ from the page's: they are not what is compared.
+    // The save carries a summary, so it quotes a revision. The properties
+    // the server holds differ from the page's: they are not what is compared.
     const { queue, edit } = setup('pdf');
-    edit({ label: 'Paper, renamed' });
+    edit({ summary: 'A summary derived here' });
     putMock.mockRejectedValueOnce(stale('rev-with-extracted-text'));
     getMock.mockResolvedValueOnce({
       nodeId: 'n1',

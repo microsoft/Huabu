@@ -102,13 +102,13 @@ describe('what a content save carries', () => {
     edit({ label: 'Renamed' });
     await queue.flushAll();
     // The source is unchanged here and still travels with the title: the
-    // server tells a person's title from an automatic one by it.
+    // server tells a person's title from an automatic one by it. No
+    // revision: a rename is not checked against the body.
     expect(sent()).toEqual([
       {
         nodeType: 'note',
         label: 'Renamed',
         labelSource: 'user',
-        expectRev: 'rev-0',
         pageId: 'page-b',
       },
     ]);
@@ -189,7 +189,6 @@ describe('what a content save carries', () => {
           nodeType: type,
           label: 'Renamed',
           labelSource: 'user',
-          expectRev: 'rev-0',
           pageId: 'page-b',
         },
       ]);

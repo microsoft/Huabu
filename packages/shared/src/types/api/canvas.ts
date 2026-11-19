@@ -121,6 +121,13 @@ export const putNodeContentBodySchema = z.object({
   /**
    * Provenance of the label. `'user'` triggers strict-rename mode on the
    * server (409 on collision); `'agent'` / `'auto'` use lazy dedupe.
+   *
+   * A title a person or an agent gave is not versioned: `expectRev` does
+   * not cover it, a request that carries nothing the revision covers is
+   * never refused as stale, and a request whose body is refused as stale
+   * still has the title applied (`titleApplied` on the conflict response).
+   * Two writers of one title are last-writer-wins. An automatic title
+   * (`'auto'`) is derived from a body and is checked with it.
    */
   labelSource: z.enum(['user', 'auto', 'agent']).optional(),
   /**
@@ -151,7 +158,9 @@ export const putNodeContentBodySchema = z.object({
   /**
    * Optimistic-concurrency baseline of the **body**: the {@link nodeRevision}
    * the client's edit descends from (a deterministic djb2 over the node's
-   * `content` / `src`, and nothing else). The server recomputes the on-disk node's revision
+   * `content` / `src`, and nothing else). It is checked for a request that
+   * carries the body or something derived from one (`content`, `src`,
+   * `summary`, `keywords`, `provenance`, an automatic title). The server recomputes the on-disk node's revision
    * and rejects the write with `NODE_CONTENT_CONFLICT` when it differs, so
    * a concurrent edit (another tab / device / an agent, or a Google-Drive
    * synced newer copy) is surfaced as a conflict instead of silently
@@ -159,7 +168,8 @@ export const putNodeContentBodySchema = z.object({
    * revision of empty content (`nodeRevisionOf({})`), so the create only
    * succeeds while no file exists yet (guards create-races too). Omit to
    * skip the check entirely (kept optional so non-CAS callers still work).
-   * Ignored on a request that carries only custom properties.
+   * Ignored on a request that carries only an authored title and/or custom
+   * properties.
    */
   expectRev: z.string().optional(),
   /**
@@ -312,6 +322,12 @@ export interface CanvasConflictResponse {
    * written**; only the body and the other fields were refused.
    */
   propertiesApplied?: boolean;
+  /**
+   * For `NODE_CONTENT_CONFLICT`: the request also carried an authored title
+   * (`label` / `labelSource` other than `auto`) and that part **was
+   * written**; only the body and what is derived from it were refused.
+   */
+  titleApplied?: boolean;
 }
 
 export interface UpdateCanvasStateParams {

@@ -44,6 +44,12 @@ export const PROPERTY_CONTENT_KEYS: ReadonlySet<string> = new Set([
   'propertyDisplayKeys',
 ]);
 
+/** The title: a label and the source that says who gave it. */
+export const TITLE_CONTENT_KEYS: ReadonlySet<string> = new Set([
+  'label',
+  'labelSource',
+]);
+
 /** The body's fields: the ones a node's content revision covers. */
 export const BODY_CONTENT_KEYS: ReadonlySet<string> = new Set([
   'content',

@@ -43,7 +43,7 @@ afterEach(() => {
 });
 
 describe('canvas title ownership during loading', () => {
-  it('saves a PDF property without a revision, and quotes the canonical loaded revision when it saves the title', async () => {
+  it('saves a PDF property and a rename without a revision, and quotes the canonical loaded revision when it saves a summary', async () => {
     api.getCanvas.mockResolvedValue({
       canvasId: 'pdf-space',
       title: 'Papers',
@@ -86,18 +86,28 @@ describe('canvas title ownership during loading', () => {
       ['nodeType', 'pageId', 'properties'].sort(),
     );
 
-    // A save that carries more than properties quotes the revision the load
-    // named, not a hash of the node without its extracted text, and not the
-    // revision the property save's answer named.
-    useCanvasStore.getState().updateNodeData('pdf', { label: 'Paper, final' });
+    // A rename is not versioned either: the title alone, no revision.
+    useCanvasStore
+      .getState()
+      .updateNodeData('pdf', { label: 'Paper, final', labelSource: 'user' });
     await flushNodeContent('pdf');
     const titleSave = vi.mocked(putNodeContent).mock.calls[1][2];
-    expect(titleSave).toMatchObject({
-      label: 'Paper, final',
-      expectRev: 'canonical-server-revision',
-    });
+    expect(titleSave).toMatchObject({ label: 'Paper, final' });
+    expect(titleSave).not.toHaveProperty('expectRev');
     expect(titleSave).not.toHaveProperty('content');
     expect(titleSave).not.toHaveProperty('properties');
+
+    // A save of something derived from the body quotes the revision the
+    // load named, not a hash of the node without its extracted text, and
+    // not the revision the property or the title save's answer named.
+    useCanvasStore.getState().updateNodeData('pdf', { summary: 'A paper.' });
+    await flushNodeContent('pdf');
+    const summarySave = vi.mocked(putNodeContent).mock.calls[2][2];
+    expect(summarySave).toMatchObject({
+      summary: 'A paper.',
+      expectRev: 'canonical-server-revision',
+    });
+    expect(summarySave).not.toHaveProperty('label');
   });
 
   it('resets tool intent on a direct Space change but preserves preferences and same-Space placement', async () => {

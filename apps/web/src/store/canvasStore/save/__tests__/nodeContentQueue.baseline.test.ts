@@ -292,18 +292,35 @@ describe('nodeContentQueue baseline lifecycle', () => {
       nodeType: 'pdf',
       properties: { Status: 'Read' },
     });
-    // A save that carries more than properties still quotes the revision
-    // the server named, never one hashed from the node without its text.
-    const renamed = { ...next, data: { ...next.data, label: 'Paper, final' } };
+    // A rename is the title alone, without a revision.
+    const renamed = {
+      ...next,
+      data: { ...next.data, label: 'Paper, final', labelSource: 'user' },
+    };
     state.nodes = [renamed];
     queue.scheduleChanges('c1', [next], [renamed]);
     await queue.flushNow('c1', 'pdf');
     expect(putMock.mock.calls.at(-1)?.[2]).toMatchObject({
       label: 'Paper, final',
+    });
+    expect(putMock.mock.calls.at(-1)?.[2]).not.toHaveProperty('expectRev');
+    expect(putMock.mock.calls.at(-1)?.[2]).not.toHaveProperty('content');
+    expect(putMock.mock.calls.at(-1)?.[2]).not.toHaveProperty('properties');
+    // A save of something derived from the body still quotes the revision
+    // the server named, never one hashed from the node without its text.
+    const summarised = {
+      ...renamed,
+      data: { ...renamed.data, summary: 'A paper.' },
+    };
+    state.nodes = [summarised];
+    queue.scheduleChanges('c1', [renamed], [summarised]);
+    await queue.flushNow('c1', 'pdf');
+    expect(putMock.mock.calls.at(-1)?.[2]).toMatchObject({
+      summary: 'A paper.',
       expectRev: 'saved',
     });
     expect(putMock.mock.calls.at(-1)?.[2]).not.toHaveProperty('content');
-    expect(putMock.mock.calls.at(-1)?.[2]).not.toHaveProperty('properties');
+    expect(putMock.mock.calls.at(-1)?.[2]).not.toHaveProperty('label');
   });
 
   it('sends a removed property as a tombstone of that key alone and retains edits made during a save', async () => {

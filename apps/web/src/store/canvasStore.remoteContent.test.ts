@@ -494,7 +494,7 @@ describe('properties another page saved', () => {
 });
 
 describe('the revision of a node whose stored body the page does not show', () => {
-  it('is kept through a structure update: a title save of a PDF quotes it, and a property save quotes none', async () => {
+  it('is kept through a structure update: a summary save of a PDF quotes it, and a property save and a rename quote none', async () => {
     // A load brings the server's revision of the PDF; the page is not sent
     // the extracted text it is computed from.
     const PDF = 'node-content-pdf';
@@ -550,14 +550,23 @@ describe('the revision of a node whose stored body the page does not show', () =
     });
     expect(api.putNodeContent.mock.calls[0][2]).not.toHaveProperty('expectRev');
 
-    // The baseline is still the load's: a save that carries the title
-    // quotes it, not a hash of the node without its extracted text, and not
-    // the revision the property save's answer named.
-    state().updateNodeData(PDF, { label: 'Paper, final' });
+    // A rename quotes no revision either.
+    state().updateNodeData(PDF, { label: 'Paper, final', labelSource: 'user' });
     await vi.advanceTimersByTimeAsync(10_000);
     expect(api.putNodeContent).toHaveBeenCalledTimes(2);
     expect(api.putNodeContent.mock.calls[1][2]).toMatchObject({
       label: 'Paper, final',
+    });
+    expect(api.putNodeContent.mock.calls[1][2]).not.toHaveProperty('expectRev');
+
+    // The baseline is still the load's: a save of something derived from
+    // the body quotes it, not a hash of the node without its extracted
+    // text, and not the revision the other saves' answers named.
+    state().updateNodeData(PDF, { summary: 'A paper.' });
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(api.putNodeContent).toHaveBeenCalledTimes(3);
+    expect(api.putNodeContent.mock.calls[2][2]).toMatchObject({
+      summary: 'A paper.',
       expectRev: canonical,
     });
   });

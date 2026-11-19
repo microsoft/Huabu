@@ -1178,12 +1178,14 @@ describe('PUT /nodes/:nodeId/content — content CAS', () => {
         expect(staleBody.json()).not.toHaveProperty('propertiesApplied');
         expect(received).not.toHaveBeenCalled();
 
-        // Body and properties in one request, body stale: the body, title
-        // and summary are refused; the property patch is written.
+        // Body and properties in one request, body stale: the body, the
+        // summary and the automatic title derived from it are refused; the
+        // property patch is written.
         const both = await putContent(app, 'c1', 'n1', {
           nodeType: 'note',
           content: 'stale',
           label: 'Stale title',
+          labelSource: 'auto',
           summary: 'stale summary',
           properties: { tags: ['physics'], gone: null },
           propertyDisplayKeys: ['tags'],
@@ -1213,17 +1215,31 @@ describe('PUT /nodes/:nodeId/content — content CAS', () => {
           rev: rev2,
         });
         expect(stored).not.toHaveProperty('summary');
+        expect(both.json()).not.toHaveProperty('titleApplied');
 
-        // A label-only save of an authored node is checked as before.
+        // An automatic title alone is derived from the body it quotes and
+        // is checked as before.
         expect(
           (
             await putContent(app, 'c1', 'n1', {
               nodeType: 'note',
-              label: 'Renamed',
+              label: 'Derived',
+              labelSource: 'auto',
               expectRev: rev1,
             })
           ).statusCode,
         ).toBe(409);
+        // So is a summary alone.
+        expect(
+          (
+            await putContent(app, 'c1', 'n1', {
+              nodeType: 'note',
+              summary: 'derived from v1',
+              expectRev: rev1,
+            })
+          ).statusCode,
+        ).toBe(409);
+        expect(await fetchNode(app)).toMatchObject({ label: null });
       } finally {
         unsubscribe();
         await app.close();
@@ -1275,6 +1291,253 @@ describe('PUT /nodes/:nodeId/content — content CAS', () => {
         expect((await put({ status: null })).statusCode).toBe(200);
         expect((await put({ status: null })).statusCode).toBe(200);
         expect((await fetchNode(app)).properties).toEqual({ tags: ['a', 'c'] });
+      } finally {
+        await app.close();
+      }
+    });
+  });
+
+  describe('a title a person gave is not versioned', () => {
+    const fetchNode = async (
+      app: Awaited<ReturnType<typeof buildApp>>,
+      nodeId = 'n1',
+    ) =>
+      (
+        await app.inject({
+          method: 'GET',
+          url: `/canvas/c1/nodes/${nodeId}/content`,
+        })
+      ).json();
+    /** A note saved with body `v1`, then given body `v2` by somebody else. */
+    const seedTwoBodies = async (app: Awaited<ReturnType<typeof buildApp>>) => {
+      seedCanvas('c1', 'n1', 'Note');
+      const first = await putContent(app, 'c1', 'n1', {
+        nodeType: 'note',
+        content: 'v1',
+        expectRev: REV_EMPTY,
+      });
+      const rev1 = first.json().rev as string;
+      const second = await putContent(app, 'c1', 'n1', {
+        nodeType: 'note',
+        content: 'v2',
+        expectRev: rev1,
+      });
+      expect(second.statusCode).toBe(200);
+      return { rev1, rev2: second.json().rev as string };
+    };
+
+    it('applies a rename although the body revision it quotes is stale, or none is quoted', async () => {
+      const app = await buildApp();
+      try {
+        const { rev1, rev2 } = await seedTwoBodies(app);
+        const stale = await putContent(app, 'c1', 'n1', {
+          nodeType: 'note',
+          label: 'Renamed',
+          labelSource: 'user',
+          expectRev: rev1,
+        });
+        expect(stale.statusCode).toBe(200);
+        // The answer names the body's current revision; the rename left it.
+        expect(stale.json()).toMatchObject({ label: 'Renamed', rev: rev2 });
+        expect(await fetchNode(app)).toMatchObject({
+          content: 'v2',
+          label: 'Renamed',
+          labelSource: 'user',
+          rev: rev2,
+        });
+
+        const unversioned = await putContent(app, 'c1', 'n1', {
+          nodeType: 'note',
+          label: 'Renamed again',
+          labelSource: 'user',
+        });
+        expect(unversioned.statusCode).toBe(200);
+        expect(await fetchNode(app)).toMatchObject({
+          content: 'v2',
+          label: 'Renamed again',
+          rev: rev2,
+        });
+      } finally {
+        await app.close();
+      }
+    });
+
+    it('lets the last of two renames win, whatever each had read', async () => {
+      const app = await buildApp();
+      try {
+        const { rev1, rev2 } = await seedTwoBodies(app);
+        const rename = (label: string, expectRev: string) =>
+          putContent(app, 'c1', 'n1', {
+            nodeType: 'note',
+            label,
+            labelSource: 'user',
+            expectRev,
+          });
+        expect((await rename('From page A', rev2)).statusCode).toBe(200);
+        expect((await rename('From page B', rev1)).statusCode).toBe(200);
+        expect(await fetchNode(app)).toMatchObject({
+          content: 'v2',
+          label: 'From page B',
+        });
+      } finally {
+        await app.close();
+      }
+    });
+
+    it('accepts a body save that quotes the revision from before somebody renamed the node', async () => {
+      const app = await buildApp();
+      try {
+        seedCanvas('c1', 'n1', 'Note');
+        const rev1 = (
+          await putContent(app, 'c1', 'n1', {
+            nodeType: 'note',
+            content: 'v1',
+            expectRev: REV_EMPTY,
+          })
+        ).json().rev as string;
+        expect(
+          (
+            await putContent(app, 'c1', 'n1', {
+              nodeType: 'note',
+              label: 'Renamed',
+              labelSource: 'user',
+            })
+          ).statusCode,
+        ).toBe(200);
+        const typed = await putContent(app, 'c1', 'n1', {
+          nodeType: 'note',
+          content: 'v1, typed on',
+          expectRev: rev1,
+        });
+        expect(typed.statusCode).toBe(200);
+        // The body save carried no title and leaves the rename standing.
+        expect(await fetchNode(app)).toMatchObject({
+          content: 'v1, typed on',
+          label: 'Renamed',
+        });
+      } finally {
+        await app.close();
+      }
+    });
+
+    it('writes the rename of a request whose body is refused, and says so', async () => {
+      const app = await buildApp();
+      const received = vi.fn();
+      const unsubscribe = subscribeCanvasUpdates('c1', received);
+      try {
+        const { rev1, rev2 } = await seedTwoBodies(app);
+        received.mockClear();
+        const both = await putContent(app, 'c1', 'n1', {
+          nodeType: 'note',
+          content: 'stale',
+          summary: 'stale summary',
+          label: 'Renamed',
+          labelSource: 'user',
+          expectRev: rev1,
+          pageId: 'page-a',
+        });
+        expect(both.statusCode).toBe(409);
+        expect(both.json()).toMatchObject({
+          code: 'NODE_CONTENT_CONFLICT',
+          currentRev: rev2,
+          expectedRev: rev1,
+          titleApplied: true,
+        });
+        expect(both.json()).not.toHaveProperty('propertiesApplied');
+        // Other pages fetch the title like any other save.
+        expect(received).toHaveBeenCalledExactlyOnceWith(
+          {
+            type: 'invalidate',
+            data: { nodeIds: ['n1'], originPageId: 'page-a' },
+          },
+          { principalId: 'anonymous' },
+        );
+        const stored = await fetchNode(app);
+        expect(stored).toMatchObject({
+          content: 'v2',
+          label: 'Renamed',
+          labelSource: 'user',
+          rev: rev2,
+        });
+        expect(stored).not.toHaveProperty('summary');
+      } finally {
+        unsubscribe();
+        await app.close();
+      }
+    });
+
+    it('refuses a rename to a name another node uses, with or without a stale body beside it', async () => {
+      const app = await buildApp();
+      try {
+        getCanvasStore('c1').write({
+          canvasId: 'c1',
+          title: null,
+          version: 1,
+          state: {
+            nodes: ['n1', 'n2'].map((id) => ({
+              id,
+              type: 'note',
+              position: { x: 0, y: 0 },
+              data: { label: id },
+            })),
+            edges: [],
+          },
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        });
+        expect(
+          (
+            await putContent(app, 'c1', 'n2', {
+              nodeType: 'note',
+              content: 'other',
+              label: 'Taken',
+              labelSource: 'user',
+              expectRev: REV_EMPTY,
+            })
+          ).statusCode,
+        ).toBe(200);
+        const rev1 = (
+          await putContent(app, 'c1', 'n1', {
+            nodeType: 'note',
+            content: 'v1',
+            label: 'Mine',
+            labelSource: 'user',
+            expectRev: REV_EMPTY,
+          })
+        ).json().rev as string;
+
+        const alone = await putContent(app, 'c1', 'n1', {
+          nodeType: 'note',
+          label: 'Taken',
+          labelSource: 'user',
+        });
+        expect(alone.statusCode).toBe(409);
+        expect(alone.json()).toMatchObject({ code: 'NODE_LABEL_CONFLICT' });
+
+        // Somebody else saves the body; this page then sends body and title.
+        expect(
+          (
+            await putContent(app, 'c1', 'n1', {
+              nodeType: 'note',
+              content: 'v2',
+              expectRev: rev1,
+            })
+          ).statusCode,
+        ).toBe(200);
+        const both = await putContent(app, 'c1', 'n1', {
+          nodeType: 'note',
+          content: 'stale',
+          label: 'Taken',
+          labelSource: 'user',
+          properties: { tags: ['physics'] },
+          expectRev: rev1,
+        });
+        expect(both.statusCode).toBe(409);
+        expect(both.json()).toMatchObject({ code: 'NODE_LABEL_CONFLICT' });
+        // Nothing of that request was written.
+        const stored = await fetchNode(app);
+        expect(stored).toMatchObject({ content: 'v2', label: 'Mine' });
+        expect(stored.properties ?? {}).toEqual({});
       } finally {
         await app.close();
       }

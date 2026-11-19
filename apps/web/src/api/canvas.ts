@@ -102,6 +102,11 @@ export class CanvasConflictError extends Error {
    * request was written; only the body and the other fields were refused.
    */
   readonly propertiesApplied: boolean;
+  /**
+   * For `NODE_CONTENT_CONFLICT`: the authored title of the refused request
+   * was written; only the body and what is derived from it were refused.
+   */
+  readonly titleApplied: boolean;
 
   constructor(payload: CanvasConflictResponse) {
     super(payload.message);
@@ -111,6 +116,7 @@ export class CanvasConflictError extends Error {
     this.nodeId = payload.nodeId;
     this.currentRev = payload.currentRev;
     this.propertiesApplied = payload.propertiesApplied === true;
+    this.titleApplied = payload.titleApplied === true;
   }
 }
 

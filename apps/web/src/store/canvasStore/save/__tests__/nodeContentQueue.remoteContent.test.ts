@@ -305,6 +305,42 @@ describe('adopting content another page saved', () => {
     expect(data()['content']).toBe('typed during the fetch');
   });
 
+  it('shows the saved body although this page renamed the node, its first save of it, while the fetch was under way', async () => {
+    const { queue, edit, data } = makeQueue([
+      note({ content: 'old', label: 'Note', labelSource: 'auto' }),
+    ]);
+    let respond!: (value: GetNodeContentResponse) => void;
+    getMock.mockReturnValue(
+      new Promise<GetNodeContentResponse>((resolve) => {
+        respond = resolve;
+      }),
+    );
+    putMock.mockResolvedValue({
+      nodeId: 'n1',
+      label: 'Renamed here',
+      rev: nodeRevisionOf({ content: 'from page A' }),
+    });
+
+    const outcome = queue.adoptRemoteContent('c1', 'n1');
+    // The rename is sent and answered before the fetch is.
+    edit('n1', { label: 'Renamed here', labelSource: 'user' });
+    await queue.flushNow('c1', 'n1');
+    expect(putMock.mock.calls[0][2]).not.toHaveProperty('expectRev');
+    respond(saved('from page A', { label: 'Renamed here' }));
+
+    await expect(outcome).resolves.toBe('applied');
+    expect(data()['content']).toBe('from page A');
+    expect(data()['label']).toBe('Renamed here');
+    // The body shown is the server's, and so is the baseline of the next
+    // body save.
+    edit('n1', { content: 'typed on it' });
+    await queue.flushNow('c1', 'n1');
+    expect(putMock.mock.calls[1][2]).toMatchObject({
+      content: 'typed on it',
+      expectRev: nodeRevisionOf({ content: 'from page A' }),
+    });
+  });
+
   it('reads a save that lands during a fetch with one more fetch', async () => {
     const { queue, data } = makeQueue([
       note({ content: 'old', label: 'Note' }),

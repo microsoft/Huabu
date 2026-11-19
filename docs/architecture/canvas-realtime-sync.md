@@ -251,10 +251,11 @@ One rule, for pages and agents alike:
 | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Body**: `content` and `src`                                 | The **content revision** (`nodeRevisionOf`, `CONTENT_REVISION_KEYS`). A writer quotes the revision it last saw (`expectRev`); a stale one is refused (`NODE_CONTENT_CONFLICT` / an execute `conflict`). |
 | **Custom properties**: `properties`, `propertyDisplayKeys`    | None. Each write is a per-key patch applied to the stored record as it is at that moment: different keys never conflict, the same key is last-writer-wins. No revision is needed, quoted or checked.    |
-| Title, summary, keywords, provenance                          | None of their own. They travel in a body save and are written or refused with it.                                                                                                                       |
+| **Title** a person or an agent gave: `label`, `labelSource`   | None. A rename is applied to the stored record as it is at that moment: it never conflicts with a body edit or a property edit, and two renames of one node are last-writer-wins. No revision.          |
+| Summary, keywords, provenance, an automatic title (`auto`)    | The body's content revision: they are derived from one particular body, so a save of them quotes that body's revision and is refused when the body has changed since.                                   |
 | Structure: position, size, parent, colour, font, order, edges | The read-version check per command ([Browser structure edits](#browser-structure-edits)); same-field edits are last-writer-wins.                                                                        |
 
-Consequences. A custom-property change, by anyone, never changes a node's content revision, so it never refuses a body save and never asks a person to choose. A body change never refuses a property write. The revision is computed from the stored record on demand and is not stored with the node, so existing Spaces need no migration: a node that has properties simply reports the revision of its body from now on.
+Consequences. A custom-property change or a rename, by anyone, never changes a node's content revision, so it never refuses a body save and never asks a person to choose. A body change never refuses a property write or a rename: somebody renaming a note while somebody else types in it both keep what they did, and nobody is asked. Position, colour, properties and title are all independent small items in this sense; only the body has a version. The revision is computed from the stored record on demand and is not stored with the node, so existing Spaces need no migration: a node that has properties simply reports the revision of its body from now on.
 
 **Sending.** The queue adds this page's id (`CANVAS_PAGE_ID`) to the request as `pageId`. The server copies it to the event as `originPageId` and does not store it. It is routing information, not a credential: the event carries `originPageId` only on streams of the principal that made the save (`eventForSubscriber`), so a page cannot be made to skip another principal's save by that principal quoting its page id — every other principal's pages receive the event without it and fetch. One schema, `canvasPageIdSchema` (1–64 characters of `[A-Za-z0-9_-]`), is the shape of a page id everywhere: `originator.tabId`, the content PUT's `pageId`, presence and the stream's `pageId`.
 
@@ -264,7 +265,7 @@ Consequences. A custom-property change, by anyone, never changes a node's conten
 - sets the node's baseline revision to the returned `rev` in the same step — when the page then shows the server's body — so the page's next save of that node sends the fetched revision as `expectRev` and is not refused;
 - puts the same fields into every undo and redo entry of the Space (`rebaseRemoteContent`), so undoing an earlier local edit cannot restore the previous body and save it over the other page's.
 
-One fetch runs per node at a time; saves that arrive during it are read by one further fetch. An event that arrives while the Space is loading is fetched when the load ends. The response carries `provenance` for this purpose.
+One fetch runs per node at a time; saves that arrive during it are read by one further fetch. A fetch is dropped only when the node was forgotten or brought back by an undo meanwhile; this page's own save of the node during the fetch — a rename, say — does not drop it. An event that arrives while the Space is loading is fetched when the load ends. The response carries `provenance` for this purpose.
 
 **What it does not do on the receiving page.** No content save, structure save or preprocessing request is sent, the Space is not marked as having unsaved changes, no undo entry is added, and selection, viewport and focus are not touched. An open preview of that node shows the new body and title through the editor's existing external-content path; a text node that is not being edited re-syncs its draft.
 
@@ -315,18 +316,19 @@ Two features share this machinery: authored node properties (tags and other valu
 
 **The server rule** ([canvas.route.ts](../../apps/server/src/modules/canvas/canvas.route.ts), `updateNode` in [write-coordinator.ts](../../apps/server/src/modules/canvas/write-coordinator.ts)).
 
-- _A request that carries only a property patch_ (`properties` and/or `propertyDisplayKeys`, besides `nodeType`, `pageId` and `expectRev`) is applied without a revision check, for every node type. An `expectRev` in it is ignored. Its answer names the revision of the body the server holds, which the patch did not change.
-- _A request that carries a body (or a title, summary, …) and a property patch_ checks `expectRev` for the body, as before. When the body is refused, the property patch is still applied — in the same pass under the Space's write mutex (`applyUnversioned`) — the `invalidate` is published, and the `409` says so: `NODE_CONTENT_CONFLICT` with `propertiesApplied: true`. Body, title and summary of that request are not written.
+- _A request that carries only unversioned items_ — a property patch (`properties` and/or `propertyDisplayKeys`) and/or an authored title (`label` / `labelSource` other than `auto`), besides `nodeType`, `pageId` and `expectRev` — is applied without a revision check, for every node type (`isRevisionCheckedRequest` in [node-content-update.ts](../../apps/server/src/modules/canvas/node-content-update.ts)). An `expectRev` in it is ignored. Its answer names the revision of the body the server holds, which the request did not change.
+- _A request that carries a body (or a summary, keywords, provenance, an automatic title) and unversioned items_ checks `expectRev` for the body, as before. When the body is refused, the authored title and the property patch are still applied (`applyNodeUnversionedPatch`) — in the same pass under the Space's write mutex (`applyUnversioned`) — the `invalidate` is published, and the `409` says so: `NODE_CONTENT_CONFLICT` with `titleApplied: true` and/or `propertiesApplied: true`. The body and what is derived from it are not written. The one exception keeps a rename's own rule: a title another node already uses (`labelSource: 'user'`, strict) answers `NODE_LABEL_CONFLICT` and writes nothing of the request, as it does when the body is not stale.
 - _Agents._ `collectMergeConflicts` in [canvas-executor.ts](../../apps/server/src/modules/canvas/canvas-executor.ts) checks `expectRev` (and reports `not-read` without one) only for a patch entry that carries `content`. An entry that carries `content` **and** properties is refused as a whole when the body revision is stale; nothing of it is applied. Agents are told to send properties in their own entry.
 - _A PDF._ Its extracted text is a derived body: content PUTs of a PDF are last-writer-wins and were only checked while properties shared the revision. With properties unversioned no PDF write is checked, and the acceptance of a "metadata-only revision" (`derivedBody`) that existed for that is gone.
 
 **The page rule** ([nodeContentQueue.ts](../../apps/web/src/store/canvasStore/save/nodeContentQueue.ts)).
 
 - A save carries only what this page changed, see [What a save carries](#what-a-save-carries). A body save quotes the body's baseline and carries no property that was not changed in the store on this page. It never carries another writer's keys, so it can neither overwrite nor remove them.
-- A property save never moves the body's baseline: the revision its answer names is the server's body, which this page may not show.
+- A property save never moves the body's baseline: the revision its answer names is the server's body, which this page may not show. The same holds for a rename's answer: another page may have saved a body this page has not fetched yet, and a baseline moved to that body's revision would let this page's next body save overwrite it unseen instead of being refused.
 - `commitProperties` has a lane of its own (`propertySaves`), separate from the body's (`inflight`). A property edit on the wire is not unsaved content of the node (`hasUnsaved` is false for it), so a body another page or an agent saves meanwhile is shown at once; and it is sent while the node's body is unsaved, in flight, or frozen by a conflict. Two property edits of one node from one page are sent in the order they were made.
 - The one exception to "by itself": a node this page created and has not saved yet. Its first save (which carries its properties) goes out before a property edit, and the edit is not made when that fails.
-- When a refused body save reports `propertiesApplied`, the page settles the property fields of that request and keeps only the body for the user's choice; **Keep mine** then sends the body alone.
+- When a refused body save reports `propertiesApplied` or `titleApplied`, the page settles those fields of that request and keeps only the body for the user's choice; **Keep mine** then sends the body alone.
+- A rename follows the same rule as a property save: it quotes no revision, its answer never moves the body's baseline, and a node frozen by a body conflict still sends a rename (and its properties) by itself while the body waits for the user's choice. The title the answer names is shown when it differs from the one sent (an agent's or an automatic title may be de-duplicated).
 
 **Properties arriving while this page has something unsaved for the node.**
 
@@ -355,7 +357,8 @@ A fetched response always carries the node's whole property bag and display orde
 
 ### Known gaps of node content between pages
 
-- Only `content` and `src` are covered by `expectRev`. A title, summary or keywords save quotes the baseline all the same and is refused with the body's conflict choice when another writer changed the body since; when nobody did, two pages that change the same one of those fields are last-writer-wins without a notice.
+- Only `content` and `src` are covered by `expectRev`. A summary, keywords, provenance or automatic-title save quotes the baseline all the same and is refused with the body's conflict choice when another writer changed the body since; when nobody did, two pages that change the same one of those fields are last-writer-wins without a notice.
+- Two people renaming one node at the same moment get no notice: the later rename wins, on the server and on both pages (the page whose title lost fetches the node after the other's `invalidate`). A rename the server refuses for a name in use (`NODE_LABEL_CONFLICT`), or that fails in transit, is put back to the previous title on the renaming page, and that title stays this page's unsaved change until its next save, which writes it; a title another page gave the node in between is overwritten by it.
 - The page's own title is shown to it again when a save that did not carry a title is answered and the page holds no unsaved title: the answer names the title the server holds.
 - A list-valued property (tags) and the display order are replaced as a whole: two writers that each add an item to the same list are last-writer-wins on that key ([Lists](#properties-and-pdf-notes-between-pages)).
 - Two people editing the **same** property at the same moment (possible only when both editors opened before either page heard of the other) get no notice: the later save wins.
@@ -409,9 +412,11 @@ On a **version gap** (`toVersion > local`) the tab catches up with `loadCanvas`,
 | The page changed                                                       | The request carries                                                                                                           |
 | ---------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
 | The body (`content`, or `src`)                                         | That field and `expectRev`                                                                                                    |
-| The title                                                              | `label` and `labelSource` together (the server protects a person's title from an automatic one by the source) and `expectRev` |
+| The title                                                              | `label` and `labelSource` together (the server protects a person's title from an automatic one by the source); no `expectRev` |
+| An automatic title (`labelSource: 'auto'`)                             | `label`, `labelSource` and `expectRev`: it is derived from the body                                                           |
 | Summary, keywords, provenance                                          | Each one that changed, and `expectRev`                                                                                        |
-| Custom properties, the display order                                   | The changed keys (`null` removes one), the order when it changed; no `expectRev` when nothing else is sent                    |
+| Custom properties, the display order                                   | The changed keys (`null` removes one), the order when it changed; no `expectRev`                                              |
+| A title or properties, and the body or something derived from it       | All of them in one request with `expectRev`; the server writes the title and the properties whatever becomes of the rest      |
 | Nothing                                                                | No request                                                                                                                    |
 | A node this page creates and has not saved, or one an undo brings back | The whole node: its record does not exist yet                                                                                 |
 
@@ -424,7 +429,7 @@ The baseline of a node is always a revision the server computed from the stored 
 | The page learns the revision from                                      | Source of the value                                                            |
 | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
 | A load (`GET /api/canvas/:id`)                                         | `nodeContentRevisions` of the response                                         |
-| Its own content save                                                   | `rev` of the PUT response                                                      |
+| Its own save of a body or of something derived from one                | `rev` of the PUT response                                                      |
 | Another page's save (`invalidate`), a content check, **Load latest**   | `rev` of `GET …/nodes/:id/content`, installed with the fetched content         |
 | An `update` that changed the node's content and was applied            | `nodeContentRevisions` of the update                                           |
 | An `update` whose content change was withheld from a node being edited | `nodeContentRevisions` of the update; the text is not touched                  |
@@ -446,7 +451,7 @@ Remaining uses of `revOfNode`, each of the page's own content: the comparison of
 
 The content queue keeps two things per node, changed by two operations:
 
-- `setBaselines(nodes, revisions)` moves the baseline — the body's revision, and the generation that tells a body save in flight that the baseline moved under it — and nothing else. Custom properties have no baseline.
+- `setBaselines(nodes, revisions)` moves the baseline — the body's revision, and the generation that tells a body save in flight that the baseline moved under it — and nothing else. Custom properties and the title have no baseline.
 - `clearUnsavedStatus(nodeIds)` forgets what is recorded about the node's saves: the failure record and its toast, the once-per-node toast guards, and a conflict freeze.
 
 | Event                                                                      | Baseline                                             | Failure record and toast         | Conflict freeze                    |
@@ -454,6 +459,7 @@ The content queue keeps two things per node, changed by two operations:
 | Load                                                                       | moves                                                | cleared                          | cleared (the text was replaced)    |
 | Own body save acknowledged                                                 | moves                                                | cleared                          | —                                  |
 | Own property save acknowledged (`commitProperties`, or properties alone)   | stays                                                | kept                             | kept                               |
+| Own rename acknowledged (a title alone, or with properties)                | stays                                                | kept while a conflict is open    | kept                               |
 | Remote content adopted by fetch, node with nothing unsaved                 | moves                                                | none to clear                    | none to clear                      |
 | Remote content fetched for a node with something unsaved                   | stays, unless the server's body is now the one shown | kept                             | kept (compared, see above)         |
 | Update that changed the node's content, applied (node had nothing unsaved) | moves                                                | cleared                          | cleared                            |

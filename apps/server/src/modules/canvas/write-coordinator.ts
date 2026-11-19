@@ -114,10 +114,13 @@ export interface UpdateNodeOptions {
    */
   expectRev?: string;
   /**
-   * The part of the write that no revision protects (custom properties),
-   * applied to the current record when `expectRev` is refused. Same contract
-   * as {@link apply}; `null` writes nothing. The outcome is still
-   * `rev-conflict`, with `unversionedApplied` set when the record was put.
+   * The part of the write that no revision protects (an authored title,
+   * custom properties), applied to the current record when `expectRev` is
+   * refused. Same contract as {@link apply}; `null` writes nothing. The
+   * outcome is still `rev-conflict`, with `unversionedApplied` set when the
+   * record was put — except that a title another node already uses
+   * (`strictRename`) rejects the request as it does without a conflict, and
+   * nothing of it is written.
    */
   applyUnversioned?: (current: NodeContent | null) => NodeContent | null;
   /**
@@ -169,7 +172,12 @@ export async function updateNode(
           nodeId,
           record: unversioned,
           expectedRevision: current?.revision ?? null,
+          ...(opts.strictRename !== undefined
+            ? { strictLabel: opts.strictRename }
+            : {}),
         });
+        if (!partial.ok && partial.reason === 'label-conflict')
+          return { status: 'rejected', result: partial };
         return {
           status: 'rev-conflict',
           currentRev: partial.ok

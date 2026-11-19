@@ -31,17 +31,12 @@ export function resolveNodeContentUpdate(
     input.content === '' &&
     typeof existing?.content === 'string' &&
     existing.content.length > 0;
-  const protectAutomaticLabel =
-    input.labelSource === 'auto' &&
-    isLabelProtected(existing?.['labelSource'], existing?.label);
+  const title = resolveNodeTitle(input, existing);
   const result: NodeContent = {
     ...(existing ?? {}),
     nodeId,
     type: input.nodeType,
-    label:
-      protectAutomaticLabel || input.label === undefined
-        ? (existing?.label ?? null)
-        : (input.label ?? null),
+    label: title.label,
     ...(input.src !== undefined
       ? { src: input.src }
       : existing?.src !== undefined
@@ -49,8 +44,8 @@ export function resolveNodeContentUpdate(
         : {}),
     content: wouldClobber && existing ? existing.content : body,
   };
-  if (input.labelSource !== undefined && !protectAutomaticLabel)
-    result['labelSource'] = input.labelSource;
+  if (title.labelSource !== undefined)
+    result['labelSource'] = title.labelSource;
   if (input.summary !== undefined) result['summary'] = input.summary;
   if (input.keywords !== undefined) result['keywords'] = input.keywords;
   if (input.provenance !== undefined) result['provenance'] = input.provenance;
@@ -58,18 +53,93 @@ export function resolveNodeContentUpdate(
 }
 
 /**
- * The request fields besides the custom-property patch that change a record.
- * A request that carries none of them is a property patch and nothing else.
+ * The title `input` leaves on a record that holds `existing`: the stored
+ * one when the request names none, or names an automatic one over a title a
+ * person or an agent gave.
  */
-export const NODE_BODY_REQUEST_KEYS = [
+function resolveNodeTitle(
+  input: Pick<PutNodeContentRequest, 'label' | 'labelSource'>,
+  existing: NodeContent | null,
+): {
+  label: string | null;
+  labelSource?: PutNodeContentRequest['labelSource'];
+} {
+  const protectAutomaticLabel =
+    input.labelSource === 'auto' &&
+    isLabelProtected(existing?.['labelSource'], existing?.label);
+  return {
+    label:
+      protectAutomaticLabel || input.label === undefined
+        ? (existing?.label ?? null)
+        : (input.label ?? null),
+    ...(input.labelSource !== undefined && !protectAutomaticLabel
+      ? { labelSource: input.labelSource }
+      : {}),
+  };
+}
+
+/**
+ * The request fields the content revision protects: the body (`content`,
+ * `src`) and what is derived from one particular body (`summary`,
+ * `keywords`, `provenance`). A request that carries any of them quotes the
+ * body it was made on and is refused when the stored body has changed since.
+ */
+const NODE_VERSIONED_REQUEST_KEYS = [
   'content',
-  'label',
-  'labelSource',
   'src',
   'summary',
   'keywords',
   'provenance',
 ] as const satisfies readonly (keyof PutNodeContentRequest)[];
+
+/**
+ * Whether `input` carries a title that no revision protects: one a person
+ * or an agent gave. It is an independent small item like a custom property
+ * — last writer wins. An automatic title (`labelSource: 'auto'`) is derived
+ * from a body and is checked with it.
+ */
+export function carriesAuthoredTitle(
+  input: Pick<PutNodeContentRequest, 'label' | 'labelSource'>,
+): boolean {
+  return (
+    input.labelSource !== 'auto' &&
+    (input.label !== undefined || input.labelSource !== undefined)
+  );
+}
+
+/**
+ * Whether the body's revision (`expectRev`) applies to `input`: it carries
+ * the body, something derived from a body, or an automatic title. A request
+ * of an authored title and/or custom properties alone is never refused as
+ * stale, whatever revision it quotes.
+ */
+export function isRevisionCheckedRequest(
+  input: PutNodeContentRequest,
+): boolean {
+  return (
+    NODE_VERSIONED_REQUEST_KEYS.some((key) => input[key] !== undefined) ||
+    (input.labelSource === 'auto' && input.label !== undefined)
+  );
+}
+
+/**
+ * `record` (the stored record as it is now) with the part of `input` that no
+ * revision protects applied: an authored title and the custom-property
+ * patch. Used for a request whose body was refused as stale, so a rename or
+ * a property edit that travelled with it is not lost with it.
+ */
+export function applyNodeUnversionedPatch(
+  record: NodeContent,
+  input: PutNodeContentRequest,
+): NodeContent {
+  const result = applyNodePropertyPatch(record, input);
+  if (!carriesAuthoredTitle(input)) return result;
+  const title = resolveNodeTitle(input, record);
+  result.label = title.label;
+  if (title.labelSource !== undefined)
+    result['labelSource'] = title.labelSource;
+  return result;
+}
 
 /**
  * `record` (the stored record as it is now) with the custom-property patch
