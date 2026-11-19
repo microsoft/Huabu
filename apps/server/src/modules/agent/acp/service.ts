@@ -33,10 +33,10 @@ import { chatInputText } from '@huabu/shared';
 
 import { renderExternalAgentInputs } from './preprocessor.js';
 import { readProfileObservation } from './profile-capabilities.js';
-import { getProfileSessionPreferences } from './profile-session-preferences.js';
+import { profileSessionPreferences } from './profile-session-preferences.js';
 import {
+  profileSnapshot,
   recipeFromProfileSnapshot,
-  resolveProfileSnapshot,
 } from './profile-snapshot.js';
 import { renderExternalAgentSystemPreamble } from '../../../prompt/external-agent/system-preamble.js';
 import { canvasAcpNamespace } from '../../workspace/paths.js';
@@ -152,12 +152,13 @@ export interface RunAcpAgentOptions {
  * host-side Profile projection; keeping it in the host composition layer lets the session-lifecycle helper stay
  * profile-store-free and its create-time spec fully serializable.
  */
-export function resolveBindingRecipe(
+export async function resolveBindingRecipe(
   profileId: string,
-): AcpBindingRecipe | null {
-  const profile = resolveProfileSnapshot(profileId);
-  const alias = getAgentProfileRegistry()?.getProfile(profileId)?.alias;
-  return profile && alias ? recipeFromProfileSnapshot(profile, alias) : null;
+): Promise<AcpBindingRecipe | null> {
+  const profile = await getAgentProfileRegistry()?.getProfile(profileId);
+  return profile?.alias
+    ? recipeFromProfileSnapshot(profileSnapshot(profile), profile.alias)
+    : null;
 }
 
 export { resolveProfileSnapshot } from './profile-snapshot.js';
@@ -187,13 +188,15 @@ export interface BuildAcpWorkloadSpecOptions {
   spacePrompt?: string;
 }
 
-export function buildAcpWorkloadSpec(
+export async function buildAcpWorkloadSpec(
   opts: BuildAcpWorkloadSpecOptions,
-): AcpWorkloadSpec {
+): Promise<AcpWorkloadSpec> {
   const { binding, threadId } = opts;
   const canvasId = opts.canvasId ?? '';
-  const profile = resolveProfileSnapshot(binding.profileId);
-  if (!profile) {
+  // One registry read serves the snapshot, preferences, and observation.
+  const stored = await getAgentProfileRegistry()?.getProfile(binding.profileId);
+  const profile = stored ? profileSnapshot(stored) : null;
+  if (!stored || !profile) {
     throw new AcpServiceError(
       'profile_missing',
       `Agent Profile '${binding.profileId}' is unavailable.`,
@@ -211,10 +214,10 @@ export function buildAcpWorkloadSpec(
   recipe = applyWorkingDirectoryOverride(recipe, workingDirPath);
 
   const initialPreferences =
-    opts.initialPreferences ?? getProfileSessionPreferences(binding.profileId);
+    opts.initialPreferences ?? profileSessionPreferences(stored);
   // Resolved against the catalogue the user was shown, so the session starts
   // on those values without waiting for the agent to advertise its own.
-  const observation = readProfileObservation(binding.profileId);
+  const observation = readProfileObservation(stored);
   const initialSelections = observation
     ? resolveInitialPreferenceSelections(initialPreferences, {
         configOptions: observation.configOptions ?? [],

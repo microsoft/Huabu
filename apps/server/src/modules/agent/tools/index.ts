@@ -15,9 +15,11 @@
  */
 
 import {
+  DEFAULT_IMAGE_MODEL_FAMILY,
   describeQualitiesForPrompt,
   describeSizesForPrompt,
   getImageCapabilities,
+  type ImageModelFamily,
 } from '@huabu/shared';
 
 import { TOOL_REGISTRY, type ToolDefinition } from './definitions.js';
@@ -74,9 +76,11 @@ export interface ToolBuildContext {
  * at bind time rather than at module load so changing Settings
  * takes effect on the next chat turn.
  */
-function patchGenerateImageDescription(def: ToolDefinition): ToolDefinition {
+function patchGenerateImageDescription(
+  def: ToolDefinition,
+  family: ImageModelFamily,
+): ToolDefinition {
   if (def.name !== 'generate_image') return def;
-  const family = getConfiguredImageModelFamily();
   const caps = getImageCapabilities(family);
   const block =
     `\n\n--- Active image deployment ---\n` +
@@ -100,8 +104,12 @@ function patchGenerateImageDescription(def: ToolDefinition): ToolDefinition {
  * `agent.service.ts` lifts that flag into a
  * `ToolResponse<status: 'error'>` envelope.
  */
-function toAgentTool(def: ToolDefinition, ctx: ToolBuildContext): AgentTool {
-  const enriched = patchGenerateImageDescription(def);
+function toAgentTool(
+  def: ToolDefinition,
+  ctx: ToolBuildContext,
+  imageFamily: ImageModelFamily,
+): AgentTool {
+  const enriched = patchGenerateImageDescription(def, imageFamily);
   return {
     ...enriched,
     execute: async (_toolCallId, params) => {
@@ -136,10 +144,14 @@ function toAgentTool(def: ToolDefinition, ctx: ToolBuildContext): AgentTool {
  * `AGENT.md` fails loudly at startup rather than silently dropping a
  * tool.
  */
-export function buildAgentToolsByNames(
+export async function buildAgentToolsByNames(
   names: readonly string[],
   ctx: ToolBuildContext,
-): AgentTool[] {
+): Promise<AgentTool[]> {
+  // Read from Settings once per build, and only when a tool describes it.
+  const imageFamily = names.includes('generate_image')
+    ? await getConfiguredImageModelFamily()
+    : DEFAULT_IMAGE_MODEL_FAMILY;
   return names.map((name) => {
     const def = TOOL_REGISTRY[name];
     if (!def) {
@@ -147,7 +159,7 @@ export function buildAgentToolsByNames(
         `[tools] Unknown tool name "${name}" — not in TOOL_REGISTRY (definitions.ts)`,
       );
     }
-    return toAgentTool(def, ctx);
+    return toAgentTool(def, ctx, imageFamily);
   });
 }
 
@@ -161,7 +173,7 @@ export function buildAgentToolsByNames(
 export function buildToolsForScope(
   scope: ToolScope,
   ctx: ToolBuildContext,
-): AgentTool[] {
+): Promise<AgentTool[]> {
   // Every ToolScope is also an AgentId, so the cast is sound.
   const cfg = loadAgent(scope as AgentId);
   return buildAgentToolsByNames(cfg.toolNames, ctx);

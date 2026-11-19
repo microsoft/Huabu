@@ -71,16 +71,16 @@ interface RecognizeInkParams {
 
 class InvalidResultError extends Error {}
 
-function readConfiguration(): Configuration {
+async function readConfiguration(): Promise<Configuration> {
   try {
-    const snapshot = serviceProvisioner.getConfig('ink-ocr');
+    const snapshot = await serviceProvisioner.getConfig('ink-ocr');
     if (!snapshot.configured) {
       return {
         outcome:
           snapshot.configuredFields.length === 0 ? 'disabled' : 'config_error',
       };
     }
-    const resolved = serviceProvisioner.resolveForServer('ink-ocr');
+    const resolved = await serviceProvisioner.resolveForServer('ink-ocr');
     const key = typeof resolved.apiKey === 'string' ? resolved.apiKey : '';
     const endpoint =
       typeof resolved.endpoint === 'string' ? resolved.endpoint : '';
@@ -101,8 +101,10 @@ function readConfiguration(): Configuration {
   }
 }
 
-export function isInkOcrConfigured(logger?: FastifyBaseLogger): boolean {
-  const config = readConfiguration();
+export async function isInkOcrConfigured(
+  logger?: FastifyBaseLogger,
+): Promise<boolean> {
+  const config = await readConfiguration();
   if (config.outcome === 'configured') return true;
   if (config.outcome === 'disabled') {
     logger?.debug({ outcome: config.outcome }, '[ink-ocr] not configured');
@@ -231,7 +233,7 @@ export async function recognizeInk({
   signal,
 }: RecognizeInkParams): Promise<InkRecognition | undefined> {
   const started = Date.now();
-  const config = readConfiguration();
+  const config = await readConfiguration();
   const requestController = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
   let onAbort: (() => void) | undefined;

@@ -23,7 +23,7 @@ const deviceFilesRoutes: FastifyPluginAsync = async (app) => {
         code: 'invalid_request',
         message: 'Invalid filesystem request',
       });
-    requireOwnAgentlet(parsed.data.agentletId);
+    await requireOwnAgentlet(parsed.data.agentletId);
     reply.header('Cache-Control', 'no-store');
     try {
       service ??= new DeviceFilesService(app.log);

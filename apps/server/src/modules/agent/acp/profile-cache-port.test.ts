@@ -62,7 +62,7 @@ describe('Profile cache execution isolation', () => {
       await held;
     }
   });
-  it('does not warm-start an old execution from a newer Profile cache', () => {
+  it('does not warm-start an old execution from a newer Profile cache', async () => {
     installAcpProfileCachePort();
     const port = mocks.install.mock.calls[0]?.[0] as {
       readCommands: (id: string, revision?: number) => unknown;
@@ -71,9 +71,9 @@ describe('Profile cache execution isolation', () => {
       availableCommands: [{ name: 'new' }],
       commandsUpdatedAt: 2,
     });
-    expect(port.readCommands('profile', 0)).toBeNull();
+    expect(await port.readCommands('profile', 0)).toBeNull();
     expect(mocks.readCache).not.toHaveBeenCalled();
-    expect(port.readCommands('profile', 1)).toEqual({
+    expect(await port.readCommands('profile', 1)).toEqual({
       availableCommands: [{ name: 'new' }],
       commandsUpdatedAt: 2,
     });

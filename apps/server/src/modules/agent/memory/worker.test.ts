@@ -37,7 +37,7 @@ beforeEach(async () => {
   vi.mocked(markAnalyzed).mockReset().mockResolvedValue();
   vi.mocked(getAgentDefaults)
     .mockReset()
-    .mockReturnValue({ profileId: 'huabu', functionalModel: '' });
+    .mockResolvedValue({ profileId: 'huabu', functionalModel: '' });
 });
 
 describe('memory worker outcomes', () => {
@@ -82,7 +82,7 @@ describe('memory worker outcomes', () => {
   it.each([null, 'external'])(
     'does not start the legacy curator with default %s',
     async (profileId) => {
-      vi.mocked(getAgentDefaults).mockReturnValue({
+      vi.mocked(getAgentDefaults).mockResolvedValue({
         profileId,
         functionalModel: '',
       });
@@ -95,7 +95,7 @@ describe('memory worker outcomes', () => {
   it('rechecks queued work before starting', async () => {
     const log = logger();
     schedule('canvas-a', log);
-    vi.mocked(getAgentDefaults).mockReturnValue({
+    vi.mocked(getAgentDefaults).mockResolvedValue({
       profileId: 'external',
       functionalModel: '',
     });
@@ -116,7 +116,7 @@ describe('memory worker outcomes', () => {
     await new Promise<void>((resolve) => setImmediate(resolve));
     expect(runAnalysisPass).toHaveBeenCalledTimes(1);
     schedule('canvas-a', log);
-    vi.mocked(getAgentDefaults).mockReturnValue({
+    vi.mocked(getAgentDefaults).mockResolvedValue({
       profileId: 'external',
       functionalModel: '',
     });

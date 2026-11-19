@@ -11,9 +11,26 @@ import { resolve, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { createAgentProfileRegistry } from './create.js';
-import { FileAgentProfileRegistryStore } from './store.js';
+import {
+  FileAgentProfileRegistryStore,
+  InMemoryAgentProfileRegistryStore,
+} from './store.js';
 
-import type { AcpCommandProfile } from './types.js';
+import type {
+  AcpCommandProfile,
+  CreateAgentProfileRegistryOptions,
+} from './index.js';
+
+/** A registry over `registry.json` in `storageDir`. */
+function fileRegistry(
+  storageDir: string,
+  options: Omit<CreateAgentProfileRegistryOptions, 'store'> = {},
+) {
+  return createAgentProfileRegistry({
+    ...options,
+    store: new FileAgentProfileRegistryStore(storageDir),
+  });
+}
 
 const directories: string[] = [];
 function directory(): string {
@@ -40,9 +57,36 @@ const profile: AcpCommandProfile = {
 };
 
 describe('Profile storage and one-time migration', () => {
+  it('reads the store once to open, whether it seeds it or not', async () => {
+    const memory = new InMemoryAgentProfileRegistryStore();
+    let loads = 0;
+    const store = {
+      load: () => {
+        loads += 1;
+        return memory.load();
+      },
+      save: memory.save.bind(memory),
+    };
+    const seeded = await createAgentProfileRegistry({ store });
+    expect(loads).toBe(1);
+    await seeded.createProfile({
+      launchKind: 'acp-harness',
+      harnessId: 'copilot',
+      alias: 'Copilot',
+      agentletId: 'device',
+      workingDirPath: '/work',
+    });
+
+    const reopened = await createAgentProfileRegistry({ store });
+    expect(loads).toBe(2);
+    expect((await reopened.listProfiles()).map((p) => p.alias)).toEqual([
+      'Copilot',
+    ]);
+  });
+
   it.each([2, 3])(
     'imports only commands from old schema %s without modifying its bytes',
-    (schemaVersion) => {
+    async (schemaVersion) => {
       const legacyStorageDir = directory();
       const storageDir = directory();
       const original = JSON.stringify(
@@ -62,34 +106,28 @@ describe('Profile storage and one-time migration', () => {
         3,
       );
       writeFileSync(join(legacyStorageDir, 'registry.json'), original);
-      const registry = createAgentProfileRegistry({
-        storageDir,
+      const registry = await fileRegistry(storageDir, {
         legacyStorageDir,
       });
-      expect(registry.listProfiles()).toEqual([profile]);
+      expect(await registry.listProfiles()).toEqual([profile]);
       expect(
         readFileSync(join(legacyStorageDir, 'registry.json'), 'utf8'),
       ).toBe(original);
-      registry.deleteProfile('stable');
-      expect(
-        createAgentProfileRegistry({
-          storageDir,
-          legacyStorageDir,
-        }).listProfiles(),
-      ).toEqual([]);
+      await registry.deleteProfile('stable');
+      const reopened = await fileRegistry(storageDir, { legacyStorageDir });
+      expect(await reopened.listProfiles()).toEqual([]);
     },
   );
 
-  it('makes even empty initialization authoritative over both legacy sources', () => {
+  it('makes even empty initialization authoritative over both legacy sources', async () => {
     const storageDir = directory();
-    createAgentProfileRegistry({ storageDir });
+    await fileRegistry(storageDir);
     const legacyStorageDir = directory();
     writeFileSync(
       join(legacyStorageDir, 'registry.json'),
       'malformed old data',
     );
-    const registry = createAgentProfileRegistry({
-      storageDir,
+    const registry = await fileRegistry(storageDir, {
       legacyStorageDir,
       legacyCommandProfiles: [
         {
@@ -101,13 +139,13 @@ describe('Profile storage and one-time migration', () => {
         },
       ],
     });
-    expect(registry.listProfiles()).toEqual([]);
+    expect(await registry.listProfiles()).toEqual([]);
     expect(
       JSON.parse(readFileSync(join(storageDir, 'registry.json'), 'utf8')),
     ).toEqual({ schemaVersion: 1, state: { profiles: [] } });
   });
 
-  it('ignores v1 Team deployments and initializes the new file', () => {
+  it('ignores v1 Team deployments and initializes the new file', async () => {
     const legacyStorageDir = directory();
     const storageDir = directory();
     writeFileSync(
@@ -117,12 +155,8 @@ describe('Profile storage and one-time migration', () => {
         state: { deployments: [{ id: 'retired' }] },
       }),
     );
-    expect(
-      createAgentProfileRegistry({
-        storageDir,
-        legacyStorageDir,
-      }).listProfiles(),
-    ).toEqual([]);
+    const registry = await fileRegistry(storageDir, { legacyStorageDir });
+    expect(await registry.listProfiles()).toEqual([]);
     expect(existsSync(join(storageDir, 'registry.json'))).toBe(true);
   });
 
@@ -140,13 +174,13 @@ describe('Profile storage and one-time migration', () => {
     }),
   ])(
     'fails malformed legacy data without finalizing an empty import',
-    (contents) => {
+    async (contents) => {
       const storageDir = directory();
       const legacyStorageDir = directory();
       writeFileSync(join(legacyStorageDir, 'registry.json'), contents);
-      expect(() =>
-        createAgentProfileRegistry({ storageDir, legacyStorageDir }),
-      ).toThrow();
+      await expect(
+        fileRegistry(storageDir, { legacyStorageDir }),
+      ).rejects.toThrow();
       expect(existsSync(join(storageDir, 'registry.json'))).toBe(false);
       expect(
         readFileSync(join(legacyStorageDir, 'registry.json'), 'utf8'),
@@ -154,16 +188,15 @@ describe('Profile storage and one-time migration', () => {
     },
   );
 
-  it('rejects conflicting legacy sources before committing', () => {
+  it('rejects conflicting legacy sources before committing', async () => {
     const storageDir = directory();
     const legacyStorageDir = directory();
     writeFileSync(
       join(legacyStorageDir, 'registry.json'),
       JSON.stringify({ schemaVersion: 3, state: { profiles: [profile] } }),
     );
-    expect(() =>
-      createAgentProfileRegistry({
-        storageDir,
+    await expect(
+      fileRegistry(storageDir, {
         legacyStorageDir,
         legacyCommandProfiles: [
           {
@@ -175,14 +208,13 @@ describe('Profile storage and one-time migration', () => {
           },
         ],
       }),
-    ).toThrow(expect.objectContaining({ code: 'profile_conflict' }));
+    ).rejects.toThrow(expect.objectContaining({ code: 'profile_conflict' }));
     expect(existsSync(join(storageDir, 'registry.json'))).toBe(false);
   });
 
-  it('imports older ordinary command records with original IDs and opaque host data', () => {
+  it('imports older ordinary command records with original IDs and opaque host data', async () => {
     const storageDir = directory();
-    const registry = createAgentProfileRegistry({
-      storageDir,
+    const registry = await fileRegistry(storageDir, {
       legacyCommandProfiles: [
         {
           id: profile.id,
@@ -195,17 +227,18 @@ describe('Profile storage and one-time migration', () => {
         },
       ],
     });
-    expect(registry.listProfiles()).toEqual([profile]);
-    expect(createAgentProfileRegistry({ storageDir }).listProfiles()).toEqual([
+    expect(await registry.listProfiles()).toEqual([profile]);
+    expect(await (await fileRegistry(storageDir)).listProfiles()).toEqual([
       profile,
     ]);
   });
 
-  it('round trips snapshots atomically and rejects retired launches in the neutral file', () => {
+  it('round trips snapshots atomically and rejects retired launches in the neutral file', async () => {
     const storageDir = directory();
     const store = new FileAgentProfileRegistryStore(storageDir);
-    store.save({ profiles: [profile] });
-    expect(store.load()).toEqual({ profiles: [profile] });
+    expect(await store.load()).toBeNull();
+    await store.save({ profiles: [profile] });
+    expect(await store.load()).toEqual({ profiles: [profile] });
     expect(existsSync(join(storageDir, 'registry.json.pending'))).toBe(false);
     writeFileSync(
       join(storageDir, 'registry.json'),
@@ -216,7 +249,7 @@ describe('Profile storage and one-time migration', () => {
         },
       }),
     );
-    expect(() => createAgentProfileRegistry({ storageDir })).toThrow();
+    await expect(fileRegistry(storageDir)).rejects.toThrow();
     expect(() => new FileAgentProfileRegistryStore('relative')).toThrow(
       'must be absolute',
     );

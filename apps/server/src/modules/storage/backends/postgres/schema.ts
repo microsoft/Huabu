@@ -95,4 +95,19 @@ export const POSTGRES_MIGRATIONS = [
       CREATE INDEX spaces_by_parent ON spaces(workspace_id, parent_space_id);
     `,
   },
+  {
+    // Server records: the Server's own state, owned by no Workspace
+    // (ports/server-records.ts). `owner_key` is a person's opaque key, or ''
+    // for the deployment's record.
+    version: 3,
+    sql: `
+      CREATE TABLE server_records (
+        owner_key TEXT NOT NULL,
+        name TEXT NOT NULL,
+        record_json TEXT NOT NULL CHECK ((record_json::json) IS NOT NULL),
+        updated_at DOUBLE PRECISION NOT NULL,
+        PRIMARY KEY (owner_key, name)
+      );
+    `,
+  },
 ] as const;

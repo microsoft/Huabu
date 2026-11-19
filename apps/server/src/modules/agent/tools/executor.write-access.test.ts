@@ -86,7 +86,7 @@ for (const kind of ['disk', 'sqlite'] as const) {
       if (!made.ok) throw new Error('Expected the test Space');
       // Only external model transport/configuration and agent execution are
       // replaced. The actual commands, task services, and storage stay real.
-      vi.spyOn(serviceProvisioner, 'resolveForServer').mockReturnValue({
+      vi.spyOn(serviceProvisioner, 'resolveForServer').mockResolvedValue({
         baseUrl: 'https://images.example.test/openai/v1',
         model: 'test-image-deployment',
         apiKey: 'test-only-key',

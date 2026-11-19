@@ -83,6 +83,31 @@ export function parseState(value: unknown): AgentProfileRegistryState {
   return parsed.data;
 }
 
+/**
+ * The persisted registry document, `{ schemaVersion: 1, state }`.
+ *
+ * Shared by every store so a registry written by one medium reads back
+ * identically from another.
+ */
+export function encodeAgentProfileRegistry(
+  state: AgentProfileRegistryState,
+): unknown {
+  return { schemaVersion: 1, state: parseState(state) };
+}
+
+/** Parse a document written by {@link encodeAgentProfileRegistry}. */
+export function decodeAgentProfileRegistry(
+  value: unknown,
+): AgentProfileRegistryState {
+  const parsed = fileSchema.safeParse(value);
+  if (!parsed.success)
+    throw new AgentProfileError(
+      'invalid_registry',
+      `Invalid Agent Profile registry: ${parsed.error.message}`,
+    );
+  return parseState(parsed.data.state);
+}
+
 export function readLegacyProfiles(storageDir: string): AgentProfile[] {
   const filePath = join(storageDir, 'registry.json');
   if (!existsSync(filePath)) return [];
@@ -132,14 +157,15 @@ export class InMemoryAgentProfileRegistryStore implements AgentProfileRegistrySt
   constructor(initialState: AgentProfileRegistryState = { profiles: [] }) {
     this.state = parseState(initialState);
   }
-  load(): AgentProfileRegistryState {
+  async load(): Promise<AgentProfileRegistryState> {
     return structuredClone(this.state);
   }
-  save(state: AgentProfileRegistryState): void {
+  async save(state: AgentProfileRegistryState): Promise<void> {
     this.state = parseState(state);
   }
 }
 
+/** One `registry.json` in a host-owned directory. */
 export class FileAgentProfileRegistryStore implements AgentProfileRegistryStore {
   private readonly filePath: string;
   constructor(private readonly storageDir: string) {
@@ -150,21 +176,12 @@ export class FileAgentProfileRegistryStore implements AgentProfileRegistryStore 
       );
     this.filePath = join(storageDir, 'registry.json');
   }
-  exists(): boolean {
-    return existsSync(this.filePath);
+  async load(): Promise<AgentProfileRegistryState | null> {
+    if (!existsSync(this.filePath)) return null;
+    return decodeAgentProfileRegistry(readJson(this.filePath));
   }
-  load(): AgentProfileRegistryState {
-    if (!this.exists()) return { profiles: [] };
-    const parsed = fileSchema.safeParse(readJson(this.filePath));
-    if (!parsed.success)
-      throw new AgentProfileError(
-        'invalid_registry',
-        `Invalid Agent Profile registry: ${parsed.error.message}`,
-      );
-    return parseState(parsed.data.state);
-  }
-  save(state: AgentProfileRegistryState): void {
-    const candidate = { schemaVersion: 1, state: parseState(state) };
+  async save(state: AgentProfileRegistryState): Promise<void> {
+    const candidate = encodeAgentProfileRegistry(state);
     mkdirSync(this.storageDir, { recursive: true });
     const pendingPath = `${this.filePath}.pending`;
     try {

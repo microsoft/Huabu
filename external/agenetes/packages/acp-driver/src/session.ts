@@ -93,14 +93,18 @@ export interface AcpProfileCachePort {
    * when none is cached. Used to paint the `/` menu on a fresh session
    * before the agent's authoritative `available_commands_update` arrives.
    * Hosts fence this cache read against the frozen execution revision; absent means zero.
+   * A host may resolve it asynchronously, for example after reading the
+   * Profile from storage.
    */
   readCommands(
     profileId: string,
     profileExecutionRevision?: number,
-  ): {
-    availableCommands: AvailableCommand[];
-    commandsUpdatedAt: number;
-  } | null;
+  ): WarmCommands | null | Promise<WarmCommands | null>;
+}
+
+export interface WarmCommands {
+  availableCommands: AvailableCommand[];
+  commandsUpdatedAt: number;
 }
 
 let profileCachePort: AcpProfileCachePort | null = null;
@@ -1232,11 +1236,27 @@ async function ensureAcpSessionInner(
   // optimistic localStorage cache the web client maintains for the
   // same purpose.
   if (created.availableCommands.length === 0 && binding.profileId) {
-    const warm = profileCachePort?.readCommands(
-      binding.profileId,
-      opts.profileExecutionRevision,
-    );
-    if (warm) {
+    const before = created.commandsUpdatedAt;
+    let warm: WarmCommands | null | undefined = null;
+    try {
+      warm = await profileCachePort?.readCommands(
+        binding.profileId,
+        opts.profileExecutionRevision,
+      );
+    } catch (err) {
+      // Only suggestions are lost; the session must still be registered.
+      logger.warn(
+        {
+          threadId,
+          sessionId,
+          err: err instanceof Error ? err.message : String(err),
+        },
+        '[acp] per-profile command cache unavailable',
+      );
+    }
+    // The agent's own list may have arrived while the cache was read, empty
+    // or not; it always wins.
+    if (warm && created.commandsUpdatedAt === before) {
       created.availableCommands = warm.availableCommands;
       created.commandsUpdatedAt = warm.commandsUpdatedAt;
       logger.info(

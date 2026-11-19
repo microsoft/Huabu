@@ -25,7 +25,7 @@ const log = getLogger('tool.web-search');
 export type WebSearchArgs = Static<typeof webSearchParamsSchema>;
 
 export async function handleWebSearch(args: WebSearchArgs): Promise<string> {
-  const resolved = serviceProvisioner.resolveForServer('web-search');
+  const resolved = await serviceProvisioner.resolveForServer('web-search');
   const apiKey = typeof resolved.apiKey === 'string' ? resolved.apiKey : '';
 
   const controller = new AbortController();

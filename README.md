@@ -98,7 +98,7 @@ Environment variables and `.env` override setup choices and are never rewritten 
 
 For Linux containers and the daily App Service image, see [Web container](docs/architecture/web-container.md).
 
-Back up and persist both server data and private credential configuration. See [Credential storage](docs/architecture/credential-storage.md).
+Back up and persist both server data and private credential configuration on Disk and SQLite deployments. A PostgreSQL deployment keeps credentials and settings in the database and needs `HUABU_SECRET_KEY` from the environment. With Disk blobs it still stores uploaded materials under the data directory, so persist that directory. Only PostgreSQL with Azure blobs, with its configuration supplied by the environment and `HUABU_IDENTITY_PROVIDER=bubble`, needs no persistent storage. In local identity mode the Server also runs a bundled Agentlet whose device identity lives in the home directory of the user running Huabu, and its agents work in directories on that filesystem; persist both, or a replaced container gets a new device and saved Profiles and conversations keep targeting the old one (see [Web container](docs/architecture/web-container.md#app-service-configuration)). See [Credential storage](docs/architecture/credential-storage.md).
 
 ## Data, Credentials, and Connected Services
 

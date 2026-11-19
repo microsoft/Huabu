@@ -3,6 +3,7 @@
 
 import { CUSTOM_COMMAND_WRAPPER_ID } from '@agentlet/protocol';
 
+import { createKeyedMutex } from '../../../utils/keyed-mutex.js';
 import { formatAgentletDeviceDisplayName } from '../agentlet-device-display.js';
 
 import type {
@@ -109,7 +110,7 @@ interface DiscoveryOptions {
   gateway: DiscoveryGateway;
   getRegistry: () => ProfileRegistry | null;
   log: Pick<FastifyBaseLogger, 'info' | 'warn'>;
-  onProfilesDiscovered?: (profiles: AgentProfile[]) => void;
+  onProfilesDiscovered?: (profiles: AgentProfile[]) => unknown;
 }
 
 export function registerHarnessProfileDiscovery({
@@ -119,13 +120,31 @@ export function registerHarnessProfileDiscovery({
   onProfilesDiscovered,
 }: DiscoveryOptions): () => void {
   const generations = new Map<string, number>();
+  // A device's lookups and creates run one discovery at a time: creating a
+  // Profile is acknowledged asynchronously, and a reconnect's discovery must
+  // see the Profiles an earlier one just created rather than duplicate them.
+  const serializeDevice = createKeyedMutex<string>();
   let disposed = false;
 
   const discover = async (agentletId: string, generation: number) => {
     const result = await gateway.discoverHarnesses(agentletId, {
       prepareWorkspaces: true,
     });
-    if (disposed || generations.get(agentletId) !== generation) return;
+    await serializeDevice(agentletId, () =>
+      commit(agentletId, generation, result),
+    );
+  };
+
+  const commit = async (
+    agentletId: string,
+    generation: number,
+    result: HarnessDiscoveryResult,
+  ) => {
+    // A disconnect, reconnect, or disposal makes this discovery obsolete; it
+    // is checked again after every await, because one may land during any.
+    const obsolete = () =>
+      disposed || generations.get(agentletId) !== generation;
+    if (obsolete()) return;
     const registry = getRegistry();
     if (!registry) throw new Error('Agent Profile registry is not ready');
 
@@ -145,8 +164,10 @@ export function registerHarnessProfileDiscovery({
         );
         continue;
       }
-      // No await between the lookup and the synchronous registry commit.
-      const profiles = registry.listProfiles();
+      // Every create for this device runs inside this commit, so the lookup
+      // sees each Profile an earlier harness or discovery created.
+      const profiles = await registry.listProfiles();
+      if (obsolete()) return;
       const existing = profiles.find((profile) => {
         const source = parseSource(profile.customData?.[SOURCE_KEY]);
         return (
@@ -176,7 +197,7 @@ export function registerHarnessProfileDiscovery({
           [SOURCE_KEY]: { version: 1, agentletId, harnessId: harness.id },
         },
       };
-      const profile = registry.createProfile({
+      const profile = await registry.createProfile({
         ...common,
         launchKind: 'acp-harness',
         harnessId: harness.id,
@@ -188,8 +209,11 @@ export function registerHarnessProfileDiscovery({
         { agentletId, harnessId: harness.id, profileId: profile.id },
         '[acp] automatically created Profile',
       );
+      if (obsolete()) return;
     }
-    onProfilesDiscovered?.(registry.listProfiles());
+    const profiles = await registry.listProfiles();
+    if (obsolete()) return;
+    await onProfilesDiscovered?.(profiles);
   };
 
   const onChanged: Parameters<DiscoveryGateway['onAgentletsChanged']>[0] = ({

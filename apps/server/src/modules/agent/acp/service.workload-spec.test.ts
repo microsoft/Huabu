@@ -68,17 +68,19 @@ describe('buildAcpWorkloadSpec', () => {
         },
       ],
     };
-    const build = (
+    const build = async (
       initialPreferences?: Parameters<
         typeof buildAcpWorkloadSpec
       >[0]['initialPreferences'],
     ) =>
-      buildAcpWorkloadSpec({
-        binding: { profileId: 'profile-a', alias: 'Claude' },
-        threadId: 'thread-a',
-        canvasId: 'canvas-a',
-        ...(initialPreferences && { initialPreferences }),
-      }).spec;
+      (
+        await buildAcpWorkloadSpec({
+          binding: { profileId: 'profile-a', alias: 'Claude' },
+          threadId: 'thread-a',
+          canvasId: 'canvas-a',
+          ...(initialPreferences && { initialPreferences }),
+        })
+      ).spec;
 
     beforeEach(() => {
       mocks.profile = {
@@ -91,26 +93,28 @@ describe('buildAcpWorkloadSpec', () => {
       };
     });
 
-    it('starts on what the conversation displayed, not what the Profile remembers now', () => {
+    it('starts on what the conversation displayed, not what the Profile remembers now', async () => {
       mocks.observation = observation;
 
-      expect(build({ model: 'opus', thoughtLevel: 'high' })).toMatchObject({
+      expect(
+        await build({ model: 'opus', thoughtLevel: 'high' }),
+      ).toMatchObject({
         initialPreferences: { model: 'opus', thoughtLevel: 'high' },
         initialSelections: { model_id: 'opus', effort: 'high' },
       });
     });
 
-    it('falls back to the remembered preferences for callers with no interface', () => {
+    it('falls back to the remembered preferences for callers with no interface', async () => {
       mocks.observation = observation;
 
-      expect(build()).toMatchObject({
+      expect(await build()).toMatchObject({
         initialPreferences: { model: 'sonnet' },
         initialSelections: { model_id: 'sonnet' },
       });
     });
 
-    it('leaves matching to the session when the Profile has no observed catalogue', () => {
-      const spec = build({ model: 'opus' });
+    it('leaves matching to the session when the Profile has no observed catalogue', async () => {
+      const spec = await build({ model: 'opus' });
 
       expect(spec.initialPreferences).toEqual({ model: 'opus' });
       expect(spec).not.toHaveProperty('initialSelections');
@@ -119,7 +123,7 @@ describe('buildAcpWorkloadSpec', () => {
 
   it.each(['node', 'chat'])(
     'applies cwd overrides to command profiles from %s',
-    (source) => {
+    async (source) => {
       mocks.profile = {
         id: 'profile-a',
         alias: 'Researcher',
@@ -129,7 +133,7 @@ describe('buildAcpWorkloadSpec', () => {
         launch: { kind: 'acp-command', command: 'copilot --acp' },
       };
 
-      const workload = buildAcpWorkloadSpec({
+      const workload = await buildAcpWorkloadSpec({
         binding: {
           profileId: 'profile-a',
           alias: 'Researcher',
@@ -154,7 +158,7 @@ describe('buildAcpWorkloadSpec', () => {
     },
   );
 
-  it('uses the discovered Profile machine and default workspace without overrides', () => {
+  it('uses the discovered Profile machine and default workspace without overrides', async () => {
     mocks.profile = {
       id: 'profile-a',
       alias: 'Claude',
@@ -166,7 +170,7 @@ describe('buildAcpWorkloadSpec', () => {
       },
     };
 
-    const workload = buildAcpWorkloadSpec({
+    const workload = await buildAcpWorkloadSpec({
       binding: {
         profileId: 'profile-a',
         alias: 'Claude',
@@ -187,7 +191,7 @@ describe('buildAcpWorkloadSpec', () => {
     });
   });
 
-  it('places Space instructions between bootstrap and node constraints', () => {
+  it('places Space instructions between bootstrap and node constraints', async () => {
     mocks.profile = {
       id: 'profile-a',
       alias: 'Researcher',
@@ -196,7 +200,7 @@ describe('buildAcpWorkloadSpec', () => {
       launch: { kind: 'acp-command', command: 'copilot --acp' },
     };
 
-    const workload = buildAcpWorkloadSpec({
+    const workload = await buildAcpWorkloadSpec({
       binding: { profileId: 'profile-a', alias: 'Researcher' },
       threadId: 'thread-a',
       canvasId: 'canvas-a',
@@ -213,13 +217,13 @@ describe('buildAcpWorkloadSpec', () => {
     ]);
   });
 
-  it('rejects a missing Profile instead of inventing a placement', () => {
-    expect(() =>
+  it('rejects a missing Profile instead of inventing a placement', async () => {
+    await expect(
       buildAcpWorkloadSpec({
         binding: { profileId: 'missing', alias: 'Missing' },
         threadId: 'thread-a',
         canvasId: 'canvas-a',
       }),
-    ).toThrow("Agent Profile 'missing' is unavailable.");
+    ).rejects.toThrow("Agent Profile 'missing' is unavailable.");
   });
 });

@@ -36,7 +36,7 @@ const connectionTokenRoutes: FastifyPluginAsync = async (app) => {
       return reply.status(409).send({
         message: 'Device credentials are reset per user in Bubble mode only',
       });
-    resetAgentCredentials(principalId);
+    await resetAgentCredentials(principalId);
     return reply.code(204).send();
   });
 
@@ -56,8 +56,8 @@ const connectionTokenRoutes: FastifyPluginAsync = async (app) => {
       .header('Cache-Control', 'no-store')
       .header('Pragma', 'no-cache')
       .send({
-        token: ownDeviceCredential(),
-        maxAgents: getExternalAgentRuntimeConfig().maxAgents,
+        token: await ownDeviceCredential(),
+        maxAgents: (await getExternalAgentRuntimeConfig()).maxAgents,
       });
   });
 
@@ -88,11 +88,11 @@ const connectionTokenRoutes: FastifyPluginAsync = async (app) => {
       // A Bubble user's command carries their own device credential; locally
       // it is the machine token, reported with where it came from.
       const response = personalSettingsOwner()
-        ? buildAgentletConnectionCommand(parsed.data, {
-            token: ownDeviceCredential(),
+        ? await buildAgentletConnectionCommand(parsed.data, {
+            token: await ownDeviceCredential(),
             source: 'managed',
           })
-        : buildAgentletConnectionCommand(parsed.data);
+        : await buildAgentletConnectionCommand(parsed.data);
       return reply
         .header('Cache-Control', 'no-store')
         .header('Pragma', 'no-cache')

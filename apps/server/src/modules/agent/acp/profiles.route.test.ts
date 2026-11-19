@@ -54,12 +54,17 @@ vi.mock('@agenetes/agentlet-host', () => ({
   }),
   getAgentletGateway: () => ({
     discoverHarnesses: mocks.discoverHarnesses,
+    getAgentlet: (agentletId: string) =>
+      mocks.connectedIds.has(agentletId) || mocks.offlineIds.has(agentletId)
+        ? { agentletId, metadata: {} }
+        : undefined,
     getAgentlets: (filter?: { status: string }) =>
       [
         ...mocks.connectedIds,
         ...(filter?.status === 'connected' ? [] : mocks.offlineIds),
       ].map((agentletId) => ({
         agentletId,
+        metadata: {},
         status: mocks.connectedIds.has(agentletId)
           ? 'connected'
           : 'disconnected',
