@@ -382,3 +382,13 @@ it('leaves the database as it was when the import check refuses', async () => {
   ).rejects.toThrow('refused');
   expect(userVersion(file)).toEqual({ user_version: 2 });
 });
+
+it('keeps one ServerRecords for a Disk target opened lazily while an open is in flight', async () => {
+  vi.stubEnv('HUABU_DATA_DIR', dataDirectory());
+  vi.stubEnv('HUABU_STRUCTURED_BACKEND', 'disk');
+  const opening = initServerRecords();
+  // A caller reaching for records before the awaited open settles.
+  const lazy = getServerRecords();
+  expect(await opening).toBe(lazy);
+  expect(getServerRecords()).toBe(lazy);
+});

@@ -289,10 +289,13 @@ function openRecords(
   if (opening?.target === target) return opening.records;
   const records = openServerRecords(kind, env, checkImport).then(
     (opened) => {
-      if (opening?.records === records) {
-        open = { target, records: opened };
-        opening = null;
-      }
+      if (opening?.records !== records) return opened;
+      opening = null;
+      // A lazy Disk open (getServerRecords) may have answered for this
+      // target meanwhile; keep it, so one target has one ServerRecords and
+      // one mutex. Database targets never open lazily.
+      if (open?.target === target) return open.records;
+      open = { target, records: opened };
       return opened;
     },
     (error: unknown) => {

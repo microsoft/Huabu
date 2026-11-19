@@ -44,7 +44,7 @@ export type { SqliteMigration } from './schema.js';
 export const SQLITE_WORLD_COLLISION_KEY = '.world';
 
 /** Milliseconds a statement waits for a lock before reporting SQLITE_BUSY. */
-const BUSY_TIMEOUT_MS = 5_000;
+export const BUSY_TIMEOUT_MS = 5_000;
 
 /**
  * Where this backend keeps its records in the Server data directory.

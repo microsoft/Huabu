@@ -11,7 +11,7 @@
 
 import { DatabaseSync } from 'node:sqlite';
 
-import { withImmediateTransaction } from './database.js';
+import { BUSY_TIMEOUT_MS, withImmediateTransaction } from './database.js';
 import {
   decodeServerRecord,
   encodeServerRecord,
@@ -50,6 +50,9 @@ function readWithoutOpening<T>(
     throw error;
   }
   try {
+    // Wait out a writer's lock as the Server's own connection does, rather
+    // than failing a startup read that races the Server's first write.
+    database.exec(`PRAGMA busy_timeout = ${BUSY_TIMEOUT_MS}`);
     const table = database
       .prepare(
         "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'server_records'",
