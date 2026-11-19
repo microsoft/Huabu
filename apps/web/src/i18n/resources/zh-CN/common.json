@@ -720,6 +720,7 @@
     "signInIntro": "使用你的组织账户打开你的 Space。",
     "continueWith": "使用 {{provider}} 继续",
     "signingIn": "正在登录…",
+    "verifyingSession": "正在验证登录状态…",
     "signInFailed": "登录失败：{{message}}",
     "noSignInMethods": "此服务器尚未配置浏览器登录。请联系管理员添加带有客户端 ID 的 Auth0 或 Entra ID 登录方式。",
     "crossOriginUnsupported": "浏览器登录要求 Web 应用与服务器位于同一来源。此构建指向其他来源的服务器（VITE_API_BASE）；请从同一来源提供两者后再登录。",

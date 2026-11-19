@@ -720,6 +720,7 @@
     "signInIntro": "Use your organization account to open your Spaces.",
     "continueWith": "Continue with {{provider}}",
     "signingIn": "Signing in…",
+    "verifyingSession": "Checking your session…",
     "signInFailed": "Sign-in failed: {{message}}",
     "noSignInMethods": "This server has no browser sign-in configured. Ask its administrator to add an Auth0 or Entra ID login with a client ID.",
     "crossOriginUnsupported": "Browser sign-in needs the web app and its Server on the same origin. This build points at a Server elsewhere (VITE_API_BASE); serve both from one origin to sign in.",

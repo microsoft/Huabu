@@ -30,6 +30,7 @@ import {
   type SignedInTokens,
 } from '../../utils/oidcLogin';
 import { Button } from '../Common/Button';
+import { Spinner } from '../Common/Spinner';
 
 import type { IdentityResponse } from '@huabu/shared';
 import type { ReactNode } from 'react';
@@ -386,24 +387,45 @@ export function SignInGate({ children }: { children: ReactNode }) {
     return () => window.removeEventListener(AUTH_REQUIRED_EVENT, recheck);
   }, [check, adopt, recover, blockApp]);
 
+  // The check a foreground event started, while it is still the one that
+  // decides. One return to the page fires both `focus` and
+  // `visibilitychange`; the second joins the first instead of asking again.
+  const foregroundRun = useRef<number | null>(null);
+
   // Waiting members poll for admission. A running Bubble app also verifies
   // its shared cookie on foreground and on peer writes, without refreshing
   // tokens or replaying drafts that could belong to the previous account.
   const awaitingAccess = state.kind === 'noAccess';
   useEffect(() => {
+    const verifyNow = () => {
+      // `check` takes its run number before its first await.
+      const pending = check(undefined, false);
+      const run = latestCheck.current;
+      foregroundRun.current = run;
+      void pending.finally(() => {
+        if (foregroundRun.current === run) foregroundRun.current = null;
+      });
+    };
     const verifyPrincipal = () => {
       if (
         accountChanged.current ||
         (sessionChanging.current && !hasSessionLock())
       )
         return;
-      if (awaitingAccess) void check(undefined, false);
+      // Any later check, or a peer's cookie write, supersedes the pending
+      // one; only then does this event need a check of its own.
+      if (
+        foregroundRun.current !== null &&
+        foregroundRun.current === latestCheck.current
+      )
+        return;
+      if (awaitingAccess) verifyNow();
       else if (
         appStarted.current &&
         useIdentityStore.getState().identity?.provider === 'bubble'
       ) {
         blockApp();
-        void check(undefined, false);
+        verifyNow();
       }
     };
     const recheckAccess = () => {
@@ -477,11 +499,7 @@ export function SignInGate({ children }: { children: ReactNode }) {
         <div ref={app} className="contents" inert={overlay || verifying}>
           {children}
         </div>
-        {verifying && (
-          <div className="bg-bg-default/95 fixed inset-0 z-[1000]">
-            <WorkspaceLoadingScreen />
-          </div>
-        )}
+        {verifying && <VerifyingCover />}
         {overlay && state.kind === 'signIn' && (
           <FloatingFocusManager
             context={context}
@@ -504,6 +522,44 @@ export function SignInGate({ children }: { children: ReactNode }) {
       </>
     );
   return <SignInScreen state={state} />;
+}
+
+/** How long a re-verification runs before the cover says what it is waiting for. */
+const VERIFYING_NOTICE_MS = 1_000;
+
+/**
+ * Covers the running app while its session is re-verified, such as on every
+ * return to the tab. The app stays visible underneath, since a check that
+ * confirms the same person changes nothing, but the cover still catches
+ * pointer input, including on dialogs portalled outside the inert app root.
+ * Only a check that outlasts {@link VERIFYING_NOTICE_MS} shows a small notice.
+ */
+function VerifyingCover() {
+  const { t } = useTranslation();
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setSlow(true), VERIFYING_NOTICE_MS);
+    return () => window.clearTimeout(timer);
+  }, []);
+  return (
+    <div
+      data-testid="session-verifying-cover"
+      aria-busy="true"
+      className="fixed inset-0 z-[1000] cursor-progress"
+    >
+      {slow && (
+        <div className="absolute inset-x-0 top-4 flex justify-center">
+          <div
+            role="status"
+            className="bg-surface border-edge-default text-fg-muted inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm shadow-md"
+          >
+            <Spinner size="sm" />
+            {t('auth.verifyingSession')}
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 /** The sign-in and no-access screens, in the Welcome page's frame. */

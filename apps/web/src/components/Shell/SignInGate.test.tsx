@@ -14,7 +14,7 @@ import { forgetTokens } from '../../utils/oidcLogin';
 
 // The brand animation draws on a canvas the test DOM does not provide.
 vi.mock('../../pages/WorkspaceLoadingScreen', () => ({
-  WorkspaceLoadingScreen: () => null,
+  WorkspaceLoadingScreen: () => <div data-testid="workspace-loading" />,
 }));
 const unsaved = vi.hoisted(() => vi.fn(() => false));
 const resend = vi.hoisted(() => vi.fn(async () => {}));
@@ -109,6 +109,12 @@ it('shows a blocked-popup error over the running app and permits retry', async (
   expect(container.textContent).toContain('app');
   expect(container.querySelector('button')?.disabled).toBe(false);
 });
+
+/** Identity reads made so far, including ones a test answers by hand. */
+const identityChecks = () =>
+  vi
+    .mocked(fetch)
+    .mock.calls.filter(([input]) => String(input) === '/api/identity').length;
 
 async function mount(strict = false) {
   const gate = (
@@ -597,6 +603,90 @@ describe('SignInGate', () => {
     expect(container.querySelector('input')).toBe(draft);
     expect(draft?.value).toBe('unsaved draft');
     expect(resend).not.toHaveBeenCalled();
+  });
+
+  it('verifies one return to the page once, keeping the app visible but inert', async () => {
+    routes['GET /api/identity'] = () => json(MEMBER);
+    await mount();
+    resend.mockClear();
+    const before = identityChecks();
+    let finish!: (response: Response) => void;
+    vi.mocked(fetch).mockImplementationOnce(
+      () => new Promise<Response>((resolve) => (finish = resolve)),
+    );
+    await act(async () => {
+      window.dispatchEvent(new Event('focus'));
+      document.dispatchEvent(new Event('visibilitychange'));
+      window.dispatchEvent(new Event('focus'));
+    });
+    expect(identityChecks()).toBe(before + 1);
+    // The app stays on screen under a clear cover, not the loading page.
+    expect(container.textContent).toBe('app');
+    expect(
+      container.querySelector('[data-testid="workspace-loading"]'),
+    ).toBeNull();
+    expect(
+      container.querySelector('[data-testid="session-verifying-cover"]'),
+    ).not.toBeNull();
+    expect(container.querySelector('[inert]')).not.toBeNull();
+    await act(async () => finish(json(MEMBER)));
+    expect(
+      container.querySelector('[data-testid="session-verifying-cover"]'),
+    ).toBeNull();
+    expect(container.querySelector('[inert]')).toBeNull();
+    expect(resend).not.toHaveBeenCalled();
+    // The next return checks again.
+    await act(async () => window.dispatchEvent(new Event('focus')));
+    expect(identityChecks()).toBe(before + 2);
+  });
+
+  it('says what a slow re-verification is waiting for', async () => {
+    routes['GET /api/identity'] = () => json(MEMBER);
+    await mount();
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      let finish!: (response: Response) => void;
+      vi.mocked(fetch).mockImplementationOnce(
+        () => new Promise<Response>((resolve) => (finish = resolve)),
+      );
+      await act(async () => window.dispatchEvent(new Event('focus')));
+      expect(container.textContent).not.toContain('auth.verifyingSession');
+      await act(async () => vi.advanceTimersByTimeAsync(1_000));
+      expect(container.textContent).toContain('auth.verifyingSession');
+      await act(async () => finish(json(MEMBER)));
+      expect(container.textContent).toBe('app');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('checks again on a return after a peer cookie write superseded the pending check', async () => {
+    routes['GET /api/identity'] = () => json(MEMBER);
+    await mount();
+    vi.spyOn(navigator, 'locks', 'get').mockReturnValue(
+      undefined as unknown as LockManager,
+    );
+    const peer = new BroadcastChannel('huabu.session');
+    let finish!: (response: Response) => void;
+    vi.mocked(fetch).mockImplementationOnce(
+      () => new Promise<Response>((resolve) => (finish = resolve)),
+    );
+    try {
+      await act(async () => window.dispatchEvent(new Event('focus')));
+      const before = identityChecks();
+      peer.postMessage('changing');
+      peer.postMessage('changed');
+      await vi.waitFor(() => expect(identityChecks()).toBe(before + 1));
+      await vi.waitFor(() =>
+        expect(container.querySelector('[inert]')).toBeNull(),
+      );
+      await act(async () => finish(json(MEMBER)));
+      expect(container.querySelector('[inert]')).toBeNull();
+      await act(async () => window.dispatchEvent(new Event('focus')));
+      expect(identityChecks()).toBe(before + 2);
+    } finally {
+      peer.close();
+    }
   });
 
   it.each(['completed', 'closed'])(
