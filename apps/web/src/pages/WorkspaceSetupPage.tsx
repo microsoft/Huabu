@@ -165,6 +165,12 @@ function RenamableWorkspaceRow({
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={(event) => {
+            // Enter and Escape confirm or cancel an IME composition first.
+            if (
+              event.nativeEvent.isComposing ||
+              event.nativeEvent.keyCode === 229
+            )
+              return;
             if (event.key === 'Enter') void save();
             if (event.key === 'Escape') setDraft(null);
           }}

@@ -193,6 +193,19 @@ it('renames only the Workspaces the caller may manage', async () => {
       )!.set!.call(input, '  Default ');
       input.dispatchEvent(new Event('input', { bubbles: true }));
     });
+    // Enter and Escape that end an IME composition neither save nor cancel.
+    for (const key of ['Enter', 'Escape'])
+      await act(async () =>
+        input.dispatchEvent(
+          new KeyboardEvent('keydown', {
+            key,
+            isComposing: true,
+            bubbles: true,
+          }),
+        ),
+      );
+    expect(mocks.state.renameWorkspace).not.toHaveBeenCalled();
+    expect(input.isConnected).toBe(true);
     await act(async () =>
       input.dispatchEvent(
         new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
