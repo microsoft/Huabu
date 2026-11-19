@@ -32,6 +32,7 @@ import {
 } from '@huabu/shared/canvas-engine';
 
 import { dismissToast, toast } from '@/components/Common/Toast';
+import { i18n } from '@/i18n';
 
 import { canvasHistoryManager } from './canvasHistoryManager';
 import { useCanvasPresenceStore } from './canvasPresence/canvasPresenceStore';
@@ -414,6 +415,197 @@ describe('a gesture is one edit here as on the server', () => {
     expect(accentOf(node(X))).toBe('white');
     expect(own).toHaveLength(0);
     expect(state().canUndo).toBe(false);
+  });
+
+  // A target that is gone is not something the person can act on.
+  it('says nothing about a refused gesture whose target no longer exists', () => {
+    state().executeCommands([
+      accentCommand(X, 'red'),
+      {
+        type: 'DISCONNECT_EDGES',
+        edges: ['edge-not-there' as `edge-${string}`],
+      },
+    ]);
+    expect(toast).not.toHaveBeenCalled();
+  });
+});
+
+describe('a gesture the engine refuses tells the person once and leaves nothing', () => {
+  const OUTER = 'node-sync-outer';
+  const INNER = 'node-sync-inner';
+  const frame = (
+    id: string,
+    position: { x: number; y: number },
+    size: number,
+    data: Record<string, unknown> = {},
+    parentId?: string,
+  ): Node => ({
+    id,
+    type: 'frame',
+    position,
+    style: { width: size, height: size },
+    ...(parentId ? { parentId } : {}),
+    data: { type: 'frame', label: id, ...data },
+  });
+  const locked = (value: Node): Node => ({
+    ...value,
+    draggable: false,
+    data: { ...value.data, locked: true },
+  });
+  /** A Frame at (1100, 100) inside a locked Frame, and X outside both. */
+  const underLockedFrame = (inner: Record<string, unknown> = {}): Node[] => [
+    locked(frame(OUTER, { x: 1000, y: 0 }, 800)),
+    frame(INNER, { x: 100, y: 100 }, 600, inner, OUTER),
+    note(X, 0, 0),
+  ];
+  function open(nodes: Node[]) {
+    state()._setStateRaw({ nodes });
+    server.reset(nodes, [], 1);
+    return nodes;
+  }
+  /** Nothing changed here, nothing was sent, nothing can be undone. */
+  function expectUntouched(nodes: Node[]) {
+    expect(state().nodes).toBe(nodes);
+    expect(own).toHaveLength(0);
+    expect(state().canUndo).toBe(false);
+    expect(canvasHistoryManager.canUndo).toBe(false);
+    expect(hasUnsavedCanvasEdits()).toBe(false);
+  }
+  const hints = () => vi.mocked(toast).mock.calls;
+  // One attempt is told once, so each case is an attempt of its own day.
+  let day = 0;
+  beforeEach(() => {
+    vi.setSystemTime(new Date(2030, 0, ++day));
+  });
+
+  it('grouping a selection that contains a locked node', () => {
+    const nodes = open([
+      { ...locked(note(X, 0, 0)), selected: true },
+      { ...note(Y, 0, 300), selected: true },
+    ]);
+    state().frameSelectedNodes();
+    expectUntouched(nodes);
+    expect(hints()).toEqual([
+      [i18n.t('canvasGesture.lockedGroup'), { tone: 'warning' }],
+    ]);
+
+    // The key held down, or pressed again at once, is the same attempt.
+    state().frameSelectedNodes();
+    expect(toast).toHaveBeenCalledTimes(1);
+    // A later attempt is told again.
+    vi.advanceTimersByTime(2_000);
+    state().frameSelectedNodes();
+    expect(toast).toHaveBeenCalledTimes(2);
+    expectUntouched(nodes);
+  });
+
+  it('drawing a Frame around a locked node', () => {
+    const nodes = open([locked(note(X, 0, 0)), note(Y, 0, 300)]);
+    state().frameNodesInRect({ x: -50, y: -50, width: 500, height: 700 });
+    expectUntouched(nodes);
+    expect(hints()).toEqual([
+      [i18n.t('canvasGesture.lockedGroup'), { tone: 'warning' }],
+    ]);
+  });
+
+  it('dropping a node into a Frame inside a locked Frame puts it back where the drag began', () => {
+    const nodes = open(underLockedFrame());
+    // Cmd/Ctrl held: the drop may enter a nested Frame.
+    state().onNodeDragStart(
+      new MouseEvent('mousedown', { metaKey: true }),
+      node(X),
+      [node(X)],
+    );
+    const drop = { x: 1250, y: 250 };
+    state().onNodesChange([
+      { type: 'position', id: X, position: drop, dragging: true },
+    ]);
+    // A tick is not a gesture: nothing is said while the node is moving.
+    expect(toast).not.toHaveBeenCalled();
+    state().onNodesChange([
+      { type: 'position', id: X, position: drop, dragging: false },
+    ]);
+    state().onNodeDragStop(new MouseEvent('mouseup'), node(X), [node(X)]);
+
+    expect(node(X).position).toEqual({ x: 0, y: 0 });
+    expect(node(X).parentId).toBeUndefined();
+    expect(node(X).dragging).toBeFalsy();
+    expect(state().nodes.map(({ id }) => id)).toEqual(
+      nodes.map(({ id }) => id),
+    );
+    expect(own).toHaveLength(0);
+    expect(state().canUndo).toBe(false);
+    expect(canvasHistoryManager.canUndo).toBe(false);
+    expect(hasUnsavedCanvasEdits()).toBe(false);
+    expect(hints()).toEqual([
+      [i18n.t('canvasGesture.locked'), { tone: 'warning' }],
+    ]);
+
+    // The next drag is an ordinary one.
+    state().onNodeDragStart(new MouseEvent('mousedown'), node(X), [node(X)]);
+    state().onNodesChange([
+      { type: 'position', id: X, position: { x: 40, y: 0 }, dragging: false },
+    ]);
+    state().onNodeDragStop(new MouseEvent('mouseup'), node(X), [node(X)]);
+    expect(own).toHaveLength(1);
+    expect(commandsOf(own[0].request)).toEqual([moveCommand(X, 40)]);
+    expect(toast).toHaveBeenCalledTimes(1);
+  });
+
+  it('adding a node on a grid Frame inside a locked Frame', () => {
+    const nodes = open(underLockedFrame({ layoutMode: 'grid', gridCount: 2 }));
+    state().dispatchUiIntent({
+      type: 'ADD_NODES',
+      inputs: [
+        {
+          nodeType: 'note',
+          placementPoint: { x: 1300, y: 300 },
+          data: { label: 'New', content: '' },
+        },
+      ],
+    });
+    expectUntouched(nodes);
+    expect(hints()).toEqual([
+      [i18n.t('canvasGesture.locked'), { tone: 'warning' }],
+    ]);
+  });
+
+  it('uses the general wording when no lock is involved', () => {
+    const nodes = open([note(X, 0, 0), note(Y, 0, 300)]);
+    state().executeCommands([
+      accentCommand(X, 'red'),
+      {
+        type: 'SET_NODE_PARENT',
+        nodeIds: [X as `node-${string}`],
+        parentId: 'node-not-there',
+      },
+    ]);
+    expectUntouched(nodes);
+    expect(hints()).toEqual([
+      [i18n.t('canvasGesture.refused'), { tone: 'warning' }],
+    ]);
+  });
+
+  it('says nothing for a preview tick', () => {
+    const nodes = open([locked(note(X, 0, 0)), note(Y, 0, 300)]);
+    state().executeCommands(
+      [
+        {
+          type: 'SET_NODE_PARENT',
+          nodeIds: [X as `node-${string}`],
+          parentId: null,
+        },
+        {
+          type: 'SET_NODE_PARENT',
+          nodeIds: [X as `node-${string}`],
+          parentId: 'node-not-there',
+        },
+      ],
+      'ui',
+      { localOnly: true },
+    );
+    expect(state().nodes).toBe(nodes);
+    expect(toast).not.toHaveBeenCalled();
   });
 });
 

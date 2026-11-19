@@ -1756,6 +1756,11 @@
     "noteSeparator": ", ",
     "notesAndMore": "{{notes}} and {{count}} more"
   },
+  "canvasGesture": {
+    "lockedGroup": "The selection contains a locked node, so it cannot be grouped into a frame.",
+    "locked": "This is locked or inside a locked frame, so nothing was changed. Unlock it and try again.",
+    "refused": "This action could not be applied here. Nothing was changed."
+  },
   "canvasPresence": {
     "anotherDevice": "Another device",
     "editing": "{{label}} · editing",

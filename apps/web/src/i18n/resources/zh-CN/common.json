@@ -1756,6 +1756,11 @@
     "noteSeparator": "、",
     "notesAndMore": "{{notes}}等另外 {{count}} 条"
   },
+  "canvasGesture": {
+    "lockedGroup": "选中的节点里有锁定的，无法组合到框架中。",
+    "locked": "此处已锁定或位于锁定的框架内，未做任何更改。请解锁后重试。",
+    "refused": "此操作无法在这里完成，未做任何更改。"
+  },
   "canvasPresence": {
     "anotherDevice": "其他设备",
     "editing": "{{label}} · 正在编辑",

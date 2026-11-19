@@ -299,7 +299,9 @@ describe('automatic node placement and reveal', () => {
     });
     state().addNode({ id: 'node-existing', nodeType: 'note' });
     expect(state().pendingRevealNodeIds).toEqual([]);
-    state()._setStateRaw({ executeCommands: vi.fn() });
+    state()._setStateRaw({
+      executeCommands: vi.fn(() => ({ refused: true })),
+    });
     state().addNode({ id: 'node-rejected', nodeType: 'note' });
     expect(state().pendingRevealNodeIds).toEqual([]);
   });

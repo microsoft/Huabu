@@ -108,6 +108,7 @@ export {
   type SiblingReorderTarget,
   isSetSiblingOrderEvent,
   admitSiblingReorder,
+  hasUnlockedAncestry,
   collectSiblingOrders,
   diffSiblingOrderEvents,
   applySiblingOrderEvents,

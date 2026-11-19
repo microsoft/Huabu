@@ -145,6 +145,10 @@ import { normalizeNodeHeights } from './canvasStore/load/normalizeNodeHeights';
 import { reconcileQuestionStatus } from './canvasStore/load/reconcileQuestionStatus';
 import { shouldBackfillNodeLabel } from './canvasStore/load/shouldBackfillNodeLabel';
 import { warmupNodeHeights } from './canvasStore/load/warmupNodeHeights';
+import {
+  refusedGestureHint,
+  showRefusedGestureHint,
+} from './canvasStore/refusedGesture';
 import { createCanvasEventBuffer } from './canvasStore/save/eventBuffer';
 import {
   contentFieldOfUnit,
@@ -972,7 +976,12 @@ type RFState = {
     nextName: string,
   ) => Promise<boolean>;
 
-  /** @internal Execute a batch of shared CanvasCommands. Do not call from outside the store. */
+  /**
+   * @internal Execute a batch of shared CanvasCommands. Do not call from outside the store.
+   *
+   * `refused` is true when the batch closed a gesture and the engine refused
+   * it as a whole: nothing changed, nothing was sent and the person was told.
+   */
   executeCommands: (
     commands: CanvasCommand[],
     source?: CanvasExecutionSource,
@@ -983,7 +992,7 @@ type RFState = {
        */
       localOnly?: boolean;
     },
-  ) => void;
+  ) => { refused: boolean };
   /**
    * @internal Apply the deltas of a batch the server committed — any
    * writer's: an agent's, another page's, or this page's own.
@@ -3887,7 +3896,7 @@ const useCanvasStore = create<RFState>()(
         });
       };
 
-      const { writeResult, commandResults, pendingEffects } = (
+      const { writeResult, commandResults, editResults, pendingEffects } = (
         closesGesture ? executeGesture : executeEachCommand
       )(resolvedSource, commands, state, {
         ...engineOptions,
@@ -3901,6 +3910,21 @@ const useCanvasStore = create<RFState>()(
         !commandResults.some((r) => r.applied) ||
         !canChangeSpaceEntries(state.canvasId, state.nodes, writeResult.nodes)
       ) {
+        // A gesture is one edit, so a refused one changed nothing at all.
+        // Say so once; a preview tick is not a gesture and never gets here.
+        const refusedEdit = closesGesture
+          ? editResults.find((edit) => !edit.applied)
+          : undefined;
+        if (refusedEdit) {
+          const hint = refusedGestureHint(commands, refusedEdit, state.nodes);
+          if (hint) showRefusedGestureHint(hint);
+          // What a drag moved tick by tick belongs to the refused gesture:
+          // the nodes go back to where the drag began and no move is sent.
+          if (openGesture && _dragStartPositions) {
+            get().cancelActiveNodeDrag();
+            return { refused: true };
+          }
+        }
         // The gesture's ticks are this edit; record them for its undo entry.
         if (openGesture && openGesture !== state.nodes) {
           canvasHistoryManager.noteChange(
@@ -3912,7 +3936,7 @@ const useCanvasStore = create<RFState>()(
         }
         submitPreludeOnly();
         if (!routed || prelude.length > 0) gestureTicksSent();
-        return;
+        return { refused: refusedEdit !== undefined };
       }
 
       // Whether the send queue persists this batch. A batch whose applied
@@ -4098,6 +4122,7 @@ const useCanvasStore = create<RFState>()(
         validatePreviewNodes: (liveNodeIds) =>
           usePreviewWorkspaceStore.getState().validate(liveNodeIds),
       });
+      return { refused: false };
     },
 
     /**
@@ -4402,7 +4427,7 @@ const useCanvasStore = create<RFState>()(
         editNodeId !== undefined &&
         uiState.nodes.some(({ id }) => id === editNodeId);
       if (execution.commands.length > 0) {
-        get().executeCommands(
+        const { refused } = get().executeCommands(
           execution.commands,
           undefined,
           intent.type === 'RESIZE_NODE' && intent.preview
@@ -4412,6 +4437,8 @@ const useCanvasStore = create<RFState>()(
               }
             : undefined,
         );
+        // Nothing happened, so there is nothing to reveal, edit or record.
+        if (refused) return;
       }
       if (execution.revealNodeIds?.length) {
         const existingIds = new Set(uiState.nodes.map((node) => node.id));
