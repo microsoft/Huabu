@@ -159,7 +159,7 @@ export const routes = {
     return `/agent/history/${enc(threadId)}/page?${params.toString()}`;
   },
   agentHistoryTurn: (threadId: string, canvasId: string, turnRef: string) =>
-    `/agent/history/${enc(threadId)}/turn/${enc(turnRef)}?canvasId=${enc(canvasId)}`,
+    `/agent/history/${enc(threadId)}/turn?${new URLSearchParams({ canvasId, turnRef }).toString()}`,
   agentHistoryFork: (threadId: string, canvasId?: string) => {
     const params = canvasId ? `?canvasId=${enc(canvasId)}` : '';
     return `/agent/history/${enc(threadId)}/fork${params}`;

@@ -59,7 +59,7 @@ function host() {
     ok,
   );
   app.get('/api/agent/history/:threadId', ok);
-  app.get('/api/agent/history/:threadId/turn/:turnRef', ok);
+  app.get('/api/agent/history/:threadId/turn', ok);
   app.post('/api/agent', ok);
   app.post('/api/acp/threads/:threadId/permission', ok);
   app.get('/api/acp/profiles', ok);
@@ -185,12 +185,18 @@ describe('Space access', () => {
     );
     expect(await member({ url: '/api/agent/history/t1' })).toBe(400);
     expect(
-      await member({ url: '/api/agent/history/t1/turn/ref?canvasId=mine' }),
+      await member({
+        url: '/api/agent/history/t1/turn?canvasId=mine&turnRef=ref',
+      }),
     ).toBe(200);
     expect(
-      await member({ url: '/api/agent/history/t1/turn/ref?canvasId=other' }),
+      await member({
+        url: '/api/agent/history/t1/turn?canvasId=other&turnRef=ref',
+      }),
     ).toBe(404);
-    expect(await member({ url: '/api/agent/history/t1/turn/ref' })).toBe(400);
+    expect(
+      await member({ url: '/api/agent/history/t1/turn?turnRef=ref' }),
+    ).toBe(400);
     // Profile routes enforce device ownership separately from Space access.
     expect(await member({ url: '/api/acp/profiles' })).toBe(200);
     for (const request of [
