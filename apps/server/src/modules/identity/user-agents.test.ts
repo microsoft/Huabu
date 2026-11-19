@@ -990,6 +990,59 @@ it('revokes a stalled admission on its own, keeping a device admitted with the n
   }
 });
 
+it('orders a first-time claim behind a reset that is still committing', async () => {
+  const h = await host(false);
+  await app.listen({ port: 0, host: '127.0.0.1' });
+  const port = (app.server.address() as { port: number }).port;
+  const sockets: WebSocket[] = [];
+  const alice = await h.as('alice', ownDeviceCredential);
+  const records = getServerRecords();
+  const put = records.store.put.bind(records.store);
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => (release = resolve));
+  let writing!: () => void;
+  const resetWriting = new Promise<void>((resolve) => (writing = resolve));
+  // Hold the reset's version write until the handshake waits to claim.
+  vi.spyOn(records.store, 'put').mockImplementation(async (key, value) => {
+    if (key.name === 'agent-credential-versions') {
+      writing();
+      await held;
+    }
+    return put(key, value);
+  });
+  const get = records.get.bind(records);
+  let claiming!: () => void;
+  const readOwners = new Promise<void>((resolve) => (claiming = resolve));
+  vi.spyOn(records, 'get').mockImplementation(async (key) => {
+    const value = await get(key);
+    if (key.name === 'device-owners') claiming();
+    return value;
+  });
+  try {
+    const reset = resetAgentCredentials('alice');
+    await resetWriting;
+    // Started after the reset revoked what was in flight, with a credential
+    // whose version is not yet replaced in storage.
+    const handshake = connectDevice(port, sockets, 'racing-device', alice);
+    await readOwners;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    release();
+    await reset;
+    expect(await handshake).toMatchObject({
+      error: {
+        message: expect.stringContaining('Device credentials were reset'),
+      },
+    });
+    vi.mocked(records.get).mockRestore();
+    expect(
+      (await getServerRecords().get({ owner: null, name: 'device-owners' })) ??
+        {},
+    ).not.toHaveProperty('racing-device');
+  } finally {
+    for (const socket of sockets) socket.close();
+  }
+});
+
 it('leaves no ownership behind for a first-time claim a reset overtakes', async () => {
   const h = await host(false);
   await app.listen({ port: 0, host: '127.0.0.1' });

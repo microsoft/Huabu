@@ -8,6 +8,7 @@ import { z } from 'zod';
 
 import { personalSettingsOwner } from './personal-settings.js';
 import { getConnectionToken } from '../../connection-token.js';
+import { createKeyedMutex } from '../../utils/keyed-mutex.js';
 import {
   credentialVersionSchema as version,
   credentialVersionsSchema as versionsSchema,
@@ -268,22 +269,32 @@ export async function resetAgentCredentials(
   principalId: string,
 ): Promise<void> {
   const reason = 'Device credentials were reset';
-  // Every admission in flight now carries a credential this reset revokes.
-  // Revoking them before the version is written fences their first-time
-  // device claims: a claim checks its admission inside the ownership write,
-  // so one that has not committed yet commits nothing.
-  revokeAdmissions(principalId, reason);
   let version = 0;
-  await getServerRecords().update(VERSIONS, (current) => {
-    const versions = versionsSchema.parse(current ?? {});
-    const previous = Object.hasOwn(versions, principalId)
-      ? versions[principalId]
-      : 0;
-    version = previous + 1;
-    return { ...versions, [principalId]: version };
+  // Ordered with this owner's first-time device claims, through commit: a
+  // claim that committed first stands, and its device is disconnected
+  // below like any other; one waiting behind the reset sees it and writes
+  // nothing.
+  await claimsAndResets(principalId, async () => {
+    // Every admission in flight now carries a credential this reset revokes.
+    revokeAdmissions(principalId, reason);
+    await getServerRecords().update(VERSIONS, (current) => {
+      const versions = versionsSchema.parse(current ?? {});
+      const previous = Object.hasOwn(versions, principalId)
+        ? versions[principalId]
+        : 0;
+      version = previous + 1;
+      return { ...versions, [principalId]: version };
+    });
   });
   disconnectAgentlets(principalId, reason, version);
 }
+
+/**
+ * One owner's credential resets and first-time device claims, one at a time,
+ * each through its commit. A device's ownership is immutable, so a claim
+ * must never commit for an admission a reset has already overtaken.
+ */
+const claimsAndResets = createKeyedMutex<string>();
 
 /**
  * One device admission: deciding, or decided and about to be registered.
@@ -480,11 +491,12 @@ export async function ownDeviceCredential(): Promise<string> {
  * Called by the Gateway's existing host-owned authentication port.
  *
  * A reset or revocation in this process revokes the handshake's
- * {@link Admission}: before the device claim is written, the claim writes
- * nothing and the handshake is refused; after it has decided, the connection
- * it registers is closed. A reset in another process is seen through the
- * stored credential version, read again after each lookup and after the
- * claim.
+ * {@link Admission}: before it has decided, the handshake is refused; after,
+ * the connection it registers is closed. A first-time device claim is
+ * ordered with this owner's resets through commit, so either the claim
+ * stands or it writes nothing. A reset in another process is seen through
+ * the stored credential version, read again after each lookup and after
+ * the claim.
  */
 export function authenticateUserAgentlet(service: IdentityService) {
   const admit = async (
@@ -512,19 +524,23 @@ export function authenticateUserAgentlet(service: IdentityService) {
     if (owner !== null && owner !== claims.principalId)
       throw new Error('Device belongs to another user');
     if (owner === null) {
-      // Claims are serialized, so of two people racing for a new device the
-      // second sees the first's claim here and is refused.
-      await getServerRecords().update(OWNERS, (current) => {
-        // Checked as the claim is written: a reset in this process revokes
-        // the admission before it writes, so a revoked claim writes nothing.
+      await claimsAndResets(claims.principalId, async () => {
+        // No reset of this owner runs until the claim commits, so a claim
+        // that passes these checks is never overtaken by one.
         refuseIfRevoked();
-        const owners = ownersSchema.parse(current ?? {});
-        if (
-          Object.hasOwn(owners, agentletId) &&
-          owners[agentletId] !== claims.principalId
-        )
-          throw new Error('Device belongs to another user');
-        return { ...owners, [agentletId]: claims.principalId };
+        if (!(await readAgentCredential(token)))
+          throw refusedDeviceCredential(token);
+        // Claims are serialized, so of two people racing for a new device
+        // the second sees the first's claim here and is refused.
+        await getServerRecords().update(OWNERS, (current) => {
+          const owners = ownersSchema.parse(current ?? {});
+          if (
+            Object.hasOwn(owners, agentletId) &&
+            owners[agentletId] !== claims.principalId
+          )
+            throw new Error('Device belongs to another user');
+          return { ...owners, [agentletId]: claims.principalId };
+        });
       });
       // Another process's reset reaches this one only through storage.
       if (!(await readAgentCredential(token)))
