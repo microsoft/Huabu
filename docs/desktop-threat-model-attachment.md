@@ -2,7 +2,7 @@
 
 ## Scope
 
-This model covers the installed desktop app in its default mode: the app starts its own Server on the same machine and is the only client of it. Connecting the app to a remote Huabu Server (`--server <url>`), and the "Connect device" Agent that mode offers, are not covered.
+This model covers the installed desktop app in its default mode: the app starts its own Server on the same machine and is the only client of it.
 
 Every control under [Implemented controls](#implemented-controls) is in the code at the path given beside it. Hardening that is not in the code is listed separately under [Not implemented](#not-implemented) and is not relied on.
 
