@@ -8,6 +8,11 @@ import { z } from 'zod';
 
 import { personalSettingsOwner } from './personal-settings.js';
 import { getConnectionToken } from '../../connection-token.js';
+import {
+  credentialVersionSchema as version,
+  credentialVersionsSchema as versionsSchema,
+  deviceOwnersSchema as ownersSchema,
+} from '../server-record-shapes.js';
 import { getServerRecords } from '../storage/index.js';
 
 import type { IdentityService } from './service.js';
@@ -116,7 +121,6 @@ export function registerAgentIdentity(
  * Every credential names its owner's credential version: resetting it revokes
  * that person's device and reachback credentials, and nobody else's.
  */
-const version = z.number().int().nonnegative();
 const claimsSchema = z.discriminatedUnion('aud', [
   z
     .object({
@@ -139,8 +143,6 @@ const claimsSchema = z.discriminatedUnion('aud', [
 type Claims = z.infer<typeof claimsSchema>;
 export type AgentReachback = Extract<Claims, { aud: 'rfs' }>;
 const PREFIX = 'huabu-agent.v1.';
-const ownersSchema = z.record(z.string(), z.string().min(1));
-const versionsSchema = z.record(z.string(), version);
 
 /** `agentletId -> principalId` for every device that ever connected as a user's. */
 const OWNERS = { owner: null, name: 'device-owners' } as const;
