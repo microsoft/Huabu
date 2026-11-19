@@ -119,8 +119,9 @@ function maskRecord(record: ConfigRecord): InkOcrConfig {
  * credential record; afterwards the legacy file is never read.
  *
  * Ink OCR is an optional integration, so a damaged legacy file never stops
- * the Server here: it is left where it is and keeps failing Ink OCR alone,
- * on use, as it always has. Saving the settings reads it too, so the
+ * the Server here: it is left where it is and keeps failing as it always
+ * has, wherever the Ink OCR configuration is read: Ink OCR itself and the
+ * Services settings that list it. Saving the settings reads it too, so the
  * operator repairs or moves the file aside first, then saves them.
  */
 export async function importLegacyInkOcrConfig(): Promise<void> {
@@ -133,7 +134,7 @@ export async function importLegacyInkOcrConfig(): Promise<void> {
     } catch (error) {
       log.warn(
         { err: error, file: configPath() },
-        'Legacy Ink OCR configuration is damaged; Ink OCR fails on use until the file is repaired or moved aside and its settings saved',
+        'Legacy Ink OCR configuration is damaged; Ink OCR and the Services settings fail until the file is repaired or moved aside and the Ink OCR settings saved',
       );
       return;
     }
