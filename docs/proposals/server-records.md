@@ -95,7 +95,8 @@ With `postgres` + `azure` and `HUABU_SECRET_KEY` supplied, a Bubble deployment's
 
 - Disk deployments, including Desktop, see no change: the Disk adapter reads and writes the same files.
 - Existing SQLite and PostgreSQL deployments import their data-directory records on the first start of this version. Keep the existing mount for that first start. Only a deployment whose records and bytes are all remote (`postgres` with `azure` blobs) may then remove it; SQLite keeps its database, and Disk blobs their bytes, in the data directory, so those deployments keep the mount.
-- An Ink OCR endpoint that only the legacy `ink-ocr-config.json` holds is saved into the credential record on the first start of this version, together with the effective key, so it survives the mount's removal.
+- The import reads the files once, checks that snapshot before the database is upgraded (each owner must be able to read its record, and the key must open the credentials), and commits exactly that snapshot in one transaction. A file that fails the check stops startup naming it, with the database as the earlier version left it; repair or remove the file and start again.
+- An Ink OCR endpoint that only the legacy `ink-ocr-config.json` holds is saved into the credential record on the first start of this version, together with the effective key, so it survives the mount's removal. A damaged legacy file does not stop startup: it stays where it is and fails Ink OCR on use, as before, until the settings are saved again.
 - A PostgreSQL deployment that relied on an automatically generated key must set `HUABU_SECRET_KEY` to the contents of `<HUABU_CONFIG_DIR>/master-key` before upgrading. The key is checked against the legacy envelope before the database is opened, so a wrong key fails startup or setup without changing anything.
 
 ## Not in scope
