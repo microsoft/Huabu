@@ -47,8 +47,8 @@
     "dev": "tsc -w -p tsconfig.json"
   },
   "dependencies": {
-    "@agentclientprotocol/sdk": "^0.22.1",
     "@agenetes/protocol": "workspace:*",
+    "@agentclientprotocol/sdk": "^0.22.1",
     "@xyflow/react": "^12.10.0",
     "@xyflow/system": "0.0.77",
     "mdast-util-from-markdown": "^2.0.3",
@@ -64,6 +64,6 @@
     "@types/react-dom": "^19.2.3",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
-    "vitest": "^4.1.11"
+    "vitest": "^4.1.12"
   }
 }

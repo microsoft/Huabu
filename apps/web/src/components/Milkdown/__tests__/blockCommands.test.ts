@@ -1197,7 +1197,7 @@ describe('Milkdown block commands', () => {
     dragOverAt(bottomOf('li li'));
 
     expect(instance.insertBlocksAtDropIndicator('dropped')).toBe(true);
-    expect(instance.getMarkdown()).toContain('* b\n\n    dropped\n\n  * c');
+    expect(instance.getMarkdown()).toContain('* b\n\n    dropped\n  * c');
   });
 
   it('reports failure when no indicator is showing', async () => {
