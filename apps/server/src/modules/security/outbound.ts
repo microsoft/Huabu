@@ -125,11 +125,48 @@ export function isPublicNetworkOnly(): boolean {
   return isMemberWork() || isPublicOnlyDeployment();
 }
 
-function usesProxy(): boolean {
-  const env = process.env;
-  return Boolean(
-    env.HTTPS_PROXY || env.https_proxy || env.HTTP_PROXY || env.http_proxy,
-  );
+const DEFAULT_PORTS: Record<string, number> = { 'http:': 80, 'https:': 443 };
+
+/**
+ * Whether a request to `url` leaves through a proxy. The global dispatcher
+ * that `setup-proxy.ts` installs decides this per request, and a configured
+ * proxy does not carry every one: `NO_PROXY` exempts hosts, and a scheme may
+ * have no proxy at all. This mirrors undici's `EnvHttpProxyAgent`.
+ */
+export function leavesThroughProxy(
+  url: URL,
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  const http = env.http_proxy ?? env.HTTP_PROXY;
+  const https = env.https_proxy ?? env.HTTPS_PROXY;
+  if (!(url.protocol === 'https:' ? https || http : http)) return false;
+  let hostname = url.hostname.replace(/^\[(.+)\]$/, '$1').toLowerCase();
+  if (hostname.length > 1 && hostname.endsWith('.'))
+    hostname = hostname.slice(0, -1);
+  const port = Number.parseInt(url.port, 10) || DEFAULT_PORTS[url.protocol];
+  for (const entry of (env.no_proxy ?? env.NO_PROXY ?? '').split(/[,\s]/)) {
+    if (!entry) continue;
+    // `[::1]:443`, or `host[:port]`; a bare IPv6 address has several colons
+    // and no port.
+    const bracketed = entry.match(/^\[(.+)\]:(\d+)$/);
+    const plain = entry.replace(/^\[(.+)\]$/, '$1');
+    const single =
+      !bracketed && plain.split(':').length === 2
+        ? plain.match(/^(.+):(\d+)$/)
+        : null;
+    const named = bracketed ?? single;
+    const exemptPort = named ? Number.parseInt(named[2], 10) : 0;
+    const exempt = (named ? named[1] : plain)
+      .replace(/^\*?\./, '')
+      .replace(/^(.+)\.$/, '$1')
+      .toLowerCase();
+    if (exemptPort && exemptPort !== port) continue;
+    if (exempt === '*') return false;
+    // `*.example.com` exempts subdomains only, never `example.com` itself.
+    if (!entry.startsWith('*') && hostname === exempt) return false;
+    if (hostname.endsWith(`.${exempt}`)) return false;
+  }
+  return true;
 }
 
 function fetchFailed(cause: Error): TypeError {
@@ -137,21 +174,39 @@ function fetchFailed(cause: Error): TypeError {
 }
 
 /**
- * Refuse a host this machine knows to be non-public. A name this machine
- * cannot resolve is left to the proxy: it names nothing on this network.
+ * Names that are private by construction: a single label, and the suffixes
+ * reserved or conventionally used for a local network.
+ */
+const PRIVATE_NAME =
+  /^[^.]+$|\.(?:local|localhost|localdomain|internal|intranet|lan|home|corp|private|home\.arpa)$/i;
+
+/**
+ * Refuse a host this machine knows to be non-public, before a proxy is asked
+ * to reach it.
+ *
+ * A name this machine cannot resolve is not proof of anything: many networks
+ * resolve public names only at the proxy, and a proxy may also resolve names
+ * of its own network. Refusing every such name would stop all fetching on
+ * the former; allowing every one would open the latter. So an unresolved
+ * name is refused when it is private by construction, and otherwise left to
+ * the proxy, whose own policy then governs.
  */
 async function assertPublicHost(hostname: string): Promise<void> {
-  const host = hostname.replace(/^\[|\]$/g, '');
+  const host = hostname.replace(/^\[|\]$/g, '').replace(/\.$/, '');
   if (isIP(host)) {
     if (!isPublicAddress(host)) throw fetchFailed(refused(host));
     return;
   }
-  const addresses = await new Promise<LookupAddress[]>((resolve) =>
+  const addresses = await new Promise<LookupAddress[] | null>((resolve) =>
     dnsLookup(host, { all: true }, (error, found) =>
-      resolve(error ? [] : found),
+      resolve(error ? null : found),
     ),
   );
-  if (addresses.some(({ address }) => !isPublicAddress(address)))
+  if (
+    addresses
+      ? addresses.some(({ address }) => !isPublicAddress(address))
+      : PRIVATE_NAME.test(host)
+  )
     throw fetchFailed(refused(host));
 }
 
@@ -159,27 +214,42 @@ const REDIRECTS = new Set([301, 302, 303, 307, 308]);
 const MAX_REDIRECTS = 20;
 
 /**
- * A proxy makes the connection, so no address can be checked where it is
- * made. Each hop is checked before it is sent instead, redirects included.
- * Unlike the direct guard this leaves the gap between the check and the
- * proxy's own lookup.
+ * The owner's fetch where a proxy is configured. Redirects are followed here,
+ * one hop at a time, because each hop may leave differently:
+ *
+ * - directly, when `NO_PROXY` or the scheme exempts it: through the guarded
+ *   dispatcher, which checks the address where the connection is made;
+ * - through the proxy, which makes the connection itself: checked before it
+ *   is sent, leaving the gap between that check and the proxy's own lookup.
  */
-async function fetchThroughProxy(
+async function fetchWhereProxied(
   input: Parameters<typeof fetch>[0],
   init?: RequestInit,
 ): Promise<Response> {
   const request = new Request(input, init);
-  if (request.redirect !== 'follow') {
-    await assertPublicHost(new URL(request.url).hostname);
-    return fetch(request);
-  }
+  const send = async (url: URL, options: RequestInit) => {
+    if (!leavesThroughProxy(url))
+      return fetch(url, {
+        ...options,
+        dispatcher: publicOnlyAgent,
+      } as RequestInit);
+    await assertPublicHost(url.hostname);
+    return fetch(url, options);
+  };
   let url = new URL(request.url);
   let method = request.method;
   const headers = new Headers(request.headers);
   let body = request.body ? await request.arrayBuffer() : undefined;
+  if (request.redirect !== 'follow')
+    return send(url, {
+      method,
+      headers,
+      body,
+      signal: request.signal,
+      redirect: request.redirect,
+    });
   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
-    await assertPublicHost(url.hostname);
-    const response = await fetch(url, {
+    const response = await send(url, {
       method,
       headers,
       body,
@@ -209,6 +279,13 @@ async function fetchThroughProxy(
   throw fetchFailed(new Error('Too many redirects'));
 }
 
+function proxyConfigured(): boolean {
+  const env = process.env;
+  return Boolean(
+    env.HTTPS_PROXY || env.https_proxy || env.HTTP_PROXY || env.http_proxy,
+  );
+}
+
 /**
  * `fetch`, kept to public addresses for members, inside
  * {@link withPublicNetworkOnly}, and throughout a public-only deployment.
@@ -221,7 +298,8 @@ async function fetchThroughProxy(
  */
 export const outboundFetch: typeof fetch = (input, init) => {
   if (!isPublicNetworkOnly()) return fetch(input, init);
-  if (!isMemberWork() && usesProxy()) return fetchThroughProxy(input, init);
+  if (!isMemberWork() && proxyConfigured())
+    return fetchWhereProxied(input, init);
   return fetch(input, {
     ...init,
     dispatcher: publicOnlyAgent,

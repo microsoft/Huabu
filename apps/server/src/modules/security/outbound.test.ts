@@ -16,6 +16,7 @@ import {
 
 import {
   isPublicAddress,
+  leavesThroughProxy,
   outboundFetch,
   readBodyWithin,
   ResponseTooLargeError,
@@ -226,7 +227,14 @@ describe('public-only deployment', () => {
     'https_proxy',
     'HTTP_PROXY',
     'http_proxy',
+    'NO_PROXY',
+    'no_proxy',
   ];
+  /** Every scheme leaves through a proxy; nothing is exempt. */
+  const useProxy = () => {
+    process.env.HTTP_PROXY = 'http://proxy.invalid:8080';
+    process.env.HTTPS_PROXY = 'http://proxy.invalid:8080';
+  };
   let saved: Record<string, string | undefined>;
   beforeEach(() => {
     saved = Object.fromEntries(
@@ -259,7 +267,7 @@ describe('public-only deployment', () => {
   });
 
   it('checks every hop itself when a proxy makes the connections', async () => {
-    process.env.HTTPS_PROXY = 'http://proxy.invalid:8080';
+    useProxy();
     const hops: string[] = [];
     vi.stubGlobal(
       'fetch',
@@ -301,16 +309,70 @@ describe('public-only deployment', () => {
     expect(requests).toBe(before);
   });
 
-  it('leaves a name this machine cannot resolve to the proxy', async () => {
-    process.env.HTTPS_PROXY = 'http://proxy.invalid:8080';
+  it('leaves an unresolved name to the proxy unless it is private by construction', async () => {
+    useProxy();
     const proxied = vi.fn(async () => new Response('resolved by the proxy'));
     vi.stubGlobal('fetch', proxied);
+    // Many networks resolve public names only at the proxy.
     const response = await outboundFetch('http://unresolvable.invalid/');
     expect(await response.text()).toBe('resolved by the proxy');
+    expect(proxied).toHaveBeenCalledTimes(1);
+    // A proxy may resolve names of its own network; these can only be that.
+    for (const host of [
+      'huabu-no-such-intranet-host',
+      'wiki.huabu-no-such.corp',
+      'build.huabu-no-such.internal',
+      'nas.huabu-no-such.lan',
+    ])
+      await expect(outboundFetch(`http://${host}/`)).rejects.toThrow(REFUSED);
+    expect(proxied).toHaveBeenCalledTimes(1);
+  });
+
+  it('checks a hop that bypasses the proxy where its connection is made', async () => {
+    useProxy();
+    process.env.NO_PROXY = `localhost,127.0.0.1,exempt.example`;
+    const before = requests;
+    // Real fetches: the guarded dispatcher refuses these at connect time.
+    await expect(outboundFetch(`http://localhost:${port}/`)).rejects.toThrow(
+      REFUSED,
+    );
+    await expect(outboundFetch(`http://127.0.0.1:${port}/hop`)).rejects.toThrow(
+      REFUSED,
+    );
+    expect(requests).toBe(before);
+
+    const sent: { url: string; guarded: boolean }[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: URL, init: RequestInit & { dispatcher?: unknown }) => {
+        sent.push({ url: String(url), guarded: init.dispatcher !== undefined });
+        return url.pathname === '/start'
+          ? new Response(null, {
+              status: 302,
+              headers: { Location: 'http://exempt.example/next' },
+            })
+          : new Response('ok');
+      }),
+    );
+    await outboundFetch('http://93.184.215.14/start');
+    // The proxied hop is checked beforehand; the exempt one by its dispatcher.
+    expect(sent).toEqual([
+      { url: 'http://93.184.215.14/start', guarded: false },
+      { url: 'http://exempt.example/next', guarded: true },
+    ]);
+  });
+
+  it('guards a scheme that has no proxy of its own', async () => {
+    process.env.HTTPS_PROXY = 'http://proxy.invalid:8080';
+    const before = requests;
+    await expect(outboundFetch(`http://localhost:${port}/`)).rejects.toThrow(
+      REFUSED,
+    );
+    expect(requests).toBe(before);
   });
 
   it('drops credentials when a proxied redirect changes origin', async () => {
-    process.env.HTTPS_PROXY = 'http://proxy.invalid:8080';
+    useProxy();
     const seen: (string | null)[] = [];
     vi.stubGlobal(
       'fetch',
@@ -331,7 +393,7 @@ describe('public-only deployment', () => {
   });
 
   it('still connects member work directly behind a proxy', async () => {
-    process.env.HTTPS_PROXY = 'http://proxy.invalid:8080';
+    useProxy();
     const before = requests;
     await expect(
       withPublicNetworkOnly(() => outboundFetch(`http://127.0.0.1:${port}/`)),
@@ -404,6 +466,75 @@ describe('bounded response bodies', () => {
       ]);
     } finally {
       await opened.close();
+    }
+  });
+});
+
+describe('leavesThroughProxy', () => {
+  const through = (url: string, env: NodeJS.ProcessEnv) =>
+    leavesThroughProxy(new URL(url), env);
+  const BOTH = { HTTP_PROXY: 'http://p:1', HTTPS_PROXY: 'http://p:1' };
+
+  it('follows the proxy configured for the scheme', () => {
+    expect(through('http://example.com/', {})).toBe(false);
+    expect(through('https://example.com/', BOTH)).toBe(true);
+    expect(through('http://example.com/', BOTH)).toBe(true);
+    // An HTTP proxy also carries HTTPS; an HTTPS proxy does not carry HTTP.
+    expect(through('https://example.com/', { HTTP_PROXY: 'http://p:1' })).toBe(
+      true,
+    );
+    expect(through('http://example.com/', { HTTPS_PROXY: 'http://p:1' })).toBe(
+      false,
+    );
+    expect(through('https://example.com/', { https_proxy: 'http://p:1' })).toBe(
+      true,
+    );
+  });
+
+  it.each([
+    ['*', 'https://example.com/', false],
+    ['example.com', 'https://example.com/', false],
+    ['example.com', 'https://api.example.com/', false],
+    ['example.com', 'https://badexample.com/', true],
+    ['.example.com', 'https://example.com/', false],
+    ['*.example.com', 'https://api.example.com/', false],
+    ['*.example.com', 'https://example.com/', true],
+    ['EXAMPLE.com', 'https://Example.COM./', false],
+    ['example.com:8443', 'https://example.com/', true],
+    ['example.com:8443', 'https://example.com:8443/', false],
+    ['example.com:443', 'https://example.com/', false],
+    ['other.test, example.com', 'https://example.com/', false],
+    ['127.0.0.1', 'http://127.0.0.1:3000/', false],
+    ['::1', 'http://[::1]:3000/', false],
+    ['[::1]:3000', 'http://[::1]:3000/', false],
+    ['[::1]:3001', 'http://[::1]:3000/', true],
+    ['', 'https://example.com/', true],
+  ])('NO_PROXY=%j for %s: proxied=%s', (noProxy, url, expected) => {
+    expect(through(url, { ...BOTH, NO_PROXY: noProxy })).toBe(expected);
+    expect(through(url, { ...BOTH, no_proxy: noProxy })).toBe(expected);
+  });
+});
+
+describe('the guarded dispatcher and the built-in fetch', () => {
+  // Node's fetch and this package's undici are different copies with
+  // different handler protocols: an upgrade of either can leave the guarded
+  // dispatcher unable to return any response. The guard itself only admits
+  // public addresses, which a test cannot serve, so this checks the wrapping
+  // it depends on against a real response and a real redirect.
+  it('reads a response and follows a redirect through a wrapped dispatcher', async () => {
+    const { Agent, Dispatcher1Wrapper } = await import('undici');
+    const dispatcher = new Dispatcher1Wrapper(new Agent());
+    try {
+      const before = requests;
+      const response = await fetch(`http://127.0.0.1:${port}/hop`, {
+        dispatcher,
+      } as RequestInit);
+      expect(response.status).toBe(200);
+      expect(response.redirected).toBe(true);
+      expect(await response.text()).toContain('secret');
+      expect(requests).toBe(before + 2);
+    } finally {
+      await dispatcher.close();
     }
   });
 });
