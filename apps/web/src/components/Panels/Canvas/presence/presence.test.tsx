@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CANVAS_PRESENCE_LIMITS } from '@huabu/shared';
 
 import { useCanvasPresenceStore } from '@/store/canvasPresence/canvasPresenceStore';
+import { editingNodeId } from '@/store/canvasPresence/localEditing';
 
 import {
   PRESENCE_COLOR_TOKENS,
@@ -18,7 +19,6 @@ import {
 } from './presencePaint';
 import { RemoteCursors } from './RemoteCursors';
 import { RemoteNodeOutlines } from './RemoteNodeOutlines';
-import { editingNodeId } from './useReportCanvasPresence';
 
 import type { CanvasPresencePage } from '@huabu/shared';
 
@@ -358,6 +358,8 @@ describe('editingNodeId', () => {
       <div data-search-node-id="note-2">
         <div contenteditable="true"><p id="panel-caret">x</p></div>
         <button id="panel-button">b</button>
+        <div id="source" contenteditable="true" aria-readonly="true"><p id="source-caret">x</p></div>
+        <div data-not-node-content><input id="find" /></div>
       </div>
       <textarea id="chat"></textarea>`;
     document.body.append(panel);
@@ -377,6 +379,12 @@ describe('editingNodeId', () => {
       expect(editingNodeId(container, find('chat'))).toBeNull();
       expect(editingNodeId(container, document.body)).toBeNull();
       expect(editingNodeId(container, null)).toBeNull();
+      // A surface that shows text without letting it be changed: a source
+      // view that is read-only but keeps its caret, and the find field.
+      expect(editingNodeId(container, find('source-caret'))).toBeNull();
+      expect(editingNodeId(container, find('find'))).toBeNull();
+      find('source')?.removeAttribute('aria-readonly');
+      expect(editingNodeId(container, find('source-caret'))).toBe('note-2');
     } finally {
       panel.remove();
     }

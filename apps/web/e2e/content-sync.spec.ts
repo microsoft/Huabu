@@ -12,6 +12,7 @@ import {
 
 import { editsPerCommand } from './helpers';
 
+import type * as CanvasPresenceStore from '../src/store/canvasPresence/canvasPresenceStore';
 import type * as CanvasStore from '../src/store/canvasStore';
 import type { CreateCanvasResponse } from '@huabu/shared';
 
@@ -489,6 +490,113 @@ test('page B cannot start editing a text node in place while page A is editing i
   await textOn(b.page).dblclick();
   await expect(textOn(b.page).locator('textarea')).toBeFocused();
 
+  await b.context.close();
+});
+
+/** The node this page's presence says it is editing, and who it sees editing. */
+async function editingState(page: Page) {
+  return page.evaluate(async () => {
+    const path = '/src/store/canvasPresence/canvasPresenceStore.ts';
+    const { useCanvasPresenceStore } = (await import(
+      path
+    )) as typeof CanvasPresenceStore;
+    const state = useCanvasPresenceStore.getState();
+    return {
+      local: state.localEditingNodeId,
+      remote: Object.values(state.pages).flatMap((other) => [
+        ...other.editingNodeIds,
+      ]),
+    };
+  });
+}
+
+test('a locked-out page that puts its caret into the read-only raw Markdown of the note does not take the lock', async ({
+  browser,
+  request,
+}) => {
+  const { a, b } = await openBoth(browser, request, 'Content lock raw');
+  const rawEditor = (page: Page) =>
+    page.locator('[data-search-scope="node"] .cm-content');
+
+  // B has X open as raw Markdown and has left it: it is not editing.
+  await openPreview(b.page, X);
+  await b.page.getByRole('button', { name: 'Switch to raw markdown' }).click();
+  await expect(rawEditor(b.page)).toHaveCount(1);
+  await b.page
+    .locator(`.react-flow__node[data-id="${Y}"]`)
+    .click({ position: { x: 150, y: 12 } });
+  await expect
+    .poll(() => editingState(b.page))
+    .toEqual({
+      local: null,
+      remote: [],
+    });
+
+  // A starts editing X; B's source view becomes read-only and says why.
+  await openPreview(a.page, X);
+  await editablePreview(a.page).fill('Typed by page A');
+  await expect(b.page.locator('[data-edit-locked-notice]')).toHaveText(
+    LOCKED_HINT,
+  );
+  await expect(rawEditor(b.page)).toHaveAttribute('aria-readonly', 'true');
+  await expect(rawEditor(b.page)).toContainText('Typed by page A');
+
+  // B puts its caret into the source and types.
+  await rawEditor(b.page).click();
+  await expect(rawEditor(b.page)).toBeFocused();
+  await b.page.keyboard.type('typed by B while locked');
+  await b.page.waitForTimeout(1_000);
+
+  // B did not become the editor: still locked, nothing typed, nothing saved.
+  expect(await editingState(b.page)).toEqual({ local: null, remote: [X] });
+  await expect(b.page.locator('[data-edit-locked-notice]')).toHaveCount(1);
+  await expect(rawEditor(b.page)).toHaveAttribute('aria-readonly', 'true');
+  await expect(rawEditor(b.page)).not.toContainText('typed by B');
+  expect(b.calls.filter((call) => call.includes('/content'))).toEqual([]);
+  expect((await storeState(b.page)).pendingContent).toEqual([]);
+  // A is not told that B edits X, and goes on typing.
+  expect((await editingState(a.page)).remote).toEqual([]);
+  await expect(editablePreview(a.page)).toHaveCount(1);
+
+  await a.context.close();
+  await b.context.close();
+});
+
+test('searching in the preview of a note another page is editing does not take the lock', async ({
+  browser,
+  request,
+}) => {
+  const { a, b } = await openBoth(browser, request, 'Content lock find');
+
+  await openPreview(a.page, X);
+  await editablePreview(a.page).fill('Typed by page A');
+  await openPreview(b.page, X);
+  await expect(b.page.locator('[data-edit-locked-notice]')).toHaveText(
+    LOCKED_HINT,
+  );
+  await expect(previewEditor(b.page)).toHaveText('Typed by page A');
+
+  // B searches the read-only preview: its caret is in the find field.
+  await previewEditor(b.page).click();
+  await b.page.keyboard.press('ControlOrMeta+f');
+  const find = b.page.getByPlaceholder('Find…');
+  await find.click();
+  await expect(find).toBeFocused();
+  await find.pressSequentially('Typed');
+  await b.page.waitForTimeout(1_000);
+
+  expect(await editingState(b.page)).toEqual({ local: null, remote: [X] });
+  await expect(b.page.locator('[data-edit-locked-notice]')).toHaveCount(1);
+  await expect(editablePreview(b.page)).toHaveCount(0);
+  expect((await editingState(a.page)).remote).toEqual([]);
+  // The body cannot be typed into after the search either.
+  await b.page.keyboard.press('Escape');
+  await previewEditor(b.page).click();
+  await b.page.keyboard.type('typed by B while locked');
+  await expect(previewEditor(b.page)).toHaveText('Typed by page A');
+  expect(b.calls.filter((call) => call.includes('/content'))).toEqual([]);
+
+  await a.context.close();
   await b.context.close();
 });
 

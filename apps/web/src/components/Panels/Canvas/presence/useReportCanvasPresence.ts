@@ -16,7 +16,7 @@ import {
   selectEditLockHolder,
   showEditLockedHint,
 } from '@/store/canvasPresence/editLock';
-import { EDITABLE } from '@/store/canvasPresence/localEditing';
+import { editingNodeId } from '@/store/canvasPresence/localEditing';
 import { createPresencePointerTracker } from '@/store/canvasPresence/pointerTracker';
 import { createPresenceReporter } from '@/store/canvasPresence/presenceReporter';
 import useCanvasStore, { flushNodeContent } from '@/store/canvasStore';
@@ -26,34 +26,6 @@ import type { Node } from '@xyflow/react';
 
 /** What counts as the person still working in an editor. */
 const ACTIVITY_EVENTS = ['keydown', 'pointerdown', 'input'] as const;
-
-/**
- * The node whose text control has focus: a node edited in place on the
- * canvas, or the one open in the preview panel beside it. A read-only field
- * (a title that is shown in an input until it is edited) is not editing.
- */
-export function editingNodeId(
-  canvas: HTMLElement,
-  active: Element | null,
-): string | null {
-  const control = active?.closest(EDITABLE);
-  if (!active || !control) return null;
-  if (
-    (control instanceof HTMLInputElement ||
-      control instanceof HTMLTextAreaElement) &&
-    control.readOnly
-  )
-    return null;
-  if (canvas.contains(active))
-    return (
-      active.closest<HTMLElement>('.react-flow__node[data-id]')?.dataset.id ??
-      null
-    );
-  return (
-    active.closest<HTMLElement>('[data-search-node-id]')?.dataset
-      .searchNodeId ?? null
-  );
-}
 
 /**
  * Tell the other pages what this page is doing in the Space: where its mouse,
@@ -156,7 +128,6 @@ export function useReportCanvasPresence(domNode: HTMLDivElement | null): void {
       },
     });
     const syncEditing = (): void => editing.sync();
-    const resumeEditing = (): void => editing.resume();
     const noteActivity = (): void => editing.activity();
     // On `focusout` the next element is not focused yet.
     const afterBlur = (): void => void setTimeout(syncEditing, 0);
@@ -171,7 +142,7 @@ export function useReportCanvasPresence(domNode: HTMLDivElement | null): void {
         editing.sync();
       } else {
         reporter.announce();
-        editing.resume();
+        editing.sync();
       }
     };
     // The page may be restored from the back/forward cache, so withdraw
@@ -190,7 +161,7 @@ export function useReportCanvasPresence(domNode: HTMLDivElement | null): void {
     document.addEventListener('focusin', syncEditing);
     document.addEventListener('focusout', afterBlur);
     window.addEventListener('blur', windowBlur);
-    window.addEventListener('focus', resumeEditing);
+    window.addEventListener('focus', syncEditing);
     for (const type of ACTIVITY_EVENTS)
       document.addEventListener(type, noteActivity, {
         capture: true,
@@ -214,7 +185,7 @@ export function useReportCanvasPresence(domNode: HTMLDivElement | null): void {
       document.removeEventListener('focusout', afterBlur);
       editing.stop();
       window.removeEventListener('blur', windowBlur);
-      window.removeEventListener('focus', resumeEditing);
+      window.removeEventListener('focus', syncEditing);
       for (const type of ACTIVITY_EVENTS)
         document.removeEventListener(type, noteActivity, { capture: true });
       document.removeEventListener('visibilitychange', visibility);

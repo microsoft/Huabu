@@ -47,9 +47,13 @@ describe('pageIsEditing', () => {
 
   it('ignores read-only fields and controls outside the canvas', () => {
     mount(
-      '<div data-canvas-root><input id="mirror" readonly /></div><textarea id="composer"></textarea>',
+      '<div data-canvas-root><input id="mirror" readonly /><div id="source" contenteditable="true" aria-readonly="true" tabindex="0"></div></div><textarea id="composer"></textarea>',
     );
     document.getElementById('mirror')?.focus();
+    expect(pageIsEditing()).toBe(false);
+    // Read-only, though it keeps a caret for selecting and copying.
+    document.getElementById('source')?.focus();
+    expect(document.activeElement?.id).toBe('source');
     expect(pageIsEditing()).toBe(false);
     document.getElementById('composer')?.focus();
     expect(pageIsEditing()).toBe(false);

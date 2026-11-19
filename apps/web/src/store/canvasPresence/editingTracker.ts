@@ -15,8 +15,10 @@
  *    is reported after the server answered (at most `EDIT_RELEASE_CAP_MS`
  *    later), so a page that starts editing right after it has that text.
  *
- * When the person comes back to a control another page has started editing
- * meanwhile, the control is blurred instead of the report being resumed.
+ * A node another page is editing is never taken: when the caret gets into a
+ * control of it — the person clicks into it, or comes back to a control the
+ * other page has started editing meanwhile — the control is blurred instead
+ * of the node being reported.
  */
 
 /** Longest a release waits for the last save of the node. */
@@ -36,19 +38,18 @@ export interface EditingTrackerOptions {
   /** Save the node's queued content; settles when the server has answered. */
   save: (nodeId: string) => Promise<void>;
   /**
-   * The person returned to a control of `nodeId`. Returns `true` when another
-   * page is editing it now; the caller has then taken focus away.
+   * This page is about to report `nodeId`, which it does not report now.
+   * Returns `true` when another page is editing it; the caller has then
+   * taken focus away.
    */
   yieldIfHeldElsewhere: (nodeId: string) => boolean;
 }
 
 export interface EditingTracker {
-  /** Focus changed. */
+  /** Focus changed, or the page regained focus or became visible. */
   sync(): void;
   /** A key press, pointer press or input happened on the page. */
   activity(): void;
-  /** The page regained focus or became visible. */
-  resume(): void;
   stop(): void;
 }
 
@@ -84,7 +85,11 @@ export function createEditingTracker(
   function sync(): void {
     if (stopped) return;
     const focused = options.focusedNodeId();
-    const id = focused && !idle && options.pageActive() ? focused : null;
+    let id = focused && !idle && options.pageActive() ? focused : null;
+    // A node this page is not reporting may be another page's by now. However
+    // the caret got into one of its controls — a click, or coming back to
+    // the page — the node is not taken from the page that is editing it.
+    if (id && id !== reported && options.yieldIfHeldElsewhere(id)) id = null;
     options.setLocal(id);
     if (id === reported) return;
     const previous = reported;
@@ -111,24 +116,14 @@ export function createEditingTracker(
     void saved.then(send, send);
   }
 
-  function resume(): void {
-    if (stopped) return;
-    const focused = options.focusedNodeId();
-    // Only a control this page stopped reporting can have been taken over.
-    if (focused && focused !== reported && options.pageActive())
-      options.yieldIfHeldElsewhere(focused);
-    sync();
-  }
-
   return {
     sync,
-    resume,
     activity() {
       if (stopped) return;
       lastActivity = Date.now();
       if (!idle) return;
       idle = false;
-      resume();
+      sync();
     },
     stop() {
       stopped = true;

@@ -710,7 +710,7 @@ Two pages do not edit the same node's body, title or properties at once. `editin
 
 The toast is shown at most once per 1.5 s. The outline with `· editing` is drawn as before.
 
-**What holds the lock** ([editingTracker.ts](../../apps/web/src/store/canvasPresence/editingTracker.ts)). A page reports N while a text control of N has focus — on the canvas, or in the preview of N — and the page itself has focus and is visible. A read-only field does not count. Opening a Note's preview focuses its editor, so the lock starts there, before the first key press.
+**What holds the lock** ([editingTracker.ts](../../apps/web/src/store/canvasPresence/editingTracker.ts)). A page reports N while a control through which N's saved content can be changed has focus — on the canvas, or in the preview of N — and the page itself has focus and is visible. Focus alone is not editing: one classifier (`writableControl` in [localEditing.ts](../../apps/web/src/store/canvasPresence/localEditing.ts)) decides it for the report, for the page's own exemption below, and for the gates that keep a reload or a remote deletion away from a control in use. It does not count a read-only field (`readOnly`), a read-only editor that keeps its caret for selecting and copying (`aria-readonly`: the raw Markdown source and the file source view while they are read-only), or a control inside the node's preview that edits nothing of the node (`data-not-node-content`: the find field). Opening a Note's preview focuses its editor, so the lock starts there, before the first key press.
 
 **What releases it.**
 
@@ -720,9 +720,9 @@ The toast is shown at most once per 1.5 s. The outline with `· editing` is draw
 - The page closes or navigates away (`leave`), its stream closes, or it stops reporting for 75 s (presence expiry).
 - The locked-out page's own stream drops: presence is cleared there, so it is not locked while it cannot know. Its saves are then checked by revision only.
 
-When a page returns (window focus, tab shown, input after the idle release) to a control of a node another page has started editing meanwhile, the control is blurred and the toast is shown instead of the lock being taken back.
+A node another page is editing is never taken. Whenever a page is about to report a node it is not reporting — the caret was put into one of its controls, or the page returned (window focus, tab shown, input after the idle release) to a control of a node another page has started editing meanwhile — and another page reports that node, the control is blurred and the toast is shown instead. So a locked-out page cannot become the editor by focusing something, and its lock stays.
 
-**A page that is itself editing N is never locked out of N.** If two pages start in the same instant, both keep their editor and the revision check decides between their saves. This also means a notice cannot remove a caret from under someone who is typing.
+**A page that is itself editing N is never locked out of N.** That is a page whose report of N the rule above let through: if two pages start in the same instant, before either has seen the other's report, both keep their editor and the revision check decides between their saves. This also means a notice cannot remove a caret from under someone who is typing.
 
 Limits: the lock is per node, not per field: a property editor on one page still makes the body read-only on the others and the reverse, although a body and a property can no longer refuse each other. Typing in a Question's chat composer and renaming from the layer panel or the chat header do not report editing, so they hold no lock (they are refused by one). The release can reach another page slightly before the saved content does; a person who starts typing in that gap gets the content-conflict choice.
 

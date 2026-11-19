@@ -124,7 +124,7 @@ describe('editing tracker', () => {
     expect(reports).toEqual(['n1', null]);
 
     page.active = true;
-    tracker.resume();
+    tracker.sync();
     expect(reports).toEqual(['n1', null, 'n1']);
   });
 
@@ -157,11 +157,20 @@ describe('editing tracker', () => {
 
     page.heldElsewhere = true;
     page.active = true;
-    tracker.resume();
+    tracker.sync();
 
     expect(yielded).toEqual(['n1']);
     expect(reports).toEqual(['n1', null]);
     expect(local.at(-1)).toBeNull();
+  });
+
+  it('does not take a node another page is editing when a control of it gets focus', () => {
+    const { page, reports, local, yielded, focus } = setup();
+    page.heldElsewhere = true;
+    focus('n1');
+    expect(yielded).toEqual(['n1']);
+    expect(reports).toEqual([]);
+    expect(local).not.toContain('n1');
   });
 
   it('does not ask whether a node is held elsewhere while this page still reports it', () => {
@@ -169,7 +178,7 @@ describe('editing tracker', () => {
     focus('n1');
     page.heldElsewhere = true;
     // A window focus event while the page never stopped editing.
-    tracker.resume();
+    tracker.sync();
     expect(yielded).toEqual([]);
   });
 
