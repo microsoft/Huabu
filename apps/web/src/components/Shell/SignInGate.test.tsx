@@ -6,6 +6,8 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { SignInGate } from './SignInGate';
+import en from '../../i18n/resources/en/common.json';
+import zhCN from '../../i18n/resources/zh-CN/common.json';
 import { AUTH_REQUIRED_EVENT } from '../../api/_client';
 import { SESSION_CHANGE_EVENT } from '../../api/identity';
 import { useIdentityStore } from '../../store/identityStore';
@@ -1115,3 +1117,18 @@ it('keeps renewal blocked when the adopted session identity cannot be verified',
   expect(container.textContent).toContain('Identity service unavailable');
   expect(resend).not.toHaveBeenCalled();
 });
+
+it.each([
+  ['en', en],
+  ['zh-CN', zhCN],
+])(
+  'keeps the %s admission path on one line in the waiting copy',
+  (_locale, resources) => {
+    const copy = resources.auth.noAccessHowTo;
+    // "Settings → People" must not break around the arrow on a narrow screen.
+    expect(copy).toContain('→');
+    // Both sides of every arrow are non-breaking spaces, never breakable ones.
+    expect(copy).not.toMatch(/[ \t\n]→|→[ \t\n]/u);
+    expect(copy).toMatch(/\u00a0→\u00a0/u);
+  },
+);
