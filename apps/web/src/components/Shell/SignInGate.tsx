@@ -542,8 +542,10 @@ const VERIFYING_NOTICE_MS = 1_000;
  * Covers the running app while its session is re-verified, such as on every
  * return to the tab. The app stays visible underneath, since a check that
  * confirms the same person changes nothing, but the cover still catches
- * pointer input, including on dialogs portalled outside the inert app root.
- * Only a check that outlasts {@link VERIFYING_NOTICE_MS} shows a small notice.
+ * pointer input, including on dialogs and toasts portalled outside the inert
+ * app root: it sits above both (z-index 9999), so its notice is never hidden
+ * behind a toast. Only a check that outlasts {@link VERIFYING_NOTICE_MS}
+ * shows a small notice.
  */
 function VerifyingCover() {
   const { t } = useTranslation();
@@ -555,7 +557,7 @@ function VerifyingCover() {
   return (
     <div
       data-testid="session-verifying-cover"
-      className="fixed inset-0 z-[1000] cursor-progress"
+      className="fixed inset-0 z-10000 cursor-progress"
     >
       {slow && (
         <div className="absolute inset-x-0 top-4 flex justify-center">

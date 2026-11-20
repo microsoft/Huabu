@@ -336,6 +336,47 @@ test('People keeps each person whole and their access switch beside or below the
   }
 });
 
+test('a slow session check shows its notice above any toast', async ({
+  page,
+}, testInfo) => {
+  let hold: Promise<void> | null = null;
+  await page.route('**/api/identity', async (route) => {
+    await hold;
+    await route.fulfill({ json: member });
+  });
+  await page.goto('/playground/components');
+  await page.evaluate(async () => {
+    const load = (path: string) => import(/* @vite-ignore */ path);
+    const { toast } = await load('/src/components/Common/Toast.tsx');
+    toast(
+      'A persistent toast whose text runs long enough to cross the top of the page',
+      { duration: 0 },
+    );
+  });
+  await expect(
+    page.getByText('A persistent toast', { exact: false }),
+  ).toBeVisible();
+  let release!: () => void;
+  hold = new Promise<void>((resolve) => (release = resolve));
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+  const notice = page
+    .getByRole('status')
+    .filter({ hasText: en.auth.verifyingSession });
+  await expect(notice).toBeVisible();
+  // The notice is the topmost thing where it is drawn, not hidden by the toast.
+  const box = (await notice.boundingBox())!;
+  const onTop = await notice.evaluate(
+    (el, point) => el.contains(document.elementFromPoint(point.x, point.y)),
+    { x: box.x + box.width / 2, y: box.y + box.height / 2 },
+  );
+  expect(onTop).toBe(true);
+  await page.screenshot({
+    path: testInfo.outputPath('verifying-over-toast.png'),
+  });
+  release();
+  await expect(notice).toHaveCount(0);
+});
+
 test('Bubble users open a Server folder as a Workspace where Workspaces are folders', async ({
   page,
 }, testInfo) => {
