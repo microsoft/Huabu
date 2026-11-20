@@ -251,6 +251,91 @@ test('Bubble administrators see People in the current Settings navigation', asyn
   });
 });
 
+test('People keeps each person whole and their access switch beside or below them', async ({
+  page,
+}, testInfo) => {
+  const admin = {
+    ...member,
+    principal: {
+      principalId: 'admin',
+      kind: 'user',
+      displayName: 'Casey Jo Whitaker',
+      email: 'casey.whitaker@contoso.example',
+    },
+    owner: true,
+  };
+  const morgan = {
+    principalId: 'morgan',
+    kind: 'user',
+    displayName: 'Morgan Alexandra Chen',
+    email: 'morgan.alexandra.chen@fabrikam.example',
+  };
+  await page.route('**/api/identity', (route) =>
+    route.fulfill({ json: admin }),
+  );
+  await page.route('**/api/workspaces', (route) =>
+    route.fulfill({ json: [{ workspaceId: 'default', name: 'Default' }] }),
+  );
+  await page.route('**/api/people', (route) =>
+    route.fulfill({
+      json: [
+        {
+          principal: admin.principal,
+          member: false,
+          admin: true,
+          workspaces: [],
+        },
+        { principal: morgan, member: false, admin: false, workspaces: [] },
+      ],
+    }),
+  );
+  await page.goto('/playground/components');
+  await page.evaluate(async () => {
+    const load = (path: string) => import(/* @vite-ignore */ path);
+    const { useSettingsUiStore } = await load('/src/store/settingsUiStore.ts');
+    useSettingsUiStore.getState().open('people');
+  });
+  const dialog = page.getByRole('dialog', {
+    name: en.settings.title,
+    exact: true,
+  });
+  const name = dialog.getByText(morgan.displayName, { exact: true });
+  const email = dialog.getByText(morgan.email, { exact: true });
+  const toggle = dialog.getByRole('switch', {
+    name: `${en.people.serviceAccess}: ${morgan.displayName}`,
+  });
+  await expect(name).toBeVisible();
+  /** True when the element shows all of its text, with nothing cut off. */
+  const whole = (locator: typeof name) =>
+    locator.evaluate((el) => el.scrollWidth <= el.clientWidth + 1);
+  for (const [width, height, stacked] of [
+    [1440, 900, false],
+    [390, 844, true],
+    [320, 700, true],
+  ] as const) {
+    await page.setViewportSize({ width, height });
+    await toggle.scrollIntoViewIfNeeded();
+    // The name and email an administrator decides on are never truncated.
+    expect(await whole(name), `name at ${width}px`).toBe(true);
+    expect(await whole(email), `email at ${width}px`).toBe(true);
+    const emailBox = (await email.boundingBox())!;
+    const toggleBox = (await toggle.boundingBox())!;
+    // In a narrow list the switch moves below the person it controls; in a
+    // wide one it stays beside them.
+    if (stacked)
+      expect(toggleBox.y, `switch at ${width}px`).toBeGreaterThanOrEqual(
+        emailBox.y + emailBox.height - 1,
+      );
+    else
+      expect(toggleBox.y, `switch at ${width}px`).toBeLessThan(
+        emailBox.y + emailBox.height,
+      );
+    await page.screenshot({
+      path: testInfo.outputPath(`people-layout-${width}.png`),
+    });
+  }
+});
+
 test('Bubble users open a Server folder as a Workspace where Workspaces are folders', async ({
   page,
 }, testInfo) => {
