@@ -640,6 +640,35 @@ describe('SignInGate', () => {
     expect(identityChecks()).toBe(before + 2);
   });
 
+  it('lets a later return replace a foreground check that never settles', async () => {
+    routes['GET /api/identity'] = () => json(MEMBER);
+    await mount();
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      const before = identityChecks();
+      // The first read hangs; without Web Locks nothing queues behind it.
+      vi.mocked(fetch).mockImplementationOnce(
+        () => new Promise<Response>(() => {}),
+      );
+      await act(async () => window.dispatchEvent(new Event('focus')));
+      expect(identityChecks()).toBe(before + 1);
+      expect(container.querySelector('[inert]')).not.toBeNull();
+      // Within the join window, another return still joins the hung check.
+      vi.setSystemTime(Date.now() + 1_000);
+      await act(async () => window.dispatchEvent(new Event('focus')));
+      expect(identityChecks()).toBe(before + 1);
+      // A return after it asks again, and that answer uncovers the app.
+      vi.setSystemTime(Date.now() + 5_000);
+      await act(async () => window.dispatchEvent(new Event('focus')));
+      expect(identityChecks()).toBe(before + 2);
+      for (let i = 0; i < 3; i++) await act(async () => {});
+      expect(container.querySelector('[inert]')).toBeNull();
+      expect(container.textContent).toBe('app');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('says what a slow re-verification is waiting for', async () => {
     routes['GET /api/identity'] = () => json(MEMBER);
     await mount();

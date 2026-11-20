@@ -58,6 +58,13 @@ const RECHECK_MIN_MS = 2_000;
 const RECHECK_MAX_MS = 30_000;
 /** How often a person waiting for admission asks again, while the page is visible. */
 const NO_ACCESS_RECHECK_MS = 15_000;
+/**
+ * How long a pending foreground check absorbs later foreground events. One
+ * return fires its events within milliseconds; a later return past this
+ * window starts its own check, so an identity read that never settles cannot
+ * keep the app covered.
+ */
+const FOREGROUND_JOIN_MS = 5_000;
 
 /**
  * The session is an HttpOnly cookie for this origin, which an API on any
@@ -387,10 +394,12 @@ export function SignInGate({ children }: { children: ReactNode }) {
     return () => window.removeEventListener(AUTH_REQUIRED_EVENT, recheck);
   }, [check, adopt, recover, blockApp]);
 
-  // The check a foreground event started, while it is still the one that
-  // decides. One return to the page fires both `focus` and
+  // The check a foreground event started, and when, while it is still the
+  // one that decides. One return to the page fires both `focus` and
   // `visibilitychange`; the second joins the first instead of asking again.
-  const foregroundRun = useRef<number | null>(null);
+  const foregroundRun = useRef<{ run: number; startedAt: number } | null>(
+    null,
+  );
 
   // Waiting members poll for admission. A running Bubble app also verifies
   // its shared cookie on foreground and on peer writes, without refreshing
@@ -401,9 +410,9 @@ export function SignInGate({ children }: { children: ReactNode }) {
       // `check` takes its run number before its first await.
       const pending = check(undefined, false);
       const run = latestCheck.current;
-      foregroundRun.current = run;
+      foregroundRun.current = { run, startedAt: Date.now() };
       void pending.finally(() => {
-        if (foregroundRun.current === run) foregroundRun.current = null;
+        if (foregroundRun.current?.run === run) foregroundRun.current = null;
       });
     };
     const verifyPrincipal = () => {
@@ -413,10 +422,12 @@ export function SignInGate({ children }: { children: ReactNode }) {
       )
         return;
       // Any later check, or a peer's cookie write, supersedes the pending
-      // one; only then does this event need a check of its own.
+      // one; so does a return after the join window, in case it hangs.
+      const pending = foregroundRun.current;
       if (
-        foregroundRun.current !== null &&
-        foregroundRun.current === latestCheck.current
+        pending !== null &&
+        pending.run === latestCheck.current &&
+        Date.now() - pending.startedAt < FOREGROUND_JOIN_MS
       )
         return;
       if (awaitingAccess) verifyNow();
