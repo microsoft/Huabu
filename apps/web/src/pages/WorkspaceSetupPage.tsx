@@ -96,7 +96,6 @@ export default function WorkspaceSetupPage() {
             recentWorkspaces={recentWorkspaces}
             activateRecentWorkspace={activateRecentWorkspace}
             removeRecentWorkspace={removeRecentWorkspace}
-            renameWorkspace={renameWorkspace}
             selectWorkspace={selectWorkspace}
             onActivated={() => navigate('/', { replace: true })}
           />
@@ -113,9 +112,10 @@ export default function WorkspaceSetupPage() {
 type RenameWorkspace = (workspaceId: string, name: string) => Promise<void>;
 
 /**
- * A chooser row that can turn into a name field. The row's own button
- * (`children`) is shown until the pencil is pressed; the pencil is offered
- * only when the server says the caller may manage this Workspace.
+ * A named-Workspace chooser row that can turn into a name field. The row's
+ * own button (`children`) is shown until the pencil is pressed; the pencil is
+ * offered only when the server says the caller may manage this Workspace.
+ * The folder chooser has no rename: its Workspaces are known by their paths.
  */
 function RenamableWorkspaceRow({
   workspace,
@@ -377,7 +377,6 @@ interface FreeSetupProps {
   recentWorkspaces: WorkspaceDescriptor[];
   activateRecentWorkspace: (workspaceId: string) => Promise<void>;
   removeRecentWorkspace: (workspaceId: string) => void;
-  renameWorkspace: RenameWorkspace;
   selectWorkspace: (path: string) => Promise<void>;
   onActivated: () => void;
 }
@@ -388,7 +387,6 @@ function FreeSetup({
   recentWorkspaces,
   activateRecentWorkspace,
   removeRecentWorkspace,
-  renameWorkspace,
   selectWorkspace,
   onActivated,
 }: FreeSetupProps) {
@@ -459,49 +457,35 @@ function FreeSetup({
           </div>
           <ul className="space-y-1">
             {recentWorkspaces.map((workspace) => (
-              <li key={workspace.workspaceId}>
-                {/* A folder Workspace is known by its path; one without a
-                    folder (SQL storage) only by its name, so that is the
-                    one worth renaming here. */}
-                <RenamableWorkspaceRow
-                  workspace={
-                    workspace.path === null
-                      ? workspace
-                      : { ...workspace, canManage: false }
-                  }
-                  renameWorkspace={renameWorkspace}
+              <li
+                key={workspace.workspaceId}
+                className="group flex items-center gap-1"
+              >
+                <Button
+                  variant="ghost"
+                  tone="neutral"
+                  size="sm"
+                  onClick={() => void handleSelectRecent(workspace.workspaceId)}
                   disabled={isLoading}
+                  className="min-w-0 flex-1 justify-start rounded-lg text-left"
                 >
+                  <FolderOpen size={14} className="text-fg-subtle shrink-0" />
+                  <span className="text-fg-muted truncate text-sm">
+                    {workspace.path ?? workspace.name}
+                  </span>
+                </Button>
+                {!workspace.active && (
                   <Button
                     variant="ghost"
-                    tone="neutral"
+                    iconOnly
                     size="sm"
-                    onClick={() =>
-                      void handleSelectRecent(workspace.workspaceId)
-                    }
-                    disabled={isLoading}
-                    className="min-w-0 flex-1 justify-start rounded-lg text-left"
+                    onClick={() => removeRecentWorkspace(workspace.workspaceId)}
+                    className="opacity-0 transition-all group-hover:opacity-100"
+                    title={t('workspace.removeRecent')}
                   >
-                    <FolderOpen size={14} className="text-fg-subtle shrink-0" />
-                    <span className="text-fg-muted truncate text-sm">
-                      {workspace.path ?? workspace.name}
-                    </span>
+                    <X size={14} />
                   </Button>
-                  {!workspace.active && (
-                    <Button
-                      variant="ghost"
-                      iconOnly
-                      size="sm"
-                      onClick={() =>
-                        removeRecentWorkspace(workspace.workspaceId)
-                      }
-                      className="opacity-0 transition-all group-hover:opacity-100"
-                      title={t('workspace.removeRecent')}
-                    >
-                      <X size={14} />
-                    </Button>
-                  )}
-                </RenamableWorkspaceRow>
+                )}
               </li>
             ))}
           </ul>

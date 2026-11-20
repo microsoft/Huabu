@@ -222,3 +222,33 @@ it('renames only the Workspaces the caller may manage', async () => {
     mocks.state.recentWorkspaces = original;
   }
 });
+
+it('offers no rename in the folder chooser', async () => {
+  const original = mocks.state.recentWorkspaces;
+  // A pathless Workspace the local caller may manage (SQL storage) still gets
+  // no pencil here: the folder chooser knows Workspaces by their paths.
+  mocks.state.recentWorkspaces = [
+    {
+      workspaceId: 'sql',
+      name: 'Default',
+      path: null,
+      active: true,
+      canManage: true,
+    },
+  ];
+  try {
+    await act(async () =>
+      root.render(
+        <MemoryRouter>
+          <WorkspaceSetupPage key="folder-rename" />
+        </MemoryRouter>,
+      ),
+    );
+    expect(container.textContent).toContain('Default');
+    expect(
+      container.querySelector('button[aria-label="workspace.renameLabel"]'),
+    ).toBeNull();
+  } finally {
+    mocks.state.recentWorkspaces = original;
+  }
+});
