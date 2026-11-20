@@ -2668,8 +2668,14 @@ try {
     if (route.request().method() === 'PUT') await saveGate;
     await route.continue();
   });
-  // The Server accepts the change again; closing sends it with the rest.
+  // The Server accepts the change again. A queue that gave up while it was
+  // refused stays stopped until it is told to resend, as the user would.
   await a.unroute('**/api/canvas/*/execute');
+  await a.evaluate(async () => {
+    const { resendUnsavedCanvasEdits } =
+      await import('/src/store/canvasStore.ts');
+    await resendUnsavedCanvasEdits();
+  });
   await a.evaluate(async () => {
     const { default: store } = await import('/src/store/canvasStore.ts');
     store.getState().updateNodeData('tabs-smoke-note', {
