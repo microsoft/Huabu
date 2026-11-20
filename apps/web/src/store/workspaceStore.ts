@@ -14,6 +14,7 @@ import {
   openFolderWorkspace as adoptFolderWorkspace,
   putWorkspacePath,
   removeWorkspace,
+  renameWorkspace as renameWorkspaceRequest,
   type WorkspaceCapabilities,
   type WorkspaceDescriptor,
   type WorkspaceInfo,
@@ -118,6 +119,13 @@ interface WorkspaceState {
 
   /** (Free mode) Unregister an inactive Workspace. */
   removeRecentWorkspace: (workspaceId: string) => void;
+
+  /**
+   * Rename a Workspace the caller may manage. Updates its chooser row and,
+   * when it is the active one, the name shown in the header. Throws on
+   * failure so the caller can report it.
+   */
+  renameWorkspace: (workspaceId: string, name: string) => Promise<void>;
 
   /**
    * Publish a freshly-counted canvas total. Pass `null` to clear the
@@ -532,6 +540,20 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
       .catch(() => {
         // Surface nothing — removing an inactive registration is best-effort.
       });
+  },
+
+  renameWorkspace: async (workspaceId: string, name: string) => {
+    const renamed = await renameWorkspaceRequest(workspaceId, name);
+    set((state) => ({
+      recentWorkspaces: state.recentWorkspaces.map((workspace) =>
+        workspace.workspaceId === workspaceId
+          ? { ...workspace, name: renamed.name }
+          : workspace,
+      ),
+      ...(state.workspaceId === workspaceId
+        ? { workspaceName: renamed.name }
+        : {}),
+    }));
   },
 
   setCanvasCount: (count: number | null) => {
