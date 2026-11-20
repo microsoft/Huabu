@@ -315,6 +315,32 @@ describe('quick switch popover', () => {
     expect(label()).toBe('Default');
   });
 
+  it('keeps a rename made while the list was being refreshed', async () => {
+    const api = await import('../../api/workspace');
+    let answer: () => void = () => {};
+    vi.mocked(api.listWorkspaces).mockImplementationOnce(async () => {
+      // The list as it stood when the chooser opened, answered late.
+      const stale = server.workspaces.map((workspace) => ({
+        ...structuredClone(workspace),
+        active: workspace.workspaceId === server.current,
+      }));
+      await new Promise<void>((resolve) => (answer = resolve));
+      return stale;
+    });
+    await mount();
+    await click(trigger());
+    await act(async () =>
+      useWorkspaceStore.getState().renameWorkspace('lab', 'Lab notes'),
+    );
+    await act(async () => answer());
+    expect(
+      useWorkspaceStore
+        .getState()
+        .recentWorkspaces.find((workspace) => workspace.workspaceId === 'lab')
+        ?.name,
+    ).toBe('Lab notes');
+  });
+
   it('closes without switching when the current Workspace is chosen', async () => {
     await mount();
     await click(trigger());

@@ -550,11 +550,16 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   },
 
   refreshWorkspaces: async () => {
-    const { workspaceId } = get();
+    const { workspaceId, recentWorkspaces } = get();
     try {
       const listed = await listWorkspaces();
-      // A switch that landed meanwhile has already read its own list.
-      if (get().workspaceId === workspaceId && !get().isSyncing)
+      // A switch that landed meanwhile has already read its own list, and a
+      // rename that landed meanwhile is newer than this answer.
+      if (
+        get().workspaceId === workspaceId &&
+        !get().isSyncing &&
+        get().recentWorkspaces === recentWorkspaces
+      )
         set({ recentWorkspaces: listed });
     } catch (error) {
       console.warn('Could not refresh the Workspace list:', error);
