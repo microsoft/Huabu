@@ -477,7 +477,7 @@ importers:
         specifier: ^4.18.7
         version: 4.18.7(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       remark-cjk-friendly:
-        specifier: 2.3.4
+        specifier: ^2.3.4
         version: 2.3.4(@types/mdast@4.0.4)(micromark-util-types@2.0.2)(micromark@4.0.2)(unified@11.0.5)
       remark-cjk-friendly-gfm-strikethrough:
         specifier: ^2.3.3
