@@ -320,6 +320,45 @@ describe('automatic admission', () => {
     expect(await identity('erin')).toMatchObject({ member: true });
   });
 
+  it('readmits a person removed before blocks existed, unless an administrator blocks them first', async () => {
+    const { store, identity, setAutomatic, setMember, person } = await host();
+    // Alice and Bob were admitted and later removed by a Server without
+    // admission blocks: the grant went, and nothing else was recorded.
+    for (const principalId of ['alice', 'bob']) {
+      expect(await identity(principalId)).toMatchObject({ member: false });
+      await store.grants.add({
+        target: { type: 'system' },
+        principalId,
+        role: 'member',
+        grantedByPrincipalId: 'admin',
+      });
+      for (const row of await store.grants.list({
+        target: { type: 'system' },
+        principalId,
+      }))
+        await store.grants.remove(row.grantId);
+      expect(await person(principalId)).toMatchObject({
+        member: false,
+        blocked: false,
+      });
+    }
+    // The administrator keeps Bob out before turning admission on: admit,
+    // then remove, which records a block.
+    await setMember('bob', true);
+    await setMember('bob', false);
+    expect(await person('bob')).toMatchObject({ blocked: true });
+
+    await setAutomatic(true);
+    // Alice looks like anyone waiting, so her next sign-in admits her.
+    expect(await identity('alice')).toMatchObject({ member: true });
+    expect(await person('alice')).toMatchObject({ joinedAutomatically: true });
+    expect(await identity('bob')).toMatchObject({ member: false });
+    expect(await person('bob')).toMatchObject({
+      member: false,
+      blocked: true,
+    });
+  });
+
   it('keeps everyone already admitted when it is turned off', async () => {
     const { identity, setAutomatic, person } = await host();
     await setAutomatic(true);
