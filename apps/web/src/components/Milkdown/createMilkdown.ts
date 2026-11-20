@@ -1719,15 +1719,11 @@ function createLinkClickHandler(
     if (!anchor || !view.dom.contains(anchor)) return false;
 
     const rawHref = anchor.getAttribute('href');
-    // `#node-<id>` addresses a node of this Space; it is the only non-HTTP(S)
-    // href that may be activated, and it never leaves the app.
-    const nodeReference = parseNodeReferenceHref(
-      rawHref,
-      window.location.origin,
-    );
-    const isLocalNodeLink =
-      nodeReference !== null && nodeReference.canvasId === undefined;
-    const href = isLocalNodeLink
+    // A node reference (`#node-<id>` or a deep link on this origin) is in-app
+    // navigation. It is the only non-HTTP(S) href that may be activated.
+    const isNodeLink =
+      parseNodeReferenceHref(rawHref, window.location.origin) !== null;
+    const href = isNodeLink
       ? (rawHref ?? '').trim()
       : normalizeSafeLinkHref(rawHref);
     if (!href) {
@@ -1737,7 +1733,7 @@ function createLinkClickHandler(
 
     if (mouseEvent.button !== 0) {
       // A fragment href would otherwise open this app again in a new tab.
-      if (isLocalNodeLink) mouseEvent.preventDefault();
+      if (isNodeLink) mouseEvent.preventDefault();
       return false;
     }
     const hasFollowModifier = isMac ? mouseEvent.metaKey : mouseEvent.ctrlKey;
@@ -1764,7 +1760,7 @@ function createLinkClickHandler(
     }
     // A node link is in-app navigation: only the host can follow it, and a
     // follow modifier must not send it to the browser.
-    if (isLocalNodeLink) {
+    if (isNodeLink) {
       onLinkClick?.(href);
       return true;
     }
@@ -1803,7 +1799,7 @@ function createLinkClickHandler(
         anchor.getAttribute('href'),
         window.location.origin,
       );
-      if (!reference || reference.canvasId !== undefined) return false;
+      if (!reference) return false;
       event.preventDefault();
       return true;
     },

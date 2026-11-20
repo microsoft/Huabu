@@ -12,7 +12,10 @@ import { CenterArea } from '@/pages/CanvasPage/CenterArea.tsx';
 import { MainLayout } from '@/pages/CanvasPage/MainLayout.tsx';
 import { usePanelStore } from '@/store/panelStore';
 import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store';
-import { activateNodeTarget } from '@/utils/activateNodeTarget';
+import {
+  activateNodeTarget,
+  isLocateOnlyNavigation,
+} from '@/utils/activateNodeTarget';
 import { fitNodesOnCanvas } from '@/utils/canvasViewport';
 import { readNodeDeepLinkIntent } from '@/utils/nodeDeepLink';
 import { isVisibleWorldNode } from '@/utils/spaceHierarchy';
@@ -284,13 +287,17 @@ export default function CanvasPage() {
     if (!rfInstance) return;
 
     consumedDeepLinkActivationRef.current = activation;
-    activateNodeTarget(intent.nodeId, { openPreview: true });
+    // A document link that crossed Spaces only locates; URL entry also opens.
+    activateNodeTarget(intent.nodeId, {
+      openPreview: !isLocateOnlyNavigation(location.state),
+    });
   }, [
     canvasId,
     isLoading,
     isPreviewFullscreen,
     location.key,
     location.search,
+    location.state,
     previewCanvasId,
     rfInstance,
     storeCanvasId,

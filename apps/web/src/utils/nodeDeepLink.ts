@@ -57,9 +57,10 @@ export function buildNodeReferenceHref(nodeId: string): string {
 }
 
 /**
- * Recognise the two in-app node link forms authored in Markdown: the
- * Space-relative `#node-<id>` and a same-origin `/canvas/<id>?node=<id>` deep
- * link. Anything else is an ordinary document link.
+ * Recognise the in-app node link forms authored in Markdown: the
+ * Space-relative `#node-<id>` and a `/canvas/<id>?node=<id>` deep link, either
+ * root-relative or absolute on this origin. Anything else is an ordinary
+ * document link.
  */
 export function parseNodeReferenceHref(
   href: string | null | undefined,
@@ -73,7 +74,12 @@ export function parseNodeReferenceHref(
   }
   let url: URL;
   try {
-    url = new URL(trimmed);
+    // A root-relative deep link is same-origin by construction; any other
+    // relative href is not a node reference.
+    url =
+      trimmed.startsWith('/') && !trimmed.startsWith('//')
+        ? new URL(trimmed, origin)
+        : new URL(trimmed);
   } catch {
     return null;
   }

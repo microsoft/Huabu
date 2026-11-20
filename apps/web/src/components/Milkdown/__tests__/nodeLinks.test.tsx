@@ -9,6 +9,7 @@ import { MilkdownMessageCard } from '@/components/Messages/AIMessage/MilkdownMes
 import { MilkdownPreview } from '@/components/Milkdown/MilkdownPreview';
 import { isElectron } from '@/hooks/useElectron';
 import useCanvasStore from '@/store/canvasStore';
+import { usePanelStore } from '@/store/panelStore';
 import { createEmptyWorkspace } from '@/store/previewWorkspace/model';
 import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store';
 import { registerAppNavigate } from '@/utils/appNavigation';
@@ -144,7 +145,12 @@ it('enters the owning Space for a node link in a conversation presented from ano
 
   expect(navigate).toHaveBeenCalledExactlyOnceWith(
     '/canvas/owner%2Fcanvas?node=node-remote',
-    { state: expect.objectContaining({ returnToSpace: canvasId }) },
+    {
+      state: expect.objectContaining({
+        locateNodeOnly: true,
+        returnToSpace: canvasId,
+      }),
+    },
   );
   expect(window.open).not.toHaveBeenCalled();
   expect(tabTargets()).toEqual([]);
@@ -184,4 +190,42 @@ it('keeps the caret out of a node chip without affecting ordinary links', async 
 
   expect(press(nodeLink)).toBe(true);
   expect(press(webLink)).toBe(false);
+});
+
+it('keeps a deep link to this Space in-app for plain and modifier clicks', async () => {
+  const [link] = await renderLinks(
+    <MilkdownMessageCard
+      content={`[Conversation](/canvas/${canvasId}?node=node-question)`}
+      threadId="thread-source"
+    />,
+    1,
+  );
+
+  click(link);
+  expect(selectedNodeIds()).toEqual(['node-question']);
+
+  act(() => useCanvasStore.getState().selectNodes([], false));
+  click(link, isMac ? { metaKey: true } : { ctrlKey: true });
+  expect(selectedNodeIds()).toEqual(['node-question']);
+  expect(window.open).not.toHaveBeenCalled();
+});
+
+it('leaves fullscreen and queues the reveal when the Canvas is unmounted', async () => {
+  usePanelStore.setState({ isPreviewFullscreen: true });
+  useCanvasStore.setState({ rfInstance: null, canvasWrapper: null });
+  const [link] = await renderLinks(
+    <MilkdownMessageCard
+      content="[Conversation](#node-question)"
+      threadId="thread-source"
+    />,
+    1,
+  );
+
+  click(link);
+
+  expect(usePanelStore.getState().isPreviewFullscreen).toBe(false);
+  expect(useCanvasStore.getState().pendingRevealNodeIds).toEqual([
+    'node-question',
+  ]);
+  expect(tabTargets()).toEqual([]);
 });

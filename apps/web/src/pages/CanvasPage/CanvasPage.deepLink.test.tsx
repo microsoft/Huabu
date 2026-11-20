@@ -422,6 +422,19 @@ describe('CanvasPage node deep-link navigation', () => {
     expect(mocks.revealNodesOnCanvas).toHaveBeenCalledOnce();
   });
 
+  it('only locates the target when a document link crossed Spaces', async () => {
+    const { selectNodes } = await renderAt(
+      `/canvas/${CANVAS_ID}?node=node-1`,
+      node('note'),
+      {},
+      { locateNodeOnly: true, returnToSpace: 'canvas-source' },
+    );
+
+    expect(selectNodes).toHaveBeenCalledWith(['node-1'], false);
+    expect(mocks.revealNodesOnCanvas).toHaveBeenCalledOnce();
+    expect(mocks.openPreviewNode).not.toHaveBeenCalled();
+  });
+
   it('reconsumes the retained target after browser back navigation', async () => {
     const { router } = await renderAt(
       `/canvas/${CANVAS_ID}?node=node-1`,

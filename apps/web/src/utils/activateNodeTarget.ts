@@ -5,6 +5,7 @@ import { toast } from '@/components/Common/Toast';
 import { hasNodePreview } from '@/components/Nodes/previewableNodeTypes';
 import { i18n } from '@/i18n';
 import useCanvasStore from '@/store/canvasStore';
+import { usePanelStore } from '@/store/panelStore';
 import { openPreviewNode } from '@/store/previewWorkspace/actions';
 import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store';
 import { useWorkspaceStore } from '@/store/workspaceStore';
@@ -15,6 +16,16 @@ import { buildNodeDeepLink } from '@/utils/nodeDeepLink';
 import type { NodeReference } from '@/utils/nodeDeepLink';
 
 const DOUBLED_PREFIX = 'node-node-';
+const LOCATE_ONLY_STATE_KEY = 'locateNodeOnly';
+
+/** Whether a navigation came from a document link, which must not open a preview. */
+export function isLocateOnlyNavigation(state: unknown): boolean {
+  return (
+    typeof state === 'object' &&
+    state !== null &&
+    (state as Record<string, unknown>)[LOCATE_ONLY_STATE_KEY] === true
+  );
+}
 
 /**
  * Select a node of the loaded Space and reveal it on the canvas. With
@@ -52,6 +63,11 @@ export function activateNodeTarget(
       [node.id],
       400,
     );
+  } else {
+    // Fullscreen preview unmounts the Canvas. Leave fullscreen and hand the
+    // target to the reveal request the Canvas consumes once it is mounted.
+    usePanelStore.getState().setPreviewFullscreen(false);
+    useCanvasStore.setState({ pendingRevealNodeIds: [node.id] });
   }
   return true;
 }
@@ -82,7 +98,7 @@ function openNodePreview(node: {
  * Space that owns the document (`sourceCanvasId`), which is not the loaded
  * Space when a conversation is presented from another one. A reference to
  * another Space navigates there and lets the deep-link coordinator locate the
- * node. Returns false only when that navigation is impossible, so the caller
+ * node, carrying the locate-only intent in router state. Returns false only when that navigation is impossible, so the caller
  * can fall back to ordinary URL handling.
  */
 export function openNodeReference(
@@ -100,6 +116,7 @@ export function openNodeReference(
   );
   return appNavigate(`${url.pathname}${url.search}`, {
     state: {
+      [LOCATE_ONLY_STATE_KEY]: true,
       returnToSpace: loadedCanvasId,
       workspaceId: useWorkspaceStore.getState().workspaceId,
     },

@@ -62,10 +62,18 @@ describe('in-document node references', () => {
     ).toEqual({ canvasId: 'canvas-a/b', nodeId: 'node-123' });
   });
 
+  it('reads a root-relative deep link', () => {
+    expect(
+      parseNodeReferenceHref('/canvas/canvas-a?node=node-123', origin),
+    ).toEqual({ canvasId: 'canvas-a', nodeId: 'node-123' });
+  });
+
   it.each([
     null,
     '',
     '#section',
+    'canvas/c?node=node-123',
+    '//other.example/canvas/c?node=node-123',
     '#node-',
     'node-123',
     'javascript:alert(1)#node-123',
