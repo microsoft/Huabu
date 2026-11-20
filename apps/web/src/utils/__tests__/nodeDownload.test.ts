@@ -163,7 +163,7 @@ describe('nodeDownload', () => {
       });
     });
 
-    it('resolves Web downloads for HTML artifacts, data HTML, and MHTML snapshots while excluding snapshot-less URLs and Interactive Views', () => {
+    it('resolves Web downloads for HTML artifacts (including Interactive Views), data HTML, and MHTML snapshots while excluding snapshot-less URLs', () => {
       expect(
         canDownloadWebSource({
           src: 'https://example.com',
@@ -180,10 +180,22 @@ describe('nodeDownload', () => {
 
       expect(
         canDownloadWebSource({
-          src: 'app_bundle.html',
-          isInteractiveView: true,
+          src: 'artifact-3951a380-17f4-4b38-863f-f0c5cf9572be.html',
         }),
-      ).toBe(false);
+      ).toBe(true);
+
+      expect(
+        resolveWebDownloadTarget({
+          src: 'artifact-3951a380-17f4-4b38-863f-f0c5cf9572be.html',
+          canvasId: 'c-1',
+          label: 'HUABU · Impact Pitch · Complete Deck',
+        }),
+      ).toEqual({
+        kind: 'artifact',
+        canvasId: 'c-1',
+        key: 'artifact-3951a380-17f4-4b38-863f-f0c5cf9572be.html',
+        filename: 'HUABU · Impact Pitch · Complete Deck.html',
+      });
 
       expect(
         resolveWebDownloadTarget({

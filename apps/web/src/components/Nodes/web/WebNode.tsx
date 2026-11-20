@@ -170,7 +170,6 @@ export const WebNode = memo(
     const canDownload = canDownloadWebSource({
       src,
       mhtmlArtifact: preview?.mhtmlArtifact,
-      isInteractiveView,
       missing: Boolean(missingFileKind),
     });
     const downloadLabel =
@@ -183,17 +182,9 @@ export const WebNode = memo(
         mhtmlArtifact: preview?.mhtmlArtifact,
         canvasId,
         label: downloadLabel,
-        isInteractiveView,
         missing: Boolean(missingFileKind),
       });
-    }, [
-      src,
-      preview?.mhtmlArtifact,
-      canvasId,
-      downloadLabel,
-      isInteractiveView,
-      missingFileKind,
-    ]);
+    }, [src, preview?.mhtmlArtifact, canvasId, downloadLabel, missingFileKind]);
 
     const WebActions = (
       <>

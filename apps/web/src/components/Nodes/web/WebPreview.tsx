@@ -360,7 +360,6 @@ export const WebPreview = ({
   const canDownload = canDownloadWebSource({
     src,
     mhtmlArtifact,
-    isInteractiveView: hasInteractiveView,
     missing: isMissing,
   });
   const rawLabel = typeof data.label === 'string' ? data.label : undefined;
@@ -370,10 +369,9 @@ export const WebPreview = ({
       mhtmlArtifact,
       canvasId,
       label: rawLabel,
-      isInteractiveView: hasInteractiveView,
       missing: isMissing,
     });
-  }, [src, mhtmlArtifact, canvasId, rawLabel, hasInteractiveView, isMissing]);
+  }, [src, mhtmlArtifact, canvasId, rawLabel, isMissing]);
 
   // ── Render ───────────────────────────────────────────────────────
   if (!src) {

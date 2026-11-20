@@ -128,7 +128,7 @@ describe('Preview header download actions', () => {
     expect(header.querySelector('button[aria-label="Download"]')).toBeNull();
   });
 
-  it('shows WebPreview download for remote URLs only when an MHTML snapshot exists, and hides for Interactive Views', async () => {
+  it('shows WebPreview download for MHTML snapshots and Interactive View HTML artifacts while hiding for snapshot-less remote URLs', async () => {
     mocks.getWebPage.mockResolvedValueOnce({
       kind: 'url',
       src: 'https://example.com',
@@ -176,8 +176,15 @@ describe('Preview header download actions', () => {
       mhtmlArtifact: 'snap_abc.mhtml',
       canvasId: 'canvas-1',
       label: 'Article',
-      isInteractiveView: false,
       missing: false,
+    });
+
+    mocks.triggerWebDownload.mockReset();
+    mocks.getWebPage.mockResolvedValueOnce({
+      kind: 'html',
+      src: '/api/canvas/canvas-1/artifact/app_bundle.html',
+      snapshot: false,
+      embeddable: true,
     });
 
     await act(async () => {
@@ -187,14 +194,25 @@ describe('Preview header download actions', () => {
             id="web-app"
             data={{
               src: 'app_bundle.html',
-              label: 'Calculator',
-              interactiveView: { manifestVersion: 1 },
+              label: 'HUABU · Impact Pitch · Complete Deck',
+              interactiveView: { protocolVersion: 1 },
             }}
           />
         </PreviewHeaderSlotContext.Provider>,
       );
     });
-    expect(header.querySelector('button[aria-label="Download"]')).toBeNull();
+    const appBtn = header.querySelector<HTMLButtonElement>(
+      'button[aria-label="Download"]',
+    );
+    expect(appBtn).not.toBeNull();
+    act(() => appBtn?.click());
+    expect(mocks.triggerWebDownload).toHaveBeenCalledWith({
+      src: 'app_bundle.html',
+      mhtmlArtifact: undefined,
+      canvasId: 'canvas-1',
+      label: 'HUABU · Impact Pitch · Complete Deck',
+      missing: false,
+    });
   });
 
   it('shows VideoPreview and OfficePreview download for stored artifacts while excluding external video URLs', () => {
