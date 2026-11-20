@@ -37,6 +37,7 @@ import { parserCtx, serializerCtx } from '@milkdown/core';
 import { Crepe } from '@milkdown/crepe';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import { cjkFriendlyEmphasisPlugins } from '../cjkFriendlyEmphasis';
 import {
   configureLatexCodeFences,
   latexCodeBlockSchema,
@@ -73,7 +74,10 @@ async function createHarness(): Promise<RoundTripHarness> {
     },
   });
 
-  crepe.editor.config(configureLatexCodeFences).use(latexCodeBlockSchema);
+  crepe.editor
+    .config(configureLatexCodeFences)
+    .use(latexCodeBlockSchema)
+    .use(cjkFriendlyEmphasisPlugins);
   await crepe.create();
 
   return {
@@ -143,4 +147,41 @@ describe('Milkdown round-trip (Gate G1, parser ↔ serializer)', () => {
       expect(history[3]).toBe(history[2]);
     });
   }
+});
+
+describe('Milkdown CJK-friendly emphasis', () => {
+  let harness: RoundTripHarness;
+
+  beforeAll(async () => {
+    harness = await createHarness();
+  });
+
+  afterAll(async () => {
+    await harness?.destroy();
+  });
+
+  // A delimiter run that fails to parse is serialized with backslash
+  // escapes, so a byte-identical round trip proves the mark was recognised.
+  for (const source of [
+    '**工单比对话活得久。**DeepSeek 原型里',
+    '* **中途定期交报告。**状态是进行中的报告',
+    '这是*斜体。*后文',
+    '这是**“引号”**后文',
+    '~~删除。~~后文',
+  ]) {
+    it(`keeps ${source} unescaped`, () => {
+      expect(normalize(harness.roundTrip(source))).toBe(source);
+    });
+  }
+
+  it('leaves the non-CJK CommonMark rule untouched', () => {
+    expect(normalize(harness.roundTrip('**bold.**after'))).toBe(
+      '\\*\\*bold.\\*\\*after',
+    );
+  });
+
+  it('keeps already escaped delimiters literal', () => {
+    const source = '\\*\\*中途定期交报告。\\*\\*状态';
+    expect(normalize(harness.roundTrip(source))).toBe(source);
+  });
 });

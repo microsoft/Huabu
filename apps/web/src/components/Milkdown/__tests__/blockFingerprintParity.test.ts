@@ -30,6 +30,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { fingerprintMarkdownKeys } from '@huabu/shared/canvas-engine';
 
+import { cjkFriendlyEmphasisPlugins } from '../cjkFriendlyEmphasis';
 import {
   configureLatexCodeFences,
   latexCodeBlockSchema,
@@ -60,7 +61,10 @@ async function createHarness(): Promise<Harness> {
       [Crepe.Feature.TopBar]: false,
     },
   });
-  crepe.editor.config(configureLatexCodeFences).use(latexCodeBlockSchema);
+  crepe.editor
+    .config(configureLatexCodeFences)
+    .use(latexCodeBlockSchema)
+    .use(cjkFriendlyEmphasisPlugins);
   await crepe.create();
   return {
     roundTrip(markdown: string) {
@@ -90,6 +94,11 @@ const AGENT_MARKDOWN_CASES: Array<[string, string]> = [
   ['styled-span', '<span data-huabu-text-color="danger">Important text</span>'],
   ['nested-quote-list', '> Summary\n>\n> - First\n> - Second'],
   ['mixed-inline-marks', 'This is ***important*** and ~~obsolete~~.'],
+  ['cjk-strong', '**工单比对话活得久。**DeepSeek 原型里'],
+  ['cjk-strikethrough', '~~删除。~~后文'],
+  ['cjk-single-tilde', '~删除。~后文'],
+  ['cjk-adjacent-strong', '__前言__**结论。**后文'],
+  ['cjk-underscore-emphasis', '正體字。\uFE01_Traditional._'],
   ['setext-heading', 'Agent-generated heading\n======================='],
   ['indented-code', '    const value = 42;\n    console.log(value);'],
   [
