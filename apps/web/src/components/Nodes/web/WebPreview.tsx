@@ -12,7 +12,7 @@ import { Button } from '@/components/Common/Button';
 import { usePreviewScrollMemory } from '@/hooks/usePreviewScrollMemory';
 
 import { useInteractiveViewBridge } from './useInteractiveViewBridge';
-import { isElectron } from '../../../hooks/useElectron.ts';
+import { isElectron, openInNewWindow } from '../../../hooks/useElectron.ts';
 import useCanvasStore from '../../../store/canvasStore.ts';
 import { Loading } from '../../Common/Loading';
 import { PreviewHeaderButton } from '../PreviewHeaderButton';
@@ -400,7 +400,7 @@ export const WebPreview = ({
           <PreviewHeaderButton
             title={t('node.openExternally')}
             aria-label={t('node.openPageExternal')}
-            onClick={() => window.open(externalHref, '_blank', 'noopener')}
+            onClick={() => openInNewWindow(externalHref, 'noopener')}
           >
             <ArrowUpRight />
           </PreviewHeaderButton>

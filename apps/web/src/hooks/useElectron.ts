@@ -287,10 +287,34 @@ export function formatSystemInfo(info: ElectronSystemInfo): string {
 export function openServerFileInDesktop(url: string): boolean {
   const files = getElectronBridge()?.files;
   if (!files) return false;
-  void files.open(url).catch((error: unknown) => {
+  // Only what this Server serves. A link elsewhere, such as an image an
+  // Agent left at its remote address, still belongs to the browser.
+  let target: URL;
+  try {
+    target = new URL(url, window.location.href);
+  } catch {
+    return false;
+  }
+  if (
+    target.origin !== window.location.origin ||
+    !target.pathname.startsWith('/api/')
+  )
+    return false;
+  void files.open(target.href).catch((error: unknown) => {
     console.error('[desktop] Could not open file:', error);
   });
   return true;
+}
+
+/**
+ * `window.open(href, '_blank')`, except that a file this Server stores is
+ * opened by the desktop app, which is the only thing its local Server admits.
+ */
+export function openInNewWindow(
+  href: string,
+  features = 'noopener,noreferrer',
+): void {
+  if (!openServerFileInDesktop(href)) window.open(href, '_blank', features);
 }
 
 function requireDiagnostics(): ElectronDiagnosticsApi {

@@ -345,6 +345,25 @@ describe('public-only deployment', () => {
     expect(proxied).toHaveBeenCalledTimes(1);
   });
 
+  it('gives up the check before a proxied hop as soon as the caller does', async () => {
+    useProxy();
+    const proxied = vi.fn(async () => new Response('never sent'));
+    vi.stubGlobal('fetch', proxied);
+    const reason = new Error('The caller timed out');
+    await expect(
+      outboundFetch('http://example.com/', {
+        signal: AbortSignal.abort(reason),
+      }),
+    ).rejects.toBe(reason);
+    const controller = new AbortController();
+    const pending = outboundFetch('http://slow-to-resolve.example/', {
+      signal: controller.signal,
+    });
+    controller.abort(reason);
+    await expect(pending).rejects.toBe(reason);
+    expect(proxied).not.toHaveBeenCalled();
+  });
+
   it('checks a hop that bypasses the proxy where its connection is made', async () => {
     useProxy();
     process.env.NO_PROXY = `localhost,127.0.0.1,exempt.example`;

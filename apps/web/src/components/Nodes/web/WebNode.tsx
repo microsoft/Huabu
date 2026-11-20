@@ -7,6 +7,7 @@ import { useTranslation } from 'react-i18next';
 
 import { getWebPreview } from '@/api/web';
 import { DropdownMenuLink } from '@/components/Common/DropdownMenu';
+import { openServerFileInDesktop } from '@/hooks/useElectron';
 import { useNodePresentation } from '@/hooks/useNodePresentation';
 
 import { WebReadingView } from './WebReadingView';
@@ -187,6 +188,10 @@ export const WebNode = memo(
               to={externalHref}
               target="_blank"
               rel="noopener noreferrer"
+              onClick={(event) => {
+                if (openServerFileInDesktop(externalHref))
+                  event.preventDefault();
+              }}
               icon={<ArrowUpRight />}
             >
               {t('toolbar.openOriginalUrl')}

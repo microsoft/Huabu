@@ -176,16 +176,26 @@ const PRIVATE_NAME =
  * name is refused when it is private by construction, and otherwise left to
  * the proxy, whose own policy then governs.
  */
-async function assertPublicHost(hostname: string): Promise<void> {
+async function assertPublicHost(
+  hostname: string,
+  signal?: AbortSignal | null,
+): Promise<void> {
+  signal?.throwIfAborted();
   const host = hostname.replace(/^\[|\]$/g, '').replace(/\.$/, '');
   if (isIP(host)) {
     if (!isPublicAddress(host)) throw fetchFailed(refused(host));
     return;
   }
-  const addresses = await new Promise<LookupAddress[] | null>((resolve) =>
-    dnsLookup(host, { all: true }, (error, found) =>
-      resolve(error ? null : found),
-    ),
+  // A slow resolver must not outlast the caller's deadline.
+  const addresses = await new Promise<LookupAddress[] | null>(
+    (resolve, reject) => {
+      const abandon = () => reject(signal?.reason);
+      signal?.addEventListener('abort', abandon, { once: true });
+      dnsLookup(host, { all: true }, (error, found) => {
+        signal?.removeEventListener('abort', abandon);
+        resolve(error ? null : found);
+      });
+    },
   );
   if (
     addresses
@@ -218,7 +228,7 @@ async function fetchWhereProxied(
         ...options,
         dispatcher: publicOnlyAgent,
       } as RequestInit);
-    await assertPublicHost(url.hostname);
+    await assertPublicHost(url.hostname, options.signal);
     return fetch(url, options);
   };
   let url = new URL(request.url);
