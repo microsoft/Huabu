@@ -1,7 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, URL } from 'node:url';
 
@@ -9,6 +8,7 @@ import react from '@vitejs/plugin-react';
 import { defineConfig, loadEnv, type Plugin } from 'vite';
 
 import { decideViteAccess } from './vite-access';
+import { resolveBuildVersion } from '../../scripts/build-version.mjs';
 import {
   readDeploymentSettings,
   resolveAuthenticationMode,
@@ -132,14 +132,11 @@ export default defineConfig(async ({ mode, command }) => {
     );
   }
 
-  // The desktop app's `package.json` is the single source of truth for
-  // the user-facing product version (web's own version is `0.0.0`).
-  // Inline it at build time so the Settings panel can render `v<x.y.z>`
-  // without a runtime fetch.
-  const desktopPkg = JSON.parse(
-    readFileSync(path.resolve(here, '../desktop/package.json'), 'utf8'),
-  ) as { version?: string };
-  const appVersion = desktopPkg.version ?? '0.0.0';
+  // Inline this build's identity (`X.Y.Z+g<sha7>`, or the nightly version)
+  // so the Settings panel can show exactly which build is running without a
+  // runtime fetch. scripts/build-version.mjs owns the format; the product
+  // version comes from `apps/desktop/package.json` (web's own is `0.0.0`).
+  const appVersion = resolveBuildVersion(process.env);
 
   return {
     plugins: [

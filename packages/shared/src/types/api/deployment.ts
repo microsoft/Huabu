@@ -40,6 +40,16 @@ export const deploymentReadinessResponseSchema = z.object({
     status: z.literal('operator-unverified'),
   }),
   issues: z.array(deploymentReadinessIssueSchema),
+  /**
+   * The full 40-character Git commit the Server runs, so a device can check
+   * out matching source; null when the deployment does not know it. Absent
+   * from older servers, which reads the same as null.
+   */
+  revision: z
+    .string()
+    .regex(/^[0-9a-f]{40}$/)
+    .nullable()
+    .optional(),
 });
 export type DeploymentReadinessResponse = z.infer<
   typeof deploymentReadinessResponseSchema

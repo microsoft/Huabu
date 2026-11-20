@@ -21,6 +21,7 @@ import { getElectronBridge } from '@/hooks/useElectron';
 import { useDeploymentReadinessStore } from '@/store/deploymentReadinessStore';
 import { useIdentityStore } from '@/store/identityStore';
 import { copyToClipboard } from '@/utils/io/clipboard';
+import { isWindows } from '@/utils/platform';
 
 import { ResetDeviceCredentials } from './ResetDeviceCredentials';
 
@@ -376,8 +377,26 @@ export function AgentConnectionSettings() {
   const personalDevices = useIdentityStore(
     (state) => state.identity?.provider === 'bubble',
   );
-  const [connectionShell, setConnectionShell] =
-    useState<ConnectionShell>('posix');
+  // The device to connect is usually the one this browser runs on.
+  const [connectionShell, setConnectionShell] = useState<ConnectionShell>(() =>
+    isWindows() ? 'powershell' : 'posix',
+  );
+  // `undefined` while readiness loads; then the Server's commit, or null when
+  // it does not report one. A revision from an earlier load is not shown while
+  // a newer one is on its way: the Server may have been redeployed since.
+  const revision = useDeploymentReadinessStore((state) =>
+    state.readiness && !state.loading
+      ? (state.readiness.revision ?? null)
+      : undefined,
+  );
+  // Settings loads readiness only for people who manage the deployment, and
+  // the store outlives this page, so revalidate each time the instructions
+  // open, joining a load already in flight. A failed load leaves the generic
+  // text.
+  useEffect(() => {
+    const { loading, load } = useDeploymentReadinessStore.getState();
+    if (!loading) void load();
+  }, []);
   const [copying, setCopying] = useState<ConnectionCopyFormat | null>(null);
   const [connectionInfo, setConnectionInfo] = useState<Pick<
     AgentletConnectionCommandResponse,
@@ -434,13 +453,22 @@ export function AgentConnectionSettings() {
             {t('settings.agentletRequirements')}
           </p>
           <p className="text-fg-muted mt-2">
-            {t('settings.agentletSourceSetup')}
+            {revision
+              ? t('settings.agentletSourceSetupPinned', {
+                  revision: revision.slice(0, 12),
+                })
+              : revision === null
+                ? t('settings.agentletSourceSetupRevisionUnknown')
+                : t('settings.agentletSourceSetup')}
           </p>
           <pre className="bg-bg-default border-edge-default my-2 overflow-x-auto rounded-md border p-3 text-xs leading-5">
             <code translate="no">
-              {
-                'git clone https://github.com/microsoft/Huabu.git\ncd Huabu\npnpm install'
-              }
+              {[
+                'git clone https://github.com/microsoft/Huabu.git',
+                'cd Huabu',
+                ...(revision ? [`git checkout ${revision}`] : []),
+                'pnpm install',
+              ].join('\n')}
             </code>
           </pre>
         </li>

@@ -16,6 +16,11 @@ COPY . .
 RUN pnpm install --frozen-lockfile --ignore-scripts
 # Install just the pinned media binary; do not run desktop dependency scripts.
 RUN pnpm --filter @huabu/server exec node -e "require('ffmpeg-static/install.js')"
+# The image has no Git metadata, so the build identity shown in the UI comes
+# from these (see scripts/build-version.mjs): the commit, and optionally the
+# identity CI computed for this image (e.g. its nightly version).
+ARG SOURCE_REVISION
+ARG HUABU_BUILD_VERSION
 RUN pnpm run build:web
 RUN mkdir -p /runtime/apps/server /runtime/apps/web /runtime/scripts \
         /runtime/packages/client-runtime/dist /runtime/node_modules \
@@ -28,8 +33,10 @@ RUN mkdir -p /runtime/apps/server /runtime/apps/web /runtime/scripts \
 
 FROM base AS runtime
 ARG SOURCE_REVISION
+ARG HUABU_BUILD_VERSION
 LABEL org.opencontainers.image.source="https://github.com/microsoft/Huabu" \
     org.opencontainers.image.revision=${SOURCE_REVISION} \
+    org.opencontainers.image.version=${HUABU_BUILD_VERSION} \
     org.opencontainers.image.licenses="MIT"
 ENV NODE_ENV=production \
     SERVER_PORT=8080 \

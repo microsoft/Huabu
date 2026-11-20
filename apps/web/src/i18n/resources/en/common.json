@@ -621,6 +621,8 @@
     "agentletPrepareDevice": "Set up the environment",
     "agentletRequirements": "Requirements: Node.js 24.16+ and pnpm.",
     "agentletSourceSetup": "Download the Huabu source version that matches your server and install its dependencies:",
+    "agentletSourceSetupPinned": "Download the Huabu source at the exact revision this server runs ({{revision}}) and install its dependencies:",
+    "agentletSourceSetupRevisionUnknown": "Download the Huabu source version that matches your server and install its dependencies. This server does not report its exact revision; ask its administrator if you are unsure which one to use:",
     "agentletRunConnection": "Run the connection command",
     "agentletRunConnectionDescription": "Open a terminal on that device and go to the Huabu source folder. Choose the shell you use, then copy the matching connection command and run it in that terminal.",
     "agentletLocalAccessSetup": "The server listens only on loopback. For remote access, stop the server, run pnpm run setup, then restart it.",

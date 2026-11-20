@@ -27,8 +27,10 @@ process.env.HUABU_REPO_ROOT = repoRoot;
 // variables retain higher precedence because dotenv does not override them.
 dotenv.config({ path: path.join(repoRoot, '.env') });
 
-// Images may carry a build-time revision without Git or repository metadata.
-// A source checkout still discovers its revision for the personal Canary.
+// Server bundles built before they recorded their own revision read the
+// running commit from here; a current bundle ignores it in favour of the
+// revision recorded at build time (`deployedSha()`), because this checkout's
+// HEAD can differ from the source the bundle was built from.
 if (!process.env.HUABU_DEPLOYED_SHA?.trim()) {
   try {
     process.env.HUABU_DEPLOYED_SHA = execFileSync(
