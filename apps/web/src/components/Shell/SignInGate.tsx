@@ -544,7 +544,6 @@ function VerifyingCover() {
   return (
     <div
       data-testid="session-verifying-cover"
-      aria-busy="true"
       className="fixed inset-0 z-[1000] cursor-progress"
     >
       {slow && (

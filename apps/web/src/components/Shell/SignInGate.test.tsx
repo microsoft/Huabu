@@ -653,6 +653,11 @@ describe('SignInGate', () => {
       expect(container.textContent).not.toContain('auth.verifyingSession');
       await act(async () => vi.advanceTimersByTimeAsync(1_000));
       expect(container.textContent).toContain('auth.verifyingSession');
+      // The notice is a live status outside any busy subtree, so a screen
+      // reader announces it while the check runs rather than deferring it.
+      const status = container.querySelector('[role="status"]');
+      expect(status?.textContent).toContain('auth.verifyingSession');
+      expect(status?.closest('[aria-busy="true"]')).toBeNull();
       await act(async () => finish(json(MEMBER)));
       expect(container.textContent).toBe('app');
     } finally {
