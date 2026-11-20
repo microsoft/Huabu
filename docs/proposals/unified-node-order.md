@@ -1,9 +1,21 @@
 # Unified node order and placement
 
-Status: Proposed — design only, awaiting the owner's confirmation of the direction; nothing is implemented.
+Status: Implemented on `feature/unified-node-order`, not merged — direction A ("everything on the node") confirmed by the owner on 2026-11-20. Shipped behaviour is described in `docs/architecture/`; this record keeps the design and where the implementation departed from it.
 Last updated: 2026-11-20
 
-> Decision so far (2026-11-20): the three ways a node's order and placement inside its container are stored must be unified at the root. The direction recommended here (everything on the node) is not yet confirmed. Prerequisite shipped separately: command post-effects request preprocessing only when the request input changed (`fix/preprocess-only-on-input-change`), so writing order data on a node does not start preprocessing.
+> Prerequisite, on its own branch (`fix/preprocess-only-on-input-change`): the server starts preprocessing where a write is committed, and only for a node whose preprocessing input the write changed ([node-preprocessing.md](../architecture/node-preprocessing.md#who-starts-preprocessing)), so writing order data on a node starts none. An earlier form of that branch made pages compare the request input instead; it was replaced.
+
+## Implementation notes
+
+What was built differs from the sections below in these points; where they disagree, this list and `docs/architecture/` are current.
+
+- **Commands were not rewritten one by one (§5).** They still say where a node goes by where they put it in the array. One pass, `settlePaintOrder`, turns that into keys at the end of a batch: a node without a key, or one that changed parent and still carries its old key, is keyed for the place it stands in. `REORDER_NODES` strips the moved nodes' keys and settles. Create, group, dissolve, reparent and restore needed no order code of their own, and keep their previous array behaviour (a reparented node keeps its slot; it does not jump to the front).
+- **`applyDeltas` orders by key.** Every consumer of a delta batch gets the writer's order, including the server's second write path (`applyDeltasOnServer`), which previously sent no order at all and now also keys the nodes it inserts.
+- **`reorderCommands` was kept (§8)** for `restorePlan.ts`: it verifies the result of an undo plan and places a returning Agent Node. It is no longer part of `commandsForStateDiff`; an undone reorder is sent as the node's previous `paintKey`.
+- **Import still remaps the ids in a stored `layoutOrder` (§7, §8).** An archive exported before this change holds the list; the remap lets the read that follows convert it. The handling of `SET_SIBLING_ORDER` rows in imported history was removed: no production writer ever produced one.
+- **A child that changes track drops its track key (not in §5).** `MERGE_NODE_DATA` or `SET_FRAME_LAYOUT.cells` that move a child to another track without naming a key remove the key, and the child is read by where it was put. Before, the page corrected this by writing the whole list after a cross-track drop.
+- **Long keys are not re-spread (§3).** No rule for keys longer than 64 characters was added; appending or prepending stays under five characters after thousands of operations, and repeated insertion into one gap grows about one character per six insertions.
+- **Verified:** engine, server and store unit suites; browser suites `multi-page-frames` (20), `multi-page-sync-baseline` (12), `structured-drop` (34), `preprocess-lifecycle` (7). **Not verified:** Postgres (no Docker on the development machine; the change adds no SQL), two real devices, and a Space migrated from production data rather than fixtures.
 
 ## 1. Problem
 

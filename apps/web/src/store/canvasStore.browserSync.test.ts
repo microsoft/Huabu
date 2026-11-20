@@ -2870,7 +2870,7 @@ describe('a command batch marks no node as being processed on the page', () => {
   const settle = () => vi.advanceTimersByTimeAsync(5_000);
 
   beforeEach(() => {
-    const nodes = [...state().nodes, pdf];
+    const nodes = seedNodeOrder([...state().nodes, pdf]);
     server.reset(nodes, [], 1);
     state()._setStateRaw({ nodes });
   });
@@ -2888,6 +2888,24 @@ describe('a command batch marks no node as being processed on the page', () => {
       'a new source',
       () =>
         state().executeCommands([patch(PDF, { src: 'artifact-other.pdf' })]),
+    ],
+    [
+      'a layer change',
+      () =>
+        state().executeCommands([
+          {
+            type: 'REORDER_NODES',
+            nodeIds: [X as `node-${string}`],
+            to: 'top',
+          },
+        ]),
+    ],
+    [
+      'a place in a Column track',
+      () =>
+        state().executeCommands([
+          patch(PDF, { frameColumn: 1, trackKey: 'a5' }),
+        ]),
     ],
     [
       'a created node',

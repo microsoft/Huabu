@@ -143,6 +143,14 @@ A surviving node whose direct parent was ignored becomes a root: its position is
 
 This filtering performs no writes, deletes no node sidecars or other local files, and does not change the stored version. The underlying structured handle and node repository remain unchanged. Web Canvas load, clipboard preparation and resolution, and undo/redo restore reuse the same helper rather than migrating old nodes into previews. Ordinary later saves, including a World reconciliation batch that actually adds or removes previews, may persist topology without the ignored entries; there is no dedicated disk cleanup or migration pass. Current command and full-state write boundaries reject attempts to reintroduce the retired types.
 
+### Order keys on load
+
+The same composition-layer `space(canvasId).read()` then applies [`seedNodeOrder()`](../../packages/shared/src/canvas-engine/seedOrder.ts). A Space stored before nodes carried their own order holds paint order as array position and a Column / Row Frame's reading order as `data.layoutOrder` on the Frame; the read gives every node the `data.paintKey` its position stands for, turns each stored list into the listed children's `data.trackKey`, and drops the list ([paint order](./canvas-command-architecture.md#sibling-paint-order), [reading order](./canvas-command-architecture.md#structured-placement-and-reading-order)).
+
+Like the filtering above, this performs no write and does not change the stored version. The result depends only on the stored state, so every read before the first write returns the same keys, and a batch that starts from a read diffs against a keyed state — the keys never appear as changes. The next ordinary save stores them, because a save writes the whole `state.nodes`. A Space that already has its keys is returned unchanged, array included.
+
+The keys are node `data` inside the Space record (`space.json`, or `spaces.state_json` in SQLite and Postgres), which already holds every structural node field. No backend has an order column and none was added: this is not a schema migration, and the SQLite and Postgres schema versions are unchanged. Imported archives and Spaces written by an older build are converted by the same read.
+
 ## 2b. SQLite layout — records in a database, bytes in files
 
 `HUABU_STRUCTURED_BACKEND=sqlite` selects the second implemented structured backend. The blob axis is chosen separately, because bytes are always files — `disk` here, and §2c for the Azure pairing. It needs **no Workspace folder and no Space directories**: every record is a row, and the only directories are the ones a Space's bytes sit in.
