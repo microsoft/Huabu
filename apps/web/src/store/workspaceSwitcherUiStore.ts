@@ -21,6 +21,14 @@ interface WorkspaceSwitcherUiState {
   intent: 'choose' | 'create';
   open: (intent?: 'choose' | 'create') => void;
   close: () => void;
+  /**
+   * A Workspace switch is in flight, from saving the open Space's edits until
+   * the new Workspace is open or the switch fails. It is the one-at-a-time
+   * lock for `useWorkspaceSwitch`; choosers disable themselves while it is
+   * set.
+   */
+  switching: boolean;
+  setSwitching: (switching: boolean) => void;
 }
 
 export const useWorkspaceSwitcherUiStore = create<WorkspaceSwitcherUiState>(
@@ -29,5 +37,7 @@ export const useWorkspaceSwitcherUiStore = create<WorkspaceSwitcherUiState>(
     intent: 'choose',
     open: (intent = 'choose') => set({ isOpen: true, intent }),
     close: () => set({ isOpen: false, intent: 'choose' }),
+    switching: false,
+    setSwitching: (switching) => set({ switching }),
   }),
 );

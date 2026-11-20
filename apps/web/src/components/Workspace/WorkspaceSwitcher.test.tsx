@@ -3,7 +3,7 @@
 
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { MemoryRouter, useLocation } from 'react-router-dom';
+import { MemoryRouter, useLocation, useNavigate } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useOpenWorkspaceSwitcher } from './useOpenWorkspaceSwitcher';
@@ -41,6 +41,12 @@ vi.mock('react-i18next', () => ({
     t: (key: string, options?: Record<string, unknown>) =>
       options ? `${key} ${JSON.stringify(options)}` : key,
   }),
+}));
+vi.mock('@/i18n', () => ({
+  i18n: {
+    t: (key: string, options?: Record<string, unknown>) =>
+      options ? `${key} ${JSON.stringify(options)}` : key,
+  },
 }));
 vi.mock('../Common/Toast', () => ({
   toast: mocks.toast,
@@ -140,6 +146,15 @@ function Probe() {
   path = useLocation().pathname;
   return null;
 }
+/** Opens a Space the way a link in the app would. */
+function OpenSpace() {
+  const navigate = useNavigate();
+  return (
+    <button type="button" onClick={() => navigate('/canvas/space-in-lab')}>
+      Open a Space
+    </button>
+  );
+}
 function Header() {
   const label = useWorkspaceLabel() ?? '';
   return (
@@ -185,6 +200,7 @@ async function mount(entry = '/spaces') {
       <MemoryRouter initialEntries={[entry]}>
         <Header />
         <MenuItem />
+        <OpenSpace />
         <WorkspaceSwitcherDialog />
         <Probe />
       </MemoryRouter>,
@@ -313,6 +329,26 @@ describe('quick switch popover', () => {
     await act(async () => options.action.onClick());
     expect(server.calls).toEqual(['activate lab', 'activate default']);
     expect(label()).toBe('Default');
+  });
+
+  it('saves and leaves a Space opened after the switch before going back from the toast', async () => {
+    await mount();
+    await click(trigger());
+    await click(buttonNamed(/Research lab/));
+    const [, options] = mocks.toast.mock.calls[0] as [
+      string,
+      { action: { onClick: () => void } },
+    ];
+    // The popover that made the toast is gone; the person opens a Space in
+    // the new Workspace before pressing Back.
+    await click(buttonNamed('Open a Space'));
+    expect(path).toBe('/canvas/space-in-lab');
+    expect(mocks.drain).not.toHaveBeenCalled();
+
+    await act(async () => options.action.onClick());
+    expect(mocks.drain).toHaveBeenCalledTimes(1);
+    expect(path).toBe('/');
+    expect(server.calls).toEqual(['activate lab', 'activate default']);
   });
 
   it('keeps a rename made while the list was being refreshed', async () => {
@@ -461,6 +497,34 @@ describe('Switch Workspace dialog', () => {
     expect(mocks.drain).toHaveBeenCalledTimes(1);
     expect(path).toBe('/');
     expect(server.calls).toEqual(['activate lab']);
+  });
+
+  it('makes one switch at a time while an open Space is still saving', async () => {
+    let saved: () => void = () => {};
+    mocks.drain.mockImplementationOnce(
+      () => new Promise<void>((resolve) => (saved = resolve)),
+    );
+    await mount('/canvas/space-in-default');
+    await open();
+    await act(async () =>
+      document
+        .querySelector<HTMLInputElement>('input[type="radio"][value="lab"]')!
+        .click(),
+    );
+    await click(buttonNamed('workspace.switchTo {"workspace":"Research lab"}'));
+    expect(useWorkspaceSwitcherUiStore.getState().switching).toBe(true);
+
+    // The quick switch offers nothing to choose until the first switch ends.
+    await click(trigger());
+    const lab = buttonNamed(/Research lab/)!;
+    expect(lab.disabled).toBe(true);
+    await act(async () => lab.click());
+    await key('Escape');
+
+    await act(async () => saved());
+    expect(mocks.drain).toHaveBeenCalledTimes(1);
+    expect(server.calls).toEqual(['activate lab']);
+    expect(useWorkspaceSwitcherUiStore.getState().switching).toBe(false);
   });
 
   it('stays put when the open Space cannot be saved', async () => {

@@ -67,7 +67,7 @@ export function WorkspaceSwitcherPopover({
   const syncing = useWorkspaceStore((s) => s.isSyncing);
   const refreshWorkspaces = useWorkspaceStore((s) => s.refreshWorkspaces);
   const openSwitcher = useOpenWorkspaceSwitcher();
-  const { switchTo } = useWorkspaceSwitch();
+  const { busy, switchTo } = useWorkspaceSwitch();
   const [renaming, setRenaming] = useState(false);
   const list = useRef<HTMLDivElement>(null);
 
@@ -93,7 +93,7 @@ export function WorkspaceSwitcherPopover({
         workspaces={workspaces}
         mode="activate"
         onChoose={choose}
-        disabled={syncing}
+        disabled={syncing || busy}
         density={phone ? 'comfortable' : 'compact'}
         aria-labelledby={titleId}
         onRenamingChange={setRenaming}

@@ -6,7 +6,10 @@ import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate } from 'react-router-dom';
 
 import { OPEN_WORKSPACE_SWITCHER } from './useOpenWorkspaceSwitcher';
-import { useWorkspaceSwitch } from './useWorkspaceSwitch';
+import {
+  useWorkspaceSwitch,
+  useWorkspaceSwitchRoute,
+} from './useWorkspaceSwitch';
 import { CreateWorkspaceFields, WorkspaceList } from './WorkspaceList';
 import {
   useWorkspaceLabel,
@@ -24,9 +27,12 @@ import { Modal } from '../Common/Modal';
  * is open and returns to whatever opened it.
  *
  * Mounted once at the router root; open it through
- * {@link useWorkspaceSwitcherUiStore} or `useOpenWorkspaceSwitcher`.
+ * {@link useWorkspaceSwitcherUiStore} or `useOpenWorkspaceSwitcher`. Being
+ * the switcher's one never-unmounting part, it also keeps the route every
+ * Workspace switch acts on.
  */
 export function WorkspaceSwitcherDialog() {
+  useWorkspaceSwitchRoute();
   const isOpen = useWorkspaceSwitcherUiStore((s) => s.isOpen);
   const open = useWorkspaceSwitcherUiStore((s) => s.open);
   const location = useLocation();
