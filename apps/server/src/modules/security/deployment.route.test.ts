@@ -109,7 +109,12 @@ describe('deployment readiness', () => {
     const startup = 'b0403c4ff401e9be7ea777988b5aa1d5fbf0a8b4';
     expect(deployedSha({ HUABU_DEPLOYED_SHA: startup }, built)).toBe(built);
     expect(deployedSha({}, built)).toBe(built);
-    // A bundle that recorded no revision keeps the explicit deployment SHA.
-    expect(deployedSha({ HUABU_DEPLOYED_SHA: startup }, null)).toBe(startup);
+    // A bundle that recorded none (built dirty or without Git) stays unknown
+    // rather than adopting whatever checkout launched it.
+    expect(deployedSha({ HUABU_DEPLOYED_SHA: startup }, null)).toBeNull();
+    // Only the Server run from source reads the startup environment.
+    expect(deployedSha({ HUABU_DEPLOYED_SHA: startup }, undefined)).toBe(
+      startup,
+    );
   });
 });

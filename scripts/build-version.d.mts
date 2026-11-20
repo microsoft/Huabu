@@ -38,10 +38,22 @@ export function readProductVersion(): string;
  * otherwise the checkout's HEAD; `revision` is null when neither is known,
  * and `dirty` reports uncommitted changes to tracked files.
  */
-export function resolveRevision(env?: NodeJS.ProcessEnv): {
+export function resolveRevision(
+  env?: NodeJS.ProcessEnv,
+  cwd?: string,
+): {
   revision: string | null;
   dirty: boolean;
 };
+
+/**
+ * The commit whose checkout reproduces this build's source exactly: null when
+ * the revision is unknown or tracked files have uncommitted changes.
+ */
+export function resolveExactRevision(
+  env?: NodeJS.ProcessEnv,
+  cwd?: string,
+): string | null;
 
 /** This build's identity, from the environment and the checkout. */
 export function resolveBuildVersion(env?: NodeJS.ProcessEnv): string;

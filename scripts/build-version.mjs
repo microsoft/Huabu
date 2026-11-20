@@ -156,12 +156,13 @@ export function readProductVersion() {
 
 /**
  * @param {string[]} args
+ * @param {string} cwd checkout to run Git in
  * @returns {string | null} trimmed Git output, or null when Git is unavailable
  */
-function git(args) {
+function git(args, cwd) {
   try {
     return execFileSync('git', args, {
-      cwd: repoRoot,
+      cwd,
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
     }).trim();
@@ -175,9 +176,10 @@ function git(args) {
  * dirty), otherwise the checkout's HEAD and whether tracked files changed.
  *
  * @param {NodeJS.ProcessEnv} env
+ * @param {string} cwd checkout to read; defaults to this repository
  * @returns {{ revision: string | null, dirty: boolean }}
  */
-export function resolveRevision(env = process.env) {
+export function resolveRevision(env = process.env, cwd = repoRoot) {
   if (env.SOURCE_REVISION?.trim()) {
     const revision = normalizeRevision(env.SOURCE_REVISION);
     if (!revision) {
@@ -187,10 +189,25 @@ export function resolveRevision(env = process.env) {
     }
     return { revision, dirty: false };
   }
-  const revision = normalizeRevision(git(['rev-parse', 'HEAD']));
+  const revision = normalizeRevision(git(['rev-parse', 'HEAD'], cwd));
   if (!revision) return { revision: null, dirty: false };
-  const status = git(['status', '--porcelain', '--untracked-files=no']);
+  const status = git(['status', '--porcelain', '--untracked-files=no'], cwd);
   return { revision, dirty: Boolean(status) };
+}
+
+/**
+ * The commit whose checkout reproduces this build's source exactly, or null
+ * when there is none: the revision is unknown, or tracked files have
+ * uncommitted changes, so no commit contains what is being built. The
+ * server bundle records this as the revision it runs (`deployedSha()`).
+ *
+ * @param {NodeJS.ProcessEnv} env
+ * @param {string} cwd checkout to read; defaults to this repository
+ * @returns {string | null}
+ */
+export function resolveExactRevision(env = process.env, cwd = repoRoot) {
+  const { revision, dirty } = resolveRevision(env, cwd);
+  return dirty ? null : revision;
 }
 
 /**
