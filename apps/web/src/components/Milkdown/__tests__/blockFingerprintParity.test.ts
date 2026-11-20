@@ -30,6 +30,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { fingerprintMarkdownKeys } from '@huabu/shared/canvas-engine';
 
+import { cjkFriendlyEmphasisPlugins } from '../cjkFriendlyEmphasis';
 import {
   configureLatexCodeFences,
   latexCodeBlockSchema,
@@ -60,7 +61,10 @@ async function createHarness(): Promise<Harness> {
       [Crepe.Feature.TopBar]: false,
     },
   });
-  crepe.editor.config(configureLatexCodeFences).use(latexCodeBlockSchema);
+  crepe.editor
+    .config(configureLatexCodeFences)
+    .use(latexCodeBlockSchema)
+    .use(cjkFriendlyEmphasisPlugins);
   await crepe.create();
   return {
     roundTrip(markdown: string) {

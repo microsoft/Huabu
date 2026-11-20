@@ -65,6 +65,7 @@ import {
 import { isMac } from '@/utils/platform';
 import { normalizeSafeLinkHref } from '@/utils/safeLink';
 
+import { cjkFriendlyEmphasisPlugins } from './cjkFriendlyEmphasis';
 import {
   configureLatexCodeFences,
   latexCodeBlockSchema,
@@ -2013,6 +2014,7 @@ export async function createMilkdown(
     (state: MilkdownFormattingState) => void
   >();
   crepe.editor
+    .use(cjkFriendlyEmphasisPlugins)
     .use(huabuColorSpanRemarkPlugin)
     .use(textColorMarkSchema)
     .use(backgroundColorMarkSchema);
