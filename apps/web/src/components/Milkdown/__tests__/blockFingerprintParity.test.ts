@@ -97,6 +97,8 @@ const AGENT_MARKDOWN_CASES: Array<[string, string]> = [
   ['cjk-strong', '**工单比对话活得久。**DeepSeek 原型里'],
   ['cjk-strikethrough', '~~删除。~~后文'],
   ['cjk-single-tilde', '~删除。~后文'],
+  ['cjk-adjacent-strong', '__前言__**结论。**后文'],
+  ['cjk-underscore-emphasis', '正體字。\uFE01_Traditional._'],
   ['setext-heading', 'Agent-generated heading\n======================='],
   ['indented-code', '    const value = 42;\n    console.log(value);'],
   [
