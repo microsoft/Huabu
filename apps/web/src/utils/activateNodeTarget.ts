@@ -5,6 +5,7 @@ import { toast } from '@/components/Common/Toast';
 import { hasNodePreview } from '@/components/Nodes/previewableNodeTypes';
 import { i18n } from '@/i18n';
 import useCanvasStore from '@/store/canvasStore';
+import { usePanelStore } from '@/store/panelStore';
 import { openPreviewNode } from '@/store/previewWorkspace/actions';
 import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store';
 import { useWorkspaceStore } from '@/store/workspaceStore';
@@ -27,7 +28,8 @@ export function isLocateOnlyNavigation(state: unknown): boolean {
 }
 
 /**
- * Select a node of the loaded Space and reveal it on the canvas. With
+ * Select a node of the loaded Space, reveal it on the canvas and, when Layers
+ * is showing (or the Canvas is not), bring its Layers row into view. With
  * `openPreview` (URL deep links) it also opens the node's permanent preview —
  * a Question opens its conversation at the latest message. In-document node
  * links only locate, so following one never replaces what the user is reading.
@@ -55,6 +57,7 @@ export function activateNodeTarget(
 
   canvas.selectNodes([node.id], false);
   if (openPreview) openNodePreview(node);
+  const canvasMounted = !!canvas.rfInstance && !!canvas.canvasWrapper;
   if (canvas.rfInstance && canvas.canvasWrapper) {
     revealNodesOnCanvas(
       canvas.rfInstance,
@@ -64,11 +67,14 @@ export function activateNodeTarget(
     );
   } else {
     // Fullscreen preview unmounts the Canvas. Stay in fullscreen — the user is
-    // reading — and hand the target to the reveal request the Canvas consumes
-    // when it is mounted again; say so, since nothing visibly moves now.
+    // reading — and queue the reveal for when the Canvas is mounted again.
     useCanvasStore.setState({ pendingRevealNodeIds: [node.id] });
-    toast(i18n.t('canvasPage.nodeLocatedAfterFullscreen'), { tone: 'info' });
   }
+  // Layers mirrors the location: it follows when already showing, and is
+  // opened only when the Canvas cannot show the node itself.
+  usePanelStore
+    .getState()
+    .requestLayerLocate(node.id, { open: !canvasMounted });
   return true;
 }
 

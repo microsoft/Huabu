@@ -15,7 +15,13 @@ import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store';
 import { registerAppNavigate } from '@/utils/appNavigation';
 import { isMac } from '@/utils/platform';
 
+import type * as CanvasViewport from '@/utils/canvasViewport';
+
 vi.mock('@/hooks/useElectron', () => ({ isElectron: vi.fn() }));
+vi.mock('@/utils/canvasViewport', async (importOriginal) => ({
+  ...(await importOriginal<typeof CanvasViewport>()),
+  revealNodesOnCanvas: vi.fn(),
+}));
 
 (
   globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -88,7 +94,13 @@ afterEach(() => {
   container = undefined;
   vi.restoreAllMocks();
   registerAppNavigate(null);
-  usePanelStore.setState({ isPreviewFullscreen: false });
+  usePanelStore.setState({
+    isPreviewFullscreen: false,
+    isLeftCollapsed: true,
+    leftMode: 'layers',
+    layerLocateRequest: null,
+  });
+  useCanvasStore.setState({ rfInstance: null, canvasWrapper: null });
   useCanvasStore.setState({ canvasId: '', nodes: [] });
   usePreviewWorkspaceStore.setState({
     canvasId: '',
@@ -211,8 +223,8 @@ it('keeps a deep link to this Space in-app for plain and modifier clicks', async
   expect(window.open).not.toHaveBeenCalled();
 });
 
-it('stays in fullscreen and queues the reveal when the Canvas is unmounted', async () => {
-  usePanelStore.setState({ isPreviewFullscreen: true });
+it('stays in fullscreen and opens Layers on the node when the Canvas is unmounted', async () => {
+  usePanelStore.setState({ isPreviewFullscreen: true, isLeftCollapsed: true });
   useCanvasStore.setState({ rfInstance: null, canvasWrapper: null });
   const [link] = await renderLinks(
     <MilkdownMessageCard
@@ -224,10 +236,45 @@ it('stays in fullscreen and queues the reveal when the Canvas is unmounted', asy
 
   click(link);
 
-  expect(usePanelStore.getState().isPreviewFullscreen).toBe(true);
+  const panel = usePanelStore.getState();
+  expect(panel.isPreviewFullscreen).toBe(true);
+  expect(panel.isLeftCollapsed).toBe(false);
+  expect(panel.leftMode).toBe('layers');
+  expect(panel.layerLocateRequest?.nodeId).toBe('node-question');
   expect(selectedNodeIds()).toEqual(['node-question']);
   expect(useCanvasStore.getState().pendingRevealNodeIds).toEqual([
     'node-question',
   ]);
   expect(tabTargets()).toEqual([]);
 });
+
+it.each([
+  ['follows in Layers when it is showing', false, 'layers', true],
+  ['leaves a collapsed panel closed', true, 'layers', false],
+  ['leaves the Files tab alone', false, 'files', false],
+] as const)(
+  'with the Canvas mounted, %s',
+  async (_case, isLeftCollapsed, leftMode, located) => {
+    usePanelStore.setState({ isLeftCollapsed, leftMode });
+    useCanvasStore.setState({
+      rfInstance: { getViewport: () => ({ x: 0, y: 0, zoom: 1 }) } as never,
+      canvasWrapper: document.createElement('div'),
+    });
+    const [link] = await renderLinks(
+      <MilkdownMessageCard
+        content="[Conversation](#node-question)"
+        threadId="thread-source"
+      />,
+      1,
+    );
+
+    click(link);
+
+    const panel = usePanelStore.getState();
+    expect(panel.isLeftCollapsed).toBe(isLeftCollapsed);
+    expect(panel.leftMode).toBe(leftMode);
+    expect(panel.layerLocateRequest?.nodeId).toBe(
+      located ? 'node-question' : undefined,
+    );
+  },
+);

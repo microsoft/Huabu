@@ -863,8 +863,7 @@
     "backToList": "Back to Space list",
     "openListInNewTab": "Open Space list in new tab",
     "nodeTargetUnavailable": "This linked node is unavailable.",
-    "nodeFocusedNoPreview": "Node focused. This node has no expanded preview.",
-    "nodeLocatedAfterFullscreen": "Node selected. It will be shown on the canvas when you leave fullscreen."
+    "nodeFocusedNoPreview": "Node focused. This node has no expanded preview."
   },
   "world": {
     "title": "World",

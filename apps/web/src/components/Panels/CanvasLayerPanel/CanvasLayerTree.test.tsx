@@ -446,6 +446,47 @@ describe('CanvasLayerTree activation', () => {
     });
   });
 
+  it('expands collapsed ancestors and scrolls a located node into view once', async () => {
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView;
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+      callback(0);
+      return 0;
+    });
+    try {
+      await renderTree([
+        item('frame-1', 'frame'),
+        { ...item('frame-2', 'frame', 'frame-1'), depth: 1 },
+        { ...item('note-1', 'note', 'frame-2'), depth: 2 },
+      ]);
+      act(() =>
+        useCanvasStore.setState({
+          collapsedFrameIds: new Set(['frame-1', 'frame-2']),
+        }),
+      );
+      expect(container.querySelector('[data-layer-id="note-1"]')).toBeNull();
+
+      act(() =>
+        usePanelStore.setState({ isLeftCollapsed: false, leftMode: 'layers' }),
+      );
+      act(() => usePanelStore.getState().requestLayerLocate('note-1'));
+
+      expect(useCanvasStore.getState().collapsedFrameIds.size).toBe(0);
+      expect(scrollIntoView).toHaveBeenCalledExactlyOnceWith({
+        block: 'nearest',
+      });
+      expect(scrollIntoView.mock.contexts[0]).toBe(row('note-1'));
+      expect(usePanelStore.getState().layerLocateRequest).toBeNull();
+
+      // A request for a node with no row is dropped rather than left pending.
+      act(() => usePanelStore.getState().requestLayerLocate('missing'));
+      expect(usePanelStore.getState().layerLocateRequest).toBeNull();
+      expect(scrollIntoView).toHaveBeenCalledOnce();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('ignores a stale row safely', async () => {
     await renderTree([item('note-1', 'note')]);
     act(() => useCanvasStore.setState({ nodes: [] }));

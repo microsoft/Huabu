@@ -39,6 +39,16 @@ interface PanelState {
   /** Expand Layers and request search focus after the DOM leaves its inert state. */
   requestFocusCanvasSearch: () => void;
 
+  /** Pending one-shot request to bring a node's row into view in Layers. */
+  layerLocateRequest: { nodeId: string; nonce: number } | null;
+  /**
+   * Ask Layers to show a node's row. With `open` the panel is expanded on the
+   * Layers tab first; without it the request is a no-op unless Layers is
+   * already showing, so it never changes what the user has open.
+   */
+  requestLayerLocate: (nodeId: string, options?: { open?: boolean }) => void;
+  consumeLayerLocateRequest: (nonce: number) => void;
+
   /**
    * Collapse state for the right (chat) panel. Hoisted out of
    * `MainLayout`'s local `useState` and persisted to localStorage so
@@ -132,6 +142,27 @@ export const usePanelStore = create<PanelState>()(
           leftMode: 'layers',
           focusCanvasSearchRequest: (s.focusCanvasSearchRequest ?? 0) + 1,
         })),
+
+      layerLocateRequest: null,
+      requestLayerLocate: (nodeId, options) =>
+        set((s) => {
+          const showing = !s.isLeftCollapsed && s.leftMode === 'layers';
+          if (!showing && !options?.open) return s;
+          return {
+            isLeftCollapsed: false,
+            leftMode: 'layers',
+            layerLocateRequest: {
+              nodeId,
+              nonce: (s.layerLocateRequest?.nonce ?? 0) + 1,
+            },
+          };
+        }),
+      consumeLayerLocateRequest: (nonce) =>
+        set((s) =>
+          s.layerLocateRequest?.nonce === nonce
+            ? { layerLocateRequest: null }
+            : s,
+        ),
 
       isRightCollapsed: true,
       rightWidthPx: 420,
