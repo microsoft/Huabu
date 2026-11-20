@@ -94,6 +94,9 @@ const AGENT_MARKDOWN_CASES: Array<[string, string]> = [
   ['styled-span', '<span data-huabu-text-color="danger">Important text</span>'],
   ['nested-quote-list', '> Summary\n>\n> - First\n> - Second'],
   ['mixed-inline-marks', 'This is ***important*** and ~~obsolete~~.'],
+  ['cjk-strong', '**工单比对话活得久。**DeepSeek 原型里'],
+  ['cjk-strikethrough', '~~删除。~~后文'],
+  ['cjk-single-tilde', '~删除。~后文'],
   ['setext-heading', 'Agent-generated heading\n======================='],
   ['indented-code', '    const value = 42;\n    console.log(value);'],
   [

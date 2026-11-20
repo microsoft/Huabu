@@ -21,8 +21,12 @@ import remarkCjkFriendlyGfmStrikethrough from 'remark-cjk-friendly-gfm-strikethr
  */
 export const cjkFriendlyEmphasisPlugins = [
   $remark('huabuCjkFriendlyEmphasis', () => remarkCjkFriendly),
+  // Single-tilde strikethrough stays off for CJK-adjacent runs: it would be
+  // serialized as `~~`, a different literal string to the shared block
+  // fingerprint parser, which does not load this extension.
   $remark(
     'huabuCjkFriendlyStrikethrough',
     () => remarkCjkFriendlyGfmStrikethrough,
+    { singleTilde: false },
   ),
 ].flat();
