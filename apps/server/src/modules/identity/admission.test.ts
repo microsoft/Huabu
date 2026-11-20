@@ -236,6 +236,15 @@ describe('automatic admission', () => {
     await store.principals.update('gina', {
       disabledAt: new Date().toISOString(),
     });
+    // Hana signed in then too, and was given a system role with no Huabu
+    // access.
+    expect(await identity('hana')).toMatchObject({ member: false });
+    await store.grants.add({
+      target: { type: 'system' },
+      principalId: 'hana',
+      role: 'system_manager',
+      grantedByPrincipalId: 'admin',
+    });
     await setAutomatic(true);
     expect((await call(signIn('gina'), 'GET', '/api/identity')).status).toBe(
       403,
@@ -254,6 +263,14 @@ describe('automatic admission', () => {
       '/api/identity',
     );
     expect((await person('robot'))?.member ?? false).toBe(false);
+
+    // Any system grant that carries no Huabu access was an administrator's
+    // choice; admission leaves it alone rather than adding `member`.
+    expect(await identity('hana')).toMatchObject({ member: false });
+    expect(await person('hana')).toMatchObject({
+      member: false,
+      joinedAutomatically: false,
+    });
   });
 
   it('keeps a removed person out across sign-ins and a restart, until access is turned back on', async () => {

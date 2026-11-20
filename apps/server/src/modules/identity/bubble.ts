@@ -98,8 +98,9 @@ function bubblePeople(
   /**
    * Admit `principalId` as an ordinary member if automatic admission is on,
    * they hold no system grant, no block, and are an enabled user. Only a
-   * sign-in through `providers` may ask. `true` when they hold a system grant
-   * afterwards, including one a racing first request just made.
+   * sign-in through `providers` may ask. `true` when they hold `member` or
+   * `owner` afterwards, including a `member` grant a racing first request
+   * just made.
    */
   admitAutomatically(principalId: string): Promise<boolean>;
 } {
@@ -200,6 +201,9 @@ function bubblePeople(
         const rows = await store.grants.list({ target: SYSTEM, principalId });
         if (rows.some((row) => row.role === 'member' || row.role === 'owner'))
           return true;
+        // Any other system grant (such as Bubble's `system_manager`) is an
+        // administrator's deliberate choice that withholds Huabu access.
+        if (rows.length > 0) return false;
         // Read under the lock: a revocation for this person has either
         // committed its block already or waits until this grant is made.
         const admission = await readAdmission();
