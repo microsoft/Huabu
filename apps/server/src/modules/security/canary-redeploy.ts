@@ -90,15 +90,38 @@ function validSha(value: string | undefined): string | null {
 }
 
 /**
- * The full Git commit this Server runs, from `HUABU_DEPLOYED_SHA`, or null
- * when it is unset or not a 40-character SHA. Images bake it in from the
- * `SOURCE_REVISION` build argument; `scripts/start-web.mjs` fills it from a
- * source checkout's `git rev-parse HEAD`.
+ * The full commit the server bundle was built from, replaced at bundle time
+ * by `apps/server/tsup.config.ts` (from `scripts/build-version.mjs`): a
+ * 40-character SHA, or null when the build could not determine it. Not
+ * defined when the Server runs from source (development and tests).
+ */
+declare const __HUABU_BUILD_REVISION__: string | null | undefined;
+
+/** The commit the running bundle was built from, or null when unknown. */
+export function bundledRevision(): string | null {
+  return typeof __HUABU_BUILD_REVISION__ === 'string'
+    ? validSha(__HUABU_BUILD_REVISION__)
+    : null;
+}
+
+/**
+ * The full Git commit this Server runs, or null when unknown.
+ *
+ * The revision recorded in the bundle at build time wins, because the
+ * startup environment can describe a different checkout: `scripts/start-web.mjs`
+ * fills `HUABU_DEPLOYED_SHA` from `git rev-parse HEAD` at launch, which is
+ * not the bundle's commit once the checkout moves without a rebuild. Only a
+ * bundle without a recorded revision (or the Server run from source) falls
+ * back to a valid `HUABU_DEPLOYED_SHA`.
+ *
+ * @param env startup environment holding `HUABU_DEPLOYED_SHA`
+ * @param built the bundle's recorded revision; tests pass it explicitly
  */
 export function deployedSha(
   env: NodeJS.ProcessEnv = process.env,
+  built: string | null = bundledRevision(),
 ): string | null {
-  return validSha(env.HUABU_DEPLOYED_SHA);
+  return built ?? validSha(env.HUABU_DEPLOYED_SHA);
 }
 
 export function resolveCanaryCapability(

@@ -28,6 +28,7 @@ import {
   resolveRuntimeArtifacts,
 } from '../../../packages/client-runtime/src/bootstrap.js';
 import clientRuntimeConfig from '../../../packages/client-runtime/tsup.config.js';
+import { resolveRevision } from '../../../scripts/build-version.mjs';
 import bundleConfig from '../tsup.config.js';
 
 const configured =
@@ -334,6 +335,53 @@ describe('server bundle runtime', () => {
       rmSync(directory, { recursive: true, force: true });
     }
   });
+  it('reports the revision it was built from, not the startup checkout', async () => {
+    // Built at this checkout's commit (A), then started by a launcher whose
+    // checkout has moved to another commit (B) without rebuilding.
+    const built = resolveRevision(process.env).revision;
+    const startup = built?.startsWith('0') ? '1'.repeat(40) : '0'.repeat(40);
+    const directory = mkdtempSync(path.join(tmpdir(), 'huabu-revision-'));
+    try {
+      const entry = path.join(directory, 'probe.ts');
+      writeFileSync(
+        entry,
+        `import { deployedSha } from ${JSON.stringify(
+          path.resolve('src/modules/security/canary-redeploy.ts'),
+        )};
+console.log(JSON.stringify(deployedSha()));
+`,
+      );
+      const outDir = path.join(directory, 'dist');
+      await build({
+        ...configurations[0],
+        config: false,
+        entry: { probe: entry },
+        outDir,
+        outExtension: () => ({ js: '.mjs' }),
+        onSuccess: undefined,
+        silent: true,
+      });
+      const output = execFileSync(
+        process.execPath,
+        [path.join(outDir, 'probe.mjs')],
+        {
+          cwd: directory,
+          encoding: 'utf8',
+          env: {
+            ...process.env,
+            HUABU_DATA_DIR: directory,
+            HUABU_DEPLOYED_SHA: startup,
+          },
+        },
+      );
+      // Without a recorded revision (a build with neither Git nor
+      // SOURCE_REVISION), only the startup value remains.
+      expect(JSON.parse(output)).toBe(built ?? startup);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it.each(configurations)(
     'loads prefix-only Node built-ins with the $outDir configuration',
     async (configuration) => {

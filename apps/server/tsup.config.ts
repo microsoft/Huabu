@@ -8,6 +8,7 @@ import path from 'node:path';
 import { defineConfig } from 'tsup';
 
 import { prepareVideoMedia } from './scripts/prepare-video-media.mjs';
+import { resolveRevision } from '../../scripts/build-version.mjs';
 
 // ESM bundles don't have `require`, `__dirname`, or `__filename` in
 // global scope, but plenty of bundled CJS packages assume they exist:
@@ -30,6 +31,12 @@ const BANNER = {
 const resvgWasmSrc = createRequire(path.resolve('package.json')).resolve(
   '@resvg/resvg-wasm/index_bg.wasm',
 );
+
+// Record the commit this bundle is built from, the same one the web build's
+// version names. The Server reports it as its running revision
+// (`deployedSha()` in canary-redeploy.ts) instead of the launch-time
+// checkout, which can have moved since this build.
+const { revision: buildRevision } = resolveRevision(process.env);
 
 export default defineConfig([
   {
@@ -67,6 +74,9 @@ export default defineConfig([
     // Namespace banner-only aliases because esbuild cannot rename raw banner
     // declarations when bundled source emits the same import alias.
     banner: BANNER,
+    define: {
+      __HUABU_BUILD_REVISION__: JSON.stringify(buildRevision),
+    },
     esbuildOptions(options) {
       options.platform = 'node';
     },

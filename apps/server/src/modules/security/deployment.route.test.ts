@@ -101,4 +101,15 @@ describe('deployment readiness', () => {
     expect(deployedSha({ HUABU_DEPLOYED_SHA: 'main' })).toBeNull();
     expect(deployedSha({})).toBeNull();
   });
+
+  it('reports the bundle revision over the startup checkout', () => {
+    // Built at A, then started from a checkout moved to B without rebuilding:
+    // the launcher's startup HEAD (B) must not be presented as the bundle's.
+    const built = '16099466a503230613d0d0efbc58334f905676ce';
+    const startup = 'b0403c4ff401e9be7ea777988b5aa1d5fbf0a8b4';
+    expect(deployedSha({ HUABU_DEPLOYED_SHA: startup }, built)).toBe(built);
+    expect(deployedSha({}, built)).toBe(built);
+    // A bundle that recorded no revision keeps the explicit deployment SHA.
+    expect(deployedSha({ HUABU_DEPLOYED_SHA: startup }, null)).toBe(startup);
+  });
 });
