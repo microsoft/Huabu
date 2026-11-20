@@ -26,6 +26,7 @@
 import { rm } from 'node:fs/promises';
 
 import { stripLegacyPortalTopology } from '@huabu/shared';
+import { seedNodeOrder } from '@huabu/shared/canvas-engine';
 
 import { runInWorkspace } from '../workspace/context.js';
 import { runWorkspacePreparation } from '../workspace-activation.js';
@@ -251,7 +252,12 @@ function composeSpace(storage: Storage, canvasId: string): Space {
         record.state.nodes as Parameters<typeof stripLegacyPortalTopology>[0],
         record.state.edges as Parameters<typeof stripLegacyPortalTopology>[1],
       );
-      return { ...record, state: { ...record.state, ...topology } };
+      // A Space stored before nodes carried their own order keys gets them
+      // here, the same on every read, until its next write stores them.
+      const nodes = seedNodeOrder(
+        topology.nodes as unknown as Parameters<typeof seedNodeOrder>[0],
+      ) as unknown as typeof topology.nodes;
+      return { ...record, state: { ...record.state, ...topology, nodes } };
     },
     write: (input) => handle.write(input),
     save: handle.save,

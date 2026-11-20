@@ -11,9 +11,8 @@
  * fields the edit changed and is merged into the node as it is then; a
  * deletion's revert row holds the whole deleted node, because nothing else
  * does once its record is gone. Records stored before rows became partial
- * hold whole nodes and are read by the same code. Old logs have no exact
- * sibling order. OrderedDelta inversion below is whole-batch only;
- * per-entity Review extraction/coalescing remains entity-only.
+ * hold whole nodes and are read by the same code. Paint order is a node
+ * field (`data.paintKey`), so a revert row restores it like any other.
  *
  * Pure functions only — host-agnostic, shared by server (producer) and
  * web (renderer / reverter).
@@ -27,7 +26,6 @@ import {
   replacedNodeType,
   type Delta,
   type NodeFields,
-  type OrderedDelta,
 } from './delta.js';
 import { createId } from '../utils/id.js';
 
@@ -245,13 +243,10 @@ export function nodeRevisionOf(fields: {
 
 /**
  * Invert a delta batch. To undo a sequence applied in order, invert each
- * delta and apply them in reverse order. Ordered batches must be applied
- * atomically; orderVersion is retained, not rolled back as a live writer version.
+ * delta and apply them in reverse order.
  */
-export function invertDeltas(deltas: readonly Delta[]): Delta[];
-export function invertDeltas(deltas: readonly OrderedDelta[]): OrderedDelta[];
-export function invertDeltas(deltas: readonly OrderedDelta[]): OrderedDelta[] {
-  const out: OrderedDelta[] = [];
+export function invertDeltas(deltas: readonly Delta[]): Delta[] {
+  const out: Delta[] = [];
   for (let i = deltas.length - 1; i >= 0; i--) {
     out.push(invertDelta(deltas[i]));
   }

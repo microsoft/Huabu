@@ -149,27 +149,27 @@ describe('canvasSyncStore stream recovery', () => {
     });
   });
 
-  it('passes order events to the store and reloads when they cannot be installed', async () => {
-    const orderEvents = [
+  it("hands another page's reorder to the store as a node delta, with no order argument and no reload", async () => {
+    // Paint order is the moved node's own `data.paintKey`.
+    const deltas = [
       {
-        type: 'SET_SIBLING_ORDER',
-        parentId: null,
-        before: ['a', 'b'],
-        after: ['b', 'a'],
-        orderVersion: 2,
+        type: 'REPLACE_NODE',
+        prev: { id: 'a', data: { paintKey: 'a0' } },
+        next: { id: 'a', data: { paintKey: 'a2' } },
+        nodeType: 'note',
       },
     ];
     const update = {
       fromVersion: 1,
       toVersion: 2,
-      deltas: [],
+      deltas,
       pendingEffects: {
         mutatedNodeIds: [],
         deletedNodeIds: [],
         contentEditedNodeIds: [],
         deferredFitFrameIds: [],
       },
-      orderEvents,
+      source: 'ui',
     };
     const stream = new ReadableStream<Uint8Array>({
       start(controller) {
@@ -188,22 +188,12 @@ describe('canvasSyncStore stream recovery', () => {
 
     expect(mocks.canvasState.applyServerDeltas).toHaveBeenCalledOnce();
     const call = mocks.canvasState.applyServerDeltas.mock
-      .calls[0] as unknown as [
-      unknown[],
-      number,
-      unknown,
-      boolean | undefined,
-      { events: unknown; onDiverged: () => void },
-    ];
-    expect(call[0]).toEqual([]);
+      .calls[0] as unknown as unknown[];
+    expect(call).toHaveLength(5);
+    expect(call[0]).toEqual(deltas);
     expect(call[1]).toBe(2);
-    expect(call[4].events).toEqual(orderEvents);
+    expect(call[4]).toEqual({ source: 'ui' });
     expect(mocks.canvasState.loadCanvas).not.toHaveBeenCalled();
-
-    call[4].onDiverged();
-    expect(mocks.canvasState.loadCanvas).toHaveBeenCalledWith('canvas-1', {
-      resetHistory: true,
-    });
   });
 
   it('shows a renamed Space and follows its version without loading it again', async () => {
@@ -302,7 +292,7 @@ describe('canvasSyncStore stream recovery', () => {
       expect(mocks.canvasState.applyServerDeltas).toHaveBeenCalledOnce();
       const call = mocks.canvasState.applyServerDeltas.mock
         .calls[0] as unknown as unknown[];
-      expect(call[5]).toEqual({
+      expect(call[4]).toEqual({
         source: 'agent',
         nodeContentRevisions: { n1: 'stored-rev' },
       });

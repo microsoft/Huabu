@@ -31,3 +31,8 @@ export {
   materializeForestOrder,
   edgeZIndex,
 } from './zorder.js';
+export {
+  orderByPaintKeys,
+  readPaintKey,
+  settlePaintOrder,
+} from './paintOrder.js';

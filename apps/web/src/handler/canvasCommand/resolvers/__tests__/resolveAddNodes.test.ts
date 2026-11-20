@@ -5,7 +5,7 @@ import { assert, describe, expect, it, vi } from 'vitest';
 
 import {
   autoHeightKey,
-  applyOrderedDeltas,
+  applyDeltas,
   assignNodeZIndices,
   diffCanvasState,
   executeCanvasCommands,
@@ -775,8 +775,9 @@ describe('resolvePasteClipboard', () => {
     expect(
       [...assignNodeZIndices(output.nodes).keys()].map((id) => labels.get(id)),
     ).toEqual(originalOrder);
-    const deltas = diffCanvasState(ui, output, { orderVersion: 1 });
-    const replayed = applyOrderedDeltas(ui, JSON.parse(JSON.stringify(deltas)));
+    // Paint order travels in the node rows, as each node's key.
+    const deltas = diffCanvasState(ui, output);
+    const replayed = applyDeltas(ui, JSON.parse(JSON.stringify(deltas)));
     expect(replayed.nodes).toEqual(output.nodes);
     expect(replayed.edges).toEqual(output.edges);
   });

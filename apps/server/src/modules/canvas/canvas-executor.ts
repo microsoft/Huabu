@@ -52,8 +52,6 @@ import {
   applySharedPostEffectsFromWriteResult,
   applyDeltas,
   diffCanvasState,
-  diffSiblingOrderEvents,
-  SiblingOrderReplayError,
   createReadVersionAdmission,
   executeCanvasEdits,
   extractCanvasChanges,
@@ -64,6 +62,8 @@ import {
   mergeNodeFields,
   nodeRevision,
   nodeRevisionOf,
+  settlePaintOrder,
+  type NestableNode,
   preserveAgentNodeOwnedData,
   projectAgentNodeEditableData,
   replayAgentNodeEditableData,
@@ -76,7 +76,6 @@ import {
   type CanvasNode,
   type Delta,
   type ReadVersionAdmission,
-  type SetSiblingOrderEvent,
 } from '@huabu/shared/canvas-engine';
 
 import {
@@ -143,24 +142,6 @@ import {
 const EMPTY_CANVAS_IDS: ReadonlySet<string> = new Set<string>();
 
 const log = getLogger('canvas.executor');
-
-/**
- * Sibling order events for a commit's notification. The strict forest check
- * rejects legacy topology that loads still repair; such a commit sends none
- * and clients keep their entity-only replay.
- */
-function siblingOrderEventsFor(
-  prestateNodes: readonly CanvasNode[],
-  finalNodes: readonly CanvasNode[],
-  orderVersion: number,
-): SetSiblingOrderEvent[] {
-  try {
-    return diffSiblingOrderEvents(prestateNodes, finalNodes, orderVersion);
-  } catch (error) {
-    if (error instanceof SiblingOrderReplayError) return [];
-    throw error;
-  }
-}
 
 function insertedNodeIds(deltas: readonly Delta[]): Set<string> {
   return new Set(
@@ -1066,12 +1047,6 @@ export interface ExecuteOnServerOutput {
   conflicts?: ExecuteConflict[];
   viewConflicts?: InteractiveViewConflict[];
   /**
-   * Complete direct-child lists of every parent whose sibling paint order or
-   * membership this batch changed, stamped with `toVersion`. Entity `deltas`
-   * cannot express order; clients replay these after them.
-   */
-  orderEvents?: SetSiblingOrderEvent[];
-  /**
    * Stored content revision of every node whose saved content this batch
    * created or changed ({@link contentChangedNodeIds}), read back after the
    * commit. A response answered from a result record carries the revisions
@@ -1378,7 +1353,6 @@ export function toExecuteResponse(
         })),
     })),
     pendingEffects: outcome.pendingEffects,
-    ...(outcome.orderEvents ? { orderEvents: outcome.orderEvents } : {}),
     ...(outcome.nodeContentRevisions
       ? { nodeContentRevisions: outcome.nodeContentRevisions }
       : {}),
@@ -1400,7 +1374,6 @@ export function publishCanvasExecution(output: ExecuteOnServerOutput): void {
       toVersion: output.toVersion,
       deltas: output.deltas,
       pendingEffects: toWirePendingEffects(output.pendingEffects),
-      ...(output.orderEvents ? { orderEvents: output.orderEvents } : {}),
       ...(output.nodeContentRevisions
         ? { nodeContentRevisions: output.nodeContentRevisions }
         : {}),
@@ -2074,8 +2047,8 @@ async function executePreparedOnServerAlreadyLocked(
   // leaving the agent with `applied: true` while persisted topology
   // is unchanged.
   //
-  // The delta log stays entity-only; the order itself travels to clients
-  // as `orderEvents` on the response and the sync notification below.
+  // Paint order itself is a node field (`data.paintKey`) and shows up as a
+  // delta; this only catches a rebuilt array whose entities are unchanged.
   const orderChanged =
     prestateNodes.length !== finalNodes.length ||
     prestateEdges.length !== finalEdges.length ||
@@ -2109,11 +2082,6 @@ async function executePreparedOnServerAlreadyLocked(
   }
 
   const toVersion = fromVersion + 1;
-  const orderEvents = siblingOrderEventsFor(
-    prestateNodes,
-    finalNodes,
-    toVersion,
-  );
   // What travels and is journalled: a deletion as an id. `deltas` keeps the
   // deleted nodes for the Review records and for in-process callers that
   // invert the batch.
@@ -2229,7 +2197,6 @@ async function executePreparedOnServerAlreadyLocked(
       deferredFitFrameIds: pendingEffects.deferredFitFrameIds,
     },
     ...(changes ? { changes } : {}),
-    ...(orderEvents.length > 0 ? { orderEvents } : {}),
     ...(nodeContentRevisions ? { nodeContentRevisions } : {}),
     ...envelope(toVersion),
   });
@@ -2340,7 +2307,6 @@ async function executePreparedOnServerAlreadyLocked(
         toVersion,
         deltas: wireDeltas,
         pendingEffects: toWirePendingEffects(pendingEffects),
-        ...(orderEvents.length > 0 ? { orderEvents } : {}),
         ...(nodeContentRevisions ? { nodeContentRevisions } : {}),
         ...(originator.threadId ? { threadId: originator.threadId } : {}),
         ...(broadcastChanges ? { changes: broadcastChanges } : {}),
@@ -2691,7 +2657,15 @@ export async function applyDeltasOnServerAlreadyLocked(input: {
       version: toVersion,
       state: {
         ...canvas.state,
-        nodes: stripNodesForCanvas(finalNodes),
+        // A row may insert a node without an order key (a preview the
+        // World creates, a node moved in from another Space): it is keyed
+        // here for where it was put, as the executor's end of batch does.
+        nodes: stripNodesForCanvas(
+          settlePaintOrder(
+            finalNodes as NestableNode[],
+            prestateNodes as NestableNode[],
+          ) as CanvasNode[],
+        ),
         edges: finalEdges,
       },
       updatedAt: Date.now(),

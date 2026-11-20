@@ -44,6 +44,7 @@
 import { applyStructuredFrameRelayout } from './autoLayout/gridLayout.js';
 import { HANDLERS, COMMAND_META } from './commands/index.js';
 import { isAllowedFor } from './commandScope.js';
+import { settlePaintOrder } from './container/paintOrder.js';
 import {
   fitFrameToChildren,
   normalizeTreeOrder,
@@ -426,8 +427,13 @@ export function executeCanvasEdits(
   // (no sort, no remap, no allocation).
   // ------------------------------------------------------------------
   if (anyApplied) {
+    // Paint order first: every node the batch created or moved to another
+    // parent gets its own key for the place it stands in, and the array
+    // follows the keys (see `container/paintOrder.ts`).
     currentNodes = hidePdfNotes(
-      normalizeTreeOrder(currentNodes as NestableNode[]),
+      normalizeTreeOrder(
+        settlePaintOrder(currentNodes as NestableNode[], state.nodes),
+      ),
     );
   }
 

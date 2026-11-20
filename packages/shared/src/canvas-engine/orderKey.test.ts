@@ -118,10 +118,8 @@ describe('keysInSequence', () => {
     expect(last[2] > b).toBe(true);
   });
 
-  it('re-keys the later of two equal keys and leaves the rest', () => {
-    const keys = keysInSequence([a, b, b, c]);
-    expect([keys[0], keys[1], keys[3]]).toEqual([a, b, c]);
-    expect(b < keys[2] && keys[2] < c).toBe(true);
+  it('leaves two equal keys alone when nothing goes between them', () => {
+    expect(keysInSequence([a, b, b, c])).toEqual([a, b, b, c]);
   });
 
   it('makes room between two equal keys for an entry placed between them', () => {
@@ -136,7 +134,7 @@ describe('keysInSequence', () => {
     expect(a < keys[1] && keys[1] < c).toBe(true);
   });
 
-  it('always returns strictly ascending keys', () => {
+  it('always returns ascending keys and never moves a kept key', () => {
     const next = random(11);
     const pool = keysBetween(undefined, undefined, 6);
     for (let round = 0; round < 300; round++) {
@@ -146,8 +144,13 @@ describe('keysInSequence', () => {
       });
       const keys = keysInSequence(input);
       expect(keys).toHaveLength(input.length);
-      for (let i = 1; i < keys.length; i++)
-        expect(keys[i - 1] < keys[i]).toBe(true);
+      for (let i = 1; i < keys.length; i++) {
+        expect(keys[i - 1] <= keys[i]).toBe(true);
+        // A new key is never equal to a neighbour.
+        if (keys[i] !== input[i]) expect(keys[i - 1] < keys[i]).toBe(true);
+        if (keys[i - 1] !== input[i - 1])
+          expect(keys[i - 1] < keys[i]).toBe(true);
+      }
     }
   });
 });

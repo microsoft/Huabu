@@ -25,7 +25,12 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { canvasSyncEventSchema, encodeBasis } from '@huabu/shared';
-import { nodeRevisionOf } from '@huabu/shared/canvas-engine';
+import {
+  applyDeltas,
+  nodeRevisionOf,
+  type CanvasNode,
+  type Delta,
+} from '@huabu/shared/canvas-engine';
 
 import {
   ExecuteBasisError,
@@ -1088,12 +1093,18 @@ describe('Review records', () => {
   });
 });
 
-describe('sibling order in the update notification', () => {
-  const orderEventsOf = (event: CanvasSyncEvent | undefined) =>
-    event?.type === 'update' ? event.data.orderEvents : undefined;
+describe('paint order in the update notification', () => {
+  const paintKeyOf = (node: object | undefined) =>
+    (node as { data?: Record<string, unknown> } | undefined)?.data?.paintKey as
+      | string
+      | undefined;
 
-  it('publishes the new root order of a pure reorder', async () => {
+  it('publishes a pure reorder as the moved node alone, with its new key', async () => {
     seed();
+    const before = await nodesNow();
+    const keyBefore = new Map(
+      before.map((node) => [node.id, paintKeyOf(node)]),
+    );
     const request = requestOf();
     const output = await run(
       cmds({ type: 'REORDER_NODES', nodeIds: ['a'], to: 'top' }),
@@ -1101,52 +1112,73 @@ describe('sibling order in the update notification', () => {
     );
 
     expect(output.results[0]?.applied).toBe(true);
-    expect(output.deltas).toEqual([]);
     expect(output.toVersion).toBe(2);
-    const expected = [
-      {
-        type: 'SET_SIBLING_ORDER',
-        parentId: null,
-        before: ['f1', 'f2', 'a', 'b', 'c'],
-        after: ['f1', 'f2', 'b', 'c', 'a'],
-        orderVersion: 2,
-      },
-    ];
-    expect(output.orderEvents).toEqual(expected);
+    // One row, for the moved node, naming only the key that changed.
+    expect(output.deltas).toHaveLength(1);
+    expect(output.deltas[0]).toMatchObject({
+      type: 'REPLACE_NODE',
+      prev: { id: 'a', data: { paintKey: keyBefore.get('a') } },
+      next: { id: 'a' },
+    });
+    const after = await nodesNow();
+    expect(after.map((node) => node.id)).toEqual(['f1', 'f2', 'b', 'c', 'a']);
+    const keyAfter = paintKeyOf(after.find((node) => node.id === 'a'));
+    expect(output.deltas[0]).toMatchObject({
+      next: { data: { paintKey: keyAfter } },
+    });
+    // In front of every sibling, and nobody else was rewritten.
+    for (const node of after) {
+      if (node.id === 'a') continue;
+      expect(paintKeyOf(node)).toBe(keyBefore.get(node.id));
+      if (!node.parentId)
+        expect((keyAfter as string) > (paintKeyOf(node) as string)).toBe(true);
+    }
+
     expect(events).toHaveLength(1);
     expect(events[0]).toMatchObject({
       type: 'update',
-      data: { fromVersion: 1, toVersion: 2, deltas: [] },
+      data: { fromVersion: 1, toVersion: 2 },
     });
-    expect(orderEventsOf(events[0])).toEqual(expected);
+    expect(events[0]?.data).not.toHaveProperty('orderEvents');
     expect(canvasSyncEventSchema.safeParse(events[0]).success).toBe(true);
-    expect((await nodesNow()).map((node) => node.id)).toEqual(
-      expected[0].after,
+
+    // Another page gets the order from the row alone.
+    const replayedOnAPage = applyDeltas(
+      { nodes: before as CanvasNode[], edges: [] },
+      output.deltas as Delta[],
+    );
+    expect(replayedOnAPage.nodes.map((node) => node.id)).toEqual(
+      after.map((node) => node.id),
     );
 
-    // The stored response replays the same order; the delta log does not carry it.
+    // The same request again answers from the stored response.
     const replayed = await run(
       cmds({ type: 'REORDER_NODES', nodeIds: ['a'], to: 'top' }),
       { request },
     );
-    expect(replayed.orderEvents).toEqual(expected);
+    expect(replayed).not.toHaveProperty('orderEvents');
     expect(events).toHaveLength(1);
-    expect(deltaRows()[0]).not.toHaveProperty('orderEvents');
   });
 
-  it('lists a parent whose membership changed and omits the field otherwise', async () => {
+  it('keys a created node in front and leaves order alone on a move', async () => {
     seed();
     const created = await run(cmds(createNote('New', 'n1')));
-    expect(created.orderEvents).toEqual([
-      {
-        type: 'SET_SIBLING_ORDER',
-        parentId: null,
-        before: ['f1', 'f2', 'a', 'b', 'c'],
-        after: ['f1', 'f2', 'a', 'b', 'c', 'n1'],
-        orderVersion: 2,
-      },
+    const nodes = await nodesNow();
+    expect(nodes.map((node) => node.id)).toEqual([
+      'f1',
+      'f2',
+      'a',
+      'b',
+      'c',
+      'n1',
     ]);
-    expect(orderEventsOf(events[0])).toEqual(created.orderEvents);
+    const newKey = paintKeyOf(nodes.find((node) => node.id === 'n1'));
+    for (const node of nodes) {
+      if (node.id !== 'n1' && !node.parentId)
+        expect((newKey as string) > (paintKeyOf(node) as string)).toBe(true);
+    }
+    expect(created).not.toHaveProperty('orderEvents');
+    expect(events[0]?.data).not.toHaveProperty('orderEvents');
 
     const moved = await run(
       cmds({
@@ -1155,8 +1187,7 @@ describe('sibling order in the update notification', () => {
       }),
     );
     expect(moved.toVersion).toBe(3);
-    expect(moved).not.toHaveProperty('orderEvents');
-    expect(events[1]?.data).not.toHaveProperty('orderEvents');
+    expect(JSON.stringify(moved.deltas)).not.toContain('paintKey');
   });
 });
 

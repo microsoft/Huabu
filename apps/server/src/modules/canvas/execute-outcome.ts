@@ -31,7 +31,6 @@ import {
   nodeRevision,
   type CanvasNode,
   type Delta,
-  type SetSiblingOrderEvent,
 } from '@huabu/shared/canvas-engine';
 
 import { SAVE_RESPONSE_MAX_BYTES } from '../storage/ports/save.js';
@@ -87,7 +86,6 @@ export interface ExecuteOutcome {
     contentEditedNodeIds: string[];
     deferredFitFrameIds: string[];
   };
-  orderEvents?: SetSiblingOrderEvent[];
   nodeContentRevisions?: Record<string, string>;
   /** Body-revision refusals, without the body they echoed. */
   conflicts?: Omit<ExecuteConflict, 'currentContent'>[];
@@ -184,7 +182,6 @@ export function outcomeOf(
       contentEditedNodeIds: output.pendingEffects.contentEditedNodeIds,
       deferredFitFrameIds: output.pendingEffects.deferredFitFrameIds,
     },
-    ...(output.orderEvents ? { orderEvents: output.orderEvents } : {}),
     ...(output.nodeContentRevisions
       ? { nodeContentRevisions: output.nodeContentRevisions }
       : {}),
@@ -206,7 +203,6 @@ export function outcomeOf(
 function withoutOptionalParts(outcome: ExecuteOutcome): ExecuteOutcome {
   const {
     commands: _commands,
-    orderEvents: _orderEvents,
     viewConflicts: _viewConflicts,
     ...rest
   } = outcome;
@@ -325,7 +321,6 @@ export function readStoredOutcome(response: unknown): ExecuteOutcome | null {
       },
       ...(legacy.conflicts ? { conflicts: legacy.conflicts } : {}),
       ...(legacy.viewConflicts ? { viewConflicts: legacy.viewConflicts } : {}),
-      ...(legacy.orderEvents ? { orderEvents: legacy.orderEvents } : {}),
       ...(legacy.nodeContentRevisions
         ? { nodeContentRevisions: legacy.nodeContentRevisions }
         : {}),
@@ -368,7 +363,6 @@ export function replayedOutput(outcome: ExecuteOutcome): ExecuteOnServerOutput {
     },
     ...(outcome.conflicts ? { conflicts: outcome.conflicts } : {}),
     ...(outcome.viewConflicts ? { viewConflicts: outcome.viewConflicts } : {}),
-    ...(outcome.orderEvents ? { orderEvents: outcome.orderEvents } : {}),
     ...(outcome.nodeContentRevisions
       ? { nodeContentRevisions: outcome.nodeContentRevisions }
       : {}),

@@ -9,7 +9,6 @@ import {
   EXISTENCE_UNIT,
   InFlightSet,
   nodeUnitKey,
-  orderKey,
   type HeldKeys,
 } from '../inFlight';
 
@@ -193,7 +192,7 @@ describe('deriveHeldKeys', () => {
     expect([...keys.keys()]).toEqual([nodeUnitKey('x', 'data.style.accent')]);
   });
 
-  it('holds existence and the parent order for created and deleted nodes', () => {
+  it('holds existence for created and deleted nodes', () => {
     const z: UnitNode = { id: 'z', position: { x: 0, y: 0 }, data: {} };
     const keys = deriveHeldKeys(
       { nodes: [x, y], edges: [edge] },
@@ -203,21 +202,39 @@ describe('deriveHeldKeys', () => {
       new Set([
         nodeUnitKey('y', EXISTENCE_UNIT),
         nodeUnitKey('z', EXISTENCE_UNIT),
-        orderKey(null),
         edgeKey('e'),
       ]),
     );
   });
 
-  it('holds only the order of a parent whose children were reordered', () => {
-    const a: UnitNode = { id: 'a', parentId: 'f', data: {} };
-    const b: UnitNode = { id: 'b', parentId: 'f', data: {} };
-    const f: UnitNode = { id: 'f', data: {} };
+  it('holds only the paint key of the node a reorder moved', () => {
+    const a: UnitNode = { id: 'a', parentId: 'f', data: { paintKey: 'a0' } };
+    const b: UnitNode = { id: 'b', parentId: 'f', data: { paintKey: 'a1' } };
+    const f: UnitNode = { id: 'f', data: { paintKey: 'a0' } };
+    // `a` is brought in front of `b`: one node's key, one held unit.
+    const moved: UnitNode = { ...a, data: { paintKey: 'a2' } };
+    const keys = deriveHeldKeys(
+      { nodes: [f, a, b, x], edges: [] },
+      { nodes: [f, b, moved, x], edges: [] },
+    );
+    expect([...keys.keys()]).toEqual([nodeUnitKey('a', 'data.paintKey')]);
+    expect(keys.get(nodeUnitKey('a', 'data.paintKey'))).toEqual({
+      nodeId: 'a',
+      unit: 'data.paintKey',
+      // What the server had before this page's reorder.
+      value: { present: true, value: 'a0' },
+    });
+  });
+
+  it('holds nothing for array positions alone', () => {
+    const a: UnitNode = { id: 'a', parentId: 'f', data: { paintKey: 'a0' } };
+    const b: UnitNode = { id: 'b', parentId: 'f', data: { paintKey: 'a1' } };
+    const f: UnitNode = { id: 'f', data: { paintKey: 'a0' } };
     const keys = deriveHeldKeys(
       { nodes: [f, a, b, x], edges: [] },
       { nodes: [f, b, a, x], edges: [] },
     );
-    expect([...keys.keys()]).toEqual([orderKey('f')]);
+    expect(keys.size).toBe(0);
   });
 
   it('ignores a selection-only change', () => {

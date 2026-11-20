@@ -387,6 +387,18 @@ export interface BaseNodeData {
    */
   frameColumn?: number;
   /**
+   * Paint order among the children of this node's parent (the root
+   * included): a higher key paints further in front. An order key
+   * (`canvas-engine/orderKey.ts`), so one node can be moved between two
+   * others by writing this node alone. Equal keys order by node id.
+   *
+   * Written by the engine only — at the end of a batch for a node that was
+   * created or changed parent, and by `REORDER_NODES`. The `nodes` array is
+   * kept in this order; it is derived from the keys, not the other way
+   * round.
+   */
+  paintKey?: string;
+  /**
    * Row index inside a parent Frame laid out in `row` or `grid` mode.
    * Ignored by `free` and `column` layouts and by root-level nodes. See
    * {@link frameColumn} for how the two combine.

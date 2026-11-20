@@ -6,11 +6,14 @@ import { describe, it, expect } from 'vitest';
 import {
   applyDeltas,
   coalesceChanges,
+  diffCanvasState,
+  executeCanvasCommands,
   extractCanvasChanges,
   fingerprintNodeFields,
   nodeRevision,
   invertDeltas,
   isChangeStale,
+  seedNodeOrder,
   type Delta,
 } from '../index.js';
 
@@ -136,22 +139,36 @@ describe('invertDeltas', () => {
     expect(inv[0]).toEqual({ type: 'DELETE_NODE', node: b });
   });
 
-  it('inverts complete sibling lists without rolling back writer metadata', () => {
-    const before = { nodes: [note('a'), note('b')], edges: [] };
-    const deltas = [
+  it('inverts a reorder as the moved node getting its old paint key back', () => {
+    const before = {
+      nodes: seedNodeOrder([note('node-a'), note('node-b')]),
+      edges: [],
+    };
+    const { writeResult } = executeCanvasCommands(
       {
-        type: 'SET_SIBLING_ORDER' as const,
-        parentId: null,
-        before: ['a', 'b'],
-        after: ['b', 'a'],
-        orderVersion: 101,
+        source: 'ui',
+        commands: [{ type: 'REORDER_NODES', nodeIds: ['node-a'], to: 'top' }],
       },
-    ];
+      { ...before, canvasId: 'c1' },
+    );
+    const deltas = diffCanvasState(before, writeResult);
     const inverse = invertDeltas(deltas);
     expect(inverse).toEqual([
-      { ...deltas[0], before: ['b', 'a'], after: ['a', 'b'] },
+      {
+        type: 'REPLACE_NODE',
+        prev: {
+          id: 'node-a',
+          data: { paintKey: writeResult.nodes[1].data.paintKey },
+        },
+        next: {
+          id: 'node-a',
+          data: { paintKey: before.nodes[0].data.paintKey },
+        },
+      },
     ]);
-    expect(applyDeltas(applyDeltas(before, deltas), inverse)).toEqual(before);
+    const moved = applyDeltas(before, deltas);
+    expect(moved.nodes.map((node) => node.id)).toEqual(['node-b', 'node-a']);
+    expect(applyDeltas(moved, inverse)).toEqual(before);
   });
 });
 

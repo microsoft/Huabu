@@ -3,7 +3,11 @@
 
 import { describe, it, expect } from 'vitest';
 
-import { executeCanvasCommands } from '../index.js';
+import {
+  executeCanvasCommands,
+  readPaintKey,
+  seedNodeOrder,
+} from '../index.js';
 
 import type { CanvasCommand } from '../../types/canvas/index.js';
 import type { CanvasNode } from '../interfaces.js';
@@ -43,20 +47,30 @@ function merge(
 
 describe('MERGE_NODE_DATA unset', () => {
   it('removes a data key and leaves the others', () => {
-    const { commandResults, writeResult } = merge(
-      [node('a', 'pdf', { coverPage: 3, pageCount: 9 })],
-      [{ nodeId: 'a', patch: {}, unset: ['coverPage'] }],
-    );
+    const before = seedNodeOrder([
+      node('a', 'pdf', { coverPage: 3, pageCount: 9 }),
+    ]);
+    const { commandResults, writeResult } = merge(before, [
+      { nodeId: 'a', patch: {}, unset: ['coverPage'] },
+    ]);
     expect(commandResults[0].applied).toBe(true);
-    expect(writeResult.nodes[0].data).toEqual({ type: 'pdf', pageCount: 9 });
+    expect(writeResult.nodes[0].data).toEqual({
+      type: 'pdf',
+      pageCount: 9,
+      paintKey: readPaintKey(before[0]),
+    });
   });
 
   it('applies the patch first, then the removal', () => {
-    const { writeResult } = merge(
-      [node('a', 'pdf', { coverPage: 3 })],
-      [{ nodeId: 'a', patch: { pageCount: 2 }, unset: ['coverPage'] }],
-    );
-    expect(writeResult.nodes[0].data).toEqual({ type: 'pdf', pageCount: 2 });
+    const before = seedNodeOrder([node('a', 'pdf', { coverPage: 3 })]);
+    const { writeResult } = merge(before, [
+      { nodeId: 'a', patch: { pageCount: 2 }, unset: ['coverPage'] },
+    ]);
+    expect(writeResult.nodes[0].data).toEqual({
+      type: 'pdf',
+      pageCount: 2,
+      paintKey: readPaintKey(before[0]),
+    });
   });
 
   it('removes one style leaf and drops an emptied style bag', () => {
@@ -74,7 +88,9 @@ describe('MERGE_NODE_DATA unset', () => {
   });
 
   it('is a no-op on the stored node when the key is already absent', () => {
-    const before = [node('a', 'note', { style: { accent: 'red' } })];
+    const before = seedNodeOrder([
+      node('a', 'note', { style: { accent: 'red' } }),
+    ]);
     const { writeResult } = merge(before, [
       { nodeId: 'a', patch: {}, unset: ['missing', 'style.missing'] },
     ]);

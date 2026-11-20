@@ -43,7 +43,6 @@ function applyUpdate(
       toVersion,
       pendingEffects,
       agentNodeProjection,
-      undefined,
       nodeContentRevisions ? { nodeContentRevisions } : undefined,
     );
 }

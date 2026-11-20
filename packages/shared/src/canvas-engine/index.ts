@@ -89,9 +89,7 @@ export {
 export {
   type Delta,
   type NodeFields,
-  type OrderedDelta,
   applyDeltas,
-  applyOrderedDeltas,
   invertDelta,
   isWholeNode,
   mergeNodeFields,
@@ -103,16 +101,10 @@ export {
   toWireDeltas,
 } from './delta.js';
 export {
-  type SetSiblingOrderEvent,
   type SiblingReorderAdmission,
   type SiblingReorderTarget,
-  isSetSiblingOrderEvent,
   admitSiblingReorder,
   hasUnlockedAncestry,
-  collectSiblingOrders,
-  diffSiblingOrderEvents,
-  applySiblingOrderEvents,
-  SiblingOrderReplayError,
 } from './siblingOrder.js';
 export {
   diffCanvasState,
@@ -275,7 +267,18 @@ export {
   assignNodeZIndices,
   materializeForestOrder,
   edgeZIndex,
+  orderByPaintKeys,
+  readPaintKey,
+  settlePaintOrder,
 } from './container/index.js';
+export {
+  compareOrder,
+  isOrderKey,
+  keyBetween,
+  keysBetween,
+  keysInSequence,
+} from './orderKey.js';
+export { seedNodeOrder } from './seedOrder.js';
 export {
   type UnframeResult,
   type FrameNodesOptions,

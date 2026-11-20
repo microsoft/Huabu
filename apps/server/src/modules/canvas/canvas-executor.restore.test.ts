@@ -234,7 +234,11 @@ describe('MERGE_NODE_DATA unset on the server', () => {
     expect(out.results[0].applied).toBe(true);
     expect(out.toVersion).toBe(out.fromVersion + 1);
     const node = stored().nodes.find((candidate) => candidate.id === 'note');
-    expect(node?.data).toEqual({ type: 'note', heightMode: 'fixed' });
+    expect(node?.data).toEqual({
+      type: 'note',
+      heightMode: 'fixed',
+      paintKey: expect.any(String),
+    });
   });
 });
 

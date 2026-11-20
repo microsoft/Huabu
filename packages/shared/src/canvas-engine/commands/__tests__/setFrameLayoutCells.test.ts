@@ -18,9 +18,10 @@ import {
   applyStructuredFrameRelayout,
   describeFrameLayout,
 } from '../../autoLayout/gridLayout.js';
-import { applyOrderedDeltas } from '../../delta.js';
+import { applyDeltas } from '../../delta.js';
 import { diffCanvasState } from '../../diff.js';
 import { executeCanvasCommands } from '../../executor.js';
+import { seedNodeOrder } from '../../seedOrder.js';
 import { HANDLERS } from '../index.js';
 
 import type { CanvasCommand } from '../../../types/canvas/command.js';
@@ -89,8 +90,10 @@ describe('SET_FRAME_LAYOUT cells', () => {
       };
 
       it('seeds legacy coordinate ties before a layer reorder and survives relayout and replay', () => {
-        const nodes = initial();
-        nodes[2].position = { ...nodes[1].position };
+        const unkeyed = initial();
+        unkeyed[2].position = { ...unkeyed[1].position };
+        // A stored Space is read with its paint keys already in place.
+        const nodes = seedNodeOrder(unkeyed);
         const output = execute(nodes, [
           {
             type: 'REORDER_NODES',
@@ -107,9 +110,9 @@ describe('SET_FRAME_LAYOUT cells', () => {
         ]).nodes;
         expect(layout(relaid)).toEqual([['c0', 'c1'], ['c2']]);
         expect(
-          applyOrderedDeltas(
+          applyDeltas(
             { nodes, edges: [] },
-            diffCanvasState({ nodes, edges: [] }, output, { orderVersion: 1 }),
+            diffCanvasState({ nodes, edges: [] }, output),
           ).nodes,
         ).toEqual(output.nodes);
       });

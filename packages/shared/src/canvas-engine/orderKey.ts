@@ -168,10 +168,14 @@ export function keysBetween(
 }
 
 /**
- * Keys for a sequence that must end up strictly ascending, changing as few
- * as possible. An entry keeps its key when it is an order key greater than
- * the last one kept; every other entry (no key, an equal key, a key out of
- * place) gets a new key between its kept neighbours.
+ * Keys for a sequence in its intended order, changing as few as possible.
+ * An entry keeps its key when it is an order key not below the last one
+ * kept; every other entry (no key, a key out of place) gets a new key
+ * strictly between its kept neighbours.
+ *
+ * Two equal keys next to each other are left alone: their holders are told
+ * apart by id (see {@link compareOrder}). Only when an entry has to go
+ * between them is the later one re-keyed as well, to make room.
  *
  * Deterministic: the same input always yields the same keys, which is what
  * lets a Space stored before keys existed be read the same way twice.
@@ -184,7 +188,7 @@ export function keysInSequence(
   let index = 0;
   while (index < keys.length) {
     const key = keys[index];
-    if (isOrderKey(key) && (lower === undefined || key > lower)) {
+    if (isOrderKey(key) && (lower === undefined || key >= lower)) {
       result.push(key);
       lower = key;
       index++;
