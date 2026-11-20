@@ -49,7 +49,7 @@ describe('preprocess restore projection generation', () => {
       nodes: [node],
       setNodeIngestion: vi.fn(),
       clearNodeIngestion: vi.fn(),
-      _setStateNoAutosave: vi.fn(),
+      _setStateRaw: vi.fn(),
       patchNodeSilent: vi.fn((id: string, patch: Record<string, unknown>) => {
         state.nodes = state.nodes.map((n) =>
           n.id === id ? { ...n, data: { ...n.data, ...patch } } : n,

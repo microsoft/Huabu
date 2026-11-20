@@ -15,6 +15,7 @@ function output(applied = true): ExecuteOnServerOutput {
     fromVersion: 1,
     toVersion: 2,
     deltas: [],
+    edits: [],
     commands: [],
     results: [
       {

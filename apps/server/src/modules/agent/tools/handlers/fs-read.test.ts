@@ -131,7 +131,7 @@ describe('handleRead node projection', () => {
     expect(store.readNode('pdf')?.content).toBe('Extracted source');
   });
 
-  it('refreshes metadata freshness after inspect, a remote edit, and a full read', async () => {
+  it('patches properties after an inspection alone, and reads the body revision that a property edit leaves as it was', async () => {
     const store = getCanvasStore(canvasId);
     store.write({
       canvasId,
@@ -153,8 +153,13 @@ describe('handleRead node projection', () => {
     };
     store.writeNode('pdf', record);
     const readSet = new Map<string, string>();
-    await handleInspectNodes({ canvasId, ids: ['pdf'] }, readSet);
-    const inspected = readSet.get('metadata:pdf');
+    const inspected = (
+      JSON.parse(await handleInspectNodes({ canvasId, ids: ['pdf'] })) as {
+        nodes: Array<{ rev?: string }>;
+      }
+    ).nodes[0]?.rev;
+    // An inspection records no read: it authorizes no body rewrite.
+    expect(readSet.size).toBe(0);
     const originalSpace = storage.space;
     vi.spyOn(storage, 'space').mockImplementationOnce((id) => {
       // Simulate a remote edit between the file read and canonical record lookup.
@@ -171,8 +176,11 @@ describe('handleRead node projection', () => {
       ),
     );
     expect(read.frontmatter?.properties).toEqual({ Venue: 'UIST' });
-    expect(read.rev).not.toBe(inspected);
-    expect(readSet.get('metadata:pdf')).toBe(read.rev);
+    // The remote property edit did not move the content revision.
+    expect(inspected).toBeDefined();
+    expect(read.rev).toBe(inspected);
+    expect(readSet.get('pdf')).toBe(read.rev);
+    expect([...readSet.keys()]).toEqual(['pdf']);
     const result = await executeOnServer({
       canvasId,
       originator: { source: 'agent' },

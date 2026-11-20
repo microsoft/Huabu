@@ -1160,6 +1160,7 @@
     "emptyFrame": "此框架中没有子节点。",
     "multiDragSameParentOnly": "请选择同一父级的图层后一起移动。",
     "invalidFrameDrop": "无法将这些图层移到此目标。请确认框架仍存在、未被锁定，且不在选中的图层内部。",
+    "invalidReorderSelection": "无法调整这些图层的顺序。请只选择同一容器内、未被锁定的图层。",
     "filterLabels": {
       "fileReference": "文件引用",
       "note": "笔记",
@@ -1743,6 +1744,37 @@
       "showShortcuts": "显示键盘快捷键",
       "closeShortcuts": "关闭快捷键对话框"
     }
+  },
+  "canvasSync": {
+    "changeRejected": "有一项修改未能应用，因为该内容已在别处被更改。当前空间已显示最新版本。",
+    "unsynced": "你的修改尚未同步，正在重试…",
+    "sendFailed": "部分修改未能发送到服务器。",
+    "keepTrying": "继续重试",
+    "reloadAndDiscard": "重新加载并放弃未发送的修改",
+    "reloadWaiting": "此空间有更新的修改。{{notes}}中未保存的文字保存后，将显示这些修改。",
+    "savingTextBeforeReload": "正在保存笔记文字，然后重新加载…",
+    "unsavedTextConfirm": "{{notes}}中的文字未能保存。重新加载会一并放弃这些文字。如需保留，请取消并先复制出来。",
+    "cancelDiscard": "取消",
+    "discardTextAndReload": "放弃这些文字并重新加载",
+    "reloadedDiscarded": "此空间已重新加载，未能发送的修改已放弃。",
+    "deletedWhileEditing": "{{name}}在你编辑时已在别处被删除。在你结束编辑前它会保留在这里，你输入的内容不再保存。",
+    "deletedElsewhere": "{{name}}已在别处被删除，并已从此空间移除。",
+    "copyMyText": "复制我的文字",
+    "noteName": "“{{name}}”",
+    "untitledNote": "未命名笔记",
+    "noteSeparator": "、",
+    "notesAndMore": "{{notes}}等另外 {{count}} 条"
+  },
+  "canvasGesture": {
+    "lockedGroup": "选中的节点里有锁定的，无法组合到框架中。",
+    "locked": "此处已锁定或位于锁定的框架内，未做任何更改。请解锁后重试。",
+    "refused": "此操作无法在这里完成，未做任何更改。"
+  },
+  "canvasPresence": {
+    "anotherDevice": "其他设备",
+    "editing": "{{label}} · 正在编辑",
+    "moving": "{{label}} · 正在移动",
+    "editLocked": "{{label}}正在编辑此内容，对方完成后你才能编辑。"
   },
   "errors": {
     "configureModel": "配置模型",

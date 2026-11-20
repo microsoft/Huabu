@@ -101,6 +101,9 @@ describeSpaceNodesContract('Postgres', async () => {
     missingRepository: h.store.space('missing').nodes,
     expectedCanvasId: h.canvasId,
     deletedNodePut: 'allowed',
+    space: h.space,
+    // A second pool on the same schema, as a restarted Server has.
+    reopen: () => h.concurrent.nodes,
     cleanup: h.cleanup,
   };
 });
@@ -216,6 +219,67 @@ describeWorkspaceRepositoryContract('Postgres', async () => {
     create: (name: string) => repository.create(name),
     cleanup: h.cleanup,
   };
+});
+
+it('orders node writes of one Space made through two pools at once, without deadlock', async () => {
+  const h = await ordinary();
+  try {
+    const { nodes } = h.space;
+    for (const id of ['seed-a', 'seed-b'])
+      await nodes.put({ nodeId: id, record: note(id, `Seed ${id}`, 'seed') });
+    const { position } = await nodes.changes();
+
+    // Standalone puts on both pools race Space writes that delete one node
+    // and put another — the two shapes that take the Space row and a node
+    // row in what would otherwise be opposite orders.
+    let version = (await h.space.read())?.version ?? 0;
+    const writes = (async () => {
+      for (let round = 0; round < 6; round += 1) {
+        const record = await h.space.read();
+        if (!record) throw new Error('Space is missing');
+        const written = await h.space.write({
+          expectedVersion: record.version,
+          nextRecord: { ...record, version: record.version + 1 },
+          nodeMutations: [
+            { kind: 'delete', nodeId: 'seed-a' },
+            {
+              kind: 'put',
+              nodeId: `batch-${round}`,
+              record: note(`batch-${round}`, `Batch ${round}`, 'batch'),
+            },
+          ],
+        });
+        expect(written.ok).toBe(true);
+        version = record.version + 1;
+      }
+    })();
+    const puts = Promise.all(
+      Array.from({ length: 12 }, (_, index) =>
+        (index % 2 ? h.concurrent.nodes : nodes).put({
+          nodeId: index % 3 ? `put-${index}` : 'seed-a',
+          record:
+            index % 3
+              ? note(`put-${index}`, `Put ${index}`, 'put')
+              : note('seed-a', 'Seed seed-a', `rewritten ${index}`),
+        }),
+      ),
+    );
+    await Promise.all([writes, puts]);
+    expect(version).toBeGreaterThan(0);
+
+    const after = await nodes.changes(position);
+    const present = new Set((await nodes.list()).keys());
+    present.delete('seed-b');
+    // Everything written since, and still there, is named; the untouched
+    // node is not.
+    expect(new Set(after.nodeIds)).toEqual(present);
+    expect(after.position.seq).toBeGreaterThan(position.seq);
+    // A position read now is behind every later write.
+    await nodes.put({ nodeId: 'late', record: note('late', 'Late', 'late') });
+    expect((await nodes.changes(after.position)).nodeIds).toEqual(['late']);
+  } finally {
+    await h.cleanup();
+  }
 });
 
 describeServerRecordStoreContract('Postgres', async () => {

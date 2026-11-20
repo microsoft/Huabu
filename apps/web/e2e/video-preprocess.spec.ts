@@ -3,7 +3,7 @@
 
 import { expect, test, type Page } from '@playwright/test';
 
-import { readViewportTransform, scaleOf } from './helpers';
+import { readViewportTransform, scaleOf, personEdits } from './helpers';
 
 import type {
   ArtifactUploadResponse,
@@ -110,7 +110,7 @@ test('uploaded video gets a persisted JPEG cover, reuses it and plays natively a
   const label = 'Uploaded VP8 video';
   const inserted = await page.request.post(`/api/canvas/${canvasId}/execute`, {
     data: {
-      commands: [
+      edits: personEdits([
         {
           type: 'CREATE_NODES',
           nodes: [
@@ -122,8 +122,7 @@ test('uploaded video gets a persisted JPEG cover, reuses it and plays natively a
             },
           ],
         },
-      ],
-      originator: { source: 'agent', threadId: 'e2e-video-preprocess' },
+      ]),
     },
   });
   expect(inserted.ok(), await inserted.text()).toBe(true);

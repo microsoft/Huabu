@@ -8,6 +8,7 @@ import {
   openNewCanvas,
   readViewportTransform,
   touchTap,
+  personEdits,
 } from './helpers';
 
 import type { GetCanvasResponse } from '@huabu/shared';
@@ -82,11 +83,7 @@ async function seed(page: Page, nodes: FixtureNode[]) {
     `/api/canvas/${canvasId(page)}/execute`,
     {
       data: {
-        commands: [{ type: 'CREATE_NODES', nodes }],
-        originator: {
-          source: 'agent',
-          threadId: 'e2e-production-selection-resize',
-        },
+        edits: personEdits([{ type: 'CREATE_NODES', nodes }]),
       },
     },
   );

@@ -7,7 +7,7 @@ Opinionated layouts for structured diagrams (architecture diagrams, flowcharts, 
 - The Space uses x (right = positive) and y (down = positive) coordinates.
 - A standard node is about **400px wide** and **300px tall**. Use a gap of **~50px** between nodes.
 - Headers / labels can be narrower (≈250px wide).
-- **`position` is required** on every `CREATE_NODES` entry. It is **parent-local**: relative to the node's `parentId` frame, or absolute canvas coords when there is no parent (root). It is the same coordinate space as the `position` you read from `inspect_nodes` (not `absolutePosition`). There is no auto-layout — if you omit `position`, the engine falls back to `(0, 0)` (often off-screen), so always pick an explicit slot.
+- **`position` is required** on every `CREATE_NODES` entry. It is **parent-local**: relative to the node's `parentId` frame, or absolute canvas coords when there is no parent (root). It is the same coordinate space as the `position` you read from `inspect_nodes` (not `absolutePosition`). Structured Frames compute final geometry; use their layout operations below rather than guessing pixel insets.
 
 ## Choosing node size
 
@@ -44,7 +44,7 @@ Place the centre at `(cx, cy)`; place N children on a ring of radius `r`. For ev
 
 ### Structured frame layout (`column` / `row` / `grid`)
 
-A frame can opt into a deterministic layout that re-flows its children automatically whenever they change (added, removed, resized). Use `SET_FRAME_LAYOUT` to switch a frame between `free` (default), `column`, `row`, or `grid`, optionally with `gridCount` (number of tracks, 1–12, default 1):
+A frame can opt into a deterministic layout that re-flows its children automatically whenever they change (added, removed, resized). Use `SET_FRAME_LAYOUT` to switch a frame between `free` (default), `column`, `row`, or `grid`, optionally with `gridCount` (number of tracks, 1–12). When switching modes without a count, the engine derives tracks from current geometry; otherwise it preserves the current count:
 
 ```
 SET_FRAME_LAYOUT { frameId: "<frame-id>", mode: "column", gridCount: 3 }
@@ -53,11 +53,15 @@ SET_FRAME_LAYOUT { frameId: "<frame-id>", mode: "column", gridCount: 3 }
 - `column` — N columns, children stack top-to-bottom inside each column, left-aligned. Column width adapts to the widest child.
 - `row` — mirror on the other axis: N rows, children stack left-to-right inside each row, top-aligned. Row height adapts to the tallest child.
 - `grid` — N columns like `column`, but rows are aligned too: every child holds a cell, children sharing a row sit on one row origin, and the row's height is its tallest member.
-- The engine assigns each child to a track automatically (least-full track wins). To place children yourself, pass `cells` on the same `SET_FRAME_LAYOUT`: `column` addresses columns, `row` addresses rows, `grid` addresses both. To control vertical (column mode) or horizontal (row mode) order _within_ a track, set initial child positions; the engine sorts by that axis. `grid` is the exception — it does not sort by position at all, see below.
+- Inspect the Frame to read `layout`: Column/Row expose `tracks` (ordered child IDs per zero-based track); Grid exposes `cells` (`nodeId`, `column`, `row`). These are layout positions, not paint order. For initial track/cell assignment use `SET_FRAME_LAYOUT.cells`; existing Column/Row order is explicit, not repeatedly inferred from coordinates. Legacy arrangements and newly placed children are seeded from geometry by the engine.
 - Structured frames default to `sizing: "hug"`: the engine re-sizes the frame after every child change, so do not pass an explicit frame size in this mode. Use `sizing: "manual"` to preserve a pinned frame size while children still reflow; children that do not fit may overflow along the main axis.
 - Switch back to free positioning with `SET_FRAME_LAYOUT { frameId, mode: "free" }`.
 
 Use `column` / `row` for: stacked column lists, kanban-style boards, row tracks where each lane represents a theme.
+
+#### Reorder or move between masonry tracks
+
+For an existing Column/Row Frame, use `placements` on `SET_FRAME_LAYOUT` with the current `mode`. For example, `placements: [{ nodeId: "<B>", after: "<A>" }]` moves B into A's track immediately after A; `{ nodeId: "<B>", track: 1, at: "end" }` appends B to the second track. All referenced nodes must be direct children of that Frame; reparent an external node with `SET_NODE_PARENT` first. Fetch the command capability for exact constraints and rejection behavior. Do not send a replacement reading list or combine placement with a mode/count/cell change. `REORDER_NODES` is only for visual stacking; it does not reorder these lists. After a structural change, inspect again before using numeric track indices because empty tracks can compact.
 
 #### Choosing `grid` over `column`
 
@@ -65,7 +69,7 @@ Use `column` / `row` for: stacked column lists, kanban-style boards, row tracks 
 
 Reach for `grid` whenever the columns are **parallel series** rather than independent stacks — question notes beside their answers, papers beside a per-paper summary, an original beside its translation — especially when some items have no counterpart.
 
-Rows are **not** derived from position. Each child holds a cell, and children left without one all default to row 0 and are then bumped down to resolve collisions inside their column — which pairs them essentially at random. So a `grid` frame is only worth switching into once you state the cells: give the two members of a pair the same `row`, and skip that row number in the column that has no counterpart.
+Grid row membership is stored in cells, not continuously inferred from coordinates. When no child has a stored row, the engine seeds rows from the existing geometry; when some rows already exist, an unassigned child starts at row 0 and collisions move it down within its column. Neither fallback expresses semantic pairing. State the cells explicitly when correspondence matters: give paired members the same `row`, and skip that row number in the column that has no counterpart.
 
 ```
 # Row 1 has no right-hand counterpart, so column 1 simply skips it.

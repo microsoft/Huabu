@@ -62,7 +62,7 @@ Connected-device browsing and the bundled ACP proxy are documented in [device-fi
 | [service-packages.md](./architecture/service-packages.md)                       | Manifest-driven third-party Services, storage bindings, Agent declarations, RFS leases, and SDK.         |
 | [canary-deployment.md](./architecture/canary-deployment.md)                     | Personal Alpha Canary status, owner-triggered redeployment, and explicit reliability limits.             |
 | [canvas-action-log.md](./architecture/canvas-action-log.md)                     | Persistent `events.jsonl` user-action trail; consumed by the memory curator.                             |
-| [canvas-realtime-sync.md](./architecture/canvas-realtime-sync.md)               | Multi-agent real-time sync: SSE broadcast, dirty-node conflict model, per-thread change-review card.     |
+| [canvas-realtime-sync.md](./architecture/canvas-realtime-sync.md)               | Real-time sync: SSE broadcast, structure edits, node content between pages, presence, edit lock.         |
 | [credential-storage.md](./architecture/credential-storage.md)                   | Electron OS-protected credentials, utility-process bridge, migration, and standalone fallback.           |
 | [desktop-auto-update.md](./architecture/desktop-auto-update.md)                 | Desktop auto-update: electron-updater lifecycle, env-driven update feed, required release artifacts.     |
 | [desktop-startup.md](./architecture/desktop-startup.md)                         | Cold start: splash window, main-window reveal, and the first-screen bundle boundary.                     |
@@ -93,7 +93,7 @@ Connected-device browsing and the bundled ACP proxy are documented in [device-fi
 | [agent-space-change-auto-accept.md](./proposals/agent-space-change-auto-accept.md)                                   | Proposed                                        | Global General setting to suppress routine Agent Space Change Review records.                                                                                                            |
 | [agent-turn-realtime-sync.md](./proposals/agent-turn-realtime-sync.md)                                               | Proposed                                        | Live attachment and durable event replay for UI, RFS, and Headless turns.                                                                                                                |
 | [canvas-checkpoint-plan.md](./proposals/canvas-checkpoint-plan.md)                                                   | Proposed                                        | Canvas checkpoint and restoration design.                                                                                                                                                |
-| [canvas-realtime-sync-plan.md](./proposals/canvas-realtime-sync-plan.md)                                             | In-Progress                                     | Roadmap from multi-agent sync to multi-user co-editing.                                                                                                                                  |
+| [canvas-realtime-sync-plan.md](./proposals/canvas-realtime-sync-plan.md)                                             | Proposed; server part superseded                | Structural collaboration write inventory and browser-side requirements; its operation protocol was superseded by reliable save in the executor (see its status note).                    |
 | [content-before-ai-design.md](./proposals/content-before-ai-design.md)                                               | Needs review                                    | Block-level and inline authorship provenance.                                                                                                                                            |
 | [credential-storage-hardening-followups.md](./proposals/credential-storage-hardening-followups.md)                   | Draft                                           | Follow-up credential storage hardening.                                                                                                                                                  |
 | [service-packages.md](./proposals/service-packages.md)                                                               | Accepted                                        | #110 portable Service Packages and zero-migration configuration bindings.                                                                                                                |
@@ -155,12 +155,13 @@ Backlog documents are preserved discussion material, not approved implementation
 
 Archive contains only abandoned or superseded designs.
 
-| Doc                                                                          | Status     | Summary                                                                                         |
-| ---------------------------------------------------------------------------- | ---------- | ----------------------------------------------------------------------------------------------- |
-| [acp-eventstore-refactor-plan.md](./archive/acp-eventstore-refactor-plan.md) | Superseded | Earlier EventStore adaptation replaced by Gateway-owned live buffering and Agenetes durability. |
-| [agent-reachback.md](./archive/agent-reachback.md)                           | Superseded | Removed HRT `.mjs` node-CRUD reachback design.                                                  |
-| [agentlet-upgrade-plan.md](./archive/agentlet-upgrade-plan.md)               | Superseded | Earlier split-hello migration absorbed by the Gateway consolidation.                            |
-| [agent-teams-as-extensions.md](./archive/agent-teams-as-extensions.md)       | Superseded | Agent Team runtime retired in favor of [generic Profiles](./architecture/agent-profiles.md).    |
+| Doc                                                                                          | Status     | Summary                                                                                             |
+| -------------------------------------------------------------------------------------------- | ---------- | --------------------------------------------------------------------------------------------------- |
+| [acp-eventstore-refactor-plan.md](./archive/acp-eventstore-refactor-plan.md)                 | Superseded | Earlier EventStore adaptation replaced by Gateway-owned live buffering and Agenetes durability.     |
+| [agent-reachback.md](./archive/agent-reachback.md)                                           | Superseded | Removed HRT `.mjs` node-CRUD reachback design.                                                      |
+| [agentlet-upgrade-plan.md](./archive/agentlet-upgrade-plan.md)                               | Superseded | Earlier split-hello migration absorbed by the Gateway consolidation.                                |
+| [agent-teams-as-extensions.md](./archive/agent-teams-as-extensions.md)                       | Superseded | Agent Team runtime retired in favor of [generic Profiles](./architecture/agent-profiles.md).        |
+| [canvas-realtime-sync-roadmap-2026-07.md](./archive/canvas-realtime-sync-roadmap-2026-07.md) | Superseded | Historical PUT-broadcast and multi-user roadmap, replaced by the structural collaboration contract. |
 
 ---
 

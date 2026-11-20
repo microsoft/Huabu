@@ -10,7 +10,7 @@
  * structural deltas the engine produced, and appends one row per
  * mutating batch to `<canvasDir>/.history/delta-log.jsonl`.
  *
- * Wire entry point: `POST /api/canvas/:canvasId/execute` (M2).
+ * Wire entry point: `POST /api/canvas/:canvasId/execute`.
  * Internal entry point: the agent's `canvas_commands` tool handler.
  *
  * Concurrency model: one in-flight batch per canvas, enforced by a
@@ -18,25 +18,29 @@
  * with the canvas-level monotonic `version` counter so two parallel
  * callers never observe the same prestate.
  *
- * What this module does NOT do (Phase A scoping notes):
- *   - Trigger preprocessing. The web side already drives that via the
- *     dispatch endpoint based on `pendingEffects.mutatedNodes` in the
- *     response payload; pulling preprocessing fully server-side is
- *     part of M3 once cross-tab broadcast lands.
- *   - Broadcast deltas to other tabs. M3.
- *   - Per-command granular delta log rows. Phase A writes one row per
- *     /execute call. Per-command granularity arrives in M5 alongside
- *     fine-grained `SET_*` deltas.
+ * Every committed batch is broadcast to the open pages of the Space
+ * (`publishCanvasUpdate`) unless the caller defers publication.
+ *
+ * What this module does NOT do:
+ *   - Trigger preprocessing. The originating side drives that from
+ *     `pendingEffects.mutatedNodes`.
+ *   - Per-command delta log rows: one row is written per batch.
  */
+
+import { isDeepStrictEqual } from 'node:util';
 
 import { imageSize } from 'image-size';
 
 import {
   createId,
+  encodeBasis,
   interactiveViewDefinitionV1Schema,
   interactiveViewRevision,
   type CanvasCommand,
   type CanvasCommandFailureReason,
+  editsPerCommand,
+  type CanvasExecuteEditRef,
+  type PostCanvasExecuteResponse,
   type CanvasEdgeId,
   type CanvasNodeId,
   type ExecuteConflict,
@@ -47,22 +51,31 @@ import {
   applySharedPostEffectsFromWriteResult,
   applyDeltas,
   diffCanvasState,
-  executeCanvasCommands,
+  diffSiblingOrderEvents,
+  SiblingOrderReplayError,
+  createReadVersionAdmission,
+  executeCanvasEdits,
   extractCanvasChanges,
   isChangeStale,
   hasValidPdfNoteOwnership,
   hidePdfNotes,
   pdfNoteId,
-  replayChangedData,
+  mergeNodeFields,
   nodeRevision,
+  nodeRevisionOf,
   preserveAgentNodeOwnedData,
   projectAgentNodeEditableData,
   replayAgentNodeEditableData,
+  replacedNodeType,
+  slimDeltas,
+  toWireDeltas,
   changesAgentNodePreparation,
   type CanvasChangeRecord,
   type CanvasEdge,
   type CanvasNode,
   type Delta,
+  type ReadVersionAdmission,
+  type SetSiblingOrderEvent,
 } from '@huabu/shared/canvas-engine';
 
 import {
@@ -72,9 +85,22 @@ import {
 } from './agent-node-edit.js';
 import { publishCanvasUpdate } from './canvas-sync.js';
 import {
+  outcomeOf,
+  readStoredOutcome,
+  replayedOutput,
+  storableOutcome,
+  type ExecuteOutcome,
+} from './execute-outcome.js';
+import {
   importForeignNodeSources,
   reclaimStagedUploads,
 } from './import-node-src.js';
+import {
+  pageKeyOf,
+  resolveEdits,
+  resolveReadVersion,
+  type ResolvedEdit,
+} from './read-version.js';
 import {
   assertWorldPreviewMutationsAllowed,
   assertChildSpaceEntriesAllowed,
@@ -83,6 +109,7 @@ import {
   assertCurrentCanvasCommands,
   readLiveSpaceIds,
 } from './world-preview-policy.js';
+import { digestJson } from '../../utils/json.js';
 import { getLogger } from '../../utils/logger.js';
 import { getAgentChangeReviewConfig } from '../agent/change-review-config.js';
 import { isLabelProtected } from '../preprocessing/label-policy.js';
@@ -97,11 +124,41 @@ import {
   type NodeSnapshot,
   type SpaceNodeMutation,
 } from '../storage/index.js';
+import {
+  SaveIdReusedError,
+  normalizeSaveKey,
+  type SaveKey,
+  type SaveResult,
+  type SpaceStamps,
+  type StoredSaveResult,
+} from '../storage/ports/save.js';
+import {
+  acquireWorkspaceOperationLease,
+  getWorkspaceKey,
+} from '../workspace.js';
 
 /** Ordinary Spaces do not need World membership checks. */
 const EMPTY_CANVAS_IDS: ReadonlySet<string> = new Set<string>();
 
 const log = getLogger('canvas.executor');
+
+/**
+ * Sibling order events for a commit's notification. The strict forest check
+ * rejects legacy topology that loads still repair; such a commit sends none
+ * and clients keep their entity-only replay.
+ */
+function siblingOrderEventsFor(
+  prestateNodes: readonly CanvasNode[],
+  finalNodes: readonly CanvasNode[],
+  orderVersion: number,
+): SetSiblingOrderEvent[] {
+  try {
+    return diffSiblingOrderEvents(prestateNodes, finalNodes, orderVersion);
+  } catch (error) {
+    if (error instanceof SiblingOrderReplayError) return [];
+    throw error;
+  }
+}
 
 function insertedNodeIds(deltas: readonly Delta[]): Set<string> {
   return new Set(
@@ -117,7 +174,7 @@ function insertedNodeIds(deltas: readonly Delta[]): Set<string> {
 // are intentionally self-contained so an accidental import cycle
 // between the route and the executor cannot occur — when these sets
 // drift we have a single failing test (per-node content round-trip) that
-// surfaces the discrepancy. See `docs/node-content-api-split.md`.
+// surfaces the discrepancy. See `docs/architecture/canvas-storage.md`.
 
 const MD_BACKED_NODE_TYPES = new Set([
   'fileReference',
@@ -206,19 +263,26 @@ export function hydrateCanvasNodes(
 }
 
 /**
- * Compare-and-swap pre-flight for agent content writes. For each
- * `MERGE_NODE_DATA` patch that rewrites authored content or custom metadata,
- * compare the writer's `expectRev` against the hydrated node's current
- * {@link nodeRevision}. A missing `expectRev` (the agent never read the
- * node this run) or a mismatch (edited since) is a conflict.
+ * Compare-and-swap pre-flight for agent body writes. For each
+ * `MERGE_NODE_DATA` patch that rewrites `content` (a note's body, the body
+ * of a Note a PDF owns), compare the writer's `expectRev` against the
+ * hydrated node's current {@link nodeRevision}. A missing `expectRev` (the
+ * agent never read the node this run) or a mismatch (edited since) is a
+ * conflict, and refuses the whole patch entry, whatever else it carries.
  *
- * Content, owned notes, properties, and display order are guarded — NOT `src`. `src` is a short pointer (an
- * external URL / `artifacts/<file>` handle), not a mergeable body, and a
- * media node's `src` is never reached via a `nodes/<label>.md` read (the
- * agent reads the artifact the `src` points at, not the sidecar), so the
- * read-set never holds its rev — guarding it would reject every legit
- * `src` rewrite as `not-read`. Patches touching only non-body fields
- * (`src` / label / summary / style) remain unconditional.
+ * Only the body is guarded.
+ *
+ * - NOT custom properties (`properties`, `propertyDisplayKeys`): they are
+ *   independent small items merged per key into the node as it is now.
+ *   Different keys never conflict, the same key is last-writer-wins, and a
+ *   patch that touches only them needs neither a read nor a revision; an
+ *   `expectRev` it carries anyway is not looked at.
+ * - NOT `src`: a short pointer (an external URL / `artifacts/<file>`
+ *   handle), not a mergeable body, and a media node's `src` is never reached
+ *   via a `nodes/<label>.md` read (the agent reads the artifact the `src`
+ *   points at, not the sidecar), so the read-set never holds its rev —
+ *   guarding it would reject every legit `src` rewrite as `not-read`.
+ * - NOT label / summary / style.
  */
 function collectMergeConflicts(
   commands: readonly CanvasCommand[],
@@ -230,12 +294,7 @@ function collectMergeConflicts(
     if (cmd.type !== 'MERGE_NODE_DATA') continue;
     for (const entry of cmd.patches) {
       const patch = entry.patch ?? {};
-      const rewritesContent = [
-        'content',
-        'properties',
-        'propertyDisplayKeys',
-      ].some((key) => key in patch);
-      if (!rewritesContent) continue;
+      if (!('content' in patch)) continue;
       const node = byId.get(entry.nodeId);
       if (!node) continue; // missing node → engine emits 'not-found'
       const currentRev = nodeRevision(node);
@@ -331,6 +390,111 @@ function buildNodeContent(node: CanvasNode): NodeContent | null {
     out['labelSource'] = labelSource;
   }
   return out;
+}
+
+/** Sidecar fields compared as they travel: by value, `undefined` as absent. */
+function sameSidecarValue(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (a === undefined || b === undefined) return false;
+  if (typeof a !== 'object' || typeof b !== 'object') return false;
+  const plain = (value: unknown): unknown =>
+    JSON.parse(JSON.stringify(value)) as unknown;
+  return isDeepStrictEqual(plain(a), plain(b));
+}
+
+/**
+ * Ids of the sidecar-backed nodes whose saved content `deltas` created or
+ * changed: every inserted node, and every replaced node with a different
+ * {@link NODE_CONTENT_KEYS} field. A page decides the same from the same
+ * rows, so each node whose save baseline it has to move is named here.
+ */
+export function contentChangedNodeIds(deltas: readonly Delta[]): string[] {
+  const ids = new Set<string>();
+  for (const delta of deltas) {
+    if (delta.type === 'INSERT_NODE') {
+      if (MD_BACKED_NODE_TYPES.has(delta.node.type ?? ''))
+        ids.add(delta.node.id);
+    } else if (delta.type === 'REPLACE_NODE') {
+      if (!MD_BACKED_NODE_TYPES.has(replacedNodeType(delta) ?? '')) continue;
+      const before = (delta.prev.data ?? {}) as Record<string, unknown>;
+      const after = (delta.next.data ?? {}) as Record<string, unknown>;
+      if (
+        [...NODE_CONTENT_KEYS].some(
+          (key) => !sameSidecarValue(before[key], after[key]),
+        )
+      )
+        ids.add(delta.next.id);
+    }
+  }
+  return [...ids];
+}
+
+/**
+ * Content revisions of `nodeIds` as the records handed to storage give
+ * them: the record this batch puts, or else the one read before it. Known
+ * before the commit, so it is what a stored result record carries.
+ */
+function plannedContentRevisions(
+  nodeIds: readonly string[],
+  nodeMutations: readonly SpaceNodeMutation[],
+  before: ReadonlyMap<string, NodeSnapshot>,
+): Record<string, string> | undefined {
+  if (nodeIds.length === 0) return undefined;
+  const written = new Map<string, NodeContent | null>();
+  for (const mutation of nodeMutations) {
+    written.set(
+      mutation.nodeId,
+      mutation.kind === 'put' ? mutation.record : null,
+    );
+  }
+  const revisions: Record<string, string> = {};
+  for (const nodeId of nodeIds) {
+    const record = written.has(nodeId)
+      ? written.get(nodeId)
+      : before.get(nodeId)?.record;
+    revisions[nodeId] = nodeRevisionOf(record ?? {});
+  }
+  return revisions;
+}
+
+/**
+ * Content revisions of `nodeIds` as stored: one read of exactly those
+ * records after the commit, hashed the way a load hashes them
+ * (`nodeContentRevisions` of `GET /api/canvas/:id`). The caller holds the
+ * Space's write mutex, so what is read is what this batch left.
+ *
+ * `planned` stands in when the read fails — the batch is committed and must
+ * not fail for it — and a difference from it is logged: it would mean the
+ * backend does not store a revision-covered field as it was given.
+ */
+async function storedContentRevisions(
+  handle: SpaceHandle,
+  canvasId: string,
+  nodeIds: readonly string[],
+  planned?: Record<string, string>,
+): Promise<Record<string, string> | undefined> {
+  if (nodeIds.length === 0) return undefined;
+  let stored: Map<string, NodeSnapshot>;
+  try {
+    stored = await handle.nodes.readMany(nodeIds);
+  } catch (error) {
+    log.warn(
+      { canvasId, error },
+      'Could not read back content revisions after a committed batch',
+    );
+    return planned;
+  }
+  const revisions: Record<string, string> = {};
+  for (const nodeId of nodeIds) {
+    revisions[nodeId] = nodeRevisionOf(stored.get(nodeId)?.record ?? {});
+    if (planned && planned[nodeId] !== revisions[nodeId]) {
+      log.warn(
+        { canvasId, nodeId },
+        'Stored content revision differs from the record handed to storage',
+      );
+    }
+  }
+  return revisions;
 }
 
 /**
@@ -507,13 +671,15 @@ async function normalizeMergeImageGeometry(
   canvasId: string,
   commands: readonly CanvasCommand[],
   prestateNodes: readonly CanvasNode[],
+  /** Every command of the request, when `commands` is one edit of it. */
+  allCommands: readonly CanvasCommand[] = commands,
 ): Promise<CanvasCommand[]> {
   const nodeById = new Map<string, CanvasNode>();
   for (const node of prestateNodes) {
     if (typeof node.id === 'string') nodeById.set(node.id, node);
   }
   const explicitGeometry = new Set<string>();
-  for (const cmd of commands) {
+  for (const cmd of allCommands) {
     if (cmd.type === 'SET_NODE_GEOMETRY') {
       for (const item of cmd.items) explicitGeometry.add(item.nodeId);
     }
@@ -615,11 +781,101 @@ async function normalizeSetGeometryImageSizes(
   return out;
 }
 
+// ── Edits ────────────────────────────────────────────────────────────────
+
+/** A request's edits while the Server prepares them. */
+interface PreparedEdits {
+  edits: ExecuteEditInput[];
+  /**
+   * The request was a plain command list: every command is its own edit,
+   * also one the Server adds while preparing.
+   */
+  perCommand: boolean;
+}
+
+/**
+ * The one place a plain command list becomes edits: one edit per command,
+ * each quoting the request's `basis`.
+ */
+function preparedEditsOf(input: ExecuteOnServerInput): PreparedEdits {
+  if (input.edits) {
+    if (input.commands !== undefined)
+      throw new Error('Give an execute request edits or commands, not both');
+    return {
+      edits: input.edits.map((edit) => ({ ...edit })),
+      perCommand: false,
+    };
+  }
+  return {
+    edits: editsPerCommand(input.commands ?? [], input.basis),
+    perCommand: true,
+  };
+}
+
+function flatCommands(edits: readonly ExecuteEditInput[]): CanvasCommand[] {
+  return edits.flatMap((edit) => edit.commands);
+}
+
+/**
+ * Run a transform over all commands of the request at once and put the
+ * result back into the edits. The transform returns one command per command.
+ */
+async function transformCommands(
+  prepared: PreparedEdits,
+  transform: (
+    commands: readonly CanvasCommand[],
+  ) => CanvasCommand[] | Promise<CanvasCommand[]>,
+): Promise<PreparedEdits> {
+  const before = flatCommands(prepared.edits);
+  const after = await transform(before);
+  if (after.length !== before.length)
+    throw new Error('A command transform changed the number of commands');
+  let offset = 0;
+  return {
+    ...prepared,
+    edits: prepared.edits.map((edit) => {
+      const commands = after.slice(offset, offset + edit.commands.length);
+      offset += edit.commands.length;
+      return { ...edit, commands };
+    }),
+  };
+}
+
 // ── Public entry ─────────────────────────────────────────────────────────
+
+/** One edit of a request: the commands of one intent, taken or refused whole. */
+export interface ExecuteEditInput {
+  /**
+   * The read version the edit was made on (an opaque string from an earlier
+   * `basis` output). When given, the edit is checked against the nodes it
+   * targets — see `read-version.ts` — and refused with `stale-target` /
+   * `stale-parent` if they changed since.
+   */
+  basis?: string;
+  /**
+   * Earlier edits of the same caller this one was made on top of: of this
+   * request, or of an earlier one by its request id. It does not run when
+   * one of them did not take effect.
+   */
+  after?: readonly CanvasExecuteEditRef[];
+  commands: readonly CanvasCommand[];
+}
 
 export interface ExecuteOnServerInput {
   canvasId: string;
-  commands: readonly CanvasCommand[];
+  /**
+   * The request as edits. Each takes effect as a whole or not at all, and
+   * an edit that does not leaves the others to apply.
+   */
+  edits?: readonly ExecuteEditInput[];
+  /**
+   * The request as a plain command list — the Agent route's `{ commands }`
+   * and the Server's own callers. It is {@link edits} with one edit per
+   * command (each quoting {@link basis}), so a command that fails is
+   * skipped and the others still apply. Give `edits` or `commands`, not
+   * both.
+   */
+  commands?: readonly CanvasCommand[];
   originator: ExecuteOriginator;
   runId?: string;
   /**
@@ -634,6 +890,42 @@ export interface ExecuteOnServerInput {
   /** Validated cross-Space move retains the original execution identity. */
   agentNodeMoveState?: ReadonlyMap<string, Record<string, unknown>>;
   /**
+   * Makes the call safe to retry. The response is stored under
+   * (`principalId`, `operationId`) in the same commit as the write it
+   * describes; calling again with the same id and the same request returns
+   * that stored response (`replayed: true`) instead of applying the batch a
+   * second time. `operationId` must be a UUID.
+   *
+   * Honoured by {@link executeOnServer} only. Omitted, nothing is looked up
+   * and nothing is stored.
+   */
+  request?: { operationId: string; principalId: string };
+  /** With {@link commands}: the read version every command is checked against. */
+  basis?: string;
+  /** Return the read version of the state this call leaves behind. */
+  issueBasis?: boolean;
+  /**
+   * The browser page the batch comes from: the transport's principal and
+   * the page's own id. A node this page created or re-parented itself is
+   * not stale for it, and what this batch creates or re-parents is recorded
+   * as its change — provided every command was checked against a read
+   * version.
+   */
+  page?: { principalId: string; pageId: string };
+  /**
+   * The thread id exactly as the caller sent it, when the entry point
+   * checked it and `originator.threadId` holds only what survived the check.
+   * Used to recognise a repeated request: a retry must match the original
+   * even if the thread stopped belonging to the Space in between.
+   */
+  claimedThreadId?: string;
+  /**
+   * Keep the executed commands in the stored outcome, for an entry point
+   * whose response echoes them (the Agent route). Without it a result
+   * record holds no command.
+   */
+  echoCommands?: boolean;
+  /**
    * Hold `coverUrl` to the agent command contract: PDF only, resolved to an
    * existing raster artifact, rejected otherwise. Set by the entry points
    * that validate against that contract; other agent-origin callers keep
@@ -642,13 +934,42 @@ export interface ExecuteOnServerInput {
   agentCovers?: boolean;
 }
 
+/** What became of one edit; mirrors `CanvasExecuteEditOutcome` on the wire. */
+export interface ExecuteEditOutcome {
+  /** None of the edit's commands failed. When false, nothing of it applied. */
+  applied: boolean;
+  reason?: CanvasCommandFailureReason;
+  /** Position, within the edit, of the command that failed. */
+  failedAt?: number;
+  /** The edit's commands, as positions in the flat `results`. */
+  start: number;
+  count: number;
+}
+
 export interface ExecuteOnServerOutput {
   canvasId: string;
   fromVersion: number;
   toVersion: number;
+  /**
+   * In-memory rows: a replace names only the fields that changed, a
+   * deletion still holds the node (so a caller can invert the batch). Use
+   * `toWireDeltas` before sending them anywhere.
+   */
   deltas: Delta[];
+  /** One outcome per edit of the request, in order. */
+  edits: ExecuteEditOutcome[];
+  /**
+   * The request stated its edits itself (not a plain command list), so its
+   * caller is answered per edit.
+   */
+  statedAsEdits?: true;
+  /** One entry per command across all edits, in order. */
   results: Array<{
-    command: CanvasCommand;
+    /**
+     * The command as executed. Absent on a replayed output whose stored
+     * outcome does not keep the commands.
+     */
+    command?: CanvasCommand;
     applied: boolean;
     reason?: CanvasCommandFailureReason;
     /**
@@ -679,8 +1000,7 @@ export interface ExecuteOnServerOutput {
    * Subset of `PendingEffects` that clients need to drain locally.
    *
    * `mutatedNodes` is included so the web's existing `triggerPreprocessing`
-   * pipeline can still run (Phase A keeps preprocessing on the web; M3
-   * will move it server-side once cross-tab broadcast lands).
+   * pipeline can still run (the originating page drives preprocessing).
    */
   pendingEffects: {
     mutatedNodes: CanvasNode[];
@@ -701,6 +1021,255 @@ export interface ExecuteOnServerOutput {
    */
   conflicts?: ExecuteConflict[];
   viewConflicts?: InteractiveViewConflict[];
+  /**
+   * Complete direct-child lists of every parent whose sibling paint order or
+   * membership this batch changed, stamped with `toVersion`. Entity `deltas`
+   * cannot express order; clients replay these after them.
+   */
+  orderEvents?: SetSiblingOrderEvent[];
+  /**
+   * Stored content revision of every node whose saved content this batch
+   * created or changed ({@link contentChangedNodeIds}), read back after the
+   * commit. A response answered from a result record carries the revisions
+   * of the records that commit handed to storage.
+   */
+  nodeContentRevisions?: Record<string, string>;
+  /** Read version of the state this call left behind (`issueBasis`). */
+  basis?: string;
+  /** The request id this response is stored under, when one was supplied. */
+  operationId?: string;
+  /**
+   * The run id the batch was journalled under. Present only when a request
+   * id was supplied, so a replay reports the original run and not a new one.
+   */
+  runId?: string;
+  /**
+   * This answers an earlier call with the same request id, from its stored
+   * outcome: `deltas` and `pendingEffects.mutatedNodes` are empty, and
+   * {@link outcome} is what a caller is told.
+   */
+  replayed?: true;
+  /** The stored outcome a replayed output was built from. */
+  outcome?: ExecuteOutcome;
+}
+
+/** The request id was already used for a different request. */
+export class ExecuteRequestReusedError extends Error {
+  readonly operationId: string;
+  constructor(operationId: string) {
+    super(`Request id ${operationId} was already used for a different request`);
+    this.name = 'ExecuteRequestReusedError';
+    this.operationId = operationId;
+  }
+}
+
+/**
+ * Storage failed in a way that leaves it unknown whether the batch was
+ * saved. The caller must ask again with the same request id; it must not
+ * treat this as a rejection.
+ */
+export class ExecuteOutcomeUnknownError extends Error {
+  readonly operationId: string;
+  constructor(operationId: string, cause: unknown) {
+    super(`The outcome of request ${operationId} is unknown`, { cause });
+    this.name = 'ExecuteOutcomeUnknownError';
+    this.operationId = operationId;
+  }
+}
+
+/** The supplied read version does not name a version of this Space. */
+export class ExecuteBasisError extends Error {
+  readonly basis: string;
+  constructor(basis: string) {
+    super('The read version is not one this Space issued');
+    this.name = 'ExecuteBasisError';
+    this.basis = basis;
+  }
+}
+
+// ── Reliable save ────────────────────────────────────────────────────────
+//
+// Everything below is reached only when the caller supplied a request id.
+
+/** A request id, resolved once at the entry point. */
+interface ReliableRequest {
+  readonly key: SaveKey;
+  readonly digest: string;
+}
+
+type SpaceHandle = ReturnType<typeof space>;
+
+function reliableRequestOf(input: ExecuteOnServerInput): ReliableRequest {
+  const key = normalizeSaveKey(input.request as SaveKey);
+  return {
+    key,
+    // `runId` is correlation, not content: a retry may carry a new one.
+    digest: digestJson({
+      canvasId: input.canvasId,
+      // A plain command list keeps the digest it always had, so a retry of
+      // a request made before edits existed still matches its record.
+      ...(input.edits
+        ? { edits: input.edits }
+        : { commands: input.commands ?? [], basis: input.basis ?? null }),
+      source: input.originator.source,
+      threadId: input.claimedThreadId ?? input.originator.threadId ?? null,
+    }),
+  };
+}
+
+/** Hand back a stored outcome, or refuse an id reused for something else. */
+function replayStored(
+  request: ReliableRequest,
+  stored: StoredSaveResult,
+): ExecuteOnServerOutput {
+  if (stored.digest !== request.digest) {
+    throw new ExecuteRequestReusedError(request.key.operationId);
+  }
+  const outcome = readStoredOutcome(stored.response);
+  if (!outcome) {
+    throw new Error(
+      `The stored result of request ${request.key.operationId} cannot be read`,
+    );
+  }
+  return replayedOutput(outcome);
+}
+
+async function lookupReplay(
+  handle: SpaceHandle,
+  request: ReliableRequest,
+): Promise<ExecuteOnServerOutput | null> {
+  const stored = await handle.save.lookup(request.key);
+  return stored ? replayStored(request, stored) : null;
+}
+
+/**
+ * The result record for `output`: its outcome, never the deltas or nodes of
+ * the call. An outcome too large for a record is stored without its
+ * optional parts, so a repeat of the request still finds it and does not
+ * execute again. `null` — the batch is then saved the ordinary way, and a
+ * retry is a new request — is left for an outcome that cannot be stored at
+ * all.
+ */
+function saveResultFor(
+  canvasId: string,
+  request: ReliableRequest,
+  output: ExecuteOnServerOutput,
+  echoCommands: boolean,
+): SaveResult | null {
+  const whole = outcomeOf(output, echoCommands);
+  const outcome = storableOutcome(whole);
+  if (!outcome) {
+    log.warn(
+      { canvasId, operationId: request.key.operationId },
+      'Execute outcome is not storable; saving without a result record',
+    );
+    return null;
+  }
+  if (outcome !== whole) {
+    log.warn(
+      { canvasId, operationId: request.key.operationId },
+      'Execute outcome exceeds the result record limit; stored without its optional parts',
+    );
+  }
+  return { key: request.key, digest: request.digest, response: outcome };
+}
+
+/**
+ * Decide what a storage failure means for a call that carried a request id.
+ *
+ * The write may or may not have landed. The result record is stored in the
+ * same commit, so its presence settles it: found means saved, absent means
+ * not. Only when that question cannot be answered either is the outcome
+ * reported as unknown.
+ *
+ * @returns the stored result when the write did land; otherwise throws.
+ */
+async function settleFailedSave(
+  handle: SpaceHandle,
+  request: ReliableRequest,
+  failure: unknown,
+): Promise<StoredSaveResult> {
+  if (failure instanceof SaveIdReusedError) {
+    throw new ExecuteRequestReusedError(request.key.operationId);
+  }
+  let stored: StoredSaveResult | null;
+  try {
+    stored = await handle.save.lookup(request.key);
+  } catch {
+    throw new ExecuteOutcomeUnknownError(request.key.operationId, failure);
+  }
+  if (!stored) throw failure;
+  if (stored.digest !== request.digest) {
+    throw new ExecuteRequestReusedError(request.key.operationId);
+  }
+  return stored;
+}
+
+/**
+ * Store the outcome of a batch that changed nothing, and return what the
+ * caller should be given.
+ */
+async function recordUnchangedOutcome(
+  handle: SpaceHandle,
+  request: ReliableRequest | undefined,
+  output: ExecuteOnServerOutput,
+  echoCommands: boolean,
+): Promise<ExecuteOnServerOutput> {
+  if (!request) return output;
+  const result = saveResultFor(output.canvasId, request, output, echoCommands);
+  if (!result) return output;
+  try {
+    const recorded = await handle.save.record({
+      expectedVersion: output.fromVersion,
+      result,
+    });
+    if (recorded.ok) return output;
+    if (recorded.reason === 'result-exists') {
+      return replayStored(request, recorded.stored);
+    }
+    // Nothing was applied and nothing was stored: a retry starts afresh.
+    log.warn(
+      {
+        canvasId: output.canvasId,
+        operationId: request.key.operationId,
+        actualVersion: recorded.actualVersion,
+      },
+      'Space moved while recording an unchanged outcome; not stored',
+    );
+    return output;
+  } catch (error) {
+    // Found: the record landed and only its acknowledgement was lost.
+    await settleFailedSave(handle, request, error);
+    return output;
+  }
+}
+
+/** Requests being executed right now, by Workspace, Space and request key. */
+const requestsInFlight = new Map<string, Promise<unknown>>();
+
+/**
+ * Run `task` unless the same request is already running; in that case wait
+ * for it first. The waiter then runs too — and finds the stored result — so
+ * a request that failed without storing anything is simply attempted again.
+ */
+async function withRequestSingleFlight<T>(
+  flightKey: string,
+  task: () => Promise<T>,
+): Promise<T> {
+  for (;;) {
+    const running = requestsInFlight.get(flightKey);
+    if (!running) break;
+    await running.catch(() => undefined);
+  }
+  const mine = task();
+  requestsInFlight.set(flightKey, mine);
+  try {
+    return await mine;
+  } finally {
+    if (requestsInFlight.get(flightKey) === mine) {
+      requestsInFlight.delete(flightKey);
+    }
+  }
 }
 
 export class CanvasChangeConflictError extends Error {}
@@ -714,6 +1283,69 @@ export class CanvasNotFoundError extends Error {
   }
 }
 
+/** Pending effects as they travel: the mutated nodes by id. */
+export function toWirePendingEffects(effects: {
+  mutatedNodes: readonly CanvasNode[];
+  deletedNodeIds: readonly string[];
+  contentEditedNodeIds: readonly string[];
+  deferredFitFrameIds: readonly string[];
+}): {
+  mutatedNodeIds: string[];
+  deletedNodeIds: string[];
+  contentEditedNodeIds: string[];
+  deferredFitFrameIds: string[];
+} {
+  return {
+    mutatedNodeIds: [...new Set(effects.mutatedNodes.map((node) => node.id))],
+    deletedNodeIds: [...effects.deletedNodeIds],
+    contentEditedNodeIds: [...effects.contentEditedNodeIds],
+    deferredFitFrameIds: [...effects.deferredFitFrameIds],
+  };
+}
+
+/**
+ * The answer of `POST /api/canvas/:canvasId/execute` for `output`: results
+ * per edit, rows reduced to what changed, mutated nodes by id, and no echo
+ * of the commands.
+ */
+export function toExecuteResponse(
+  output: ExecuteOnServerOutput,
+  runId?: string,
+): PostCanvasExecuteResponse {
+  // Everything but the deltas comes from the outcome, so a repeated request
+  // (answered from the stored outcome) is told the same as the first call.
+  const outcome = outcomeOf(output, false);
+  return {
+    canvasId: outcome.canvasId,
+    fromVersion: outcome.fromVersion,
+    toVersion: outcome.toVersion,
+    ...(output.replayed ? {} : { deltas: toWireDeltas(output.deltas) }),
+    edits: outcome.edits.map((edit) => ({
+      applied: edit.applied,
+      ...(edit.reason ? { reason: edit.reason } : {}),
+      ...(edit.failedAt !== undefined ? { failedAt: edit.failedAt } : {}),
+      results: outcome.results
+        .slice(edit.start, edit.start + edit.count)
+        .map((result) => ({
+          applied: result.applied,
+          ...(result.reason ? { reason: result.reason } : {}),
+          ...(result.nodes ? { nodes: result.nodes } : {}),
+          ...(result.edges ? { edges: result.edges } : {}),
+        })),
+    })),
+    pendingEffects: outcome.pendingEffects,
+    ...(outcome.orderEvents ? { orderEvents: outcome.orderEvents } : {}),
+    ...(outcome.nodeContentRevisions
+      ? { nodeContentRevisions: outcome.nodeContentRevisions }
+      : {}),
+    ...((outcome.runId ?? runId) ? { runId: outcome.runId ?? runId } : {}),
+    ...(outcome.operationId ? { operationId: outcome.operationId } : {}),
+    ...(outcome.basis ? { basis: outcome.basis } : {}),
+    ...(output.replayed ? { replayed: true as const } : {}),
+    ...(outcome.incomplete ? { incomplete: true as const } : {}),
+  };
+}
+
 /** Publish a system lifecycle batch after its related metadata has settled. */
 export function publishCanvasExecution(output: ExecuteOnServerOutput): void {
   if (output.toVersion === output.fromVersion) return;
@@ -723,7 +1355,12 @@ export function publishCanvasExecution(output: ExecuteOnServerOutput): void {
       fromVersion: output.fromVersion,
       toVersion: output.toVersion,
       deltas: output.deltas,
-      pendingEffects: output.pendingEffects,
+      pendingEffects: toWirePendingEffects(output.pendingEffects),
+      ...(output.orderEvents ? { orderEvents: output.orderEvents } : {}),
+      ...(output.nodeContentRevisions
+        ? { nodeContentRevisions: output.nodeContentRevisions }
+        : {}),
+      ...(output.operationId ? { operationId: output.operationId } : {}),
     },
   });
 }
@@ -741,9 +1378,43 @@ export function publishCanvasExecution(output: ExecuteOnServerOutput): void {
 export async function executeOnServer(
   input: ExecuteOnServerInput,
 ): Promise<ExecuteOnServerOutput> {
+  assertCurrentCanvasCommands(flatCommands(preparedEditsOf(input).edits));
+  const lease = acquireWorkspaceOperationLease();
+  try {
+    if (!input.request) return await executeUnlocked(input, undefined);
+
+    const { canvasId } = input;
+    const request = reliableRequestOf(input);
+    return await withRequestSingleFlight(
+      JSON.stringify([
+        getWorkspaceKey(),
+        canvasId,
+        request.key.principalId,
+        request.key.operationId,
+      ]),
+      async () => {
+        // Before any preparation: a retry must not mint new ids or import
+        // foreign sources a second time.
+        const replay = await lookupReplay(space(canvasId), request);
+        if (replay) return replay;
+        return executeUnlocked(
+          { ...input, runId: input.runId ?? createId('run') },
+          request,
+        );
+      },
+    );
+  } finally {
+    lease.release();
+  }
+}
+
+/** Prepare a batch outside the Canvas mutex, then run it inside. */
+async function executeUnlocked(
+  input: ExecuteOnServerInput,
+  request: ReliableRequest | undefined,
+): Promise<ExecuteOnServerOutput> {
   const { canvasId, originator } = input;
-  assertCurrentCanvasCommands(input.commands);
-  let commands = preAssignIds(input.commands);
+  let prepared = await transformCommands(preparedEditsOf(input), preAssignIds);
 
   // Normalize agent-authored `data.src` values into artifact keys BEFORE the
   // per-canvas mutex: an ACP agent may point a node at an RFS upload
@@ -756,18 +1427,22 @@ export async function executeOnServer(
   // keys / `/api/` URLs / `data:` URIs.
   const stagedCoverUploads: string[] = [];
   if (originator.source === 'agent') {
-    commands = await importForeignNodeSources(canvasId, commands, {
-      agentCovers: input.agentCovers,
-      stagedCoverUploads,
-    });
+    prepared = await transformCommands(prepared, (commands) =>
+      importForeignNodeSources(canvasId, commands, {
+        agentCovers: input.agentCovers,
+        stagedCoverUploads,
+      }),
+    );
 
     // For image nodes with only width specified, calculate height from actual
     // image aspect ratio. This ensures correct proportions for all image sources.
-    commands = await normalizeImageNodeSizes(canvasId, commands);
+    prepared = await transformCommands(prepared, (commands) =>
+      normalizeImageNodeSizes(canvasId, commands),
+    );
   }
 
   const output = await withCanvasMutex(canvasId, () =>
-    executeOnServerAlreadyLocked({ ...input, commands }),
+    executeLocked(input, prepared, request),
   );
   // Cover uploads outlive a batch that threw or had a command rejected, so
   // the corrected retry can still name them.
@@ -786,11 +1461,25 @@ export async function executeOnServer(
 export async function executeOnServerAlreadyLocked(
   input: ExecuteOnServerInput,
 ): Promise<ExecuteOnServerOutput> {
+  return executeLocked(input, preparedEditsOf(input), undefined);
+}
+
+async function executeLocked(
+  input: ExecuteOnServerInput,
+  preparedEdits: PreparedEdits,
+  request: ReliableRequest | undefined,
+): Promise<ExecuteOnServerOutput> {
   const { canvasId } = input;
-  assertCurrentCanvasCommands(input.commands);
-  const commands = [...input.commands];
+  const commands = flatCommands(preparedEdits.edits);
+  assertCurrentCanvasCommands(commands);
 
   const handle = space(canvasId);
+  if (request) {
+    // The entry-point lookup ran before the mutex; the same request may have
+    // been saved by another caller in between.
+    const replay = await lookupReplay(handle, request);
+    if (replay) return replay;
+  }
   const canvas = await handle.read();
   if (!canvas) throw new CanvasNotFoundError(canvasId);
 
@@ -851,17 +1540,19 @@ export async function executeOnServerAlreadyLocked(
     const confirmedCanvas = await handle.read();
     if (!confirmedCanvas) throw new CanvasNotFoundError(canvasId);
     const promoted = confirmedCanvas.version !== canvas.version;
-    return await executePreparedOnServerAlreadyLocked(input, {
+    const confirmedRecords = promoted ? await handle.nodes.list() : records;
+    return await executePreparedOnServerAlreadyLocked(input, request, {
       handle,
       canvas: confirmedCanvas,
-      commands,
+      edits: preparedEdits,
       prestateNodes: promoted
         ? hydrateCanvasNodes(
-            await handle.nodes.list(),
+            confirmedRecords,
             confirmedCanvas.state.nodes as CanvasNode[],
           )
         : prestateNodes,
       prestateEdges: (confirmedCanvas.state.edges ?? []) as CanvasEdge[],
+      records: confirmedRecords,
     });
   } finally {
     releaseDrafts();
@@ -870,22 +1561,90 @@ export async function executeOnServerAlreadyLocked(
 
 async function executePreparedOnServerAlreadyLocked(
   input: ExecuteOnServerInput,
+  request: ReliableRequest | undefined,
   prepared: {
     handle: ReturnType<typeof space>;
     canvas: CanvasFile;
-    commands: CanvasCommand[];
+    edits: PreparedEdits;
     prestateNodes: CanvasNode[];
     prestateEdges: CanvasEdge[];
+    /** The stored node records `prestateNodes` was hydrated from. */
+    records: ReadonlyMap<string, NodeSnapshot>;
   },
 ): Promise<ExecuteOnServerOutput> {
   const { canvasId, originator, runId } = input;
   const { handle, canvas, prestateNodes, prestateEdges } = prepared;
-  let commands = prepared.commands;
+  let edits = prepared.edits.edits;
+  const { perCommand } = prepared.edits;
   const fromVersion = canvas.version;
+
+  // Stamps are read only when the caller quotes or asks for a read version;
+  // the first such call is what gives a Space its baseline.
+  let stamps: SpaceStamps | null = null;
+  if (
+    edits.some((edit) => edit.basis !== undefined) ||
+    input.basis !== undefined ||
+    input.issueBasis === true
+  ) {
+    stamps = await handle.save.stamps();
+    if (!stamps) throw new CanvasNotFoundError(canvasId);
+  }
+  // A plain command list quotes its read version once, for the request: it
+  // has to be one of this Space's also when the list is empty.
+  if (
+    input.basis !== undefined &&
+    !(stamps && resolveReadVersion(input.basis, stamps))
+  ) {
+    throw new ExecuteBasisError(input.basis);
+  }
+  const resolved = await resolveEdits({
+    edits,
+    stamps,
+    principalId: input.page?.principalId ?? request?.key.principalId,
+    lookup: (key) => handle.save.lookup(key),
+  });
+  if (!resolved.ok) throw new ExecuteBasisError(resolved.basis);
+  /** Decoded read version and `after` of each edit, by the edit object. */
+  const resolvedOf = new Map<ExecuteEditInput, ResolvedEdit | undefined>(
+    edits.map((edit, index) => [edit, resolved.edits[index]] as const),
+  );
+  const page = input.page
+    ? pageKeyOf(input.page.principalId, input.page.pageId)
+    : undefined;
+  /** Commands the Server appends below; not checked on their own. */
+  const serverAppended = new Set<CanvasCommand>();
+
+  /** Fields every response of this call carries, whatever its outcome. */
+  const envelope = (version: number): Partial<ExecuteOnServerOutput> => ({
+    ...(perCommand ? {} : { statedAsEdits: true as const }),
+    ...(stamps && input.issueBasis === true
+      ? { basis: encodeBasis(stamps.lineage, version) }
+      : {}),
+    ...(request
+      ? {
+          operationId: request.key.operationId,
+          ...(runId ? { runId } : {}),
+        }
+      : {}),
+  });
+
+  /**
+   * Replace the commands of every edit, one for one. The decoded read
+   * version follows the edit.
+   */
+  const mapCommands = (
+    transform: (command: CanvasCommand) => CanvasCommand,
+  ): void => {
+    edits = edits.map((edit) => {
+      const next = { ...edit, commands: edit.commands.map(transform) };
+      resolvedOf.set(next, resolvedOf.get(edit));
+      return next;
+    });
+  };
 
   // Automatic preprocessing can arrive after an agent or user rename.
   // Filter only its label fields at the actual commit, not at request time.
-  commands = commands.map((command) =>
+  mapCommands((command) =>
     command.type !== 'MERGE_NODE_DATA'
       ? command
       : {
@@ -917,7 +1676,7 @@ async function executePreparedOnServerAlreadyLocked(
 
   assertWorldPreviewMutationsAllowed(
     canvasId,
-    commands,
+    flatCommands(edits),
     prestateNodes,
     originator.source,
     liveCanvasIds,
@@ -927,17 +1686,65 @@ async function executePreparedOnServerAlreadyLocked(
     // Order matters: fix explicit image resizes first (edits items in
     // place), then let the merge pass append geometry for src-swaps that
     // have no explicit resize. The two target disjoint node sets.
-    commands = await normalizeSetGeometryImageSizes(
+    const resized = await normalizeSetGeometryImageSizes(
       canvasId,
-      commands,
+      flatCommands(edits),
       prestateNodes,
     );
-    commands = await normalizeMergeImageGeometry(
-      canvasId,
-      commands,
-      prestateNodes,
-    );
+    let offset = 0;
+    mapCommands(() => resized[offset++] as CanvasCommand);
+    const authored = flatCommands(edits);
+    const authoredSet = new Set(authored);
+    const extended: ExecuteEditInput[] = [];
+    for (const edit of edits) {
+      const commands = await normalizeMergeImageGeometry(
+        canvasId,
+        edit.commands,
+        prestateNodes,
+        authored,
+      );
+      for (const command of commands) {
+        if (!authoredSet.has(command)) serverAppended.add(command);
+      }
+      // What the Server adds follows from the command before it. In a plain
+      // command list it is an edit of its own like every other command, so a
+      // command that fails never undoes another; among stated edits it
+      // belongs to the edit of the command it follows from.
+      const pieces: ExecuteEditInput[] = perCommand
+        ? commands.map((command) => ({ ...edit, commands: [command] }))
+        : [{ ...edit, commands }];
+      for (const piece of pieces) {
+        resolvedOf.set(piece, resolvedOf.get(edit));
+        extended.push(piece);
+      }
+    }
+    edits = extended;
   }
+
+  const commands = flatCommands(edits);
+  /** Position of each edit's first command in `commands`. */
+  const editStarts: number[] = [];
+  edits.reduce((start, edit) => {
+    editStarts.push(start);
+    return start + edit.commands.length;
+  }, 0);
+  /** The outcome of a request refused before the engine ran. */
+  const refusedEdits = (
+    conflictIds: ReadonlySet<string>,
+  ): ExecuteEditOutcome[] =>
+    edits.map((edit, index) => {
+      const failedAt = edit.commands.findIndex(
+        (command) =>
+          command.type === 'MERGE_NODE_DATA' &&
+          command.patches.some((patch) => conflictIds.has(patch.nodeId)),
+      );
+      return {
+        applied: false,
+        ...(failedAt >= 0 ? { reason: 'conflict' as const, failedAt } : {}),
+        start: editStarts[index] ?? 0,
+        count: edit.commands.length,
+      };
+    });
 
   // Compare-and-swap pre-flight (agent writes only). A stale or
   // never-read content rewrite mutates NOTHING — the whole batch is a
@@ -947,28 +1754,35 @@ async function executePreparedOnServerAlreadyLocked(
     const conflicts = collectMergeConflicts(commands, prestateNodes);
     if (conflicts.length > 0) {
       const conflictIds = new Set(conflicts.map((c) => c.nodeId));
-      return {
-        canvasId,
-        fromVersion,
-        toVersion: fromVersion,
-        deltas: [],
-        results: commands.map((command) => ({
-          command,
-          applied: false,
-          ...(command.type === 'MERGE_NODE_DATA' &&
-          command.patches.some((p) => conflictIds.has(p.nodeId))
-            ? { reason: 'conflict' as const }
-            : {}),
-        })),
-        commands,
-        pendingEffects: {
-          mutatedNodes: [],
-          deletedNodeIds: [],
-          contentEditedNodeIds: [],
-          deferredFitFrameIds: [],
+      return recordUnchangedOutcome(
+        handle,
+        request,
+        {
+          canvasId,
+          fromVersion,
+          toVersion: fromVersion,
+          deltas: [],
+          edits: refusedEdits(conflictIds),
+          results: commands.map((command) => ({
+            command,
+            applied: false,
+            ...(command.type === 'MERGE_NODE_DATA' &&
+            command.patches.some((p) => conflictIds.has(p.nodeId))
+              ? { reason: 'conflict' as const }
+              : {}),
+          })),
+          commands,
+          pendingEffects: {
+            mutatedNodes: [],
+            deletedNodeIds: [],
+            contentEditedNodeIds: [],
+            deferredFitFrameIds: [],
+          },
+          conflicts,
+          ...envelope(fromVersion),
         },
-        conflicts,
-      };
+        input.echoCommands === true,
+      );
     }
   }
 
@@ -980,39 +1794,90 @@ async function executePreparedOnServerAlreadyLocked(
     const conflictIds = new Set(
       viewConflicts.map((conflict) => conflict.nodeId),
     );
-    return {
-      canvasId,
-      fromVersion,
-      toVersion: fromVersion,
-      deltas: [],
-      results: commands.map((command) => ({
-        command,
-        applied: false,
-        ...(command.type === 'MERGE_NODE_DATA' &&
-        command.patches.some((patch) => conflictIds.has(patch.nodeId))
-          ? { reason: 'conflict' as const }
-          : {}),
-      })),
-      commands,
-      pendingEffects: {
-        mutatedNodes: [],
-        deletedNodeIds: [],
-        contentEditedNodeIds: [],
-        deferredFitFrameIds: [],
+    return recordUnchangedOutcome(
+      handle,
+      request,
+      {
+        canvasId,
+        fromVersion,
+        toVersion: fromVersion,
+        deltas: [],
+        edits: refusedEdits(conflictIds),
+        results: commands.map((command) => ({
+          command,
+          applied: false,
+          ...(command.type === 'MERGE_NODE_DATA' &&
+          command.patches.some((patch) => conflictIds.has(patch.nodeId))
+            ? { reason: 'conflict' as const }
+            : {}),
+        })),
+        commands,
+        pendingEffects: {
+          mutatedNodes: [],
+          deletedNodeIds: [],
+          contentEditedNodeIds: [],
+          deferredFitFrameIds: [],
+        },
+        viewConflicts,
+        ...envelope(fromVersion),
       },
-      viewConflicts,
-    };
+      input.echoCommands === true,
+    );
   }
 
-  const { writeResult, commandResults, pendingEffects } = executeCanvasCommands(
-    { source: originator.source, commands },
-    {
-      nodes: prestateNodes,
-      edges: prestateEdges,
-      canvasId,
-    },
-    { forceFitFrames: originator.source === 'agent' },
+  const everyEditChecked = edits.every(
+    (edit) => resolvedOf.get(edit)?.version !== undefined,
   );
+  const admission: ReadVersionAdmission | undefined =
+    stamps && edits.some((edit) => resolvedOf.get(edit)?.version !== undefined)
+      ? createReadVersionAdmission({
+          edits: edits.map((edit) => {
+            const version = resolvedOf.get(edit)?.version;
+            return {
+              commands: edit.commands,
+              ...(version !== undefined ? { version } : {}),
+            };
+          }),
+          stamps,
+          prestateNodes,
+          ...(page ? { page } : {}),
+          exempt: serverAppended,
+        })
+      : undefined;
+
+  // Positions named by `after` are those of the request as it was sent. A
+  // plain command list names none, so the edits the Server added to one
+  // shift nothing.
+  const { writeResult, commandResults, editResults, pendingEffects } =
+    executeCanvasEdits(
+      {
+        source: originator.source,
+        edits: edits.map((edit) => {
+          const decoded = resolvedOf.get(edit);
+          return {
+            commands: edit.commands,
+            ...(decoded?.after.length ? { after: decoded.after } : {}),
+            ...(decoded?.blocked ? { blocked: true } : {}),
+          };
+        }),
+      },
+      {
+        nodes: prestateNodes,
+        edges: prestateEdges,
+        canvasId,
+      },
+      {
+        forceFitFrames: originator.source === 'agent',
+        ...(admission ? { admitEdit: admission.admitEdit } : {}),
+      },
+    );
+  const editOutcomes: ExecuteEditOutcome[] = editResults.map((edit, index) => ({
+    applied: edit.applied,
+    ...(edit.reason ? { reason: edit.reason } : {}),
+    ...(edit.failedAt !== undefined ? { failedAt: edit.failedAt } : {}),
+    start: editStarts[index] ?? 0,
+    count: edit.results.length,
+  }));
 
   // Pure host-agnostic cleanups (edge handle reroute) — same path the
   // web's `executeCommands` runs before its set().
@@ -1165,12 +2030,8 @@ async function executePreparedOnServerAlreadyLocked(
   // leaving the agent with `applied: true` while persisted topology
   // is unchanged.
   //
-  // We do NOT synthesise a delta — Phase A has no order-aware delta
-  // type, and cross-tab broadcast (M3) is not shipped yet. We just
-  // fall through to the persistence branch so topology and the
-  // delta-log version both reflect that something happened. Catch-up
-  // clients on M3 will see the version bump and need to refetch the
-  // full canvas; that's an acceptable Phase-A trade-off.
+  // The delta log stays entity-only; the order itself travels to clients
+  // as `orderEvents` on the response and the sync notification below.
   const orderChanged =
     prestateNodes.length !== finalNodes.length ||
     prestateEdges.length !== finalEdges.length ||
@@ -1180,23 +2041,39 @@ async function executePreparedOnServerAlreadyLocked(
   // No-op fast path. Returning early preserves the invariant that
   // `toVersion === fromVersion` IFF no row was appended to the log.
   if (deltas.length === 0 && !orderChanged) {
-    return {
-      canvasId,
-      fromVersion,
-      toVersion: fromVersion,
-      deltas,
-      results,
-      commands,
-      pendingEffects: {
-        mutatedNodes: pendingEffects.mutatedNodes,
-        deletedNodeIds: pendingEffects.deletedNodeIds,
-        contentEditedNodeIds: pendingEffects.contentEditedNodeIds,
-        deferredFitFrameIds: pendingEffects.deferredFitFrameIds,
+    return recordUnchangedOutcome(
+      handle,
+      request,
+      {
+        canvasId,
+        fromVersion,
+        toVersion: fromVersion,
+        deltas,
+        edits: editOutcomes,
+        results,
+        commands,
+        pendingEffects: {
+          mutatedNodes: pendingEffects.mutatedNodes,
+          deletedNodeIds: pendingEffects.deletedNodeIds,
+          contentEditedNodeIds: pendingEffects.contentEditedNodeIds,
+          deferredFitFrameIds: pendingEffects.deferredFitFrameIds,
+        },
+        ...envelope(fromVersion),
       },
-    };
+      input.echoCommands === true,
+    );
   }
 
   const toVersion = fromVersion + 1;
+  const orderEvents = siblingOrderEventsFor(
+    prestateNodes,
+    finalNodes,
+    toVersion,
+  );
+  // What travels and is journalled: a deletion as an id. `deltas` keeps the
+  // deleted nodes for the Review records and for in-process callers that
+  // invert the batch.
+  const wireDeltas = toWireDeltas(deltas);
 
   // Persist .md sidecars first so topology never references a markdown
   // file that does not exist on disk. The synchronous commit section is
@@ -1255,87 +2132,46 @@ async function executePreparedOnServerAlreadyLocked(
     version: toVersion,
     ts: Date.now(),
     ...(runId ? { runId } : {}),
-    commands: commands as unknown[],
-    deltas: deltas as unknown[],
+    // The row says which commands ran; what they changed is in `deltas`,
+    // and a command's payload (a created body) is not journalled twice.
+    commands: commands.map((command) => ({ type: command.type })),
+    deltas: wireDeltas as unknown[],
     originator,
   };
-  const write = await handle.write({
-    expectedVersion: fromVersion,
-    nextRecord: nextCanvas,
-    nodeMutations,
-    delta: logEntry,
-  });
-  if (!write.ok) {
-    if (write.reason === 'not-found') {
-      throw new CanvasNotFoundError(canvasId);
-    }
-    throw new Error(
-      `[canvas-executor] ordered Space write rejected: ${write.reason}`,
-    );
-  }
-
   // Derive review records (ACP change cards) only when asked. Edge
   // endpoint labels are resolved against the post-state nodes.
-  const shouldComputeChanges =
-    input.computeChanges === true &&
-    !(
-      originator.source === 'agent' &&
-      (await getAgentChangeReviewConfig()).autoAcceptSpaceChanges
-    );
-  let changes: CanvasChangeRecord[] | undefined;
-  if (shouldComputeChanges) {
+  const autoAcceptSpaceChanges =
+    input.computeChanges === true && originator.source === 'agent'
+      ? (await getAgentChangeReviewConfig()).autoAcceptSpaceChanges
+      : false;
+  const deriveChanges = (): CanvasChangeRecord[] | undefined => {
+    const shouldComputeChanges =
+      input.computeChanges === true && !autoAcceptSpaceChanges;
+    if (!shouldComputeChanges) return undefined;
     const labelById = new Map<string, string>();
     for (const node of finalNodes) {
       const lbl = (node.data as Record<string, unknown> | undefined)?.['label'];
       if (typeof lbl === 'string' && lbl) labelById.set(node.id, lbl);
     }
-    changes = extractCanvasChanges(deltas, { nodeLabelById: labelById });
-  }
-
-  // Broadcast the delta to live frontends and persist review records to
-  // the originating thread's sidecar. Every accepted write broadcasts —
-  // the initiating tab applies it from the sync stream, not the tool
-  // result. No-op fast path above already returned for empty diffs.
-  //
-  // When attributed to a thread, fold this batch's records into the
-  // thread's coalesced change list (one net record per entity) and
-  // broadcast that full list so live cards replace their state with it —
-  // matching what GET /changes returns.
-  let broadcastChanges = changes;
-  if (originator.threadId && changes && changes.length > 0) {
-    try {
-      broadcastChanges = await handle.changes.append(
-        originator.threadId,
-        changes,
-      );
-    } catch {
-      /* sidecar persistence is best-effort — never fail the write */
-    }
-  }
-  if (input.publish !== false) {
-    publishCanvasUpdate(canvasId, {
-      type: 'update',
-      data: {
-        fromVersion,
-        toVersion,
-        deltas,
-        pendingEffects: {
-          mutatedNodes: pendingEffects.mutatedNodes,
-          deletedNodeIds: pendingEffects.deletedNodeIds,
-          contentEditedNodeIds: pendingEffects.contentEditedNodeIds,
-          deferredFitFrameIds: pendingEffects.deferredFitFrameIds,
-        },
-        ...(originator.threadId ? { threadId: originator.threadId } : {}),
-        ...(broadcastChanges ? { changes: broadcastChanges } : {}),
-      },
+    return extractCanvasChanges(deltas, {
+      nodeLabelById: labelById,
+      nodeTypeById: new Map(
+        finalNodes.flatMap((node) =>
+          typeof node.type === 'string' ? [[node.id, node.type] as const] : [],
+        ),
+      ),
     });
-  }
-
-  return {
+  };
+  const contentNodeIds = contentChangedNodeIds(deltas);
+  const outputWith = (
+    changes: CanvasChangeRecord[] | undefined,
+    nodeContentRevisions: Record<string, string> | undefined,
+  ): ExecuteOnServerOutput => ({
     canvasId,
     fromVersion,
     toVersion,
     deltas,
+    edits: editOutcomes,
     results,
     commands,
     pendingEffects: {
@@ -1345,7 +2181,114 @@ async function executePreparedOnServerAlreadyLocked(
       deferredFitFrameIds: pendingEffects.deferredFitFrameIds,
     },
     ...(changes ? { changes } : {}),
-  };
+    ...(orderEvents.length > 0 ? { orderEvents } : {}),
+    ...(nodeContentRevisions ? { nodeContentRevisions } : {}),
+    ...envelope(toVersion),
+  });
+
+  // Review records are part of the commit, and with a request id so is the
+  // response, so both are complete before the write.
+  const changes = deriveChanges();
+  const reviewThreadId =
+    originator.threadId && changes && changes.length > 0
+      ? originator.threadId
+      : undefined;
+  // The result record is part of the commit, so it cannot hold what is read
+  // back after it: it carries the revisions of the records handed to storage.
+  const plannedRevisions = request
+    ? plannedContentRevisions(contentNodeIds, nodeMutations, prepared.records)
+    : undefined;
+  const result = request
+    ? saveResultFor(
+        canvasId,
+        request,
+        outputWith(changes, plannedRevisions),
+        input.echoCommands === true,
+      )
+    : null;
+
+  // What this batch creates or re-parents is the page's own change only when
+  // the page said what it had read for every edit: an unchecked edit
+  // could have moved a node its author had not seen moved.
+  const author =
+    page && admission && everyEditChecked
+      ? { by: page, except: admission.unseenMoves(finalNodes) }
+      : undefined;
+
+  let write: Awaited<ReturnType<SpaceHandle['write']>>;
+  try {
+    write = await handle.write({
+      expectedVersion: fromVersion,
+      nextRecord: nextCanvas,
+      nodeMutations,
+      delta: logEntry,
+      ...(result ? { result } : {}),
+      ...(author ? { author } : {}),
+      ...(reviewThreadId && changes
+        ? { reviews: [{ threadId: reviewThreadId, records: changes }] }
+        : {}),
+    });
+  } catch (error) {
+    if (!request || !result) throw error;
+    // Found: the commit landed and only its acknowledgement was lost, so
+    // this call finishes as the success it was. Otherwise this throws.
+    const stored = await settleFailedSave(handle, request, error);
+    if (stored.atVersion !== toVersion) return replayStored(request, stored);
+    write = { ok: true };
+  }
+  if (!write.ok) {
+    if (write.reason === 'not-found') {
+      throw new CanvasNotFoundError(canvasId);
+    }
+    if (write.reason === 'result-exists' && request) {
+      return replayStored(request, write.stored);
+    }
+    throw new Error(
+      `[canvas-executor] ordered Space write rejected: ${write.reason}`,
+    );
+  }
+
+  // Broadcast the delta to live frontends. Every accepted write broadcasts —
+  // the initiating tab applies it from the sync stream, not the tool result.
+  // No-op fast path above already returned for empty diffs.
+  //
+  // When attributed to a thread, this batch's records were folded into the
+  // thread's coalesced change list (one net record per entity) by the write
+  // itself; broadcast that full list so live cards replace their state with
+  // it — matching what GET /changes returns.
+  const nodeContentRevisions = await storedContentRevisions(
+    handle,
+    canvasId,
+    contentNodeIds,
+    plannedRevisions,
+  );
+  let broadcastChanges = changes;
+  if (reviewThreadId) {
+    broadcastChanges =
+      write.reviews?.[reviewThreadId] ??
+      // Only a commit whose acknowledgement was lost reports no list: the
+      // records are stored, so the list is read back.
+      (await handle.changes.read(reviewThreadId).catch(() => changes));
+  }
+  if (input.publish !== false) {
+    publishCanvasUpdate(canvasId, {
+      type: 'update',
+      data: {
+        fromVersion,
+        toVersion,
+        deltas: wireDeltas,
+        pendingEffects: toWirePendingEffects(pendingEffects),
+        ...(orderEvents.length > 0 ? { orderEvents } : {}),
+        ...(nodeContentRevisions ? { nodeContentRevisions } : {}),
+        ...(originator.threadId ? { threadId: originator.threadId } : {}),
+        ...(broadcastChanges ? { changes: broadcastChanges } : {}),
+        ...(request ? { operationId: request.key.operationId } : {}),
+        source: originator.source,
+      },
+    });
+  }
+
+  return outputWith(changes, nodeContentRevisions);
 }
 
 /**
@@ -1376,12 +2319,19 @@ export async function applyDeltasOnServer(input: {
     contentEditedNodeIds: string[];
     deferredFitFrameIds: string[];
   };
+  /** As {@link ExecuteOnServerOutput.nodeContentRevisions}; publish it with the deltas. */
+  nodeContentRevisions?: Record<string, string>;
 }> {
   const { canvasId } = input;
 
-  return await withCanvasMutex(canvasId, () =>
-    applyDeltasOnServerAlreadyLocked(input),
-  );
+  const lease = acquireWorkspaceOperationLease();
+  try {
+    return await withCanvasMutex(canvasId, () =>
+      applyDeltasOnServerAlreadyLocked(input),
+    );
+  } finally {
+    lease.release();
+  }
 }
 
 /**
@@ -1410,6 +2360,8 @@ export async function applyDeltasOnServerAlreadyLocked(input: {
     contentEditedNodeIds: string[];
     deferredFitFrameIds: string[];
   };
+  /** As {@link ExecuteOnServerOutput.nodeContentRevisions}; publish it with the deltas. */
+  nodeContentRevisions?: Record<string, string>;
 }> {
   const { canvasId, originator, runId } = input;
 
@@ -1437,39 +2389,39 @@ export async function applyDeltasOnServerAlreadyLocked(input: {
     );
   }
   const liveNodes = new Map(prestateNodes.map((node) => [node.id, node]));
+  // Every row is merged into the node as it is now, so a revert puts back
+  // the fields its change touched and leaves later edits of other fields
+  // alone. A whole-node row (a Review record stored before rows became
+  // partial, or one a caller built from two node objects) is reduced to the
+  // fields that differ first.
+  const incomingDeltas = slimDeltas(input.deltas);
   const editableDeltas = input.agentNodeProjection
-    ? input.deltas
-    : input.deltas.map((delta): Delta => {
+    ? incomingDeltas
+    : incomingDeltas.map((delta): Delta => {
         if (delta.type !== 'REPLACE_NODE') return delta;
         const current = liveNodes.get(delta.next.id);
-        if (
-          input.change &&
-          current?.type === 'pdf' &&
-          delta.prev.type === 'pdf' &&
-          delta.next.type === 'pdf'
-        ) {
-          const next = {
-            ...delta.next,
-            data: replayChangedData(
-              current.data,
-              delta.prev.data,
-              delta.next.data,
-            ),
-          };
-          liveNodes.set(next.id, next);
-          return { ...delta, next };
+        if (current?.type !== 'question') {
+          if (current)
+            liveNodes.set(
+              current.id,
+              mergeNodeFields(current, delta.prev, delta.next),
+            );
+          return delta;
         }
-        if (current?.type !== 'question') return delta;
-        const next = {
-          ...delta.next,
-          data: replayAgentNodeEditableData(
-            current.data,
-            delta.prev.data,
-            delta.next.data,
-          ),
+        // An Agent Node takes only its editable data from a replay; the
+        // row names the whole `data` so the merge installs exactly that.
+        const data = replayAgentNodeEditableData(
+          current.data,
+          delta.prev.data ?? {},
+          delta.next.data ?? {},
+        );
+        const row: Delta = {
+          ...delta,
+          prev: { ...delta.prev, data: current.data },
+          next: { ...delta.next, data },
         };
-        liveNodes.set(next.id, next);
-        return { ...delta, next };
+        liveNodes.set(current.id, mergeNodeFields(current, row.prev, row.next));
+        return row;
       });
   const final = applyDeltas(
     { nodes: prestateNodes, edges: prestateEdges },
@@ -1481,7 +2433,7 @@ export async function applyDeltasOnServerAlreadyLocked(input: {
   final.nodes = hidePdfNotes(final.nodes);
   const previousById = new Map(prestateNodes.map((node) => [node.id, node]));
   const replacedNodeIds = new Set(
-    input.deltas.flatMap((delta) =>
+    incomingDeltas.flatMap((delta) =>
       delta.type === 'REPLACE_NODE' ? [delta.next.id] : [],
     ),
   );
@@ -1625,9 +2577,18 @@ export async function applyDeltasOnServerAlreadyLocked(input: {
 
     const toVersion = fromVersion + 1;
 
+    // A replace row names only what changed; the node it leaves is the one
+    // in the final state.
+    const finalById = new Map(finalNodes.map((node) => [node.id, node]));
+    const writtenNode = (d: Delta): CanvasNode | undefined =>
+      d.type === 'INSERT_NODE'
+        ? d.node
+        : d.type === 'REPLACE_NODE'
+          ? finalById.get(d.next.id)
+          : undefined;
     for (const d of deltas) {
-      if (d.type === 'INSERT_NODE' || d.type === 'REPLACE_NODE') {
-        const node = d.type === 'INSERT_NODE' ? d.node : d.next;
+      const node = writtenNode(d);
+      if (node) {
         mutatedNodes.push(node);
         if (d.type === 'REPLACE_NODE') contentEditedNodeIds.push(node.id);
       } else if (d.type === 'DELETE_NODE') {
@@ -1637,8 +2598,8 @@ export async function applyDeltasOnServerAlreadyLocked(input: {
     const insertedIds = insertedNodeIds(deltas);
     const nodeMutations: SpaceNodeMutation[] = [];
     for (const d of deltas) {
-      if (d.type === 'INSERT_NODE' || d.type === 'REPLACE_NODE') {
-        const node = d.type === 'INSERT_NODE' ? d.node : d.next;
+      const node = writtenNode(d);
+      if (node) {
         const record = buildNodeContent(node);
         if (record) {
           nodeMutations.push({
@@ -1673,7 +2634,7 @@ export async function applyDeltasOnServerAlreadyLocked(input: {
         ts: Date.now(),
         ...(runId ? { runId } : {}),
         commands: [],
-        deltas: deltas as unknown[],
+        deltas: toWireDeltas(deltas) as unknown[],
         originator,
       },
     });
@@ -1686,6 +2647,11 @@ export async function applyDeltasOnServerAlreadyLocked(input: {
       );
     }
 
+    const nodeContentRevisions = await storedContentRevisions(
+      handle,
+      canvasId,
+      contentChangedNodeIds(deltas),
+    );
     return {
       canvasId,
       fromVersion,
@@ -1697,6 +2663,7 @@ export async function applyDeltasOnServerAlreadyLocked(input: {
         contentEditedNodeIds,
         deferredFitFrameIds: [],
       },
+      ...(nodeContentRevisions ? { nodeContentRevisions } : {}),
     };
   } finally {
     releaseDrafts();

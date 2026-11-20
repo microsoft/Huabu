@@ -13,6 +13,8 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 import { install, loadKit } from '../scripts/install.mjs';
 import rfsRoutes from '../../../apps/server/src/modules/remote_fs/rfs.route.js';
+import { setRequestIdentity } from '../../../apps/server/src/modules/identity/request.js';
+import { UNRESTRICTED_ACCESS } from '../../../apps/server/src/modules/identity/service.js';
 import {
   getCanvasStore,
   resetStorageCache,
@@ -115,6 +117,17 @@ beforeEach(async () => {
     content: '',
   });
   app = fastify();
+  // The RFS transport resolves the machine token to this principal. The
+  // CLI sends a request id with every execute, which the route accepts
+  // only from an authenticated caller.
+  app.addHook('onRequest', async (request) => {
+    setRequestIdentity(request, {
+      principal: { principalId: 'huabu-agentlet', kind: 'bot' },
+      member: true,
+      owner: true,
+      access: UNRESTRICTED_ACCESS,
+    });
+  });
   await app.register(rfsRoutes, { prefix: '/rfs' });
   await app.ready();
   writes = [];

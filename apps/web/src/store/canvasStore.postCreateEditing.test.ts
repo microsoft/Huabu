@@ -54,7 +54,7 @@ const profileSnapshot = {
 };
 
 function resetStore() {
-  useCanvasStore.getState()._setStateNoAutosave({
+  useCanvasStore.getState()._setStateRaw({
     nodes: [],
     edges: [],
     canvasId: 'test-canvas',
@@ -197,7 +197,7 @@ describe('post-create editing', () => {
       selectableProfileIds: [],
     });
     expect(await openNewChat()).toBe('');
-    useCanvasStore.getState()._setStateNoAutosave({ canvasId: 'other-canvas' });
+    useCanvasStore.getState()._setStateRaw({ canvasId: 'other-canvas' });
     usePreviewWorkspaceStore.setState({ canvasId: 'other-canvas' });
     configureModelAction().onClick();
     await Promise.resolve();
@@ -374,7 +374,7 @@ describe('post-create editing', () => {
   });
 
   it('does not edit an existing node when creation is rejected', () => {
-    useCanvasStore.getState()._setStateNoAutosave({
+    useCanvasStore.getState()._setStateRaw({
       nodes: [
         {
           id: 'node-existing',

@@ -37,14 +37,17 @@ import {
   MEMORY_DIR_NAME,
   UPLOAD_DIR_NAME,
 } from './layout.js';
-import { renameOverWithRetry } from '../../../../utils/fs.js';
+import {
+  renameOverWithRetry,
+  resolveDirectChildPath,
+} from '../../../../utils/fs.js';
 import { getWorkspaceKey } from '../../../workspace.js';
 import {
   BlobNameError,
-  createBlobLease,
   normalizeBlobName,
   SPACE_GUIDE_BLOB_NAMES,
 } from '../../ports/blob.js';
+import { materializeBlobCopy } from '../blob/materialization.js';
 
 import type {
   BlobInfo,
@@ -114,7 +117,7 @@ function scopePlacement(area: SpaceBlobArea, root: string): ScopePlacement {
 
 /** Resolve one blob beneath an already-bound scope directory. */
 function blobPath(dir: string, name: string): string {
-  return path.join(dir, normalizeBlobName(name));
+  return resolveDirectChildPath(dir, normalizeBlobName(name));
 }
 
 /** Treat a missing file as absence rather than an error. */
@@ -299,15 +302,7 @@ class DiskBlobScope implements BlobScope {
   }
 
   async materialize(name: string): Promise<BlobLease | null> {
-    const placement = this.#placement();
-    const dir = placement.directory;
-    const info = await this.#headAt(dir, this.#assertMember(placement, name));
-    if (!info) return null;
-    // Disk already *is* a filesystem: hand back the real path and make
-    // release a no-op. No copy, so this costs nothing today. The lease
-    // still refuses to hand out its path after release, so a consumer
-    // can't come to depend on Disk keeping the file (see `createBlobLease`).
-    return createBlobLease(blobPath(dir, info.name), async () => {});
+    return materializeBlobCopy(await this.open(name));
   }
 
   async deleteAll(): Promise<void> {

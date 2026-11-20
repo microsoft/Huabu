@@ -155,7 +155,7 @@ describe('useSketchStrokeMove', () => {
   });
 
   it('cancels the node drag lifecycle when a mixed move was already locked', () => {
-    useCanvasStore.getState()._setStateNoAutosave({
+    useCanvasStore.getState()._setStateRaw({
       nodes: [
         {
           id: 'note-1',

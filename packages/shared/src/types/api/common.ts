@@ -14,9 +14,9 @@
  *
  * - `message` is always a user-facing, stable string suitable for UI display.
  * - `code` is an optional machine-readable identifier (e.g.
- *   `'CANVAS_VERSION_MISMATCH'`).
- * - `details` carries optional structured context (e.g. the conflicting
- *   `serverVersion` for canvas writes).
+ *   `'CANVAS_TITLE_CONFLICT'`).
+ * - `details` carries optional structured context (e.g. the current
+ *   observation of an Agent conversation owner).
  */
 export interface ApiErrorBody {
   message: string;

@@ -5,7 +5,7 @@ import { writeFile } from 'node:fs/promises';
 
 import { expect, test } from '@playwright/test';
 
-import { openNewCanvas } from './helpers';
+import { openNewCanvas, personEdits } from './helpers';
 
 import type * as CanvasModule from '../src/store/canvasStore';
 import type * as OidcModule from '../src/utils/oidcLogin';
@@ -410,7 +410,7 @@ test('keeps edits covered during discovery failure and saves them after cookie r
   const contentUrl = `/api/canvas/${canvasId}/nodes/node-recovery-note/content`;
   const created = await page.request.post(`/api/canvas/${canvasId}/execute`, {
     data: {
-      commands: [
+      edits: personEdits([
         {
           type: 'CREATE_NODES',
           nodes: [
@@ -422,8 +422,7 @@ test('keeps edits covered during discovery failure and saves them after cookie r
             },
           ],
         },
-      ],
-      originator: { source: 'agent', threadId: 'e2e-session-recovery' },
+      ]),
     },
   });
   expect(created.ok(), await created.text()).toBe(true);

@@ -6,8 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { nodeRevisionOf } from '@huabu/shared/canvas-engine';
 
 const api = vi.hoisted(() => ({
-  putCanvas: vi.fn(),
-  deleteNode: vi.fn(),
+  postCanvasExecute: vi.fn(),
   putNodeContent: vi.fn(),
   getCanvas: vi.fn(),
   preprocessNode: vi.fn(),
@@ -29,10 +28,13 @@ import { canvasHistoryManager } from './canvasHistoryManager';
 import useCanvasStore, {
   discardPendingSaves,
   drainPendingSaves,
+  resetCanvasSyncForTests,
   saveCanvasForSubmission,
   settleNodePreprocess,
 } from './canvasStore';
+import { ApiError } from '../api/_client';
 import { CanvasConflictError } from '../api/canvas';
+import { createFakeExecuteServer } from './canvasStore/sync/testing/fakeExecuteServer';
 import {
   openPreviewNode,
   openSpaceConversation,
@@ -42,7 +44,10 @@ import { usePreviewWorkspaceStore } from './previewWorkspace/store';
 
 import type * as apiModule from '../api';
 import type * as canvasApiModule from '../api/canvas';
-import type { PutCanvasRequest, PutNodeContentRequest } from '@huabu/shared';
+import type {
+  PostCanvasExecuteRequest,
+  PutNodeContentRequest,
+} from '@huabu/shared';
 import type { Node } from '@xyflow/react';
 
 function deferred() {
@@ -72,20 +77,71 @@ let topology: Node[];
 let body: string | undefined;
 let serverLabel: string;
 let tombstone: boolean;
-let structureGate: ReturnType<typeof deferred> | undefined;
-let deleteGate: ReturnType<typeof deferred> | undefined;
+let executeGate: ReturnType<typeof deferred> | undefined;
 let contentGate: ReturnType<typeof deferred> | undefined;
 let calls: string[];
 const state = () => useCanvasStore.getState();
 
-// Only transport is substituted: the store, history, dirty detector, queues,
-// debounce, and OCC reconciliation are real. This transport explicitly models
-// the server's split topology/sidecar contract, including benign tombstone 200
-// and revision refusal. The acceptance spec checks the real Disk endpoints.
+// Only transport is substituted: the store, history, queues and debounce are
+// real. This transport explicitly models the server's split topology/sidecar
+// contract, including benign tombstone 200 and revision refusal.
+//
+// Every structure change — the deletion these cases start from, and the undo
+// that brings the node back — is an execute request, answered by the real
+// engine over `topology` / `version`. As on the server, a batch that deletes
+// the node unlinks its sidecar and one that restores it writes the sidecar
+// from the command. Nothing saves the whole Space.
 beforeEach(() => {
   vi.useFakeTimers();
   vi.clearAllMocks();
-  structureGate = deleteGate = contentGate = undefined;
+  resetCanvasSyncForTests();
+  const executeServer = createFakeExecuteServer(
+    () => ({ nodes: topology, edges: [], version }),
+    (next) => {
+      topology = next.nodes;
+      version = next.version;
+    },
+  );
+  api.postCanvasExecute.mockImplementation(async (canvasId, request) => {
+    calls.push('execute:start');
+    const gate = executeGate;
+    executeGate = undefined;
+    await gate?.promise;
+    const response = executeServer.execute(canvasId, request);
+    const sent = (request as PostCanvasExecuteRequest).edits.flatMap(
+      (edit, position) =>
+        (edit.commands as Array<Record<string, unknown>>).map(
+          (command, index) => ({
+            command,
+            applied:
+              response.edits[position]?.applied === true &&
+              response.edits[position]?.results[index]?.applied === true,
+          }),
+        ),
+    );
+    sent.forEach(({ command, applied }) => {
+      if (!applied) return;
+      if (
+        command.type === 'DELETE_NODES' &&
+        (command.nodeIds as string[]).includes(note.id)
+      ) {
+        body = undefined;
+        tombstone = true;
+        calls.push('delete:executed');
+      }
+      const restored =
+        command.type === 'RESTORE_NODES'
+          ? (command.nodes as Node[]).find((n) => n.id === note.id)
+          : undefined;
+      if (restored) {
+        body = restored.data.content as string;
+        tombstone = false;
+        calls.push('restore:committed');
+      }
+    });
+    return response;
+  });
+  executeGate = contentGate = undefined;
   version = 1;
   topology = [note];
   body = note.data.content as string;
@@ -93,51 +149,13 @@ beforeEach(() => {
   tombstone = false;
   calls = [];
   canvasHistoryManager.activate('restore-canvas', true);
-  state()._setStateNoAutosave({
+  state()._setStateRaw({
     canvasId: 'restore-canvas',
     canvasTitle: 'Restore',
     nodes: [note],
     edges: [],
     version: 1,
     isLoading: false,
-    isSaving: false,
-    pendingSave: false,
-    versionConflict: false,
-    versionConflictServerVersion: null,
-  });
-  api.putCanvas.mockImplementation(
-    async (_id: string, request: PutCanvasRequest) => {
-      calls.push('structure:start');
-      const gate = structureGate;
-      structureGate = undefined;
-      await gate?.promise;
-      if (request.version !== version)
-        throw new CanvasConflictError({
-          code: 'CANVAS_VERSION_CONFLICT',
-          message: 'version',
-          serverVersion: version,
-        });
-      const next = (request.state as { nodes: Node[] }).nodes;
-      if (
-        !topology.some((n) => n.id === note.id) &&
-        next.some((n) => n.id === note.id)
-      )
-        tombstone = false;
-      topology = next;
-      version++;
-      calls.push('structure:committed');
-      return { canvasId: 'restore-canvas', version };
-    },
-  );
-  api.deleteNode.mockImplementation(async () => {
-    calls.push('delete:start');
-    const gate = deleteGate;
-    deleteGate = undefined;
-    await gate?.promise;
-    body = undefined;
-    tombstone = true;
-    calls.push('delete:committed');
-    return { success: true };
   });
   api.putNodeContent.mockImplementation(
     async (_canvas: string, _id: string, request: PutNodeContentRequest) => {
@@ -200,22 +218,24 @@ afterEach(async () => {
   vi.useRealTimers();
 });
 
+async function tick() {
+  await vi.advanceTimersByTimeAsync(0);
+}
+
 function remove() {
   state().executeCommands([
     { type: 'DELETE_NODES', nodeIds: [note.id as `node-${string}`] },
   ]);
 }
+/** The note is deleted, on this page and on the server. */
 async function deleted() {
   remove();
-  await state().saveCanvas();
+  await vi.waitFor(() => expect(calls).toContain('delete:executed'));
+  await tick();
   calls = [];
-  api.putCanvas.mockClear();
+  api.postCanvasExecute.mockClear();
   api.putNodeContent.mockClear();
 }
-async function tick() {
-  await vi.advanceTimersByTimeAsync(0);
-}
-
 describe('undo/redo persistence ordering', () => {
   it('preprocesses the edited Note and applies its derived title after opening a Space conversation', async () => {
     topology = [{ ...note, data: { ...note.data, labelSource: 'auto' } }];
@@ -248,71 +268,6 @@ describe('undo/redo persistence ordering', () => {
     ).toBeDefined();
   });
 
-  it('persists grouped root exits with explicit null parents through undo and redo', async () => {
-    const frame: Node = {
-      id: 'node-source-frame',
-      type: 'frame',
-      position: { x: 500, y: 600 },
-      style: { width: 1200, height: 800 },
-      data: { label: 'Source', sizing: 'manual', layoutMode: 'free' },
-    };
-    const child = { ...note, parentId: frame.id, selected: true };
-    const other = { ...child, id: 'node-other', position: { x: 400, y: 0 } };
-    state()._setStateNoAutosave({ nodes: [frame, child, other] });
-    const parentValues = () => {
-      const request = api.putCanvas.mock.lastCall?.[1] as
-        | PutCanvasRequest
-        | undefined;
-      return request?.state.nodes
-        .filter((node) => node.id === child.id || node.id === other.id)
-        .map((node) => node.parentId);
-    };
-    state().moveNodeOutOfFrame([other.id, child.id]);
-    await state().saveCanvas();
-    expect(parentValues()).toEqual([null, null]);
-    expect(state().canUndo).toBe(true);
-    state().undo();
-    await state().saveCanvas();
-    expect(parentValues()).toEqual([frame.id, frame.id]);
-    expect(state().canRedo).toBe(true);
-    state().redo();
-    await state().saveCanvas();
-    expect(parentValues()).toEqual([null, null]);
-  });
-
-  it('retains a new edit-settle during restored content PUT even without interrupted work', async () => {
-    await deleted();
-    const gate = (contentGate = deferred());
-    state().undo();
-    const draining = drainPendingSaves();
-    await tick();
-    expect(calls).toContain('content:start');
-    useCanvasStore.setState({
-      nodes: [
-        {
-          ...state().nodes[0],
-          data: {
-            ...state().nodes[0].data,
-            content: '# Edited during restore',
-          },
-        },
-      ],
-    });
-    settleNodePreprocess(note.id);
-    await vi.advanceTimersByTimeAsync(2_000);
-    expect(api.preprocessNode).not.toHaveBeenCalled();
-    gate.resolve();
-    await draining;
-    await drainPendingSaves();
-    await vi.advanceTimersByTimeAsync(2_000);
-    expect(api.preprocessNode).toHaveBeenCalledOnce();
-    expect(api.preprocessNode.mock.calls[0][2].snapshot.content).toBe(
-      '# Edited during restore',
-    );
-    expect(body).toBe('# Edited during restore');
-    expect(state().ingestionByNodeId[note.id]).toBeUndefined();
-  });
-
   it.each([false, true])(
     'preserves preprocessing across an unrelated history change (issued=%s)',
     async (issued) => {
@@ -322,12 +277,12 @@ describe('undo/redo persistence ordering', () => {
         id: 'node-other',
         position: { x: 100, y: 0 },
       };
-      state()._setStateNoAutosave({
+      state()._setStateRaw({
         nodes: [note, other],
         ingestionByNodeId: {},
       });
       canvasHistoryManager.takeSnapshot([note, other], []);
-      state()._setStateNoAutosave({
+      state()._setStateRaw({
         nodes: [note, { ...other, position: { x: 200, y: 0 } }],
       });
       const gate = deferred();
@@ -349,72 +304,14 @@ describe('undo/redo persistence ordering', () => {
     },
   );
 
-  it.each([false, true])(
-    'resumes unfinished preprocessing after resurrected content commits (issued=%s)',
-    async (issued) => {
-      const old = deferred();
-      if (issued)
-        api.preprocessNode.mockImplementationOnce(async () => {
-          await old.promise;
-          return { success: true, summary: 'Obsolete result' };
-        });
-      settleNodePreprocess(note.id);
-      if (issued) await vi.advanceTimersByTimeAsync(2_000);
-      remove();
-      expect(state().ingestionByNodeId[note.id]).toBeUndefined();
-      state().undo();
-      const write = (contentGate = deferred());
-      const draining = drainPendingSaves();
-      old.resolve();
-      await vi.advanceTimersByTimeAsync(2_000);
-      expect(api.preprocessNode).toHaveBeenCalledTimes(issued ? 1 : 0);
-      expect(state().nodes[0].data.summary).toBeUndefined();
-      expect(state().pendingContentNodeIds()).toContain(note.id);
-      write.resolve();
-      await draining;
-      api.preprocessNode.mockResolvedValueOnce({
-        success: true,
-        summary: 'Resumed result',
-      });
-      await vi.advanceTimersByTimeAsync(2_000);
-      expect(api.preprocessNode).toHaveBeenCalledTimes(issued ? 2 : 1);
-      expect(state().nodes[0].data.summary).toBe('Resumed result');
-      expect(state().ingestionByNodeId[note.id]).toBeUndefined();
-      await drainPendingSaves();
-    },
-  );
-
-  it('does not resume preprocessing until a failed restored content save succeeds on Retry', async () => {
-    settleNodePreprocess(note.id);
-    await deleted();
-    api.putNodeContent.mockRejectedValueOnce(new Error('Disk unavailable'));
-    state().undo();
-    await expect(drainPendingSaves()).rejects.toThrow('Restored node content');
-    await vi.advanceTimersByTimeAsync(2_000);
-    expect(api.preprocessNode).not.toHaveBeenCalled();
-    const retry = vi
-      .mocked(toast)
-      .mock.calls.find(
-        ([, options]) => options?.action?.label === 'Retry',
-      )?.[1]?.action;
-    expect(retry).toBeDefined();
-    retry?.onClick();
-    await tick();
-    await drainPendingSaves();
-    await vi.advanceTimersByTimeAsync(2_000);
-    expect(api.preprocessNode).toHaveBeenCalledOnce();
-  });
-
   it('retains unfinished work through rapid undo/redo without starting it for an absent node', async () => {
     settleNodePreprocess(note.id);
     await deleted();
-    const gate = (structureGate = deferred());
+    const gate = (executeGate = deferred());
     state().undo();
-    const saving = state().saveCanvas();
     await tick();
     state().redo();
     gate.resolve();
-    await saving;
     await drainPendingSaves();
     await vi.advanceTimersByTimeAsync(2_000);
     expect(api.preprocessNode).not.toHaveBeenCalled();
@@ -424,58 +321,21 @@ describe('undo/redo persistence ordering', () => {
     expect(api.preprocessNode).toHaveBeenCalledOnce();
   });
 
-  it('holds content until structure commits, then survives authoritative reload', async () => {
-    await deleted();
-    const gate = (structureGate = deferred());
-    state().undo();
-    const saving = state().saveCanvas();
-    await vi.advanceTimersByTimeAsync(500);
-    expect(api.putNodeContent).not.toHaveBeenCalled();
-    expect(state().pendingContentNodeIds()).toContain(note.id);
-    gate.resolve();
-    await saving;
-    await drainPendingSaves();
-    expect(calls.indexOf('structure:committed')).toBeLessThan(
-      calls.indexOf('content:start'),
-    );
-    expect(calls).not.toContain('content:suppressed');
-    expect(api.putNodeContent.mock.calls[0][2].expectRev).toBe(
-      nodeRevisionOf({}),
-    );
-    await state().loadCanvas('restore-canvas');
-    expect(state().nodes[0].data.content).toBe(note.data.content);
-    expect(state().nodes[0].data.contentMissing).toBe(false);
-  });
-
-  it('waits for a pending DELETE response rather than aborting it', async () => {
-    const gate = (deleteGate = deferred());
+  it('rapid redo while waiting for deletion ends with the note deleted and no content write', async () => {
+    const gate = (executeGate = deferred());
     remove();
     await tick();
     state().undo();
-    const saving = state().saveCanvas();
     await tick();
-    expect(api.putCanvas).not.toHaveBeenCalled();
-    expect(api.putNodeContent).not.toHaveBeenCalled();
-    gate.resolve();
-    await saving;
-    await drainPendingSaves();
-    expect(calls.indexOf('delete:committed')).toBeLessThan(
-      calls.indexOf('structure:start'),
-    );
-    expect(body).toBe(note.data.content);
-  });
-
-  it('rapid redo while waiting for deletion never sends the obsolete resurrection', async () => {
-    const gate = (deleteGate = deferred());
-    remove();
-    await tick();
-    state().undo();
-    const saving = state().saveCanvas();
-    await tick();
+    // The restore is queued behind the deletion; nothing has been sent for it.
+    expect(calls.filter((call) => call === 'execute:start')).toHaveLength(1);
     state().redo();
     gate.resolve();
-    await saving;
     await drainPendingSaves();
+    // The restore and the deletion that follows it are sent in order.
+    expect(calls.indexOf('restore:committed')).toBeLessThan(
+      calls.lastIndexOf('delete:executed'),
+    );
     expect(topology).toEqual([]);
     expect(body).toBeUndefined();
     expect(api.putNodeContent).not.toHaveBeenCalled();
@@ -483,308 +343,6 @@ describe('undo/redo persistence ordering', () => {
     await expect(state().switchCanvas('other')).resolves.toBeUndefined();
     expect(state().canvasId).toBe('other');
   });
-
-  it('rapid redo clears an absent restore before its in-flight structure acknowledgement', async () => {
-    await deleted();
-    const gate = (structureGate = deferred());
-    state().undo();
-    const saving = state().saveCanvas();
-    await tick();
-    expect(api.putCanvas).toHaveBeenCalledOnce();
-    expect(state().pendingContentNodeIds()).toContain(note.id);
-    state().redo();
-    expect(state().nodes).toEqual([]);
-    expect(state().pendingContentNodeIds()).toEqual([]);
-    gate.resolve();
-    await saving;
-    await expect(drainPendingSaves()).resolves.toBeUndefined();
-    expect(api.putNodeContent).not.toHaveBeenCalled();
-    expect(topology).toEqual([]);
-    expect(body).toBeUndefined();
-    await expect(state().switchCanvas('other')).resolves.toBeUndefined();
-    expect(state().canvasId).toBe('other');
-  });
-
-  it.each(['undo', 'redo'] as const)(
-    'rejects delayed preprocessing after live-node %s has fully persisted',
-    async (direction) => {
-      const original: Node = {
-        ...note,
-        type: 'office',
-        data: {
-          content: 'Original extracted body',
-          src: 'artifact-original.docx',
-          label: 'Restore note',
-          labelSource: 'auto',
-        },
-      };
-      const edited: Node = {
-        ...original,
-        data: {
-          ...original.data,
-          content: 'Edited extracted body',
-          src: 'artifact-edited.docx',
-        },
-      };
-      state()._setStateNoAutosave({ nodes: [original] });
-      canvasHistoryManager.takeSnapshot([original], []);
-      state()._setStateNoAutosave({ nodes: [edited] });
-      // Derived Office bodies use last-write-wins, not authored-body CAS.
-      api.putNodeContent.mockImplementation(
-        async (_canvas, _id, request: PutNodeContentRequest) => {
-          body = request.content;
-          return {
-            nodeId: original.id,
-            label: request.label ?? null,
-            rev: nodeRevisionOf({ content: body, src: request.src }),
-          };
-        },
-      );
-      if (direction === 'redo') {
-        state().undo();
-        await drainPendingSaves();
-      }
-      const restored = direction === 'undo' ? original : edited;
-      const gate = deferred();
-      const staleResponse = {
-        success: true,
-        content: 'Stale extracted body',
-        src: 'artifact-stale.docx',
-        suggestedLabel: 'Stale label',
-        summary: 'Stale summary',
-        keywords: ['stale'],
-      };
-      api.preprocessNode.mockImplementationOnce(async () => {
-        await gate.promise;
-        return staleResponse;
-      });
-      settleNodePreprocess(original.id);
-      await vi.advanceTimersByTimeAsync(2_000);
-      expect(api.preprocessNode).toHaveBeenCalledOnce();
-
-      state()[direction]();
-      await drainPendingSaves();
-      expect(body).toBe(restored.data.content);
-      expect(state().pendingContentNodeIds()).toEqual([]);
-      gate.resolve();
-      await tick();
-      expect(state().nodes[0].data).toEqual(restored.data);
-      await drainPendingSaves();
-      expect(body).toBe(restored.data.content);
-
-      // A request started after restoration still projects all ordinary fields.
-      const freshResponse = {
-        ...staleResponse,
-        content: 'Fresh extracted body',
-        src: 'artifact-fresh.docx',
-      };
-      api.preprocessNode.mockResolvedValueOnce(freshResponse);
-      settleNodePreprocess(original.id);
-      await vi.advanceTimersByTimeAsync(2_000);
-      expect(api.preprocessNode).toHaveBeenCalledTimes(2);
-      expect(state().nodes[0].data).toMatchObject({
-        content: freshResponse.content,
-        src: freshResponse.src,
-        label: freshResponse.suggestedLabel,
-        labelSource: 'auto',
-        summary: freshResponse.summary,
-        keywords: freshResponse.keywords,
-      });
-      await drainPendingSaves();
-      expect(body).toBe(freshResponse.content);
-    },
-  );
-
-  it('an obsolete structure acknowledgement cannot release a later undo generation', async () => {
-    await deleted();
-    const gate = (structureGate = deferred());
-    state().undo();
-    const saving = state().saveCanvas();
-    await tick();
-    state().redo();
-    state().undo();
-    gate.resolve();
-    await saving;
-    await tick();
-    expect(api.putNodeContent).not.toHaveBeenCalled();
-    await drainPendingSaves();
-    expect(body).toBe(note.data.content);
-  });
-
-  it('waits for already-issued preprocessing before DELETE and then restores without deadlock', async () => {
-    const gate = deferred();
-    api.preprocessNode.mockImplementationOnce(async () => {
-      await gate.promise;
-      return {
-        success: true,
-        content: 'Obsolete body',
-        src: 'artifact-obsolete',
-        suggestedLabel: 'Obsolete label',
-      };
-    });
-    settleNodePreprocess(note.id);
-    await vi.advanceTimersByTimeAsync(2_000);
-    expect(api.preprocessNode).toHaveBeenCalledOnce();
-    remove();
-    state().undo();
-    const draining = drainPendingSaves();
-    await tick();
-    expect(state().pendingContentNodeIds()).toContain(note.id);
-    expect(api.deleteNode).not.toHaveBeenCalled();
-    expect(api.putCanvas).not.toHaveBeenCalled();
-    expect(api.putNodeContent).not.toHaveBeenCalled();
-    gate.resolve();
-    await draining;
-    expect(calls.indexOf('delete:committed')).toBeLessThan(
-      calls.indexOf('structure:start'),
-    );
-    expect(calls.indexOf('structure:committed')).toBeLessThan(
-      calls.indexOf('content:start'),
-    );
-    expect(body).toBe(note.data.content);
-    expect(state().nodes[0].data).toEqual(note.data);
-    expect(state().pendingContentNodeIds()).toEqual([]);
-    await expect(state().switchCanvas('other')).resolves.toBeUndefined();
-  });
-
-  it('keeps the snapshot on structure failure and retries via the existing Retry action', async () => {
-    await deleted();
-    const gate = (structureGate = deferred());
-    state().undo();
-    const saving = state().saveCanvas();
-    gate.reject(new Error('disk unavailable'));
-    await saving;
-    await tick();
-    expect(api.putNodeContent).not.toHaveBeenCalled();
-    expect(state().nodes[0].data.content).toBe(note.data.content);
-    expect(state().pendingContentNodeIds()).toContain(note.id);
-    const options = vi.mocked(toast).mock.calls.at(-1)?.[1];
-    expect(options?.action).toBeDefined();
-    options?.action?.onClick();
-    await tick();
-    await drainPendingSaves();
-    expect(body).toBe(note.data.content);
-  });
-
-  it('an unresolved version conflict keeps content blocked and prevents Canvas switch', async () => {
-    await deleted();
-    version++;
-    state().undo();
-    await state().saveCanvas();
-    await tick();
-    expect(state().versionConflict).toBe(true);
-    expect(api.putNodeContent).not.toHaveBeenCalled();
-    await expect(state().loadCanvas('other')).rejects.toThrow(
-      'Restored node content',
-    );
-    await expect(state().switchCanvas('other')).rejects.toThrow(
-      'Restored node content',
-    );
-    expect(state().versionConflict).toBe(true);
-    expect(state().canvasId).toBe('restore-canvas');
-    // Existing SSE reconciliation clears the version gate and retries.
-    state().applyDeltasFromAgent([], version, {
-      mutatedNodes: [],
-      deletedNodeIds: [],
-      contentEditedNodeIds: [],
-      deferredFitFrameIds: [],
-    });
-    await drainPendingSaves();
-    expect(body).toBe(note.data.content);
-  });
-
-  it('Canvas switch waits for restoration; stale acknowledgements do not patch a different Canvas', async () => {
-    await deleted();
-    const gate = (structureGate = deferred());
-    state().undo();
-    const switching = state().switchCanvas('other');
-    await tick();
-    expect(state().canvasId).toBe('restore-canvas');
-    gate.resolve();
-    await switching;
-    expect(body).toBe(note.data.content);
-    expect(state().canvasId).toBe('other');
-    expect(state().nodes).toEqual([]);
-  });
-
-  it('drains in-flight restored content before a subsequent DELETE', async () => {
-    await deleted();
-    const gate = (contentGate = deferred());
-    state().undo();
-    await state().saveCanvas();
-    await tick();
-    expect(calls).toContain('content:start');
-    state().redo();
-    await tick();
-    expect(calls).not.toContain('delete:start');
-    gate.resolve();
-    await drainPendingSaves();
-    expect(calls.indexOf('content:committed')).toBeLessThan(
-      calls.indexOf('delete:start'),
-    );
-    expect(body).toBeUndefined();
-    expect(topology).toEqual([]);
-  });
-
-  it('retains a restored body after content failure until content Retry succeeds', async () => {
-    await deleted();
-    const gate = (contentGate = deferred());
-    state().undo();
-    await state().saveCanvas();
-    await tick();
-    gate.reject(new Error('content write failed'));
-    await tick();
-    expect(state().pendingContentNodeIds()).toContain(note.id);
-    api.putNodeContent.mockRejectedValueOnce(new Error('still offline'));
-    await expect(drainPendingSaves()).rejects.toThrow('Restored node content');
-    expect(state().nodes[0].data.content).toBe(note.data.content);
-    vi.mocked(toast).mock.calls.at(-1)?.[1]?.action?.onClick();
-    await tick();
-    await drainPendingSaves();
-    expect(body).toBe(note.data.content);
-  });
-
-  it('does not apply an old structure acknowledgement to an externally replaced Canvas', async () => {
-    await deleted();
-    const gate = (structureGate = deferred());
-    state().undo();
-    const saving = state().saveCanvas();
-    await tick();
-    state()._setStateNoAutosave({
-      canvasId: 'other',
-      nodes: [],
-      version: 50,
-      isSaving: false,
-    });
-    gate.resolve();
-    await saving;
-    await tick();
-    expect(state().version).toBe(50);
-    expect(state().nodes).toEqual([]);
-    expect(api.putNodeContent).not.toHaveBeenCalled();
-    // Return solely to release the test's retained queue state in afterEach.
-    state()._setStateNoAutosave({ canvasId: 'restore-canvas', nodes: [note] });
-  });
-
-  it.each([undefined, true])(
-    'does not invent an empty body from an incomplete snapshot (%s)',
-    async (missing) => {
-      const incomplete = {
-        ...note,
-        data: {
-          label: 'Restore note',
-          ...(missing ? { contentMissing: true, content: '' } : {}),
-        },
-      };
-      state()._setStateNoAutosave({ nodes: [incomplete] });
-      await deleted();
-      state().undo();
-      await drainPendingSaves();
-      expect(api.putNodeContent).not.toHaveBeenCalled();
-      expect(body).toBeUndefined();
-      expect(state().nodes[0].data.contentMissing).toBe(true);
-    },
-  );
 
   it('restores a deleted PDF, whose body never reaches the web, without calling it missing', async () => {
     const pdf = {
@@ -792,18 +350,37 @@ describe('undo/redo persistence ordering', () => {
       type: 'pdf',
       data: { label: 'Paper', src: 'artifacts/paper.pdf' },
     };
-    state()._setStateNoAutosave({ nodes: [pdf] });
+    topology = [pdf];
+    state()._setStateRaw({ nodes: [pdf] });
     await deleted();
     state().undo();
     await drainPendingSaves();
-    expect(api.putNodeContent).toHaveBeenCalledOnce();
-    const request = api.putNodeContent.mock.calls[0][2];
-    expect(request).toMatchObject({ nodeType: 'pdf', src: pdf.data.src });
-    expect(request).not.toHaveProperty('content');
+    // The node goes back in the restoring batch, with the file it shows and
+    // no body: the web never held one. Nothing writes the record a second
+    // time.
+    const restores = api.postCanvasExecute.mock.calls.flatMap(([, request]) =>
+      (
+        (request as PostCanvasExecuteRequest).edits.flatMap(
+          (edit) => edit.commands,
+        ) as Array<{ type: string; nodes?: Node[] }>
+      ).filter((command) => command.type === 'RESTORE_NODES'),
+    );
+    expect(restores).toHaveLength(1);
+    expect(restores[0].nodes).toHaveLength(1);
+    expect(restores[0].nodes?.[0]).toMatchObject({
+      id: pdf.id,
+      type: 'pdf',
+      data: { src: pdf.data.src },
+    });
+    expect(restores[0].nodes?.[0].data).not.toHaveProperty('content');
+    expect(calls).toContain('restore:committed');
+    expect(api.putNodeContent).not.toHaveBeenCalled();
+    expect(topology.map((n) => n.id)).toEqual([pdf.id]);
     expect(state().nodes[0].data.contentMissing).toBeUndefined();
-    // The extracted text went with the deleted sidecar; only the server can
-    // produce it again. The request is issued with the save rather than
-    // debounced, so leaving the Space straight away cannot cancel it.
+    // The extracted text went with the deleted record; only the server can
+    // produce it again. The request is issued when the restore is answered
+    // rather than debounced, so leaving the Space straight away cannot
+    // cancel it.
     expect(api.preprocessNode).toHaveBeenCalledExactlyOnceWith(
       'restore-canvas',
       pdf.id,
@@ -814,12 +391,36 @@ describe('undo/redo persistence ordering', () => {
     );
   });
 
+  it('does not derive a PDF again when the server refused to take it back', async () => {
+    const pdf = {
+      ...note,
+      type: 'pdf',
+      data: { label: 'Paper', src: 'artifacts/paper.pdf' },
+    };
+    topology = [pdf];
+    state()._setStateRaw({ nodes: [pdf] });
+    await deleted();
+    // Somebody else put a node with this id back first.
+    topology = [pdf];
+    api.getCanvas.mockClear();
+    state().undo();
+    await drainPendingSaves().catch(() => undefined);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(calls).not.toContain('restore:committed');
+    expect(api.preprocessNode).not.toHaveBeenCalled();
+  });
+
   it('does not preprocess a restored Note that had no work pending', async () => {
     await deleted();
     state().undo();
     await drainPendingSaves();
     await vi.advanceTimersByTimeAsync(1000);
-    expect(api.putNodeContent).toHaveBeenCalledOnce();
+    // The body came back in the restoring batch, once.
+    expect(calls.filter((call) => call === 'restore:committed')).toHaveLength(
+      1,
+    );
+    expect(body).toBe(note.data.content);
+    expect(api.putNodeContent).not.toHaveBeenCalled();
     expect(api.preprocessNode).not.toHaveBeenCalled();
   });
 
@@ -836,10 +437,206 @@ describe('undo/redo persistence ordering', () => {
     });
     await vi.advanceTimersByTimeAsync(500);
     expect(body).toBe('edited');
-    expect(api.putCanvas).not.toHaveBeenCalled();
     expect(api.putNodeContent.mock.calls[0][2].expectRev).toBe(
       nodeRevisionOf({ content: note.data.content as string }),
     );
+  });
+
+  it('persists grouped root exits through undo and redo as parent commands', async () => {
+    const frame: Node = {
+      id: 'node-source-frame',
+      type: 'frame',
+      position: { x: 500, y: 600 },
+      style: { width: 1200, height: 800 },
+      data: { label: 'Source', sizing: 'manual', layoutMode: 'free' },
+    };
+    const child = { ...note, parentId: frame.id, selected: true };
+    const other = { ...child, id: 'node-other', position: { x: 400, y: 0 } };
+    state()._setStateRaw({ nodes: [frame, child, other] });
+    topology = [frame, child, other];
+    const parents = () =>
+      topology
+        .filter((node) => node.id === child.id || node.id === other.id)
+        .map((node) => node.parentId ?? null);
+    state().moveNodeOutOfFrame([other.id, child.id]);
+    await tick();
+    expect(parents()).toEqual([null, null]);
+    expect(state().canUndo).toBe(true);
+    state().undo();
+    await tick();
+    expect(parents()).toEqual([frame.id, frame.id]);
+    expect(state().canRedo).toBe(true);
+    state().redo();
+    await tick();
+    expect(parents()).toEqual([null, null]);
+  });
+
+  it('brings a deleted note back with its body in one command, without a content PUT', async () => {
+    await deleted();
+    expect(topology).toEqual([]);
+    expect(body).toBeUndefined();
+
+    state().undo();
+    expect(state().nodes.map((node) => node.id)).toEqual([note.id]);
+    await drainPendingSaves();
+    expect(topology.map((node) => node.id)).toEqual([note.id]);
+    expect(body).toBe('The complete original body');
+    expect(calls).toEqual(['execute:start', 'restore:committed']);
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(api.putNodeContent).not.toHaveBeenCalled();
+    expect(state().pendingContentNodeIds()).toEqual([]);
+  });
+
+  it('sends the restore only after the batch that deleted the node is answered, and nothing else unlinks it', async () => {
+    const gate = (executeGate = deferred());
+    remove();
+    await tick();
+    expect(calls).toEqual(['execute:start']);
+    state().undo();
+    await vi.advanceTimersByTimeAsync(2_000);
+    // The deletion has not been answered: the restore is not sent yet.
+    expect(calls).not.toContain('restore:committed');
+    expect(calls.filter((call) => call === 'execute:start')).toHaveLength(1);
+
+    gate.resolve();
+    await drainPendingSaves();
+    expect(calls.indexOf('delete:executed')).toBeLessThan(
+      calls.indexOf('restore:committed'),
+    );
+    // The server deleted the record in the batch; the page sent no request
+    // of its own that could land after the restore.
+    expect(calls.filter((call) => call.startsWith('delete:'))).toEqual([
+      'delete:executed',
+    ]);
+    expect(body).toBe('The complete original body');
+    expect(topology.map((node) => node.id)).toEqual([note.id]);
+  });
+
+  it('saves an edit made to the returning note only after the restore has landed', async () => {
+    await deleted();
+    const gate = (executeGate = deferred());
+    state().undo();
+    await tick();
+    state().updateNodeData(note.id, { content: '# Edited during restore' });
+    await vi.advanceTimersByTimeAsync(2_000);
+    // Saved now, the edit would be a write to a node the server deleted.
+    expect(api.putNodeContent).not.toHaveBeenCalled();
+
+    gate.resolve();
+    await drainPendingSaves();
+    expect(calls.indexOf('restore:committed')).toBeLessThan(
+      calls.indexOf('content:start'),
+    );
+    expect(calls).toContain('content:committed');
+    expect(body).toBe('# Edited during restore');
+  });
+
+  it('does not preprocess the returning note until the restore is answered', async () => {
+    settleNodePreprocess(note.id);
+    await deleted();
+    const gate = (executeGate = deferred());
+    state().undo();
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(api.preprocessNode).not.toHaveBeenCalled();
+
+    gate.resolve();
+    await drainPendingSaves();
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(api.preprocessNode).toHaveBeenCalledOnce();
+  });
+
+  it('holds leaving the Space until the restore is answered', async () => {
+    await deleted();
+    const gate = (executeGate = deferred());
+    state().undo();
+    let left = false;
+    const leaving = saveCanvasForSubmission('restore-canvas').then(() => {
+      left = true;
+    });
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(left).toBe(false);
+    gate.resolve();
+    await leaving;
+    expect(topology.map((node) => node.id)).toEqual([note.id]);
+  });
+
+  it('adopts the server Space when the restore is refused', async () => {
+    await deleted();
+    // Another page has put a node with the same id back meanwhile.
+    topology = [{ ...note, position: { x: 900, y: 900 } }];
+    version += 1;
+    body = 'Restored elsewhere';
+    tombstone = false;
+
+    state().undo();
+    await drainPendingSaves().catch(() => undefined);
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(api.getCanvas).toHaveBeenCalled();
+    expect(state().nodes[0]).toMatchObject({
+      position: { x: 900, y: 900 },
+      data: { content: 'Restored elsewhere' },
+    });
+    expect(body).toBe('Restored elsewhere');
+  });
+
+  it('Retry on the failed save of an edited returning note sends the restore again', async () => {
+    await deleted();
+    const gate = (executeGate = deferred());
+    state().undo();
+    await tick();
+    state().updateNodeData(note.id, { content: '# Edited during restore' });
+    await vi.advanceTimersByTimeAsync(2_000);
+    // The server refuses the restoring request outright.
+    gate.reject(new ApiError(400, { message: 'Bad request' }, 'Bad request'));
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(topology).toEqual([]);
+    // The edit is still on the page, and its save is reported as failed.
+    expect(state().nodes[0]?.data.content).toBe('# Edited during restore');
+    const failed = vi
+      .mocked(toast)
+      .mock.calls.filter(([, options]) => options?.action?.label === 'Retry')
+      .at(-1);
+    expect(failed).toBeDefined();
+    expect(api.putNodeContent).not.toHaveBeenCalled();
+    calls = [];
+
+    failed?.[1]?.action?.onClick();
+    await vi.advanceTimersByTimeAsync(2_000);
+    // Retry brought the node back on the server, with the edited body.
+    expect(calls.slice(0, 2)).toEqual(['execute:start', 'restore:committed']);
+    expect(topology.map((node) => node.id)).toEqual([note.id]);
+    expect(body).toBe('# Edited during restore');
+    expect(state().pendingContentNodeIds()).toEqual([]);
+    await expect(drainPendingSaves()).resolves.toBeUndefined();
+  });
+
+  it('leaving the Space sends a failed restore again before the edit that waits for it', async () => {
+    await deleted();
+    const gate = (executeGate = deferred());
+    state().undo();
+    await tick();
+    state().updateNodeData(note.id, { content: '# Edited during restore' });
+    await vi.advanceTimersByTimeAsync(2_000);
+    gate.reject(new ApiError(400, { message: 'Bad request' }, 'Bad request'));
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(topology).toEqual([]);
+
+    await expect(drainPendingSaves()).resolves.toBeUndefined();
+    expect(topology.map((node) => node.id)).toEqual([note.id]);
+    expect(body).toBe('# Edited during restore');
+  });
+
+  it('redoes the deletion of a restored note and unlinks it once', async () => {
+    await deleted();
+    state().undo();
+    await drainPendingSaves();
+    calls = [];
+    state().redo();
+    await drainPendingSaves();
+    expect(topology).toEqual([]);
+    expect(body).toBeUndefined();
+    expect(calls.filter((call) => call === 'delete:executed')).toHaveLength(1);
+    expect(api.putNodeContent).not.toHaveBeenCalled();
   });
 
   it('blocks switching after ordinary content failure and preserves edits for Retry', async () => {
@@ -894,7 +691,6 @@ describe('undo/redo persistence ordering', () => {
     retry?.();
     await vi.advanceTimersByTimeAsync(2_000);
     expect(api.putNodeContent).toHaveBeenCalledTimes(1);
-    expect(api.putCanvas).not.toHaveBeenCalled();
     expect(api.getCanvas).toHaveBeenCalledTimes(1);
     expect(state().canvasId).toBe('');
     expect(state().nodes).toEqual([]);
@@ -907,73 +703,24 @@ describe('undo/redo persistence ordering', () => {
     expect(state().canUndo).toBe(false);
   });
 
-  it('blocks a persistent structure failure until explicit discard', async () => {
+  it('retries a retained content failure when switching again', async () => {
     await state().loadCanvas('restore-canvas');
-    api.putCanvas.mockRejectedValue(new Error('structure unavailable'));
+    api.putNodeContent.mockRejectedValueOnce(new Error('offline'));
     useCanvasStore.setState({
-      nodes: [{ ...state().nodes[0], position: { x: 100, y: 100 } }],
+      nodes: [
+        {
+          ...state().nodes[0],
+          data: { ...state().nodes[0].data, content: 'Recovered edit' },
+        },
+      ],
     });
-    await expect(state().switchCanvas('other')).rejects.toThrow(
-      'structure unavailable',
-    );
+    await expect(state().switchCanvas('other')).rejects.toThrow();
     expect(state().canvasId).toBe('restore-canvas');
-    expect(state().nodes[0].position).toEqual({ x: 100, y: 100 });
-    await expect(saveCanvasForSubmission('restore-canvas')).rejects.toThrow(
-      'Cannot submit',
-    );
-    await discardPendingSaves('restore-canvas');
-    await expect(
-      saveCanvasForSubmission('restore-canvas'),
-    ).resolves.toBeUndefined();
+    expect(state().isLoading).toBe(false);
     await state().switchCanvas('other');
     expect(state().canvasId).toBe('other');
-  });
-
-  it.each(['structure', 'content'])(
-    'retries a retained %s failure when switching again',
-    async (kind) => {
-      await state().loadCanvas('restore-canvas');
-      if (kind === 'structure')
-        api.putCanvas.mockRejectedValueOnce(new Error('offline'));
-      else api.putNodeContent.mockRejectedValueOnce(new Error('offline'));
-      useCanvasStore.setState({
-        nodes: [
-          {
-            ...state().nodes[0],
-            ...(kind === 'structure'
-              ? { position: { x: 300, y: 300 } }
-              : {
-                  data: { ...state().nodes[0].data, content: 'Recovered edit' },
-                }),
-          },
-        ],
-      });
-      await expect(state().switchCanvas('other')).rejects.toThrow();
-      expect(state().canvasId).toBe('restore-canvas');
-      expect(state().isLoading).toBe(false);
-      await state().switchCanvas('other');
-      expect(state().canvasId).toBe('other');
-      if (kind === 'structure') {
-        expect(api.putCanvas).toHaveBeenCalledTimes(2);
-        expect(topology[0].position).toEqual({ x: 300, y: 300 });
-      } else {
-        expect(api.putNodeContent).toHaveBeenCalledTimes(2);
-        expect(body).toBe('Recovered edit');
-      }
-    },
-  );
-
-  it('explicit discard releases a failed resurrection without resurrecting its body', async () => {
-    await deleted();
-    state().undo();
-    api.putCanvas.mockRejectedValueOnce(new Error('structure unavailable'));
-    await expect(drainPendingSaves()).rejects.toThrow('Restored node content');
-    await discardPendingSaves('restore-canvas');
-    await vi.advanceTimersByTimeAsync(2_000);
-    expect(api.putNodeContent).not.toHaveBeenCalled();
-    expect(body).toBeUndefined();
-    expect(state().pendingContentNodeIds()).toEqual([]);
-    await expect(state().switchCanvas('other')).resolves.toBeUndefined();
+    expect(api.putNodeContent).toHaveBeenCalledTimes(2);
+    expect(body).toBe('Recovered edit');
   });
 
   it('waits for an issued save before discarding and cannot patch a later Space', async () => {
@@ -998,53 +745,5 @@ describe('undo/redo persistence ordering', () => {
     expect(body).toBe('Issued edit');
     expect(state().nodes).toEqual([]);
     expect(state().pendingContentNodeIds()).toEqual([]);
-  });
-
-  it('does not release a restored body when an issued structure retry finishes during discard', async () => {
-    await deleted();
-    state().undo();
-    api.putCanvas.mockRejectedValueOnce(new Error('structure unavailable'));
-    await expect(drainPendingSaves()).rejects.toThrow('Restored node content');
-    const gate = (structureGate = deferred());
-    const retry = state().saveCanvas();
-    await tick();
-    expect(api.putCanvas).toHaveBeenCalledTimes(2);
-    const discarding = discardPendingSaves('restore-canvas');
-    await tick();
-    expect(state().pendingContentNodeIds()).toContain(note.id);
-    gate.resolve();
-    await Promise.all([retry, discarding]);
-    await vi.advanceTimersByTimeAsync(2_000);
-    expect(api.putNodeContent).not.toHaveBeenCalled();
-    expect(body).toBeUndefined();
-    expect(state().canvasId).toBe('');
-    await state().loadCanvas('restore-canvas');
-    expect(state().nodes[0].data.contentMissing).toBe(true);
-    expect(state().pendingContentNodeIds()).toEqual([]);
-  });
-
-  it('retains the held body and restores save admission when discard fails', async () => {
-    await deleted();
-    state().undo();
-    const gate = (structureGate = deferred());
-    const saving = state().saveCanvas();
-    await tick();
-    const waitForDeletes = vi
-      .spyOn(canvasHistoryManager, 'waitForDeletes')
-      .mockRejectedValueOnce(new Error('delete settlement failed'));
-    const discarding = expect(
-      discardPendingSaves('restore-canvas'),
-    ).rejects.toThrow('delete settlement failed');
-    gate.resolve();
-    await Promise.all([saving, discarding]);
-    waitForDeletes.mockRestore();
-    expect(api.putNodeContent).not.toHaveBeenCalled();
-    expect(state().canvasId).toBe('restore-canvas');
-    expect(state().isLoading).toBe(false);
-    expect(state().pendingContentNodeIds()).toContain(note.id);
-    await state().saveCanvas();
-    await drainPendingSaves();
-    expect(api.putNodeContent).toHaveBeenCalledOnce();
-    expect(body).toBe(note.data.content);
   });
 });

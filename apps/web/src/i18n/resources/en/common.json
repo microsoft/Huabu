@@ -1160,6 +1160,7 @@
     "emptyFrame": "This frame has no child nodes.",
     "multiDragSameParentOnly": "Select layers from the same parent to move them together.",
     "invalidFrameDrop": "These layers cannot be moved to this destination. Check that the frame is available, unlocked, and not inside a selected layer.",
+    "invalidReorderSelection": "These layers cannot be reordered together. Select unlocked layers in the same container.",
     "filterLabels": {
       "fileReference": "File Reference",
       "note": "Note",
@@ -1743,6 +1744,37 @@
       "showShortcuts": "Show keyboard shortcuts",
       "closeShortcuts": "Close the shortcuts dialog"
     }
+  },
+  "canvasSync": {
+    "changeRejected": "A change could not be applied because the item was changed elsewhere. This Space now shows the latest version.",
+    "unsynced": "Your changes are not synced yet. Trying again…",
+    "sendFailed": "Some changes could not be sent to the server.",
+    "keepTrying": "Keep trying",
+    "reloadAndDiscard": "Reload and discard unsent changes",
+    "reloadWaiting": "This Space has newer changes. They will be shown once the unsaved text in {{notes}} has been saved.",
+    "savingTextBeforeReload": "Saving note text before reloading…",
+    "unsavedTextConfirm": "Text in {{notes}} could not be saved. Reloading will discard that text as well. Cancel to keep it and copy it out first.",
+    "cancelDiscard": "Cancel",
+    "discardTextAndReload": "Discard this text and reload",
+    "reloadedDiscarded": "This Space was reloaded. The changes that could not be sent were discarded.",
+    "deletedWhileEditing": "{{name}} was deleted elsewhere while you are editing it. It stays here until you finish, and what you type is no longer saved.",
+    "deletedElsewhere": "{{name}} was deleted elsewhere and has been removed from this Space.",
+    "copyMyText": "Copy my text",
+    "noteName": "“{{name}}”",
+    "untitledNote": "an untitled note",
+    "noteSeparator": ", ",
+    "notesAndMore": "{{notes}} and {{count}} more"
+  },
+  "canvasGesture": {
+    "lockedGroup": "The selection contains a locked node, so it cannot be grouped into a frame.",
+    "locked": "This is locked or inside a locked frame, so nothing was changed. Unlock it and try again.",
+    "refused": "This action could not be applied here. Nothing was changed."
+  },
+  "canvasPresence": {
+    "anotherDevice": "Another device",
+    "editing": "{{label}} · editing",
+    "moving": "{{label}} · moving",
+    "editLocked": "{{label}} is editing this. You can edit it when they finish."
   },
   "errors": {
     "configureModel": "Configure model",

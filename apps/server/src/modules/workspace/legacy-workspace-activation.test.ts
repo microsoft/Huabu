@@ -54,6 +54,12 @@ import multipart from '@fastify/multipart';
 import fastify from 'fastify';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { editsPerCommand } from '@huabu/shared';
+
+import {
+  AGENT_CREDENTIAL,
+  registerTestAgentCredential,
+} from '../../test-support/agent-credential.js';
 import { registerLocalTestIdentity } from '../../test-support/local-identity.js';
 import agentRoutes from '../agent/agent.route.js';
 import artifactRoute from '../artifact/artifact.route.js';
@@ -92,6 +98,7 @@ let tmp: string;
 async function buildApp(): Promise<FastifyInstance> {
   const app = fastify();
   registerLocalTestIdentity(app);
+  registerTestAgentCredential(app);
   await app.register(multipart);
   await app.register(canvasRoutes, { prefix: '/api/canvas' });
   await app.register(artifactRoute, { prefix: '/api/canvas' });
@@ -162,26 +169,27 @@ async function seedLegacyWorkspace(): Promise<void> {
   const app = await buildApp();
   try {
     // Real topology write.
-    const put = await app.inject({
-      method: 'PUT',
-      url: `/api/canvas/${CANVAS_ID}`,
+    const created = await app.inject({
+      method: 'POST',
+      url: `/api/canvas/${CANVAS_ID}/execute`,
       payload: {
-        version: 0,
-        title: SPACE_TITLE,
-        state: {
-          nodes: [
-            {
-              id: 'n-note',
-              type: 'note',
-              position: { x: 10, y: 20 },
-              data: { label: 'Old Note' },
-            },
-          ],
-          edges: [],
-        },
+        edits: editsPerCommand([
+          {
+            type: 'CREATE_NODES',
+            nodes: [
+              {
+                id: 'n-note',
+                nodeType: 'note',
+                position: { x: 10, y: 20 },
+                data: { label: 'Old Note' },
+              },
+            ],
+          },
+        ]),
       },
     });
-    expect(put.statusCode).toBe(200);
+    expect(created.statusCode, created.body).toBe(200);
+    expect(created.json().edits[0].results[0].applied).toBe(true);
 
     // Real node markdown sidecar.
     const content = await app.inject({
@@ -429,11 +437,11 @@ describe('activating a legacy workspace on the new storage boundary', () => {
       const exec = await app.inject({
         method: 'POST',
         url: `/api/canvas/${CANVAS_ID}/execute`,
+        // An agent's batch is the one that runs the artifact import hook —
+        // the path that has to keep reaching the blob port after the move.
+        headers: AGENT_CREDENTIAL,
         payload: {
-          // `agent` is the origin that runs the artifact import hook — the
-          // path that has to keep reaching the blob port after the move.
-          originator: { source: 'agent', threadId: PLAIN_THREAD },
-          commands: [
+          edits: editsPerCommand([
             {
               type: 'CREATE_NODES',
               nodes: [
@@ -444,7 +452,7 @@ describe('activating a legacy workspace on the new storage boundary', () => {
                 },
               ],
             },
-          ],
+          ]),
         },
       });
       expect(exec.statusCode).toBe(200);

@@ -14,6 +14,7 @@ import type {
   NodeData,
 } from './node.js';
 import type { PrefixedId } from '../../utils/id.js';
+import type { FrameLayoutPlacement } from '../api/frame-layout.js';
 /**
  * Canvas node ids follow the standard `node-<uuid>` convention.
  */
@@ -116,7 +117,10 @@ export type CanvasNodeDataMergePatch = {
    * ({@link nodeRevision}) the writer last saw. Sibling of `patch` (never
    * merged into node data). The server compares it against the node's
    * current rev before applying a content rewrite and rejects on mismatch
-   * (a human / another turn edited it since). Auto-injected server-side for
+   * (a human / another turn edited it since). Looked at only when `patch`
+   * rewrites `content`: custom properties (`properties`,
+   * `propertyDisplayKeys`) are merged per key without a revision, and an
+   * `expectRev` beside a patch without `content` is ignored. Auto-injected server-side for
    * agent writes from the run's read-set; absent for ui / system writes,
    * which are unconditional.
    */
@@ -126,6 +130,13 @@ export type CanvasNodeDataMergePatch = {
    * from the complete persisted View Definition and never stored separately.
    */
   expectViewRev?: string;
+  /**
+   * `data` keys to remove after the merge. `style.<leaf>` removes one leaf
+   * of `data.style`. JSON cannot carry a key whose value is `undefined`, so
+   * a page states the removal here. Sibling of `patch`; not part of the
+   * agent schema, which clears with `null` where a field allows it.
+   */
+  unset?: string[];
 };
 
 export interface CanvasNodeParentUpdate {
@@ -176,6 +187,26 @@ export interface CanvasNodeMeasuredHeightUpdate {
   provisional?: boolean;
 }
 
+/**
+ * The box a renderer measured for one node whose size only a renderer
+ * knows (`text`, `question`, `spacePreview`). Derived data, like
+ * {@link CanvasNodeMeasuredHeightUpdate}.
+ */
+export interface CanvasNodeMeasuredSizeUpdate {
+  nodeId: CanvasNodeId;
+  /** Rendered width in canvas px. */
+  width: number;
+  /** Rendered height in canvas px. */
+  height: number;
+  /**
+   * The `MeasuredSizeKey` the box was measured under (see
+   * `canvas-engine/height/freshness.ts`). An item whose key no longer
+   * matches the node — its content or authored width changed since — is
+   * ignored.
+   */
+  measuredFor: string;
+}
+
 export interface CanvasEdgeCreateInput {
   id?: CanvasEdgeId;
   source: CanvasNodeId;
@@ -198,7 +229,16 @@ export type CanvasCommand =
       type: 'CREATE_NODES';
       nodes: CanvasNodeCreateInput[];
     }
-  | { type: 'INITIALIZE_PDF_NOTE'; nodeId: CanvasNodeId }
+  | {
+      type: 'INITIALIZE_PDF_NOTE';
+      nodeId: CanvasNodeId;
+      /**
+       * The id the new Note gets. A browser page states it so the Note it
+       * shows at once and the one the Server creates are the same node;
+       * `ui` only — an agent is told the id in the result.
+       */
+      noteId?: CanvasNodeId;
+    }
   | { type: 'DELETE_NODES'; nodeIds: CanvasNodeId[] }
   | { type: 'MERGE_NODE_DATA'; patches: CanvasNodeDataMergePatch[] }
   | {
@@ -246,6 +286,18 @@ export type CanvasCommand =
     }
   | {
       /**
+       * Report the box a renderer measured for nodes whose size only a
+       * renderer knows, so Frames are laid out around their real
+       * footprint. The counterpart of `APPLY_MEASURED_HEIGHT` for the
+       * `content` height policy; non-undoable and UI-only for the same
+       * reasons. Stale items (key mismatch) and other node types are
+       * ignored rather than rejected.
+       */
+      type: 'APPLY_MEASURED_SIZE';
+      items: CanvasNodeMeasuredSizeUpdate[];
+    }
+  | {
+      /**
        * Set a frame's child-layout mode. When switching into `column`,
        * `row` or `grid`, the engine assigns each child to a track and
        * resizes the frame to fit its content; when switching to `free`
@@ -268,6 +320,8 @@ export type CanvasCommand =
        * combination back to `'hug'`.
        */
       type: 'SET_FRAME_LAYOUT';
+      /** Column/Row relative placement; exclusive with cells, counts and mode changes. */
+      placements?: FrameLayoutPlacement[];
       frameId: CanvasNodeId;
       mode: FrameLayoutMode;
       gridCount?: number;
@@ -308,20 +362,64 @@ export type CanvasCommand =
       type: 'CHANGE_NODE_TYPE';
       nodeId: CanvasNodeId;
       to: 'text' | 'note';
+    }
+  | {
+      /**
+       * Put nodes and edges back exactly as a page's undo history holds
+       * them, ids and content included. UI-only.
+       *
+       * A node not named in `replace` is inserted and must not exist; one
+       * named there must exist and is replaced in place. An edge is
+       * inserted, or replaces the edge with its id. Every restored node's
+       * parent chain must exist after the command and be made of
+       * containers. Agent Nodes cannot be inserted this way (their identity
+       * has its own association path) and never change type. The command is
+       * all-or-nothing and fits no Frame.
+       */
+      type: 'RESTORE_NODES';
+      nodes: CanvasRestoredNode[];
+      edges?: CanvasRestoredEdge[];
+      /** Ids in `nodes` that exist and are replaced whole. */
+      replace?: CanvasNodeId[];
+      /**
+       * `data` keys a replaced node keeps from its current state instead
+       * of taking from the snapshot (content fields, which have their own
+       * writer).
+       */
+      keepDataKeys?: string[];
     };
+
+/** A whole persisted node, as an undo snapshot holds it. */
+export type CanvasRestoredNode = {
+  id: CanvasNodeId;
+  type: CanvasNodeType;
+  position: Point;
+  data?: Record<string, unknown>;
+  parentId?: CanvasNodeId | null;
+} & Record<string, unknown>;
+
+/** A whole persisted edge, as an undo snapshot holds it. */
+export type CanvasRestoredEdge = {
+  id: CanvasEdgeId;
+  source: CanvasNodeId;
+  target: CanvasNodeId;
+} & Record<string, unknown>;
 
 export type CanvasCommandType = CanvasCommand['type'];
 
 /**
  * Command types that are UI-only and excluded from the agent-facing schema.
- * These depend on ephemeral view state, user-controlled protection, or a
- * browser measurement the agent has no way to produce.
+ * These depend on ephemeral view state, user-controlled protection, a
+ * browser measurement the agent has no way to produce, or a page's own undo
+ * history.
  */
 export const UI_ONLY_CANVAS_COMMAND_TYPES = [
   'SET_NODE_LOCKED',
   'SET_NODE_SELECTION',
   'CHANGE_NODE_TYPE',
   'APPLY_MEASURED_HEIGHT',
+  'APPLY_MEASURED_SIZE',
+  'RESTORE_NODES',
 ] as const;
 export type UiOnlyCanvasCommandType =
   (typeof UI_ONLY_CANVAS_COMMAND_TYPES)[number];

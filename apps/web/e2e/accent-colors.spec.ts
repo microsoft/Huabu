@@ -5,7 +5,7 @@ import { expect, test } from '@playwright/test';
 
 import { ACCENT_PALETTE } from '@huabu/shared';
 
-import { openNewCanvas } from './helpers';
+import { openNewCanvas, personEdits } from './helpers';
 
 const rgb = (hex: string) =>
   `rgb(${[1, 3, 5].map((offset) => parseInt(hex.slice(offset, offset + 2), 16)).join(', ')})`;
@@ -17,7 +17,7 @@ test('Text placeholders stay opaque and Ink cursor pixels follow the current the
   const canvasId = page.url().split('/canvas/')[1]?.split(/[?#]/)[0];
   const response = await page.request.post(`/api/canvas/${canvasId}/execute`, {
     data: {
-      commands: [
+      edits: personEdits([
         {
           type: 'CREATE_NODES',
           nodes: [
@@ -30,8 +30,7 @@ test('Text placeholders stay opaque and Ink cursor pixels follow the current the
             },
           ],
         },
-      ],
-      originator: { source: 'agent', threadId: 'e2e-placeholder' },
+      ]),
     },
   });
   expect(response.ok(), await response.text()).toBe(true);
@@ -182,7 +181,7 @@ test('Text uses brighter preset colors in both its reading mirror and editor', a
   ];
   const response = await page.request.post(`/api/canvas/${canvasId}/execute`, {
     data: {
-      commands: [
+      edits: personEdits([
         {
           type: 'CREATE_NODES',
           nodes: ACCENT_PALETTE.flatMap(({ token, name }, index) =>
@@ -205,8 +204,7 @@ test('Text uses brighter preset colors in both its reading mirror and editor', a
             })),
           ),
         },
-      ],
-      originator: { source: 'agent', threadId: 'e2e-text-accent' },
+      ]),
     },
   });
   expect(response.ok(), await response.text()).toBe(true);
@@ -265,7 +263,7 @@ test('yellow Text keeps gold at every authored font size and canvas zoom', async
   const canvasId = page.url().split('/canvas/')[1]?.split(/[?#]/)[0];
   const response = await page.request.post(`/api/canvas/${canvasId}/execute`, {
     data: {
-      commands: [
+      edits: personEdits([
         {
           type: 'CREATE_NODES',
           nodes: [16, 24, 32].map((fontSize, index) => ({
@@ -279,8 +277,7 @@ test('yellow Text keeps gold at every authored font size and canvas zoom', async
             size: { width: 350 },
           })),
         },
-      ],
-      originator: { source: 'agent', threadId: 'e2e-gold-screen-size' },
+      ]),
     },
   });
   expect(response.ok(), await response.text()).toBe(true);
@@ -405,7 +402,7 @@ test('production Note outlines, connector arrows and label colors share the cali
   const canvasId = page.url().split('/canvas/')[1]?.split(/[?#]/)[0];
   const response = await page.request.post(`/api/canvas/${canvasId}/execute`, {
     data: {
-      commands: [
+      edits: personEdits([
         {
           type: 'CREATE_NODES',
           nodes: ['amber', 'white'].map((accent, index) => ({
@@ -430,8 +427,7 @@ test('production Note outlines, connector arrows and label colors share the cali
             },
           ],
         },
-      ],
-      originator: { source: 'agent', threadId: 'e2e-accents' },
+      ]),
     },
   });
   expect(response.ok(), await response.text()).toBe(true);

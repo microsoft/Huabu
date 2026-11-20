@@ -15,7 +15,7 @@ const update = (toVersion: number): CanvasSyncEvent => ({
     toVersion,
     deltas: [],
     pendingEffects: {
-      mutatedNodes: [],
+      mutatedNodeIds: [],
       deletedNodeIds: [],
       contentEditedNodeIds: [],
       deferredFitFrameIds: [],
@@ -40,6 +40,27 @@ describe('canvas-sync publisher', () => {
     );
     publishCanvasUpdate('canvas-1', update(3));
     expect(seen).toEqual(['observer', 'observer']);
+    unsubscribe();
+  });
+
+  it('delivers a content save and a read-model notice as published, and keeps nothing for a later subscriber', () => {
+    // No subscriber yet: nothing is held for one that comes later.
+    publishCanvasUpdate('canvas-content', {
+      type: 'invalidate',
+      data: { nodeIds: ['n1'], originPageId: 'page-a' },
+    });
+    const listener = vi.fn();
+    const unsubscribe = subscribeCanvasUpdates('canvas-content', listener);
+    publishCanvasUpdate('canvas-content', {
+      type: 'invalidate',
+      data: { nodeIds: ['n2'] },
+    });
+    publishCanvasUpdate('canvas-content', { type: 'invalidate', data: {} });
+
+    expect(listener.mock.calls).toEqual([
+      [{ type: 'invalidate', data: { nodeIds: ['n2'] } }],
+      [{ type: 'invalidate', data: {} }],
+    ]);
     unsubscribe();
   });
 

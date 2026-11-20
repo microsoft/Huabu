@@ -9,18 +9,16 @@
  * translates that manifest into web verbs:
  *
  *  1. Debounced HTTP preprocessing fetch.
- *  2. Delete tracking for the local history manager.
+ *  2. Per-node save-queue cleanup for deleted nodes.
  *  3. Deferred `fitFrames` after the DOM has reflowed.
  *
  * Pure host-agnostic cleanups (edge reroute) live in the shared
  * `applySharedPostEffects` and run BEFORE the state commit so they
  * fold into a single `set({ nodes, edges })`.
  *
- * Most dependencies (`canvasHistoryManager`) are
- * imported directly because they are module-level singletons.
- * `triggerPreprocessing` is the one exception — it is a closure over
- * the canvas store's internal state and timers, so it is passed in as
- * a callback by the store. The engine boundary stays clean either way.
+ * `triggerPreprocessing` and `forgetNodeContent` are closures over the
+ * canvas store's internal state and timers, so they are passed in as
+ * callbacks by the store. The engine boundary stays clean either way.
  */
 
 import {
@@ -30,13 +28,10 @@ import {
   type PendingEffects,
 } from '@huabu/shared/canvas-engine';
 
-import { canvasHistoryManager } from '@/store/canvasHistoryManager';
-
 import type { Edge, Node } from '@xyflow/react';
 
 export interface RunWebPostEffectsInput {
   effects: PendingEffects;
-  canvasId: string;
   /** Read latest committed nodes from the store. */
   getNodes: () => Node[];
   /** Read latest committed edges for edge-aware structured gutters. */
@@ -57,8 +52,6 @@ export interface RunWebPostEffectsInput {
    * a back-import cycle with the canvas store.
    */
   forgetNodeContent: (nodeId: string) => void;
-  getPendingCreation?: (nodeId: string) => Promise<void> | undefined;
-  waitForNodeContent?: () => Promise<void>;
   /** Remove Preview Workspace tabs whose node targets were deleted. */
   validatePreviewNodes: (liveNodeIds: ReadonlySet<string>) => void;
 }
@@ -68,19 +61,17 @@ export interface RunWebPostEffectsInput {
  *
  * Order matters and matches the previous `runPostEffects`:
  *  1. preprocessing trigger (synchronous fan-out into debounced fetch)
- *  2. delete tracking
+ *  2. save-queue cleanup for deleted nodes
  *  3. deferred frame fit (double-rAF)
  */
 export function runWebPostEffects(input: RunWebPostEffectsInput): void {
   const {
     effects,
-    canvasId,
     getNodes,
     getEdges,
     setNodes,
     triggerPreprocessing,
     forgetNodeContent,
-    getPendingCreation,
     validatePreviewNodes,
   } = input;
 
@@ -111,14 +102,9 @@ export function runWebPostEffects(input: RunWebPostEffectsInput): void {
     triggerPreprocessing(node);
   }
 
-  // 2. Track server-side deletes for local history.
+  // 2. A deleted node needs no request of its own: the batch that removed
+  // it from the Space removed its record on the server in the same commit.
   for (const nodeId of effects.deletedNodeIds) {
-    canvasHistoryManager.trackDelete(
-      canvasId,
-      nodeId,
-      input.waitForNodeContent?.(),
-      getPendingCreation?.(nodeId),
-    );
     // Release the node's per-node save-queue state so a long session of
     // create/delete churn doesn't leak bookkeeping keyed by dead ids.
     forgetNodeContent(nodeId);

@@ -3,7 +3,7 @@
 
 import { expect, test, type Locator, type Page } from '@playwright/test';
 
-import { oneFingerDrag, openNewCanvas, touchTap } from './helpers';
+import { oneFingerDrag, openNewCanvas, touchTap, personEdits } from './helpers';
 
 import type * as CardModule from '../src/components/Messages/AIMessage/MilkdownMessageCard';
 import type * as PreviewActions from '../src/store/previewWorkspace/actions';
@@ -73,7 +73,7 @@ test('touch Note reading, scrolling, direct paragraph extraction and explicit ed
     'More reading content.\n\n'.repeat(35);
   const created = await page.request.post(`/api/canvas/${canvasId}/execute`, {
     data: {
-      commands: [
+      edits: personEdits([
         {
           type: 'CREATE_NODES',
           nodes: [
@@ -86,8 +86,7 @@ test('touch Note reading, scrolling, direct paragraph extraction and explicit ed
             },
           ],
         },
-      ],
-      originator: { source: 'agent', threadId: 'paragraph-touch-test' },
+      ]),
     },
   });
   expect(created.ok(), await created.text()).toBe(true);

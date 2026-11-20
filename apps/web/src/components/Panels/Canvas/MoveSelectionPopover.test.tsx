@@ -143,7 +143,6 @@ afterEach(() => {
     nodes: [],
     moveSelectionDialogOpen: false,
     moveSelectionAnchor: null,
-    pendingSave: false,
   });
   listCanvases.mockReset();
   moveCanvasSelection.mockReset();
@@ -780,7 +779,7 @@ describe('MoveSelectionPopover', () => {
       act(() => root?.render(<MoveSelectionPopover />));
     }).not.toThrow();
 
-    act(() => useCanvasStore.setState({ pendingSave: true }));
+    act(() => useCanvasStore.setState({ canvasTitle: 'Renamed' }));
     expect(container.innerHTML).toBe('');
   });
 

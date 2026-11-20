@@ -5,23 +5,22 @@
  * Shared constants describing which node fields participate in the
  * per-node markdown sidecar pipeline. Imported by both:
  *
- *   • {@link ../save/structureDirtyDetector} — to *exclude* these
- *     fields from the structure-save diff (content edits must not
- *     bump `canvas.version`).
+ *   • the store's send queue — to *exclude* these fields from the
+ *     structure commands it sends (content edits must not bump
+ *     `canvas.version`).
  *   • the future `nodeContentQueue` extraction — to *include* them
  *     in the per-node `PUT /api/canvas/:id/nodes/:nodeId/content`
  *     body and decide which nodes own a `.md` sidecar.
  *
  * Keep in sync with the server-side `MD_BACKED_NODE_TYPES` /
- * `putNodeContentBodySchema`. See `docs/node-content-api-split.md`.
+ * `putNodeContentBodySchema`. See `docs/architecture/canvas-realtime-sync.md`.
  */
 
 /**
  * `data` keys whose values live in the per-node markdown sidecar
  * (`nodes/<safe(label)>.md`), not in structural state. A patch touching
  * any of these schedules a per-node content save and the key is
- * stripped from the structure PUT body so a viewport drag does not
- * rewrite content.
+ * left out of the structure commands the page sends.
  */
 export const NODE_CONTENT_KEYS: ReadonlySet<string> = new Set([
   'content',
@@ -36,6 +35,44 @@ export const NODE_CONTENT_KEYS: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * The content keys that hold a node's custom properties. No revision covers
+ * them and they are saved per key; every other content field belongs to the
+ * body's save.
+ */
+export const PROPERTY_CONTENT_KEYS: ReadonlySet<string> = new Set([
+  'properties',
+  'propertyDisplayKeys',
+]);
+
+/** The title: a label and the source that says who gave it. */
+export const TITLE_CONTENT_KEYS: ReadonlySet<string> = new Set([
+  'label',
+  'labelSource',
+]);
+
+/** The body's fields: the ones a node's content revision covers. */
+export const BODY_CONTENT_KEYS: ReadonlySet<string> = new Set([
+  'content',
+  'src',
+]);
+
+/**
+ * The content field a property unit belongs to (see `sync/propertyUnits.ts`):
+ * `data.label` is `label`, `data.properties.<key>` is the custom property
+ * `<key>` of `properties`. `null` for a unit that is not node content.
+ */
+export function contentFieldOfUnit(
+  unit: string,
+): { field: string; propertyKey?: string } | null {
+  if (!unit.startsWith('data.')) return null;
+  const rest = unit.slice(5);
+  if (NODE_CONTENT_KEYS.has(rest)) return { field: rest };
+  if (rest.startsWith('properties.'))
+    return { field: 'properties', propertyKey: rest.slice(11) };
+  return null;
+}
+
+/**
  * Node types that own a markdown sidecar. Mirrors the server-side
  * `MD_BACKED_NODE_TYPES`. Patches to nodes whose type is not in this
  * set still update the in-memory store but do not schedule a content
@@ -44,11 +81,11 @@ export const NODE_CONTENT_KEYS: ReadonlySet<string> = new Set([
  * `question` is included as a frontmatter-only sidecar (no body) so
  * its auto-generated label / labelSource survive canvas reloads —
  * without this, `patchNodeSilent({label, labelSource})` would only
- * live in memory because the structure PUT strips both fields.
+ * live in memory because structure commands leave both fields out.
  *
  * `sketch` is included for the same reason as `question`: the canvas
  * engine auto-stamps a `Sketch N` label on creation (and the user can
- * rename it from the layer panel) but the structure PUT strips
+ * rename it from the layer panel) but structure commands leave out
  * `label` / `labelSource`. Without a sidecar those fields would only
  * live in memory and the layer panel would show a blank row after
  * reload. The sidecar is frontmatter-only — stroke geometry stays
@@ -86,6 +123,17 @@ export const TEXT_BEARING_NODE_TYPES: ReadonlySet<string> = new Set([
   'office',
   'question',
 ]);
+
+/** `data` with `patch` laid over it; a key patched to `undefined` is removed. */
+export function withContentPatch(
+  data: Record<string, unknown> | undefined,
+  patch: Readonly<Record<string, unknown>>,
+): Record<string, unknown> {
+  const next: Record<string, unknown> = { ...data, ...patch };
+  for (const [key, value] of Object.entries(patch))
+    if (value === undefined) delete next[key];
+  return next;
+}
 
 /**
  * Types whose sidecar carries data only the server can produce and the web

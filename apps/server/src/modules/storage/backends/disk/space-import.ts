@@ -26,7 +26,11 @@ import {
   registerCanvasDir,
   suggestCanvasDir,
 } from './canvas-dirs.js';
-import { SPACE_JSON_FILENAME } from './layout.js';
+import {
+  HISTORY_DIR_NAME,
+  SAVE_DIR_NAME,
+  SPACE_JSON_FILENAME,
+} from './layout.js';
 import { toSafeFilename } from '../../../../utils/naming.js';
 import { getWorkspacePath } from '../../../workspace.js';
 
@@ -121,6 +125,14 @@ export function stageDiskSpaceImport(canvasId: string): DiskSpaceImport {
         if (name === SPACE_JSON_FILENAME) continue;
         await rm(path.join(stagingDirectory, name), { force: true });
       }
+      // An imported Space is a new Space: it starts without a stamp baseline
+      // and without stored responses. A bundle that carries the source's —
+      // an older export, or a hand-made archive — would otherwise let a read
+      // version or a request id of the source be honoured here.
+      await rm(path.join(stagingDirectory, HISTORY_DIR_NAME, SAVE_DIR_NAME), {
+        recursive: true,
+        force: true,
+      });
 
       await mkdir(path.dirname(stagingDirectory), { recursive: true });
       await rename(

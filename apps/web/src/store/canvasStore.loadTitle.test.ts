@@ -13,7 +13,7 @@ vi.mock('../api', async (importOriginal) => ({
 import { putNodeContent } from '@/api/canvas';
 
 import useCanvasStore from './canvasStore';
-import { commitNodeMetadata } from './canvasStore';
+import { flushNodeContent } from './canvasStore';
 import { useToolStore } from './toolStore';
 
 import type * as canvasApi from '../api';
@@ -27,14 +27,12 @@ vi.mock('@/api/canvas', async (original) => ({
 beforeEach(() => {
   vi.useFakeTimers();
   vi.clearAllMocks();
-  useCanvasStore.getState()._setStateNoAutosave({
+  useCanvasStore.getState()._setStateRaw({
     canvasId: 'previous',
     canvasTitle: 'Previous Space',
     nodes: [],
     edges: [],
     isLoading: false,
-    isSaving: false,
-    pendingSave: false,
   });
 });
 
@@ -45,7 +43,7 @@ afterEach(() => {
 });
 
 describe('canvas title ownership during loading', () => {
-  it('passes the canonical loaded PDF revision into the first property save', async () => {
+  it('saves a PDF property and a rename without a revision, and quotes the canonical loaded revision when it saves a summary', async () => {
     api.getCanvas.mockResolvedValue({
       canvasId: 'pdf-space',
       title: 'Papers',
@@ -74,19 +72,42 @@ describe('canvas title ownership during loading', () => {
       rev: 'saved',
     });
     await useCanvasStore.getState().loadCanvas('pdf-space');
-    await commitNodeMetadata('pdf', { properties: { Status: 'Reading' } });
-    expect(putNodeContent).toHaveBeenCalledWith(
-      'pdf-space',
-      'pdf',
-      expect.objectContaining({
-        expectRev: 'canonical-server-revision',
-        properties: { Venue: 'CHI 25', Status: 'Reading' },
-      }),
-      undefined,
+    useCanvasStore
+      .getState()
+      .updateNodeData('pdf', { properties: { Status: 'Reading' } });
+    await flushNodeContent('pdf');
+    // The one key that changed; no revision, no body, no title.
+    const propertySave = vi.mocked(putNodeContent).mock.calls[0][2];
+    expect(propertySave).toMatchObject({
+      nodeType: 'pdf',
+      properties: { Status: 'Reading' },
+    });
+    expect(Object.keys(propertySave).sort()).toEqual(
+      ['nodeType', 'pageId', 'properties'].sort(),
     );
-    expect(vi.mocked(putNodeContent).mock.calls[0][2]).not.toHaveProperty(
-      'content',
-    );
+
+    // A rename is not versioned either: the title alone, no revision.
+    useCanvasStore
+      .getState()
+      .updateNodeData('pdf', { label: 'Paper, final', labelSource: 'user' });
+    await flushNodeContent('pdf');
+    const titleSave = vi.mocked(putNodeContent).mock.calls[1][2];
+    expect(titleSave).toMatchObject({ label: 'Paper, final' });
+    expect(titleSave).not.toHaveProperty('expectRev');
+    expect(titleSave).not.toHaveProperty('content');
+    expect(titleSave).not.toHaveProperty('properties');
+
+    // A save of something derived from the body quotes the revision the
+    // load named, not a hash of the node without its extracted text, and
+    // not the revision the property or the title save's answer named.
+    useCanvasStore.getState().updateNodeData('pdf', { summary: 'A paper.' });
+    await flushNodeContent('pdf');
+    const summarySave = vi.mocked(putNodeContent).mock.calls[2][2];
+    expect(summarySave).toMatchObject({
+      summary: 'A paper.',
+      expectRev: 'canonical-server-revision',
+    });
+    expect(summarySave).not.toHaveProperty('label');
   });
 
   it('resets tool intent on a direct Space change but preserves preferences and same-Space placement', async () => {
@@ -122,7 +143,6 @@ describe('canvas title ownership during loading', () => {
       canvasId: 'next',
       canvasTitle: '',
       isLoading: true,
-      pendingSave: false,
     });
 
     resolve({
@@ -136,7 +156,6 @@ describe('canvas title ownership during loading', () => {
     expect(useCanvasStore.getState()).toMatchObject({
       canvasTitle: 'Next Space',
       isLoading: false,
-      pendingSave: false,
     });
   });
 

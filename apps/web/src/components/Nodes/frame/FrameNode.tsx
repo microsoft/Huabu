@@ -26,6 +26,7 @@ import { FloatingToolbar } from '@/components/Common/FloatingToolbar.tsx';
 import { Input } from '@/components/Common/Input.tsx';
 import { MissingFileBanner } from '@/components/Nodes/MissingFileBanner.tsx';
 import { NodeWrapper } from '@/components/Nodes/NodeWrapper.tsx';
+import { canStartEditing } from '@/store/canvasPresence/editLock';
 import useCanvasStore from '@/store/canvasStore.ts';
 
 import { FRAME_DESIGN_CONFIG, frameVisualMetricsForSize } from './frameDesign';
@@ -438,6 +439,8 @@ export const FrameNode = memo(
           }}
           onClick={() => {
             if (isEditingLabel) return;
+            // One editor at a time: not while another page edits this Frame.
+            if (!canStartEditing(id)) return;
             setIsEditingLabel(true);
           }}
           onBlur={() => {

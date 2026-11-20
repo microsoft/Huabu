@@ -3,7 +3,8 @@
 
 import { expect, test } from '@playwright/test';
 
-import { openNewCanvas } from './helpers';
+import { agentExecute, type AgentExecuteResponse } from './agent-execute';
+import { openNewCanvas, personEdits } from './helpers';
 
 import type * as PreviewActions from '../src/store/previewWorkspace/actions';
 
@@ -17,7 +18,7 @@ test('tags are picked with the pointer and corrected in place', async ({
   const canvasId = page.url().split('/canvas/')[1]?.split(/[?#]/)[0];
   const response = await page.request.post(`/api/canvas/${canvasId}/execute`, {
     data: {
-      commands: [
+      edits: personEdits([
         {
           type: 'CREATE_NODES',
           nodes: [
@@ -43,8 +44,7 @@ test('tags are picked with the pointer and corrected in place', async ({
             },
           ],
         },
-      ],
-      originator: { source: 'agent', threadId: 'e2e-property-tags' },
+      ]),
     },
   });
   expect(response.ok(), await response.text()).toBe(true);
@@ -91,40 +91,40 @@ test('a tag removed from a PDF an agent wrote saves without a conflict', async (
   await openNewCanvas(page);
   await page.keyboard.press('Escape');
   const canvasId = page.url().split('/canvas/')[1]?.split(/[?#]/)[0];
+  if (!canvasId) throw new Error('canvas id not found in URL');
   // The agent write makes the web re-derive its save baseline from the node
   // it holds, and a PDF's extracted body is never sent to it.
-  const response = await page.request.post(`/api/canvas/${canvasId}/execute`, {
-    data: {
-      commands: [
+  const response = await agentExecute(page.request, canvasId, [
+    {
+      type: 'CREATE_NODES',
+      nodes: [
         {
-          type: 'CREATE_NODES',
-          nodes: [
-            {
-              id: 'node-tags-pdf',
-              nodeType: 'pdf',
-              data: {
-                label: 'Paper',
-                src: 'https://example.test/paper.pdf',
-                properties: { keywords: ['canvas', 'widget'] },
-              },
-              position: { x: 100, y: 100 },
-              size: { width: 300, height: 300 },
-            },
-          ],
+          nodeType: 'pdf',
+          data: {
+            label: 'Paper',
+            src: 'https://example.test/paper.pdf',
+            properties: { keywords: ['canvas', 'widget'] },
+          },
+          position: { x: 100, y: 100 },
+          size: { width: 300, height: 300 },
         },
       ],
-      originator: { source: 'agent', threadId: 'e2e-property-tags' },
     },
-  });
+  ]);
   expect(response.ok(), await response.text()).toBe(true);
+  const { results } = (await response.json()) as AgentExecuteResponse;
+  expect(results[0]?.applied).toBe(true);
+  // An Agent does not choose a node's id; it reads it from the result.
+  const pdfId = results[0]?.nodes?.[0]?.nodeId;
+  if (!pdfId) throw new Error('The Agent result names no node');
   await expect(page.locator('.react-flow__node-pdf')).toHaveCount(1);
-  await page.evaluate(async () => {
+  await page.evaluate(async (nodeId) => {
     const previewPath = '/src/store/previewWorkspace/actions.ts';
     const { openPreviewNode } = (await import(
       previewPath
     )) as typeof PreviewActions;
-    openPreviewNode('node-tags-pdf');
-  });
+    openPreviewNode(nodeId);
+  }, pdfId);
 
   const row = page.getByRole('button', { name: 'Edit keywords' });
   for (const [removed, left] of [

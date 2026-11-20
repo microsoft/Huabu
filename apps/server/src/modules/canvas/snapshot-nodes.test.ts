@@ -1,17 +1,35 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   bundledResvgWasmPath,
   clusterToSvg,
   filterSketchStrokes,
   renderInkOcrRaster,
+  snapshotNodesToArtifacts,
   type ContextImage,
 } from './snapshot-nodes.js';
 
 import type { CanvasNode } from '@huabu/shared/canvas-engine';
+
+const storage = vi.hoisted(() => ({
+  readNode: vi.fn(),
+  readArtifact: vi.fn(),
+  headArtifact: vi.fn(),
+  putArtifact: vi.fn(),
+}));
+vi.mock('../storage/index.js', () => ({
+  space: () => ({
+    nodes: { read: storage.readNode },
+    artifacts: {
+      read: storage.readArtifact,
+      head: storage.headArtifact,
+      put: storage.putArtifact,
+    },
+  }),
+}));
 
 // Minimal 1x1 transparent PNG so we can verify the data URL embed
 // without bringing real image bytes into the test.
@@ -96,6 +114,55 @@ function makeSketch(opts: {
 }
 
 describe('clusterToSvg', () => {
+  it('interleaves images and sketch nodes by explicit paint order, retaining stroke order', () => {
+    const sketch = makeSketch({
+      id: 'ink',
+      x: 0,
+      y: 0,
+      w: 100,
+      h: 100,
+      strokes: [
+        {
+          points: [
+            [0, 0],
+            [20, 20],
+          ],
+          color: '#123456',
+        },
+        {
+          points: [
+            [0, 10],
+            [20, 30],
+          ],
+          color: '#654321',
+        },
+      ],
+    });
+    const context: ContextImage[] = [
+      {
+        node: makeImageNode({ id: 'image', x: 0, y: 0, w: 100, h: 100 }),
+        resolvedSrc: 'image.png',
+        bytes: TINY_PNG,
+        mimeType: 'image/png',
+        width: 100,
+        height: 100,
+      },
+    ];
+    const below =
+      clusterToSvg([sketch], context, 1280, { paintOrder: ['ink', 'image'] })
+        ?.svg ?? '';
+    const above =
+      clusterToSvg([sketch], context, 1280, { paintOrder: ['image', 'ink'] })
+        ?.svg ?? '';
+    expect(below.indexOf('<path')).toBeGreaterThan(0);
+    expect(below.indexOf('<path')).toBeLessThan(below.indexOf('<image'));
+    expect(above.indexOf('<image')).toBeLessThan(above.indexOf('<path'));
+    expect(below.indexOf('#123456')).toBeLessThan(below.indexOf('#654321'));
+    expect(clusterToSvg([sketch], context)?.svg).toBe(above);
+    expect(() =>
+      clusterToSvg([sketch], context, 1280, { paintOrder: ['ink'] }),
+    ).toThrow('incomplete');
+  });
   it('crops the OCR profile to painted strokes while preserving the default profile', () => {
     const sketch = makeSketch({ id: 'ink', x: 0, y: 0, w: 10000, h: 10000 });
     const built = clusterToSvg([sketch], [], 2048, {
@@ -109,6 +176,114 @@ describe('clusterToSvg', () => {
     expect(built?.svg).not.toContain('fill="red"');
     expect(built?.svg).toContain('fill="#ffffff"');
     expect(clusterToSvg([sketch])?.width).toBe(1280);
+  });
+
+  describe('snapshotNodesToArtifacts paint order', () => {
+    beforeEach(() => {
+      const artifacts = new Map<string, Buffer>();
+      storage.readNode.mockImplementation(async () => ({
+        record: { src: 'image.png' },
+      }));
+      storage.readArtifact.mockImplementation(async () => TINY_PNG);
+      storage.headArtifact.mockImplementation(async (key: string) =>
+        artifacts.has(key) ? { size: artifacts.get(key)?.length } : null,
+      );
+      storage.putArtifact.mockReset();
+      storage.putArtifact.mockImplementation(
+        async (key: string, bytes: Buffer) => {
+          artifacts.set(key, bytes);
+        },
+      );
+    });
+
+    it('ignores request order but invalidates cached pixels after an authoritative reorder', async () => {
+      const a = makeSketch({ id: 'a', x: 0, y: 0, w: 100, h: 100 });
+      const b = makeSketch({
+        id: 'b',
+        x: 0,
+        y: 0,
+        w: 100,
+        h: 100,
+        strokes: [
+          {
+            points: [
+              [10, 10],
+              [20, 20],
+              [30, 10],
+            ],
+            color: 'black',
+            size: 8,
+          },
+        ],
+      });
+      const first = await snapshotNodesToArtifacts(
+        { canvasId: 'test', nodeIds: ['b', 'a'] },
+        [a, b],
+      );
+      const repeated = await snapshotNodesToArtifacts(
+        { canvasId: 'test', nodeIds: ['a', 'b'] },
+        [a, b],
+      );
+      expect(repeated).toEqual(first);
+      expect(storage.putArtifact).toHaveBeenCalledTimes(1);
+      const reordered = await snapshotNodesToArtifacts(
+        { canvasId: 'test', nodeIds: ['a', 'b'] },
+        [b, a],
+      );
+      expect(reordered[0].src).not.toBe(first[0].src);
+      expect(storage.putArtifact).toHaveBeenCalledTimes(2);
+      expect(storage.putArtifact.mock.calls[0][1]).not.toEqual(
+        storage.putArtifact.mock.calls[1][1],
+      );
+    });
+
+    it('uses the same image/ink order for a nested Frame and explicit reversed selection', async () => {
+      const outer: CanvasNode = {
+        id: 'outer',
+        type: 'frame',
+        position: { x: 20, y: 20 },
+        data: {},
+      };
+      const inner: CanvasNode = {
+        id: 'inner',
+        type: 'frame',
+        parentId: 'outer',
+        position: { x: 30, y: 30 },
+        data: {},
+      };
+      const ink = makeSketch({
+        id: 'ink',
+        parentId: 'inner',
+        x: 0,
+        y: 0,
+        w: 100,
+        h: 100,
+      });
+      const image = makeImageNode({
+        id: 'image',
+        parentId: 'inner',
+        x: 0,
+        y: 0,
+        w: 100,
+        h: 100,
+      });
+      const nodes = [outer, inner, ink, image];
+      const expanded = await snapshotNodesToArtifacts(
+        { canvasId: 'test', nodeIds: ['outer'] },
+        nodes,
+      );
+      const selected = await snapshotNodesToArtifacts(
+        { canvasId: 'test', nodeIds: ['image', 'ink'] },
+        nodes,
+      );
+      expect(selected).toEqual(expanded);
+      expect(storage.putArtifact).toHaveBeenCalledTimes(1);
+      const reordered = await snapshotNodesToArtifacts(
+        { canvasId: 'test', nodeIds: ['outer'] },
+        [outer, inner, image, ink],
+      );
+      expect(reordered[0].src).not.toBe(expanded[0].src);
+    });
   });
 
   it('produces a sketch-only SVG when no contextImages are given', () => {

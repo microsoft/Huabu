@@ -234,12 +234,7 @@ export async function executeTool(
           args,
           'inspect_nodes',
         );
-        return handleInspectNodes(
-          inspectArgs,
-          inspectArgs.canvasId === requireCanvasId('inspect_nodes')
-            ? context?.readSet
-            : undefined,
-        );
+        return handleInspectNodes(inspectArgs);
       });
 
     case 'inspect_edges':

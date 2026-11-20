@@ -4,7 +4,6 @@
 import { describe, expect, it } from 'vitest';
 
 import { agentRequestSchema } from './agent.js';
-import { putCanvasBodySchema } from './canvas.js';
 import {
   inkResourceBindingSchema,
   inkResourceReferenceSchema,
@@ -84,7 +83,7 @@ describe('Ink resource wire contracts', () => {
     }
   });
 
-  it('rejects malformed bindings at Canvas PUT ingestion but keeps ordinary Ink unchanged', () => {
+  it('rejects malformed bindings in Sketch data but keeps ordinary Ink unchanged', () => {
     const stroke = {
       id: 's0',
       points: [
@@ -94,26 +93,22 @@ describe('Ink resource wire contracts', () => {
       color: 'black',
       size: 2,
     };
-    const body = (value: unknown) => ({
-      version: 0,
-      state: {
-        nodes: [
-          {
-            id: 'ink',
-            type: 'sketch',
-            data: { strokes: [{ ...stroke, resourceBinding: value }] },
-          },
-        ],
-      },
+    const data = (value: unknown) => ({
+      strokes: [{ ...stroke, resourceBinding: value }],
     });
-    expect(putCanvasBodySchema.safeParse(body({ strokeIds: 42 })).success).toBe(
+    expect(
+      sketchResourceBindingDataSchema.safeParse(data({ strokeIds: 42 }))
+        .success,
+    ).toBe(false);
+    expect(sketchResourceBindingDataSchema.safeParse(data(null)).success).toBe(
       false,
     );
-    expect(putCanvasBodySchema.safeParse(body(null)).success).toBe(false);
-    expect(putCanvasBodySchema.parse(body(undefined))).toEqual(body(undefined));
+    expect(sketchResourceBindingDataSchema.parse(data(undefined))).toEqual(
+      data(undefined),
+    );
     const { sources: _sources, sourceBounds: _bounds, ...fields } = reference;
-    const valid = body({ ...fields, strokeIds });
-    expect(putCanvasBodySchema.parse(valid)).toEqual(valid);
+    const valid = data({ ...fields, strokeIds });
+    expect(sketchResourceBindingDataSchema.parse(valid)).toEqual(valid);
   });
 
   it('accepts an off-selection resource without changing grounding operands', () => {

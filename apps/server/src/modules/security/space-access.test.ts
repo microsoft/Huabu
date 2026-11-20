@@ -47,7 +47,7 @@ function host() {
   registerSpaceAccess(app);
   const ok = async () => ({ ok: true });
   app.get('/api/canvas/:canvasId', ok);
-  app.put('/api/canvas/:canvasId', ok);
+  app.post('/api/canvas/:canvasId/execute', ok);
   app.delete(
     '/api/canvas/:canvasId',
     { config: { spaceAccess: 'manage' } },
@@ -99,18 +99,23 @@ describe('Space access', () => {
 
   it('reads and writes only the Spaces the identity provider allows', async () => {
     const { app } = host();
-    const status = async (method: 'GET' | 'PUT', id: string) =>
+    const status = async (method: 'GET' | 'POST', id: string) =>
       (
         await app.inject({
           method,
-          url: `/api/canvas/${id}`,
-          payload: method === 'PUT' ? {} : undefined,
+          url:
+            method === 'POST'
+              ? `/api/canvas/${id}/execute`
+              : `/api/canvas/${id}`,
+          payload: method === 'POST' ? {} : undefined,
         })
       ).statusCode;
     expect(await status('GET', 'mine')).toBe(200);
-    expect(await status('PUT', 'mine')).toBe(200);
+    expect(await status('POST', 'mine')).toBe(200);
     expect(await status('GET', 'shared')).toBe(200);
-    expect(await status('PUT', 'shared')).toBe(403);
+    expect(await status('POST', 'shared')).toBe(403);
+    expect(await status('POST', 'edit')).toBe(200);
+    expect(await status('POST', 'other')).toBe(404);
     // An unreadable Space looks exactly like a missing one.
     const hidden = await app.inject('/api/canvas/other');
     expect(hidden.statusCode).toBe(404);
@@ -312,11 +317,16 @@ describe('Space access', () => {
     });
     registerSpaceAccess(app);
     app.get('/api/agent/history/:threadId', async () => ({ ok: true }));
-    app.put('/api/canvas/:canvasId', async () => ({ ok: true }));
+    app.post('/api/canvas/:canvasId/execute', async () => ({ ok: true }));
     expect((await app.inject('/api/agent/history/t1')).statusCode).toBe(200);
     expect(
-      (await app.inject({ method: 'PUT', url: '/api/canvas/any', payload: {} }))
-        .statusCode,
+      (
+        await app.inject({
+          method: 'POST',
+          url: '/api/canvas/any/execute',
+          payload: {},
+        })
+      ).statusCode,
     ).toBe(200);
   });
 
