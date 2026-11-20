@@ -726,7 +726,7 @@
     "crossOriginUnsupported": "Browser sign-in needs the web app and its Server on the same origin. This build points at a Server elsewhere (VITE_API_BASE); serve both from one origin to sign in.",
     "noAccessTitle": "No access yet",
     "noAccessIntro": "You are signed in as {{name}}, but this account cannot use {{appName}} yet. Ask an administrator to grant access.",
-    "noAccessHowTo": "An administrator can admit you: in {{appName}}, open Settings → People, find this account and turn on Service access. You already appear in that list because you have signed in. This page keeps checking and opens {{appName}} once access is on.",
+    "noAccessHowTo": "An administrator can admit you: in {{appName}}, open Settings\u00a0→\u00a0People, find this account and turn on Service access. You already appear in that list because you have signed in. This page keeps checking and opens {{appName}} once access is on.",
     "signOut": "Sign out",
     "signOutAs": "Sign out ({{name}})",
     "deniedIntro": "This account cannot use {{appName}}. Sign out to use another account.",

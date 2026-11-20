@@ -726,7 +726,7 @@
     "crossOriginUnsupported": "浏览器登录要求 Web 应用与服务器位于同一来源。此构建指向其他来源的服务器（VITE_API_BASE）；请从同一来源提供两者后再登录。",
     "noAccessTitle": "暂无访问权限",
     "noAccessIntro": "你已以 {{name}} 的身份登录，但该账户尚不能使用 {{appName}}。请联系管理员授予访问权限。",
-    "noAccessHowTo": "管理员可以为你开通：在 {{appName}} 中打开“设置 → 成员”，找到此账号并打开“服务访问权限”。你已登录过，所以已经出现在该列表中。开通后此页面会自动进入 {{appName}}。",
+    "noAccessHowTo": "管理员可以为你开通：在 {{appName}} 中打开“设置\u00a0→\u00a0成员”，找到此账号并打开“服务访问权限”。你已登录过，所以已经出现在该列表中。开通后此页面会自动进入 {{appName}}。",
     "signOut": "退出登录",
     "signOutAs": "退出登录（{{name}}）",
     "deniedIntro": "该账户无法使用 {{appName}}。请退出登录后使用其他账户。",
