@@ -197,7 +197,7 @@ describe('post-create editing', () => {
       selectableProfileIds: [],
     });
     expect(await openNewChat()).toBe('');
-    useCanvasStore.getState()._setStateNoAutosave({ canvasId: 'other-canvas' });
+    useCanvasStore.getState()._setStateRaw({ canvasId: 'other-canvas' });
     usePreviewWorkspaceStore.setState({ canvasId: 'other-canvas' });
     configureModelAction().onClick();
     await Promise.resolve();
