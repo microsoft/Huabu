@@ -1,6 +1,12 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+export { readLayoutOrder, remapLayoutOrder } from './autoLayout/layoutOrder.js';
+export {
+  withMasonryLayoutOrder,
+  describeFrameLayout,
+} from './autoLayout/gridLayout.js';
+
 /**
  * @huabu/shared/canvas-engine — pure, server-portable canvas command engine.
  *
@@ -42,11 +48,27 @@ export {
   replayAgentNodeEditableData,
   changesAgentNodePreparation,
 } from './agentNodeOwnership.js';
+export { isRefusedResult } from '../types/canvas/execution.js';
 export {
   executeCanvasCommands,
+  executeCanvasEdits,
   type ExecutorOutput,
   type ExecutorOptions,
 } from './executor.js';
+export {
+  collectCommandIds,
+  commandReadTargets,
+  type CommandReadTargets,
+} from './commandTargets.js';
+export {
+  advanceNodeStamps,
+  createReadVersionAdmission,
+  type NodeStamp,
+  type ReadStamps,
+  type ReadVersionAdmission,
+  type ReadVersionEdit,
+  type StampAuthor,
+} from './readVersion.js';
 export type {
   CanvasNode,
   CanvasEdge,
@@ -66,10 +88,32 @@ export {
 // ── Deltas (server → client wire diff) ────────────────────────────────────
 export {
   type Delta,
+  type NodeFields,
+  type OrderedDelta,
   applyDeltas,
+  applyOrderedDeltas,
   invertDelta,
+  isWholeNode,
+  mergeNodeFields,
+  nodeFieldChanges,
+  replacedNodeType,
   replayChangedData,
+  slimDelta,
+  slimDeltas,
+  toWireDeltas,
 } from './delta.js';
+export {
+  type SetSiblingOrderEvent,
+  type SiblingReorderAdmission,
+  type SiblingReorderTarget,
+  isSetSiblingOrderEvent,
+  admitSiblingReorder,
+  hasUnlockedAncestry,
+  collectSiblingOrders,
+  diffSiblingOrderEvents,
+  applySiblingOrderEvents,
+  SiblingOrderReplayError,
+} from './siblingOrder.js';
 export {
   diffCanvasState,
   TRANSIENT_NODE_FIELDS,
@@ -85,6 +129,7 @@ export {
   extractCanvasChanges,
   coalesceChanges,
   fingerprintNodeFields,
+  CONTENT_REVISION_KEYS,
   nodeRevision,
   nodeRevisionOf,
   invertDeltas,
@@ -99,6 +144,7 @@ export {
   type CommandHandlerResult,
   type CommandDefinition,
 } from './commands/index.js';
+export { isAllowedFor } from './commandScope.js';
 
 // ── Frame grid layout (column / row / grid child packing) ───────────────
 // The engine no longer ships a fallback layout for free-form nodes — every
@@ -166,6 +212,7 @@ export {
   type AutoHeightFreshness,
   type AutoHeightHintRead,
   type AutoHeightKey,
+  type MeasuredSizeKey,
   type HeightKind,
   type HeightPolicy,
   HEIGHT_LAYOUT_VERSION,
@@ -181,8 +228,10 @@ export {
   isAutoHeightByDefaultType,
   materializeAutoHeight,
   materializeAutoHeights,
+  measuredSizeKey,
   quantizeHeight,
   readAutoHeightHint,
+  readMeasuredSizeHint,
   resolveAutoLayoutHeight,
   resolveHeightMode,
 } from './height/index.js';
@@ -224,6 +273,7 @@ export {
   computeContainerFit,
   applyContainerFit,
   assignNodeZIndices,
+  materializeForestOrder,
   edgeZIndex,
 } from './container/index.js';
 export {

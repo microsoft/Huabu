@@ -240,7 +240,7 @@ async function cancelReplacementSelection() {
 
 function addQuestion(data: Record<string, unknown> = {}) {
   const state = useCanvasStore.getState();
-  state._setStateNoAutosave({
+  state._setStateRaw({
     nodes: [
       ...state.nodes,
       {
@@ -276,7 +276,7 @@ beforeEach(() => {
   mocks.recentConversation
     .mockReset()
     .mockResolvedValue({ conversation: null });
-  useCanvasStore.getState()._setStateNoAutosave({
+  useCanvasStore.getState()._setStateRaw({
     canvasId: 'canvas-1',
     nodes: [
       {
@@ -395,7 +395,7 @@ describe('StrokeSelectionToolbar Ink submission', () => {
       }
       if (kind === 'nodes') {
         const canvas = useCanvasStore.getState();
-        canvas._setStateNoAutosave({
+        canvas._setStateRaw({
           nodes: [
             ...canvas.nodes.filter((node) => node.type !== 'sketch'),
             {
@@ -547,17 +547,17 @@ describe('StrokeSelectionToolbar Ink submission', () => {
       act(() => {
         const canvas = useCanvasStore.getState();
         if (change === 'canvas-changed')
-          canvas._setStateNoAutosave({ canvasId: 'canvas-2' });
+          canvas._setStateRaw({ canvasId: 'canvas-2' });
         if (change === 'selection-changed')
           useGesturePreviewStore.setState({
             sketchStrokeSelection: { 'sketch-1': ['stroke-2'] },
           });
         if (change === 'removed')
-          canvas._setStateNoAutosave({
+          canvas._setStateRaw({
             nodes: canvas.nodes.filter((node) => node.id !== 'question-1'),
           });
         if (change === 'rebound')
-          canvas._setStateNoAutosave({
+          canvas._setStateRaw({
             nodes: canvas.nodes.map((node) =>
               node.id === 'question-1'
                 ? { ...node, data: { ...node.data, threadId: 'other-thread' } }
@@ -584,7 +584,7 @@ describe('StrokeSelectionToolbar Ink submission', () => {
     async (type) => {
       const content =
         'Full content\n' + 'Complete Text must not be truncated. '.repeat(20);
-      useCanvasStore.getState()._setStateNoAutosave({
+      useCanvasStore.getState()._setStateRaw({
         nodes: [
           {
             id: 'source',
@@ -639,7 +639,7 @@ describe('StrokeSelectionToolbar Ink submission', () => {
   );
 
   it('does not replace ordinary click-selection toolbars', async () => {
-    useCanvasStore.getState()._setStateNoAutosave({
+    useCanvasStore.getState()._setStateRaw({
       nodes: [
         {
           id: 'text',
@@ -660,7 +660,7 @@ describe('StrokeSelectionToolbar Ink submission', () => {
   });
 
   it('captures a shallow Frame directory and full standalone Text, without Note bodies', () => {
-    useCanvasStore.getState()._setStateNoAutosave({
+    useCanvasStore.getState()._setStateRaw({
       nodes: [
         { id: 'frame', type: 'frame', position: { x: 0, y: 0 }, data: {} },
         {
@@ -773,7 +773,7 @@ describe('StrokeSelectionToolbar Ink submission', () => {
     expect(callbacks?.canDispatch?.()).toBe(true);
     await act(async () => {
       const state = useCanvasStore.getState();
-      state._setStateNoAutosave({
+      state._setStateRaw({
         nodes: state.nodes.map((node) =>
           node.id === 'question-1'
             ? { ...node, data: { ...node.data, agentMode: 'ask' } }
@@ -796,7 +796,7 @@ describe('StrokeSelectionToolbar Ink submission', () => {
   it('previews cached recency but waits for the current server target before sending', async () => {
     addQuestion();
     const state = useCanvasStore.getState();
-    state._setStateNoAutosave({
+    state._setStateRaw({
       nodes: [
         ...state.nodes,
         {
@@ -897,7 +897,7 @@ describe('StrokeSelectionToolbar Ink submission', () => {
     async (kind) => {
       addQuestion();
       const state = useCanvasStore.getState();
-      state._setStateNoAutosave({
+      state._setStateRaw({
         nodes: [
           ...state.nodes,
           {
@@ -1068,7 +1068,7 @@ describe('StrokeSelectionToolbar Ink submission', () => {
     async (data) => {
       addQuestion(data);
       const state = useCanvasStore.getState();
-      state._setStateNoAutosave({
+      state._setStateRaw({
         nodes: [
           ...state.nodes,
           {
@@ -1155,7 +1155,7 @@ describe('StrokeSelectionToolbar Ink submission', () => {
     expect(sendButton().disabled).toBe(true);
     await act(async () => {
       const state = useCanvasStore.getState();
-      state._setStateNoAutosave({
+      state._setStateRaw({
         nodes: state.nodes.map((node) =>
           node.id === 'question-1'
             ? { ...node, data: { ...node.data, status: 'idle' } }
@@ -1169,7 +1169,7 @@ describe('StrokeSelectionToolbar Ink submission', () => {
   it('blocks unresolved loading and ignores a late response after an explicit choice', async () => {
     addQuestion();
     const state = useCanvasStore.getState();
-    state._setStateNoAutosave({
+    state._setStateRaw({
       nodes: [
         ...state.nodes,
         {
@@ -1221,7 +1221,7 @@ describe('StrokeSelectionToolbar Ink submission', () => {
   it('keeps a manually confirmed destination stable when recency returns during grounding', async () => {
     addQuestion();
     const state = useCanvasStore.getState();
-    state._setStateNoAutosave({
+    state._setStateRaw({
       nodes: [
         ...state.nodes,
         {
@@ -1317,7 +1317,7 @@ describe('StrokeSelectionToolbar Ink submission', () => {
       .mockResolvedValue({ conversation: null });
     await mountToolbar();
     await act(async () =>
-      useCanvasStore.getState()._setStateNoAutosave({ canvasId: 'canvas-2' }),
+      useCanvasStore.getState()._setStateRaw({ canvasId: 'canvas-2' }),
     );
     expect(document.querySelector('[data-picker-target]')?.textContent).toBe(
       'new',
@@ -1336,7 +1336,7 @@ describe('StrokeSelectionToolbar Ink submission', () => {
 
   it('keeps pending forks visible but unavailable for continuation', async () => {
     addQuestion();
-    useCanvasStore.getState()._setStateNoAutosave({
+    useCanvasStore.getState()._setStateRaw({
       pendingForkThreadIds: { 'thread-existing': true },
     });
     await mountToolbar();
@@ -1359,7 +1359,7 @@ describe('StrokeSelectionToolbar Ink submission', () => {
     await selectConversation();
     await act(async () => {
       const state = useCanvasStore.getState();
-      state._setStateNoAutosave({
+      state._setStateRaw({
         nodes: [
           ...state.nodes,
           {
@@ -1489,7 +1489,7 @@ describe('StrokeSelectionToolbar Ink submission', () => {
       await act(async () => sendButton().click());
       await act(async () => {
         const state = useCanvasStore.getState();
-        state._setStateNoAutosave({
+        state._setStateRaw({
           nodes:
             change === 'deleted'
               ? state.nodes.filter((node) => node.id !== 'question-1')
@@ -1525,7 +1525,7 @@ describe('StrokeSelectionToolbar Ink submission', () => {
     await selectConversation();
     await act(async () => {
       const state = useCanvasStore.getState();
-      state._setStateNoAutosave({
+      state._setStateRaw({
         nodes: state.nodes.filter((node) => node.id !== 'question-1'),
       });
     });
@@ -1541,7 +1541,7 @@ describe('StrokeSelectionToolbar Ink submission', () => {
 
   it('excludes Agent Nodes nested in selected Frames from source and grounding trees', async () => {
     const state = useCanvasStore.getState();
-    state._setStateNoAutosave({
+    state._setStateRaw({
       nodes: [
         {
           id: 'frame',
@@ -1633,7 +1633,7 @@ describe('StrokeSelectionToolbar Ink submission', () => {
     await act(async () => submit.click());
     await act(async () => {
       const state = useCanvasStore.getState();
-      state._setStateNoAutosave({
+      state._setStateRaw({
         nodes: state.nodes.map((node) =>
           node.id === 'question-1'
             ? { ...node, data: { ...node.data, threadId: 'replaced-thread' } }
@@ -1758,9 +1758,7 @@ describe('StrokeSelectionToolbar Ink submission', () => {
       );
       await act(async () => {
         if (change === 'canvas') {
-          useCanvasStore
-            .getState()
-            ._setStateNoAutosave({ canvasId: 'canvas-2' });
+          useCanvasStore.getState()._setStateRaw({ canvasId: 'canvas-2' });
         } else {
           useGesturePreviewStore.setState({
             sketchStrokeSelection: { 'sketch-1': ['stroke-2'] },
@@ -1780,7 +1778,7 @@ describe('StrokeSelectionToolbar Ink submission', () => {
   );
 
   it('keeps submit visible without a source count for a mixed selection', async () => {
-    useCanvasStore.getState()._setStateNoAutosave({
+    useCanvasStore.getState()._setStateRaw({
       nodes: [
         {
           id: 'sketch-1',
@@ -1829,7 +1827,7 @@ describe('StrokeSelectionToolbar Ink submission', () => {
 
   it('keeps Delete in an always-visible overflow menu', async () => {
     const state = useCanvasStore.getState();
-    state._setStateNoAutosave({
+    state._setStateRaw({
       nodes: state.nodes.map((node) =>
         node.id === 'sketch-1'
           ? {
@@ -1893,7 +1891,7 @@ describe('StrokeSelectionToolbar Ink submission', () => {
   });
 
   it('keeps only the identity divider when a mixed selection has no style controls', async () => {
-    useCanvasStore.getState()._setStateNoAutosave({
+    useCanvasStore.getState()._setStateRaw({
       nodes: [
         ...useCanvasStore.getState().nodes,
         {
@@ -1915,7 +1913,7 @@ describe('StrokeSelectionToolbar Ink submission', () => {
   });
 
   it('captures hidden grounding before dispatching mixed Ink and objects', async () => {
-    useCanvasStore.getState()._setStateNoAutosave({
+    useCanvasStore.getState()._setStateRaw({
       nodes: [
         {
           id: 'sketch-1',
@@ -1961,7 +1959,7 @@ describe('StrokeSelectionToolbar Ink submission', () => {
   });
 
   it('uses the activation viewport without resampling live viewport state', async () => {
-    useCanvasStore.getState()._setStateNoAutosave({
+    useCanvasStore.getState()._setStateRaw({
       nodes: [
         {
           id: 'sketch-1',
@@ -2001,7 +1999,7 @@ describe('StrokeSelectionToolbar Ink submission', () => {
   });
 
   it('dispatches the frozen snapshot while viewport, selection, and Canvas change', async () => {
-    useCanvasStore.getState()._setStateNoAutosave({
+    useCanvasStore.getState()._setStateRaw({
       nodes: [
         {
           id: 'sketch-1',
@@ -2045,7 +2043,7 @@ describe('StrokeSelectionToolbar Ink submission', () => {
           { x: 550, y: 550 },
         ],
       });
-      useCanvasStore.getState()._setStateNoAutosave({ canvasId: 'canvas-2' });
+      useCanvasStore.getState()._setStateRaw({ canvasId: 'canvas-2' });
       grounding.resolve({
         blob: new Blob(['png'], { type: 'image/png' }),
         crop: { x: 0, y: 0, width: 320, height: 100 },
@@ -2070,7 +2068,7 @@ describe('StrokeSelectionToolbar Ink submission', () => {
   });
 
   it('reports a genuine activation-time crop outside the visible Canvas', async () => {
-    useCanvasStore.getState()._setStateNoAutosave({
+    useCanvasStore.getState()._setStateRaw({
       nodes: [
         {
           id: 'sketch-1',
@@ -2105,7 +2103,7 @@ describe('StrokeSelectionToolbar Ink submission', () => {
   });
 
   it('keeps Frame-nested Ink unique and grounds the final source tree', async () => {
-    useCanvasStore.getState()._setStateNoAutosave({
+    useCanvasStore.getState()._setStateRaw({
       nodes: [
         {
           id: 'frame-1',
@@ -2157,7 +2155,7 @@ describe('StrokeSelectionToolbar Ink submission', () => {
   });
 
   it('requires a choice for multiple conversations regardless of selected Agent Nodes', async () => {
-    useCanvasStore.getState()._setStateNoAutosave({
+    useCanvasStore.getState()._setStateRaw({
       nodes: [
         {
           id: 'question-1',
@@ -2207,7 +2205,7 @@ describe('StrokeSelectionToolbar Ink submission', () => {
         },
       ],
     });
-    useCanvasStore.getState()._setStateNoAutosave({
+    useCanvasStore.getState()._setStateRaw({
       nodes: [
         {
           id: 'question-1',
@@ -2272,7 +2270,7 @@ describe('StrokeSelectionToolbar Ink submission', () => {
         },
       ],
     });
-    useCanvasStore.getState()._setStateNoAutosave({
+    useCanvasStore.getState()._setStateRaw({
       nodes: [
         {
           id: 'question-1',
@@ -2309,7 +2307,7 @@ describe('StrokeSelectionToolbar Ink submission', () => {
   });
 
   it('excludes an internal Ask conversation from continuation', async () => {
-    useCanvasStore.getState()._setStateNoAutosave({
+    useCanvasStore.getState()._setStateRaw({
       nodes: [
         {
           id: 'question-1',
@@ -2420,7 +2418,7 @@ describe('StrokeSelectionToolbar Ink submission', () => {
       targetType: 'pdf',
       label: 'Original paper',
     };
-    useCanvasStore.getState()._setStateNoAutosave({
+    useCanvasStore.getState()._setStateRaw({
       nodes: [
         ink,
         {
@@ -2454,7 +2452,7 @@ describe('StrokeSelectionToolbar Ink submission', () => {
         }),
       ]);
       await act(async () => {
-        useCanvasStore.getState()._setStateNoAutosave({
+        useCanvasStore.getState()._setStateRaw({
           nodes: useCanvasStore
             .getState()
             .nodes.map((node) =>
@@ -2485,7 +2483,7 @@ describe('StrokeSelectionToolbar Ink submission', () => {
 
     await act(async () => button.click());
     const capturedSources = mocks.prepare.mock.calls[0][0].sources;
-    useCanvasStore.getState()._setStateNoAutosave({
+    useCanvasStore.getState()._setStateRaw({
       nodes: [
         {
           id: 'sketch-1',
@@ -2602,7 +2600,7 @@ describe('StrokeSelectionToolbar Ink submission', () => {
     const button = await renderToolbar();
 
     await act(async () => button.click());
-    useCanvasStore.getState()._setStateNoAutosave({
+    useCanvasStore.getState()._setStateRaw({
       nodes: [
         {
           id: 'sketch-1',

@@ -182,9 +182,24 @@ export function registerSpaceCardRoutes(app: FastifyInstance): void {
             throw new Error(
               `Space rename metadata write failed: ${written.reason}`,
             );
+          // The rename advances the version without changing a node, so it
+          // is published as the update that takes pages from the previous
+          // version to this one — they stay in step and show the new title
+          // instead of loading the Space again.
           publishCanvasUpdate(canvasId, {
-            type: 'snapshot',
-            data: { version: record.version },
+            type: 'update',
+            data: {
+              fromVersion: current.version,
+              toVersion: record.version,
+              deltas: [],
+              pendingEffects: {
+                mutatedNodeIds: [],
+                deletedNodeIds: [],
+                contentEditedNodeIds: [],
+                deferredFitFrameIds: [],
+              },
+              title: record.title,
+            },
           });
           return reply.send({
             title: record.title,

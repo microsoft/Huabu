@@ -1,10 +1,12 @@
-import { describe, expect, it } from 'vitest'
-import { HARNESS_DEFINITIONS } from '../src/harnesses/registry.js'
-import { compileHarnessLaunch } from '../src/harnesses/harness.js'
+import { describe, expect, it } from 'vitest';
+import { HARNESS_DEFINITIONS } from '../src/harnesses/registry.js';
+import { compileHarnessLaunch } from '../src/harnesses/harness.js';
 
 describe('harness definitions', () => {
   it('exposes the supported agents in stable UI order', () => {
-    expect(HARNESS_DEFINITIONS.map(({ id, displayName }) => ({ id, displayName }))).toEqual([
+    expect(
+      HARNESS_DEFINITIONS.map(({ id, displayName }) => ({ id, displayName })),
+    ).toEqual([
       { id: 'copilot', displayName: 'GitHub Copilot' },
       { id: 'claude', displayName: 'Claude Agent' },
       { id: 'gemini', displayName: 'Gemini' },
@@ -18,23 +20,29 @@ describe('harness definitions', () => {
       { id: 'pi', displayName: 'Pi' },
       { id: 'proxy', displayName: 'Filesystem Proxy' },
       { id: 'custom', displayName: 'Custom command' },
-    ])
-  })
+    ]);
+  });
 
   it('compiles trusted terminal-style commands', () => {
-    expect(compileHarnessLaunch({
-      kind: 'acp-harness',
-      harnessId: 'copilot',
-      options: { autoApprove: true },
-    })).toEqual({ kind: 'shell', command: 'copilot --acp --allow-all' })
-    expect(compileHarnessLaunch({
-      kind: 'acp-harness',
-      harnessId: 'kimi',
-      options: { autoApprove: true },
-    })).toEqual({ kind: 'shell', command: 'kimi --yolo acp' })
-    expect(compileHarnessLaunch({
-      kind: 'acp-harness',
-      harnessId: 'claude',
-    })).toEqual({ kind: 'shell', command: 'claude-agent-acp' })
-  })
-})
+    expect(
+      compileHarnessLaunch({
+        kind: 'acp-harness',
+        harnessId: 'copilot',
+        options: { autoApprove: true },
+      }),
+    ).toEqual({ kind: 'shell', command: 'copilot --acp --allow-all' });
+    expect(
+      compileHarnessLaunch({
+        kind: 'acp-harness',
+        harnessId: 'kimi',
+        options: { autoApprove: true },
+      }),
+    ).toEqual({ kind: 'shell', command: 'kimi --yolo acp' });
+    expect(
+      compileHarnessLaunch({
+        kind: 'acp-harness',
+        harnessId: 'claude',
+      }),
+    ).toEqual({ kind: 'shell', command: 'claude-agent-acp' });
+  });
+});

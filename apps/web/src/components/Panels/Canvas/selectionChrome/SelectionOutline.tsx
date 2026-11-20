@@ -10,6 +10,8 @@ type Props = Omit<ComponentProps<'div'>, 'style' | 'children'> & {
   radius?: number;
   variant?: 'solid' | 'dashed' | 'offset';
   outlineOffset?: number;
+  /** Stroke colour; this page's own selection colour when omitted. */
+  color?: string;
 };
 
 /** Paint only: callers own geometry, portals, visibility, and gesture policy. */
@@ -18,9 +20,10 @@ export function SelectionOutline({
   radius = 0,
   variant = 'solid',
   outlineOffset = 0,
+  color = NODE_SELECTION_CHROME.color,
   ...props
 }: Props) {
-  const { width, color, dashArray } = NODE_SELECTION_CHROME;
+  const { width, dashArray } = NODE_SELECTION_CHROME;
   return (
     <div
       {...props}

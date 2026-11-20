@@ -8,6 +8,7 @@ import {
   moveNodeIntoFrame,
   moveNodeOutOfFrame,
   planStructuredDrop,
+  withMasonryLayoutOrder,
   readFrameGridConfig,
   readFrameGridRow,
   readFrameTrack,
@@ -208,9 +209,14 @@ export default function resolveNodeDragStop(
   );
   const dropOutcome = buildGridDropCommands(dropPlans, ui.nodes);
 
+  let placed = applyPendingMutations(result, dropOutcome);
+  const movedIds = new Set<string>(intent.draggedNodeIds);
+  for (const frameId of affectedFrameIds) {
+    placed = withMasonryLayoutOrder(placed, frameId, movedIds, ui.edges);
+  }
   // Resolve destination cells before reflow can replace the live insertion coordinate.
   const projection = projectAffectedFrameGeometry(
-    applyPendingMutations(result, dropOutcome),
+    placed,
     affectedFrameIds,
     ui.edges,
   );

@@ -1,4 +1,4 @@
-import { defineCommandHarness } from './common/define-command-harness.js'
+import { defineCommandHarness } from './common/define-command-harness.js';
 
 export const codebuddyHarness = defineCommandHarness({
   id: 'codebuddy',
@@ -6,4 +6,4 @@ export const codebuddyHarness = defineCommandHarness({
   command: 'codebuddy',
   acpArgs: ['--acp'],
   installHint: 'npm install -g @tencent-ai/codebuddy-code',
-})
+});

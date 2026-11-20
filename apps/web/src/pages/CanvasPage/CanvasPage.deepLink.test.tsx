@@ -136,7 +136,7 @@ async function renderAt(
   state: unknown = null,
 ) {
   const selectNodes = vi.fn();
-  const loadCanvas = vi.fn(async () => undefined);
+  const loadCanvas = vi.fn(async () => 'loaded' as const);
   useCanvasStore.setState({
     canvasId: CANVAS_ID,
     canvasNotFound: false,
@@ -263,14 +263,14 @@ describe('CanvasPage node deep-link navigation', () => {
     mocks.spaceSummaries = { child: { parentSpaceId: 'parent' } };
     await renderAt(`/canvas/${CANVAS_ID}`, node('note'), null);
     await act(async () => {
-      useCanvasStore.getState()._setStateNoAutosave({ isLoading: true });
+      useCanvasStore.getState()._setStateRaw({ isLoading: true });
     });
     const entry = {
       ...node('spacePreview', { targetCanvasId: 'child' }),
       selected: true,
     };
     await act(async () => {
-      useCanvasStore.getState()._setStateNoAutosave({
+      useCanvasStore.getState()._setStateRaw({
         nodes: [entry],
         edges: [
           { id: 'edge-1', source: entry.id, target: entry.id, selected: true },
@@ -291,7 +291,7 @@ describe('CanvasPage node deep-link navigation', () => {
     const { router } = await renderAt(`/canvas/${CANVAS_ID}`, entry, null);
     await act(async () => {
       usePanelStore.setState({ isPreviewFullscreen: true });
-      useCanvasStore.getState()._setStateNoAutosave({
+      useCanvasStore.getState()._setStateRaw({
         edges: [
           { id: 'edge-1', source: 'node-1', target: 'node-1', selected: true },
         ],
@@ -305,7 +305,6 @@ describe('CanvasPage node deep-link navigation', () => {
     const after = useCanvasStore.getState();
     expect(after.nodes[0]).toEqual({ ...entry, selected: false });
     expect(after.edges[0]).toEqual({ ...before.edges[0], selected: false });
-    expect(after.pendingSave).toBe(before.pendingSave);
     expect(after.version).toBe(before.version);
     expect(mocks.fitNodesOnCanvas).not.toHaveBeenCalled();
   });

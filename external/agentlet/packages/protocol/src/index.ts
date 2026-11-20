@@ -10,19 +10,22 @@ export {
   AgentMethods,
   ServerMethods,
   ErrorCodes,
-} from './constants.js'
+} from './constants.js';
 
-export * from './filesystem.js'
+export * from './filesystem.js';
 
-export { parseAcpHarnessLaunch, parseAgentProfileLaunch } from './harness.js'
-export { CUSTOM_COMMAND_WRAPPER_ID, CUSTOM_COMMAND_CAPABILITIES } from './harness.js'
+export { parseAcpHarnessLaunch, parseAgentProfileLaunch } from './harness.js';
+export {
+  CUSTOM_COMMAND_WRAPPER_ID,
+  CUSTOM_COMMAND_CAPABILITIES,
+} from './harness.js';
 export type {
   AgentProfileLaunch,
   AcpHarnessLaunch,
   HarnessCapabilities,
   HarnessLaunchOptions,
   HarnessLaunchPlan,
-} from './harness.js'
+} from './harness.js';
 
 export type {
   JsonRpcRequest,
@@ -33,7 +36,7 @@ export type {
   JsonRpcResponse,
   JsonRpcMessage,
   AcpMessage,
-} from './json-rpc.js'
+} from './json-rpc.js';
 
 export type {
   AgentletProfile,
@@ -68,9 +71,6 @@ export type {
   HarnessDiscoveryParams,
   HarnessDiscoveryResult,
   LifecycleEvent,
-} from './messages.js'
+} from './messages.js';
 
-export type {
-  AuthResult,
-  AgentConnection,
-} from './gateway-types.js'
+export type { AuthResult, AgentConnection } from './gateway-types.js';

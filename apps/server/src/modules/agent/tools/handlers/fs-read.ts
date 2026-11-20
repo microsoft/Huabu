@@ -99,7 +99,6 @@ async function projectNodeRead(
   const rev = nodeRevisionOf(nc);
   const { nodeId: id, content, ...metadata } = nc;
   readSet?.set(nodeId, rev);
-  readSet?.set(`metadata:${nodeId}`, rev);
   return { content, frontmatter: { ...metadata, id }, rev };
 }
 

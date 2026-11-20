@@ -10,6 +10,40 @@ import {
   openPostgresTestDatabase,
   openPostgresTestStore,
 } from './test-support.js';
+/**
+ * Everything the migrations define in the current schema: columns in order
+ * with type, nullability and default; constraints; indexes.
+ */
+async function describeSchema(db: {
+  query(sql: string): Promise<{ rows: Array<Record<string, unknown>> }>;
+}) {
+  const rows = async (sql: string) => (await db.query(sql)).rows;
+  return {
+    columns: await rows(
+      `SELECT table_name, ordinal_position, column_name, data_type,
+              is_nullable, column_default, is_identity, identity_generation
+       FROM information_schema.columns
+       WHERE table_schema = current_schema()
+       ORDER BY table_name, ordinal_position`,
+    ),
+    constraints: await rows(
+      `SELECT c.conrelid::regclass::text AS table_name, c.conname, c.contype,
+              pg_get_constraintdef(c.oid) AS definition
+       FROM pg_constraint c
+       JOIN pg_namespace n ON n.oid = c.connamespace
+       WHERE n.nspname = current_schema()
+       ORDER BY table_name, c.conname`,
+    ),
+    indexes: await rows(
+      `SELECT tablename, indexname,
+              replace(indexdef, current_schema() || '.', '') AS indexdef
+       FROM pg_indexes
+       WHERE schemaname = current_schema()
+       ORDER BY tablename, indexname`,
+    ),
+  };
+}
+
 const cleanup: Array<() => Promise<unknown>> = [];
 afterEach(async () => {
   for (const close of cleanup.splice(0).reverse()) await close();
@@ -55,6 +89,63 @@ it('runs on PostgreSQL 18 and serializes simultaneous fresh migrations', async (
       'delta_log',
     ]),
   );
+});
+it('reaches the same v4 schema from a fresh database and from a v2 database', async () => {
+  const fresh = await openPostgresTestStore(false);
+  cleanup.push(fresh.cleanup);
+  const h = await openPostgresTestDatabase();
+  cleanup.push(h.cleanup);
+  const pool = new Pool(h.config);
+  cleanup.push(() => pool.end());
+  for (const migration of POSTGRES_MIGRATIONS.slice(0, 2))
+    await pool.query(migration.sql);
+  await pool.query(
+    'CREATE TABLE huabu_schema_version (id INTEGER PRIMARY KEY CHECK (id = 1), version INTEGER NOT NULL)',
+  );
+  await pool.query('INSERT INTO huabu_schema_version VALUES (1, 2)');
+  await pool.query(
+    "INSERT INTO workspaces VALUES ('original', 'Original', 1, 1, NULL)",
+  );
+  await pool.query(
+    "INSERT INTO spaces (workspace_id, canvas_id, title, collision_key, version, created_at, updated_at, state_json) VALUES ('original', 's', 'S', 's', 3, 1, 1, '{}')",
+  );
+  await pool.query("INSERT INTO nodes VALUES ('s', 'n', '{}', 'r', 'n')");
+  const context = new PostgresStoreContext(h.config);
+  cleanup.push(() => context.close());
+  await context.init();
+  const db = context.connection();
+  expect(POSTGRES_MIGRATIONS.length).toBe(4);
+  expect((await db.query('SELECT * FROM huabu_schema_version')).rows).toEqual([
+    { id: 1, version: 4 },
+  ]);
+  expect(
+    (await db.query('SELECT canvas_id, version, node_change_seq FROM spaces'))
+      .rows,
+  ).toEqual([{ canvas_id: 's', version: 3, node_change_seq: '0' }]);
+  expect(
+    (await db.query('SELECT node_id, change_seq FROM nodes')).rows,
+  ).toEqual([{ node_id: 'n', change_seq: '0' }]);
+  const upgraded = await describeSchema(db);
+  expect(upgraded).toEqual(await describeSchema(fresh.context.connection()));
+  expect(upgraded.indexes.map((row) => row['indexname'])).toEqual(
+    expect.arrayContaining(['nodes_by_change', 'space_save_results_by_age']),
+  );
+  expect(
+    [...new Set(upgraded.columns.map((row) => row['table_name']))].sort(),
+  ).toEqual([
+    'changes',
+    'delta_log',
+    'events',
+    'huabu_schema_version',
+    'nodes',
+    'server_records',
+    'space_extensions',
+    'space_save_heads',
+    'space_save_results',
+    'spaces',
+    'tasks',
+    'workspaces',
+  ]);
 });
 it('opens the original v1 schema without changing existing data', async () => {
   const h = await openPostgresTestDatabase();

@@ -48,7 +48,7 @@ function pointerDown(pointerType: 'mouse' | 'touch'): Event {
 }
 
 beforeEach(() => {
-  useCanvasStore.getState()._setStateNoAutosave({
+  useCanvasStore.getState()._setStateRaw({
     nodes: [
       {
         id: 'sketch-1',

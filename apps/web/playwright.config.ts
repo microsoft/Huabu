@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -53,6 +53,15 @@ const runId = `${process.pid}-${randomUUID()}`;
 const e2eWorkspace = join(tmpdir(), `huabu-e2e-workspace-${runId}`);
 const e2eDataDir = join(tmpdir(), `huabu-e2e-data-${runId}`);
 
+// The backend's machine credential — what an external Agent presents on
+// `/api/rfs/*`. A deployment fixes it with `HUABU_CONNECTION_TOKEN`; the suite
+// does the same for the backend it boots, so a spec that needs an Agent's
+// write can make it as an Agent does (`e2e/agent-execute.ts`). Set in this
+// process's environment so test workers, which inherit it, present the same
+// value; a value already in the environment is kept.
+const connectionToken = (process.env.HUABU_CONNECTION_TOKEN ??=
+  randomBytes(32).toString('hex'));
+
 // Only the Disk structured backend gives a Workspace a folder to lock onto.
 // Anything else is isolated by its data dir alone, and would refuse to boot if
 // handed a Workspace path (see `initWorkspaceFromEnv`).
@@ -103,6 +112,7 @@ export default defineConfig({
         SERVER_PORT: E2E_SERVER_PORT,
         ...(workspaceIsAFolder ? { HUABU_WORKSPACE: e2eWorkspace } : {}),
         HUABU_DATA_DIR: e2eDataDir,
+        HUABU_CONNECTION_TOKEN: connectionToken,
       },
     },
     {

@@ -13,6 +13,7 @@ import {
   getRequestAuthorizations,
   setRequestWorkspaceChooser,
   getRequestIdentity,
+  markAgentCredential,
   setRequestIdentity,
 } from './request.js';
 import { IdentityError, UNRESTRICTED_ACCESS } from './service.js';
@@ -146,6 +147,7 @@ export function registerIdentity(
       supplied.length === expected.length &&
       timingSafeEqual(supplied, expected)
     ) {
+      markAgentCredential(request);
       setRequestIdentity(request, {
         principal: { principalId: 'huabu-agentlet', kind: 'bot' },
         member: true,
@@ -168,6 +170,8 @@ export function registerIdentity(
     // is read once, in `resolveIdentity`, which runs on every revalidation.
     const agentCredential =
       service.provider === 'bubble' && isAgentCredential(bearer);
+    // Whoever the credential resolves to, the request is an agent's.
+    if (agentCredential) markAgentCredential(request);
     const resolveIdentity = async () => {
       if (!agentCredential) return service.authenticate(credentials);
       // Read afresh on every revalidation too: resetting its owner's

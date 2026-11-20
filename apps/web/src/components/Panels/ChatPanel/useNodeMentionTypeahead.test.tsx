@@ -112,7 +112,7 @@ beforeEach(() => {
     return 1;
   });
   useChatStore.setState({ threadsById: {}, selectionAttachment: null });
-  useCanvasStore.getState()._setStateNoAutosave({
+  useCanvasStore.getState()._setStateRaw({
     canvasId: 'canvas',
     nodes: ['Other Herd', 'Herdr', 'Herdr notes', '研究笔记'].map(
       (label, index) => ({
@@ -169,7 +169,7 @@ describe('parseNodeMention', () => {
 
 describe('node mention typeahead', () => {
   it('keeps all matches accessible while mounting a bounded window', () => {
-    useCanvasStore.getState()._setStateNoAutosave({
+    useCanvasStore.getState()._setStateRaw({
       nodes: Array.from({ length: 2000 }, (_, index) => ({
         id: `large-${index}`,
         type: 'note',

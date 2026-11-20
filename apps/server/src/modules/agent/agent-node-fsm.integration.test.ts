@@ -5,7 +5,7 @@ import multipart from '@fastify/multipart';
 import fastify from 'fastify';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { createId } from '@huabu/shared';
+import { createId, editsPerCommand } from '@huabu/shared';
 
 import { agenetes } from './agenetes/drivers.js';
 import { buildHuabuPiWorkloadSpec } from './agenetes/pi-driver.js';
@@ -28,9 +28,25 @@ import {
   type MountedTestStorage,
 } from '../storage/testing.js';
 import { canvasAcpNamespace } from '../workspace/paths.js';
+import {
+  acquireWorkspaceOperationLease,
+  commitWorkspaceIdentity,
+  getWorkspaceHandle,
+  getWorkspaceKey,
+  isWorkspaceLeased,
+  WorkspaceOperationInProgressError,
+} from '../workspace.js';
 
 import type { AgentNodeTarget } from './agent-thread-resolver.js';
 import type { CanvasNode } from '@huabu/shared/canvas-engine';
+
+function deferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((settle) => {
+    resolve = settle;
+  });
+  return { promise, resolve };
+}
 
 forEachProductProfile((profile, label) => {
   describe(`Agent Node runtime persistence (${label})`, () => {
@@ -83,6 +99,7 @@ forEachProductProfile((profile, label) => {
     });
 
     afterEach(async () => {
+      vi.restoreAllMocks();
       if (target) await agenetes.close(target.threadId);
       await mounted?.close();
     });
@@ -111,6 +128,99 @@ forEachProductProfile((profile, label) => {
       if (!canvas) throw new Error('Space disappeared');
       return canvas.state.nodes[0] as CanvasNode;
     }
+
+    function assertWorkspacePinned() {
+      const workspace = getWorkspaceHandle();
+      if (!workspace) throw new Error('Missing fixture Workspace');
+      expect(isWorkspaceLeased(getWorkspaceKey())).toBe(true);
+      expect(() =>
+        commitWorkspaceIdentity({
+          ...workspace,
+          workspaceId: `${workspace.workspaceId}-other`,
+        }),
+      ).toThrow(WorkspaceOperationInProgressError);
+    }
+
+    it.each([
+      ['record', false],
+      ['record', true],
+      ['history', false],
+      ['history', true],
+    ] as const)(
+      'pins binding confirmation across delayed %s (failure: %s)',
+      async (stage, fails) => {
+        if (stage === 'record') await createCanonicalExecution();
+        const entered = deferred();
+        const proceed = deferred();
+        const pause = async () => {
+          entered.resolve();
+          await proceed.promise;
+          if (fails) throw new Error('Binding read unavailable');
+        };
+        const record = agenetes.record.bind(agenetes);
+        const history = agenetes.history.bind(agenetes);
+        const read =
+          stage === 'record'
+            ? vi
+                .spyOn(agenetes, 'record')
+                .mockImplementation(async (...args) => {
+                  await pause();
+                  return record(...args);
+                })
+            : vi
+                .spyOn(agenetes, 'history')
+                .mockImplementation(async (...args) => {
+                  await pause();
+                  return history(...args);
+                });
+        const pending = agentNodeBinding.confirm(target);
+        const settled = fails
+          ? expect(pending).rejects.toThrow('Binding read unavailable')
+          : expect(pending).resolves.toEqual(
+              stage === 'record' ? { kind: 'internal' } : null,
+            );
+        await entered.promise;
+        try {
+          assertWorkspacePinned();
+          expect((await current()).data.bindingState).toBe('editing');
+        } finally {
+          proceed.resolve();
+          await settled;
+        }
+        expect(read).toHaveBeenCalledOnce();
+        expect(isWorkspaceLeased(getWorkspaceKey())).toBe(false);
+        expect(target.bindingState).toBe(
+          stage === 'record' && !fails ? 'bound' : 'editing',
+        );
+        expect((await current()).data.bindingState).toBe(target.bindingState);
+      },
+    );
+
+    it('retains the binding lease while promotion waits for the Canvas mutex', async () => {
+      await createCanonicalExecution();
+      const entered = deferred();
+      const proceed = deferred();
+      const blocker = withCanvasMutex(target.canvasId, async () => {
+        entered.resolve();
+        await proceed.promise;
+      });
+      await entered.promise;
+      const pending = agentNodeBinding.confirm(target, {
+        record: await agenetes.record(
+          canvasAcpNamespace(target.canvasId),
+          target.threadId,
+        ),
+      });
+      try {
+        assertWorkspacePinned();
+        expect((await current()).data.bindingState).toBe('editing');
+      } finally {
+        proceed.resolve();
+        await Promise.all([blocker, pending]);
+      }
+      expect(isWorkspaceLeased(getWorkspaceKey())).toBe(false);
+      expect((await current()).data.bindingState).toBe('bound');
+    });
 
     it.each(['Deployment', 'Job'] as const)(
       'confirms a durable %s record before any run starts',
@@ -182,6 +292,7 @@ forEachProductProfile((profile, label) => {
         hasHistory: () => false,
         promote: vi.fn().mockRejectedValue(new Error('Projection unavailable')),
         acquireTurn: acquireAgentTurn,
+        acquireWorkspaceLease: acquireWorkspaceOperationLease,
       });
       await expect(coordinator.confirm(target)).rejects.toThrow(
         'Projection unavailable',
@@ -255,7 +366,7 @@ forEachProductProfile((profile, label) => {
       }
     });
 
-    it.each(['command', 'put', 'delta'] as const)(
+    it.each(['command', 'delta'] as const)(
       'preserves the same-config binding and version policy during %s Save',
       async (operation) => {
         await createCanonicalExecution();
@@ -263,11 +374,10 @@ forEachProductProfile((profile, label) => {
         if (!before) throw new Error('Space disappeared');
         const node = await current();
         expect(node.data.bindingState).toBe('editing');
-        const expectedBindingState = operation === 'put' ? 'editing' : 'bound';
-        const expectedVersion = before.version + (operation === 'put' ? 1 : 2);
-        const expectedLabel = operation === 'put' ? 'Agent' : 'Saved';
-        const expectedPosition =
-          operation === 'put' ? { x: 40, y: 60 } : node.position;
+        const expectedBindingState = 'bound';
+        const expectedVersion = before.version + 2;
+        const expectedLabel = 'Saved';
+        const expectedPosition = node.position;
         if (operation === 'command') {
           const result = await executeOnServer({
             canvasId: target.canvasId,
@@ -289,36 +399,6 @@ forEachProductProfile((profile, label) => {
           });
           expect(result.fromVersion).toBe(before.version + 1);
           expect(result.toVersion).toBe(before.version + 2);
-        } else if (operation === 'put') {
-          const app = fastify();
-          try {
-            await app.register(multipart);
-            await app.register(canvasRoutes, { prefix: '/canvas' });
-            const response = await app.inject({
-              method: 'PUT',
-              url: `/canvas/${target.canvasId}`,
-              payload: {
-                version: before.version,
-                state: {
-                  ...before.state,
-                  nodes: [
-                    {
-                      ...node,
-                      position: expectedPosition,
-                      data: {
-                        agentBinding: { kind: 'internal' },
-                        label: 'Saved',
-                      },
-                    },
-                  ],
-                },
-              },
-            });
-            expect(response.statusCode, response.body).toBe(200);
-            expect(response.json().version).toBe(expectedVersion);
-          } finally {
-            await app.close();
-          }
         } else {
           const result = await withCanvasMutex(target.canvasId, () =>
             applyDeltasOnServerAlreadyLocked({
@@ -387,7 +467,7 @@ forEachProductProfile((profile, label) => {
       expect((await current()).data.bindingState).toBe('bound');
     });
 
-    it('allows a layout PUT with unchanged preparation while a prompt is admitted', async () => {
+    it('allows a layout edit while a prompt is admitted', async () => {
       const release = acquireAgentTurn(
         target.threadId,
         canvasAcpNamespace(target.canvasId),
@@ -397,24 +477,16 @@ forEachProductProfile((profile, label) => {
       try {
         await app.register(multipart);
         await app.register(canvasRoutes, { prefix: '/canvas' });
-        const canvas = await space(target.canvasId).read();
-        if (!canvas) throw new Error('Space disappeared');
         const response = await app.inject({
-          method: 'PUT',
-          url: `/canvas/${target.canvasId}`,
+          method: 'POST',
+          url: `/canvas/${target.canvasId}/execute`,
           payload: {
-            version: canvas.version,
-            state: {
-              nodes: [
-                {
-                  id: target.nodeId,
-                  type: 'question',
-                  position: { x: 42, y: 0 },
-                  data: { agentBinding: { kind: 'internal' } },
-                },
-              ],
-              edges: [],
-            },
+            edits: editsPerCommand([
+              {
+                type: 'SET_NODE_GEOMETRY',
+                items: [{ nodeId: target.nodeId, position: { x: 42, y: 0 } }],
+              },
+            ]),
           },
         });
         expect(response.statusCode, response.body).toBe(200);

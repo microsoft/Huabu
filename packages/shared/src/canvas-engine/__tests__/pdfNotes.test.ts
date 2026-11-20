@@ -3,6 +3,7 @@
 
 import { describe, expect, it } from 'vitest';
 
+import { collectCommandIds, commandReadTargets } from '../commandTargets.js';
 import { executeCanvasCommands } from '../executor.js';
 import { includePdfNotes } from '../pdfNotes.js';
 
@@ -281,5 +282,147 @@ describe('PDF-owned real Notes', () => {
         [pdf, note, other],
       ).commandResults[0].applied,
     ).toBe(false);
+  });
+
+  describe('as a browser page sends them', () => {
+    const bare = { ...pdf, data: {} };
+    const init = (noteId?: string): CanvasCommand =>
+      ({
+        type: 'INITIALIZE_PDF_NOTE',
+        nodeId: 'node-pdf',
+        ...(noteId ? { noteId } : {}),
+      }) as CanvasCommand;
+
+    it('creates the Note under the id the page chose, so page and Server agree', () => {
+      const page = run([init('node-chosen')], [bare]);
+      const server = run([init('node-chosen')], [bare]);
+      expect(page.commandResults[0].applied).toBe(true);
+      expect(page.writeResult.nodes).toEqual(server.writeResult.nodes);
+      expect(page.writeResult.nodes).toEqual([
+        expect.objectContaining({
+          id: 'node-pdf',
+          data: expect.objectContaining({ noteNodeId: 'node-chosen' }),
+        }),
+        expect.objectContaining({
+          id: 'node-chosen',
+          type: 'note',
+          hidden: true,
+        }),
+      ]);
+    });
+
+    it('refuses a chosen id from an agent, and one that is already taken', () => {
+      const agent = executeCanvasCommands(
+        { source: 'agent', commands: [init('node-chosen')] },
+        { nodes: [bare], edges: [], canvasId: 'space' },
+      );
+      expect(agent.commandResults[0]).toMatchObject({
+        applied: false,
+        reason: 'invalid-scope',
+      });
+      const other = { ...note, id: 'node-chosen', hidden: false };
+      expect(
+        run([init('node-chosen')], [bare, other]).commandResults[0],
+      ).toMatchObject({ applied: false, reason: 'invalid-target' });
+    });
+
+    it('answers no-op, creating nothing, when another page gave the PDF its Note first', () => {
+      const result = run([init('node-mine')]);
+      expect(result.commandResults[0]).toMatchObject({
+        applied: false,
+        reason: 'no-op',
+      });
+      expect(result.writeResult.nodes.map((node) => node.id)).toEqual([
+        'node-pdf',
+        'node-note',
+      ]);
+    });
+
+    it('names the PDF as the node the command must have read', () => {
+      expect(commandReadTargets(init('node-chosen'))).toEqual({
+        existence: ['node-pdf'],
+        membership: [],
+      });
+      const nodeIds = new Set<string>();
+      collectCommandIds(init('node-chosen'), nodeIds, new Set());
+      expect([...nodeIds]).toEqual(['node-pdf', 'node-chosen']);
+    });
+
+    it('undoes the creation as a deletion plus an unset link, and refuses the unset alone', () => {
+      const undo = run([
+        { type: 'DELETE_NODES', nodeIds: ['node-note'] },
+        {
+          type: 'MERGE_NODE_DATA',
+          patches: [{ nodeId: 'node-pdf', patch: {}, unset: ['noteNodeId'] }],
+        },
+      ]);
+      expect(undo.writeResult.nodes).toEqual([
+        expect.objectContaining({ id: 'node-pdf', data: {} }),
+      ]);
+      // Without the deletion the Note would be left without an owner.
+      const orphan = run([
+        {
+          type: 'MERGE_NODE_DATA',
+          patches: [{ nodeId: 'node-pdf', patch: {}, unset: ['noteNodeId'] }],
+        },
+      ]);
+      expect(orphan.commandResults[0]).toMatchObject({
+        applied: false,
+        reason: 'invalid-target',
+      });
+      expect(orphan.writeResult.nodes).toEqual([pdf, note]);
+    });
+
+    it('restores a deleted pair whole, with the Note body and the link', () => {
+      const restored = run(
+        [{ type: 'RESTORE_NODES', nodes: [pdf, note] } as CanvasCommand],
+        [],
+      );
+      expect(restored.commandResults[0].applied).toBe(true);
+      expect(restored.writeResult.nodes).toEqual([
+        expect.objectContaining({
+          id: 'node-pdf',
+          data: { noteNodeId: 'node-note' },
+        }),
+        expect.objectContaining({
+          id: 'node-note',
+          hidden: true,
+          data: { content: 'My notes' },
+        }),
+      ]);
+    });
+
+    it('restores the Note of a redone creation before linking it', () => {
+      const redo = run(
+        [
+          { type: 'RESTORE_NODES', nodes: [note] } as CanvasCommand,
+          {
+            type: 'MERGE_NODE_DATA',
+            patches: [
+              { nodeId: 'node-pdf', patch: { noteNodeId: 'node-note' } },
+            ],
+          },
+        ],
+        [bare],
+      );
+      expect(redo.commandResults.map((entry) => entry.applied)).toEqual([
+        true,
+        true,
+      ]);
+      expect(redo.writeResult.nodes).toHaveLength(2);
+    });
+
+    it('does not let a restore hand a PDF a Note that already exists on its own', () => {
+      const independent = { ...note, hidden: false };
+      const result = run(
+        [{ type: 'RESTORE_NODES', nodes: [pdf] } as CanvasCommand],
+        [independent],
+      );
+      expect(result.commandResults[0]).toMatchObject({
+        applied: false,
+        reason: 'invalid-target',
+      });
+      expect(result.writeResult.nodes).toEqual([independent]);
+    });
   });
 });

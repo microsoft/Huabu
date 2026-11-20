@@ -6,6 +6,7 @@ import { readSpaceRow, spaceRowExists } from './rows.js';
 import { createPostgresSpaceLogs } from './space-logs.js';
 import { PostgresSpaceNodes } from './space-nodes.js';
 import { PostgresSpaceRepository } from './space-repository.js';
+import { createPostgresSpaceSave } from './space-save.js';
 import { PostgresSpaceTasks } from './space-tasks.js';
 import { createPostgresSpaceWrite } from './space-write.js';
 import { sanitizeId } from '../../../../utils/fs.js';
@@ -57,6 +58,7 @@ export class PostgresStructuredStore implements StructuredStore {
         );
       },
       write: createPostgresSpaceWrite(context, workspaceId, canvasId),
+      save: createPostgresSpaceSave(context, workspaceId, canvasId),
       nodes: new PostgresSpaceNodes(context, workspaceId, canvasId),
       tasks: new PostgresSpaceTasks(context, workspaceId, canvasId),
       ...createPostgresSpaceLogs(context, workspaceId, canvasId),

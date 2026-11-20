@@ -5,7 +5,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { lookup as dnsLookup } from 'node:dns';
 import { BlockList, isIP } from 'node:net';
 
-import { Agent, buildConnector, Dispatcher1Wrapper } from 'undici';
+import { Agent, buildConnector } from 'undici';
 
 import { personalSettingsOwner } from '../identity/personal-settings.js';
 
@@ -79,21 +79,15 @@ function publicLookup(
 const connect = buildConnector({ lookup: publicLookup } as never);
 // Every connection, including each redirect hop, is checked where it is
 // made, so a name that resolves differently on a second lookup gains nothing.
-//
-// Node's built-in `fetch` speaks the handler protocol of the undici it
-// bundles, which this package's undici no longer accepts unwrapped: without
-// the wrapper every request fails, whatever its address.
-const publicOnlyAgent = new Dispatcher1Wrapper(
-  new Agent({
-    connect: (options, callback) => {
-      const host = options.hostname.replace(/^\[|\]$/g, '');
-      // A literal address is never looked up, so it is checked here.
-      if (isIP(host) && !isPublicAddress(host))
-        return callback(refused(host), null);
-      return connect(options, callback);
-    },
-  }),
-);
+const publicOnlyAgent = new Agent({
+  connect: (options, callback) => {
+    const host = options.hostname.replace(/^\[|\]$/g, '');
+    // A literal address is never looked up, so it is checked here.
+    if (isIP(host) && !isPublicAddress(host))
+      return callback(refused(host), null);
+    return connect(options, callback);
+  },
+});
 
 const scope = new AsyncLocalStorage<true>();
 
@@ -131,7 +125,10 @@ const DEFAULT_PORTS: Record<string, number> = { 'http:': 80, 'https:': 443 };
  * Whether a request to `url` leaves through a proxy. The global dispatcher
  * that `setup-proxy.ts` installs decides this per request, and a configured
  * proxy does not carry every one: `NO_PROXY` exempts hosts, and a scheme may
- * have no proxy at all. This mirrors undici's `EnvHttpProxyAgent`.
+ * have no proxy at all. This follows the `EnvHttpProxyAgent` of the undici
+ * this package pins, rule for rule. Where the two ever disagree the cost is
+ * bounded: a hop taken for proxied is still checked before it is sent, and
+ * one taken for direct still connects through the guarded dispatcher.
  */
 export function leavesThroughProxy(
   url: URL,
@@ -140,31 +137,19 @@ export function leavesThroughProxy(
   const http = env.http_proxy ?? env.HTTP_PROXY;
   const https = env.https_proxy ?? env.HTTPS_PROXY;
   if (!(url.protocol === 'https:' ? https || http : http)) return false;
-  let hostname = url.hostname.replace(/^\[(.+)\]$/, '$1').toLowerCase();
-  if (hostname.length > 1 && hostname.endsWith('.'))
-    hostname = hostname.slice(0, -1);
+  // `host` rather than `hostname`: an IPv6 literal keeps its brackets.
+  const hostname = url.host.replace(/:\d*$/, '').toLowerCase();
   const port = Number.parseInt(url.port, 10) || DEFAULT_PORTS[url.protocol];
-  for (const entry of (env.no_proxy ?? env.NO_PROXY ?? '').split(/[,\s]/)) {
+  const exemptions = env.no_proxy ?? env.NO_PROXY ?? '';
+  if (exemptions === '*') return false;
+  for (const entry of exemptions.split(/[,\s]/)) {
     if (!entry) continue;
-    // `[::1]:443`, or `host[:port]`; a bare IPv6 address has several colons
-    // and no port.
-    const bracketed = entry.match(/^\[(.+)\]:(\d+)$/);
-    const plain = entry.replace(/^\[(.+)\]$/, '$1');
-    const single =
-      !bracketed && plain.split(':').length === 2
-        ? plain.match(/^(.+):(\d+)$/)
-        : null;
-    const named = bracketed ?? single;
-    const exemptPort = named ? Number.parseInt(named[2], 10) : 0;
-    const exempt = (named ? named[1] : plain)
+    const withPort = entry.match(/^(.+):(\d+)$/);
+    const exempt = (withPort ? withPort[1] : entry)
       .replace(/^\*?\./, '')
-      .replace(/^(.+)\.$/, '$1')
       .toLowerCase();
-    if (exemptPort && exemptPort !== port) continue;
-    if (exempt === '*') return false;
-    // `*.example.com` exempts subdomains only, never `example.com` itself.
-    if (!entry.startsWith('*') && hostname === exempt) return false;
-    if (hostname.endsWith(`.${exempt}`)) return false;
+    if (withPort && Number.parseInt(withPort[2], 10) !== port) continue;
+    if (hostname === exempt || hostname.endsWith(`.${exempt}`)) return false;
   }
   return true;
 }
@@ -292,6 +277,10 @@ function proxyConfigured(): boolean {
  * The built-in `fetch` takes the guarded dispatcher, so callers keep its
  * `Response` and `FormData`: SDKs that probe for multipart support (image
  * edits) reject npm undici's, which cannot serialize Node's `FormData`.
+ * That only works while the npm `undici` the Agent comes from shares a major
+ * version with the one bundled in Node (`process.versions.undici`): undici 8's
+ * Agent rejects the handlers Node 24's fetch hands it, failing every guarded
+ * request. `outbound.test.ts` checks the pairing.
  *
  * Member work always connects directly, as it did before a deployment could
  * be public-only. The owner's fetches keep the configured proxy.

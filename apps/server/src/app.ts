@@ -43,6 +43,7 @@ import artifactRoute from './modules/artifact/artifact.route.js';
 import canvasRoutes from './modules/canvas/canvas.route.js';
 import { resetExternalNoteSessions } from './modules/canvas/external-watcher.js';
 import externalNoteRoutes from './modules/canvas/external.route.js';
+import presenceRoutes from './modules/canvas/presence.route.js';
 import syncRoutes from './modules/canvas/sync.route.js';
 import {
   authenticateUserAgentlet,
@@ -184,6 +185,7 @@ app.register(agentChangeReviewConfigRoutes, {
 app.register(canvasRoutes, { prefix: '/api/canvas' });
 app.register(externalNoteRoutes, { prefix: '/api/canvas' });
 app.register(syncRoutes, { prefix: '/api/canvas' });
+app.register(presenceRoutes, { prefix: '/api/canvas' });
 app.register(webRoutes, { prefix: '/api/web' });
 app.register(artifactRoute, { prefix: '/api/canvas' });
 

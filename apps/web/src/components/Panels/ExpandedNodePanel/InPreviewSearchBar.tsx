@@ -335,6 +335,8 @@ export const InPreviewSearchBar = ({
   return (
     <div
       role="presentation"
+      // The find field is inside the node's preview and edits nothing of it.
+      data-not-node-content
       className="border-edge-default bg-surface absolute top-3 right-3 z-50 flex h-9 items-center gap-1 rounded-lg border px-1.5 shadow-lg"
       onKeyDown={(e) => {
         if (e.key === 'Escape') {

@@ -119,7 +119,9 @@ The shared `CREATE_NODES` command converts `size.height: "auto"` to explicit Not
 
 ## 9. Persistence
 
-The hint and materialized height ride the ordinary structure save. Load recomputes geometry from current hints; stale hints retain the persisted numeric footprint only as a seed until measurement corrects it. No path rewrites an old key to make a seed appear fresh.
+The hint and materialized height are reported to the server as an `APPLY_MEASURED_HEIGHT` command through the browser's send queue: a page reports a current measurement once the node's content save has landed, and not when a measurement under the same key is already on the server, so two pages do not keep rewriting each other's size (see [browser structure edits](./canvas-realtime-sync.md#browser-structure-edits)). The server applies it only when the key matches its own copy of the body; otherwise the page keeps showing its measurement and the stored hint catches up on a later load. Load recomputes geometry from current hints; stale hints retain the persisted numeric footprint only as a seed until measurement corrects it. No path rewrites an old key to make a seed appear fresh.
+
+Renderer-owned types (`text`, `question`, `spacePreview`) have no authored height and no intrinsic-height hint. The box their renderer measured is reported the same way with `APPLY_MEASURED_SIZE` and stored as `data.measuredSize { width, height, measuredFor }`, mirrored to `measured`, so the headless engine lays Frames out around their real footprint. `measuredFor` is a `MeasuredSizeKey` — layout version, content revision and authored width (`'auto'` when none) — and a report whose key no longer matches the node is ignored. The reporting rules that keep two pages from rewriting each other's box are in [browser structure edits](./canvas-realtime-sync.md#browser-structure-edits). `RESTORE_NODES` seeds a returning node's `measured` from a stored box whose key still matches.
 
 Derived geometry is **not yet isolated from the sync path** — see §11.
 

@@ -22,6 +22,26 @@ export interface RequestAuthorization {
 }
 
 const identities = new WeakMap<FastifyRequest, ResolvedIdentity>();
+const agentCredentialRequests = new WeakSet<FastifyRequest>();
+
+/**
+ * Record that the request was admitted with a credential issued to agents
+ * and machines — the connection token, or a device or reachback credential —
+ * rather than with a person's session.
+ */
+export function markAgentCredential(request: FastifyRequest): void {
+  agentCredentialRequests.add(request);
+}
+
+/**
+ * Whether the request arrived with an agent or machine credential. Such a
+ * request speaks for an agent whatever its body says: it can never be a
+ * person's page (`ui`), even where the credential resolves to the identity
+ * of the person who owns the device.
+ */
+export function arrivedWithAgentCredential(request: FastifyRequest): boolean {
+  return agentCredentialRequests.has(request);
+}
 const authorizations = new WeakMap<FastifyRequest, RequestAuthorization[]>();
 
 export function setRequestIdentity(

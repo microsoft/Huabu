@@ -37,9 +37,12 @@ export {
   type AutoHeightFreshness,
   type AutoHeightHintRead,
   type AutoHeightKey,
+  type MeasuredSizeKey,
   HEIGHT_LAYOUT_VERSION,
   autoHeightKey,
+  measuredSizeKey,
   readAutoHeightHint,
+  readMeasuredSizeHint,
 } from './freshness.js';
 
 export {

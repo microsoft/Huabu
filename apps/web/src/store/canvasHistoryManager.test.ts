@@ -159,4 +159,42 @@ describe('CanvasHistoryRegistry', () => {
     expect(history.canUndo).toBe(false);
     expect(history.canRedo).toBe(false);
   });
+
+  it("keeps another page's saved content when a local edit is undone or redone", () => {
+    const history = new CanvasHistoryRegistry();
+    history.activate('remote-content');
+    const before: Node = {
+      ...node('x', 0),
+      data: { content: 'old body', label: 'Old', style: { accent: 'red' } },
+    };
+    const other = node('y', 0);
+    // A local move of x is the undo entry.
+    history.takeSnapshot([before, other], []);
+    const moved: Node = { ...before, position: { x: 100, y: 0 } };
+
+    // Another page then saves x's body and label.
+    const patch = { content: 'body from page A', label: 'From A' };
+    history.rebaseRemoteContent('remote-content', 'x', patch);
+    const current: Node = { ...moved, data: { ...moved.data, ...patch } };
+
+    const undo = history.undo([current, other], []);
+    if (!undo) throw new Error('Missing undo snapshot');
+    expect(undo.nodes[0].position).toEqual({ x: 0, y: 0 });
+    expect(undo.nodes[0].data).toEqual({
+      content: 'body from page A',
+      label: 'From A',
+      style: { accent: 'red' },
+    });
+    expect(undo.nodes[1].data).toEqual({});
+
+    // A save that arrives after the undo reaches the redo entry as well.
+    history.rebaseRemoteContent('remote-content', 'x', { content: 'again' });
+    const redo = history.redo(undo.nodes, []);
+    if (!redo) throw new Error('Missing redo snapshot');
+    expect(redo.nodes[0].position).toEqual({ x: 100, y: 0 });
+    expect(redo.nodes[0].data).toMatchObject({
+      content: 'again',
+      label: 'From A',
+    });
+  });
 });

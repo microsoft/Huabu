@@ -67,16 +67,13 @@ export function prepareAgentCanvasCommands(
             entry.patch.content,
             entry.nodeId,
           );
-          const editsMetadata = ['properties', 'propertyDisplayKeys'].some(
-            (key) => key in entry.patch,
-          );
+          // Only a body rewrite is checked against a revision. Custom
+          // properties are merged per key without one, so nothing is injected
+          // for a patch that leaves the body alone.
           const injectedRev =
             'content' in entry.patch
               ? options.readSet?.get(entry.nodeId)
-              : editsMetadata
-                ? (options.readSet?.get(`metadata:${entry.nodeId}`) ??
-                  options.readSet?.get(entry.nodeId))
-                : undefined;
+              : undefined;
           const revision =
             injectedRev ??
             (options.allowCallerRevisions ? callerRevision : undefined);

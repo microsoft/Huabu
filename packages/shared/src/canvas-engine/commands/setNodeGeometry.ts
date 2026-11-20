@@ -2,6 +2,7 @@
 // Licensed under the MIT license.
 
 import { noop, type CommandDefinition } from './types.js';
+import { withMasonryLayoutOrder } from '../autoLayout/gridLayout.js';
 import { getFrameSizing } from '../frame/sizing.js';
 import { materializeAutoHeight } from '../height/materialize.js';
 import { getHeightPolicy } from '../height/policy.js';
@@ -67,7 +68,7 @@ const setNodeGeometry: CommandDefinition<Cmd> = {
       }
     }
 
-    const nextNodes = state.nodes.map((n) => {
+    let nextNodes = state.nodes.map((n) => {
       const update = updateMap.get(n.id);
       if (!update) return n;
 
@@ -197,6 +198,23 @@ const setNodeGeometry: CommandDefinition<Cmd> = {
       return updated;
     });
 
+    const movedIds = new Set(
+      cmd.items
+        .filter((item) => item.position)
+        .map((item) => item.nodeId as string),
+    );
+    const parents = new Set(
+      nextNodes
+        .filter((node) => movedIds.has(node.id) && node.parentId)
+        .map((node) => node.parentId as string),
+    );
+    for (const parentId of parents)
+      nextNodes = withMasonryLayoutOrder(
+        nextNodes,
+        parentId,
+        movedIds,
+        state.edges,
+      );
     return {
       applied: true,
       nodes: nextNodes,

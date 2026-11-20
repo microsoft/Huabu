@@ -126,7 +126,7 @@ function publishResult(attributedThreadId = threadId) {
         },
       ],
       pendingEffects: {
-        mutatedNodes: [],
+        mutatedNodeIds: [],
         deletedNodeIds: [],
         contentEditedNodeIds: [],
         deferredFitFrameIds: [],

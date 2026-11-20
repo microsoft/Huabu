@@ -3,7 +3,11 @@
 
 import { expect, test, type Locator, type Page } from '@playwright/test';
 
-import { oneFingerDrag, readViewportTransform } from './helpers';
+import {
+  oneFingerDrag,
+  readViewportTransform,
+  editsPerCommand,
+} from './helpers';
 
 import type {
   CreateCanvasResponse,
@@ -206,7 +210,7 @@ async function seed(
   }
   const inserted = await page.request.post(`/api/canvas/${canvasId}/execute`, {
     data: {
-      commands: [
+      edits: editsPerCommand([
         {
           type: 'CREATE_NODES',
           nodes: [
@@ -219,8 +223,8 @@ async function seed(
             },
           ],
         },
-      ],
-      originator: { source: 'ui', tabId: 'e2e-interactive-node-drag' },
+      ]),
+      originator: { tabId: 'e2e-interactive-node-drag' },
     },
   });
   expect(inserted.ok(), await inserted.text()).toBe(true);

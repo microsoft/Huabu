@@ -320,6 +320,9 @@ export const NodeWrapper = memo(
     const onNodeResizeStart = useCanvasStore(
       (state) => state.onNodeResizeStart,
     );
+    const closePointerGesture = useCanvasStore(
+      (state) => state.closePointerGesture,
+    );
     const updateResizePreview = useCanvasStore(
       (state) => state.updateResizePreview,
     );
@@ -563,6 +566,9 @@ export const NodeWrapper = memo(
         ]);
 
         endSnapSession();
+        // The commit above normally closes the gesture; this covers a commit
+        // that applied nothing.
+        closePointerGesture();
         // Paired with the `suspendHeightCommits` in `onNodeResizeStart`.
         // Released after the geometry commit so a queued correction is
         // evaluated against the node's final width.
@@ -571,6 +577,7 @@ export const NodeWrapper = memo(
       [
         endResizePreview,
         setNodeGeometry,
+        closePointerGesture,
         id,
         type,
         onResizeEnd,

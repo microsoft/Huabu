@@ -59,13 +59,19 @@ export interface AgentHistoryPageResponse {
   hasMore: boolean;
 }
 
-export const agentHistoryTurnParamsSchema = agentHistoryPageParamsSchema.extend(
-  {
-    turnRef: z.string().min(1).max(4096),
-  },
-);
+/** Path parameters for `GET /agent/history/:threadId/turn`. */
+export const agentHistoryTurnParamsSchema = agentHistoryPageParamsSchema;
+/**
+ * Query for `GET /agent/history/:threadId/turn`.
+ *
+ * `turnRef` is the opaque cursor from a deferred tool detail. It travels in
+ * the query, like the page `before` cursor, because a real cursor (base64url
+ * JSON carrying the thread UUID) is longer than the router's 100-character
+ * path-parameter limit.
+ */
 export const agentHistoryTurnQuerySchema = z.object({
   canvasId: z.string().trim().min(1),
+  turnRef: z.string().min(1).max(4096),
 });
 export type AgentHistoryTurnParams = z.infer<
   typeof agentHistoryTurnParamsSchema

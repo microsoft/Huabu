@@ -67,17 +67,13 @@ function commit(percent: number): boolean {
 beforeEach(() => {
   vi.useFakeTimers();
   canvasHistoryManager.activate('question-scale-test', true);
-  state()._setStateNoAutosave({
+  state()._setStateRaw({
     executeCommands,
     canvasId: 'question-scale-test',
     nodes: [question()],
     edges: [],
     version: 1,
     isLoading: true,
-    isSaving: false,
-    pendingSave: false,
-    versionConflict: false,
-    versionConflictServerVersion: null,
     canUndo: false,
     canRedo: false,
     rfInstance: null,
@@ -88,7 +84,7 @@ beforeEach(() => {
 afterEach(() => {
   // Zustand copies actions into new state objects; restoring the old object's
   // spy alone does not remove that spy from the live state.
-  state()._setStateNoAutosave({ executeCommands });
+  state()._setStateRaw({ executeCommands });
   canvasHistoryManager.clear();
   vi.clearAllTimers();
   vi.restoreAllMocks();
@@ -153,7 +149,7 @@ describe('Question card scale through the real store and history', () => {
       style: { width: 2000, height: 2000 },
       data: { layoutMode: 'free', sizing: 'manual' },
     };
-    state()._setStateNoAutosave({ nodes: [frame, child] });
+    state()._setStateRaw({ nodes: [frame, child] });
     expect(commit(100)).toBe(true);
     expect(current().data.style).toEqual({
       ...(child.data.style as object),
@@ -176,7 +172,7 @@ describe('Question card scale through the real store and history', () => {
     const node = question({
       style: { width: 321.125, height: 250, opacity: 0.75 },
     });
-    state()._setStateNoAutosave({ nodes: [node] });
+    state()._setStateRaw({ nodes: [node] });
     commit(200);
     expect(current().style).toEqual({ width: 642.25, opacity: 0.75 });
     await state().undo();
@@ -242,7 +238,7 @@ describe('Question card scale through the real store and history', () => {
   it.each(['missing', 'text', 'note', 'frame'])(
     'rejects a live %s target without history',
     (type) => {
-      state()._setStateNoAutosave({
+      state()._setStateRaw({
         nodes: type === 'missing' ? [] : [question({ type })],
       });
       const before = state().nodes;

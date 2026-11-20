@@ -25,7 +25,9 @@ vi.mock('@/store/conversationTitleStore', () => ({
   invalidateConversationTitle: vi.fn(),
 }));
 
-import useCanvasStore from './canvasStore';
+import { ApiError } from '@/api/_client';
+
+import useCanvasStore, { resetCanvasSyncForTests } from './canvasStore';
 import { useChatStore } from './chatStore';
 import {
   ConversationIntegrityError,
@@ -76,6 +78,7 @@ beforeEach(() => {
     },
   });
   postCanvasExecute.mockReset();
+  resetCanvasSyncForTests();
   useRemoteConversationOwnerStore.setState({ entries: {} });
   getOwner.mockReset().mockResolvedValue({
     canvasId: 'canvas-source',
@@ -92,16 +95,15 @@ beforeEach(() => {
     fromVersion: 1,
     toVersion: 2,
     deltas: [],
-    results: [{ command: {}, applied: true }],
-    commands: [],
+    edits: [{ applied: true, results: [{ applied: true }] }],
     pendingEffects: {
-      mutatedNodes: [],
+      mutatedNodeIds: [],
       deletedNodeIds: [],
       contentEditedNodeIds: [],
       deferredFitFrameIds: [],
     },
   });
-  useCanvasStore.getState()._setStateNoAutosave({
+  useCanvasStore.getState()._setStateRaw({
     canvasId: 'canvas-source',
     isLoading: false,
     version: 1,
@@ -127,9 +129,7 @@ beforeEach(() => {
 
 describe('conversation owner routing', () => {
   it('acknowledges a saved draft despite an older SSE snapshot arriving during post-write validation', async () => {
-    useCanvasStore
-      .getState()
-      ._setStateNoAutosave({ canvasId: 'parent', nodes: [] });
+    useCanvasStore.getState()._setStateRaw({ canvasId: 'parent', nodes: [] });
     const oldOwner: AgentConversationOwnerResponse = {
       ...ownerView.conversationOwner,
       observation: { epoch: 'server', revision: 1 },
@@ -195,7 +195,7 @@ describe('conversation owner routing', () => {
   it.each([false, true])(
     'verifies remote configuration using a read started after the write, with stale poll failure=%s',
     async (pollFails) => {
-      useCanvasStore.getState()._setStateNoAutosave({
+      useCanvasStore.getState()._setStateRaw({
         canvasId: 'parent',
         nodes: [],
       });
@@ -318,7 +318,9 @@ describe('conversation owner routing', () => {
       spaceTitle: 'Draft',
       source: { agentBinding: { kind: 'internal' } },
     });
-    postCanvasExecute.mockResolvedValueOnce({ results: [{ applied: false }] });
+    postCanvasExecute.mockResolvedValueOnce({
+      edits: [{ applied: false, failedAt: 0, results: [{ applied: false }] }],
+    });
     await expect(
       saveConversationDraft(view, {
         agentBinding: { kind: 'internal' },
@@ -361,7 +363,7 @@ describe('conversation owner routing', () => {
       ...before,
       data: { ...before.data, agentBinding: binding, agentMode: 'ask' },
     };
-    useCanvasStore.getState()._setStateNoAutosave({
+    useCanvasStore.getState()._setStateRaw({
       canvasId: 'canvas-source',
       version: 1,
       nodes: [before],
@@ -372,9 +374,9 @@ describe('conversation owner routing', () => {
       fromVersion: 1,
       toVersion: 2,
       deltas: [{ type: 'REPLACE_NODE', prev: before, next: after }],
-      results: [{ applied: true }],
+      edits: [{ applied: true, results: [{ applied: true }] }],
       pendingEffects: {
-        mutatedNodes: [],
+        mutatedNodeIds: [],
         deletedNodeIds: [],
         contentEditedNodeIds: [],
         deferredFitFrameIds: [],
@@ -391,7 +393,7 @@ describe('conversation owner routing', () => {
       }),
     ).toEqual(binding);
     expect(
-      postCanvasExecute.mock.calls[0][1].commands[0].patches[0].patch,
+      postCanvasExecute.mock.calls[0][1].edits[0].commands[0].patches[0].patch,
     ).toEqual({
       agentBinding: binding,
       agentMode: 'ask',
@@ -407,12 +409,12 @@ describe('conversation owner routing', () => {
         threadId: 'create-thread',
       },
     };
-    useCanvasStore.getState()._setStateNoAutosave({
+    useCanvasStore.getState()._setStateRaw({
       canvasId: 'create-canvas',
       nodes: [],
       edges: [],
       version: 1,
-      isLoading: true,
+      isLoading: false,
     });
     let rejectCreation: ((error: Error) => void) | undefined;
     postCanvasExecute.mockImplementationOnce(
@@ -439,10 +441,12 @@ describe('conversation owner routing', () => {
       agentMode: 'operate',
     });
     await vi.waitFor(() => expect(postCanvasExecute).toHaveBeenCalledTimes(1));
-    expect(postCanvasExecute.mock.calls[0][1].commands[0].type).toBe(
+    expect(postCanvasExecute.mock.calls[0][1].edits[0].commands[0].type).toBe(
       'CREATE_NODES',
     );
-    rejectCreation?.(new Error('creation failed'));
+    // A refusal, not a transport failure: the queue repeats the latter with
+    // the same request id instead of giving up.
+    rejectCreation?.(new ApiError(409, { message: 'creation failed' }, ''));
     await expect(draft).rejects.toThrow('creation failed');
     expect(postCanvasExecute).toHaveBeenCalledTimes(1);
   });
@@ -456,7 +460,7 @@ describe('conversation owner routing', () => {
         threadId: 'draft-thread',
       },
     };
-    useCanvasStore.getState()._setStateNoAutosave({
+    useCanvasStore.getState()._setStateRaw({
       canvasId: 'draft-conflict',
       version: 3,
       nodes: [
@@ -498,7 +502,7 @@ describe('conversation owner routing', () => {
   });
 
   it('persists only an explicit Node cwd and clears it back to inheritance', async () => {
-    useCanvasStore.getState()._setStateNoAutosave({
+    useCanvasStore.getState()._setStateRaw({
       nodes: [
         {
           id: 'node-source',
@@ -521,7 +525,7 @@ describe('conversation owner routing', () => {
       '  /work/project  ',
     );
     expect(
-      postCanvasExecute.mock.calls[0][1].commands[0].patches[0].patch,
+      postCanvasExecute.mock.calls[0][1].edits[0].commands[0].patches[0].patch,
     ).toEqual({
       agentLaunchOverrides: {
         additionalInitialPreamble: 'Keep this instruction.',
@@ -529,7 +533,7 @@ describe('conversation owner routing', () => {
       },
     });
 
-    useCanvasStore.getState()._setStateNoAutosave({
+    useCanvasStore.getState()._setStateRaw({
       nodes: [
         {
           id: 'node-source',
@@ -548,7 +552,7 @@ describe('conversation owner routing', () => {
     });
     await saveConversationWorkingDirectoryOverride(ownerView, null);
     expect(
-      postCanvasExecute.mock.calls[1][1].commands[0].patches[0].patch,
+      postCanvasExecute.mock.calls[1][1].edits[0].commands[0].patches[0].patch,
     ).toEqual({ agentLaunchOverrides: null });
   });
 
@@ -591,7 +595,7 @@ describe('conversation owner routing', () => {
   });
 
   it('persists a background lifecycle update without patching a different active Canvas', async () => {
-    useCanvasStore.getState()._setStateNoAutosave({ canvasId: 'canvas-other' });
+    useCanvasStore.getState()._setStateRaw({ canvasId: 'canvas-other' });
     const before = useCanvasStore.getState().nodes[0];
 
     await patchConversationOwnerNode(ownerView, {
@@ -600,18 +604,21 @@ describe('conversation owner routing', () => {
 
     expect(useCanvasStore.getState().nodes[0]).toBe(before);
     expect(postCanvasExecute).toHaveBeenCalledWith('canvas-source', {
-      commands: [
+      edits: [
         {
-          type: 'MERGE_NODE_DATA',
-          patches: [
+          commands: [
             {
-              nodeId: 'node-source',
-              patch: { agentMode: 'operate' },
+              type: 'MERGE_NODE_DATA',
+              patches: [
+                {
+                  nodeId: 'node-source',
+                  patch: { agentMode: 'operate' },
+                },
+              ],
             },
           ],
         },
       ],
-      originator: { source: 'ui' },
     });
   });
 
@@ -627,7 +634,7 @@ describe('conversation owner routing', () => {
         threadId: 'thread-source',
       },
     };
-    useCanvasStore.getState()._setStateNoAutosave({
+    useCanvasStore.getState()._setStateRaw({
       canvasId: 'canvas-source',
       nodes: [
         {
@@ -694,9 +701,9 @@ describe('conversation owner routing', () => {
   });
 
   it('validates offscreen ownership remotely and defers live-node checks while loading', async () => {
-    useCanvasStore.getState()._setStateNoAutosave({ canvasId: 'canvas-other' });
+    useCanvasStore.getState()._setStateRaw({ canvasId: 'canvas-other' });
     await expect(validateConversationView(ownerView)).resolves.toBeUndefined();
-    useCanvasStore.getState()._setStateNoAutosave({
+    useCanvasStore.getState()._setStateRaw({
       canvasId: 'canvas-source',
       isLoading: true,
       nodes: [],
@@ -705,7 +712,7 @@ describe('conversation owner routing', () => {
   });
 
   it('validates remote ownership without changing the active Canvas and rejects a deleted owner', async () => {
-    useCanvasStore.getState()._setStateNoAutosave({ canvasId: 'canvas-other' });
+    useCanvasStore.getState()._setStateRaw({ canvasId: 'canvas-other' });
     await expect(validateConversationView(ownerView)).resolves.toBeUndefined();
     expect(getOwner).toHaveBeenCalledWith(
       'canvas-source',
@@ -725,14 +732,14 @@ describe('conversation owner routing', () => {
     );
     useCanvasStore
       .getState()
-      ._setStateNoAutosave({ canvasId: 'canvas-source', nodes: [] });
+      ._setStateRaw({ canvasId: 'canvas-source', nodes: [] });
     await expect(validateConversationView(ownerView)).rejects.toThrow(
       ConversationIntegrityError,
     );
   });
 
   it('rejects mismatched presentation anchors even when the owner is offscreen', async () => {
-    useCanvasStore.getState()._setStateNoAutosave({ canvasId: 'canvas-other' });
+    useCanvasStore.getState()._setStateRaw({ canvasId: 'canvas-other' });
     for (const presentationAnchor of [
       { canvasId: 'canvas-other', nodeId: 'node-source' },
       { canvasId: 'canvas-source', nodeId: 'node-other' },
@@ -744,9 +751,9 @@ describe('conversation owner routing', () => {
   });
 
   it('reconciles a routed lifecycle response when its source becomes active', async () => {
-    useCanvasStore.getState()._setStateNoAutosave({ canvasId: 'canvas-other' });
+    useCanvasStore.getState()._setStateRaw({ canvasId: 'canvas-other' });
     postCanvasExecute.mockImplementationOnce(async () => {
-      useCanvasStore.getState()._setStateNoAutosave({
+      useCanvasStore.getState()._setStateRaw({
         canvasId: 'canvas-source',
         version: 1,
         nodes: [
@@ -779,10 +786,9 @@ describe('conversation owner routing', () => {
             },
           },
         ],
-        results: [{ command: {}, applied: true }],
-        commands: [],
+        edits: [{ applied: true, results: [{ applied: true }] }],
         pendingEffects: {
-          mutatedNodes: [],
+          mutatedNodeIds: [],
           deletedNodeIds: [],
           contentEditedNodeIds: [],
           deferredFitFrameIds: [],
@@ -808,10 +814,9 @@ describe('conversation owner routing', () => {
                 fromVersion: 1,
                 toVersion: 2,
                 deltas: [],
-                results: [{ command: {}, applied: true }],
-                commands: [],
+                edits: [{ applied: true, results: [{ applied: true }] }],
                 pendingEffects: {
-                  mutatedNodes: [],
+                  mutatedNodeIds: [],
                   deletedNodeIds: [],
                   contentEditedNodeIds: [],
                   deferredFitFrameIds: [],
@@ -824,10 +829,9 @@ describe('conversation owner routing', () => {
         fromVersion: 2,
         toVersion: 3,
         deltas: [],
-        results: [{ command: {}, applied: true }],
-        commands: [],
+        edits: [{ applied: true, results: [{ applied: true }] }],
         pendingEffects: {
-          mutatedNodes: [],
+          mutatedNodeIds: [],
           deletedNodeIds: [],
           contentEditedNodeIds: [],
           deferredFitFrameIds: [],
@@ -845,9 +849,13 @@ describe('conversation owner routing', () => {
 
     expect(postCanvasExecute).toHaveBeenCalledTimes(2);
     expect(postCanvasExecute.mock.calls[1]?.[1]).toMatchObject({
-      commands: [
+      edits: [
         {
-          patches: [{ patch: { agentMode: 'operate' } }],
+          commands: [
+            {
+              patches: [{ patch: { agentMode: 'operate' } }],
+            },
+          ],
         },
       ],
     });
@@ -858,7 +866,7 @@ describe('conversation owner routing', () => {
       ...ownerView,
       presentationAnchor: { canvasId: 'canvas-source', nodeId: 'node-source' },
     };
-    useCanvasStore.getState()._setStateNoAutosave({
+    useCanvasStore.getState()._setStateRaw({
       canvasId: 'canvas-source',
       version: 3,
       nodes: [

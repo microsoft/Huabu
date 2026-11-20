@@ -151,7 +151,7 @@ describe('prepareAgentCanvasCommands', () => {
     });
   });
 
-  it('uses inspected metadata freshness without authorizing unread body writes', () => {
+  it('injects no revision for a property patch and none for an unread body write', () => {
     const [command] = prepareAgentCanvasCommands(
       [
         {
@@ -163,12 +163,45 @@ describe('prepareAgentCanvasCommands', () => {
           ],
         },
       ],
-      { readSet: new Map([['metadata:node-1', 'inspected']]) },
+      { readSet: new Map([['node-2', 'read']]) },
     );
     if (command.type !== 'MERGE_NODE_DATA') throw new Error('Expected merge');
-    expect(command.patches[0].expectRev).toBe('inspected');
+    expect(command.patches[0].expectRev).toBeUndefined();
     expect(command.patches[1].expectRev).toBeUndefined();
     expect(command.patches[2].expectRev).toBeUndefined();
+  });
+
+  it('injects no revision for a property patch of a node that was read, and keeps a caller revision it is given', () => {
+    const patches = [
+      { nodeId: 'node-1', patch: { properties: { year: 2026 } } },
+      {
+        nodeId: 'node-1',
+        expectRev: 'from-an-older-prompt',
+        patch: { propertyDisplayKeys: ['year'] },
+      },
+      {
+        nodeId: 'node-1',
+        patch: { content: 'body', properties: { year: 2027 } },
+      },
+    ];
+    const [builtIn] = prepareAgentCanvasCommands(
+      [{ type: 'MERGE_NODE_DATA', patches }],
+      { readSet: new Map([['node-1', 'read']]) },
+    );
+    if (builtIn.type !== 'MERGE_NODE_DATA') throw new Error('Expected merge');
+    expect(builtIn.patches[0].expectRev).toBeUndefined();
+    expect(builtIn.patches[1].expectRev).toBeUndefined();
+    // A patch that also rewrites the body carries the body's revision.
+    expect(builtIn.patches[2].expectRev).toBe('read');
+
+    // A native caller's revision on a properties-only patch is passed on;
+    // the executor does not look at it.
+    const [native] = prepareAgentCanvasCommands(
+      [{ type: 'MERGE_NODE_DATA', patches }],
+      { allowCallerRevisions: true },
+    );
+    if (native.type !== 'MERGE_NODE_DATA') throw new Error('Expected merge');
+    expect(native.patches[1].expectRev).toBe('from-an-older-prompt');
   });
 
   it('unwraps a downloaded node sidecar before writing its body back', () => {

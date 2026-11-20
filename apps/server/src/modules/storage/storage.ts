@@ -27,6 +27,8 @@ import { rm } from 'node:fs/promises';
 
 import { stripLegacyPortalTopology } from '@huabu/shared';
 
+import { runInWorkspace } from '../workspace/context.js';
+import { runWorkspacePreparation } from '../workspace-activation.js';
 import {
   commitWorkspaceIdentity,
   getWorkspaceHandle,
@@ -48,6 +50,7 @@ import { PostgresStructuredStore } from './backends/postgres/structured-store.js
 import { PostgresWorkspaceRepository } from './backends/postgres/workspace-repository.js';
 import { SqliteStructuredStore } from './backends/sqlite/structured-store.js';
 import { SqliteWorkspaceRepository } from './backends/sqlite/workspace-repository.js';
+import { refreshCanvasDirIndex } from './canvas-dirs.js';
 import { hasStorageCapability } from './capabilities.js';
 import {
   openConnections,
@@ -69,9 +72,6 @@ import {
 } from './profile.js';
 import { ensureServerRecords, forgetServerRecords } from './server-records.js';
 import { withSpacePutAdmission } from './space-lifecycle-admission.js';
-import { runInWorkspace } from '../workspace/context.js';
-import { runWorkspacePreparation } from '../workspace-activation.js';
-import { refreshCanvasDirIndex } from './canvas-dirs.js';
 
 import type { WorkspaceScope } from '../workspace/context.js';
 import type { DiskSpaceImport } from './backends/disk/space-import.js';
@@ -254,6 +254,7 @@ function composeSpace(storage: Storage, canvasId: string): Space {
       return { ...record, state: { ...record.state, ...topology } };
     },
     write: (input) => handle.write(input),
+    save: handle.save,
     nodes: handle.nodes,
     changes: handle.changes,
     tasks: handle.tasks,
@@ -671,7 +672,7 @@ async function ensureActiveWorkspace(profile: StorageProfile): Promise<void> {
 }
 
 /** The name a SQL deployment's first Workspace is given. */
-const DEFAULT_WORKSPACE_NAME = 'Workspace';
+const DEFAULT_WORKSPACE_NAME = 'Default';
 
 /**
  * Select one Workspace as the process's active namespace.

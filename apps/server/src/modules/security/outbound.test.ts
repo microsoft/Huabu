@@ -35,11 +35,6 @@ import type { CanvasCommand } from '@huabu/shared';
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 
-/** A refusal by the guard, as opposed to any other failed fetch. */
-const REFUSED = expect.objectContaining({
-  cause: expect.objectContaining({ code: 'NON_PUBLIC_ADDRESS' }),
-});
-
 let server: Server;
 let port: number;
 let requests = 0;
@@ -90,10 +85,30 @@ function asMember<T>(operation: () => Promise<T>): Promise<T> {
   });
 }
 
+/**
+ * The guard's own refusal. Asserting only that the fetch throws would also
+ * accept a dispatcher the built-in fetch cannot drive at all, which fails
+ * every member request, public ones included.
+ */
+const refusedByGuard = {
+  cause: expect.objectContaining({ code: 'NON_PUBLIC_ADDRESS' }),
+};
+
+it('uses an undici the built-in fetch can drive', async () => {
+  // The guarded Agent comes from the npm package but is handed to Node's own
+  // fetch; a different major speaks a different dispatcher handler API.
+  const { default: undiciPackage } = await import('undici/package.json', {
+    with: { type: 'json' },
+  });
+  expect(undiciPackage.version.split('.')[0]).toBe(
+    process.versions.undici?.split('.')[0],
+  );
+});
+
 it('applies public-network checks to member calls without a preprocessing scope', async () => {
   await expect(
     asMember(() => outboundFetch(`http://localhost:${port}/hop`)),
-  ).rejects.toThrow(REFUSED);
+  ).rejects.toMatchObject(refusedByGuard);
 });
 
 it('keeps the built-in Response and FormData for member multipart uploads', async () => {
@@ -177,13 +192,13 @@ describe('public-network-only outbound fetch', () => {
     expect((await outboundFetch(url)).status).toBe(200);
     await expect(
       withPublicNetworkOnly(() => outboundFetch(url)),
-    ).rejects.toThrow(REFUSED);
+    ).rejects.toMatchObject(refusedByGuard);
     // A host name that resolves to loopback is refused at connect time too.
     await expect(
       withPublicNetworkOnly(() =>
         outboundFetch(`http://localhost:${port}/hop`),
       ),
-    ).rejects.toThrow(REFUSED);
+    ).rejects.toMatchObject(refusedByGuard);
   });
 
   it('keeps the web loader from reading the Server network inside the scope', async () => {
@@ -217,7 +232,7 @@ it('applies the same connection-time guard to member model discovery and inferen
         workspaces: async () => [],
       },
     });
-    await expect(memberModelFetch(url)).rejects.toThrow(REFUSED);
+    await expect(memberModelFetch(url)).rejects.toMatchObject(refusedByGuard);
   });
 });
 
@@ -255,12 +270,12 @@ describe('public-only deployment', () => {
 
   it('refuses the owner the Server network, by address, by name and by redirect', async () => {
     const before = requests;
-    await expect(outboundFetch(`http://127.0.0.1:${port}/`)).rejects.toThrow(
-      REFUSED,
-    );
-    await expect(outboundFetch(`http://localhost:${port}/`)).rejects.toThrow(
-      REFUSED,
-    );
+    await expect(
+      outboundFetch(`http://127.0.0.1:${port}/`),
+    ).rejects.toMatchObject(refusedByGuard);
+    await expect(
+      outboundFetch(`http://localhost:${port}/`),
+    ).rejects.toMatchObject(refusedByGuard);
     const loader = new WebLoader();
     await expect(loader.load(`http://localhost:${port}/hop`)).rejects.toThrow();
     expect(requests).toBe(before);
@@ -288,19 +303,19 @@ describe('public-only deployment', () => {
     );
     const before = requests;
 
-    await expect(outboundFetch(`http://127.0.0.1:${port}/`)).rejects.toThrow(
-      REFUSED,
-    );
-    await expect(outboundFetch(`http://localhost:${port}/`)).rejects.toThrow(
-      REFUSED,
-    );
+    await expect(
+      outboundFetch(`http://127.0.0.1:${port}/`),
+    ).rejects.toMatchObject(refusedByGuard);
+    await expect(
+      outboundFetch(`http://localhost:${port}/`),
+    ).rejects.toMatchObject(refusedByGuard);
     expect(hops).toEqual([]);
 
     const response = await outboundFetch('http://93.184.215.14/start');
     expect(await response.text()).toBe('public page');
-    await expect(outboundFetch('http://93.184.215.14/inward')).rejects.toThrow(
-      REFUSED,
-    );
+    await expect(
+      outboundFetch('http://93.184.215.14/inward'),
+    ).rejects.toMatchObject(refusedByGuard);
     expect(hops).toEqual([
       'GET http://93.184.215.14/start',
       'GET http://93.184.215.14/final',
@@ -324,7 +339,9 @@ describe('public-only deployment', () => {
       'build.huabu-no-such.internal',
       'nas.huabu-no-such.lan',
     ])
-      await expect(outboundFetch(`http://${host}/`)).rejects.toThrow(REFUSED);
+      await expect(outboundFetch(`http://${host}/`)).rejects.toMatchObject(
+        refusedByGuard,
+      );
     expect(proxied).toHaveBeenCalledTimes(1);
   });
 
@@ -333,12 +350,12 @@ describe('public-only deployment', () => {
     process.env.NO_PROXY = `localhost,127.0.0.1,exempt.example`;
     const before = requests;
     // Real fetches: the guarded dispatcher refuses these at connect time.
-    await expect(outboundFetch(`http://localhost:${port}/`)).rejects.toThrow(
-      REFUSED,
-    );
-    await expect(outboundFetch(`http://127.0.0.1:${port}/hop`)).rejects.toThrow(
-      REFUSED,
-    );
+    await expect(
+      outboundFetch(`http://localhost:${port}/`),
+    ).rejects.toMatchObject(refusedByGuard);
+    await expect(
+      outboundFetch(`http://127.0.0.1:${port}/hop`),
+    ).rejects.toMatchObject(refusedByGuard);
     expect(requests).toBe(before);
 
     const sent: { url: string; guarded: boolean }[] = [];
@@ -365,9 +382,9 @@ describe('public-only deployment', () => {
   it('guards a scheme that has no proxy of its own', async () => {
     process.env.HTTPS_PROXY = 'http://proxy.invalid:8080';
     const before = requests;
-    await expect(outboundFetch(`http://localhost:${port}/`)).rejects.toThrow(
-      REFUSED,
-    );
+    await expect(
+      outboundFetch(`http://localhost:${port}/`),
+    ).rejects.toMatchObject(refusedByGuard);
     expect(requests).toBe(before);
   });
 
@@ -397,7 +414,7 @@ describe('public-only deployment', () => {
     const before = requests;
     await expect(
       withPublicNetworkOnly(() => outboundFetch(`http://127.0.0.1:${port}/`)),
-    ).rejects.toThrow(REFUSED);
+    ).rejects.toMatchObject(refusedByGuard);
     expect(requests).toBe(before);
   });
 });
@@ -498,16 +515,18 @@ describe('leavesThroughProxy', () => {
     ['example.com', 'https://badexample.com/', true],
     ['.example.com', 'https://example.com/', false],
     ['*.example.com', 'https://api.example.com/', false],
-    ['*.example.com', 'https://example.com/', true],
-    ['EXAMPLE.com', 'https://Example.COM./', false],
+    ['*.example.com', 'https://example.com/', false],
+    ['EXAMPLE.com', 'https://Example.COM/', false],
     ['example.com:8443', 'https://example.com/', true],
     ['example.com:8443', 'https://example.com:8443/', false],
     ['example.com:443', 'https://example.com/', false],
     ['other.test, example.com', 'https://example.com/', false],
     ['127.0.0.1', 'http://127.0.0.1:3000/', false],
-    ['::1', 'http://[::1]:3000/', false],
+    ['[::1]', 'http://[::1]:3000/', false],
     ['[::1]:3000', 'http://[::1]:3000/', false],
     ['[::1]:3001', 'http://[::1]:3000/', true],
+    // Only the whole value `*` exempts everything.
+    ['none.invalid,*', 'https://example.com/', true],
     ['', 'https://example.com/', true],
   ])('NO_PROXY=%j for %s: proxied=%s', (noProxy, url, expected) => {
     expect(through(url, { ...BOTH, NO_PROXY: noProxy })).toBe(expected);
@@ -516,14 +535,12 @@ describe('leavesThroughProxy', () => {
 });
 
 describe('the guarded dispatcher and the built-in fetch', () => {
-  // Node's fetch and this package's undici are different copies with
-  // different handler protocols: an upgrade of either can leave the guarded
-  // dispatcher unable to return any response. The guard itself only admits
-  // public addresses, which a test cannot serve, so this checks the wrapping
-  // it depends on against a real response and a real redirect.
-  it('reads a response and follows a redirect through a wrapped dispatcher', async () => {
-    const { Agent, Dispatcher1Wrapper } = await import('undici');
-    const dispatcher = new Dispatcher1Wrapper(new Agent());
+  // The guard itself only admits public addresses, which a test cannot serve,
+  // so beside the version pairing above this reads a real response, and a
+  // real redirect, through an Agent of the same package.
+  it("reads a response and follows a redirect through this package's Agent", async () => {
+    const { Agent } = await import('undici');
+    const dispatcher = new Agent();
     try {
       const before = requests;
       const response = await fetch(`http://127.0.0.1:${port}/hop`, {

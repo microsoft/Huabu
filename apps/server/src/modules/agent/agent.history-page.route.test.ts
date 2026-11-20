@@ -1,7 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+import { randomUUID } from 'node:crypto';
+
 import {
+  encodeTurnCursor,
   MalformedTurnCursorError,
   StaleTurnCursorError,
 } from '@agenetes/agenetes';
@@ -230,7 +233,7 @@ describe('GET /agent/history/:threadId/page', () => {
     );
     mocks.historyTurn.mockResolvedValue(turn);
     const detail = await request(
-      '/agent/history/thread-1/turn/ref?canvasId=canvas-1',
+      '/agent/history/thread-1/turn?canvasId=canvas-1&turnRef=ref',
     );
     expect(detail.statusCode, detail.body).toBe(200);
     expect(detail.json().messages[0].parts[0]).toMatchObject({
@@ -246,21 +249,71 @@ describe('GET /agent/history/:threadId/page', () => {
   });
 
   it('rejects invalid detail requests and distinguishes missing and stale turns', async () => {
-    expect((await request('/agent/history/thread-1/turn/ref')).statusCode).toBe(
-      400,
-    );
+    expect(
+      (await request('/agent/history/thread-1/turn?turnRef=ref')).statusCode,
+    ).toBe(400);
+    expect(
+      (await request('/agent/history/thread-1/turn?canvasId=canvas-1'))
+        .statusCode,
+    ).toBe(400);
+    expect(
+      (
+        await request(
+          `/agent/history/thread-1/turn?canvasId=canvas-1&turnRef=${'a'.repeat(4097)}`,
+        )
+      ).statusCode,
+    ).toBe(400);
     expect(mocks.historyTurn).not.toHaveBeenCalled();
     mocks.historyTurn.mockResolvedValue(undefined);
     expect(
-      (await request('/agent/history/thread-1/turn/ref?canvasId=canvas-1'))
-        .statusCode,
+      (
+        await request(
+          '/agent/history/thread-1/turn?canvasId=canvas-1&turnRef=ref',
+        )
+      ).statusCode,
     ).toBe(404);
     mocks.historyTurn.mockRejectedValue(
       new StaleTurnCursorError('History cursor is stale'),
     );
     expect(
-      (await request('/agent/history/thread-1/turn/ref?canvasId=canvas-1'))
-        .statusCode,
+      (
+        await request(
+          '/agent/history/thread-1/turn?canvasId=canvas-1&turnRef=ref',
+        )
+      ).statusCode,
     ).toBe(409);
+    mocks.historyTurn.mockRejectedValue(
+      new MalformedTurnCursorError('Malformed history cursor'),
+    );
+    expect(
+      (
+        await request(
+          '/agent/history/thread-1/turn?canvasId=canvas-1&turnRef=x',
+        )
+      ).statusCode,
+    ).toBe(400);
+  });
+
+  it('reaches the handler with a production-length cursor', async () => {
+    // A real reference names a UUID thread, so it is longer than Fastify's
+    // default 100-character path-parameter limit.
+    const threadId = randomUUID();
+    const turnRef = encodeTurnCursor({
+      version: 1,
+      threadId,
+      generation: 1,
+      ordinal: 12,
+    });
+    expect(turnRef.length).toBeGreaterThan(100);
+    mocks.historyTurn.mockResolvedValue(undefined);
+    const response = await request(
+      `/agent/history/${threadId}/turn?canvasId=canvas-1&turnRef=${turnRef}`,
+    );
+    expect(response.json()).toMatchObject({ code: 'history_turn_not_found' });
+    expect(mocks.historyTurn).toHaveBeenCalledWith(
+      { name: 'canvas-1' },
+      threadId,
+      turnRef,
+    );
   });
 });

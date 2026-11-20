@@ -44,6 +44,7 @@ export type {
   BaseNodeData,
   FileReferenceNodeData,
   AutoHeightHint,
+  MeasuredSizeHint,
   HeightMode,
   BlockProvenance,
   DeletedBlockInfo,
@@ -138,6 +139,9 @@ export type {
   CanvasNodeGeometryUpdate,
   CanvasNodeLockUpdate,
   CanvasNodeMeasuredHeightUpdate,
+  CanvasNodeMeasuredSizeUpdate,
+  CanvasRestoredEdge,
+  CanvasRestoredNode,
   NodeGeometrySize,
   CanvasEdgeCreateInput,
   CanvasEdgeStylePatch,
@@ -154,9 +158,13 @@ export {
 } from './command.js';
 
 // Execution types
+export { isRefusedResult } from './execution.js';
 export type {
   CanvasExecutionSource,
   CanvasExecution,
+  CanvasEdit,
+  CanvasEditsExecution,
+  CanvasEditResult,
   CanvasCommandFailureReason,
   CanvasCommandResult,
   ExecuteConflict,

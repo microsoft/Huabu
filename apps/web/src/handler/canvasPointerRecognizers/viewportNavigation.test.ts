@@ -74,7 +74,7 @@ beforeEach(() => {
   beginCanvasGesture.mockReturnValue(true);
   updateCanvasGesture.mockReturnValue('pending');
   nodeIdAtScreenPoint.mockReturnValue('node-1');
-  useCanvasStore.getState()._setStateNoAutosave({
+  useCanvasStore.getState()._setStateRaw({
     nodes: [
       {
         id: 'sketch-1',

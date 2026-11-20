@@ -3,7 +3,10 @@
 
 import { agentInputSchema } from '@agenetes/protocol';
 
-import { fingerprintNodeFields } from '@huabu/shared/canvas-engine';
+import {
+  fingerprintNodeFields,
+  isSetSiblingOrderEvent,
+} from '@huabu/shared/canvas-engine';
 
 import {
   escapeXmlAttr,
@@ -98,7 +101,7 @@ function isImportRecord(value: unknown): value is RecordValue {
 // Adding a command/action or field requires an explicit identity-versus-opaque decision.
 const commandFields = {
   CREATE_NODES: { nodes: 'nodes' },
-  INITIALIZE_PDF_NOTE: { nodeId: 'nodeId' },
+  INITIALIZE_PDF_NOTE: { nodeId: 'nodeId', noteId: 'nodeId' },
   DELETE_NODES: { nodeIds: 'nodeIds' },
   MERGE_NODE_DATA: { patches: 'patches' },
   SET_NODE_PARENT: { nodeIds: 'nodeIds', parentId: 'nodeId' },
@@ -113,7 +116,9 @@ const commandFields = {
   SET_NODE_SELECTION: { nodeIds: 'nodeIds' },
   SET_NODE_LOCKED: { items: 'geometry' },
   APPLY_MEASURED_HEIGHT: { items: 'geometry' },
+  APPLY_MEASURED_SIZE: { items: 'geometry' },
   SET_FRAME_LAYOUT: {
+    placements: 'layout-placements',
     frameId: 'nodeId',
     cells: 'geometry',
     mode: null,
@@ -122,6 +127,12 @@ const commandFields = {
     sizing: null,
   },
   CHANGE_NODE_TYPE: { nodeId: 'nodeId', to: null },
+  RESTORE_NODES: {
+    nodes: 'nodes',
+    edges: 'edges',
+    replace: 'nodeIds',
+    keepDataKeys: null,
+  },
 } satisfies {
   [T in CanvasCommand['type']]: Shape<
     Omit<Extract<CanvasCommand, { type: T }>, 'type'>
@@ -172,6 +183,26 @@ export function rewriteImportContract(
   context: string,
   rewrite: Rewrite,
 ): RecordValue | undefined {
+  if (context === 'layout-placements') {
+    return fields(
+      value,
+      { nodeId: 'nodeId', before: 'nodeId', after: 'nodeId' },
+      rewrite,
+    );
+  }
+  if (
+    (context === 'deltas' || context === 'revertDeltas') &&
+    value.type === 'SET_SIBLING_ORDER'
+  ) {
+    if (!isSetSiblingOrderEvent(value)) {
+      throw new Error('Invalid imported sibling-order event');
+    }
+    return fields(
+      value,
+      { parentId: 'nodeId', before: 'nodeIds', after: 'nodeIds' },
+      rewrite,
+    );
+  }
   if (context === 'commands' && typeof value.type === 'string') {
     const shape = Object.entries(commandFields).find(
       ([type]) => type === value.type,
@@ -260,13 +291,16 @@ export function rewriteImportedChange(
           ? delta.prev
           : undefined
       : undefined;
+    // A row holds the whole node (history written before rows became
+    // partial) or only the fields the change touched; a change that touched
+    // no `data` key has no `data` and fingerprints as empty.
     if (
       !isImportRecord(node) ||
       typeof node.id !== 'string' ||
-      !isImportRecord(node.data)
+      (node.data !== undefined && !isImportRecord(node.data))
     )
       throw new Error('Invalid imported change applied snapshot');
-    return { id: node.id, data: node.data, position: { x: 0, y: 0 } };
+    return { id: node.id, data: node.data ?? {}, position: { x: 0, y: 0 } };
   };
   if (
     fingerprintNodeFields(applied(original), original.fingerprintKeys) !==

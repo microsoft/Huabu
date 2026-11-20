@@ -3,6 +3,7 @@
 
 import { expect, test } from '@playwright/test';
 
+import { editsPerCommand } from './helpers';
 import { installStreams, publish } from './stream-helpers';
 
 import type { AgentHistoryDisplayTurn } from '@huabu/shared';
@@ -23,7 +24,7 @@ for (const outcome of ['delayed', 'unavailable'] as const) {
     const { canvasId } = await created.json();
     const nodes = await request.post(`/api/canvas/${canvasId}/execute`, {
       data: {
-        commands: [
+        edits: editsPerCommand([
           {
             type: 'CREATE_NODES',
             nodes: [
@@ -46,8 +47,7 @@ for (const outcome of ['delayed', 'unavailable'] as const) {
               },
             ],
           },
-        ],
-        originator: { source: 'ui' },
+        ]),
       },
     });
     expect(nodes.ok()).toBe(true);

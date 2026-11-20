@@ -266,7 +266,7 @@ describe('queued composer turns', () => {
         reasoningEffort: null,
       }),
     );
-    useCanvasStore.getState()._setStateNoAutosave({ nodes: [] });
+    useCanvasStore.getState()._setStateRaw({ nodes: [] });
     await enqueue('Third');
     const [second, third] =
       useChatStore.getState().threadsById[session.threadId].queuedTurns;
@@ -718,7 +718,7 @@ describe('queued composer turns', () => {
     async ({ accepted, anchored }) => {
       const owner = anchored ? questionSession : session;
       if (anchored) {
-        useCanvasStore.getState()._setStateNoAutosave({
+        useCanvasStore.getState()._setStateRaw({
           nodes: [
             {
               id: 'question-1',
@@ -1227,7 +1227,7 @@ describe('queued composer turns', () => {
           status: 'pending',
         });
       }
-      useCanvasStore.getState()._setStateNoAutosave({
+      useCanvasStore.getState()._setStateRaw({
         canvasId: 'parent-space',
         nodes: [
           {
@@ -1298,8 +1298,8 @@ describe('queued composer turns', () => {
         await act(async () => {
           resumeAgentTurnQueue(questionSession);
           await vi.waitFor(() => expect(operation).toHaveBeenCalledOnce());
-          useCanvasStore.getState()._setStateNoAutosave({ isLoading: true });
-          useCanvasStore.getState()._setStateNoAutosave({
+          useCanvasStore.getState()._setStateRaw({ isLoading: true });
+          useCanvasStore.getState()._setStateRaw({
             canvasId: 'parent-space',
             nodes: [],
           });
@@ -1331,7 +1331,7 @@ describe('queued composer turns', () => {
       prepared: request('text', questionSession),
       status: 'pending',
     });
-    useCanvasStore.getState()._setStateNoAutosave({
+    useCanvasStore.getState()._setStateRaw({
       canvasId: 'parent-space',
       nodes: [],
     });
@@ -1394,11 +1394,11 @@ describe('queued composer turns', () => {
     await expect(canvasModule.drainPendingSaves()).rejects.toThrow(
       'Content saves failed',
     );
-    useCanvasStore.getState()._setStateNoAutosave({
+    useCanvasStore.getState()._setStateRaw({
       canvasId: 'parent-space',
       nodes: [],
     });
-    useCanvasStore.getState()._setStateNoAutosave({
+    useCanvasStore.getState()._setStateRaw({
       canvasId: session.ownerCanvasId,
       isLoading: true,
     });
@@ -1453,7 +1453,7 @@ describe('queued composer turns', () => {
       await act(async () => {
         resumeAgentTurnQueue(session);
         await vi.waitFor(() => expect(mocks.stream).toHaveBeenCalledOnce());
-        useCanvasStore.getState()._setStateNoAutosave({
+        useCanvasStore.getState()._setStateRaw({
           canvasId: 'parent-space',
           isLoading: true,
         });
@@ -1675,12 +1675,9 @@ beforeEach(() => {
     ephemeralSettingsThreads: {},
     selectionAttachment: null,
   });
-  useCanvasStore.getState()._setStateNoAutosave({
+  useCanvasStore.getState()._setStateRaw({
     canvasId: 'canvas-1',
     isLoading: false,
-    isSaving: false,
-    pendingSave: false,
-    versionConflict: false,
     nodes: [
       {
         id: 'note-1',
@@ -1730,7 +1727,7 @@ describe('remote conversation execution', () => {
     'sends and stops the original thread without attaching the parent canvas (queued: %s)',
     async (queued) => {
       const remote: ChatSession = { ...questionSession, canvasId: 'parent' };
-      useCanvasStore.getState()._setStateNoAutosave({ canvasId: 'parent' });
+      useCanvasStore.getState()._setStateRaw({ canvasId: 'parent' });
       const parentNodes = useCanvasStore.getState().nodes;
       useRemoteConversationOwnerStore.setState({
         entries: {
@@ -1872,7 +1869,7 @@ describe('Ink interpretation lifecycle', () => {
   });
 
   it('preserves lasso reference-only capture when retrying from history', () => {
-    useCanvasStore.getState()._setStateNoAutosave({
+    useCanvasStore.getState()._setStateRaw({
       canvasId: session.canvasId,
       nodes: [
         {
@@ -2286,7 +2283,7 @@ describe('shared Agent turn input', () => {
     expect(retry.attachments).toEqual([]);
   });
   it('deduplicates Frame-nested Ink while excluding its Question anchor', () => {
-    useCanvasStore.getState()._setStateNoAutosave({
+    useCanvasStore.getState()._setStateRaw({
       nodes: [
         {
           id: 'frame-1',
@@ -2423,7 +2420,7 @@ describe('shared Agent turn input', () => {
     const prepared = request();
     prepared.invokedSkills = ['review'];
     const running = dispatchAgentTurn(prepared);
-    useCanvasStore.getState()._setStateNoAutosave({ nodes: [] });
+    useCanvasStore.getState()._setStateRaw({ nodes: [] });
     useGesturePreviewStore.setState({ sketchStrokeSelection: {} });
     gate.resolve();
     const result = await running;
@@ -2758,7 +2755,7 @@ describe('shared Agent turn input', () => {
 
   it('leaves server-owned Question lifecycle untouched when preparation saving fails', async () => {
     mocks.save.mockRejectedValueOnce(new Error('save conflict'));
-    useCanvasStore.getState()._setStateNoAutosave({
+    useCanvasStore.getState()._setStateRaw({
       nodes: [
         {
           id: 'question-1',
@@ -2804,7 +2801,7 @@ describe('shared Agent turn input', () => {
   it('stops a Question while its preparation save is pending', async () => {
     const preparationSave = deferred();
     mocks.save.mockReturnValueOnce(preparationSave.promise);
-    useCanvasStore.getState()._setStateNoAutosave({
+    useCanvasStore.getState()._setStateRaw({
       nodes: [
         {
           id: 'question-1',
@@ -2846,7 +2843,7 @@ describe('shared Agent turn input', () => {
   });
 
   it('allows node-less source-less text', async () => {
-    useCanvasStore.getState()._setStateNoAutosave({ nodes: [] });
+    useCanvasStore.getState()._setStateRaw({ nodes: [] });
     useGesturePreviewStore.setState({ sketchStrokeSelection: {} });
     await dispatchAgentTurn(request());
     expect(mocks.stream.mock.calls[0][4].canvasContext).toEqual({
@@ -2984,7 +2981,7 @@ describe('shared Agent turn input', () => {
     it.each([true, false])(
       'keeps Note quote evidence independent of selected parent Frame context, excluded=%s',
       async (excluded) => {
-        useCanvasStore.getState()._setStateNoAutosave({
+        useCanvasStore.getState()._setStateRaw({
           nodes: [
             {
               id: 'frame',
@@ -3061,7 +3058,7 @@ describe('shared Agent turn input', () => {
             }
           : { kind: 'internal' as const };
         const canvas = useCanvasStore.getState();
-        canvas._setStateNoAutosave({
+        canvas._setStateRaw({
           nodes: [
             {
               id: 'frame-1',
