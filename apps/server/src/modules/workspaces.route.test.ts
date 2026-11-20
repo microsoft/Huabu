@@ -255,12 +255,14 @@ describe('plural Workspace management routes', () => {
           name: 'First',
           path: '/tmp/first',
           active: true,
+          canManage: true,
         },
         {
           workspaceId: SECOND_ID,
           name: 'Second',
           path: '/tmp/second',
           active: false,
+          canManage: true,
         },
       ]);
     } finally {
@@ -524,6 +526,8 @@ describe('plural Workspace management routes', () => {
           name: 'First',
           path: null,
           active: true,
+          // Managed mode's one Workspace is locked.
+          canManage: false,
         },
       ]);
 

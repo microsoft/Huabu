@@ -26,8 +26,10 @@ import {
   loadDefaultAgentBinding,
   RECENT_CONVERSATION_AGENT_STORAGE_KEY,
   rememberConversationAgentBinding,
+  toastConversationStartError,
   useAcpProfilesStore,
 } from './acpProfilesStore';
+import { useSettingsUiStore } from './settingsUiStore';
 
 import type { AgentDefaults, AgentDefaultsResponse } from '@huabu/shared';
 
@@ -407,5 +409,57 @@ describe('Utility Agent settings', () => {
     expect(useAcpProfilesStore.getState().agentDefaults?.profileId).toBe(
       'new-utility',
     );
+  });
+});
+
+describe('toastConversationStartError', () => {
+  beforeEach(() => useSettingsUiStore.getState().close());
+
+  it('reports an ordinary start failure as an error without setup actions', () => {
+    toastConversationStartError(new Error('boom'), vi.fn());
+    expect(api.toast).toHaveBeenCalledWith('boom', { tone: 'danger' });
+  });
+
+  it('offers connecting a device for a missing Agent', () => {
+    const retry = vi.fn();
+    toastConversationStartError(
+      new ConversationAgentUnconfiguredError(),
+      retry,
+    );
+    const [message, options] = api.toast.mock.calls[0];
+    expect(message).toBe(new ConversationAgentUnconfiguredError().message);
+    expect(options).toMatchObject({
+      tone: 'info',
+      duration: 0,
+      secondaryAction: { label: 'Connect device' },
+    });
+    options.secondaryAction.onClick();
+    expect(useSettingsUiStore.getState()).toMatchObject({
+      isOpen: true,
+      requestedTab: 'agent',
+    });
+    expect(retry).not.toHaveBeenCalled();
+    expect(
+      useAcpProfilesStore.getState().recentConversationProfileId,
+    ).toBeNull();
+  });
+
+  it('configures a model by choosing Built-In Pi, retrying, and opening its settings', async () => {
+    const retry = vi.fn();
+    toastConversationStartError(
+      new ConversationAgentUnconfiguredError(),
+      retry,
+    );
+    const [, options] = api.toast.mock.calls[0];
+    expect(options.action.label).toBe('Configure model');
+    options.action.onClick();
+    expect(retry).toHaveBeenCalledOnce();
+    expect(useSettingsUiStore.getState()).toMatchObject({
+      isOpen: true,
+      requestedTab: 'builtIn',
+    });
+    await expect(loadDefaultAgentBinding()).resolves.toEqual({
+      kind: 'internal',
+    });
   });
 });

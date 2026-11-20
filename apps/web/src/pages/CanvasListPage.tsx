@@ -2,6 +2,7 @@
 // Licensed under the MIT license.
 
 import {
+  ChevronDown,
   Download,
   FolderInput,
   FolderUp,
@@ -324,17 +325,23 @@ export default function CanvasListPage() {
       : showAll || !canvas.parentSpaceId,
   );
 
+  // A named Workspace is shown by its name alone: a "Workspace:" prefix
+  // read as "Workspace: Workspace" for the default one. The chevron marks
+  // it as the switcher it is; the tooltip still names the category.
   const workspaceName = (
-    <>
-      <span>
+    <span className="inline-flex max-w-full items-center gap-0.5">
+      <span className="truncate">
         {workspacePath
           ? t('workspace.pathPrefix')
           : namedWorkspaces
-            ? t('workspace.namedPrefix')
+            ? null
             : t('workspace.workspacePrefix')}
         {workspaceLabel}
       </span>
-    </>
+      {canChangeWorkspace && (
+        <ChevronDown size={12} className="shrink-0" aria-hidden />
+      )}
+    </span>
   );
   const workspaceSwitcher =
     !isDesktopHome && workspaceLabel ? (

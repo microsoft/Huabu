@@ -8,13 +8,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SignInGate } from './SignInGate';
 import { AUTH_REQUIRED_EVENT } from '../../api/_client';
 import { SESSION_CHANGE_EVENT } from '../../api/identity';
+import en from '../../i18n/resources/en/common.json';
+import zhCN from '../../i18n/resources/zh-CN/common.json';
 import { useIdentityStore } from '../../store/identityStore';
 import * as oidc from '../../utils/oidcLogin';
 import { forgetTokens } from '../../utils/oidcLogin';
 
 // The brand animation draws on a canvas the test DOM does not provide.
 vi.mock('../../pages/WorkspaceLoadingScreen', () => ({
-  WorkspaceLoadingScreen: () => null,
+  WorkspaceLoadingScreen: () => <div data-testid="workspace-loading" />,
 }));
 const unsaved = vi.hoisted(() => vi.fn(() => false));
 const resend = vi.hoisted(() => vi.fn(async () => {}));
@@ -109,6 +111,12 @@ it('shows a blocked-popup error over the running app and permits retry', async (
   expect(container.textContent).toContain('app');
   expect(container.querySelector('button')?.disabled).toBe(false);
 });
+
+/** Identity reads made so far, including ones a test answers by hand. */
+const identityChecks = () =>
+  vi
+    .mocked(fetch)
+    .mock.calls.filter(([input]) => String(input) === '/api/identity').length;
 
 async function mount(strict = false) {
   const gate = (
@@ -599,6 +607,186 @@ describe('SignInGate', () => {
     expect(resend).not.toHaveBeenCalled();
   });
 
+  it('verifies one return to the page once, keeping the app visible but inert', async () => {
+    routes['GET /api/identity'] = () => json(MEMBER);
+    await mount();
+    resend.mockClear();
+    const before = identityChecks();
+    let finish!: (response: Response) => void;
+    vi.mocked(fetch).mockImplementationOnce(
+      () => new Promise<Response>((resolve) => (finish = resolve)),
+    );
+    await act(async () => {
+      window.dispatchEvent(new Event('focus'));
+      document.dispatchEvent(new Event('visibilitychange'));
+      window.dispatchEvent(new Event('focus'));
+    });
+    expect(identityChecks()).toBe(before + 1);
+    // The app stays on screen under a clear cover, not the loading page.
+    expect(container.textContent).toBe('app');
+    expect(
+      container.querySelector('[data-testid="workspace-loading"]'),
+    ).toBeNull();
+    expect(
+      container.querySelector('[data-testid="session-verifying-cover"]'),
+    ).not.toBeNull();
+    expect(container.querySelector('[inert]')).not.toBeNull();
+    await act(async () => finish(json(MEMBER)));
+    expect(
+      container.querySelector('[data-testid="session-verifying-cover"]'),
+    ).toBeNull();
+    expect(container.querySelector('[inert]')).toBeNull();
+    expect(resend).not.toHaveBeenCalled();
+    // The next return checks again.
+    await act(async () => window.dispatchEvent(new Event('focus')));
+    expect(identityChecks()).toBe(before + 2);
+  });
+
+  it('lets the next return replace a foreground check that never settles', async () => {
+    routes['GET /api/identity'] = () => json(MEMBER);
+    await mount();
+    const before = identityChecks();
+    // The first read hangs; without Web Locks nothing queues behind it.
+    vi.mocked(fetch).mockImplementationOnce(
+      () => new Promise<Response>(() => {}),
+    );
+    await act(async () => window.dispatchEvent(new Event('focus')));
+    expect(identityChecks()).toBe(before + 1);
+    expect(container.querySelector('[inert]')).not.toBeNull();
+    // The same return's visibility event joins the pending check.
+    await act(async () =>
+      document.dispatchEvent(new Event('visibilitychange')),
+    );
+    expect(identityChecks()).toBe(before + 1);
+    // Leaving and coming back is a new return, which asks again, and that
+    // answer uncovers the app.
+    await act(async () => {
+      window.dispatchEvent(new Event('blur'));
+      window.dispatchEvent(new Event('focus'));
+    });
+    expect(identityChecks()).toBe(before + 2);
+    for (let i = 0; i < 3; i++) await act(async () => {});
+    expect(container.querySelector('[inert]')).toBeNull();
+    expect(container.textContent).toBe('app');
+  });
+
+  it('admits a waiting person on a new return while an earlier read is still pending', async () => {
+    routes['GET /api/identity'] = () => json({ ...MEMBER, member: false });
+    await mount();
+    expect(container.textContent).toContain('auth.noAccessTitle');
+    const before = identityChecks();
+    let finishStale!: (response: Response) => void;
+    vi.mocked(fetch).mockImplementationOnce(
+      () => new Promise<Response>((resolve) => (finishStale = resolve)),
+    );
+    await act(async () => window.dispatchEvent(new Event('focus')));
+    expect(identityChecks()).toBe(before + 1);
+    // An administrator admits them; they switch away and back to the tab.
+    routes['GET /api/identity'] = () => json(MEMBER);
+    let visibility: DocumentVisibilityState = 'hidden';
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      get: () => visibility,
+    });
+    try {
+      await act(async () =>
+        document.dispatchEvent(new Event('visibilitychange')),
+      );
+      visibility = 'visible';
+      await act(async () => {
+        document.dispatchEvent(new Event('visibilitychange'));
+        window.dispatchEvent(new Event('focus'));
+      });
+    } finally {
+      // Back to the prototype's own `visibilityState`.
+      delete (document as { visibilityState?: unknown }).visibilityState;
+    }
+    // The new return asks once, rather than waiting on the earlier read.
+    expect(identityChecks()).toBe(before + 2);
+    for (let i = 0; i < 5; i++) await act(async () => {});
+    expect(container.textContent).toBe('app');
+    // The earlier read's answer, from before admission, changes nothing.
+    await act(async () => finishStale(json({ ...MEMBER, member: false })));
+    for (let i = 0; i < 3; i++) await act(async () => {});
+    expect(container.textContent).toBe('app');
+  });
+
+  it('polls a waiting person afresh even while a foreground read is pending', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    try {
+      routes['GET /api/identity'] = () => json({ ...MEMBER, member: false });
+      await mount();
+      expect(container.textContent).toContain('auth.noAccessTitle');
+      const before = identityChecks();
+      vi.mocked(fetch).mockImplementationOnce(
+        () => new Promise<Response>(() => {}),
+      );
+      await act(async () => window.dispatchEvent(new Event('focus')));
+      expect(identityChecks()).toBe(before + 1);
+      routes['GET /api/identity'] = () => json(MEMBER);
+      await act(async () => vi.advanceTimersByTime(15_000));
+      expect(identityChecks()).toBe(before + 2);
+      for (let i = 0; i < 5; i++) await act(async () => {});
+      expect(container.textContent).toBe('app');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('says what a slow re-verification is waiting for', async () => {
+    routes['GET /api/identity'] = () => json(MEMBER);
+    await mount();
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      let finish!: (response: Response) => void;
+      vi.mocked(fetch).mockImplementationOnce(
+        () => new Promise<Response>((resolve) => (finish = resolve)),
+      );
+      await act(async () => window.dispatchEvent(new Event('focus')));
+      expect(container.textContent).not.toContain('auth.verifyingSession');
+      await act(async () => vi.advanceTimersByTimeAsync(1_000));
+      expect(container.textContent).toContain('auth.verifyingSession');
+      // The notice is a live status outside any busy subtree, so a screen
+      // reader announces it while the check runs rather than deferring it.
+      const status = container.querySelector('[role="status"]');
+      expect(status?.textContent).toContain('auth.verifyingSession');
+      expect(status?.closest('[aria-busy="true"]')).toBeNull();
+      await act(async () => finish(json(MEMBER)));
+      expect(container.textContent).toBe('app');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('checks again on a return after a peer cookie write superseded the pending check', async () => {
+    routes['GET /api/identity'] = () => json(MEMBER);
+    await mount();
+    vi.spyOn(navigator, 'locks', 'get').mockReturnValue(
+      undefined as unknown as LockManager,
+    );
+    const peer = new BroadcastChannel('huabu.session');
+    let finish!: (response: Response) => void;
+    vi.mocked(fetch).mockImplementationOnce(
+      () => new Promise<Response>((resolve) => (finish = resolve)),
+    );
+    try {
+      await act(async () => window.dispatchEvent(new Event('focus')));
+      const before = identityChecks();
+      peer.postMessage('changing');
+      peer.postMessage('changed');
+      await vi.waitFor(() => expect(identityChecks()).toBe(before + 1));
+      await vi.waitFor(() =>
+        expect(container.querySelector('[inert]')).toBeNull(),
+      );
+      await act(async () => finish(json(MEMBER)));
+      expect(container.querySelector('[inert]')).toBeNull();
+      await act(async () => window.dispatchEvent(new Event('focus')));
+      expect(identityChecks()).toBe(before + 2);
+    } finally {
+      peer.close();
+    }
+  });
+
   it.each(['completed', 'closed'])(
     'blocks a ready peer during a cookie write whose tab %s, then verifies without replaying another account draft',
     async (writer) => {
@@ -991,3 +1179,18 @@ it('keeps renewal blocked when the adopted session identity cannot be verified',
   expect(container.textContent).toContain('Identity service unavailable');
   expect(resend).not.toHaveBeenCalled();
 });
+
+it.each([
+  ['en', en],
+  ['zh-CN', zhCN],
+])(
+  'keeps the %s admission path on one line in the waiting copy',
+  (_locale, resources) => {
+    const copy = resources.auth.noAccessHowTo;
+    // "Settings → People" must not break around the arrow on a narrow screen.
+    expect(copy).toContain('→');
+    // Both sides of every arrow are non-breaking spaces, never breakable ones.
+    expect(copy).not.toMatch(/[ \t\n]→|→[ \t\n]/u);
+    expect(copy).toMatch(/\u00a0→\u00a0/u);
+  },
+);

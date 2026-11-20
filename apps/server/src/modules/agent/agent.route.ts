@@ -344,7 +344,7 @@ const agentRoutes: FastifyPluginAsync = async (
     Params: AgentHistoryTurnParams;
     Querystring: AgentHistoryTurnQuery;
     Reply: ApiResult<AgentHistoryTurnResponse>;
-  }>('/history/:threadId/turn/:turnRef', async (request, reply) => {
+  }>('/history/:threadId/turn', async (request, reply) => {
     const params = agentHistoryTurnParamsSchema.safeParse(request.params);
     const query = agentHistoryTurnQuerySchema.safeParse(request.query);
     if (!params.success || !query.success) {
@@ -353,7 +353,8 @@ const agentRoutes: FastifyPluginAsync = async (
         code: 'malformed_history_request',
       });
     }
-    const { threadId, turnRef } = params.data;
+    const { threadId } = params.data;
+    const { turnRef } = query.data;
     const lease = acquireWorkspaceOperationLease();
     try {
       const namespace = canvasAcpNamespace(query.data.canvasId);

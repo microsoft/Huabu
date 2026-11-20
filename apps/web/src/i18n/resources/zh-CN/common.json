@@ -720,11 +720,13 @@
     "signInIntro": "使用你的组织账户打开你的 Space。",
     "continueWith": "使用 {{provider}} 继续",
     "signingIn": "正在登录…",
+    "verifyingSession": "正在验证登录状态…",
     "signInFailed": "登录失败：{{message}}",
     "noSignInMethods": "此服务器尚未配置浏览器登录。请联系管理员添加带有客户端 ID 的 Auth0 或 Entra ID 登录方式。",
     "crossOriginUnsupported": "浏览器登录要求 Web 应用与服务器位于同一来源。此构建指向其他来源的服务器（VITE_API_BASE）；请从同一来源提供两者后再登录。",
     "noAccessTitle": "暂无访问权限",
     "noAccessIntro": "你已以 {{name}} 的身份登录，但该账户尚不能使用 {{appName}}。请联系管理员授予访问权限。",
+    "noAccessHowTo": "管理员可以为你开通：在 {{appName}} 中打开“设置\u00a0→\u00a0成员”，找到此账号并打开“服务访问权限”。你已登录过，所以已经出现在该列表中。开通后此页面会自动进入 {{appName}}。",
     "signOut": "退出登录",
     "signOutAs": "退出登录（{{name}}）",
     "deniedIntro": "该账户无法使用 {{appName}}。请退出登录后使用其他账户。",
@@ -759,7 +761,11 @@
     "create": "创建",
     "current": "当前",
     "named": "工作区：{{workspace}}",
-    "namedPrefix": "工作区："
+    "rename": "重命名",
+    "renameLabel": "重命名工作区“{{workspace}}”",
+    "renameSave": "保存",
+    "renameCancel": "取消重命名",
+    "renameFailed": "无法重命名工作区，请重试。"
   },
   "spaceHierarchy": {
     "deleteFromContainer": "请从 Home 或父 Space 中删除此 Space。",
@@ -1771,20 +1777,25 @@
     "editLocked": "{{label}}正在编辑此内容，对方完成后你才能编辑。"
   },
   "errors": {
-    "connectAnAgent": "连接 Agent",
-    "conversationAgentUnconfigured": "请连接外部 Agent，或使用 Built-In Pi 开始新对话。",
+    "configureModel": "配置模型",
+    "connectDevice": "连接设备",
+    "conversationAgentUnconfigured": "要开始对话，请为 Built-In Pi 配置模型，或连接装有外部 Agent 的设备。",
     "nodeSaveFailed": "无法保存「{{name}}」。你的修改仍保留在此，请重试。",
     "rateLimited": "请求过于频繁，请在 {{seconds}} 秒后重试。",
-    "spaceSaveAccessDenied": "你的账户对这个空间只有只读权限。修改未保存。",
-    "useBuiltInPi": "使用 Built-In Pi"
+    "spaceSaveAccessDenied": "你的账户对这个空间只有只读权限。修改未保存。"
   },
   "people": {
     "loading": "正在加载成员…",
     "loadFailed": "无法加载成员。",
     "saveFailed": "无法保存更改。",
     "intro": "谁可以使用此 Huabu，以及能打开哪些工作区。成员首次登录后会出现在这里。更改在其下一次请求时生效。",
-    "administrator": "管理员",
-    "access": "访问权限",
+    "serviceAccess": "服务访问权限",
+    "accessVsWorkspace": "服务访问权限决定某人能否使用此 Huabu；开通后没有工作区的人会获得一个个人工作区。将某人添加到工作区不会开通服务访问权限，加入后默认是查看者，可改为编辑者或所有者。",
+    "status": {
+      "administrator": "管理员",
+      "admitted": "已开通",
+      "waiting": "等待开通"
+    },
     "roleIn": "在 {{workspace}} 中的角色",
     "removeRole": "从此工作区移除",
     "addToWorkspace": "添加到工作区…",

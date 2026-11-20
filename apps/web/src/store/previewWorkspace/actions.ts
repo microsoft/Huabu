@@ -7,15 +7,18 @@ import { createId, isFileReference } from '@huabu/shared';
 
 import { ApiError } from '@/api/_client';
 import { getAgentConversationOwner } from '@/api/agent';
-import { toast } from '@/components/Common/Toast';
 import { pageLifecycle } from '@/utils/pageLifecycle';
 
-import { loadDefaultAgentBinding } from '../acpProfilesStore';
+import {
+  loadDefaultAgentBinding,
+  toastConversationStartError,
+} from '../acpProfilesStore';
 import { selectCanWriteCanvas } from '../canvasStore';
 import useCanvasStore from '../canvasStore';
 import { rememberPreviewedAgent } from '../commentDestinationMemory';
 import { createConversation } from '../conversationPreparation';
 import { usePanelStore } from '../panelStore';
+import { useWorkspaceStore } from '../workspaceStore';
 import { findTabByTarget, groupOfTab, normalizePreviewTarget } from './model';
 import { selectActiveTab, usePreviewWorkspaceStore } from './store';
 
@@ -278,12 +281,18 @@ export async function openNewChat(groupId?: string): Promise<string> {
   const initial = usePreviewWorkspaceStore.getState();
   const canvasId = initial.canvasId || useCanvasStore.getState().canvasId;
   if (!canvasId) return '';
+  // Space ids are scoped to a Workspace, so the same id after a Workspace
+  // switch names a different Space.
+  const workspaceId = useWorkspaceStore.getState().workspaceId;
+  const inInitialSpace = () =>
+    useWorkspaceStore.getState().workspaceId === workspaceId &&
+    useCanvasStore.getState().canvasId === canvasId;
   try {
     return await pageLifecycle.run('updating', async () => {
       const binding = await loadDefaultAgentBinding();
       const preview = usePreviewWorkspaceStore.getState();
       if (
-        useCanvasStore.getState().canvasId !== canvasId ||
+        !inInitialSpace() ||
         preview.canvasId !== initial.canvasId ||
         preview.workspace !== initial.workspace
       ) {
@@ -303,8 +312,10 @@ export async function openNewChat(groupId?: string): Promise<string> {
       return tabId;
     });
   } catch (error) {
-    toast(error instanceof Error ? error.message : String(error), {
-      tone: 'danger',
+    // A missing Agent offers setup. The toast outlives this call, so its retry
+    // opens the requested Chat only while the same Space is still open.
+    toastConversationStartError(error, () => {
+      if (inInitialSpace()) void openNewChat(groupId);
     });
     return '';
   }

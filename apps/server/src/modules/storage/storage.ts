@@ -672,7 +672,7 @@ async function ensureActiveWorkspace(profile: StorageProfile): Promise<void> {
 }
 
 /** The name a SQL deployment's first Workspace is given. */
-const DEFAULT_WORKSPACE_NAME = 'Workspace';
+const DEFAULT_WORKSPACE_NAME = 'Default';
 
 /**
  * Select one Workspace as the process's active namespace.

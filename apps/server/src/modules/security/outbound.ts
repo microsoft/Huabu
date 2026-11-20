@@ -110,6 +110,10 @@ export function isPublicNetworkOnly(): boolean {
  * The built-in `fetch` takes the guarded dispatcher, so callers keep its
  * `Response` and `FormData`: SDKs that probe for multipart support (image
  * edits) reject npm undici's, which cannot serialize Node's `FormData`.
+ * That only works while the npm `undici` the Agent comes from shares a major
+ * version with the one bundled in Node (`process.versions.undici`): undici 8's
+ * Agent rejects the handlers Node 24's fetch hands it, failing every guarded
+ * request. `outbound.test.ts` checks the pairing.
  */
 export const outboundFetch: typeof fetch = (input, init) =>
   isPublicNetworkOnly()
