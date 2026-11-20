@@ -24,6 +24,7 @@ import {
 } from '../Common/menuStyles';
 import { Popover } from '../Common/Popover';
 import { toast } from '../Common/Toast';
+import { useOpenWorkspaceSwitcher } from '../Workspace/useOpenWorkspaceSwitcher';
 
 import type { DesktopHomeMenuPosition } from '@huabu/shared/desktop-tabs';
 
@@ -40,6 +41,10 @@ export function DesktopHomeMenu() {
   );
   const syncing = useWorkspaceStore((s) => s.isSyncing);
   const activate = useWorkspaceStore((s) => s.activateRecentWorkspace);
+  const named = useWorkspaceStore(
+    (s) => s.capabilities?.namedWorkspaces === true,
+  );
+  const openWorkspaceSwitcher = useOpenWorkspaceSwitcher();
   const [position, setPosition] = useState<DesktopHomeMenuPosition | null>(
     null,
   );
@@ -172,15 +177,27 @@ export function DesktopHomeMenu() {
           ))}
         </div>
         {canChange && <div role="separator" className={MENU_SEPARATOR_CLASS} />}
-        {canChange && (
-          <DropdownMenuLink
-            to="/setup"
-            icon={<FolderOpen aria-hidden />}
-            onClick={() => close()}
-          >
-            {t('workspace.open')}
-          </DropdownMenuLink>
-        )}
+        {canChange &&
+          (named ? (
+            // Named Workspaces are created and listed in the dialog.
+            <DropdownMenuItem
+              icon={<FolderOpen aria-hidden />}
+              onClick={() => {
+                close();
+                openWorkspaceSwitcher();
+              }}
+            >
+              {t('workspace.allWorkspaces')}
+            </DropdownMenuItem>
+          ) : (
+            <DropdownMenuLink
+              to="/setup"
+              icon={<FolderOpen aria-hidden />}
+              onClick={() => close()}
+            >
+              {t('workspace.open')}
+            </DropdownMenuLink>
+          ))}
       </div>
     </Popover>
   );

@@ -20,6 +20,7 @@ import {
 import { Button } from '../Common/Button';
 import { Tooltip } from '../Common/Tooltip';
 import { AppMenu } from '../Panels/Header/AppMenu';
+import { WorkspaceSwitcherButton } from '../Workspace/WorkspaceSwitcherPopover';
 
 /**
  * Width (in px) reserved on the right edge of the title bar for the
@@ -69,6 +70,9 @@ export function WindowChrome() {
   const workspacePath = useWorkspaceStore((s) => s.workspacePath);
   const canChangeWorkspace = useWorkspaceStore(
     (s) => s.capabilities?.canChangeWorkspace ?? true,
+  );
+  const namedWorkspaces = useWorkspaceStore(
+    (s) => s.capabilities?.namedWorkspaces === true,
   );
   const canvasCount = useWorkspaceStore((s) => s.canvasCount);
 
@@ -245,7 +249,16 @@ export function WindowChrome() {
           right). `max-w-[50%]` keeps long canvas / folder names from
           sliding under the side controls; they truncate with ellipsis. */}
       <div className="pointer-events-none absolute left-1/2 flex max-w-[50%] min-w-0 -translate-x-1/2 items-center justify-center">
-        {showWorkspaceSwitcher ? (
+        {showWorkspaceSwitcher && namedWorkspaces && canChangeWorkspace ? (
+          // Named Workspaces switch in place, from the quick-switch popover.
+          <WorkspaceSwitcherButton
+            label={workspaceLabel}
+            style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+            className="text-fg-muted hover:text-fg-default hover:bg-hover focus-visible:ring-info pointer-events-auto max-w-full cursor-pointer truncate rounded-md px-2 py-0.5 text-sm font-medium transition-colors focus-visible:ring-2 focus-visible:outline-none"
+          >
+            {workspaceLabel}
+          </WorkspaceSwitcherButton>
+        ) : showWorkspaceSwitcher ? (
           <Tooltip
             placement="bottom"
             content={

@@ -204,8 +204,13 @@ function RootLayout() {
 function WorkspaceGuardLayout() {
   const initialising = useContext(InitialisingContext);
   const isReady = useWorkspaceStore((s) => s.isReady);
+  const isSyncing = useWorkspaceStore((s) => s.isSyncing);
 
   if (initialising) return <WorkspaceLoadingScreen />;
+  // A switch from inside the app (the Workspace popover or dialog) waits
+  // here rather than on the first-launch page, which is only for choosing
+  // a Workspace when there is none to be in.
+  if (!isReady && isSyncing) return <WorkspaceLoadingScreen />;
   if (!isReady) return <Navigate to="/setup" replace />;
   return <Outlet />;
 }

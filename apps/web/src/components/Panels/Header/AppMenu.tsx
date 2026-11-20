@@ -39,6 +39,7 @@ import {
 } from '../../Common/DropdownMenu';
 import { MENU_SEPARATOR_CLASS } from '../../Common/menuStyles';
 import { toast } from '../../Common/Toast.tsx';
+import { useOpenWorkspaceSwitcher } from '../../Workspace/useOpenWorkspaceSwitcher';
 
 interface AppMenuProps {
   /**
@@ -92,6 +93,7 @@ export const AppMenu: React.FC<AppMenuProps> = ({
     useCanvasActions();
   const openSettings = useSettingsUiStore((s) => s.open);
   const openShortcuts = useShortcutsUiStore((s) => s.open);
+  const openWorkspaceSwitcher = useOpenWorkspaceSwitcher();
   const diagnosticsAvailable = desktopDiagnosticsAvailable();
   const runDiagnostic = useRunDiagnostic();
   const { status: updateStatus, check: checkForUpdates } = useAppUpdate();
@@ -214,7 +216,9 @@ export const AppMenu: React.FC<AppMenuProps> = ({
         )}
 
         {canChangeWorkspace && (
-          <DropdownMenuItem onClick={runAndClose(() => navigate('/setup'))}>
+          <DropdownMenuItem
+            onClick={runAndClose(() => openWorkspaceSwitcher())}
+          >
             {t(
               namedWorkspaces
                 ? 'workspace.switcher'
