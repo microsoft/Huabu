@@ -245,8 +245,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
              * App version in the desktop rail footer or mobile title row: a product-wide
              * fact, not a General-tab setting, so it lives here (decoupled
              * from any tab) as a muted signature rather than mixed in with
-             * editable preferences. `__APP_VERSION__` is inlined at build
-             * time from `apps/desktop/package.json` (see vite.config.ts).
+             * editable preferences. `__APP_VERSION__` is this build's
+             * identity, inlined at build time by scripts/build-version.mjs
+             * (`X.Y.Z+g<sha7>` or `X.Y.Z-nightly.<date>.g<sha7>`).
              */}
             <span className="text-fg-muted col-start-2 row-start-1 mb-2 self-center justify-self-end px-2 font-mono text-[11px] select-text sm:mt-auto sm:mb-0 sm:self-auto sm:pt-4">
               v{__APP_VERSION__}

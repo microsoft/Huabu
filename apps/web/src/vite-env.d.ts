@@ -4,9 +4,11 @@
 /// <reference types="vite/client" />
 
 /**
- * Inlined at build time by Vite (`define`) from the desktop package's
- * version field. See `vite.config.ts`. Available to all client code as
- * a global string literal — no runtime fetch required.
+ * This build's identity, inlined at build time by Vite (`define`) from
+ * `scripts/build-version.mjs`: the desktop package's semver plus the source
+ * commit, e.g. `0.9.2+gabc1234`, `0.9.2+gabc1234.dirty` for a modified
+ * checkout, or the nightly `0.9.2-nightly.20261120.gabc1234`. Just `0.9.2`
+ * when the commit is unknown. A global string literal; no runtime fetch.
  */
 declare const __APP_VERSION__: string;
 
