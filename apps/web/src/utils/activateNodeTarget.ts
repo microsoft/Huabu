@@ -5,7 +5,6 @@ import { toast } from '@/components/Common/Toast';
 import { hasNodePreview } from '@/components/Nodes/previewableNodeTypes';
 import { i18n } from '@/i18n';
 import useCanvasStore from '@/store/canvasStore';
-import { usePanelStore } from '@/store/panelStore';
 import { openPreviewNode } from '@/store/previewWorkspace/actions';
 import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store';
 import { useWorkspaceStore } from '@/store/workspaceStore';
@@ -64,10 +63,11 @@ export function activateNodeTarget(
       400,
     );
   } else {
-    // Fullscreen preview unmounts the Canvas. Leave fullscreen and hand the
-    // target to the reveal request the Canvas consumes once it is mounted.
-    usePanelStore.getState().setPreviewFullscreen(false);
+    // Fullscreen preview unmounts the Canvas. Stay in fullscreen — the user is
+    // reading — and hand the target to the reveal request the Canvas consumes
+    // when it is mounted again; say so, since nothing visibly moves now.
     useCanvasStore.setState({ pendingRevealNodeIds: [node.id] });
+    toast(i18n.t('canvasPage.nodeLocatedAfterFullscreen'), { tone: 'info' });
   }
   return true;
 }

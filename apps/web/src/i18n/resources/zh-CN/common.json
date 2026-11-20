@@ -863,7 +863,8 @@
     "backToList": "返回 Space 列表",
     "openListInNewTab": "在新标签页打开 Space 列表",
     "nodeTargetUnavailable": "链接指向的节点不可用。",
-    "nodeFocusedNoPreview": "已定位到节点，但该节点没有展开预览。"
+    "nodeFocusedNoPreview": "已定位到节点，但该节点没有展开预览。",
+    "nodeLocatedAfterFullscreen": "已选中节点，退出全屏后会在画布上定位。"
   },
   "world": {
     "title": "World",

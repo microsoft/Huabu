@@ -88,6 +88,7 @@ afterEach(() => {
   container = undefined;
   vi.restoreAllMocks();
   registerAppNavigate(null);
+  usePanelStore.setState({ isPreviewFullscreen: false });
   useCanvasStore.setState({ canvasId: '', nodes: [] });
   usePreviewWorkspaceStore.setState({
     canvasId: '',
@@ -210,7 +211,7 @@ it('keeps a deep link to this Space in-app for plain and modifier clicks', async
   expect(window.open).not.toHaveBeenCalled();
 });
 
-it('leaves fullscreen and queues the reveal when the Canvas is unmounted', async () => {
+it('stays in fullscreen and queues the reveal when the Canvas is unmounted', async () => {
   usePanelStore.setState({ isPreviewFullscreen: true });
   useCanvasStore.setState({ rfInstance: null, canvasWrapper: null });
   const [link] = await renderLinks(
@@ -223,7 +224,8 @@ it('leaves fullscreen and queues the reveal when the Canvas is unmounted', async
 
   click(link);
 
-  expect(usePanelStore.getState().isPreviewFullscreen).toBe(false);
+  expect(usePanelStore.getState().isPreviewFullscreen).toBe(true);
+  expect(selectedNodeIds()).toEqual(['node-question']);
   expect(useCanvasStore.getState().pendingRevealNodeIds).toEqual([
     'node-question',
   ]);
