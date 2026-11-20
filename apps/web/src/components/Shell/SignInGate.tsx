@@ -59,14 +59,6 @@ const RECHECK_MAX_MS = 30_000;
 /** How often a person waiting for admission asks again, while the page is visible. */
 const NO_ACCESS_RECHECK_MS = 15_000;
 /**
- * How long a pending foreground check absorbs later foreground events. One
- * return fires its events within milliseconds; a later return past this
- * window starts its own check, so an identity read that never settles cannot
- * keep the app covered.
- */
-const FOREGROUND_JOIN_MS = 5_000;
-
-/**
  * The session is an HttpOnly cookie for this origin, which an API on any
  * other origin (`VITE_API_BASE`) neither receives nor can set.
  */
@@ -394,12 +386,12 @@ export function SignInGate({ children }: { children: ReactNode }) {
     return () => window.removeEventListener(AUTH_REQUIRED_EVENT, recheck);
   }, [check, adopt, recover, blockApp]);
 
-  // The check a foreground event started, and when, while it is still the
-  // one that decides. One return to the page fires both `focus` and
-  // `visibilitychange`; the second joins the first instead of asking again.
-  const foregroundRun = useRef<{ run: number; startedAt: number } | null>(
-    null,
-  );
+  // The check the current return to the page started, while it is still the
+  // one that decides. One return fires both `focus` and `visibilitychange`;
+  // the second joins the first instead of asking again. Leaving the page
+  // (blur, or hidden) ends the return, so the next one always asks afresh and
+  // neither a stale answer nor a read that never settles can stand in for it.
+  const foregroundRun = useRef<number | null>(null);
 
   // Waiting members poll for admission. A running Bubble app also verifies
   // its shared cookie on foreground and on peer writes, without refreshing
@@ -410,24 +402,23 @@ export function SignInGate({ children }: { children: ReactNode }) {
       // `check` takes its run number before its first await.
       const pending = check(undefined, false);
       const run = latestCheck.current;
-      foregroundRun.current = { run, startedAt: Date.now() };
+      foregroundRun.current = run;
       void pending.finally(() => {
-        if (foregroundRun.current?.run === run) foregroundRun.current = null;
+        if (foregroundRun.current === run) foregroundRun.current = null;
       });
     };
-    const verifyPrincipal = () => {
+    const verifyPrincipal = (joinPending: boolean) => {
       if (
         accountChanged.current ||
         (sessionChanging.current && !hasSessionLock())
       )
         return;
       // Any later check, or a peer's cookie write, supersedes the pending
-      // one; so does a return after the join window, in case it hangs.
-      const pending = foregroundRun.current;
+      // one; only then does this return need a check of its own.
       if (
-        pending !== null &&
-        pending.run === latestCheck.current &&
-        Date.now() - pending.startedAt < FOREGROUND_JOIN_MS
+        joinPending &&
+        foregroundRun.current !== null &&
+        foregroundRun.current === latestCheck.current
       )
         return;
       if (awaitingAccess) verifyNow();
@@ -440,7 +431,15 @@ export function SignInGate({ children }: { children: ReactNode }) {
       }
     };
     const recheckAccess = () => {
-      if (document.visibilityState === 'visible') verifyPrincipal();
+      if (document.visibilityState === 'visible') verifyPrincipal(true);
+      else foregroundRun.current = null;
+    };
+    const leave = () => {
+      foregroundRun.current = null;
+    };
+    // The admission poll is spaced out, so it never joins: each one asks.
+    const pollAccess = () => {
+      if (document.visibilityState === 'visible') verifyPrincipal(false);
     };
     const peerChanged = (event: Event) => {
       const phase = (event as CustomEvent<SessionChangePhase>).detail;
@@ -455,14 +454,16 @@ export function SignInGate({ children }: { children: ReactNode }) {
       if (phase === 'changed' || hasSessionLock()) void check(undefined, false);
     };
     const timer = awaitingAccess
-      ? window.setInterval(recheckAccess, NO_ACCESS_RECHECK_MS)
+      ? window.setInterval(pollAccess, NO_ACCESS_RECHECK_MS)
       : undefined;
     window.addEventListener('focus', recheckAccess);
+    window.addEventListener('blur', leave);
     document.addEventListener('visibilitychange', recheckAccess);
     window.addEventListener(SESSION_CHANGE_EVENT, peerChanged);
     return () => {
       window.clearInterval(timer);
       window.removeEventListener('focus', recheckAccess);
+      window.removeEventListener('blur', leave);
       document.removeEventListener('visibilitychange', recheckAccess);
       window.removeEventListener(SESSION_CHANGE_EVENT, peerChanged);
     };

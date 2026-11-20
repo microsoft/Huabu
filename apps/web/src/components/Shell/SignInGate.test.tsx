@@ -6,10 +6,10 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { SignInGate } from './SignInGate';
-import en from '../../i18n/resources/en/common.json';
-import zhCN from '../../i18n/resources/zh-CN/common.json';
 import { AUTH_REQUIRED_EVENT } from '../../api/_client';
 import { SESSION_CHANGE_EVENT } from '../../api/identity';
+import en from '../../i18n/resources/en/common.json';
+import zhCN from '../../i18n/resources/zh-CN/common.json';
 import { useIdentityStore } from '../../store/identityStore';
 import * as oidc from '../../utils/oidcLogin';
 import { forgetTokens } from '../../utils/oidcLogin';
@@ -642,29 +642,91 @@ describe('SignInGate', () => {
     expect(identityChecks()).toBe(before + 2);
   });
 
-  it('lets a later return replace a foreground check that never settles', async () => {
+  it('lets the next return replace a foreground check that never settles', async () => {
     routes['GET /api/identity'] = () => json(MEMBER);
     await mount();
-    vi.useFakeTimers({ toFake: ['Date'] });
+    const before = identityChecks();
+    // The first read hangs; without Web Locks nothing queues behind it.
+    vi.mocked(fetch).mockImplementationOnce(
+      () => new Promise<Response>(() => {}),
+    );
+    await act(async () => window.dispatchEvent(new Event('focus')));
+    expect(identityChecks()).toBe(before + 1);
+    expect(container.querySelector('[inert]')).not.toBeNull();
+    // The same return's visibility event joins the pending check.
+    await act(async () =>
+      document.dispatchEvent(new Event('visibilitychange')),
+    );
+    expect(identityChecks()).toBe(before + 1);
+    // Leaving and coming back is a new return, which asks again, and that
+    // answer uncovers the app.
+    await act(async () => {
+      window.dispatchEvent(new Event('blur'));
+      window.dispatchEvent(new Event('focus'));
+    });
+    expect(identityChecks()).toBe(before + 2);
+    for (let i = 0; i < 3; i++) await act(async () => {});
+    expect(container.querySelector('[inert]')).toBeNull();
+    expect(container.textContent).toBe('app');
+  });
+
+  it('admits a waiting person on a new return while an earlier read is still pending', async () => {
+    routes['GET /api/identity'] = () => json({ ...MEMBER, member: false });
+    await mount();
+    expect(container.textContent).toContain('auth.noAccessTitle');
+    const before = identityChecks();
+    let finishStale!: (response: Response) => void;
+    vi.mocked(fetch).mockImplementationOnce(
+      () => new Promise<Response>((resolve) => (finishStale = resolve)),
+    );
+    await act(async () => window.dispatchEvent(new Event('focus')));
+    expect(identityChecks()).toBe(before + 1);
+    // An administrator admits them; they switch away and back to the tab.
+    routes['GET /api/identity'] = () => json(MEMBER);
+    let visibility: DocumentVisibilityState = 'hidden';
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      get: () => visibility,
+    });
     try {
+      await act(async () =>
+        document.dispatchEvent(new Event('visibilitychange')),
+      );
+      visibility = 'visible';
+      await act(async () => {
+        document.dispatchEvent(new Event('visibilitychange'));
+        window.dispatchEvent(new Event('focus'));
+      });
+    } finally {
+      // Back to the prototype's own `visibilityState`.
+      delete (document as { visibilityState?: unknown }).visibilityState;
+    }
+    // The new return asks once, rather than waiting on the earlier read.
+    expect(identityChecks()).toBe(before + 2);
+    for (let i = 0; i < 5; i++) await act(async () => {});
+    expect(container.textContent).toBe('app');
+    // The earlier read's answer, from before admission, changes nothing.
+    await act(async () => finishStale(json({ ...MEMBER, member: false })));
+    for (let i = 0; i < 3; i++) await act(async () => {});
+    expect(container.textContent).toBe('app');
+  });
+
+  it('polls a waiting person afresh even while a foreground read is pending', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    try {
+      routes['GET /api/identity'] = () => json({ ...MEMBER, member: false });
+      await mount();
+      expect(container.textContent).toContain('auth.noAccessTitle');
       const before = identityChecks();
-      // The first read hangs; without Web Locks nothing queues behind it.
       vi.mocked(fetch).mockImplementationOnce(
         () => new Promise<Response>(() => {}),
       );
       await act(async () => window.dispatchEvent(new Event('focus')));
       expect(identityChecks()).toBe(before + 1);
-      expect(container.querySelector('[inert]')).not.toBeNull();
-      // Within the join window, another return still joins the hung check.
-      vi.setSystemTime(Date.now() + 1_000);
-      await act(async () => window.dispatchEvent(new Event('focus')));
-      expect(identityChecks()).toBe(before + 1);
-      // A return after it asks again, and that answer uncovers the app.
-      vi.setSystemTime(Date.now() + 5_000);
-      await act(async () => window.dispatchEvent(new Event('focus')));
+      routes['GET /api/identity'] = () => json(MEMBER);
+      await act(async () => vi.advanceTimersByTime(15_000));
       expect(identityChecks()).toBe(before + 2);
-      for (let i = 0; i < 3; i++) await act(async () => {});
-      expect(container.querySelector('[inert]')).toBeNull();
+      for (let i = 0; i < 5; i++) await act(async () => {});
       expect(container.textContent).toBe('app');
     } finally {
       vi.useRealTimers();
