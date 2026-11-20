@@ -19,7 +19,7 @@ import {
   openServerLog,
 } from '../../../hooks/useElectron';
 import { useRunDiagnostic } from '../../../hooks/useRunDiagnostic';
-import { savedBeforeSignOut } from '../../../store/canvasStore';
+import { savedBeforeLeaving } from '../../../store/canvasStore';
 import { useIdentityStore } from '../../../store/identityStore';
 import { useSettingsUiStore } from '../../../store/settingsUiStore';
 import { useShortcutsUiStore } from '../../../store/shortcutsUiStore';
@@ -109,7 +109,7 @@ export const AppMenu: React.FC<AppMenuProps> = ({
       document.activeElement.blur();
     let failure: 'auth.signOutUnsaved' | 'auth.signOutFailed';
     try {
-      if (!(await savedBeforeSignOut())) failure = 'auth.signOutUnsaved';
+      if (!(await savedBeforeLeaving())) failure = 'auth.signOutUnsaved';
       else {
         await signOut({ providerSignOut: identity?.providerSignOut });
         return;

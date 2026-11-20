@@ -782,7 +782,7 @@
     "switchedCount_other": "已切换到“{{workspace}}” · {{count}} 个 Space",
     "backTo": "返回“{{workspace}}”",
     "back": "返回",
-    "unsavedBeforeSwitch": "此 Space 还有未保存的更改，因此仍停留在当前工作区。请稍后重试。"
+    "unsavedBeforeSwitch": "还有未保存的更改，因此仍停留在当前工作区。请稍后重试。"
   },
   "spaceHierarchy": {
     "deleteFromContainer": "请从 Home 或父 Space 中删除此 Space。",

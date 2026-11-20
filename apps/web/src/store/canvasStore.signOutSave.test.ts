@@ -21,7 +21,7 @@ vi.mock('@/components/Common/Toast', () => ({ toast: vi.fn() }));
 
 import useCanvasStore, {
   hasUnsavedCanvasEdits,
-  savedBeforeSignOut,
+  savedBeforeLeaving,
   resendUnsavedCanvasEdits,
 } from './canvasStore';
 import { pageLifecycle } from '../utils/pageLifecycle';
@@ -63,11 +63,11 @@ beforeEach(() => {
   });
 });
 
-describe('savedBeforeSignOut', () => {
+describe('savedBeforeLeaving', () => {
   it('reports an edit whose content save failed as unsaved', async () => {
     api.putNodeContent.mockRejectedValue(new Error('Internal Server Error'));
     state().updateNodeData(note.id, { content: 'Typed just before sign-out' });
-    expect(await savedBeforeSignOut()).toBe(false);
+    expect(await savedBeforeLeaving()).toBe(false);
     expect(api.putNodeContent).toHaveBeenCalled();
   });
 
@@ -90,7 +90,7 @@ describe('savedBeforeSignOut', () => {
         }),
     );
     try {
-      const saved = savedBeforeSignOut();
+      const saved = savedBeforeLeaving();
       await new Promise((resolve) => setTimeout(resolve, 20));
       expect(settle).toHaveBeenCalled();
       expect(api.putNodeContent).not.toHaveBeenCalled();
@@ -111,7 +111,7 @@ describe('savedBeforeSignOut', () => {
   it('confirms once the content save landed', async () => {
     api.putNodeContent.mockImplementation(async () => ({ revision: 'r2' }));
     state().updateNodeData(note.id, { content: 'Typed just before sign-out' });
-    expect(await savedBeforeSignOut()).toBe(true);
+    expect(await savedBeforeLeaving()).toBe(true);
     expect(api.putNodeContent).toHaveBeenCalled();
   });
 });
@@ -120,7 +120,7 @@ describe('hasUnsavedCanvasEdits', () => {
   it('resends a settled 401 sidecar failure after renewal without requiring another edit', async () => {
     api.putNodeContent.mockRejectedValue(new Error('401 IDENTITY_REQUIRED'));
     state().updateNodeData(note.id, { content: 'Retained across renewal' });
-    expect(await savedBeforeSignOut()).toBe(false);
+    expect(await savedBeforeLeaving()).toBe(false);
     const attempts = api.putNodeContent.mock.calls.length;
     api.putNodeContent.mockResolvedValue({ revision: 'r3' });
     await resendUnsavedCanvasEdits();
@@ -138,12 +138,12 @@ describe('hasUnsavedCanvasEdits', () => {
     api.putNodeContent.mockRejectedValue(new Error('401 IDENTITY_REQUIRED'));
     state().updateNodeData(note.id, { content: 'Typed as the session lapsed' });
     expect(hasUnsavedCanvasEdits()).toBe(true);
-    await savedBeforeSignOut();
+    await savedBeforeLeaving();
     expect(hasUnsavedCanvasEdits()).toBe(true);
 
     api.putNodeContent.mockImplementation(async () => ({ revision: 'r3' }));
     state().updateNodeData(note.id, { content: 'Typed once signed in again' });
-    expect(await savedBeforeSignOut()).toBe(true);
+    expect(await savedBeforeLeaving()).toBe(true);
     expect(hasUnsavedCanvasEdits()).toBe(false);
   });
 });

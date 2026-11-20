@@ -6,10 +6,12 @@ import { useLocation, useNavigate } from 'react-router-dom';
 
 import { i18n } from '@/i18n';
 
-import { drainPendingSaves } from '../../store/canvasStore';
+import { savedBeforeLeaving } from '../../store/canvasStore';
 import { useWorkspaceStore } from '../../store/workspaceStore';
 import { useWorkspaceSwitcherUiStore } from '../../store/workspaceSwitcherUiStore';
+import { setDesktopInputFrozen } from '../../utils/desktopInput';
 import { dismissToast, toast } from '../Common/Toast';
+import { leaveSpace } from '../Space/spaceDeparture';
 
 import type { NavigateFunction } from 'react-router-dom';
 
@@ -45,9 +47,15 @@ export function useWorkspaceSwitchRoute(): void {
  *   anything is awaited and held until the switch ends, so a second request
  *   made while a Space's edits are still saving is refused rather than racing
  *   the first. Choosers disable themselves while it is held.
- * - An open Space belongs to the Workspace being left, so its edits are saved
- *   first and the view moves to the new Workspace's home; no Space of the old
- *   Workspace stays on screen. If the edits cannot be saved, nothing changes.
+ * - Everything the page still owes the old Workspace lands first, with input
+ *   frozen as for sign-out: recordings are stopped and kept, imports and
+ *   uploads finish, and every save queue drains ({@link savedBeforeLeaving}),
+ *   whether or not a Space is open. If any of it fails, nothing changes.
+ * - An open Space belongs to the Workspace being left, so the view then
+ *   leaves it for the new Workspace's home through the Space navigation
+ *   guard, and the Workspace changes only once the Space is off screen. If
+ *   the guard keeps the person in the Space (a late save failed and they
+ *   chose to stay), nothing changes.
  * - The header shows the new name as soon as the switch lands, and a toast
  *   names it with a button back to the previous Workspace, which is itself a
  *   switch like any other.
@@ -55,9 +63,7 @@ export function useWorkspaceSwitchRoute(): void {
  *
  * Returns whether the switch happened.
  */
-async function switchWorkspace(
-  change: () => Promise<void>,
-): Promise<boolean> {
+async function switchWorkspace(change: () => Promise<void>): Promise<boolean> {
   const t = i18n.t.bind(i18n);
   const before = useWorkspaceStore.getState();
   const switcher = useWorkspaceSwitcherUiStore.getState();
@@ -75,27 +81,34 @@ async function switchWorkspace(
             null,
         }
       : null;
-    const inSpace = route?.pathname.startsWith('/canvas/') ?? false;
-    if (inSpace) {
-      try {
-        await drainPendingSaves();
-      } catch (error) {
-        console.error('[workspace-switch] Space edits were not saved:', error);
-        toast(t('workspace.unsavedBeforeSwitch'), { tone: 'danger' });
-        return false;
-      }
-    }
+    setDesktopInputFrozen(true);
+    if (document.activeElement instanceof HTMLElement)
+      document.activeElement.blur();
+    let saved: boolean;
     try {
-      // Leave the old Workspace's Space before it stops being reachable.
-      // Its edits are saved, so the navigation guard lets this through.
-      if (inSpace) route?.navigate('/');
+      saved = await savedBeforeLeaving();
+    } finally {
+      // Thawed before leaving, so the guard's Stay / Discard choice stays
+      // usable if a late save fails.
+      setDesktopInputFrozen(false);
+    }
+    if (!saved) {
+      toast(t('workspace.unsavedBeforeSwitch'), { tone: 'danger' });
+      return false;
+    }
+    // Leave the old Workspace's Space before it stops being reachable.
+    if (
+      route?.pathname.startsWith('/canvas/') &&
+      !(await leaveSpace(route.navigate, '/'))
+    )
+      return false;
+    try {
       await change();
     } catch (error) {
       console.error('[workspace-switch] Could not open Workspace:', error);
-      toast(
-        useWorkspaceStore.getState().error ?? t('workspace.switchFailed'),
-        { tone: 'danger' },
-      );
+      toast(useWorkspaceStore.getState().error ?? t('workspace.switchFailed'), {
+        tone: 'danger',
+      });
       return false;
     }
 

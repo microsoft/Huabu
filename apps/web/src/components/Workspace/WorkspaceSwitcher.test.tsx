@@ -3,10 +3,18 @@
 
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { MemoryRouter, useLocation, useNavigate } from 'react-router-dom';
+import {
+  createMemoryRouter,
+  RouterProvider,
+  useLocation,
+  useNavigate,
+} from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { useOpenWorkspaceSwitcher } from './useOpenWorkspaceSwitcher';
+import {
+  OPEN_WORKSPACE_SWITCHER,
+  useOpenWorkspaceSwitcher,
+} from './useOpenWorkspaceSwitcher';
 import { WorkspaceSwitcherDialog } from './WorkspaceSwitcherDialog';
 import { WorkspaceSwitcherButton } from './WorkspaceSwitcherPopover';
 import {
@@ -14,13 +22,15 @@ import {
   useWorkspaceStore,
 } from '../../store/workspaceStore';
 import { useWorkspaceSwitcherUiStore } from '../../store/workspaceSwitcherUiStore';
+import { SpaceNavigationGuard } from '../Space/SpaceNavigationGuard';
 
 import type { WorkspaceDescriptor, WorkspaceInfo } from '../../api/workspace';
 
 /**
  * The quick switch, the Switch Workspace dialog and their entry point, over
- * the real Workspace store. Only the network (`api/workspace`), the toast
- * surface, the canvas save queue and the desktop bridge are replaced.
+ * the real Workspace store and the real Space navigation guard. Only the
+ * network (`api/workspace`), the toast surface, the canvas save queues and
+ * the desktop bridge are replaced.
  */
 
 const server = vi.hoisted(() => ({
@@ -28,11 +38,23 @@ const server = vi.hoisted(() => ({
   workspaces: [] as Array<Omit<WorkspaceDescriptor, 'active'>>,
   current: '',
   calls: [] as string[],
+  /** The route the app showed when each activation reached the Server. */
+  pathsAtActivation: [] as string[],
+  /** The route the app shows now, as `Probe` last saw it. */
+  path: '',
 }));
 const mocks = vi.hoisted(() => ({
   toast: vi.fn((_message: string, _options?: unknown) => 'toast-id'),
-  drain: vi.fn(async () => {}),
-  bridge: null as null | { tabs: { context: { role: string } } },
+  /** `savedBeforeLeaving`: everything the page owes the Server, saved. */
+  saved: vi.fn(async () => true),
+  /** The Space navigation guard's own drain as the person leaves a Space. */
+  drain: vi.fn(async (_canvasId?: string | null) => {}),
+  bridge: null as null | {
+    tabs: {
+      context: { role: string };
+      open?: (target: unknown) => Promise<unknown>;
+    };
+  },
 }));
 
 vi.mock('react-i18next', () => ({
@@ -48,11 +70,18 @@ vi.mock('@/i18n', () => ({
       options ? `${key} ${JSON.stringify(options)}` : key,
   },
 }));
+// The guard's saving overlay animates with lottie, which jsdom cannot draw.
+vi.mock('@/components/Common/Loading', () => ({ Loading: () => null }));
 vi.mock('../Common/Toast', () => ({
   toast: mocks.toast,
   dismissToast: vi.fn(),
 }));
-vi.mock('../../store/canvasStore', () => ({ drainPendingSaves: mocks.drain }));
+vi.mock('../../store/canvasStore', () => ({
+  default: { getState: () => ({ canvasId: 'open-space' }) },
+  savedBeforeLeaving: mocks.saved,
+  drainPendingSaves: mocks.drain,
+  discardPendingSaves: vi.fn(async () => {}),
+}));
 vi.mock('../../hooks/useElectron', () => ({
   getElectronBridge: () => mocks.bridge,
   requireDesktopTabSuccess: () => {},
@@ -87,6 +116,7 @@ vi.mock('../../api/workspace', () => {
     getWorkspaceInfo: vi.fn(async () => info()),
     activateWorkspace: vi.fn(async (workspaceId: string) => {
       server.calls.push(`activate ${workspaceId}`);
+      server.pathsAtActivation.push(server.path);
       server.current = workspaceId;
       return describe().find((w) => w.workspaceId === workspaceId);
     }),
@@ -144,6 +174,7 @@ let path = '';
 
 function Probe() {
   path = useLocation().pathname;
+  server.path = path;
   return null;
 }
 /** Opens a Space the way a link in the app would. */
@@ -172,7 +203,9 @@ function MenuItem() {
   );
 }
 
-async function mount(entry = '/spaces') {
+async function mount(
+  entry: string | { pathname: string; state: unknown } = '/spaces',
+) {
   const named = server.workspaces.length > 0;
   useWorkspaceStore.setState({
     mode: 'free',
@@ -197,13 +230,28 @@ async function mount(entry = '/spaces') {
   });
   await act(async () =>
     root.render(
-      <MemoryRouter initialEntries={[entry]}>
-        <Header />
-        <MenuItem />
-        <OpenSpace />
-        <WorkspaceSwitcherDialog />
-        <Probe />
-      </MemoryRouter>,
+      // A data router, as in the app, so the real Space navigation guard can
+      // hold a departure from a Space.
+      <RouterProvider
+        router={createMemoryRouter(
+          [
+            {
+              path: '*',
+              element: (
+                <>
+                  <Header />
+                  <MenuItem />
+                  <OpenSpace />
+                  <WorkspaceSwitcherDialog />
+                  <SpaceNavigationGuard />
+                  <Probe />
+                </>
+              ),
+            },
+          ],
+          { initialEntries: [entry] },
+        )}
+      />,
     ),
   );
 }
@@ -245,6 +293,7 @@ beforeEach(() => {
   server.workspaces = [structuredClone(DEFAULT), structuredClone(LAB)];
   server.current = 'default';
   server.calls = [];
+  server.pathsAtActivation = [];
   mocks.bridge = null;
   vi.clearAllMocks();
   useWorkspaceSwitcherUiStore.getState().close();
@@ -346,9 +395,12 @@ describe('quick switch popover', () => {
     expect(mocks.drain).not.toHaveBeenCalled();
 
     await act(async () => options.action.onClick());
+    expect(mocks.saved).toHaveBeenCalledTimes(2);
+    // The guard drained the Space on the way out, before activation.
     expect(mocks.drain).toHaveBeenCalledTimes(1);
     expect(path).toBe('/');
     expect(server.calls).toEqual(['activate lab', 'activate default']);
+    expect(server.pathsAtActivation).toEqual(['/spaces', '/']);
   });
 
   it('keeps a rename made while the list was being refreshed', async () => {
@@ -494,15 +546,56 @@ describe('Switch Workspace dialog', () => {
         .click(),
     );
     await click(buttonNamed('workspace.switchTo {"workspace":"Research lab"}'));
-    expect(mocks.drain).toHaveBeenCalledTimes(1);
+    expect(mocks.saved).toHaveBeenCalledTimes(1);
+    expect(mocks.drain).toHaveBeenCalledWith('open-space');
     expect(path).toBe('/');
+    expect(server.calls).toEqual(['activate lab']);
+    // The Workspace changed only once the guard had let the Space go.
+    expect(server.pathsAtActivation).toEqual(['/']);
+  });
+
+  it('stays in the Space, unswitched, when a late save fails and the person stays', async () => {
+    mocks.drain.mockRejectedValueOnce(new Error('offline'));
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    await mount('/canvas/space-in-default');
+    await open();
+    await act(async () =>
+      document
+        .querySelector<HTMLInputElement>('input[type="radio"][value="lab"]')!
+        .click(),
+    );
+    await click(buttonNamed('workspace.switchTo {"workspace":"Research lab"}'));
+    // The guard asks; nothing has been activated meanwhile.
+    expect(dialog()?.textContent).toContain('app.unsavedChangesTitle');
+    expect(server.calls).toEqual([]);
+    expect(useWorkspaceSwitcherUiStore.getState().switching).toBe(true);
+
+    await click(buttonNamed('app.stayInSpace'));
+    expect(path).toBe('/canvas/space-in-default');
+    expect(server.calls).toEqual([]);
+    expect(label()).toBe('Default');
+    expect(useWorkspaceSwitcherUiStore.getState().switching).toBe(false);
+  });
+
+  it('settles pending work with input frozen before switching from the Spaces page', async () => {
+    const inertDuringSave: boolean[] = [];
+    mocks.saved.mockImplementationOnce(async () => {
+      inertDuringSave.push(document.body.inert);
+      return true;
+    });
+    await mount();
+    await click(trigger());
+    await click(buttonNamed(/Research lab/));
+    expect(inertDuringSave).toEqual([true]);
+    expect(document.body.inert).toBe(false);
+    expect(mocks.drain).not.toHaveBeenCalled();
     expect(server.calls).toEqual(['activate lab']);
   });
 
   it('makes one switch at a time while an open Space is still saving', async () => {
     let saved: () => void = () => {};
-    mocks.drain.mockImplementationOnce(
-      () => new Promise<void>((resolve) => (saved = resolve)),
+    mocks.saved.mockImplementationOnce(
+      () => new Promise<boolean>((resolve) => (saved = () => resolve(true))),
     );
     await mount('/canvas/space-in-default');
     await open();
@@ -522,14 +615,13 @@ describe('Switch Workspace dialog', () => {
     await key('Escape');
 
     await act(async () => saved());
-    expect(mocks.drain).toHaveBeenCalledTimes(1);
+    expect(mocks.saved).toHaveBeenCalledTimes(1);
     expect(server.calls).toEqual(['activate lab']);
     expect(useWorkspaceSwitcherUiStore.getState().switching).toBe(false);
   });
 
   it('stays put when the open Space cannot be saved', async () => {
-    mocks.drain.mockRejectedValueOnce(new Error('offline'));
-    vi.spyOn(console, 'error').mockImplementation(() => {});
+    mocks.saved.mockResolvedValueOnce(false);
     await mount('/canvas/space-in-default');
     await open();
     await act(async () =>
@@ -596,12 +688,28 @@ describe('entry points', () => {
   });
 
   it('asks Home to open the dialog from a desktop Space tab', async () => {
-    mocks.bridge = { tabs: { context: { role: 'space' } } };
+    const open = vi.fn(async (_target: unknown) => ({ ok: true }));
+    mocks.bridge = { tabs: { context: { role: 'space' }, open } };
     await mount('/canvas/a');
     await click(buttonNamed('Menu: Switch Workspace'));
-    // The navigation carries the request; Home (the same component here)
-    // opens the dialog and clears it.
-    expect(path).toBe('/spaces');
+    // The Space tab stays; the navigation guard forwards the request to Home,
+    // whose own Switch Workspace dialog acts on it.
+    expect(open).toHaveBeenCalledWith({
+      canvasId: null,
+      homePath: '/spaces',
+      state: { [OPEN_WORKSPACE_SWITCHER]: 'choose' },
+    });
+    expect(path).toBe('/canvas/a');
+    expect(useWorkspaceSwitcherUiStore.getState().isOpen).toBe(false);
+  });
+
+  it('opens the dialog on Home when a Space tab forwards the request', async () => {
+    mocks.bridge = { tabs: { context: { role: 'home' } } };
+    await mount({
+      pathname: '/spaces',
+      state: { [OPEN_WORKSPACE_SWITCHER]: 'choose' },
+    });
     expect(useWorkspaceSwitcherUiStore.getState().isOpen).toBe(true);
+    expect(path).toBe('/spaces');
   });
 });
