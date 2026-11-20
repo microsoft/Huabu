@@ -56,10 +56,37 @@ test('a nightly version already names its commit', () => {
   );
 });
 
-test('an identity this script printed is kept as is', () => {
+test('release metadata is kept in front of the commit', () => {
   assert.equal(
-    buildVersion({ version: '0.9.2+g0b4438c', revision: SHA }),
+    buildVersion({ version: '0.9.2+preview.1', revision: SHA }),
+    '0.9.2+preview.1.g0b4438c',
+  );
+  assert.equal(
+    buildVersion({
+      version: '0.9.2-rc.1+preview.1',
+      revision: SHA,
+      dirty: true,
+    }),
+    '0.9.2-rc.1+preview.1.g0b4438c.dirty',
+  );
+  assert.equal(
+    buildVersion({ version: '0.9.2+preview.1', revision: null }),
+    '0.9.2+preview.1',
+  );
+});
+
+test('a product version never names a commit other than the build revision', () => {
+  assert.equal(
+    buildVersion({ version: '0.9.2+g0000000', revision: SHA }),
     '0.9.2+g0b4438c',
+  );
+  assert.equal(
+    buildVersion({ version: '0.9.2+preview.1.gb0403c4.dirty', revision: SHA }),
+    '0.9.2+preview.1.g0b4438c',
+  );
+  assert.equal(
+    buildVersion({ version: '0.9.2+g0000000', revision: null }),
+    '0.9.2',
   );
 });
 
@@ -109,11 +136,28 @@ test('SOURCE_REVISION replaces Git and is never dirty', () => {
   );
 });
 
-test('HUABU_BUILD_VERSION replaces the package version', () => {
+test('HUABU_BUILD_VERSION is an identity used exactly as given', () => {
   const nightly = '0.9.2-nightly.20261120.g0b4438c';
   assert.equal(
     resolveBuildVersion({ SOURCE_REVISION: SHA, HUABU_BUILD_VERSION: nightly }),
     nightly,
+  );
+  for (const identity of ['0.9.2+g0b4438c', '0.9.2+preview.1.g0b4438c']) {
+    assert.equal(
+      resolveBuildVersion({
+        SOURCE_REVISION: SHA,
+        HUABU_BUILD_VERSION: ` ${identity}\n`,
+      }),
+      identity,
+    );
+  }
+  assert.throws(
+    () =>
+      resolveBuildVersion({
+        SOURCE_REVISION: SHA,
+        HUABU_BUILD_VERSION: 'next',
+      }),
+    /HUABU_BUILD_VERSION must be semver/,
   );
   assert.equal(
     resolveBuildVersion({ SOURCE_REVISION: SHA }),

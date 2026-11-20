@@ -13,8 +13,13 @@
  *   names the commit.
  * - Any other build is its product version plus semver build metadata:
  *   `X.Y.Z+g<sha7>`, with `.dirty` appended when the revision was read from
- *   a working tree that has uncommitted changes to tracked files.
- * - A build whose revision is unknown shows its product version unchanged.
+ *   a working tree that has uncommitted changes to tracked files. Metadata
+ *   the product version already carries (a release tag such as
+ *   `0.9.2+preview.1`) is kept in front: `0.9.2+preview.1.g<sha7>`. Commit
+ *   identifiers (`g<hex>`) and `dirty` in the product version are dropped,
+ *   so the only commit a build names is the one it was built from.
+ * - A build whose revision is unknown shows its product version without
+ *   those commit identifiers.
  *
  * Usage (prints one line):
  *   node scripts/build-version.mjs            # this build's identity
@@ -24,11 +29,11 @@
  *   SOURCE_REVISION      Full 40-character commit SHA. CI and image builds
  *                        set it; when set, Git is not consulted, so build
  *                        steps that rewrite files are not reported as dirty.
- *   HUABU_BUILD_VERSION  Replaces the package version for this build: a
+ *   HUABU_BUILD_VERSION  This build's complete identity, used exactly as
+ *                        given instead of formatting the package version: a
  *                        nightly version, or an identity this script already
  *                        printed (CI passes it to image builds, which also
- *                        label the image with it). Kept as is when it
- *                        already carries build metadata.
+ *                        label the image with it). Must be semver.
  */
 
 import { execFileSync } from 'node:child_process';
@@ -42,10 +47,11 @@ export const NIGHTLY_TIME_ZONE = 'Asia/Shanghai';
 export const SHORT_SHA_LENGTH = 7;
 
 const FULL_SHA = /^[0-9a-f]{40}$/;
-const PRODUCT_VERSION =
-  /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
-const BUILD_IDENTITY =
-  /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*$/;
+/** Semver with optional build metadata; group 1 is the metadata. */
+const SEMVER =
+  /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/;
+/** Build metadata identifiers this script owns: a commit, or `dirty`. */
+const OWNED_METADATA = /^(?:g[0-9a-f]{7,40}|dirty)$/;
 const NIGHTLY_VERSION =
   /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)-nightly\.(\d{8})\.g([0-9a-f]+)$/;
 
@@ -110,28 +116,31 @@ export function nightlyVersion({
 }
 
 /**
- * Build identity from a version and the revision it was built from.
+ * Build identity from a product version and the revision it was built from.
  *
  * @param {{ version: string, revision: string | null, dirty?: boolean }} input
- *   `version` is the package version or a nightly version; `revision` is the
- *   full commit SHA, or null when unknown; `dirty` marks uncommitted changes.
+ *   `version` is the package version (a product version, a release tag's
+ *   version with or without build metadata, or a nightly version);
+ *   `revision` is the full commit SHA, or null when unknown; `dirty` marks
+ *   uncommitted changes.
  * @returns {string} see the module comment for the format
  */
 export function buildVersion({ version, revision, dirty = false }) {
+  const semver = SEMVER.exec(version);
+  if (!semver) throw new Error(`Build version must be semver: ${version}`);
   const sha = normalizeRevision(revision);
   const nightly = NIGHTLY_VERSION.exec(version);
   if (nightly && sha?.startsWith(nightly[5])) {
     return dirty ? `${version}+dirty` : version;
   }
-  // Already a complete identity (from an earlier run of this script).
-  if (BUILD_IDENTITY.test(version)) return version;
-  if (!PRODUCT_VERSION.test(version) && !nightly) {
-    throw new Error(
-      `Build version must be semver without build metadata: ${version}`,
-    );
-  }
-  if (!sha) return version;
-  return `${version}+${shortId(sha)}${dirty ? '.dirty' : ''}`;
+  const [precedence] = version.split('+');
+  const metadata = (semver[1]?.split('.') ?? []).filter(
+    (identifier) => !OWNED_METADATA.test(identifier),
+  );
+  if (sha) metadata.push(shortId(sha), ...(dirty ? ['dirty'] : []));
+  return metadata.length > 0
+    ? `${precedence}+${metadata.join('.')}`
+    : precedence;
 }
 
 /** @returns {string} `apps/desktop/package.json`'s version */
@@ -191,8 +200,17 @@ export function resolveRevision(env = process.env) {
  * @returns {string}
  */
 export function resolveBuildVersion(env = process.env) {
-  const version = env.HUABU_BUILD_VERSION?.trim() || readProductVersion();
-  return buildVersion({ version, ...resolveRevision(env) });
+  const identity = env.HUABU_BUILD_VERSION?.trim();
+  if (identity) {
+    if (!SEMVER.test(identity)) {
+      throw new Error(`HUABU_BUILD_VERSION must be semver: ${identity}`);
+    }
+    return identity;
+  }
+  return buildVersion({
+    version: readProductVersion(),
+    ...resolveRevision(env),
+  });
 }
 
 /**
