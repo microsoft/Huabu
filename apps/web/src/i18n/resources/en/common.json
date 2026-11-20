@@ -1812,13 +1812,14 @@
     "accessVsWorkspace": "Service access lets someone use this Huabu; anyone admitted without a Workspace gets a personal one. Adding someone to a Workspace does not turn on Service access, and they join it as a Viewer until you choose Editor or Owner.",
     "admission": {
       "title": "Automatic admission",
-      "description": "Give Service access to anyone who signs in with {{providers}}, as an ordinary member with a personal Workspace. They are never made administrators or added to existing Workspaces. People whose access you remove stay out until you turn it back on, and turning this off removes nobody.",
+      "description": "Admit anyone who signs in with {{providers}} as an ordinary member with a personal Workspace. They never become administrators or join existing Workspaces.",
       "provider": {
-        "entra": "Microsoft Entra ID (accounts in this deployment's tenant)",
-        "auth0": "Auth0 (any account its sign-in accepts)"
+        "entra": "Microsoft Entra ID (this deployment's tenant only)",
+        "auth0": "Auth0 (anyone its sign-in accepts)"
       },
       "providerSeparator": " or ",
-      "noProviders": "Automatic admission applies to Microsoft Entra ID and Auth0 sign-in, and neither is configured here."
+      "noProviders": "Automatic admission applies to Microsoft Entra ID and Auth0 sign-in, and neither is configured here.",
+      "keepsRemoved": "People you remove stay out until you turn their access back on. Turning off automatic admission removes nobody."
     },
     "status": {
       "administrator": "Administrator",

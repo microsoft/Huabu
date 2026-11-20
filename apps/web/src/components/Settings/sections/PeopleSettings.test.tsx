@@ -125,6 +125,7 @@ it('turns automatic admission on, naming the providers it applies to', async () 
     'people.admission.description(people.admission.provider.entra' +
       'people.admission.providerSeparatorpeople.admission.provider.auth0)',
   );
+  expect(container.textContent).toContain('people.admission.keepsRemoved');
 
   mocks.getAdmission.mockResolvedValue({
     automatic: true,

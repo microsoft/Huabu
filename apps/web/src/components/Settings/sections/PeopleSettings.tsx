@@ -107,18 +107,34 @@ function AutomaticAdmission({
         })
       : t('people.admission.noProviders');
   return (
-    <SettingSection>
-      <SettingRow title={t('people.admission.title')} description={description}>
-        <Toggle
-          label={t('people.admission.title')}
-          checked={admission.automatic}
-          // Turning it off stays possible, to undo a switch made before the
-          // providers changed.
-          disabled={busy || (providers.length === 0 && !admission.automatic)}
-          onChange={onChange}
-        />
-      </SettingRow>
-    </SettingSection>
+    <div className="space-y-1">
+      {/* Its own parent, so the section is a last child and drops the
+          bottom margin it keeps between sections: the note belongs to it. */}
+      <div>
+        <SettingSection>
+          {/* Padded like the person rows below, so their text lines up. */}
+          <SettingRow
+            className="px-3"
+            title={t('people.admission.title')}
+            description={description}
+          >
+            <Toggle
+              label={t('people.admission.title')}
+              checked={admission.automatic}
+              // Turning it off stays possible, to undo a switch made before the
+              // providers changed.
+              disabled={
+                busy || (providers.length === 0 && !admission.automatic)
+              }
+              onChange={onChange}
+            />
+          </SettingRow>
+        </SettingSection>
+      </div>
+      <p className="text-fg-subtle text-xs">
+        {t('people.admission.keepsRemoved')}
+      </p>
+    </div>
   );
 }
 
