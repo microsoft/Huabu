@@ -138,6 +138,7 @@ it('reaches the same v4 schema from a fresh database and from a v2 database', as
     'events',
     'huabu_schema_version',
     'nodes',
+    'server_records',
     'space_extensions',
     'space_save_heads',
     'space_save_results',
