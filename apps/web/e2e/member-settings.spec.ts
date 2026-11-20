@@ -200,6 +200,9 @@ test('Bubble administrators see People in the current Settings navigation', asyn
       json: [{ workspaceId: 'carol-workspace', name: "Carol's Workspace" }],
     }),
   );
+  await page.route('**/api/people/admission', (route) =>
+    route.fulfill({ json: { automatic: false, providers: ['entra'] } }),
+  );
   await page.route('**/api/people', (route) =>
     route.fulfill({
       json: [
@@ -207,12 +210,16 @@ test('Bubble administrators see People in the current Settings navigation', asyn
           principal: admin.principal,
           member: false,
           admin: true,
+          joinedAutomatically: false,
+          blocked: false,
           workspaces: [],
         },
         {
           principal: member.principal,
           member: true,
           admin: false,
+          joinedAutomatically: false,
+          blocked: false,
           workspaces: [],
         },
       ],
@@ -276,6 +283,9 @@ test('People keeps each person whole and their access switch beside or below the
   await page.route('**/api/workspaces', (route) =>
     route.fulfill({ json: [{ workspaceId: 'default', name: 'Default' }] }),
   );
+  await page.route('**/api/people/admission', (route) =>
+    route.fulfill({ json: { automatic: false, providers: ['entra'] } }),
+  );
   await page.route('**/api/people', (route) =>
     route.fulfill({
       json: [
@@ -283,9 +293,18 @@ test('People keeps each person whole and their access switch beside or below the
           principal: admin.principal,
           member: false,
           admin: true,
+          joinedAutomatically: false,
+          blocked: false,
           workspaces: [],
         },
-        { principal: morgan, member: false, admin: false, workspaces: [] },
+        {
+          principal: morgan,
+          member: false,
+          admin: false,
+          joinedAutomatically: false,
+          blocked: false,
+          workspaces: [],
+        },
       ],
     }),
   );

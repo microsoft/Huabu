@@ -1810,10 +1810,22 @@
     "intro": "谁可以使用此 Huabu，以及能打开哪些工作区。成员首次登录后会出现在这里。更改在其下一次请求时生效。",
     "serviceAccess": "服务访问权限",
     "accessVsWorkspace": "服务访问权限决定某人能否使用此 Huabu；开通后没有工作区的人会获得一个个人工作区。将某人添加到工作区不会开通服务访问权限，加入后默认是查看者，可改为编辑者或所有者。",
+    "admission": {
+      "title": "自动开通",
+      "description": "通过{{providers}}登录的任何人都会作为普通成员自动获得服务访问权限，并获得一个个人工作区。他们不会成为管理员，也不会被加入现有工作区。你移除了访问权限的人会一直无法使用，直到你重新开通；关闭此项不会移除任何人。",
+      "provider": {
+        "entra": "Microsoft Entra ID（此部署所在租户中的账户）",
+        "auth0": "Auth0（其登录接受的任何账户）"
+      },
+      "providerSeparator": "或",
+      "noProviders": "自动开通仅适用于 Microsoft Entra ID 和 Auth0 登录，而此处两者均未配置。"
+    },
     "status": {
       "administrator": "管理员",
       "admitted": "已开通",
-      "waiting": "等待开通"
+      "waiting": "等待开通",
+      "blocked": "已移除访问权限",
+      "joinedAutomatically": "自动加入"
     },
     "roleIn": "在 {{workspace}} 中的角色",
     "removeRole": "从此工作区移除",
