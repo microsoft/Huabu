@@ -321,6 +321,94 @@ export function describeSeveralPeople(
       ).toBe(404);
     });
 
+    it('lists each Workspace with the caller’s role and the Spaces they may open', async () => {
+      const { call, store, workspaceOf } = await host();
+      const carolWs = await workspaceOf('carol');
+      const daveWs = await workspaceOf('dave');
+      const make = async (title: string) =>
+        (await call('carol', 'POST', '/api/canvas', { title })).body
+          .canvasId as string;
+      const parent = await make('plans');
+      await make('notes');
+      await call('carol', 'POST', `/api/canvas/${parent}/children`, {
+        title: 'nested',
+      });
+      // Two more of carol's own, each holding Spaces of its own.
+      const workspace = async (name: string, titles: string[]) => {
+        const made = await call('carol', 'POST', '/api/workspaces', { name });
+        const id = made.body.workspaceId as string;
+        await call('carol', 'POST', `/api/workspaces/${id}/activate`);
+        const spaces = [];
+        for (const title of titles) spaces.push(await make(title));
+        return { id, spaces };
+      };
+      const team = await workspace('Team', ['roadmap']);
+      const lab = await workspace('Lab', ['shared draft', 'private draft']);
+      await call('carol', 'POST', `/api/workspaces/${carolWs}/activate`);
+      type Grant = Parameters<typeof store.grants.add>[0];
+      const grant = (target: Grant['target'], role: Grant['role']) =>
+        store.grants.add({
+          target,
+          principalId: 'dave',
+          role,
+          grantedByPrincipalId: 'carol',
+        });
+      await grant(
+        { type: 'huabu.workspace', id: carolWs },
+        'huabu.workspace.editor',
+      );
+      await grant(
+        { type: 'huabu.workspace', id: team.id },
+        'huabu.workspace.viewer',
+      );
+      // One Lab Space alone, which makes Lab enterable without a role there.
+      await grant(
+        { type: 'huabu.space', id: `${lab.id}:${lab.spaces[0]}` },
+        'huabu.space.owner',
+      );
+
+      const listed = async (principalId: string) =>
+        Object.fromEntries(
+          (
+            (await call(principalId, 'GET', '/api/workspaces')).body as Array<{
+              workspaceId: string;
+              role?: string | null;
+              spaceCount?: number;
+              canManage?: boolean;
+            }>
+          ).map(({ workspaceId, role, spaceCount, canManage }) => [
+            workspaceId,
+            { role, spaceCount, canManage },
+          ]),
+        );
+      // Disk Workspaces are folders, and are not opened just to be counted.
+      const count = (spaces: number) => (folders ? undefined : spaces);
+
+      expect(await listed('dave')).toEqual({
+        [daveWs]: { role: 'owner', spaceCount: count(0), canManage: true },
+        [carolWs]: { role: 'editor', spaceCount: count(3), canManage: false },
+        [team.id]: { role: 'viewer', spaceCount: count(1), canManage: false },
+        [lab.id]: { role: null, spaceCount: count(1), canManage: false },
+      });
+      expect((await listed('carol'))[lab.id]).toEqual({
+        role: 'owner',
+        spaceCount: count(2),
+        canManage: true,
+      });
+      // An administrator may manage every Workspace, so owns each of them.
+      const admin = await listed('admin');
+      expect(admin[daveWs]).toEqual({
+        role: 'owner',
+        spaceCount: count(0),
+        canManage: true,
+      });
+      expect(admin[carolWs]).toMatchObject({ role: 'owner' });
+      // The single-Workspace route describes it the same way.
+      expect(
+        (await call('dave', 'GET', `/api/workspaces/${lab.id}`)).body,
+      ).toMatchObject({ role: null, ...(folders ? {} : { spaceCount: 1 }) });
+    });
+
     it.runIf(folders)(
       'keeps a folder Workspace with the person who opened it',
       async () => {
