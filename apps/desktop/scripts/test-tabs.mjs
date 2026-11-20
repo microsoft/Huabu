@@ -938,11 +938,8 @@ try {
     'Pending upload waited beyond 15s and persisted before reload without dismissing progress',
   );
   await createdPage.evaluate(async () => {
-    const {
-      default: store,
-      saveCanvasForSubmission,
-      drainNodePreprocessing,
-    } = await import('/src/store/canvasStore.ts');
+    const { default: store } = await import('/src/store/canvasStore.ts');
+    const { pageLifecycle } = await import('/src/utils/pageLifecycle.ts');
     store.getState().addNode({
       id: 'tabs-smoke-close-text',
       nodeType: 'text',
@@ -957,8 +954,9 @@ try {
         placementPoint: { x: 300, y: side === 'left' ? 100 : 400 },
       });
     }
-    await saveCanvasForSubmission(store.getState().canvasId);
-    await drainNodePreprocessing();
+    // Settle the new nodes the way closing the Tab will: the page's own
+    // close preparation saves the Canvas and drains node preprocessing.
+    await pageLifecycle.prepare(new AbortController().signal);
     const { openPreviewNode } =
       await import('/src/store/previewWorkspace/actions.ts');
     const { usePreviewWorkspaceStore } =
@@ -2489,9 +2487,23 @@ try {
       });
     await shell.getByRole('tab', { name: 'Tabs smoke A', exact: true }).click();
   }
+  // A change the Server keeps refusing is unsaved work: the Tab stays open,
+  // and so does the app when it is asked to quit below.
+  await a.route('**/api/canvas/*/execute', (route) =>
+    route.fulfill({
+      status: 500,
+      contentType: 'application/json',
+      body: JSON.stringify({ message: 'Injected send failure' }),
+    }),
+  );
   await a.evaluate(async () => {
     const { default: store } = await import('/src/store/canvasStore.ts');
-    store.setState({ versionConflict: true });
+    store.getState().addNode({
+      id: 'tabs-smoke-unsent-text',
+      nodeType: 'text',
+      data: { content: 'Not sent yet' },
+      placementPoint: { x: 520, y: 520 },
+    });
   });
   const refused = await shell.evaluate(
     (id) => window.electronBridge.tabs.close(id),
@@ -2500,8 +2512,9 @@ try {
   assert.equal(
     refused.ok,
     false,
-    'An unresolved save conflict must keep the Tab open',
+    'Changes that cannot be sent must keep the Tab open',
   );
+  assert.match(refused.error, /could not be sent/);
   assert.equal(a.isClosed(), false);
   await electron.evaluate(() => {
     globalThis.tabsSmokeRestoreDiscardDialog();
@@ -2655,9 +2668,10 @@ try {
     if (route.request().method() === 'PUT') await saveGate;
     await route.continue();
   });
+  // The Server accepts the change again; closing sends it with the rest.
+  await a.unroute('**/api/canvas/*/execute');
   await a.evaluate(async () => {
     const { default: store } = await import('/src/store/canvasStore.ts');
-    store.setState({ versionConflict: false });
     store.getState().updateNodeData('tabs-smoke-note', {
       content: '# Smoke Note\nSaved on close',
     });
