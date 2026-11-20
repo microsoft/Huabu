@@ -12,7 +12,6 @@ import {
   createId,
   interactiveViewAgentEventV1Schema,
 } from '@huabu/shared';
-import { readLayoutOrder } from '@huabu/shared/canvas-engine';
 
 import {
   rewriteImportContract,
@@ -366,12 +365,17 @@ export async function remapImportedSpace(
             key === 'layoutOrder' &&
             /^(node-data|node-metadata)$/.test(field)
           ) {
-            const order = readLayoutOrder({ layoutOrder: item });
+            // A Space exported before reading order moved onto the
+            // children still lists them on the Frame. The ids follow the
+            // import, so that reading the imported Space can turn the list
+            // into the children's track keys (`seedNodeOrder`).
             return [
               key,
-              order?.map((track) =>
-                rewrite(track, 'nodeIds', '', internalHistory),
-              ),
+              Array.isArray(item)
+                ? item.map((track) =>
+                    rewrite(track, 'nodeIds', '', internalHistory),
+                  )
+                : item,
             ];
           }
           if (key === 'data' && /^(node|nodes)$/.test(field))

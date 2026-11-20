@@ -24,6 +24,7 @@ import {
   type AutoUnframeByNonOverlapOptions,
   type Rect,
 } from './geometry.js';
+import { withoutTrackKey } from '../autoLayout/layoutOrder.js';
 import {
   moveNodeIntoContainer,
   moveNodeOutOfContainer,
@@ -79,14 +80,18 @@ export function unframe(
       if (parentId && parentAbs) {
         // Child moves to the frame's parent frame — ensure zIndex: -1.
         nextNodes.push({
-          ...n,
+          ...withoutTrackKey(n),
           parentId,
           position: subPos(childAbs, parentAbs),
           zIndex: -1,
         });
       } else {
         // Child becomes top-level — strip frame-level zIndex.
-        const { parentId: _parentId, zIndex: _zIndex, ...rest } = n;
+        const {
+          parentId: _parentId,
+          zIndex: _zIndex,
+          ...rest
+        } = withoutTrackKey(n);
         nextNodes.push({
           ...rest,
           position: childAbs,
@@ -282,7 +287,7 @@ export function frameNodes(
     if (!abs) return n;
 
     return {
-      ...n,
+      ...withoutTrackKey(n),
       parentId: options.frameId,
       position: subPos(abs, groupAbs),
       extent: undefined,

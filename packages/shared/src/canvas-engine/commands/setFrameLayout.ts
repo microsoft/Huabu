@@ -12,7 +12,10 @@ import {
   planGridReflow,
   solveStructuredFrameLayout,
 } from '../autoLayout/gridLayout.js';
-import { readLayoutOrder, sameLayoutOrder } from '../autoLayout/layoutOrder.js';
+import {
+  dropTrackKeyOnTrackChange,
+  trackKeyChanges,
+} from '../autoLayout/layoutOrder.js';
 import { hasUnlockedAncestry } from '../siblingOrder.js';
 
 import type { CanvasCommand } from '../../index.js';
@@ -115,23 +118,32 @@ const setFrameLayout: CommandDefinition<Cmd> = {
       const assignments = new Map(
         order.flatMap((track, i) => track.map((id) => [id, i] as const)),
       );
+      // The placed children get a key for where they were put; nobody
+      // they passed is rewritten.
+      const trackKeys = trackKeyChanges(
+        order,
+        byId,
+        new Set(cmd.placements.map((item) => item.nodeId as string)),
+      );
       const nextNodes = state.nodes.map((node) => {
         if (node.id === frame.id)
-          return {
-            ...node,
-            data: { ...node.data, layoutOrder: order, gridCount: order.length },
-          };
+          return node.data.gridCount === order.length
+            ? node
+            : { ...node, data: { ...node.data, gridCount: order.length } };
         const slot = assignments.get(node.id);
-        return slot !== undefined && node.data[field] !== slot
-          ? { ...node, data: { ...node.data, [field]: slot } }
-          : node;
+        const key = trackKeys.get(node.id);
+        const slotChanged = slot !== undefined && node.data[field] !== slot;
+        if (!slotChanged && key === undefined) return node;
+        return {
+          ...node,
+          data: {
+            ...node.data,
+            ...(slotChanged ? { [field]: slot } : {}),
+            ...(key !== undefined ? { trackKey: key } : {}),
+          },
+        };
       });
-      if (
-        sameLayoutOrder(readLayoutOrder(frame.data), order) &&
-        nextNodes.every(
-          (node, i) => node.id === frame.id || node === state.nodes[i],
-        )
-      )
+      if (nextNodes.every((node, i) => node === state.nodes[i]))
         return noop(state, 'no-op');
       return {
         applied: true,
@@ -250,6 +262,8 @@ const setFrameLayout: CommandDefinition<Cmd> = {
         if (resetsCells) {
           delete nextData.frameColumn;
           delete nextData.frameRow;
+          // Reading order belongs to the old mode's tracks as well.
+          delete nextData.trackKey;
         }
         if (planned) {
           nextData.frameColumn = planned.column;
@@ -270,19 +284,21 @@ const setFrameLayout: CommandDefinition<Cmd> = {
         if (
           nextData.frameColumn === dataRec.frameColumn &&
           nextData.frameRow === dataRec.frameRow &&
+          nextData.trackKey === dataRec.trackKey &&
           !('frameSlot' in dataRec)
         ) {
           return n;
         }
         touchedChildIds.add(n.id);
-        return { ...n, data: nextData };
+        // A cell that names another track drops the child's place in the
+        // old one; the relayout keys it for where it reads now.
+        return { ...n, data: dropTrackKeyOnTrackChange(dataRec, nextData) };
       }
       const dataRec = (n.data ?? {}) as Record<string, unknown>;
       const nextData: Record<string, unknown> = {
         ...dataRec,
         layoutMode: cmd.mode,
       };
-      if (modeChanged) delete nextData.layoutOrder;
       if (typeof nextGridCount === 'number') {
         nextData.gridCount = nextGridCount;
       } else {

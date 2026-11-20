@@ -31,7 +31,7 @@
  * That is the only thing standing between "switch the layout mode" and
  * "scatter the arrangement the user built".
  */
-import { orderTrack, readLayoutOrder, sameLayoutOrder } from './layoutOrder.js';
+import { orderTrack, trackKeyChanges, trackOrderRanks } from './layoutOrder.js';
 import { EDGE_LABEL_MAX_INVERSE_SCALE } from '../../types/canvas/edge.js';
 import {
   FRAME_GRID_DEFAULT_COUNT,
@@ -755,11 +755,12 @@ export function applyColumnLayout(
   const frame = nodes.find((n) => n.id === frameId);
   if (!frame || frame.type !== 'frame' || isLocked(frame)) return null;
 
+  const orderRanks = masonryOrderRanks(nodes, frameId, 'column', options);
   const children = orderTrack(
     collectChildren(nodes, frameId),
     (item) => item.node.id,
     (item) => item.node.position.y,
-    masonryOrderRanks(frame, options),
+    orderRanks,
   );
   if (children.length === 0) return null;
 
@@ -787,7 +788,6 @@ export function applyColumnLayout(
     'column',
   );
 
-  const orderRanks = masonryOrderRanks(frame, options);
   const colItems: ChildSlot[][] = Array.from(
     { length: effectiveCols },
     () => [],
@@ -898,11 +898,12 @@ export function applyRowLayout(
   const frame = nodes.find((n) => n.id === frameId);
   if (!frame || frame.type !== 'frame' || isLocked(frame)) return null;
 
+  const orderRanks = masonryOrderRanks(nodes, frameId, 'row', options);
   const children = orderTrack(
     collectChildren(nodes, frameId),
     (item) => item.node.id,
     (item) => item.node.position.x,
-    masonryOrderRanks(frame, options),
+    orderRanks,
   );
   if (children.length === 0) return null;
 
@@ -938,7 +939,6 @@ export function applyRowLayout(
     const slot = assignment.get(child.node.id) ?? 0;
     rowItems[slot].push(child);
   }
-  const orderRanks = masonryOrderRanks(frame, options);
   for (let i = 0; i < rowItems.length; i++) {
     rowItems[i] = orderTrack(
       rowItems[i],
@@ -2311,21 +2311,7 @@ export function applyStructuredFrameRelayout(
       policy,
       layoutOptions,
     );
-    if (!result) {
-      if (
-        frame &&
-        (cfg.axis === 'column' || cfg.axis === 'row') &&
-        !working.some((node) => node.parentId === frameId) &&
-        !sameLayoutOrder(readLayoutOrder(frame.data), [])
-      ) {
-        working = working.map((node) =>
-          node.id === frameId
-            ? { ...node, data: { ...node.data, layoutOrder: [] } }
-            : node,
-        );
-      }
-      continue;
-    }
+    if (!result) continue;
 
     handled.add(frameId);
 
@@ -2341,6 +2327,14 @@ export function applyStructuredFrameRelayout(
     //                trade-off for unlocking `column|row + manual`.
     const sizing = getFrameSizing(frame);
     const writeFrameSize = sizing === 'hug';
+    // Column / Row reading order is stored on the children: only a child
+    // that has no key for the place the solver read it in gets one.
+    const trackKeys = result.layoutOrder
+      ? trackKeyChanges(
+          result.layoutOrder,
+          new Map(working.map((node) => [node.id, node])),
+        )
+      : new Map<string, string>();
 
     working = working.map((n) => {
       // Frame itself — for `hug`, write content-driven size into both
@@ -2357,16 +2351,12 @@ export function applyStructuredFrameRelayout(
         const gridChanged =
           (prevData as { gridCount?: number }).gridCount !==
           result.effectiveCount;
-        const orderChanged =
-          result.layoutOrder !== undefined &&
-          !sameLayoutOrder(readLayoutOrder(prevData), result.layoutOrder);
         const nextData = {
           ...prevData,
           gridCount: result.effectiveCount,
-          ...(result.layoutOrder ? { layoutOrder: result.layoutOrder } : {}),
         };
         if (!writeFrameSize) {
-          if (!gridChanged && !orderChanged) return n;
+          if (!gridChanged) return n;
           return {
             ...n,
             data: nextData,
@@ -2374,7 +2364,7 @@ export function applyStructuredFrameRelayout(
         }
         return {
           ...n,
-          ...(gridChanged || orderChanged ? { data: nextData } : {}),
+          ...(gridChanged ? { data: nextData } : {}),
           style: {
             ...(n.style ?? {}),
             width: result.frameSize.width,
@@ -2404,19 +2394,29 @@ export function applyStructuredFrameRelayout(
       // `slotChanged` because the value itself is usually unchanged —
       // it is the *field* that moves.
       const shedsLegacy = 'frameSlot' in dataRec;
+      const nextTrackKey = trackKeys.get(n.id);
       const posChanged =
         !!nextPos && (n.position.x !== nextPos.x || n.position.y !== nextPos.y);
       const slotChanged =
         typeof nextSlot === 'number' && priorSlot !== nextSlot;
       const rowChanged = typeof nextRow === 'number' && priorRow !== nextRow;
-      if (!posChanged && !slotChanged && !rowChanged && !shedsLegacy) return n;
-      const dataChanged = slotChanged || rowChanged || shedsLegacy;
+      if (
+        !posChanged &&
+        !slotChanged &&
+        !rowChanged &&
+        !shedsLegacy &&
+        nextTrackKey === undefined
+      )
+        return n;
+      const dataChanged =
+        slotChanged || rowChanged || shedsLegacy || nextTrackKey !== undefined;
       let nextData: Record<string, unknown> | undefined;
       if (dataChanged) {
         nextData = { ...dataRec };
         delete nextData.frameSlot;
         if (typeof nextSlot === 'number') nextData[trackField] = nextSlot;
         if (typeof nextRow === 'number') nextData.frameRow = nextRow;
+        if (nextTrackKey !== undefined) nextData.trackKey = nextTrackKey;
       }
       return {
         ...n,
@@ -2430,18 +2430,25 @@ export function applyStructuredFrameRelayout(
 }
 
 function masonryOrderRanks(
-  frame: Node,
+  nodes: Node[],
+  frameId: string,
+  axis: 'column' | 'row',
   options: StructuredLayoutOptions,
 ): Map<string, number> {
-  const order = readLayoutOrder(frame.data);
-  return new Map(
-    (order?.flat() ?? [])
-      .filter((id) => !options.masonryMovedNodeIds?.has(id))
-      .map((id, index) => [id, index]),
+  return trackOrderRanks(
+    nodes.filter((node) => node.parentId === frameId),
+    (child) => readFrameTrack(child, axis),
+    options.masonryMovedNodeIds,
   );
 }
 
-/** Capture reading order without changing geometry or enabling a storage migration. */
+/**
+ * Give the children of a Column / Row Frame their track keys in the order
+ * they read in now, without changing geometry. `movedIds` are read by their
+ * coordinate instead of their key: this is how a moved child takes its new
+ * place. Children that tie on their coordinate read in array order, so this
+ * is also called before a paint reorder changes that order.
+ */
 export function withMasonryLayoutOrder(
   nodes: Node[],
   frameId: string,
@@ -2456,13 +2463,21 @@ export function withMasonryLayoutOrder(
     masonryMovedNodeIds: movedIds,
   });
   const order = result?.layoutOrder;
-  if (!order || sameLayoutOrder(readLayoutOrder(frame.data), order))
-    return nodes;
-  return nodes.map((node) =>
-    node.id === frameId
-      ? { ...node, data: { ...node.data, layoutOrder: order } }
-      : node,
+  if (!order) return nodes;
+  // A moved child reads where its coordinate puts it and is keyed for that
+  // place; the children it passed keep their keys.
+  const keys = trackKeyChanges(
+    order,
+    new Map(nodes.map((node) => [node.id, node])),
+    movedIds,
   );
+  if (keys.size === 0) return nodes;
+  return nodes.map((node) => {
+    const key = keys.get(node.id);
+    return key === undefined
+      ? node
+      : { ...node, data: { ...node.data, trackKey: key } };
+  });
 }
 
 export function describeFrameLayout(

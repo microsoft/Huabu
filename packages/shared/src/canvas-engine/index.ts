@@ -1,7 +1,12 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-export { readLayoutOrder, remapLayoutOrder } from './autoLayout/layoutOrder.js';
+export {
+  dropTrackKeyOnTrackChange,
+  readTrackKey,
+  trackKeyChanges,
+  withoutTrackKey,
+} from './autoLayout/layoutOrder.js';
 export {
   withMasonryLayoutOrder,
   describeFrameLayout,

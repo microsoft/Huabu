@@ -17,8 +17,6 @@ import {
   getAbsolutePosition,
   getNodeDefaultSize,
   resolveHeightMode,
-  readLayoutOrder,
-  remapLayoutOrder,
   type CanvasEdge,
   type CanvasNode,
   type NestableNode,
@@ -215,10 +213,6 @@ export function buildSpaceMovePlan(input: {
     if (!nodeId) continue;
     const nodeType = node.type as CanvasNodeType;
     const data = structuredClone(node.data ?? {});
-    const layoutOrder =
-      nodeType === 'frame' ? readLayoutOrder(data) : undefined;
-    if (layoutOrder)
-      data.layoutOrder = remapLayoutOrder(layoutOrder, nodeIdMap);
     if (typeof data.noteNodeId === 'string')
       data.noteNodeId = nodeIdMap.get(data.noteNodeId);
     if (nodeType === 'note') data.heightMode = resolveHeightMode(node);

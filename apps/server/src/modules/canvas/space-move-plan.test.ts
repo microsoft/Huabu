@@ -4,9 +4,11 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  describeFrameLayout,
   executeCanvasCommands,
   materializeAutoHeight,
   resolveHeightMode,
+  seedNodeOrder,
 } from '@huabu/shared/canvas-engine';
 
 import { buildSpaceMovePlan, SpaceMovePlanError } from './space-move-plan.js';
@@ -31,7 +33,7 @@ function node(
 }
 
 describe('buildSpaceMovePlan', () => {
-  it('rekeys Frame reading lists without deriving them from paint order', () => {
+  it('keeps a Frame’s reading order without deriving it from paint order', () => {
     const frame = node('frame', 'frame', 0, 0);
     frame.data = {
       layoutMode: 'column',
@@ -43,7 +45,9 @@ describe('buildSpaceMovePlan', () => {
     a.data.frameColumn = 0;
     b.data.frameColumn = 0;
     const plan = buildSpaceMovePlan({
-      sourceNodes: [frame, a, b],
+      // As the source Space is read: the stored list becomes the children's
+      // own track keys, which travel with them.
+      sourceNodes: seedNodeOrder([frame, a, b]),
       sourceEdges: [],
       destinationNodes: [],
       selectedNodeIds: ['frame'],
@@ -54,9 +58,12 @@ describe('buildSpaceMovePlan', () => {
       { source: 'system', commands: plan.commands },
       { nodes: [], edges: [], canvasId: 'destination' },
     ).writeResult.nodes;
-    expect(output.find((n) => n.type === 'frame')?.data.layoutOrder).toEqual([
-      [plan.nodeIdMap.get('b'), plan.nodeIdMap.get('a')],
-    ]);
+    const moved = output.find((n) => n.type === 'frame');
+    expect(moved?.data).not.toHaveProperty('layoutOrder');
+    expect(describeFrameLayout(output, moved?.id ?? '')).toEqual({
+      mode: 'column',
+      tracks: [[plan.nodeIdMap.get('b'), plan.nodeIdMap.get('a')]],
+    });
   });
   it.each([
     { selectedNodeIds: ['pdf'] },

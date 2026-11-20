@@ -25,6 +25,7 @@ import {
   materializeForestOrder,
   readPaintKey,
   seedNodeOrder,
+  withMasonryLayoutOrder,
   solveStructuredFrameLayout,
 } from '../index.js';
 
@@ -270,24 +271,29 @@ describe('executeCanvasCommands: tree-order invariant', () => {
     it.each(['column', 'row', 'grid'])(
       'keeps %s reading geometry and cells independent from paint order',
       (layoutMode) => {
-        const nodes = seedNodeOrder([
-          {
-            ...frame('f'),
-            data: { sizing: 'manual', layoutMode, gridCount: 1 },
-          },
-          {
-            ...child('a', 'f'),
-            position: { x: 30, y: 80 },
-            data: { frameColumn: 0, frameRow: 0 },
-            style: { width: 100, height: 100 },
-          },
-          {
-            ...child('b', 'f'),
-            position: { x: 180, y: 230 },
-            data: { frameColumn: 0, frameRow: 1 },
-            style: { width: 100, height: 100 },
-          },
-        ]);
+        // As a stored Space is read: paint keys in place, and a Column / Row
+        // Frame's children already holding their reading order.
+        const nodes = withMasonryLayoutOrder(
+          seedNodeOrder([
+            {
+              ...frame('f'),
+              data: { sizing: 'manual', layoutMode, gridCount: 1 },
+            },
+            {
+              ...child('a', 'f'),
+              position: { x: 30, y: 80 },
+              data: { frameColumn: 0, frameRow: 0 },
+              style: { width: 100, height: 100 },
+            },
+            {
+              ...child('b', 'f'),
+              position: { x: 180, y: 230 },
+              data: { frameColumn: 0, frameRow: 1 },
+              style: { width: 100, height: 100 },
+            },
+          ]),
+          'f',
+        );
         const beforeLayout = solveStructuredFrameLayout(nodes, 'f');
         const out = run(
           [{ type: 'REORDER_NODES', nodeIds: ['a'], to: 'top' }],

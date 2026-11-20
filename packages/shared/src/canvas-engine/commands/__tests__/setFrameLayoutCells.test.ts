@@ -18,6 +18,7 @@ import {
   applyStructuredFrameRelayout,
   describeFrameLayout,
 } from '../../autoLayout/gridLayout.js';
+import { readTrackKey } from '../../autoLayout/layoutOrder.js';
 import { applyDeltas } from '../../delta.js';
 import { diffCanvasState } from '../../diff.js';
 import { executeCanvasCommands } from '../../executor.js';
@@ -72,9 +73,31 @@ describe('SET_FRAME_LAYOUT cells', () => {
           { source: 'ui', commands },
           { nodes, edges: [], canvasId: 'layout' },
         ).writeResult;
-      const layout = (nodes: Node[]) =>
-        nodes.find((node) => node.id === 'frame')?.data.layoutOrder;
       const field = mode === 'column' ? 'frameColumn' : 'frameRow';
+      /**
+       * The reading order as the children store it: each child's track and
+       * its key inside that track. A child without a key is not listed.
+       */
+      const layout = (nodes: Node[], frameId = 'frame') => {
+        const tracks = new Map<number, Node[]>();
+        for (const node of nodes) {
+          if (node.parentId !== frameId || readTrackKey(node) === undefined)
+            continue;
+          const track = Number(node.data[field] ?? 0);
+          tracks.set(track, [...(tracks.get(track) ?? []), node]);
+        }
+        return [...tracks.entries()]
+          .sort(([a], [b]) => a - b)
+          .map(([, children]) =>
+            children
+              .sort((a, b) =>
+                (readTrackKey(a) as string) < (readTrackKey(b) as string)
+                  ? -1
+                  : 1,
+              )
+              .map((child) => child.id),
+          );
+      };
       const initial = () => {
         const nodes = scene([{ [field]: 0 }, { [field]: 0 }, { [field]: 1 }]);
         nodes[0].data = { layoutMode: mode, gridCount: 2, sizing: 'manual' };
@@ -167,7 +190,8 @@ describe('SET_FRAME_LAYOUT cells', () => {
             mode: 'grid',
           },
         ]);
-        expect(layout(grid.nodes)).toBeUndefined();
+        // Track keys belong to the mode that issued them.
+        expect(layout(grid.nodes)).toEqual([]);
         expect(describeFrameLayout(grid.nodes, 'frame')?.mode).toBe('grid');
       });
 
@@ -227,7 +251,10 @@ describe('SET_FRAME_LAYOUT cells', () => {
             nodeIds,
           },
         ]);
-        expect(dataOf(deleted.nodes, 'target').layoutOrder).toEqual([]);
+        expect(dataOf(deleted.nodes, 'target')).not.toHaveProperty(
+          'layoutOrder',
+        );
+        expect(layout(deleted.nodes, 'target')).toEqual([]);
       });
 
       it.each([

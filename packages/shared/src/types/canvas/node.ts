@@ -399,6 +399,14 @@ export interface BaseNodeData {
    */
   paintKey?: string;
   /**
+   * Reading order inside this node's track of a parent Frame laid out in
+   * `column` or `row` mode: an order key, compared with the other children
+   * of the same track ({@link frameColumn} / {@link frameRow}). A child
+   * without one is placed by its coordinate and keyed by the relayout.
+   * Dropped when the node changes parent or the Frame changes mode.
+   */
+  trackKey?: string;
+  /**
    * Row index inside a parent Frame laid out in `row` or `grid` mode.
    * Ignored by `free` and `column` layouts and by root-level nodes. See
    * {@link frameColumn} for how the two combine.
@@ -664,8 +672,6 @@ export const FRAME_GRID_DEFAULT_COUNT = 1;
 
 /** Frame node: container for grouping other nodes */
 export interface FrameNodeData extends BaseNodeData {
-  /** Direct child IDs per numeric masonry track, separate from sibling paint order. */
-  layoutOrder?: string[][];
   type: 'frame';
   /** Layout mode applied to direct children. Defaults to `'free'`. */
   layoutMode?: FrameLayoutMode;

@@ -7,6 +7,7 @@ import {
   hasAgentNodeOwnedData,
   changesAgentNodePreparation,
 } from '../agentNodeOwnership.js';
+import { dropTrackKeyOnTrackChange } from '../autoLayout/layoutOrder.js';
 import {
   hasValidNodeProperties,
   mergeNodeProperties,
@@ -155,6 +156,10 @@ const mergeNodeData: CommandDefinition<Cmd> = {
       };
       if (n.type === 'question' && patchRec.agentLaunchOverrides === null)
         delete mergedData.agentLaunchOverrides;
+      // A node moved to another Column / Row track leaves its place in the
+      // old one behind.
+      if (dropTrackKeyOnTrackChange(dataRec, mergedData) !== mergedData)
+        delete mergedData.trackKey;
       // JSON transports cannot carry `undefined`, so `null` clears the cover.
       if (patchRec.coverUrl === null) delete mergedData.coverUrl;
       if (patchRec.properties !== undefined) {

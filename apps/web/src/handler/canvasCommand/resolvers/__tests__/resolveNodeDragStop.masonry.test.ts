@@ -4,8 +4,10 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  describeFrameLayout,
   describeStructuredDropZone,
   executeCanvasCommands,
+  seedNodeOrder,
   solveStructuredFrameLayout,
 } from '@huabu/shared/canvas-engine';
 
@@ -43,7 +45,9 @@ describe.each(['column', 'row'] as const)(
     ])(
       'commits the previewed insertion and peer positions ($sizing, sole source: $soleSource)',
       ({ sizing, soleSource }) => {
-        const initial: Node[] = [
+        // Stored the old way (a list on the Frame) and read as every stored
+        // Space is: the list becomes the children's own track keys.
+        const initial: Node[] = seedNodeOrder([
           {
             id: 'frame',
             type: 'frame',
@@ -65,7 +69,7 @@ describe.each(['column', 'row'] as const)(
           child('before', 1, 60),
           child('after', 1, 90),
           child('last', 1, 60),
-        ];
+        ]);
         const layout = solveStructuredFrameLayout(initial, 'frame', 'compact');
         if (!layout) throw new Error('Missing fixture layout');
         const laidOut = initial.map((node) => ({
@@ -139,8 +143,12 @@ describe.each(['column', 'row'] as const)(
           'after',
           'last',
         ]);
-        const order = committed.find((node) => node.id === 'frame')?.data
-          .layoutOrder as string[][];
+        expect(
+          committed.find((node) => node.id === 'frame')?.data,
+        ).not.toHaveProperty('layoutOrder');
+        const described = describeFrameLayout(committed, 'frame');
+        const order =
+          described && 'tracks' in described ? described.tracks : [];
         expect(order[dropped.data[field] as number]).toEqual([
           'before',
           'dragged',
