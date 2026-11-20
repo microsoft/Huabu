@@ -23,10 +23,10 @@ The workflow refreshes the base image and OS certificate packages on each run. L
 
 ## Local build and verification
 
-Run from the repository root in PowerShell with a Linux Docker engine:
+Run from the repository root in PowerShell with a Linux Docker engine. `$HuabuRevision` is the commit only when tracked files have no uncommitted changes, and empty otherwise, because no commit then holds the image's source; the image then reports no revision, and Connect device shows unpinned instructions, while the version keeps its `.dirty` suffix:
 
 ```powershell
-$HuabuRevision = git rev-parse HEAD
+$HuabuRevision = node --input-type=module -e "import { resolveExactRevision } from './scripts/build-version.mjs'; console.log(resolveExactRevision({}) ?? '')"
 $HuabuVersion = node scripts/build-version.mjs
 docker build --pull --build-arg "SOURCE_REVISION=$HuabuRevision" --build-arg "HUABU_BUILD_VERSION=$HuabuVersion" --tag huabu-web:local .
 node scripts/test-web-container.mjs huabu-web:local
