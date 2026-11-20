@@ -11,7 +11,9 @@ import { VideoPreview } from './video/VideoPreview';
 import { WebPreview } from './web/WebPreview';
 
 import type { PreviewComponentProps } from './note/NotePreview';
+import type { PreviewableNodeType } from './previewableNodeTypes';
 
+// `satisfies` keeps this registry and the light type list from drifting.
 export const NodePreviews: Record<
   string,
   React.ComponentType<PreviewComponentProps>
@@ -24,9 +26,10 @@ export const NodePreviews: Record<
   image: ImagePreview,
   video: VideoPreview,
   sketch: SketchPreview,
-};
+} satisfies Record<
+  PreviewableNodeType,
+  React.ComponentType<PreviewComponentProps>
+>;
 
-export const hasNodePreview = (nodeType: string): boolean =>
-  Object.hasOwn(NodePreviews, nodeType);
-
+export { hasNodePreview } from './previewableNodeTypes';
 export type { PreviewComponentProps };

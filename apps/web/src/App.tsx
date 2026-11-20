@@ -36,6 +36,7 @@ import CanvasListPage from './pages/CanvasListPage';
 import { WorkspaceLoadingScreen } from './pages/WorkspaceLoadingScreen';
 import WorkspaceSetupPage from './pages/WorkspaceSetupPage';
 import { useWorkspaceStore } from './store/workspaceStore';
+import { registerAppNavigate } from './utils/appNavigation';
 
 /**
  * Loaded on demand so the editor, PDF and KaTeX vendor chunks — roughly 3 MB
@@ -321,6 +322,11 @@ export default function App() {
       ]),
     [],
   );
+
+  useEffect(() => {
+    registerAppNavigate((to, options) => void router.navigate(to, options));
+    return () => registerAppNavigate(null);
+  }, [router]);
 
   return (
     <InitialisingContext.Provider value={initialising}>

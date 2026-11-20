@@ -207,6 +207,8 @@ huabu-rfs execute --json-file /tmp/huabu-execute.json
 
 Commands run in order, failures do not roll back accepted commands, and an accepted subset commits once. Always inspect every entry in `results`; successful delivery does not mean every command was applied. Read generated node IDs from `results[].nodes` and generated edge IDs from `results[].edges`.
 
+When you tell the user about a node you created or updated, link it in your reply as `[label](#<node id>)` — `#` followed by the node's full ID, which already starts with `node-`, for example `[Research note](#node-1a2b3c)` — so they can jump to it with one click.
+
 A command cannot refer to a Huabu-assigned ID before you receive it. Create first, read the generated ID, then connect or reparent it in a follow-up request.
 
 For a `MERGE_NODE_DATA` patch that changes `content`, first download the node and copy its `revision` metadata into `expectRev`. PDF notes are separate Note nodes: inspect the PDF for `noteNodeId`, then read and edit that Note by its own ID, not the PDF's extracted body. A missing or stale revision on a content write produces `applied: false`, `reason: "conflict"`, and a structured conflict. Re-read, reconcile, and submit a new request.

@@ -1450,6 +1450,7 @@
     "activityErrorSteps_other": "发生错误 · {{count}} 个步骤",
     "activityFilesChanged_one": "已更改 {{count}} 个文件",
     "activityFilesChanged_other": "已更改 {{count}} 个文件",
+    "openFile": "打开 {{path}}",
     "plan": "计划",
     "copyPlan": "复制计划",
     "copyPlanMarkdown": "复制为 Markdown 清单",

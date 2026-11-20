@@ -125,8 +125,9 @@ export const MilkdownMessageCard = memo(function MilkdownMessageCard({
     if (!enableComments) dismissComment();
   }, [enableComments, dismissComment]);
   const handleLinkClick = useCallback(
-    (href: string) => openDocumentLink(href, { threadId }),
-    [threadId],
+    (href: string) =>
+      openDocumentLink(href, { threadId, canvasId: sourceCanvasId }),
+    [threadId, sourceCanvasId],
   );
 
   return (

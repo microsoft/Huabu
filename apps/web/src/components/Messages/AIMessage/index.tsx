@@ -2,7 +2,7 @@
 // Licensed under the MIT license.
 
 import { Copy, Loader2 } from 'lucide-react';
-import { memo, useState, type ReactNode } from 'react';
+import { Fragment, memo, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import {
@@ -19,6 +19,7 @@ import { MilkdownMessageCard } from './MilkdownMessageCard';
 import { PermissionCard } from './PermissionCard';
 import { PlanCard } from './PlanCard';
 import { ThinkingCard } from './ThinkingCard';
+import { FilePathLink } from './Tool/FilePathLink';
 import { ImageGenerationCard } from './Tool/ImageGenerationCard';
 import { MergedAgentToolRow } from './Tool/MergedAgentToolRow';
 import { SnapshotNodesCard } from './Tool/SnapshotNodesCard';
@@ -242,39 +243,49 @@ export const AIMessage = memo(function AIMessage({
               (detail) => detail.kind === 'thinking',
             );
             return (
-              <ActivityDisclosure
-                key={entry.startIndex}
-                summary={entry.summary}
-                status={status}
-              >
-                {details.map((detail, index) =>
-                  detail.kind === 'thinking' ? (
-                    <ThinkingCard
-                      key={detail.startIndex}
-                      plainText={detail.plainText}
-                      inActivity={showChildIcons}
-                    />
-                  ) : (
-                    <ActivityDisclosure
-                      key={detail.startIndex}
-                      variant={hasThinking ? 'tools' : 'inline-tools'}
-                      summary={detail.summary}
-                      status={
-                        index === details.length - 1 ? status : 'completed'
-                      }
-                    >
-                      {detail.groups.map((group, toolIndex) =>
-                        renderToolGroup(
-                          group,
-                          messageId,
-                          `tool-${toolIndex}`,
-                          showChildIcons,
-                        ),
-                      )}
-                    </ActivityDisclosure>
-                  ),
+              <Fragment key={entry.startIndex}>
+                <ActivityDisclosure summary={entry.summary} status={status}>
+                  {details.map((detail, index) =>
+                    detail.kind === 'thinking' ? (
+                      <ThinkingCard
+                        key={detail.startIndex}
+                        plainText={detail.plainText}
+                        inActivity={showChildIcons}
+                      />
+                    ) : (
+                      <ActivityDisclosure
+                        key={detail.startIndex}
+                        variant={hasThinking ? 'tools' : 'inline-tools'}
+                        summary={detail.summary}
+                        status={
+                          index === details.length - 1 ? status : 'completed'
+                        }
+                      >
+                        {detail.groups.map((group, toolIndex) =>
+                          renderToolGroup(
+                            group,
+                            messageId,
+                            `tool-${toolIndex}`,
+                            showChildIcons,
+                          ),
+                        )}
+                      </ActivityDisclosure>
+                    ),
+                  )}
+                </ActivityDisclosure>
+                {status !== 'running' && entry.changedPaths.length > 0 && (
+                  <ul
+                    data-assistant-changed-files=""
+                    className="text-fg-subtle flex flex-wrap gap-x-2 gap-y-0.5 text-xs"
+                  >
+                    {entry.changedPaths.map((path) => (
+                      <li key={path} className="flex max-w-full min-w-0">
+                        <FilePathLink path={path} compact />
+                      </li>
+                    ))}
+                  </ul>
                 )}
-              </ActivityDisclosure>
+              </Fragment>
             );
           }
 
