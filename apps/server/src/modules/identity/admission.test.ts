@@ -430,6 +430,25 @@ describe('automatic admission', () => {
     expect(await identity('erin')).toMatchObject({ member: false });
   });
 
+  it('leaves access as it was when a damaged record fails an administrator’s change', async () => {
+    const { store, identity, setMember } = await host();
+    expect(await identity('erin')).toMatchObject({ member: false });
+    await getServerRecords().put(
+      { owner: null, name: 'admission' },
+      { automatic: 'yes' },
+    );
+    const memberRoles = async (principalId: string) =>
+      (await store.grants.list({ target: { type: 'system' }, principalId }))
+        .map((grant) => grant.role)
+        .filter((role) => role === 'member');
+    // Admitting fails before the grant is made, not after.
+    expect((await setMember('erin', true)).status).toBe(500);
+    expect(await memberRoles('erin')).toEqual([]);
+    // Removing fails before the grant goes, so the failure is the whole story.
+    expect((await setMember('carol', false)).status).toBe(500);
+    expect(await memberRoles('carol')).toEqual(['member']);
+  });
+
   it('names the configured providers it applies to', async () => {
     const { call } = await host(new InMemoryBubbleStore(), [
       { driver: 'local-token' },

@@ -170,7 +170,11 @@ function bubblePeople(
         if (!(await store.principals.get(principalId))) return false;
         const rows = await store.grants.list({ target: SYSTEM, principalId });
         const current = rows.filter((row) => row.role === 'member');
+        // The admission record changes before the grant, in both directions,
+        // so a record that cannot be written (damaged) fails the change with
+        // the grant as it was.
         if (member) {
+          await clearAdmissionBlock(principalId);
           if (current.length === 0)
             await store.grants.add({
               target: SYSTEM,
@@ -178,11 +182,8 @@ function bubblePeople(
               role: 'member',
               grantedByPrincipalId: by,
             });
-          await clearAdmissionBlock(principalId);
         }
         if (!member) {
-          // Blocked before the grant goes, under this lock, so no automatic
-          // admission can slip in between and readmit them.
           await blockAdmission(principalId, by);
           for (const row of current) await store.grants.remove(row.grantId);
           // Removing membership does not rotate reusable device credentials.
