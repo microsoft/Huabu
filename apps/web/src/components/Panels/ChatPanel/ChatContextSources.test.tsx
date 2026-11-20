@@ -60,7 +60,7 @@ function node(id: string, options: Partial<Node> = {}): Node {
 }
 
 function setNodes(nodes: Node[]) {
-  act(() => useCanvasStore.getState()._setStateNoAutosave({ nodes }));
+  act(() => useCanvasStore.getState()._setStateRaw({ nodes }));
 }
 
 function render({
@@ -102,7 +102,7 @@ function button(label: string): HTMLButtonElement {
 beforeEach(() => {
   void translations.changeLanguage('en');
   useChatStore.setState({ threadsById: {}, selectionAttachment: null });
-  useCanvasStore.getState()._setStateNoAutosave({
+  useCanvasStore.getState()._setStateRaw({
     canvasId: session.canvasId,
     nodes: [],
     edges: [],

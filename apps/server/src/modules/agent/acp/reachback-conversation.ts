@@ -29,7 +29,7 @@ export async function isCurrentReachback(
     const { agentletId } = record.spec.spec as { agentletId?: unknown };
     return (
       typeof agentletId === 'string' &&
-      agentletOwner(agentletId) === claims.principalId
+      (await agentletOwner(agentletId)) === claims.principalId
     );
   });
 }

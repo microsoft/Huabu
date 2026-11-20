@@ -197,3 +197,41 @@ export function translateOf(transform: string): Point {
   if (!match) throw new Error(`no translate in transform: ${transform}`);
   return { x: Number(match[1]), y: Number(match[2]) };
 }
+
+/** A plain command list as edits: one edit per command (a failing command does not undo the others). */
+export function editsPerCommand<T>(
+  commands: readonly T[],
+  basis?: string,
+): { basis?: string; commands: T[] }[] {
+  return commands.map((command) => ({
+    ...(basis !== undefined ? { basis } : {}),
+    commands: [command],
+  }));
+}
+
+/**
+ * A person's batch as their page sends it: one edit per command and, as the
+ * page does (`commandsForServer`), no created node selected on the server —
+ * selection is a page's own view state. For fixtures that only need some
+ * nodes to exist; an Agent's write goes through `agentExecute`.
+ */
+export function personEdits<T>(
+  commands: readonly T[],
+  basis?: string,
+): { basis?: string; commands: T[] }[] {
+  return editsPerCommand(
+    commands.map((command) => {
+      const create = command as { type?: unknown; nodes?: unknown };
+      if (create.type !== 'CREATE_NODES' || !Array.isArray(create.nodes))
+        return command;
+      return {
+        ...command,
+        nodes: create.nodes.map((node: object) => ({
+          selectOnCreate: false,
+          ...node,
+        })),
+      };
+    }),
+    basis,
+  );
+}

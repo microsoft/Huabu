@@ -9,6 +9,7 @@ import {
   readdirSync,
   rmSync,
   unlinkSync,
+  utimesSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -60,6 +61,13 @@ describeSpaceNodesContract('Disk', async () => {
     missingRepository: store.space('missing-node-space').nodes,
     expectedCanvasId: 'node-space',
     deletedNodePut: 'write-suppressed',
+    space,
+    // Fresh store objects with cold caches, as a restarted Server has.
+    reopen: () => {
+      resetStorageCache();
+      refreshCanvasDirIndex();
+      return new DiskStructuredStore().space('node-space').nodes;
+    },
     cleanup: () => {
       vi.restoreAllMocks();
       resetStorageCache();
@@ -83,6 +91,81 @@ describe('DiskSpaceNodes', () => {
   afterEach(() => {
     resetStorageCache();
     rmSync(workspacePath, { recursive: true, force: true });
+  });
+
+  describe('changes', () => {
+    /** Date the node's sidecar, as the file system would have. */
+    function dateSidecar(label: string, at: Date): void {
+      const file = path.join(nodesDir('canvas-a'), `${label}.md`);
+      utimesSync(file, at, at);
+    }
+
+    async function put(repository: DiskSpaceNodes, id: string, label: string) {
+      const result = await repository.put({
+        nodeId: id,
+        record: note(id, label, `body of ${id}`),
+      });
+      if (!result.ok) throw new Error(`put of ${id} failed`);
+    }
+
+    it('names the sidecars written since, not the ones written long before', async () => {
+      const repository = new DiskSpaceNodes(getCanvasStore('canvas-a'));
+      await put(repository, 'old', 'Old');
+      await put(repository, 'recent', 'Recent');
+      dateSidecar('Old', new Date(Date.now() - 60_000));
+      const { position } = await repository.changes();
+
+      await put(repository, 'new', 'New');
+      const changed = (await repository.changes(position)).nodeIds;
+      expect(changed).toContain('new');
+      expect(changed).not.toContain('old');
+    });
+
+    it('names a write that shares the timestamp of the position', async () => {
+      // A file system with coarse times: two writes, one tick.
+      const repository = new DiskSpaceNodes(getCanvasStore('canvas-a'));
+      const tick = new Date(Math.floor(Date.now() / 1000) * 1000 - 5_000);
+      await put(repository, 'first', 'First');
+      dateSidecar('First', tick);
+      const { position } = await repository.changes();
+      expect(position.seq).toBe(tick.getTime());
+
+      await put(repository, 'second', 'Second');
+      dateSidecar('Second', tick);
+      expect((await repository.changes(position)).nodeIds).toContain('second');
+    });
+
+    it('is not carried past later writes by a sidecar dated in the future', async () => {
+      const repository = new DiskSpaceNodes(getCanvasStore('canvas-a'));
+      await put(repository, 'ahead', 'Ahead');
+      dateSidecar('Ahead', new Date(Date.now() + 3_600_000));
+      const { position } = await repository.changes();
+      // Behind the clock, so a write stamped by a coarser file clock right
+      // after it is not dated before the position.
+      expect(position.seq).toBeLessThan(Date.now());
+      expect(position.seq).toBeGreaterThan(Date.now() - 60_000);
+
+      await put(repository, 'later', 'Later');
+      expect((await repository.changes(position)).nodeIds).toEqual(
+        expect.arrayContaining(['later', 'ahead']),
+      );
+    });
+
+    it('sees a sidecar changed on disk by something else, without reading any', async () => {
+      const repository = new DiskSpaceNodes(getCanvasStore('canvas-a'));
+      await put(repository, 'edited', 'Edited');
+      await put(repository, 'kept', 'Kept');
+      dateSidecar('Kept', new Date(Date.now() - 120_000));
+      dateSidecar('Edited', new Date(Date.now() - 60_000));
+      const { position } = await repository.changes();
+      // The latest write is at the position, so it is named once more.
+      expect((await repository.changes(position)).nodeIds).toEqual(['edited']);
+
+      const file = path.join(nodesDir('canvas-a'), 'Edited.md');
+      writeFileSync(file, readFileSync(file, 'utf8').replace('body', 'text'));
+      dateSidecar('Edited', new Date(position.seq + 1_000));
+      expect((await repository.changes(position)).nodeIds).toEqual(['edited']);
+    });
   });
 
   it('uses full-record node CAS and returns the exact persisted record', async () => {

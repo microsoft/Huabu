@@ -5,18 +5,30 @@
  * Canvas change records — a human-readable summary of a mutation plus
  * the **inverse deltas** needed to undo it.
  *
- * Built purely from a batch's {@link Delta} list (the same wire diff the
- * server broadcasts), so revert is a generic, complete operation:
- * `applyDeltas(state, record.revertDeltas)`. This avoids per-command
- * inverse logic — deltas carry the full prior/next node objects, so the
- * inverse is exact (including restored content) for every command type.
+ * Change records are built from a batch's {@link Delta} list and undone by
+ * `applyDeltas(state, record.revertDeltas)`. This avoids per-command inverse
+ * logic. An update's revert row holds the previous value of exactly the
+ * fields the edit changed and is merged into the node as it is then; a
+ * deletion's revert row holds the whole deleted node, because nothing else
+ * does once its record is gone. Records stored before rows became partial
+ * hold whole nodes and are read by the same code. Old logs have no exact
+ * sibling order. OrderedDelta inversion below is whole-batch only;
+ * per-entity Review extraction/coalescing remains entity-only.
  *
  * Pure functions only — host-agnostic, shared by server (producer) and
  * web (renderer / reverter).
  */
 
-import { invertDelta, type Delta } from './delta.js';
-import { pdfNoteId } from './pdfNotes.js';
+import {
+  invertDelta,
+  isWholeNode,
+  mergeNodeFields,
+  nodeFieldChanges,
+  replacedNodeType,
+  type Delta,
+  type NodeFields,
+  type OrderedDelta,
+} from './delta.js';
 import { createId } from '../utils/id.js';
 
 import type { CanvasNode, CanvasEdge } from './interfaces.js';
@@ -69,18 +81,18 @@ export interface CanvasChangeRecord {
   fingerprintKeys?: string[];
 }
 
-function nodeData(node: CanvasNode | undefined): Record<string, unknown> {
-  return (node?.data ?? {}) as Record<string, unknown>;
+function nodeData(node: NodeFields | undefined): Record<string, unknown> {
+  return node?.data ?? {};
 }
 
 function truncate(s: string, n: number): string {
   return s.length > n ? s.slice(0, n) + '…' : s;
 }
 
-function labelOf(node: CanvasNode | undefined): string {
+function labelOf(node: NodeFields | undefined, known?: string): string {
   if (!node) return 'unknown';
   const label = nodeData(node)['label'];
-  return truncate((typeof label === 'string' && label) || node.id, 24);
+  return truncate((typeof label === 'string' && label) || known || node.id, 24);
 }
 
 /**
@@ -108,13 +120,15 @@ function changedKeys(
 }
 
 /**
- * The authored body and metadata keys. A CREATE has no `prev` to diff, so it
- * can't derive its changed keys the way an UPDATE does — instead it
- * fingerprints only the body here, which is what a revert (deleting the
- * node) would actually destroy. Cosmetic (`style`) and auto-derived
+ * What a CREATE review record fingerprints. A CREATE has no `prev` to diff,
+ * so it can't derive its changed keys the way an UPDATE does — instead it
+ * fingerprints what a revert (deleting the node) would actually destroy: the
+ * body and the custom properties. Cosmetic (`style`) and auto-derived
  * (`label` / `summary` / `keywords`, stamped by preprocessing AFTER
  * creation) fields are deliberately excluded so they never flip a fresh
- * create to "stale"; a genuine edit to the body still does.
+ * create to "stale"; a genuine edit to the body or a property still does.
+ *
+ * Not the content revision: see {@link CONTENT_REVISION_KEYS}.
  */
 const PRIMARY_CONTENT_KEYS = [
   'content',
@@ -122,6 +136,15 @@ const PRIMARY_CONTENT_KEYS = [
   'properties',
   'propertyDisplayKeys',
 ];
+
+/**
+ * The fields a node's content revision covers: the body and the source
+ * pointer, and nothing else. Custom properties (`properties`,
+ * `propertyDisplayKeys`) are independent small items written per key without
+ * a revision, like colour or position; title, summary and keywords are
+ * derived or renamed separately.
+ */
+export const CONTENT_REVISION_KEYS = ['content', 'src'] as const;
 
 /** Body keys present on a node's `data`, for CREATE fingerprinting. */
 function primaryKeysOf(data: Record<string, unknown>): string[] {
@@ -164,25 +187,26 @@ function hashDataFields(
  * over the same {@link CanvasChangeRecord.fingerprintKeys}.
  */
 export function fingerprintNodeFields(
-  node: CanvasNode | undefined,
+  node: NodeFields | undefined,
   keys: readonly string[],
 ): string {
   return hashDataFields(nodeData(node), keys);
 }
 
 /**
- * A node's **revision token**: a deterministic djb2 hash over its authored
- * content and metadata ({@link PRIMARY_CONTENT_KEYS}). Surfaced to
+ * A node's **revision token**: a deterministic djb2 hash over its body and
+ * source pointer ({@link CONTENT_REVISION_KEYS}). Surfaced to
  * agents as an `ETag` on RFS downloads and as `rev` in per-turn refs /
  * neighbourhood, and (later) checked on the executor's content writes
  * (compare-and-swap).
  *
  * Stateless and host-agnostic: recomputed from the node on demand, yielding
  * the identical string on server (producer) and web / agent (consumer).
- * Cosmetic (`style`), geometry, and auto-derived (`label` / `summary` /
- * `keywords`) fields are excluded — the same discipline as CREATE
- * fingerprinting — so a re-measure or a preprocessing regen never moves the
- * revision and forces a needless re-read.
+ * Cosmetic (`style`), geometry, auto-derived (`label` / `summary` /
+ * `keywords`) fields and custom properties (`properties`,
+ * `propertyDisplayKeys`) are excluded, so a re-measure, a preprocessing
+ * regen or a tag added by somebody else never moves the revision and forces
+ * a needless re-read or refuses a body save.
  *
  * IMPORTANT: `data.content` must be **hydrated** (the canonical on-disk
  * `nodes/<label>.md` body). Persisted topology deliberately strips `content` from
@@ -208,8 +232,6 @@ export function nodeRevisionOf(fields: {
   type?: string;
   content?: string;
   src?: string;
-  properties?: unknown;
-  propertyDisplayKeys?: unknown;
 }): string {
   const data: Record<string, unknown> = {};
   const hasBody =
@@ -218,18 +240,18 @@ export function nodeRevisionOf(fields: {
   if (hasBody && typeof fields.content === 'string')
     data.content = fields.content;
   if (typeof fields.src === 'string') data.src = fields.src;
-  for (const key of ['properties', 'propertyDisplayKeys'] as const) {
-    if (fields[key] !== undefined) data[key] = fields[key];
-  }
-  return hashDataFields(data, PRIMARY_CONTENT_KEYS);
+  return hashDataFields(data, CONTENT_REVISION_KEYS);
 }
 
 /**
  * Invert a delta batch. To undo a sequence applied in order, invert each
- * delta and apply them in reverse order.
+ * delta and apply them in reverse order. Ordered batches must be applied
+ * atomically; orderVersion is retained, not rolled back as a live writer version.
  */
-export function invertDeltas(deltas: readonly Delta[]): Delta[] {
-  const out: Delta[] = [];
+export function invertDeltas(deltas: readonly Delta[]): Delta[];
+export function invertDeltas(deltas: readonly OrderedDelta[]): OrderedDelta[];
+export function invertDeltas(deltas: readonly OrderedDelta[]): OrderedDelta[] {
+  const out: OrderedDelta[] = [];
   for (let i = deltas.length - 1; i >= 0; i--) {
     out.push(invertDelta(deltas[i]));
   }
@@ -277,6 +299,16 @@ export function isChangeStale(
   });
 }
 
+/** The Note a PDF row names; a partial row has no `type` of its own. */
+function noteLinkOf(
+  fields: NodeFields | undefined,
+  nodeType: string | undefined,
+): string | undefined {
+  if (!fields || (fields.type ?? nodeType) !== 'pdf') return undefined;
+  const id = nodeData(fields)['noteNodeId'];
+  return typeof id === 'string' ? id : undefined;
+}
+
 function groupPdfNoteChanges(
   records: CanvasChangeRecord[],
 ): CanvasChangeRecord[] {
@@ -297,8 +329,8 @@ function groupPdfNoteChanges(
         : delta.type === 'DELETE_NODE'
           ? delta.node
           : undefined;
-    const beforeId = before && pdfNoteId(before);
-    const afterId = after && pdfNoteId(after);
+    const beforeId = noteLinkOf(before, record.nodeType);
+    const afterId = noteLinkOf(after, record.nodeType);
     if (beforeId === afterId) continue;
     for (const id of new Set([beforeId, afterId])) {
       const dependent = id && byNodeId.get(id);
@@ -317,11 +349,17 @@ function groupPdfNoteChanges(
  *
  * @param deltas The batch deltas (server diff prestate → poststate).
  * @param opts.nodeLabelById Optional label lookup for edge endpoints
- *   whose nodes are not themselves part of this batch.
+ *   whose nodes are not themselves part of this batch, and for updated nodes
+ *   whose row does not carry a label (it did not change).
+ * @param opts.nodeTypeById Type lookup for updated nodes, whose row carries
+ *   a type only when the type changed.
  */
 export function extractCanvasChanges(
   deltas: readonly Delta[],
-  opts?: { nodeLabelById?: ReadonlyMap<string, string> },
+  opts?: {
+    nodeLabelById?: ReadonlyMap<string, string>;
+    nodeTypeById?: ReadonlyMap<string, string>;
+  },
 ): CanvasChangeRecord[] {
   // Harvest node labels from the batch's own node deltas, then fall back
   // to the caller-supplied map for edge endpoints outside the batch.
@@ -376,17 +414,41 @@ export function extractCanvasChanges(
         // (raw prev→next diff). Fields the agent didn't touch are absent,
         // so later system rewrites of them (preprocessing regenerating
         // `label` / `summary`, a re-measure, …) can never flip it.
-        const keys = changedKeys(nodeData(d.prev), nodeData(d.next));
+        //
+        // The revert row holds only those fields, so reverting puts back
+        // what this edit changed and leaves later edits of other fields
+        // alone. A whole-node row (old format) is reduced first.
+        const changes = nodeFieldChanges(d.prev, d.next);
+        if (!changes) break;
+        const keys = changedKeys(
+          nodeData(changes.prev),
+          nodeData(changes.next),
+        );
+        const known = labelById.get(d.next.id);
+        const nodeType =
+          replacedNodeType(d) ??
+          opts?.nodeTypeById?.get(d.next.id) ??
+          // Only a PDF links a Note.
+          (keys.includes('noteNodeId') ? 'pdf' : 'note');
         records.push({
           id: createId('change'),
           kind: 'update',
-          label: `Updated: ${labelOf(d.next)}`,
+          label: `Updated: ${labelOf(changes.next, known)}`,
           nodeId: d.next.id,
-          nodeType: (d.next.type ?? 'note') as string,
-          nodeLabel: labelOf(d.next),
-          revertDeltas: [invertDelta(d)],
+          nodeType,
+          nodeLabel: labelOf(changes.next, known),
+          revertDeltas: [
+            {
+              type: 'REPLACE_NODE',
+              prev: changes.next,
+              next: changes.prev,
+              // The type the node has once the revert is applied.
+              nodeType: changes.prev.type ?? nodeType,
+              ...(d.hidden ? { hidden: true as const } : {}),
+            },
+          ],
           fingerprintKeys: keys,
-          appliedFingerprint: fingerprintNodeFields(d.next, keys),
+          appliedFingerprint: fingerprintNodeFields(changes.next, keys),
         });
         break;
       }
@@ -395,6 +457,7 @@ export function extractCanvasChanges(
         // DELETE: existence-based — the revert (INSERT_NODE) is
         // meaningful iff the node is still absent (blocked once it's
         // back).
+        if (!isWholeNode(d.node)) break;
         records.push({
           id: createId('change'),
           kind: 'delete',
@@ -402,6 +465,9 @@ export function extractCanvasChanges(
           nodeId: d.node.id,
           nodeType: (d.node.type ?? 'note') as string,
           nodeLabel: labelOf(d.node),
+          // The whole node: after the deletion this row is the only place
+          // its content is kept. A row already reduced to an id cannot be
+          // reverted and yields no record.
           revertDeltas: [invertDelta(d)],
         });
         break;
@@ -459,13 +525,29 @@ export function extractCanvasChanges(
 // the revert restores the state from BEFORE the first edit, and a
 // create+delete (or an edit that nets to nothing) drops out entirely.
 
-/** The forward change (before → after) a record's inverse delta implies. */
-function forwardOf(rec: CanvasChangeRecord): {
-  key: string;
-  kind: 'node' | 'edge';
-  before: CanvasNode | CanvasEdge | null;
-  after: CanvasNode | CanvasEdge | null;
-} | null {
+/** The forward change of one node that a record's inverse row implies. */
+type NodeForward =
+  | { op: 'insert'; node: CanvasNode }
+  | { op: 'delete'; node: NodeFields }
+  | {
+      op: 'replace';
+      prev: NodeFields;
+      next: NodeFields;
+      /** The node's type before the change, when the row states it. */
+      nodeType?: string;
+      hidden?: true;
+    };
+
+type Forward =
+  | { key: string; kind: 'node'; change: NodeForward }
+  | {
+      key: string;
+      kind: 'edge';
+      before: CanvasEdge | null;
+      after: CanvasEdge | null;
+    };
+
+function forwardOf(rec: CanvasChangeRecord): Forward | null {
   const rd = rec.revertDeltas[0];
   if (!rd) return null;
   switch (rd.type) {
@@ -473,22 +555,25 @@ function forwardOf(rec: CanvasChangeRecord): {
       return {
         key: `node:${rd.node.id}`,
         kind: 'node',
-        before: null,
-        after: rd.node,
+        change: { op: 'insert', node: rd.node as CanvasNode },
       };
     case 'INSERT_NODE': // forward was DELETE: node → absent
       return {
         key: `node:${rd.node.id}`,
         kind: 'node',
-        before: rd.node,
-        after: null,
+        change: { op: 'delete', node: rd.node },
       };
     case 'REPLACE_NODE': // forward REPLACE: before=rd.next, after=rd.prev
       return {
         key: `node:${rd.prev.id}`,
         kind: 'node',
-        before: rd.next,
-        after: rd.prev,
+        change: {
+          op: 'replace',
+          prev: rd.next,
+          next: rd.prev,
+          ...(rd.nodeType !== undefined ? { nodeType: rd.nodeType } : {}),
+          ...(rd.hidden ? { hidden: true as const } : {}),
+        },
       };
     case 'DELETE_EDGE':
       return {
@@ -516,18 +601,112 @@ function forwardOf(rec: CanvasChangeRecord): {
   }
 }
 
-function netNodeDelta(
-  before: CanvasNode | null,
-  after: CanvasNode | null,
-): Delta | null {
-  if (!before && !after) return null;
-  if (!before && after) return { type: 'INSERT_NODE', node: after };
-  if (before && !after) return { type: 'DELETE_NODE', node: before };
-  if (JSON.stringify(before) === JSON.stringify(after)) return null;
+/**
+ * One side of two replaces of a node in a row: per field, the value the
+ * `pick`ed change gives it when that change names the field, the other
+ * change's value otherwise.
+ */
+function pickFields(
+  primary: { prev: NodeFields; next: NodeFields },
+  primarySide: 'prev' | 'next',
+  other: { prev: NodeFields; next: NodeFields },
+): NodeFields {
+  const out: Record<string, unknown> = { id: primary.next.id };
+  const names = (change: { prev: NodeFields; next: NodeFields }): Set<string> =>
+    new Set([...Object.keys(change.prev), ...Object.keys(change.next)]);
+  const dataNames = (change: {
+    prev: NodeFields;
+    next: NodeFields;
+  }): Set<string> =>
+    new Set([
+      ...Object.keys(change.prev.data ?? {}),
+      ...Object.keys(change.next.data ?? {}),
+    ]);
+  const primaryNames = names(primary);
+  for (const key of new Set([...primaryNames, ...names(other)])) {
+    if (key === 'id' || key === 'data') continue;
+    const from = primaryNames.has(key) ? primary : other;
+    const value = (from[primarySide] as Record<string, unknown>)[key];
+    if (value !== undefined) out[key] = value;
+  }
+  const primaryData = dataNames(primary);
+  const data: Record<string, unknown> = {};
+  for (const key of new Set([...primaryData, ...dataNames(other)])) {
+    const from = primaryData.has(key) ? primary : other;
+    const value = from[primarySide].data?.[key];
+    if (value !== undefined) data[key] = value;
+  }
+  out['data'] = data;
+  return out as NodeFields;
+}
+
+/**
+ * The net of `first` followed by `second` on one node; `null` when together
+ * they change nothing (created then deleted, edited and edited back).
+ */
+function composeNodeChanges(
+  first: NodeForward | null,
+  second: NodeForward,
+): NodeForward | null {
+  if (!first) return second;
+  if (first.op === 'insert') {
+    if (second.op === 'delete') return null;
+    if (second.op === 'replace') {
+      return {
+        op: 'insert',
+        node: mergeNodeFields(first.node, second.prev, second.next),
+      };
+    }
+    return second;
+  }
+  if (first.op === 'replace') {
+    if (second.op === 'replace') {
+      // Per field: the value before the first edit that touched it, and the
+      // value after the last one that did.
+      const changes = nodeFieldChanges(
+        pickFields(first, 'prev', second),
+        pickFields(second, 'next', first),
+      );
+      return changes
+        ? {
+            op: 'replace',
+            ...changes,
+            ...(first.nodeType !== undefined
+              ? { nodeType: first.nodeType }
+              : {}),
+            ...(first.hidden && second.hidden ? { hidden: true as const } : {}),
+          }
+        : null;
+    }
+    if (second.op === 'delete') {
+      // The node as it was before the first edit is what a revert restores.
+      return {
+        op: 'delete',
+        node: isWholeNode(second.node)
+          ? mergeNodeFields(second.node, first.next, first.prev)
+          : second.node,
+      };
+    }
+    return second;
+  }
+  // Deleted, then created again under the same id.
+  if (second.op === 'insert' && isWholeNode(first.node)) {
+    const changes = nodeFieldChanges(first.node, second.node);
+    return changes ? { op: 'replace', ...changes } : null;
+  }
+  return second;
+}
+
+function netNodeDelta(change: NodeForward | null): Delta | null {
+  if (!change) return null;
+  if (change.op === 'insert') return { type: 'INSERT_NODE', node: change.node };
+  if (change.op === 'delete') return { type: 'DELETE_NODE', node: change.node };
   return {
     type: 'REPLACE_NODE',
-    prev: before as CanvasNode,
-    next: after as CanvasNode,
+    prev: change.prev,
+    next: change.next,
+    ...(change.nodeType !== undefined ? { nodeType: change.nodeType } : {}),
+    ...(change.hidden ? { hidden: true as const } : {}),
   };
 }
 
@@ -558,6 +737,7 @@ export function coalesceChanges(
   const groups = new Map<string, CanvasChangeRecord[]>();
   const order: string[] = [];
   const labelById = new Map<string, string>();
+  const typeById = new Map<string, string>();
   // Flatten grouped rows before netting each entity, then rebuild ownership groups.
   const individual = records.flatMap((record) =>
     record.revertDeltas.map((delta, index) => ({
@@ -571,6 +751,15 @@ export function coalesceChanges(
   );
   for (const r of individual) {
     if (r.nodeId && r.nodeLabel) labelById.set(r.nodeId, r.nodeLabel);
+    const own = r.revertDeltas[0];
+    // A grouped row's dependents carry the group's type, not their own.
+    if (
+      r.nodeId &&
+      r.nodeType &&
+      own?.type === 'REPLACE_NODE' &&
+      own.prev.id === r.nodeId
+    )
+      typeById.set(r.nodeId, r.nodeType);
     if (r.sourceNodeId && r.sourceNodeLabel)
       labelById.set(r.sourceNodeId, r.sourceNodeLabel);
     if (r.targetNodeId && r.targetNodeLabel)
@@ -591,19 +780,25 @@ export function coalesceChanges(
   for (const key of order) {
     const grp = groups.get(key);
     if (!grp || grp.length === 0) continue;
-    const first = forwardOf(grp[0]);
-    const last = forwardOf(grp[grp.length - 1]);
+    const forwards = grp.flatMap((record) => {
+      const forward = forwardOf(record);
+      return forward ? [forward] : [];
+    });
+    const first = forwards[0];
+    const last = forwards[forwards.length - 1];
     if (!first || !last) continue;
     const net =
       first.kind === 'node'
         ? netNodeDelta(
-            first.before as CanvasNode | null,
-            last.after as CanvasNode | null,
+            forwards.reduce<NodeForward | null>(
+              (acc, forward) =>
+                forward.kind === 'node'
+                  ? composeNodeChanges(acc, forward.change)
+                  : acc,
+              null,
+            ),
           )
-        : netEdgeDelta(
-            first.before as CanvasEdge | null,
-            last.after as CanvasEdge | null,
-          );
+        : netEdgeDelta(first.before, last.kind === 'edge' ? last.after : null);
     if (net) {
       netDeltas.push(net);
       idByKey.set(key, grp[0].id);
@@ -611,11 +806,12 @@ export function coalesceChanges(
   }
 
   // Rebuild records from the net deltas, then restore the stable id.
-  return extractCanvasChanges(netDeltas, { nodeLabelById: labelById }).map(
-    (rec) => {
-      const f = forwardOf(rec);
-      const id = f ? idByKey.get(f.key) : undefined;
-      return id ? { ...rec, id } : rec;
-    },
-  );
+  return extractCanvasChanges(netDeltas, {
+    nodeLabelById: labelById,
+    nodeTypeById: typeById,
+  }).map((rec) => {
+    const f = forwardOf(rec);
+    const id = f ? idByKey.get(f.key) : undefined;
+    return id ? { ...rec, id } : rec;
+  });
 }

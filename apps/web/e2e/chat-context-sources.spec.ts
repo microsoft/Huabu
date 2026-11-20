@@ -76,7 +76,7 @@ for (const interaction of ['mouse', 'keyboard'] as const) {
         }>,
         import(loaded('/src/store/chatStore.ts')) as Promise<typeof ChatStore>,
       ]);
-      canvas.getState()._setStateNoAutosave({
+      canvas.getState()._setStateRaw({
         canvasId: 'source-focus-canvas',
         nodes: [
           {
@@ -293,7 +293,7 @@ for (const width of [320, 520]) {
             import(loadedStore('chatStore')) as Promise<typeof ChatStore>,
           ],
         );
-        canvas.getState()._setStateNoAutosave({
+        canvas.getState()._setStateRaw({
           canvasId: 'chat-performance-canvas',
           nodes: ['Research notes', 'Product outline', 'User feedback'].map(
             (label, index) => ({
@@ -504,7 +504,7 @@ test('adjacent source stays dashed and transparent until added, with Canvas summ
         default: typeof CanvasStore;
       }>,
     ]);
-    canvas.getState()._setStateNoAutosave({
+    canvas.getState()._setStateRaw({
       canvasId: 'candidate-canvas',
       nodes: [
         {

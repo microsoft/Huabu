@@ -30,6 +30,23 @@ function personName(person: Person): string {
   return principal.displayName ?? principal.email ?? principal.principalId;
 }
 
+/** Where a person stands with the service, shown beside their name. */
+function AccessStatus({ person }: { person: Person }) {
+  const { t } = useTranslation();
+  const [label, className] = person.admin
+    ? [t('people.status.administrator'), 'bg-info-bg text-info-fg']
+    : person.member
+      ? [t('people.status.admitted'), 'bg-success-bg text-success-fg']
+      : [t('people.status.waiting'), 'bg-warning-bg text-warning-fg'];
+  return (
+    <span
+      className={`shrink-0 rounded px-1.5 py-0.5 text-[11px] leading-none font-medium ${className}`}
+    >
+      {label}
+    </span>
+  );
+}
+
 /**
  * Who may use this Huabu, and with which Workspace roles. Shown to
  * administrators of a Bubble deployment; changes apply on each person's
@@ -85,34 +102,42 @@ export function PeopleSettings() {
   return (
     <div className="space-y-3">
       <p className="text-fg-subtle text-xs">{t('people.intro')}</p>
-      <ul className="divide-edge-default border-edge-default divide-y rounded-lg border">
+      <p className="text-fg-subtle text-xs">{t('people.accessVsWorkspace')}</p>
+      <ul className="divide-edge-default border-edge-default @container divide-y rounded-lg border">
         {people.map((person) => {
           const id = person.principal.principalId;
           const held = new Set(person.workspaces.map((w) => w.workspaceId));
           const addable = workspaces.filter((w) => !held.has(w.workspaceId));
           return (
             <li key={id} className="space-y-2 px-3 py-2.5">
-              <div className="flex items-center gap-3">
-                <div className="min-w-0 flex-1">
-                  <div className="text-fg-default truncate text-sm">
-                    {personName(person)}
+              {/* The person's name and email are what an administrator
+                  decides on, so they wrap rather than truncate, and in a
+                  narrow list the Service access switch moves below them. */}
+              <div className="flex flex-col items-start gap-2 @md:flex-row @md:items-center @md:gap-3">
+                <div className="w-full min-w-0 @md:w-auto @md:flex-1">
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                    <span className="text-fg-default min-w-0 text-sm [overflow-wrap:anywhere]">
+                      {personName(person)}
+                    </span>
+                    <AccessStatus person={person} />
                   </div>
-                  <div className="text-fg-subtle truncate text-xs">
-                    {person.admin
-                      ? t('people.administrator')
-                      : person.principal.email && person.principal.displayName
-                        ? person.principal.email
-                        : id}
+                  <div className="text-fg-subtle text-xs [overflow-wrap:anywhere]">
+                    {person.principal.email && person.principal.displayName
+                      ? person.principal.email
+                      : id}
                   </div>
                 </div>
-                <Toggle
-                  label={`${t('people.access')}: ${personName(person)}`}
-                  checked={person.member || person.admin}
-                  disabled={busy || person.admin || id === self}
-                  onChange={(member) =>
-                    void change(() => setPersonMember(id, member))
-                  }
-                />
+                <div className="text-fg-muted flex shrink-0 items-center gap-2 text-xs">
+                  <span aria-hidden>{t('people.serviceAccess')}</span>
+                  <Toggle
+                    label={`${t('people.serviceAccess')}: ${personName(person)}`}
+                    checked={person.member || person.admin}
+                    disabled={busy || person.admin || id === self}
+                    onChange={(member) =>
+                      void change(() => setPersonMember(id, member))
+                    }
+                  />
+                </div>
               </div>
               {person.workspaces.length > 0 && (
                 <ul className="space-y-1">

@@ -254,6 +254,45 @@ describe('ACP Handle session self-repair', () => {
     },
   );
 
+  it('registers the session when the warm-start cache fails', async () => {
+    setAcpProfileCachePort({
+      readCommands: vi.fn(async () => {
+        throw new Error('settings storage unavailable');
+      }),
+    });
+    orchestrator.ensureAgentForThread.mockResolvedValueOnce({
+      sessionId: 'cache-down',
+      pid: 43,
+    });
+    const entry = await ensureAcpSession(ensureOptions());
+    expect(entry.availableCommands).toEqual([]);
+    expect(acpSessionRegistry.get(agentletId, threadId, namespace)).toBe(entry);
+  });
+
+  it('keeps an empty command list the agent reports while the cache is read', async () => {
+    setAcpProfileCachePort({
+      readCommands: vi.fn(async () => {
+        // The agent withdraws every command before the cache answers.
+        const [client] = clients.created.slice(-1);
+        const [, listener] = client.registerSessionListener.mock.calls[0];
+        listener({
+          sessionUpdate: 'available_commands_update',
+          availableCommands: [],
+        });
+        return {
+          availableCommands: [{ name: 'stale', description: 'Withdrawn' }],
+          commandsUpdatedAt: 42,
+        };
+      }),
+    });
+    orchestrator.ensureAgentForThread.mockResolvedValueOnce({
+      sessionId: 'withdrawn',
+      pid: 43,
+    });
+    const entry = await ensureAcpSession(ensureOptions());
+    expect(entry.availableCommands).toEqual([]);
+  });
+
   it('starts a fresh thread on the selections the host resolved, before any catalogue arrives', async () => {
     orchestrator.ensureAgentForThread.mockResolvedValueOnce({
       sessionId: 'fresh-session',

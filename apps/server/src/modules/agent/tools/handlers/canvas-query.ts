@@ -62,7 +62,6 @@ export async function handleGetCanvasOutline(
 
 export async function handleInspectNodes(
   args: InspectNodesArgs,
-  readSet?: Map<string, string>,
 ): Promise<string> {
   const { canvasId, ...predicates } = args;
   const result = await inspectNodes(canvasId, predicates);
@@ -72,10 +71,8 @@ export async function handleInspectNodes(
   if ('error' in result) {
     throw new Error(result.error);
   }
-  // Metadata inspection authorizes metadata writes, never unread body replacement.
-  for (const node of result.nodes) {
-    if (node.rev) readSet?.set(`metadata:${node.id}`, node.rev);
-  }
+  // Inspection is not a read of the body: it records nothing, so it never
+  // authorizes replacing one. Custom properties need no recorded read.
   return JSON.stringify(result);
 }
 

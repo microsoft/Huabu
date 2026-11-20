@@ -9,42 +9,34 @@
  * after a server-side batch run. The executor produces a poststate;
  * this module reduces (prestate, poststate) → coarse deltas.
  *
- * Phase A semantics (matches `delta.ts` Phase A note):
+ * Entity semantics:
  *
  *   - Identity equality (`Object.is`) on `node` / `edge` references is
  *     the fast path. The engine handlers return shared references for
  *     untouched items, so most batches emit zero deltas for the
  *     untouched majority and one REPLACE per actually-mutated id.
  *
- *   - When references differ, the entire next object becomes a
- *     `REPLACE_*` payload — there is no per-property minimisation.
- *     Wire size stays small because a typical agent batch touches
- *     few nodes; large batches that move many nodes will produce
- *     proportional payloads, which is acceptable for Phase A.
+ *   - When node references differ, the row carries only the fields that
+ *     differ, with their previous and new values (`nodeFieldChanges`): a
+ *     moved node's row holds its position, not its body. A deleted node's
+ *     row holds the whole node here, so the caller can still build the
+ *     insert that reverts it; `toWireDeltas` reduces it to an id before
+ *     the row travels. Edges are small and are carried whole.
  *
  * Pure — does not depend on host or executor state.
  */
 
-import type { Delta } from './delta.js';
-import type { CanvasEdge, CanvasNode } from './interfaces.js';
+import {
+  nodeFieldChanges,
+  TRANSIENT_NODE_FIELDS,
+  type Delta,
+  type OrderedDelta,
+} from './delta.js';
+import { diffSiblingOrderEvents } from './siblingOrder.js';
 
-/**
- * Top-level React Flow runtime fields — selection / drag / measurement
- * bookkeeping the renderer writes onto every node or edge. They are NOT
- * authored content and MUST be ignored when deciding whether a node or
- * edge actually changed: otherwise a pure selection flip (e.g. creating
- * a node auto-selects it and deselects the user's node) would diff into
- * a spurious REPLACE and surface as a phantom "Updated" change.
- *
- * This is the single canonical list, reused by the web undo snapshotter
- * (`createSnapshot`) so both layers strip exactly the same fields.
- */
-export const TRANSIENT_NODE_FIELDS = [
-  'selected',
-  'dragging',
-  'measured',
-  'resizing',
-] as const;
+export { TRANSIENT_NODE_FIELDS };
+
+import type { CanvasEdge, CanvasNode } from './interfaces.js';
 
 /** React Flow runtime fields on edges (selection only). */
 export const TRANSIENT_EDGE_FIELDS = ['selected'] as const;
@@ -64,18 +56,29 @@ export function stripTransientEdgeFields<T extends object>(edge: T): T {
 }
 
 /**
- * Compute the coarse delta list that transforms `prev` into `next`.
+ * Compute entity deltas; passing orderVersion opts into complete sibling lists.
+ * The two-argument legacy contract deliberately remains entity-only until its
+ * filtered broadcast and per-entity Review consumers support atomic order replay.
  *
  * Output ordering: deletes first, then inserts, then replaces. This
- * lets {@link applyDeltas} consumers reason about transient state
- * (e.g. delete an old edge that referenced a node, before that node
- * is replaced) without juggling intermediate maps.
+ * Ordered output appends sibling events. Apply the whole batch, not individual
+ * rows; replay materializes the rendered forest rather than legacy interleaving.
  */
 export function diffCanvasState(
   prev: { nodes: readonly CanvasNode[]; edges: readonly CanvasEdge[] },
   next: { nodes: readonly CanvasNode[]; edges: readonly CanvasEdge[] },
-): Delta[] {
-  const out: Delta[] = [];
+  options: { orderVersion: number },
+): OrderedDelta[];
+export function diffCanvasState(
+  prev: { nodes: readonly CanvasNode[]; edges: readonly CanvasEdge[] },
+  next: { nodes: readonly CanvasNode[]; edges: readonly CanvasEdge[] },
+): Delta[];
+export function diffCanvasState(
+  prev: { nodes: readonly CanvasNode[]; edges: readonly CanvasEdge[] },
+  next: { nodes: readonly CanvasNode[]; edges: readonly CanvasEdge[] },
+  options?: { orderVersion: number },
+): OrderedDelta[] {
+  const out: OrderedDelta[] = [];
 
   const prevNodeMap = new Map<string, CanvasNode>(
     prev.nodes.map((n) => [n.id, n]),
@@ -99,8 +102,18 @@ export function diffCanvasState(
     const prevNode = prevNodeMap.get(id);
     if (!prevNode) continue;
     if (Object.is(prevNode, nextNode)) continue;
-    if (nodesEqual(prevNode, nextNode)) continue;
-    out.push({ type: 'REPLACE_NODE', prev: prevNode, next: nextNode });
+    // Only the fields that differ; runtime UI fields never count.
+    const changes = nodeFieldChanges(prevNode, nextNode);
+    if (changes) {
+      out.push({
+        type: 'REPLACE_NODE',
+        ...changes,
+        ...(nextNode.type !== undefined ? { nodeType: nextNode.type } : {}),
+        ...(prevNode.hidden && nextNode.hidden
+          ? { hidden: true as const }
+          : {}),
+      });
+    }
   }
 
   const prevEdgeMap = new Map<string, CanvasEdge>(
@@ -124,6 +137,11 @@ export function diffCanvasState(
     out.push({ type: 'REPLACE_EDGE', prev: prevEdge, next: nextEdge });
   }
 
+  if (options) {
+    out.push(
+      ...diffSiblingOrderEvents(prev.nodes, next.nodes, options.orderVersion),
+    );
+  }
   return out;
 }
 
@@ -135,21 +153,6 @@ export function diffCanvasState(
 // small (<2KB typical) so this is faster than a generic deep-equal
 // library; for the unusually large frame node it stays well under one
 // millisecond.
-
-function nodesEqual(a: CanvasNode, b: CanvasNode): boolean {
-  // Cheap pre-checks before falling through to stringify.
-  if (a.id !== b.id) return false;
-  if (a.type !== b.type) return false;
-  if (a.parentId !== b.parentId) return false;
-  if (a.position?.x !== b.position?.x) return false;
-  if (a.position?.y !== b.position?.y) return false;
-  // Ignore React Flow runtime UI fields (selected / dragging / measured /
-  // resizing) so a pure selection flip never diffs into a REPLACE.
-  return (
-    safeStringify(stripTransientNodeFields(a)) ===
-    safeStringify(stripTransientNodeFields(b))
-  );
-}
 
 function edgesEqual(a: CanvasEdge, b: CanvasEdge): boolean {
   if (a.id !== b.id) return false;

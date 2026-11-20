@@ -24,7 +24,7 @@ import { CanvasHeader } from '../../components/Panels/Header/CanvasHeader.tsx';
 import { PreviewWorkspacePanel } from '../../components/Panels/PreviewWorkspace/PreviewWorkspacePanel';
 import { useGlobalSearchHotkey } from '../../hooks/useGlobalSearchHotkey';
 import { useTrackCanvasAttention } from '../../store/canvasAttentionStore';
-import useStore, { dismissVersionConflictToast } from '../../store/canvasStore';
+import useStore from '../../store/canvasStore';
 import { useCanvasSyncStore } from '../../store/canvasSyncStore';
 import { openPreviewNode } from '../../store/previewWorkspace/actions';
 import { useShortcutsUiStore } from '../../store/shortcutsUiStore';
@@ -120,7 +120,7 @@ export default function CanvasPage() {
     )
       return;
     // Visibility changes must not leave invisible selection in Preview or clipboard actions.
-    canvas._setStateNoAutosave({
+    canvas._setStateRaw({
       nodes: canvas.nodes.map((node) =>
         node.selected && hidden.has(node.id)
           ? { ...node, selected: false }
@@ -388,19 +388,10 @@ export default function CanvasPage() {
     setPendingNodeType,
   ]);
 
-  // When the user leaves the canvas page (e.g. clicks the back arrow
-  // to the canvas list, navigates into settings, or opens the docs),
-  // dismiss the persistent "modified elsewhere" toast so it doesn't
-  // bleed into other routes where the stale baseline isn't relevant.
-  // Pending save drains are handled by the navigation blocker in
-  // `RootLayout` (which lives in the data router and never unmounts),
-  // not here — putting the blocker on this component would leak stale
-  // entries under React.StrictMode and freeze later navigations.
-  useEffect(() => {
-    return () => {
-      dismissVersionConflictToast();
-    };
-  }, []);
+  // Pending save drains when leaving the canvas page are handled by the
+  // navigation blocker in `RootLayout` (which lives in the data router and
+  // never unmounts), not here — putting the blocker on this component would
+  // leak stale entries under React.StrictMode and freeze later navigations.
 
   // Treat any mismatch between the URL canvas and the store canvas as a
   // loading state — covers the gap between this page mounting and the

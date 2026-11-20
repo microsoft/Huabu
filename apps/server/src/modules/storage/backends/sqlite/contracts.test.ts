@@ -3,6 +3,11 @@
 
 import { SqliteStoreContext } from './database.js';
 import {
+  SqliteServerRecordStore,
+  sqliteDatabaseHoldsServerRecords,
+} from './server-records.js';
+import { SqliteStructuredStore } from './structured-store.js';
+import {
   createSqliteTestFile,
   installDeltaAbortTrigger,
   openEmptySqliteTestStore,
@@ -10,6 +15,10 @@ import {
   readSqliteDeltaLog,
 } from './test-support.js';
 import { SqliteWorkspaceRepository } from './workspace-repository.js';
+import {
+  describeServerRecordImportContract,
+  describeServerRecordStoreContract,
+} from '../../ports/contracts/server-records.contract.js';
 import { describeSpaceExtensionContract } from '../../ports/contracts/space-extension.contract.js';
 import { describeSpaceLogsContract } from '../../ports/contracts/space-logs.contract.js';
 import { describeSpaceNodesContract } from '../../ports/contracts/space-nodes.contract.js';
@@ -19,7 +28,6 @@ import { describeSpaceWriteContract } from '../../ports/contracts/space-write.co
 import { describeStructuredStoreContract } from '../../ports/contracts/structured-store.contract.js';
 import { describeWorkspaceRepositoryContract } from '../../ports/contracts/workspace-repository.contract.js';
 
-import type { SqliteStructuredStore } from './structured-store.js';
 import type { NodeContent } from '../../../canvas/persistence-types.js';
 
 function note(nodeId: string, label: string, content: string): NodeContent {
@@ -88,12 +96,26 @@ describeSpaceNodesContract('SQLite', async () => {
   const canvasId = 'sqlite-nodes-contract';
   await createOrdinarySpace(harness.store, canvasId, 'SQLite Nodes Contract');
   const space = harness.store.space(canvasId);
+  const reopened: SqliteStoreContext[] = [];
   return {
     repository: space.nodes,
     missingRepository: harness.store.space('sqlite-nodes-missing').nodes,
     expectedCanvasId: canvasId,
     deletedNodePut: 'allowed',
-    cleanup: harness.cleanup,
+    space,
+    // A second connection to the same file, as a restarted Server has.
+    reopen: () => {
+      harness.closeConnection();
+      const context = new SqliteStoreContext(harness.filename);
+      reopened.push(context);
+      context.init();
+      context.useWorkspace(harness.workspaceId);
+      return new SqliteStructuredStore(context).space(canvasId).nodes;
+    },
+    cleanup: async () => {
+      for (const context of reopened.splice(0)) context.close();
+      await harness.cleanup();
+    },
   };
 });
 
@@ -211,6 +233,43 @@ describeWorkspaceRepositoryContract('SQLite', async () => {
   return {
     repository,
     create: (name: string) => repository.create(name),
+    cleanup: () => {
+      context.close();
+      file.remove();
+    },
+  };
+});
+
+describeServerRecordStoreContract('SQLite', async () => {
+  const file = createSqliteTestFile('huabu-sqlite-server-records-contract-');
+  const contexts = [new SqliteStoreContext(file.filename)];
+  const open = async () => {
+    const context = contexts.at(-1)!;
+    const store = new SqliteServerRecordStore(context);
+    await store.init();
+    return store;
+  };
+  return {
+    store: await open(),
+    reopen: async () => {
+      contexts.push(new SqliteStoreContext(file.filename));
+      return open();
+    },
+    cleanup: () => {
+      for (const context of contexts) context.close();
+      file.remove();
+    },
+  };
+});
+
+describeServerRecordImportContract('SQLite', async () => {
+  const file = createSqliteTestFile('huabu-sqlite-server-records-import-');
+  const context = new SqliteStoreContext(file.filename);
+  const store = new SqliteServerRecordStore(context);
+  await store.init();
+  return {
+    store,
+    holdsRecords: async () => sqliteDatabaseHoldsServerRecords(file.filename),
     cleanup: () => {
       context.close();
       file.remove();

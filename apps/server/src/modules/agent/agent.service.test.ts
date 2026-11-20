@@ -103,7 +103,7 @@ vi.mock('@earendil-works/pi-agent-core', () => {
 });
 
 vi.mock('./llm.js', () => ({
-  getLLMModel: () => ({ id: 'mock-model' }),
+  getLLMModel: async () => ({ id: 'mock-model' }),
   ensureApiKey: () => 'mock-key',
   resolveModelForRoleAsync,
   resolveModelByIdAsync,
@@ -112,7 +112,7 @@ vi.mock('./llm.js', () => ({
 
 vi.mock('./tools/index.js', () => ({
   buildToolsForScope: () => [],
-  buildAgentToolsByNames: vi.fn(() => []),
+  buildAgentToolsByNames: vi.fn(async () => []),
 }));
 
 // Deterministic per-turn render: one user message, no canvas / I/O.
@@ -405,7 +405,7 @@ describe('runAgent Ink model requirements', () => {
       id: 'default-vision',
       input: ['text', 'image'],
     });
-    vi.mocked(buildAgentToolsByNames).mockImplementation((names) =>
+    vi.mocked(buildAgentToolsByNames).mockImplementation(async (names) =>
       names.includes('report_ink_intent')
         ? [
             {
@@ -459,7 +459,7 @@ describe('runAgent Ink model requirements', () => {
           .mock.calls.some(([names]) => names.includes('report_ink_intent')),
       ).toBe(false);
     } finally {
-      vi.mocked(buildAgentToolsByNames).mockImplementation(() => []);
+      vi.mocked(buildAgentToolsByNames).mockImplementation(async () => []);
       await agenetes.close(threadId);
     }
   });

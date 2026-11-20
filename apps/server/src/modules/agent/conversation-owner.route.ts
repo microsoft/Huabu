@@ -338,7 +338,13 @@ const conversationOwnerRoutes: FastifyPluginAsync = async (fastify) => {
       })();
     };
     const unsubscribe = subscribeCanvasUpdates(canvasId, (event) => {
-      if (!nodeId || event.type === 'snapshot') return refresh();
+      // A rename changes what the owner shows without touching a node.
+      if (
+        !nodeId ||
+        event.type === 'snapshot' ||
+        (event.type === 'update' && event.data.title !== undefined)
+      )
+        return refresh();
       if (event.type === 'invalidate') {
         if (!event.data.nodeIds || event.data.nodeIds.includes(nodeId))
           refresh();
@@ -348,13 +354,7 @@ const conversationOwnerRoutes: FastifyPluginAsync = async (fastify) => {
           event.data.threadId === threadId ||
           pendingEffects.deletedNodeIds.includes(nodeId) ||
           pendingEffects.contentEditedNodeIds.includes(nodeId) ||
-          pendingEffects.mutatedNodes.some(
-            (node) =>
-              typeof node === 'object' &&
-              node !== null &&
-              'id' in node &&
-              node.id === nodeId,
-          )
+          pendingEffects.mutatedNodeIds.includes(nodeId)
         )
           refresh();
       }

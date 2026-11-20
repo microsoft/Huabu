@@ -71,9 +71,7 @@ test('queues, removes, pauses and resumes through the real composer', async ({
       ownerCanvasId: '',
       conversationView: null,
     };
-    canvas
-      .getState()
-      ._setStateNoAutosave({ canvasId: '', nodes: [], edges: [] });
+    canvas.getState()._setStateRaw({ canvasId: '', nodes: [], edges: [] });
     useChatStore
       .getState()
       .setAgentBinding(session.threadId, { kind: 'internal' });

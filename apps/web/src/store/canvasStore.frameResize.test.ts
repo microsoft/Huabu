@@ -17,7 +17,7 @@ import type { Node } from '@xyflow/react';
 
 afterEach(() => {
   endSnapSession();
-  useCanvasStore.getState()._setStateNoAutosave({ nodes: [], edges: [] });
+  useCanvasStore.getState()._setStateRaw({ nodes: [], edges: [] });
 });
 
 describe('Frame resize React Flow measurement boundary', () => {
@@ -43,7 +43,7 @@ describe('Frame resize React Flow measurement boundary', () => {
         })),
       ];
       const initial = projectAffectedFrameGeometry(nodes, ['frame']).nodes;
-      useCanvasStore.getState()._setStateNoAutosave({
+      useCanvasStore.getState()._setStateRaw({
         nodes: initial,
         edges: [],
       });
@@ -95,7 +95,7 @@ describe('Frame resize React Flow measurement boundary', () => {
       data: {},
       style: { width: 400 },
     };
-    useCanvasStore.getState()._setStateNoAutosave({
+    useCanvasStore.getState()._setStateRaw({
       nodes: [frame, question],
       edges: [],
     });
@@ -122,9 +122,7 @@ describe('Frame resize React Flow measurement boundary', () => {
       style: { width: 579.38, height: 722.34 },
       measured: { width: 579.38, height: 722.34 },
     };
-    useCanvasStore
-      .getState()
-      ._setStateNoAutosave({ nodes: [frame], edges: [] });
+    useCanvasStore.getState()._setStateRaw({ nodes: [frame], edges: [] });
     const before = useCanvasStore.getState();
     before.onNodesChange([
       {
@@ -159,7 +157,7 @@ describe('Frame resize React Flow measurement boundary', () => {
       position: { x: 0, y: 0 },
       data: {},
     };
-    before._setStateNoAutosave({ nodes: [frame, note], edges: [] });
+    before._setStateRaw({ nodes: [frame, note], edges: [] });
     before.onNodesChange([
       {
         type: 'dimensions',
@@ -188,7 +186,7 @@ describe('Frame resize React Flow measurement boundary', () => {
       style: { width: 360, height: 240 },
       measured: { width: 360, height: 240 },
     }));
-    useCanvasStore.getState()._setStateNoAutosave({ nodes, edges: [] });
+    useCanvasStore.getState()._setStateRaw({ nodes, edges: [] });
     beginSnapSession({
       nodes,
       gestureIds: new Set(['question']),
@@ -229,7 +227,7 @@ describe('Frame resize React Flow measurement boundary', () => {
       style: { width: 360 },
       measured: { width: 360, height: 120 },
     };
-    useCanvasStore.getState()._setStateNoAutosave({
+    useCanvasStore.getState()._setStateRaw({
       nodes: [question],
       edges: [],
     });
@@ -271,7 +269,7 @@ describe('Frame resize React Flow measurement boundary', () => {
       data: {},
       style: { width: 400 - index * 40, height: 400 - index * 84 },
     }));
-    useCanvasStore.getState()._setStateNoAutosave({ nodes, edges: [] });
+    useCanvasStore.getState()._setStateRaw({ nodes, edges: [] });
     useCanvasStore.getState().onNodesChange([
       {
         type: 'dimensions',
@@ -310,7 +308,7 @@ describe('Frame resize React Flow measurement boundary', () => {
         data: {},
       },
     ];
-    useCanvasStore.getState()._setStateNoAutosave({ nodes, edges: [] });
+    useCanvasStore.getState()._setStateRaw({ nodes, edges: [] });
     beginSnapSession({
       nodes,
       gestureIds: new Set(['inner']),
@@ -325,7 +323,7 @@ describe('Frame resize React Flow measurement boundary', () => {
       },
     });
     applyResizeProposal({ x: -30, y: 14, width: 350, height: 250 }, 1);
-    useCanvasStore.getState()._setStateNoAutosave({
+    useCanvasStore.getState()._setStateRaw({
       nodes: [{ ...nodes[0], position: { x: 50, y: 50 } }, nodes[1]],
     });
     useCanvasStore.getState().onNodesChange([

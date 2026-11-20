@@ -454,7 +454,7 @@ export async function* runAgent(
         )
       : () => undefined;
   const turnTools = isCanvasIntent(envelope?.user?.inputKind)
-    ? buildAgentToolsByNames(['report_ink_intent'], {
+    ? await buildAgentToolsByNames(['report_ink_intent'], {
         canvasId,
         origin,
         threadId: deploymentThreadId,

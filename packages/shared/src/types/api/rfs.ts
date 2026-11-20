@@ -33,6 +33,7 @@
 import { z } from 'zod';
 
 import { inkIntentReportSchema } from './agent.js';
+import { recentCanvasConversationParamsSchema } from './canvas.js';
 import { CANVAS_NODE_TYPES } from '../canvas/node.js';
 
 export const RFS_SKILL_CLIENT_HEADER = 'X-Huabu-Skill-Client';
@@ -142,20 +143,32 @@ export const RFS_HEADERS = {
   locked: 'X-Huabu-Locked',
   /** `X-Huabu-Node-Edges` — `{"parents":[…],"children":[…]}` JSON string. */
   edges: 'X-Huabu-Node-Edges',
+  /**
+   * `X-Huabu-Basis` — the Space's read version. On a node download it is the
+   * version the metadata was read at; on an execute request it quotes one back.
+   */
+  basis: 'X-Huabu-Basis',
+  /** `X-Huabu-Operation-Id` — the request id of an execute request. */
+  operationId: 'X-Huabu-Operation-Id',
 } as const;
 
 // ==================== Upload ====================
 
+export const rfsUploadParamsSchema =
+  recentCanvasConversationParamsSchema.extend({
+    '*': z.string().min(1).max(4096),
+  });
+export type RfsUploadParams = z.infer<typeof rfsUploadParamsSchema>;
+
 /** Success body for `POST /api/rfs/:canvasId/upload/<file>`. */
-export interface RfsUploadResponse {
-  /**
-   * Canvas-relative path where the bytes were staged, e.g. `upload/out.md`.
-   * This is the path the internal agent reads when asked to consume the file.
-   */
-  path: string;
-  /** Number of bytes written. */
-  size: number;
-}
+export const rfsUploadResponseSchema = z
+  .object({
+    /** Canvas-relative staging path, e.g. `upload/out.md`. */
+    path: z.string(),
+    size: z.number().int().nonnegative(),
+  })
+  .strict();
+export type RfsUploadResponse = z.infer<typeof rfsUploadResponseSchema>;
 
 // ==================== ask-agent ====================
 
@@ -240,6 +253,10 @@ export const rfsExecuteHeadersSchema = z
       .max(200)
       .regex(/^[a-zA-Z0-9_-]+$/)
       .optional(),
+    /** Same meaning as the body's `operationId`; the two must agree. */
+    'x-huabu-operation-id': z.uuid().optional(),
+    /** Same meaning as the body's `basis`; the two must agree. */
+    'x-huabu-basis': z.string().min(1).max(128).optional(),
   })
   .passthrough();
 

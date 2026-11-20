@@ -22,6 +22,7 @@ import type { CanvasNodeType } from '@huabu/shared';
 const TEXT_NODE_TYPES: ReadonlySet<string> = new Set([
   'web',
   'pdf',
+  'office',
   'note',
   'text',
   'question',

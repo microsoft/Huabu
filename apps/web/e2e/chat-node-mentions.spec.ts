@@ -45,7 +45,7 @@ test.beforeEach(async ({ page }) => {
       }>,
       import(loaded('/src/store/chatStore.ts')) as Promise<typeof ChatStore>,
     ]);
-    canvas.getState()._setStateNoAutosave({
+    canvas.getState()._setStateRaw({
       canvasId: 'mentions-canvas',
       nodes: [
         { id: 'frame', type: 'frame', data: { label: 'Herdr' } },
@@ -209,7 +209,7 @@ test('large mention lists keep DOM bounded and preserve scrolling, wrapping and 
     const { default: canvas } = (await import(path)) as {
       default: typeof CanvasStore;
     };
-    canvas.getState()._setStateNoAutosave({
+    canvas.getState()._setStateRaw({
       nodes: Array.from({ length: 2000 }, (_, index) => ({
         id: `large-${index}`,
         type: 'note',

@@ -28,6 +28,7 @@ const harness = vi.hoisted(() => ({
   previewResizeGeometry: vi.fn(),
   setNodeGeometry: vi.fn(),
   onNodeResizeStart: vi.fn(),
+  closePointerGesture: vi.fn(),
 }));
 
 vi.mock('@/store/canvasStore', () => ({

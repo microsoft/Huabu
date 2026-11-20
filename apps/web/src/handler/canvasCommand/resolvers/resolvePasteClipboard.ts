@@ -16,6 +16,8 @@ import {
   pdfNoteIds,
   generateNextLabel,
   resolveHeightMode,
+  readLayoutOrder,
+  remapLayoutOrder,
 } from '@huabu/shared/canvas-engine';
 
 import { canvasSizeFromStyle, resolveFrameAtPoint } from '../utils';
@@ -109,6 +111,10 @@ export default function resolvePasteClipboard(
 
     // Clone data.
     const clonedData = JSON.parse(JSON.stringify(node.data ?? {}));
+    const layoutOrder =
+      nodeType === 'frame' ? readLayoutOrder(node.data) : undefined;
+    if (layoutOrder)
+      clonedData.layoutOrder = remapLayoutOrder(layoutOrder, idMap);
     if (typeof clonedData.noteNodeId === 'string') {
       const mapped = idMap.get(clonedData.noteNodeId);
       if (!mapped) throw new Error('The copied PDF is missing its owned Note');

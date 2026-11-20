@@ -228,24 +228,20 @@ describe('opening storage', () => {
     expect(() => getStorage()).not.toThrow();
   });
 
-  it('closes the blob store a failed structured init leaves open', async () => {
+  it('builds no blob store when the database cannot be reached', async () => {
     releases.push(await prepareAzureTestEnvironment());
     setEnv('HUABU_POSTGRES_URL', UNREACHABLE_POSTGRES);
     const built = captureAzureStores();
 
     await expect(initStorage(POSTGRES_AZURE)).rejects.toThrow(/ECONNREFUSED/);
 
-    expect(built).toHaveLength(1);
-    // "closed", not "not initialized": the store was opened and then closed.
-    // A blob store left open is a handle nothing else in the process can
-    // reach, because composition cleared the only reference to it.
-    expect(() => built[0].assertOpen()).toThrow(/Azure blob store is closed/);
-    // And it stays closed. This is what awaiting both settlements buys: an
-    // init still in flight when composition gave up would resolve afterwards
-    // and mark the closed store open again, since `init()` checks for closure
-    // before its await rather than after it.
+    // Server records open first, before any store is built, so that their
+    // import reads the database as it was; an unreachable database fails
+    // there. No blob store exists to be left open, and none appears later
+    // from an init still in flight.
+    expect(built).toHaveLength(0);
     await sleep(750);
-    expect(() => built[0].assertOpen()).toThrow(/Azure blob store is closed/);
+    expect(built).toHaveLength(0);
   });
 
   it('leaves no session behind when a blob failure outruns the structured init', async () => {

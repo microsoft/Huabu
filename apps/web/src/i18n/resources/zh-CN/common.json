@@ -722,11 +722,13 @@
     "signInIntro": "使用你的组织账户打开你的 Space。",
     "continueWith": "使用 {{provider}} 继续",
     "signingIn": "正在登录…",
+    "verifyingSession": "正在验证登录状态…",
     "signInFailed": "登录失败：{{message}}",
     "noSignInMethods": "此服务器尚未配置浏览器登录。请联系管理员添加带有客户端 ID 的 Auth0 或 Entra ID 登录方式。",
     "crossOriginUnsupported": "浏览器登录要求 Web 应用与服务器位于同一来源。此构建指向其他来源的服务器（VITE_API_BASE）；请从同一来源提供两者后再登录。",
     "noAccessTitle": "暂无访问权限",
     "noAccessIntro": "你已以 {{name}} 的身份登录，但该账户尚不能使用 {{appName}}。请联系管理员授予访问权限。",
+    "noAccessHowTo": "管理员可以为你开通：在 {{appName}} 中打开“设置\u00a0→\u00a0成员”，找到此账号并打开“服务访问权限”。你已登录过，所以已经出现在该列表中。开通后此页面会自动进入 {{appName}}。",
     "signOut": "退出登录",
     "signOutAs": "退出登录（{{name}}）",
     "deniedIntro": "该账户无法使用 {{appName}}。请退出登录后使用其他账户。",
@@ -761,7 +763,11 @@
     "create": "创建",
     "current": "当前",
     "named": "工作区：{{workspace}}",
-    "namedPrefix": "工作区："
+    "rename": "重命名",
+    "renameLabel": "重命名工作区“{{workspace}}”",
+    "renameSave": "保存",
+    "renameCancel": "取消重命名",
+    "renameFailed": "无法重命名工作区，请重试。"
   },
   "spaceHierarchy": {
     "deleteFromContainer": "请从 Home 或父 Space 中删除此 Space。",
@@ -1157,6 +1163,7 @@
     "emptyFrame": "此框架中没有子节点。",
     "multiDragSameParentOnly": "请选择同一父级的图层后一起移动。",
     "invalidFrameDrop": "无法将这些图层移到此目标。请确认框架仍存在、未被锁定，且不在选中的图层内部。",
+    "invalidReorderSelection": "无法调整这些图层的顺序。请只选择同一容器内、未被锁定的图层。",
     "filterLabels": {
       "fileReference": "文件引用",
       "note": "笔记",
@@ -1741,21 +1748,57 @@
       "closeShortcuts": "关闭快捷键对话框"
     }
   },
+  "canvasSync": {
+    "changeRejected": "有一项修改未能应用，因为该内容已在别处被更改。当前空间已显示最新版本。",
+    "unsynced": "你的修改尚未同步，正在重试…",
+    "sendFailed": "部分修改未能发送到服务器。",
+    "keepTrying": "继续重试",
+    "reloadAndDiscard": "重新加载并放弃未发送的修改",
+    "reloadWaiting": "此空间有更新的修改。{{notes}}中未保存的文字保存后，将显示这些修改。",
+    "savingTextBeforeReload": "正在保存笔记文字，然后重新加载…",
+    "unsavedTextConfirm": "{{notes}}中的文字未能保存。重新加载会一并放弃这些文字。如需保留，请取消并先复制出来。",
+    "cancelDiscard": "取消",
+    "discardTextAndReload": "放弃这些文字并重新加载",
+    "reloadedDiscarded": "此空间已重新加载，未能发送的修改已放弃。",
+    "deletedWhileEditing": "{{name}}在你编辑时已在别处被删除。在你结束编辑前它会保留在这里，你输入的内容不再保存。",
+    "deletedElsewhere": "{{name}}已在别处被删除，并已从此空间移除。",
+    "copyMyText": "复制我的文字",
+    "noteName": "“{{name}}”",
+    "untitledNote": "未命名笔记",
+    "noteSeparator": "、",
+    "notesAndMore": "{{notes}}等另外 {{count}} 条"
+  },
+  "canvasGesture": {
+    "lockedGroup": "选中的节点里有锁定的，无法组合到框架中。",
+    "locked": "此处已锁定或位于锁定的框架内，未做任何更改。请解锁后重试。",
+    "refused": "此操作无法在这里完成，未做任何更改。"
+  },
+  "canvasPresence": {
+    "anotherDevice": "其他设备",
+    "editing": "{{label}} · 正在编辑",
+    "moving": "{{label}} · 正在移动",
+    "editLocked": "{{label}}正在编辑此内容，对方完成后你才能编辑。"
+  },
   "errors": {
-    "connectAnAgent": "连接 Agent",
-    "conversationAgentUnconfigured": "请连接外部 Agent，或使用 Built-In Pi 开始新对话。",
+    "configureModel": "配置模型",
+    "connectDevice": "连接设备",
+    "conversationAgentUnconfigured": "要开始对话，请为 Built-In Pi 配置模型，或连接装有外部 Agent 的设备。",
     "nodeSaveFailed": "无法保存「{{name}}」。你的修改仍保留在此，请重试。",
     "rateLimited": "请求过于频繁，请在 {{seconds}} 秒后重试。",
-    "spaceSaveAccessDenied": "你的账户对这个空间只有只读权限。修改未保存。",
-    "useBuiltInPi": "使用 Built-In Pi"
+    "spaceSaveAccessDenied": "你的账户对这个空间只有只读权限。修改未保存。"
   },
   "people": {
     "loading": "正在加载成员…",
     "loadFailed": "无法加载成员。",
     "saveFailed": "无法保存更改。",
     "intro": "谁可以使用此 Huabu，以及能打开哪些工作区。成员首次登录后会出现在这里。更改在其下一次请求时生效。",
-    "administrator": "管理员",
-    "access": "访问权限",
+    "serviceAccess": "服务访问权限",
+    "accessVsWorkspace": "服务访问权限决定某人能否使用此 Huabu；开通后没有工作区的人会获得一个个人工作区。将某人添加到工作区不会开通服务访问权限，加入后默认是查看者，可改为编辑者或所有者。",
+    "status": {
+      "administrator": "管理员",
+      "admitted": "已开通",
+      "waiting": "等待开通"
+    },
     "roleIn": "在 {{workspace}} 中的角色",
     "removeRole": "从此工作区移除",
     "addToWorkspace": "添加到工作区…",

@@ -8,8 +8,8 @@
  * this is NOT a debounced queue — it accumulates every event the UI
  * produces and is drained by *external* triggers:
  *
- *   1. Autosave piggy-back — `saveCanvas` calls {@link CanvasEventBuffer.flush}
- *      after a successful PUT so events ride the 1s structure cadence.
+ *   1. Send-queue piggy-back — the store calls {@link CanvasEventBuffer.flush}
+ *      whenever the queue of structure edits has drained.
  *   2. Pre-agent flush     — exposed as the store action
  *      `flushCanvasEvents` so agent requests see the latest log.
  *   3. Page unload         — the `beforeunload` listener fires

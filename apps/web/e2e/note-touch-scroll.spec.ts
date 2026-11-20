@@ -12,6 +12,7 @@ import {
   readScreenshotPixels,
   scaleOf,
   touchTap,
+  personEdits,
 } from './helpers';
 
 async function openScrollableNote(page: Page) {
@@ -20,7 +21,7 @@ async function openScrollableNote(page: Page) {
   const canvasId = page.url().split('/canvas/')[1]?.split(/[?#]/)[0];
   const response = await page.request.post(`/api/canvas/${canvasId}/execute`, {
     data: {
-      commands: [
+      edits: personEdits([
         {
           type: 'CREATE_NODES',
           nodes: [
@@ -35,8 +36,7 @@ async function openScrollableNote(page: Page) {
             },
           ],
         },
-      ],
-      originator: { source: 'agent', threadId: 'e2e-touch-reading' },
+      ]),
     },
   });
   expect(response.ok(), await response.text()).toBe(true);

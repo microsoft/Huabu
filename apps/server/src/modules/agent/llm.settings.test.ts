@@ -43,8 +43,8 @@ describe('LLM provider catalog', () => {
     });
   });
 
-  it('includes the current GPT-5.6 family for OpenAI Codex', () => {
-    const models = getModelsForProvider('openai-codex');
+  it('includes the current GPT-5.6 family for OpenAI Codex', async () => {
+    const models = await getModelsForProvider('openai-codex');
     const ids = models.map((model) => model.id);
 
     expect(ids).toEqual(
@@ -59,8 +59,8 @@ describe('LLM provider catalog', () => {
     });
   });
 
-  it('surfaces cost and context window for built-in models', () => {
-    const models = getModelsForProvider('openai');
+  it('surfaces cost and context window for built-in models', async () => {
+    const models = await getModelsForProvider('openai');
     expect(models.length).toBeGreaterThan(0);
 
     // At least one real (non-synthesized) model carries pricing +
@@ -75,8 +75,8 @@ describe('LLM provider catalog', () => {
     expect(priced!.contextWindow).toBeGreaterThan(0);
   });
 
-  it('surfaces reasoning-effort and service-tier capability for built-in models', () => {
-    const models = getModelsForProvider('openai');
+  it('surfaces reasoning-effort and service-tier capability for built-in models', async () => {
+    const models = await getModelsForProvider('openai');
 
     // Reasoning-capable models expose their supported effort levels; the
     // list never contains the internal `off` sentinel.

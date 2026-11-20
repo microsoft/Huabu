@@ -21,12 +21,14 @@
  *    file → node mapping and `label` / `rev` come from the on-disk sidecar
  *    (the canonical source); type / src / locked / edges come from
  *    structural state. All of it is serialised into the `X-Huabu-*`
- *    response headers (label percent-encoded, edges as JSON).
+ *    response headers (label percent-encoded, edges as JSON), together with
+ *    the Space's read version (`X-Huabu-Basis`).
  */
 
 import path from 'node:path';
 
 import {
+  encodeBasis,
   RFS_HEADERS,
   type RfsNodeEdges,
   type RfsNodeMeta,
@@ -77,6 +79,8 @@ export function resolveReadable(
 export interface RfsNodeLookup {
   meta: RfsNodeMeta;
   edges: RfsNodeEdges;
+  /** Read version of the Space this metadata was taken at. */
+  basis: string;
 }
 
 /** Canvas-relative regex for a node markdown file. */
@@ -103,8 +107,10 @@ export async function lookupNodeByPath(
   if (!NODE_FILE_RE.test(physicalRel)) return null;
 
   const handle = space(canvasId);
+  // Taken before the read, so it is never newer than what is described.
+  const stamps = await handle.save.stamps();
   const canvas = await handle.read();
-  if (!canvas) return null;
+  if (!canvas || !stamps) return null;
 
   const nodeId = handle.diskTree?.nodeIdForPath(physicalRel) ?? null;
   if (!nodeId) return null;
@@ -147,7 +153,11 @@ export async function lookupNodeByPath(
       .map((e) => e.target),
   };
 
-  return { meta, edges };
+  return {
+    meta,
+    edges,
+    basis: encodeBasis(stamps.lineage, stamps.version),
+  };
 }
 
 /**
@@ -161,6 +171,7 @@ export function rfsMetaHeaders(lookup: RfsNodeLookup): Record<string, string> {
     [RFS_HEADERS.nodeId]: meta.id,
     [RFS_HEADERS.nodeType]: meta.type,
     [RFS_HEADERS.edges]: JSON.stringify(edges),
+    [RFS_HEADERS.basis]: lookup.basis,
   };
   if (meta.label !== undefined) {
     headers[RFS_HEADERS.nodeLabel] = encodeURIComponent(meta.label);

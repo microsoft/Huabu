@@ -10,7 +10,15 @@ import { measureNoteHeightOffscreen } from '@/components/Nodes/shared/height/mea
 import { canvasHistoryManager } from './canvasHistoryManager';
 import useCanvasStore from './canvasStore';
 
+import type * as canvasApi from '../api';
 import type { Node } from '@xyflow/react';
+
+// These tests are about the page's own state; the edits it sends are never
+// answered, so nothing reaches the network.
+vi.mock('../api', async (importOriginal) => ({
+  ...(await importOriginal<typeof canvasApi>()),
+  postCanvasExecute: vi.fn(() => new Promise<never>(() => {})),
+}));
 
 vi.mock('@/components/Nodes/shared/height/measure/offscreenMeasurer', () => ({
   measureNoteHeightOffscreen: vi.fn(),
@@ -28,13 +36,11 @@ beforeEach(() => {
   vi.useFakeTimers();
   measure.mockReset();
   canvasHistoryManager.activate('height-test', true);
-  useCanvasStore.getState()._setStateNoAutosave({
+  useCanvasStore.getState()._setStateRaw({
     canvasId: 'height-test',
     nodes: [note()],
     edges: [],
     isLoading: false,
-    isSaving: false,
-    pendingSave: false,
   });
 });
 afterEach(() => {
@@ -58,7 +64,7 @@ describe('store Note height toggle', () => {
 
   it('does not replay the old width when a fixed Note resizes during measurement', async () => {
     measure.mockImplementation(async () => {
-      useCanvasStore.getState()._setStateNoAutosave({ nodes: [note(800)] });
+      useCanvasStore.getState()._setStateRaw({ nodes: [note(800)] });
       return { height: 120, provisional: false };
     });
     useCanvasStore.getState().setNoteHeightMode(['n1'], 'auto');
@@ -73,7 +79,7 @@ describe('store Note height toggle', () => {
     measure.mockImplementation(async () => {
       useCanvasStore
         .getState()
-        ._setStateNoAutosave({ canvasId: 'other-canvas', nodes: [note()] });
+        ._setStateRaw({ canvasId: 'other-canvas', nodes: [note()] });
       return { height: 120, provisional: false };
     });
     useCanvasStore.getState().setNoteHeightMode(['n1'], 'auto');

@@ -23,6 +23,18 @@ import type { Node } from '@xyflow/react';
 
 type Cmd = Extract<CanvasCommand, { type: 'MERGE_NODE_DATA' }>;
 
+const STYLE_LEAF_PREFIX = 'style.';
+
+/** The keys an `unset` list removes, as a patch that names them. */
+function unsetAsPatch(unset: readonly string[]): Record<string, unknown> {
+  return Object.fromEntries(
+    unset.map((key) => [
+      key.startsWith(STYLE_LEAF_PREFIX) ? 'style' : key,
+      null,
+    ]),
+  );
+}
+
 const mergeNodeData: CommandDefinition<Cmd> = {
   meta: {
     snapshot: 'yes',
@@ -48,6 +60,26 @@ const mergeNodeData: CommandDefinition<Cmd> = {
       const node = state.nodes.find(
         (candidate) => candidate.id === entry.nodeId,
       );
+      if (entry.unset?.length) {
+        // A page's way to state a removal; an agent clears with `null`
+        // and may not send one (`commandScope.ts`).
+        if (!entry.unset.every((key) => typeof key === 'string' && key))
+          return noop(state, 'invalid-target');
+        // A removal is admitted like a write of the same key.
+        const removed = unsetAsPatch(entry.unset);
+        if (
+          node?.type === 'fileReference' &&
+          ['content', 'src', 'fileReference'].some((key) => key in removed)
+        )
+          return noop(state, 'invalid-target');
+        if (
+          node?.type === 'question' &&
+          (hasAgentNodeOwnedData(removed) ||
+            (node.data.bindingState === 'bound' &&
+              changesAgentNodePreparation(node.data, removed)))
+        )
+          return noop(state, 'invalid-target');
+      }
       if (
         node &&
         'noteNodeId' in entry.patch &&
@@ -78,6 +110,11 @@ const mergeNodeData: CommandDefinition<Cmd> = {
         return noop(state, 'invalid-target');
     }
 
+    const unsetMap = new Map(
+      cmd.patches.flatMap((p) =>
+        p.unset?.length ? [[p.nodeId as string, p.unset] as const] : [],
+      ),
+    );
     // Every node whose data we actually patched, plus any parent frame
     // whose child label changed. The engine doesn't filter by watched
     // fields — the server's preprocessing dispatcher does that against
@@ -139,6 +176,20 @@ const mergeNodeData: CommandDefinition<Cmd> = {
           };
         }
         // `null` is the explicit clear-all signal.
+      }
+      for (const key of unsetMap.get(n.id) ?? []) {
+        if (!key.startsWith(STYLE_LEAF_PREFIX)) {
+          delete mergedData[key];
+          continue;
+        }
+        const style = mergedData.style;
+        if (!style || typeof style !== 'object') continue;
+        const { [key.slice(STYLE_LEAF_PREFIX.length)]: _removed, ...rest } =
+          style as Record<string, unknown>;
+        void _removed;
+        // An emptied bag is dropped, as on a node that never had one.
+        if (Object.keys(rest).length > 0) mergedData.style = rest;
+        else delete mergedData.style;
       }
 
       const updated: Node = {

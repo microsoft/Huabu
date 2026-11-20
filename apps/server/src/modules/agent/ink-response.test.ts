@@ -162,7 +162,7 @@ describe('agent-authored Ink response verification', () => {
           },
         ],
         pendingEffects: {
-          mutatedNodes: [],
+          mutatedNodeIds: [],
           deletedNodeIds: [],
           contentEditedNodeIds: [],
           deferredFitFrameIds: [],

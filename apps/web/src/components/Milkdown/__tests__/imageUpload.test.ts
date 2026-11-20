@@ -122,7 +122,8 @@ describe('image src resolution (nodeView)', () => {
       (src) => `https://cdn.test/${src}`,
     );
 
-    const img = root.querySelector('img');
+    // ProseMirror may add its own empty separator <img> next to inline nodes.
+    const img = root.querySelector('img:not(.ProseMirror-separator)');
     expect(img?.getAttribute('src')).toBe('https://cdn.test/art_abc.png');
     expect(img?.getAttribute('alt')).toBe('alt text');
 

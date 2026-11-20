@@ -22,12 +22,15 @@ describe('persisted device names', () => {
     rmSync(dataDir, { recursive: true, force: true });
   });
 
-  it('persists independent names by exact identity across subsequent reads', () => {
-    expect(getDeviceNames()).toEqual({});
-    renameDevice('windows', 'Office PC');
-    renameDevice('wsl', 'Linux');
-    renameDevice('windows', '  Desktop  ');
-    expect(getDeviceNames()).toEqual({ windows: 'Desktop', wsl: 'Linux' });
+  it('persists independent names by exact identity across subsequent reads', async () => {
+    expect(await getDeviceNames()).toEqual({});
+    await renameDevice('windows', 'Office PC');
+    await renameDevice('wsl', 'Linux');
+    await renameDevice('windows', '  Desktop  ');
+    expect(await getDeviceNames()).toEqual({
+      windows: 'Desktop',
+      wsl: 'Linux',
+    });
     expect(
       JSON.parse(
         readFileSync(join(dataDir, 'agentlet-device-names.json'), 'utf8'),
@@ -40,11 +43,11 @@ describe('persisted device names', () => {
 
   it.each(['{broken', 'null', '{"windows":""}'])(
     'refuses to overwrite damaged storage: %s',
-    (content) => {
+    async (content) => {
       const path = join(dataDir, 'agentlet-device-names.json');
       writeFileSync(path, content);
-      expect(() => getDeviceNames()).toThrow();
-      expect(() => renameDevice('windows', 'New')).toThrow();
+      await expect(getDeviceNames()).rejects.toThrow();
+      await expect(renameDevice('windows', 'New')).rejects.toThrow();
       expect(readFileSync(path, 'utf8')).toBe(content);
     },
   );

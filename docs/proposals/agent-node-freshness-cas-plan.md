@@ -379,12 +379,22 @@ into the one writer.
      machines both creating the same node) is also caught. Omitting `expectRev`
      skips the check (backward-compatible / non-CAS callers).
    - **Client** ([`nodeContentQueue.ts`](../../apps/web/src/store/canvasStore/save/nodeContentQueue.ts)):
-     a per-node baseline map, seeded on `loadCanvas` and on
-     `applyDeltasFromAgent` (for the nodes a broadcast actually applied) and
-     advanced to the server-returned `rev` after every successful write.
-     **Co-delivery invariant** — content and its baseline always update through
-     the same payload/store-write, so there is no window where they diverge and
-     a false conflict becomes structurally impossible. On `NODE_CONTENT_CONFLICT`
+     a per-node baseline map, set on `loadCanvas` and on
+     `applyServerDeltas` (for the nodes whose content a broadcast changed)
+     and advanced to the server-returned `rev` after every successful write.
+     **Co-delivery** — content and its baseline update through the same
+     payload/store-write, and the baseline is always a revision the server
+     computed from the stored record: a load carries `nodeContentRevisions`,
+     a write's own response carries `rev`, and a broadcast `update` (and the
+     `execute` response a page applies) carries `nodeContentRevisions` for
+     the nodes whose content the batch created or changed, read back from
+     storage after the commit. The page no longer hashes the node in a batch
+     to get a baseline; before this, false conflicts from that path had
+     occurred and were fixed case by case. An update that names no revision
+     for a changed node (an older server) is handled as another page's save
+     of that node, by a fetch. See
+     [canvas-realtime-sync.md](../architecture/canvas-realtime-sync.md#where-a-baseline-comes-from)
+     for the rule and its fallback. On `NODE_CONTENT_CONFLICT`
      the queue keeps the user's text, stops writing (never clobbers the newer
      server content), and shows a one-per-node persistent "reload" toast.
    - **Note**: `nodeRevision` covers authored `content` / `src` only, so this

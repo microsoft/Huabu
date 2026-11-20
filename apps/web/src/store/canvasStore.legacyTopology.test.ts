@@ -3,10 +3,11 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { stripLegacyPortalTopology } from '@huabu/shared';
+
 const api = vi.hoisted(() => ({
   getCanvas: vi.fn(),
-  putCanvas: vi.fn(),
-  deleteNode: vi.fn(),
+  postCanvasExecute: vi.fn(),
 }));
 
 vi.mock('../api', async (importOriginal) => ({
@@ -14,15 +15,33 @@ vi.mock('../api', async (importOriginal) => ({
   ...api,
 }));
 
+/** Node ids this page asked the server to delete (through `execute`). */
+function sentDeletions(): string[] {
+  return api.postCanvasExecute.mock.calls.flatMap(([, request]) =>
+    (
+      (request as PostCanvasExecuteRequest).edits.flatMap(
+        (edit) => edit.commands,
+      ) as Array<{
+        type: string;
+        nodeIds?: string[];
+      }>
+    ).flatMap((command) =>
+      command.type === 'DELETE_NODES' ? (command.nodeIds ?? []) : [],
+    ),
+  );
+}
+
 import { useAcpProfilesStore } from './acpProfilesStore';
 import { canvasHistoryManager } from './canvasHistoryManager';
 import useCanvasStore from './canvasStore';
 import { useChatStore } from './chatStore';
-import { CanvasConflictError } from '../api';
+import { ApiError } from '../api/_client';
+import { createFakeSpaceServer } from './canvasStore/sync/testing/fakeExecuteServer';
 import { usePreviewWorkspaceStore } from './previewWorkspace/store';
 import * as notifications from '../components/Common/Toast';
 
 import type * as canvasApi from '../api';
+import type { PostCanvasExecuteRequest } from '@huabu/shared';
 import type { Edge, Node } from '@xyflow/react';
 
 function storedGraph(): { nodes: Node[]; edges: Edge[] } {
@@ -93,14 +112,12 @@ beforeEach(() => {
   vi.useFakeTimers();
   vi.clearAllMocks();
   canvasHistoryManager.activate('canvas-loaded', true);
-  useCanvasStore.getState()._setStateNoAutosave({
+  useCanvasStore.getState()._setStateRaw({
     canvasId: '',
     nodes: [],
     edges: [],
     version: 0,
     isLoading: false,
-    isSaving: false,
-    pendingSave: false,
   });
 });
 
@@ -157,7 +174,7 @@ describe('legacy topology load boundary', () => {
     });
   });
 
-  it('saves legacy Hug headers before completing load and does not save again on reopen', async () => {
+  it('sends legacy Hug headers as geometry commands before completing load and not again on reopen', async () => {
     const graph = storedGraph();
     graph.nodes[3].data.sizing = 'hug';
     const before = JSON.stringify(graph);
@@ -167,32 +184,59 @@ describe('legacy topology load boundary', () => {
       version: 9,
       state: graph,
     });
-    let acknowledge!: (value: { version: number }) => void;
-    api.putCanvas.mockImplementationOnce(
-      () =>
+    // The server as it stores the Space once it has read it: without the
+    // retired topology. It runs the commands with the real engine.
+    const kept = stripLegacyPortalTopology(graph.nodes, graph.edges);
+    const server = createFakeSpaceServer();
+    server.reset(kept.nodes as Node[], kept.edges as Edge[], 9);
+    let acknowledge!: () => void;
+    api.postCanvasExecute.mockImplementationOnce(
+      (canvasId: string, request: PostCanvasExecuteRequest) =>
         new Promise((resolve) => {
-          acknowledge = resolve;
+          acknowledge = () => {
+            const response = server.execute(canvasId, request);
+            api.getCanvas.mockResolvedValue({
+              canvasId: 'canvas-loaded',
+              title: 'Loaded',
+              version: response.toVersion,
+              state: {
+                nodes: server.state.nodes,
+                edges: server.state.edges,
+              },
+            });
+            resolve(response);
+          };
         }),
     );
     const loading = useCanvasStore.getState().loadCanvas('canvas-loaded');
     await vi.advanceTimersByTimeAsync(0);
-    expect(api.putCanvas).toHaveBeenCalledOnce();
+    expect(api.postCanvasExecute).toHaveBeenCalledOnce();
+    // Nothing is shown until the server has taken the change.
     expect(useCanvasStore.getState()).toMatchObject({
       isLoading: true,
       nodes: [],
       version: 0,
     });
-    const saved = api.putCanvas.mock.calls[0][1];
-    expect(saved.version).toBe(9);
-    expect(
-      saved.state.nodes.find((node: Node) => node.id === 'note'),
-    ).toMatchObject({
-      position: { y: 64 },
-    });
-    expect(
-      saved.state.nodes.find((node: Node) => node.id === 'note').data,
-    ).not.toHaveProperty('content');
-    acknowledge({ version: 10 });
+    const sent = api.postCanvasExecute.mock.calls[0][1];
+    // Sent as this page, and as one edit: the header shift is all or nothing.
+    expect(sent.originator).toEqual({ tabId: expect.stringMatching(/.+/) });
+    expect(sent.edits).toHaveLength(1);
+    expect(sent.edits[0].commands).toEqual([
+      {
+        type: 'SET_NODE_GEOMETRY',
+        items: expect.arrayContaining([
+          expect.objectContaining({
+            nodeId: 'note',
+            position: expect.objectContaining({ y: 64 }),
+          }),
+          expect.objectContaining({
+            nodeId: 'frame',
+            position: expect.objectContaining({ y: 180 }),
+          }),
+        ]),
+      },
+    ]);
+    acknowledge();
     await loading;
     await vi.advanceTimersByTimeAsync(2000);
     const loaded = useCanvasStore.getState();
@@ -204,30 +248,20 @@ describe('legacy topology load boundary', () => {
     );
     expect(loaded.version).toBe(10);
     expect(loaded.isLoading).toBe(false);
-    expect(api.putCanvas).toHaveBeenCalledOnce();
+    expect(api.postCanvasExecute).toHaveBeenCalledOnce();
     expect(JSON.stringify(graph)).toBe(before);
 
-    api.getCanvas.mockResolvedValue({
-      canvasId: 'canvas-loaded',
-      title: 'Loaded',
-      version: 10,
-      state: { nodes: loaded.nodes, edges: loaded.edges },
-    });
     await useCanvasStore.getState().loadCanvas('canvas-loaded');
     await vi.advanceTimersByTimeAsync(2000);
-    expect(api.putCanvas).toHaveBeenCalledOnce();
+    expect(api.postCanvasExecute).toHaveBeenCalledOnce();
   });
 
   it.each([
     new Error('Network unavailable'),
     new Error('Thread thread-existing has no canonical execution record'),
-    new CanvasConflictError({
-      code: 'CANVAS_VERSION_CONFLICT',
-      message: 'Changed elsewhere',
-      serverVersion: 10,
-    }),
+    new ApiError(403, { message: 'Read only' }, 'Read only'),
   ])(
-    'loads the original geometry without retries or duplicate notifications when header saving fails: %s',
+    'loads the original geometry without retries or duplicate notifications when the header change is refused: %s',
     async (error) => {
       const graph = storedGraph();
       graph.nodes[3].data.sizing = 'hug';
@@ -237,7 +271,7 @@ describe('legacy topology load boundary', () => {
         version: 9,
         state: graph,
       });
-      api.putCanvas.mockRejectedValue(error);
+      api.postCanvasExecute.mockRejectedValue(error);
       const consoleWarn = vi
         .spyOn(console, 'warn')
         .mockImplementation(() => {});
@@ -259,11 +293,12 @@ describe('legacy topology load boundary', () => {
           data: { content: 'Keep this note' },
         });
         expect(loaded.edges).toEqual([graph.edges[1]]);
-        expect(api.putCanvas).toHaveBeenCalledOnce();
+        expect(api.postCanvasExecute).toHaveBeenCalledOnce();
+        expect(api.getCanvas).toHaveBeenCalledOnce();
         await useCanvasStore.getState().loadCanvas('canvas-loaded');
         await vi.advanceTimersByTimeAsync(2000);
         expect(useCanvasStore.getState().isLoading).toBe(false);
-        expect(api.putCanvas).toHaveBeenCalledTimes(2);
+        expect(api.postCanvasExecute).toHaveBeenCalledTimes(2);
         expect(notify).not.toHaveBeenCalled();
       } finally {
         consoleWarn.mockRestore();
@@ -309,14 +344,11 @@ describe('legacy topology load boundary', () => {
     expect(loaded.version).toBe(9);
     expect(JSON.stringify(graph)).toBe(before);
     expect(localStorage.getItem('legacy-topology-fixture')).toBe(before);
-    expect(api.putCanvas).not.toHaveBeenCalled();
-    expect(api.deleteNode).not.toHaveBeenCalled();
+    expect(sentDeletions()).toEqual([]);
   });
 
   it('pastes surviving ordinary content and Space previews through the store entry', () => {
-    useCanvasStore
-      .getState()
-      ._setStateNoAutosave({ canvasId: 'canvas-loaded' });
+    useCanvasStore.getState()._setStateRaw({ canvasId: 'canvas-loaded' });
     const graph = storedGraph();
     const before = JSON.stringify(graph);
     useCanvasStore
@@ -332,7 +364,7 @@ describe('legacy topology load boundary', () => {
     expect(pasted.nodes[1].parentId).toBe(pasted.nodes[0].id);
     expect(pasted.edges).toHaveLength(1);
     expect(JSON.stringify(graph)).toBe(before);
-    expect(api.deleteNode).not.toHaveBeenCalled();
+    expect(sentDeletions()).toEqual([]);
   });
 
   it('drops stale preview tabs after a matching load without losing unbound chats', async () => {

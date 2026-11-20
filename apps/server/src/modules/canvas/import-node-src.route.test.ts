@@ -8,7 +8,13 @@ import { join } from 'node:path';
 import fastify from 'fastify';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { editsPerCommand } from '@huabu/shared';
+
 import canvasRoutes from './canvas.route.js';
+import {
+  AGENT_CREDENTIAL,
+  registerTestAgentCredential,
+} from '../../test-support/agent-credential.js';
 import { resetPreprocessDispatcher } from '../preprocessing/index.js';
 import { createCanvas } from '../storage/compatibility/canvas.js';
 import { resetStorageCache, space } from '../storage/index.js';
@@ -49,15 +55,16 @@ describe('YouTube source import → real route preprocessing', () => {
       });
       vi.stubGlobal('fetch', fetchMock);
       const app = fastify();
+      registerTestAgentCredential(app);
       await app.register(canvasRoutes, { prefix: '/canvas' });
       await app.ready();
       try {
         const created = await app.inject({
           method: 'POST',
           url: '/canvas/c-youtube/execute',
+          headers: AGENT_CREDENTIAL,
           payload: {
-            originator: { source: 'agent' },
-            commands: [
+            edits: editsPerCommand([
               {
                 type: 'CREATE_NODES',
                 nodes: [
@@ -72,7 +79,7 @@ describe('YouTube source import → real route preprocessing', () => {
                   },
                 ],
               },
-            ],
+            ]),
           },
         });
         expect(created.statusCode).toBe(200);
@@ -80,14 +87,14 @@ describe('YouTube source import → real route preprocessing', () => {
           const merged = await app.inject({
             method: 'POST',
             url: '/canvas/c-youtube/execute',
+            headers: AGENT_CREDENTIAL,
             payload: {
-              originator: { source: 'agent' },
-              commands: [
+              edits: editsPerCommand([
                 {
                   type: 'MERGE_NODE_DATA',
                   patches: [{ nodeId: 'node-video', patch: { src } }],
                 },
-              ],
+              ]),
             },
           });
           expect(merged.statusCode).toBe(200);

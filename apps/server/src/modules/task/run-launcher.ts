@@ -86,7 +86,7 @@ async function drainInvocation(
 
 interface RunLauncherDependencies {
   repository: (canvasId: string) => SpaceTasks;
-  requireProfile: (profileId: string) => void;
+  requireProfile: (profileId: string) => Promise<void>;
   resolveRootPosition: (
     canvasId: string,
     anchorNodeId: string,
@@ -105,9 +105,7 @@ interface RunLauncherDependencies {
 
 const DEFAULT_DEPENDENCIES: RunLauncherDependencies = {
   repository: (canvasId) => getStructuredStore().space(canvasId).tasks,
-  requireProfile: (profileId) => {
-    requireAvailableAgentProfile(profileId);
-  },
+  requireProfile: (profileId) => requireAvailableAgentProfile(profileId),
   resolveRootPosition: resolveRootAgentPosition,
   createAgentNode: (input) => agentNodeService.create(input),
   invokeAgent: (options) => agentThreadService.invoke(options),
@@ -199,7 +197,7 @@ export class RunLauncher {
 
     const rootProfileId =
       parsed.data.rootProfileId ?? task.defaultRootProfileId;
-    this.requireProfile(rootProfileId);
+    await this.requireProfile(rootProfileId);
 
     const run: TaskRunRecord = {
       runId: createId('run'),
@@ -304,9 +302,9 @@ export class RunLauncher {
     return running;
   }
 
-  private requireProfile(profileId: string): void {
+  private async requireProfile(profileId: string): Promise<void> {
     try {
-      this.dependencies.requireProfile(profileId);
+      await this.dependencies.requireProfile(profileId);
     } catch (error) {
       if (error instanceof SelectableAgentProfileError) {
         throw new RunLaunchError(

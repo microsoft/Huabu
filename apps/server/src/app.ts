@@ -30,6 +30,7 @@ import {
   mountAgenetes,
   resolveDaemonRuntime,
 } from './modules/agent/acp/index.js';
+import { agentProfileRecordStore } from './modules/agent/acp/profile-registry-store.js';
 import { isCurrentReachback } from './modules/agent/acp/reachback-conversation.js';
 import { initializeAgentDefaults } from './modules/agent/agent-defaults.js';
 import agentDefaultsRoutes from './modules/agent/agent-defaults.route.js';
@@ -42,10 +43,12 @@ import artifactRoute from './modules/artifact/artifact.route.js';
 import canvasRoutes from './modules/canvas/canvas.route.js';
 import { resetExternalNoteSessions } from './modules/canvas/external-watcher.js';
 import externalNoteRoutes from './modules/canvas/external.route.js';
+import presenceRoutes from './modules/canvas/presence.route.js';
 import syncRoutes from './modules/canvas/sync.route.js';
 import {
   authenticateUserAgentlet,
-  canUseAgentlet,
+  connectedDeviceAccess,
+  readDeviceAccess,
 } from './modules/identity/agent-credentials.js';
 import { createIdentity, registerIdentity } from './modules/identity/index.js';
 import peopleRoutes from './modules/identity/people.route.js';
@@ -182,6 +185,7 @@ app.register(agentChangeReviewConfigRoutes, {
 app.register(canvasRoutes, { prefix: '/api/canvas' });
 app.register(externalNoteRoutes, { prefix: '/api/canvas' });
 app.register(syncRoutes, { prefix: '/api/canvas' });
+app.register(presenceRoutes, { prefix: '/api/canvas' });
 app.register(webRoutes, { prefix: '/api/web' });
 app.register(artifactRoute, { prefix: '/api/canvas' });
 
@@ -238,7 +242,10 @@ if (!daemonRuntime.artifacts.serviceSdkEntry) {
 }
 const agentletGateway = mountAgenetes(app, {
   connectionToken: getConnectionToken(),
-  canAccessAgentlet: canUseAgentlet,
+  // Placement only ever chooses among connected devices, whose owner the
+  // handshake already established, so it reads no storage.
+  canAccessAgentlet: (agentletId, requestedId) =>
+    connectedDeviceAccess().canUse(agentletId, requestedId),
   ...(identity.service.provider === 'bubble'
     ? {
         authenticate: authenticateUserAgentlet(identity.service),
@@ -248,7 +255,7 @@ const agentletGateway = mountAgenetes(app, {
   dataDir: getDataDir(),
   daemonEntryPath: daemonRuntime.artifacts.daemonEntry ?? '',
   bootstrapEnv: daemonRuntime.bootstrapEnv,
-  getMaxAgents: () => getExternalAgentRuntimeConfig().maxAgents,
+  getMaxAgents: async () => (await getExternalAgentRuntimeConfig()).maxAgents,
   // Host-namespaced env isolation: the agentlet daemon and every external
   // agent it spawns are host-agnostic and must receive their Huabu
   // coordinates only through explicit injection (per-agent reachback env),
@@ -260,13 +267,23 @@ const agentletGateway = mountAgenetes(app, {
   hostEnvPrefix: 'HUABU_',
   hostEnvAllowlist: [],
   profiles: {
-    storageDir: join(
-      getDataDir(),
+    store: agentProfileRecordStore(
       identity.service.provider === 'bubble'
         ? 'user-agent-profiles'
         : 'agent-profiles',
     ),
-    canAccess: (profile) => canUseAgentlet(profile.agentletId),
+    // Profiles name devices that may be offline: read ownership once per
+    // registry operation. Only Bubble restricts devices to their owners;
+    // local mode has one person, who may use every device, so it reads none.
+    ...(identity.service.provider === 'bubble'
+      ? {
+          resolveAccess: async () => {
+            const access = await readDeviceAccess();
+            return (profile: { agentletId: string }) =>
+              access.canUse(profile.agentletId);
+          },
+        }
+      : {}),
     ...(identity.service.provider === 'local'
       ? { legacyStorageDir: join(getDataDir(), 'agent-team') }
       : {}),
@@ -276,7 +293,7 @@ const agentletGateway = mountAgenetes(app, {
 let unregisterHarnessDiscovery: (() => void) | undefined;
 app.addHook('onReady', async () => {
   const registry = getAgentProfileRegistry();
-  if (registry) initializeAgentDefaults(registry.listProfiles());
+  if (registry) await initializeAgentDefaults(await registry.listProfiles());
   unregisterHarnessDiscovery = registerHarnessProfileDiscovery({
     gateway: agentletGateway,
     getRegistry: getAgentProfileRegistry,

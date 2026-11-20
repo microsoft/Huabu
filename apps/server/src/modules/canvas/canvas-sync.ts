@@ -10,33 +10,62 @@
  * route); every live SSE subscriber (`GET /:canvasId/sync/stream`)
  * receives the event and replays the deltas locally.
  *
- * ALL canvas writes broadcast — the out-of-band HTTP `/execute` route
- * (ACP / headless) AND the built-in / question-node agents that mutate
- * in-process via `executeOnServer` (C2). The chat SSE tool result no
- * longer applies canvas state, so the initiating tab is a plain receiver
- * that applies its own change once, from this broadcast. There is no
- * per-client echo filtering yet (`clientId` is deferred to P2, needed
- * only once user hand-edits also broadcast).
+ * ALL canvas writes broadcast — the HTTP `/execute` route (browser pages,
+ * ACP, headless callers) AND the built-in / question-node agents that
+ * mutate in-process via `executeOnServer`. The chat SSE tool result does
+ * not apply canvas state, so the initiating tab is a plain receiver. A
+ * page is not filtered out of the broadcast: it recognises the update for
+ * its own batch by `operationId`.
  */
 
 import { AsyncResource } from 'node:async_hooks';
 
+import { toWireDeltas, type Delta } from '@huabu/shared/canvas-engine';
+
 import type { CanvasSyncEvent } from '@huabu/shared';
 
-type Listener = (event: CanvasSyncEvent) => void;
+/**
+ * Who caused an event, for what a subscriber is told depends on it (see
+ * `eventForSubscriber` in `caller-principal.ts`). Never on the wire.
+ */
+export interface CanvasUpdateOrigin {
+  principalId: string;
+}
+
+type Listener = (event: CanvasSyncEvent, origin?: CanvasUpdateOrigin) => void;
 
 const listenersByCanvas = new Map<string, Set<Listener>>();
 
-/** Broadcast a sync event to every subscriber of `canvasId`. */
+/**
+ * Broadcast a sync event to every subscriber of `canvasId`.
+ *
+ * Nothing is kept for a page that is not listening. What such a page missed
+ * it learns from storage: the Space version for structure, and the node
+ * writes since its content position for content (`SpaceNodes.changes`).
+ */
 export function publishCanvasUpdate(
   canvasId: string,
   event: CanvasSyncEvent,
+  origin?: CanvasUpdateOrigin,
 ): void {
   const set = listenersByCanvas.get(canvasId);
   if (!set) return;
+  // The one place an update leaves the writer: whoever built it, its rows
+  // travel reduced to what changed, and a deletion as an id.
+  const sent: CanvasSyncEvent =
+    event.type === 'update'
+      ? {
+          ...event,
+          data: {
+            ...event.data,
+            deltas: toWireDeltas(event.data.deltas as Delta[]),
+          },
+        }
+      : event;
   for (const fn of set) {
     try {
-      fn(event);
+      if (origin) fn(sent, origin);
+      else fn(sent);
     } catch {
       /* ignore listener errors — one bad subscriber must not stall others */
     }

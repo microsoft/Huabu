@@ -99,7 +99,7 @@ export const resolveReachbackRuntimeEnvironment: NonNullable<
   );
   if (!env[REACHBACK_ENV_KEYS.url])
     throw new Error('Reachback server endpoint is unavailable');
-  if (spec.agentletId) requireOwnAgentlet(spec.agentletId);
+  if (spec.agentletId) await requireOwnAgentlet(spec.agentletId);
   const credentials = await agentReachbackEnvironment({
     agentletId: context.agentletId,
     env,

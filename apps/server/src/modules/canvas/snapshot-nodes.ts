@@ -16,10 +16,9 @@
  *      `parentId` and single-linkage clustered in flow space
  *      (200 px edge-to-edge). Cross-frame overlaps never merge —
  *      a frame is an explicit container in the user's mental model.
- *   3. Each cluster becomes ONE PNG: image members are drawn at
- *      their world-space rect as backdrop and sketch strokes are
- *      layered on top, all sharing one `viewBox` so the artifact
- *      preserves the on-canvas spatial relationships.
+ *   3. Each cluster becomes ONE PNG: images and sketches paint in
+ *      authoritative forest order, sharing one `viewBox`. Request
+ *      order does not change their stacking.
  *   4. A singleton image cluster short-circuits: instead of
  *      re-rastering, the node's existing artifact key is returned
  *      as-is (or a content-addressed downscaled copy when its
@@ -33,8 +32,8 @@
  *   - `audio` / `web` / `office` / `question` — no meaningful snapshot.
  *
  * Rendered cluster snapshots are **content-addressed**: the artifact
- * filename embeds a SHA-256 fingerprint of every member's geometry +
- * strokes + backdrop bytes, so re-snapshotting an unchanged input
+ * filename embeds a SHA-256 fingerprint of the rendered SVG, including
+ * geometry, strokes, image bytes and paint order, so unchanged input
  * returns the same `src` without writing a new file. This keeps
  * `.artifacts/` bounded under the chat-route auto-snapshot path that
  * runs on every send.
@@ -66,6 +65,7 @@ import {
   resolveAccent,
 } from '@huabu/shared';
 import {
+  assignNodeZIndices,
   getAbsolutePosition,
   getSketchRenderedSize,
 } from '@huabu/shared/canvas-engine';
@@ -155,6 +155,8 @@ interface ClusterRenderProfile {
   strokeColor?: string;
   scale?: number;
   minPixels?: number;
+  /** Explicit Canvas stacking; omitted for the legacy annotation/backdrop profile. */
+  paintOrder?: readonly string[];
 }
 
 // ─── Node `data` access (loose, defensive) ─────────────────────────────────
@@ -352,53 +354,6 @@ export function filterSketchStrokes(
   } as CanvasNode;
 }
 
-/**
- * SHA-256 fingerprint over the cluster's geometry + strokes plus any
- * backdrop image nodes composited under the strokes. Stable under
- * re-ordering of nodes (sort by id) but sensitive to any change in
- * position / size / stroke points / colour / thickness / backdrop
- * src — which is exactly what changes the rendered PNG. First 16 hex
- * chars (~64 bits of entropy) is plenty for per-canvas dedup.
- */
-function clusterFingerprint(
-  nodes: CanvasNode[],
-  contextImages: ContextImage[] = [],
-): string {
-  const sketches = nodes
-    .map((n) => {
-      const { width, height } = sketchEffectiveSize(n);
-      const data = getSketchData(n);
-      return {
-        id: n.id,
-        x: n.position?.x ?? 0,
-        y: n.position?.y ?? 0,
-        w: width,
-        h: height,
-        init: data?.initialSize ?? null,
-        strokes: (data?.strokes ?? []).map((s) => ({
-          c: s.color ?? null,
-          z: s.size ?? null,
-          p: s.points,
-        })),
-      };
-    })
-    .sort((a, b) => a.id.localeCompare(b.id));
-  const context = contextImages
-    .map((ci) => ({
-      id: ci.node.id,
-      src: ci.resolvedSrc,
-      x: ci.node.position?.x ?? 0,
-      y: ci.node.position?.y ?? 0,
-      w: ci.width,
-      h: ci.height,
-    }))
-    .sort((a, b) => a.id.localeCompare(b.id));
-  return createHash('sha256')
-    .update(JSON.stringify({ sketches, context }))
-    .digest('hex')
-    .slice(0, 16);
-}
-
 // ─── Image artifact MIME map ───────────────────────────────────────────────
 // Used by `maybeResizeImageArtifact` to wrap raw image bytes inside an
 // SVG `<image>` element for resvg-driven downscaling, and by
@@ -469,7 +424,8 @@ async function loadContextImage(
 /**
  * Build a complete SVG document from a cluster of sketch nodes,
  * optionally composited over backdrop image nodes the caller also
- * passed in.
+ * passed in. An explicit paintOrder instead interleaves image and sketch
+ * nodes in Canvas order; stroke order within each sketch is unchanged.
  *
  * Every stroke is transformed into **world coordinates** (i.e. each
  * point is multiplied by the node's `effectiveSize / initialSize` and
@@ -565,20 +521,18 @@ export function clusterToSvg(
   const pxW = Math.max(1, Math.round(vbW * scale));
   const pxH = Math.max(1, Math.round(vbH * scale));
 
-  const backdrops: string[] = [];
+  const layers = new Map<string, string[]>();
   for (const ci of contextImages) {
     if (ci.width <= 0 || ci.height <= 0) continue;
     const ix = ci.node.position?.x ?? 0;
     const iy = ci.node.position?.y ?? 0;
     const href = `data:${ci.mimeType};base64,${ci.bytes.toString('base64')}`;
-    backdrops.push(
+    layers.set(ci.node.id, [
       `<image x="${ix}" y="${iy}" width="${ci.width}" height="${ci.height}" ` +
         `preserveAspectRatio="xMidYMid meet" href="${href}" />`,
-    );
+    ]);
   }
 
-  const innerPaths: string[] = [];
-  let anyStrokes = false;
   for (const n of nodes) {
     const data = getSketchData(n);
     const strokes = data?.strokes ?? [];
@@ -591,6 +545,7 @@ export function clusterToSvg(
     const scaleY = init.height > 0 ? height / init.height : 1;
     const ox = n.position?.x ?? 0;
     const oy = n.position?.y ?? 0;
+    const innerPaths: string[] = [];
     for (const stroke of strokes) {
       const pts = stroke.points;
       if (!pts || pts.length === 0) continue;
@@ -609,10 +564,22 @@ export function clusterToSvg(
       const d = pointsToPathD(worldPoints, size);
       if (!d) continue;
       innerPaths.push(`<path d="${d}" fill="${escapeXml(fill)}" />`);
-      anyStrokes = true;
     }
+    if (innerPaths.length > 0) layers.set(n.id, innerPaths);
   }
-  if (!anyStrokes && backdrops.length === 0) return null;
+  if (layers.size === 0) return null;
+  const paintOrder = profile.paintOrder ?? [...layers.keys()];
+  const uniqueOrder = new Set(paintOrder);
+  if (
+    uniqueOrder.size !== paintOrder.length ||
+    [...layers.keys()].some((id) => !uniqueOrder.has(id))
+  ) {
+    throw new SnapshotNodeError(
+      'Snapshot paint order is incomplete or contains duplicate nodes.',
+      'invalid_snapshot_request',
+    );
+  }
+  const painted = paintOrder.flatMap((id) => layers.get(id) ?? []).join('');
 
   // White background under everything: matches the canvas surface
   // (and fills any object-contain letterbox around backdrops).
@@ -620,8 +587,7 @@ export function clusterToSvg(
     `<svg xmlns="http://www.w3.org/2000/svg" ` +
     `viewBox="${vbX} ${vbY} ${vbW} ${vbH}" width="${pxW}" height="${pxH}">` +
     `<rect x="${vbX}" y="${vbY}" width="${vbW}" height="${vbH}" fill="#ffffff" />` +
-    backdrops.join('') +
-    innerPaths.join('') +
+    painted +
     `</svg>`;
   return { svg, width: pxW, height: pxH };
 }
@@ -954,6 +920,7 @@ export async function snapshotNodesToArtifacts(
   const allNodes =
     preparedNodes ?? ((canvas?.state.nodes ?? []) as CanvasNode[]);
   const byId = new Map(allNodes.map((n) => [n.id, n] as const));
+  const paintIndices = assignNodeZIndices(allNodes);
 
   // Per-node stroke subset requested by the caller (partial-selection
   // snapshot). Keyed by node id; empty entries are dropped so a node
@@ -1052,6 +1019,17 @@ export async function snapshotNodesToArtifacts(
   const clusters = clusterByFrame(snapshottable);
 
   for (const cluster of clusters) {
+    cluster.sort((a, b) => {
+      const aIndex = paintIndices.get(a.node.id);
+      const bIndex = paintIndices.get(b.node.id);
+      if (aIndex === undefined || bIndex === undefined) {
+        throw new SnapshotNodeError(
+          'Snapshot node is missing from the forest.',
+          'invalid_snapshot_request',
+        );
+      }
+      return aIndex - bIndex;
+    });
     // ── Singleton image: pass-through (or maxPixels-resized copy) ──
     // Skipping the SVG raster here keeps the common "user asked
     // about one photo" case as cheap as a sidecar read + maybe one
@@ -1085,8 +1063,7 @@ export async function snapshotNodesToArtifacts(
       continue;
     }
 
-    // ── Composite cluster: render strokes over any loadable image
-    //    backdrops as a single content-addressed PNG. ──────────────
+    // Composite only requested members, preserving Canvas stacking.
     const sketchNodes: CanvasNode[] = [];
     const imageEntries: SnapshotEntry[] = [];
     for (const member of cluster) {
@@ -1118,7 +1095,9 @@ export async function snapshotNodesToArtifacts(
       }
     }
 
-    const built = clusterToSvg(sketchNodes, contextImages, maxEdge);
+    const built = clusterToSvg(sketchNodes, contextImages, maxEdge, {
+      paintOrder: cluster.map((entry) => entry.node.id),
+    });
     if (!built) {
       // Empty cluster — no strokes AND no loadable backdrops, or
       // every member has zero size. Nothing meaningful to emit.
@@ -1131,7 +1110,12 @@ export async function snapshotNodesToArtifacts(
       ...sketchNodes.map((n) => n.id),
       ...contextImages.map((ci) => ci.node.id),
     ];
-    const fingerprint = clusterFingerprint(sketchNodes, contextImages);
+    // Hash the actual ordered drawing, including embedded bytes, so a reorder
+    // or an image replacement cannot reuse pixels from a previous snapshot.
+    const fingerprint = createHash('sha256')
+      .update(built.svg)
+      .digest('hex')
+      .slice(0, 16);
     // `sketch-raster-<hash>-<edge>.png` — the prefix is kept for
     // historical compatibility with existing `.artifacts/` listings;
     // it now also covers image-only clusters that go through the

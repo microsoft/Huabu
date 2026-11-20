@@ -722,11 +722,13 @@
     "signInIntro": "Use your organization account to open your Spaces.",
     "continueWith": "Continue with {{provider}}",
     "signingIn": "Signing in…",
+    "verifyingSession": "Checking your session…",
     "signInFailed": "Sign-in failed: {{message}}",
     "noSignInMethods": "This server has no browser sign-in configured. Ask its administrator to add an Auth0 or Entra ID login with a client ID.",
     "crossOriginUnsupported": "Browser sign-in needs the web app and its Server on the same origin. This build points at a Server elsewhere (VITE_API_BASE); serve both from one origin to sign in.",
     "noAccessTitle": "No access yet",
     "noAccessIntro": "You are signed in as {{name}}, but this account cannot use {{appName}} yet. Ask an administrator to grant access.",
+    "noAccessHowTo": "An administrator can admit you: in {{appName}}, open Settings\u00a0→\u00a0People, find this account and turn on Service access. You already appear in that list because you have signed in. This page keeps checking and opens {{appName}} once access is on.",
     "signOut": "Sign out",
     "signOutAs": "Sign out ({{name}})",
     "deniedIntro": "This account cannot use {{appName}}. Sign out to use another account.",
@@ -761,7 +763,11 @@
     "create": "Create",
     "current": "Current",
     "named": "Workspace: {{workspace}}",
-    "namedPrefix": "Workspace: "
+    "rename": "Rename",
+    "renameLabel": "Rename Workspace “{{workspace}}”",
+    "renameSave": "Save",
+    "renameCancel": "Cancel rename",
+    "renameFailed": "Could not rename the Workspace. Please try again."
   },
   "spaceHierarchy": {
     "deleteFromContainer": "Delete this Space from Home or its parent Space.",
@@ -1157,6 +1163,7 @@
     "emptyFrame": "This frame has no child nodes.",
     "multiDragSameParentOnly": "Select layers from the same parent to move them together.",
     "invalidFrameDrop": "These layers cannot be moved to this destination. Check that the frame is available, unlocked, and not inside a selected layer.",
+    "invalidReorderSelection": "These layers cannot be reordered together. Select unlocked layers in the same container.",
     "filterLabels": {
       "fileReference": "File Reference",
       "note": "Note",
@@ -1741,21 +1748,57 @@
       "closeShortcuts": "Close the shortcuts dialog"
     }
   },
+  "canvasSync": {
+    "changeRejected": "A change could not be applied because the item was changed elsewhere. This Space now shows the latest version.",
+    "unsynced": "Your changes are not synced yet. Trying again…",
+    "sendFailed": "Some changes could not be sent to the server.",
+    "keepTrying": "Keep trying",
+    "reloadAndDiscard": "Reload and discard unsent changes",
+    "reloadWaiting": "This Space has newer changes. They will be shown once the unsaved text in {{notes}} has been saved.",
+    "savingTextBeforeReload": "Saving note text before reloading…",
+    "unsavedTextConfirm": "Text in {{notes}} could not be saved. Reloading will discard that text as well. Cancel to keep it and copy it out first.",
+    "cancelDiscard": "Cancel",
+    "discardTextAndReload": "Discard this text and reload",
+    "reloadedDiscarded": "This Space was reloaded. The changes that could not be sent were discarded.",
+    "deletedWhileEditing": "{{name}} was deleted elsewhere while you are editing it. It stays here until you finish, and what you type is no longer saved.",
+    "deletedElsewhere": "{{name}} was deleted elsewhere and has been removed from this Space.",
+    "copyMyText": "Copy my text",
+    "noteName": "“{{name}}”",
+    "untitledNote": "an untitled note",
+    "noteSeparator": ", ",
+    "notesAndMore": "{{notes}} and {{count}} more"
+  },
+  "canvasGesture": {
+    "lockedGroup": "The selection contains a locked node, so it cannot be grouped into a frame.",
+    "locked": "This is locked or inside a locked frame, so nothing was changed. Unlock it and try again.",
+    "refused": "This action could not be applied here. Nothing was changed."
+  },
+  "canvasPresence": {
+    "anotherDevice": "Another device",
+    "editing": "{{label}} · editing",
+    "moving": "{{label}} · moving",
+    "editLocked": "{{label}} is editing this. You can edit it when they finish."
+  },
   "errors": {
-    "connectAnAgent": "Connect an Agent",
-    "conversationAgentUnconfigured": "Connect an external Agent or use Built-In Pi to start a new conversation.",
+    "configureModel": "Configure model",
+    "connectDevice": "Connect device",
+    "conversationAgentUnconfigured": "To start a conversation, configure a model for Built-In Pi or connect a device with an external Agent.",
     "nodeSaveFailed": "Could not save \"{{name}}\". Your changes are still here; try again.",
     "rateLimited": "Too many requests. Try again in {{seconds}} seconds.",
-    "spaceSaveAccessDenied": "This Space is read-only for your account. Your changes were not saved.",
-    "useBuiltInPi": "Use Built-In Pi"
+    "spaceSaveAccessDenied": "This Space is read-only for your account. Your changes were not saved."
   },
   "people": {
     "loading": "Loading people…",
     "loadFailed": "Could not load people.",
     "saveFailed": "Could not save the change.",
     "intro": "Who may use this Huabu, and which Workspaces they can open. People appear here after they first sign in. Changes apply on their next request.",
-    "administrator": "Administrator",
-    "access": "Access",
+    "serviceAccess": "Service access",
+    "accessVsWorkspace": "Service access lets someone use this Huabu; anyone admitted without a Workspace gets a personal one. Adding someone to a Workspace does not turn on Service access, and they join it as a Viewer until you choose Editor or Owner.",
+    "status": {
+      "administrator": "Administrator",
+      "admitted": "Has access",
+      "waiting": "Waiting for access"
+    },
     "roleIn": "Role in {{workspace}}",
     "removeRole": "Remove from this Workspace",
     "addToWorkspace": "Add to a Workspace…",

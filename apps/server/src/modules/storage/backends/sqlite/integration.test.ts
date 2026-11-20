@@ -10,6 +10,7 @@ import { extractCanvasChanges } from '@huabu/shared/canvas-engine';
 import {
   applySqliteMigrations,
   SqliteStoreContext,
+  SQLITE_MIGRATIONS,
   SQLITE_SCHEMA_VERSION,
 } from './database.js';
 import { SqliteStructuredStore } from './structured-store.js';
@@ -30,6 +31,7 @@ import type {
 import type { NodeSnapshot } from '../../ports/structured.js';
 import type { TaskRecord } from '@huabu/shared';
 import type { CanvasNode } from '@huabu/shared/canvas-engine';
+import type { DatabaseSync } from 'node:sqlite';
 
 const cleanups: Array<() => Promise<void> | void> = [];
 
@@ -265,6 +267,43 @@ describe('SqliteStructuredStore lifecycle and schema', () => {
     });
   });
 
+  it('orders node writes in a database upgraded from v1, leaving its existing nodes at the start', async () => {
+    const file = trackedFile('huabu-sqlite-v1-changes-');
+    const fixtureSql = readFileSync(
+      new URL('./fixtures/v1.sql', import.meta.url),
+      'utf8',
+    );
+    withTestDatabase(file.filename, (database) => database.exec(fixtureSql));
+
+    const store = await reopenWithWorkspace(file.filename);
+    const { nodes } = store.space('fixture-space');
+    const start = await nodes.changes();
+    expect(start.position.seq).toBe(0);
+    // Nothing was written since the upgrade: the node that was already
+    // there is not named.
+    expect((await nodes.changes(start.position)).nodeIds).toEqual([]);
+
+    const put = await nodes.put({
+      nodeId: 'added-node',
+      record: {
+        nodeId: 'added-node',
+        type: 'note',
+        label: 'Added',
+        content: 'after the upgrade',
+      },
+    });
+    expect(put.ok).toBe(true);
+    const after = await nodes.changes(start.position);
+    expect(after.nodeIds).toEqual(['added-node']);
+    expect(after.position).toEqual({ epoch: start.position.epoch, seq: 1 });
+    // Exactly the writes after a position, and none at it.
+    expect((await nodes.changes(after.position)).nodeIds).toEqual([]);
+    // A position ahead of the counter belongs to some other history.
+    expect(
+      (await nodes.changes({ epoch: start.position.epoch, seq: 99 })).nodeIds,
+    ).toBeNull();
+  });
+
   it('opens the immutable v1 SQL fixture without rewriting its records', async () => {
     const file = trackedFile('huabu-sqlite-v1-fixture-');
     const fixtureSql = readFileSync(
@@ -324,6 +363,73 @@ describe('SqliteStructuredStore lifecycle and schema', () => {
         originator: { source: 'system' },
       },
     ]);
+  });
+
+  it('reaches the pinned v4 schema from a fresh database and from a v2 database', () => {
+    // `fixtures/v4-schema.json` is every table and index of the released
+    // schema, as SQLite records it. A fresh database and one upgraded from
+    // v2 must both arrive at exactly that.
+    const pinned: unknown = JSON.parse(
+      readFileSync(
+        new URL('./fixtures/v4-schema.json', import.meta.url),
+        'utf8',
+      ),
+    );
+    const schemaOf = (database: DatabaseSync) => ({
+      version: database.prepare('PRAGMA user_version').get()?.['user_version'],
+      objects: database
+        .prepare(
+          `SELECT type, name, tbl_name, sql FROM sqlite_schema
+           WHERE name NOT LIKE 'sqlite_%'
+           ORDER BY type, name`,
+        )
+        .all()
+        .map((row) => ({ ...row })),
+      // Column order and defaults, which the recorded SQL of an altered
+      // table states only implicitly.
+      columns: ['spaces', 'nodes'].map((table) =>
+        database
+          .prepare(`PRAGMA table_xinfo(${table})`)
+          .all()
+          .map((row) => ({ ...row })),
+      ),
+    });
+
+    const fresh = trackedFile('huabu-sqlite-v3-fresh-');
+    const upgraded = trackedFile('huabu-sqlite-v3-from-v2-');
+    const freshSchema = withTestDatabase(fresh.filename, (database) => {
+      applySqliteMigrations(database);
+      return schemaOf(database);
+    });
+    const upgradedSchema = withTestDatabase(upgraded.filename, (database) => {
+      applySqliteMigrations(database, SQLITE_MIGRATIONS.slice(0, 2));
+      database.exec(`
+        INSERT INTO workspaces VALUES ('w', 'W', 1, 1, NULL);
+        INSERT INTO spaces (workspace_id, canvas_id, title, collision_key, version, created_at, updated_at, state_json)
+          VALUES ('w', 's', 'S', 's', 3, 1, 1, '{}');
+        INSERT INTO nodes VALUES ('s', 'n', '{}', 'r', 'n');
+      `);
+      applySqliteMigrations(database);
+      expect(database.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
+      expect(
+        database
+          .prepare('SELECT canvas_id, version, node_change_seq FROM spaces')
+          .all()
+          .map((row) => ({ ...row })),
+      ).toEqual([{ canvas_id: 's', version: 3, node_change_seq: 0 }]);
+      expect(
+        database
+          .prepare('SELECT node_id, change_seq FROM nodes')
+          .all()
+          .map((row) => ({ ...row })),
+      ).toEqual([{ node_id: 'n', change_seq: 0 }]);
+      return schemaOf(database);
+    });
+
+    expect(freshSchema.version).toBe(4);
+    expect(SQLITE_SCHEMA_VERSION).toBe(4);
+    expect(freshSchema.objects).toEqual(pinned);
+    expect(upgradedSchema).toEqual(freshSchema);
   });
 
   it('rejects a database whose user_version is from the future', async () => {

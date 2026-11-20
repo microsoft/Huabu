@@ -7,8 +7,14 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
+import type { IdentityService } from './service.js';
+
 const gateway = vi.hoisted(() => ({
-  agentlets: [] as Array<{ agentletId: string; disconnect: () => void }>,
+  agentlets: [] as Array<{
+    agentletId: string;
+    metadata: Record<string, unknown>;
+    disconnect: () => void;
+  }>,
 }));
 
 vi.mock('@agenetes/agentlet-host', () => ({
@@ -18,7 +24,10 @@ vi.mock('@agenetes/agentlet-host', () => ({
   }),
 }));
 
-const { resetAgentCredentials } = await import('./agent-credentials.js');
+const { authenticateUserAgentlet, disconnectAgentlets, ownDeviceCredential } =
+  await import('./agent-credentials.js');
+const { openPersonalSettings, useCaller } =
+  await import('./personal-settings.js');
 
 let dataDir: string;
 
@@ -37,20 +46,41 @@ afterEach(() => {
   rmSync(dataDir, { recursive: true, force: true });
 });
 
-it('disconnects a device whose admitted handshake registers just after a reset', async () => {
-  const live = { agentletId: 'alice-device', disconnect: vi.fn() };
-  const late = { agentletId: 'alice-device', disconnect: vi.fn() };
-  const bob = { agentletId: 'bob-device', disconnect: vi.fn() };
-  gateway.agentlets = [live, bob];
+it('disconnects a device whose admitted handshake registers just after a revocation', async () => {
+  vi.stubEnv('HUABU_CONNECTION_TOKEN', 'test-host-credential');
+  const alice = {
+    member: true,
+    principal: { principalId: 'alice' },
+    access: null,
+  } as never;
+  const service = {
+    provider: 'bubble',
+    resolvePrincipal: async () => alice,
+  } as unknown as IdentityService;
+  const token = await openPersonalSettings(async () => {
+    useCaller(alice);
+    return ownDeviceCredential();
+  });
+  const bob = {
+    agentletId: 'bob-device',
+    metadata: { principalId: 'bob' },
+    disconnect: vi.fn(),
+  };
+  const late = {
+    agentletId: 'alice-device',
+    metadata: { principalId: 'alice' },
+    disconnect: vi.fn(),
+  };
+  gateway.agentlets = [bob];
 
-  resetAgentCredentials('alice');
-  expect(live.disconnect).toHaveBeenCalledOnce();
-  // The Gateway registers a handshake authenticated before the reset only
-  // once its authentication resolves, which is after the first sweep.
-  await Promise.resolve();
-  gateway.agentlets = [late, bob];
+  // The Gateway registers what an admission decided right after it
+  // resolves. Land the revocation in between: after the decision, before
+  // the connection is registered, where its own sweep cannot see it.
+  await authenticateUserAgentlet(service)('alice-device', token).then(() => {
+    disconnectAgentlets('alice', 'Device owner is not admitted');
+    gateway.agentlets = [late, bob];
+  });
   expect(late.disconnect).not.toHaveBeenCalled();
-
   await new Promise((resolve) => setImmediate(resolve));
   expect(late.disconnect).toHaveBeenCalledOnce();
   expect(bob.disconnect).not.toHaveBeenCalled();

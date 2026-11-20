@@ -38,6 +38,12 @@
 
 import type { StorageHealth } from './common.js';
 import type {
+  SaveResult,
+  SpaceSave,
+  StampAuthor,
+  StoredSaveResult,
+} from './save.js';
+import type {
   CanvasEvent,
   CanvasFile,
   DeltaLogEntry,
@@ -242,6 +248,16 @@ export interface SpaceHandle {
    * to neither of them.
    */
   write(input: SpaceWriteInput): Promise<SpaceWriteResult>;
+  /**
+   * Result records and version stamps kept alongside {@link write}.
+   *
+   * A member rather than more methods on the handle because it is a part the
+   * Space holds — what was answered, and when each node last moved — with its
+   * own reads. Writing them is {@link write}'s business: a result record is
+   * stored by passing `result` to the write it describes, and stamps advance
+   * inside every write, so neither can drift from the state they describe.
+   */
+  readonly save: SpaceSave;
   /** Complete node records, addressed by stable id. */
   readonly nodes: SpaceNodes;
   /** Agent-proposed changes awaiting review, per thread. */
@@ -333,9 +349,21 @@ export type SpaceSubstrate =
 // ─── The ordered Space write ─────────────────────────────────────────────────
 
 export type SpaceWriteResult =
-  | { ok: true }
+  | {
+      ok: true;
+      /**
+       * The stored Review list of each thread named in `input.reviews`, after
+       * coalescing — exactly what `changes.read` now returns for it.
+       */
+      reviews?: Record<string, CanvasChangeRecord[]>;
+    }
   | { ok: false; reason: 'not-found' }
-  | { ok: false; reason: 'version-conflict'; actualVersion: number };
+  | { ok: false; reason: 'version-conflict'; actualVersion: number }
+  /**
+   * `input.result` named a request already stored with the same digest.
+   * Nothing was written; `stored` is the answer given the first time.
+   */
+  | { ok: false; reason: 'result-exists'; stored: StoredSaveResult };
 
 export type SpaceNodeMutation =
   | {
@@ -400,6 +428,42 @@ export interface SpaceWriteInput {
    * Omitted or false means an absent Space returns `not-found`.
    */
   readonly allowCreate?: boolean;
+  /**
+   * Result record to store in the same commit as this write.
+   *
+   * The one exception to "no idempotent retry" above. When the key is already
+   * stored the write does nothing: the same digest returns `result-exists`
+   * with the stored answer, a different digest rejects with
+   * `SaveIdReusedError`. Otherwise the record lands atomically with the node
+   * mutations, the Space record and the delta — on every backend, including
+   * across process termination. Not valid together with `allowCreate`.
+   */
+  readonly result?: SaveResult;
+  /**
+   * Review records to fold into their threads' pending lists in the same
+   * commit as this write.
+   *
+   * Coalesced with what each thread already holds, exactly as
+   * {@link SpaceChanges.append} does, and returned in the result. They land
+   * with the record or not at all: a rejected write, a write answered from a
+   * stored result, and a failed write all leave every list untouched. Not
+   * valid together with `allowCreate`.
+   */
+  readonly reviews?: readonly SpaceWriteReview[];
+  /**
+   * The browser page this write comes from, for the node stamps it advances:
+   * a node this write creates or re-parents is stamped as changed by
+   * `author.by`, so a later write of the same page is not refused for a
+   * change that page made itself (see `ports/save.ts`). Omitted, the stamps
+   * name nobody. Has no effect on a Space without a stamp baseline.
+   */
+  readonly author?: StampAuthor;
+}
+
+/** One thread's new Review records, carried by a {@link SpaceWriteInput}. */
+export interface SpaceWriteReview {
+  readonly threadId: string;
+  readonly records: readonly CanvasChangeRecord[];
 }
 
 // ─── History ────────────────────────────────────────────────────────────────
@@ -533,6 +597,35 @@ export type NodePutResult =
 export type NodeDeleteResult = 'deleted' | 'absent';
 
 /**
+ * A point in one Space's sequence of node writes.
+ *
+ * Persisted, so it means the same after a restart. `epoch` names the
+ * sequence (the backend kind and the Space's lineage); `seq` orders writes
+ * within it. A caller stores both and hands them back unchanged; it never
+ * compares the `seq` of two epochs or computes with it.
+ */
+export interface NodeChangePosition {
+  readonly epoch: string;
+  readonly seq: number;
+}
+
+export interface NodeChanges {
+  /**
+   * Where the sequence stood when this was read. Every node write that
+   * completes after the read is reported by a later
+   * {@link SpaceNodes.changes} call given this position.
+   */
+  readonly position: NodeChangePosition;
+  /**
+   * The nodes that exist and were written since the position given. `null`
+   * when no position was given, or when it belongs to another sequence and
+   * so cannot be compared — the caller then knows nothing about what
+   * changed.
+   */
+  readonly nodeIds: readonly string[] | null;
+}
+
+/**
  * Complete node-record persistence for one Space.
  *
  * Revisions are opaque full-record storage tokens, distinct from any public
@@ -622,6 +715,27 @@ export interface SpaceNodes {
   ): Promise<Map<string, NodeSnapshot>>;
   put(input: NodePutInput): Promise<NodePutResult>;
   delete(nodeId: string): Promise<NodeDeleteResult>;
+  /**
+   * Which nodes were written since `since`, without reading any record.
+   *
+   * Every write of a node record counts — a standalone {@link put} and a put
+   * inside {@link SpaceHandle.write} alike — whatever part of the record it
+   * changed. The answer is **complete, not minimal**: it names every node
+   * written after `since` was read, and may also name nodes written at that
+   * very position, so a caller treats a named node as "read it again", which
+   * must be harmless to repeat. A deleted node is not named; deletion is a
+   * structural change and travels with the Space record.
+   *
+   * The position survives a restart. An adapter with a transactional store
+   * keeps a counter per Space, advanced in the transaction that writes the
+   * node. An adapter that keeps records in files uses the files' modification
+   * times, bounded by the clock so that a record dated in the future cannot
+   * hide later writes; it is then exact only as far as that clock does not
+   * step back past the Space's most recent write.
+   *
+   * A Space that does not exist reports no changes at a zero position.
+   */
+  changes(since?: NodeChangePosition): Promise<NodeChanges>;
 }
 
 export interface NodeStreamOptions {

@@ -3,7 +3,7 @@
 
 import { expect, test } from '@playwright/test';
 
-import { openNewCanvas } from './helpers';
+import { openNewCanvas, personEdits } from './helpers';
 
 import type * as PreviewActions from '../src/store/previewWorkspace/actions';
 
@@ -22,7 +22,7 @@ test('dragging a Note block in the Preview panel shows the drop line above the p
   ).join('\n\n');
   const created = await page.request.post(`/api/canvas/${canvasId}/execute`, {
     data: {
-      commands: [
+      edits: personEdits([
         {
           type: 'CREATE_NODES',
           nodes: [
@@ -35,8 +35,7 @@ test('dragging a Note block in the Preview panel shows the drop line above the p
             },
           ],
         },
-      ],
-      originator: { source: 'agent', threadId: 'note-drop-indicator' },
+      ]),
     },
   });
   expect(created.ok(), await created.text()).toBe(true);

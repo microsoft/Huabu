@@ -62,7 +62,7 @@ export async function ensureQuestionThread(
     throw new Error('Agent Node no longer exists');
   const confirmed = response.node as Node;
   if (!live.data.threadId) {
-    current._setStateNoAutosave({
+    current._setStateRaw({
       nodes: current.nodes.map((node) =>
         node.id === nodeId
           ? {

@@ -24,6 +24,7 @@ import { toast } from '@/components/Common/Toast';
 import { holdSaveErrorRecovery } from '@/utils/saveErrorFeedback';
 
 import { createNodeContentQueue } from '../nodeContentQueue';
+import { unsavedFields } from './unsavedFields';
 
 import type * as CanvasApi from '@/api/canvas';
 import type { PutNodeContentRequest } from '@huabu/shared';
@@ -68,7 +69,7 @@ function makeQueue(
     canvasId: 'c1',
     isLoading: false,
     nodes: [node] as Node[],
-    _setStateNoAutosave: vi.fn(),
+    _setStateRaw: vi.fn(),
     patchNodeSilent: vi.fn(),
   };
   const queue = createNodeContentQueue({
@@ -78,6 +79,20 @@ function makeQueue(
       ? () => options.waitForCreation!()
       : undefined,
   });
+  // A save is of something the person changed. Where a test has made no
+  // edit of its own, `flushNow` stands for "the body was typed, and is
+  // saved now".
+  const flushNow = queue.flushNow.bind(queue);
+  queue.flushNow = (canvasId, nodeId, flushOpts) => {
+    const typed = state.nodes.find((candidate) => candidate.id === nodeId);
+    if (typed && !queue.hasUnsaved(nodeId))
+      queue.scheduleChanges(
+        canvasId,
+        [{ ...typed, data: { ...typed.data, content: undefined } }],
+        [typed],
+      );
+    return flushNow(canvasId, nodeId, flushOpts);
+  };
   return { queue, state };
 }
 
@@ -96,7 +111,26 @@ describe('nodeContentQueue baseline lifecycle', () => {
     await queue.flushAll();
     const body = putMock.mock.calls[0][2];
     expect(body).not.toHaveProperty('noteContent');
+    expect(body).not.toHaveProperty('properties');
     expect(body).not.toHaveProperty('propertyDisplayKeys');
+  });
+
+  it('sends the properties a new node is created with beside its body, in its first save', async () => {
+    const node = noteNode('body');
+    node.data.properties = { Venue: 'UIST' };
+    node.data.propertyDisplayKeys = ['Venue'];
+    const { queue } = makeQueue(node);
+    putMock.mockResolvedValue({ nodeId: 'n1', label: 'Note', rev: 'saved' });
+    queue.scheduleChanges('c1', [], [node]);
+    await queue.flushAll();
+    expect(putMock).toHaveBeenCalledTimes(1);
+    expect(putMock.mock.calls[0][2]).toMatchObject({
+      content: 'body',
+      properties: { Venue: 'UIST' },
+      propertyDisplayKeys: ['Venue'],
+      expectRev: nodeRevisionOf({}),
+    });
+    expect(queue.unsavedNodeIds('c1')).toEqual([]);
   });
   it.each<Pick<PutNodeContentRequest, 'properties' | 'propertyDisplayKeys'>>([
     { properties: { Added: 'new' }, propertyDisplayKeys: ['Venue', 'Added'] },
@@ -112,16 +146,16 @@ describe('nodeContentQueue baseline lifecycle', () => {
       node.data.properties = { Venue: 'UIST' };
       node.data.propertyDisplayKeys = ['Venue'];
       const { queue, state } = makeQueue(node);
-      state._setStateNoAutosave.mockImplementation(({ nodes }) => {
+      state._setStateRaw.mockImplementation(({ nodes }) => {
         state.nodes = nodes;
       });
-      queue.seedBaselines([node]);
+      queue.setBaselines([node]);
       putMock.mockRejectedValueOnce(new Error('offline'));
       await expect(queue.commitProperties('c1', 'n1', patch)).rejects.toThrow(
         'offline',
       );
       expect(state.nodes[0].data).toEqual(node.data);
-      expect(queue.pendingFields('n1').size).toBe(0);
+      expect(unsavedFields(queue, 'n1')).toEqual([]);
       expect(queue.hasUnsavedContent('c1')).toBe(false);
       queue.retryFailedSaves('c1');
       await queue.flushAll();
@@ -136,9 +170,15 @@ describe('nodeContentQueue baseline lifecycle', () => {
       ];
       queue.scheduleChanges('c1', previous, state.nodes);
       await queue.flushNow('c1', 'n1');
-      expect(putMock.mock.calls.at(-1)?.[2].properties).toEqual({
-        Venue: 'UIST',
+      // The later body save says nothing about properties: neither the
+      // retracted edit nor the bag as it stands.
+      expect(putMock.mock.calls.at(-1)?.[2]).toMatchObject({
+        content: 'later body',
       });
+      expect(putMock.mock.calls.at(-1)?.[2]).not.toHaveProperty('properties');
+      expect(putMock.mock.calls.at(-1)?.[2]).not.toHaveProperty(
+        'propertyDisplayKeys',
+      );
     },
   );
 
@@ -146,10 +186,10 @@ describe('nodeContentQueue baseline lifecycle', () => {
     const node = noteNode('body');
     node.data.properties = { Venue: 'UIST', Score: 1 };
     const { queue, state } = makeQueue(node);
-    state._setStateNoAutosave.mockImplementation(({ nodes }) => {
+    state._setStateRaw.mockImplementation(({ nodes }) => {
       state.nodes = nodes;
     });
-    queue.seedBaselines([node]);
+    queue.setBaselines([node]);
     putMock.mockImplementationOnce(async () => {
       const previous = state.nodes;
       state.nodes = [
@@ -174,22 +214,20 @@ describe('nodeContentQueue baseline lifecycle', () => {
       content: 'new body',
       properties: { Venue: 'Newest', Score: 2, Added: true },
     });
-    expect(queue.pendingFields('n1')).toEqual(
-      new Set(['content', 'properties']),
-    );
+    expect(unsavedFields(queue, 'n1')).toEqual(['content', 'properties']);
     putMock.mockResolvedValue({ nodeId: 'n1', label: 'Note', rev: 'next' });
     await queue.flushNow('c1', 'n1');
-    expect(queue.pendingFields('n1').size).toBe(0);
+    expect(unsavedFields(queue, 'n1')).toEqual([]);
   });
 
   it('captures the rollback state inside the serialized lane after earlier edits settle', async () => {
     const node = noteNode('body');
     node.data.properties = { Venue: 'UIST' };
     const { queue, state } = makeQueue(node);
-    state._setStateNoAutosave.mockImplementation(({ nodes }) => {
+    state._setStateRaw.mockImplementation(({ nodes }) => {
       state.nodes = nodes;
     });
-    queue.seedBaselines([node]);
+    queue.setBaselines([node]);
     putMock.mockResolvedValueOnce({
       nodeId: 'n1',
       label: 'Note',
@@ -208,7 +246,7 @@ describe('nodeContentQueue baseline lifecycle', () => {
     expect(queue.hasUnsavedContent('c1')).toBe(false);
   });
 
-  it('uses the loaded server revision when PDF content is deliberately omitted', async () => {
+  it('saves a PDF property changed in the store as that key alone, without a revision and without the content the page does not hold', async () => {
     const node: Node = {
       id: 'pdf',
       type: 'pdf',
@@ -225,7 +263,7 @@ describe('nodeContentQueue baseline lifecycle', () => {
       content: 'Extracted text only available on the server',
     });
     const { queue, state } = makeQueue(node);
-    queue.seedBaselines([node], { pdf: serverRev });
+    queue.setBaselines([node], { pdf: serverRev });
     const edited = {
       ...node,
       data: {
@@ -237,13 +275,12 @@ describe('nodeContentQueue baseline lifecycle', () => {
     queue.scheduleChanges('c1', [node], [edited]);
     putMock.mockResolvedValue({ nodeId: 'pdf', label: 'Paper', rev: 'saved' });
     await queue.flushNow('c1', 'pdf');
-    expect(putMock.mock.calls[0][2]).toMatchObject({
-      expectRev: serverRev,
-      properties: edited.data.properties,
+    expect(putMock.mock.calls[0][2]).toEqual({
+      nodeType: 'pdf',
+      properties: { Status: 'Reading' },
     });
-    expect(putMock.mock.calls[0][2]).not.toHaveProperty('content');
     expect(toastMock).not.toHaveBeenCalled();
-    queue.seedBaselines([edited], { pdf: 'saved' });
+    queue.setBaselines([edited], { pdf: 'saved' });
     const next = {
       ...edited,
       data: { ...edited.data, properties: { Venue: 'CHI 25', Status: 'Read' } },
@@ -251,14 +288,46 @@ describe('nodeContentQueue baseline lifecycle', () => {
     state.nodes = [next];
     queue.scheduleChanges('c1', [edited], [next]);
     await queue.flushNow('c1', 'pdf');
-    expect(putMock.mock.calls.at(-1)?.[2].expectRev).toBe('saved');
+    expect(putMock.mock.calls.at(-1)?.[2]).toEqual({
+      nodeType: 'pdf',
+      properties: { Status: 'Read' },
+    });
+    // A rename is the title alone, without a revision.
+    const renamed = {
+      ...next,
+      data: { ...next.data, label: 'Paper, final', labelSource: 'user' },
+    };
+    state.nodes = [renamed];
+    queue.scheduleChanges('c1', [next], [renamed]);
+    await queue.flushNow('c1', 'pdf');
+    expect(putMock.mock.calls.at(-1)?.[2]).toMatchObject({
+      label: 'Paper, final',
+    });
+    expect(putMock.mock.calls.at(-1)?.[2]).not.toHaveProperty('expectRev');
+    expect(putMock.mock.calls.at(-1)?.[2]).not.toHaveProperty('content');
+    expect(putMock.mock.calls.at(-1)?.[2]).not.toHaveProperty('properties');
+    // A save of something derived from the body still quotes the revision
+    // the server named, never one hashed from the node without its text.
+    const summarised = {
+      ...renamed,
+      data: { ...renamed.data, summary: 'A paper.' },
+    };
+    state.nodes = [summarised];
+    queue.scheduleChanges('c1', [renamed], [summarised]);
+    await queue.flushNow('c1', 'pdf');
+    expect(putMock.mock.calls.at(-1)?.[2]).toMatchObject({
+      summary: 'A paper.',
+      expectRev: 'saved',
+    });
+    expect(putMock.mock.calls.at(-1)?.[2]).not.toHaveProperty('content');
+    expect(putMock.mock.calls.at(-1)?.[2]).not.toHaveProperty('label');
   });
 
-  it('sends property tombstones from the acknowledged baseline and retains edits made during a save', async () => {
+  it('sends a removed property as a tombstone of that key alone and retains edits made during a save', async () => {
     const node = noteNode('body');
     node.data.properties = { keep: 'yes', remove: 2026 };
     const { queue, state } = makeQueue(node);
-    queue.seedBaselines([node]);
+    queue.setBaselines([node]);
     const edited = {
       ...node,
       data: { ...node.data, properties: { keep: 'yes' } },
@@ -274,12 +343,11 @@ describe('nodeContentQueue baseline lifecycle', () => {
     const saving = queue.flushNow('c1', 'n1');
     for (let i = 0; i < 5; i++) await Promise.resolve();
     expect(putMock).toHaveBeenCalledOnce();
-    expect(putMock.mock.calls[0][2]).toMatchObject({
-      properties: { keep: 'yes', remove: null },
-      expectRev: nodeRevisionOf({
-        content: 'body',
-        properties: node.data.properties,
-      }),
+    // The key that was removed, as a removal; the key nobody touched is
+    // not in the request, and neither is a revision.
+    expect(putMock.mock.calls[0][2]).toEqual({
+      nodeType: 'note',
+      properties: { remove: null },
     });
     const next = { ...edited, data: { ...edited.data, properties: {} } };
     state.nodes = [next];
@@ -288,10 +356,11 @@ describe('nodeContentQueue baseline lifecycle', () => {
     await saving;
     putMock.mockResolvedValue({ nodeId: 'n1', label: 'Note', rev: 'SECOND' });
     await queue.flushNow('c1', 'n1');
-    expect(putMock.mock.calls.at(-1)?.[2]).toMatchObject({
+    expect(putMock.mock.calls.at(-1)?.[2]).toEqual({
+      nodeType: 'note',
       properties: { keep: null },
-      expectRev: 'FIRST',
     });
+    expect(queue.unsavedNodeIds('c1')).toEqual([]);
   });
   it('suppresses the redundant Question creation PUT', async () => {
     const node = questionNode('');
@@ -302,7 +371,7 @@ describe('nodeContentQueue baseline lifecycle', () => {
     await queue.flushAll();
 
     expect(putMock).not.toHaveBeenCalled();
-    expect(queue.pendingNodeIds()).toEqual([]);
+    expect(queue.unsavedNodeIds('c1')).toEqual([]);
   });
 
   it('waits for Question creation before persisting a real pre-acknowledgement edit', async () => {
@@ -341,7 +410,7 @@ describe('nodeContentQueue baseline lifecycle', () => {
   it('sends only locally dirty Question fields', async () => {
     const node = questionNode('');
     const { queue, state } = makeQueue(node);
-    queue.seedBaselines([node]);
+    queue.setBaselines([node]);
     const edited = questionNode('Pending prompt');
     state.nodes = [edited];
     queue.scheduleChanges('c1', [node], [edited]);
@@ -367,7 +436,7 @@ describe('nodeContentQueue baseline lifecycle', () => {
     });
     const node = questionNode('');
     const { queue, state } = makeQueue(node);
-    queue.seedBaselines([node]);
+    queue.setBaselines([node]);
     const edited = questionNode('Mine');
     state.nodes = [edited];
     queue.scheduleChanges('c1', [node], [edited]);
@@ -377,7 +446,7 @@ describe('nodeContentQueue baseline lifecycle', () => {
 
     const flushing = queue.flushAll();
     await vi.waitFor(() => expect(putMock).toHaveBeenCalledOnce());
-    queue.seedBaselines([questionNode('Remote prompt', 'Remote')]);
+    queue.setBaselines([questionNode('Remote prompt', 'Remote')]);
     finishFirst({ nodeId: 'q1', label: 'Question 1', rev: 'OLD' });
     await flushing;
     await queue.flushAll();
@@ -386,7 +455,7 @@ describe('nodeContentQueue baseline lifecycle', () => {
     expect(putMock.mock.calls[1][2].expectRev).toBe(
       nodeRevisionOf({ content: 'Remote prompt' }),
     );
-    expect(state._setStateNoAutosave).toHaveBeenCalledWith({
+    expect(state._setStateRaw).toHaveBeenCalledWith({
       nodes: [
         expect.objectContaining({
           data: expect.objectContaining({ label: 'Remote' }),
@@ -402,7 +471,7 @@ describe('nodeContentQueue baseline lifecycle', () => {
     });
     const node = questionNode('');
     const { queue, state } = makeQueue(node);
-    queue.seedBaselines([node]);
+    queue.setBaselines([node]);
     const edited = questionNode('Mine');
     state.nodes = [edited];
     queue.scheduleChanges('c1', [node], [edited]);
@@ -412,7 +481,7 @@ describe('nodeContentQueue baseline lifecycle', () => {
 
     const flushing = queue.flushAll();
     await vi.waitFor(() => expect(putMock).toHaveBeenCalledOnce());
-    queue.seedBaselines([questionNode('Remote prompt', 'Remote')]);
+    queue.setBaselines([questionNode('Remote prompt', 'Remote')]);
     failFirst(
       new CanvasConflictError({
         code: 'NODE_CONTENT_CONFLICT',
@@ -444,7 +513,7 @@ describe('nodeContentQueue baseline lifecycle', () => {
     expect(queue.hasRestore(node.id)).toBe(false);
     expect(queue.hasPendingRestoredContent()).toBe(false);
     expect(queue.restoreTokens().size).toBe(0);
-    expect(queue.pendingNodeIds()).toEqual([]);
+    expect(queue.unsavedNodeIds('c1')).toEqual([]);
     await queue.waitForIdle();
     await queue.flushAll();
     expect(putMock).not.toHaveBeenCalled();
@@ -453,7 +522,7 @@ describe('nodeContentQueue baseline lifecycle', () => {
   it('sends the seeded rev, then advances to the server-returned rev', async () => {
     const node = noteNode('v1');
     const { queue } = makeQueue(node);
-    queue.seedBaselines([node]);
+    queue.setBaselines([node]);
 
     putMock.mockResolvedValueOnce({ nodeId: 'n1', label: 'Note', rev: 'SRV1' });
     await queue.flushNow('c1', 'n1');
@@ -472,7 +541,7 @@ describe('nodeContentQueue baseline lifecycle', () => {
   it('sends the empty-content rev for a node with no seeded baseline', async () => {
     const node = noteNode('fresh');
     const { queue } = makeQueue(node);
-    // No seedBaselines() — brand-new node created this session.
+    // No setBaselines() — brand-new node created this session.
 
     putMock.mockResolvedValueOnce({ nodeId: 'n1', label: 'Note', rev: 'SRV1' });
     await queue.flushNow('c1', 'n1');
@@ -493,7 +562,7 @@ describe('nodeContentQueue baseline lifecycle', () => {
   it('on NODE_CONTENT_CONFLICT: no throw, keeps text, freezes, toasts once', async () => {
     const node = noteNode('v1');
     const { queue, state } = makeQueue(node);
-    queue.seedBaselines([node]);
+    queue.setBaselines([node]);
 
     const conflict = new CanvasConflictError({
       code: 'NODE_CONTENT_CONFLICT',
@@ -506,7 +575,7 @@ describe('nodeContentQueue baseline lifecycle', () => {
     // Must not reject (fire-and-forget autosave path).
     await expect(queue.flushNow('c1', 'n1')).resolves.toBeUndefined();
     // User's text is never reverted on a content conflict.
-    expect(state._setStateNoAutosave).not.toHaveBeenCalled();
+    expect(state._setStateRaw).not.toHaveBeenCalled();
     expect(toastMock).toHaveBeenCalledTimes(1);
     expect(putMock).toHaveBeenCalledTimes(1);
 
@@ -518,12 +587,56 @@ describe('nodeContentQueue baseline lifecycle', () => {
     expect(toastMock).toHaveBeenCalledTimes(1);
   });
 
+  it('a frozen node counts as unsaved content and keeps its conflict when the server content moves on', async () => {
+    const node = noteNode('mine');
+    const { queue } = makeQueue(node);
+    queue.setBaselines([node]);
+    putMock.mockRejectedValueOnce(
+      new CanvasConflictError({
+        code: 'NODE_CONTENT_CONFLICT',
+        message: 'changed elsewhere',
+        nodeId: 'n1',
+        currentRev: 'OTHER',
+      }),
+    );
+    // A flush with no field recorded as pending, as `flushNow` allows.
+    await queue.flushNow('c1', 'n1');
+    expect(toastMock).toHaveBeenCalledTimes(1);
+    // The sync applier reads this to leave the node's text alone.
+    expect(queue.unsavedNodeIds('c1')).toEqual(['n1']);
+
+    // An update carried newer server content for the node.
+    expect(
+      queue.rebaseConflict(
+        'n1',
+        nodeRevisionOf({ content: 'newer on the server' }),
+      ),
+    ).toBe(true);
+    await queue.flushNow('c1', 'n1');
+    expect(putMock).toHaveBeenCalledTimes(1);
+
+    // Keep mine overwrites the revision the server holds now.
+    putMock.mockResolvedValueOnce({ nodeId: 'n1', label: 'Note', rev: 'R' });
+    const toastOpts = toastMock.mock.calls[0][1] as {
+      secondaryAction: { onClick: () => void };
+    };
+    toastOpts.secondaryAction.onClick();
+    await vi.waitFor(() => expect(putMock).toHaveBeenCalledTimes(2));
+    expect(putMock.mock.calls[1][2].expectRev).toBe(
+      nodeRevisionOf({ content: 'newer on the server' }),
+    );
+    await queue.waitForIdle();
+    expect(queue.unsavedNodeIds('c1')).toEqual([]);
+    // A node that is not frozen is not this method's business.
+    expect(queue.rebaseConflict('n1', 'anything')).toBe(false);
+  });
+
   it.each([false, true])(
     'adopts contentMissing when Load latest finds a deleted sidecar (deferred: %s)',
     async (deferred) => {
       const node = noteNode('mine');
       const { queue, state } = makeQueue(node);
-      queue.seedBaselines([node]);
+      queue.setBaselines([node]);
       putMock.mockRejectedValueOnce(
         new CanvasConflictError({
           code: 'NODE_CONTENT_CONFLICT',
@@ -532,7 +645,8 @@ describe('nodeContentQueue baseline lifecycle', () => {
           currentRev: 'OTHER',
         }),
       );
-      getMock.mockResolvedValueOnce({
+      // Read twice: when the save is refused, and by Load latest.
+      getMock.mockResolvedValue({
         nodeId: 'n1',
         type: 'note',
         label: null,
@@ -553,7 +667,7 @@ describe('nodeContentQueue baseline lifecycle', () => {
       };
       toastOpts.action.onClick();
       await vi.waitFor(() => {
-        expect(state._setStateNoAutosave).toHaveBeenCalledWith({
+        expect(state._setStateRaw).toHaveBeenCalledWith({
           nodes: [
             expect.objectContaining({
               data: expect.objectContaining({ contentMissing: true }),
@@ -567,7 +681,7 @@ describe('nodeContentQueue baseline lifecycle', () => {
   it('"Keep mine" re-baselines to the disk rev and force-writes over it', async () => {
     const node = noteNode('mine');
     const { queue } = makeQueue(node);
-    queue.seedBaselines([node]);
+    queue.setBaselines([node]);
 
     const conflict = new CanvasConflictError({
       code: 'NODE_CONTENT_CONFLICT',

@@ -182,6 +182,7 @@ export const MultiSelectResizer = () => {
   const previewResizeGeometry = useCanvasStore((s) => s.previewResizeGeometry);
   const patchNodeSilent = useCanvasStore((s) => s.patchNodeSilent);
   const onNodeResizeStart = useCanvasStore((s) => s.onNodeResizeStart);
+  const closePointerGesture = useCanvasStore((s) => s.closePointerGesture);
 
   const isDirectManipulation = useIsNotMouse();
   const { zoom, x: vpX, y: vpY } = useViewport();
@@ -376,6 +377,8 @@ export const MultiSelectResizer = () => {
     latestItemsRef.current = [];
     lastAppliedFontRef.current.clear();
     if (items.length > 0) setNodeGeometry(items);
+    // A resize that committed nothing still has to send what its ticks did.
+    closePointerGesture();
     resumeHeightCommits('node-resize');
     try {
       (e.currentTarget as Element).releasePointerCapture(e.pointerId);

@@ -78,13 +78,13 @@ beforeEach(() => {
 });
 
 describe('Service Provision Service storage bindings', () => {
-  it('reads every existing owner without causing a persistence write', () => {
+  it('reads every existing owner without causing a persistence write', async () => {
     const provision = service();
 
-    expect(provision.list()).toHaveLength(5);
-    expect(provision.getConfig('image-gen').configured).toBe(true);
-    expect(provision.getConfig('web-search').values.apiKey).toBeNull();
-    expect(provision.resolveForServer('youtube-transcripts')).toEqual({
+    expect(await provision.list()).toHaveLength(5);
+    expect((await provision.getConfig('image-gen')).configured).toBe(true);
+    expect((await provision.getConfig('web-search')).values.apiKey).toBeNull();
+    expect(await provision.resolveForServer('youtube-transcripts')).toEqual({
       apiKey: 'rapid-secret',
     });
 
@@ -111,8 +111,8 @@ describe('Service Provision Service storage bindings', () => {
     expect(mocks.setInkOcrConfig).toHaveBeenCalledWith({ apiKey: null });
   });
 
-  it('leases only declared fields for configured External packages', () => {
-    const lease = service().lease('image-gen');
+  it('leases only declared fields for configured External packages', async () => {
+    const lease = await service().lease('image-gen');
 
     expect(lease).toMatchObject({
       id: 'image-gen',
@@ -139,15 +139,19 @@ describe('Service Provision Service storage bindings', () => {
         'quality',
       ].sort(),
     );
-    expect(() => service().lease('ink-ocr')).toThrow(
+    await expect(service().lease('ink-ocr')).rejects.toThrow(
       'not available to External Agents',
     );
   });
 
   it('stores HackMD tokens without exposing them in Settings and leases only to configured callers', async () => {
     const provision = service();
-    expect(provision.getConfig('hackmd').values).toEqual({ apiKey: null });
-    expect(provision.lease('hackmd').config).toEqual({ apiKey: 'test-secret' });
+    expect((await provision.getConfig('hackmd')).values).toEqual({
+      apiKey: null,
+    });
+    expect((await provision.lease('hackmd')).config).toEqual({
+      apiKey: 'test-secret',
+    });
     await provision.updateConfig('hackmd', { apiKey: 'next-token' });
     expect(mocks.setSecret).toHaveBeenCalledWith(
       'integration:hackmd:api-key',
@@ -159,6 +163,6 @@ describe('Service Provision Service storage bindings', () => {
       null,
     );
     mocks.getSecret.mockReturnValueOnce('');
-    expect(() => provision.lease('hackmd')).toThrow('not configured');
+    await expect(provision.lease('hackmd')).rejects.toThrow('not configured');
   });
 });

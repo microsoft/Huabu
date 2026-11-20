@@ -87,7 +87,7 @@ beforeEach(() => {
   });
   vi.mocked(toast).mockClear();
   useWorkspaceStore.setState({ workspaceId: 'workspace-1' });
-  useCanvasStore.getState()._setStateNoAutosave({
+  useCanvasStore.getState()._setStateRaw({
     canvasId: 'canvas-1',
     nodes: [],
     edges: [],
@@ -151,7 +151,7 @@ it('does not create after a newer explicit tool choice supersedes consumed place
 
 describe('Question conversation presentation', () => {
   it('keeps legacy compose by awaiting a server-minted identity', async () => {
-    useCanvasStore.getState()._setStateNoAutosave({
+    useCanvasStore.getState()._setStateRaw({
       version: 1,
       nodes: [
         {
@@ -189,7 +189,7 @@ describe('Question conversation presentation', () => {
   });
 
   it('does not invent an identity when the association is rejected', async () => {
-    useCanvasStore.getState()._setStateNoAutosave({
+    useCanvasStore.getState()._setStateRaw({
       nodes: [
         {
           id: 'question-1',

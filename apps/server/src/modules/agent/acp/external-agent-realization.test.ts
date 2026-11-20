@@ -99,10 +99,14 @@ function createHarness(options?: {
     hasHistory: () => false,
     promote,
     acquireTurn,
+    acquireWorkspaceLease: () => ({
+      workspaceKey: 'test-workspace',
+      release: vi.fn(),
+    }),
   });
   const subscribeTitles = vi.fn();
   const buildSpec = vi.fn(
-    ({
+    async ({
       binding,
       threadId,
       canvasId,
@@ -119,7 +123,7 @@ function createHarness(options?: {
         additionalInitialPreamble?: string;
       };
       spacePrompt?: string;
-    }): AcpWorkloadSpec => ({
+    }): Promise<AcpWorkloadSpec> => ({
       threadId,
       namespace: {
         name: canvasId ?? '',

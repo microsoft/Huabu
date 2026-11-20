@@ -45,7 +45,7 @@ const externalAgentRuntimeConfigRoutes: FastifyPluginAsync = async (app) => {
         code: 'validation_failed',
       });
     }
-    return setExternalAgentRuntimeConfig(parsed.data);
+    return await setExternalAgentRuntimeConfig(parsed.data);
   });
 };
 

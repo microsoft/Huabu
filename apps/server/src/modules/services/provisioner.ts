@@ -44,9 +44,11 @@ interface AdapterSnapshot {
 }
 
 interface ServiceStorageAdapter {
-  read(): AdapterSnapshot;
+  read(): AdapterSnapshot | Promise<AdapterSnapshot>;
   update(values: Readonly<Record<string, ServiceFieldValue>>): Promise<void>;
-  resolve(): Record<string, ServiceFieldValue>;
+  resolve():
+    | Record<string, ServiceFieldValue>
+    | Promise<Record<string, ServiceFieldValue>>;
 }
 
 export class ServiceProvisionError extends Error {
@@ -73,8 +75,8 @@ function presentFields(
     .map(([id]) => id);
 }
 
-function imageSnapshot(): AdapterSnapshot {
-  const stored = getImageConfig();
+async function imageSnapshot(): Promise<AdapterSnapshot> {
+  const stored = await getImageConfig();
   const modelFamily = stored.modelFamily ?? DEFAULT_IMAGE_MODEL_FAMILY;
   const values: Record<string, ServiceFieldValue> = {
     provider: stored.provider || 'azure-openai',
@@ -128,8 +130,8 @@ const imageAdapter: ServiceStorageAdapter = {
     }
     await setImageConfig(parsed.data);
   },
-  resolve() {
-    const resolved = getAzureImageConfig();
+  async resolve() {
+    const resolved = await getAzureImageConfig();
     return {
       provider: 'azure-openai',
       baseUrl: resolved.endpoint,
@@ -330,24 +332,27 @@ export class ServiceProvisioner {
     return manifest;
   }
 
-  list(): ServiceSummary[] {
-    return [...this.manifests.values()].map((manifest) => {
-      const snapshot = adapterFor(manifest).read();
-      const configured = isConfigured(manifest, snapshot.configuredFields);
-      return {
-        id: manifest.id,
-        version: manifest.version,
-        name: manifest.name,
-        description: manifest.description,
-        configured,
-        availableToExternalAgent: configured && isAgentFacingService(manifest),
-      };
-    });
+  list(): Promise<ServiceSummary[]> {
+    return Promise.all(
+      [...this.manifests.values()].map(async (manifest) => {
+        const snapshot = await adapterFor(manifest).read();
+        const configured = isConfigured(manifest, snapshot.configuredFields);
+        return {
+          id: manifest.id,
+          version: manifest.version,
+          name: manifest.name,
+          description: manifest.description,
+          configured,
+          availableToExternalAgent:
+            configured && isAgentFacingService(manifest),
+        };
+      }),
+    );
   }
 
-  getConfig(serviceId: string): ServiceConfig {
+  async getConfig(serviceId: string): Promise<ServiceConfig> {
     const manifest = this.manifest(serviceId);
-    const snapshot = adapterFor(manifest).read();
+    const snapshot = await adapterFor(manifest).read();
     return {
       manifest,
       values: snapshot.values,
@@ -366,10 +371,12 @@ export class ServiceProvisioner {
     return this.getConfig(serviceId);
   }
 
-  resolveForServer(serviceId: string): Record<string, ServiceFieldValue> {
+  async resolveForServer(
+    serviceId: string,
+  ): Promise<Record<string, ServiceFieldValue>> {
     const manifest = this.manifest(serviceId);
     const adapter = adapterFor(manifest);
-    const snapshot = adapter.read();
+    const snapshot = await adapter.read();
     if (!isConfigured(manifest, snapshot.configuredFields)) {
       throw new ServiceProvisionError(
         'service_not_configured',
@@ -379,7 +386,7 @@ export class ServiceProvisioner {
     return adapter.resolve();
   }
 
-  lease(serviceId: string): ServiceLease {
+  async lease(serviceId: string): Promise<ServiceLease> {
     const manifest = this.manifest(serviceId);
     if (!isAgentFacingService(manifest)) {
       throw new ServiceProvisionError(
@@ -391,7 +398,7 @@ export class ServiceProvisioner {
       id: manifest.id,
       version: manifest.version,
       manifest,
-      config: this.resolveForServer(serviceId),
+      config: await this.resolveForServer(serviceId),
     };
   }
 }

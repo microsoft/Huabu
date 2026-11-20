@@ -50,7 +50,6 @@ function run(
       ...effectsWith(mutatedNodes, contentEditedNodeIds),
       deletedNodeIds,
     },
-    canvasId: 'c1',
     getNodes: () => [],
     getEdges: () => [],
     setNodes: () => undefined,

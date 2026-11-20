@@ -135,6 +135,24 @@ describe('invertDeltas', () => {
     const inv = invertDeltas(deltas);
     expect(inv[0]).toEqual({ type: 'DELETE_NODE', node: b });
   });
+
+  it('inverts complete sibling lists without rolling back writer metadata', () => {
+    const before = { nodes: [note('a'), note('b')], edges: [] };
+    const deltas = [
+      {
+        type: 'SET_SIBLING_ORDER' as const,
+        parentId: null,
+        before: ['a', 'b'],
+        after: ['b', 'a'],
+        orderVersion: 101,
+      },
+    ];
+    const inverse = invertDeltas(deltas);
+    expect(inverse).toEqual([
+      { ...deltas[0], before: ['b', 'a'], after: ['a', 'b'] },
+    ]);
+    expect(applyDeltas(applyDeltas(before, deltas), inverse)).toEqual(before);
+  });
 });
 
 describe('fingerprintNodeFields', () => {
@@ -286,9 +304,19 @@ describe('extractCanvasChanges', () => {
 
     expect(rec.kind).toBe('update');
     expect(rec.label).toBe('Updated: Draft');
+    // The revert row holds the changed field only, and applying it to the
+    // node as it is now restores the previous node.
     expect(rec.revertDeltas).toEqual([
-      { type: 'REPLACE_NODE', prev: next, next: prev },
+      {
+        type: 'REPLACE_NODE',
+        nodeType: 'note',
+        prev: { id: 'node-b', data: { content: 'NEW' } },
+        next: { id: 'node-b', data: { content: 'OLD' } },
+      },
     ]);
+    expect(
+      applyDeltas({ nodes: [next], edges: [] }, rec.revertDeltas).nodes,
+    ).toEqual([prev]);
     // UPDATE fingerprints only the fields that actually changed (content).
     expect(rec.fingerprintKeys).toEqual(['content']);
     expect(rec.appliedFingerprint).toBe(
@@ -385,8 +413,16 @@ describe('coalesceChanges', () => {
     expect(merged).toHaveLength(1);
     expect(merged[0].kind).toBe('update');
     expect(merged[0].revertDeltas).toEqual([
-      { type: 'REPLACE_NODE', prev: a3, next: a1 },
+      {
+        type: 'REPLACE_NODE',
+        nodeType: 'note',
+        prev: { id: 'A', data: { content: 'v3' } },
+        next: { id: 'A', data: { content: 'v1' } },
+      },
     ]);
+    expect(
+      applyDeltas({ nodes: [a3], edges: [] }, merged[0].revertDeltas).nodes,
+    ).toEqual([a1]);
     // Stable id — keeps the first constituent's id.
     expect(merged[0].id).toBe(first[0].id);
   });

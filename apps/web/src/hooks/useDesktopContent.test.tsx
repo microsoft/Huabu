@@ -108,7 +108,6 @@ vi.mock('@/store/canvasStore', () => ({
     subscribe: () => () => {},
   },
   saveCanvasForSubmission: mocks.save,
-  drainNodePreprocessing: mocks.preprocess,
   flushCanvasViewState: mocks.flush,
 }));
 vi.mock('@/store/chatStore', () => ({
@@ -365,7 +364,7 @@ describe('desktop save presentation', () => {
         canvasId: 'space-a',
         isLoading: false,
         nodes: [node],
-        _setStateNoAutosave: vi.fn(),
+        _setStateRaw: vi.fn(),
         patchNodeSilent: vi.fn(),
       }),
     });

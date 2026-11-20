@@ -44,7 +44,7 @@ const binding: AgentBinding = {
 function createSession(node: boolean): ChatSession {
   const threadId = createConversation({ canvasId: 'canvas', binding });
   if (node) {
-    useCanvasStore.getState()._setStateNoAutosave({
+    useCanvasStore.getState()._setStateRaw({
       nodes: [
         {
           id: 'node-1',
@@ -75,9 +75,7 @@ beforeEach(() => {
     bindingByThread: {},
     ephemeralMetadataThreads: {},
   });
-  useCanvasStore
-    .getState()
-    ._setStateNoAutosave({ canvasId: 'canvas', nodes: [] });
+  useCanvasStore.getState()._setStateRaw({ canvasId: 'canvas', nodes: [] });
   useConversationPreparationStore.setState({
     directories: {},
     executions: {},

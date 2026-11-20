@@ -8,6 +8,7 @@ import {
   readViewportTransform,
   scaleOf,
   translateOf,
+  personEdits,
 } from './helpers';
 
 import type { GetCanvasResponse } from '@huabu/shared';
@@ -57,7 +58,7 @@ async function seed(page: Page) {
     `/api/canvas/${canvasId(page)}/execute`,
     {
       data: {
-        commands: [
+        edits: personEdits([
           {
             type: 'CREATE_NODES',
             nodes: [
@@ -87,8 +88,7 @@ async function seed(page: Page) {
               },
             ],
           },
-        ],
-        originator: { source: 'agent', threadId: 'e2e-question-card-scale' },
+        ]),
       },
     },
   );

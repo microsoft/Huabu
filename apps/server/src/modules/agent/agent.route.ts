@@ -220,7 +220,7 @@ const agentRoutes: FastifyPluginAsync = async (
       if (record?.spec.kind === EXTERNAL_DRIVER_KIND) {
         const agentletId = (record.spec.spec as { agentletId?: string })
           .agentletId;
-        if (agentletId) requireOwnAgentlet(agentletId);
+        if (agentletId) await requireOwnAgentlet(agentletId);
       }
       // Only a Bubble user's private registry hides a bound Profile, and there
       // an unavailable one refuses Stop too: it is someone else's agent. The
@@ -231,7 +231,7 @@ const agentRoutes: FastifyPluginAsync = async (
         canvasId,
         threadId,
       );
-      if (target && !resolveProfileSnapshot(target.binding.profileId))
+      if (target && !(await resolveProfileSnapshot(target.binding.profileId)))
         return reply.code(403).send({
           message: 'Agent is unavailable to this user',
           code: 'AGENT_ACCESS_REQUIRED',
@@ -344,7 +344,7 @@ const agentRoutes: FastifyPluginAsync = async (
     Params: AgentHistoryTurnParams;
     Querystring: AgentHistoryTurnQuery;
     Reply: ApiResult<AgentHistoryTurnResponse>;
-  }>('/history/:threadId/turn/:turnRef', async (request, reply) => {
+  }>('/history/:threadId/turn', async (request, reply) => {
     const params = agentHistoryTurnParamsSchema.safeParse(request.params);
     const query = agentHistoryTurnQuerySchema.safeParse(request.query);
     if (!params.success || !query.success) {
@@ -353,7 +353,8 @@ const agentRoutes: FastifyPluginAsync = async (
         code: 'malformed_history_request',
       });
     }
-    const { threadId, turnRef } = params.data;
+    const { threadId } = params.data;
+    const { turnRef } = query.data;
     const lease = acquireWorkspaceOperationLease();
     try {
       const namespace = canvasAcpNamespace(query.data.canvasId);
@@ -733,7 +734,7 @@ const agentRoutes: FastifyPluginAsync = async (
     // (e.g. unconfigured provider on first run).
     let contextWindow = 128_000;
     try {
-      const window = getLLMModel().contextWindow;
+      const window = (await getLLMModel()).contextWindow;
       if (typeof window === 'number' && window > 0) contextWindow = window;
     } catch {
       /* keep fallback */

@@ -3,7 +3,7 @@
 
 import { expect, test } from '@playwright/test';
 
-import { readViewportTransform } from './helpers';
+import { readViewportTransform, editsPerCommand } from './helpers';
 import { installStreams } from './stream-helpers';
 
 test('opens and continues a child Agent in the parent without leaking canvas selection', async ({
@@ -29,7 +29,7 @@ test('opens and continues a child Agent in the parent without leaking canvas sel
   const child = entry.data.targetCanvasId;
   const createAgent = await page.request.post(`/api/canvas/${child}/execute`, {
     data: {
-      commands: [
+      edits: editsPerCommand([
         {
           type: 'CREATE_NODES',
           nodes: [
@@ -45,8 +45,8 @@ test('opens and continues a child Agent in the parent without leaking canvas sel
             },
           ],
         },
-      ],
-      originator: { source: 'ui', tabId: 'remote-conversation-test' },
+      ]),
+      originator: { tabId: 'remote-conversation-test' },
     },
   });
   expect(createAgent.ok(), await createAgent.text()).toBe(true);
@@ -60,7 +60,7 @@ test('opens and continues a child Agent in the parent without leaking canvas sel
   expect(threadId).toBeTruthy();
   const createNote = await page.request.post(`/api/canvas/${parent}/execute`, {
     data: {
-      commands: [
+      edits: editsPerCommand([
         {
           type: 'CREATE_NODES',
           nodes: [
@@ -75,8 +75,8 @@ test('opens and continues a child Agent in the parent without leaking canvas sel
             },
           ],
         },
-      ],
-      originator: { source: 'ui', tabId: 'remote-conversation-test' },
+      ]),
+      originator: { tabId: 'remote-conversation-test' },
     },
   });
   expect(createNote.ok(), await createNote.text()).toBe(true);

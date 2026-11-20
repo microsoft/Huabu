@@ -3,11 +3,13 @@
 
 import { expect, test, type Page, type TestInfo } from '@playwright/test';
 
+import { agentExecute, type AgentExecuteResponse } from './agent-execute';
 import {
   oneFingerDrag,
   openNewCanvas,
   readViewportTransform,
   translateOf,
+  personEdits,
 } from './helpers';
 
 import type {
@@ -41,12 +43,7 @@ async function persisted(page: Page) {
 async function execute(page: Page, commands: CanvasCommand[]) {
   const response = await page.request.post(
     `/api/canvas/${canvasId(page)}/execute`,
-    {
-      data: {
-        commands,
-        originator: { source: 'agent', threadId: 'e2e-frame-marquee' },
-      },
-    },
+    { data: { edits: personEdits(commands) } },
   );
   expect(response.ok(), await response.text()).toBe(true);
 }
@@ -470,7 +467,8 @@ test.describe('Finger-mode inferred Frame presses', () => {
         '2',
       );
       await expect(
-        page.getByRole('tab', { name: /^first child \(note\)/ }),
+        // A person named the Note, so the tab carries that name.
+        page.getByRole('tab', { name: /^first \(note\)/ }),
       ).toBeVisible();
       expect((await rects(page, ids)).frame.x).toBeCloseTo(before.frame.x, 1);
     });
@@ -745,9 +743,15 @@ for (const tool of ['s', 'l']) {
       (entry) => entry.data.label === 'outer',
     );
     if (!outer) throw new Error('Missing outer Frame');
-    await execute(page, [
+    // An Agent nests the Frame: the Server fits the outer Frame to it, which
+    // a person's batch leaves to the page.
+    const nested = await agentExecute(page.request, canvasId(page), [
       { type: 'SET_NODE_PARENT', nodeIds: [ids.frame], parentId: outer.id },
     ]);
+    expect(nested.ok(), await nested.text()).toBe(true);
+    expect(
+      ((await nested.json()) as AgentExecuteResponse).results[0]?.applied,
+    ).toBe(true);
     await page.reload();
     await expect(page.locator('.react-flow__node')).toHaveCount(4);
     await stableViewport(page);

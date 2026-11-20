@@ -6,11 +6,15 @@
  */
 
 import {
+  closeSync,
   existsSync,
+  openSync,
   readFileSync,
+  readSync,
   readdirSync,
   rmSync,
   unlinkSync,
+  statSync,
 } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -45,6 +49,10 @@ import {
 } from '../../../../../utils/markdown-frontmatter.js';
 import { toSafeFilename } from '../../../../../utils/naming.js';
 import { getWorkspacePath } from '../../../../workspace.js';
+import {
+  DELTA_LOG_FILE_MAX_BYTES,
+  DELTA_LOG_MAX_ROWS,
+} from '../../../ports/delta-log.js';
 import { assertSpaceMutationAllowed } from '../../../space-lifecycle-admission.js';
 import {
   patchCanvasDirTitle,
@@ -750,6 +758,38 @@ export class CanvasStore {
       diskFiles.length !== indexedFiles.length ||
       diskFiles.some((file, index) => file !== indexedFiles[index])
     );
+  }
+
+  /**
+   * When each node's sidecar was last written, in whole milliseconds, by
+   * stable id — the file's modification time, read with one `stat` per
+   * sidecar and no file contents.
+   *
+   * The id of a file comes from the cached index. The index is rebuilt (one
+   * read per sidecar) only when it is cold or the directory's filenames no
+   * longer match it, exactly as a write would rebuild it. A sidecar that
+   * vanishes between the listing and its `stat` is left out.
+   */
+  nodeWriteTimes(): Map<string, number> {
+    this.assertActiveWorkspace();
+    let idx = this.nodeIndex();
+    if (this.nodeIndexCountStale(idx)) {
+      this.invalidateNodeIndex();
+      idx = this.nodeIndex();
+    }
+    const dir = nodesDir(this.canvasId);
+    const times = new Map<string, number>();
+    for (const entry of idx.list()) {
+      try {
+        times.set(
+          entry.id,
+          Math.floor(statSync(path.join(dir, entry.filename)).mtimeMs),
+        );
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      }
+    }
+    return times;
   }
 
   /**
@@ -1475,6 +1515,58 @@ export class CanvasStore {
     this.assertActiveWorkspace();
     this.requireExistingSpaceForMutation('append a delta');
     appendJsonLine<DeltaLogEntry>(deltaLogPath(this.canvasId), entry);
+  }
+
+  /**
+   * Keep the delta log within its bounds before the row for `nextVersion`
+   * is appended; see `ports/delta-log.ts`.
+   *
+   * The log is one append-only file, so it cannot drop its oldest row per
+   * write. Instead, when it holds the rows of {@link DELTA_LOG_MAX_ROWS}
+   * versions or has reached {@link DELTA_LOG_FILE_MAX_BYTES}, it is replaced
+   * by its newest part — at most half the rows and half the bytes — in one
+   * atomic rename. The check is a `stat` and a read of the first row's
+   * version; the rewrite reads the tail of the file only, so neither grows
+   * with what a log left over from before the bound holds.
+   *
+   * Runs before the write takes its before-image of the log (a byte
+   * offset), never inside it. The newest row always stays, which is all
+   * crash recovery asks of the log ({@link lastDeltaLogEntry}).
+   */
+  trimDeltaLog(nextVersion: number): void {
+    this.assertActiveWorkspace();
+    const filePath = deltaLogPath(this.canvasId);
+    let size: number;
+    try {
+      const stat = statSync(filePath);
+      if (!stat.isFile()) return;
+      size = stat.size;
+    } catch {
+      return;
+    }
+    if (size === 0) return;
+    const fd = openSync(filePath, 'r');
+    let kept: string[];
+    try {
+      const head = Buffer.alloc(Math.min(size, 64));
+      readSync(fd, head, 0, head.length, 0);
+      // Rows are written version first; anything else is not a row of ours.
+      const first = /^\{"version":(\d+)[,}]/.exec(head.toString('utf8'));
+      const span = first ? nextVersion - Number(first[1]) : Infinity;
+      if (size < DELTA_LOG_FILE_MAX_BYTES && span < DELTA_LOG_MAX_ROWS) return;
+      const tailBytes = Math.min(size, DELTA_LOG_FILE_MAX_BYTES / 2);
+      const tail = Buffer.alloc(tailBytes);
+      readSync(fd, tail, 0, tailBytes, size - tailBytes);
+      const lines = tail.toString('utf8').split('\n');
+      // The first piece starts mid-row unless the tail is the whole file.
+      if (tailBytes < size) lines.shift();
+      kept = lines
+        .filter((line) => line.trim().length > 0)
+        .slice(-Math.floor(DELTA_LOG_MAX_ROWS / 2));
+    } finally {
+      closeSync(fd);
+    }
+    atomicWriteText(filePath, kept.map((line) => `${line}\n`).join(''));
   }
 
   /**

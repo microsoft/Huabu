@@ -256,7 +256,9 @@ test('deferred details preserve the reading anchor and avoid transferring collap
   };
   let detailRequests = 0;
   const server = createServer((request, response) => {
-    const kind = request.url?.includes('/turn/')
+    // The detail route carries its turn reference in the query.
+    const path = new URL(request.url ?? '/', 'http://fixture').pathname;
+    const kind = path.endsWith('/turn')
       ? 'detail'
       : request.url?.includes('detailLevel=summary')
         ? 'summary'

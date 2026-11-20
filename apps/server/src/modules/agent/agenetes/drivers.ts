@@ -40,7 +40,8 @@ export type AgenetesHandle = RuntimeAgentHandle;
 
 export const acpRuntimePolicy: AcpRuntimePolicy = {
   resolveRuntimeEnvironment: resolveReachbackRuntimeEnvironment,
-  getIdleTimeoutSecs: () => getExternalAgentRuntimeConfig().idleTimeoutSecs,
+  getIdleTimeoutSecs: async () =>
+    (await getExternalAgentRuntimeConfig()).idleTimeoutSecs,
 };
 
 const externalDriver = acpDriverFactory(acpRuntimePolicy);

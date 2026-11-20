@@ -120,6 +120,7 @@ import { MultiSelectToolbar } from './FloatingToolbars/MultiSelectToolbar.tsx';
 import { StrokeSelectionToolbar } from './FloatingToolbars/StrokeSelectionToolbar.tsx';
 import { MoveSelectionPopover } from './MoveSelectionPopover.tsx';
 import { MultiSelectResizer } from './MultiSelectResizer.tsx';
+import { CanvasPresenceLayer } from './presence/CanvasPresenceLayer.tsx';
 import { SelectionOutlines } from './SelectionOutlines.tsx';
 import { canvasNodeZOrder, withoutNodeStyleZIndex } from './selectionZOrder';
 import { SnapGuidesOverlay } from './SnapGuidesOverlay.tsx';
@@ -1450,8 +1451,8 @@ const CanvasContent: React.FC<CanvasProps> = ({
           onMoveEnd={(_event, viewport) => {
             resumeHeightCommits('viewport');
             // Mirror pan/zoom into localStorage (per canvas) so browser and
-            // desktop restarts restore the same view. Does NOT participate in
-            // the structure autosave.
+            // desktop restarts restore the same view. It is never sent to the
+            // server.
             setViewport(viewport);
           }}
           onPaneClick={handlePaneClick}
@@ -1595,6 +1596,7 @@ const CanvasContent: React.FC<CanvasProps> = ({
           )}
           <MultiSelectResizer />
           <SelectionOutlines />
+          <CanvasPresenceLayer />
           {!isBoxSelecting && !hasLassoSelection && <MultiSelectToolbar />}
           {!isBoxSelecting && <StrokeSelectionRegion />}
           {!isBoxSelecting && <StrokeSelectionToolbar />}

@@ -27,6 +27,7 @@ import { MilkdownPreview } from '@/components/Milkdown';
 import { NODE_TYPE_LABEL } from '@/config/nodeIcons';
 import { useIsNotMouse } from '@/hooks/useInputMode';
 import { useNodePresentation } from '@/hooks/useNodePresentation';
+import { useEditLockHolder } from '@/store/canvasPresence/editLock';
 import useCanvasStore, { selectCanWriteCanvas } from '@/store/canvasStore';
 import { useGesturePreviewStore } from '@/store/gesturePreviewStore';
 import { openPreviewNode } from '@/store/previewWorkspace/actions';
@@ -397,7 +398,10 @@ export const NoteNode = memo(
     // payload's Markdown to this note's content. Locked notes opt
     // out so the gesture falls through to canvas's "create new
     // node" handler instead.
-    const isLocked = !!data.locked || !canWrite;
+    // Another page editing this note also opts it out: a block appended
+    // here would be saved against a body that page is about to replace.
+    const editedElsewhere = useEditLockHolder(id) !== null;
+    const isLocked = !!data.locked || !canWrite || editedElsewhere;
     // We use a small counter to track dragenter / dragleave events so
     // hovering between child elements doesn't flicker the highlight.
     const dragCounterRef = useRef(0);

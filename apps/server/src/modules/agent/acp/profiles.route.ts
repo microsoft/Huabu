@@ -53,7 +53,8 @@ import {
 } from './profile-capabilities.js';
 import { invalidateProfileSchemaCache } from './profile-schema-cache.js';
 import {
-  canUseAgentlet,
+  connectedDeviceAccess,
+  readDeviceAccess,
   requireOwnAgentlet,
 } from '../../identity/agent-credentials.js';
 import { personalSettingsOwner } from '../../identity/personal-settings.js';
@@ -86,9 +87,10 @@ function denyRemote(request: FastifyRequest, reply: FastifyReply): boolean {
 }
 
 function getConnectedAgentlets(): AgentletConnection[] {
+  const access = connectedDeviceAccess();
   return (
     getAgentletGateway()?.getAgentlets({ status: 'connected' }) ?? []
-  ).filter((connection) => canUseAgentlet(connection.agentletId));
+  ).filter((connection) => access.canUse(connection.agentletId));
 }
 
 function isAgentletConnected(agentletId: string): boolean {
@@ -159,7 +161,7 @@ const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
           message: 'Device names must contain 1 to 120 characters.',
         });
       }
-      requireOwnAgentlet(params.data.agentletId);
+      await requireOwnAgentlet(params.data.agentletId);
       if (!isAgentletConnected(params.data.agentletId)) {
         return reply.status(404).send({
           code: 'device_not_connected',
@@ -167,7 +169,7 @@ const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
         });
       }
       try {
-        renameDevice(params.data.agentletId, body.data.displayName);
+        await renameDevice(params.data.agentletId, body.data.displayName);
         return body.data;
       } catch (error) {
         request.log.error({ err: error }, 'Failed to save device name');
@@ -200,7 +202,7 @@ const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
         }
         try {
           return method === 'GET'
-            ? readProfileCapabilities(parsed.data.id)
+            ? await readProfileCapabilities(parsed.data.id)
             : await discoverProfileCapabilities(parsed.data.id, request.log);
         } catch (error) {
           request.log.warn(
@@ -237,16 +239,17 @@ const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
           code: 'profile_registry_unavailable',
         });
       }
-      const profiles = registry.listProfiles();
+      const profiles = await registry.listProfiles();
+      const connectedAccess = connectedDeviceAccess();
       const connections = (getAgentletGateway()?.getAgentlets() ?? []).filter(
-        (connection) => canUseAgentlet(connection.agentletId),
+        (connection) => connectedAccess.canUse(connection.agentletId),
       );
       const connected = connections.filter(
         (connection) => connection.status === 'connected',
       );
       let deviceNames: Record<string, string>;
       try {
-        deviceNames = getDeviceNames();
+        deviceNames = await getDeviceNames();
       } catch (error) {
         request.log.error({ err: error }, 'Failed to read device names');
         return reply.status(500).send({
@@ -316,8 +319,11 @@ const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
           }) => [device.agentletId, device],
         ),
       );
+      // Named devices need not be connected, so their ownership is read
+      // from storage, once for the whole list.
+      const recordedAccess = await readDeviceAccess();
       for (const [agentletId, displayName] of Object.entries(deviceNames)) {
-        if (canUseAgentlet(agentletId) && !knownDevices.has(agentletId))
+        if (recordedAccess.canUse(agentletId) && !knownDevices.has(agentletId))
           knownDevices.set(agentletId, { agentletId, displayName });
       }
       return {
@@ -337,7 +343,7 @@ const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
         agentlet: personalSettingsOwner()
           ? null
           : getDaemonSupervisor().getStatus(),
-        agentDefaults: getAgentDefaults(),
+        agentDefaults: await getAgentDefaults(),
       };
     },
   );
@@ -368,7 +374,7 @@ const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
         });
       }
       const agentletId = parsed.data.agentletId;
-      requireOwnAgentlet(agentletId);
+      await requireOwnAgentlet(agentletId);
       if (!isAgentletConnected(agentletId)) {
         return reply.status(409).send({
           code: 'agentlet_unavailable',
@@ -393,7 +399,7 @@ const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
           ? {}
           : { customData: parsed.data.customData }),
       };
-      const created = registry.createProfile(
+      const created = await registry.createProfile(
         launch.kind === 'acp-command'
           ? { ...common, launchKind: 'acp-command', command: launch.command }
           : {
@@ -403,7 +409,7 @@ const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
               options: launch.options,
             },
       );
-      initializeAgentDefaults(registry.listProfiles());
+      await initializeAgentDefaults(await registry.listProfiles());
       return created;
     },
   );
@@ -435,7 +441,7 @@ const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
         code: 'profile_registry_unavailable',
       });
     }
-    const existing = registry.getProfile(params.data.id);
+    const existing = await registry.getProfile(params.data.id);
     if (!existing) {
       return reply.status(404).send({
         message: `No profile with id ${params.data.id}`,
@@ -490,7 +496,7 @@ const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
       }
     }
     try {
-      const updated = registry.patchProfile(params.data.id, {
+      const updated = await registry.patchProfile(params.data.id, {
         expectedRevision: parsed.data.expectedRevision,
         ...(parsed.data.alias === undefined
           ? {}
@@ -544,7 +550,7 @@ const acpProfilesRoutes: FastifyPluginAsync = async (app) => {
         code: 'profile_registry_unavailable',
       });
     }
-    const deleted = registry.deleteProfile(params.data.id);
+    const deleted = await registry.deleteProfile(params.data.id);
     if (!deleted) {
       return reply.status(404).send({
         message: `No profile with id ${request.params.id}`,

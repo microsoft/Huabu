@@ -134,7 +134,7 @@ async function safeBump(
   logger: FastifyBaseLogger,
 ): Promise<void> {
   try {
-    if (getAgentDefaults().profileId !== 'huabu') return;
+    if ((await getAgentDefaults()).profileId !== 'huabu') return;
     const shouldRun = await bumpOpCounter(canvasId, weight);
     if (shouldRun) enqueueMemory(canvasId, logger);
   } catch (err) {

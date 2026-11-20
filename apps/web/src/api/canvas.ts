@@ -16,11 +16,8 @@ import type {
   GetCanvasResponse,
   CanvasAccess,
   GetNodeContentResponse,
-  PutCanvasRequest,
-  PutCanvasResponse,
   PutNodeContentRequest,
   PutNodeContentResponse,
-  DeleteNodeResponse,
   ImportCanvasResponse,
   ListCanvasesResponse,
   CreateCanvasRequest,
@@ -92,15 +89,24 @@ export async function acknowledgeAgentNodeResult(
 /**
  * Error thrown when a canvas mutation is rejected by the server with a
  * structured 409 conflict (`CanvasConflictResponse`). Callers can branch on
- * `code` to distinguish title / node-label collisions from version drift.
+ * `code` to distinguish title / node-label collisions from content conflicts.
  */
 export class CanvasConflictError extends Error {
   readonly code: CanvasErrorCode;
   readonly conflictWith?: string;
   readonly nodeId?: string;
-  readonly serverVersion?: number;
   /** For `NODE_CONTENT_CONFLICT`: the on-disk node's current revision. */
   readonly currentRev?: string;
+  /**
+   * For `NODE_CONTENT_CONFLICT`: the custom-property patch of the refused
+   * request was written; only the body and the other fields were refused.
+   */
+  readonly propertiesApplied: boolean;
+  /**
+   * For `NODE_CONTENT_CONFLICT`: the authored title of the refused request
+   * was written; only the body and what is derived from it were refused.
+   */
+  readonly titleApplied: boolean;
 
   constructor(payload: CanvasConflictResponse) {
     super(payload.message);
@@ -108,8 +114,9 @@ export class CanvasConflictError extends Error {
     this.code = payload.code;
     this.conflictWith = payload.conflictWith;
     this.nodeId = payload.nodeId;
-    this.serverVersion = payload.serverVersion;
     this.currentRev = payload.currentRev;
+    this.propertiesApplied = payload.propertiesApplied === true;
+    this.titleApplied = payload.titleApplied === true;
   }
 }
 
@@ -179,6 +186,11 @@ export async function createCanvas(
   });
 }
 
+/**
+ * Load a Space. `null` means the server has no such Space (404); any other
+ * failure — the network, a 5xx — is thrown, so a caller can tell a Space
+ * that is gone from one that could not be reached just now.
+ */
 export async function getCanvas(
   canvasId: string,
 ): Promise<GetCanvasResponse | null> {
@@ -188,8 +200,7 @@ export async function getCanvas(
     });
   } catch (error) {
     if (error instanceof ApiError && error.status === 404) return null;
-    console.error('Failed to get canvas:', error);
-    return null;
+    throw error;
   }
 }
 
@@ -204,10 +215,12 @@ export function getCanvasAccess(canvasId: string): Promise<CanvasAccess> {
 export async function postCanvasExecute(
   canvasId: string,
   request: PostCanvasExecuteRequest,
+  options?: { keepalive?: boolean },
 ): Promise<PostCanvasExecuteResponse> {
   return apiFetch<PostCanvasExecuteResponse>(routes.canvasExecute(canvasId), {
     method: 'POST',
     json: request,
+    ...(options?.keepalive ? { keepalive: true } : {}),
     fallbackMessage: 'Failed to execute Space command',
   });
 }
@@ -223,60 +236,15 @@ export async function moveCanvasSelection(
   });
 }
 
-export async function putCanvas(
-  canvasId: string,
-  request: PutCanvasRequest,
-  options?: { keepalive?: boolean },
-): Promise<PutCanvasResponse> {
-  // We can't use `apiFetch` directly because the structured 409
-  // `CanvasConflictResponse` carries `conflictWith` / `nodeId` /
-  // `serverVersion` at the top level, while `ApiError` only preserves
-  // `code` + `details` from the canonical `ApiErrorBody`. Fall back to
-  // a raw `fetch` so we can throw a `CanvasConflictError` with the
-  // full payload intact.
-  const response = await fetch(apiUrl(routes.canvas(canvasId)), {
-    method: 'PUT',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(request),
-    keepalive: options?.keepalive ?? false,
-  });
-
-  if (!response.ok) {
-    notifyAccessRefusal(canvasId, response.status);
-    const body = (await response.json().catch(() => null)) as unknown;
-    if (response.status === 409 && isCanvasConflictResponse(body)) {
-      throw new CanvasConflictError(body);
-    }
-    const errBody =
-      body && typeof body === 'object' ? (body as Partial<ApiErrorBody>) : {};
-    throw new ApiError(response.status, errBody, 'Failed to save Space');
-  }
-
-  return (await response.json()) as PutCanvasResponse;
-}
-
-export async function deleteNode(
-  canvasId: string,
-  nodeId: string,
-  options?: { signal?: AbortSignal },
-): Promise<DeleteNodeResponse> {
-  return apiFetch<DeleteNodeResponse>(routes.canvasNode(canvasId, nodeId), {
-    method: 'DELETE',
-    signal: options?.signal,
-    fallbackMessage: 'Failed to delete node',
-  });
-}
-
 /**
  * Persist a single node's markdown sidecar
- * (`nodes/<safe(label)>.md`). Unlike `putCanvas`, this endpoint never
- * touches structural state and therefore does not participate in the
- * canvas-level optimistic-concurrency `version` counter — concurrent
- * editor edits and viewport drags never collide on it.
+ * (`nodes/<safe(label)>.md`). This endpoint never touches structural
+ * state and therefore does not participate in the canvas-level
+ * optimistic-concurrency `version` counter — concurrent editor edits and
+ * viewport drags never collide on it.
  *
- * Mirrors `putCanvas`'s raw-fetch pattern so a 409 `NODE_LABEL_CONFLICT`
+ * Uses a raw fetch rather than `apiFetch` (which keeps only `code` and
+ * `details` of an error body) so a 409 `NODE_LABEL_CONFLICT`
  * body deserialises into `CanvasConflictError` with `nodeId` +
  * `conflictWith` intact, which `tryRename` reads to revert + alert.
  */

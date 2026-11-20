@@ -8,17 +8,15 @@
  * settings, model keys and connected credentials: a
  * call made for a member, and everything it starts (an agent run included),
  * runs in that member's personal settings namespace, and the secret store and
- * settings files answer from it. Local mode and the machine
+ * settings records answer from it. Local mode and the machine
  * credential never open one, so they read the deployment's, exactly as before.
  */
 
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash } from 'node:crypto';
-import path from 'node:path';
-
-import { getDataDir } from '../../data-dir.js';
 
 import type { ResolvedIdentity, ResourceAccess } from './service.js';
+import type { ServerRecordKey, ServerRecordName } from '../storage/index.js';
 
 interface Slot {
   /** Whose personal settings this call uses; `null` for the deployment's. */
@@ -65,20 +63,21 @@ export function personalSettingsOwner(): string | null {
   return storage.getStore()?.principalId ?? null;
 }
 
-/** A name safe for a directory, the same for the same principal. */
+/**
+ * A person's opaque key: the same for the same principal, safe as a path
+ * segment or column value, and revealing nothing about the account.
+ */
 function personKey(principalId: string): string {
   return createHash('sha256').update(principalId).digest('hex').slice(0, 32);
 }
 
 /**
- * Where a settings file lives for this call: in the data directory for the
- * deployment, under `people/<key>/` for a member.
+ * Which server record holds this call's copy of `name`: the deployment's,
+ * or the member's own in their personal settings namespace.
  */
-export function settingsFilePath(fileName: string): string {
+export function settingsRecordKey(name: ServerRecordName): ServerRecordKey {
   const owner = personalSettingsOwner();
-  return owner
-    ? path.join(getDataDir(), 'people', personKey(owner), fileName)
-    : path.join(getDataDir(), fileName);
+  return { owner: owner ? personKey(owner) : null, name };
 }
 
 /**

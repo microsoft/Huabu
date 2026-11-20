@@ -210,8 +210,11 @@ export interface AcpDurableState {
 }
 
 export interface AcpRuntimePolicy {
-  /** Return the current host policy for newly spawned or resumed sessions. */
-  getIdleTimeoutSecs(): number;
+  /**
+   * Return the current host policy for newly spawned or resumed sessions.
+   * Resolved once per session spawn, so a host may read it from storage.
+   */
+  getIdleTimeoutSecs(): number | Promise<number>;
   /**
    * Resolve non-durable environment values immediately before session spawn.
    * Runtime values override recipe and frozen environment. An undefined value
@@ -497,7 +500,8 @@ export class AcpAgentHandle<
         agentletId,
       },
     );
-    // close may have finished while a host-owned launch port was still pending.
+    const idleTimeoutSecs = await this.runtimePolicy.getIdleTimeoutSecs();
+    // close may have finished while a host-owned port was still pending.
     if (this.closing) throw new Error('ACP handle is closed');
     return ensureAcpSession({
       agentletId,
@@ -517,7 +521,7 @@ export class AcpAgentHandle<
         initialSelections: this.spec.spec.initialSelections,
       }),
       repairFromClosedEntry,
-      idleTimeoutSecs: this.runtimePolicy.getIdleTimeoutSecs(),
+      idleTimeoutSecs,
       logger,
     });
   }
