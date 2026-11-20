@@ -10,19 +10,23 @@
 // merge-blocking severity leave the check green. Reading both here is what
 // keeps an agent from declaring "CI is green" while CodeQL has findings.
 //
-// Exit codes: 0 clean, 1 failing checks or open alerts, 2 could not run.
+// Exit codes: 0 clean, 1 failing checks or open alerts, 2 could not run or CodeQL
+// did not run (missing or skipped), so the result is unverified.
 
 import { execFileSync } from 'node:child_process';
 
 const POLL_MS = 15_000;
 const TIMEOUT_MS = 30 * 60_000;
 const CODEQL_CHECK = 'CodeQL';
+const GH_MAX_BUFFER = 256 * 1024 * 1024;
 const PR_REFS = ['head', 'merge'];
 
 function gh(args) {
   return execFileSync('gh', args, {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
+    // The default 1 MiB cap would abort on a large paginated alert list.
+    maxBuffer: GH_MAX_BUFFER,
   });
 }
 
@@ -136,7 +140,20 @@ async function main() {
     );
   }
 
-  process.exit(failed.length > 0 || alerts.length > 0 ? 1 : 0);
+  // A skipped scan found nothing because it looked at nothing.
+  const codeqlSkipped = checks.some(
+    (c) => c.name === CODEQL_CHECK && c.bucket === 'skipping',
+  );
+  if (codeqlSkipped) {
+    console.log(
+      `\nThe \`${CODEQL_CHECK}\` check was skipped on #${pr}; code scanning is unverified, so this is not a clean result.`,
+    );
+  }
+
+  // Set the code instead of calling process.exit() so a piped report is
+  // fully flushed before the process ends.
+  if (failed.length > 0 || alerts.length > 0) process.exitCode = 1;
+  else if (codeqlSkipped) process.exitCode = 2;
 }
 
 main().catch((error) =>
