@@ -2,7 +2,7 @@
 // Licensed under the MIT license.
 
 import { Check, FolderOpen, Layers, Pencil, X } from 'lucide-react';
-import { useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Navigate, useNavigate } from 'react-router-dom';
 
@@ -131,18 +131,31 @@ function RenamableWorkspaceRow({
   const { t } = useTranslation();
   const [draft, setDraft] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const renameButton = useRef<HTMLButtonElement>(null);
+  // Closing the editor removes the focused field, so keyboard focus returns
+  // to this row's Rename button instead of falling to the page body.
+  const refocus = useRef(false);
+  useEffect(() => {
+    if (draft !== null || !refocus.current) return;
+    refocus.current = false;
+    renameButton.current?.focus();
+  }, [draft]);
+  const close = () => {
+    refocus.current = true;
+    setDraft(null);
+  };
 
   const save = async () => {
     const trimmed = draft?.trim();
     if (!trimmed) return;
     if (trimmed === workspace.name) {
-      setDraft(null);
+      close();
       return;
     }
     setSaving(true);
     try {
       await renameWorkspace(workspace.workspaceId, trimmed);
-      setDraft(null);
+      close();
     } catch (error) {
       console.error('[workspace-setup] Could not rename Workspace:', error);
       toast(
@@ -172,7 +185,7 @@ function RenamableWorkspaceRow({
             )
               return;
             if (event.key === 'Enter') void save();
-            if (event.key === 'Escape') setDraft(null);
+            if (event.key === 'Escape') close();
           }}
           disabled={saving}
           className="min-w-0 flex-1"
@@ -188,7 +201,7 @@ function RenamableWorkspaceRow({
           variant="ghost"
           iconOnly
           size="sm"
-          onClick={() => setDraft(null)}
+          onClick={close}
           disabled={saving}
           title={t('workspace.renameCancel')}
           aria-label={t('workspace.renameCancel')}
@@ -204,6 +217,7 @@ function RenamableWorkspaceRow({
       {children}
       {workspace.canManage && (
         <Button
+          ref={renameButton}
           variant="ghost"
           iconOnly
           size="sm"
