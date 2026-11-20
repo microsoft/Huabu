@@ -50,6 +50,16 @@ function hasMissingContent(node: Node): boolean {
   return node.data?.contentMissing === true;
 }
 
+/** What a preprocessing request for `node` carries, given its siblings. */
+function requestInput(node: Node, nodes: readonly Node[]) {
+  return {
+    nodeType: node.type,
+    snapshot: buildPreprocessSnapshot(node, (id) =>
+      nodes.filter((child) => child.parentId === id),
+    ),
+  };
+}
+
 /**
  * Slice fields the queue reads at fire time. Kept structural (not
  * `RFState`) so this module is free of store-type coupling and
@@ -83,6 +93,13 @@ export type PreprocessQueue = {
    * request now, for work that must survive a Canvas switch.
    */
   schedule(node: Node, options?: { immediate?: boolean }): void;
+
+  /**
+   * {@link schedule} `node` unless its request would carry what it carried
+   * in `previousNodes`. A node `previousNodes` does not hold always
+   * schedules: it was created, pasted, imported or restored.
+   */
+  scheduleIfInputChanged(node: Node, previousNodes: readonly Node[]): void;
 
   /**
    * Cancel every pending preprocess timer without firing and invalidate
@@ -133,15 +150,6 @@ export function createPreprocessQueue(opts: {
     if (task?.canvasId === opts.getState().canvasId) {
       opts.getState().clearNodeIngestion(nodeId);
     }
-  }
-
-  function requestInput(node: Node, nodes: readonly Node[]) {
-    return {
-      nodeType: node.type,
-      snapshot: buildPreprocessSnapshot(node, (id) =>
-        nodes.filter((child) => child.parentId === id),
-      ),
-    };
   }
 
   function canProcess(node: Node): boolean {
@@ -336,6 +344,21 @@ export function createPreprocessQueue(opts: {
       if (task.phase !== 'queued') return;
       if (options?.immediate) start(nodeId, task);
       else debouncer.schedule(nodeId, () => start(nodeId, task));
+    },
+
+    scheduleIfInputChanged(node, previousNodes) {
+      const before = previousNodes.find(
+        (candidate) => candidate.id === node.id,
+      );
+      if (
+        before &&
+        deepEqual(
+          requestInput(before, previousNodes),
+          requestInput(node, opts.getState().nodes),
+        )
+      )
+        return;
+      queue.schedule(node);
     },
 
     cancelAll() {

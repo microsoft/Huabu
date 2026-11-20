@@ -75,8 +75,10 @@ export function runWebPostEffects(input: RunWebPostEffectsInput): void {
     validatePreviewNodes,
   } = input;
 
-  // 1. Trigger preprocessing for created / mutated nodes. The server
-  // decides per node profile whether any actual work runs.
+  // 1. Trigger preprocessing for created / mutated nodes. The trigger
+  // requests nothing for a node whose request input the batch left as it
+  // was (see `scheduleIfInputChanged`); the server decides per node profile
+  // which work a request runs.
   //
   // `note` / `text` need special handling: their label auto-derives from
   // the first heading, so firing preprocess on every keystroke content edit

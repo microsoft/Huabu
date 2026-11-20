@@ -3375,11 +3375,20 @@ export async function awaitQuestionCreation(
   await questionCreations.get(`${canvasId}\0${nodeId}`)?.promise;
 }
 
-function scheduleAcknowledgedNodePreprocessing(node: Node): void {
+/**
+ * Request preprocessing for a node a command batch changed, once the server
+ * has taken its creation. `previousNodes` is the Space before the batch: a
+ * node whose request would carry what it carried then is left alone, so a
+ * batch that only moved it (a Grid cell, a paint order) requests nothing.
+ */
+function scheduleAcknowledgedNodePreprocessing(
+  node: Node,
+  previousNodes: readonly Node[],
+): void {
   const { canvasId } = useCanvasStore.getState();
   const creation = questionCreations.get(`${canvasId}\0${node.id}`)?.promise;
   if (!creation) {
-    preprocessQueue.schedule(node);
+    preprocessQueue.scheduleIfInputChanged(node, previousNodes);
     return;
   }
   void creation.then(
@@ -3387,7 +3396,7 @@ function scheduleAcknowledgedNodePreprocessing(node: Node): void {
       const current = useCanvasStore.getState();
       if (current.canvasId !== canvasId) return;
       const live = current.nodes.find((candidate) => candidate.id === node.id);
-      if (live) preprocessQueue.schedule(live);
+      if (live) preprocessQueue.scheduleIfInputChanged(live, previousNodes);
     },
     () => {},
   );
@@ -4123,7 +4132,8 @@ const useCanvasStore = create<RFState>()(
         // A deferred Frame refit is this page's own layout around what its
         // renderer measured; the server lays out from the reported boxes.
         setNodes: (nodes) => set({ nodes }),
-        triggerPreprocessing: scheduleAcknowledgedNodePreprocessing,
+        triggerPreprocessing: (node) =>
+          scheduleAcknowledgedNodePreprocessing(node, state.nodes),
         forgetNodeContent: nodeContentQueue.forgetNode,
         validatePreviewNodes: (liveNodeIds) =>
           usePreviewWorkspaceStore.getState().validate(liveNodeIds),
@@ -4354,7 +4364,8 @@ const useCanvasStore = create<RFState>()(
         getNodes: () => get().nodes,
         getEdges: () => get().edges,
         setNodes: (nodes) => get()._setStateRaw({ nodes }),
-        triggerPreprocessing: scheduleAcknowledgedNodePreprocessing,
+        triggerPreprocessing: (node) =>
+          scheduleAcknowledgedNodePreprocessing(node, prevNodes),
         forgetNodeContent: nodeContentQueue.forgetNode,
         validatePreviewNodes: (liveNodeIds) =>
           usePreviewWorkspaceStore.getState().validate(liveNodeIds),

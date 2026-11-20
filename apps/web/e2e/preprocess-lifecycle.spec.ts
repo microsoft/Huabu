@@ -10,7 +10,10 @@ import {
   type Route,
 } from '@playwright/test';
 
-import { openNewCanvas, paneCenter } from './helpers';
+import { openNewCanvas, paneCenter, personEdits } from './helpers';
+
+import type { ArtifactUploadResponse, GetCanvasResponse } from '@huabu/shared';
+import type { Node } from '@xyflow/react';
 
 // Real UI and persistence; only explicitly gated preprocessing responses are
 // synthetic. Never import the store or invoke lifecycle methods from the page.
@@ -469,5 +472,160 @@ test('Text creation and changed-content blur use the real preprocessing endpoint
   await page.reload();
   await expect(page.locator(`[data-id="${nodeId}"]`)).toContainText(
     'Changed lifecycle text',
+  );
+});
+
+/** A one-page PDF with a text layer, small enough to build inline. */
+function textPdf(text: string) {
+  const stream = `BT /F1 18 Tf 40 700 Td (${text}) Tj ET`;
+  const objects = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>',
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+    `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`,
+  ];
+  let pdf = '%PDF-1.4\n';
+  const offsets = [0];
+  for (const [index, object] of objects.entries()) {
+    offsets.push(pdf.length);
+    pdf += `${index + 1} 0 obj\n${object}\nendobj\n`;
+  }
+  const xref = pdf.length;
+  pdf += `xref\n0 ${offsets.length}\n0000000000 65535 f \n`;
+  for (const offset of offsets.slice(1))
+    pdf += `${String(offset).padStart(10, '0')} 00000 n \n`;
+  return `${pdf}trailer\n<< /Size ${offsets.length} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+}
+
+test('moving a PDF to another Grid cell requests no preprocessing; renaming it does', async ({
+  page,
+}) => {
+  await openNewCanvas(page);
+  await page.keyboard.press('Escape');
+  const sources: string[] = [];
+  for (const name of ['first', 'second']) {
+    const upload = await page.request.post(
+      `/api/canvas/${idOf(page)}/artifact/pdf`,
+      {
+        multipart: {
+          file: {
+            name: `${name}.pdf`,
+            mimeType: 'application/pdf',
+            buffer: Buffer.from(textPdf(`Grid ${name}`)),
+          },
+        },
+      },
+    );
+    expect(upload.ok(), await upload.text()).toBe(true);
+    sources.push(((await upload.json()) as ArtifactUploadResponse).uri);
+  }
+  const created = await page.request.post(`/api/canvas/${idOf(page)}/execute`, {
+    data: {
+      edits: personEdits([
+        {
+          type: 'CREATE_NODES',
+          nodes: [
+            {
+              id: 'node-grid-frame',
+              nodeType: 'frame',
+              position: { x: 100, y: 100 },
+              size: { width: 440, height: 300 },
+              data: {
+                label: 'Papers',
+                labelSource: 'user',
+                layoutMode: 'grid',
+                gridCount: 2,
+                sizing: 'hug',
+              },
+            },
+            ...sources.map((src, index) => ({
+              id: `node-grid-pdf-${index}`,
+              nodeType: 'pdf',
+              parentId: 'node-grid-frame',
+              position: { x: 0, y: 0 },
+              size: { width: 160, height: 160 },
+              data: {
+                label: `Paper ${index}`,
+                labelSource: 'user',
+                src,
+                content: `Grid paper ${index}`,
+                frameColumn: index,
+                frameRow: 0,
+              },
+            })),
+          ],
+        },
+      ]),
+    },
+  });
+  expect(created.ok(), await created.text()).toBe(true);
+  await page.addInitScript((id) => {
+    localStorage.setItem(
+      `huabu.viewport.${id}`,
+      JSON.stringify({ x: 180, y: 80, zoom: 1 }),
+    );
+  }, idOf(page));
+  await page.reload();
+  const pdf = (index: number) =>
+    page.locator(`.react-flow__node[data-id="node-grid-pdf-${index}"]`);
+  await expect(pdf(0)).toBeVisible();
+  await expect(pdf(1)).toBeVisible();
+  await quiet(page);
+
+  const requested: string[] = [];
+  page.on('request', (request) => {
+    if (request.method() === 'POST' && request.url().endsWith('/preprocess'))
+      requested.push(new URL(request.url()).pathname);
+  });
+  const cells = async () => {
+    const response = await page.request.get(`/api/canvas/${idOf(page)}`);
+    const record = (await response.json()) as GetCanvasResponse;
+    return (record.state as { nodes: Node[] }).nodes
+      .filter((node) => node.parentId === 'node-grid-frame')
+      .sort((a, b) => a.id.localeCompare(b.id))
+      .map((node) => `${node.data.frameColumn},${node.data.frameRow}`);
+  };
+  expect(await cells()).toEqual(['0,0', '1,0']);
+
+  // Drop the first PDF on the cell the second one occupies.
+  const from = await pdf(0).boundingBox();
+  const onto = await pdf(1).boundingBox();
+  if (!from || !onto) throw new Error('Missing PDF rectangle');
+  await page.mouse.move(from.x + from.width / 2, from.y + 12);
+  await page.mouse.down();
+  await page.mouse.move(onto.x + onto.width / 2, onto.y + onto.height / 2, {
+    steps: 12,
+  });
+  await page.mouse.up();
+  await expect.poll(cells).not.toEqual(['0,0', '1,0']);
+  await expect(pending(pdf(0))).toHaveCount(0);
+  await expect(pending(pdf(1))).toHaveCount(0);
+  await observeNoNewRequests(() => requested.length, 0);
+  await expect(pending(pdf(0))).toHaveCount(0);
+  await expect(pending(pdf(1))).toHaveCount(0);
+
+  // A title is preprocessing input: renaming still asks once, for the PDF
+  // and for the Frame whose own title derives from its children's.
+  const held = await holdPreprocessing(page, 'node-grid-pdf-0');
+  await pdf(0).click();
+  await page.getByRole('button', { name: 'Open Large View' }).click();
+  const tab = page.getByRole('tab', { selected: true });
+  await tab.focus();
+  await tab.press('F2');
+  const input = page.getByRole('tab').getByRole('textbox', {
+    name: 'Rename node',
+    exact: true,
+  });
+  await input.fill('Renamed paper');
+  await input.press('Enter');
+  await expect.poll(() => held.length).toBe(1);
+  expect(held[0].request().postDataJSON().snapshot.title).toBe('Renamed paper');
+  await expect(pending(pdf(0))).toBeVisible();
+  await succeed(held[0], 'Renamed paper');
+  await expect(pending(pdf(0))).toHaveCount(0);
+  await quiet(page);
+  expect(requested.filter((path) => path.includes('node-grid-pdf-1'))).toEqual(
+    [],
   );
 });
