@@ -765,7 +765,10 @@
     "renameLabel": "Rename Workspace “{{workspace}}”",
     "renameSave": "Save",
     "renameCancel": "Cancel rename",
-    "renameFailed": "Could not rename the Workspace. Please try again."
+    "renameFailed": "Could not rename the Workspace. Please try again.",
+    "currentWorkspace": "Current Workspace",
+    "sharedSpacesOnly": "Shared Spaces",
+    "createHint": "You’ll be its Owner. Add people from Settings → People."
   },
   "spaceHierarchy": {
     "deleteFromContainer": "Delete this Space from Home or its parent Space.",

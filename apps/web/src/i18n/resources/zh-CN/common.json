@@ -765,7 +765,10 @@
     "renameLabel": "重命名工作区“{{workspace}}”",
     "renameSave": "保存",
     "renameCancel": "取消重命名",
-    "renameFailed": "无法重命名工作区，请重试。"
+    "renameFailed": "无法重命名工作区，请重试。",
+    "currentWorkspace": "当前工作区",
+    "sharedSpacesOnly": "共享的 Space",
+    "createHint": "你将成为它的所有者。可在“设置 → 成员”中添加成员。"
   },
   "spaceHierarchy": {
     "deleteFromContainer": "请从 Home 或父 Space 中删除此 Space。",
