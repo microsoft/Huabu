@@ -158,7 +158,9 @@ export function WorkspaceSwitcherPopover({
       aria-labelledby={titleId}
       dismissOnEscape={!renaming}
       onDismiss={(reason) => onClose(reason === 'escape')}
-      className="w-[340px] p-2"
+      // Many Workspaces scroll inside the panel; the page itself never
+      // scrolls, so the footer must stay reachable within the viewport.
+      className="max-h-[var(--popover-available-height,calc(100dvh-24px))] w-[340px] overflow-y-auto overscroll-contain p-2"
       onOpenAutoFocus={() => {
         const rows = list.current?.querySelectorAll<HTMLElement>('button');
         const current = list.current?.querySelector<HTMLElement>(
