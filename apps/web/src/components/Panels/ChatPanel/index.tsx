@@ -87,7 +87,11 @@ import { parseSlashInvocations } from './parseSlashInvocations';
 import { saveChatAsQuestion } from './saveChatAsQuestion';
 import { ThreadChatInput } from './ThreadChatInput';
 import { WorkingDirectoryOverride } from './WorkingDirectoryOverride';
-import { useAgentStream } from '../../../hooks/useAgentStream';
+import { holdAgentTurnQueue } from '../../../hooks/agentTurnController';
+import {
+  useAgentStream,
+  type AgentSubmitOptions,
+} from '../../../hooks/useAgentStream';
 import { useChatHistory } from '../../../hooks/useChatHistory';
 import { MessageList } from '../../Messages/MessageList';
 import { SidebarPanel } from '../SidebarPanel';
@@ -818,11 +822,39 @@ export const ChatPanel = ({
     onRenameRequestHandled,
   ]);
 
+  // Never block Send on a transient state. While history is loading the turn
+  // waits in the queue, since hydration replaces the transcript. For Agent
+  // warm-up or a save in flight it is shown as sent and dispatched once ready:
+  // nothing is ahead of it, so a queue would only raise the question why.
+  const awaitingReadiness =
+    builtinThreadSettings.saving ||
+    preparation.pending ||
+    savingAgentDraft ||
+    savingWorkingDirectory;
+  const notReady = !isHistoryLoaded
+    ? 'queue'
+    : awaitingReadiness
+      ? 'wait'
+      : undefined;
+  const holdQueue = notReady !== undefined;
+  const sendingWhenReady = useChatStore((state) => {
+    const thread = state.threadsById[threadId];
+    const last = thread?.messages.at(-1);
+    return !!thread?.isPreparing && last?.role === 'user';
+  });
+  useEffect(
+    () =>
+      holdQueue ? holdAgentTurnQueue({ threadId, ownerCanvasId }) : undefined,
+    [holdQueue, threadId, ownerCanvasId],
+  );
   const handleSubmit = useCallback(
     async (e: React.FormEvent, agentMode: AgentMode, draft: string) => {
       e.preventDefault();
-      if (!ownerScopeReady || builtinThreadSettings.saving) return;
-      if (!selectThreadHistoryLoaded(useChatStore.getState(), threadId)) return;
+      if (!ownerScopeReady) return;
+      const options: AgentSubmitOptions = {
+        notReady,
+        settingsPending: builtinThreadSettings.saving,
+      };
       // Strip leading `/<id>` tokens that match a known slash command
       // and forward them as `invokedSkills`. Skill invocation is gated
       // to **internal + operate mode** only:
@@ -845,7 +877,7 @@ export const ChatPanel = ({
       if (!isSkillInvocationAllowed) {
         const prompt = raw.trim();
         onCommit?.();
-        await startStream(prompt, agentMode);
+        await startStream(prompt, agentMode, undefined, options);
         return;
       }
       const { invokedSkills, message } = parseSlashInvocations(
@@ -858,6 +890,7 @@ export const ChatPanel = ({
         prompt,
         agentMode,
         invokedSkills.length > 0 ? invokedSkills : undefined,
+        options,
       );
     },
     [
@@ -865,8 +898,8 @@ export const ChatPanel = ({
       knownSlashIds,
       onCommit,
       startStream,
-      threadId,
       ownerScopeReady,
+      notReady,
       builtinThreadSettings.saving,
     ],
   );
@@ -1175,7 +1208,7 @@ export const ChatPanel = ({
             onRetryHistoryPage={historyWindow?.retryHistoryPage}
             activationId={activationId}
             threadId={threadId}
-            isLoading={isLoading}
+            isLoading={isLoading || sendingWhenReady}
             isHistoryLoading={
               !ownerUnavailable && !isHistoryLoaded && !historyError
             }
@@ -1316,14 +1349,8 @@ export const ChatPanel = ({
               // snapshot. Transport-health gating is now expressed via the
               // connection badge above; we keep the input enabled so the
               // user can retry / trigger a re-ensure on the next send.
-              submitDisabled={
-                !ownerScopeReady ||
-                builtinThreadSettings.saving ||
-                !isHistoryLoaded ||
-                preparation.pending ||
-                savingAgentDraft ||
-                savingWorkingDirectory
-              }
+              submitDisabled={!ownerScopeReady}
+              deferSubmission={notReady === 'queue'}
             >
               {!remote && ownerCanvasId && threadId ? (
                 <ChangeReviewCard

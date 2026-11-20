@@ -10,7 +10,13 @@
 
 import { AGENT_HOST_SSE_EVENTS, AGENT_SSE_EVENTS } from '@huabu/shared';
 
-import { ApiError, apiErrorFromResponse, apiFetch, apiUrl } from './_client';
+import {
+  AgentTurnFailedError,
+  ApiError,
+  apiErrorFromResponse,
+  apiFetch,
+  apiUrl,
+} from './_client';
 import { routes } from './_routes';
 import { readTypedSSEStream } from './_sse';
 
@@ -201,7 +207,7 @@ async function pumpAgentStream(
       if (event.type === AGENT_SSE_EVENTS.Error) {
         terminal = 'error';
         callbacks.onError(
-          new Error(event.data.error || 'Unknown server error'),
+          new AgentTurnFailedError(event.data.error || 'Unknown server error'),
         );
         return;
       }
@@ -467,7 +473,10 @@ export const agentApi = {
         callbacks,
         options?.signal,
       );
-      if (!terminal) callbacks.onComplete();
+      if (!terminal) {
+        // The connection closed mid-turn; the turn may still be running.
+        throw new Error('Agent stream ended before a terminal event');
+      }
     } catch (error) {
       // Treat any error while the signal is aborted as an intentional stop
       if (options?.signal?.aborted) {
