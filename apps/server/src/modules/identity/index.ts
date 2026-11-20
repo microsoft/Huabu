@@ -69,6 +69,12 @@ export function createIdentity(
         list: async () => (await (opening ??= open())).service.people.list(),
         setMember: async (...args) =>
           (await (opening ??= open())).service.people.setMember(...args),
+        admission: async () =>
+          (await (opening ??= open())).service.people.admission(),
+        setAutomaticAdmission: async (automatic) =>
+          (await (opening ??= open())).service.people.setAutomaticAdmission(
+            automatic,
+          ),
         setWorkspaceRole: async (...args) =>
           (await (opening ??= open())).service.people.setWorkspaceRole(...args),
       },

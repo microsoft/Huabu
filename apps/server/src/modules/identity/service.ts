@@ -3,6 +3,7 @@
 
 import type { WorkspaceScope } from '../workspace/context.js';
 import type {
+  AdmissionSettings,
   IdentityPrincipal,
   IdentityResponse,
   Person,
@@ -176,8 +177,16 @@ export class IdentityError extends Error {
  */
 export interface PeopleDirectory {
   list(): Promise<Person[]>;
-  /** `false` when there is no such principal. */
+  /**
+   * Admit or revoke system `member`; `false` when there is no such principal.
+   * Revoking also blocks automatic admission for them, and admitting clears
+   * that block.
+   */
   setMember(principalId: string, member: boolean, by: string): Promise<boolean>;
+  /** Whether people who sign in are admitted automatically, and through which providers. */
+  admission(): Promise<AdmissionSettings>;
+  /** Turn automatic admission on or off. Turning it off revokes nobody. */
+  setAutomaticAdmission(automatic: boolean): Promise<AdmissionSettings>;
   /** `null` removes every Workspace role they hold there. */
   setWorkspaceRole(
     principalId: string,

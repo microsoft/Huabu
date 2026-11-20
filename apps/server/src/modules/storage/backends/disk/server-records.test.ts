@@ -65,6 +65,7 @@ describe('Disk server records', () => {
       'agent-credential-versions': 'agent-credential-versions.json',
       'agent-profiles': join('agent-profiles', 'registry.json'),
       'user-agent-profiles': join('user-agent-profiles', 'registry.json'),
+      admission: 'people-admission.json',
     };
     expect(Object.keys(files).sort()).toEqual([...SERVER_RECORD_NAMES].sort());
     for (const [name, file] of Object.entries(files)) {

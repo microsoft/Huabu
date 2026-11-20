@@ -15,11 +15,20 @@ import {
   isBubbleProtocolError,
 } from '@octostaff/sdk';
 
-import { identityPrincipalSchema } from '@huabu/shared';
+import {
+  admissionProviderSchema,
+  identityPrincipalSchema,
+} from '@huabu/shared';
 
 import { createKeyedMutex } from '../../utils/keyed-mutex.js';
 import { getLogger } from '../../utils/logger.js';
 import { getWorkspaceHandle } from '../workspace.js';
+import {
+  blockAdmission,
+  clearAdmissionBlock,
+  readAdmission,
+  setAutomaticAdmission,
+} from './admission.js';
 import { disconnectAgentlets } from './agent-credentials.js';
 import { IdentityError } from './service.js';
 import {
@@ -36,7 +45,7 @@ import type {
   ResourceDirectory,
   ResolvedIdentity,
 } from './service.js';
-import type { WorkspaceRole } from '@huabu/shared';
+import type { AdmissionProvider, WorkspaceRole } from '@huabu/shared';
 import type {
   BubbleAuthzOptions,
   BubbleStore,
@@ -71,8 +80,29 @@ const WORKSPACE_ROLE = {
   viewer: 'huabu.workspace.viewer',
 } as const satisfies Record<WorkspaceRole, string>;
 
-/** People administration over Bubble's principal and grant tables. */
-function bubblePeople(store: BubbleStore): PeopleDirectory {
+/**
+ * People administration over Bubble's principal and grant tables, and
+ * automatic admission, which writes the same `member` grant.
+ *
+ * A system `member` grant with no grantor (`grantedByPrincipalId: null`) is an
+ * automatic admission, as Bubble's own first-owner grant has none: People and
+ * Bubble's API always record the administrator who grants one.
+ *
+ * @param providers The configured sign-in providers automatic admission
+ *   applies to, for administrators to see.
+ */
+function bubblePeople(
+  store: BubbleStore,
+  providers: readonly AdmissionProvider[],
+): PeopleDirectory & {
+  /**
+   * Admit `principalId` as an ordinary member if automatic admission is on,
+   * they hold no system grant, no block, and are an enabled user. Only a
+   * sign-in through `providers` may ask. `true` when they hold a system grant
+   * afterwards, including one a racing first request just made.
+   */
+  admitAutomatically(principalId: string): Promise<boolean>;
+} {
   const SYSTEM = { type: 'system' } as const;
   const withWorkspaceGrantLock = createKeyedMutex();
   const withMemberGrantLock = createKeyedMutex();
@@ -82,9 +112,10 @@ function bubblePeople(store: BubbleStore): PeopleDirectory {
     ) ?? null;
   return {
     async list() {
-      const [principals, grants] = await Promise.all([
+      const [principals, grants, admission] = await Promise.all([
         store.principals.list(),
         store.grants.list(),
+        readAdmission(),
       ]);
       return principals.map((principal) => {
         const held = grants.filter(
@@ -105,6 +136,8 @@ function bubblePeople(store: BubbleStore): PeopleDirectory {
               workspaces.set(grant.target.id, role);
           }
         }
+        const memberGrant = system.find((grant) => grant.role === 'member');
+        const admin = system.some((grant) => grant.role === 'owner');
         return {
           principal: identityPrincipalSchema.parse({
             principalId: principal.principalId,
@@ -115,8 +148,15 @@ function bubblePeople(store: BubbleStore): PeopleDirectory {
             ...(principal.email ? { email: principal.email } : {}),
             ...(principal.avatarUrl ? { avatarUrl: principal.avatarUrl } : {}),
           }),
-          member: system.some((grant) => grant.role === 'member'),
-          admin: system.some((grant) => grant.role === 'owner'),
+          member: memberGrant !== undefined,
+          admin,
+          joinedAutomatically: memberGrant?.grantedByPrincipalId === null,
+          // A block outlasts a grant someone added through Bubble's own API;
+          // it only matters, and is only shown, while they have no access.
+          blocked:
+            !memberGrant &&
+            !admin &&
+            Object.hasOwn(admission.blocked, principal.principalId),
           workspaces: [...workspaces].map(([workspaceId, role]) => ({
             workspaceId,
             role,
@@ -129,14 +169,20 @@ function bubblePeople(store: BubbleStore): PeopleDirectory {
         if (!(await store.principals.get(principalId))) return false;
         const rows = await store.grants.list({ target: SYSTEM, principalId });
         const current = rows.filter((row) => row.role === 'member');
-        if (member && current.length === 0)
-          await store.grants.add({
-            target: SYSTEM,
-            principalId,
-            role: 'member',
-            grantedByPrincipalId: by,
-          });
+        if (member) {
+          if (current.length === 0)
+            await store.grants.add({
+              target: SYSTEM,
+              principalId,
+              role: 'member',
+              grantedByPrincipalId: by,
+            });
+          await clearAdmissionBlock(principalId);
+        }
         if (!member) {
+          // Blocked before the grant goes, under this lock, so no automatic
+          // admission can slip in between and readmit them.
+          await blockAdmission(principalId, by);
           for (const row of current) await store.grants.remove(row.grantId);
           // Removing membership does not rotate reusable device credentials.
           // A system owner still has admission through its owner role.
@@ -145,6 +191,45 @@ function bubblePeople(store: BubbleStore): PeopleDirectory {
         }
         return true;
       });
+    },
+    admitAutomatically(principalId) {
+      return withMemberGrantLock(principalId, async () => {
+        const principal = await store.principals.get(principalId);
+        if (!principal || principal.disabledAt || principal.kind !== 'user')
+          return false;
+        const rows = await store.grants.list({ target: SYSTEM, principalId });
+        if (rows.some((row) => row.role === 'member' || row.role === 'owner'))
+          return true;
+        // Read under the lock: a revocation for this person has either
+        // committed its block already or waits until this grant is made.
+        const admission = await readAdmission();
+        if (
+          !admission.automatic ||
+          Object.hasOwn(admission.blocked, principalId)
+        )
+          return false;
+        // Ordinary membership only: never a system owner, never a role in an
+        // existing Workspace. Their personal Workspace follows as for anyone
+        // admitted with none.
+        await store.grants.add({
+          target: SYSTEM,
+          principalId,
+          role: 'member',
+          grantedByPrincipalId: null,
+        });
+        log.info({ principalId }, 'Admitted automatically');
+        return true;
+      });
+    },
+    async admission() {
+      return {
+        automatic: (await readAdmission()).automatic,
+        providers: [...providers],
+      };
+    },
+    async setAutomaticAdmission(automatic) {
+      const record = await setAutomaticAdmission(automatic);
+      return { automatic: record.automatic, providers: [...providers] };
     },
     setWorkspaceRole(principalId, workspaceId, role, by) {
       return withWorkspaceGrantLock(
@@ -295,6 +380,22 @@ export async function migrateSpaceGrants(
     throw new AggregateError(failures, 'Some Space grants were not migrated');
 }
 
+/**
+ * The sign-in providers automatic admission applies to: the configured
+ * interactive authenticators. A custom verifier (tests) names none.
+ */
+function admissionProviders(
+  authenticator: NonNullable<CreateBubbleRuntimeOptions['authenticator']>,
+): AdmissionProvider[] {
+  if (!Array.isArray(authenticator)) return [];
+  const drivers = authenticator.map(
+    (entry: { driver: string }) => entry.driver,
+  );
+  return admissionProviderSchema.options
+    .filter((provider) => drivers.includes(provider))
+    .sort((a, b) => drivers.indexOf(a) - drivers.indexOf(b));
+}
+
 /** Bubble's records live beside Huabu's, in a schema of their own. */
 export async function openBubblePostgresStore(
   url: string,
@@ -379,6 +480,7 @@ export async function openBubbleIdentity(options: {
     }
   }
   const { identity } = runtime.application;
+  const people = bubblePeople(store, admissionProviders(options.authenticator));
   const resolvePrincipal = async (
     principalId: string,
   ): Promise<ResolvedIdentity | null> => {
@@ -479,11 +581,22 @@ export async function openBubbleIdentity(options: {
     };
   };
 
+  // A damaged admission record admits nobody rather than locking every
+  // waiting person out of their own identity.
+  const admitAutomatically = (principalId: string) =>
+    people.admitAutomatically(principalId).catch((error: unknown) => {
+      log.error(
+        { err: error },
+        'Automatic admission could not be decided; not admitting',
+      );
+      return false;
+    });
+
   return {
     service: {
       provider: 'bubble',
       challenge: 'Bearer realm="Huabu"',
-      people: bubblePeople(store),
+      people,
       resolvePrincipal,
       selectWorkspace: (identity) =>
         selectRequestWorkspace(identity, preferences, options.resources),
@@ -508,7 +621,20 @@ export async function openBubbleIdentity(options: {
           });
           // Registration binds (issuer, subject) and refuses disabled accounts.
           const registered = await identity.register(auth, 'http');
-          return resolvePrincipal(registered.principalId);
+          const resolved = await resolvePrincipal(registered.principalId);
+          // Only a sign-in through an identity provider (Entra or Auth0,
+          // whose tokens name their issuer) is admitted automatically: never
+          // a local token or the master key, which an existing principal can
+          // mint or hold for someone else.
+          if (
+            resolved &&
+            !resolved.member &&
+            auth.issuer &&
+            auth.subject !== undefined &&
+            (await admitAutomatically(registered.principalId))
+          )
+            return resolvePrincipal(registered.principalId);
+          return resolved;
         } catch (error) {
           if (isBubbleProtocolError(error)) {
             if (error.code === BubbleErrorCode.Unauthenticated) return null;
