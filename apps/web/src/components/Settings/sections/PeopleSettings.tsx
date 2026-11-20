@@ -103,22 +103,25 @@ export function PeopleSettings() {
     <div className="space-y-3">
       <p className="text-fg-subtle text-xs">{t('people.intro')}</p>
       <p className="text-fg-subtle text-xs">{t('people.accessVsWorkspace')}</p>
-      <ul className="divide-edge-default border-edge-default divide-y rounded-lg border">
+      <ul className="divide-edge-default border-edge-default @container divide-y rounded-lg border">
         {people.map((person) => {
           const id = person.principal.principalId;
           const held = new Set(person.workspaces.map((w) => w.workspaceId));
           const addable = workspaces.filter((w) => !held.has(w.workspaceId));
           return (
             <li key={id} className="space-y-2 px-3 py-2.5">
-              <div className="flex items-center gap-3">
-                <div className="min-w-0 flex-1">
-                  <div className="flex min-w-0 items-center gap-2">
-                    <span className="text-fg-default truncate text-sm">
+              {/* The person's name and email are what an administrator
+                  decides on, so they wrap rather than truncate, and in a
+                  narrow list the Service access switch moves below them. */}
+              <div className="flex flex-col items-start gap-2 @md:flex-row @md:items-center @md:gap-3">
+                <div className="w-full min-w-0 @md:w-auto @md:flex-1">
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                    <span className="text-fg-default min-w-0 text-sm [overflow-wrap:anywhere]">
                       {personName(person)}
                     </span>
                     <AccessStatus person={person} />
                   </div>
-                  <div className="text-fg-subtle truncate text-xs">
+                  <div className="text-fg-subtle text-xs [overflow-wrap:anywhere]">
                     {person.principal.email && person.principal.displayName
                       ? person.principal.email
                       : id}
