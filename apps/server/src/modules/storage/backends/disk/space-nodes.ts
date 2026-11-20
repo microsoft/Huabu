@@ -49,7 +49,8 @@ function snapshotsOf(
 const DISK_CHANGE_EPOCH = 'disk:mtime-ms';
 
 /**
- * How far behind the clock a position taken from the clock is placed. A file
+ * How far behind the clock a position taken from the clock is placed (it is
+ * taken from the clock only when a sidecar is dated in the future). A file
  * system stamps a write with a time that can be earlier than the clock read
  * just before it: the kernel's file clock ticks a few milliseconds apart, and
  * some volumes keep whole seconds or two-second steps.
@@ -208,8 +209,9 @@ export class DiskSpaceNodes implements SpaceNodes {
   /**
    * Sidecars modified at or after `since`.
    *
-   * The position is the latest modification time among the sidecars, but
-   * never later than the clock less {@link DISK_CLOCK_SLACK_MS}. "At or after" covers a file system whose
+   * The position is the latest modification time among the sidecars; when
+   * that is ahead of the clock, it is the clock less
+   * {@link DISK_CLOCK_SLACK_MS} instead. "At or after" covers a file system whose
    * times are coarser than the gap between two writes: a write in the same
    * tick as the position is named (again) rather than missed. The clock
    * bound covers a sidecar dated in the future — copied in from a machine
@@ -234,9 +236,12 @@ export class DiskSpaceNodes implements SpaceNodes {
     const times = this.#store.nodeWriteTimes();
     let latest = 0;
     for (const time of times.values()) latest = Math.max(latest, time);
+    // File times are compared with each other as they are. Only a sidecar
+    // dated ahead of the clock brings the clock in, and with it the slack.
+    const now = Date.now();
     const position = {
       epoch: DISK_CHANGE_EPOCH,
-      seq: Math.min(latest, Date.now() - DISK_CLOCK_SLACK_MS),
+      seq: latest > now ? now - DISK_CLOCK_SLACK_MS : latest,
     };
     if (
       since === undefined ||
