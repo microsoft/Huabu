@@ -33,20 +33,15 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # scripts/build-version.mjs owns the nightly format
+      # (X.Y.Z-nightly.<YYYYMMDD>.g<sha7>), shared with the daily image.
       - name: Generate version
         id: version
         shell: bash
+        env:
+          SOURCE_REVISION: ${{ github.sha }}
         run: |
-          BASE_VERSION="$(node -p "require('./apps/desktop/package.json').version.split(/[+-]/)[0]")"
-          if [[ ! "$BASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "Desktop version must use X.Y.Z format: $BASE_VERSION" >&2
-            exit 1
-          fi
-
-          DATE="$(TZ=Asia/Shanghai date +%Y%m%d)"
-          SHORT_SHA="${GITHUB_SHA::7}"
-          VERSION="${BASE_VERSION}-nightly.${DATE}.g${SHORT_SHA}"
-
+          VERSION="$(node scripts/build-version.mjs nightly)"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
           echo "Nightly version: v$VERSION"
@@ -109,6 +104,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       NIGHTLY_VERSION: ${{ needs.prepare.outputs.version }}
+      # The commit the web bundle reports with its version; set explicitly
+      # so the package.json rewrite below is not reported as a dirty tree.
+      SOURCE_REVISION: ${{ github.sha }}
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
       RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
