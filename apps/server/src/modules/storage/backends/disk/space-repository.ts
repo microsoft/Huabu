@@ -109,6 +109,12 @@ export class DiskSpaceRepository implements SpaceRepository {
     });
   }
 
+  async listIds(): Promise<string[]> {
+    this.#assertActiveWorkspace();
+    refreshCanvasDirIndex();
+    return listCanvasDirEntries().map((entry) => entry.id);
+  }
+
   async worldId(): Promise<string> {
     this.#assertActiveWorkspace();
     return this.#requireWorld();

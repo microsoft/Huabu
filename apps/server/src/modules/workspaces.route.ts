@@ -306,10 +306,16 @@ async function spaceCountIn(
     // Not `openWorkspace`, which may write its World on first use: listing
     // must not change anything.
     return await runInWorkspace({ handle: workspace, path: null }, async () => {
-      const spaces = await getStructuredStore().spaces().list();
+      // Ids only: counting must not read every Space's contents.
+      const ids = await getStructuredStore().spaces().listIds();
       return everySpace
-        ? spaces.length
-        : (await readableSpaces(request, spaces)).length;
+        ? ids.length
+        : (
+            await readableSpaces(
+              request,
+              ids.map((canvasId) => ({ canvasId })),
+            )
+          ).length;
     });
   } catch (error) {
     request.log.warn(

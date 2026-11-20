@@ -183,6 +183,12 @@ export interface SpaceRepository {
   }): Promise<boolean>;
   list(): Promise<CanvasSummary[]>;
   /**
+   * The ids of the same ordinary Spaces {@link list} returns (never World), in
+   * no promised order, without reading or decoding any Space's contents. For
+   * callers that only count Spaces or check access to them.
+   */
+  listIds(): Promise<string[]>;
+  /**
    * Return the stable id of the hidden World Space.
    *
    * A missing or malformed World is an integrity failure and rejects.
