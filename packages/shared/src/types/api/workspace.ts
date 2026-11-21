@@ -115,6 +115,15 @@ export type WorkspaceDescriptor = z.infer<typeof workspaceDescriptorSchema>;
 export const workspaceCreateSchema = z.object({
   path: z.string().min(1, 'Workspace path is required').optional(),
   name: z.string().trim().min(1, 'Workspace name is required').optional(),
+  /**
+   * For a create by `name` alone: the client's id for this create, sent again
+   * unchanged when retrying it. A repeat from the same caller with the same
+   * id and name returns the Workspace the first made (200) instead of making
+   * another, so a create whose answer was lost is safe to retry. The Server
+   * remembers it for a limited time in its own process; without it, every
+   * request creates. Ignored with `path`, which is idempotent by folder.
+   */
+  requestId: z.string().min(1).max(200).optional(),
 });
 export type WorkspaceCreateRequest = z.infer<typeof workspaceCreateSchema>;
 

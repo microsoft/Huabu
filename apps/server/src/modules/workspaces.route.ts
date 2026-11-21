@@ -8,6 +8,7 @@ import { z } from 'zod';
 import { workspaceCreateSchema, workspaceRenameSchema } from '@huabu/shared';
 
 import {
+  getRequestIdentity,
   getRequestWorkspaceChooser,
   requireRequestIdentity,
 } from './identity/request.js';
@@ -42,6 +43,7 @@ import {
   WorkspaceActivationInProgressError,
   WorkspaceActivationTimeoutError,
 } from './workspace-activation.js';
+import { createOnce } from './workspace-create-replay.js';
 import {
   commitWorkspacePath,
   getProcessWorkspaceHandle,
@@ -561,8 +563,14 @@ const workspacesRoutes: FastifyPluginAsync = async (app) => {
           .send(descriptor(adopted.workspace));
       }
       try {
-        const workspace = await createWorkspace(parsed.data.name!, claim);
-        return reply.status(201).send(descriptor(workspace));
+        const name = parsed.data.name!;
+        const { workspace, created } = await createOnce(
+          requireRequestIdentity(request).principal.principalId,
+          parsed.data.requestId,
+          name,
+          () => createWorkspace(name, claim),
+        );
+        return reply.status(created ? 201 : 200).send(descriptor(workspace));
       } catch (error) {
         return sendPreparationError(reply, error);
       }
@@ -589,9 +597,13 @@ const workspacesRoutes: FastifyPluginAsync = async (app) => {
         return sendError(reply, 400, 'Workspace name is required');
       }
       try {
-        return reply
-          .status(201)
-          .send(descriptor(await createNamedWorkspace(name)));
+        const { workspace, created } = await createOnce(
+          getRequestIdentity(request)?.principal.principalId ?? '',
+          parsed.data.requestId,
+          name,
+          () => createNamedWorkspace(name),
+        );
+        return reply.status(created ? 201 : 200).send(descriptor(workspace));
       } catch (error) {
         return sendPreparationError(reply, error);
       }

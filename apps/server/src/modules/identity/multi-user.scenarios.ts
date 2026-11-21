@@ -798,6 +798,43 @@ export function describeSeveralPeople(
       await reader.cancel();
     });
 
+    it('makes one Workspace for a create retried with its request ID', async () => {
+      const { call, workspaceOf } = await host();
+      await workspaceOf('carol');
+      await workspaceOf('dave');
+      const names = async (principalId: string) =>
+        (
+          (await call(principalId, 'GET', '/api/workspaces')).body as Array<{
+            name: string;
+          }>
+        )
+          .map((w) => w.name)
+          .filter((name) => name === 'Work log');
+      const body = { name: 'Work log', requestId: 'create-1' };
+
+      const first = await call('carol', 'POST', '/api/workspaces', body);
+      expect(first.status).toBe(201);
+      // The answer was lost; the retry sends the same request.
+      const retried = await call('carol', 'POST', '/api/workspaces', body);
+      expect(retried).toEqual({ status: 200, body: first.body });
+      expect(await names('carol')).toEqual(['Work log']);
+
+      // Names may repeat: a new request ID makes a second Workspace.
+      const another = await call('carol', 'POST', '/api/workspaces', {
+        ...body,
+        requestId: 'create-2',
+      });
+      expect(another.status).toBe(201);
+      expect(another.body.workspaceId).not.toBe(first.body.workspaceId);
+      expect(await names('carol')).toEqual(['Work log', 'Work log']);
+
+      // One person's request ID never answers another's.
+      const daves = await call('dave', 'POST', '/api/workspaces', body);
+      expect(daves.status).toBe(201);
+      expect(daves.body.workspaceId).not.toBe(first.body.workspaceId);
+      expect(await names('dave')).toEqual(['Work log']);
+    });
+
     it('leaves no ownerless Workspace behind when making a personal one fails', async () => {
       const { call, store, workspaceOf } = await host();
       const before = (await getWorkspaceRepository().list()).map(
@@ -833,6 +870,20 @@ export function describeSeveralPeople(
       expect(
         (await getWorkspaceRepository().list()).map((w) => w.name),
       ).not.toContain('Doomed');
+
+      // A create that failed is not replayed: its retry makes the Workspace.
+      failures = 1;
+      const retry = { name: 'Retried', requestId: 'retried-1' };
+      expect(
+        (await call('carol', 'POST', '/api/workspaces', retry)).status,
+      ).toBeGreaterThanOrEqual(400);
+      const made = await call('carol', 'POST', '/api/workspaces', retry);
+      expect(made.status).toBe(201);
+      expect(
+        (await getWorkspaceRepository().list()).filter(
+          (w) => w.name === 'Retried',
+        ),
+      ).toHaveLength(1);
     });
 
     it('requires management of every child reparented by a selection move before any mutations', async () => {
