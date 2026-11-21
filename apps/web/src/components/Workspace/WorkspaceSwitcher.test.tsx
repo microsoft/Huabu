@@ -50,6 +50,13 @@ const server = vi.hoisted(() => ({
   worlds: {} as Record<string, string>,
   /** Makes the next create request fail, as a Server error would. */
   failCreate: false,
+  /**
+   * Makes activation requests fail: `'before'` leaves the current Workspace
+   * as it was; `'after'` switches it but loses the answer.
+   */
+  failActivate: null as null | 'before' | 'after',
+  /** Makes list requests fail. */
+  failList: false,
 }));
 const mocks = vi.hoisted(() => ({
   toast: vi.fn((_message: string, _options?: unknown) => 'toast-id'),
@@ -127,12 +134,18 @@ vi.mock('../../api/workspace', () => {
     };
   };
   return {
-    listWorkspaces: vi.fn(async () => describe()),
+    listWorkspaces: vi.fn(async () => {
+      if (server.failList) throw new Error('List unavailable');
+      return describe();
+    }),
     getWorkspaceInfo: vi.fn(async () => info()),
     activateWorkspace: vi.fn(async (workspaceId: string) => {
       server.calls.push(`activate ${workspaceId}`);
       server.pathsAtActivation.push(server.path);
+      if (server.failActivate === 'before')
+        throw new Error('Activation failed');
       server.current = workspaceId;
+      if (server.failActivate === 'after') throw new Error('Answer lost');
       return describe().find((w) => w.workspaceId === workspaceId);
     }),
     createNamedWorkspace: vi.fn(async (name: string) => {
@@ -320,6 +333,8 @@ beforeEach(() => {
   server.pathsAtActivation = [];
   server.worlds = {};
   server.failCreate = false;
+  server.failActivate = null;
+  server.failList = false;
   mocks.bridge = null;
   useWorkspaceStore.setState({ worldEnabled: false });
   vi.clearAllMocks();
@@ -531,6 +546,16 @@ describe('quick switch popover', () => {
 
 describe('Switch Workspace dialog', () => {
   const open = async () => click(buttonNamed('Menu: Switch Workspace'));
+  const nameField = () => {
+    const name = [...document.querySelectorAll('label')].find(
+      (label) => label.textContent === 'workspace.newWorkspace',
+    );
+    const field = document.querySelector<HTMLInputElement>(
+      `[id="${name?.htmlFor}"]`,
+    );
+    if (!field) throw new Error('No name field');
+    return field;
+  };
 
   it('opens from the menu entry and cancels with Cancel or Escape', async () => {
     await mount();
@@ -562,6 +587,19 @@ describe('Switch Workspace dialog', () => {
     expect(dialog()).toBeNull();
     expect(server.calls).toEqual(['activate lab']);
     expect(label()).toBe('Research lab');
+  });
+
+  it('counts a switch the Server made as done when its answer is lost', async () => {
+    server.failActivate = 'after';
+    await mount();
+    await open();
+    await click(document.querySelector('input[type="radio"][value="lab"]'));
+    await click(buttonNamed('workspace.switchTo {"workspace":"Research lab"}'));
+    expect(label()).toBe('Research lab');
+    expect(useWorkspaceStore.getState().error).toBeNull();
+    expect(mocks.toast.mock.calls[0][0]).toBe(
+      'workspace.switchedCount {"workspace":"Research lab","count":14}',
+    );
   });
 
   it('saves an open Space and leaves it before switching', async () => {
@@ -747,6 +785,54 @@ describe('Switch Workspace dialog', () => {
     expect(dialog()).toBeNull();
     expect(label()).toBe('Side project');
     expect(dismissToast).toHaveBeenCalledWith('create-failed');
+  });
+
+  it('finishes a create that landed even when the list then fails to load', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    await mount();
+    await open();
+    await type(nameField(), 'Side project');
+    server.failList = true;
+    await click(buttonNamed('workspace.create'));
+    expect(server.calls).toEqual(['create Side project', 'activate new-2']);
+    expect(dialog()).toBeNull();
+    expect(label()).toBe('Side project');
+    expect(useWorkspaceStore.getState().error).toBeNull();
+    expect(mocks.toast.mock.calls[0][1]).toMatchObject({ tone: 'success' });
+    expect(server.workspaces.map((w) => w.workspaceId)).toEqual([
+      'default',
+      'lab',
+      'new-2',
+    ]);
+  });
+
+  it('activates the Workspace already made when retrying after activation failed', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    server.failActivate = 'before';
+    await mount();
+    await open();
+    await type(nameField(), 'Side project');
+    await click(buttonNamed('workspace.create'));
+    expect(dialog()).not.toBeNull();
+    expect(label()).toBe('Default');
+
+    await click(buttonNamed('workspace.create'));
+
+    server.failActivate = null;
+    await click(buttonNamed('workspace.create'));
+    expect(server.calls).toEqual([
+      'create Side project',
+      'activate new-2',
+      'activate new-2',
+      'activate new-2',
+    ]);
+    expect(server.workspaces.map((w) => w.workspaceId)).toEqual([
+      'default',
+      'lab',
+      'new-2',
+    ]);
+    expect(dialog()).toBeNull();
+    expect(label()).toBe('Side project');
   });
 });
 
