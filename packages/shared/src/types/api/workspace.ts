@@ -18,6 +18,8 @@
 
 import { z } from 'zod';
 
+import { workspaceRoleSchema } from './identity.js';
+
 export const workspaceModeSchema = z.enum(['free', 'managed']);
 export type WorkspaceMode = z.infer<typeof workspaceModeSchema>;
 
@@ -74,6 +76,30 @@ export const workspaceDescriptorSchema = z.object({
    * absent elsewhere and from older servers, where it should be read as no.
    */
   canManage: z.boolean().optional(),
+  /**
+   * The caller's role in this Workspace, read from the access they actually
+   * have there: `owner` may also manage it, `editor` may add and change
+   * Spaces, `viewer` may only read them. An administrator may manage every
+   * Workspace, so is `owner` of each. `null` means no role in the Workspace
+   * itself: the caller enters it only for Spaces shared with them one by one.
+   *
+   * Sent by the list and get routes in Bubble mode, where each person's access
+   * is decided per Workspace. Absent for a local caller, who has no roles
+   * (local SQLite and Disk storage), and from older servers; clients show no
+   * role then.
+   */
+  role: workspaceRoleSchema.nullable().optional(),
+  /**
+   * How many Spaces the caller may open in this Workspace: every Space,
+   * nested ones included and the hidden World excluded, that
+   * `GET /api/canvas` would list there.
+   *
+   * Sent by the list and get routes where Workspaces are SQL rows (local
+   * SQLite or Postgres structured storage). Absent where Workspaces are Disk
+   * folders, since counting would open every folder; when that Workspace could
+   * not be read just now; and from older servers. Clients show no count then.
+   */
+  spaceCount: z.number().int().nonnegative().optional(),
 });
 export type WorkspaceDescriptor = z.infer<typeof workspaceDescriptorSchema>;
 

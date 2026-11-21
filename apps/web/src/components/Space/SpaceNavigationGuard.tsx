@@ -3,7 +3,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useBlocker } from 'react-router-dom';
+import { useBlocker, useLocation } from 'react-router-dom';
 
 import { Button } from '@/components/Common/Button';
 import { Loading } from '@/components/Common/Loading';
@@ -19,10 +19,13 @@ import useCanvasStore, {
 } from '@/store/canvasStore';
 import { desktopNavigation } from '@/utils/desktopNavigation';
 
+import { settleDepartures } from './spaceDeparture';
+
 /** Keep mounted in the router root so the blocker survives route changes. */
 export function SpaceNavigationGuard() {
   const { t } = useTranslation();
   const tabs = getElectronBridge()?.tabs;
+  const { pathname } = useLocation();
   const stayRef = useRef<HTMLButtonElement>(null);
   const savingDialog = useRef<HTMLDialogElement>(null);
   const discarding = useRef(false);
@@ -42,6 +45,10 @@ export function SpaceNavigationGuard() {
       (currentLocation.pathname.startsWith('/canvas/') &&
         currentLocation.pathname !== nextLocation.pathname),
   );
+  // Off a Space: whoever asked to leave it may go on.
+  useEffect(() => {
+    if (!pathname.startsWith('/canvas/')) settleDepartures(true);
+  }, [pathname]);
   useEffect(() => {
     if (blocker.state !== 'blocked') return;
     const target = desktopNavigation(tabs?.context, blocker.location);
@@ -55,7 +62,11 @@ export function SpaceNavigationGuard() {
             tone: 'danger',
           });
         })
-        .finally(() => blocker.reset?.());
+        .finally(() => {
+          // The Space stays here; another tab opens the target.
+          blocker.reset?.();
+          settleDepartures(false);
+        });
       return;
     }
     let cancelled = false;
@@ -90,6 +101,7 @@ export function SpaceNavigationGuard() {
     if (discarding.current) return;
     setFailedCanvasId(null);
     if (blocker.state === 'blocked') blocker.reset();
+    settleDepartures(false);
   };
   const discard = async () => {
     if (

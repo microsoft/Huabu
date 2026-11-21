@@ -27,6 +27,10 @@ export function desktopNavigation(
     return {
       canvasId: null,
       homePath: location.pathname === '/setup' ? '/setup' : '/spaces',
+      // Home acts on it, e.g. by opening the Switch Workspace dialog.
+      ...(location.state !== undefined && location.state !== null
+        ? { state: location.state }
+        : {}),
     };
   }
   return null;

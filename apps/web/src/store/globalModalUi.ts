@@ -3,6 +3,7 @@
 
 import { useSettingsUiStore } from './settingsUiStore';
 import { useShortcutsUiStore } from './shortcutsUiStore';
+import { useWorkspaceSwitcherUiStore } from './workspaceSwitcherUiStore';
 
 /**
  * Aggregated open-state for every app-wide modal.
@@ -20,5 +21,6 @@ import { useShortcutsUiStore } from './shortcutsUiStore';
 export function useAnyGlobalModalOpen(): boolean {
   const settingsOpen = useSettingsUiStore((s) => s.isOpen);
   const shortcutsOpen = useShortcutsUiStore((s) => s.isOpen);
-  return settingsOpen || shortcutsOpen;
+  const workspaceSwitcherOpen = useWorkspaceSwitcherUiStore((s) => s.isOpen);
+  return settingsOpen || shortcutsOpen || workspaceSwitcherOpen;
 }

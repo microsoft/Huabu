@@ -6,6 +6,7 @@ import {
   Download,
   FolderInput,
   FolderUp,
+  Layers,
   MoreHorizontal,
   Plus,
   Search,
@@ -34,6 +35,7 @@ import { Header } from '../components/Panels/Header/Header';
 import { SpaceDeletionDialog } from '../components/Space/SpaceDeletionDialog';
 import { SpaceOrganizationPopover } from '../components/Space/SpaceOrganizationPopover';
 import { useSpaceParentMove } from '../components/Space/useSpaceParentMove';
+import { WorkspaceSwitcherButton } from '../components/Workspace/WorkspaceSwitcherPopover';
 import { APP_NAME } from '../config/app';
 import { useCanvasActions } from '../hooks/useCanvasActions';
 import {
@@ -344,7 +346,23 @@ export default function CanvasListPage() {
     </span>
   );
   const workspaceSwitcher =
-    !isDesktopHome && workspaceLabel ? (
+    isDesktopHome || !workspaceLabel ? null : namedWorkspaces &&
+      canChangeWorkspace ? (
+      // Named Workspaces switch in place, from a popover over this page.
+      <WorkspaceSwitcherButton
+        label={workspaceLabel}
+        className="group border-info bg-info-bg text-info-fg hover:bg-info-bg-hover focus-visible:ring-info ml-1 inline-flex h-8 max-w-[min(20rem,45vw)] min-w-0 cursor-pointer items-center gap-1.5 rounded-lg border px-2.5 text-sm font-medium transition-colors focus-visible:ring-2 focus-visible:outline-none"
+      >
+        <Layers size={14} className="shrink-0" aria-hidden />
+        <span className="truncate">{workspaceLabel}</span>
+        {/* Points up while the quick switch is open. */}
+        <ChevronDown
+          size={12}
+          className="shrink-0 transition-transform group-aria-expanded:rotate-180"
+          aria-hidden
+        />
+      </WorkspaceSwitcherButton>
+    ) : (
       <Tooltip
         content={
           <div className="text-center">
@@ -377,7 +395,7 @@ export default function CanvasListPage() {
           </span>
         )}
       </Tooltip>
-    ) : null;
+    );
 
   if (isDesktopHome && workspaceSyncing) return <WorkspaceLoadingScreen />;
 
