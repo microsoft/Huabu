@@ -69,9 +69,10 @@ export type SetPersonWorkspaceRoleRequest = z.infer<
 /**
  * A sign-in provider that automatic admission can admit people from: an
  * interactive authenticator configured in `HUABU_BUBBLE_AUTH`. `entra` admits
- * only accounts in its one configured tenant; `auth0` admits any account that
- * can sign in through that Auth0 tenant's connections. Local tokens and the
- * master key are never admitted automatically.
+ * only accounts in the tenants its entries name (one per entry, and any number
+ * of entries); `auth0` admits any account that can sign in through that Auth0
+ * tenant's connections, but never an application's client-credentials token.
+ * Local tokens and the master key are never admitted automatically.
  */
 export const admissionProviderSchema = z.enum(['entra', 'auth0']);
 export type AdmissionProvider = z.infer<typeof admissionProviderSchema>;

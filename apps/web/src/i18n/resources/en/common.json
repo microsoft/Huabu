@@ -1814,7 +1814,7 @@
       "title": "Automatic admission",
       "description": "Admit anyone who signs in with {{providers}} as an ordinary member with a personal Workspace. They never become administrators or join existing Workspaces.",
       "provider": {
-        "entra": "Microsoft Entra ID (this deployment's tenant only)",
+        "entra": "Microsoft Entra ID (only the tenants configured here)",
         "auth0": "Auth0 (anyone its sign-in accepts)"
       },
       "providerSeparator": " or ",
