@@ -258,6 +258,82 @@ test('Bubble administrators see People in the current Settings navigation', asyn
   });
 });
 
+test('People lists everyone and resets devices when the admission setting cannot load', async ({
+  page,
+}, testInfo) => {
+  const admin = {
+    ...member,
+    principal: { principalId: 'admin', kind: 'user', displayName: 'Admin' },
+    owner: true,
+  };
+  await page.route('**/api/identity', (route) =>
+    route.fulfill({ json: admin }),
+  );
+  await page.route('**/api/workspaces', (route) => route.fulfill({ json: [] }));
+  await page.route('**/api/people/admission', (route) =>
+    route.fulfill({ status: 500, json: { message: 'Internal Server Error' } }),
+  );
+  await page.route('**/api/people', (route) =>
+    route.fulfill({
+      json: [
+        {
+          principal: admin.principal,
+          member: false,
+          admin: true,
+          joinedAutomatically: false,
+          blocked: false,
+          workspaces: [],
+        },
+        {
+          principal: { principalId: 'ivan', kind: 'user', displayName: 'Ivan' },
+          member: false,
+          admin: false,
+          joinedAutomatically: false,
+          // The server could not read the record either.
+          blocked: null,
+          workspaces: [],
+        },
+      ],
+    }),
+  );
+  await page.route('**/api/people/ivan/agent-credentials/reset', (route) =>
+    route.fulfill({ status: 204 }),
+  );
+  await page.goto('/playground/components');
+  await page.evaluate(async () => {
+    const load = (path: string) => import(/* @vite-ignore */ path);
+    const { useSettingsUiStore } = await load('/src/store/settingsUiStore.ts');
+    useSettingsUiStore.getState().open('people');
+  });
+  const dialog = page.getByRole('dialog', {
+    name: en.settings.title,
+    exact: true,
+  });
+  await expect(dialog.getByText(en.people.admission.loadFailed)).toBeVisible();
+  await expect(
+    dialog.getByRole('switch', { name: en.people.admission.title }),
+  ).toHaveCount(0);
+  const ivan = dialog.getByRole('listitem').filter({ hasText: 'Ivan' });
+  await expect(
+    ivan.getByText(en.people.status.noAccess, { exact: true }),
+  ).toBeVisible();
+  await page.screenshot({
+    path: testInfo.outputPath('people-admission-unavailable.png'),
+  });
+
+  const reset = page.waitForRequest(
+    '**/api/people/ivan/agent-credentials/reset',
+  );
+  await ivan
+    .getByRole('button', { name: en.people.resetDevices, exact: true })
+    .click();
+  await page
+    .getByRole('dialog', { name: en.people.resetDevices, exact: true })
+    .getByRole('button', { name: en.people.resetDevices, exact: true })
+    .click();
+  await reset;
+});
+
 test('People keeps each person whole and their access switch beside or below them', async ({
   page,
 }, testInfo) => {

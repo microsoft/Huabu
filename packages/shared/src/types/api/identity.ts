@@ -44,9 +44,10 @@ export const personSchema = z.object({
   /**
    * An administrator removed their access. Automatic admission never readmits
    * them; an administrator turning their access back on clears this. Always
-   * `false` while `member` is `true`.
+   * `false` while `member` is `true`. `null` when the admission record cannot
+   * be read, so whether a person without access was removed is unknown.
    */
-  blocked: z.boolean(),
+  blocked: z.boolean().nullable(),
   /** Workspace roles held directly, one entry per Workspace. */
   workspaces: z.array(
     z.object({ workspaceId: z.string().min(1), role: workspaceRoleSchema }),

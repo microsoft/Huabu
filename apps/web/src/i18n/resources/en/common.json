@@ -1819,13 +1819,15 @@
       },
       "providerSeparator": " or ",
       "noProviders": "Automatic admission applies to Microsoft Entra ID and Auth0 sign-in, and neither is configured here.",
-      "keepsRemoved": "People you remove stay out until you turn their access back on. Turning off automatic admission removes nobody."
+      "keepsRemoved": "People you remove stay out until you turn their access back on. Turning off automatic admission removes nobody.",
+      "loadFailed": "Could not load the automatic admission setting. Reopen People to try again."
     },
     "status": {
       "administrator": "Administrator",
       "admitted": "Has access",
       "waiting": "Waiting for access",
       "blocked": "Access removed",
+      "noAccess": "No access",
       "joinedAutomatically": "Joined automatically"
     },
     "roleIn": "Role in {{workspace}}",

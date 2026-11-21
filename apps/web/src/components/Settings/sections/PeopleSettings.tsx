@@ -69,7 +69,11 @@ function AccessStatus({ person }: { person: Person }) {
       ? [t('people.status.admitted'), 'bg-success-bg text-success-fg']
       : person.blocked
         ? [t('people.status.blocked'), 'bg-danger-bg text-danger-fg']
-        : [t('people.status.waiting'), 'bg-warning-bg text-warning-fg'];
+        : person.blocked === null
+          ? // The admission record is unreadable, so whether they were
+            // removed or are waiting is unknown.
+            [t('people.status.noAccess'), 'bg-hover text-fg-muted']
+          : [t('people.status.waiting'), 'bg-warning-bg text-warning-fg'];
   return (
     <>
       <Badge className={className}>{label}</Badge>
@@ -147,19 +151,26 @@ export function PeopleSettings() {
   const { t } = useTranslation();
   const self = useIdentityStore((s) => s.identity?.principal.principalId);
   const [people, setPeople] = useState<Person[] | null>(null);
-  const [admission, setAdmission] = useState<AdmissionSettings | null>(null);
+  // `unavailable` when it has never loaded: People still works without it.
+  const [admission, setAdmission] = useState<
+    AdmissionSettings | 'unavailable' | null
+  >(null);
   const [workspaces, setWorkspaces] = useState<WorkspaceDescriptor[]>([]);
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
-    const [nextPeople, nextWorkspaces, nextAdmission] = await Promise.all([
-      listPeople(),
-      listWorkspaces(),
+    // The admission setting loads on its own, so when it cannot be read the
+    // list, and each person's Reset devices, still work.
+    const [directory, nextAdmission] = await Promise.allSettled([
+      Promise.all([listPeople(), listWorkspaces()]),
       getAdmission(),
     ]);
+    if (nextAdmission.status === 'fulfilled') setAdmission(nextAdmission.value);
+    else setAdmission((shown) => shown ?? 'unavailable');
+    if (directory.status === 'rejected') throw directory.reason;
+    const [nextPeople, nextWorkspaces] = directory.value;
     setPeople(nextPeople);
     setWorkspaces(nextWorkspaces);
-    setAdmission(nextAdmission);
   }, []);
 
   useEffect(() => {
@@ -190,24 +201,32 @@ export function PeopleSettings() {
     label: t(`people.role.${role}`),
   }));
 
-  if (!people || !admission)
+  if (!people)
     return <p className="text-fg-subtle text-sm">{t('people.loading')}</p>;
 
   return (
     <div className="space-y-3">
       <p className="text-fg-subtle text-xs">{t('people.intro')}</p>
       <p className="text-fg-subtle text-xs">{t('people.accessVsWorkspace')}</p>
-      <AutomaticAdmission
-        admission={admission}
-        busy={busy}
-        onChange={(automatic) =>
-          void change(async () => {
-            // Shown as soon as it is saved, so a failed refresh after it
-            // cannot leave the switch saying the opposite of the policy.
-            setAdmission(await setAutomaticAdmission(automatic));
-          })
-        }
-      />
+      {admission === 'unavailable' ? (
+        <p className="text-danger-fg text-xs">
+          {t('people.admission.loadFailed')}
+        </p>
+      ) : (
+        admission && (
+          <AutomaticAdmission
+            admission={admission}
+            busy={busy}
+            onChange={(automatic) =>
+              void change(async () => {
+                // Shown as soon as it is saved, so a failed refresh after it
+                // cannot leave the switch saying the opposite of the policy.
+                setAdmission(await setAutomaticAdmission(automatic));
+              })
+            }
+          />
+        )
+      )}
       <ul className="divide-edge-default border-edge-default @container divide-y rounded-lg border">
         {people.map((person) => {
           const id = person.principal.principalId;

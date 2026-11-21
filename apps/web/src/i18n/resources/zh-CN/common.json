@@ -1819,13 +1819,15 @@
       },
       "providerSeparator": "或",
       "noProviders": "自动开通仅适用于 Microsoft Entra ID 和 Auth0 登录，而此处两者均未配置。",
-      "keepsRemoved": "你移除的人在你重新开通前无法再进入。关闭自动开通不会移除任何人。"
+      "keepsRemoved": "你移除的人在你重新开通前无法再进入。关闭自动开通不会移除任何人。",
+      "loadFailed": "无法加载自动开通设置。请重新打开成员页面重试。"
     },
     "status": {
       "administrator": "管理员",
       "admitted": "已开通",
       "waiting": "等待开通",
       "blocked": "已移除访问权限",
+      "noAccess": "未开通",
       "joinedAutomatically": "自动加入"
     },
     "roleIn": "在 {{workspace}} 中的角色",

@@ -133,7 +133,7 @@ async function host(
         member: boolean;
         admin: boolean;
         joinedAutomatically: boolean;
-        blocked: boolean;
+        blocked: boolean | null;
       }>
     ).find((p) => p.principal.principalId === principalId);
   const grants = async (principalId: string) =>
@@ -445,7 +445,7 @@ describe('automatic admission', () => {
   });
 
   it('keeps People working when its record is damaged, except removing access', async () => {
-    const { store, call, identity, setMember } = await host();
+    const { store, call, identity, setMember, person } = await host();
     expect(await identity('erin')).toMatchObject({ member: false });
     await getServerRecords().put(
       { owner: null, name: 'admission' },
@@ -455,6 +455,15 @@ describe('automatic admission', () => {
       (await store.grants.list({ target: { type: 'system' }, principalId }))
         .map((grant) => grant.role)
         .filter((role) => role === 'member');
+    // People still lists everyone, with blocks unknown for those waiting.
+    expect(await person('erin')).toMatchObject({
+      member: false,
+      blocked: null,
+    });
+    expect(await person('carol')).toMatchObject({
+      member: true,
+      blocked: false,
+    });
     // Admitting needs no block cleared to stand.
     expect((await setMember('erin', true)).status).toBe(204);
     expect(await memberRoles('erin')).toEqual(['member']);

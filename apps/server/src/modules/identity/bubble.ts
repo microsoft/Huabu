@@ -116,7 +116,12 @@ function bubblePeople(
       const [principals, grants, admission] = await Promise.all([
         store.principals.list(),
         store.grants.list(),
-        readAdmission(),
+        // Without the record People still lists everyone, so an administrator
+        // can find a person and reset their devices; only blocks go unknown.
+        readAdmission().catch((error: unknown) => {
+          log.warn({ err: error }, 'People listed without admission blocks');
+          return null;
+        }),
       ]);
       return principals.map((principal) => {
         const held = grants.filter(
@@ -155,9 +160,11 @@ function bubblePeople(
           // A block outlasts a grant someone added through Bubble's own API;
           // it only matters, and is only shown, while they have no access.
           blocked:
-            !memberGrant &&
-            !admin &&
-            Object.hasOwn(admission.blocked, principal.principalId),
+            memberGrant || admin
+              ? false
+              : admission
+                ? Object.hasOwn(admission.blocked, principal.principalId)
+                : null,
           workspaces: [...workspaces].map(([workspaceId, role]) => ({
             workspaceId,
             role,

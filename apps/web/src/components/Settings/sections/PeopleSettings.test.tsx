@@ -138,6 +138,7 @@ it('turns automatic admission on, naming the providers it applies to', async () 
 
 it('shows the saved admission setting even when the refresh after it fails', async () => {
   mocks.listPeople.mockRejectedValue(new Error('People unavailable'));
+  mocks.getAdmission.mockRejectedValue(new Error('Admission unavailable'));
   await act(async () => automaticSwitch()?.click());
   expect(mocks.setAutomaticAdmission).toHaveBeenCalledExactlyOnceWith(true);
   expect(automaticSwitch()?.getAttribute('aria-checked')).toBe('true');
@@ -148,6 +149,27 @@ it('shows the saved admission setting even when the refresh after it fails', asy
   });
   await act(async () => automaticSwitch()?.click());
   expect(mocks.setAutomaticAdmission).toHaveBeenLastCalledWith(false);
+});
+
+it('lists people and their device reset when the admission setting cannot load', async () => {
+  mocks.getAdmission.mockRejectedValue(new Error('Admission unavailable'));
+  mocks.listPeople.mockResolvedValue([
+    person('admin', { admin: true }),
+    { ...person('ivan', {}), blocked: null },
+  ]);
+  await act(async () => root.unmount());
+  root = createRoot(container);
+  await render();
+  expect(automaticSwitch()).toBeNull();
+  expect(container.textContent).toContain('people.admission.loadFailed');
+  expect(container.textContent).not.toContain('people.loading');
+  const ivan = Array.from(container.querySelectorAll('li')).find((li) =>
+    li.textContent?.startsWith('ivan'),
+  );
+  // Whether Ivan was removed is unknown, so he is neither waiting nor blocked.
+  expect(ivan?.textContent).toContain('people.status.noAccess');
+  expect(ivan?.textContent).not.toContain('people.status.waiting');
+  expect(ivan?.textContent).toContain('people.resetDevices');
 });
 
 it('offers no switch to turn on when no identity provider is configured', async () => {
