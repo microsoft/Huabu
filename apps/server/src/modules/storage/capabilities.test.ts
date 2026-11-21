@@ -101,7 +101,6 @@ describe('storage capability matrix', () => {
     expect(hasStorageCapability(OFFSITE_BYTES, 'builtin-file-tools')).toBe(
       false,
     );
-    expect(hasStorageCapability(OFFSITE_BYTES, 'space-file-plane')).toBe(false);
 
     // What survives: the Space folder still holds the record and the node
     // documents, so showing it to a user is still showing them the Space, and

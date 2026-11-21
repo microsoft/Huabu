@@ -533,6 +533,7 @@ function minEdgeDistFromCluster(
  */
 export function serializeNodeNeighbourhood(
   ctx: NodeNeighbourhoodContext,
+  options?: { includeFile?: boolean },
 ): string {
   const blocks: string[] = [];
 
@@ -559,7 +560,9 @@ export function serializeNodeNeighbourhood(
         .filter(Boolean)
         .join(' ');
       blocks.push(
-        [`<group ${attrs}>`, renderNodes(g.nodes), '</group>'].join('\n'),
+        [`<group ${attrs}>`, renderNodes(g.nodes, options), '</group>'].join(
+          '\n',
+        ),
       );
     }
   }

@@ -10,8 +10,8 @@
  *
  * The differences are intentional and tied to how each backend reads
  * node bodies: the built-in agent reads by pre-computed `file=` path
- * (`read()` / `inspect_nodes()`), the external agent downloads by that
- * same `file=` path over the RFS (`GET ${HUABU_RFS_URL}/download/<file>`).
+ * (`read()` / `inspect_nodes()`), while the external agent downloads by
+ * `id` over the RFS (`download <id>` or `GET ${HUABU_RFS_URL}/download/<id>`).
  * The sketch-raster reuse hint is worded per `toolset` (built-in
  * `snapshot_nodes` vs asking the canvas agent to render).
  */
@@ -21,8 +21,8 @@ export interface RenderProfile {
   /**
    * Which tool surface the agent has — picks the read verb in section
    * intros and tool-specific wording. `internal` reads by `file=` path
-   * (`read()` / `inspect_nodes()`); `reachback` downloads by that same
-   * `file=` path over the RFS (`GET ${HUABU_RFS_URL}/download/<file>`).
+   * (`read()` / `inspect_nodes()`); `reachback` downloads by node `id`
+   * over the RFS (`download <id>` or `GET ${HUABU_RFS_URL}/download/<id>`).
    */
   toolset: 'internal' | 'reachback';
   /** Inline selection pixels as `<selected_nodes_visuals>` (+ sketch hint). */
@@ -35,7 +35,7 @@ export const INTERNAL_PROFILE: RenderProfile = {
   includeSelectionVisuals: true,
 };
 
-/** External/ACP agent: read-by-path (over RFS), selection pixels, task last. */
+/** External/ACP agent: read-by-id (over RFS), selection pixels, task last. */
 export const ACP_PROFILE: RenderProfile = {
   toolset: 'reachback',
   includeSelectionVisuals: true,

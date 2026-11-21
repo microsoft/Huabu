@@ -155,12 +155,11 @@ describe('renderExternalAgentInputs', () => {
     expect(serialized).toContain('<selected_nodes>');
     expect(serialized).toContain('</selected_nodes>');
     expect(serialized).toContain(
-      '<node id="node-a" type="note" label="Intro" file="nodes/Intro.md" />',
+      '<node id="node-a" type="note" label="Intro" />',
     );
-    // Label-less node renders with id + type + file.
-    expect(serialized).toContain(
-      '<node id="node-b" type="image" file="nodes/node-b.md" />',
-    );
+    // Label-less node renders with id + type and omits Disk file= paths.
+    expect(serialized).toContain('<node id="node-b" type="image" />');
+    expect(serialized).not.toContain('file=');
     // The user's words come last, wrapped in <user_request>.
     expect(serialized).toContain(
       '<user_request>\nCompare these notes.\n</user_request>',
@@ -179,7 +178,7 @@ describe('renderExternalAgentInputs', () => {
       agentAlias: 'claude',
       logger,
     });
-    expect(serialized).toContain('${HUABU_RFS_URL}/download/');
+    expect(serialized).toContain('${HUABU_RFS_URL}/download/<id>');
   });
 
   it('escapes XML-special characters in labels so the attribute cannot break', async () => {
@@ -192,7 +191,7 @@ describe('renderExternalAgentInputs', () => {
       logger,
     });
     expect(serialized).toContain(
-      '<node id="n1" type="note" label="a &quot; &lt;b&gt;" file="nodes/a _ _b_.md" />',
+      '<node id="n1" type="note" label="a &quot; &lt;b&gt;" />',
     );
   });
   it('wraps off-canvas attachments in <attachments> before the user request', async () => {
@@ -333,7 +332,7 @@ describe('canonical ACP rendering', () => {
 
     expect(result.serialized).toContain('do something');
     expect(result.serialized).toContain(
-      '<node id="child-1" type="note" label="Child" file="nodes/Child.md" />',
+      '<node id="child-1" type="note" label="Child" />',
     );
   });
 
@@ -371,10 +370,11 @@ describe('canonical ACP rendering', () => {
     expect(result.serialized).toContain(
       '<group direction="to the left" arrangement="2 nodes">',
     );
-    // ACP now emits `file=` too (RFS downloads by file path).
+    // ACP omits Disk `file=` paths and addresses nodes by `id`.
     expect(result.serialized).toContain(
-      '<node id="sketch-a" type="sketch" label="Sketch A" file="nodes/Sketch A.md" />',
+      '<node id="sketch-a" type="sketch" label="Sketch A" />',
     );
+    expect(result.serialized).not.toContain('file=');
     // The user's request comes LAST; the neighbourhood precedes it.
     expect(result.serialized.indexOf('<canvas_neighbourhood>')).toBeLessThan(
       result.serialized.indexOf('generate an image'),

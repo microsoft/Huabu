@@ -13,9 +13,14 @@ import path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { importForeignNodeSources, NodeCoverError } from './import-node-src.js';
+import {
+  importForeignNodeSources,
+  NodeCoverError,
+  NodeSourceError,
+} from './import-node-src.js';
 import { createCanvas } from '../storage/compatibility/canvas.js';
 import { space, getCanvasStore } from '../storage/index.js';
+import { mountTestWorkspace } from '../storage/testing.js';
 import { setWorkspacePath } from '../workspace.js';
 
 import type { CanvasCommand } from '@huabu/shared';
@@ -830,5 +835,142 @@ describe('importForeignNodeSources — PDF covers', () => {
       },
     ];
     expect(await importCovers(commands)).toEqual(commands);
+  });
+});
+
+describe('importForeignNodeSources — portable artifact keys and non-Disk storage', () => {
+  it('accepts .htm and .mhtml local uploads and bare artifact keys on web nodes', async () => {
+    const canvasId = 'c-web-local';
+    stageUpload(
+      canvasId,
+      'snapshot.mhtml',
+      'MIME-Version: 1.0\r\n\r\n<p>hi</p>',
+    );
+    await space(canvasId).artifacts.put(
+      'artifact-direct.htm',
+      Buffer.from('<!doctype html><p>htm</p>'),
+    );
+
+    const out = await importForeignNodeSources(canvasId, [
+      {
+        type: 'CREATE_NODES',
+        nodes: [
+          {
+            nodeType: 'web',
+            data: { src: 'upload/snapshot.mhtml', label: 'Archive' },
+            position: { x: 0, y: 0 },
+          },
+          {
+            nodeType: 'web',
+            data: { src: 'artifact-direct.htm', label: 'Direct HTM' },
+            position: { x: 420, y: 0 },
+          },
+        ],
+      },
+    ]);
+
+    const create = out[0];
+    if (create?.type !== 'CREATE_NODES')
+      throw new Error('Expected CREATE_NODES');
+    expect((create.nodes[0]?.data as { src?: string }).src).toMatch(
+      /^artifact-[^/]+\.mhtml$/,
+    );
+    expect((create.nodes[1]?.data as { src?: string }).src).toBe(
+      'artifact-direct.htm',
+    );
+  });
+
+  it('rejects non-HTML or missing bare artifact keys on web nodes with NodeSourceError', async () => {
+    const canvasId = 'c-web-local';
+    await space(canvasId).artifacts.put(
+      'artifact-wrong.pdf',
+      Buffer.from('%PDF-1.4'),
+    );
+
+    await expect(
+      importForeignNodeSources(canvasId, [
+        {
+          type: 'CREATE_NODES',
+          nodes: [
+            {
+              nodeType: 'web',
+              data: { src: 'artifact-wrong.pdf', label: 'Wrong' },
+              position: { x: 0, y: 0 },
+            },
+          ],
+        },
+      ]),
+    ).rejects.toThrow(NodeSourceError);
+
+    await expect(
+      importForeignNodeSources(canvasId, [
+        {
+          type: 'CREATE_NODES',
+          nodes: [
+            {
+              nodeType: 'web',
+              data: { src: 'artifact-missing.html', label: 'Missing' },
+              position: { x: 0, y: 0 },
+            },
+          ],
+        },
+      ]),
+    ).rejects.toThrow(NodeSourceError);
+  });
+
+  it('runs cleanly on a SQLite structured backend with no diskTree', async () => {
+    const mounted = await mountTestWorkspace(
+      { structured: { kind: 'sqlite' }, blobs: { kind: 'disk' } },
+      'huabu-import-src-sqlite-',
+    );
+    try {
+      const canvasId = 'c-sqlite-space';
+      const created = await mounted.storage.structured
+        .spaces()
+        .create({ canvasId, title: 'SQLite Space' });
+      if (!created.ok) throw new Error('Expected SQLite Space creation');
+      expect(mounted.storage.space(canvasId).diskTree).toBeNull();
+
+      await mounted.storage
+        .space(canvasId)
+        .artifacts.put('artifact-img.png', Buffer.from('png-bytes'));
+      await mounted.storage
+        .space(canvasId)
+        .artifacts.put(
+          'artifact-page.mhtml',
+          Buffer.from('MIME-Version: 1.0\r\n\r\n<p>ok</p>'),
+        );
+
+      const out = await importForeignNodeSources(canvasId, [
+        {
+          type: 'CREATE_NODES',
+          nodes: [
+            {
+              nodeType: 'image',
+              data: { src: 'artifact-img.png', label: 'Diagram' },
+              position: { x: 0, y: 0 },
+            },
+            {
+              nodeType: 'web',
+              data: { src: 'artifact-page.mhtml', label: 'Saved Page' },
+              position: { x: 420, y: 0 },
+            },
+          ],
+        },
+      ]);
+
+      const create = out[0];
+      if (create?.type !== 'CREATE_NODES') {
+        throw new Error('Expected CREATE_NODES');
+      }
+      expect((create.nodes[0]?.data as { src?: string }).src).toBe(
+        'artifact-img.png',
+      );
+      expect((create.nodes[1]?.data as { src?: string }).src).toBe(
+        'artifact-page.mhtml',
+      );
+    } finally {
+      await mounted.close();
+    }
   });
 });

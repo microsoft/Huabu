@@ -25,7 +25,7 @@ curl -fsS -H "$AUTH" -H "Content-Type: text/html" \
   "$HUABU_RFS_URL/upload/issue-tracker.html"
 ```
 
-The response path, such as `upload/issue-tracker.html`, is the `rendererArtifact` used in the create request. Huabu imports it into Canvas artifact storage and reclaims the staged upload.
+The response `{ "id": "<artifactKey>", "size": ... }` (for example `artifact-8f2a.html`) supplies the `rendererArtifact` key used in the create request.
 
 ## 3. Create the View
 
@@ -34,7 +34,7 @@ The response path, such as `upload/issue-tracker.html`, is the `rendererArtifact
 ```bash
 cat > /tmp/huabu-view.json <<JSON
 {
-  "rendererArtifact": "upload/issue-tracker.html",
+  "rendererArtifact": "artifact-8f2a.html",
   "viewKey": "issue-tracker",
   "label": "Issue Tracker",
   "ownerThreadId": "$HUABU_THREAD_ID",

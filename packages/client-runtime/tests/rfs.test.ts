@@ -390,15 +390,16 @@ describe('optional raw RFS client', () => {
     expect(stdout.text()).toContain('data: last');
   });
 
-  it('streams binary file/stdin uploads with exactly-once encoding', async () => {
+  it('streams binary file/stdin uploads with exactly-once encoding and optional filename inference', async () => {
     const payload = Buffer.from([0, 255, 10, 13, 128, 42]);
     const file = join(await directory(), 'upload.bin');
     await writeFile(file, payload);
+    const urls: string[] = [];
     const env = await server((request, response) => {
-      expect(request.url).toBe('/rfs/space/upload/a%20%2520.bin');
+      urls.push(request.url ?? '');
       void bytes(request).then((body) => {
         expect(body).toEqual(payload);
-        response.end('{"unknown":"untouched"}');
+        response.end('{"id":"artifact-1.bin","size":6}');
       });
     });
     for (const source of [file, '-']) {
@@ -408,8 +409,24 @@ describe('optional raw RFS client', () => {
         payload,
       );
       expect(result.code).toBe(0);
-      expect(result.stdout.toString()).toBe('{"unknown":"untouched"}');
+      expect(result.stdout.toString()).toBe('{"id":"artifact-1.bin","size":6}');
     }
+    const inferred = await call(['upload', '--file', file], env);
+    expect(inferred.code).toBe(0);
+    expect(urls).toEqual([
+      '/rfs/space/upload/a%20%2520.bin',
+      '/rfs/space/upload/a%20%2520.bin',
+      '/rfs/space/upload/upload.bin',
+    ]);
+    const missingStdinName = await call(
+      ['upload', '--file', '-'],
+      env,
+      payload,
+    );
+    expect(missingStdinName.code).toBe(1);
+    expect(missingStdinName.stderr).toContain(
+      'requires an explicit [filename]',
+    );
   });
 
   it('deletes a staged upload without reading a file or request body', async () => {
@@ -442,7 +459,7 @@ describe('optional raw RFS client', () => {
     });
     await writeFile(target, 'old');
     const env = await server((request, response) => {
-      expect(request.url).toBe('/rfs/space/download/nodes/a%20%2520.md');
+      expect(request.url).toBe('/rfs/space/download/node-1%20%2520');
       response.setHeader('etag', '"revision"');
       response.setHeader('x-huabu-node-id', 'node-1');
       response.setHeader('x-huabu-node-type', 'note');
@@ -461,7 +478,7 @@ describe('optional raw RFS client', () => {
         response.end(Buffer.from([0, 255, 10]));
       }
     });
-    const args = ['download', 'nodes/a %20.md', '--output', target];
+    const args = ['download', 'node-1 %20', '--output', target];
     const downloaded = await call(args, env);
     expect(downloaded.code).toBe(0);
     expect(await readFile(target)).toEqual(Buffer.from([0, 255, 10]));
@@ -607,6 +624,7 @@ describe('optional raw RFS client', () => {
   it.each([
     [['query', '--help'], undefined, '/capabilities'],
     [['query', '--help', 'QUERY'], undefined, '/capabilities/queries/QUERY'],
+    [['snapshot', '--help'], undefined, '/capabilities/queries/SNAPSHOT_NODES'],
     [['execute', '--help', 'CMD'], undefined, '/capabilities/commands/CMD'],
     [['agent', '--help'], '/skill/agents', undefined],
     [['agent', 'prompt', '--help'], '/skill/agents', undefined],
@@ -1406,3 +1424,127 @@ it.each(['', '   '])(
     expect(result.code).toBe(0);
   },
 );
+
+describe('huabu-rfs snapshot command', () => {
+  it('queries SNAPSHOT_NODES, downloads every PNG cluster to --out-dir, and reports files JSON', async () => {
+    const outDir = join(await directory(), 'snaps');
+    let seenQuery: unknown;
+    const png1 = Buffer.from([137, 80, 78, 71, 1]);
+    const png2 = Buffer.from([137, 80, 78, 71, 2]);
+    const env = await server(async (request, response) => {
+      if (request.url === '/rfs/space/query') {
+        seenQuery = JSON.parse((await bytes(request)).toString('utf8'));
+        response.setHeader('content-type', 'application/json');
+        response.end(
+          JSON.stringify({
+            type: 'SNAPSHOT_NODES',
+            basis: 'b5.snap',
+            result: {
+              snapshots: [
+                {
+                  src: 'sketch-raster-1.png',
+                  width: 320,
+                  height: 240,
+                  originNodeIds: ['sketch-1'],
+                },
+                {
+                  src: 'sketch-raster-2.png',
+                  width: 400,
+                  height: 300,
+                  originNodeIds: ['img-1'],
+                },
+              ],
+            },
+          }),
+        );
+        return;
+      }
+      if (request.url === '/rfs/space/download/sketch-raster-1.png') {
+        response.end(png1);
+        return;
+      }
+      if (request.url === '/rfs/space/download/sketch-raster-2.png') {
+        response.end(png2);
+        return;
+      }
+      response.writeHead(404).end('unexpected');
+    });
+
+    const result = await call(
+      [
+        'snapshot',
+        'sketch-1',
+        'img-1',
+        '--out-dir',
+        outDir,
+        '--max-pixels',
+        '1024',
+        '--padding',
+        '16',
+        '--stroke-subset',
+        'sketch-1:s1,s2',
+      ],
+      env,
+    );
+    expect(result.code).toBe(0);
+    expect(seenQuery).toEqual({
+      type: 'SNAPSHOT_NODES',
+      nodeIds: ['sketch-1', 'img-1'],
+      maxPixels: 1024,
+      padding: 16,
+      strokeSubsets: [{ nodeId: 'sketch-1', strokeIds: ['s1', 's2'] }],
+    });
+    expect(JSON.parse(result.stdout.toString())).toEqual({
+      basis: 'b5.snap',
+      snapshots: [
+        {
+          src: 'sketch-raster-1.png',
+          output: join(outDir, 'sketch-raster-1.png'),
+          width: 320,
+          height: 240,
+          originNodeIds: ['sketch-1'],
+        },
+        {
+          src: 'sketch-raster-2.png',
+          output: join(outDir, 'sketch-raster-2.png'),
+          width: 400,
+          height: 300,
+          originNodeIds: ['img-1'],
+        },
+      ],
+    });
+    expect(await readFile(join(outDir, 'sketch-raster-1.png'))).toEqual(png1);
+    expect(await readFile(join(outDir, 'sketch-raster-2.png'))).toEqual(png2);
+  });
+
+  it('handles zero snapshots and rejects invalid snapshot arguments', async () => {
+    const outDir = join(await directory(), 'empty');
+    const env = await server((_request, response) => {
+      response.setHeader('content-type', 'application/json');
+      response.end(
+        JSON.stringify({
+          type: 'SNAPSHOT_NODES',
+          basis: 'b1.empty',
+          result: { snapshots: [] },
+        }),
+      );
+    });
+    const empty = await call(
+      ['snapshot', 'frame-empty', '--out-dir', outDir],
+      env,
+    );
+    expect(empty.code).toBe(0);
+    expect(JSON.parse(empty.stdout.toString())).toEqual({
+      basis: 'b1.empty',
+      snapshots: [],
+    });
+
+    for (const bad of [
+      ['snapshot', 'node-1'],
+      ['snapshot', '--out-dir', outDir],
+      ['snapshot', 'node-1', '--out-dir', outDir, '--stroke-subset', 'bad'],
+    ]) {
+      expect((await call(bad, env)).code).toBe(1);
+    }
+  });
+});

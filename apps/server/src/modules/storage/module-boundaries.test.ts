@@ -430,9 +430,6 @@ describe('Disk Space tree capability', () => {
     'modules/canvas/canvas.route.ts',
     // A — external-note claim.
     'modules/canvas/external.route.ts',
-    // B, deferred — RFS's sidecar-to-record mapping. Portable in principle,
-    // Disk's in practice until a second backend has a file plane at all.
-    'modules/remote_fs/node-meta.ts',
     // C — ACP session state, which leaves with phase 6's `Namespace` change.
     // Everything else this module addressed has already left: the memory
     // bookkeeping and debug prompt log onto the extension substrate, the
