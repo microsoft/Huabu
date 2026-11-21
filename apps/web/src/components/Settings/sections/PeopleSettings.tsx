@@ -2,15 +2,24 @@
 // Licensed under the MIT license.
 
 import { X } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { ResetDeviceCredentials } from './ResetDeviceCredentials';
 import {
+  getAdmission,
   listPeople,
   resetPersonDeviceCredentials,
+  setAutomaticAdmission,
   setPersonMember,
   setPersonWorkspaceRole,
+  type AdmissionSettings,
   type Person,
   type WorkspaceRole,
 } from '../../../api/people';
@@ -20,6 +29,8 @@ import { Button } from '../../Common/Button';
 import { Select } from '../../Common/Select';
 import { toast } from '../../Common/Toast';
 import { Toggle } from '../../Common/Toggle';
+import { SettingRow } from '../Common/SettingRow';
+import { SettingSection } from '../Common/SettingSection';
 
 import type { WorkspaceDescriptor } from '../../../api/workspace';
 
@@ -30,20 +41,104 @@ function personName(person: Person): string {
   return principal.displayName ?? principal.email ?? principal.principalId;
 }
 
-/** Where a person stands with the service, shown beside their name. */
+function Badge({
+  className,
+  children,
+}: {
+  className: string;
+  children: ReactNode;
+}) {
+  return (
+    <span
+      className={`shrink-0 rounded px-1.5 py-0.5 text-[11px] leading-none font-medium ${className}`}
+    >
+      {children}
+    </span>
+  );
+}
+
+/**
+ * Where a person stands with the service, shown beside their name, and how
+ * they got there when automatic admission decided it.
+ */
 function AccessStatus({ person }: { person: Person }) {
   const { t } = useTranslation();
   const [label, className] = person.admin
     ? [t('people.status.administrator'), 'bg-info-bg text-info-fg']
     : person.member
       ? [t('people.status.admitted'), 'bg-success-bg text-success-fg']
-      : [t('people.status.waiting'), 'bg-warning-bg text-warning-fg'];
+      : person.blocked
+        ? [t('people.status.blocked'), 'bg-danger-bg text-danger-fg']
+        : person.blocked === null
+          ? // The admission record is unreadable, so whether they were
+            // removed or are waiting is unknown.
+            [t('people.status.noAccess'), 'bg-hover text-fg-muted']
+          : [t('people.status.waiting'), 'bg-warning-bg text-warning-fg'];
   return (
-    <span
-      className={`shrink-0 rounded px-1.5 py-0.5 text-[11px] leading-none font-medium ${className}`}
-    >
-      {label}
-    </span>
+    <>
+      <Badge className={className}>{label}</Badge>
+      {person.member && !person.admin && person.joinedAutomatically && (
+        <Badge className="bg-hover text-fg-muted">
+          {t('people.status.joinedAutomatically')}
+        </Badge>
+      )}
+    </>
+  );
+}
+
+/**
+ * The owner's switch for admitting everyone who signs in through the
+ * configured identity providers, naming those providers so it never promises
+ * more than they enforce.
+ */
+function AutomaticAdmission({
+  admission,
+  busy,
+  onChange,
+}: {
+  admission: AdmissionSettings;
+  busy: boolean;
+  onChange: (automatic: boolean) => void;
+}) {
+  const { t } = useTranslation();
+  const providers = admission.providers.map((provider) =>
+    t(`people.admission.provider.${provider}`),
+  );
+  const description =
+    providers.length > 0
+      ? t('people.admission.description', {
+          providers: providers.join(t('people.admission.providerSeparator')),
+        })
+      : t('people.admission.noProviders');
+  return (
+    <div className="space-y-1">
+      {/* Its own parent, so the section is a last child and drops the
+          bottom margin it keeps between sections: the note belongs to it. */}
+      <div>
+        <SettingSection>
+          {/* Padded like the person rows below, so their text lines up. */}
+          <SettingRow
+            className="px-3"
+            title={t('people.admission.title')}
+            description={description}
+          >
+            <Toggle
+              label={t('people.admission.title')}
+              checked={admission.automatic}
+              // Turning it off stays possible, to undo a switch made before the
+              // providers changed.
+              disabled={
+                busy || (providers.length === 0 && !admission.automatic)
+              }
+              onChange={onChange}
+            />
+          </SettingRow>
+        </SettingSection>
+      </div>
+      <p className="text-fg-subtle text-xs">
+        {t('people.admission.keepsRemoved')}
+      </p>
+    </div>
   );
 }
 
@@ -56,14 +151,24 @@ export function PeopleSettings() {
   const { t } = useTranslation();
   const self = useIdentityStore((s) => s.identity?.principal.principalId);
   const [people, setPeople] = useState<Person[] | null>(null);
+  // `unavailable` when it has never loaded: People still works without it.
+  const [admission, setAdmission] = useState<
+    AdmissionSettings | 'unavailable' | null
+  >(null);
   const [workspaces, setWorkspaces] = useState<WorkspaceDescriptor[]>([]);
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
-    const [nextPeople, nextWorkspaces] = await Promise.all([
-      listPeople(),
-      listWorkspaces(),
+    // The admission setting loads on its own, so when it cannot be read the
+    // list, and each person's Reset devices, still work.
+    const [directory, nextAdmission] = await Promise.allSettled([
+      Promise.all([listPeople(), listWorkspaces()]),
+      getAdmission(),
     ]);
+    if (nextAdmission.status === 'fulfilled') setAdmission(nextAdmission.value);
+    else setAdmission((shown) => shown ?? 'unavailable');
+    if (directory.status === 'rejected') throw directory.reason;
+    const [nextPeople, nextWorkspaces] = directory.value;
     setPeople(nextPeople);
     setWorkspaces(nextWorkspaces);
   }, []);
@@ -103,6 +208,25 @@ export function PeopleSettings() {
     <div className="space-y-3">
       <p className="text-fg-subtle text-xs">{t('people.intro')}</p>
       <p className="text-fg-subtle text-xs">{t('people.accessVsWorkspace')}</p>
+      {admission === 'unavailable' ? (
+        <p className="text-danger-fg text-xs">
+          {t('people.admission.loadFailed')}
+        </p>
+      ) : (
+        admission && (
+          <AutomaticAdmission
+            admission={admission}
+            busy={busy}
+            onChange={(automatic) =>
+              void change(async () => {
+                // Shown as soon as it is saved, so a failed refresh after it
+                // cannot leave the switch saying the opposite of the policy.
+                setAdmission(await setAutomaticAdmission(automatic));
+              })
+            }
+          />
+        )
+      )}
       <ul className="divide-edge-default border-edge-default @container divide-y rounded-lg border">
         {people.map((person) => {
           const id = person.principal.principalId;

@@ -1810,10 +1810,25 @@
     "intro": "Who may use this Huabu, and which Workspaces they can open. People appear here after they first sign in. Changes apply on their next request.",
     "serviceAccess": "Service access",
     "accessVsWorkspace": "Service access lets someone use this Huabu; anyone admitted without a Workspace gets a personal one. Adding someone to a Workspace does not turn on Service access, and they join it as a Viewer until you choose Editor or Owner.",
+    "admission": {
+      "title": "Automatic admission",
+      "description": "Admit anyone who signs in with {{providers}} as an ordinary member with a personal Workspace. They never become administrators or join existing Workspaces.",
+      "provider": {
+        "entra": "Microsoft Entra ID (only the tenants configured here)",
+        "auth0": "Auth0 (anyone its sign-in accepts)"
+      },
+      "providerSeparator": " or ",
+      "noProviders": "Automatic admission applies to Microsoft Entra ID and Auth0 sign-in, and neither is configured here.",
+      "keepsRemoved": "People you remove stay out until you turn their access back on. Turning off automatic admission removes nobody.",
+      "loadFailed": "Could not load the automatic admission setting. Reopen People to try again."
+    },
     "status": {
       "administrator": "Administrator",
       "admitted": "Has access",
-      "waiting": "Waiting for access"
+      "waiting": "Waiting for access",
+      "blocked": "Access removed",
+      "noAccess": "No access",
+      "joinedAutomatically": "Joined automatically"
     },
     "roleIn": "Role in {{workspace}}",
     "removeRole": "Remove from this Workspace",
