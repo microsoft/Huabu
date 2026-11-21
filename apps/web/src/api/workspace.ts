@@ -63,18 +63,13 @@ export async function listWorkspaces(): Promise<WorkspaceDescriptor[]> {
 /**
  * Create a Workspace by name, for a Server where each person keeps their own
  * (`capabilities.namedWorkspaces`). The caller owns it; it is not activated.
- *
- * `requestId` names this create: a retry that sends it again gets the
- * Workspace the first attempt made instead of a second one, even when the
- * first attempt's answer was lost.
  */
 export async function createNamedWorkspace(
   name: string,
-  requestId?: string,
 ): Promise<WorkspaceDescriptor> {
   return apiFetch<WorkspaceDescriptor>(routes.workspaces, {
     method: 'POST',
-    json: { name, requestId },
+    json: { name },
     fallbackMessage: 'Failed to create Workspace',
   });
 }

@@ -50,19 +50,10 @@ const server = vi.hoisted(() => ({
   worlds: {} as Record<string, string>,
   /** Makes the next create request fail, as a Server error would. */
   failCreate: false,
-  /**
-   * Makes activation requests fail: `'before'` leaves the current Workspace
-   * as it was; `'after'` switches it but loses the answer.
-   */
-  failActivate: null as null | 'before' | 'after',
+  /** Makes activation requests switch the Workspace but lose the answer. */
+  loseActivateAnswer: false,
   /** Makes list requests fail. */
   failList: false,
-  /** Makes the next create's answer get lost after the Server made it. */
-  loseCreateAnswer: false,
-  /** The `requestId` each create request carried, in order. */
-  createRequestIds: [] as Array<string | undefined>,
-  /** The Workspace each `requestId` made, as the Server replays them. */
-  createdByRequest: {} as Record<string, string>,
 }));
 const mocks = vi.hoisted(() => ({
   toast: vi.fn((_message: string, _options?: unknown) => 'toast-id'),
@@ -148,19 +139,13 @@ vi.mock('../../api/workspace', () => {
     activateWorkspace: vi.fn(async (workspaceId: string) => {
       server.calls.push(`activate ${workspaceId}`);
       server.pathsAtActivation.push(server.path);
-      if (server.failActivate === 'before')
-        throw new Error('Activation failed');
       server.current = workspaceId;
-      if (server.failActivate === 'after') throw new Error('Answer lost');
+      if (server.loseActivateAnswer) throw new Error('Answer lost');
       return describe().find((w) => w.workspaceId === workspaceId);
     }),
-    createNamedWorkspace: vi.fn(async (name: string, requestId?: string) => {
+    createNamedWorkspace: vi.fn(async (name: string) => {
       server.calls.push(`create ${name}`);
-      server.createRequestIds.push(requestId);
       if (server.failCreate) throw new Error('Service unavailable');
-      const replayed = requestId && server.createdByRequest[requestId];
-      const earlier = describe().find((w) => w.workspaceId === replayed);
-      if (replayed && earlier) return earlier;
       const created = {
         workspaceId: `new-${server.workspaces.length}`,
         name,
@@ -170,11 +155,6 @@ vi.mock('../../api/workspace', () => {
         spaceCount: 0,
       };
       server.workspaces.push(created);
-      if (requestId) server.createdByRequest[requestId] = created.workspaceId;
-      if (server.loseCreateAnswer) {
-        server.loseCreateAnswer = false;
-        throw new Error('Answer lost');
-      }
       return { ...created, active: false };
     }),
     renameWorkspace: vi.fn(async (workspaceId: string, name: string) => {
@@ -348,11 +328,8 @@ beforeEach(() => {
   server.pathsAtActivation = [];
   server.worlds = {};
   server.failCreate = false;
-  server.failActivate = null;
+  server.loseActivateAnswer = false;
   server.failList = false;
-  server.loseCreateAnswer = false;
-  server.createRequestIds = [];
-  server.createdByRequest = {};
   mocks.bridge = null;
   useWorkspaceStore.setState({ worldEnabled: false });
   vi.clearAllMocks();
@@ -608,7 +585,7 @@ describe('Switch Workspace dialog', () => {
   });
 
   it('counts a switch the Server made as done when its answer is lost', async () => {
-    server.failActivate = 'after';
+    server.loseActivateAnswer = true;
     await mount();
     await open();
     await click(document.querySelector('input[type="radio"][value="lab"]'));
@@ -771,7 +748,9 @@ describe('Switch Workspace dialog', () => {
   it('keeps the dialog and the typed name when creating fails', async () => {
     server.failCreate = true;
     vi.spyOn(console, 'error').mockImplementation(() => {});
-    mocks.toast.mockReturnValueOnce('create-failed');
+    mocks.toast
+      .mockReturnValueOnce('first-failure')
+      .mockReturnValueOnce('second-failure');
     await mount();
     await open();
     const name = [...document.querySelectorAll('label')].find(
@@ -792,17 +771,22 @@ describe('Switch Workspace dialog', () => {
     expect(input()?.value).toBe('Side project');
     expect(useWorkspaceSwitcherUiStore.getState().switching).toBe(false);
 
+    // A second failure replaces the first one's toast rather than stacking.
+    await click(buttonNamed('workspace.create'));
+    expect(vi.mocked(dismissToast).mock.calls).toEqual([['first-failure']]);
+
     // Retrying from the kept name works, and takes the failure down.
     server.failCreate = false;
     await click(buttonNamed('workspace.create'));
     expect(server.calls).toEqual([
       'create Side project',
       'create Side project',
+      'create Side project',
       'activate new-2',
     ]);
     expect(dialog()).toBeNull();
     expect(label()).toBe('Side project');
-    expect(dismissToast).toHaveBeenCalledWith('create-failed');
+    expect(dismissToast).toHaveBeenCalledWith('second-failure');
   });
 
   it('finishes a create that landed even when the list then fails to load', async () => {
@@ -838,81 +822,6 @@ describe('Switch Workspace dialog', () => {
     await click(buttonNamed(/Default/));
     expect(server.calls.at(-1)).toBe('activate default');
     expect(label()).toBe('Default');
-  });
-
-  it('gets the Workspace a create made when its answer was lost, on retry', async () => {
-    vi.spyOn(console, 'error').mockImplementation(() => {});
-    server.loseCreateAnswer = true;
-    await mount();
-    await open();
-    await type(nameField(), 'Work log');
-    await click(buttonNamed('workspace.create'));
-    expect(dialog()).not.toBeNull();
-    expect(label()).toBe('Default');
-
-    await click(buttonNamed('workspace.create'));
-    expect(server.calls).toEqual([
-      'create Work log',
-      'create Work log',
-      'activate new-2',
-    ]);
-    // Both attempts are one create to the Server.
-    expect(server.createRequestIds[0]).toBeTruthy();
-    expect(server.createRequestIds[1]).toBe(server.createRequestIds[0]);
-    expect(server.workspaces.map((w) => w.workspaceId)).toEqual([
-      'default',
-      'lab',
-      'new-2',
-    ]);
-    expect(dialog()).toBeNull();
-    expect(label()).toBe('Work log');
-
-    // A new create of the same name is a new request, not a replay.
-    await open();
-    await type(nameField(), 'Work log');
-    await click(buttonNamed('workspace.create'));
-    expect(server.createRequestIds[2]).not.toBe(server.createRequestIds[0]);
-    expect(server.workspaces.map((w) => w.workspaceId)).toEqual([
-      'default',
-      'lab',
-      'new-2',
-      'new-3',
-    ]);
-  });
-
-  it('activates the Workspace already made when retrying after activation failed', async () => {
-    vi.spyOn(console, 'error').mockImplementation(() => {});
-    mocks.toast
-      .mockReturnValueOnce('first-failure')
-      .mockReturnValueOnce('second-failure');
-    server.failActivate = 'before';
-    await mount();
-    await open();
-    await type(nameField(), 'Side project');
-    await click(buttonNamed('workspace.create'));
-    expect(dialog()).not.toBeNull();
-    expect(label()).toBe('Default');
-
-    // A second failure replaces the first one's toast rather than stacking.
-    await click(buttonNamed('workspace.create'));
-    expect(vi.mocked(dismissToast).mock.calls).toEqual([['first-failure']]);
-
-    server.failActivate = null;
-    await click(buttonNamed('workspace.create'));
-    expect(server.calls).toEqual([
-      'create Side project',
-      'activate new-2',
-      'activate new-2',
-      'activate new-2',
-    ]);
-    expect(server.workspaces.map((w) => w.workspaceId)).toEqual([
-      'default',
-      'lab',
-      'new-2',
-    ]);
-    expect(dialog()).toBeNull();
-    expect(label()).toBe('Side project');
-    expect(dismissToast).toHaveBeenCalledWith('second-failure');
   });
 });
 

@@ -4,8 +4,6 @@
 import { useMemo } from 'react';
 import { create } from 'zustand';
 
-import { createId } from '@huabu/shared';
-
 import { ApiError } from '../api/_client';
 import { listCanvases } from '../api/canvas';
 import {
@@ -195,22 +193,6 @@ function workspaceActivationError(error: unknown, path: string): string {
 }
 
 /**
- * The last create by name that has not yet made its Workspace current. A
- * retry of the same name is the same create: it sends the same `requestId`,
- * so the Server returns the Workspace an attempt whose answer was lost
- * already made, and once an answer has arrived it skips the create and only
- * activates `workspaceId`. Cleared once any change lands, or when that
- * Workspace is removed.
- */
-let pendingCreate: {
-  readonly name: string;
-  /** Sent with every attempt at this create. */
-  readonly requestId: string;
-  /** The Workspace the Server made, once it has said so. */
-  workspaceId?: string;
-} | null = null;
-
-/**
  * The kept Workspace list with the store's confirmed Workspace marked current
  * (and added first, named from the change's `label` if the Server gave no
  * name, when the list has not heard of it yet), for when a fresh list could
@@ -300,7 +282,6 @@ async function changeWorkspace(
         );
       }
     }
-    if (!failure) pendingCreate = null;
     if (confirmed) {
       try {
         set({ recentWorkspaces: await listWorkspaces() });
@@ -593,21 +574,15 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     if (get().mode === 'managed') {
       throw new Error('Workspace is locked by the server (managed mode)');
     }
-    const attempt =
-      pendingCreate?.name === name
-        ? pendingCreate
-        : { name, requestId: createId('workspace-create') };
-    pendingCreate = attempt;
+    let workspaceId: string | undefined;
     await changeWorkspace(
       async () => {
-        attempt.workspaceId ??= (
-          await createNamedWorkspace(name, attempt.requestId)
-        ).workspaceId;
-        await activateWorkspace(attempt.workspaceId);
+        workspaceId = (await createNamedWorkspace(name)).workspaceId;
+        await activateWorkspace(workspaceId);
         return getWorkspaceInfo();
       },
       name,
-      () => attempt.workspaceId,
+      () => workspaceId,
     );
   },
 
@@ -628,7 +603,6 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
   },
 
   removeRecentWorkspace: (workspaceId: string) => {
-    if (pendingCreate?.workspaceId === workspaceId) pendingCreate = null;
     void removeWorkspace(workspaceId)
       .then(() =>
         set((state) => ({
