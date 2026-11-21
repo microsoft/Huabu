@@ -808,6 +808,9 @@ describe('Switch Workspace dialog', () => {
 
   it('activates the Workspace already made when retrying after activation failed', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
+    mocks.toast
+      .mockReturnValueOnce('first-failure')
+      .mockReturnValueOnce('second-failure');
     server.failActivate = 'before';
     await mount();
     await open();
@@ -816,7 +819,9 @@ describe('Switch Workspace dialog', () => {
     expect(dialog()).not.toBeNull();
     expect(label()).toBe('Default');
 
+    // A second failure replaces the first one's toast rather than stacking.
     await click(buttonNamed('workspace.create'));
+    expect(vi.mocked(dismissToast).mock.calls).toEqual([['first-failure']]);
 
     server.failActivate = null;
     await click(buttonNamed('workspace.create'));
@@ -833,6 +838,7 @@ describe('Switch Workspace dialog', () => {
     ]);
     expect(dialog()).toBeNull();
     expect(label()).toBe('Side project');
+    expect(dismissToast).toHaveBeenCalledWith('second-failure');
   });
 });
 
