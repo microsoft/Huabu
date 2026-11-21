@@ -165,6 +165,9 @@ function bubblePeople(
         };
       });
     },
+    async has(principalId) {
+      return (await store.principals.get(principalId)) !== null;
+    },
     setMember(principalId, member, by) {
       return withMemberGrantLock(principalId, async () => {
         if (!(await store.principals.get(principalId))) return false;

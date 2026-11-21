@@ -107,7 +107,7 @@ async function host(
 
   const call = async (
     headers: Record<string, string>,
-    method: 'GET' | 'PUT',
+    method: 'GET' | 'PUT' | 'POST',
     url: string,
     payload?: object,
   ) => {
@@ -445,7 +445,7 @@ describe('automatic admission', () => {
   });
 
   it('keeps People working when its record is damaged, except removing access', async () => {
-    const { store, identity, setMember } = await host();
+    const { store, call, identity, setMember } = await host();
     expect(await identity('erin')).toMatchObject({ member: false });
     await getServerRecords().put(
       { owner: null, name: 'admission' },
@@ -461,6 +461,11 @@ describe('automatic admission', () => {
     // Removing cannot record its block, so it fails with the grant in place.
     expect((await setMember('carol', false)).status).toBe(500);
     expect(await memberRoles('carol')).toEqual(['member']);
+    // A lost device's credentials can still be reset.
+    expect(
+      (await call(ADMIN, 'POST', '/api/people/carol/agent-credentials/reset'))
+        .status,
+    ).toBe(204);
   });
 
   it('keeps the block when an administrator’s grant fails, until a retry lands', async () => {

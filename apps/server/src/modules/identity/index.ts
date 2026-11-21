@@ -67,6 +67,8 @@ export function createIdentity(
       // opens Bubble on demand like every other member here.
       people: {
         list: async () => (await (opening ??= open())).service.people.list(),
+        has: async (principalId) =>
+          (await (opening ??= open())).service.people.has(principalId),
         setMember: async (...args) =>
           (await (opening ??= open())).service.people.setMember(...args),
         admission: async () =>

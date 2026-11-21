@@ -177,6 +177,8 @@ export class IdentityError extends Error {
  */
 export interface PeopleDirectory {
   list(): Promise<Person[]>;
+  /** Whether Bubble knows `principalId`, whatever their access or account state. */
+  has(principalId: string): Promise<boolean>;
   /**
    * Admit or revoke system `member`; `false` when there is no such principal.
    * Revoking also blocks automatic admission for them, and admitting clears

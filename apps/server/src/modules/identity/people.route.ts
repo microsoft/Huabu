@@ -82,12 +82,8 @@ const peopleRoutes: FastifyPluginAsync<{ service: IdentityService }> = async (
     '/:principalId/agent-credentials/reset',
     async (request, reply) => {
       const { principalId } = request.params;
-      // Listed, not resolved: a revoked or disabled person's devices too.
-      if (
-        !(await people.list()).some(
-          (person) => person.principal.principalId === principalId,
-        )
-      )
+      // Known, not resolved: a revoked or disabled person's devices too.
+      if (!(await people.has(principalId)))
         return reply.code(404).send({ message: 'No such person' });
       await resetAgentCredentials(principalId);
       return reply.code(204).send();
