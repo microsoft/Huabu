@@ -25,6 +25,7 @@ import {
 import { Popover } from '../Common/Popover';
 import { toast } from '../Common/Toast';
 import { useOpenWorkspaceSwitcher } from '../Workspace/useOpenWorkspaceSwitcher';
+import { useWorkspaceSwitch } from '../Workspace/useWorkspaceSwitch';
 
 import type { DesktopHomeMenuPosition } from '@huabu/shared/desktop-tabs';
 
@@ -45,6 +46,9 @@ export function DesktopHomeMenu() {
     (s) => s.capabilities?.namedWorkspaces === true,
   );
   const openWorkspaceSwitcher = useOpenWorkspaceSwitcher();
+  // Named Workspaces switch like every other chooser does (saved first, then
+  // a toast with the way back); Disk folders keep the plain activation.
+  const { busy: switching, switchTo } = useWorkspaceSwitch();
   const [position, setPosition] = useState<DesktopHomeMenuPosition | null>(
     null,
   );
@@ -78,6 +82,10 @@ export function DesktopHomeMenu() {
     close();
     if (id === workspaceId) {
       navigate('/spaces');
+      return;
+    }
+    if (named) {
+      if (await switchTo(id)) navigate('/spaces');
       return;
     }
     setBusy(true);
@@ -151,7 +159,7 @@ export function DesktopHomeMenu() {
           {workspaces.map((workspace) => (
             <DropdownMenuItem
               key={workspace.workspaceId}
-              disabled={!canChange || busy || syncing}
+              disabled={!canChange || busy || switching || syncing}
               aria-current={
                 workspace.workspaceId === workspaceId ? 'true' : undefined
               }
@@ -183,7 +191,9 @@ export function DesktopHomeMenu() {
             <DropdownMenuItem
               icon={<FolderOpen aria-hidden />}
               onClick={() => {
-                close();
+                // The dialog opens in this Home view, so focus stays here
+                // rather than going back to the Shell.
+                close(false);
                 openWorkspaceSwitcher();
               }}
             >

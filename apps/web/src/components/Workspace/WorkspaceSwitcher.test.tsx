@@ -25,12 +25,13 @@ import {
 } from '../../store/workspaceStore';
 import { useWorkspaceSwitcherUiStore } from '../../store/workspaceSwitcherUiStore';
 import { dismissToast } from '../Common/Toast';
+import { DesktopHomeMenu } from '../Shell/DesktopHomeMenu';
 import { SpaceNavigationGuard } from '../Space/SpaceNavigationGuard';
 
 import type { WorkspaceDescriptor, WorkspaceInfo } from '../../api/workspace';
 
 /**
- * The quick switch, the Switch Workspace dialog and their entry point, over
+ * The quick switch, the Switch Workspace dialog and their entry points, over
  * the real Workspace store, the real Space navigation guard and the real `/`
  * landing. Only the network (`api/workspace`), the toast surface, the canvas
  * save queues and the desktop bridge are replaced.
@@ -60,6 +61,13 @@ const mocks = vi.hoisted(() => ({
     tabs: {
       context: { role: string };
       open?: (target: unknown) => Promise<unknown>;
+      onHomeMenu?: (
+        listener: (position: { x: number } | null) => void,
+      ) => () => void;
+      command?: (command: unknown) => Promise<unknown>;
+      beginWorkspaceChange?: () => Promise<unknown>;
+      endWorkspaceChange?: () => Promise<unknown>;
+      workspaceReady?: (workspaceId: string) => Promise<unknown>;
     };
   },
 }));
@@ -251,6 +259,7 @@ async function mount(
                   <Header />
                   <MenuItem />
                   <OpenSpace />
+                  {mocks.bridge?.tabs.onHomeMenu && <DesktopHomeMenu />}
                   <WorkspaceSwitcherDialog />
                   <SpaceNavigationGuard />
                   <Probe />
@@ -785,6 +794,59 @@ describe('entry points', () => {
     });
     expect(path).toBe('/canvas/a');
     expect(useWorkspaceSwitcherUiStore.getState().isOpen).toBe(false);
+  });
+
+  describe('desktop Home menu', () => {
+    const command = vi.fn(async (_command: unknown) => ({ ok: true }));
+    let showMenu: (position: { x: number } | null) => void = () => {};
+    beforeEach(() => {
+      mocks.bridge = {
+        tabs: {
+          context: { role: 'home' },
+          onHomeMenu: (listener) => {
+            showMenu = listener;
+            return () => {};
+          },
+          command,
+          beginWorkspaceChange: async () => ({ ok: true }),
+          endWorkspaceChange: async () => ({ ok: true }),
+          workspaceReady: async () => ({ ok: true }),
+        },
+      };
+    });
+    const menuItem = (text: RegExp) =>
+      [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
+        (item) => text.test(item.textContent ?? ''),
+      );
+
+    it('switches a named Recent Workspace like every other chooser', async () => {
+      await mount();
+      await act(async () => showMenu({ x: 76 }));
+      await click(menuItem(/Research lab/));
+      expect(mocks.saved).toHaveBeenCalledTimes(1);
+      expect(server.calls).toEqual(['activate lab']);
+      expect(label()).toBe('Research lab');
+      expect(path).toBe('/spaces');
+      const [message, options] = mocks.toast.mock.calls[0] as [
+        string,
+        { action?: { label: string } },
+      ];
+      expect(message).toBe(
+        'workspace.switchedCount {"workspace":"Research lab","count":14}',
+      );
+      expect(options.action?.label).toBe(
+        'workspace.backTo {"workspace":"Default"}',
+      );
+    });
+
+    it('hands over to the dialog without sending focus back to the Shell', async () => {
+      await mount();
+      await act(async () => showMenu({ x: 76 }));
+      await click(menuItem(/workspace\.allWorkspaces/));
+      expect(useWorkspaceSwitcherUiStore.getState().isOpen).toBe(true);
+      expect(command).toHaveBeenCalledWith('dismiss-home-menu');
+      expect(command).not.toHaveBeenCalledWith('close-home-menu');
+    });
   });
 
   it('opens the dialog on Home when a Space tab forwards the request', async () => {
