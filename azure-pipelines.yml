@@ -100,6 +100,8 @@ jobs:
         displayName: Build desktop installer
         env:
           WINDOWS_INSTALLER_NAME: $(WindowsInstallerName)
+          # The commit the web bundle reports with its version (X.Y.Z+g<sha7>).
+          SOURCE_REVISION: $(Build.SourceVersion)
 
       - task: UseDotNet@2
         displayName: Install .NET 8 for ESRP
@@ -255,6 +257,8 @@ jobs:
           APPLE_ID: $(APPLE_ID)
           APPLE_APP_SPECIFIC_PASSWORD: $(APPLE_APP_SPECIFIC_PASSWORD)
           APPLE_TEAM_ID: $(APPLE_TEAM_ID)
+          # The commit the web bundle reports with its version (X.Y.Z+g<sha7>).
+          SOURCE_REVISION: $(Build.SourceVersion)
 
       - pwsh: |
           $output = Join-Path $env:BUILD_SOURCESDIRECTORY '../huabu-electron-out'

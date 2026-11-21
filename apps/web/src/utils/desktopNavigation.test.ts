@@ -44,14 +44,26 @@ describe('desktop navigation routing', () => {
   });
 
   it('returns to the existing Home for list and Workspace setup routes', () => {
-    expect(desktopNavigation(space, location('/'))).toEqual({
+    const plain = (pathname: string) => ({
+      ...location(pathname),
+      state: null,
+    });
+    expect(desktopNavigation(space, plain('/'))).toEqual({
       canvasId: null,
       homePath: '/spaces',
     });
-    expect(desktopNavigation(space, location('/setup'))).toEqual({
+    expect(desktopNavigation(space, plain('/setup'))).toEqual({
       canvasId: null,
       homePath: '/setup',
     });
+  });
+
+  it('hands Home the request that came with the navigation', () => {
+    // E.g. a Space tab's "Switch Workspace", which only Home can carry out.
+    const state = { 'huabu.openWorkspaceSwitcher': 'choose' };
+    expect(desktopNavigation(space, { ...location('/spaces'), state })).toEqual(
+      { canvasId: null, homePath: '/spaces', state },
+    );
   });
 
   it('decodes and re-encodes Space identities without altering their meaning', () => {

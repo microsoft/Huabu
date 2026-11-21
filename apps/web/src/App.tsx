@@ -28,6 +28,7 @@ import { GlobalModals } from './components/Shell/GlobalModals';
 import { NativeMenuBridge } from './components/Shell/NativeMenuBridge';
 import { WindowChrome } from './components/Shell/WindowChrome';
 import { SpaceNavigationGuard } from './components/Space/SpaceNavigationGuard';
+import { WorkspaceLanding } from './components/Workspace/WorkspaceLanding';
 import { useDesktopContent } from './hooks/useDesktopContent';
 import { useDisableBrowserZoom } from './hooks/useDisableBrowserZoom';
 import { getElectronBridge } from './hooks/useElectron';
@@ -204,8 +205,13 @@ function RootLayout() {
 function WorkspaceGuardLayout() {
   const initialising = useContext(InitialisingContext);
   const isReady = useWorkspaceStore((s) => s.isReady);
+  const isSyncing = useWorkspaceStore((s) => s.isSyncing);
 
   if (initialising) return <WorkspaceLoadingScreen />;
+  // A switch from inside the app (the Workspace popover or dialog) waits
+  // here rather than on the first-launch page, which is only for choosing
+  // a Workspace when there is none to be in.
+  if (!isReady && isSyncing) return <WorkspaceLoadingScreen />;
   if (!isReady) return <Navigate to="/setup" replace />;
   return <Outlet />;
 }
@@ -219,17 +225,6 @@ function WorkspaceGuardLayout() {
 function SetupRoute() {
   const initialising = useContext(InitialisingContext);
   return initialising ? <WorkspaceLoadingScreen /> : <WorkspaceSetupPage />;
-}
-
-function WorkspaceLanding() {
-  const desktopHome = getElectronBridge()?.tabs?.context.role === 'home';
-  const worldEnabled = useWorkspaceStore((state) => state.worldEnabled);
-  const worldCanvasId = useWorkspaceStore((state) => state.worldCanvasId);
-  return !desktopHome && worldEnabled && worldCanvasId ? (
-    <Navigate to={`/canvas/${worldCanvasId}`} replace />
-  ) : (
-    <Navigate to="/spaces" replace />
-  );
 }
 
 export default function App() {

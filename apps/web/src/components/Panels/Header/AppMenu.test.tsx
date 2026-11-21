@@ -28,7 +28,7 @@ const signOutMocks = vi.hoisted(() => ({
   toast: vi.fn(),
 }));
 vi.mock('../../../store/canvasStore', () => ({
-  savedBeforeSignOut: signOutMocks.saved,
+  savedBeforeLeaving: signOutMocks.saved,
 }));
 vi.mock('../../../api/identity', () => ({ signOut: signOutMocks.signOut }));
 vi.mock('../../Common/Toast.tsx', () => ({ toast: signOutMocks.toast }));

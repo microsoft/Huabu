@@ -2899,12 +2899,18 @@ export async function discardPendingSaves(canvasId: string): Promise<void> {
 }
 
 /**
- * Drain every save queue for the current Canvas before the session ends,
- * and report whether everything reached the Server. Signing out removes the
- * credential the unload flush would need, so whatever is still queued or
- * failed then would be lost.
+ * Settle and save everything this page still owes the Server before its
+ * requests stop reaching the current Workspace, and report whether it all
+ * landed. Callers freeze input first, so no edit can start after the last
+ * save.
+ *
+ * - Signing out removes the credential the unload flush would need.
+ * - Switching Workspace (`useWorkspaceSwitch`) makes the Server answer for
+ *   another Workspace, so a late save of this one's Space would fail.
+ *
+ * Whatever is still queued or failed then would be lost.
  */
-export async function savedBeforeSignOut(): Promise<boolean> {
+export async function savedBeforeLeaving(): Promise<boolean> {
   try {
     // The desktop close path: stop recordings, await imports and uploads,
     // then save structure and every node's content strictly, failing on any

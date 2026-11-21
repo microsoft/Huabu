@@ -10,6 +10,18 @@ export const isMac =
   typeof navigator !== 'undefined' &&
   /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent || '');
 
+/**
+ * Whether the current browser is running on Windows. A function rather than a
+ * constant like {@link isMac}, so callers deciding a default per render can be
+ * tested with a different platform.
+ */
+export function isWindows(): boolean {
+  return (
+    typeof navigator !== 'undefined' &&
+    /^Win|Windows/.test(navigator.platform || navigator.userAgent || '')
+  );
+}
+
 const MAC_MODIFIER_SYMBOLS: Record<string, string> = {
   'Ctrl/Cmd': '⌘',
   Cmd: '⌘',

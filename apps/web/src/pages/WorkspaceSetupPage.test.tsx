@@ -124,9 +124,12 @@ it.each([false, true])(
         </MemoryRouter>,
       ),
     );
-    const input = container.querySelector<HTMLInputElement>(
-      '#open-workspace-folder',
+    const label = [...container.querySelectorAll('label')].find(
+      (element) => element.textContent === 'workspace.openFolder',
     );
+    const input = label
+      ? container.querySelector<HTMLInputElement>(`[id="${label.htmlFor}"]`)
+      : null;
     expect(input !== null).toBe(folderWorkspaces);
     expect(container.textContent).toContain('workspace.newWorkspace');
     if (!input) return;
@@ -303,6 +306,51 @@ it('offers no rename in the folder chooser', async () => {
     expect(
       container.querySelector('button[aria-label="workspace.renameLabel"]'),
     ).toBeNull();
+    // Disk Home folders keep their own chooser, not the named Workspace list.
+    expect(container.textContent).toContain('workspace.folder');
+    expect(container.querySelector('[role="list"]')).toBeNull();
+    expect(container.textContent).not.toContain('workspace.newWorkspace');
+  } finally {
+    mocks.state.recentWorkspaces = original;
+  }
+});
+
+it('keeps first launch as the welcome page over the shared Workspace list', async () => {
+  const original = mocks.state.recentWorkspaces;
+  mocks.state.capabilities = { namedWorkspaces: true, folderWorkspaces: false };
+  mocks.state.recentWorkspaces = [
+    {
+      workspaceId: 'team',
+      name: 'Team',
+      path: null,
+      active: false,
+      canManage: false,
+      role: 'viewer',
+      spaceCount: 2,
+    } as (typeof original)[number],
+  ];
+  mocks.state.activateRecentWorkspace.mockResolvedValue(undefined);
+  try {
+    await act(async () =>
+      root.render(
+        <MemoryRouter>
+          <WorkspaceSetupPage key="first-launch" />
+        </MemoryRouter>,
+      ),
+    );
+    expect(container.querySelector('h1')?.textContent).toBe(
+      'workspace.welcome',
+    );
+    expect(container.textContent).toContain('workspace.introNamed');
+    const row = container.querySelector<HTMLButtonElement>(
+      '[role="listitem"] button',
+    )!;
+    expect(row.textContent).toContain('Team');
+    expect(row.textContent).toContain('people.role.viewer');
+    await act(async () => row.click());
+    expect(mocks.state.activateRecentWorkspace).toHaveBeenCalledWith('team');
+    // First launch announces nothing: there was no Workspace to go back to.
+    expect(mocks.toast).not.toHaveBeenCalled();
   } finally {
     mocks.state.recentWorkspaces = original;
   }
