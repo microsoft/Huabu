@@ -57,6 +57,12 @@ const server = vi.hoisted(() => ({
   failActivate: null as null | 'before' | 'after',
   /** Makes list requests fail. */
   failList: false,
+  /** Makes the next create's answer get lost after the Server made it. */
+  loseCreateAnswer: false,
+  /** The `requestId` each create request carried, in order. */
+  createRequestIds: [] as Array<string | undefined>,
+  /** The Workspace each `requestId` made, as the Server replays them. */
+  createdByRequest: {} as Record<string, string>,
 }));
 const mocks = vi.hoisted(() => ({
   toast: vi.fn((_message: string, _options?: unknown) => 'toast-id'),
@@ -148,9 +154,13 @@ vi.mock('../../api/workspace', () => {
       if (server.failActivate === 'after') throw new Error('Answer lost');
       return describe().find((w) => w.workspaceId === workspaceId);
     }),
-    createNamedWorkspace: vi.fn(async (name: string) => {
+    createNamedWorkspace: vi.fn(async (name: string, requestId?: string) => {
       server.calls.push(`create ${name}`);
+      server.createRequestIds.push(requestId);
       if (server.failCreate) throw new Error('Service unavailable');
+      const replayed = requestId && server.createdByRequest[requestId];
+      const earlier = describe().find((w) => w.workspaceId === replayed);
+      if (replayed && earlier) return earlier;
       const created = {
         workspaceId: `new-${server.workspaces.length}`,
         name,
@@ -160,6 +170,11 @@ vi.mock('../../api/workspace', () => {
         spaceCount: 0,
       };
       server.workspaces.push(created);
+      if (requestId) server.createdByRequest[requestId] = created.workspaceId;
+      if (server.loseCreateAnswer) {
+        server.loseCreateAnswer = false;
+        throw new Error('Answer lost');
+      }
       return { ...created, active: false };
     }),
     renameWorkspace: vi.fn(async (workspaceId: string, name: string) => {
@@ -335,6 +350,9 @@ beforeEach(() => {
   server.failCreate = false;
   server.failActivate = null;
   server.failList = false;
+  server.loseCreateAnswer = false;
+  server.createRequestIds = [];
+  server.createdByRequest = {};
   mocks.bridge = null;
   useWorkspaceStore.setState({ worldEnabled: false });
   vi.clearAllMocks();
@@ -803,6 +821,46 @@ describe('Switch Workspace dialog', () => {
       'default',
       'lab',
       'new-2',
+    ]);
+  });
+
+  it('gets the Workspace a create made when its answer was lost, on retry', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    server.loseCreateAnswer = true;
+    await mount();
+    await open();
+    await type(nameField(), 'Work log');
+    await click(buttonNamed('workspace.create'));
+    expect(dialog()).not.toBeNull();
+    expect(label()).toBe('Default');
+
+    await click(buttonNamed('workspace.create'));
+    expect(server.calls).toEqual([
+      'create Work log',
+      'create Work log',
+      'activate new-2',
+    ]);
+    // Both attempts are one create to the Server.
+    expect(server.createRequestIds[0]).toBeTruthy();
+    expect(server.createRequestIds[1]).toBe(server.createRequestIds[0]);
+    expect(server.workspaces.map((w) => w.workspaceId)).toEqual([
+      'default',
+      'lab',
+      'new-2',
+    ]);
+    expect(dialog()).toBeNull();
+    expect(label()).toBe('Work log');
+
+    // A new create of the same name is a new request, not a replay.
+    await open();
+    await type(nameField(), 'Work log');
+    await click(buttonNamed('workspace.create'));
+    expect(server.createRequestIds[2]).not.toBe(server.createRequestIds[0]);
+    expect(server.workspaces.map((w) => w.workspaceId)).toEqual([
+      'default',
+      'lab',
+      'new-2',
+      'new-3',
     ]);
   });
 

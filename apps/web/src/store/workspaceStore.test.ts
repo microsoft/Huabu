@@ -600,7 +600,10 @@ describe('workspaceStore registry persistence', () => {
     });
 
     await useWorkspaceStore.getState().createWorkspace('Side project');
-    expect(apiMocks.createNamedWorkspace).toHaveBeenCalledWith('Side project');
+    expect(apiMocks.createNamedWorkspace).toHaveBeenCalledWith(
+      'Side project',
+      expect.stringMatching(/^workspace-create-/),
+    );
     expect(apiMocks.activateWorkspace).toHaveBeenCalledWith(
       '33333333-3333-4333-8333-333333333333',
     );
