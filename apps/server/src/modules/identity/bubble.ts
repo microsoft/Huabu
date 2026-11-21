@@ -408,6 +408,32 @@ function admissionProviders(
   );
 }
 
+/**
+ * Whether a verified access token was issued to an application on its own
+ * behalf: Auth0's client-credentials grant, which it marks with
+ * `gty: "client-credentials"`. Bubble's `auth0` driver reports such a caller
+ * as a `user` unless a kind claim is mapped, so automatic admission, which is
+ * for people, refuses it here. Bubble's `entra` driver already refuses
+ * app-only tokens, which carry no delegated scope. A token that is not a JWT
+ * is not one.
+ */
+function isApplicationToken(token: string | null): boolean {
+  const payload = token?.split('.')[1];
+  if (!payload) return false;
+  try {
+    const claims: unknown = JSON.parse(
+      Buffer.from(payload, 'base64url').toString('utf8'),
+    );
+    return (
+      typeof claims === 'object' &&
+      claims !== null &&
+      (claims as { gty?: unknown }).gty === 'client-credentials'
+    );
+  } catch {
+    return false;
+  }
+}
+
 /** Bubble's records live beside Huabu's, in a schema of their own. */
 export async function openBubblePostgresStore(
   url: string,
@@ -634,15 +660,17 @@ export async function openBubbleIdentity(options: {
           // Registration binds (issuer, subject) and refuses disabled accounts.
           const registered = await identity.register(auth, 'http');
           const resolved = await resolvePrincipal(registered.principalId);
-          // Only a sign-in through an identity provider (Entra or Auth0,
-          // whose tokens name their issuer) is admitted automatically: never
-          // a local token or the master key, which an existing principal can
-          // mint or hold for someone else.
+          // Only a person's sign-in through an identity provider (Entra or
+          // Auth0, whose tokens name their issuer) is admitted automatically:
+          // never a local token or the master key, which an existing
+          // principal can mint or hold for someone else, nor an application
+          // signing in as itself.
           if (
             resolved &&
             !resolved.member &&
             auth.issuer &&
             auth.subject !== undefined &&
+            !isApplicationToken(auth.token) &&
             (await admitAutomatically(registered.principalId))
           )
             return resolvePrincipal(registered.principalId);

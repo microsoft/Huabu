@@ -263,6 +263,21 @@ describe('automatic admission', () => {
       '/api/identity',
     );
     expect((await person('robot'))?.member ?? false).toBe(false);
+    // Nor an application signing in as itself with an Auth0
+    // client-credentials token, which Bubble reports as a `user`.
+    expect(
+      (
+        await call(
+          { authorization: 'Bearer idp-app:reporting-job' },
+          'GET',
+          '/api/identity',
+        )
+      ).body,
+    ).toMatchObject({ member: false });
+    expect(await person('reporting-job')).toMatchObject({
+      member: false,
+    });
+
     // Any system grant that carries no Huabu access was an administrator's
     // choice; admission leaves it alone rather than adding `member`.
     expect(await identity('hana')).toMatchObject({ member: false });
