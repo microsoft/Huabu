@@ -170,11 +170,10 @@ function bubblePeople(
         if (!(await store.principals.get(principalId))) return false;
         const rows = await store.grants.list({ target: SYSTEM, principalId });
         const current = rows.filter((row) => row.role === 'member');
-        // The admission record changes before the grant, in both directions,
-        // so a record that cannot be written (damaged) fails the change with
-        // the grant as it was.
+        // A block only matters while someone has no access, so it is written
+        // before a grant goes and cleared after one lands: neither write
+        // failing can leave a removed person admissible.
         if (member) {
-          await clearAdmissionBlock(principalId);
           if (current.length === 0)
             await store.grants.add({
               target: SYSTEM,
@@ -182,6 +181,14 @@ function bubblePeople(
               role: 'member',
               grantedByPrincipalId: by,
             });
+          // Tidying only: a block left on a member is ignored, and the next
+          // removal replaces it. So the admission stands even when this fails.
+          await clearAdmissionBlock(principalId).catch((error: unknown) =>
+            log.warn(
+              { err: error, principalId },
+              'Admitted, but the admission block could not be cleared',
+            ),
+          );
         }
         if (!member) {
           await blockAdmission(principalId, by);

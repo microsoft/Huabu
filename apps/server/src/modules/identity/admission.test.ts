@@ -263,7 +263,6 @@ describe('automatic admission', () => {
       '/api/identity',
     );
     expect((await person('robot'))?.member ?? false).toBe(false);
-
     // Any system grant that carries no Huabu access was an administrator's
     // choice; admission leaves it alone rather than adding `member`.
     expect(await identity('hana')).toMatchObject({ member: false });
@@ -430,7 +429,7 @@ describe('automatic admission', () => {
     expect(await identity('erin')).toMatchObject({ member: false });
   });
 
-  it('leaves access as it was when a damaged record fails an administrator’s change', async () => {
+  it('keeps People working when its record is damaged, except removing access', async () => {
     const { store, identity, setMember } = await host();
     expect(await identity('erin')).toMatchObject({ member: false });
     await getServerRecords().put(
@@ -441,12 +440,36 @@ describe('automatic admission', () => {
       (await store.grants.list({ target: { type: 'system' }, principalId }))
         .map((grant) => grant.role)
         .filter((role) => role === 'member');
-    // Admitting fails before the grant is made, not after.
-    expect((await setMember('erin', true)).status).toBe(500);
-    expect(await memberRoles('erin')).toEqual([]);
-    // Removing fails before the grant goes, so the failure is the whole story.
+    // Admitting needs no block cleared to stand.
+    expect((await setMember('erin', true)).status).toBe(204);
+    expect(await memberRoles('erin')).toEqual(['member']);
+    // Removing cannot record its block, so it fails with the grant in place.
     expect((await setMember('carol', false)).status).toBe(500);
     expect(await memberRoles('carol')).toEqual(['member']);
+  });
+
+  it('keeps the block when an administrator’s grant fails, until a retry lands', async () => {
+    const { store, identity, setAutomatic, setMember, person } = await host();
+    expect(await identity('erin')).toMatchObject({ member: false });
+    expect((await setMember('erin', true)).status).toBe(204);
+    expect((await setMember('erin', false)).status).toBe(204);
+    await setAutomatic(true);
+
+    const add = store.grants.add.bind(store.grants);
+    store.grants.add = () => Promise.reject(new Error('Bubble unavailable'));
+    expect((await setMember('erin', true)).status).toBe(500);
+    store.grants.add = add;
+    expect(await person('erin')).toMatchObject({
+      member: false,
+      blocked: true,
+    });
+    expect(await identity('erin')).toMatchObject({ member: false });
+
+    expect((await setMember('erin', true)).status).toBe(204);
+    expect(await person('erin')).toMatchObject({
+      member: true,
+      blocked: false,
+    });
   });
 
   it('names the configured providers it applies to', async () => {
