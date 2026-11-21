@@ -17,6 +17,11 @@ import type { NavigateFunction } from 'react-router-dom';
 
 /** The toast that announced the last switch; a newer switch replaces it. */
 let switchedToastId: string | null = null;
+/**
+ * The (persistent) toast saying the last switch failed. A switch that then
+ * succeeds, such as a retry from the kept name, takes it down.
+ */
+let failedToastId: string | null = null;
 
 /**
  * The router root's current route, kept by {@link useWorkspaceSwitchRoute}.
@@ -95,7 +100,9 @@ async function switchWorkspace(change: () => Promise<void>): Promise<boolean> {
       setDesktopInputFrozen(false);
     }
     if (!saved) {
-      toast(t('workspace.unsavedBeforeSwitch'), { tone: 'danger' });
+      failedToastId = toast(t('workspace.unsavedBeforeSwitch'), {
+        tone: 'danger',
+      });
       return false;
     }
     // Leave the old Workspace's Space before it stops being reachable, for a
@@ -108,9 +115,10 @@ async function switchWorkspace(change: () => Promise<void>): Promise<boolean> {
       await change();
     } catch (error) {
       console.error('[workspace-switch] Could not open Workspace:', error);
-      toast(useWorkspaceStore.getState().error ?? t('workspace.switchFailed'), {
-        tone: 'danger',
-      });
+      failedToastId = toast(
+        useWorkspaceStore.getState().error ?? t('workspace.switchFailed'),
+        { tone: 'danger' },
+      );
       return false;
     }
     // Now open the new Workspace's home, unless the person has moved on.
@@ -122,6 +130,8 @@ async function switchWorkspace(change: () => Promise<void>): Promise<boolean> {
       (workspace) => workspace.workspaceId === after.workspaceId,
     );
     const name = after.workspaceName ?? current?.name ?? '';
+    if (failedToastId) dismissToast(failedToastId);
+    failedToastId = null;
     if (switchedToastId) dismissToast(switchedToastId);
     switchedToastId = toast(
       current?.spaceCount === undefined

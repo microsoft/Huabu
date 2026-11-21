@@ -23,8 +23,10 @@ import { Modal } from '../Common/Modal';
  * The Switch Workspace dialog: the full chooser for named Workspaces. It says
  * what a Workspace is, lists them all with the same rows as the quick switch,
  * and can create one. Choosing a row only marks it; Switch commits, and
- * Cancel or Escape leaves everything as it was. Focus stays inside while it
- * is open and returns to whatever opened it.
+ * Cancel or Escape leaves everything as it was. Creating (or opening a
+ * folder) keeps the dialog open until the new Workspace is current, so a
+ * failure leaves the typed name in place to retry. Focus stays inside while
+ * it is open and returns to whatever opened it.
  *
  * Mounted once at the router root; open it through
  * {@link useWorkspaceSwitcherUiStore} or `useOpenWorkspaceSwitcher`. Being
@@ -100,18 +102,29 @@ function OpenWorkspaceSwitcherDialog() {
           : t('workspace.dialogIntroNone')
       }
       onClose={close}
-      closeOnEscape={!renaming}
+      // A create in flight finishes or fails here, with its name kept.
+      closeOnEscape={!renaming && !busy}
+      closeOnBackdropClick={!busy}
       initialFocusRef={intent === 'create' ? nameInput : firstFocus}
       className="w-[540px] max-w-[calc(100vw-2rem)]"
       footer={
         <>
-          <Button variant="ghost" onClick={close}>
+          <Button
+            variant="ghost"
+            onClick={close}
+            disabled={busy}
+            className="shrink-0"
+          >
             {t('actions.cancel')}
           </Button>
-          <Button onClick={commit} disabled={!canSwitch}>
-            {canSwitch
-              ? t('workspace.switchTo', { workspace: selected.name })
-              : t('workspace.switch')}
+          {/* A long name is cut short here, never Cancel; the marked row and
+              the button's accessible name carry it whole. */}
+          <Button onClick={commit} disabled={!canSwitch} className="min-w-0">
+            <span className="truncate">
+              {canSwitch
+                ? t('workspace.switchTo', { workspace: selected.name })
+                : t('workspace.switch')}
+            </span>
           </Button>
         </>
       }
@@ -157,14 +170,12 @@ function OpenWorkspaceSwitcherDialog() {
           disabled={busy || syncing}
           hint={hasRoles ? t('workspace.createHint') : undefined}
           onCreate={(name) => {
-            close();
-            void create(name);
+            void create(name).then((created) => created && close());
           }}
           onOpenFolder={
             folders
               ? (path) => {
-                  close();
-                  void openFolder(path);
+                  void openFolder(path).then((opened) => opened && close());
                 }
               : undefined
           }

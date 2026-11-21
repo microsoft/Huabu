@@ -24,6 +24,7 @@ import {
   useWorkspaceStore,
 } from '../../store/workspaceStore';
 import { useWorkspaceSwitcherUiStore } from '../../store/workspaceSwitcherUiStore';
+import { dismissToast } from '../Common/Toast';
 import { SpaceNavigationGuard } from '../Space/SpaceNavigationGuard';
 
 import type { WorkspaceDescriptor, WorkspaceInfo } from '../../api/workspace';
@@ -46,6 +47,8 @@ const server = vi.hoisted(() => ({
   path: '',
   /** Each Workspace's World Space id, when the test turns World on. */
   worlds: {} as Record<string, string>,
+  /** Makes the next create request fail, as a Server error would. */
+  failCreate: false,
 }));
 const mocks = vi.hoisted(() => ({
   toast: vi.fn((_message: string, _options?: unknown) => 'toast-id'),
@@ -126,6 +129,7 @@ vi.mock('../../api/workspace', () => {
     }),
     createNamedWorkspace: vi.fn(async (name: string) => {
       server.calls.push(`create ${name}`);
+      if (server.failCreate) throw new Error('Service unavailable');
       const created = {
         workspaceId: `new-${server.workspaces.length}`,
         name,
@@ -306,6 +310,7 @@ beforeEach(() => {
   server.calls = [];
   server.pathsAtActivation = [];
   server.worlds = {};
+  server.failCreate = false;
   mocks.bridge = null;
   useWorkspaceStore.setState({ worldEnabled: false });
   vi.clearAllMocks();
@@ -580,6 +585,22 @@ describe('Switch Workspace dialog', () => {
     expect(label()).toBe('Research lab');
   });
 
+  it('keeps a long name from pushing Cancel out of the dialog', async () => {
+    const long = 'L'.repeat(120);
+    server.workspaces[1].name = long;
+    await mount();
+    await open();
+    await click(document.querySelector('input[type="radio"][value="lab"]'));
+    const cancel = buttonNamed('actions.cancel');
+    const confirm = buttonNamed(`workspace.switchTo {"workspace":"${long}"}`);
+    // jsdom has no layout, so check the classes that keep the footer in
+    // bounds: Cancel never shrinks; the confirmation shrinks and truncates
+    // while its text, and so its accessible name, stays whole.
+    expect(cancel?.className).toContain('shrink-0');
+    expect(confirm?.className).toContain('min-w-0');
+    expect(confirm?.querySelector('span')?.className).toContain('truncate');
+  });
+
   it('stays in the Space, unswitched, when a late save fails and the person stays', async () => {
     mocks.drain.mockRejectedValueOnce(new Error('offline'));
     vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -680,6 +701,43 @@ describe('Switch Workspace dialog', () => {
     expect(mocks.toast.mock.calls[0][0]).toBe(
       'workspace.switchedCount {"workspace":"Side project","count":0}',
     );
+  });
+
+  it('keeps the dialog and the typed name when creating fails', async () => {
+    server.failCreate = true;
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    mocks.toast.mockReturnValueOnce('create-failed');
+    await mount();
+    await open();
+    const name = [...document.querySelectorAll('label')].find(
+      (label) => label.textContent === 'workspace.newWorkspace',
+    );
+    const input = () =>
+      document.querySelector<HTMLInputElement>(`[id="${name?.htmlFor}"]`);
+    const field = input();
+    if (!field) throw new Error('No name field');
+    await type(field, 'Side project');
+    await click(buttonNamed('workspace.create'));
+    expect(server.calls).toEqual(['create Side project']);
+    expect(mocks.toast).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ tone: 'danger' }),
+    );
+    expect(dialog()).not.toBeNull();
+    expect(input()?.value).toBe('Side project');
+    expect(useWorkspaceSwitcherUiStore.getState().switching).toBe(false);
+
+    // Retrying from the kept name works, and takes the failure down.
+    server.failCreate = false;
+    await click(buttonNamed('workspace.create'));
+    expect(server.calls).toEqual([
+      'create Side project',
+      'create Side project',
+      'activate new-2',
+    ]);
+    expect(dialog()).toBeNull();
+    expect(label()).toBe('Side project');
+    expect(dismissToast).toHaveBeenCalledWith('create-failed');
   });
 });
 
