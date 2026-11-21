@@ -52,10 +52,12 @@ export function useWorkspaceSwitchRoute(): void {
  *   uploads finish, and every save queue drains ({@link savedBeforeLeaving}),
  *   whether or not a Space is open. If any of it fails, nothing changes.
  * - An open Space belongs to the Workspace being left, so the view then
- *   leaves it for the new Workspace's home through the Space navigation
- *   guard, and the Workspace changes only once the Space is off screen. If
- *   the guard keeps the person in the Space (a late save failed and they
- *   chose to stay), nothing changes.
+ *   leaves it for the Spaces page through the Space navigation guard, and
+ *   the Workspace changes only once the Space is off screen. If the guard
+ *   keeps the person in the Space (a late save failed and they chose to
+ *   stay), nothing changes. Only after activation does the view go on to the
+ *   new Workspace's home (`/`), so that landing resolves against the new
+ *   Workspace (its World, say) rather than the old one.
  * - The header shows the new name as soon as the switch lands, and a toast
  *   names it with a button back to the previous Workspace, which is itself a
  *   switch like any other.
@@ -96,11 +98,11 @@ async function switchWorkspace(change: () => Promise<void>): Promise<boolean> {
       toast(t('workspace.unsavedBeforeSwitch'), { tone: 'danger' });
       return false;
     }
-    // Leave the old Workspace's Space before it stops being reachable.
-    if (
-      route?.pathname.startsWith('/canvas/') &&
-      !(await leaveSpace(route.navigate, '/'))
-    )
+    // Leave the old Workspace's Space before it stops being reachable, for a
+    // route that does not depend on which Workspace is current: `/` would
+    // resolve against the old Workspace and could open its World.
+    const leaving = route?.pathname.startsWith('/canvas/') ? route : null;
+    if (leaving && !(await leaveSpace(leaving.navigate, '/spaces')))
       return false;
     try {
       await change();
@@ -111,6 +113,9 @@ async function switchWorkspace(change: () => Promise<void>): Promise<boolean> {
       });
       return false;
     }
+    // Now open the new Workspace's home, unless the person has moved on.
+    if (leaving && route?.pathname === '/spaces')
+      void route.navigate('/', { replace: true });
 
     const after = useWorkspaceStore.getState();
     const current = after.recentWorkspaces.find(

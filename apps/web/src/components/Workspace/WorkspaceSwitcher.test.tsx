@@ -5,6 +5,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import {
   createMemoryRouter,
+  Outlet,
   RouterProvider,
   useLocation,
   useNavigate,
@@ -15,6 +16,7 @@ import {
   OPEN_WORKSPACE_SWITCHER,
   useOpenWorkspaceSwitcher,
 } from './useOpenWorkspaceSwitcher';
+import { WorkspaceLanding } from './WorkspaceLanding';
 import { WorkspaceSwitcherDialog } from './WorkspaceSwitcherDialog';
 import { WorkspaceSwitcherButton } from './WorkspaceSwitcherPopover';
 import {
@@ -28,9 +30,9 @@ import type { WorkspaceDescriptor, WorkspaceInfo } from '../../api/workspace';
 
 /**
  * The quick switch, the Switch Workspace dialog and their entry point, over
- * the real Workspace store and the real Space navigation guard. Only the
- * network (`api/workspace`), the toast surface, the canvas save queues and
- * the desktop bridge are replaced.
+ * the real Workspace store, the real Space navigation guard and the real `/`
+ * landing. Only the network (`api/workspace`), the toast surface, the canvas
+ * save queues and the desktop bridge are replaced.
  */
 
 const server = vi.hoisted(() => ({
@@ -42,6 +44,8 @@ const server = vi.hoisted(() => ({
   pathsAtActivation: [] as string[],
   /** The route the app shows now, as `Probe` last saw it. */
   path: '',
+  /** Each Workspace's World Space id, when the test turns World on. */
+  worlds: {} as Record<string, string>,
 }));
 const mocks = vi.hoisted(() => ({
   toast: vi.fn((_message: string, _options?: unknown) => 'toast-id'),
@@ -102,7 +106,7 @@ vi.mock('../../api/workspace', () => {
       workspaceId: server.current,
       path: null,
       name: current?.name ?? null,
-      worldCanvasId: null,
+      worldCanvasId: server.worlds[server.current] ?? null,
       capabilities: {
         canChangeWorkspace: true,
         nativePicker: false,
@@ -220,6 +224,7 @@ async function mount(
       server.workspaces.find((w) => w.workspaceId === server.current)?.name ??
       null,
     workspacePath: null,
+    worldCanvasId: server.worlds[server.current] ?? null,
     recentWorkspaces: server.workspaces.map((workspace) => ({
       ...workspace,
       active: workspace.workspaceId === server.current,
@@ -236,7 +241,7 @@ async function mount(
         router={createMemoryRouter(
           [
             {
-              path: '*',
+              path: '/',
               element: (
                 <>
                   <Header />
@@ -245,8 +250,14 @@ async function mount(
                   <WorkspaceSwitcherDialog />
                   <SpaceNavigationGuard />
                   <Probe />
+                  <Outlet />
                 </>
               ),
+              children: [
+                // The app's own landing: World when it is on, else Spaces.
+                { index: true, element: <WorkspaceLanding /> },
+                { path: '*', element: null },
+              ],
             },
           ],
           { initialEntries: [entry] },
@@ -294,7 +305,9 @@ beforeEach(() => {
   server.current = 'default';
   server.calls = [];
   server.pathsAtActivation = [];
+  server.worlds = {};
   mocks.bridge = null;
+  useWorkspaceStore.setState({ worldEnabled: false });
   vi.clearAllMocks();
   useWorkspaceSwitcherUiStore.getState().close();
   container = document.createElement('div');
@@ -398,9 +411,9 @@ describe('quick switch popover', () => {
     expect(mocks.saved).toHaveBeenCalledTimes(2);
     // The guard drained the Space on the way out, before activation.
     expect(mocks.drain).toHaveBeenCalledTimes(1);
-    expect(path).toBe('/');
+    expect(path).toBe('/spaces');
     expect(server.calls).toEqual(['activate lab', 'activate default']);
-    expect(server.pathsAtActivation).toEqual(['/spaces', '/']);
+    expect(server.pathsAtActivation).toEqual(['/spaces', '/spaces']);
   });
 
   it('keeps a rename made while the list was being refreshed', async () => {
@@ -548,10 +561,23 @@ describe('Switch Workspace dialog', () => {
     await click(buttonNamed('workspace.switchTo {"workspace":"Research lab"}'));
     expect(mocks.saved).toHaveBeenCalledTimes(1);
     expect(mocks.drain).toHaveBeenCalledWith('open-space');
-    expect(path).toBe('/');
+    expect(path).toBe('/spaces');
     expect(server.calls).toEqual(['activate lab']);
     // The Workspace changed only once the guard had let the Space go.
-    expect(server.pathsAtActivation).toEqual(['/']);
+    expect(server.pathsAtActivation).toEqual(['/spaces']);
+  });
+
+  it("opens the new Workspace's World, not the old one's, after leaving a Space", async () => {
+    server.worlds = { default: 'world-default', lab: 'world-lab' };
+    useWorkspaceStore.setState({ worldEnabled: true });
+    await mount('/canvas/space-in-default');
+    await open();
+    await click(document.querySelector('input[type="radio"][value="lab"]'));
+    await click(buttonNamed('workspace.switchTo {"workspace":"Research lab"}'));
+    // Left for a page that names no Workspace, then landed in the new one.
+    expect(server.pathsAtActivation).toEqual(['/spaces']);
+    expect(path).toBe('/canvas/world-lab');
+    expect(label()).toBe('Research lab');
   });
 
   it('stays in the Space, unswitched, when a late save fails and the person stays', async () => {

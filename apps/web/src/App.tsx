@@ -28,6 +28,7 @@ import { GlobalModals } from './components/Shell/GlobalModals';
 import { NativeMenuBridge } from './components/Shell/NativeMenuBridge';
 import { WindowChrome } from './components/Shell/WindowChrome';
 import { SpaceNavigationGuard } from './components/Space/SpaceNavigationGuard';
+import { WorkspaceLanding } from './components/Workspace/WorkspaceLanding';
 import { useDesktopContent } from './hooks/useDesktopContent';
 import { useDisableBrowserZoom } from './hooks/useDisableBrowserZoom';
 import { getElectronBridge } from './hooks/useElectron';
@@ -224,17 +225,6 @@ function WorkspaceGuardLayout() {
 function SetupRoute() {
   const initialising = useContext(InitialisingContext);
   return initialising ? <WorkspaceLoadingScreen /> : <WorkspaceSetupPage />;
-}
-
-function WorkspaceLanding() {
-  const desktopHome = getElectronBridge()?.tabs?.context.role === 'home';
-  const worldEnabled = useWorkspaceStore((state) => state.worldEnabled);
-  const worldCanvasId = useWorkspaceStore((state) => state.worldCanvasId);
-  return !desktopHome && worldEnabled && worldCanvasId ? (
-    <Navigate to={`/canvas/${worldCanvasId}`} replace />
-  ) : (
-    <Navigate to="/spaces" replace />
-  );
 }
 
 export default function App() {
