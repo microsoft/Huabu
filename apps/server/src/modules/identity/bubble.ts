@@ -396,9 +396,9 @@ function admissionProviders(
   const drivers = authenticator.map(
     (entry: { driver: string }) => entry.driver,
   );
-  return admissionProviderSchema.options
-    .filter((provider) => drivers.includes(provider))
-    .sort((a, b) => drivers.indexOf(a) - drivers.indexOf(b));
+  return admissionProviderSchema.options.filter((provider) =>
+    drivers.includes(provider),
+  );
 }
 
 /** Bubble's records live beside Huabu's, in a schema of their own. */

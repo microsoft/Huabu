@@ -30,8 +30,7 @@ const MANUAL: AdmissionRecord = { automatic: false, blocked: {} };
  * that as "do not admit".
  */
 export async function readAdmission(): Promise<AdmissionRecord> {
-  const stored = await getServerRecords().get(RECORD);
-  return stored === null ? MANUAL : admissionRecordSchema.parse(stored);
+  return parse(await getServerRecords().get(RECORD));
 }
 
 /** Turn automatic admission on or off; blocks are kept either way. */
@@ -65,9 +64,8 @@ export async function blockAdmission(
   });
 }
 
-/** An administrator gave `principalId` access again. Writes nothing when they were not blocked. */
+/** An administrator gave `principalId` access again. */
 export async function clearAdmissionBlock(principalId: string): Promise<void> {
-  if (!Object.hasOwn((await readAdmission()).blocked, principalId)) return;
   await getServerRecords().update(RECORD, (current) => {
     const record = parse(current);
     const blocked = { ...record.blocked };

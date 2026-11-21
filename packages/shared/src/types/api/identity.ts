@@ -90,9 +90,9 @@ export const admissionSettingsSchema = z.object({
    */
   automatic: z.boolean(),
   /**
-   * The configured sign-in providers automatic admission applies to, in
-   * `HUABU_BUBBLE_AUTH` order; empty when none is configured, in which case
-   * turning it on admits nobody.
+   * The configured sign-in providers automatic admission applies to, each
+   * once, in {@link admissionProviderSchema} order; empty when none is
+   * configured, in which case turning it on admits nobody.
    */
   providers: z.array(admissionProviderSchema),
 });
