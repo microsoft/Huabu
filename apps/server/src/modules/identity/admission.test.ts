@@ -335,7 +335,8 @@ describe('automatic admission', () => {
   });
 
   it('readmits a person removed before blocks existed, unless an administrator blocks them first', async () => {
-    const { store, identity, setAutomatic, setMember, person } = await host();
+    const { store, identity, setAutomatic, setMember, person, grants } =
+      await host();
     // Alice and Bob were admitted and later removed by a Server without
     // admission blocks: the grant went, and nothing else was recorded.
     for (const principalId of ['alice', 'bob']) {
@@ -356,11 +357,13 @@ describe('automatic admission', () => {
         blocked: false,
       });
     }
-    // The administrator keeps Bob out before turning admission on: admit,
-    // then remove, which records a block.
-    await setMember('bob', true);
-    await setMember('bob', false);
+    // The administrator keeps Bob out before turning admission on by
+    // removing his access again, which records a block and grants nothing.
+    expect((await setMember('bob', false)).status).toBe(204);
     expect(await person('bob')).toMatchObject({ blocked: true });
+    expect(
+      (await grants('bob')).filter(({ target }) => target.type === 'system'),
+    ).toEqual([]);
 
     await setAutomatic(true);
     // Alice looks like anyone waiting, so her next sign-in admits her.
