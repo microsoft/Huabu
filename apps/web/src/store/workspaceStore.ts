@@ -211,6 +211,34 @@ let pendingCreate: {
 } | null = null;
 
 /**
+ * The kept Workspace list with the store's confirmed Workspace marked current
+ * (and added first, named from the change's `label` if the Server gave no
+ * name, when the list has not heard of it yet), for when a fresh list could
+ * not be read: choosers mark and skip the current row by `active`.
+ */
+function markCurrent(
+  state: WorkspaceState,
+  label: string,
+): WorkspaceDescriptor[] {
+  const { workspaceId, workspaceName, workspacePath, recentWorkspaces } = state;
+  const marked = recentWorkspaces.map((workspace) => ({
+    ...workspace,
+    active: workspace.workspaceId === workspaceId,
+  }));
+  if (!workspaceId || marked.some((w) => w.workspaceId === workspaceId))
+    return marked;
+  return [
+    {
+      workspaceId,
+      name: workspaceName ?? label,
+      path: workspacePath,
+      active: true,
+    },
+    ...marked,
+  ];
+}
+
+/**
  * Make another Workspace current.
  *
  * `activate` asks the Server for the change and returns the Workspace it
@@ -220,7 +248,8 @@ let pendingCreate: {
  * nothing throws. Without `intended` (a folder path), any failure throws.
  *
  * The Workspace list is refreshed after a confirmed change, best-effort: a
- * failed refresh keeps the old list rather than failing a change that landed.
+ * failed refresh keeps the old list, with the new Workspace marked current,
+ * rather than failing a change that landed.
  *
  * Throws, with `error` set, only when the intended Workspace is not current.
  */
@@ -277,6 +306,7 @@ async function changeWorkspace(
         set({ recentWorkspaces: await listWorkspaces() });
       } catch (error) {
         console.warn('Could not refresh the Workspace list:', error);
+        set((state) => ({ recentWorkspaces: markCurrent(state, label) }));
       }
     }
     if (failure) {

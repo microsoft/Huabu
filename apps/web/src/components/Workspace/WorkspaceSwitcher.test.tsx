@@ -822,6 +822,22 @@ describe('Switch Workspace dialog', () => {
       'lab',
       'new-2',
     ]);
+
+    // The kept list marks the new Workspace current, so the one left is a
+    // row that switches back rather than a dead one.
+    await click(trigger());
+    const rows = [
+      ...document.querySelectorAll('[role="dialog"] [role="listitem"]'),
+    ];
+    const current = rows.filter((row) =>
+      row.querySelector('[aria-current="true"]'),
+    );
+    expect(current.map((row) => row.textContent)).toEqual([
+      expect.stringContaining('Side project'),
+    ]);
+    await click(buttonNamed(/Default/));
+    expect(server.calls.at(-1)).toBe('activate default');
+    expect(label()).toBe('Default');
   });
 
   it('gets the Workspace a create made when its answer was lost, on retry', async () => {
