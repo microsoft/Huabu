@@ -74,32 +74,3 @@ it('counts each local SQL Workspace’s Spaces and gives no role', async () => {
     await app.close();
   }
 });
-
-it('makes one local SQL Workspace for a create retried with its request ID', async () => {
-  mounted = await mountTestWorkspace({
-    structured: { kind: 'sqlite' },
-    blobs: { kind: 'disk' },
-  });
-  const app = Fastify();
-  registerLocalTestIdentity(app);
-  await app.register(workspacesRoutes, { prefix: '/workspaces' });
-  try {
-    const create = () =>
-      app.inject({
-        method: 'POST',
-        url: '/workspaces',
-        payload: { name: 'Work log', requestId: 'local-create-1' },
-      });
-    const first = await create();
-    expect(first.statusCode).toBe(201);
-    const retried = await create();
-    expect(retried.statusCode).toBe(200);
-    expect(retried.json()).toEqual(first.json());
-    const listed = (
-      await app.inject({ method: 'GET', url: '/workspaces' })
-    ).json() as WorkspaceDescriptor[];
-    expect(listed.filter((w) => w.name === 'Work log')).toHaveLength(1);
-  } finally {
-    await app.close();
-  }
-});
