@@ -40,6 +40,7 @@ vi.mock('react-i18next', () => ({
   initReactI18next: { type: '3rdParty', init: vi.fn() },
   useTranslation: () => ({ t: (key: string) => key }),
 }));
+vi.mock('@/i18n', () => ({ i18n: { t: (key: string) => key } }));
 vi.mock('../../components/Common/Loading', () => ({
   Loading: () => <div>loading</div>,
 }));
@@ -48,7 +49,7 @@ vi.mock('../../components/Space/moveNodesToSpace', () => ({
   dismissMoveSuccessToasts: mocks.dismissMoveSuccessToasts,
   moveNodesToSpace: vi.fn(),
 }));
-vi.mock('../../components/Nodes/previews', () => ({
+vi.mock('@/components/Nodes/previewableNodeTypes', () => ({
   hasNodePreview: (type: string) => type === 'note',
 }));
 vi.mock('@/utils/canvasViewport', () => ({
@@ -419,6 +420,19 @@ describe('CanvasPage node deep-link navigation', () => {
 
     expect(selectNodes).toHaveBeenCalledWith(['node-1'], false);
     expect(mocks.revealNodesOnCanvas).toHaveBeenCalledOnce();
+  });
+
+  it('only locates the target when a document link crossed Spaces', async () => {
+    const { selectNodes } = await renderAt(
+      `/canvas/${CANVAS_ID}?node=node-1`,
+      node('note'),
+      {},
+      { locateNodeOnly: true, returnToSpace: 'canvas-source' },
+    );
+
+    expect(selectNodes).toHaveBeenCalledWith(['node-1'], false);
+    expect(mocks.revealNodesOnCanvas).toHaveBeenCalledOnce();
+    expect(mocks.openPreviewNode).not.toHaveBeenCalled();
   });
 
   it('reconsumes the retained target after browser back navigation', async () => {

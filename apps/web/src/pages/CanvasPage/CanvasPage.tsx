@@ -12,13 +12,16 @@ import { CenterArea } from '@/pages/CanvasPage/CenterArea.tsx';
 import { MainLayout } from '@/pages/CanvasPage/MainLayout.tsx';
 import { usePanelStore } from '@/store/panelStore';
 import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store';
-import { fitNodesOnCanvas, revealNodesOnCanvas } from '@/utils/canvasViewport';
+import {
+  activateNodeTarget,
+  isLocateOnlyNavigation,
+} from '@/utils/activateNodeTarget';
+import { fitNodesOnCanvas } from '@/utils/canvasViewport';
 import { readNodeDeepLinkIntent } from '@/utils/nodeDeepLink';
 import { isVisibleWorldNode } from '@/utils/spaceHierarchy';
 
 import { Loading } from '../../components/Common/Loading';
 import { toast } from '../../components/Common/Toast';
-import { hasNodePreview } from '../../components/Nodes/previews';
 import { CanvasSidebar } from '../../components/Panels/CanvasSidebar';
 import { CanvasHeader } from '../../components/Panels/Header/CanvasHeader.tsx';
 import { PreviewWorkspacePanel } from '../../components/Panels/PreviewWorkspace/PreviewWorkspacePanel';
@@ -284,42 +287,17 @@ export default function CanvasPage() {
     if (!rfInstance) return;
 
     consumedDeepLinkActivationRef.current = activation;
-    const canvas = useStore.getState();
-    const node = canvas.nodes.find(
-      (candidate) => candidate.id === intent.nodeId,
-    );
-    if (!node) {
-      toast(t('canvasPage.nodeTargetUnavailable'), { tone: 'warning' });
-      return;
-    }
-
-    canvas.selectNodes([node.id], false);
-    if (node.type === 'question') {
-      if (typeof node.data.threadId === 'string' && node.data.threadId) {
-        const tabId = openPreviewNode(node.id, {
-          transient: false,
-          markReadIntent: false,
-        });
-        if (tabId) {
-          usePreviewWorkspaceStore.getState().requestChatOpen(tabId, 'bottom');
-        }
-      } else {
-        toast(t('canvasPage.nodeFocusedNoPreview'), { tone: 'info' });
-      }
-    } else if (hasNodePreview(node.type ?? '')) {
-      openPreviewNode(node.id, { transient: false, markReadIntent: false });
-    } else {
-      toast(t('canvasPage.nodeFocusedNoPreview'), { tone: 'info' });
-    }
-    if (canvas.canvasWrapper) {
-      revealNodesOnCanvas(rfInstance, canvas.canvasWrapper, [node.id], 400);
-    }
+    // A document link that crossed Spaces only locates; URL entry also opens.
+    activateNodeTarget(intent.nodeId, {
+      openPreview: !isLocateOnlyNavigation(location.state),
+    });
   }, [
     canvasId,
     isLoading,
     isPreviewFullscreen,
     location.key,
     location.search,
+    location.state,
     previewCanvasId,
     rfInstance,
     storeCanvasId,

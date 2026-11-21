@@ -1469,6 +1469,7 @@
     "activityErrorSteps_other": "Error · {{count}} steps",
     "activityFilesChanged_one": "Changed {{count}} file",
     "activityFilesChanged_other": "Changed {{count}} files",
+    "openFile": "Open {{path}}",
     "plan": "Plan",
     "copyPlan": "Copy plan",
     "copyPlanMarkdown": "Copy plan as markdown checklist",

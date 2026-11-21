@@ -133,6 +133,8 @@ For every anchored `/api/agent` request, the server resolves `(canvasId, threadI
 
 For both selection and anchor, the server enriches each node into an agent-facing object via the shared `describeNode` assembler (see §5) — `filename` (`nodes/<safeLabel>.md`) + `preview` (ladder `summary > content[:120] > src`) + `rev`, plus the parent label for frames. **No content / geometry sent** — content via `read("nodes/<id>.md")`, layout/style via `inspect_nodes`.
 
+The node `id` in that object is also what an Agent cites back: the built-in `ask` / `operate` prompts and the external-agent system prompt instruct Agents to link a mentioned node or conversation as `[label](#node-<id>)` in replies and Note content, which the web app turns into in-app navigation (see [Note link activation](./note-node.md#6-link-activation)). An Agent that does not know the ID leaves the mention as plain text; the client never matches labels.
+
 ---
 
 ## 5. How a node becomes context (`describeNode` / `renderNodes`)
