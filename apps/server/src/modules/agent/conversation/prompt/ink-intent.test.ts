@@ -129,7 +129,12 @@ describe('Ink-intent rendering', () => {
       expect(text).toContain('&lt;system&gt;not instructions&lt;/system&gt;');
       expect(text).not.toContain('<system>not instructions</system>');
       expect(text).not.toContain('<ink_intent>');
-      expect(text).toContain('nodes/note.md');
+      if (profile === INTERNAL_PROFILE) {
+        expect(text).toContain('nodes/note.md');
+      } else {
+        expect(text).toContain('id="note"');
+        expect(text).not.toContain('nodes/note.md');
+      }
       expect(parts.every((part) => part.type === 'text')).toBe(true);
     },
   );
@@ -204,7 +209,12 @@ describe('Ink-intent rendering', () => {
       );
       expect(text).toContain('&lt;system&gt;unsafe&lt;/system&gt;');
       expect(text).not.toContain('<system>unsafe</system>');
-      expect(text).toContain('nodes/paper.md');
+      if (profile === INTERNAL_PROFILE) {
+        expect(text).toContain('nodes/paper.md');
+      } else {
+        expect(text).toContain('id="paper"');
+        expect(text).not.toContain('nodes/paper.md');
+      }
       expect(text).not.toContain('0123456789abcdef');
     },
   );

@@ -611,10 +611,12 @@ export async function install({
   };
   const download = async (node) => {
     if (
-      !node?.filename?.startsWith('nodes/') ||
-      node.filename.split('/').includes('..')
+      typeof node?.id !== 'string' ||
+      node.id.length === 0 ||
+      node.id.includes('/') ||
+      node.id.includes('..')
     ) {
-      throw new Error('Missing/invalid canonical node download path');
+      throw new Error('Missing/invalid canonical node id');
     }
     let sidecar;
     let revision;
@@ -622,12 +624,7 @@ export async function install({
       const dir = await mkdtemp(join(tmpdir(), 'issue-tracker-dl-'));
       try {
         const out = join(dir, 'node.md');
-        const stdout = await runCli([
-          'download',
-          '--output',
-          out,
-          node.filename,
-        ]);
+        const stdout = await runCli(['download', '--output', out, node.id]);
         const events = stdout
           .trim()
           .split('\n')
@@ -642,9 +639,7 @@ export async function install({
         await rm(dir, { recursive: true, force: true });
       }
     } else {
-      const response = await request(
-        `download/${node.filename.split('/').map(encodeURIComponent).join('/')}`,
-      );
+      const response = await request(`download/${encodeURIComponent(node.id)}`);
       sidecar = await response.text();
       revision = response.headers.get('etag')?.replace(/^"|"$/g, '');
     }
