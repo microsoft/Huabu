@@ -25,7 +25,11 @@ import { Readability } from '@mozilla/readability';
 import { parseHTML } from 'linkedom';
 import TurndownService from 'turndown';
 
-import { isPublicNetworkOnly, outboundFetch } from '../../security/outbound.js';
+import {
+  isPublicNetworkOnly,
+  outboundFetch,
+  readBodyWithin,
+} from '../../security/outbound.js';
 
 import type { IDocumentLoader, LoadResult } from './loader.interface.js';
 
@@ -71,6 +75,8 @@ export type FetchWebContentOptions = {
 const DEFAULT_WEB_FETCH_TIMEOUT_MS = 30_000;
 const DEFAULT_WEB_FETCH_RETRIES = 1;
 const DEFAULT_ABORT_GRACE_MS = 5_000;
+/** Far above any real page, the HTML standard's single-page edition included. */
+const MAX_HTML_BYTES = 20 * 1024 * 1024;
 
 const REMOTE_URL_RE = /^https?:\/\//i;
 
@@ -477,7 +483,10 @@ async function fetchHtmlWithRetry(
         );
       }
 
-      const html = await response.text();
+      // Decoded as `response.text()` would: UTF-8, without a byte-order mark.
+      const html = new TextDecoder().decode(
+        await readBodyWithin(response, MAX_HTML_BYTES),
+      );
       return { html, headers: response.headers };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

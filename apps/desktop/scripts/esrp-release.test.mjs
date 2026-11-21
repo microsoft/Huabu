@@ -17,7 +17,10 @@ import path from 'node:path';
 import test from 'node:test';
 import { gunzipSync } from 'node:zlib';
 import YAML from 'yaml';
-import { refreshInstallerMetadata } from './esrp-release.mjs';
+import {
+  assertExpectedPublisher,
+  refreshInstallerMetadata,
+} from './esrp-release.mjs';
 
 const pipeline = YAML.parse(
   await readFile(
@@ -104,6 +107,66 @@ test('refresh replaces pre-sign hashes and blockmap while preserving release fie
   );
   await refreshInstallerMetadata(output, version);
   assert.deepEqual(await readFile(`${installer}.blockmap`), mapBytes);
+});
+
+const builder = YAML.parse(
+  await readFile(new URL('../electron-builder.yml', import.meta.url), 'utf8'),
+);
+
+test('the packaged app accepts updates only from its configured publisher', async (t) => {
+  assert.deepEqual(builder.publish.publisherName, ['Microsoft Corporation']);
+  const output = await mkdtemp(path.join(os.tmpdir(), 'huabu-publisher-test-'));
+  t.after(() => rm(output, { recursive: true, force: true }));
+  const resources = path.join(output, 'win-unpacked', 'resources');
+  await mkdir(resources, { recursive: true });
+  const configure = (publisherName) =>
+    writeFile(
+      path.join(resources, 'app-update.yml'),
+      YAML.stringify({ provider: 'github', publisherName }),
+    );
+  const microsoft =
+    'CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US';
+
+  await configure(builder.publish.publisherName);
+  await assertExpectedPublisher(output, microsoft);
+  for (const subject of [
+    'CN=Contoso Ltd, O=Contoso Ltd, C=US',
+    // The name appearing anywhere but the common name is not a match.
+    'CN=Attacker, O=Microsoft Corporation, C=US',
+    'CN=Microsoft Corporation Ltd, O=Microsoft Corporation, C=US',
+    '',
+  ])
+    await assert.rejects(assertExpectedPublisher(output, subject));
+
+  // A full distinguished name must match on every part it states.
+  await configure('CN=Microsoft Corporation, O=Microsoft Corporation');
+  await assertExpectedPublisher(output, microsoft);
+  await assert.rejects(
+    assertExpectedPublisher(
+      output,
+      'CN=Microsoft Corporation, O=Someone Else, C=US',
+    ),
+  );
+
+  // An app that names no publisher would skip the check on every update.
+  for (const missing of [undefined, [], [42]]) {
+    await configure(missing);
+    await assert.rejects(assertExpectedPublisher(output, microsoft));
+  }
+  await rm(path.join(resources, 'app-update.yml'));
+  await assert.rejects(assertExpectedPublisher(output, microsoft));
+});
+
+test('the pipeline hands the installer signer to the publisher check', () => {
+  const step = windows.steps.find(
+    (step) =>
+      step.displayName ===
+      'Verify installer signature and refresh update metadata',
+  );
+  assert.match(
+    step.pwsh,
+    /esrp-release\.mjs \$output \$signature\.SignerCertificate\.Subject\r?\n/,
+  );
 });
 
 test('refresh rejects mismatched release assets without rewriting metadata', async (t) => {

@@ -7,6 +7,7 @@ import { join } from 'node:path';
 
 import { dialog, ipcMain, shell, WebContentsView } from 'electron';
 
+import { classifyLink } from './link-targets.js';
 import { isSameOrigin } from './server-target.js';
 import {
   parseTabNavigation,
@@ -262,22 +263,22 @@ export class DesktopTabs {
   }
 
   guard(contents: WebContents): void {
-    const isApplicationLink = (url: string) => {
-      if (!isSameOrigin(url, this.origin)) return false;
-      const path = new URL(url).pathname;
-      return (
-        path === '/' ||
-        path === '/spaces' ||
-        path === '/setup' ||
-        path.startsWith('/canvas/')
-      );
-    };
+    const isApplicationLink = (url: string) =>
+      classifyLink(url, this.origin) === 'application';
     contents.setWindowOpenHandler(({ url }) => {
-      if (isApplicationLink(url)) {
+      const target = classifyLink(url, this.origin);
+      if (target === 'application') {
         this.runAction(async () => this.open(tabNavigationFromUrl(url)));
         return { action: 'deny' };
       }
-      if (/^https?:/i.test(url)) {
+      // The system browser holds no launch token, so it would only be refused
+      // what the local Server serves; the application opens those files over
+      // its IPC bridge instead (`server-files.ts`). Nothing is done for them
+      // here, where a page framed on the Canvas can also ask. A remote Server
+      // authenticates the browser itself, as before.
+      if (!this.remote && (target === 'image' || target === 'file'))
+        return { action: 'deny' };
+      if (target !== 'none') {
         void shell
           .openExternal(url)
           .catch((error: unknown) =>

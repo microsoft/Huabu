@@ -57,6 +57,7 @@ import {
   NOTE_CONTENT_HOST_SCOPE_CLASS,
   NOTE_FIRST_BLOCK_CLASS,
 } from '@/components/Nodes/note/noteContentHost';
+import { openInNewWindow } from '@/hooks/useElectron';
 import { fingerprintBlocks, type BlockSnapshot } from '@/utils/blockProvenance';
 import {
   parseHuabuImageClipboard,
@@ -1746,7 +1747,7 @@ function createLinkClickHandler(
       onLinkClick(href);
       return true;
     }
-    window.open(href, '_blank', 'noopener,noreferrer');
+    openInNewWindow(href);
     return true;
   };
 

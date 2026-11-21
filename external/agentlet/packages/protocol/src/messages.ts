@@ -1,5 +1,9 @@
-import type { AcpMessage, JsonRpcError } from './json-rpc.js'
-import type { AcpHarnessLaunch, HarnessCapabilities, HarnessLaunchPlan } from './harness.js'
+import type { AcpMessage, JsonRpcError } from './json-rpc.js';
+import type {
+  AcpHarnessLaunch,
+  HarnessCapabilities,
+  HarnessLaunchPlan,
+} from './harness.js';
 
 // ─── Agentlet Profile ────────────────────────────────────────────────────────
 
@@ -7,25 +11,25 @@ import type { AcpHarnessLaunch, HarnessCapabilities, HarnessLaunchPlan } from '.
 export interface AgentletProfile {
   /** Agentlet adapter identity */
   bridge: {
-    name: string
-    version: string
-  }
+    name: string;
+    version: string;
+  };
 
   /** Machine info (informational) */
   machine?: {
-    hostname: string
-    platform: string
-    arch: string
-  }
+    hostname: string;
+    platform: string;
+    arch: string;
+  };
 
   /** Agentlet capabilities */
   capabilities: {
-    autoRestart: boolean
-    bufferLimit: number
-    maxAgents?: number
-    harnessDiscovery?: { version: 1 | 2 }
-    harnessLaunch?: { version: 1 | 2 }
-  }
+    autoRestart: boolean;
+    bufferLimit: number;
+    maxAgents?: number;
+    harnessDiscovery?: { version: 1 | 2 };
+    harnessLaunch?: { version: 1 | 2 };
+  };
 }
 
 // ─── Session Profile & Spec ──────────────────────────────────────────────────
@@ -33,72 +37,72 @@ export interface AgentletProfile {
 /** All session metadata bundled into a single profile object */
 export interface SessionProfile {
   /** Parent agentlet identifier — links this session to its agentlet control channel */
-  agentletId: string
+  agentletId: string;
 
   /** Copy of the agentlet's profile for server-side context */
-  agentletProfile?: AgentletProfile
+  agentletProfile?: AgentletProfile;
 
   /** Host-side correlation ID (e.g., canvas node ID, chat tab ID). Absent for CLI self-spawn. */
-  appId?: string
+  appId?: string;
 
   /** Agentlet adapter identity */
   bridge: {
-    name: string
-    version: string
-  }
+    name: string;
+    version: string;
+  };
 
   /** Spawned agent process info */
   agent: {
-    command: string
-    pid: number
-    cwd: string
-  }
+    command: string;
+    pid: number;
+    cwd: string;
+  };
 
   /** ACP session capabilities (present after session bootstrap) */
   session?: {
-    supportsLoad: boolean
-    supportsResume: boolean
-    initializeResult: unknown
+    supportsLoad: boolean;
+    supportsResume: boolean;
+    initializeResult: unknown;
     /**
      * The full ACP `session/new` response when this profile came from a
      * freshly-created session (absent on resume/load). Opaque to agentlet;
      * may carry inline `models` / `modes` / `configOptions` that the host
      * uses to seed its UI without waiting for the first prompt.
      */
-    newSessionResult?: unknown
-  }
+    newSessionResult?: unknown;
+  };
 
   /** Machine info (informational) */
   machine?: {
-    hostname: string
-    platform: string
-    arch: string
-  }
+    hostname: string;
+    platform: string;
+    arch: string;
+  };
 
   /** Agentlet capabilities */
   capabilities: {
-    autoRestart: boolean
-    bufferLimit: number
-    maxAgents?: number
-  }
+    autoRestart: boolean;
+    bufferLimit: number;
+    maxAgents?: number;
+  };
 }
 
 /** Specification for spawning a new agent */
 export interface SessionSpec {
   /** Trusted shell command to spawn the agent (must support ACP stdio). */
-  command?: string
+  command?: string;
   /** Structured alternative to command; requires harnessLaunch v1. */
-  launch?: AcpHarnessLaunch
+  launch?: AcpHarnessLaunch;
   /** Legacy persisted evidence. Version 2 daemons validate then ignore it. */
-  launchPlan?: HarnessLaunchPlan
+  launchPlan?: HarnessLaunchPlan;
   /** Working directory for the agent subprocess */
-  cwd?: string
+  cwd?: string;
   /** Extra environment variables for the agent */
-  env?: Record<string, string>
+  env?: Record<string, string>;
   /** Whether to auto-restart the agent on crash */
-  autoRestart?: boolean
+  autoRestart?: boolean;
   /** Seconds of inactivity before suspending. 0 or omitted = no timeout. */
-  idleTimeoutSecs?: number
+  idleTimeoutSecs?: number;
 }
 
 // ─── agentlet/hello (Request/Response) ────────────────────────────────────────
@@ -106,16 +110,16 @@ export interface SessionSpec {
 /** Parameters sent by the agentlet in the agentlet/hello request */
 export interface AgentletHelloParams {
   /** Self-chosen agentlet identifier (should match query param `id`) */
-  agentletId: string
+  agentletId: string;
   /** Full agentlet adapter profile */
-  agentletProfile: AgentletProfile
+  agentletProfile: AgentletProfile;
 }
 
 /** Success result returned by the server after agentlet/hello */
 export interface AgentletHelloResult {
   /** Server-confirmed agentlet identifier */
-  agentletId: string
-  status: 'registered'
+  agentletId: string;
+  status: 'registered';
 }
 
 // ─── agent/hello (Request/Response) ──────────────────────────────────────────
@@ -123,56 +127,60 @@ export interface AgentletHelloResult {
 /** Parameters sent by the agentlet in the agent/hello request */
 export interface AgentHelloParams {
   /** ACP session identifier — primary routing key */
-  sessionId: string
+  sessionId: string;
   /** All session metadata */
-  sessionProfile: SessionProfile
+  sessionProfile: SessionProfile;
 }
 
 /** Success result returned by the server after agent/hello */
 export interface AgentHelloResult {
-  sessionId: string
-  status: 'connected'
+  sessionId: string;
+  status: 'connected';
 }
 
 /** Error returned by the server when agent/hello fails */
-export type AgentHelloError = JsonRpcError
+export type AgentHelloError = JsonRpcError;
 
 // ─── Agent → Server Notifications ────────────────────────────────────────────
 
 /** agent/exited — agent process exited */
 export interface AgentExitedParams {
-  code: number | null
-  signal: string | null
-  willRestart: boolean
+  code: number | null;
+  signal: string | null;
+  willRestart: boolean;
 }
 
 /** agent/restarted — agent restarted after crash */
 export interface AgentRestartedParams {
-  pid: number
-  attempt: number
+  pid: number;
+  attempt: number;
 }
 
 /** agent/goodbye — agentlet shutting down */
 export interface AgentGoodbyeParams {
-  reason: 'user_interrupt' | 'server_requested' | 'max_restarts_exceeded' | (string & {})
+  reason:
+    | 'user_interrupt'
+    | 'server_requested'
+    | 'max_restarts_exceeded'
+    | (string & {});
 }
 
 /** agent/overflow — buffer limit reached */
 export interface AgentOverflowParams {
-  dropped: number
+  dropped: number;
 }
 
 /** agent/suspended — idle session suspended */
 export interface AgentSuspendedParams {
-  sessionId: string
-  reason: 'idle_timeout' | (string & {})
+  sessionId: string;
+  reason: 'idle_timeout' | (string & {});
 }
 
 // ─── Server → Agent Notifications ────────────────────────────────────────────
 
 /** server/replay — replay buffered messages after reconnect */
 export interface ServerReplayParams {
-  messages: AcpMessage[]
+  messages: AcpMessage[];
 }
 
 /** server/ping — keepalive */
@@ -183,7 +191,11 @@ export interface AgentPongParams {}
 
 /** server/shutdown — request agentlet shutdown */
 export interface ServerShutdownParams {
-  reason: 'token_revoked' | 'server_shutting_down' | 'idle_timeout' | (string & {})
+  reason:
+    | 'token_revoked'
+    | 'server_shutting_down'
+    | 'idle_timeout'
+    | (string & {});
 }
 
 // ─── Server → Agentlet Control (spawn/stop/list) ─────────────────────────────
@@ -191,55 +203,55 @@ export interface ServerShutdownParams {
 /** server/spawn — spawn agent on agentlet */
 export interface SpawnParams {
   /** Host-side correlation ID */
-  appId: string
+  appId: string;
   /** Workload lifecycle used only for aggregate capacity diagnostics. */
-  workloadType?: 'Job' | 'Deployment'
+  workloadType?: 'Job' | 'Deployment';
   /** If present, resume an existing session */
-  sessionId?: string
+  sessionId?: string;
   /** How to spawn the agent */
-  sessionSpec: SessionSpec
+  sessionSpec: SessionSpec;
 }
 
 /** Successful spawn result */
 export interface SpawnResult {
-  sessionId: string
-  pid: number
-  launchPlan?: HarnessLaunchPlan
+  sessionId: string;
+  pid: number;
+  launchPlan?: HarnessLaunchPlan;
 }
 
 /** Structured daemon error data for a failed session resume/load. */
 export interface SessionResumeUnavailableErrorData {
-  code: 'session_resume_unavailable'
+  code: 'session_resume_unavailable';
 }
 
 /** Structured daemon error data for capacity exhaustion. */
 export interface CapacityExhaustedErrorData {
-  code: 'capacity_exhausted'
-  limit: number
+  code: 'capacity_exhausted';
+  limit: number;
   active: {
-    total: number
-    jobs: number
-    deployments: number
-    unknown: number
-    stopping: number
-  }
+    total: number;
+    jobs: number;
+    deployments: number;
+    unknown: number;
+    stopping: number;
+  };
 }
 
 /** Structured daemon error data when a process could not be reclaimed. */
 export interface AgentStopFailedErrorData {
-  code: 'agent_stop_failed'
-  stillRunning: true
+  code: 'agent_stop_failed';
+  stillRunning: true;
 }
 
 /** server/stop — stop agent session */
 export interface StopParams {
-  sessionId: string
+  sessionId: string;
 }
 
 /** Successful stop result */
 export interface StopResult {
-  stopped: true
-  disposition: 'stopped' | 'already_absent'
+  stopped: true;
+  disposition: 'stopped' | 'already_absent';
 }
 
 /** server/list — list agent sessions */
@@ -248,14 +260,14 @@ export interface ListParams {}
 /** List result */
 export interface ListResult {
   agents: Array<{
-    sessionId: string
-    appId?: string
-    command: string
-    pid: number
-    cwd: string
-    workloadType?: 'Job' | 'Deployment'
-    status: 'running' | 'starting' | 'stopping'
-  }>
+    sessionId: string;
+    appId?: string;
+    command: string;
+    pid: number;
+    cwd: string;
+    workloadType?: 'Job' | 'Deployment';
+    status: 'running' | 'starting' | 'stopping';
+  }>;
 }
 
 // ─── Server → Agentlet Resource Distribution ──────────────────────────────────
@@ -268,42 +280,47 @@ export interface ListResult {
  */
 export interface SendResourceParams {
   /** Destination path with ${ENV_VAR} interpolation */
-  destination: string
+  destination: string;
   /** File content (text) */
-  content: string
+  content: string;
 }
 
 // ─── Generic harness discovery ───────────────────────────────────────────────
 
 export interface HarnessCatalogueEntry {
-  id: string
-  displayName: string
-  installHint: string
-  capabilities: HarnessCapabilities
+  id: string;
+  displayName: string;
+  installHint: string;
+  capabilities: HarnessCapabilities;
 }
 
 export interface HarnessDiscoveryEntry extends HarnessCatalogueEntry {
-  status: 'ready' | 'adapter-missing' | 'not-found'
-  version?: string
-  workingDirPath?: string
-  diagnostics?: Array<{ code: string; message: string }>
+  status: 'ready' | 'adapter-missing' | 'not-found';
+  version?: string;
+  workingDirPath?: string;
+  diagnostics?: Array<{ code: string; message: string }>;
 }
 
 export interface HarnessDiscoveryParams {
-  prepareWorkspaces?: boolean
+  prepareWorkspaces?: boolean;
 }
 
 export interface HarnessDiscoveryResult {
-  harnesses: HarnessDiscoveryEntry[]
+  harnesses: HarnessDiscoveryEntry[];
 }
 
 // ─── Lifecycle Events (surfaced to host app) ──────────────────────────────────
 
 /** Union of all lifecycle events the server surfaces to the host app */
 export type LifecycleEvent =
-  | { type: 'agent/exited'; code: number | null; signal: string | null; willRestart: boolean }
+  | {
+      type: 'agent/exited';
+      code: number | null;
+      signal: string | null;
+      willRestart: boolean;
+    }
   | { type: 'agent/restarted'; pid: number; attempt: number }
   | { type: 'agent/overflow'; dropped: number }
   | { type: 'agent/goodbye'; reason: string }
   | { type: 'agent/suspended'; sessionId: string; reason: string }
-  | { type: 'agent/disconnected'; reason: string }
+  | { type: 'agent/disconnected'; reason: string };

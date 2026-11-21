@@ -209,6 +209,91 @@ describe('local identity admission', () => {
     ).toBe(401);
   });
 
+  it('admits only the desktop window and the machine once a launch token is set', async () => {
+    expect(resolveIdentityConfig({ HUABU_DESKTOP_TOKEN: 'launch' })).toEqual({
+      provider: 'local',
+      launchToken: 'launch',
+    });
+    const app = host(createLocalIdentityService({ launchToken: 'launch' }));
+    const token = { 'x-huabu-desktop-token': 'launch' };
+
+    // Another program on this machine: loopback, but no token.
+    for (const headers of [
+      {},
+      { 'x-huabu-desktop-token': 'guess' },
+      { 'x-huabu-desktop-token': 'launch-and-more' },
+      { authorization: 'Bearer launch' },
+    ]) {
+      for (const url of ['/api/data', '/api/settings', '/api/identity']) {
+        const refused = await app.inject({ url, headers });
+        expect(refused.statusCode).toBe(401);
+        // No scheme a browser would answer with a login prompt.
+        expect(refused.headers['www-authenticate']).not.toMatch(/^Basic/);
+      }
+    }
+
+    expect(
+      (await app.inject({ url: '/api/data', headers: token })).statusCode,
+    ).toBe(200);
+    expect(
+      (await app.inject({ url: '/api/settings', headers: token })).statusCode,
+    ).toBe(200);
+    // The token admits; ownership still follows the loopback rule.
+    expect(
+      (
+        await app.inject({
+          url: '/api/settings',
+          remoteAddress: '192.0.2.1',
+          headers: token,
+        })
+      ).statusCode,
+    ).toBe(403);
+
+    // An Agent reaches back with the machine credential, as before, and the
+    // RFS surface accepts nothing else: not even the desktop window.
+    const machine = { authorization: 'Bearer machine-secret' };
+    expect(
+      (await app.inject({ url: '/api/rfs/space/content', headers: machine }))
+        .statusCode,
+    ).toBe(200);
+    expect(
+      (await app.inject({ url: '/api/rfs/space/content', headers: token }))
+        .statusCode,
+    ).toBe(401);
+    expect((await app.inject('/api/rfs/space/skill')).statusCode).toBe(200);
+    expect(
+      (await app.inject({ method: 'OPTIONS', url: '/api/data' })).statusCode,
+    ).toBe(200);
+  });
+
+  it('leaves Basic Auth in charge when both are configured', async () => {
+    const app = host(
+      createLocalIdentityService({
+        username: 'owner',
+        password: 'secret',
+        launchToken: 'launch',
+      }),
+    );
+    expect(
+      (
+        await app.inject({
+          url: '/api/data',
+          headers: { 'x-huabu-desktop-token': 'launch' },
+        })
+      ).statusCode,
+    ).toBe(401);
+    expect(
+      (
+        await app.inject({
+          url: '/api/data',
+          headers: {
+            authorization: `Basic ${Buffer.from('owner:secret').toString('base64')}`,
+          },
+        })
+      ).statusCode,
+    ).toBe(200);
+  });
+
   it('retains RFS bootstrap, and machine access with the local owner rule', async () => {
     const app = host(createLocalIdentityService());
     expect((await app.inject('/api/rfs/space/skill')).statusCode).toBe(200);

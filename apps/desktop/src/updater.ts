@@ -27,7 +27,12 @@
  * handlers return a friendly "unavailable" result instead of throwing.
  */
 
-import { app, ipcMain, type BrowserWindow } from 'electron';
+import {
+  app,
+  ipcMain,
+  type BrowserWindow,
+  type IpcMainInvokeEvent,
+} from 'electron';
 // electron-updater is a CommonJS module that marks itself `__esModule`
 // but exposes `autoUpdater` only as a NAMED export (there is no default
 // export). Under our `module: CommonJS` build a `import x from
@@ -182,6 +187,7 @@ function setStatus(
  */
 export function registerUpdaterIpc(
   getWindow: () => BrowserWindow | null,
+  assertSender: (event: IpcMainInvokeEvent) => void,
   hooks?: UpdaterDesktopHooks,
 ): void {
   if (wired) return;
@@ -189,9 +195,13 @@ export function registerUpdaterIpc(
   resolveWindow = getWindow;
   desktopHooks = hooks;
 
-  ipcMain.handle('update:get-state', (): UpdateStatus => lastStatus);
+  ipcMain.handle('update:get-state', (event): UpdateStatus => {
+    assertSender(event);
+    return lastStatus;
+  });
 
-  ipcMain.handle('update:check', async (): Promise<UpdateCheckResult> => {
+  ipcMain.handle('update:check', async (event): Promise<UpdateCheckResult> => {
+    assertSender(event);
     if (!isPackaged()) {
       return {
         ok: false,
@@ -217,32 +227,37 @@ export function registerUpdaterIpc(
     }
   });
 
-  ipcMain.handle('update:download', async (): Promise<UpdateActionResult> => {
-    if (!isPackaged()) {
-      return {
-        ok: false,
-        error: 'Updates are only available in the installed app.',
-      };
-    }
-    try {
-      await autoUpdater.downloadUpdate();
-      return { ok: true };
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      // Claim this error so the shared `error` event (fired with the same
-      // instance) treats it as download-owned, not an install failure. A
-      // user-started download failing IS "update failed", so raise the
-      // persistent badge here — owned by this catch, never inferred from a
-      // shared flag a coincident background check could forge.
-      claimOperationError(err);
-      setStatus({ state: 'error', message }, getWindow);
-      return { ok: false, error: message };
-    }
-  });
+  ipcMain.handle(
+    'update:download',
+    async (event): Promise<UpdateActionResult> => {
+      assertSender(event);
+      if (!isPackaged()) {
+        return {
+          ok: false,
+          error: 'Updates are only available in the installed app.',
+        };
+      }
+      try {
+        await autoUpdater.downloadUpdate();
+        return { ok: true };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        // Claim this error so the shared `error` event (fired with the same
+        // instance) treats it as download-owned, not an install failure. A
+        // user-started download failing IS "update failed", so raise the
+        // persistent badge here — owned by this catch, never inferred from a
+        // shared flag a coincident background check could forge.
+        claimOperationError(err);
+        setStatus({ state: 'error', message }, getWindow);
+        return { ok: false, error: message };
+      }
+    },
+  );
 
   ipcMain.handle(
     'update:install',
-    (): UpdateActionResult | Promise<UpdateActionResult> => {
+    (event): UpdateActionResult | Promise<UpdateActionResult> => {
+      assertSender(event);
       if (!isPackaged()) {
         return {
           ok: false,

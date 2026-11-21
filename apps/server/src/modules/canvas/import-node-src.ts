@@ -47,7 +47,7 @@ import {
   toPhysicalRel,
 } from '../agent/tools/handlers/fs-sandbox.js';
 import { extractYoutubeVideoId } from '../preprocessing/loaders/youtube-id.js';
-import { outboundFetch } from '../security/outbound.js';
+import { outboundFetch, readBodyWithin } from '../security/outbound.js';
 import { space } from '../storage/index.js';
 
 const log = getLogger('canvas.import-node-src');
@@ -587,18 +587,15 @@ async function downloadToArtifact(
       log.warn({ url, status: res.status }, 'Online src download failed');
       return null;
     }
-    const declared = Number(res.headers.get('content-length') ?? '');
-    if (Number.isFinite(declared) && declared > MAX_DOWNLOAD_BYTES) {
-      log.warn({ url, declared }, 'Online src exceeds size cap; skipped');
-      return null;
-    }
     const contentType = (res.headers.get('content-type') ?? '')
       .split(';')[0]
       .trim()
       .toLowerCase();
-    const buffer = Buffer.from(await res.arrayBuffer());
-    if (buffer.length === 0 || buffer.length > MAX_DOWNLOAD_BYTES) {
-      log.warn({ url, size: buffer.length }, 'Online src empty / oversized');
+    // Stops reading at the cap: a body with no declared length is otherwise
+    // buffered whole before its size can be checked.
+    const buffer = await readBodyWithin(res, MAX_DOWNLOAD_BYTES);
+    if (buffer.length === 0) {
+      log.warn({ url }, 'Online src is empty; skipped');
       return null;
     }
     const ext = pickDownloadExt(pathname, contentType);

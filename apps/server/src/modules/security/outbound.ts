@@ -100,13 +100,190 @@ export function withPublicNetworkOnly<T>(operation: () => Promise<T>) {
   return scope.run(true, operation);
 }
 
-export function isPublicNetworkOnly(): boolean {
-  // Member work also reaches this transport outside the preprocessing pipeline.
+/** Member work also reaches this transport outside the preprocessing pipeline. */
+function isMemberWork(): boolean {
   return scope.getStore() === true || personalSettingsOwner() !== null;
 }
 
 /**
- * `fetch`, restricted for members and inside {@link withPublicNetworkOnly}.
+ * Whether this deployment keeps every content fetch on the public network,
+ * the owner's included. The desktop app sets it: there the Server shares a
+ * machine and a network with the user's other services, and the URLs it
+ * fetches come from web pages and Agent output as often as from the user.
+ */
+function isPublicOnlyDeployment(): boolean {
+  return process.env.HUABU_PUBLIC_NETWORK_ONLY === '1';
+}
+
+export function isPublicNetworkOnly(): boolean {
+  return isMemberWork() || isPublicOnlyDeployment();
+}
+
+const DEFAULT_PORTS: Record<string, number> = { 'http:': 80, 'https:': 443 };
+
+/**
+ * Whether a request to `url` leaves through a proxy. The global dispatcher
+ * that `setup-proxy.ts` installs decides this per request, and a configured
+ * proxy does not carry every one: `NO_PROXY` exempts hosts, and a scheme may
+ * have no proxy at all. This follows the `EnvHttpProxyAgent` of the undici
+ * this package pins, rule for rule. Where the two ever disagree the cost is
+ * bounded: a hop taken for proxied is still checked before it is sent, and
+ * one taken for direct still connects through the guarded dispatcher.
+ */
+export function leavesThroughProxy(
+  url: URL,
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  const http = env.http_proxy ?? env.HTTP_PROXY;
+  const https = env.https_proxy ?? env.HTTPS_PROXY;
+  if (!(url.protocol === 'https:' ? https || http : http)) return false;
+  // `host` rather than `hostname`: an IPv6 literal keeps its brackets.
+  const hostname = url.host.replace(/:\d*$/, '').toLowerCase();
+  const port = Number.parseInt(url.port, 10) || DEFAULT_PORTS[url.protocol];
+  const exemptions = env.no_proxy ?? env.NO_PROXY ?? '';
+  if (exemptions === '*') return false;
+  for (const entry of exemptions.split(/[,\s]/)) {
+    if (!entry) continue;
+    const withPort = entry.match(/^(.+):(\d+)$/);
+    const exempt = (withPort ? withPort[1] : entry)
+      .replace(/^\*?\./, '')
+      .toLowerCase();
+    if (withPort && Number.parseInt(withPort[2], 10) !== port) continue;
+    if (hostname === exempt || hostname.endsWith(`.${exempt}`)) return false;
+  }
+  return true;
+}
+
+function fetchFailed(cause: Error): TypeError {
+  return new TypeError('fetch failed', { cause });
+}
+
+/**
+ * Names that are private by construction: a single label, and the suffixes
+ * reserved or conventionally used for a local network.
+ */
+const PRIVATE_NAME =
+  /^[^.]+$|\.(?:local|localhost|localdomain|internal|intranet|lan|home|corp|private|home\.arpa)$/i;
+
+/**
+ * Refuse a host this machine knows to be non-public, before a proxy is asked
+ * to reach it.
+ *
+ * A name this machine cannot resolve is not proof of anything: many networks
+ * resolve public names only at the proxy, and a proxy may also resolve names
+ * of its own network. Refusing every such name would stop all fetching on
+ * the former; allowing every one would open the latter. So an unresolved
+ * name is refused when it is private by construction, and otherwise left to
+ * the proxy, whose own policy then governs.
+ */
+async function assertPublicHost(
+  hostname: string,
+  signal?: AbortSignal | null,
+): Promise<void> {
+  signal?.throwIfAborted();
+  const host = hostname.replace(/^\[|\]$/g, '').replace(/\.$/, '');
+  if (isIP(host)) {
+    if (!isPublicAddress(host)) throw fetchFailed(refused(host));
+    return;
+  }
+  // A slow resolver must not outlast the caller's deadline.
+  const addresses = await new Promise<LookupAddress[] | null>(
+    (resolve, reject) => {
+      const abandon = () => reject(signal?.reason);
+      signal?.addEventListener('abort', abandon, { once: true });
+      dnsLookup(host, { all: true }, (error, found) => {
+        signal?.removeEventListener('abort', abandon);
+        resolve(error ? null : found);
+      });
+    },
+  );
+  if (
+    addresses
+      ? addresses.some(({ address }) => !isPublicAddress(address))
+      : PRIVATE_NAME.test(host)
+  )
+    throw fetchFailed(refused(host));
+}
+
+const REDIRECTS = new Set([301, 302, 303, 307, 308]);
+const MAX_REDIRECTS = 20;
+
+/**
+ * The owner's fetch where a proxy is configured. Redirects are followed here,
+ * one hop at a time, because each hop may leave differently:
+ *
+ * - directly, when `NO_PROXY` or the scheme exempts it: through the guarded
+ *   dispatcher, which checks the address where the connection is made;
+ * - through the proxy, which makes the connection itself: checked before it
+ *   is sent, leaving the gap between that check and the proxy's own lookup.
+ */
+async function fetchWhereProxied(
+  input: Parameters<typeof fetch>[0],
+  init?: RequestInit,
+): Promise<Response> {
+  const request = new Request(input, init);
+  const send = async (url: URL, options: RequestInit) => {
+    if (!leavesThroughProxy(url))
+      return fetch(url, {
+        ...options,
+        dispatcher: publicOnlyAgent,
+      } as RequestInit);
+    await assertPublicHost(url.hostname, options.signal);
+    return fetch(url, options);
+  };
+  let url = new URL(request.url);
+  let method = request.method;
+  const headers = new Headers(request.headers);
+  let body = request.body ? await request.arrayBuffer() : undefined;
+  if (request.redirect !== 'follow')
+    return send(url, {
+      method,
+      headers,
+      body,
+      signal: request.signal,
+      redirect: request.redirect,
+    });
+  for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+    const response = await send(url, {
+      method,
+      headers,
+      body,
+      signal: request.signal,
+      redirect: 'manual',
+    });
+    const location = response.headers.get('location');
+    if (!REDIRECTS.has(response.status) || !location) return response;
+    await response.body?.cancel();
+    const next = new URL(location, url);
+    if (next.protocol !== 'http:' && next.protocol !== 'https:')
+      throw fetchFailed(new Error('Redirect to an unsupported scheme'));
+    if (
+      response.status === 303 ||
+      (response.status !== 307 && response.status !== 308 && method === 'POST')
+    ) {
+      if (method !== 'HEAD') method = 'GET';
+      body = undefined;
+      for (const name of ['content-type', 'content-length', 'content-encoding'])
+        headers.delete(name);
+    }
+    if (next.origin !== url.origin)
+      for (const name of ['authorization', 'cookie', 'proxy-authorization'])
+        headers.delete(name);
+    url = next;
+  }
+  throw fetchFailed(new Error('Too many redirects'));
+}
+
+function proxyConfigured(): boolean {
+  const env = process.env;
+  return Boolean(
+    env.HTTPS_PROXY || env.https_proxy || env.HTTP_PROXY || env.http_proxy,
+  );
+}
+
+/**
+ * `fetch`, kept to public addresses for members, inside
+ * {@link withPublicNetworkOnly}, and throughout a public-only deployment.
  * The built-in `fetch` takes the guarded dispatcher, so callers keep its
  * `Response` and `FormData`: SDKs that probe for multipart support (image
  * edits) reject npm undici's, which cannot serialize Node's `FormData`.
@@ -114,11 +291,57 @@ export function isPublicNetworkOnly(): boolean {
  * version with the one bundled in Node (`process.versions.undici`): undici 8's
  * Agent rejects the handlers Node 24's fetch hands it, failing every guarded
  * request. `outbound.test.ts` checks the pairing.
+ *
+ * Member work always connects directly, as it did before a deployment could
+ * be public-only. The owner's fetches keep the configured proxy.
  */
-export const outboundFetch: typeof fetch = (input, init) =>
-  isPublicNetworkOnly()
-    ? fetch(input, {
-        ...init,
-        dispatcher: publicOnlyAgent,
-      } as RequestInit)
-    : fetch(input, init);
+export const outboundFetch: typeof fetch = (input, init) => {
+  if (!isPublicNetworkOnly()) return fetch(input, init);
+  if (!isMemberWork() && proxyConfigured())
+    return fetchWhereProxied(input, init);
+  return fetch(input, {
+    ...init,
+    dispatcher: publicOnlyAgent,
+  } as RequestInit);
+};
+
+export class ResponseTooLargeError extends Error {
+  constructor(readonly limit: number) {
+    super(`Response body exceeds ${limit} bytes`);
+    this.name = 'ResponseTooLargeError';
+  }
+}
+
+/**
+ * The whole body of `response`, refused once it passes `limit` bytes.
+ *
+ * `arrayBuffer()` and `text()` buffer whatever a server chooses to send, so a
+ * fetched URL decides how much memory the Server spends. A declared length is
+ * refused up front; a body without one is abandoned at the limit.
+ */
+export async function readBodyWithin(
+  response: Response,
+  limit: number,
+): Promise<Buffer> {
+  const declared = Number(response.headers.get('content-length') ?? '');
+  if (Number.isFinite(declared) && declared > limit) {
+    await response.body?.cancel().catch(() => {});
+    throw new ResponseTooLargeError(limit);
+  }
+  if (!response.body) return Buffer.alloc(0);
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > limit) {
+      // Release the stream so the underlying connection can close.
+      await reader.cancel().catch(() => {});
+      throw new ResponseTooLargeError(limit);
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks);
+}

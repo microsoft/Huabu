@@ -59,6 +59,7 @@ describe('desktop updater IPC', () => {
         ({
           webContents: { isDestroyed: () => false, send },
         }) as never,
+      vi.fn(),
     );
     return { send };
   }
@@ -109,10 +110,33 @@ describe('desktop updater IPC', () => {
     expect(mocks.autoUpdater.on).not.toHaveBeenCalled();
   });
 
+  it('refuses every channel to a sender that is not the application', async () => {
+    const { registerUpdaterIpc } = await import('./updater.js');
+    registerUpdaterIpc(
+      () => null,
+      () => {
+        throw new Error('Not the Huabu window');
+      },
+    );
+    for (const channel of [
+      'update:get-state',
+      'update:check',
+      'update:download',
+      'update:install',
+    ]) {
+      await expect(
+        (async () => mocks.handlers.get(channel)?.({}))(),
+      ).rejects.toThrow('Not the Huabu window');
+    }
+    expect(mocks.autoUpdater.checkForUpdates).not.toHaveBeenCalled();
+    expect(mocks.autoUpdater.downloadUpdate).not.toHaveBeenCalled();
+    expect(mocks.autoUpdater.quitAndInstall).not.toHaveBeenCalled();
+  });
+
   it('does not install when a content page refuses the save barrier', async () => {
     const { registerUpdaterIpc } = await import('./updater.js');
     const cancelInstall = vi.fn();
-    registerUpdaterIpc(() => null, {
+    registerUpdaterIpc(() => null, vi.fn(), {
       broadcast: vi.fn(),
       prepareInstall: vi.fn().mockRejectedValue(new Error('Disk full')),
       cancelInstall,
@@ -128,7 +152,7 @@ describe('desktop updater IPC', () => {
   it('broadcasts update state to the tabbed desktop host', async () => {
     const { registerUpdaterIpc } = await import('./updater.js');
     const broadcast = vi.fn();
-    registerUpdaterIpc(() => null, {
+    registerUpdaterIpc(() => null, vi.fn(), {
       broadcast,
       prepareInstall: vi.fn().mockResolvedValue(undefined),
       cancelInstall: vi.fn(),

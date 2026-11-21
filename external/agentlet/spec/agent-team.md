@@ -44,8 +44,8 @@ The historical manifest could declare `command` mappings, `require.cli-tools`, `
 
 ## Current code entry points
 
-| Contract | Source |
-| --- | --- |
-| Generic harness catalogue | [`catalogue.ts`](../packages/local/src/harnesses/catalogue.ts) |
-| Read-only discovery and optional workspace preparation | [`detect.ts`](../packages/local/src/harnesses/detect.ts) |
-| Generic spawn contract | [`messages.ts`](../packages/protocol/src/messages.ts) |
+| Contract                                               | Source                                                         |
+| ------------------------------------------------------ | -------------------------------------------------------------- |
+| Generic harness catalogue                              | [`catalogue.ts`](../packages/local/src/harnesses/catalogue.ts) |
+| Read-only discovery and optional workspace preparation | [`detect.ts`](../packages/local/src/harnesses/detect.ts)       |
+| Generic spawn contract                                 | [`messages.ts`](../packages/protocol/src/messages.ts)          |
