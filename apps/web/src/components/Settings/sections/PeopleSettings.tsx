@@ -202,7 +202,9 @@ export function PeopleSettings() {
         busy={busy}
         onChange={(automatic) =>
           void change(async () => {
-            await setAutomaticAdmission(automatic);
+            // Shown as soon as it is saved, so a failed refresh after it
+            // cannot leave the switch saying the opposite of the policy.
+            setAdmission(await setAutomaticAdmission(automatic));
           })
         }
       />

@@ -136,6 +136,20 @@ it('turns automatic admission on, naming the providers it applies to', async () 
   expect(automaticSwitch()?.getAttribute('aria-checked')).toBe('true');
 });
 
+it('shows the saved admission setting even when the refresh after it fails', async () => {
+  mocks.listPeople.mockRejectedValue(new Error('People unavailable'));
+  await act(async () => automaticSwitch()?.click());
+  expect(mocks.setAutomaticAdmission).toHaveBeenCalledExactlyOnceWith(true);
+  expect(automaticSwitch()?.getAttribute('aria-checked')).toBe('true');
+  // So the next click turns it off rather than sending `true` again.
+  mocks.setAutomaticAdmission.mockResolvedValue({
+    automatic: false,
+    providers: ['entra', 'auth0'],
+  });
+  await act(async () => automaticSwitch()?.click());
+  expect(mocks.setAutomaticAdmission).toHaveBeenLastCalledWith(false);
+});
+
 it('offers no switch to turn on when no identity provider is configured', async () => {
   mocks.getAdmission.mockResolvedValue({ automatic: false, providers: [] });
   await act(async () => root.unmount());
