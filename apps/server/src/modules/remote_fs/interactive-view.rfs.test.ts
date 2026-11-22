@@ -113,7 +113,7 @@ describe('Interactive View RFS resources', () => {
         url: '/rfs/c1/interactive-views',
         headers: { 'content-type': 'application/json' },
         payload: {
-          rendererArtifact: 'upload/issue-tracker.html',
+          rendererArtifact: uploaded.json<{ id: string }>().id,
           viewKey: 'issue-tracker',
           ownerThreadId: 'thread-owner',
           state,
@@ -241,7 +241,7 @@ describe('Interactive View RFS resources', () => {
   it('keeps iframe state writes grant-bound while trusted RFS writes remain available', async () => {
     const app = await buildApp();
     try {
-      await app.inject({
+      const uploaded = await app.inject({
         method: 'POST',
         url: '/rfs/c1/upload/read-only.html',
         payload: '<!doctype html><title>Read only</title>',
@@ -250,7 +250,7 @@ describe('Interactive View RFS resources', () => {
         method: 'POST',
         url: '/rfs/c1/interactive-views',
         payload: {
-          rendererArtifact: 'upload/read-only.html',
+          rendererArtifact: uploaded.json<{ id: string }>().id,
           ownerThreadId: 'thread-owner',
           state,
           actions: [],

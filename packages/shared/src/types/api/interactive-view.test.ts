@@ -31,6 +31,12 @@ describe('createInteractiveViewRequestSchema', () => {
     expect(
       createInteractiveViewRequestSchema.safeParse({
         ...request,
+        rendererArtifact: 'artifact-8f2a.html',
+      }).success,
+    ).toBe(true);
+    expect(
+      createInteractiveViewRequestSchema.safeParse({
+        ...request,
         rendererArtifact: 'upload/../view.html',
       }).success,
     ).toBe(false);

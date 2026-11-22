@@ -97,6 +97,8 @@ export const routes = {
     canvasId: string,
     kind: 'image' | 'pdf' | 'office' | 'video' | 'audio' | 'html',
   ) => `/canvas/${enc(canvasId)}/artifact/${kind}`,
+  canvasArtifactFile: (canvasId: string, filename: string) =>
+    `/canvas/${enc(canvasId)}/artifact/${enc(filename)}`,
   canvasArtifactCloneFrom: (canvasId: string) =>
     `/canvas/${enc(canvasId)}/artifact/clone-from`,
   canvasEvents: (canvasId: string) => `/canvas/${enc(canvasId)}/events`,

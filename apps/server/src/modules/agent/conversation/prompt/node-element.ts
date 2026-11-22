@@ -23,10 +23,9 @@
  *   - `id`      — always; the addressable handle.
  *   - `type`    — always; the canvas node type.
  *   - `label`   — when the node has one.
- *   - `file`    — the pre-computed `nodes/<file>.md` path, when the node has
- *                 one. Both backends address a node by this path (the
- *                 built-in agent `read()`s it; the external agent downloads
- *                 it over the RFS).
+ *   - `file`    — the pre-computed `nodes/<file>.md` path for the built-in
+ *                 agent (`includeFile !== false`), omitted for external/RFS
+ *                 agents which address nodes by `id`.
  *   - `rev`     — content revision token, when the node has a body / src.
  *   - `summary` — the authored abstract (frontmatter `summary`), when present.
  *   - `preview` — a raw body excerpt (`content[:120]`), when present. `summary`
@@ -94,7 +93,16 @@ export interface RenderableNode {
  *   - the element shape matches the sibling `<skill>` / `<attachment>`
  *     conventions, so the whole prompt reads uniformly.
  */
-export function renderNodes(nodes: readonly RenderableNode[]): string {
+export interface RenderNodesOptions {
+  /** Include the Disk `file=` attribute (default `true` for built-in tools). */
+  includeFile?: boolean;
+}
+
+export function renderNodes(
+  nodes: readonly RenderableNode[],
+  options?: RenderNodesOptions,
+): string {
+  const includeFile = options?.includeFile ?? true;
   return nodes
     .map((n) => {
       const summary = n.summary?.trim();
@@ -103,7 +111,7 @@ export function renderNodes(nodes: readonly RenderableNode[]): string {
         `id="${escapeXmlAttr(n.id)}"`,
         `type="${escapeXmlAttr(n.type)}"`,
         n.label ? `label="${escapeXmlAttr(n.label)}"` : '',
-        n.filename ? `file="${escapeXmlAttr(n.filename)}"` : '',
+        includeFile && n.filename ? `file="${escapeXmlAttr(n.filename)}"` : '',
         n.rev ? `rev="${escapeXmlAttr(n.rev)}"` : '',
         summary ? `summary="${escapeXmlAttr(summary)}"` : '',
         preview ? `preview="${escapeXmlAttr(preview)}"` : '',

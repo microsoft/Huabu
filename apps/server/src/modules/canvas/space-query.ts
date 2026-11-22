@@ -140,12 +140,7 @@ export async function executeSpaceQuery(
         });
         return {
           type: query.type,
-          result: {
-            snapshots: snapshots.map((snapshot) => ({
-              ...snapshot,
-              downloadPath: `artifacts/${snapshot.src}`,
-            })),
-          },
+          result: { snapshots },
           basis,
         };
       } catch (error) {

@@ -288,6 +288,9 @@ describe('WebNode reading presentation', () => {
     expect(link.closest('[inert]')).toBeNull();
     expect(link.target).toBe('_blank');
     expect(link.rel).toBe('noopener noreferrer');
+    expect(element('[data-node-actions]').textContent).not.toContain(
+      'node.download',
+    );
     expect(element('[data-web-reading]').contains(link)).toBe(false);
     act(() => element('iframe').dispatchEvent(new Event('load')));
     expect(element('iframe').getAttribute('src')).toBe(
@@ -356,6 +359,9 @@ describe('WebNode reading presentation', () => {
       interactiveView: {} as CanvasWebNodeData['interactiveView'],
     });
     expect(container.querySelector('[data-preview-card]')).toBeNull();
+    expect(element('[data-node-actions]').textContent).toContain(
+      'node.download',
+    );
     expect(mocks.resolveArtifactUrl).toHaveBeenCalledWith(
       '/api/interactive-views/canvas-1/web-1/renderer',
       'canvas-1',

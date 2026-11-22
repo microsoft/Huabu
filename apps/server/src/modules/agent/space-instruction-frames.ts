@@ -124,7 +124,16 @@ function neutralizeNoteTags(value: string): string {
   );
 }
 
-function renderNoteReference(node: CanvasNode, record: NodeContent): string {
+export interface SpaceInstructionRenderOptions {
+  /** Include Disk `file=` attributes on `<note>` elements (default `true`). */
+  readonly includeFile?: boolean;
+}
+
+function renderNoteReference(
+  node: CanvasNode,
+  record: NodeContent,
+  includeFile = true,
+): string {
   const ref = buildAgentNodeRef({
     id: node.id,
     type: 'note',
@@ -135,9 +144,10 @@ function renderNoteReference(node: CanvasNode, record: NodeContent): string {
     content: record.content,
     ...(typeof record.src === 'string' ? { src: record.src } : {}),
   });
+  const fileAttr = includeFile ? ` file="${quoteAttribute(ref.filename)}"` : '';
   return `<note id="${quoteAttribute(ref.id)}" label="${quoteAttribute(
     ref.label ?? '',
-  )}" file="${quoteAttribute(ref.filename)}" rev="${quoteAttribute(rev)}" />`;
+  )}"${fileAttr} rev="${quoteAttribute(rev)}" />`;
 }
 
 function truncateUtf8(value: string, byteLimit: number): string {
@@ -156,6 +166,7 @@ function truncateUtf8(value: string, byteLimit: number): string {
 function renderPromptNote(
   node: CanvasNode,
   record: NodeContent,
+  includeFile = true,
 ): { markdown: string; truncated: boolean } {
   const ref = buildAgentNodeRef({
     id: node.id,
@@ -173,12 +184,11 @@ function renderPromptNote(
   const marker = truncated
     ? '\n\n[Note truncated at the 10 KiB per-note limit.]'
     : '';
+  const fileAttr = includeFile ? ` file="${quoteAttribute(ref.filename)}"` : '';
   return {
     markdown: `<note id="${quoteAttribute(ref.id)}" label="${quoteAttribute(
       ref.label ?? '',
-    )}" file="${quoteAttribute(ref.filename)}" rev="${quoteAttribute(
-      rev,
-    )}">\n${bounded}${marker}\n</note>`,
+    )}"${fileAttr} rev="${quoteAttribute(rev)}">\n${bounded}${marker}\n</note>`,
     truncated,
   };
 }
@@ -309,7 +319,9 @@ function renderSpaceInstructionFrames(
   records: ReadonlyMap<string, { readonly record: NodeContent }>,
   kind: SpaceInstructionFrameKind,
   targetAgentNodeId?: string,
+  options?: SpaceInstructionRenderOptions,
 ): RenderedSpacePrompt | null {
+  const includeFile = options?.includeFile ?? true;
   const config = INSTRUCTION_FRAME_CONFIG[kind];
   const bundle = buildSpatialBundle(canvas);
   const rawNodes = [...bundle.rawById.values()];
@@ -382,7 +394,7 @@ function renderSpaceInstructionFrames(
         });
       } else {
         if (config.noteRendering === 'inline') {
-          const rendered = renderPromptNote(child.raw, record);
+          const rendered = renderPromptNote(child.raw, record, includeFile);
           entries.push({
             nodeId: child.raw.id,
             markdown: rendered.markdown,
@@ -391,7 +403,7 @@ function renderSpaceInstructionFrames(
         } else {
           entries.push({
             nodeId: child.raw.id,
-            markdown: renderNoteReference(child.raw, record),
+            markdown: renderNoteReference(child.raw, record, includeFile),
           });
         }
       }
@@ -430,26 +442,36 @@ export function renderSpacePrompt(
   canvas: CanvasFile,
   records: ReadonlyMap<string, { readonly record: NodeContent }>,
   targetAgentNodeId: string,
+  options?: SpaceInstructionRenderOptions,
 ): RenderedSpacePrompt | null {
   return renderSpaceInstructionFrames(
     canvas,
     records,
     'prompt',
     targetAgentNodeId,
+    options,
   );
 }
 
 export function renderSpaceSkill(
   canvas: CanvasFile,
   records: ReadonlyMap<string, { readonly record: NodeContent }>,
+  options?: SpaceInstructionRenderOptions,
 ): RenderedSpaceSkill | null {
-  return renderSpaceInstructionFrames(canvas, records, 'skill');
+  return renderSpaceInstructionFrames(
+    canvas,
+    records,
+    'skill',
+    undefined,
+    options,
+  );
 }
 
 async function resolveSpaceInstructionFrames(
   canvasId: string,
   kind: SpaceInstructionFrameKind,
   targetAgentNodeId?: string,
+  options?: SpaceInstructionRenderOptions,
 ): Promise<RenderedSpacePrompt | null> {
   const handle = space(canvasId);
   const canvas = await handle.read();
@@ -508,18 +530,26 @@ async function resolveSpaceInstructionFrames(
     records,
     kind,
     targetAgentNodeId,
+    options,
   );
 }
 
 export function resolveSpacePrompt(
   canvasId: string,
   targetAgentNodeId: string,
+  options?: SpaceInstructionRenderOptions,
 ): Promise<RenderedSpacePrompt | null> {
-  return resolveSpaceInstructionFrames(canvasId, 'prompt', targetAgentNodeId);
+  return resolveSpaceInstructionFrames(
+    canvasId,
+    'prompt',
+    targetAgentNodeId,
+    options,
+  );
 }
 
 export function resolveSpaceSkill(
   canvasId: string,
+  options?: SpaceInstructionRenderOptions,
 ): Promise<RenderedSpaceSkill | null> {
-  return resolveSpaceInstructionFrames(canvasId, 'skill');
+  return resolveSpaceInstructionFrames(canvasId, 'skill', undefined, options);
 }
