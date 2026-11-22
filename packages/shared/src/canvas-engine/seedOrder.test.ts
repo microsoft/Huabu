@@ -121,3 +121,76 @@ describe.each(['column', 'row'] as const)(
     });
   },
 );
+
+/**
+ * A Column / Row Frame stored before reading order was stored at all (before
+ * `layoutOrder`, #386): its children read by coordinate, and children that
+ * tie on the coordinate read in array order. Nothing recorded that order.
+ */
+describe.each(['column', 'row'] as const)(
+  'seedNodeOrder (%s Frame stored without any reading order)',
+  (mode) => {
+    const field = mode === 'column' ? 'frameColumn' : 'frameRow';
+    const at = (along: number) =>
+      mode === 'column' ? { x: 30, y: along } : { x: along, y: 80 };
+    const child = (id: string, along: number): CanvasNode =>
+      ({
+        id,
+        type: 'note',
+        parentId: 'frame',
+        zIndex: -1,
+        position: at(along),
+        style: { width: 100, height: 60 },
+        data: { [field]: 0 },
+      }) as CanvasNode;
+    const stored = (): CanvasNode[] =>
+      [
+        {
+          id: 'frame',
+          type: 'frame',
+          position: { x: 0, y: 0 },
+          style: { width: 400, height: 600 },
+          data: { layoutMode: mode, gridCount: 1, sizing: 'manual' },
+        },
+        // `tie-b` and `tie-a` share a coordinate: array order decides.
+        child('second', 200),
+        child('tie-b', 80),
+        child('tie-a', 80),
+      ] as CanvasNode[];
+    const tracks = (nodes: CanvasNode[]) => {
+      const layout = describeFrameLayout(nodes, 'frame');
+      return layout && 'tracks' in layout ? layout.tracks : undefined;
+    };
+
+    it('records the order the children read in, on every child', () => {
+      const before = tracks(stored());
+      expect(before).toEqual([['tie-b', 'tie-a', 'second']]);
+
+      const seeded = seedNodeOrder(stored()) as CanvasNode[];
+      expect(tracks(seeded)).toEqual(before);
+      const keys = ['tie-b', 'tie-a', 'second'].map((id) =>
+        readTrackKey(seeded.find((node) => node.id === id) as CanvasNode),
+      );
+      expect(keys.every((key) => key !== undefined)).toBe(true);
+      expect([...keys].sort()).toEqual(keys);
+      // Geometry is not touched: seeding records order, it does not lay out.
+      expect(seeded.map((node) => node.position)).toEqual(
+        stored().map((node) => node.position),
+      );
+      expect(seedNodeOrder(stored())).toEqual(seeded);
+      expect(seedNodeOrder(seeded)).toBe(seeded);
+    });
+
+    it('keeps that order when the array order behind a tie later changes', () => {
+      const seeded = seedNodeOrder(stored()) as CanvasNode[];
+      // The tied children swap places in the array, as a different paint
+      // order or a rebuilt array would leave them.
+      const swapped = [seeded[0], seeded[1], seeded[3], seeded[2]];
+      expect(tracks(swapped)).toEqual([['tie-b', 'tie-a', 'second']]);
+      // Without the recorded order the tie would follow the array.
+      expect(
+        tracks([stored()[0], stored()[1], stored()[3], stored()[2]]),
+      ).toEqual([['tie-a', 'tie-b', 'second']]);
+    });
+  },
+);

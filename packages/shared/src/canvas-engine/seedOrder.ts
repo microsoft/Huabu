@@ -4,15 +4,25 @@
 /**
  * Order keys for a Space stored before nodes carried them.
  *
- * Such a Space holds paint order as array position and a Column / Row
- * Frame's reading order as a list on the Frame (`data.layoutOrder`). Reading
- * it gives every node the keys those stand for and drops the list. The
- * result depends only on the stored state, so two reads before the first
- * write agree, and the keys are stored with the Space's next write. A Space
- * that already has its keys comes back unchanged, array included.
+ * Such a Space holds paint order as array position. A Column / Row Frame's
+ * reading order it holds in one of two older ways:
+ *
+ *  - as a list on the Frame (`data.layoutOrder`), since that was introduced;
+ *  - not at all, for a Frame that was never laid out again after that: its
+ *    children read by coordinate, and children that tie on the coordinate
+ *    read in array order. The list was written only by the next relayout,
+ *    so such Frames were never migrated and their order stayed implicit.
+ *
+ * Reading the Space gives every node the keys those stand for and drops the
+ * list. The result depends only on the stored state, so two reads before
+ * the first write agree, and the keys are stored with the Space's next
+ * write. A Space that already has its keys comes back unchanged, array
+ * included. Geometry is never touched: this records order, it lays nothing
+ * out.
  */
 
-import { trackKeyChanges } from './autoLayout/layoutOrder.js';
+import { withMasonryLayoutOrder } from './autoLayout/gridLayout.js';
+import { readTrackKey, trackKeyChanges } from './autoLayout/layoutOrder.js';
 import { settlePaintOrder } from './container/paintOrder.js';
 
 import type { NestableNode } from './container/tree.js';
@@ -57,8 +67,35 @@ function seedTrackKeys<T extends NestableNode>(nodes: readonly T[]): T[] {
   });
 }
 
+/**
+ * Track keys for the children of every Column / Row Frame that still has a
+ * child without one, in the order the Frame reads them in now. Covers a
+ * Frame stored without any reading order, and a child a stored list did not
+ * name.
+ */
+function seedImplicitTrackOrder<T extends NestableNode>(
+  nodes: readonly T[],
+): T[] {
+  const incomplete = new Set<string>();
+  const modes = new Map<string, unknown>();
+  for (const node of nodes)
+    if (node.type === 'frame') modes.set(node.id, node.data?.layoutMode);
+  for (const node of nodes) {
+    const mode = node.parentId ? modes.get(node.parentId) : undefined;
+    if (
+      (mode === 'column' || mode === 'row') &&
+      readTrackKey(node) === undefined
+    )
+      incomplete.add(node.parentId as string);
+  }
+  let seeded = nodes as T[];
+  for (const frameId of incomplete)
+    seeded = withMasonryLayoutOrder(seeded, frameId) as T[];
+  return seeded;
+}
+
 export function seedNodeOrder<T extends NestableNode>(
   nodes: readonly T[],
 ): T[] {
-  return settlePaintOrder(seedTrackKeys(nodes));
+  return settlePaintOrder(seedImplicitTrackOrder(seedTrackKeys(nodes)));
 }
