@@ -3376,30 +3376,37 @@ export async function awaitQuestionCreation(
 }
 
 /**
- * Request preprocessing for a node a command batch changed, once the server
- * has taken its creation. `previousNodes` is the Space before the batch: a
- * node whose request would carry what it carried then is left alone, so a
- * batch that only moved it (a Grid cell, a paint order) requests nothing.
+ * Request preprocessing for the nodes a command batch changed, each once
+ * the server has taken its creation. `previousNodes` is the Space before the
+ * batch: a node whose request would carry what it carried then is left
+ * alone, so a batch that only moved it (a Grid cell, a paint order) requests
+ * nothing.
  */
 function scheduleAcknowledgedNodePreprocessing(
-  node: Node,
+  nodes: readonly Node[],
   previousNodes: readonly Node[],
 ): void {
   const { canvasId } = useCanvasStore.getState();
-  const creation = questionCreations.get(`${canvasId}\0${node.id}`)?.promise;
-  if (!creation) {
-    preprocessQueue.scheduleIfInputChanged(node, previousNodes);
-    return;
+  const ready: Node[] = [];
+  for (const node of nodes) {
+    const creation = questionCreations.get(`${canvasId}\0${node.id}`)?.promise;
+    if (!creation) {
+      ready.push(node);
+      continue;
+    }
+    void creation.then(
+      () => {
+        const current = useCanvasStore.getState();
+        if (current.canvasId !== canvasId) return;
+        const live = current.nodes.find(
+          (candidate) => candidate.id === node.id,
+        );
+        if (live) preprocessQueue.scheduleIfInputChanged([live], previousNodes);
+      },
+      () => {},
+    );
   }
-  void creation.then(
-    () => {
-      const current = useCanvasStore.getState();
-      if (current.canvasId !== canvasId) return;
-      const live = current.nodes.find((candidate) => candidate.id === node.id);
-      if (live) preprocessQueue.scheduleIfInputChanged(live, previousNodes);
-    },
-    () => {},
-  );
+  preprocessQueue.scheduleIfInputChanged(ready, previousNodes);
 }
 
 function rollbackFailedQuestions(canvasId: string, nodes: Node[]): void {
@@ -4132,8 +4139,8 @@ const useCanvasStore = create<RFState>()(
         // A deferred Frame refit is this page's own layout around what its
         // renderer measured; the server lays out from the reported boxes.
         setNodes: (nodes) => set({ nodes }),
-        triggerPreprocessing: (node) =>
-          scheduleAcknowledgedNodePreprocessing(node, state.nodes),
+        triggerPreprocessing: (nodes) =>
+          scheduleAcknowledgedNodePreprocessing(nodes, state.nodes),
         forgetNodeContent: nodeContentQueue.forgetNode,
         validatePreviewNodes: (liveNodeIds) =>
           usePreviewWorkspaceStore.getState().validate(liveNodeIds),
@@ -4364,8 +4371,8 @@ const useCanvasStore = create<RFState>()(
         getNodes: () => get().nodes,
         getEdges: () => get().edges,
         setNodes: (nodes) => get()._setStateRaw({ nodes }),
-        triggerPreprocessing: (node) =>
-          scheduleAcknowledgedNodePreprocessing(node, prevNodes),
+        triggerPreprocessing: (nodes) =>
+          scheduleAcknowledgedNodePreprocessing(nodes, prevNodes),
         forgetNodeContent: nodeContentQueue.forgetNode,
         validatePreviewNodes: (liveNodeIds) =>
           usePreviewWorkspaceStore.getState().validate(liveNodeIds),

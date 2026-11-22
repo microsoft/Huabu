@@ -53,7 +53,9 @@ function run(
     getNodes: () => [],
     getEdges: () => [],
     setNodes: () => undefined,
-    triggerPreprocessing,
+    // The trigger takes the batch; these cases look at its members.
+    triggerPreprocessing: (nodes) =>
+      nodes.forEach((node) => triggerPreprocessing(node)),
     forgetNodeContent: () => undefined,
     validatePreviewNodes,
   });
@@ -94,6 +96,28 @@ describe('runWebPostEffects — settle-triggered types skip content-edit preproc
     expect(trigger).toHaveBeenCalledTimes(1);
     expect(trigger).toHaveBeenCalledWith(web);
     expect(trigger).not.toHaveBeenCalledWith(note);
+  });
+
+  it('hands the trigger the whole batch in one call, and makes no call for nothing', () => {
+    const trigger = vi.fn();
+    const call = (mutatedNodes: Node[], contentEditedNodeIds: string[]) =>
+      runWebPostEffects({
+        effects: effectsWith(mutatedNodes, contentEditedNodeIds),
+        getNodes: () => [],
+        getEdges: () => [],
+        setNodes: () => undefined,
+        triggerPreprocessing: trigger,
+        forgetNodeContent: () => undefined,
+        validatePreviewNodes: () => undefined,
+      });
+    const web = node('w', 'web');
+    const pdf = node('p', 'pdf');
+    call([node('n', 'note'), web, pdf], ['n']);
+    expect(trigger).toHaveBeenCalledTimes(1);
+    expect(trigger).toHaveBeenCalledWith([web, pdf]);
+    call([node('n', 'note')], ['n']);
+    call([], []);
+    expect(trigger).toHaveBeenCalledTimes(1);
   });
 
   it('validates Preview Workspace against live nodes after deletion', () => {

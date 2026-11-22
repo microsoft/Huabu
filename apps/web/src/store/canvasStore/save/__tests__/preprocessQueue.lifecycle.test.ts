@@ -414,7 +414,7 @@ describe('scheduling only when the request input changed', () => {
 
   it('requests nothing and shows nothing when only unrelated data changed', async () => {
     const { queue, ingestion } = setup([moved]);
-    queue.scheduleIfInputChanged(moved, [node]);
+    queue.scheduleIfInputChanged([moved], [node]);
     expect(ingestion[node.id]).toBeUndefined();
     await vi.advanceTimersByTimeAsync(100);
     expect(preprocessNode).not.toHaveBeenCalled();
@@ -423,7 +423,7 @@ describe('scheduling only when the request input changed', () => {
   it('keeps work that is already queued for the node', async () => {
     const { queue, ingestion } = setup([moved]);
     queue.schedule(node);
-    queue.scheduleIfInputChanged(moved, [node]);
+    queue.scheduleIfInputChanged([moved], [node]);
     expect(ingestion[node.id]?.status).toBe('pending');
     await vi.advanceTimersByTimeAsync(100);
     expect(preprocessNode).toHaveBeenCalledOnce();
@@ -438,14 +438,28 @@ describe('scheduling only when the request input changed', () => {
     ['type', { ...node, type: 'pdf' }],
   ])('requests when the %s changed', async (_field, changed) => {
     const { queue } = setup([changed]);
-    queue.scheduleIfInputChanged(changed, [node]);
+    queue.scheduleIfInputChanged([changed], [node]);
     await vi.advanceTimersByTimeAsync(100);
     expect(preprocessNode).toHaveBeenCalledOnce();
   });
 
+  it('decides each node of a batch on its own', async () => {
+    const renamed = { ...node, id: 'web-b', data: { label: 'Renamed' } };
+    const original = { ...node, id: 'web-b', data: { label: 'Original' } };
+    const created = { ...node, id: 'web-c' };
+    const { queue, ingestion } = setup([moved, renamed, created]);
+    queue.scheduleIfInputChanged([moved, renamed, created], [node, original]);
+    expect(Object.keys(ingestion).sort()).toEqual(['web-b', 'web-c']);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(preprocessNode.mock.calls.map(([, id]) => id).sort()).toEqual([
+      'web-b',
+      'web-c',
+    ]);
+  });
+
   it('requests for a node the previous Space did not hold', async () => {
     const { queue } = setup();
-    queue.scheduleIfInputChanged(node, []);
+    queue.scheduleIfInputChanged([node], []);
     await vi.advanceTimersByTimeAsync(100);
     expect(preprocessNode).toHaveBeenCalledOnce();
   });
@@ -463,12 +477,12 @@ describe('scheduling only when the request input changed', () => {
       data: { ...frame.data, layoutOrder: [[node.id]] },
     };
     const { state, queue } = setup([relaid, child]);
-    queue.scheduleIfInputChanged(relaid, [frame, child]);
+    queue.scheduleIfInputChanged([relaid], [frame, child]);
     await vi.advanceTimersByTimeAsync(100);
     expect(preprocessNode).not.toHaveBeenCalled();
 
     state.nodes = [relaid, { ...child, data: { label: 'Two' } }];
-    queue.scheduleIfInputChanged(relaid, [relaid, child]);
+    queue.scheduleIfInputChanged([relaid], [relaid, child]);
     await vi.advanceTimersByTimeAsync(100);
     expect(preprocessNode).toHaveBeenCalledOnce();
   });

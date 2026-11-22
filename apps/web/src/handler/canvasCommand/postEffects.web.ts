@@ -43,7 +43,7 @@ export interface RunWebPostEffectsInput {
    * canvas store (depends on `useCanvasStore.getState()` and a private
    * timer map), so it is provided per-call rather than imported.
    */
-  triggerPreprocessing: (node: Node) => void;
+  triggerPreprocessing: (nodes: Node[]) => void;
   /**
    * Drop all per-node save-queue bookkeeping (CAS baseline, conflict /
    * error guards, rename anchor) for a deleted node. Injected as a
@@ -94,15 +94,16 @@ export function runWebPostEffects(input: RunWebPostEffectsInput): void {
   // Skip only the content-edit churn path, not the create/import path.
   // See `docs/architecture/node-preprocessing.md` §4 (Triggers & state).
   const contentEdited = new Set(effects.contentEditedNodeIds);
-  for (const node of effects.mutatedNodes) {
-    if (
-      (node.type === 'note' || node.type === 'text') &&
-      contentEdited.has(node.id)
-    ) {
-      continue;
-    }
-    triggerPreprocessing(node);
-  }
+  const candidates = effects.mutatedNodes.filter(
+    (node) =>
+      !(
+        (node.type === 'note' || node.type === 'text') &&
+        contentEdited.has(node.id)
+      ),
+  );
+  // One call for the batch: the trigger compares against the Space before
+  // the batch, and indexes it once rather than once per node.
+  if (candidates.length > 0) triggerPreprocessing(candidates);
 
   // 2. A deleted node needs no request of its own: the batch that removed
   // it from the Space removed its record on the server in the same commit.
