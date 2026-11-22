@@ -9,12 +9,13 @@
  * global auth hook in `app.ts`, except the bundled root `GET skill`
  * bootstrap:
  *
- * - `GET    download/<path>` — fetch a canvas file as raw bytes. Node files
- *   also carry their metadata (id/type/label/src/locked + parent/child edges)
- *   in ASCII-safe `X-Huabu-*` response headers.
- * - `POST   upload/<file>`   — stage bytes into the shared `.upload/` scratch
- *   dir (rejects on collision — the agent self-suffixes).
- * - `DELETE upload/<file>`   — remove a staged payload.
+ * - `GET    download/<id>`   — fetch a node (`<nodeId>`) or stored artifact
+ *   (`<artifactKey>`) across all storage backends. Node downloads carry
+ *   metadata (id/type/label/src/locked + parent/child edges) in ASCII-safe
+ *   `X-Huabu-*` response headers.
+ * - `POST   upload/<file>`   — store bytes directly in `space(canvasId).artifacts`
+ *   and return `{ id, size }`.
+ * - `DELETE upload/<file>`   — remove a legacy staged `.upload/` payload.
  * - `POST   agent`           — create a visible Agent and optionally start it.
  * - `POST   agent/:threadId/prompt` — submit a turn to an existing Agent.
  * - `POST   task/create`     — create a durable Task and static Task Note.
@@ -32,8 +33,8 @@
  * a runnable `/skill` recovery command into the message (self-healing pull).
  */
 
-import { createReadStream, existsSync, statSync } from 'node:fs';
-import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
 import path from 'node:path';
 
 import archiver from 'archiver';
@@ -41,6 +42,7 @@ import archiver from 'archiver';
 import {
   AGENT_HOST_SSE_EVENTS,
   AGENT_SSE_EVENTS,
+  createId,
   RFS_HEARTBEAT_DEFAULT_SEC,
   RFS_HEARTBEAT_MAX_SEC,
   RFS_HEARTBEAT_MIN_SEC,
@@ -85,11 +87,12 @@ import {
   type ServiceParams,
 } from '@huabu/shared';
 
-import { mimeForPath } from './mime.js';
 import {
-  lookupNodeByPath,
-  resolveReadable,
+  parseRfsDownloadTarget,
+  resolveRfsNodeByFilename,
+  resolveRfsNodeById,
   rfsMetaHeaders,
+  type RfsResolvedNode,
 } from './node-meta.js';
 import {
   resolveBundledRootSkill,
@@ -132,6 +135,7 @@ import {
   InkIntentTurnError,
   reportInkIntent,
 } from '../agent/tools/handlers/report-ink-intent.js';
+import { sendBlob } from '../artifact/send-blob.js';
 import {
   CanvasNotFoundError,
   ExecuteBasisError,
@@ -154,10 +158,8 @@ import {
   isAgentFacingService,
   readServicePackageFile,
 } from '../services/index.js';
-import {
-  storageServes,
-  unavailableCapabilityMessage,
-} from '../storage/index.js';
+import { space, storageServes } from '../storage/index.js';
+import { BlobNameError } from '../storage/ports/blob.js';
 import {
   RunCompletionError,
   runCompletionService,
@@ -313,19 +315,29 @@ function logReachbackEvent(
 
 // ── Route plugin ──
 
-const rfsRoutes: FastifyPluginAsync = async (app) => {
-  // RFS is the Space *as files*. A backend that keeps Spaces in tables has no
-  // tree to project, and the honest answer is the declared refusal rather
-  // than a partial projection assembled from records — see the
-  // `space-file-plane` capability. One hook, because every route below
-  // resolves a real path sooner or later.
-  app.addHook('onRequest', async (_request, reply) => {
-    if (storageServes('space-file-plane')) return;
-    return reply
-      .code(409)
-      .send(rfsError(unavailableCapabilityMessage('space-file-plane')));
-  });
+function parseUploadFilenameHint(rawPath: string): string | null {
+  if (
+    !rawPath ||
+    rawPath.startsWith('/') ||
+    rawPath.endsWith('/') ||
+    rawPath.includes('\\') ||
+    rawPath.includes('\0')
+  ) {
+    return null;
+  }
+  const segments = rawPath.split('/');
+  if (
+    segments.some(
+      (seg) =>
+        seg.length === 0 || seg === '.' || seg === '..' || seg.startsWith('.'),
+    )
+  ) {
+    return null;
+  }
+  return segments[segments.length - 1] ?? null;
+}
 
+const rfsRoutes: FastifyPluginAsync = async (app) => {
   // Consume every request body as raw bytes within this plugin: uploads are
   // arbitrary binary, and the `agent` endpoint accepts either a JSON body or a
   // raw text prompt. Handlers interpret the Buffer per Content-Type.
@@ -1111,43 +1123,65 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
       if (!requestRel) {
         return reply
           .code(400)
-          .send(rfsError('A download path is required (download/<path>).'));
+          .send(rfsError('A download target is required (download/<id>).'));
       }
 
-      let absPath: string;
-      let physicalRel: string;
-      try {
-        ({ absPath, physicalRel } = resolveReadable(canvasId, requestRel));
-      } catch {
+      const target = parseRfsDownloadTarget(requestRel);
+      if (target.kind === 'invalid') {
         return reply
           .code(400)
           .send(rfsError(`Path "${requestRel}" is not readable.`));
       }
 
-      if (!existsSync(absPath) || !statSync(absPath).isFile()) {
-        return reply.code(404).send(rfsError(`No file at "${requestRel}".`));
-      }
+      const sendResolvedNode = (resolved: RfsResolvedNode) => {
+        if (resolved.meta.rev) {
+          const etag = `"${resolved.meta.rev}"`;
+          reply.header('ETag', etag);
+          if (ifNoneMatchSatisfied(request.headers['if-none-match'], etag)) {
+            return reply.code(304).send();
+          }
+        }
+        reply.headers(rfsMetaHeaders(resolved));
+        const bytes = Buffer.from(resolved.markdown, 'utf8');
+        return reply
+          .header('Content-Type', 'text/markdown; charset=utf-8')
+          .header('Content-Length', String(bytes.byteLength))
+          .send(bytes);
+      };
 
-      const lookup = await lookupNodeByPath(canvasId, physicalRel);
-
-      // Node files carry a revision ETag (hash of authored content) so an
-      // agent can conditional-GET: an unchanged node returns `304` and the
-      // agent reuses its cached copy instead of re-reading. Non-node files
-      // Non-node files have no node revision and are served
-      // unconditionally.
-      if (lookup?.meta.rev) {
-        const etag = `"${lookup.meta.rev}"`;
-        reply.header('ETag', etag);
-        if (ifNoneMatchSatisfied(request.headers['if-none-match'], etag)) {
-          return reply.code(304).send();
+      const handle = space(canvasId);
+      switch (target.kind) {
+        case 'id-or-artifact': {
+          const node = await resolveRfsNodeById(canvasId, target.value);
+          if (node) return sendResolvedNode(node);
+          if (await sendBlob(request, reply, handle.artifacts, target.value)) {
+            return reply;
+          }
+          return reply
+            .code(404)
+            .send(rfsError(`No node or artifact at "${requestRel}".`));
+        }
+        case 'artifact': {
+          if (await sendBlob(request, reply, handle.artifacts, target.key)) {
+            return reply;
+          }
+          return reply.code(404).send(rfsError(`No file at "${requestRel}".`));
+        }
+        case 'upload': {
+          if (await sendBlob(request, reply, handle.uploads, target.name)) {
+            return reply;
+          }
+          return reply.code(404).send(rfsError(`No file at "${requestRel}".`));
+        }
+        case 'legacy-node': {
+          const node = await resolveRfsNodeByFilename(
+            canvasId,
+            target.filename,
+          );
+          if (node) return sendResolvedNode(node);
+          return reply.code(404).send(rfsError(`No file at "${requestRel}".`));
         }
       }
-
-      // Raw bytes (+ X-Huabu-* headers for node files).
-      if (lookup) reply.headers(rfsMetaHeaders(lookup));
-      return reply
-        .header('Content-Type', mimeForPath(absPath))
-        .send(createReadStream(absPath));
     },
   );
 
@@ -1174,38 +1208,44 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
           .send(rfsError('Upload body must be the raw file bytes.'));
       }
 
+      const base = parseUploadFilenameHint(filename);
+      if (!base) {
+        return reply
+          .code(400)
+          .send(rfsError(`Upload path "${filename}" is not allowed.`));
+      }
+
+      const rawExt = path.extname(base).toLowerCase();
+      const ext = /^\.[a-z0-9]{1,16}$/.test(rawExt) ? rawExt : '';
+      const id = `${createId('artifact')}${ext}`;
+
+      let missingSpace = false;
       try {
         await withLegacyUploadMutation(canvasId, async () => {
-          const uploadRoot = safeResolve(canvasId, '.upload');
-          let absPath: string;
-          try {
-            absPath = safeJoin(uploadRoot, filename);
-          } catch {
-            return reply
-              .code(400)
-              .send(rfsError(`Upload path "${filename}" is not allowed.`));
+          const handle = space(canvasId);
+          if (!(await handle.read())) {
+            missingSpace = true;
+            return;
           }
-          await mkdir(path.dirname(absPath), { recursive: true });
-          await writeFile(absPath, body, { flag: 'wx' });
+          await handle.artifacts.put(id, body);
         });
-        if (reply.sent) return reply;
       } catch (err) {
-        if (err instanceof Error && 'code' in err && err.code === 'EEXIST')
+        if (err instanceof BlobNameError) {
           return reply
-            .code(409)
-            .send(
-              rfsError(
-                `A file already named "upload/${filename}" exists; choose a different name (overwrite is not allowed).`,
-              ),
-            );
+            .code(400)
+            .send(rfsError(`Upload path "${filename}" is not allowed.`));
+        }
         request.log.error({ err, canvasId, filename }, 'rfs upload failed');
+        return reply.code(500).send(rfsError(`Failed to store "${filename}".`));
+      }
+      if (missingSpace) {
         return reply
-          .code(500)
-          .send(rfsError(`Failed to store "upload/${filename}".`));
+          .code(404)
+          .send(rfsError('Canvas not found.', 'canvas_not_found'));
       }
 
       const payload: RfsUploadResponse = {
-        path: `upload/${filename}`,
+        id,
         size: body.length,
       };
       return reply.code(201).send(payload);
@@ -1230,6 +1270,23 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
       const { canvasId, '*': filename } = params.data;
       try {
         return await withLegacyUploadMutation(canvasId, async () => {
+          if (!storageServes('builtin-file-tools')) {
+            try {
+              safeJoin('/upload', filename);
+            } catch {
+              return reply
+                .code(400)
+                .send(rfsError(`Upload path "${filename}" is not allowed.`));
+            }
+            if (!(await space(canvasId).read())) {
+              return reply
+                .code(404)
+                .send(rfsError('Canvas not found.', 'canvas_not_found'));
+            }
+            return reply
+              .code(404)
+              .send(rfsError(`No staged file at "upload/${filename}".`));
+          }
           const uploadRoot = safeResolve(canvasId, '.upload');
           let absPath: string;
           try {
@@ -1239,10 +1296,11 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
               .code(400)
               .send(rfsError(`Upload path "${filename}" is not allowed.`));
           }
-          if (!existsSync(absPath))
+          if (!existsSync(absPath)) {
             return reply
               .code(404)
               .send(rfsError(`No staged file at "upload/${filename}".`));
+          }
           await rm(absPath, { force: true });
           return reply.code(204).send();
         });

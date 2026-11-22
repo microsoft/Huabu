@@ -56,7 +56,7 @@ const QUERY_DETAILS: Record<
       'The query may materialize content-addressed PNG cache artifacts but does not change canvas topology or version.',
     ],
     result:
-      'Snapshot entries with an artifact src, a downloadable path, PNG dimensions, and every contributing node ID.',
+      'Snapshot entries with an artifact src, PNG dimensions, and every contributing node ID.',
     examples: [
       {
         type: 'SNAPSHOT_NODES',

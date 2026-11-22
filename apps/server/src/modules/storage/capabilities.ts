@@ -144,19 +144,6 @@ export const STORAGE_CAPABILITIES: readonly StorageCapability[] = [
       'which is the portable surface it already prefers for structured edits.',
   },
   {
-    id: 'space-file-plane',
-    summary: 'Reach a Space as files over RFS, the plane external agents mount',
-    requires: { structured: ['disk'], blobs: ['disk'] },
-    rationale:
-      'RFS projects the Space directory over HTTP — the record and the node ' +
-      'sidecars, reachable from another machine. Those are rows here, and a ' +
-      'projection of the byte areas alone would be a different plane wearing ' +
-      "this one's name. It is listed apart from the built-in file tools " +
-      'because it is what those tools were said to fall back to: a Space ' +
-      'with no file plane has neither, and an external agent bound to a ' +
-      'Space on this backend reaches it through the Canvas API.',
-  },
-  {
     id: 'external-note-discovery',
     summary: 'Adopt Markdown files dropped into a Space from outside the app',
     requires: { structured: ['disk'] },

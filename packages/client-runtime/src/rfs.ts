@@ -4,8 +4,8 @@
 import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import { createReadStream, createWriteStream } from 'node:fs';
-import { mkdtemp, readFile, rename, rm } from 'node:fs/promises';
-import { dirname, join, resolve } from 'node:path';
+import { mkdir, mkdtemp, readFile, rename, rm } from 'node:fs/promises';
+import { basename, dirname, join, resolve } from 'node:path';
 import { Readable, Writable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -17,6 +17,7 @@ import {
   RFS_HEADERS,
   RFS_SKILL_CLIENT_HEADER,
   agentTurnAcceptedSchema,
+  spaceQueryResponseSchema,
 } from '@huabu/shared';
 import { serviceParamsSchema } from '@huabu/shared/service-package';
 
@@ -26,6 +27,7 @@ import {
   type InputOptions,
   type ExecuteOptions,
   type DownloadOptions,
+  type SnapshotOptions,
   type UploadOptions,
 } from './rfs-cli.js';
 import { installServicePackage } from './rfs-service.js';
@@ -687,8 +689,8 @@ export async function runRfs(args: string[], io: RfsIO = {}): Promise<number> {
           throw new Error('Operation id must be a UUID');
         return send({ path: `/execute/${id.toLowerCase()}` });
       },
-      download: async (path, options) => {
-        const url = `/download/${path.split('/').map(segment).join('/')}`;
+      download: async (id, options) => {
+        const url = `/download/${id.split('/').map(segment).join('/')}`;
         await send({
           path: url,
           download: options,
@@ -703,18 +705,30 @@ export async function runRfs(args: string[], io: RfsIO = {}): Promise<number> {
                 },
         });
       },
-      upload: async (name, options: UploadOptions) => {
-        const path = `/upload/${segment(name)}`;
-        const selected =
-          Number(options.file !== undefined) + Number(options.delete === true);
-        if (selected !== 1)
-          throw new Error('Provide exactly one of --file or --delete');
+      upload: async (filename, options: UploadOptions) => {
         if (options.delete) {
-          await send({ path, method: 'DELETE', mutation: true });
+          if (options.file !== undefined) {
+            throw new Error('--delete cannot be combined with --file');
+          }
+          if (!filename) {
+            throw new Error('--delete requires an explicit <filename>');
+          }
+          await send({
+            path: `/upload/${segment(filename)}`,
+            method: 'DELETE',
+            mutation: true,
+          });
           return;
         }
         const file = options.file;
-        if (!file) throw new Error('Upload file path must be nonempty');
+        if (!file) throw new Error('Upload requires --file <path>');
+        if (file === '-' && !filename) {
+          throw new Error(
+            'Uploading from stdin (--file -) requires an explicit [filename]',
+          );
+        }
+        const resolvedName = filename ?? basename(file);
+        const path = `/upload/${segment(resolvedName)}`;
         uploadStream = file === '-' ? stdin : createReadStream(file);
         if (file !== '-') await once(uploadStream, 'open');
         await send({
@@ -725,6 +739,145 @@ export async function runRfs(args: string[], io: RfsIO = {}): Promise<number> {
           headers: { 'Content-Type': 'application/octet-stream' },
           mutation: true,
         });
+      },
+      snapshot: async (nodeIds: string[], options: SnapshotOptions) => {
+        if (!options.outDir) throw new Error('--out-dir must be nonempty');
+        for (const id of nodeIds) segment(id);
+
+        let maxPixels: number | undefined;
+        if (options.maxPixels !== undefined) {
+          maxPixels = Number(options.maxPixels);
+          if (
+            !Number.isInteger(maxPixels) ||
+            maxPixels < 64 ||
+            maxPixels > 4096
+          ) {
+            throw new Error(
+              '--max-pixels must be an integer between 64 and 4096',
+            );
+          }
+        }
+
+        let padding: number | undefined;
+        if (options.padding !== undefined) {
+          padding = Number(options.padding);
+          if (!Number.isInteger(padding) || padding < 0 || padding > 128) {
+            throw new Error('--padding must be an integer between 0 and 128');
+          }
+        }
+
+        const strokeSubsets = (options.strokeSubset ?? []).map((spec) => {
+          const colon = spec.indexOf(':');
+          if (colon <= 0) {
+            throw new Error(
+              '--stroke-subset must have the form <nodeId>:<strokeId1,strokeId2,...>',
+            );
+          }
+          const nodeId = spec.slice(0, colon).trim();
+          const strokeIds = spec
+            .slice(colon + 1)
+            .split(',')
+            .map((entry) => entry.trim())
+            .filter(Boolean);
+          if (!nodeId || strokeIds.length === 0) {
+            throw new Error(
+              '--stroke-subset must have the form <nodeId>:<strokeId1,strokeId2,...>',
+            );
+          }
+          return { nodeId, strokeIds };
+        });
+
+        const config = connection(env);
+        sent = true;
+        const queryResponse = await fetch(`${config.base}/query`, {
+          method: 'POST',
+          headers: {
+            ...config.headers,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            type: 'SNAPSHOT_NODES',
+            nodeIds,
+            ...(maxPixels !== undefined ? { maxPixels } : {}),
+            ...(padding !== undefined ? { padding } : {}),
+            ...(strokeSubsets.length > 0 ? { strokeSubsets } : {}),
+          }),
+          redirect: 'manual',
+          signal,
+        });
+        if (!queryResponse.ok) {
+          const body = cliErrorBody(
+            Buffer.from(await queryResponse.arrayBuffer()).toString(),
+          );
+          stdout.write(body);
+          diagnostic(
+            `Request failed (status ${queryResponse.status}); response body is on stdout.`,
+          );
+          code = 1;
+          return;
+        }
+
+        const parsed = spaceQueryResponseSchema.parse(
+          await queryResponse.json(),
+        );
+        if (parsed.type !== 'SNAPSHOT_NODES') {
+          throw new Error('Unexpected response for SNAPSHOT_NODES query');
+        }
+
+        const outDir = resolve(options.outDir);
+        await mkdir(outDir, { recursive: true });
+        const snapshots: Array<{
+          src: string;
+          output: string;
+          width: number;
+          height: number;
+          originNodeIds: string[];
+        }> = [];
+
+        for (const item of parsed.result.snapshots) {
+          const encodedSrc = segment(item.src);
+          const dlResponse = await fetch(
+            `${config.base}/download/${encodedSrc}`,
+            {
+              headers: config.headers,
+              redirect: 'manual',
+              signal,
+            },
+          );
+          if (!dlResponse.ok) {
+            const body = cliErrorBody(
+              Buffer.from(await dlResponse.arrayBuffer()).toString(),
+            );
+            diagnostic(
+              `Download failed (status ${dlResponse.status}): ${body}`,
+            );
+            code = 1;
+            return;
+          }
+          const target = join(outDir, item.src);
+          const snapTmp = await mkdtemp(join(outDir, '.huabu-rfs-'));
+          try {
+            const tmpBody = join(snapTmp, 'body');
+            await deliver(
+              dlResponse,
+              createWriteStream(tmpBody, { flags: 'wx' }),
+              true,
+            );
+            await rename(tmpBody, target);
+          } finally {
+            await rm(snapTmp, { recursive: true, force: true });
+          }
+          snapshots.push({
+            src: item.src,
+            output: target,
+            width: item.width,
+            height: item.height,
+            originNodeIds: item.originNodeIds,
+          });
+        }
+
+        stdout.write(`${JSON.stringify({ basis: parsed.basis, snapshots })}\n`);
+        code = 0;
       },
       profiles: () => send({ path: '/agent/profiles' }),
       create: (options) => post('/agent', options, false, true),

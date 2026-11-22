@@ -245,6 +245,81 @@ describe('renderSpacePrompt', () => {
       );
       expect(result?.markdown).not.toContain('Lazy Skill body');
     });
+
+    it('omits Disk file= attributes when includeFile is false', () => {
+      const topology = canvas([
+        {
+          id: 'prompt-frame',
+          type: 'frame',
+          position: { x: 0, y: 0 },
+          data: {},
+        },
+        {
+          id: 'prompt-note',
+          type: 'note',
+          parentId: 'prompt-frame',
+          position: { x: 0, y: 0 },
+          data: {},
+        },
+        {
+          id: 'skill-frame',
+          type: 'frame',
+          position: { x: 0, y: 200 },
+          data: {},
+        },
+        {
+          id: 'skill-note',
+          type: 'note',
+          parentId: 'skill-frame',
+          position: { x: 0, y: 0 },
+          data: {},
+        },
+      ]);
+      const snapshots = records([
+        {
+          nodeId: 'prompt-frame',
+          type: 'frame',
+          label: 'prompt: External',
+          labelSource: 'user',
+          content: '',
+        },
+        {
+          nodeId: 'prompt-note',
+          type: 'note',
+          label: 'Prompt Ref',
+          content: 'Prompt body',
+        },
+        {
+          nodeId: 'skill-frame',
+          type: 'frame',
+          label: 'skill: External',
+          labelSource: 'user',
+          content: '',
+        },
+        {
+          nodeId: 'skill-note',
+          type: 'note',
+          label: 'Skill Ref',
+          content: 'Skill body',
+        },
+      ]);
+
+      const prompt = renderSpacePrompt(topology, snapshots, 'agent-target', {
+        includeFile: false,
+      });
+      const skill = renderSpaceSkill(topology, snapshots, {
+        includeFile: false,
+      });
+
+      expect(prompt?.markdown).toMatch(
+        /<note id="prompt-note" label="Prompt Ref" rev="[^"]+">/,
+      );
+      expect(prompt?.markdown).not.toContain('file=');
+      expect(skill?.markdown).toMatch(
+        /<note id="skill-note" label="Skill Ref" rev="[^"]+" \/>/,
+      );
+      expect(skill?.markdown).not.toContain('file=');
+    });
   });
 
   it('renders direct Text and inline Note bodies in stable reading order', () => {

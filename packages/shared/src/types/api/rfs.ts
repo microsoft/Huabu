@@ -8,11 +8,12 @@
  * canvas. It replaces the v1 node-CRUD reachback tool with a discoverable HTTP
  * surface under `/api/rfs/:canvasId`:
  *
- * - `GET  download/<path>` — fetch a node/artifact/upload file as raw bytes.
- *   All node metadata (including the label and incident edges) rides along in
- *   ASCII-safe `X-Huabu-*` response headers (see {@link RFS_HEADERS}).
- * - `POST/DELETE upload/<file>` — stage/remove a file in the shared upload area
- *   so the internal agent can consume it (see {@link RfsUploadResponse}).
+ * - `GET  download/<id>` — fetch a node (`<nodeId>`) or stored artifact
+ *   (`<artifactKey>`) by ID across all storage backends. Node metadata
+ *   (including label and incident edges) rides along in ASCII-safe
+ *   `X-Huabu-*` response headers (see {@link RFS_HEADERS}).
+ * - `POST upload/<filename>` — store an artifact directly in the Space's
+ *   artifact store and return `{ id, size }` (see {@link RfsUploadResponse}).
  * - `POST query` with `type: "SNAPSHOT_NODES"` — render image, sketch, or frame
  *   nodes into downloadable PNG artifacts without invoking the
  *   canvas-internal agent.
@@ -160,11 +161,11 @@ export const rfsUploadParamsSchema =
   });
 export type RfsUploadParams = z.infer<typeof rfsUploadParamsSchema>;
 
-/** Success body for `POST /api/rfs/:canvasId/upload/<file>`. */
+/** Success body for `POST /api/rfs/:canvasId/upload/<filename>`. */
 export const rfsUploadResponseSchema = z
   .object({
-    /** Canvas-relative staging path, e.g. `upload/out.md`. */
-    path: z.string(),
+    /** Stored artifact key (for example `artifact-8f2a.png`). */
+    id: z.string().min(1),
     size: z.number().int().nonnegative(),
   })
   .strict();

@@ -29,7 +29,10 @@ import {
   type FixedAgentNodeTarget,
 } from '../agent-thread-resolver.js';
 import { conversationTitleService } from '../conversation-title.service.js';
-import { resolveSpacePrompt } from '../space-instruction-frames.js';
+import {
+  resolveSpacePrompt,
+  type RenderedSpacePrompt,
+} from '../space-instruction-frames.js';
 import { acquireAgentTurn } from '../turn-lease.js';
 import { ensureProfileCacheSubscription } from './profile-cache-port.js';
 import { getExternalAgentRuntimeConfig } from './runtime-config.js';
@@ -90,7 +93,10 @@ interface RealizationDependencies {
     canvasId: string,
     threadId: string,
   ) => Promise<FixedAgentNodeTarget | null>;
-  collectSpacePrompt: typeof resolveSpacePrompt;
+  collectSpacePrompt: (
+    canvasId: string,
+    targetAgentNodeId: string,
+  ) => Promise<RenderedSpacePrompt | null>;
   readRecord: (
     namespace: Namespace,
     threadId: string,
@@ -189,7 +195,8 @@ const DEFAULT_DEPENDENCIES: RealizationDependencies = {
     agentThreadResolver.resolveAgentNode(canvasId, threadId),
   resolveFixedAgentNode: (canvasId, threadId) =>
     agentThreadResolver.resolveFixedAgentNode(canvasId, threadId),
-  collectSpacePrompt: resolveSpacePrompt,
+  collectSpacePrompt: (canvasId, targetAgentNodeId) =>
+    resolveSpacePrompt(canvasId, targetAgentNodeId, { includeFile: false }),
   readRecord: async (namespace, threadId) =>
     await agenetes.record(namespace, threadId),
   createHandle: async (spec) => (await agenetes.create(spec)) as AcpHandle,
