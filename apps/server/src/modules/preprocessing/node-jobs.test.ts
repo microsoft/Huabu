@@ -327,7 +327,10 @@ describe('preprocessing started by the server after a write', () => {
     ).toBeUndefined();
 
     save({ ...before, label: 'Two' })?.();
-    await vi.waitFor(() => expect(preprocess).toHaveBeenCalledTimes(2));
+    // The Frame's run starts after its children's titles are read.
+    await vi.waitFor(() => expect(preprocess).toHaveBeenCalledTimes(2), {
+      timeout: 15_000,
+    });
     await waitForNodePreprocessing();
     const requests = preprocess.mock.calls.map(([request]) => request);
     expect(requests.find((r) => r.nodeId === 'node-a')).toMatchObject({

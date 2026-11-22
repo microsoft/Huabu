@@ -2277,6 +2277,7 @@ async function executePreparedOnServerAlreadyLocked(
   // many pages are open.
   const startFollowUp = commitReactions()?.batch({
     canvasId,
+    deltas,
     prestateNodes,
     finalNodes,
     contentEditedNodeIds: pendingEffects.contentEditedNodeIds,

@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 
 import { selectNodesToPreprocess } from './commit-trigger.js';
 
-import type { CanvasNode } from '@huabu/shared/canvas-engine';
+import { diffCanvasState, type CanvasNode } from '@huabu/shared/canvas-engine';
 
 function node(
   id: string,
@@ -30,10 +30,21 @@ function select(
   contentEditedNodeIds: string[] = [],
 ) {
   return selectNodesToPreprocess({
-    prestateNodes,
-    finalNodes,
+    ...commit(prestateNodes, finalNodes),
     contentEditedNodeIds,
   }).map((candidate) => candidate.node.id);
+}
+
+/** A batch as the executor hands it over: both states and their rows. */
+function commit(prestateNodes: CanvasNode[], finalNodes: CanvasNode[]) {
+  return {
+    prestateNodes,
+    finalNodes,
+    deltas: diffCanvasState(
+      { nodes: prestateNodes, edges: [] },
+      { nodes: finalNodes, edges: [] },
+    ),
+  };
 }
 
 const pdf = node('pdf', 'pdf', { label: 'Paper', src: 'a.pdf' });
@@ -43,8 +54,7 @@ const child = node('child', 'pdf', { label: 'One', src: 'b.pdf' }, 'frame');
 describe('selectNodesToPreprocess', () => {
   it('selects a node the write created, with nothing as its previous input', () => {
     const [candidate] = selectNodesToPreprocess({
-      prestateNodes: [],
-      finalNodes: [pdf],
+      ...commit([], [pdf]),
       contentEditedNodeIds: [],
     });
     expect(candidate.node).toBe(pdf);
@@ -70,8 +80,7 @@ describe('selectNodesToPreprocess', () => {
 
   it('selects a node whose watched input changed, with its previous input', () => {
     const [candidate] = selectNodesToPreprocess({
-      prestateNodes: [pdf],
-      finalNodes: [withData(pdf, { src: 'other.pdf' })],
+      ...commit([pdf], [withData(pdf, { src: 'other.pdf' })]),
       contentEditedNodeIds: [],
     });
     expect(candidate.previousSnapshot).toMatchObject({ src: 'a.pdf' });
@@ -99,8 +108,8 @@ describe('selectNodesToPreprocess', () => {
   it('selects a Frame when a child’s title changes or its children change', () => {
     const renamed = withData(child, { label: 'Two' });
     expect(select([frame, child], [frame, renamed])).toEqual([
-      'frame',
       'child',
+      'frame',
     ]);
     // A child that only moves inside the Frame changes nothing for it.
     expect(
@@ -128,14 +137,42 @@ describe('selectNodesToPreprocess', () => {
     const note = node('note', 'note', { label: 'Kept', content: 'Body' });
     const video = node('vid', 'video', { label: 'Clip', src: 'a.mp4' });
     const selected = selectNodesToPreprocess({
-      prestateNodes: [],
-      finalNodes: [note, pdf, video],
+      ...commit([], [note, pdf, video]),
       contentEditedNodeIds: [],
       restoredNodeIds: ['note', 'pdf', 'vid'],
     }).map((candidate) => candidate.node.id);
     // The note came back whole, title included; the PDF's text and the
     // video's cover did not.
     expect(selected).toEqual(['pdf', 'vid']);
+  });
+
+  it('does not look at the Space for a batch that touches no watched field', () => {
+    // A node array that cannot be read: any indexing would throw.
+    const unreadable = new Proxy([] as CanvasNode[], {
+      get(target, key) {
+        if (key === 'length') return 0;
+        throw new Error(`The Space was read (${String(key)})`);
+      },
+    });
+    const moved = diffCanvasState(
+      { nodes: [pdf, child], edges: [] },
+      {
+        nodes: [
+          { ...pdf, position: { x: 5, y: 5 } } as CanvasNode,
+          withData(child, { frameColumn: 2, paintKey: 'a2' }),
+        ],
+        edges: [],
+      },
+    );
+    expect(moved).toHaveLength(2);
+    expect(
+      selectNodesToPreprocess({
+        deltas: moved,
+        prestateNodes: unreadable,
+        finalNodes: unreadable,
+        contentEditedNodeIds: [],
+      }),
+    ).toEqual([]);
   });
 
   it('never selects types whose pipeline does nothing', () => {

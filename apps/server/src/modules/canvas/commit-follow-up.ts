@@ -13,11 +13,16 @@
  */
 
 import type { NodeContent } from '../storage/index.js';
-import type { CanvasNode } from '@huabu/shared/canvas-engine';
+import type { CanvasNode, Delta } from '@huabu/shared/canvas-engine';
 
 /** A command batch as the executor committed it. */
 export interface CanvasCommit {
   canvasId: string;
+  /**
+   * What the batch changed, as diffed: per node the fields that changed,
+   * and a deletion still holding the node.
+   */
+  deltas: readonly Delta[];
   prestateNodes: readonly CanvasNode[];
   finalNodes: readonly CanvasNode[];
   /** Nodes whose body a command of the batch rewrote. */

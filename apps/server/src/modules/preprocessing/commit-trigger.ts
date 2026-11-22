@@ -15,7 +15,7 @@ import { buildPreprocessSnapshot, type CanvasNodeType } from '@huabu/shared';
 
 import { getProfile } from './profiles.js';
 
-import type { CanvasNode } from '@huabu/shared/canvas-engine';
+import type { CanvasNode, Delta } from '@huabu/shared/canvas-engine';
 
 /** A node to preprocess, with what its request carried before the write. */
 export interface PreprocessCandidate {
@@ -64,77 +64,155 @@ const DERIVED_AGAIN_ON_RESTORE: ReadonlySet<string> = new Set<CanvasNodeType>([
   'video',
 ]);
 
-function childIndex(
-  nodes: readonly CanvasNode[],
-): (frameId: string) => CanvasNode[] {
+/** Lookups over one node array, each built on first use. */
+function indexNodes(nodes: readonly CanvasNode[]) {
+  let byId: Map<string, CanvasNode> | undefined;
   let byParent: Map<string, CanvasNode[]> | undefined;
-  return (frameId) => {
-    if (!byParent) {
-      byParent = new Map();
-      for (const node of nodes) {
-        if (!node.parentId) continue;
-        const list = byParent.get(node.parentId);
-        if (list) list.push(node);
-        else byParent.set(node.parentId, [node]);
+  return {
+    get(id: string): CanvasNode | undefined {
+      byId ??= new Map(nodes.map((node) => [node.id, node]));
+      return byId.get(id);
+    },
+    childrenOf(frameId: string): CanvasNode[] {
+      if (!byParent) {
+        byParent = new Map();
+        for (const node of nodes) {
+          if (!node.parentId) continue;
+          const list = byParent.get(node.parentId);
+          if (list) list.push(node);
+          else byParent.set(node.parentId, [node]);
+        }
       }
-    }
-    return byParent.get(frameId) ?? [];
+      return byParent.get(frameId) ?? [];
+    },
   };
 }
 
 const same = (a: unknown, b: unknown): boolean =>
   a === b || JSON.stringify(a) === JSON.stringify(b);
 
+/** The node data key each watched snapshot field is read from. */
+const DATA_KEY_OF_FIELD: Record<string, string> = {
+  title: 'label',
+  labelSource: 'labelSource',
+  content: 'content',
+  src: 'src',
+};
+
 /**
  * The nodes a write created (or, for the types that need it, restored), or
- * whose watched preprocessing input it changed. A write that only moved, restyled or reordered a node selects
- * nothing.
+ * whose watched preprocessing input it changed. A write that only moved,
+ * restyled or reordered a node selects nothing.
  *
- * @param contentEditedNodeIds Nodes whose body a command of the write
- *   rewrote (`pendingEffects.contentEditedNodeIds`).
+ * It starts from the batch's change rows, which already name each changed
+ * node and field, so the cost follows what the batch changed and not the
+ * size of the Space: a row that touches no watched field is skipped without
+ * looking at the node, and nothing is indexed unless a candidate is found.
  */
 export function selectNodesToPreprocess(input: {
+  /** The batch's rows as diffed: a deletion still holds the node. */
+  deltas: readonly Delta[];
   prestateNodes: readonly CanvasNode[];
   finalNodes: readonly CanvasNode[];
+  /** Nodes whose body a command of the write rewrote. */
   contentEditedNodeIds: readonly string[];
   /** Nodes a `RESTORE_NODES` command put back (`CanvasCommit`). */
   restoredNodeIds?: readonly string[];
 }): PreprocessCandidate[] {
-  const { prestateNodes, finalNodes } = input;
-  if (prestateNodes === finalNodes) return [];
-  const before = new Map(prestateNodes.map((node) => [node.id, node]));
-  const childrenBefore = childIndex(prestateNodes);
-  const childrenAfter = childIndex(finalNodes);
+  const before = indexNodes(input.prestateNodes);
+  const after = indexNodes(input.finalNodes);
   const bodyEdited = new Set(input.contentEditedNodeIds);
   const restored = new Set(input.restoredNodeIds ?? []);
   const candidates: PreprocessCandidate[] = [];
+  /** Frames whose children, or whose children's titles, a row changed. */
+  const frames = new Set<string>();
+  const noteParent = (parentId: unknown): void => {
+    if (typeof parentId === 'string' && parentId) frames.add(parentId);
+  };
 
-  for (const node of finalNodes) {
-    const type = node.type ?? '';
-    if (!PROCESSED_TYPES.has(type)) continue;
-    const previous = before.get(node.id);
-    // Untouched by the write: nothing to compare. A Frame is the exception,
-    // because its input is its children's titles.
-    if (previous === node && type !== 'frame') continue;
-    const profile = getProfile(type as CanvasNodeType);
-    if (!profile) continue;
-
-    const snapshot = buildPreprocessSnapshot(node, childrenAfter);
-    if (!previous) {
-      if (!restored.has(node.id) || DERIVED_AGAIN_ON_RESTORE.has(type))
-        candidates.push({ node, snapshot });
+  for (const delta of input.deltas) {
+    if (delta.type === 'INSERT_NODE') {
+      const node = delta.node;
+      noteParent(node.parentId);
+      const type = node.type ?? '';
+      if (!PROCESSED_TYPES.has(type)) continue;
+      if (restored.has(node.id) && !DERIVED_AGAIN_ON_RESTORE.has(type))
+        continue;
+      const stored = after.get(node.id);
+      if (stored)
+        candidates.push({
+          node: stored,
+          snapshot: buildPreprocessSnapshot(stored, after.childrenOf),
+        });
       continue;
     }
-    const previousSnapshot = buildPreprocessSnapshot(previous, childrenBefore);
-    const changed = profile.watchFields.some(
-      (field) =>
+    if (delta.type === 'DELETE_NODE') {
+      noteParent(delta.node.parentId);
+      continue;
+    }
+    if (delta.type !== 'REPLACE_NODE') continue;
+
+    const { prev, next } = delta;
+    const changedData = { ...prev.data, ...next.data };
+    const parentChanged = 'parentId' in prev || 'parentId' in next;
+    const titleChanged = 'label' in changedData;
+    if (parentChanged) {
+      noteParent(prev.parentId);
+      noteParent(next.parentId);
+    } else if (titleChanged) {
+      noteParent(after.get(next.id)?.parentId);
+    }
+
+    const type = delta.nodeType ?? '';
+    if (type === 'frame') {
+      // Its own input is its children's titles, decided below.
+      if ('labelSource' in changedData) frames.add(next.id);
+      continue;
+    }
+    if (!PROCESSED_TYPES.has(type)) continue;
+    const profile = getProfile(type as CanvasNodeType);
+    const touched = profile?.watchFields.some((field) => {
+      const key = DATA_KEY_OF_FIELD[field];
+      return (
+        key !== undefined &&
+        key in changedData &&
         !(
           field === 'content' &&
           SETTLED_BY_EDITOR.has(type) &&
-          bodyEdited.has(node.id)
-        ) && !same(previousSnapshot[field], snapshot[field]),
+          bodyEdited.has(next.id)
+        )
+      );
+    });
+    if (!touched) continue;
+    const node = after.get(next.id);
+    const previous = before.get(next.id);
+    if (!node || !previous) continue;
+    candidates.push({
+      node,
+      snapshot: buildPreprocessSnapshot(node, after.childrenOf),
+      previousSnapshot: buildPreprocessSnapshot(previous, before.childrenOf),
+    });
+  }
+
+  const selected = new Set(candidates.map((candidate) => candidate.node.id));
+  for (const frameId of frames) {
+    if (selected.has(frameId)) continue;
+    const node = after.get(frameId);
+    const previous = before.get(frameId);
+    // Created in this batch (selected above), deleted, or not a Frame.
+    if (!node || !previous || node.type !== 'frame') continue;
+    const snapshot = buildPreprocessSnapshot(node, after.childrenOf);
+    const previousSnapshot = buildPreprocessSnapshot(
+      previous,
+      before.childrenOf,
     );
-    if (changed) candidates.push({ node, snapshot, previousSnapshot });
+    const profile = getProfile('frame');
+    if (
+      profile?.watchFields.some(
+        (field) => !same(previousSnapshot[field], snapshot[field]),
+      )
+    )
+      candidates.push({ node, snapshot, previousSnapshot });
   }
   return candidates;
 }
