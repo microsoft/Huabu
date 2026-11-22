@@ -377,18 +377,9 @@ describe('undo/redo persistence ordering', () => {
     expect(api.putNodeContent).not.toHaveBeenCalled();
     expect(topology.map((n) => n.id)).toEqual([pdf.id]);
     expect(state().nodes[0].data.contentMissing).toBeUndefined();
-    // The extracted text went with the deleted record; only the server can
-    // produce it again. The request is issued when the restore is answered
-    // rather than debounced, so leaving the Space straight away cannot
-    // cancel it.
-    expect(api.preprocessNode).toHaveBeenCalledExactlyOnceWith(
-      'restore-canvas',
-      pdf.id,
-      expect.objectContaining({
-        nodeType: 'pdf',
-        snapshot: expect.objectContaining({ src: pdf.data.src }),
-      }),
-    );
+    // The page asks for nothing: the server derives the text again when it
+    // commits the restoring batch (see the server's `node-jobs.test.ts`).
+    expect(api.preprocessNode).not.toHaveBeenCalled();
   });
 
   it('does not derive a PDF again when the server refused to take it back', async () => {

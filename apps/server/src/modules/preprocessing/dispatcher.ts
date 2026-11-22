@@ -65,7 +65,9 @@ export function buildPlan(
     ? [...profile.watchFields]
     : profile.watchFields.filter(
         (field) =>
-          request.previousSnapshot?.[field] !== request.snapshot[field],
+          // By value: a Frame's `childLabels` is a fresh array on each side.
+          JSON.stringify(request.previousSnapshot?.[field]) !==
+          JSON.stringify(request.snapshot[field]),
       );
 
   if (!isFirstRun && dirtyFields.length === 0) {

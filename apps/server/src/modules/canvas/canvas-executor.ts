@@ -22,8 +22,9 @@
  * (`publishCanvasUpdate`) unless the caller defers publication.
  *
  * What this module does NOT do:
- *   - Trigger preprocessing. The originating side drives that from
- *     `pendingEffects.mutatedNodes`.
+ *   - Decide what follows from a batch. After the commit it calls the
+ *     reaction installed in `commit-follow-up.ts` (preprocessing of the
+ *     nodes whose input the batch changed) and knows nothing more of it.
  *   - Per-command delta log rows: one row is written per batch.
  */
 
@@ -84,6 +85,7 @@ import {
   validateAgentNodeEditableData,
 } from './agent-node-edit.js';
 import { publishCanvasUpdate } from './canvas-sync.js';
+import { commitReactions } from './commit-follow-up.js';
 import {
   outcomeOf,
   readStoredOutcome,
@@ -999,8 +1001,8 @@ export interface ExecuteOnServerOutput {
   /**
    * Subset of `PendingEffects` that clients need to drain locally.
    *
-   * `mutatedNodes` is included so the web's existing `triggerPreprocessing`
-   * pipeline can still run (the originating page drives preprocessing).
+   * `mutatedNodes` names the nodes the batch created or whose data it
+   * changed; a page reads them from its own state.
    */
   pendingEffects: {
     mutatedNodes: CanvasNode[];
@@ -2270,6 +2272,20 @@ async function executePreparedOnServerAlreadyLocked(
       // records are stored, so the list is read back.
       (await handle.changes.read(reviewThreadId).catch(() => changes));
   }
+  // What follows from the write (preprocessing of the nodes it created or
+  // whose input it changed) is decided here, once, whoever wrote and however
+  // many pages are open.
+  const startFollowUp = commitReactions()?.batch({
+    canvasId,
+    prestateNodes,
+    finalNodes,
+    contentEditedNodeIds: pendingEffects.contentEditedNodeIds,
+    restoredNodeIds: commands.flatMap((command) =>
+      command.type === 'RESTORE_NODES'
+        ? (command.nodes ?? []).map((node) => node.id as string)
+        : [],
+    ),
+  });
   if (input.publish !== false) {
     publishCanvasUpdate(canvasId, {
       type: 'update',
@@ -2287,6 +2303,11 @@ async function executePreparedOnServerAlreadyLocked(
       },
     });
   }
+
+  // After the update, so a page learns of the write before what follows
+  // from it. The work runs in this call's context: its caller's settings
+  // and credentials.
+  startFollowUp?.();
 
   return outputWith(changes, nodeContentRevisions);
 }

@@ -14,6 +14,8 @@
  * This module replaces both the old `ingest.ts` and `resolveLabel.ts`.
  */
 
+import { buildPreprocessSnapshot } from '@huabu/shared';
+
 import { preprocessNode } from '@/api/canvas';
 
 import type { Node } from '@xyflow/react';
@@ -43,60 +45,8 @@ export type PreprocessHelperDeps = {
 
 // ─── Unified preprocessing entry point ───────────────────────────────────────
 
-/**
- * Build the snapshot object sent to the server for a given node.
- * For frame nodes we include child labels so the Enrich stage can
- * generate a group-level label.
- *
- * Exported so the unload-time keepalive path (in `preprocessQueue`)
- * can produce the same snapshot shape without going through the full
- * `preprocessNodeIfNeeded` flow (which mutates ingestion state — a
- * no-op during page unload).
- */
-export function buildPreprocessSnapshot(
-  node: Node,
-  getChildNodes: (frameId: string) => Node[],
-): Record<string, unknown> {
-  const data = node.data as Record<string, unknown> | undefined;
-  const nodeType = node.type ?? '';
-
-  if (nodeType === 'frame') {
-    const children = getChildNodes(node.id);
-    const childLabels = children
-      .map((c) => {
-        const cData = c.data as Record<string, unknown> | undefined;
-        const label =
-          typeof cData?.label === 'string' ? (cData.label as string) : '';
-        return label.trim();
-      })
-      .filter((l) => l.length > 0);
-    return {
-      title: (data?.label as string) || undefined,
-      childLabels,
-      labelSource: (data?.labelSource as string) || undefined,
-    };
-  }
-
-  if (nodeType === 'question') {
-    // Question prompts live at `data.content` just like text / note
-    // bodies, so the server pipeline can treat them uniformly when
-    // generating a label.
-    const content =
-      typeof data?.content === 'string' ? data.content.trim() : '';
-    return {
-      title: (data?.label as string) || (data?.title as string) || undefined,
-      labelSource: (data?.labelSource as string) || undefined,
-      content: content || undefined,
-    };
-  }
-
-  return {
-    title: (data?.label as string) || (data?.title as string) || undefined,
-    labelSource: (data?.labelSource as string) || undefined,
-    content: (data?.content as string) || undefined,
-    src: (data?.src as string) || undefined,
-  };
-}
+// The request's content is defined once, for the server and for pages.
+export { buildPreprocessSnapshot };
 
 /**
  * Preprocess a single node through the unified server endpoint.

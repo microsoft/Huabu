@@ -51,6 +51,7 @@ import {
 } from './canvas-executor.js';
 import { searchCanvas } from './canvas-search.js';
 import { publishCanvasUpdate } from './canvas-sync.js';
+import { commitReactions, type NodeContentSave } from './commit-follow-up.js';
 import { admitExecuteRequest } from './execute-admission.js';
 import { NodeCoverError } from './import-node-src.js';
 import { remapImportedSpace } from './import-space-identity.js';
@@ -853,7 +854,9 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     // writer (another tab / device / agent / preprocess). See
     // `canvas/write-coordinator.ts`.
     let persisted: NodeContent | undefined;
+    let replaced: NodeContent | null = null;
     const apply = (existing: NodeContent | null): NodeContent => {
+      replaced = existing;
       persisted = resolveNodeContentUpdate(nodeId, parsed.data, existing);
       return persisted;
     };
@@ -1012,6 +1015,20 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       },
       { principalId: callerPrincipalId(request) },
     );
+    // A saved title or source may change what preprocessing would derive,
+    // for this node or for the Frame that holds it. Decided here, where the
+    // save is committed, and not by whichever pages are open.
+    const before = replaced as NodeContent | null;
+    if (before && persisted)
+      commitReactions()?.contentSave({
+        canvasId,
+        nodeId,
+        nodeType,
+        before,
+        after: persisted,
+        storedNodes: (canvas.state.nodes ??
+          []) as NodeContentSave['storedNodes'],
+      })?.();
     const response: PutNodeContentResponse = {
       nodeId,
       label: outcome.label,

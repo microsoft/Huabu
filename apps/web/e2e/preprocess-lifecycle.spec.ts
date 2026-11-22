@@ -498,7 +498,7 @@ function textPdf(text: string) {
   return `${pdf}trailer\n<< /Size ${offsets.length} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
 }
 
-test('moving a PDF to another Grid cell requests no preprocessing; renaming it does', async ({
+test('a page requests no preprocessing for a batch: moving a PDF in a Grid starts none, and a rename is processed by the server', async ({
   page,
 }) => {
   await openNewCanvas(page);
@@ -605,9 +605,44 @@ test('moving a PDF to another Grid cell requests no preprocessing; renaming it d
   await expect(pending(pdf(0))).toHaveCount(0);
   await expect(pending(pdf(1))).toHaveCount(0);
 
-  // A title is preprocessing input: renaming still asks once, for the PDF
-  // and for the Frame whose own title derives from its children's.
-  const held = await holdPreprocessing(page, 'node-grid-pdf-0');
+  // A title is preprocessing input, but it is the server that acts on it,
+  // where the save is committed: the page sends no request of its own and
+  // shows the status the server announces.
+  const statuses: string[] = [];
+  await page.addInitScript(() => {
+    const seen: string[] = ((
+      window as unknown as { __preprocess: string[] }
+    ).__preprocess = []);
+    const original = window.fetch;
+    window.fetch = async (...args) => {
+      const response = await original(...args);
+      const url = String(args[0] instanceof Request ? args[0].url : args[0]);
+      if (!url.includes('/sync/stream') || !response.body) return response;
+      const [mine, theirs] = response.body.tee();
+      void (async () => {
+        const reader = mine.getReader();
+        const decoder = new TextDecoder();
+        let text = '';
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) return;
+          text += decoder.decode(value, { stream: true });
+          const frames = text.split('\n\n');
+          text = frames.pop() ?? '';
+          for (const frame of frames)
+            if (frame.includes('event: preprocess'))
+              seen.push(frame.split('data: ')[1] ?? '');
+        }
+      })();
+      return new Response(theirs, response);
+    };
+  });
+  // Reconnect the stream through the tap.
+  await page.reload();
+  await expect(pdf(0)).toBeVisible();
+  await quiet(page);
+  requested.length = 0;
+
   await pdf(0).click();
   await page.getByRole('button', { name: 'Open Large View' }).click();
   const tab = page.getByRole('tab', { selected: true });
@@ -619,13 +654,24 @@ test('moving a PDF to another Grid cell requests no preprocessing; renaming it d
   });
   await input.fill('Renamed paper');
   await input.press('Enter');
-  await expect.poll(() => held.length).toBe(1);
-  expect(held[0].request().postDataJSON().snapshot.title).toBe('Renamed paper');
-  await expect(pending(pdf(0))).toBeVisible();
-  await succeed(held[0], 'Renamed paper');
+  await expect
+    .poll(async () => {
+      statuses.splice(
+        0,
+        statuses.length,
+        ...(await page.evaluate(
+          () => (window as unknown as { __preprocess: string[] }).__preprocess,
+        )),
+      );
+      return statuses
+        .map((raw) => JSON.parse(raw) as { nodeId: string; status: string })
+        .filter((event) => event.nodeId === 'node-grid-pdf-0')
+        .map((event) => event.status);
+    })
+    .toEqual(['pending', 'done']);
   await expect(pending(pdf(0))).toHaveCount(0);
   await quiet(page);
-  expect(requested.filter((path) => path.includes('node-grid-pdf-1'))).toEqual(
-    [],
-  );
+  expect(requested).toEqual([]);
+  // The other PDF, which was only pushed aside, was never processed.
+  expect(statuses.join('')).not.toContain('node-grid-pdf-1');
 });

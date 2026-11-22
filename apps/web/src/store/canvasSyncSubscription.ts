@@ -124,11 +124,12 @@ function acquire(canvasId: string): Subscription {
               if (
                 event.type !== 'snapshot' &&
                 event.type !== 'update' &&
-                event.type !== 'invalidate'
+                event.type !== 'invalidate' &&
+                event.type !== 'preprocess'
               )
                 return;
               delay = 500;
-              if (event.type !== 'invalidate')
+              if (event.type === 'snapshot' || event.type === 'update')
                 current.version =
                   event.type === 'snapshot'
                     ? event.data.version

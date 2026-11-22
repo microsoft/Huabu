@@ -8,17 +8,19 @@
  * describing what happened during a command batch; this module
  * translates that manifest into web verbs:
  *
- *  1. Debounced HTTP preprocessing fetch.
- *  2. Per-node save-queue cleanup for deleted nodes.
- *  3. Deferred `fitFrames` after the DOM has reflowed.
+ *  1. Per-node save-queue cleanup for deleted nodes.
+ *  2. Deferred `fitFrames` after the DOM has reflowed.
+ *
+ * Preprocessing is not among them: the server starts it where a write is
+ * committed (see `docs/architecture/node-preprocessing.md` §4), so a page
+ * asks for nothing because of a command batch.
  *
  * Pure host-agnostic cleanups (edge reroute) live in the shared
  * `applySharedPostEffects` and run BEFORE the state commit so they
  * fold into a single `set({ nodes, edges })`.
  *
- * `triggerPreprocessing` and `forgetNodeContent` are closures over the
- * canvas store's internal state and timers, so they are passed in as
- * callbacks by the store. The engine boundary stays clean either way.
+ * `forgetNodeContent` is a closure over the canvas store's internal state,
+ * so it is passed in as a callback by the store.
  */
 
 import {
@@ -39,16 +41,10 @@ export interface RunWebPostEffectsInput {
   /** Apply a subsequent partial node update. */
   setNodes: (nodes: Node[]) => void;
   /**
-   * Debounced preprocessing trigger. Defined as a closure inside the
-   * canvas store (depends on `useCanvasStore.getState()` and a private
-   * timer map), so it is provided per-call rather than imported.
-   */
-  triggerPreprocessing: (nodes: Node[]) => void;
-  /**
    * Drop all per-node save-queue bookkeeping (CAS baseline, conflict /
    * error guards, rename anchor) for a deleted node. Injected as a
    * closure over the store's private `nodeContentQueue` singleton, same
-   * pattern as {@link triggerPreprocessing}, to keep this module free of
+   * closure, to keep this module free of
    * a back-import cycle with the canvas store.
    */
   forgetNodeContent: (nodeId: string) => void;
@@ -60,9 +56,8 @@ export interface RunWebPostEffectsInput {
  * Drain web-only effects after a command batch has been committed.
  *
  * Order matters and matches the previous `runPostEffects`:
- *  1. preprocessing trigger (synchronous fan-out into debounced fetch)
- *  2. save-queue cleanup for deleted nodes
- *  3. deferred frame fit (double-rAF)
+ *  1. save-queue cleanup for deleted nodes
+ *  2. deferred frame fit (double-rAF)
  */
 export function runWebPostEffects(input: RunWebPostEffectsInput): void {
   const {
@@ -70,42 +65,11 @@ export function runWebPostEffects(input: RunWebPostEffectsInput): void {
     getNodes,
     getEdges,
     setNodes,
-    triggerPreprocessing,
     forgetNodeContent,
     validatePreviewNodes,
   } = input;
 
-  // 1. Trigger preprocessing for created / mutated nodes. The trigger
-  // requests nothing for a node whose request input the batch left as it
-  // was (see `scheduleIfInputChanged`); the server decides per node profile
-  // which work a request runs.
-  //
-  // `note` / `text` need special handling: their label auto-derives from
-  // the first heading, so firing preprocess on every keystroke content edit
-  // renamed the `.md` file through every partial heading (`Note 1.md` →
-  // `H.md` → `He.md` → …). Those keystroke edits arrive as `MERGE_NODE_DATA`
-  // content rewrites (their ids land in `contentEditedNodeIds`) and are
-  // instead settled on exit-edit (`settleNodePreprocess`, wired from
-  // Preview Workspace settle boundaries for `note` and `TextNode`'s blur for
-  // `text`). But a one-time structural mutation — create / duplicate /
-  // import — is NOT a keystroke edit (it arrives via `CREATE_NODES` and never
-  // appears in `contentEditedNodeIds`), so it still needs its single
-  // preprocess pass to persist the sidecar and derive the initial label.
-  // Skip only the content-edit churn path, not the create/import path.
-  // See `docs/architecture/node-preprocessing.md` §4 (Triggers & state).
-  const contentEdited = new Set(effects.contentEditedNodeIds);
-  const candidates = effects.mutatedNodes.filter(
-    (node) =>
-      !(
-        (node.type === 'note' || node.type === 'text') &&
-        contentEdited.has(node.id)
-      ),
-  );
-  // One call for the batch: the trigger compares against the Space before
-  // the batch, and indexes it once rather than once per node.
-  if (candidates.length > 0) triggerPreprocessing(candidates);
-
-  // 2. A deleted node needs no request of its own: the batch that removed
+  // 1. A deleted node needs no request of its own: the batch that removed
   // it from the Space removed its record on the server in the same commit.
   for (const nodeId of effects.deletedNodeIds) {
     // Release the node's per-node save-queue state so a long session of
@@ -116,7 +80,7 @@ export function runWebPostEffects(input: RunWebPostEffectsInput): void {
     validatePreviewNodes(new Set(getNodes().map((node) => node.id)));
   }
 
-  // 3. Refit frames whose children need a render cycle to settle their
+  // 2. Refit frames whose children need a render cycle to settle their
   // size (e.g. notes whose pinned height was just cleared). Deferred
   // via double-rAF so the inline editor can reflow and ReactFlow's
   // ResizeObserver can update `measured.height` first.

@@ -2843,121 +2843,76 @@ describe('what is sent is decided by one rule, also around a pointer gesture', (
   });
 });
 
-describe('preprocessing is requested only when its input changed', () => {
-  const FRAME = 'node-sync-grid';
+describe('a page asks for no preprocessing because of a command batch', () => {
+  // The server starts preprocessing where a batch is committed; a page only
+  // shows the status the server announces (see `canvasSyncStore.test.ts`).
   const PDF = 'node-sync-pdf';
   const pdf: Node = {
     id: PDF,
     type: 'pdf',
-    parentId: FRAME,
-    position: { x: 0, y: 0 },
+    position: { x: 600, y: 0 },
     style: { width: 160, height: 160 },
     data: {
       type: 'pdf',
       label: 'Paper',
       labelSource: 'user',
       src: 'artifact-paper.pdf',
-      frameColumn: 0,
-      frameRow: 0,
-    },
-  };
-  const frame: Node = {
-    id: FRAME,
-    type: 'frame',
-    position: { x: 600, y: 0 },
-    style: { width: 440, height: 440 },
-    data: {
-      type: 'frame',
-      label: 'Papers',
-      labelSource: 'user',
-      layoutMode: 'grid',
-      gridCount: 2,
     },
   };
   const patch = (id: string, data: Record<string, unknown>): CanvasCommand => ({
     type: 'MERGE_NODE_DATA',
     patches: [{ nodeId: id as `node-${string}`, patch: data }],
   });
-  const requestedIds = () =>
-    api.preprocessNode.mock.calls.map(([, nodeId]) => nodeId);
   const settle = () => vi.advanceTimersByTimeAsync(5_000);
 
   beforeEach(() => {
-    const nodes = [...state().nodes, frame, pdf];
+    const nodes = [...state().nodes, pdf];
     server.reset(nodes, [], 1);
     state()._setStateRaw({ nodes });
   });
 
-  it('does not request or show pending for a node whose Grid cell changed', async () => {
-    state().executeCommands([patch(PDF, { frameColumn: 1, frameRow: 2 })]);
-
-    expect(node(PDF).data.frameRow).toBe(2);
-    expect(state().ingestionByNodeId[PDF]).toBeUndefined();
-    await settle();
-    expect(requestedIds()).toEqual([]);
-  });
-
-  it('does not request for a Frame whose stored child order changed', async () => {
-    state().executeCommands([patch(FRAME, { layoutOrder: [[PDF]] })]);
-
-    await settle();
-    expect(requestedIds()).toEqual([]);
-  });
-
-  it.each([
-    ['title', { label: 'Renamed paper', labelSource: 'user' }],
-    ['source', { src: 'artifact-other.pdf' }],
-  ])('still requests when the %s changes', async (_field, data) => {
-    state().executeCommands([patch(PDF, data)]);
-
-    expect(state().ingestionByNodeId[PDF]?.status).toBe('pending');
-    await settle();
-    expect(requestedIds()).toContain(PDF);
-  });
-
-  it("requests a Frame's title again when a child's title changes", async () => {
-    state().executeCommands([patch(PDF, { label: 'Renamed paper' })]);
-
-    await settle();
-    expect(requestedIds()).toEqual(expect.arrayContaining([PDF, FRAME]));
-  });
-
-  it('still requests once for a node this batch created', async () => {
-    state().executeCommands([
-      {
-        type: 'CREATE_NODES',
-        nodes: [
+  it.each<[string, () => void]>([
+    [
+      'a Grid cell change',
+      () => state().executeCommands([patch(PDF, { frameColumn: 1 })]),
+    ],
+    [
+      'a rename',
+      () => state().executeCommands([patch(PDF, { label: 'Renamed' })]),
+    ],
+    [
+      'a new source',
+      () =>
+        state().executeCommands([patch(PDF, { src: 'artifact-other.pdf' })]),
+    ],
+    [
+      'a created node',
+      () =>
+        state().executeCommands([
           {
-            id: 'node-sync-new',
-            nodeType: 'web',
-            position: { x: 0, y: 900 },
-            data: { src: 'https://example.com/a' },
+            type: 'CREATE_NODES',
+            nodes: [
+              {
+                id: 'node-sync-new',
+                nodeType: 'web',
+                position: { x: 0, y: 900 },
+                data: { src: 'https://example.com/a' },
+              },
+            ],
           },
-        ],
-      },
-    ]);
-
-    // The request waits for the server to take the creation.
-    await answer(0);
-    expect(state().ingestionByNodeId['node-sync-new']?.status).toBe('pending');
+        ]),
+    ],
+    [
+      "an agent's rename",
+      () =>
+        void deliver(remote([patch(PDF, { label: 'Agent title' })]), 'agent'),
+    ],
+  ])('%s', async (_name, act) => {
+    act();
+    for (let index = 0; index < own.length; index++) await answer(index);
     await settle();
-    expect(requestedIds()).toEqual(['node-sync-new']);
-  });
 
-  it("does not request for an agent's edit that left the input unchanged", async () => {
-    const update = remote([patch(PDF, { frameColumn: 1 })]);
-    deliver(update, 'agent');
-
-    expect(node(PDF).data.frameColumn).toBe(1);
-    expect(state().ingestionByNodeId[PDF]).toBeUndefined();
-    await settle();
-    expect(requestedIds()).toEqual([]);
-  });
-
-  it("still requests for an agent's edit that changed the title", async () => {
-    deliver(remote([patch(PDF, { label: 'Agent title' })]), 'agent');
-
-    await settle();
-    expect(requestedIds()).toContain(PDF);
+    expect(api.preprocessNode).not.toHaveBeenCalled();
+    expect(state().ingestionByNodeId).toEqual({});
   });
 });

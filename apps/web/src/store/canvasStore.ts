@@ -155,7 +155,6 @@ import {
   MD_BACKED_NODE_TYPES,
   NODE_CONTENT_KEYS,
   PROPERTY_CONTENT_KEYS,
-  SERVER_DERIVED_SIDECAR_NODE_TYPES,
 } from './canvasStore/save/nodeContentFields';
 import {
   createNodeContentQueue,
@@ -1183,25 +1182,13 @@ const canvasEvents = createCanvasEventBuffer();
 
 /**
  * Preprocessing for a node an undo or redo brought back, once the server
- * holds it again.
- *
- * A PDF's extracted text and a video's cover exist only in the record the
- * deleting batch removed; the restoring batch writes back what the web
- * holds, which never included them. So those types are asked to be derived
- * again, whether or not work was pending at deletion, and at once rather
- * than debounced: leaving the Space cancels debounced work, and nothing
- * would ask for this repair again. Every other type only resumes work that
- * was waiting.
+ * holds it again: work this page had asked for and that was waiting for the
+ * node (an editor that was left) is resumed. What the node needs because it
+ * is on the Space again — a PDF's extracted text, a video's cover — the
+ * server starts itself when it commits the restoring batch.
  */
 function resumePreprocessAfterRestore(canvasId: string, nodeId: string): void {
-  const state = useCanvasStore.getState();
-  const node =
-    state.canvasId === canvasId
-      ? state.nodes.find((candidate) => candidate.id === nodeId)
-      : undefined;
-  if (node && SERVER_DERIVED_SIDECAR_NODE_TYPES.has(node.type ?? ''))
-    preprocessQueue.schedule(node, { immediate: true });
-  else preprocessQueue.resumeRestored(canvasId, nodeId);
+  preprocessQueue.resumeRestored(canvasId, nodeId);
 }
 
 /**
@@ -3375,40 +3362,6 @@ export async function awaitQuestionCreation(
   await questionCreations.get(`${canvasId}\0${nodeId}`)?.promise;
 }
 
-/**
- * Request preprocessing for the nodes a command batch changed, each once
- * the server has taken its creation. `previousNodes` is the Space before the
- * batch: a node whose request would carry what it carried then is left
- * alone, so a batch that only moved it (a Grid cell, a paint order) requests
- * nothing.
- */
-function scheduleAcknowledgedNodePreprocessing(
-  nodes: readonly Node[],
-  previousNodes: readonly Node[],
-): void {
-  const { canvasId } = useCanvasStore.getState();
-  const ready: Node[] = [];
-  for (const node of nodes) {
-    const creation = questionCreations.get(`${canvasId}\0${node.id}`)?.promise;
-    if (!creation) {
-      ready.push(node);
-      continue;
-    }
-    void creation.then(
-      () => {
-        const current = useCanvasStore.getState();
-        if (current.canvasId !== canvasId) return;
-        const live = current.nodes.find(
-          (candidate) => candidate.id === node.id,
-        );
-        if (live) preprocessQueue.scheduleIfInputChanged([live], previousNodes);
-      },
-      () => {},
-    );
-  }
-  preprocessQueue.scheduleIfInputChanged(ready, previousNodes);
-}
-
 function rollbackFailedQuestions(canvasId: string, nodes: Node[]): void {
   const failedIds = new Set(nodes.map((node) => node.id));
   canvasHistoryManager.discardNodes(canvasId, failedIds);
@@ -4139,8 +4092,6 @@ const useCanvasStore = create<RFState>()(
         // A deferred Frame refit is this page's own layout around what its
         // renderer measured; the server lays out from the reported boxes.
         setNodes: (nodes) => set({ nodes }),
-        triggerPreprocessing: (nodes) =>
-          scheduleAcknowledgedNodePreprocessing(nodes, state.nodes),
         forgetNodeContent: nodeContentQueue.forgetNode,
         validatePreviewNodes: (liveNodeIds) =>
           usePreviewWorkspaceStore.getState().validate(liveNodeIds),
@@ -4371,8 +4322,6 @@ const useCanvasStore = create<RFState>()(
         getNodes: () => get().nodes,
         getEdges: () => get().edges,
         setNodes: (nodes) => get()._setStateRaw({ nodes }),
-        triggerPreprocessing: (nodes) =>
-          scheduleAcknowledgedNodePreprocessing(nodes, prevNodes),
         forgetNodeContent: nodeContentQueue.forgetNode,
         validatePreviewNodes: (liveNodeIds) =>
           usePreviewWorkspaceStore.getState().validate(liveNodeIds),

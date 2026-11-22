@@ -50,54 +50,6 @@ function hasMissingContent(node: Node): boolean {
   return node.data?.contentMissing === true;
 }
 
-/** Reads a Frame's direct children out of one node array. */
-type ChildrenOf = (frameId: string) => Node[];
-
-/** Children by scanning `nodes`: for a single request, where an index would cost more. */
-function childrenIn(nodes: readonly Node[]): ChildrenOf {
-  return (frameId) => nodes.filter((child) => child.parentId === frameId);
-}
-
-/**
- * Lookups over one node array for comparing many nodes at once. Each index
- * is built on first use and then shared, so a batch costs one pass over the
- * array however many nodes it changed; the child index is built only when a
- * Frame is among them.
- */
-function indexNodes(nodes: readonly Node[]): {
-  byId: (id: string) => Node | undefined;
-  childrenOf: ChildrenOf;
-} {
-  let byId: Map<string, Node> | undefined;
-  let children: Map<string, Node[]> | undefined;
-  return {
-    byId(id) {
-      byId ??= new Map(nodes.map((node) => [node.id, node]));
-      return byId.get(id);
-    },
-    childrenOf(frameId) {
-      if (!children) {
-        children = new Map();
-        for (const node of nodes) {
-          if (!node.parentId) continue;
-          const list = children.get(node.parentId);
-          if (list) list.push(node);
-          else children.set(node.parentId, [node]);
-        }
-      }
-      return children.get(frameId) ?? [];
-    },
-  };
-}
-
-/** What a preprocessing request for `node` carries, given its Frame's children. */
-function requestInput(node: Node, childrenOf: ChildrenOf) {
-  return {
-    nodeType: node.type,
-    snapshot: buildPreprocessSnapshot(node, childrenOf),
-  };
-}
-
 /**
  * Slice fields the queue reads at fire time. Kept structural (not
  * `RFState`) so this module is free of store-type coupling and
@@ -131,17 +83,6 @@ export type PreprocessQueue = {
    * request now, for work that must survive a Canvas switch.
    */
   schedule(node: Node, options?: { immediate?: boolean }): void;
-
-  /**
-   * {@link schedule} each of `nodes` unless its request would carry what it
-   * carried in `previousNodes`. A node `previousNodes` does not hold always
-   * schedules: it was created, pasted, imported or restored. Takes the
-   * whole batch so that both node arrays are indexed once, not per node.
-   */
-  scheduleIfInputChanged(
-    nodes: readonly Node[],
-    previousNodes: readonly Node[],
-  ): void;
 
   /**
    * Cancel every pending preprocess timer without firing and invalidate
@@ -194,6 +135,15 @@ export function createPreprocessQueue(opts: {
     }
   }
 
+  function requestInput(node: Node, nodes: readonly Node[]) {
+    return {
+      nodeType: node.type,
+      snapshot: buildPreprocessSnapshot(node, (id) =>
+        nodes.filter((child) => child.parentId === id),
+      ),
+    };
+  }
+
   function canProcess(node: Node): boolean {
     return !isExcludedFromPreprocessing(node) && !hasMissingContent(node);
   }
@@ -215,7 +165,7 @@ export function createPreprocessQueue(opts: {
       opts.isBlocked?.(nodeId)
     )
       return false;
-    const current = requestInput(node, childrenIn(state.nodes));
+    const current = requestInput(node, state.nodes);
     // The helper already suppresses automatic labels after a protected rename.
     // Preserve useful extracted content when only that ownership changed.
     if (
@@ -253,7 +203,7 @@ export function createPreprocessQueue(opts: {
       return;
     }
     task.phase = 'running';
-    task.input = requestInput(node, childrenIn(state.nodes));
+    task.input = requestInput(node, state.nodes);
     const pending = preprocessNodeIfNeeded({
       canvasId: task.canvasId,
       node,
@@ -275,7 +225,7 @@ export function createPreprocessQueue(opts: {
         const latest = opts.getState();
         const projected = latest.nodes.find((candidate) => candidate.id === id);
         if (ownsTask(nodeId, task) && projected)
-          task.input = requestInput(projected, childrenIn(latest.nodes));
+          task.input = requestInput(projected, latest.nodes);
       },
     }).catch((error: unknown) => {
       if (canProject(nodeId, task))
@@ -343,8 +293,8 @@ export function createPreprocessQueue(opts: {
           !deepEqual(
             task.phase === 'running'
               ? task.input
-              : requestInput(before, childrenIn(previousNodes)),
-            requestInput(node, childrenIn(state.nodes)),
+              : requestInput(before, previousNodes),
+            requestInput(node, state.nodes),
           )
         ) {
           invalidate(node.id);
@@ -386,24 +336,6 @@ export function createPreprocessQueue(opts: {
       if (task.phase !== 'queued') return;
       if (options?.immediate) start(nodeId, task);
       else debouncer.schedule(nodeId, () => start(nodeId, task));
-    },
-
-    scheduleIfInputChanged(nodes, previousNodes) {
-      if (nodes.length === 0) return;
-      const before = indexNodes(previousNodes);
-      const after = indexNodes(opts.getState().nodes);
-      for (const node of nodes) {
-        const previous = before.byId(node.id);
-        if (
-          previous &&
-          deepEqual(
-            requestInput(previous, before.childrenOf),
-            requestInput(node, after.childrenOf),
-          )
-        )
-          continue;
-        queue.schedule(node);
-      }
     },
 
     cancelAll() {

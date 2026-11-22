@@ -65,6 +65,7 @@ schema + `z.infer`, web imports as `import type` only):
 | `snapshot`   | once, on SSE connect                                              | `{ version }` — lets a tab that connected _after_ a mutation detect the gap and `loadCanvas`. It says nothing about node content, which does not change `version`; the page asks for that separately ([Content saved before the stream was open](#content-saved-before-the-stream-was-open)).      |
 | `update`     | after every persisted batch                                       | `{ fromVersion, toVersion, deltas, pendingEffects, orderEvents?, nodeContentRevisions?, threadId?, changes?, agentNodeProjection?, operationId?, source? }` — `deltas` name per node only what changed, `pendingEffects` names nodes by id; see [what an update carries](#what-an-update-carries). |
 | `invalidate` | node-content save, orphan-sidecar deletion or Space-tree deletion | `{ nodeIds?, originPageId? }` — refresh observed read models for those nodes, or every observed owner in that Space when omitted; not editable Canvas deltas. With `nodeIds`, a Canvas page fetches those nodes' content unless `originPageId` is its own id.                                      |
+| `preprocess` | a preprocessing run the server started begins or ends             | `{ nodeId, status: 'pending' \| 'done' \| 'error', error? }` — display state only; carries no version and no result.                                                                                                                                                                               |
 
 `canvasSyncSubscription` manages the per-Space Canvas transport, preserving the 45-second inactivity timeout, heartbeat handling, rate-limit-aware 500ms-to-10s reconnect backoff, and version baselines for late subscribers. The final subscriber aborts the transport. Conversation views instead share one dedicated owner-state subscription per conversation address per page: the server listens to this same Canvas publisher, reads canonical ownership, and pushes complete versioned metadata snapshots. The browser applies those snapshots without querying ownership for each change or loading the source Canvas document. Reconnect, focus and visibility restoration obtain a fresh baseline. Canvas rendering never treats `invalidate` as a document replacement or as a reason to reload. An `invalidate` that names nodes makes the page fetch those nodes' content, see [Node content between pages](#node-content-between-pages); one without node ids is ignored by the Canvas page. See [conversation observation](./preview-workspace.md#3-opening-and-target-conversion).
 
@@ -546,18 +547,11 @@ A browser page cannot attribute a batch: the page route's `originator` is `{ tab
 
 `executeOnServer` computes review records only when `computeChanges` is set (i.e. thread-attributed batches) and the global Agent Change Review configuration does not auto-accept Agent writes, so untagged and auto-accepted writers pay no extraction cost. When a `threadId` is present and explicit review is enabled, the batch's records are folded into the thread's coalesced sidecar and that full list is broadcast as `changes`.
 
-## Preprocessing cost dedup
+## Preprocessing
 
-When N tabs replay the same broadcast delta they each schedule an identical
-`preprocess` request. [PreprocessDispatcher](../../apps/server/src/modules/preprocessing/dispatcher.ts)
-**coalesces concurrent identical requests** via
-[coalesceInFlight](../../apps/server/src/modules/preprocessing/coalesce.ts):
-requests keyed the same (`dedupeKey` over canvasId / nodeId / type / trigger /
-hashed snapshots / options) share one in-flight promise; the entry evicts on
-settle. The expensive pipeline (extract + LLM enrich) therefore runs **once**
-regardless of tab count. The remaining _ownership_ cleanup (receivers not
-triggering at all, plus a server-owned trigger + enriched writeback broadcast)
-is deferred — see the plan.
+Preprocessing that follows a write is started by the server where the write is committed, once, and its result is stored by the server ([node-preprocessing.md](./node-preprocessing.md#who-starts-preprocessing)). A page that receives a batch — its own, another page's or an Agent's — starts nothing because of it. On this stream a page receives `preprocess { nodeId, status }` (`pending`, then `done` or `error`), which it shows as the node's ingestion state, and the result as it receives any saved node content (`invalidate { nodeIds }`), or as an `update` for a video's cover.
+
+[PreprocessDispatcher](../../apps/server/src/modules/preprocessing/dispatcher.ts) still coalesces concurrent identical requests ([coalesceInFlight](../../apps/server/src/modules/preprocessing/coalesce.ts)); that now matters only for the requests pages make themselves.
 
 ## Navigation save boundary
 
