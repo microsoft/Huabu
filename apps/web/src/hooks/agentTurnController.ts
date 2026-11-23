@@ -21,7 +21,7 @@ import {
   settleInkInterpretation,
 } from '@huabu/shared/ink-interpretation';
 
-import { ApiError } from '@/api/_client';
+import { AgentTurnFailedError, ApiError } from '@/api/_client';
 import { agentApi, type AgentStreamCallbacks } from '@/api/agent';
 import { useAcpThreadChangesStore } from '@/store/acpThreadChangesStore';
 import useCanvasStore, {
@@ -49,6 +49,7 @@ import {
   beginConversationRealization,
   conversationControlTarget,
   resolveConversationPreparation,
+  useConversationPreparationStore,
 } from '@/store/conversationPreparation';
 import {
   invalidateConversationTitle,
@@ -62,6 +63,7 @@ import {
   abortAgentStreamClaim,
   claimAgentStream,
   hasAgentStreamClaim,
+  subscribeAgentStreamRelease,
 } from './agentStreamCoordinator';
 
 import type { AssistantSegment, ChatMessage } from '../store/chatTypes';
@@ -376,6 +378,7 @@ export function resetAgentTurnAcceptanceObserversForTests(): void {
   activeTurnRequests.clear();
   latestAcceptanceSeqByThread.clear();
   hiddenInkIntentToolCalls.clear();
+  queueHolds.clear();
 }
 
 export function registerAcpSessionMetaSink(
@@ -883,6 +886,14 @@ type AgentTurnAcceptance = AgentTurnAccepted | { requestId: string };
 
 export interface AgentTurnCallbacks {
   queuedTurnId?: string;
+  /**
+   * The composer reported a transient state (Agent warm-up, a save in flight).
+   * Show the message as sent and dispatch it once that state clears, rather
+   * than making the user wait in the queue behind nothing.
+   */
+  waitUntilReady?: boolean;
+  /** Read built-in settings again after waiting, once their save has settled. */
+  settingsPending?: boolean;
   canDispatch?: () => boolean;
   onStarted?: () => void;
   onAccepted?: (accepted: AgentTurnAcceptance) => void;
@@ -895,6 +906,8 @@ export interface AgentTurnResult {
   error?: Error;
   /** True only after a successful done event, never just a transport close. */
   completedNormally?: boolean;
+  /** The connection dropped mid-turn; the turn may still be running. */
+  connectionLost?: boolean;
 }
 
 export function captureAgentTurnSources(
@@ -1114,13 +1127,10 @@ export async function dispatchAgentTurn(
 ): Promise<AgentTurnResult> {
   try {
     const result = await executeAgentTurn(input, callbacks);
-    settleAgentTurnQueue(
-      input.session,
-      result.status === 'completed' && result.completedNormally === true,
-    );
+    settleAgentTurnQueue(input.session);
     return result;
   } catch (error) {
-    settleAgentTurnQueue(input.session, false);
+    pauseAgentTurnQueueAfterFailure(input.session.threadId);
     throw error;
   }
 }
@@ -1172,6 +1182,9 @@ async function executePreparedAgentTurn(
   let requestedPreferences: AgentRequest['initialPreferences'];
   let requestDispatched = false;
   let releasePreparation: ((attempted?: boolean) => void) | undefined;
+  // Set while a message is displayed ahead of dispatch; cleared once `run`
+  // adopts it as the turn's user message.
+  let shownMessage: Extract<ChatMessage, { role: 'user' }> | undefined;
   const run = async (): Promise<void> => {
     // Per-thread guard: this thread's own loading flag, not any other
     // thread's. The user may already have a stream running in a
@@ -1223,13 +1236,20 @@ async function executePreparedAgentTurn(
       result.status = 'busy';
       return;
     }
+    // Every exit gives up the claim here. A known failure pauses the queue
+    // first, so a drain waiting for the thread to go idle cannot send the next
+    // turn in between.
+    const releaseTurn = () => {
+      if (agentTurnFailed(result)) pauseAgentTurnQueueAfterFailure(threadId);
+      streamClaim.release();
+    };
     preparingTurnCancellations.set(acceptanceKey, () =>
       abortAgentStreamClaim(requestScope.canvasId, threadId),
     );
     const requestId = createId('request');
     activeTurnRequests.set(acceptanceKey, requestId);
     useChatStore.getState().setThreadPreparing(threadId, true);
-    const userMessage = createAgentTurnUserMessage(prepared);
+    const userMessage = shownMessage ?? createAgentTurnUserMessage(prepared);
     userMessage.queuedTurnId = callbacks.queuedTurnId;
     try {
       if (
@@ -1302,14 +1322,16 @@ async function executePreparedAgentTurn(
         preparingTurnCancellations.delete(acceptanceKey);
         useChatStore.getState().setThreadPreparing(threadId, false);
         activeTurnRequests.delete(acceptanceKey);
-        streamClaim.release();
+        releaseTurn();
       }
     }
     setThreadLastAction(threadId, agentMode);
     callbacks.onStarted?.();
 
     const userMessageId = userMessage.id;
-    addMessage(threadId, userMessage);
+    // A message shown while waiting for readiness is already in the transcript.
+    if (shownMessage) shownMessage = undefined;
+    else addMessage(threadId, userMessage);
 
     setThreadLoading(threadId, true);
 
@@ -1318,10 +1340,6 @@ async function executePreparedAgentTurn(
 
     // Guard: ensure only one of onError / catch adds an error status
     let errorHandled = false;
-
-    const releaseAbort = () => {
-      streamClaim.release();
-    };
 
     // Canvas Sync owns all Question lifecycle projection. This controller
     // maintains request feedback, durable acceptance, and the transcript.
@@ -1437,12 +1455,24 @@ async function executePreparedAgentTurn(
             errorHandled = true;
             settleTurnInkInterpretation(streamContext, 'error');
             result.error = err;
+            result.connectionLost =
+              !(err instanceof ApiError) &&
+              !(err instanceof AgentTurnFailedError);
             result.status = result.accepted
               ? 'failed'
               : err instanceof ApiError && err.status < 500
                 ? 'rejected'
                 : 'unknown';
+            if (callbacks.queuedTurnId && isThreadBusyError(err)) {
+              // The queue retries once the server-side turn ends; leave no
+              // trace of this attempt in the transcript.
+              removeThreadMessage(threadId, userMessageId);
+              return;
+            }
             console.error(`${agentMode} error:`, err);
+            // The server keeps running an accepted turn; it is re-attached on
+            // release instead of being reported as failed.
+            if (result.accepted && result.connectionLost) return;
             addMessage(threadId, {
               id: createId('status'),
               role: 'status',
@@ -1539,41 +1569,124 @@ async function executePreparedAgentTurn(
           turnAcceptanceSinks.delete(acceptanceKey);
         }
         setThreadLoading(threadId, false);
-        releaseAbort();
+        releaseTurn();
+        if (result.accepted && result.connectionLost) {
+          // Reloading history rediscovers the still-running turn and resumes
+          // its stream, the same path a page refresh takes.
+          useChatStore.getState().setHistoryLoaded(threadId, false);
+        }
       }
     }
   };
-  const preparation = resolveConversationPreparation(session);
-  if (preparation.pending) {
-    return { status: 'busy' };
-  }
-  if (
-    preparation.binding.kind === 'external' &&
-    (prompt.trim() || quotedComments?.length || isCanvasIntent(inputKind))
-  ) {
-    requestedCwd = conversationControlTarget(session).cwd;
-    requestedPreferences = readDisplayedInitialPreferences(
-      session.ownerCanvasId,
-      session.threadId,
-      preparation.binding.profileId,
-    );
-    try {
-      releasePreparation = beginConversationRealization(session);
-    } catch (error) {
-      return {
-        status: 'busy',
-        error: error instanceof Error ? error : new Error(String(error)),
-      };
+  const dispatch = async (): Promise<AgentTurnResult> => {
+    const preparation = resolveConversationPreparation(session);
+    if (preparation.pending) {
+      return { status: 'busy' };
     }
-    try {
+    if (
+      preparation.binding.kind === 'external' &&
+      (prompt.trim() || quotedComments?.length || isCanvasIntent(inputKind))
+    ) {
+      requestedCwd = conversationControlTarget(session).cwd;
+      requestedPreferences = readDisplayedInitialPreferences(
+        session.ownerCanvasId,
+        session.threadId,
+        preparation.binding.profileId,
+      );
+      try {
+        releasePreparation = beginConversationRealization(session);
+      } catch (error) {
+        return {
+          status: 'busy',
+          error: error instanceof Error ? error : new Error(String(error)),
+        };
+      }
+      try {
+        await run();
+      } finally {
+        releasePreparation?.(requestDispatched);
+      }
+    } else {
       await run();
-    } finally {
-      releasePreparation?.(requestDispatched);
     }
-  } else {
-    await run();
+    return result;
+  };
+  if (callbacks.waitUntilReady && sendNotReady(session)) {
+    const key = turnKey(
+      conversationRequestScope(conversationView, session.canvasId).canvasId,
+      threadId,
+    );
+    const thread = useChatStore.getState().threadsById[threadId];
+    if (
+      thread?.isStreaming ||
+      thread?.isPreparing ||
+      preparingTurnCancellations.has(key)
+    ) {
+      return { status: 'busy' };
+    }
+    let cancelled = false;
+    const cancel = () => {
+      cancelled = true;
+      // The store change also wakes the wait below.
+      useChatStore.getState().setThreadPreparing(threadId, false);
+    };
+    preparingTurnCancellations.set(key, cancel);
+    useChatStore.getState().setThreadPreparing(threadId, true);
+    shownMessage = createAgentTurnUserMessage(prepared);
+    addMessage(threadId, shownMessage);
+    try {
+      while (!cancelled && sendNotReady(session)) {
+        await waitForQueueChange(session);
+      }
+    } finally {
+      if (preparingTurnCancellations.get(key) === cancel) {
+        preparingTurnCancellations.delete(key);
+      }
+    }
+    if (cancelled) {
+      removeThreadMessage(threadId, shownMessage.id);
+      return { status: 'stopped' };
+    }
+    if (callbacks.settingsPending) {
+      prepared.settings = selectThreadSettings(
+        useChatStore.getState(),
+        threadId,
+      );
+    }
   }
-  return result;
+  try {
+    return await dispatch();
+  } finally {
+    // The turn ended before adopting the message it showed early; the caller
+    // restores the draft, so the transcript must not keep a second copy.
+    if (shownMessage) {
+      removeThreadMessage(threadId, shownMessage.id);
+      useChatStore.getState().setThreadPreparing(threadId, false);
+    }
+  }
+}
+
+/**
+ * True while the thread cannot take a send: a mounted composer reports a
+ * transient state, a control is pending, or a failed history load awaits the
+ * user's retry (whether or not the panel that reported it is still mounted).
+ */
+function sendNotReady(session: ChatSession): boolean {
+  return (
+    queueHolds.has(session.threadId) ||
+    !!useChatStore.getState().threadsById[session.threadId]?.historyError ||
+    resolveConversationPreparation(session).pending
+  );
+}
+
+function removeThreadMessage(threadId: string, messageId: string): void {
+  const chat = useChatStore.getState();
+  chat.setMessages(
+    threadId,
+    selectThreadMessages(chat, threadId).filter(
+      (message) => message.id !== messageId,
+    ),
+  );
 }
 
 export function stopAgentTurn(session: ChatSession): void {
@@ -1671,18 +1784,93 @@ export function stopAgentTurn(session: ChatSession): void {
 }
 
 const drainingQueues = new Set<string>();
+const queueHolds = new Map<string, Set<symbol>>();
+const queueHoldListeners = new Set<() => void>();
+const QUEUE_RECHECK_MS = 1000;
+const THREAD_BUSY_RETRY_MS = 2000;
 
-/** Called after the stream claim and preparation lease have been released. */
+/**
+ * The turn is known to have ended badly (agent error, rejection, interruption).
+ * A lost connection or a still-busy thread is not a failure: the turn may be
+ * fine, so the queue waits instead.
+ */
+function agentTurnFailed(result: AgentTurnResult): boolean {
+  if (result.status === 'busy' || isThreadBusyError(result.error)) return false;
+  if (result.completedNormally === false) return true;
+  return !!result.error && !result.connectionLost;
+}
+
+/** Keep the rest of the queue back once a turn is known to have failed. */
+export function pauseAgentTurnQueueAfterFailure(threadId: string): void {
+  const chat = useChatStore.getState();
+  if (selectThreadQueuedTurns(chat, threadId).length) {
+    chat.setQueuePaused(threadId, true);
+  }
+}
+
+function isThreadBusyError(error: unknown): boolean {
+  return error instanceof ApiError && error.code === 'thread_busy';
+}
+
+/**
+ * Keep queued turns from being sent while the composer's surface is not ready
+ * (history reloading, settings being saved). Releasing the hold sends them.
+ */
+export function holdAgentTurnQueue(
+  session: Pick<ChatSession, 'threadId' | 'ownerCanvasId'>,
+): () => void {
+  const { threadId } = session;
+  const token = Symbol('queue-hold');
+  const holds = queueHolds.get(threadId) ?? new Set<symbol>();
+  holds.add(token);
+  queueHolds.set(threadId, holds);
+  return () => {
+    if (!holds.delete(token)) return;
+    if (holds.size === 0 && queueHolds.get(threadId) === holds) {
+      queueHolds.delete(threadId);
+    }
+    for (const listener of queueHoldListeners) listener();
+    settleAgentTurnQueue(session);
+  };
+}
+
+/** Resolves on the next state change that may let the queue advance. */
+function waitForQueueChange(
+  session: Pick<ChatSession, 'threadId' | 'ownerCanvasId'>,
+): Promise<void> {
+  return new Promise((resolve) => {
+    const cleanups: Array<() => void> = [];
+    const done = () => {
+      for (const cleanup of cleanups.splice(0)) cleanup();
+      resolve();
+    };
+    // Acceptance reconciliation has no change signal; the timer covers it.
+    const timer = setTimeout(done, QUEUE_RECHECK_MS);
+    cleanups.push(
+      () => clearTimeout(timer),
+      useChatStore.subscribe(done),
+      useConversationPreparationStore.subscribe(done),
+      subscribeAgentStreamRelease(
+        session.ownerCanvasId,
+        session.threadId,
+        done,
+      ),
+    );
+    queueHoldListeners.add(done);
+    cleanups.push(() => queueHoldListeners.delete(done));
+  });
+}
+
+/**
+ * Called after the stream claim and preparation lease have been released.
+ * Queued turns are sent as soon as the thread is idle. A turn known to have
+ * failed has already paused the queue by then, as has an explicit Stop.
+ */
 export function settleAgentTurnQueue(
   session: Pick<ChatSession, 'threadId' | 'ownerCanvasId'>,
-  completedNormally: boolean,
 ): void {
   const chat = useChatStore.getState();
   if (!selectThreadQueuedTurns(chat, session.threadId).length) return;
-  if (!completedNormally) {
-    chat.setQueuePaused(session.threadId, true);
-    return;
-  }
   void drainAgentTurnQueue(session);
 }
 
@@ -1704,15 +1892,22 @@ async function drainAgentTurnQueue(
       const thread = chat.threadsById[threadId];
       const next = thread?.queuedTurns[0];
       if (!next || thread.queuePaused) return;
-      if (
-        next.status !== 'pending' ||
-        selectThreadIsLoading(chat, threadId) ||
-        hasAgentStreamClaim(ownerCanvasId, threadId) ||
-        turnAcceptanceSinks.has(key) ||
-        resolveConversationPreparation(next.prepared.session).pending
-      ) {
+      if (next.status !== 'pending') {
+        // Delivery of this turn is ambiguous; never resend it automatically.
         chat.setQueuePaused(threadId, true);
         return;
+      }
+      if (
+        sendNotReady(next.prepared.session) ||
+        // A turn is in progress, including a direct send waiting to go first.
+        !!thread.isPreparing ||
+        selectThreadIsLoading(chat, threadId) ||
+        hasAgentStreamClaim(ownerCanvasId, threadId) ||
+        turnAcceptanceSinks.has(key)
+      ) {
+        // Not ready yet: wait rather than making the user resume by hand.
+        await waitForQueueChange(session);
+        continue;
       }
       chat.setQueuedTurnStatus(threadId, next.id, 'sending');
       const reject = () => {
@@ -1721,27 +1916,49 @@ async function drainAgentTurnQueue(
         current.setQueuePaused(threadId, true);
       };
       try {
-        const result = await executeAgentTurn(next.prepared, {
+        const prepared = next.settingsPending
+          ? {
+              ...next.prepared,
+              settings: selectThreadSettings(useChatStore.getState(), threadId),
+            }
+          : next.prepared;
+        const result = await executeAgentTurn(prepared, {
           queuedTurnId: next.id,
           onAccepted: () =>
             useChatStore.getState().removeQueuedTurn(threadId, next.id),
           onAcceptanceRejected: reject,
         });
         if (!result.accepted) {
+          if (result.status === 'busy' || isThreadBusyError(result.error)) {
+            // A turn is still running, here or on the server. Try again once
+            // it ends.
+            useChatStore
+              .getState()
+              .setQueuedTurnStatus(threadId, next.id, 'pending');
+            // A fixed delay: unrelated store updates must not shorten it.
+            await new Promise((resolve) =>
+              setTimeout(resolve, THREAD_BUSY_RETRY_MS),
+            );
+            continue;
+          }
           if (result.status === 'unknown') {
             useChatStore
               .getState()
               .setQueuedTurnStatus(threadId, next.id, 'uncertain');
-          } else if (!result.completedNormally) {
-            reject();
+            useChatStore.getState().setQueuePaused(threadId, true);
+            return;
           }
+          if (!result.completedNormally) {
+            reject();
+            return;
+          }
+          // Older transports can complete without an acceptance envelope.
+          useChatStore.getState().removeQueuedTurn(threadId, next.id);
         }
-        if (result.status !== 'completed' || !result.completedNormally) {
+        if (result.status === 'stopped') {
           useChatStore.getState().setQueuePaused(threadId, true);
           return;
         }
-        // Older transports can complete without an acceptance envelope.
-        useChatStore.getState().removeQueuedTurn(threadId, next.id);
       } catch (error) {
         reject();
         console.error('Failed to send queued Agent turn', error);

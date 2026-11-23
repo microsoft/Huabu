@@ -1103,6 +1103,9 @@ describe('useChatHistory paging', () => {
         },
       };
       apiMocks.remoteSource = { status, invocationToken: 'old-run' };
+      const settle = vi
+        .spyOn(turnController, 'settleAgentTurnQueue')
+        .mockImplementation(() => {});
       apiMocks.fetchHistoryPage.mockResolvedValue({
         threadId: THREAD_ID,
         hasMore: false,
@@ -1206,8 +1209,10 @@ describe('useChatHistory paging', () => {
             },
           }),
         );
+        settle.mockClear();
         // The old request can finish after the new attachment has claimed the thread.
         await act(async () => finishOld?.({ status: 'aborted' }));
+        expect(settle).not.toHaveBeenCalled();
         expect(useChatStore.getState().threadsById[THREAD_ID].queuePaused).toBe(
           false,
         );
@@ -1228,12 +1233,14 @@ describe('useChatHistory paging', () => {
           ),
         );
         expect(apiMocks.reconnectStream).toHaveBeenCalledTimes(1);
-        // A failure of the current attachment still pauses its own queue.
+        // The current attachment settles its own queue without pausing it.
         await act(async () => finishNew?.({ status: 'aborted' }));
+        expect(settle).toHaveBeenCalled();
         expect(useChatStore.getState().threadsById[THREAD_ID].queuePaused).toBe(
-          true,
+          false,
         );
       } finally {
+        settle.mockRestore();
         await act(async () => {
           root?.unmount();
           root = undefined;
@@ -1302,6 +1309,9 @@ describe('useChatHistory paging', () => {
       };
       apiMocks.remoteSource = { status: 'running', invocationToken: 'run' };
       let finishAttach!: (result: AgentStreamAttachResult) => void;
+      const settle = vi
+        .spyOn(turnController, 'settleAgentTurnQueue')
+        .mockImplementation(() => {});
       useChatStore.getState().enqueueTurn(THREAD_ID, {
         id: 'actually-pending',
         status: 'pending',
@@ -1378,8 +1388,11 @@ describe('useChatHistory paging', () => {
           false,
         );
         expect(latestOwnerHistoryReady).toBe(true);
+        // A finished owner hands its queue back for sending; one that failed
+        // mid-run pauses it without waiting for history to hydrate.
+        expect(settle).toHaveBeenCalled();
         expect(useChatStore.getState().threadsById[THREAD_ID].queuePaused).toBe(
-          true,
+          status === 'error',
         );
         expect(apiMocks.fetchHistoryPage).toHaveBeenLastCalledWith(
           THREAD_ID,
@@ -1418,6 +1431,7 @@ describe('useChatHistory paging', () => {
         ]);
       } finally {
         await act(async () => finishAttach({ status: 'aborted' }));
+        settle.mockRestore();
       }
     },
   );
@@ -1575,11 +1589,10 @@ describe('useChatHistory paging', () => {
       seedStore(false);
       const settle = vi
         .spyOn(turnController, 'settleAgentTurnQueue')
-        .mockImplementation((session, completed) => {
+        .mockImplementation((session) => {
           expect(
             hasAgentStreamClaim(session.ownerCanvasId, session.threadId),
           ).toBe(false);
-          expect(completed).toBe(terminal === 'done');
         });
       apiMocks.reconnectStream.mockImplementationOnce(
         async (_thread, _canvas, callbacks) => {
