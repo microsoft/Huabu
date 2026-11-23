@@ -6,6 +6,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react';
@@ -157,20 +158,32 @@ export function PeopleSettings() {
   >(null);
   const [workspaces, setWorkspaces] = useState<WorkspaceDescriptor[]>([]);
   const [busy, setBusy] = useState(false);
+  // Counts loads and saves. A load publishes its answers only while it is the
+  // latest, so a slower, older read can never overwrite newer state.
+  const generation = useRef(0);
 
   const load = useCallback(async () => {
-    // The admission setting loads on its own, so when it cannot be read the
-    // list, and each person's Reset devices, still work.
-    const [directory, nextAdmission] = await Promise.allSettled([
-      Promise.all([listPeople(), listWorkspaces()]),
-      getAdmission(),
+    const current = ++generation.current;
+    const latest = () => generation.current === current;
+    // The admission setting loads on its own, so the list, and each person's
+    // Reset devices, neither waits for it nor fails with it.
+    const admissionLoaded = getAdmission().then(
+      (next) => {
+        if (latest()) setAdmission(next);
+      },
+      () => {
+        if (latest()) setAdmission((shown) => shown ?? 'unavailable');
+      },
+    );
+    const [nextPeople, nextWorkspaces] = await Promise.all([
+      listPeople(),
+      listWorkspaces(),
     ]);
-    if (nextAdmission.status === 'fulfilled') setAdmission(nextAdmission.value);
-    else setAdmission((shown) => shown ?? 'unavailable');
-    if (directory.status === 'rejected') throw directory.reason;
-    const [nextPeople, nextWorkspaces] = directory.value;
-    setPeople(nextPeople);
-    setWorkspaces(nextWorkspaces);
+    if (latest()) {
+      setPeople(nextPeople);
+      setWorkspaces(nextWorkspaces);
+    }
+    await admissionLoaded;
   }, []);
 
   useEffect(() => {
@@ -219,9 +232,13 @@ export function PeopleSettings() {
             busy={busy}
             onChange={(automatic) =>
               void change(async () => {
-                // Shown as soon as it is saved, so a failed refresh after it
-                // cannot leave the switch saying the opposite of the policy.
-                setAdmission(await setAutomaticAdmission(automatic));
+                const saved = await setAutomaticAdmission(automatic);
+                // Shown as soon as it is saved, and every read begun before
+                // the save is dropped, so neither a failed refresh nor an
+                // older answer can leave the switch saying the opposite of
+                // the policy.
+                generation.current += 1;
+                setAdmission(saved);
               })
             }
           />

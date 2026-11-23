@@ -14,12 +14,12 @@ const mocks = vi.hoisted(() => ({
   setAutomaticAdmission: vi.fn(),
 }));
 
-// A stable `t`, as react-i18next gives: the list reloads when `t` changes.
+// A stable `t`, as react-i18next gives: the list reloads when `t` changes,
+// as on a language change, which a test does by replacing `translation`.
 // Interpolated values follow the key, so a test can see what was passed.
-const translation = {
-  t: (key: string, options?: Record<string, unknown>) =>
-    options ? `${key}(${Object.values(options).join('|')})` : key,
-};
+const translate = (key: string, options?: Record<string, unknown>) =>
+  options ? `${key}(${Object.values(options).join('|')})` : key;
+let translation = { t: translate };
 vi.mock('react-i18next', () => ({ useTranslation: () => translation }));
 vi.mock('../../../api/people', () => ({
   listPeople: mocks.listPeople,
@@ -65,8 +65,20 @@ async function render() {
   await act(async () => root.render(<PeopleSettings />));
 }
 
+/** A promise the test settles when it chooses. */
+function held<T>() {
+  let settle!: (value: T) => void;
+  let fail!: (reason: unknown) => void;
+  const promise = new Promise<T>((resolve, reject) => {
+    settle = resolve;
+    fail = reject;
+  });
+  return { promise, settle, fail };
+}
+
 beforeEach(async () => {
   vi.clearAllMocks();
+  translation = { t: translate };
   mocks.listPeople.mockResolvedValue([
     person('admin', { admin: true }),
     person('carol', { member: true }),
@@ -149,6 +161,47 @@ it('shows the saved admission setting even when the refresh after it fails', asy
   });
   await act(async () => automaticSwitch()?.click());
   expect(mocks.setAutomaticAdmission).toHaveBeenLastCalledWith(false);
+});
+
+it('keeps the saved admission setting when an older refresh answers last', async () => {
+  // A language change reloads People; its admission read is slow and still
+  // carries the setting from before the save.
+  const older = held<{ automatic: boolean; providers: string[] }>();
+  mocks.getAdmission.mockReturnValueOnce(older.promise);
+  translation = { t: (key, options) => translate(key, options) };
+  await render();
+  expect(mocks.getAdmission).toHaveBeenCalledTimes(2);
+
+  mocks.getAdmission.mockResolvedValue({
+    automatic: true,
+    providers: ['entra', 'auth0'],
+  });
+  await act(async () => automaticSwitch()?.click());
+  expect(automaticSwitch()?.getAttribute('aria-checked')).toBe('true');
+  await act(async () =>
+    older.settle({ automatic: false, providers: ['entra', 'auth0'] }),
+  );
+  expect(automaticSwitch()?.getAttribute('aria-checked')).toBe('true');
+  // So the next click turns it off rather than sending `true` again.
+  await act(async () => automaticSwitch()?.click());
+  expect(mocks.setAutomaticAdmission).toHaveBeenLastCalledWith(false);
+});
+
+it('lists people before the admission setting answers', async () => {
+  const pending = held<never>();
+  mocks.getAdmission.mockReturnValue(pending.promise);
+  await act(async () => root.unmount());
+  root = createRoot(container);
+  await render();
+  expect(container.textContent).not.toContain('people.loading');
+  const dave = Array.from(container.querySelectorAll('li')).find((li) =>
+    li.textContent?.startsWith('dave'),
+  );
+  expect(dave?.textContent).toContain('people.resetDevices');
+  // The switch waits for the setting rather than guessing it.
+  expect(automaticSwitch()).toBeNull();
+  await act(async () => pending.fail(new Error('Admission unavailable')));
+  expect(container.textContent).toContain('people.admission.loadFailed');
 });
 
 it('lists people and their device reset when the admission setting cannot load', async () => {
