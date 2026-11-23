@@ -426,6 +426,10 @@ function admissionProviders(
  * for people, refuses it here. Bubble's `entra` driver already refuses
  * app-only tokens, which carry no delegated scope. A token that is not a JWT
  * is not one.
+ *
+ * Known gap, accepted in #444: Auth0's RFC 9068 access-token profile omits
+ * `gty`, so an application's token in that profile is not recognized here.
+ * The deployment guide warns operators and gives the `kindClaim` workaround.
  */
 function isApplicationToken(token: string | null): boolean {
   const payload = token?.split('.')[1];

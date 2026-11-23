@@ -72,8 +72,12 @@ export type SetPersonWorkspaceRoleRequest = z.infer<
  * interactive authenticator configured in `HUABU_BUBBLE_AUTH`. `entra` admits
  * only accounts in the tenants its entries name (one per entry, and any number
  * of entries); `auth0` admits any account that can sign in through that Auth0
- * tenant's connections, but never an application's client-credentials token.
- * Local tokens and the master key are never admitted automatically.
+ * tenant's connections, but not an application's client-credentials token in
+ * Auth0's default access-token profile, which marks it with `gty`. Under
+ * Auth0's RFC 9068 profile an application's token carries no such mark and is
+ * admitted like a person's; `docs/architecture/deployment-security.md` warns
+ * operators about it. Local tokens and the master key are never admitted
+ * automatically.
  */
 export const admissionProviderSchema = z.enum(['entra', 'auth0']);
 export type AdmissionProvider = z.infer<typeof admissionProviderSchema>;
