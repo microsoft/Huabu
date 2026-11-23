@@ -9,8 +9,6 @@ import type {
   ArtifactUploadResponse,
   CreateCanvasResponse,
   GetCanvasResponse,
-  PreprocessNodeBody,
-  PreprocessNodeResponse,
 } from '@huabu/shared';
 import type { Node } from '@xyflow/react';
 
@@ -120,11 +118,6 @@ test('uploaded video gets a persisted JPEG cover, reuses it and plays natively a
   }, canvasId);
   await page.goto(`/canvas/${canvasId}`);
   await page.waitForSelector('.react-flow__pane');
-  const pageRequests: string[] = [];
-  page.on('request', (request) => {
-    if (request.method() === 'POST' && request.url().endsWith('/preprocess'))
-      pageRequests.push(new URL(request.url()).pathname);
-  });
 
   const inserted = await page.request.post(`/api/canvas/${canvasId}/execute`, {
     data: {
@@ -174,41 +167,13 @@ test('uploaded video gets a persisted JPEG cover, reuses it and plays natively a
     coverSourceSrc: string;
   };
   expect(made.coverSourceSrc).toBe(src);
-  // The page shows it without a reload and without a request of its own.
+  // The page shows it without a reload.
   await expect(node.locator('[data-video-player] img')).toHaveAttribute(
     'src',
     `/api/canvas/${canvasId}/artifact/${made.coverUrl}`,
   );
-  expect(pageRequests).toEqual([]);
 
-  async function preprocess() {
-    // No previousSnapshot or client-supplied cover: the second call must consult persisted cache.
-    const body: PreprocessNodeBody = {
-      nodeType: 'video',
-      trigger: 'manual',
-      snapshot: { src, label },
-      options: { allowLLM: false, allowPersistence: true },
-    };
-    const response = await page.request.post(
-      `/api/canvas/${canvasId}/nodes/${initial.id}/preprocess`,
-      { data: body },
-    );
-    expect(response.ok(), await response.text()).toBe(true);
-    const result = (await response.json()) as PreprocessNodeResponse;
-    expect(result, JSON.stringify(result)).toMatchObject({
-      nodeId: initial.id,
-      success: true,
-      coverSourceSrc: src,
-    });
-    expect(result.error).toBeUndefined();
-    expect(result.coverUrl).toMatch(/^cover_[^/\\:]+\.jpg$/);
-    return result;
-  }
-
-  // An explicit request finds the cover the server made, and makes no other.
-  const first = await preprocess();
-  const coverUrl = first.coverUrl;
-  expect(coverUrl).toBe(made.coverUrl);
+  const coverUrl = made.coverUrl;
   const coverPath = `/api/canvas/${canvasId}/artifact/${coverUrl}`;
   const cover = await page.request.get(coverPath);
   expect(cover.ok(), await cover.text()).toBe(true);
@@ -216,15 +181,6 @@ test('uploaded video gets a persisted JPEG cover, reuses it and plays natively a
   const jpeg = await cover.body();
   expect([...jpeg.subarray(0, 3)]).toEqual([0xff, 0xd8, 0xff]);
   expect([...jpeg.subarray(-2)]).toEqual([0xff, 0xd9]);
-  const second = await preprocess();
-  expect(second.coverUrl).toBe(coverUrl);
-  const cachedCover = await page.request.get(coverPath);
-  expect(cachedCover.ok()).toBe(true);
-  expect(await cachedCover.body()).toEqual(jpeg);
-  await testInfo.attach('preprocessing-results', {
-    body: JSON.stringify({ canvasId, src, first, second }, null, 2),
-    contentType: 'application/json',
-  });
   expect(errors).toEqual([]);
   expect.soft((await persistedVideo()).data).toMatchObject({
     coverUrl,

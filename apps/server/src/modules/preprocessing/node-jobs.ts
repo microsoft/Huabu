@@ -11,17 +11,19 @@
  * any saved node content does (`invalidate`, or an `update` for the fields
  * kept with the Space's structure).
  *
- * A job runs in the call that committed the write, so the Utility Agent,
- * credentials and network restrictions it uses are that caller's: the
- * member whose page or Agent run made the change, or the deployment's for a
- * machine credential.
+ * A run is made as the caller whose write it follows, so the Utility Agent,
+ * credentials, access and network restrictions it uses are that caller's:
+ * the member whose page or Agent run made the change, or the deployment's
+ * for a machine credential. That holds for a run that waited behind another
+ * member's, too.
  */
+
+import { AsyncLocalStorage } from 'node:async_hooks';
 
 import {
   buildPreprocessSnapshot,
   isLabelProtected,
   type CanvasCommand,
-  type PreprocessNodeRequest,
 } from '@huabu/shared';
 
 import { getLogger } from '../../utils/logger.js';
@@ -39,7 +41,7 @@ import {
 
 import { getPreprocessDispatcher } from './index.js';
 
-import type { PreprocessNodeResult } from './types.js';
+import type { PreprocessableNodeType, PreprocessNodeResult } from './types.js';
 import type {
   CommitReactions,
   NodeContentSave,
@@ -54,7 +56,18 @@ interface Job {
   /** The input of the run under way. */
   current: Record<string, unknown>;
   /** A later write to the same node, to run once this one has finished. */
-  next?: PreprocessCandidate;
+  next?: Waiting;
+}
+
+/** A candidate with the caller whose write selected it. */
+interface Waiting {
+  candidate: PreprocessCandidate;
+  /**
+   * Runs a function as that caller: a run uses the settings and the access
+   * of the member whose write it follows, not of whoever's write happened to
+   * start the job it waited behind.
+   */
+  asCaller: <T>(fn: () => T) => T;
 }
 
 const jobs = new Map<string, Job>();
@@ -159,10 +172,11 @@ async function frameCandidate(
  * once; a node that is already being processed is processed again when that
  * run ends, with the input of the earliest write still waiting as "before".
  */
-export function startNodePreprocessing(
+function startNodePreprocessing(
   canvasId: string,
   candidates: readonly PreprocessCandidate[],
 ): void {
+  const asCaller = AsyncLocalStorage.snapshot();
   for (const candidate of candidates) {
     const key = jobKey(canvasId, candidate.node.id);
     const active = jobs.get(key);
@@ -175,11 +189,14 @@ export function startNodePreprocessing(
       )
         continue;
       active.next = {
-        ...candidate,
-        // What the pipeline last saw is the first waiting write's "before".
-        ...(active.next
-          ? { previousSnapshot: active.next.previousSnapshot }
-          : {}),
+        candidate: {
+          ...candidate,
+          // What the pipeline last saw is the first waiting write's "before".
+          ...(active.next
+            ? { previousSnapshot: active.next.candidate.previousSnapshot }
+            : {}),
+        },
+        asCaller,
       };
       continue;
     }
@@ -189,10 +206,11 @@ export function startNodePreprocessing(
     };
     jobs.set(key, job);
     job.running = (async () => {
-      let current: PreprocessCandidate | undefined = candidate;
+      let current: Waiting | undefined = { candidate, asCaller };
       while (current) {
-        job.current = current.snapshot;
-        await runJob(canvasId, current);
+        const { candidate: next } = current;
+        job.current = next.snapshot;
+        await current.asCaller(() => runJob(canvasId, next));
         current = job.next;
         job.next = undefined;
       }
@@ -205,6 +223,9 @@ async function runJob(
   { node, snapshot, previousSnapshot }: PreprocessCandidate,
 ): Promise<void> {
   const nodeId = node.id;
+  // A node whose record is gone (deleted meanwhile, or its file is missing)
+  // is not processed: the pipeline would write a record for it.
+  if (!(await space(canvasId).nodes.read(nodeId))) return;
   let error: string | undefined;
   publishCanvasUpdate(canvasId, {
     type: 'preprocess',
@@ -214,12 +235,10 @@ async function runJob(
     const result = await getPreprocessDispatcher().preprocess({
       canvasId,
       nodeId,
-      nodeType: node.type as PreprocessNodeRequest['nodeType'],
-      trigger: previousSnapshot ? 'node_updated' : 'node_inserted',
+      nodeType: node.type as PreprocessableNodeType,
       snapshot,
       ...(previousSnapshot ? { previousSnapshot } : {}),
-      options: { allowLLM: true, allowPersistence: true, force: false },
-      // As the request route does for a restricted caller.
+      // A restricted caller's URLs must not reach the Server's own network.
       ...(callerAccess() !== null ? { publicNetworkOnly: true } : {}),
     });
     await writeBack(canvasId, node.type ?? '', nodeId, snapshot, result);

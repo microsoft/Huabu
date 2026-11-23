@@ -2076,31 +2076,6 @@ describe('missing-sidecar barrier', () => {
       }
     },
   );
-
-  it('does not recreate the missing sidecar through preprocessing', async () => {
-    const app = await buildApp();
-    try {
-      seedNodeWithoutSidecar('pdf-preprocess', 'pdf1', 'pdf');
-      const store = getCanvasStore('pdf-preprocess');
-
-      const response = await app.inject({
-        method: 'POST',
-        url: '/canvas/pdf-preprocess/nodes/pdf1/preprocess',
-        headers: { 'content-type': 'application/json' },
-        payload: JSON.stringify({
-          nodeType: 'pdf',
-          trigger: 'node_updated',
-          snapshot: {},
-        }),
-      });
-
-      expect(response.statusCode).toBe(200);
-      expect(response.json<{ success: boolean }>().success).toBe(false);
-      expect(store.readNode('pdf1')).toBeNull();
-    } finally {
-      await app.close();
-    }
-  });
 });
 
 describe('artifact presence hydration', () => {

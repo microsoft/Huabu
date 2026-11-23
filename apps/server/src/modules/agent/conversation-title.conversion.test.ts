@@ -153,7 +153,6 @@ forEachProductProfile((profile, label) => {
         canvasId,
         nodeId,
         nodeType: 'question' as const,
-        trigger: 'node_inserted' as const,
         snapshot: {
           content: 'First user prompt',
           title: 'Question',
@@ -364,7 +363,6 @@ forEachProductProfile((profile, label) => {
         canvasId,
         nodeId,
         nodeType: 'question' as const,
-        trigger: 'node_updated' as const,
         snapshot: { content: 'First user prompt', title: 'Old request title' },
       };
       expect((await dispatcher.preprocess(request)).patch).toEqual({});

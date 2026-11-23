@@ -7,7 +7,46 @@
  * These types flow between pipeline stages and are not part of the public API.
  */
 
-import type { CanvasNodeType, TriggerReason } from '@huabu/shared';
+import type { CanvasNodeType } from '@huabu/shared';
+
+// ---------------------------------------------------------------------------
+// Request
+// ---------------------------------------------------------------------------
+
+/**
+ * Node types that are preprocessed. `sketch` carries nothing to process;
+ * `question` does: its prompt names the conversation.
+ */
+export type PreprocessableNodeType =
+  | 'note'
+  | 'text'
+  | 'web'
+  | 'pdf'
+  | 'office'
+  | 'image'
+  | 'video'
+  | 'frame'
+  | 'question';
+
+/** One node to preprocess, as a committed write left it. */
+export interface PreprocessNodeRequest {
+  canvasId: string;
+  nodeId: string;
+  nodeType: PreprocessableNodeType;
+  /** The node's preprocessing input (`buildPreprocessSnapshot`). */
+  snapshot: Record<string, unknown>;
+  /**
+   * The input before the write. Absent for a node that has not been
+   * processed with its present input in view: every watched field then
+   * counts as changed.
+   */
+  previousSnapshot?: Record<string, unknown>;
+  /**
+   * Every fetch the run makes must reach a public address, for a caller
+   * whose URLs must not reach the Server's own network.
+   */
+  publicNetworkOnly?: boolean;
+}
 
 // ---------------------------------------------------------------------------
 // Capabilities — organized by pipeline stage
@@ -124,13 +163,12 @@ export interface PreprocessDiagnostic {
 }
 
 /**
- * Full result returned by the preprocessing pipeline. Server-internal — the
- * HTTP endpoint projects this down to `PreprocessNodeResponse` before returning.
+ * Full result returned by the preprocessing pipeline; the job that asked
+ * stores what it derived (`node-jobs.ts`).
  */
 export interface PreprocessNodeResult {
   nodeId: string;
   nodeType: CanvasNodeType;
-  trigger: TriggerReason;
   requestId: string;
 
   success: boolean;

@@ -149,7 +149,7 @@ describe('selectNodesToPreprocess', () => {
   it('does not look at the Space for a batch that touches no watched field', () => {
     // A node array that cannot be read: any indexing would throw.
     const unreadable = new Proxy([] as CanvasNode[], {
-      get(target, key) {
+      get(_target, key) {
         if (key === 'length') return 0;
         throw new Error(`The Space was read (${String(key)})`);
       },

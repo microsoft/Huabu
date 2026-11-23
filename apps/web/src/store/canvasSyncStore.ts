@@ -379,22 +379,14 @@ export const useCanvasSyncStore = create<CanvasSyncState>((set, get) => ({
       if (event.type === 'preprocess') {
         // Preprocessing the server runs after a write: show it on the node
         // until it ends. What it derived arrives as node content does.
-        const { nodeId, status, error } = event.data;
+        const { nodeId, status } = event.data;
         if (status === 'pending') {
           serverPreprocessing.add(nodeId);
-          canvasStore.setNodeIngestion(nodeId, {
-            status: 'pending',
-            updatedAt: Date.now(),
-          });
+          canvasStore.setNodeIngestion(nodeId, { status: 'pending' });
         } else {
+          // Done or failed: either way the run is over.
           serverPreprocessing.delete(nodeId);
-          if (status === 'error')
-            canvasStore.setNodeIngestion(nodeId, {
-              status: 'error',
-              updatedAt: Date.now(),
-              error: error ?? 'Unknown preprocessing error',
-            });
-          else canvasStore.clearNodeIngestion(nodeId);
+          canvasStore.clearNodeIngestion(nodeId);
         }
         return;
       }

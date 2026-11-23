@@ -23,7 +23,6 @@ const writes = new WeakMap<Page, { pending: Set<Request>; last: number }>();
 const errors = new WeakMap<Page, string[]>();
 const injectedFailures = new WeakMap<Page, Set<Request>>();
 const expectedDiagnostics = new WeakMap<Page, string[]>();
-const asked = new WeakMap<Page, string[]>();
 
 test.beforeEach(async ({ page, context }, testInfo) => {
   const state = { pending: new Set<Request>(), last: Date.now() };
@@ -31,10 +30,7 @@ test.beforeEach(async ({ page, context }, testInfo) => {
   errors.set(page, []);
   injectedFailures.set(page, new Set());
   expectedDiagnostics.set(page, []);
-  asked.set(page, []);
   page.on('request', (request) => {
-    if (request.method() === 'POST' && request.url().endsWith('/preprocess'))
-      asked.get(page)?.push(new URL(request.url()).pathname);
     if (/^(POST|PUT|PATCH|DELETE)$/.test(request.method())) {
       state.pending.add(request);
       state.last = Date.now();
@@ -124,8 +120,6 @@ test.afterEach(async ({ page }, testInfo) => {
     contentType: 'application/json',
   });
   expect(errors.get(page)).toEqual([]);
-  // Preprocessing is the server's to start: no page of this suite asks.
-  expect(asked.get(page)).toEqual([]);
 });
 
 async function quiet(page: Page) {
@@ -505,7 +499,7 @@ function textPdf(text: string) {
   return `${pdf}trailer\n<< /Size ${offsets.length} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
 }
 
-test('a page requests no preprocessing for a batch: moving a PDF in a Grid starts none, and a rename is processed by the server', async ({
+test('moving a PDF in a Grid starts no preprocessing, and a rename is processed by the server', async ({
   page,
 }) => {
   await openNewCanvas(page);
@@ -573,18 +567,28 @@ test('a page requests no preprocessing for a batch: moving a PDF in a Grid start
       JSON.stringify({ x: 180, y: 80, zoom: 1 }),
     );
   }, idOf(page));
+  await tapPreprocessEvents(page);
   await page.reload();
   const pdf = (index: number) =>
     page.locator(`.react-flow__node[data-id="node-grid-pdf-${index}"]`);
   await expect(pdf(0)).toBeVisible();
   await expect(pdf(1)).toBeVisible();
   await quiet(page);
+  // Let the runs that creating the PDFs started end before watching the move.
+  const announced = async () => (await preprocessEvents(page)).length;
+  let settled = -1;
+  await expect
+    .poll(
+      async () => {
+        const count = await announced();
+        const unchanged = count === settled;
+        settled = count;
+        return unchanged;
+      },
+      { intervals: [1500], timeout: 60_000 },
+    )
+    .toBe(true);
 
-  const requested: string[] = [];
-  page.on('request', (request) => {
-    if (request.method() === 'POST' && request.url().endsWith('/preprocess'))
-      requested.push(new URL(request.url()).pathname);
-  });
   const cells = async () => {
     const response = await page.request.get(`/api/canvas/${idOf(page)}`);
     const record = (await response.json()) as GetCanvasResponse;
@@ -608,19 +612,23 @@ test('a page requests no preprocessing for a batch: moving a PDF in a Grid start
   await expect.poll(cells).not.toEqual(['0,0', '1,0']);
   await expect(pending(pdf(0))).toHaveCount(0);
   await expect(pending(pdf(1))).toHaveCount(0);
-  await observeNoNewRequests(() => requested.length, 0);
+  // The server announces no run for either PDF: nothing was processed.
+  const moved = Date.now();
+  await expect
+    .poll(async () => {
+      expect(await announced()).toBe(settled);
+      return Date.now() - moved;
+    })
+    .toBeGreaterThan(1800);
   await expect(pending(pdf(0))).toHaveCount(0);
   await expect(pending(pdf(1))).toHaveCount(0);
 
-  // A title is preprocessing input, but it is the server that acts on it,
-  // where the save is committed: the page sends no request of its own and
-  // shows the status the server announces.
-  await tapPreprocessEvents(page);
-  // Reconnect the stream through the tap.
+  // A title is preprocessing input: the server acts on it where the save is
+  // committed, and the page shows the status the server announces.
+  // A fresh page forgets the events seen so far.
   await page.reload();
   await expect(pdf(0)).toBeVisible();
   await quiet(page);
-  requested.length = 0;
 
   await pdf(0).click();
   await page.getByRole('button', { name: 'Open Large View' }).click();
@@ -640,7 +648,6 @@ test('a page requests no preprocessing for a batch: moving a PDF in a Grid start
     .toEqual(['pending', 'done']);
   await expect(pending(pdf(0))).toHaveCount(0);
   await quiet(page);
-  expect(requested).toEqual([]);
   // The other PDF, which was only pushed aside, was never processed.
   expect(statusesOf(await preprocessEvents(page), 'node-grid-pdf-1')).toEqual(
     [],
@@ -659,12 +666,6 @@ test('a write is processed once, whether two pages are open or none', async ({
   const other = await browser.newContext({ baseURL });
   await tapPreprocessEvents(other);
   const second = await other.newPage();
-  const asked: string[] = [];
-  for (const each of [page, second])
-    each.on('request', (request) => {
-      if (request.method() === 'POST' && request.url().endsWith('/preprocess'))
-        asked.push(new URL(request.url()).pathname);
-    });
   await second.goto(`/canvas/${canvasId}`);
   await second.waitForSelector('.react-flow__pane');
   await quiet(page);
@@ -716,14 +717,13 @@ test('a write is processed once, whether two pages are open or none', async ({
     label: 'Derived once',
     labelSource: 'auto',
   });
-  // Nothing more follows, and neither page asked for anything.
+  // Nothing more follows.
   await quiet(page);
   for (const each of [page, second])
     expect(statusesOf(await preprocessEvents(each), 'node-once')).toEqual([
       'pending',
       'done',
     ]);
-  expect(asked).toEqual([]);
   await other.close();
 
   // ── No page on the Space ──────────────────────────────────────────────
@@ -737,5 +737,4 @@ test('a write is processed once, whether two pages are open or none', async ({
   await expect
     .poll(async () => stored(unwatched, 'node-alone'))
     .toMatchObject({ label: 'Derived unwatched', labelSource: 'auto' });
-  expect(asked).toEqual([]);
 });

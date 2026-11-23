@@ -339,17 +339,15 @@ describe('canvasSyncStore stream recovery', () => {
         ['snapshot', { version: 1 }],
       );
 
-      const shown = mocks.canvasState.setNodeIngestion.mock.calls.map(
-        ([nodeId, info]) => [nodeId, info.status, info.error],
-      );
-      expect(shown).toEqual([
-        ['n1', 'pending', undefined],
-        ['n2', 'pending', undefined],
-        ['n3', 'pending', undefined],
-        ['n2', 'error', 'no text'],
+      expect(mocks.canvasState.setNodeIngestion.mock.calls).toEqual([
+        ['n1', { status: 'pending' }],
+        ['n2', { status: 'pending' }],
+        ['n3', { status: 'pending' }],
       ]);
+      // A run that ended, a run that failed, and one whose end was missed.
       expect(mocks.canvasState.clearNodeIngestion.mock.calls).toEqual([
         ['n1'],
+        ['n2'],
         ['n3'],
       ]);
       // A status is not a version change: nothing is replayed or reloaded.

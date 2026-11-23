@@ -20,7 +20,6 @@ import {
   postCanvasExecuteBodySchema,
   moveSelectionBodySchema,
   moveSelectionParamsSchema,
-  preprocessNodeBodySchema,
   acknowledgeAgentNodeResultBodySchema,
   associateAgentNodeBodySchema,
   associateAgentNodeParamsSchema,
@@ -89,16 +88,14 @@ import {
   arrivedWithAgentCredential,
   getRequestIdentity,
 } from '../identity/request.js';
-import { getPreprocessDispatcher, getProfile } from '../preprocessing/index.js';
+import { getProfile } from '../preprocessing/index.js';
 import { stripOfficeparserPreamble } from '../preprocessing/loaders/office-strip.js';
 import {
-  canReadCitedSpaces,
   canReadSpace,
   claimSpace,
   canManageSpace,
   getSpaceAccess,
   requireWorkspaceWrite,
-  isRestrictedRequest,
   readableSpaces,
 } from '../security/space-access.js';
 import {
@@ -143,9 +140,6 @@ import type {
   PostCanvasExecuteResponse,
   MoveSelectionResponse,
   MoveSelectionParams,
-  PreprocessNodeBody,
-  PreprocessNodeRequest,
-  PreprocessNodeResponse,
   PutNodeContentRequest,
   PutNodeContentResponse,
   RevealNodesFolderResponse,
@@ -1170,131 +1164,6 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       }
     }
     return reply.send(response);
-  });
-
-  // --- Unified preprocessing endpoint ---
-  // Single route that handles all node types (note/text/web/pdf/image/frame/video).
-  // Replaces the split between PUT /:canvasId/nodes/:nodeId and POST /resolve-label.
-
-  fastify.post<{
-    Params: { canvasId: string; nodeId: string };
-    Body: PreprocessNodeBody;
-    Reply: ApiResult<PreprocessNodeResponse>;
-  }>('/:canvasId/nodes/:nodeId/preprocess', async function (request, reply) {
-    const params = deleteNodeParamsSchema.safeParse(request.params);
-    if (!params.success)
-      return reply.code(400).send({ message: 'Invalid canvas or node ID' });
-    const { canvasId, nodeId } = params.data;
-    const parsed = preprocessNodeBodySchema.safeParse(request.body);
-    if (!parsed.success) {
-      return reply.code(400).send({
-        message: parsed.error.issues[0]?.message ?? 'Invalid request body',
-      });
-    }
-
-    const { nodeType, trigger, snapshot, previousSnapshot, options } =
-      parsed.data;
-    // A snapshot may point at another Space's artifact, whose bytes the
-    // pipeline would read; that Space is as absent as a missing one.
-    if (
-      !(await canReadCitedSpaces(request, canvasId, [
-        snapshot,
-        previousSnapshot,
-      ]))
-    ) {
-      return reply.code(404).send({ message: 'Canvas not found' });
-    }
-    // Utility execution uses the caller's own Agent and credentials.
-    const restricted = isRestrictedRequest(request);
-    const dispatcher = getPreprocessDispatcher();
-    if (
-      MD_BACKED_NODE_TYPES.has(nodeType) &&
-      !(await space(canvasId).nodes.read(nodeId))
-    ) {
-      return reply.send({
-        nodeId,
-        success: false,
-        error: 'Node sidecar is missing',
-      });
-    }
-
-    try {
-      const ppRequest: PreprocessNodeRequest = {
-        canvasId,
-        nodeId,
-        nodeType,
-        trigger: trigger ?? 'node_updated',
-        snapshot,
-        previousSnapshot,
-        options: {
-          allowLLM: options?.allowLLM ?? true,
-          allowPersistence: options?.allowPersistence ?? true,
-          force: options?.force ?? false,
-          mode: options?.mode,
-        },
-        ...(restricted ? { publicNetworkOnly: true } : {}),
-      };
-
-      const result = await dispatcher.preprocess(ppRequest);
-
-      const response: PreprocessNodeResponse = {
-        nodeId,
-        success: result.success,
-        suggestedLabel:
-          typeof result.patch.label === 'string'
-            ? result.patch.label
-            : undefined,
-        // Surface the post-Persist canonical `src` only when the
-        // Project stage decided it diverged from the snapshot — see
-        // the `patch.src` branch in `stages/project.ts`. Reading from
-        // the patch (rather than `result.persistence`) means we
-        // automatically inherit the same "only when changed" gate so
-        // the client never receives a redundant src write.
-        src:
-          typeof result.patch.src === 'string' ? result.patch.src : undefined,
-        coverUrl:
-          typeof result.patch.coverUrl === 'string' ||
-          result.patch.coverUrl === null
-            ? result.patch.coverUrl
-            : undefined,
-        coverSourceSrc:
-          typeof result.patch.coverSourceSrc === 'string' ||
-          result.patch.coverSourceSrc === null
-            ? result.patch.coverSourceSrc
-            : undefined,
-        // For office nodes the in-canvas preview reads `data.content`
-        // directly, so ship the freshly-extracted body back so the
-        // client doesn't need a full canvas reload (or a follow-up
-        // GET /content) before the preview can render. The OfficeLoader
-        // already strips officeparser's auto-prepended YAML frontmatter
-        // and stray horizontal rule, so this value is preview-ready.
-        // Other text-bearing types (pdf / web / note) deliberately do
-        // NOT echo `content` here — their previews never read it and
-        // the extracted text can be hundreds of KB.
-        content:
-          nodeType === 'office' && typeof result.extracted?.content === 'string'
-            ? result.extracted.content
-            : undefined,
-        summary: result.enriched?.summary,
-        keywords: result.enriched?.keywords,
-        error:
-          result.diagnostics
-            .filter((d) => d.level === 'error')
-            .map((d) => `${d.code}: ${d.message}`)
-            .join('; ') || undefined,
-      };
-      return reply.send(response);
-    } catch (error) {
-      const message = toMessage(error);
-      request.log.error(
-        { nodeId, nodeType, error },
-        'Failed to preprocess node',
-      );
-      return reply.code(500).send({
-        message: 'Failed to preprocess node',
-        details: message,
-      });
-    }
   });
 
   // Permission refresh must not hydrate or replace the caller's unsaved content.

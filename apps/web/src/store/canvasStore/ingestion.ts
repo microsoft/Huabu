@@ -3,13 +3,7 @@
 
 /**
  * What a page shows for a node the server is preprocessing. The server
- * announces it (`preprocess` events on the Canvas Sync stream); the page
- * keeps it as display state only.
+ * announces a run's start and end (`preprocess` events on the Canvas Sync
+ * stream); the page keeps an entry only while the run is under way.
  */
-export type NodeIngestionStatus = 'pending' | 'success' | 'error';
-
-export type NodeIngestionInfo = {
-  status: NodeIngestionStatus;
-  updatedAt: number;
-  error?: string;
-};
+export type NodeIngestionInfo = { status: 'pending' };

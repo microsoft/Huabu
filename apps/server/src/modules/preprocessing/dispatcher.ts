@@ -9,31 +9,25 @@
  * store identified by `request.canvasId`.
  */
 
-import { coalesceInFlight } from './coalesce.js';
 import { isLabelProtected } from './label-policy.js';
 import { runPipeline, type PipelineDeps } from './pipeline.js';
 import { getProfile } from './profiles.js';
 import { ProviderManager } from './provider-manager.js';
-import { personalSettingsOwner } from '../identity/personal-settings.js';
 import { withPublicNetworkOnly } from '../security/outbound.js';
 import { space, getStructuredStore } from '../storage/index.js';
-import {
-  acquireWorkspaceOperationLease,
-  getWorkspaceHandle,
-} from '../workspace.js';
+import { acquireWorkspaceOperationLease } from '../workspace.js';
 
 import type {
   Capability,
   NodePreprocessProfile,
   PreprocessNodeResult,
 } from './types.js';
-import type { PreprocessNodeRequest } from '@huabu/shared';
+import type { PreprocessNodeRequest } from './types.js';
 
 /**
  * Build the execution plan: which capabilities need to run given the request.
  *
- * - `force` (repair / manual) runs the full profile, bypassing all gating.
- * - Otherwise the profile's capabilities are filtered by two rules:
+ * The profile's capabilities are filtered by two rules:
  *     1. **Per-capability triggers** (`profile.capabilityTriggers`): a listed
  *        capability is kept only when one of its trigger fields is dirty. On
  *        the first run (no `previousSnapshot`) every watched field counts as
@@ -51,11 +45,6 @@ export function buildPlan(
 ): Capability[] {
   // Always include structural capabilities
   const structural: Capability[] = ['resolve_input', 'build_patch'];
-
-  // Repair / manual triggers force a full run, overriding all gating.
-  if (request.options?.force) {
-    return profile.capabilities;
-  }
 
   const isFirstRun = !request.previousSnapshot;
 
@@ -96,62 +85,15 @@ export function buildPlan(
   });
 }
 
-/** Small stable string hash (djb2) — collisions only cost a missed
- *  coalesce, never a wrong result, so a 32-bit hash is plenty. */
-function stableHash(input: string): string {
-  let h = 5381;
-  for (let i = 0; i < input.length; i++) {
-    h = ((h << 5) + h + input.charCodeAt(i)) | 0;
-  }
-  return (h >>> 0).toString(36);
-}
-
-/**
- * Key that is equal iff two requests would produce the same pipeline
- * outcome. Snapshots can be large (hundreds of KB for pdf/web), so they
- * are hashed rather than embedded verbatim.
- */
-function dedupeKey(request: PreprocessNodeRequest): string {
-  const o = request.options;
-  return [
-    getWorkspaceHandle()?.workspaceId ?? '',
-    // Utility Agent selection, credentials, and failures belong to the caller.
-    // Only that member's tabs may reuse a pipeline that reads those settings.
-    JSON.stringify(personalSettingsOwner()),
-    request.canvasId,
-    request.nodeId,
-    request.nodeType,
-    request.trigger,
-    stableHash(JSON.stringify(request.snapshot ?? null)),
-    stableHash(JSON.stringify(request.previousSnapshot ?? null)),
-    o?.force ? 'F' : '_',
-    o?.allowLLM === false ? 'nl' : 'll',
-    o?.allowPersistence === false ? 'np' : 'pp',
-    o?.mode ?? '',
-    request.publicNetworkOnly ? 'pub' : 'any',
-  ].join('\u0000');
-}
-
 export class PreprocessDispatcher {
   private provider = new ProviderManager();
-
-  /**
-   * Coalesces concurrent identical requests so N tabs replaying the same
-   * broadcast delta run the pipeline once. Keyed on {@link dedupeKey};
-   * entries evict on settle (see {@link coalesceInFlight}).
-   */
-  private inFlight = new Map<string, Promise<PreprocessNodeResult>>();
 
   async preprocess(
     request: PreprocessNodeRequest,
   ): Promise<PreprocessNodeResult> {
     const lease = acquireWorkspaceOperationLease();
     try {
-      return await coalesceInFlight(
-        this.inFlight,
-        JSON.stringify([lease.workspaceKey, dedupeKey(request)]),
-        () => this.runPreprocess(request),
-      );
+      return await this.runPreprocess(request);
     } finally {
       lease.release();
     }
@@ -166,7 +108,6 @@ export class PreprocessDispatcher {
       return {
         nodeId: request.nodeId,
         nodeType: request.nodeType,
-        trigger: request.trigger,
         requestId: '',
         success: false,
         status: 'error',

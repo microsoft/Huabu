@@ -60,9 +60,9 @@ export interface CanvasWriteResult {
  * **Pure data — never callbacks.** The engine never invokes host APIs;
  * it merely *describes* what happened. Each host (web / server) drains
  * the manifest after committing the write result and decides how to
- * react. This decouples the engine from web-only verbs
- * (`triggerPreprocessing`, deferred frame fit, etc.) so the same
- * executor runs unchanged in a headless / server context.
+ * react. This decouples the engine from host-only verbs (deferred frame
+ * fit, starting preprocessing, etc.) so the same executor runs unchanged in
+ * a browser and on the server.
  *
  * Hosts are free to ignore fields that don't apply to them — e.g. a
  * server has no DOM, so `deferredFitFrameIds` is a no-op there. See
@@ -74,16 +74,9 @@ export interface PendingEffects {
   /**
    * Nodes that were created or had their `data` mutated in this batch.
    *
-   * Hosts forward these to the preprocessing pipeline (web → POST
-   * `/preprocess`, future server host → in-process dispatcher). The
-   * engine does **not** filter by node type or watched fields — that
-   * decision lives server-side in `dispatcher.buildPlan()` against the
-   * declarative `profiles` registry, so the engine never has to know
-   * which fields are interesting for which node type.
-   *
-   * Carries full `CanvasNode` objects — not just IDs — because the
-   * preprocessing pipeline branches on `data.fileType`, `data.src`,
-   * etc. that live on the node.
+   * The server names them in its outcome and stores their records. The
+   * engine does **not** decide which of them need preprocessing: the server
+   * selects those from the batch's change rows (`commit-trigger.ts`).
    */
   mutatedNodes: CanvasNode[];
 
@@ -95,8 +88,8 @@ export interface PendingEffects {
    *
    * Engine-neutral fact: "the content of these notes was just replaced".
    * The executor itself consumes this for agent batches to compute
-   * block-level `data.provenance` (see `computeAiNoteProvenance`); hosts
-   * also forward it to preprocessing. Non-agent batches leave
+   * block-level `data.provenance` (see `computeAiNoteProvenance`); the
+   * server also uses it to tell a body rewrite from a body typed in. Non-agent batches leave
    * provenance untouched.
    */
   contentEditedNodeIds: string[];

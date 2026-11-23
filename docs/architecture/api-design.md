@@ -103,9 +103,8 @@ export async function postEcho(body: EchoBody): Promise<EchoResponse> {
 - **Naming**: `<purpose>Schema` for schemas, `<Purpose>Body` /
   `<Purpose>Response` for types.
 - **Wire body vs internal request**: when a handler augments the body
-  with URL params, name them distinctly (e.g. `PreprocessNodeBody` is
-  what the client sends; `PreprocessNodeRequest` adds `canvasId` /
-  `nodeId` from `request.params`). Don't smuggle URL ids into the body.
+  with URL params, name them distinctly (the body is what the client sends; the
+  internal request adds `canvasId` / `nodeId` from `request.params`). Don't smuggle URL ids into the body.
 - **SSE**: event names live in shared (`AGENT_SSE_EVENTS` etc.). The
   request body that opens the stream still follows rule 3. Always emit
   a final `End` or `Error` event before `reply.raw.end()`.

@@ -19,7 +19,7 @@ import {
 import { executeOnServer } from '../canvas/canvas-executor.js';
 import { subscribeCanvasUpdates } from '../canvas/canvas-sync.js';
 import { setCommitReactions } from '../canvas/commit-follow-up.js';
-import { getCanvasStore } from '../storage/index.js';
+import { getCanvasStore, space } from '../storage/index.js';
 import { setWorkspacePath } from '../workspace.js';
 
 import { getPreprocessDispatcher } from './index.js';
@@ -149,7 +149,6 @@ describe('preprocessing started by the server after a write', () => {
     expect(preprocess).toHaveBeenCalledTimes(1);
     expect(preprocess.mock.calls[0][0]).toMatchObject({
       nodeId: 'node-a',
-      trigger: 'node_updated',
       snapshot: { title: 'Second' },
       previousSnapshot: { title: 'First' },
     });
@@ -425,6 +424,16 @@ describe('preprocessing started by the server after a write', () => {
     await waitForNodePreprocessing();
     expect(spy).toHaveBeenCalledTimes(1);
 
+    // The returning node has its record, as the association route found it.
+    await space(CANVAS).nodes.put({
+      nodeId: 'node-q',
+      record: {
+        nodeId: 'node-q',
+        type: 'question',
+        label: '',
+        content: 'What is this?',
+      },
+    });
     spy.mockClear();
     preprocessAfterWrites.agentNodeRestored(CANVAS, {
       id: 'node-q',

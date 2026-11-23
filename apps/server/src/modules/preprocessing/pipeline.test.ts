@@ -14,14 +14,13 @@ vi.mock('./stages/extract.js', () => ({ extract: extractMock }));
 import { runPipeline } from './pipeline.js';
 
 import type { ProviderManager } from './provider-manager.js';
+import type { PreprocessNodeRequest } from './types.js';
 import type { BlobScope, SpaceNodes } from '../storage/index.js';
-import type { PreprocessNodeRequest } from '@huabu/shared';
 
 const request: PreprocessNodeRequest = {
   canvasId: 'canvas-test',
   nodeId: 'node-test',
   nodeType: 'pdf',
-  trigger: 'node_inserted',
   snapshot: { src: 'document.pdf' },
 };
 
@@ -80,7 +79,6 @@ describe('Question title delegation', () => {
       'canvas-test',
       'node-test',
       'First user prompt',
-      true,
     );
     expect(harness.generateContentMeta).not.toHaveBeenCalled();
     expect(result.enriched).toBeUndefined();
@@ -88,46 +86,20 @@ describe('Question title delegation', () => {
     expect(result.success).toBe(true);
   });
 
-  it.each(['user', 'agent'])(
-    'protects a %s label even when enrichment is forced',
-    async (labelSource) => {
-      const harness = deps(vi.fn());
-      harness.generateContentMeta.mockResolvedValue({
-        label: 'Generated title',
-      });
-      const result = await runPipeline(
-        {
-          ...request,
-          nodeType: 'question',
-          snapshot: {
-            content: 'First user prompt',
-            title: 'Protected label',
-            labelSource,
-          },
-          options: { force: true },
-        },
-        ['resolve_input', 'generate_label', 'build_patch'],
-        undefined,
-        undefined,
-        harness.value,
-      );
-      expect(harness.generateContentMeta).not.toHaveBeenCalled();
-      expect(nameQuestion).toHaveBeenCalledOnce();
-      expect(result.enriched).toBeUndefined();
-      expect(result.patch).not.toHaveProperty('label');
-      expect(result.patch).not.toHaveProperty('labelSource');
-      expect(result.success).toBe(true);
-    },
-  );
-
-  it('does not call the provider when allowLLM is false', async () => {
+  it.each(['user', 'agent'])('protects a %s label', async (labelSource) => {
     const harness = deps(vi.fn());
-    await runPipeline(
+    harness.generateContentMeta.mockResolvedValue({
+      label: 'Generated title',
+    });
+    const result = await runPipeline(
       {
         ...request,
         nodeType: 'question',
-        snapshot: { content: 'First prompt' },
-        options: { allowLLM: false },
+        snapshot: {
+          content: 'First user prompt',
+          title: 'Protected label',
+          labelSource,
+        },
       },
       ['resolve_input', 'generate_label', 'build_patch'],
       undefined,
@@ -135,12 +107,11 @@ describe('Question title delegation', () => {
       harness.value,
     );
     expect(harness.generateContentMeta).not.toHaveBeenCalled();
-    expect(nameQuestion).toHaveBeenCalledWith(
-      'canvas-test',
-      'node-test',
-      'First prompt',
-      false,
-    );
+    expect(nameQuestion).toHaveBeenCalledOnce();
+    expect(result.enriched).toBeUndefined();
+    expect(result.patch).not.toHaveProperty('label');
+    expect(result.patch).not.toHaveProperty('labelSource');
+    expect(result.success).toBe(true);
   });
 
   it('never adds a second fallback when the naming service returns no metadata', async () => {

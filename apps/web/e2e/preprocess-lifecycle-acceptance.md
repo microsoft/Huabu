@@ -8,7 +8,7 @@ This record replaces the one of 2026-09-15/16. That one certified the page-side 
 
 [The spec](./preprocess-lifecycle.spec.ts) uses real Chromium UI interactions, the actual frontend store and content queue, the real server preprocessing jobs, and real Disk-backed topology and content persistence. [The configuration](../playwright.preprocess-lifecycle.config.ts) runs credential-free services on ports 3197/5297 with a temporary workspace, data directory and HOME, and `reuseExistingServer: false`. Browser requests to remote origins and POST requests for agent execution are forbidden; read-only chat metadata is allowed.
 
-No store imports, direct store mutations, or lifecycle calls are injected into the browser. Nothing about preprocessing is synthetic: titles are the ones the server derived and stored, read back over HTTP and after reload. The only injected faults are restore batches that are held or answered with 503; once released they go to the real server unmodified. Every scenario asserts that no page sends `POST …/preprocess`, and that there are no unexpected page exceptions, console errors or failed HTTP responses. Credentials are absent, so remote LLM enrichment is not validated.
+No store imports, direct store mutations, or lifecycle calls are injected into the browser. Nothing about preprocessing is synthetic: titles are the ones the server derived and stored, read back over HTTP and after reload. The only injected faults are restore batches that are held or answered with 503; once released they go to the real server unmodified. Every scenario asserts that there are no unexpected page exceptions, console errors or failed HTTP responses. Credentials are absent, so remote LLM enrichment is not validated.
 
 ## Verified scenarios
 
@@ -18,7 +18,7 @@ No store imports, direct store mutations, or lifecycle calls are injected into t
 | Editing during a restore    | Delete a Note, undo, hold the restoring batch, edit and leave the editor: no content save goes out while the restore is unanswered; after release the body is saved once with the mark and the title follows it. |
 | Failing restore             | The restoring batch fails with 503: the edit and the editing-ended mark are kept; after Retry the restore lands, then the body and the mark are sent, and the title follows.                                     |
 | Text node                   | A Text node is titled by the server when it is created and again when its inline editor is left.                                                                                                                 |
-| A batch asks for nothing    | Moving a PDF inside a Grid starts no preprocessing; renaming it is processed by the server; the page requests none in either case.                                                                               |
+| A batch asks for nothing    | Moving a PDF inside a Grid makes the server announce no run for either PDF; renaming one is processed by the server, the other is left alone.                                                                    |
 | Two pages or none           | With two pages open a write is processed once and both show the result; with no page open a write made over HTTP is processed and stored all the same.                                                           |
 
 ## Scope
