@@ -449,10 +449,20 @@ describe('CanvasLayerTree activation', () => {
   it('expands collapsed ancestors and scrolls a located node into view once', async () => {
     const scrollIntoView = vi.fn();
     Element.prototype.scrollIntoView = scrollIntoView;
+    // Queue frames like a browser does, so a cancelled frame never runs.
+    const frames = new Map<number, FrameRequestCallback>();
+    let nextFrame = 0;
     vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
-      callback(0);
-      return 0;
+      frames.set(++nextFrame, callback);
+      return nextFrame;
     });
+    vi.stubGlobal('cancelAnimationFrame', (id: number) => frames.delete(id));
+    const flushFrames = () =>
+      act(() => {
+        const pending = [...frames.values()];
+        frames.clear();
+        for (const callback of pending) callback(0);
+      });
     try {
       await renderTree([
         item('frame-1', 'frame'),
@@ -470,8 +480,12 @@ describe('CanvasLayerTree activation', () => {
         usePanelStore.setState({ isLeftCollapsed: false, leftMode: 'layers' }),
       );
       act(() => usePanelStore.getState().requestLayerLocate('note-1'));
-
       expect(useCanvasStore.getState().collapsedFrameIds.size).toBe(0);
+      expect(usePanelStore.getState().layerLocateRequest).not.toBeNull();
+
+      flushFrames();
+      flushFrames();
+
       expect(scrollIntoView).toHaveBeenCalledExactlyOnceWith({
         block: 'nearest',
       });
@@ -480,6 +494,7 @@ describe('CanvasLayerTree activation', () => {
 
       // A request for a node with no row is dropped rather than left pending.
       act(() => usePanelStore.getState().requestLayerLocate('missing'));
+      flushFrames();
       expect(usePanelStore.getState().layerLocateRequest).toBeNull();
       expect(scrollIntoView).toHaveBeenCalledOnce();
     } finally {

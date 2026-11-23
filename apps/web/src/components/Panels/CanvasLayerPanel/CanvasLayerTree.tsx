@@ -481,8 +481,9 @@ export const CanvasLayerTree = ({
       else consume();
       return;
     }
-    consume();
     setFocusedId(nodeId);
+    // Consume only after scrolling: consuming changes this effect's
+    // dependency, and its cleanup would cancel a frame still waiting.
     const frame = requestAnimationFrame(() => {
       for (const row of treeRef.current?.querySelectorAll<HTMLElement>(
         '[data-layer-id]',
@@ -492,6 +493,7 @@ export const CanvasLayerTree = ({
           break;
         }
       }
+      consume();
     });
     return () => cancelAnimationFrame(frame);
   }, [itemById, locateRequest, visibleItemMap]);

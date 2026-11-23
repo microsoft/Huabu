@@ -280,17 +280,17 @@ export default function CanvasPage() {
       return;
     }
 
-    if (isPreviewFullscreen) {
+    // A document link that crossed Spaces only locates, and must not pull the
+    // user out of fullscreen; URL entry leaves fullscreen and opens a preview.
+    const locateOnly = isLocateOnlyNavigation(location.state);
+    if (isPreviewFullscreen && !locateOnly) {
       usePanelStore.getState().setPreviewFullscreen(false);
       return;
     }
-    if (!rfInstance) return;
+    if (!rfInstance && !isPreviewFullscreen) return;
 
     consumedDeepLinkActivationRef.current = activation;
-    // A document link that crossed Spaces only locates; URL entry also opens.
-    activateNodeTarget(intent.nodeId, {
-      openPreview: !isLocateOnlyNavigation(location.state),
-    });
+    activateNodeTarget(intent.nodeId, { openPreview: !locateOnly });
   }, [
     canvasId,
     isLoading,

@@ -435,6 +435,26 @@ describe('CanvasPage node deep-link navigation', () => {
     expect(mocks.openPreviewNode).not.toHaveBeenCalled();
   });
 
+  it('keeps fullscreen for a document link that crossed Spaces', async () => {
+    usePanelStore.setState({ isPreviewFullscreen: true });
+    const { selectNodes } = await renderAt(
+      `/canvas/${CANVAS_ID}?node=node-1`,
+      node('note'),
+      null,
+      { locateNodeOnly: true },
+    );
+
+    expect(usePanelStore.getState().isPreviewFullscreen).toBe(true);
+    expect(selectNodes).toHaveBeenCalledWith(['node-1'], false);
+    expect(mocks.openPreviewNode).not.toHaveBeenCalled();
+    expect(useCanvasStore.getState().pendingRevealNodeIds).toEqual(['node-1']);
+    usePanelStore.setState({
+      isLeftCollapsed: true,
+      layerLocateRequest: null,
+    });
+    useCanvasStore.setState({ pendingRevealNodeIds: [] });
+  });
+
   it('reconsumes the retained target after browser back navigation', async () => {
     const { router } = await renderAt(
       `/canvas/${CANVAS_ID}?node=node-1`,
