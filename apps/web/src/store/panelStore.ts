@@ -40,7 +40,12 @@ interface PanelState {
   requestFocusCanvasSearch: () => void;
 
   /** Pending one-shot request to bring a node's row into view in Layers. */
-  layerLocateRequest: { nodeId: string; nonce: number } | null;
+  layerLocateRequest: {
+    nodeId: string;
+    nonce: number;
+    /** Layers is the only locator (Canvas hidden): reveal the row at any cost. */
+    force: boolean;
+  } | null;
   /**
    * Ask Layers to show a node's row. With `open` the panel is expanded on the
    * Layers tab first; without it the request is a no-op unless Layers is
@@ -154,6 +159,7 @@ export const usePanelStore = create<PanelState>()(
             layerLocateRequest: {
               nodeId,
               nonce: (s.layerLocateRequest?.nonce ?? 0) + 1,
+              force: !!options?.open,
             },
           };
         }),

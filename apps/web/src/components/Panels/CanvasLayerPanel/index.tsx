@@ -26,6 +26,7 @@ import {
   isOfficeFilterKey,
   type LayerFilterKey,
 } from './layerFilterKey';
+import { resolveLayerLocate } from './layerLocate';
 import { LayerNodeIcon } from './LayerNodeIcon';
 import {
   isLayerNodeVisibleByDefault,
@@ -424,6 +425,42 @@ export const CanvasLayerPanel = ({
   const handleToggleAllFrames = useCallback(() => {
     setAllFramesCollapsed(hasAnyExpandedFrame);
   }, [hasAnyExpandedFrame, setAllFramesCollapsed]);
+
+  // Gate "show this node here" requests (see `layerLocate.ts`): the tree
+  // handles rows it renders; search results and filtered-out rows are either
+  // cleared out of the way or the request is dropped.
+  const locateRequest = usePanelStore((s) => s.layerLocateRequest);
+  useEffect(() => {
+    if (!locateRequest) return;
+    const { nodeId, nonce, force } = locateRequest;
+    const action = resolveLayerLocate({
+      force,
+      inRenderedTree:
+        !isSearchActive &&
+        (isFilterActive
+          ? (filteredFlatItems ?? [])
+          : defaultVisibleLayerItems
+        ).some((item) => item.id === nodeId),
+      exists: layerItems.some((item) => item.id === nodeId),
+      isSearchActive,
+      isFilterActive,
+    });
+    if (action === 'tree') return;
+    if (action === 'drop') {
+      usePanelStore.getState().consumeLayerLocateRequest(nonce);
+      return;
+    }
+    if (isSearchActive) useSearchStore.getState().setQuery('');
+    setSelectedKeys(new Set());
+    setShowMissingOnly(false);
+  }, [
+    defaultVisibleLayerItems,
+    filteredFlatItems,
+    isFilterActive,
+    isSearchActive,
+    layerItems,
+    locateRequest,
+  ]);
 
   // External rows render at the bottom so they don't push the active
   // canvas nodes off-screen when many `.md` files appear at once.

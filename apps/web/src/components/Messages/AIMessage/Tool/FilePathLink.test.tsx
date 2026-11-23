@@ -66,10 +66,10 @@ it('opens an absolute path on the device that runs the conversation', () => {
   const button = container.querySelector('button');
   expect(button?.textContent).toBe('app.ts:12');
   act(() => button?.click());
-  expect(mocks.openPreviewFile).toHaveBeenCalledExactlyOnceWith({
-    agentletId: 'device-1',
-    path: '/repo/src/app.ts',
-  });
+  expect(mocks.openPreviewFile).toHaveBeenCalledExactlyOnceWith(
+    { agentletId: 'device-1', path: '/repo/src/app.ts' },
+    { threadId: 'thread-1', nodeId: undefined },
+  );
 });
 
 it.each([

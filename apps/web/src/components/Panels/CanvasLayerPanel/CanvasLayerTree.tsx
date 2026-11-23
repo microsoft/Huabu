@@ -464,11 +464,8 @@ export const CanvasLayerTree = ({
     const { nodeId, nonce } = locateRequest;
     const consume = () =>
       usePanelStore.getState().consumeLayerLocateRequest(nonce);
-    if (!itemById.has(nodeId)) {
-      // Filtered out or gone: there is no row to show.
-      consume();
-      return;
-    }
+    // The panel decides what to do when the node has no row in this list.
+    if (!itemById.has(nodeId)) return;
     if (!visibleItemMap.has(nodeId)) {
       const collapsed = new Set(useCanvasStore.getState().collapsedFrameIds);
       let parentId = itemById.get(nodeId)?.node.parentId;

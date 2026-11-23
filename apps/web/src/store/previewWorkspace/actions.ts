@@ -360,19 +360,45 @@ export function openPreviewUrl(
   return preview.openPreviewTarget(target, { groupId });
 }
 
-/** Inspect a device file in the reusable Preview slot without creating a node. */
-export function openPreviewFile(file: {
-  agentletId: string;
-  path: string;
-  deviceName?: string;
-}): string {
+/**
+ * Inspect a device file in the reusable Preview slot without creating a node.
+ * A `source` names the conversation the file was opened from: its tab is made
+ * permanent first, so the file takes a slot beside it instead of replacing the
+ * conversation the user is reading.
+ */
+export function openPreviewFile(
+  file: {
+    agentletId: string;
+    path: string;
+    deviceName?: string;
+  },
+  source?: { threadId?: string; nodeId?: string },
+): string {
   const preview = usePreviewWorkspaceStore.getState();
   const canvasId = preview.canvasId;
   if (!canvasId) return '';
   const target = normalizePreviewTarget({ kind: 'file', canvasId, ...file });
   if (!target) return '';
+  const sourceTab = source
+    ? Object.values(preview.workspace.tabs).find(
+        ({ target: open }) =>
+          open.canvasId === canvasId &&
+          ((!!source.threadId &&
+            (open.kind === 'chat' || open.kind === 'conversation') &&
+            open.threadId === source.threadId) ||
+            (!!source.nodeId &&
+              open.kind === 'node' &&
+              open.nodeId === source.nodeId)),
+      )
+    : undefined;
+  if (sourceTab) preview.promoteTab(sourceTab.id);
   usePanelStore.getState().requestOpenRightPanel();
-  return preview.openPreviewTarget(target, { transient: true });
+  return preview.openPreviewTarget(target, {
+    transient: true,
+    groupId: sourceTab
+      ? groupOfTab(preview.workspace, sourceTab.id)?.id
+      : undefined,
+  });
 }
 
 /**

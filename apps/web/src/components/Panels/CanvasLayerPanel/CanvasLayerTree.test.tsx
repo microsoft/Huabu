@@ -492,11 +492,14 @@ describe('CanvasLayerTree activation', () => {
       expect(scrollIntoView.mock.contexts[0]).toBe(row('note-1'));
       expect(usePanelStore.getState().layerLocateRequest).toBeNull();
 
-      // A request for a node with no row is dropped rather than left pending.
+      // A node with no row here is the panel's call, not the tree's.
       act(() => usePanelStore.getState().requestLayerLocate('missing'));
       flushFrames();
-      expect(usePanelStore.getState().layerLocateRequest).toBeNull();
+      expect(usePanelStore.getState().layerLocateRequest?.nodeId).toBe(
+        'missing',
+      );
       expect(scrollIntoView).toHaveBeenCalledOnce();
+      act(() => usePanelStore.setState({ layerLocateRequest: null }));
     } finally {
       vi.unstubAllGlobals();
     }

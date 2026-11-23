@@ -50,7 +50,10 @@ export function FilePathLink({ path, line, compact }: FilePathLinkProps) {
       title={t('messages.openFile', { path })}
       onClick={(event) => {
         event.stopPropagation();
-        openPreviewFile(reference);
+        openPreviewFile(reference, {
+          threadId: session?.threadId,
+          nodeId: session?.conversationView?.conversationOwner.nodeId,
+        });
       }}
     >
       <span className="truncate">{label}</span>
