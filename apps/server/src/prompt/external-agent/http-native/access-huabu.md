@@ -105,7 +105,6 @@ Execution rules:
 - **Reference new IDs in a follow-up call:** Commands cannot reference server-assigned IDs created earlier in the same batch; read `results[].nodes` first, then connect or reparent, switching to the new `basis` returned by `POST execute`.
 - **Pass `basis` for structural safety:** Send the latest `basis` (from `POST query`, node `X-Huabu-Basis`, or `POST execute`) in the execute body so structural edits against deleted (`stale-target`) or reparented (`stale-parent`) nodes are rejected safely (on `409 basis-unknown`, query again for a fresh `basis`).
 - **Use `operationId` for idempotent retry:** Generate a UUID `operationId` (`runId` is correlation-only) and send the identical file-backed body on timeout, dropped connection, or `503 operation-outcome-unknown` (or read `GET execute/<operationId>` without re-executing)—never retry without `operationId` unless you reconcile Space state first.
-- **Link what you report:** When you tell the user about a node you created or updated, link it in your reply as `[label](#<node id>)`—`#` followed by the node's full ID, which already starts with `node-`, such as `[Research note](#node-1a2b3c)`—so they can jump to it with one click.
 
 ### Create a Note from Markdown
 

@@ -86,7 +86,6 @@ Execution rules:
 - **Reference new IDs in a follow-up call:** Commands cannot reference server-assigned IDs created earlier in the same batch; read `results[].nodes` first, then connect or reparent, switching to the new `basis` returned by `execute`.
 - **Pass `--basis` for structural safety:** Pass the latest `basis` (from `query`, node `download_started`, or `execute`) via `--basis <token>` so structural edits against deleted (`stale-target`) or reparented (`stale-parent`) nodes are rejected safely (on `409 basis-unknown`, query again for a fresh `basis`).
 - **Replay with `--operation-id` or `result`:** `execute` attaches a UUID `operationId` (`runId` is correlation-only) and auto-retries dropped or `503 operation-outcome-unknown` calls. If it still fails and prints `operation-id=<uuid>` on stderr, replay the exact command with `--operation-id <uuid>` (and the same `--basis`) or check `huabu-rfs result <uuid>`—never resend without `--operation-id` unless you reconcile Space state first.
-- **Link what you report:** When you tell the user about a node you created or updated, link it in your reply as `[label](#<node id>)`—`#` followed by the node's full ID, which already starts with `node-`, such as `[Research note](#node-1a2b3c)`—so they can jump to it with one click.
 
 ### Create a Note from Markdown
 
