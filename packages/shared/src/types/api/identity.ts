@@ -90,10 +90,10 @@ export const admissionSettingsSchema = z.object({
   /**
    * When `true`, a person who signs in through one of `providers` with no
    * system grant and no block gets an ordinary system `member` grant, and a
-   * personal Workspace if they can open no Workspace yet; never ownership or a
-   * Workspace role. When `false`
-   * (the default), an administrator admits each person in People. Turning it
-   * off revokes nobody.
+   * personal Workspace, which they own, if they can open no Workspace yet. It
+   * never grants system `owner` or a role on an existing Workspace or Space.
+   * When `false` (the default), an administrator admits each person in
+   * People. Turning it off revokes nobody.
    */
   automatic: z.boolean(),
   /**
