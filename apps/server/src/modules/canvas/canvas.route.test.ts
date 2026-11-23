@@ -926,6 +926,59 @@ describe('GET /api/canvas/:canvasId/events', () => {
   });
 });
 
+describe('POST /api/canvas/:canvasId/changes/query', () => {
+  it('returns the pending records of the named threads that have any', async () => {
+    const expected = [change('n1')];
+    const readChanges = vi.fn((threadId: string) =>
+      Promise.resolve(threadId === 'thread-1' ? expected : []),
+    );
+    const space = vi.fn(() => ({
+      read: vi.fn().mockResolvedValue({ canvasId: 'c1' }),
+      changes: { read: readChanges },
+    }));
+    vi.mocked(getStructuredStore).mockImplementationOnce(
+      () => ({ space }) as unknown as ReturnType<typeof getStructuredStore>,
+    );
+
+    const app = await buildApp();
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/canvas/c1/changes/query',
+        payload: { threadIds: ['thread-1', 'thread-2', 'thread-1'] },
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toEqual({ threads: { 'thread-1': expected } });
+      expect(readChanges).toHaveBeenCalledTimes(2);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('rejects a malformed body and an unknown Space', async () => {
+    createCanvas('c1', 'Canvas One');
+
+    const app = await buildApp();
+    try {
+      const malformed = await app.inject({
+        method: 'POST',
+        url: '/canvas/c1/changes/query',
+        payload: { threadIds: 'thread-1' },
+      });
+      expect(malformed.statusCode).toBe(400);
+      const unknown = await app.inject({
+        method: 'POST',
+        url: '/canvas/missing/changes/query',
+        payload: { threadIds: [] },
+      });
+      expect(unknown.statusCode).toBe(404);
+    } finally {
+      await app.close();
+    }
+  });
+});
+
 describe('GET /api/canvas/:canvasId/threads/:threadId/changes', () => {
   it('reads change records through one structured Space handle', async () => {
     const expected = [change('n1')];

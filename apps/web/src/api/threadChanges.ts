@@ -7,6 +7,7 @@ import { routes } from './_routes';
 import type {
   DeleteThreadChangeResponse,
   GetThreadChangesResponse,
+  QuerySpaceChangesResponse,
 } from '@huabu/shared';
 import type { CanvasChangeRecord } from '@huabu/shared/canvas-engine';
 
@@ -19,6 +20,18 @@ export async function getThreadChanges(
     routes.canvasThreadChanges(canvasId, threadId),
   );
   return res.changes;
+}
+
+/** Load the pending change-review records of several threads at once. */
+export async function querySpaceChanges(
+  canvasId: string,
+  threadIds: readonly string[],
+): Promise<QuerySpaceChangesResponse['threads']> {
+  const res = await apiFetch<QuerySpaceChangesResponse>(
+    routes.canvasChangesQuery(canvasId),
+    { method: 'POST', body: JSON.stringify({ threadIds }) },
+  );
+  return res.threads;
 }
 
 /** Accept (discard) a single change record. */

@@ -14,8 +14,10 @@ import {
   readConversations,
   type TurnEvent,
 } from '@/utils/turnNotices';
+import { markTouches } from '@/utils/unseenChanges';
 
 import { getElectronBridge } from './useElectron';
+import { readUnseenMarks } from './useUnseenChanges';
 
 import type { DesktopTabNotice } from '@huabu/shared/desktop-tabs';
 
@@ -64,7 +66,13 @@ export function useTurnNotices(canvasId: string | undefined): void {
 
     const tell = () => {
       tellTimer = undefined;
-      const events = gathered;
+      const unseen = [...readUnseenMarks()];
+      const events = gathered.map((event) => ({
+        ...event,
+        outputIds: unseen.flatMap(([nodeId, mark]) =>
+          markTouches(mark, event.key) ? [nodeId] : [],
+        ),
+      }));
       gathered = [];
       const notice = composeNotice(
         events,

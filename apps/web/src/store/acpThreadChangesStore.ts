@@ -8,6 +8,7 @@ import { isChangeStale } from '@huabu/shared/canvas-engine';
 import {
   acceptThreadChange,
   getThreadChanges,
+  querySpaceChanges,
   revertThreadChange,
 } from '@/api/threadChanges';
 import useCanvasStore from '@/store/canvasStore';
@@ -39,8 +40,20 @@ interface AcpThreadChangesState {
    * instead of a normal applied change.
    */
   conflictedByThread: Record<string, string[]>;
+  /**
+   * Threads told of by a broadcast while this page was open, each with the
+   * turn of its latest broadcast: a higher number spoke later. What they
+   * hold may have just happened, unlike what a page finds when it opens.
+   */
+  liveThreads: Record<string, number>;
   /** Fetch persisted records for a thread (replaces local list). */
   load: (canvasId: string, threadId: string) => Promise<void>;
+  /**
+   * Fetch the records of a Space's conversations in one request, for the
+   * marks on what Agents changed. A thread this page already holds — opened,
+   * or told of by a broadcast meanwhile — keeps what it has.
+   */
+  loadSpace: (canvasId: string, threadIds: readonly string[]) => Promise<void>;
   /** Replace a thread's list with the coalesced set pushed via broadcast. */
   replaceFromBroadcast: (
     threadId: string,
@@ -83,6 +96,7 @@ export const useAcpThreadChangesStore = create<AcpThreadChangesState>(
   (set, get) => ({
     byThread: {},
     conflictedByThread: {},
+    liveThreads: {},
 
     load: async (canvasId, threadId) => {
       const key = `${canvasId}\0${threadId}`;
@@ -117,6 +131,19 @@ export const useAcpThreadChangesStore = create<AcpThreadChangesState>(
       }
     },
 
+    loadSpace: async (canvasId, threadIds) => {
+      if (threadIds.length === 0) return;
+      try {
+        const threads = await querySpaceChanges(canvasId, threadIds);
+        if (useCanvasStore.getState().canvasId !== canvasId) return;
+        set((s) => ({
+          byThread: { ...threads, ...s.byThread },
+        }));
+      } catch (err) {
+        console.error('[acpThreadChanges] Space load failed', err);
+      }
+    },
+
     replaceFromBroadcast: (threadId, records, skippedNodeIds = []) => {
       // The broadcast carries the thread's full coalesced list (one net
       // record per entity), so replace rather than append — this also
@@ -134,6 +161,10 @@ export const useAcpThreadChangesStore = create<AcpThreadChangesState>(
         conflictedByThread: {
           ...s.conflictedByThread,
           [threadId]: conflicted,
+        },
+        liveThreads: {
+          ...s.liveThreads,
+          [threadId]: Math.max(0, ...Object.values(s.liveThreads)) + 1,
         },
       }));
     },

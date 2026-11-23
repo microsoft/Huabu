@@ -25,6 +25,7 @@ import {
   associateAgentNodeBodySchema,
   associateAgentNodeParamsSchema,
   putNodeContentBodySchema,
+  querySpaceChangesBodySchema,
   stripLegacyPortalTopology,
   recentCanvasConversationParamsSchema,
   deleteNodeParamsSchema,
@@ -134,6 +135,7 @@ import type {
   GetNodeContentResponse,
   GetSpacePreviewSceneResponse,
   GetThreadChangesResponse,
+  QuerySpaceChangesResponse,
   ImportCanvasResponse,
   ListCanvasesResponse,
   PostCanvasEventsRequest,
@@ -1594,6 +1596,35 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     }
     return reply.send({ changes: await handle.changes.read(threadId) });
   });
+
+  // The pending records of several conversations at once, so a page can mark
+  // what Agents changed across the whole Space without a request per thread.
+  fastify.post<{
+    Params: { canvasId: string };
+    Reply: ApiResult<QuerySpaceChangesResponse>;
+  }>(
+    '/:canvasId/changes/query',
+    // A read, sent as POST only because it carries a list.
+    { config: { spaceAccess: 'read' } },
+    async function (request, reply) {
+      const parsed = querySpaceChangesBodySchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.code(400).send({ message: parsed.error.message });
+      }
+      const handle = getStructuredStore().space(request.params.canvasId);
+      if (!(await handle.read())) {
+        return reply.code(404).send({ message: 'Canvas not found' });
+      }
+      const threads: QuerySpaceChangesResponse['threads'] = {};
+      await Promise.all(
+        [...new Set(parsed.data.threadIds)].map(async (threadId) => {
+          const changes = await handle.changes.read(threadId);
+          if (changes.length > 0) threads[threadId] = changes;
+        }),
+      );
+      return reply.send({ threads });
+    },
+  );
 
   fastify.delete<{
     Params: { canvasId: string; threadId: string; changeId: string };

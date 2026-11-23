@@ -69,6 +69,11 @@
     "error": "出错了",
     "approval": "等你批准"
   },
+  "unseenChanges": {
+    "create": "{{conversation}} · 新建",
+    "update": "{{conversation}} · 改过",
+    "open": "点击查看对话"
+  },
   "turnNotices": {
     "done": "做完了",
     "error": "出错了",

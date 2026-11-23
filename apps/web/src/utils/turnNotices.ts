@@ -48,6 +48,8 @@ export interface TurnEvent {
   nodeId: string | null;
   label: string;
   text: string;
+  /** What the turn left unseen on the Space, when the caller knows. */
+  outputIds?: readonly string[];
 }
 
 interface NodeLike {
@@ -62,6 +64,8 @@ interface ThreadLike {
 }
 
 const SENTENCE_LIMIT = 140;
+/** As many nodes as a notice may name; the desktop shell refuses more. */
+const NOTICE_NODE_LIMIT = 64;
 
 /**
  * The opening sentence of a reply, as plain text. Markdown markers that
@@ -254,7 +258,17 @@ export function composeNotice(
   );
   const [only] = told;
   if (!only) return null;
-  const nodeIds = told.flatMap((event) => (event.nodeId ? [event.nodeId] : []));
+  // A finished turn opens on what it made; anything else, and a turn that
+  // made nothing, opens on the conversation.
+  const nodeIds = told
+    .flatMap((event) =>
+      event.kind === 'done' && event.outputIds?.length
+        ? event.outputIds
+        : event.nodeId
+          ? [event.nodeId]
+          : [],
+    )
+    .slice(0, NOTICE_NODE_LIMIT);
   if (told.length === 1)
     return {
       key: only.key,

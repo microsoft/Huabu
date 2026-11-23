@@ -69,6 +69,11 @@
     "error": "Failed",
     "approval": "Waiting for your approval"
   },
+  "unseenChanges": {
+    "create": "{{conversation}} · created",
+    "update": "{{conversation}} · changed",
+    "open": "Click to open the conversation"
+  },
   "turnNotices": {
     "done": "Finished",
     "error": "Failed",

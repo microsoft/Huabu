@@ -6,6 +6,8 @@ import { useTranslation } from 'react-i18next';
 import { cn } from '@/components/Common/cn';
 import { ATTENTION_COLOR, type AttentionKind } from '@/utils/attention';
 
+import type { CSSProperties } from 'react';
+
 /**
  * The badge that says "something here you have not seen", coloured by what
  * it is. It sits just past the top right corner of what it marks, clear of
@@ -26,7 +28,13 @@ export function AttentionDot({
       data-attention={kind}
       role="img"
       aria-label={t(`attention.${kind}`)}
-      style={{ backgroundColor: ATTENTION_COLOR[kind] }}
+      style={
+        {
+          backgroundColor: ATTENTION_COLOR[kind],
+          // For styles that draw around the dot in its own colour.
+          '--attention-color': ATTENTION_COLOR[kind],
+        } as CSSProperties
+      }
       className={cn(
         'absolute top-0.5 -right-2 size-1.5 rounded-full',
         className,

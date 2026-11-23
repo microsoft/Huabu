@@ -195,6 +195,20 @@ export interface GetThreadChangesResponse {
   changes: CanvasChangeRecord[];
 }
 
+/** Body of `POST /api/canvas/:canvasId/changes/query`. */
+export const querySpaceChangesBodySchema = z.object({
+  /** The conversations to read; a Space's page names those it shows. */
+  threadIds: z.array(z.string().min(1).max(256)).max(500),
+});
+
+/**
+ * Response for `POST /api/canvas/:canvasId/changes/query`: the pending
+ * review records of each named thread that has any.
+ */
+export interface QuerySpaceChangesResponse {
+  threads: Record<string, CanvasChangeRecord[]>;
+}
+
 /**
  * Response for `DELETE /api/canvas/:canvasId/threads/:threadId/changes/:changeId`
  * (accept / discard a single review record).

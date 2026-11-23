@@ -204,6 +204,28 @@ describe('composeNotice', () => {
     ).toMatchObject({ body: 'Waiting for your approval' });
   });
 
+  it('opens a finished turn on what it left unseen, anything else on the conversation', () => {
+    expect(
+      composeNotice(
+        [event({ outputIds: ['out-1', 'out-2'] })],
+        'Space',
+        wording,
+        on,
+      )?.nodeIds,
+    ).toEqual(['out-1', 'out-2']);
+    expect(
+      composeNotice(
+        [event({ kind: 'approval', outputIds: ['out-1'] })],
+        'Space',
+        wording,
+        on,
+      )?.nodeIds,
+    ).toEqual(['n1']);
+    expect(
+      composeNotice([event({ outputIds: [] })], 'Space', wording, on)?.nodeIds,
+    ).toEqual(['n1']);
+  });
+
   it('tells several conversations as one and keeps the latest of each', () => {
     expect(
       composeNotice(
