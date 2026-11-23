@@ -146,7 +146,7 @@ const agentNodeDataSchema = z
       .max(4096)
       .optional()
       .describe(
-        'Source pointer for media nodes: a staged upload path, an artifact key, or an HTTPS URL.',
+        'Source pointer for media nodes: an artifact key or an HTTPS URL.',
       ),
     coverUrl: z
       .string()
@@ -154,7 +154,7 @@ const agentNodeDataSchema = z
       .nullable()
       .optional()
       .describe(
-        'PDF-only cover image shown on the card instead of the first page: a staged upload path, an artifact key, or an HTTPS image URL (png, jpg, gif, webp, avif). Pass null to restore the first-page thumbnail. An unavailable image or a non-PDF target rejects the whole request.',
+        'PDF-only cover image shown on the card instead of the first page: an artifact key or an HTTPS image URL (png, jpg, gif, webp, avif). Pass null to restore the first-page thumbnail. An unavailable image or a non-PDF target rejects the whole request.',
       ),
     style: nodeStyleSchema.optional(),
   })
@@ -814,7 +814,11 @@ const spaceNodeResultSchema = z
     id: z.string(),
     type: z.enum(CANVAS_NODE_TYPES),
     label: z.string().optional(),
-    filename: z.string(),
+    filename: z
+      .string()
+      .describe(
+        'Internal Disk-tool path; external RFS callers address nodes by id.',
+      ),
     summary: z.string().optional(),
     preview: z.string().optional(),
     rev: z.string().optional(),
@@ -944,13 +948,7 @@ const snapshotNodeResultSchema = z
       .string()
       .min(1)
       .describe(
-        'Bare artifact key accepted by media-node data.src and other Huabu artifact consumers.',
-      ),
-    downloadPath: z
-      .string()
-      .min(1)
-      .describe(
-        'Canvas-relative path to pass to GET download/<path> for the PNG bytes.',
+        'Bare artifact key accepted by GET download/<id>, media-node data.src, and other Huabu artifact consumers.',
       ),
     width: z.number().int().nonnegative(),
     height: z.number().int().nonnegative(),

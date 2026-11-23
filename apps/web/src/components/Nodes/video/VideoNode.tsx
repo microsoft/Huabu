@@ -1,10 +1,11 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { Maximize2, Play } from 'lucide-react';
+import { Download, Maximize2, Play } from 'lucide-react';
 import { memo, useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { DropdownMenuItem } from '@/components/Common/DropdownMenu';
 import { useNodePresentation } from '@/hooks/useNodePresentation';
 import useCanvasStore from '@/store/canvasStore.ts';
 import { openPreviewNode } from '@/store/previewWorkspace/actions';
@@ -12,6 +13,10 @@ import {
   selectIsNodeOpen,
   usePreviewWorkspaceStore,
 } from '@/store/previewWorkspace/store';
+import {
+  canDownloadMediaSource,
+  triggerMediaDownload,
+} from '@/utils/io/nodeDownload';
 
 import { Button } from '../../Common/Button';
 import { FloatingToolbar } from '../../Common/FloatingToolbar.tsx';
@@ -49,6 +54,21 @@ export const VideoNode = memo(
         frameSuppressed,
       });
 
+    const canDownload = canDownloadMediaSource(
+      data?.src,
+      Boolean(missingFileKind),
+    );
+    const handleDownload = useCallback(() => {
+      triggerMediaDownload({
+        src: data?.src,
+        canvasId,
+        label: data?.label,
+        defaultExt: '.mp4',
+        fallbackStem: 'video',
+        missing: Boolean(missingFileKind),
+      });
+    }, [data?.src, data?.label, canvasId, missingFileKind]);
+
     const VideoActions = (
       <FloatingToolbar.ActionButton
         title={t('node.openLargeView')}
@@ -68,6 +88,13 @@ export const VideoNode = memo(
         type={'video'}
         selected={selected}
         actions={missingFileKind ? undefined : VideoActions}
+        overflow={
+          canDownload ? (
+            <DropdownMenuItem icon={<Download />} onClick={handleDownload}>
+              {t('node.download')}
+            </DropdownMenuItem>
+          ) : undefined
+        }
         keepAspectRatio={true}
       >
         {missingFileKind ? (

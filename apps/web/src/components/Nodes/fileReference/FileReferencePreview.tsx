@@ -1,7 +1,16 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { lazy, Suspense, useEffect, useRef, useState } from 'react';
+import { ChevronDown, ChevronRight } from 'lucide-react';
+import {
+  lazy,
+  Suspense,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { isFileReference } from '@huabu/shared';
@@ -14,6 +23,8 @@ import {
   openFileReference,
 } from '@/store/previewWorkspace/actions';
 import { deviceFileName } from '@/utils/deviceFile';
+
+import { splitMarkdownFrontmatter } from './markdownFrontmatter';
 
 import type { PreviewComponentProps } from '../previews';
 import type { EditorView } from '@codemirror/view';
@@ -38,7 +49,12 @@ export function FileReferencePreview({ id, data }: PreviewComponentProps) {
     : null;
   const agentletId = reference?.agentletId;
   const path = reference?.path;
-  const [result, setResult] = useState<FileReadResult | null>(null);
+  const fileIdentity = `${agentletId ?? ''}\0${path ?? ''}`;
+  const [loaded, setLoaded] = useState<{
+    identity: string;
+    result: FileReadResult;
+  } | null>(null);
+  const result = loaded?.identity === fileIdentity ? loaded.result : null;
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [refresh, setRefresh] = useState(0);
@@ -51,10 +67,29 @@ export function FileReferencePreview({ id, data }: PreviewComponentProps) {
   const [view, setView] = useState<EditorView | null>(null);
   const [mode, setMode] = useState<'reading' | 'source'>('reading');
   const [renderError, setRenderError] = useState<string | null>(null);
+  const frontmatterRegionId = useId();
+  const [collapsedFileIdentity, setCollapsedFileIdentity] = useState<
+    string | null
+  >(null);
+  const frontmatterExpanded = collapsedFileIdentity !== fileIdentity;
   const isMarkdown = /\.(?:md|markdown|mdown|mkd)$/i.test(path ?? '');
   const canReadMarkdown =
     isMarkdown && !!result && !result.nextCursor && !pending && !error;
   const reading = canReadMarkdown && mode === 'reading' && !renderError;
+  const sourceText = result?.text;
+  const parsedMarkdown = useMemo(
+    () =>
+      canReadMarkdown && sourceText !== undefined
+        ? splitMarkdownFrontmatter(sourceText)
+        : null,
+    [canReadMarkdown, sourceText],
+  );
+  const frontmatter = parsedMarkdown?.frontmatter ?? null;
+  const markdownBody = parsedMarkdown
+    ? parsedMarkdown.body
+    : (sourceText ?? '');
+  const hasMarkdownBody =
+    frontmatter === null || markdownBody.trim().length > 0;
   useEffect(() => {
     setMode('reading');
   }, [agentletId, path]);
@@ -64,7 +99,7 @@ export function FileReferencePreview({ id, data }: PreviewComponentProps) {
     const abort = new AbortController();
     controller.current = abort;
     loadedBytes.current = 0;
-    setResult(null);
+    setLoaded(null);
     setError(null);
     setRenderError(null);
     if (!agentletId || !path) return;
@@ -74,7 +109,7 @@ export function FileReferencePreview({ id, data }: PreviewComponentProps) {
         if (current !== generation.current) return;
         loadedBytes.current = value.byteLength;
         if (value.nextCursor) setMode('source');
-        setResult(value);
+        setLoaded({ identity: fileIdentity, result: value });
       })
       .catch((failure: unknown) => {
         if (current === generation.current && !abort.signal.aborted)
@@ -89,7 +124,7 @@ export function FileReferencePreview({ id, data }: PreviewComponentProps) {
       generation.current = current + 1;
       abort.abort();
     };
-  }, [agentletId, path, refresh, t]);
+  }, [agentletId, fileIdentity, path, refresh, t]);
 
   const more = async () => {
     if (
@@ -117,7 +152,10 @@ export function FileReferencePreview({ id, data }: PreviewComponentProps) {
       if (next.contentVersion !== result.contentVersion)
         throw new Error(t('files.changed'));
       loadedBytes.current += next.byteLength;
-      setResult({ ...next, text: result.text + next.text });
+      setLoaded({
+        identity: fileIdentity,
+        result: { ...next, text: result.text + next.text },
+      });
     } catch (failure) {
       if (current === generation.current)
         setError(
@@ -238,14 +276,65 @@ export function FileReferencePreview({ id, data }: PreviewComponentProps) {
       {result ? (
         <Suspense fallback={<div className="p-3">{t('files.loading')}</div>}>
           {reading ? (
-            <MarkdownViewer
-              key={`${agentletId}:${path}:${refresh}`}
-              markdown={result.text}
-              singleFile
-              ariaLabel={t('files.readOnlyMarkdown')}
-              className="min-h-0 flex-1 overflow-auto p-4"
-              onLoadError={(failure) => setRenderError(failure.message)}
-            />
+            <div className="min-h-0 flex-1 overflow-auto p-4">
+              {frontmatter !== null ? (
+                <section
+                  aria-label={t('files.frontmatter')}
+                  className={
+                    hasMarkdownBody
+                      ? 'border-edge-default bg-bg-default mb-4 overflow-hidden rounded-md border'
+                      : 'border-edge-default bg-bg-default overflow-hidden rounded-md border'
+                  }
+                >
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    aria-expanded={frontmatterExpanded}
+                    aria-controls={
+                      frontmatterExpanded ? frontmatterRegionId : undefined
+                    }
+                    onClick={() =>
+                      setCollapsedFileIdentity((current) =>
+                        current === fileIdentity ? null : fileIdentity,
+                      )
+                    }
+                    className="text-fg-muted enabled:hover:text-fg-default w-full justify-start rounded-none px-3 py-1.5 text-left text-xs font-medium"
+                  >
+                    {frontmatterExpanded ? (
+                      <ChevronDown aria-hidden="true" />
+                    ) : (
+                      <ChevronRight aria-hidden="true" />
+                    )}
+                    <span>{t('files.frontmatter')}</span>
+                  </Button>
+                  {frontmatterExpanded ? (
+                    <div
+                      id={frontmatterRegionId}
+                      className="border-edge-default border-t px-3 py-2"
+                    >
+                      {frontmatter.trim().length > 0 ? (
+                        <pre className="text-fg-default overflow-x-auto font-mono text-xs leading-relaxed break-words whitespace-pre-wrap">
+                          <code>{frontmatter}</code>
+                        </pre>
+                      ) : (
+                        <p className="text-fg-subtle text-xs italic">
+                          {t('files.emptyFrontmatter')}
+                        </p>
+                      )}
+                    </div>
+                  ) : null}
+                </section>
+              ) : null}
+              {hasMarkdownBody ? (
+                <MarkdownViewer
+                  key={`${agentletId}:${path}:${refresh}`}
+                  markdown={markdownBody}
+                  singleFile
+                  ariaLabel={t('files.readOnlyMarkdown')}
+                  onLoadError={(failure) => setRenderError(failure.message)}
+                />
+              ) : null}
+            </div>
           ) : (
             <SourceViewer
               key={`${agentletId}:${path}`}

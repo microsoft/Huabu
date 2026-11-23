@@ -89,6 +89,47 @@ function validSha(value: string | undefined): string | null {
   return SHA_PATTERN.test(normalized) ? normalized : null;
 }
 
+/**
+ * The commit the server bundle was built from, replaced at bundle time by
+ * `apps/server/tsup.config.ts` (`resolveExactRevision()` in
+ * `scripts/build-version.mjs`): a 40-character SHA, or null when no commit
+ * holds the bundle's exact source (unknown revision, or uncommitted
+ * changes). Not defined when the Server runs from source (development and
+ * tests).
+ */
+declare const __HUABU_BUILD_REVISION__: string | null | undefined;
+
+/**
+ * The revision recorded in the running bundle: a SHA, null when the bundle
+ * recorded none, or undefined when the Server runs from source.
+ */
+export function bundledRevision(): string | null | undefined {
+  if (typeof __HUABU_BUILD_REVISION__ === 'undefined') return undefined;
+  return validSha(__HUABU_BUILD_REVISION__ ?? undefined);
+}
+
+/**
+ * The full Git commit whose checkout reproduces this Server's source, or
+ * null when unknown. Devices check it out, so it is never a guess.
+ *
+ * A bundle's recorded revision is authoritative, including null: the
+ * startup environment can describe a different checkout, because
+ * `scripts/start-web.mjs` fills `HUABU_DEPLOYED_SHA` from `git rev-parse
+ * HEAD` at launch, which is not the bundle's source once the checkout moves
+ * or when the build had uncommitted changes. `HUABU_DEPLOYED_SHA` is read
+ * only when the Server runs from source.
+ *
+ * @param env startup environment holding `HUABU_DEPLOYED_SHA`
+ * @param built the bundle's recorded revision (see `bundledRevision()`);
+ *   tests pass it explicitly
+ */
+export function deployedSha(
+  env: NodeJS.ProcessEnv = process.env,
+  built: string | null | undefined = bundledRevision(),
+): string | null {
+  return built === undefined ? validSha(env.HUABU_DEPLOYED_SHA) : built;
+}
+
 export function resolveCanaryCapability(
   env: NodeJS.ProcessEnv = process.env,
 ): CanaryCapability {
@@ -99,7 +140,7 @@ export function resolveCanaryCapability(
       repoRoot: null,
       scriptPath: null,
       runnerPath: null,
-      runningSha: validSha(env.HUABU_DEPLOYED_SHA),
+      runningSha: deployedSha(env),
     };
   }
 
@@ -111,7 +152,7 @@ export function resolveCanaryCapability(
       repoRoot: null,
       scriptPath: null,
       runnerPath: null,
-      runningSha: validSha(env.HUABU_DEPLOYED_SHA),
+      runningSha: deployedSha(env),
     };
   }
 
@@ -131,7 +172,7 @@ export function resolveCanaryCapability(
       repoRoot,
       scriptPath,
       runnerPath,
-      runningSha: validSha(env.HUABU_DEPLOYED_SHA),
+      runningSha: deployedSha(env),
     };
   }
   try {
@@ -148,7 +189,7 @@ export function resolveCanaryCapability(
       repoRoot,
       scriptPath,
       runnerPath,
-      runningSha: validSha(env.HUABU_DEPLOYED_SHA),
+      runningSha: deployedSha(env),
     };
   }
 
@@ -158,7 +199,7 @@ export function resolveCanaryCapability(
     repoRoot,
     scriptPath,
     runnerPath,
-    runningSha: validSha(env.HUABU_DEPLOYED_SHA),
+    runningSha: deployedSha(env),
   };
 }
 

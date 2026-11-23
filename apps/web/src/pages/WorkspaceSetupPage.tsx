@@ -1,23 +1,30 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { Check, FolderOpen, Layers, Pencil, X } from 'lucide-react';
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { FolderOpen, X } from 'lucide-react';
+import { useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Navigate, useNavigate } from 'react-router-dom';
 
 import { WorkspaceLoadingScreen } from './WorkspaceLoadingScreen';
 import { Button } from '../components/Common/Button';
 import { PathInput } from '../components/Common/PathInput';
-import { TextInput } from '../components/Common/TextInput';
 import { toast } from '../components/Common/Toast';
+import {
+  CreateWorkspaceFields,
+  WorkspaceList,
+} from '../components/Workspace/WorkspaceList';
 import { APP_NAME } from '../config/app';
 import { useWorkspaceStore } from '../store/workspaceStore';
 
 import type { WorkspaceDescriptor } from '../api/workspace';
 
 /**
- * First-launch / "switch workspace" page.
+ * First-launch page, and the folder chooser for Disk "Home folder" mode.
+ *
+ * Named Workspaces are switched from inside the app (the Spaces header's
+ * popover and the Switch Workspace dialog); this page is where a person with
+ * none to be in chooses or creates one. Folder Workspaces still switch here.
  *
  * Only meaningful in free mode. In managed mode the workspace is locked
  * at the server, so we redirect home (no UI to render).
@@ -43,7 +50,6 @@ export default function WorkspaceSetupPage() {
   const selectWorkspace = useWorkspaceStore((s) => s.selectWorkspace);
   const createWorkspace = useWorkspaceStore((s) => s.createWorkspace);
   const openFolderWorkspace = useWorkspaceStore((s) => s.openFolderWorkspace);
-  const renameWorkspace = useWorkspaceStore((s) => s.renameWorkspace);
   const named = useWorkspaceStore(
     (s) => s.capabilities?.namedWorkspaces === true,
   );
@@ -85,7 +91,6 @@ export default function WorkspaceSetupPage() {
             workspaces={recentWorkspaces}
             activateWorkspace={activateRecentWorkspace}
             createWorkspace={createWorkspace}
-            renameWorkspace={renameWorkspace}
             openFolder={folders ? openFolderWorkspace : undefined}
             onActivated={() => navigate('/', { replace: true })}
           />
@@ -106,134 +111,6 @@ export default function WorkspaceSetupPage() {
 }
 
 // ──────────────────────────────────────────────────────────────────────
-// Rename: an inline editor for a Workspace the caller may manage
-// ──────────────────────────────────────────────────────────────────────
-
-type RenameWorkspace = (workspaceId: string, name: string) => Promise<void>;
-
-/**
- * A named-Workspace chooser row that can turn into a name field. The row's
- * own button (`children`) is shown until the pencil is pressed; the pencil is
- * offered only when the server says the caller may manage this Workspace.
- * The folder chooser has no rename: its Workspaces are known by their paths.
- */
-function RenamableWorkspaceRow({
-  workspace,
-  renameWorkspace,
-  disabled,
-  children,
-}: {
-  workspace: WorkspaceDescriptor;
-  renameWorkspace: RenameWorkspace;
-  disabled: boolean;
-  children: ReactNode;
-}) {
-  const { t } = useTranslation();
-  const [draft, setDraft] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-  const renameButton = useRef<HTMLButtonElement>(null);
-  // Closing the editor removes the focused field, so keyboard focus returns
-  // to this row's Rename button instead of falling to the page body.
-  const refocus = useRef(false);
-  useEffect(() => {
-    if (draft !== null || !refocus.current) return;
-    refocus.current = false;
-    renameButton.current?.focus();
-  }, [draft]);
-  const close = () => {
-    refocus.current = true;
-    setDraft(null);
-  };
-
-  const save = async () => {
-    const trimmed = draft?.trim();
-    if (!trimmed) return;
-    if (trimmed === workspace.name) {
-      close();
-      return;
-    }
-    setSaving(true);
-    try {
-      await renameWorkspace(workspace.workspaceId, trimmed);
-      close();
-    } catch (error) {
-      console.error('[workspace-setup] Could not rename Workspace:', error);
-      toast(
-        error instanceof Error && error.message
-          ? error.message
-          : t('workspace.renameFailed'),
-        { tone: 'danger' },
-      );
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  if (draft !== null) {
-    return (
-      <div className="flex items-center gap-1">
-        <TextInput
-          autoFocus
-          aria-label={t('workspace.renameLabel', { workspace: workspace.name })}
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
-          onKeyDown={(event) => {
-            // Enter and Escape confirm or cancel an IME composition first.
-            if (
-              event.nativeEvent.isComposing ||
-              event.nativeEvent.keyCode === 229
-            )
-              return;
-            if (event.key === 'Enter') void save();
-            if (event.key === 'Escape') close();
-          }}
-          disabled={saving}
-          className="min-w-0 flex-1"
-        />
-        <Button
-          size="sm"
-          onClick={() => void save()}
-          disabled={saving || !draft.trim()}
-        >
-          {t('workspace.renameSave')}
-        </Button>
-        <Button
-          variant="ghost"
-          iconOnly
-          size="sm"
-          onClick={close}
-          disabled={saving}
-          title={t('workspace.renameCancel')}
-          aria-label={t('workspace.renameCancel')}
-        >
-          <X size={14} />
-        </Button>
-      </div>
-    );
-  }
-
-  return (
-    <div className="group flex items-center gap-1">
-      {children}
-      {workspace.canManage && (
-        <Button
-          ref={renameButton}
-          variant="ghost"
-          iconOnly
-          size="sm"
-          onClick={() => setDraft(workspace.name)}
-          disabled={disabled}
-          title={t('workspace.rename')}
-          aria-label={t('workspace.renameLabel', { workspace: workspace.name })}
-        >
-          <Pencil size={14} />
-        </Button>
-      )}
-    </div>
-  );
-}
-
-// ──────────────────────────────────────────────────────────────────────
 // Named Workspaces: each signed-in person's own, chosen and created by name
 // ──────────────────────────────────────────────────────────────────────
 
@@ -242,24 +119,26 @@ interface NamedSetupProps {
   workspaces: WorkspaceDescriptor[];
   activateWorkspace: (workspaceId: string) => Promise<void>;
   createWorkspace: (name: string) => Promise<void>;
-  renameWorkspace: RenameWorkspace;
   /** Where Workspaces are Disk folders: open one by its path on the Server. */
   openFolder?: (path: string) => Promise<void>;
   onActivated: () => void;
 }
 
+/**
+ * First launch for named Workspaces: the shared Workspace list (with rename)
+ * and the create field. Switching from inside the app uses the header popover
+ * and the Switch Workspace dialog instead, over the same list.
+ */
 function NamedSetup({
   isSyncing,
   workspaces,
   activateWorkspace,
   createWorkspace,
-  renameWorkspace,
   openFolder,
   onActivated,
 }: NamedSetupProps) {
   const { t } = useTranslation();
-  const [name, setName] = useState('');
-  const [folder, setFolder] = useState('');
+  const headingId = useId();
 
   const run = async (action: () => Promise<void>) => {
     try {
@@ -273,110 +152,40 @@ function NamedSetup({
     }
   };
 
-  const create = () => {
-    const trimmed = name.trim();
-    if (trimmed) void run(() => createWorkspace(trimmed));
-  };
-
-  const open = () => {
-    const trimmed = folder.trim();
-    if (trimmed && openFolder) void run(() => openFolder(trimmed));
-  };
-
   return (
     <>
       {workspaces.length > 0 && (
         <div className="mb-6">
-          <div className="text-fg-subtle mb-2 text-xs font-medium">
+          <div
+            id={headingId}
+            className="text-fg-subtle mb-2 text-xs font-medium"
+          >
             {t('workspace.yourWorkspaces')}
           </div>
-          <ul className="space-y-1">
-            {workspaces.map((workspace) => (
-              <li key={workspace.workspaceId}>
-                <RenamableWorkspaceRow
-                  workspace={workspace}
-                  renameWorkspace={renameWorkspace}
-                  disabled={isSyncing}
-                >
-                  <Button
-                    variant="ghost"
-                    tone="neutral"
-                    size="sm"
-                    onClick={() =>
-                      void run(() => activateWorkspace(workspace.workspaceId))
-                    }
-                    disabled={isSyncing}
-                    className="min-w-0 flex-1 justify-start rounded-lg text-left"
-                  >
-                    <Layers size={14} className="text-fg-subtle shrink-0" />
-                    <span className="text-fg-muted min-w-0 flex-1 truncate text-sm">
-                      {workspace.name}
-                    </span>
-                    {workspace.active && (
-                      <span className="text-fg-subtle flex shrink-0 items-center gap-1 text-xs">
-                        <Check size={12} />
-                        {t('workspace.current')}
-                      </span>
-                    )}
-                  </Button>
-                </RenamableWorkspaceRow>
-              </li>
-            ))}
-          </ul>
+          <WorkspaceList
+            workspaces={workspaces}
+            mode="activate"
+            aria-labelledby={headingId}
+            disabled={isSyncing}
+            onChoose={(workspace) =>
+              void run(() => activateWorkspace(workspace.workspaceId))
+            }
+          />
         </div>
       )}
 
-      <label
-        htmlFor="new-workspace-name"
-        className="text-fg-subtle mb-1.5 block text-xs font-medium"
-      >
-        {t('workspace.newWorkspace')}
-      </label>
-      <div className="flex gap-2">
-        <TextInput
-          id="new-workspace-name"
-          value={name}
-          onChange={(event) => setName(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter') create();
-          }}
-          placeholder={t('workspace.namePlaceholder')}
-          disabled={isSyncing}
-          className="min-w-0 flex-1"
-        />
-        <Button onClick={create} disabled={isSyncing || !name.trim()}>
-          {t('workspace.create')}
-        </Button>
-      </div>
-
-      {openFolder && (
-        <>
-          <label
-            htmlFor="open-workspace-folder"
-            className="text-fg-subtle mt-4 mb-1.5 block text-xs font-medium"
-          >
-            {t('workspace.openFolder')}
-          </label>
-          <div className="flex gap-2">
-            <TextInput
-              id="open-workspace-folder"
-              value={folder}
-              onChange={(event) => setFolder(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter') open();
-              }}
-              placeholder={t('workspace.pathPlaceholder')}
-              disabled={isSyncing}
-              spellCheck={false}
-              autoComplete="off"
-              className="min-w-0 flex-1"
-            />
-            <Button onClick={open} disabled={isSyncing || !folder.trim()}>
-              {t('workspace.openFolderButton')}
-            </Button>
-          </div>
-        </>
-      )}
+      <CreateWorkspaceFields
+        disabled={isSyncing}
+        hint={
+          workspaces.some((workspace) => workspace.role !== undefined)
+            ? t('workspace.createHint')
+            : undefined
+        }
+        onCreate={(name) => void run(() => createWorkspace(name))}
+        onOpenFolder={
+          openFolder ? (path) => void run(() => openFolder(path)) : undefined
+        }
+      />
     </>
   );
 }

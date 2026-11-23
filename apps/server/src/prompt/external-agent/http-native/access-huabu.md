@@ -1,357 +1,162 @@
 # Accessing this Huabu Space
 
-You are working with a **Huabu** Space, an infinite visual surface of notes, images, PDFs, sketches, questions, frames, and links. You do not see the Space directly. Use plain HTTP with `curl`, `wget`, `Invoke-RestMethod`, Python `requests`, or Node `fetch`; no custom tool or SDK is required.
+You are working with a **Huabu** Space, an infinite visual surface of notes, images, PDFs, sketches, questions, frames, and links. You do not see the Space directly. Use plain HTTP (`curl`, `wget`, `Invoke-RestMethod`, Python, or Node `fetch`) with the pre-injected environment, and prefer direct `query`, `download`, `upload`, and `execute` operations for deterministic reads and edits; they work without an internal model provider:
 
-These environment variables are already set:
+- `HUABU_RFS_URL` — Space base URL, with no trailing slash.
+- `HUABU_RFS_TOKEN` — bearer credential (`AUTH="Authorization: Bearer $HUABU_RFS_TOKEN"`).
+- `HUABU_THREAD_ID` — conversation ID; pass `X-Huabu-Host-Thread-Id: $HUABU_THREAD_ID` on `POST execute` and `POST agent` to attribute edits.
 
-- `HUABU_RFS_URL` — the base URL for this Space, with no trailing slash.
-- `HUABU_RFS_TOKEN` — the RFS bearer credential.
-- `HUABU_THREAD_ID` — your conversation ID. Pass it on `execute` (see §6) to attribute your edits.
+## Space model and discovery
 
-This is the HTTP-native access guide. Client selection and optional CLI discovery are described in the initial bootstrap; these HTTP operations require no Node runtime or custom tool.
+Huabu separates bounded graph/geometry operations (`query`, `execute`) from out-of-band file bytes (`download`, `upload`):
 
-Prefer deterministic direct operations:
-
-1. Discover supported queries and commands through `capabilities`.
-2. Use `query` for graph, geometry, and content search.
-3. Use `download` for full node or artifact bytes.
-4. Use the `SNAPSHOT_NODES` query to render image, sketch, or frame nodes into PNG artifacts you can inspect.
-5. Use `execute` for validated Space commands.
-6. Use `agent` only when you deliberately want the optional internal Huabu agent to interpret an open-ended request.
-7. Discover configured provider services through `services`, read the selected Package Skill, and download its complete Package before running or extending its entry.
-
-## 1. Discover operations
-
-Fetch the compact handshake once:
+- **Coordinates:** x increases right and y increases downward. `position` is a node's top-left corner in **parent-local** coordinates (relative to its parent frame, or world coordinates at root); query results also include read-only `absolutePosition` in world coordinates.
+- **Geometry before placement:** Selected-node context carries `id` and metadata, never coordinates or sizes. Query `INSPECT_NODES` before placing or resizing relative to existing nodes (use `position` for same-frame siblings, `absolutePosition` for root placement), and re-query after mutations when exact final geometry matters. `CREATE_NODES.position` is always required; never pin height on `text` or `question`.
+- **Live operation contracts:** Fetch `/capabilities` once for protocol limits, permissions, execution semantics, and supported types, then load the schema only for the operation you are about to use rather than guessing fields:
 
 ```bash
 curl -fsS -H "$AUTH" "$HUABU_RFS_URL/capabilities"
+curl -fsS -H "$AUTH" "$HUABU_RFS_URL/capabilities/queries/INSPECT_NODES"
+COMMAND=CREATE_NODES
+curl -fsS -H "$AUTH" "$HUABU_RFS_URL/capabilities/commands/$COMMAND"
 ```
 
-It reports protocol version, effective read/write permissions, limits, execution semantics, supported query and command types, and links. Load a detailed schema only for the operation you are about to use:
+Re-fetch the relevant capability when validation fails. Validation and transport errors return `{ "message": ..., "code"?: ... }` and include a `/skill` recovery command.
+
+## Read and upload files
+
+### Query
+
+Send one bounded query object to `POST query`. Inspect responses report `count`, `total`, and `truncated`; search responses report `count` and `truncated`—narrow predicates or raise `limit` within the advertised maximum when truncated. Every response also returns `basis` (a Space read-version token for `POST execute`):
+
+- `INSPECT_NODES` — identity, type, parent, geometry, proximity, cluster, or connection filters (prefer anchor-scoped inspection when selected nodes already identify the area; Question Nodes with an existing conversation include `threadId`).
+- `GET_SPACE_OUTLINE` — whole-Space orientation, bounding box, and clusters when no anchor is known.
+- `INSPECT_EDGES` — edge endpoints and complete visual style.
+- `SEARCH` — bounded literal search across labels, metadata, node bodies, and question threads.
+- `SNAPSHOT_NODES` — visual render query for `image`, `sketch`, and `frame` nodes (see `Snapshot` below).
 
 ```bash
-curl -fsS -H "$AUTH" \
-  "$HUABU_RFS_URL/capabilities/queries/INSPECT_NODES"
-
-curl -fsS -H "$AUTH" \
-  "$HUABU_RFS_URL/capabilities/commands/CREATE_NODES"
-
-curl -fsS -H "$AUTH" \
-  "$HUABU_RFS_URL/capabilities/queries/SNAPSHOT_NODES"
-```
-
-Do not guess fields or duplicate the schemas locally. Re-fetch the relevant capability when validation fails or the protocol changes.
-
-## 2. Query the Space
-
-`POST query` accepts one canonical query object. Keep queries bounded. Inspect responses include `count`, `total`, and `truncated`; search responses include `count` and `truncated`. Narrow the predicate or raise the limit within the advertised maximum when results truncate.
-
-Every query response also carries a top-level `basis`: an opaque token for the Space version you read. Keep the latest one when you plan structural edits; section 7 explains how to pass it back.
-
-```bash
-cat > /tmp/huabu-query.json <<'JSON'
-{
-  "type": "INSPECT_NODES",
-  "ids": ["node-123"]
-}
-JSON
-
 curl -fsS -H "$AUTH" -H "Content-Type: application/json" \
-  --data-binary @/tmp/huabu-query.json "$HUABU_RFS_URL/query"
+  --data-binary '{"type":"INSPECT_NODES","ids":["node-123"]}' \
+  "$HUABU_RFS_URL/query"
 ```
 
-Use:
+### Snapshot
 
-- `GET_SPACE_OUTLINE` when whole-Space orientation is necessary; prefer an anchor-specific inspect query when selected-node context already identifies the relevant area.
-- `INSPECT_NODES` for identity, type, parent, geometry, proximity, cluster, or topology predicates.
-- `INSPECT_EDGES` for endpoints and complete edge style.
-- `SEARCH` for bounded literal search across labels, metadata, node bodies, and question conversations.
-
-Query results point to node files. Large bodies and artifacts remain out of band; download only the exact files you need.
-
-## 3. Download files
-
-Selected-node context supplies an exact `file` path. Pass that path through instead of guessing a filename. There is no directory-listing endpoint.
-
-Always write bodies to a file rather than dumping large content into your context. For a node, save response headers too: `X-Huabu-Node-Id`, `X-Huabu-Node-Type`, `X-Huabu-Node-Label`, `X-Huabu-Src`, `X-Huabu-Locked`, `X-Huabu-Node-Edges`, `X-Huabu-Basis`, and `ETag`. `X-Huabu-Basis` is the same kind of token a query returns as `basis`; a `304` carries none.
+Render `image`, `sketch`, or recursive `frame` descendants into content-addressed PNGs via `POST query` (`GET capabilities/queries/SNAPSHOT_NODES` for `maxPixels`, `padding`, and `strokeSubsets`), returning `{ "type": "SNAPSHOT_NODES", "basis": "...", "result": { "snapshots": [{ "src", "width", "height", "originNodeIds" }] } }`, then fetch each bare `src` (`<artifactKey>`) via `GET /download/<id>`. A single Frame or multi-node request may return zero or more spatially clustered PNGs, with `originNodeIds` listing every contributing node:
 
 ```bash
-curl -fsS -H "$AUTH" -D /tmp/huabu-headers.txt -o /tmp/node.md \
-  "$HUABU_RFS_URL/download/nodes/My%20note.md"
+curl -fsS -H "$AUTH" -H "Content-Type: application/json" \
+  --data-binary '{"type":"SNAPSHOT_NODES","nodeIds":["sketch-123"],"maxPixels":1280}' \
+  "$HUABU_RFS_URL/query"
+curl -fsS -H "$AUTH" "$HUABU_RFS_URL/download/sketch-raster-abc123.png" -o /tmp/snap.png
 ```
 
-The `ETag` is the node's authored-content revision. Cache it and use `If-None-Match` to avoid re-reading unchanged content. Write a conditional response to a temporary file so a `304` cannot replace your cached body with an empty file:
+### Download
+
+Pass a URL-encoded `<nodeId>` (from `<node id="...">`, `<note id="...">`, or `INSPECT_NODES`) or `<artifactKey>` (from `X-Huabu-Src`, snapshot `src`, or inline Note images) to `GET /download/<id>`. Downloading a `<nodeId>` fetches that node's text/Markdown record plus `X-Huabu-Node-*`, `X-Huabu-Src`, `X-Huabu-Basis`, and `ETag` headers (pass `X-Huabu-Src` to a second `download` when you need a PDF/media node's raw binary file). Always write bodies to a file rather than stdout, and send `If-None-Match` (using `ETag`, `INSPECT_NODES.rev`, or a Space Skill Note's `rev`) staged to a temporary file so `304 Not Modified` never overwrites a cached file:
 
 ```bash
 STATUS="$(curl -sS -H "$AUTH" -H 'If-None-Match: "3d7e"' \
   -D /tmp/huabu-headers.txt -o /tmp/node.next -w '%{http_code}' \
-  "$HUABU_RFS_URL/download/nodes/My%20note.md")"
+  "$HUABU_RFS_URL/download/node-123")"
 [ "$STATUS" = 200 ] && mv /tmp/node.next /tmp/node.md
 [ "$STATUS" = 304 ] && rm -f /tmp/node.next
 ```
 
-`304 Not Modified` means your cached copy is current. `200` returns the new body and revision. Treat any other status as an error rather than using the temporary body.
+Treat any status other than `200` or `304` as an error and discard `/tmp/node.next`.
 
-## 4. Snapshot visual nodes
+### Upload
 
-Use the `SNAPSHOT_NODES` query when you need to see an `image` or the user's hand-drawn `sketch`. Passing one `frame` ID is sufficient: frame expansion is recursive by definition and includes all nested image and sketch descendants, so do not enumerate every child ID. Notes, text, PDFs, videos, and other non-still node types are not accepted; use `download` for their authored content instead.
-
-Fetch the query capability before constructing a request:
+Upload file bytes into Space artifact storage (`POST /upload/<filename>`), returning `{ "id": "<artifactKey>", "size": ... }` (for example `artifact-8f2a.png`, preserving `<filename>`'s extension). Reference `<artifactKey>` directly in media `data.src` (for `web` nodes, `data.src` accepts an HTTPS URL, `data:` URI, or an existing `.html`/`.htm`/`.mhtml` `<artifactKey>`), PDF `coverUrl`, inline Note Markdown `![](<artifactKey>)` / `![alt](<artifactKey>)`, or Interactive View `rendererArtifact`:
 
 ```bash
-curl -fsS -H "$AUTH" \
-  "$HUABU_RFS_URL/capabilities/queries/SNAPSHOT_NODES"
+curl -fsS -H "$AUTH" --data-binary @./diagram.png "$HUABU_RFS_URL/upload/diagram.png"
 ```
 
-Then submit node IDs obtained from `query`:
+## Mutate the Space safely
+
+`POST execute` accepts `{ "runId"?: string, "operationId"?: string, "basis"?: string, "commands": [...] }`. Fetch `/capabilities/commands/$COMMAND` for one command's authoritative `schema`, `constraints`, `result`, and `examples` before constructing it, and include `X-Huabu-Host-Thread-Id: $HUABU_THREAD_ID` for edit attribution. Confirm with the user before destructive, broad, or hard-to-reverse edits.
 
 ```bash
-cat > /tmp/huabu-snapshot.json <<'JSON'
-{
-  "type": "SNAPSHOT_NODES",
-  "nodeIds": ["sketch-123"],
-  "maxPixels": 1280
-}
-JSON
-
-curl -fsS -H "$AUTH" -H "Content-Type: application/json" \
-  --data-binary @/tmp/huabu-snapshot.json "$HUABU_RFS_URL/query"
-```
-
-The response is `{ "type": "SNAPSHOT_NODES", "result": { "snapshots": [{ "src", "downloadPath", "width", "height", "originNodeIds" }] } }`. `src` is the bare artifact key accepted by Huabu media-node commands; `downloadPath` is the exact path to retrieve through `GET download/<path>`. Multiple nearby image or sketch nodes may be spatially clustered into one PNG, and `originNodeIds` identifies every contributing node.
-
-```bash
-curl -fsS -H "$AUTH" -o /tmp/huabu-snapshot.png \
-  "$HUABU_RFS_URL/download/artifacts/sketch-raster-example.png"
-```
-
-Snapshots are content-addressed, so repeating an unchanged request reuses the existing artifact. To render only selected strokes from a sketch, use the capability-documented `strokeSubsets` KEEP list. Reduce `maxPixels` when the resulting PNG is too large for a downstream vision model.
-
-## 5. Upload payloads
-
-Stage bytes under a descriptive, unique name. Uploads are inert until an `execute` command references their returned path. Existing names are never overwritten; a collision returns `409`.
-
-```bash
-curl -fsS -H "$AUTH" --data-binary @./diagram.png \
-  "$HUABU_RFS_URL/upload/diagram.png"
-```
-
-The response is `{ "path": "upload/diagram.png", "size": ... }`. Remove an unused staged file with:
-
-```bash
-curl -fsS -X DELETE -H "$AUTH" \
-  "$HUABU_RFS_URL/upload/diagram.png"
-```
-
-## 6. Huabu layout basics
-
-Coordinates use screen-style axes: x increases to the right and y increases downward. A node's `position` is its top-left corner in **parent-local** coordinates: relative to its direct parent frame, or absolute Space coordinates when it is at the root. Query results also expose read-only `absolutePosition`, which resolves the complete parent chain into world coordinates. For root nodes, `position` and `absolutePosition` are equal.
-
-Before placing or resizing relative to existing content, query the relevant nodes with `INSPECT_NODES`; selected-node metadata does not contain authoritative geometry. Use the returned `position` for sibling placement inside the same frame and `absolutePosition` for root-level placement. After a mutation, query again when exact final geometry matters because frame fitting, structured layout, text measurement, and image aspect-ratio normalization may adjust it.
-
-`CREATE_NODES.position` is always required. `size` is optional; when omitted, Huabu starts from these canonical defaults:
-
-| Node type              | Default geometry                                                                     |
-| ---------------------- | ------------------------------------------------------------------------------------ |
-| `text`                 | 400px wide; content-driven height                                                    |
-| `note`                 | 400 × 300px; fixed height by default                                                 |
-| `web`, `pdf`, `office` | 400 × 400px                                                                          |
-| `video`                | 400 × 300px                                                                          |
-| `image`                | 400px wide; height follows the source aspect ratio (300px nominal before resolution) |
-| `frame`                | 400 × 300px                                                                          |
-| `question`             | 400px wide; content-driven height (80px nominal layout height)                       |
-
-Never pin top-level height for `text` or `question`. Both respect `data.style.fontSize`: Text defaults to 16px and Question to 24px. The font also scales content padding and, for Question, the avatar, alias, status, and gaps; Question chrome retains a separate 28px design basis. Width-only edits preserve the font and reflow content-driven height; proportional canvas resize gestures scale the font with outer width. Existing Question font values are respected without automatic persisted-data migration. New Notes default to fixed height; use `SET_NODE_GEOMETRY` with `size.height: "auto"` to fit a Note to its content. Resizing their container preserves fixed typography and reflows or scrolls the document rather than scaling its font. For free-form root or frame layouts, a useful starting heuristic is about 50px between nodes, 28px side/bottom Frame padding, and an 80px top inset for a Regular internal Frame title, adjusted to the actual queried sizes.
-
-Frames default to `free` layout with explicit parent-local positions. Structured `column`/`row` layouts pack independent tracks; `grid` also aligns rows and retains empty cells. Inspect the Frame's `layout` to read ordered tracks or Grid cells. Use `SET_FRAME_LAYOUT` for placement and `REORDER_NODES` only for paint order; the Frame computes final geometry. Fetch the `SET_FRAME_LAYOUT` capability for `cells`, relative `placements`, counts and sizing; the focused `layout` Skill contains shared recipes.
-
-## 7. Execute Space commands
-
-`POST execute` accepts `{ "runId"?: string, "operationId"?: string, "basis"?: string, "commands": [...] }`. The server owns canvas scope, agent origin, authorship metadata, and generated node/edge IDs; do not send them.
-
-Add the header `X-Huabu-Host-Thread-Id: $HUABU_THREAD_ID` so your edits are attributed to this conversation. Optional — omitting it still applies the write.
-
-The accepted command set is:
-
-| Command               | Purpose                                                                                 |
-| --------------------- | --------------------------------------------------------------------------------------- |
-| `CREATE_NODES`        | Create one or more nodes; Huabu assigns node IDs.                                       |
-| `INITIALIZE_PDF_NOTE` | Create or reuse a PDF's hidden Note; see the command capability for result fields.      |
-| `DELETE_NODES`        | Delete nodes and their incident edges.                                                  |
-| `MERGE_NODE_DATA`     | Patch node label, content, source, or visual style; content writes require `expectRev`. |
-| `SET_NODE_PARENT`     | Move nodes into a frame or back to the root.                                            |
-| `DISSOLVE_FRAME`      | Remove a frame while keeping its children in the Space.                                 |
-| `SET_NODE_GEOMETRY`   | Change node position and/or size.                                                       |
-| `REORDER_NODES`       | Change node z-order.                                                                    |
-| `CONNECT_NODES`       | Create edges between existing nodes; Huabu assigns edge IDs.                            |
-| `DISCONNECT_EDGES`    | Remove edges by ID or endpoint pair.                                                    |
-| `SET_EDGE_STYLE`      | Patch edge direction, line shape, dash style, stroke, width, or label.                  |
-| `ALIGN_NODES`         | Align existing nodes along one axis.                                                    |
-| `DISTRIBUTE_NODES`    | Spread three or more existing nodes apart.                                              |
-| `SET_FRAME_LAYOUT`    | Configure a frame's free, column, row, or grid layout.                                  |
-
-This table is only a navigation summary. For the complete contract of one command—including required fields, parameter types, enums, limits, semantic constraints, result description, and a valid example—fetch its capability:
-
-```bash
-COMMAND=SET_FRAME_LAYOUT
-curl -fsS -H "$AUTH" \
-  "$HUABU_RFS_URL/capabilities/commands/$COMMAND"
-```
-
-The response contains `schema`, `constraints`, `result`, and `examples`. Treat `schema` as authoritative rather than inferring parameters from the summary above. Confirm with the user before destructive, broad, or difficult-to-reverse changes.
-
-```bash
-cat > /tmp/huabu-execute.json <<'JSON'
-{
-  "runId": "create-summary",
-  "commands": [
-    {
-      "type": "CREATE_NODES",
-      "nodes": [
-        {
-          "nodeType": "note",
-          "data": {
-            "label": "Summary",
-            "content": "# Summary\n\nDirectly created through Huabu HTTP."
-          },
-          "position": { "x": 400, "y": 240 }
-        }
-      ]
-    }
-  ]
-}
-JSON
-
 curl -fsS -H "$AUTH" -H "Content-Type: application/json" \
   -H "X-Huabu-Host-Thread-Id: $HUABU_THREAD_ID" \
   --data-binary @/tmp/huabu-execute.json "$HUABU_RFS_URL/execute"
 ```
 
-Commands run in order, failures do not roll back accepted commands, and an accepted subset commits once. Always inspect every entry in `results`; do not infer success from HTTP 200 alone. Read generated node IDs from `results[].nodes` and generated edge IDs from `results[].edges`.
+- `CREATE_NODES` — create nodes (`note`/`text`/`question` take authored body in `data.content` without YAML frontmatter; media nodes take `data.src`; `position` required).
+- `INITIALIZE_PDF_NOTE` — create or reuse a PDF's linked hidden Note (`results[].nodes[0].nodeId`), then read/edit that Note by its own ID.
+- `MERGE_NODE_DATA` — patch node fields (`patch.content` takes Markdown body only, stripped of downloaded `---` frontmatter, and requires unquoted `ETag` in `expectRev`; `properties` and `propertyDisplayKeys` need no `expectRev`—keep them in a separate patch entry from `content`).
+- `DELETE_NODES` — delete nodes by ID (incident edges are removed automatically).
+- `SET_NODE_GEOMETRY` — move or resize nodes in parent-local coordinates (`size.height: "auto"` fits a `note` to its text).
+- `SET_NODE_PARENT` — move nodes into a Frame, or to root with `parentId: null`.
+- `DISSOLVE_FRAME` — ungroup a Frame while keeping its children on the Space.
+- `SET_FRAME_LAYOUT` — configure a Frame's `free`, `column`, `row`, or `grid` layout, track count, `cells`, `placements`, and `hug`/`manual` sizing.
+- `ALIGN_NODES` — align nodes along `left`, `center`, `right`, `top`, `middle`, or `bottom`.
+- `DISTRIBUTE_NODES` — spread apart three or more nodes within each parent group.
+- `REORDER_NODES` — change z-order (`top`, `bottom`, `before`, or `after`).
+- `CONNECT_NODES` — create directed or styled edges between existing nodes.
+- `SET_EDGE_STYLE` — patch `lineType`, `lineStyle`, `stroke`, `strokeWidth`, `direction`, or `label` on existing edges.
+- `DISCONNECT_EDGES` — remove edges by edge ID or `{ source, target }` pair.
 
-When you tell the user about a node you created or updated, link it in your reply as `[label](#<node id>)` — `#` followed by the node's full ID, which already starts with `node-`, for example `[Research note](#node-1a2b3c)` — so they can jump to it with one click.
+Execution rules:
 
-A command cannot refer to a server-assigned ID before you receive it. Create first, read the generated ID, then connect or reparent it in a follow-up request.
+- **Inspect `results[]` on every call:** Commands run in order without rollback, and HTTP `200` does not mean every command applied—check `applied` and `reason` on each item (on `reason: "conflict"`, re-read and submit a fresh update).
+- **Reference new IDs in a follow-up call:** Commands cannot reference server-assigned IDs created earlier in the same batch; read `results[].nodes` first, then connect or reparent, switching to the new `basis` returned by `POST execute`.
+- **Pass `basis` for structural safety:** Send the latest `basis` (from `POST query`, node `X-Huabu-Basis`, or `POST execute`) in the execute body so structural edits against deleted (`stale-target`) or reparented (`stale-parent`) nodes are rejected safely (on `409 basis-unknown`, query again for a fresh `basis`).
+- **Use `operationId` for idempotent retry:** Generate a UUID `operationId` (`runId` is correlation-only) and send the identical file-backed body on timeout, dropped connection, or `503 operation-outcome-unknown` (or read `GET execute/<operationId>` without re-executing)—never retry without `operationId` unless you reconcile Space state first.
+- **Link what you report:** When you tell the user about a node you created or updated, link it in your reply as `[label](#<node id>)`—`#` followed by the node's full ID, which already starts with `node-`, such as `[Research note](#node-1a2b3c)`—so they can jump to it with one click.
 
-For a `MERGE_NODE_DATA` patch that changes `content`, first download the node and copy its unquoted `ETag` into `expectRev`. PDF notes are separate Note nodes: inspect the PDF for `noteNodeId`, then read and edit that Note by its own ID, not the PDF's extracted body. A missing or stale revision on a content write produces an HTTP 200 business result with `applied: false`, `reason: "conflict"`, and a structured conflict. Re-read, reconcile, and submit a new request.
+### Create a Note from Markdown
 
-Custom properties (`properties`, `propertyDisplayKeys`) need no `expectRev` and no prior read. `patch.properties` is a per-key patch merged into the node as it is at the moment of the write: `{"status": "read"}` changes only `status`, `{"status": null}` removes it, and keys you do not name are kept. Different keys never conflict; the same key is last-writer-wins, and a list value (tags) is one value, replaced as a whole. `propertyDisplayKeys` replaces the display order as a whole. The revision (`ETag`, `rev`) covers the body only, so a property edit by you or anyone else does not change it, and an `expectRev` sent with a patch that has no `content` is accepted and ignored. Put properties in their own patch entry: an entry that carries both `content` and `properties` is refused as a whole when its body revision is stale.
-
-Downloaded node Markdown is a complete Huabu sidecar: server-owned YAML frontmatter followed by the authored Markdown body. `CREATE_NODES.data.content` and `MERGE_NODE_DATA.patch.content` accept the Markdown body only. Never pass the downloaded file verbatim or copy its leading `---` block into `content`; remove exactly the first frontmatter block and preserve everything after its closing fence. Huabu serializes canonical node metadata itself. As a final safety net, an update whose submitted frontmatter `id` matches its target `nodeId` is unwrapped at the server boundary.
-
-`runId` is an optional opaque correlation label of 1–256 characters. It does not need to be unique. When omitted, Huabu generates a fresh `run-<UUID>` value; either way, the response returns the effective value. Reusing one `runId` in adjacent requests does not join them, reject the later request, deduplicate execution, or return an earlier result: every request executes independently and may create another committed delta-log entry carrying the same label. Reuse a value only to correlate related requests; use distinct values when you need to distinguish them. A replayed response (see below) reports the `runId` of the original request.
-
-`runId` is not an idempotency key and provides no retry safety. Retry safety comes only from `operationId`, described below.
-
-Every `query` response, every node download (`X-Huabu-Basis`), and every `execute` response carries a `basis`. Send the most recent one you read as `basis` in the execute body so that commands planned on an outdated view are rejected instead of applied:
-
-- `reason: "stale-target"` — a node the command targets no longer exists, or was created after your read.
-- `reason: "stale-parent"` — only for `SET_NODE_GEOMETRY`, `SET_NODE_PARENT`, `REORDER_NODES`, `ALIGN_NODES`, and `DISTRIBUTE_NODES`: a node the command targets was moved to a different parent after your read.
-- HTTP `409` with code `basis-unknown` — the token is not a read version of this Space. Nothing is applied; query again and use the new `basis`.
-
-The first two reject only that command (`applied: false`); the rest of the batch proceeds as usual. The check covers only the nodes a command names, so unrelated edits by others never cause a rejection. `CREATE_NODES`, `CONNECT_NODES`, and edge commands are not checked, and the check does not detect that someone else edited the same field: keep using `expectRev` for content. Without `basis` none of these checks run.
-
-After each `execute`, switch to the `basis` in its response: nodes that request created are newer than any earlier `basis`, so targeting them with an older one is rejected as `stale-target`.
-
-To make a request safe to repeat, generate a UUID and send it as `operationId`; write the body to a file first so a repeat sends identical bytes. Huabu saves the response under that id together with the write. When the connection drops, the request times out, or Huabu answers `503` with code `operation-outcome-unknown`, send the identical request again with the same `operationId`: Huabu applies it at most once, and a repeat returns the saved response, marked `replayed: true`, with the original generated IDs. `GET execute/<operationId>` returns the saved response without executing anything, or `404` when none is saved under that id. Never retry a `4xx` rejection unchanged.
-
-Without an `operationId`, never blindly retry a mutation after a timeout or dropped connection: the request executes again and may duplicate created nodes and edges. Query the Space, reconcile the observed state, then decide whether another command is needed.
-
-An `operationId` belongs to one exact request. Reusing it with different commands or a different `basis` is rejected with `409` and code `operation-id-reused`; use a new UUID for a new request. Saved responses are kept for about two weeks, and a response larger than 4 MiB is not saved, so that request is not protected against a repeat.
-
-The response includes version transition, projected commands, command results, generated IDs, affected IDs, new revisions, the `operationId` when you sent one, and the new `basis`. It intentionally excludes Web UI deltas and internal change-review records.
-
-## 8. Create or continue an Agent
-
-Use an Agent when open-ended work benefits from interpretation or a durable visible conversation. Prefer direct `query`, `download`, `upload`, and `execute` for deterministic operations; they work without an internal model provider.
-
-### 8.1 Create and start an Agent
-
-Plain text creates a visible Agent with the first selectable external Profile and immediately submits its first prompt. This server-side fallback does not read the Web client's browser-local recent selection:
+Serialize multi-line Markdown into a JSON file rather than inline shell strings so quotes and code fences stay intact. Pass only the Markdown body in `data.content` (no `---` frontmatter; reference uploaded inline images as `![](<artifactKey>)`). Match nearby peer `size` from `INSPECT_NODES` when joining an existing layout, or use `{ "width": 400, "height": 300 }` as the default size for a new Note:
 
 ```bash
-SSE="$(curl -fsS -N -H "$AUTH" -H "Content-Type: text/plain" \
-  --data-binary @./prompt.txt "$HUABU_RFS_URL/agent")"
-THREAD_ID="$(printf '%s\n' "$SSE" | sed -n 's/^: threadId //p' | head -n 1)"
-printf '%s\n' "$SSE" | sed -n 's/^data: //p' | tail -n +2
+node -e '
+const fs = require("fs");
+fs.writeFileSync("/tmp/create-note.json", JSON.stringify({
+  commands: [{
+    type: "CREATE_NODES",
+    nodes: [{
+      nodeType: "note",
+      data: { label: "Design Summary", content: fs.readFileSync("./summary.md", "utf8") },
+      position: { x: 1200, y: 480 },
+      size: { width: 400, height: 300 }
+    }]
+  }]
+}));
+'
+curl -fsS -H "$AUTH" -H "Content-Type: application/json" \
+  -H "X-Huabu-Host-Thread-Id: $HUABU_THREAD_ID" \
+  --data-binary @/tmp/create-note.json "$HUABU_RFS_URL/execute"
 ```
 
-The SSE `created` event reports the new Node, thread, effective Profile, and optional parent-connection result. Save `THREAD_ID`.
+For `parentId`, `style`, or `properties` fields fetch `GET capabilities/commands/CREATE_NODES`; for multi-node grids, Frame layouts, and diagrams load `GET skill/layout`.
 
-### 8.2 Continue the Agent
+## Create and prompt Agents
 
-Address the existing thread in the URL. If you know the Agent Node but did not retain its creation response, query that Node first; a Question Node with an existing association includes `threadId`:
+Delegate work to a visible Agent Node on the Space or continue an existing Agent conversation:
+
+- **Create an Agent Node:** Fetch `GET /agent/profiles` and pick a selectable `profileId` (never guess `profileId`; `text/plain` without `profileId` requires a `default: true` Profile). Send `POST /agent` as `application/json` with `profileId`, `prompt`, and `position` (plus optional `workingDirPath`, or `X-Huabu-Agent-Start: false` without `prompt` to create idle). The SSE stream begins with a `created` event carrying `nodeId` and `threadId`.
+- **Talk to an Agent Node:** Take `threadId` from `created` or from `INSPECT_NODES` on an existing Question Node, then `POST /agent/<threadId>/prompt` with actual prompt bytes (set `X-Huabu-Event-Mode: all` and read until `event: accepted` for asynchronous handoff). Never send a local file path as the prompt text itself, and never blindly resend after a timeout or unconfirmed acceptance.
 
 ```bash
-THREAD_ID="$(curl -fsS -H "$AUTH" -H "Content-Type: application/json" \
-  --data-binary '{"type":"INSPECT_NODES","ids":["node-123"]}' \
-  "$HUABU_RFS_URL/query" \
-  | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(JSON.parse(s).result.nodes[0]?.threadId ?? ""))')"
-
-curl -fsS -N -H "$AUTH" -H "Content-Type: text/plain" \
-  -H "X-Huabu-Event-Mode: all" \
-  --data-binary @./follow-up.txt \
-  "$HUABU_RFS_URL/agent/$THREAD_ID/prompt"
+curl -fsS -H "$AUTH" "$HUABU_RFS_URL/agent/profiles"
+curl -N -H "$AUTH" -H "Content-Type: application/json" \
+  -H "X-Huabu-Host-Thread-Id: $HUABU_THREAD_ID" \
+  --data-binary '{"profileId":"profile-id","prompt":"Summarize the selected notes.","position":{"x":1200,"y":480}}' \
+  "$HUABU_RFS_URL/agent"
+curl -N -H "$AUTH" -H "Content-Type: text/plain" --data-binary @./follow-up.txt "$HUABU_RFS_URL/agent/thread-123/prompt"
 ```
 
-An absent `threadId` means the result is not a Question Node with an existing thread association. Inspection is read-only and never creates or realizes Agent state. Submitting the prompt continues the associated conversation without creating another Agent or changing its Profile.
+For full `POST /agent` JSON options (`additionalInitialPreamble`, `X-Huabu-Agent-Start`), SSE framing, and `event: accepted` handoff rules, load `GET skill/agents`.
 
-For asynchronous handoff, consume this stream incrementally through the matching `accepted` receipt, then disconnect without cancelling execution. The raw curl example streams until closed; do not wait for its final answer or buffer the whole response. Send the actual prompt bytes yourself; a local file path alone is not a dispatch. Load the `agents` guide for receipt validation, bounded submission, and ambiguous-outcome semantics.
+## Focused workflows
 
-### 8.3 Choose Profiles or create without starting
+Load an authenticated focused guide only when the task requires it (`curl -fsS -H "$AUTH" "$HUABU_RFS_URL/skill/<id>"`):
 
-For available Profile discovery, launch configuration, create-only requests, optional parent connections, or recursive delegation, load:
-
-```bash
-curl -fsS -H "$AUTH" "$HUABU_RFS_URL/skill/agents"
-```
-
-## Provider Services
-
-List the bundled provider services that Huabu can provision:
-
-```bash
-curl -fsS -H "$AUTH" "$HUABU_RFS_URL/services"
-```
-
-Before using one, fetch and follow its Skill:
-
-```bash
-curl -fsS -H "$AUTH" "$HUABU_RFS_URL/services/image-gen/skill"
-```
-
-Download the complete Package to a path in your working directory:
-
-```bash
-curl -fsS -H "$AUTH" \
-  "$HUABU_RFS_URL/download/services/image-gen.zip" \
-  -o image-gen.zip
-unzip image-gen.zip
-cd image-gen
-```
-
-Every archive contains one top-level directory named after the Service, so extracting `image-gen.zip` creates `image-gen/` rather than placing files directly in the current directory. `service.yaml` and every file declared by `package.files` are included; undeclared development files are not.
-
-Read the extracted `SKILL.md` before using the Package. Load authenticated `GET skill/services` for complete discovery, download, entry, custom operation, and private lease guidance.
-
-## Advanced workflows
-
-Load these authenticated guides only when the request needs them:
-
-- `GET skill/layout` — structured diagrams, grids, flowcharts, roadmaps, and advanced Frame layout.
+- `GET skill/layout` — canonical per-type default sizes, Note sizing rules, free-Frame insets, structured `column`/`row`/`grid` Frames, and diagram recipes.
+- `GET skill/agents` — full Agent creation/continuation reference, Profile selection, SSE stream events, and `event: accepted` asynchronous handoff semantics.
+- `GET skill/services` — configured provider Service discovery (`/services`), Package archive download (`<id>/service.yaml` + declared files), reading `SKILL.md` before use, and in-memory `POST /services/<id>/lease`. Never print, persist, or pass leased credentials via argv or shell env.
 - `GET skill/tasks` — durable long-horizon Tasks and Runs.
-- `GET skill/agents` — available Profiles, Agent creation, launch configuration, continued conversations, and recursive delegation.
-- `GET skill/interactive-views` — durable sandboxed HTML Views with Host-owned state, data, navigation, and Agent actions.
-- `GET skill/services` — Service discovery, Package download, entries, custom operations, and private configuration leases.
-
-```bash
-curl -fsS -H "$AUTH" "$HUABU_RFS_URL/skill/tasks"
-```
-
-## Error handling
-
-- Validation and transport errors use `{ "message": ..., "code"?: ... }`.
-- HTTP 200 execution responses may still contain rejected commands or content conflicts.
-- Error messages include a command that reloads this guide.
-- Keep full content in downloaded files; use bounded query metadata to decide what to read.
+- `GET skill/interactive-views` — durable sandboxed HTML Views with Host-owned state, bindings, navigation, and Agent actions.

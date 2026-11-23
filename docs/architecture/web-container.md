@@ -9,18 +9,26 @@ The root `Dockerfile` builds the standalone web app for Linux. Its runtime conta
 The scheduled/manual job builds and tests a `linux/amd64` image before publishing those same local image bytes to GHCR:
 
 - `ghcr.io/microsoft/huabu:daily` points to the latest successful daily/manual build.
+- `ghcr.io/microsoft/huabu:<nightly-version>` names the commit's nightly build, for example `0.9.2-nightly.20261120.g0b4438c`. It uses the same nightly version as the desktop nightly for that commit, and a rerun on the same day and commit replaces it.
 - `ghcr.io/microsoft/huabu:sha-<full-sha>-run-<run-id>-<attempt>` identifies one build.
 - The run summary records the digest. Pin that digest when deploying to App Service.
+
+## Build version
+
+[`scripts/build-version.mjs`](../../scripts/build-version.mjs) is the only place that formats a build's version. The product version is `apps/desktop/package.json`'s. A nightly build (the desktop nightly and the daily image) is `X.Y.Z-nightly.<YYYYMMDD>.g<sha7>`, dated in Asia/Shanghai so nightlies sort in order. Any other build is `X.Y.Z+g<sha7>`, with `.dirty` added when it is built from a checkout with uncommitted changes to tracked files. Build metadata the product version already has, such as a release tag's `0.9.2+preview.1`, is kept in front of the commit (`0.9.2+preview.1.g<sha7>`); any commit identifier (`g<hex>`) or `dirty` already in it is replaced, so a build names only the commit it was built from. A build whose commit is unknown shows the product version without those identifiers. The web build inlines the version, and Settings shows it in its navigation footer.
+
+CI sets `SOURCE_REVISION` to the commit, so the script does not read Git and the temporary desktop version rewrite is not counted as dirty. Images have no Git metadata and take `SOURCE_REVISION` and, optionally, `HUABU_BUILD_VERSION` (the version CI computed, used exactly as given) as build arguments. The image's `org.opencontainers.image.version` label carries `HUABU_BUILD_VERSION`. The packaged desktop app keeps its plain semver (`app.getVersion()`, installer names, update feed), because `+` metadata does not survive GitHub release asset names.
 
 The workflow refreshes the base image and OS certificate packages on each run. Local builds use the Microsoft npm proxy by default for managed devices. GitHub-hosted builds explicitly use the public npm registry so a lagging proxy mirror cannot block installation of the locked public packages. Publication uses `GITHUB_TOKEN` with job-scoped `packages: write`; organization policy must permit this. Package visibility and App Service pull authorization are separate registry settings: use anonymous pulls for a public package or configure a dedicated `read:packages` credential for a private package. The workflow does not change package visibility, Azure resources, or the running App Service image.
 
 ## Local build and verification
 
-Run from the repository root in PowerShell with a Linux Docker engine:
+Run from the repository root in PowerShell with a Linux Docker engine. `$HuabuRevision` is the commit only when tracked files have no uncommitted changes, and empty otherwise, because no commit then holds the image's source; the image then reports no revision, and Connect device shows unpinned instructions, while the version keeps its `.dirty` suffix:
 
 ```powershell
-$HuabuRevision = git rev-parse HEAD
-docker build --pull --build-arg "SOURCE_REVISION=$HuabuRevision" --tag huabu-web:local .
+$HuabuRevision = node --input-type=module -e "import { resolveExactRevision } from './scripts/build-version.mjs'; console.log(resolveExactRevision({}) ?? '')"
+$HuabuVersion = node scripts/build-version.mjs
+docker build --pull --build-arg "SOURCE_REVISION=$HuabuRevision" --build-arg "HUABU_BUILD_VERSION=$HuabuVersion" --tag huabu-web:local .
 node scripts/test-web-container.mjs huabu-web:local
 ```
 

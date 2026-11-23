@@ -121,6 +121,13 @@ interface WorkspaceState {
   removeRecentWorkspace: (workspaceId: string) => void;
 
   /**
+   * Re-read the Workspace list, for a chooser about to show it: names, roles
+   * and Space counts may have changed since the last switch. Keeps the list
+   * it has when the read fails.
+   */
+  refreshWorkspaces: () => Promise<void>;
+
+  /**
    * Rename a Workspace the caller may manage. Updates its chooser row and,
    * when it is the active one, the name shown in the header. Throws on
    * failure so the caller can report it.
@@ -185,9 +192,53 @@ function workspaceActivationError(error: unknown, path: string): string {
     : i18n.t('workspace.openPathFailed');
 }
 
+/**
+ * The kept Workspace list with the store's confirmed Workspace marked current
+ * (and added first, named from the change's `label` if the Server gave no
+ * name, when the list has not heard of it yet), for when a fresh list could
+ * not be read: choosers mark and skip the current row by `active`.
+ */
+function markCurrent(
+  state: WorkspaceState,
+  label: string,
+): WorkspaceDescriptor[] {
+  const { workspaceId, workspaceName, workspacePath, recentWorkspaces } = state;
+  const marked = recentWorkspaces.map((workspace) => ({
+    ...workspace,
+    active: workspace.workspaceId === workspaceId,
+  }));
+  if (!workspaceId || marked.some((w) => w.workspaceId === workspaceId))
+    return marked;
+  return [
+    {
+      workspaceId,
+      name: workspaceName ?? label,
+      path: workspacePath,
+      active: true,
+    },
+    ...marked,
+  ];
+}
+
+/**
+ * Make another Workspace current.
+ *
+ * `activate` asks the Server for the change and returns the Workspace it
+ * reports as current. `intended` names the Workspace the change is for, once
+ * known (a create learns it from the Server); when a request fails but the
+ * Server then reports that Workspace as current, the change succeeded and
+ * nothing throws. Without `intended` (a folder path), any failure throws.
+ *
+ * The Workspace list is refreshed after a confirmed change, best-effort: a
+ * failed refresh keeps the old list, with the new Workspace marked current,
+ * rather than failing a change that landed.
+ *
+ * Throws, with `error` set, only when the intended Workspace is not current.
+ */
 async function changeWorkspace(
   activate: () => Promise<WorkspaceInfo>,
   label: string,
+  intended?: () => string | undefined,
 ): Promise<void> {
   const { getState: get, setState: set } = useWorkspaceStore;
   const tabs = getElectronBridge()?.tabs;
@@ -211,17 +262,19 @@ async function changeWorkspace(
     canvasCount: null,
   });
   let confirmed = false;
+  let failure: { error: unknown } | null = null;
   try {
-    const info = await activate();
-    set(fromInfo(info));
-    confirmed = true;
-    set({ recentWorkspaces: await listWorkspaces() });
-  } catch (err) {
-    if (!confirmed) {
+    try {
+      set(fromInfo(await activate()));
+      confirmed = true;
+    } catch (error) {
+      failure = { error };
       try {
         // A rejected response does not prove that Server activation failed.
-        set(fromInfo(await getWorkspaceInfo()));
+        const info = await getWorkspaceInfo();
+        set(fromInfo(info));
         confirmed = true;
+        if (intended && info.workspaceId === intended()) failure = null;
       } catch (confirmationError) {
         console.error(
           'Could not confirm the active Workspace:',
@@ -229,8 +282,18 @@ async function changeWorkspace(
         );
       }
     }
-    set({ error: workspaceActivationError(err, label) });
-    throw err;
+    if (confirmed) {
+      try {
+        set({ recentWorkspaces: await listWorkspaces() });
+      } catch (error) {
+        console.warn('Could not refresh the Workspace list:', error);
+        set((state) => ({ recentWorkspaces: markCurrent(state, label) }));
+      }
+    }
+    if (failure) {
+      set({ error: workspaceActivationError(failure.error, label) });
+      throw failure.error;
+    }
   } finally {
     try {
       if (tabs) requireDesktopTabSuccess(await tabs.endWorkspaceChange());
@@ -503,6 +566,7 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
         return getWorkspaceInfo();
       },
       selected?.path ?? selected?.name ?? workspaceId,
+      () => workspaceId,
     );
   },
 
@@ -510,22 +574,32 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     if (get().mode === 'managed') {
       throw new Error('Workspace is locked by the server (managed mode)');
     }
-    await changeWorkspace(async () => {
-      const created = await createNamedWorkspace(name);
-      await activateWorkspace(created.workspaceId);
-      return getWorkspaceInfo();
-    }, name);
+    let workspaceId: string | undefined;
+    await changeWorkspace(
+      async () => {
+        workspaceId = (await createNamedWorkspace(name)).workspaceId;
+        await activateWorkspace(workspaceId);
+        return getWorkspaceInfo();
+      },
+      name,
+      () => workspaceId,
+    );
   },
 
   openFolderWorkspace: async (path: string) => {
     if (get().mode === 'managed') {
       throw new Error('Workspace is locked by the server (managed mode)');
     }
-    await changeWorkspace(async () => {
-      const opened = await adoptFolderWorkspace(path);
-      await activateWorkspace(opened.workspaceId);
-      return getWorkspaceInfo();
-    }, path);
+    let workspaceId: string | undefined;
+    await changeWorkspace(
+      async () => {
+        workspaceId = (await adoptFolderWorkspace(path)).workspaceId;
+        await activateWorkspace(workspaceId);
+        return getWorkspaceInfo();
+      },
+      path,
+      () => workspaceId,
+    );
   },
 
   removeRecentWorkspace: (workspaceId: string) => {
@@ -540,6 +614,23 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
       .catch(() => {
         // Surface nothing — removing an inactive registration is best-effort.
       });
+  },
+
+  refreshWorkspaces: async () => {
+    const { workspaceId, recentWorkspaces } = get();
+    try {
+      const listed = await listWorkspaces();
+      // A switch that landed meanwhile has already read its own list, and a
+      // rename that landed meanwhile is newer than this answer.
+      if (
+        get().workspaceId === workspaceId &&
+        !get().isSyncing &&
+        get().recentWorkspaces === recentWorkspaces
+      )
+        set({ recentWorkspaces: listed });
+    } catch (error) {
+      console.warn('Could not refresh the Workspace list:', error);
+    }
   },
 
   renameWorkspace: async (workspaceId: string, name: string) => {

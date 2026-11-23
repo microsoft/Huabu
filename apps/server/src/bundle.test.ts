@@ -28,6 +28,7 @@ import {
   resolveRuntimeArtifacts,
 } from '../../../packages/client-runtime/src/bootstrap.js';
 import clientRuntimeConfig from '../../../packages/client-runtime/tsup.config.js';
+import { resolveExactRevision } from '../../../scripts/build-version.mjs';
 import bundleConfig from '../tsup.config.js';
 
 const configured =
@@ -334,6 +335,130 @@ describe('server bundle runtime', () => {
       rmSync(directory, { recursive: true, force: true });
     }
   });
+  describe('running revision', () => {
+    // Build a probe with the production server bundle options and the define
+    // a build in `checkout` would record, then start it the way a launcher in
+    // a different checkout would: with that checkout's HEAD in
+    // HUABU_DEPLOYED_SHA.
+    async function reportedRevision(checkout: string): Promise<unknown> {
+      const directory = mkdtempSync(path.join(tmpdir(), 'huabu-revision-'));
+      try {
+        const entry = path.join(directory, 'probe.ts');
+        writeFileSync(
+          entry,
+          `import { deployedSha } from ${JSON.stringify(
+            path.resolve('src/modules/security/canary-redeploy.ts'),
+          )};
+console.log(JSON.stringify(deployedSha()));
+`,
+        );
+        const outDir = path.join(directory, 'dist');
+        await build({
+          ...configurations[0],
+          config: false,
+          define: {
+            ...configurations[0].define,
+            __HUABU_BUILD_REVISION__: JSON.stringify(
+              resolveExactRevision({}, checkout),
+            ),
+          },
+          entry: { probe: entry },
+          outDir,
+          outExtension: () => ({ js: '.mjs' }),
+          onSuccess: undefined,
+          silent: true,
+        });
+        const output = execFileSync(
+          process.execPath,
+          [path.join(outDir, 'probe.mjs')],
+          {
+            cwd: directory,
+            encoding: 'utf8',
+            env: {
+              ...process.env,
+              HUABU_DATA_DIR: directory,
+              HUABU_DEPLOYED_SHA: STARTUP_SHA,
+            },
+          },
+        );
+        return JSON.parse(output);
+      } finally {
+        rmSync(directory, { recursive: true, force: true });
+      }
+    }
+
+    // The launching checkout's HEAD, a commit none of the builds come from.
+    const STARTUP_SHA = 'b0403c4ff401e9be7ea777988b5aa1d5fbf0a8b4';
+
+    function withCheckout(run: (checkout: string) => Promise<void>) {
+      return async () => {
+        const checkout = mkdtempSync(path.join(tmpdir(), 'huabu-checkout-'));
+        try {
+          await run(checkout);
+        } finally {
+          rmSync(checkout, { recursive: true, force: true });
+        }
+      };
+    }
+
+    function commit(checkout: string): string {
+      const git = (...args: string[]) =>
+        execFileSync(
+          'git',
+          [
+            '-c',
+            'user.name=Huabu Test',
+            '-c',
+            'user.email=test@example.invalid',
+            '-c',
+            'commit.gpgsign=false',
+            '-c',
+            `core.hooksPath=${path.join(checkout, 'no-hooks')}`,
+            ...args,
+          ],
+          { cwd: checkout, encoding: 'utf8' },
+        ).trim();
+      git('init', '-q');
+      writeFileSync(path.join(checkout, 'module.ts'), 'export {};\n');
+      git('add', 'module.ts');
+      git('commit', '-qm', 'fixture');
+      return git('rev-parse', 'HEAD');
+    }
+
+    it('records the exact revision in the production configuration', () => {
+      expect(configurations[0].define?.__HUABU_BUILD_REVISION__).toBe(
+        JSON.stringify(resolveExactRevision(process.env)),
+      );
+    });
+
+    it(
+      'reports a clean build revision, not the startup checkout',
+      withCheckout(async (checkout) => {
+        const built = commit(checkout);
+        expect(await reportedRevision(checkout)).toBe(built);
+      }),
+    );
+
+    it(
+      'reports no revision for a build with uncommitted changes',
+      withCheckout(async (checkout) => {
+        commit(checkout);
+        writeFileSync(
+          path.join(checkout, 'module.ts'),
+          'export const edited = true;\n',
+        );
+        expect(await reportedRevision(checkout)).toBeNull();
+      }),
+    );
+
+    it(
+      'reports no revision for a build without Git or SOURCE_REVISION',
+      withCheckout(async (checkout) => {
+        expect(await reportedRevision(checkout)).toBeNull();
+      }),
+    );
+  });
+
   it.each(configurations)(
     'loads prefix-only Node built-ins with the $outDir configuration',
     async (configuration) => {

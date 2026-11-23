@@ -30,3 +30,23 @@ export const cloneArtifactBodySchema = z.object({
   srcKey: z.string().min(1),
 });
 export type CloneArtifactRequest = z.infer<typeof cloneArtifactBodySchema>;
+
+/**
+ * Querystring for `GET /api/canvas/:canvasId/artifact/:filename`.
+ *
+ * All fields are stringly-typed because querystring values arrive as strings
+ * on the wire. Default (all omitted) serves the artifact inline, including the
+ * `.mhtml` → `text/html` iframe extraction.
+ */
+export const getArtifactQuerySchema = z.object({
+  /** Validate artifact existence without streaming bytes (`'true'`). */
+  check: z.enum(['true', 'false']).optional(),
+  /** Serve the raw stored artifact bytes with `Content-Disposition: attachment`. */
+  download: z.enum(['1', 'true', 'false']).optional(),
+  /**
+   * Optional suggested download filename or stem. Unsafe path/header characters
+   * are sanitized and the stored artifact's canonical extension is enforced.
+   */
+  filename: z.string().max(500).optional(),
+});
+export type GetArtifactQuery = z.infer<typeof getArtifactQuerySchema>;

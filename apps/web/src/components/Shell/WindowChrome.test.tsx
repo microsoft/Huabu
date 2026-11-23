@@ -17,6 +17,8 @@ import useCanvasStore from '../../store/canvasStore';
 import { useWorkspaceStore } from '../../store/workspaceStore';
 
 vi.mock('react-i18next', () => ({
+  // The Workspace switch loads the app's i18n instance, which registers this.
+  initReactI18next: { type: '3rdParty', init: () => {} },
   useTranslation: () => ({ t: (key: string) => key }),
 }));
 vi.mock('../../hooks/useElectron', () => ({

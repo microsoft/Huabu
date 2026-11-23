@@ -41,15 +41,15 @@ export async function resolveCanvasSkill(
   canvasId: string,
   client: RfsSkillClient,
 ): Promise<string> {
-  const frameSkill = await resolveSpaceSkill(canvasId).catch(
-    (error: unknown) => {
-      logger.warn(
-        { err: error, canvasId },
-        'Space Skill Frame collection failed; serving the root guide only',
-      );
-      return null;
-    },
-  );
+  const frameSkill = await resolveSpaceSkill(canvasId, {
+    includeFile: false,
+  }).catch((error: unknown) => {
+    logger.warn(
+      { err: error, canvasId },
+      'Space Skill Frame collection failed; serving the root guide only',
+    );
+    return null;
+  });
   const guide = resolveBundledRootSkill(client);
   return frameSkill ? `${guide}\n\n${frameSkill.markdown}` : guide;
 }

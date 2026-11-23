@@ -3,7 +3,7 @@
 
 import { type Node, type NodeProps, useStore } from '@xyflow/react';
 import clsx from 'clsx';
-import { Maximize2 } from 'lucide-react';
+import { Download, Maximize2 } from 'lucide-react';
 import {
   memo,
   useCallback,
@@ -20,6 +20,7 @@ import {
   autoHeightContentWidth,
 } from '@huabu/shared/canvas-engine';
 
+import { DropdownMenuItem } from '@/components/Common/DropdownMenu';
 import { FloatingToolbar } from '@/components/Common/FloatingToolbar';
 import { Loading } from '@/components/Common/Loading';
 import { MilkdownPreview } from '@/components/Milkdown';
@@ -35,6 +36,7 @@ import {
   canReadHuabuPayload,
   getHuabuPayload,
 } from '@/utils/io/dragDrop';
+import { triggerNoteDownload } from '@/utils/io/nodeDownload';
 import { dragPayloadToMarkdown } from '@/utils/io/payloadToMarkdown';
 import { parseNodeReferenceHref } from '@/utils/nodeDeepLink';
 import { openDocumentLink } from '@/utils/openDocumentLink';
@@ -535,6 +537,14 @@ export const NoteNode = memo(
       ],
     );
 
+    const handleDownload = useCallback(() => {
+      triggerNoteDownload({
+        content: typeof data.content === 'string' ? data.content : '',
+        label: data.label,
+        missing: isContentMissing,
+      });
+    }, [data.content, data.label, isContentMissing]);
+
     return (
       <NodeWrapper
         id={id}
@@ -543,6 +553,13 @@ export const NoteNode = memo(
         selected={selected}
         farLabel={farLabel}
         actions={isContentMissing ? undefined : NoteActions}
+        overflow={
+          isContentMissing ? undefined : (
+            <DropdownMenuItem icon={<Download />} onClick={handleDownload}>
+              {t('node.download')}
+            </DropdownMenuItem>
+          )
+        }
         keepAspectRatio={false}
         fillColor={isDropTarget ? 'var(--info-bg)' : undefined}
         className={clsx(

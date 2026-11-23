@@ -13,12 +13,16 @@ import {
 } from './identity/request.js';
 import { migrateLegacyDesktopWorkspaceStore } from './legacy-desktop-workspace-store.js';
 import { resetPreprocessDispatcher } from './preprocessing/index.js';
-import { isRestrictedRequest } from './security/space-access.js';
+import {
+  isRestrictedRequest,
+  readableSpaces,
+} from './security/space-access.js';
 import {
   activateWorkspace,
   adoptWorkspaceDirectory,
   createNamedWorkspace,
   ensureWorkspaceManifestOnDisk,
+  getStructuredStore,
   getWorkspaceRepository,
   hasWorkspaceRegistry,
   materializesWorkspaces,
@@ -30,7 +34,7 @@ import {
   workspaceDirectory,
   workspaceIdentityOnDisk,
 } from './storage/index.js';
-import { runInProcessWorkspace } from './workspace/context.js';
+import { runInProcessWorkspace, runInWorkspace } from './workspace/context.js';
 import {
   activateWorkspacePath,
   createWorkspace,
@@ -51,12 +55,14 @@ import {
   workspaceKeyOf,
 } from './workspace.js';
 
+import type { AccessLevel } from './identity/service.js';
 import type { WorkspaceHandle } from './storage/index.js';
 import type {
   ApiErrorBody,
   WorkspaceCreateRequest,
   WorkspaceDescriptor,
   WorkspaceRenameRequest,
+  WorkspaceRole,
 } from '@huabu/shared';
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 
@@ -245,32 +251,109 @@ async function canManage(
 }
 
 /**
+ * The caller's role in each Workspace, read from the same access checks that
+ * gate it: `owner` where they may manage it, `editor` where they may write,
+ * `viewer` where they may only read, and `null` where they reach it only
+ * through Spaces shared one by one. `undefined` for a caller without roles: a
+ * local caller, whose access is not decided per Workspace. One batch per
+ * level, so the number of policy snapshots does not grow with the list.
+ */
+async function rolesFor(
+  request: FastifyRequest,
+  workspaces: readonly WorkspaceHandle[],
+): Promise<readonly (WorkspaceRole | null | undefined)[]> {
+  if (!personal(request)) return workspaces.map(() => undefined);
+  const { access } = requireRequestIdentity(request);
+  const resources = workspaces.map((workspace) => ({
+    type: 'workspace' as const,
+    id: workspace.workspaceId,
+  }));
+  const decide = (level: AccessLevel) =>
+    access.canMany
+      ? access.canMany(level, resources)
+      : Promise.all(resources.map((resource) => access.can(level, resource)));
+  const [manage, write, read] = await Promise.all([
+    decide('manage'),
+    decide('write'),
+    decide('read'),
+  ]);
+  return workspaces.map((_, index) =>
+    manage[index]
+      ? 'owner'
+      : write[index]
+        ? 'editor'
+        : read[index]
+          ? 'viewer'
+          : null,
+  );
+}
+
+/**
+ * How many Spaces the caller may open in a Workspace that is a SQL row: all
+ * of them for a caller with a role there (a Workspace role reaches every Space
+ * in it), else only those shared with them. `undefined` where Workspaces are
+ * Disk folders, which would each have to be opened, or when this one cannot
+ * be read just now; the list still answers without its count.
+ */
+async function spaceCountIn(
+  request: FastifyRequest,
+  workspace: WorkspaceHandle,
+  everySpace: boolean,
+): Promise<number | undefined> {
+  if (materializesWorkspaces()) return undefined;
+  try {
+    // A row-backed Workspace has no folder, so its scope is only its identity.
+    // Not `openWorkspace`, which may write its World on first use: listing
+    // must not change anything.
+    return await runInWorkspace({ handle: workspace, path: null }, async () => {
+      // Ids only: counting must not read every Space's contents.
+      const ids = await getStructuredStore().spaces().listIds();
+      return everySpace
+        ? ids.length
+        : (
+            await readableSpaces(
+              request,
+              ids.map((canvasId) => ({ canvasId })),
+            )
+          ).length;
+    });
+  } catch (error) {
+    request.log.warn(
+      { err: error, workspaceId: workspace.workspaceId },
+      'Could not count the Spaces in a Workspace',
+    );
+    return undefined;
+  }
+}
+
+/**
  * Descriptors that also say whether the caller may rename or unregister each
- * Workspace, by the same rules the PATCH and DELETE routes apply. A personal
- * caller's checks share one access snapshot where the provider batches them.
+ * Workspace, by the same rules the PATCH and DELETE routes apply, the
+ * caller's role there, and how many Spaces it holds for them. A personal
+ * caller's checks share one access snapshot per level where the provider
+ * batches them.
  */
 async function describeFor(
   request: FastifyRequest,
   workspaces: readonly WorkspaceHandle[],
 ): Promise<WorkspaceDescriptor[]> {
-  const manageable = await (async (): Promise<readonly boolean[]> => {
-    if (isManagedMode()) return workspaces.map(() => false);
-    if (!personal(request))
-      return workspaces.map(() => isLocalhost(request.ip));
-    const { access } = requireRequestIdentity(request);
-    const resources = workspaces.map((workspace) => ({
-      type: 'workspace' as const,
-      id: workspace.workspaceId,
-    }));
-    return access.canMany
-      ? access.canMany('manage', resources)
-      : Promise.all(
-          resources.map((resource) => access.can('manage', resource)),
-        );
-  })();
+  const roles = await rolesFor(request, workspaces);
+  const manageable = isManagedMode()
+    ? workspaces.map(() => false)
+    : personal(request)
+      ? // Manage access is what makes the caller a Workspace's owner.
+        roles.map((role) => role === 'owner')
+      : workspaces.map(() => isLocalhost(request.ip));
+  const counts = await Promise.all(
+    workspaces.map((workspace, index) =>
+      spaceCountIn(request, workspace, roles[index] !== null),
+    ),
+  );
   return workspaces.map((workspace, index) => ({
     ...descriptor(workspace),
     canManage: manageable[index]!,
+    ...(roles[index] !== undefined ? { role: roles[index] } : {}),
+    ...(counts[index] !== undefined ? { spaceCount: counts[index] } : {}),
   }));
 }
 

@@ -6,9 +6,11 @@ import { useSettingsUiStore } from '../../store/settingsUiStore';
 import { useShortcutsUiStore } from '../../store/shortcutsUiStore';
 import { KeyboardShortcutsModal } from '../Panels/Header/KeyboardShortcutsModal';
 import { SettingsModal } from '../Settings/SettingsModal';
+import { WorkspaceSwitcherDialog } from '../Workspace/WorkspaceSwitcherDialog';
 
 /**
- * Mounts the app-wide singleton modals (Settings + Keyboard Shortcuts)
+ * Mounts the app-wide singleton modals (Settings, Keyboard Shortcuts and
+ * Switch Workspace)
  * and registers the global `?` hotkey.
  *
  * Rendered once from the never-unmounting router root (`RootLayout`) so
@@ -31,6 +33,7 @@ export function GlobalModals() {
     <>
       <SettingsModal isOpen={settingsOpen} onClose={closeSettings} />
       <KeyboardShortcutsModal isOpen={shortcutsOpen} onClose={closeShortcuts} />
+      <WorkspaceSwitcherDialog />
     </>
   );
 }

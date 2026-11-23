@@ -11,28 +11,38 @@ import { PreviewHeaderButton } from '@/components/Nodes/PreviewHeaderButton';
 import { usePreviewHeaderSlot } from '@/components/Nodes/PreviewHeaderSlot';
 import useCanvasStore from '@/store/canvasStore';
 import { copyImageToClipboard } from '@/utils/io/clipboard';
+import {
+  canDownloadMediaSource,
+  triggerMediaDownload,
+} from '@/utils/io/nodeDownload';
+
+import { getMissingFileKind } from '../MissingFileBanner';
 
 import type { PreviewComponentProps } from '../note/NotePreview';
 
 export const ImagePreview = ({ data }: PreviewComponentProps) => {
   const { t } = useTranslation();
   const src = typeof data.src === 'string' ? data.src : '';
+  const rawLabel = typeof data.label === 'string' ? data.label : undefined;
   const label =
-    typeof data.label === 'string' && data.label.trim().length > 0
-      ? data.label.trim()
+    rawLabel && rawLabel.trim().length > 0
+      ? rawLabel.trim()
       : t('node.nodeImage');
   const canvasId = useCanvasStore((s) => s.canvasId);
   const { el: headerSlotEl } = usePreviewHeaderSlot();
   const resolvedSrc = src ? resolveArtifactUrl(src, canvasId) : '';
+  const isMissing = Boolean(getMissingFileKind(data));
+  const canDownload = canDownloadMediaSource(src, isMissing);
 
   const downloadImage = () => {
-    if (!resolvedSrc) return;
-    const link = document.createElement('a');
-    link.href = resolvedSrc;
-    link.download = label;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    triggerMediaDownload({
+      src,
+      canvasId,
+      label: rawLabel,
+      defaultExt: '.png',
+      fallbackStem: 'image',
+      missing: isMissing,
+    });
   };
 
   const copyImage = () => {
@@ -45,10 +55,12 @@ export const ImagePreview = ({ data }: PreviewComponentProps) => {
         console.error('[clipboard] explicit image copy failed', error);
         toast(t('node.copyImageFailed'), {
           tone: 'danger',
-          action: {
-            label: t('node.downloadImage'),
-            onClick: downloadImage,
-          },
+          action: canDownload
+            ? {
+                label: t('node.downloadImage'),
+                onClick: downloadImage,
+              }
+            : undefined,
         });
       });
   };
@@ -62,13 +74,15 @@ export const ImagePreview = ({ data }: PreviewComponentProps) => {
       >
         <Copy />
       </PreviewHeaderButton>
-      <PreviewHeaderButton
-        title={t('node.downloadImage')}
-        aria-label={t('node.downloadImage')}
-        onClick={downloadImage}
-      >
-        <Download />
-      </PreviewHeaderButton>
+      {canDownload ? (
+        <PreviewHeaderButton
+          title={t('node.downloadImage')}
+          aria-label={t('node.downloadImage')}
+          onClick={downloadImage}
+        >
+          <Download />
+        </PreviewHeaderButton>
+      ) : null}
     </>
   ) : null;
 
