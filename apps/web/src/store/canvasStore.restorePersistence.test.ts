@@ -9,6 +9,7 @@ const api = vi.hoisted(() => ({
   postCanvasExecute: vi.fn(),
   putNodeContent: vi.fn(),
   getCanvas: vi.fn(),
+  getNodeContent: vi.fn(),
   postCanvasEvents: vi.fn(),
 }));
 vi.mock('../api', async (actual) => ({
@@ -185,6 +186,12 @@ beforeEach(() => {
     },
   );
   api.postCanvasEvents.mockResolvedValue({ success: true });
+  api.getNodeContent.mockImplementation(async () => ({
+    nodeId: note.id,
+    label: serverLabel,
+    content: body ?? '',
+    rev: nodeRevisionOf(body === undefined ? {} : { content: body }),
+  }));
   api.getCanvas.mockImplementation(async (canvasId: string) => ({
     canvasId,
     title: 'Loaded',
@@ -297,6 +304,51 @@ describe('undo/redo persistence ordering', () => {
       expect.objectContaining({ content: '# Typed, then left at once' }),
     ]);
     expect(body).toBe('# Typed, then left at once');
+  });
+
+  it('says a second leaving that happened while the first was being said', async () => {
+    await state().loadCanvas('restore-canvas');
+    state().updateNodeData(note.id, { content: '# First body' });
+    const gate = (contentGate = deferred());
+    endNodeEditing(note.id);
+    await tick();
+    // Typed on and left again before the server answered.
+    state().updateNodeData(note.id, { content: '# Second body' });
+    endNodeEditing(note.id);
+    gate.resolve();
+    await drainPendingSaves();
+    await vi.advanceTimersByTimeAsync(2_000);
+
+    // The answer to the first save settled the first leaving only.
+    expect(editingEndedSaves()).toEqual([
+      expect.objectContaining({ content: '# First body' }),
+      expect.objectContaining({ content: '# Second body' }),
+    ]);
+    expect(body).toBe('# Second body');
+  });
+
+  it('takes the newer body, without asking, when only the leaving was refused', async () => {
+    await state().loadCanvas('restore-canvas');
+    // Another page saved a body this page has not fetched yet.
+    body = '# Saved by another page';
+    vi.mocked(toast).mockClear();
+
+    endNodeEditing(note.id);
+    await drainPendingSaves().catch(() => undefined);
+    await vi.advanceTimersByTimeAsync(2_000);
+
+    // Nothing of this page's was unsaved: no choice to put to the user, and
+    // the leaving is not said again of somebody else's body.
+    expect(toast).not.toHaveBeenCalled();
+    expect(editingEndedSaves()).toHaveLength(1);
+    expect(state().nodes[0].data.content).toBe('# Saved by another page');
+    expect(state().pendingContentNodeIds()).toEqual([]);
+
+    // This page's next edit is made from the body it now shows.
+    state().updateNodeData(note.id, { content: '# Edited from the newer one' });
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(body).toBe('# Edited from the newer one');
+    expect(toast).not.toHaveBeenCalled();
   });
 
   it('sends nothing for an absent node through rapid undo/redo', async () => {

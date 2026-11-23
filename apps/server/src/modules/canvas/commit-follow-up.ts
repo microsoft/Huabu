@@ -25,8 +25,6 @@ export interface CanvasCommit {
   deltas: readonly Delta[];
   prestateNodes: readonly CanvasNode[];
   finalNodes: readonly CanvasNode[];
-  /** Nodes whose body a command of the batch rewrote. */
-  contentEditedNodeIds: readonly string[];
   /** Nodes a `RESTORE_NODES` command of the batch put back (an undo). */
   restoredNodeIds: readonly string[];
 }

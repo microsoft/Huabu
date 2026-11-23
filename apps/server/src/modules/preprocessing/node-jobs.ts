@@ -24,6 +24,7 @@ import {
   buildPreprocessSnapshot,
   isLabelProtected,
   type CanvasCommand,
+  type CanvasNodeType,
 } from '@huabu/shared';
 
 import { getLogger } from '../../utils/logger.js';
@@ -39,7 +40,7 @@ import {
   type PreprocessCandidate,
 } from './commit-trigger.js';
 
-import { getPreprocessDispatcher } from './index.js';
+import { getPreprocessDispatcher, getProfile } from './index.js';
 
 import type { PreprocessableNodeType, PreprocessNodeResult } from './types.js';
 import type {
@@ -75,10 +76,16 @@ const jobs = new Map<string, Job>();
 const jobKey = (canvasId: string, nodeId: string): string =>
   JSON.stringify([getWorkspaceKey(), canvasId, nodeId]);
 
-/** Resolves when no job is running; for tests and orderly shutdown. */
+/** Frames being read to see whether a child's new title is their input. */
+const preparing = new Set<Promise<void>>();
+
+/** Resolves when nothing is running or about to; for orderly shutdown. */
 export async function waitForNodePreprocessing(): Promise<void> {
-  while (jobs.size > 0)
-    await Promise.all([...jobs.values()].map((job) => job.running));
+  while (jobs.size > 0 || preparing.size > 0)
+    await Promise.all([
+      ...[...jobs.values()].map((job) => job.running),
+      ...preparing,
+    ]);
 }
 
 /**
@@ -120,38 +127,65 @@ export const preprocessAfterWrites: CommitReactions = {
           },
         ]);
       if (frame)
-        void frameCandidate(save, frame.id)
-          .then((candidate) => {
-            if (candidate) startNodePreprocessing(save.canvasId, [candidate]);
-          })
-          .catch((error: unknown) =>
-            log.warn(
-              {
-                canvasId: save.canvasId,
-                frameId: frame.id,
-                err: String(error),
-              },
-              'could not prepare Frame preprocessing',
-            ),
-          );
+        startFrameAfterChildTitle({
+          canvasId: save.canvasId,
+          frameId: frame.id,
+          childId: save.nodeId,
+          before: save.before.label,
+          after: save.after.label,
+          storedNodes: save.storedNodes,
+        });
     };
   },
 };
 
-/** A Frame whose child was just given another title, as a candidate. */
+/** A child's title before and after a write, and the Frame holding it. */
+interface ChildTitleChange {
+  canvasId: string;
+  frameId: string;
+  childId: string;
+  before: string | null | undefined;
+  after: string | null | undefined;
+  /** The Space's nodes as stored: structure only. */
+  storedNodes: NodeContentSave['storedNodes'];
+}
+
+/**
+ * Preprocess a Frame whose child was just given another title: by a page's
+ * save, or by a run that derived one. Returns at once.
+ */
+function startFrameAfterChildTitle(change: ChildTitleChange): void {
+  const prepared = frameCandidate(change)
+    .then((candidate) => {
+      if (candidate) startNodePreprocessing(change.canvasId, [candidate]);
+    })
+    .catch((error: unknown) =>
+      log.warn(
+        {
+          canvasId: change.canvasId,
+          frameId: change.frameId,
+          err: String(error),
+        },
+        'could not prepare Frame preprocessing',
+      ),
+    )
+    .finally(() => preparing.delete(prepared));
+  preparing.add(prepared);
+}
+
 async function frameCandidate(
-  save: NodeContentSave,
-  frameId: string,
+  change: ChildTitleChange,
 ): Promise<PreprocessCandidate | undefined> {
-  const records = await space(save.canvasId).nodes.list();
+  const { frameId } = change;
+  const records = await space(change.canvasId).nodes.list();
   const frameRecord = records.get(frameId)?.record;
   if (!frameRecord) return undefined;
-  const labels = (titleOfSaved: string | null | undefined): string[] =>
-    save.storedNodes
+  const labels = (titleOfChild: string | null | undefined): string[] =>
+    change.storedNodes
       .filter((node) => node.parentId === frameId)
       .map((node) =>
-        node.id === save.nodeId
-          ? titleOfSaved
+        node.id === change.childId
+          ? titleOfChild
           : records.get(node.id)?.record.label,
       )
       .map((label) => (typeof label === 'string' ? label.trim() : ''))
@@ -162,8 +196,8 @@ async function frameCandidate(
   };
   return {
     node: { id: frameId, type: 'frame' } as CanvasNode,
-    snapshot: { ...base, childLabels: labels(save.after.label) },
-    previousSnapshot: { ...base, childLabels: labels(save.before.label) },
+    snapshot: { ...base, childLabels: labels(change.after) },
+    previousSnapshot: { ...base, childLabels: labels(change.before) },
   };
 }
 
@@ -224,8 +258,17 @@ async function runJob(
 ): Promise<void> {
   const nodeId = node.id;
   // A node whose record is gone (deleted meanwhile, or its file is missing)
-  // is not processed: the pipeline would write a record for it.
-  if (!(await space(canvasId).nodes.read(nodeId))) return;
+  // is not processed: the pipeline would write a record for it. A record
+  // that cannot be read is skipped the same way; the next write tries again.
+  try {
+    if (!(await space(canvasId).nodes.read(nodeId))) return;
+  } catch (cause) {
+    log.warn(
+      { canvasId, nodeId, err: String(cause) },
+      'node record unreadable',
+    );
+    return;
+  }
   let error: string | undefined;
   publishCanvasUpdate(canvasId, {
     type: 'preprocess',
@@ -285,17 +328,30 @@ async function writeBack(
   const summary = result.enriched?.summary;
   const keywords = result.enriched?.keywords;
 
+  // A body a person writes can have moved on while the run was under way.
+  // What was derived from the earlier one is not this body's.
+  const authoredBody =
+    getProfile(nodeType as CanvasNodeType)?.bodyOwnership === 'authored' &&
+    typeof snapshot.content === 'string'
+      ? snapshot.content
+      : undefined;
+
   let wrote = false;
+  let titleNow: string | null | undefined;
   const outcome = await updateNode(handle.nodes, nodeId, {
     apply: (existing) => {
       // Never create a sidecar: a node deleted meanwhile stays deleted.
       if (!existing) return null;
+      titleNow = existing.label;
+      if (authoredBody !== undefined && existing.content !== authoredBody)
+        return null;
       const next: NodeContent = { ...existing };
       // A title a person or an Agent gave meanwhile is theirs.
       if (label && !isLabelProtected(existing.labelSource, existing.label)) {
         next.label = label;
         next.labelSource = 'auto';
       }
+      titleNow = next.label;
       if (src) next.src = src;
       if (typeof summary === 'string' && summary.length > 0)
         next.summary = summary;
@@ -316,6 +372,32 @@ async function writeBack(
       type: 'invalidate',
       data: { nodeIds: [nodeId] },
     });
+
+  // The title this run started from is the Frame's input no longer: the
+  // Frame holding the node is processed too. Compared with the run's input
+  // and not with the record before the write above, because the pipeline
+  // stores some titles itself.
+  const titleBefore =
+    typeof snapshot.title === 'string' ? snapshot.title : undefined;
+  if (nodeType !== 'frame' && (titleNow ?? '') !== (titleBefore ?? '')) {
+    const storedNodes = ((await handle.read())?.state.nodes ??
+      []) as NodeContentSave['storedNodes'];
+    const parentId = storedNodes.find((node) => node.id === nodeId)?.parentId;
+    const frame = parentId
+      ? storedNodes.find(
+          (node) => node.id === parentId && node.type === 'frame',
+        )
+      : undefined;
+    if (frame)
+      startFrameAfterChildTitle({
+        canvasId,
+        frameId: frame.id,
+        childId: nodeId,
+        before: titleBefore,
+        after: titleNow,
+        storedNodes,
+      });
+  }
 
   if (nodeType !== 'video') return;
   // A video's cover is kept with the Space's structure. It is accepted only

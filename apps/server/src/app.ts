@@ -313,16 +313,19 @@ app.addHook('preClose', async () => unregisterHarnessDiscovery?.());
 // filesystems (Google Drive) an abandoned watch request can stay wedged
 // after the process is gone. Closing them here lets `app.close()` (driven
 // by the SIGTERM/SIGINT handlers in server.ts) tear them down gracefully.
-// Preprocessing follows every committed write; let what is running finish
-// before storage closes.
 setCommitReactions(preprocessAfterWrites);
-app.addHook('onClose', async () => waitForNodePreprocessing());
 app.addHook('onClose', async () => resetExternalNoteSessions());
 // Close the storage connections on graceful shutdown. Disk holds nothing a
 // process exit would not release, so this earns its place by being the seat
 // a connection-holding backend will need — a pool nobody closes leaks on
 // every restart, and the lifecycle is where that is visible.
-app.addHook('onClose', async () => closeStorage());
+// Preprocessing follows every committed write and writes its result: what
+// is running finishes first. One hook, so the order does not depend on the
+// order hooks are run in.
+app.addHook('onClose', async () => {
+  await waitForNodePreprocessing();
+  await closeStorage();
+});
 // Capture the bound TCP port for the local RFS reachback fallback. Public
 // deployments use their configured canonical origin instead.
 app.addHook('onListen', async () => {

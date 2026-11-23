@@ -417,8 +417,10 @@ const NODE_BACKED_RECORD_KEYS: ReadonlySet<string> = new Set([
  * video's cover (`coverUrl`, `coverSourceSrc`), a web page's saved snapshot
  * (`mhtmlArtifact`), loader metadata. The node a command hands back does
  * not have them, so a record rebuilt from the node alone would drop them
- * whenever the node is recoloured or renamed. A node re-created under the
- * id (`inserted`) starts without them.
+ * whenever the node is recoloured or renamed. They describe the source the
+ * record had, though: a node given another source starts without them, as a
+ * node re-created under the id (`inserted`) does. Kept beside a new source,
+ * a saved snapshot would pass for the new page's.
  */
 function recordToStore(
   node: CanvasNode,
@@ -427,6 +429,7 @@ function recordToStore(
 ): NodeContent | null {
   const record = buildNodeContent(node);
   if (!record || !stored || inserted) return record;
+  if ((stored.src ?? '') !== (record.src ?? '')) return record;
   const kept: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(stored))
     if (!NODE_BACKED_RECORD_KEYS.has(key)) kept[key] = value;
@@ -2323,7 +2326,6 @@ async function executePreparedOnServerAlreadyLocked(
     deltas,
     prestateNodes,
     finalNodes,
-    contentEditedNodeIds: pendingEffects.contentEditedNodeIds,
     restoredNodeIds: commands.flatMap((command) =>
       command.type === 'RESTORE_NODES'
         ? (command.nodes ?? []).map((node) => node.id as string)

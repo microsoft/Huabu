@@ -823,6 +823,48 @@ describe('PUT /nodes/:nodeId/content — content CAS', () => {
     }
   });
 
+  it('refuses "the editor was left" said of a body the server no longer holds', async () => {
+    const app = await buildApp();
+    try {
+      seedCanvas('c1', 'n1', 'Note');
+      const first = await putContent(app, 'c1', 'n1', {
+        nodeType: 'note',
+        content: 'Body A',
+        expectRev: REV_EMPTY,
+      });
+      const revA = (first.json() as { rev: string }).rev;
+      // Another page saves body B.
+      const second = await putContent(app, 'c1', 'n1', {
+        nodeType: 'note',
+        content: 'Body B',
+        expectRev: revA,
+      });
+      const revB = (second.json() as { rev: string }).rev;
+
+      // The first page, still holding A, says its editor was left.
+      const stale = await putContent(app, 'c1', 'n1', {
+        nodeType: 'note',
+        editingEnded: true,
+        expectRev: revA,
+      });
+      // Refused: accepted, its answer would hand that page B's revision
+      // for a body it has not seen.
+      expect(stale.statusCode).toBe(409);
+      expect(getCanvasStore('c1').readNode('n1')?.content).toBe('Body B');
+
+      // Said of the body the server holds, it is accepted.
+      const current = await putContent(app, 'c1', 'n1', {
+        nodeType: 'note',
+        editingEnded: true,
+        expectRev: revB,
+      });
+      expect(current.statusCode).toBe(200);
+      expect((current.json() as { rev: string }).rev).toBe(revB);
+    } finally {
+      await app.close();
+    }
+  });
+
   it('names the saving principal with the notification, and refuses a page id of another shape', async () => {
     const app = fastify();
     app.addHook('onRequest', async (request) => {

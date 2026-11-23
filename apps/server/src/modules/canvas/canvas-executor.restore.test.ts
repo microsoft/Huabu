@@ -418,6 +418,22 @@ describe('a command that changes a node keeps what only the server derives for i
     },
   );
 
+  it('does not keep them beside another source', async () => {
+    await run([
+      {
+        type: 'MERGE_NODE_DATA',
+        patches: [
+          { nodeId: 'web', patch: { src: 'https://example.com/other' } },
+        ],
+      },
+    ]);
+    const record = getCanvasStore(CANVAS).readNode('web');
+    expect(record).toMatchObject({ src: 'https://example.com/other' });
+    // The saved snapshot was of the page the node pointed at before; kept,
+    // it would pass for the new page's and the new page would not be read.
+    expect(record).not.toHaveProperty('mhtmlArtifact');
+  });
+
   it('does not hand them to a node recreated under the same id', async () => {
     await run([{ type: 'DELETE_NODES', nodeIds: ['video'] }]);
     await run([

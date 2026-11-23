@@ -118,7 +118,11 @@ export function isRevisionCheckedRequest(
 ): boolean {
   return (
     NODE_VERSIONED_REQUEST_KEYS.some((key) => input[key] !== undefined) ||
-    (input.labelSource === 'auto' && input.label !== undefined)
+    (input.labelSource === 'auto' && input.label !== undefined) ||
+    // "The editor of this body was left" is said of the body the page
+    // holds; of another one it is not true, and the answer would hand the
+    // page a revision for a body it has not seen.
+    input.editingEnded === true
   );
 }
 

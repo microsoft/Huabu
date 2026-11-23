@@ -42,9 +42,11 @@ const PROCESSED_TYPES: ReadonlySet<string> = new Set<CanvasNodeType>([
 ]);
 
 /**
- * `note` / `text` bodies are settled by the editor that was left, not by
- * every write: their title derives from the first heading, and deriving it
- * from each intermediate body renamed the file again and again.
+ * A `note` / `text` body a page saves as it is typed is settled by the
+ * editor that was left, not by every save: the title derives from the first
+ * heading, and deriving it from each intermediate body renamed the file
+ * again and again. A body a command batch rewrites is a finished write
+ * (pages send no bodies in batches) and is processed at once.
  */
 const SETTLED_BY_EDITOR: ReadonlySet<string> = new Set<CanvasNodeType>([
   'note',
@@ -114,14 +116,11 @@ export function selectNodesToPreprocess(input: {
   deltas: readonly Delta[];
   prestateNodes: readonly CanvasNode[];
   finalNodes: readonly CanvasNode[];
-  /** Nodes whose body a command of the write rewrote. */
-  contentEditedNodeIds: readonly string[];
   /** Nodes a `RESTORE_NODES` command put back (`CanvasCommit`). */
   restoredNodeIds?: readonly string[];
 }): PreprocessCandidate[] {
   const before = indexNodes(input.prestateNodes);
   const after = indexNodes(input.finalNodes);
-  const bodyEdited = new Set(input.contentEditedNodeIds);
   const restored = new Set(input.restoredNodeIds ?? []);
   const candidates: PreprocessCandidate[] = [];
   /** Frames whose children, or whose children's titles, a row changed. */
@@ -173,15 +172,7 @@ export function selectNodesToPreprocess(input: {
     const profile = getProfile(type as CanvasNodeType);
     const touched = profile?.watchFields.some((field) => {
       const key = DATA_KEY_OF_FIELD[field];
-      return (
-        key !== undefined &&
-        key in changedData &&
-        !(
-          field === 'content' &&
-          SETTLED_BY_EDITOR.has(type) &&
-          bodyEdited.has(next.id)
-        )
-      );
+      return key !== undefined && key in changedData;
     });
     if (!touched) continue;
     const node = after.get(next.id);

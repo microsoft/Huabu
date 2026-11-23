@@ -12,6 +12,8 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { nodeRevisionOf } from '@huabu/shared/canvas-engine';
+
 import {
   preprocessAfterWrites,
   waitForNodePreprocessing,
@@ -448,5 +450,99 @@ describe('preprocessing started by the server after a write', () => {
       nodeType: 'question',
       snapshot: { content: 'What is this?' },
     });
+  });
+
+  it('retitles a note whose body an Agent rewrote', async () => {
+    await run([createNote('node-a', { content: '# First\n\nBody' })]);
+    await waitForNodePreprocessing();
+    expect(sidecar('node-a')).toMatchObject({ label: 'First' });
+
+    const out = await run([
+      {
+        type: 'MERGE_NODE_DATA',
+        patches: [
+          {
+            nodeId: 'node-a',
+            patch: { content: '# Second\n\nBody' },
+            expectRev: nodeRevisionOf({ content: '# First\n\nBody' }),
+          },
+        ],
+      },
+    ]);
+    expect(out.results[0].applied).toBe(true);
+    await waitForNodePreprocessing();
+
+    expect(sidecar('node-a')).toMatchObject({
+      label: 'Second',
+      labelSource: 'auto',
+    });
+  });
+
+  it('does not title a body with what was derived from the one before it', async () => {
+    const dispatcher = getPreprocessDispatcher();
+    const real = dispatcher.preprocess.bind(dispatcher);
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    vi.spyOn(dispatcher, 'preprocess').mockImplementationOnce(
+      async (request) => {
+        await held;
+        return real(request);
+      },
+    );
+    await run([createNote('node-a', { content: '# From A\n\nBody' })]);
+    // A page saves another body while the run is under way, and has not
+    // left its editor: nothing else is started for it.
+    const record = sidecar('node-a')!;
+    await space(CANVAS).nodes.put({
+      nodeId: 'node-a',
+      record: { ...record, content: '# From B\n\nBody' },
+    });
+    release();
+    await waitForNodePreprocessing();
+
+    expect(sidecar('node-a')?.label).not.toBe('From A');
+  });
+
+  it('processes the Frame when a run gives its child another title', async () => {
+    await run([
+      {
+        type: 'CREATE_NODES',
+        nodes: [
+          {
+            id: 'node-frame',
+            nodeType: 'frame',
+            position: { x: 0, y: 0 },
+            size: { width: 600, height: 400 },
+            data: {},
+          },
+        ],
+      },
+    ]);
+    await waitForNodePreprocessing();
+    const preprocess = vi.spyOn(getPreprocessDispatcher(), 'preprocess');
+
+    await run([
+      {
+        type: 'CREATE_NODES',
+        nodes: [
+          {
+            id: 'node-child',
+            nodeType: 'note',
+            parentId: 'node-frame',
+            position: { x: 20, y: 60 },
+            data: { content: '# Derived child title\n\nBody' },
+          },
+        ],
+      },
+    ]);
+    await waitForNodePreprocessing();
+
+    // The batch selected the Frame with the child's first title; the run
+    // that derived the child's title selects it again with the new one.
+    const last = preprocess.mock.calls
+      .map(([request]) => request)
+      .filter((request) => request.nodeId === 'node-frame')
+      .at(-1);
+    expect(last?.snapshot.childLabels).toEqual(['Derived child title']);
   });
 });

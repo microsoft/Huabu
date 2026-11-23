@@ -88,9 +88,8 @@ export interface PendingEffects {
    *
    * Engine-neutral fact: "the content of these notes was just replaced".
    * The executor itself consumes this for agent batches to compute
-   * block-level `data.provenance` (see `computeAiNoteProvenance`); the
-   * server also uses it to tell a body rewrite from a body typed in. Non-agent batches leave
-   * provenance untouched.
+   * block-level `data.provenance` (see `computeAiNoteProvenance`).
+   * Non-agent batches leave provenance untouched.
    */
   contentEditedNodeIds: string[];
 

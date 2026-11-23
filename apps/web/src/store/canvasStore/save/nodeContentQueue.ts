@@ -539,6 +539,14 @@ export type NodeContentQueue = {
  *   queue needs. Re-invoked on every fire so HMR / store swaps Just
  *   Work.
  */
+/** The fields of a save that says only that the editor was left. */
+const MARK_ONLY_REQUEST_KEYS: ReadonlySet<string> = new Set([
+  'nodeType',
+  'expectRev',
+  'editingEnded',
+  'pageId',
+]);
+
 export function createNodeContentQueue(opts: {
   delayMs: number;
   getState: () => NodeContentQueueState;
@@ -690,8 +698,13 @@ export function createNodeContentQueue(opts: {
    */
   const frozen = new Map<string, string>();
 
-  /** Nodes whose editor was left and whose save has not said so yet. */
-  const editingEnded = new Set<string>();
+  /**
+   * Nodes whose editor was left and whose save has not said so yet, each
+   * with a token of that leaving. An editor can be left again while the
+   * save that says so is on the wire; that save's answer settles only the
+   * leaving it carried.
+   */
+  const editingEnded = new Map<string, object>();
 
   /**
    * Node ids for which we have registered the persistent
@@ -940,6 +953,14 @@ export function createNodeContentQueue(opts: {
       const request = buildRequest(nodeId, new Set(requested.keys()));
       if (!request) return false;
       const { body, unversionedOnly } = request;
+      const endedToken = body.editingEnded
+        ? editingEnded.get(nodeId)
+        : undefined;
+      /** The leaving this request carried needs saying no more. */
+      const settleEditingEnded = (): void => {
+        if (endedToken && editingEnded.get(nodeId) === endedToken)
+          editingEnded.delete(nodeId);
+      };
       const sentTitle = 'label' in body || 'labelSource' in body;
       // A request of a title and properties alone settles those fields and
       // no others.
@@ -1032,6 +1053,18 @@ export function createNodeContentQueue(opts: {
             // not cover (title, summary) are saved too.
             identicalSettled = true;
             continue;
+          } else if (
+            endedToken &&
+            Object.keys(body).every((key) => MARK_ONLY_REQUEST_KEYS.has(key))
+          ) {
+            // Only "the editor was left" was said, of a body the server no
+            // longer holds: somebody saved another one this page has not
+            // fetched yet. Nothing of this page's is unsaved, so there is
+            // nothing to ask the user; the newer body is fetched, and when
+            // its editing ends is for its writer to say.
+            settleEditingEnded();
+            void adoptRemoteContent(canvasId, nodeId);
+            return false;
           }
         }
         throw error;
@@ -1081,7 +1114,7 @@ export function createNodeContentQueue(opts: {
       baselineRev.set(nodeId, response.rev);
       baselineGeneration.set(nodeId, {});
       // The server has heard that the editor was left.
-      if (body.editingEnded) editingEnded.delete(nodeId);
+      settleEditingEnded();
       const livePending = pendingFields.get(nodeId);
       for (const [key, token] of requested) {
         if (PROPERTY_CONTENT_KEYS.has(key)) continue;
@@ -1307,6 +1340,8 @@ export function createNodeContentQueue(opts: {
       labelSource: res.labelSource,
     });
     frozen.delete(nodeId);
+    // The body whose editor was left is not the node's any more.
+    editingEnded.delete(nodeId);
     contentConflictToasted.delete(nodeId);
     toast(i18n.t('node.contentConflictLoaded'), { tone: 'success' });
     restoredContent.delete(nodeId);
@@ -2242,7 +2277,7 @@ export function createNodeContentQueue(opts: {
 
     markEditingEnded(canvasId, nodeId) {
       if (opts.getState().canvasId !== canvasId) return;
-      editingEnded.add(nodeId);
+      editingEnded.set(nodeId, {});
       debouncer.cancel(nodeId);
       // Failures are the queue's to report and retry; the mark stays.
       void serializedFlush(canvasId, nodeId, 'auto').catch(() => undefined);
@@ -2342,7 +2377,10 @@ export function createNodeContentQueue(opts: {
     flushAllKeepalive() {
       const canvasId = opts.getState().canvasId;
       // An editor left just before the page closed is said here too.
-      const pendingIds = new Set([...debouncer.cancelAll(), ...editingEnded]);
+      const pendingIds = new Set([
+        ...debouncer.cancelAll(),
+        ...editingEnded.keys(),
+      ]);
       for (const nodeId of pendingIds) {
         // Fire-and-forget keepalive PUT — browser caps these at ~64 KB
         // per request, which is plenty for a single node's markdown.

@@ -24,15 +24,10 @@ function node(
 const withData = (n: CanvasNode, data: Record<string, unknown>): CanvasNode =>
   ({ ...n, data: { ...n.data, ...data } }) as CanvasNode;
 
-function select(
-  prestateNodes: CanvasNode[],
-  finalNodes: CanvasNode[],
-  contentEditedNodeIds: string[] = [],
-) {
-  return selectNodesToPreprocess({
-    ...commit(prestateNodes, finalNodes),
-    contentEditedNodeIds,
-  }).map((candidate) => candidate.node.id);
+function select(prestateNodes: CanvasNode[], finalNodes: CanvasNode[]) {
+  return selectNodesToPreprocess(commit(prestateNodes, finalNodes)).map(
+    (candidate) => candidate.node.id,
+  );
 }
 
 /** A batch as the executor hands it over: both states and their rows. */
@@ -55,7 +50,6 @@ describe('selectNodesToPreprocess', () => {
   it('selects a node the write created, with nothing as its previous input', () => {
     const [candidate] = selectNodesToPreprocess({
       ...commit([], [pdf]),
-      contentEditedNodeIds: [],
     });
     expect(candidate.node).toBe(pdf);
     expect(candidate.previousSnapshot).toBeUndefined();
@@ -81,7 +75,6 @@ describe('selectNodesToPreprocess', () => {
   it('selects a node whose watched input changed, with its previous input', () => {
     const [candidate] = selectNodesToPreprocess({
       ...commit([pdf], [withData(pdf, { src: 'other.pdf' })]),
-      contentEditedNodeIds: [],
     });
     expect(candidate.previousSnapshot).toMatchObject({ src: 'a.pdf' });
     expect(candidate.snapshot).toMatchObject({ src: 'other.pdf' });
@@ -121,16 +114,17 @@ describe('selectNodesToPreprocess', () => {
     ]);
   });
 
-  it('leaves a note body to the editor that is left, but not its creation or title', () => {
+  it('selects a note whose body, title or existence a batch changed', () => {
     const note = node('note', 'note', { label: 'Note', content: 'Body' });
-    const edited = withData(note, { content: 'Body, typed on' });
-    expect(select([note], [edited], ['note'])).toEqual([]);
+    // A body in a batch is a finished rewrite (an Agent's): pages save the
+    // bodies they type through the content save, never in a batch.
+    expect(select([note], [withData(note, { content: 'Rewritten' })])).toEqual([
+      'note',
+    ]);
     expect(select([note], [withData(note, { label: 'Renamed' })])).toEqual([
       'note',
     ]);
     expect(select([], [note])).toEqual(['note']);
-    // A body put back by a command that is not an edit is processed.
-    expect(select([note], [edited])).toEqual(['note']);
   });
 
   it('derives again only what a restored node lost with its deletion', () => {
@@ -138,7 +132,6 @@ describe('selectNodesToPreprocess', () => {
     const video = node('vid', 'video', { label: 'Clip', src: 'a.mp4' });
     const selected = selectNodesToPreprocess({
       ...commit([], [note, pdf, video]),
-      contentEditedNodeIds: [],
       restoredNodeIds: ['note', 'pdf', 'vid'],
     }).map((candidate) => candidate.node.id);
     // The note came back whole, title included; the PDF's text and the
@@ -170,7 +163,6 @@ describe('selectNodesToPreprocess', () => {
         deltas: moved,
         prestateNodes: unreadable,
         finalNodes: unreadable,
-        contentEditedNodeIds: [],
       }),
     ).toEqual([]);
   });
