@@ -89,8 +89,9 @@ export type AdmissionProvider = z.infer<typeof admissionProviderSchema>;
 export const admissionSettingsSchema = z.object({
   /**
    * When `true`, a person who signs in through one of `providers` with no
-   * system grant and no block gets an ordinary system `member` grant (and so a
-   * personal Workspace), never ownership or a Workspace role. When `false`
+   * system grant and no block gets an ordinary system `member` grant, and a
+   * personal Workspace if they can open no Workspace yet; never ownership or a
+   * Workspace role. When `false`
    * (the default), an administrator admits each person in People. Turning it
    * off revokes nobody.
    */
