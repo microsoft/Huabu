@@ -5,7 +5,13 @@ import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { dialog, ipcMain, shell, WebContentsView } from 'electron';
+import {
+  dialog,
+  ipcMain,
+  Notification,
+  shell,
+  WebContentsView,
+} from 'electron';
 
 import { isSameOrigin } from './server-target.js';
 import {
@@ -21,6 +27,7 @@ import type {
   DesktopHomeMenuPosition,
   DesktopTab,
   DesktopTabNavigation,
+  DesktopTabNotice,
   DesktopTabReport,
   DesktopTabResult,
   DesktopTabsSnapshot,
@@ -36,7 +43,6 @@ interface ContentTab {
   state: DesktopTab;
   view: WebContentsView | null;
   ready: boolean;
-  completion: string | null;
   failureNotified: boolean;
   navigation?: DesktopTabNavigation;
 }
@@ -59,6 +65,8 @@ const PREFERENCE_KEYS = [
   'huabu.recentConversationAgentProfile.v1',
   'huabu:world-enabled',
   'huabu.minimapEnabled',
+  'huabu.notifyTurnDone',
+  'huabu.notifyNeedsYou',
 ];
 const isLegacyStorageKey = (key: string) =>
   PREFERENCE_KEYS.includes(key) ||
@@ -103,6 +111,8 @@ export class DesktopTabs {
     null;
   private legacyStorage: Record<string, string> = {};
   private preferences: Record<string, string> = {};
+  /** System notifications still showing, by Tab and then by notice key. */
+  private notices = new Map<string, Map<string, Notification>>();
 
   constructor(
     private win: BrowserWindow,
@@ -147,6 +157,8 @@ export class DesktopTabs {
     this.tabs.push(this.newTab(null));
     this.ensureView(this.tabs[0]);
     win.on('resize', () => this.layout());
+    // Coming back to the window is coming back to the Tab in front.
+    win.on('focus', () => this.clearNotices(this.activeId));
   }
 
   get snapshot(): DesktopTabsSnapshot {
@@ -194,12 +206,12 @@ export class DesktopTabs {
         title: canvasId ? title : 'Home',
         loading: true,
         running: false,
-        unread: false,
+        attention: null,
+        unseen: 0,
         error: null,
       },
       view: null,
       ready: false,
-      completion: null,
       failureNotified: false,
     };
   }
@@ -448,7 +460,7 @@ export class DesktopTabs {
     this.persist(this.tabs, id);
     this.activeId = id;
     this.setHomeMenu(null);
-    tab.state.unread = false;
+    this.clearNotices(id);
     this.showActiveTab(focus);
     this.publish();
   }
@@ -595,32 +607,99 @@ export class DesktopTabs {
       typeof report.title !== 'string' ||
       report.title.length > 512 ||
       typeof report.running !== 'boolean' ||
-      typeof report.completion !== 'string' ||
-      report.completion.length > 65_536 ||
+      (report.attention !== null &&
+        !['done', 'error', 'approval'].includes(report.attention)) ||
+      !Number.isSafeInteger(report.unseen) ||
+      report.unseen < 0 ||
       (report.error !== null && typeof report.error !== 'string')
     )
       throw new Error('Invalid Tab status');
     if (
-      tab.completion === report.completion &&
       tab.state.title === report.title &&
       tab.state.running === report.running &&
+      tab.state.attention === report.attention &&
+      tab.state.unseen === report.unseen &&
       (!tab.ready || tab.state.error === report.error)
     )
       return;
-    const previous = new Set(tab.completion?.split('\0'));
-    if (
-      tab.completion !== null &&
-      report.completion.split('\0').some((id) => id && !previous.has(id)) &&
-      this.activeId !== tab.state.id
-    ) {
-      tab.state.unread = true;
-    }
-    tab.completion = report.completion;
     tab.state.title = report.title;
     tab.state.running = report.running;
+    // What is unseen is the page's to say: it knows what has been viewed.
+    tab.state.attention = report.attention;
+    tab.state.unseen = report.unseen;
     // A load/crash error stays visible until an explicit reload.
     if (tab.ready) tab.state.error = report.error;
     this.publish();
+  }
+
+  /**
+   * Take a notice from a Space's page and show it as a system notification.
+   * A Space the person is looking at — its Tab in front, in a focused window
+   * — needs none. The Tab's own mark does not come from here: the page
+   * reports what is unseen with its status.
+   */
+  notify(contents: WebContents, raw: unknown): void {
+    const tab = this.contentTab(contents);
+    const canvasId = tab.state.canvasId;
+    if (!canvasId) throw new Error('Only a Space can send a notice');
+    if (!raw || typeof raw !== 'object') throw new Error('Invalid notice');
+    const notice = raw as DesktopTabNotice;
+    if (
+      typeof notice.key !== 'string' ||
+      notice.key.length > 256 ||
+      typeof notice.title !== 'string' ||
+      notice.title.length > 512 ||
+      typeof notice.body !== 'string' ||
+      notice.body.length > 1024 ||
+      !Array.isArray(notice.nodeIds) ||
+      notice.nodeIds.length > 64 ||
+      notice.nodeIds.some((id) => typeof id !== 'string' || id.length > 256)
+    )
+      throw new Error('Invalid notice');
+    const id = tab.state.id;
+    if (this.activeId === id && this.win.isFocused()) return;
+    if (!Notification.isSupported()) return;
+    const shown = this.notices.get(id) ?? new Map<string, Notification>();
+    this.notices.set(id, shown);
+    // One notification per conversation: the newer one takes its place.
+    shown.get(notice.key)?.close();
+    const notification = new Notification({
+      title: notice.title,
+      body: notice.body,
+      silent: true,
+    });
+    shown.set(notice.key, notification);
+    notification.on('close', () => {
+      if (shown.get(notice.key) === notification) shown.delete(notice.key);
+    });
+    // macOS reports a notification it could not deliver, e.g. no permission.
+    notification.on('failed', (_event, error) => {
+      console.error('[desktop-tabs] Could not show a notification:', error);
+    });
+    notification.on('click', () => {
+      try {
+        if (this.win.isMinimized()) this.win.restore();
+        this.win.show();
+        this.win.focus();
+        void this.open({
+          canvasId,
+          ...(notice.nodeIds.length > 0
+            ? { state: { focusNodeIds: notice.nodeIds } }
+            : {}),
+        });
+      } catch (error) {
+        console.error('[desktop-tabs] Could not open a notice:', error);
+      }
+    });
+    notification.show();
+  }
+
+  /** Withdraw the notifications of a Tab the person has come back to. */
+  private clearNotices(id: string): void {
+    const shown = this.notices.get(id);
+    if (!shown) return;
+    this.notices.delete(id);
+    for (const notification of shown.values()) notification.close();
   }
 
   workspaceReady(contents: WebContents, workspaceId: unknown): void {
@@ -918,7 +997,6 @@ export class DesktopTabs {
       this.persist(remaining, activeId);
       this.tabs = remaining;
       this.activeId = activeId;
-      next.state.unread = false;
       this.destroyTab(tab);
       this.showActiveTab();
       this.resume();
@@ -1300,6 +1378,7 @@ export class DesktopTabs {
   }
 
   private destroyTab(tab: ContentTab): void {
+    this.clearNotices(tab.state.id);
     const view = tab.view;
     if (!view) return;
     tab.view = null;
@@ -1440,6 +1519,9 @@ export function registerDesktopTabsIpc(
   listen('tabs:ready', (tabs, event) => tabs.ready(event.sender));
   listen('tabs:report', (tabs, event, args) =>
     tabs.report(event.sender, args[0]),
+  );
+  listen('tabs:notify', (tabs, event, args) =>
+    tabs.notify(event.sender, args[0]),
   );
   listen('tabs:finish-close', (tabs, event, args) =>
     tabs.finishDrain(event.sender, args[0], args[1]),

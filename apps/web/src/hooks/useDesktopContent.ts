@@ -27,6 +27,7 @@ import {
 } from '@/utils/desktopStorage';
 import { pageLifecycle } from '@/utils/pageLifecycle';
 import { prepareSpaceDeletion } from '@/utils/prepareSpaceDeletion';
+import { readConversations, unseenIn } from '@/utils/turnNotices';
 
 import { getElectronBridge, requireDesktopTabSuccess } from './useElectron';
 
@@ -271,20 +272,14 @@ export function useDesktopContent(): {
           questions.some(
             (node) => getQuestionNodeStatus(node.data) === 'running',
           ) || threads.some(([, thread]) => thread.isStreaming),
-        completion: [
-          ...questions.flatMap((node) =>
-            getQuestionNodeStatus(node.data) === 'done'
-              ? [`${node.id}:${node.data.invocationToken ?? ''}`]
-              : [],
+        ...unseenIn(
+          readConversations(
+            tabs.context.role === 'space' ? canvas.nodes : [],
+            tabs.context.role === 'space'
+              ? useChatStore.getState().threadsById
+              : {},
           ),
-          ...threads.flatMap(([threadId, thread]) =>
-            thread.completedTurnId
-              ? [`${threadId}:${thread.completedTurnId}`]
-              : [],
-          ),
-        ]
-          .sort()
-          .join('\0'),
+        ),
         error: canvas.canvasNotFound
           ? 'Space no longer exists'
           : errorNode
@@ -297,7 +292,8 @@ export function useDesktopContent(): {
         previous &&
         previous.title === next.title &&
         previous.running === next.running &&
-        previous.completion === next.completion &&
+        previous.attention === next.attention &&
+        previous.unseen === next.unseen &&
         previous.error === next.error
       )
         return;

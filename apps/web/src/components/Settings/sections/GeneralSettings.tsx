@@ -10,6 +10,7 @@ import { toast } from '@/components/Common/Toast';
 import { Toggle } from '@/components/Common/Toggle';
 import { CanaryRedeploySettings } from '@/components/Settings/CanaryRedeploySettings';
 import { SettingRow } from '@/components/Settings/Common/SettingRow';
+import { TurnNoticeSettings } from '@/components/Settings/sections/TurnNoticeSettings';
 import { canCheckForUpdates, useAppUpdate } from '@/hooks/useAppUpdate';
 import { getElectronBridge } from '@/hooks/useElectron';
 import { useEffectiveInputMode } from '@/hooks/useInputMode';
@@ -118,6 +119,7 @@ export const GeneralSettings: React.FC = () => {
           }
         />
       </SettingRow>
+      <TurnNoticeSettings />
       {updaterAvailable && (
         <SettingRow
           title={t('update.check')}

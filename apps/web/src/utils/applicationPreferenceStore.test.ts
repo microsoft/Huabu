@@ -59,6 +59,7 @@ beforeEach(async () => {
       onHomeMenu: vi.fn(),
       ready: vi.fn(),
       report: vi.fn(),
+      notify: vi.fn(),
       workspaceReady: vi.fn(),
       beginWorkspaceChange: vi.fn(),
       endWorkspaceChange: vi.fn(),

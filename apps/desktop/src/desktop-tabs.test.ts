@@ -17,6 +17,7 @@ import { DesktopTabs, registerDesktopTabsIpc } from './desktop-tabs.js';
 
 import type {
   DesktopPreferenceKey,
+  DesktopTabNotice,
   DesktopTabReport,
 } from '@huabu/shared/desktop-tabs' with {
   'resolution-mode': 'import',
@@ -51,6 +52,14 @@ const mocks = vi.hoisted(() => ({
   showErrorBox: vi.fn(),
   showMessageBox: vi.fn(),
   openExternal: vi.fn().mockResolvedValue(undefined),
+  focused: true,
+  windowCallbacks: new Map<string, () => void>(),
+  notifications: [] as {
+    options: { title: string; body: string; silent?: boolean };
+    callbacks: Map<string, () => void>;
+    show: ReturnType<typeof vi.fn>;
+    close: ReturnType<typeof vi.fn>;
+  }[],
 }));
 
 vi.mock('electron', () => ({
@@ -65,6 +74,20 @@ vi.mock('electron', () => ({
     showMessageBox: mocks.showMessageBox,
   },
   shell: { openExternal: mocks.openExternal },
+  Notification: class {
+    static isSupported = () => true;
+    callbacks = new Map<string, () => void>();
+    show = vi.fn();
+    close = vi.fn(() => this.callbacks.get('close')?.());
+    constructor(
+      public options: { title: string; body: string; silent?: boolean },
+    ) {
+      mocks.notifications.push(this);
+    }
+    on(event: string, callback: () => void) {
+      this.callbacks.set(event, callback);
+    }
+  },
   WebContentsView: class {
     webContents = {
       id: mocks.views.length + 1,
@@ -109,6 +132,9 @@ describe('desktop Space Tab lifecycle', () => {
     mocks.options.length = 0;
     mocks.handlers.clear();
     mocks.listeners.clear();
+    mocks.notifications.length = 0;
+    mocks.windowCallbacks.clear();
+    mocks.focused = true;
     mocks.showMessageBox.mockReset().mockResolvedValue({ response: 1 });
     directory = mkdtempSync(join(tmpdir(), 'huabu-tabs-test-'));
     shell = {
@@ -147,7 +173,12 @@ describe('desktop Space Tab lifecycle', () => {
     return new DesktopTabs(
       {
         ...shell,
-        on: vi.fn(),
+        on: (event: string, callback: () => void) =>
+          mocks.windowCallbacks.set(event, callback),
+        isFocused: () => mocks.focused,
+        isMinimized: () => false,
+        show: vi.fn(),
+        focus: vi.fn(),
         getContentSize: () => [1400, 900],
         isDestroyed: () => false,
       } as never,
@@ -671,8 +702,9 @@ describe('desktop Space Tab lifecycle', () => {
   const report = (patch: Partial<DesktopTabReport> = {}): DesktopTabReport => ({
     title: 'Space',
     running: false,
-    completion: '',
     error: null,
+    attention: null,
+    unseen: 0,
     ...patch,
   });
 
@@ -874,13 +906,10 @@ describe('desktop Space Tab lifecycle', () => {
       a.webContents as never,
       report({ title: 'Renamed', running: true }),
     );
+    tabs.report(a.webContents as never, report({ title: 'Renamed' }));
     tabs.report(
       a.webContents as never,
-      report({ title: 'Renamed', completion: 'turn1' }),
-    );
-    tabs.report(
-      a.webContents as never,
-      report({ title: 'Renamed', completion: 'turn1', error: 'Failed' }),
+      report({ title: 'Renamed', error: 'Failed' }),
     );
     expect(shell.webContents.send).toHaveBeenCalledTimes(4);
   });
@@ -1499,20 +1528,113 @@ describe('desktop Space Tab lifecycle', () => {
     await close;
   });
 
-  it('separates first hydration from genuine background completion', () => {
+  const notice = (patch: Partial<DesktopTabNotice> = {}): DesktopTabNotice => ({
+    key: 'thread-1',
+    title: 'Plan · Space',
+    body: 'The plan is ready.',
+    nodeIds: ['node-1'],
+    ...patch,
+  });
+
+  it('shows what the page reports as unseen, whichever Tab is in front', () => {
     const a = open('a');
-    open('b');
-    tabs.report(a.webContents as never, report({ completion: 'turn1' }));
-    expect(tabs.snapshot.tabs[1].unread).toBe(false);
+    const b = open('b');
     tabs.report(
       a.webContents as never,
-      report({ running: true, completion: '' }),
+      report({ attention: 'approval', unseen: 2 }),
     );
-    expect(tabs.snapshot.tabs[1].unread).toBe(false);
-    tabs.report(a.webContents as never, report({ completion: 'turn2' }));
-    expect(tabs.snapshot.tabs[1].unread).toBe(true);
+    tabs.report(
+      b.webContents as never,
+      report({ attention: 'done', unseen: 1 }),
+    );
+    expect(tabs.snapshot.tabs[1]).toMatchObject({
+      attention: 'approval',
+      unseen: 2,
+    });
+    expect(tabs.snapshot.tabs[2]).toMatchObject({
+      attention: 'done',
+      unseen: 1,
+    });
+    // Coming to the Tab is not viewing: only the page says what was seen.
     tabs.activate(tabs.snapshot.tabs[1].id);
-    expect(tabs.snapshot.tabs[1].unread).toBe(false);
+    expect(tabs.snapshot.tabs[1].attention).toBe('approval');
+    tabs.report(a.webContents as never, report());
+    expect(tabs.snapshot.tabs[1]).toMatchObject({ attention: null, unseen: 0 });
+    expect(() =>
+      tabs.report(
+        a.webContents as never,
+        report({ attention: 'new' as never }),
+      ),
+    ).toThrow('Invalid Tab status');
+    expect(() =>
+      tabs.report(a.webContents as never, report({ unseen: -1 })),
+    ).toThrow('Invalid Tab status');
+  });
+
+  it('notifies only about a Space the person is not looking at', () => {
+    const a = open('a');
+    const b = open('b');
+    tabs.notify(b.webContents as never, notice());
+    expect(mocks.notifications).toHaveLength(0);
+
+    tabs.notify(a.webContents as never, notice());
+    expect(mocks.notifications).toHaveLength(1);
+    expect(mocks.notifications[0].options).toEqual({
+      title: 'Plan · Space',
+      body: 'The plan is ready.',
+      silent: true,
+    });
+    expect(mocks.notifications[0].show).toHaveBeenCalledOnce();
+
+    tabs.activate(tabs.snapshot.tabs[1].id);
+    expect(mocks.notifications[0].close).toHaveBeenCalledOnce();
+  });
+
+  it('replaces the notification of the same conversation and keeps others', () => {
+    const a = open('a');
+    open('b');
+    tabs.notify(a.webContents as never, notice());
+    tabs.notify(a.webContents as never, notice({ key: 'thread-2' }));
+    tabs.notify(a.webContents as never, notice({ body: 'Revised.' }));
+    expect(mocks.notifications).toHaveLength(3);
+    expect(mocks.notifications[0].close).toHaveBeenCalledOnce();
+    expect(mocks.notifications[1].close).not.toHaveBeenCalled();
+    expect(mocks.notifications[2].close).not.toHaveBeenCalled();
+  });
+
+  it('notifies about the Tab in front while the window is in the background, until it is focused again', () => {
+    const a = open('a');
+    mocks.focused = false;
+    tabs.notify(a.webContents as never, notice());
+    expect(mocks.notifications).toHaveLength(1);
+    mocks.windowCallbacks.get('focus')?.();
+    expect(mocks.notifications[0].close).toHaveBeenCalledOnce();
+  });
+
+  it('opens the Space on the nodes of a clicked notification', () => {
+    const a = open('a');
+    open('b');
+    tabs.notify(a.webContents as never, notice());
+    a.webContents.send.mockClear();
+    mocks.notifications[0].callbacks.get('click')?.();
+    expect(tabs.snapshot.activeId).toBe(tabs.snapshot.tabs[1].id);
+    expect(a.webContents.send).toHaveBeenCalledWith(
+      'tabs:navigate',
+      expect.objectContaining({
+        canvasId: 'a',
+        state: { focusNodeIds: ['node-1'] },
+      }),
+    );
+  });
+
+  it('rejects a notice from Home and a malformed notice', () => {
+    expect(() =>
+      tabs.notify(mocks.views[0].webContents as never, notice()),
+    ).toThrow('Only a Space');
+    const a = open('a');
+    expect(() =>
+      tabs.notify(a.webContents as never, { ...notice(), nodeIds: [1] }),
+    ).toThrow('Invalid notice');
   });
 
   it('notifies renderer failure separately even when a task already reported an error', async () => {

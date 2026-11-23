@@ -35,6 +35,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 import type { LocalAgentState } from './local-agent.js';
 import type {
   DesktopTabNavigation,
+  DesktopTabNotice,
   DesktopTabReport,
   DesktopTabResult,
   DesktopTabsApi,
@@ -105,6 +106,8 @@ const tabs: DesktopTabsApi | undefined =
         ready: () => ipcRenderer.send('tabs:ready'),
         report: (report: DesktopTabReport) =>
           ipcRenderer.send('tabs:report', report),
+        notify: (notice: DesktopTabNotice) =>
+          ipcRenderer.send('tabs:notify', notice),
         workspaceReady: (id) =>
           ipcRenderer.invoke(
             'tabs:workspace-ready',

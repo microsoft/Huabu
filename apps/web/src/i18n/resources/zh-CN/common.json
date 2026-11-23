@@ -61,7 +61,19 @@
     "label": "已打开的 Space",
     "newTab": "新标签页",
     "noMatchingSpaces": "没有匹配的 Space。",
-    "closeTab": "关闭标签页"
+    "closeTab": "关闭标签页",
+    "unseen": "{{count}} 个对话有你没看的内容"
+  },
+  "attention": {
+    "done": "做完了，还没看",
+    "error": "出错了",
+    "approval": "等你批准"
+  },
+  "turnNotices": {
+    "done": "做完了",
+    "error": "出错了",
+    "approval": "等你批准后才能继续",
+    "several": "{{count}} 个对话有新进展"
   },
   "sigil": {
     "chooseResource": "选择资源",
@@ -454,6 +466,11 @@
     "showMiniMap": "显示小地图",
     "hideMiniMap": "隐藏小地图",
     "miniMapDescription": "在 Space 右下角显示概览。",
+    "notifyTurnDone": "Agent 做完时通知",
+    "notifyTurnDoneDescription": "一轮对话在你没有看着的 Space 里结束时，发一条系统通知。",
+    "notifyNeedsYou": "Agent 需要你时通知",
+    "notifyNeedsYouDescription": "Agent 在你没有看着的 Space 里出错或等你批准时，发一条系统通知。",
+    "turnNoticesBlocked": "浏览器不允许这个页面发通知，请先在浏览器设置里允许。",
     "worldCanvas": "World Canvas",
     "worldCanvasDescription": "将 World 作为工作区入口，并显示 Space 快捷入口。",
     "showWorldCanvas": "显示 World Canvas",
