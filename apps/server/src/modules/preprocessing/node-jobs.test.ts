@@ -327,6 +327,11 @@ describe('preprocessing started by the server after a write', () => {
       save({ ...before, label: 'Derived', labelSource: 'auto' }),
     ).toBeUndefined();
 
+    // The save has stored the new title, as the route does before it reacts.
+    await space(CANVAS).nodes.put({
+      nodeId: 'node-a',
+      record: { ...before, label: 'Two' },
+    });
     save({ ...before, label: 'Two' })?.();
     // The Frame's run starts after its children's titles are read.
     await vi.waitFor(() => expect(preprocess).toHaveBeenCalledTimes(2), {

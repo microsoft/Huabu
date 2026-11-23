@@ -30,7 +30,7 @@ import {
 import { getLogger } from '../../utils/logger.js';
 import { executeOnServer } from '../canvas/canvas-executor.js';
 import { publishCanvasUpdate } from '../canvas/canvas-sync.js';
-import { updateNode } from '../canvas/write-coordinator.js';
+import { updateNode, withCanvasMutex } from '../canvas/write-coordinator.js';
 import { callerAccess } from '../identity/personal-settings.js';
 import { space } from '../storage/index.js';
 import { getWorkspaceKey } from '../workspace.js';
@@ -177,7 +177,11 @@ async function frameCandidate(
   change: ChildTitleChange,
 ): Promise<PreprocessCandidate | undefined> {
   const { frameId } = change;
-  const records = await space(change.canvasId).nodes.list();
+  // Under the Space's write lock: a run that is renaming a child's record
+  // (a new title is a new file name) would otherwise be met half-way.
+  const records = await withCanvasMutex(change.canvasId, () =>
+    space(change.canvasId).nodes.list(),
+  );
   const frameRecord = records.get(frameId)?.record;
   if (!frameRecord) return undefined;
   const labels = (titleOfChild: string | null | undefined): string[] =>
@@ -261,7 +265,12 @@ async function runJob(
   // is not processed: the pipeline would write a record for it. A record
   // that cannot be read is skipped the same way; the next write tries again.
   try {
-    if (!(await space(canvasId).nodes.read(nodeId))) return;
+    // Read under the Space's write lock, so a record that is being renamed
+    // is not taken for a missing one.
+    const record = await withCanvasMutex(canvasId, () =>
+      space(canvasId).nodes.read(nodeId),
+    );
+    if (!record) return;
   } catch (cause) {
     log.warn(
       { canvasId, nodeId, err: String(cause) },
