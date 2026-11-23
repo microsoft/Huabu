@@ -394,6 +394,45 @@ function buildNodeContent(node: CanvasNode): NodeContent | null {
   return out;
 }
 
+/** The record fields {@link buildNodeContent} takes from a node's data. */
+const NODE_BACKED_RECORD_KEYS: ReadonlySet<string> = new Set([
+  'nodeId',
+  'type',
+  'label',
+  'content',
+  'src',
+  'summary',
+  'keywords',
+  'provenance',
+  'properties',
+  'propertyDisplayKeys',
+  'labelSource',
+]);
+
+/**
+ * The record to store for a node a batch changed: what the node carries,
+ * plus whatever the stored record holds that no node carries.
+ *
+ * Some record fields are derived by the server and read only by it: a
+ * video's cover (`coverUrl`, `coverSourceSrc`), a web page's saved snapshot
+ * (`mhtmlArtifact`), loader metadata. The node a command hands back does
+ * not have them, so a record rebuilt from the node alone would drop them
+ * whenever the node is recoloured or renamed. A node re-created under the
+ * id (`inserted`) starts without them.
+ */
+function recordToStore(
+  node: CanvasNode,
+  stored: NodeContent | undefined,
+  inserted: boolean,
+): NodeContent | null {
+  const record = buildNodeContent(node);
+  if (!record || !stored || inserted) return record;
+  const kept: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(stored))
+    if (!NODE_BACKED_RECORD_KEYS.has(key)) kept[key] = value;
+  return { ...kept, ...record };
+}
+
 /** Sidecar fields compared as they travel: by value, `undefined` as absent. */
 function sameSidecarValue(a: unknown, b: unknown): boolean {
   if (a === b) return true;
@@ -2106,7 +2145,11 @@ async function executePreparedOnServerAlreadyLocked(
   const insertedIds = insertedNodeIds(deltas);
   const nodeMutations: SpaceNodeMutation[] = [];
   for (const node of mutatedNodesToPersist) {
-    const record = buildNodeContent(node);
+    const record = recordToStore(
+      node,
+      prepared.records.get(node.id)?.record,
+      insertedIds.has(node.id),
+    );
     if (!record) continue;
     nodeMutations.push({
       kind: 'put',
@@ -2622,7 +2665,11 @@ export async function applyDeltasOnServerAlreadyLocked(input: {
     for (const d of deltas) {
       const node = writtenNode(d);
       if (node) {
-        const record = buildNodeContent(node);
+        const record = recordToStore(
+          node,
+          records.get(node.id)?.record,
+          insertedIds.has(node.id),
+        );
         if (record) {
           nodeMutations.push({
             kind: 'put',

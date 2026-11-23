@@ -335,3 +335,106 @@ describe('APPLY_MEASURED_SIZE on the server', () => {
     expect(again.toVersion).toBe(again.fromVersion);
   });
 });
+
+describe('a command that changes a node keeps what only the server derives for it', () => {
+  // A video's cover and a web page's saved snapshot live in the node record
+  // alone: no page holds them, so the node a command hands back does not
+  // either. Writing the record from that node must not drop them.
+  beforeEach(() => {
+    const store = getCanvasStore(CANVAS);
+    const canvas = store.read();
+    if (!canvas) throw new Error('Space missing');
+    store.write({
+      ...canvas,
+      state: {
+        ...canvas.state,
+        nodes: [
+          ...(canvas.state.nodes as CanvasNode[]),
+          {
+            id: 'video',
+            type: 'video',
+            position: { x: 0, y: 900 },
+            data: { type: 'video' },
+          },
+          {
+            id: 'web',
+            type: 'web',
+            position: { x: 400, y: 900 },
+            data: { type: 'web' },
+          },
+        ],
+      },
+    });
+    store.writeNode('video', {
+      nodeId: 'video',
+      type: 'video',
+      label: 'Clip',
+      content: '',
+      src: 'clip.webm',
+      coverUrl: 'cover_1.jpg',
+      coverSourceSrc: 'clip.webm',
+    } as never);
+    store.writeNode('web', {
+      nodeId: 'web',
+      type: 'web',
+      label: 'Page',
+      content: 'Extracted body',
+      src: 'https://example.com/',
+      mhtmlArtifact: 'artifact-1.mhtml',
+      summary: 'A summary',
+    } as never);
+  });
+
+  it.each(['ui', 'agent'] as const)(
+    'when a %s batch recolours and renames them',
+    async (source) => {
+      const out = await run(
+        [
+          {
+            type: 'MERGE_NODE_DATA',
+            patches: [
+              { nodeId: 'video', patch: { style: { accent: 'red' } } },
+              { nodeId: 'web', patch: { label: 'Renamed page' } },
+            ],
+          },
+        ],
+        source,
+      );
+      expect(out.results[0].applied).toBe(true);
+
+      const store = getCanvasStore(CANVAS);
+      expect(store.readNode('video')).toMatchObject({
+        label: 'Clip',
+        src: 'clip.webm',
+        coverUrl: 'cover_1.jpg',
+        coverSourceSrc: 'clip.webm',
+      });
+      expect(store.readNode('web')).toMatchObject({
+        label: 'Renamed page',
+        content: 'Extracted body',
+        mhtmlArtifact: 'artifact-1.mhtml',
+        summary: 'A summary',
+      });
+    },
+  );
+
+  it('does not hand them to a node recreated under the same id', async () => {
+    await run([{ type: 'DELETE_NODES', nodeIds: ['video'] }]);
+    await run([
+      {
+        type: 'RESTORE_NODES',
+        nodes: [
+          {
+            id: 'video',
+            type: 'video',
+            position: { x: 0, y: 900 },
+            data: { type: 'video', label: 'Clip', src: 'other.webm' },
+          },
+        ],
+      },
+    ]);
+    const record = getCanvasStore(CANVAS).readNode('video');
+    expect(record).toMatchObject({ src: 'other.webm' });
+    expect(record).not.toHaveProperty('coverUrl');
+  });
+});
