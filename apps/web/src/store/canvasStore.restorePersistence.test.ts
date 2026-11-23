@@ -166,7 +166,8 @@ beforeEach(() => {
       const currentRev = nodeRevisionOf(
         body === undefined ? {} : { content: body },
       );
-      if (request.expectRev !== currentRev)
+      // A save of a title or properties alone quotes no revision.
+      if (request.expectRev !== undefined && request.expectRev !== currentRev)
         throw new CanvasConflictError({
           code: 'NODE_CONTENT_CONFLICT',
           message: 'revision',
@@ -325,6 +326,24 @@ describe('undo/redo persistence ordering', () => {
       expect.objectContaining({ content: '# Second body' }),
     ]);
     expect(body).toBe('# Second body');
+  });
+
+  it('says the leaving after a save of properties alone, which could not carry it', async () => {
+    await state().loadCanvas('restore-canvas');
+    // The body is saved already; only a property is unsaved when the
+    // editor is left. That save quotes no revision and carries no mark.
+    state().updateNodeData(note.id, { properties: { Status: 'Reading' } });
+    endNodeEditing(note.id);
+    await drainPendingSaves();
+    await vi.advanceTimersByTimeAsync(2_000);
+    await drainPendingSaves();
+
+    const saves = api.putNodeContent.mock.calls.map(
+      ([, , request]) => request as PutNodeContentRequest,
+    );
+    expect(saves[0]).toMatchObject({ properties: { Status: 'Reading' } });
+    expect(saves[0]).not.toHaveProperty('editingEnded');
+    expect(editingEndedSaves()).toHaveLength(1);
   });
 
   it('takes the newer body, without asking, when only the leaving was refused', async () => {

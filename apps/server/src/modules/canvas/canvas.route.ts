@@ -884,6 +884,8 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     const hasPropertyPatch =
       properties !== undefined || propertyDisplayKeys !== undefined;
     const hasAuthoredTitle = carriesAuthoredTitle(parsed.data);
+    /** The title and properties written although the body was refused. */
+    let partial: { before: NodeContent; after: NodeContent } | undefined;
     let outcome: UpdateNodeOutcome;
     try {
       outcome = await updateNode(handle.nodes, nodeId, {
@@ -894,10 +896,14 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         apply,
         ...(hasPropertyPatch || hasAuthoredTitle
           ? {
-              applyUnversioned: (existing) =>
-                existing
-                  ? applyNodeUnversionedPatch(existing, parsed.data)
-                  : null,
+              applyUnversioned: (existing) => {
+                if (!existing) return null;
+                partial = {
+                  before: existing,
+                  after: applyNodeUnversionedPatch(existing, parsed.data),
+                };
+                return partial.after;
+              },
             }
           : {}),
         strictRename: labelSource === 'user',
@@ -932,6 +938,18 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
           },
           { principalId: callerPrincipalId(request) },
         );
+        // A rename that was written is a rename, whatever became of the
+        // body beside it: the node and the Frame holding it react to it.
+        // The body was refused, so nothing is said of its editor.
+        if (partial)
+          commitReactions()?.contentSave({
+            canvasId,
+            nodeId,
+            nodeType,
+            ...partial,
+            storedNodes: (canvas.state.nodes ??
+              []) as NodeContentSave['storedNodes'],
+          })?.();
       }
       return reply.code(409).send({
         code: 'NODE_CONTENT_CONFLICT',

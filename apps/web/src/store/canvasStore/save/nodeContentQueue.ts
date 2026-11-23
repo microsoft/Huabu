@@ -1098,7 +1098,10 @@ export function createNodeContentQueue(opts: {
           failures.delete(nodeId);
           dismissFailureToast(nodeId);
           saveErrorToasted.delete(nodeId);
-          if (pendingFields.get(nodeId)?.size) schedule(canvasId, nodeId);
+          // A leaving that could not ride on this request (it quoted no
+          // revision) still has to be said.
+          if (pendingFields.get(nodeId)?.size || editingEnded.has(nodeId))
+            schedule(canvasId, nodeId);
           else opts.onContentPersisted?.(canvasId, nodeId);
         }
         return true;

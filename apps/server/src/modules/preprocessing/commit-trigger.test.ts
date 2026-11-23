@@ -5,7 +5,10 @@ import { describe, expect, it } from 'vitest';
 
 import { diffCanvasState, type CanvasNode } from '@huabu/shared/canvas-engine';
 
-import { selectNodesToPreprocess } from './commit-trigger.js';
+import {
+  selectAfterContentSave,
+  selectNodesToPreprocess,
+} from './commit-trigger.js';
 
 function node(
   id: string,
@@ -172,5 +175,51 @@ describe('selectNodesToPreprocess', () => {
       expect(select([], [node('n', type, { label: 'X', src: 's' })])).toEqual(
         [],
       );
+  });
+});
+
+describe('selectAfterContentSave', () => {
+  const record = (data: Record<string, unknown>) =>
+    ({ nodeId: 'n', type: 'question', label: 'Question', ...data }) as never;
+
+  it('selects a Question whose prompt a page saved, automatic title or not', () => {
+    const before = record({ content: '', labelSource: 'auto' });
+    const after = record({ content: 'What is this?', labelSource: 'auto' });
+    expect(
+      selectAfterContentSave({
+        nodeId: 'n',
+        nodeType: 'question',
+        before,
+        after,
+      }),
+    ).toMatchObject({
+      node: { snapshot: { content: 'What is this?' } },
+    });
+  });
+
+  it('leaves a note body typed on to the editor that is left', () => {
+    const before = record({
+      type: 'note',
+      content: 'Body',
+      labelSource: 'auto',
+    });
+    const after = record({
+      type: 'note',
+      content: 'Body, typed on',
+      labelSource: 'auto',
+    });
+    expect(
+      selectAfterContentSave({ nodeId: 'n', nodeType: 'note', before, after })
+        .node,
+    ).toBeUndefined();
+    expect(
+      selectAfterContentSave({
+        nodeId: 'n',
+        nodeType: 'note',
+        before,
+        after,
+        editingEnded: true,
+      }).node,
+    ).toBeDefined();
   });
 });

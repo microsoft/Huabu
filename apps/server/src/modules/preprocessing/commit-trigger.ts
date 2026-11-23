@@ -227,15 +227,16 @@ function recordSnapshot(record: {
  * What a node-content save changed for the node's own preprocessing: its
  * title, who owns the title, or its source.
  *
- * A body counts only in the save that says the editor was left
- * (`editingEnded`): a page saves an authored body as it is typed, and a
+ * A `note` / `text` body counts only in the save that says the editor was
+ * left (`editingEnded`): a page saves an authored body as it is typed, and a
  * title derived from each intermediate body renamed the file again and
  * again. That save may itself change nothing, the body having been saved
  * already, so it selects the node whatever it carries, and with no
  * "before": the pipeline derives the title from the body as stored.
  *
  * A title that ends up automatic is not an input either: it is what
- * preprocessing produced, saved back.
+ * preprocessing produced, saved back. A Question's prompt is neither typed
+ * into over time nor a title: saving it starts the Question's naming.
  */
 export function selectAfterContentSave(input: {
   nodeId: string;
@@ -256,20 +257,25 @@ export function selectAfterContentSave(input: {
       node: { snapshot },
       titleChanged: !same(previousSnapshot.title, snapshot.title),
     };
+  // A title that ends up automatic is what preprocessing produced.
+  const automaticTitle = snapshot.labelSource === 'auto';
   const sourceChanged = !same(previousSnapshot.src, snapshot.src);
-  if (snapshot.labelSource === 'auto' && !sourceChanged)
-    return { titleChanged: false };
-  const titleChanged = !same(previousSnapshot.title, snapshot.title);
   const profile = PROCESSED_TYPES.has(input.nodeType)
     ? getProfile(input.nodeType as CanvasNodeType)
     : undefined;
   const changed =
-    profile?.watchFields.some(
-      (field) =>
-        field !== 'content' && !same(previousSnapshot[field], snapshot[field]),
-    ) ?? false;
+    profile?.watchFields.some((field) => {
+      // Typed into; the editor that is left says when it is finished.
+      if (field === 'content' && SETTLED_BY_EDITOR.has(input.nodeType))
+        return false;
+      if (automaticTitle && (field === 'title' || field === 'labelSource'))
+        return false;
+      return !same(previousSnapshot[field], snapshot[field]);
+    }) ?? false;
   return {
     ...(changed ? { node: { snapshot, previousSnapshot } } : {}),
-    titleChanged,
+    titleChanged:
+      (!automaticTitle || sourceChanged) &&
+      !same(previousSnapshot.title, snapshot.title),
   };
 }
