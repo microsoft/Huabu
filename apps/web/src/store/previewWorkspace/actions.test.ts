@@ -361,6 +361,36 @@ it('records explicit Agent opens but not programmatic navigation or file preview
   );
 });
 
+it.each([
+  [
+    'a transient Question tab',
+    { kind: 'node', nodeId: 'agent' },
+    { nodeId: 'agent' },
+  ],
+  [
+    'a transient Chat tab',
+    { kind: 'chat', threadId: 'thread' },
+    { threadId: 'thread' },
+  ],
+] as const)(
+  'keeps %s open when a file is opened from its conversation',
+  (_case, sourceTarget, source) => {
+    const store = () => usePreviewWorkspaceStore.getState();
+    const sourceTab = store().openPreviewTarget(
+      { canvasId: 'space', ...sourceTarget },
+      { transient: true },
+    );
+
+    const fileTab = openPreviewFile(reference, source);
+
+    expect(fileTab).not.toBe(sourceTab);
+    const { tabs } = store().workspace;
+    expect(tabs[sourceTab].transient).toBe(false);
+    expect(tabs[sourceTab].target).toMatchObject(sourceTarget);
+    expect(tabs[fileTab].target.kind).toBe('file');
+  },
+);
+
 it('previews a device file without a node, and hands over to a reference node when one opens', () => {
   const tabs = () =>
     Object.values(usePreviewWorkspaceStore.getState().workspace.tabs).map(

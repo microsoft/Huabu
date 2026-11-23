@@ -10,7 +10,7 @@
  * Content-block coverage is deliberately minimal in v1:
  *  - `text`  → render verbatim
  *  - `image` → small inline image
- *  - `diff`  → collapsed "+N / −M" summary
+ *  - `diff`  → the changed file's path, opening the file when possible
  *  - `terminal` → collapsed "[terminal]" placeholder
  *
  * Permission-gate UI lives elsewhere (the `permission` field is
@@ -23,6 +23,7 @@
 
 import { X as XIcon } from 'lucide-react';
 
+import { FilePathLink } from './FilePathLink';
 import { ToolKindIcon } from './ToolKindIcon';
 import { CommandBlock } from '../../../Common/CommandBlock';
 import { AssistantDisclosure } from '../../AssistantDisclosure';
@@ -130,9 +131,9 @@ export function ToolCallCard({ part, showIcon = false }: ToolCallCardProps) {
         renderedContent.push(
           <div
             key={`diff-${i}`}
-            className="text-fg-subtle bg-bg-default rounded-sm px-2 py-1 text-xs"
+            className="text-fg-subtle bg-bg-default flex min-w-0 rounded-sm px-2 py-1 text-xs"
           >
-            [diff: {wrap.path}]
+            <FilePathLink path={wrap.path} />
           </div>,
         );
       } else {
@@ -169,9 +170,8 @@ export function ToolCallCard({ part, showIcon = false }: ToolCallCardProps) {
       {hasLocations && (
         <ul className="text-fg-subtle text-xs">
           {(part.locations ?? []).map((loc, i) => (
-            <li key={`loc-${i}`} className="truncate">
-              {loc.path}
-              {loc.line ? `:${loc.line}` : ''}
+            <li key={`loc-${i}`} className="flex min-w-0">
+              <FilePathLink path={loc.path} line={loc.line} />
             </li>
           ))}
         </ul>

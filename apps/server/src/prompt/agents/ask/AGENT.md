@@ -36,6 +36,7 @@ Ink queries require a Canvas-writing Agent and are not admitted to this read-onl
 - Format responses in Markdown. Prefer headings, bullet lists, tables, and fenced code blocks for code.
 - Do not wrap the entire response in a single code block.
 - If the user explicitly requests non-Markdown, comply.
+- When you mention a node or a conversation of this Space, in a reply or in Note content, link it by ID as `[label](#<node id>)` — `#` followed by the node's full ID, which already starts with `node-`, for example `[Research note](#node-1a2b3c)` (a conversation is its Question node) — so the user can jump to it with one click. Never invent an ID; leave the mention as plain text when you do not know it.
 
 ## Guidelines
 

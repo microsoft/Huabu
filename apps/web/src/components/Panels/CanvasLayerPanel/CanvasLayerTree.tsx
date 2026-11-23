@@ -456,6 +456,45 @@ export const CanvasLayerTree = ({
     );
   }, [focusedId, itemById, selectedIdSet, visibleItemMap, visibleItems]);
 
+  // One-shot "show this node here" request, e.g. from a node link in Chat.
+  // Expanding a collapsed ancestor re-runs this effect with the row visible.
+  const locateRequest = usePanelStore((state) => state.layerLocateRequest);
+  useEffect(() => {
+    if (!locateRequest) return;
+    const { nodeId, nonce } = locateRequest;
+    const consume = () =>
+      usePanelStore.getState().consumeLayerLocateRequest(nonce);
+    // The panel decides what to do when the node has no row in this list.
+    if (!itemById.has(nodeId)) return;
+    if (!visibleItemMap.has(nodeId)) {
+      const collapsed = new Set(useCanvasStore.getState().collapsedFrameIds);
+      let parentId = itemById.get(nodeId)?.node.parentId;
+      let expanded = false;
+      while (parentId) {
+        expanded = collapsed.delete(parentId) || expanded;
+        parentId = itemById.get(parentId)?.node.parentId;
+      }
+      if (expanded) useCanvasStore.setState({ collapsedFrameIds: collapsed });
+      else consume();
+      return;
+    }
+    setFocusedId(nodeId);
+    // Consume only after scrolling: consuming changes this effect's
+    // dependency, and its cleanup would cancel a frame still waiting.
+    const frame = requestAnimationFrame(() => {
+      for (const row of treeRef.current?.querySelectorAll<HTMLElement>(
+        '[data-layer-id]',
+      ) ?? []) {
+        if (row.dataset.layerId === nodeId) {
+          row.scrollIntoView({ block: 'nearest' });
+          break;
+        }
+      }
+      consume();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [itemById, locateRequest, visibleItemMap]);
+
   const focusRow = useCallback((id: string) => {
     setFocusedId(id);
     requestAnimationFrame(() => {
