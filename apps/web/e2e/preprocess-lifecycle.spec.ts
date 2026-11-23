@@ -16,12 +16,14 @@ import { openNewCanvas, paneCenter, personEdits } from './helpers';
 import type { ArtifactUploadResponse, GetCanvasResponse } from '@huabu/shared';
 import type { Node } from '@xyflow/react';
 
-// Real UI and persistence; only explicitly gated preprocessing responses are
-// synthetic. Never import the store or invoke lifecycle methods from the page.
+// Real UI, real server preprocessing and real persistence; the only faults
+// injected are held or failed restore batches. Never import the store or
+// invoke lifecycle methods from the page.
 const writes = new WeakMap<Page, { pending: Set<Request>; last: number }>();
 const errors = new WeakMap<Page, string[]>();
 const injectedFailures = new WeakMap<Page, Set<Request>>();
 const expectedDiagnostics = new WeakMap<Page, string[]>();
+const asked = new WeakMap<Page, string[]>();
 
 test.beforeEach(async ({ page, context }, testInfo) => {
   const state = { pending: new Set<Request>(), last: Date.now() };
@@ -29,7 +31,10 @@ test.beforeEach(async ({ page, context }, testInfo) => {
   errors.set(page, []);
   injectedFailures.set(page, new Set());
   expectedDiagnostics.set(page, []);
+  asked.set(page, []);
   page.on('request', (request) => {
+    if (request.method() === 'POST' && request.url().endsWith('/preprocess'))
+      asked.get(page)?.push(new URL(request.url()).pathname);
     if (/^(POST|PUT|PATCH|DELETE)$/.test(request.method())) {
       state.pending.add(request);
       state.last = Date.now();
@@ -119,6 +124,8 @@ test.afterEach(async ({ page }, testInfo) => {
     contentType: 'application/json',
   });
   expect(errors.get(page)).toEqual([]);
+  // Preprocessing is the server's to start: no page of this suite asks.
+  expect(asked.get(page)).toEqual([]);
 });
 
 async function quiet(page: Page) {
@@ -216,52 +223,75 @@ async function remove(page: Page, node: Locator) {
   await expect(node).toHaveCount(0);
 }
 
-async function holdPreprocessing(page: Page, nodeId: string) {
-  const held: Route[] = [];
-  await page.route(`**/nodes/${nodeId}/preprocess`, (route) => {
-    held.push(route);
+/** A node's stored title, who owns it, and its body. */
+async function stored(page: Page, nodeId: string) {
+  const response = await page.request.get(
+    `/api/canvas/${idOf(page)}/nodes/${nodeId}/content`,
+  );
+  expect(response.ok()).toBe(true);
+  return (await response.json()) as {
+    label?: string | null;
+    labelSource?: string;
+    content: string;
+  };
+}
+
+/** The saves of a node's content this page sent, as their request bodies. */
+function contentSaves(page: Page, nodeId: string) {
+  const saves: Array<{ content?: string; editingEnded?: boolean }> = [];
+  page.on('request', (request) => {
+    if (
+      request.method() === 'PUT' &&
+      request.url().endsWith(`/nodes/${nodeId}/content`)
+    )
+      saves.push(request.postDataJSON());
   });
-  return held;
+  return saves;
 }
 
-async function succeed(route: Route, label: string) {
-  await route.fulfill({ json: { success: true, suggestedLabel: label } });
-}
-
-test('Note close settles, typing invalidates a delayed result, and later settle survives reload', async ({
+test('a Note’s title follows its body when the editor is left, not while it is typed in, and survives reload', async ({
   page,
 }) => {
   const { note, nodeId } = await noteFixture(page);
-  const held = await holdPreprocessing(page, nodeId);
-  await editNote(page, note, 'Lifecycle input A');
-  await expect.poll(() => held.length).toBe(1);
-  expect(held[0].request().postDataJSON().snapshot.content).toContain(
-    'Lifecycle input A',
-  );
-  await expect(pending(note)).toBeVisible();
-  await editNote(page, note, 'Lifecycle input B', false);
-  await expect.poll(() => body(page, nodeId)).toContain('Lifecycle input B');
-  await succeed(held[0], 'OBSOLETE RESULT A');
-  await expect(pending(note)).toHaveCount(0);
-  await expect(note).not.toContainText('OBSOLETE RESULT A');
-  await observeNoNewRequests(() => held.length, 1);
+  // The server derived the first title when the note was created.
+  await expect
+    .poll(async () => (await stored(page, nodeId)).label)
+    .toBe('Lifecycle original');
+  const saves = contentSaves(page, nodeId);
+
+  // Typing saves the body. The editor is still open: no title is derived.
+  await editNote(page, note, 'Heading typed first', false);
+  await expect.poll(() => body(page, nodeId)).toContain('Heading typed first');
+  await quiet(page);
+  expect(saves.some((save) => save.editingEnded)).toBe(false);
+  expect((await stored(page, nodeId)).label).toBe('Lifecycle original');
+
+  // Leaving the editor says so on a save; the server derives the title.
   await closeNote(page);
-  await expect.poll(() => held.length).toBe(2);
-  expect(held[1].request().postDataJSON().snapshot.content).toContain(
-    'Lifecycle input B',
-  );
-  await succeed(held[1], 'Current result B');
+  await expect
+    .poll(async () => (await stored(page, nodeId)).label)
+    .toBe('Heading typed first');
+  expect((await stored(page, nodeId)).labelSource).toBe('auto');
+  expect(saves.filter((save) => save.editingEnded)).toHaveLength(1);
   await expect(pending(note)).toHaveCount(0);
-  await expect(note).toContainText('Current result B');
+
+  // Again: typed on, left, derived from the latest body.
+  await editNote(page, note, 'Heading typed second');
+  await expect
+    .poll(async () => (await stored(page, nodeId)).label)
+    .toBe('Heading typed second');
   await quiet(page);
   await page.reload();
   await expect(page.locator(`[data-id="${nodeId}"]`)).toContainText(
-    'Lifecycle input B',
+    'Heading typed second',
   );
-  expect(await body(page, nodeId)).toContain('Lifecycle input B');
+  expect(await stored(page, nodeId)).toMatchObject({
+    label: 'Heading typed second',
+    content: expect.stringContaining('Heading typed second'),
+  });
 });
 
-test('new Note settle while the restore is being sent waits and resumes with latest body', async ({
+test('a Note edited and left while its restore is being sent is saved and titled once the restore lands', async ({
   page,
 }) => {
   const { note, nodeId } = await noteFixture(page);
@@ -274,7 +304,7 @@ test('new Note settle while the restore is being sent waits and resumes with lat
       restores.push(route);
     else await route.continue();
   });
-  const held = await holdPreprocessing(page, nodeId);
+  const saves = contentSaves(page, nodeId);
   await page.keyboard.press('ControlOrMeta+z');
   await expect(note).toBeVisible();
   await expect.poll(() => restores.length).toBe(1);
@@ -282,16 +312,14 @@ test('new Note settle while the restore is being sent waits and resumes with lat
     'RESTORE_NODES',
   );
   await editNote(page, note, 'Edited while restore is saving');
-  await expect(pending(note)).toBeVisible();
-  // The server has no such node yet: nothing is preprocessed for it.
-  await observeNoNewRequests(() => held.length, 0);
+  // The server has no such node yet: nothing is saved or said about it.
+  await observeNoNewRequests(() => saves.length, 0);
+
   await restores[0].continue();
-  await expect.poll(() => held.length).toBe(1);
-  expect(held[0].request().postDataJSON().snapshot.content).toContain(
-    'Edited while restore is saving',
-  );
-  await succeed(held[0], 'Restored latest result');
-  await expect(pending(note)).toHaveCount(0);
+  await expect
+    .poll(async () => (await stored(page, nodeId)).label)
+    .toBe('Edited while restore is saving');
+  expect(saves.filter((save) => save.editingEnded)).toHaveLength(1);
   await quiet(page);
   expect(await body(page, nodeId)).toContain('Edited while restore is saving');
   await page.reload();
@@ -300,7 +328,7 @@ test('new Note settle while the restore is being sent waits and resumes with lat
   );
 });
 
-test('a failing restore retains fresh work until the restore is sent', async ({
+test('a failing restore keeps the edit and the left editor until the restore is sent', async ({
   page,
 }, testInfo) => {
   const { note, nodeId } = await noteFixture(page);
@@ -328,7 +356,7 @@ test('a failing restore retains fresh work until the restore is sent', async ({
       await route.fulfill({ response });
     }
   });
-  const held = await holdPreprocessing(page, nodeId);
+  const saves = contentSaves(page, nodeId);
   await page.keyboard.press('ControlOrMeta+z');
   await expect(note).toBeVisible();
   await expect.poll(() => failedWrites).toBeGreaterThan(0);
@@ -337,11 +365,9 @@ test('a failing restore retains fresh work until the restore is sent', async ({
     page.getByText('Your changes are not synced yet. Trying again…'),
   ).toBeVisible();
   await editNote(page, note, 'Latest body retained through save failure');
-  await expect(pending(note)).toBeVisible();
-  // Neither the body nor the preprocessing is sent for a node the server
+  // Neither the body nor the left editor is sent for a node the server
   // does not have.
-  await observeNoNewRequests(() => held.length, 0);
-  expect(held).toHaveLength(0);
+  await observeNoNewRequests(() => saves.length, 0);
   expect(successfulWrites).toBe(0);
   await page.screenshot({
     path: testInfo.outputPath('blocked-before-restore.png'),
@@ -350,17 +376,14 @@ test('a failing restore retains fresh work until the restore is sent', async ({
   await expect
     .poll(() => successfulWrites, { timeout: 20_000 })
     .toBeGreaterThan(0);
-  await expect.poll(() => held.length).toBe(1);
-  expect(held[0].request().postDataJSON().snapshot.content).toContain(
-    'Latest body retained through save failure',
-  );
-  await succeed(held[0], 'Retry recovered result');
-  await expect(pending(note)).toHaveCount(0);
+  await expect
+    .poll(async () => (await stored(page, nodeId)).label, { timeout: 20_000 })
+    .toBe('Latest body retained through save failure');
   await expect(
     page.getByText('Your changes are not synced yet. Trying again…'),
   ).toHaveCount(0);
   await quiet(page);
-  expect(held).toHaveLength(1);
+  expect(saves.filter((save) => save.editingEnded)).toHaveLength(1);
   expect(await body(page, nodeId)).toContain(
     'Latest body retained through save failure',
   );
@@ -368,81 +391,12 @@ test('a failing restore retains fresh work until the restore is sent', async ({
   await expect(page.locator(`[data-id="${nodeId}"]`)).toContainText(
     'Latest body retained through save failure',
   );
-  expect(await body(page, nodeId)).toContain(
-    'Latest body retained through save failure',
-  );
 });
 
-test('unfinished deletion drains old response and rapid undo/redo resumes only the final restoration', async ({
-  page,
-}) => {
-  const { note, nodeId } = await noteFixture(page);
-  const held = await holdPreprocessing(page, nodeId);
-  await editNote(page, note, 'Unfinished deletion body');
-  await expect.poll(() => held.length).toBe(1);
-  await remove(page, note);
-  await succeed(held[0], 'DELETED OLD RESULT');
-  await quiet(page);
-  await page.keyboard.press('ControlOrMeta+z');
-  await expect(note).toBeVisible();
-  await page.keyboard.press('ControlOrMeta+Shift+z');
-  await expect(note).toHaveCount(0);
-  await quiet(page);
-  expect(held).toHaveLength(1);
-  await page.keyboard.press('ControlOrMeta+z');
-  await expect(note).toBeVisible();
-  await expect.poll(() => held.length).toBe(2);
-  expect(held[1].request().postDataJSON().snapshot.content).toContain(
-    'Unfinished deletion body',
-  );
-  await expect(note).not.toContainText('DELETED OLD RESULT');
-  await succeed(held[1], 'Final restored result');
-  await expect(pending(note)).toHaveCount(0);
-  await quiet(page);
-  expect(await body(page, nodeId)).toContain('Unfinished deletion body');
-});
-
-test('geometry undo and redo preserve an issued task and its pending indicator', async ({
-  page,
-}) => {
-  const { note, nodeId } = await noteFixture(page);
-  const held = await holdPreprocessing(page, nodeId);
-  await editNote(page, note, 'Geometry-independent processing');
-  await expect.poll(() => held.length).toBe(1);
-  const position = () =>
-    note.evaluate((element) => (element as HTMLElement).style.transform);
-  const before = await position();
-  const box = await note.boundingBox();
-  if (!box) throw new Error('Missing drag target');
-  await page.mouse.move(box.x + box.width / 2, box.y + 8);
-  await page.mouse.down();
-  await page.mouse.move(box.x + box.width / 2 + 90, box.y + 68, { steps: 14 });
-  await page.mouse.up();
-  await expect.poll(position).not.toBe(before);
-  const moved = await position();
-  await page.keyboard.press('ControlOrMeta+z');
-  await expect.poll(position).toBe(before);
-  await expect(pending(note)).toBeVisible();
-  await observeNoNewRequests(() => held.length, 1);
-  await page.keyboard.press('ControlOrMeta+Shift+z');
-  await expect.poll(position).toBe(moved);
-  await expect(pending(note)).toBeVisible();
-  await succeed(held[0], 'Geometry preserved result');
-  await expect(note).toContainText('Geometry preserved result');
-  await expect(pending(note)).toHaveCount(0);
-  await quiet(page);
-  expect(held).toHaveLength(1);
-});
-
-test('Text creation and changed-content blur use the real preprocessing endpoint', async ({
+test('a Text node is titled by the server when it is created and when its editor is left', async ({
   page,
 }) => {
   await openNewCanvas(page);
-  const requests: Request[] = [];
-  page.on('request', (request) => {
-    if (request.method() === 'POST' && request.url().endsWith('/preprocess'))
-      requests.push(request);
-  });
   const center = await paneCenter(page);
   await page
     .locator('[data-canvas-main-toolbar]')
@@ -454,21 +408,23 @@ test('Text creation and changed-content blur use the real preprocessing endpoint
   await page.keyboard.press('Escape');
   const text = page.locator('.react-flow__node-text').last();
   await expect(text).toBeVisible();
+  const nodeId = await text.getAttribute('data-id');
+  if (!nodeId) throw new Error('Missing Text identity');
+  await expect
+    .poll(async () => (await stored(page, nodeId)).label)
+    .toBe('Initial lifecycle text');
   await quiet(page);
-  const before = requests.length;
+
   await text.dblclick();
   await text.locator('textarea').fill('Changed lifecycle text');
   await page
     .locator('.react-flow__pane')
     .click({ position: { x: 40, y: 100 } });
-  await expect.poll(() => requests.length).toBeGreaterThan(before);
-  expect(requests.at(-1)?.postDataJSON().snapshot.content).toBe(
-    'Changed lifecycle text',
-  );
+  await expect
+    .poll(async () => (await stored(page, nodeId)).label)
+    .toBe('Changed lifecycle text');
   await quiet(page);
   await expect(pending(text)).toHaveCount(0);
-  const nodeId = await text.getAttribute('data-id');
-  if (!nodeId) throw new Error('Missing Text identity');
   expect(await body(page, nodeId)).toBe('Changed lifecycle text');
   await page.reload();
   await expect(page.locator(`[data-id="${nodeId}"]`)).toContainText(

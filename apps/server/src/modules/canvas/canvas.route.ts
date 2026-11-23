@@ -152,6 +152,7 @@ import type {
   RecentCanvasConversationParams,
   RecentCanvasConversationResponse,
 } from '@huabu/shared';
+import type { CanvasNode } from '@huabu/shared/canvas-engine';
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 
 /**
@@ -1026,6 +1027,7 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         nodeType,
         before,
         after: persisted,
+        ...(parsed.data.editingEnded ? { editingEnded: true } : {}),
         storedNodes: (canvas.state.nodes ??
           []) as NodeContentSave['storedNodes'],
       })?.();
@@ -1388,13 +1390,22 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
           .code(400)
           .send({ message: 'Invalid Agent Node association' });
       try {
-        return reply.send(
-          await associateAgentNode(
-            params.data.canvasId,
-            params.data.nodeId,
-            body.data,
-          ),
+        const associated = await associateAgentNode(
+          params.data.canvasId,
+          params.data.nodeId,
+          body.data,
         );
+        // The conversation of a node that came back is named again here,
+        // by the server that re-associated it, not by the page that asked.
+        if (
+          body.data.kind === 'restore' &&
+          associated.toVersion > associated.fromVersion
+        )
+          commitReactions()?.agentNodeRestored(
+            params.data.canvasId,
+            associated.node as CanvasNode,
+          )?.();
+        return reply.send(associated);
       } catch (error) {
         if (
           error instanceof AgentNodeAssociationError ||

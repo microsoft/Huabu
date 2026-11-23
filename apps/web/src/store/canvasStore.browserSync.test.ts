@@ -7,7 +7,6 @@ const api = vi.hoisted(() => ({
   postCanvasExecute: vi.fn(),
   getCanvas: vi.fn(),
   putNodeContent: vi.fn(),
-  preprocessNode: vi.fn(),
   postCanvasEvents: vi.fn(),
 }));
 vi.mock('../api', async (actual) => ({
@@ -242,7 +241,6 @@ beforeEach(() => {
     state: { nodes: server.state.nodes, edges: server.state.edges },
   }));
   api.putNodeContent.mockResolvedValue({ nodeId: X, label: null, rev: 'rev' });
-  api.preprocessNode.mockResolvedValue({ success: true });
   api.postCanvasEvents.mockResolvedValue({ success: true });
 });
 
@@ -2843,7 +2841,7 @@ describe('what is sent is decided by one rule, also around a pointer gesture', (
   });
 });
 
-describe('a page asks for no preprocessing because of a command batch', () => {
+describe('a command batch marks no node as being processed on the page', () => {
   // The server starts preprocessing where a batch is committed; a page only
   // shows the status the server announces (see `canvasSyncStore.test.ts`).
   const PDF = 'node-sync-pdf';
@@ -2911,8 +2909,6 @@ describe('a page asks for no preprocessing because of a command batch', () => {
     act();
     for (let index = 0; index < own.length; index++) await answer(index);
     await settle();
-
-    expect(api.preprocessNode).not.toHaveBeenCalled();
     expect(state().ingestionByNodeId).toEqual({});
   });
 });

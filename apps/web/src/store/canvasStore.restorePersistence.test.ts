@@ -9,7 +9,6 @@ const api = vi.hoisted(() => ({
   postCanvasExecute: vi.fn(),
   putNodeContent: vi.fn(),
   getCanvas: vi.fn(),
-  preprocessNode: vi.fn(),
   postCanvasEvents: vi.fn(),
 }));
 vi.mock('../api', async (actual) => ({
@@ -30,7 +29,7 @@ import useCanvasStore, {
   drainPendingSaves,
   resetCanvasSyncForTests,
   saveCanvasForSubmission,
-  settleNodePreprocess,
+  endNodeEditing,
 } from './canvasStore';
 import { ApiError } from '../api/_client';
 import { CanvasConflictError } from '../api/canvas';
@@ -185,7 +184,6 @@ beforeEach(() => {
       };
     },
   );
-  api.preprocessNode.mockResolvedValue({ success: true });
   api.postCanvasEvents.mockResolvedValue({ success: true });
   api.getCanvas.mockImplementation(async (canvasId: string) => ({
     canvasId,
@@ -236,8 +234,14 @@ async function deleted() {
   api.postCanvasExecute.mockClear();
   api.putNodeContent.mockClear();
 }
+/** Content saves that said the editor was left, by what else they carried. */
+const editingEndedSaves = () =>
+  api.putNodeContent.mock.calls
+    .map(([, , request]) => request as PutNodeContentRequest)
+    .filter((request) => request.editingEnded === true);
+
 describe('undo/redo persistence ordering', () => {
-  it('preprocesses the edited Note and applies its derived title after opening a Space conversation', async () => {
+  it('says the edited Note’s editor was left when a Space conversation is opened, on a content save', async () => {
     topology = [{ ...note, data: { ...note.data, labelSource: 'auto' } }];
     await state().loadCanvas('restore-canvas');
     usePreviewWorkspaceStore.setState({
@@ -247,65 +251,59 @@ describe('undo/redo persistence ordering', () => {
     const tabId = openPreviewNode(note.id, { transient: false });
     state().updateNodeData(note.id, { content: '# Updated heading' });
     await vi.advanceTimersByTimeAsync(2_000);
-    expect(api.preprocessNode).not.toHaveBeenCalled();
-    api.preprocessNode.mockImplementation(async () => {
-      serverLabel = 'Updated heading';
-      return { success: true, suggestedLabel: serverLabel };
-    });
+    // Typing saves the body and says nothing more.
+    expect(body).toBe('# Updated heading');
+    expect(editingEndedSaves()).toEqual([]);
+
     openSpaceConversation('child-canvas', 'agent', 'thread');
     await vi.advanceTimersByTimeAsync(2_000);
-    expect(api.preprocessNode).toHaveBeenCalledExactlyOnceWith(
-      'restore-canvas',
-      note.id,
-      expect.objectContaining({
-        snapshot: expect.objectContaining({ content: '# Updated heading' }),
-      }),
-    );
-    expect(state().nodes[0].data.label).toBe('Updated heading');
+    // Leaving the editor has nothing left to save; the save says only that.
+    expect(editingEndedSaves()).toHaveLength(1);
+    expect(editingEndedSaves()[0]).not.toHaveProperty('content');
     expect(body).toBe('# Updated heading');
     expect(
       usePreviewWorkspaceStore.getState().workspace.tabs[tabId],
     ).toBeDefined();
   });
 
-  it.each([false, true])(
-    'preserves preprocessing across an unrelated history change (issued=%s)',
-    async (issued) => {
-      await state().loadCanvas('restore-canvas');
-      const other: Node = {
-        ...note,
-        id: 'node-other',
-        position: { x: 100, y: 0 },
-      };
-      state()._setStateRaw({
-        nodes: [note, other],
-        ingestionByNodeId: {},
-      });
-      canvasHistoryManager.takeSnapshot([note, other], []);
-      state()._setStateRaw({
-        nodes: [note, { ...other, position: { x: 200, y: 0 } }],
-      });
-      const gate = deferred();
-      api.preprocessNode.mockImplementationOnce(async () => {
-        await gate.promise;
-        return { success: true, summary: 'Useful result' };
-      });
-      settleNodePreprocess(note.id);
-      if (issued) await vi.advanceTimersByTimeAsync(2_000);
-      state().undo();
-      expect(state().ingestionByNodeId[note.id]?.status).toBe('pending');
-      await vi.advanceTimersByTimeAsync(2_000);
-      expect(api.preprocessNode).toHaveBeenCalledOnce();
-      gate.resolve();
-      await tick();
-      expect(state().nodes[0].data.summary).toBe('Useful result');
-      expect(state().ingestionByNodeId[note.id]).toBeUndefined();
-      await drainPendingSaves();
-    },
-  );
+  it('says it once, and an unrelated undo neither repeats nor loses it', async () => {
+    await state().loadCanvas('restore-canvas');
+    const other: Node = {
+      ...note,
+      id: 'node-other',
+      position: { x: 100, y: 0 },
+    };
+    state()._setStateRaw({ nodes: [note, other] });
+    canvasHistoryManager.takeSnapshot([note, other], []);
+    state()._setStateRaw({
+      nodes: [note, { ...other, position: { x: 200, y: 0 } }],
+    });
+    const gate = (contentGate = deferred());
+    endNodeEditing(note.id);
+    state().undo();
+    await vi.advanceTimersByTimeAsync(2_000);
+    gate.resolve();
+    await drainPendingSaves();
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(editingEndedSaves()).toHaveLength(1);
+  });
 
-  it('retains unfinished work through rapid undo/redo without starting it for an absent node', async () => {
-    settleNodePreprocess(note.id);
+  it('carries the body typed last together with the mark, in one save', async () => {
+    await state().loadCanvas('restore-canvas');
+    state().updateNodeData(note.id, { content: '# Typed, then left at once' });
+    endNodeEditing(note.id);
+    await drainPendingSaves();
+    expect(editingEndedSaves()).toEqual([
+      expect.objectContaining({ content: '# Typed, then left at once' }),
+    ]);
+    expect(body).toBe('# Typed, then left at once');
+  });
+
+  it('sends nothing for an absent node through rapid undo/redo', async () => {
+    await state().loadCanvas('restore-canvas');
+    endNodeEditing(note.id);
+    await drainPendingSaves();
+    expect(editingEndedSaves()).toHaveLength(1);
     await deleted();
     const gate = (executeGate = deferred());
     state().undo();
@@ -314,11 +312,8 @@ describe('undo/redo persistence ordering', () => {
     gate.resolve();
     await drainPendingSaves();
     await vi.advanceTimersByTimeAsync(2_000);
-    expect(api.preprocessNode).not.toHaveBeenCalled();
-    state().undo();
-    await drainPendingSaves();
-    await vi.advanceTimersByTimeAsync(2_000);
-    expect(api.preprocessNode).toHaveBeenCalledOnce();
+    // Deleted again before the restore landed: no save of any kind.
+    expect(api.putNodeContent).not.toHaveBeenCalled();
   });
 
   it('rapid redo while waiting for deletion ends with the note deleted and no content write', async () => {
@@ -377,31 +372,9 @@ describe('undo/redo persistence ordering', () => {
     expect(api.putNodeContent).not.toHaveBeenCalled();
     expect(topology.map((n) => n.id)).toEqual([pdf.id]);
     expect(state().nodes[0].data.contentMissing).toBeUndefined();
-    // The page asks for nothing: the server derives the text again when it
-    // commits the restoring batch (see the server's `node-jobs.test.ts`).
-    expect(api.preprocessNode).not.toHaveBeenCalled();
   });
 
-  it('does not derive a PDF again when the server refused to take it back', async () => {
-    const pdf = {
-      ...note,
-      type: 'pdf',
-      data: { label: 'Paper', src: 'artifacts/paper.pdf' },
-    };
-    topology = [pdf];
-    state()._setStateRaw({ nodes: [pdf] });
-    await deleted();
-    // Somebody else put a node with this id back first.
-    topology = [pdf];
-    api.getCanvas.mockClear();
-    state().undo();
-    await drainPendingSaves().catch(() => undefined);
-    await vi.advanceTimersByTimeAsync(1000);
-    expect(calls).not.toContain('restore:committed');
-    expect(api.preprocessNode).not.toHaveBeenCalled();
-  });
-
-  it('does not preprocess a restored Note that had no work pending', async () => {
+  it('sends a restored Note once, in the restoring batch', async () => {
     await deleted();
     state().undo();
     await drainPendingSaves();
@@ -412,7 +385,6 @@ describe('undo/redo persistence ordering', () => {
     );
     expect(body).toBe(note.data.content);
     expect(api.putNodeContent).not.toHaveBeenCalled();
-    expect(api.preprocessNode).not.toHaveBeenCalled();
   });
 
   it('ordinary typing still saves on its own cadence without a structure PUT', async () => {
@@ -522,18 +494,25 @@ describe('undo/redo persistence ordering', () => {
     expect(body).toBe('# Edited during restore');
   });
 
-  it('does not preprocess the returning note until the restore is answered', async () => {
-    settleNodePreprocess(note.id);
+  it('says the editor of the returning note was left only once the restore is answered', async () => {
     await deleted();
     const gate = (executeGate = deferred());
     state().undo();
+    await tick();
+    state().updateNodeData(note.id, { content: '# Edited during restore' });
+    endNodeEditing(note.id);
     await vi.advanceTimersByTimeAsync(2_000);
-    expect(api.preprocessNode).not.toHaveBeenCalled();
+    // The server does not hold the node yet: nothing is said about it.
+    expect(api.putNodeContent).not.toHaveBeenCalled();
 
     gate.resolve();
     await drainPendingSaves();
-    await vi.advanceTimersByTimeAsync(2_000);
-    expect(api.preprocessNode).toHaveBeenCalledOnce();
+    expect(calls.indexOf('restore:committed')).toBeLessThan(
+      calls.indexOf('content:start'),
+    );
+    expect(editingEndedSaves()).toEqual([
+      expect.objectContaining({ content: '# Edited during restore' }),
+    ]);
   });
 
   it('holds leaving the Space until the restore is answered', async () => {

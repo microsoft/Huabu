@@ -8,7 +8,6 @@ const api = vi.hoisted(() => ({
   getCanvas: vi.fn(),
   putNodeContent: vi.fn(),
   getNodeContent: vi.fn(),
-  preprocessNode: vi.fn(),
   postCanvasEvents: vi.fn(),
 }));
 vi.mock('../api', async (actual) => ({
@@ -107,7 +106,6 @@ beforeEach(() => {
       rev: nodeRevisionOf({ content: body.content ?? '' }),
     }),
   );
-  api.preprocessNode.mockResolvedValue({ success: true });
   api.postCanvasEvents.mockResolvedValue({ success: true });
   // The content queue outlives a test; a fetch it still owes finds nothing.
   api.getNodeContent.mockReset();
@@ -144,7 +142,6 @@ describe('content another page saved, in the store', () => {
     expect(hasUnsavedCanvasEdits()).toBe(false);
     expect(api.putNodeContent).not.toHaveBeenCalled();
     expect(api.postCanvasExecute).not.toHaveBeenCalled();
-    expect(api.preprocessNode).not.toHaveBeenCalled();
   });
 
   it("sends this page's next edit of the node from the adopted revision, naming the page", async () => {

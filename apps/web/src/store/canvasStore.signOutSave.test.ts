@@ -5,7 +5,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const api = vi.hoisted(() => ({
   putNodeContent: vi.fn(),
-  preprocessNode: vi.fn(),
   postCanvasEvents: vi.fn(),
 }));
 vi.mock('../api', async (actual) => ({
@@ -42,7 +41,6 @@ const state = () => useCanvasStore.getState();
 // bookkeeping are real.
 beforeEach(() => {
   vi.clearAllMocks();
-  api.preprocessNode.mockResolvedValue({ success: true });
   api.postCanvasEvents.mockResolvedValue({ ok: true });
   state()._setStateRaw({
     canvasId: 'signout-canvas',

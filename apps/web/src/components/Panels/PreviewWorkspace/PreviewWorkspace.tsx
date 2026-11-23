@@ -41,7 +41,7 @@ import { createQuestionNodeAndCompose } from '@/components/Nodes/question/questi
 import { useConversationTitles } from '@/hooks/useConversationTitles';
 import useCanvasStore, {
   selectCanWriteCanvas,
-  settleNodePreprocess,
+  endNodeEditing,
 } from '@/store/canvasStore';
 import { conversationViewForNode } from '@/store/conversationOwner';
 import { openNewChat as createWorkspaceChat } from '@/store/previewWorkspace/actions';
@@ -98,7 +98,7 @@ export function settleActivePreviewTab(
   workspace: CanvasPreviewWorkspace,
   nodes: readonly Node[],
   tabId: string,
-  settle: (nodeId: string) => void = settleNodePreprocess,
+  settle: (nodeId: string) => void = endNodeEditing,
 ): void {
   if (!workspace.groups.some((group) => group.activeTabId === tabId)) return;
 

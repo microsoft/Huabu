@@ -21,7 +21,6 @@ vi.mock('../api', async (importOriginal) => ({
 vi.mock('../api/canvas', async (importOriginal) => ({
   ...(await importOriginal<typeof CanvasApi>()),
   putNodeContent,
-  preprocessNode: vi.fn().mockResolvedValue({ success: true }),
 }));
 vi.mock('../api/agent', () => ({ agentApi: { forkThread } }));
 

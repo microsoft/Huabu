@@ -173,6 +173,15 @@ export const putNodeContentBodySchema = z.object({
    */
   expectRev: z.string().optional(),
   /**
+   * The person has left the editor of this `note` / `text` node: its body
+   * is as they mean it, and the server derives the title from it. Saves
+   * made while typing do not say so, because a title derived from each
+   * intermediate body renamed the node's file again and again. Sent with
+   * the save made on leaving the editor, which may carry nothing else when
+   * the body was already saved.
+   */
+  editingEnded: z.boolean().optional(),
+  /**
    * The saving page's id (its `originator.tabId` / presence page id). Echoed
    * as `originPageId` on the `invalidate` event so that page can tell its own
    * save from another page's — to streams of the saving principal only, so

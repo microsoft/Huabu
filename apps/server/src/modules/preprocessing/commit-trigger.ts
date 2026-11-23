@@ -236,16 +236,22 @@ function recordSnapshot(record: {
  * What a node-content save changed for the node's own preprocessing: its
  * title, who owns the title, or its source.
  *
- * A body is not among them. A page saves an authored body as it is typed and
- * asks for preprocessing when the editor is left; a derived body is written
- * by preprocessing itself. Nor is a title that ends up automatic: that is
- * what preprocessing produced, saved back, not a new input.
+ * A body counts only in the save that says the editor was left
+ * (`editingEnded`): a page saves an authored body as it is typed, and a
+ * title derived from each intermediate body renamed the file again and
+ * again. That save may itself change nothing, the body having been saved
+ * already, so it selects the node whatever it carries, and with no
+ * "before": the pipeline derives the title from the body as stored.
+ *
+ * A title that ends up automatic is not an input either: it is what
+ * preprocessing produced, saved back.
  */
 export function selectAfterContentSave(input: {
   nodeId: string;
   nodeType: string;
   before: Parameters<typeof recordSnapshot>[0];
   after: Parameters<typeof recordSnapshot>[0];
+  editingEnded?: boolean;
 }): {
   /** The saved node, when its own input changed. */
   node?: Omit<PreprocessCandidate, 'node'>;
@@ -254,6 +260,11 @@ export function selectAfterContentSave(input: {
 } {
   const previousSnapshot = recordSnapshot(input.before);
   const snapshot = recordSnapshot(input.after);
+  if (input.editingEnded && SETTLED_BY_EDITOR.has(input.nodeType))
+    return {
+      node: { snapshot },
+      titleChanged: !same(previousSnapshot.title, snapshot.title),
+    };
   const sourceChanged = !same(previousSnapshot.src, snapshot.src);
   if (snapshot.labelSource === 'auto' && !sourceChanged)
     return { titleChanged: false };

@@ -344,4 +344,100 @@ describe('preprocessing started by the server after a write', () => {
       previousSnapshot: { title: 'Group', childLabels: ['One'] },
     });
   });
+
+  it('derives a note’s title when the save says the editor was left, and not before', async () => {
+    await run([createNote('node-a', { content: '# First\n\nBody' })]);
+    await waitForNodePreprocessing();
+    expect(sidecar('node-a')).toMatchObject({ label: 'First' });
+    // The body was typed on and saved while the editor stayed open.
+    const before = sidecar('node-a')!;
+    const typed = { ...before, content: '# Second heading\n\nBody' };
+    getCanvasStore(CANVAS).writeNode('node-a', typed);
+    const storedNodes = getCanvasStore(CANVAS).read()!.state.nodes as never[];
+    const save = (editingEnded: boolean) =>
+      preprocessAfterWrites.contentSave({
+        canvasId: CANVAS,
+        nodeId: 'node-a',
+        nodeType: 'note',
+        before,
+        after: typed,
+        storedNodes,
+        ...(editingEnded ? { editingEnded } : {}),
+      });
+    expect(save(false)).toBeUndefined();
+
+    // Leaving the editor saves nothing new, and says so.
+    preprocessAfterWrites.contentSave({
+      canvasId: CANVAS,
+      nodeId: 'node-a',
+      nodeType: 'note',
+      before: typed,
+      after: typed,
+      storedNodes,
+      editingEnded: true,
+    })?.();
+    await waitForNodePreprocessing();
+    expect(sidecar('node-a')).toMatchObject({
+      label: 'Second heading',
+      labelSource: 'auto',
+      content: '# Second heading\n\nBody',
+    });
+    // The flag means nothing for a node whose body no person edits.
+    expect(
+      preprocessAfterWrites.contentSave({
+        canvasId: CANVAS,
+        nodeId: 'node-a',
+        nodeType: 'pdf',
+        before: typed,
+        after: typed,
+        storedNodes,
+        editingEnded: true,
+      }),
+    ).toBeUndefined();
+  });
+
+  it('runs once for the same input asked for twice, and names a returning Agent Node', async () => {
+    const dispatcher = getPreprocessDispatcher();
+    const real = dispatcher.preprocess.bind(dispatcher);
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    const spy = vi
+      .spyOn(dispatcher, 'preprocess')
+      .mockImplementationOnce(async (request) => {
+        await held;
+        return real(request);
+      });
+    await run([createNote('node-a', { content: '# Same\n\nBody' })]);
+    const record = sidecar('node-a')!;
+    const again = () =>
+      preprocessAfterWrites.contentSave({
+        canvasId: CANVAS,
+        nodeId: 'node-a',
+        nodeType: 'note',
+        before: record,
+        after: record,
+        storedNodes: [],
+        editingEnded: true,
+      })?.();
+    again();
+    again();
+    release();
+    await waitForNodePreprocessing();
+    expect(spy).toHaveBeenCalledTimes(1);
+
+    spy.mockClear();
+    preprocessAfterWrites.agentNodeRestored(CANVAS, {
+      id: 'node-q',
+      type: 'question',
+      position: { x: 0, y: 0 },
+      data: { content: 'What is this?', threadId: 'thread-q' },
+    } as never)?.();
+    await waitForNodePreprocessing();
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy.mock.calls[0][0]).toMatchObject({
+      nodeId: 'node-q',
+      nodeType: 'question',
+      snapshot: { content: 'What is this?' },
+    });
+  });
 });

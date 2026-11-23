@@ -38,6 +38,8 @@ export interface NodeContentSave {
   nodeType: string;
   before: NodeContent;
   after: NodeContent;
+  /** The save said the person left the node's editor. */
+  editingEnded?: boolean;
   /** The Space's nodes as stored: structure only, no content fields. */
   storedNodes: readonly { id: string; type?: string; parentId?: string }[];
 }
@@ -48,6 +50,14 @@ export type StartFollowUp = () => void;
 export interface CommitReactions {
   batch(commit: CanvasCommit): StartFollowUp | undefined;
   contentSave(save: NodeContentSave): StartFollowUp | undefined;
+  /**
+   * An Agent Node an undo brought back is associated with its conversation
+   * again. That write goes through neither path above.
+   */
+  agentNodeRestored(
+    canvasId: string,
+    node: CanvasNode,
+  ): StartFollowUp | undefined;
 }
 
 let installed: CommitReactions | undefined;

@@ -1028,7 +1028,7 @@ describe('activation', () => {
   it('registers every active split editor for outer-page preparation without closing inner tabs', () => {
     const registration = vi.spyOn(pageLifecycle, 'register');
     const settle = vi
-      .spyOn(canvasModule, 'settleNodePreprocess')
+      .spyOn(canvasModule, 'endNodeEditing')
       .mockImplementation(() => {});
     try {
       openNode('a');

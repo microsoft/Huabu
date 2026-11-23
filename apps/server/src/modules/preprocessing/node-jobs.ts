@@ -18,6 +18,7 @@
  */
 
 import {
+  buildPreprocessSnapshot,
   isLabelProtected,
   type CanvasCommand,
   type PreprocessNodeRequest,
@@ -50,6 +51,8 @@ const log = getLogger('preprocessing.jobs');
 
 interface Job {
   running: Promise<void>;
+  /** The input of the run under way. */
+  current: Record<string, unknown>;
   /** A later write to the same node, to run once this one has finished. */
   next?: PreprocessCandidate;
 }
@@ -75,6 +78,13 @@ export const preprocessAfterWrites: CommitReactions = {
     const candidates = selectNodesToPreprocess(commit);
     if (candidates.length === 0) return undefined;
     return () => startNodePreprocessing(commit.canvasId, candidates);
+  },
+
+  agentNodeRestored(canvasId, node) {
+    return () =>
+      startNodePreprocessing(canvasId, [
+        { node, snapshot: buildPreprocessSnapshot(node, () => []) },
+      ]);
   },
 
   contentSave(save) {
@@ -157,6 +167,13 @@ export function startNodePreprocessing(
     const key = jobKey(canvasId, candidate.node.id);
     const active = jobs.get(key);
     if (active) {
+      // The same input as the run under way, with nothing waiting: that
+      // run is this request.
+      if (
+        !active.next &&
+        JSON.stringify(active.current) === JSON.stringify(candidate.snapshot)
+      )
+        continue;
       active.next = {
         ...candidate,
         // What the pipeline last saw is the first waiting write's "before".
@@ -166,11 +183,15 @@ export function startNodePreprocessing(
       };
       continue;
     }
-    const job: Job = { running: Promise.resolve() };
+    const job: Job = {
+      running: Promise.resolve(),
+      current: candidate.snapshot,
+    };
     jobs.set(key, job);
     job.running = (async () => {
       let current: PreprocessCandidate | undefined = candidate;
       while (current) {
+        job.current = current.snapshot;
         await runJob(canvasId, current);
         current = job.next;
         job.next = undefined;
