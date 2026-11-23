@@ -57,14 +57,10 @@ export function activateNodeTarget(
 
   canvas.selectNodes([node.id], false);
   if (openPreview) openNodePreview(node);
-  const canvasMounted = !!canvas.rfInstance && !!canvas.canvasWrapper;
-  if (canvas.rfInstance && canvas.canvasWrapper) {
-    revealNodesOnCanvas(
-      canvas.rfInstance,
-      canvas.canvasWrapper,
-      [node.id],
-      400,
-    );
+  const { rfInstance, canvasWrapper } = canvas;
+  const canvasMounted = !!rfInstance && !!canvasWrapper;
+  if (canvasMounted) {
+    revealNodesOnCanvas(rfInstance, canvasWrapper, [node.id], 400);
   } else {
     // Fullscreen preview unmounts the Canvas. Stay in fullscreen — the user is
     // reading — and queue the reveal for when the Canvas is mounted again.
@@ -104,8 +100,9 @@ function openNodePreview(node: {
  * Space that owns the document (`sourceCanvasId`), which is not the loaded
  * Space when a conversation is presented from another one. A reference to
  * another Space navigates there and lets the deep-link coordinator locate the
- * node, carrying the locate-only intent in router state. Returns false only when that navigation is impossible, so the caller
- * can fall back to ordinary URL handling.
+ * node, carrying the locate-only intent in router state. Returns false only
+ * when that navigation is impossible, so the caller can fall back to ordinary
+ * URL handling.
  */
 export function openNodeReference(
   reference: NodeReference,

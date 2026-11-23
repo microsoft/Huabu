@@ -5,7 +5,6 @@ import { describe, expect, it } from 'vitest';
 
 import {
   buildNodeDeepLink,
-  buildNodeReferenceHref,
   parseNodeReferenceHref,
   readNodeDeepLinkIntent,
 } from './nodeDeepLink';
@@ -45,10 +44,8 @@ describe('node deep links', () => {
 describe('in-document node references', () => {
   const origin = 'https://huabu.example';
 
-  it('round-trips the Space-relative form', () => {
-    const href = buildNodeReferenceHref('node-123');
-    expect(href).toBe('#node-123');
-    expect(parseNodeReferenceHref(`  ${href} `, origin)).toEqual({
+  it('reads the Space-relative form', () => {
+    expect(parseNodeReferenceHref('  #node-123 ', origin)).toEqual({
       nodeId: 'node-123',
     });
   });

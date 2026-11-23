@@ -1754,17 +1754,10 @@ function createLinkClickHandler(
       !isKeyboardActivation
     )
       return false;
-    if (onLinkClick && isPlainClick) {
-      onLinkClick(href);
-      return true;
-    }
     // A node link is in-app navigation: only the host can follow it, and a
     // follow modifier must not send it to the browser.
-    if (isNodeLink) {
-      onLinkClick?.(href);
-      return true;
-    }
-    window.open(href, '_blank', 'noopener,noreferrer');
+    if (onLinkClick && (isPlainClick || isNodeLink)) onLinkClick(href);
+    else if (!isNodeLink) window.open(href, '_blank', 'noopener,noreferrer');
     return true;
   };
 

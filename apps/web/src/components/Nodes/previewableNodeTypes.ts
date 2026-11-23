@@ -6,7 +6,7 @@
  * component registry so navigation helpers can ask the question without
  * importing every preview component.
  */
-export const PREVIEWABLE_NODE_TYPES = [
+const PREVIEWABLE_NODE_TYPES = [
   'fileReference',
   'note',
   'web',

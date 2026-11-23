@@ -51,11 +51,6 @@ function isNodeId(value: string): boolean {
   return value.length <= MAX_NODE_ID_LENGTH && NODE_ID_PATTERN.test(value);
 }
 
-/** Markdown href that addresses a node of the Space the document lives in. */
-export function buildNodeReferenceHref(nodeId: string): string {
-  return `#${nodeId}`;
-}
-
 /**
  * Recognise the in-app node link forms authored in Markdown: the
  * Space-relative `#node-<id>` and a `/canvas/<id>?node=<id>` deep link, either
