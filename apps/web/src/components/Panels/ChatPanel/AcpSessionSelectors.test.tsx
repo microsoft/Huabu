@@ -421,10 +421,9 @@ describe('AcpSessionSelectors capability loading', () => {
 
     const button = container.querySelector('button');
     expect(button).not.toBeNull();
-    expect(button?.textContent).toContain('chat.retryAgentOptions');
-    expect(container.querySelector('[role="alert"]')?.textContent).toContain(
-      'Agent is offline',
-    );
+    expect(button?.getAttribute('aria-label')).toBe('chat.retryAgentOptions');
+    // The raw reason belongs to the tooltip, not to the selector row.
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe('');
 
     act(() => {
       button?.dispatchEvent(new MouseEvent('click', { bubbles: true }));

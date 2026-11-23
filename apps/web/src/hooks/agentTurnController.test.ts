@@ -13,7 +13,6 @@ import { useAcpThreadChangesStore } from '@/store/acpThreadChangesStore';
 import useCanvasStore from '@/store/canvasStore';
 import {
   selectThreadExcludeCanvasSelection,
-  selectThreadHistoryLoaded,
   selectThreadMessages,
   useChatStore,
 } from '@/store/chatStore';
@@ -1186,21 +1185,16 @@ describe('queued composer turns', () => {
     expect(historyError).toBeUndefined();
   });
 
-  it('reloads history after inactive accepted Stop without remounting the composer', async () => {
-    const historyGate = deferred();
+  it('settles an unknown send through the attachment without waiting for Stop', async () => {
     act(() => useChatStore.getState().setHistoryLoaded(session.threadId, true));
     function MountedChat() {
       hook = useAgentStream(session);
       useChatHistory(session, useChatStore.getState().setThreadLoading);
-      const historyLoaded = useChatStore((state) =>
-        selectThreadHistoryLoaded(state, session.threadId),
-      );
       return createElement(ChatSessionProvider, {
         value: session,
         children: createElement(ThreadChatInput, {
           mode: 'operate',
           isStreaming: hook.isLoading,
-          submitDisabled: !historyLoaded,
           onStop: hook.stopStream,
           onSubmit: (event, mode, draft) => {
             event.preventDefault();
@@ -1215,100 +1209,73 @@ describe('queued composer turns', () => {
     act(() => useChatStore.getState().setThreadLoading(session.threadId, true));
     await enqueue('Unknown');
     await enqueue('Later');
-    act(() =>
-      useChatStore.getState().setThreadLoading(session.threadId, false),
-    );
+    act(() => {
+      useChatStore.getState().setThreadLoading(session.threadId, false);
+      useChatStore.getState().setDraft(session.threadId, 'Unsent draft');
+    });
     mocks.stream.mockImplementationOnce(
       async (_content, _thread, _mode, callbacks: AgentStreamCallbacks) =>
         callbacks.onError(new Error('Connection lost before acceptance')),
     );
-    await act(async () => {
-      resumeAgentTurnQueue(session);
-      await vi.waitFor(() =>
-        expect(
-          useChatStore.getState().threadsById[session.threadId].queuedTurns[0]
-            .status,
-        ).toBe('uncertain'),
-      );
-    });
-    const requestId = mocks.stream.mock.calls[0][4].requestId;
-    mocks.stop.mockResolvedValueOnce({
+    // The server did receive the request, and has since finished the turn.
+    mocks.stop.mockImplementation(async (_thread, _canvas, requestId) => ({
       stopped: false,
       acceptance: null,
       request: { id: requestId, accepted: true },
+    }));
+    mocks.history.mockResolvedValue({
+      threadId: session.threadId,
+      turns: [
+        {
+          id: 'finished-turn',
+          messages: [
+            { role: 'user', content: 'Unknown' },
+            {
+              role: 'assistant',
+              parts: [{ kind: 'text', text: 'Persisted answer' }],
+            },
+          ],
+        },
+      ],
+      hasMore: false,
     });
-    mocks.history.mockImplementationOnce(async () => {
-      await historyGate.promise;
-      return {
-        threadId: session.threadId,
-        turns: [
-          {
-            id: 'finished-turn',
+    try {
+      await act(async () => {
+        resumeAgentTurnQueue(session);
+        await vi.waitFor(() =>
+          expect(
+            useChatStore.getState().threadsById[session.threadId],
+          ).toMatchObject({
+            historyLoaded: true,
+            draft: 'Unsent draft',
+            queuePaused: true,
+            queuedTurns: [
+              { status: 'pending', prepared: { content: 'Later' } },
+            ],
             messages: [
               { role: 'user', content: 'Unknown' },
               {
                 role: 'assistant',
-                parts: [{ kind: 'text', text: 'Persisted answer' }],
+                segments: [{ kind: 'text', text: 'Persisted answer' }],
               },
             ],
-          },
-        ],
-        hasMore: false,
-      };
-    });
-    act(() =>
-      useChatStore.getState().setDraft(session.threadId, 'Unsent draft'),
-    );
-    try {
-      await act(async () => {
-        container
-          ?.querySelector<HTMLButtonElement>('[aria-label="chat.stop"]')
-          ?.click();
+          }),
+        );
       });
       expect(mocks.stop).toHaveBeenCalledWith(
         session.threadId,
         session.ownerCanvasId,
-        requestId,
+        mocks.stream.mock.calls[0][4].requestId,
       );
-      expect(mocks.history).toHaveBeenCalledOnce();
-      expect(
-        container?.querySelector<HTMLButtonElement>(
-          '[aria-label="chat.addToQueue"]',
-        )?.disabled,
-      ).toBe(true);
-      await act(async () => {
-        historyGate.resolve();
-        await historyGate.promise;
-      });
-      expect(
-        useChatStore.getState().threadsById[session.threadId],
-      ).toMatchObject({
-        historyLoaded: true,
-        draft: 'Unsent draft',
-        queuePaused: true,
-        queuedTurns: [{ status: 'pending', prepared: { content: 'Later' } }],
-        messages: [
-          { role: 'user', content: 'Unknown' },
-          {
-            role: 'assistant',
-            segments: [{ kind: 'text', text: 'Persisted answer' }],
-          },
-        ],
-      });
-      expect(
-        container?.querySelector<HTMLButtonElement>(
-          '[aria-label="chat.addToQueue"]',
-        )?.disabled,
-      ).toBe(false);
       const resume = [...(container?.querySelectorAll('button') ?? [])].find(
         (button) => button.textContent === 'chat.resumeQueue',
       );
       expect(resume?.disabled).toBe(false);
       expect(mocks.stream).toHaveBeenCalledOnce();
-      expect(mocks.history).toHaveBeenCalledOnce();
-      expect(mocks.reconnect).not.toHaveBeenCalled();
+      expect(mocks.reconnect).toHaveBeenCalledOnce();
     } finally {
-      historyGate.resolve();
+      mocks.stop.mockReset();
+      mocks.history.mockReset();
     }
   });
 

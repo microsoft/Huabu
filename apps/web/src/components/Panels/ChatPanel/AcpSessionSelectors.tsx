@@ -30,6 +30,7 @@ import { SessionSelectorPill } from './SessionSelectorPill';
 import { Button } from '../../Common/Button';
 import { Loading } from '../../Common/Loading';
 import { Popover } from '../../Common/Popover';
+import { Tooltip } from '../../Common/Tooltip';
 
 import type { SelectOption } from '../../Common/Select';
 import type { AcpSessionMetaSnapshot, AcpSessionSelector } from '@huabu/shared';
@@ -88,27 +89,32 @@ export const AcpSessionSelectors = ({
   const fullAccessDescriptionId = useId();
 
   const selectors = useMemo(() => buildAcpSessionSelectors(meta), [meta]);
+  // The row has no room for a sentence: the reason stays in the tooltip, and
+  // the panel's own alert carries the message when no options are cached.
   const retry =
-    error && !loading ? (
-      <span
-        role="alert"
-        className="text-danger-fg inline-flex items-center gap-1 text-xs"
+    error && !loading && onRetry ? (
+      <Tooltip
+        content={`${t('chat.retryAgentOptions')}\n${error.message}`}
+        contentClassName="whitespace-pre-line"
+        wrapperClassName="inline-flex shrink-0"
       >
-        <span>{error.message}</span>
-        {onRetry && (
+        <span role="alert" className="inline-flex">
           <Button
             variant="ghost"
-            tone="neutral"
+            tone="danger"
             size="sm"
             shape="pill"
-            className="gap-1 px-2 py-0.5 text-xs whitespace-nowrap"
+            iconOnly
+            // Match the selector pills' height so the row does not grow and
+            // the hover background lines up with theirs.
+            className="size-5 min-h-5 min-w-5 p-0.5"
+            aria-label={t('chat.retryAgentOptions')}
             onClick={() => void onRetry()}
           >
-            <RefreshCcw aria-hidden="true" className="h-3 w-3" />
-            <span>{t('chat.retryAgentOptions')}</span>
+            <RefreshCcw aria-hidden="true" />
           </Button>
-        )}
-      </span>
+        </span>
+      </Tooltip>
     ) : null;
 
   const dismissFullAccess = () => {

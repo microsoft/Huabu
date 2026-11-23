@@ -83,7 +83,7 @@ function HistoryFixture() {
           historyPages={thread?.historyPages}
           onLoadHistoryPage={history.loadHistoryPage}
           historyPageError={history.historyPageError}
-          onRetryHistoryPage={history.retryHistoryPage}
+          onRetryHistory={history.retryHistory}
           onVisibleMessagesChange={history.updateHistoryViewport}
         />
       </main>

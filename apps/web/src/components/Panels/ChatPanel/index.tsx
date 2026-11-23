@@ -18,7 +18,6 @@ import {
   setAcpSessionMode,
   setAcpSessionModel,
 } from '@/api/acp';
-import { Button } from '@/components/Common/Button';
 import { InlineEditableTitle } from '@/components/Common/InlineEditableTitle';
 import { toast } from '@/components/Common/Toast';
 import { PermissionTray } from '@/components/Messages/AIMessage/PermissionCard';
@@ -74,7 +73,6 @@ import { resolveConnectedDevice } from '@/utils/agentletDevice';
 
 import {
   AcpConnectionBadge,
-  useAcpConnectionDescription,
   type AcpConnectionInfo,
   type AcpConnectionStatus,
 } from './AcpConnectionBadge';
@@ -83,6 +81,7 @@ import { bindingsEqual } from './agentMenu';
 import { AgentSelector, type AgentChoice } from './AgentSelector';
 import { BuiltinSessionSelectors } from './BuiltinSessionSelectors';
 import { ChangeReviewCard } from './ChangeReviewCard';
+import { PanelAlert } from './PanelAlert';
 import { parseSlashInvocations } from './parseSlashInvocations';
 import { saveChatAsQuestion } from './saveChatAsQuestion';
 import { ThreadChatInput } from './ThreadChatInput';
@@ -554,15 +553,6 @@ export const ChatPanel = ({
           : 'connected';
   const agentAlias = agentBinding.kind === 'external' ? agentBinding.alias : '';
   const connectionError = acpSessionMetaError?.message ?? null;
-  const connectionDescription = useAcpConnectionDescription(
-    acpConnectionStatus
-      ? {
-          status: acpConnectionStatus,
-          alias: agentAlias,
-          errorMessage: connectionError,
-        }
-      : null,
-  );
   useEffect(() => {
     onConnectionChange?.(
       isActive && acpConnectionStatus
@@ -582,6 +572,25 @@ export const ChatPanel = ({
     connectionError,
   ]);
   const connectionInTab = hideDuplicateTitle && !!onConnectionChange;
+  // A failure the network caused is retried when the network returns, so its
+  // alert does not outlive the outage.
+  const titleSyncFailed = !activeConversationView && !!titleError;
+  const agentInfoFailed = !!acpSessionMetaError;
+  useEffect(() => {
+    if (!titleSyncFailed && !agentInfoFailed) return;
+    const recover = () => {
+      if (agentInfoFailed) void refreshAcpSessionMeta();
+      if (titleSyncFailed) void retryConversationTitle(ownerCanvasId, threadId);
+    };
+    window.addEventListener('online', recover);
+    return () => window.removeEventListener('online', recover);
+  }, [
+    titleSyncFailed,
+    agentInfoFailed,
+    refreshAcpSessionMeta,
+    ownerCanvasId,
+    threadId,
+  ]);
 
   // Apply optimism when the queued RPC starts, and revert before refreshing
   // on failure so an older operation cannot overwrite a later selection.
@@ -1143,60 +1152,21 @@ export const ChatPanel = ({
         <div
           className={`flex h-full flex-col gap-2 overflow-visible ${remote ? 'pt-0' : hidePanelHeader ? 'pt-3' : 'pt-1'}`}
         >
-          {historyError && !ownerUnavailable && (
-            <div
-              role="alert"
-              className="text-danger-fg flex items-center gap-2 px-3 text-xs"
-            >
-              <span>
-                {t('chat.historyLoadFailed')}: {historyError}
-              </span>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={historyWindow?.retryHistory}
-              >
-                {t('messages.retry')}
-              </Button>
-            </div>
-          )}
           {acpConnectionStatus === 'failed' && (
-            <div
-              role="alert"
-              className="text-danger-fg flex items-start gap-2 px-3 text-xs"
-            >
-              <span className="min-w-0 flex-1 wrap-anywhere whitespace-pre-line">
-                {[agentAlias, connectionDescription, connectionError]
-                  .filter(Boolean)
-                  .join('\n')}
-              </span>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => void refreshAcpSessionMeta()}
-              >
-                {t('messages.retry')}
-              </Button>
-            </div>
+            <PanelAlert
+              message={t('chat.agentSessionLoadFailed', { agent: agentAlias })}
+              detail={connectionError}
+              onRetry={() => void refreshAcpSessionMeta()}
+            />
           )}
           {!activeConversationView && titleError && (
-            <div
-              role="alert"
-              className="text-danger-fg flex items-center gap-2 px-3 text-xs"
-            >
-              <span>
-                {t('chat.titleSaveFailed')}: {titleError}
-              </span>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => {
-                  void retryConversationTitle(ownerCanvasId, threadId);
-                }}
-              >
-                {t('messages.retry')}
-              </Button>
-            </div>
+            <PanelAlert
+              message={t('chat.titleSaveFailed')}
+              detail={titleError}
+              onRetry={() => {
+                void retryConversationTitle(ownerCanvasId, threadId);
+              }}
+            />
           )}
           <MessageList
             onLatestVisibleChange={setIsLatestVisible}
@@ -1204,8 +1174,12 @@ export const ChatPanel = ({
             historyPages={historyPages}
             onLoadHistoryPage={historyWindow?.loadHistoryPage}
             onVisibleMessagesChange={historyWindow?.updateHistoryViewport}
-            historyPageError={historyWindow?.historyPageError}
-            onRetryHistoryPage={historyWindow?.retryHistoryPage}
+            historyPageError={
+              historyError && !ownerUnavailable
+                ? t('chat.historyLoadFailed')
+                : historyWindow?.historyPageError
+            }
+            onRetryHistory={historyWindow?.retryHistory}
             activationId={activationId}
             threadId={threadId}
             isLoading={isLoading || sendingWhenReady}
@@ -1296,7 +1270,13 @@ export const ChatPanel = ({
                       meta={acpSessionMeta}
                       source={acpSessionMetaSource}
                       loading={acpSessionMetaLoading}
-                      error={acpSessionMetaError}
+                      // With no cached options the panel alert already
+                      // reports this failure and offers the same retry.
+                      error={
+                        acpConnectionStatus === 'failed'
+                          ? null
+                          : acpSessionMetaError
+                      }
                       onRetry={refreshAcpSessionMeta}
                       onSelectMode={handleAcpSelectMode}
                       onSelectModel={handleAcpSelectModel}

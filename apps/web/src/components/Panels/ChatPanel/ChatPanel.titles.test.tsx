@@ -107,7 +107,10 @@ vi.mock('@/store/conversationOwner', async (original) => ({
 // and network boundaries with complete, stable fixtures.
 vi.mock('react-router-dom', () => ({ useNavigate: () => () => {} }));
 vi.mock('@/components/Common/Loading', () => ({ Loading: () => null }));
-vi.mock('@/components/Common/Toast', () => ({ toast: vi.fn() }));
+vi.mock('@/components/Common/Toast', async () => ({
+  ...(await vi.importActual<object>('@/components/Common/Toast')),
+  toast: vi.fn(),
+}));
 vi.mock('@/hooks/useChatHistory', () => ({
   useChatHistory: vi.fn(() => ({
     isCurrentOwnerHistory: historyState.current,
@@ -969,7 +972,7 @@ describe('rendered conversation titles', () => {
       const alert = container.querySelector('[role="alert"]');
       if (status === 'failed') {
         expect(alert?.textContent).toContain('Fixture');
-        expect(alert?.textContent).toContain('Cache unavailable');
+        expect(alert?.getAttribute('title')).toBe('Cache unavailable');
         await act(async () =>
           alert?.querySelector<HTMLButtonElement>('button')?.click(),
         );
@@ -1124,8 +1127,11 @@ describe('rendered conversation titles', () => {
     expect(title()).toBe('Original');
     expect(header()).toBeNull();
     expect(container.querySelector('[role="alert"]')?.textContent).toContain(
-      'Offline',
+      'Could not sync conversation title',
     );
+    expect(
+      container.querySelector('[role="alert"]')?.getAttribute('title'),
+    ).toBe('Offline');
     const retry = container.querySelector<HTMLButtonElement>(
       '[role="alert"] button',
     );
@@ -1472,8 +1478,11 @@ describe('rendered conversation titles', () => {
     expect(title()).toBe('Original');
     expect(header().textContent).toBe('Original');
     expect(container.querySelector('[role="alert"]')?.textContent).toContain(
-      'Offline',
+      'Could not sync conversation title',
     );
+    expect(
+      container.querySelector('[role="alert"]')?.getAttribute('title'),
+    ).toBe('Offline');
     await act(async () =>
       container
         .querySelector<HTMLButtonElement>('[role="alert"] button')!
