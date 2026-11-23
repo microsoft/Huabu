@@ -37,7 +37,7 @@ export function FilePathLink({ path, line, compact }: FilePathLinkProps) {
 
   if (!isFileReference(reference)) {
     return (
-      <span className="truncate" title={compact ? path : undefined}>
+      <span className="min-w-0 truncate" title={compact ? path : undefined}>
         {label}
       </span>
     );
@@ -46,7 +46,10 @@ export function FilePathLink({ path, line, compact }: FilePathLinkProps) {
     <Button
       variant="ghost"
       size="sm"
-      className="text-info-fg max-w-full justify-start truncate px-1 text-xs"
+      className="text-info-fg max-w-full min-w-0 justify-start truncate px-1 text-xs"
+      // The tooltip wrapper is the flex item: unconstrained, a long path would
+      // push past a narrow Chat panel instead of truncating.
+      tooltipWrapperClassName="inline-flex max-w-full min-w-0"
       title={t('messages.openFile', { path })}
       onClick={(event) => {
         event.stopPropagation();

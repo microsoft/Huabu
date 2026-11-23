@@ -65,6 +65,14 @@ it('opens an absolute path on the device that runs the conversation', () => {
 
   const button = container.querySelector('button');
   expect(button?.textContent).toBe('app.ts:12');
+  // Every box from the list item down may shrink, so a long path truncates.
+  for (
+    let box: Element | null | undefined = button;
+    box && box !== container;
+    box = box.parentElement
+  ) {
+    expect(box.className).toContain('min-w-0');
+  }
   act(() => button?.click());
   expect(mocks.openPreviewFile).toHaveBeenCalledExactlyOnceWith(
     { agentletId: 'device-1', path: '/repo/src/app.ts' },

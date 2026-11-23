@@ -131,7 +131,7 @@ export function ToolCallCard({ part, showIcon = false }: ToolCallCardProps) {
         renderedContent.push(
           <div
             key={`diff-${i}`}
-            className="text-fg-subtle bg-bg-default flex rounded-sm px-2 py-1 text-xs"
+            className="text-fg-subtle bg-bg-default flex min-w-0 rounded-sm px-2 py-1 text-xs"
           >
             <FilePathLink path={wrap.path} />
           </div>,
@@ -170,7 +170,7 @@ export function ToolCallCard({ part, showIcon = false }: ToolCallCardProps) {
       {hasLocations && (
         <ul className="text-fg-subtle text-xs">
           {(part.locations ?? []).map((loc, i) => (
-            <li key={`loc-${i}`} className="flex">
+            <li key={`loc-${i}`} className="flex min-w-0">
               <FilePathLink path={loc.path} line={loc.line} />
             </li>
           ))}
