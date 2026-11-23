@@ -1404,7 +1404,6 @@
     "partialStrokeCount_other": "{{count}} 笔"
   },
   "messages": {
-    "seeMore": "查看更多",
     "detailsLoading": "正在加载详情…",
     "detailsLoadFailed": "无法加载详情。",
     "listLabel": "对话消息",

@@ -310,12 +310,7 @@ test('deferred details preserve the reading anchor and avoid transferring collap
       name: 'Reading file a',
       exact: true,
     });
-    await card.click();
-    const seeMore = fixture(page).getByRole('button', {
-      name: 'See more',
-      exact: true,
-    });
-    await expect(seeMore).toBeVisible();
+    await expect(card).toBeVisible();
     expect(detailRequests).toBe(0);
     await card.evaluate((element) => {
       element.setAttribute('data-hydration-identity', 'retained');
@@ -327,7 +322,7 @@ test('deferred details preserve the reading anchor and avoid transferring collap
       );
       element.scrollTop -= 20;
     });
-    await seeMore.click();
+    await card.click();
     const before = await card.boundingBox();
     await expect(
       fixture(page).getByText(body.slice(0, 64), { exact: false }),
