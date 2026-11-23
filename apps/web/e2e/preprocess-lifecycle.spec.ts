@@ -4,6 +4,7 @@
 import {
   expect,
   test,
+  type BrowserContext,
   type Locator,
   type Page,
   type Request,
@@ -475,6 +476,56 @@ test('Text creation and changed-content blur use the real preprocessing endpoint
   );
 });
 
+/**
+ * Record the `preprocess` events a page receives on the Canvas Sync stream,
+ * from its next navigation on. The page's own handling is untouched: the
+ * stream is read twice.
+ */
+async function tapPreprocessEvents(target: Page | BrowserContext) {
+  await target.addInitScript(() => {
+    const seen: string[] = ((
+      window as unknown as { __preprocess: string[] }
+    ).__preprocess = []);
+    const original = window.fetch;
+    window.fetch = async (...args) => {
+      const response = await original(...args);
+      const url = String(args[0] instanceof Request ? args[0].url : args[0]);
+      if (!url.includes('/sync/stream') || !response.body) return response;
+      const [mine, theirs] = response.body.tee();
+      void (async () => {
+        const reader = mine.getReader();
+        const decoder = new TextDecoder();
+        let text = '';
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) return;
+          text += decoder.decode(value, { stream: true });
+          const frames = text.split('\n\n');
+          text = frames.pop() ?? '';
+          for (const frame of frames)
+            if (frame.includes('event: preprocess'))
+              seen.push(frame.split('data: ')[1] ?? '');
+        }
+      })();
+      return new Response(theirs, response);
+    };
+  });
+}
+
+type PreprocessEvent = { nodeId: string; status: string; error?: string };
+
+async function preprocessEvents(page: Page): Promise<PreprocessEvent[]> {
+  const raw = await page.evaluate(
+    () => (window as unknown as { __preprocess?: string[] }).__preprocess ?? [],
+  );
+  return raw.map((data) => JSON.parse(data) as PreprocessEvent);
+}
+
+const statusesOf = (events: PreprocessEvent[], nodeId: string) =>
+  events
+    .filter((event) => event.nodeId === nodeId)
+    .map((event) => event.status);
+
 /** A one-page PDF with a text layer, small enough to build inline. */
 function textPdf(text: string) {
   const stream = `BT /F1 18 Tf 40 700 Td (${text}) Tj ET`;
@@ -608,35 +659,7 @@ test('a page requests no preprocessing for a batch: moving a PDF in a Grid start
   // A title is preprocessing input, but it is the server that acts on it,
   // where the save is committed: the page sends no request of its own and
   // shows the status the server announces.
-  const statuses: string[] = [];
-  await page.addInitScript(() => {
-    const seen: string[] = ((
-      window as unknown as { __preprocess: string[] }
-    ).__preprocess = []);
-    const original = window.fetch;
-    window.fetch = async (...args) => {
-      const response = await original(...args);
-      const url = String(args[0] instanceof Request ? args[0].url : args[0]);
-      if (!url.includes('/sync/stream') || !response.body) return response;
-      const [mine, theirs] = response.body.tee();
-      void (async () => {
-        const reader = mine.getReader();
-        const decoder = new TextDecoder();
-        let text = '';
-        for (;;) {
-          const { done, value } = await reader.read();
-          if (done) return;
-          text += decoder.decode(value, { stream: true });
-          const frames = text.split('\n\n');
-          text = frames.pop() ?? '';
-          for (const frame of frames)
-            if (frame.includes('event: preprocess'))
-              seen.push(frame.split('data: ')[1] ?? '');
-        }
-      })();
-      return new Response(theirs, response);
-    };
-  });
+  await tapPreprocessEvents(page);
   // Reconnect the stream through the tap.
   await page.reload();
   await expect(pdf(0)).toBeVisible();
@@ -655,23 +678,108 @@ test('a page requests no preprocessing for a batch: moving a PDF in a Grid start
   await input.fill('Renamed paper');
   await input.press('Enter');
   await expect
-    .poll(async () => {
-      statuses.splice(
-        0,
-        statuses.length,
-        ...(await page.evaluate(
-          () => (window as unknown as { __preprocess: string[] }).__preprocess,
-        )),
-      );
-      return statuses
-        .map((raw) => JSON.parse(raw) as { nodeId: string; status: string })
-        .filter((event) => event.nodeId === 'node-grid-pdf-0')
-        .map((event) => event.status);
-    })
+    .poll(async () =>
+      statusesOf(await preprocessEvents(page), 'node-grid-pdf-0'),
+    )
     .toEqual(['pending', 'done']);
   await expect(pending(pdf(0))).toHaveCount(0);
   await quiet(page);
   expect(requested).toEqual([]);
   // The other PDF, which was only pushed aside, was never processed.
-  expect(statuses.join('')).not.toContain('node-grid-pdf-1');
+  expect(statusesOf(await preprocessEvents(page), 'node-grid-pdf-1')).toEqual(
+    [],
+  );
+});
+
+test('a write is processed once, whether two pages are open or none', async ({
+  page,
+  browser,
+  baseURL,
+}) => {
+  // ── Two pages on the Space ────────────────────────────────────────────
+  await tapPreprocessEvents(page);
+  await openNewCanvas(page);
+  const canvasId = idOf(page);
+  const other = await browser.newContext({ baseURL });
+  await tapPreprocessEvents(other);
+  const second = await other.newPage();
+  const asked: string[] = [];
+  for (const each of [page, second])
+    each.on('request', (request) => {
+      if (request.method() === 'POST' && request.url().endsWith('/preprocess'))
+        asked.push(new URL(request.url()).pathname);
+    });
+  await second.goto(`/canvas/${canvasId}`);
+  await second.waitForSelector('.react-flow__pane');
+  await quiet(page);
+
+  // The write comes from neither page: nothing either of them does can be
+  // what starts the processing.
+  const create = (spaceId: string, id: string, heading: string) =>
+    page.request.post(`/api/canvas/${spaceId}/execute`, {
+      data: {
+        edits: personEdits([
+          {
+            type: 'CREATE_NODES',
+            nodes: [
+              {
+                id,
+                nodeType: 'note',
+                position: { x: 200, y: 200 },
+                size: { width: 300, height: 200 },
+                data: { content: `# ${heading}\n\nBody` },
+              },
+            ],
+          },
+        ]),
+      },
+    });
+  const created = await create(canvasId, 'node-once', 'Derived once');
+  expect(created.ok(), await created.text()).toBe(true);
+
+  // One run: each page hears one start and one end, and both show the
+  // title the server derived and stored.
+  for (const each of [page, second]) {
+    await expect
+      .poll(async () => statusesOf(await preprocessEvents(each), 'node-once'))
+      .toEqual(['pending', 'done']);
+    await expect(each.locator('[data-id="node-once"]')).toContainText(
+      'Derived once',
+    );
+    await expect(pending(each.locator('[data-id="node-once"]'))).toHaveCount(0);
+  }
+  const stored = async (spaceId: string, id: string) => {
+    const response = await page.request.get(
+      `/api/canvas/${spaceId}/nodes/${id}/content`,
+    );
+    return response.ok()
+      ? ((await response.json()) as { label?: string; labelSource?: string })
+      : {};
+  };
+  expect(await stored(canvasId, 'node-once')).toMatchObject({
+    label: 'Derived once',
+    labelSource: 'auto',
+  });
+  // Nothing more follows, and neither page asked for anything.
+  await quiet(page);
+  for (const each of [page, second])
+    expect(statusesOf(await preprocessEvents(each), 'node-once')).toEqual([
+      'pending',
+      'done',
+    ]);
+  expect(asked).toEqual([]);
+  await other.close();
+
+  // ── No page on the Space ──────────────────────────────────────────────
+  const made = await page.request.post('/api/canvas', {
+    data: { title: 'Nobody is looking' },
+  });
+  expect(made.ok(), await made.text()).toBe(true);
+  const { canvasId: unwatched } = (await made.json()) as { canvasId: string };
+  const alone = await create(unwatched, 'node-alone', 'Derived unwatched');
+  expect(alone.ok(), await alone.text()).toBe(true);
+  await expect
+    .poll(async () => stored(unwatched, 'node-alone'))
+    .toMatchObject({ label: 'Derived unwatched', labelSource: 'auto' });
+  expect(asked).toEqual([]);
 });

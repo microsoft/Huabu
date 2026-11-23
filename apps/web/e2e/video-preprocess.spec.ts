@@ -108,6 +108,24 @@ test('uploaded video gets a persisted JPEG cover, reuses it and plays natively a
   const { uri: src } = (await uploaded.json()) as ArtifactUploadResponse;
   expect(src).toMatch(/^[^/\\:]+\.webm$/);
   const label = 'Uploaded VP8 video';
+
+  // The Space is open on a page before the video exists, so that what the
+  // page shows afterwards can only have reached it from the server.
+  await page.addInitScript((id) => {
+    // Reuse the production persisted-viewport contract, not React Flow/store injection.
+    localStorage.setItem(
+      `huabu.viewport.${id}`,
+      JSON.stringify({ x: 160, y: 100, zoom: 0.5 }),
+    );
+  }, canvasId);
+  await page.goto(`/canvas/${canvasId}`);
+  await page.waitForSelector('.react-flow__pane');
+  const pageRequests: string[] = [];
+  page.on('request', (request) => {
+    if (request.method() === 'POST' && request.url().endsWith('/preprocess'))
+      pageRequests.push(new URL(request.url()).pathname);
+  });
+
   const inserted = await page.request.post(`/api/canvas/${canvasId}/execute`, {
     data: {
       edits: personEdits([
@@ -141,17 +159,27 @@ test('uploaded video gets a persisted JPEG cover, reuses it and plays natively a
   }
 
   const initial = await persistedVideo();
-  expect(initial.data.coverUrl).toBeUndefined();
-  await page.addInitScript((id) => {
-    // Reuse the production persisted-viewport contract, not React Flow/store injection.
-    localStorage.setItem(
-      `huabu.viewport.${id}`,
-      JSON.stringify({ x: 160, y: 100, zoom: 0.5 }),
-    );
-  }, canvasId);
-  await page.goto(`/canvas/${canvasId}`);
   const node = page.locator(`.react-flow__node[data-id="${initial.id}"]`);
   await expect(node).toBeVisible();
+
+  // Nobody asks for a cover: the server makes one because the video was
+  // created, stores it with the node and tells the open page.
+  await expect
+    .poll(async () => (await persistedVideo()).data.coverUrl, {
+      timeout: 60_000,
+    })
+    .toMatch(/^cover_[^/\\:]+\.jpg$/);
+  const made = (await persistedVideo()).data as {
+    coverUrl: string;
+    coverSourceSrc: string;
+  };
+  expect(made.coverSourceSrc).toBe(src);
+  // The page shows it without a reload and without a request of its own.
+  await expect(node.locator('[data-video-player] img')).toHaveAttribute(
+    'src',
+    `/api/canvas/${canvasId}/artifact/${made.coverUrl}`,
+  );
+  expect(pageRequests).toEqual([]);
 
   async function preprocess() {
     // No previousSnapshot or client-supplied cover: the second call must consult persisted cache.
@@ -177,8 +205,10 @@ test('uploaded video gets a persisted JPEG cover, reuses it and plays natively a
     return result;
   }
 
+  // An explicit request finds the cover the server made, and makes no other.
   const first = await preprocess();
   const coverUrl = first.coverUrl;
+  expect(coverUrl).toBe(made.coverUrl);
   const coverPath = `/api/canvas/${canvasId}/artifact/${coverUrl}`;
   const cover = await page.request.get(coverPath);
   expect(cover.ok(), await cover.text()).toBe(true);
