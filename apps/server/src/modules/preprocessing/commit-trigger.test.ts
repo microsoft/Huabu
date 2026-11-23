@@ -3,9 +3,10 @@
 
 import { describe, expect, it } from 'vitest';
 
+import { diffCanvasState, type CanvasNode } from '@huabu/shared/canvas-engine';
+
 import { selectNodesToPreprocess } from './commit-trigger.js';
 
-import { diffCanvasState, type CanvasNode } from '@huabu/shared/canvas-engine';
 
 function node(
   id: string,
