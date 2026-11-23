@@ -38,6 +38,7 @@ export const routes = {
 
   // ── People (Bubble administration) ────────────────────────────────
   people: '/people',
+  peopleAdmission: '/people/admission',
   personMember: (principalId: string) => `/people/${enc(principalId)}/member`,
   personWorkspace: (principalId: string, workspaceId: string) =>
     `/people/${enc(principalId)}/workspaces/${enc(workspaceId)}`,
