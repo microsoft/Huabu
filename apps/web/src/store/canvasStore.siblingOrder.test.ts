@@ -7,7 +7,6 @@ const api = vi.hoisted(() => ({
   postCanvasExecute: vi.fn(),
   getCanvas: vi.fn(),
   putNodeContent: vi.fn(),
-  preprocessNode: vi.fn(),
   postCanvasEvents: vi.fn(),
 }));
 vi.mock('../api', async (actual) => ({
@@ -215,7 +214,6 @@ beforeEach(() => {
     state: { nodes: server.state.nodes, edges: server.state.edges },
   }));
   api.putNodeContent.mockResolvedValue({ nodeId: A, label: null, rev: 'rev' });
-  api.preprocessNode.mockResolvedValue({ success: true });
   api.postCanvasEvents.mockResolvedValue({ success: true });
 });
 
