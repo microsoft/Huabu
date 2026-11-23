@@ -7,7 +7,6 @@ import { diffCanvasState, type CanvasNode } from '@huabu/shared/canvas-engine';
 
 import { selectNodesToPreprocess } from './commit-trigger.js';
 
-
 function node(
   id: string,
   type: string,
