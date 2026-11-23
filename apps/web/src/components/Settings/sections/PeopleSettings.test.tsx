@@ -204,6 +204,22 @@ it('lists people before the admission setting answers', async () => {
   expect(container.textContent).toContain('people.admission.loadFailed');
 });
 
+it('re-enables every control after a change while the admission read stalls', async () => {
+  mocks.getAdmission.mockReturnValue(held<never>().promise);
+  const dave = () =>
+    container.querySelector<HTMLButtonElement>(
+      'button[role="switch"][aria-label="people.serviceAccess: dave"]',
+    );
+  await act(async () => dave()?.click());
+  expect(mocks.setPersonMember).toHaveBeenCalledExactlyOnceWith('dave', true);
+  expect(dave()?.disabled).toBe(false);
+  // So the owner can still turn automatic admission off, or on.
+  expect(automaticSwitch()?.disabled).toBe(false);
+  await act(async () => automaticSwitch()?.click());
+  expect(mocks.setAutomaticAdmission).toHaveBeenCalledExactlyOnceWith(true);
+  expect(automaticSwitch()?.getAttribute('aria-checked')).toBe('true');
+});
+
 it('lists people and their device reset when the admission setting cannot load', async () => {
   mocks.getAdmission.mockRejectedValue(new Error('Admission unavailable'));
   mocks.listPeople.mockResolvedValue([

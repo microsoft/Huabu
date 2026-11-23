@@ -165,9 +165,10 @@ export function PeopleSettings() {
   const load = useCallback(async () => {
     const current = ++generation.current;
     const latest = () => generation.current === current;
-    // The admission setting loads on its own, so the list, and each person's
-    // Reset devices, neither waits for it nor fails with it.
-    const admissionLoaded = getAdmission().then(
+    // The admission setting loads on its own, so the list, each person's
+    // Reset devices, and the end of a change, which re-enables every control,
+    // neither wait for it nor fail with it.
+    void getAdmission().then(
       (next) => {
         if (latest()) setAdmission(next);
       },
@@ -183,7 +184,6 @@ export function PeopleSettings() {
       setPeople(nextPeople);
       setWorkspaces(nextWorkspaces);
     }
-    await admissionLoaded;
   }, []);
 
   useEffect(() => {
