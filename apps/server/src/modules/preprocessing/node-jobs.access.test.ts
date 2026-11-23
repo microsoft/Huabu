@@ -30,6 +30,8 @@ import { createCanvas } from '../storage/compatibility/canvas.js';
 import { getCanvasStore, resetStorageCache, space } from '../storage/index.js';
 import { setWorkspacePath } from '../workspace.js';
 
+import { getPreprocessDispatcher } from './index.js';
+
 import type { CanvasCommand } from '@huabu/shared';
 import type { CanvasNode } from '@huabu/shared/canvas-engine';
 
@@ -171,5 +173,63 @@ describe('a server-started job and a node whose record is missing', () => {
     await waitForNodePreprocessing();
 
     expect(getCanvasStore('mine').readNode('node-gone')).toBeNull();
+  });
+});
+
+describe('a Frame inside a Frame', () => {
+  it('has the outer Frame processed when a run titles the inner one', async () => {
+    const create = (
+      id: string,
+      nodeType: string,
+      parentId: string | undefined,
+      data: Record<string, unknown>,
+    ) =>
+      executeOnServer({
+        canvasId: 'mine',
+        originator: { source: 'ui' },
+        commands: [
+          {
+            type: 'CREATE_NODES',
+            nodes: [
+              {
+                id,
+                nodeType,
+                ...(parentId ? { parentId } : {}),
+                position: { x: 20, y: 60 },
+                size: { width: 400, height: 300 },
+                data,
+              },
+            ],
+          },
+        ] as CanvasCommand[],
+      });
+    await create('node-outer', 'frame', undefined, {});
+    await create('node-inner', 'frame', 'node-outer', {});
+    await waitForNodePreprocessing();
+    const preprocess = vi.spyOn(getPreprocessDispatcher(), 'preprocess');
+    vi.mocked(runFunctionalText)
+      .mockResolvedValueOnce('Inner title')
+      .mockResolvedValueOnce('Outer title');
+
+    // A child gives the inner Frame something to be titled from.
+    await create('node-note', 'note', 'node-inner', {
+      label: 'A child',
+      labelSource: 'user',
+    });
+    await waitForNodePreprocessing();
+
+    expect(getCanvasStore('mine').readNode('node-inner')).toMatchObject({
+      label: 'Inner title',
+      labelSource: 'auto',
+    });
+    // The inner Frame's new title is the outer Frame's input.
+    const outer = preprocess.mock.calls
+      .map(([request]) => request)
+      .filter((request) => request.nodeId === 'node-outer')
+      .at(-1);
+    expect(outer?.snapshot.childLabels).toEqual(['Inner title']);
+    expect(getCanvasStore('mine').readNode('node-outer')).toMatchObject({
+      label: 'Outer title',
+    });
   });
 });

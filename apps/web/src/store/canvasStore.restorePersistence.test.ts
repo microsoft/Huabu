@@ -286,6 +286,10 @@ describe('undo/redo persistence ordering', () => {
     state()._setStateRaw({
       nodes: [note, { ...other, position: { x: 200, y: 0 } }],
     });
+    // Typed into and saved; what is left to say is that the editor was left.
+    state().updateNodeData(note.id, { content: '# Typed and saved' });
+    await vi.advanceTimersByTimeAsync(2_000);
+    api.putNodeContent.mockClear();
     const gate = (contentGate = deferred());
     endNodeEditing(note.id);
     state().undo();
@@ -305,6 +309,24 @@ describe('undo/redo persistence ordering', () => {
       expect.objectContaining({ content: '# Typed, then left at once' }),
     ]);
     expect(body).toBe('# Typed, then left at once');
+  });
+
+  it('says nothing when an editor nothing was typed into is left', async () => {
+    await state().loadCanvas('restore-canvas');
+    usePreviewWorkspaceStore.setState({
+      canvasId: 'restore-canvas',
+      workspace: createEmptyWorkspace(),
+    });
+    // Opened to read, then left: a viewer who may not write would be sent
+    // a save that can only be refused, and no title has to be derived.
+    openPreviewNode(note.id, { transient: false });
+    openSpaceConversation('child-canvas', 'agent', 'thread');
+    endNodeEditing(note.id);
+    await vi.advanceTimersByTimeAsync(2_000);
+    await drainPendingSaves();
+
+    expect(api.putNodeContent).not.toHaveBeenCalled();
+    expect(state().pendingContentNodeIds()).toEqual([]);
   });
 
   it('says a second leaving that happened while the first was being said', async () => {
@@ -330,8 +352,12 @@ describe('undo/redo persistence ordering', () => {
 
   it('says the leaving after a save of properties alone, which could not carry it', async () => {
     await state().loadCanvas('restore-canvas');
-    // The body is saved already; only a property is unsaved when the
-    // editor is left. That save quotes no revision and carries no mark.
+    // Typed into and saved; what is left to say is that the editor was left.
+    state().updateNodeData(note.id, { content: '# Typed and saved' });
+    await vi.advanceTimersByTimeAsync(2_000);
+    api.putNodeContent.mockClear();
+    // Only a property is unsaved when the editor is left. That save quotes
+    // no revision and carries no mark.
     state().updateNodeData(note.id, { properties: { Status: 'Reading' } });
     endNodeEditing(note.id);
     await drainPendingSaves();
@@ -348,6 +374,10 @@ describe('undo/redo persistence ordering', () => {
 
   it('takes the newer body, without asking, when only the leaving was refused', async () => {
     await state().loadCanvas('restore-canvas');
+    // Typed into and saved; what is left to say is that the editor was left.
+    state().updateNodeData(note.id, { content: '# Typed and saved' });
+    await vi.advanceTimersByTimeAsync(2_000);
+    api.putNodeContent.mockClear();
     // Another page saved a body this page has not fetched yet.
     body = '# Saved by another page';
     vi.mocked(toast).mockClear();
@@ -372,6 +402,10 @@ describe('undo/redo persistence ordering', () => {
 
   it('sends nothing for an absent node through rapid undo/redo', async () => {
     await state().loadCanvas('restore-canvas');
+    // Typed into and saved; what is left to say is that the editor was left.
+    state().updateNodeData(note.id, { content: '# Typed and saved' });
+    await vi.advanceTimersByTimeAsync(2_000);
+    api.putNodeContent.mockClear();
     endNodeEditing(note.id);
     await drainPendingSaves();
     expect(editingEndedSaves()).toHaveLength(1);

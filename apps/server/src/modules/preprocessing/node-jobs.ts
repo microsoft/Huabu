@@ -177,20 +177,27 @@ async function frameCandidate(
   change: ChildTitleChange,
 ): Promise<PreprocessCandidate | undefined> {
   const { frameId } = change;
-  // Under the Space's write lock: a run that is renaming a child's record
-  // (a new title is a new file name) would otherwise be met half-way.
-  const records = await withCanvasMutex(change.canvasId, () =>
-    space(change.canvasId).nodes.list(),
+  const children = change.storedNodes.filter(
+    (node) => node.parentId === frameId,
   );
-  const frameRecord = records.get(frameId)?.record;
+  // The Frame's record and its children's, not the Space's. Under the
+  // Space's write lock: a run that is renaming a child's record (a new
+  // title is a new file name) would otherwise be met half-way.
+  const { nodes } = space(change.canvasId);
+  const [frameRecord, ...childRecords] = await withCanvasMutex(
+    change.canvasId,
+    () =>
+      Promise.all(
+        [frameId, ...children.map((node) => node.id)].map(async (id) =>
+          id === change.childId ? undefined : (await nodes.read(id))?.record,
+        ),
+      ),
+  );
   if (!frameRecord) return undefined;
   const labels = (titleOfChild: string | null | undefined): string[] =>
-    change.storedNodes
-      .filter((node) => node.parentId === frameId)
-      .map((node) =>
-        node.id === change.childId
-          ? titleOfChild
-          : records.get(node.id)?.record.label,
+    children
+      .map((node, index) =>
+        node.id === change.childId ? titleOfChild : childRecords[index]?.label,
       )
       .map((label) => (typeof label === 'string' ? label.trim() : ''))
       .filter((label) => label.length > 0);
@@ -383,12 +390,13 @@ async function writeBack(
     });
 
   // The title this run started from is the Frame's input no longer: the
-  // Frame holding the node is processed too. Compared with the run's input
+  // Frame holding the node is processed too, also when the node is itself
+  // a Frame. Compared with the run's input
   // and not with the record before the write above, because the pipeline
   // stores some titles itself.
   const titleBefore =
     typeof snapshot.title === 'string' ? snapshot.title : undefined;
-  if (nodeType !== 'frame' && (titleNow ?? '') !== (titleBefore ?? '')) {
+  if ((titleNow ?? '') !== (titleBefore ?? '')) {
     const storedNodes = ((await handle.read())?.state.nodes ??
       []) as NodeContentSave['storedNodes'];
     const parentId = storedNodes.find((node) => node.id === nodeId)?.parentId;

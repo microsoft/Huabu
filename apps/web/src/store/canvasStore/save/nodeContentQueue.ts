@@ -707,6 +707,14 @@ export function createNodeContentQueue(opts: {
   const editingEnded = new Map<string, object>();
 
   /**
+   * Nodes whose body this page changed and whose editor it has not left
+   * since. Leaving an editor nothing was typed into says nothing: there is
+   * no title to derive again, and a viewer who may not write would be sent
+   * a save that can only be refused.
+   */
+  const bodyChangedSinceLeft = new Set<string>();
+
+  /**
    * Node ids for which we have registered the persistent
    * "duplicate files on disk" toast. Autosave retries while the
    * duplicate persists would otherwise pop a fresh toast on every
@@ -2262,6 +2270,7 @@ export function createNodeContentQueue(opts: {
                 beforeData[key] !== undefined && afterData[key] === undefined,
             });
             pendingFields.set(next.id, fields);
+            if (key === 'content') bodyChangedSinceLeft.add(next.id);
             schedule(canvasId, next.id);
           }
         }
@@ -2280,6 +2289,7 @@ export function createNodeContentQueue(opts: {
 
     markEditingEnded(canvasId, nodeId) {
       if (opts.getState().canvasId !== canvasId) return;
+      if (!bodyChangedSinceLeft.delete(nodeId)) return;
       editingEnded.set(nodeId, {});
       debouncer.cancel(nodeId);
       // Failures are the queue's to report and retry; the mark stays.
@@ -2400,6 +2410,7 @@ export function createNodeContentQueue(opts: {
     },
 
     forgetNode(nodeId) {
+      bodyChangedSinceLeft.delete(nodeId);
       dismissFailureToast(nodeId);
       generations.delete(nodeId);
       restores.delete(nodeId);
