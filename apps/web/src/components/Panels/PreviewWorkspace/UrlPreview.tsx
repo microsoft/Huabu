@@ -5,6 +5,11 @@ import { ArrowUpRight, Globe } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import { PreviewHeaderButton } from '@/components/Nodes/PreviewHeaderButton';
+import {
+  canIsolatePages,
+  IsolatedPage,
+  isolatedPageUrl,
+} from '@/components/Nodes/web/IsolatedPage';
 import { normalizeSafeLinkHref } from '@/utils/safeLink';
 
 /** A bridge-free remote page, independent of node ingestion and artifacts. */
@@ -14,6 +19,8 @@ export function UrlPreview({ url }: { url: string }) {
   if (!href)
     return <div className="text-fg-subtle p-4">{t('node.invalidUrl')}</div>;
   const address = new URL(href);
+  // The desktop app shows another site's page in a view of its own.
+  const isolatedUrl = canIsolatePages() ? isolatedPageUrl(href) : null;
   const location = `${address.pathname === '/' ? '' : address.pathname}${address.search}${address.hash}`;
 
   return (
@@ -41,14 +48,18 @@ export function UrlPreview({ url }: { url: string }) {
           <ArrowUpRight aria-hidden="true" />
         </PreviewHeaderButton>
       </div>
-      <iframe
-        key={href}
-        src={href}
-        title={href}
-        className="min-h-0 w-full flex-1 border-0"
-        sandbox="allow-scripts allow-forms"
-        referrerPolicy="no-referrer"
-      />
+      {isolatedUrl ? (
+        <IsolatedPage key={isolatedUrl} url={isolatedUrl} />
+      ) : (
+        <iframe
+          key={href}
+          src={href}
+          title={href}
+          className="min-h-0 w-full flex-1 border-0"
+          sandbox="allow-scripts allow-forms"
+          referrerPolicy="no-referrer"
+        />
+      )}
     </div>
   );
 }

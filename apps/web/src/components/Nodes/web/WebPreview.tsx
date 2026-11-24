@@ -16,12 +16,14 @@ import {
 } from '@/utils/io/nodeDownload';
 
 import { useInteractiveViewBridge } from './useInteractiveViewBridge';
-import { isElectron, openInNewWindow } from '../../../hooks/useElectron.ts';
+import { openInNewWindow } from '../../../hooks/useElectron.ts';
 import useCanvasStore from '../../../store/canvasStore.ts';
 import { Loading } from '../../Common/Loading';
 import { getMissingFileKind } from '../MissingFileBanner';
 import { PreviewHeaderButton } from '../PreviewHeaderButton';
+import { canIsolatePages, IsolatedPage, isolatedPageUrl } from './IsolatedPage';
 import { livePageSandboxFor } from './livePageSandbox';
+import { ReaderFrame } from './ReaderFrame';
 import { usePreviewHeaderSlot } from '../PreviewHeaderSlot';
 
 import type { PreviewComponentProps } from '../note/NotePreview';
@@ -48,8 +50,8 @@ const IFRAME_SPINNER_DISMISS_MS = 1500;
  * catches sites that send `X-Frame-Options` we couldn't detect server-
  * side (e.g. when the response was already cached without us).
  *
- * Electron ignores this — the main process strips the headers, so the
- * iframe always loads.
+ * The desktop app ignores this — it shows another site's page in a view of
+ * its own, which no site refuses.
  */
 const LIVE_LOAD_TIMEOUT_MS = 3500;
 
@@ -101,11 +103,12 @@ export const WebPreview = ({
     onBootstrapError,
   });
 
-  // Electron is detected once at mount — it does not change at runtime.
-  // Inside the desktop shell the main process strips X-Frame-Options /
-  // frame-ancestors, so live always works regardless of the server-side
-  // embeddable verdict.
-  const inElectron = useMemo(() => isElectron(), []);
+  // Detected once at mount — it does not change at runtime. The desktop app
+  // shows another site's page in a view of its own rather than a frame, so
+  // live always works there regardless of the server-side embeddable verdict.
+  const isolated = useMemo(() => canIsolatePages(), []);
+  const isolatedUrl =
+    isolated && pageKind === 'url' ? isolatedPageUrl(pageSrc) : null;
 
   // ── Load reader HTML (cheap; fetched up-front so the fallback flip
   //    has something to show immediately when live fails) ───────────
@@ -191,21 +194,20 @@ export const WebPreview = ({
 
   // ── Decide which mode to start in once the page metadata arrives ───
   //
-  // Electron: always start live — the main process strips XFO/CSP so
-  // every site loads. The embeddable verdict from the server is
-  // irrelevant.
+  // Desktop app: always start live — the page is not framed, so the
+  // embeddable verdict from the server is irrelevant.
   // Plain browser: respect the server-side verdict. `false` → start in
   // reader straight away (saves the user staring at a blank iframe).
   // `true` or `undefined` → try live first; the load-timeout below will
   // silently flip to reader if it never resolves.
   useEffect(() => {
     if (!pageSrc) return;
-    if (!inElectron && pageEmbeddable === false) {
+    if (!isolated && pageEmbeddable === false) {
       setMode('reader');
     } else {
       setMode('live');
     }
-  }, [pageSrc, pageEmbeddable, inElectron]);
+  }, [pageSrc, pageEmbeddable, isolated]);
 
   // ── Manage the loading badge + auto-fall back to reader ────────────
   //
@@ -218,8 +220,7 @@ export const WebPreview = ({
   //      so it doesn't linger forever on slow-but-working pages.
   //   2. A longer "reader fallback deadline": when the iframe still
   //      hasn't fired `load` AND the reader view is ready, silently flip
-  //      to reader. Skipped inside Electron — there the iframe is
-  //      authoritative.
+  //      to reader. Skipped in the desktop app, where no site can refuse.
   const iframeSpinnerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
@@ -248,9 +249,8 @@ export const WebPreview = ({
     }, IFRAME_SPINNER_DISMISS_MS);
 
     // Plain browser only: arm the silent flip to reader if the iframe
-    // never makes it to `load` within the window. Electron strips the
-    // blocking headers, so the iframe always loads — no need to bail.
-    if (!inElectron) {
+    // never makes it to `load` within the window.
+    if (!isolated) {
       iframeFallbackTimerRef.current = setTimeout(() => {
         if (!iframeReadyRef.current && readerHtmlRef.current) {
           setMode('reader');
@@ -265,7 +265,7 @@ export const WebPreview = ({
       if (iframeFallbackTimerRef.current)
         clearTimeout(iframeFallbackTimerRef.current);
     };
-  }, [mode, pageSrc, iframeBumpKey, inElectron]);
+  }, [mode, pageSrc, iframeBumpKey, isolated]);
 
   // URL we'd open in the system browser when the user clicks
   // "Open externally". Only meaningful when the node points at a real
@@ -288,65 +288,6 @@ export const WebPreview = ({
     setMode('live');
     setIframeBumpKey((n) => n + 1);
   }, []);
-
-  // ── Reader-view iframe srcDoc (auto-resizes via postMessage) ─────
-  const readerIframeId = useRef(
-    `web-preview-${Math.random().toString(36).slice(2)}`,
-  );
-  const [readerHeight, setReaderHeight] = useState<number | null>(null);
-  useEffect(() => {
-    const channelId = readerIframeId.current;
-    const handleMessage = (e: MessageEvent) => {
-      if (
-        e.data?.type === 'web-preview-resize' &&
-        e.data?.id === channelId &&
-        typeof e.data.height === 'number'
-      ) {
-        setReaderHeight(e.data.height);
-      }
-    };
-    window.addEventListener('message', handleMessage);
-    return () => window.removeEventListener('message', handleMessage);
-  }, []);
-
-  const readerSrcDoc = useMemo(() => {
-    if (!readerHtml) return '';
-    const channelId = readerIframeId.current;
-    return `<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <base target="_blank" />
-    <style>
-      html { color-scheme: light; }
-      html, body { margin: 0; padding: 0; overflow: hidden; }
-      body { padding: 16px; font-family: system-ui, -apple-system, sans-serif; line-height: 1.5; }
-      img { max-width: 100%; height: auto; }
-      pre { overflow: auto; background: var(--bg-default); padding: 10px; border-radius: 4px; }
-      code { font-family: monospace; }
-    </style>
-  </head>
-  <body>
-    ${readerHtml}
-    <script>
-      (function() {
-        var id = ${JSON.stringify(channelId)};
-        function reportHeight() {
-          window.parent.postMessage(
-            { type: 'web-preview-resize', id: id, height: document.body.scrollHeight },
-            '*'
-          );
-        }
-        window.addEventListener('load', reportHeight);
-        if (window.ResizeObserver) {
-          new ResizeObserver(reportHeight).observe(document.body);
-        }
-      })();
-    </script>
-  </body>
-</html>`;
-  }, [readerHtml]);
 
   // Host header slot — rendered by `ExpandedNodePanel`. Same pattern as
   // NotePreview's edit-mode toggle: portal our action buttons up into
@@ -471,6 +412,8 @@ export const WebPreview = ({
                 {t('messages.retry')}
               </Button>
             </div>
+          ) : isolatedUrl ? (
+            <IsolatedPage url={isolatedUrl} reloadNonce={iframeBumpKey} />
           ) : pageSrc ? (
             <>
               {/* Iframe is ALWAYS mounted and visible — never hidden under an
@@ -523,17 +466,7 @@ export const WebPreview = ({
             ref={readerScrollRef}
             className="bg-surface h-full overflow-x-hidden overflow-y-auto p-1"
           >
-            <iframe
-              className="nodrag w-full border-0"
-              style={{
-                colorScheme: 'light',
-                height: readerHeight ? `${readerHeight}px` : '100%',
-              }}
-              title={t('node.readerView')}
-              sandbox="allow-popups allow-scripts"
-              srcDoc={readerSrcDoc}
-              scrolling="no"
-            />
+            <ReaderFrame html={readerHtml} title={t('node.readerView')} />
           </div>
         ) : (
           <div className="text-fg-subtle flex h-full w-full items-center justify-center text-sm">

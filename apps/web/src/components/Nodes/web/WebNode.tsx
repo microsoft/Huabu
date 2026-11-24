@@ -226,6 +226,37 @@ export const WebNode = memo(
         </>
       ) : undefined;
 
+    const overview = (
+      <div className="bg-surface relative flex h-full w-full flex-col rounded-[inherit]">
+        {!src ? (
+          <div className="text-fg-subtle flex h-full w-full items-center justify-center text-base">
+            {t('node.invalidUrl')}
+          </div>
+        ) : (
+          <ViewportPreviewCard
+            {...cardSize}
+            accent={data.style?.accent}
+            minimal={isMinimalLOD}
+            image={fallbackImage}
+            imageAlt={title}
+            nodeType="web"
+            favicon={favicon}
+            source={isRemoteUrl ? shortenForToolbar(src) : siteName || 'HTML'}
+            title={title}
+            summary={summary}
+            loading={
+              !isMinimalLOD &&
+              (ingestion?.status === 'pending' ||
+                previewLoading ||
+                (!webHydrated && !preview && !previewError))
+            }
+            error={previewError}
+            onRetry={handleRetry}
+          />
+        )}
+      </div>
+    );
+
     return (
       <NodeWrapper
         id={id}
@@ -248,38 +279,13 @@ export const WebNode = memo(
             interactive={presentation.isSoleSelected}
             isInteractiveView={isInteractiveView}
             zoom={presentation.zoom}
+            hasContent={
+              typeof data.content === 'string' && data.content.length > 0
+            }
+            fallback={overview}
           />
         ) : (
-          <div className="bg-surface relative flex h-full w-full flex-col rounded-[inherit]">
-            {!src ? (
-              <div className="text-fg-subtle flex h-full w-full items-center justify-center text-base">
-                {t('node.invalidUrl')}
-              </div>
-            ) : (
-              <ViewportPreviewCard
-                {...cardSize}
-                accent={data.style?.accent}
-                minimal={isMinimalLOD}
-                image={fallbackImage}
-                imageAlt={title}
-                nodeType="web"
-                favicon={favicon}
-                source={
-                  isRemoteUrl ? shortenForToolbar(src) : siteName || 'HTML'
-                }
-                title={title}
-                summary={summary}
-                loading={
-                  !isMinimalLOD &&
-                  (ingestion?.status === 'pending' ||
-                    previewLoading ||
-                    (!webHydrated && !preview && !previewError))
-                }
-                error={previewError}
-                onRetry={handleRetry}
-              />
-            )}
-          </div>
+          overview
         )}
       </NodeWrapper>
     );

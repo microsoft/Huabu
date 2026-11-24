@@ -139,7 +139,21 @@ On the canvas the same badge marks each node an Agent created or changed that th
 
 Both need the Space's page to be loaded, because the page is what sees the turn and the viewing; a Space with no loaded Tab has no badge and produces no notice. In a browser the same page shows the notification itself through the Web Notification API, only while the page is hidden or unfocused and only after the person granted permission from Settings, replaces and withdraws its notifications by the same rules (on the page becoming visible and focused again), and a click leads to the Space and Workspace the notification was made in; there is no Tab mark in a browser.
 
-## 5. Verification
+## 5. Previewed web pages
+
+Another site's page opened in a Space's Preview panel is not an `<iframe>` of the Space. `page-previews.ts` gives it a `WebContentsView` of its own, added to the window above the Space's view:
+
+- It runs in its own process and in a session of its own: one per Space, kept between launches, holding nothing but that Space's previewed pages. It has no preload script, so no bridge to the application.
+- That session grants no device permission and cancels every download. A popup opens in the system browser. The page may follow links to other web pages, but not to the application's origin or to a non-web scheme.
+- It is a top-level document, so a site that refuses framing is shown as it is. The application no longer removes `X-Frame-Options` or `frame-ancestors` from any response.
+
+The Space's page owns placement. `IsolatedPage` reports its rectangle each animation frame through the `pagePreview` bridge, which only a Space's Tab receives; the main process offsets it by the Tab's position, scales it by the Tab's zoom, and clips it to the Tab so it cannot cover the title bar. A page is visible only while its Space's Tab is in front, and is closed when its Preview tab closes or its Space reloads or closes.
+
+A native view is drawn above all of the Space's HTML, so the page steps aside whenever the Space needs that area: when anything is drawn over its rectangle (a menu, a dialog), while something is dragged (a pointer drag or a drag-and-drop), and when its load failed and the Space shows the error. Before hiding, the main process captures the page and the Space shows that picture in its place, at the size it was taken and dimmed while a drag lasts. Resizing a panel is not such a case: a drag that starts on a resize handle leaves the page live, and it follows the panel's edge. A click into the page gives it focus; the main process reports that, and the Space dispatches a press on the placeholder so open menus close and the Preview group takes focus. The application's Tab shortcuts are handled for a focused page as for a Space.
+
+Only `http:` and `https:` addresses on another origin are shown this way. A document the Server stores stays a sandboxed frame of the Space, under the Server's policy for stored documents.
+
+## 6. Verification
 
 The content root tracks Space activation from the existing main-process Tab snapshots in a renderer-local Store. Both reactive and imperative question-view predicates require this activation in addition to an expanded Preview panel and matching inner tab. Background completion remains unread until the Space is activated, without unmounting retained previews; browser behavior is unchanged. Activation starts unconfirmed and an older initial snapshot cannot override a newer subscription event.
 
@@ -153,12 +167,14 @@ Explicit desktop language choices must persist through main before i18next chang
 
 After the normal workspace dependency builds, `pnpm --filter @huabu/desktop test:tabs` starts an isolated Server and Vite instance and drives real Electron content views through Playwright. It creates temporary Workspaces, verifies draft/document isolation, retained selection and viewport, usable undo/redo after switching, cross-partition preference and language synchronization, save refusal and persisted content on close, five simultaneous Spaces, lazy restart recovery and Workspace switching, and cleans up its temporary processes and data. It prints warm-switch timing and process memory samples; these samples are observations, not fixed product limits. `HUABU_TABS_SCREENSHOT` optionally names a Shell screenshot output file; a sibling `-content.png` captures the active native content view separately because Shell page capture does not composite child views.
 
-## 6. Code entry points
+## 7. Code entry points
 
 | File                                                                                   | Responsibility                                                                                                            |
 | -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
 | [desktop-tabs.ts](../../apps/desktop/src/desktop-tabs.ts)                              | Main-process content views, Tab authority, scoped IPC, save and Workspace coordination.                                   |
 | [tab-session.ts](../../apps/desktop/src/tab-session.ts)                                | Validated identity/navigation inputs and persisted session parsing.                                                       |
+| [page-previews.ts](../../apps/desktop/src/page-previews.ts)                            | Other sites' pages in views of their own: session policy, placement, capture and lifetime.                                |
+| [IsolatedPage.tsx](../../apps/web/src/components/Nodes/web/IsolatedPage.tsx)           | The placeholder a previewed page is shown over; reports its rectangle and when to step aside.                             |
 | [desktop-tabs.ts](../../packages/shared/src/types/desktop-tabs.ts)                     | Type-only IPC contract shared by main, preload and web.                                                                   |
 | [preload.ts](../../apps/desktop/src/preload.ts)                                        | Sandboxed role/context and narrow Tab API.                                                                                |
 | [DesktopTabShell.tsx](../../apps/web/src/components/Shell/DesktopTabShell.tsx)         | Accessible Tab strip and window chrome.                                                                                   |

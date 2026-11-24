@@ -1,14 +1,21 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { resolveArtifactUrl } from '@/api/artifact';
-import { getWebPage } from '@/api/web';
+import { getWebPage, getWebReader } from '@/api/web';
 import { Button } from '@/components/Common/Button';
 import { normalizeSafeLinkHref } from '@/utils/safeLink';
 
+import { ReaderFrame } from './ReaderFrame';
 import { useInteractiveViewBridge } from './useInteractiveViewBridge';
 
 interface WebReadingViewProps {
@@ -18,9 +25,23 @@ interface WebReadingViewProps {
   interactive: boolean;
   isInteractiveView: boolean;
   zoom: number;
+  /** Whether the Server has extracted this page's text yet. */
+  hasContent: boolean;
+  /** Shown for another site's page that has no reader view. */
+  fallback: ReactNode;
 }
 
-/** Visible reading views reuse the expanded preview's capability bridge. */
+/**
+ * A web node at reading size on the Canvas.
+ *
+ * Another site's page is shown as its reader view — the text the Server
+ * extracted — and never loaded here: the Canvas holds many nodes at once, and
+ * none of them should run a third party's page inside the application. The
+ * live page is one click away in the Preview panel.
+ *
+ * A page stored in the Space (an Agent's, or an upload) is shown live, and
+ * reuses the expanded preview's capability bridge.
+ */
 export function WebReadingView({
   nodeId,
   canvasId,
@@ -28,6 +49,8 @@ export function WebReadingView({
   interactive,
   isInteractiveView,
   zoom,
+  hasContent,
+  fallback,
 }: WebReadingViewProps) {
   const { t } = useTranslation();
   const remoteHref = normalizeSafeLinkHref(src);
@@ -54,8 +77,31 @@ export function WebReadingView({
     onBootstrapError,
   });
 
+  // `undefined` while it is fetched; `null` when the page has none.
+  const [reader, setReader] = useState<string | null | undefined>(undefined);
   useEffect(() => {
-    // Remote pages must use the original URL, not the server's MHTML snapshot.
+    if (!remoteHref || !canvasId) return;
+    if (!hasContent) {
+      setReader(null);
+      return;
+    }
+    let cancelled = false;
+    setReader(undefined);
+    void getWebReader({ canvasId, nodeId }).then(
+      (result) => {
+        if (!cancelled) setReader(result.html || null);
+      },
+      () => {
+        if (!cancelled) setReader(null);
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [canvasId, nodeId, remoteHref, hasContent]);
+
+  useEffect(() => {
+    // A remote page is never resolved to the server's MHTML snapshot.
     if (remoteHref || !canvasId) return;
     let cancelled = false;
     void getWebPage({ canvasId, nodeId }).then(
@@ -79,8 +125,10 @@ export function WebReadingView({
     };
   }, [canvasId, nodeId, remoteHref, retryAttempt]);
 
-  const pageSrc = remoteHref ?? page?.src;
-  const snapshot = !remoteHref && page?.snapshot;
+  const pageSrc = page?.src;
+  const snapshot = page?.snapshot;
+
+  if (remoteHref && !reader) return <>{fallback}</>;
 
   return (
     <div
@@ -94,7 +142,15 @@ export function WebReadingView({
       }}
     >
       <div className="relative min-h-0 flex-1">
-        {failed ? (
+        {remoteHref && reader ? (
+          <div
+            className={`bg-surface h-full overflow-x-hidden overflow-y-auto ${interactive ? 'nodrag nopan nowheel' : 'pointer-events-none'}`}
+            inert={!interactive}
+            data-web-reader
+          >
+            <ReaderFrame html={reader} title={t('node.readerView')} />
+          </div>
+        ) : failed ? (
           <div className="text-fg-subtle flex h-full flex-col items-center justify-center gap-2 text-sm">
             <span role="status">
               {t(
@@ -123,7 +179,7 @@ export function WebReadingView({
             ref={iframeRef}
             src={pageSrc}
             title={t('node.livePage')}
-            // Like UrlPreview, never grant same-origin, including after redirects.
+            // Never grant same-origin, including after redirects.
             sandbox={snapshot ? '' : 'allow-scripts allow-forms'}
             referrerPolicy="no-referrer"
             inert={!interactive}
