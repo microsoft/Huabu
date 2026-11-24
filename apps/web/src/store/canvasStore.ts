@@ -63,7 +63,6 @@ import {
   moveNodeIntoContainer as projectNodeIntoFrame,
   moveNodeOutOfFrame as projectNodeOutOfFrame,
   normalizeTreeOrder,
-  orderByPaintKeys,
   projectAffectedFrameGeometry,
   type AlignDirection,
   type Delta,
@@ -144,6 +143,7 @@ import { normalizeFrameHeaderInsets } from './canvasStore/load/normalizeFrameHea
 import { normalizeNodeHeights } from './canvasStore/load/normalizeNodeHeights';
 import { reconcileQuestionStatus } from './canvasStore/load/reconcileQuestionStatus';
 import { warmupNodeHeights } from './canvasStore/load/warmupNodeHeights';
+import { paintOrderMiddleware } from './canvasStore/paintOrderFunnel';
 import {
   refusedGestureHint,
   showRefusedGestureHint,
@@ -181,7 +181,6 @@ import { CANVAS_PAGE_ID } from './canvasStore/sync/pageId';
 import {
   applyUnits,
   changedUnits,
-  PAINT_KEY_UNIT,
   PARENT_UNIT,
   PLACEMENT_UNITS,
   writeUnit,
@@ -1810,17 +1809,9 @@ const browserSync = createBrowserSync({
       return next as unknown as Node;
     });
     if (!touched) return;
-    // The array follows the keys the nodes now carry: a paint key put back
-    // to the server's, or a parent, changes where a node stands, and nothing
-    // else re-sorts the array when the command that held it turned out to
-    // change nothing on the server. Parents stay before their children.
-    state._setStateRaw({
-      nodes: units.some(
-        (unit) => unit.unit === PARENT_UNIT || unit.unit === PAINT_KEY_UNIT,
-      )
-        ? (orderByPaintKeys(nodes as NestableNode[]) as Node[])
-        : nodes,
-    });
+    // A paint key put back to the server's, or a parent, changes where a
+    // node stands; the store orders the array by the keys on the way in.
+    state._setStateRaw({ nodes });
   },
   onRejected: ({ canvasId, outcome }) => {
     if (useCanvasStore.getState().canvasId !== canvasId) return;
@@ -3595,8 +3586,18 @@ function restoreFromHistory(direction: 'undo' | 'redo'): void {
   }
 }
 
+/**
+ * What stands between the store and every write of it. Paint order is the
+ * inner layer, next to the store's own `set`, so every setter the outer
+ * layer builds on it (an action's `set`, `setState`, `_setStateRaw`) stores
+ * `nodes` in paint order.
+ */
+const canvasStoreMiddleware = (
+  config: StateCreator<RFState>,
+): StateCreator<RFState> => paintOrderMiddleware(contentSaveMiddleware(config));
+
 const useCanvasStore = create<RFState>()(
-  contentSaveMiddleware((set, get) => ({
+  canvasStoreMiddleware((set, get) => ({
     nodes: [],
     edges: [],
     canvasId: '',

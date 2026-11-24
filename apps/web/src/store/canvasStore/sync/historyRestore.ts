@@ -93,7 +93,8 @@ export function restoreChanged<N extends UnitNode, E extends RestoreEdge>(
 
   return {
     // Paint order is each node's own `data.paintKey`, restored above like
-    // any other unit; the array follows the keys.
+    // any other unit; the array follows the keys. The store would order it
+    // on the way in, but the restore plan reads this array's order first.
     nodes: orderByPaintKeys(
       order.flatMap((id) => {
         const node = nodes.get(id);
