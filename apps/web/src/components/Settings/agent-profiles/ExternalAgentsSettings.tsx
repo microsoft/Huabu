@@ -30,10 +30,11 @@ import { useDetectedClis } from './useDetectedClis';
 import { AgentConnectionSettings } from '../sections/ExternalAgentRuntimeSettings';
 
 import type { AgentIconValue } from '@/components/Common/AgentIcon';
-import type { AgentProfileView } from '@huabu/shared';
+import type { AgentProfileView, AgentletDevice } from '@huabu/shared';
 
 type EditorState =
-  | { kind: 'connect-device' }
+  /** With `device`, reconnecting that offline device rather than adding one. */
+  | { kind: 'connect-device'; device?: AgentletDevice }
   | { kind: 'create'; agentletId: string }
   | { kind: 'edit-command'; profile: AgentProfileView };
 
@@ -152,7 +153,9 @@ export function ExternalAgentsSettings({
 
   const editorTitle = editor
     ? editor.kind === 'connect-device'
-      ? t('settings.addDevice')
+      ? editor.device
+        ? t('settings.reconnectDevice', { device: editor.device.displayName })
+        : t('settings.addDevice')
       : editor.kind === 'create'
         ? t('settings.newAgentProfile')
         : t('settings.editAgentProfile', { name: editor.profile.alias })
@@ -377,7 +380,7 @@ export function ExternalAgentsSettings({
           <div key="editor" ref={activeViewRef}>
             {editor.kind === 'connect-device' ? (
               <SettingSection>
-                <AgentConnectionSettings />
+                <AgentConnectionSettings device={editor.device} />
               </SettingSection>
             ) : (
               <>
@@ -426,6 +429,15 @@ export function ExternalAgentsSettings({
                   }
                   addRef={(agentletId) =>
                     restoreTriggerFocus(`create:${agentletId}`)
+                  }
+                  onReconnect={(device) =>
+                    openEditor(
+                      { kind: 'connect-device', device },
+                      `reconnect:${device.agentletId}`,
+                    )
+                  }
+                  reconnectRef={(agentletId) =>
+                    restoreTriggerFocus(`reconnect:${agentletId}`)
                   }
                 />
               </>

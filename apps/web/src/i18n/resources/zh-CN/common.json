@@ -620,6 +620,8 @@
     "agentDefaultsSaved": "Utility Agent 设置已保存",
     "agentletHowToConnect": "连接说明",
     "agentletHowToConnectDescription": "将其他电脑或服务器上运行的 Agent 接入 Huabu。请在运行 Agent 的设备上执行以下步骤。",
+    "reconnectDevice": "重新连接 {{device}}",
+    "reconnectDeviceDescription": "请在 {{device}} 本机上、以之前的同一用户身份执行以下步骤。Huabu 会根据该设备上保存的标识认出它，因此设备 ID 和 Agent 配置都会保留。在其他设备上运行该命令则会添加一台新设备。",
     "agentletPrepareDevice": "准备运行环境",
     "agentletRequirements": "环境要求：Node.js 24.16+、pnpm。",
     "agentletSourceSetup": "下载与服务器版本一致的 Huabu 源码，并安装依赖：",

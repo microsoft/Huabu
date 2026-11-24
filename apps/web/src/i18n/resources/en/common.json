@@ -620,6 +620,8 @@
     "agentDefaultsSaved": "Utility Agent settings saved",
     "agentletHowToConnect": "Connection instructions",
     "agentletHowToConnectDescription": "Connect Agents running on another computer or server to Huabu. Follow these steps on the device where those Agents run.",
+    "reconnectDevice": "Reconnect {{device}}",
+    "reconnectDeviceDescription": "Follow these steps on {{device}} itself, signed in as the same user as before. Huabu recognizes the device from the identity saved there, so it keeps its ID and Agent profiles. Running the command on another device adds a new device instead.",
     "agentletPrepareDevice": "Set up the environment",
     "agentletRequirements": "Requirements: Node.js 24.16+ and pnpm.",
     "agentletSourceSetup": "Download the Huabu source version that matches your server and install its dependencies:",

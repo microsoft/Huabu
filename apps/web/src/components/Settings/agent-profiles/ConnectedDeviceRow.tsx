@@ -38,6 +38,8 @@ export function ConnectedDeviceRow({
   children,
   onAdd,
   addRef,
+  onReconnect,
+  reconnectRef,
   profileCount = 0,
 }: {
   device: AgentletDevice;
@@ -51,6 +53,12 @@ export function ConnectedDeviceRow({
   children?: ReactNode;
   onAdd?: () => void;
   addRef?: Ref<HTMLButtonElement>;
+  /**
+   * Shows Reconnect beside Not connected on an offline device other than
+   * this one, leading to the command to run again on that device.
+   */
+  onReconnect?: () => void;
+  reconnectRef?: Ref<HTMLButtonElement>;
   profileCount?: number;
 }) {
   const { t } = useTranslation();
@@ -174,9 +182,27 @@ export function ConnectedDeviceRow({
         <div className="flex flex-wrap items-center justify-end gap-1">
           {!editing && connectionControls}
           {!online && !isLocalDevice && (
-            <span role="status" className="text-fg-muted px-2 text-xs">
+            <span
+              role="status"
+              // At phone width Reconnect alone says the device is offline,
+              // leaving room for its name; screen readers still hear both.
+              className={`text-fg-muted px-2 text-xs ${onReconnect && !editing ? 'max-sm:sr-only' : ''}`}
+            >
               {t('settings.localAgentDisabled')}
             </span>
+          )}
+          {!online && !isLocalDevice && onReconnect && !editing && (
+            <Button
+              variant="outline"
+              size="field"
+              ref={reconnectRef}
+              aria-label={t('settings.reconnectDevice', {
+                device: device.displayName,
+              })}
+              onClick={onReconnect}
+            >
+              {t('settings.localAgentReconnect')}
+            </Button>
           )}
           {online && onAdd && !editing && (
             <Button

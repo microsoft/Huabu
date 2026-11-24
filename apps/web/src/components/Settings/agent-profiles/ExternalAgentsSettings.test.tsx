@@ -325,6 +325,44 @@ describe('ExternalAgentsSettings', () => {
     expect(onNavigationChange.mock.lastCall?.[0]).toBeNull();
   });
 
+  it('offers Reconnect on an offline device, leading to its command and back', async () => {
+    await renderSettings();
+    const reconnect = () =>
+      container?.querySelector<HTMLButtonElement>(
+        'button[aria-label="settings.reconnectDevice"]',
+      );
+    // An online device has nothing to reconnect.
+    expect(reconnect()).toBeNull();
+    const device = useAcpProfilesStore.getState().connectedDevices[0];
+    await act(async () =>
+      useAcpProfilesStore.setState({
+        connectedDevices: [],
+        knownDevices: [device],
+      }),
+    );
+    const row = container?.querySelector('[data-device-id="local"]');
+    expect(row?.textContent).toContain('settings.localAgentDisabled');
+    expect(reconnect()?.closest('[data-device-id]')).toBe(row);
+    expect(reconnect()?.textContent).toBe('settings.localAgentReconnect');
+
+    await click('settings.reconnectDevice');
+    // The usual command, introduced as one to run again on that device.
+    expect(container?.textContent).toContain('git clone');
+    expect(container?.textContent).toContain('settings.agentletCommandCopy');
+    expect(container?.textContent).toContain(
+      'settings.reconnectDeviceDescription',
+    );
+    expect(container?.textContent).not.toContain(
+      'settings.agentletHowToConnectDescription',
+    );
+    const navigation = onNavigationChange.mock.lastCall?.[0];
+    expect(navigation?.title).toBe('settings.reconnectDevice');
+
+    await act(async () => navigation.onBack());
+    expect(document.activeElement).toBe(reconnect());
+    expect(container?.textContent).not.toContain('git clone');
+  });
+
   it('offers connection instructions even when no device is connected', async () => {
     await renderSettings();
     await act(async () =>
