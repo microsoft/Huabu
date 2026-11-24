@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   QuestionTakeoverMark,
   questionTakeoverMarkLayout,
+  resolveQuestionAttentionHalo,
   resolveQuestionSpecialRingGeometry,
 } from './QuestionTakeoverMark';
 
@@ -226,6 +227,57 @@ describe('QuestionTakeoverMark', () => {
     expect(layout.avatarTop - 84.48 * 0.45 * 0.3).toBeGreaterThanOrEqual(
       -1e-12,
     );
+  });
+
+  it('scales every halo length with the avatar instead of fixed pixels', () => {
+    expect(resolveQuestionAttentionHalo(40, 'red')).toBe(
+      '0 0 0 3px color-mix(in srgb, red 26%, transparent), 0 0 12px 2px color-mix(in srgb, red 42%, transparent)',
+    );
+    expect(resolveQuestionAttentionHalo(80, 'red', 4)).toBe(
+      '0 0 0 4px red, 0 0 0 10px color-mix(in srgb, red 26%, transparent), 0 0 24px 8px color-mix(in srgb, red 42%, transparent)',
+    );
+  });
+
+  it.each([
+    ['an unread answer', { unread: true, conflictCount: 0 }, 'success'],
+    [
+      'a skipped-write conflict',
+      { unread: false, conflictCount: 2 },
+      'warning',
+    ],
+  ] as const)('draws the attention halo for %s', (_name, props, color) => {
+    const onBoundsChange = vi.fn();
+    const el = render({
+      ...props,
+      status: 'done',
+      state: { stage: 'collapsed', size: 12.8, onBoundsChange },
+    });
+    const avatar = el.querySelector<HTMLElement>(
+      '[data-question-takeover-avatar]',
+    );
+    expect(avatar?.style.boxShadow).toBe(
+      resolveQuestionAttentionHalo(84.48, `var(--${color})`, 84.48 / 20),
+    );
+    // The solid ring sits inside the bounds edges and outlines clip against.
+    expect(onBoundsChange).toHaveBeenLastCalledWith(
+      questionTakeoverMarkLayout(true, false, false).diameter / 128,
+    );
+  });
+
+  it('keeps a viewed answer quiet and drops the halo while the bubble is open', () => {
+    const onBoundsChange = vi.fn();
+    const el = render({
+      status: 'done',
+      state: { stage: 'collapsed', size: 12.8, onBoundsChange },
+    });
+    const avatar = () =>
+      el.querySelector<HTMLElement>('[data-question-takeover-avatar]');
+    expect(avatar()?.style.boxShadow).toBe(
+      'inset 0 0 0 1px var(--edge-default)',
+    );
+    expect(onBoundsChange).toHaveBeenLastCalledWith(0.66);
+    render({ status: 'done', unread: true, isOpen: true });
+    expect(avatar()?.style.boxShadow).toBe('none');
   });
 
   it('supports legacy open and explicit false override', () => {
