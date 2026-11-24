@@ -23,16 +23,15 @@ import { profiles } from './profiles.js';
 import { fetchYoutubeCover } from './video-cover.js';
 
 import type { PipelineDeps } from './pipeline.js';
+import type { PreprocessNodeRequest } from './types.js';
 import type { NodeContent } from '../storage/index.js';
 import type * as Workspace from '../workspace.js';
-import type { PreprocessNodeRequest } from '@huabu/shared';
 
 const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xd9]);
 const request: PreprocessNodeRequest = {
   canvasId: 'c',
   nodeId: 'v',
   nodeType: 'video',
-  trigger: 'node_updated',
   snapshot: { src: 'video.mp4' },
 };
 
@@ -141,7 +140,7 @@ describe('video cover pipeline', () => {
     });
   });
 
-  it('regenerates a missing cached blob and force bypasses cache', async () => {
+  it('regenerates a missing cached blob', async () => {
     const h = harness();
     h.record = {
       ...h.current(),
@@ -150,23 +149,7 @@ describe('video cover pipeline', () => {
     };
     h.head.mockResolvedValueOnce(null as never);
     await h.run();
-    await h.run({ ...request, options: { force: true } });
-    expect(decode).toHaveBeenCalledTimes(2);
-  });
-
-  it('does not decode, fetch, write blobs or persist when persistence is disabled', async () => {
-    const h = harness();
-    const fetch = vi.fn();
-    vi.stubGlobal('fetch', fetch);
-    const result = await h.run({
-      ...request,
-      options: { allowPersistence: false },
-    });
-    expect(h.put).not.toHaveBeenCalled();
-    expect(h.putNode).not.toHaveBeenCalled();
-    expect(decode).not.toHaveBeenCalled();
-    expect(fetch).not.toHaveBeenCalled();
-    expect(result.patch).toEqual({});
+    expect(decode).toHaveBeenCalledTimes(1);
   });
 
   it('warns on decoder failure, clears obsolete refs and preserves the video', async () => {
@@ -307,7 +290,6 @@ describe('video cover pipeline', () => {
     const result = await h.run({
       ...request,
       snapshot: { src },
-      options: { allowLLM: false },
     });
     expect(result.patch).toMatchObject({
       coverSourceSrc: src,

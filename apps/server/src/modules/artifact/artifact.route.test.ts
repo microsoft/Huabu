@@ -28,6 +28,7 @@ import {
   resetStorageCache,
   setStorageForTesting,
 } from '../storage/index.js';
+import { wrapAsMhtml } from '../web/mhtml.js';
 import { setWorkspacePath } from '../workspace.js';
 
 import type { BlobScope, BlobStore } from '../storage/index.js';
@@ -372,6 +373,108 @@ describe('artifact route', () => {
       payload: { srcCanvasId: 'src-canvas', srcKey: 'gone.png' },
     });
     expect(res.statusCode).toBe(404);
+    await app.close();
+  });
+
+  it('preflights artifact existence via ?check=true without streaming bytes', async () => {
+    const app = await buildApp();
+    await space('c1').artifacts.put('doc.pdf', png);
+
+    const existing = await app.inject({
+      method: 'GET',
+      url: '/canvas/c1/artifact/doc.pdf?check=true',
+    });
+    expect(existing.statusCode).toBe(204);
+    expect(existing.rawPayload.length).toBe(0);
+
+    const missing = await app.inject({
+      method: 'GET',
+      url: '/canvas/c1/artifact/missing.pdf?check=true',
+    });
+    expect(missing.statusCode).toBe(404);
+
+    await app.close();
+  });
+
+  it('serves ?download=1 with RFC 5987 attachment disposition and canonical extension', async () => {
+    const app = await buildApp();
+    await space('c1').artifacts.put('art_q3.pdf', png);
+
+    // Non-ASCII stem without extension preserves canonical `.pdf`.
+    const renamed = await app.inject({
+      method: 'GET',
+      url: `/canvas/c1/artifact/art_q3.pdf?download=1&filename=${encodeURIComponent('季度报告')}`,
+    });
+    expect(renamed.statusCode).toBe(200);
+    expect(renamed.rawPayload).toEqual(png);
+    expect(renamed.headers['content-disposition']).toBe(
+      `attachment; filename="____.pdf"; filename*=UTF-8''${encodeURIComponent('季度报告.pdf')}`,
+    );
+
+    // Upload-seeded label that already ends with `.pdf` is not doubled.
+    const seeded = await app.inject({
+      method: 'GET',
+      url: `/canvas/c1/artifact/art_q3.pdf?download=1&filename=${encodeURIComponent('report.PDF')}`,
+    });
+    expect(seeded.statusCode).toBe(200);
+    expect(seeded.headers['content-disposition']).toBe(
+      `attachment; filename="report.pdf"; filename*=UTF-8''report.pdf`,
+    );
+
+    // Mismatched extension cannot spoof the stored artifact's canonical extension.
+    const spoofed = await app.inject({
+      method: 'GET',
+      url: `/canvas/c1/artifact/art_q3.pdf?download=1&filename=${encodeURIComponent('installer.exe')}`,
+    });
+    expect(spoofed.statusCode).toBe(200);
+    expect(spoofed.headers['content-disposition']).toBe(
+      `attachment; filename="installer.exe.pdf"; filename*=UTF-8''installer.exe.pdf`,
+    );
+
+    // 416 error responses do not attach Content-Disposition.
+    const invalidRange = await app.inject({
+      method: 'GET',
+      url: '/canvas/c1/artifact/art_q3.pdf?download=1&filename=report',
+      headers: { range: 'bytes=999-1000' },
+    });
+    expect(invalidRange.statusCode).toBe(416);
+    expect(invalidRange.headers['content-disposition']).toBeUndefined();
+
+    await app.close();
+  });
+
+  it('keeps inline HTML extraction for .mhtml while serving raw MHTML bytes on ?download=1', async () => {
+    const app = await buildApp();
+    const archive = wrapAsMhtml(
+      '<!doctype html><html><body><h1>Saved Page</h1></body></html>',
+      'https://example.com/article',
+      'Example Article',
+    );
+    await space('c1').artifacts.put('snap_1.mhtml', archive);
+
+    const inlineRes = await app.inject({
+      method: 'GET',
+      url: '/canvas/c1/artifact/snap_1.mhtml',
+    });
+    expect(inlineRes.statusCode).toBe(200);
+    expect(inlineRes.headers['content-type']).toBe('text/html; charset=utf-8');
+    expect(inlineRes.headers['content-disposition']).toBeUndefined();
+    expect(inlineRes.body).toContain('<h1>Saved Page</h1>');
+    expect(inlineRes.body).toContain(
+      '<base href="https://example.com/article"',
+    );
+
+    const downloadRes = await app.inject({
+      method: 'GET',
+      url: `/canvas/c1/artifact/snap_1.mhtml?download=1&filename=${encodeURIComponent('网页快照')}`,
+    });
+    expect(downloadRes.statusCode).toBe(200);
+    expect(downloadRes.headers['content-type']).toBe('message/rfc822');
+    expect(downloadRes.headers['content-disposition']).toBe(
+      `attachment; filename="____.mhtml"; filename*=UTF-8''${encodeURIComponent('网页快照.mhtml')}`,
+    );
+    expect(downloadRes.rawPayload).toEqual(archive);
+
     await app.close();
   });
 });

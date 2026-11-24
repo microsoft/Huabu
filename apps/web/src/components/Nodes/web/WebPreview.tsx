@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { ArrowUpRight, RotateCw } from 'lucide-react';
+import { ArrowUpRight, Download, RotateCw } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
@@ -10,11 +10,16 @@ import { resolveArtifactUrl } from '@/api/artifact';
 import { getWebPage, getWebReader } from '@/api/web';
 import { Button } from '@/components/Common/Button';
 import { usePreviewScrollMemory } from '@/hooks/usePreviewScrollMemory';
+import {
+  canDownloadWebSource,
+  triggerWebDownload,
+} from '@/utils/io/nodeDownload';
 
 import { useInteractiveViewBridge } from './useInteractiveViewBridge';
 import { isElectron, openInNewWindow } from '../../../hooks/useElectron.ts';
 import useCanvasStore from '../../../store/canvasStore.ts';
 import { Loading } from '../../Common/Loading';
+import { getMissingFileKind } from '../MissingFileBanner';
 import { PreviewHeaderButton } from '../PreviewHeaderButton';
 import { livePageSandboxFor } from './livePageSandbox';
 import { usePreviewHeaderSlot } from '../PreviewHeaderSlot';
@@ -66,6 +71,7 @@ export const WebPreview = ({
   // ── State ────────────────────────────────────────────────────────
   const [mode, setMode] = useState<ViewMode>('live');
   const [pageSrc, setPageSrc] = useState<string>('');
+  const [pageRawSrc, setPageRawSrc] = useState<string>('');
   const [pageKind, setPageKind] = useState<'url' | 'html' | null>(null);
   const [pageSnapshot, setPageSnapshot] = useState(false);
   const [pageEmbeddable, setPageEmbeddable] = useState<boolean | undefined>(
@@ -83,11 +89,10 @@ export const WebPreview = ({
   const liveIframeRef = useRef<HTMLIFrameElement>(null);
   const readerScrollRef = useRef<HTMLDivElement>(null);
   usePreviewScrollMemory(readerScrollRef, scrollViewKey);
+  const hasInteractiveView =
+    data.interactiveView !== null && typeof data.interactiveView === 'object';
   const isInteractiveView =
-    data.interactiveView !== null &&
-    typeof data.interactiveView === 'object' &&
-    pageKind === 'html' &&
-    !pageSnapshot;
+    hasInteractiveView && pageKind === 'html' && !pageSnapshot;
   const interactiveBridge = useInteractiveViewBridge({
     enabled: mode === 'live' && isInteractiveView && !bridgeFailed,
     canvasId,
@@ -139,6 +144,7 @@ export const WebPreview = ({
   useEffect(() => {
     if (!src || !id || !canvasId) {
       setPageSrc('');
+      setPageRawSrc('');
       setPageKind(null);
       setPageSnapshot(false);
       setPageEmbeddable(undefined);
@@ -161,12 +167,14 @@ export const WebPreview = ({
             ? result.src
             : resolveArtifactUrl(result.src, canvasId);
         setPageSrc(resolved);
+        setPageRawSrc(result.src);
         setPageKind(result.kind);
         setPageSnapshot(result.snapshot === true);
         setPageEmbeddable(result.embeddable);
       } catch (error) {
         if (cancelled) return;
         setPageSrc('');
+        setPageRawSrc('');
         setPageKind(null);
         setPageSnapshot(false);
         setPageEmbeddable(undefined);
@@ -347,6 +355,24 @@ export const WebPreview = ({
   // declared up here (before any early return) to satisfy React's
   // rules-of-hooks.
   const { el: headerSlotEl } = usePreviewHeaderSlot();
+  const isMissing = Boolean(getMissingFileKind(data));
+  const mhtmlArtifact =
+    pageSnapshot && pageKind === 'html' ? pageRawSrc : undefined;
+  const canDownload = canDownloadWebSource({
+    src,
+    mhtmlArtifact,
+    missing: isMissing,
+  });
+  const rawLabel = typeof data.label === 'string' ? data.label : undefined;
+  const handleDownload = useCallback(() => {
+    triggerWebDownload({
+      src,
+      mhtmlArtifact,
+      canvasId,
+      label: rawLabel,
+      missing: isMissing,
+    });
+  }, [src, mhtmlArtifact, canvasId, rawLabel, isMissing]);
 
   // ── Render ───────────────────────────────────────────────────────
   if (!src) {
@@ -385,7 +411,7 @@ export const WebPreview = ({
   });
 
   const headerActions =
-    pageSrc || externalHref ? (
+    pageSrc || externalHref || canDownload ? (
       <>
         {pageSrc ? (
           <PreviewHeaderButton
@@ -394,6 +420,15 @@ export const WebPreview = ({
             onClick={handleReload}
           >
             <RotateCw />
+          </PreviewHeaderButton>
+        ) : null}
+        {canDownload ? (
+          <PreviewHeaderButton
+            title={t('node.download')}
+            aria-label={t('node.download')}
+            onClick={handleDownload}
+          >
+            <Download />
           </PreviewHeaderButton>
         ) : null}
         {externalHref ? (

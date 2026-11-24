@@ -27,6 +27,8 @@
     "reading": "阅读",
     "source": "源码",
     "readOnlyMarkdown": "只读 Markdown 文件",
+    "frontmatter": "前置元数据",
+    "emptyFrontmatter": "空前置元数据",
     "singleFileMarkdown": "单文件预览：不加载图片或跳转链接。摘录和评论请使用源码模式。",
     "partialMarkdown": "仅加载了部分内容；阅读模式需要在 256 KiB 预览上限内加载完整文件。",
     "renderFailed": "Markdown 渲染失败，已显示源码；刷新可重试。",
@@ -59,7 +61,24 @@
     "label": "已打开的 Space",
     "newTab": "新标签页",
     "noMatchingSpaces": "没有匹配的 Space。",
-    "closeTab": "关闭标签页"
+    "closeTab": "关闭标签页",
+    "unseen": "{{count}} 个对话有你没看的内容"
+  },
+  "attention": {
+    "done": "做完了，还没看",
+    "error": "出错了",
+    "approval": "等你批准"
+  },
+  "unseenChanges": {
+    "create": "{{conversation}} · 新建",
+    "update": "{{conversation}} · 改过",
+    "open": "点击查看对话"
+  },
+  "turnNotices": {
+    "done": "做完了",
+    "error": "出错了",
+    "approval": "等你批准后才能继续",
+    "several": "{{count}} 个对话有新进展"
   },
   "sigil": {
     "chooseResource": "选择资源",
@@ -452,6 +471,11 @@
     "showMiniMap": "显示小地图",
     "hideMiniMap": "隐藏小地图",
     "miniMapDescription": "在 Space 右下角显示概览。",
+    "notifyTurnDone": "Agent 做完时通知",
+    "notifyTurnDoneDescription": "一轮对话在你没有看着的 Space 里结束时，发一条系统通知。",
+    "notifyNeedsYou": "Agent 需要你时通知",
+    "notifyNeedsYouDescription": "Agent 在你没有看着的 Space 里出错或等你批准时，发一条系统通知。",
+    "turnNoticesBlocked": "浏览器不允许这个页面发通知，请先在浏览器设置里允许。",
     "worldCanvas": "World Canvas",
     "worldCanvasDescription": "将 World 作为工作区入口，并显示 Space 快捷入口。",
     "showWorldCanvas": "显示 World Canvas",
@@ -621,6 +645,8 @@
     "agentletPrepareDevice": "准备运行环境",
     "agentletRequirements": "环境要求：Node.js 24.16+、pnpm。",
     "agentletSourceSetup": "下载与服务器版本一致的 Huabu 源码，并安装依赖：",
+    "agentletSourceSetupPinned": "下载与服务器运行版本完全一致的 Huabu 源码（{{revision}}），并安装依赖：",
+    "agentletSourceSetupRevisionUnknown": "下载与服务器版本一致的 Huabu 源码，并安装依赖。此服务器未报告其确切版本；如不确定应使用哪个版本，请咨询管理员：",
     "agentletRunConnection": "运行连接命令",
     "agentletRunConnectionDescription": "在该设备上打开终端，进入 Huabu 源码目录。根据所用终端选择类型，复制对应的连接命令并在终端中运行。",
     "agentletLocalAccessSetup": "当前服务器仅监听本机。如需远程访问，请停止服务器，运行 pnpm run setup 后重新启动。",
@@ -765,7 +791,24 @@
     "renameLabel": "重命名工作区“{{workspace}}”",
     "renameSave": "保存",
     "renameCancel": "取消重命名",
-    "renameFailed": "无法重命名工作区，请重试。"
+    "renameFailed": "无法重命名工作区，请重试。",
+    "currentWorkspace": "当前工作区",
+    "sharedSpacesOnly": "共享的 Space",
+    "switcherButton": "{{workspace}}，切换工作区",
+    "newWorkspaceEllipsis": "新建工作区…",
+    "allWorkspaces": "所有工作区…",
+    "explainer": "每个工作区都有自己的 Space 和成员。切换只改变你看到的内容，不会移动任何东西。",
+    "dialogIntro": "每个工作区都有自己的 Space 和成员。你当前在“{{workspace}}”。",
+    "dialogIntroNone": "每个工作区都有自己的 Space 和成员。",
+    "createHint": "你将成为它的所有者。可在“设置 → 成员”中添加成员。",
+    "switch": "切换",
+    "switchTo": "切换到“{{workspace}}”",
+    "switched": "已切换到“{{workspace}}”",
+    "switchedCount_one": "已切换到“{{workspace}}” · {{count}} 个 Space",
+    "switchedCount_other": "已切换到“{{workspace}}” · {{count}} 个 Space",
+    "backTo": "返回“{{workspace}}”",
+    "back": "返回",
+    "unsavedBeforeSwitch": "还有未保存的更改，因此仍停留在当前工作区。请稍后重试。"
   },
   "spaceHierarchy": {
     "deleteFromContainer": "请从 Home 或父 Space 中删除此 Space。",
@@ -1106,6 +1149,7 @@
     "previewFailed": "预览加载失败",
     "processing": "正在处理…",
     "download": "下载",
+    "downloadFailed": "下载失败",
     "officeFileMissing": "{{label}} 文件缺失",
     "untitledTypedDocument": "未命名 {{label}}",
     "noOfficeSource": "无 Office 来源",
@@ -1382,7 +1426,6 @@
     "partialStrokeCount_other": "{{count}} 笔"
   },
   "messages": {
-    "seeMore": "查看更多",
     "detailsLoading": "正在加载详情…",
     "detailsLoadFailed": "无法加载详情。",
     "listLabel": "对话消息",
@@ -1450,6 +1493,7 @@
     "activityErrorSteps_other": "发生错误 · {{count}} 个步骤",
     "activityFilesChanged_one": "已更改 {{count}} 个文件",
     "activityFilesChanged_other": "已更改 {{count}} 个文件",
+    "openFile": "打开 {{path}}",
     "plan": "计划",
     "copyPlan": "复制计划",
     "copyPlanMarkdown": "复制为 Markdown 清单",
@@ -1791,10 +1835,25 @@
     "intro": "谁可以使用此 Huabu，以及能打开哪些工作区。成员首次登录后会出现在这里。更改在其下一次请求时生效。",
     "serviceAccess": "服务访问权限",
     "accessVsWorkspace": "服务访问权限决定某人能否使用此 Huabu；开通后没有工作区的人会获得一个个人工作区。将某人添加到工作区不会开通服务访问权限，加入后默认是查看者，可改为编辑者或所有者。",
+    "admission": {
+      "title": "自动开通",
+      "description": "通过{{providers}}登录的任何人都会作为普通成员获得访问权限；没有可打开工作区的人会获得一个个人工作区。自动开通不会让他们成为管理员，也不会把他们加入现有工作区。",
+      "provider": {
+        "entra": "Microsoft Entra ID（仅限此处配置的租户）",
+        "auth0": "Auth0（其登录接受的任何人）"
+      },
+      "providerSeparator": "或",
+      "noProviders": "自动开通仅适用于 Microsoft Entra ID 和 Auth0 登录，而此处两者均未配置。",
+      "keepsRemoved": "你移除的人在你重新开通前无法再进入。关闭自动开通不会移除任何人。",
+      "loadFailed": "无法加载自动开通设置。请重新打开成员页面重试。"
+    },
     "status": {
       "administrator": "管理员",
       "admitted": "已开通",
-      "waiting": "等待开通"
+      "waiting": "等待开通",
+      "blocked": "已移除访问权限",
+      "noAccess": "未开通",
+      "joinedAutomatically": "自动加入"
     },
     "roleIn": "在 {{workspace}} 中的角色",
     "removeRole": "从此工作区移除",

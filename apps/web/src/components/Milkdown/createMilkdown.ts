@@ -63,6 +63,7 @@ import {
   parseHuabuImageClipboard,
   readHuabuClipboardPayload,
 } from '@/utils/io/clipboard';
+import { parseNodeReferenceHref } from '@/utils/nodeDeepLink';
 import { isMac } from '@/utils/platform';
 import { normalizeSafeLinkHref } from '@/utils/safeLink';
 
@@ -1718,13 +1719,24 @@ function createLinkClickHandler(
     const anchor = target.closest('a[href]');
     if (!anchor || !view.dom.contains(anchor)) return false;
 
-    const href = normalizeSafeLinkHref(anchor.getAttribute('href'));
+    const rawHref = anchor.getAttribute('href');
+    // A node reference (`#node-<id>` or a deep link on this origin) is in-app
+    // navigation. It is the only non-HTTP(S) href that may be activated.
+    const isNodeLink =
+      parseNodeReferenceHref(rawHref, window.location.origin) !== null;
+    const href = isNodeLink
+      ? (rawHref ?? '').trim()
+      : normalizeSafeLinkHref(rawHref);
     if (!href) {
       mouseEvent.preventDefault();
       return false;
     }
 
-    if (mouseEvent.button !== 0) return false;
+    if (mouseEvent.button !== 0) {
+      // A fragment href would otherwise open this app again in a new tab.
+      if (isNodeLink) mouseEvent.preventDefault();
+      return false;
+    }
     const hasFollowModifier = isMac ? mouseEvent.metaKey : mouseEvent.ctrlKey;
     const isPlainClick =
       !mouseEvent.metaKey &&
@@ -1743,11 +1755,10 @@ function createLinkClickHandler(
       !isKeyboardActivation
     )
       return false;
-    if (onLinkClick && isPlainClick) {
-      onLinkClick(href);
-      return true;
-    }
-    openInNewWindow(href);
+    // A node link is in-app navigation: only the host can follow it, and a
+    // follow modifier must not send it to the browser.
+    if (onLinkClick && (isPlainClick || isNodeLink)) onLinkClick(href);
+    else if (!isNodeLink) openInNewWindow(href);
     return true;
   };
 
@@ -1768,6 +1779,23 @@ function createLinkClickHandler(
     pointercancel: (): boolean => {
       gesture = null;
       return false;
+    },
+    // A node link on a plain-click surface is a reference chip, not text to
+    // edit: keep ProseMirror from placing a caret inside it. The click still
+    // fires and locates the node.
+    mousedown: (view: EditorView, event: MouseEvent): boolean => {
+      if (!allowPlainClick || event.button !== 0) return false;
+      const target = event.target;
+      const anchor =
+        target instanceof Element ? target.closest('a[href]') : null;
+      if (!anchor || !view.dom.contains(anchor)) return false;
+      const reference = parseNodeReferenceHref(
+        anchor.getAttribute('href'),
+        window.location.origin,
+      );
+      if (!reference) return false;
+      event.preventDefault();
+      return true;
     },
     click,
     auxclick: click,

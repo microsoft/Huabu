@@ -1,8 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { collectMarkdownArtifactRefs, parseArtifactRef } from '@huabu/shared';
-
 import {
   getRequestIdentity,
   recordRequestAuthorization,
@@ -253,34 +251,4 @@ export async function readableSpaces<T extends { canvasId: string }>(
         resources.map((resource) => access.can('read', resource)),
       );
   return spaces.filter((_, index) => readable[index]);
-}
-
-/**
- * Whether the caller may read every other Space whose artifact `value` cites,
- * as a whole artifact URL or a Markdown image, at any depth. A route that
- * reads bytes a client-supplied snapshot points at must not reach further
- * than the Space it was authorized for.
- */
-export async function canReadCitedSpaces(
-  request: FastifyRequest,
-  canvasId: string,
-  value: unknown,
-): Promise<boolean> {
-  const cited = new Set<string>();
-  const visit = (node: unknown): void => {
-    if (typeof node === 'string') {
-      for (const raw of [node, ...collectMarkdownArtifactRefs(node)]) {
-        const owner = parseArtifactRef(raw)?.canvasId;
-        if (owner && owner !== canvasId) cited.add(owner);
-      }
-    } else if (Array.isArray(node)) {
-      node.forEach(visit);
-    } else if (node && typeof node === 'object') {
-      Object.values(node).forEach(visit);
-    }
-  };
-  visit(value);
-  for (const owner of cited)
-    if (!(await canReadSpace(request, owner))) return false;
-  return true;
 }

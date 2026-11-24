@@ -48,7 +48,7 @@ import {
 } from '../agent/tools/handlers/fs-sandbox.js';
 import { extractYoutubeVideoId } from '../preprocessing/loaders/youtube-id.js';
 import { outboundFetch, readBodyWithin } from '../security/outbound.js';
-import { space } from '../storage/index.js';
+import { space, storageServes } from '../storage/index.js';
 
 const log = getLogger('canvas.import-node-src');
 
@@ -110,7 +110,11 @@ const LOCAL_ONLY_ARTIFACT_SRC_NODE_TYPES: ReadonlySet<string> = new Set([
 ]);
 
 /** Local file extensions accepted as agent-authored `web` node sources. */
-const WEB_LOCAL_EXTENSIONS: ReadonlySet<string> = new Set(['.html']);
+const WEB_LOCAL_EXTENSIONS: ReadonlySet<string> = new Set([
+  '.html',
+  '.htm',
+  '.mhtml',
+]);
 
 /** Raster formats accepted as an agent-authored PDF cover. */
 const COVER_EXTENSIONS: ReadonlySet<string> = new Set([
@@ -140,6 +144,20 @@ export class NodeCoverError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'NodeCoverError';
+  }
+}
+
+/**
+ * An invalid local `src` for a node type with strict artifact constraints
+ * (such as `web`, which accepts only existing `.html`/`.htm`/`.mhtml`
+ * artifacts when not pointing at a live URL or `data:` URI). Extends
+ * {@link NodeCoverError} so existing route error handlers reject the batch
+ * with HTTP `400 validation_failed`.
+ */
+export class NodeSourceError extends NodeCoverError {
+  constructor(message: string) {
+    super(message);
+    this.name = 'NodeSourceError';
   }
 }
 
@@ -202,6 +220,38 @@ export async function reclaimStagedUploads(
   );
 }
 
+async function assertValidWebSrc(
+  canvasId: string,
+  rawSrc: unknown,
+  resolvedSrc: string | null,
+  strictAllLocal: boolean,
+): Promise<void> {
+  const candidate = resolvedSrc ?? (typeof rawSrc === 'string' ? rawSrc : '');
+  if (
+    !candidate ||
+    candidate.startsWith('data:') ||
+    /^https?:\/\//i.test(candidate) ||
+    candidate.startsWith('/api/')
+  ) {
+    return;
+  }
+  const isBareKey = !candidate.includes('/') && !candidate.includes('\\');
+  if (!isBareKey && !strictAllLocal) {
+    return;
+  }
+  const ext = path.extname(candidate).toLowerCase();
+  if (
+    !isBareKey ||
+    candidate.startsWith('.') ||
+    !WEB_LOCAL_EXTENSIONS.has(ext) ||
+    !(await space(canvasId).artifacts.head(candidate))
+  ) {
+    throw new NodeSourceError(
+      `Web node src ${JSON.stringify(rawSrc)} must be an HTTPS URL, a data: URI, or an existing HTML/MHTML artifact key (.html, .htm, .mhtml)`,
+    );
+  }
+}
+
 export async function importForeignNodeSources(
   canvasId: string,
   commands: readonly CanvasCommand[],
@@ -260,6 +310,14 @@ export async function importForeignNodeSources(
             undefined,
             stagedCoverUploads,
           );
+          if (node.nodeType === 'web') {
+            await assertValidWebSrc(
+              canvasId,
+              data?.['src'],
+              key,
+              Boolean(options.agentCovers),
+            );
+          }
           if (key === null) return node;
           // Cast back to the discriminated create-input union — the engine
           // treats `data` structurally, but the static type is per-nodeType.
@@ -281,10 +339,8 @@ export async function importForeignNodeSources(
                 patch: { ...original.patch, coverUrl: covers.get(original) },
               }
             : original;
-          const mode = srcNormalizeMode(
-            await nodeType(entry.nodeId),
-            entry.patch?.['src'],
-          );
+          const targetType = await nodeType(entry.nodeId);
+          const mode = srcNormalizeMode(targetType, entry.patch?.['src']);
           if (!mode) return entry;
           const key = await resolveImportedSrc(
             canvasId,
@@ -294,6 +350,14 @@ export async function importForeignNodeSources(
             undefined,
             stagedCoverUploads,
           );
+          if (targetType === 'web' && entry.patch?.['src'] !== undefined) {
+            await assertValidWebSrc(
+              canvasId,
+              entry.patch?.['src'],
+              key,
+              Boolean(options.agentCovers),
+            );
+          }
           if (key === null) return entry;
           return { ...entry, patch: { ...entry.patch, src: key } };
         }),
@@ -473,6 +537,58 @@ async function resolveImportedSrc(
 
   // Already an in-app API path — leave it for the web resolver.
   if (src.startsWith('/api/')) return null;
+
+  // Portable single-segment `artifacts/<key>` normalization across all storage
+  // backends before touching any Disk directory.
+  if (src.startsWith('artifacts/')) {
+    const candidate = src.slice('artifacts/'.length);
+    if (
+      candidate.length > 0 &&
+      !candidate.startsWith('.') &&
+      candidate !== '..' &&
+      !candidate.includes('/') &&
+      !candidate.includes('\\')
+    ) {
+      return candidate;
+    }
+  }
+
+  const handle = space(canvasId);
+  if (!storageServes('builtin-file-tools')) {
+    // Non-Disk backends have no Space directory to sandbox-resolve. Support
+    // legacy single-segment `upload/<name>` blobs portably via `handle.uploads`,
+    // and leave bare artifact keys (`artifact-abc.png`) untouched.
+    if (src.startsWith('upload/')) {
+      const uploadName = src.slice('upload/'.length);
+      if (
+        uploadName.length > 0 &&
+        !uploadName.startsWith('.') &&
+        uploadName !== '..' &&
+        !uploadName.includes('/') &&
+        !uploadName.includes('\\')
+      ) {
+        const localExt = path.extname(uploadName).toLowerCase();
+        if (allowedLocalExtensions && !allowedLocalExtensions.has(localExt)) {
+          log.warn(
+            {
+              src,
+              localExt,
+              allowedLocalExtensions: [...allowedLocalExtensions],
+            },
+            'Local node src has an unsupported extension; skipped',
+          );
+          return null;
+        }
+        const bytes = await handle.uploads.read(uploadName);
+        if (!bytes) return null;
+        const ext = path.extname(uploadName) || '.bin';
+        const key = `${createId('artifact')}${ext}`;
+        await handle.artifacts.put(key, bytes);
+        return key;
+      }
+    }
+    return null;
+  }
 
   // Relative / local path. Map RFS virtual prefixes (`upload/`, `artifacts/`)
   // onto their physical `.`-dirs, then resolve within the canvas sandbox.

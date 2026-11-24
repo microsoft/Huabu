@@ -1,14 +1,21 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { Maximize2, ArrowUpRight } from 'lucide-react';
+import { ArrowUpRight, Download, Maximize2 } from 'lucide-react';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { getWebPreview } from '@/api/web';
-import { DropdownMenuLink } from '@/components/Common/DropdownMenu';
+import {
+  DropdownMenuItem,
+  DropdownMenuLink,
+} from '@/components/Common/DropdownMenu';
 import { openServerFileInDesktop } from '@/hooks/useElectron';
 import { useNodePresentation } from '@/hooks/useNodePresentation';
+import {
+  canDownloadWebSource,
+  triggerWebDownload,
+} from '@/utils/io/nodeDownload';
 
 import { WebReadingView } from './WebReadingView';
 import useCanvasStore from '../../../store/canvasStore.ts';
@@ -68,7 +75,7 @@ export const WebNode = memo(
     // ~simultaneously. Minimal LOD skips the queue entirely; once the node
     // returns to full LOD, the hook grants one node per frame so requests +
     // paints stream in. See `../shared/nodeHydrationScheduler`.
-    const webHydrated = useDeferredHydration(isMinimalLOD);
+    const webHydrated = useDeferredHydration(isMinimalLOD && !selected);
 
     const src = typeof data?.src === 'string' ? data.src : '';
     const missingFileKind = getMissingFileKind(data);
@@ -113,7 +120,7 @@ export const WebNode = memo(
       // node lifetime. Minimal LOD also suppresses the request; entering it
       // while a request is in flight runs this effect's cleanup and ignores
       // the eventual result.
-      if (isMinimalLOD) return;
+      if (isMinimalLOD && !selected) return;
       if (!webHydrated) return;
 
       let cancelled = false;
@@ -149,6 +156,7 @@ export const WebNode = memo(
       ingestion?.status,
       id,
       isMinimalLOD,
+      selected,
       webHydrated,
       retryAttempt,
     ]);
@@ -160,6 +168,24 @@ export const WebNode = memo(
     const favicon = preview?.favicon;
     const fallbackImage = preview?.image;
     const siteName = preview?.siteName;
+    const canDownload = canDownloadWebSource({
+      src,
+      mhtmlArtifact: preview?.mhtmlArtifact,
+      missing: Boolean(missingFileKind),
+    });
+    const downloadLabel =
+      typeof data?.label === 'string' && data.label.trim().length > 0
+        ? data.label
+        : preview?.label;
+    const handleDownload = useCallback(() => {
+      triggerWebDownload({
+        src,
+        mhtmlArtifact: preview?.mhtmlArtifact,
+        canvasId,
+        label: downloadLabel,
+        missing: Boolean(missingFileKind),
+      });
+    }, [src, preview?.mhtmlArtifact, canvasId, downloadLabel, missingFileKind]);
 
     const WebActions = (
       <>
@@ -175,15 +201,15 @@ export const WebNode = memo(
       </>
     );
 
-    return (
-      <NodeWrapper
-        id={id}
-        data={data}
-        type={'web'}
-        selected={selected}
-        actions={missingFileKind ? undefined : WebActions}
-        overflow={
-          !missingFileKind && externalHref ? (
+    const WebOverflow =
+      !missingFileKind && (canDownload || externalHref) ? (
+        <>
+          {canDownload && (
+            <DropdownMenuItem icon={<Download />} onClick={handleDownload}>
+              {t('node.download')}
+            </DropdownMenuItem>
+          )}
+          {externalHref && (
             <DropdownMenuLink
               to={externalHref}
               target="_blank"
@@ -196,8 +222,18 @@ export const WebNode = memo(
             >
               {t('toolbar.openOriginalUrl')}
             </DropdownMenuLink>
-          ) : undefined
-        }
+          )}
+        </>
+      ) : undefined;
+
+    return (
+      <NodeWrapper
+        id={id}
+        data={data}
+        type={'web'}
+        selected={selected}
+        actions={missingFileKind ? undefined : WebActions}
+        overflow={WebOverflow}
         resizable
         keepAspectRatio={false}
       >

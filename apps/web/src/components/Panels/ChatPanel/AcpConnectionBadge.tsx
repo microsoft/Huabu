@@ -18,8 +18,8 @@
  *
  *   • `connected` — default. Cache hit, post-success steady state,
  *     OR a transient refresh error while we still have a usable
- *     cached snapshot. Green solid dot, no text — once everything is
- *     working the badge should be near-invisible chrome.
+ *     cached snapshot. Nothing is drawn: a dot that is always there
+ *     reads as news, which is what the attention badge means.
  *
  *   • `failed` — the cache read failed and there is no snapshot to show.
  *
@@ -62,13 +62,15 @@ export function AcpConnectionDot({
   status: AcpConnectionStatus;
   className?: string;
 }) {
+  // Working is the normal state and gets no mark: a dot that is always there
+  // reads as news. Only loading and failure are shown.
+  if (status === 'connected') return null;
   return (
     <span
       aria-hidden
       data-acp-connection-status={status}
       className={cn(
         'size-1.5 shrink-0 rounded-full',
-        status === 'connected' && 'bg-success-light',
         status === 'connecting' &&
           'bg-info animate-pulse motion-reduce:animate-none',
         status === 'failed' && 'bg-danger',
@@ -81,6 +83,7 @@ export function AcpConnectionDot({
 export const AcpConnectionBadge: FC<AcpConnectionInfo> = (connection) => {
   const { t } = useTranslation();
   const tooltipText = useAcpConnectionDescription(connection);
+  if (connection.status === 'connected') return null;
   return (
     <Tooltip
       content={tooltipText}

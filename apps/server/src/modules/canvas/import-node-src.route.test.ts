@@ -15,7 +15,10 @@ import {
   AGENT_CREDENTIAL,
   registerTestAgentCredential,
 } from '../../test-support/agent-credential.js';
-import { resetPreprocessDispatcher } from '../preprocessing/index.js';
+import {
+  getPreprocessDispatcher,
+  resetPreprocessDispatcher,
+} from '../preprocessing/index.js';
 import { createCanvas } from '../storage/compatibility/canvas.js';
 import { resetStorageCache, space } from '../storage/index.js';
 import { setWorkspacePath } from '../workspace.js';
@@ -113,19 +116,15 @@ describe('YouTube source import → real route preprocessing', () => {
         expect((await handle.nodes.read('node-video'))?.record.src).toBe(src);
         expect(await handle.artifacts.list()).toEqual([]);
 
-        const processed = await app.inject({
-          method: 'POST',
-          url: '/canvas/c-youtube/nodes/node-video/preprocess',
-          payload: {
-            nodeType: 'video',
-            trigger: 'node_updated',
-            snapshot: { src },
-            options: { allowLLM: false },
-          },
+        // The cover is fetched when the node is preprocessed, not on import.
+        const processed = await getPreprocessDispatcher().preprocess({
+          canvasId: 'c-youtube',
+          nodeId: 'node-video',
+          nodeType: 'video',
+          snapshot: { src },
         });
-        expect(processed.statusCode).toBe(200);
-        expect(processed.json()).toMatchObject({
-          success: true,
+        expect(processed.success).toBe(true);
+        expect(processed.patch).toMatchObject({
           coverUrl: expect.stringMatching(/^cover_[\w-]+\.jpg$/),
           coverSourceSrc: src,
         });
@@ -133,7 +132,7 @@ describe('YouTube source import → real route preprocessing', () => {
           'https://i.ytimg.com/vi/dQw4w9WgXcQ/maxresdefault.jpg',
           expect.objectContaining({ redirect: 'error' }),
         );
-        const coverUrl = processed.json().coverUrl as string;
+        const coverUrl = processed.patch.coverUrl as string;
         expect((await handle.nodes.read('node-video'))?.record).toMatchObject({
           src,
           coverUrl,

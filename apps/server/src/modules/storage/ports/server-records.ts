@@ -48,6 +48,8 @@ export const SERVER_RECORDS = {
   'agent-profiles': { personal: false },
   /** The Bubble-mode Agent Profile registry; every member's Profiles, filtered by owner on read. */
   'user-agent-profiles': { personal: false },
+  /** How a Bubble deployment admits people: automatic admission and the people it may not readmit (`identity/admission.ts`). */
+  admission: { personal: false },
 } as const satisfies Record<string, { readonly personal: boolean }>;
 
 export type ServerRecordName = keyof typeof SERVER_RECORDS;

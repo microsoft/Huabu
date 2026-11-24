@@ -201,10 +201,12 @@ vi.mock('./ThreadChatInput', () => ({
     agentSelectorSlot,
     acpSelectorsSlot,
     submitDisabled,
+    deferSubmission,
   }: {
     agentSelectorSlot?: React.ReactNode;
     acpSelectorsSlot?: React.ReactNode;
     submitDisabled?: boolean;
+    deferSubmission?: boolean;
     onSubmit: (
       event: React.FormEvent,
       mode: 'ask',
@@ -213,6 +215,7 @@ vi.mock('./ThreadChatInput', () => ({
   }) => (
     <form
       data-submit-disabled={String(submitDisabled)}
+      data-defer-submission={String(deferSubmission)}
       onSubmit={(event) => {
         void onSubmit(event, 'ask', 'First prompt\nMore detail');
       }}
@@ -696,9 +699,10 @@ describe('rendered conversation titles', () => {
     const selectors = vi.mocked(BuiltinSessionSelectors).mock.lastCall?.[0];
     assert(selectors);
     expect(selectors.disabled).toBe(true);
-    expect(container.querySelector('form')?.dataset.submitDisabled).toBe(
-      'true',
-    );
+    // A save in flight neither blocks Send nor routes it through the queue.
+    const form = container.querySelector('form');
+    expect(form?.dataset.submitDisabled).toBe('false');
+    expect(form?.dataset.deferSubmission).toBe('false');
     await act(async () => {
       await selectors.onSelectModel('model-2');
       await selectors.onSelectReasoningEffort('low');
@@ -764,7 +768,7 @@ describe('rendered conversation titles', () => {
       expect(calls).toEqual(['model-a']);
       expect(
         container.querySelector('form')?.getAttribute('data-submit-disabled'),
-      ).toBe('true');
+      ).toBe('false');
       await act(async () => {
         finish();
         await vi.waitFor(() =>
@@ -893,12 +897,12 @@ describe('rendered conversation titles', () => {
     );
   });
 
-  it('gates panel submission independently from draft editing when history is not ready', async () => {
+  it('queues a submission instead of blocking it while history is not ready', async () => {
     useChatStore.getState().setHistoryLoaded('thread', false);
     await renderPanel();
-    expect(
-      container.querySelector('form')?.getAttribute('data-submit-disabled'),
-    ).toBe('true');
+    const form = container.querySelector('form');
+    expect(form?.getAttribute('data-submit-disabled')).toBe('false');
+    expect(form?.getAttribute('data-defer-submission')).toBe('true');
     await act(async () => {
       container
         .querySelector('form')
@@ -907,6 +911,15 @@ describe('rendered conversation titles', () => {
         );
     });
     expect(agentApi.streamMessage).not.toHaveBeenCalled();
+    expect(useChatStore.getState().threadsById.thread.queuedTurns).toHaveLength(
+      1,
+    );
+    await act(async () => {
+      useChatStore.getState().setHistoryLoaded('thread', true);
+      await vi.waitFor(() =>
+        expect(agentApi.streamMessage).toHaveBeenCalledTimes(1),
+      );
+    });
   });
 
   it('keeps scroll readiness false after history fails until retry succeeds', async () => {
@@ -944,6 +957,14 @@ describe('rendered conversation titles', () => {
       const dot = container.querySelector(
         `[data-acp-connection-status="${status}"]`,
       );
+      if (status === 'connected') {
+        // Working is the normal state and gets no mark anywhere.
+        expect(
+          container.querySelector('[data-acp-connection-status]'),
+        ).toBeNull();
+        expect(container.querySelector('[role="alert"]')).toBeNull();
+        return;
+      }
       assert(dot);
       expect(dot.closest('[role="tab"]')).not.toBeNull();
       expect(
@@ -974,7 +995,7 @@ describe('rendered conversation titles', () => {
     },
   );
 
-  it('removes an otherwise empty Question header after moving its status to the tab', async () => {
+  it('removes an otherwise empty Question header when the status is the normal one', async () => {
     const node = {
       id: 'question',
       type: 'question',
@@ -1003,15 +1024,13 @@ describe('rendered conversation titles', () => {
       vi.fn(),
       { hideDuplicateTitle: true },
     );
-    expect(
-      container.querySelector('[role="tab"] [data-acp-connection-status]'),
-    ).not.toBeNull();
+    expect(container.querySelector('[data-acp-connection-status]')).toBeNull();
     expect(container.querySelector('.h-7.shrink-0')).toBeNull();
     expect(container.querySelector('.overflow-visible.pt-3')).not.toBeNull();
     expect(container.querySelector('.overflow-visible.pt-1')).toBeNull();
   });
 
-  it('hides the duplicate title but retains connection and save controls, and waits for hydration before renaming', async () => {
+  it('hides the duplicate title but retains save controls, and waits for hydration before renaming', async () => {
     useChatStore.getState().setHistoryLoaded('thread', false);
     useChatStore.getState().setAgentBinding('thread', {
       kind: 'external',
@@ -1040,11 +1059,7 @@ describe('rendered conversation titles', () => {
     expect(saveButton?.classList.contains('[&_svg]:h-3.25')).toBe(true);
     expect(saveButton?.classList.contains('min-h-6')).toBe(true);
     expect(saveButton?.classList.contains('text-fg-muted')).toBe(true);
-    expect(
-      container.querySelector(
-        '[role="tab"] [data-acp-connection-status="connected"]',
-      ),
-    ).not.toBeNull();
+    expect(container.querySelector('[data-acp-connection-status]')).toBeNull();
     await act(async () =>
       useChatStore.getState().setHistoryLoaded('thread', true),
     );
@@ -1196,6 +1211,8 @@ describe('rendered conversation titles', () => {
       alias: 'Fixture',
     });
     await loadTitle('Long valid topic '.repeat(7).trim());
+    // A badge is only there while the status is not the normal one.
+    sessionMetaState.loading = true;
     await renderPanel();
     const button = header();
     const wrapper = button.parentElement;

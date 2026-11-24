@@ -8,13 +8,18 @@ import { useTranslation } from 'react-i18next';
 
 import { stripMarkdown } from '@huabu/shared/canvas-engine';
 
-import { resolveArtifactUrl } from '@/api/artifact';
 import { DropdownMenuItem } from '@/components/Common/DropdownMenu';
 import { FloatingToolbar } from '@/components/Common/FloatingToolbar';
 import { SummaryContent } from '@/components/Common/SummaryContent';
 import { OFFICE_FORMAT_ICON } from '@/config/nodeIcons';
 import useCanvasStore from '@/store/canvasStore';
 import { openPreviewNode } from '@/store/previewWorkspace/actions';
+import {
+  canDownloadMediaSource,
+  officeDefaultExtension,
+  officeFallbackStem,
+  triggerMediaDownload,
+} from '@/utils/io/nodeDownload';
 
 import { getAccentTokens } from '../design/accentTokens';
 import { nodeAccentToken } from '../design/nodeAccentPolicy';
@@ -113,16 +118,17 @@ export const OfficeNode = memo(
     const iconColor = accentTokens?.fg ?? 'var(--fg-muted)';
     const borderColor = accentTokens?.divider ?? 'var(--edge-default)';
 
+    const canDownload = canDownloadMediaSource(src, Boolean(missingFileKind));
     const handleDownload = useCallback(() => {
-      if (!src) return;
-      const link = document.createElement('a');
-      link.href = resolveArtifactUrl(src, canvasId);
-      link.download =
-        (data.label as string) || src.split('/').pop() || meta.fallbackName;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-    }, [src, data.label, canvasId, meta.fallbackName]);
+      triggerMediaDownload({
+        src,
+        canvasId,
+        label: typeof data.label === 'string' ? data.label : undefined,
+        defaultExt: officeDefaultExtension(format),
+        fallbackStem: officeFallbackStem(format),
+        missing: Boolean(missingFileKind),
+      });
+    }, [src, data.label, canvasId, format, missingFileKind]);
 
     const OfficeActions = (
       <>
@@ -147,11 +153,11 @@ export const OfficeNode = memo(
         farLabel={farLabel}
         actions={missingFileKind ? undefined : OfficeActions}
         overflow={
-          missingFileKind ? undefined : (
+          canDownload ? (
             <DropdownMenuItem icon={<Download />} onClick={handleDownload}>
               {t('node.download')}
             </DropdownMenuItem>
-          )
+          ) : undefined
         }
         resizable
         keepAspectRatio={false}

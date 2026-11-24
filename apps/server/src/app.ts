@@ -41,6 +41,7 @@ import { registerOpCounterHook } from './modules/agent/memory/op-counter-hook.js
 import skillsRoutes from './modules/agent/skills.route.js';
 import artifactRoute from './modules/artifact/artifact.route.js';
 import canvasRoutes from './modules/canvas/canvas.route.js';
+import { setCommitReactions } from './modules/canvas/commit-follow-up.js';
 import { resetExternalNoteSessions } from './modules/canvas/external-watcher.js';
 import externalNoteRoutes from './modules/canvas/external.route.js';
 import presenceRoutes from './modules/canvas/presence.route.js';
@@ -54,6 +55,10 @@ import { createIdentity, registerIdentity } from './modules/identity/index.js';
 import peopleRoutes from './modules/identity/people.route.js';
 import integrationsRoutes from './modules/integrations/integrations.route.js';
 import interactiveViewRoutes from './modules/interactive-view/interactive-view.route.js';
+import {
+  preprocessAfterWrites,
+  waitForNodePreprocessing,
+} from './modules/preprocessing/node-jobs.js';
 import rfsRoutes from './modules/remote_fs/rfs.route.js';
 import canaryRedeployRoutes from './modules/security/canary-redeploy.route.js';
 import { createCorsOptions } from './modules/security/cors.js';
@@ -308,12 +313,19 @@ app.addHook('preClose', async () => unregisterHarnessDiscovery?.());
 // filesystems (Google Drive) an abandoned watch request can stay wedged
 // after the process is gone. Closing them here lets `app.close()` (driven
 // by the SIGTERM/SIGINT handlers in server.ts) tear them down gracefully.
+setCommitReactions(preprocessAfterWrites);
 app.addHook('onClose', async () => resetExternalNoteSessions());
 // Close the storage connections on graceful shutdown. Disk holds nothing a
 // process exit would not release, so this earns its place by being the seat
 // a connection-holding backend will need — a pool nobody closes leaks on
 // every restart, and the lifecycle is where that is visible.
-app.addHook('onClose', async () => closeStorage());
+// Preprocessing follows every committed write and writes its result: what
+// is running finishes first. One hook, so the order does not depend on the
+// order hooks are run in.
+app.addHook('onClose', async () => {
+  await waitForNodePreprocessing();
+  await closeStorage();
+});
 // Capture the bound TCP port for the local RFS reachback fallback. Public
 // deployments use their configured canonical origin instead.
 app.addHook('onListen', async () => {

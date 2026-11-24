@@ -31,6 +31,7 @@ import {
 import { executeOnServer } from './canvas-executor.js';
 import { subscribeCanvasUpdates } from './canvas-sync.js';
 import canvasRoutes from './canvas.route.js';
+import { setCommitReactions } from './commit-follow-up.js';
 import syncRoutes from './sync.route.js';
 import {
   AGENT_CREDENTIAL,
@@ -819,6 +820,95 @@ describe('PUT /nodes/:nodeId/content — content CAS', () => {
       expect(space.readNode('n1')).toBeNull();
     } finally {
       unsubscribe();
+      await app.close();
+    }
+  });
+
+  it('refuses "the editor was left" said of a body the server no longer holds', async () => {
+    const app = await buildApp();
+    try {
+      seedCanvas('c1', 'n1', 'Note');
+      const first = await putContent(app, 'c1', 'n1', {
+        nodeType: 'note',
+        content: 'Body A',
+        expectRev: REV_EMPTY,
+      });
+      const revA = (first.json() as { rev: string }).rev;
+      // Another page saves body B.
+      const second = await putContent(app, 'c1', 'n1', {
+        nodeType: 'note',
+        content: 'Body B',
+        expectRev: revA,
+      });
+      const revB = (second.json() as { rev: string }).rev;
+
+      // The first page, still holding A, says its editor was left.
+      const stale = await putContent(app, 'c1', 'n1', {
+        nodeType: 'note',
+        editingEnded: true,
+        expectRev: revA,
+      });
+      // Refused: accepted, its answer would hand that page B's revision
+      // for a body it has not seen.
+      expect(stale.statusCode).toBe(409);
+      expect(getCanvasStore('c1').readNode('n1')?.content).toBe('Body B');
+
+      // Said of the body the server holds, it is accepted.
+      const current = await putContent(app, 'c1', 'n1', {
+        nodeType: 'note',
+        editingEnded: true,
+        expectRev: revB,
+      });
+      expect(current.statusCode).toBe(200);
+      expect((current.json() as { rev: string }).rev).toBe(revB);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('reacts to a rename that was written although the body beside it was refused', async () => {
+    const app = await buildApp();
+    const contentSave = vi.fn(() => undefined);
+    setCommitReactions({
+      batch: () => undefined,
+      contentSave,
+      agentNodeRestored: () => undefined,
+    });
+    try {
+      seedCanvas('c1', 'n1', 'Note');
+      const first = await putContent(app, 'c1', 'n1', {
+        nodeType: 'note',
+        content: 'Body A',
+        expectRev: REV_EMPTY,
+      });
+      expect(first.statusCode).toBe(200);
+      contentSave.mockClear();
+
+      // A stale body with a rename: the body is refused, the rename written.
+      const stale = await putContent(app, 'c1', 'n1', {
+        nodeType: 'note',
+        content: 'Body from a stale page',
+        label: 'Renamed',
+        labelSource: 'user',
+        expectRev: REV_EMPTY,
+      });
+      expect(stale.statusCode).toBe(409);
+      expect(stale.json()).toMatchObject({ titleApplied: true });
+
+      // The node, and a Frame holding it, read a different title now.
+      expect(contentSave).toHaveBeenCalledOnce();
+      const [save] = contentSave.mock.calls[0] as unknown as [
+        {
+          before: { label: string };
+          after: { label: string; content: string };
+        },
+      ];
+      expect(save.before.label).not.toBe('Renamed');
+      expect(save.after).toMatchObject({ label: 'Renamed', content: 'Body A' });
+      // Nothing is said of the editor of a body that was refused.
+      expect(save).not.toHaveProperty('editingEnded');
+    } finally {
+      setCommitReactions(undefined);
       await app.close();
     }
   });
@@ -2076,31 +2166,6 @@ describe('missing-sidecar barrier', () => {
       }
     },
   );
-
-  it('does not recreate the missing sidecar through preprocessing', async () => {
-    const app = await buildApp();
-    try {
-      seedNodeWithoutSidecar('pdf-preprocess', 'pdf1', 'pdf');
-      const store = getCanvasStore('pdf-preprocess');
-
-      const response = await app.inject({
-        method: 'POST',
-        url: '/canvas/pdf-preprocess/nodes/pdf1/preprocess',
-        headers: { 'content-type': 'application/json' },
-        payload: JSON.stringify({
-          nodeType: 'pdf',
-          trigger: 'node_updated',
-          snapshot: {},
-        }),
-      });
-
-      expect(response.statusCode).toBe(200);
-      expect(response.json<{ success: boolean }>().success).toBe(false);
-      expect(store.readNode('pdf1')).toBeNull();
-    } finally {
-      await app.close();
-    }
-  });
 });
 
 describe('artifact presence hydration', () => {

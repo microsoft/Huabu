@@ -103,9 +103,8 @@ export async function postEcho(body: EchoBody): Promise<EchoResponse> {
 - **Naming**: `<purpose>Schema` for schemas, `<Purpose>Body` /
   `<Purpose>Response` for types.
 - **Wire body vs internal request**: when a handler augments the body
-  with URL params, name them distinctly (e.g. `PreprocessNodeBody` is
-  what the client sends; `PreprocessNodeRequest` adds `canvasId` /
-  `nodeId` from `request.params`). Don't smuggle URL ids into the body.
+  with URL params, name them distinctly (the body is what the client sends; the
+  internal request adds `canvasId` / `nodeId` from `request.params`). Don't smuggle URL ids into the body.
 - **SSE**: event names live in shared (`AGENT_SSE_EVENTS` etc.). The
   request body that opens the stream still follows rule 3. Always emit
   a final `End` or `Error` event before `reply.raw.end()`.
@@ -120,7 +119,7 @@ RFS Agent SSE in `all` mode reuses `AGENT_HOST_SSE_EVENTS.Accepted` and `agentTu
 
 ## RFS legacy mutation gates
 
-The existing RFS `POST /:canvasId/execute` validates its Space parameter with `recentCanvasConversationParamsSchema` and retains `rfsExecuteRequestSchema` and the existing partial-result response; its optional request id and read version are described under [request id and read version on execute](#request-id-and-read-version-on-execute). `POST` / `DELETE /:canvasId/upload/*` use `rfsUploadParamsSchema`; upload bodies remain raw bytes and the unchanged `{ path, size }` response is defined by `rfsUploadResponseSchema` plus its inferred type. Ordinary malformed input remains 400, upload collisions remain 409, absent staged files remain 404, and unexpected storage failures remain logged 500 errors. Upload mutation is leased and serialized before path resolution; paths stay within the upload area and exclusive creation does not overwrite raced destinations. See [RFS file projection](./agent-reachback.md#file-projection) for the remaining lifetime limits.
+The existing RFS `POST /:canvasId/execute` validates its Space parameter with `recentCanvasConversationParamsSchema` and retains `rfsExecuteRequestSchema` and the existing partial-result response; its optional request id and read version are described under [request id and read version on execute](#request-id-and-read-version-on-execute). `POST` / `DELETE /:canvasId/upload/*` use `rfsUploadParamsSchema`; upload bodies remain raw bytes written directly to `space(canvasId).artifacts` with a fresh `artifact-<uuid><ext>` key, and the `{ id, size }` response is defined by `rfsUploadResponseSchema` plus its inferred type. Ordinary malformed input remains 400, absent staged files on legacy `DELETE` remain 404, and unexpected storage failures remain logged 500 errors. Upload mutation is leased and serialized under the Canvas mutex across every storage backend. See [RFS file projection](./agent-reachback.md#file-projection) for portable node/artifact resolution.
 
 ## Quoted Comment source evidence
 

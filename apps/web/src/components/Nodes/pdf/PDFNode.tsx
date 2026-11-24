@@ -21,6 +21,10 @@ import { FloatingToolbar } from '@/components/Common/FloatingToolbar';
 import { useNodePresentation } from '@/hooks/useNodePresentation';
 import useCanvasStore from '@/store/canvasStore';
 import { openPreviewNode } from '@/store/previewWorkspace/actions';
+import {
+  canDownloadMediaSource,
+  triggerMediaDownload,
+} from '@/utils/io/nodeDownload';
 
 import { PDFNotesButton } from './PDFNotesButton';
 import { getMissingFileKind, MissingFileBanner } from '../MissingFileBanner';
@@ -185,15 +189,17 @@ export const PDFNode = memo(
       ? resolveArtifactUrl(data.coverUrl as string, canvasId)
       : (thumbnail ?? undefined);
 
+    const canDownload = canDownloadMediaSource(src, Boolean(missingFileKind));
     const handleDownload = useCallback(() => {
-      if (!src) return;
-      const link = document.createElement('a');
-      link.href = resolveArtifactUrl(src, canvasId);
-      link.download = data.label || src.split('/').pop() || 'document.pdf';
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-    }, [src, data.label, canvasId]);
+      triggerMediaDownload({
+        src,
+        canvasId,
+        label: data.label,
+        defaultExt: '.pdf',
+        fallbackStem: 'document',
+        missing: Boolean(missingFileKind),
+      });
+    }, [src, data.label, canvasId, missingFileKind]);
 
     const handleDeleteCover = useCallback(() => {
       updateNodeData(id, { coverUrl: undefined });
@@ -229,18 +235,21 @@ export const PDFNode = memo(
         <PDFNotesButton id={id} surface="canvas" />
       </>
     );
-    const PDFOverflow = (
-      <>
-        <DropdownMenuItem icon={<Download />} onClick={handleDownload}>
-          {t('node.download')}
-        </DropdownMenuItem>
-        {hasCover && (
-          <DropdownMenuItem icon={<ImageOff />} onClick={handleDeleteCover}>
-            {t('node.deleteCover')}
-          </DropdownMenuItem>
-        )}
-      </>
-    );
+    const PDFOverflow =
+      canDownload || hasCover ? (
+        <>
+          {canDownload && (
+            <DropdownMenuItem icon={<Download />} onClick={handleDownload}>
+              {t('node.download')}
+            </DropdownMenuItem>
+          )}
+          {hasCover && (
+            <DropdownMenuItem icon={<ImageOff />} onClick={handleDeleteCover}>
+              {t('node.deleteCover')}
+            </DropdownMenuItem>
+          )}
+        </>
+      ) : undefined;
 
     const overview = (
       <ViewportPreviewCard

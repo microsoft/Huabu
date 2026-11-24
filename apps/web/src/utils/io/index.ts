@@ -37,3 +37,23 @@ export {
   normalizeUrl,
   getImageDimensionsFromBlob,
 } from './media';
+
+export {
+  resolveDownloadFilename,
+  dataUrlToBlob,
+  triggerBlobDownload,
+  officeDefaultExtension,
+  officeFallbackStem,
+  canDownloadMediaSource,
+  resolveMediaDownloadTarget,
+  canDownloadWebSource,
+  resolveWebDownloadTarget,
+  downloadMediaTarget,
+  triggerMediaDownload,
+  triggerWebDownload,
+  triggerNoteDownload,
+  type MediaDownloadTarget,
+  type ResolveMediaDownloadParams,
+  type WebDownloadSourceParams,
+  type ResolveWebDownloadParams,
+} from './nodeDownload';

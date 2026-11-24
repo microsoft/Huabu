@@ -175,6 +175,11 @@ export function sandboxStoredDocument(
   );
 }
 
+export interface SendBlobOptions {
+  /** Optional `Content-Disposition` header attached to 200/206/304 payload responses. */
+  contentDisposition?: string;
+}
+
 /**
  * Stream one blob to the client, honouring conditional requests and byte
  * ranges. Returns false when the blob is absent so the caller can 404.
@@ -184,6 +189,7 @@ export async function sendBlob(
   reply: FastifyReply,
   blobs: BlobScope,
   name: string,
+  options?: SendBlobOptions,
 ): Promise<boolean> {
   const info = await blobs.head(name);
   if (!info) return false;
@@ -208,6 +214,9 @@ export async function sendBlob(
   }
 
   if (isFresh(request, info, etag)) {
+    if (options?.contentDisposition) {
+      reply.header('Content-Disposition', options.contentDisposition);
+    }
     await reply.code(304).send();
     return true;
   }
@@ -228,6 +237,9 @@ export async function sendBlob(
   }
 
   const contentType = contentTypeFor(info.name);
+  if (options?.contentDisposition) {
+    reply.header('Content-Disposition', options.contentDisposition);
+  }
 
   if (range) {
     if (request.method === 'HEAD') {

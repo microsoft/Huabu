@@ -446,6 +446,65 @@ describe('CanvasLayerTree activation', () => {
     });
   });
 
+  it('expands collapsed ancestors and scrolls a located node into view once', async () => {
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView;
+    // Queue frames like a browser does, so a cancelled frame never runs.
+    const frames = new Map<number, FrameRequestCallback>();
+    let nextFrame = 0;
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+      frames.set(++nextFrame, callback);
+      return nextFrame;
+    });
+    vi.stubGlobal('cancelAnimationFrame', (id: number) => frames.delete(id));
+    const flushFrames = () =>
+      act(() => {
+        const pending = [...frames.values()];
+        frames.clear();
+        for (const callback of pending) callback(0);
+      });
+    try {
+      await renderTree([
+        item('frame-1', 'frame'),
+        { ...item('frame-2', 'frame', 'frame-1'), depth: 1 },
+        { ...item('note-1', 'note', 'frame-2'), depth: 2 },
+      ]);
+      act(() =>
+        useCanvasStore.setState({
+          collapsedFrameIds: new Set(['frame-1', 'frame-2']),
+        }),
+      );
+      expect(container.querySelector('[data-layer-id="note-1"]')).toBeNull();
+
+      act(() =>
+        usePanelStore.setState({ isLeftCollapsed: false, leftMode: 'layers' }),
+      );
+      act(() => usePanelStore.getState().requestLayerLocate('note-1'));
+      expect(useCanvasStore.getState().collapsedFrameIds.size).toBe(0);
+      expect(usePanelStore.getState().layerLocateRequest).not.toBeNull();
+
+      flushFrames();
+      flushFrames();
+
+      expect(scrollIntoView).toHaveBeenCalledExactlyOnceWith({
+        block: 'nearest',
+      });
+      expect(scrollIntoView.mock.contexts[0]).toBe(row('note-1'));
+      expect(usePanelStore.getState().layerLocateRequest).toBeNull();
+
+      // A node with no row here is the panel's call, not the tree's.
+      act(() => usePanelStore.getState().requestLayerLocate('missing'));
+      flushFrames();
+      expect(usePanelStore.getState().layerLocateRequest?.nodeId).toBe(
+        'missing',
+      );
+      expect(scrollIntoView).toHaveBeenCalledOnce();
+      act(() => usePanelStore.setState({ layerLocateRequest: null }));
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('ignores a stale row safely', async () => {
     await renderTree([item('note-1', 'note')]);
     act(() => useCanvasStore.setState({ nodes: [] }));

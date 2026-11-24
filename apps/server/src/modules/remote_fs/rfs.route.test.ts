@@ -13,7 +13,6 @@
  */
 
 import {
-  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -80,7 +79,9 @@ import {
 import * as selectableProfiles from '../agent/selectable-agent-profile.js';
 import { withCanvasMutex } from '../canvas/write-coordinator.js';
 import { ServiceProvisionError } from '../services/index.js';
+import { createCanvas } from '../storage/compatibility/canvas.js';
 import { getCanvasStore, resetStorageCache, space } from '../storage/index.js';
+import { mountTestWorkspace } from '../storage/testing.js';
 import {
   RunCompletionError,
   runCompletionService,
@@ -249,11 +250,11 @@ describe('GET /api/rfs/:canvasId/skill', () => {
       expect(res.statusCode).toBe(200);
       expect(res.headers['content-type']).toMatch(/text\/markdown/);
       expect(res.body).toMatch(/Accessing this Huabu Space/i);
-      expect(res.body).toMatch(/POST execute/);
+      expect(res.body).toMatch(/POST \/?execute/);
       expect(res.body).toMatch(/work without an internal model provider/i);
       for (const command of AGENT_CANVAS_COMMAND_TYPES) {
         expect(res.body).toMatch(
-          new RegExp(String.raw`\|\s+\`${command}\`\s+\|`),
+          new RegExp(String.raw`-\s+\`${command}\`\s+—`),
         );
       }
       expect(res.body).toContain('/capabilities/commands/$COMMAND');
@@ -261,11 +262,17 @@ describe('GET /api/rfs/:canvasId/skill', () => {
       expect(res.body).toContain('GET skill/services');
       expect(res.body).toContain('**parent-local**');
       expect(res.body).toContain('read-only `absolutePosition`');
-      expect(res.body).toContain(
+
+      const layout = await app.inject({
+        method: 'GET',
+        url: '/rfs/c1/skill/layout',
+      });
+      expect(layout.statusCode).toBe(200);
+      expect(layout.body).toContain(
         `${getNodeDefaultSize('web').width} × ${getNodeDefaultSize('web').height}px`,
       );
-      expect(res.body).toContain(
-        `${getNodeDefaultSize('note').width} × ${getNodeDefaultSize('note').height}px; fixed height by default`,
+      expect(layout.body).toContain(
+        `${getNodeDefaultSize('note').width} × ${getNodeDefaultSize('note').height}px`,
       );
     } finally {
       await app.close();
@@ -1228,9 +1235,6 @@ describe('SNAPSHOT_NODES Space query', () => {
       expect(parsed.result.snapshots).toEqual([
         {
           src: expect.stringMatching(/^sketch-raster-.+\.png$/),
-          downloadPath: expect.stringMatching(
-            /^artifacts\/sketch-raster-.+\.png$/,
-          ),
           width: expect.any(Number),
           height: expect.any(Number),
           originNodeIds: ['sketch-1'],
@@ -1239,7 +1243,7 @@ describe('SNAPSHOT_NODES Space query', () => {
 
       const download = await app.inject({
         method: 'GET',
-        url: `/rfs/c1/download/${parsed.result.snapshots[0].downloadPath}`,
+        url: `/rfs/c1/download/${parsed.result.snapshots[0].src}`,
       });
       expect(download.statusCode).toBe(200);
       expect(download.rawPayload.subarray(0, 8)).toEqual(
@@ -1913,8 +1917,9 @@ describe('POST /api/rfs/:canvasId/execute', () => {
 
 describe('POST/GET/DELETE /api/rfs/:canvasId/upload', () => {
   it.each(['note.md', 'nested/note.md'])(
-    'roundtrips upload %s then a download',
+    'roundtrips upload %s into Space artifacts then downloads by id',
     async (filename) => {
+      createCanvas('c1');
       const app = await buildApp();
       try {
         const up = await app.inject({
@@ -1925,14 +1930,15 @@ describe('POST/GET/DELETE /api/rfs/:canvasId/upload', () => {
         });
         expect(up.statusCode).toBe(201);
         expect(rfsUploadResponseSchema.safeParse(up.json()).success).toBe(true);
-        expect(up.json<{ path: string; size: number }>()).toEqual({
-          path: `upload/${filename}`,
+        const body = up.json<{ id: string; size: number }>();
+        expect(body).toEqual({
+          id: expect.stringMatching(/^artifact-[^/]+\.md$/),
           size: 11,
         });
 
         const down = await app.inject({
           method: 'GET',
-          url: `/rfs/c1/download/upload/${filename}`,
+          url: `/rfs/c1/download/${body.id}`,
         });
         expect(down.statusCode).toBe(200);
         expect(down.body).toBe('hello world');
@@ -1942,27 +1948,23 @@ describe('POST/GET/DELETE /api/rfs/:canvasId/upload', () => {
     },
   );
 
-  it('rejects a colliding upload with 409 and a /skill hint', async () => {
+  it('returns 404 canvas_not_found when uploading to a missing Space', async () => {
     const app = await buildApp();
     try {
-      await app.inject({
-        method: 'POST',
-        url: '/rfs/c1/upload/dup.md',
-        payload: 'a',
-      });
       const res = await app.inject({
         method: 'POST',
-        url: '/rfs/c1/upload/dup.md',
-        payload: 'b',
+        url: '/rfs/missing/upload/note.md',
+        payload: 'orphan',
       });
-      expect(res.statusCode).toBe(409);
-      expect(res.json<{ message: string }>().message).toMatch(/\/skill/);
+      expect(res.statusCode).toBe(404);
+      expect(res.json<{ code: string }>().code).toBe('canvas_not_found');
     } finally {
       await app.close();
     }
   });
 
-  it('does not overwrite either upload when two requests race for the same name', async () => {
+  it('allocates distinct artifact keys without overwriting when two requests upload the same filename', async () => {
+    createCanvas('c1');
     const app = await buildApp();
     try {
       const bodies = ['first body', 'second body'];
@@ -1975,16 +1977,19 @@ describe('POST/GET/DELETE /api/rfs/:canvasId/upload', () => {
           }),
         ),
       );
-      expect(results.map((result) => result.statusCode).sort()).toEqual([
-        201, 409,
-      ]);
-      const saved = await app.inject({
-        method: 'GET',
-        url: '/rfs/c1/download/upload/race.txt',
-      });
-      expect(saved.body).toBe(
-        bodies[results.findIndex((result) => result.statusCode === 201)],
+      expect(results.map((result) => result.statusCode)).toEqual([201, 201]);
+      const [first, second] = results.map((r) =>
+        r.json<{ id: string; size: number }>(),
       );
+      expect(first?.id).not.toBe(second?.id);
+      for (const [idx, item] of [first, second].entries()) {
+        const saved = await app.inject({
+          method: 'GET',
+          url: `/rfs/c1/download/${item?.id}`,
+        });
+        expect(saved.statusCode).toBe(200);
+        expect(saved.body).toBe(bodies[idx]);
+      }
     } finally {
       await app.close();
     }
@@ -2013,6 +2018,7 @@ describe('POST/GET/DELETE /api/rfs/:canvasId/upload', () => {
   );
 
   it('holds a Workspace lease while an upload waits for the Space mutex', async () => {
+    createCanvas('c1');
     const app = await buildApp();
     let release!: () => void;
     const gate = new Promise<void>((resolve) => {
@@ -2028,9 +2034,7 @@ describe('POST/GET/DELETE /api/rfs/:canvasId/upload', () => {
       await vi.waitFor(() =>
         expect(isWorkspaceLeased(getWorkspaceKey())).toBe(true),
       );
-      expect(existsSync(join(diskDirOf('c1'), '.upload', 'queued.bin'))).toBe(
-        false,
-      );
+      expect(await space('c1').artifacts.list()).toEqual([]);
       release();
       await held;
       expect((await pending).statusCode).toBe(201);
@@ -2043,14 +2047,16 @@ describe('POST/GET/DELETE /api/rfs/:canvasId/upload', () => {
     }
   });
 
-  it('deletes a staged upload', async () => {
+  it('deletes a legacy staged upload', async () => {
+    createCanvas('c1');
+    await space('c1').uploads.put('gone.md', Buffer.from('x'));
     const app = await buildApp();
     try {
-      await app.inject({
-        method: 'POST',
-        url: '/rfs/c1/upload/gone.md',
-        payload: 'x',
+      const before = await app.inject({
+        method: 'GET',
+        url: '/rfs/c1/download/upload/gone.md',
       });
+      expect(before.statusCode).toBe(200);
       const del = await app.inject({
         method: 'DELETE',
         url: '/rfs/c1/upload/gone.md',
@@ -2068,6 +2074,62 @@ describe('POST/GET/DELETE /api/rfs/:canvasId/upload', () => {
 });
 
 describe('GET /api/rfs/:canvasId/download', () => {
+  it('downloads a node by id with clean frontmatter, ETag, and X-Huabu-Basis', async () => {
+    const store = getCanvasStore('c1');
+    store.write({
+      canvasId: 'c1',
+      title: null,
+      version: 1,
+      state: {
+        nodes: [
+          {
+            id: 'node-clean',
+            type: 'pdf',
+            position: { x: 0, y: 0 },
+            data: { label: 'Paper', src: 'artifact-paper.pdf' },
+          },
+        ],
+        edges: [],
+      },
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+    store.writeNode('node-clean', {
+      nodeId: 'node-clean',
+      type: 'pdf',
+      label: 'Paper',
+      labelSource: 'user',
+      titleGenerated: true,
+      src: 'artifact-paper.pdf',
+      content: 'Annotated summary',
+    });
+
+    const app = await buildApp();
+    try {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/rfs/c1/download/node-clean',
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.headers['x-huabu-node-id']).toBe('node-clean');
+      expect(res.headers['x-huabu-src']).toBe('artifact-paper.pdf');
+      expect(res.headers['x-huabu-basis']).toEqual(expect.any(String));
+      expect(res.body).toContain('id: node-clean');
+      expect(res.body).toContain('src: artifact-paper.pdf');
+      expect(res.body).toContain('Annotated summary');
+      expect(res.body).not.toContain('labelSource');
+      expect(res.body).not.toContain('titleGenerated');
+
+      const spaceJson = await app.inject({
+        method: 'GET',
+        url: '/rfs/c1/download/space.json',
+      });
+      expect(spaceJson.statusCode).toBe(400);
+    } finally {
+      await app.close();
+    }
+  });
+
   it('404s a missing file with a runnable /skill recovery command', async () => {
     const app = await buildApp();
     try {
@@ -2715,6 +2777,241 @@ describe('POST /api/rfs/:canvasId/agent', () => {
       expect(res.body).toContain('event: end');
     } finally {
       await app.close();
+    }
+  });
+});
+
+describe('portable RFS on SQLite structured storage', () => {
+  it('serves skill, upload, execute, query, snapshot, and download with no diskTree', async () => {
+    const mounted = await mountTestWorkspace(
+      { structured: { kind: 'sqlite' }, blobs: { kind: 'disk' } },
+      'huabu-rfs-sqlite-',
+    );
+    const app = await buildApp();
+    try {
+      const canvasId = 'c-sqlite';
+      const created = await mounted.storage.structured
+        .spaces()
+        .create({ canvasId, title: 'SQLite RFS Space' });
+      if (!created.ok) throw new Error('Expected SQLite Space creation');
+      expect(space(canvasId).diskTree).toBeNull();
+
+      // Seed a Skill Frame with a child Note so `/skill` renders `<space_skill>`
+      // without Disk `file=` paths.
+      await mounted.storage.space(canvasId).write({
+        expectedVersion: 0,
+        nextRecord: {
+          ...created.record,
+          version: 1,
+          state: {
+            nodes: [
+              {
+                id: 'frame-skill',
+                type: 'frame',
+                position: { x: 0, y: -400 },
+                data: {},
+              },
+              {
+                id: 'note-skill',
+                type: 'note',
+                parentId: 'frame-skill',
+                position: { x: 20, y: 40 },
+                data: {},
+              },
+              {
+                id: 'sketch-sqlite',
+                type: 'sketch',
+                position: { x: 0, y: 400 },
+                style: { width: 200, height: 120 },
+                data: {
+                  type: 'sketch',
+                  initialSize: { width: 200, height: 120 },
+                  strokes: [
+                    {
+                      id: 's1',
+                      points: [
+                        [10, 10, 0.5],
+                        [120, 80, 0.5],
+                      ],
+                      color: 'blue',
+                      size: 4,
+                    },
+                  ],
+                },
+              },
+            ],
+            edges: [],
+          },
+        },
+        nodeMutations: [
+          {
+            kind: 'put',
+            nodeId: 'frame-skill',
+            record: {
+              nodeId: 'frame-skill',
+              type: 'frame',
+              label: 'skill: Safety',
+              labelSource: 'user',
+              content: '',
+            },
+          },
+          {
+            kind: 'put',
+            nodeId: 'note-skill',
+            record: {
+              nodeId: 'note-skill',
+              type: 'note',
+              label: 'Safety Contract',
+              content: 'Read before mutating.',
+            },
+          },
+        ],
+      });
+
+      const skill = await app.inject({
+        method: 'GET',
+        url: `/rfs/${canvasId}/skill`,
+        headers: { authorization: 'Bearer test-token' },
+      });
+      expect(skill.statusCode).toBe(200);
+      expect(skill.body).toContain(
+        '<note id="note-skill" label="Safety Contract"',
+      );
+      expect(skill.body).not.toContain('file=');
+
+      const pngBytes = Buffer.from(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+        'base64',
+      );
+      const upPng = await app.inject({
+        method: 'POST',
+        url: `/rfs/${canvasId}/upload/diagram.png`,
+        payload: pngBytes,
+      });
+      expect(upPng.statusCode).toBe(201);
+      const pngId = upPng.json<{ id: string }>().id;
+
+      const upMhtml = await app.inject({
+        method: 'POST',
+        url: `/rfs/${canvasId}/upload/archive.mhtml`,
+        payload: 'MIME-Version: 1.0\r\n\r\n<p>saved</p>',
+      });
+      expect(upMhtml.statusCode).toBe(201);
+      const mhtmlId = upMhtml.json<{ id: string }>().id;
+
+      const upPdf = await app.inject({
+        method: 'POST',
+        url: `/rfs/${canvasId}/upload/wrong.pdf`,
+        payload: '%PDF-1.4',
+      });
+      expect(upPdf.statusCode).toBe(201);
+      const pdfId = upPdf.json<{ id: string }>().id;
+
+      const badWeb = await app.inject({
+        method: 'POST',
+        url: `/rfs/${canvasId}/execute`,
+        headers: { 'content-type': 'application/json' },
+        payload: {
+          commands: [
+            {
+              type: 'CREATE_NODES',
+              nodes: [
+                {
+                  nodeType: 'web',
+                  position: { x: 0, y: 0 },
+                  data: { label: 'Invalid Web', src: pdfId },
+                },
+              ],
+            },
+          ],
+        },
+      });
+      expect(badWeb.statusCode).toBe(400);
+
+      const executed = await app.inject({
+        method: 'POST',
+        url: `/rfs/${canvasId}/execute`,
+        headers: { 'content-type': 'application/json' },
+        payload: {
+          commands: [
+            {
+              type: 'CREATE_NODES',
+              nodes: [
+                {
+                  nodeType: 'note',
+                  position: { x: 0, y: 0 },
+                  data: { label: 'SQLite Note', content: 'Portable body' },
+                },
+                {
+                  nodeType: 'image',
+                  position: { x: 440, y: 0 },
+                  data: { label: 'Diagram', src: pngId },
+                },
+                {
+                  nodeType: 'web',
+                  position: { x: 880, y: 0 },
+                  data: { label: 'Saved Page', src: mhtmlId },
+                },
+              ],
+            },
+          ],
+        },
+      });
+      expect(executed.statusCode).toBe(200);
+      const parsedExec = rfsExecuteResponseSchema.parse(executed.json());
+      const createdNoteId = parsedExec.results[0]?.nodes?.[0]?.nodeId;
+      expect(createdNoteId).toEqual(expect.any(String));
+
+      const noteDown = await app.inject({
+        method: 'GET',
+        url: `/rfs/${canvasId}/download/${createdNoteId}`,
+      });
+      expect(noteDown.statusCode).toBe(200);
+      expect(noteDown.body).toContain('Portable body');
+      const etag = noteDown.headers['etag'] as string;
+      expect(etag).toMatch(/^".+"$/);
+
+      const notModified = await app.inject({
+        method: 'GET',
+        url: `/rfs/${canvasId}/download/${createdNoteId}`,
+        headers: { 'if-none-match': etag },
+      });
+      expect(notModified.statusCode).toBe(304);
+
+      const artifactDown = await app.inject({
+        method: 'GET',
+        url: `/rfs/${canvasId}/download/${pngId}`,
+      });
+      expect(artifactDown.statusCode).toBe(200);
+      expect(artifactDown.rawPayload).toEqual(pngBytes);
+
+      const snapRes = await app.inject({
+        method: 'POST',
+        url: `/rfs/${canvasId}/query`,
+        headers: { 'content-type': 'application/json' },
+        payload: {
+          type: 'SNAPSHOT_NODES',
+          nodeIds: ['sketch-sqlite'],
+          maxPixels: 512,
+        },
+      });
+      expect(snapRes.statusCode).toBe(200);
+      const snapParsed = spaceQueryResponseSchema.parse(snapRes.json());
+      if (snapParsed.type !== 'SNAPSHOT_NODES') {
+        throw new Error('Expected SNAPSHOT_NODES');
+      }
+      expect(snapParsed.result.snapshots).toHaveLength(1);
+      const snapPng = await app.inject({
+        method: 'GET',
+        url: `/rfs/${canvasId}/download/${snapParsed.result.snapshots[0].src}`,
+      });
+      expect(snapPng.statusCode).toBe(200);
+      expect(snapPng.rawPayload.subarray(0, 8)).toEqual(
+        Buffer.from('89504e470d0a1a0a', 'hex'),
+      );
+    } finally {
+      await app.close();
+      await mounted.close();
     }
   });
 });

@@ -105,6 +105,7 @@ const SERVER_RECORD_FILES: Readonly<Record<ServerRecordName, string>> = {
   'agent-credential-versions': 'agent-credential-versions.json',
   'agent-profiles': path.join('agent-profiles', 'registry.json'),
   'user-agent-profiles': path.join('user-agent-profiles', 'registry.json'),
+  admission: 'people-admission.json',
 };
 
 /** The directory holding every person's server records. */

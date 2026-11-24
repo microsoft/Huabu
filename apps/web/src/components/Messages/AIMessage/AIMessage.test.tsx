@@ -42,6 +42,11 @@ vi.mock('react-i18next', async (importOriginal) => ({
   }),
 }));
 vi.mock('lottie-react', () => ({ default: () => null }));
+// The link's own suite covers opening; here only the listed paths matter, and
+// its Preview Workspace dependencies need a full canvas store.
+vi.mock('./Tool/FilePathLink', () => ({
+  FilePathLink: ({ path }: { path: string }) => <span>{path}</span>,
+}));
 vi.mock('./MilkdownMessageCard', () => ({
   MilkdownMessageCard: ({
     content,
@@ -136,7 +141,7 @@ afterEach(() => {
 });
 
 describe('assistant activity presentation', () => {
-  it('loads only on See more and hydrates sibling tools without resetting their disclosure state', async () => {
+  it('loads when a tool row is expanded and hydrates sibling tools without resetting their disclosure state', async () => {
     const full = ['a', 'b'].map((id) => ({
       ...tool(id),
       detail: { state: 'inline' as const, turnRef: 'ref' },
@@ -166,10 +171,9 @@ describe('assistant activity presentation', () => {
     render(summary, { isStreaming: false });
     expect(fetch).not.toHaveBeenCalled();
     act(() => header().click());
-    act(() => button('Read a').click());
     expect(fetch).not.toHaveBeenCalled();
+    await act(async () => button('Read a').click());
     expect(container.textContent).not.toContain('Output a');
-    await act(async () => button('messages.seeMore').click());
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(container.textContent).toContain('messages.detailsLoading');
     await act(async () =>
@@ -214,8 +218,7 @@ describe('assistant activity presentation', () => {
       .spyOn(agentApi, 'fetchHistoryTurn')
       .mockRejectedValue(new Error('offline'));
     render([summary], { isStreaming: false });
-    act(() => button('Read a').click());
-    await act(async () => button('messages.seeMore').click());
+    await act(async () => button('Read a').click());
     expect(container.querySelector('[role="alert"]')?.textContent).toBe(
       'messages.detailsLoadFailed',
     );
@@ -690,6 +693,9 @@ describe('assistant activity presentation', () => {
     expect(header().textContent).toBe(
       'messages.activityFilesChanged:1 · messages.activityCompletedSteps:2',
     );
+    expect(
+      container.querySelector('[data-assistant-changed-files]')?.textContent,
+    ).toBe('example.ts');
   });
 
   it('closes the previous block and opens only the new trailing activity', () => {

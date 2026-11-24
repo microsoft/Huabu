@@ -475,18 +475,19 @@ describe('workspaceStore registry persistence', () => {
     );
 
     it.each(['path', 'recent'] as const)(
-      'keeps the confirmed new identity when the registry refresh fails (%s)',
+      'completes a confirmed change when only the registry refresh fails (%s)',
       async (method) => {
+        vi.spyOn(console, 'warn').mockImplementation(() => {});
         apiMocks.listWorkspaces.mockRejectedValueOnce(
           new Error('Registry offline'),
         );
-        await expect(activate(method)).rejects.toThrow('Registry offline');
+        await expect(activate(method)).resolves.toBeUndefined();
         expect(useWorkspaceStore.getState()).toMatchObject({
           workspaceId: SECOND_ID,
           workspacePath: '/tmp/second',
           isReady: true,
           isSyncing: false,
-          error: 'Registry offline',
+          error: null,
         });
         expect(desktop.tabs.endWorkspaceChange).toHaveBeenCalledOnce();
         expect(desktop.tabs.workspaceReady).toHaveBeenCalledExactlyOnceWith(
@@ -499,7 +500,9 @@ describe('workspaceStore registry persistence', () => {
       apiMocks.getWorkspaceInfo.mockRejectedValueOnce(
         new Error('Info offline'),
       );
-      await expect(activate('recent')).rejects.toThrow('Info offline');
+      // The Server reports the chosen Workspace as current: the change landed.
+      await expect(activate('recent')).resolves.toBeUndefined();
+      expect(useWorkspaceStore.getState().error).toBeNull();
       expect(apiMocks.getWorkspaceInfo).toHaveBeenCalledTimes(2);
       expect(useWorkspaceStore.getState().workspaceId).toBe(SECOND_ID);
       expect(desktop.tabs.workspaceReady).toHaveBeenCalledExactlyOnceWith(
@@ -527,7 +530,12 @@ describe('workspaceStore registry persistence', () => {
           apiMocks.activateWorkspace.mockImplementationOnce(
             rejectAfterActivation,
           );
-        await expect(activate(method)).rejects.toThrow('Response lost');
+        // A chosen Workspace that the Server reports as current is a change
+        // that landed; a folder path names no Workspace to check, so its
+        // failure still stands.
+        if (method === 'recent')
+          await expect(activate(method)).resolves.toBeUndefined();
+        else await expect(activate(method)).rejects.toThrow('Response lost');
         expect(useWorkspaceStore.getState().workspaceId).toBe(SECOND_ID);
         expect(desktop.tabs.workspaceReady).toHaveBeenCalledExactlyOnceWith(
           SECOND_ID,

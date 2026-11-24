@@ -26,6 +26,7 @@ import {
   prepareAgentTurn,
   prepareAgentTurnRetry,
   resumeAgentTurnQueue,
+  settleAgentTurnQueue,
   stopAgentTurn,
 } from './agentTurnController';
 
@@ -39,6 +40,17 @@ export {
 } from './agentTurnController';
 export type { AcpSessionMetaStreamEvent } from './agentTurnController';
 
+export interface AgentSubmitOptions {
+  /**
+   * The thread cannot take a send yet. `queue` holds the turn in the visible
+   * queue (history is still loading); `wait` shows it as sent and dispatches it
+   * once the transient state clears (Agent warm-up, a save in flight).
+   */
+  notReady?: 'queue' | 'wait';
+  /** A built-in settings save is in flight; read them again at send. */
+  settingsPending?: boolean;
+}
+
 export interface UseAgentStreamReturn {
   isLoading: boolean;
   setIsLoading: (threadId: string, loading: boolean) => void;
@@ -46,6 +58,7 @@ export interface UseAgentStreamReturn {
     prompt: string,
     mode: AgentMode,
     invokedSkills?: string[],
+    options?: AgentSubmitOptions,
   ) => Promise<void>;
   retryStream: (
     message: Extract<ChatMessage, { role: 'user' }>,
@@ -83,13 +96,20 @@ export function useAgentStream(
           target.threadId === session.threadId;
   }, [previewTabId, session]);
   const startStream = useCallback(
-    async (prompt: string, mode: AgentMode, invokedSkills?: string[]) => {
+    async (
+      prompt: string,
+      mode: AgentMode,
+      invokedSkills?: string[],
+      options?: AgentSubmitOptions,
+    ) => {
       const chat = useChatStore.getState();
       const quotedComments = selectThreadQuotedComments(chat, session.threadId);
       if (!prompt.trim() && !quotedComments.length) return;
       if (quotedComments.some((item) => !item.comment.trim())) return;
       const queuedTurns = selectThreadQueuedTurns(chat, session.threadId);
       const shouldQueue =
+        options?.notReady === 'queue' ||
+        !!chat.threadsById[session.threadId]?.isPreparing ||
         selectThreadIsLoading(chat, session.threadId) ||
         queuedTurns.length > 0 ||
         hasAgentStreamClaim(session.ownerCanvasId, session.threadId);
@@ -138,11 +158,13 @@ export function useAgentStream(
             id: createId('queued-turn'),
             prepared,
             status: 'pending',
+            ...(options?.settingsPending ? { settingsPending: true } : {}),
           });
           chat.consumeDraft(session.threadId, draft, quotedComments);
           chat.setExcludeCanvasSelection(session.threadId, false);
           chat.clearPendingAttachments(session.threadId);
           if (excerpt) chat.setSelectionAttachment(null);
+          settleAgentTurnQueue(session);
           return;
         }
         chat.setQueuePaused(session.threadId, false);
@@ -189,6 +211,8 @@ export function useAgentStream(
         if (excerpt) chat.setSelectionAttachment(null);
         const result = await dispatchAgentTurn(prepared, {
           canDispatch,
+          waitUntilReady: options?.notReady === 'wait',
+          settingsPending: options?.settingsPending,
           onStarted: () => {
             started = true;
           },

@@ -48,6 +48,35 @@ export const credentialVersionsSchema = z.record(
 /** `device-names`: `agentletId -> display name`. */
 export const deviceNamesSchema = z.record(z.string(), agentletDeviceNameSchema);
 
+/**
+ * `admission`: how a Bubble deployment admits people who sign in
+ * (`identity/admission.ts`). Absent means manual admission with nobody
+ * blocked.
+ */
+export const admissionRecordSchema = z.object({
+  /**
+   * Admit a first-time Entra or Auth0 sign-in that holds no system grant and
+   * no block as an ordinary system `member`. Set by an administrator in
+   * Settings → People.
+   */
+  automatic: z.boolean(),
+  /**
+   * `principalId -> block`: people an administrator removed. Automatic
+   * admission never readmits them; giving them access again in People removes
+   * the entry. Grants stay Bubble's: a block grants and revokes nothing itself.
+   */
+  blocked: z.record(
+    z.string().min(1),
+    z.object({
+      /** When their access was removed, as an ISO 8601 timestamp. */
+      blockedAt: z.string().min(1),
+      /** The administrator who removed it. */
+      blockedBy: z.string().min(1),
+    }),
+  ),
+});
+export type AdmissionRecord = z.infer<typeof admissionRecordSchema>;
+
 /** Throws when `value` is not a record of `name` its owner can read. */
 const REFUSED_SHAPES: Partial<
   Record<ServerRecordName, (value: unknown) => unknown>
@@ -58,6 +87,7 @@ const REFUSED_SHAPES: Partial<
   'device-names': (value) => deviceNamesSchema.parse(value),
   'device-owners': (value) => deviceOwnersSchema.parse(value),
   'agent-credential-versions': (value) => credentialVersionsSchema.parse(value),
+  admission: (value) => admissionRecordSchema.parse(value),
 };
 
 /**

@@ -200,3 +200,128 @@ it('reports Markdown rendering failures and returns to source without another de
   expect(button('files.reading').disabled).toBe(true);
   expect(mocks.read).toHaveBeenCalledOnce();
 });
+
+it('displays leading YAML frontmatter separately in reading mode while preserving full source text', async () => {
+  const fullMarkdown =
+    '---\ntitle: Guide\ntags:\n  - one\n  - two\n---\n\n# Heading\n\nBody';
+  mocks.read.mockResolvedValue({
+    ...result(fullMarkdown),
+    path: '/guide.md',
+    nextCursor: undefined,
+  });
+  await act(async () =>
+    root.render(
+      <FileReferencePreview
+        id="markdown"
+        data={{ fileReference: { ...reference, path: '/guide.md' } }}
+      />,
+    ),
+  );
+  await act(async () => {
+    await vi.waitFor(() =>
+      expect(host.querySelector('article')).not.toBeNull(),
+    );
+  });
+
+  const section = host.querySelector('section[aria-label="files.frontmatter"]');
+  expect(section).not.toBeNull();
+  expect(section?.querySelector('pre')?.textContent).toBe(
+    'title: Guide\ntags:\n  - one\n  - two',
+  );
+  expect(mocks.markdown.mock.calls.at(-1)?.[0]).toMatchObject({
+    markdown: '\n# Heading\n\nBody',
+    singleFile: true,
+  });
+
+  const toggle = button('files.frontmatter');
+  expect(toggle.getAttribute('aria-expanded')).toBe('true');
+  await act(async () => toggle.click());
+  expect(toggle.getAttribute('aria-expanded')).toBe('false');
+  expect(section?.querySelector('pre')).toBeNull();
+
+  await act(async () => button('files.source').click());
+  expect(
+    host.querySelector('section[aria-label="files.frontmatter"]'),
+  ).toBeNull();
+  expect(mocks.viewer.mock.calls.at(-1)?.[0]).toMatchObject({
+    value: fullMarkdown,
+    readOnly: true,
+    plainText: true,
+    languageFilename: '/guide.md',
+  });
+});
+
+it('handles empty frontmatter, frontmatter-only files, and unterminated opening dashes cleanly', async () => {
+  mocks.read.mockResolvedValueOnce({
+    ...result('---\n---\n# Empty Meta'),
+    path: '/empty-meta.md',
+    nextCursor: undefined,
+  });
+  await act(async () =>
+    root.render(
+      <FileReferencePreview
+        id="markdown"
+        data={{ fileReference: { ...reference, path: '/empty-meta.md' } }}
+      />,
+    ),
+  );
+  await act(async () => {
+    await vi.waitFor(() =>
+      expect(host.querySelector('article')).not.toBeNull(),
+    );
+  });
+  expect(
+    host.querySelector('section[aria-label="files.frontmatter"]')?.textContent,
+  ).toContain('files.emptyFrontmatter');
+  expect(mocks.markdown.mock.calls.at(-1)?.[0]).toMatchObject({
+    markdown: '# Empty Meta',
+  });
+
+  mocks.markdown.mockClear();
+  mocks.read.mockResolvedValueOnce({
+    ...result('---\nid: sidecar-only\n---\n'),
+    path: '/sidecar.md',
+    nextCursor: undefined,
+  });
+  await act(async () =>
+    root.render(
+      <FileReferencePreview
+        id="markdown"
+        data={{ fileReference: { ...reference, path: '/sidecar.md' } }}
+      />,
+    ),
+  );
+  await act(async () => {
+    await vi.waitFor(() =>
+      expect(
+        host.querySelector('section[aria-label="files.frontmatter"] pre')
+          ?.textContent,
+      ).toBe('id: sidecar-only'),
+    );
+  });
+  expect(host.querySelector('article')).toBeNull();
+  expect(mocks.markdown).not.toHaveBeenCalled();
+
+  const unterminated = '---\ntitle: Unclosed\n\n# Body';
+  mocks.read.mockResolvedValueOnce({
+    ...result(unterminated),
+    path: '/unterminated.md',
+    nextCursor: undefined,
+  });
+  await act(async () =>
+    root.render(
+      <FileReferencePreview
+        id="markdown"
+        data={{ fileReference: { ...reference, path: '/unterminated.md' } }}
+      />,
+    ),
+  );
+  await act(async () => {
+    await vi.waitFor(() =>
+      expect(host.querySelector('article')?.textContent).toBe(unterminated),
+    );
+  });
+  expect(
+    host.querySelector('section[aria-label="files.frontmatter"]'),
+  ).toBeNull();
+});

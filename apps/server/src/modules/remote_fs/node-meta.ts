@@ -2,27 +2,20 @@
 // Licensed under the MIT license.
 
 /**
- * Path mapping + node-metadata lookup for the Remote File System (RFS).
+ * Target classification + portable node lookup/serialization for the Remote
+ * File System (RFS).
  *
- * Two concerns live here:
+ * RFS downloads are storage-backend-independent:
  *
- * 1. **Virtual → physical path mapping.** The RFS presents a clean read
- *    layout (`nodes/`, `artifacts/`, `upload/`) while on disk
- *    the artifact and upload regions are hidden `.`-dirs (`.artifacts/`,
- *    `.upload/`) alongside the private bookkeeping dirs. {@link toPhysicalRel}
- *    rewrites the two aliased prefixes and {@link resolveReadable} maps a
- *    request path to an absolute path, guarding against traversal (via
- *    `safeResolve`) and refusing the private dirs that must never be projected
- *    to an external agent.
- *
- * 2. **Node metadata.** When a download targets a `nodes/<label>.md` file, we
- *    surface a small allow-list of the node's attributes (id/type/label/src/
- *    locked) plus its incident edges (grouped into parents/children). The
- *    file → node mapping and `label` / `rev` come from the on-disk sidecar
- *    (the canonical source); type / src / locked / edges come from
- *    structural state. All of it is serialised into the `X-Huabu-*`
- *    response headers (label percent-encoded, edges as JSON), together with
- *    the Space's read version (`X-Huabu-Basis`).
+ * 1. **Primary ID-first targets (`download/<id>`):** `<id>` resolves first
+ *    against live node IDs in `space(canvasId)` (serving a canonical Markdown
+ *    sidecar assembled from topology + `handle.nodes.read(id)`), and otherwise
+ *    against `space(canvasId).artifacts` (`<artifactKey>`).
+ * 2. **Legacy prefixed targets:** `artifacts/<key>`, `upload/<name>`, and
+ *    `nodes/<safe_label>.md` remain readable via portable `SpaceBlobs` /
+ *    `SpaceNodes` ports without touching Disk paths.
+ * 3. **Private or unrecognised paths** (`space.json`, `.memory/*`, traversal,
+ *    etc.) are rejected uniformly across all backends.
  */
 
 import path from 'node:path';
@@ -30,49 +23,67 @@ import path from 'node:path';
 import {
   encodeBasis,
   RFS_HEADERS,
+  type CanvasNodeType,
   type RfsNodeEdges,
   type RfsNodeMeta,
 } from '@huabu/shared';
 import { nodeRevisionOf } from '@huabu/shared/canvas-engine';
 
-import {
-  ALWAYS_SKIP,
-  safeResolve,
-  toPhysicalRel,
-} from '../agent/tools/handlers/fs-sandbox.js';
-import { space } from '../storage/index.js';
+import { toFrontmatter } from '../../utils/markdown-frontmatter.js';
+import { toSafeFilename } from '../../utils/naming.js';
+import { space, type NodeContent } from '../storage/index.js';
 
-import type { CanvasNodeType } from '@huabu/shared';
-import type { CanvasNode, CanvasEdge } from '@huabu/shared/canvas-engine';
+import type { CanvasEdge, CanvasNode } from '@huabu/shared/canvas-engine';
 
-/** First path segment (used to gate private dirs). */
-function firstSegment(rel: string): string {
-  const norm = rel.replace(/^\/+/, '');
-  const slash = norm.indexOf('/');
-  return slash === -1 ? norm : norm.slice(0, slash);
-}
+const RESERVED_SINGLE_SEGMENTS: ReadonlySet<string> = new Set([
+  'space.json',
+  'skill.md',
+  'memory.md',
+]);
+
+export type RfsDownloadTarget =
+  | { readonly kind: 'id-or-artifact'; readonly value: string }
+  | { readonly kind: 'artifact'; readonly key: string }
+  | { readonly kind: 'upload'; readonly name: string }
+  | { readonly kind: 'legacy-node'; readonly filename: string }
+  | { readonly kind: 'invalid' };
 
 /**
- * Resolve a request path to an absolute file path under the canvas root,
- * refusing traversal and the private bookkeeping dirs ({@link ALWAYS_SKIP} —
- * `.history` / `.memory` / `.git` / `node_modules`). Any other explicit path
- * under the canvas is readable. Returns both the absolute path and the
- * physical canvas-relative path (post virtual-prefix mapping).
- *
- * @throws if the path escapes the canvas root or targets a private dir.
+ * Classify a raw `download/*` wildcard parameter without touching the
+ * filesystem. Rejects traversal, hidden dot-segments, and private Space files
+ * identically on Disk, SQLite, and Postgres.
  */
-export function resolveReadable(
-  canvasId: string,
-  requestRel: string,
-): { absPath: string; physicalRel: string } {
-  const physicalRel = toPhysicalRel(requestRel);
-  const seg = firstSegment(physicalRel);
-  if (ALWAYS_SKIP.has(seg)) {
-    throw new Error(`Path "${requestRel}" is not readable.`);
+export function parseRfsDownloadTarget(rawPath: string): RfsDownloadTarget {
+  if (
+    !rawPath ||
+    rawPath.startsWith('/') ||
+    rawPath.endsWith('/') ||
+    rawPath.includes('\\') ||
+    rawPath.includes('\0')
+  ) {
+    return { kind: 'invalid' };
   }
-  // `safeResolve` throws on any escape of `<workspace>/<canvasDir>/`.
-  const absPath = safeResolve(canvasId, physicalRel);
-  return { absPath, physicalRel };
+  const segments = rawPath.split('/');
+  if (segments.some((seg) => seg.length === 0 || seg === '.' || seg === '..')) {
+    return { kind: 'invalid' };
+  }
+  if (segments.length === 1) {
+    const [value] = segments;
+    if (value.startsWith('.') || RESERVED_SINGLE_SEGMENTS.has(value)) {
+      return { kind: 'invalid' };
+    }
+    return { kind: 'id-or-artifact', value };
+  }
+  if (segments.length === 2) {
+    const [prefix, child] = segments;
+    if (child.startsWith('.')) return { kind: 'invalid' };
+    if (prefix === 'artifacts') return { kind: 'artifact', key: child };
+    if (prefix === 'upload') return { kind: 'upload', name: child };
+    if (prefix === 'nodes' && child.endsWith('.md') && child.length > 3) {
+      return { kind: 'legacy-node', filename: child };
+    }
+  }
+  return { kind: 'invalid' };
 }
 
 /** A node's metadata plus its incident edges (grouped by direction). */
@@ -83,53 +94,82 @@ export interface RfsNodeLookup {
   basis: string;
 }
 
-/** Canvas-relative regex for a node markdown file. */
-const NODE_FILE_RE = /^nodes\/[^/]+\.md$/;
+/** Portable node download payload: metadata headers + serialized Markdown. */
+export interface RfsResolvedNode extends RfsNodeLookup {
+  readonly markdown: string;
+}
 
-/**
- * Look up the node whose markdown file is `physicalRel` (`nodes/<label>.md`),
- * returning its metadata allow-list and incident edges. Returns `null` when
- * the path is not a node file or no node currently claims it — callers then
- * serve the bytes without `X-Huabu-*` headers.
- *
- * The file → node mapping is the Disk tree's sidecar-to-record mapping, NOT a
- * re-derived `toSafeFilename(label)` — topology never carries `data.label`, so
- * the derived path would collapse to `nodes/<id>.md` and never match a real
- * label-named file. It stays Disk-shaped on purpose (§6.4.3, disposition B):
- * inverting a filename is only meaningful where the file is really there, so
- * until a second backend exists RFS's file plane is Disk's. The record and the
- * sidecar themselves come from the portable ports.
- */
-export async function lookupNodeByPath(
-  canvasId: string,
-  physicalRel: string,
-): Promise<RfsNodeLookup | null> {
-  if (!NODE_FILE_RE.test(physicalRel)) return null;
+function serializeRfsNodeMarkdown(
+  match: CanvasNode,
+  sidecar: NodeContent | null,
+): string {
+  const data = (match.data ?? {}) as Record<string, unknown>;
+  const type = (match.type ?? 'note') as CanvasNodeType;
+  const label =
+    typeof sidecar?.label === 'string' && sidecar.label.length > 0
+      ? sidecar.label
+      : typeof data.label === 'string' && data.label.length > 0
+        ? data.label
+        : undefined;
+  const src =
+    typeof sidecar?.src === 'string' && sidecar.src.length > 0
+      ? sidecar.src
+      : typeof data.src === 'string' && data.src.length > 0
+        ? data.src
+        : undefined;
 
-  const handle = space(canvasId);
-  // Taken before the read, so it is never newer than what is described.
-  const stamps = await handle.save.stamps();
-  const canvas = await handle.read();
-  if (!canvas || !stamps) return null;
+  const fm: Record<string, unknown> = {
+    id: match.id,
+    type,
+  };
+  if (label !== undefined) fm.label = label;
+  if (src !== undefined) fm.src = src;
+  if (typeof sidecar?.summary === 'string' && sidecar.summary.length > 0) {
+    fm.summary = sidecar.summary;
+  }
+  if (Array.isArray(sidecar?.keywords) && sidecar.keywords.length > 0) {
+    fm.keywords = sidecar.keywords;
+  }
+  if (
+    sidecar?.properties &&
+    typeof sidecar.properties === 'object' &&
+    Object.keys(sidecar.properties).length > 0
+  ) {
+    fm.properties = sidecar.properties;
+  }
+  if (
+    Array.isArray(sidecar?.propertyDisplayKeys) &&
+    sidecar.propertyDisplayKeys.length > 0
+  ) {
+    fm.propertyDisplayKeys = sidecar.propertyDisplayKeys;
+  }
+  const content = typeof sidecar?.content === 'string' ? sidecar.content : '';
+  return `${toFrontmatter(fm)}\n${content}`;
+}
 
-  const nodeId = handle.diskTree?.nodeIdForPath(physicalRel) ?? null;
-  if (!nodeId) return null;
-
-  const nodes = (canvas.state.nodes ?? []) as CanvasNode[];
-  const match = nodes.find((n) => n.id === nodeId);
-  if (!match) return null;
-
-  const sidecar = (await handle.nodes.read(nodeId))?.record ?? null;
+function buildResolvedNode(
+  match: CanvasNode,
+  sidecar: NodeContent | null,
+  edgeList: readonly CanvasEdge[],
+  stamps: { lineage: string; version: number },
+): RfsResolvedNode {
   const data = (match.data ?? {}) as {
+    label?: string;
     locked?: boolean;
     src?: string;
   };
+  const type = (match.type ?? 'note') as CanvasNodeType;
   const meta: RfsNodeMeta = {
     id: match.id,
-    type: (match.type ?? 'note') as CanvasNodeType,
+    type,
   };
-  // Label lives in the sidecar frontmatter (topology never carries it).
-  if (sidecar?.label) meta.label = sidecar.label;
+  const label =
+    typeof sidecar?.label === 'string' && sidecar.label.length > 0
+      ? sidecar.label
+      : typeof data.label === 'string' && data.label.length > 0
+        ? data.label
+        : undefined;
+  if (label) meta.label = label;
   const src =
     typeof sidecar?.src === 'string'
       ? sidecar.src
@@ -138,14 +178,10 @@ export async function lookupNodeByPath(
         : undefined;
   if (src) meta.src = src;
   if (typeof data.locked === 'boolean') meta.locked = data.locked;
-  // Revision hashes the node's *canonical* authored content — the on-disk
-  // body (topology strips `data.content`). Media nodes carry only a
-  // `src`, so a missing body is fine.
   const content =
     typeof sidecar?.content === 'string' ? sidecar.content : undefined;
-  meta.rev = nodeRevisionOf({ ...sidecar, content, src });
+  meta.rev = nodeRevisionOf({ ...sidecar, type, content, src });
 
-  const edgeList = (canvas.state.edges ?? []) as CanvasEdge[];
   const edges: RfsNodeEdges = {
     parents: edgeList.filter((e) => e.target === match.id).map((e) => e.source),
     children: edgeList
@@ -157,7 +193,70 @@ export async function lookupNodeByPath(
     meta,
     edges,
     basis: encodeBasis(stamps.lineage, stamps.version),
+    markdown: serializeRfsNodeMarkdown(match, sidecar),
   };
+}
+
+/**
+ * Resolve a node by its canonical `<nodeId>` through portable `Space` ports.
+ */
+export async function resolveRfsNodeById(
+  canvasId: string,
+  nodeId: string,
+): Promise<RfsResolvedNode | null> {
+  const handle = space(canvasId);
+  const stamps = await handle.save.stamps();
+  const canvas = await handle.read();
+  if (!canvas || !stamps) return null;
+
+  const nodes = (canvas.state.nodes ?? []) as CanvasNode[];
+  const match = nodes.find((n) => n.id === nodeId);
+  if (!match) return null;
+
+  const sidecar = (await handle.nodes.read(nodeId))?.record ?? null;
+  const edgeList = (canvas.state.edges ?? []) as CanvasEdge[];
+  return buildResolvedNode(match, sidecar, edgeList, stamps);
+}
+
+/**
+ * Resolve a legacy `nodes/<filename>.md` download target through portable
+ * `Space` ports so historical callers work identically across backends.
+ */
+export async function resolveRfsNodeByFilename(
+  canvasId: string,
+  filename: string,
+): Promise<RfsResolvedNode | null> {
+  const handle = space(canvasId);
+  const stamps = await handle.save.stamps();
+  const canvas = await handle.read();
+  if (!canvas || !stamps) return null;
+
+  const snapshots = await handle.nodes.list();
+  const nodes = (canvas.state.nodes ?? []) as CanvasNode[];
+  let matchedNode: CanvasNode | undefined;
+  for (const node of nodes) {
+    const sidecar = snapshots.get(node.id)?.record ?? null;
+    const data = (node.data ?? {}) as { label?: unknown };
+    const rawLabel =
+      typeof sidecar?.label === 'string'
+        ? sidecar.label
+        : typeof data.label === 'string'
+          ? data.label
+          : '';
+    const primary = `${toSafeFilename(rawLabel, node.id)}.md`;
+    const disambiguated = rawLabel
+      ? `${toSafeFilename(`${rawLabel} (${node.id})`, node.id)}.md`
+      : primary;
+    if (filename === primary || filename === disambiguated) {
+      matchedNode = node;
+      break;
+    }
+  }
+  if (!matchedNode) return null;
+
+  const sidecar = snapshots.get(matchedNode.id)?.record ?? null;
+  const edgeList = (canvas.state.edges ?? []) as CanvasEdge[];
+  return buildResolvedNode(matchedNode, sidecar, edgeList, stamps);
 }
 
 /**

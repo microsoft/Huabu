@@ -12,8 +12,8 @@ import type {
   ResolvedInput,
   VideoCoverReference,
 } from './types.js';
+import type { PreprocessNodeRequest } from './types.js';
 import type { BlobLease } from '../storage/index.js';
-import type { PreprocessNodeRequest } from '@huabu/shared';
 
 const MAX_THUMBNAIL_BYTES = 8 * 1024 * 1024;
 
@@ -82,7 +82,6 @@ export async function extractVideoCover(
   leases: BlobLease[],
   diagnostics: PreprocessDiagnostic[],
 ): Promise<VideoCoverReference | undefined> {
-  if (request.options?.allowPersistence === false) return undefined;
   const src = canonicalVideoSrc(request.snapshot.src, request.canvasId);
   try {
     const existing = (await deps.nodes.read(request.nodeId))?.record;
@@ -97,7 +96,6 @@ export async function extractVideoCover(
         ? videoArtifactKey(existing.coverUrl, request.canvasId)
         : undefined;
     if (
-      !request.options?.force &&
       cover &&
       canonicalVideoSrc(existing.coverSourceSrc, request.canvasId) === src &&
       (await deps.artifacts.head(cover))

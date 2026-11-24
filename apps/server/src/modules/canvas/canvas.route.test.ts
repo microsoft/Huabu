@@ -926,6 +926,103 @@ describe('GET /api/canvas/:canvasId/events', () => {
   });
 });
 
+describe('POST /api/canvas/:canvasId/changes/query', () => {
+  it('returns the pending records of the named threads that have any', async () => {
+    const expected = [change('n1')];
+    const readChanges = vi.fn((threadId: string) =>
+      Promise.resolve(threadId === 'thread-1' ? expected : []),
+    );
+    const space = vi.fn(() => ({
+      read: vi.fn().mockResolvedValue({ canvasId: 'c1' }),
+      changes: { read: readChanges },
+    }));
+    vi.mocked(getStructuredStore).mockImplementationOnce(
+      () => ({ space }) as unknown as ReturnType<typeof getStructuredStore>,
+    );
+
+    const app = await buildApp();
+    try {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/canvas/c1/changes/query',
+        payload: { threadIds: ['thread-1', 'thread-2', 'thread-1'] },
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toEqual({ threads: { 'thread-1': expected } });
+      expect(readChanges).toHaveBeenCalledTimes(2);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('rejects a malformed body and an unknown Space', async () => {
+    createCanvas('c1', 'Canvas One');
+
+    const app = await buildApp();
+    try {
+      const malformed = await app.inject({
+        method: 'POST',
+        url: '/canvas/c1/changes/query',
+        payload: { threadIds: 'thread-1' },
+      });
+      expect(malformed.statusCode).toBe(400);
+      const unknown = await app.inject({
+        method: 'POST',
+        url: '/canvas/missing/changes/query',
+        payload: { threadIds: [] },
+      });
+      expect(unknown.statusCode).toBe(404);
+    } finally {
+      await app.close();
+    }
+  });
+});
+
+describe('DELETE /api/canvas/:canvasId/threads/:threadId/changes/:changeId', () => {
+  it('tells the Space’s pages that the thread’s review records changed', async () => {
+    const deleteChange = vi.fn((_threadId: string, changeId: string) =>
+      Promise.resolve(changeId === 'kept' ? change('n1') : null),
+    );
+    const space = vi.fn(() => ({
+      read: vi.fn().mockResolvedValue({ canvasId: 'c1' }),
+      changes: { delete: deleteChange },
+    }));
+    const store = () =>
+      ({ space }) as unknown as ReturnType<typeof getStructuredStore>;
+    // One for each of the two requests below.
+    vi.mocked(getStructuredStore)
+      .mockImplementationOnce(store)
+      .mockImplementationOnce(store);
+    const events: unknown[] = [];
+    const unsubscribe = subscribeCanvasUpdates('c1', (event) => {
+      events.push(event);
+    });
+
+    const app = await buildApp();
+    try {
+      const kept = await app.inject({
+        method: 'DELETE',
+        url: '/canvas/c1/threads/thread-1/changes/kept',
+      });
+      expect(kept.json()).toEqual({ removed: true });
+      expect(events).toEqual([
+        { type: 'invalidate', data: { reviewThreadId: 'thread-1' } },
+      ]);
+      // Nothing was removed, so there is nothing to tell.
+      const missing = await app.inject({
+        method: 'DELETE',
+        url: '/canvas/c1/threads/thread-1/changes/gone',
+      });
+      expect(missing.json()).toEqual({ removed: false });
+      expect(events).toHaveLength(1);
+    } finally {
+      unsubscribe();
+      await app.close();
+    }
+  });
+});
+
 describe('GET /api/canvas/:canvasId/threads/:threadId/changes', () => {
   it('reads change records through one structured Space handle', async () => {
     const expected = [change('n1')];

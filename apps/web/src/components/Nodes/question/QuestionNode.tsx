@@ -29,6 +29,7 @@ import { findPendingPermissionRequestId } from '@/store/chatTypes.ts';
 import { rememberPreviewedAgent } from '@/store/commentDestinationMemory';
 import { resolveConversationAgentBinding } from '@/store/conversationOwner';
 import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store';
+import { conversationAttention } from '@/utils/attention';
 import {
   getQuestionFontOpts,
   QUESTION_NODE_DEFAULT_FONT_SIZE,
@@ -331,8 +332,8 @@ export const QuestionNode = memo(
       [isForkPending, canOpenInChat, status, openInChat, openInCompose, t],
     );
 
-    const isDoneUnviewed = status === 'done' && !viewed;
-    const isErrorUnviewed = status === 'error' && !viewed;
+    // A finished or failed turn the person has not viewed yet.
+    const unread = conversationAttention(status, viewed, false) !== null;
     const effectiveBinding = resolveConversationAgentBinding(
       data,
       composeAgentBinding ?? { kind: 'internal' },
@@ -354,7 +355,7 @@ export const QuestionNode = memo(
           : status;
     const tone = resolveQuestionTakeoverTone(
       badgeStatus ?? 'idle',
-      isDoneUnviewed || isErrorUnviewed,
+      unread,
       status === 'done' ? conflictCount : 0,
     );
 
@@ -393,7 +394,7 @@ export const QuestionNode = memo(
                       status={badgeStatus ?? 'idle'}
                       isOpen={isChatAnchorActive}
                       agent={agentPresentation}
-                      unread={isDoneUnviewed || isErrorUnviewed}
+                      unread={unread}
                       conflictCount={status === 'done' ? conflictCount : 0}
                       interactive={canOpenInChat}
                       onOpen={canOpenInChat ? openInChat : undefined}
@@ -436,7 +437,7 @@ export const QuestionNode = memo(
             agent={agentPresentation}
             status={badgeStatus ?? 'idle'}
             isOpen={isChatAnchorActive}
-            unread={isDoneUnviewed || isErrorUnviewed}
+            unread={unread}
             conflictCount={status === 'done' ? conflictCount : 0}
             errorMessage={data.errorMessage}
             lastActivityAt={data.lastActivityAt}

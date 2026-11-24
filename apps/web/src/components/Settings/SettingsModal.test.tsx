@@ -328,6 +328,16 @@ describe('Settings information architecture', () => {
     ).toBe(true);
   });
 
+  it('shows the whole build version, wrapping only between its parts', async () => {
+    await renderModal();
+    const version = container.querySelector('nav span.select-text');
+    // `<wbr>` adds no text, so selecting and copying yields the version.
+    expect(version?.textContent).toBe(`v${__APP_VERSION__}`);
+    expect((version?.querySelectorAll('wbr').length ?? 0) > 0).toBe(
+      /[-+]/.test(__APP_VERSION__),
+    );
+  });
+
   it('vertically centers both titles on matching header centerlines', async () => {
     await renderModal();
     const title = container.querySelector('nav h2');

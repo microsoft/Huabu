@@ -1,14 +1,19 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { Pause, Play } from 'lucide-react';
+import { Download, Pause, Play } from 'lucide-react';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { resolveArtifactUrl, uploadAudio } from '@/api/artifact';
 import { cn } from '@/components/Common/cn';
+import { DropdownMenuItem } from '@/components/Common/DropdownMenu';
 import useCanvasStore from '@/store/canvasStore.ts';
 import { isDesktopInputFrozen } from '@/utils/desktopInput';
+import {
+  canDownloadMediaSource,
+  triggerMediaDownload,
+} from '@/utils/io/nodeDownload';
 import { pageLifecycle } from '@/utils/pageLifecycle';
 
 import { getMissingFileKind, MissingFileBanner } from '../MissingFileBanner';
@@ -479,12 +484,33 @@ export const AudioNode = memo(
       );
     }
 
+    const canDownload =
+      recState === 'idle' &&
+      canDownloadMediaSource(data?.src, Boolean(missingFileKind));
+    const handleDownload = useCallback(() => {
+      triggerMediaDownload({
+        src: data?.src,
+        canvasId,
+        label: data?.label,
+        defaultExt: '.webm',
+        fallbackStem: 'audio',
+        missing: Boolean(missingFileKind),
+      });
+    }, [data?.src, data?.label, canvasId, missingFileKind]);
+
     return (
       <NodeWrapper
         id={id}
         data={data}
         type={'audio'}
         selected={selected}
+        overflow={
+          canDownload ? (
+            <DropdownMenuItem icon={<Download />} onClick={handleDownload}>
+              {t('node.download')}
+            </DropdownMenuItem>
+          ) : undefined
+        }
         minHeight={56}
         className={missingFileKind ? undefined : 'bg-surface'}
       >
