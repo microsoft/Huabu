@@ -407,6 +407,15 @@ describe('quick switch popover', () => {
 
       await click(showOthers()!);
       expect(dave()).not.toBeNull();
+      // Its role says it comes from the administrator's office; others' don't.
+      const noted = [
+        ...document.querySelectorAll('[data-testid="admin-access-note"]'),
+      ].map((icon) => icon.closest('label, li, [role="listitem"]'));
+      expect(noted).toHaveLength(1);
+      expect(noted[0]?.textContent).toContain("Dave's Workspace");
+      expect(noted[0]?.textContent).toContain(
+        'people.role.owner (workspace.adminAccessNote) · ',
+      );
       // Marked, then hidden again: Switch has nothing hidden to act on.
       await click(dave() as HTMLElement);
       expect(buttonNamed(/workspace.switchTo/)).toBeTruthy();
