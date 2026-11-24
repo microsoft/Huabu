@@ -81,6 +81,20 @@ export const canvasSyncEventSchema = z.discriminatedUnion('type', [
     }),
   }),
   z.object({
+    type: z.literal('preprocess'),
+    /**
+     * Preprocessing the server runs for a node after a write: `pending`
+     * when it starts, then `done` or `error`. What a run derived arrives
+     * separately, as node content does. Nothing is kept for a page that is
+     * not listening: a page that loads later shows no pending state.
+     */
+    data: z.object({
+      nodeId: z.string(),
+      status: z.enum(['pending', 'done', 'error']),
+      error: z.string().optional(),
+    }),
+  }),
+  z.object({
     type: z.literal('snapshot'),
     data: z.object({
       version: z.number(),

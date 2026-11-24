@@ -20,6 +20,8 @@ const mocks = vi.hoisted(() => {
     nodes: [],
     pendingContentNodeIds: vi.fn(() => []),
     applyServerDeltas: vi.fn(() => []),
+    setNodeIngestion: vi.fn(),
+    clearNodeIngestion: vi.fn(),
     loadCanvas: vi.fn(async () => undefined),
     _setStateRaw: vi.fn((partial: Record<string, unknown>) => {
       Object.assign(canvasState, partial);
@@ -319,6 +321,36 @@ describe('canvasSyncStore stream recovery', () => {
         ['canvas-1', ['n2']],
       ]);
       // Content is not a version change: nothing is replayed or reloaded.
+      expect(mocks.canvasState.applyServerDeltas).not.toHaveBeenCalled();
+      expect(mocks.canvasState.loadCanvas).not.toHaveBeenCalled();
+    });
+
+    it('shows preprocessing the server announces until it ends, and forgets it on a new connection', async () => {
+      mocks.canvasState.setNodeIngestion.mockClear();
+      mocks.canvasState.clearNodeIngestion.mockClear();
+      await connectWith(
+        ['snapshot', { version: 1 }],
+        ['preprocess', { nodeId: 'n1', status: 'pending' }],
+        ['preprocess', { nodeId: 'n2', status: 'pending' }],
+        ['preprocess', { nodeId: 'n3', status: 'pending' }],
+        ['preprocess', { nodeId: 'n1', status: 'done' }],
+        ['preprocess', { nodeId: 'n2', status: 'error', error: 'no text' }],
+        // The connection is replaced before n3's end is heard.
+        ['snapshot', { version: 1 }],
+      );
+
+      expect(mocks.canvasState.setNodeIngestion.mock.calls).toEqual([
+        ['n1', { status: 'pending' }],
+        ['n2', { status: 'pending' }],
+        ['n3', { status: 'pending' }],
+      ]);
+      // A run that ended, a run that failed, and one whose end was missed.
+      expect(mocks.canvasState.clearNodeIngestion.mock.calls).toEqual([
+        ['n1'],
+        ['n2'],
+        ['n3'],
+      ]);
+      // A status is not a version change: nothing is replayed or reloaded.
       expect(mocks.canvasState.applyServerDeltas).not.toHaveBeenCalled();
       expect(mocks.canvasState.loadCanvas).not.toHaveBeenCalled();
     });

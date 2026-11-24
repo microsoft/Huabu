@@ -201,7 +201,6 @@ export class ConversationTitleService {
     canvasId: string,
     nodeId: string,
     prompt: string,
-    allowLLM = true,
   ): Promise<void> {
     const question = await this.deps.questions?.read(
       canvasId,
@@ -209,13 +208,7 @@ export class ConversationTitleService {
       nodeId,
     );
     if (!question || question.content !== prompt) return;
-    await this.initializeTarget(
-      canvasId,
-      question.threadId,
-      prompt,
-      question,
-      allowLLM,
-    );
+    await this.initializeTarget(canvasId, question.threadId, prompt, question);
   }
 
   /** Await durable fallback, not title generation, before dispatching a turn. */
@@ -249,15 +242,14 @@ export class ConversationTitleService {
     threadId: string | undefined,
     prompt: string,
     question?: QuestionTitleSnapshot,
-    allowLLM = true,
   ): Promise<void> {
     const key = threadIdentityKey({
       namespace: canvasAcpNamespace(canvasId),
       threadId: threadId ?? question?.nodeId ?? '',
     });
     return coalesceInFlight(this.inFlight, key, () =>
-      this.initializeOnce(canvasId, threadId, prompt, question, allowLLM).catch(
-        (error) => this.deps.onError(error),
+      this.initializeOnce(canvasId, threadId, prompt, question).catch((error) =>
+        this.deps.onError(error),
       ),
     );
   }
@@ -317,10 +309,9 @@ export class ConversationTitleService {
     threadId: string | undefined,
     prompt: string,
     expected?: QuestionTitleSnapshot,
-    allowLLM = true,
   ): Promise<void> {
     const prepared = await this.prepare(canvasId, threadId, prompt, expected);
-    if (!prepared || !allowLLM || !prepared.firstPrompt.trim()) return;
+    if (!prepared || !prepared.firstPrompt.trim()) return;
     const { firstPrompt, question } = prepared;
     const generated = await this.deps.generate(firstPrompt, canvasId);
     // Check the latest source after the await; a manual rename wins even if

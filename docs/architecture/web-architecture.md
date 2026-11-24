@@ -67,7 +67,6 @@ What stays in `apps/web/src/handler/canvasCommand/`:
 
 - `uiIntent.ts` — UI gesture → `CanvasUiIntent` types
 - `resolvers/` — resolve ambiguous gestures (selection / clipboard / drag) into commands
-- `preprocess.ts` — node preprocessing trigger (calls the server)
 - `postEffects.web.ts` — web-only post-commit effects (transition cleanup, deferred frame-fit, history snapshot)
 - `nodeInputBuilders.ts`, `utils/` — input assembly + local helpers
 

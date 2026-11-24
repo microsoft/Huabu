@@ -4,9 +4,8 @@
 /**
  * Generic per-key debouncer primitive.
  *
- * Used by the per-node save queues (`preprocessQueue`,
- * `nodeContentQueue`) where each key independently coalesces rapid
- * writes into a single trailing-edge fire.
+ * Used by the per-node save queue (`nodeContentQueue`), where each key
+ * independently coalesces rapid writes into a single trailing-edge fire.
  *
  * NOT used by the structure scheduler (single global timer, no key
  * dimension) or the event buffer (accumulating, not debounced).

@@ -33,8 +33,8 @@ import type {
   PreprocessDiagnostic,
   PreprocessNodeResult,
 } from './types.js';
+import type { PreprocessNodeRequest } from './types.js';
 import type { BlobLease, BlobScope, SpaceNodes } from '../storage/index.js';
-import type { PreprocessNodeRequest } from '@huabu/shared';
 
 const log = getLogger('preprocessing.pipeline');
 
@@ -60,21 +60,16 @@ export async function runPipeline(
   deps: PipelineDeps,
 ): Promise<PreprocessNodeResult> {
   if (request.nodeType === 'question') {
-    if (request.options?.allowPersistence !== false) {
-      await conversationTitleService.initializeQuestion(
-        request.canvasId,
-        request.nodeId,
-        typeof request.snapshot.content === 'string'
-          ? request.snapshot.content
-          : '',
-        request.options?.allowLLM !== false &&
-          request.options?.mode !== 'interactive',
-      );
-    }
+    await conversationTitleService.initializeQuestion(
+      request.canvasId,
+      request.nodeId,
+      typeof request.snapshot.content === 'string'
+        ? request.snapshot.content
+        : '',
+    );
     return {
       nodeId: request.nodeId,
       nodeType: request.nodeType,
-      trigger: request.trigger,
       requestId: randomUUID(),
       success: true,
       status: 'success',
@@ -330,62 +325,49 @@ async function runPipelineStages(
     has('generate_summary') ||
     has('generate_keywords')
   ) {
-    const allowLLM =
-      request.options?.allowLLM !== false &&
-      request.options?.mode !== 'interactive';
-    if (allowLLM) {
-      try {
-        ctx.enriched = await enrich(
-          request.nodeType,
-          ctx.resolved,
-          ctx.normalized,
-          plan,
-          deps.provider,
-          request.canvasId,
-        );
-        if (has('generate_label')) usedCapabilities.push('generate_label');
-        if (has('generate_summary')) usedCapabilities.push('generate_summary');
-        if (has('generate_keywords'))
-          usedCapabilities.push('generate_keywords');
+    try {
+      ctx.enriched = await enrich(
+        request.nodeType,
+        ctx.resolved,
+        ctx.normalized,
+        plan,
+        deps.provider,
+        request.canvasId,
+      );
+      if (has('generate_label')) usedCapabilities.push('generate_label');
+      if (has('generate_summary')) usedCapabilities.push('generate_summary');
+      if (has('generate_keywords')) usedCapabilities.push('generate_keywords');
 
-        // Merge enriched summary and keywords into normalized metadata so they are persisted
-        if (ctx.enriched?.summary && ctx.normalized) {
-          ctx.normalized.metadata = {
-            ...ctx.normalized.metadata,
-            summary: ctx.enriched.summary,
-          };
-        }
-        if (ctx.enriched?.keywords?.length && ctx.normalized) {
-          ctx.normalized.metadata = {
-            ...ctx.normalized.metadata,
-            keywords: ctx.enriched.keywords,
-          };
-        }
-
-        // When the extracted document has no title, use the LLM-generated
-        // label as the normalized label so the canvas list and source list
-        // stay in sync.
-        if (
-          !ctx.normalized?.label &&
-          ctx.enriched?.suggestedLabel &&
-          ctx.normalized
-        ) {
-          ctx.normalized.label = ctx.enriched.suggestedLabel;
-        }
-      } catch (error) {
-        diagnostics.push({
-          code: 'ENRICH_FAILED',
-          level: 'warning',
-          message: error instanceof Error ? error.message : String(error),
-          retryable: true,
-        });
+      // Merge enriched summary and keywords into normalized metadata so they are persisted
+      if (ctx.enriched?.summary && ctx.normalized) {
+        ctx.normalized.metadata = {
+          ...ctx.normalized.metadata,
+          summary: ctx.enriched.summary,
+        };
       }
-    } else {
-      ctx.enriched = { skipped: true };
+      if (ctx.enriched?.keywords?.length && ctx.normalized) {
+        ctx.normalized.metadata = {
+          ...ctx.normalized.metadata,
+          keywords: ctx.enriched.keywords,
+        };
+      }
+
+      // When the extracted document has no title, use the LLM-generated
+      // label as the normalized label so the canvas list and source list
+      // stay in sync.
+      if (
+        !ctx.normalized?.label &&
+        ctx.enriched?.suggestedLabel &&
+        ctx.normalized
+      ) {
+        ctx.normalized.label = ctx.enriched.suggestedLabel;
+      }
+    } catch (error) {
       diagnostics.push({
-        code: 'ENRICH_SKIPPED',
-        level: 'info',
-        message: 'LLM enrichment disabled by request options',
+        code: 'ENRICH_FAILED',
+        level: 'warning',
+        message: error instanceof Error ? error.message : String(error),
+        retryable: true,
       });
     }
   }
@@ -399,64 +381,59 @@ async function runPipelineStages(
     (d) => d.code === 'EXTRACT_FAILED' && d.level === 'error',
   );
   if (has('persist_source') && ctx.normalized) {
-    const allowPersistence = request.options?.allowPersistence !== false;
-    if (allowPersistence) {
-      try {
-        const src = ctx.resolved?.normalizedUri ?? ctx.resolved?.artifactUri;
+    try {
+      const src = ctx.resolved?.normalizedUri ?? ctx.resolved?.artifactUri;
 
-        if (extractFailed) {
-          // Persist a placeholder with empty content so the node still has
-          // a record keyed by its nodeId. Store the extraction error in
-          // metadata for debugging.
-          const placeholderNormalized = {
-            ...ctx.normalized,
-            canonicalContent: '',
-            metadata: {
-              ...ctx.normalized.metadata,
-              placeholder: true,
-              extractError: diagnostics
-                .filter((d) => d.code === 'EXTRACT_FAILED')
-                .map((d) => d.message)
-                .join('; '),
-            },
-          };
-          ctx.persisted = await persist(
-            placeholderNormalized,
-            contentKind,
-            bodyOwnership,
-            deps.nodes,
-            src,
-            true,
-          );
-          ctx.persisted.placeholder = true;
-          diagnostics.push({
-            code: 'PERSIST_PLACEHOLDER',
-            level: 'info',
-            message:
-              'Persisted placeholder source because extraction failed — content is empty',
-          });
-        } else {
-          ctx.persisted = await persist(
-            ctx.normalized,
-            contentKind,
-            bodyOwnership,
-            deps.nodes,
-            src,
-            true,
-            ctx.videoCover,
-          );
-        }
-        usedCapabilities.push('persist_source');
-      } catch (error) {
+      if (extractFailed) {
+        // Persist a placeholder with empty content so the node still has
+        // a record keyed by its nodeId. Store the extraction error in
+        // metadata for debugging.
+        const placeholderNormalized = {
+          ...ctx.normalized,
+          canonicalContent: '',
+          metadata: {
+            ...ctx.normalized.metadata,
+            placeholder: true,
+            extractError: diagnostics
+              .filter((d) => d.code === 'EXTRACT_FAILED')
+              .map((d) => d.message)
+              .join('; '),
+          },
+        };
+        ctx.persisted = await persist(
+          placeholderNormalized,
+          contentKind,
+          bodyOwnership,
+          deps.nodes,
+          src,
+          true,
+        );
+        ctx.persisted.placeholder = true;
         diagnostics.push({
-          code: 'PERSIST_FAILED',
-          level: 'error',
-          message: error instanceof Error ? error.message : String(error),
-          retryable: true,
+          code: 'PERSIST_PLACEHOLDER',
+          level: 'info',
+          message:
+            'Persisted placeholder source because extraction failed — content is empty',
         });
+      } else {
+        ctx.persisted = await persist(
+          ctx.normalized,
+          contentKind,
+          bodyOwnership,
+          deps.nodes,
+          src,
+          true,
+          ctx.videoCover,
+        );
       }
-    } else {
-      ctx.persisted = { skipped: true };
+      usedCapabilities.push('persist_source');
+    } catch (error) {
+      diagnostics.push({
+        code: 'PERSIST_FAILED',
+        level: 'error',
+        message: error instanceof Error ? error.message : String(error),
+        retryable: true,
+      });
     }
   }
 

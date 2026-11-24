@@ -22,8 +22,9 @@
  * (`publishCanvasUpdate`) unless the caller defers publication.
  *
  * What this module does NOT do:
- *   - Trigger preprocessing. The originating side drives that from
- *     `pendingEffects.mutatedNodes`.
+ *   - Decide what follows from a batch. After the commit it calls the
+ *     reaction installed in `commit-follow-up.ts` (preprocessing of the
+ *     nodes whose input the batch changed) and knows nothing more of it.
  *   - Per-command delta log rows: one row is written per batch.
  */
 
@@ -84,6 +85,7 @@ import {
   validateAgentNodeEditableData,
 } from './agent-node-edit.js';
 import { publishCanvasUpdate } from './canvas-sync.js';
+import { commitReactions } from './commit-follow-up.js';
 import {
   outcomeOf,
   readStoredOutcome,
@@ -390,6 +392,48 @@ function buildNodeContent(node: CanvasNode): NodeContent | null {
     out['labelSource'] = labelSource;
   }
   return out;
+}
+
+/** The record fields {@link buildNodeContent} takes from a node's data. */
+const NODE_BACKED_RECORD_KEYS: ReadonlySet<string> = new Set([
+  'nodeId',
+  'type',
+  'label',
+  'content',
+  'src',
+  'summary',
+  'keywords',
+  'provenance',
+  'properties',
+  'propertyDisplayKeys',
+  'labelSource',
+]);
+
+/**
+ * The record to store for a node a batch changed: what the node carries,
+ * plus whatever the stored record holds that no node carries.
+ *
+ * Some record fields are derived by the server and read only by it: a
+ * video's cover (`coverUrl`, `coverSourceSrc`), a web page's saved snapshot
+ * (`mhtmlArtifact`), loader metadata. The node a command hands back does
+ * not have them, so a record rebuilt from the node alone would drop them
+ * whenever the node is recoloured or renamed. They describe the source the
+ * record had, though: a node given another source starts without them, as a
+ * node re-created under the id (`inserted`) does. Kept beside a new source,
+ * a saved snapshot would pass for the new page's.
+ */
+function recordToStore(
+  node: CanvasNode,
+  stored: NodeContent | undefined,
+  inserted: boolean,
+): NodeContent | null {
+  const record = buildNodeContent(node);
+  if (!record || !stored || inserted) return record;
+  if ((stored.src ?? '') !== (record.src ?? '')) return record;
+  const kept: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(stored))
+    if (!NODE_BACKED_RECORD_KEYS.has(key)) kept[key] = value;
+  return { ...kept, ...record };
 }
 
 /** Sidecar fields compared as they travel: by value, `undefined` as absent. */
@@ -999,8 +1043,8 @@ export interface ExecuteOnServerOutput {
   /**
    * Subset of `PendingEffects` that clients need to drain locally.
    *
-   * `mutatedNodes` is included so the web's existing `triggerPreprocessing`
-   * pipeline can still run (the originating page drives preprocessing).
+   * `mutatedNodes` names the nodes the batch created or whose data it
+   * changed; a page reads them from its own state.
    */
   pendingEffects: {
     mutatedNodes: CanvasNode[];
@@ -2104,7 +2148,11 @@ async function executePreparedOnServerAlreadyLocked(
   const insertedIds = insertedNodeIds(deltas);
   const nodeMutations: SpaceNodeMutation[] = [];
   for (const node of mutatedNodesToPersist) {
-    const record = buildNodeContent(node);
+    const record = recordToStore(
+      node,
+      prepared.records.get(node.id)?.record,
+      insertedIds.has(node.id),
+    );
     if (!record) continue;
     nodeMutations.push({
       kind: 'put',
@@ -2270,6 +2318,20 @@ async function executePreparedOnServerAlreadyLocked(
       // records are stored, so the list is read back.
       (await handle.changes.read(reviewThreadId).catch(() => changes));
   }
+  // What follows from the write (preprocessing of the nodes it created or
+  // whose input it changed) is decided here, once, whoever wrote and however
+  // many pages are open.
+  const startFollowUp = commitReactions()?.batch({
+    canvasId,
+    deltas,
+    prestateNodes,
+    finalNodes,
+    restoredNodeIds: commands.flatMap((command) =>
+      command.type === 'RESTORE_NODES'
+        ? (command.nodes ?? []).map((node) => node.id as string)
+        : [],
+    ),
+  });
   if (input.publish !== false) {
     publishCanvasUpdate(canvasId, {
       type: 'update',
@@ -2287,6 +2349,11 @@ async function executePreparedOnServerAlreadyLocked(
       },
     });
   }
+
+  // After the update, so a page learns of the write before what follows
+  // from it. The work runs in this call's context: its caller's settings
+  // and credentials.
+  startFollowUp?.();
 
   return outputWith(changes, nodeContentRevisions);
 }
@@ -2600,7 +2667,11 @@ export async function applyDeltasOnServerAlreadyLocked(input: {
     for (const d of deltas) {
       const node = writtenNode(d);
       if (node) {
-        const record = buildNodeContent(node);
+        const record = recordToStore(
+          node,
+          records.get(node.id)?.record,
+          insertedIds.has(node.id),
+        );
         if (record) {
           nodeMutations.push({
             kind: 'put',

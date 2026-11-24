@@ -76,7 +76,13 @@ async function seedSpace(request: APIRequestContext) {
   const note = (id: string, x: number, y: number) => ({
     id,
     nodeType: 'note',
-    data: { type: 'note', label: `Label ${id}`, content: `Body of ${id}` },
+    // A title somebody gave: the server derives none from the body for it.
+    data: {
+      type: 'note',
+      label: `Label ${id}`,
+      labelSource: 'user',
+      content: `Body of ${id}`,
+    },
     selectOnCreate: false,
     position: { x, y },
     size: { width: 260, height: 160 },

@@ -22,8 +22,6 @@ import type {
   ListCanvasesResponse,
   CreateCanvasRequest,
   CreateCanvasResponse,
-  PreprocessNodeRequest,
-  PreprocessNodeResponse,
   RevealNodesFolderResponse,
   PostCanvasExecuteRequest,
   PostCanvasExecuteResponse,
@@ -354,36 +352,6 @@ export async function deleteCanvasById(
     method: 'DELETE',
     fallbackMessage: 'Failed to delete Space',
   });
-}
-
-/**
- * Unified preprocessing endpoint.
- * Handles all node types through a single route.
- *
- * Note: `nodeType` is intentionally typed as `string` here (rather than
- * `CanvasNodeType`) to match call sites that read `node.type ?? ''`.
- * The server validates the wire shape via zod.
- */
-export async function preprocessNode(
-  canvasId: string,
-  nodeId: string,
-  body: {
-    nodeType: string;
-    trigger?: PreprocessNodeRequest['trigger'];
-    snapshot: PreprocessNodeRequest['snapshot'];
-    options?: PreprocessNodeRequest['options'];
-  },
-  options?: { keepalive?: boolean },
-): Promise<PreprocessNodeResponse> {
-  return apiFetch<PreprocessNodeResponse>(
-    routes.canvasNodePreprocess(canvasId, nodeId),
-    {
-      method: 'POST',
-      json: body,
-      keepalive: options?.keepalive ?? false,
-      fallbackMessage: 'Failed to preprocess node',
-    },
-  );
 }
 
 /**
