@@ -21,8 +21,8 @@ import { isMac } from '@/utils/platform';
 
 import { NotePreview } from './NotePreview';
 
-vi.mock('@/hooks/useElectron', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@/hooks/useElectron')>()),
+vi.mock(import('@/hooks/useElectron'), async (importOriginal) => ({
+  ...(await importOriginal()),
   isElectron: vi.fn(),
 }));
 
