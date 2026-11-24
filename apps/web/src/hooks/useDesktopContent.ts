@@ -14,6 +14,7 @@ import { useChatStore } from '@/store/chatStore';
 import { ConversationTitleSaveError } from '@/store/conversationTitleStore';
 import { useDesktopTabStore } from '@/store/desktopTabStore';
 import { useSettingsUiStore } from '@/store/settingsUiStore';
+import { standaloneThreadsOf } from '@/store/spaceThreads';
 import { useToolStore } from '@/store/toolStore';
 import { useWorkspaceStore } from '@/store/workspaceStore';
 import {
@@ -27,6 +28,7 @@ import {
 } from '@/utils/desktopStorage';
 import { pageLifecycle } from '@/utils/pageLifecycle';
 import { prepareSpaceDeletion } from '@/utils/prepareSpaceDeletion';
+import { readConversations, unseenIn } from '@/utils/turnNotices';
 
 import { getElectronBridge, requireDesktopTabSuccess } from './useElectron';
 
@@ -271,20 +273,15 @@ export function useDesktopContent(): {
           questions.some(
             (node) => getQuestionNodeStatus(node.data) === 'running',
           ) || threads.some(([, thread]) => thread.isStreaming),
-        completion: [
-          ...questions.flatMap((node) =>
-            getQuestionNodeStatus(node.data) === 'done'
-              ? [`${node.id}:${node.data.invocationToken ?? ''}`]
-              : [],
-          ),
-          ...threads.flatMap(([threadId, thread]) =>
-            thread.completedTurnId
-              ? [`${threadId}:${thread.completedTurnId}`]
-              : [],
-          ),
-        ]
-          .sort()
-          .join('\0'),
+        ...unseenIn(
+          tabs.context.role === 'space'
+            ? readConversations(
+                canvas.nodes,
+                useChatStore.getState().threadsById,
+                standaloneThreadsOf(canvas.canvasId),
+              )
+            : new Map(),
+        ),
         error: canvas.canvasNotFound
           ? 'Space no longer exists'
           : errorNode
@@ -297,7 +294,8 @@ export function useDesktopContent(): {
         previous &&
         previous.title === next.title &&
         previous.running === next.running &&
-        previous.completion === next.completion &&
+        previous.attention === next.attention &&
+        previous.unseen === next.unseen &&
         previous.error === next.error
       )
         return;

@@ -26,6 +26,7 @@ import { CanvasSidebar } from '../../components/Panels/CanvasSidebar';
 import { CanvasHeader } from '../../components/Panels/Header/CanvasHeader.tsx';
 import { PreviewWorkspacePanel } from '../../components/Panels/PreviewWorkspace/PreviewWorkspacePanel';
 import { useGlobalSearchHotkey } from '../../hooks/useGlobalSearchHotkey';
+import { useTurnNotices } from '../../hooks/useTurnNotices';
 import { useTrackCanvasAttention } from '../../store/canvasAttentionStore';
 import useStore from '../../store/canvasStore';
 import { useCanvasSyncStore } from '../../store/canvasSyncStore';
@@ -86,6 +87,7 @@ export default function CanvasPage() {
   const { canvasId } = useParams<{ canvasId: string }>();
   const navigate = useNavigate();
   const location = useLocation();
+  useTurnNotices(canvasId);
   const switchCanvas = useStore((s) => s.switchCanvas);
   const loadCanvas = useStore((s) => s.loadCanvas);
   const isLoading = useStore((s) => s.isLoading);
