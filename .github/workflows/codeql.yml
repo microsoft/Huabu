@@ -1,0 +1,57 @@
+name: CodeQL
+
+# Advanced setup, replacing GitHub's default setup. Default setup skips pull
+# requests opened from forks and pull requests that target a branch other
+# than `main`; a `pull_request` trigger covers both.
+#
+# Default setup must be switched off in the repository settings (Advanced
+# Security > Code scanning > CodeQL analysis) for this workflow to work:
+# while it is on, GitHub rejects the results this workflow uploads.
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  schedule:
+    # Weekly, so queries added to CodeQL reach code that has not changed.
+    - cron: '23 3 * * 1'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codeql-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    # The job name and `category` below match what default setup produced, so
+    # existing alerts and their dismissals carry over.
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Upload results. A fork pull request gets a read-only token whatever is
+      # asked for here; code scanning still accepts its upload because the
+      # repository is public.
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        language:
+          - javascript-typescript
+          - actions
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: none
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
+        with:
+          category: /language:${{ matrix.language }}
