@@ -40,8 +40,6 @@ export type UnitNode = { id: string } & Record<string, unknown>;
 export const POSITION_UNIT = 'position';
 export const SIZE_UNIT = 'size';
 export const PARENT_UNIT = 'parent';
-/** Where a node stands among its siblings in paint order. */
-export const PAINT_KEY_UNIT = 'data.paintKey';
 /**
  * The units that say where a node is: its parent and its position relative
  * to that parent. Each is a unit of its own for reading and writing, but
