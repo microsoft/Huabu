@@ -112,7 +112,12 @@ function WorkspaceRowFace({
             {role && <span className="shrink-0">{role}</span>}
             {role && adminNote && (
               <>
-                <Tooltip content={adminNote} contentClassName="max-w-64">
+                <Tooltip
+                  content={adminNote}
+                  // Below, so it never covers the name it explains.
+                  placement="bottom"
+                  contentClassName="max-w-64"
+                >
                   <Info
                     aria-hidden
                     size={12}

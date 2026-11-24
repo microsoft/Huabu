@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { useEffect, useId, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate } from 'react-router-dom';
 
@@ -21,6 +21,7 @@ import {
 } from '../../store/workspaceStore';
 import { useWorkspaceSwitcherUiStore } from '../../store/workspaceSwitcherUiStore';
 import { Button } from '../Common/Button';
+import { cn } from '../Common/cn';
 import { Modal } from '../Common/Modal';
 import { Toggle } from '../Common/Toggle';
 
@@ -85,9 +86,33 @@ function OpenWorkspaceSwitcherDialog() {
   const hasOthers = everyWorkspace.some(
     (workspace) => !isOwnWorkspace(workspace),
   );
+  // The person's own first, so the current one is not buried among others'.
+  const own = everyWorkspace.filter(isOwnWorkspace);
   const workspaces = showOthers
-    ? everyWorkspace
-    : everyWorkspace.filter(isOwnWorkspace);
+    ? [...own, ...everyWorkspace.filter((w) => !isOwnWorkspace(w))]
+    : own;
+  // Fade an edge of the list while rows lie beyond it, so a list that ends
+  // on a whole row still reads as one that scrolls.
+  const scroller = useRef<HTMLDivElement | null>(null);
+  const [beyond, setBeyond] = useState({ above: false, below: false });
+  const measure = useCallback(() => {
+    const element = scroller.current;
+    if (!element) return;
+    const above = element.scrollTop > 1;
+    const below =
+      element.scrollTop + element.clientHeight < element.scrollHeight - 1;
+    setBeyond((last) =>
+      last.above === above && last.below === below ? last : { above, below },
+    );
+  }, []);
+  useEffect(() => {
+    measure();
+    const element = scroller.current;
+    if (!element) return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [measure, workspaces.length]);
 
   useEffect(() => {
     void refreshWorkspaces();
@@ -165,7 +190,25 @@ function OpenWorkspaceSwitcherDialog() {
       {/* Enter on a marked row switches, like the Switch button. */}
       {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions -- Enter is a shortcut for the footer's Switch button, which stays the accessible control. */}
       <div
-        className="-mx-2 mt-4 max-h-[min(22rem,45dvh)] overflow-y-auto px-2 py-0.5"
+        ref={scroller}
+        onScroll={measure}
+        // Leaves the rest of the dialog room, so only the list scrolls; 20rem
+        // ends part-way through a row, which shows there is more.
+        // `relative` keeps the rows' visually hidden radios and notes, which
+        // are absolutely positioned, inside it; otherwise those of rows
+        // scrolled out of view stretch the dialog's own scroll area.
+        className={cn(
+          'relative -mx-2 mt-4 max-h-[min(20rem,calc(100dvh-24rem))] overflow-y-auto px-2 py-0.5',
+          beyond.above &&
+            beyond.below &&
+            '[mask-image:linear-gradient(to_bottom,transparent,black_3rem,black_calc(100%-3rem),transparent)]',
+          beyond.above &&
+            !beyond.below &&
+            '[mask-image:linear-gradient(to_bottom,transparent,black_3rem)]',
+          !beyond.above &&
+            beyond.below &&
+            '[mask-image:linear-gradient(to_bottom,black_calc(100%-3rem),transparent)]',
+        )}
         onKeyDown={(event) => {
           if (
             event.key === 'Enter' &&

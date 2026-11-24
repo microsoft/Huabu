@@ -395,6 +395,9 @@ describe('quick switch popover', () => {
       );
 
     it('stays out of the quick switch, and out of All Workspaces until asked for', async () => {
+      // Listed first by the server, to show the dialog puts it after the
+      // person's own.
+      server.workspaces.unshift(server.workspaces.pop()!);
       await mount();
       await click(trigger());
       expect(rowNames()).toEqual([
@@ -407,6 +410,11 @@ describe('quick switch popover', () => {
 
       await click(showOthers()!);
       expect(dave()).not.toBeNull();
+      // The person's own come first, others' after them.
+      const order = [
+        ...document.querySelectorAll<HTMLInputElement>('input[type="radio"]'),
+      ].map((radio) => radio.value);
+      expect(order.at(-1)).toBe('dave');
       // Its role says it comes from the administrator's office; others' don't.
       const noted = [
         ...document.querySelectorAll('[data-testid="admin-access-note"]'),
