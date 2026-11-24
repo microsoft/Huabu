@@ -156,8 +156,8 @@ export function withDistinctPaintKeys<T extends NestableNode>(
  * array in paint order.
  *
  * A node keeps its key unless it has none, or — given `previousNodes`, the
- * Space before the batch — it changed parent and still carries the key it
- * had under the old one, unless the batch itself named that key (`placed`:
+ * nodes before the write — it changed parent and still carries the key it
+ * had under the old one, unless the write itself named that key (`placed`:
  * a restored node, a patch that carries the key). Such a node is keyed
  * between the siblings it stands between. A Space stored before keys existed is keyed the same way:
  * every node in its array order, the same keys on every read.

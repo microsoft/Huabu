@@ -114,6 +114,39 @@ describe('a reorder after an earlier command of the batch named a paint key', ()
   });
 });
 
+describe('a node reordered and then moved to another parent in one batch', () => {
+  it('is keyed for where it is put, not by the key the reorder gave it', () => {
+    const nodes = [
+      node('node-f', 'frame', { paintKey: 'a0', sizing: 'manual' }),
+      node('node-x', 'text', { paintKey: 'a5' }, 'node-f'),
+      node('node-y', 'text', { paintKey: 'a6' }, 'node-f'),
+      node('node-a', 'text', { paintKey: 'a1' }),
+      node('node-b', 'text', { paintKey: 'a2' }),
+    ];
+    const out = run(nodes, [
+      { type: 'REORDER_NODES', nodeIds: ['node-a'], to: 'top' },
+      { type: 'SET_NODE_PARENT', nodeIds: ['node-a'], parentId: 'node-f' },
+    ]);
+    const moved = out.find((n) => n.id === 'node-a') as NestableNode;
+    const inFrame = children(out, 'node-f');
+    const keys = inFrame.map((id) =>
+      readPaintKey(out.find((n) => n.id === id) as NestableNode),
+    );
+    expect(readPaintKey(moved)).not.toBe('a1');
+    expect([...keys].sort()).toEqual(keys);
+    expect(new Set(keys).size).toBe(3);
+    // Where the reparent put it in the array is where its key puts it.
+    expect(inFrame).toEqual(
+      children(
+        run(nodes, [
+          { type: 'SET_NODE_PARENT', nodeIds: ['node-a'], parentId: 'node-f' },
+        ]),
+        'node-f',
+      ),
+    );
+  });
+});
+
 describe('a locked Column Frame stored without a reading order', () => {
   it('is given its reading order by the read like any other', () => {
     const stored = [

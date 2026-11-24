@@ -183,8 +183,6 @@ export function executeCanvasEdits(
   const resizedFrameIds = new Set<string>();
 
   // Track whether any command was actually applied.
-  /** Nodes whose paint key a command of the batch itself named. */
-  const placedPaintKeyIds = new Set<string>();
   let anyApplied = false;
 
   const refuseEdit = (
@@ -238,8 +236,6 @@ export function executeCanvasEdits(
     /** In command order: the fill request follows the last layout command. */
     const stagedFrames: Array<{ id: string; fill?: boolean }> = [];
     const stagedResized: string[] = [];
-    // What earlier edits of the batch placed, and what this one does.
-    const editPlacedPaint = new Set(placedPaintKeyIds);
     let failedAt: number | undefined;
 
     for (const [commandIndex, cmd] of edit.commands.entries()) {
@@ -277,21 +273,23 @@ export function executeCanvasEdits(
       // Advance the evolving state so the next command of the edit sees
       // this command's changes, with both kinds of order settled: the next
       // command reads them. A track key the command left meaningless is
-      // dropped. Paint keys are settled against the batch's starting state:
-      // a node created, or moved to another parent with the key it had
-      // there, is keyed for where it stands, a key a command named is kept,
-      // and the array is put in key order.
-      for (const id of result.placedPaintKeyIds ?? []) editPlacedPaint.add(id);
+      // dropped. A node the command created, or moved to another parent
+      // with the key it had there, gets a paint key for where it stands; a
+      // key the command itself named is kept; the array is put in key
+      // order. Both rules compare with the nodes before this command.
+      const before = editNodes;
       editNodes = settlePaintOrder(
         settleTrackKeys(
           result.nodes,
-          editNodes,
+          before,
           result.placedTrackKeyIds
             ? new Set(result.placedTrackKeyIds)
             : undefined,
         ) as NestableNode[],
-        state.nodes,
-        editPlacedPaint,
+        before,
+        result.placedPaintKeyIds
+          ? new Set(result.placedPaintKeyIds)
+          : undefined,
       ) as typeof editNodes;
       editEdges = result.edges;
 
@@ -343,7 +341,6 @@ export function executeCanvasEdits(
     pendingEffects.contentEditedNodeIds.push(...staged.contentEditedNodeIds);
     pendingEffects.deferredFitFrameIds.push(...staged.deferredFitFrameIds);
     for (const id of stagedResized) resizedFrameIds.add(id);
-    for (const id of editPlacedPaint) placedPaintKeyIds.add(id);
     for (const frame of stagedFrames) {
       allAffectedFrameIds.add(frame.id);
       if (frame.fill === true) fillFrameIds.add(frame.id);
