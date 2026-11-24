@@ -7,7 +7,6 @@ import {
   hasAgentNodeOwnedData,
   changesAgentNodePreparation,
 } from '../agentNodeOwnership.js';
-import { dropTrackKeyOnTrackChange } from '../autoLayout/layoutOrder.js';
 import {
   hasValidNodeProperties,
   mergeNodeProperties,
@@ -122,6 +121,7 @@ const mergeNodeData: CommandDefinition<Cmd> = {
     // the per-type profile.
     const mutatedNodes: Node[] = [];
     const contentEditedNodeIds: string[] = [];
+    const placedTrackKeyIds: string[] = [];
     let anyApplied = false;
 
     const nextNodes = state.nodes.map((n) => {
@@ -156,10 +156,9 @@ const mergeNodeData: CommandDefinition<Cmd> = {
       };
       if (n.type === 'question' && patchRec.agentLaunchOverrides === null)
         delete mergedData.agentLaunchOverrides;
-      // A node moved to another Column / Row track leaves its place in the
-      // old one behind.
-      if (dropTrackKeyOnTrackChange(dataRec, mergedData) !== mergedData)
-        delete mergedData.trackKey;
+      // A patch that names a track key places the node, whatever the key.
+      if ('trackKey' in patchRec && patchRec.trackKey !== undefined)
+        placedTrackKeyIds.push(n.id);
       // JSON transports cannot carry `undefined`, so `null` clears the cover.
       if (patchRec.coverUrl === null) delete mergedData.coverUrl;
       if (patchRec.properties !== undefined) {
@@ -231,6 +230,7 @@ const mergeNodeData: CommandDefinition<Cmd> = {
       edges: state.edges,
       mutatedNodes,
       ...(contentEditedNodeIds.length > 0 ? { contentEditedNodeIds } : {}),
+      ...(placedTrackKeyIds.length > 0 ? { placedTrackKeyIds } : {}),
     };
   },
 };

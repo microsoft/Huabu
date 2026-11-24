@@ -42,6 +42,7 @@
  */
 
 import { applyStructuredFrameRelayout } from './autoLayout/gridLayout.js';
+import { settleTrackKeys } from './autoLayout/layoutOrder.js';
 import { HANDLERS, COMMAND_META } from './commands/index.js';
 import { isAllowedFor } from './commandScope.js';
 import { settlePaintOrder } from './container/paintOrder.js';
@@ -270,8 +271,15 @@ export function executeCanvasEdits(
       }
 
       // Advance the evolving state so the next command of the edit sees
-      // this command's changes.
-      editNodes = result.nodes;
+      // this command's changes. A track key the command left meaningless
+      // goes first: the next command reads the children's order.
+      editNodes = settleTrackKeys(
+        result.nodes,
+        editNodes,
+        result.placedTrackKeyIds
+          ? new Set(result.placedTrackKeyIds)
+          : undefined,
+      );
       editEdges = result.edges;
 
       if (result.mutatedNodes) staged.mutatedNodes.push(...result.mutatedNodes);

@@ -10,7 +10,6 @@ import {
   subPos,
   type NestableNode,
 } from './tree.js';
-import { withoutTrackKey } from '../autoLayout/layoutOrder.js';
 
 /**
  * Parent a node under a Container while preserving its absolute position.
@@ -39,8 +38,7 @@ export function moveNodeIntoContainer(
   const nextNodes = nodes.map((candidate) =>
     candidate.id === nodeId
       ? {
-          // Its place in a Column / Row track belonged to the old parent.
-          ...withoutTrackKey(candidate),
+          ...candidate,
           parentId: containerId,
           position: subPos(nodeAbs, containerAbs),
           extent: undefined,
@@ -112,11 +110,7 @@ export function moveNodeOutOfContainer(
 
   const nextNodes = nodes.map((candidate) => {
     if (candidate.id !== nodeId) return candidate;
-    const {
-      parentId: _parentId,
-      zIndex: _zIndex,
-      ...rest
-    } = withoutTrackKey(candidate);
+    const { parentId: _parentId, zIndex: _zIndex, ...rest } = candidate;
     return {
       ...rest,
       position: nodeAbs,

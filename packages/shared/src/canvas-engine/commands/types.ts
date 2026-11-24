@@ -41,6 +41,12 @@ export interface CommandHandlerResult {
    * node type / watched fields; that's the server's job.
    */
   mutatedNodes?: Node[];
+  /**
+   * Children this command itself placed in a Column / Row track: their
+   * `trackKey` is the one the command means, even where it equals the one
+   * they had (see `settleTrackKeys`).
+   */
+  placedTrackKeyIds?: string[];
   /** Node IDs that were deleted and need server-side tracking. */
   deletedNodeIds?: string[];
   /**

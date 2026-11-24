@@ -12,11 +12,7 @@ import {
   planGridReflow,
   solveStructuredFrameLayout,
 } from '../autoLayout/gridLayout.js';
-import {
-  dropTrackKeyOnTrackChange,
-  movedInOrder,
-  trackKeyChanges,
-} from '../autoLayout/layoutOrder.js';
+import { movedInOrder, trackKeyChanges } from '../autoLayout/layoutOrder.js';
 import { hasUnlockedAncestry } from '../siblingOrder.js';
 
 import type { CanvasCommand } from '../../index.js';
@@ -160,6 +156,9 @@ const setFrameLayout: CommandDefinition<Cmd> = {
         edges: state.edges,
         mutatedNodes: nextNodes.filter((node, i) => node !== state.nodes[i]),
         affectedFrameIds: [frame.id],
+        // Every child stands where this command read or put it: a track
+        // that was renumbered because another emptied keeps its order.
+        placedTrackKeyIds: [...assignments.keys()],
       };
     }
 
@@ -271,8 +270,6 @@ const setFrameLayout: CommandDefinition<Cmd> = {
         if (resetsCells) {
           delete nextData.frameColumn;
           delete nextData.frameRow;
-          // Reading order belongs to the old mode's tracks as well.
-          delete nextData.trackKey;
         }
         if (planned) {
           nextData.frameColumn = planned.column;
@@ -293,15 +290,12 @@ const setFrameLayout: CommandDefinition<Cmd> = {
         if (
           nextData.frameColumn === dataRec.frameColumn &&
           nextData.frameRow === dataRec.frameRow &&
-          nextData.trackKey === dataRec.trackKey &&
           !('frameSlot' in dataRec)
         ) {
           return n;
         }
         touchedChildIds.add(n.id);
-        // A cell that names another track drops the child's place in the
-        // old one; the relayout keys it for where it reads now.
-        return { ...n, data: dropTrackKeyOnTrackChange(dataRec, nextData) };
+        return { ...n, data: nextData };
       }
       const dataRec = (n.data ?? {}) as Record<string, unknown>;
       const nextData: Record<string, unknown> = {

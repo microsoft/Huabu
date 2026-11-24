@@ -17,7 +17,7 @@ import {
   applyColumnLayout,
   applyGridLayout,
   applyRowLayout,
-  dropTrackKeyOnTrackChange,
+  settleTrackKeys,
   readFrameGridConfig,
   readFrameGridRow,
   readFrameTrack,
@@ -83,17 +83,11 @@ export function applyPendingMutations(
     for (const p of frameDataPatches) frameDataById.set(p.nodeId, p.patch);
   }
 
-  return nodes.map((n) => {
+  const patched = nodes.map((n) => {
     let next = n;
     const cellPatch = cellById.get(n.id);
     if (cellPatch) {
-      // As `MERGE_NODE_DATA` will: a child sent to another track leaves its
-      // place in the old one, so the layout pass reads it by coordinate.
-      const data = (next.data ?? {}) as Record<string, unknown>;
-      next = {
-        ...next,
-        data: dropTrackKeyOnTrackChange(data, { ...data, ...cellPatch }),
-      };
+      next = { ...next, data: { ...(next.data ?? {}), ...cellPatch } };
     }
     const framePatch = frameDataById.get(n.id);
     if (framePatch) {
@@ -104,6 +98,10 @@ export function applyPendingMutations(
     }
     return next;
   });
+  // As the engine will after the commands these patches become: a child
+  // sent to another track leaves its place in the old one, so the layout
+  // pass reads it by coordinate.
+  return settleTrackKeys(patched, nodes);
 }
 
 /**

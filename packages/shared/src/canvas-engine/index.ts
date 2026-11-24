@@ -2,11 +2,10 @@
 // Licensed under the MIT license.
 
 export {
-  dropTrackKeyOnTrackChange,
   readTrackKey,
+  settleTrackKeys,
   trackKeyChanges,
   withDistinctTrackKeys,
-  withoutTrackKey,
 } from './autoLayout/layoutOrder.js';
 export {
   withMasonryLayoutOrder,

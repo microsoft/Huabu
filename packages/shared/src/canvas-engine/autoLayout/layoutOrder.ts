@@ -24,31 +24,71 @@ export function readTrackKey(node: Keyed): string | undefined {
   return isOrderKey(key) ? key : undefined;
 }
 
-/** `node` without the track key it held in the Frame it is leaving. */
-export function withoutTrackKey<T extends Keyed>(node: T): T {
-  if (!node.data || !('trackKey' in node.data)) return node;
-  const { trackKey: _trackKey, ...data } = node.data;
-  return { ...node, data };
-}
+type Placed = Keyed & { type?: string; parentId?: string };
+
+const parentOf = (node: Placed): string | null => node.parentId ?? null;
 
 /**
- * `next` data for a node whose data was `prev`: when the write moves the
- * node to another track and does not itself say where it reads there, the
- * key it held in the old track is dropped. The node is then placed by its
- * coordinate and keyed for that place by the relayout.
+ * `nodes` without the track keys a write left meaningless.
+ *
+ * A track key ranks a child among the children of one Frame, in one track,
+ * under one layout mode. `previous` is the state before the write. A child
+ * that the write moved to another parent or another track, or whose Frame
+ * it switched to another mode, and whose key is still the one it had, holds
+ * a key issued for another place: it is dropped, and the child is read by
+ * where it was put until the relayout keys it for that place. So does a
+ * node the write created into a Frame that already existed (a paste): its
+ * key was issued somewhere else.
+ *
+ * A key is kept when the write itself placed the child: it changed the key,
+ * created the child together with its Frame (a copied Frame and its
+ * children), or names the child in `placed`.
+ *
+ * This is the one place the rule lives. The executor applies it after each
+ * command, so a later command of the same batch reads a consistent order,
+ * and a command that moves nodes gets it without saying anything; a command
+ * that places a child says so (`CommandHandlerResult.placedTrackKeyIds`).
  */
-export function dropTrackKeyOnTrackChange(
-  prev: Record<string, unknown>,
-  next: Record<string, unknown>,
-): Record<string, unknown> {
-  if (
-    next.trackKey === undefined ||
-    next.trackKey !== prev.trackKey ||
-    (next.frameColumn === prev.frameColumn && next.frameRow === prev.frameRow)
-  )
-    return next;
-  const { trackKey: _trackKey, ...rest } = next;
-  return rest;
+export function settleTrackKeys<T extends Placed>(
+  nodes: readonly T[],
+  previous: readonly Placed[],
+  placed?: ReadonlySet<string>,
+): T[] {
+  if (nodes === previous) return nodes as T[];
+  if (!nodes.some((node) => node.data?.trackKey !== undefined))
+    return nodes as T[];
+  const before = new Map(previous.map((node) => [node.id, node]));
+  const now = new Map(nodes.map((node) => [node.id, node]));
+  const modeOf = (
+    byId: ReadonlyMap<string, Placed>,
+    id: string | null,
+  ): unknown => (id === null ? undefined : byId.get(id)?.data?.layoutMode);
+  const stale = (node: T): boolean => {
+    const key = node.data?.trackKey;
+    if (key === undefined || placed?.has(node.id)) return false;
+    const parentId = parentOf(node);
+    const was = before.get(node.id);
+    // Created by this write: with its Frame, or into one that was there.
+    if (!was) return parentId === null || before.has(parentId);
+    if (was.data?.trackKey !== key) return false;
+    return (
+      parentOf(was) !== parentId ||
+      was.data?.frameColumn !== node.data?.frameColumn ||
+      was.data?.frameRow !== node.data?.frameRow ||
+      modeOf(before, parentId) !== modeOf(now, parentId)
+    );
+  };
+  let changed = false;
+  const settled = nodes.map((node) => {
+    if (!stale(node)) return node;
+    changed = true;
+    const { trackKey: _trackKey, ...data } = node.data as Record<
+      string,
+      unknown
+    >;
+    return { ...node, data };
+  });
+  return changed ? settled : (nodes as T[]);
 }
 
 /**
