@@ -64,8 +64,18 @@ interface ThreadLike {
 }
 
 const SENTENCE_LIMIT = 140;
-/** As many nodes as a notice may name; the desktop shell refuses more. */
+/**
+ * How much a notice may carry. The desktop shell refuses a notice past its
+ * own bounds, which are wider than these; a notification shows less anyway.
+ */
 const NOTICE_NODE_LIMIT = 64;
+const NOTICE_KEY_LIMIT = 64;
+const NOTICE_TITLE_LIMIT = 200;
+const NOTICE_BODY_LIMIT = 300;
+
+function clip(text: string, limit: number): string {
+  return text.length > limit ? `${text.slice(0, limit - 1)}…` : text;
+}
 
 /**
  * The opening sentence of a reply, as plain text. Markdown markers that
@@ -272,8 +282,11 @@ export function composeNotice(
   if (told.length === 1)
     return {
       keys: [only.key],
-      title: only.label ? `${only.label} · ${spaceTitle}` : spaceTitle,
-      body:
+      title: clip(
+        only.label ? `${only.label} · ${spaceTitle}` : spaceTitle,
+        NOTICE_TITLE_LIMIT,
+      ),
+      body: clip(
         only.kind === 'approval'
           ? wording.approval
           : only.kind === 'error'
@@ -281,11 +294,14 @@ export function composeNotice(
               ? `${wording.error}: ${only.text}`
               : wording.error
             : only.text || wording.done,
+        NOTICE_BODY_LIMIT,
+      ),
       nodeIds,
     };
   return {
-    keys: told.map((event) => event.key),
-    title: spaceTitle,
+    // The count says how many there were; the keys name as many as fit.
+    keys: told.slice(0, NOTICE_KEY_LIMIT).map((event) => event.key),
+    title: clip(spaceTitle, NOTICE_TITLE_LIMIT),
     body: wording.several(told.length),
     nodeIds,
   };

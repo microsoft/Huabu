@@ -246,6 +246,34 @@ describe('composeNotice', () => {
     });
   });
 
+  it('keeps a notice within what a notification can carry', () => {
+    const long = composeNotice(
+      [
+        event({
+          kind: 'error',
+          label: 'L'.repeat(900),
+          text: 'E'.repeat(5000),
+        }),
+      ],
+      'Space',
+      wording,
+      on,
+    );
+    expect(long?.title.length).toBeLessThanOrEqual(200);
+    expect(long?.body.length).toBeLessThanOrEqual(300);
+    const many = composeNotice(
+      Array.from({ length: 80 }, (_, index) =>
+        event({ key: `t${index}`, nodeId: `n${index}` }),
+      ),
+      'Space',
+      wording,
+      on,
+    );
+    expect(many?.keys).toHaveLength(64);
+    expect(many?.nodeIds).toHaveLength(64);
+    expect(many?.body).toBe('80 conversations have news');
+  });
+
   it('leaves out what the preferences silence', () => {
     const events = [event(), event({ key: 't2', kind: 'error', nodeId: 'n2' })];
     expect(

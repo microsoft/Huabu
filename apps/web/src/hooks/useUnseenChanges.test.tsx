@@ -128,6 +128,32 @@ describe('useTrackUnseenChanges', () => {
     log.mockRestore();
   });
 
+  it('asks again for every load that failed during one wait', async () => {
+    mocks.query
+      .mockReset()
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValue({});
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const question = (id: string, threadId: string) =>
+      node(id, false, { type: 'question', threadId });
+    useCanvasStore.setState({ nodes: [question('q1', 't8')] });
+    await act(async () => root.render(<Tracker />));
+    await settle();
+    // A second conversation appears, and its load fails too, while the
+    // first failure's wait is still running.
+    await act(async () =>
+      useCanvasStore.setState({
+        nodes: [question('q1', 't8'), question('q2', 't9')],
+      }),
+    );
+    await settle();
+    expect(mocks.query).toHaveBeenCalledTimes(2);
+    await act(async () => vi.advanceTimersByTime(2_000));
+    expect(mocks.query).toHaveBeenLastCalledWith('c1', ['t8', 't9']);
+    log.mockRestore();
+  });
+
   it('asks once for the changes of the Space’s conversations', async () => {
     useCanvasStore.setState({
       nodes: [node('q1', false, { type: 'question', threadId: 't9' })],

@@ -133,6 +133,9 @@ export function useTurnNotices(canvasId: string | undefined): void {
       clearTimeout(tellTimer);
       document.removeEventListener('visibilitychange', withdraw);
       window.removeEventListener('focus', withdraw);
+      // Nothing after this would withdraw or replace them: the page has
+      // left this Space, or is going away.
+      for (const notification of [...shown.keys()]) notification.close();
       unsubscribeCanvas();
       unsubscribeChat();
     };

@@ -115,6 +115,14 @@ describe('useTurnNotices in a browser', () => {
     expect(FakeNotification.all[0]?.closed).toBe(true);
   });
 
+  it('closes what it showed when the page leaves the Space', async () => {
+    await finish('t1');
+    await act(async () => root.unmount());
+    expect(FakeNotification.all[0]?.closed).toBe(true);
+    // The shared teardown unmounts again; give it something to unmount.
+    root = createRoot(document.createElement('div'));
+  });
+
   it('replaces a conversation’s notification, and shows none to a page in front', async () => {
     await finish('t1');
     await finish('t1');

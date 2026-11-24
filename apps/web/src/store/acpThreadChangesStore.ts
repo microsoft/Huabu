@@ -168,6 +168,13 @@ export const useAcpThreadChangesStore = create<AcpThreadChangesState>(
       const conflicted = Array.from(
         new Set(skippedNodeIds.filter((id) => recordNodeIds.has(id))),
       );
+      // What a broadcast says is newer than any read still in flight for
+      // this thread; that read's answer must not replace it.
+      const key = `${useCanvasStore.getState().canvasId}\0${threadId}`;
+      loadGenerationByThread.set(
+        key,
+        (loadGenerationByThread.get(key) ?? 0) + 1,
+      );
       set((s) => ({
         byThread: { ...s.byThread, [threadId]: records },
         conflictedByThread: {

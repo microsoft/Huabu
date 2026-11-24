@@ -75,6 +75,8 @@ export function useTrackUnseenChanges(canvasId: string | undefined): void {
     if (!canvasId) return;
     let live = true;
     const asked = new Set<string>();
+    /** Asked for, and not read: to be asked for again. */
+    const unread = new Set<string>();
     let failures = 0;
     let retry: ReturnType<typeof setTimeout> | undefined;
     const load = () => {
@@ -102,10 +104,14 @@ export function useTrackUnseenChanges(canvasId: string | undefined): void {
           // after each failure in a row, so a server that is down is not
           // asked on every change to the canvas.
           failures += 1;
+          // Every load that failed while the wait runs is asked again at
+          // its end, not only the one that started it.
+          for (const threadId of threadIds) unread.add(threadId);
           retry ??= setTimeout(
             () => {
               retry = undefined;
-              for (const threadId of threadIds) asked.delete(threadId);
+              for (const threadId of unread) asked.delete(threadId);
+              unread.clear();
               load();
             },
             Math.min(RETRY_MS * 2 ** (failures - 1), RETRY_MAX_MS),
