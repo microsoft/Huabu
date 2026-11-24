@@ -112,10 +112,11 @@ describe('SET_FRAME_LAYOUT cells', () => {
         return nodes;
       };
 
-      it('seeds legacy coordinate ties before a layer reorder and survives relayout and replay', () => {
+      it('keeps the reading order of coordinate ties through a layer reorder, relayout and replay', () => {
         const unkeyed = initial();
         unkeyed[2].position = { ...unkeyed[1].position };
-        // A stored Space is read with its paint keys already in place.
+        // A stored Space is read with its paint and track keys in place, so
+        // the children that tie on their coordinate already read by key.
         const nodes = seedNodeOrder(unkeyed);
         const output = execute(nodes, [
           {

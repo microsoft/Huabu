@@ -26,11 +26,7 @@ export type {
 } from './fit.js';
 export { applyContainerFit, computeContainerFit } from './fit.js';
 
-export {
-  assignNodeZIndices,
-  materializeForestOrder,
-  edgeZIndex,
-} from './zorder.js';
+export { assignNodeZIndices, edgeZIndex } from './zorder.js';
 export {
   orderByPaintKeys,
   readPaintKey,

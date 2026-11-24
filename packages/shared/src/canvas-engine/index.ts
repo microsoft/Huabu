@@ -271,7 +271,6 @@ export {
   computeContainerFit,
   applyContainerFit,
   assignNodeZIndices,
-  materializeForestOrder,
   edgeZIndex,
   orderByPaintKeys,
   readPaintKey,

@@ -6,7 +6,6 @@ import { describe, it, expect } from 'vitest';
 import {
   applyDeltas,
   invertDeltas,
-  materializeForestOrder,
   diffCanvasState,
   executeCanvasCommands,
   readPaintKey,
@@ -95,14 +94,11 @@ describe('diffCanvasState — runtime UI fields', () => {
 });
 
 describe('diffCanvasState — paint order', () => {
-  /** Apply rows, then lay the array out as the rendered forest. */
+  /** Apply rows; the result is already in the rendered forest's order. */
   const replay = (
     state: { nodes: CanvasNode[]; edges: CanvasEdge[] },
     deltas: Delta[],
-  ) => {
-    const applied = applyDeltas(state, deltas);
-    return { ...applied, nodes: materializeForestOrder(applied.nodes) };
-  };
+  ) => applyDeltas(state, deltas);
   const ids = (nodes: readonly CanvasNode[]) => nodes.map((node) => node.id);
   const summary = (deltas: Delta[]) =>
     deltas
@@ -288,7 +284,7 @@ describe('diffCanvasState — paint order', () => {
     expect(summary(deltas)).toEqual(['REPLACE_NODE f']);
     expect(replay(before, deltas)).toEqual(after);
     expect(replay(after, invertDeltas(deltas))).toEqual({
-      nodes: materializeForestOrder(before.nodes),
+      nodes: before.nodes,
       edges: [],
     });
   });

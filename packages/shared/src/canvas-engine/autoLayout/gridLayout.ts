@@ -2446,8 +2446,7 @@ function masonryOrderRanks(
  * Give the children of a Column / Row Frame their track keys in the order
  * they read in now, without changing geometry. `movedIds` are read by their
  * coordinate instead of their key: this is how a moved child takes its new
- * place. Children that tie on their coordinate read in array order, so this
- * is also called before a paint reorder changes that order.
+ * place.
  */
 export function withMasonryLayoutOrder(
   nodes: Node[],

@@ -2,10 +2,8 @@
 // Licensed under the MIT license.
 
 import { noop, type CommandDefinition } from './types.js';
-import { withMasonryLayoutOrder } from '../autoLayout/gridLayout.js';
 import { settlePaintOrder } from '../container/paintOrder.js';
 import { getTopLevelIds, indexById } from '../container/tree.js';
-import { materializeForestOrder } from '../container/zorder.js';
 import { admitSiblingReorder, sameSiblingOrder } from '../siblingOrder.js';
 
 import type { CanvasCommand } from '../../index.js';
@@ -34,22 +32,13 @@ const reorderNodes: CommandDefinition<Cmd> = {
     const admission = admitSiblingReorder(state.nodes, roots, cmd.to);
     if (!admission.valid) return noop(state, admission.reason);
     if (sameSiblingOrder(admission.before, admission.after)) return noop(state);
-    const seeded = admission.parentId
-      ? withMasonryLayoutOrder(
-          state.nodes,
-          admission.parentId,
-          undefined,
-          state.edges,
-        )
-      : state.nodes;
-    const seededById = indexById(seeded);
     const moving = new Set(roots);
     let index = 0;
     // Put the moved nodes where they go and take their keys away: settling
     // then keys exactly them, between the siblings they now stand between.
-    const reordered = seeded.map((node) => {
+    const reordered = state.nodes.map((node) => {
       if ((node.parentId ?? null) !== admission.parentId) return node;
-      const sibling = seededById.get(admission.after[index++]);
+      const sibling = byId.get(admission.after[index++]);
       if (!sibling) throw new Error('Admitted sibling disappeared');
       if (!moving.has(sibling.id) || !('paintKey' in sibling.data))
         return sibling;
@@ -58,9 +47,8 @@ const reorderNodes: CommandDefinition<Cmd> = {
     });
     return {
       applied: true,
-      nodes: materializeForestOrder(settlePaintOrder(reordered)),
+      nodes: settlePaintOrder(reordered),
       edges: state.edges,
-      mutatedNodes: seeded.filter((node, i) => node !== state.nodes[i]),
     };
   },
 };

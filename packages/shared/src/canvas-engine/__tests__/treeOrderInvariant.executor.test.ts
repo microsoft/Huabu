@@ -22,7 +22,6 @@ import {
   applyDeltas,
   diffCanvasState,
   invertDeltas,
-  materializeForestOrder,
   readPaintKey,
   seedNodeOrder,
   withMasonryLayoutOrder,
@@ -54,19 +53,16 @@ function run(commands: unknown[], startNodes: CanvasNode[]) {
 }
 
 /**
- * Replay deltas onto a state: apply the rows (which orders siblings by
- * their paint keys), then lay the array out as the rendered forest, the
- * form the executor's own reorder output has.
+ * Replay deltas onto a state. Applying the rows orders siblings by their
+ * paint keys and lays the array out as the rendered forest, the form the
+ * executor's own output has.
  */
 function replay(
   state: { nodes: CanvasNode[]; edges: CanvasEdge[] },
   deltas: Parameters<typeof applyDeltas>[1],
 ) {
-  const applied = applyDeltas(state, deltas);
-  return {
-    nodes: materializeForestOrder(applied.nodes),
-    edges: applied.edges,
-  };
+  const { nodes, edges } = applyDeltas(state, deltas);
+  return { nodes, edges };
 }
 
 function indexOfId(nodes: CanvasNode[], id: string): number {
