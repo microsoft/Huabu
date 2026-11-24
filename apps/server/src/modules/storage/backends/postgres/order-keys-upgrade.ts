@@ -10,14 +10,14 @@
  * `state_json` is replaced: `version`, `updated_at`, the change log, the
  * stamps and the node rows stay as they are, because the read already
  * returned these keys and nothing changed for any reader. Which keys those
- * are is not this backend's to know (`sql/space-state-rewrites.ts`).
+ * are is not this backend's to know (`ports/space-state-rewrites.ts`).
  */
 
-import { parseJson, stringifyJson } from '../sql/codecs.js';
 import {
   SPACE_ORDER_KEYS_REWRITE,
   spaceStateRewrite,
-} from '../sql/space-state-rewrites.js';
+} from '../../ports/space-state-rewrites.js';
+import { parseJson, stringifyJson } from '../sql/codecs.js';
 
 import type { PoolClient } from 'pg';
 

@@ -26,7 +26,7 @@ import { stateWithOrderKeys } from '../../../canvas/stored-node-order.js';
 import {
   provideSpaceStateRewrite,
   SPACE_ORDER_KEYS_REWRITE,
-} from '../sql/space-state-rewrites.js';
+} from '../../ports/space-state-rewrites.js';
 
 import type {
   CanvasFile,

@@ -50,7 +50,7 @@ export function storedNodesWithOrderKeys(
 /**
  * The same as a rewrite of a stored state: the state with its order keys,
  * or `null` when it already has them. The SQL backends run it in the
- * upgrade to schema version 5 (`storage/backends/sql/space-state-rewrites.ts`).
+ * upgrade to schema version 5 (`storage/ports/space-state-rewrites.ts`).
  */
 export function stateWithOrderKeys(state: unknown): unknown | null {
   const stored = state as CanvasFile['state'];

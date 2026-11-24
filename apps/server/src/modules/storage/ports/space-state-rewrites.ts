@@ -4,10 +4,11 @@
 /**
  * Rewrites of stored Space state that a schema version applies once.
  *
- * A SQL backend knows how to read and replace every Space's state inside an
- * upgrade transaction. It does not know what a Space's state means: the rule
- * that computes the new state belongs to the layer that composes storage
- * (`storage.ts`), which provides it here by name. So the backends, and the
+ * A port, in the other direction: something storage is given. A SQL backend
+ * knows how to read and replace every Space's state inside an upgrade
+ * transaction. It does not know what a Space's state means: the rule
+ * that computes the new state belongs to the module that owns the meaning
+ * (`canvas/order-keys-upgrade-rule.ts`), which provides it here by name. So the backends, and the
  * code that only reads a database without upgrading it, do not depend on
  * the canvas engine.
  *

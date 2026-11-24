@@ -25,6 +25,9 @@ import {
   resolveDeploymentConfig,
 } from './modules/security/deployment-config.js';
 import { parseStorageProfile } from './modules/storage/profile.js';
+// For its effect: setup opens the database's server records, which upgrades
+// the database, and the version-5 data step needs the rule.
+import './modules/canvas/order-keys-upgrade-rule.js';
 import { closeServerRecords } from './modules/storage/server-records.js';
 import {
   deploymentUsernameSchema,

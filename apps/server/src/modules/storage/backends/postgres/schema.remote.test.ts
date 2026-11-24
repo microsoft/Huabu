@@ -10,6 +10,11 @@ import {
   openPostgresTestDatabase,
   openPostgresTestStore,
 } from './test-support.js';
+import { stateWithOrderKeys } from '../../../canvas/stored-node-order.js';
+import {
+  provideSpaceStateRewrite,
+  SPACE_ORDER_KEYS_REWRITE,
+} from '../../ports/space-state-rewrites.js';
 /**
  * Everything the migrations define in the current schema: columns in order
  * with type, nullability and default; constraints; indexes.
@@ -48,6 +53,10 @@ const cleanup: Array<() => Promise<unknown>> = [];
 afterEach(async () => {
   for (const close of cleanup.splice(0).reverse()) await close();
 });
+// These tests upgrade databases that hold Spaces without composing storage,
+// which is what provides the rule the version-5 data step runs.
+provideSpaceStateRewrite(SPACE_ORDER_KEYS_REWRITE, stateWithOrderKeys);
+
 it('runs on PostgreSQL 18 and serializes simultaneous fresh migrations', async () => {
   const h = await openPostgresTestDatabase();
   cleanup.push(h.cleanup);

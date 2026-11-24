@@ -356,6 +356,23 @@ describe('stored order keys on a Disk Workspace folder', () => {
     expect(recordFiles(mounted.workspacePath)).toEqual(once);
   });
 
+  it('leaves a folder the Server already has open to its reads and saves', async () => {
+    mounted = await mountTestWorkspace(PROFILES[0], 'huabu-order-keys-open-');
+    await writeLegacySpace(mounted);
+    const before = recordFiles(mounted.workspacePath);
+    const readBefore = await mounted.storage.space('space-legacy').read();
+
+    // Preparing a folder whose Spaces can be saved meanwhile: no record is
+    // rewritten, so no save can be overwritten with an older state.
+    prepareWorkspaceOnDisk(mounted.workspacePath, { inUse: true });
+
+    expect(recordFiles(mounted.workspacePath)).toEqual(before);
+    // The read still returns the keys.
+    expect(await mounted.storage.space('space-legacy').read()).toEqual(
+      readBefore,
+    );
+  });
+
   it('passes over a folder whose space.json is not a Space record', async () => {
     mounted = await mountTestWorkspace(PROFILES[0], 'huabu-order-keys-bad-');
     await writeLegacySpace(mounted);

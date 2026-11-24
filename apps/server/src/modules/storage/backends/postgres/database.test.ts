@@ -11,7 +11,7 @@ import { stateWithOrderKeys } from '../../../canvas/stored-node-order.js';
 import {
   provideSpaceStateRewrite,
   SPACE_ORDER_KEYS_REWRITE,
-} from '../sql/space-state-rewrites.js';
+} from '../../ports/space-state-rewrites.js';
 const pg = vi.hoisted(() => {
   const query = vi.fn();
   const release = vi.fn();
