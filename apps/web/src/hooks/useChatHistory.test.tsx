@@ -1099,6 +1099,36 @@ describe('bounded history refill and completion', () => {
     }
   });
 
+  it('does not restart an attachment that is already settling an unresolved send', async () => {
+    seedPages();
+    await renderHarness();
+    const unresolved = vi
+      .spyOn(turnController, 'hasUnreconciledAgentTurn')
+      .mockReturnValue(true);
+    let finish!: (value: AgentStreamAttachResult) => void;
+    apiMocks.reconnectStream.mockImplementation(
+      async () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    try {
+      await act(async () => window.dispatchEvent(new Event('online')));
+      await vi.waitFor(() =>
+        expect(apiMocks.reconnectStream).toHaveBeenCalledOnce(),
+      );
+      // Still in flight: neither the network event nor Retry may restart it.
+      await act(async () => window.dispatchEvent(new Event('online')));
+      await act(async () => latestHistory.retryHistory());
+      await act(async () => window.dispatchEvent(new Event('online')));
+      expect(apiMocks.reconnectStream).toHaveBeenCalledOnce();
+    } finally {
+      unresolved.mockReturnValue(false);
+      await act(async () => finish?.({ status: 'aborted' }));
+      unresolved.mockRestore();
+    }
+  });
+
   it('reloads a failed history load when the network returns', async () => {
     useChatStore.setState({ threadsById: {} });
     useChatStore.getState().setDraft(THREAD_ID, 'Draft');

@@ -214,6 +214,19 @@ function applyInitialHistoryPage(response: AgentHistoryPageResponse): void {
   state.setHistoryError(response.threadId, null);
 }
 
+/**
+ * The trailing messages history does not know about, when they end in a status
+ * marked local-only: a submission the server confirmed it never accepted.
+ */
+function localOnlyTail(messages: ChatMessage[]): ChatMessage[] {
+  const last = messages.at(-1);
+  if (last?.role !== 'status' || !last.localOnly) return [];
+  let start = messages.length;
+  while (start > 0 && messages[start - 1]?.historyTurnId === undefined)
+    start -= 1;
+  return messages.slice(start);
+}
+
 interface LatestHistoryWindow {
   response: AgentHistoryPageResponse;
   hadCachedHistory: boolean;
@@ -517,7 +530,9 @@ export function useChatHistory(
       // refreshes history, so start one instead of refusing.
       setPageFailure(undefined);
       setRefreshError(undefined);
-      setAttachAttempt((attempt) => attempt + 1);
+      // One already in flight is doing this; restarting it would cancel it.
+      if (!hasAgentStreamClaim(ownerCanvasId, threadId))
+        setAttachAttempt((attempt) => attempt + 1);
       return;
     }
     resetOnHydration.current = true;
@@ -1088,7 +1103,20 @@ export function useChatHistory(
           HISTORY_PAGE_TURNS,
         );
         if (!cancelled) {
+          // Reconciliation can put a rejected submission back as local
+          // messages; the server has no turn for them, so the refresh would
+          // drop them again.
+          const kept = localOnlyTail(
+            selectThreadMessages(useChatStore.getState(), ownerThreadId),
+          );
           applyLatestHistoryWindow(finalHistory, ownerCanvasId);
+          if (kept.length)
+            useChatStore
+              .getState()
+              .setMessages(ownerThreadId, [
+                ...selectThreadMessages(useChatStore.getState(), ownerThreadId),
+                ...kept,
+              ]);
           if (outcome) settleTurnInkInterpretation(streamContext, outcome);
           setIsLoading(ownerThreadId, false);
         }
@@ -1171,8 +1199,14 @@ export function useChatHistory(
     if (!threadId || !ownerCanvasId || ownerUnavailable) return;
     const settle = () => {
       // Offline the attempt can only fail and unload history; wait for the
-      // network instead.
-      if (navigator.onLine && hasUnreconciledAgentTurn(ownerCanvasId, threadId))
+      // network instead. A claim in flight is a send that will report here
+      // when it ends, or an attachment already doing this work; restarting
+      // that one would release it and land back here without end.
+      if (
+        navigator.onLine &&
+        !hasAgentStreamClaim(ownerCanvasId, threadId) &&
+        hasUnreconciledAgentTurn(ownerCanvasId, threadId)
+      )
         setAttachAttempt((attempt) => attempt + 1);
     };
     const recover = () => {
@@ -1182,10 +1216,14 @@ export function useChatHistory(
         state.setHistoryError(threadId, null);
       else settle();
     };
+    // Only a send leaves a request unresolved. An attachment's own release
+    // must not start the next one.
     const unsubscribe = subscribeAgentStreamRelease(
       ownerCanvasId,
       threadId,
-      settle,
+      (owner) => {
+        if (owner === 'post') settle();
+      },
     );
     window.addEventListener('online', recover);
     return () => {

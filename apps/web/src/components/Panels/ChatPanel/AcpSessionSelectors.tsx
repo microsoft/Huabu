@@ -93,12 +93,13 @@ export const AcpSessionSelectors = ({
   // the panel's own alert carries the message when no options are cached.
   const retry =
     error && !loading && onRetry ? (
-      <Tooltip
-        content={`${t('chat.retryAgentOptions')}\n${error.message}`}
-        contentClassName="whitespace-pre-line"
-        wrapperClassName="inline-flex shrink-0"
-      >
-        <span role="alert" className="inline-flex">
+      <span role="alert" className="inline-flex shrink-0">
+        {/* Announced with the alert; sighted users get it from the tooltip. */}
+        <span className="sr-only">{error.message}</span>
+        <Tooltip
+          content={`${t('chat.retryAgentOptions')}\n${error.message}`}
+          contentClassName="whitespace-pre-line"
+        >
           <Button
             variant="ghost"
             tone="danger"
@@ -113,8 +114,8 @@ export const AcpSessionSelectors = ({
           >
             <RefreshCcw aria-hidden="true" />
           </Button>
-        </span>
-      </Tooltip>
+        </Tooltip>
+      </span>
     ) : null;
 
   const dismissFullAccess = () => {

@@ -1279,6 +1279,76 @@ describe('queued composer turns', () => {
     }
   });
 
+  it('keeps a rejected send as a local message when a newer draft holds the composer', async () => {
+    act(() => {
+      const chat = useChatStore.getState();
+      chat.setHistoryLoaded(session.threadId, true);
+      chat.setMessages(session.threadId, [
+        { id: 'old:0', historyTurnId: 'old', role: 'user', content: 'Earlier' },
+        { id: 'old:1', historyTurnId: 'old', role: 'assistant', segments: [] },
+      ]);
+    });
+    function MountedChat() {
+      hook = useAgentStream(session);
+      useChatHistory(session, useChatStore.getState().setThreadLoading);
+      return null;
+    }
+    await act(async () => root?.render(createElement(MountedChat)));
+    const failed = deferred();
+    mocks.stream.mockImplementationOnce(
+      async (_content, _thread, _mode, callbacks: AgentStreamCallbacks) => {
+        await failed.promise;
+        callbacks.onError(new Error('Connection lost before acceptance'));
+      },
+    );
+    // The server never received the request.
+    mocks.stop.mockImplementation(async (_thread, _canvas, requestId) => ({
+      stopped: false,
+      acceptance: null,
+      request: { id: requestId, accepted: false },
+    }));
+    mocks.history.mockResolvedValue({
+      threadId: session.threadId,
+      turns: [
+        {
+          id: 'old',
+          messages: [
+            { role: 'user', content: 'Earlier' },
+            { role: 'assistant', parts: [] },
+          ],
+        },
+      ],
+      hasMore: false,
+    });
+    let sending!: Promise<void>;
+    await act(async () => {
+      useChatStore.getState().setDraft(session.threadId, 'Sent while offline');
+      sending = hook.startStream('Sent while offline', 'operate');
+      await Promise.resolve();
+      // A newer draft is typed while the first send is still in flight.
+      useChatStore.getState().setDraft(session.threadId, 'Newer draft');
+      failed.resolve();
+      await sending;
+    });
+    await act(async () => {
+      await vi.waitFor(() => expect(mocks.stop).toHaveBeenCalled());
+      await vi.waitFor(() =>
+        expect(
+          useChatStore.getState().threadsById[session.threadId].messages,
+        ).toMatchObject([
+          { id: 'old:0' },
+          { id: 'old:1' },
+          { role: 'user', content: 'Sent while offline' },
+          { role: 'status', status: 'interrupted', localOnly: true },
+        ]),
+      );
+    });
+    expect(useChatStore.getState().threadsById[session.threadId].draft).toBe(
+      'Newer draft',
+    );
+    expect(mocks.stream).toHaveBeenCalledOnce();
+  });
+
   it('keeps an uncertain item blocked when Stop reconciliation fails', async () => {
     act(() => useChatStore.getState().setThreadLoading(session.threadId, true));
     await enqueue('Unknown');

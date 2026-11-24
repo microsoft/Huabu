@@ -185,8 +185,9 @@ export function useAgentStream(
             for (const attachment of prepared.attachments ?? [])
               current.addPendingAttachment(session.threadId, attachment);
           }
-          if (!restored && !started) {
-            const messages = selectThreadMessages(current, session.threadId);
+          if (restored) return;
+          const messages = selectThreadMessages(current, session.threadId);
+          if (!started) {
             const lastMessage = messages.at(-1);
             const hasRejection =
               lastMessage?.role === 'status' &&
@@ -203,7 +204,29 @@ export function useAgentStream(
                     status: 'interrupted',
                   },
             ]);
+            return;
           }
+          // A started send normally still shows its own message. A history
+          // refresh that ran before the server rejected it has dropped that
+          // message, and the composer now holds something newer, so put the
+          // submission back as a local message the user can resend.
+          const shown = messages.some(
+            (message) =>
+              message.role === 'user' &&
+              !message.historyTurnId &&
+              message.content === prepared.content,
+          );
+          if (shown) return;
+          current.setMessages(session.threadId, [
+            ...messages,
+            createAgentTurnUserMessage(prepared),
+            {
+              id: createId('status'),
+              role: 'status',
+              status: 'interrupted',
+              localOnly: true,
+            },
+          ]);
         };
         chat.consumeDraft(session.threadId, draft, quotedComments);
         chat.setExcludeCanvasSelection(session.threadId, false);
