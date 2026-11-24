@@ -2,7 +2,6 @@
 // Licensed under the MIT license.
 
 import { noop, type CommandDefinition } from './types.js';
-import { settlePaintOrder } from '../container/paintOrder.js';
 import { getTopLevelIds, indexById } from '../container/tree.js';
 import { admitSiblingReorder, sameSiblingOrder } from '../siblingOrder.js';
 
@@ -34,8 +33,9 @@ const reorderNodes: CommandDefinition<Cmd> = {
     if (sameSiblingOrder(admission.before, admission.after)) return noop(state);
     const moving = new Set(roots);
     let index = 0;
-    // Put the moved nodes where they go and take their keys away: settling
-    // then keys exactly them, between the siblings they now stand between.
+    // Put the moved nodes where they go and take their keys away: the
+    // executor's settlement after this command then keys exactly them,
+    // between the siblings they now stand between.
     const reordered = state.nodes.map((node) => {
       if ((node.parentId ?? null) !== admission.parentId) return node;
       const sibling = byId.get(admission.after[index++]);
@@ -47,10 +47,7 @@ const reorderNodes: CommandDefinition<Cmd> = {
     });
     return {
       applied: true,
-      // Against the batch's starting state: a sibling an earlier command of
-      // the batch moved in here still carries the key it had elsewhere and
-      // is read by where it stands.
-      nodes: settlePaintOrder(reordered, state.batchPrestate),
+      nodes: reordered,
       edges: state.edges,
     };
   },

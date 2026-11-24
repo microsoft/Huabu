@@ -238,7 +238,8 @@ export function executeCanvasEdits(
     /** In command order: the fill request follows the last layout command. */
     const stagedFrames: Array<{ id: string; fill?: boolean }> = [];
     const stagedResized: string[] = [];
-    const stagedPlacedPaint: string[] = [];
+    // What earlier edits of the batch placed, and what this one does.
+    const editPlacedPaint = new Set(placedPaintKeyIds);
     let failedAt: number | undefined;
 
     for (const [commandIndex, cmd] of edit.commands.entries()) {
@@ -274,19 +275,26 @@ export function executeCanvasEdits(
       }
 
       // Advance the evolving state so the next command of the edit sees
-      // this command's changes. A track key the command left meaningless
-      // goes first: the next command reads the children's order.
-      editNodes = settleTrackKeys(
-        result.nodes,
-        editNodes,
-        result.placedTrackKeyIds
-          ? new Set(result.placedTrackKeyIds)
-          : undefined,
-      );
+      // this command's changes, with both kinds of order settled: the next
+      // command reads them. A track key the command left meaningless is
+      // dropped. Paint keys are settled against the batch's starting state:
+      // a node created, or moved to another parent with the key it had
+      // there, is keyed for where it stands, a key a command named is kept,
+      // and the array is put in key order.
+      for (const id of result.placedPaintKeyIds ?? []) editPlacedPaint.add(id);
+      editNodes = settlePaintOrder(
+        settleTrackKeys(
+          result.nodes,
+          editNodes,
+          result.placedTrackKeyIds
+            ? new Set(result.placedTrackKeyIds)
+            : undefined,
+        ) as NestableNode[],
+        state.nodes,
+        editPlacedPaint,
+      ) as typeof editNodes;
       editEdges = result.edges;
 
-      if (result.placedPaintKeyIds)
-        stagedPlacedPaint.push(...result.placedPaintKeyIds);
       if (result.mutatedNodes) staged.mutatedNodes.push(...result.mutatedNodes);
       if (result.deletedNodeIds)
         staged.deletedNodeIds.push(...result.deletedNodeIds);
@@ -335,7 +343,7 @@ export function executeCanvasEdits(
     pendingEffects.contentEditedNodeIds.push(...staged.contentEditedNodeIds);
     pendingEffects.deferredFitFrameIds.push(...staged.deferredFitFrameIds);
     for (const id of stagedResized) resizedFrameIds.add(id);
-    for (const id of stagedPlacedPaint) placedPaintKeyIds.add(id);
+    for (const id of editPlacedPaint) placedPaintKeyIds.add(id);
     for (const frame of stagedFrames) {
       allAffectedFrameIds.add(frame.id);
       if (frame.fill === true) fillFrameIds.add(frame.id);
@@ -441,17 +449,10 @@ export function executeCanvasEdits(
   // (no sort, no remap, no allocation).
   // ------------------------------------------------------------------
   if (anyApplied) {
-    // Paint order first: every node the batch created or moved to another
-    // parent gets its own key for the place it stands in, and the array
-    // follows the keys (see `container/paintOrder.ts`).
+    // Paint order was settled after each command (see the loop above and
+    // `container/paintOrder.ts`): the array is already in key order.
     currentNodes = hidePdfNotes(
-      normalizeTreeOrder(
-        settlePaintOrder(
-          currentNodes as NestableNode[],
-          state.nodes,
-          placedPaintKeyIds,
-        ),
-      ),
+      normalizeTreeOrder(currentNodes as NestableNode[]),
     );
   }
 
@@ -585,7 +586,6 @@ function runCommand(
     edges: context.edges,
     canvasId: context.canvasId,
     source: context.source,
-    batchPrestate: context.batchPrestate,
   });
 
   // Compare with the batch prestate so CREATE then link may initialize a new Note.

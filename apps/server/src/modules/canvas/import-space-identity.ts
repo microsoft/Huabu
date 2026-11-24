@@ -12,6 +12,10 @@ import {
   createId,
   interactiveViewAgentEventV1Schema,
 } from '@huabu/shared';
+import {
+  withDistinctPaintKeys,
+  withDistinctTrackKeys,
+} from '@huabu/shared/canvas-engine';
 
 import {
   rewriteImportContract,
@@ -28,6 +32,7 @@ import { parseMigratableV3Records } from '../workspace/migrations/legacy/acp-ses
 import { migrateAcpSessionsFile } from '../workspace/migrations/migrate-acp-sessions.js';
 
 import type { CanvasFile } from './persistence-types.js';
+import type { CanvasNode } from '@huabu/shared/canvas-engine';
 
 const NODE_REFERENCE =
   /^(parentId|noteNodeId|nodeIds?|frameIds?|edgeIds?|selectedNodeIds|originNodeIds|sourceNodeId|targetNodeId|anchorNodeId|rootNodeId|parentEntryNodeId|createdNodeIds|deletedNodeIds)$/;
@@ -651,6 +656,11 @@ export async function remapImportedSpace(
     }
   }
 
+  // Siblings that share an order key rank by id, and every id is about to
+  // change: the keys take over the order the ids decided.
+  const sourceNodes = withDistinctPaintKeys(
+    withDistinctTrackKeys(record.state.nodes as CanvasNode[]),
+  );
   return {
     ...record,
     canvasId,
@@ -661,7 +671,7 @@ export async function remapImportedSpace(
           rewrite(value, key),
         ]),
       ),
-      nodes: record.state.nodes.map((node) => rewrite(node, 'nodes')),
+      nodes: sourceNodes.map((node) => rewrite(node, 'nodes')),
       edges: record.state.edges.map((edge) => rewrite(edge, 'edges')),
     },
   };

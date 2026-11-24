@@ -11,9 +11,10 @@
  * what is stored, sent and merged is one key per node.
  *
  * Commands keep expressing order the way they always did, by where they put
- * a node in the array. {@link settlePaintOrder} turns that into keys at the
- * end of a batch: a node without a usable key gets one for the place it
- * stands in, and nobody else is rewritten.
+ * a node in the array. {@link settlePaintOrder} turns that into keys after
+ * each command: a node without a usable key gets one for the place it
+ * stands in, and nobody else is rewritten. So the next command of a batch,
+ * and whoever reads the result, sees the array in key order.
  */
 
 import { compareOrder, isOrderKey, keysInSequence } from '../orderKey.js';
@@ -106,6 +107,48 @@ export function orderByPaintKeys<T extends NestableNode>(
   nodes: readonly T[],
 ): T[] {
   return arrange(nodes, siblingsInPaintOrder(nodes, readPaintKey));
+}
+
+/**
+ * The same nodes with no two keyed siblings sharing a paint key.
+ *
+ * Two siblings can hold one key (two people placing a node in the same gap
+ * at once); they then order by id. Whoever is about to give the nodes new
+ * ids (importing a Space) calls this first, so the order the ids decided is
+ * carried by the keys instead. Only the later node of a tie is rekeyed.
+ */
+export function withDistinctPaintKeys<T extends NestableNode>(
+  nodes: readonly T[],
+): T[] {
+  const siblings = new Map<string | null, T[]>();
+  for (const node of nodes) {
+    if (readPaintKey(node) === undefined) continue;
+    const parentId = node.parentId ?? null;
+    siblings.set(parentId, [...(siblings.get(parentId) ?? []), node]);
+  }
+  const changes = new Map<string, string>();
+  for (const group of siblings.values()) {
+    const inOrder = [...group].sort((a, b) =>
+      compareOrder(
+        { id: a.id, key: readPaintKey(a) },
+        { id: b.id, key: readPaintKey(b) },
+      ),
+    );
+    const kept = inOrder.map((node, index) =>
+      index > 0 && readPaintKey(node) === readPaintKey(inOrder[index - 1])
+        ? undefined
+        : readPaintKey(node),
+    );
+    keysInSequence(kept).forEach((key, index) => {
+      if (readPaintKey(inOrder[index]) !== key)
+        changes.set(inOrder[index].id, key);
+    });
+  }
+  if (changes.size === 0) return nodes as T[];
+  return nodes.map((node) => {
+    const key = changes.get(node.id);
+    return key === undefined ? node : withPaintKey(node, key);
+  });
 }
 
 /**

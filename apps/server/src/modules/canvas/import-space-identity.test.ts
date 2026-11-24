@@ -93,6 +93,38 @@ it('remaps the Frame reading order and preserves imported forest order', async (
   ]).toEqual([frame.id, note.id, agent.id]);
 });
 
+it('keeps the order of siblings that share an order key, which their ids decided', async () => {
+  const original = record();
+  original.state.nodes = [
+    {
+      id: 'frame',
+      type: 'frame',
+      position: { x: 0, y: 0 },
+      data: { label: 'Frame', layoutMode: 'column', paintKey: 'a0' },
+    },
+    ...['first', 'second', 'third'].map((id) => ({
+      id,
+      type: 'note',
+      parentId: 'frame',
+      position: { x: 0, y: 0 },
+      data: { label: id, paintKey: 'a0', trackKey: 'a0', frameColumn: 0 },
+    })),
+  ];
+  original.state.edges = [];
+  const imported = await remapImportedSpace(directory, original, 'target');
+  const children = (imported.state.nodes as CanvasNode[]).slice(1);
+  expect(children.map((node) => node.data.label)).toEqual([
+    'first',
+    'second',
+    'third',
+  ]);
+  for (const field of ['paintKey', 'trackKey']) {
+    const keys = children.map((node) => String(node.data[field]));
+    expect(keys[0]).toBe('a0');
+    expect([...new Set(keys)].sort()).toEqual(keys);
+  }
+});
+
 it('preserves owned notes and property values when importing with new identities', async () => {
   const original = record();
   (original.state.nodes[0] as CanvasNode).type = 'pdf';

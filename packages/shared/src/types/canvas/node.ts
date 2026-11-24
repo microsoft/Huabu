@@ -392,8 +392,8 @@ export interface BaseNodeData {
    * (`canvas-engine/orderKey.ts`), so one node can be moved between two
    * others by writing this node alone. Equal keys order by node id.
    *
-   * Written by the engine only — at the end of a batch for a node that was
-   * created or changed parent, and by `REORDER_NODES`. The `nodes` array is
+   * Written by the engine only — after a command that created the node,
+   * changed its parent or reordered it. The `nodes` array is
    * kept in this order; it is derived from the keys, not the other way
    * round.
    */

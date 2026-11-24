@@ -31,4 +31,5 @@ export {
   orderByPaintKeys,
   readPaintKey,
   settlePaintOrder,
+  withDistinctPaintKeys,
 } from './paintOrder.js';

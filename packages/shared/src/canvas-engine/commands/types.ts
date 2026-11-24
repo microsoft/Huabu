@@ -49,9 +49,9 @@ export interface CommandHandlerResult {
   placedTrackKeyIds?: string[];
   /**
    * Nodes whose `paintKey` this command itself names (a restored node, a
-   * patch that carries the key): the key is kept by the end-of-batch
-   * settlement even where it equals the one the node had under another
-   * parent (see `settlePaintOrder`).
+   * patch that carries the key): the settlement after the command keeps
+   * the key even where it equals the one the node had under another parent
+   * (see `settlePaintOrder`).
    */
   placedPaintKeyIds?: string[];
   /** Node IDs that were deleted and need server-side tracking. */
@@ -87,13 +87,6 @@ export interface CommandHandlerResult {
 
 export interface CommandHandlerContext extends CanvasReadState {
   source: CanvasExecutionSource;
-  /**
-   * The nodes before the first command of the batch. A command that reads
-   * paint keys compares with it, as the end-of-batch settlement does: a
-   * node an earlier command moved to another parent still carries the key
-   * it had under the old one.
-   */
-  batchPrestate?: CanvasReadState['nodes'];
 }
 
 export type CommandHandler<T extends CanvasCommand = CanvasCommand> = (

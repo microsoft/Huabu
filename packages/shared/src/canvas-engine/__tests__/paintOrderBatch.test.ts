@@ -79,6 +79,41 @@ describe('paint keys inside one batch', () => {
   });
 });
 
+describe('a reorder after an earlier command of the batch named a paint key', () => {
+  it('follows a restore: the restored node is where its key puts it', () => {
+    const nodes = [
+      node('node-f', 'frame', { paintKey: 'a1', sizing: 'manual' }),
+      node('node-a', 'text', { paintKey: 'a0' }, 'node-f'),
+      node('node-b', 'text', { paintKey: 'a2' }),
+    ];
+    const out = run(nodes, [
+      {
+        type: 'RESTORE_NODES',
+        nodes: [node('node-a', 'text', { paintKey: 'a0' })],
+        replace: ['node-a'],
+      },
+      { type: 'REORDER_NODES', nodeIds: ['node-b'], to: 'bottom' },
+    ]);
+    expect(children(out)).toEqual(['node-b', 'node-a', 'node-f']);
+  });
+
+  it('follows a patched key: the patched node is where its new key puts it', () => {
+    const nodes = [
+      node('node-a', 'text', { paintKey: 'a0' }),
+      node('node-b', 'text', { paintKey: 'a1' }),
+      node('node-c', 'text', { paintKey: 'a2' }),
+    ];
+    const out = run(nodes, [
+      {
+        type: 'MERGE_NODE_DATA',
+        patches: [{ nodeId: 'node-a', patch: { paintKey: 'a3' } }],
+      },
+      { type: 'REORDER_NODES', nodeIds: ['node-b'], to: 'top' },
+    ]);
+    expect(children(out)).toEqual(['node-c', 'node-a', 'node-b']);
+  });
+});
+
 describe('a locked Column Frame stored without a reading order', () => {
   it('is given its reading order by the read like any other', () => {
     const stored = [

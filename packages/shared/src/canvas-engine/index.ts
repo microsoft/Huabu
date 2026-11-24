@@ -274,6 +274,7 @@ export {
   orderByPaintKeys,
   readPaintKey,
   settlePaintOrder,
+  withDistinctPaintKeys,
 } from './container/index.js';
 export {
   compareOrder,
