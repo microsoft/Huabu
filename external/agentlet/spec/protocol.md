@@ -6,10 +6,10 @@ The definitive machine-readable contract is the TypeScript API in [`packages/pro
 
 Agentlet uses two independent outbound WebSocket connection roles:
 
-| Role | Identity | First message | Purpose |
-| --- | --- | --- | --- |
-| `agentlet` | `agentletId` | `agentlet/hello` | Machine-level control channel for spawn, stop, list, resource delivery, and shutdown. |
-| `session` | ACP `sessionId` | `agent/hello` | Per-agent ACP relay channel with bootstrap metadata. |
+| Role       | Identity        | First message    | Purpose                                                                               |
+| ---------- | --------------- | ---------------- | ------------------------------------------------------------------------------------- |
+| `agentlet` | `agentletId`    | `agentlet/hello` | Machine-level control channel for spawn, stop, list, resource delivery, and shutdown. |
+| `session`  | ACP `sessionId` | `agent/hello`    | Per-agent ACP relay channel with bootstrap metadata.                                  |
 
 The WebSocket URL includes `role`, `id`, and `token` query parameters. The Gateway authenticates the token and verifies that the query identity matches the hello payload before registering the connection.
 
@@ -64,29 +64,29 @@ Both hello methods are requests and require a matching JSON-RPC response before 
 
 ### Daemon to Gateway
 
-| Method | Shape | Meaning |
-| --- | --- | --- |
-| `agentlet/hello` | Request | Register or reconnect the machine control channel. |
-| `agent/hello` | Request | Register or reconnect one ACP session channel. |
-| `agent/exited` | Notification | Agent process exited. |
-| `agent/restarted` | Notification | Agent process restarted after a crash. |
-| `agent/goodbye` | Notification | Daemon or session is shutting down. |
-| `agent/overflow` | Notification | A bounded reconnect buffer dropped messages. |
-| `agent/suspended` | Notification | Idle timeout suspended a resumable session. |
-| `agent/pong` | Notification | Application-level heartbeat response. |
+| Method            | Shape        | Meaning                                            |
+| ----------------- | ------------ | -------------------------------------------------- |
+| `agentlet/hello`  | Request      | Register or reconnect the machine control channel. |
+| `agent/hello`     | Request      | Register or reconnect one ACP session channel.     |
+| `agent/exited`    | Notification | Agent process exited.                              |
+| `agent/restarted` | Notification | Agent process restarted after a crash.             |
+| `agent/goodbye`   | Notification | Daemon or session is shutting down.                |
+| `agent/overflow`  | Notification | A bounded reconnect buffer dropped messages.       |
+| `agent/suspended` | Notification | Idle timeout suspended a resumable session.        |
+| `agent/pong`      | Notification | Application-level heartbeat response.              |
 
 ### Gateway to daemon
 
-| Method | Shape | Meaning |
-| --- | --- | --- |
-| `server/spawn` | Request | Launch and bootstrap an ACP agent. |
-| `server/stop` | Request | Stop one managed agent session. |
-| `server/list` | Request | List the daemon's active agents. |
-| `server/discoverHarnesses` | Request | Discover the daemon's static ACP harness catalogue, optionally preparing local workspaces. |
-| `server/sendResource` | Notification | Write a host-provided resource through the daemon environment registry. |
-| `server/replay` | Notification | Replay Gateway-to-daemon messages buffered during disconnection. |
-| `server/ping` | Notification | Application-level heartbeat request. |
-| `server/shutdown` | Notification | Stop gracefully, except reason `server_shutting_down`, which stops managed agents but keeps the daemon waiting to reconnect. |
+| Method                     | Shape        | Meaning                                                                                                                      |
+| -------------------------- | ------------ | ---------------------------------------------------------------------------------------------------------------------------- |
+| `server/spawn`             | Request      | Launch and bootstrap an ACP agent.                                                                                           |
+| `server/stop`              | Request      | Stop one managed agent session.                                                                                              |
+| `server/list`              | Request      | List the daemon's active agents.                                                                                             |
+| `server/discoverHarnesses` | Request      | Discover the daemon's static ACP harness catalogue, optionally preparing local workspaces.                                   |
+| `server/sendResource`      | Notification | Write a host-provided resource through the daemon environment registry.                                                      |
+| `server/replay`            | Notification | Replay Gateway-to-daemon messages buffered during disconnection.                                                             |
+| `server/ping`              | Notification | Application-level heartbeat request.                                                                                         |
+| `server/shutdown`          | Notification | Stop gracefully, except reason `server_shutting_down`, which stops managed agents but keeps the daemon waiting to reconnect. |
 
 For `server/shutdown` with `{ "reason": "server_shutting_down" }`, the host is stopping its service. Agentlet closes the old control connection, stops existing agents and pending launches, and reconnects using its existing identity and credentials. Device reconnection does not resume old ACP sessions or tasks. Other reasons, including an omitted reason, retain the terminal graceful-shutdown behavior. User interruption remains terminal. Control reconnection uses exponential delays beginning at one second, capped by `--reconnect-max` (30 seconds by default), with no attempt limit and a reset after a successful handshake. Authentication rejection is terminal rather than a transient reconnect condition.
 
@@ -182,13 +182,13 @@ The host-agnostic Reachback contract is documented in [`agent-reachback.md`](age
 
 ## 10. Source references
 
-| Contract | Source |
-| --- | --- |
-| Method constants and error codes | [`packages/protocol/src/constants.ts`](../packages/protocol/src/constants.ts) |
-| JSON-RPC envelopes and ACP message alias | [`packages/protocol/src/json-rpc.ts`](../packages/protocol/src/json-rpc.ts) |
-| Hello, lifecycle, spawn, replay, and resource payloads | [`packages/protocol/src/messages.ts`](../packages/protocol/src/messages.ts) |
-| Shared Gateway-facing connection types | [`packages/protocol/src/gateway-types.ts`](../packages/protocol/src/gateway-types.ts) |
-| Daemon implementation | [`packages/local/src/agentlet.ts`](../packages/local/src/agentlet.ts) |
-| Harness Definitions, registry, and probes | [`packages/local/src/harnesses/registry.ts`](../packages/local/src/harnesses/registry.ts), [`detect.ts`](../packages/local/src/harnesses/detect.ts), [`common/command-discovery.ts`](../packages/local/src/harnesses/common/command-discovery.ts) |
-| Daemon-owned reusable workspaces | [`packages/local/src/harnesses/workspace.ts`](../packages/local/src/harnesses/workspace.ts) |
-| WebSocket client and reconnect behavior | [`packages/local/src/ws-client.ts`](../packages/local/src/ws-client.ts) |
+| Contract                                               | Source                                                                                                                                                                                                                                            |
+| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Method constants and error codes                       | [`packages/protocol/src/constants.ts`](../packages/protocol/src/constants.ts)                                                                                                                                                                     |
+| JSON-RPC envelopes and ACP message alias               | [`packages/protocol/src/json-rpc.ts`](../packages/protocol/src/json-rpc.ts)                                                                                                                                                                       |
+| Hello, lifecycle, spawn, replay, and resource payloads | [`packages/protocol/src/messages.ts`](../packages/protocol/src/messages.ts)                                                                                                                                                                       |
+| Shared Gateway-facing connection types                 | [`packages/protocol/src/gateway-types.ts`](../packages/protocol/src/gateway-types.ts)                                                                                                                                                             |
+| Daemon implementation                                  | [`packages/local/src/agentlet.ts`](../packages/local/src/agentlet.ts)                                                                                                                                                                             |
+| Harness Definitions, registry, and probes              | [`packages/local/src/harnesses/registry.ts`](../packages/local/src/harnesses/registry.ts), [`detect.ts`](../packages/local/src/harnesses/detect.ts), [`common/command-discovery.ts`](../packages/local/src/harnesses/common/command-discovery.ts) |
+| Daemon-owned reusable workspaces                       | [`packages/local/src/harnesses/workspace.ts`](../packages/local/src/harnesses/workspace.ts)                                                                                                                                                       |
+| WebSocket client and reconnect behavior                | [`packages/local/src/ws-client.ts`](../packages/local/src/ws-client.ts)                                                                                                                                                                           |

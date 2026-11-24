@@ -57,6 +57,7 @@ import {
   NOTE_CONTENT_HOST_SCOPE_CLASS,
   NOTE_FIRST_BLOCK_CLASS,
 } from '@/components/Nodes/note/noteContentHost';
+import { openInNewWindow } from '@/hooks/useElectron';
 import { fingerprintBlocks, type BlockSnapshot } from '@/utils/blockProvenance';
 import {
   parseHuabuImageClipboard,
@@ -1757,7 +1758,7 @@ function createLinkClickHandler(
     // A node link is in-app navigation: only the host can follow it, and a
     // follow modifier must not send it to the browser.
     if (onLinkClick && (isPlainClick || isNodeLink)) onLinkClick(href);
-    else if (!isNodeLink) window.open(href, '_blank', 'noopener,noreferrer');
+    else if (!isNodeLink) openInNewWindow(href);
     return true;
   };
 

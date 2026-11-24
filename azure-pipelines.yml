@@ -161,7 +161,8 @@ jobs:
           if ((Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash -eq $env:UNSIGNED_INSTALLER_HASH) {
             throw 'ESRP did not modify the installer'
           }
-          node .\apps\desktop\scripts\esrp-release.mjs $output
+          # Also fails unless the signer is the publisher the app accepts updates from.
+          node .\apps\desktop\scripts\esrp-release.mjs $output $signature.SignerCertificate.Subject
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
         displayName: Verify installer signature and refresh update metadata
         env:

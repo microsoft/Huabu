@@ -16,11 +16,12 @@ import {
 } from '@/utils/io/nodeDownload';
 
 import { useInteractiveViewBridge } from './useInteractiveViewBridge';
-import { isElectron } from '../../../hooks/useElectron.ts';
+import { isElectron, openInNewWindow } from '../../../hooks/useElectron.ts';
 import useCanvasStore from '../../../store/canvasStore.ts';
 import { Loading } from '../../Common/Loading';
 import { getMissingFileKind } from '../MissingFileBanner';
 import { PreviewHeaderButton } from '../PreviewHeaderButton';
+import { livePageSandboxFor } from './livePageSandbox';
 import { usePreviewHeaderSlot } from '../PreviewHeaderSlot';
 
 import type { PreviewComponentProps } from '../note/NotePreview';
@@ -399,13 +400,15 @@ export const WebPreview = ({
   //  - `html` interactive artifact / `data:` URL: scripts ON but no
   //    `allow-same-origin`, so an attacker-controlled upload served from our
   //    same-origin artifact route can't read the host's cookies.
-  const livePageSandbox = isInteractiveView
-    ? 'allow-scripts allow-forms'
-    : pageKind === 'url'
-      ? 'allow-scripts allow-forms allow-popups allow-same-origin'
-      : pageSnapshot
-        ? 'allow-popups'
-        : 'allow-scripts allow-forms allow-popups';
+  //  - `url` on the application's own origin: the same, whatever route it
+  //    names. See `livePageSandboxFor`.
+  const livePageSandbox = livePageSandboxFor({
+    interactiveView: isInteractiveView,
+    kind: pageKind,
+    snapshot: pageSnapshot,
+    src: pageSrc,
+    appOrigin: window.location.origin,
+  });
 
   const headerActions =
     pageSrc || externalHref || canDownload ? (
@@ -432,7 +435,7 @@ export const WebPreview = ({
           <PreviewHeaderButton
             title={t('node.openExternally')}
             aria-label={t('node.openPageExternal')}
-            onClick={() => window.open(externalHref, '_blank', 'noopener')}
+            onClick={() => openInNewWindow(externalHref, 'noopener')}
           >
             <ArrowUpRight />
           </PreviewHeaderButton>

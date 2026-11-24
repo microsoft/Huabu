@@ -27,7 +27,7 @@
  * user can see it (window title, installer, Start Menu entry, log dir, etc.).
  */
 
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import {
   existsSync,
   mkdirSync,
@@ -68,6 +68,7 @@ import {
   DesktopSecureSecretStore,
   isDesktopSecretId,
 } from './secure-secrets.js';
+import { openServerFile } from './server-files.js';
 import {
   isSameOrigin,
   parseServerOption,
@@ -77,6 +78,7 @@ import {
 import { ensureShellPath } from './shell-path.js';
 import { TITLE_BAR_HEIGHT } from './title-bar.js';
 import { registerUpdaterIpc, startAutoUpdateChecks } from './updater.js';
+import { guardSession, sendLaunchToken } from './web-guards.js';
 
 import type * as DesktopAgentRuntime from '@huabu/client-runtime/desktop' with {
   'resolution-mode': 'import',
@@ -581,6 +583,14 @@ function resolveServerEntry(): string {
  * All HUABU_* vars are injected here — the server code reads them
  * via process.env and has fallbacks for the standalone (non-Electron) case.
  */
+/**
+ * Admits this app's windows to the Server it starts, and nothing else on the
+ * machine: loopback is reachable by every local program and every local user.
+ * New on each launch and held in memory only. Absent when the Server is not
+ * ours to configure (`--server`, or a development Server already running).
+ */
+let launchToken: string | null = null;
+
 function buildServerEnv(port: number): NodeJS.ProcessEnv {
   const userData = app.getPath('userData');
 
@@ -631,6 +641,10 @@ function buildServerEnv(port: number): NodeJS.ProcessEnv {
     // when its authoritative storage/disk/workspaces.json does not exist.
     HUABU_LEGACY_WORKSPACE_STORE: join(userData, 'workspace.json'),
     HUABU_SECRET_BRIDGE: '1',
+    ...(launchToken ? { HUABU_DESKTOP_TOKEN: launchToken } : {}),
+    // Content fetches (web pages, imported files, inlined images) stay off
+    // this machine and its network. Model endpoints are not content fetches.
+    HUABU_PUBLIC_NETWORK_ONLY: '1',
     ...(webDistPath ? { WEB_DIST_PATH: webDistPath } : {}),
     NODE_ENV: IS_DEV ? 'development' : 'production',
   };
@@ -836,8 +850,31 @@ function waitForPort(
   });
 }
 
+/**
+ * Privileged channels answer only the application's own top-level pages.
+ *
+ * The preload bridge is injected into main frames alone and the navigation
+ * guard keeps those on the application origin, so a framed web page has no
+ * bridge to call. This is the check that still holds if either assumption
+ * stops being true.
+ */
+function assertApplicationSender(
+  event: Electron.IpcMainInvokeEvent | Electron.IpcMainEvent,
+): void {
+  const frame = event.senderFrame;
+  if (
+    !applicationUrl ||
+    !desktopTabs?.owns(event.sender) ||
+    !frame ||
+    frame !== event.sender.mainFrame ||
+    !isSameOrigin(frame.url, new URL(applicationUrl).origin)
+  )
+    throw new Error('This operation is available only to the Huabu window.');
+}
+
 function registerWindowIpc(): void {
-  ipcMain.handle('window:is-fullscreen', () => {
+  ipcMain.handle('window:is-fullscreen', (event) => {
+    assertApplicationSender(event);
     return mainWindow ? mainWindow.isFullScreen() : false;
   });
 }
@@ -850,7 +887,8 @@ function registerWindowIpc(): void {
 function registerDiagnosticsIpc(): void {
   ipcMain.handle(
     'diagnostics:open-server-log',
-    async (): Promise<{ ok: true } | { ok: false; error: string }> => {
+    async (event): Promise<{ ok: true } | { ok: false; error: string }> => {
+      assertApplicationSender(event);
       const configuredDataDir = process.env.HUABU_DATA_DIR?.trim();
       if (
         (getExternalServerUrl() || remoteServerOrigin) &&
@@ -882,6 +920,7 @@ function registerDiagnosticsIpc(): void {
   ipcMain.handle(
     'diagnostics:open-developer-tools',
     (event): { ok: true } | { ok: false; error: string } => {
+      assertApplicationSender(event);
       const win = BrowserWindow.getFocusedWindow() ?? mainWindow;
       if (!win || win.webContents.isDestroyed()) {
         return { ok: false, error: 'No application window is available.' };
@@ -894,13 +933,16 @@ function registerDiagnosticsIpc(): void {
     },
   );
 
-  ipcMain.handle('diagnostics:get-system-info', () => ({
-    appVersion: app.getVersion(),
-    platform: process.platform,
-    osRelease: getOsRelease(),
-    architecture: process.arch,
-    electronVersion: process.versions.electron,
-  }));
+  ipcMain.handle('diagnostics:get-system-info', (event) => {
+    assertApplicationSender(event);
+    return {
+      appVersion: app.getVersion(),
+      platform: process.platform,
+      osRelease: getOsRelease(),
+      architecture: process.arch,
+      electronVersion: process.versions.electron,
+    };
+  });
 }
 
 /**
@@ -932,11 +974,12 @@ function registerDialogIpc(): void {
   ipcMain.handle(
     'dialog:pick-folder',
     async (
-      _event,
+      event,
       rawTitle: unknown,
     ): Promise<
       { ok: true; path: string } | { ok: false; reason: 'cancelled' }
     > => {
+      assertApplicationSender(event);
       const title =
         typeof rawTitle === 'string' && rawTitle.length > 0
           ? rawTitle
@@ -1056,6 +1099,15 @@ function configureWebSession(
   serverOrigin: string,
   webSession = session.defaultSession,
 ): void {
+  // A remote Server's session is left as it was: this policy is part of
+  // hardening the local one.
+  if (!remoteServerOrigin) guardSession(webSession, serverOrigin);
+  if (launchToken)
+    // With a development web server in front, the page reaches the Server
+    // through that server's proxy as well as directly.
+    sendLaunchToken(webSession, launchToken, [
+      ...new Set([serverOrigin, `http://127.0.0.1:${serverPort}`]),
+    ]);
   const filter = { urls: ['<all_urls>'] };
   webSession.webRequest.onHeadersReceived(filter, (details, callback) => {
     // Leave our own origin alone — stripping CSP from our SPA would be
@@ -1311,13 +1363,18 @@ app.whenReady().then(async () => {
   registerDiagnosticsIpc();
   if (!requestedRemoteOrigin) {
     registerDialogIpc();
+    ipcMain.handle('files:open', (event, url: unknown) => {
+      assertApplicationSender(event);
+      if (!applicationUrl) throw new Error('The application is not ready.');
+      openServerFile(url, event.sender, new URL(applicationUrl).origin);
+    });
   }
-  registerMenuIpc(() => mainWindow);
+  registerMenuIpc(() => mainWindow, assertApplicationSender);
   registerDesktopTabsIpc(() => desktopTabs);
   // Auto-update IPC must exist before the first render so the preload
   // bridge's `update:get-state` / `update:check` calls always resolve.
   // The actual GitHub-feed checks only run in a packaged app.
-  registerUpdaterIpc(() => mainWindow, {
+  registerUpdaterIpc(() => mainWindow, assertApplicationSender, {
     broadcast: (status) => desktopTabs?.broadcast('update:status', status),
     prepareInstall: prepareDesktopQuit,
     cancelInstall: cancelDesktopQuit,
@@ -1426,6 +1483,7 @@ app.whenReady().then(async () => {
       // service that just bound 3001). When that happens the child
       // crashes with EADDRINUSE — retry with a fresh port instead of
       // surfacing the error to the user.
+      launchToken = randomBytes(32).toString('base64url');
       const tried = new Set<number>();
       let lastErr: Error | null = null;
       // `get-port` is an ESM-only package; load it via dynamic import so

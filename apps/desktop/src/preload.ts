@@ -253,6 +253,11 @@ contextBridge.exposeInMainWorld('electronBridge', {
   ...(isRemoteServer
     ? {}
     : {
+        // The local Server's files: the system browser cannot open them.
+        files: {
+          open: (url: string): Promise<void> =>
+            ipcRenderer.invoke('files:open', url) as Promise<void>,
+        },
         dialog: {
           pickFolder: (
             title?: string,
