@@ -22,6 +22,11 @@ import {
   withTestDatabase,
 } from './test-support.js';
 import { SqliteWorkspaceRepository } from './workspace-repository.js';
+import { stateWithOrderKeys } from '../../../canvas/stored-node-order.js';
+import {
+  provideSpaceStateRewrite,
+  SPACE_ORDER_KEYS_REWRITE,
+} from '../sql/space-state-rewrites.js';
 
 import type {
   CanvasFile,
@@ -154,6 +159,10 @@ async function createSpace(
   if (!result.ok) throw new Error(`Could not create test Space ${canvasId}`);
   return result.record;
 }
+
+// These tests upgrade databases that hold Spaces without composing storage,
+// which is what provides the rule the version-5 data step runs.
+provideSpaceStateRewrite(SPACE_ORDER_KEYS_REWRITE, stateWithOrderKeys);
 
 describe('SqliteStructuredStore lifecycle and schema', () => {
   it('rejects an empty database filename', () => {

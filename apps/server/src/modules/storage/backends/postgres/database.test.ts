@@ -7,6 +7,11 @@ import { seedNodeOrder } from '@huabu/shared/canvas-engine';
 
 import { PgExecutor, PostgresStoreContext } from './database.js';
 import { POSTGRES_MIGRATIONS } from './schema.js';
+import { stateWithOrderKeys } from '../../../canvas/stored-node-order.js';
+import {
+  provideSpaceStateRewrite,
+  SPACE_ORDER_KEYS_REWRITE,
+} from '../sql/space-state-rewrites.js';
 const pg = vi.hoisted(() => {
   const query = vi.fn();
   const release = vi.fn();
@@ -26,6 +31,10 @@ vi.mock('pg', () => ({
     }
   },
 }));
+// These tests upgrade databases that hold Spaces without composing storage,
+// which is what provides the rule the version-5 data step runs.
+provideSpaceStateRewrite(SPACE_ORDER_KEYS_REWRITE, stateWithOrderKeys);
+
 beforeEach(() => {
   vi.resetAllMocks();
   pg.pool.connect.mockResolvedValue(pg.client);

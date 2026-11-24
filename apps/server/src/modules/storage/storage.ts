@@ -28,6 +28,11 @@ import { rm } from 'node:fs/promises';
 import { stripLegacyPortalTopology } from '@huabu/shared';
 import { seedNodeOrder } from '@huabu/shared/canvas-engine';
 
+import { stateWithOrderKeys } from '../canvas/stored-node-order.js';
+import {
+  assertSpaceHierarchyLocked,
+  withSpaceHierarchyLock,
+} from '../canvas/write-coordinator.js';
 import { runInWorkspace } from '../workspace/context.js';
 import { runWorkspacePreparation } from '../workspace-activation.js';
 import {
@@ -49,6 +54,10 @@ import { DiskStructuredStore } from './backends/disk/structured-store.js';
 import { DiskWorkspaceRepository } from './backends/disk/workspace-repository.js';
 import { PostgresStructuredStore } from './backends/postgres/structured-store.js';
 import { PostgresWorkspaceRepository } from './backends/postgres/workspace-repository.js';
+import {
+  provideSpaceStateRewrite,
+  SPACE_ORDER_KEYS_REWRITE,
+} from './backends/sql/space-state-rewrites.js';
 import { SqliteStructuredStore } from './backends/sqlite/structured-store.js';
 import { SqliteWorkspaceRepository } from './backends/sqlite/workspace-repository.js';
 import { refreshCanvasDirIndex } from './canvas-dirs.js';
@@ -59,10 +68,6 @@ import {
   releaseConnections,
   sqliteConnection,
 } from './connections.js';
-import {
-  assertSpaceHierarchyLocked,
-  withSpaceHierarchyLock,
-} from '../canvas/write-coordinator.js';
 import { spaceBlobAreas } from './ports/blob.js';
 import {
   parseStorageProfile,
@@ -237,6 +242,11 @@ export interface SqliteSpaceTree {
    */
   extension(namespace: string): SqliteSpaceSubstrate | null;
 }
+
+// The SQL backends store the order keys of old Spaces once, in the upgrade to
+// schema version 5. They run the step; the rule is given to them here, and
+// it is the read's own (`storedNodesWithOrderKeys`).
+provideSpaceStateRewrite(SPACE_ORDER_KEYS_REWRITE, stateWithOrderKeys);
 
 function composeSpace(storage: Storage, canvasId: string): Space {
   const handle = storage.structured.space(canvasId);
