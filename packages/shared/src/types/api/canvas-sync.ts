@@ -78,6 +78,12 @@ export const canvasSyncEventSchema = z.discriminatedUnion('type', [
        * fetch it again; every other page does.
        */
       originPageId: canvasPageIdSchema.optional(),
+      /**
+       * A conversation whose pending review records changed without a canvas
+       * write, as when one was kept, or after one was reverted. A page reads
+       * that conversation's records again.
+       */
+      reviewThreadId: z.string().optional(),
     }),
   }),
   z.object({

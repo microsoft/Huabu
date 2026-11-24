@@ -5,7 +5,6 @@ import { useEffect, useMemo } from 'react';
 
 import { useAcpThreadChangesStore } from '@/store/acpThreadChangesStore';
 import useCanvasStore from '@/store/canvasStore';
-import { useChatStore } from '@/store/chatStore';
 import { useSeenChangesStore } from '@/store/seenChangesStore';
 import {
   threadSeenKeys,
@@ -56,18 +55,11 @@ export function markSeen(mark: UnseenMark): void {
     store.markSeen(source.threadId, source.keys);
 }
 
-/** Mark everything a conversation's Agent changed as seen. */
-function markThreadSeen(threadId: string): void {
-  useSeenChangesStore
-    .getState()
-    .markSeen(
-      threadId,
-      threadSeenKeys(useAcpThreadChangesStore.getState().byThread[threadId]),
-    );
-}
-
 /** How often, at most, the tracker reads the stores it follows. */
 const FOLLOW_MS = 150;
+/** The first wait before asking again for records that could not be read. */
+const RETRY_MS = 2_000;
+const RETRY_MAX_MS = 60_000;
 
 /**
  * Keep the marks of a Space true: load what its conversations changed, and
@@ -75,14 +67,16 @@ const FOLLOW_MS = 150;
  *
  * - A node counts as seen once the person has been on it — it was the only
  *   node selected, which clicking, opening or editing it does — and moved
- *   on. Passing it on the canvas, or reading the conversation, is not
- *   seeing it.
- * - A conversation's marks end when its next turn begins.
+ *   on. Passing it on the canvas, reading the conversation, or carrying the
+ *   conversation on into another turn is not seeing it.
  */
 export function useTrackUnseenChanges(canvasId: string | undefined): void {
   useEffect(() => {
     if (!canvasId) return;
+    let live = true;
     const asked = new Set<string>();
+    let failures = 0;
+    let retry: ReturnType<typeof setTimeout> | undefined;
     const load = () => {
       const canvas = useCanvasStore.getState();
       if (canvas.canvasId !== canvasId || canvas.isLoading) return;
@@ -95,7 +89,28 @@ export function useTrackUnseenChanges(canvasId: string | undefined): void {
       );
       if (threadIds.length === 0) return;
       for (const threadId of threadIds) asked.add(threadId);
-      void useAcpThreadChangesStore.getState().loadSpace(canvasId, threadIds);
+      void useAcpThreadChangesStore
+        .getState()
+        .loadSpace(canvasId, threadIds)
+        .then((read) => {
+          if (!live) return;
+          if (read) {
+            failures = 0;
+            return;
+          }
+          // Not read, so not asked: a later look asks again. Wait longer
+          // after each failure in a row, so a server that is down is not
+          // asked on every change to the canvas.
+          failures += 1;
+          retry ??= setTimeout(
+            () => {
+              retry = undefined;
+              for (const threadId of threadIds) asked.delete(threadId);
+              load();
+            },
+            Math.min(RETRY_MS * 2 ** (failures - 1), RETRY_MAX_MS),
+          );
+        });
     };
 
     // The only node selected, and whether it carried a mark when the person
@@ -130,22 +145,6 @@ export function useTrackUnseenChanges(canvasId: string | undefined): void {
       marked = only !== null && readUnseenMarks().has(only);
     };
 
-    // The conversations streaming now. One that is already streaming when
-    // the page opens is mid-turn: what it has made so far is this turn's.
-    const streamingNow = () =>
-      new Set(
-        Object.entries(useChatStore.getState().threadsById).flatMap(
-          ([threadId, thread]) => (thread.isStreaming ? [threadId] : []),
-        ),
-      );
-    let streaming = streamingNow();
-    const turns = () => {
-      const next = streamingNow();
-      for (const threadId of next)
-        if (!streaming.has(threadId)) markThreadSeen(threadId);
-      streaming = next;
-    };
-
     const forget = () => {
       const { byThread } = useAcpThreadChangesStore.getState();
       const { seen, retain } = useSeenChangesStore.getState();
@@ -154,30 +153,27 @@ export function useTrackUnseenChanges(canvasId: string | undefined): void {
           retain(threadId, threadSeenKeys(byThread[threadId]));
     };
 
-    // These stores change on every pointer tick of a drag and every token of
-    // a reply; reading them that often would cost more than the marks are
-    // worth. A turn's start is noticed within the same delay, before its
-    // first change arrives.
+    // The canvas store changes on every pointer tick of a drag; reading all
+    // nodes that often would cost more than the marks are worth.
     let timer: ReturnType<typeof setTimeout> | undefined;
     const follow = () => {
       timer ??= setTimeout(() => {
         timer = undefined;
-        turns();
         load();
         see();
       }, FOLLOW_MS);
     };
     const unsubscribeCanvas = useCanvasStore.subscribe(follow);
-    const unsubscribeChat = useChatStore.subscribe(follow);
     const unsubscribeChanges = useAcpThreadChangesStore.subscribe(() => {
       forget();
       follow();
     });
     load();
     return () => {
+      live = false;
       clearTimeout(timer);
+      clearTimeout(retry);
       unsubscribeCanvas();
-      unsubscribeChat();
       unsubscribeChanges();
     };
   }, [canvasId]);

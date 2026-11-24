@@ -7,6 +7,7 @@ import { useNavigate } from 'react-router-dom';
 import { i18n } from '@/i18n';
 import useCanvasStore from '@/store/canvasStore';
 import { useChatStore } from '@/store/chatStore';
+import { useWorkspaceStore } from '@/store/workspaceStore';
 import { readNoticePreferences } from '@/utils/turnNoticePreferences';
 import {
   composeNotice,
@@ -25,30 +26,6 @@ import type { DesktopTabNotice } from '@huabu/shared/desktop-tabs';
 const GATHER_MS = 1_000;
 
 /**
- * Show a notice from a browser page. The page in front needs none; a hidden
- * or unfocused one gets a system notification when the browser allows it.
- */
-function notifyFromBrowser(
-  notice: DesktopTabNotice,
-  open: (nodeIds: string[]) => void,
-): void {
-  if (typeof Notification === 'undefined') return;
-  if (document.visibilityState === 'visible' && document.hasFocus()) return;
-  if (Notification.permission !== 'granted') return;
-  // The tag makes a conversation's newer notification replace its older one.
-  const notification = new Notification(notice.title, {
-    body: notice.body,
-    tag: notice.key,
-    silent: true,
-  });
-  notification.onclick = () => {
-    window.focus();
-    open(notice.nodeIds);
-    notification.close();
-  };
-}
-
-/**
  * Tell a person who is elsewhere that an Agent in this Space finished,
  * failed, or waits for them. In the desktop app the main process decides
  * what to show; in a browser this page does.
@@ -63,6 +40,49 @@ export function useTurnNotices(canvasId: string | undefined): void {
     let gathered: TurnEvent[] = [];
     let readTimer: ReturnType<typeof setTimeout> | undefined;
     let tellTimer: ReturnType<typeof setTimeout> | undefined;
+
+    // A browser page shows its own notifications; each is kept with the
+    // conversations it tells of until it is closed.
+    const shown = new Map<Notification, readonly string[]>();
+    const inFront = () =>
+      document.visibilityState === 'visible' && document.hasFocus();
+    const notifyFromBrowser = (notice: DesktopTabNotice) => {
+      if (typeof Notification === 'undefined') return;
+      // The page in front needs none; a hidden or unfocused one gets a
+      // system notification when the browser allows it.
+      if (inFront() || Notification.permission !== 'granted') return;
+      // One notification per conversation: a newer notice takes the place of
+      // every one that told of a conversation it tells of.
+      for (const [earlier, keys] of [...shown])
+        if (keys.some((key) => notice.keys.includes(key))) earlier.close();
+      const notification = new Notification(notice.title, {
+        body: notice.body,
+        silent: true,
+      });
+      shown.set(notification, notice.keys);
+      // Where it leads is fixed now: the Space and Workspace it was made in,
+      // whatever the page shows by the time it is clicked.
+      const workspaceId = useWorkspaceStore.getState().workspaceId;
+      notification.onclose = () => shown.delete(notification);
+      notification.onclick = () => {
+        window.focus();
+        navigate(`/canvas/${encodeURIComponent(canvasId)}`, {
+          state:
+            notice.nodeIds.length > 0
+              ? { focusNodeIds: notice.nodeIds, workspaceId }
+              : undefined,
+        });
+        notification.close();
+      };
+    };
+    // Coming back to the page is coming back to the Space: what it was told
+    // of is in front of the person now.
+    const withdraw = () => {
+      if (!inFront()) return;
+      for (const notification of [...shown.keys()]) notification.close();
+    };
+    document.addEventListener('visibilitychange', withdraw);
+    window.addEventListener('focus', withdraw);
 
     const tell = () => {
       tellTimer = undefined;
@@ -87,14 +107,7 @@ export function useTurnNotices(canvasId: string | undefined): void {
       );
       if (!notice) return;
       if (tabs) tabs.notify?.(notice);
-      else
-        notifyFromBrowser(notice, (nodeIds) => {
-          if (nodeIds.length === 0) return;
-          navigate(
-            `${window.location.pathname}${window.location.search}${window.location.hash}`,
-            { state: { focusNodeIds: nodeIds } },
-          );
-        });
+      else notifyFromBrowser(notice);
     };
 
     const read = () => {
@@ -118,6 +131,8 @@ export function useTurnNotices(canvasId: string | undefined): void {
     return () => {
       clearTimeout(readTimer);
       clearTimeout(tellTimer);
+      document.removeEventListener('visibilitychange', withdraw);
+      window.removeEventListener('focus', withdraw);
       unsubscribeCanvas();
       unsubscribeChat();
     };

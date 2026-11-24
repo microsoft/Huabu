@@ -979,6 +979,50 @@ describe('POST /api/canvas/:canvasId/changes/query', () => {
   });
 });
 
+describe('DELETE /api/canvas/:canvasId/threads/:threadId/changes/:changeId', () => {
+  it('tells the Space’s pages that the thread’s review records changed', async () => {
+    const deleteChange = vi.fn((_threadId: string, changeId: string) =>
+      Promise.resolve(changeId === 'kept' ? change('n1') : null),
+    );
+    const space = vi.fn(() => ({
+      read: vi.fn().mockResolvedValue({ canvasId: 'c1' }),
+      changes: { delete: deleteChange },
+    }));
+    const store = () =>
+      ({ space }) as unknown as ReturnType<typeof getStructuredStore>;
+    // One for each of the two requests below.
+    vi.mocked(getStructuredStore)
+      .mockImplementationOnce(store)
+      .mockImplementationOnce(store);
+    const events: unknown[] = [];
+    const unsubscribe = subscribeCanvasUpdates('c1', (event) => {
+      events.push(event);
+    });
+
+    const app = await buildApp();
+    try {
+      const kept = await app.inject({
+        method: 'DELETE',
+        url: '/canvas/c1/threads/thread-1/changes/kept',
+      });
+      expect(kept.json()).toEqual({ removed: true });
+      expect(events).toEqual([
+        { type: 'invalidate', data: { reviewThreadId: 'thread-1' } },
+      ]);
+      // Nothing was removed, so there is nothing to tell.
+      const missing = await app.inject({
+        method: 'DELETE',
+        url: '/canvas/c1/threads/thread-1/changes/gone',
+      });
+      expect(missing.json()).toEqual({ removed: false });
+      expect(events).toHaveLength(1);
+    } finally {
+      unsubscribe();
+      await app.close();
+    }
+  });
+});
+
 describe('GET /api/canvas/:canvasId/threads/:threadId/changes', () => {
   it('reads change records through one structured Space handle', async () => {
     const expected = [change('n1')];

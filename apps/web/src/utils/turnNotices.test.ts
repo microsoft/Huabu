@@ -186,7 +186,7 @@ describe('composeNotice', () => {
 
   it('words a single event by its kind', () => {
     expect(composeNotice([event()], 'Space', wording, on)).toEqual({
-      key: 't1',
+      keys: ['t1'],
       title: 'Plan · Space',
       body: 'The plan is ready.',
       nodeIds: ['n1'],
@@ -239,7 +239,7 @@ describe('composeNotice', () => {
         on,
       ),
     ).toEqual({
-      key: 'several',
+      keys: ['t1', 't2'],
       title: 'Space',
       body: '2 conversations have news',
       nodeIds: ['n1', 'n2'],
@@ -250,7 +250,7 @@ describe('composeNotice', () => {
     const events = [event(), event({ key: 't2', kind: 'error', nodeId: 'n2' })];
     expect(
       composeNotice(events, 'Space', wording, { done: false, needsYou: true }),
-    ).toMatchObject({ key: 't2', nodeIds: ['n2'] });
+    ).toMatchObject({ keys: ['t2'], nodeIds: ['n2'] });
     expect(
       composeNotice([event()], 'Space', wording, {
         done: false,

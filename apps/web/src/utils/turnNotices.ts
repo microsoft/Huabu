@@ -271,7 +271,7 @@ export function composeNotice(
     .slice(0, NOTICE_NODE_LIMIT);
   if (told.length === 1)
     return {
-      key: only.key,
+      keys: [only.key],
       title: only.label ? `${only.label} · ${spaceTitle}` : spaceTitle,
       body:
         only.kind === 'approval'
@@ -284,7 +284,7 @@ export function composeNotice(
       nodeIds,
     };
   return {
-    key: 'several',
+    keys: told.map((event) => event.key),
     title: spaceTitle,
     body: wording.several(told.length),
     nodeIds,

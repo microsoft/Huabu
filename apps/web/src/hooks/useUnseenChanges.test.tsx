@@ -101,18 +101,31 @@ describe('useTrackUnseenChanges', () => {
     expect(readUnseenMarks().size).toBe(2);
   });
 
-  it('ends a conversation’s marks when its next turn begins', async () => {
+  it('keeps a conversation’s marks when it goes on into another turn', async () => {
     await act(async () => root.render(<Tracker />));
     await streamT1(true);
     await settle();
-    expect(readUnseenMarks().size).toBe(0);
-  });
-
-  it('keeps the marks of a turn already under way when the page opens', async () => {
-    await streamT1(true);
-    await act(async () => root.render(<Tracker />));
+    await streamT1(false);
     await settle();
     expect(readUnseenMarks().size).toBe(2);
+  });
+
+  it('asks again, after a wait, for changes it could not read', async () => {
+    mocks.query.mockReset().mockRejectedValueOnce(new Error('offline'));
+    mocks.query.mockResolvedValue({ t9: [record('c9', 'n1')] });
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    useAcpThreadChangesStore.setState({ byThread: {} });
+    useCanvasStore.setState({
+      nodes: [node('q1', false, { type: 'question', threadId: 't9' })],
+    });
+    await act(async () => root.render(<Tracker />));
+    await settle();
+    expect(mocks.query).toHaveBeenCalledTimes(1);
+    expect(readUnseenMarks().size).toBe(0);
+    await act(async () => vi.advanceTimersByTime(2_000));
+    expect(mocks.query).toHaveBeenCalledTimes(2);
+    expect([...readUnseenMarks().keys()]).toEqual(['n1']);
+    log.mockRestore();
   });
 
   it('asks once for the changes of the Space’s conversations', async () => {

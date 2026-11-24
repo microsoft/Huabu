@@ -29,7 +29,7 @@ export async function querySpaceChanges(
 ): Promise<QuerySpaceChangesResponse['threads']> {
   const res = await apiFetch<QuerySpaceChangesResponse>(
     routes.canvasChangesQuery(canvasId),
-    { method: 'POST', body: JSON.stringify({ threadIds }) },
+    { method: 'POST', json: { threadIds } },
   );
   return res.threads;
 }

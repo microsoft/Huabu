@@ -51,9 +51,13 @@ interface AcpThreadChangesState {
   /**
    * Fetch the records of a Space's conversations in one request, for the
    * marks on what Agents changed. A thread this page already holds — opened,
-   * or told of by a broadcast meanwhile — keeps what it has.
+   * or told of by a broadcast meanwhile — keeps what it has. Resolves to
+   * whether the records were read, so a caller can ask again.
    */
-  loadSpace: (canvasId: string, threadIds: readonly string[]) => Promise<void>;
+  loadSpace: (
+    canvasId: string,
+    threadIds: readonly string[],
+  ) => Promise<boolean>;
   /** Replace a thread's list with the coalesced set pushed via broadcast. */
   replaceFromBroadcast: (
     threadId: string,
@@ -79,6 +83,9 @@ interface AcpThreadChangesState {
   /** True when the change targets a node modified since (revert unsafe). */
   isStale: (record: CanvasChangeRecord) => boolean;
 }
+
+/** As many threads as one Space query names; the route refuses more. */
+const SPACE_QUERY_BATCH = 500;
 
 const loadGenerationByThread = new Map<string, number>();
 
@@ -132,15 +139,20 @@ export const useAcpThreadChangesStore = create<AcpThreadChangesState>(
     },
 
     loadSpace: async (canvasId, threadIds) => {
-      if (threadIds.length === 0) return;
       try {
-        const threads = await querySpaceChanges(canvasId, threadIds);
-        if (useCanvasStore.getState().canvasId !== canvasId) return;
-        set((s) => ({
-          byThread: { ...threads, ...s.byThread },
-        }));
+        // The route takes a bounded list; a Space may hold more.
+        for (let at = 0; at < threadIds.length; at += SPACE_QUERY_BATCH) {
+          const threads = await querySpaceChanges(
+            canvasId,
+            threadIds.slice(at, at + SPACE_QUERY_BATCH),
+          );
+          if (useCanvasStore.getState().canvasId !== canvasId) return true;
+          set((s) => ({ byThread: { ...threads, ...s.byThread } }));
+        }
+        return true;
       } catch (err) {
         console.error('[acpThreadChanges] Space load failed', err);
+        return false;
       }
     },
 

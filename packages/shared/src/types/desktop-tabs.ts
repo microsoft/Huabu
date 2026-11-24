@@ -92,8 +92,11 @@ export interface DesktopTabReport {
  * system notification unless the person is looking at the Space.
  */
 export interface DesktopTabNotice {
-  /** What it is about. A later notice with the same key replaces this one. */
-  key: string;
+  /**
+   * The conversations it tells of. A later notice that tells of any of them
+   * replaces this one.
+   */
+  keys: string[];
   title: string;
   body: string;
   /** The nodes to bring into view when the notice is opened. */

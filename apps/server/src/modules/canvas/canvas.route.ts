@@ -1638,6 +1638,13 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         return reply.code(404).send({ message: 'Canvas not found' });
       }
       const removed = await handle.changes.delete(threadId, changeId);
+      // Keeping writes nothing to the canvas, so no update tells the other
+      // pages that this record is gone.
+      if (removed)
+        publishCanvasUpdate(canvasId, {
+          type: 'invalidate',
+          data: { reviewThreadId: threadId },
+        });
       return reply.send({ removed: !!removed });
     },
   );
@@ -1701,6 +1708,11 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         return reply.code(500).send({ message: 'Failed to revert change' });
       }
       await handle.changes.delete(threadId, changeId);
+      // The update above carried the canvas change, not the record's removal.
+      publishCanvasUpdate(canvasId, {
+        type: 'invalidate',
+        data: { reviewThreadId: threadId },
+      });
       return reply.send({ removed: true });
     },
   );

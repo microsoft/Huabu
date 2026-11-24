@@ -111,8 +111,8 @@ export class DesktopTabs {
     null;
   private legacyStorage: Record<string, string> = {};
   private preferences: Record<string, string> = {};
-  /** System notifications still showing, by Tab and then by notice key. */
-  private notices = new Map<string, Map<string, Notification>>();
+  /** System notifications still showing, by Tab, each with what it tells. */
+  private notices = new Map<string, Map<Notification, readonly string[]>>();
 
   constructor(
     private win: BrowserWindow,
@@ -645,8 +645,10 @@ export class DesktopTabs {
     if (!raw || typeof raw !== 'object') throw new Error('Invalid notice');
     const notice = raw as DesktopTabNotice;
     if (
-      typeof notice.key !== 'string' ||
-      notice.key.length > 256 ||
+      !Array.isArray(notice.keys) ||
+      notice.keys.length === 0 ||
+      notice.keys.length > 64 ||
+      notice.keys.some((key) => typeof key !== 'string' || key.length > 256) ||
       typeof notice.title !== 'string' ||
       notice.title.length > 512 ||
       typeof notice.body !== 'string' ||
@@ -659,19 +661,20 @@ export class DesktopTabs {
     const id = tab.state.id;
     if (this.activeId === id && this.win.isFocused()) return;
     if (!Notification.isSupported()) return;
-    const shown = this.notices.get(id) ?? new Map<string, Notification>();
+    const shown =
+      this.notices.get(id) ?? new Map<Notification, readonly string[]>();
     this.notices.set(id, shown);
-    // One notification per conversation: the newer one takes its place.
-    shown.get(notice.key)?.close();
+    // One notification per conversation: a newer notice takes the place of
+    // every one that told of a conversation it tells of.
+    for (const [earlier, keys] of [...shown])
+      if (keys.some((key) => notice.keys.includes(key))) earlier.close();
     const notification = new Notification({
       title: notice.title,
       body: notice.body,
       silent: true,
     });
-    shown.set(notice.key, notification);
-    notification.on('close', () => {
-      if (shown.get(notice.key) === notification) shown.delete(notice.key);
-    });
+    shown.set(notification, notice.keys);
+    notification.on('close', () => shown.delete(notification));
     // macOS reports a notification it could not deliver, e.g. no permission.
     notification.on('failed', (_event, error) => {
       console.error('[desktop-tabs] Could not show a notification:', error);
@@ -683,8 +686,14 @@ export class DesktopTabs {
         this.win.focus();
         void this.open({
           canvasId,
+          // The Space takes a focus request only with its Workspace named.
           ...(notice.nodeIds.length > 0
-            ? { state: { focusNodeIds: notice.nodeIds } }
+            ? {
+                state: {
+                  focusNodeIds: notice.nodeIds,
+                  workspaceId: this.workspaceId,
+                },
+              }
             : {}),
         });
       } catch (error) {
@@ -699,7 +708,7 @@ export class DesktopTabs {
     const shown = this.notices.get(id);
     if (!shown) return;
     this.notices.delete(id);
-    for (const notification of shown.values()) notification.close();
+    for (const notification of [...shown.keys()]) notification.close();
   }
 
   workspaceReady(contents: WebContents, workspaceId: unknown): void {

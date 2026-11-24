@@ -402,7 +402,13 @@ export const useCanvasSyncStore = create<CanvasSyncState>((set, get) => ({
       if (event.type === 'invalidate') {
         // A node-content save by another page. An event without node ids is
         // a read-model notice, and this page already shows its own saves.
-        const { nodeIds, originPageId } = event.data;
+        const { nodeIds, originPageId, reviewThreadId } = event.data;
+        // A review record kept or reverted on another page: the list this
+        // page holds for that conversation is out of date.
+        if (reviewThreadId)
+          void useAcpThreadChangesStore
+            .getState()
+            .load(canvasId, reviewThreadId);
         if (!nodeIds?.length || originPageId === CANVAS_PAGE_ID) return;
         if (canvasStore.isLoading) adoptAfterLoad(canvasId, nodeIds);
         else void adoptRemoteNodeContent(canvasId, nodeIds);

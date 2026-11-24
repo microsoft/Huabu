@@ -1529,7 +1529,7 @@ describe('desktop Space Tab lifecycle', () => {
   });
 
   const notice = (patch: Partial<DesktopTabNotice> = {}): DesktopTabNotice => ({
-    key: 'thread-1',
+    keys: ['thread-1'],
     title: 'Plan · Space',
     body: 'The plan is ready.',
     nodeIds: ['node-1'],
@@ -1594,7 +1594,7 @@ describe('desktop Space Tab lifecycle', () => {
     const a = open('a');
     open('b');
     tabs.notify(a.webContents as never, notice());
-    tabs.notify(a.webContents as never, notice({ key: 'thread-2' }));
+    tabs.notify(a.webContents as never, notice({ keys: ['thread-2'] }));
     tabs.notify(a.webContents as never, notice({ body: 'Revised.' }));
     expect(mocks.notifications).toHaveLength(3);
     expect(mocks.notifications[0].close).toHaveBeenCalledOnce();
@@ -1611,6 +1611,22 @@ describe('desktop Space Tab lifecycle', () => {
     expect(mocks.notifications[0].close).toHaveBeenCalledOnce();
   });
 
+  it('lets a notice for several conversations take the place of each one’s own', () => {
+    const a = open('a');
+    open('b');
+    tabs.notify(a.webContents as never, notice());
+    tabs.notify(a.webContents as never, notice({ keys: ['thread-3'] }));
+    tabs.notify(
+      a.webContents as never,
+      notice({ keys: ['thread-1', 'thread-2'] }),
+    );
+    expect(mocks.notifications[0].close).toHaveBeenCalledOnce();
+    expect(mocks.notifications[1].close).not.toHaveBeenCalled();
+    // And a later one for either of them takes the place of the group's.
+    tabs.notify(a.webContents as never, notice({ keys: ['thread-2'] }));
+    expect(mocks.notifications[2].close).toHaveBeenCalledOnce();
+  });
+
   it('opens the Space on the nodes of a clicked notification', () => {
     const a = open('a');
     open('b');
@@ -1622,7 +1638,7 @@ describe('desktop Space Tab lifecycle', () => {
       'tabs:navigate',
       expect.objectContaining({
         canvasId: 'a',
-        state: { focusNodeIds: ['node-1'] },
+        state: { focusNodeIds: ['node-1'], workspaceId: 'workspace' },
       }),
     );
   });
