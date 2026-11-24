@@ -183,6 +183,8 @@ export function executeCanvasEdits(
   const resizedFrameIds = new Set<string>();
 
   // Track whether any command was actually applied.
+  /** Nodes whose paint key a command of the batch itself named. */
+  const placedPaintKeyIds = new Set<string>();
   let anyApplied = false;
 
   const refuseEdit = (
@@ -236,6 +238,7 @@ export function executeCanvasEdits(
     /** In command order: the fill request follows the last layout command. */
     const stagedFrames: Array<{ id: string; fill?: boolean }> = [];
     const stagedResized: string[] = [];
+    const stagedPlacedPaint: string[] = [];
     let failedAt: number | undefined;
 
     for (const [commandIndex, cmd] of edit.commands.entries()) {
@@ -282,6 +285,8 @@ export function executeCanvasEdits(
       );
       editEdges = result.edges;
 
+      if (result.placedPaintKeyIds)
+        stagedPlacedPaint.push(...result.placedPaintKeyIds);
       if (result.mutatedNodes) staged.mutatedNodes.push(...result.mutatedNodes);
       if (result.deletedNodeIds)
         staged.deletedNodeIds.push(...result.deletedNodeIds);
@@ -330,6 +335,7 @@ export function executeCanvasEdits(
     pendingEffects.contentEditedNodeIds.push(...staged.contentEditedNodeIds);
     pendingEffects.deferredFitFrameIds.push(...staged.deferredFitFrameIds);
     for (const id of stagedResized) resizedFrameIds.add(id);
+    for (const id of stagedPlacedPaint) placedPaintKeyIds.add(id);
     for (const frame of stagedFrames) {
       allAffectedFrameIds.add(frame.id);
       if (frame.fill === true) fillFrameIds.add(frame.id);
@@ -440,7 +446,11 @@ export function executeCanvasEdits(
     // follows the keys (see `container/paintOrder.ts`).
     currentNodes = hidePdfNotes(
       normalizeTreeOrder(
-        settlePaintOrder(currentNodes as NestableNode[], state.nodes),
+        settlePaintOrder(
+          currentNodes as NestableNode[],
+          state.nodes,
+          placedPaintKeyIds,
+        ),
       ),
     );
   }
@@ -575,6 +585,7 @@ function runCommand(
     edges: context.edges,
     canvasId: context.canvasId,
     source: context.source,
+    batchPrestate: context.batchPrestate,
   });
 
   // Compare with the batch prestate so CREATE then link may initialize a new Note.

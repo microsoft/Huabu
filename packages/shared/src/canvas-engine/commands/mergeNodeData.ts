@@ -122,6 +122,7 @@ const mergeNodeData: CommandDefinition<Cmd> = {
     const mutatedNodes: Node[] = [];
     const contentEditedNodeIds: string[] = [];
     const placedTrackKeyIds: string[] = [];
+    const placedPaintKeyIds: string[] = [];
     let anyApplied = false;
 
     const nextNodes = state.nodes.map((n) => {
@@ -159,6 +160,8 @@ const mergeNodeData: CommandDefinition<Cmd> = {
       // A patch that names a track key places the node, whatever the key.
       if ('trackKey' in patchRec && patchRec.trackKey !== undefined)
         placedTrackKeyIds.push(n.id);
+      if ('paintKey' in patchRec && patchRec.paintKey !== undefined)
+        placedPaintKeyIds.push(n.id);
       // JSON transports cannot carry `undefined`, so `null` clears the cover.
       if (patchRec.coverUrl === null) delete mergedData.coverUrl;
       if (patchRec.properties !== undefined) {
@@ -231,6 +234,7 @@ const mergeNodeData: CommandDefinition<Cmd> = {
       mutatedNodes,
       ...(contentEditedNodeIds.length > 0 ? { contentEditedNodeIds } : {}),
       ...(placedTrackKeyIds.length > 0 ? { placedTrackKeyIds } : {}),
+      ...(placedPaintKeyIds.length > 0 ? { placedPaintKeyIds } : {}),
     };
   },
 };

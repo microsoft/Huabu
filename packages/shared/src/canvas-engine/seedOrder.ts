@@ -89,8 +89,25 @@ function seedImplicitTrackOrder<T extends NestableNode>(
       incomplete.add(node.parentId as string);
   }
   let seeded = nodes as T[];
-  for (const frameId of incomplete)
-    seeded = withMasonryLayoutOrder(seeded, frameId) as T[];
+  for (const frameId of incomplete) {
+    // A lock refuses changes to a Frame's layout; this records the order it
+    // already reads in, so the order is read as if the Frame were unlocked
+    // and the Frame is put back as stored.
+    const frame = seeded.find((node) => node.id === frameId);
+    const locked = frame?.data?.locked === true;
+    const readable = locked
+      ? seeded.map((node) =>
+          node === frame
+            ? { ...node, data: { ...node.data, locked: false } }
+            : node,
+        )
+      : seeded;
+    const keyed = withMasonryLayoutOrder(readable, frameId) as T[];
+    seeded =
+      locked && frame
+        ? keyed.map((node) => (node.id === frameId ? frame : node))
+        : keyed;
+  }
   return seeded;
 }
 

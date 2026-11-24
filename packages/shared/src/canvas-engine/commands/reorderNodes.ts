@@ -47,7 +47,10 @@ const reorderNodes: CommandDefinition<Cmd> = {
     });
     return {
       applied: true,
-      nodes: settlePaintOrder(reordered),
+      // Against the batch's starting state: a sibling an earlier command of
+      // the batch moved in here still carries the key it had elsewhere and
+      // is read by where it stands.
+      nodes: settlePaintOrder(reordered, state.batchPrestate),
       edges: state.edges,
     };
   },

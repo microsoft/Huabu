@@ -191,8 +191,9 @@ const restoreNodes: CommandDefinition<Cmd> = {
       mutatedNodes: [...incoming.values()].filter(
         (node) => !existing.has(node.id) || keepDataKeys.length === 0,
       ),
-      // A restored node comes back to the place it had, key included.
+      // A restored node comes back to the place it had, keys included.
       placedTrackKeyIds: [...incoming.keys()],
+      placedPaintKeyIds: [...incoming.keys()],
     };
   },
 };
