@@ -72,7 +72,15 @@
   "unseenChanges": {
     "create": "{{conversation}} · 新建",
     "update": "{{conversation}} · 改过",
-    "open": "点击查看对话"
+    "open": "点击查看对话",
+    "untitled": "未命名",
+    "kind": {
+      "create": "新建",
+      "update": "改过"
+    },
+    "others": "还有 {{count}} 条",
+    "go": "点击前往",
+    "dismiss": "右键：标为已看"
   },
   "turnNotices": {
     "done": "做完了",

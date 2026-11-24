@@ -72,7 +72,15 @@
   "unseenChanges": {
     "create": "{{conversation}} · created",
     "update": "{{conversation}} · changed",
-    "open": "Click to open the conversation"
+    "open": "Click to open the conversation",
+    "untitled": "Untitled",
+    "kind": {
+      "create": "created",
+      "update": "changed"
+    },
+    "others": "and {{count}} more",
+    "go": "Click to go there",
+    "dismiss": "Right-click: mark as seen"
   },
   "turnNotices": {
     "done": "Finished",
