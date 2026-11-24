@@ -585,6 +585,22 @@ export async function openBubbleIdentity(options: {
         ),
       );
     };
+    // The Workspaces the caller holds a role in, or a Space in. A Space shared
+    // on its own makes its Workspace enterable; what the caller sees there is
+    // still decided Space by Space.
+    const heldWorkspaces = async (): Promise<Set<string>> => {
+      const ids = new Set<string>();
+      for (const grant of await store.grants.list({ principalId })) {
+        const granted = grant.target;
+        if (!('id' in granted)) continue;
+        if (granted.type === TARGET.workspace) ids.add(granted.id);
+        if (granted.type === TARGET.space) {
+          const space = parseSpaceTargetId(granted.id);
+          if (space) ids.add(space.workspaceId);
+        }
+      }
+      return ids;
+    };
     return {
       principal: identityPrincipalSchema.parse(principal),
       member,
@@ -610,24 +626,30 @@ export async function openBubbleIdentity(options: {
             grantedByPrincipalId: principalId,
           });
         },
-        // A Space shared on its own makes its Workspace enterable; what
-        // the caller sees there is still decided Space by Space.
         workspaces: async () => {
           const policy = await currentPolicy();
           if (!policy) return [];
           if (await policy.can(ADMIN, principalId, { type: 'system' }))
             return 'all';
-          const ids = new Set<string>();
-          for (const grant of await store.grants.list({ principalId })) {
-            const granted = grant.target;
-            if (!('id' in granted)) continue;
-            if (granted.type === TARGET.workspace) ids.add(granted.id);
-            if (granted.type === TARGET.space) {
-              const space = parseSpaceTargetId(granted.id);
-              if (space) ids.add(space.workspaceId);
-            }
-          }
-          return [...ids];
+          return [...(await heldWorkspaces())];
+        },
+        adminAccessOnly: async (workspaceIds) => {
+          const policy = await currentPolicy();
+          if (
+            !policy ||
+            !(await policy.can(ADMIN, principalId, { type: 'system' }))
+          )
+            return workspaceIds.map(() => false);
+          const held = await heldWorkspaces();
+          return Promise.all(
+            workspaceIds.map(
+              async (id) =>
+                !held.has(id) &&
+                // The caller holds nothing here, so any role is someone else's.
+                (await store.grants.list({ type: TARGET.workspace, id }))
+                  .length > 0,
+            ),
+          );
         },
       },
     };

@@ -327,17 +327,37 @@ async function spaceCountIn(
 }
 
 /**
+ * Whether each Workspace is another person's that a personal caller reaches
+ * only as an administrator. `undefined` for a caller without roles, as with
+ * {@link rolesFor}; false throughout where the provider has no such notion.
+ */
+async function adminAccessOnlyFor(
+  request: FastifyRequest,
+  workspaces: readonly WorkspaceHandle[],
+): Promise<readonly (boolean | undefined)[]> {
+  if (!personal(request)) return workspaces.map(() => undefined);
+  const { access } = requireRequestIdentity(request);
+  if (!access.adminAccessOnly) return workspaces.map(() => false);
+  return access.adminAccessOnly(
+    workspaces.map((workspace) => workspace.workspaceId),
+  );
+}
+
+/**
  * Descriptors that also say whether the caller may rename or unregister each
  * Workspace, by the same rules the PATCH and DELETE routes apply, the
- * caller's role there, and how many Spaces it holds for them. A personal
- * caller's checks share one access snapshot per level where the provider
- * batches them.
+ * caller's role there, whether they reach it only as an administrator, and
+ * how many Spaces it holds for them. A personal caller's checks share one
+ * access snapshot per level where the provider batches them.
  */
 async function describeFor(
   request: FastifyRequest,
   workspaces: readonly WorkspaceHandle[],
 ): Promise<WorkspaceDescriptor[]> {
-  const roles = await rolesFor(request, workspaces);
+  const [roles, adminOnly] = await Promise.all([
+    rolesFor(request, workspaces),
+    adminAccessOnlyFor(request, workspaces),
+  ]);
   const manageable = isManagedMode()
     ? workspaces.map(() => false)
     : personal(request)
@@ -353,6 +373,9 @@ async function describeFor(
     ...descriptor(workspace),
     canManage: manageable[index]!,
     ...(roles[index] !== undefined ? { role: roles[index] } : {}),
+    ...(adminOnly[index] !== undefined
+      ? { adminAccessOnly: adminOnly[index] }
+      : {}),
     ...(counts[index] !== undefined ? { spaceCount: counts[index] } : {}),
   }));
 }

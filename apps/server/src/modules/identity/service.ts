@@ -64,6 +64,19 @@ export interface ResourceAccess {
    * enter any registered one.
    */
   workspaces(): Promise<readonly string[] | 'all'>;
+  /**
+   * For each of `workspaceIds`, whether it is another person's Workspace that
+   * the caller reaches only as the deployment's administrator: someone else
+   * holds a role in it, and the caller holds no role there and no Space
+   * shared with them in it. A Workspace nobody holds a role in, such as the
+   * Server's own, is the administrator's. Always false for a caller who is
+   * not an administrator, since they reach only what they hold. Results have
+   * the same length and order as `workspaceIds`.
+   *
+   * Optional: providers without per-person grants omit it, and every
+   * Workspace then counts as the caller's own.
+   */
+  adminAccessOnly?(workspaceIds: readonly string[]): Promise<boolean[]>;
 }
 
 /** Whether an answer from {@link ResourceAccess.workspaces} admits one. */

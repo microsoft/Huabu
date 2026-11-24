@@ -63,7 +63,12 @@ export function WorkspaceSwitcherPopover({
   const { t } = useTranslation();
   const phone = usePhoneWidth();
   const titleId = useId();
-  const workspaces = useWorkspaceStore((s) => s.recentWorkspaces);
+  const recent = useWorkspaceStore((s) => s.recentWorkspaces);
+  // Only the person's own Workspaces and those shared with them. Others an
+  // administrator may open stay in All Workspaces, unless one is current.
+  const workspaces = recent.filter(
+    (workspace) => workspace.active || !workspace.adminAccessOnly,
+  );
   const syncing = useWorkspaceStore((s) => s.isSyncing);
   const refreshWorkspaces = useWorkspaceStore((s) => s.refreshWorkspaces);
   const openSwitcher = useOpenWorkspaceSwitcher();

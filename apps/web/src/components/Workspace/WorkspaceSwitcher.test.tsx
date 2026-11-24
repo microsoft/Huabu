@@ -370,6 +370,48 @@ describe('quick switch popover', () => {
     expect(buttonNamed('workspace.allWorkspaces')).toBeTruthy();
   });
 
+  describe("another person's Workspace an administrator reaches", () => {
+    beforeEach(() => {
+      server.workspaces.push({
+        workspaceId: 'dave',
+        name: "Dave's Workspace",
+        path: null,
+        canManage: true,
+        role: 'owner',
+        adminAccessOnly: true,
+        spaceCount: 2,
+      });
+    });
+    const rowNames = () =>
+      [...dialog()!.querySelectorAll('[role="listitem"]')].map(
+        (row) => row.textContent,
+      );
+
+    it('stays out of the quick switch but in All Workspaces', async () => {
+      await mount();
+      await click(trigger());
+      expect(rowNames()).toEqual([
+        expect.stringContaining('Default'),
+        expect.stringContaining('Research lab'),
+      ]);
+      await click(buttonNamed('workspace.allWorkspaces'));
+      expect(
+        document.querySelector('input[type="radio"][value="dave"]'),
+      ).not.toBeNull();
+    });
+
+    it('stays in the quick switch while it is the current one', async () => {
+      server.current = 'dave';
+      await mount();
+      await click(trigger());
+      expect(rowNames()).toEqual([
+        expect.stringContaining('Default'),
+        expect.stringContaining('Research lab'),
+        expect.stringContaining("Dave's Workspace"),
+      ]);
+    });
+  });
+
   it('cancels with Escape or a click outside, changing nothing', async () => {
     await mount();
     await click(trigger());

@@ -415,6 +415,44 @@ export function describeSeveralPeople(
         canManage: true,
       });
       expect(admin[carolWs]).toMatchObject({ role: 'owner' });
+
+      // Which Workspaces are someone else's, reached only as an administrator.
+      const adminOnly = async (principalId: string) =>
+        Object.fromEntries(
+          (
+            (await call(principalId, 'GET', '/api/workspaces')).body as Array<{
+              workspaceId: string;
+              adminAccessOnly?: boolean;
+            }>
+          ).map(({ workspaceId, adminAccessOnly }) => [
+            workspaceId,
+            adminAccessOnly,
+          ]),
+        );
+      // A Space of carol's shared with the administrator makes her Workspace
+      // one shared with them; the Server's own Workspace, which nobody holds a
+      // role in, is the administrator's.
+      await store.grants.add({
+        target: { type: 'huabu.space', id: `${team.id}:${team.spaces[0]}` },
+        principalId: 'admin',
+        role: 'huabu.space.owner',
+        grantedByPrincipalId: 'carol',
+      });
+      const adminWs = await workspaceOf('admin');
+      expect(await adminOnly('admin')).toEqual({
+        [adminWs]: false,
+        [daveWs]: true,
+        [carolWs]: true,
+        [team.id]: false,
+        [lab.id]: true,
+      });
+      // Everyone else reaches only what they hold.
+      expect(Object.values(await adminOnly('dave'))).toEqual([
+        false,
+        false,
+        false,
+        false,
+      ]);
       // The single-Workspace route describes it the same way.
       expect(
         (await call('dave', 'GET', `/api/workspaces/${lab.id}`)).body,
