@@ -4,6 +4,7 @@
 import { useCallback } from 'react';
 
 import { createId } from '@huabu/shared';
+import { settleInkInterpretation } from '@huabu/shared/ink-interpretation';
 
 import { toast } from '@/components/Common/Toast';
 import {
@@ -87,9 +88,20 @@ function keepRejectedSubmission(
       message.content === prepared.content,
   );
   if (shown) return;
+  const message = createAgentTurnUserMessage(prepared);
   chat.setMessages(threadId, [
     ...messages,
-    createAgentTurnUserMessage(prepared),
+    // A new intent message starts out waiting for its interpretation, and
+    // nothing will settle this one: the turn it belonged to never ran.
+    message.inkInterpretation
+      ? {
+          ...message,
+          inkInterpretation: settleInkInterpretation(
+            message.inkInterpretation,
+            'interrupted',
+          ),
+        }
+      : message,
     {
       id: createId('status'),
       role: 'status',
