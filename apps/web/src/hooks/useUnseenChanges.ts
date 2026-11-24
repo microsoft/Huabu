@@ -6,11 +6,7 @@ import { useEffect, useMemo } from 'react';
 import { useAcpThreadChangesStore } from '@/store/acpThreadChangesStore';
 import useCanvasStore from '@/store/canvasStore';
 import { useSeenChangesStore } from '@/store/seenChangesStore';
-import {
-  threadSeenKeys,
-  unseenMarks,
-  type UnseenMark,
-} from '@/utils/unseenChanges';
+import { unseenMarks, type UnseenMark } from '@/utils/unseenChanges';
 
 /**
  * The marks, each with the conversation that changed the node last put
@@ -151,14 +147,6 @@ export function useTrackUnseenChanges(canvasId: string | undefined): void {
       marked = only !== null && readUnseenMarks().has(only);
     };
 
-    const forget = () => {
-      const { byThread } = useAcpThreadChangesStore.getState();
-      const { seen, retain } = useSeenChangesStore.getState();
-      for (const threadId of Object.keys(seen))
-        if (byThread[threadId])
-          retain(threadId, threadSeenKeys(byThread[threadId]));
-    };
-
     // The canvas store changes on every pointer tick of a drag; reading all
     // nodes that often would cost more than the marks are worth.
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -170,10 +158,7 @@ export function useTrackUnseenChanges(canvasId: string | undefined): void {
       }, FOLLOW_MS);
     };
     const unsubscribeCanvas = useCanvasStore.subscribe(follow);
-    const unsubscribeChanges = useAcpThreadChangesStore.subscribe(() => {
-      forget();
-      follow();
-    });
+    const unsubscribeChanges = useAcpThreadChangesStore.subscribe(follow);
     load();
     return () => {
       live = false;

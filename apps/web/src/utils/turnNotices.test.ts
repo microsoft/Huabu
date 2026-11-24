@@ -31,6 +31,12 @@ const thread = (patch: {
   completedTurnId?: string;
 }) => ({ messages: [], isStreaming: false, ...patch });
 
+/** Read with every given thread owned by the Space. */
+const readAll = (
+  nodes: Parameters<typeof readConversations>[0],
+  threads: Parameters<typeof readConversations>[1],
+) => readConversations(nodes, threads, new Set(Object.keys(threads)));
+
 const wording = {
   done: 'Finished',
   error: 'Failed',
@@ -53,30 +59,28 @@ describe('turn watcher', () => {
   it('reports nothing for what a page finds when it opens', () => {
     const watcher = createTurnWatcher();
     const nodes = [question('n1', { threadId: 't1', status: 'done' })];
-    expect(watcher.take(readConversations(nodes, {}))).toEqual([]);
+    expect(watcher.take(readAll(nodes, {}))).toEqual([]);
     // History arriving afterwards is not news either.
     const loaded = {
       t1: thread({
         messages: [{ id: 'm3', role: 'status', status: 'error' }],
       }),
     };
-    expect(watcher.take(readConversations(nodes, loaded))).toEqual([]);
+    expect(watcher.take(readAll(nodes, loaded))).toEqual([]);
   });
 
   it('reports a turn that ran here with the opening of its reply', () => {
     const watcher = createTurnWatcher();
     const nodes = [question('n1', { threadId: 't1' })];
-    watcher.take(readConversations(nodes, { t1: thread({}) }));
-    watcher.take(
-      readConversations(nodes, { t1: thread({ isStreaming: true }) }),
-    );
+    watcher.take(readAll(nodes, { t1: thread({}) }));
+    watcher.take(readAll(nodes, { t1: thread({ isStreaming: true }) }));
     const done = {
       t1: thread({
         completedTurnId: 'm2',
         messages: [reply('The plan is ready. Details below.')],
       }),
     };
-    expect(watcher.take(readConversations(nodes, done))).toEqual([
+    expect(watcher.take(readAll(nodes, done))).toEqual([
       {
         key: 't1',
         kind: 'done',
@@ -85,16 +89,14 @@ describe('turn watcher', () => {
         text: 'The plan is ready.',
       },
     ]);
-    expect(watcher.take(readConversations(nodes, done))).toEqual([]);
+    expect(watcher.take(readAll(nodes, done))).toEqual([]);
   });
 
   it('reports a conversation running elsewhere through its node', () => {
     const watcher = createTurnWatcher();
-    watcher.take(
-      readConversations([question('n1', { status: 'running' })], {}),
-    );
+    watcher.take(readAll([question('n1', { status: 'running' })], {}));
     const events = watcher.take(
-      readConversations(
+      readAll(
         [question('n1', { status: 'error', errorMessage: 'No quota' })],
         {},
       ),
@@ -117,22 +119,40 @@ describe('turn watcher', () => {
         ],
       }),
     };
-    watcher.take(readConversations([], { t1: thread({ isStreaming: true }) }));
-    expect(watcher.take(readConversations([], waiting))).toMatchObject([
+    watcher.take(readAll([], { t1: thread({ isStreaming: true }) }));
+    expect(watcher.take(readAll([], waiting))).toMatchObject([
       { key: 't1', kind: 'approval', nodeId: null },
     ]);
-    expect(watcher.take(readConversations([], waiting))).toEqual([]);
+    expect(watcher.take(readAll([], waiting))).toEqual([]);
     expect(
-      watcher.take(
-        readConversations([], { t1: thread({ completedTurnId: 'm2' }) }),
-      ),
+      watcher.take(readAll([], { t1: thread({ completedTurnId: 'm2' }) })),
     ).toMatchObject([{ kind: 'done' }]);
   });
 
   it('reports nothing for a turn the person stopped', () => {
     const watcher = createTurnWatcher();
-    watcher.take(readConversations([], { t1: thread({ isStreaming: true }) }));
-    expect(watcher.take(readConversations([], { t1: thread({}) }))).toEqual([]);
+    watcher.take(readAll([], { t1: thread({ isStreaming: true }) }));
+    expect(watcher.take(readAll([], { t1: thread({}) }))).toEqual([]);
+  });
+});
+
+describe('readConversations', () => {
+  it('leaves out a thread that belongs to another Space', () => {
+    const threads = {
+      mine: thread({ isStreaming: true }),
+      theirs: thread({ isStreaming: true }),
+    };
+    expect([
+      ...readConversations([], threads, new Set(['mine'])).keys(),
+    ]).toEqual(['mine']);
+    // A Question node names its own thread, whatever else is owned.
+    expect([
+      ...readConversations(
+        [question('n1', { threadId: 'theirs' })],
+        threads,
+        new Set(),
+      ).keys(),
+    ]).toEqual(['theirs']);
   });
 });
 
@@ -153,20 +173,20 @@ describe('unseenIn', () => {
       question('n3', { status: 'done', viewed: true, threadId: 't3' }),
       question('n4', { status: 'running' }),
     ];
-    expect(unseenIn(readConversations(nodes, {}))).toEqual({
+    expect(unseenIn(readAll(nodes, {}))).toEqual({
       attention: 'done',
       unseen: 1,
     });
     // A bare thread records no viewing; it can only await an approval.
     expect(
       unseenIn(
-        readConversations(nodes, {
+        readAll(nodes, {
           t3: waiting,
           t9: thread({ completedTurnId: 'm2' }),
         }),
       ),
     ).toEqual({ attention: 'approval', unseen: 2 });
-    expect(unseenIn(readConversations([], {}))).toEqual({
+    expect(unseenIn(readAll([], {}))).toEqual({
       attention: null,
       unseen: 0,
     });

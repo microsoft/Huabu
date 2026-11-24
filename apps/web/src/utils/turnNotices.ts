@@ -113,6 +113,11 @@ function lastReply(messages: ChatMessage[]): string {
 export function readConversations(
   nodes: readonly NodeLike[],
   threadsById: Readonly<Record<string, ThreadLike>>,
+  /**
+   * The threads this Space owns besides those its Question nodes name. The
+   * chat store keeps threads of other Spaces too; those are not read.
+   */
+  standalone: ReadonlySet<string>,
 ): Map<string, ConversationReading> {
   const readings = new Map<string, ConversationReading>();
   const seen = new Set<string>();
@@ -173,8 +178,10 @@ export function readConversations(
       threadId ? threadsById[threadId] : undefined,
     );
   }
-  for (const [threadId, thread] of Object.entries(threadsById))
-    if (!seen.has(threadId)) read(threadId, undefined, thread);
+  for (const threadId of standalone) {
+    const thread = threadsById[threadId];
+    if (thread && !seen.has(threadId)) read(threadId, undefined, thread);
+  }
   return readings;
 }
 

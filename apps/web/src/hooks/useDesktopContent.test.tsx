@@ -112,7 +112,7 @@ vi.mock('@/store/canvasStore', () => ({
 }));
 vi.mock('@/store/chatStore', () => ({
   useChatStore: {
-    getState: () => ({ threadsById: {} }),
+    getState: () => ({ threadsById: {}, threadMap: {} }),
     subscribe: () => () => {},
   },
 }));

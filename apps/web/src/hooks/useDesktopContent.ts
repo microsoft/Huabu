@@ -14,6 +14,7 @@ import { useChatStore } from '@/store/chatStore';
 import { ConversationTitleSaveError } from '@/store/conversationTitleStore';
 import { useDesktopTabStore } from '@/store/desktopTabStore';
 import { useSettingsUiStore } from '@/store/settingsUiStore';
+import { standaloneThreadsOf } from '@/store/spaceThreads';
 import { useToolStore } from '@/store/toolStore';
 import { useWorkspaceStore } from '@/store/workspaceStore';
 import {
@@ -273,12 +274,13 @@ export function useDesktopContent(): {
             (node) => getQuestionNodeStatus(node.data) === 'running',
           ) || threads.some(([, thread]) => thread.isStreaming),
         ...unseenIn(
-          readConversations(
-            tabs.context.role === 'space' ? canvas.nodes : [],
-            tabs.context.role === 'space'
-              ? useChatStore.getState().threadsById
-              : {},
-          ),
+          tabs.context.role === 'space'
+            ? readConversations(
+                canvas.nodes,
+                useChatStore.getState().threadsById,
+                standaloneThreadsOf(canvas.canvasId),
+              )
+            : new Map(),
         ),
         error: canvas.canvasNotFound
           ? 'Space no longer exists'

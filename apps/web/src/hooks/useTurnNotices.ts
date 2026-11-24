@@ -7,6 +7,7 @@ import { useNavigate } from 'react-router-dom';
 import { i18n } from '@/i18n';
 import useCanvasStore from '@/store/canvasStore';
 import { useChatStore } from '@/store/chatStore';
+import { standaloneThreadsOf } from '@/store/spaceThreads';
 import { useWorkspaceStore } from '@/store/workspaceStore';
 import { readNoticePreferences } from '@/utils/turnNoticePreferences';
 import {
@@ -115,7 +116,11 @@ export function useTurnNotices(canvasId: string | undefined): void {
       const canvas = useCanvasStore.getState();
       if (canvas.canvasId !== canvasId || canvas.isLoading) return;
       const events = watcher.take(
-        readConversations(canvas.nodes, useChatStore.getState().threadsById),
+        readConversations(
+          canvas.nodes,
+          useChatStore.getState().threadsById,
+          standaloneThreadsOf(canvasId),
+        ),
       );
       if (events.length === 0) return;
       gathered.push(...events);
