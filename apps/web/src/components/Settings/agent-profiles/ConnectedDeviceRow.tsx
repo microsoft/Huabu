@@ -7,6 +7,7 @@ import {
   MoreHorizontal,
   Pencil,
   Plus,
+  RefreshCw,
 } from 'lucide-react';
 import { useEffect, useId, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -39,7 +40,7 @@ export function ConnectedDeviceRow({
   onAdd,
   addRef,
   onReconnect,
-  reconnectRef,
+  actionsRef,
   profileCount = 0,
 }: {
   device: AgentletDevice;
@@ -54,11 +55,12 @@ export function ConnectedDeviceRow({
   onAdd?: () => void;
   addRef?: Ref<HTMLButtonElement>;
   /**
-   * Shows Reconnect beside Not connected on an offline device other than
-   * this one, leading to the command to run again on that device.
+   * Adds Reconnect to the actions menu of an offline device other than this
+   * one, leading to the command to run again on that device.
    */
   onReconnect?: () => void;
-  reconnectRef?: Ref<HTMLButtonElement>;
+  /** The device's actions (…) button, where focus returns from Reconnect. */
+  actionsRef?: Ref<HTMLButtonElement>;
   profileCount?: number;
 }) {
   const { t } = useTranslation();
@@ -182,27 +184,9 @@ export function ConnectedDeviceRow({
         <div className="flex flex-wrap items-center justify-end gap-1">
           {!editing && connectionControls}
           {!online && !isLocalDevice && (
-            <span
-              role="status"
-              // At phone width Reconnect alone says the device is offline,
-              // leaving room for its name; screen readers still hear both.
-              className={`text-fg-muted px-2 text-xs ${onReconnect && !editing ? 'max-sm:sr-only' : ''}`}
-            >
+            <span role="status" className="text-fg-muted px-2 text-xs">
               {t('settings.localAgentDisabled')}
             </span>
-          )}
-          {!online && !isLocalDevice && onReconnect && !editing && (
-            <Button
-              variant="outline"
-              size="field"
-              ref={reconnectRef}
-              aria-label={t('settings.reconnectDevice', {
-                device: device.displayName,
-              })}
-              onClick={onReconnect}
-            >
-              {t('settings.localAgentReconnect')}
-            </Button>
           )}
           {online && onAdd && !editing && (
             <Button
@@ -244,7 +228,11 @@ export function ConnectedDeviceRow({
               align="bottom-right"
               trigger={
                 <Button
-                  ref={renameRef}
+                  ref={(element: HTMLButtonElement | null) => {
+                    renameRef.current = element;
+                    if (typeof actionsRef === 'function') actionsRef(element);
+                    else if (actionsRef) actionsRef.current = element;
+                  }}
                   variant="ghost"
                   size="field"
                   iconOnly
@@ -267,6 +255,17 @@ export function ConnectedDeviceRow({
                   }}
                 >
                   {t('settings.renameDevice')}
+                </DropdownMenuItem>
+              )}
+              {!online && !isLocalDevice && onReconnect && (
+                <DropdownMenuItem
+                  icon={<RefreshCw />}
+                  onClick={() => {
+                    onMenuOpenChange?.(false);
+                    onReconnect();
+                  }}
+                >
+                  {t('settings.localAgentReconnect')}
                 </DropdownMenuItem>
               )}
               {menuItems}

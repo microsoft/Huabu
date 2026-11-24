@@ -39,7 +39,7 @@ export function ConnectedDevicesSetting({
   onAdd,
   addRef,
   onReconnect,
-  reconnectRef,
+  actionsRef,
 }: {
   profiles?: AgentProfileView[];
   renderProfile?: (profile: AgentProfileView) => ReactNode;
@@ -47,7 +47,8 @@ export function ConnectedDevicesSetting({
   addRef?: (agentletId: string) => Ref<HTMLButtonElement>;
   /** Opens the connection command to run again on an offline device. */
   onReconnect?: (device: AgentletDevice) => void;
-  reconnectRef?: (agentletId: string) => Ref<HTMLButtonElement>;
+  /** Each device's actions (…) button, where focus returns from Reconnect. */
+  actionsRef?: (agentletId: string) => Ref<HTMLButtonElement>;
 }) {
   const { t } = useTranslation();
   const bridge = getElectronBridge();
@@ -308,7 +309,7 @@ export function ConnectedDevicesSetting({
             onAdd={onAdd ? () => onAdd(device.agentletId) : undefined}
             addRef={addRef?.(device.agentletId)}
             onReconnect={onReconnect ? () => onReconnect(device) : undefined}
-            reconnectRef={reconnectRef?.(device.agentletId)}
+            actionsRef={actionsRef?.(device.agentletId)}
             profileCount={deviceProfiles.length}
           >
             {deviceProfiles.map((profile) => renderProfile?.(profile))}

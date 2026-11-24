@@ -325,14 +325,22 @@ describe('ExternalAgentsSettings', () => {
     expect(onNavigationChange.mock.lastCall?.[0]).toBeNull();
   });
 
-  it('offers Reconnect on an offline device, leading to its command and back', async () => {
+  it('offers Reconnect in an offline device menu, leading to its command and back', async () => {
     await renderSettings();
-    const reconnect = () =>
+    const actions = () =>
       container?.querySelector<HTMLButtonElement>(
-        'button[aria-label="settings.reconnectDevice"]',
+        '[data-device-id="local"] button[aria-label="settings.deviceActions"]',
       );
+    const reconnect = () =>
+      [...document.querySelectorAll('[role="menuitem"]')].find(
+        (item) => item.textContent === 'settings.localAgentReconnect',
+      ) as HTMLElement | undefined;
     // An online device has nothing to reconnect.
-    expect(reconnect()).toBeNull();
+    await act(async () => actions()?.click());
+    expect(document.querySelector('[role="menu"]')).toBeTruthy();
+    expect(reconnect()).toBeUndefined();
+    await act(async () => actions()?.click());
+
     const device = useAcpProfilesStore.getState().connectedDevices[0];
     await act(async () =>
       useAcpProfilesStore.setState({
@@ -342,10 +350,12 @@ describe('ExternalAgentsSettings', () => {
     );
     const row = container?.querySelector('[data-device-id="local"]');
     expect(row?.textContent).toContain('settings.localAgentDisabled');
-    expect(reconnect()?.closest('[data-device-id]')).toBe(row);
-    expect(reconnect()?.textContent).toBe('settings.localAgentReconnect');
+    // Reconnect lives in the menu, not beside the status.
+    expect(row?.textContent).not.toContain('settings.localAgentReconnect');
+    await act(async () => actions()?.click());
+    expect(reconnect()).toBeTruthy();
 
-    await click('settings.reconnectDevice');
+    await act(async () => reconnect()?.click());
     // The usual command, introduced as one to run again on that device.
     expect(container?.textContent).toContain('git clone');
     expect(container?.textContent).toContain('settings.agentletCommandCopy');
@@ -359,7 +369,8 @@ describe('ExternalAgentsSettings', () => {
     expect(navigation?.title).toBe('settings.reconnectDevice');
 
     await act(async () => navigation.onBack());
-    expect(document.activeElement).toBe(reconnect());
+    expect(document.activeElement).toBe(actions());
+    expect(document.querySelector('[role="menu"]')).toBeNull();
     expect(container?.textContent).not.toContain('git clone');
   });
 

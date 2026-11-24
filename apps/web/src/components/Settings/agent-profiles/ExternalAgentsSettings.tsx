@@ -436,7 +436,7 @@ export function ExternalAgentsSettings({
                       `reconnect:${device.agentletId}`,
                     )
                   }
-                  reconnectRef={(agentletId) =>
+                  actionsRef={(agentletId) =>
                     restoreTriggerFocus(`reconnect:${agentletId}`)
                   }
                 />
