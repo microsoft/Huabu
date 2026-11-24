@@ -17,6 +17,7 @@ import { Virtuoso } from 'react-virtuoso';
 import { Button } from '@/components/Common/Button';
 import { Loading } from '@/components/Common/Loading';
 import { ThinkingIndicator } from '@/components/Common/ThinkingIndicator';
+import { ToastCard } from '@/components/Common/Toast';
 import { hashSearchSource } from '@/hooks/useSearchSource';
 import { historyMessageIds } from '@/store/chatHistoryCache';
 import {
@@ -59,7 +60,8 @@ interface MessageListProps {
   onLoadHistoryPage?: (page: ChatHistoryPage) => void;
   onVisibleMessagesChange?: (ids: string[]) => void;
   historyPageError?: string;
-  onRetryHistoryPage?: () => void;
+  /** Retries whichever history read failure the alert is showing. */
+  onRetryHistory?: () => void;
   viewKey?: string;
   isActive?: boolean;
   openPosition?: MessageListPreferredPosition;
@@ -130,7 +132,7 @@ function VirtualMessageList({
   onLoadHistoryPage,
   onVisibleMessagesChange,
   historyPageError,
-  onRetryHistoryPage,
+  onRetryHistory,
   viewKey,
   isActive = true,
   openPosition = 'bottom',
@@ -1046,18 +1048,18 @@ function VirtualMessageList({
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
       {pageError ? (
-        <div
-          role="alert"
-          className="border-edge-default bg-surface text-danger absolute top-2 left-1/2 z-10 flex w-max max-w-[calc(100%-1.5rem)] -translate-x-1/2 items-center justify-center gap-2 rounded-md border px-3 py-1 text-xs shadow-lg"
-        >
-          <span>{pageError}</span>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={historyPageError ? onRetryHistoryPage : onLoadOlderHistory}
-          >
-            {t('messages.retry')}
-          </Button>
+        <div className="pointer-events-none absolute inset-x-3 top-2 z-10 flex justify-center">
+          <ToastCard
+            role="alert"
+            tone="danger"
+            message={pageError}
+            action={
+              onRetryHistory && {
+                label: t('messages.retry'),
+                onClick: onRetryHistory,
+              }
+            }
+          />
         </div>
       ) : null}
       {isLoadingOlderHistory && !showScrollLoading ? (
