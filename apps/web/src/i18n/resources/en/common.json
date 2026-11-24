@@ -1404,7 +1404,6 @@
     "partialStrokeCount_other": "{{count}} strokes"
   },
   "messages": {
-    "seeMore": "See more",
     "detailsLoading": "Loading details…",
     "detailsLoadFailed": "Could not load details.",
     "listLabel": "Conversation messages",
