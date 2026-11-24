@@ -10,7 +10,11 @@ import {
   useWorkspaceSwitch,
   useWorkspaceSwitchRoute,
 } from './useWorkspaceSwitch';
-import { CreateWorkspaceFields, WorkspaceList } from './WorkspaceList';
+import {
+  CreateWorkspaceFields,
+  isOwnWorkspace,
+  WorkspaceList,
+} from './WorkspaceList';
 import {
   useWorkspaceLabel,
   useWorkspaceStore,
@@ -18,11 +22,13 @@ import {
 import { useWorkspaceSwitcherUiStore } from '../../store/workspaceSwitcherUiStore';
 import { Button } from '../Common/Button';
 import { Modal } from '../Common/Modal';
+import { Toggle } from '../Common/Toggle';
 
 /**
  * The Switch Workspace dialog: the full chooser for named Workspaces. It says
- * what a Workspace is, lists them all with the same rows as the quick switch,
- * and can create one. Choosing a row only marks it; Switch commits, and
+ * what a Workspace is, lists the person's Workspaces with the same rows as the
+ * quick switch, and can create one. An administrator can also show other
+ * people's Workspaces, which stay hidden until they turn that on. Choosing a row only marks it; Switch commits, and
  * Cancel or Escape leaves everything as it was. Creating (or opening a
  * folder) keeps the dialog open until the new Workspace is current, so a
  * failure leaves the typed name in place to retry. Focus stays inside while
@@ -60,7 +66,7 @@ function OpenWorkspaceSwitcherDialog() {
   const { t } = useTranslation();
   const intent = useWorkspaceSwitcherUiStore((s) => s.intent);
   const close = useWorkspaceSwitcherUiStore((s) => s.close);
-  const workspaces = useWorkspaceStore((s) => s.recentWorkspaces);
+  const everyWorkspace = useWorkspaceStore((s) => s.recentWorkspaces);
   const currentId = useWorkspaceStore((s) => s.workspaceId);
   const syncing = useWorkspaceStore((s) => s.isSyncing);
   const folders = useWorkspaceStore(
@@ -74,6 +80,14 @@ function OpenWorkspaceSwitcherDialog() {
   const nameInput = useRef<HTMLInputElement>(null);
   const firstFocus = useRef<HTMLElement | null>(null);
   const listLabel = useId();
+  const [showOthers, setShowOthers] = useState(false);
+  // Only an administrator has other people's Workspaces to show.
+  const hasOthers = everyWorkspace.some(
+    (workspace) => !isOwnWorkspace(workspace),
+  );
+  const workspaces = showOthers
+    ? everyWorkspace
+    : everyWorkspace.filter(isOwnWorkspace);
 
   useEffect(() => {
     void refreshWorkspaces();
@@ -132,6 +146,22 @@ function OpenWorkspaceSwitcherDialog() {
       <span id={listLabel} className="sr-only">
         {t('workspace.yourWorkspaces')}
       </span>
+      {hasOthers && (
+        <div className="text-fg-muted mt-4 flex items-center justify-end gap-2 text-xs">
+          <span aria-hidden>{t('workspace.showOthers')}</span>
+          <Toggle
+            label={t('workspace.showOthers')}
+            checked={showOthers}
+            disabled={busy}
+            onChange={(next) => {
+              setShowOthers(next);
+              // A hidden row cannot stay marked for Switch.
+              if (!next && selected && !isOwnWorkspace(selected))
+                setSelectedId(currentId);
+            }}
+          />
+        </div>
+      )}
       {/* Enter on a marked row switches, like the Switch button. */}
       {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions -- Enter is a shortcut for the footer's Switch button, which stays the accessible control. */}
       <div

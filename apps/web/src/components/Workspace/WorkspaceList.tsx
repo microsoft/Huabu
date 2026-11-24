@@ -34,6 +34,16 @@ import type { TFunction } from 'i18next';
  */
 
 /** "Owner · 8 Spaces"; either part is left out when the server did not send it. */
+/**
+ * Whether the person's own lists show it by default: Workspaces of their own
+ * and those shared with them. Another person's Workspace an administrator
+ * reaches only through that role (`adminAccessOnly`) is left out, unless it
+ * is the current one, so the person still sees where they are.
+ */
+export function isOwnWorkspace(workspace: WorkspaceDescriptor): boolean {
+  return workspace.active || !workspace.adminAccessOnly;
+}
+
 export function workspaceDetail(
   t: TFunction,
   workspace: Pick<WorkspaceDescriptor, 'role' | 'spaceCount'>,

@@ -775,6 +775,7 @@
     "switcherButton": "{{workspace}}, Switch Workspace",
     "newWorkspaceEllipsis": "New Workspace…",
     "allWorkspaces": "All Workspaces…",
+    "showOthers": "Show other people’s Workspaces",
     "explainer": "A Workspace holds its own Spaces and people. Switching changes what you see; nothing moves.",
     "dialogIntro": "Each Workspace has its own Spaces and its own people. You’re in {{workspace}}.",
     "dialogIntroNone": "Each Workspace has its own Spaces and its own people.",

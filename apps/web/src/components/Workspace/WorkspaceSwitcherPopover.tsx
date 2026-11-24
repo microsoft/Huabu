@@ -13,7 +13,7 @@ import { useTranslation } from 'react-i18next';
 
 import { useOpenWorkspaceSwitcher } from './useOpenWorkspaceSwitcher';
 import { useWorkspaceSwitch } from './useWorkspaceSwitch';
-import { WorkspaceList } from './WorkspaceList';
+import { isOwnWorkspace, WorkspaceList } from './WorkspaceList';
 import { useWorkspaceStore } from '../../store/workspaceStore';
 import { Button } from '../Common/Button';
 import { Modal } from '../Common/Modal';
@@ -64,11 +64,8 @@ export function WorkspaceSwitcherPopover({
   const phone = usePhoneWidth();
   const titleId = useId();
   const recent = useWorkspaceStore((s) => s.recentWorkspaces);
-  // Only the person's own Workspaces and those shared with them. Others an
-  // administrator may open stay in All Workspaces, unless one is current.
-  const workspaces = recent.filter(
-    (workspace) => workspace.active || !workspace.adminAccessOnly,
-  );
+  // Others an administrator may open are listed in All Workspaces on request.
+  const workspaces = recent.filter(isOwnWorkspace);
   const syncing = useWorkspaceStore((s) => s.isSyncing);
   const refreshWorkspaces = useWorkspaceStore((s) => s.refreshWorkspaces);
   const openSwitcher = useOpenWorkspaceSwitcher();

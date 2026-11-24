@@ -387,7 +387,14 @@ describe('quick switch popover', () => {
         (row) => row.textContent,
       );
 
-    it('stays out of the quick switch but in All Workspaces', async () => {
+    const dave = () =>
+      document.querySelector('input[type="radio"][value="dave"]');
+    const showOthers = () =>
+      document.querySelector<HTMLButtonElement>(
+        'button[role="switch"][aria-label="workspace.showOthers"]',
+      );
+
+    it('stays out of the quick switch, and out of All Workspaces until asked for', async () => {
       await mount();
       await click(trigger());
       expect(rowNames()).toEqual([
@@ -395,9 +402,20 @@ describe('quick switch popover', () => {
         expect.stringContaining('Research lab'),
       ]);
       await click(buttonNamed('workspace.allWorkspaces'));
+      expect(dave()).toBeNull();
+      expect(showOthers()?.getAttribute('aria-checked')).toBe('false');
+
+      await click(showOthers()!);
+      expect(dave()).not.toBeNull();
+      // Marked, then hidden again: Switch has nothing hidden to act on.
+      await click(dave() as HTMLElement);
+      expect(buttonNamed(/workspace.switchTo/)).toBeTruthy();
+      await click(showOthers()!);
+      expect(dave()).toBeNull();
       expect(
-        document.querySelector('input[type="radio"][value="dave"]'),
-      ).not.toBeNull();
+        document.querySelector<HTMLInputElement>('input[type="radio"]:checked')
+          ?.value,
+      ).toBe('default');
     });
 
     it('stays in the quick switch while it is the current one', async () => {
@@ -410,6 +428,13 @@ describe('quick switch popover', () => {
         expect.stringContaining("Dave's Workspace"),
       ]);
     });
+  });
+
+  it("offers no switch for other people's Workspaces when there are none", async () => {
+    await mount();
+    await click(trigger());
+    await click(buttonNamed('workspace.allWorkspaces'));
+    expect(document.querySelector('button[role="switch"]')).toBeNull();
   });
 
   it('cancels with Escape or a click outside, changing nothing', async () => {

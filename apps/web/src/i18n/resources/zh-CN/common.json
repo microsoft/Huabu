@@ -775,6 +775,7 @@
     "switcherButton": "{{workspace}}，切换工作区",
     "newWorkspaceEllipsis": "新建工作区…",
     "allWorkspaces": "所有工作区…",
+    "showOthers": "显示其他人的工作区",
     "explainer": "每个工作区都有自己的 Space 和成员。切换只改变你看到的内容，不会移动任何东西。",
     "dialogIntro": "每个工作区都有自己的 Space 和成员。你当前在“{{workspace}}”。",
     "dialogIntroNone": "每个工作区都有自己的 Space 和成员。",
