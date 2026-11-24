@@ -30,6 +30,7 @@ import {
   stopAgentTurn,
 } from './agentTurnController';
 
+import type { PreparedAgentTurn } from './agentTurnController';
 import type { ChatSession } from './useChatSession';
 import type { ChatMessage } from '@/store/chatTypes';
 import type { AgentMode } from '@huabu/shared';
@@ -65,6 +66,37 @@ export interface UseAgentStreamReturn {
     mode: AgentMode,
   ) => Promise<void>;
   stopStream: () => void;
+}
+
+/**
+ * Put a submission the server confirmed it never accepted back in the
+ * transcript as a local message the user can resend. A started send normally
+ * still shows its own message; a history refresh that ran before the rejection
+ * was known has dropped it.
+ */
+function keepRejectedSubmission(
+  threadId: string,
+  prepared: PreparedAgentTurn,
+): void {
+  const chat = useChatStore.getState();
+  const messages = selectThreadMessages(chat, threadId);
+  const shown = messages.some(
+    (message) =>
+      message.role === 'user' &&
+      !message.historyTurnId &&
+      message.content === prepared.content,
+  );
+  if (shown) return;
+  chat.setMessages(threadId, [
+    ...messages,
+    createAgentTurnUserMessage(prepared),
+    {
+      id: createId('status'),
+      role: 'status',
+      status: 'interrupted',
+      localOnly: true,
+    },
+  ]);
 }
 
 export function useAgentStream(
@@ -206,27 +238,9 @@ export function useAgentStream(
             ]);
             return;
           }
-          // A started send normally still shows its own message. A history
-          // refresh that ran before the server rejected it has dropped that
-          // message, and the composer now holds something newer, so put the
-          // submission back as a local message the user can resend.
-          const shown = messages.some(
-            (message) =>
-              message.role === 'user' &&
-              !message.historyTurnId &&
-              message.content === prepared.content,
-          );
-          if (shown) return;
-          current.setMessages(session.threadId, [
-            ...messages,
-            createAgentTurnUserMessage(prepared),
-            {
-              id: createId('status'),
-              role: 'status',
-              status: 'interrupted',
-              localOnly: true,
-            },
-          ]);
+          // The composer now holds something newer, so the submission goes
+          // back to the transcript instead.
+          keepRejectedSubmission(session.threadId, prepared);
         };
         chat.consumeDraft(session.threadId, draft, quotedComments);
         chat.setExcludeCanvasSelection(session.threadId, false);
@@ -276,8 +290,12 @@ export function useAgentStream(
           resumeAgentTurnQueue(session);
           return;
         }
-        await dispatchAgentTurn(prepareAgentTurnRetry(session, message, mode), {
+        const prepared = prepareAgentTurnRetry(session, message, mode);
+        await dispatchAgentTurn(prepared, {
           canDispatch,
+          // A resend came from the transcript, so that is where it returns.
+          onAcceptanceRejected: () =>
+            keepRejectedSubmission(session.threadId, prepared),
         });
       } catch (error) {
         toast(error instanceof Error ? error.message : String(error), {
