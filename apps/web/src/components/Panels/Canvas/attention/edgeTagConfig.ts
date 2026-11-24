@@ -37,8 +37,11 @@ export const EDGE_TAG_CONFIG: EdgeTagConfig = {
   bottomLeftClearance: 96,
   /** How far a tag on the bottom edge stays from the right end; 0 with no minimap. */
   bottomRightClearance: 0,
-  /** The width kept free in the middle of the bottom edge, for the toolbar. */
-  bottomToolbarWidth: 470,
+  /**
+   * The space kept between a tag on the bottom edge and the main toolbar,
+   * in screen px. The toolbar itself is measured as it is drawn.
+   */
+  toolbarGap: 16,
   /** The diameter of a tag's dot, in screen px. The number in it is sized from it. */
   dotSize: 22,
   /** How broad the pointer beside the dot is, in screen px; its length follows. */

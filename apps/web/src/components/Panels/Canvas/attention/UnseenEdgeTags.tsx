@@ -21,6 +21,7 @@ import {
   type EdgeTag,
   type MarkedAs,
   type MarkedNode,
+  type Span,
 } from '@/utils/unseenEdgeTags';
 
 import { EDGE_TAG_CONFIG } from './edgeTagConfig';
@@ -105,31 +106,79 @@ function pointerShape(
   };
 }
 
+/** The canvas's main toolbar, wherever it is mounted. */
+const findToolbar = (domNode: HTMLDivElement): Element | null =>
+  document.querySelector('[data-canvas-main-toolbar]') ??
+  domNode.querySelector('.react-flow__panel.bottom.center');
+
 /**
- * The visible canvas within the React Flow container: the container less
- * what the side panels cover. Followed as the container is resized and as
- * the panels open, close and are dragged wider.
+ * Where tags may go: the visible canvas within the React Flow container —
+ * the container less what the side panels cover — and the span of its bottom
+ * edge the main toolbar takes, both in the container's px.
+ *
+ * The toolbar is measured, not assumed: it is wider with a finger or a pen
+ * than with a mouse, and wider again in some Spaces. Both are read again when
+ * the container, a side panel or the toolbar changes size.
  */
-function useVisibleArea(domNode: HTMLDivElement | null): Rect | null {
+function useCanvasRoom(domNode: HTMLDivElement | null): {
+  area: Rect | null;
+  toolbar: Span | null;
+} {
   const width = useStore((state) => state.width);
   const height = useStore((state) => state.height);
-  const [area, setArea] = useState<Rect | null>(null);
-  // Read again when the container changes size, and when a panel does: the
-  // panels' widths are custom properties on the layout's style.
+  const [room, setRoom] = useState<{ area: Rect | null; toolbar: Span | null }>(
+    { area: null, toolbar: null },
+  );
   useLayoutEffect(() => {
     if (!domNode) {
-      setArea(null);
+      setRoom({ area: null, toolbar: null });
       return;
     }
-    const read = () => setArea(getCanvasVisibleArea(domNode));
+    const resized =
+      typeof ResizeObserver === 'undefined'
+        ? undefined
+        : new ResizeObserver(() => read());
+    let watched: Element | null = null;
+    const read = () => {
+      const found = findToolbar(domNode);
+      if (found !== watched) {
+        if (watched) resized?.unobserve(watched);
+        if (found) resized?.observe(found);
+        watched = found;
+      }
+      const container = domNode.getBoundingClientRect();
+      const box = found?.getBoundingClientRect();
+      const toolbar =
+        box && box.width > 0
+          ? { from: box.left - container.left, to: box.right - container.left }
+          : null;
+      const area = getCanvasVisibleArea(domNode);
+      // The same room is the same object, so nothing is drawn again for it.
+      setRoom((current) =>
+        current.area?.x === area.x &&
+        current.area.width === area.width &&
+        current.area.height === area.height &&
+        current.toolbar?.from === toolbar?.from &&
+        current.toolbar?.to === toolbar?.to
+          ? current
+          : { area, toolbar },
+      );
+    };
     read();
+    // The panels' widths are custom properties on the layout's style.
     const layout = domNode.closest('[data-overlay-layout]');
-    if (!layout) return;
-    const observer = new MutationObserver(read);
-    observer.observe(layout, { attributes: true, attributeFilter: ['style'] });
-    return () => observer.disconnect();
+    const restyled = layout ? new MutationObserver(read) : undefined;
+    if (layout)
+      restyled?.observe(layout, {
+        attributes: true,
+        attributeFilter: ['style'],
+      });
+    return () => {
+      resized?.disconnect();
+      restyled?.disconnect();
+    };
   }, [domNode, width, height]);
-  return area;
+  return room;
 }
 
 /**
@@ -321,7 +370,7 @@ export function UnseenEdgeTags() {
   const marks = useUnseenMarks();
   const reactFlow = useReactFlow();
   const viewport = useViewport();
-  const area = useVisibleArea(domNode);
+  const { area, toolbar } = useCanvasRoom(domNode);
   const conversations = useUnseenConversations();
   // What to point at, by node: the marked content, and the conversations.
   const wanted = useMemo(() => {
@@ -379,15 +428,28 @@ export function UnseenEdgeTags() {
     [nodes],
   );
   const tags = useMemo(
-    () => (area ? edgeTags(pieces, viewport, area, EDGE_TAG_CONFIG) : []),
-    [pieces, viewport, area],
+    () =>
+      area ? edgeTags(pieces, viewport, area, toolbar, EDGE_TAG_CONFIG) : [],
+    [pieces, viewport, area, toolbar],
   );
   if (!domNode || !area || tags.length === 0) return null;
   const dismiss = (tag: EdgeTag) => {
-    for (const node of tag.nodes) {
-      const mark = marks.get(node.id);
-      if (mark) markSeen(mark);
-    }
+    // One write per conversation, however many nodes the piece has: each
+    // write copies and stores everything seen so far.
+    const keys = new Map<string, string[]>();
+    for (const node of tag.nodes)
+      for (const source of marks.get(node.id)?.sources ?? [])
+        keys.set(source.threadId, [
+          ...(keys.get(source.threadId) ?? []),
+          ...source.keys,
+        ]);
+    markSeen({
+      sources: [...keys].map(([threadId, seen]) => ({
+        threadId,
+        kind: 'update',
+        keys: seen,
+      })),
+    });
   };
   const go = (tag: EdgeTag) => {
     void reactFlow.setViewport(

@@ -14,6 +14,7 @@ import {
   type Rect,
 } from '@huabu/shared';
 
+import { MIN_ZOOM } from '@/config/canvas';
 import { ATTENTION_RANK, type AttentionKind } from '@/utils/attention';
 
 /** The numbers the tags are laid out by. See `edgeTagConfig.ts`. */
@@ -26,7 +27,7 @@ export interface EdgeTagConfig {
   topRightClearance: number;
   bottomLeftClearance: number;
   bottomRightClearance: number;
-  bottomToolbarWidth: number;
+  toolbarGap: number;
   bottomClearance: number;
   dotSize: number;
   pointerSize: number;
@@ -61,6 +62,12 @@ export type MarkedAs =
 
 /** A node a tag may point at. */
 export type MarkedNode = NodeBox & MarkedAs;
+
+/** A span along an edge, in screen px. */
+export interface Span {
+  from: number;
+  to: number;
+}
 
 export type TagEdge = 'left' | 'right' | 'top' | 'bottom';
 
@@ -151,11 +158,14 @@ function spread(values: number[], step: number, max: number): number[] {
  * @param pieces What {@link unseenPieces} made of the nodes. Grouping does
  *   not depend on the view, so it is not done again as the view moves.
  * @param area The visible canvas within its container, in screen px.
+ * @param toolbar The span of the bottom edge the main toolbar takes, as it
+ *   is drawn now; null when there is none.
  */
 export function edgeTags(
   pieces: readonly MarkedNode[][],
   viewport: CanvasViewport,
   area: Rect,
+  toolbar: Span | null,
   config: EdgeTagConfig,
 ): EdgeTag[] {
   const left = area.x + config.edgePadding;
@@ -170,7 +180,10 @@ export function edgeTags(
   // side edge keeps above and below them.
   const half = config.dotSize / 2;
   const step = config.dotSize + config.tagGap;
-  const middle = (left + right) / 2;
+  const alongBottom: [number, number] = [
+    left + config.bottomLeftClearance + half,
+    right - config.bottomRightClearance - half,
+  ];
   const side: [number, number][] = [
     [top + config.topClearance + half, bottom - config.bottomClearance - half],
   ];
@@ -181,16 +194,12 @@ export function edgeTags(
         right - config.topRightClearance - half,
       ],
     ],
-    bottom: [
-      [
-        left + config.bottomLeftClearance + half,
-        middle - config.bottomToolbarWidth / 2 - half,
-      ],
-      [
-        middle + config.bottomToolbarWidth / 2 + half,
-        right - config.bottomRightClearance - half,
-      ],
-    ],
+    bottom: toolbar
+      ? [
+          [alongBottom[0], toolbar.from - config.toolbarGap - half],
+          [toolbar.to + config.toolbarGap + half, alongBottom[1]],
+        ]
+      : [alongBottom],
     left: side,
     right: side,
   };
@@ -308,7 +317,8 @@ export function edgeTags(
 
 /**
  * The viewport that puts a piece in the middle of the visible canvas. The
- * zoom is kept when the piece fits at it, and lowered just enough when not.
+ * zoom is kept when the piece fits at it, and lowered just enough when not,
+ * down to the canvas's least.
  */
 export function viewportOnPiece(
   nodes: readonly MarkedNode[],
@@ -317,10 +327,15 @@ export function viewportOnPiece(
   padding: number,
 ): CanvasViewport {
   const bounds = union(nodes.map((node) => node.rect));
-  const zoom = Math.min(
-    viewport.zoom,
-    Math.max(area.width - padding * 2, 1) / Math.max(bounds.width, 1),
-    Math.max(area.height - padding * 2, 1) / Math.max(bounds.height, 1),
+  // Never below what the canvas itself allows: a piece too large to fit at
+  // that is shown about its middle.
+  const zoom = Math.max(
+    MIN_ZOOM,
+    Math.min(
+      viewport.zoom,
+      Math.max(area.width - padding * 2, 1) / Math.max(bounds.width, 1),
+      Math.max(area.height - padding * 2, 1) / Math.max(bounds.height, 1),
+    ),
   );
   return {
     x: area.x + area.width / 2 - (bounds.x + bounds.width / 2) * zoom,

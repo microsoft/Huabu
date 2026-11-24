@@ -9,6 +9,7 @@ import {
   viewportOnPiece,
   type EdgeTagConfig,
   type MarkedNode,
+  type Span,
 } from './unseenEdgeTags';
 
 const config: EdgeTagConfig = {
@@ -20,7 +21,7 @@ const config: EdgeTagConfig = {
   topRightClearance: 0,
   bottomLeftClearance: 0,
   bottomRightClearance: 0,
-  bottomToolbarWidth: 0,
+  toolbarGap: 0,
   bottomClearance: 60,
   dotSize: 20,
   pointerSize: 10,
@@ -44,8 +45,15 @@ const edgeTags = (
   nodes: readonly MarkedNode[],
   view: Parameters<typeof placeTags>[1],
   visible: Parameters<typeof placeTags>[2],
-  numbers: EdgeTagConfig,
-) => placeTags(unseenPieces(nodes, numbers.clusterGap), view, visible, numbers);
+  numbers: EdgeTagConfig & { toolbar?: Span },
+) =>
+  placeTags(
+    unseenPieces(nodes, numbers.clusterGap),
+    view,
+    visible,
+    numbers.toolbar ?? null,
+    numbers,
+  );
 
 describe('unseenPieces', () => {
   it('joins nodes that are near one another, chained, in reading order', () => {
@@ -101,7 +109,7 @@ describe('edgeTags', () => {
     const taken = {
       ...config,
       bottomLeftClearance: 90,
-      bottomToolbarWidth: 300,
+      toolbar: { from: 450, to: 750 },
     };
     // Straight below is the toolbar, 450..750: the tag goes beside it, on
     // the side the piece leans to.
@@ -162,7 +170,7 @@ describe('edgeTags', () => {
     const taken = {
       ...config,
       bottomLeftClearance: 96,
-      bottomToolbarWidth: 470,
+      toolbar: { from: 125, to: 595 },
     };
     expect(edgeTags([node('n', 310, 3000)], viewport, slot, taken)).toEqual([]);
     // The side edges of the same view still have room.
@@ -275,6 +283,22 @@ describe('edgeTags for conversations', () => {
       ['waiting', 'approval'],
       ['failed', 'error'],
     ]);
+  });
+});
+
+describe('viewportOnPiece for a piece too large to fit', () => {
+  it('stops at the least zoom of the canvas', () => {
+    const vast: MarkedNode[] = [
+      {
+        id: 'n',
+        rect: { x: 0, y: 0, width: 200_000, height: 100 },
+        kind: 'create',
+      },
+    ];
+    const next = viewportOnPiece(vast, viewport, area, 50);
+    expect(next.zoom).toBe(0.01);
+    // Its middle is in the middle of the visible canvas.
+    expect(next.x).toBe(600 - 100_000 * 0.01);
   });
 });
 
