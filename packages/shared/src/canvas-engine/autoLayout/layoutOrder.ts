@@ -101,6 +101,89 @@ export function trackKeyChanges(
   return changes;
 }
 
+/**
+ * Those of `ids` that stand somewhere else in `after` than in `before`: in
+ * another track, or between other neighbours. A child placed where it
+ * already stood has not moved and keeps its key.
+ */
+export function movedInOrder(
+  before: FrameLayoutOrder,
+  after: FrameLayoutOrder,
+  ids: Iterable<string>,
+): Set<string> {
+  const places = (order: FrameLayoutOrder): Map<string, string> =>
+    new Map(
+      order.flatMap((track, trackIndex) =>
+        track.map(
+          (id, index) =>
+            [
+              id,
+              JSON.stringify([
+                trackIndex,
+                track[index - 1] ?? null,
+                track[index + 1] ?? null,
+              ]),
+            ] as const,
+        ),
+      ),
+    );
+  const was = places(before);
+  const is = places(after);
+  return new Set([...ids].filter((id) => was.get(id) !== is.get(id)));
+}
+
+/**
+ * `nodes` with distinct track keys wherever two children of one Column / Row
+ * Frame in `nodes` share a key in one track. Children that share a key are
+ * read in id order ({@link trackOrderRanks}); a copy is given new ids, so
+ * the order has to be written into the keys before the ids are replaced.
+ * Children whose Frame is not among `nodes` are left as they are.
+ */
+export function withDistinctTrackKeys<
+  T extends Keyed & { type?: string; parentId?: string },
+>(nodes: readonly T[]): T[] {
+  const changes = new Map<string, string>();
+  for (const frame of nodes) {
+    const mode = frame.data?.layoutMode;
+    if (frame.type !== 'frame' || (mode !== 'column' && mode !== 'row'))
+      continue;
+    const field = mode === 'column' ? 'frameColumn' : 'frameRow';
+    const tracks = new Map<number, T[]>();
+    for (const child of nodes) {
+      if (child.parentId !== frame.id || readTrackKey(child) === undefined)
+        continue;
+      const track = Number(child.data?.[field] ?? 0);
+      tracks.set(track, [...(tracks.get(track) ?? []), child]);
+    }
+    for (const children of tracks.values()) {
+      const inOrder = [...children].sort((a, b) =>
+        compareOrder(
+          { id: a.id, key: readTrackKey(a) },
+          { id: b.id, key: readTrackKey(b) },
+        ),
+      );
+      // A key equal to the one before it is given up; `keysInSequence`
+      // then finds one between its neighbours.
+      const kept = inOrder.map((child, index) =>
+        index > 0 && readTrackKey(child) === readTrackKey(inOrder[index - 1])
+          ? undefined
+          : readTrackKey(child),
+      );
+      keysInSequence(kept).forEach((key, index) => {
+        if (readTrackKey(inOrder[index]) !== key)
+          changes.set(inOrder[index].id, key);
+      });
+    }
+  }
+  if (changes.size === 0) return nodes as T[];
+  return nodes.map((node) => {
+    const key = changes.get(node.id);
+    return key === undefined
+      ? node
+      : { ...node, data: { ...node.data, trackKey: key } };
+  });
+}
+
 /** Existing members keep explicit order; newcomers are inserted by their placement coordinate. */
 export function orderTrack<T>(
   items: T[],

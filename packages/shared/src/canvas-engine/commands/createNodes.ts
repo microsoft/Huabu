@@ -81,6 +81,9 @@ const createNodes: CommandDefinition<Cmd> = {
     // new child was added. The server decides whether to actually run.
     const affectedParentFrames: Node[] = [];
 
+    const createdIds = new Set(
+      cmd.nodes.flatMap((input) => (input.id ? [input.id as string] : [])),
+    );
     for (const input of cmd.nodes) {
       const nodeId = input.id ?? createId('node');
       const nodeType = input.nodeType;
@@ -226,6 +229,18 @@ const createNodes: CommandDefinition<Cmd> = {
       // duplicated node is a new node: it is keyed for where it is put.
       if ('paintKey' in node.data) {
         const { paintKey: _paintKey, ...data } = node.data;
+        node.data = data;
+      }
+      // A track key ranks a child among the children of the Frame it was
+      // in. Created together with that Frame (a copied Frame and its
+      // children) it still means that. Created by itself, it is put into
+      // whatever Frame it lands in by where it was placed, not by a key
+      // from somewhere else.
+      if (
+        'trackKey' in node.data &&
+        !(input.parentId && createdIds.has(input.parentId))
+      ) {
+        const { trackKey: _trackKey, ...data } = node.data;
         node.data = data;
       }
 

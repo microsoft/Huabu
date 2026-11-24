@@ -2509,7 +2509,7 @@ export async function applyDeltasOnServerAlreadyLocked(input: {
         for (const node of prestateNodes) previousById.set(node.id, node);
       }
     }
-    const finalNodes = input.agentNodeProjection
+    const projectedNodes = input.agentNodeProjection
       ? final.nodes
       : await Promise.all(
           final.nodes.map(async (node) => {
@@ -2559,6 +2559,15 @@ export async function applyDeltasOnServerAlreadyLocked(input: {
             };
           }),
         );
+    // A row may insert a node without an order key (a preview the World
+    // creates, a node moved in from another Space): it is keyed here for
+    // where it was put, as the executor's end of batch does. Before the
+    // diff, so that the rows announced, the journal and the nodes returned
+    // carry the keys that are stored.
+    const finalNodes = settlePaintOrder(
+      projectedNodes as NestableNode[],
+      prestateNodes as NestableNode[],
+    ) as CanvasNode[];
     const threadOwners = new Set<string>();
     for (const node of finalNodes) {
       if (node.type !== 'question' || typeof node.data.threadId !== 'string')
@@ -2657,15 +2666,7 @@ export async function applyDeltasOnServerAlreadyLocked(input: {
       version: toVersion,
       state: {
         ...canvas.state,
-        // A row may insert a node without an order key (a preview the
-        // World creates, a node moved in from another Space): it is keyed
-        // here for where it was put, as the executor's end of batch does.
-        nodes: stripNodesForCanvas(
-          settlePaintOrder(
-            finalNodes as NestableNode[],
-            prestateNodes as NestableNode[],
-          ) as CanvasNode[],
-        ),
+        nodes: stripNodesForCanvas(finalNodes),
         edges: finalEdges,
       },
       updatedAt: Date.now(),

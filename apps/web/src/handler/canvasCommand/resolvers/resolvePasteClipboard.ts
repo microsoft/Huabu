@@ -16,6 +16,7 @@ import {
   pdfNoteIds,
   generateNextLabel,
   resolveHeightMode,
+  withDistinctTrackKeys,
 } from '@huabu/shared/canvas-engine';
 
 import { canvasSizeFromStyle, resolveFrameAtPoint } from '../utils';
@@ -38,7 +39,9 @@ export default function resolvePasteClipboard(
     intent.clipboardNodes ?? [],
     intent.clipboardEdges ?? [],
   );
-  const clipboard = topology.nodes;
+  // A copy gets new ids; children that shared a track key were told apart
+  // by id, so their order is written into the keys first.
+  const clipboard = withDistinctTrackKeys(topology.nodes);
   const ownedIds = pdfNoteIds(clipboard);
   if (clipboard.length === 0) {
     return { commands: [], trace: [] };

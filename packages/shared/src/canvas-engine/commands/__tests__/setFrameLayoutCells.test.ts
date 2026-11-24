@@ -220,6 +220,43 @@ describe('SET_FRAME_LAYOUT cells', () => {
         expect(run(command, reordered.nodes).applied).toBe(false);
       });
 
+      it('leaves a child placed where it already stands as it is', () => {
+        const nodes = execute(
+          applyStructuredFrameRelayout(initial(), ['frame']).nodes,
+          [
+            {
+              type: 'SET_FRAME_LAYOUT',
+              frameId: 'frame' as Cmd['frameId'],
+              mode,
+              placements: [{ nodeId: 'c2', track: 0, at: 'end' }],
+            },
+          ],
+        ).nodes;
+        expect(layout(nodes)).toEqual([['c0', 'c1', 'c2']]);
+        // The middle child holds a key between its neighbours that is not
+        // the one a fresh placement there would pick.
+        const first = readTrackKey(nodes.find((n) => n.id === 'c0') as Node);
+        const middle = nodes.find((n) => n.id === 'c1') as Node;
+        middle.data = { ...middle.data, trackKey: `${first}V` };
+        expect(layout(nodes)).toEqual([['c0', 'c1', 'c2']]);
+
+        for (const placement of [
+          { nodeId: 'c1', before: 'c2' },
+          { nodeId: 'c1', after: 'c0' },
+        ] as NonNullable<Cmd['placements']>) {
+          const result = run(
+            {
+              type: 'SET_FRAME_LAYOUT',
+              frameId: 'frame' as Cmd['frameId'],
+              mode,
+              placements: [placement],
+            },
+            nodes,
+          );
+          expect(result.applied).toBe(false);
+        }
+      });
+
       it('reconciles both Frames on reparent and removes the last deleted member', () => {
         const nodes = applyStructuredFrameRelayout(initial(), ['frame']).nodes;
         const nodeIds = nodes

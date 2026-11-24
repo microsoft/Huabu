@@ -364,6 +364,25 @@ describe('two pages changing the layer of different nodes under one parent', () 
   });
 });
 
+describe('a reorder the server had nothing left to do for', () => {
+  it('ends with the array in the order of the keys the server holds', async () => {
+    // This page brings A to the front; the answer is not in yet.
+    state().executeCommands([reorder([A], 'top')]);
+    // Meanwhile another page does the same, then brings B in front of it,
+    // then A to the front again.
+    deliver(remote([reorder([A], 'top')]));
+    deliver(remote([reorder([B], 'top')]));
+    deliver(remote([reorder([A], 'top')]));
+    expect(there()).toEqual([C, D, B, A]);
+
+    // A is in front already when this page's command reaches the server:
+    // nothing changes there, and the key it holds for A is installed here.
+    await answer(0);
+    expect(commit(0).deltas).toEqual([]);
+    expectSameAsServer();
+  });
+});
+
 describe('undo of a reorder', () => {
   it("restores only that node's place and keeps another page's later reorder of a different node", async () => {
     const original = keysOf(state().nodes);

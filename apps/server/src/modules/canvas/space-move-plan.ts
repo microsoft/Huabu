@@ -17,6 +17,7 @@ import {
   getAbsolutePosition,
   getNodeDefaultSize,
   resolveHeightMode,
+  withDistinctTrackKeys,
   type CanvasEdge,
   type CanvasNode,
   type NestableNode,
@@ -207,8 +208,12 @@ export function buildSpaceMovePlan(input: {
   const creates: Extract<CanvasCommand, { type: 'CREATE_NODES' }>['nodes'] = [];
   const movedThreadIds: string[] = [];
 
-  for (const node of sourceNodes) {
-    if (!movedIds.has(node.id)) continue;
+  // The moved nodes get new ids; children that shared a track key were
+  // told apart by id, so their order is written into the keys first.
+  const movedNodes = withDistinctTrackKeys(
+    sourceNodes.filter((node) => movedIds.has(node.id)),
+  );
+  for (const node of movedNodes) {
     const nodeId = nodeIdMap.get(node.id);
     if (!nodeId) continue;
     const nodeType = node.type as CanvasNodeType;

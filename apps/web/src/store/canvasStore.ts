@@ -63,6 +63,7 @@ import {
   moveNodeIntoContainer as projectNodeIntoFrame,
   moveNodeOutOfFrame as projectNodeOutOfFrame,
   normalizeTreeOrder,
+  orderByPaintKeys,
   projectAffectedFrameGeometry,
   type AlignDirection,
   type Delta,
@@ -180,6 +181,7 @@ import { CANVAS_PAGE_ID } from './canvasStore/sync/pageId';
 import {
   applyUnits,
   changedUnits,
+  PAINT_KEY_UNIT,
   PARENT_UNIT,
   PLACEMENT_UNITS,
   writeUnit,
@@ -1808,12 +1810,15 @@ const browserSync = createBrowserSync({
       return next as unknown as Node;
     });
     if (!touched) return;
-    // A parent put back to the server's needs the parent-before-child order
-    // React Flow requires; sibling order follows with the reload a refusal
-    // asks for.
+    // The array follows the keys the nodes now carry: a paint key put back
+    // to the server's, or a parent, changes where a node stands, and nothing
+    // else re-sorts the array when the command that held it turned out to
+    // change nothing on the server. Parents stay before their children.
     state._setStateRaw({
-      nodes: units.some((unit) => unit.unit === PARENT_UNIT)
-        ? (normalizeTreeOrder(nodes as NestableNode[]) as Node[])
+      nodes: units.some(
+        (unit) => unit.unit === PARENT_UNIT || unit.unit === PAINT_KEY_UNIT,
+      )
+        ? (orderByPaintKeys(nodes as NestableNode[]) as Node[])
         : nodes,
     });
   },

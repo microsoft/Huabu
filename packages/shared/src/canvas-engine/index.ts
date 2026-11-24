@@ -5,6 +5,7 @@ export {
   dropTrackKeyOnTrackChange,
   readTrackKey,
   trackKeyChanges,
+  withDistinctTrackKeys,
   withoutTrackKey,
 } from './autoLayout/layoutOrder.js';
 export {

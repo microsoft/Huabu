@@ -14,6 +14,7 @@ import {
 } from '../autoLayout/gridLayout.js';
 import {
   dropTrackKeyOnTrackChange,
+  movedInOrder,
   trackKeyChanges,
 } from '../autoLayout/layoutOrder.js';
 import { hasUnlockedAncestry } from '../siblingOrder.js';
@@ -73,6 +74,9 @@ const setFrameLayout: CommandDefinition<Cmd> = {
       );
       if (!solved?.layoutOrder) return noop(state, 'invalid-target');
       const tracks = solved.layoutOrder.map((track) => [...track]);
+      const before = tracks
+        .filter((track) => track.length > 0)
+        .map((track) => [...track]);
       for (const placement of cmd.placements) {
         const node = byId.get(placement.nodeId);
         const anchorId =
@@ -119,11 +123,16 @@ const setFrameLayout: CommandDefinition<Cmd> = {
         order.flatMap((track, i) => track.map((id) => [id, i] as const)),
       );
       // The placed children get a key for where they were put; nobody
-      // they passed is rewritten.
+      // they passed is rewritten, and neither is a child placed where it
+      // already stood.
       const trackKeys = trackKeyChanges(
         order,
         byId,
-        new Set(cmd.placements.map((item) => item.nodeId as string)),
+        movedInOrder(
+          before,
+          order,
+          cmd.placements.map((item) => item.nodeId as string),
+        ),
       );
       const nextNodes = state.nodes.map((node) => {
         if (node.id === frame.id)
