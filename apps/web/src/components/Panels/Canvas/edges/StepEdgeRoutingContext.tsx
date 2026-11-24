@@ -8,30 +8,41 @@ import {
   routeOrthogonalEdge,
 } from '@huabu/shared/canvas-engine';
 
-import { createRoutingSceneCache, getRouteObstacles } from './autoEdgeRouting';
+import { createRoutingSceneCache, getRouteObstacles } from './stepEdgeRouting';
 
-import type { RoutingScene } from './autoEdgeRouting';
-import type { EdgeProps, Node } from '@xyflow/react';
+import type { RoutingScene } from './stepEdgeRouting';
+import type { Edge, EdgeProps, Node } from '@xyflow/react';
 import type { ReactNode } from 'react';
 
-const RoutingContext = createContext<RoutingScene>(new Map());
+const EMPTY_SCENE: RoutingScene = new Map();
+const RoutingContext = createContext<RoutingScene>(EMPTY_SCENE);
 
-export function AutoEdgeRoutingProvider({
+export function StepEdgeRoutingProvider({
   nodes,
+  edges,
   children,
 }: {
   nodes: Node[];
+  edges: Edge[];
   children: ReactNode;
 }) {
   const readScene = useMemo(createRoutingSceneCache, []);
-  const scene = useMemo(() => readScene(nodes), [nodes, readScene]);
+  const hasStepEdges = useMemo(
+    () =>
+      edges.some((edge) => getEdgeLineType(edge.data, edge.type) === 'step'),
+    [edges],
+  );
+  const scene = useMemo(
+    () => (hasStepEdges ? readScene(nodes) : EMPTY_SCENE),
+    [hasStepEdges, nodes, readScene],
+  );
   return (
     <RoutingContext.Provider value={scene}>{children}</RoutingContext.Provider>
   );
 }
 
-/** Route once, using the renderer's actual ports, including live drag positions. */
-export function useAutoEdgeRoute(props: EdgeProps) {
+/** Route Step connectors once from the renderer's actual ports, including live drag positions. */
+export function useStepEdgeRoute(props: EdgeProps) {
   const scene = useContext(RoutingContext);
   const {
     source,
@@ -43,14 +54,14 @@ export function useAutoEdgeRoute(props: EdgeProps) {
     sourcePosition,
     targetPosition,
   } = props;
-  const automatic = getEdgeLineType(props.data, props.type) === 'auto';
+  const isStep = getEdgeLineType(props.data, props.type) === 'step';
   const clearance = Math.max(
     12,
     Number(props.style?.strokeWidth) / 2 + 8 || 12,
   );
   return useMemo(
     () =>
-      automatic && scene.size
+      isStep && scene.size
         ? routeOrthogonalEdge({
             source: { x: sourceX, y: sourceY },
             target: { x: targetX, y: targetY },
@@ -61,7 +72,7 @@ export function useAutoEdgeRoute(props: EdgeProps) {
           })
         : undefined,
     [
-      automatic,
+      isStep,
       scene,
       source,
       target,

@@ -87,7 +87,7 @@ afterEach(() => {
 });
 
 describe('inspect_edges line shapes', () => {
-  it('filters omitted shapes as auto while retaining explicit and legacy shapes', async () => {
+  it('filters omitted shapes as bezier while retaining explicit and legacy shapes', async () => {
     const canvasId = 'edge-shapes';
     const base = { source: 'a', target: 'b' };
     getCanvasStore(canvasId).write({
@@ -98,9 +98,10 @@ describe('inspect_edges line shapes', () => {
         nodes: [],
         edges: [
           { ...base, id: 'default' },
-          { ...base, id: 'auto', data: { edgeStyle: { lineType: 'auto' } } },
           { ...base, id: 'curve', data: { edgeStyle: { lineType: 'bezier' } } },
-          { ...base, id: 'legacy', type: 'straight' },
+          { ...base, id: 'step', data: { edgeStyle: { lineType: 'step' } } },
+          { ...base, id: 'legacy-step', type: 'smoothstep' },
+          { ...base, id: 'legacy-straight', type: 'straight' },
         ],
       },
       createdAt: Date.now(),
@@ -108,9 +109,9 @@ describe('inspect_edges line shapes', () => {
     });
 
     for (const [lineType, ids] of [
-      ['auto', ['default', 'auto']],
-      ['bezier', ['curve']],
-      ['straight', ['legacy']],
+      ['bezier', ['default', 'curve']],
+      ['step', ['step', 'legacy-step']],
+      ['straight', ['legacy-straight']],
     ] as const) {
       const result = await inspectEdges(canvasId, { byLineType: lineType });
       if ('error' in result) throw new Error(result.error);

@@ -210,4 +210,87 @@ describe('routeOrthogonalEdge', () => {
     );
     expectClear(flattenEdgePath(result.path), obstacles);
   });
+
+  it('connects aligned facing ports across a narrow card gap without entering either card', () => {
+    const sourceRect = { x: -80, y: -40, w: 80, h: 80 };
+    const targetRect = { x: 20, y: -40, w: 80, h: 80 };
+    const result = routeOrthogonalEdge({
+      ...base,
+      source: { x: 0, y: 0 },
+      target: { x: 20, y: 0 },
+      sourceRect,
+      targetRect,
+    });
+    expect(result.status).toBe('routed');
+    expect(result.points).toEqual([
+      { x: 0, y: 0 },
+      { x: 20, y: 0 },
+    ]);
+    expectClear(flattenEdgePath(result.path), [sourceRect, targetRect]);
+  });
+
+  it.each([20, 36])(
+    'steps cleanly through a %ipx facing gap when endpoints are vertically offset',
+    (gap) => {
+      const sourceRect = { x: -80, y: -40, w: 80, h: 80 };
+      const targetRect = { x: gap, y: 0, w: 80, h: 80 };
+      const result = routeOrthogonalEdge({
+        ...base,
+        source: { x: 0, y: 0 },
+        target: { x: gap, y: 40 },
+        sourceRect,
+        targetRect,
+      });
+      expect(result.status).toBe('routed');
+      expect(result.points).toEqual([
+        { x: 0, y: 0 },
+        { x: gap / 2, y: 0 },
+        { x: gap / 2, y: 40 },
+        { x: gap, y: 40 },
+      ]);
+      expectClear(flattenEdgePath(result.path), [sourceRect, targetRect]);
+    },
+  );
+
+  it('uses a single L-bend for close perpendicular ports without stub overshoot', () => {
+    const sourceRect = { x: 0, y: 0, w: 80, h: 60 };
+    const targetRect = { x: 54, y: 74, w: 80, h: 60 };
+    const result = routeOrthogonalEdge({
+      ...base,
+      source: { x: 80, y: 30 },
+      target: { x: 94, y: 74 },
+      sourceSide: 'right',
+      targetSide: 'top',
+      sourceRect,
+      targetRect,
+    });
+    expect(result.status).toBe('routed');
+    expect(result.points).toEqual([
+      { x: 80, y: 30 },
+      { x: 94, y: 30 },
+      { x: 94, y: 74 },
+    ]);
+    expectClear(flattenEdgePath(result.path), [sourceRect, targetRect]);
+  });
+
+  it('threads around an obstacle sitting closer than the nominal stub length', () => {
+    const sourceRect = { x: -80, y: -40, w: 80, h: 80 };
+    const targetRect = { x: 220, y: -40, w: 80, h: 80 };
+    const obstacles = [{ x: 20, y: -40, w: 80, h: 80 }];
+    const result = routeOrthogonalEdge({
+      ...base,
+      source: { x: 0, y: 0 },
+      target: { x: 220, y: 0 },
+      sourceRect,
+      targetRect,
+      obstacles,
+    });
+    expect(result.status).toBe('routed');
+    expectClear(result.points, [sourceRect, targetRect, ...obstacles]);
+    expectClear(flattenEdgePath(result.path), [
+      sourceRect,
+      targetRect,
+      ...obstacles,
+    ]);
+  });
 });

@@ -109,13 +109,13 @@ import {
 import { NodeToolbar } from './CanvasToolbar.tsx';
 import { CanvasZoomMenu } from './CanvasZoomMenu';
 import { ConnectedNodePicker } from './ConnectedNodePicker.tsx';
-import { AutoEdgeRoutingProvider } from './edges/AutoEdgeRoutingContext';
 import { renderEdgeAccent } from './edges/edgeAccent';
 import {
   EDIT_EDGE_LABEL_EVENT,
   LabelledEdge,
   type EditEdgeLabelDetail,
 } from './edges/LabelledEdge.tsx';
+import { StepEdgeRoutingProvider } from './edges/StepEdgeRoutingContext';
 import { EdgeStyleToolbar } from './FloatingToolbars/EdgeStyleToolbar.tsx';
 import { MultiSelectToolbar } from './FloatingToolbars/MultiSelectToolbar.tsx';
 import { StrokeSelectionToolbar } from './FloatingToolbars/StrokeSelectionToolbar.tsx';
@@ -1413,7 +1413,7 @@ const CanvasContent: React.FC<CanvasProps> = ({
         }
       }}
     >
-      <AutoEdgeRoutingProvider nodes={visibleNodes}>
+      <StepEdgeRoutingProvider nodes={visibleNodes} edges={visibleEdges}>
         <FrameZoomProvider>
           <ReactFlow
             className={cn(
@@ -1646,7 +1646,7 @@ const CanvasContent: React.FC<CanvasProps> = ({
             )}
           </ReactFlow>
         </FrameZoomProvider>
-      </AutoEdgeRoutingProvider>
+      </StepEdgeRoutingProvider>
 
       {isInitialViewportPending && (
         <Loading

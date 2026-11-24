@@ -88,24 +88,69 @@ function hits(
   );
 }
 
+function exitDistance(
+  point: OrthogonalPoint,
+  side: OrthogonalSide,
+  rect?: OrthogonalRect,
+): number {
+  if (!rect) return 0;
+  return Math.max(
+    0,
+    side === 'right'
+      ? rect.x + rect.w - point.x
+      : side === 'left'
+        ? point.x - rect.x
+        : side === 'bottom'
+          ? rect.y + rect.h - point.y
+          : point.y - rect.y,
+  );
+}
+
+function nearestForwardGap(
+  point: OrthogonalPoint,
+  side: OrthogonalSide,
+  ownRect: OrthogonalRect | undefined,
+  others: readonly OrthogonalRect[],
+  pad: number,
+): number {
+  const exit = exitDistance(point, side, ownRect);
+  const origin = {
+    x: point.x + NORMAL[side].x * exit,
+    y: point.y + NORMAL[side].y * exit,
+  };
+  let best = Infinity;
+  for (const rect of others) {
+    const spansPerp =
+      side === 'left' || side === 'right'
+        ? origin.y > rect.y - pad + EPSILON &&
+          origin.y < rect.y + rect.h + pad - EPSILON
+        : origin.x > rect.x - pad + EPSILON &&
+          origin.x < rect.x + rect.w + pad - EPSILON;
+    if (!spansPerp) continue;
+    const gap =
+      side === 'right'
+        ? rect.x - origin.x
+        : side === 'left'
+          ? origin.x - (rect.x + rect.w)
+          : side === 'bottom'
+            ? rect.y - origin.y
+            : origin.y - (rect.y + rect.h);
+    if (gap >= 2 && gap < best) best = gap;
+  }
+  return best;
+}
+
 function outwardStub(
   point: OrthogonalPoint,
   side: OrthogonalSide,
   length: number,
-  rect?: OrthogonalRect,
+  inflatedRect?: OrthogonalRect,
+  rawRect?: OrthogonalRect,
 ): OrthogonalPoint {
-  let span = length;
-  if (rect) {
-    const boundary =
-      side === 'right'
-        ? rect.x + rect.w - point.x
-        : side === 'left'
-          ? point.x - rect.x
-          : side === 'bottom'
-            ? rect.y + rect.h - point.y
-            : point.y - rect.y;
-    span = Math.max(span, boundary);
-  }
+  const span = Math.max(
+    exitDistance(point, side, rawRect) + length,
+    exitDistance(point, side, inflatedRect),
+  );
   return {
     x: point.x + NORMAL[side].x * span,
     y: point.y + NORMAL[side].y * span,
@@ -258,44 +303,139 @@ export function routeOrthogonalEdge(
   options: OrthogonalRouteOptions,
 ): OrthogonalRoute {
   const { source, target, sourceSide, targetSide } = options;
-  const clearance = Math.max(0, options.clearance ?? 12);
+  const requestedClearance = Math.max(0, options.clearance ?? 12);
+  const baseRadius = Math.min(8, requestedClearance / 2);
+  const bendPenalty = Math.max(0, options.bendPenalty ?? 24);
+  const validRect = (r: OrthogonalRect) =>
+    r.w >= 0 && r.h >= 0 && [r.x, r.y, r.w, r.h].every(Number.isFinite);
+  const rawObstacles = options.obstacles.filter(validRect);
+  const rawSourceRect =
+    options.sourceRect && validRect(options.sourceRect)
+      ? options.sourceRect
+      : undefined;
+  const rawTargetRect =
+    options.targetRect && validRect(options.targetRect)
+      ? options.targetRect
+      : undefined;
+  const fullObstacles = rawObstacles.map((r) => inflate(r, requestedClearance));
+  const fullSourceRect = rawSourceRect
+    ? inflate(rawSourceRect, requestedClearance)
+    : undefined;
+  const fullTargetRect = rawTargetRect
+    ? inflate(rawTargetRect, requestedClearance)
+    : undefined;
+
+  // Direct aligned facing and single-bend perpendicular routes need no stubs
+  // when clear, preventing overshoot in narrow gaps between nearby cards.
+  const sourceNormal = NORMAL[sourceSide];
+  const targetNormal = NORMAL[targetSide];
+  const dx = target.x - source.x;
+  const dy = target.y - source.y;
+  if (
+    DIRECTION[targetSide] === (DIRECTION[sourceSide] + 2) % 4 &&
+    dx * sourceNormal.x + dy * sourceNormal.y > EPSILON &&
+    Math.abs(dx * sourceNormal.y - dy * sourceNormal.x) <= EPSILON &&
+    !fullObstacles.some((rect) => hits(source, target, rect)) &&
+    !(rawSourceRect && hits(source, target, rawSourceRect)) &&
+    !(rawTargetRect && hits(source, target, rawTargetRect))
+  )
+    return render([source, target], baseRadius, 'routed');
+
+  if ((DIRECTION[sourceSide] + DIRECTION[targetSide]) % 2 === 1) {
+    const corner =
+      sourceNormal.x !== 0
+        ? { x: target.x, y: source.y }
+        : { x: source.x, y: target.y };
+    if (
+      (corner.x - source.x) * sourceNormal.x +
+        (corner.y - source.y) * sourceNormal.y >
+        EPSILON &&
+      (corner.x - target.x) * targetNormal.x +
+        (corner.y - target.y) * targetNormal.y >
+        EPSILON &&
+      !fullObstacles.some(
+        (rect) => hits(source, corner, rect) || hits(corner, target, rect),
+      ) &&
+      !(rawSourceRect && hits(source, corner, rawSourceRect)) &&
+      !(rawTargetRect && hits(corner, target, rawTargetRect)) &&
+      !(fullSourceRect && hits(corner, target, fullSourceRect)) &&
+      !(fullTargetRect && hits(source, corner, fullTargetRect))
+    )
+      return render([source, corner, target], baseRadius, 'routed');
+  }
+
+  // Proportionally scale clearance and stubs when a narrow corridor sits right
+  // in front of either port so adjacent cards do not force stub reversals.
+  const sourceGap = nearestForwardGap(
+    source,
+    sourceSide,
+    rawSourceRect,
+    [...rawObstacles, ...(rawTargetRect ? [rawTargetRect] : [])],
+    requestedClearance,
+  );
+  const targetGap = nearestForwardGap(
+    target,
+    targetSide,
+    rawTargetRect,
+    [...rawObstacles, ...(rawSourceRect ? [rawSourceRect] : [])],
+    requestedClearance,
+  );
+  const sourceExit = exitDistance(source, sourceSide, rawSourceRect);
+  const targetExit = exitDistance(target, targetSide, rawTargetRect);
+  const facingSpan =
+    DIRECTION[targetSide] === (DIRECTION[sourceSide] + 2) % 4
+      ? dx * sourceNormal.x + dy * sourceNormal.y - sourceExit - targetExit
+      : Infinity;
+  const facingChannel =
+    facingSpan >= 2 &&
+    (facingSpan >= requestedClearance || (!rawSourceRect && !rawTargetRect))
+      ? facingSpan
+      : Infinity;
+  const tightestGap = Math.min(sourceGap, targetGap, facingChannel);
+  const clearance =
+    tightestGap < Infinity
+      ? Math.min(requestedClearance, tightestGap * 0.35)
+      : requestedClearance;
   const radius = Math.min(8, clearance / 2);
   const stubLength = Math.max(1, options.stubLength ?? 24, clearance + radius);
-  const bendPenalty = Math.max(0, options.bendPenalty ?? 24);
   const spacing = Math.max(12, clearance);
-  const obstacles = options.obstacles
-    .filter(
-      (r) =>
-        r.w >= 0 && r.h >= 0 && [r.x, r.y, r.w, r.h].every(Number.isFinite),
-    )
-    .map((r) => inflate(r, clearance));
-  const sourceRect = options.sourceRect
-    ? inflate(options.sourceRect, clearance)
-    : undefined;
-  const targetRect = options.targetRect
-    ? inflate(options.targetRect, clearance)
-    : undefined;
+  const obstacles =
+    clearance === requestedClearance
+      ? fullObstacles
+      : rawObstacles.map((r) => inflate(r, clearance));
+  const sourceRect =
+    clearance === requestedClearance
+      ? fullSourceRect
+      : rawSourceRect
+        ? inflate(rawSourceRect, clearance)
+        : undefined;
+  const targetRect =
+    clearance === requestedClearance
+      ? fullTargetRect
+      : rawTargetRect
+        ? inflate(rawTargetRect, clearance)
+        : undefined;
   const blockers = [
     ...obstacles,
     ...(sourceRect ? [sourceRect] : []),
     ...(targetRect ? [targetRect] : []),
   ];
-  // A clear facing connection needs no stubs, even in a narrow endpoint gap.
-  const normal = NORMAL[sourceSide];
-  const dx = target.x - source.x;
-  const dy = target.y - source.y;
-  if (
-    DIRECTION[targetSide] === (DIRECTION[sourceSide] + 2) % 4 &&
-    dx * normal.x + dy * normal.y > 0 &&
-    dx * normal.y - dy * normal.x === 0 &&
-    !obstacles.some((rect) => hits(source, target, rect)) &&
-    !(options.sourceRect && hits(source, target, options.sourceRect)) &&
-    !(options.targetRect && hits(source, target, options.targetRect))
-  )
-    return render([source, target], radius, 'routed');
-
-  const start = outwardStub(source, sourceSide, stubLength, sourceRect);
-  const end = outwardStub(target, targetSide, stubLength, targetRect);
+  const sourceCap = Math.min(sourceGap, facingChannel) / 2;
+  const targetCap = Math.min(targetGap, facingChannel) / 2;
+  const start = outwardStub(
+    source,
+    sourceSide,
+    sourceCap < stubLength ? sourceCap : stubLength,
+    sourceRect,
+    rawSourceRect,
+  );
+  const end = outwardStub(
+    target,
+    targetSide,
+    targetCap < stubLength ? targetCap : stubLength,
+    targetRect,
+    rawTargetRect,
+  );
   const blockedPort =
     obstacles.some((r) => hits(source, start, r) || hits(end, target, r)) ||
     !!(targetRect && hits(source, start, targetRect)) ||

@@ -16,29 +16,23 @@ export function getEdgeLineType(
   const style = data?.edgeStyle;
   if (style && typeof style === 'object' && 'lineType' in style) {
     const type = style.lineType;
-    if (
-      type === 'auto' ||
-      type === 'straight' ||
-      type === 'step' ||
-      type === 'bezier'
-    )
+    if (type === 'straight' || type === 'step' || type === 'bezier')
       return type;
   }
   return legacyType === 'straight'
     ? 'straight'
     : legacyType === 'smoothstep' || legacyType === 'step'
       ? 'step'
-      : 'auto';
+      : 'bezier';
 }
 
-/** Explicit rendered shapes, and the smooth-step estimate used to select auto ports. */
+/** Shared with the renderer so route selection evaluates the same geometry. */
 export function getEdgePath(
   params: Parameters<typeof getBezierPath>[0],
   lineType: EdgeLineType = 'bezier',
 ) {
   if (lineType === 'straight') return getStraightPath(params);
-  if (lineType === 'step' || lineType === 'auto')
-    return getSmoothStepPath(params);
+  if (lineType === 'step') return getSmoothStepPath(params);
   return getBezierPath(params);
 }
 

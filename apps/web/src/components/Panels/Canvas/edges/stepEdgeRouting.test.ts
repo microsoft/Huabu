@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 
 import { routeOrthogonalEdge } from '@huabu/shared/canvas-engine';
 
-import { createRoutingSceneCache, getRouteObstacles } from './autoEdgeRouting';
+import { createRoutingSceneCache, getRouteObstacles } from './stepEdgeRouting';
 
 import type { Node } from '@xyflow/react';
 
@@ -23,7 +23,7 @@ const ports = {
   targetSide: 'left' as const,
 };
 
-describe('automatic connector scene', () => {
+describe('step connector scene', () => {
   it('reuses geometry for selection/content changes, but updates a moving unrelated obstacle', () => {
     const read = createRoutingSceneCache();
     const nodes = [

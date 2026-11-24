@@ -1501,7 +1501,7 @@ test('context toolbars share chrome while edge controls expose readable values',
   await expect(toolbar).toBeVisible();
   await expect(
     toolbar.getByRole('button', { name: 'Type', exact: true }),
-  ).toContainText('Auto route');
+  ).toContainText('Bezier');
   await expect(toolbar.locator('.bg-edge-default')).toHaveCount(0);
   await toolbar.getByRole('button', { name: 'Type', exact: true }).click();
   await page.getByRole('menuitem', { name: 'Straight', exact: true }).click();

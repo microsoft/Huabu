@@ -3,11 +3,14 @@
 
 import { expect, test, type Locator, type Page } from '@playwright/test';
 
+import { personEdits } from './helpers';
+
 import type {
+  CanvasCommand,
   CreateCanvasResponse,
   GetCanvasResponse,
   NodeData,
-  PostCanvasExecuteRequest,
+  PostCanvasExecuteResponse,
 } from '@huabu/shared';
 import type { Edge, Node } from '@xyflow/react';
 
@@ -35,15 +38,14 @@ async function createSpace(page: Page, title: string) {
 async function execute(
   page: Page,
   canvasId: string,
-  commands: PostCanvasExecuteRequest['commands'],
-  source: 'ui' | 'agent',
+  commands: readonly CanvasCommand[],
 ) {
   const response = await page.request.post(`/api/canvas/${canvasId}/execute`, {
-    data: { commands, originator: { source } },
+    data: { edits: personEdits(commands) },
   });
   expect(response.ok(), await response.text()).toBe(true);
-  const result = await response.json();
-  for (const outcome of result.results) expect(outcome.applied).toBe(true);
+  const result = (await response.json()) as PostCanvasExecuteResponse;
+  for (const outcome of result.edits) expect(outcome.applied).toBe(true);
 }
 
 async function readState(page: Page, canvasId: string) {
@@ -112,79 +114,88 @@ function expectOnBoundary(
   ).toBeLessThanOrEqual(2);
 }
 
-test('default connectors route around an unrelated obstacle and recompute during dragging while explicit Straight stays straight', async ({
+test('step connectors route around an unrelated obstacle and recompute during dragging while default Bezier and explicit Straight preserve their shapes', async ({
   page,
 }, testInfo) => {
   const canvasId = await createSpace(page, 'Live obstacle-aware connectors');
   const obstacleId = 'node-routing-obstacle';
-  await execute(
-    page,
-    canvasId,
-    [
-      {
-        type: 'CREATE_NODES',
-        nodes: [
-          ...(
-            [
-              ['node-routing-source', 80, 300],
-              ['node-routing-target', 820, 300],
-              ['node-straight-source', 80, 700],
-              ['node-straight-target', 820, 720],
-            ] as const
-          ).map(([id, x, y]) => ({
-            id,
-            nodeType: 'image',
-            position: { x, y },
-            size: { width: 160, height: 100 },
-            data: { label: id },
-          })),
-          {
-            id: obstacleId,
-            nodeType: 'image',
-            position: { x: 420, y: 120 },
-            size: { width: 160, height: 520 },
-            data: { label: 'Drag this unrelated obstacle' },
-          },
-        ],
-      },
-      {
-        type: 'CONNECT_NODES',
-        edges: [
-          {
-            id: 'edge-routing-auto',
-            source: 'node-routing-source',
-            target: 'node-routing-target',
-          },
-          {
-            id: 'edge-routing-straight',
-            source: 'node-straight-source',
-            target: 'node-straight-target',
-            style: { lineType: 'straight' },
-          },
-        ],
-      },
-    ],
-    'ui',
-  );
+  await execute(page, canvasId, [
+    {
+      type: 'CREATE_NODES',
+      nodes: [
+        ...(
+          [
+            ['node-routing-source', 80, 300],
+            ['node-routing-target', 820, 300],
+            ['node-bezier-source', 80, 520],
+            ['node-bezier-target', 820, 560],
+            ['node-straight-source', 80, 700],
+            ['node-straight-target', 820, 720],
+          ] as const
+        ).map(([id, x, y]) => ({
+          id,
+          nodeType: 'image',
+          position: { x, y },
+          size: { width: 160, height: 100 },
+          data: { label: id },
+        })),
+        {
+          id: obstacleId,
+          nodeType: 'image',
+          position: { x: 420, y: 120 },
+          size: { width: 160, height: 520 },
+          data: { label: 'Drag this unrelated obstacle' },
+        },
+      ],
+    },
+    {
+      type: 'CONNECT_NODES',
+      edges: [
+        {
+          id: 'edge-routing-step',
+          source: 'node-routing-source',
+          target: 'node-routing-target',
+          style: { lineType: 'step' },
+        },
+        {
+          id: 'edge-routing-default',
+          source: 'node-bezier-source',
+          target: 'node-bezier-target',
+        },
+        {
+          id: 'edge-routing-straight',
+          source: 'node-straight-source',
+          target: 'node-straight-target',
+          style: { lineType: 'straight' },
+        },
+      ],
+    },
+  ]);
   await page.goto(`/canvas/${canvasId}`, { waitUntil: 'domcontentloaded' });
   await page.keyboard.press('Escape');
-  const auto = page.locator(
-    '.react-flow__edge[data-id="edge-routing-auto"] .react-flow__edge-path',
+  const step = page.locator(
+    '.react-flow__edge[data-id="edge-routing-step"] .react-flow__edge-path',
+  );
+  const bezier = page.locator(
+    '.react-flow__edge[data-id="edge-routing-default"] .react-flow__edge-path',
   );
   const straight = page.locator(
     '.react-flow__edge[data-id="edge-routing-straight"] .react-flow__edge-path',
   );
   const obstacle = page.locator(`.react-flow__node[data-id="${obstacleId}"]`);
-  await expect(auto).toBeVisible({ timeout: 45_000 });
+  await expect(step).toBeVisible({ timeout: 45_000 });
+  await expect(bezier).toBeVisible();
   await expect(straight).toBeVisible();
   await expect(obstacle).toBeVisible();
   await page.mouse.click(1120, 500);
   await expect(page.locator('.react-flow__node.selected')).toHaveCount(0);
   await expect
-    .poll(async () => (await pathGeometry(auto, obstacleId)).insideObstacle)
+    .poll(async () => (await pathGeometry(step, obstacleId)).insideObstacle)
     .toBe(0);
-  const initial = await pathGeometry(auto, obstacleId);
+  const initial = await pathGeometry(step, obstacleId);
+  const initialBezier = await pathGeometry(bezier, obstacleId);
   const initialStraight = await pathGeometry(straight, obstacleId);
+  expect(initialBezier.d?.match(/[A-Za-z]/g)).toContain('C');
   expect(initialStraight.d?.match(/[A-Za-z]/g)).toEqual(['M', 'L']);
   expect(initial.length).toBeGreaterThan(initialStraight.length);
   await page.screenshot({
@@ -215,10 +226,10 @@ test('default connectors route around an unrelated obstacle and recompute during
     expect(await visibleBounds(target)).toEqual(targetAtStart);
     // Assert while the pointer is still held: a drag-stop-only update fails.
     await expect
-      .poll(async () => (await pathGeometry(auto, obstacleId)).d)
+      .poll(async () => (await pathGeometry(step, obstacleId)).d)
       .not.toBe(initial.d);
     await expect
-      .poll(async () => (await pathGeometry(auto, obstacleId)).insideObstacle)
+      .poll(async () => (await pathGeometry(step, obstacleId)).insideObstacle)
       .toBe(0);
     expect(
       (await pathGeometry(straight, obstacleId)).d?.match(/[A-Za-z]/g),
@@ -242,7 +253,7 @@ test('default connectors route around an unrelated obstacle and recompute during
     .toBeGreaterThan(220);
 
   const sourceBefore = await visibleBounds(source);
-  const routeBefore = (await pathGeometry(auto, obstacleId)).d;
+  const routeBefore = (await pathGeometry(step, obstacleId)).d;
   const sourceCenter = {
     x: sourceBefore.x + sourceBefore.width / 2,
     y: sourceBefore.y + sourceBefore.height / 2,
@@ -255,10 +266,10 @@ test('default connectors route around an unrelated obstacle and recompute during
       .poll(async () => (await visibleBounds(source)).y)
       .toBeLessThan(sourceBefore.y - 60);
     await expect
-      .poll(async () => (await pathGeometry(auto, obstacleId)).d)
+      .poll(async () => (await pathGeometry(step, obstacleId)).d)
       .not.toBe(routeBefore);
     await expect(async () => {
-      const geometry = await pathGeometry(auto, obstacleId);
+      const geometry = await pathGeometry(step, obstacleId);
       expect(geometry.insideObstacle).toBe(0);
       expectOnBoundary(geometry.start, await visibleBounds(source));
       expectOnBoundary(geometry.end, await visibleBounds(target));
@@ -278,17 +289,27 @@ test('default connectors route around an unrelated obstacle and recompute during
     )
     .toBeLessThan(260);
   await page.reload({ waitUntil: 'domcontentloaded' });
-  await expect(auto).toBeVisible();
+  await expect(step).toBeVisible();
   await expect
-    .poll(async () => (await pathGeometry(auto, obstacleId)).insideObstacle)
+    .poll(async () => (await pathGeometry(step, obstacleId)).insideObstacle)
     .toBe(0);
+  expect(
+    (await pathGeometry(bezier, obstacleId)).d?.match(/[A-Za-z]/g),
+  ).toContain('C');
   expect(
     (await pathGeometry(straight, obstacleId)).d?.match(/[A-Za-z]/g),
   ).toEqual(['M', 'L']);
-  const persisted = (await readState(page, canvasId)).edges.find(
-    (edge) => edge.id === 'edge-routing-straight',
-  );
-  expect((persisted?.data?.edgeStyle as { lineType?: string })?.lineType).toBe(
-    'straight',
-  );
+  const state = await readState(page, canvasId);
+  expect(
+    (
+      state.edges.find((edge) => edge.id === 'edge-routing-step')?.data
+        ?.edgeStyle as { lineType?: string }
+    )?.lineType,
+  ).toBe('step');
+  expect(
+    (
+      state.edges.find((edge) => edge.id === 'edge-routing-default')?.data
+        ?.edgeStyle as { lineType?: string } | undefined
+    )?.lineType,
+  ).toBeUndefined();
 });

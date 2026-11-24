@@ -9,40 +9,49 @@ import {
 import type { OrthogonalRect } from '@huabu/shared/canvas-engine';
 import type { Node } from '@xyflow/react';
 
-export type RoutingScene = ReadonlyMap<
-  string,
-  { rect: OrthogonalRect; parentId?: string; hidden?: boolean }
->;
+export type RoutingSceneNode = {
+  rect: OrthogonalRect;
+  parentId?: string;
+  hidden?: boolean;
+};
+
+export type RoutingScene = ReadonlyMap<string, RoutingSceneNode>;
 
 /** Cache only visible geometry and hierarchy, not selection or card contents. */
 export function createRoutingSceneCache() {
-  let previousKey = '';
   let scene: RoutingScene = new Map();
   return (nodes: Node[]): RoutingScene => {
-    const resolve = createAbsolutePositionGetter(
-      new Map(nodes.map((n) => [n.id, n])),
-    );
-    const entries = nodes
-      .map(
-        (node) =>
-          [
-            node.id,
-            {
-              rect: {
-                ...(resolve(node.id) ?? node.position),
-                ...getLayoutNodeSize(node),
-              },
-              parentId: node.parentId,
-              hidden: node.hidden,
-            },
-          ] as const,
-      )
-      .sort((a, b) => a[0].localeCompare(b[0]));
-    const key = JSON.stringify(entries);
-    if (key !== previousKey) {
-      scene = new Map(entries);
-      previousKey = key;
+    const nodeMap = new Map(nodes.map((n) => [n.id, n]));
+    const resolve = createAbsolutePositionGetter(nodeMap);
+    let unchanged = nodeMap.size === scene.size;
+    const entries: Array<readonly [string, RoutingSceneNode]> = [];
+    for (const [id, node] of nodeMap) {
+      const pos = resolve(id) ?? node.position;
+      const size = getLayoutNodeSize(node);
+      const entry: RoutingSceneNode = {
+        rect: { x: pos.x, y: pos.y, w: size.w, h: size.h },
+        parentId: node.parentId,
+        hidden: node.hidden,
+      };
+      entries.push([id, entry]);
+      if (unchanged) {
+        const prev = scene.get(id);
+        if (
+          !prev ||
+          !Object.is(prev.rect.x, entry.rect.x) ||
+          !Object.is(prev.rect.y, entry.rect.y) ||
+          !Object.is(prev.rect.w, entry.rect.w) ||
+          !Object.is(prev.rect.h, entry.rect.h) ||
+          prev.parentId !== entry.parentId ||
+          prev.hidden !== entry.hidden
+        ) {
+          unchanged = false;
+        }
+      }
     }
+    if (unchanged) return scene;
+    entries.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+    scene = new Map(entries);
     return scene;
   };
 }
