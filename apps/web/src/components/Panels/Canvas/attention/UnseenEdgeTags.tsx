@@ -16,6 +16,7 @@ import { getCanvasVisibleArea } from '@/utils/canvasViewport';
 import { readConversations } from '@/utils/turnNotices';
 import {
   edgeTags,
+  unseenPieces,
   viewportOnPiece,
   type EdgeTag,
   type MarkedAs,
@@ -238,7 +239,9 @@ function Tag({ tag, onGo, onDismiss }: TagProps) {
       data-canvas-grounding-exclude
       // A flex box, so that it is exactly as tall as the tag: as a line of
       // text it would be taller, and the tag would hang short of the edge.
-      className="absolute z-1000 flex"
+      // A React Flow panel, so that the canvas's pointer router leaves a
+      // touch or a pen stroke on it alone; a panel's own margin is undone.
+      className="react-flow__panel absolute !z-1000 !m-0 flex"
       // On whole pixels, for the same reason the wedge is.
       style={{
         left: Math.round(tag.x),
@@ -348,9 +351,18 @@ export function UnseenEdgeTags() {
         id,
         rect: {
           ...node.internals.positionAbsolute,
-          width: node.measured.width ?? node.width ?? node.initialWidth ?? 0,
+          // A node out of view may never have been measured, and some
+          // carry their size only in their style.
+          width:
+            node.measured.width ??
+            node.width ??
+            node.initialWidth ??
+            (typeof node.style?.width === 'number' ? node.style.width : 0),
           height:
-            node.measured.height ?? node.height ?? node.initialHeight ?? 0,
+            node.measured.height ??
+            node.height ??
+            node.initialHeight ??
+            (typeof node.style?.height === 'number' ? node.style.height : 0),
         },
         label: typeof label === 'string' ? label : undefined,
         type: typeof type === 'string' ? type : node.type,
@@ -360,9 +372,15 @@ export function UnseenEdgeTags() {
     return JSON.stringify(nodes);
   });
   const nodes = useMemo(() => JSON.parse(marked) as MarkedNode[], [marked]);
+  // Grouped when the nodes change, placed when the view does: grouping
+  // compares every pair of nodes, and the view moves on every frame of a pan.
+  const pieces = useMemo(
+    () => unseenPieces(nodes, EDGE_TAG_CONFIG.clusterGap),
+    [nodes],
+  );
   const tags = useMemo(
-    () => (area ? edgeTags(nodes, viewport, area, EDGE_TAG_CONFIG) : []),
-    [nodes, viewport, area],
+    () => (area ? edgeTags(pieces, viewport, area, EDGE_TAG_CONFIG) : []),
+    [pieces, viewport, area],
   );
   if (!domNode || !area || tags.length === 0) return null;
   const dismiss = (tag: EdgeTag) => {
@@ -379,7 +397,11 @@ export function UnseenEdgeTags() {
         area,
         EDGE_TAG_CONFIG.flyPadding,
       ),
-      { duration: EDGE_TAG_CONFIG.flyDurationMs },
+      {
+        duration: window.matchMedia('(prefers-reduced-motion: reduce)').matches
+          ? 0
+          : EDGE_TAG_CONFIG.flyDurationMs,
+      },
     );
   };
   return createPortal(

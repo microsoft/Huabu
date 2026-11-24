@@ -4,7 +4,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  edgeTags,
+  edgeTags as placeTags,
   unseenPieces,
   viewportOnPiece,
   type EdgeTagConfig,
@@ -38,6 +38,14 @@ const node = (
   y: number,
   kind: 'create' | 'update' = 'create',
 ): MarkedNode => ({ id, rect: { x, y, width: 100, height: 100 }, kind });
+
+/** The tags for nodes: grouped, then placed, as the layer does it. */
+const edgeTags = (
+  nodes: readonly MarkedNode[],
+  view: Parameters<typeof placeTags>[1],
+  visible: Parameters<typeof placeTags>[2],
+  numbers: EdgeTagConfig,
+) => placeTags(unseenPieces(nodes, numbers.clusterGap), view, visible, numbers);
 
 describe('unseenPieces', () => {
   it('joins nodes that are near one another, chained, in reading order', () => {
@@ -123,6 +131,43 @@ describe('edgeTags', () => {
     // To the right and far up: on the side edge, below the corner.
     const [side] = edgeTags([node('n', 9000, -7400)], viewport, area, corners);
     expect(side).toMatchObject({ edge: 'right', x: 990, y: 10 + 50 + 10 });
+  });
+
+  it('gives a tag to no more pieces than a stretch has room for', () => {
+    // A view 250 wide: the top edge is one stretch, 20..230, with room for
+    // eight dots 30 apart. Nine pieces lie above.
+    const narrow = { x: 0, y: 0, width: 250, height: 800 };
+    const above = Array.from({ length: 9 }, (_, index) =>
+      node(`n${index}`, 75, -3000 - index * 1000),
+    );
+    const tags = edgeTags(above, viewport, narrow, {
+      ...config,
+      clusterGap: 100,
+      maxTags: 9,
+    });
+    expect(tags.map((tag) => tag.key)).toEqual(
+      above.slice(0, 8).map((entry) => entry.id),
+    );
+    const xs = tags.map((tag) => tag.x).sort((a, b) => a - b);
+    expect(xs[0]).toBeGreaterThanOrEqual(20);
+    expect(xs[7]).toBeLessThanOrEqual(230);
+    for (let index = 1; index < xs.length; index++)
+      expect(xs[index] - xs[index - 1]).toBeGreaterThanOrEqual(30);
+  });
+
+  it('gives no tag where an edge has no room at all', () => {
+    // Between the panels 200 px are left; the toolbar and the corner take
+    // all of the bottom edge, so there is nowhere on it to put a tag.
+    const slot = { x: 260, y: 0, width: 200, height: 800 };
+    const taken = {
+      ...config,
+      bottomLeftClearance: 96,
+      bottomToolbarWidth: 470,
+    };
+    expect(edgeTags([node('n', 310, 3000)], viewport, slot, taken)).toEqual([]);
+    // The side edges of the same view still have room.
+    const [side] = edgeTags([node('n', 3000, 350)], viewport, slot, taken);
+    expect(side).toMatchObject({ edge: 'right', x: 450 });
   });
 
   it('follows the viewport', () => {

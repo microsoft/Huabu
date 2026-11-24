@@ -116,18 +116,14 @@ const intersects = (a: Rect, b: Rect): boolean =>
   b.y < a.y + a.height;
 
 const clamp = (value: number, min: number, max: number): number =>
-  min > max ? (min + max) / 2 : Math.min(Math.max(value, min), max);
+  Math.min(Math.max(value, min), max);
 
 /**
  * Move values apart, keeping their order, until neighbours are at least
- * `step` apart and all lie within `min`..`max` where that is possible.
+ * `step` apart and none lies past `max`. The values start within their
+ * range, which must have the room for them.
  */
-function spread(
-  values: number[],
-  step: number,
-  min: number,
-  max: number,
-): number[] {
+function spread(values: number[], step: number, max: number): number[] {
   const order = values.map((_, index) => index);
   order.sort((a, b) => values[a] - values[b]);
   const result = [...values];
@@ -142,18 +138,22 @@ function spread(
         result[order[i + 1]] - step,
       );
   }
-  return result.map((value) => Math.max(value, min));
+  return result;
 }
 
 /**
  * The tags to show: one for each piece that lies wholly outside the visible
  * canvas, at most `config.maxTags` of them: first what waits for the person,
- * then what failed, then the rest, the nearest first within each.
+ * then what failed, then the rest, the nearest first within each. A piece
+ * whose edge has no room left for a tag gets none, and the next one is
+ * tried in its place.
  *
+ * @param pieces What {@link unseenPieces} made of the nodes. Grouping does
+ *   not depend on the view, so it is not done again as the view moves.
  * @param area The visible canvas within its container, in screen px.
  */
 export function edgeTags(
-  nodes: readonly MarkedNode[],
+  pieces: readonly MarkedNode[][],
   viewport: CanvasViewport,
   area: Rect,
   config: EdgeTagConfig,
@@ -169,11 +169,12 @@ export function edgeTags(
   // along the bottom. A tag keeps out of those sideways, and a tag on a
   // side edge keeps above and below them.
   const half = config.dotSize / 2;
+  const step = config.dotSize + config.tagGap;
   const middle = (left + right) / 2;
   const side: [number, number][] = [
     [top + config.topClearance + half, bottom - config.bottomClearance - half],
   ];
-  const stretches: Record<TagEdge, [number, number][]> = {
+  const along: Record<TagEdge, [number, number][]> = {
     top: [
       [
         left + config.topLeftClearance + half,
@@ -193,15 +194,37 @@ export function edgeTags(
     left: side,
     right: side,
   };
-  /** The stretch of an edge nearest a point along it, and the point in it. */
-  const settle = (edge: TagEdge, along: number) => {
-    let best = { stretch: 0, along: Infinity, off: Infinity };
-    stretches[edge].forEach(([from, to], stretch) => {
-      const within = clamp(along, from, to);
-      // A stretch too short to hold a tag is the last resort.
-      const off = Math.abs(within - along) + (from > to ? 1e6 : 0);
-      if (off < best.off) best = { stretch, along: within, off };
-    });
+  // Each stretch with the tags it holds. One too short for a tag is not a
+  // place at all, and one that is full takes no more: tags pushed together
+  // would lie on top of one another, and all but one could not be reached.
+  const stretches = Object.fromEntries(
+    (Object.keys(along) as TagEdge[]).map((edge) => [
+      edge,
+      along[edge]
+        .filter(([from, to]) => from <= to)
+        .map(([from, to]) => ({
+          from,
+          to,
+          room: Math.floor((to - from) / step) + 1,
+          tags: [] as EdgeTag[],
+        })),
+    ]),
+  ) as Record<
+    TagEdge,
+    { from: number; to: number; room: number; tags: EdgeTag[] }[]
+  >;
+  /** The stretch of an edge with room that is nearest a point along it. */
+  const settle = (edge: TagEdge, wanted: number) => {
+    let best: (typeof stretches)[TagEdge][number] | undefined;
+    let off = Infinity;
+    for (const stretch of stretches[edge]) {
+      if (stretch.tags.length >= stretch.room) continue;
+      const away = Math.abs(clamp(wanted, stretch.from, stretch.to) - wanted);
+      if (away < off) {
+        best = stretch;
+        off = away;
+      }
+    }
     return best;
   };
   const centreX = (left + right) / 2;
@@ -213,7 +236,7 @@ export function edgeTags(
     height: rect.height * viewport.zoom,
   });
 
-  const away = unseenPieces(nodes, config.clusterGap).flatMap((piece) => {
+  const away = pieces.flatMap((piece) => {
     const rects = piece.map((node) => onScreen(node.rect));
     // A piece with any of it in view already shows its marks.
     if (rects.some((rect) => intersects(rect, area))) return [];
@@ -230,60 +253,57 @@ export function edgeTags(
       a.distance - b.distance,
   );
 
-  const placed = away
-    .slice(0, config.maxTags)
-    .map(({ piece, bounds, attention }) => {
-      const dx = bounds.x + bounds.width / 2 - centreX;
-      const dy = bounds.y + bounds.height / 2 - centreY;
-      // How far along the line to the piece each pair of edges is reached.
-      const untilSide = dx === 0 ? Infinity : (right - left) / 2 / Math.abs(dx);
-      const untilEnd = dy === 0 ? Infinity : (bottom - top) / 2 / Math.abs(dy);
-      const sideways = untilSide <= untilEnd;
-      const reach = Math.min(untilSide, untilEnd, 1);
-      const edge: TagEdge = sideways
-        ? dx > 0
-          ? 'right'
-          : 'left'
-        : dy > 0
-          ? 'bottom'
-          : 'top';
-      const { stretch, along } = settle(
-        edge,
-        sideways ? centreY + dy * reach : centreX + dx * reach,
-      );
-      const tag: EdgeTag = {
-        key: piece[0].id,
-        nodes: piece,
-        attention,
-        edge,
-        // The tag hangs from this point: centred on it along the edge.
-        x: sideways ? (dx > 0 ? right : left) : along,
-        y: sideways ? along : dy > 0 ? bottom : top,
-      };
-      return { tag, stretch };
-    });
+  const tags: EdgeTag[] = [];
+  for (const { piece, bounds, attention } of away) {
+    if (tags.length >= config.maxTags) break;
+    const dx = bounds.x + bounds.width / 2 - centreX;
+    const dy = bounds.y + bounds.height / 2 - centreY;
+    // How far along the line to the piece each pair of edges is reached.
+    const untilSide = dx === 0 ? Infinity : (right - left) / 2 / Math.abs(dx);
+    const untilEnd = dy === 0 ? Infinity : (bottom - top) / 2 / Math.abs(dy);
+    const sideways = untilSide <= untilEnd;
+    const reach = Math.min(untilSide, untilEnd, 1);
+    const edge: TagEdge = sideways
+      ? dx > 0
+        ? 'right'
+        : 'left'
+      : dy > 0
+        ? 'bottom'
+        : 'top';
+    const wanted = sideways ? centreY + dy * reach : centreX + dx * reach;
+    const stretch = settle(edge, wanted);
+    if (!stretch) continue;
+    const at = clamp(wanted, stretch.from, stretch.to);
+    const tag: EdgeTag = {
+      key: piece[0].id,
+      nodes: piece,
+      attention,
+      edge,
+      // The tag hangs from this point: centred on it along the edge.
+      x: sideways ? (dx > 0 ? right : left) : at,
+      y: sideways ? at : dy > 0 ? bottom : top,
+    };
+    stretch.tags.push(tag);
+    tags.push(tag);
+  }
 
-  // Tags on the same stretch of an edge must not lie on top of one another.
-  for (const edge of ['left', 'right', 'top', 'bottom'] as const) {
+  // Tags on the same stretch of an edge are moved apart; there is room.
+  for (const edge of Object.keys(stretches) as TagEdge[]) {
     const sideways = edge === 'left' || edge === 'right';
-    stretches[edge].forEach(([from, to], stretch) => {
-      const here = placed
-        .filter((entry) => entry.tag.edge === edge && entry.stretch === stretch)
-        .map((entry) => entry.tag);
-      if (here.length < 2) return;
+    for (const stretch of stretches[edge]) {
+      if (stretch.tags.length < 2) continue;
       const apart = spread(
-        here.map((tag) => (sideways ? tag.y : tag.x)),
-        config.dotSize + config.tagGap,
-        from,
-        to,
+        stretch.tags.map((tag) => (sideways ? tag.y : tag.x)),
+        step,
+        stretch.to,
       );
-      here.forEach((tag, index) => {
+      stretch.tags.forEach((tag, index) => {
         if (sideways) tag.y = apart[index];
         else tag.x = apart[index];
       });
-    });
+    }
   }
-  return placed.map((entry) => entry.tag);
+  return tags;
 }
 
 /**
