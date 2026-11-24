@@ -30,7 +30,7 @@
   "devDependencies": {
     "@types/node": "^24.13.3",
     "@types/yauzl": "^2.10.3",
-    "tsup": "^8.5.1",
+    "tsup": "^9.0.0",
     "typescript": "^6.0.3",
     "vitest": "^4.1.12"
   }

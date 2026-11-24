@@ -16,7 +16,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import multipart from '@fastify/multipart';
-import archiver from 'archiver';
+import { ZipArchive } from 'archiver';
 import fastify from 'fastify';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -1695,7 +1695,7 @@ describe('Space export/import and reliable-save state', () => {
       join(saveDir, 'pending.json'),
       JSON.stringify({ v: 1, toVersion: 1, result: {}, delta: null }),
     );
-    const archive = archiver('zip');
+    const archive = new ZipArchive();
     const chunks: Buffer[] = [];
     archive.on('data', (chunk: Buffer) => chunks.push(chunk));
     const finished = new Promise<void>((resolve, reject) => {
