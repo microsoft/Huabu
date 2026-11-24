@@ -6,7 +6,7 @@
  *
  * One file per version, applied in order, never edited once released. The
  * migration runner in `database.ts` enforces that shape; this file is only the
- * SQL. Everything is `STRICT` so a column's declared type is a real
+ * SQL, and names the data step of a version that has one. Everything is `STRICT` so a column's declared type is a real
  * constraint, and every child row reaches its owner through a foreign key so
  * deleting a Space or a Workspace cannot leave the rest behind.
  *
@@ -22,6 +22,10 @@
  * rows in this database; the two lifecycles are joined only by the deletion
  * saga in `storage.ts`, which sweeps the byte areas before the record goes.
  */
+
+import { storeSqliteSpaceOrderKeys } from './order-keys-upgrade.js';
+
+import type { DatabaseSync } from 'node:sqlite';
 
 /**
  * Version 1 — Workspaces, Spaces, and everything a Space owns.
@@ -117,6 +121,11 @@ const SCHEMA_V1 = `
 export interface SqliteMigration {
   readonly version: number;
   readonly sql: string;
+  /**
+   * Stored data this version rewrites, where SQL alone cannot compute it.
+   * Runs after `sql`, in the same transaction.
+   */
+  readonly data?: (database: DatabaseSync) => void;
 }
 
 export const SQLITE_MIGRATIONS: readonly SqliteMigration[] = Object.freeze([
@@ -183,6 +192,10 @@ export const SQLITE_MIGRATIONS: readonly SqliteMigration[] = Object.freeze([
       CREATE INDEX nodes_by_change ON nodes(canvas_id, change_seq);
     `,
   }),
+  // Version 5 — data only, no schema change. Every Space written before
+  // nodes carried their order keys gets them stored, once, so that its order
+  // does not depend on the code that reads it later.
+  Object.freeze({ version: 5, sql: '', data: storeSqliteSpaceOrderKeys }),
 ]);
 
 export const SQLITE_SCHEMA_VERSION =

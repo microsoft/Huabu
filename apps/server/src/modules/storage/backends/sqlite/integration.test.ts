@@ -304,7 +304,7 @@ describe('SqliteStructuredStore lifecycle and schema', () => {
     ).toBeNull();
   });
 
-  it('opens the immutable v1 SQL fixture without rewriting its records', async () => {
+  it('opens the immutable v1 SQL fixture, adding only the order keys its Space lacked', async () => {
     const file = trackedFile('huabu-sqlite-v1-fixture-');
     const fixtureSql = readFileSync(
       new URL('./fixtures/v1.sql', import.meta.url),
@@ -329,7 +329,8 @@ describe('SqliteStructuredStore lifecycle and schema', () => {
       title: 'Fixture Space',
       version: 3,
       state: {
-        nodes: [{ id: 'fixture-node', type: 'note' }],
+        // Stored by the version 5 data step; version and timestamps stay.
+        nodes: [{ id: 'fixture-node', type: 'note', data: { paintKey: 'a0' } }],
         edges: [],
       },
       createdAt: 10,
@@ -365,7 +366,7 @@ describe('SqliteStructuredStore lifecycle and schema', () => {
     ]);
   });
 
-  it('reaches the pinned v4 schema from a fresh database and from a v2 database', () => {
+  it('reaches the pinned schema from a fresh database and from a v2 database', () => {
     // `fixtures/v4-schema.json` is every table and index of the released
     // schema, as SQLite records it. A fresh database and one upgraded from
     // v2 must both arrive at exactly that.
@@ -406,7 +407,7 @@ describe('SqliteStructuredStore lifecycle and schema', () => {
       database.exec(`
         INSERT INTO workspaces VALUES ('w', 'W', 1, 1, NULL);
         INSERT INTO spaces (workspace_id, canvas_id, title, collision_key, version, created_at, updated_at, state_json)
-          VALUES ('w', 's', 'S', 's', 3, 1, 1, '{}');
+          VALUES ('w', 's', 'S', 's', 3, 1, 1, '{"nodes":[],"edges":[]}');
         INSERT INTO nodes VALUES ('s', 'n', '{}', 'r', 'n');
       `);
       applySqliteMigrations(database);
@@ -426,8 +427,8 @@ describe('SqliteStructuredStore lifecycle and schema', () => {
       return schemaOf(database);
     });
 
-    expect(freshSchema.version).toBe(4);
-    expect(SQLITE_SCHEMA_VERSION).toBe(4);
+    expect(freshSchema.version).toBe(5);
+    expect(SQLITE_SCHEMA_VERSION).toBe(5);
     expect(freshSchema.objects).toEqual(pinned);
     expect(upgradedSchema).toEqual(freshSchema);
   });

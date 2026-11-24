@@ -3,6 +3,8 @@
 
 import { beforeEach, expect, it, vi } from 'vitest';
 
+import { seedNodeOrder } from '@huabu/shared/canvas-engine';
+
 import { PgExecutor, PostgresStoreContext } from './database.js';
 import { POSTGRES_MIGRATIONS } from './schema.js';
 const pg = vi.hoisted(() => {
@@ -87,6 +89,48 @@ it('rolls back a failed migration and permits a later initialization attempt', a
   });
   await context.init();
   expect(context.connection()).toBe(pg.pool);
+});
+it('stores order keys for Spaces without them when upgrading from version 4', async () => {
+  const legacy = {
+    nodes: [
+      { id: 'node-a', type: 'note', position: { x: 0, y: 0 }, data: {} },
+      { id: 'node-b', type: 'note', position: { x: 0, y: 0 }, data: {} },
+    ],
+    edges: [],
+  };
+  const keyed = {
+    nodes: seedNodeOrder(legacy.nodes as never[]),
+    edges: [],
+  };
+  pg.query.mockImplementation(async (sql: string) => ({
+    rows: sql.startsWith('SELECT version')
+      ? [{ version: 4 }]
+      : sql.startsWith('SELECT current_database()')
+        ? [{ database: 'test', schema: 'public' }]
+        : sql.startsWith('SELECT canvas_id, state_json')
+          ? [
+              { canvas_id: 'legacy', state_json: JSON.stringify(legacy) },
+              { canvas_id: 'keyed', state_json: JSON.stringify(keyed) },
+            ]
+          : [],
+  }));
+  await new PostgresStoreContext({}).init();
+  const statements = pg.query.mock.calls.map(([sql]) => sql as string);
+  const writes = pg.query.mock.calls.filter(([sql]) =>
+    (sql as string).startsWith('UPDATE spaces'),
+  );
+  // One Space rewritten, and only its state: no version, no timestamp.
+  expect(writes).toEqual([
+    [
+      'UPDATE spaces SET state_json = $1 WHERE canvas_id = $2',
+      [JSON.stringify(keyed), 'legacy'],
+    ],
+  ]);
+  expect(pg.query).toHaveBeenCalledWith(
+    'UPDATE huabu_schema_version SET version = $1 WHERE id = 1',
+    [5],
+  );
+  expect(statements.at(-1)).toBe('COMMIT');
 });
 it('discards a broken client while preserving the original transaction failure', async () => {
   const context = new PostgresStoreContext({});

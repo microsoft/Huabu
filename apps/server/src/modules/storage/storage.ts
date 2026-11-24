@@ -252,8 +252,13 @@ function composeSpace(storage: Storage, canvasId: string): Space {
         record.state.nodes as Parameters<typeof stripLegacyPortalTopology>[0],
         record.state.edges as Parameters<typeof stripLegacyPortalTopology>[1],
       );
-      // A Space stored before nodes carried their own order keys gets them
-      // here, the same on every read, until its next write stores them.
+      // Order keys for a Space stored before nodes carried them. Such Spaces
+      // are converted once, when their Workspace is opened or their database
+      // upgraded, so that a stored order never depends on the code reading it
+      // later; for those this returns the same array. It still converts a
+      // Space that arrives in the old format afterwards — an imported archive,
+      // a folder written by an older build — the same on every read, until
+      // its next write or the next open stores the keys.
       const nodes = seedNodeOrder(
         topology.nodes as unknown as Parameters<typeof seedNodeOrder>[0],
       ) as unknown as typeof topology.nodes;
