@@ -142,9 +142,21 @@ export const SHORTCUTS: ShortcutDef[] = [
     section: SECTION.editing,
   },
   {
+    id: 'edit.cut',
+    combo: { mod: true, key: 'x' },
+    descriptionKey: 'shortcuts.items.cutSelectedNodes',
+    section: SECTION.editing,
+  },
+  {
     id: 'edit.paste',
     combo: { mod: true, key: 'v' },
     descriptionKey: 'shortcuts.items.paste',
+    section: SECTION.editing,
+  },
+  {
+    id: 'edit.selectAll',
+    combo: { mod: true, key: 'a' },
+    descriptionKey: 'shortcuts.items.selectAllNodes',
     section: SECTION.editing,
   },
   {

@@ -22,7 +22,7 @@ export function toSafeFilename(
 ): string {
   const normalized = (name ?? '').normalize('NFC');
   let safe = normalized.replace(ILLEGAL_CHARS_RE, '_');
-  safe = safe.replace(/^[.\s]+|[.\s]+$/g, '');
+  safe = safe.replace(/^[.\s]+|(?<![.\s])[.\s]+$/g, '');
   if (!safe) return fallback;
   if (WIN_RESERVED_RE.test(safe)) safe = `_${safe}`;
   if (safe.length > MAX_FILENAME_LENGTH) {

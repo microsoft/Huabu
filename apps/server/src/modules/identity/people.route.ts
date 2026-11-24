@@ -2,6 +2,7 @@
 // Licensed under the MIT license.
 
 import {
+  setAdmissionSchema,
   setPersonMemberSchema,
   setPersonWorkspaceRoleSchema,
 } from '@huabu/shared';
@@ -14,8 +15,9 @@ import type { IdentityService } from './service.js';
 import type { FastifyPluginAsync } from 'fastify';
 
 /**
- * People administration for a Bubble deployment: who may use Huabu, and with
- * which Workspace roles. An administrator's alone; absent in local mode, where
+ * People administration for a Bubble deployment: who may use Huabu, with
+ * which Workspace roles, and whether people who sign in are admitted
+ * automatically. An administrator's alone; absent in local mode, where
  * there is one person. Revocation reaches open streams at their next
  * revalidation, as every other grant change does.
  */
@@ -39,6 +41,16 @@ const peopleRoutes: FastifyPluginAsync<{ service: IdentityService }> = async (
   });
 
   app.get('/', async () => people.list());
+
+  // Automatic admission: a deployment setting, so an administrator's alone
+  // like the rest of People.
+  app.get('/admission', async () => people.admission());
+  app.put('/admission', async (request, reply) => {
+    const body = setAdmissionSchema.safeParse(request.body);
+    if (!body.success)
+      return reply.code(400).send({ message: 'Invalid request body' });
+    return people.setAutomaticAdmission(body.data.automatic);
+  });
 
   app.put<{ Params: { principalId: string } }>(
     '/:principalId/member',
@@ -70,14 +82,10 @@ const peopleRoutes: FastifyPluginAsync<{ service: IdentityService }> = async (
     '/:principalId/agent-credentials/reset',
     async (request, reply) => {
       const { principalId } = request.params;
-      // Listed, not resolved: a revoked or disabled person's devices too.
-      if (
-        !(await people.list()).some(
-          (person) => person.principal.principalId === principalId,
-        )
-      )
+      // Known, not resolved: a revoked or disabled person's devices too.
+      if (!(await people.has(principalId)))
         return reply.code(404).send({ message: 'No such person' });
-      resetAgentCredentials(principalId);
+      await resetAgentCredentials(principalId);
       return reply.code(204).send();
     },
   );

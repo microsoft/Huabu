@@ -31,6 +31,22 @@ async function mount(page: Page, theme: string, input: 'mouse' | 'finger') {
         body: 'Isolated renderer fixture: no backend',
       }),
   );
+  // The sign-in gate mounts nothing until the Server says who is calling, so
+  // the backend-less fixture answers that one request as a local deployment.
+  await page.route('**/api/identity', (route) =>
+    route.fulfill({
+      json: {
+        provider: 'local',
+        principal: {
+          principalId: 'local-owner',
+          kind: 'user',
+          displayName: 'Local owner',
+        },
+        member: true,
+        owner: true,
+      },
+    }),
+  );
   await page.goto('/playground/chat-performance?messages=2');
   await expect(page.locator('textarea[name="agent-message"]')).toBeVisible();
   await page.evaluate(

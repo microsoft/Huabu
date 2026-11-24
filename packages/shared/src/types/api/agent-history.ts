@@ -5,6 +5,26 @@ import { z } from 'zod';
 
 import type { ChatHistoryItem } from '../agent/chat.js';
 
+export const historyDetailLevelSchema = z.enum(['full', 'summary']);
+export type HistoryDetailLevel = z.infer<typeof historyDetailLevelSchema>;
+
+export const toolDetailSchema = z.discriminatedUnion('state', [
+  z.object({ state: z.literal('inline'), turnRef: z.string().min(1) }),
+  z.object({
+    state: z.literal('deferred'),
+    turnRef: z.string().min(1),
+    summary: z.object({
+      count: z.number().int().nonnegative().optional(),
+      detailCount: z.number().int().nonnegative().optional(),
+      nodeCount: z.number().int().nonnegative().optional(),
+      imageCount: z.number().int().nonnegative().optional(),
+      referenceCount: z.number().int().nonnegative().optional(),
+      changedPaths: z.array(z.string()).optional(),
+    }),
+  }),
+]);
+export type ToolDetail = z.infer<typeof toolDetailSchema>;
+
 export const agentHistoryPageParamsSchema = z.object({
   threadId: z.string().trim().min(1),
 });
@@ -16,6 +36,7 @@ export const agentHistoryPageQuerySchema = z.object({
   canvasId: z.string().trim().min(1),
   limit: z.coerce.number().int().min(1).max(20),
   before: z.string().trim().min(1).max(4096).optional(),
+  detailLevel: historyDetailLevelSchema.optional(),
 });
 export type AgentHistoryPageQuery = z.infer<typeof agentHistoryPageQuerySchema>;
 
@@ -37,3 +58,30 @@ export interface AgentHistoryPageResponse {
   before?: string;
   hasMore: boolean;
 }
+
+/** Path parameters for `GET /agent/history/:threadId/turn`. */
+export const agentHistoryTurnParamsSchema = agentHistoryPageParamsSchema;
+/**
+ * Query for `GET /agent/history/:threadId/turn`.
+ *
+ * `turnRef` is the opaque cursor from a deferred tool detail. It travels in
+ * the query, like the page `before` cursor, because a real cursor (base64url
+ * JSON carrying the thread UUID) is longer than the router's 100-character
+ * path-parameter limit.
+ */
+export const agentHistoryTurnQuerySchema = z.object({
+  canvasId: z.string().trim().min(1),
+  turnRef: z.string().min(1).max(4096),
+});
+export type AgentHistoryTurnParams = z.infer<
+  typeof agentHistoryTurnParamsSchema
+>;
+export type AgentHistoryTurnQuery = z.infer<typeof agentHistoryTurnQuerySchema>;
+export const agentHistoryTurnResponseSchema = z.object({
+  threadId: z.string(),
+  turnRef: z.string(),
+  messages: z.array(z.custom<ChatHistoryItem>()),
+});
+export type AgentHistoryTurnResponse = z.infer<
+  typeof agentHistoryTurnResponseSchema
+>;

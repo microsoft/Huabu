@@ -90,7 +90,7 @@ export function _waitForIdle(): Promise<void> {
 
 async function runOnce(canvasId: string, logger?: MemoryLogger): Promise<void> {
   try {
-    if (getAgentDefaults().profileId !== 'huabu') {
+    if ((await getAgentDefaults()).profileId !== 'huabu') {
       logger?.info(
         `[memory] pass for canvas ${canvasId} skipped — Built-In is not the default`,
       );

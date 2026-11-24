@@ -14,8 +14,11 @@ import base from './playwright.config';
 // inherit deployment credentials, proxy targets, or a different worktree.
 const webRoot = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(webRoot, '../..');
-const serverPort = '3197';
-const webPort = '5297';
+// Dedicated defaults; like the standard harness, a run may move them so a
+// process already holding one (for example a previous run's orphan) cannot
+// keep these servers from binding.
+const serverPort = process.env.E2E_SERVER_PORT ?? '3197';
+const webPort = process.env.E2E_WEB_PORT ?? '5297';
 const baseURL = `http://127.0.0.1:${webPort}`;
 const workspace = process.env.E2E_WORKSPACE_DIR;
 const dataDir = process.env.E2E_DATA_DIR;

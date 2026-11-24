@@ -14,6 +14,7 @@ import {
   findTabByTarget,
   groupOfTab,
   isSamePreviewTarget,
+  normalizePreviewTarget,
   mergeGroups,
   moveTab,
   openTarget,
@@ -782,5 +783,39 @@ describe('lookups', () => {
     const ws = open(emptyWorkspace(), node('a'), 't1').workspace;
     expect(activateTab(ws, 'nope')).toBe(ws);
     expect(setActiveGroup(ws, 'nope')).toBe(ws);
+  });
+
+  it('preserves pending-creation scope when focus returns to the active group', () => {
+    const ws = splitGroup(emptyWorkspace(), 'g2');
+    expect(setActiveGroup(ws, ws.activeGroupId)).toBe(ws);
+    const switched = setActiveGroup(ws, 'g1');
+    expect(switched).not.toBe(ws);
+    expect(switched.activeGroupId).toBe('g1');
+  });
+});
+
+describe('device file targets', () => {
+  const file = {
+    kind: 'file' as const,
+    canvasId: 'canvas-1',
+    agentletId: 'device',
+    path: '/root/a.txt',
+  };
+
+  it('identifies a file by device and path, not by its display name', () => {
+    expect(isSamePreviewTarget(file, { ...file, deviceName: 'Laptop' })).toBe(
+      true,
+    );
+    expect(isSamePreviewTarget(file, { ...file, path: '/root/b.txt' })).toBe(
+      false,
+    );
+    expect(isSamePreviewTarget(file, { ...file, agentletId: 'other' })).toBe(
+      false,
+    );
+  });
+
+  it('rejects a file target whose path is not absolute', () => {
+    expect(normalizePreviewTarget(file)).toEqual(file);
+    expect(normalizePreviewTarget({ ...file, path: 'a.txt' })).toBeNull();
   });
 });

@@ -67,6 +67,7 @@ export function describeSpaceRepositoryContract(
       const { repository } = await open();
 
       await expect(repository.list()).resolves.toEqual([]);
+      await expect(repository.listIds()).resolves.toEqual([]);
     });
 
     it('persists hierarchy independently of ordinary structural writes', async () => {
@@ -130,6 +131,10 @@ export function describeSpaceRepositoryContract(
           })),
         ),
       );
+      expect((await repository.listIds()).sort()).toEqual([
+        'contract-list-a',
+        'contract-list-b',
+      ]);
     });
 
     it('returns a stable World id that is excluded from ordinary listings', async () => {
@@ -145,6 +150,7 @@ export function describeSpaceRepositoryContract(
       expect(
         (await repository.list()).map((row) => row.canvasId),
       ).not.toContain(worldCanvasId);
+      expect(await repository.listIds()).toEqual([created.record.canvasId]);
     });
 
     it('returns the established World from ensureWorld without replacing it', async () => {
@@ -184,6 +190,7 @@ export function describeSpaceRepositoryContract(
       await expect(repository.worldId()).resolves.toBe(worldCanvasId);
       await expect(read(worldCanvasId)).resolves.toEqual(created);
       await expect(repository.list()).resolves.toEqual([]);
+      await expect(repository.listIds()).resolves.toEqual([]);
     });
 
     it('creates and returns the authoritative empty version-0 record', async () => {

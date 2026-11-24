@@ -12,6 +12,7 @@ import {
   openSpaceConversation,
 } from './previewWorkspace/actions';
 import { createEmptyWorkspace } from './previewWorkspace/model';
+import { readWorkspaceCollapsed } from './previewWorkspace/persistence';
 import { usePreviewWorkspaceStore } from './previewWorkspace/store';
 
 import type * as PreprocessQueueModule from './canvasStore/save/preprocessQueue';
@@ -37,7 +38,7 @@ const node = (id: string, type = 'note') => ({
 const scheduledIds = () => schedule.mock.calls.map(([value]) => value.id);
 
 beforeEach(() => {
-  useCanvasStore.getState()._setStateNoAutosave({
+  useCanvasStore.getState()._setStateRaw({
     canvasId: '',
     nodes: [],
     edges: [],
@@ -50,7 +51,7 @@ beforeEach(() => {
     readIntentByTab: {},
   });
   usePanelStore.setState({ isRightCollapsed: false });
-  useCanvasStore.getState()._setStateNoAutosave({
+  useCanvasStore.getState()._setStateRaw({
     canvasId: 'parent',
     nodes: [
       node('note'),
@@ -60,6 +61,13 @@ beforeEach(() => {
     ],
   });
   schedule.mockClear();
+});
+
+it('records the panel choice with the Space layout as soon as it is made', () => {
+  usePanelStore.getState().setRightCollapsed(true);
+  expect(readWorkspaceCollapsed('parent')).toBe(true);
+  usePanelStore.getState().requestOpenRightPanel();
+  expect(readWorkspaceCollapsed('parent')).toBe(false);
 });
 
 describe('preview editor departure', () => {
@@ -180,7 +188,7 @@ describe('preview editor departure', () => {
     openSpaceConversation('child', 'agent', 'thread');
     expect(schedule).not.toHaveBeenCalled();
     openPreviewNode('note', { transient: false });
-    useCanvasStore.getState()._setStateNoAutosave({ canvasId: 'different' });
+    useCanvasStore.getState()._setStateRaw({ canvasId: 'different' });
     openSpaceConversation('child', 'agent', 'thread');
     expect(schedule).not.toHaveBeenCalled();
   });

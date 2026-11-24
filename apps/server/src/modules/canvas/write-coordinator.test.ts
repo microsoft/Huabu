@@ -8,6 +8,7 @@ import { nodeRevisionOf } from '@huabu/shared/canvas-engine';
 import {
   assertSpaceHierarchyLocked,
   updateNode,
+  withCanvasMutex,
   withSpaceHierarchyLock,
 } from './write-coordinator.js';
 import { acquireWorkspaceOperationLease } from '../workspace.js';
@@ -161,6 +162,9 @@ function fakeRepository(canvasId = 'c1') {
         ? new Map()
         : new Map([[snapshot.record.nodeId, snapshot]]);
     },
+    async changes() {
+      return { position: { epoch: 'test', seq: 0 }, nodeIds: null };
+    },
     async stream(onNode): Promise<Map<string, NodeSnapshot>> {
       const all = await nodes.list();
       for (const snapshot of all.values()) onNode(snapshot);
@@ -215,6 +219,118 @@ function note(content: string, label: string | null = 'Note'): NodeContent {
 }
 
 describe('updateNode', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('leases the Workspace before waiting for a competing Canvas writer', async () => {
+    const fixture = fakeRepository();
+    const gate = deferred();
+    const entered = deferred();
+    const read = vi.spyOn(fixture.nodes, 'read');
+    const blocker = withCanvasMutex(fixture.nodes.canvasId, async () => {
+      entered.resolve();
+      await gate.promise;
+    });
+    await entered.promise;
+    const pending = updateNode(fixture.nodes, 'n1', {
+      apply: () => note('queued write'),
+    });
+    try {
+      await Promise.resolve();
+      expect(acquireWorkspaceOperationLease).toHaveBeenCalledTimes(1);
+      expect(releaseLease).not.toHaveBeenCalled();
+      expect(read).not.toHaveBeenCalled();
+    } finally {
+      gate.resolve();
+      await blocker;
+      await pending;
+    }
+    expect(fixture.get()?.content).toBe('queued write');
+    expect(releaseLease).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['read', 'put'] as const)(
+    'retains the Workspace lease until asynchronous %s settles',
+    async (stage) => {
+      const fixture = fakeRepository();
+      const gate = deferred();
+      const entered = deferred();
+      if (stage === 'read') {
+        const read = fixture.nodes.read.bind(fixture.nodes);
+        vi.spyOn(fixture.nodes, 'read').mockImplementationOnce(async (id) => {
+          entered.resolve();
+          await gate.promise;
+          return read(id);
+        });
+      } else {
+        const put = fixture.nodes.put.bind(fixture.nodes);
+        vi.spyOn(fixture.nodes, 'put').mockImplementationOnce(async (input) => {
+          entered.resolve();
+          await gate.promise;
+          return put(input);
+        });
+      }
+      const pending = updateNode(fixture.nodes, 'n1', {
+        apply: () => note('async write'),
+      });
+      try {
+        await entered.promise;
+        expect(acquireWorkspaceOperationLease).toHaveBeenCalledTimes(1);
+        expect(releaseLease).not.toHaveBeenCalled();
+      } finally {
+        gate.resolve();
+        await pending;
+      }
+      expect(releaseLease).toHaveBeenCalledTimes(1);
+      expect(fixture.get()?.content).toBe('async write');
+    },
+  );
+
+  it.each(['read', 'apply', 'put'] as const)(
+    'releases the lease and queue after a %s failure without retrying',
+    async (stage) => {
+      const fixture = fakeRepository();
+      const failure = new Error(`${stage} failed`);
+      if (stage === 'read')
+        vi.spyOn(fixture.nodes, 'read').mockRejectedValueOnce(failure);
+      if (stage === 'put')
+        vi.spyOn(fixture.nodes, 'put').mockRejectedValueOnce(failure);
+      const apply = vi.fn(() => {
+        if (stage === 'apply') throw failure;
+        return note('failed write');
+      });
+      await expect(updateNode(fixture.nodes, 'n1', { apply })).rejects.toBe(
+        failure,
+      );
+      expect(apply).toHaveBeenCalledTimes(stage === 'read' ? 0 : 1);
+      expect(releaseLease).toHaveBeenCalledTimes(1);
+      await expect(
+        updateNode(fixture.nodes, 'n1', { apply: () => note('later write') }),
+      ).resolves.toMatchObject({ status: 'ok' });
+      expect(releaseLease).toHaveBeenCalledTimes(2);
+      expect(fixture.get()?.content).toBe('later write');
+    },
+  );
+
+  it('does not access storage or evaluate a mutation when Workspace admission is refused', async () => {
+    const fixture = fakeRepository();
+    const read = vi.spyOn(fixture.nodes, 'read');
+    const put = vi.spyOn(fixture.nodes, 'put');
+    const apply = vi.fn(() => note('must not write'));
+    const failure = new Error('Workspace activation is pending');
+    vi.mocked(acquireWorkspaceOperationLease).mockImplementationOnce(() => {
+      throw failure;
+    });
+    await expect(updateNode(fixture.nodes, 'n1', { apply })).rejects.toBe(
+      failure,
+    );
+    expect(read).not.toHaveBeenCalled();
+    expect(apply).not.toHaveBeenCalled();
+    expect(put).not.toHaveBeenCalled();
+    expect(releaseLease).not.toHaveBeenCalled();
+  });
+
   it('writes and returns the persisted revision and label', async () => {
     const fixture = fakeRepository();
     const result = await updateNode(fixture.nodes, 'n1', {
@@ -288,9 +404,6 @@ describe('updateNode', () => {
       }),
     });
 
-    // One pass, no retry: the mutex plus a synchronous adapter mean nothing
-    // can move the record mid-operation, so re-running `apply` would be a
-    // merge policy invented for a backend that does not exist.
     expect(calls).toBe(1);
     // The conflict is reported as a public content revision, never as the
     // opaque storage token the repository refused on.
@@ -332,6 +445,63 @@ describe('updateNode', () => {
     expect(result).toMatchObject({
       status: 'rejected',
       result: { reason: 'label-conflict' },
+    });
+  });
+
+  it('writes the unversioned part of a refused write, strictly when the caller renames strictly', async () => {
+    const fixture = fakeRepository();
+    fixture.seed(note('disk-newer'));
+    let strict: boolean | undefined;
+    fixture.onPut((input) => {
+      strict = input.strictLabel;
+      return undefined;
+    });
+
+    const result = await updateNode(fixture.nodes, 'n1', {
+      expectRev: nodeRevisionOf({ content: 'stale' }),
+      apply: () => note('would-clobber', 'Renamed'),
+      applyUnversioned: (current) =>
+        current ? { ...current, label: 'Renamed' } : null,
+      strictRename: true,
+    });
+
+    expect(result).toEqual({
+      status: 'rev-conflict',
+      currentRev: nodeRevisionOf({ content: 'disk-newer' }),
+      unversionedApplied: true,
+    });
+    expect(strict).toBe(true);
+    expect(fixture.get()).toMatchObject({
+      content: 'disk-newer',
+      label: 'Renamed',
+    });
+  });
+
+  it('rejects a refused write whose title another node uses, and writes nothing of it', async () => {
+    const fixture = fakeRepository();
+    fixture.seed(note('disk-newer'));
+    fixture.onPut(() => ({
+      ok: false,
+      reason: 'label-conflict',
+      conflictingNodeId: 'other',
+      conflictingLabel: 'Taken',
+    }));
+
+    const result = await updateNode(fixture.nodes, 'n1', {
+      expectRev: nodeRevisionOf({ content: 'stale' }),
+      apply: () => note('would-clobber', 'Taken'),
+      applyUnversioned: (current) =>
+        current ? { ...current, label: 'Taken' } : null,
+      strictRename: true,
+    });
+
+    expect(result).toMatchObject({
+      status: 'rejected',
+      result: { reason: 'label-conflict' },
+    });
+    expect(fixture.get()).toMatchObject({
+      content: 'disk-newer',
+      label: 'Note',
     });
   });
 

@@ -2,7 +2,15 @@
 // Licensed under the MIT license.
 
 import { Download, Maximize2, ImageOff } from 'lucide-react';
-import { lazy, memo, Suspense, useCallback, useEffect, useState } from 'react';
+import {
+  lazy,
+  memo,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { orderedPropertyKeys } from '@huabu/shared/canvas-engine';
@@ -13,6 +21,10 @@ import { FloatingToolbar } from '@/components/Common/FloatingToolbar';
 import { useNodePresentation } from '@/hooks/useNodePresentation';
 import useCanvasStore from '@/store/canvasStore';
 import { openPreviewNode } from '@/store/previewWorkspace/actions';
+import {
+  canDownloadMediaSource,
+  triggerMediaDownload,
+} from '@/utils/io/nodeDownload';
 
 import { PDFNotesButton } from './PDFNotesButton';
 import { getMissingFileKind, MissingFileBanner } from '../MissingFileBanner';
@@ -24,6 +36,7 @@ import {
 import { noteFarDescription } from '../semanticZoom/noteFarDescription';
 import { useDeferredHydration } from '../shared/nodeHydrationScheduler';
 
+import type { CardProperty } from '../previewCard/PreviewCard';
 import type { CanvasPdfNodeData } from '../types';
 import type { Node, NodeProps } from '@xyflow/react';
 import type { ReactNode } from 'react';
@@ -108,27 +121,37 @@ export const PDFNode = memo(
 
     const hasCover = !!data.coverUrl;
     const src = typeof data.src === 'string' ? data.src : '';
-    const summary =
-      typeof notesContent === 'string'
-        ? noteFarDescription(notesContent, '')
-        : undefined;
-    const cardProperties = orderedPropertyKeys(
-      data.properties,
-      data.propertyDisplayKeys,
-    ).flatMap((key) => {
-      const value = data.properties?.[key];
-      const text = Array.isArray(value)
-        ? value.filter((item) => item.trim()).join(', ')
-        : String(value ?? '');
-      return !text.trim()
-        ? []
-        : [
-            {
-              name: key,
-              value: text,
-            },
-          ];
-    });
+    const summary = useMemo(
+      () =>
+        typeof notesContent === 'string'
+          ? noteFarDescription(notesContent, '')
+          : undefined,
+      [notesContent],
+    );
+    // Type decides placement: lists, numbers and true flags read as tags;
+    // text is prose on its own lines, however short. Memoized so an unrelated
+    // re-render hands the card the same arrays and it does not re-measure.
+    const { cardTags, cardTexts } = useMemo(() => {
+      const cardTags: CardProperty[] = [];
+      const cardTexts: CardProperty[] = [];
+      for (const name of orderedPropertyKeys(
+        data.properties,
+        data.propertyDisplayKeys,
+      )) {
+        const value = data.properties?.[name];
+        if (Array.isArray(value)) {
+          for (const item of new Set(value.map((entry) => entry.trim())))
+            if (item) cardTags.push({ name, value: item });
+        } else if (typeof value === 'number') {
+          cardTags.push({ name, value: String(value) });
+        } else if (value === true) {
+          cardTags.push({ name, value: name });
+        } else if (typeof value === 'string' && value.trim()) {
+          cardTexts.push({ name, value: value.trim() });
+        }
+      }
+      return { cardTags, cardTexts };
+    }, [data.properties, data.propertyDisplayKeys]);
     const missingFileKind = getMissingFileKind(data);
     const title = data.label || t('node.untitledPdf');
 
@@ -166,15 +189,17 @@ export const PDFNode = memo(
       ? resolveArtifactUrl(data.coverUrl as string, canvasId)
       : (thumbnail ?? undefined);
 
+    const canDownload = canDownloadMediaSource(src, Boolean(missingFileKind));
     const handleDownload = useCallback(() => {
-      if (!src) return;
-      const link = document.createElement('a');
-      link.href = resolveArtifactUrl(src, canvasId);
-      link.download = data.label || src.split('/').pop() || 'document.pdf';
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-    }, [src, data.label, canvasId]);
+      triggerMediaDownload({
+        src,
+        canvasId,
+        label: data.label,
+        defaultExt: '.pdf',
+        fallbackStem: 'document',
+        missing: Boolean(missingFileKind),
+      });
+    }, [src, data.label, canvasId, missingFileKind]);
 
     const handleDeleteCover = useCallback(() => {
       updateNodeData(id, { coverUrl: undefined });
@@ -210,18 +235,21 @@ export const PDFNode = memo(
         <PDFNotesButton id={id} surface="canvas" />
       </>
     );
-    const PDFOverflow = (
-      <>
-        <DropdownMenuItem icon={<Download />} onClick={handleDownload}>
-          {t('node.download')}
-        </DropdownMenuItem>
-        {hasCover && (
-          <DropdownMenuItem icon={<ImageOff />} onClick={handleDeleteCover}>
-            {t('node.deleteCover')}
-          </DropdownMenuItem>
-        )}
-      </>
-    );
+    const PDFOverflow =
+      canDownload || hasCover ? (
+        <>
+          {canDownload && (
+            <DropdownMenuItem icon={<Download />} onClick={handleDownload}>
+              {t('node.download')}
+            </DropdownMenuItem>
+          )}
+          {hasCover && (
+            <DropdownMenuItem icon={<ImageOff />} onClick={handleDeleteCover}>
+              {t('node.deleteCover')}
+            </DropdownMenuItem>
+          )}
+        </>
+      ) : undefined;
 
     const overview = (
       <ViewportPreviewCard
@@ -235,7 +263,8 @@ export const PDFNode = memo(
         source="PDF"
         title={title}
         summary={summary}
-        properties={cardProperties}
+        tags={cardTags}
+        texts={cardTexts}
         loading={mode !== 'minimal' && !coverImage && !thumbnailError}
         error={hasCover ? null : thumbnailError}
         onRetry={handleRetry}

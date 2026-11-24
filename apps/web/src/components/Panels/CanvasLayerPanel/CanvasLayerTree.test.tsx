@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { CanvasLayerTree, resolveCollisionY } from './CanvasLayerTree';
 import useCanvasStore from '../../../store/canvasStore';
+import { useCommentDestinationMemory } from '../../../store/commentDestinationMemory';
 import { usePanelStore } from '../../../store/panelStore';
 import { createEmptyWorkspace } from '../../../store/previewWorkspace/model';
 import { usePreviewWorkspaceStore } from '../../../store/previewWorkspace/store';
@@ -233,6 +234,33 @@ afterEach(() => {
 });
 
 describe('CanvasLayerTree activation', () => {
+  it('records activation of an already visible Agent but not range selection', async () => {
+    await renderTree([
+      item('question-1', 'question', undefined, { threadId: 'thread-1' }),
+      item('question-2', 'question', undefined, { threadId: 'thread-2' }),
+    ]);
+    act(() =>
+      usePreviewWorkspaceStore.getState().openPreviewTarget({
+        kind: 'node',
+        canvasId: CANVAS_ID,
+        nodeId: 'question-1',
+      }),
+    );
+    act(() => row('question-1').click());
+    expect(useCommentDestinationMemory.getState().lastPreview?.nodeId).toBe(
+      'question-1',
+    );
+    expect(mocks.openPreviewNode).not.toHaveBeenCalled();
+    act(() =>
+      row('question-2').dispatchEvent(
+        new MouseEvent('click', { bubbles: true, shiftKey: true }),
+      ),
+    );
+    expect(useCommentDestinationMemory.getState().lastPreview?.nodeId).toBe(
+      'question-1',
+    );
+  });
+
   it('leaves vertical list padding to its host instead of adding a second inset', async () => {
     await renderTree([item('note-1', 'note')]);
     const tree = container.querySelector('[role="tree"]');
@@ -368,6 +396,7 @@ describe('CanvasLayerTree activation', () => {
     act(() => row('question-1').click());
     expect(mocks.openPreviewNode).toHaveBeenCalledWith('question-1', {
       transient: true,
+      userInitiated: true,
     });
     expect(mocks.requestChatOpen).toHaveBeenCalledWith('tab-1', 'bottom');
 
@@ -415,6 +444,65 @@ describe('CanvasLayerTree activation', () => {
     expect(mocks.toast).not.toHaveBeenCalledWith('layers.emptyFrame', {
       tone: 'info',
     });
+  });
+
+  it('expands collapsed ancestors and scrolls a located node into view once', async () => {
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView;
+    // Queue frames like a browser does, so a cancelled frame never runs.
+    const frames = new Map<number, FrameRequestCallback>();
+    let nextFrame = 0;
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+      frames.set(++nextFrame, callback);
+      return nextFrame;
+    });
+    vi.stubGlobal('cancelAnimationFrame', (id: number) => frames.delete(id));
+    const flushFrames = () =>
+      act(() => {
+        const pending = [...frames.values()];
+        frames.clear();
+        for (const callback of pending) callback(0);
+      });
+    try {
+      await renderTree([
+        item('frame-1', 'frame'),
+        { ...item('frame-2', 'frame', 'frame-1'), depth: 1 },
+        { ...item('note-1', 'note', 'frame-2'), depth: 2 },
+      ]);
+      act(() =>
+        useCanvasStore.setState({
+          collapsedFrameIds: new Set(['frame-1', 'frame-2']),
+        }),
+      );
+      expect(container.querySelector('[data-layer-id="note-1"]')).toBeNull();
+
+      act(() =>
+        usePanelStore.setState({ isLeftCollapsed: false, leftMode: 'layers' }),
+      );
+      act(() => usePanelStore.getState().requestLayerLocate('note-1'));
+      expect(useCanvasStore.getState().collapsedFrameIds.size).toBe(0);
+      expect(usePanelStore.getState().layerLocateRequest).not.toBeNull();
+
+      flushFrames();
+      flushFrames();
+
+      expect(scrollIntoView).toHaveBeenCalledExactlyOnceWith({
+        block: 'nearest',
+      });
+      expect(scrollIntoView.mock.contexts[0]).toBe(row('note-1'));
+      expect(usePanelStore.getState().layerLocateRequest).toBeNull();
+
+      // A node with no row here is the panel's call, not the tree's.
+      act(() => usePanelStore.getState().requestLayerLocate('missing'));
+      flushFrames();
+      expect(usePanelStore.getState().layerLocateRequest?.nodeId).toBe(
+        'missing',
+      );
+      expect(scrollIntoView).toHaveBeenCalledOnce();
+      act(() => usePanelStore.setState({ layerLocateRequest: null }));
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it('ignores a stale row safely', async () => {

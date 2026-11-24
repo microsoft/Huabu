@@ -9,6 +9,12 @@ export interface InputOptions {
   text?: string;
   textFile?: string;
   noStart?: boolean;
+  untilAccepted?: boolean;
+}
+
+export interface ExecuteOptions extends InputOptions {
+  operationId?: string;
+  basis?: string;
 }
 
 export interface DownloadOptions {
@@ -21,13 +27,29 @@ export interface UploadOptions {
   delete?: boolean;
 }
 
+export interface SnapshotOptions {
+  outDir: string;
+  maxPixels?: string;
+  padding?: string;
+  strokeSubset?: string[];
+}
+
 export interface RfsActions {
   rootHelp: () => Promise<void>;
-  getSkill: (id: string | undefined, usage: string) => Promise<void>;
+  getSkill: (
+    id: string | undefined,
+    usage: string,
+    output?: string,
+  ) => Promise<void>;
   query: (options: InputOptions) => Promise<void>;
-  execute: (options: InputOptions) => Promise<void>;
-  download: (path: string, options: DownloadOptions) => Promise<void>;
-  upload: (name: string, options: UploadOptions) => Promise<void>;
+  execute: (options: ExecuteOptions) => Promise<void>;
+  result: (operationId: string) => Promise<void>;
+  download: (id: string, options: DownloadOptions) => Promise<void>;
+  upload: (
+    filename: string | undefined,
+    options: UploadOptions,
+  ) => Promise<void>;
+  snapshot: (nodeIds: string[], options: SnapshotOptions) => Promise<void>;
   profiles: () => Promise<void>;
   create: (options: InputOptions) => Promise<void>;
   prompt: (thread: string, options: InputOptions) => Promise<void>;
@@ -63,7 +85,7 @@ export function createRfsProgram(
     .addHelpText(
       'after',
       '\nOperation response bodies and SSE are raw; exit 0 means delivery completed, not business success.\n' +
-        'No redirects, retries, reconnects or remote cancellation.\n' +
+        'No redirects, reconnects or remote cancellation. Only execute retries, re-sending one request id.\n' +
         'Start with get-skill; use COMMAND --help for usage and live contracts when applicable.\n',
     );
 
@@ -91,33 +113,67 @@ export function createRfsProgram(
     return command;
   }
   guide(program, '').action(actions.rootHelp);
-  guide(
+  const getSkill = guide(
     program
       .command('get-skill [skillId]')
-      .description('Load root or focused Skill'),
-  ).action((id: string | undefined) =>
-    actions.getSkill(id, program.helpInformation()),
+      .description('Load root or focused Skill')
+      .option(
+        '--output <path>',
+        'Save the guide atomically; report file metadata as NDJSON',
+      ),
+  );
+  getSkill.action((id: string | undefined) =>
+    actions.getSkill(
+      id,
+      program.helpInformation(),
+      getSkill.opts<{ output?: string }>().output,
+    ),
   );
 
-  for (const [name, action] of [
-    ['query', actions.query],
-    ['execute', actions.execute],
-  ] as const) {
-    const command = guide(
-      inputs(
-        program.command(name).description(`Send raw ${name} JSON`),
-        false,
-      ).helpOption(
-        '-h, --help',
-        'Show usage; --help TYPE loads one operation contract',
+  const operationHelp = [
+    '-h, --help',
+    'Show usage; --help TYPE loads one operation contract',
+  ] as const;
+  const query = guide(
+    inputs(
+      program.command('query').description('Send raw query JSON'),
+      false,
+    ).helpOption(...operationHelp),
+  );
+  query.action(() => actions.query(query.opts<InputOptions>()));
+  const execute = guide(
+    inputs(
+      program
+        .command('execute')
+        .description(
+          'Send raw execute JSON; retries a dropped connection under one request id',
+        ),
+      false,
+    )
+      .option(
+        '--operation-id <uuid>',
+        'Request id; default: a new one per invocation. Re-use the printed id to get the original result instead of executing twice',
+      )
+      .option(
+        '--basis <token>',
+        'Read version from a query, download or execute; stale structural edits are rejected',
+      )
+      .helpOption(...operationHelp),
+  );
+  execute.action(() => actions.execute(execute.opts<ExecuteOptions>()));
+  guide(
+    program
+      .command('result <operationId>')
+      .description(
+        'Print the stored response of an earlier execute; never executes',
       ),
-    );
-    command.action(() => action(command.opts<InputOptions>()));
-  }
+  ).action((id: string) => actions.result(id));
   const download = guide(
     program
-      .command('download <logicalPath>')
-      .description('Download a file and stream metadata/progress as NDJSON')
+      .command('download <id>')
+      .description(
+        'Download a node (<nodeId>) or artifact (<artifactKey>) and stream metadata/progress as NDJSON',
+      )
       .requiredOption(
         '--output <path>',
         'Replace a local file only after a complete successful transfer',
@@ -127,17 +183,49 @@ export function createRfsProgram(
         'Keep the output file when its Huabu revision is unchanged',
       ),
   );
-  download.action((path: string) =>
-    actions.download(path, download.opts<DownloadOptions>()),
+  download.action((id: string) =>
+    actions.download(id, download.opts<DownloadOptions>()),
   );
   const upload = guide(
     program
-      .command('upload <name>')
-      .description('Stage raw file bytes')
-      .option('--file <path>', 'File path, or - for stdin')
-      .option('--delete', 'Delete the named staged upload'),
+      .command('upload [filename]')
+      .description(
+        'Upload a local file or stdin into Space artifacts and print {id, size}',
+      )
+      .option(
+        '--file <path>',
+        'File path, or - for stdin (stdin requires explicit [filename])',
+      )
+      .option('--delete', 'Delete a legacy staged upload'),
   );
-  upload.action((name: string) => actions.upload(name, upload.opts()));
+  upload.action((filename: string | undefined) =>
+    actions.upload(filename, upload.opts<UploadOptions>()),
+  );
+  const snapshot = guide(
+    program
+      .command('snapshot <nodeIds...>')
+      .description(
+        'Render image, sketch, or frame nodes into PNG files in --out-dir and print {basis, snapshots}',
+      )
+      .requiredOption(
+        '--out-dir <dir>',
+        'Directory where rendered PNG files are saved atomically',
+      )
+      .option(
+        '--max-pixels <n>',
+        'Longest-edge pixel cap for rendered PNGs (64..4096)',
+      )
+      .option('--padding <n>', 'Sketch raster padding in px (0..128)')
+      .option(
+        '--stroke-subset <spec>',
+        'Filter one sketch to specific strokes (<nodeId>:<s1,s2,...>); repeatable',
+        (value: string, previous: string[]) => [...previous, value],
+        [],
+      ),
+  );
+  snapshot.action((nodeIds: string[]) =>
+    actions.snapshot(nodeIds, snapshot.opts<SnapshotOptions>()),
+  );
 
   const agent = guide(
     program.command('agent').description('Create or continue an Agent'),
@@ -166,7 +254,11 @@ export function createRfsProgram(
     inputs(
       agent
         .command('prompt <threadId>')
-        .description('Continue an existing conversation'),
+        .description('Continue an existing conversation')
+        .option(
+          '--until-accepted',
+          'Return a validated durable acceptance receipt within 60s, without waiting for the answer',
+        ),
       true,
     ),
     'agents',
@@ -232,6 +324,8 @@ export function createRfsProgram(
         capability = operands[0]
           ? `/capabilities/${name === 'query' ? 'queries' : 'commands'}/${segment(operands[0])}`
           : '/capabilities';
+      } else if (name === 'snapshot') {
+        capability = '/capabilities/queries/SNAPSHOT_NODES';
       }
       return {
         guide:

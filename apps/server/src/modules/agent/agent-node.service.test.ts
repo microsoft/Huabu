@@ -17,6 +17,7 @@ function output(applied: boolean): ExecuteOnServerOutput {
     fromVersion: 1,
     toVersion: 2,
     deltas: [],
+    edits: [],
     commands: [],
     results: [
       {
@@ -50,22 +51,25 @@ function createHarness(options?: {
     execute.mockResolvedValueOnce(output(options?.edgeApplied ?? true));
   }
   const service = new AgentNodeService({
-    getFallbackProfileId: () =>
+    getFallbackProfileId: async () =>
       options?.fallbackProfileId === undefined
         ? 'profile-a'
         : options.fallbackProfileId,
     getProfileRegistry: () => ({
-      getProfile: (profileId) =>
-        profileId === 'profile-a'
-          ? {
-              id: 'profile-a',
-              alias: 'Researcher',
-              customData: {
-                icon: { shape: 'diamond', color: 'green' },
-              },
-            }
-          : null,
-      listSelectableProfileIds: () => options?.selectableIds ?? ['profile-a'],
+      listSelectableProfiles: async () =>
+        (options?.selectableIds ?? ['profile-a']).flatMap((profileId) =>
+          profileId === 'profile-a'
+            ? [
+                {
+                  id: 'profile-a',
+                  alias: 'Researcher',
+                  customData: {
+                    icon: { shape: 'diamond', color: 'green' },
+                  },
+                },
+              ]
+            : [],
+        ),
     }),
     readCanvasNodes: async () =>
       options?.nodes === undefined

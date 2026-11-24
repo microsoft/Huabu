@@ -25,12 +25,12 @@
   "devDependencies": {
     "@huabu/client-runtime": "workspace:*",
     "@types/node": "^24.13.3",
-    "electron": "43.5.0",
+    "electron": "43.8.1",
     "electron-builder": "26.16.1",
     "lottie-web": "^5.13.0",
     "png2icons": "^2.0.1",
     "sharp": "^0.35.5",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.11"
+    "vitest": "^4.1.12"
   }
 }

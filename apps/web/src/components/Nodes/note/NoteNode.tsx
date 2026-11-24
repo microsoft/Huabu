@@ -3,7 +3,7 @@
 
 import { type Node, type NodeProps, useStore } from '@xyflow/react';
 import clsx from 'clsx';
-import { Maximize2 } from 'lucide-react';
+import { Download, Maximize2 } from 'lucide-react';
 import {
   memo,
   useCallback,
@@ -20,12 +20,14 @@ import {
   autoHeightContentWidth,
 } from '@huabu/shared/canvas-engine';
 
+import { DropdownMenuItem } from '@/components/Common/DropdownMenu';
 import { FloatingToolbar } from '@/components/Common/FloatingToolbar';
 import { Loading } from '@/components/Common/Loading';
 import { MilkdownPreview } from '@/components/Milkdown';
 import { NODE_TYPE_LABEL } from '@/config/nodeIcons';
 import { useIsNotMouse } from '@/hooks/useInputMode';
 import { useNodePresentation } from '@/hooks/useNodePresentation';
+import { useEditLockHolder } from '@/store/canvasPresence/editLock';
 import useCanvasStore, { selectCanWriteCanvas } from '@/store/canvasStore';
 import { useGesturePreviewStore } from '@/store/gesturePreviewStore';
 import { openPreviewNode } from '@/store/previewWorkspace/actions';
@@ -34,7 +36,10 @@ import {
   canReadHuabuPayload,
   getHuabuPayload,
 } from '@/utils/io/dragDrop';
+import { triggerNoteDownload } from '@/utils/io/nodeDownload';
 import { dragPayloadToMarkdown } from '@/utils/io/payloadToMarkdown';
+import { parseNodeReferenceHref } from '@/utils/nodeDeepLink';
+import { openDocumentLink } from '@/utils/openDocumentLink';
 import { isMac } from '@/utils/platform';
 
 import { MissingFileBanner } from '../MissingFileBanner';
@@ -395,11 +400,24 @@ export const NoteNode = memo(
     // payload's Markdown to this note's content. Locked notes opt
     // out so the gesture falls through to canvas's "create new
     // node" handler instead.
-    const isLocked = !!data.locked || !canWrite;
+    // Another page editing this note also opts it out: a block appended
+    // here would be saved against a body that page is about to replace.
+    const editedElsewhere = useEditLockHolder(id) !== null;
+    const isLocked = !!data.locked || !canWrite || editedElsewhere;
     // We use a small counter to track dragenter / dragleave events so
     // hovering between child elements doesn't flicker the highlight.
     const dragCounterRef = useRef(0);
     const [isDropTarget, setIsDropTarget] = useState(false);
+    // The card has no host navigation of its own: only in-app node links are
+    // routed, every other link keeps opening externally.
+    const handleCardLinkClick = useCallback((href: string) => {
+      if (parseNodeReferenceHref(href, window.location.origin)) {
+        openDocumentLink(href);
+      } else {
+        window.open(href, '_blank', 'noopener,noreferrer');
+      }
+    }, []);
+
     const handleNoteDragEnter = useCallback(
       (e: React.DragEvent) => {
         if (isLocked) return;
@@ -519,6 +537,14 @@ export const NoteNode = memo(
       ],
     );
 
+    const handleDownload = useCallback(() => {
+      triggerNoteDownload({
+        content: typeof data.content === 'string' ? data.content : '',
+        label: data.label,
+        missing: isContentMissing,
+      });
+    }, [data.content, data.label, isContentMissing]);
+
     return (
       <NodeWrapper
         id={id}
@@ -527,6 +553,13 @@ export const NoteNode = memo(
         selected={selected}
         farLabel={farLabel}
         actions={isContentMissing ? undefined : NoteActions}
+        overflow={
+          isContentMissing ? undefined : (
+            <DropdownMenuItem icon={<Download />} onClick={handleDownload}>
+              {t('node.download')}
+            </DropdownMenuItem>
+          )
+        }
         keepAspectRatio={false}
         fillColor={isDropTarget ? 'var(--info-bg)' : undefined}
         className={clsx(
@@ -568,6 +601,7 @@ export const NoteNode = memo(
                 {hydrated ? (
                   <MilkdownPreview
                     linkActivation="modifier"
+                    onLinkClick={handleCardLinkClick}
                     markdown={markdown}
                     canvasId={canvasId ?? undefined}
                     className="pointer-events-none w-full select-none"

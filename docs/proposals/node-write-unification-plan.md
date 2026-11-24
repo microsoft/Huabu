@@ -152,9 +152,10 @@ write uses it) so a client never 409s against its own prior write.
 
 The node-write endpoint returns `{ rev, label }` (as the content PUT does now).
 The client updates its per-node baseline from the response — **co-delivered with
-the write it confirms** — so content and its CAS baseline never diverge (false
-conflicts become structurally impossible; see
-[agent-node-freshness-cas-plan.md](./agent-node-freshness-cas-plan.md) §Phase 3).
+the write it confirms** — so for a write's own response content and its CAS
+baseline do not diverge. A broadcast `update` carries no revision and is not
+covered by this; see
+[agent-node-freshness-cas-plan.md](./agent-node-freshness-cas-plan.md) §Phase 3.
 
 ### 3d. Two cadences, one queue
 

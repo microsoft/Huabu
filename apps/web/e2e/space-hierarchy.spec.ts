@@ -3,6 +3,8 @@
 
 import { expect, test, type Page } from '@playwright/test';
 
+import { editsPerCommand } from './helpers';
+
 import type * as CanvasStore from '../src/store/canvasStore';
 import type * as WorkspaceStore from '../src/store/workspaceStore';
 import type { CanvasSummary } from '@huabu/shared';
@@ -39,7 +41,7 @@ test('Add Content brings an existing Space into the visible destination and sele
   ).json();
   const seeded = await page.request.post(`/api/canvas/${destination}/execute`, {
     data: {
-      commands: [
+      edits: editsPerCommand([
         {
           type: 'CREATE_NODES',
           nodes: [
@@ -58,8 +60,8 @@ test('Add Content brings an existing Space into the visible destination and sele
             },
           ],
         },
-      ],
-      originator: { source: 'ui', tabId: 'e2e-bring-space' },
+      ]),
+      originator: { tabId: 'e2e-bring-space' },
     },
   });
   expect(seeded.ok()).toBe(true);
@@ -224,7 +226,7 @@ test('Home moves an existing Space subtree and the current Space menu promotes i
   const child = (await childResponse.json()).canvasId;
   const seeded = await page.request.post(`/api/canvas/${source}/execute`, {
     data: {
-      commands: [
+      edits: editsPerCommand([
         {
           type: 'CREATE_NODES',
           nodes: [
@@ -236,8 +238,8 @@ test('Home moves an existing Space subtree and the current Space menu promotes i
             },
           ],
         },
-      ],
-      originator: { source: 'ui', tabId: 'e2e-organize' },
+      ]),
+      originator: { tabId: 'e2e-organize' },
     },
   });
   expect(seeded.ok()).toBe(true);
@@ -451,7 +453,7 @@ test('cancelling child-Space deletion preserves separately selected edges', asyn
   const child = await response.json();
   const seeded = await page.request.post(`/api/canvas/${parent}/execute`, {
     data: {
-      commands: [
+      edits: editsPerCommand([
         {
           type: 'CREATE_NODES',
           nodes: ['node-a', 'node-b'].map((id, index) => ({
@@ -465,8 +467,8 @@ test('cancelling child-Space deletion preserves separately selected edges', asyn
           type: 'CONNECT_NODES',
           edges: [{ id: 'edge-selected', source: 'node-a', target: 'node-b' }],
         },
-      ],
-      originator: { source: 'ui', tabId: 'e2e-guarded-delete' },
+      ]),
+      originator: { tabId: 'e2e-guarded-delete' },
     },
   });
   expect(seeded.ok(), await seeded.text()).toBe(true);
@@ -490,7 +492,7 @@ test('cancelling child-Space deletion preserves separately selected edges', asyn
   await page.evaluate(async (entryId) => {
     const path = '/src/store/canvasStore.ts';
     const { default: store } = (await import(path)) as typeof CanvasStore;
-    store.getState()._setStateNoAutosave({
+    store.getState()._setStateRaw({
       nodes: store
         .getState()
         .nodes.map((node) => ({ ...node, selected: node.id === entryId })),
@@ -527,8 +529,10 @@ test('cancelling child-Space deletion preserves separately selected edges', asyn
   await expect(dialog).not.toBeVisible();
   const retained = await page.evaluate(async () => {
     const path = '/src/store/canvasStore.ts';
-    const { default: store } = (await import(path)) as typeof CanvasStore;
-    await store.getState().saveCanvas();
+    const { default: store, drainPendingSaves } = (await import(
+      path
+    )) as typeof CanvasStore;
+    await drainPendingSaves();
     return {
       nodes: store.getState().nodes.map((node) => node.id),
       edges: store.getState().edges.map((edge) => edge.id),
@@ -572,9 +576,11 @@ test('immediate Undo after child creation keeps its entry and leaves saves usabl
     .toBe(true);
   await page.evaluate(async () => {
     const path = '/src/store/canvasStore.ts';
-    const { default: store } = (await import(path)) as typeof CanvasStore;
+    const { default: store, drainPendingSaves } = (await import(
+      path
+    )) as typeof CanvasStore;
     await store.getState().undo();
-    await store.getState().saveCanvas();
+    await drainPendingSaves();
   });
   const record = await (await page.request.get(`/api/canvas/${parent}`)).json();
   expect(record.state.nodes).toEqual(
@@ -582,12 +588,15 @@ test('immediate Undo after child creation keeps its entry and leaves saves usabl
       expect.objectContaining({ id: child.parentEntryNodeId }),
     ]),
   );
+  // Saving still works afterwards: nothing is left unsent.
   await expect
     .poll(() =>
       page.evaluate(async () => {
         const path = '/src/store/canvasStore.ts';
-        const { default: store } = (await import(path)) as typeof CanvasStore;
-        return store.getState().versionConflict;
+        const { hasUnsavedCanvasEdits } = (await import(
+          path
+        )) as typeof CanvasStore;
+        return hasUnsavedCanvasEdits();
       }),
     )
     .toBe(false);
@@ -959,7 +968,7 @@ test('World clears selection when a selected top-level Space becomes nested', as
         );
       if (!node || !rootNode) throw new Error('World entry missing');
       store.getState().selectNodes([node.id, rootNode.id]);
-      store.getState()._setStateNoAutosave({
+      store.getState()._setStateRaw({
         edges: [
           ...store.getState().edges,
           {
@@ -1025,8 +1034,7 @@ test('World first fit waits for hierarchy metadata', async ({ page }) => {
   }));
   const moved = await page.request.post(`/api/canvas/${world}/execute`, {
     data: {
-      commands: [{ type: 'SET_NODE_GEOMETRY', items }],
-      originator: { source: 'ui' },
+      edits: editsPerCommand([{ type: 'SET_NODE_GEOMETRY', items }]),
     },
   });
   expect(moved.ok(), await moved.text()).toBe(true);

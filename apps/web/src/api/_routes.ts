@@ -38,6 +38,7 @@ export const routes = {
 
   // ── People (Bubble administration) ────────────────────────────────
   people: '/people',
+  peopleAdmission: '/people/admission',
   personMember: (principalId: string) => `/people/${enc(principalId)}/member`,
   personWorkspace: (principalId: string, workspaceId: string) =>
     `/people/${enc(principalId)}/workspaces/${enc(workspaceId)}`,
@@ -97,6 +98,8 @@ export const routes = {
     canvasId: string,
     kind: 'image' | 'pdf' | 'office' | 'video' | 'audio' | 'html',
   ) => `/canvas/${enc(canvasId)}/artifact/${kind}`,
+  canvasArtifactFile: (canvasId: string, filename: string) =>
+    `/canvas/${enc(canvasId)}/artifact/${enc(filename)}`,
   canvasArtifactCloneFrom: (canvasId: string) =>
     `/canvas/${enc(canvasId)}/artifact/clone-from`,
   canvasEvents: (canvasId: string) => `/canvas/${enc(canvasId)}/events`,
@@ -104,8 +107,16 @@ export const routes = {
     `/canvas/${enc(canvasId)}/external/stream`,
   canvasExternalImport: (canvasId: string) =>
     `/canvas/${enc(canvasId)}/external/import`,
-  canvasSyncStream: (canvasId: string) =>
-    `/canvas/${enc(canvasId)}/sync/stream`,
+  canvasSyncStream: (canvasId: string, pageId: string) =>
+    `/canvas/${enc(canvasId)}/sync/stream?pageId=${enc(pageId)}`,
+  canvasContentChanges: (
+    canvasId: string,
+    since: { epoch: string; seq: number },
+  ) =>
+    `/canvas/${enc(canvasId)}/content/changes?epoch=${enc(since.epoch)}&seq=${since.seq}`,
+  canvasPresence: (canvasId: string) => `/canvas/${enc(canvasId)}/presence`,
+  canvasPresenceLeave: (canvasId: string) =>
+    `/canvas/${enc(canvasId)}/presence/leave`,
   canvasThreadChanges: (canvasId: string, threadId: string) =>
     `/canvas/${enc(canvasId)}/threads/${enc(threadId)}/changes`,
   canvasThreadChange: (canvasId: string, threadId: string, changeId: string) =>
@@ -153,10 +164,13 @@ export const routes = {
     const params = new URLSearchParams({
       canvasId,
       limit: String(limit),
+      detailLevel: 'summary',
     });
     if (before) params.set('before', before);
     return `/agent/history/${enc(threadId)}/page?${params.toString()}`;
   },
+  agentHistoryTurn: (threadId: string, canvasId: string, turnRef: string) =>
+    `/agent/history/${enc(threadId)}/turn?${new URLSearchParams({ canvasId, turnRef }).toString()}`,
   agentHistoryFork: (threadId: string, canvasId?: string) => {
     const params = canvasId ? `?canvasId=${enc(canvasId)}` : '';
     return `/agent/history/${enc(threadId)}/fork${params}`;

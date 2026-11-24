@@ -53,6 +53,7 @@ import {
   awaitSelectionReplay,
   ensureAcpSession,
   recordSessionSelection,
+  recordPromptUsage,
   registerAcpStateListener,
   reportEntryState,
 } from './session.js';
@@ -164,6 +165,12 @@ export interface AcpSpec {
     readonly model?: string;
     readonly thoughtLevel?: string;
   };
+  /**
+   * Selections a fresh thread starts with, keyed like `AgentMetadata.selections`.
+   * Laid over whatever `initialPreferences` match in the catalogue this
+   * session advertises.
+   */
+  readonly initialSelections?: Readonly<Record<string, string>>;
   /** External binding (alias + profileId) for the thread. */
   readonly binding: { readonly alias: string; readonly profileId: string };
   /** Frozen Profile configuration identity; absent legacy revisions mean zero. */
@@ -188,8 +195,8 @@ export interface AcpSpec {
     env?: Record<string, string>;
   }>;
   /**
-   * Durable non-sensitive host environment such as reachback coordinates.
-   * Secret-backed values must use `resolveRuntimeEnvironment`.
+   * Frozen user environment. Runtime-owned coordinates and credentials use
+   * `resolveRuntimeEnvironment` instead.
    */
   readonly env?: Record<string, string>;
 }
@@ -203,21 +210,33 @@ export interface AcpDurableState {
 }
 
 export interface AcpRuntimePolicy {
-  /** Return the current host policy for newly spawned or resumed sessions. */
-  getIdleTimeoutSecs(): number;
+  /**
+   * Return the current host policy for newly spawned or resumed sessions.
+   * Resolved once per session spawn, so a host may read it from storage.
+   */
+  getIdleTimeoutSecs(): number | Promise<number>;
   /**
    * Resolve non-durable environment values immediately before session spawn.
-   * Hosts use this port for secret-backed configuration that must never enter
-   * the persisted workload spec.
+   * Runtime values override recipe and frozen environment. An undefined value
+   * removes a stale declaration. Neither the patch nor secrets are persisted.
    */
   resolveRuntimeEnvironment?(
     spec: AcpSpec,
-  ): Promise<Record<string, string> | undefined>;
+    context: AcpRuntimeLaunchContext,
+  ): Promise<Record<string, string | undefined> | undefined>;
+}
+
+export interface AcpRuntimeLaunchContext {
+  readonly namespace: AcpCreateSpec['namespace'];
+  /** Conversation identity, or the private execution identity for an unthreaded Job. */
+  readonly threadId: string;
+  readonly agentletId: string;
 }
 
 export async function resolveAcpRuntimeLaunch(
   spec: AcpSpec,
   runtimePolicy: AcpRuntimePolicy,
+  context: AcpRuntimeLaunchContext,
 ): Promise<{
   recipe: AcpBindingRecipe | null | undefined;
   env: Record<string, string> | undefined;
@@ -225,16 +244,28 @@ export async function resolveAcpRuntimeLaunch(
   if (spec.recipe) acpBindingRecipeSchema.parse(spec.recipe);
   const [runtime, resolvedEnvironment] = await Promise.all([
     spec.resolveRecipe?.(),
-    runtimePolicy.resolveRuntimeEnvironment?.(spec),
+    runtimePolicy.resolveRuntimeEnvironment?.(spec, context),
   ]);
   if (runtime?.recipe) acpBindingRecipeSchema.parse(runtime.recipe);
-  const runtimeEnvironment = runtime?.env ?? resolvedEnvironment;
+  const env =
+    spec.env || runtime?.env || resolvedEnvironment
+      ? { ...runtime?.env, ...spec.env }
+      : undefined;
+  if (env && resolvedEnvironment) {
+    for (const [key, value] of Object.entries(resolvedEnvironment)) {
+      if (value === undefined) delete env[key];
+      else
+        Object.defineProperty(env, key, {
+          value,
+          enumerable: true,
+          configurable: true,
+          writable: true,
+        });
+    }
+  }
   return {
     recipe: runtime?.recipe ?? spec.recipe,
-    env:
-      runtimeEnvironment || spec.env
-        ? { ...runtimeEnvironment, ...spec.env }
-        : undefined,
+    env,
   };
 }
 
@@ -351,6 +382,9 @@ export class AcpAgentHandle<
         ...(spec.spec.initialPreferences
           ? { initialPreferences: { ...spec.spec.initialPreferences } }
           : {}),
+        ...(spec.spec.initialSelections
+          ? { initialSelections: { ...spec.spec.initialSelections } }
+          : {}),
       }),
     };
     this.requestedAgentletId = resolveAcpAgentletId(spec);
@@ -456,13 +490,19 @@ export class AcpAgentHandle<
     logger: AcpSessionLogger,
     repairFromClosedEntry = true,
   ): Promise<AcpSessionEntry> {
+    const agentletId = this.resolveAgentletId();
     const { recipe, env } = await resolveAcpRuntimeLaunch(
       this.spec.spec,
       this.runtimePolicy,
+      {
+        namespace: this.spec.namespace,
+        threadId: this.spec.threadId || this.sessionThreadId,
+        agentletId,
+      },
     );
-    // close may have finished while a host-owned launch port was still pending.
+    const idleTimeoutSecs = await this.runtimePolicy.getIdleTimeoutSecs();
+    // close may have finished while a host-owned port was still pending.
     if (this.closing) throw new Error('ACP handle is closed');
-    const agentletId = this.resolveAgentletId();
     return ensureAcpSession({
       agentletId,
       threadId: this.sessionThreadId,
@@ -477,8 +517,11 @@ export class AcpAgentHandle<
       ...(this.spec.spec.initialPreferences !== undefined && {
         initialPreferences: this.spec.spec.initialPreferences,
       }),
+      ...(this.spec.spec.initialSelections !== undefined && {
+        initialSelections: this.spec.spec.initialSelections,
+      }),
       repairFromClosedEntry,
-      idleTimeoutSecs: this.runtimePolicy.getIdleTimeoutSecs(),
+      idleTimeoutSecs,
       logger,
     });
   }
@@ -684,6 +727,7 @@ export class AcpAgentHandle<
           stateChanged = true;
         }
         if (stateChanged) reportEntryState(entry);
+        recordPromptUsage(entry, result.usage, logger);
         if (turnsToLoad) this.turnsToLoad = undefined;
       })
       .catch((err: unknown) => {

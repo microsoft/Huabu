@@ -37,6 +37,7 @@ import { toSafeFilename } from '../../utils/naming.js';
 import type {
   CanvasNodeType,
   WireNodeRef,
+  FrameLayoutDescription,
   NodeProperties,
 } from '@huabu/shared';
 
@@ -110,6 +111,8 @@ export interface AgentNodePreview extends AgentNodeRef {
  *  - inspect_nodes results
  */
 export interface AgentNodeOutline extends AgentNodePreview {
+  /** Structured Frame placement, separate from paint order. Indices are zero-based. */
+  layout?: FrameLayoutDescription;
   noteNodeId?: string;
   /** Cross-Space address exposed by a Space preview. */
   targetCanvasId?: string;
@@ -251,12 +254,9 @@ function flattenPreview(raw: string): string {
  * the same node would return.
  */
 function revisionOfPreviewInput(input: NodePreviewInput): string | undefined {
-  if (
-    typeof input.content !== 'string' &&
-    typeof input.src !== 'string' &&
-    input.properties === undefined &&
-    input.propertyDisplayKeys === undefined
-  ) {
+  // Custom properties are not part of the revision, so they do not give a
+  // node one.
+  if (typeof input.content !== 'string' && typeof input.src !== 'string') {
     return undefined;
   }
   return nodeRevisionOf(input);

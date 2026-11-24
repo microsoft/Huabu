@@ -178,6 +178,97 @@ it('checks registered path ownership without reading a denied manifest', async (
   );
 });
 
+it('tells each person which Workspaces they may rename, and enforces it', async () => {
+  const { call, store, workspaceOf } = await host();
+  await workspaceOf('dave');
+  const made = await call('carol', 'POST', '/api/workspaces', {
+    path: path.join(root, 'shared'),
+    name: 'Shared',
+  });
+  expect(made.status).toBe(201);
+  const workspaceId = made.body.workspaceId as string;
+  await store.grants.add({
+    target: { type: 'huabu.workspace', id: workspaceId },
+    principalId: 'dave',
+    role: 'huabu.workspace.viewer',
+    grantedByPrincipalId: 'carol',
+  });
+  const listed = async (principalId: string) =>
+    (
+      (await call(principalId, 'GET', '/api/workspaces')).body as Array<{
+        workspaceId: string;
+        name: string;
+        canManage?: boolean;
+      }>
+    ).find((workspace) => workspace.workspaceId === workspaceId);
+
+  expect(await listed('carol')).toMatchObject({ canManage: true });
+  expect(await listed('dave')).toMatchObject({ canManage: false });
+  expect(
+    (await call('dave', 'GET', `/api/workspaces/${workspaceId}`)).body,
+  ).toMatchObject({ canManage: false });
+
+  expect(
+    await call('dave', 'PATCH', `/api/workspaces/${workspaceId}`, {
+      name: 'Taken over',
+    }),
+  ).toEqual({ status: 404, body: { message: 'Workspace not found' } });
+  const renamed = await call(
+    'carol',
+    'PATCH',
+    `/api/workspaces/${workspaceId}`,
+    { name: 'Team notes' },
+  );
+  expect(renamed).toMatchObject({
+    status: 200,
+    body: { workspaceId, name: 'Team notes', canManage: true },
+  });
+  expect(await listed('dave')).toMatchObject({ name: 'Team notes' });
+});
+
+it('decides every listed Workspace from one access snapshot', async () => {
+  const { call, store, workspaceOf } = await host();
+  await workspaceOf('dave');
+  const share = async (name: string) => {
+    const made = await call('carol', 'POST', '/api/workspaces', {
+      path: path.join(root, name),
+      name,
+    });
+    await store.grants.add({
+      target: { type: 'huabu.workspace', id: made.body.workspaceId as string },
+      principalId: 'dave',
+      role: 'huabu.workspace.viewer',
+      grantedByPrincipalId: 'carol',
+    });
+  };
+  const reads = vi.spyOn(store.principals, 'get');
+  const list = async () => {
+    reads.mockClear();
+    const { body } = await call('dave', 'GET', '/api/workspaces');
+    return {
+      reads: reads.mock.calls.length,
+      canManage: Object.fromEntries(
+        (body as Array<{ name: string; canManage: boolean }>).map((entry) => [
+          entry.name,
+          entry.canManage,
+        ]),
+      ),
+    };
+  };
+
+  await share('First shared');
+  const two = await list();
+  await share('Second shared');
+  const three = await list();
+
+  expect(three.canManage).toMatchObject({
+    'First shared': false,
+    'Second shared': false,
+  });
+  expect(Object.values(three.canManage).filter(Boolean)).toHaveLength(1);
+  expect(three.reads).toBe(two.reads);
+});
+
 it('keeps damaged foreign directory paths out of adoption errors', async () => {
   const { call, workspaceOf } = await host();
   await workspaceOf('dave');

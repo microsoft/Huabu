@@ -134,6 +134,73 @@ function zip(
 }
 
 describe('optional raw RFS client', () => {
+  it('returns a validated acceptance without waiting for the answer or cancelling the turn', async () => {
+    let submissions = 0;
+    const env = await server(async (request, response) => {
+      submissions++;
+      expect(request.url).toBe('/rfs/space/agent/thread-existing/prompt');
+      expect(request.headers['x-huabu-event-mode']).toBe('all');
+      expect((await bytes(request)).toString()).toBe('investigate only');
+      response.writeHead(200, { 'content-type': 'text/event-stream' });
+      response.write(': threadId thread-existing\r\n\r\n');
+      response.write('event: accepted\r\ndata: {"threadId":"thread-');
+      await new Promise((resolve) => setImmediate(resolve));
+      response.write('existing","turnStartSeq":7}\r\n\r\n');
+      // The response deliberately stays open without a final answer.
+    });
+    const result = await call(
+      [
+        'agent',
+        'prompt',
+        'thread-existing',
+        '--until-accepted',
+        '--text',
+        'investigate only',
+      ],
+      env,
+    );
+    expect(result.code).toBe(0);
+    expect(JSON.parse(result.stdout.toString())).toEqual({
+      threadId: 'thread-existing',
+      turnStartSeq: 7,
+    });
+    expect(submissions).toBe(1);
+  });
+
+  it.each([
+    ': threadId thread-existing\n\n',
+    'event: done\ndata: {"message":"not an acceptance"}\n\n',
+    'event: error\ndata: {"error":"preparation failed"}\n\n',
+    'event: accepted\ndata: {"threadId":"wrong-thread","turnStartSeq":1}\n\n',
+    'event: accepted\ndata: {"threadId":"thread-existing","turnStartSeq":0}\n\n',
+    'event: accepted\ndata: not-json\n\n',
+  ])(
+    'does not confirm or retry an ambiguous submission: %s',
+    async (stream) => {
+      let submissions = 0;
+      const env = await server((_request, response) => {
+        submissions++;
+        response.writeHead(200, { 'content-type': 'text/event-stream' });
+        response.end(stream);
+      });
+      const result = await call(
+        [
+          'agent',
+          'prompt',
+          'thread-existing',
+          '--until-accepted',
+          '--text',
+          'investigate',
+        ],
+        env,
+      );
+      expect(result.code).toBe(1);
+      expect(result.stdout.toString()).toBe('');
+      expect(result.stderr).toContain('do not blindly resend');
+      expect(submissions).toBe(1);
+    },
+  );
+
   it.each([
     [['get-skill', 'services'], '/skill/services'],
     [['agent', 'profiles'], '/agent/profiles'],
@@ -218,6 +285,9 @@ describe('optional raw RFS client', () => {
     ['download', '../file', '--output', 'file'],
     ['download', 'nodes//file', '--output', 'file'],
     ['download', 'nodes/file'],
+    ['get-skill', '--output'],
+    ['get-skill', '--output', ''],
+    ['get-skill', 'layout', '--output', ''],
     ['upload', 'a/b', '--file', '-'],
     ['upload', 'a'],
     ['capabilities'],
@@ -320,15 +390,16 @@ describe('optional raw RFS client', () => {
     expect(stdout.text()).toContain('data: last');
   });
 
-  it('streams binary file/stdin uploads with exactly-once encoding', async () => {
+  it('streams binary file/stdin uploads with exactly-once encoding and optional filename inference', async () => {
     const payload = Buffer.from([0, 255, 10, 13, 128, 42]);
     const file = join(await directory(), 'upload.bin');
     await writeFile(file, payload);
+    const urls: string[] = [];
     const env = await server((request, response) => {
-      expect(request.url).toBe('/rfs/space/upload/a%20%2520.bin');
+      urls.push(request.url ?? '');
       void bytes(request).then((body) => {
         expect(body).toEqual(payload);
-        response.end('{"unknown":"untouched"}');
+        response.end('{"id":"artifact-1.bin","size":6}');
       });
     });
     for (const source of [file, '-']) {
@@ -338,8 +409,24 @@ describe('optional raw RFS client', () => {
         payload,
       );
       expect(result.code).toBe(0);
-      expect(result.stdout.toString()).toBe('{"unknown":"untouched"}');
+      expect(result.stdout.toString()).toBe('{"id":"artifact-1.bin","size":6}');
     }
+    const inferred = await call(['upload', '--file', file], env);
+    expect(inferred.code).toBe(0);
+    expect(urls).toEqual([
+      '/rfs/space/upload/a%20%2520.bin',
+      '/rfs/space/upload/a%20%2520.bin',
+      '/rfs/space/upload/upload.bin',
+    ]);
+    const missingStdinName = await call(
+      ['upload', '--file', '-'],
+      env,
+      payload,
+    );
+    expect(missingStdinName.code).toBe(1);
+    expect(missingStdinName.stderr).toContain(
+      'requires an explicit [filename]',
+    );
   });
 
   it('deletes a staged upload without reading a file or request body', async () => {
@@ -372,7 +459,7 @@ describe('optional raw RFS client', () => {
     });
     await writeFile(target, 'old');
     const env = await server((request, response) => {
-      expect(request.url).toBe('/rfs/space/download/nodes/a%20%2520.md');
+      expect(request.url).toBe('/rfs/space/download/node-1%20%2520');
       response.setHeader('etag', '"revision"');
       response.setHeader('x-huabu-node-id', 'node-1');
       response.setHeader('x-huabu-node-type', 'note');
@@ -386,11 +473,12 @@ describe('optional raw RFS client', () => {
         response.writeHead(304);
         response.end();
       } else {
+        response.setHeader('x-huabu-basis', 'b1.read');
         response.setHeader('content-length', '3');
         response.end(Buffer.from([0, 255, 10]));
       }
     });
-    const args = ['download', 'nodes/a %20.md', '--output', target];
+    const args = ['download', 'node-1 %20', '--output', target];
     const downloaded = await call(args, env);
     expect(downloaded.code).toBe(0);
     expect(await readFile(target)).toEqual(Buffer.from([0, 255, 10]));
@@ -406,6 +494,7 @@ describe('optional raw RFS client', () => {
         output: target,
         size: 3,
         revision: 'revision',
+        basis: 'b1.read',
         contentType: 'application/octet-stream',
         node: {
           id: 'node-1',
@@ -426,6 +515,7 @@ describe('optional raw RFS client', () => {
         received: 3,
         size: 3,
         revision: 'revision',
+        basis: 'b1.read',
         contentType: 'application/octet-stream',
         node: {
           id: 'node-1',
@@ -453,61 +543,67 @@ describe('optional raw RFS client', () => {
     expect(await readdir(folder)).toEqual(['body']);
   });
 
-  it('announces a download before body completion and preserves the target on failure', async () => {
-    const folder = await directory();
-    const target = join(folder, 'body');
-    await writeFile(target, 'old');
-    let finish!: () => void;
-    const observed = new Promise<void>((resolve) => {
-      finish = resolve;
-    });
-    const env = await server((_request, response) => {
-      response.setHeader('content-length', '100');
-      response.flushHeaders();
-      void observed.then(() => {
-        response.write('partial');
-        response.destroy();
+  it.each([['download', 'nodes/a'], ['get-skill'], ['get-skill', 'layout']])(
+    'announces file output before body completion and preserves the target on failure: %j',
+    async (...command) => {
+      const folder = await directory();
+      const target = join(folder, 'body');
+      await writeFile(target, 'old');
+      let finish!: () => void;
+      const observed = new Promise<void>((resolve) => {
+        finish = resolve;
       });
-    });
-    const args = ['download', 'nodes/a', '--output', target];
-    const stdout = output();
-    const pending = runRfs(args, {
-      env,
-      stdout: stdout.stream,
-      stderr: output().stream,
-    });
-    await vi.waitFor(() =>
-      expect(stdout.text()).toContain('"event":"download_started"'),
-    );
-    expect(await readFile(target, 'utf8')).toBe('old');
-    finish();
-    expect(await pending).toBe(1);
-    expect(await readFile(target, 'utf8')).toBe('old');
-    expect(stdout.text()).not.toContain('"event":"download_completed"');
-    expect(await readdir(folder)).toEqual(['body']);
-  });
-
-  it('keeps download error bodies off stdout and adapts the recovery command', async () => {
-    const folder = await directory();
-    const target = join(folder, 'body');
-    await writeFile(target, 'old');
-    const env = await server((_request, response) => {
-      response.writeHead(403, { 'content-type': 'application/json' });
-      response.end(
-        JSON.stringify({
-          message:
-            'Denied. To see how to use this Space, run: curl -fsS "$HUABU_RFS_URL/skill"',
-        }),
+      const env = await server((_request, response) => {
+        response.setHeader('content-length', '100');
+        response.flushHeaders();
+        void observed.then(() => {
+          response.write('partial');
+          response.destroy();
+        });
+      });
+      const args = [...command, '--output', target];
+      const stdout = output();
+      const pending = runRfs(args, {
+        env,
+        stdout: stdout.stream,
+        stderr: output().stream,
+      });
+      await vi.waitFor(() =>
+        expect(stdout.text()).toContain('"event":"download_started"'),
       );
-    });
-    const result = await call(['download', 'nodes/a', '--output', target], env);
-    expect(result.code).toBe(1);
-    expect(result.stdout.length).toBe(0);
-    expect(result.stderr).toContain('huabu-rfs get-skill');
-    expect(result.stderr).not.toContain('HUABU_RFS_URL');
-    expect(await readFile(target, 'utf8')).toBe('old');
-    expect(await readdir(folder)).toEqual(['body']);
-  });
+      expect(await readFile(target, 'utf8')).toBe('old');
+      finish();
+      expect(await pending).toBe(1);
+      expect(await readFile(target, 'utf8')).toBe('old');
+      expect(stdout.text()).not.toContain('"event":"download_completed"');
+      expect(await readdir(folder)).toEqual(['body']);
+    },
+  );
+
+  it.each([['download', 'nodes/a'], ['get-skill'], ['get-skill', 'layout']])(
+    'keeps file-output error bodies off stdout and adapts the recovery command: %j',
+    async (...command) => {
+      const folder = await directory();
+      const target = join(folder, 'body');
+      await writeFile(target, 'old');
+      const env = await server((_request, response) => {
+        response.writeHead(403, { 'content-type': 'application/json' });
+        response.end(
+          JSON.stringify({
+            message:
+              'Denied. To see how to use this Space, run: curl -fsS "$HUABU_RFS_URL/skill"',
+          }),
+        );
+      });
+      const result = await call([...command, '--output', target], env);
+      expect(result.code).toBe(1);
+      expect(result.stdout.length).toBe(0);
+      expect(result.stderr).toContain('huabu-rfs get-skill');
+      expect(result.stderr).not.toContain('HUABU_RFS_URL');
+      expect(await readFile(target, 'utf8')).toBe('old');
+      expect(await readdir(folder)).toEqual(['body']);
+    },
+  );
 
   it('does not follow redirects or forward credentials to another server', async () => {
     let redirected = 0;
@@ -528,6 +624,7 @@ describe('optional raw RFS client', () => {
   it.each([
     [['query', '--help'], undefined, '/capabilities'],
     [['query', '--help', 'QUERY'], undefined, '/capabilities/queries/QUERY'],
+    [['snapshot', '--help'], undefined, '/capabilities/queries/SNAPSHOT_NODES'],
     [['execute', '--help', 'CMD'], undefined, '/capabilities/commands/CMD'],
     [['agent', '--help'], '/skill/agents', undefined],
     [['agent', 'prompt', '--help'], '/skill/agents', undefined],
@@ -592,6 +689,54 @@ describe('optional raw RFS client', () => {
     expect(result.code).toBe(1);
     expect(result.stdout.toString()).toBe('authentication failed');
   });
+
+  it.each([undefined, 'layout'])(
+    'saves the complete Skill output atomically with its actual byte size: %s',
+    async (id) => {
+      const folder = await directory();
+      const target = join(folder, 'guide with spaces.md');
+      await writeFile(target, 'previous guide');
+      const guide = '# Guide\n\n' + 'Guide text \u4e2d\n'.repeat(2048);
+      const env = await server((request, response) => {
+        expect(request.url).toBe(
+          id ? `/rfs/space/skill/${id}` : '/rfs/space/skill',
+        );
+        expect(request.headers.authorization).toBe('Bearer private-token');
+        expect(request.headers['x-huabu-skill-client']).toBe('rfs-cli');
+        response.setHeader('content-type', 'text/markdown; charset=utf-8');
+        response.setHeader('content-length', Buffer.byteLength(guide));
+        response.end(guide);
+      });
+      const args = ['get-skill', ...(id ? [id] : [])];
+      const direct = await call(args, env);
+      const saved = await call([...args, '--output', target], env);
+      const bytes = await readFile(target);
+      expect(direct.code).toBe(0);
+      expect(saved.code).toBe(0);
+      expect(saved.stderr).toBe('');
+      expect(bytes).toEqual(direct.stdout);
+      expect(bytes.toString()).toContain(guide);
+      expect(bytes.toString().startsWith('Usage: huabu-rfs')).toBe(!id);
+      const events = saved.stdout
+        .toString()
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line));
+      expect(events[0]).toMatchObject({
+        event: 'download_started',
+        output: target,
+        size: bytes.byteLength,
+      });
+      expect(events.at(-1)).toMatchObject({
+        event: 'download_completed',
+        output: target,
+        size: bytes.byteLength,
+        received: bytes.byteLength,
+      });
+      expect(saved.stdout.toString()).not.toContain('# Guide');
+      expect(await readdir(folder)).toEqual(['guide with spaces.md']);
+    },
+  );
 
   it('adapts Server recovery guidance to the CLI without exposing connection environment', async () => {
     const env = await server((_request, response) => {
@@ -893,10 +1038,338 @@ describe('optional raw RFS client', () => {
     const dropped = await server((request) => {
       request.socket.destroy();
     });
-    const unknown = await call(['execute', '--json', '{}'], dropped);
+    const unknown = await call(
+      ['execute', '--json', '{}'],
+      dropped,
+      undefined,
+      { executeRetry: { backoffMs: [1] } },
+    );
     expect(unknown.code).toBe(1);
     expect(unknown.stderr).toContain('Remote outcome may be unknown');
     expect(unknown.stderr).not.toContain('private-token');
+  });
+
+  describe('execute request ids', () => {
+    const UUID =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+    const OPERATION = '11111111-1111-4111-8111-111111111111';
+    const fast = { executeRetry: { backoffMs: [1] } };
+    /** Record what each attempt sent, then let the test answer it. */
+    async function recorder(
+      answer: (
+        attempt: number,
+        request: IncomingMessage,
+        response: ServerResponse,
+      ) => void,
+    ) {
+      const seen: { id: string | undefined; basis: unknown; body: string }[] =
+        [];
+      const env = await server(async (request, response) => {
+        expect(request.url).toBe('/rfs/space/execute');
+        seen.push({
+          id: request.headers['x-huabu-operation-id'] as string | undefined,
+          basis: request.headers['x-huabu-basis'],
+          body: (await bytes(request)).toString(),
+        });
+        answer(seen.length, request, response);
+      });
+      return { env, seen };
+    }
+    const echo = (request: IncomingMessage, response: ServerResponse) =>
+      response.end(
+        JSON.stringify({
+          canvasId: 'space',
+          operationId: request.headers['x-huabu-operation-id'],
+          basis: 'b1.next',
+          results: [],
+        }),
+      );
+
+    it('adds a fresh request id per invocation and prints it with the basis, body untouched', async () => {
+      const { env, seen } = await recorder((_attempt, request, response) =>
+        echo(request, response),
+      );
+      const body = '{ "commands": [ ] }';
+      const first = await call(['execute', '--json', body], env);
+      const second = await call(['execute', '--json', body], env);
+      expect(first.code).toBe(0);
+      expect(seen).toHaveLength(2);
+      expect(seen[0]?.id).toMatch(UUID);
+      expect(seen[1]?.id).toMatch(UUID);
+      expect(seen[0]?.id).not.toBe(seen[1]?.id);
+      expect(seen[0]?.body).toBe(body);
+      expect(seen[0]?.basis).toBeUndefined();
+      // stdout stays the raw response, which names the effective id and basis.
+      expect(JSON.parse(first.stdout.toString())).toEqual({
+        canvasId: 'space',
+        operationId: seen[0]?.id,
+        basis: 'b1.next',
+        results: [],
+      });
+      expect(first.stderr).toBe('');
+      expect(JSON.parse(second.stdout.toString()).operationId).toBe(
+        seen[1]?.id,
+      );
+    });
+
+    it('sends a command list and a list of edits as they are, and prints a replayed answer as it is', async () => {
+      const { env, seen } = await recorder((attempt, request, response) => {
+        // The first attempt of each call is dropped, so each is retried
+        // under its request id and answered from the stored outcome.
+        if (attempt % 2 === 1) {
+          request.socket.destroy();
+          return;
+        }
+        response.end(
+          JSON.stringify({
+            canvasId: 'space',
+            operationId: request.headers['x-huabu-operation-id'],
+            replayed: true,
+            results: [{ index: 0, type: 'DELETE_NODES', applied: true }],
+          }),
+        );
+      });
+      // The documented form: the server runs it as one edit per command.
+      const commands =
+        '{"commands":[{"type":"DELETE_NODES","nodeIds":["a"]}],"basis":"b1.read"}';
+      // The edits spelled out: forwarded untouched as well, never rewritten
+      // into the other form on the way.
+      const edits =
+        '{"edits":[{"basis":"b1.read","commands":[{"type":"DELETE_NODES","nodeIds":["a"]}]}]}';
+      for (const [index, body] of [commands, edits].entries()) {
+        const result = await call(
+          ['execute', '--json', body],
+          env,
+          undefined,
+          fast,
+        );
+        expect(result.code).toBe(0);
+        const attempts = seen.slice(index * 2, index * 2 + 2);
+        expect(attempts.map((attempt) => attempt.body)).toEqual([body, body]);
+        // One request id for both attempts.
+        expect(attempts[0]?.id).toMatch(UUID);
+        expect(attempts[1]?.id).toBe(attempts[0]?.id);
+        // The replayed answer is the answer: printed raw, exit code 0.
+        expect(JSON.parse(result.stdout.toString())).toEqual({
+          canvasId: 'space',
+          operationId: attempts[0]?.id,
+          replayed: true,
+          results: [{ index: 0, type: 'DELETE_NODES', applied: true }],
+        });
+      }
+      expect(seen).toHaveLength(4);
+    });
+
+    it('forwards --operation-id and --basis, and keeps a request id the body names', async () => {
+      const { env, seen } = await recorder((_attempt, request, response) =>
+        echo(request, response),
+      );
+      const flagged = await call(
+        [
+          'execute',
+          '--json',
+          '{"commands":[]}',
+          '--operation-id',
+          OPERATION.toUpperCase(),
+          '--basis',
+          'b1.read',
+        ],
+        env,
+      );
+      expect(flagged.code).toBe(0);
+      expect(seen[0]).toEqual({
+        id: OPERATION,
+        basis: 'b1.read',
+        body: '{"commands":[]}',
+      });
+
+      const inBody = `{"operationId":"${OPERATION}","commands":[]}`;
+      await call(['execute', '--json', inBody], env);
+      expect(seen[1]).toEqual({
+        id: undefined,
+        basis: undefined,
+        body: inBody,
+      });
+
+      const invalid = await call(
+        ['execute', '--json', '{}', '--operation-id', 'nope'],
+        env,
+      );
+      expect(invalid.code).toBe(1);
+      expect(invalid.stderr).toContain('--operation-id must be a UUID');
+      expect(invalid.stderr).not.toContain('operation-id=');
+      expect(seen).toHaveLength(2);
+    });
+
+    it('retries a dropped connection and an unknown outcome with the same id and body', async () => {
+      const { env, seen } = await recorder((attempt, request, response) => {
+        if (attempt === 1) request.socket.destroy();
+        else if (attempt === 2)
+          response
+            .writeHead(503, { 'Content-Type': 'application/json' })
+            .end('{"code":"operation-outcome-unknown","message":"unknown"}');
+        else echo(request, response);
+      });
+      const body = '{"commands":[{"type":"CREATE_NODES"}]}';
+      const result = await call(
+        ['execute', '--json-file', '-'],
+        env,
+        Buffer.from(body),
+        fast,
+      );
+      expect(result.code).toBe(0);
+      expect(seen).toHaveLength(3);
+      expect(seen[0]?.id).toMatch(UUID);
+      expect(new Set(seen.map((attempt) => attempt.id)).size).toBe(1);
+      expect(seen.map((attempt) => attempt.body)).toEqual([body, body, body]);
+      // Only the final answer reaches stdout.
+      expect(JSON.parse(result.stdout.toString()).operationId).toBe(
+        seen[0]?.id,
+      );
+      expect(result.stderr).toContain('retrying with the same operation id');
+      expect(result.stderr).not.toContain('operation-id=');
+    });
+
+    it('retries an attempt that gets no response in time', async () => {
+      const { env, seen } = await recorder((attempt, request, response) => {
+        if (attempt > 1) echo(request, response);
+      });
+      const result = await call(['execute', '--json', '{}'], env, undefined, {
+        executeRetry: { backoffMs: [1], attemptTimeoutMs: 100 },
+      });
+      expect(result.code).toBe(0);
+      expect(seen).toHaveLength(2);
+      expect(seen[0]?.id).toBe(seen[1]?.id);
+      expect(result.stderr).toContain('no response in time');
+    });
+
+    it.each([400, 409, 422])(
+      'does not retry a %i rejection',
+      async (status) => {
+        const { env, seen } = await recorder((_attempt, _request, response) =>
+          response
+            .writeHead(status)
+            .end('{"code":"operation-id-reused","message":"no"}'),
+        );
+        const result = await call(
+          ['execute', '--json', '{}'],
+          env,
+          undefined,
+          fast,
+        );
+        expect(result.code).toBe(1);
+        expect(seen).toHaveLength(1);
+        expect(result.stdout.toString()).toContain('operation-id-reused');
+        expect(result.stderr).toContain(`status ${status}`);
+        expect(result.stderr).not.toContain('operation-id=');
+      },
+    );
+
+    it('does not retry a 503 that is not an unknown outcome', async () => {
+      const { env, seen } = await recorder((_attempt, _request, response) =>
+        response.writeHead(503).end('busy'),
+      );
+      const result = await call(
+        ['execute', '--json', '{}'],
+        env,
+        undefined,
+        fast,
+      );
+      expect(result.code).toBe(1);
+      expect(seen).toHaveLength(1);
+      expect(result.stderr).toContain(`operation-id=${seen[0]?.id}`);
+    });
+
+    it('gives up after four attempts and prints the request id with the error', async () => {
+      const { env, seen } = await recorder((_attempt, request) =>
+        request.socket.destroy(),
+      );
+      const result = await call(
+        ['execute', '--json', '{}', '--operation-id', OPERATION],
+        env,
+        undefined,
+        fast,
+      );
+      expect(result.code).toBe(1);
+      expect(seen).toHaveLength(4);
+      expect(seen.every((attempt) => attempt.id === OPERATION)).toBe(true);
+      expect(result.stdout.toString()).toBe('');
+      expect(result.stderr).toContain('Request failed after 4 attempts');
+      expect(result.stderr).toContain(`huabu-rfs: operation-id=${OPERATION}\n`);
+      expect(result.stderr).toContain(`--operation-id ${OPERATION}`);
+
+      const unknown = await recorder((_attempt, _request, response) =>
+        response
+          .writeHead(503)
+          .end('{"code":"operation-outcome-unknown","message":"unknown"}'),
+      );
+      const exhausted = await call(
+        ['execute', '--json', '{}'],
+        unknown.env,
+        undefined,
+        fast,
+      );
+      expect(exhausted.code).toBe(1);
+      expect(unknown.seen).toHaveLength(4);
+      expect(exhausted.stdout.toString()).toContain(
+        'operation-outcome-unknown',
+      );
+      expect(exhausted.stderr).toContain(`operation-id=${unknown.seen[0]?.id}`);
+    });
+
+    it('stops within the time budget and never retries a local interrupt', async () => {
+      const slow = await recorder(() => {});
+      const bounded = await call(
+        ['execute', '--json', '{}'],
+        slow.env,
+        undefined,
+        {
+          executeRetry: { backoffMs: [1], attemptTimeoutMs: 80, budgetMs: 150 },
+        },
+      );
+      expect(bounded.code).toBe(1);
+      expect(slow.seen.length).toBeGreaterThanOrEqual(1);
+      expect(slow.seen.length).toBeLessThan(4);
+      expect(bounded.stderr).toContain(`operation-id=${slow.seen[0]?.id}`);
+
+      const controller = new AbortController();
+      const hanging = await recorder(() => controller.abort());
+      const interrupted = await call(
+        ['execute', '--json', '{}'],
+        hanging.env,
+        undefined,
+        { ...fast, signal: controller.signal },
+      );
+      expect(interrupted.code).toBe(130);
+      expect(hanging.seen).toHaveLength(1);
+      expect(interrupted.stderr).toContain('Local delivery interrupted');
+      expect(interrupted.stderr).toContain(
+        `operation-id=${hanging.seen[0]?.id}`,
+      );
+    });
+
+    it('reads a stored result by request id without executing', async () => {
+      const env = await server((request, response) => {
+        expect(request.method).toBe('GET');
+        if (request.url === `/rfs/space/execute/${OPERATION}`)
+          response.end('{"operationId":"stored","replayed":true}');
+        else response.writeHead(404).end('{"code":"operation_not_found"}');
+      });
+      const found = await call(['result', OPERATION.toUpperCase()], env);
+      expect(found.code).toBe(0);
+      expect(found.stdout.toString()).toBe(
+        '{"operationId":"stored","replayed":true}',
+      );
+      const missing = await call(
+        ['result', '22222222-2222-4222-8222-222222222222'],
+        env,
+      );
+      expect(missing.code).toBe(1);
+      expect(missing.stdout.toString()).toContain('operation_not_found');
+      const invalid = await call(['result', '../skill'], env);
+      expect(invalid.code).toBe(1);
+      expect(invalid.stderr).toContain('Operation id must be a UUID');
+    });
   });
 
   it('aborts local SSE delivery without pretending to cancel remote work', async () => {
@@ -951,3 +1424,127 @@ it.each(['', '   '])(
     expect(result.code).toBe(0);
   },
 );
+
+describe('huabu-rfs snapshot command', () => {
+  it('queries SNAPSHOT_NODES, downloads every PNG cluster to --out-dir, and reports files JSON', async () => {
+    const outDir = join(await directory(), 'snaps');
+    let seenQuery: unknown;
+    const png1 = Buffer.from([137, 80, 78, 71, 1]);
+    const png2 = Buffer.from([137, 80, 78, 71, 2]);
+    const env = await server(async (request, response) => {
+      if (request.url === '/rfs/space/query') {
+        seenQuery = JSON.parse((await bytes(request)).toString('utf8'));
+        response.setHeader('content-type', 'application/json');
+        response.end(
+          JSON.stringify({
+            type: 'SNAPSHOT_NODES',
+            basis: 'b5.snap',
+            result: {
+              snapshots: [
+                {
+                  src: 'sketch-raster-1.png',
+                  width: 320,
+                  height: 240,
+                  originNodeIds: ['sketch-1'],
+                },
+                {
+                  src: 'sketch-raster-2.png',
+                  width: 400,
+                  height: 300,
+                  originNodeIds: ['img-1'],
+                },
+              ],
+            },
+          }),
+        );
+        return;
+      }
+      if (request.url === '/rfs/space/download/sketch-raster-1.png') {
+        response.end(png1);
+        return;
+      }
+      if (request.url === '/rfs/space/download/sketch-raster-2.png') {
+        response.end(png2);
+        return;
+      }
+      response.writeHead(404).end('unexpected');
+    });
+
+    const result = await call(
+      [
+        'snapshot',
+        'sketch-1',
+        'img-1',
+        '--out-dir',
+        outDir,
+        '--max-pixels',
+        '1024',
+        '--padding',
+        '16',
+        '--stroke-subset',
+        'sketch-1:s1,s2',
+      ],
+      env,
+    );
+    expect(result.code).toBe(0);
+    expect(seenQuery).toEqual({
+      type: 'SNAPSHOT_NODES',
+      nodeIds: ['sketch-1', 'img-1'],
+      maxPixels: 1024,
+      padding: 16,
+      strokeSubsets: [{ nodeId: 'sketch-1', strokeIds: ['s1', 's2'] }],
+    });
+    expect(JSON.parse(result.stdout.toString())).toEqual({
+      basis: 'b5.snap',
+      snapshots: [
+        {
+          src: 'sketch-raster-1.png',
+          output: join(outDir, 'sketch-raster-1.png'),
+          width: 320,
+          height: 240,
+          originNodeIds: ['sketch-1'],
+        },
+        {
+          src: 'sketch-raster-2.png',
+          output: join(outDir, 'sketch-raster-2.png'),
+          width: 400,
+          height: 300,
+          originNodeIds: ['img-1'],
+        },
+      ],
+    });
+    expect(await readFile(join(outDir, 'sketch-raster-1.png'))).toEqual(png1);
+    expect(await readFile(join(outDir, 'sketch-raster-2.png'))).toEqual(png2);
+  });
+
+  it('handles zero snapshots and rejects invalid snapshot arguments', async () => {
+    const outDir = join(await directory(), 'empty');
+    const env = await server((_request, response) => {
+      response.setHeader('content-type', 'application/json');
+      response.end(
+        JSON.stringify({
+          type: 'SNAPSHOT_NODES',
+          basis: 'b1.empty',
+          result: { snapshots: [] },
+        }),
+      );
+    });
+    const empty = await call(
+      ['snapshot', 'frame-empty', '--out-dir', outDir],
+      env,
+    );
+    expect(empty.code).toBe(0);
+    expect(JSON.parse(empty.stdout.toString())).toEqual({
+      basis: 'b1.empty',
+      snapshots: [],
+    });
+
+    for (const bad of [
+      ['snapshot', 'node-1'],
+      ['snapshot', '--out-dir', outDir],
+      ['snapshot', 'node-1', '--out-dir', outDir, '--stroke-subset', 'bad'],
+    ]) {
+      expect((await call(bad, env)).code).toBe(1);
+    }
+  });
+});

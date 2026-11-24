@@ -3,7 +3,8 @@
 
 import { expect, test, type Page, type TestInfo } from '@playwright/test';
 
-import { openNewCanvas, readViewportTransform } from './helpers';
+import { agentExecute, type AgentExecuteResponse } from './agent-execute';
+import { openNewCanvas, readViewportTransform, personEdits } from './helpers';
 
 import type {
   CanvasCommand,
@@ -27,17 +28,25 @@ async function persisted(page: Page) {
   expect(response.ok(), await response.text()).toBe(true);
   return ((await response.json()) as GetCanvasResponse).state.nodes as Node[];
 }
+/** A person's batch, through the page route. */
 async function execute(page: Page, commands: CanvasCommand[]) {
   const response = await page.request.post(
     `/api/canvas/${canvasId(page)}/execute`,
-    {
-      data: {
-        commands,
-        originator: { source: 'agent', threadId: 'e2e-cross-frame-marquee' },
-      },
-    },
+    { data: { edits: personEdits(commands) } },
   );
   expect(response.ok(), await response.text()).toBe(true);
+}
+/**
+ * An Agent's batch, through the Agent route. The Server fits a Frame to the
+ * children an Agent gives it; a person's batch leaves that to the page.
+ */
+async function agentExecutes(page: Page, commands: CanvasCommand[]) {
+  const response = await agentExecute(page.request, canvasId(page), commands);
+  expect(response.ok(), await response.text()).toBe(true);
+  const { results } = (await response.json()) as AgentExecuteResponse;
+  expect(results.map((result) => result.applied)).toEqual(
+    commands.map(() => true),
+  );
 }
 function node(page: Page, id: string) {
   return page.locator(`.react-flow__node[data-id="${id}"]`);
@@ -66,7 +75,8 @@ function geometry(nodes: Node[]) {
   return nodes
     .map(({ id, parentId, position, width, height }) => ({
       id,
-      parentId,
+      // A client structure save writes a root as `parentId: null`.
+      parentId: parentId ?? null,
       position,
       width,
       height,
@@ -185,7 +195,9 @@ async function seed(page: Page, zoom: number, overlapping = true) {
     }),
   ) as Ids;
   fixtures.set(page, ids);
-  await execute(page, [
+  // A person made the Frames and Notes; an Agent groups them, so each Frame
+  // is fitted to its children by the Server.
+  await agentExecutes(page, [
     {
       type: 'SET_NODE_PARENT',
       nodeIds: [ids.first, ids.second],
@@ -271,7 +283,9 @@ for (const zoom of [0.5, 1, 2]) {
       await page.mouse.move(start.x + 2, start.y + 2);
       await expect(page.locator('.react-flow__selection')).toBeVisible();
       await selection(page, []);
-      await move(page, center(before.third));
+      // End off the start column: a zero-width marquee selects nothing.
+      const end = center(before.third);
+      await move(page, { x: end.x + 20 * zoom, y: end.y });
       await selection(page, [ids.third]);
       await expect(node(page, ids.B)).not.toHaveClass(/\bselected\b/);
       await sameRects(page, ids, before);
@@ -388,8 +402,10 @@ test.describe('retained overlay input scope', () => {
     const retained = page.locator('.react-flow__nodesselection-rect');
     await expect(retained).toHaveCSS('pointer-events', 'none');
 
-    // An idempotent toolbar action avoids layout changes during input-mode switches.
-    const select = page.getByRole('button', { name: /^Select(?: \(|$)/ });
+    // The touch toolbar has no Select button, so switch input modes on a
+    // control that exists for every pointer: the zoom menu trigger. Each
+    // touch or pen press opens the menu and the following mouse click closes it.
+    const select = page.getByRole('button', { name: /^Canvas zoom/ });
     await select.tap();
     await selection(page, [ids.first, ids.second]);
     await expect(retained).toHaveCSS('pointer-events', 'all');
@@ -397,7 +413,7 @@ test.describe('retained overlay input scope', () => {
     await expect(retained).toHaveCSS('pointer-events', 'none');
 
     const show = await select.boundingBox();
-    if (!show) throw new Error('Missing Select tool');
+    if (!show) throw new Error('Missing zoom menu trigger');
     const point = center(show);
     const client = await page.context().newCDPSession(page);
     await client.send('Input.dispatchMouseEvent', {

@@ -5,6 +5,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { spyOnAssignedStyle } from '@/__tests__/spyOnAssignedStyle';
 import {
   NODE_CONTROL_CHROME,
   NODE_RESIZE_GRIP_STYLE,
@@ -75,11 +76,7 @@ describe('selection chrome visual primitives', () => {
 
   it('preserves the collapsed mark outline offset and circular geometry', () => {
     // Happy DOM misparses outline shorthand containing CSS variables.
-    const outlinePaint = vi.spyOn(
-      CSSStyleDeclaration.prototype,
-      'outline',
-      'set',
-    );
+    const outlinePaint = spyOnAssignedStyle('outline');
     act(() =>
       root.render(
         <SelectionOutline

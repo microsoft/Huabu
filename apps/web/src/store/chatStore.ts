@@ -15,6 +15,7 @@ import {
   isProtectedHistoryMessage,
   trimHistoryPages,
 } from './chatHistoryCache';
+import { preserveLoadedToolDetails } from './chatToolDetails';
 
 import type { ChatHistoryPage } from './chatHistoryCache';
 import type { ChatMessage } from './chatTypes';
@@ -53,6 +54,8 @@ export interface QueuedAgentTurn {
   id: string;
   prepared: PreparedAgentTurn;
   status: 'pending' | 'sending' | 'uncertain';
+  /** Queued while a settings save was in flight; read them again at send. */
+  settingsPending?: boolean;
 }
 
 export interface ChatThreadState {
@@ -453,6 +456,10 @@ export const useChatStore = create<ChatState>()(
 
       setMessages: (threadId, messages) =>
         set((state) => {
+          messages = preserveLoadedToolDetails(
+            messages,
+            threadOf(state, threadId).messages,
+          );
           const ids = new Set(messages.map((message) => message.id));
           return patchThread(state, threadId, {
             messages,
@@ -571,6 +578,7 @@ export const useChatStore = create<ChatState>()(
       mergeLatestHistoryMessages: (threadId, messages) =>
         set((state) => {
           const current = threadOf(state, threadId).messages;
+          messages = preserveLoadedToolDetails(messages, current);
           const incomingTurnIds = new Set(
             messages.flatMap((message) =>
               message.historyTurnId ? [message.historyTurnId] : [],

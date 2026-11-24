@@ -43,13 +43,19 @@ vi.mock('@/api/artifact', () => ({
   uploadImage: vi.fn(),
 }));
 vi.mock('@/store/canvasStore', () => ({
-  default: (select: (state: unknown) => unknown) =>
-    select({ canvasId: 'canvas-1', nodes: [] }),
+  default: Object.assign(
+    (select: (state: unknown) => unknown) =>
+      select({ canvasId: 'canvas-1', nodes: [] }),
+    { subscribe: () => () => {} },
+  ),
   selectCanWriteCanvas: () => false,
 }));
 vi.mock('@/store/chatStore', () => ({ useChatStore: {} }));
 vi.mock('@/store/workspaceStore', () => ({
-  useWorkspaceStore: { getState: () => ({ workspaceId: 'workspace-1' }) },
+  useWorkspaceStore: {
+    getState: () => ({ workspaceId: 'workspace-1' }),
+    subscribe: () => () => {},
+  },
 }));
 vi.mock('@/store/acpProfilesStore', () => ({
   loadDefaultAgentBinding: vi.fn(),
@@ -701,9 +707,12 @@ describe('embedded PDF reader', () => {
   it('preserves header actions and search integration for expanded previews', () => {
     render(true, false);
     load();
-    expect(mocks.header?.querySelectorAll('button')).toHaveLength(4);
+    expect(mocks.header?.querySelectorAll('button')).toHaveLength(5);
     expect(
       mocks.header?.querySelector('[aria-label="node.selectAreaToCapture"]'),
+    ).not.toBeNull();
+    expect(
+      mocks.header?.querySelector('[aria-label="node.download"]'),
     ).not.toBeNull();
     expect(mocks.header?.querySelectorAll('[aria-pressed]')).toHaveLength(1);
     expect(mocks.registerSearch).toHaveBeenCalled();

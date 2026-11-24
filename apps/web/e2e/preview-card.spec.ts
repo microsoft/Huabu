@@ -5,7 +5,7 @@ import { readFile } from 'node:fs/promises';
 
 import { expect, test } from '@playwright/test';
 
-import { openNewCanvas } from './helpers';
+import { openNewCanvas, personEdits } from './helpers';
 
 for (const nodeType of ['pdf', 'web']) {
   test(`${nodeType} Retry owns keyboard navigation and preserves native activation`, async ({
@@ -32,7 +32,7 @@ for (const nodeType of ['pdf', 'web']) {
       `/api/canvas/${canvasId}/execute`,
       {
         data: {
-          commands: [
+          edits: personEdits([
             {
               type: 'CREATE_NODES',
               nodes: [
@@ -48,8 +48,7 @@ for (const nodeType of ['pdf', 'web']) {
                 },
               ],
             },
-          ],
-          originator: { source: 'agent', threadId: 'e2e-preview-retry' },
+          ]),
         },
       },
     );
@@ -133,7 +132,7 @@ test('only vertical cards separate the cover and information with a full-width 1
 });
 
 for (const accent of ['white', 'teal']) {
-  test(`PDF divider stays inside the ${accent} border without shifting its title or badge`, async ({
+  test(`PDF card keeps a padded, undivided surface inside the ${accent} border`, async ({
     page,
   }) => {
     await openNewCanvas(page);
@@ -149,7 +148,7 @@ for (const accent of ['white', 'teal']) {
       `/api/canvas/${canvasId}/execute`,
       {
         data: {
-          commands: [
+          edits: personEdits([
             {
               type: 'CREATE_NODES',
               nodes: [
@@ -166,8 +165,7 @@ for (const accent of ['white', 'teal']) {
                 },
               ],
             },
-          ],
-          originator: { source: 'agent', threadId: 'e2e-preview-divider' },
+          ]),
         },
       },
     );
@@ -237,20 +235,25 @@ for (const accent of ['white', 'teal']) {
         bodyOverflow: getComputedStyle(card.parentElement).overflow,
       };
     });
-    expect(geometry.leftGap).toBeCloseTo(1, 3);
-    expect(geometry.rightGap).toBeCloseTo(1, 3);
+    // The shell clips at its 1px border; inside it a PDF card is one padded
+    // surface. Cover and text share the same inset and nothing divides them.
+    const inset = 1 + 16 * (398 / 400);
     expect(geometry.clipLeftGap).toBeCloseTo(1, 3);
     expect(geometry.clipRightGap).toBeCloseTo(1, 3);
-    expect(geometry.dividerHeight).toBe('1px');
-    expect(geometry.dividerPseudoContent).toBe('none');
     expect(geometry.border).toBe('1px');
-    expect(geometry.titleInset).toBeCloseTo(1 + 16 * (398 / 400), 1);
-    expect(geometry.badgeDelta).toBeCloseTo(0, 3);
+    expect(geometry.leftGap).toBeCloseTo(inset, 1);
+    expect(geometry.rightGap).toBeCloseTo(inset, 1);
+    expect(geometry.titleInset).toBeCloseTo(inset, 1);
+    expect(geometry.dividerHeight).toBe('0px');
+    expect(geometry.dividerPseudoContent).toBe('none');
+    // The badge sits on the cover, one padding in from the cover's edge.
+    expect(geometry.badgeDelta).toBeCloseTo(16 * (398 / 400), 1);
     expect(geometry.cardOverflow).toBe('hidden');
     expect(geometry.bodyOverflow).toBe('visible');
     expect(geometry.cardRadius).toBe(geometry.shellRadius - 1);
     expect(geometry.bottomRadius).toBe(geometry.cardRadius);
-    expect(geometry.coverRadius).toBe(geometry.cardRadius);
+    // An inset cover rounds on its own, tighter than the card around it.
+    expect(geometry.coverRadius).toBeCloseTo(geometry.shellRadius * 0.65, 1);
     expect(geometry.cornerHitsImage).toBe(false);
   });
 }
@@ -272,7 +275,7 @@ for (const nodeType of ['pdf', 'web']) {
       `/api/canvas/${canvasId}/execute`,
       {
         data: {
-          commands: [
+          edits: personEdits([
             {
               type: 'CREATE_NODES',
               nodes: [
@@ -290,8 +293,7 @@ for (const nodeType of ['pdf', 'web']) {
                 },
               ],
             },
-          ],
-          originator: { source: 'agent', threadId: 'e2e-reading-corners' },
+          ]),
         },
       },
     );

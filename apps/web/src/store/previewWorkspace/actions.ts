@@ -3,20 +3,89 @@
 
 import { t } from 'i18next';
 
+import { createId, isFileReference } from '@huabu/shared';
+
 import { ApiError } from '@/api/_client';
 import { getAgentConversationOwner } from '@/api/agent';
-import { toast } from '@/components/Common/Toast';
 import { pageLifecycle } from '@/utils/pageLifecycle';
 
-import { loadDefaultAgentBinding } from '../acpProfilesStore';
+import {
+  loadDefaultAgentBinding,
+  toastConversationStartError,
+} from '../acpProfilesStore';
 import { selectCanWriteCanvas } from '../canvasStore';
 import useCanvasStore from '../canvasStore';
+import { rememberPreviewedAgent } from '../commentDestinationMemory';
 import { createConversation } from '../conversationPreparation';
 import { usePanelStore } from '../panelStore';
+import { useWorkspaceStore } from '../workspaceStore';
 import { findTabByTarget, groupOfTab, normalizePreviewTarget } from './model';
 import { selectActiveTab, usePreviewWorkspaceStore } from './store';
 
-import type { CanvasNodeId } from '@huabu/shared';
+import type { CanvasNodeId, FileReference } from '@huabu/shared';
+
+export function addFileReferenceNode(
+  canvasId: string,
+  reference: FileReference,
+  label: string,
+): string {
+  const canvas = useCanvasStore.getState();
+  if (!isFileReference(reference)) throw new Error(t('files.invalidReference'));
+  if (canvas.canvasId !== canvasId || canvas.isLoading)
+    throw new Error(t('files.spaceChanged'));
+  if (!selectCanWriteCanvas(canvas))
+    throw new Error(t('files.creationReadOnly'));
+  const id = createId('node');
+  canvas.addNode({
+    id,
+    nodeType: 'fileReference',
+    data: {
+      label,
+      origin: { type: 'user-created' },
+      fileReference: reference,
+    },
+    size: { width: 400, height: 180 },
+  });
+  if (
+    useCanvasStore.getState().canvasId !== canvasId ||
+    !useCanvasStore.getState().nodes.some((node) => node.id === id)
+  )
+    throw new Error(t('files.creationFailed'));
+  return id;
+}
+
+export function openFileReference(
+  canvasId: string,
+  reference: FileReference,
+  label: string,
+): string {
+  const canvas = useCanvasStore.getState();
+  if (!isFileReference(reference)) throw new Error(t('files.invalidReference'));
+  if (canvas.canvasId !== canvasId || canvas.isLoading)
+    throw new Error(t('files.spaceChanged'));
+  const matches = canvas.nodes.filter(
+    (node) =>
+      node.type === 'fileReference' &&
+      isFileReference(node.data.fileReference) &&
+      node.data.fileReference.agentletId === reference.agentletId &&
+      node.data.fileReference.path === reference.path,
+  );
+  const openMatch = Object.values(
+    usePreviewWorkspaceStore.getState().workspace.tabs,
+  )
+    .sort((a, b) => b.lastActiveSeq - a.lastActiveSeq)
+    .find(
+      ({ target }) =>
+        target.kind === 'node' &&
+        target.canvasId === canvasId &&
+        matches.some((node) => node.id === target.nodeId),
+    );
+  const nodeId =
+    (openMatch?.target.kind === 'node' ? openMatch.target.nodeId : undefined) ??
+    matches[0]?.id ??
+    addFileReferenceNode(canvasId, reference, label);
+  return openPreviewNode(nodeId, { transient: false, focusEditor: false });
+}
 
 function findConversationTab(
   canvasId: string,
@@ -109,6 +178,7 @@ export function openPreviewNode(
     markReadIntent?: boolean;
     openToSide?: boolean;
     groupId?: string;
+    userInitiated?: boolean;
   },
 ): string {
   const canvas = useCanvasStore.getState();
@@ -127,6 +197,9 @@ export function openPreviewNode(
     },
   );
   const openedNode = canvas.nodes.find((node) => node.id === nodeId);
+  if (tabId && options?.userInitiated) {
+    rememberPreviewedAgent({ kind: 'node', canvasId: canvas.canvasId, nodeId });
+  }
   if (tabId && openedNode?.type === 'note' && options?.focusEditor !== false) {
     usePreviewWorkspaceStore.getState().requestNodeFocus(tabId);
   } else if (tabId && options?.focusEditor === false) {
@@ -208,12 +281,18 @@ export async function openNewChat(groupId?: string): Promise<string> {
   const initial = usePreviewWorkspaceStore.getState();
   const canvasId = initial.canvasId || useCanvasStore.getState().canvasId;
   if (!canvasId) return '';
+  // Space ids are scoped to a Workspace, so the same id after a Workspace
+  // switch names a different Space.
+  const workspaceId = useWorkspaceStore.getState().workspaceId;
+  const inInitialSpace = () =>
+    useWorkspaceStore.getState().workspaceId === workspaceId &&
+    useCanvasStore.getState().canvasId === canvasId;
   try {
     return await pageLifecycle.run('updating', async () => {
       const binding = await loadDefaultAgentBinding();
       const preview = usePreviewWorkspaceStore.getState();
       if (
-        useCanvasStore.getState().canvasId !== canvasId ||
+        !inInitialSpace() ||
         preview.canvasId !== initial.canvasId ||
         preview.workspace !== initial.workspace
       ) {
@@ -233,8 +312,10 @@ export async function openNewChat(groupId?: string): Promise<string> {
       return tabId;
     });
   } catch (error) {
-    toast(error instanceof Error ? error.message : String(error), {
-      tone: 'danger',
+    // A missing Agent offers setup. The toast outlives this call, so its retry
+    // opens the requested Chat only while the same Space is still open.
+    toastConversationStartError(error, () => {
+      if (inInitialSpace()) void openNewChat(groupId);
     });
     return '';
   }
@@ -277,6 +358,66 @@ export function openPreviewUrl(
   }
   usePanelStore.getState().requestOpenRightPanel();
   return preview.openPreviewTarget(target, { groupId });
+}
+
+/**
+ * Inspect a device file in the reusable Preview slot without creating a node.
+ * A `source` names the conversation the file was opened from: its tab is made
+ * permanent first, so the file takes a slot beside it instead of replacing the
+ * conversation the user is reading.
+ */
+export function openPreviewFile(
+  file: {
+    agentletId: string;
+    path: string;
+    deviceName?: string;
+  },
+  source?: { threadId?: string; nodeId?: string },
+): string {
+  const preview = usePreviewWorkspaceStore.getState();
+  const canvasId = preview.canvasId;
+  if (!canvasId) return '';
+  const target = normalizePreviewTarget({ kind: 'file', canvasId, ...file });
+  if (!target) return '';
+  const sourceTab = source
+    ? Object.values(preview.workspace.tabs).find(
+        ({ target: open }) =>
+          open.canvasId === canvasId &&
+          ((!!source.threadId &&
+            (open.kind === 'chat' || open.kind === 'conversation') &&
+            open.threadId === source.threadId) ||
+            (!!source.nodeId &&
+              open.kind === 'node' &&
+              open.nodeId === source.nodeId)),
+      )
+    : undefined;
+  if (sourceTab) preview.promoteTab(sourceTab.id);
+  usePanelStore.getState().requestOpenRightPanel();
+  return preview.openPreviewTarget(target, {
+    transient: true,
+    groupId: sourceTab
+      ? groupOfTab(preview.workspace, sourceTab.id)?.id
+      : undefined,
+  });
+}
+
+/**
+ * Close the node-free Preview of a device file. Once a reference node shows
+ * the same file, the two tabs would only duplicate each other.
+ */
+export function closePreviewFile(file: {
+  agentletId: string;
+  path: string;
+}): void {
+  const preview = usePreviewWorkspaceStore.getState();
+  const canvasId = preview.canvasId;
+  if (!canvasId) return;
+  const tab = findTabByTarget(preview.workspace, {
+    kind: 'file',
+    canvasId,
+    ...file,
+  });
+  if (tab) preview.closeTab(tab.id);
 }
 
 export function closeActivePreviewNode(): void {

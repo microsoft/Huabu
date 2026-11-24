@@ -1,23 +1,30 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { Check, FolderOpen, Layers, X } from 'lucide-react';
-import { useState } from 'react';
+import { FolderOpen, X } from 'lucide-react';
+import { useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Navigate, useNavigate } from 'react-router-dom';
 
 import { WorkspaceLoadingScreen } from './WorkspaceLoadingScreen';
 import { Button } from '../components/Common/Button';
 import { PathInput } from '../components/Common/PathInput';
-import { TextInput } from '../components/Common/TextInput';
 import { toast } from '../components/Common/Toast';
+import {
+  CreateWorkspaceFields,
+  WorkspaceList,
+} from '../components/Workspace/WorkspaceList';
 import { APP_NAME } from '../config/app';
 import { useWorkspaceStore } from '../store/workspaceStore';
 
 import type { WorkspaceDescriptor } from '../api/workspace';
 
 /**
- * First-launch / "switch workspace" page.
+ * First-launch page, and the folder chooser for Disk "Home folder" mode.
+ *
+ * Named Workspaces are switched from inside the app (the Spaces header's
+ * popover and the Switch Workspace dialog); this page is where a person with
+ * none to be in chooses or creates one. Folder Workspaces still switch here.
  *
  * Only meaningful in free mode. In managed mode the workspace is locked
  * at the server, so we redirect home (no UI to render).
@@ -117,6 +124,11 @@ interface NamedSetupProps {
   onActivated: () => void;
 }
 
+/**
+ * First launch for named Workspaces: the shared Workspace list (with rename)
+ * and the create field. Switching from inside the app uses the header popover
+ * and the Switch Workspace dialog instead, over the same list.
+ */
 function NamedSetup({
   isSyncing,
   workspaces,
@@ -126,8 +138,7 @@ function NamedSetup({
   onActivated,
 }: NamedSetupProps) {
   const { t } = useTranslation();
-  const [name, setName] = useState('');
-  const [folder, setFolder] = useState('');
+  const headingId = useId();
 
   const run = async (action: () => Promise<void>) => {
     try {
@@ -141,104 +152,40 @@ function NamedSetup({
     }
   };
 
-  const create = () => {
-    const trimmed = name.trim();
-    if (trimmed) void run(() => createWorkspace(trimmed));
-  };
-
-  const open = () => {
-    const trimmed = folder.trim();
-    if (trimmed && openFolder) void run(() => openFolder(trimmed));
-  };
-
   return (
     <>
       {workspaces.length > 0 && (
         <div className="mb-6">
-          <div className="text-fg-subtle mb-2 text-xs font-medium">
+          <div
+            id={headingId}
+            className="text-fg-subtle mb-2 text-xs font-medium"
+          >
             {t('workspace.yourWorkspaces')}
           </div>
-          <ul className="space-y-1">
-            {workspaces.map((workspace) => (
-              <li key={workspace.workspaceId}>
-                <Button
-                  variant="ghost"
-                  tone="neutral"
-                  size="sm"
-                  onClick={() =>
-                    void run(() => activateWorkspace(workspace.workspaceId))
-                  }
-                  disabled={isSyncing}
-                  className="w-full justify-start rounded-lg text-left"
-                >
-                  <Layers size={14} className="text-fg-subtle shrink-0" />
-                  <span className="text-fg-muted min-w-0 flex-1 truncate text-sm">
-                    {workspace.name}
-                  </span>
-                  {workspace.active && (
-                    <span className="text-fg-subtle flex shrink-0 items-center gap-1 text-xs">
-                      <Check size={12} />
-                      {t('workspace.current')}
-                    </span>
-                  )}
-                </Button>
-              </li>
-            ))}
-          </ul>
+          <WorkspaceList
+            workspaces={workspaces}
+            mode="activate"
+            aria-labelledby={headingId}
+            disabled={isSyncing}
+            onChoose={(workspace) =>
+              void run(() => activateWorkspace(workspace.workspaceId))
+            }
+          />
         </div>
       )}
 
-      <label
-        htmlFor="new-workspace-name"
-        className="text-fg-subtle mb-1.5 block text-xs font-medium"
-      >
-        {t('workspace.newWorkspace')}
-      </label>
-      <div className="flex gap-2">
-        <TextInput
-          id="new-workspace-name"
-          value={name}
-          onChange={(event) => setName(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter') create();
-          }}
-          placeholder={t('workspace.namePlaceholder')}
-          disabled={isSyncing}
-          className="min-w-0 flex-1"
-        />
-        <Button onClick={create} disabled={isSyncing || !name.trim()}>
-          {t('workspace.create')}
-        </Button>
-      </div>
-
-      {openFolder && (
-        <>
-          <label
-            htmlFor="open-workspace-folder"
-            className="text-fg-subtle mt-4 mb-1.5 block text-xs font-medium"
-          >
-            {t('workspace.openFolder')}
-          </label>
-          <div className="flex gap-2">
-            <TextInput
-              id="open-workspace-folder"
-              value={folder}
-              onChange={(event) => setFolder(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter') open();
-              }}
-              placeholder={t('workspace.pathPlaceholder')}
-              disabled={isSyncing}
-              spellCheck={false}
-              autoComplete="off"
-              className="min-w-0 flex-1"
-            />
-            <Button onClick={open} disabled={isSyncing || !folder.trim()}>
-              {t('workspace.openFolderButton')}
-            </Button>
-          </div>
-        </>
-      )}
+      <CreateWorkspaceFields
+        disabled={isSyncing}
+        hint={
+          workspaces.some((workspace) => workspace.role !== undefined)
+            ? t('workspace.createHint')
+            : undefined
+        }
+        onCreate={(name) => void run(() => createWorkspace(name))}
+        onOpenFolder={
+          openFolder ? (path) => void run(() => openFolder(path)) : undefined
+        }
+      />
     </>
   );
 }

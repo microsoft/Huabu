@@ -92,7 +92,7 @@ export function seedInkSigilScene(split: boolean) {
     label: 'A long resource reference',
   };
   useToolStore.getState().setInputModePreference('pen');
-  useCanvasStore.getState()._setStateNoAutosave({ nodes });
+  useCanvasStore.getState()._setStateRaw({ nodes });
 }
 
 export function selectInk() {

@@ -13,14 +13,15 @@ import {
   translateOf,
   oneFingerDrag,
   touchTap,
+  personEdits,
 } from './helpers';
 
+import type * as CanvasStore from '../src/store/canvasStore';
 import type {
   CanvasCommand,
   CanvasNodeCreateInput,
   CanvasNodeId,
   GetCanvasResponse,
-  PutCanvasRequest,
 } from '@huabu/shared';
 import type { Node } from '@xyflow/react';
 
@@ -32,7 +33,7 @@ test('mounts Layers on demand and restores filtered scrolling and focus', async 
   const canvasId = page.url().split('/canvas/')[1]?.split(/[?#]/)[0];
   const response = await page.request.post(`/api/canvas/${canvasId}/execute`, {
     data: {
-      commands: [
+      edits: personEdits([
         {
           type: 'CREATE_NODES',
           nodes: Array.from({ length: 50 }, (_, index) => ({
@@ -42,8 +43,7 @@ test('mounts Layers on demand and restores filtered scrolling and focus', async 
             size: { width: 400, height: 200 },
           })),
         },
-      ],
-      originator: { source: 'agent', threadId: 'e2e-layers-lifecycle' },
+      ]),
     },
   });
   expect(response.ok(), await response.text()).toBe(true);
@@ -109,7 +109,8 @@ test('mounts Layers on demand and restores filtered scrolling and focus', async 
   const reopenedRow = tree.locator(`[data-layer-id="${focusedId}"]`);
   await reopenedRow.click({ position: { x: 50, y: 18 } });
   await expect(reopenedRow).toHaveAttribute('aria-selected', 'true');
-  await expect(page.getByRole('tab', { name: /^Body 37/ })).toBeVisible();
+  // A person named the Note, so its preview tab carries that name.
+  await expect(page.getByRole('tab', { name: /^Layer 37/ })).toBeVisible();
   expect(
     await reopenedRow.evaluate((row) => {
       const surface = row.querySelector<HTMLElement>(':scope > .group');
@@ -189,13 +190,27 @@ test('mounts Layers on demand and restores filtered scrolling and focus', async 
   const firstMatch = searchResults
     .locator('button:not([aria-expanded])')
     .first();
-  await expect(firstMatch).toHaveCSS('height', '40px');
+  // A match is one 28px snippet row; the field name is a caption above the
+  // first match of each field, not a second line inside every row.
+  await expect(firstMatch).toHaveCSS('height', '28px');
   await expect(firstMatch).toHaveCSS('padding-top', '4px');
   await expect(firstMatch).toHaveCSS('padding-bottom', '4px');
+  await expect(firstMatch.locator('.uppercase')).toHaveCount(0);
+  const fieldCaption = firstMatch.locator('..').locator(':scope > .uppercase');
+  await expect(fieldCaption).toHaveCount(1);
+  expect(
+    await fieldCaption.evaluate(
+      (element) => element.getBoundingClientRect().top,
+    ),
+  ).toBe(
+    await searchHeader.evaluate(
+      (element) => element.getBoundingClientRect().bottom,
+    ),
+  );
   expect(
     await firstMatch.evaluate((element) => element.getBoundingClientRect().top),
   ).toBe(
-    await searchHeader.evaluate(
+    await fieldCaption.evaluate(
       (element) => element.getBoundingClientRect().bottom,
     ),
   );
@@ -204,9 +219,11 @@ test('mounts Layers on demand and restores filtered scrolling and focus', async 
     .locator('span.truncate')
     .evaluate((element) => element.getBoundingClientRect().left);
   expect(
-    await firstMatch
-      .locator('.uppercase')
-      .evaluate((element) => element.getBoundingClientRect().left),
+    await fieldCaption.evaluate(
+      (element) =>
+        element.getBoundingClientRect().left +
+        parseFloat(getComputedStyle(element).paddingLeft),
+    ),
   ).toBe(titleLeft);
   expect(
     await firstMatch
@@ -318,9 +335,19 @@ test('keeps search visible without stealing focus and focuses it only on Find', 
         input.evaluate((element) => {
           const icon = element.previousElementSibling;
           if (!icon) throw new Error('Missing search icon');
+          const resolve = (token: string) => {
+            const probe = document.createElement('span');
+            probe.style.color = `var(${token})`;
+            document.body.appendChild(probe);
+            const color = getComputedStyle(probe).color;
+            probe.remove();
+            return color;
+          };
+          // The placeholder is muted text; the icon stays one step quieter.
           return (
             getComputedStyle(element, '::placeholder').color ===
-            getComputedStyle(icon).color
+              resolve('--fg-muted') &&
+            getComputedStyle(icon).color === resolve('--fg-subtle')
           );
         }),
       )
@@ -373,7 +400,7 @@ test('uses the Canvas typography hierarchy for Layers and search results', async
   const canvasId = page.url().split('/canvas/')[1]?.split(/[?#]/)[0];
   const response = await page.request.post(`/api/canvas/${canvasId}/execute`, {
     data: {
-      commands: [
+      edits: personEdits([
         {
           type: 'CREATE_NODES',
           nodes: [
@@ -389,8 +416,7 @@ test('uses the Canvas typography hierarchy for Layers and search results', async
             },
           ],
         },
-      ],
-      originator: { source: 'agent', threadId: 'e2e-canvas-typography' },
+      ]),
     },
   });
   expect(response.ok(), await response.text()).toBe(true);
@@ -717,7 +743,7 @@ for (const input of ['mouse', 'touch'] as const) {
       `/api/canvas/${canvasId}/execute`,
       {
         data: {
-          commands: [
+          edits: personEdits([
             {
               type: 'CREATE_NODES',
               nodes: Array.from({ length: 5 }, (_, index) => ({
@@ -727,11 +753,7 @@ for (const input of ['mouse', 'touch'] as const) {
                 size: { width: 400, height: 200 },
               })),
             },
-          ],
-          originator: {
-            source: 'agent',
-            threadId: `e2e-layers-multi-${input}`,
-          },
+          ]),
         },
       },
     );
@@ -853,11 +875,7 @@ for (const count of [1, 2]) {
               `/api/canvas/${canvasId}/execute`,
               {
                 data: {
-                  commands,
-                  originator: {
-                    source: 'agent',
-                    threadId: `e2e-group-frame-${count}-${input}`,
-                  },
+                  edits: personEdits(commands),
                 },
               },
             );
@@ -1030,11 +1048,20 @@ for (const count of [1, 2]) {
               'Existing child',
               ...sources,
             ]);
+            // Selection is this page's view state. The move is sent as
+            // commands, which do not save it, so it is read from the page.
             expect(
-              after
-                .filter((node) => node.selected)
-                .map((node) => node.id)
-                .sort(),
+              await page.evaluate(async () => {
+                const path = '/src/store/canvasStore.ts';
+                const { default: store } = (await import(
+                  path
+                )) as typeof CanvasStore;
+                return store
+                  .getState()
+                  .nodes.filter((node) => node.selected)
+                  .map((node) => node.id)
+                  .sort();
+              }),
             ).toEqual(sources.map(id).sort());
             await expect(tree.locator('[aria-selected="true"]')).toHaveCount(
               collapsed ? 0 : count,
@@ -1044,28 +1071,24 @@ for (const count of [1, 2]) {
               String(!collapsed),
             );
             await expect(page.getByRole('tab')).toHaveCount(tabs);
+            // The move, its undo and its redo are each saved by one write:
+            // an execute request carrying the commands, or (when a
+            // whole-Space save is already pending) that PUT. Either way the
+            // saved record ends with the sources under the expected parent.
+            // Like the response wait this replaces, it is bounded by the
+            // test timeout rather than by the default assertion timeout.
             const waitForParentsSave = (parentId: string | undefined) =>
-              page.waitForResponse((response) => {
-                if (
-                  response.request().method() !== 'PUT' ||
-                  !response.url().endsWith(`/api/canvas/${canvasId}`)
+              expect
+                .poll(
+                  async () =>
+                    (await persisted())
+                      .filter((node) =>
+                        sources.includes(String(node.data.label)),
+                      )
+                      .map((node) => node.parentId ?? null),
+                  { timeout: 30_000 },
                 )
-                  return false;
-                const body = response
-                  .request()
-                  .postDataJSON() as PutCanvasRequest;
-                const sourceIds = new Set<string>(sources.map(id));
-                const moved = body.state.nodes.filter((node) =>
-                  sourceIds.has(node.id),
-                );
-                return (
-                  response.ok() &&
-                  moved.length === sources.length &&
-                  moved.every(
-                    (node) => (node.parentId ?? null) === (parentId ?? null),
-                  )
-                );
-              });
+                .toEqual(sources.map(() => parentId ?? null));
             const undoSaved = waitForParentsSave(id('Source frame'));
             await target.focus();
             await expect(target).toBeFocused();
@@ -1200,7 +1223,7 @@ test('taps Layers to activate, long-presses to reorder, and swipes to scroll wit
   const canvasId = new URL(page.url()).pathname.split('/canvas/')[1];
   const response = await page.request.post(`/api/canvas/${canvasId}/execute`, {
     data: {
-      commands: [
+      edits: personEdits([
         {
           type: 'CREATE_NODES',
           nodes: Array.from({ length: 40 }, (_, index) => ({
@@ -1210,8 +1233,7 @@ test('taps Layers to activate, long-presses to reorder, and swipes to scroll wit
             size: { width: 400, height: 200 },
           })),
         },
-      ],
-      originator: { source: 'agent', threadId: 'e2e-layers-touch' },
+      ]),
     },
   });
   expect(response.ok(), await response.text()).toBe(true);
@@ -1313,7 +1335,7 @@ test('keeps type filters on one line and preserves overflow selections during re
   const canvasId = new URL(page.url()).pathname.split('/canvas/')[1];
   const response = await page.request.post(`/api/canvas/${canvasId}/execute`, {
     data: {
-      commands: [
+      edits: personEdits([
         {
           type: 'CREATE_NODES',
           nodes: [
@@ -1332,8 +1354,7 @@ test('keeps type filters on one line and preserves overflow selections during re
             size: { width: 400, height: 200 },
           })),
         },
-      ],
-      originator: { source: 'agent', threadId: 'e2e-layer-filter-overflow' },
+      ]),
     },
   });
   expect(response.ok(), await response.text()).toBe(true);
@@ -1515,7 +1536,7 @@ test('keeps type filters on one line and preserves overflow selections during re
   await expect(overflowIcon).toHaveCSS('width', '14px');
   await expect(overflowIcon).toHaveCSS('height', '14px');
   await expect(overflowIcon).toHaveCSS('stroke-width', '2px');
-  await expect(overflowIcon).toHaveCSS('color', 'rgb(118, 118, 118)');
+  await expect(overflowIcon).toHaveCSS('color', 'rgb(112, 112, 112)');
   const filterName = (await filter.getAttribute('aria-label'))?.replace(
     'Filter by ',
     '',
@@ -1597,7 +1618,7 @@ test('matches header icon color, size and stroke in both panel states and themes
           strokeWidth: getComputedStyle(element).strokeWidth,
         })),
       ).toEqual({
-        color: 'rgb(118, 118, 118)',
+        color: 'rgb(112, 112, 112)',
         width: 16,
         height: 16,
         strokeWidth: '2px',
@@ -1821,7 +1842,7 @@ test.describe('mouse header controls', () => {
         logoToTitle: 2,
         logoImageToTitle: 4,
         logoVerticalCenterOffset: 0,
-        titleToToggle: 12,
+        titleToToggle: 6,
       });
       await toggle.locator('xpath=ancestor::header').screenshot({
         path: testInfo.outputPath(

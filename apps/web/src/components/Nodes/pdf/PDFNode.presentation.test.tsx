@@ -6,8 +6,11 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { PDFNode, type PDFNodeType } from './PDFNode';
+import { noteFarDescription } from '../semanticZoom/noteFarDescription';
 
 import type { NodeProps } from '@xyflow/react';
+
+vi.mock('../semanticZoom/noteFarDescription', { spy: true });
 
 const mocks = vi.hoisted(() => ({
   presentation: {
@@ -153,34 +156,72 @@ async function render(data: Record<string, unknown> = {}) {
 }
 
 describe('PDF canvas presentation', () => {
-  it('uses property order automatically, skips empty values and keeps zero and false', async () => {
+  it('reuses the notes excerpt across presentation updates and refreshes it after edits', async () => {
+    mocks.note.data.content = '- First item';
+    await render({ noteNodeId: 'notes' });
+    expect(noteFarDescription).toHaveBeenCalledTimes(1);
+
+    mocks.presentation = { ...mocks.presentation, mode: 'minimal', zoom: 0.1 };
+    await render({ noteNodeId: 'notes', label: 'Renamed PDF' });
+    expect(noteFarDescription).toHaveBeenCalledTimes(1);
+    expect(mocks.card).toHaveBeenLastCalledWith(
+      expect.objectContaining({ summary: 'First item' }),
+    );
+
+    mocks.note.data.content = '- Updated item';
+    await render({ noteNodeId: 'notes' });
+    expect(noteFarDescription).toHaveBeenCalledTimes(2);
+    expect(mocks.card).toHaveBeenLastCalledWith(
+      expect.objectContaining({ summary: 'Updated item' }),
+    );
+  });
+
+  it('splits properties by type into tags and text, in property order', async () => {
     const properties = {
       Empty: ' ',
-      Tags: [],
+      NoTags: [],
       Score: 0,
       Reviewed: false,
-      Venue: 'UIST',
+      Starred: true,
+      Venue: ['UIST 2026'],
+      Keywords: ['canvas', ' ', 'ink', 'canvas'],
+      Question: ' How do people steer agents? ',
+      Short: 'CHI',
     };
     await render({ properties });
     expect(mocks.card).toHaveBeenLastCalledWith(
       expect.objectContaining({
-        properties: [
+        // Zero is a value; a false flag and blank entries say nothing.
+        tags: [
           { name: 'Score', value: '0' },
-          { name: 'Reviewed', value: 'false' },
-          { name: 'Venue', value: 'UIST' },
+          { name: 'Starred', value: 'Starred' },
+          { name: 'Venue', value: 'UIST 2026' },
+          { name: 'Keywords', value: 'canvas' },
+          { name: 'Keywords', value: 'ink' },
+        ],
+        // Text stays text however short it is.
+        texts: [
+          { name: 'Question', value: 'How do people steer agents?' },
+          { name: 'Short', value: 'CHI' },
         ],
       }),
     );
     await render({
       properties,
-      propertyDisplayKeys: ['Venue', 'Empty', 'Venue', 'missing', 'Reviewed'],
+      propertyDisplayKeys: ['Short', 'Keywords', 'Short', 'missing', 'Venue'],
     });
     expect(mocks.card).toHaveBeenLastCalledWith(
       expect.objectContaining({
-        properties: [
-          { name: 'Venue', value: 'UIST' },
-          { name: 'Reviewed', value: 'false' },
+        tags: [
+          { name: 'Keywords', value: 'canvas' },
+          { name: 'Keywords', value: 'ink' },
+          { name: 'Venue', value: 'UIST 2026' },
           { name: 'Score', value: '0' },
+          { name: 'Starred', value: 'Starred' },
+        ],
+        texts: [
+          { name: 'Short', value: 'CHI' },
+          { name: 'Question', value: 'How do people steer agents?' },
         ],
       }),
     );
@@ -202,7 +243,8 @@ describe('PDF canvas presentation', () => {
     expect(mocks.card).toHaveBeenLastCalledWith(
       expect.objectContaining({
         summary: 'My own interpretation.',
-        properties: [
+        tags: [],
+        texts: [
           { name: 'Venue', value: 'UIST' },
           { name: 'Internal', value: 'Hidden' },
         ],

@@ -9,12 +9,13 @@
  * global auth hook in `app.ts`, except the bundled root `GET skill`
  * bootstrap:
  *
- * - `GET    download/<path>` — fetch a canvas file as raw bytes. Node files
- *   also carry their metadata (id/type/label/src/locked + parent/child edges)
- *   in ASCII-safe `X-Huabu-*` response headers.
- * - `POST   upload/<file>`   — stage bytes into the shared `.upload/` scratch
- *   dir (rejects on collision — the agent self-suffixes).
- * - `DELETE upload/<file>`   — remove a staged payload.
+ * - `GET    download/<id>`   — fetch a node (`<nodeId>`) or stored artifact
+ *   (`<artifactKey>`) across all storage backends. Node downloads carry
+ *   metadata (id/type/label/src/locked + parent/child edges) in ASCII-safe
+ *   `X-Huabu-*` response headers.
+ * - `POST   upload/<file>`   — store bytes directly in `space(canvasId).artifacts`
+ *   and return `{ id, size }`.
+ * - `DELETE upload/<file>`   — remove a legacy staged `.upload/` payload.
  * - `POST   agent`           — create a visible Agent and optionally start it.
  * - `POST   agent/:threadId/prompt` — submit a turn to an existing Agent.
  * - `POST   task/create`     — create a durable Task and static Task Note.
@@ -26,19 +27,22 @@
  * - `GET    capabilities*`   — discover direct query/command contracts.
  * - `POST   query`           — run one bounded canonical SpaceQuery.
  * - `POST   execute`         — execute validated agent Space commands.
+ * - `GET    execute/:operationId` — stored response of an earlier execute.
  *
  * Errors keep the repo-standard `{ message }` shape and, on `4xx`/`5xx`, fold
  * a runnable `/skill` recovery command into the message (self-healing pull).
  */
 
-import { createReadStream, existsSync, statSync } from 'node:fs';
-import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
 import path from 'node:path';
 
 import archiver from 'archiver';
 
 import {
+  AGENT_HOST_SSE_EVENTS,
   AGENT_SSE_EVENTS,
+  createId,
   RFS_HEARTBEAT_DEFAULT_SEC,
   RFS_HEARTBEAT_MAX_SEC,
   RFS_HEARTBEAT_MIN_SEC,
@@ -53,7 +57,10 @@ import {
   rfsAgentHeadersSchema,
   rfsAgentPromptRequestSchema,
   rfsExecuteHeadersSchema,
+  rfsExecuteEditsRequestSchema,
   rfsExecuteRequestSchema,
+  recentCanvasConversationParamsSchema,
+  rfsUploadParamsSchema,
   rfsInkIntentParamsSchema,
   rfsInkIntentRequestSchema,
   RFS_SKILL_CLIENT_HEADER,
@@ -72,17 +79,20 @@ import {
   type RfsAgentEventMode,
   type RfsAgentCreateResponse,
   type RfsAgentProfilesResponse,
+  type RfsUploadParams,
   type RfsUploadResponse,
+  type RecentCanvasConversationParams,
   type AgentStreamEvent,
   type StartTaskRunResponse,
   type ServiceParams,
 } from '@huabu/shared';
 
-import { mimeForPath } from './mime.js';
 import {
-  lookupNodeByPath,
-  resolveReadable,
+  parseRfsDownloadTarget,
+  resolveRfsNodeByFilename,
+  resolveRfsNodeById,
   rfsMetaHeaders,
+  type RfsResolvedNode,
 } from './node-meta.js';
 import {
   resolveBundledRootSkill,
@@ -94,7 +104,12 @@ import {
   getQueryCapability,
   getRfsCapabilities,
 } from './space-capabilities.js';
-import { executeRfsCommands } from './space-execute.js';
+import {
+  executeRfsCommands,
+  NotAnRfsExecuteResultError,
+  lookupRfsExecuteResponse,
+} from './space-execute.js';
+import { safeJoin } from '../../utils/fs.js';
 import {
   AgentNodeCreationError,
   agentNodeService,
@@ -120,9 +135,18 @@ import {
   InkIntentTurnError,
   reportInkIntent,
 } from '../agent/tools/handlers/report-ink-intent.js';
-import { CanvasNotFoundError } from '../canvas/canvas-executor.js';
+import { sendBlob } from '../artifact/send-blob.js';
+import {
+  CanvasNotFoundError,
+  ExecuteBasisError,
+  ExecuteOutcomeUnknownError,
+  ExecuteRequestReusedError,
+} from '../canvas/canvas-executor.js';
+import { NodeCoverError } from '../canvas/import-node-src.js';
 import { executeSpaceQuery, SpaceQueryError } from '../canvas/space-query.js';
 import { WorldPreviewMutationError } from '../canvas/world-preview-policy.js';
+import { withCanvasMutex } from '../canvas/write-coordinator.js';
+import { getRequestIdentity } from '../identity/request.js';
 import {
   InteractiveViewServiceError,
   interactiveViewService,
@@ -134,16 +158,15 @@ import {
   isAgentFacingService,
   readServicePackageFile,
 } from '../services/index.js';
-import {
-  storageServes,
-  unavailableCapabilityMessage,
-} from '../storage/index.js';
+import { space, storageServes } from '../storage/index.js';
+import { BlobNameError } from '../storage/ports/blob.js';
 import {
   RunCompletionError,
   runCompletionService,
 } from '../task/run-completion.service.js';
 import { RunLaunchError, runLauncher } from '../task/run-launcher.js';
 import { TaskCreationError, taskService } from '../task/task.service.js';
+import { acquireWorkspaceOperationLease } from '../workspace.js';
 
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 
@@ -165,6 +188,18 @@ function rfsError(
     ...(code ? { code } : {}),
     ...(details !== undefined ? { details } : {}),
   };
+}
+
+async function withLegacyUploadMutation<T>(
+  canvasId: string,
+  mutate: () => Promise<T>,
+): Promise<T> {
+  const lease = acquireWorkspaceOperationLease();
+  try {
+    return await withCanvasMutex(canvasId, mutate);
+  } finally {
+    lease.release();
+  }
 }
 
 function interactiveViewStatus(error: InteractiveViewServiceError): number {
@@ -280,19 +315,29 @@ function logReachbackEvent(
 
 // ── Route plugin ──
 
-const rfsRoutes: FastifyPluginAsync = async (app) => {
-  // RFS is the Space *as files*. A backend that keeps Spaces in tables has no
-  // tree to project, and the honest answer is the declared refusal rather
-  // than a partial projection assembled from records — see the
-  // `space-file-plane` capability. One hook, because every route below
-  // resolves a real path sooner or later.
-  app.addHook('onRequest', async (_request, reply) => {
-    if (storageServes('space-file-plane')) return;
-    return reply
-      .code(409)
-      .send(rfsError(unavailableCapabilityMessage('space-file-plane')));
-  });
+function parseUploadFilenameHint(rawPath: string): string | null {
+  if (
+    !rawPath ||
+    rawPath.startsWith('/') ||
+    rawPath.endsWith('/') ||
+    rawPath.includes('\\') ||
+    rawPath.includes('\0')
+  ) {
+    return null;
+  }
+  const segments = rawPath.split('/');
+  if (
+    segments.some(
+      (seg) =>
+        seg.length === 0 || seg === '.' || seg === '..' || seg.startsWith('.'),
+    )
+  ) {
+    return null;
+  }
+  return segments[segments.length - 1] ?? null;
+}
 
+const rfsRoutes: FastifyPluginAsync = async (app) => {
   // Consume every request body as raw bytes within this plugin: uploads are
   // arbitrary binary, and the `agent` endpoint accepts either a JSON body or a
   // raw text prompt. Handlers interpret the Buffer per Content-Type.
@@ -569,7 +614,7 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
   // `/capabilities` already owns direct Space-operation discovery. Keep the
   // configured third-party services under a separate unambiguous root.
   app.get('/:canvasId/services', async (_request, reply) =>
-    reply.send({ services: serviceProvisioner.list() }),
+    reply.send({ services: await serviceProvisioner.list() }),
   );
 
   app.get<{
@@ -681,7 +726,7 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
     try {
       return reply
         .header('Cache-Control', 'no-store')
-        .send(serviceProvisioner.lease(parsed.data.serviceId));
+        .send(await serviceProvisioner.lease(parsed.data.serviceId));
     } catch (error) {
       if (error instanceof ServiceProvisionError) {
         const status =
@@ -779,9 +824,16 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
   );
 
   // ── POST /:canvasId/execute ──
-  app.post<{ Params: { canvasId: string } }>(
+  app.post<{ Params: RecentCanvasConversationParams }>(
     '/:canvasId/execute',
     async (request, reply) => {
+      const params = recentCanvasConversationParamsSchema.safeParse(
+        request.params,
+      );
+      if (!params.success)
+        return reply
+          .code(400)
+          .send(rfsError('Invalid Space identity.', 'validation_failed'));
       const body = request.body;
       const buffer = Buffer.isBuffer(body) ? body : Buffer.alloc(0);
       let json: unknown;
@@ -792,7 +844,17 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
           .code(400)
           .send(rfsError('Request body is not valid JSON.', 'invalid_json'));
       }
-      const parsed = rfsExecuteRequestSchema.safeParse(json);
+      // `{ commands }` is the documented form and is parsed exactly as
+      // before. A body that states `edits` is the same request with the
+      // edits spelled out.
+      const statesEdits =
+        json !== null &&
+        typeof json === 'object' &&
+        !Array.isArray(json) &&
+        'edits' in json;
+      const parsed = statesEdits
+        ? rfsExecuteEditsRequestSchema.safeParse(json)
+        : rfsExecuteRequestSchema.safeParse(json);
       if (!parsed.success) {
         return reply
           .code(400)
@@ -808,17 +870,102 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
       // Best-effort change attribution: when the agent forwards its
       // injected `HUABU_THREAD_ID` via `X-Huabu-Host-Thread-Id`, tag the
       // batch to that host conversation so its change-review card fills.
-      // Absent / malformed → the write still applies, just unattributed.
-      const parsedHeaders = rfsExecuteHeadersSchema.safeParse(request.headers);
-      const hostThreadId = parsedHeaders.success
-        ? parsedHeaders.data['x-huabu-host-thread-id']
+      // Absent / malformed / not a thread of this Space → the write still
+      // applies, just unattributed.
+      const headerFields = rfsExecuteHeadersSchema.shape;
+      const parsedThread = headerFields['x-huabu-host-thread-id'].safeParse(
+        request.headers['x-huabu-host-thread-id'],
+      );
+      const claimedThreadId = parsedThread.success
+        ? parsedThread.data
         : undefined;
 
+      // The request id and read version may travel in a header so a client
+      // can forward the body bytes untouched. Unlike attribution they change
+      // what the request means, so a malformed or contradicting value is
+      // refused rather than ignored.
+      const parsedOperationId = headerFields['x-huabu-operation-id'].safeParse(
+        request.headers['x-huabu-operation-id'],
+      );
+      const parsedBasis = headerFields['x-huabu-basis'].safeParse(
+        request.headers['x-huabu-basis'],
+      );
+      if (!parsedOperationId.success || !parsedBasis.success) {
+        return reply
+          .code(400)
+          .send(
+            rfsError(
+              `Invalid ${parsedOperationId.success ? 'X-Huabu-Basis' : 'X-Huabu-Operation-Id'} header.`,
+              'validation_failed',
+            ),
+          );
+      }
+      const operationId = parsed.data.operationId ?? parsedOperationId.data;
+      const bodyBasis = 'basis' in parsed.data ? parsed.data.basis : undefined;
+      const basis = bodyBasis ?? parsedBasis.data;
+      if (
+        (parsedOperationId.data !== undefined &&
+          parsedOperationId.data.toLowerCase() !==
+            operationId?.toLowerCase()) ||
+        (parsedBasis.data !== undefined && parsedBasis.data !== basis)
+      ) {
+        return reply
+          .code(400)
+          .send(
+            rfsError(
+              'The request id or basis in the headers differs from the one in the body.',
+              'validation_failed',
+            ),
+          );
+      }
+      // Stored responses are kept per authenticated caller; the principal is
+      // the transport's, never a value the request supplies.
+      const principalId = getRequestIdentity(request)?.principal.principalId;
+      if (operationId !== undefined && !principalId) {
+        return reply
+          .code(401)
+          .send(
+            rfsError(
+              'A request id requires an authenticated caller.',
+              'identity_required',
+            ),
+          );
+      }
+
       try {
+        // Known limitation: every machine-token caller is one principal, so
+        // this checks the thread is in this Space, not that the caller is it.
+        const hostThreadId =
+          claimedThreadId !== undefined &&
+          (await agentThreadService.ownsThread(
+            params.data.canvasId,
+            claimedThreadId,
+          ))
+            ? claimedThreadId
+            : undefined;
         return reply.send(
-          await executeRfsCommands(request.params.canvasId, parsed.data, {
-            hostThreadId,
-          }),
+          await executeRfsCommands(
+            params.data.canvasId,
+            'edits' in parsed.data
+              ? {
+                  ...parsed.data,
+                  ...(operationId !== undefined ? { operationId } : {}),
+                  // A read version in the header is the one of every edit
+                  // that states none.
+                  edits: parsed.data.edits.map((edit) => ({
+                    ...edit,
+                    ...(edit.basis === undefined && basis !== undefined
+                      ? { basis }
+                      : {}),
+                  })),
+                }
+              : {
+                  ...parsed.data,
+                  ...(operationId !== undefined ? { operationId } : {}),
+                  ...(basis !== undefined ? { basis } : {}),
+                },
+            { hostThreadId, claimedThreadId, principalId },
+          ),
         );
       } catch (error) {
         if (error instanceof CanvasNotFoundError) {
@@ -829,6 +976,45 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
         if (error instanceof WorldPreviewMutationError) {
           return reply.code(409).send(rfsError(error.message));
         }
+        if (error instanceof ExecuteRequestReusedError) {
+          return reply
+            .code(409)
+            .send(
+              rfsError(
+                'This operation id was already used for a different request. Use a new operation id for a new request.',
+                'operation-id-reused',
+              ),
+            );
+        }
+        if (error instanceof ExecuteBasisError) {
+          return reply
+            .code(409)
+            .send(
+              rfsError(
+                'The basis is not a read version of this Space. Nothing was applied; query again for a current basis.',
+                'basis-unknown',
+              ),
+            );
+        }
+        if (error instanceof ExecuteOutcomeUnknownError) {
+          request.log.error(
+            { err: error, canvasId: request.params.canvasId },
+            'rfs Space execution outcome is unknown',
+          );
+          return reply
+            .code(503)
+            .send(
+              rfsError(
+                'The outcome of this request is unknown. Send it again with the same operation id; do not send it under a new one.',
+                'operation-outcome-unknown',
+              ),
+            );
+        }
+        if (error instanceof NodeCoverError) {
+          return reply
+            .code(400)
+            .send(rfsError(error.message, 'validation_failed'));
+        }
         request.log.error(
           { err: error, canvasId: request.params.canvasId },
           'rfs Space execution failed',
@@ -836,6 +1022,57 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
         return reply
           .code(500)
           .send(rfsError('Failed to execute the Space commands.'));
+      }
+    },
+  );
+
+  // ── GET /:canvasId/execute/:operationId ──
+  // The stored response of an earlier execute request of this caller, shaped
+  // as a repeat of that request would be answered. Never executes anything.
+  app.get<{ Params: { canvasId: string; operationId: string } }>(
+    '/:canvasId/execute/:operationId',
+    async (request, reply) => {
+      const params = recentCanvasConversationParamsSchema.safeParse({
+        canvasId: request.params.canvasId,
+      });
+      const operationId = rfsExecuteRequestSchema.shape.operationId.safeParse(
+        request.params.operationId,
+      );
+      if (!params.success || !operationId.success || !operationId.data) {
+        return reply
+          .code(400)
+          .send(
+            rfsError('Invalid Space or operation id.', 'validation_failed'),
+          );
+      }
+      const notFound = () =>
+        reply
+          .code(404)
+          .send(
+            rfsError(
+              'No stored result for this operation id. Either the request was never saved, it was sent by another caller, or the record has expired.',
+              'operation_not_found',
+            ),
+          );
+      const principalId = getRequestIdentity(request)?.principal.principalId;
+      if (!principalId) return notFound();
+      try {
+        const stored = await lookupRfsExecuteResponse(params.data.canvasId, {
+          principalId,
+          operationId: operationId.data,
+        });
+        return stored ? reply.send(stored) : notFound();
+      } catch (error) {
+        // Stored, but not by an RFS execute (the canvas route keeps results
+        // under the same principal): for this endpoint there is no result.
+        if (error instanceof NotAnRfsExecuteResultError) return notFound();
+        request.log.error(
+          { err: error, canvasId: params.data.canvasId },
+          'rfs stored execute result lookup failed',
+        );
+        return reply
+          .code(500)
+          .send(rfsError('Failed to read the stored result.'));
       }
     },
   );
@@ -886,78 +1123,84 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
       if (!requestRel) {
         return reply
           .code(400)
-          .send(rfsError('A download path is required (download/<path>).'));
+          .send(rfsError('A download target is required (download/<id>).'));
       }
 
-      let absPath: string;
-      let physicalRel: string;
-      try {
-        ({ absPath, physicalRel } = resolveReadable(canvasId, requestRel));
-      } catch {
+      const target = parseRfsDownloadTarget(requestRel);
+      if (target.kind === 'invalid') {
         return reply
           .code(400)
           .send(rfsError(`Path "${requestRel}" is not readable.`));
       }
 
-      if (!existsSync(absPath) || !statSync(absPath).isFile()) {
-        return reply.code(404).send(rfsError(`No file at "${requestRel}".`));
-      }
+      const sendResolvedNode = (resolved: RfsResolvedNode) => {
+        if (resolved.meta.rev) {
+          const etag = `"${resolved.meta.rev}"`;
+          reply.header('ETag', etag);
+          if (ifNoneMatchSatisfied(request.headers['if-none-match'], etag)) {
+            return reply.code(304).send();
+          }
+        }
+        reply.headers(rfsMetaHeaders(resolved));
+        const bytes = Buffer.from(resolved.markdown, 'utf8');
+        return reply
+          .header('Content-Type', 'text/markdown; charset=utf-8')
+          .header('Content-Length', String(bytes.byteLength))
+          .send(bytes);
+      };
 
-      const lookup = await lookupNodeByPath(canvasId, physicalRel);
-
-      // Node files carry a revision ETag (hash of authored content) so an
-      // agent can conditional-GET: an unchanged node returns `304` and the
-      // agent reuses its cached copy instead of re-reading. Non-node files
-      // Non-node files have no node revision and are served
-      // unconditionally.
-      if (lookup?.meta.rev) {
-        const etag = `"${lookup.meta.rev}"`;
-        reply.header('ETag', etag);
-        if (ifNoneMatchSatisfied(request.headers['if-none-match'], etag)) {
-          return reply.code(304).send();
+      const handle = space(canvasId);
+      switch (target.kind) {
+        case 'id-or-artifact': {
+          const node = await resolveRfsNodeById(canvasId, target.value);
+          if (node) return sendResolvedNode(node);
+          if (await sendBlob(request, reply, handle.artifacts, target.value)) {
+            return reply;
+          }
+          return reply
+            .code(404)
+            .send(rfsError(`No node or artifact at "${requestRel}".`));
+        }
+        case 'artifact': {
+          if (await sendBlob(request, reply, handle.artifacts, target.key)) {
+            return reply;
+          }
+          return reply.code(404).send(rfsError(`No file at "${requestRel}".`));
+        }
+        case 'upload': {
+          if (await sendBlob(request, reply, handle.uploads, target.name)) {
+            return reply;
+          }
+          return reply.code(404).send(rfsError(`No file at "${requestRel}".`));
+        }
+        case 'legacy-node': {
+          const node = await resolveRfsNodeByFilename(
+            canvasId,
+            target.filename,
+          );
+          if (node) return sendResolvedNode(node);
+          return reply.code(404).send(rfsError(`No file at "${requestRel}".`));
         }
       }
-
-      // Raw bytes (+ X-Huabu-* headers for node files).
-      if (lookup) reply.headers(rfsMetaHeaders(lookup));
-      return reply
-        .header('Content-Type', mimeForPath(absPath))
-        .send(createReadStream(absPath));
     },
   );
 
   // ── POST /:canvasId/upload/* ──
-  app.post<{ Params: { canvasId: string; '*': string } }>(
+  app.post<{ Params: RfsUploadParams }>(
     '/:canvasId/upload/*',
     async (request, reply) => {
-      const { canvasId } = request.params;
-      const filename = request.params['*'];
-      if (!filename) {
+      const params = rfsUploadParamsSchema.safeParse(request.params);
+      if (!params.success) {
         return reply
           .code(400)
-          .send(rfsError('An upload filename is required (upload/<file>).'));
-      }
-
-      let absPath: string;
-      try {
-        absPath = safeResolve(canvasId, path.join('.upload', filename));
-      } catch {
-        return reply
-          .code(400)
-          .send(rfsError(`Upload path "${filename}" is not allowed.`));
-      }
-
-      if (existsSync(absPath)) {
-        return reply
-          .code(409)
           .send(
             rfsError(
-              `A file already named "upload/${filename}" exists; ` +
-                `choose a different name (overwrite is not allowed).`,
+              'Invalid upload Space or filename (upload/<file>).',
+              'validation_failed',
             ),
           );
       }
-
+      const { canvasId, '*': filename } = params.data;
       const body = request.body;
       if (!Buffer.isBuffer(body)) {
         return reply
@@ -965,18 +1208,44 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
           .send(rfsError('Upload body must be the raw file bytes.'));
       }
 
-      try {
-        await mkdir(path.dirname(absPath), { recursive: true });
-        await writeFile(absPath, body);
-      } catch (err) {
-        request.log.error({ err, canvasId, filename }, 'rfs upload failed');
+      const base = parseUploadFilenameHint(filename);
+      if (!base) {
         return reply
-          .code(500)
-          .send(rfsError(`Failed to store "upload/${filename}".`));
+          .code(400)
+          .send(rfsError(`Upload path "${filename}" is not allowed.`));
+      }
+
+      const rawExt = path.extname(base).toLowerCase();
+      const ext = /^\.[a-z0-9]{1,16}$/.test(rawExt) ? rawExt : '';
+      const id = `${createId('artifact')}${ext}`;
+
+      let missingSpace = false;
+      try {
+        await withLegacyUploadMutation(canvasId, async () => {
+          const handle = space(canvasId);
+          if (!(await handle.read())) {
+            missingSpace = true;
+            return;
+          }
+          await handle.artifacts.put(id, body);
+        });
+      } catch (err) {
+        if (err instanceof BlobNameError) {
+          return reply
+            .code(400)
+            .send(rfsError(`Upload path "${filename}" is not allowed.`));
+        }
+        request.log.error({ err, canvasId, filename }, 'rfs upload failed');
+        return reply.code(500).send(rfsError(`Failed to store "${filename}".`));
+      }
+      if (missingSpace) {
+        return reply
+          .code(404)
+          .send(rfsError('Canvas not found.', 'canvas_not_found'));
       }
 
       const payload: RfsUploadResponse = {
-        path: `upload/${filename}`,
+        id,
         size: body.length,
       };
       return reply.code(201).send(payload);
@@ -984,33 +1253,66 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
   );
 
   // ── DELETE /:canvasId/upload/* ──
-  app.delete<{ Params: { canvasId: string; '*': string } }>(
+  app.delete<{ Params: RfsUploadParams }>(
     '/:canvasId/upload/*',
     async (request, reply) => {
-      const { canvasId } = request.params;
-      const filename = request.params['*'];
-      if (!filename) {
+      const params = rfsUploadParamsSchema.safeParse(request.params);
+      if (!params.success) {
         return reply
           .code(400)
-          .send(rfsError('An upload filename is required (upload/<file>).'));
+          .send(
+            rfsError(
+              'Invalid upload Space or filename (upload/<file>).',
+              'validation_failed',
+            ),
+          );
       }
-
-      let absPath: string;
+      const { canvasId, '*': filename } = params.data;
       try {
-        absPath = safeResolve(canvasId, path.join('.upload', filename));
-      } catch {
+        return await withLegacyUploadMutation(canvasId, async () => {
+          if (!storageServes('builtin-file-tools')) {
+            try {
+              safeJoin('/upload', filename);
+            } catch {
+              return reply
+                .code(400)
+                .send(rfsError(`Upload path "${filename}" is not allowed.`));
+            }
+            if (!(await space(canvasId).read())) {
+              return reply
+                .code(404)
+                .send(rfsError('Canvas not found.', 'canvas_not_found'));
+            }
+            return reply
+              .code(404)
+              .send(rfsError(`No staged file at "upload/${filename}".`));
+          }
+          const uploadRoot = safeResolve(canvasId, '.upload');
+          let absPath: string;
+          try {
+            absPath = safeJoin(uploadRoot, filename);
+          } catch {
+            return reply
+              .code(400)
+              .send(rfsError(`Upload path "${filename}" is not allowed.`));
+          }
+          if (!existsSync(absPath)) {
+            return reply
+              .code(404)
+              .send(rfsError(`No staged file at "upload/${filename}".`));
+          }
+          await rm(absPath, { force: true });
+          return reply.code(204).send();
+        });
+      } catch (error) {
+        request.log.error(
+          { err: error, canvasId, filename },
+          'rfs upload deletion failed',
+        );
         return reply
-          .code(400)
-          .send(rfsError(`Upload path "${filename}" is not allowed.`));
+          .code(500)
+          .send(rfsError(`Failed to delete "upload/${filename}".`));
       }
-
-      if (!existsSync(absPath)) {
-        return reply
-          .code(404)
-          .send(rfsError(`No staged file at "upload/${filename}".`));
-      }
-      await rm(absPath, { force: true });
-      return reply.code(204).send();
     },
   );
 
@@ -1020,7 +1322,7 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
     async (_request, reply) => {
       try {
         const response: RfsAgentProfilesResponse = {
-          profiles: listAvailableAgentProfiles(),
+          profiles: await listAvailableAgentProfiles(),
         };
         return reply.send(response);
       } catch (error) {
@@ -1694,7 +1996,16 @@ async function streamAgent(
   const onClose = (): void => {
     clientConnected = false;
   };
+  raw.once('close', onClose);
   request.raw.socket?.once('close', onClose);
+
+  const acceptanceForwarded = invocation.acceptance.then((acceptance) => {
+    if (acceptance && clientConnected && eventMode === 'all') {
+      raw.write(
+        `event: ${AGENT_HOST_SSE_EVENTS.Accepted}\ndata: ${JSON.stringify(acceptance)}\n\n`,
+      );
+    }
+  });
 
   try {
     for await (const event of invocation.events) {
@@ -1720,6 +2031,8 @@ async function streamAgent(
         );
       }
     }
+    // A pre-start failure can settle acceptance only after its error is drained.
+    await acceptanceForwarded;
     if (clientConnected && eventMode === 'all' && outcome !== 'error') {
       raw.write(`event: ${AGENT_SSE_EVENTS.End}\ndata: {}\n\n`);
     }
@@ -1735,6 +2048,7 @@ async function streamAgent(
     }
   } finally {
     clearInterval(heartbeat);
+    raw.removeListener('close', onClose);
     request.raw.socket?.removeListener('close', onClose);
     if (clientConnected) raw.end();
     if (debug) {

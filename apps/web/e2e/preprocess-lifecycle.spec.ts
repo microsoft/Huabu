@@ -74,7 +74,7 @@ test.beforeEach(async ({ page, context }, testInfo) => {
       response.status() === 503 &&
       injectedFailures.get(page)?.has(response.request())
     ) {
-      expectedDiagnostics.get(page)?.push(`Injected 503 PUT ${response.url()}`);
+      expectedDiagnostics.get(page)?.push(`Injected 503 ${response.url()}`);
       return;
     }
     if (response.status() >= 400)
@@ -257,26 +257,31 @@ test('Note close settles, typing invalidates a delayed result, and later settle 
   expect(await body(page, nodeId)).toContain('Lifecycle input B');
 });
 
-test('new Note settle during restored content PUT waits and resumes with latest body', async ({
+test('new Note settle while the restore is being sent waits and resumes with latest body', async ({
   page,
 }) => {
   const { note, nodeId } = await noteFixture(page);
   await remove(page, note);
   await quiet(page);
-  const contentWrites: Route[] = [];
-  await page.route(`**/nodes/${nodeId}/content`, async (route) => {
-    if (route.request().method() === 'PUT' && contentWrites.length === 0)
-      contentWrites.push(route);
+  // The undo brings the note back, body included, in one execute request.
+  const restores: Route[] = [];
+  await page.route('**/api/canvas/*/execute', async (route) => {
+    if (route.request().method() === 'POST' && restores.length === 0)
+      restores.push(route);
     else await route.continue();
   });
   const held = await holdPreprocessing(page, nodeId);
   await page.keyboard.press('ControlOrMeta+z');
   await expect(note).toBeVisible();
-  await expect.poll(() => contentWrites.length).toBe(1);
+  await expect.poll(() => restores.length).toBe(1);
+  expect(JSON.stringify(restores[0].request().postDataJSON())).toContain(
+    'RESTORE_NODES',
+  );
   await editNote(page, note, 'Edited while restore is saving');
   await expect(pending(note)).toBeVisible();
+  // The server has no such node yet: nothing is preprocessed for it.
   await observeNoNewRequests(() => held.length, 0);
-  await contentWrites[0].continue();
+  await restores[0].continue();
   await expect.poll(() => held.length).toBe(1);
   expect(held[0].request().postDataJSON().snapshot.content).toContain(
     'Edited while restore is saving',
@@ -291,7 +296,7 @@ test('new Note settle during restored content PUT waits and resumes with latest 
   );
 });
 
-test('failed restored PUT retains fresh work until the user clicks Retry', async ({
+test('a failing restore retains fresh work until the restore is sent', async ({
   page,
 }, testInfo) => {
   const { note, nodeId } = await noteFixture(page);
@@ -300,8 +305,8 @@ test('failed restored PUT retains fresh work until the user clicks Retry', async
   let failWrites = true;
   let failedWrites = 0;
   let successfulWrites = 0;
-  await page.route(`**/nodes/${nodeId}/content`, async (route) => {
-    if (route.request().method() !== 'PUT') {
+  await page.route('**/api/canvas/*/execute', async (route) => {
+    if (route.request().method() !== 'POST') {
       await route.continue();
       return;
     }
@@ -310,7 +315,7 @@ test('failed restored PUT retains fresh work until the user clicks Retry', async
       failedWrites += 1;
       await route.fulfill({
         status: 503,
-        json: { error: 'Acceptance: restored content temporarily unavailable' },
+        json: { error: 'Acceptance: restore temporarily unavailable' },
       });
     } else {
       const response = await route.fetch();
@@ -323,29 +328,33 @@ test('failed restored PUT retains fresh work until the user clicks Retry', async
   await page.keyboard.press('ControlOrMeta+z');
   await expect(note).toBeVisible();
   await expect.poll(() => failedWrites).toBeGreaterThan(0);
-  const retry = page.getByRole('button', { name: 'Retry', exact: true });
-  await expect(retry).toBeVisible();
+  // The page says so and keeps trying on its own; there is nothing to click.
+  await expect(
+    page.getByText('Your changes are not synced yet. Trying again…'),
+  ).toBeVisible();
   await editNote(page, note, 'Latest body retained through save failure');
-  await quiet(page);
   await expect(pending(note)).toBeVisible();
+  // Neither the body nor the preprocessing is sent for a node the server
+  // does not have.
+  await observeNoNewRequests(() => held.length, 0);
   expect(held).toHaveLength(0);
   expect(successfulWrites).toBe(0);
   await page.screenshot({
-    path: testInfo.outputPath('blocked-before-retry.png'),
+    path: testInfo.outputPath('blocked-before-restore.png'),
   });
   failWrites = false;
-  // Removing the fault alone must not release demand; success is required.
-  await observeNoNewRequests(() => held.length, 0);
-  expect(successfulWrites).toBe(0);
-  await retry.click();
-  await expect.poll(() => successfulWrites).toBeGreaterThan(0);
+  await expect
+    .poll(() => successfulWrites, { timeout: 20_000 })
+    .toBeGreaterThan(0);
   await expect.poll(() => held.length).toBe(1);
   expect(held[0].request().postDataJSON().snapshot.content).toContain(
     'Latest body retained through save failure',
   );
   await succeed(held[0], 'Retry recovered result');
   await expect(pending(note)).toHaveCount(0);
-  await expect(retry).toHaveCount(0);
+  await expect(
+    page.getByText('Your changes are not synced yet. Trying again…'),
+  ).toHaveCount(0);
   await quiet(page);
   expect(held).toHaveLength(1);
   expect(await body(page, nodeId)).toContain(
@@ -432,7 +441,7 @@ test('Text creation and changed-content blur use the real preprocessing endpoint
   });
   const center = await paneCenter(page);
   await page
-    .locator('.react-flow__panel.bottom.center')
+    .locator('[data-canvas-main-toolbar]')
     .getByRole('button', { name: /^Text/ })
     .click();
   await expect(page.locator('.canvas-pending-text').first()).toBeVisible();

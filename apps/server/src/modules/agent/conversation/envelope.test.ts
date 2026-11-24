@@ -191,7 +191,7 @@ describe('buildChatEnvelope selection records', () => {
       originNodeIds: ['ink-1', 'ink-2'],
     });
     isInkOcrConfigured.mockReset();
-    isInkOcrConfigured.mockReturnValue(false);
+    isInkOcrConfigured.mockResolvedValue(false);
     recognizeInk.mockReset();
     readCanvas.mockReset();
     readCanvas.mockResolvedValue({
@@ -536,7 +536,7 @@ describe('buildChatEnvelope selection records', () => {
   });
 
   it('attaches OCR derived from the same captured nodes as the required visual', async () => {
-    isInkOcrConfigured.mockReturnValue(true);
+    isInkOcrConfigured.mockResolvedValue(true);
     recognizeInk.mockResolvedValue({
       provider: 'azure-vision',
       apiVersion: '2024-02-01',
@@ -570,7 +570,7 @@ describe('buildChatEnvelope selection records', () => {
   });
 
   it('continues image-only when optional OCR raster preparation fails', async () => {
-    isInkOcrConfigured.mockReturnValue(true);
+    isInkOcrConfigured.mockResolvedValue(true);
     rasterizeOcr.mockRejectedValue(new Error('private raster failure'));
 
     const envelope = await buildChatEnvelope({
@@ -591,7 +591,7 @@ describe('buildChatEnvelope selection records', () => {
 
   it('propagates user cancellation instead of starting image-only execution', async () => {
     const controller = new AbortController();
-    isInkOcrConfigured.mockReturnValue(true);
+    isInkOcrConfigured.mockResolvedValue(true);
     recognizeInk.mockImplementation(async () => {
       controller.abort();
       return undefined;

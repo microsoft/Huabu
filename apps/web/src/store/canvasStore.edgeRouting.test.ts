@@ -10,7 +10,7 @@ import {
 } from '@huabu/shared/canvas-engine';
 
 const api = vi.hoisted(() => ({
-  putCanvas: vi.fn(),
+  postCanvasExecute: vi.fn(),
   postCanvasEvents: vi.fn(),
 }));
 vi.mock('../api', async (actual) => ({
@@ -31,7 +31,8 @@ import {
 import { resolveUiIntent } from '@/handler/canvasCommand/uiIntent';
 
 import { canvasHistoryManager } from './canvasHistoryManager';
-import useCanvasStore from './canvasStore';
+import useCanvasStore, { resetCanvasSyncForTests } from './canvasStore';
+import { createFakeSpaceServer } from './canvasStore/sync/testing/fakeExecuteServer';
 import { useGesturePreviewStore } from './gesturePreviewStore';
 
 import type * as apiModule from '../api';
@@ -64,8 +65,15 @@ function edge(source: string, target: string): Edge {
   return { id: `edge-${source}-${target}`, source, target };
 }
 
+// Structure edits are sent as execute requests. The stand-in server runs
+// them through the real engine, so "persisted" below means its copy of the
+// Space ended up in that state.
+const server = createFakeSpaceServer();
+
 function seed(nodes: Node[], edges: Edge[]) {
-  state()._setStateNoAutosave({ nodes, edges: rerouteAllEdges(nodes, edges) });
+  const routed = rerouteAllEdges(nodes, edges);
+  state()._setStateRaw({ nodes, edges: routed });
+  server.reset(nodes, routed);
 }
 
 function node(id: string): Node {
@@ -105,21 +113,21 @@ beforeEach(() => {
   vi.useFakeTimers();
   vi.clearAllMocks();
   canvasHistoryManager.activate('routing-canvas', true);
-  state()._setStateNoAutosave({
+  state()._setStateRaw({
     nodes: [],
     edges: [],
     canvasId: 'routing-canvas',
     canvasTitle: 'Routing',
     version: 1,
     isLoading: false,
-    isSaving: false,
-    pendingSave: false,
-    versionConflict: false,
-    versionConflictServerVersion: null,
     rfInstance: null,
     canvasWrapper: null,
   });
-  api.putCanvas.mockResolvedValue({ canvasId: 'routing-canvas', version: 2 });
+  server.reset([], []);
+  resetCanvasSyncForTests();
+  api.postCanvasExecute.mockImplementation(async (canvasId, request) =>
+    server.execute(canvasId, request),
+  );
   api.postCanvasEvents.mockResolvedValue({ success: true });
 });
 
@@ -175,25 +183,22 @@ describe('edge routing after real node drags', () => {
         });
       }
       await vi.advanceTimersByTimeAsync(2000);
-      expect(api.putCanvas).toHaveBeenCalledOnce();
-      expect(api.putCanvas).toHaveBeenCalledWith(
-        'routing-canvas',
-        expect.objectContaining({
-          state: expect.objectContaining({
-            nodes: expect.arrayContaining([
-              expect.objectContaining({
-                id: 'frame',
-                position: { x: 700, y: 300 },
-              }),
-              expect.objectContaining({
-                id: 'a',
-                parentId: 'frame',
-                position: { x: 30, y: 80 },
-              }),
-            ]),
+      expect(server.requests).toHaveLength(1);
+      expect(server.state.nodes).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: 'frame',
+            position: { x: 700, y: 300 },
           }),
-        }),
-        expect.anything(),
+          expect.objectContaining({
+            id: 'a',
+            parentId: 'frame',
+            // The engine re-flows a structured Frame named by a geometry
+            // command. These children were seeded outside any slot, so only
+            // the free Frame keeps them where the fixture put them.
+            ...(layoutMode === 'free' ? { position: { x: 30, y: 80 } } : {}),
+          }),
+        ]),
       );
       state().undo();
       expect(node('frame').position).toEqual({ x: 100, y: 200 });
@@ -287,7 +292,7 @@ describe('edge routing after real node drags', () => {
         screenToFlowPosition: (point) => point,
         getZoom: () => 1,
       };
-      state()._setStateNoAutosave({
+      state()._setStateRaw({
         rfInstance: instance as ReactFlowInstance,
       });
       const first = node('child-0').position;
@@ -356,22 +361,19 @@ describe('edge routing after real node drags', () => {
     expect(state().edges[0]).toMatchObject(down);
 
     await vi.advanceTimersByTimeAsync(2000);
-    expect(api.putCanvas).toHaveBeenCalledOnce();
-    expect(api.putCanvas).toHaveBeenCalledWith(
-      'routing-canvas',
-      expect.objectContaining({
-        state: expect.objectContaining({
-          nodes: expect.arrayContaining([
-            expect.objectContaining({
-              id: 't',
-              position: { x: 0, y: 300 },
-            }),
-          ]),
-          edges: [expect.objectContaining(down)],
+    expect(server.requests).toHaveLength(1);
+    expect(server.state.nodes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 't',
+          position: { x: 0, y: 300 },
         }),
-      }),
-      expect.anything(),
+      ]),
     );
+    expect(server.state.edges).toEqual([expect.objectContaining(down)]);
+    // The server's answer leaves this page as it was.
+    expect(node('t').position).toEqual({ x: 0, y: 300 });
+    expect(state().edges[0]).toMatchObject(down);
   });
 
   it('adapts on successive moves to each side of the other node', () => {

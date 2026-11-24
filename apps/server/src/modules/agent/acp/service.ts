@@ -22,19 +22,22 @@
 
 import { randomUUID } from 'node:crypto';
 
-import { AcpServiceError } from '@agenetes/acp-driver';
+import {
+  AcpServiceError,
+  resolveInitialPreferenceSelections,
+} from '@agenetes/acp-driver';
 import { getAgentProfileRegistry } from '@agenetes/agentlet-host';
 
 import { isCanvasIntent } from '@huabu/shared';
 import { chatInputText } from '@huabu/shared';
 
 import { renderExternalAgentInputs } from './preprocessor.js';
-import { getProfileSessionPreferences } from './profile-session-preferences.js';
+import { readProfileObservation } from './profile-capabilities.js';
+import { profileSessionPreferences } from './profile-session-preferences.js';
 import {
+  profileSnapshot,
   recipeFromProfileSnapshot,
-  resolveProfileSnapshot,
 } from './profile-snapshot.js';
-import { buildReachbackEnv } from './reachback-env.js';
 import { renderExternalAgentSystemPreamble } from '../../../prompt/external-agent/system-preamble.js';
 import { canvasAcpNamespace } from '../../workspace/paths.js';
 import {
@@ -56,6 +59,7 @@ import type {
   AgentLaunchOverrides,
   AgentStreamEvent,
   AgentTurnAccepted,
+  AgentInitialPreferences,
 } from '@huabu/shared';
 import type { FastifyBaseLogger } from 'fastify';
 
@@ -148,12 +152,13 @@ export interface RunAcpAgentOptions {
  * host-side Profile projection; keeping it in the host composition layer lets the session-lifecycle helper stay
  * profile-store-free and its create-time spec fully serializable.
  */
-export function resolveBindingRecipe(
+export async function resolveBindingRecipe(
   profileId: string,
-): AcpBindingRecipe | null {
-  const profile = resolveProfileSnapshot(profileId);
-  const alias = getAgentProfileRegistry()?.getProfile(profileId)?.alias;
-  return profile && alias ? recipeFromProfileSnapshot(profile, alias) : null;
+): Promise<AcpBindingRecipe | null> {
+  const profile = await getAgentProfileRegistry()?.getProfile(profileId);
+  return profile?.alias
+    ? recipeFromProfileSnapshot(profileSnapshot(profile), profile.alias)
+    : null;
 }
 
 export { resolveProfileSnapshot } from './profile-snapshot.js';
@@ -174,17 +179,24 @@ export interface BuildAcpWorkloadSpecOptions {
   threadId: string;
   canvasId?: string;
   cwd?: string;
+  /**
+   * What the conversation was showing when it was first realized. Absent for
+   * callers with no interface, which start from the Profile's preferences.
+   */
+  initialPreferences?: AgentInitialPreferences;
   launchOverrides?: AgentLaunchOverrides;
   spacePrompt?: string;
 }
 
-export function buildAcpWorkloadSpec(
+export async function buildAcpWorkloadSpec(
   opts: BuildAcpWorkloadSpecOptions,
-): AcpWorkloadSpec {
+): Promise<AcpWorkloadSpec> {
   const { binding, threadId } = opts;
   const canvasId = opts.canvasId ?? '';
-  const profile = resolveProfileSnapshot(binding.profileId);
-  if (!profile) {
+  // One registry read serves the snapshot, preferences, and observation.
+  const stored = await getAgentProfileRegistry()?.getProfile(binding.profileId);
+  const profile = stored ? profileSnapshot(stored) : null;
+  if (!stored || !profile) {
     throw new AcpServiceError(
       'profile_missing',
       `Agent Profile '${binding.profileId}' is unavailable.`,
@@ -201,6 +213,18 @@ export function buildAcpWorkloadSpec(
   cwd = workingDirPath ?? cwd;
   recipe = applyWorkingDirectoryOverride(recipe, workingDirPath);
 
+  const initialPreferences =
+    opts.initialPreferences ?? profileSessionPreferences(stored);
+  // Resolved against the catalogue the user was shown, so the session starts
+  // on those values without waiting for the agent to advertise its own.
+  const observation = readProfileObservation(stored);
+  const initialSelections = observation
+    ? resolveInitialPreferenceSelections(initialPreferences, {
+        configOptions: observation.configOptions ?? [],
+        availableModels: observation.availableModels ?? [],
+      })
+    : undefined;
+
   return {
     threadId,
     kind: EXTERNAL_DRIVER_KIND,
@@ -214,14 +238,14 @@ export function buildAcpWorkloadSpec(
           ? [opts.launchOverrides.additionalInitialPreamble]
           : []),
       ],
-      initialPreferences: getProfileSessionPreferences(binding.profileId),
+      initialPreferences,
+      ...(initialSelections && { initialSelections }),
       profileExecutionRevision: profile?.executionRevision ?? 0,
       binding,
       agentletId,
       ...(cwd !== undefined && { cwd }),
       workingDirectoryOverride: workingDirPath ?? null,
       recipe,
-      env: buildReachbackEnv(threadId, canvasId),
     },
   };
 }

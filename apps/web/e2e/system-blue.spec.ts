@@ -3,7 +3,7 @@
 
 import { expect, test, type Locator } from '@playwright/test';
 
-import { openNewCanvas } from './helpers';
+import { openNewCanvas, personEdits } from './helpers';
 
 import type * as GesturePreviewModule from '../src/store/gesturePreviewStore';
 
@@ -136,7 +136,7 @@ test('a real Note preserves drop feedback and distinguishes editor selection mat
   expect(canvasId).toBeTruthy();
   const response = await page.request.post(`/api/canvas/${canvasId}/execute`, {
     data: {
-      commands: [
+      edits: personEdits([
         {
           type: 'CREATE_NODES',
           nodes: [
@@ -153,8 +153,7 @@ test('a real Note preserves drop feedback and distinguishes editor selection mat
             },
           ],
         },
-      ],
-      originator: { source: 'agent', threadId: 'e2e-system-blue' },
+      ]),
     },
   });
   expect(response.ok(), await response.text()).toBe(true);
@@ -237,7 +236,7 @@ test('a real Note preserves drop feedback and distinguishes editor selection mat
   }
 });
 
-test('composer and panel drag feedback reuse opaque system blues without changing geometry', async ({
+test('composer focus uses opaque system blues and panel drag feedback its translucent tint, without changing geometry', async ({
   page,
 }) => {
   await page.goto('/playground/chat-performance?messages=0');
@@ -278,13 +277,38 @@ test('composer and panel drag feedback reuse opaque system blues without changin
     '[role="separator"][aria-orientation="vertical"]:visible',
   );
   await expect(handles).toHaveCount(2);
-  for (const [theme, palette] of Object.entries(palettes)) {
+  for (const theme of Object.keys(palettes)) {
     await page.evaluate((theme) => {
       document.documentElement.classList.toggle('dark', theme === 'dark');
     }, theme);
+    // The owner's choice for these handles: the translucent `info` tint they
+    // have long had, 30% on hover and 50% while dragging. DESIGN.md records
+    // it as the one exception to the opaque roles. The left handle paints
+    // itself; the right one is a wider hit target around a 1px indicator
+    // that is the divider at rest.
+    const tints = await page.evaluate(() => {
+      const probe = document.createElement('div');
+      document.body.append(probe);
+      const read = (value: string) => {
+        probe.style.backgroundColor = value;
+        return getComputedStyle(probe).backgroundColor;
+      };
+      const tint = (percent: number) =>
+        read(`color-mix(in oklab, var(--color-info) ${percent}%, transparent)`);
+      const colors = {
+        hover: tint(30),
+        drag: tint(50),
+        divider: read('var(--edge-default)'),
+      };
+      probe.remove();
+      return colors;
+    });
     for (const [index, handle] of (await handles.all()).entries()) {
+      const indicator = handle.locator('> div');
+      const hasIndicator = (await indicator.count()) > 0;
+      const paint = hasIndicator ? indicator : handle;
       await handle.hover();
-      await expect(handle).toHaveCSS('background-color', palette.light);
+      await expect(paint).toHaveCSS('background-color', tints.hover);
       const bounds = await handle.boundingBox();
       if (!bounds) throw new Error('Missing panel drag handle');
       await page.mouse.down();
@@ -292,13 +316,16 @@ test('composer and panel drag feedback reuse opaque system blues without changin
         bounds.x + bounds.width / 2 + 16,
         bounds.y + bounds.height / 2,
       );
-      await expect(handle).toHaveCSS('background-color', palette.light);
+      await expect(paint).toHaveCSS('background-color', tints.drag);
       await page.screenshot({
         path: test.info().outputPath(`panel-drag-${theme}-${index}.png`),
       });
       await page.mouse.up();
       await page.mouse.move(640, 400);
-      await expect(handle).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+      await expect(paint).toHaveCSS(
+        'background-color',
+        hasIndicator ? tints.divider : 'rgba(0, 0, 0, 0)',
+      );
     }
   }
 });
@@ -312,7 +339,7 @@ test('real Canvas overlays use shared transparent fills in both themes', async (
   expect(canvasId).toBeTruthy();
   const response = await page.request.post(`/api/canvas/${canvasId}/execute`, {
     data: {
-      commands: [
+      edits: personEdits([
         {
           type: 'CREATE_NODES',
           nodes: [
@@ -337,8 +364,7 @@ test('real Canvas overlays use shared transparent fills in both themes', async (
             },
           ],
         },
-      ],
-      originator: { source: 'agent', threadId: 'e2e-blue-overlays' },
+      ]),
     },
   });
   expect(response.ok(), await response.text()).toBe(true);

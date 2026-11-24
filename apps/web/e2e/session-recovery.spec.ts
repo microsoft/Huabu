@@ -5,7 +5,7 @@ import { writeFile } from 'node:fs/promises';
 
 import { expect, test } from '@playwright/test';
 
-import { openNewCanvas } from './helpers';
+import { openNewCanvas, personEdits } from './helpers';
 
 import type * as CanvasModule from '../src/store/canvasStore';
 import type * as OidcModule from '../src/utils/oidcLogin';
@@ -410,7 +410,7 @@ test('keeps edits covered during discovery failure and saves them after cookie r
   const contentUrl = `/api/canvas/${canvasId}/nodes/node-recovery-note/content`;
   const created = await page.request.post(`/api/canvas/${canvasId}/execute`, {
     data: {
-      commands: [
+      edits: personEdits([
         {
           type: 'CREATE_NODES',
           nodes: [
@@ -422,8 +422,7 @@ test('keeps edits covered during discovery failure and saves them after cookie r
             },
           ],
         },
-      ],
-      originator: { source: 'agent', threadId: 'e2e-session-recovery' },
+      ]),
     },
   });
   expect(created.ok(), await created.text()).toBe(true);
@@ -443,13 +442,13 @@ test('keeps edits covered during discovery failure and saves them after cookie r
   const saved = await page.evaluate(async () => {
     const canvasPath = '/src/store/canvasStore.ts';
     const clientPath = '/src/api/_client.ts';
-    const { default: canvas, savedBeforeSignOut } = (await import(
+    const { default: canvas, savedBeforeLeaving } = (await import(
       canvasPath
     )) as typeof CanvasModule;
     canvas.getState().updateNodeData('node-recovery-note', {
       content: 'Retained while the session was expired',
     });
-    const saved = await savedBeforeSignOut();
+    const saved = await savedBeforeLeaving();
     const { AUTH_REQUIRED_EVENT } = await import(clientPath);
     window.dispatchEvent(new Event(AUTH_REQUIRED_EVENT));
     return saved;

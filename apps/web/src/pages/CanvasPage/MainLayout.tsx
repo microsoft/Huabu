@@ -18,7 +18,6 @@ interface MainLayoutProps {
 interface LayoutInjectedProps {
   isCollapsed?: boolean;
   isContentMounted?: boolean;
-  isHostCollapsed?: boolean;
   isFullscreen?: boolean;
   compact?: boolean;
   vertical?: boolean;
@@ -113,6 +112,11 @@ export const MainLayout = ({
   }, []);
   const focusPanel = (event: React.PointerEvent<HTMLDivElement>) => {
     const target = event.target;
+    // React delivers presses from portalled surfaces (a popover opened from
+    // this panel) here too. They sit outside the panel, and focusing it would
+    // take focus from the field that owns them.
+    if (!(target instanceof Node) || !event.currentTarget.contains(target))
+      return;
     const control =
       target instanceof Element
         ? target.closest(
@@ -518,7 +522,6 @@ export const MainLayout = ({
                 rightPanel as React.ReactElement<LayoutInjectedProps>,
                 {
                   isCollapsed: false,
-                  isHostCollapsed: isRightCollapsed,
                   onToggle: toggleRightPanel,
                   isFullscreen: displayedPreviewFullscreen,
                   onToggleFullscreen: handleTogglePreviewFullscreen,

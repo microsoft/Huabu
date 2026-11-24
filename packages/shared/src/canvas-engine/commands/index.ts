@@ -11,6 +11,7 @@
 
 import alignNodes from './alignNodes.js';
 import applyMeasuredHeight from './applyMeasuredHeight.js';
+import applyMeasuredSize from './applyMeasuredSize.js';
 import changeNodeType from './changeNodeType.js';
 import connectNodes from './connectNodes.js';
 import createNodes from './createNodes.js';
@@ -21,6 +22,7 @@ import distributeNodes from './distributeNodes.js';
 import initializePdfNote from './initializePdfNote.js';
 import mergeNodeData from './mergeNodeData.js';
 import reorderNodes from './reorderNodes.js';
+import restoreNodes from './restoreNodes.js';
 import setEdgeStyle from './setEdgeStyle.js';
 import setFrameLayout from './setFrameLayout.js';
 import setNodeGeometry from './setNodeGeometry.js';
@@ -54,6 +56,7 @@ export const HANDLERS: HandlerMap = {
   SET_NODE_GEOMETRY: setNodeGeometry.handler,
   SET_NODE_SELECTION: setNodeSelection.handler,
   APPLY_MEASURED_HEIGHT: applyMeasuredHeight.handler,
+  APPLY_MEASURED_SIZE: applyMeasuredSize.handler,
   REORDER_NODES: reorderNodes.handler,
   SET_NODE_LOCKED: setNodeLocked.handler,
   CONNECT_NODES: connectNodes.handler,
@@ -63,6 +66,7 @@ export const HANDLERS: HandlerMap = {
   DISTRIBUTE_NODES: distributeNodes.handler,
   CHANGE_NODE_TYPE: changeNodeType.handler,
   SET_FRAME_LAYOUT: setFrameLayout.handler,
+  RESTORE_NODES: restoreNodes.handler,
 };
 
 // ---------------------------------------------------------------------------
@@ -79,6 +83,7 @@ export const COMMAND_META: Record<CanvasCommandType, CommandMeta> = {
   SET_NODE_GEOMETRY: setNodeGeometry.meta,
   SET_NODE_SELECTION: setNodeSelection.meta,
   APPLY_MEASURED_HEIGHT: applyMeasuredHeight.meta,
+  APPLY_MEASURED_SIZE: applyMeasuredSize.meta,
   REORDER_NODES: reorderNodes.meta,
   SET_NODE_LOCKED: setNodeLocked.meta,
   CONNECT_NODES: connectNodes.meta,
@@ -88,6 +93,7 @@ export const COMMAND_META: Record<CanvasCommandType, CommandMeta> = {
   DISTRIBUTE_NODES: distributeNodes.meta,
   CHANGE_NODE_TYPE: changeNodeType.meta,
   SET_FRAME_LAYOUT: setFrameLayout.meta,
+  RESTORE_NODES: restoreNodes.meta,
 };
 
 // Re-export types for consumers.

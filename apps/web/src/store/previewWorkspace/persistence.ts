@@ -43,6 +43,8 @@ export const MAX_PERSISTED_CANVASES = 50;
 type PersistedWorkspace = {
   version: number;
   workspace: CanvasPreviewWorkspace;
+  /** Whether this Canvas was last left with the panel closed. */
+  collapsed?: boolean;
 };
 
 function readRaw(key: string): string | null {
@@ -111,6 +113,21 @@ function parseTarget(value: unknown, canvasId: string): PreviewTarget | null {
     candidate.threadId.length > 0
   ) {
     return { kind: 'chat', canvasId, threadId: candidate.threadId };
+  }
+  if (
+    candidate.kind === 'file' &&
+    typeof candidate.agentletId === 'string' &&
+    typeof candidate.path === 'string'
+  ) {
+    return normalizePreviewTarget({
+      kind: 'file',
+      canvasId,
+      agentletId: candidate.agentletId,
+      path: candidate.path,
+      ...(typeof candidate.deviceName === 'string'
+        ? { deviceName: candidate.deviceName }
+        : {}),
+    });
   }
   if (candidate.kind === 'url' && typeof candidate.url === 'string') {
     return normalizePreviewTarget({
@@ -288,15 +305,36 @@ export function readWorkspace(canvasId: string): CanvasPreviewWorkspace | null {
   return parseWorkspace(readRaw(workspaceStorageKey(canvasId)), canvasId);
 }
 
+/**
+ * Whether the panel was closed when this Canvas was last shown, or
+ * `undefined` for a Canvas that has never recorded it.
+ */
+export function readWorkspaceCollapsed(canvasId: string): boolean | undefined {
+  if (!canvasId) return undefined;
+  try {
+    const parsed = JSON.parse(
+      readRaw(workspaceStorageKey(canvasId)) ?? 'null',
+    ) as Partial<PersistedWorkspace> | null;
+    return parsed?.version === WORKSPACE_VERSION &&
+      typeof parsed.collapsed === 'boolean'
+      ? parsed.collapsed
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export function writeWorkspace(
   canvasId: string,
   workspace: CanvasPreviewWorkspace,
+  collapsed?: boolean,
 ): void {
   if (!canvasId) return;
 
   const payload: PersistedWorkspace = {
     version: WORKSPACE_VERSION,
     workspace,
+    ...(collapsed === undefined ? {} : { collapsed }),
   };
   writeRaw(workspaceStorageKey(canvasId), JSON.stringify(payload));
   touchIndex(canvasId);

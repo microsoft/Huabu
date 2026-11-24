@@ -22,6 +22,7 @@ import { join } from 'node:path';
 import fastify from 'fastify';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { editsPerCommand } from '@huabu/shared';
 import {
   nodeRevisionOf,
   extractCanvasChanges,
@@ -30,6 +31,13 @@ import {
 import { executeOnServer } from './canvas-executor.js';
 import { subscribeCanvasUpdates } from './canvas-sync.js';
 import canvasRoutes from './canvas.route.js';
+import syncRoutes from './sync.route.js';
+import {
+  AGENT_CREDENTIAL,
+  registerTestAgentCredential,
+} from '../../test-support/agent-credential.js';
+import { setRequestIdentity } from '../identity/request.js';
+import { UNRESTRICTED_ACCESS } from '../identity/service.js';
 import {
   getCanvasStore,
   getStorage,
@@ -46,9 +54,23 @@ let tmp: string;
 
 const REV_EMPTY = nodeRevisionOf({});
 
+/**
+ * The command results of a page `execute` response, flat. These requests
+ * send one edit per command, so entry i answers command i.
+ */
+function resultsOf(body: {
+  edits: Array<{
+    results: Array<{ applied: boolean; reason?: string }>;
+  }>;
+}): Array<{ applied: boolean; reason?: string }> {
+  return body.edits.flatMap((edit) => edit.results);
+}
+
 async function buildApp() {
   const app = fastify();
+  registerTestAgentCredential(app);
   await app.register(canvasRoutes, { prefix: '/canvas' });
+  await app.register(syncRoutes, { prefix: '/canvas' });
   await app.ready();
   return app;
 }
@@ -93,6 +115,123 @@ afterEach(() => {
   rmSync(tmp, { recursive: true, force: true });
 });
 
+describe('content saved after a load', () => {
+  /** Add a second note to the seeded Space's record. */
+  function addNote(canvasId: string, nodeId: string): void {
+    const store = getCanvasStore(canvasId);
+    const record = store.read();
+    if (!record) throw new Error('Space is missing');
+    store.write({
+      ...record,
+      state: {
+        ...record.state,
+        nodes: [
+          ...record.state.nodes,
+          {
+            id: nodeId,
+            type: 'note',
+            position: { x: 0, y: 200 },
+            data: { label: nodeId },
+          },
+        ],
+      },
+    });
+  }
+
+  it('is named when asked from the position that load carried: a body, and a title alone', async () => {
+    const app = await buildApp();
+    try {
+      seedCanvas('c1', 'n1', 'Note');
+      addNote('c1', 'n2');
+      for (const nodeId of ['n1', 'n2'])
+        expect(
+          (
+            await putContent(app, 'c1', nodeId, {
+              nodeType: 'note',
+              content: `first ${nodeId}`,
+              expectRev: REV_EMPTY,
+            })
+          ).statusCode,
+        ).toBe(200);
+
+      // A page loads the Space. Its stream is not open yet.
+      const loaded = (
+        await app.inject({ method: 'GET', url: '/canvas/c1' })
+      ).json() as {
+        version: number;
+        contentPosition: { epoch: string; seq: number };
+      };
+      expect(loaded.contentPosition).toEqual({
+        epoch: expect.any(String),
+        seq: expect.any(Number),
+      });
+      const changesSince = async (position: { epoch: string; seq: number }) =>
+        (
+          await app.inject({
+            method: 'GET',
+            url: `/canvas/c1/content/changes?epoch=${encodeURIComponent(position.epoch)}&seq=${position.seq}`,
+          })
+        ).json() as {
+          position: { epoch: string; seq: number };
+          changedNodeIds?: string[];
+          reset?: boolean;
+        };
+
+      // Another page saves a body, and on the other node a title only.
+      // Neither changes the Space version.
+      const first = await app.inject({
+        method: 'GET',
+        url: '/canvas/c1/nodes/n1/content',
+      });
+      expect(
+        (
+          await putContent(app, 'c1', 'n1', {
+            nodeType: 'note',
+            content: 'saved in the gap',
+            expectRev: (first.json() as { rev: string }).rev,
+            pageId: 'another-page',
+          })
+        ).statusCode,
+      ).toBe(200);
+      const second = await app.inject({
+        method: 'GET',
+        url: '/canvas/c1/nodes/n2/content',
+      });
+      expect(
+        (
+          await putContent(app, 'c1', 'n2', {
+            nodeType: 'note',
+            label: 'Renamed in the gap',
+            labelSource: 'user',
+            expectRev: (second.json() as { rev: string }).rev,
+            pageId: 'another-page',
+          })
+        ).statusCode,
+      ).toBe(200);
+      expect(
+        (
+          (await app.inject({ method: 'GET', url: '/canvas/c1' })).json() as {
+            version: number;
+          }
+        ).version,
+      ).toBe(loaded.version);
+
+      const answer = await changesSince(loaded.contentPosition);
+      expect(answer.reset).toBeUndefined();
+      expect(answer.changedNodeIds).toEqual(
+        expect.arrayContaining(['n1', 'n2']),
+      );
+      // The answer's position is the one a load made now would carry.
+      const reloaded = (
+        await app.inject({ method: 'GET', url: '/canvas/c1' })
+      ).json() as { contentPosition: { epoch: string; seq: number } };
+      expect(answer.position).toEqual(reloaded.contentPosition);
+    } finally {
+      await app.close();
+    }
+  });
+});
+
 describe('PUT /nodes/:nodeId/content — content CAS', () => {
   it('rejects existing Note claims over HTTP but initializes a new hidden Note in one batch', async () => {
     seedCanvas('c1', 'node-existing', 'Independent');
@@ -106,31 +245,40 @@ describe('PUT /nodes/:nodeId/content — content CAS', () => {
         position: { x: 0, y: 0 },
         data: {},
       };
-      const claimed = await app.inject({
-        method: 'PUT',
-        url: '/canvas/c1',
-        payload: {
-          version: 1,
-          state: {
-            nodes: [
-              independent,
-              { ...pdf, data: { noteNodeId: 'node-existing' } },
-            ],
-            edges: [],
+      // A page adds nodes through `execute`; there is no whole-Space save.
+      const create = (data: Record<string, unknown>) =>
+        app.inject({
+          method: 'POST',
+          url: '/canvas/c1/execute',
+          payload: {
+            edits: editsPerCommand([
+              {
+                type: 'CREATE_NODES',
+                nodes: [
+                  {
+                    id: pdf.id,
+                    nodeType: 'pdf',
+                    position: pdf.position,
+                    data,
+                    selectOnCreate: false,
+                  },
+                ],
+              },
+            ]),
           },
-        },
-      });
-      expect(claimed.statusCode).toBe(400);
+        });
+      expect(independent).toMatchObject({ id: 'node-existing' });
+      const claimed = await create({ noteNodeId: 'node-existing' });
+      expect(claimed.statusCode).toBe(200);
+      expect(resultsOf(claimed.json())).toEqual([
+        expect.objectContaining({ applied: false, reason: 'invalid-target' }),
+      ]);
       expect(store.read()?.version).toBe(1);
-      const addedPdf = await app.inject({
-        method: 'PUT',
-        url: '/canvas/c1',
-        payload: {
-          version: 1,
-          state: { nodes: [independent, pdf], edges: [] },
-        },
-      });
+      const addedPdf = await create({});
       expect(addedPdf.statusCode).toBe(200);
+      expect(resultsOf(addedPdf.json())).toEqual([
+        expect.objectContaining({ applied: true }),
+      ]);
       const patch = (id: string) => ({
         type: 'MERGE_NODE_DATA',
         patches: [{ nodeId: 'node-pdf', patch: { noteNodeId: id } }],
@@ -138,21 +286,21 @@ describe('PUT /nodes/:nodeId/content — content CAS', () => {
       const rejected = await app.inject({
         method: 'POST',
         url: '/canvas/c1/execute',
+        headers: AGENT_CREDENTIAL,
         payload: {
-          originator: { source: 'agent' },
-          commands: [patch('node-existing')],
+          edits: editsPerCommand([patch('node-existing')]),
         },
       });
       expect(rejected.statusCode).toBe(200);
-      expect(rejected.json().results).toEqual([
+      expect(resultsOf(rejected.json())).toEqual([
         expect.objectContaining({ applied: false, reason: 'invalid-target' }),
       ]);
       const initialized = await app.inject({
         method: 'POST',
         url: '/canvas/c1/execute',
+        headers: AGENT_CREDENTIAL,
         payload: {
-          originator: { source: 'agent' },
-          commands: [
+          edits: editsPerCommand([
             {
               type: 'CREATE_NODES',
               nodes: [
@@ -165,11 +313,11 @@ describe('PUT /nodes/:nodeId/content — content CAS', () => {
               ],
             },
             patch('node-new'),
-          ],
+          ]),
         },
       });
       expect(initialized.statusCode).toBe(200);
-      expect(initialized.json().results).toEqual([
+      expect(resultsOf(initialized.json())).toEqual([
         expect.objectContaining({ applied: true }),
         expect.objectContaining({ applied: true }),
       ]);
@@ -294,97 +442,142 @@ describe('PUT /nodes/:nodeId/content — content CAS', () => {
 
   it('round-trips an owned Note independently and validates structural ownership', async () => {
     seedCanvas('c1', 'pdf', 'Paper');
+    {
+      // The seeded node is the PDF; another Note stands on its own.
+      const store = getCanvasStore('c1');
+      const record = store.read();
+      if (!record) throw new Error('Missing seeded Space');
+      store.write({
+        ...record,
+        state: {
+          ...record.state,
+          nodes: [
+            { id: 'pdf', type: 'pdf', position: { x: 0, y: 0 }, data: {} },
+            {
+              id: 'other-notes',
+              type: 'note',
+              position: { x: 0, y: 0 },
+              data: {},
+            },
+          ],
+        },
+      });
+    }
     const app = await buildApp();
     try {
-      const before = (
-        await app.inject({ method: 'GET', url: '/canvas/c1' })
-      ).json<GetCanvasResponse>();
-      const nodes = [
-        {
-          id: 'pdf',
-          type: 'pdf',
-          position: { x: 0, y: 0 },
-          data: { noteNodeId: 'notes' },
-        },
-        { id: 'notes', type: 'note', position: { x: 0, y: 0 }, data: {} },
-      ];
-      const linked = await app.inject({
-        method: 'PUT',
-        url: '/canvas/c1',
-        payload: { version: before.version, state: { nodes, edges: [] } },
+      // Every structure change is a page's `execute` batch; the whole-Space
+      // save these cases once went through no longer exists.
+      const execute = async (commands: unknown[]) => {
+        const response = await app.inject({
+          method: 'POST',
+          url: '/canvas/c1/execute',
+          payload: {
+            edits: editsPerCommand(commands),
+          },
+        });
+        expect(response.statusCode).toBe(200);
+        const body = response.json<{
+          toVersion: number;
+          fromVersion: number;
+          edits: Array<{
+            results: Array<{ applied: boolean; reason?: string }>;
+          }>;
+        }>();
+        return { ...body, results: resultsOf(body) };
+      };
+      const load = async () =>
+        (
+          await app.inject({ method: 'GET', url: '/canvas/c1' })
+        ).json<GetCanvasResponse>();
+      const link = (noteNodeId: string) => ({
+        type: 'MERGE_NODE_DATA',
+        patches: [{ nodeId: 'pdf', patch: { noteNodeId } }],
       });
-      expect(linked.statusCode).toBe(200);
+
+      const linked = await execute([
+        { type: 'INITIALIZE_PDF_NOTE', nodeId: 'pdf', noteId: 'notes' },
+      ]);
+      expect(linked.results).toEqual([
+        expect.objectContaining({ applied: true }),
+      ]);
+      const created = await load();
       const saved = await putContent(app, 'c1', 'notes', {
         nodeType: 'note',
         content: 'My independently stored notes',
         label: 'Reading notes',
-        expectRev: nodeRevisionOf({}),
+        expectRev: created.nodeContentRevisions?.notes,
       });
       expect(saved.statusCode).toBe(200);
-      const loaded = (
-        await app.inject({ method: 'GET', url: '/canvas/c1' })
-      ).json<GetCanvasResponse>();
+      const loaded = await load();
       expect(loaded.state).toMatchObject({
-        nodes: [
-          { id: 'pdf', data: { noteNodeId: 'notes' } },
-          {
+        nodes: expect.arrayContaining([
+          expect.objectContaining({
+            id: 'pdf',
+            data: expect.objectContaining({ noteNodeId: 'notes' }),
+          }),
+          expect.objectContaining({
             id: 'notes',
             hidden: true,
-            data: { content: 'My independently stored notes' },
-          },
-        ],
+            data: expect.objectContaining({
+              content: 'My independently stored notes',
+            }),
+          }),
+        ]),
       });
-      const invalid = await app.inject({
-        method: 'PUT',
-        url: '/canvas/c1',
-        payload: {
-          version: loaded.version,
-          state: {
-            nodes: [{ ...nodes[0], data: { noteNodeId: 'missing' } }, nodes[1]],
-            edges: [],
-          },
+
+      // A link to a Note that does not exist, a second Note for the same
+      // PDF, and dropping the link while the Note stays are all refused,
+      // and none of them changes the Space.
+      for (const command of [
+        link('missing'),
+        link('other-notes'),
+        {
+          type: 'MERGE_NODE_DATA',
+          patches: [{ nodeId: 'pdf', patch: {}, unset: ['noteNodeId'] }],
         },
-      });
-      expect(invalid.statusCode).toBe(400);
-      const another = { ...nodes[1], id: 'other-notes' };
-      for (const proposed of [
-        [{ ...nodes[0], data: { noteNodeId: another.id } }, nodes[1], another],
-        [{ ...nodes[0], data: { noteNodeId: another.id } }, another],
-        [{ ...nodes[0], data: { noteNodeId: null } }, nodes[1]],
-        [nodes[1]],
+        { type: 'SET_NODE_PARENT', nodeIds: ['notes'], parentId: 'pdf' },
       ]) {
-        const rejected = await app.inject({
-          method: 'PUT',
-          url: '/canvas/c1',
-          payload: {
-            version: loaded.version,
-            state: { nodes: proposed, edges: [] },
-          },
-        });
-        expect(rejected.statusCode).toBe(400);
+        const rejected = await execute([command]);
+        expect(rejected.results).toEqual([
+          expect.objectContaining({ applied: false, reason: 'invalid-target' }),
+        ]);
+        expect(rejected.toVersion).toBe(loaded.version);
       }
-      const unlinked = await app.inject({
-        method: 'PUT',
-        url: '/canvas/c1',
-        payload: {
-          version: loaded.version,
-          state: {
-            nodes: [{ ...nodes[0], data: { noteNodeId: null } }],
-            edges: [],
-          },
-        },
-      });
-      expect(unlinked.statusCode).toBe(200);
-      const withoutNote = (
-        await app.inject({ method: 'GET', url: '/canvas/c1' })
-      ).json<GetCanvasResponse>();
+      // Replacing the Note in one batch is refused where the new link is
+      // stated; the PDF never ends up owning somebody else's Note.
+      const replaced = await execute([
+        { type: 'DELETE_NODES', nodeIds: ['notes'] },
+        link('other-notes'),
+      ]);
+      expect(replaced.results).toEqual([
+        expect.objectContaining({ applied: true }),
+        expect.objectContaining({ applied: false, reason: 'invalid-target' }),
+      ]);
+
+      // Deleting the Note is how the link is dropped.
+      const withoutNote = await load();
       expect(withoutNote.state).toMatchObject({
         nodes: [
           {
             id: 'pdf',
             data: expect.not.objectContaining({ noteNodeId: 'notes' }),
           },
+          { id: 'other-notes' },
         ],
+      });
+
+      // And a PDF cannot be removed leaving its Note behind.
+      await execute([
+        { type: 'INITIALIZE_PDF_NOTE', nodeId: 'pdf', noteId: 'notes-again' },
+      ]);
+      const removed = await execute([
+        { type: 'DELETE_NODES', nodeIds: ['pdf'] },
+      ]);
+      expect(removed.results).toEqual([
+        expect.objectContaining({ applied: true }),
+      ]);
+      expect((await load()).state).toMatchObject({
+        nodes: [{ id: 'other-notes' }],
       });
     } finally {
       await app.close();
@@ -429,7 +622,7 @@ describe('PUT /nodes/:nodeId/content — content CAS', () => {
     }
   });
 
-  it('loads the canonical PDF revision without its extracted body and accepts repeated property saves', async () => {
+  it('loads the canonical PDF revision without its extracted body; property saves neither need nor move it', async () => {
     seedCanvas('c1', 'pdf', 'Paper');
     const store = getCanvasStore('c1');
     const canvas = store.read()!;
@@ -491,12 +684,33 @@ describe('PUT /nodes/:nodeId/content — content CAS', () => {
         ],
       });
       expect(afterReorder.nodeContentRevisions?.pdf).toBe(reordered.json().rev);
-      const staleEdit = await putContent(app, 'c1', 'pdf', {
-        nodeType: 'pdf',
-        properties: { Status: 'Stale' },
-        expectRev: response.nodeContentRevisions?.pdf,
+      // Four property saves later the revision is still the one of the text.
+      expect(reordered.json().rev).toBe(created.json().rev);
+      expect(reordered.json().rev).toBe(
+        nodeRevisionOf({
+          type: 'pdf',
+          content: 'Extracted PDF text that is not sent to the canvas.',
+        }),
+      );
+      // A page that hashes the node it holds (no body) has another revision.
+      // It does not matter: a property save is not checked against one.
+      const visible = (afterReorder.state as { nodes: Array<{ data: object }> })
+        .nodes[0].data;
+      const derived = nodeRevisionOf({ ...visible, type: 'pdf' });
+      expect(derived).not.toBe(reordered.json().rev);
+      for (const expectRev of [derived, 'no-such-revision', undefined]) {
+        const edit = await putContent(app, 'c1', 'pdf', {
+          nodeType: 'pdf',
+          properties: { Status: `Done ${expectRev}` },
+          ...(expectRev !== undefined ? { expectRev } : {}),
+        });
+        expect(edit.statusCode).toBe(200);
+        expect(edit.json().rev).toBe(created.json().rev);
+      }
+      expect(store.readNode('pdf')?.properties).toEqual({
+        Venue: 'CHI 25',
+        Status: 'Done undefined',
       });
-      expect(staleEdit.statusCode).toBe(409);
       expect(store.readNode('pdf')?.content).toBe(
         'Extracted PDF text that is not sent to the canvas.',
       );
@@ -505,7 +719,7 @@ describe('PUT /nodes/:nodeId/content — content CAS', () => {
     }
   });
 
-  it('round-trips PDF properties with key deletion and CAS', async () => {
+  it('round-trips PDF properties with key deletion, whatever revision the save quotes', async () => {
     seedCanvas('c1', 'pdf', 'Paper');
     const store = getCanvasStore('c1');
     const canvas = store.read()!;
@@ -541,15 +755,19 @@ describe('PUT /nodes/:nodeId/content — content CAS', () => {
         rev: second.json().rev,
       });
       expect(loaded.json().properties).not.toHaveProperty('year');
+      // The revision is the body's: the property save did not move it, and a
+      // property save that quotes any other is applied all the same.
+      expect(second.json().rev).toBe(first.json().rev);
       expect(
         (
           await putContent(app, 'c1', 'pdf', {
             nodeType: 'pdf',
-            expectRev: first.json().rev,
+            expectRev: 'a-revision-from-before',
             properties: { authors: null },
           })
         ).statusCode,
-      ).toBe(409);
+      ).toBe(200);
+      expect(store.readNode('pdf')?.properties).toEqual({ reviewed: true });
     } finally {
       await app.close();
     }
@@ -569,10 +787,11 @@ describe('PUT /nodes/:nodeId/content — content CAS', () => {
           })
         ).statusCode,
       ).toBe(200);
-      expect(received).toHaveBeenCalledExactlyOnceWith({
-        type: 'invalidate',
-        data: { nodeIds: ['n1'] },
-      });
+      expect(received).toHaveBeenCalledExactlyOnceWith(
+        { type: 'invalidate', data: { nodeIds: ['n1'] } },
+        // Who saved; this app has no identity layer.
+        { principalId: 'anonymous' },
+      );
       received.mockClear();
       expect(
         (
@@ -584,6 +803,11 @@ describe('PUT /nodes/:nodeId/content — content CAS', () => {
         ).statusCode,
       ).toBe(409);
       expect(received).not.toHaveBeenCalled();
+      // The node has left the Space; its record is what the route removes.
+      const space = getCanvasStore('c1');
+      const stored = space.read();
+      if (!stored) throw new Error('Missing fixture');
+      space.write({ ...stored, state: { nodes: [], edges: [] } });
       expect(
         (await app.inject({ method: 'DELETE', url: '/canvas/c1/nodes/n1' }))
           .statusCode,
@@ -592,10 +816,732 @@ describe('PUT /nodes/:nodeId/content — content CAS', () => {
         type: 'invalidate',
         data: { nodeIds: ['n1'] },
       });
+      expect(space.readNode('n1')).toBeNull();
     } finally {
       unsubscribe();
       await app.close();
     }
+  });
+
+  it('names the saving principal with the notification, and refuses a page id of another shape', async () => {
+    const app = fastify();
+    app.addHook('onRequest', async (request) => {
+      setRequestIdentity(request, {
+        principal: {
+          principalId: String(request.headers['x-principal']),
+          kind: 'user',
+        },
+        member: true,
+        owner: false,
+        access: UNRESTRICTED_ACCESS,
+      });
+    });
+    await app.register(canvasRoutes, { prefix: '/canvas' });
+    await app.ready();
+    const received = vi.fn();
+    const unsubscribe = subscribeCanvasUpdates('c1', received);
+    try {
+      seedCanvas('c1', 'n1', 'Note');
+      const saved = await app.inject({
+        method: 'PUT',
+        url: '/canvas/c1/nodes/n1/content',
+        headers: { 'x-principal': 'mallory' },
+        payload: {
+          nodeType: 'note',
+          content: 'first',
+          expectRev: REV_EMPTY,
+          pageId: 'page-of-alice',
+        },
+      });
+      expect(saved.statusCode, saved.body).toBe(200);
+      // The page id is passed on as given, but with who gave it: the stream
+      // route sends it to that principal's streams only.
+      expect(received).toHaveBeenCalledExactlyOnceWith(
+        {
+          type: 'invalidate',
+          data: { nodeIds: ['n1'], originPageId: 'page-of-alice' },
+        },
+        { principalId: 'mallory' },
+      );
+      for (const pageId of ['a b', '', 'p'.repeat(65), 'a/b']) {
+        const refused = await app.inject({
+          method: 'PUT',
+          url: '/canvas/c1/nodes/n1/content',
+          headers: { 'x-principal': 'mallory' },
+          payload: { nodeType: 'note', content: 'x', pageId },
+        });
+        expect(refused.statusCode, pageId).toBe(400);
+      }
+    } finally {
+      unsubscribe();
+      await app.close();
+    }
+  });
+
+  it('does not unlink the record of a node that is in the Space', async () => {
+    // A page that only received a deletion used to send this request late,
+    // after another page's undo had restored the node and its body.
+    const app = await buildApp();
+    const received = vi.fn();
+    try {
+      seedCanvas('c1', 'n1', 'Note');
+      expect(
+        (
+          await putContent(app, 'c1', 'n1', {
+            nodeType: 'note',
+            content: 'the body',
+            expectRev: REV_EMPTY,
+          })
+        ).statusCode,
+      ).toBe(200);
+      const unsubscribe = subscribeCanvasUpdates('c1', received);
+      try {
+        const response = await app.inject({
+          method: 'DELETE',
+          url: '/canvas/c1/nodes/n1',
+        });
+        expect(response.statusCode, response.body).toBe(200);
+        expect(response.json()).toEqual({ success: true });
+      } finally {
+        unsubscribe();
+      }
+      expect(getCanvasStore('c1').readNode('n1')?.content).toBe('the body');
+      expect(received).not.toHaveBeenCalled();
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('names the saving page on the notification and serves what the other pages then fetch', async () => {
+    const app = await buildApp();
+    const received = vi.fn();
+    const unsubscribe = subscribeCanvasUpdates('c1', received);
+    try {
+      seedCanvas('c1', 'n1', 'Note');
+      const provenance = { blocks: [{ id: 'b1', source: 'agent' }] };
+      const saved = await putContent(app, 'c1', 'n1', {
+        nodeType: 'note',
+        content: 'from page A',
+        label: 'Renamed',
+        labelSource: 'user',
+        summary: 'A summary',
+        keywords: ['one', 'two'],
+        provenance,
+        expectRev: REV_EMPTY,
+        pageId: 'page-a',
+      });
+      expect(saved.statusCode).toBe(200);
+      expect(received).toHaveBeenCalledExactlyOnceWith(
+        {
+          type: 'invalidate',
+          data: { nodeIds: ['n1'], originPageId: 'page-a' },
+        },
+        { principalId: 'anonymous' },
+      );
+
+      const fetched = await app.inject({
+        method: 'GET',
+        url: '/canvas/c1/nodes/n1/content',
+      });
+      expect(fetched.statusCode).toBe(200);
+      // The page id is routing information, never stored with the node.
+      expect(fetched.json()).toEqual({
+        nodeId: 'n1',
+        type: 'note',
+        label: 'Renamed',
+        labelSource: 'user',
+        content: 'from page A',
+        rev: saved.json().rev,
+        summary: 'A summary',
+        keywords: ['one', 'two'],
+        provenance,
+      });
+      expect(saved.json().rev).toBe(nodeRevisionOf({ content: 'from page A' }));
+
+      // A page id that is not a short string is refused, not relayed.
+      expect(
+        (
+          await putContent(app, 'c1', 'n1', {
+            nodeType: 'note',
+            content: 'again',
+            expectRev: saved.json().rev,
+            pageId: 'x'.repeat(65),
+          })
+        ).statusCode,
+      ).toBe(400);
+    } finally {
+      unsubscribe();
+      await app.close();
+    }
+  });
+
+  it('keeps both when two pages edit different properties of one node, although neither had read the other', async () => {
+    const app = await buildApp();
+    const received = vi.fn();
+    const unsubscribe = subscribeCanvasUpdates('c1', received);
+    try {
+      seedCanvas('c1', 'n1', 'Note');
+      const base = await putContent(app, 'c1', 'n1', {
+        nodeType: 'note',
+        content: 'body',
+        expectRev: REV_EMPTY,
+      });
+      const position = (
+        await app.inject({ method: 'GET', url: '/canvas/c1' })
+      ).json<GetCanvasResponse>().contentPosition;
+      received.mockClear();
+
+      // Page A adds tags. Page B, which has not fetched that yet, sets a
+      // status from the revision both started from: applied as well, since
+      // each save patches its own key of what the server holds.
+      const fromA = await putContent(app, 'c1', 'n1', {
+        nodeType: 'note',
+        expectRev: base.json().rev,
+        properties: { tags: ['physics'] },
+        pageId: 'page-a',
+      });
+      expect(fromA.statusCode).toBe(200);
+      const fromB = await putContent(app, 'c1', 'n1', {
+        nodeType: 'note',
+        expectRev: base.json().rev,
+        properties: { status: 'read' },
+        pageId: 'page-b',
+      });
+      expect(fromB.statusCode).toBe(200);
+      expect(received.mock.calls).toEqual([
+        [
+          {
+            type: 'invalidate',
+            data: { nodeIds: ['n1'], originPageId: 'page-a' },
+          },
+          { principalId: 'anonymous' },
+        ],
+        [
+          {
+            type: 'invalidate',
+            data: { nodeIds: ['n1'], originPageId: 'page-b' },
+          },
+          { principalId: 'anonymous' },
+        ],
+      ]);
+      // The body's revision is where it was.
+      expect(fromA.json().rev).toBe(base.json().rev);
+      expect(fromB.json().rev).toBe(base.json().rev);
+      expect(
+        (
+          await app.inject({
+            method: 'GET',
+            url: '/canvas/c1/nodes/n1/content',
+          })
+        ).json(),
+      ).toMatchObject({
+        content: 'body',
+        properties: { tags: ['physics'], status: 'read' },
+        rev: base.json().rev,
+      });
+
+      // A page that was not connected meanwhile is told to fetch the node.
+      const changes = await app.inject({
+        method: 'GET',
+        url: `/canvas/c1/content/changes?epoch=${encodeURIComponent(position?.epoch ?? '')}&seq=${position?.seq}`,
+      });
+      expect(changes.statusCode).toBe(200);
+      expect(changes.json().changedNodeIds).toEqual(['n1']);
+    } finally {
+      unsubscribe();
+      await app.close();
+    }
+  });
+
+  describe('custom properties are not versioned', () => {
+    const fetchNode = async (app: Awaited<ReturnType<typeof buildApp>>) =>
+      (
+        await app.inject({ method: 'GET', url: '/canvas/c1/nodes/n1/content' })
+      ).json();
+    const seedBody = async (app: Awaited<ReturnType<typeof buildApp>>) => {
+      seedCanvas('c1', 'n1', 'Note');
+      const saved = await putContent(app, 'c1', 'n1', {
+        nodeType: 'note',
+        content: 'v1',
+        expectRev: REV_EMPTY,
+      });
+      expect(saved.statusCode).toBe(200);
+      return saved.json().rev as string;
+    };
+
+    it('applies a property patch although the body revision it quotes is stale, or none is quoted', async () => {
+      const app = await buildApp();
+      try {
+        const rev1 = await seedBody(app);
+        // Someone else saves the body.
+        const body2 = await putContent(app, 'c1', 'n1', {
+          nodeType: 'note',
+          content: 'v2',
+          expectRev: rev1,
+        });
+        const rev2 = body2.json().rev as string;
+        expect(rev2).not.toBe(rev1);
+
+        const stale = await putContent(app, 'c1', 'n1', {
+          nodeType: 'note',
+          properties: { tags: ['physics'] },
+          propertyDisplayKeys: ['tags'],
+          expectRev: rev1,
+        });
+        expect(stale.statusCode).toBe(200);
+        // The answer names the body's current revision; the patch left it.
+        expect(stale.json().rev).toBe(rev2);
+        const unversioned = await putContent(app, 'c1', 'n1', {
+          nodeType: 'note',
+          properties: { status: 'read' },
+        });
+        expect(unversioned.statusCode).toBe(200);
+        expect(await fetchNode(app)).toMatchObject({
+          content: 'v2',
+          label: null,
+          properties: { tags: ['physics'], status: 'read' },
+          propertyDisplayKeys: ['tags'],
+          rev: rev2,
+        });
+      } finally {
+        await app.close();
+      }
+    });
+
+    it('accepts a body save that quotes the revision from before somebody changed a property', async () => {
+      const app = await buildApp();
+      try {
+        const rev1 = await seedBody(app);
+        // An agent, or another page, tags the note while this page types.
+        expect(
+          (
+            await putContent(app, 'c1', 'n1', {
+              nodeType: 'note',
+              properties: { tags: ['physics'] },
+            })
+          ).statusCode,
+        ).toBe(200);
+        await executeOnServer({
+          canvasId: 'c1',
+          originator: { source: 'agent', threadId: 't' },
+          commands: [
+            {
+              type: 'MERGE_NODE_DATA',
+              patches: [
+                {
+                  nodeId: 'n1' as never,
+                  patch: { properties: { status: 'read' } },
+                },
+              ],
+            },
+          ],
+        });
+        const typed = await putContent(app, 'c1', 'n1', {
+          nodeType: 'note',
+          content: 'v1, typed on',
+          expectRev: rev1,
+        });
+        expect(typed.statusCode).toBe(200);
+        expect(await fetchNode(app)).toMatchObject({
+          content: 'v1, typed on',
+          properties: { tags: ['physics'], status: 'read' },
+        });
+      } finally {
+        await app.close();
+      }
+    });
+
+    it('still refuses a stale body, with or without properties beside it', async () => {
+      const app = await buildApp();
+      const received = vi.fn();
+      const unsubscribe = subscribeCanvasUpdates('c1', received);
+      try {
+        const rev1 = await seedBody(app);
+        const body2 = await putContent(app, 'c1', 'n1', {
+          nodeType: 'note',
+          content: 'v2',
+          expectRev: rev1,
+        });
+        const rev2 = body2.json().rev as string;
+        received.mockClear();
+
+        const staleBody = await putContent(app, 'c1', 'n1', {
+          nodeType: 'note',
+          content: 'stale',
+          expectRev: rev1,
+        });
+        expect(staleBody.statusCode).toBe(409);
+        expect(staleBody.json()).toMatchObject({
+          code: 'NODE_CONTENT_CONFLICT',
+          currentRev: rev2,
+        });
+        expect(staleBody.json()).not.toHaveProperty('propertiesApplied');
+        expect(received).not.toHaveBeenCalled();
+
+        // Body and properties in one request, body stale: the body, the
+        // summary and the automatic title derived from it are refused; the
+        // property patch is written.
+        const both = await putContent(app, 'c1', 'n1', {
+          nodeType: 'note',
+          content: 'stale',
+          label: 'Stale title',
+          labelSource: 'auto',
+          summary: 'stale summary',
+          properties: { tags: ['physics'], gone: null },
+          propertyDisplayKeys: ['tags'],
+          expectRev: rev1,
+          pageId: 'page-a',
+        });
+        expect(both.statusCode).toBe(409);
+        expect(both.json()).toMatchObject({
+          code: 'NODE_CONTENT_CONFLICT',
+          currentRev: rev2,
+          expectedRev: rev1,
+          propertiesApplied: true,
+        });
+        expect(received).toHaveBeenCalledExactlyOnceWith(
+          {
+            type: 'invalidate',
+            data: { nodeIds: ['n1'], originPageId: 'page-a' },
+          },
+          { principalId: 'anonymous' },
+        );
+        const stored = await fetchNode(app);
+        expect(stored).toMatchObject({
+          content: 'v2',
+          label: null,
+          properties: { tags: ['physics'] },
+          propertyDisplayKeys: ['tags'],
+          rev: rev2,
+        });
+        expect(stored).not.toHaveProperty('summary');
+        expect(both.json()).not.toHaveProperty('titleApplied');
+
+        // An automatic title alone is derived from the body it quotes and
+        // is checked as before.
+        expect(
+          (
+            await putContent(app, 'c1', 'n1', {
+              nodeType: 'note',
+              label: 'Derived',
+              labelSource: 'auto',
+              expectRev: rev1,
+            })
+          ).statusCode,
+        ).toBe(409);
+        // So is a summary alone.
+        expect(
+          (
+            await putContent(app, 'c1', 'n1', {
+              nodeType: 'note',
+              summary: 'derived from v1',
+              expectRev: rev1,
+            })
+          ).statusCode,
+        ).toBe(409);
+        expect(await fetchNode(app)).toMatchObject({ label: null });
+      } finally {
+        unsubscribe();
+        await app.close();
+      }
+    });
+
+    it('writes body and properties of one request together when the body revision is current', async () => {
+      const app = await buildApp();
+      try {
+        const rev1 = await seedBody(app);
+        const both = await putContent(app, 'c1', 'n1', {
+          nodeType: 'note',
+          content: 'v2',
+          properties: { tags: ['physics'] },
+          expectRev: rev1,
+        });
+        expect(both.statusCode).toBe(200);
+        expect(both.json().rev).toBe(nodeRevisionOf({ content: 'v2' }));
+        expect(await fetchNode(app)).toMatchObject({
+          content: 'v2',
+          properties: { tags: ['physics'] },
+        });
+      } finally {
+        await app.close();
+      }
+    });
+
+    it('lets the last writer of one key win, and keeps a whole list value as one value', async () => {
+      const app = await buildApp();
+      try {
+        const rev1 = await seedBody(app);
+        const put = (properties: Record<string, unknown>) =>
+          putContent(app, 'c1', 'n1', {
+            nodeType: 'note',
+            properties,
+            expectRev: rev1,
+          });
+        expect((await put({ status: 'first' })).statusCode).toBe(200);
+        expect((await put({ status: 'second' })).statusCode).toBe(200);
+        // A list is one value: two writers that each add an item to the list
+        // they saw replace it, they do not merge item by item.
+        expect((await put({ tags: ['a', 'b'] })).statusCode).toBe(200);
+        expect((await put({ tags: ['a', 'c'] })).statusCode).toBe(200);
+        expect((await fetchNode(app)).properties).toEqual({
+          status: 'second',
+          tags: ['a', 'c'],
+        });
+        // Removing a key that somebody else already removed is not an error.
+        expect((await put({ status: null })).statusCode).toBe(200);
+        expect((await put({ status: null })).statusCode).toBe(200);
+        expect((await fetchNode(app)).properties).toEqual({ tags: ['a', 'c'] });
+      } finally {
+        await app.close();
+      }
+    });
+  });
+
+  describe('a title a person gave is not versioned', () => {
+    const fetchNode = async (
+      app: Awaited<ReturnType<typeof buildApp>>,
+      nodeId = 'n1',
+    ) =>
+      (
+        await app.inject({
+          method: 'GET',
+          url: `/canvas/c1/nodes/${nodeId}/content`,
+        })
+      ).json();
+    /** A note saved with body `v1`, then given body `v2` by somebody else. */
+    const seedTwoBodies = async (app: Awaited<ReturnType<typeof buildApp>>) => {
+      seedCanvas('c1', 'n1', 'Note');
+      const first = await putContent(app, 'c1', 'n1', {
+        nodeType: 'note',
+        content: 'v1',
+        expectRev: REV_EMPTY,
+      });
+      const rev1 = first.json().rev as string;
+      const second = await putContent(app, 'c1', 'n1', {
+        nodeType: 'note',
+        content: 'v2',
+        expectRev: rev1,
+      });
+      expect(second.statusCode).toBe(200);
+      return { rev1, rev2: second.json().rev as string };
+    };
+
+    it('applies a rename although the body revision it quotes is stale, or none is quoted', async () => {
+      const app = await buildApp();
+      try {
+        const { rev1, rev2 } = await seedTwoBodies(app);
+        const stale = await putContent(app, 'c1', 'n1', {
+          nodeType: 'note',
+          label: 'Renamed',
+          labelSource: 'user',
+          expectRev: rev1,
+        });
+        expect(stale.statusCode).toBe(200);
+        // The answer names the body's current revision; the rename left it.
+        expect(stale.json()).toMatchObject({ label: 'Renamed', rev: rev2 });
+        expect(await fetchNode(app)).toMatchObject({
+          content: 'v2',
+          label: 'Renamed',
+          labelSource: 'user',
+          rev: rev2,
+        });
+
+        const unversioned = await putContent(app, 'c1', 'n1', {
+          nodeType: 'note',
+          label: 'Renamed again',
+          labelSource: 'user',
+        });
+        expect(unversioned.statusCode).toBe(200);
+        expect(await fetchNode(app)).toMatchObject({
+          content: 'v2',
+          label: 'Renamed again',
+          rev: rev2,
+        });
+      } finally {
+        await app.close();
+      }
+    });
+
+    it('lets the last of two renames win, whatever each had read', async () => {
+      const app = await buildApp();
+      try {
+        const { rev1, rev2 } = await seedTwoBodies(app);
+        const rename = (label: string, expectRev: string) =>
+          putContent(app, 'c1', 'n1', {
+            nodeType: 'note',
+            label,
+            labelSource: 'user',
+            expectRev,
+          });
+        expect((await rename('From page A', rev2)).statusCode).toBe(200);
+        expect((await rename('From page B', rev1)).statusCode).toBe(200);
+        expect(await fetchNode(app)).toMatchObject({
+          content: 'v2',
+          label: 'From page B',
+        });
+      } finally {
+        await app.close();
+      }
+    });
+
+    it('accepts a body save that quotes the revision from before somebody renamed the node', async () => {
+      const app = await buildApp();
+      try {
+        seedCanvas('c1', 'n1', 'Note');
+        const rev1 = (
+          await putContent(app, 'c1', 'n1', {
+            nodeType: 'note',
+            content: 'v1',
+            expectRev: REV_EMPTY,
+          })
+        ).json().rev as string;
+        expect(
+          (
+            await putContent(app, 'c1', 'n1', {
+              nodeType: 'note',
+              label: 'Renamed',
+              labelSource: 'user',
+            })
+          ).statusCode,
+        ).toBe(200);
+        const typed = await putContent(app, 'c1', 'n1', {
+          nodeType: 'note',
+          content: 'v1, typed on',
+          expectRev: rev1,
+        });
+        expect(typed.statusCode).toBe(200);
+        // The body save carried no title and leaves the rename standing.
+        expect(await fetchNode(app)).toMatchObject({
+          content: 'v1, typed on',
+          label: 'Renamed',
+        });
+      } finally {
+        await app.close();
+      }
+    });
+
+    it('writes the rename of a request whose body is refused, and says so', async () => {
+      const app = await buildApp();
+      const received = vi.fn();
+      const unsubscribe = subscribeCanvasUpdates('c1', received);
+      try {
+        const { rev1, rev2 } = await seedTwoBodies(app);
+        received.mockClear();
+        const both = await putContent(app, 'c1', 'n1', {
+          nodeType: 'note',
+          content: 'stale',
+          summary: 'stale summary',
+          label: 'Renamed',
+          labelSource: 'user',
+          expectRev: rev1,
+          pageId: 'page-a',
+        });
+        expect(both.statusCode).toBe(409);
+        expect(both.json()).toMatchObject({
+          code: 'NODE_CONTENT_CONFLICT',
+          currentRev: rev2,
+          expectedRev: rev1,
+          titleApplied: true,
+        });
+        expect(both.json()).not.toHaveProperty('propertiesApplied');
+        // Other pages fetch the title like any other save.
+        expect(received).toHaveBeenCalledExactlyOnceWith(
+          {
+            type: 'invalidate',
+            data: { nodeIds: ['n1'], originPageId: 'page-a' },
+          },
+          { principalId: 'anonymous' },
+        );
+        const stored = await fetchNode(app);
+        expect(stored).toMatchObject({
+          content: 'v2',
+          label: 'Renamed',
+          labelSource: 'user',
+          rev: rev2,
+        });
+        expect(stored).not.toHaveProperty('summary');
+      } finally {
+        unsubscribe();
+        await app.close();
+      }
+    });
+
+    it('refuses a rename to a name another node uses, with or without a stale body beside it', async () => {
+      const app = await buildApp();
+      try {
+        getCanvasStore('c1').write({
+          canvasId: 'c1',
+          title: null,
+          version: 1,
+          state: {
+            nodes: ['n1', 'n2'].map((id) => ({
+              id,
+              type: 'note',
+              position: { x: 0, y: 0 },
+              data: { label: id },
+            })),
+            edges: [],
+          },
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        });
+        expect(
+          (
+            await putContent(app, 'c1', 'n2', {
+              nodeType: 'note',
+              content: 'other',
+              label: 'Taken',
+              labelSource: 'user',
+              expectRev: REV_EMPTY,
+            })
+          ).statusCode,
+        ).toBe(200);
+        const rev1 = (
+          await putContent(app, 'c1', 'n1', {
+            nodeType: 'note',
+            content: 'v1',
+            label: 'Mine',
+            labelSource: 'user',
+            expectRev: REV_EMPTY,
+          })
+        ).json().rev as string;
+
+        const alone = await putContent(app, 'c1', 'n1', {
+          nodeType: 'note',
+          label: 'Taken',
+          labelSource: 'user',
+        });
+        expect(alone.statusCode).toBe(409);
+        expect(alone.json()).toMatchObject({ code: 'NODE_LABEL_CONFLICT' });
+
+        // Somebody else saves the body; this page then sends body and title.
+        expect(
+          (
+            await putContent(app, 'c1', 'n1', {
+              nodeType: 'note',
+              content: 'v2',
+              expectRev: rev1,
+            })
+          ).statusCode,
+        ).toBe(200);
+        const both = await putContent(app, 'c1', 'n1', {
+          nodeType: 'note',
+          content: 'stale',
+          label: 'Taken',
+          labelSource: 'user',
+          properties: { tags: ['physics'] },
+          expectRev: rev1,
+        });
+        expect(both.statusCode).toBe(409);
+        expect(both.json()).toMatchObject({ code: 'NODE_LABEL_CONFLICT' });
+        // Nothing of that request was written.
+        const stored = await fetchNode(app);
+        expect(stored).toMatchObject({ content: 'v2', label: 'Mine' });
+        expect(stored.properties ?? {}).toEqual({});
+      } finally {
+        await app.close();
+      }
+    });
   });
 
   it('rejects source/body writes and type spoofing on metadata-only file references', async () => {
@@ -647,21 +1593,21 @@ describe('PUT /nodes/:nodeId/content — content CAS', () => {
       expect(node.data).not.toHaveProperty('content');
       expect(node.data).not.toHaveProperty('src');
       const move = await app.inject({
-        method: 'PUT',
-        url: '/canvas/c1',
+        method: 'POST',
+        url: '/canvas/c1/execute',
         payload: {
-          version: store.read()?.version,
-          state: {
-            nodes: [
-              { id: 'ref', type: 'fileReference', position: { x: 5, y: 5 } },
-            ],
-            edges: [],
-          },
+          edits: editsPerCommand([
+            {
+              type: 'SET_NODE_GEOMETRY',
+              items: [{ nodeId: 'ref', position: { x: 5, y: 5 } }],
+            },
+          ]),
         },
       });
       expect(move.statusCode).toBe(200);
       expect(store.read()?.state.nodes).toMatchObject([
         {
+          position: { x: 5, y: 5 },
           data: {
             fileReference: {
               agentletId: 'offline-device',
@@ -670,18 +1616,51 @@ describe('PUT /nodes/:nodeId/content — content CAS', () => {
           },
         },
       ]);
+      // A structure edit names no node type, so it cannot spoof one: what
+      // the stored node is decides, and a body is refused.
+      const version = store.read()?.version;
       const invalid = await app.inject({
-        method: 'PUT',
-        url: '/canvas/c1',
+        method: 'POST',
+        url: '/canvas/c1/execute',
         payload: {
-          version: store.read()?.version,
-          state: {
-            nodes: [{ id: 'ref', data: { content: 'type-omitted bypass' } }],
-            edges: [],
-          },
+          edits: editsPerCommand([
+            {
+              type: 'MERGE_NODE_DATA',
+              patches: [
+                { nodeId: 'ref', patch: { content: 'type-omitted bypass' } },
+              ],
+            },
+          ]),
         },
       });
+      // A page does not write a body through execute at all.
       expect(invalid.statusCode).toBe(400);
+      expect(invalid.json()).toMatchObject({ code: 'UI_BODY_WRITE' });
+      // An agent's attempt reaches the engine, which refuses it for this
+      // node type.
+      const byAgent = await app.inject({
+        method: 'POST',
+        url: '/canvas/c1/execute',
+        headers: AGENT_CREDENTIAL,
+        payload: {
+          edits: editsPerCommand([
+            {
+              type: 'MERGE_NODE_DATA',
+              patches: [
+                {
+                  nodeId: 'ref',
+                  patch: { content: 'type-omitted bypass' },
+                  expectRev: nodeRevisionOf({}),
+                },
+              ],
+            },
+          ]),
+        },
+      });
+      expect(byAgent.statusCode).toBe(200);
+      expect(resultsOf(byAgent.json())[0].applied).toBe(false);
+      expect(store.read()?.version).toBe(version);
+      expect(store.readNode('ref')).toMatchObject({ content: '' });
     } finally {
       await app.close();
     }

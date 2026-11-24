@@ -1,0 +1,137 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT license.
+
+/**
+ * The shapes of the server records whose owners refuse a malformed value.
+ *
+ * Each owner reads its record through the schema here, and the secret store,
+ * which opens records first, checks every legacy file the one-time import
+ * (`storage/server-records.ts`) takes against the same schema, before the
+ * database is upgraded ({@link assertImportableShapes}). That check is what keeps an import
+ * recoverable: on Disk a damaged file is repaired by editing the file, but
+ * once a database holds the record, the file is never read again, so a
+ * value the owner refuses would be stuck in the database.
+ *
+ * Records whose owners fall back to defaults on a malformed value (model
+ * settings, change review, external-agent runtime) have no shape here: the
+ * next save repairs them, on a database exactly as on Disk. The credential
+ * envelope is checked by `security/secret-store.ts`, which holds the key.
+ *
+ * Kept above storage, which knows no owner's schema. The Vite dev server
+ * cannot load it (`@huabu/shared` is TypeScript source), and needs no check:
+ * it reads the saved password through `security/saved-secret.ts`, without
+ * opening the database.
+ */
+
+import { decodeAgentProfileRegistry } from '@agenetes/agent-profile';
+import { z } from 'zod';
+
+import { agentDefaultsSchema, agentletDeviceNameSchema } from '@huabu/shared';
+
+import { unimportableRecord } from './storage/server-records.js';
+
+import type { ServerRecordName } from './storage/ports/server-records.js';
+import type { PendingImportEntry } from './storage/server-records.js';
+
+/** A credential version: absent means 0, and a reset increments it. */
+export const credentialVersionSchema = z.number().int().nonnegative();
+
+/** `device-owners`: `agentletId -> principalId`. */
+export const deviceOwnersSchema = z.record(z.string(), z.string().min(1));
+
+/** `agent-credential-versions`: `principalId -> version`. */
+export const credentialVersionsSchema = z.record(
+  z.string(),
+  credentialVersionSchema,
+);
+
+/** `device-names`: `agentletId -> display name`. */
+export const deviceNamesSchema = z.record(z.string(), agentletDeviceNameSchema);
+
+/**
+ * `admission`: how a Bubble deployment admits people who sign in
+ * (`identity/admission.ts`). Absent means manual admission with nobody
+ * blocked.
+ */
+export const admissionRecordSchema = z.object({
+  /**
+   * Admit a first-time Entra or Auth0 sign-in that holds no system grant and
+   * no block as an ordinary system `member`. Set by an administrator in
+   * Settings → People.
+   */
+  automatic: z.boolean(),
+  /**
+   * `principalId -> block`: people an administrator removed. Automatic
+   * admission never readmits them; giving them access again in People removes
+   * the entry. Grants stay Bubble's: a block grants and revokes nothing itself.
+   */
+  blocked: z.record(
+    z.string().min(1),
+    z.object({
+      /** When their access was removed, as an ISO 8601 timestamp. */
+      blockedAt: z.string().min(1),
+      /** The administrator who removed it. */
+      blockedBy: z.string().min(1),
+    }),
+  ),
+});
+export type AdmissionRecord = z.infer<typeof admissionRecordSchema>;
+
+/** Throws when `value` is not a record of `name` its owner can read. */
+const REFUSED_SHAPES: Partial<
+  Record<ServerRecordName, (value: unknown) => unknown>
+> = {
+  'agent-profiles': decodeAgentProfileRegistry,
+  'user-agent-profiles': decodeAgentProfileRegistry,
+  'agent-defaults': (value) => agentDefaultsSchema.parse(value),
+  'device-names': (value) => deviceNamesSchema.parse(value),
+  'device-owners': (value) => deviceOwnersSchema.parse(value),
+  'agent-credential-versions': (value) => credentialVersionsSchema.parse(value),
+  admission: (value) => admissionRecordSchema.parse(value),
+};
+
+/**
+ * Why the owner of `name` would refuse `value`, or `null` when it reads it.
+ * Records with no shape here are always readable.
+ */
+export function refusedServerRecordShape(
+  name: ServerRecordName,
+  value: unknown,
+): string | null {
+  const check = REFUSED_SHAPES[name];
+  if (!check) return null;
+  try {
+    check(value);
+    return null;
+  } catch (error) {
+    return error instanceof z.ZodError
+      ? error.issues
+          .map(
+            (issue) =>
+              `${issue.path.length > 0 ? issue.path.join('.') : '(root)'}: ${issue.message}`,
+          )
+          .join('; ')
+      : // One line, for a startup error: some owners' messages embed
+        // indented JSON.
+        (error instanceof Error ? error.message : String(error))
+          .replace(/\s+/g, ' ')
+          .trim();
+  }
+}
+
+/**
+ * Refuse a snapshot of records to import (`storage/server-records.ts`) when
+ * any owner would refuse its value. Run on the snapshot the open will
+ * import, before the database is upgraded: once imported, repairing a file
+ * no longer reaches the database's copy.
+ *
+ * @throws ServerRecordError naming the first file an owner would refuse.
+ */
+export function assertImportableShapes(
+  pending: readonly PendingImportEntry[],
+): void {
+  for (const { key, value, file } of pending) {
+    const refused = refusedServerRecordShape(key.name, value);
+    if (refused !== null) throw unimportableRecord(file, refused);
+  }
+}

@@ -1,14 +1,19 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { Maximize2, Image as ImageIcon } from 'lucide-react';
-import { memo, useEffect, useState } from 'react';
+import { Download, Maximize2, Image as ImageIcon } from 'lucide-react';
+import { memo, useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { resolveArtifactUrl } from '@/api/artifact';
+import { DropdownMenuItem } from '@/components/Common/DropdownMenu';
 import { FloatingToolbar } from '@/components/Common/FloatingToolbar';
 import useCanvasStore from '@/store/canvasStore.ts';
 import { openPreviewNode } from '@/store/previewWorkspace/actions';
+import {
+  canDownloadMediaSource,
+  triggerMediaDownload,
+} from '@/utils/io/nodeDownload';
 
 import { getMissingFileKind, MissingFileBanner } from '../MissingFileBanner';
 import { NodeWrapper } from '../NodeWrapper';
@@ -48,6 +53,18 @@ export const ImageNode = memo(
       </FloatingToolbar.ActionButton>
     );
 
+    const canDownload = canDownloadMediaSource(src, Boolean(missingFileKind));
+    const handleDownload = useCallback(() => {
+      triggerMediaDownload({
+        src,
+        canvasId,
+        label: data?.label,
+        defaultExt: '.png',
+        fallbackStem: 'image',
+        missing: Boolean(missingFileKind),
+      });
+    }, [src, canvasId, data?.label, missingFileKind]);
+
     return (
       <NodeWrapper
         id={id}
@@ -55,6 +72,13 @@ export const ImageNode = memo(
         type={'image'}
         selected={selected}
         actions={missingFileKind ? undefined : ImageActions}
+        overflow={
+          canDownload ? (
+            <DropdownMenuItem icon={<Download />} onClick={handleDownload}>
+              {t('node.download')}
+            </DropdownMenuItem>
+          ) : undefined
+        }
         keepAspectRatio={true}
       >
         {missingFileKind ? (

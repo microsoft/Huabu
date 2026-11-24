@@ -1,0 +1,98 @@
+[
+  {
+    "type": "index",
+    "name": "events_by_canvas_order",
+    "tbl_name": "events",
+    "sql": "CREATE INDEX events_by_canvas_order\n    ON events(canvas_id, event_id)"
+  },
+  {
+    "type": "index",
+    "name": "nodes_by_change",
+    "tbl_name": "nodes",
+    "sql": "CREATE INDEX nodes_by_change ON nodes(canvas_id, change_seq)"
+  },
+  {
+    "type": "index",
+    "name": "space_save_results_by_age",
+    "tbl_name": "space_save_results",
+    "sql": "CREATE INDEX space_save_results_by_age\n        ON space_save_results(canvas_id, created_at)"
+  },
+  {
+    "type": "index",
+    "name": "spaces_by_parent",
+    "tbl_name": "spaces",
+    "sql": "CREATE INDEX spaces_by_parent ON spaces(workspace_id, parent_space_id)"
+  },
+  {
+    "type": "index",
+    "name": "spaces_single_world",
+    "tbl_name": "spaces",
+    "sql": "CREATE UNIQUE INDEX spaces_single_world\n    ON spaces(workspace_id)\n    WHERE is_world = 1"
+  },
+  {
+    "type": "table",
+    "name": "changes",
+    "tbl_name": "changes",
+    "sql": "CREATE TABLE changes (\n    canvas_id TEXT NOT NULL,\n    thread_id TEXT NOT NULL,\n    snapshot_json TEXT NOT NULL CHECK (json_valid(snapshot_json)),\n    PRIMARY KEY (canvas_id, thread_id),\n    FOREIGN KEY (canvas_id) REFERENCES spaces(canvas_id) ON DELETE CASCADE\n  ) STRICT"
+  },
+  {
+    "type": "table",
+    "name": "delta_log",
+    "tbl_name": "delta_log",
+    "sql": "CREATE TABLE delta_log (\n    canvas_id TEXT NOT NULL,\n    version INTEGER NOT NULL,\n    entry_json TEXT NOT NULL CHECK (json_valid(entry_json)),\n    PRIMARY KEY (canvas_id, version),\n    FOREIGN KEY (canvas_id) REFERENCES spaces(canvas_id) ON DELETE CASCADE\n  ) STRICT"
+  },
+  {
+    "type": "table",
+    "name": "events",
+    "tbl_name": "events",
+    "sql": "CREATE TABLE events (\n    event_id INTEGER PRIMARY KEY AUTOINCREMENT,\n    canvas_id TEXT NOT NULL,\n    event_json TEXT NOT NULL CHECK (json_valid(event_json)),\n    FOREIGN KEY (canvas_id) REFERENCES spaces(canvas_id) ON DELETE CASCADE\n  ) STRICT"
+  },
+  {
+    "type": "table",
+    "name": "nodes",
+    "tbl_name": "nodes",
+    "sql": "CREATE TABLE nodes (\n    canvas_id TEXT NOT NULL,\n    node_id TEXT NOT NULL,\n    record_json TEXT NOT NULL CHECK (json_valid(record_json)),\n    revision TEXT NOT NULL CHECK (length(revision) > 0),\n    label_collision_key TEXT NOT NULL, change_seq INTEGER NOT NULL DEFAULT 0,\n    PRIMARY KEY (canvas_id, node_id),\n    UNIQUE (canvas_id, label_collision_key),\n    FOREIGN KEY (canvas_id) REFERENCES spaces(canvas_id) ON DELETE CASCADE\n  ) STRICT"
+  },
+  {
+    "type": "table",
+    "name": "server_records",
+    "tbl_name": "server_records",
+    "sql": "CREATE TABLE server_records (\n        owner_key TEXT NOT NULL,\n        name TEXT NOT NULL,\n        record_json TEXT NOT NULL CHECK (json_valid(record_json)),\n        updated_at REAL NOT NULL,\n        PRIMARY KEY (owner_key, name)\n      ) STRICT"
+  },
+  {
+    "type": "table",
+    "name": "space_extensions",
+    "tbl_name": "space_extensions",
+    "sql": "CREATE TABLE space_extensions (\n    extension_id INTEGER PRIMARY KEY AUTOINCREMENT,\n    canvas_id TEXT NOT NULL,\n    namespace TEXT NOT NULL,\n    UNIQUE (canvas_id, namespace),\n    FOREIGN KEY (canvas_id) REFERENCES spaces(canvas_id) ON DELETE CASCADE\n  ) STRICT"
+  },
+  {
+    "type": "table",
+    "name": "space_save_heads",
+    "tbl_name": "space_save_heads",
+    "sql": "CREATE TABLE space_save_heads (\n        canvas_id TEXT PRIMARY KEY,\n        lineage TEXT NOT NULL,\n        floor INTEGER NOT NULL,\n        stamps_json TEXT NOT NULL CHECK (json_valid(stamps_json)),\n        FOREIGN KEY (canvas_id) REFERENCES spaces(canvas_id) ON DELETE CASCADE\n      ) STRICT"
+  },
+  {
+    "type": "table",
+    "name": "space_save_results",
+    "tbl_name": "space_save_results",
+    "sql": "CREATE TABLE space_save_results (\n        canvas_id TEXT NOT NULL,\n        principal_id TEXT NOT NULL,\n        operation_id TEXT NOT NULL,\n        digest TEXT NOT NULL,\n        at_version INTEGER NOT NULL,\n        created_at REAL NOT NULL,\n        response_json TEXT NOT NULL CHECK (json_valid(response_json)),\n        PRIMARY KEY (canvas_id, principal_id, operation_id),\n        FOREIGN KEY (canvas_id) REFERENCES spaces(canvas_id) ON DELETE CASCADE\n      ) STRICT"
+  },
+  {
+    "type": "table",
+    "name": "spaces",
+    "tbl_name": "spaces",
+    "sql": "CREATE TABLE spaces (\n    canvas_id TEXT PRIMARY KEY,\n    workspace_id TEXT NOT NULL,\n    title TEXT,\n    collision_key TEXT NOT NULL,\n    version INTEGER NOT NULL,\n    state_json TEXT NOT NULL CHECK (json_valid(state_json)),\n    created_at REAL NOT NULL,\n    updated_at REAL NOT NULL,\n    is_world INTEGER NOT NULL DEFAULT 0 CHECK (is_world IN (0, 1)), parent_space_id TEXT, parent_entry_node_id TEXT, node_change_seq INTEGER NOT NULL DEFAULT 0,\n    UNIQUE (workspace_id, collision_key),\n    FOREIGN KEY (workspace_id) REFERENCES workspaces(workspace_id)\n      ON DELETE CASCADE\n  ) STRICT"
+  },
+  {
+    "type": "table",
+    "name": "tasks",
+    "tbl_name": "tasks",
+    "sql": "CREATE TABLE tasks (\n    canvas_id TEXT PRIMARY KEY,\n    snapshot_json TEXT NOT NULL CHECK (json_valid(snapshot_json)),\n    FOREIGN KEY (canvas_id) REFERENCES spaces(canvas_id) ON DELETE CASCADE\n  ) STRICT"
+  },
+  {
+    "type": "table",
+    "name": "workspaces",
+    "tbl_name": "workspaces",
+    "sql": "CREATE TABLE workspaces (\n    workspace_id TEXT PRIMARY KEY,\n    name TEXT NOT NULL,\n    created_at REAL NOT NULL,\n    last_opened_at REAL NOT NULL,\n    -- Membership is forgettable without being destructive: the port's\n    -- remove() drops a Workspace from the listing and keeps everything it\n    -- owns, the way forgetting a Disk Workspace leaves its folder on disk.\n    forgotten_at REAL\n  ) STRICT"
+  }
+]

@@ -235,15 +235,18 @@ async function applyConversationOwnerPatch(
     Object.entries(editable).filter(([, value]) => value !== undefined),
   );
   const response = await postCanvasExecute(owner.canvasId, {
-    commands: [
+    edits: [
       {
-        type: 'MERGE_NODE_DATA',
-        patches: [{ nodeId: owner.nodeId, patch: wirePatch }],
+        commands: [
+          {
+            type: 'MERGE_NODE_DATA',
+            patches: [{ nodeId: owner.nodeId, patch: wirePatch }],
+          },
+        ],
       },
     ],
-    originator: { source: 'ui' },
   });
-  if (!response.results[0]?.applied) {
+  if (!response.edits[0]?.results[0]?.applied) {
     throw new Error('Conversation owner node could not be updated');
   }
 
@@ -252,12 +255,15 @@ async function applyConversationOwnerPatch(
     current.canvasId === response.canvasId &&
     current.version === response.fromVersion
   ) {
-    current.applyDeltasFromAgent(
-      response.deltas as Delta[],
+    current.applyServerDeltas(
+      (response.deltas ?? []) as Delta[],
       response.toVersion,
-      response.pendingEffects as Parameters<
-        typeof current.applyDeltasFromAgent
-      >[2],
+      response.pendingEffects,
+      false,
+      undefined,
+      response.nodeContentRevisions
+        ? { nodeContentRevisions: response.nodeContentRevisions }
+        : undefined,
     );
   }
   if (current.canvasId !== owner.canvasId) {

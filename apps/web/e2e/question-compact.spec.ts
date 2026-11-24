@@ -3,7 +3,13 @@
 
 import { expect, test, type Locator } from '@playwright/test';
 
-import { openNewCanvas, readViewportTransform, scaleOf } from './helpers';
+import {
+  openNewCanvas,
+  readViewportTransform,
+  scaleOf,
+  personEdits,
+} from './helpers';
+import { NODE_BORDER_WIDTH } from '../src/components/Nodes/design/nodeBoundary';
 
 import type * as ChangesModule from '../src/store/acpThreadChangesStore';
 import type * as StoreModule from '../src/store/canvasStore';
@@ -112,7 +118,7 @@ async function expectNearC(node: Locator, fontSize = 24) {
     for (const padding of metrics.padding)
       expect(padding).toBeCloseTo(16 * scale, 1);
     expect(metrics.layout.header.height).toBeCloseTo(32 * scale, 1);
-    expect(metrics.edge).toContain('0px 0px 0px 2px');
+    expect(metrics.edge).toContain(`0px 0px 0px ${NODE_BORDER_WIDTH}px`);
     expect(metrics.layout.avatar.width).toBeCloseTo(28 * scale, 1);
     expect(metrics.layout.avatar.height).toBeCloseTo(28 * scale, 1);
     expect(metrics.titleFont).toBe(fontSize);
@@ -632,13 +638,16 @@ test(
         () => window.questionCompactFlow.getNode('unread')?.style?.height,
       ),
     ).toBeUndefined();
-    const title = await unread
-      .locator('.question-conversation-question')
+    // A selected card's title text is its rename target and does not drag;
+    // the rest of the card still drags natively. Grab the top padding.
+    const cardBox = await unread
+      .locator('.question-conversation-card')
       .boundingBox();
-    if (!title) throw new Error('Missing question');
-    await page.mouse.move(title.x + 30, title.y + 8);
+    if (!cardBox) throw new Error('Missing question');
+    const grab = { x: cardBox.x + cardBox.width / 2, y: cardBox.y + 6 };
+    await page.mouse.move(grab.x, grab.y);
     await page.mouse.down();
-    await page.mouse.move(title.x + 60, title.y + 28, { steps: 8 });
+    await page.mouse.move(grab.x + 30, grab.y + 20, { steps: 8 });
     await page.mouse.up();
     await expect
       .poll(() =>
@@ -683,7 +692,7 @@ test('layout Frame Questions stay readable when zoomed out and react to layout c
   const canvasId = new URL(page.url()).pathname.split('/canvas/')[1];
   const created = await page.request.post(`/api/canvas/${canvasId}/execute`, {
     data: {
-      commands: [
+      edits: personEdits([
         {
           type: 'CREATE_NODES',
           nodes: [
@@ -706,8 +715,7 @@ test('layout Frame Questions stay readable when zoomed out and react to layout c
           nodeIds: ['layout-question'],
           parentId: 'layout-frame',
         },
-      ],
-      originator: { source: 'agent', threadId: 'layout-card-test' },
+      ]),
     },
   });
   expect(created.ok(), await created.text()).toBe(true);
@@ -724,13 +732,12 @@ test('layout Frame Questions stay readable when zoomed out and react to layout c
   for (const layoutMode of ['column', 'free', 'row', 'grid', 'column']) {
     const changed = await page.request.post(`/api/canvas/${canvasId}/execute`, {
       data: {
-        commands: [
+        edits: personEdits([
           {
             type: 'MERGE_NODE_DATA',
             patches: [{ nodeId: 'layout-frame', patch: { layoutMode } }],
           },
-        ],
-        originator: { source: 'agent', threadId: 'layout-card-test' },
+        ]),
       },
     });
     expect(changed.ok(), await changed.text()).toBe(true);
@@ -752,14 +759,13 @@ test('layout Frame Questions stay readable when zoomed out and react to layout c
   for (const parentId of [null, 'layout-frame', null, 'layout-frame']) {
     const changed = await page.request.post(`/api/canvas/${canvasId}/execute`, {
       data: {
-        commands: [
+        edits: personEdits([
           {
             type: 'SET_NODE_PARENT',
             nodeIds: ['layout-question'],
             parentId,
           },
-        ],
-        originator: { source: 'agent', threadId: 'layout-card-test' },
+        ]),
       },
     });
     expect(changed.ok(), await changed.text()).toBe(true);
@@ -787,7 +793,7 @@ test('real Canvas Question reload keeps the card and takeover mutually exclusive
   const canvasId = new URL(page.url()).pathname.split('/canvas/')[1];
   const response = await page.request.post(`/api/canvas/${canvasId}/execute`, {
     data: {
-      commands: [
+      edits: personEdits([
         {
           type: 'CREATE_NODES',
           nodes: [
@@ -798,8 +804,7 @@ test('real Canvas Question reload keeps the card and takeover mutually exclusive
             },
           ],
         },
-      ],
-      originator: { source: 'agent', threadId: 'e2e-question-reload' },
+      ]),
     },
   });
   expect(response.ok(), await response.text()).toBe(true);
@@ -866,7 +871,7 @@ test('real Canvas C questions preserve authored width and open without moving co
   // mocked Canvas responses and no forced width on the natural-size node.
   const response = await page.request.post(`/api/canvas/${canvasId}/execute`, {
     data: {
-      commands: [
+      edits: personEdits([
         {
           type: 'CREATE_NODES',
           nodes: [
@@ -883,8 +888,7 @@ test('real Canvas C questions preserve authored width and open without moving co
             },
           ],
         },
-      ],
-      originator: { source: 'agent', threadId: 'e2e-question-compact-c' },
+      ]),
     },
   });
   expect(response.ok(), await response.text()).toBe(true);

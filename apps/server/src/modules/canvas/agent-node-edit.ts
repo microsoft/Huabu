@@ -15,12 +15,7 @@ import { parseAgentLaunchOverrides } from '../agent/agent-launch-overrides.js';
 import { agentNodeBinding } from '../agent/agent-node-binding.js';
 import { agentThreadResolver } from '../agent/agent-thread-resolver.js';
 import { effectiveConversationTitle } from '../agent/conversation-title.service.js';
-import {
-  getFirstSelectableAgentProfileId,
-  requireSelectableAgentProfile,
-  SelectableAgentProfileError,
-  type SelectableAgentProfile,
-} from '../agent/selectable-agent-profile.js';
+import { getFirstSelectableAgentProfile } from '../agent/selectable-agent-profile.js';
 import { canvasAcpNamespace } from '../workspace/paths.js';
 
 import type { CanvasNodeId } from '@huabu/shared';
@@ -39,36 +34,28 @@ export class AgentNodeEditError extends Error {
   }
 }
 
-export function withDefaultAgentBinding(
-  data: Record<string, unknown>,
-): Record<string, unknown> {
-  if (data.agentBinding) return data;
-  const profileId = getFirstSelectableAgentProfileId();
-  if (!profileId) {
+/**
+ * The binding a conversation gets when none was chosen: the first selectable
+ * Profile. Reads the registry once, so a caller binding several nodes in one
+ * write resolves it once and passes it to {@link withDefaultAgentBinding}.
+ */
+export async function defaultAgentBinding(): Promise<Record<string, unknown>> {
+  const profile = await getFirstSelectableAgentProfile();
+  if (!profile) {
     throw new AgentNodeEditError(
       'Connect an external Agent before creating a conversation.',
     );
   }
-  if (profileId === HUABU_AGENT_PROFILE_ID) {
-    return { ...data, agentBinding: { kind: 'internal' } };
-  }
-  let profile: SelectableAgentProfile;
-  try {
-    profile = requireSelectableAgentProfile(profileId);
-  } catch (error) {
-    if (error instanceof SelectableAgentProfileError) {
-      throw new AgentNodeEditError(error.message);
-    }
-    throw error;
-  }
-  return {
-    ...data,
-    agentBinding: {
-      kind: 'external',
-      profileId: profile.id,
-      alias: profile.alias,
-    },
-  };
+  if (profile.id === HUABU_AGENT_PROFILE_ID) return { kind: 'internal' };
+  return { kind: 'external', profileId: profile.id, alias: profile.alias };
+}
+
+export async function withDefaultAgentBinding(
+  data: Record<string, unknown>,
+  resolveDefault: () => Promise<Record<string, unknown>> = defaultAgentBinding,
+): Promise<Record<string, unknown>> {
+  if (data.agentBinding) return data;
+  return { ...data, agentBinding: await resolveDefault() };
 }
 
 export function validateAgentNodeEditableData(
@@ -151,7 +138,7 @@ export async function initializeAgentNodeCreationAlreadyLocked(
   if (applyDefault && !node.data.agentBinding) {
     return {
       ...node,
-      data: withDefaultAgentBinding(node.data),
+      data: await withDefaultAgentBinding(node.data),
     };
   }
   return node;

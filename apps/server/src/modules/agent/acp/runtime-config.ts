@@ -1,13 +1,11 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { existsSync, readFileSync } from 'node:fs';
-
 import { externalAgentRuntimeConfigSchema } from '@huabu/shared';
 
-import { atomicWriteJson } from '../../../utils/fs.js';
 import { getLogger } from '../../../utils/logger.js';
-import { settingsFilePath } from '../../identity/personal-settings.js';
+import { settingsRecordKey } from '../../identity/personal-settings.js';
+import { getServerRecords } from '../../storage/index.js';
 
 import type { ExternalAgentRuntimeConfig } from '@huabu/shared';
 
@@ -19,36 +17,33 @@ export const DEFAULT_EXTERNAL_AGENT_RUNTIME_CONFIG: ExternalAgentRuntimeConfig =
 
 const log = getLogger('external-agent-runtime-config');
 
-function configPath(): string {
-  return settingsFilePath('external-agent-runtime-config.json');
-}
-
-export function getExternalAgentRuntimeConfig(): ExternalAgentRuntimeConfig {
-  const path = configPath();
-  if (!existsSync(path)) return DEFAULT_EXTERNAL_AGENT_RUNTIME_CONFIG;
-
+export async function getExternalAgentRuntimeConfig(): Promise<ExternalAgentRuntimeConfig> {
+  const key = settingsRecordKey('external-agent-runtime');
   try {
-    const parsed = externalAgentRuntimeConfigSchema.safeParse(
-      JSON.parse(readFileSync(path, 'utf8')),
-    );
+    const stored = await getServerRecords().get(key);
+    if (stored === null) return DEFAULT_EXTERNAL_AGENT_RUNTIME_CONFIG;
+    const parsed = externalAgentRuntimeConfigSchema.safeParse(stored);
     if (parsed.success) return parsed.data;
     log.warn(
-      { path, issues: parsed.error.issues },
+      { record: key.name, issues: parsed.error.issues },
       'Invalid external-agent runtime config; using defaults',
     );
   } catch (error) {
     log.warn(
-      { path, error },
+      { record: key.name, error },
       'Unreadable external-agent runtime config; using defaults',
     );
   }
   return DEFAULT_EXTERNAL_AGENT_RUNTIME_CONFIG;
 }
 
-export function setExternalAgentRuntimeConfig(
+export async function setExternalAgentRuntimeConfig(
   value: ExternalAgentRuntimeConfig,
-): ExternalAgentRuntimeConfig {
+): Promise<ExternalAgentRuntimeConfig> {
   const parsed = externalAgentRuntimeConfigSchema.parse(value);
-  atomicWriteJson(configPath(), parsed);
+  await getServerRecords().put(
+    settingsRecordKey('external-agent-runtime'),
+    parsed,
+  );
   return parsed;
 }

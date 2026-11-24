@@ -135,6 +135,34 @@ describe('renderEnvelopeMessages', () => {
     ).toContain('<path>/project/&lt;file&gt;.tex</path>');
   });
 
+  it('omits the node id for a file quoted straight from the file browser', async () => {
+    const envelope = makeEnvelope({ text: 'Review the excerpt.' });
+    envelope.user.quotedComments = [
+      {
+        quote: 'text',
+        contextBefore: '',
+        contextAfter: '',
+        comment: 'Explain.',
+        source: {
+          kind: 'file-reference',
+          canvasId: 'space',
+          agentletId: 'device',
+          path: '/project/file.tex',
+          contentVersion: 'a'.repeat(64),
+          offsetUnit: 'utf-16',
+          from: 0,
+          to: 4,
+          loadedLength: 40,
+          complete: true,
+        },
+      },
+    ];
+    const rendered = await renderEnvelopeMessages(envelope, NO_CANVAS);
+    const text = textOf(rendered.messages[0].content);
+    expect(text).toContain('<path>/project/file.tex</path>');
+    expect(text).not.toContain('<node_id>');
+  });
+
   it('renders multiple quoted comments with escaped context without mutating user text', async () => {
     const envelope = makeEnvelope({ text: 'Compare both.' });
     envelope.user.quotedComments = [

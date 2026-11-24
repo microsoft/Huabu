@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { expect, test, type Locator } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 
 import type * as InputModule from '../src/components/Panels/ChatPanel/ChatInput';
 import type * as SessionModule from '../src/hooks/useChatSession';
@@ -14,6 +14,29 @@ const excerpt =
   'The selected passage is included automatically, without an extra confirmation click.';
 
 test.use({ hasTouch: false });
+
+/**
+ * The system-blue roles as the page resolves them: `info` is graphical
+ * emphasis (the focused composer's boundary), `info-fg` is readable text and
+ * `info-bg` the tinted surface behind it (a focused composer's source chips).
+ */
+function systemBlue(page: Page) {
+  return page.evaluate(() => {
+    const resolve = (property: 'color' | 'backgroundColor', token: string) => {
+      const probe = document.createElement('span');
+      probe.style[property] = `var(${token})`;
+      document.body.append(probe);
+      const value = getComputedStyle(probe)[property];
+      probe.remove();
+      return value;
+    };
+    return {
+      boundary: resolve('color', '--info'),
+      text: resolve('color', '--info-fg'),
+      surface: resolve('backgroundColor', '--info-bg'),
+    };
+  });
+}
 
 for (const interaction of ['mouse', 'keyboard'] as const) {
   test(`source actions preserve composer focus and selection via ${interaction}`, async ({
@@ -53,7 +76,7 @@ for (const interaction of ['mouse', 'keyboard'] as const) {
         }>,
         import(loaded('/src/store/chatStore.ts')) as Promise<typeof ChatStore>,
       ]);
-      canvas.getState()._setStateNoAutosave({
+      canvas.getState()._setStateRaw({
         canvasId: 'source-focus-canvas',
         nodes: [
           {
@@ -130,6 +153,9 @@ for (const interaction of ['mouse', 'keyboard'] as const) {
     );
     const focusedBorder = await border();
     expect(focusedBorder).not.toBe(restingBorder);
+    const blue = await systemBlue(page);
+    expect(focusedBorder).toBe(blue.boundary);
+    expect(blue.text).not.toBe(blue.boundary);
     const scrollY = await page.evaluate(() => window.scrollY);
     const selection = () =>
       textarea.evaluate((element: HTMLTextAreaElement) => [
@@ -168,9 +194,7 @@ for (const interaction of ['mouse', 'keyboard'] as const) {
         await chips.evaluateAll((elements) =>
           elements.map((element) => getComputedStyle(element).color),
         ),
-      ).toEqual(
-        Array.from({ length: await chips.count() }, () => focusedBorder),
-      );
+      ).toEqual(Array.from({ length: await chips.count() }, () => blue.text));
     }
     await expect(right.locator('[data-context-attachment]')).toHaveCount(0);
     await expect(left.locator('[data-context-attachment]')).toHaveCount(0);
@@ -194,9 +218,13 @@ async function expectSharedChipTone(sources: Locator, textbox: Locator) {
     content:
       '[data-chat-input-surface], [data-chat-context-sources] * { transition: none !important; }',
   });
+  // Included sources only: an attachment chip and the Canvas selection
+  // summary. A dashed candidate is transparent until it is added.
   const chips = sources.locator(
-    '[data-context-attachment], button:has(.lucide-plus), [tabindex="0"]:not([data-context-attachment] *)',
+    '[data-context-attachment], [data-context-selection]:not(button)',
   );
+  await expect(chips).not.toHaveCount(0);
+  const blue = await systemBlue(textbox.page());
   const tones = () =>
     chips.evaluateAll((elements) =>
       elements.map((element) => {
@@ -217,18 +245,14 @@ async function expectSharedChipTone(sources: Locator, textbox: Locator) {
     .toBe(1);
   const [resting] = await tones();
   await textbox.focus();
-  await expect
-    .poll(async () => {
-      const focused = await tones();
-      return (
-        focused.every(
-          (tone) =>
-            tone.background !== resting.background &&
-            tone.color !== resting.color,
-        ) && new Set(focused.map((tone) => JSON.stringify(tone))).size === 1
-      );
-    })
-    .toBe(true);
+  expect(resting.background).not.toBe(blue.surface);
+  expect(resting.color).not.toBe(blue.text);
+  await expect.poll(tones).toEqual(
+    Array.from({ length: await chips.count() }, () => ({
+      background: blue.surface,
+      color: blue.text,
+    })),
+  );
   const surface = textbox.locator(
     'xpath=ancestor::*[@data-chat-input-surface]',
   );
@@ -236,7 +260,7 @@ async function expectSharedChipTone(sources: Locator, textbox: Locator) {
     .poll(async () =>
       surface.evaluate((element) => getComputedStyle(element).borderTopColor),
     )
-    .toBe((await tones())[0].color);
+    .toBe(blue.boundary);
   await textbox.evaluate((element) => element.blur());
   await expect
     .poll(tones)
@@ -269,7 +293,7 @@ for (const width of [320, 520]) {
             import(loadedStore('chatStore')) as Promise<typeof ChatStore>,
           ],
         );
-        canvas.getState()._setStateNoAutosave({
+        canvas.getState()._setStateRaw({
           canvasId: 'chat-performance-canvas',
           nodes: ['Research notes', 'Product outline', 'User feedback'].map(
             (label, index) => ({
@@ -326,7 +350,7 @@ for (const width of [320, 520]) {
       const rowBounds = row.getBoundingClientRect();
       const chips = [
         ...row.querySelectorAll<HTMLElement>(
-          '[data-context-attachment], [tabindex="0"]',
+          '[data-context-attachment], [data-context-selection]',
         ),
       ];
       const rows = new Set(
@@ -349,7 +373,11 @@ for (const width of [320, 520]) {
     expect(layout.fits).toBe(true);
     expect(layout.topInset).toBe(12);
     expect(layout.textGap).toBe(10);
-    expect(layout.rows).toBe(width === 320 ? 2 : 1);
+    // Three chips, each at most 160px wide: the excerpt, the upload, and the
+    // Canvas selection summary with its own remove control. At 320px the
+    // 262px row holds only one of them per line; at 520px all three fit.
+    expect(layout.widths).toHaveLength(3);
+    expect(layout.rows).toBe(width === 320 ? 3 : 1);
     expect(layout.rowHeight).toBe(layout.rows * 24 + (layout.rows - 1) * 4);
     for (const chipWidth of layout.widths)
       expect(chipWidth).toBeLessThanOrEqual(160);
@@ -476,7 +504,7 @@ test('adjacent source stays dashed and transparent until added, with Canvas summ
         default: typeof CanvasStore;
       }>,
     ]);
-    canvas.getState()._setStateNoAutosave({
+    canvas.getState()._setStateRaw({
       canvasId: 'candidate-canvas',
       nodes: [
         {

@@ -138,7 +138,82 @@ export function useInputModeListener(): void {
         useInputModeStore.setState({ mode: next });
       }
     };
+    const press = (e: PointerEvent) => pressedPointers.add(e.pointerId);
+    const release = (e: PointerEvent) => pressedPointers.delete(e.pointerId);
     window.addEventListener('pointerdown', handler, true);
-    return () => window.removeEventListener('pointerdown', handler, true);
+    window.addEventListener('pointerdown', press, true);
+    window.addEventListener('pointerup', release, true);
+    window.addEventListener('pointercancel', release, true);
+    // A release that happens while another window has focus never arrives.
+    // Its pointer would stay "pressed" for good and hold back every later
+    // settlement, so presses are abandoned when the window loses the user.
+    const abandon = () => {
+      if (pressedPointers.size === 0) return;
+      pressedPointers.clear();
+      window.dispatchEvent(new Event(PRESSES_ABANDONED_EVENT));
+    };
+    const abandonWhenHidden = () => {
+      if (document.visibilityState === 'hidden') abandon();
+    };
+    window.addEventListener('blur', abandon);
+    document.addEventListener('visibilitychange', abandonWhenHidden);
+    return () => {
+      window.removeEventListener('blur', abandon);
+      document.removeEventListener('visibilitychange', abandonWhenHidden);
+      window.removeEventListener('pointerdown', handler, true);
+      window.removeEventListener('pointerdown', press, true);
+      window.removeEventListener('pointerup', release, true);
+      window.removeEventListener('pointercancel', release, true);
+      pressedPointers.clear();
+    };
   }, []);
+}
+
+/** Pointers currently held down, maintained by {@link useInputModeListener}. */
+const pressedPointers = new Set<number>();
+/** Fired on window when held pointers are given up without a release. */
+const PRESSES_ABANDONED_EVENT = 'huabu:presses-abandoned';
+
+/**
+ * {@link useIsNotMouse}, except that a change made by a press is adopted only
+ * after that press has ended.
+ *
+ * The pointer mode flips on `pointerdown`. Chrome that is positioned by the
+ * mode would then move between the press and its release, and a control that
+ * was under the pointer no longer is: the click lands on nothing. Use this
+ * for geometry the user may be pressing on; use `useIsNotMouse` for
+ * everything else.
+ */
+export function usePressSettledIsNotMouse(): boolean {
+  const live = useIsNotMouse();
+  const [settled, setSettled] = useState(live);
+  useEffect(() => {
+    if (settled === live) return;
+    let timer: number | undefined;
+    // Wait for every pointer, not the first to lift: on a hybrid device a
+    // finger can come up while the mouse that pressed the chrome is still
+    // down. The check itself is deferred past the click the last release
+    // produces, which is dispatched in the same task as `pointerup`; by then
+    // `pressedPointers` is current whatever order the listeners ran in, and
+    // it also catches a press that began meanwhile.
+    const adopt = () => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        if (pressedPointers.size === 0) setSettled(live);
+      }, 0);
+    };
+    adopt();
+    // Capture phase on window: a gesture handler that stops the release from
+    // propagating must not leave the chrome at its old offset.
+    window.addEventListener('pointerup', adopt, true);
+    window.addEventListener('pointercancel', adopt, true);
+    window.addEventListener(PRESSES_ABANDONED_EVENT, adopt);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener('pointerup', adopt, true);
+      window.removeEventListener('pointercancel', adopt, true);
+      window.removeEventListener(PRESSES_ABANDONED_EVENT, adopt);
+    };
+  }, [live, settled]);
+  return settled;
 }

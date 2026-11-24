@@ -95,4 +95,56 @@ export const POSTGRES_MIGRATIONS = [
       CREATE INDEX spaces_by_parent ON spaces(workspace_id, parent_space_id);
     `,
   },
+  {
+    // Server records: the Server's own state, owned by no Workspace
+    // (ports/server-records.ts). `owner_key` is a person's opaque key, or ''
+    // for the deployment's record.
+    version: 3,
+    sql: `
+      CREATE TABLE server_records (
+        owner_key TEXT NOT NULL,
+        name TEXT NOT NULL,
+        record_json TEXT NOT NULL CHECK ((record_json::json) IS NOT NULL),
+        updated_at DOUBLE PRECISION NOT NULL,
+        PRIMARY KEY (owner_key, name)
+      );
+    `,
+  },
+  // Reliable save and node change tracking.
+  //
+  // `space_save_heads` holds a Space's version stamps and `space_save_results`
+  // one record per answered request. Both hang off the Space row, so they
+  // follow it through rename and re-parenting and are removed with it.
+  //
+  // The two counters say which nodes were written since a given point: one
+  // per Space, advanced by every node write, and the value it had at each
+  // node's last write. Rows that predate the columns share position 0.
+  {
+    version: 4,
+    sql: `
+      CREATE TABLE space_save_heads (
+        canvas_id TEXT PRIMARY KEY,
+        lineage TEXT NOT NULL,
+        floor INTEGER NOT NULL,
+        stamps_json TEXT NOT NULL CHECK ((stamps_json::json) IS NOT NULL),
+        FOREIGN KEY (canvas_id) REFERENCES spaces(canvas_id) ON DELETE CASCADE
+      );
+      CREATE TABLE space_save_results (
+        canvas_id TEXT NOT NULL,
+        principal_id TEXT NOT NULL,
+        operation_id TEXT NOT NULL,
+        digest TEXT NOT NULL,
+        at_version INTEGER NOT NULL,
+        created_at DOUBLE PRECISION NOT NULL,
+        response_json TEXT NOT NULL CHECK ((response_json::json) IS NOT NULL),
+        PRIMARY KEY (canvas_id, principal_id, operation_id),
+        FOREIGN KEY (canvas_id) REFERENCES spaces(canvas_id) ON DELETE CASCADE
+      );
+      CREATE INDEX space_save_results_by_age
+        ON space_save_results(canvas_id, created_at);
+      ALTER TABLE spaces ADD COLUMN node_change_seq BIGINT NOT NULL DEFAULT 0;
+      ALTER TABLE nodes ADD COLUMN change_seq BIGINT NOT NULL DEFAULT 0;
+      CREATE INDEX nodes_by_change ON nodes(canvas_id, change_seq);
+    `,
+  },
 ] as const;

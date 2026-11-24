@@ -439,6 +439,24 @@ export interface BaseNodeData {
    * and in the headless engine, which has no DOM to measure with.
    */
   autoHeight?: AutoHeightHint;
+  /**
+   * The box a renderer last reported for a node whose size only a renderer
+   * knows (`text`, `question`, `spacePreview`). Derived state, like
+   * {@link autoHeight}: it gives the headless engine a footprint to lay
+   * Frames out around, and tells other pages the size is already reported.
+   */
+  measuredSize?: MeasuredSizeHint;
+}
+
+/**
+ * A renderer-reported node box with proof of what it was measured against.
+ * Advisory in the same sense as {@link AutoHeightHint}.
+ */
+export interface MeasuredSizeHint {
+  width: number;
+  height: number;
+  /** The `MeasuredSizeKey` (content revision and authored width) it is valid for. */
+  measuredFor: string;
 }
 
 /** Who owns a node's height. See {@link BaseNodeData.heightMode}. */
@@ -634,6 +652,8 @@ export const FRAME_GRID_DEFAULT_COUNT = 1;
 
 /** Frame node: container for grouping other nodes */
 export interface FrameNodeData extends BaseNodeData {
+  /** Direct child IDs per numeric masonry track, separate from sibling paint order. */
+  layoutOrder?: string[][];
   type: 'frame';
   /** Layout mode applied to direct children. Defaults to `'free'`. */
   layoutMode?: FrameLayoutMode;

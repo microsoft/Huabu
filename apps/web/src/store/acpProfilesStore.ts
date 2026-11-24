@@ -409,9 +409,15 @@ export class ConversationAgentUnconfiguredError extends Error {
 
 /**
  * Report a failed conversation start. A missing Agent is a setup choice, not a
- * failure: the persistent info toast offers connecting an external Agent in
- * Settings, or Built-In Pi, which records the same explicit choice as the Agent
- * menus and then runs `retry` (when given) so the start completes with it.
+ * failure, so the persistent info toast leads into one of the two setup paths:
+ *
+ * - "Connect device" opens Settings → Devices and Agents, where a device with
+ *   external Agents is connected.
+ * - "Configure model" records Built-In Pi as the explicit choice (the same one
+ *   the Agent menus record), runs `retry` (when given) so the intended start
+ *   completes with Pi behind Settings, and opens Built-In Pi's provider
+ *   settings. Starting a conversation sends no model request, so a missing
+ *   provider surfaces in Settings rather than as a failed turn.
  */
 export function toastConversationStartError(
   error: unknown,
@@ -426,14 +432,15 @@ export function toastConversationStartError(
     tone: 'info',
     duration: 0,
     secondaryAction: {
-      label: i18n.t('errors.connectAnAgent'),
+      label: i18n.t('errors.connectDevice'),
       onClick: () => useSettingsUiStore.getState().open('agent'),
     },
     action: {
-      label: i18n.t('errors.useBuiltInPi'),
+      label: i18n.t('errors.configureModel'),
       onClick: () => {
         rememberConversationAgentBinding({ kind: 'internal' });
         retry?.();
+        useSettingsUiStore.getState().open('builtIn');
       },
     },
   });

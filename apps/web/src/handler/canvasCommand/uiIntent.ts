@@ -12,7 +12,12 @@
  * happens uniformly at the intent level (not inside command handlers).
  */
 
-import { canParentNode, getAncestorIds } from '@huabu/shared/canvas-engine';
+import {
+  admitSiblingReorder,
+  canParentNode,
+  getAncestorIds,
+  getTopLevelIds,
+} from '@huabu/shared/canvas-engine';
 
 import {
   resolveAddNodes,
@@ -323,7 +328,7 @@ export type CanvasUiIntent =
 export interface UiIntentResolution {
   commands: CanvasCommand[];
   /** Rejected gestures must notify the user without executing commands. */
-  rejectionKey?: 'layers.invalidFrameDrop';
+  rejectionKey?: 'layers.invalidFrameDrop' | 'layers.invalidReorderSelection';
   /** Trace entries to record for this intent. */
   trace: RecentAction[];
   /**
@@ -469,6 +474,22 @@ function resolveReorderSelected(
 ): UiIntentResolution {
   const selectedIds = getSelectedNodeIds(ui.nodes);
   const selectedNodes = ui.nodes.filter((n) => selectedIds.includes(n.id));
+  // The command rejects a selection that spans containers or includes a
+  // locked layer; say so instead of letting the shortcut do nothing.
+  if (
+    selectedIds.length > 0 &&
+    !admitSiblingReorder(
+      ui.nodes,
+      getTopLevelIds(ui.nodes, selectedIds),
+      intent.to,
+    ).valid
+  ) {
+    return {
+      commands: [],
+      trace: [],
+      rejectionKey: 'layers.invalidReorderSelection',
+    };
+  }
 
   return {
     commands:
@@ -505,12 +526,15 @@ function resolveDeleteNodes(
       )
     : { commands: [], trace: [] };
   return {
+    // The edges go first. Deleting a node removes its edges, and an edge
+    // named after that is gone: `DISCONNECT_EDGES` would report `not-found`
+    // and the gesture, which is one edit, would be refused as a whole.
     commands: [
+      ...disconnected.commands,
       {
         type: 'DELETE_NODES',
         nodeIds: intent.nodeIds as CanvasNodeId[],
       },
-      ...disconnected.commands,
     ],
     trace: [
       ...(toDelete.length > 0

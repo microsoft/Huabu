@@ -1,45 +1,64 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { act, type ReactNode } from 'react';
+import { act, useImperativeHandle, type ReactNode, type Ref } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 import { useAcpProfilesStore } from '@/store/acpProfilesStore';
 import useCanvasStore from '@/store/canvasStore';
 import { usePanelStore } from '@/store/panelStore';
+import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store';
 
 import { FilesPanel } from './FilesPanel';
 
+import type { AddNodeInput } from '@/handler/canvasCommand/uiIntent';
+import type * as PreviewActions from '@/store/previewWorkspace/actions';
 import type { FileListResult } from '@huabu/shared';
 import type * as ReactI18next from 'react-i18next';
 
 const mocks = vi.hoisted(() => ({
   list: vi.fn(),
+  preview: vi.fn(),
   add: vi.fn(),
   copy: vi.fn(),
+  open: vi.fn(),
   t: (key: string) => key,
 }));
 vi.mock('@/api/device-files', () => ({ listDeviceFiles: mocks.list }));
+vi.mock('@/store/previewWorkspace/actions', async (original) => ({
+  ...(await original<typeof PreviewActions>()),
+  openFileReference: mocks.open,
+  openPreviewFile: mocks.preview,
+}));
+vi.mock('@/components/Common/Loading', () => ({ Loading: () => null }));
 vi.mock('@/utils/io/clipboard', () => ({ copyToClipboard: mocks.copy }));
 vi.mock('react-i18next', async (importOriginal) => ({
   ...(await importOriginal<typeof ReactI18next>()),
   useTranslation: () => ({ t: mocks.t }),
 }));
 vi.mock('react-virtuoso', () => ({
+  // Every row is mounted here, so scrolling one into view is immediate.
   Virtuoso: <T,>({
     data,
     itemContent,
+    ref,
   }: {
     data: T[];
     itemContent: (index: number, row: T) => ReactNode;
-  }) => (
-    <div>
-      {data.map((row, index) => (
-        <div key={index}>{itemContent(index, row)}</div>
-      ))}
-    </div>
-  ),
+    ref?: Ref<{ scrollIntoView: (target: { done?: () => void }) => void }>;
+  }) => {
+    useImperativeHandle(ref, () => ({
+      scrollIntoView: ({ done }) => done?.(),
+    }));
+    return (
+      <div>
+        {data.map((row, index) => (
+          <div key={index}>{itemContent(index, row)}</div>
+        ))}
+      </div>
+    );
+  },
 }));
 let host: HTMLDivElement;
 let root: Root;
@@ -61,7 +80,26 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.copy.mockResolvedValue(undefined);
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
-  useCanvasStore.setState({ canvasId: 'canvas-files', addNode: mocks.add });
+  mocks.add.mockImplementation((input: AddNodeInput) => {
+    useCanvasStore.setState((state) => ({
+      nodes: [
+        ...state.nodes,
+        {
+          id: input.id ?? 'new-file',
+          type: input.nodeType,
+          position: { x: 0, y: 0 },
+          data: input.data ?? {},
+        },
+      ],
+    }));
+  });
+  useCanvasStore.setState({
+    canvasId: 'canvas-files',
+    addNode: mocks.add,
+    nodes: [],
+    isLoading: false,
+    canvasAccess: { canvasId: 'canvas-files', write: true, manage: true },
+  });
   usePanelStore.getState().openFiles({
     canvasId: 'canvas-files',
     agentletId: 'device',
@@ -119,7 +157,20 @@ it('loads directories lazily, deduplicates mutation-overlapping pages and create
     path: '/root/folder',
     showHidden: false,
   });
-  await click('files.add');
+  // A file opens in Preview on click; nothing lands on the canvas for it.
+  await click('file.txt');
+  expect(mocks.preview).toHaveBeenCalledWith({
+    agentletId: 'device',
+    path: '/root/file.txt',
+    deviceName: 'Remote',
+  });
+  expect(mocks.add).not.toHaveBeenCalled();
+  await openMenu('file.txt');
+  const addItem = [
+    ...document.querySelectorAll<HTMLElement>('[role="menuitem"]'),
+  ].find((element) => element.textContent === 'files.addToSpace');
+  if (!addItem) throw new Error('Missing add to canvas');
+  await act(async () => addItem.click());
   expect(mocks.add).toHaveBeenCalledWith(
     expect.objectContaining({
       nodeType: 'fileReference',
@@ -160,6 +211,116 @@ it('discards late directory replies after the browsing target changes', async ()
   expect(signal.aborted).toBe(true);
   await act(async () => resolve(page([file])));
   expect(host.textContent).not.toContain('file.txt');
+});
+
+async function openLocationMenu() {
+  const trigger = [...host.querySelectorAll('button')].find((button) =>
+    button.getAttribute('aria-label')?.startsWith('files.location'),
+  );
+  if (!trigger) throw new Error('Missing location menu');
+  await act(async () => trigger.click());
+}
+
+it('groups folders first at every level without losing entries across pagination or changing cached order', async () => {
+  const entry = (
+    name: string,
+    kind: FileListResult['entries'][number]['kind'],
+    parent = '/root',
+  ) => ({ name, path: `${parent}/${name}`, kind });
+  const initial = [
+    entry('.hidden', 'file'),
+    entry('a.txt', 'file'),
+    entry('b-link', 'symlink'),
+    entry('c-special', 'other'),
+    entry('m-folder', 'directory'),
+    entry('n.txt', 'file'),
+  ];
+  const children = [
+    entry('a.txt', 'file', '/root/m-folder'),
+    entry('nested', 'directory', '/root/m-folder'),
+    entry('z.txt', 'file', '/root/m-folder'),
+  ];
+  const continuation = [
+    entry('n.txt', 'file'),
+    entry('y-folder', 'directory'),
+    entry('z.txt', 'file'),
+  ];
+  mocks.list
+    .mockResolvedValueOnce(page(initial, 'root-next'))
+    .mockResolvedValueOnce({
+      path: '/root/m-folder',
+      parentPath: '/root',
+      entries: children,
+    })
+    .mockResolvedValueOnce(page(continuation));
+  const visiblePaths = () =>
+    [...host.querySelectorAll('span[title]')].map((span) =>
+      span.getAttribute('title'),
+    );
+  await act(async () => root.render(<FilesPanel />));
+  expect(visiblePaths()).toEqual([
+    '/root/m-folder',
+    '/root/.hidden',
+    '/root/a.txt',
+    '/root/b-link',
+    '/root/c-special',
+    '/root/n.txt',
+  ]);
+  expect(mocks.list).toHaveBeenCalledOnce();
+  await click('m-folder');
+  expect(visiblePaths()).toEqual([
+    '/root/m-folder',
+    '/root/m-folder/nested',
+    '/root/m-folder/a.txt',
+    '/root/m-folder/z.txt',
+    '/root/.hidden',
+    '/root/a.txt',
+    '/root/b-link',
+    '/root/c-special',
+    '/root/n.txt',
+  ]);
+  expect(host.querySelector('[data-file-index="9"]')?.textContent).toBe(
+    'files.more',
+  );
+  await click('files.more');
+  expect(mocks.list.mock.calls.at(-1)?.[1]).toEqual({
+    path: '/root',
+    showHidden: false,
+    cursor: 'root-next',
+  });
+  expect(visiblePaths()).toEqual([
+    '/root/m-folder',
+    '/root/m-folder/nested',
+    '/root/m-folder/a.txt',
+    '/root/m-folder/z.txt',
+    '/root/y-folder',
+    '/root/.hidden',
+    '/root/a.txt',
+    '/root/b-link',
+    '/root/c-special',
+    '/root/n.txt',
+    '/root/z.txt',
+  ]);
+  expect(host.textContent).not.toContain('files.more');
+  expect(initial.map(({ name }) => name)).toEqual([
+    '.hidden',
+    'a.txt',
+    'b-link',
+    'c-special',
+    'm-folder',
+    'n.txt',
+  ]);
+  expect(children.map(({ name }) => name)).toEqual([
+    'a.txt',
+    'nested',
+    'z.txt',
+  ]);
+  expect(continuation.map(({ name }) => name)).toEqual([
+    'n.txt',
+    'y-folder',
+    'z.txt',
+  ]);
+  expect(mocks.list).toHaveBeenCalledTimes(3);
 });
 
 function rowFor(name: string) {
@@ -220,6 +381,9 @@ it('replaces native row menus with three metadata copy actions but retains nativ
       'files.copyName',
       'files.copyRelativePath',
       'files.copyFullPath',
+      ...(entry.kind === 'file'
+        ? ['files.openPreview', 'files.addToSpace']
+        : ['files.openHere']),
     ]);
     await selectCopy('files.copyName', entry.name);
     await openMenu(entry.name);
@@ -227,6 +391,13 @@ it('replaces native row menus with three metadata copy actions but retains nativ
     await openMenu(entry.name);
     await selectCopy('files.copyFullPath', entry.path);
   }
+  // The path field only exists while a path is being typed.
+  await openLocationMenu();
+  const enterPath = [
+    ...document.querySelectorAll<HTMLElement>('[role="menuitem"]'),
+  ].find((element) => element.textContent === 'files.enterPath');
+  if (!enterPath) throw new Error('Missing enter path action');
+  await act(async () => enterPath.click());
   const input = host.querySelector('input[aria-label="files.path"]');
   if (!input) throw new Error('Missing path input');
   const nativeMenu = new MouseEvent('contextmenu', {
@@ -426,4 +597,301 @@ it('preserves file dragging and retires the menu when the browsing root changes'
     }),
   );
   expect(document.querySelector('[role="menu"]')).toBeNull();
+});
+
+it('keeps the listing and open folders on screen while refreshing, and loads folders independently', async () => {
+  const folder = (name: string) => ({
+    name,
+    path: `/root/${name}`,
+    kind: 'directory' as const,
+  });
+  const pendingReplies: Array<(value: FileListResult) => void> = [];
+  const deferred = () =>
+    new Promise<FileListResult>((done) => {
+      pendingReplies.push(done);
+    });
+  mocks.list
+    .mockResolvedValueOnce(page([folder('a'), folder('b')]))
+    .mockImplementationOnce(deferred)
+    .mockImplementationOnce(deferred);
+  await act(async () => root.render(<FilesPanel />));
+
+  // Two folders load at once; neither disables the other or adds a banner.
+  await click('a');
+  await click('b');
+  expect(mocks.list).toHaveBeenCalledTimes(3);
+  expect(host.querySelector('[role="status"]')).toBeNull();
+  expect(host.querySelector('button[disabled]')).toBeNull();
+  await act(async () => pendingReplies[0]?.(page([file])));
+  await act(async () => pendingReplies[1]?.(page([])));
+  expect(host.textContent).toContain('file.txt');
+
+  // Refresh re-lists the root and both open folders without blanking.
+  pendingReplies.length = 0;
+  mocks.list.mockImplementation(deferred);
+  await openLocationMenu();
+  const refresh = [
+    ...document.querySelectorAll<HTMLElement>('[role="menuitem"]'),
+  ].find((element) => element.textContent === 'files.refresh');
+  if (!refresh) throw new Error('Missing refresh');
+  await act(async () => refresh.click());
+  expect(mocks.list.mock.calls.slice(3).map((call) => call[1].path)).toEqual([
+    '/root',
+    '/root/a',
+    '/root/b',
+  ]);
+  expect(host.textContent).toContain('file.txt');
+  expect(host.querySelector('[role="status"]')).toBeNull();
+  await act(async () => {
+    pendingReplies[0]?.(page([folder('a')]));
+    pendingReplies[1]?.(page([{ ...file, name: 'fresh.txt' }]));
+    pendingReplies[2]?.(page([]));
+  });
+  expect(host.textContent).toContain('fresh.txt');
+  expect(host.textContent).not.toContain('file.txt');
+  expect(
+    rowFor('a').querySelector('button')?.getAttribute('aria-expanded'),
+  ).toBe('true');
+  expect(() => rowFor('b')).toThrow();
+});
+
+it('starts browsing without a typed path: the remembered directory, else the device root', async () => {
+  usePanelStore.setState({ filesLocation: null, filesLastPaths: {} });
+  mocks.list.mockResolvedValue(page([]));
+  await act(async () => root.render(<FilesPanel />));
+  expect(mocks.list.mock.calls.at(-1)?.[1].path).toBe('/');
+  expect(usePanelStore.getState().filesLocation).toMatchObject({
+    agentletId: 'device',
+    path: '/',
+  });
+
+  await act(async () =>
+    usePanelStore.getState().openFiles({
+      canvasId: 'canvas-files',
+      agentletId: 'device',
+      path: '/projects',
+    }),
+  );
+  await act(async () => usePanelStore.setState({ filesLocation: null }));
+  expect(usePanelStore.getState().filesLocation?.path).toBe('/projects');
+});
+
+it('falls back to the device root when the remembered directory can no longer be listed', async () => {
+  usePanelStore.setState({
+    filesLocation: null,
+    filesLastPaths: { 'canvas-files\ndevice': '/gone' },
+  });
+  mocks.list
+    .mockRejectedValueOnce(new Error('ENOENT'))
+    .mockResolvedValueOnce(page([file]));
+  await act(async () => root.render(<FilesPanel />));
+  expect(mocks.list.mock.calls.map((call) => call[1].path)).toEqual([
+    '/gone',
+    '/',
+  ]);
+  expect(host.querySelector('[role="alert"]')).toBeNull();
+  expect(host.textContent).toContain('file.txt');
+});
+
+it('highlights the file open in Preview', async () => {
+  mocks.list.mockResolvedValueOnce(page([file]));
+  await act(async () => root.render(<FilesPanel />));
+  const preview = usePreviewWorkspaceStore.getState();
+  const before = preview.workspace;
+  try {
+    await act(async () => {
+      usePreviewWorkspaceStore.setState({ canvasId: 'canvas-files' });
+      usePreviewWorkspaceStore.getState().openPreviewTarget({
+        kind: 'file',
+        canvasId: 'canvas-files',
+        agentletId: 'device',
+        path: file.path,
+      });
+    });
+    expect(
+      rowFor(file.name).querySelector('button')?.getAttribute('aria-current'),
+    ).toBe('true');
+  } finally {
+    usePreviewWorkspaceStore.setState({ workspace: before });
+  }
+});
+
+it('shows where the folder sits and goes up one level from the location menu', async () => {
+  usePanelStore.getState().openFiles({
+    canvasId: 'canvas-files',
+    agentletId: 'device',
+    path: '/Users/me/code',
+  });
+  mocks.list.mockImplementation(
+    async (_agentletId: string, args: { path: string }) => ({
+      path: args.path,
+      parentPath: args.path.slice(0, args.path.lastIndexOf('/')) || '/',
+      entries: [],
+    }),
+  );
+  await act(async () => root.render(<FilesPanel />));
+  await openLocationMenu();
+  const items = () => [
+    ...document.querySelectorAll<HTMLElement>('[role="menuitem"]'),
+  ];
+  expect(items().map((item) => item.textContent)).toEqual([
+    '/Users/me/code',
+    'files.openParent',
+    'files.enterPath',
+    'files.refresh',
+  ]);
+  // The path itself is the copy action.
+  await act(async () => items()[0]?.click());
+  expect(mocks.copy).toHaveBeenLastCalledWith('/Users/me/code');
+  expect(document.querySelector('[role="menu"]')).toBeNull();
+
+  await openLocationMenu();
+  await act(async () => items()[1]?.click());
+  expect(usePanelStore.getState().filesLocation?.path).toBe('/Users/me');
+  expect(document.querySelector('[role="menu"]')).toBeNull();
+});
+
+it('makes a folder the root of the tree from its menu', async () => {
+  mocks.list.mockResolvedValue(
+    page([{ name: 'folder', path: '/root/folder', kind: 'directory' }]),
+  );
+  await act(async () => root.render(<FilesPanel />));
+  await openMenu('folder');
+  const openHere = [
+    ...document.querySelectorAll<HTMLElement>('[role="menuitem"]'),
+  ].find((element) => element.textContent === 'files.openHere');
+  if (!openHere) throw new Error('Missing open here');
+  await act(async () => openHere.click());
+  expect(usePanelStore.getState().filesLocation?.path).toBe('/root/folder');
+});
+
+it('returns to the device the Space browsed last, unless it is no longer connected', async () => {
+  const device = (agentletId: string) => ({
+    agentletId,
+    displayName: agentletId,
+    connectedAt: '',
+    version: '1',
+    profileCount: 0,
+  });
+  useAcpProfilesStore.setState({
+    connectedDevices: [device('laptop'), device('server')],
+    folderPickerAgentletId: 'laptop',
+  });
+  usePanelStore.setState({ filesLocation: null, filesLastPaths: {} });
+  mocks.list.mockResolvedValue(page([]));
+  const { openFiles } = usePanelStore.getState();
+  openFiles({ canvasId: 'other-space', agentletId: 'laptop', path: '/x' });
+  openFiles({ canvasId: 'canvas-files', agentletId: 'laptop', path: '/a' });
+  openFiles({ canvasId: 'canvas-files', agentletId: 'server', path: '/srv' });
+  usePanelStore.setState({ filesLocation: null });
+
+  await act(async () => root.render(<FilesPanel />));
+  expect(usePanelStore.getState().filesLocation).toMatchObject({
+    agentletId: 'server',
+    path: '/srv',
+  });
+
+  // With that device gone, this machine comes first again.
+  await act(async () => {
+    useAcpProfilesStore.setState({ connectedDevices: [device('laptop')] });
+    usePanelStore.setState({ filesLocation: null });
+  });
+  expect(usePanelStore.getState().filesLocation).toMatchObject({
+    agentletId: 'laptop',
+    path: '/a',
+  });
+});
+
+it('previews a file on click or keyboard activation without touching the Space', async () => {
+  mocks.list.mockResolvedValueOnce(page([file]));
+  await act(async () => root.render(<FilesPanel />));
+  const button = rowFor(file.name).querySelector('button');
+  if (!button) throw new Error('Missing file button');
+  const reference = {
+    agentletId: 'device',
+    path: file.path,
+    deviceName: 'Remote',
+  };
+  await act(async () =>
+    button.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 })),
+  );
+  expect(mocks.preview).toHaveBeenLastCalledWith(reference);
+  // Enter and Space arrive as a click with no pointer detail.
+  await act(async () =>
+    button.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 0 })),
+  );
+  expect(mocks.preview).toHaveBeenCalledTimes(2);
+  expect(mocks.open).not.toHaveBeenCalled();
+  expect(mocks.add).not.toHaveBeenCalled();
+
+  // Adding a reference card is an explicit choice from the menu.
+  await openMenu(file.name);
+  const openItem = [
+    ...document.querySelectorAll<HTMLElement>('[role="menuitem"]'),
+  ].find((item) => item.textContent === 'files.openPreview');
+  if (!openItem) throw new Error('Missing open action');
+  await act(async () => openItem.click());
+  expect(mocks.open).toHaveBeenLastCalledWith(
+    'canvas-files',
+    reference,
+    file.name,
+  );
+});
+
+it('disables explicit creation and dragging in read-only Spaces and displays open failures', async () => {
+  useCanvasStore.setState({
+    canvasAccess: { canvasId: 'canvas-files', write: false, manage: false },
+  });
+  mocks.list.mockResolvedValueOnce(page([file]));
+  mocks.open.mockImplementationOnce(() => {
+    throw new Error('Read-only Space');
+  });
+  await act(async () => root.render(<FilesPanel />));
+  expect(host.querySelector('[draggable="true"]')).toBeNull();
+  // Looking at a file needs no write access.
+  await click(file.name);
+  expect(mocks.preview).toHaveBeenCalledOnce();
+  await openMenu(file.name);
+  const add = [
+    ...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'),
+  ].find((item) => item.textContent === 'files.addToSpace');
+  expect(add?.disabled).toBe(true);
+  const openItem = [
+    ...document.querySelectorAll<HTMLElement>('[role="menuitem"]'),
+  ].find((item) => item.textContent === 'files.openPreview');
+  if (!openItem) throw new Error('Missing open action');
+  await act(async () => openItem.click());
+  expect(host.querySelector('[role="alert"]')?.textContent).toBe(
+    'Read-only Space',
+  );
+  expect(mocks.add).not.toHaveBeenCalled();
+});
+
+it('moves focus between rows with the arrow, Home and End keys', async () => {
+  mocks.list.mockResolvedValueOnce(
+    page([
+      { name: 'folder', path: '/root/folder', kind: 'directory' },
+      { name: 'socket', path: '/root/socket', kind: 'other' },
+      file,
+    ]),
+  );
+  await act(async () => root.render(<FilesPanel />));
+  const focusable = (index: number) =>
+    host.querySelector<HTMLElement>(`[data-file-index="${index}"]`);
+  const press = async (key: string) =>
+    act(async () => {
+      document.activeElement?.dispatchEvent(
+        new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }),
+      );
+    });
+  await act(async () => focusable(0)?.focus());
+  // The row in between is neither a file nor a folder and is skipped.
+  await press('ArrowDown');
+  expect(document.activeElement?.textContent).toBe(file.name);
+  await press('Home');
+  expect(document.activeElement?.textContent).toBe('folder');
+  await press('End');
+  expect(document.activeElement?.textContent).toBe(file.name);
+  await press('ArrowUp');
+  expect(document.activeElement?.textContent).toBe('folder');
 });

@@ -1,24 +1,33 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import { createReadStream, createWriteStream } from 'node:fs';
-import { mkdtemp, readFile, rename, rm } from 'node:fs/promises';
-import { dirname, join, resolve } from 'node:path';
+import { mkdir, mkdtemp, readFile, rename, rm } from 'node:fs/promises';
+import { basename, dirname, join, resolve } from 'node:path';
 import { Readable, Writable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
+import { setTimeout as delay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 
 import { CommanderError } from 'commander';
 
-import { RFS_HEADERS, RFS_SKILL_CLIENT_HEADER } from '@huabu/shared';
+import {
+  RFS_HEADERS,
+  RFS_SKILL_CLIENT_HEADER,
+  agentTurnAcceptedSchema,
+  spaceQueryResponseSchema,
+} from '@huabu/shared';
 import { serviceParamsSchema } from '@huabu/shared/service-package';
 
 import {
   createRfsProgram,
   segment,
   type InputOptions,
+  type ExecuteOptions,
   type DownloadOptions,
+  type SnapshotOptions,
   type UploadOptions,
 } from './rfs-cli.js';
 import { installServicePackage } from './rfs-service.js';
@@ -104,13 +113,21 @@ async function deliver(
   end: boolean,
   maximumBytes = Infinity,
   onChunk?: (received: number) => void,
+  prefix = '',
 ) {
   async function* bytes() {
-    if (!response.body) return;
-    const reader = response.body.getReader();
+    const reader = response.body?.getReader();
     let received = 0;
     try {
-      while (true) {
+      if (prefix) {
+        const bytes = Buffer.from(prefix);
+        received += bytes.byteLength;
+        if (received > maximumBytes)
+          throw new Error('Service archive exceeds download size limit');
+        onChunk?.(received);
+        yield bytes;
+      }
+      while (reader) {
         const result = await reader.read();
         if (result.done) return;
         received += result.value.byteLength;
@@ -120,14 +137,71 @@ async function deliver(
         yield result.value;
       }
     } finally {
-      try {
-        await reader.cancel();
-      } finally {
-        reader.releaseLock();
+      if (reader) {
+        try {
+          await reader.cancel();
+        } finally {
+          reader.releaseLock();
+        }
       }
     }
   }
   await pipeline(Readable.from(bytes()), destination, { end });
+}
+
+async function readAcceptance(response: Response, threadId: string) {
+  if (
+    !response.headers.get('content-type')?.includes('text/event-stream') ||
+    !response.body
+  ) {
+    throw new Error('Expected an Agent acceptance event stream');
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) throw new Error('Stream ended without confirmed acceptance');
+      buffer += decoder.decode(value, { stream: true });
+      let separator: RegExpExecArray | null;
+      while ((separator = /\r?\n\r?\n/.exec(buffer))) {
+        const frame = buffer.slice(0, separator.index);
+        buffer = buffer.slice(separator.index + separator[0].length);
+        if (frame.length > 65536)
+          throw new Error('Agent event exceeds size limit');
+        let type = '';
+        const data = [];
+        for (const line of frame.split(/\r?\n/)) {
+          if (line.startsWith('event:')) type = line.slice(6).trim();
+          if (line.startsWith('data:'))
+            data.push(line.slice(5).replace(/^ /, ''));
+        }
+        if (type === 'accepted') {
+          const acceptance = agentTurnAcceptedSchema.parse(
+            JSON.parse(data.join('\n')),
+          );
+          if (acceptance.threadId !== threadId) {
+            throw new Error(
+              'Acceptance Thread does not match the requested Thread',
+            );
+          }
+          return acceptance;
+        }
+        if (['error', 'done', 'end'].includes(type)) {
+          throw new Error(`Agent emitted ${type} before confirmed acceptance`);
+        }
+      }
+      if (buffer.length > 65536)
+        throw new Error('Agent event exceeds size limit');
+    }
+  } finally {
+    try {
+      await reader.cancel();
+    } finally {
+      reader.releaseLock();
+    }
+  }
 }
 
 function downloadRevision(response: Response): string | undefined {
@@ -150,6 +224,7 @@ function downloadMetadata(response: Response) {
   const src = response.headers.get(RFS_HEADERS.src);
   const locked = response.headers.get(RFS_HEADERS.locked);
   const edges = response.headers.get(RFS_HEADERS.edges);
+  const basis = response.headers.get(RFS_HEADERS.basis);
   const node =
     id && type
       ? {
@@ -166,6 +241,7 @@ function downloadMetadata(response: Response) {
       ? { size }
       : {}),
     ...(revision === undefined ? {} : { revision }),
+    ...(basis === null ? {} : { basis }),
     ...(contentType === null ? {} : { contentType }),
     ...(node === undefined ? {} : { node }),
   };
@@ -176,6 +252,49 @@ function cliErrorBody(body: string): string {
     .replace('curl -fsS "$HUABU_RFS_URL/skill"', 'huabu-rfs get-skill')
     .replace('curl -fsS \\"$HUABU_RFS_URL/skill\\"', 'huabu-rfs get-skill');
 }
+
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** The top-level string field of a JSON object body, if it has one. */
+function declaredField(bytes: Buffer, name: string): string | undefined {
+  try {
+    const value: unknown = JSON.parse(bytes.toString());
+    if (value === null || typeof value !== 'object') return undefined;
+    const field = (value as Record<string, unknown>)[name];
+    return typeof field === 'string' ? field : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Whether an error body is the Server saying it cannot tell what happened. */
+function outcomeUnknown(body: Buffer): boolean {
+  return declaredField(body, 'code') === 'operation-outcome-unknown';
+}
+
+/**
+ * How `execute` retries. Every attempt re-sends the same request id and the
+ * same bytes, so the Server applies the request at most once.
+ */
+export interface ExecuteRetryPolicy {
+  /** Most attempts, the first included. */
+  attempts: number;
+  /** Time allowed for all attempts and the waits between them. */
+  budgetMs: number;
+  /** Time allowed for one attempt. */
+  attemptTimeoutMs: number;
+  /** Wait before attempt 2, 3, …; the last entry repeats. */
+  backoffMs: readonly number[];
+}
+
+const EXECUTE_RETRY: ExecuteRetryPolicy = {
+  attempts: 4,
+  // An execute may import remote media before it writes; allow a slow one.
+  budgetMs: 300_000,
+  attemptTimeoutMs: 120_000,
+  backoffMs: [1000, 2000, 4000],
+};
 
 function streamBody(source: Readable): ReadableStream<Uint8Array> {
   const iterator = source[Symbol.asyncIterator]();
@@ -203,6 +322,8 @@ export interface RfsIO {
   stderr?: Writable;
   signal?: AbortSignal;
   helpTimeoutMs?: number;
+  /** Overrides for the `execute` retry policy. */
+  executeRetry?: Partial<ExecuteRetryPolicy>;
 }
 
 export async function runRfs(args: string[], io: RfsIO = {}): Promise<number> {
@@ -216,6 +337,8 @@ export async function runRfs(args: string[], io: RfsIO = {}): Promise<number> {
     : controller.signal;
   let mutation = false;
   let sent = false;
+  /** Request id of the execute in flight, for the failure report. */
+  let executeOperationId: string | undefined;
   let uploadStream: Readable | undefined;
   let temporary: string | undefined;
   const diagnostic = (message: string) =>
@@ -233,8 +356,11 @@ export async function runRfs(args: string[], io: RfsIO = {}): Promise<number> {
     download?: DownloadOptions;
     usage?: string;
     service?: { id: string; folder: string };
+    acceptedThread?: string;
   }
   async function send(request: Request) {
+    if (request.download && !request.download.output)
+      throw new Error('--output must be nonempty');
     const config = connection(env);
     const headers: Record<string, string> = {
       ...config.headers,
@@ -259,7 +385,9 @@ export async function runRfs(args: string[], io: RfsIO = {}): Promise<number> {
       body: request.body,
       duplex: request.duplex,
       redirect: 'manual',
-      signal,
+      signal: request.acceptedThread
+        ? AbortSignal.any([signal, AbortSignal.timeout(60000)])
+        : signal,
     };
     const response = await fetch(`${config.base}${request.path}`, init);
     const download = request.download;
@@ -286,7 +414,9 @@ export async function runRfs(args: string[], io: RfsIO = {}): Promise<number> {
       code = 1;
       return;
     }
-    if (response.ok && request.service) {
+    if (request.acceptedThread) {
+      event(await readAcceptance(response, request.acceptedThread));
+    } else if (response.ok && request.service) {
       const target = await installServicePackage(
         request.service.id,
         request.service.folder,
@@ -303,6 +433,8 @@ export async function runRfs(args: string[], io: RfsIO = {}): Promise<number> {
     } else if (download) {
       const target = resolve(download.output);
       const metadata = downloadMetadata(response);
+      if (metadata.size !== undefined)
+        metadata.size += Buffer.byteLength(request.usage ?? '');
       temporary = await mkdtemp(join(dirname(target), '.huabu-rfs-'));
       let received = 0;
       event({
@@ -328,6 +460,7 @@ export async function runRfs(args: string[], io: RfsIO = {}): Promise<number> {
           (value) => {
             received = value;
           },
+          request.usage,
         );
         await rename(join(temporary, 'body'), target);
       } finally {
@@ -350,6 +483,7 @@ export async function runRfs(args: string[], io: RfsIO = {}): Promise<number> {
     options: InputOptions,
     jsonOnly: boolean,
     correlate = false,
+    acceptedThread?: string,
   ) {
     const source = await input(
       options,
@@ -364,10 +498,127 @@ export async function runRfs(args: string[], io: RfsIO = {}): Promise<number> {
       headers: {
         'Content-Type': source.contentType,
         ...(options.noStart ? { 'X-Huabu-Agent-Start': 'false' } : {}),
+        ...(acceptedThread ? { 'X-Huabu-Event-Mode': 'all' } : {}),
       },
       mutation: path !== '/query',
       correlate,
+      acceptedThread,
     });
+  }
+  const rerunAdvice = (operationId: string) => {
+    diagnostic(`operation-id=${operationId}`);
+    diagnostic(
+      `Remote outcome may be unknown. Re-run the same command with --operation-id ${operationId} and the same input: it returns the original result if the request was applied, and applies it once if it was not. Do not resend without it.`,
+    );
+  };
+  async function execute(options: ExecuteOptions) {
+    const source = await input(options, stdin, true, signal);
+    if (
+      options.operationId !== undefined &&
+      !UUID_PATTERN.test(options.operationId)
+    )
+      throw new Error('--operation-id must be a UUID');
+    // The body is forwarded byte for byte, so the request id and basis
+    // travel in headers. A body that names its own request id keeps it.
+    const declared = declaredField(source.bytes, 'operationId');
+    const operationId = (
+      options.operationId ??
+      declared ??
+      randomUUID()
+    ).toLowerCase();
+    const config = connection(env);
+    const headers: Record<string, string> = {
+      ...config.headers,
+      'Content-Type': source.contentType,
+      ...(options.operationId !== undefined || declared === undefined
+        ? { [RFS_HEADERS.operationId]: operationId }
+        : {}),
+      ...(options.basis === undefined
+        ? {}
+        : { [RFS_HEADERS.basis]: header(options.basis, '--basis') }),
+    };
+    if (env.HUABU_THREAD_ID !== undefined)
+      headers['X-Huabu-Host-Thread-Id'] = header(
+        env.HUABU_THREAD_ID,
+        'HUABU_THREAD_ID',
+      );
+    else
+      diagnostic(
+        'HUABU_THREAD_ID is absent; proceeding without host-thread correlation.',
+      );
+    const policy = { ...EXECUTE_RETRY, ...io.executeRetry };
+    const started = Date.now();
+    mutation = true;
+    executeOperationId = operationId;
+    let failure = '';
+    let unknownBody: Buffer | undefined;
+    let attempt = 0;
+    while (true) {
+      attempt += 1;
+      const remaining = policy.budgetMs - (Date.now() - started);
+      const timeout = AbortSignal.timeout(
+        Math.max(1, Math.min(policy.attemptTimeoutMs, remaining)),
+      );
+      unknownBody = undefined;
+      try {
+        sent = true;
+        const response = await fetch(`${config.base}/execute`, {
+          method: 'POST',
+          headers,
+          // The same buffered bytes on every attempt.
+          body: new Uint8Array(source.bytes),
+          redirect: 'manual',
+          signal: AbortSignal.any([signal, timeout]),
+        });
+        const body = Buffer.from(await response.arrayBuffer());
+        if (response.ok) {
+          stdout.write(body);
+          executeOperationId = undefined;
+          code = 0;
+          return;
+        }
+        if (response.status !== 503 || !outcomeUnknown(body)) {
+          // A definite answer. A rejection is never retried.
+          stdout.write(cliErrorBody(body.toString()));
+          diagnostic(
+            `Request failed (status ${response.status}); response body is on stdout.`,
+          );
+          executeOperationId = undefined;
+          if (response.status >= 500) rerunAdvice(operationId);
+          code = 1;
+          return;
+        }
+        unknownBody = body;
+        failure = 'the Server could not confirm the outcome (status 503)';
+      } catch (error) {
+        // A local interrupt is not a transport failure and is not retried.
+        if (signal.aborted) throw error;
+        failure = timeout.aborted
+          ? 'no response in time'
+          : error instanceof Error
+            ? error.message
+            : String(error);
+      }
+      const wait =
+        policy.backoffMs[Math.min(attempt - 1, policy.backoffMs.length - 1)] ??
+        0;
+      if (
+        attempt >= policy.attempts ||
+        Date.now() - started + wait >= policy.budgetMs
+      )
+        break;
+      diagnostic(
+        `Attempt ${attempt} failed (${failure}); retrying with the same operation id.`,
+      );
+      await delay(wait, undefined, { signal });
+    }
+    if (unknownBody) stdout.write(cliErrorBody(unknownBody.toString()));
+    diagnostic(
+      `Request failed after ${attempt} attempt${attempt === 1 ? '' : 's'}: ${failure}.${unknownBody ? ' Response body is on stdout.' : ''}`,
+    );
+    executeOperationId = undefined;
+    rerunAdvice(operationId);
+    code = 1;
   }
   function serviceId(id: string) {
     const parsed = serviceParamsSchema.safeParse({ serviceId: id });
@@ -424,17 +675,22 @@ export async function runRfs(args: string[], io: RfsIO = {}): Promise<number> {
         cli.program.outputHelp();
         await liveHelp();
       },
-      getSkill: (id, usage) =>
+      getSkill: (id, usage, output) =>
         send({
           path: id ? `/skill/${segment(id)}` : '/skill',
           headers: SKILL_CLIENT_HEADERS,
           usage: id ? undefined : usage,
+          download: output === undefined ? undefined : { output },
         }),
       query: (options) => post('/query', options, true),
-      execute: (options) => post('/execute', options, true, true),
-      download: async (path, options) => {
-        const url = `/download/${path.split('/').map(segment).join('/')}`;
-        if (!options.output) throw new Error('--output must be nonempty');
+      execute,
+      result: (id) => {
+        if (!UUID_PATTERN.test(id))
+          throw new Error('Operation id must be a UUID');
+        return send({ path: `/execute/${id.toLowerCase()}` });
+      },
+      download: async (id, options) => {
+        const url = `/download/${id.split('/').map(segment).join('/')}`;
         await send({
           path: url,
           download: options,
@@ -449,18 +705,30 @@ export async function runRfs(args: string[], io: RfsIO = {}): Promise<number> {
                 },
         });
       },
-      upload: async (name, options: UploadOptions) => {
-        const path = `/upload/${segment(name)}`;
-        const selected =
-          Number(options.file !== undefined) + Number(options.delete === true);
-        if (selected !== 1)
-          throw new Error('Provide exactly one of --file or --delete');
+      upload: async (filename, options: UploadOptions) => {
         if (options.delete) {
-          await send({ path, method: 'DELETE', mutation: true });
+          if (options.file !== undefined) {
+            throw new Error('--delete cannot be combined with --file');
+          }
+          if (!filename) {
+            throw new Error('--delete requires an explicit <filename>');
+          }
+          await send({
+            path: `/upload/${segment(filename)}`,
+            method: 'DELETE',
+            mutation: true,
+          });
           return;
         }
         const file = options.file;
-        if (!file) throw new Error('Upload file path must be nonempty');
+        if (!file) throw new Error('Upload requires --file <path>');
+        if (file === '-' && !filename) {
+          throw new Error(
+            'Uploading from stdin (--file -) requires an explicit [filename]',
+          );
+        }
+        const resolvedName = filename ?? basename(file);
+        const path = `/upload/${segment(resolvedName)}`;
         uploadStream = file === '-' ? stdin : createReadStream(file);
         if (file !== '-') await once(uploadStream, 'open');
         await send({
@@ -472,10 +740,155 @@ export async function runRfs(args: string[], io: RfsIO = {}): Promise<number> {
           mutation: true,
         });
       },
+      snapshot: async (nodeIds: string[], options: SnapshotOptions) => {
+        if (!options.outDir) throw new Error('--out-dir must be nonempty');
+        for (const id of nodeIds) segment(id);
+
+        let maxPixels: number | undefined;
+        if (options.maxPixels !== undefined) {
+          maxPixels = Number(options.maxPixels);
+          if (
+            !Number.isInteger(maxPixels) ||
+            maxPixels < 64 ||
+            maxPixels > 4096
+          ) {
+            throw new Error(
+              '--max-pixels must be an integer between 64 and 4096',
+            );
+          }
+        }
+
+        let padding: number | undefined;
+        if (options.padding !== undefined) {
+          padding = Number(options.padding);
+          if (!Number.isInteger(padding) || padding < 0 || padding > 128) {
+            throw new Error('--padding must be an integer between 0 and 128');
+          }
+        }
+
+        const strokeSubsets = (options.strokeSubset ?? []).map((spec) => {
+          const colon = spec.indexOf(':');
+          if (colon <= 0) {
+            throw new Error(
+              '--stroke-subset must have the form <nodeId>:<strokeId1,strokeId2,...>',
+            );
+          }
+          const nodeId = spec.slice(0, colon).trim();
+          const strokeIds = spec
+            .slice(colon + 1)
+            .split(',')
+            .map((entry) => entry.trim())
+            .filter(Boolean);
+          if (!nodeId || strokeIds.length === 0) {
+            throw new Error(
+              '--stroke-subset must have the form <nodeId>:<strokeId1,strokeId2,...>',
+            );
+          }
+          return { nodeId, strokeIds };
+        });
+
+        const config = connection(env);
+        sent = true;
+        const queryResponse = await fetch(`${config.base}/query`, {
+          method: 'POST',
+          headers: {
+            ...config.headers,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            type: 'SNAPSHOT_NODES',
+            nodeIds,
+            ...(maxPixels !== undefined ? { maxPixels } : {}),
+            ...(padding !== undefined ? { padding } : {}),
+            ...(strokeSubsets.length > 0 ? { strokeSubsets } : {}),
+          }),
+          redirect: 'manual',
+          signal,
+        });
+        if (!queryResponse.ok) {
+          const body = cliErrorBody(
+            Buffer.from(await queryResponse.arrayBuffer()).toString(),
+          );
+          stdout.write(body);
+          diagnostic(
+            `Request failed (status ${queryResponse.status}); response body is on stdout.`,
+          );
+          code = 1;
+          return;
+        }
+
+        const parsed = spaceQueryResponseSchema.parse(
+          await queryResponse.json(),
+        );
+        if (parsed.type !== 'SNAPSHOT_NODES') {
+          throw new Error('Unexpected response for SNAPSHOT_NODES query');
+        }
+
+        const outDir = resolve(options.outDir);
+        await mkdir(outDir, { recursive: true });
+        const snapshots: Array<{
+          src: string;
+          output: string;
+          width: number;
+          height: number;
+          originNodeIds: string[];
+        }> = [];
+
+        for (const item of parsed.result.snapshots) {
+          const encodedSrc = segment(item.src);
+          const dlResponse = await fetch(
+            `${config.base}/download/${encodedSrc}`,
+            {
+              headers: config.headers,
+              redirect: 'manual',
+              signal,
+            },
+          );
+          if (!dlResponse.ok) {
+            const body = cliErrorBody(
+              Buffer.from(await dlResponse.arrayBuffer()).toString(),
+            );
+            diagnostic(
+              `Download failed (status ${dlResponse.status}): ${body}`,
+            );
+            code = 1;
+            return;
+          }
+          const target = join(outDir, item.src);
+          const snapTmp = await mkdtemp(join(outDir, '.huabu-rfs-'));
+          try {
+            const tmpBody = join(snapTmp, 'body');
+            await deliver(
+              dlResponse,
+              createWriteStream(tmpBody, { flags: 'wx' }),
+              true,
+            );
+            await rename(tmpBody, target);
+          } finally {
+            await rm(snapTmp, { recursive: true, force: true });
+          }
+          snapshots.push({
+            src: item.src,
+            output: target,
+            width: item.width,
+            height: item.height,
+            originNodeIds: item.originNodeIds,
+          });
+        }
+
+        stdout.write(`${JSON.stringify({ basis: parsed.basis, snapshots })}\n`);
+        code = 0;
+      },
       profiles: () => send({ path: '/agent/profiles' }),
       create: (options) => post('/agent', options, false, true),
       prompt: (thread, options) =>
-        post(`/agent/${segment(thread)}/prompt`, options, false),
+        post(
+          `/agent/${segment(thread)}/prompt`,
+          options,
+          false,
+          false,
+          options.untilAccepted ? thread : undefined,
+        ),
       services: () => send({ path: '/services' }),
       serviceSkill: (id) => send({ path: `/services/${serviceId(id)}/skill` }),
       serviceManifest: (id) =>
@@ -514,7 +927,8 @@ export async function runRfs(args: string[], io: RfsIO = {}): Promise<number> {
           ? error.message
           : String(error),
     );
-    if (mutation && sent)
+    if (executeOperationId && sent) rerunAdvice(executeOperationId);
+    else if (mutation && sent)
       diagnostic(
         'Remote outcome may be unknown. Inspect state before any further mutation; do not blindly resend.',
       );

@@ -4,6 +4,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createId, type CanvasNodeId } from '@huabu/shared';
+import { nodeRevisionOf } from '@huabu/shared/canvas-engine';
 
 import { agenetes } from './agenetes/drivers.js';
 import { buildHuabuPiWorkloadSpec } from './agenetes/pi-driver.js';
@@ -199,6 +200,12 @@ forEachProductProfile((profile, label) => {
         );
         expect(events).toHaveBeenCalledTimes(2);
         expect(events.mock.calls[1][0].data.agentNodeProjection).toBe(true);
+        // A title is node content: the update names the node's stored
+        // revision, as a load reports it.
+        const stored = await space(canvasId).nodes.read(nodeId);
+        expect(events.mock.calls[1][0].data.nodeContentRevisions).toEqual({
+          [nodeId]: nodeRevisionOf(stored?.record ?? {}),
+        });
       } finally {
         unsubscribe();
       }

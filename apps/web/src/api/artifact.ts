@@ -140,6 +140,36 @@ export async function uploadHtml(
 export { apiUrl };
 
 /**
+ * Preflight and stream a stored canvas artifact as a browser attachment
+ * download. Mirrors `exportCanvas`: `?check=true` surfaces 401/403/404
+ * errors in-app via `ApiError`, and the subsequent `<a download>` click
+ * streams bytes directly through the browser/Electron download manager
+ * without buffering large files in JS memory.
+ */
+export async function downloadArtifact(
+  canvasId: string,
+  key: string,
+  filename?: string,
+): Promise<void> {
+  const basePath = routes.canvasArtifactFile(canvasId, key);
+  await apiFetch<void>(`${basePath}?check=true`);
+
+  const params = new URLSearchParams({ download: '1' });
+  const trimmedFilename = filename?.trim();
+  if (trimmedFilename) {
+    params.set('filename', trimmedFilename);
+  }
+  const a = document.createElement('a');
+  a.href = apiUrl(`${basePath}?${params.toString()}`);
+  if (trimmedFilename) {
+    a.download = trimmedFilename;
+  }
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+/**
  * Copy an artifact from one canvas into another. Returns the new
  * artifact storage key (the bare `<id><ext>` filename) which the caller
  * can drop into the pasted node's `data.src` / `data.coverUrl`.

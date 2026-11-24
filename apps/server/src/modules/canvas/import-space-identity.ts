@@ -12,6 +12,7 @@ import {
   createId,
   interactiveViewAgentEventV1Schema,
 } from '@huabu/shared';
+import { readLayoutOrder } from '@huabu/shared/canvas-engine';
 
 import {
   rewriteImportContract,
@@ -23,7 +24,7 @@ import {
   parseFrontmatter,
   toFrontmatter,
 } from '../../utils/markdown-frontmatter.js';
-import { buildReachbackEnv } from '../agent/acp/reachback-env.js';
+import { frozenAgentEnvironment } from '../agent/acp/reachback-env.js';
 import { parseMigratableV3Records } from '../workspace/migrations/legacy/acp-sessions-v3.js';
 import { migrateAcpSessionsFile } from '../workspace/migrations/migrate-acp-sessions.js';
 
@@ -361,6 +362,18 @@ export async function remapImportedSpace(
       }
       const mapped = Object.fromEntries(
         Object.entries(value).map(([key, item]) => {
+          if (
+            key === 'layoutOrder' &&
+            /^(node-data|node-metadata)$/.test(field)
+          ) {
+            const order = readLayoutOrder({ layoutOrder: item });
+            return [
+              key,
+              order?.map((track) =>
+                rewrite(track, 'nodeIds', '', internalHistory),
+              ),
+            ];
+          }
           if (key === 'data' && /^(node|nodes)$/.test(field))
             return [key, rewrite(item, 'node-data', '', internalHistory)];
           if (key === 'patch' && field === 'patches')
@@ -373,7 +386,8 @@ export async function remapImportedSpace(
             !['interactiveView', 'origin', 'strokes'].includes(key)
           )
             return [key, typeof item === 'string' ? rewriteLinks(item) : item];
-          // Replacement deltas contain complete nodes/edges, not arbitrary prev/next values.
+          // Replacement deltas contain nodes/edges — a node whole (old
+          // history) or only its changed fields — not arbitrary prev/next values.
           if (
             (key === 'prev' || key === 'next') &&
             value.type === 'REPLACE_NODE'
@@ -460,13 +474,12 @@ export async function remapImportedSpace(
               },
             };
           } else if (isRecord(spec) && workload.kind === 'external') {
-            const env = { ...(isRecord(spec.env) ? spec.env : {}) };
-            delete env.HUABU_RFS_URL;
-            delete env.HUABU_RFS_TOKEN;
-            delete env.HUABU_THREAD_ID;
+            const env = frozenAgentEnvironment(
+              isRecord(spec.env) ? spec.env : {},
+            );
             spec = {
               ...spec,
-              env: { ...env, ...buildReachbackEnv(threadId, canvasId) },
+              env,
             };
             state = {
               ...(isRecord(state) ? state : {}),

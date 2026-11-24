@@ -5,6 +5,7 @@ import { Bot, Settings as SettingsIcon } from 'lucide-react';
 
 import {
   Callout,
+  CodeBlock,
   DocImage,
   DocLink,
   H2,
@@ -16,7 +17,7 @@ import {
 import { NODE_ICON } from '../config/nodeIcons';
 
 const toc: TocEntry[] = [
-  { id: '1-download-and-install-huabu', label: 'Download and install Huabu' },
+  { id: '1-run-huabu-from-source', label: 'Run Huabu from source' },
   { id: '2-choose-a-home-folder', label: 'Choose a Home Folder' },
   { id: '3-connect-your-agent', label: 'Connect your agent' },
   { id: '4-create-a-space', label: 'Create a Space' },
@@ -28,17 +29,32 @@ export default function QuickStart() {
   return (
     <PageLayout
       title="Quick Start"
-      description="Install Huabu, connect an agent you already use, and start working together in your first Space."
+      description="Run Huabu, connect an agent you already use, and start working together in your first Space."
       toc={toc}
     >
-      <H2>1. Download and install Huabu</H2>
+      <span id="1-download-and-install-huabu" />
+      <H2>1. Run Huabu from source</H2>
       <P>
-        Download the latest version from{' '}
-        <DocLink href="https://github.com/microsoft/Huabu/releases/latest">
-          GitHub Releases
-        </DocLink>
-        . Choose the <code>.dmg</code> package on macOS or the <code>.exe</code>{' '}
-        package on Windows, then install and launch Huabu.
+        Running from source is the recommended way to use Huabu. Desktop
+        installers are coming soon.
+      </P>
+      <P>
+        Requirements: Node.js 24.16.0+ and pnpm 10+. Get the source from{' '}
+        <DocLink href="https://github.com/microsoft/Huabu">GitHub</DocLink>,
+        then install dependencies in the repository directory:
+      </P>
+      <CodeBlock language="bash">pnpm install</CodeBlock>
+      <P>Start the desktop application:</P>
+      <CodeBlock language="bash">pnpm start:desktop</CodeBlock>
+      <P>Or start the web application:</P>
+      <CodeBlock language="bash">pnpm start:web</CodeBlock>
+      <P>
+        For the web application, open the server address printed in the
+        terminal. See the{' '}
+        <DocLink href="https://github.com/microsoft/Huabu#building-from-source">
+          README
+        </DocLink>{' '}
+        for more setup options.
       </P>
 
       <H2>2. Choose a Home Folder</H2>

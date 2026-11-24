@@ -118,6 +118,18 @@ export class PostgresSpaceRepository implements SpaceRepository {
     });
   }
 
+  async listIds(): Promise<string[]> {
+    const workspaceId = this.#workspace();
+    return (
+      await this.#context
+        .database()
+        .all(
+          `SELECT canvas_id FROM spaces WHERE workspace_id = ? AND is_world = 0`,
+          workspaceId,
+        )
+    ).map((row) => (row as { canvas_id: string }).canvas_id);
+  }
+
   async worldId(): Promise<string> {
     const workspaceId = this.#workspace();
     const database = this.#context.database();

@@ -79,6 +79,20 @@ function mount() {
   return mountAgenetes({ drivers: { external: scriptedDriver() } });
 }
 
+it('keeps older custom stores usable without silently falling back for targeted reads', async () => {
+  const turnStore = new InMemoryTurnStore();
+  Object.defineProperty(turnStore, 'get', { value: undefined });
+  const instance = mountAgenetes({
+    drivers: { external: scriptedDriver() },
+    turnStore,
+  });
+  await instance.create(deployment);
+  expect((await instance.history(ns, threadId)).turns).toEqual([]);
+  await expect(instance.historyTurn(ns, threadId, 'ref')).rejects.toThrow(
+    'does not support single-turn history reads',
+  );
+});
+
 const ns: Namespace = { name: 'canvas-1', storage: undefined };
 const threadId = 'thr_1';
 const deployment: WorkloadSpec = {
@@ -244,6 +258,10 @@ describe('Agenetes two-tier conversation log (M5.6/C3)', () => {
     });
     expect(completed.groups[1]!.id).toBe(activeId);
     expect(completed.groups[1]!.isActive).toBeUndefined();
+    expect(active.groups[1]!.turnRefs).toBeUndefined();
+    expect(
+      await inst.historyTurn(ns, threadId, completed.groups[1]!.turnRefs![0]!),
+    ).toEqual(completed.groups[1]!.turns[0]);
   });
 
   it.each([0, -1, 0.5, 1.5, NaN, Infinity])(

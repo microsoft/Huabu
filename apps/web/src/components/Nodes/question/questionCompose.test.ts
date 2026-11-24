@@ -87,7 +87,7 @@ beforeEach(() => {
   });
   vi.mocked(toast).mockClear();
   useWorkspaceStore.setState({ workspaceId: 'workspace-1' });
-  useCanvasStore.getState()._setStateNoAutosave({
+  useCanvasStore.getState()._setStateRaw({
     canvasId: 'canvas-1',
     nodes: [],
     edges: [],
@@ -151,7 +151,7 @@ it('does not create after a newer explicit tool choice supersedes consumed place
 
 describe('Question conversation presentation', () => {
   it('keeps legacy compose by awaiting a server-minted identity', async () => {
-    useCanvasStore.getState()._setStateNoAutosave({
+    useCanvasStore.getState()._setStateRaw({
       version: 1,
       nodes: [
         {
@@ -189,7 +189,7 @@ describe('Question conversation presentation', () => {
   });
 
   it('does not invent an identity when the association is rejected', async () => {
-    useCanvasStore.getState()._setStateNoAutosave({
+    useCanvasStore.getState()._setStateRaw({
       nodes: [
         {
           id: 'question-1',
@@ -317,6 +317,27 @@ describe('Question conversation presentation', () => {
     );
     expect(useChatStore.getState().threadsById).toEqual({});
     expect(usePanelStore.getState().isRightCollapsed).toBe(true);
+  });
+
+  it('abandons preview creation when its group closes while defaults load', async () => {
+    let resolveProfiles!: (value: typeof profileSnapshot) => void;
+    listProfiles.mockReturnValueOnce(
+      new Promise<typeof profileSnapshot>((resolve) => {
+        resolveProfiles = resolve;
+      }),
+    );
+    usePreviewWorkspaceStore.getState().splitGroup();
+    const groupId = usePreviewWorkspaceStore.getState().workspace.groups[1].id;
+    const addNode = vi.fn();
+    const pending = createAndCompose({
+      addNode,
+      canvasId: 'canvas-1',
+      previewOptions: { groupId, transient: false },
+    });
+    usePreviewWorkspaceStore.getState().closeEmptyGroup(groupId);
+    resolveProfiles(profileSnapshot);
+    expect(await pending).toBeNull();
+    expect(addNode).not.toHaveBeenCalled();
   });
 
   it('offers Built-In Pi without selecting it, then retries with that explicit choice', async () => {

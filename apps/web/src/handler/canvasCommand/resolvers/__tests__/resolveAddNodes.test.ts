@@ -5,6 +5,9 @@ import { assert, describe, expect, it, vi } from 'vitest';
 
 import {
   autoHeightKey,
+  applyOrderedDeltas,
+  assignNodeZIndices,
+  diffCanvasState,
   executeCanvasCommands,
   solveStructuredFrameLayout,
 } from '@huabu/shared/canvas-engine';
@@ -713,6 +716,70 @@ describe('resolveAddNodes in a Grid Frame', () => {
 });
 
 describe('resolvePasteClipboard', () => {
+  it('preserves nested sibling paint order through ID remapping, insertion and replay', () => {
+    const source: Node[] = [
+      {
+        id: 'outer',
+        type: 'frame',
+        position: { x: 0, y: 0 },
+        data: { label: 'outer', sizing: 'manual' },
+      },
+      {
+        id: 'nested',
+        type: 'frame',
+        parentId: 'outer',
+        position: { x: 20, y: 80 },
+        data: { label: 'nested', sizing: 'manual' },
+      },
+      {
+        id: 'leaf',
+        type: 'note',
+        parentId: 'nested',
+        position: { x: 20, y: 80 },
+        data: { label: 'leaf' },
+      },
+      {
+        id: 'sibling',
+        type: 'note',
+        parentId: 'outer',
+        position: { x: 20, y: 300 },
+        data: { label: 'sibling' },
+      },
+      {
+        id: 'root',
+        type: 'note',
+        position: { x: 800, y: 0 },
+        data: { label: 'root' },
+      },
+    ];
+    source[0].data.layoutMode = 'column';
+    source[0].data.layoutOrder = [['sibling', 'nested']];
+    source[1].data.frameColumn = 0;
+    source[3].data.frameColumn = 0;
+    const originalOrder = [...assignNodeZIndices(source).keys()];
+    const resolution = resolvePasteClipboard(
+      { type: 'PASTE_CLIPBOARD', clipboardNodes: source, clipboardEdges: [] },
+      ui,
+    );
+    const output = executeCanvasCommands(
+      { commands: resolution.commands, source: 'ui' },
+      { ...ui, canvasId: 'paste-order' },
+    ).writeResult;
+    expect(output.nodes.every((n) => !originalOrder.includes(n.id))).toBe(true);
+    const labels = new Map(output.nodes.map((n) => [n.id, n.data.label]));
+    const order = output.nodes.find((n) => n.data.label === 'outer')?.data
+      .layoutOrder as string[][];
+    expect(order.map((track) => track.map((id) => labels.get(id)))).toEqual([
+      ['sibling', 'nested'],
+    ]);
+    expect(
+      [...assignNodeZIndices(output.nodes).keys()].map((id) => labels.get(id)),
+    ).toEqual(originalOrder);
+    const deltas = diffCanvasState(ui, output, { orderVersion: 1 });
+    const replayed = applyOrderedDeltas(ui, JSON.parse(JSON.stringify(deltas)));
+    expect(replayed.nodes).toEqual(output.nodes);
+    expect(replayed.edges).toEqual(output.edges);
+  });
   it.each([
     {
       name: 'legacy auto',

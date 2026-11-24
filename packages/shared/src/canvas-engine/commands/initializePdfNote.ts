@@ -24,7 +24,17 @@ const initializePdfNote: CommandDefinition<Cmd> = {
       );
     }
     if (pdf.data.noteNodeId !== undefined) return noop(state, 'invalid-target');
-    const id = createId('node');
+    if (cmd.noteId !== undefined) {
+      // A page's way to agree on the id with the Server. An agent reads it
+      // from the result instead and may not state one (`commandScope.ts`).
+      if (
+        typeof cmd.noteId !== 'string' ||
+        !cmd.noteId ||
+        state.nodes.some((node) => node.id === cmd.noteId)
+      )
+        return noop(state, 'invalid-target');
+    }
+    const id = cmd.noteId ?? createId('node');
     const created = createNodes.handler(
       {
         type: 'CREATE_NODES',

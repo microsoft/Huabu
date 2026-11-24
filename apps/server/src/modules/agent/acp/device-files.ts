@@ -16,8 +16,6 @@ import { FS_MAX_RESPONSE_BYTES, supportsFsProtocol } from '@agentlet/protocol';
 
 import { proxyFsResponseSchema } from '@huabu/shared';
 
-import { requireOwnAgentlet } from '../../identity/agent-credentials.js';
-
 import type { AcpSessionEntry } from '@agenetes/acp-driver';
 import type { Namespace } from '@agenetes/protocol';
 import type { DeviceFilesBody, DeviceFilesResponse } from '@huabu/shared';
@@ -143,8 +141,8 @@ export class DeviceFilesService {
     );
   }
 
+  /** The caller has checked that it may use `body.agentletId`. */
   async execute(body: DeviceFilesBody): Promise<DeviceFilesResponse> {
-    requireOwnAgentlet(body.agentletId);
     if (
       this.disposed ||
       getAgentletGateway()?.getAgentlet(body.agentletId)?.status !== 'connected'
@@ -233,22 +231,20 @@ export class DeviceFilesService {
     });
     const operation = async (): Promise<DeviceFilesResponse> => {
       if (!session.entry || session.entry.client.isClosed) {
-        const profile = getAgentProfileRegistry()
-          ?.listProfiles()
-          .find(
-            (candidate) =>
-              candidate.agentletId === body.agentletId &&
-              candidate.visible === false &&
-              candidate.launch.kind === 'acp-harness' &&
-              candidate.launch.harnessId === 'proxy' &&
-              candidate.customData?.discoveredAgent &&
-              typeof candidate.customData.discoveredAgent === 'object' &&
-              !Array.isArray(candidate.customData.discoveredAgent) &&
-              candidate.customData.discoveredAgent.version === 1 &&
-              candidate.customData.discoveredAgent.agentletId ===
-                body.agentletId &&
-              candidate.customData.discoveredAgent.harnessId === 'proxy',
-          );
+        const profile = (await getAgentProfileRegistry()?.listProfiles())?.find(
+          (candidate) =>
+            candidate.agentletId === body.agentletId &&
+            candidate.visible === false &&
+            candidate.launch.kind === 'acp-harness' &&
+            candidate.launch.harnessId === 'proxy' &&
+            candidate.customData?.discoveredAgent &&
+            typeof candidate.customData.discoveredAgent === 'object' &&
+            !Array.isArray(candidate.customData.discoveredAgent) &&
+            candidate.customData.discoveredAgent.version === 1 &&
+            candidate.customData.discoveredAgent.agentletId ===
+              body.agentletId &&
+            candidate.customData.discoveredAgent.harnessId === 'proxy',
+        );
         if (!profile || profile.launch.kind !== 'acp-harness') {
           throw new DeviceFilesError(
             'files_proxy_missing',
@@ -256,6 +252,9 @@ export class DeviceFilesService {
             'Update Agentlet and detect installed Agents to enable Files',
           );
         }
+        // Cleanup may have run while the Profile was being looked up, before
+        // there was a proxy for it to stop.
+        this.assertCurrent(session);
         session.starting = true;
         try {
           session.entry = await ensureAcpSession({

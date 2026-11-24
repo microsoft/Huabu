@@ -263,6 +263,8 @@ export function getActivityStatus(
 export function describeActivity(groups: SegmentGroup[]): {
   details: ActivityDetail[];
   summary: ActivitySummary;
+  /** Distinct changed paths in first-change order, behind the summary count. */
+  changedPaths: string[];
 } {
   const details: ActivityDetail[] = [];
   let visibleGroupCount = 0;
@@ -310,6 +312,11 @@ export function describeActivity(groups: SegmentGroup[]): {
     visibleGroupCount++;
     stepCount += group.parts.length;
     for (const part of group.parts) {
+      if (part.detail?.state === 'deferred') {
+        for (const path of part.detail.summary.changedPaths ?? [])
+          recordChangedPath(path);
+        continue;
+      }
       if (part.variant === 'generic') {
         if (part.status !== 'completed' || part.toolKind !== 'edit') continue;
         for (const content of part.content ?? []) {
@@ -350,6 +357,7 @@ export function describeActivity(groups: SegmentGroup[]): {
       stepCount,
       changedFileCount: changedPaths.size,
     },
+    changedPaths: [...changedPaths],
   };
 }
 

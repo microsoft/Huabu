@@ -10,7 +10,13 @@
 
 import { AGENT_HOST_SSE_EVENTS, AGENT_SSE_EVENTS } from '@huabu/shared';
 
-import { ApiError, apiErrorFromResponse, apiFetch, apiUrl } from './_client';
+import {
+  AgentTurnFailedError,
+  ApiError,
+  apiErrorFromResponse,
+  apiFetch,
+  apiUrl,
+} from './_client';
 import { routes } from './_routes';
 import { readTypedSSEStream } from './_sse';
 
@@ -26,6 +32,7 @@ import type {
   AgentTurnAccepted,
   AgentChatContext,
   AgentHistoryPageResponse,
+  AgentHistoryTurnResponse,
   ChatAttachment,
   VisibleCanvasGrounding,
   ChatHistoryResponse,
@@ -200,7 +207,7 @@ async function pumpAgentStream(
       if (event.type === AGENT_SSE_EVENTS.Error) {
         terminal = 'error';
         callbacks.onError(
-          new Error(event.data.error || 'Unknown server error'),
+          new AgentTurnFailedError(event.data.error || 'Unknown server error'),
         );
         return;
       }
@@ -257,6 +264,21 @@ export const agentApi = {
       { fallbackMessage: 'Failed to load history' },
     );
   },
+
+  fetchHistoryTurn: (
+    threadId: string,
+    canvasId: string,
+    turnRef: string,
+    signal?: AbortSignal,
+  ): Promise<AgentHistoryTurnResponse> =>
+    apiFetch<AgentHistoryTurnResponse>(
+      routes.agentHistoryTurn(threadId, canvasId, turnRef),
+      {
+        signal,
+        cache: 'no-store',
+        fallbackMessage: 'Failed to load tool details',
+      },
+    ),
 
   /**
    * Realize a new thread from a source conversation so a duplicated question
@@ -373,6 +395,8 @@ export const agentApi = {
        */
       agentBinding?: AgentBinding;
       cwd?: string;
+      /** What an external draft is showing; see `AgentRequest`. */
+      initialPreferences?: AgentRequest['initialPreferences'];
       /**
        * Skill ids the user explicitly invoked by typing `/<id>` in the
        * chat input (parsed by `useInternalSlashCommands`). Forwarded
@@ -412,6 +436,7 @@ export const agentApi = {
       anchorNodeId: options?.anchorNodeId,
       agentBinding: options?.agentBinding,
       cwd: options?.cwd,
+      initialPreferences: options?.initialPreferences,
       invokedSkills: options?.invokedSkills?.length
         ? options.invokedSkills
         : undefined,
@@ -448,7 +473,10 @@ export const agentApi = {
         callbacks,
         options?.signal,
       );
-      if (!terminal) callbacks.onComplete();
+      if (!terminal) {
+        // The connection closed mid-turn; the turn may still be running.
+        throw new Error('Agent stream ended before a terminal event');
+      }
     } catch (error) {
       // Treat any error while the signal is aborted as an intentional stop
       if (options?.signal?.aborted) {

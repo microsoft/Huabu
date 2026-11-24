@@ -11,9 +11,14 @@ import { getRecentCanvasConversation } from '@/api/canvas';
 import { i18n } from '@/i18n';
 import useCanvasStore from '@/store/canvasStore';
 import { useChatStore } from '@/store/chatStore';
+import {
+  rememberPreviewedAgent,
+  useCommentDestinationMemory,
+} from '@/store/commentDestinationMemory';
 import { usePanelStore } from '@/store/panelStore';
 import { createEmptyWorkspace } from '@/store/previewWorkspace/model';
 import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store';
+import { useWorkspaceStore } from '@/store/workspaceStore';
 import { copyToClipboard } from '@/utils/io/clipboard';
 
 import { captureFileComment, FileCommentActions } from './FileCommentActions';
@@ -304,10 +309,79 @@ it('keeps an opened snapshot frozen across refresh/error and stages without navi
     },
   });
   expect(usePreviewWorkspaceStore.getState().workspace).toBe(workspace);
+  expect(useCommentDestinationMemory.getState().lastComment).toEqual({
+    kind: 'agent',
+    destination: { nodeId: 'agent', threadId: 'thread' },
+  });
   expect(usePanelStore.getState().focusChatInputRequest).toBeNull();
   expect(useCanvasStore.getState().nodes).toHaveLength(2);
   expect(notices.toast).toHaveBeenCalledOnce();
   expect(view.state.readOnly).toBe(true);
+});
+
+it('stages consecutive selections into the displayed picker choice despite later preview activity', async () => {
+  useCanvasStore.setState({
+    nodes: [
+      ...useCanvasStore.getState().nodes,
+      {
+        id: 'other',
+        type: 'question',
+        position: { x: 0, y: 0 },
+        data: { label: 'Other reader', threadId: 'other-thread' },
+      },
+    ],
+  });
+  rememberPreviewedAgent({ kind: 'node', canvasId: 'space', nodeId: 'agent' });
+  await render();
+  await act(async () => button('Comment').click());
+  await act(async () => button('Reader').click());
+  await act(async () => button('Other reader').click());
+  const write = async (text: string) => {
+    const input = document.querySelector<HTMLTextAreaElement>(
+      'textarea[aria-label="Comment"]',
+    );
+    if (!input) throw new Error('Missing Comment input');
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(
+        HTMLTextAreaElement.prototype,
+        'value',
+      )?.set?.call(input, text);
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+  };
+  await write('First');
+  await act(async () => button('Add to input').click());
+  rememberPreviewedAgent({ kind: 'node', canvasId: 'space', nodeId: 'agent' });
+  act(() => view.dispatch({ selection: { anchor: 0, head: 5 } }));
+  await act(async () => button('Comment').click());
+  expect(button('Other reader')).toBeTruthy();
+  await write('Second');
+  await act(async () => button('Add to input').click());
+  expect(
+    useChatStore
+      .getState()
+      .threadsById[
+        'other-thread'
+      ].pendingQuotedComments.map((item) => item.comment),
+  ).toEqual(['First', 'Second']);
+  expect(
+    useChatStore.getState().threadsById.thread.pendingQuotedComments,
+  ).toEqual([]);
+});
+
+it('blocks an open form across a Workspace change with identical Canvas and owner IDs', async () => {
+  await render();
+  await act(async () => button('Comment').click());
+  const previous = useWorkspaceStore.getState().workspaceId;
+  act(() => useWorkspaceStore.setState({ workspaceId: 'different-workspace' }));
+  expect((button('Add to input') as HTMLButtonElement).disabled).toBe(true);
+  expect(document.querySelector('[role="alert"]')?.textContent).toContain(
+    'unavailable',
+  );
+  expect(
+    useChatStore.getState().threadsById.thread.pendingQuotedComments,
+  ).toEqual([]);
+  act(() => useWorkspaceStore.setState({ workspaceId: previous }));
 });
 
 it('does not offer new captures while loading or showing a read failure', async () => {

@@ -34,9 +34,14 @@ import archiver from 'archiver';
 import fastify from 'fastify';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { editsPerCommand } from '@huabu/shared';
 import { autoHeightKey } from '@huabu/shared/canvas-engine';
 
 import canvasRoutes from './canvas.route.js';
+import {
+  AGENT_CREDENTIAL,
+  registerTestAgentCredential,
+} from '../../test-support/agent-credential.js';
 import { registerLocalTestIdentity } from '../../test-support/local-identity.js';
 import { refreshCanvasDirIndex } from '../storage/backends/disk/canvas-dirs.js';
 import {
@@ -86,6 +91,7 @@ function freshWorkspace(): string {
 async function buildApp(): Promise<FastifyInstance> {
   const instance = fastify();
   registerLocalTestIdentity(instance);
+  registerTestAgentCredential(instance);
   await instance.register(multipart);
   await instance.register(canvasRoutes, { prefix: '/canvas' });
   await instance.ready();
@@ -957,11 +963,32 @@ describe('per-node content routes', () => {
         .content,
     ).toContain('repaired');
 
-    const deleted = await app.inject({
+    // The sidecar route leaves the record of a node of the Space alone …
+    const ignored = await app.inject({
       method: 'DELETE',
       url: '/canvas/canvas-content-broken/nodes/node-broken',
     });
-    expect(deleted.statusCode).toBe(200);
+    expect(ignored.statusCode).toBe(200);
+    expect(
+      await space('canvas-content-broken').nodes.read('node-broken'),
+    ).not.toBeNull();
+    // … the node is deleted, with its record, by a command.
+    const deleted = await app.inject({
+      method: 'POST',
+      url: '/canvas/canvas-content-broken/execute',
+      payload: {
+        edits: editsPerCommand([
+          { type: 'DELETE_NODES', nodeIds: ['node-broken'] },
+        ]),
+      },
+    });
+    expect(deleted.statusCode, deleted.body).toBe(200);
+    expect(deleted.json().edits).toEqual([
+      expect.objectContaining({
+        applied: true,
+        results: [expect.objectContaining({ applied: true })],
+      }),
+    ]);
     expect(
       await space('canvas-content-broken').nodes.read('node-broken'),
     ).toBeNull();
@@ -1015,9 +1042,9 @@ describe('POST /canvas/:canvasId/execute', () => {
       const response = await app.inject({
         method: 'POST',
         url: '/canvas/canvas-height/execute',
+        headers: source === 'agent' ? AGENT_CREDENTIAL : {},
         payload: {
-          originator: { source },
-          commands: [
+          edits: editsPerCommand([
             {
               type: 'CREATE_NODES',
               nodes: [
@@ -1042,7 +1069,7 @@ describe('POST /canvas/:canvasId/execute', () => {
                 },
               ],
             },
-          ],
+          ]),
         },
       });
       expect(response.statusCode, response.body).toBe(200);
@@ -1070,8 +1097,7 @@ describe('POST /canvas/:canvasId/execute', () => {
         method: 'POST',
         url: '/canvas/canvas-height/execute',
         payload: {
-          originator: { source: 'ui' },
-          commands: [
+          edits: editsPerCommand([
             {
               type: 'APPLY_MEASURED_HEIGHT',
               items: [
@@ -1082,7 +1108,7 @@ describe('POST /canvas/:canvasId/execute', () => {
                 },
               ],
             },
-          ],
+          ]),
         },
       });
       expect(measured.statusCode, measured.body).toBe(200);
@@ -1110,8 +1136,7 @@ describe('POST /canvas/:canvasId/execute', () => {
       method: 'POST',
       url: '/canvas/canvas-exec/execute',
       payload: {
-        originator: { source: 'ui' },
-        commands: [
+        edits: editsPerCommand([
           {
             type: 'CREATE_NODES',
             nodes: [
@@ -1123,7 +1148,7 @@ describe('POST /canvas/:canvasId/execute', () => {
               },
             ],
           },
-        ],
+        ]),
       },
     });
 
@@ -1147,7 +1172,13 @@ describe('POST /canvas/:canvasId/execute', () => {
     const response = await app.inject({
       method: 'POST',
       url: '/canvas/canvas-absent/execute',
-      payload: { originator: { source: 'ui' }, commands: [] },
+      payload: {
+        // A request holds at least one edit; an empty one is a 400 before
+        // the Space is looked at.
+        edits: editsPerCommand([
+          { type: 'DELETE_NODES', nodeIds: ['node-absent'] },
+        ]),
+      },
     });
 
     expect(response.statusCode).toBe(404);

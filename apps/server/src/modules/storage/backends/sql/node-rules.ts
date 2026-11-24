@@ -9,6 +9,7 @@ import {
 import { sanitizeId } from '../../../../utils/fs.js';
 
 import type {
+  NodeChangePosition,
   NodePutInput,
   NodePutResult,
   NodeSnapshot,
@@ -93,4 +94,49 @@ export function decodeLabelConflict(
           ? collisionKey
           : conflictingNodeId,
   };
+}
+
+/**
+ * The sequence of node writes of one Space row.
+ *
+ * The creation time is part of the name so a Space deleted and created again
+ * under the same id — whose counter starts over — is a different sequence.
+ */
+export function nodeChangeEpoch(
+  kind: 'sqlite' | 'postgres',
+  createdAt: unknown,
+): string {
+  return `${kind}:${String(createdAt)}`;
+}
+
+/** The position a Space that does not exist reports. */
+export function absentNodeChangePosition(
+  kind: 'sqlite' | 'postgres',
+): NodeChangePosition {
+  return { epoch: `${kind}:absent`, seq: 0 };
+}
+
+/**
+ * Whether `since` can be compared with a Space's counter: the same sequence,
+ * and not ahead of it.
+ */
+export function isComparableNodeChangePosition(
+  since: NodeChangePosition | undefined,
+  current: NodeChangePosition,
+): since is NodeChangePosition {
+  return (
+    since !== undefined &&
+    since.epoch === current.epoch &&
+    Number.isSafeInteger(since.seq) &&
+    since.seq >= 0 &&
+    since.seq <= current.seq
+  );
+}
+
+/** A counter column as a number; both drivers may hand back a string or bigint. */
+export function decodeChangeSeq(value: unknown): number {
+  const seq = Number(value);
+  if (!Number.isSafeInteger(seq) || seq < 0)
+    throw new Error(`Invalid node change sequence ${String(value)}`);
+  return seq;
 }

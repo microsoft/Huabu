@@ -17,6 +17,10 @@ import {
 } from './canvas-search.js';
 import { nodePropertiesSchema, nodePropertiesPatchSchema } from './canvas.js';
 import {
+  frameLayoutPlacementSchema,
+  frameLayoutDescriptionSchema,
+} from './frame-layout.js';
+import {
   ACCENT_PALETTE,
   AGENT_CANVAS_COMMAND_TYPES,
   AGENT_CREATABLE_NODE_TYPES,
@@ -142,7 +146,15 @@ const agentNodeDataSchema = z
       .max(4096)
       .optional()
       .describe(
-        'Source pointer for media nodes: a staged upload path, an artifact key, or an HTTPS URL.',
+        'Source pointer for media nodes: an artifact key or an HTTPS URL.',
+      ),
+    coverUrl: z
+      .string()
+      .max(4096)
+      .nullable()
+      .optional()
+      .describe(
+        'PDF-only cover image shown on the card instead of the first page: an artifact key or an HTTPS image URL (png, jpg, gif, webp, avif). Pass null to restore the first-page thumbnail. An unavailable image or a non-PDF target rejects the whole request.',
       ),
     style: nodeStyleSchema.optional(),
   })
@@ -260,7 +272,7 @@ export const mergeNodeDataCommandSchema = z
   })
   .strict()
   .describe(
-    'Merge patches into node data. patch.content is the Markdown body only, never a downloaded node sidecar or YAML frontmatter. Content and authored metadata (properties, propertyDisplayKeys) require a fresh revision; use expectRev for src edits too. Read the node before content edits; inspect_nodes suffices for property edits. Native callers pass expectRev; the built-in agent injects it from the read or inspection.',
+    'Merge patches into node data. patch.content is the Markdown body only, never a downloaded node sidecar or YAML frontmatter. Only a patch that rewrites content requires a fresh revision: read the node first; native callers pass the revision of that read as expectRev, the built-in agent has it injected from the read. Custom properties (patch.properties: a per-key patch, null deletes a key; patch.propertyDisplayKeys: the display order) need no read and no expectRev: they are merged into the node as it is now, different keys never conflict and the same key is last-writer-wins. An expectRev on a patch without content is ignored. A patch entry that carries both content and properties is refused as a whole when the body revision is stale, so send properties in their own patch entry.',
   );
 
 export const setNodeParentCommandSchema = z
@@ -371,6 +383,14 @@ export const distributeNodesCommandSchema = z
 export const setFrameLayoutCommandSchema = z
   .object({
     type: z.literal('SET_FRAME_LAYOUT'),
+    placements: z
+      .array(frameLayoutPlacementSchema)
+      .min(1)
+      .max(200)
+      .optional()
+      .describe(
+        'Column/Row only, in the current mode: move direct children before/after a live child (adopting its track), or to a zero-based track start/end. Applied in list order; each moved ID must be unique. Example: [{nodeId:"B",after:"A"}]. Do not combine with cells, counts, sizing or a mode change. Missing/foreign/locked targets reject the whole command. This changes reading order, not paint order; Grid uses cells instead.',
+      ),
     frameId: z.string().min(1).describe('Target frame node ID.'),
     mode: z
       .enum(FRAME_LAYOUT_MODES)
@@ -407,7 +427,7 @@ export const setFrameLayoutCommandSchema = z
       )
       .optional()
       .describe(
-        'Where each direct child sits. A structured frame computes every child position from its cell, so `position` cannot express this — pass `cells` whenever placement matters. `column` addresses columns, `row` addresses rows, `grid` addresses both; an index for an axis the mode lacks is ignored. Children you omit keep their current cell, or are auto-assigned from their current on-screen position if they have none. Skipping a row number in one column is how you leave that cell blank in `grid`. Keep indices small and contiguous — they are positions, not labels, and a row far beyond the child count is clamped, so do not encode meaning (a year, an ID) in them.',
+        'Zero-based direct-child track/cell assignments: column mode uses column, row mode uses row, Grid uses both; inactive-axis indices are ignored. This does not specify Column/Row intra-track order; use placements in a separate command for that. Omitted children retain their cell or receive an initial automatic assignment. In Grid, skipping a row in one column leaves a blank cell. Keep indices small: they are positions, not permanent IDs, and oversized rows are clamped.',
       ),
     sizing: z
       .enum(FRAME_SIZING_MODES)
@@ -417,7 +437,9 @@ export const setFrameLayoutCommandSchema = z
       ),
   })
   .strict()
-  .describe("Set a frame's layout mode, track count, or sizing.");
+  .describe(
+    'Set Frame layout, Grid cells, or Column/Row reading order. REORDER_NODES changes paint order instead.',
+  );
 
 export const initializePdfNoteCommandSchema = z
   .object({
@@ -792,10 +814,15 @@ const spaceNodeResultSchema = z
     id: z.string(),
     type: z.enum(CANVAS_NODE_TYPES),
     label: z.string().optional(),
-    filename: z.string(),
+    filename: z
+      .string()
+      .describe(
+        'Internal Disk-tool path; external RFS callers address nodes by id.',
+      ),
     summary: z.string().optional(),
     preview: z.string().optional(),
     rev: z.string().optional(),
+    layout: frameLayoutDescriptionSchema.optional(),
     parentFrame: z
       .object({
         id: z.string(),
@@ -921,13 +948,7 @@ const snapshotNodeResultSchema = z
       .string()
       .min(1)
       .describe(
-        'Bare artifact key accepted by media-node data.src and other Huabu artifact consumers.',
-      ),
-    downloadPath: z
-      .string()
-      .min(1)
-      .describe(
-        'Canvas-relative path to pass to GET download/<path> for the PNG bytes.',
+        'Bare artifact key accepted by GET download/<id>, media-node data.src, and other Huabu artifact consumers.',
       ),
     width: z.number().int().nonnegative(),
     height: z.number().int().nonnegative(),
@@ -941,35 +962,48 @@ const snapshotNodesResultSchema = z
   })
   .strict();
 
+/**
+ * The read version of the Space a response describes: an opaque token the
+ * caller may quote back in an execute request (`basis`) so commands aimed at
+ * nodes that were deleted, recreated or moved to another parent since are
+ * rejected instead of applied.
+ */
+const basisSchema = z.string().min(1).max(128);
+
 export const spaceQueryResponseSchema = z.discriminatedUnion('type', [
   z
     .object({
       type: z.literal('GET_SPACE_OUTLINE'),
       result: outlineResultSchema,
+      basis: basisSchema,
     })
     .strict(),
   z
     .object({
       type: z.literal('INSPECT_NODES'),
       result: inspectNodesResultSchema,
+      basis: basisSchema,
     })
     .strict(),
   z
     .object({
       type: z.literal('INSPECT_EDGES'),
       result: inspectEdgesResultSchema,
+      basis: basisSchema,
     })
     .strict(),
   z
     .object({
       type: z.literal('SEARCH'),
       result: searchResultSchema,
+      basis: basisSchema,
     })
     .strict(),
   z
     .object({
       type: z.literal('SNAPSHOT_NODES'),
       result: snapshotNodesResultSchema,
+      basis: basisSchema,
     })
     .strict(),
 ]);
@@ -991,8 +1025,11 @@ export const rfsCapabilitiesResponseSchema = z
       .object({
         atomic: z.literal(false),
         partialCommit: z.literal(true),
+        /** A request without `operationId` is applied every time it is sent. */
         idempotent: z.literal(false),
         runIdIsIdempotencyKey: z.literal(false),
+        /** A request with `operationId` is applied once; a repeat returns the stored response. */
+        operationIdIsIdempotencyKey: z.literal(true),
       })
       .strict(),
     limits: z
@@ -1040,7 +1077,16 @@ export type RfsOperationCapabilityResponse = z.infer<
 
 export const rfsExecuteRequestSchema = z
   .object({
+    /** Correlation label only. Never deduplicates or joins requests. */
     runId: z.string().min(1).max(256).optional(),
+    /**
+     * Request id chosen by the caller. The response is stored under it in the
+     * same commit as the write, so sending the same id with the same body
+     * again returns that stored response instead of executing twice.
+     */
+    operationId: z.uuid().optional(),
+    /** Read version from an earlier query, download or execute response. */
+    basis: basisSchema.optional(),
     commands: z
       .array(agentCanvasCommandSchema)
       .min(1)
@@ -1049,6 +1095,74 @@ export const rfsExecuteRequestSchema = z
   .strict();
 
 export type RfsExecuteRequest = z.infer<typeof rfsExecuteRequestSchema>;
+
+/**
+ * One edit of {@link rfsExecuteEditsRequestSchema}: the commands of one step
+ * that take effect together or not at all.
+ */
+export const rfsExecuteEditSchema = z
+  .object({
+    /** Read version this edit was made on; without one it is not checked. */
+    basis: basisSchema.optional(),
+    /** Earlier edits this one was made on top of. */
+    after: z
+      .array(
+        z
+          .object({
+            operationId: z.uuid().optional(),
+            edit: z.number().int().min(0),
+          })
+          .strict(),
+      )
+      .max(64)
+      .optional(),
+    commands: z.array(agentCanvasCommandSchema).min(1),
+  })
+  .strict();
+
+/**
+ * The same request as a list of edits, the shape a page sends. The
+ * `{ commands }` form above is this with one edit per command, each quoting
+ * the request's `basis` — which is why a failed command there does not undo
+ * the others.
+ */
+export const rfsExecuteEditsRequestSchema = z
+  .object({
+    runId: z.string().min(1).max(256).optional(),
+    operationId: z.uuid().optional(),
+    edits: z
+      .array(rfsExecuteEditSchema)
+      .min(1)
+      .superRefine((edits, context) => {
+        const total = edits.reduce(
+          (sum, edit) => sum + edit.commands.length,
+          0,
+        );
+        if (total > SPACE_EXECUTE_MAX_COMMANDS) {
+          context.addIssue({
+            code: 'custom',
+            message: `A request accepts at most ${SPACE_EXECUTE_MAX_COMMANDS} commands in total`,
+          });
+        }
+        edits.forEach((edit, index) => {
+          (edit.after ?? []).forEach((ref, refIndex) => {
+            if (ref.operationId === undefined && ref.edit >= index) {
+              context.addIssue({
+                code: 'custom',
+                path: [index, 'after', refIndex, 'edit'],
+                message:
+                  'an edit can only come after an earlier edit of the request',
+              });
+            }
+          });
+        });
+      }),
+  })
+  .strict();
+
+export type RfsExecuteEditsRequest = z.infer<
+  typeof rfsExecuteEditsRequestSchema
+>;
 
 const executeResultNodeSchema = z
   .object({
@@ -1071,7 +1185,17 @@ const executeResultEdgeSchema = z
 export const rfsExecuteResponseSchema = z
   .object({
     canvasId: z.string(),
+    /**
+     * Correlation label of the run that executed the batch. On a replayed
+     * response this is the original run, not the label of the repeat.
+     */
     runId: z.string(),
+    /** Echo of the request id, when one was supplied. */
+    operationId: z.string().optional(),
+    /** Read version of the Space after this request. */
+    basis: basisSchema.optional(),
+    /** Present when this is the stored response of an earlier request. */
+    replayed: z.literal(true).optional(),
     fromVersion: z.number().int().nonnegative(),
     toVersion: z.number().int().nonnegative(),
     commands: z.array(agentCanvasCommandSchema),
@@ -1091,6 +1215,8 @@ export const rfsExecuteResponseSchema = z
               'cycle',
               'duplicate-id',
               'conflict',
+              'stale-target',
+              'stale-parent',
             ])
             .optional(),
           nodes: z.array(executeResultNodeSchema).optional(),
@@ -1122,6 +1248,30 @@ export const rfsExecuteResponseSchema = z
             reason: z.enum(['not-read', 'stale']),
             expectedRev: z.string().optional(),
             currentRev: z.string(),
+          })
+          .strict(),
+      )
+      .optional(),
+    /**
+     * Only on a replayed response whose outcome was too large to store
+     * whole: `commands` is empty and the per-command node and edge lists
+     * are missing. The results and versions are always there.
+     */
+    incomplete: z.literal(true).optional(),
+    /**
+     * Present only when the request was sent as `edits`: what became of each
+     * edit. `results` above stays one entry per command across all edits;
+     * `start` and `count` say which of them belong to the edit.
+     */
+    edits: z
+      .array(
+        z
+          .object({
+            applied: z.boolean(),
+            reason: z.string().optional(),
+            failedAt: z.number().int().nonnegative().optional(),
+            start: z.number().int().nonnegative(),
+            count: z.number().int().nonnegative(),
           })
           .strict(),
       )

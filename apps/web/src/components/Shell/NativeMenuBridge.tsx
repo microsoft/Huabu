@@ -3,7 +3,6 @@
 
 import { useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useNavigate } from 'react-router-dom';
 
 import { APP_NAME } from '../../config/app';
 import { openUserHandbook } from '../../config/handbook';
@@ -20,6 +19,7 @@ import { useSettingsUiStore } from '../../store/settingsUiStore';
 import { useShortcutsUiStore } from '../../store/shortcutsUiStore';
 import { useWorkspaceStore } from '../../store/workspaceStore';
 import { isDesktopInputFrozen } from '../../utils/desktopInput';
+import { useOpenWorkspaceSwitcher } from '../Workspace/useOpenWorkspaceSwitcher';
 
 /**
  * Bridges the native macOS menu bar to the in-app action handlers.
@@ -49,14 +49,17 @@ export function NativeMenuBridge() {
   const enabled = isMac && !!menu;
 
   const { t, i18n } = useTranslation();
-  const navigate = useNavigate();
   const canChangeWorkspace = useWorkspaceStore(
     (s) => s.capabilities?.canChangeWorkspace ?? true,
+  );
+  const namedWorkspaces = useWorkspaceStore(
+    (s) => s.capabilities?.namedWorkspaces === true,
   );
   const { create, openImportDialog, fileInputRef, onFileChange } =
     useCanvasActions();
   const openSettings = useSettingsUiStore((s) => s.open);
   const openShortcuts = useShortcutsUiStore((s) => s.open);
+  const openWorkspaceSwitcher = useOpenWorkspaceSwitcher();
   const runDiagnostic = useRunDiagnostic();
   const { status: updateStatus, check: checkForUpdates } = useAppUpdate();
   const updateCheckEnabled = canCheckForUpdates(updateStatus);
@@ -93,7 +96,9 @@ export function NativeMenuBridge() {
         toggleFullScreen: t('menu.toggleFullScreen'),
         newCanvas: t('actions.newCanvas'),
         import: t('actions.importCanvas'),
-        switchWorkspace: t('navigation.switchWorkspace'),
+        switchWorkspace: t(
+          namedWorkspaces ? 'workspace.switcher' : 'navigation.switchWorkspace',
+        ),
         settings: t('settings.title'),
         checkForUpdates: t('update.check'),
         userHandbook: t('navigation.userHandbook'),
@@ -114,6 +119,7 @@ export function NativeMenuBridge() {
     t,
     i18n.language,
     canChangeWorkspace,
+    namedWorkspaces,
     updateCheckEnabled,
     bridge?.tabs,
   ]);
@@ -131,7 +137,7 @@ export function NativeMenuBridge() {
           openImportDialog();
           break;
         case 'switch-workspace':
-          navigate('/setup');
+          openWorkspaceSwitcher();
           break;
         case 'open-settings':
           openSettings();
@@ -163,7 +169,7 @@ export function NativeMenuBridge() {
     menu,
     create,
     openImportDialog,
-    navigate,
+    openWorkspaceSwitcher,
     openSettings,
     checkForUpdates,
     openShortcuts,

@@ -17,6 +17,7 @@ import { agentNodeBinding } from './agent-node-binding.js';
 import { agentNodeLifecycle } from './agent-node-lifecycle.js';
 import { prepareAgentSubmission } from './agent-submission.js';
 import {
+  AgentThreadResolutionError,
   agentThreadResolver,
   type AgentNodeTarget,
   type FixedAgentNodeTarget,
@@ -52,6 +53,7 @@ import type {
   AgentTurnAccepted,
   ReasoningEffort,
   StopThreadResponse,
+  AgentInitialPreferences,
 } from '@huabu/shared';
 import type { FastifyBaseLogger } from 'fastify';
 
@@ -226,6 +228,7 @@ export interface AgentThreadInvocationOptions {
   submission?: HuabuSubmission;
   requestBinding?: AgentBinding;
   requestedCwd?: string;
+  requestedPreferences?: AgentInitialPreferences;
   agentTarget?: AgentNodeTarget | null;
   fixedTarget?: FixedAgentNodeTarget | null;
   modelId?: string;
@@ -426,6 +429,32 @@ export class AgentThreadService {
         if (pending.size === 0) this.pendingPreparations.delete(key);
       },
     };
+  }
+
+  /**
+   * Whether `threadId` is a conversation of this Space: the thread of one of
+   * its Agent Nodes, or an external thread realised in it.
+   *
+   * Entry points that accept a thread id from a caller use this before
+   * attributing Review records to it. It says the thread exists here, not
+   * that the caller is that thread — callers sharing one machine credential
+   * are one principal and cannot be told apart.
+   */
+  async ownsThread(canvasId: string, threadId: string): Promise<boolean> {
+    try {
+      if (await this.dependencies.resolveAgentNode(canvasId, threadId))
+        return true;
+    } catch (error) {
+      // A missing Space or an ambiguous binding owns nothing.
+      if (error instanceof AgentThreadResolutionError) return false;
+      throw error;
+    }
+    return (
+      (await this.dependencies.resolvePersistedExternalBinding(
+        canvasId,
+        threadId,
+      )) !== null
+    );
   }
 
   async resolveFixedTarget(
@@ -711,6 +740,7 @@ export class AgentThreadService {
           canvasId: options.canvasId,
           requestedBinding: binding,
           requestedCwd: options.requestedCwd,
+          requestedPreferences: options.requestedPreferences,
           agentTarget,
           fixedTarget,
           logger: options.logger,

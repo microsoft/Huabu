@@ -3,6 +3,8 @@
 
 import { expect, test, type Page } from '@playwright/test';
 
+import { editsPerCommand } from './helpers';
+
 import type * as StoreModule from '../src/store/canvasStore';
 import type {
   CreateCanvasResponse,
@@ -32,7 +34,7 @@ async function seedNode(
 ) {
   const response = await page.request.post(`/api/canvas/${canvasId}/execute`, {
     data: {
-      commands: [
+      edits: editsPerCommand([
         {
           type: 'CREATE_NODES',
           nodes: [
@@ -45,8 +47,8 @@ async function seedNode(
             },
           ],
         },
-      ],
-      originator: { source: 'ui', tabId: 'e2e-space-shortcut' },
+      ]),
+      originator: { tabId: 'e2e-space-shortcut' },
     },
   });
   expect(response.ok(), await response.text()).toBe(true);
@@ -319,7 +321,7 @@ test('mixed collection reparents child Spaces and the tree picker blocks cyclic 
   await seedNode(page, source, 'text', { content: 'Mixed content' });
   const shortcut = await page.request.post(`/api/canvas/${source}/execute`, {
     data: {
-      commands: [
+      edits: editsPerCommand([
         {
           type: 'CREATE_NODES',
           nodes: [
@@ -331,8 +333,8 @@ test('mixed collection reparents child Spaces and the tree picker blocks cyclic 
             },
           ],
         },
-      ],
-      originator: { source: 'ui', tabId: 'mixed-move-e2e' },
+      ]),
+      originator: { tabId: 'mixed-move-e2e' },
     },
   });
   expect(shortcut.ok(), await shortcut.text()).toBe(true);
@@ -534,7 +536,7 @@ test('real shortcuts keep fixed widths, undo, resize, and navigate without scene
     'font-size',
     '18px',
   );
-  await expect(node).toHaveCSS('width', '360px');
+  await expect(node).toHaveCSS('width', '400px');
   expect(await node.evaluate((element) => element.clientHeight)).toBeLessThan(
     120,
   );
@@ -564,8 +566,8 @@ test('real shortcuts keep fixed widths, undo, resize, and navigate without scene
   const title = `A longer research notebook covering many observations and future product directions (${targetId})`;
   await seedNode(page, targetId, 'text', { content: 'A saved target node' });
   const target = await readSpace(page, targetId);
-  const renamed = await page.request.put(`/api/canvas/${targetId}`, {
-    data: { version: target.version, state: target.state, title },
+  const renamed = await page.request.patch(`/api/canvas/${targetId}/title`, {
+    data: { title, expectedTitle: target.title },
   });
   expect(renamed.ok(), await renamed.text()).toBe(true);
   await page.evaluate(() => window.dispatchEvent(new Event('focus')));
@@ -583,9 +585,9 @@ test('real shortcuts keep fixed widths, undo, resize, and navigate without scene
   const undone = await history(page, 'undo');
   expect(undone).toMatchObject({
     before: [{ mode: 'fixed', width: 320 }],
-    after: [{ mode: 'fixed', width: 360 }],
+    after: [{ mode: 'fixed', width: 400 }],
   });
-  await expect(node).toHaveCSS('width', '360px');
+  await expect(node).toHaveCSS('width', '400px');
   await history(page, 'redo');
   await expect(node).toHaveCSS('width', '320px');
 
@@ -630,7 +632,7 @@ test('real shortcuts keep fixed widths, undo, resize, and navigate without scene
   await expect(body).toHaveCSS('font-size', '24px');
   await expect(node.locator('.semantic-lod-node')).toHaveCSS(
     'border-top-width',
-    '2px',
+    '1px',
   );
   await history(page, 'undo');
   await expect(node).toHaveCSS('width', '320px');

@@ -11,6 +11,8 @@ import { getWorkspacePath } from '../../../workspace.js';
 import type { CanvasStore } from './legacy/canvas-store.js';
 import type { NodeContent } from '../../../canvas/persistence-types.js';
 import type {
+  NodeChangePosition,
+  NodeChanges,
   NodeDeleteResult,
   NodePutInput,
   NodePutResult,
@@ -38,6 +40,22 @@ function snapshotsOf(
   for (const [nodeId, record] of contents) out.set(nodeId, snapshotOf(record));
   return out;
 }
+
+/**
+ * The one sequence a Disk Space has: its sidecars' modification times in
+ * whole milliseconds. They are properties of the files, so they are the
+ * same after a restart and for any process reading the directory.
+ */
+const DISK_CHANGE_EPOCH = 'disk:mtime-ms';
+
+/**
+ * How far behind the clock a position taken from the clock is placed (it is
+ * taken from the clock only when a sidecar is dated in the future). A file
+ * system stamps a write with a time that can be earlier than the clock read
+ * just before it: the kernel's file clock ticks a few milliseconds apart, and
+ * some volumes keep whole seconds or two-second steps.
+ */
+const DISK_CLOCK_SLACK_MS = 2_000;
 
 export class DiskSpaceNodes implements SpaceNodes {
   readonly canvasId: string;
@@ -186,6 +204,56 @@ export class DiskSpaceNodes implements SpaceNodes {
   async delete(nodeId: string): Promise<NodeDeleteResult> {
     this.#assertActiveWorkspace();
     return this.#store.deleteNode(nodeId);
+  }
+
+  /**
+   * Sidecars modified at or after `since`.
+   *
+   * The position is the latest modification time among the sidecars; when
+   * that is ahead of the clock, it is the clock less
+   * {@link DISK_CLOCK_SLACK_MS} instead. "At or after" covers a file system whose
+   * times are coarser than the gap between two writes: a write in the same
+   * tick as the position is named (again) rather than missed. The clock
+   * bound covers a sidecar dated in the future — copied in from a machine
+   * whose clock runs ahead, say — which would otherwise put the position
+   * beyond every write made until that date, and a clock that was set back:
+   * the position then follows the clock down. Such a sidecar is simply named
+   * on every call until the clock passes it. The slack is there because that
+   * bound is the one place the clock is compared with file times: a write
+   * made right after it can be stamped slightly earlier than the clock read.
+   *
+   * What it cannot see is a write dated before the position: a clock set
+   * back past the Space's most recent write and not yet caught up, or a file
+   * put in place with an older modification time kept (`cp -p`, a sync
+   * client restoring one). The latter is an external edit and is the
+   * external watcher's to report.
+   *
+   * Cost: one `stat` per sidecar, synchronous; no file is read once the id
+   * index is warm.
+   */
+  async changes(since?: NodeChangePosition): Promise<NodeChanges> {
+    this.#assertActiveWorkspace();
+    const times = this.#store.nodeWriteTimes();
+    let latest = 0;
+    for (const time of times.values()) latest = Math.max(latest, time);
+    // File times are compared with each other as they are. Only a sidecar
+    // dated ahead of the clock brings the clock in, and with it the slack.
+    const now = Date.now();
+    const position = {
+      epoch: DISK_CHANGE_EPOCH,
+      seq: latest > now ? now - DISK_CLOCK_SLACK_MS : latest,
+    };
+    if (
+      since === undefined ||
+      since.epoch !== DISK_CHANGE_EPOCH ||
+      !Number.isFinite(since.seq)
+    )
+      return { position, nodeIds: null };
+    const nodeIds: string[] = [];
+    for (const [nodeId, time] of times) {
+      if (time >= since.seq) nodeIds.push(nodeId);
+    }
+    return { position, nodeIds };
   }
 
   #assertActiveWorkspace(): void {

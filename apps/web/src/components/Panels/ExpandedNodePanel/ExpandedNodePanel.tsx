@@ -26,8 +26,14 @@ import { isNodeProperties } from '@huabu/shared/canvas-engine';
 import { Button } from '@/components/Common/Button';
 import { PDFNotesButton } from '@/components/Nodes/pdf/PDFNotesButton';
 import { NodeProperties } from '@/components/Nodes/properties/NodeProperties';
+import { propertyTagOptions } from '@/components/Nodes/properties/propertyTagOptions';
 import { getNodeIcon } from '@/config/nodeIcons.ts';
 import { formatShortcutById, matchesShortcut } from '@/config/shortcuts.ts';
+import {
+  canStartEditing,
+  showEditLockedHint,
+  useEditLockHolder,
+} from '@/store/canvasPresence/editLock';
 import {
   selectCanWriteCanvas,
   commitNodeProperties,
@@ -241,10 +247,22 @@ export const ExpandedNodePanel = ({
   const edges = useCanvasStore((s) => s.edges);
   const canvasId = useCanvasStore((s) => s.canvasId);
   const canWrite = useCanvasStore(selectCanWriteCanvas);
-  const [propertiesNodeId, setPropertiesNodeId] = useState<string | null>(null);
+  // One editor at a time: while another page is editing this node the
+  // preview is read-only here and its title cannot be edited.
+  const editLockHolder = useEditLockHolder(expandedNodeId);
+  const editLockLabel = editLockHolder
+    ? editLockHolder.displayName?.trim() ||
+      editLockHolder.label.trim() ||
+      t('canvasPresence.anotherDevice')
+    : null;
+  // An explicit choice for one node; other nodes follow the default below.
+  const [propertiesChoice, setPropertiesChoice] = useState<{
+    nodeId: string;
+    open: boolean;
+  } | null>(null);
   const propertiesRegionId = useId();
   const propertiesRegionRef = useRef<HTMLDivElement>(null);
-  const propertiesOpen = propertiesNodeId === expandedNodeId;
+  const revealProperties = useRef(false);
   const updateNodeData = useCanvasStore((s) => s.updateNodeData);
   // Routed through `tryRename` so a sibling-label collision triggers the
   // shared alert + revert flow (same path used by the layer tree and
@@ -255,7 +273,29 @@ export const ExpandedNodePanel = ({
     if (!expandedNodeId) return null;
     return nodes.find((n) => n.id === expandedNodeId) ?? null;
   }, [expandedNodeId, nodes]);
+  // Properties start open when the node has some as it is opened. The answer
+  // is latched per node: properties written later (an agent filling in a
+  // paper being read) must not pop the list open and push the pages down.
+  const hasProperties =
+    isNodeProperties(node?.data.properties) &&
+    Object.keys(node.data.properties).length > 0;
+  const propertiesKey = node ? `${canvasId}:${node.id}` : null;
+  const [propertiesDefault, setPropertiesDefault] = useState<{
+    key: string;
+    open: boolean;
+  } | null>(null);
+  if (propertiesKey && propertiesDefault?.key !== propertiesKey)
+    setPropertiesDefault({ key: propertiesKey, open: hasProperties });
+  const propertiesOpen =
+    propertiesChoice?.nodeId === expandedNodeId
+      ? propertiesChoice.open
+      : propertiesDefault?.key === propertiesKey
+        ? propertiesDefault.open
+        : hasProperties;
   useLayoutEffect(() => {
+    // Only an explicit expand scrolls; a default-open PDF keeps its position.
+    if (!revealProperties.current) return;
+    revealProperties.current = false;
     if (propertiesOpen && node?.type === 'pdf') {
       propertiesRegionRef.current?.scrollIntoView({ block: 'start' });
     }
@@ -465,7 +505,7 @@ export const ExpandedNodePanel = ({
       return;
     handledRenameNonce.current = renameRequestNonce;
     onRenameRequestHandled?.(renameRequestNonce);
-    if (!canWrite) return;
+    if (!canWrite || !canStartEditing(expandedNodeId)) return;
     setDraftTitle(liveLabel);
     setIsEditingTitle(true);
   }, [
@@ -575,24 +615,17 @@ export const ExpandedNodePanel = ({
             : 'max-h-[40%] shrink-0 overflow-y-auto'
         }
       >
-        {activeItem.type === 'pdf' && (
-          <div className="px-5 pt-1">
-            <PDFNotesButton
-              key={expandedNodeId}
-              id={expandedNodeId}
-              noteNodeId={
-                typeof node?.data.noteNodeId === 'string'
-                  ? node.data.noteNodeId
-                  : undefined
-              }
-            />
-          </div>
-        )}
         <NodeProperties
           key={`${canvasId}:${expandedNodeId}`}
           properties={properties}
           displayKeys={propertyDisplayKeys}
-          readOnly={!canWrite}
+          // Properties are saved with the node's content and share its
+          // revision, so editing them is editing the node: while another
+          // page edits it they are read-only here, like its body and title.
+          readOnly={!canWrite || editLockHolder !== null}
+          tagOptions={(name) =>
+            propertyTagOptions(useCanvasStore.getState().nodes, name)
+          }
           onSave={async (patch) => {
             if (await commitNodeProperties(expandedNodeId, patch)) onCommit?.();
           }}
@@ -651,30 +684,38 @@ export const ExpandedNodePanel = ({
             data-preview-header-leading-actions
             className="flex shrink-0 items-center gap-1 empty:hidden"
           />
+          {activeItem.type === 'pdf' && expandedNodeId && (
+            <PDFNotesButton
+              key={expandedNodeId}
+              id={expandedNodeId}
+              noteNodeId={
+                typeof node?.data.noteNodeId === 'string'
+                  ? node.data.noteNodeId
+                  : undefined
+              }
+            />
+          )}
           {supportsProperties && (
             <Button
               variant="ghost"
               size="sm"
               iconOnly
               className="shrink-0 px-1.5"
-              title={
-                activeItem.type === 'pdf'
-                  ? t(
-                      propertiesOpen
-                        ? 'node.collapsePdfDetails'
-                        : 'node.expandPdfDetails',
-                    )
-                  : t(
-                      propertiesOpen
-                        ? 'node.collapseProperties'
-                        : 'node.expandProperties',
-                    )
-              }
+              title={t(
+                propertiesOpen
+                  ? 'node.collapseProperties'
+                  : 'node.expandProperties',
+              )}
               aria-expanded={propertiesOpen}
               aria-controls={propertiesRegionId}
-              onClick={() =>
-                setPropertiesNodeId(propertiesOpen ? null : expandedNodeId)
-              }
+              onClick={() => {
+                if (!expandedNodeId) return;
+                revealProperties.current = !propertiesOpen;
+                setPropertiesChoice({
+                  nodeId: expandedNodeId,
+                  open: !propertiesOpen,
+                });
+              }}
             >
               {propertiesOpen ? <ChevronDown /> : <ChevronRight />}
             </Button>
@@ -704,7 +745,10 @@ export const ExpandedNodePanel = ({
                         onChange: setDraftTitle,
                         onCommit: commitTitle,
                         onKeyboardEditEnd: onRenameKeyboardEnd,
-                        onStart: () => setIsEditingTitle(true),
+                        onStart: () => {
+                          if (canStartEditing(expandedNodeId))
+                            setIsEditingTitle(true);
+                        },
                         onCancel: () => {
                           setDraftTitle(liveLabel);
                           setIsEditingTitle(false);
@@ -751,7 +795,29 @@ export const ExpandedNodePanel = ({
           bar (Cmd+F) to the top-right of this body — keeps the
           preview document underneath fully visible instead of
           pushing it down with an inline find row. */}
-      <div ref={setPreviewBodyEl} className="relative flex-1 overflow-hidden">
+      {editLockHolder && (
+        <div
+          role="status"
+          data-edit-locked-notice
+          className="bg-info-bg text-fg-default border-edge-default shrink-0 border-b px-3 py-1.5 text-xs"
+        >
+          {t('canvasPresence.editLocked', { label: editLockLabel })}
+        </div>
+      )}
+      <div
+        ref={setPreviewBodyEl}
+        className="relative flex-1 overflow-hidden"
+        // A mouse press in the body is the attempt to edit; touch and pen
+        // press there to scroll, and read the notice above instead.
+        onPointerDown={
+          editLockHolder && canWrite
+            ? (event) => {
+                if (event.pointerType === 'mouse')
+                  showEditLockedHint(editLockHolder);
+              }
+            : undefined
+        }
+      >
         <PreviewSearchAdapterProvider key={previewNodeId}>
           {/* In-preview find bar — renders nothing unless search scope
               is `'node'`. Wires the highlight walk to the body element
@@ -777,11 +843,11 @@ export const ExpandedNodePanel = ({
               scrollHeader={
                 activeItem.type === 'pdf' ? propertiesPanel : undefined
               }
-              readOnly={!canWrite}
+              readOnly={!canWrite || editLockHolder !== null}
               focusRequestNonce={nodeFocusRequestNonce}
               onFocusRequestHandled={onNodeFocusRequestHandled}
               onDataChange={
-                expandedNodeId && canWrite
+                expandedNodeId && canWrite && !editLockHolder
                   ? (patch) => {
                       if (!selectCanWriteCanvas(useCanvasStore.getState()))
                         return;

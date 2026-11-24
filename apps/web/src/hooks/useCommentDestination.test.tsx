@@ -1,12 +1,17 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { act } from 'react';
+import { act, Activity } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
 import { getRecentCanvasConversation } from '@/api/canvas';
 import useCanvasStore from '@/store/canvasStore';
+import {
+  rememberPreviewedAgent,
+  useCommentDestinationMemory,
+} from '@/store/commentDestinationMemory';
+import { useWorkspaceStore } from '@/store/workspaceStore';
 
 import { useCommentDestination } from './useCommentDestination';
 
@@ -45,6 +50,12 @@ function owners(...ids: string[]) {
 }
 
 beforeEach(() => {
+  useCanvasStore.setState({ canvasId: '', isLoading: false });
+  useWorkspaceStore.setState({
+    workspaceId: 'workspace',
+    workspacePath: '/workspace',
+    isSyncing: false,
+  });
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   vi.mocked(getRecentCanvasConversation).mockReset();
   vi.mocked(getRecentCanvasConversation).mockResolvedValue({
@@ -65,6 +76,16 @@ it('defaults to the sole existing conversation even when running or internal Ask
   owners('a');
   await act(async () => root.render(<Harness />));
   expect(current.destination).toEqual({ nodeId: 'a', threadId: 'thread-a' });
+  expect(current.available).toBe(true);
+});
+
+it('waits for the initial Space load before resolving a default', async () => {
+  owners('a');
+  useCanvasStore.setState({ isLoading: true });
+  await act(async () => root.render(<Harness />));
+  expect(getRecentCanvasConversation).not.toHaveBeenCalled();
+  await act(async () => useCanvasStore.setState({ isLoading: false }));
+  expect(current.destination?.nodeId).toBe('a');
   expect(current.available).toBe(true);
 });
 
@@ -191,4 +212,182 @@ it('ignores a response after the Space changes', async () => {
     resolve({ conversation: { nodeId: 'old', threadId: 'old' } }),
   );
   expect(current.destination?.nodeId).not.toBe('old');
+});
+
+function preview(nodeId: string) {
+  rememberPreviewedAgent({ kind: 'node', canvasId: 'space', nodeId });
+}
+
+it('uses preview intent ahead of messaging, ignores Canvas selection, and retains intent across file opens', async () => {
+  owners('a', 'b', 'c');
+  useCanvasStore.setState({
+    nodes: useCanvasStore.getState().nodes.map((node) => ({
+      ...node,
+      selected: node.id === 'a',
+    })),
+  });
+  vi.mocked(getRecentCanvasConversation).mockResolvedValue({
+    conversation: { nodeId: 'a', threadId: 'thread-a' },
+  });
+  preview('b');
+  rememberPreviewedAgent({ kind: 'node', canvasId: 'space', nodeId: 'file' });
+  await act(async () => root.render(<Harness />));
+  expect(current.destination?.nodeId).toBe('b');
+  expect(getRecentCanvasConversation).not.toHaveBeenCalled();
+});
+
+it('only successful staging remembers picker choices and wins over later preview activity after remount', async () => {
+  owners('a', 'b', 'c');
+  preview('a');
+  await act(async () => root.render(<Harness key="first" />));
+  act(() => current.choose({ nodeId: 'b', threadId: 'thread-b' }));
+  await act(async () => root.render(<Harness key="cancelled" />));
+  expect(current.destination?.nodeId).toBe('a');
+  act(() => {
+    current.choose({ nodeId: 'b', threadId: 'thread-b' });
+  });
+  act(() => current.rememberStaged('thread-b'));
+  preview('c');
+  await act(async () => root.render(<Harness key="next-comment" />));
+  expect(current.destination?.nodeId).toBe('b');
+  act(() => current.choose({ nodeId: 'a', threadId: 'thread-a' }));
+  expect(current.destination?.nodeId).toBe('a');
+});
+
+it('preserves a choice through Activity hide/show without re-reading defaults', async () => {
+  owners('a', 'b');
+  const render = (mode: 'visible' | 'hidden') =>
+    act(async () =>
+      root.render(
+        <Activity mode={mode}>
+          <Harness />
+        </Activity>,
+      ),
+    );
+  await render('visible');
+  act(() => current.choose({ nodeId: 'b', threadId: 'thread-b' }));
+  await render('hidden');
+  preview('a');
+  await render('visible');
+  expect(current.destination?.nodeId).toBe('b');
+  expect(getRecentCanvasConversation).toHaveBeenCalledTimes(1);
+});
+
+it('keeps destination and candidate order stable under background activity and preview changes', async () => {
+  owners('z', 'b', 'a');
+  preview('b');
+  await act(async () => root.render(<Harness />));
+  expect(current.candidates.map((item) => item.nodeId)).toEqual([
+    'b',
+    'a',
+    'z',
+  ]);
+  act(() => {
+    preview('z');
+    useCanvasStore.setState({
+      nodes: [...useCanvasStore.getState().nodes].reverse().map((node) => ({
+        ...node,
+        data: { ...node.data, lastActivityAt: node.id === 'z' ? 100 : 0 },
+      })),
+    });
+  });
+  expect(current.destination?.nodeId).toBe('b');
+  expect(current.candidates.map((item) => item.nodeId)).toEqual([
+    'b',
+    'a',
+    'z',
+  ]);
+  await act(async () => root.render(<Harness key="next" />));
+  expect(current.destination?.nodeId).toBe('z');
+});
+
+it('requires explicit choice after staging in a temporary chat, without reviving an older Agent', async () => {
+  owners('a', 'b');
+  preview('a');
+  await act(async () => root.render(<Harness />));
+  act(() => current.choose(null));
+  act(() => current.rememberStaged('temporary-thread'));
+  preview('b');
+  await act(async () => root.render(<Harness key="next" />));
+  expect(current.destination).toBeNull();
+  expect(current.temporary).toBe(true);
+  expect(current.loading).toBe(false);
+  expect(current.available).toBe(false);
+  act(() => current.choose({ nodeId: 'b', threadId: 'thread-b' }));
+  expect(current.temporary).toBe(false);
+  expect(current.resolve()?.conversationOwner.threadId).toBe('thread-b');
+});
+
+it('does not replace a deleted remembered comment owner with a preview or sole remaining owner', async () => {
+  owners('a', 'b');
+  preview('a');
+  await act(async () => root.render(<Harness />));
+  act(() => current.rememberStaged('thread-a'));
+  act(() => owners('b'));
+  preview('b');
+  await act(async () => root.render(<Harness key="next" />));
+  expect(current.destination?.nodeId).toBe('a');
+  expect(current.available).toBe(false);
+  expect(current.resolve()).toBeNull();
+});
+
+it.each(['space', 'workspace'] as const)(
+  'fences old forms and requests across a %s round trip, even with identical owner IDs',
+  async (kind) => {
+    owners('a', 'b');
+    let resolve!: (
+      value: Awaited<ReturnType<typeof getRecentCanvasConversation>>,
+    ) => void;
+    vi.mocked(getRecentCanvasConversation).mockImplementationOnce(
+      () =>
+        new Promise((done) => {
+          resolve = done;
+        }),
+    );
+    await act(async () => root.render(<Harness />));
+    const old = current;
+    act(() => {
+      if (kind === 'space') {
+        useCanvasStore.setState({ canvasId: 'other' });
+        useCanvasStore.setState({ canvasId: 'space' });
+      } else {
+        useWorkspaceStore.setState({ workspaceId: 'other' });
+        useWorkspaceStore.setState({ workspaceId: 'workspace' });
+      }
+    });
+    await act(async () =>
+      resolve({ conversation: { nodeId: 'a', threadId: 'thread-a' } }),
+    );
+    expect(current.scopeValid).toBe(false);
+    expect(old.isCurrent()).toBe(false);
+    expect(old.resolve()).toBeNull();
+    act(() => {
+      old.choose({ nodeId: 'b', threadId: 'thread-b' });
+      old.rememberStaged('thread-b');
+    });
+    expect(useCommentDestinationMemory.getState().lastComment).toBeNull();
+    await act(async () => root.render(<Harness key="fresh" />));
+    expect(current.scopeValid).toBe(true);
+    expect(current.destination).toBeNull();
+  },
+);
+
+it('does not let Retry or an old rejected request replace a manual choice', async () => {
+  owners('a', 'b');
+  let reject!: (reason: Error) => void;
+  vi.mocked(getRecentCanvasConversation).mockImplementationOnce(
+    () =>
+      new Promise((_done, fail) => {
+        reject = fail;
+      }),
+  );
+  await act(async () => root.render(<Harness />));
+  act(() => current.choose({ nodeId: 'b', threadId: 'thread-b' }));
+  await act(async () => {
+    current.retry();
+    reject(new Error('late failure'));
+  });
+  expect(current.destination?.nodeId).toBe('b');
+  expect(current.error).toBeNull();
+  expect(getRecentCanvasConversation).toHaveBeenCalledTimes(1);
 });

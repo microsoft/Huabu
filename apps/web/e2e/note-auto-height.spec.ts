@@ -3,6 +3,7 @@
 
 import { test, expect, type Page } from '@playwright/test';
 
+import { agentExecute, type AgentExecuteResponse } from './agent-execute';
 import { openNewCanvas, paneCenter } from './helpers';
 
 /**
@@ -82,22 +83,22 @@ async function enableNoteAutoHeight(page: Page): Promise<void> {
  * The open tab receives the server-authored insertion through canvas sync;
  * no UI creation path runs locally before the note is measured.
  */
+/** An Agent's commands, through the Agent route with the machine credential. */
 async function executeAgentCommands(
   page: Page,
   commands: unknown[],
-): Promise<Record<string, unknown>> {
+): Promise<AgentExecuteResponse> {
   const canvasId = page.url().split('/canvas/')[1]?.split(/[?#]/)[0];
   if (!canvasId) throw new Error('canvas id not found in URL');
 
-  const response = await page.request.post(`/api/canvas/${canvasId}/execute`, {
-    data: {
-      commands,
-      originator: { source: 'agent', threadId: 'e2e-auto-height' },
-    },
-  });
+  const response = await agentExecute(page.request, canvasId, commands);
 
   expect(response.ok(), await response.text()).toBe(true);
-  return (await response.json()) as Record<string, unknown>;
+  const body = (await response.json()) as AgentExecuteResponse;
+  expect(body.results.map((result) => result.applied)).toEqual(
+    commands.map(() => true),
+  );
+  return body;
 }
 
 async function createAgentNote(
@@ -267,10 +268,7 @@ test.describe('note auto height', () => {
         ],
       },
     ]);
-    const results = frameResponse.results as Array<{
-      nodes?: Array<{ nodeId: string }>;
-    }>;
-    const frameId = results[0]?.nodes?.[0]?.nodeId;
+    const frameId = frameResponse.results[0]?.nodes?.[0]?.nodeId;
     expect(frameId).toBeTruthy();
 
     await executeAgentCommands(page, [

@@ -17,6 +17,7 @@ import { useActivelyViewingQuestionNode } from '@/hooks/useActivelyViewingQuesti
 import { useTextNodeSurface } from '@/hooks/useTextNodeSurface';
 import { useAcpProfilesStore } from '@/store/acpProfilesStore.ts';
 import { useAcpThreadChangesStore } from '@/store/acpThreadChangesStore.ts';
+import { canStartEditing } from '@/store/canvasPresence/editLock';
 import useCanvasStore from '@/store/canvasStore.ts';
 import {
   selectThreadBinding,
@@ -25,6 +26,7 @@ import {
   useChatStore,
 } from '@/store/chatStore.ts';
 import { findPendingPermissionRequestId } from '@/store/chatTypes.ts';
+import { rememberPreviewedAgent } from '@/store/commentDestinationMemory';
 import { resolveConversationAgentBinding } from '@/store/conversationOwner';
 import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store';
 import {
@@ -140,7 +142,6 @@ export const QuestionNode = memo(
     const surface = useTextNodeSurface({
       nodeId: id,
       width,
-      isEditing: false,
       content: displayText,
       baseFontSize: QUESTION_NODE_DEFAULT_FONT_SIZE,
       fontSizing: 'proportional',
@@ -244,7 +245,7 @@ export const QuestionNode = memo(
           data.agentBinding,
           canvasId,
           'bottom',
-          { transient },
+          { transient, userInitiated: true },
         );
       },
       [id, data.threadId, data.agentBinding, canvasId],
@@ -257,6 +258,7 @@ export const QuestionNode = memo(
     // ------------------------------------------------------------------
     const openInCompose = useCallback(
       (transient = false) => {
+        rememberPreviewedAgent({ kind: 'node', canvasId, nodeId: id });
         void ensureQuestionThread(canvasId, id)
           .then((threadId) =>
             enterQuestionCompose(
@@ -452,6 +454,7 @@ export const QuestionNode = memo(
                     maxLength: 120,
                     onStart: () => {
                       if (titleSavePending.current) return;
+                      if (!canStartEditing(id)) return;
                       originalTitle.current = displayText.trim();
                       setTitleDraft(displayText);
                       setTitleError(null);

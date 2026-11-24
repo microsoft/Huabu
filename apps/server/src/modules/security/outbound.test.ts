@@ -63,10 +63,30 @@ function asMember<T>(operation: () => Promise<T>): Promise<T> {
   });
 }
 
+/**
+ * The guard's own refusal. Asserting only that the fetch throws would also
+ * accept a dispatcher the built-in fetch cannot drive at all, which fails
+ * every member request, public ones included.
+ */
+const refusedByGuard = {
+  cause: expect.objectContaining({ code: 'NON_PUBLIC_ADDRESS' }),
+};
+
+it('uses an undici the built-in fetch can drive', async () => {
+  // The guarded Agent comes from the npm package but is handed to Node's own
+  // fetch; a different major speaks a different dispatcher handler API.
+  const { default: undiciPackage } = await import('undici/package.json', {
+    with: { type: 'json' },
+  });
+  expect(undiciPackage.version.split('.')[0]).toBe(
+    process.versions.undici?.split('.')[0],
+  );
+});
+
 it('applies public-network checks to member calls without a preprocessing scope', async () => {
   await expect(
     asMember(() => outboundFetch(`http://localhost:${port}/hop`)),
-  ).rejects.toThrow();
+  ).rejects.toMatchObject(refusedByGuard);
 });
 
 it('keeps the built-in Response and FormData for member multipart uploads', async () => {
@@ -150,13 +170,13 @@ describe('public-network-only outbound fetch', () => {
     expect((await outboundFetch(url)).status).toBe(200);
     await expect(
       withPublicNetworkOnly(() => outboundFetch(url)),
-    ).rejects.toThrow();
+    ).rejects.toMatchObject(refusedByGuard);
     // A host name that resolves to loopback is refused at connect time too.
     await expect(
       withPublicNetworkOnly(() =>
         outboundFetch(`http://localhost:${port}/hop`),
       ),
-    ).rejects.toThrow();
+    ).rejects.toMatchObject(refusedByGuard);
   });
 
   it('keeps the web loader from reading the Server network inside the scope', async () => {
@@ -190,6 +210,6 @@ it('applies the same connection-time guard to member model discovery and inferen
         workspaces: async () => [],
       },
     });
-    await expect(memberModelFetch(url)).rejects.toThrow();
+    await expect(memberModelFetch(url)).rejects.toMatchObject(refusedByGuard);
   });
 });

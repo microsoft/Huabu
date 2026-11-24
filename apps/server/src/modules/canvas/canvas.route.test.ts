@@ -6,6 +6,7 @@
 import {
   existsSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -15,9 +16,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import multipart from '@fastify/multipart';
+import archiver from 'archiver';
 import fastify from 'fastify';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { editsPerCommand, encodeBasis, parseBasis } from '@huabu/shared';
 import { extractCanvasChanges } from '@huabu/shared/canvas-engine';
 
 vi.mock('../storage/index.js', async (importOriginal) => {
@@ -42,6 +45,7 @@ vi.mock(
   },
 );
 
+import { ExecuteBasisError, executeOnServer } from './canvas-executor.js';
 import { subscribeCanvasUpdates } from './canvas-sync.js';
 import canvasRoutes from './canvas.route.js';
 import { withCanvasMutex } from './write-coordinator.js';
@@ -66,7 +70,7 @@ import {
 
 import type * as SpaceDirHandlesModule from '../storage/backends/disk/space-dir-handles.js';
 import type * as StorageModule from '../storage/index.js';
-import type { RecentAction } from '@huabu/shared';
+import type { CanvasSyncEvent, RecentAction } from '@huabu/shared';
 import type { CanvasNode } from '@huabu/shared/canvas-engine';
 
 let tmp: string;
@@ -200,16 +204,40 @@ describe('POST /api/canvas lifecycle', () => {
       await createCanvas('card-target', 'Before');
       await createCanvas('other-target', 'Taken');
       const before = await space('card-target').read();
+      const published: CanvasSyncEvent[] = [];
+      const unsubscribe = subscribeCanvasUpdates('card-target', (event) =>
+        published.push(event),
+      );
       const renamed = await app.inject({
         method: 'PATCH',
         url: '/canvas/card-target/title',
         payload: { title: ' After ', expectedTitle: 'Before' },
       });
+      unsubscribe();
       expect(renamed.statusCode).toBe(200);
       expect(renamed.json().title).toBe('After');
       const after = await space('card-target').read();
       expect(after?.version).toBe((before?.version ?? 0) + 1);
       expect(after?.state).toEqual(before?.state);
+      // Open pages follow the version and learn the title from one update,
+      // not from a snapshot that would make them load the Space again.
+      expect(published).toEqual([
+        {
+          type: 'update',
+          data: {
+            fromVersion: before?.version,
+            toVersion: after?.version,
+            deltas: [],
+            pendingEffects: {
+              mutatedNodeIds: [],
+              deletedNodeIds: [],
+              contentEditedNodeIds: [],
+              deferredFitFrameIds: [],
+            },
+            title: 'After',
+          },
+        },
+      ]);
       const stale = await app.inject({
         method: 'PATCH',
         url: '/canvas/card-target/title',
@@ -340,216 +368,32 @@ describe('POST /api/canvas lifecycle', () => {
   });
 });
 
-describe('PUT /api/canvas/:canvasId lifecycle', () => {
-  it('notifies observers after topology saves without publishing editable deltas', async () => {
-    createCanvas('c1', 'Original');
-    const app = await buildApp();
-    const received = vi.fn();
-    const unsubscribe = subscribeCanvasUpdates('c1', received);
-    try {
-      const response = await app.inject({
-        method: 'PUT',
-        url: '/canvas/c1',
-        payload: { version: 0, state: { nodes: [], edges: [] } },
-      });
-      expect(response.statusCode).toBe(200);
-      expect(received).toHaveBeenCalledExactlyOnceWith({
-        type: 'invalidate',
-        data: {},
-      });
-      received.mockClear();
-      const conflict = await app.inject({
-        method: 'PUT',
-        url: '/canvas/c1',
-        payload: { version: 0, state: { nodes: [], edges: [] } },
-      });
-      expect(conflict.statusCode).toBe(409);
-      expect(received).not.toHaveBeenCalled();
-    } finally {
-      unsubscribe();
-      await app.close();
-    }
-  });
-  it.each(['sketch', undefined])(
-    'rejects malformed persisted Sigil metadata before saving or renaming with type %s',
-    async (type) => {
-      createCanvas('c1', 'Original');
-      const app = await buildApp();
-      try {
-        const seed = await app.inject({
-          method: 'PUT',
-          url: '/canvas/c1',
-          payload: {
-            version: 0,
-            state: {
-              nodes: [
-                {
-                  id: 'ink',
-                  type: 'sketch',
-                  position: { x: 0, y: 0 },
-                  data: { strokes: [] },
-                },
-              ],
-              edges: [],
-            },
-          },
-        });
-        expect(seed.statusCode).toBe(200);
-        const before = await space('c1').read();
-        const response = await app.inject({
-          method: 'PUT',
-          url: '/canvas/c1',
-          payload: {
-            version: seed.json().version,
-            title: 'Must not rename',
-            state: {
-              nodes: [
-                {
-                  id: 'ink',
-                  type,
-                  position: { x: 0, y: 0 },
-                  data: {
-                    strokes: [
-                      {
-                        id: 's0',
-                        points: [
-                          [0, 0],
-                          [10, 10],
-                        ],
-                        color: 'black',
-                        size: 2,
-                        resourceBinding: { strokeIds: 42 },
-                      },
-                    ],
-                  },
-                },
-              ],
-              edges: [],
-            },
-          },
-        });
-        expect(response.statusCode).toBe(400);
-        expect(response.json()).toMatchObject({
-          message: 'Invalid request body',
-        });
-        expect(await space('c1').read()).toEqual(before);
-      } finally {
-        await app.close();
-      }
-    },
-  );
+describe('PATCH /api/canvas/:canvasId/title storage outcomes', () => {
+  const rename = (
+    app: Awaited<ReturnType<typeof buildApp>>,
+    canvasId: string,
+    title: string,
+    expectedTitle: string,
+  ) =>
+    app.inject({
+      method: 'PATCH',
+      url: `/canvas/${canvasId}/title`,
+      payload: { title, expectedTitle },
+    });
 
-  it('preserves the legacy structural response, version bump, and no-delta behavior', async () => {
-    createCanvas('c1', 'Original');
-    const app = await buildApp();
-    try {
-      const response = await app.inject({
-        method: 'PUT',
-        url: '/canvas/c1',
-        payload: {
-          version: 0,
-          state: {
-            nodes: [
-              {
-                id: 'n1',
-                type: 'note',
-                position: { x: 0, y: 0 },
-                data: { label: 'Note', content: 'must stay out of space.json' },
-              },
-            ],
-            edges: [],
-          },
-        },
-      });
-
-      expect(response.statusCode).toBe(200);
-      expect(response.json()).toEqual({ canvasId: 'c1', version: 1 });
-      expect(getCanvasStore('c1').read()).toMatchObject({
-        version: 1,
-        state: {
-          nodes: [
-            expect.objectContaining({
-              id: 'n1',
-              data: { label: 'Note' },
-            }),
-          ],
-          edges: [],
-        },
-      });
-      expect(getCanvasStore('c1').readDeltaLogSince(0)).toEqual([]);
-    } finally {
-      await app.close();
-    }
-  });
-
-  it('keeps the legacy implicit-create path for an initially absent Space', async () => {
-    const app = await buildApp();
-    try {
-      const response = await app.inject({
-        method: 'PUT',
-        url: '/canvas/implicit',
-        payload: { version: 0, state: { nodes: [], edges: [] } },
-      });
-
-      expect(response.statusCode).toBe(200);
-      expect(response.json()).toEqual({ canvasId: 'implicit', version: 1 });
-      expect(getCanvasStore('implicit').read()).toMatchObject({
-        canvasId: 'implicit',
-        version: 1,
-        state: { nodes: [], edges: [] },
-      });
-    } finally {
-      await app.close();
-    }
-  });
-
-  it('keeps title collision as a 409 without applying the record write', async () => {
+  it('answers a title collision with a 409 without applying the record write', async () => {
     createCanvas('c1', 'Original');
     createCanvas('c2', 'Taken/A');
     const app = await buildApp();
     try {
-      const response = await app.inject({
-        method: 'PUT',
-        url: '/canvas/c1',
-        payload: {
-          version: 0,
-          title: 'Taken:A',
-          state: { nodes: [], edges: [] },
-        },
-      });
+      // The two titles differ, but are filed under the same name.
+      const response = await rename(app, 'c1', 'Taken:A', 'Original');
 
       expect(response.statusCode).toBe(409);
-      expect(response.json()).toMatchObject({
-        code: 'CANVAS_TITLE_CONFLICT',
-        conflictWith: 'Taken/A',
-      });
+      expect(response.json()).toMatchObject({ code: 'CANVAS_TITLE_CONFLICT' });
       expect(getCanvasStore('c1').read()).toMatchObject({
         title: 'Original',
         version: 0,
-      });
-    } finally {
-      await app.close();
-    }
-  });
-
-  it('renames only when the request explicitly supplies a new title', async () => {
-    createCanvas('c1', 'Original');
-    const app = await buildApp();
-    try {
-      const response = await app.inject({
-        method: 'PUT',
-        url: '/canvas/c1',
-        payload: {
-          version: 0,
-          title: 'Explicit rename',
-          state: { nodes: [], edges: [] },
-        },
-      });
-
-      expect(response.statusCode).toBe(200);
-      expect(getCanvasStore('c1').read()).toMatchObject({
-        title: 'Explicit rename',
-        version: 1,
       });
     } finally {
       await app.close();
@@ -560,15 +404,7 @@ describe('PUT /api/canvas/:canvasId lifecycle', () => {
     createCanvas('c1', 'A/B');
     const app = await buildApp();
     try {
-      const response = await app.inject({
-        method: 'PUT',
-        url: '/canvas/c1',
-        payload: {
-          version: 0,
-          title: 'A:B',
-          state: { nodes: [], edges: [] },
-        },
-      });
+      const response = await rename(app, 'c1', 'A:B', 'A/B');
 
       expect(response.statusCode).toBe(200);
       expect(getCanvasStore('c1').read()).toMatchObject({
@@ -580,29 +416,7 @@ describe('PUT /api/canvas/:canvasId lifecycle', () => {
     }
   });
 
-  it('preserves an externally reconciled title when the request omits title', async () => {
-    createCanvas('c1', 'Original');
-    const store = getCanvasStore('c1');
-    expect(store.renameSelf('Finder rename')).toMatchObject({ ok: true });
-    const app = await buildApp();
-    try {
-      const response = await app.inject({
-        method: 'PUT',
-        url: '/canvas/c1',
-        payload: { version: 0, state: { nodes: [], edges: [] } },
-      });
-
-      expect(response.statusCode).toBe(200);
-      expect(getCanvasStore('c1').read()).toMatchObject({
-        title: 'Finder rename',
-        version: 1,
-      });
-    } finally {
-      await app.close();
-    }
-  });
-
-  it('keeps filesystem rename failures behind the legacy generic 500', async () => {
+  it('keeps filesystem rename failures behind a generic 500', async () => {
     createCanvas('c1', 'Original');
     vi.mocked(withSpaceDirHandlesReleased).mockImplementationOnce(
       (async () => ({
@@ -613,25 +427,21 @@ describe('PUT /api/canvas/:canvasId lifecycle', () => {
     );
     const app = await buildApp();
     try {
-      const response = await app.inject({
-        method: 'PUT',
-        url: '/canvas/c1',
-        payload: {
-          version: 0,
-          title: 'Cannot rename',
-          state: { nodes: [], edges: [] },
-        },
-      });
+      const response = await rename(app, 'c1', 'Cannot rename', 'Original');
 
       expect(response.statusCode).toBe(500);
-      expect(response.json()).toEqual({ message: 'Failed to rename canvas' });
+      expect(response.json()).toMatchObject({ code: 'SPACE_RENAME_FAILED' });
       expect(response.body).not.toContain('sensitive filesystem detail');
+      expect(getCanvasStore('c1').read()).toMatchObject({
+        title: 'Original',
+        version: 0,
+      });
     } finally {
       await app.close();
     }
   });
 
-  it('does not recreate a Space deleted after the initial read', async () => {
+  it('does not recreate a Space deleted while its rename is in flight', async () => {
     createCanvas('c1', 'Original');
     const paused = deferred();
     const release = deferred();
@@ -646,24 +456,178 @@ describe('PUT /api/canvas/:canvasId lifecycle', () => {
 
     const app = await buildApp();
     try {
-      const updating = app.inject({
-        method: 'PUT',
-        url: '/canvas/c1',
-        payload: {
-          version: 0,
-          title: 'Renamed before delete',
-          state: { nodes: [], edges: [] },
-        },
-      });
+      const updating = rename(app, 'c1', 'Renamed before delete', 'Original');
       await paused.promise;
       await expect(deleteCanvas('c1')).resolves.toBe(true);
       release.resolve();
 
       const response = await updating;
-      expect(response.statusCode).toBe(404);
+      expect(response.statusCode).toBe(500);
       expect(getCanvasStore('c1').read()).toBeNull();
     } finally {
       release.resolve();
+      await app.close();
+    }
+  });
+});
+
+describe('whole-Space save', () => {
+  it('is not a route: a PUT of a Space is a 404 and writes nothing', async () => {
+    createCanvas('c1', 'Original');
+    const app = await buildApp();
+    try {
+      const before = getCanvasStore('c1').read();
+      const response = await app.inject({
+        method: 'PUT',
+        url: '/canvas/c1',
+        payload: { version: 0, state: { nodes: [], edges: [] } },
+      });
+
+      expect(response.statusCode).toBe(404);
+      expect(getCanvasStore('c1').read()).toEqual(before);
+    } finally {
+      await app.close();
+    }
+  });
+});
+
+describe('POST /api/canvas/:canvasId/execute storage outcomes', () => {
+  const execute = (
+    app: Awaited<ReturnType<typeof buildApp>>,
+    canvasId: string,
+    commands: unknown[],
+  ) =>
+    app.inject({
+      method: 'POST',
+      url: `/canvas/${canvasId}/execute`,
+      payload: {
+        edits: editsPerCommand(commands),
+      },
+    });
+
+  it('keeps node content out of the Space record', async () => {
+    createCanvas('c1', 'Original');
+    const app = await buildApp();
+    try {
+      const response = await execute(app, 'c1', [
+        {
+          type: 'CREATE_NODES',
+          nodes: [
+            {
+              id: 'n1',
+              nodeType: 'note',
+              position: { x: 0, y: 0 },
+              data: { label: 'Note', content: 'must stay out of space.json' },
+            },
+          ],
+        },
+      ]);
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({ fromVersion: 0, toVersion: 1 });
+      const record = getCanvasStore('c1').read();
+      expect(record?.version).toBe(1);
+      const [node] = (record?.state.nodes ?? []) as CanvasNode[];
+      expect(node).toMatchObject({ id: 'n1', type: 'note' });
+      expect(node?.data).not.toHaveProperty('content');
+      expect(node?.data).not.toHaveProperty('label');
+      expect(getCanvasStore('c1').readNode('n1')).toMatchObject({
+        label: 'Note',
+        content: 'must stay out of space.json',
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('does not create a Space that is absent', async () => {
+    const app = await buildApp();
+    try {
+      const response = await execute(app, 'implicit', [
+        {
+          type: 'CREATE_NODES',
+          nodes: [{ nodeType: 'note', position: { x: 0, y: 0 } }],
+        },
+      ]);
+
+      expect(response.statusCode).toBe(404);
+      expect(getCanvasStore('implicit').read()).toBeNull();
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('keeps an externally reconciled title across a structure edit', async () => {
+    createCanvas('c1', 'Original');
+    const store = getCanvasStore('c1');
+    expect(store.renameSelf('Finder rename')).toMatchObject({ ok: true });
+    const app = await buildApp();
+    try {
+      const response = await execute(app, 'c1', [
+        {
+          type: 'CREATE_NODES',
+          nodes: [{ nodeType: 'note', position: { x: 0, y: 0 } }],
+        },
+      ]);
+
+      expect(response.statusCode).toBe(200);
+      expect(getCanvasStore('c1').read()).toMatchObject({
+        title: 'Finder rename',
+        version: 1,
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('refuses malformed persisted Sigil metadata without saving', async () => {
+    createCanvas('c1', 'Original');
+    const app = await buildApp();
+    try {
+      const seed = await execute(app, 'c1', [
+        {
+          type: 'CREATE_NODES',
+          nodes: [
+            {
+              id: 'ink',
+              nodeType: 'sketch',
+              position: { x: 0, y: 0 },
+              data: { strokes: [] },
+            },
+          ],
+        },
+      ]);
+      expect(seed.statusCode).toBe(200);
+      expect(seed.json().edits[0].results[0].applied).toBe(true);
+      const before = await space('c1').read();
+      const response = await execute(app, 'c1', [
+        {
+          type: 'MERGE_NODE_DATA',
+          patches: [
+            {
+              nodeId: 'ink',
+              patch: {
+                strokes: [
+                  {
+                    id: 's0',
+                    points: [
+                      [0, 0],
+                      [10, 10],
+                    ],
+                    color: 'black',
+                    size: 2,
+                    resourceBinding: { strokeIds: 42 },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      ]);
+      expect(response.statusCode).toBe(200);
+      expect(response.json().edits[0].results[0].applied).toBe(false);
+      expect(await space('c1').read()).toEqual(before);
+    } finally {
       await app.close();
     }
   });
@@ -1607,6 +1571,150 @@ describe('Space export/import persistence', () => {
         await importedSpace.changes.read(String(agent.data.threadId)),
       ).toEqual(storedChanges);
       expect(await space(importedId).artifacts.read('asset.bin')).toEqual(blob);
+    } finally {
+      await app.close();
+    }
+  });
+});
+
+describe('Space export/import and reliable-save state', () => {
+  const OPERATION = '0b6f3c52-7d1e-4c7a-9f3b-2a6f0e9d4c11';
+  const KEY = { principalId: 'user:alice', operationId: OPERATION };
+
+  /** A Space with a stamp baseline and one stored response. */
+  async function seedSavedSpace(): Promise<{ basis: string; saveDir: string }> {
+    createCanvas('c1', 'Saved');
+    const handle = space('c1');
+    const stamps = await handle.save.stamps();
+    const record = await handle.read();
+    if (!stamps || !record) throw new Error('Test Space is missing');
+    const written = await handle.write({
+      expectedVersion: record.version,
+      nextRecord: {
+        ...record,
+        version: record.version + 1,
+        state: {
+          ...record.state,
+          nodes: [
+            { id: 'n1', type: 'note', position: { x: 0, y: 0 }, data: {} },
+          ],
+        },
+      },
+      nodeMutations: [
+        {
+          kind: 'put',
+          nodeId: 'n1',
+          record: { nodeId: 'n1', type: 'note', label: 'n1', content: 'body' },
+          authoritativeInsert: true,
+        },
+      ],
+      result: { key: KEY, digest: 'a'.repeat(64), response: { stored: true } },
+    });
+    expect(written).toEqual({ ok: true });
+    const saveDir = join(handle.diskTree!.directory(), '.history', 'save');
+    expect(existsSync(join(saveDir, 'head.json'))).toBe(true);
+    expect(readdirSync(join(saveDir, 'results'))).toHaveLength(1);
+    return {
+      basis: encodeBasis(stamps.lineage, record.version + 1),
+      saveDir,
+    };
+  }
+
+  async function importBundle(
+    app: Awaited<ReturnType<typeof buildApp>>,
+    bundle: Buffer,
+  ): Promise<string> {
+    const upload = multipartBody('saved.huabu.zip', 'application/zip', bundle);
+    const imported = await app.inject({
+      method: 'POST',
+      url: '/canvas/import',
+      payload: upload.payload,
+      headers: upload.headers,
+    });
+    expect(imported.statusCode).toBe(200);
+    return (imported.json() as { canvasId: string }).canvasId;
+  }
+
+  /** The imported Space is a new Space: nothing of the source's saves. */
+  async function expectFreshSaveState(
+    importedId: string,
+    sourceBasis: string,
+  ): Promise<void> {
+    resetStorageCache();
+    const imported = space(importedId);
+    expect(
+      existsSync(join(imported.diskTree!.directory(), '.history', 'save')),
+    ).toBe(false);
+    await expect(imported.save.lookup(KEY)).resolves.toBeNull();
+    // Its baseline is its own, so a read version of the source is refused.
+    const stamps = await imported.save.stamps();
+    expect(stamps?.lineage).not.toBe(parseBasis(sourceBasis)?.lineage);
+    await expect(
+      executeOnServer({
+        canvasId: importedId,
+        commands: [],
+        originator: { source: 'ui' },
+        basis: sourceBasis,
+      }),
+    ).rejects.toBeInstanceOf(ExecuteBasisError);
+  }
+
+  it.each(['', '?includeHistory=false'])(
+    'leaves stamps and stored responses out of an export (%s)',
+    async (query) => {
+      const { basis } = await seedSavedSpace();
+      const app = await buildApp();
+      try {
+        const exported = await app.inject({
+          method: 'GET',
+          url: `/canvas/c1/export${query}`,
+        });
+        expect(exported.statusCode).toBe(200);
+        // Stored names are plain bytes in a ZIP, compressed or not.
+        expect(exported.rawPayload.includes('.history/save')).toBe(false);
+
+        await expectFreshSaveState(
+          await importBundle(app, exported.rawPayload),
+          basis,
+        );
+        // The source keeps what it had.
+        await expect(space('c1').save.lookup(KEY)).resolves.toMatchObject({
+          response: { stored: true },
+        });
+      } finally {
+        await app.close();
+      }
+    },
+  );
+
+  it('drops save state carried by a bundle that was not made by this export', async () => {
+    const { basis, saveDir } = await seedSavedSpace();
+    // An intent as a crashed writer would leave it, to be sure it is not
+    // carried over and "finished" in the copy.
+    writeFileSync(
+      join(saveDir, 'pending.json'),
+      JSON.stringify({ v: 1, toVersion: 1, result: {}, delta: null }),
+    );
+    const archive = archiver('zip');
+    const chunks: Buffer[] = [];
+    archive.on('data', (chunk: Buffer) => chunks.push(chunk));
+    const finished = new Promise<void>((resolve, reject) => {
+      archive.on('end', resolve);
+      archive.on('error', reject);
+    });
+    archive.append(JSON.stringify({ version: '2', title: 'Saved' }), {
+      name: 'manifest.json',
+    });
+    archive.glob('**/*', { cwd: space('c1').diskTree!.directory(), dot: true });
+    await archive.finalize();
+    await finished;
+    const bundle = Buffer.concat(chunks);
+    expect(bundle.includes('.history/save/head.json')).toBe(true);
+    rmSync(join(saveDir, 'pending.json'));
+
+    const app = await buildApp();
+    try {
+      await expectFreshSaveState(await importBundle(app, bundle), basis);
     } finally {
       await app.close();
     }

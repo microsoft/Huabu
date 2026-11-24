@@ -9,6 +9,12 @@ import { desktopSpaceStorage } from '@/utils/desktopStorage';
 interface PanelState {
   leftMode: 'layers' | 'files';
   filesLocation: { canvasId: string; agentletId: string; path: string } | null;
+  /**
+   * Last directory browsed per Space and device; see {@link filesPathKey}.
+   * Entries are kept oldest first, so the order also records which device a
+   * Space browsed last.
+   */
+  filesLastPaths: Record<string, string>;
   openFiles: (location: {
     canvasId: string;
     agentletId: string;
@@ -32,6 +38,21 @@ interface PanelState {
   focusCanvasSearchRequest: number | null;
   /** Expand Layers and request search focus after the DOM leaves its inert state. */
   requestFocusCanvasSearch: () => void;
+
+  /** Pending one-shot request to bring a node's row into view in Layers. */
+  layerLocateRequest: {
+    nodeId: string;
+    nonce: number;
+    /** Layers is the only locator (Canvas hidden): reveal the row at any cost. */
+    force: boolean;
+  } | null;
+  /**
+   * Ask Layers to show a node's row. With `open` the panel is expanded on the
+   * Layers tab first; without it the request is a no-op unless Layers is
+   * already showing, so it never changes what the user has open.
+   */
+  requestLayerLocate: (nodeId: string, options?: { open?: boolean }) => void;
+  consumeLayerLocateRequest: (nonce: number) => void;
 
   /**
    * Collapse state for the right (chat) panel. Hoisted out of
@@ -71,13 +92,48 @@ interface PanelState {
   requestFocusChatInput: (threadId: string) => void;
 }
 
+const MAX_REMEMBERED_FILE_PATHS = 100;
+
+export const filesPathKey = (canvasId: string, agentletId: string) =>
+  `${canvasId}\n${agentletId}`;
+
+/** The device a Space browsed most recently, if it browsed any. */
+export function lastFilesDevice(
+  canvasId: string,
+  filesLastPaths: Record<string, string>,
+): string | undefined {
+  const prefix = filesPathKey(canvasId, '');
+  return Object.keys(filesLastPaths)
+    .filter((key) => key.startsWith(prefix))
+    .pop()
+    ?.slice(prefix.length);
+}
+
 export const usePanelStore = create<PanelState>()(
   persist(
     (set) => ({
       leftMode: 'layers',
       filesLocation: null,
+      filesLastPaths: {},
       openFiles: (filesLocation) =>
-        set({ filesLocation, leftMode: 'files', isLeftCollapsed: false }),
+        set((s) => {
+          const key = filesPathKey(
+            filesLocation.canvasId,
+            filesLocation.agentletId,
+          );
+          // Re-insert so the oldest remembered directory is evicted first.
+          const { [key]: _previous, ...others } = s.filesLastPaths;
+          const entries = [
+            ...Object.entries(others),
+            [key, filesLocation.path] as const,
+          ].slice(-MAX_REMEMBERED_FILE_PATHS);
+          return {
+            filesLocation,
+            filesLastPaths: Object.fromEntries(entries),
+            leftMode: 'files',
+            isLeftCollapsed: false,
+          };
+        }),
       setLeftMode: (leftMode) => set({ leftMode }),
       isLeftCollapsed: true,
       setLeftCollapsed: (collapsed) => set({ isLeftCollapsed: collapsed }),
@@ -91,6 +147,28 @@ export const usePanelStore = create<PanelState>()(
           leftMode: 'layers',
           focusCanvasSearchRequest: (s.focusCanvasSearchRequest ?? 0) + 1,
         })),
+
+      layerLocateRequest: null,
+      requestLayerLocate: (nodeId, options) =>
+        set((s) => {
+          const showing = !s.isLeftCollapsed && s.leftMode === 'layers';
+          if (!showing && !options?.open) return s;
+          return {
+            isLeftCollapsed: false,
+            leftMode: 'layers',
+            layerLocateRequest: {
+              nodeId,
+              nonce: (s.layerLocateRequest?.nonce ?? 0) + 1,
+              force: !!options?.open,
+            },
+          };
+        }),
+      consumeLayerLocateRequest: (nonce) =>
+        set((s) =>
+          s.layerLocateRequest?.nonce === nonce
+            ? { layerLocateRequest: null }
+            : s,
+        ),
 
       isRightCollapsed: true,
       rightWidthPx: 420,
@@ -139,6 +217,7 @@ export const usePanelStore = create<PanelState>()(
       partialize: (state) => ({
         isRightCollapsed: state.isRightCollapsed,
         rightWidthPx: state.rightWidthPx,
+        filesLastPaths: state.filesLastPaths,
       }),
     },
   ),

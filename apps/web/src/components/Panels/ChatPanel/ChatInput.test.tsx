@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { ChatSessionProvider } from '@/hooks/useChatSession';
 
-import { ChatInput } from './ChatInput';
+import { ChatInput, type ChatInputProps } from './ChatInput';
 
 import type { ChatMessage } from '@/store/chatTypes';
 import type { ChatAttachment, QuotedComment } from '@huabu/shared';
@@ -72,10 +72,12 @@ vi.mock('@/store/workspaceStore', () => ({
 }));
 
 vi.mock('react-i18next', () => ({
-  useTranslation: () => ({ t: (key: string) => key }),
+  useTranslation: () => ({ t: (key: string) => key, i18n: { language: 'en' } }),
 }));
 
-vi.mock('./ContextUsageRing', () => ({ ContextUsageRing: () => null }));
+vi.mock('./ContextUsageRing', () => ({
+  ContextUsageRing: () => <span data-builtin-usage />,
+}));
 vi.mock('./ChatContextSources', () => ({
   ChatContextSources: ({
     adjacentNodeSourceId,
@@ -122,6 +124,7 @@ describe('ChatInput', () => {
     isStreaming = false,
     submitDisabled = false,
     queueSubmission = false,
+    sessionUsage?: ChatInputProps['sessionUsage'],
   ) {
     const onSubmit = vi.fn();
     const onChange = vi.fn();
@@ -147,12 +150,32 @@ describe('ChatInput', () => {
             isStreaming={isStreaming}
             submitDisabled={submitDisabled}
             queueSubmission={queueSubmission}
+            sessionUsage={sessionUsage}
           />
         </ChatSessionProvider>,
       ),
     );
     return { onSubmit, onChange };
   }
+
+  it.each([false, true])(
+    'keeps external usage separate from built-in estimates (external=%s)',
+    (external) => {
+      renderQuotedInput(
+        '',
+        false,
+        false,
+        false,
+        external ? { usage: null, tokenUsage: null } : undefined,
+      );
+      expect(container?.querySelector('[data-builtin-usage]') !== null).toBe(
+        !external,
+      );
+      expect(container?.textContent?.includes('chat.sessionUsage')).toBe(
+        external,
+      );
+    },
+  );
 
   it('queues via Enter and the submit button while retaining a separate Stop action', () => {
     const { onSubmit } = renderQuotedInput('Next task', true, false, true);

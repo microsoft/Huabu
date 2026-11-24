@@ -20,7 +20,10 @@ import {
   useConversationPreparationStore,
 } from '@/store/conversationPreparation';
 
-import { createWorkspaceCache } from './workspaceCache';
+import {
+  sessionMetaCacheKey,
+  useSessionMetaCache,
+} from './acpSessionMetaCache';
 
 import type {
   AcpSessionMetaSnapshot,
@@ -42,23 +45,6 @@ const EMPTY_META: AcpSessionMetaSnapshot = {
   usage: null,
   updatedAt: 0,
 };
-
-interface CachedAcpSessionMetaEntry {
-  meta: AcpSessionMetaSnapshot;
-  source: AcpThreadCachedMetaResponse['source'];
-  fetchedAt: number;
-}
-
-const useSessionMetaCache = createWorkspaceCache<CachedAcpSessionMetaEntry>();
-
-function sessionMetaCacheKey(
-  canvasId: string | null | undefined,
-  threadId: string | null | undefined,
-  profileId: string,
-): string | null {
-  if (!threadId || !profileId) return null;
-  return JSON.stringify([canvasId ?? '', threadId, profileId]);
-}
 
 export function clearAcpSessionMetaCache(): void {
   useSessionMetaCache.getState().clear();
@@ -134,7 +120,7 @@ export function useAcpSessionMeta({
   const bindingKind = binding.kind;
   const profileId = binding.kind === 'external' ? binding.profileId : '';
   const cacheKey =
-    bindingKind === 'external' && enabled
+    bindingKind === 'external'
       ? sessionMetaCacheKey(canvasId, threadId, profileId)
       : null;
   const initialCached = cacheKey ? sessionMetaCache.get(cacheKey) : undefined;
@@ -147,6 +133,7 @@ export function useAcpSessionMeta({
   );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
+  const [metaScope, setMetaScope] = useState({ cacheKey, sessionMetaCache });
 
   // Monotonic epoch for cancellation; mirrors the pattern in
   // useAcpSlashCommands — see that file for the design rationale.
@@ -162,6 +149,7 @@ export function useAcpSessionMeta({
     (state) => !!threadId && selectThreadIsLoading(state, threadId),
   );
   const wasStreaming = useRef(false);
+  const wasEnabled = useRef(enabled);
 
   const refresh = useCallback(async () => {
     const myEpoch = ++epochRef.current;
@@ -169,14 +157,18 @@ export function useAcpSessionMeta({
       epochRef.current === myEpoch &&
       useSessionMetaCache.getState() === sessionMetaCache;
 
-    if (!threadId || bindingKind !== 'external' || !enabled || !cacheKey) {
-      // Internal binding (or external binding whose precondition has
-      // been gated off by the caller) — nothing to fetch. Reset to
+    if (!threadId || bindingKind !== 'external' || !cacheKey) {
+      // Internal binding or absent thread — nothing to fetch. Reset to
       // empty so a freshly-switched internal binding doesn't keep
       // showing the previous agent's snapshot.
       setMeta(EMPTY_META);
       setSource('none');
       setError(null);
+      setLoading(false);
+      loadingRef.current = false;
+      return;
+    }
+    if (!enabled) {
       setLoading(false);
       loadingRef.current = false;
       return;
@@ -322,6 +314,7 @@ export function useAcpSessionMeta({
                   used: event.data.used,
                   size: event.data.size,
                   cost: event.data.cost ?? null,
+                  receivedAt: event.data.receivedAt,
                 },
                 updatedAt: Date.now(),
               };
@@ -387,6 +380,9 @@ export function useAcpSessionMeta({
   }, [isStreaming, refresh]);
 
   useEffect(() => {
+    const reconnected = enabled && !wasEnabled.current;
+    wasEnabled.current = enabled;
+    setMetaScope({ cacheKey, sessionMetaCache });
     if (!cacheKey) {
       setMeta(EMPTY_META);
       setSource('none');
@@ -406,7 +402,8 @@ export function useAcpSessionMeta({
       lastFetchedAtRef.current = cached.fetchedAt;
       if (
         !loadingRef.current &&
-        (Date.now() - cached.fetchedAt >= STALE_TTL_MS ||
+        (reconnected ||
+          Date.now() - cached.fetchedAt >= STALE_TTL_MS ||
           (!!threadId &&
             selectThreadIsLoading(useChatStore.getState(), threadId)))
       ) {
@@ -421,7 +418,14 @@ export function useAcpSessionMeta({
     lastFetchedAtRef.current = 0;
     void refresh();
     return invalidatePending;
-  }, [cacheKey, threadId, refresh, invalidatePending, sessionMetaCache]);
+  }, [
+    cacheKey,
+    threadId,
+    refresh,
+    invalidatePending,
+    sessionMetaCache,
+    enabled,
+  ]);
 
   useEffect(() => {
     if (!threadId || bindingKind !== 'external') return;
@@ -439,11 +443,14 @@ export function useAcpSessionMeta({
     };
   }, [threadId, bindingKind, applyEvent, cacheKey, sessionMetaCache]);
 
+  const matchesScope =
+    metaScope.cacheKey === cacheKey &&
+    metaScope.sessionMetaCache === sessionMetaCache;
   return {
-    meta,
-    source,
-    loading,
-    error,
+    meta: matchesScope ? meta : (initialCached?.meta ?? EMPTY_META),
+    source: matchesScope ? source : (initialCached?.source ?? 'none'),
+    loading: matchesScope ? loading : !!cacheKey && enabled && !initialCached,
+    error: matchesScope ? error : null,
     refresh,
     refreshIfStale,
     applyOptimistic,

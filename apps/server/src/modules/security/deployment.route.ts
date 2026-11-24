@@ -7,6 +7,7 @@ import {
   type DeploymentReadinessResponse,
 } from '@huabu/shared';
 
+import { deployedSha } from './canary-redeploy.js';
 import { resolveDeploymentConfig } from './deployment-config.js';
 import { isOwnerRequest } from './owner.js';
 import { getDeploymentEnvironment } from '../../security/deployment-settings.js';
@@ -24,6 +25,8 @@ export function buildDeploymentReadiness(input: {
   ownerAllowed: boolean;
   credentialStoreWritable: boolean;
   ownerPolicy?: DeploymentReadinessResponse['owner']['policy'];
+  /** The Git commit this Server runs, or null when unknown. */
+  revision?: string | null;
 }): DeploymentReadinessResponse {
   const issues: DeploymentReadinessResponse['issues'] = [];
   if (!input.credentialStoreWritable) {
@@ -72,6 +75,7 @@ export function buildDeploymentReadiness(input: {
       status: 'operator-unverified',
     },
     issues,
+    revision: input.revision ?? null,
   });
 }
 
@@ -85,6 +89,7 @@ const deploymentRoutes: FastifyPluginAsync = async (app) => {
         ...config,
         ownerAllowed: isOwnerRequest(request),
         credentialStoreWritable: writable,
+        revision: deployedSha(),
         ...(resolveIdentityConfig(getDeploymentEnvironment()).provider ===
         'bubble'
           ? { ownerPolicy: 'bubble-system-owner' as const }

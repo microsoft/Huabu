@@ -175,7 +175,7 @@ Open to Side creates or uses the second group and moves the target's existing ta
 
 Creating a new unbound Chat mints a new `threadId`, creates a `chat` target, and opens it as a new tab. Returning to an existing unbound Chat uses its existing `{ canvasId, threadId }` target.
 
-Opening an empty workspace lazily creates one unbound Chat; merely loading a Canvas does not. New Chat always mints a new thread and tab. Closing a Chat tab closes only its presentation and does not delete server history or stop a running turn. If every tab is closed, reopening the workspace lazily creates another unbound Chat.
+An empty workspace stays empty: neither loading a Canvas nor opening the panel creates a Chat, and whether the panel is open is remembered per Canvas, starting collapsed for one with no tabs. Only an explicit New Chat mints a thread and tab. Closing a Chat tab closes only its presentation and does not delete server history or stop a running turn.
 
 Saving an unbound Chat as a Question node reuses its existing `threadId`. Only after node creation succeeds does the workspace replace the active tab's target in place with the new node target, preserving the tab ID, group position, focus, messages, and draft continuity. A failed node creation leaves the unbound Chat tab unchanged.
 

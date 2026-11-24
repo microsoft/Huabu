@@ -95,7 +95,7 @@ export interface MountAgenetesOptions {
   /** Opaque, non-secret bootstrap values forwarded through Agentlet's generic CLI. */
   bootstrapEnv?: Readonly<Record<string, string>>;
   /** Resolve the host-owned process limit on each supervised daemon start. */
-  getMaxAgents?: () => number;
+  getMaxAgents?: () => number | Promise<number>;
   /**
    * Host-namespaced environment isolation for the forked daemon and
    * every agent it spawns. `hostEnvPrefix` names the host's env

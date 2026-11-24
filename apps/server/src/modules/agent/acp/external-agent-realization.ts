@@ -5,6 +5,7 @@ import {
   AcpServiceError,
   ensureAcpSession,
   resolveAcpAgentletId,
+  resolveAcpRuntimeLaunch,
 } from '@agenetes/acp-driver';
 import { resolveConnectedAgentletId } from '@agenetes/agentlet-host';
 import { threadIdentityKey } from '@agenetes/runtime';
@@ -28,7 +29,10 @@ import {
   type FixedAgentNodeTarget,
 } from '../agent-thread-resolver.js';
 import { conversationTitleService } from '../conversation-title.service.js';
-import { resolveSpacePrompt } from '../space-instruction-frames.js';
+import {
+  resolveSpacePrompt,
+  type RenderedSpacePrompt,
+} from '../space-instruction-frames.js';
 import { acquireAgentTurn } from '../turn-lease.js';
 import { ensureProfileCacheSubscription } from './profile-cache-port.js';
 import { getExternalAgentRuntimeConfig } from './runtime-config.js';
@@ -36,7 +40,7 @@ import { buildAcpWorkloadSpec } from './service.js';
 
 import type { AcpSessionEntry } from '@agenetes/acp-driver';
 import type { Namespace } from '@agenetes/protocol';
-import type { AgentBinding } from '@huabu/shared';
+import type { AgentBinding, AgentInitialPreferences } from '@huabu/shared';
 import type { FastifyBaseLogger } from 'fastify';
 
 type ExternalBinding = Extract<AgentBinding, { kind: 'external' }>;
@@ -62,6 +66,8 @@ export interface RealizeExternalAgentThreadOptions {
   canvasId?: string;
   requestedBinding?: ExternalBinding;
   requestedCwd?: string;
+  /** What the conversation is showing; used only if this call realizes it. */
+  requestedPreferences?: AgentInitialPreferences;
   agentTarget?: AgentNodeTarget | null;
   fixedTarget?: FixedAgentNodeTarget | null;
   logger: FastifyBaseLogger;
@@ -87,7 +93,10 @@ interface RealizationDependencies {
     canvasId: string,
     threadId: string,
   ) => Promise<FixedAgentNodeTarget | null>;
-  collectSpacePrompt: typeof resolveSpacePrompt;
+  collectSpacePrompt: (
+    canvasId: string,
+    targetAgentNodeId: string,
+  ) => Promise<RenderedSpacePrompt | null>;
   readRecord: (
     namespace: Namespace,
     threadId: string,
@@ -143,23 +152,27 @@ async function ensureSessionFromCanonicalSpec(
   logger: FastifyBaseLogger,
 ): Promise<AcpSessionEntry> {
   const { spec } = realized;
-  const resolvedEnvironment =
-    await acpRuntimePolicy.resolveRuntimeEnvironment?.(spec.spec);
-  const env =
-    resolvedEnvironment || spec.spec.env
-      ? { ...resolvedEnvironment, ...spec.spec.env }
-      : undefined;
-  const record = await agenetes.record(spec.namespace, spec.threadId);
   const requestedAgentletId = resolveAcpAgentletId(spec);
+  const agentletId =
+    resolveConnectedAgentletId(requestedAgentletId) ?? requestedAgentletId;
+  const { recipe, env } = await resolveAcpRuntimeLaunch(
+    spec.spec,
+    acpRuntimePolicy,
+    {
+      namespace: spec.namespace,
+      threadId: spec.threadId,
+      agentletId,
+    },
+  );
+  const record = await agenetes.record(spec.namespace, spec.threadId);
   return ensureAcpSession({
-    agentletId:
-      resolveConnectedAgentletId(requestedAgentletId) ?? requestedAgentletId,
+    agentletId,
     threadId: spec.threadId,
     binding: spec.spec.binding,
     namespace: spec.namespace,
     profileExecutionRevision: spec.spec.profileExecutionRevision ?? 0,
     ...(spec.spec.cwd !== undefined && { cwd: spec.spec.cwd }),
-    ...(spec.spec.recipe !== undefined && { recipe: spec.spec.recipe }),
+    ...(recipe !== undefined && { recipe }),
     ...(env !== undefined && { env }),
     ...(record?.state !== undefined && {
       priorState: record.state as Parameters<
@@ -169,7 +182,10 @@ async function ensureSessionFromCanonicalSpec(
     ...(spec.spec.initialPreferences !== undefined && {
       initialPreferences: spec.spec.initialPreferences,
     }),
-    idleTimeoutSecs: getExternalAgentRuntimeConfig().idleTimeoutSecs,
+    ...(spec.spec.initialSelections !== undefined && {
+      initialSelections: spec.spec.initialSelections,
+    }),
+    idleTimeoutSecs: (await getExternalAgentRuntimeConfig()).idleTimeoutSecs,
     logger,
   });
 }
@@ -179,7 +195,8 @@ const DEFAULT_DEPENDENCIES: RealizationDependencies = {
     agentThreadResolver.resolveAgentNode(canvasId, threadId),
   resolveFixedAgentNode: (canvasId, threadId) =>
     agentThreadResolver.resolveFixedAgentNode(canvasId, threadId),
-  collectSpacePrompt: resolveSpacePrompt,
+  collectSpacePrompt: (canvasId, targetAgentNodeId) =>
+    resolveSpacePrompt(canvasId, targetAgentNodeId, { includeFile: false }),
   readRecord: async (namespace, threadId) =>
     await agenetes.record(namespace, threadId),
   createHandle: async (spec) => (await agenetes.create(spec)) as AcpHandle,
@@ -242,7 +259,7 @@ export class ExternalAgentRealizationService {
     try {
       const realized = await pending;
       if (realized.spec.spec.agentletId)
-        requireOwnAgentlet(realized.spec.spec.agentletId);
+        await requireOwnAgentlet(realized.spec.spec.agentletId);
       this.validateRequest(realized, options);
       return realized;
     } finally {
@@ -250,12 +267,12 @@ export class ExternalAgentRealizationService {
     }
   }
 
-  ensureSession(
+  async ensureSession(
     realized: RealizedExternalAgentThread,
     logger: FastifyBaseLogger,
   ): Promise<AcpSessionEntry> {
     if (realized.spec.spec.agentletId)
-      requireOwnAgentlet(realized.spec.spec.agentletId);
+      await requireOwnAgentlet(realized.spec.spec.agentletId);
     return this.dependencies.ensureSession(realized, logger);
   }
 
@@ -321,7 +338,7 @@ export class ExternalAgentRealizationService {
         );
       }
       const spec = record.spec as AcpWorkloadSpec;
-      if (spec.spec.agentletId) requireOwnAgentlet(spec.spec.agentletId);
+      if (spec.spec.agentletId) await requireOwnAgentlet(spec.spec.agentletId);
       validateRequestedExecution(spec, options);
       const binding = bindingFromSpec(spec);
       const realized = {
@@ -392,11 +409,14 @@ export class ExternalAgentRealizationService {
       );
     }
 
-    const spec = this.dependencies.buildSpec({
+    const spec = await this.dependencies.buildSpec({
       binding,
       threadId: options.threadId,
       canvasId: options.canvasId,
       cwd: agentTarget ? undefined : options.requestedCwd,
+      ...(options.requestedPreferences && {
+        initialPreferences: options.requestedPreferences,
+      }),
       ...((agentTarget?.launchOverrides ?? fixedTarget?.launchOverrides)
         ? {
             launchOverrides:

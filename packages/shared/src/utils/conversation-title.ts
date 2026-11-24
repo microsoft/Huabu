@@ -2,6 +2,49 @@
 // Licensed under the MIT license.
 
 const MAX_TITLE_LENGTH = 120;
+import type { ConversationTitle } from '../types/api/conversation-title.js';
+
+export function acceptsConversationTitle(
+  current: ConversationTitle,
+  source: NonNullable<ConversationTitle['source']>,
+): boolean {
+  return (
+    source === 'user' ||
+    (current.source !== 'user' &&
+      current.source !== 'generated' &&
+      (source !== 'fallback' ||
+        !current.title ||
+        current.source === 'fallback'))
+  );
+}
+
+export function questionConversationTitle(
+  data: Readonly<Record<string, unknown>>,
+): {
+  title: ConversationTitle;
+  protected: boolean;
+} {
+  const title = normalizeConversationTitle(data.label);
+  const owner = data.labelSource;
+  const source = data.conversationTitleSource;
+  return {
+    protected: !!title && (owner === 'user' || owner === 'agent'),
+    title: {
+      title,
+      source: !title
+        ? null
+        : owner === 'user'
+          ? 'user'
+          : owner === 'agent'
+            ? 'generated'
+            : source === 'generated' ||
+                source === 'acp' ||
+                source === 'fallback'
+              ? source
+              : 'fallback',
+    },
+  };
+}
 
 function normalizeWhitespace(value: unknown): string | null {
   if (typeof value !== 'string') return null;
@@ -28,8 +71,11 @@ export function stripInlineMarkdown(text: string): string {
       // Leading list markers must be removed before bold/italic markers.
       .replace(/^(?:>\s*)+/, '')
       .replace(/^(?:[-*+]|\d+\.)\s+/, '')
-      .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
-      .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+      // Labels exclude unescaped `[` and targets allow one level of balanced
+      // parentheses, so an unclosed `![](` run fails fast instead of rescanning
+      // the tail. Backslash escapes (`\[`, `\]`) stay part of the label.
+      .replace(/!\[((?:[^[\]\\]|\\.)*)\]\((?:[^()]|\([^()]*\))*\)/g, '$1')
+      .replace(/\[((?:[^[\]\\]|\\.)*)\]\((?:[^()]|\([^()]*\))*\)/g, '$1')
       .replace(/\*{1,3}(.+?)\*{1,3}/g, '$1')
       .replace(/_{1,3}(.+?)_{1,3}/g, '$1')
       .replace(/~~(.+?)~~/g, '$1')

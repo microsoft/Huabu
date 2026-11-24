@@ -20,7 +20,10 @@ import {
   externalAgentRealization,
   realizationHttpError,
 } from './external-agent-realization.js';
-import { getProfileSchemaCache } from './profile-schema-cache.js';
+import {
+  profileSessionMetaSnapshot,
+  readProfileObservation,
+} from './profile-capabilities.js';
 import {
   rememberProfileConfigPreference,
   rememberProfileSessionPreference,
@@ -30,7 +33,6 @@ import { personalSettingsOwner } from '../../identity/personal-settings.js';
 import { canvasAcpNamespace } from '../../workspace/paths.js';
 import { agenetes } from '../agenetes/index.js';
 
-import type { AcpProfileSchemaCacheEntry } from './profile-schema-cache.js';
 import type { AcpWorkloadSpec } from '../agenetes/drivers.js';
 import type { AcpSessionEntry } from '@agenetes/acp-driver';
 import type { AgentMetadata } from '@agenetes/protocol';
@@ -42,6 +44,7 @@ import type {
   SetAcpSessionConfigOptionResponse,
   SetAcpSessionModelResponse,
   SetAcpSessionModeResponse,
+  AgentInitialPreferences,
 } from '@huabu/shared';
 import type { FastifyBaseLogger, FastifyPluginAsync } from 'fastify';
 
@@ -63,6 +66,7 @@ async function realizeControlThread(
     binding: { kind: 'external'; alias: string; profileId: string };
     canvasId?: string;
     cwd?: string;
+    initialPreferences?: AgentInitialPreferences;
   },
   logger: FastifyBaseLogger,
 ) {
@@ -72,6 +76,7 @@ async function realizeControlThread(
       canvasId: target.canvasId,
       requestedBinding: target.binding,
       requestedCwd: target.cwd,
+      requestedPreferences: target.initialPreferences,
       logger,
     });
     const entry = await externalAgentRealization.ensureSession(
@@ -118,6 +123,7 @@ function snapshotSessionMeta(entry: AcpSessionEntry): AcpSessionMetaSnapshot {
     selections: entry.selections,
     sessionInfo: entry.sessionInfo,
     usage: entry.usage,
+    tokenUsage: entry.tokenUsage,
     updatedAt: entry.metaUpdatedAt,
   };
 }
@@ -156,6 +162,7 @@ function snapshotMetaFromPersisted(
     selections: meta.selections ?? {},
     sessionInfo: meta.sessionInfo ?? null,
     usage: meta.usage ?? null,
+    tokenUsage: meta.tokenUsage,
     updatedAt: meta.metaUpdatedAt ?? 0,
   };
 }
@@ -171,22 +178,6 @@ function snapshotMetaFromPersisted(
  * `selections` stays empty for the same reason: a user choice belongs to
  * one thread and must never leak across threads of the same profile.
  */
-function snapshotMetaFromProfileCache(
-  entry: AcpProfileSchemaCacheEntry,
-): AcpSessionMetaSnapshot {
-  return {
-    availableModes: entry.availableModes ?? [],
-    currentModeId: entry.currentModeId ?? null,
-    availableModels: entry.availableModels ?? [],
-    currentModelId: entry.currentModelId ?? null,
-    configOptions: entry.configOptions ?? [],
-    selections: {},
-    sessionInfo: null,
-    usage: null,
-    updatedAt: entry.metaUpdatedAt ?? 0,
-  };
-}
-
 const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
   /**
    * Read-only **no-spawn** meta snapshot for a thread.
@@ -257,7 +248,7 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
         }
       : undefined;
     const agentletId = resolveThreadAgentletId(record);
-    if (agentletId) requireOwnAgentlet(agentletId);
+    if (agentletId) await requireOwnAgentlet(agentletId);
     const live = agentletId
       ? acpSessionRegistry.get(agentletId, threadId, namespace)
       : undefined;
@@ -281,11 +272,12 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
       };
     }
     if (profileId) {
-      if (!getAgentProfileRegistry()?.getProfile(profileId))
+      const profile = await getAgentProfileRegistry()?.getProfile(profileId);
+      if (!profile)
         return reply
           .code(404)
           .send({ message: 'Agent Profile is unavailable' });
-      const profileCache = getProfileSchemaCache(profileId);
+      const profileCache = readProfileObservation(profile);
       if (
         profileCache &&
         ((profileCache.metaUpdatedAt ?? 0) > 0 ||
@@ -295,7 +287,7 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
           source: 'profile',
           availableCommands: profileCache.availableCommands ?? [],
           commandsUpdatedAt: profileCache.commandsUpdatedAt ?? 0,
-          sessionMeta: snapshotMetaFromProfileCache(profileCache),
+          sessionMeta: profileSessionMetaSnapshot(profile, profileCache),
         };
       }
     }
@@ -346,7 +338,7 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
         code: 'session_not_found',
       });
     }
-    if (agentletId) requireOwnAgentlet(agentletId);
+    if (agentletId) await requireOwnAgentlet(agentletId);
     const handle = agenetes.get(threadId, namespace);
     if (!handle) {
       return reply.status(404).send({
@@ -484,7 +476,7 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
         code: controlFailureCode('set_model', ack.code),
       });
     }
-    rememberProfileSessionPreference(
+    await rememberProfileSessionPreference(
       resolved.entry.profileId,
       'model',
       parsed.data.modelId,
@@ -542,7 +534,7 @@ const acpThreadsRoutes: FastifyPluginAsync = async (app) => {
         code: controlFailureCode('set_config_option', ack.code),
       });
     }
-    rememberProfileConfigPreference(
+    await rememberProfileConfigPreference(
       resolved.entry.profileId,
       resolved.entry.configOptions,
       parsed.data.configOptionId,

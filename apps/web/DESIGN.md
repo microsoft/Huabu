@@ -31,7 +31,7 @@ Content Accent colors and Agent brand artwork are separate systems. Diff added/r
 
 ### Transparency
 
-Ordinary UI surfaces use the fixed roles above. Do not introduce local alpha variants, `color-mix()` expressions, or an extra focus blue to approximate an older appearance.
+Ordinary UI surfaces use the fixed roles above. Do not introduce local alpha variants, `color-mix()` expressions, or an extra focus blue to approximate an older appearance. The side-panel resize handle is the one exception: it keeps its `info/30` hover and `info/50` drag tint, darkening on press, by the owner's choice.
 
 Transparency is appropriate when the user must still see the document or drawing underneath. Reuse the existing tokens rather than writing percentages in consumers:
 
@@ -56,7 +56,7 @@ Reuse [Common components](src/components/Common) and their current contracts. Us
 | ------------------------ | -------------------------------------------------------------------------------------------------------------------- |
 | Solid info button        | `info-fg` fill with `fg-inverse` text; hover adds an inset `fg-inverse` ring without changing the fill or dimensions |
 | Chat composer focus      | `info` 1px border and opaque `info-bg` 2px outer ring                                                                |
-| Side-panel resize handle | `info-light` during both hover and dragging; neutral divider and transparent fill at rest                            |
+| Side-panel resize handle | translucent `info`, 30% on hover and 50% while dragging; neutral divider and transparent fill at rest                |
 | Selected toolbar control | `info` icon, `info-fg` text/shortcut, and `info-bg` surface                                                          |
 | Connection control       | Borderless `info-light` idle dot; larger `info` dot when targeted; preserve hit geometry                             |
 | Resize grip              | Surface fill with the existing `info` inset outline; do not copy the connection dot treatment                        |

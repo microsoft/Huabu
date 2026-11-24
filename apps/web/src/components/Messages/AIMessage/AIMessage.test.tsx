@@ -5,6 +5,8 @@ import { act, type ComponentProps } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { agentApi } from '../../../api/agent';
+import { useChatStore } from '../../../store/chatStore';
 import { AssistantDisclosure } from '../AssistantDisclosure';
 
 import { AIMessage } from './index';
@@ -23,7 +25,11 @@ vi.mock('../../../store/canvasStore', () => ({
     selector({ addNode }),
 }));
 vi.mock('../../../hooks/useChatSession', () => ({
-  useChatSession: () => ({ threadId: 'thread-1' }),
+  useChatSession: () => ({
+    threadId: 'thread-1',
+    ownerCanvasId: 'canvas-1',
+    canvasId: 'canvas-1',
+  }),
 }));
 vi.mock('../../../utils/io/clipboard', () => ({
   copyToClipboard: copy,
@@ -36,6 +42,11 @@ vi.mock('react-i18next', async (importOriginal) => ({
   }),
 }));
 vi.mock('lottie-react', () => ({ default: () => null }));
+// The link's own suite covers opening; here only the listed paths matter, and
+// its Preview Workspace dependencies need a full canvas store.
+vi.mock('./Tool/FilePathLink', () => ({
+  FilePathLink: ({ path }: { path: string }) => <span>{path}</span>,
+}));
 vi.mock('./MilkdownMessageCard', () => ({
   MilkdownMessageCard: ({
     content,
@@ -125,10 +136,99 @@ afterEach(() => {
   act(() => root.unmount());
   container.remove();
   vi.clearAllMocks();
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 
 describe('assistant activity presentation', () => {
+  it('loads only on See more and hydrates sibling tools without resetting their disclosure state', async () => {
+    const full = ['a', 'b'].map((id) => ({
+      ...tool(id),
+      detail: { state: 'inline' as const, turnRef: 'ref' },
+    }));
+    const summary = full.map(({ content: _content, ...part }) => ({
+      ...part,
+      detail: { state: 'deferred' as const, turnRef: 'ref', summary: {} },
+    }));
+    useChatStore.setState({ threadsById: {} });
+    useChatStore.getState().setMessages('thread-1', [
+      {
+        id: 'assistant-1',
+        historyTurnId: 'group',
+        role: 'assistant',
+        segments: summary,
+      },
+    ]);
+    let finish!: (
+      value: Awaited<ReturnType<typeof agentApi.fetchHistoryTurn>>,
+    ) => void;
+    const fetch = vi.spyOn(agentApi, 'fetchHistoryTurn').mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    render(summary, { isStreaming: false });
+    expect(fetch).not.toHaveBeenCalled();
+    act(() => header().click());
+    act(() => button('Read a').click());
+    expect(fetch).not.toHaveBeenCalled();
+    expect(container.textContent).not.toContain('Output a');
+    await act(async () => button('messages.seeMore').click());
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(container.textContent).toContain('messages.detailsLoading');
+    await act(async () =>
+      finish({
+        threadId: 'thread-1',
+        turnRef: 'ref',
+        messages: [{ role: 'assistant', parts: full }],
+      }),
+    );
+    const hydrated =
+      useChatStore.getState().threadsById['thread-1']!.messages[0]!;
+    if (hydrated.role !== 'assistant') throw new Error('Expected assistant');
+    render(hydrated.segments, { isStreaming: false });
+    expect(button('Read a').getAttribute('aria-expanded')).toBe('true');
+    expect(button('Read b').getAttribute('aria-expanded')).toBe('false');
+    expect(container.textContent).toContain('Output a');
+    expect(container.textContent).not.toContain('Output b');
+    act(() => button('Read a').click());
+    act(() => button('Read a').click());
+    act(() => button('Read b').click());
+    expect(container.textContent).toContain('Output b');
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the expanded placeholder on failure and offers an explicit retry', async () => {
+    const { content: _content, ...base } = tool('a');
+    const summary = {
+      ...base,
+      detail: { state: 'deferred' as const, turnRef: 'retry-ref', summary: {} },
+    };
+    useChatStore.setState({ threadsById: {} });
+    useChatStore.getState().setMessages('thread-1', [
+      {
+        id: 'assistant-1',
+        historyTurnId: 'group',
+        role: 'assistant',
+        segments: [summary],
+      },
+    ]);
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const fetch = vi
+      .spyOn(agentApi, 'fetchHistoryTurn')
+      .mockRejectedValue(new Error('offline'));
+    render([summary], { isStreaming: false });
+    act(() => button('Read a').click());
+    await act(async () => button('messages.seeMore').click());
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe(
+      'messages.detailsLoadFailed',
+    );
+    expect(button('Read a').getAttribute('aria-expanded')).toBe('true');
+    await act(async () => button('messages.retry').click());
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
   it.each([
     ['**Explaining origin framework**', 'Explaining origin framework'],
     ['## **Checking references**', 'Checking references'],
@@ -595,6 +695,9 @@ describe('assistant activity presentation', () => {
     expect(header().textContent).toBe(
       'messages.activityFilesChanged:1 · messages.activityCompletedSteps:2',
     );
+    expect(
+      container.querySelector('[data-assistant-changed-files]')?.textContent,
+    ).toBe('example.ts');
   });
 
   it('closes the previous block and opens only the new trailing activity', () => {

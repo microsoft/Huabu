@@ -4,12 +4,21 @@
 /**
  * Batch executor for canvas commands.
  *
- * Processes a `CanvasExecution` (one or more commands) against the current
- * canvas state, returning the new state and accumulated side-effect metadata.
+ * Processes a list of edits against the current canvas state, returning the
+ * new state and accumulated side-effect metadata. An edit is the commands of
+ * one intent; {@link executeCanvasCommands} is the same run with one edit
+ * per command.
  *
  * Responsibilities:
- * - Sequential command execution within a batch (each command sees the
- *   previous command's result state).
+ * - Sequential execution: each edit sees the state the edits before it
+ *   left, each command the state the commands before it left.
+ * - **An edit is all-or-nothing.** When one of its commands does not take
+ *   effect (any result that is not applied, other than `no-op`), the state
+ *   returns to what it was when the edit began and everything the edit
+ *   accumulated — pending effects, frames to fit, explicit frame sizes — is
+ *   discarded. The end-of-batch passes below therefore run over the edits
+ *   that took effect only. An edit made on top of an edit that did not take
+ *   effect (`after`, `blocked`) does not run; other edits still apply.
  * - Collects affected parent frame IDs from each handler and performs a
  *   single deepest-first end-of-batch layout pass, fitting frames whose
  *   `data.sizing` is `'hug'` (the default). Frames with `sizing:
@@ -34,6 +43,7 @@
 
 import { applyStructuredFrameRelayout } from './autoLayout/gridLayout.js';
 import { HANDLERS, COMMAND_META } from './commands/index.js';
+import { isAllowedFor } from './commandScope.js';
 import {
   fitFrameToChildren,
   normalizeTreeOrder,
@@ -53,8 +63,12 @@ import type {
 } from './interfaces.js';
 import type {
   CanvasCommand,
-  CanvasExecution,
+  CanvasCommandFailureReason,
   CanvasCommandResult,
+  CanvasEdit,
+  CanvasEditResult,
+  CanvasEditsExecution,
+  CanvasExecution,
 } from '../index.js';
 import type { StructuredGutterSizes } from './autoLayout/gridLayout.js';
 import type { CommandHandler } from './commands/index.js';
@@ -75,11 +89,29 @@ export interface ExecutorOptions {
   forceFitFrames?: boolean;
   /** Per-frame gutter sizes frozen by a live resize gesture. */
   frozenStructuredGutters?: ReadonlyMap<string, StructuredGutterSizes>;
+  /**
+   * Host admission check, asked once per edit immediately before its first
+   * command, with the edit's position and the state it would run against
+   * (the evolving state, so it already reflects earlier edits).
+   *
+   * Returning a reason refuses the edit as a whole — every command of it is
+   * recorded as not applied with that reason and no handler runs; the other
+   * edits proceed as usual. Returning `undefined` admits it. Omitted, every
+   * edit is admitted.
+   */
+  admitEdit?: (
+    edit: CanvasEdit,
+    index: number,
+    state: Pick<CanvasReadState, 'nodes' | 'edges'>,
+  ) => CanvasCommandFailureReason | undefined;
 }
 
 export interface ExecutorOutput {
   writeResult: CanvasWriteResult;
+  /** One result per command, across all edits in order. */
   commandResults: CanvasCommandResult[];
+  /** One result per edit. */
+  editResults: CanvasEditResult[];
   /**
    * Pure side-effect manifest for host-specific drains. See
    * `applySharedPostEffects` (pure cleanups both hosts run) and
@@ -89,7 +121,27 @@ export interface ExecutorOutput {
 }
 
 /**
- * Execute a batch of canvas commands against the given state.
+ * Execute commands one by one, each on its own: a command that does not
+ * take effect is skipped and the rest still apply. Exactly
+ * {@link executeCanvasEdits} with one edit per command.
+ */
+export function executeCanvasCommands(
+  execution: CanvasExecution,
+  state: CanvasReadState,
+  options: ExecutorOptions = {},
+): ExecutorOutput {
+  return executeCanvasEdits(
+    {
+      ...(execution.source ? { source: execution.source } : {}),
+      edits: execution.commands.map((command) => ({ commands: [command] })),
+    },
+    state,
+    options,
+  );
+}
+
+/**
+ * Execute a list of edits against the given state.
  *
  * Returns the new nodes/edges, execution metadata, and accumulated
  * side-effect requests. The caller (host layer) is responsible for:
@@ -99,15 +151,16 @@ export interface ExecutorOutput {
  * 4. Draining `pendingEffects` via the host-specific post-effect runner
  *    (`runWebPostEffects` on web; M2 will add a server counterpart).
  */
-export function executeCanvasCommands(
-  execution: CanvasExecution,
+export function executeCanvasEdits(
+  execution: CanvasEditsExecution,
   state: CanvasReadState,
   options: ExecutorOptions = {},
 ): ExecutorOutput {
   const source = execution.source ?? 'ui';
 
-  // Mutable accumulators — built up as commands are processed.
+  // Mutable accumulators — built up as edits take effect.
   const commandResults: CanvasCommandResult[] = [];
+  const editResults: CanvasEditResult[] = [];
   const pendingEffects: PendingEffects = {
     mutatedNodes: [],
     deletedNodeIds: [],
@@ -115,7 +168,7 @@ export function executeCanvasCommands(
     deferredFitFrameIds: [],
   };
 
-  // Evolving state that each command reads from / writes to.
+  // Evolving state that each edit reads from / writes to.
   let currentNodes = state.nodes;
   let currentEdges = state.edges;
 
@@ -127,54 +180,82 @@ export function executeCanvasCommands(
   const fillFrameIds = new Set<string>();
   const resizedFrameIds = new Set<string>();
 
-  // Track which commands were actually applied.
+  // Track whether any command was actually applied.
   let anyApplied = false;
 
-  for (const cmd of execution.commands) {
-    // ------------------------------------------------------------------
-    // Dispatch to the handler registry. The HANDLERS table is exhaustive
-    // over `CanvasCommandType`, so an unknown command type is a
-    // TypeScript error — no defensive runtime guard needed.
-    // The cast widens the per-type handler back to a uniform shape so
-    // we can call it with the union-typed `cmd`.
-    // ------------------------------------------------------------------
-    const handler = HANDLERS[
-      cmd.type as keyof typeof HANDLERS
-    ] as CommandHandler<CanvasCommand>;
+  const refuseEdit = (
+    edit: CanvasEdit,
+    reason: CanvasCommandFailureReason,
+  ): void => {
+    const results = edit.commands.map((command) => ({
+      command,
+      applied: false,
+      reason,
+    }));
+    commandResults.push(...results);
+    editResults.push({ applied: false, reason, results });
+  };
 
-    const result = handler(cmd, {
+  for (const [editIndex, edit] of execution.edits.entries()) {
+    // Made on top of an edit that did not take effect: not run.
+    if (
+      edit.blocked ||
+      (edit.after ?? []).some(
+        (earlier) =>
+          earlier >= editIndex || editResults[earlier]?.applied !== true,
+      )
+    ) {
+      refuseEdit(edit, 'stale-parent');
+      continue;
+    }
+    const refused = options.admitEdit?.(edit, editIndex, {
       nodes: currentNodes,
       edges: currentEdges,
-      canvasId: state.canvasId,
-      source,
     });
-
-    // Compare with the batch prestate so CREATE then link may initialize a new Note.
-    if (
-      result.applied &&
-      ((cmd.type === 'CREATE_NODES' &&
-        cmd.nodes.some((node) => 'noteNodeId' in (node.data ?? {}))) ||
-        (cmd.type === 'MERGE_NODE_DATA' &&
-          cmd.patches.some(({ patch }) => 'noteNodeId' in patch))) &&
-      !hasValidPdfNoteOwnership(result.nodes, state.nodes)
-    ) {
-      commandResults.push({
-        command: cmd,
-        applied: false,
-        reason: 'invalid-target',
-      });
+    if (refused !== undefined) {
+      refuseEdit(edit, refused);
       continue;
     }
 
-    // Record the command result.
-    commandResults.push({
-      command: cmd,
-      applied: result.applied,
-      reason: result.reason,
-    });
+    // Everything the edit does is staged here and joins the batch only when
+    // the whole edit took effect. The engine advances state immutably, so
+    // going back is keeping these two references.
+    const startNodes = currentNodes;
+    const startEdges = currentEdges;
+    let editNodes = currentNodes;
+    let editEdges = currentEdges;
+    const results: CanvasCommandResult[] = [];
+    const staged: PendingEffects = {
+      mutatedNodes: [],
+      deletedNodeIds: [],
+      contentEditedNodeIds: [],
+      deferredFitFrameIds: [],
+    };
+    /** In command order: the fill request follows the last layout command. */
+    const stagedFrames: Array<{ id: string; fill?: boolean }> = [];
+    const stagedResized: string[] = [];
+    let failedAt: number | undefined;
 
-    if (result.applied) {
-      anyApplied = true;
+    for (const [commandIndex, cmd] of edit.commands.entries()) {
+      const result = runCommand(cmd, {
+        nodes: editNodes,
+        edges: editEdges,
+        canvasId: state.canvasId,
+        source,
+        batchPrestate: state.nodes,
+      });
+      results.push({
+        command: cmd,
+        applied: result.applied,
+        ...(result.reason ? { reason: result.reason } : {}),
+      });
+
+      if (!result.applied) {
+        if (result.reason === 'no-op') continue;
+        failedAt = commandIndex;
+        break;
+      }
+
       if (cmd.type === 'SET_NODE_GEOMETRY') {
         const frameIds = new Set(
           result.nodes
@@ -183,41 +264,70 @@ export function executeCanvasCommands(
         );
         for (const item of cmd.items) {
           if (item.size && frameIds.has(item.nodeId))
-            resizedFrameIds.add(item.nodeId);
+            stagedResized.push(item.nodeId);
         }
       }
 
-      // Advance the evolving state so the next command in the batch
-      // sees this command's changes.
-      currentNodes = result.nodes;
-      currentEdges = result.edges;
+      // Advance the evolving state so the next command of the edit sees
+      // this command's changes.
+      editNodes = result.nodes;
+      editEdges = result.edges;
 
-      // Collect pending effects.
-      if (result.mutatedNodes) {
-        pendingEffects.mutatedNodes.push(...result.mutatedNodes);
-      }
-      if (result.deletedNodeIds) {
-        pendingEffects.deletedNodeIds.push(...result.deletedNodeIds);
-      }
-      if (result.contentEditedNodeIds) {
-        pendingEffects.contentEditedNodeIds.push(
-          ...result.contentEditedNodeIds,
+      if (result.mutatedNodes) staged.mutatedNodes.push(...result.mutatedNodes);
+      if (result.deletedNodeIds)
+        staged.deletedNodeIds.push(...result.deletedNodeIds);
+      if (result.contentEditedNodeIds)
+        staged.contentEditedNodeIds.push(...result.contentEditedNodeIds);
+      if (result.deferredFitFrameIds)
+        staged.deferredFitFrameIds.push(...result.deferredFitFrameIds);
+      for (const id of result.affectedFrameIds ?? []) {
+        // Explicit cells outrank count-stepper redistribution, including earlier commands.
+        stagedFrames.push(
+          cmd.type === 'SET_FRAME_LAYOUT'
+            ? { id, fill: !cmd.cells?.length }
+            : { id },
         );
       }
-      if (result.deferredFitFrameIds) {
-        pendingEffects.deferredFitFrameIds.push(...result.deferredFitFrameIds);
-      }
-      if (result.affectedFrameIds) {
-        for (const id of result.affectedFrameIds) {
-          allAffectedFrameIds.add(id);
-          // Explicit cells outrank count-stepper redistribution, including earlier commands.
-          if (cmd.type === 'SET_FRAME_LAYOUT') {
-            if (cmd.cells?.length) fillFrameIds.delete(id);
-            else fillFrameIds.add(id);
-          }
-        }
-      }
     }
+
+    if (failedAt !== undefined) {
+      // Nothing of the edit stays: the state is the one it started from and
+      // what it staged is dropped. Its commands are reported as not applied
+      // — the failing one with its reason, a no-op as a no-op.
+      currentNodes = startNodes;
+      currentEdges = startEdges;
+      const failure = results[failedAt] as CanvasCommandResult;
+      const reported = edit.commands.map((command, index) => {
+        const ran = results[index];
+        if (index === failedAt) return failure;
+        if (ran && !ran.applied) return ran;
+        return { command, applied: false };
+      });
+      commandResults.push(...reported);
+      editResults.push({
+        applied: false,
+        ...(failure.reason ? { reason: failure.reason } : {}),
+        failedAt,
+        results: reported,
+      });
+      continue;
+    }
+
+    currentNodes = editNodes;
+    currentEdges = editEdges;
+    if (results.some((result) => result.applied)) anyApplied = true;
+    pendingEffects.mutatedNodes.push(...staged.mutatedNodes);
+    pendingEffects.deletedNodeIds.push(...staged.deletedNodeIds);
+    pendingEffects.contentEditedNodeIds.push(...staged.contentEditedNodeIds);
+    pendingEffects.deferredFitFrameIds.push(...staged.deferredFitFrameIds);
+    for (const id of stagedResized) resizedFrameIds.add(id);
+    for (const frame of stagedFrames) {
+      allAffectedFrameIds.add(frame.id);
+      if (frame.fill === true) fillFrameIds.add(frame.id);
+      else if (frame.fill === false) fillFrameIds.delete(frame.id);
+    }
+    commandResults.push(...results);
+    editResults.push({ applied: true, results });
   }
 
   // ------------------------------------------------------------------
@@ -387,12 +497,14 @@ export function executeCanvasCommands(
   // and the execution doesn't declare caller-handled snapshots.
   const snapshotNeeded =
     anyApplied &&
-    execution.commands.some((c) => COMMAND_META[c.type]?.snapshot === 'yes');
+    commandResults.some(
+      (result) => COMMAND_META[result.command.type]?.snapshot === 'yes',
+    );
 
   // Edge reroute is needed if any *applied* command requires it.
-  const requiresEdgeReroute = execution.commands.some(
-    (c, i) =>
-      commandResults[i]?.applied && COMMAND_META[c.type]?.requiresEdgeReroute,
+  const requiresEdgeReroute = commandResults.some(
+    (result) =>
+      result.applied && COMMAND_META[result.command.type]?.requiresEdgeReroute,
   );
 
   return {
@@ -403,6 +515,76 @@ export function executeCanvasCommands(
       snapshotNeeded,
     },
     commandResults,
+    editResults,
     pendingEffects,
   };
+}
+
+/**
+ * Run one command against `context`: scope check, handler, and the PDF Note
+ * ownership rule. Pure; the caller decides what to do with the result.
+ */
+function runCommand(
+  cmd: CanvasCommand,
+  context: {
+    nodes: CanvasReadState['nodes'];
+    edges: CanvasReadState['edges'];
+    canvasId: string;
+    source: NonNullable<CanvasEditsExecution['source']>;
+    /** Nodes before the first edit, for the Note ownership comparison. */
+    batchPrestate: CanvasReadState['nodes'];
+  },
+): ReturnType<CommandHandler<CanvasCommand>> {
+  // What this source may issue at all; see `commandScope.ts`.
+  if (!isAllowedFor(context.source, cmd)) {
+    return {
+      nodes: context.nodes,
+      edges: context.edges,
+      applied: false,
+      reason: 'invalid-scope',
+    };
+  }
+
+  // ------------------------------------------------------------------
+  // Dispatch to the handler registry. The HANDLERS table is exhaustive
+  // over `CanvasCommandType`, so an unknown command type is a
+  // TypeScript error — no defensive runtime guard needed.
+  // The cast widens the per-type handler back to a uniform shape so
+  // we can call it with the union-typed `cmd`.
+  // ------------------------------------------------------------------
+  const handler = HANDLERS[
+    cmd.type as keyof typeof HANDLERS
+  ] as CommandHandler<CanvasCommand>;
+
+  const result = handler(cmd, {
+    nodes: context.nodes,
+    edges: context.edges,
+    canvasId: context.canvasId,
+    source: context.source,
+  });
+
+  // Compare with the batch prestate so CREATE then link may initialize a new Note.
+  if (
+    result.applied &&
+    ((cmd.type === 'CREATE_NODES' &&
+      cmd.nodes.some((node) => 'noteNodeId' in (node.data ?? {}))) ||
+      (cmd.type === 'MERGE_NODE_DATA' &&
+        cmd.patches.some(
+          ({ patch, unset }) =>
+            'noteNodeId' in patch || unset?.includes('noteNodeId') === true,
+        )) ||
+      // An undo may bring a PDF back with its Note, or a Note back for
+      // its PDF; it may not hand a PDF somebody else's Note.
+      (cmd.type === 'RESTORE_NODES' &&
+        (cmd.nodes ?? []).some((node) => 'noteNodeId' in (node.data ?? {})))) &&
+    !hasValidPdfNoteOwnership(result.nodes, context.batchPrestate)
+  ) {
+    return {
+      nodes: context.nodes,
+      edges: context.edges,
+      applied: false,
+      reason: 'invalid-target',
+    };
+  }
+  return result;
 }

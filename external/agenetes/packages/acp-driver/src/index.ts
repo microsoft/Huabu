@@ -65,8 +65,14 @@ export {
   ACP_CAPABILITIES,
   lowerAcpInputs,
   resolveAcpAgentletId,
+  resolveAcpRuntimeLaunch,
 } from './handle.js';
-export type { AcpRuntimePolicy, InStreamEvent, AcpTurnCtx } from './handle.js';
+export type {
+  AcpRuntimePolicy,
+  AcpRuntimeLaunchContext,
+  InStreamEvent,
+  AcpTurnCtx,
+} from './handle.js';
 
 export {
   acpDriverFactory,
@@ -95,6 +101,7 @@ export {
   MODE_SELECTION_ID,
   MODEL_SELECTION_ID,
   ensureAcpSession,
+  resolveInitialPreferenceSelections,
   setAcpProfileCachePort,
 } from './session.js';
 export type {

@@ -40,6 +40,7 @@ vi.mock('react-i18next', () => ({
   initReactI18next: { type: '3rdParty', init: vi.fn() },
   useTranslation: () => ({ t: (key: string) => key }),
 }));
+vi.mock('@/i18n', () => ({ i18n: { t: (key: string) => key } }));
 vi.mock('../../components/Common/Loading', () => ({
   Loading: () => <div>loading</div>,
 }));
@@ -48,7 +49,7 @@ vi.mock('../../components/Space/moveNodesToSpace', () => ({
   dismissMoveSuccessToasts: mocks.dismissMoveSuccessToasts,
   moveNodesToSpace: vi.fn(),
 }));
-vi.mock('../../components/Nodes/previews', () => ({
+vi.mock('@/components/Nodes/previewableNodeTypes', () => ({
   hasNodePreview: (type: string) => type === 'note',
 }));
 vi.mock('@/utils/canvasViewport', () => ({
@@ -97,20 +98,23 @@ vi.mock('../../store/toolStore', () => ({
   ) => selector({ setPendingNodeType: mocks.setPendingNodeType }),
 }));
 vi.mock('../../store/workspaceStore', () => ({
-  useWorkspaceStore: (
-    selector: (state: {
-      workspaceId: string | undefined;
-      worldCanvasId: string | null;
-      spaceSummaries: typeof mocks.spaceSummaries;
-      refreshSpaceTitles: () => Promise<void>;
-    }) => unknown,
-  ) =>
-    selector({
-      workspaceId: mocks.workspaceId,
-      worldCanvasId: mocks.worldCanvasId,
-      spaceSummaries: mocks.spaceSummaries,
-      refreshSpaceTitles: mocks.refreshSpaceTitles,
-    }),
+  useWorkspaceStore: Object.assign(
+    (
+      selector: (state: {
+        workspaceId: string | undefined;
+        worldCanvasId: string | null;
+        spaceSummaries: typeof mocks.spaceSummaries;
+        refreshSpaceTitles: () => Promise<void>;
+      }) => unknown,
+    ) =>
+      selector({
+        workspaceId: mocks.workspaceId,
+        worldCanvasId: mocks.worldCanvasId,
+        spaceSummaries: mocks.spaceSummaries,
+        refreshSpaceTitles: mocks.refreshSpaceTitles,
+      }),
+    { subscribe: () => () => {} },
+  ),
 }));
 
 const CANVAS_ID = 'canvas-1';
@@ -133,7 +137,7 @@ async function renderAt(
   state: unknown = null,
 ) {
   const selectNodes = vi.fn();
-  const loadCanvas = vi.fn(async () => undefined);
+  const loadCanvas = vi.fn(async () => 'loaded' as const);
   useCanvasStore.setState({
     canvasId: CANVAS_ID,
     canvasNotFound: false,
@@ -260,14 +264,14 @@ describe('CanvasPage node deep-link navigation', () => {
     mocks.spaceSummaries = { child: { parentSpaceId: 'parent' } };
     await renderAt(`/canvas/${CANVAS_ID}`, node('note'), null);
     await act(async () => {
-      useCanvasStore.getState()._setStateNoAutosave({ isLoading: true });
+      useCanvasStore.getState()._setStateRaw({ isLoading: true });
     });
     const entry = {
       ...node('spacePreview', { targetCanvasId: 'child' }),
       selected: true,
     };
     await act(async () => {
-      useCanvasStore.getState()._setStateNoAutosave({
+      useCanvasStore.getState()._setStateRaw({
         nodes: [entry],
         edges: [
           { id: 'edge-1', source: entry.id, target: entry.id, selected: true },
@@ -288,7 +292,7 @@ describe('CanvasPage node deep-link navigation', () => {
     const { router } = await renderAt(`/canvas/${CANVAS_ID}`, entry, null);
     await act(async () => {
       usePanelStore.setState({ isPreviewFullscreen: true });
-      useCanvasStore.getState()._setStateNoAutosave({
+      useCanvasStore.getState()._setStateRaw({
         edges: [
           { id: 'edge-1', source: 'node-1', target: 'node-1', selected: true },
         ],
@@ -302,7 +306,6 @@ describe('CanvasPage node deep-link navigation', () => {
     const after = useCanvasStore.getState();
     expect(after.nodes[0]).toEqual({ ...entry, selected: false });
     expect(after.edges[0]).toEqual({ ...before.edges[0], selected: false });
-    expect(after.pendingSave).toBe(before.pendingSave);
     expect(after.version).toBe(before.version);
     expect(mocks.fitNodesOnCanvas).not.toHaveBeenCalled();
   });
@@ -417,6 +420,39 @@ describe('CanvasPage node deep-link navigation', () => {
 
     expect(selectNodes).toHaveBeenCalledWith(['node-1'], false);
     expect(mocks.revealNodesOnCanvas).toHaveBeenCalledOnce();
+  });
+
+  it('only locates the target when a document link crossed Spaces', async () => {
+    const { selectNodes } = await renderAt(
+      `/canvas/${CANVAS_ID}?node=node-1`,
+      node('note'),
+      {},
+      { locateNodeOnly: true, returnToSpace: 'canvas-source' },
+    );
+
+    expect(selectNodes).toHaveBeenCalledWith(['node-1'], false);
+    expect(mocks.revealNodesOnCanvas).toHaveBeenCalledOnce();
+    expect(mocks.openPreviewNode).not.toHaveBeenCalled();
+  });
+
+  it('keeps fullscreen for a document link that crossed Spaces', async () => {
+    usePanelStore.setState({ isPreviewFullscreen: true });
+    const { selectNodes } = await renderAt(
+      `/canvas/${CANVAS_ID}?node=node-1`,
+      node('note'),
+      null,
+      { locateNodeOnly: true },
+    );
+
+    expect(usePanelStore.getState().isPreviewFullscreen).toBe(true);
+    expect(selectNodes).toHaveBeenCalledWith(['node-1'], false);
+    expect(mocks.openPreviewNode).not.toHaveBeenCalled();
+    expect(useCanvasStore.getState().pendingRevealNodeIds).toEqual(['node-1']);
+    usePanelStore.setState({
+      isLeftCollapsed: true,
+      layerLocateRequest: null,
+    });
+    useCanvasStore.setState({ pendingRevealNodeIds: [] });
   });
 
   it('reconsumes the retained target after browser back navigation', async () => {

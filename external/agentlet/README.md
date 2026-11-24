@@ -92,6 +92,25 @@ Discovery uses bounded, shell-free PATH and optional version probes. It does not
 
 Only explicit workspace preparation creates `~/.agentlet/workspace/<definition-id>` on the daemon machine, and only for ready known harnesses. Existing contents are retained. Failed creation produces a diagnostic without a fallback directory. Agent Team runtime packages, setup commands, and Team RPCs are retired; manifests remain historical data only.
 
+### Pi ACP harness
+
+The `pi` Definition compiles exactly `pi-acp` with no approval or model flags. Discovery requires both `pi-acp` and native `pi` on Unix, or `pi-acp` and **`pi.cmd`** on Windows, matching the adapters' default native launcher. It does not inspect npm package provenance or execute either command, even for version probing: the adapters do not implement a version-only entrypoint. A non-default native launcher configured inside an adapter is outside this Definition's discovery contract; explicit Custom command configuration remains available.
+
+Both prerequisites present reports `ready`; native-only reports `adapter-missing` with `adapter_missing`; adapter-only reports `not-found` with `native_runtime_missing`; neither reports `not-found` with both diagnostics. Failed/malformed/timed-out PATH lookups retain `lookup_failed`, not a missing-package diagnosis. Only ready discovery can prepare `~/.agentlet/workspace/pi`. Readiness proves command presence, not versions, provider login, model availability, or successful ACP startup.
+
+Install native Pi separately on the daemon machine, for example `npm install -g @earendil-works/pi-coding-agent@1.5.2` (Node.js >=22.19.0), then configure its providers/login. Install only one adapter: both packages own the same `pi-acp` binary. The target-platform `installHint` exposes recommendations and known issues to consuming hosts; Agentlet neither installs packages nor fixes or switches adapters.
+
+| Platform | Adapter guidance and known limitations |
+| --- | --- |
+| Unix | Prefer `npm install -g @geohar/pi-acp@0.4.0`: unlike upstream, it emits standard Bash text/tool output when the client has no terminal capability. It lacks upstream context-usage reporting and model-specific thinking-level discovery. |
+| Windows | Prefer `npm install -g pi-acp@0.0.34` for its fixed native session-path escaping (Pi >=0.81.0), but Bash output uses terminal metadata and may not display in terminal-less clients. The fork provides that output fallback but retains known native session-path quoting risks, including paths with spaces. Neither is guaranteed fully compatible. |
+
+Both adapters negotiate ACP protocol 1 and persist native Pi sessions separately from host transcripts. They default to native `~/.pi/agent` (relocatable with `PI_CODING_AGENT_DIR`) and adapter mappings at `~/.pi/pi-acp/session-map.json`. The fork reads its own settings from `<agent-dir>/extensions/pi-acp.json`, with the old agent-root file as fallback; its `dataDir` setting relocates adapter data. Current fork settings do not honor the older advertised `PI_ACP_*` overrides. Authentication and configuration remain user-owned, including optional MCP and plan-producing extensions. Terminal login is an out-of-band native action, not an Agentlet setup workflow.
+
+Pi advertises neither `customLaunchCommand` nor `autoApprove`. `autoApprove: false` means no supported launch-time bypass contract, not that native tools are gated or sandboxed: Pi executes locally, and extension UI select/confirm requests are not a generic native-tool approval protocol. Actual client compatibility depends on its ACP features; adapter implementation defects remain with the external adapter projects.
+
+Linux x64 smoke with Node.js `24.19.0`, native Pi `1.5.2`, both adapter versions above and a local deterministic provider exercised the real Agentlet bootstrap/process tree and a host client on ACP SDK `0.22.1`: new session, config-option model/thinking changes, text/thought/tool/diff streaming, cancellation, continued prompts and cross-process recovery passed. Fork resume and upstream load were selected from their advertised capabilities. Upstream Bash output remained terminal-only. Both adapters rejected the legacy experimental `session/set_model` method, while their advertised `model` config option worked. This does not certify real providers/accounts, Windows/macOS lifecycle, older native versions, or optional extensions.
+
 ## Protocol lifecycle
 
 ### Typed harness launch
@@ -133,9 +152,9 @@ agentlet daemon --server "wss://host.example/api/bridge" \
   --env-inject AGENTLET_REACHBACK_DIR="/device/resources"
 ```
 
-The bootstrap map defaults to empty. The equivalent programmatic option is `bootstrapEnv`. Values are copied and frozen at construction, split at the first `=` by the CLI, and remain opaque: spaces, empty values, additional equals signs, and relative paths are preserved without expansion or path resolution. Keys must match `[A-Za-z_][A-Za-z0-9_]*`; NUL, duplicate keys, and `AGENTLET_TOKEN` declarations are rejected without printing values. Do not pass credentials through `--env-inject`, because arguments are visible to other processes.
+The bootstrap map defaults to empty. The equivalent programmatic option is `bootstrapEnv`. Values are copied and frozen at construction, split at the first `=` by the CLI, and remain opaque: spaces, empty values, additional equals signs, and relative paths are preserved without expansion or path resolution. Keys must match `[A-Za-z_][A-Za-z0-9_]*`; NUL, duplicate keys, and daemon-owned `AGENTLET_SERVER` / `AGENTLET_TOKEN` declarations are rejected without printing values. Do not pass credentials through `--env-inject`, because arguments are visible to other processes.
 
-Bootstrap overrides inherited values. A session that declares any bootstrap key or `AGENTLET_TOKEN` is rejected before process launch, even if its value is identical. Windows matching is case-insensitive and the final child environment removes inherited case variants; Unix matching is case-sensitive. Ordinary session values, including `AGENTLET_SERVER`, retain their override behavior. This protects launch configuration, not the executing agent's ability to change its own environment.
+Bootstrap overrides inherited values. A session that declares any bootstrap key or daemon-owned key is rejected before process launch, even if its value is identical. `DAEMON_ENV_KEYS` in `@agentlet/protocol` defines that reserved set. `AGENTLET_SERVER` and `AGENTLET_TOKEN` always come from the current daemon's connection options; hosts reconstructing historical workloads must remove their saved declarations before requesting a spawn. Windows matching is case-insensitive and the final child environment removes inherited case variants; Unix matching is case-sensitive. Ordinary session values retain their override behavior. This protects launch configuration, not the executing agent's ability to change its own environment.
 
 Hosts previously relying on automatic `AGENTLET_REACHBACK_DIR` must supply it explicitly; ambient values are no longer an interpolation registry and no path is automatically resolved.
 

@@ -1,3 +1,5 @@
+import { DAEMON_ENV_KEYS } from '@agentlet/protocol'
+
 type Environment = Readonly<Record<string, string | undefined>>
 
 function canonicalKey(key: string, platform: NodeJS.Platform): string {
@@ -22,7 +24,7 @@ export function createBootstrapEnv(
   for (const [key, value] of entries) {
     validateEntry(key, value)
     const canonical = canonicalKey(key, platform)
-    if (canonical === canonicalKey('AGENTLET_TOKEN', platform)) {
+    if (DAEMON_ENV_KEYS.some(key => canonical === canonicalKey(key, platform))) {
       throw new Error(`Reserved environment key: ${key}`)
     }
     if (keys.has(canonical)) throw new Error(`Duplicate bootstrap environment key: ${key}`)
@@ -54,7 +56,7 @@ export function mergeAgentEnvironment(
     throw new Error('Invalid session environment')
   }
   const protectedKeys = new Set(
-    [...Object.keys(bootstrap), 'AGENTLET_TOKEN'].map(key => canonicalKey(key, platform)),
+    [...Object.keys(bootstrap), ...DAEMON_ENV_KEYS].map(key => canonicalKey(key, platform)),
   )
   for (const [key, value] of Object.entries(session)) {
     validateEntry(key, value)

@@ -19,7 +19,7 @@ import {
   openServerLog,
 } from '../../../hooks/useElectron';
 import { useRunDiagnostic } from '../../../hooks/useRunDiagnostic';
-import { savedBeforeSignOut } from '../../../store/canvasStore';
+import { savedBeforeLeaving } from '../../../store/canvasStore';
 import { useIdentityStore } from '../../../store/identityStore';
 import { useSettingsUiStore } from '../../../store/settingsUiStore';
 import { useShortcutsUiStore } from '../../../store/shortcutsUiStore';
@@ -39,6 +39,7 @@ import {
 } from '../../Common/DropdownMenu';
 import { MENU_SEPARATOR_CLASS } from '../../Common/menuStyles';
 import { toast } from '../../Common/Toast.tsx';
+import { useOpenWorkspaceSwitcher } from '../../Workspace/useOpenWorkspaceSwitcher';
 
 interface AppMenuProps {
   /**
@@ -92,6 +93,7 @@ export const AppMenu: React.FC<AppMenuProps> = ({
     useCanvasActions();
   const openSettings = useSettingsUiStore((s) => s.open);
   const openShortcuts = useShortcutsUiStore((s) => s.open);
+  const openWorkspaceSwitcher = useOpenWorkspaceSwitcher();
   const diagnosticsAvailable = desktopDiagnosticsAvailable();
   const runDiagnostic = useRunDiagnostic();
   const { status: updateStatus, check: checkForUpdates } = useAppUpdate();
@@ -107,7 +109,7 @@ export const AppMenu: React.FC<AppMenuProps> = ({
       document.activeElement.blur();
     let failure: 'auth.signOutUnsaved' | 'auth.signOutFailed';
     try {
-      if (!(await savedBeforeSignOut())) failure = 'auth.signOutUnsaved';
+      if (!(await savedBeforeLeaving())) failure = 'auth.signOutUnsaved';
       else {
         await signOut({ providerSignOut: identity?.providerSignOut });
         return;
@@ -185,6 +187,16 @@ export const AppMenu: React.FC<AppMenuProps> = ({
             <DropdownMenuLink to="/spaces" onClick={() => setIsOpen(false)}>
               {t('canvasPage.backToList')}
             </DropdownMenuLink>
+            {!isElectron() && (
+              <DropdownMenuLink
+                to="/spaces"
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={() => setIsOpen(false)}
+              >
+                {t('canvasPage.openListInNewTab')}
+              </DropdownMenuLink>
+            )}
             <div role="separator" className={MENU_SEPARATOR_CLASS} />
           </>
         )}
@@ -204,7 +216,9 @@ export const AppMenu: React.FC<AppMenuProps> = ({
         )}
 
         {canChangeWorkspace && (
-          <DropdownMenuItem onClick={runAndClose(() => navigate('/setup'))}>
+          <DropdownMenuItem
+            onClick={runAndClose(() => openWorkspaceSwitcher())}
+          >
             {t(
               namedWorkspaces
                 ? 'workspace.switcher'

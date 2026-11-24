@@ -9,15 +9,21 @@ import { sanitizeId } from '../../../../utils/fs.js';
 import { stringifyJson } from '../sql/codecs.js';
 import { allocateNodeIdentity } from '../sql/identity.js';
 import {
+  absentNodeChangePosition,
   collectNodeRow,
+  decodeChangeSeq,
   decodeIdentifiedNodeRow,
   decodeLabelConflict,
   decodeNodeRow,
+  isComparableNodeChangePosition,
+  nodeChangeEpoch,
   validatePut,
 } from '../sql/node-rules.js';
 
 import type { SqliteStoreContext } from './database.js';
 import type {
+  NodeChangePosition,
+  NodeChanges,
   NodeDeleteResult,
   NodePutInput,
   NodePutResult,
@@ -108,15 +114,26 @@ export function putSqliteNodeInTransaction(
   }
 
   const revision = randomUUID();
+  // The Space's counter of node writes, advanced in this transaction, so the
+  // order of the values is the order the writes became visible in.
+  const changeSeq = database
+    .prepare(
+      `UPDATE spaces SET node_change_seq = node_change_seq + 1
+       WHERE workspace_id = ? AND canvas_id = ?
+       RETURNING node_change_seq`,
+    )
+    .get(workspaceId, canvasId)?.['node_change_seq'];
   database
     .prepare(
       `INSERT INTO nodes (
-         canvas_id, node_id, record_json, revision, label_collision_key
-       ) VALUES (?, ?, ?, ?, ?)
+         canvas_id, node_id, record_json, revision, label_collision_key,
+         change_seq
+       ) VALUES (?, ?, ?, ?, ?, ?)
        ON CONFLICT(canvas_id, node_id) DO UPDATE SET
          record_json = excluded.record_json,
          revision = excluded.revision,
-         label_collision_key = excluded.label_collision_key`,
+         label_collision_key = excluded.label_collision_key,
+         change_seq = excluded.change_seq`,
     )
     .run(
       canvasId,
@@ -124,6 +141,7 @@ export function putSqliteNodeInTransaction(
       stringifyJson(allocation.record, `Node ${JSON.stringify(nodeId)} record`),
       revision,
       allocation.collisionKey,
+      decodeChangeSeq(changeSeq),
     );
   return {
     ok: true,
@@ -235,6 +253,36 @@ export class SqliteSpaceNodes implements SpaceNodes {
          WHERE canvas_id = ?`,
       )
       .iterate(this.canvasId);
+  }
+
+  async changes(since?: NodeChangePosition): Promise<NodeChanges> {
+    const workspaceId = this.#workspace();
+    const database = this.#context.database();
+    // Both statements run synchronously on the one connection, so no write
+    // can land between the counter and the rows.
+    const row = database
+      .prepare(
+        `SELECT node_change_seq, created_at
+         FROM spaces
+         WHERE workspace_id = ? AND canvas_id = ?`,
+      )
+      .get(workspaceId, this.canvasId);
+    if (row === undefined)
+      return { position: absentNodeChangePosition('sqlite'), nodeIds: null };
+    const position = {
+      epoch: nodeChangeEpoch('sqlite', row['created_at']),
+      seq: decodeChangeSeq(row['node_change_seq']),
+    };
+    if (!isComparableNodeChangePosition(since, position))
+      return { position, nodeIds: null };
+    const nodeIds = database
+      .prepare(
+        `SELECT node_id FROM nodes
+         WHERE canvas_id = ? AND change_seq > ?`,
+      )
+      .all(this.canvasId, since.seq)
+      .map((entry) => String(entry['node_id']));
+    return { position, nodeIds };
   }
 
   async put(input: NodePutInput): Promise<NodePutResult> {

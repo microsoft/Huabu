@@ -23,6 +23,7 @@ vi.mock('@/utils/canvasViewport', () => ({
 
 vi.mock('@/store/canvasStore', () => ({
   default: Object.assign(vi.fn(), {
+    subscribe: () => () => {},
     getState: () => ({
       nodes: [],
       selectNodes: vi.fn(),

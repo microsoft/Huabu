@@ -20,7 +20,7 @@ import { HISTORY_LOAD_SANITY_LIMIT } from './history-replay.js';
 import { withInkResponse } from './ink-response-driver.js';
 import { huabuPiDriverPorts } from './pi-driver.js';
 import { withWorkspaceStateReports } from './workspace-driver.js';
-import { agentReachbackEnvironment } from '../../identity/agent-credentials.js';
+import { resolveReachbackRuntimeEnvironment } from '../acp/reachback-env.js';
 import { getExternalAgentRuntimeConfig } from '../acp/runtime-config.js';
 
 import type { AcpRuntimePolicy } from '@agenetes/acp-driver';
@@ -39,8 +39,9 @@ export type BuiltinHandle = AgentHandle<Message[], PiTurnCtx>;
 export type AgenetesHandle = RuntimeAgentHandle;
 
 export const acpRuntimePolicy: AcpRuntimePolicy = {
-  resolveRuntimeEnvironment: agentReachbackEnvironment,
-  getIdleTimeoutSecs: () => getExternalAgentRuntimeConfig().idleTimeoutSecs,
+  resolveRuntimeEnvironment: resolveReachbackRuntimeEnvironment,
+  getIdleTimeoutSecs: async () =>
+    (await getExternalAgentRuntimeConfig()).idleTimeoutSecs,
 };
 
 const externalDriver = acpDriverFactory(acpRuntimePolicy);

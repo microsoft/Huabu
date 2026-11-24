@@ -80,7 +80,7 @@ function inLayer(relative: string, layer: string): boolean {
 }
 
 describe('storage module tree', () => {
-  it('keeps only the barrel, composition, and the two shims at the root', () => {
+  it('keeps only the barrel, the composition roots, and the two shims at the root', () => {
     const rootFiles = storageFiles
       .filter((f) => path.dirname(f) === 'modules/storage')
       .map((f) => path.basename(f));
@@ -89,6 +89,7 @@ describe('storage module tree', () => {
       'canvas-dirs.ts',
       'capabilities.test.ts',
       'capabilities.ts',
+      'connections.ts',
       'detached-blobs.test.ts',
       'index.ts',
       'module-boundaries.test.ts',
@@ -96,6 +97,8 @@ describe('storage module tree', () => {
       'product-boundary.test.ts',
       'profile.test.ts',
       'profile.ts',
+      'server-records.test.ts',
+      'server-records.ts',
       'space-lifecycle-admission.ts',
       'storage.delete-space.remote.test.ts',
       'storage.lifecycle.remote.test.ts',
@@ -210,8 +213,8 @@ describe('storage dependency direction', () => {
   /**
    * One process, one connection to each backend — decided in one file.
    *
-   * The composition root does not merely pick an adapter, it holds the live
-   * connection every part of the process borrows, and for the SQL backends
+   * `connections.ts` holds the live SQL connection every part of the process
+   * borrows, server records and the rest of storage alike, and for the SQL backends
    * that is load-bearing rather than tidy. A context is also the scope that
    * fences Space deletion against in-flight writes, so a second one opened
    * against the same database would let one context delete what the other had
@@ -234,7 +237,12 @@ describe('storage dependency direction', () => {
         ),
       );
 
-    expect(openers).toEqual(['modules/storage/storage.ts']);
+    // Azure is opened by the storage composition root; SQL connections only
+    // by the holder both composition roots borrow from.
+    expect(openers.sort()).toEqual([
+      'modules/storage/connections.ts',
+      'modules/storage/storage.ts',
+    ]);
   });
 
   /**
@@ -301,7 +309,9 @@ describe('storage dependency direction', () => {
       );
 
     const nonAdapter = importers.filter((f) => !inLayer(f, 'backends'));
-    // `storage.ts` selects the backend. The rest reach a *named* Disk module
+    // `storage.ts` selects the backend, `server-records.ts` the record
+    // adapter, and `connections.ts` holds the SQL connections both borrow.
+    // The rest reach a *named* Disk module
     // because the Disk layout and its directory index moved inside the
     // boundary in Phase 4.5 (§12.5.2): the barrel re-exports the Disk World
     // helpers, the two shims forward Disk-capability imports, and the
@@ -311,8 +321,10 @@ describe('storage dependency direction', () => {
     expect(nonAdapter).toEqual([
       'modules/storage/canvas-dirs.ts',
       'modules/storage/compatibility/canvas.ts',
+      'modules/storage/connections.ts',
       'modules/storage/index.ts',
       'modules/storage/paths.ts',
+      'modules/storage/server-records.ts',
       'modules/storage/storage.ts',
     ]);
   });
@@ -418,9 +430,6 @@ describe('Disk Space tree capability', () => {
     'modules/canvas/canvas.route.ts',
     // A — external-note claim.
     'modules/canvas/external.route.ts',
-    // B, deferred — RFS's sidecar-to-record mapping. Portable in principle,
-    // Disk's in practice until a second backend has a file plane at all.
-    'modules/remote_fs/node-meta.ts',
     // C — ACP session state, which leaves with phase 6's `Namespace` change.
     // Everything else this module addressed has already left: the memory
     // bookkeeping and debug prompt log onto the extension substrate, the

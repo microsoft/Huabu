@@ -24,6 +24,23 @@ export const agentWorkingDirectorySchema = trimmedString(
 const pathSchema = agentWorkingDirectorySchema;
 
 /**
+ * The model and thought level a conversation with no session yet is showing.
+ *
+ * Sent with the request that first realizes the conversation so its session
+ * starts on what the user saw, not on whatever the Profile remembers by the
+ * time the request arrives.
+ */
+export const agentInitialPreferencesSchema = z
+  .object({
+    model: z.string().min(1).max(512).optional(),
+    thoughtLevel: z.string().min(1).max(512).optional(),
+  })
+  .strict();
+export type AgentInitialPreferences = z.infer<
+  typeof agentInitialPreferencesSchema
+>;
+
+/**
  * An arbitrary JSON value. Backs {@link customDataSchema}, the opaque
  * per-Profile bag agenetes stores verbatim without interpreting.
  */

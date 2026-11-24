@@ -19,7 +19,10 @@
  * the production browser bundle.
  */
 
-import { agentletStatusSchema } from '@agenetes/protocol';
+import {
+  agentletStatusSchema,
+  reportedTokenUsageSchema,
+} from '@agenetes/protocol';
 import { z } from 'zod';
 
 import {
@@ -30,6 +33,7 @@ import {
 import { agentDefaultsSchema } from './agent-defaults.js';
 import {
   agentProfileSchema,
+  agentInitialPreferencesSchema,
   agentWorkingDirectorySchema,
 } from './agent-profile.js';
 
@@ -278,37 +282,9 @@ export type AcpThreadCachedMetaResponse = z.infer<
  * pushed. Empty arrays / nulls when the agent has not provided a
  * value yet.
  */
-export interface AcpSessionMetaSnapshot {
-  /** Current `availableModes` list (cleared & replaced per update). */
-  availableModes: AcpSessionMode[];
-  /** Currently-active mode id, or `null` if the agent has not set one. */
-  currentModeId: string | null;
-  /** Catalogue of selectable models. */
-  availableModels: AcpModelInfo[];
-  /** Currently-active model id. */
-  currentModelId: string | null;
-  /** Free-form config knobs (most recent snapshot, replace-semantics). */
-  configOptions: AcpSessionConfigOption[];
-  /**
-   * Explicit user selections for this thread, keyed by config-option id
-   * (`mode` / `model` / agent-defined ids such as `allow_all`).
-   *
-   * Takes precedence over `currentModeId` / `currentModelId` /
-   * `configOptions[].currentValue` when rendering: those carry the
-   * AGENT's view, which for agents with process-global settings is the
-   * value last picked in any session rather than in this one.
-   */
-  selections: Record<string, string | boolean>;
-  /** Human-readable title + activity timestamp pushed by the agent. */
-  sessionInfo: { title: string | null; updatedAt: string | null } | null;
-  /** Token / cost budget snapshot. */
-  usage: { used: number; size: number; cost: AcpCost | null } | null;
-  /**
-   * Epoch ms when ANY field of `sessionMeta` was last touched.
-   * UI can use this to detect stale snapshots after reconnect.
-   */
-  updatedAt: number;
-}
+export type AcpSessionMetaSnapshot = z.infer<
+  typeof acpSessionMetaSnapshotSchema
+>;
 
 /**
  * Request body for `POST /api/acp/threads/:threadId/mode`.
@@ -373,7 +349,7 @@ const acpCostSchema = z.object({
   currency: z.string(),
 }) satisfies z.ZodType<AcpCost>;
 
-/** Schema mirror of {@link AcpSessionMetaSnapshot}. */
+/** Server-cached Agent observations; timestamps belong to their own surface. */
 export const acpSessionMetaSnapshotSchema = z.object({
   availableModes: z.array(
     ZAcpSessionMode as unknown as z.ZodType<AcpSessionMode>,
@@ -384,6 +360,7 @@ export const acpSessionMetaSnapshotSchema = z.object({
   configOptions: z.array(
     ZAcpSessionConfigOption as unknown as z.ZodType<AcpSessionConfigOption>,
   ),
+  /** Explicit per-thread choices take precedence over Agent-reported current values. */
   selections: z.record(z.string(), z.union([z.string(), z.boolean()])),
   sessionInfo: z
     .object({
@@ -396,10 +373,12 @@ export const acpSessionMetaSnapshotSchema = z.object({
       used: z.number(),
       size: z.number(),
       cost: acpCostSchema.nullable(),
+      receivedAt: z.number().int().nonnegative().optional(),
     })
     .nullable(),
+  tokenUsage: reportedTokenUsageSchema.nullish(),
   updatedAt: z.number().int().nonnegative(),
-}) satisfies z.ZodType<AcpSessionMetaSnapshot>;
+});
 
 export const acpThreadCachedMetaQuerySchema = z.object({
   canvasId: z.string().min(1).optional(),
@@ -471,6 +450,8 @@ const externalAgentInteractionTargetSchema = z.object({
   }),
   canvasId: z.string().min(1).optional(),
   cwd: agentWorkingDirectorySchema.optional(),
+  /** Honoured only by the request that first realizes the conversation. */
+  initialPreferences: agentInitialPreferencesSchema.optional(),
 });
 export type ExternalAgentInteractionTarget = z.infer<
   typeof externalAgentInteractionTargetSchema

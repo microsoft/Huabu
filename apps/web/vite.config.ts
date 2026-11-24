@@ -1,7 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, URL } from 'node:url';
 
@@ -9,6 +8,7 @@ import react from '@vitejs/plugin-react';
 import { defineConfig, loadEnv, type Plugin } from 'vite';
 
 import { decideViteAccess } from './vite-access';
+import { resolveBuildVersion } from '../../scripts/build-version.mjs';
 import {
   readDeploymentSettings,
   resolveAuthenticationMode,
@@ -99,10 +99,17 @@ export default defineConfig(async ({ mode, command }) => {
       env.HUABU_BASIC_AUTH_USER === undefined &&
       env.HUABU_BASIC_AUTH_PASS === undefined
     ) {
-      const { initializeSecretStore, getPersistedSecret } =
-        await import('../server/src/security/secret-store');
-      await initializeSecretStore(env);
-      password = getPersistedSecret(SECRET_IDS.remoteAccessPassword);
+      // Read-only: the dev server neither opens, upgrades, nor imports into
+      // the Server's database; the Server does that when it starts.
+      const { readSavedSecret } =
+        await import('../server/src/security/saved-secret');
+      const { closeServerRecords } =
+        await import('../server/src/modules/storage/server-records');
+      try {
+        password = await readSavedSecret(SECRET_IDS.remoteAccessPassword, env);
+      } finally {
+        await closeServerRecords();
+      }
     }
     deploymentEnv = resolveDeploymentEnvironment(env, settings, password);
   }
@@ -125,14 +132,11 @@ export default defineConfig(async ({ mode, command }) => {
     );
   }
 
-  // The desktop app's `package.json` is the single source of truth for
-  // the user-facing product version (web's own version is `0.0.0`).
-  // Inline it at build time so the Settings panel can render `v<x.y.z>`
-  // without a runtime fetch.
-  const desktopPkg = JSON.parse(
-    readFileSync(path.resolve(here, '../desktop/package.json'), 'utf8'),
-  ) as { version?: string };
-  const appVersion = desktopPkg.version ?? '0.0.0';
+  // Inline this build's identity (`X.Y.Z+g<sha7>`, or the nightly version)
+  // so the Settings panel can show exactly which build is running without a
+  // runtime fetch. scripts/build-version.mjs owns the format; the product
+  // version comes from `apps/desktop/package.json` (web's own is `0.0.0`).
+  const appVersion = resolveBuildVersion(process.env);
 
   return {
     plugins: [
@@ -277,10 +281,32 @@ export default defineConfig(async ({ mode, command }) => {
             ) {
               return 'vendor-ui';
             }
+            // Preserve lazy language loads. Markdown's static HTML/JS/CSS
+            // dependencies stay with the editor core to avoid chunk cycles.
+            const syntaxPackage = id.match(
+              /node_modules\/(?:@codemirror\/lang-|@lezer\/)([^/]+)\//,
+            )?.[1];
+            if (
+              syntaxPackage &&
+              ![
+                'common',
+                'highlight',
+                'lr',
+                'markdown',
+                'html',
+                'javascript',
+                'css',
+              ].includes(syntaxPackage)
+            )
+              return `syntax-${syntaxPackage}`;
+            const legacyMode = id.match(
+              /node_modules\/@codemirror\/legacy-modes\/mode\/([^/]+)\.js$/,
+            )?.[1];
+            if (legacyMode) return `syntax-legacy-${legacyMode}`;
             // Editor stack: Milkdown/ProseMirror and CodeMirror/Lezer are
             // interdependent (Milkdown's code-block plugin embeds CodeMirror),
             // so keeping them in separate manual chunks creates a circular
-            // chunk graph. Group the whole editor toolchain into one chunk.
+            // chunk graph. Keep the shared core together, not lazy languages.
             if (
               id.includes('@milkdown') ||
               id.includes('prosemirror') ||

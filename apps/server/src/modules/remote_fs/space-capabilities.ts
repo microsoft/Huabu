@@ -34,7 +34,7 @@ const QUERY_DETAILS: Record<
   INSPECT_NODES: {
     constraints: [`At most ${SPACE_QUERY_MAX_LIMIT} results.`],
     result:
-      'Bounded node matches with geometry and derived spatial fields. Question Nodes with an existing conversation association also include threadId.',
+      'Bounded node matches with geometry and derived spatial fields. Structured Frames include layout: Column/Row tracks are ordered child-ID lists; Grid cells carry nodeId/column/row. Indices are zero-based. Question Nodes with an existing conversation association also include threadId.',
     examples: [{ type: 'INSPECT_NODES', ids: ['node-123'] }],
   },
   INSPECT_EDGES: {
@@ -56,7 +56,7 @@ const QUERY_DETAILS: Record<
       'The query may materialize content-addressed PNG cache artifacts but does not change canvas topology or version.',
     ],
     result:
-      'Snapshot entries with an artifact src, a downloadable path, PNG dimensions, and every contributing node ID.',
+      'Snapshot entries with an artifact src, PNG dimensions, and every contributing node ID.',
     examples: [
       {
         type: 'SNAPSHOT_NODES',
@@ -143,7 +143,7 @@ const COMMAND_EXAMPLES: Record<
     type: 'SET_FRAME_LAYOUT',
     frameId: 'frame-456',
     mode: 'column',
-    gridCount: 2,
+    placements: [{ nodeId: 'node-123', after: 'node-456' }],
   },
 };
 
@@ -172,6 +172,7 @@ export function getRfsCapabilities(): RfsCapabilitiesResponse {
       partialCommit: true,
       idempotent: false,
       runIdIsIdempotencyKey: false,
+      operationIdIsIdempotencyKey: true,
     },
     limits: {
       queryDefault: SPACE_QUERY_DEFAULT_LIMIT,

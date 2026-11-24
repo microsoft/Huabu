@@ -114,8 +114,13 @@
    between notes.
 
   The indicator is portalled to `document.body` so its fixed viewport
-  coordinates are not rebased by transformed Preview panel ancestors. */
+  coordinates are not rebased by transformed Preview panel ancestors.
+  Out there it competes with every positioned layer: the Preview panel is
+  an overlay at z-index 40, and an indicator left at `auto` is painted
+  underneath it, drawn in the right place but never seen. It sits above
+  panels and below popovers and the sign-in cover. */
 .crepe-drop-cursor.milkdown-drop-indicator {
+  z-index: 900;
   background: var(--info);
   opacity: 0.6;
 }
@@ -385,6 +390,30 @@
 /* Shared navigation affordance for Chat and expanded Notes. */
 .milkdown .ProseMirror[data-link-activation='plain'] a[href] {
   cursor: pointer;
+}
+
+/* In-app node links (`#node-<id>`) read as node references, matching the
+   `NodeRef` chip, rather than as web links. Attribute-only so every surface
+   that renders Markdown gets it without a node view. */
+.milkdown .ProseMirror a[href^='#node-'] {
+  /* A borderless tinted chip: an outline reads heavy inside prose, and a
+     neutral fill is indistinguishable from inline code (identical for CJK
+     labels, where the monospace cue is lost). The info tint keeps the "this is
+     clickable" cue of a link without the underline. Sized relative to the
+     surrounding text (13px in 14px Chat body). */
+  padding: 2px 0.4em;
+  border-radius: 6px;
+  background: var(--info-bg);
+  color: var(--info-fg);
+  font-size: 0.929em;
+  font-weight: 400;
+  text-decoration: none;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+
+.milkdown .ProseMirror a[href^='#node-']:hover {
+  background: var(--info-bg-hover);
 }
 
 /* Modifier state belongs to the React host, outside ProseMirror's observed DOM. */

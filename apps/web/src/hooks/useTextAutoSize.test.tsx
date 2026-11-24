@@ -419,12 +419,36 @@ describe('useTextAutoSize resize modes', () => {
   });
 });
 
+describe('useTextNodeSurface draft', () => {
+  it('follows the text in the store, also over what was typed into the control', () => {
+    const value: UseTextNodeSurfaceOpts = { ...opts, content: 'Stored' };
+    act(() => root.render(<SurfaceProbe value={value} />));
+    expect(surface.draft).toBe('Stored');
+    // A key press shows at once, before the store has the text.
+    act(() => surface.setDraft('Stored and typed'));
+    expect(surface.draft).toBe('Stored and typed');
+    // The caller wrote it to the store: nothing changes.
+    act(() =>
+      root.render(
+        <SurfaceProbe value={{ ...value, content: 'Stored and typed' }} />,
+      ),
+    );
+    expect(surface.draft).toBe('Stored and typed');
+    // A value the control did not write replaces the draft.
+    act(() =>
+      root.render(
+        <SurfaceProbe value={{ ...value, content: 'From the server' }} />,
+      ),
+    );
+    expect(surface.draft).toBe('From the server');
+  });
+});
+
 describe('useTextNodeSurface resize bundle', () => {
   it('forwards width, scale and no-argument fit modes through the real sizing hook', () => {
     const value: UseTextNodeSurfaceOpts = {
       ...opts,
       content: opts.text,
-      isEditing: true,
     };
     act(() => root.render(<SurfaceProbe value={value} />));
     expect(surface.nodeWrapperProps.resizeEndClearHeight).toBe(true);

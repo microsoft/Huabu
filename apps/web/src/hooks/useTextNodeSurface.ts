@@ -18,8 +18,7 @@
  * const surface = useTextNodeSurface({
  *   nodeId: id,
  *   width,
- *   isEditing,
- *   content,             // current persisted text
+ *   content,             // the node's text in the store
  *   baseFontSize: 16,
  *   paddingX: NODE_PADDING,
  *   paddingY: NODE_PADDING,
@@ -33,7 +32,7 @@
  *       ref={textareaRef}
  *       {...surface.bodyProps}
  *       draft={surface.draft}
- *       onChange={surface.setDraft}
+ *       onChange={handleChange}  // setDraft + the store write
  *       onBlur={handleBlur}
  *       isEditing={isEditing}
  *       onRequestEdit={handleDoubleClick}
@@ -57,10 +56,13 @@ export interface UseTextNodeSurfaceOpts {
   /** Node width from `NodeProps`. May be undefined on first render. */
   width?: number;
 
-  // -------- Editing state (owned by parent) --------
-  /** Whether the user is currently editing the textarea. */
-  isEditing: boolean;
-  /** The persisted text content. Draft is re-synced from this when not editing. */
+  // -------- Text --------
+  /**
+   * The node's text in the store. The draft follows it: while typing the
+   * caller writes each change to the store, so the two agree, and a value
+   * the control did not write (an undo, the server's version taken after a
+   * conflict, another writer's change) is shown.
+   */
   content: string;
 
   // -------- Sizing config --------
@@ -104,7 +106,6 @@ export function useTextNodeSurface(
   const {
     nodeId,
     width,
-    isEditing,
     content,
     baseFontSize = 16,
     paddingX,
@@ -116,11 +117,12 @@ export function useTextNodeSurface(
   } = opts;
 
   // -------- Draft state --------
-  // Local-during-editing, re-synced from store on undo/redo/external updates.
+  // Set at once by the textarea for a responsive caret, and re-synced from
+  // the store on every change of the node's text.
   const [draft, setDraft] = useState(content);
   useEffect(() => {
-    if (!isEditing) setDraft(content);
-  }, [content, isEditing]);
+    setDraft(content);
+  }, [content]);
 
   // -------- Auto-size --------
   const autoSize = useTextAutoSize({

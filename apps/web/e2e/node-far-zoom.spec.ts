@@ -181,6 +181,8 @@ async function mountNodes(page: Page, options: FixtureOptions = {}) {
             : {
                 src: `https://far-zoom.example.test/${type === 'pdf' ? 'document.pdf' : type === 'office' ? 'document.docx' : 'website'}`,
               }),
+          // A PDF card quotes its description from the Note it owns.
+          ...(type === 'pdf' ? { noteNodeId: 'far-note' } : {}),
           ...(type === 'pdf' && options.cover !== false
             ? {
                 coverUrl:
@@ -343,10 +345,23 @@ for (const size of [400, 102]) {
     }
     await zoomTo(page, 0.5);
     for (const type of ['web', 'pdf'] as const) {
-      await expect(shell(page, type).locator('.preview-card__info')).toHaveCSS(
-        'padding',
-        `${(16 * (size - 2 * NODE_BORDER_WIDTH)) / 400}px`,
-      );
+      // A PDF that gained its page thumbnail pads the whole card, not the text.
+      await expect
+        .poll(() =>
+          shell(page, type)
+            .locator('.preview-card')
+            .evaluate((card) => {
+              const info = card.querySelector('.preview-card__info');
+              if (!info) throw new Error('Missing card content');
+              const padded =
+                card.getAttribute('data-node-type') === 'pdf' &&
+                card.getAttribute('data-orientation') === 'vertical'
+                  ? card
+                  : info;
+              return getComputedStyle(padded).padding;
+            }),
+        )
+        .toBe(`${(16 * (size - 2 * NODE_BORDER_WIDTH)) / 400}px`);
     }
     expect(
       await page.evaluate(() => window.farZoomFixture.readState()),
@@ -466,6 +481,50 @@ test('Note far-zoom labels use 12px titles and fitting 10px descriptions in eith
   expect(await page.evaluate(() => window.farZoomFixture.readState())).toEqual(
     before,
   );
+  expect(audit.writes).toEqual([]);
+  expect(audit.errors).toEqual([]);
+});
+
+test('tall Note far labels fill available height with later paragraphs', async ({
+  page,
+}) => {
+  const paragraphs = [
+    'First paragraph.',
+    ...Array.from(
+      { length: 12 },
+      (_, index) => `Later paragraph ${index + 1} fills the remaining space.`,
+    ),
+  ];
+  const audit = await mountNodes(page, {
+    zoom: 0.19,
+    width: 800,
+    height: 1400,
+    title: 'Tall note',
+    description: paragraphs.join('\n\n'),
+  });
+  const node = shell(page, 'note');
+  const description = node.locator('[data-study-description]');
+  for (const theme of ['light', 'dark']) {
+    await page.evaluate((theme) => {
+      document.documentElement.classList.toggle('dark', theme === 'dark');
+    }, theme);
+    await expect(description).toHaveText(paragraphs.join(' '));
+    const metrics = await description.evaluate((element) => {
+      const style = getComputedStyle(element);
+      return {
+        height: element.getBoundingClientRect().height,
+        budget: Number(style.webkitLineClamp) * parseFloat(style.lineHeight),
+      };
+    });
+    expect(metrics.height).toBeGreaterThan(100);
+    expect(metrics.height).toBeCloseTo(metrics.budget, 0);
+    await test.info().attach(`tall-note-paragraphs-${theme}`, {
+      body: await node.screenshot({
+        path: test.info().outputPath(`tall-note-paragraphs-${theme}.png`),
+      }),
+      contentType: 'image/png',
+    });
+  }
   expect(audit.writes).toEqual([]);
   expect(audit.errors).toEqual([]);
 });
@@ -592,8 +651,9 @@ for (const [width, height] of [
         await zoomTo(page, zoom, type);
         await expectLayers(node, true);
         const card = node.locator('.preview-card');
+        // Horizontal cards and vertical PDF cards pad the card itself.
         await expect(
-          orientation === 'horizontal'
+          orientation === 'horizontal' || type === 'pdf'
             ? card
             : node.locator('.preview-card__info'),
         ).toHaveCSS('padding', '6px');
@@ -689,7 +749,21 @@ for (const cover of [true, false]) {
         }
       }
       await zoomTo(page, 0.5, type);
-      await expect(title).toHaveCSS('-webkit-line-clamp', '2');
+      if (type === 'pdf') {
+        // The PDF line budget guarantees two title lines and hands the title
+        // whatever the other blocks leave unused.
+        await expect(node.locator('.preview-card')).toHaveAttribute(
+          'data-budget',
+          'true',
+        );
+        await expect
+          .poll(() =>
+            title.evaluate((element) =>
+              Number(getComputedStyle(element).webkitLineClamp),
+            ),
+          )
+          .toBeGreaterThanOrEqual(2);
+      } else await expect(title).toHaveCSS('-webkit-line-clamp', '2');
       await expect(title).toHaveCSS(
         'font-size',
         `${NODE_TYPOGRAPHY.cardTitle.size}px`,

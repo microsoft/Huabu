@@ -89,6 +89,47 @@ function validSha(value: string | undefined): string | null {
   return SHA_PATTERN.test(normalized) ? normalized : null;
 }
 
+/**
+ * The commit the server bundle was built from, replaced at bundle time by
+ * `apps/server/tsup.config.ts` (`resolveExactRevision()` in
+ * `scripts/build-version.mjs`): a 40-character SHA, or null when no commit
+ * holds the bundle's exact source (unknown revision, or uncommitted
+ * changes). Not defined when the Server runs from source (development and
+ * tests).
+ */
+declare const __HUABU_BUILD_REVISION__: string | null | undefined;
+
+/**
+ * The revision recorded in the running bundle: a SHA, null when the bundle
+ * recorded none, or undefined when the Server runs from source.
+ */
+export function bundledRevision(): string | null | undefined {
+  if (typeof __HUABU_BUILD_REVISION__ === 'undefined') return undefined;
+  return validSha(__HUABU_BUILD_REVISION__ ?? undefined);
+}
+
+/**
+ * The full Git commit whose checkout reproduces this Server's source, or
+ * null when unknown. Devices check it out, so it is never a guess.
+ *
+ * A bundle's recorded revision is authoritative, including null: the
+ * startup environment can describe a different checkout, because
+ * `scripts/start-web.mjs` fills `HUABU_DEPLOYED_SHA` from `git rev-parse
+ * HEAD` at launch, which is not the bundle's source once the checkout moves
+ * or when the build had uncommitted changes. `HUABU_DEPLOYED_SHA` is read
+ * only when the Server runs from source.
+ *
+ * @param env startup environment holding `HUABU_DEPLOYED_SHA`
+ * @param built the bundle's recorded revision (see `bundledRevision()`);
+ *   tests pass it explicitly
+ */
+export function deployedSha(
+  env: NodeJS.ProcessEnv = process.env,
+  built: string | null | undefined = bundledRevision(),
+): string | null {
+  return built === undefined ? validSha(env.HUABU_DEPLOYED_SHA) : built;
+}
+
 export function resolveCanaryCapability(
   env: NodeJS.ProcessEnv = process.env,
 ): CanaryCapability {
@@ -99,7 +140,7 @@ export function resolveCanaryCapability(
       repoRoot: null,
       scriptPath: null,
       runnerPath: null,
-      runningSha: validSha(env.HUABU_DEPLOYED_SHA),
+      runningSha: deployedSha(env),
     };
   }
 
@@ -111,12 +152,18 @@ export function resolveCanaryCapability(
       repoRoot: null,
       scriptPath: null,
       runnerPath: null,
-      runningSha: validSha(env.HUABU_DEPLOYED_SHA),
+      runningSha: deployedSha(env),
     };
   }
 
   const repoRoot = resolve(configuredRoot);
-  const scriptPath = join(repoRoot, 'scripts', 'start-huabu.sh');
+  const scriptPath = join(
+    repoRoot,
+    'scripts',
+    env.HUABU_SERVICE_MANAGER === 'systemd-user'
+      ? 'build-web.mjs'
+      : 'start-huabu.sh',
+  );
   const runnerPath = join(repoRoot, 'scripts', 'canary-redeploy-runner.mjs');
   if (!existsSync(scriptPath) || !existsSync(runnerPath)) {
     return {
@@ -125,11 +172,16 @@ export function resolveCanaryCapability(
       repoRoot,
       scriptPath,
       runnerPath,
-      runningSha: validSha(env.HUABU_DEPLOYED_SHA),
+      runningSha: deployedSha(env),
     };
   }
   try {
-    accessSync(scriptPath, constants.X_OK);
+    accessSync(
+      scriptPath,
+      env.HUABU_SERVICE_MANAGER === 'systemd-user'
+        ? constants.R_OK
+        : constants.X_OK,
+    );
   } catch {
     return {
       available: false,
@@ -137,7 +189,7 @@ export function resolveCanaryCapability(
       repoRoot,
       scriptPath,
       runnerPath,
-      runningSha: validSha(env.HUABU_DEPLOYED_SHA),
+      runningSha: deployedSha(env),
     };
   }
 
@@ -147,7 +199,7 @@ export function resolveCanaryCapability(
     repoRoot,
     scriptPath,
     runnerPath,
-    runningSha: validSha(env.HUABU_DEPLOYED_SHA),
+    runningSha: deployedSha(env),
   };
 }
 
@@ -344,15 +396,20 @@ async function resolveRemoteBranch(
 
 export async function writeCanaryRedeployResult(
   result: CanaryRedeployResult,
+  runnerPid?: number,
 ): Promise<void> {
   const parsed = canaryRedeployResultSchema.parse(result);
   const statusPath = canaryStatusPath();
   await mkdir(dirname(statusPath), { recursive: true });
   const temporaryPath = `${statusPath}.${process.pid}.${Date.now()}.tmp`;
-  await writeFile(temporaryPath, `${JSON.stringify(parsed, null, 2)}\n`, {
-    encoding: 'utf8',
-    mode: 0o600,
-  });
+  await writeFile(
+    temporaryPath,
+    `${JSON.stringify({ ...parsed, runnerPid }, null, 2)}\n`,
+    {
+      encoding: 'utf8',
+      mode: 0o600,
+    },
+  );
   await rename(temporaryPath, statusPath);
 }
 
@@ -438,6 +495,111 @@ export async function checkCanaryRemote(): Promise<CanaryRedeployStatusResponse>
   }
 }
 
+async function launchRedeployRunner(
+  repoRoot: string,
+  args: string[],
+  environment: NodeJS.ProcessEnv,
+  onReady: (runnerPid: number) => Promise<void>,
+): Promise<void> {
+  const systemd = environment.HUABU_SERVICE_MANAGER === 'systemd-user';
+  const child = spawn(
+    systemd ? 'systemd-run' : process.execPath,
+    systemd
+      ? [
+          '--user',
+          '--quiet',
+          '--collect',
+          '--pipe',
+          '--service-type=exec',
+          '--unit=huabu-redeploy.service',
+          '--expand-environment=no',
+          `--working-directory=${repoRoot}`,
+          process.execPath,
+          ...args,
+          '--environment-stdin',
+        ]
+      : args,
+    {
+      cwd: repoRoot,
+      detached: !systemd,
+      stdio: systemd ? ['pipe', 'pipe', 'pipe'] : 'ignore',
+      env: environment,
+    },
+  );
+  let launcherError: Error | null = null;
+  try {
+    const runnerPid = await new Promise<number | null>(
+      (resolveLaunch, rejectLaunch) => {
+        let settled = false;
+        let output = '';
+        let diagnostic = '';
+        const deadline = setTimeout(() => {
+          fail(new Error('Timed out starting Canary redeploy runner'));
+        }, 10_000);
+        const fail = (error: Error) => {
+          launcherError = error;
+          if (settled) return;
+          settled = true;
+          clearTimeout(deadline);
+          rejectLaunch(error);
+        };
+        const ready = (pid: number | null) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(deadline);
+          resolveLaunch(pid);
+        };
+        child.once('error', fail);
+        child.once('exit', (code, signal) => {
+          fail(
+            new Error(
+              `Canary redeploy launcher exited (${signal ?? code}): ${diagnostic}`,
+            ),
+          );
+        });
+        if (systemd) {
+          child.stderr?.setEncoding('utf8');
+          child.stderr?.on('data', (chunk: string) => {
+            diagnostic = `${diagnostic}${chunk}`.slice(-4096);
+          });
+          child.stdout?.setEncoding('utf8');
+          child.stdout?.on('data', (chunk: string) => {
+            output = `${output}${chunk}`.slice(-1024);
+            const match =
+              /(?:^|\n)Huabu redeploy runner ready ([1-9][0-9]*)\n/u.exec(
+                output,
+              );
+            const pid = Number(match?.[1]);
+            if (Number.isSafeInteger(pid) && pid > 0) ready(pid);
+          });
+          child.stdin?.once('error', fail);
+          child.stdin?.write(`${JSON.stringify(environment)}\n`);
+        } else {
+          child.once('spawn', () => ready(null));
+        }
+      },
+    );
+    if (systemd) {
+      if (runnerPid === null) {
+        throw new Error('Canary redeploy runner did not report its PID');
+      }
+      await onReady(runnerPid);
+      if (launcherError) throw launcherError;
+      if (!child.stdin?.writable || child.stdin.destroyed) {
+        throw new Error('Canary redeploy admission channel closed');
+      }
+      child.stdin.end('Huabu redeploy runner accepted\n');
+    }
+  } catch (error) {
+    child.stdin?.destroy();
+    child.stdout?.destroy();
+    child.stderr?.destroy();
+    throw error;
+  } finally {
+    child.unref();
+  }
+}
+
 export async function requestCanaryRedeploy(
   expectedBranch: CanaryBranch,
 ): Promise<CanaryRedeployStatusResponse> {
@@ -454,10 +616,8 @@ export async function requestCanaryRedeploy(
     );
   }
   await beginOperation('redeploy');
-  let branch: CanaryBranch | null = null;
-  let startedAt: number | null = null;
   try {
-    branch = readCanaryConfig().branch;
+    const branch = readCanaryConfig().branch;
     if (expectedBranch !== branch) {
       throw new CanaryRedeployError(
         'stale_branch',
@@ -466,8 +626,13 @@ export async function requestCanaryRedeploy(
     }
     const remoteSha = await resolveRemoteBranch(capability.repoRoot, branch);
     cachedRemote = { branch, remoteSha, checkedAt: Date.now() };
-    await access(capability.scriptPath, constants.X_OK);
-    startedAt = Date.now();
+    await access(
+      capability.scriptPath,
+      process.env.HUABU_SERVICE_MANAGER === 'systemd-user'
+        ? constants.R_OK
+        : constants.X_OK,
+    );
+    const startedAt = Date.now();
     await writeCanaryRedeployResult({
       state: 'requested',
       branch,
@@ -475,47 +640,46 @@ export async function requestCanaryRedeploy(
     });
 
     const deploymentEnvironment = getDeploymentEnvironment();
-    const child = spawn(
-      process.execPath,
-      [
-        capability.runnerPath,
-        capability.scriptPath,
-        canaryStatusPath(),
-        canaryLogPath(),
-        String(startedAt),
-        branch,
-      ],
-      {
-        cwd: capability.repoRoot,
-        detached: true,
-        stdio: 'ignore',
-        env: {
+    try {
+      await launchRedeployRunner(
+        capability.repoRoot,
+        [
+          capability.runnerPath,
+          capability.scriptPath,
+          canaryStatusPath(),
+          canaryLogPath(),
+          String(startedAt),
+          branch,
+        ],
+        {
           ...process.env,
           HUABU_CANARY_BASIC_AUTH_USER:
             deploymentEnvironment.HUABU_BASIC_AUTH_USER,
           HUABU_CANARY_BASIC_AUTH_PASS:
             deploymentEnvironment.HUABU_BASIC_AUTH_PASS,
         },
-      },
-    );
-    child.once('error', (error) => {
-      redeployRequestInFlight = false;
+        async (runnerPid) => {
+          await writeCanaryRedeployResult(
+            { state: 'running', branch, startedAt },
+            runnerPid,
+          );
+        },
+      );
+    } catch (error) {
       log.error({ err: error }, 'Canary redeploy runner failed to start');
-      void writeCanaryRedeployResult({
+      await writeCanaryRedeployResult({
         state: 'failed',
-        branch: branch ?? DEFAULT_BRANCH,
-        startedAt: startedAt ?? Date.now(),
+        branch,
+        startedAt,
         completedAt: Date.now(),
         exitCode: -1,
         message: 'Unable to start redeploy runner',
-      }).catch((statusError: unknown) => {
-        log.error(
-          { err: statusError },
-          'Unable to persist Canary runner start failure',
-        );
       });
-    });
-    child.unref();
+      throw new CanaryRedeployError(
+        'redeploy_unavailable',
+        'Unable to start Canary redeploy runner; inspect the server logs',
+      );
+    }
     redeployRequestInFlight = true;
     return await getCanaryRedeployStatus();
   } finally {

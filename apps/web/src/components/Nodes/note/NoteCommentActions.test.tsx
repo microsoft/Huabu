@@ -15,6 +15,7 @@ import {
 import { i18n } from '@/i18n';
 import useCanvasStore from '@/store/canvasStore';
 import { useChatStore, selectThreadQuotedComments } from '@/store/chatStore';
+import { useCommentDestinationMemory } from '@/store/commentDestinationMemory';
 import { usePanelStore } from '@/store/panelStore';
 import { createEmptyWorkspace } from '@/store/previewWorkspace/model';
 import { usePreviewWorkspaceStore } from '@/store/previewWorkspace/store';
@@ -317,6 +318,9 @@ it('does not create a new conversation until a written comment is confirmed', as
   expect(newThreads).toHaveLength(1);
   expect(newThreads[0]?.pendingQuotedComments[0]?.comment).toBe('Explain this');
   expect(newThreads[0]?.messages).toEqual([]);
+  expect(useCommentDestinationMemory.getState().lastComment?.kind).toBe(
+    'temporary',
+  );
 });
 
 it('leaves drafts untouched when cancelling after choosing a destination', async () => {

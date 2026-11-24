@@ -1,17 +1,15 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { readFileSync } from 'node:fs';
-
 import { resolveConnectedAgentletId } from '@agenetes/agentlet-host';
 
 import { agentDefaultsSchema } from '@huabu/shared';
 
-import { atomicWriteJson } from '../../utils/fs.js';
 import {
   personalSettingsOwner,
-  settingsFilePath,
+  settingsRecordKey,
 } from '../identity/personal-settings.js';
+import { getServerRecords, ServerRecordError } from '../storage/index.js';
 
 import type { AgentDefaults, AgentProfileView } from '@huabu/shared';
 
@@ -32,41 +30,57 @@ export class AgentDefaultsError extends Error {
 }
 
 interface AgentDefaultsStorage {
-  read: () => unknown;
-  write: (config: AgentDefaults) => void;
+  /** The stored value, or `undefined` when nothing was ever saved. */
+  read: () => Promise<unknown>;
+  /** Resolves once `config` is durable. */
+  write: (config: AgentDefaults) => Promise<void>;
+  /**
+   * Write `config` only if nothing was ever saved, deciding that in the same
+   * serialized step as the write, so an explicit save that lands first wins.
+   * Resolves to what is stored afterwards.
+   */
+  initialize: (config: AgentDefaults) => Promise<unknown>;
 }
 
-function configPath(): string {
-  return settingsFilePath('agent-defaults.json');
+function corruptDefaults(error: unknown): unknown {
+  if (!(error instanceof ServerRecordError)) return error;
+  return new AgentDefaultsError(
+    'agent_defaults_corrupt',
+    'Invalid Agent defaults file: malformed JSON',
+    { cause: error },
+  );
 }
 
-const diskStorage: AgentDefaultsStorage = {
-  read() {
-    let text: string;
+const recordStorage: AgentDefaultsStorage = {
+  async read() {
     try {
-      text = readFileSync(configPath(), 'utf8');
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
-      throw error;
-    }
-    try {
-      return JSON.parse(text) as unknown;
-    } catch (error) {
-      throw new AgentDefaultsError(
-        'agent_defaults_corrupt',
-        'Invalid Agent defaults file: malformed JSON',
-        { cause: error },
+      return (
+        (await getServerRecords().get(settingsRecordKey('agent-defaults'))) ??
+        undefined
       );
+    } catch (error) {
+      throw corruptDefaults(error);
     }
   },
-  write: (config) => atomicWriteJson(configPath(), config),
+  write: (config) =>
+    getServerRecords().put(settingsRecordKey('agent-defaults'), config),
+  async initialize(config) {
+    try {
+      return await getServerRecords().update(
+        settingsRecordKey('agent-defaults'),
+        (current) => current ?? config,
+      );
+    } catch (error) {
+      throw corruptDefaults(error);
+    }
+  },
 };
 
 export class AgentDefaultsService {
-  constructor(private readonly storage: AgentDefaultsStorage = diskStorage) {}
+  constructor(private readonly storage: AgentDefaultsStorage = recordStorage) {}
 
-  getAgentDefaults(): AgentDefaults {
-    return this.parseDefaults(this.storage.read());
+  async getAgentDefaults(): Promise<AgentDefaults> {
+    return this.parseDefaults(await this.storage.read());
   }
 
   private parseDefaults(stored: unknown): AgentDefaults {
@@ -86,8 +100,8 @@ export class AgentDefaultsService {
     return parsed.data;
   }
 
-  requireDefaultAgentProfileId(): string {
-    const { profileId } = this.getAgentDefaults();
+  async requireDefaultAgentProfileId(): Promise<string> {
+    const { profileId } = await this.getAgentDefaults();
     if (profileId === null) {
       throw new AgentDefaultsError(
         'default_profile_unconfigured',
@@ -97,16 +111,16 @@ export class AgentDefaultsService {
     return profileId;
   }
 
-  setAgentDefaults(config: AgentDefaults): AgentDefaults {
+  async setAgentDefaults(config: AgentDefaults): Promise<AgentDefaults> {
     const parsed = agentDefaultsSchema.parse(config);
-    this.storage.write(parsed);
+    await this.storage.write(parsed);
     return parsed;
   }
 
-  initializeAgentDefaults(
+  async initializeAgentDefaults(
     profiles: readonly AgentProfileView[],
-  ): AgentDefaults {
-    const stored = this.storage.read();
+  ): Promise<AgentDefaults> {
+    const stored = await this.storage.read();
     const current = this.parseDefaults(stored);
     if (stored !== undefined) return current;
     const candidates = profiles.filter(
@@ -128,19 +142,25 @@ export class AgentDefaultsService {
       return 0;
     });
     if (!candidates[0]) return current;
-    return this.setAgentDefaults({ ...current, profileId: candidates[0].id });
+    return this.parseDefaults(
+      await this.storage.initialize(
+        agentDefaultsSchema.parse({ ...current, profileId: candidates[0].id }),
+      ),
+    );
   }
 }
 
 const service = new AgentDefaultsService();
-export const getAgentDefaults = (): AgentDefaults => service.getAgentDefaults();
-export const requireDefaultAgentProfileId = (): string =>
+export const getAgentDefaults = (): Promise<AgentDefaults> =>
+  service.getAgentDefaults();
+export const requireDefaultAgentProfileId = (): Promise<string> =>
   service.requireDefaultAgentProfileId();
-export const setAgentDefaults = (config: AgentDefaults): AgentDefaults =>
-  service.setAgentDefaults(config);
+export const setAgentDefaults = (
+  config: AgentDefaults,
+): Promise<AgentDefaults> => service.setAgentDefaults(config);
 export const initializeAgentDefaults = (
   profiles: readonly AgentProfileView[],
-): AgentDefaults =>
+): Promise<AgentDefaults> =>
   service.initializeAgentDefaults(
     profiles.filter((profile) =>
       resolveConnectedAgentletId(profile.agentletId),

@@ -15,8 +15,10 @@ const {
   updateRuntimeConfig,
   toast,
   resetCredentials,
+  getReadiness,
 } = vi.hoisted(() => ({
   resetCredentials: vi.fn(),
+  getReadiness: vi.fn(),
   createConnectionCommand: vi.fn(),
   getRuntimeConfig: vi.fn(),
   updateRuntimeConfig: vi.fn(),
@@ -32,6 +34,7 @@ vi.mock('@/api/acp', () => ({
   updateExternalAgentRuntimeConfig: updateRuntimeConfig,
   resetOwnDeviceCredentials: resetCredentials,
 }));
+vi.mock('@/api/deployment', () => ({ getDeploymentReadiness: getReadiness }));
 vi.mock('@/components/Common/Toast', () => ({ toast }));
 vi.mock('@/hooks/useElectron', () => ({ getElectronBridge: vi.fn() }));
 
@@ -65,7 +68,16 @@ const loopbackReadiness: DeploymentReadinessResponse = {
 };
 beforeEach(() => {
   vi.mocked(getElectronBridge).mockReturnValue(null);
-  useDeploymentReadinessStore.setState({ readiness: null, error: null });
+  useDeploymentReadinessStore.setState({
+    readiness: null,
+    loading: false,
+    error: null,
+  });
+  // The Server answers with what the test put in the store, or not at all.
+  getReadiness.mockImplementation(
+    () =>
+      useDeploymentReadinessStore.getState().readiness ?? new Promise(() => {}),
+  );
   getRuntimeConfig.mockResolvedValue({ idleTimeoutSecs: 600, maxAgents: 10 });
   updateRuntimeConfig.mockImplementation(
     async (config: ExternalAgentRuntimeConfig) => config,
@@ -890,5 +902,95 @@ describe('ExternalAgentRuntimeSettings', () => {
     expect(button('settings.agentletEnvFileCopy').disabled).toBe(false);
     expect(container.textContent).not.toContain('secret');
     expect(document.querySelector('textarea')).toBeNull();
+  });
+
+  describe('source matching the Server', () => {
+    const sha = '0b4438c81f7fb5562dac8f96b19a80302c7f5d15';
+    const setupText = () =>
+      container.querySelector('ol > li p:nth-of-type(2)')?.textContent;
+    const commands = () => container.querySelector('ol > li pre')?.textContent;
+
+    it('checks out the exact revision the Server reports', async () => {
+      useDeploymentReadinessStore.setState({
+        readiness: { ...loopbackReadiness, revision: sha },
+      });
+      await act(async () => root.render(<AgentConnectionSettings />));
+      expect(setupText()).toBe('settings.agentletSourceSetupPinned');
+      expect(commands()).toBe(
+        `git clone https://github.com/microsoft/Huabu.git\ncd Huabu\ngit checkout ${sha}\npnpm install`,
+      );
+    });
+
+    it.each([null, undefined])(
+      'keeps the unpinned commands and says the revision is unknown (%s)',
+      async (revision) => {
+        useDeploymentReadinessStore.setState({
+          readiness: { ...loopbackReadiness, revision },
+        });
+        await act(async () => root.render(<AgentConnectionSettings />));
+        expect(setupText()).toBe('settings.agentletSourceSetupRevisionUnknown');
+        expect(commands()).not.toContain('git checkout');
+      },
+    );
+
+    it('stays generic while readiness has not loaded', async () => {
+      await act(async () => root.render(<AgentConnectionSettings />));
+      expect(setupText()).toBe('settings.agentletSourceSetup');
+      expect(commands()).not.toContain('git checkout');
+    });
+
+    it('loads readiness itself when Settings has not, as for a member', async () => {
+      getReadiness.mockResolvedValue({ ...loopbackReadiness, revision: sha });
+      await act(async () => root.render(<AgentConnectionSettings />));
+      expect(getReadiness).toHaveBeenCalledTimes(1);
+      expect(commands()).toContain(`git checkout ${sha}`);
+    });
+
+    it('revalidates a revision an earlier load left in the store', async () => {
+      const redeployed = '1111111111111111111111111111111111111111';
+      useDeploymentReadinessStore.setState({
+        readiness: { ...loopbackReadiness, revision: sha },
+      });
+      let answer!: (value: DeploymentReadinessResponse) => void;
+      getReadiness.mockReturnValue(
+        new Promise((resolve) => {
+          answer = resolve;
+        }),
+      );
+      await act(async () => root.render(<AgentConnectionSettings />));
+      // The earlier revision is not offered while the Server is asked again.
+      expect(commands()).not.toContain('git checkout');
+      await act(async () =>
+        answer({ ...loopbackReadiness, revision: redeployed }),
+      );
+      expect(commands()).toContain(`git checkout ${redeployed}`);
+    });
+
+    it('joins a readiness load already in flight', async () => {
+      useDeploymentReadinessStore.setState({ loading: true });
+      await act(async () => root.render(<AgentConnectionSettings />));
+      expect(getReadiness).not.toHaveBeenCalled();
+      expect(commands()).not.toContain('git checkout');
+    });
+  });
+
+  describe('default shell', () => {
+    afterEach(() => {
+      Reflect.deleteProperty(navigator, 'platform');
+    });
+
+    it.each([
+      ['Win32', 'powershell'],
+      ['Linux x86_64', 'posix'],
+      ['MacIntel', 'posix'],
+    ])('on %s copies the %s command', async (platform, shell) => {
+      Object.defineProperty(navigator, 'platform', {
+        configurable: true,
+        value: platform,
+      });
+      await act(async () => root.render(<AgentConnectionSettings />));
+      await act(async () => button('settings.agentletCommandCopy').click());
+      expect(createConnectionCommand).toHaveBeenCalledWith(shell, 'command');
+    });
   });
 });

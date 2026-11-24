@@ -3,7 +3,98 @@
 
 import { expect, test } from '@playwright/test';
 
+import { editsPerCommand } from './helpers';
+
 import type * as CanvasStore from '../src/store/canvasStore';
+import type * as WorkspaceStore from '../src/store/workspaceStore';
+
+for (const activation of [
+  'click',
+  'Enter',
+  'ControlOrMeta',
+  'middle',
+] as const) {
+  test(`Space list new-tab link preserves the source Space (${activation})`, async ({
+    page,
+    context,
+  }) => {
+    await page.addInitScript(() =>
+      localStorage.setItem('huabu.language', 'en'),
+    );
+    const title = `New-tab navigation ${activation}`;
+    const response = await page.request.post('/api/canvas', {
+      data: { title },
+    });
+    expect(response.ok(), await response.text()).toBe(true);
+    const { canvasId } = (await response.json()) as { canvasId: string };
+    await page.goto(`/canvas/${canvasId}`);
+    await expect(page.locator('[data-canvas-root]')).toHaveAttribute(
+      'aria-busy',
+      'false',
+    );
+    const workspaceId = await page.evaluate(async () => {
+      const path = '/src/store/workspaceStore.ts';
+      const { useWorkspaceStore } = (await import(
+        path
+      )) as typeof WorkspaceStore;
+      return useWorkspaceStore.getState().workspaceId;
+    });
+    expect(workspaceId).toBeTruthy();
+
+    const trigger = page.getByRole('button', {
+      name: 'Application menu',
+      exact: true,
+    });
+    await trigger.press('ArrowDown');
+    const back = page.getByRole('menuitem', {
+      name: 'Back to Space list',
+      exact: true,
+    });
+    const newTab = page.getByRole('menuitem', {
+      name: 'Open Space list in new tab',
+      exact: true,
+    });
+    await expect(newTab).toHaveAttribute('href', '/spaces');
+    await back.focus();
+    await back.press('ArrowDown');
+    await expect(newTab).toBeFocused();
+
+    const opened = context.waitForEvent('page');
+    if (activation === 'Enter') await newTab.press('Enter');
+    else if (activation === 'middle') await newTab.click({ button: 'middle' });
+    else if (activation === 'ControlOrMeta')
+      await newTab.click({ modifiers: ['ControlOrMeta'] });
+    else await newTab.click();
+    const list = await opened;
+    await expect(list).toHaveURL(/\/spaces$/);
+    await expect(list.locator(`a[href="/canvas/${canvasId}"]`)).toContainText(
+      title,
+    );
+    expect(
+      await list.evaluate(async () => {
+        const path = '/src/store/workspaceStore.ts';
+        const { useWorkspaceStore } = (await import(
+          path
+        )) as typeof WorkspaceStore;
+        return useWorkspaceStore.getState().workspaceId;
+      }),
+    ).toBe(workspaceId);
+    expect(await list.evaluate(() => window.opener === null)).toBe(true);
+    await expect(page).toHaveURL(new RegExp(`/canvas/${canvasId}$`));
+    await expect(page.locator('[data-canvas-root]')).toHaveAttribute(
+      'aria-busy',
+      'false',
+    );
+    await list.close();
+
+    if (activation === 'click') {
+      await expect(page.getByRole('menu')).toHaveCount(0);
+      await trigger.click();
+      await back.click();
+      await expect(page).toHaveURL(/\/spaces$/);
+    }
+  });
+}
 
 for (const failure of ['content', 'structure'] as const) {
   for (const recover of [false, true]) {
@@ -27,7 +118,7 @@ for (const failure of ['content', 'structure'] as const) {
       const child = (await childResponse.json()).canvasId as string;
       const seeded = await page.request.post(`/api/canvas/${child}/execute`, {
         data: {
-          commands: [
+          edits: editsPerCommand([
             {
               type: 'CREATE_NODES',
               nodes: [
@@ -39,8 +130,8 @@ for (const failure of ['content', 'structure'] as const) {
                 },
               ],
             },
-          ],
-          originator: { source: 'ui', tabId: 'e2e-save-navigation' },
+          ]),
+          originator: { tabId: 'e2e-save-navigation' },
         },
       });
       expect(seeded.ok()).toBe(true);
@@ -57,9 +148,12 @@ for (const failure of ['content', 'structure'] as const) {
           .nodes.find((node) => node.id === 'node-save-navigation');
       });
       expect(sourceNode).toBeDefined();
-      const failingRoute = `**/api/canvas/${child}${failure === 'content' ? '/nodes/*/content' : ''}`;
+      // A body is saved by the per-node content PUT; a structure edit is
+      // sent as an execute request. Nothing saves the whole Space.
+      const failingRoute = `**/api/canvas/${child}${failure === 'content' ? '/nodes/*/content' : '/execute'}`;
+      const failingMethod = failure === 'content' ? 'PUT' : 'POST';
       await page.route(failingRoute, async (route) => {
-        if (route.request().method() !== 'PUT') return route.continue();
+        if (route.request().method() !== failingMethod) return route.continue();
         await route.fulfill({
           status: 500,
           contentType: 'application/json',
@@ -69,14 +163,25 @@ for (const failure of ['content', 'structure'] as const) {
       await page.evaluate(async (kind) => {
         const path = '/src/store/canvasStore.ts';
         const { default: store } = (await import(path)) as typeof CanvasStore;
-        store.setState({
-          nodes: store.getState().nodes.map((node) => {
-            if (node.id !== 'node-save-navigation') return node;
-            return kind === 'content'
-              ? { ...node, data: { ...node.data, content: 'Unsaved text' } }
-              : { ...node, position: { x: 400, y: 400 } };
-          }),
-        });
+        if (kind === 'content') {
+          store.setState({
+            nodes: store
+              .getState()
+              .nodes.map((node) =>
+                node.id === 'node-save-navigation'
+                  ? { ...node, data: { ...node.data, content: 'Unsaved text' } }
+                  : node,
+              ),
+          });
+          return;
+        }
+        // The move a drag commits, through the store's own action.
+        store.getState().beginGesture('SET_NODE_GEOMETRY');
+        store
+          .getState()
+          .setNodeGeometry([
+            { nodeId: 'node-save-navigation', position: { x: 400, y: 400 } },
+          ]);
       }, failure);
       await page
         .getByRole('link', { name: destinationTitle, exact: true })
@@ -144,7 +249,9 @@ for (const failure of ['content', 'structure'] as const) {
           : sourceNode?.position,
       );
       expect(restored.pending).toEqual([]);
-      expect(restored.canUndo).toBe(false);
+      // The move is a real edit with an undo entry, which a Space keeps
+      // across navigation once it is saved; a discard clears it.
+      expect(restored.canUndo).toBe(recover && failure === 'structure');
     });
   }
 }

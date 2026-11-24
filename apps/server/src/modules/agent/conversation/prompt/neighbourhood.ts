@@ -23,9 +23,8 @@
  *   </canvas_neighbourhood>
  *
  * Returns `undefined` when there is no anchor, or when the anchor has no
- * useful neighbours (the serialized body is empty). The external/ACP
- * backend renders the same context identically (both address a node by
- * its `file=` path).
+ * useful neighbours (the serialized body is empty). Built-in agents receive
+ * `file=` paths while external/ACP agents address neighbours by `id`.
  */
 
 import { escapeXmlAttr } from './node-element.js';
@@ -37,7 +36,7 @@ import type { NodeNeighbourhoodContext } from '../../../canvas/node-neighbourhoo
 const READ_INTRO =
   'The user started this turn from a specific node on the canvas, and its surroundings are included so you can ground vague references. When they say "this", "the one above", or use an implicit pronoun, resolve it against this neighbourhood before answering. Every <node> is addressable — pass `file` to read() for the full body.';
 const READ_NODE_INTRO =
-  'The user started this turn from a specific node on the canvas, and its surroundings are included so you can ground vague references. When they say "this", "the one above", or use an implicit pronoun, resolve it against this neighbourhood before answering. Every <node> is addressable — download any at `GET ${HUABU_RFS_URL}/download/<file>`.';
+  'The user started this turn from a specific node on the canvas, and its surroundings are included so you can ground vague references. When they say "this", "the one above", or use an implicit pronoun, resolve it against this neighbourhood before answering. Every <node> is addressable by `id` — download any via the Space CLI `download <id>` or `GET ${HUABU_RFS_URL}/download/<id>`.';
 
 /**
  * Render the `<canvas_neighbourhood>` block, or `undefined` when the
@@ -55,11 +54,14 @@ export function renderNeighbourhoodSection(
   profile: RenderProfile,
 ): string | undefined {
   if (!anchor) return undefined;
+  const isReachback = profile.toolset === 'reachback';
   const body = anchor.neighbourhood
-    ? serializeNodeNeighbourhood(anchor.neighbourhood)
+    ? serializeNodeNeighbourhood(anchor.neighbourhood, {
+        includeFile: !isReachback,
+      })
     : '';
   if (!body) return undefined;
-  const intro = profile.toolset === 'reachback' ? READ_NODE_INTRO : READ_INTRO;
+  const intro = isReachback ? READ_NODE_INTRO : READ_INTRO;
   const anchorAttrs = [
     `id="${escapeXmlAttr(anchor.nodeId)}"`,
     anchor.label ? `label="${escapeXmlAttr(anchor.label)}"` : '',

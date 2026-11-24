@@ -11,7 +11,7 @@ for (const language of ['zh-CN', 'en']) {
       throw error;
     });
     await page.goto('/playground/node-toolbars');
-    await expect(page.locator('.nt-toolbar')).toHaveCount(12);
+    await expect(page.locator('.nt-toolbar').first()).toBeVisible();
     await page.evaluate(async (locale) => {
       const load = (path: string) => import(/* @vite-ignore */ path);
       const { mountEdgeToolbar } = await load('/e2e/fixtures/edge-toolbar.tsx');

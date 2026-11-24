@@ -5,6 +5,8 @@ import { writeFile } from 'node:fs/promises';
 
 import { expect, test, type Locator } from '@playwright/test';
 
+import { personEdits } from './helpers';
+
 import type { CreateCanvasResponse, GetCanvasResponse } from '@huabu/shared';
 
 async function readBounds(shell: Locator) {
@@ -52,7 +54,9 @@ async function readBounds(shell: Locator) {
 }
 
 for (const theme of ['light', 'dark'] as const) {
-  for (const zoom of [0.24, 0.5, 1, 1.5]) {
+  // 0.18 is far zoom for a video: it keeps its ordinary, playable body down
+  // to 0.2 (SEMANTIC_ZOOM_CONFIG.minimalZoomByType.video).
+  for (const zoom of [0.18, 0.5, 1, 1.5]) {
     test(`video zero-layout boundary ${theme} at ${zoom} zoom`, async ({
       page,
     }, testInfo) => {
@@ -113,7 +117,7 @@ for (const theme of ['light', 'dark'] as const) {
         `/api/canvas/${canvasId}/execute`,
         {
           data: {
-            commands: [
+            edits: personEdits([
               {
                 type: 'CREATE_NODES',
                 nodes: [
@@ -131,8 +135,7 @@ for (const theme of ['light', 'dark'] as const) {
                   },
                 ],
               },
-            ],
-            originator: { source: 'agent', threadId: 'e2e-video-border' },
+            ]),
           },
         },
       );
@@ -218,7 +221,8 @@ for (const theme of ['light', 'dark'] as const) {
         expect(bounds.borderColor).toBe(bounds.shellBorderColor);
         expect(bounds.borderColor).not.toBe('rgba(0, 0, 0, 0)');
         // Chromium's hit test covers a whole CSS pixel, which can intersect a
-        // 2.88px corner arc at 24% zoom. Check actual corner paint there instead.
+        // corner arc of a couple of pixels at far zoom. Check actual corner paint
+        // there instead.
         if (zoom >= 0.5) expect(bounds.cornerInContent).toBe(false);
         else if (state === 'unselected') {
           const screenshot = await page.screenshot();
@@ -243,14 +247,16 @@ for (const theme of ['light', 'dark'] as const) {
               y: bounds.shell.y,
             },
           );
-          // Subpixel antialiasing may tint the cutout slightly; an unclipped
-          // yellow source pixel would differ by hundreds of channel levels.
+          // With a corner radius near two pixels, the corner pixel is partly the
+          // antialiased 1px border: up to about 40 levels from the background,
+          // renderer-dependent. An unclipped yellow source pixel would differ
+          // by some 245 levels in blue, which is what this guards against.
           for (let channel = 0; channel < 3; channel++)
             expect(
               Math.abs(
                 cornerPaint.corner[channel] - cornerPaint.background[channel],
               ),
-            ).toBeLessThanOrEqual(8);
+            ).toBeLessThanOrEqual(64);
         }
         const border = shell.locator('[data-node-media-border]');
         await expect(border).toHaveCSS('border-left-width', '1px');
@@ -264,7 +270,7 @@ for (const theme of ['light', 'dark'] as const) {
       await expect(outline).toHaveCount(1);
       await expect(outline).toHaveCSS('box-shadow', /0px 0px 0px 1\.5px$/);
       await assertBoundary('selected');
-      if (zoom >= 0.3) {
+      if (zoom >= 0.2) {
         await node
           .getByRole('button', { name: 'Play video', exact: true })
           .click();

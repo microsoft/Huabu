@@ -14,7 +14,7 @@
  * fields it was derived from.
  */
 
-import { createId } from '@huabu/shared';
+import { createId, isFileReference } from '@huabu/shared';
 
 import { parseSafeLinkUrl } from '@/utils/safeLink';
 
@@ -23,12 +23,24 @@ export type PreviewTarget =
   | { kind: 'node'; canvasId: string; nodeId: string }
   | { kind: 'conversation'; canvasId: string; nodeId: string; threadId: string }
   | { kind: 'chat'; canvasId: string; threadId: string }
-  | { kind: 'url'; canvasId: string; url: string };
+  | { kind: 'url'; canvasId: string; url: string }
+  /** A file on a connected device, inspected without placing it in the Space. */
+  | {
+      kind: 'file';
+      canvasId: string;
+      agentletId: string;
+      path: string;
+      deviceName?: string;
+    };
 
 /** Validate raw targets and canonicalize URLs at open, replacement, and restore. */
 export function normalizePreviewTarget(
   target: PreviewTarget,
 ): PreviewTarget | null {
+  if (target.kind === 'file') {
+    const { kind: _kind, canvasId: _canvasId, ...reference } = target;
+    return isFileReference(reference) ? target : null;
+  }
   if (target.kind !== 'url') return target;
   const url = parseSafeLinkUrl(target.url);
   return url ? { kind: 'url', canvasId: target.canvasId, url: url.href } : null;
@@ -100,6 +112,10 @@ export function isSamePreviewTarget(
   }
   if (left.kind === 'conversation' && right.kind === 'conversation') {
     return left.nodeId === right.nodeId && left.threadId === right.threadId;
+  }
+
+  if (left.kind === 'file' && right.kind === 'file') {
+    return left.agentletId === right.agentletId && left.path === right.path;
   }
 
   if (left.kind === 'url' && right.kind === 'url') {
@@ -600,6 +616,7 @@ export function setActiveGroup(
   workspace: CanvasPreviewWorkspace,
   groupId: string,
 ): CanvasPreviewWorkspace {
+  if (workspace.activeGroupId === groupId) return workspace;
   if (!workspace.groups.some((g) => g.id === groupId)) return workspace;
   return { ...workspace, activeGroupId: groupId };
 }

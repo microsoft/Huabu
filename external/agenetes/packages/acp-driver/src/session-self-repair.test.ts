@@ -126,6 +126,34 @@ afterEach(() => {
 });
 
 describe('ACP Handle session self-repair', () => {
+  it.each(['session-from-create-context', 'replacement-session'])(
+    'restores usage only for the resumed native identity (%s)',
+    async (sessionId) => {
+      const usage = { used: 100, size: 1000, cost: null, receivedAt: 123 };
+      const tokenUsage = {
+        inputTokens: 200,
+        outputTokens: 30,
+        totalTokens: 230,
+        receivedAt: 124,
+      };
+      const options = ensureOptions();
+      orchestrator.ensureAgentForThread.mockResolvedValueOnce({
+        sessionId,
+        pid: 43,
+      });
+      const entry = await ensureAcpSession({
+        ...options,
+        priorState: {
+          ...options.priorState,
+          metadata: { usage, tokenUsage, metaUpdatedAt: 999 },
+        },
+      });
+      const resumed = sessionId === options.priorState.driverState.sessionId;
+      expect(entry.usage).toEqual(resumed ? usage : null);
+      expect(entry.tokenUsage).toEqual(resumed ? tokenUsage : null);
+    },
+  );
+
   it('recovers the frozen recipe while ignoring the legacy resolved plan', async () => {
     const profile = {
       executionRevision: 1,
@@ -225,6 +253,63 @@ describe('ACP Handle session self-repair', () => {
       expect(entry.availableCommands).toEqual(cached.availableCommands);
     },
   );
+
+  it('registers the session when the warm-start cache fails', async () => {
+    setAcpProfileCachePort({
+      readCommands: vi.fn(async () => {
+        throw new Error('settings storage unavailable');
+      }),
+    });
+    orchestrator.ensureAgentForThread.mockResolvedValueOnce({
+      sessionId: 'cache-down',
+      pid: 43,
+    });
+    const entry = await ensureAcpSession(ensureOptions());
+    expect(entry.availableCommands).toEqual([]);
+    expect(acpSessionRegistry.get(agentletId, threadId, namespace)).toBe(entry);
+  });
+
+  it('keeps an empty command list the agent reports while the cache is read', async () => {
+    setAcpProfileCachePort({
+      readCommands: vi.fn(async () => {
+        // The agent withdraws every command before the cache answers.
+        const [client] = clients.created.slice(-1);
+        const [, listener] = client.registerSessionListener.mock.calls[0];
+        listener({
+          sessionUpdate: 'available_commands_update',
+          availableCommands: [],
+        });
+        return {
+          availableCommands: [{ name: 'stale', description: 'Withdrawn' }],
+          commandsUpdatedAt: 42,
+        };
+      }),
+    });
+    orchestrator.ensureAgentForThread.mockResolvedValueOnce({
+      sessionId: 'withdrawn',
+      pid: 43,
+    });
+    const entry = await ensureAcpSession(ensureOptions());
+    expect(entry.availableCommands).toEqual([]);
+  });
+
+  it('starts a fresh thread on the selections the host resolved, before any catalogue arrives', async () => {
+    orchestrator.ensureAgentForThread.mockResolvedValueOnce({
+      sessionId: 'fresh-session',
+      pid: 43,
+    });
+
+    const entry = await ensureAcpSession({
+      ...ensureOptions(),
+      initialPreferences: { model: 'opus', thoughtLevel: 'high' },
+      initialSelections: { model_id: 'opus', effort: 'high' },
+    });
+    await entry.selectionsReplay;
+
+    expect(entry.configOptions).toEqual([]);
+    expect(entry.selections).toEqual({ model_id: 'opus', effort: 'high' });
+    expect(entry.selectionsUpdatedAt).toBeGreaterThan(0);
+  });
 
   it('repairs a closed committed entry from its latest session state', async () => {
     const oldEntry = closedEntry();

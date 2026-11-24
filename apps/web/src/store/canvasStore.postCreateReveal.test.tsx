@@ -24,14 +24,20 @@ vi.mock('@/handler/canvasCommand/postEffects.web', () => ({
 vi.mock('../api', async (importOriginal) => ({
   ...(await importOriginal<typeof CanvasApi>()),
   postCanvasExecute: vi.fn(
-    async (canvasId: string, request: { commands: unknown[] }) => ({
+    async (
+      canvasId: string,
+      request: { edits: Array<{ commands: unknown[] }> },
+    ) => ({
       canvasId,
       fromVersion: 1,
       toVersion: 2,
-      results: request.commands.map(() => ({ applied: true })),
+      edits: request.edits.map((edit) => ({
+        applied: true,
+        results: edit.commands.map(() => ({ applied: true })),
+      })),
       deltas: [],
       pendingEffects: {
-        mutatedNodes: [],
+        mutatedNodeIds: [],
         deletedNodeIds: [],
         contentEditedNodeIds: [],
         deferredFitFrameIds: [],
@@ -97,16 +103,13 @@ beforeEach(() => {
   document.body.appendChild(host);
   root = createRoot(host);
   canvasHistoryManager.activate('reveal-test', true);
-  state()._setStateNoAutosave({
+  state()._setStateRaw({
     executeCommands,
     canvasId: 'reveal-test',
     version: 1,
     nodes: [],
     edges: [],
     isLoading: true,
-    isSaving: false,
-    pendingSave: false,
-    versionConflict: false,
     viewport,
     rfInstance: createInstance(),
     canvasWrapper: wrapper,
@@ -117,7 +120,7 @@ beforeEach(() => {
 
 afterEach(() => {
   act(() => root.unmount());
-  state()._setStateNoAutosave({
+  state()._setStateRaw({
     executeCommands,
     rfInstance: null,
     canvasWrapper: null,
@@ -133,6 +136,85 @@ afterEach(() => {
 });
 
 describe('automatic node placement and reveal', () => {
+  it.each([
+    { zoom: 0.1, selected: true, nodeType: 'question', expectedZoom: 0.3 },
+    { zoom: 0.29, selected: true, nodeType: 'question', expectedZoom: 0.3 },
+    { zoom: 0.3, selected: true, nodeType: 'question', expectedZoom: null },
+    { zoom: 0.5, selected: true, nodeType: 'question', expectedZoom: null },
+    { zoom: 1, selected: true, nodeType: 'question', expectedZoom: null },
+    { zoom: 0.1, selected: false, nodeType: 'question', expectedZoom: null },
+    { zoom: 0.1, selected: true, nodeType: 'note', expectedZoom: null },
+  ] as const)(
+    'reveals $nodeType at $zoom with selected=$selected',
+    async ({ zoom, selected, nodeType, expectedZoom }) => {
+      viewport.zoom = zoom;
+      state().addNode({
+        id: 'node-focus',
+        nodeType,
+        selectOnCreate: selected,
+        size: { width: 400, height: 120 },
+      });
+      if (nodeType === 'question') {
+        await awaitQuestionCreation('reveal-test', 'node-focus');
+      }
+      expect(state().nodes[0].selected === true).toBe(selected);
+      state()._setStateRaw({ isLoading: false });
+      act(() => root.render(<Reveal />));
+      await act(() => vi.advanceTimersByTimeAsync(20));
+      if (expectedZoom === null) {
+        expect(setViewport).not.toHaveBeenCalled();
+      } else {
+        const node = state().nodes[0];
+        const size = getNodeSize(node);
+        expect(setViewport).toHaveBeenCalledExactlyOnceWith(
+          {
+            x: 450 - (node.position.x + size.width / 2) * expectedZoom,
+            y: 400 - (node.position.y + size.height / 2) * expectedZoom,
+            zoom: expectedZoom,
+          },
+          expect.objectContaining({ duration: 400 }),
+        );
+      }
+    },
+  );
+
+  it('reveals a selected Agent after fullscreen remount without animation when reduced motion is requested', async () => {
+    viewport.zoom = 0.1;
+    state()._setStateRaw({ rfInstance: null, canvasWrapper: null });
+    state().addNode({
+      id: 'node-fullscreen-agent',
+      nodeType: 'question',
+      selectOnCreate: true,
+    });
+    await awaitQuestionCreation('reveal-test', 'node-fullscreen-agent');
+    act(() => root.render(<Reveal />));
+    expect(setViewport).not.toHaveBeenCalled();
+    expect(state().pendingRevealNodeIds).toEqual(['node-fullscreen-agent']);
+    vi.spyOn(window, 'matchMedia').mockImplementation((query) => ({
+      matches: query === '(prefers-reduced-motion: reduce)',
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    }));
+    act(() => {
+      state()._setStateRaw({
+        rfInstance: createInstance(),
+        canvasWrapper: wrapper,
+        isLoading: false,
+      });
+    });
+    await act(() => vi.advanceTimersByTimeAsync(20));
+    expect(setViewport).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ zoom: 0.3 }),
+      expect.objectContaining({ duration: 0 }),
+    );
+    expect(state().pendingRevealNodeIds).toEqual([]);
+  });
+
   it.each([
     { nodeType: 'note', left: 200, right: 700, zoom: 0.75 },
     { nodeType: 'question', left: 200, right: 700, zoom: 1.5 },
@@ -188,7 +270,7 @@ describe('automatic node placement and reveal', () => {
   });
 
   it('uses the stored viewport rather than the origin while Canvas is unmounted', () => {
-    state()._setStateNoAutosave({ rfInstance: null, canvasWrapper: null });
+    state()._setStateRaw({ rfInstance: null, canvasWrapper: null });
     state().addNode({
       id: 'node-fullscreen',
       nodeType: 'note',
@@ -205,7 +287,7 @@ describe('automatic node placement and reveal', () => {
   });
 
   it('does not reveal existing nodes or failed creates', () => {
-    state()._setStateNoAutosave({
+    state()._setStateRaw({
       nodes: [
         {
           id: 'node-existing',
@@ -217,7 +299,9 @@ describe('automatic node placement and reveal', () => {
     });
     state().addNode({ id: 'node-existing', nodeType: 'note' });
     expect(state().pendingRevealNodeIds).toEqual([]);
-    state()._setStateNoAutosave({ executeCommands: vi.fn() });
+    state()._setStateRaw({
+      executeCommands: vi.fn(() => ({ refused: true })),
+    });
     state().addNode({ id: 'node-rejected', nodeType: 'note' });
     expect(state().pendingRevealNodeIds).toEqual([]);
   });
@@ -250,7 +334,7 @@ describe('automatic node placement and reveal', () => {
   });
 
   it('waits for Canvas, loading and initial viewport restoration before revealing a boot-time save', async () => {
-    state()._setStateNoAutosave({
+    state()._setStateRaw({
       rfInstance: null,
       canvasWrapper: null,
       viewport: null,
@@ -265,7 +349,7 @@ describe('automatic node placement and reveal', () => {
     expect(state().pendingRevealNodeIds).toEqual(['node-boot']);
 
     act(() => {
-      state()._setStateNoAutosave({
+      state()._setStateRaw({
         rfInstance: createInstance(),
         canvasWrapper: wrapper,
       });
@@ -273,7 +357,7 @@ describe('automatic node placement and reveal', () => {
     });
     expect(state().pendingRevealNodeIds).toEqual(['node-boot']);
     act(() => {
-      state()._setStateNoAutosave({ isLoading: false });
+      state()._setStateRaw({ isLoading: false });
       root.render(<Reveal pending />);
     });
     expect(state().pendingRevealNodeIds).toEqual(['node-boot']);
@@ -297,7 +381,7 @@ describe('automatic node placement and reveal', () => {
       nodeType: 'note',
       size: { width: 200, height: 100 },
     });
-    state()._setStateNoAutosave({ isLoading: false });
+    state()._setStateRaw({ isLoading: false });
     act(() => root.render(<Reveal />));
     await act(() => vi.advanceTimersByTimeAsync(20));
     expect(state().pendingRevealNodeIds).toEqual([]);

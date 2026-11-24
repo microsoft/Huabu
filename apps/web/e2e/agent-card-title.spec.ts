@@ -3,7 +3,7 @@
 
 import { expect, test } from '@playwright/test';
 
-import { openNewCanvas } from './helpers';
+import { openNewCanvas, personEdits } from './helpers';
 
 for (const nodeType of ['question', 'spacePreview'] as const) {
   for (const gesture of [
@@ -30,7 +30,7 @@ for (const nodeType of ['question', 'spacePreview'] as const) {
         `/api/canvas/${source}/execute`,
         {
           data: {
-            commands: [
+            edits: personEdits([
               {
                 type: 'CREATE_NODES',
                 nodes: [
@@ -51,8 +51,8 @@ for (const nodeType of ['question', 'spacePreview'] as const) {
                   },
                 ],
               },
-            ],
-            originator: { source: 'ui', tabId: 'title-gesture-test' },
+            ]),
+            originator: { tabId: 'title-gesture-test' },
           },
         },
       );
@@ -120,7 +120,7 @@ test('Agent cards rename inline without changing the prompt or opening Chat', as
   const canvasId = page.url().split('/canvas/')[1]?.split(/[?#]/)[0];
   const response = await page.request.post(`/api/canvas/${canvasId}/execute`, {
     data: {
-      commands: [
+      edits: personEdits([
         {
           type: 'CREATE_NODES',
           nodes: [
@@ -148,8 +148,7 @@ test('Agent cards rename inline without changing the prompt or opening Chat', as
             },
           ],
         },
-      ],
-      originator: { source: 'agent', threadId: 'e2e-card-title' },
+      ]),
     },
   });
   expect(response.ok(), await response.text()).toBe(true);
@@ -245,10 +244,22 @@ test('Agent cards rename inline without changing the prompt or opening Chat', as
   await input.fill('   ');
   await input.press('Enter');
   await expect(node.getByRole('alert')).toHaveText('Enter a node name.');
-  const errorColor = await node
-    .getByRole('alert')
-    .evaluate((element) => getComputedStyle(element).color);
-  await expect(input).toHaveCSS('border-top-color', errorColor);
+  // Status roles: readable error text takes `danger-fg`, while the invalid
+  // field's boundary is graphical emphasis and takes the base `danger`.
+  const danger = await node.getByRole('alert').evaluate((element) => {
+    const resolve = (token: string) => {
+      const probe = document.createElement('span');
+      probe.style.color = `var(${token})`;
+      element.append(probe);
+      const color = getComputedStyle(probe).color;
+      probe.remove();
+      return color;
+    };
+    return { text: resolve('--danger-fg'), boundary: resolve('--danger') };
+  });
+  expect(danger.boundary).not.toBe(danger.text);
+  await expect(node.getByRole('alert')).toHaveCSS('color', danger.text);
+  await expect(input).toHaveCSS('border-top-color', danger.boundary);
   await input.fill('Taken title');
   await input.press('Enter');
   await expect(node.getByRole('alert')).toHaveText(
@@ -312,7 +323,7 @@ test('Space cards retain selected-title editing, F2 and navigation isolation', a
   const source = page.url().split('/canvas/')[1]?.split(/[?#]/)[0];
   const created = await page.request.post(`/api/canvas/${source}/execute`, {
     data: {
-      commands: [
+      edits: personEdits([
         {
           type: 'CREATE_NODES',
           nodes: [
@@ -325,8 +336,8 @@ test('Space cards retain selected-title editing, F2 and navigation isolation', a
             },
           ],
         },
-      ],
-      originator: { source: 'ui', tabId: 'e2e-space-title' },
+      ]),
+      originator: { tabId: 'e2e-space-title' },
     },
   });
   expect(created.ok(), await created.text()).toBe(true);

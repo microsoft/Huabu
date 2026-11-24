@@ -11,9 +11,13 @@
 
 import { z } from 'zod';
 
-import { canvasEditableNodeSchema } from './agent-node.js';
+import {
+  canvasContentPositionSchema,
+  canvasPageIdSchema,
+} from './canvas-sync.js';
 
 import type { videoCoverPatchSchema } from './preprocessing.js';
+import type { SetSiblingOrderEvent } from '../../canvas-engine/siblingOrder.js';
 
 export const nodePropertyValueSchema = z.union([
   z.string(),
@@ -70,26 +74,21 @@ export const getCanvasResponseSchema = z.object({
   access: canvasAccessSchema,
   /** Canonical content revisions, including bodies omitted or normalized for rendering. */
   nodeContentRevisions: z.record(z.string(), z.string()).optional(),
+  /**
+   * The content position `state`'s node content is valid from: every
+   * content save up to it is in this response, and the page asks for the
+   * saves after it once its stream is open
+   * (`GET /api/canvas/:canvasId/content/changes`).
+   */
+  contentPosition: canvasContentPositionSchema.optional(),
+  /**
+   * The read version of the Space, taken before `state` was read. A page
+   * quotes it — with the version it has applied since — for the edits it
+   * sends (`edits[].basis` of `POST /api/canvas/:canvasId/execute`).
+   */
+  basis: z.string().optional(),
 });
 export type GetCanvasResponse = z.infer<typeof getCanvasResponseSchema>;
-
-/** Body for `PUT /api/canvas/:canvasId`. */
-export const putCanvasBodySchema = z.object({
-  version: z.number().int().nonnegative(),
-  state: z
-    .object({
-      nodes: z.array(canvasEditableNodeSchema),
-      edges: z.array(z.unknown()).optional(),
-    })
-    .catchall(z.unknown()),
-  title: z.string().min(1).optional(),
-});
-export type PutCanvasRequest = z.infer<typeof putCanvasBodySchema>;
-
-export interface PutCanvasResponse {
-  canvasId: string;
-  version: number;
-}
 
 export const deleteNodeParamsSchema =
   recentCanvasConversationParamsSchema.extend({
@@ -109,7 +108,8 @@ export type DeleteNodeResponse = z.infer<typeof deleteNodeResponseSchema>;
  * a callsite can write only the bits that actually changed; missing
  * fields are read from the existing `.md` and round-tripped untouched.
  *
- * See `docs/node-content-api-split.md`.
+ * See `docs/architecture/canvas-realtime-sync.md` (Node content between
+ * pages).
  */
 export const putNodeContentBodySchema = z.object({
   /** Node type (`note` / `text` / `web` / `pdf` / `image` / `video` / `frame` / `question` / `sketch`). */
@@ -121,6 +121,13 @@ export const putNodeContentBodySchema = z.object({
   /**
    * Provenance of the label. `'user'` triggers strict-rename mode on the
    * server (409 on collision); `'agent'` / `'auto'` use lazy dedupe.
+   *
+   * A title a person or an agent gave is not versioned: `expectRev` does
+   * not cover it, a request that carries nothing the revision covers is
+   * never refused as stale, and a request whose body is refused as stale
+   * still has the title applied (`titleApplied` on the conflict response).
+   * Two writers of one title are last-writer-wins. An automatic title
+   * (`'auto'`) is derived from a body and is checked with it.
    */
   labelSource: z.enum(['user', 'auto', 'agent']).optional(),
   /**
@@ -136,13 +143,24 @@ export const putNodeContentBodySchema = z.object({
   keywords: z.array(z.string()).optional(),
   /** Opaque pass-through frontmatter blob (e.g. AI provenance markers). */
   provenance: z.unknown().optional(),
-  /** Keywise patch; null deletes one key and omitted keys are preserved. */
+  /**
+   * Custom properties as a keywise patch: `null` deletes one key and omitted
+   * keys are preserved. Applied to the stored record as it is at the moment
+   * of the write, without a revision: different keys never conflict and the
+   * same key is last-writer-wins. `expectRev` does not cover it. A request
+   * that carries only this patch (and `propertyDisplayKeys`) is never
+   * refused as stale, and a request whose body is refused as stale still
+   * has the patch applied (`propertiesApplied` on the conflict response).
+   */
   properties: nodePropertiesPatchSchema.optional(),
+  /** Display order of the custom properties, replaced as a whole. Unversioned like `properties`. */
   propertyDisplayKeys: z.array(z.string()).optional(),
   /**
-   * Optimistic-concurrency baseline: the {@link nodeRevision} the client's
-   * edit descends from (a deterministic djb2 over the node's authored
-   * `content` / `src`). The server recomputes the on-disk node's revision
+   * Optimistic-concurrency baseline of the **body**: the {@link nodeRevision}
+   * the client's edit descends from (a deterministic djb2 over the node's
+   * `content` / `src`, and nothing else). It is checked for a request that
+   * carries the body or something derived from one (`content`, `src`,
+   * `summary`, `keywords`, `provenance`, an automatic title). The server recomputes the on-disk node's revision
    * and rejects the write with `NODE_CONTENT_CONFLICT` when it differs, so
    * a concurrent edit (another tab / device / an agent, or a Google-Drive
    * synced newer copy) is surfaced as a conflict instead of silently
@@ -150,8 +168,18 @@ export const putNodeContentBodySchema = z.object({
    * revision of empty content (`nodeRevisionOf({})`), so the create only
    * succeeds while no file exists yet (guards create-races too). Omit to
    * skip the check entirely (kept optional so non-CAS callers still work).
+   * Ignored on a request that carries only an authored title and/or custom
+   * properties.
    */
   expectRev: z.string().optional(),
+  /**
+   * The saving page's id (its `originator.tabId` / presence page id). Echoed
+   * as `originPageId` on the `invalidate` event so that page can tell its own
+   * save from another page's — to streams of the saving principal only, so
+   * another principal cannot make a page skip a save by quoting its id. Not
+   * a credential.
+   */
+  pageId: canvasPageIdSchema.optional(),
 });
 export type PutNodeContentRequest = z.infer<typeof putNodeContentBodySchema>;
 
@@ -205,6 +233,8 @@ export interface GetNodeContentResponse extends z.infer<
   rev: string;
   summary?: string;
   keywords?: string[];
+  /** Opaque frontmatter blob (block-level AI-edit markers), when stored. */
+  provenance?: unknown;
   properties?: NodeProperties;
   propertyDisplayKeys?: string[];
   contentMissing?: boolean;
@@ -229,18 +259,6 @@ export interface RevealNodesFolderResponse {
   success: boolean;
 }
 
-/**
- * 409 Conflict body returned by `PUT /api/canvas/:canvasId` when the
- * client's version doesn't match the server's. Shaped like an
- * `ApiErrorBody` so the canonical client (`apiFetch`) surfaces it as a
- * normal `ApiError` and the caller can read `details.serverVersion`.
- */
-export interface CanvasVersionMismatchError {
-  message: string;
-  code: 'CANVAS_VERSION_MISMATCH';
-  details: { serverVersion: number };
-}
-
 // ─── Rename / conflict errors ─────────────────────────────────────────────
 
 /**
@@ -254,7 +272,7 @@ export interface CanvasVersionMismatchError {
  * Codes fall into two buckets:
  * - **4xx conflicts**: caller submitted something that collides with
  *   existing state. Carried by {@link CanvasConflictResponse} with
- *   extra context (`conflictWith`, `nodeId`, `serverVersion`).
+ *   extra context (`conflictWith`, `nodeId`).
  * - **4xx/5xx operational failures**: request was well-formed but the
  *   server couldn't honour it (canvas missing, fs lock, etc.).
  *   Carried by the standard {@link ApiErrorBody}.
@@ -264,7 +282,6 @@ export type CanvasErrorCode =
   | 'NODE_LABEL_CONFLICT'
   | 'NODE_DUPLICATE_FILES'
   | 'NODE_CONTENT_CONFLICT'
-  | 'CANVAS_VERSION_CONFLICT'
   | 'INVALID_REQUEST'
   | 'CANVAS_NOT_FOUND'
   | 'NODE_FILE_DELETE_FAILED';
@@ -282,8 +299,6 @@ export interface CanvasConflictResponse {
   conflictWith?: string;
   /** For node-level conflicts. */
   nodeId?: string;
-  /** For version conflicts. */
-  serverVersion?: number;
   /**
    * For `NODE_DUPLICATE_FILES`: every markdown sidecar filename on disk
    * that currently claims the node's id, so the client can list them in
@@ -301,6 +316,18 @@ export interface CanvasConflictResponse {
    * was based on (echo of the request's `expectRev`).
    */
   expectedRev?: string;
+  /**
+   * For `NODE_CONTENT_CONFLICT`: the request also carried a custom-property
+   * patch (`properties` / `propertyDisplayKeys`) and that part **was
+   * written**; only the body and the other fields were refused.
+   */
+  propertiesApplied?: boolean;
+  /**
+   * For `NODE_CONTENT_CONFLICT`: the request also carried an authored title
+   * (`label` / `labelSource` other than `auto`) and that part **was
+   * written**; only the body and what is derived from it were refused.
+   */
+  titleApplied?: boolean;
 }
 
 export interface UpdateCanvasStateParams {
@@ -372,7 +399,7 @@ export interface CreateCanvasResponse {
 
 // ─── Headless Executor: POST /api/canvas/:canvasId/execute ────────────────
 //
-// The headless executor (M2) accepts a batch of canvas commands and
+// The headless executor accepts a batch of canvas commands and
 // runs them server-side against authoritative structural state.
 // It returns the resulting structural deltas plus per-command outcomes
 // so clients can apply the diff locally without re-executing the
@@ -388,13 +415,16 @@ export interface CreateCanvasResponse {
  */
 export const executeOriginatorSchema = z.object({
   source: z.enum(['ui', 'agent', 'system']),
-  /** Web tab/session identifier; opaque to the server. */
-  tabId: z.string().optional(),
-  /** Authenticated user id when known. */
-  userId: z.string().optional(),
   /**
-   * ACP chat thread that initiated this batch (set by the reachback
-   * tool). Lets the broadcast attribute the change to the right
+   * The sending page's id. Together with the authenticated principal it
+   * names the page whose own committed changes are not held against it.
+   */
+  tabId: canvasPageIdSchema.optional(),
+  /**
+   * Conversation that initiated this batch. Set by the Server only: by the
+   * built-in agent's tool context, or by the Agent route from the
+   * `X-Huabu-Host-Thread-Id` header of a request that arrived with an agent
+   * credential. Lets the broadcast attribute the change to the right
    * conversation's review card.
    */
   threadId: z.string().optional(),
@@ -402,30 +432,178 @@ export const executeOriginatorSchema = z.object({
 export type ExecuteOriginator = z.infer<typeof executeOriginatorSchema>;
 
 /**
+ * What an execute request to the page route may say about its sender: which
+ * page it is, and nothing else. Who the request speaks for follows the
+ * credential it arrived with (a person's session is `ui`, an agent or
+ * machine credential is `agent`; `execute-admission.ts`), and which
+ * conversation a batch belongs to is said only on the Agent route, by a
+ * caller that arrived with an agent credential (`X-Huabu-Host-Thread-Id`).
+ * The object is strict, so a request that states a `source` or a `threadId`
+ * is refused.
+ */
+export const executeRequestOriginatorSchema = executeOriginatorSchema
+  .omit({ source: true, threadId: true })
+  .strict();
+export type ExecuteRequestOriginator = z.infer<
+  typeof executeRequestOriginatorSchema
+>;
+
+/**
+ * An earlier edit of the same caller that an edit was made on top of: an
+ * edit of this request (no `operationId`) or of an earlier request.
+ */
+export const canvasExecuteEditRefSchema = z
+  .object({
+    /** The earlier request's id; omitted for an edit of this request. */
+    operationId: z.uuid().optional(),
+    /** Position of the edit in that request's `edits`. */
+    edit: z.number().int().min(0),
+  })
+  .strict();
+export type CanvasExecuteEditRef = z.infer<typeof canvasExecuteEditRefSchema>;
+
+/** Most earlier edits one edit may name. */
+export const CANVAS_EXECUTE_EDIT_AFTER_MAX = 64;
+
+/**
+ * One edit of an execute request: the commands of one intent — one gesture
+ * of a page, one step of an Agent — with the read version it was made on.
+ * It takes effect as a whole or not at all.
+ *
+ * `commands` is intentionally `z.array(z.unknown())` — the canvas command
+ * union is large and is validated by the route against the shape of each
+ * command type before it touches state.
+ */
+export const canvasExecuteEditSchema = z
+  .object({
+    /**
+     * The read version the edit was made on. An edit whose target was
+     * deleted or re-parented by someone else after that version is refused
+     * (`stale-target` / `stale-parent`). Omitted, the edit is not checked.
+     */
+    basis: z.string().min(1).max(128).optional(),
+    /**
+     * Edits of this caller, not yet confirmed when this one was made, whose
+     * result it was made on top of. When one of them did not take effect
+     * this edit does not run.
+     */
+    after: z
+      .array(canvasExecuteEditRefSchema)
+      .max(CANVAS_EXECUTE_EDIT_AFTER_MAX)
+      .optional(),
+    commands: z.array(z.unknown()).min(1),
+  })
+  .strict();
+export type CanvasExecuteEdit = z.infer<typeof canvasExecuteEditSchema>;
+
+/** An edit of this request can only come after an earlier edit of it. */
+function refineEditOrder(
+  edits: readonly { after?: readonly CanvasExecuteEditRef[] | undefined }[],
+  context: z.RefinementCtx,
+): void {
+  edits.forEach((edit, index) => {
+    (edit.after ?? []).forEach((ref, refIndex) => {
+      if (ref.operationId === undefined && ref.edit >= index) {
+        context.addIssue({
+          code: 'custom',
+          path: [index, 'after', refIndex, 'edit'],
+          message: 'an edit can only come after an earlier edit of the request',
+        });
+      }
+    });
+  });
+}
+
+/** The `edits` of an execute request: at least one, in order. */
+export const canvasExecuteEditsSchema = z
+  .array(canvasExecuteEditSchema)
+  .min(1)
+  .superRefine(refineEditOrder);
+
+/**
+ * A plain command list as edits: one edit per command, each quoting `basis`.
+ * This is what `{ commands, basis? }` means wherever it is still accepted
+ * (the Agent route, the Server's own callers) — which is why a command that
+ * fails there does not undo the others.
+ */
+export function editsPerCommand<Command>(
+  commands: readonly Command[],
+  basis?: string,
+): { basis?: string; commands: Command[] }[] {
+  return commands.map((command) => ({
+    ...(basis !== undefined ? { basis } : {}),
+    commands: [command],
+  }));
+}
+
+/**
  * Body for `POST /api/canvas/:canvasId/execute`.
  *
- * `commands` is intentionally `z.array(z.unknown())` — the canvas
- * command union is large and is validated by the engine's per-handler
- * guards. The server still parses each command against the engine's
- * runtime narrowing before it touches state.
+ * The request is a list of edits. They run in order, each on the state the
+ * ones before it left; an edit that does not take effect leaves no trace and
+ * the others still apply.
  */
 export const postCanvasExecuteBodySchema = z.object({
-  commands: z.array(z.unknown()),
-  originator: executeOriginatorSchema,
+  /**
+   * Request id. Sending the same id with the same request again returns the
+   * stored outcome instead of executing twice.
+   */
+  operationId: z.uuid().optional(),
   /** Optional client-supplied run id for tracing / multi-batch grouping. */
   runId: z.string().optional(),
+  originator: executeRequestOriginatorSchema.optional(),
+  edits: canvasExecuteEditsSchema,
 });
 export type PostCanvasExecuteRequest = z.infer<
   typeof postCanvasExecuteBodySchema
 >;
 
-/** Per-command outcome returned alongside the structural deltas. */
+/** A node a command created or re-sized, as the server left it. */
+export interface CanvasExecuteResultNode {
+  nodeId: string;
+  label?: string;
+  width: number;
+  height: number;
+  src?: string;
+}
+
+/** An edge a command created, with the id the server gave it. */
+export interface CanvasExecuteResultEdge {
+  edgeId: string;
+  source: string;
+  target: string;
+}
+
+/** Outcome of one command of an edit. */
 export interface CanvasExecuteCommandOutcome {
-  /** The (possibly annotated) command the server actually executed. */
-  command: unknown;
   applied: boolean;
   /** Engine-supplied failure reason when `applied === false`. */
   reason?: string;
+  /**
+   * Nodes the command created, with their server-assigned ids, and nodes
+   * whose image it changed. The command itself is not echoed.
+   */
+  nodes?: CanvasExecuteResultNode[];
+  /** Edges the command created, with their server-assigned ids. */
+  edges?: CanvasExecuteResultEdge[];
+}
+
+/** Outcome of one edit of the request, at the same position. */
+export interface CanvasExecuteEditOutcome {
+  /**
+   * The edit took effect: none of its commands failed (a `no-op` is not a
+   * failure). When false, nothing of the edit was applied.
+   */
+  applied: boolean;
+  /** Why the edit did not take effect. */
+  reason?: string;
+  /**
+   * Position, within the edit, of the command that failed. Absent when the
+   * edit was refused before its first command ran.
+   */
+  failedAt?: number;
+  /** One outcome per command of the edit, in order. */
+  results: CanvasExecuteCommandOutcome[];
 }
 
 /**
@@ -434,17 +612,12 @@ export interface CanvasExecuteCommandOutcome {
  * frame fit, preprocessing dispatch) without re-running the shared
  * engine.
  *
- * Mirrors the subset of {@link PendingEffects} that has client-side
- * meaning.
- *
- * `mutatedNodes` is included for now because preprocessing dispatch
- * still runs on the web in Phase A; once cross-tab broadcast (M3)
- * lands and the server drives preprocessing directly, this field can
- * be dropped from the wire and the web preprocessing trigger removed.
+ * Ids only. A page that applies the batch has the nodes: it reads a mutated
+ * node from its own state after the deltas are applied.
  */
 export interface CanvasExecutePendingEffects {
-  /** Final post-execution snapshots of nodes that were created or edited. */
-  mutatedNodes: unknown[];
+  /** Ids of the nodes the batch created or whose `data` it changed. */
+  mutatedNodeIds: string[];
   deletedNodeIds: string[];
   contentEditedNodeIds: string[];
   deferredFitFrameIds: string[];
@@ -454,26 +627,55 @@ export interface CanvasExecutePendingEffects {
  * Response body for `POST /api/canvas/:canvasId/execute`.
  *
  * `fromVersion` is the canvas version observed at the start of the
- * batch; `toVersion` is the version after persistence. A no-op batch
- * (`deltas: []`) leaves the version unchanged so concurrent clients
- * don't get spurious 409s from idempotent calls.
+ * batch; `toVersion` is the version after persistence. A request that
+ * changed nothing leaves the version unchanged.
+ *
+ * A **replayed** response (`replayed: true`) answers a request id that was
+ * already executed. It is rebuilt from the stored outcome and carries no
+ * `deltas`: a page that has not applied `toVersion` yet receives them with
+ * the `update` event, or loads the Space.
  */
 export interface PostCanvasExecuteResponse {
   canvasId: string;
   fromVersion: number;
   toVersion: number;
-  /** Deltas observed between prestate and poststate, in apply order. */
-  deltas: unknown[];
-  /** Per-command outcomes (one entry per submitted command). */
-  results: CanvasExecuteCommandOutcome[];
   /**
-   * Annotated commands as the server executed them. Carries any
-   * server-assigned ids and `origin` / `labelSource` tags so the
-   * client's revert UX can still derive `revertCommand` per-batch.
+   * What the request changed, in apply order: per node only the fields that
+   * changed. Absent on a replayed response.
    */
-  commands: unknown[];
+  deltas?: unknown[];
+  /** One outcome per edit of the request, in order. */
+  edits: CanvasExecuteEditOutcome[];
   /** Subset of engine-pending effects that clients should drain. */
   pendingEffects: CanvasExecutePendingEffects;
-  /** Optional run id; echoed from the request when supplied. */
+  /**
+   * Sibling paint order of every parent the batch changed, to replay after
+   * `deltas`. Absent when no order changed; ignoring it keeps entity-only
+   * replay.
+   */
+  orderEvents?: SetSiblingOrderEvent[];
+  /**
+   * Stored content revision of every node whose saved content (a sidecar
+   * field) this batch created or changed, keyed by node id. The page that
+   * applies `deltas` takes it as the node's save baseline. Absent when the
+   * batch changed no node content.
+   */
+  nodeContentRevisions?: Record<string, string>;
+  /**
+   * Optional run id; echoed from the request when supplied. On a replayed
+   * response it is the run id of the original request.
+   */
   runId?: string;
+  /** Echo of the request id, when one was supplied. */
+  operationId?: string;
+  /** Read version after this request; returned when `operationId` or an edit's `basis` was supplied. */
+  basis?: string;
+  /** Present when this is the stored outcome of an earlier request. */
+  replayed?: true;
+  /**
+   * Only on a replayed response whose outcome was too large to store whole:
+   * order events and the per-command node and edge lists are missing. The
+   * per-edit results and versions are always there.
+   */
+  incomplete?: true;
 }

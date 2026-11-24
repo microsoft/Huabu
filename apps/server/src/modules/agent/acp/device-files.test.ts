@@ -359,6 +359,8 @@ describe('private filesystem ACP service', () => {
     const rejected = expect(pending).rejects.toMatchObject({
       code: 'files_timeout',
     });
+    // Device ownership is read from storage before the startup timer runs.
+    await vi.waitFor(() => expect(mocks.ensure).toHaveBeenCalledOnce());
     await vi.advanceTimersByTimeAsync(60_000);
     await rejected;
     await expect(service.execute(request)).rejects.toMatchObject({

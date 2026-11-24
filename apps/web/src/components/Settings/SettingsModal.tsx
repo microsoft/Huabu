@@ -56,6 +56,16 @@ const TABS: TabDef[] = [
 ];
 const PEOPLE_TAB: TabDef = { id: 'people', labelKey: 'settings.people' };
 
+/**
+ * The build version split where it may wrap: after `-` / `+` and before the
+ * `g<sha>` part, so `v0.9.2-nightly.20261120.g544c579` wraps between its
+ * parts in the narrow rail instead of overflowing it. Rendered with `<wbr>`,
+ * which keeps the selected and copied text identical to the version.
+ */
+const APP_VERSION_PARTS = `v${__APP_VERSION__}`.split(
+  /(?<=[-+])|(?<=\.)(?=g[0-9a-f]{7})/,
+);
+
 interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -245,11 +255,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
              * App version in the desktop rail footer or mobile title row: a product-wide
              * fact, not a General-tab setting, so it lives here (decoupled
              * from any tab) as a muted signature rather than mixed in with
-             * editable preferences. `__APP_VERSION__` is inlined at build
-             * time from `apps/desktop/package.json` (see vite.config.ts).
+             * editable preferences. `__APP_VERSION__` is this build's
+             * identity, inlined at build time by scripts/build-version.mjs
+             * (`X.Y.Z+g<sha7>` or `X.Y.Z-nightly.<date>.g<sha7>`).
              */}
             <span className="text-fg-muted col-start-2 row-start-1 mb-2 self-center justify-self-end px-2 font-mono text-[11px] select-text sm:mt-auto sm:mb-0 sm:self-auto sm:pt-4">
-              v{__APP_VERSION__}
+              {APP_VERSION_PARTS.map((part, index) => (
+                <React.Fragment key={index}>
+                  {index > 0 && <wbr />}
+                  {part}
+                </React.Fragment>
+              ))}
             </span>
           </nav>
 

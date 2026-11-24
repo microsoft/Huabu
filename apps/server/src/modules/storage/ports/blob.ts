@@ -116,14 +116,10 @@ export interface BlobRead {
  * Two rules make the lease mean the same thing on every backend, because
  * this is where adapters would otherwise diverge invisibly:
  *
- * 1. **The path is read-only.** Writing through it corrupts authoritative
- *    bytes on Disk and silently mutates a doomed temp copy on a remote
- *    backend. Neither is a supported operation.
- * 2. **The path is invalid once {@link release} resolves.** Disk physically
- *    keeps its file — the path *is* its storage — so reading a retained copy
- *    of the string would keep working there and fail on a remote backend.
- *    Accessing {@link path} after release therefore throws on every backend,
- *    so the stronger Disk behavior can't be depended on by accident.
+ * 1. **The path is read-only.** Both adapters materialize a disposable copy,
+ *    so a path-only consumer cannot mutate authoritative bytes through it.
+ * 2. **The path is invalid once {@link release} resolves.** Release removes
+ *    the temporary copy, and accessing {@link path} afterwards throws.
  *
  * Use with `try`/`finally` — the repo targets ES2020, so `await using` is
  * not available. Build leases with {@link createBlobLease} rather than an

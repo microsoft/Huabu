@@ -65,7 +65,7 @@ describe('describeNode — preview level', () => {
     expect(node.filename).toBe('nodes/Wire Label.md');
   });
 
-  it('keeps an empty Note revision for metadata CAS while omitting text hints', () => {
+  it('keeps an empty Note revision for the body CAS while omitting text hints', () => {
     // content '' by default
     const node = describeNode(
       { id: 'n1', type: 'note' },
@@ -78,7 +78,7 @@ describe('describeNode — preview level', () => {
     expect(node.preview).toBeUndefined();
   });
 
-  it('exposes stored authored metadata with the same revision as persistence', () => {
+  it('exposes stored custom properties, and the revision of the body alone as persistence computes it', () => {
     const stored = record('pdf', {
       type: 'pdf',
       content: 'extracted',
@@ -92,6 +92,9 @@ describe('describeNode — preview level', () => {
       propertyDisplayKeys: stored.propertyDisplayKeys,
       rev: nodeRevisionOf(stored),
     });
+    expect(node.rev).toBe(
+      nodeRevisionOf({ type: 'pdf', content: 'extracted', src: 'paper.pdf' }),
+    );
   });
 
   it('emits summary and preview as INDEPENDENT fields', () => {

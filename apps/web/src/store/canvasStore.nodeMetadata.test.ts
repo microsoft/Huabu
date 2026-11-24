@@ -4,20 +4,37 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { cloneArtifactToCanvas } from '@/api/artifact';
-import { CanvasConflictError, putCanvas, putNodeContent } from '@/api/canvas';
+import {
+  CanvasConflictError,
+  postCanvasExecute,
+  putNodeContent,
+} from '@/api/canvas';
 import { toast } from '@/components/Common/Toast';
 
 import { canvasHistoryManager } from './canvasHistoryManager';
 import useCanvasStore, {
-  commitNodeMetadata,
   commitNodeProperties,
+  flushNodeContent,
+  resetCanvasSyncForTests,
+  setCanvasSyncLineageForTests,
 } from './canvasStore';
+import {
+  createFakeSpaceServer,
+  FAKE_LINEAGE,
+} from './canvasStore/sync/testing/fakeExecuteServer';
 import { openPdfNotes } from './previewWorkspace/actions';
 import { useWorkspaceStore } from './workspaceStore';
 
+import type * as Api from '@/api';
 import type * as ArtifactApi from '@/api/artifact';
 import type * as CanvasApi from '@/api/canvas';
-import type { PutNodeContentRequest } from '@huabu/shared';
+import type {
+  CanvasCommand,
+  CanvasNodeId,
+  PutNodeContentRequest,
+} from '@huabu/shared';
+import type { Delta } from '@huabu/shared/canvas-engine';
+import type { Node } from '@xyflow/react';
 
 vi.mock('@/api/artifact', async (importActual) => ({
   ...(await importActual<typeof ArtifactApi>()),
@@ -31,12 +48,22 @@ vi.mock('@/components/Common/Toast', () => ({
   toast: vi.fn(() => 'metadata-toast'),
   dismissToast: vi.fn(),
 }));
+// Only transport is substituted. Structure goes to the execute double (the
+// real engine over a server copy of the Space); nothing saves the whole Space.
+const api = vi.hoisted(() => ({
+  putNodeContent: vi.fn(),
+  postCanvasExecute: vi.fn(),
+}));
 vi.mock('@/api/canvas', async (importActual) => ({
   ...(await importActual<typeof CanvasApi>()),
-  putNodeContent: vi.fn(),
-  deleteNode: vi.fn().mockResolvedValue({ success: true }),
-  putCanvas: vi.fn(async (canvasId: string) => ({ canvasId, version: 1 })),
+  ...api,
 }));
+vi.mock('@/api', async (importActual) => ({
+  ...(await importActual<typeof Api>()),
+  ...api,
+}));
+
+const server = createFakeSpaceServer();
 
 describe('durable node metadata actions', () => {
   it('creates real owned notes once and restores the entire pair when undoing deletion', async () => {
@@ -70,20 +97,140 @@ describe('durable node metadata actions', () => {
     );
     useCanvasStore.getState().deleteNodes(['node-paper']);
     expect(useCanvasStore.getState().nodes).toHaveLength(0);
+    // The deletion is one command; the engine takes the owned Note with it.
+    await vi.waitFor(() => expect(server.state.nodes).toHaveLength(0));
     await useCanvasStore.getState().undo();
-    expect(useCanvasStore.getState().nodes).toEqual(
-      expect.arrayContaining([
+    const pair = expect.arrayContaining([
+      expect.objectContaining({
+        id: 'node-paper',
+        data: expect.objectContaining({ noteNodeId: noteId }),
+      }),
+      expect.objectContaining({
+        id: noteId,
+        hidden: true,
+        data: expect.objectContaining({ content: 'Authored notes' }),
+      }),
+    ]);
+    expect(useCanvasStore.getState().nodes).toEqual(pair);
+    // The undo is saved as one RESTORE_NODES batch that carries both nodes,
+    // the Note's body and the ownership link; no whole-Space save exists.
+    await vi.waitFor(() => expect(server.state.nodes).toEqual(pair));
+    expect(server.requests.at(-1)?.edits.map((edit) => edit.commands)).toEqual([
+      [
         expect.objectContaining({
-          id: 'node-paper',
-          data: expect.objectContaining({ noteNodeId: noteId }),
+          type: 'RESTORE_NODES',
+          nodes: expect.arrayContaining([
+            expect.objectContaining({ id: 'node-paper' }),
+            expect.objectContaining({ id: noteId }),
+          ]),
         }),
-        expect.objectContaining({
-          id: noteId,
-          hidden: true,
-          data: expect.objectContaining({ content: 'Authored notes' }),
-        }),
-      ]),
+      ],
+    ]);
+    expect(useCanvasStore.getState().nodes).toEqual(pair);
+  });
+
+  it('sends the PDF note with the id this page shows, and undoes and redoes its creation as commands', async () => {
+    seed('node-paper');
+    openPdfNotes('node-paper');
+    const noteId = useCanvasStore
+      .getState()
+      .nodes.find((node) => node.id === 'node-paper')?.data.noteNodeId;
+    expect(server.requests.at(-1)?.edits.map((edit) => edit.commands)).toEqual([
+      [{ type: 'INITIALIZE_PDF_NOTE', nodeId: 'node-paper', noteId }],
+    ]);
+    const linked = expect.arrayContaining([
+      expect.objectContaining({
+        id: 'node-paper',
+        data: expect.objectContaining({ noteNodeId: noteId }),
+      }),
+      expect.objectContaining({ id: noteId, type: 'note', hidden: true }),
+    ]);
+    await vi.waitFor(() => expect(server.state.nodes).toEqual(linked));
+    await vi.waitFor(() => expect(useCanvasStore.getState().version).toBe(2));
+    expect(useCanvasStore.getState().nodes).toHaveLength(2);
+
+    await useCanvasStore.getState().undo();
+    await vi.waitFor(() => expect(server.state.nodes).toHaveLength(1));
+    expect(server.state.nodes[0].data).not.toHaveProperty('noteNodeId');
+    expect(useCanvasStore.getState().nodes).toHaveLength(1);
+    expect(useCanvasStore.getState().nodes[0].data).not.toHaveProperty(
+      'noteNodeId',
     );
+
+    await useCanvasStore.getState().redo();
+    await vi.waitFor(() => expect(server.state.nodes).toEqual(linked));
+    expect(useCanvasStore.getState().nodes).toEqual(linked);
+    expect(
+      server.requests.flatMap((request) =>
+        (
+          request.edits.flatMap((edit) => edit.commands) as CanvasCommand[]
+        ).flatMap((command, index) =>
+          command.type === 'SET_NODE_SELECTION' ? [] : [[command.type, index]],
+        ),
+      ),
+    ).toEqual([
+      ['INITIALIZE_PDF_NOTE', 0],
+      ['DELETE_NODES', 0],
+      ['MERGE_NODE_DATA', 1],
+      ['RESTORE_NODES', 0],
+      ['MERGE_NODE_DATA', 1],
+    ]);
+    expect(toast).not.toHaveBeenCalled();
+  });
+
+  it('drops its own optimistic PDF note when another page gave the PDF its note first', async () => {
+    seed('node-paper');
+    // Page B's request is committed before this page's.
+    const other = server.execute('node-paper', {
+      operationId: crypto.randomUUID(),
+      originator: { tabId: 'page-b' },
+      edits: [
+        {
+          commands: [
+            {
+              type: 'INITIALIZE_PDF_NOTE',
+              nodeId: 'node-paper' as CanvasNodeId,
+              noteId: 'node-theirs' as CanvasNodeId,
+            },
+          ],
+        },
+      ],
+    });
+    openPdfNotes('node-paper');
+    const mine = useCanvasStore
+      .getState()
+      .nodes.find((node) => node.id === 'node-paper')?.data.noteNodeId;
+    expect(mine).not.toBe('node-theirs');
+    // The stream then brings page B's update.
+    const state = useCanvasStore.getState();
+    state.applyServerDeltas(
+      other.deltas as Delta[],
+      other.toVersion,
+      other.pendingEffects as Parameters<typeof state.applyServerDeltas>[2],
+      false,
+      { events: other.orderEvents },
+      {
+        operationId: other.operationId,
+        source: 'ui',
+        nodeContentRevisions: other.nodeContentRevisions,
+      },
+    );
+    await vi.waitFor(() =>
+      expect(
+        useCanvasStore
+          .getState()
+          .nodes.map((node) => node.id)
+          .sort(),
+      ).toEqual(['node-paper', 'node-theirs']),
+    );
+    expect(
+      useCanvasStore.getState().nodes.find((node) => node.id === 'node-paper')
+        ?.data.noteNodeId,
+    ).toBe('node-theirs');
+    expect(server.state.nodes.map((node) => node.id).sort()).toEqual([
+      'node-paper',
+      'node-theirs',
+    ]);
   });
   beforeEach(() => {
     useWorkspaceStore.setState({ workspaceId: 'metadata-tests' });
@@ -95,63 +242,38 @@ describe('durable node metadata actions', () => {
         rev: 'saved',
       }),
     );
-    vi.mocked(putCanvas).mockClear();
+    resetCanvasSyncForTests();
+    vi.mocked(postCanvasExecute).mockReset();
+    vi.mocked(postCanvasExecute).mockImplementation(async (canvasId, request) =>
+      server.execute(canvasId, request),
+    );
     vi.mocked(toast).mockClear();
   });
 
   function seed(id: string) {
     canvasHistoryManager.activate(id, true);
-    useCanvasStore.getState()._setStateNoAutosave({
+    const nodes: Node[] = [
+      {
+        id,
+        type: 'pdf',
+        position: { x: 0, y: 0 },
+        data: {
+          label: 'Paper',
+          content: 'Extracted text',
+          properties: { keep: 'yes' },
+        },
+      },
+    ];
+    server.reset(structuredClone(nodes), [], 1);
+    setCanvasSyncLineageForTests(id, FAKE_LINEAGE);
+    useCanvasStore.getState()._setStateRaw({
       canvasId: id,
       isLoading: false,
-      isSaving: false,
-      pendingSave: false,
-      versionConflict: false,
       version: 1,
-      nodes: [
-        {
-          id,
-          type: 'pdf',
-          position: { x: 0, y: 0 },
-          data: {
-            label: 'Paper',
-            content: 'Extracted text',
-            properties: { keep: 'yes' },
-          },
-        },
-      ],
+      nodes,
       edges: [],
     });
   }
-
-  it('rejects failures without rolling back authored edits and does not report frozen retries as saved', async () => {
-    seed('metadata-failure');
-    vi.mocked(putNodeContent).mockRejectedValueOnce(
-      new CanvasConflictError({
-        code: 'NODE_CONTENT_CONFLICT',
-        message: 'stale',
-        currentRev: 'remote',
-      }),
-    );
-    await expect(
-      commitNodeMetadata('metadata-failure', {
-        properties: { reviewed: true },
-      }),
-    ).rejects.toThrow();
-    expect(useCanvasStore.getState().nodes[0].data.properties).toEqual({
-      keep: 'yes',
-      reviewed: true,
-    });
-    await expect(
-      commitNodeMetadata('metadata-failure', {
-        properties: { reviewed: false },
-      }),
-    ).rejects.toThrow('not saved');
-    expect(useCanvasStore.getState().nodes[0].data.properties).toEqual({
-      keep: 'yes',
-      reviewed: false,
-    });
-  });
 
   it.each([{ field: 'propertyDisplayKeys', value: ['keep'], cleared: [] }])(
     'persists undo of the first $field edit before reload',
@@ -242,6 +364,28 @@ describe('durable node metadata actions', () => {
       hidden: true,
       data: { content: '![note](artifact-cloned.png)' },
     });
+    // The pasted pair is one batch through the send queue: the server
+    // creates the same two nodes, linked, with the cloned image.
+    await vi.waitFor(() =>
+      expect(server.state.nodes).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: pdf?.id,
+            data: expect.objectContaining({
+              noteNodeId: pdf?.data.noteNodeId,
+            }),
+          }),
+          expect.objectContaining({
+            id: pdf?.data.noteNodeId,
+            type: 'note',
+            hidden: true,
+            data: expect.objectContaining({
+              content: '![note](artifact-cloned.png)',
+            }),
+          }),
+        ]),
+      ),
+    );
     dispatch.mockRestore();
   });
 
@@ -294,7 +438,7 @@ describe('durable node metadata actions', () => {
         useWorkspaceStore.setState({ workspaceId: 'other' });
       else {
         const state = useCanvasStore.getState();
-        state._setStateNoAutosave({
+        state._setStateRaw({
           nodes: state.nodes.map((node) => ({
             ...node,
             data: { ...node.data, properties: { keep: 'later' } },
@@ -307,6 +451,41 @@ describe('durable node metadata actions', () => {
       expect(vi.mocked(toast).mock.calls.at(-1)?.[1]?.action).toBeUndefined();
     },
   );
+
+  it('is not saved a second time when the editor that committed it loses focus mid-save', async () => {
+    seed('properties-release');
+    let answer!: (value: {
+      nodeId: string;
+      label: string | null;
+      rev: string;
+    }) => void;
+    vi.mocked(putNodeContent).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          answer = resolve;
+        }),
+    );
+    const committed = commitNodeProperties('properties-release', {
+      properties: { reviewed: true },
+    });
+    await vi.waitFor(() => expect(putNodeContent).toHaveBeenCalledTimes(1));
+    // The field is disabled while saving, so focus leaves it: the page
+    // releases its edit lock once the node's content is on the server.
+    let released = false;
+    const release = flushNodeContent('properties-release').then(() => {
+      released = true;
+    });
+    await Promise.resolve();
+    expect(released).toBe(false);
+    answer({ nodeId: 'properties-release', label: 'Paper', rev: 'saved' });
+    await expect(committed).resolves.toBe(true);
+    await release;
+    expect(released).toBe(true);
+    expect(putNodeContent).toHaveBeenCalledTimes(1);
+    expect(useCanvasStore.getState().pendingContentNodeIds()).not.toContain(
+      'properties-release',
+    );
+  });
 
   it('retracts a conflicting property edit without offering an ordinary retry', async () => {
     seed('properties-conflict');
@@ -327,18 +506,5 @@ describe('durable node metadata actions', () => {
     });
     expect(vi.mocked(toast).mock.calls.at(-1)?.[1]?.action).toBeUndefined();
     expect(putNodeContent).toHaveBeenCalledTimes(1);
-  });
-
-  it('does not report a save in a different backend Workspace as successful', async () => {
-    seed('metadata-scope');
-    vi.mocked(putNodeContent).mockImplementationOnce(
-      async (_canvasId, nodeId) => {
-        useWorkspaceStore.setState({ workspaceId: 'another-backend' });
-        return { nodeId, label: 'Paper', rev: 'saved' };
-      },
-    );
-    await expect(
-      commitNodeMetadata('metadata-scope', { properties: { Draft: true } }),
-    ).rejects.toThrow();
   });
 });

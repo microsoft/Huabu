@@ -200,6 +200,9 @@ test('Bubble administrators see People in the current Settings navigation', asyn
       json: [{ workspaceId: 'carol-workspace', name: "Carol's Workspace" }],
     }),
   );
+  await page.route('**/api/people/admission', (route) =>
+    route.fulfill({ json: { automatic: false, providers: ['entra'] } }),
+  );
   await page.route('**/api/people', (route) =>
     route.fulfill({
       json: [
@@ -207,12 +210,16 @@ test('Bubble administrators see People in the current Settings navigation', asyn
           principal: admin.principal,
           member: false,
           admin: true,
+          joinedAutomatically: false,
+          blocked: false,
           workspaces: [],
         },
         {
           principal: member.principal,
           member: true,
           admin: false,
+          joinedAutomatically: false,
+          blocked: false,
           workspaces: [],
         },
       ],
@@ -233,7 +240,7 @@ test('Bubble administrators see People in the current Settings navigation', asyn
   ).toBeVisible();
   await expect(dialog.getByText('Carol', { exact: true })).toBeVisible();
   await expect(
-    dialog.getByRole('switch', { name: `${en.people.access}: Carol` }),
+    dialog.getByRole('switch', { name: `${en.people.serviceAccess}: Carol` }),
   ).toBeEnabled();
   await expect(
     dialog.getByRole('button', {
@@ -249,6 +256,220 @@ test('Bubble administrators see People in the current Settings navigation', asyn
   await page.screenshot({
     path: testInfo.outputPath('people-settings-mobile.png'),
   });
+});
+
+test('People lists everyone and resets devices when the admission setting cannot load', async ({
+  page,
+}, testInfo) => {
+  const admin = {
+    ...member,
+    principal: { principalId: 'admin', kind: 'user', displayName: 'Admin' },
+    owner: true,
+  };
+  await page.route('**/api/identity', (route) =>
+    route.fulfill({ json: admin }),
+  );
+  await page.route('**/api/workspaces', (route) => route.fulfill({ json: [] }));
+  await page.route('**/api/people/admission', (route) =>
+    route.fulfill({ status: 500, json: { message: 'Internal Server Error' } }),
+  );
+  await page.route('**/api/people', (route) =>
+    route.fulfill({
+      json: [
+        {
+          principal: admin.principal,
+          member: false,
+          admin: true,
+          joinedAutomatically: false,
+          blocked: false,
+          workspaces: [],
+        },
+        {
+          principal: { principalId: 'ivan', kind: 'user', displayName: 'Ivan' },
+          member: false,
+          admin: false,
+          joinedAutomatically: false,
+          // The server could not read the record either.
+          blocked: null,
+          workspaces: [],
+        },
+      ],
+    }),
+  );
+  await page.route('**/api/people/ivan/agent-credentials/reset', (route) =>
+    route.fulfill({ status: 204 }),
+  );
+  await page.goto('/playground/components');
+  await page.evaluate(async () => {
+    const load = (path: string) => import(/* @vite-ignore */ path);
+    const { useSettingsUiStore } = await load('/src/store/settingsUiStore.ts');
+    useSettingsUiStore.getState().open('people');
+  });
+  const dialog = page.getByRole('dialog', {
+    name: en.settings.title,
+    exact: true,
+  });
+  await expect(dialog.getByText(en.people.admission.loadFailed)).toBeVisible();
+  await expect(
+    dialog.getByRole('switch', { name: en.people.admission.title }),
+  ).toHaveCount(0);
+  const ivan = dialog.getByRole('listitem').filter({ hasText: 'Ivan' });
+  await expect(
+    ivan.getByText(en.people.status.noAccess, { exact: true }),
+  ).toBeVisible();
+  await page.screenshot({
+    path: testInfo.outputPath('people-admission-unavailable.png'),
+  });
+
+  const reset = page.waitForRequest(
+    '**/api/people/ivan/agent-credentials/reset',
+  );
+  await ivan
+    .getByRole('button', { name: en.people.resetDevices, exact: true })
+    .click();
+  await page
+    .getByRole('dialog', { name: en.people.resetDevices, exact: true })
+    .getByRole('button', { name: en.people.resetDevices, exact: true })
+    .click();
+  await reset;
+});
+
+test('People keeps each person whole and their access switch beside or below them', async ({
+  page,
+}, testInfo) => {
+  const admin = {
+    ...member,
+    principal: {
+      principalId: 'admin',
+      kind: 'user',
+      displayName: 'Casey Jo Whitaker',
+      email: 'casey.whitaker@contoso.example',
+    },
+    owner: true,
+  };
+  const morgan = {
+    principalId: 'morgan',
+    kind: 'user',
+    displayName: 'Morgan Alexandra Chen',
+    email: 'morgan.alexandra.chen@fabrikam.example',
+  };
+  await page.route('**/api/identity', (route) =>
+    route.fulfill({ json: admin }),
+  );
+  await page.route('**/api/workspaces', (route) =>
+    route.fulfill({ json: [{ workspaceId: 'default', name: 'Default' }] }),
+  );
+  await page.route('**/api/people/admission', (route) =>
+    route.fulfill({ json: { automatic: false, providers: ['entra'] } }),
+  );
+  await page.route('**/api/people', (route) =>
+    route.fulfill({
+      json: [
+        {
+          principal: admin.principal,
+          member: false,
+          admin: true,
+          joinedAutomatically: false,
+          blocked: false,
+          workspaces: [],
+        },
+        {
+          principal: morgan,
+          member: false,
+          admin: false,
+          joinedAutomatically: false,
+          blocked: false,
+          workspaces: [],
+        },
+      ],
+    }),
+  );
+  await page.goto('/playground/components');
+  await page.evaluate(async () => {
+    const load = (path: string) => import(/* @vite-ignore */ path);
+    const { useSettingsUiStore } = await load('/src/store/settingsUiStore.ts');
+    useSettingsUiStore.getState().open('people');
+  });
+  const dialog = page.getByRole('dialog', {
+    name: en.settings.title,
+    exact: true,
+  });
+  const name = dialog.getByText(morgan.displayName, { exact: true });
+  const email = dialog.getByText(morgan.email, { exact: true });
+  const toggle = dialog.getByRole('switch', {
+    name: `${en.people.serviceAccess}: ${morgan.displayName}`,
+  });
+  await expect(name).toBeVisible();
+  /** True when the element shows all of its text, with nothing cut off. */
+  const whole = (locator: typeof name) =>
+    locator.evaluate((el) => el.scrollWidth <= el.clientWidth + 1);
+  for (const [width, height, stacked] of [
+    [1440, 900, false],
+    [390, 844, true],
+    [320, 700, true],
+  ] as const) {
+    await page.setViewportSize({ width, height });
+    await toggle.scrollIntoViewIfNeeded();
+    // The name and email an administrator decides on are never truncated.
+    expect(await whole(name), `name at ${width}px`).toBe(true);
+    expect(await whole(email), `email at ${width}px`).toBe(true);
+    const emailBox = (await email.boundingBox())!;
+    const toggleBox = (await toggle.boundingBox())!;
+    // In a narrow list the switch moves below the person it controls; in a
+    // wide one it stays beside them.
+    if (stacked)
+      expect(toggleBox.y, `switch at ${width}px`).toBeGreaterThanOrEqual(
+        emailBox.y + emailBox.height - 1,
+      );
+    else
+      expect(toggleBox.y, `switch at ${width}px`).toBeLessThan(
+        emailBox.y + emailBox.height,
+      );
+    await page.screenshot({
+      path: testInfo.outputPath(`people-layout-${width}.png`),
+    });
+  }
+});
+
+test('a slow session check shows its notice above any toast', async ({
+  page,
+}, testInfo) => {
+  let hold: Promise<void> | null = null;
+  await page.route('**/api/identity', async (route) => {
+    await hold;
+    await route.fulfill({ json: member });
+  });
+  await page.goto('/playground/components');
+  await page.evaluate(async () => {
+    const load = (path: string) => import(/* @vite-ignore */ path);
+    const { toast } = await load('/src/components/Common/Toast.tsx');
+    toast(
+      'A persistent toast whose text runs long enough to cross the top of the page',
+      { duration: 0 },
+    );
+  });
+  await expect(
+    page.getByText('A persistent toast', { exact: false }),
+  ).toBeVisible();
+  let release!: () => void;
+  hold = new Promise<void>((resolve) => (release = resolve));
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+  const notice = page
+    .getByRole('status')
+    .filter({ hasText: en.auth.verifyingSession });
+  await expect(notice).toBeVisible();
+  // The notice is the topmost thing where it is drawn, not hidden by the toast.
+  const box = (await notice.boundingBox())!;
+  const onTop = await notice.evaluate(
+    (el, point) => el.contains(document.elementFromPoint(point.x, point.y)),
+    { x: box.x + box.width / 2, y: box.y + box.height / 2 },
+  );
+  expect(onTop).toBe(true);
+  await page.screenshot({
+    path: testInfo.outputPath('verifying-over-toast.png'),
+  });
+  release();
+  await expect(notice).toHaveCount(0);
 });
 
 test('Bubble users open a Server folder as a Workspace where Workspaces are folders', async ({

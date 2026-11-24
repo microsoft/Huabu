@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { putNodeContentBodySchema } from '../../types/api/canvas.js';
 import {
   executeCanvasCommands,
+  nodeRevision,
   nodeRevisionOf,
   extractCanvasChanges,
   fingerprintNodeFields,
@@ -48,6 +49,9 @@ function merge(patch: Record<string, unknown>, nodes = [pdf, note]) {
     { nodes, edges: [], canvasId: 'space' },
   ).writeResult.nodes[0];
 }
+
+/** The revision of loosely held fields, as a stored record passes them. */
+const revOf = (fields: object): string => nodeRevisionOf(fields);
 
 describe('node properties', () => {
   it('rejects properties on non-sidecar Space previews instead of losing them on reload', () => {
@@ -147,20 +151,68 @@ describe('node properties', () => {
     ).toBe(false);
   });
 
-  it('hashes metadata canonically and changes revision for authored edits', () => {
-    const first = { content: '', properties: { title: 'Paper', year: 2026 } };
-    expect(nodeRevisionOf(first)).toBe(
-      nodeRevisionOf({ ...first, properties: { year: 2026, title: 'Paper' } }),
-    );
-    expect(nodeRevisionOf(first)).not.toBe(
-      nodeRevisionOf({ ...first, propertyDisplayKeys: ['year'] }),
+  it('leaves custom properties and their display order out of the content revision', () => {
+    const body = { type: 'note', content: 'Body', src: 'artifacts/a.png' };
+    const rev = revOf(body);
+    // Set, change, remove, reorder: none of them is a new revision.
+    expect(revOf({ ...body, properties: { year: 2026 } })).toBe(rev);
+    expect(revOf({ ...body, properties: { year: 2027, tags: ['a'] } })).toBe(
+      rev,
     );
     expect(
-      nodeRevisionOf({
-        type: 'image',
-        content: '',
-        properties: { caption: 'Art' },
+      revOf({
+        ...body,
+        properties: { year: 2026 },
+        propertyDisplayKeys: ['year'],
       }),
-    ).toBe(nodeRevisionOf({ type: 'image', properties: { caption: 'Art' } }));
+    ).toBe(rev);
+    expect(revOf({ ...body, propertyDisplayKeys: [] })).toBe(rev);
+    expect(
+      nodeRevision({
+        id: 'n',
+        type: 'note',
+        position: { x: 0, y: 0 },
+        data: { ...body, properties: { year: 2026 } },
+      }),
+    ).toBe(rev);
+    // A node that has only properties has the revision of empty content.
+    expect(revOf({ properties: { caption: 'Art' } })).toBe(revOf({}));
+  });
+
+  it('changes the content revision with the body and with the source', () => {
+    const body = {
+      type: 'note',
+      content: 'Body',
+      src: 'artifacts/a.png',
+      properties: { year: 2026 },
+      propertyDisplayKeys: ['year'],
+    };
+    expect(revOf({ ...body, content: 'Body.' })).not.toBe(revOf(body));
+    expect(revOf({ ...body, src: 'artifacts/b.png' })).not.toBe(revOf(body));
+    // A bodyless type is not given a body by its properties.
+    expect(revOf({ type: 'image', content: '', properties: { a: 'b' } })).toBe(
+      revOf({ type: 'image' }),
+    );
+  });
+
+  it('still fingerprints properties canonically for a review record', () => {
+    const node = (properties: Record<string, unknown>): CanvasNode => ({
+      id: 'n',
+      type: 'note',
+      position: { x: 0, y: 0 },
+      data: { content: '', properties },
+    });
+    expect(
+      fingerprintNodeFields(node({ title: 'Paper', year: 2026 }), [
+        'properties',
+      ]),
+    ).toBe(
+      fingerprintNodeFields(node({ year: 2026, title: 'Paper' }), [
+        'properties',
+      ]),
+    );
+    expect(
+      fingerprintNodeFields(node({ year: 2027 }), ['properties']),
+    ).not.toBe(fingerprintNodeFields(node({ year: 2026 }), ['properties']));
   });
 });

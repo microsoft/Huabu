@@ -9,7 +9,7 @@
  *
  * `AUTO_LAYOUT` no longer exists as a command (see CHANGELOG
  * 2026-05-24); we emit `SET_NODE_GEOMETRY` (positions + frame size)
- * and `MERGE_NODE_DATA` (`frameSlot` updates) so structured re-flows
+ * and `MERGE_NODE_DATA` (cells and reading lists) so structured re-flows
  * share the same undo step as the gesture that triggered them.
  */
 
@@ -150,6 +150,12 @@ export function buildStructuredFrameRelayoutCommands(
           ? applyRowLayout(workingNodes, id, cfg.count)
           : applyGridLayout(workingNodes, id, cfg.count);
     if (!result) continue;
+    if (result.layoutOrder) {
+      dataPatches.push({
+        nodeId: id as CanvasNodeId,
+        patch: { layoutOrder: result.layoutOrder },
+      });
+    }
 
     // Child positions (only when they actually move).
     for (const [nodeId, target] of result.childPositions) {
