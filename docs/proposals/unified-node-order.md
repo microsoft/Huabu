@@ -1,9 +1,9 @@
 # Unified node order and placement
 
 Status: Implemented on `feature/unified-node-order`, not merged — direction A ("everything on the node") confirmed by the owner on 2026-11-20. Shipped behaviour is described in `docs/architecture/`; this record keeps the design and where the implementation departed from it.
-Last updated: 2026-11-20
+Last updated: 2026-11-24
 
-> Prerequisite, on its own branch (`feature/server-owned-preprocessing`): the server starts preprocessing where a write is committed, and only for a node whose preprocessing input the write changed ([node-preprocessing.md](../architecture/node-preprocessing.md#who-starts-preprocessing)), so writing order data on a node starts none. An earlier form of that branch made pages compare the request input instead; it was replaced.
+> Prerequisite, merged as #450: the server starts preprocessing where a write is committed, and only for a node whose preprocessing input the write changed ([node-preprocessing.md](../architecture/node-preprocessing.md#who-starts-preprocessing)), so writing order data on a node starts none. An earlier form of that branch made pages compare the request input instead; it was replaced.
 
 ## Implementation notes
 
