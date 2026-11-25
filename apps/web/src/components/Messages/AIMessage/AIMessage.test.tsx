@@ -42,8 +42,8 @@ vi.mock('react-i18next', async (importOriginal) => ({
   }),
 }));
 vi.mock('lottie-react', () => ({ default: () => null }));
-// The link's own suite covers opening; here only the listed paths matter, and
-// its Preview Workspace dependencies need a full canvas store.
+// The link's own suite covers opening; its Preview Workspace dependencies need
+// a full canvas store.
 vi.mock('./Tool/FilePathLink', () => ({
   FilePathLink: ({ path }: { path: string }) => <span>{path}</span>,
 }));
@@ -693,9 +693,6 @@ describe('assistant activity presentation', () => {
     expect(header().textContent).toBe(
       'messages.activityFilesChanged:1 · messages.activityCompletedSteps:2',
     );
-    expect(
-      container.querySelector('[data-assistant-changed-files]')?.textContent,
-    ).toBe('example.ts');
   });
 
   it('closes the previous block and opens only the new trailing activity', () => {

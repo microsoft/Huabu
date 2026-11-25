@@ -35,11 +35,11 @@ const execution = (agentletId: string) => ({
 let root: Root;
 let container: HTMLDivElement;
 
-function render(path: string, line?: number, compact?: boolean) {
+function render(path: string, line?: number) {
   act(() =>
     root.render(
       <ChatSessionProvider value={session}>
-        <FilePathLink path={path} line={line} compact={compact} />
+        <FilePathLink path={path} line={line} />
       </ChatSessionProvider>,
     ),
   );
@@ -61,10 +61,10 @@ afterEach(() => {
 it('opens an absolute path on the device that runs the conversation', () => {
   observeConversationExecution('canvas-1', 'thread-1', execution('device-1'));
 
-  render('/repo/src/app.ts', 12, true);
+  render('/repo/src/app.ts', 12);
 
   const button = container.querySelector('button');
-  expect(button?.textContent).toBe('app.ts:12');
+  expect(button?.textContent).toBe('/repo/src/app.ts:12');
   // Every box from the list item down may shrink, so a long path truncates.
   for (
     let box: Element | null | undefined = button;
