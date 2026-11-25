@@ -15,12 +15,12 @@
  *    type (`canvasCommandShapeProblem`); a malformed command refuses the
  *    request with 400 instead of failing inside a handler.
  * 3. **A page does not write bodies through `execute`.** A node's body
- *    (`content`, `src`) is protected by its content revision, which only
- *    the content PUT checks for a page and only `expectRev` checks for an
- *    agent. So for `ui`: `MERGE_NODE_DATA` may neither set nor unset a body
- *    key, and a `RESTORE_NODES` that replaces existing nodes must keep their
- *    body (`keepDataKeys`). Creating a node, or restoring one that is gone,
- *    with its body stays allowed: nothing is overwritten.
+ *    (`content`, `src`, `dataSchema`) is protected by its content revision,
+ *    which only the content PUT checks for a page and only `expectRev` checks
+ *    for an agent. So for `ui`: `MERGE_NODE_DATA` may neither set nor unset a
+ *    body key, and a `RESTORE_NODES` that replaces existing nodes must keep
+ *    their body (`keepDataKeys`). Creating a node, or restoring one that is
+ *    gone, with its body stays allowed: nothing is overwritten.
  *
  * Which command *types* a source may issue is the engine's rule
  * (`isAllowedFor`), reported per command as `invalid-scope`.
@@ -51,7 +51,7 @@ function uiBodyWrite(command: CanvasCommand): string | null {
   if (command.type === 'MERGE_NODE_DATA') {
     for (const entry of command.patches) {
       for (const key of [...Object.keys(entry.patch), ...(entry.unset ?? [])])
-        if (BODY_KEYS.has(key) || key === 'dataSchema') return key;
+        if (BODY_KEYS.has(key)) return key;
     }
     return null;
   }

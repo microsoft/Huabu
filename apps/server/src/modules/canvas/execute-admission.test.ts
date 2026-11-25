@@ -307,7 +307,13 @@ describe('a page does not overwrite a body through execute', () => {
       data: { label: 'A', content: 'an old body from undo history' },
     };
     try {
-      for (const keepDataKeys of [undefined, [], ['label'], ['content']]) {
+      for (const keepDataKeys of [
+        undefined,
+        [],
+        ['label'],
+        ['content'],
+        ['content', 'src'],
+      ]) {
         const response = await execute(app, {
           edits: editsPerCommand([
             {
@@ -331,7 +337,7 @@ describe('a page does not overwrite a body through execute', () => {
             type: 'RESTORE_NODES',
             nodes: [snapshot],
             replace: ['node-a'],
-            keepDataKeys: ['content', 'src', 'label'],
+            keepDataKeys: ['content', 'src', 'dataSchema', 'label'],
           },
         ]),
       });
