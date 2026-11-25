@@ -306,17 +306,21 @@ function updateHiddenInkReport(
 }
 
 /**
- * What to show for a failed send. When the connection gave out before the
- * server answered, say what that means for the message instead of quoting the
- * transport; any other failure carries its own explanation.
+ * The status row for a failed send. When the connection gave out before the
+ * server answered, it says what that means for the message instead of quoting
+ * the transport; any other failure carries its own explanation.
  */
-function sendErrorDetail(error: unknown, accepted: boolean): string {
-  if (!(error instanceof Error)) return 'Unknown error';
+function sendErrorStatus(
+  error: unknown,
+  accepted: boolean,
+): { detail: string; localOnly?: true } {
+  if (!(error instanceof Error)) return { detail: 'Unknown error' };
   const connectionLost =
     !(error instanceof ApiError) && !(error instanceof AgentTurnFailedError);
+  // Local-only: history holds no turn for it, so it is kept, not replaced.
   return connectionLost && !accepted
-    ? i18n.t('chat.sendNotDelivered')
-    : error.message;
+    ? { detail: i18n.t('chat.sendNotDelivered'), localOnly: true }
+    : { detail: error.message };
 }
 
 function turnKey(canvasId: string, threadId: string): string {
@@ -1450,7 +1454,7 @@ async function executePreparedAgentTurn(
               id: createId('status'),
               role: 'status',
               status: 'error',
-              detail: sendErrorDetail(err, !!result.accepted),
+              ...sendErrorStatus(err, !!result.accepted),
             });
           },
           onComplete: () => {
@@ -1506,7 +1510,7 @@ async function executePreparedAgentTurn(
         id: createId('status'),
         role: 'status',
         status: 'error',
-        detail: sendErrorDetail(err, !!result.accepted),
+        ...sendErrorStatus(err, !!result.accepted),
       });
     } finally {
       settleTurnInkInterpretation(

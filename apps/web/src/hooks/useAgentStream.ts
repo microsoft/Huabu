@@ -6,6 +6,7 @@ import { useCallback } from 'react';
 import { createId } from '@huabu/shared';
 
 import { toast } from '@/components/Common/Toast';
+import { isUndeliveredMessage } from '@/store/chatHistoryCache';
 import {
   selectThreadIsLoading,
   selectThreadPendingAttachments,
@@ -255,6 +256,20 @@ export function useAgentStream(
         }
         await dispatchAgentTurn(prepareAgentTurnRetry(session, message, mode), {
           canDispatch,
+          // The resend takes the place of an attempt that was never delivered,
+          // which history would otherwise keep beside it.
+          onStarted: () => {
+            const chat = useChatStore.getState();
+            const messages = selectThreadMessages(chat, session.threadId);
+            const index = messages.findIndex(
+              (candidate) => candidate.id === message.id,
+            );
+            if (isUndeliveredMessage(messages, index))
+              chat.setMessages(session.threadId, [
+                ...messages.slice(0, index),
+                ...messages.slice(index + 2),
+              ]);
+          },
         });
       } catch (error) {
         toast(error instanceof Error ? error.message : String(error), {

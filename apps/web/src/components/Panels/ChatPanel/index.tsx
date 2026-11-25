@@ -96,6 +96,7 @@ import { useChatHistory } from '../../../hooks/useChatHistory';
 import { MessageList } from '../../Messages/MessageList';
 import { SidebarPanel } from '../SidebarPanel';
 
+import type { ChatMessage } from '@/store/chatTypes';
 import type { AgentMode, CanvasNodeId } from '@huabu/shared';
 
 interface ChatPanelProps {
@@ -904,21 +905,13 @@ export const ChatPanel = ({
     ],
   );
 
-  const handleRetry = useCallback(() => {
-    if (!ownerScopeReady || builtinThreadSettings.saving) return;
-    const lastUserMsg = [...messages]
-      .reverse()
-      .find((message) => message.role === 'user');
-    if (lastUserMsg?.role === 'user') {
-      void retryStream(lastUserMsg, mode);
-    }
-  }, [
-    messages,
-    mode,
-    retryStream,
-    ownerScopeReady,
-    builtinThreadSettings.saving,
-  ]);
+  const handleRetry = useCallback(
+    (message: Extract<ChatMessage, { role: 'user' }>) => {
+      if (!ownerScopeReady || builtinThreadSettings.saving) return;
+      void retryStream(message, mode);
+    },
+    [mode, retryStream, ownerScopeReady, builtinThreadSettings.saving],
+  );
 
   // Both presentations share preparation admission and frozen execution identity.
   const preparationEditable =

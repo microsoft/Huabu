@@ -3153,10 +3153,34 @@ describe('shared Agent turn input', () => {
         {
           role: 'status',
           status: 'error',
+          // Local-only, so a later history refresh keeps it in place.
+          localOnly: true,
           detail:
             'The message was not sent. Check your connection and send it again.',
         },
       ]);
+    });
+
+    it('replaces an undelivered message with its resend', async () => {
+      mocks.stream.mockRejectedValueOnce(new Error('Connection lost'));
+      await act(async () => hook.startStream('Hello', 'operate'));
+      const failed = useChatStore
+        .getState()
+        .threadsById[session.threadId].messages.at(-2);
+      if (failed?.role !== 'user') throw new Error('Expected the failed send');
+
+      await act(async () => hook.retryStream(failed, 'operate'));
+
+      const messages =
+        useChatStore.getState().threadsById[session.threadId].messages;
+      expect(mocks.stream).toHaveBeenCalledTimes(2);
+      // One copy of the message, not the failed attempt beside the new one.
+      expect(
+        messages.filter(
+          (message) => message.role === 'user' && message.content === 'Hello',
+        ),
+      ).toHaveLength(1);
+      expect(messages.some((message) => message.role === 'status')).toBe(false);
     });
   });
 

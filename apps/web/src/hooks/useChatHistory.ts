@@ -20,6 +20,8 @@ import { agentApi } from '@/api/agent';
 import { useAcpThreadChangesStore } from '@/store/acpThreadChangesStore';
 import {
   HISTORY_PAGE_TURNS,
+  isUndeliveredMessage,
+  keepUndeliveredMessages,
   MAX_HISTORY_PAGES,
 } from '@/store/chatHistoryCache';
 import {
@@ -193,7 +195,13 @@ function historyTurnsToMessages(
 function applyInitialHistoryPage(response: AgentHistoryPageResponse): void {
   const state = useChatStore.getState();
   const messages = historyTurnsToMessages(response.turns);
-  state.setMessages(response.threadId, messages);
+  state.setMessages(
+    response.threadId,
+    keepUndeliveredMessages(
+      selectThreadMessages(state, response.threadId),
+      messages,
+    ),
+  );
   state.setHistoryPages(response.threadId, [
     {
       limit: HISTORY_PAGE_TURNS,
@@ -838,9 +846,15 @@ export function useChatHistory(
         current.messages.at(-1) === original.at(-1)
       );
     };
-    const localUser = [...original]
-      .reverse()
-      .find((message) => message.role === 'user' && !message.historyTurnId);
+    // An undelivered message is local too, but no turn will ever arrive for it.
+    const localUser = original
+      .filter(
+        (message, index) =>
+          message.role === 'user' &&
+          !message.historyTurnId &&
+          !isUndeliveredMessage(original, index),
+      )
+      .at(-1);
     const lastPersistedTurn = [...original]
       .reverse()
       .find((message) => message.historyTurnId)?.historyTurnId;
