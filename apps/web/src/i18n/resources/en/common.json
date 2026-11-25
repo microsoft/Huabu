@@ -1125,6 +1125,7 @@
     "noPdfSource": "No PDF Source",
     "noCanvasToSave": "No Space to save into",
     "uploadFailed": "Upload failed",
+    "unsupportedFileType": "Unsupported file type: {{names}}",
     "micBlocked": "Mic blocked: {{message}}",
     "microphoneAccessDenied": "Microphone access denied",
     "audioFileMissing": "Audio file missing",

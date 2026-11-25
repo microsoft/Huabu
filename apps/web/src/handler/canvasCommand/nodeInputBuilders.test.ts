@@ -3,13 +3,14 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { uploadPdf } from '@/api/artifact';
+import { uploadAudio, uploadHtml, uploadPdf } from '@/api/artifact';
 import { toast } from '@/components/Common/Toast';
 import { pageLifecycle } from '@/utils/pageLifecycle';
 
 import { importFilesAsNodes } from './nodeInputBuilders';
 
 vi.mock('@/api/artifact', () => ({
+  uploadAudio: vi.fn(),
   uploadPdf: vi.fn(),
   uploadImage: vi.fn(),
   uploadVideo: vi.fn(),
@@ -112,5 +113,49 @@ describe('file import lifecycle', () => {
     ]);
     expect(toast).toHaveBeenCalledWith('Upload offline', { tone: 'danger' });
     log.mockRestore();
+  });
+
+  it.each([
+    ['song.mp3', 'audio/mpeg'],
+    ['song.mp3', ''],
+  ])('imports %s (type "%s") as an audio node', async (name, type) => {
+    vi.mocked(uploadAudio).mockResolvedValueOnce('artifact.mp3');
+    const addNodes = vi.fn();
+    await importFilesAsNodes(
+      [new File(['audio'], name, { type })],
+      { x: 0, y: 0 },
+      { type: 'user-uploaded' },
+      'space',
+      addNodes,
+    );
+    expect(addNodes).toHaveBeenCalledWith([
+      expect.objectContaining({
+        nodeType: 'audio',
+        data: expect.objectContaining({ src: 'artifact.mp3', label: name }),
+      }),
+    ]);
+    expect(uploadHtml).not.toHaveBeenCalled();
+  });
+
+  it('names the files it cannot import and still imports the rest', async () => {
+    vi.mocked(uploadPdf).mockResolvedValueOnce('artifact.pdf');
+    const addNodes = vi.fn();
+    await importFilesAsNodes(
+      [
+        new File(['zip'], 'archive.zip', { type: 'application/zip' }),
+        new File(['pdf'], 'document.pdf', { type: 'application/pdf' }),
+      ],
+      undefined,
+      { type: 'user-uploaded' },
+      'space',
+      addNodes,
+    );
+    expect(addNodes).toHaveBeenCalledWith([
+      expect.objectContaining({ nodeType: 'pdf' }),
+    ]);
+    expect(uploadHtml).not.toHaveBeenCalled();
+    expect(toast).toHaveBeenCalledWith(expect.stringContaining('archive.zip'), {
+      tone: 'danger',
+    });
   });
 });

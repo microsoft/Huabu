@@ -1125,6 +1125,7 @@
     "noPdfSource": "无 PDF 来源",
     "noCanvasToSave": "没有可保存的 Space",
     "uploadFailed": "上传失败",
+    "unsupportedFileType": "不支持的文件类型：{{names}}",
     "micBlocked": "麦克风被阻止：{{message}}",
     "microphoneAccessDenied": "麦克风访问被拒绝",
     "audioFileMissing": "音频文件缺失",

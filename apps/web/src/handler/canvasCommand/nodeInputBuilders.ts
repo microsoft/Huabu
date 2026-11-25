@@ -12,6 +12,7 @@ import { i18n } from '@/i18n';
 import { pageLifecycle } from '@/utils/pageLifecycle';
 
 import {
+  uploadAudio,
   uploadHtml,
   uploadImage,
   uploadOffice,
@@ -19,8 +20,8 @@ import {
   uploadVideo,
 } from '../../api/artifact';
 import {
+  detectFileNodeType,
   detectNodeType,
-  detectNodeTypeFromMime,
   detectOfficeFormat,
   getImageDimensionsFromBlob,
   getVideoDimensionsFromBlob,
@@ -42,10 +43,7 @@ export async function uploadFileToNodeInput(
   origin: NodeOrigin,
   canvasId: string,
 ): Promise<AddNodeInput | null> {
-  // Prefer MIME-based detection, but fall back to filename when MIME is
-  // absent or yields the generic 'web' bucket (e.g. .md reported as text/plain).
-  const mimeType = file.type ? detectNodeTypeFromMime(file.type) : 'web';
-  const type = mimeType === 'web' ? detectNodeType(file.name) : mimeType;
+  const type = detectFileNodeType(file);
 
   if (type === 'image') {
     const [src, naturalDimensions] = await Promise.all([
@@ -72,6 +70,15 @@ export async function uploadFileToNodeInput(
       placementPoint,
       data: { src, label: file.name, origin },
       naturalDimensions,
+    };
+  }
+
+  if (type === 'audio') {
+    const src = await uploadAudio(file, canvasId);
+    return {
+      nodeType: 'audio',
+      placementPoint,
+      data: { src, label: file.name, origin },
     };
   }
 
@@ -157,6 +164,17 @@ export async function importFilesAsNodes(
         result.status === 'fulfilled' && result.value ? [result.value] : [],
       );
       if (inputs.length) addNodes(inputs);
+      const unsupported = files.filter(
+        (_file, index) =>
+          results[index].status === 'fulfilled' && !results[index].value,
+      );
+      if (unsupported.length)
+        toast(
+          i18n.t('node.unsupportedFileType', {
+            names: unsupported.map((file) => file.name).join(', '),
+          }),
+          { tone: 'danger' },
+        );
       const failed = results.find((result) => result.status === 'rejected');
       if (failed?.status === 'rejected') throw failed.reason;
     });

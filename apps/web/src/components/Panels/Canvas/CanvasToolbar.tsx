@@ -610,7 +610,7 @@ export const NodeToolbar = ({ activeTool, onToolChange }: NodeToolbarProps) => {
             ref={fileInputRef}
             className="hidden"
             multiple
-            accept="image/*,application/pdf,video/mp4,.md,.markdown,text/markdown,.docx,.xlsx,.pptx,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.openxmlformats-officedocument.presentationml.presentation,.html,.htm,text/html"
+            accept="image/*,application/pdf,video/mp4,audio/*,.md,.markdown,text/markdown,.docx,.xlsx,.pptx,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.openxmlformats-officedocument.presentationml.presentation,.html,.htm,text/html"
             onChange={handleFileChange}
           />
         </div>
