@@ -2505,17 +2505,11 @@ describe('StrokeSelectionToolbar Ink submission', () => {
     expect(mocks.listProfiles).not.toHaveBeenCalled();
   });
 
-  it('retains an ambiguous reservation until Stop confirms no acceptance', async () => {
-    let callbacks: AgentTurnCallbacks | undefined;
-    mocks.dispatch.mockImplementationOnce(
-      (_input: unknown, received: AgentTurnCallbacks) => {
-        callbacks = received;
-        return Promise.resolve({
-          status: 'unknown',
-          error: new Error('Connection lost'),
-        });
-      },
-    );
+  it('lets the request be sent again after a send that got no answer', async () => {
+    mocks.dispatch.mockResolvedValueOnce({
+      status: 'unknown',
+      error: new Error('Connection lost'),
+    });
     const button = await renderToolbar();
 
     await act(async () => button.click());
@@ -2523,16 +2517,8 @@ describe('StrokeSelectionToolbar Ink submission', () => {
     expect(useGesturePreviewStore.getState().inkSubmissionPreparing).toBe(
       false,
     );
-    const pendingButton = document.body.querySelector<HTMLButtonElement>(
-      'button[aria-label="Sending ink request"]',
-    );
-    expect(pendingButton?.disabled).toBe(true);
-
-    act(() => callbacks?.onAcceptanceRejected?.());
-
-    expect(useGesturePreviewStore.getState().inkSubmissionPreparing).toBe(
-      false,
-    );
+    // The selection is kept and the button is live again, so the same
+    // request can simply be sent once more.
     expect(useGesturePreviewStore.getState().sketchStrokeSelection).toEqual({
       'sketch-1': ['stroke-1'],
     });
@@ -2540,6 +2526,8 @@ describe('StrokeSelectionToolbar Ink submission', () => {
       'button[aria-label="Send ink request"]',
     );
     expect(retryButton?.disabled).toBe(false);
+    await act(async () => retryButton?.click());
+    expect(mocks.dispatch).toHaveBeenCalledTimes(2);
   });
 
   it('preserves a newer Lasso when the older turn is accepted', async () => {

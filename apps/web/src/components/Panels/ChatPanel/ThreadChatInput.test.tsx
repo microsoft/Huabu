@@ -173,7 +173,6 @@ describe('ThreadChatInput', () => {
     );
     for (const [turnStatus, label] of [
       ['sending', 'chat.queueSending'],
-      ['uncertain', 'chat.queueUncertain'],
       ['pending', 'chat.queuePending'],
     ] as const) {
       act(() =>
@@ -197,7 +196,7 @@ describe('ThreadChatInput', () => {
     );
     expect(resume?.disabled).toBe(false);
     act(() =>
-      chat.setQueuedTurnStatus(session.threadId, 'queued-1', 'uncertain'),
+      chat.setQueuedTurnStatus(session.threadId, 'queued-1', 'sending'),
     );
     expect(resume?.disabled).toBe(true);
     act(() =>

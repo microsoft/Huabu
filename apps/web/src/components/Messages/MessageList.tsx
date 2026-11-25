@@ -50,7 +50,8 @@ interface MessageListProps {
   isHistoryLoading?: boolean;
   isHistoryReady?: boolean;
   hideAIActions?: boolean;
-  onRetry?: () => void;
+  /** Resend the user message the failed row belongs to. */
+  onRetry?: (message: Extract<ChatMessage, { role: 'user' }>) => void;
   hasOlderHistory?: boolean;
   isLoadingOlderHistory?: boolean;
   olderHistoryError?: string;
@@ -1033,7 +1034,17 @@ function VirtualMessageList({
           <StatusMessage
             status={message.status}
             detail={message.detail}
-            onRetry={onRetry}
+            onRetry={
+              onRetry &&
+              (() => {
+                // The row's own message, which is not always the latest one.
+                const sent = messages
+                  .slice(0, messages.indexOf(message))
+                  .filter((candidate) => candidate.role === 'user')
+                  .at(-1);
+                if (sent?.role === 'user') onRetry(sent);
+              })
+            }
           />
         )}
       </div>

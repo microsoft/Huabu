@@ -544,7 +544,6 @@ export const StrokeSelectionToolbar = () => {
       releaseInteractionReservation();
       setIsPreparing(false);
     };
-    let retainReservation = false;
     try {
       for (const [attemptIdentity, previous] of attemptsRef.current) {
         if (attemptIdentity === identity || !previous.pendingGrounding)
@@ -861,13 +860,12 @@ export const StrokeSelectionToolbar = () => {
       ) {
         toast(t('toolbar.inkAgentPicker.changed'), { tone: 'warning' });
       }
-      retainReservation = result.status === 'unknown' && !result.accepted;
     } catch (error) {
       toast(error instanceof Error ? error.message : String(error), {
         tone: 'danger',
       });
     } finally {
-      if (!retainReservation) releasePreparation();
+      releasePreparation();
     }
   }, [
     addNode,

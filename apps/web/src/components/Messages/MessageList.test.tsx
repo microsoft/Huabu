@@ -69,7 +69,11 @@ vi.mock('./UserMessage', () => ({
   ),
 }));
 vi.mock('./StatusMessage', () => ({
-  StatusMessage: () => <div data-status />,
+  StatusMessage: ({ onRetry }: { onRetry?: () => void }) => (
+    <div data-status>
+      {onRetry ? <button data-status-retry onClick={onRetry} /> : null}
+    </div>
+  ),
 }));
 vi.mock('../Common/Button', () => ({
   Button: ({
@@ -708,6 +712,41 @@ describe('manual virtual chat', () => {
     act(() => (virtual.props.startReached as () => void)());
     expect(load).toHaveBeenCalledOnce();
     expect(container.textContent).not.toContain('chat.showEarlierTurns');
+  });
+
+  it('resends the message a failed row belongs to, not the latest one', () => {
+    const retry = vi.fn();
+    const undelivered = {
+      id: 'not-sent',
+      role: 'user' as const,
+      content: 'Never delivered',
+    };
+    render({
+      messages: [
+        undelivered,
+        {
+          id: 'not-sent-status',
+          role: 'status',
+          status: 'error',
+          localOnly: true,
+        },
+        { id: 'later', role: 'user', content: 'Sent afterwards' },
+        {
+          id: 'later-answer',
+          role: 'assistant',
+          segments: [{ kind: 'text', text: 'Answer' }],
+        },
+      ],
+      onRetry: retry,
+    });
+    act(() =>
+      container
+        .querySelector<HTMLButtonElement>(
+          '[data-chat-message-id="not-sent-status"] button',
+        )
+        ?.click(),
+    );
+    expect(retry).toHaveBeenCalledExactlyOnceWith(undelivered);
   });
 
   it('stops automatic retries on page errors and offers an explicit retry', () => {

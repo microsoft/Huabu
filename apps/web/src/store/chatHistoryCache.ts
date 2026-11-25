@@ -25,13 +25,89 @@ export function isProtectedHistoryMessage(message: ChatMessage): boolean {
   );
 }
 
+/**
+ * Whether the message at `index` is one the user sent that never reached the
+ * server: a local user message followed by a local-only status. History has no
+ * turn for it, so nothing will ever replace it.
+ */
+export function isUndeliveredMessage(
+  messages: readonly ChatMessage[],
+  index: number,
+): boolean {
+  const message = messages[index];
+  const status = messages[index + 1];
+  return (
+    message?.role === 'user' &&
+    !message.historyTurnId &&
+    status?.role === 'status' &&
+    status.localOnly === true
+  );
+}
+
+/**
+ * Carry undelivered messages from `current` into `next`, a transcript rebuilt
+ * from server history. Each keeps its place: directly after the last persisted
+ * turn that preceded it, or first when that turn is no longer loaded.
+ */
+export function keepUndeliveredMessages(
+  current: readonly ChatMessage[],
+  next: ChatMessage[],
+): ChatMessage[] {
+  const present = new Set(next.map((message) => message.id));
+  const groups: { after?: string; messages: ChatMessage[] }[] = [];
+  let lastTurn: string | undefined;
+  for (let index = 0; index < current.length; index += 1) {
+    const message = current[index];
+    if (!message) continue;
+    if (message.historyTurnId) lastTurn = message.historyTurnId;
+    const status = current[index + 1];
+    if (!status || !isUndeliveredMessage(current, index)) continue;
+    if (!present.has(message.id))
+      groups.push({ after: lastTurn, messages: [message, status] });
+    index += 1;
+  }
+  if (groups.length === 0) return next;
+  const result = [...next];
+  // Later groups go in first so that earlier ones end up ahead of them.
+  for (const group of groups.reverse()) {
+    let anchor = result.length - 1;
+    while (
+      anchor >= 0 &&
+      (group.after === undefined ||
+        result[anchor]?.historyTurnId !== group.after)
+    )
+      anchor -= 1;
+    result.splice(anchor + 1, 0, ...group.messages);
+  }
+  return result;
+}
+
 export function historyMessageIds(
   pages: readonly ChatHistoryPage[],
   messages: readonly ChatMessage[],
 ): string[] {
-  const ids = new Set(pages.flatMap((page) => page.messageIds));
-  for (const message of messages) ids.add(message.id);
-  return [...ids];
+  const ids = [...new Set(pages.flatMap((page) => page.messageIds))];
+  const known = new Set(ids);
+  // A message outside every page is local. It sits where the transcript has
+  // it: after the message before it, or ahead of the first one that follows.
+  let previous: string | undefined;
+  let leading: string[] = [];
+  for (const message of messages) {
+    if (known.has(message.id)) {
+      if (leading.length > 0) {
+        ids.splice(ids.indexOf(message.id), 0, ...leading);
+        leading = [];
+      }
+    } else {
+      // Still ahead of every known message while the one before it is too.
+      const at = previous === undefined ? -1 : ids.indexOf(previous);
+      if (at < 0) leading.push(message.id);
+      else ids.splice(at + 1, 0, message.id);
+    }
+    known.add(message.id);
+    previous = message.id;
+  }
+  return [...ids, ...leading];
 }
 
 /** Keep the viewport and the mutable newest page, never evict live interactions. */

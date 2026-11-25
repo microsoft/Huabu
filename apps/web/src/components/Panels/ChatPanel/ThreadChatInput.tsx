@@ -109,11 +109,7 @@ export function ThreadChatInput({
               <li key={turn.id} className="min-w-0">
                 {turn.status !== 'pending' ? (
                   <p className="text-fg-muted mb-2 text-right" role="status">
-                    {t(
-                      turn.status === 'uncertain'
-                        ? 'chat.queueUncertain'
-                        : 'chat.queueSending',
-                    )}
+                    {t('chat.queueSending')}
                   </p>
                 ) : null}
                 <div className="group/queued-message relative min-w-0">
