@@ -1,6 +1,6 @@
 # Accessing this Huabu Space
 
-You are working with a **Huabu** Space, an infinite visual surface of notes, images, PDFs, sketches, questions, frames, and links. You do not see the Space directly. Use the optional `huabu-rfs` client through the host-supplied invocation (abbreviated below as `huabu-rfs`), and prefer direct `query`, `download`, `snapshot`, `upload`, and `execute` operations for deterministic reads and edits; they work without an internal model provider.
+You are working with a **Huabu** Space, an infinite visual surface of notes, JSON data nodes, images, PDFs, sketches, questions, frames, and links. You do not see the Space directly. Use the optional `huabu-rfs` client through the host-supplied invocation (abbreviated below as `huabu-rfs`), and prefer direct `query`, `download`, `snapshot`, `upload`, and `execute` operations for deterministic reads and edits; they work without an internal model provider.
 
 ## Space model and discovery
 
@@ -45,7 +45,7 @@ huabu-rfs snapshot --out-dir /tmp/snapshots --max-pixels 1280 sketch-123
 
 ### Download
 
-Pass `<nodeId>` (from `<node id="...">`, `<note id="...">`, or `INSPECT_NODES`) or `<artifactKey>` (from `node.src`, snapshot `src`, or inline Note images) to `huabu-rfs download <id>`. Downloading a `<nodeId>` fetches that node's text/Markdown record and emits its `revision`, `basis`, and `node` metadata (including `node.src` for PDF/media nodes—pass `node.src` to a second `download` when you need the raw binary file). Always write to `--output <path>` so large bodies stay out of context; stdout streams NDJSON (`download_started`, optional `download_progress`, `download_completed`), and failed transfers exit nonzero while preserving any existing target file. Reuse `--if-revision <rev>` to emit `not_modified` without re-reading unchanged content:
+Pass `<nodeId>` (from `<node id="...">`, `<note id="...">`, `<data id="...">`, or `INSPECT_NODES`) or `<artifactKey>` (from `node.src`, snapshot `src`, or inline Note images) to `huabu-rfs download <id>`. Downloading a `<nodeId>` fetches that node's text/Markdown record (including `dataSchema` frontmatter and JSON body for `data` nodes) and emits its `revision`, `basis`, and `node` metadata (including `node.src` for PDF/media nodes—pass `node.src` to a second `download` when you need the raw binary file). Always write to `--output <path>` so large bodies stay out of context; stdout streams NDJSON (`download_started`, optional `download_progress`, `download_completed`), and failed transfers exit nonzero while preserving any existing target file. Reuse `--if-revision <rev>` to emit `not_modified` without re-reading unchanged content:
 
 ```bash
 huabu-rfs download --output /tmp/node.md node-123
@@ -65,9 +65,9 @@ huabu-rfs upload --file ./diagram.png
 
 `huabu-rfs execute` accepts `{ "runId"?: string, "commands": [...] }` (plus optional CLI flags `--basis <token>` and `--operation-id <uuid>`). Run `huabu-rfs execute --help <COMMAND>` for one command's authoritative schema and example before constructing it. Confirm with the user before destructive, broad, or hard-to-reverse edits.
 
-- `CREATE_NODES` — create nodes (`note`/`text`/`question` take authored body in `data.content` without YAML frontmatter; media nodes take `data.src`; `position` required).
+- `CREATE_NODES` — create nodes (`note`/`text`/`question` take authored body in `data.content` without YAML frontmatter; `data` takes JSON in `data.content` plus optional `data.dataSchema` without secrets; media nodes take `data.src`; `position` required).
 - `INITIALIZE_PDF_NOTE` — create or reuse a PDF's linked hidden Note (`results[].nodes[0].nodeId`), then read/edit that Note by its own ID.
-- `MERGE_NODE_DATA` — patch node fields (`patch.content` takes Markdown body only, stripped of downloaded `---` frontmatter, and requires `expectRev` from download `revision`; `properties` and `propertyDisplayKeys` need no `expectRev`—keep them in a separate patch entry from `content`).
+- `MERGE_NODE_DATA` — patch node fields (`patch.content` takes Markdown or JSON body only, stripped of downloaded `---` frontmatter, and requires `expectRev` from download `revision`; `patch.dataSchema` updates a Data Node's schema and requires `expectRev`; `properties` and `propertyDisplayKeys` need no `expectRev`—keep them in a separate patch entry from `content`).
 - `DELETE_NODES` — delete nodes by ID (incident edges are removed automatically).
 - `SET_NODE_GEOMETRY` — move or resize nodes in parent-local coordinates (`size.height: "auto"` fits a `note` to its text).
 - `SET_NODE_PARENT` — move nodes into a Frame, or to root with `parentId: null`.
@@ -133,3 +133,4 @@ Load a focused guide only when the task requires it (`huabu-rfs get-skill <id>`)
 - `layout` — canonical per-type default sizes, Note sizing rules, free-Frame insets, structured `column`/`row`/`grid` Frames, and diagram recipes (`huabu-rfs get-skill layout`).
 - `agents` — full Agent creation/continuation reference, Profile selection, SSE stream events, and `--until-accepted` handoff semantics (`huabu-rfs get-skill agents`).
 - `services` — configured provider Service discovery, safe Package extraction (`<id>/service.yaml` + declared files), reading `SKILL.md` before use, and in-memory configuration leases (`huabu-rfs get-skill services` or `huabu-rfs service --help`). Never print, persist, or pass leased credentials via argv or shell env.
+- `interactive-views` — durable sandboxed HTML Views with Data Node form bindings, live Space sync, View-local state, navigation, and optional Agent actions (`huabu-rfs get-skill interactive-views` or `huabu-rfs interactive-view --help`).

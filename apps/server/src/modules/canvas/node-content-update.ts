@@ -1,12 +1,44 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+import {
+  dataNodeSchemaV1Schema,
+  parseAndNormalizeDataNodeContent,
+  validateDataNodeSecretKeys,
+  validateInteractiveViewStateSchema,
+  type DataNodeSchemaV1,
+  type PutNodeContentRequest,
+} from '@huabu/shared';
 import { mergeNodeProperties } from '@huabu/shared/canvas-engine';
 
 import { isLabelProtected } from '../preprocessing/label-policy.js';
 
 import type { NodeContent } from './persistence-types.js';
-import type { PutNodeContentRequest } from '@huabu/shared';
+
+export class DataNodeValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'DataNodeValidationError';
+  }
+}
+
+export function validateDataSchemaOrThrow(raw: unknown): DataNodeSchemaV1 {
+  const parsed = dataNodeSchemaV1Schema.safeParse(raw);
+  if (!parsed.success) {
+    throw new DataNodeValidationError(
+      parsed.error.issues[0]?.message ?? 'Invalid Data Node schema.',
+    );
+  }
+  const schemaErr = validateInteractiveViewStateSchema(parsed.data);
+  if (schemaErr) {
+    throw new DataNodeValidationError(schemaErr);
+  }
+  const secretErr = validateDataNodeSecretKeys(parsed.data);
+  if (secretErr) {
+    throw new DataNodeValidationError(secretErr);
+  }
+  return parsed.data;
+}
 
 const textBearingNodeTypes = new Set([
   'note',
@@ -15,6 +47,7 @@ const textBearingNodeTypes = new Set([
   'pdf',
   'office',
   'question',
+  'data',
 ]);
 
 /** Shared content-owner policy for legacy PUT and recoverable body commits. */
@@ -23,11 +56,53 @@ export function resolveNodeContentUpdate(
   input: PutNodeContentRequest,
   existing: NodeContent | null,
 ): NodeContent {
-  const acceptsBody = textBearingNodeTypes.has(input.nodeType);
-  const body = acceptsBody ? (input.content ?? existing?.content ?? '') : '';
+  const effectiveType = existing?.type ?? input.nodeType;
+  if (effectiveType !== 'data' && input.dataSchema !== undefined) {
+    throw new DataNodeValidationError(
+      'dataSchema is only supported on data nodes.',
+    );
+  }
+  if (
+    existing &&
+    existing.type !== input.nodeType &&
+    (existing.type === 'data' || input.nodeType === 'data')
+  ) {
+    throw new DataNodeValidationError(
+      `Cannot change node "${nodeId}" type between "${existing.type}" and "${input.nodeType}".`,
+    );
+  }
+
+  let dataSchema: DataNodeSchemaV1 | undefined;
+  let canonicalDataBody: string | undefined;
+  if (effectiveType === 'data') {
+    dataSchema =
+      input.dataSchema === null
+        ? undefined
+        : input.dataSchema !== undefined
+          ? validateDataSchemaOrThrow(input.dataSchema)
+          : existing?.dataSchema !== undefined
+            ? validateDataSchemaOrThrow(existing.dataSchema)
+            : undefined;
+    const rawBody =
+      input.content !== undefined ? input.content : (existing?.content ?? '{}');
+    const normalized = parseAndNormalizeDataNodeContent(rawBody, dataSchema);
+    if (!normalized.ok) {
+      throw new DataNodeValidationError(normalized.message);
+    }
+    canonicalDataBody = normalized.formatted;
+  }
+
+  const acceptsBody = textBearingNodeTypes.has(effectiveType);
+  const body =
+    canonicalDataBody !== undefined
+      ? canonicalDataBody
+      : acceptsBody
+        ? (input.content ?? existing?.content ?? '')
+        : '';
   const wouldClobber =
     acceptsBody &&
-    input.nodeType !== 'question' &&
+    effectiveType !== 'question' &&
+    effectiveType !== 'data' &&
     input.content === '' &&
     typeof existing?.content === 'string' &&
     existing.content.length > 0;
@@ -35,7 +110,7 @@ export function resolveNodeContentUpdate(
   const result: NodeContent = {
     ...(existing ?? {}),
     nodeId,
-    type: input.nodeType,
+    type: effectiveType,
     label: title.label,
     ...(input.src !== undefined
       ? { src: input.src }
@@ -44,6 +119,13 @@ export function resolveNodeContentUpdate(
         : {}),
     content: wouldClobber && existing ? existing.content : body,
   };
+  if (effectiveType === 'data') {
+    if (dataSchema !== undefined) {
+      result.dataSchema = dataSchema;
+    } else {
+      delete result.dataSchema;
+    }
+  }
   if (title.labelSource !== undefined)
     result['labelSource'] = title.labelSource;
   if (input.summary !== undefined) result['summary'] = input.summary;
@@ -90,6 +172,7 @@ const NODE_VERSIONED_REQUEST_KEYS = [
   'summary',
   'keywords',
   'provenance',
+  'dataSchema',
 ] as const satisfies readonly (keyof PutNodeContentRequest)[];
 
 /**

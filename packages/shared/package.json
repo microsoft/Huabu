@@ -32,6 +32,10 @@
     "./agent-working-directory": {
       "types": "./src/utils/agent-working-directory.ts",
       "import": "./src/utils/agent-working-directory.ts"
+    },
+    "./data-node-validation": {
+      "types": "./src/utils/data-node-validation.ts",
+      "import": "./src/utils/data-node-validation.ts"
     }
   },
   "files": [

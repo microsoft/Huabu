@@ -3,19 +3,27 @@
 
 import {
   createId,
+  DEFAULT_INTERACTIVE_VIEW_STATE,
   interactiveViewDefinitionV1Schema,
   interactiveViewJsonRevision,
   interactiveViewRevision,
+  parseAndNormalizeDataNodeContent,
+  validateAndFormatDataNodeValue,
   validateInteractiveViewJsonBounds,
   validateInteractiveViewStateSchema,
   validateInteractiveViewState,
   type CanvasNodeId,
   type CreateInteractiveViewRequest,
+  type InteractiveViewDataBindingV1,
+  type InteractiveViewDataNodeBindingValueV1,
+  type InteractiveViewDataSnapshotV1,
   type InteractiveViewDefinitionV1,
   type InteractiveViewJsonValue,
   type InteractiveViewResource,
   type InteractiveViewRuntimeSnapshot,
+  type ReplaceInteractiveViewDataNodeResponse,
 } from '@huabu/shared';
+import { nodeRevisionOf } from '@huabu/shared/canvas-engine';
 
 import { createInteractiveViewSubmission } from '../agent/agenetes/handle.js';
 import { AgentThreadResolutionError } from '../agent/agent-thread-resolver.js';
@@ -28,7 +36,8 @@ import {
   executeOnServer,
   type InteractiveViewConflict,
 } from '../canvas/canvas-executor.js';
-import { space, getStructuredStore } from '../storage/index.js';
+import { publishCanvasUpdate } from '../canvas/canvas-sync.js';
+import { space, getStructuredStore, updateNode } from '../storage/index.js';
 
 import type { NodeContent } from '../storage/index.js';
 import type { FastifyBaseLogger } from 'fastify';
@@ -42,25 +51,35 @@ interface StoredNode {
 const STAGED_RENDERER_ARTIFACT_RE =
   /^upload\/([a-zA-Z0-9][a-zA-Z0-9._-]*\.html?)$/i;
 
+export interface InteractiveViewDataConflict {
+  currentRevision: string;
+  currentValue: InteractiveViewJsonValue | null;
+}
+
 export type InteractiveViewServiceErrorCode =
   | 'canvas_not_found'
   | 'renderer_not_found'
   | 'invalid_owner_thread'
   | 'invalid_definition'
   | 'invalid_state'
+  | 'invalid_data_value'
   | 'view_not_found'
+  | 'data_node_not_found'
   | 'view_conflict'
+  | 'data_node_conflict'
   | 'action_not_granted'
   | 'action_not_available'
   | 'thread_busy'
   | 'view_create_failed'
-  | 'view_update_failed';
+  | 'view_update_failed'
+  | 'data_node_update_failed';
 
 export class InteractiveViewServiceError extends Error {
   constructor(
     public readonly code: InteractiveViewServiceErrorCode,
     message: string,
     public readonly conflict?: InteractiveViewConflict,
+    public readonly dataConflict?: InteractiveViewDataConflict,
   ) {
     super(message);
     this.name = 'InteractiveViewServiceError';
@@ -116,15 +135,15 @@ function validateDefinition(definition: InteractiveViewDefinitionV1): void {
     throw new InteractiveViewServiceError('invalid_state', stateIssue);
   }
 
-  const bindingIds = new Set<string>();
+  const bindingsById = new Map<string, InteractiveViewDataBindingV1>();
   for (const binding of definition.bindings) {
-    if (bindingIds.has(binding.bindingId)) {
+    if (bindingsById.has(binding.bindingId)) {
       throw new InteractiveViewServiceError(
         'invalid_definition',
         `Duplicate bindingId "${binding.bindingId}"`,
       );
     }
-    bindingIds.add(binding.bindingId);
+    bindingsById.set(binding.bindingId, binding);
   }
 
   const actionIds = new Set<string>();
@@ -136,14 +155,18 @@ function validateDefinition(definition: InteractiveViewDefinitionV1): void {
       );
     }
     actionIds.add(action.actionId);
-    if (action.bindingId && !bindingIds.has(action.bindingId)) {
+    const bound = action.bindingId
+      ? bindingsById.get(action.bindingId)
+      : undefined;
+    if (action.bindingId && !bound) {
       throw new InteractiveViewServiceError(
         'invalid_definition',
         `Action "${action.actionId}" references unknown binding "${action.bindingId}"`,
       );
     }
     if (
-      (action.kind === 'data.refresh' ||
+      (action.kind === 'data.replace' ||
+        action.kind === 'data.refresh' ||
         action.kind === 'navigation.open-node' ||
         action.kind === 'navigation.open-thread') &&
       !action.bindingId
@@ -153,7 +176,95 @@ function validateDefinition(definition: InteractiveViewDefinitionV1): void {
         `Action "${action.actionId}" requires a bindingId`,
       );
     }
+    if (action.kind === 'data.replace' && bound?.source.kind !== 'data-node') {
+      throw new InteractiveViewServiceError(
+        'invalid_definition',
+        `Action "${action.actionId}" must reference a data-node binding`,
+      );
+    }
+    if (action.kind === 'agent.submit' && !definition.ownerThreadId) {
+      throw new InteractiveViewServiceError(
+        'invalid_definition',
+        `Action "${action.actionId}" requires an ownerThreadId`,
+      );
+    }
   }
+}
+
+async function buildDataNodeBindingSnapshot(
+  canvasId: string,
+  targetNodeId: string,
+): Promise<InteractiveViewDataSnapshotV1> {
+  const handle = space(canvasId);
+  const canvas = await handle.read();
+  if (!canvas) {
+    throw new InteractiveViewServiceError(
+      'canvas_not_found',
+      `Canvas ${canvasId} does not exist`,
+    );
+  }
+  const topologyNode = (canvas.state.nodes as StoredNode[]).find(
+    (node) => node.id === targetNodeId,
+  );
+  const versioned =
+    topologyNode?.type === 'data'
+      ? await handle.nodes.read(targetNodeId)
+      : null;
+  if (!topologyNode || topologyNode.type !== 'data' || !versioned) {
+    const missingValue: InteractiveViewDataNodeBindingValueV1 = {
+      status: 'missing',
+      nodeId: targetNodeId,
+      label: null,
+      value: null,
+      schema: null,
+      message: `Data Node "${targetNodeId}" does not exist in this Space`,
+    };
+    return {
+      revision: interactiveViewJsonRevision(
+        'missing',
+        missingValue as unknown as InteractiveViewJsonValue,
+      ),
+      value: missingValue as unknown as InteractiveViewJsonValue,
+      references: { nodeIds: [], threadIds: [] },
+    };
+  }
+
+  const topologyData =
+    topologyNode.data && typeof topologyNode.data === 'object'
+      ? (topologyNode.data as Record<string, unknown>)
+      : {};
+  const label =
+    typeof versioned.record.label === 'string'
+      ? versioned.record.label
+      : typeof topologyData.label === 'string'
+        ? topologyData.label
+        : null;
+  const schema = versioned.record.dataSchema ?? null;
+  const normalized = parseAndNormalizeDataNodeContent(
+    versioned.record.content ?? '{}',
+    schema,
+  );
+  const bindingValue: InteractiveViewDataNodeBindingValueV1 = normalized.ok
+    ? {
+        status: 'ready',
+        nodeId: targetNodeId,
+        label,
+        value: normalized.value,
+        schema,
+      }
+    : {
+        status: 'invalid',
+        nodeId: targetNodeId,
+        label,
+        value: null,
+        schema,
+        message: normalized.message,
+      };
+  return {
+    revision: nodeRevisionOf(versioned.record),
+    value: bindingValue as unknown as InteractiveViewJsonValue,
+    references: { nodeIds: [targetNodeId], threadIds: [] },
+  };
 }
 
 function resourceFromNode(
@@ -258,6 +369,13 @@ export class InteractiveViewService {
       let value: InteractiveViewJsonValue;
       const nodeIds = new Set<string>();
       const threadIds = new Set<string>();
+      if (binding.source.kind === 'data-node') {
+        data[binding.bindingId] = await buildDataNodeBindingSnapshot(
+          canvasId,
+          binding.source.nodeId,
+        );
+        continue;
+      }
       if (binding.source.kind === 'canvas.task-store') {
         const snapshot = await getStructuredStore()
           .space(canvasId)
@@ -352,11 +470,30 @@ export class InteractiveViewService {
         `Canvas ${canvasId} does not exist`,
       );
     }
-    if (!(await resolveOwnerThread(canvasId, request.ownerThreadId))) {
+    if (
+      request.ownerThreadId &&
+      !(await resolveOwnerThread(canvasId, request.ownerThreadId))
+    ) {
       throw new InteractiveViewServiceError(
         'invalid_owner_thread',
         `Owner thread ${request.ownerThreadId} is not an external Agent thread in this Canvas`,
       );
+    }
+    const nodesById = new Map(
+      (canvas.state.nodes as StoredNode[]).flatMap((node) =>
+        typeof node.id === 'string' ? [[node.id, node] as const] : [],
+      ),
+    );
+    for (const binding of request.bindings) {
+      if (binding.source.kind === 'data-node') {
+        const target = nodesById.get(binding.source.nodeId);
+        if (!target || target.type !== 'data') {
+          throw new InteractiveViewServiceError(
+            'invalid_definition',
+            `Bound Data Node "${binding.source.nodeId}" does not exist in this Canvas`,
+          );
+        }
+      }
     }
     const rendererExists = request.rendererArtifact.startsWith('upload/')
       ? await stagedRendererExists(canvasId, request.rendererArtifact)
@@ -370,8 +507,10 @@ export class InteractiveViewService {
 
     const definition = interactiveViewDefinitionV1Schema.parse({
       protocolVersion: 1,
-      ownerThreadId: request.ownerThreadId,
-      state: request.state,
+      ...(request.ownerThreadId
+        ? { ownerThreadId: request.ownerThreadId }
+        : {}),
+      state: request.state ?? DEFAULT_INTERACTIVE_VIEW_STATE,
       bindings: request.bindings,
       actions: request.actions,
     });
@@ -402,7 +541,7 @@ export class InteractiveViewService {
       ],
       originator: {
         source: 'agent',
-        threadId: request.ownerThreadId,
+        ...(request.ownerThreadId ? { threadId: request.ownerThreadId } : {}),
       },
       computeChanges: true,
     });
@@ -483,6 +622,128 @@ export class InteractiveViewService {
     return this.get(canvasId, nodeId);
   }
 
+  async replaceDataNodeBinding(
+    canvasId: string,
+    nodeId: string,
+    bindingId: string,
+    revision: string,
+    value: InteractiveViewJsonValue,
+    actor: 'host-bridge' | 'trusted-agent',
+  ): Promise<ReplaceInteractiveViewDataNodeResponse> {
+    const view = await this.get(canvasId, nodeId);
+    if (
+      actor === 'host-bridge' &&
+      !view.definition.actions.some(
+        (action) =>
+          action.kind === 'data.replace' && action.bindingId === bindingId,
+      )
+    ) {
+      throw new InteractiveViewServiceError(
+        'action_not_granted',
+        `Data replacement on binding "${bindingId}" is not granted to this View`,
+      );
+    }
+    const binding = view.definition.bindings.find(
+      (candidate) => candidate.bindingId === bindingId,
+    );
+    if (!binding || binding.source.kind !== 'data-node') {
+      throw new InteractiveViewServiceError(
+        'action_not_available',
+        `Binding "${bindingId}" is not a data-node binding`,
+      );
+    }
+    const targetNodeId = binding.source.nodeId;
+    const handle = space(canvasId);
+    const canvas = await handle.read();
+    if (!canvas) {
+      throw new InteractiveViewServiceError(
+        'canvas_not_found',
+        `Canvas ${canvasId} does not exist`,
+      );
+    }
+    const topologyNode = (canvas.state.nodes as StoredNode[]).find(
+      (candidate) => candidate.id === targetNodeId,
+    );
+    if (!topologyNode || topologyNode.type !== 'data') {
+      throw new InteractiveViewServiceError(
+        'data_node_not_found',
+        `Bound Data Node "${targetNodeId}" does not exist in this Space`,
+      );
+    }
+
+    const outcome = await updateNode(handle.nodes, targetNodeId, {
+      expectRev: revision,
+      apply: (existing) => {
+        const normalized = validateAndFormatDataNodeValue(
+          value,
+          existing?.dataSchema,
+        );
+        if (!normalized.ok) {
+          throw new InteractiveViewServiceError(
+            'invalid_data_value',
+            normalized.message,
+          );
+        }
+        return {
+          ...(existing ?? {
+            nodeId: targetNodeId,
+            type: 'data',
+            label:
+              (topologyNode.data as { label?: string | null } | undefined)
+                ?.label ?? null,
+          }),
+          nodeId: targetNodeId,
+          type: 'data',
+          content: normalized.formatted,
+        };
+      },
+    });
+
+    if (outcome.status === 'rev-conflict') {
+      const currentVersioned = await handle.nodes.read(targetNodeId);
+      const currentParsed = currentVersioned
+        ? parseAndNormalizeDataNodeContent(
+            currentVersioned.record.content ?? '{}',
+            currentVersioned.record.dataSchema,
+          )
+        : null;
+      throw new InteractiveViewServiceError(
+        'data_node_conflict',
+        `Bound Data Node "${targetNodeId}" changed since it was loaded`,
+        undefined,
+        {
+          currentRevision: outcome.currentRev,
+          currentValue:
+            currentParsed && currentParsed.ok ? currentParsed.value : null,
+        },
+      );
+    }
+    if (outcome.status === 'skipped-deleted') {
+      throw new InteractiveViewServiceError(
+        'data_node_not_found',
+        `Bound Data Node "${targetNodeId}" does not exist in this Space`,
+      );
+    }
+    if (outcome.status === 'rejected') {
+      throw new InteractiveViewServiceError(
+        'data_node_update_failed',
+        `Bound Data Node "${targetNodeId}" could not be updated`,
+      );
+    }
+
+    publishCanvasUpdate(canvasId, {
+      type: 'invalidate',
+      data: { nodeIds: [targetNodeId] },
+    });
+
+    const snapshot = await buildDataNodeBindingSnapshot(canvasId, targetNodeId);
+    return {
+      bindingId,
+      nodeId: targetNodeId,
+      snapshot,
+    };
+  }
+
   async submitAgentEvent(
     canvasId: string,
     nodeId: string,
@@ -511,6 +772,13 @@ export class InteractiveViewService {
         `Action "${actionId}" is not an Agent submission`,
       );
     }
+    if (!resource.definition.ownerThreadId) {
+      throw new InteractiveViewServiceError(
+        'invalid_owner_thread',
+        `Interactive View ${nodeId} does not have an owner Agent thread`,
+      );
+    }
+    const ownerThreadId = resource.definition.ownerThreadId;
 
     const event = {
       protocolVersion: 1 as const,
@@ -519,14 +787,11 @@ export class InteractiveViewService {
       ...(input !== undefined ? { input } : {}),
       viewRevision: resource.revision,
     };
-    const ownerTarget = await resolveOwnerThread(
-      canvasId,
-      resource.definition.ownerThreadId,
-    );
+    const ownerTarget = await resolveOwnerThread(canvasId, ownerThreadId);
     if (!ownerTarget) {
       throw new InteractiveViewServiceError(
         'invalid_owner_thread',
-        `Owner thread ${resource.definition.ownerThreadId} is not an external Agent thread in this Canvas`,
+        `Owner thread ${ownerThreadId} is not an external Agent thread in this Canvas`,
       );
     }
     const envelope = {
@@ -548,7 +813,7 @@ export class InteractiveViewService {
     let invocation;
     try {
       invocation = await agentThreadService.invokeSubmission({
-        threadId: resource.definition.ownerThreadId,
+        threadId: ownerThreadId,
         canvasId,
         content: envelope.user.text,
         mode: 'operate',

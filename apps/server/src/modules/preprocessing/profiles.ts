@@ -168,6 +168,12 @@ export const profiles: Record<CanvasNodeType, NodePreprocessProfile> = {
     capabilities: ['resolve_input', 'build_patch'],
     watchFields: ['content'],
   },
+  data: {
+    nodeType: 'data',
+    bodyOwnership: 'authored',
+    capabilities: ['resolve_input', 'build_patch'],
+    watchFields: [],
+  },
 };
 
 /**

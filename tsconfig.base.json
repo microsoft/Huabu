@@ -9,6 +9,9 @@
       "@huabu/shared": ["./packages/shared/src/index.ts"],
       "@huabu/shared/canvas-engine": [
         "./packages/shared/src/canvas-engine/index.ts"
+      ],
+      "@huabu/shared/data-node-validation": [
+        "./packages/shared/src/utils/data-node-validation.ts"
       ]
     }
   }

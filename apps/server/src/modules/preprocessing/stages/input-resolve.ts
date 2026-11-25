@@ -49,7 +49,8 @@ export function inputResolve(request: PreprocessNodeRequest): ResolvedInput {
   switch (nodeType) {
     case 'note':
     case 'text':
-    case 'question': {
+    case 'question':
+    case 'data': {
       return {
         ...base,
         content: (snapshot.content as string) ?? '',

@@ -5,15 +5,21 @@ import { act, createElement, useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { ApiError } from '@/api/_client';
+
 const mocks = vi.hoisted(() => ({
   getRuntime: vi.fn(),
   replaceState: vi.fn(),
+  replaceDataNode: vi.fn(),
   submitAction: vi.fn(),
+  adoptRemoteNodeContent: vi.fn(),
+  syncListener: null as ((event: unknown) => void) | null,
 }));
 
 vi.mock('@/api/interactiveView', () => ({
   getInteractiveViewRuntime: mocks.getRuntime,
   replaceInteractiveViewState: mocks.replaceState,
+  replaceInteractiveViewDataNode: mocks.replaceDataNode,
   submitInteractiveViewAction: mocks.submitAction,
 }));
 
@@ -30,6 +36,21 @@ vi.mock('@/store/canvasStore', () => ({
       rfInstance: null,
     }),
   }),
+  adoptRemoteNodeContent: mocks.adoptRemoteNodeContent,
+}));
+
+vi.mock('@/store/canvasSyncSubscription', () => ({
+  subscribeCanvasSync: (
+    _canvasId: string,
+    listener: (event: unknown) => void,
+  ) => {
+    mocks.syncListener = listener;
+    return () => {
+      if (mocks.syncListener === listener) {
+        mocks.syncListener = null;
+      }
+    };
+  },
 }));
 
 vi.mock('@/store/chatStore', () => ({
@@ -379,4 +400,209 @@ describe('useInteractiveViewBridge', () => {
       expect(onBootstrapError).not.toHaveBeenCalled();
     },
   );
+
+  it('dispatches data.replace with CAS revision, handles 409 conflicts, and refreshes on CanvasSync invalidate', async () => {
+    const formRuntime = {
+      resource: {
+        nodeId: 'node-view',
+        rendererArtifact: 'form.html',
+        revision: 'view-rev-1',
+        definition: {
+          protocolVersion: 1,
+          state: { schema: { type: 'null' }, value: null },
+          bindings: [
+            {
+              bindingId: 'cfg',
+              source: { kind: 'data-node', nodeId: 'node-data-1' },
+            },
+          ],
+          actions: [
+            {
+              actionId: 'save-cfg',
+              kind: 'data.replace',
+              bindingId: 'cfg',
+            },
+          ],
+        },
+      },
+      data: {
+        cfg: {
+          revision: 'rev-1',
+          value: {
+            status: 'ready',
+            nodeId: 'node-data-1',
+            label: 'Config',
+            value: { repo: 'microsoft/Huabu' },
+            schema: {
+              type: 'object',
+              properties: { repo: { type: 'string' } },
+              required: ['repo'],
+              additionalProperties: false,
+            },
+          },
+          references: { nodeIds: ['node-data-1'], threadIds: [] },
+        },
+      },
+    } as const;
+
+    mocks.getRuntime.mockResolvedValue(formRuntime);
+    mocks.adoptRemoteNodeContent.mockResolvedValue(undefined);
+    mocks.replaceDataNode.mockResolvedValueOnce({
+      bindingId: 'cfg',
+      nodeId: 'node-data-1',
+      snapshot: {
+        revision: 'rev-2',
+        value: {
+          status: 'ready',
+          nodeId: 'node-data-1',
+          label: 'Config',
+          value: { repo: 'microsoft/Next' },
+          schema: formRuntime.data.cfg.value.schema,
+        },
+        references: { nodeIds: ['node-data-1'], threadIds: [] },
+      },
+    });
+
+    function Harness() {
+      const bridge = useInteractiveViewBridge({
+        enabled: true,
+        canvasId: 'canvas-a',
+        nodeId: 'node-view',
+        iframeRef,
+      });
+      useEffect(() => {
+        void bridge.connect();
+      }, [bridge]);
+      return null;
+    }
+
+    await act(async () => {
+      root.render(createElement(Harness));
+      await Promise.resolve();
+    });
+
+    const channel = FakeMessageChannel.latest;
+    expect(channel?.port1.sent).toContainEqual(
+      expect.objectContaining({
+        type: 'huabu.view.bootstrap',
+        actions: [
+          { actionId: 'save-cfg', kind: 'data.replace', bindingId: 'cfg' },
+        ],
+      }),
+    );
+
+    await act(async () => {
+      channel?.port1.dispatch({
+        type: 'huabu.view.intent',
+        protocolVersion: 1,
+        nodeId: 'node-view',
+        requestId: 'req-save-1',
+        actionId: 'save-cfg',
+        input: {
+          revision: 'rev-1',
+          value: { repo: 'microsoft/Next' },
+        },
+      });
+      await Promise.resolve();
+    });
+
+    expect(mocks.replaceDataNode).toHaveBeenCalledWith(
+      'canvas-a',
+      'node-view',
+      'cfg',
+      {
+        revision: 'rev-1',
+        value: { repo: 'microsoft/Next' },
+      },
+    );
+    expect(mocks.adoptRemoteNodeContent).toHaveBeenCalledWith('canvas-a', [
+      'node-data-1',
+    ]);
+    expect(channel?.port1.sent).toContainEqual(
+      expect.objectContaining({
+        type: 'huabu.view.outcome',
+        requestId: 'req-save-1',
+        status: 'success',
+        data: expect.objectContaining({
+          cfg: expect.objectContaining({ revision: 'rev-2' }),
+        }),
+      }),
+    );
+
+    // 409 conflict preserves server currentRevision + currentValue in outcome.details
+    mocks.replaceDataNode.mockRejectedValueOnce(
+      new ApiError(
+        409,
+        {
+          code: 'data_node_conflict',
+          message: 'Revision mismatch',
+          details: {
+            currentRevision: 'rev-3',
+            currentValue: { repo: 'microsoft/Remote' },
+          },
+        },
+        'Revision mismatch',
+      ),
+    );
+
+    await act(async () => {
+      channel?.port1.dispatch({
+        type: 'huabu.view.intent',
+        protocolVersion: 1,
+        nodeId: 'node-view',
+        requestId: 'req-save-conflict',
+        actionId: 'save-cfg',
+        input: {
+          revision: 'rev-1',
+          value: { repo: 'microsoft/Stale' },
+        },
+      });
+      await Promise.resolve();
+    });
+
+    expect(channel?.port1.sent).toContainEqual(
+      expect.objectContaining({
+        type: 'huabu.view.outcome',
+        requestId: 'req-save-conflict',
+        status: 'conflict',
+        code: 'data_node_conflict',
+        details: {
+          currentRevision: 'rev-3',
+          currentValue: { repo: 'microsoft/Remote' },
+        },
+      }),
+    );
+
+    // Live CanvasSync invalidate for bound data-node triggers runtime refresh
+    mocks.getRuntime.mockResolvedValueOnce({
+      ...formRuntime,
+      data: {
+        cfg: {
+          revision: 'rev-4',
+          value: {
+            ...formRuntime.data.cfg.value,
+            value: { repo: 'microsoft/AgentUpdated' },
+          },
+        },
+      },
+    });
+    await act(async () => {
+      mocks.syncListener?.({
+        type: 'invalidate',
+        data: {
+          canvasId: 'canvas-a',
+          nodeIds: ['node-data-1'],
+        },
+      });
+      await Promise.resolve();
+    });
+    expect(channel?.port1.sent).toContainEqual(
+      expect.objectContaining({
+        type: 'huabu.view.data',
+        data: expect.objectContaining({
+          cfg: expect.objectContaining({ revision: 'rev-4' }),
+        }),
+      }),
+    );
+  });
 });

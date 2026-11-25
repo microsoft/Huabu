@@ -6,6 +6,8 @@ import { describe, expect, it } from 'vitest';
 import {
   createInteractiveViewRequestSchema,
   interactiveViewActionRequestSchema,
+  parseAndNormalizeDataNodeContent,
+  replaceInteractiveViewDataNodeRequestSchema,
   validateInteractiveViewStateSchema,
 } from './interactive-view.js';
 
@@ -44,6 +46,79 @@ describe('createInteractiveViewRequestSchema', () => {
       createInteractiveViewRequestSchema.safeParse({
         ...request,
         rendererArtifact: 'upload/view name.html',
+      }).success,
+    ).toBe(false);
+  });
+
+  it('allows standalone data-node views without ownerThreadId or state unless agent.submit is granted', () => {
+    expect(
+      createInteractiveViewRequestSchema.safeParse({
+        rendererArtifact: 'upload/form.html',
+        bindings: [
+          {
+            bindingId: 'cfg',
+            source: { kind: 'data-node', nodeId: 'node-cfg' },
+          },
+        ],
+        actions: [
+          {
+            actionId: 'save',
+            kind: 'data.replace',
+            bindingId: 'cfg',
+          },
+        ],
+        position: { x: 24, y: 24 },
+      }).success,
+    ).toBe(true);
+
+    expect(
+      createInteractiveViewRequestSchema.safeParse({
+        rendererArtifact: 'upload/form.html',
+        actions: [{ actionId: 'wake', kind: 'agent.submit' }],
+        position: { x: 24, y: 24 },
+      }).success,
+    ).toBe(false);
+  });
+});
+
+describe('Data node content and replace request validation', () => {
+  it('canonicalizes JSON to 2-space formatting and enforces dataSchema and secret-key prohibitions', () => {
+    const schema = {
+      type: 'object' as const,
+      properties: {
+        codebasePath: { type: 'string' as const, minLength: 1 },
+        maxTokens: { type: 'number' as const, minimum: 1 },
+      },
+      required: ['codebasePath'],
+      additionalProperties: false as const,
+    };
+
+    const ok = parseAndNormalizeDataNodeContent(
+      '{"codebasePath":"/repo","maxTokens":512}',
+      schema,
+    );
+    expect(ok).toEqual({
+      ok: true,
+      value: { codebasePath: '/repo', maxTokens: 512 },
+      formatted: '{\n  "codebasePath": "/repo",\n  "maxTokens": 512\n}',
+    });
+
+    const badJson = parseAndNormalizeDataNodeContent('{bad', schema);
+    expect(badJson.ok).toBe(false);
+    if (!badJson.ok) expect(badJson.code).toBe('invalid_json');
+
+    const schemaViolation = parseAndNormalizeDataNodeContent('{}', schema);
+    expect(schemaViolation.ok).toBe(false);
+    if (!schemaViolation.ok)
+      expect(schemaViolation.code).toBe('invalid_data_value');
+
+    const secretKey = parseAndNormalizeDataNodeContent('{"githubToken":"abc"}');
+    expect(secretKey.ok).toBe(false);
+
+    expect(
+      replaceInteractiveViewDataNodeRequestSchema.safeParse({
+        revision: 'rev-1',
+        value: { apiKey: 'secret' },
       }).success,
     ).toBe(false);
   });

@@ -9,6 +9,8 @@ import type {
   InteractiveViewActionResponse,
   InteractiveViewResource,
   InteractiveViewRuntimeSnapshot,
+  ReplaceInteractiveViewDataNodeRequest,
+  ReplaceInteractiveViewDataNodeResponse,
   ReplaceInteractiveViewStateRequest,
 } from '@huabu/shared';
 
@@ -60,5 +62,21 @@ export function getInteractiveViewRuntime(
   return apiFetch<InteractiveViewRuntimeSnapshot>(
     routes.interactiveViewRuntime(canvasId, nodeId),
     { fallbackMessage: 'Failed to refresh Interactive View data' },
+  );
+}
+
+export function replaceInteractiveViewDataNode(
+  canvasId: string,
+  nodeId: string,
+  bindingId: string,
+  request: ReplaceInteractiveViewDataNodeRequest,
+): Promise<ReplaceInteractiveViewDataNodeResponse> {
+  return apiFetch<ReplaceInteractiveViewDataNodeResponse>(
+    routes.interactiveViewBinding(canvasId, nodeId, bindingId),
+    {
+      method: 'PUT',
+      json: request,
+      fallbackMessage: 'Failed to save bound Data Node',
+    },
   );
 }

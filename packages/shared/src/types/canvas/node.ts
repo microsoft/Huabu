@@ -17,7 +17,10 @@ import type { AgentIcon } from '../api/agent-profile.js';
 import type { NodeProperties } from '../api/canvas.js';
 import type { FileReference } from '../api/device-files.js';
 import type { InkResourceBinding } from '../api/ink-sigil.js';
-import type { InteractiveViewDefinitionV1 } from '../api/interactive-view.js';
+import type {
+  DataNodeSchemaV1,
+  InteractiveViewDefinitionV1,
+} from '../api/interactive-view.js';
 
 // ==================== Basic Node Types ====================
 
@@ -29,6 +32,7 @@ import type { InteractiveViewDefinitionV1 } from '../api/interactive-view.js';
 export const CANVAS_NODE_TYPES = [
   'note',
   'text',
+  'data',
   'image',
   'pdf',
   'office',
@@ -52,6 +56,7 @@ export type CanvasNodeType = (typeof CANVAS_NODE_TYPES)[number];
 export const AGENT_CREATABLE_NODE_TYPES = [
   'note',
   'text',
+  'data',
   'web',
   'image',
   'pdf',
@@ -521,6 +526,14 @@ export interface TextNodeData extends BaseNodeData {
   style?: NodeStyle;
 }
 
+/** Structured JSON Data node: canonical JSON body plus optional bounded schema. */
+export interface DataNodeData extends BaseNodeData {
+  type: 'data';
+  content: string;
+  dataSchema?: DataNodeSchemaV1;
+  style?: NodeStyle;
+}
+
 /** Web page node: URL-based content that can be ingested */
 export interface WebNodeData extends BaseNodeData {
   type: 'web';
@@ -844,6 +857,7 @@ export type NodeData =
   | FileReferenceNodeData
   | NoteNodeData
   | TextNodeData
+  | DataNodeData
   | WebNodeData
   | PdfNodeData
   | OfficeNodeData
@@ -863,6 +877,10 @@ export function isNoteNode(data: NodeData): data is NoteNodeData {
 
 export function isTextNode(data: NodeData): data is TextNodeData {
   return data.type === 'text';
+}
+
+export function isDataNode(data: NodeData): data is DataNodeData {
+  return data.type === 'data';
 }
 
 export function isMediaNode(

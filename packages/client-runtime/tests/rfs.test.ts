@@ -1548,3 +1548,93 @@ describe('huabu-rfs snapshot command', () => {
     }
   });
 });
+
+describe('huabu-rfs interactive-view command', () => {
+  it('lists, gets, creates, and updates View state over RFS endpoints', async () => {
+    const requests: Array<{
+      method: string | undefined;
+      url: string | undefined;
+      body: string;
+      threadHeader: string | string[] | undefined;
+    }> = [];
+    const env = await server(async (request, response) => {
+      requests.push({
+        method: request.method,
+        url: request.url,
+        body: (await bytes(request)).toString('utf8'),
+        threadHeader: request.headers['x-huabu-host-thread-id'],
+      });
+      response.setHeader('content-type', 'application/json');
+      response.end('{"ok":true}');
+    });
+
+    expect(
+      (await call(['interactive-view', 'list', '--view-key', 'repo-form'], env))
+        .code,
+    ).toBe(0);
+    expect(
+      (await call(['interactive-view', 'get', 'node-view-1'], env)).code,
+    ).toBe(0);
+    expect(
+      (
+        await call(
+          [
+            'interactive-view',
+            'create',
+            '--json',
+            '{"rendererArtifact":"form.html","viewKey":"repo-form"}',
+          ],
+          env,
+        )
+      ).code,
+    ).toBe(0);
+    expect(
+      (
+        await call(
+          [
+            'interactive-view',
+            'replace-state',
+            'node-view-1',
+            '--json',
+            '{"revision":"rev-1","value":null}',
+          ],
+          env,
+        )
+      ).code,
+    ).toBe(0);
+
+    expect(requests).toEqual([
+      {
+        method: 'GET',
+        url: '/rfs/space/interactive-views?viewKey=repo-form',
+        body: '',
+        threadHeader: undefined,
+      },
+      {
+        method: 'GET',
+        url: '/rfs/space/interactive-views/node-view-1',
+        body: '',
+        threadHeader: undefined,
+      },
+      {
+        method: 'POST',
+        url: '/rfs/space/interactive-views',
+        body: '{"rendererArtifact":"form.html","viewKey":"repo-form"}',
+        threadHeader: 'host-thread',
+      },
+      {
+        method: 'PUT',
+        url: '/rfs/space/interactive-views/node-view-1/state',
+        body: '{"revision":"rev-1","value":null}',
+        threadHeader: undefined,
+      },
+    ]);
+
+    expect(
+      (await call(['interactive-view', 'list', '--view-key', '   '], env)).code,
+    ).toBe(1);
+    expect(
+      (await call(['interactive-view', 'get', '../escape'], env)).code,
+    ).toBe(1);
+  });
+});

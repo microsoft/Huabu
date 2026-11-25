@@ -124,6 +124,13 @@ function neutralizeNoteTags(value: string): string {
   );
 }
 
+function neutralizeDataTags(value: string): string {
+  return value.replace(
+    /<\/?data(?:\s[^>]*)?>/gi,
+    (tag) => `&lt;${tag.slice(1)}`,
+  );
+}
+
 export interface SpaceInstructionRenderOptions {
   /** Include Disk `file=` attributes on `<note>` elements (default `true`). */
   readonly includeFile?: boolean;
@@ -189,6 +196,57 @@ function renderPromptNote(
     markdown: `<note id="${quoteAttribute(ref.id)}" label="${quoteAttribute(
       ref.label ?? '',
     )}"${fileAttr} rev="${quoteAttribute(rev)}">\n${bounded}${marker}\n</note>`,
+    truncated,
+  };
+}
+
+function renderDataReference(
+  node: CanvasNode,
+  record: NodeContent,
+  includeFile = true,
+): string {
+  const ref = buildAgentNodeRef({
+    id: node.id,
+    type: 'data',
+    label: recordLabel(record),
+  });
+  const rev = nodeRevisionOf({
+    ...record,
+    type: 'data',
+    content: record.content,
+  });
+  const fileAttr = includeFile ? ` file="${quoteAttribute(ref.filename)}"` : '';
+  return `<data id="${quoteAttribute(ref.id)}" label="${quoteAttribute(
+    ref.label ?? '',
+  )}"${fileAttr} rev="${quoteAttribute(rev)}" />`;
+}
+
+function renderPromptData(
+  node: CanvasNode,
+  record: NodeContent,
+  includeFile = true,
+): { markdown: string; truncated: boolean } {
+  const ref = buildAgentNodeRef({
+    id: node.id,
+    type: 'data',
+    label: recordLabel(record),
+  });
+  const rev = nodeRevisionOf({
+    ...record,
+    type: 'data',
+    content: record.content,
+  });
+  const content = neutralizeDataTags(neutralizeInstructionTags(record.content));
+  const bounded = truncateUtf8(content, SPACE_PROMPT_NOTE_MAX_BYTES);
+  const truncated = bounded !== content;
+  const marker = truncated
+    ? '\n\n[Data truncated at the 10 KiB per-node limit.]'
+    : '';
+  const fileAttr = includeFile ? ` file="${quoteAttribute(ref.filename)}"` : '';
+  return {
+    markdown: `<data id="${quoteAttribute(ref.id)}" label="${quoteAttribute(
+      ref.label ?? '',
+    )}"${fileAttr} rev="${quoteAttribute(rev)}">\n${bounded}${marker}\n</data>`,
     truncated,
   };
 }
@@ -374,7 +432,11 @@ function renderSpaceInstructionFrames(
     const entries: RenderedEntry[] = [];
 
     for (const child of children) {
-      if (child.raw.type !== 'text' && child.raw.type !== 'note') {
+      if (
+        child.raw.type !== 'text' &&
+        child.raw.type !== 'note' &&
+        child.raw.type !== 'data'
+      ) {
         omittedUnsupportedIds.push(child.raw.id);
         continue;
       }
@@ -392,6 +454,20 @@ function renderSpaceInstructionFrames(
           nodeId: child.raw.id,
           markdown: neutralizeInstructionTags(record.content),
         });
+      } else if (child.raw.type === 'data') {
+        if (config.noteRendering === 'inline') {
+          const rendered = renderPromptData(child.raw, record, includeFile);
+          entries.push({
+            nodeId: child.raw.id,
+            markdown: rendered.markdown,
+          });
+          if (rendered.truncated) truncatedNoteIds.push(child.raw.id);
+        } else {
+          entries.push({
+            nodeId: child.raw.id,
+            markdown: renderDataReference(child.raw, record, includeFile),
+          });
+        }
       } else {
         if (config.noteRendering === 'inline') {
           const rendered = renderPromptNote(child.raw, record, includeFile);
@@ -520,7 +596,7 @@ async function resolveSpaceInstructionFrames(
       (node) =>
         typeof node.parentId === 'string' &&
         applicableFrameIds.has(node.parentId) &&
-        (node.type === 'text' || node.type === 'note'),
+        (node.type === 'text' || node.type === 'note' || node.type === 'data'),
     )
     .map((node) => node.id);
   const childRecords = await handle.nodes.readMany(childIds);

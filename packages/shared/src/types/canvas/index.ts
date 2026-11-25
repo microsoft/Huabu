@@ -51,6 +51,7 @@ export type {
   MarkdownProvenance,
   NoteNodeData,
   TextNodeData,
+  DataNodeData,
   WebNodeData,
   PdfNodeData,
   PdfHighlight,

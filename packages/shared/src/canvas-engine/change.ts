@@ -133,6 +133,7 @@ function changedKeys(
 const PRIMARY_CONTENT_KEYS = [
   'content',
   'src',
+  'dataSchema',
   'properties',
   'propertyDisplayKeys',
 ];
@@ -144,12 +145,22 @@ const PRIMARY_CONTENT_KEYS = [
  * a revision, like colour or position; title, summary and keywords are
  * derived or renamed separately.
  */
-export const CONTENT_REVISION_KEYS = ['content', 'src'] as const;
+export const CONTENT_REVISION_KEYS = ['content', 'src', 'dataSchema'] as const;
 
 /** Body keys present on a node's `data`, for CREATE fingerprinting. */
 function primaryKeysOf(data: Record<string, unknown>): string[] {
   return PRIMARY_CONTENT_KEYS.filter(
-    (k) => k in data || !['content', 'src'].includes(k),
+    (k) => k in data || !['content', 'src', 'dataSchema'].includes(k),
+  );
+}
+
+function canonicalizeNestedObject(value: unknown): unknown {
+  if (value === null || typeof value !== 'object') return value;
+  if (Array.isArray(value)) return value.map(canonicalizeNestedObject);
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+      .map(([k, v]) => [k, canonicalizeNestedObject(v)]),
   );
 }
 
@@ -169,7 +180,9 @@ function hashDataFields(
                 a < b ? -1 : a > b ? 1 : 0,
               ),
             )
-          : value;
+          : k === 'dataSchema'
+            ? canonicalizeNestedObject(value)
+            : value;
     }
   }
   const json = JSON.stringify(picked);
@@ -232,14 +245,24 @@ export function nodeRevisionOf(fields: {
   type?: string;
   content?: string;
   src?: string;
+  dataSchema?: unknown;
 }): string {
   const data: Record<string, unknown> = {};
   const hasBody =
     fields.type === undefined ||
-    ['note', 'text', 'web', 'pdf', 'office', 'question'].includes(fields.type);
+    ['note', 'text', 'data', 'web', 'pdf', 'office', 'question'].includes(
+      fields.type,
+    );
   if (hasBody && typeof fields.content === 'string')
     data.content = fields.content;
   if (typeof fields.src === 'string') data.src = fields.src;
+  if (
+    (fields.type === undefined || fields.type === 'data') &&
+    fields.dataSchema !== undefined &&
+    fields.dataSchema !== null
+  ) {
+    data.dataSchema = fields.dataSchema;
+  }
   return hashDataFields(data, CONTENT_REVISION_KEYS);
 }
 

@@ -24,6 +24,7 @@
  */
 export const NODE_CONTENT_KEYS: ReadonlySet<string> = new Set([
   'content',
+  'dataSchema',
   'label',
   'labelSource',
   'src',
@@ -54,6 +55,7 @@ export const TITLE_CONTENT_KEYS: ReadonlySet<string> = new Set([
 export const BODY_CONTENT_KEYS: ReadonlySet<string> = new Set([
   'content',
   'src',
+  'dataSchema',
 ]);
 
 /**
@@ -93,6 +95,7 @@ export function contentFieldOfUnit(
  */
 export const MD_BACKED_NODE_TYPES: ReadonlySet<string> = new Set([
   'fileReference',
+  'data',
   'note',
   'text',
   'web',
@@ -116,6 +119,7 @@ export const MD_BACKED_NODE_TYPES: ReadonlySet<string> = new Set([
  * canvas search picks it up for free.
  */
 export const TEXT_BEARING_NODE_TYPES: ReadonlySet<string> = new Set([
+  'data',
   'note',
   'text',
   'web',

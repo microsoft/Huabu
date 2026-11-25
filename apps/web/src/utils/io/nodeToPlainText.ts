@@ -42,6 +42,7 @@ function nodeToPlainText(node: PlainTextNode): string {
 
   switch (node.type) {
     // Body-bearing nodes paste as their content verbatim.
+    case 'data':
     case 'note':
     case 'text':
     case 'question':

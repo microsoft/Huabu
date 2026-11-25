@@ -901,6 +901,29 @@ export async function runRfs(args: string[], io: RfsIO = {}): Promise<number> {
           service: { id: validId, folder },
         });
       },
+      interactiveViewList: async (viewKey) => {
+        if (viewKey !== undefined && !viewKey.trim())
+          throw new Error('--view-key must be nonempty');
+        const query =
+          viewKey === undefined
+            ? ''
+            : `?viewKey=${encodeURIComponent(viewKey)}`;
+        await send({ path: `/interactive-views${query}` });
+      },
+      interactiveViewGet: (nodeId) =>
+        send({ path: `/interactive-views/${segment(nodeId)}` }),
+      interactiveViewCreate: (options) =>
+        post('/interactive-views', options, true, true),
+      interactiveViewReplaceState: async (nodeId, options) => {
+        const source = await input(options, stdin, true, signal);
+        await send({
+          path: `/interactive-views/${segment(nodeId)}/state`,
+          method: 'PUT',
+          body: new Uint8Array(source.bytes),
+          headers: { 'Content-Type': source.contentType },
+          mutation: true,
+        });
+      },
     },
     (text) => {
       stdout.write(text);

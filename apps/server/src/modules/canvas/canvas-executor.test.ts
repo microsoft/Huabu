@@ -1511,4 +1511,118 @@ describe('executeOnServer — persistence failure atomicity', () => {
       2,
     ]);
   });
+
+  it('canonicalizes Data Node JSON, persists dataSchema in sidecars only, and guards agent content/schema CAS', async () => {
+    seedNote('c1', 'seed', '');
+    const store = getCanvasStore('c1');
+    const created = await executeOnServer({
+      canvasId: 'c1',
+      commands: [
+        {
+          type: 'CREATE_NODES',
+          nodes: [
+            {
+              id: 'node-data-1',
+              nodeType: 'data',
+              position: { x: 100, y: 100 },
+              data: {
+                label: 'Repo Config',
+                content: '{"repo":"microsoft/Huabu","confirmed":true}',
+                dataSchema: {
+                  type: 'object',
+                  properties: {
+                    repo: { type: 'string' },
+                    confirmed: { type: 'boolean' },
+                  },
+                  required: ['repo', 'confirmed'],
+                },
+              },
+            },
+          ],
+        } as unknown as CanvasCommand,
+      ],
+      originator: { source: 'agent' },
+    });
+
+    expect(created.results[0]?.applied).toBe(true);
+    const persistedTopologyNode = store
+      .read()
+      ?.state.nodes.find((n) => (n as { id?: string }).id === 'node-data-1') as
+      | { data?: Record<string, unknown> }
+      | undefined;
+    expect(persistedTopologyNode?.data?.['content']).toBeUndefined();
+    expect(persistedTopologyNode?.data?.['dataSchema']).toBeUndefined();
+
+    const sidecar = store.readNode('node-data-1');
+    expect(sidecar?.type).toBe('data');
+    expect(sidecar?.content).toBe(
+      '{\n  "repo": "microsoft/Huabu",\n  "confirmed": true\n}',
+    );
+    expect(sidecar?.dataSchema).toEqual({
+      type: 'object',
+      properties: {
+        repo: { type: 'string' },
+        confirmed: { type: 'boolean' },
+      },
+      required: ['repo', 'confirmed'],
+      additionalProperties: false,
+    });
+    const rev1 = created.nodeContentRevisions?.['node-data-1'];
+    expect(typeof rev1).toBe('string');
+
+    // Agent MERGE_NODE_DATA on dataSchema without expectRev is refused as not-read
+    const missingRev = await executeOnServer({
+      canvasId: 'c1',
+      commands: [
+        {
+          type: 'MERGE_NODE_DATA',
+          patches: [{ nodeId: 'node-data-1', patch: { dataSchema: null } }],
+        } as unknown as CanvasCommand,
+      ],
+      originator: { source: 'agent' },
+    });
+    expect(missingRev.conflicts?.[0]).toMatchObject({
+      nodeId: 'node-data-1',
+      reason: 'not-read',
+    });
+
+    // Reject schema mismatch or prohibited secret keys
+    await expect(
+      executeOnServer({
+        canvasId: 'c1',
+        commands: [
+          {
+            type: 'MERGE_NODE_DATA',
+            patches: [
+              {
+                nodeId: 'node-data-1',
+                expectRev: rev1,
+                patch: { content: '{"repo": 123, "confirmed": true}' },
+              },
+            ],
+          } as unknown as CanvasCommand,
+        ],
+        originator: { source: 'agent' },
+      }),
+    ).rejects.toThrow(/must be a string/);
+
+    await expect(
+      executeOnServer({
+        canvasId: 'c1',
+        commands: [
+          {
+            type: 'CREATE_NODES',
+            nodes: [
+              {
+                nodeType: 'data',
+                position: { x: 0, y: 0 },
+                data: { content: '{"apiKey":"secret"}' },
+              },
+            ],
+          } as unknown as CanvasCommand,
+        ],
+        originator: { source: 'agent' },
+      }),
+    ).rejects.toThrow(/prohibited secret field/);
+  });
 });

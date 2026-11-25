@@ -56,8 +56,8 @@ export const NodePreviewContent = (props: NodePreviewContentProps) => {
 
   return (
     <div className="flex h-full flex-col">
-      {/* PDFs no longer generate summaries or keywords; legacy stored values stay hidden. */}
-      {type !== 'pdf' && (
+      {/* PDFs and structured Data Nodes do not generate AI summaries or keywords. */}
+      {type !== 'pdf' && type !== 'data' && (
         <AiSummaryButton key={id} summary={summary} keywords={keywords} />
       )}
       <div className="relative min-h-0 flex-1">

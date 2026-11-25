@@ -505,18 +505,25 @@ describe('GET /api/rfs/:canvasId/skill', () => {
     },
   );
 
-  it('does not expose Task/View Skills to the CLI presentation', async () => {
+  it('exposes Interactive Views Skill to CLI presentation while keeping Tasks HTTP-only', async () => {
     const app = await buildApp();
     try {
-      for (const id of ['tasks', 'interactive-views']) {
-        const response = await app.inject({
-          method: 'GET',
-          url: `/rfs/c1/skill/${id}`,
-          headers: { 'x-huabu-skill-client': 'rfs-cli' },
-        });
-        expect(response.statusCode).toBe(404);
-        expect(response.json()).toMatchObject({ code: 'skill_not_found' });
-      }
+      const tasksResponse = await app.inject({
+        method: 'GET',
+        url: '/rfs/c1/skill/tasks',
+        headers: { 'x-huabu-skill-client': 'rfs-cli' },
+      });
+      expect(tasksResponse.statusCode).toBe(404);
+      expect(tasksResponse.json()).toMatchObject({ code: 'skill_not_found' });
+
+      const viewsResponse = await app.inject({
+        method: 'GET',
+        url: '/rfs/c1/skill/interactive-views',
+        headers: { 'x-huabu-skill-client': 'rfs-cli' },
+      });
+      expect(viewsResponse.statusCode).toBe(200);
+      expect(viewsResponse.body).toContain('# Building Interactive Views');
+      expect(viewsResponse.body).toContain('huabu-rfs interactive-view');
     } finally {
       await app.close();
     }

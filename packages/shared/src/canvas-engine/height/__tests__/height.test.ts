@@ -42,6 +42,7 @@ const LEGACY_REF_WIDTHS: Record<string, number> = {
 const ALL_NODE_TYPES = [
   'text',
   'note',
+  'data',
   'question',
   'web',
   'pdf',

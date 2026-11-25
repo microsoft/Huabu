@@ -17,6 +17,7 @@
 
 import type {
   CanvasEventRecord,
+  DataNodeSchemaV1,
   ExecuteOriginator,
   NodeProperties,
 } from '@huabu/shared';
@@ -41,6 +42,7 @@ export interface CanvasFile {
 export interface NodeContent {
   properties?: NodeProperties;
   propertyDisplayKeys?: string[];
+  dataSchema?: DataNodeSchemaV1;
   nodeId: string;
   type: string;
   /**

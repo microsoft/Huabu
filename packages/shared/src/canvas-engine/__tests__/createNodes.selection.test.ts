@@ -32,6 +32,7 @@ describe('CREATE_NODES selection', () => {
   it.each([
     'text',
     'note',
+    'data',
     'web',
     'pdf',
     'office',

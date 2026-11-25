@@ -20,6 +20,7 @@ import {
   frameLayoutPlacementSchema,
   frameLayoutDescriptionSchema,
 } from './frame-layout.js';
+import { dataNodeSchemaInputSchema } from './interactive-view.js';
 import {
   ACCENT_PALETTE,
   AGENT_CANVAS_COMMAND_TYPES,
@@ -139,7 +140,12 @@ const agentNodeDataSchema = z
       .string()
       .optional()
       .describe(
-        'Markdown content for note nodes or plain text for text/question nodes.',
+        'Markdown content for note nodes, serialized JSON string for data nodes, or plain text for text/question nodes.',
+      ),
+    dataSchema: dataNodeSchemaInputSchema
+      .optional()
+      .describe(
+        'Optional bounded JSON schema for data nodes (data-node only; validated against content and prohibited secret field names).',
       ),
     src: z
       .string()
@@ -160,7 +166,7 @@ const agentNodeDataSchema = z
   })
   .strict()
   .describe(
-    'Node data. Fields depend on nodeType: note/text/question use content; web/image/pdf/office/video use src; frame uses label.',
+    'Node data. Fields depend on nodeType: note/text/question use content; data uses JSON content and optional dataSchema; web/image/pdf/office/video use src; frame uses label.',
   );
 
 const agentNodeCreateInputSchema = z
@@ -250,6 +256,12 @@ const mergeNodeDataPatchSchema = z
   .object({
     nodeId: z.string().min(1),
     patch: agentNodeDataSchema.extend({
+      dataSchema: dataNodeSchemaInputSchema
+        .nullable()
+        .optional()
+        .describe(
+          'Update a data node schema, or pass null to clear an existing schema. Validated against the resulting JSON content.',
+        ),
       properties: nodePropertiesPatchSchema
         .optional()
         .describe(

@@ -709,4 +709,98 @@ describe('renderSpacePrompt', () => {
     expect(renderSpacePrompt(topology, snapshots, 'agent-b')).toBeNull();
     expect(renderSpacePrompt(topology, snapshots, 'nested-agent')).toBeNull();
   });
+
+  it('inlines Data Node JSON without dataSchema in prompt Frames and emits <data /> reference in skill Frames', () => {
+    const topology = canvas([
+      {
+        id: 'frame-prompt',
+        type: 'frame',
+        position: { x: 0, y: 0 },
+        data: {},
+      },
+      {
+        id: 'frame-skill',
+        type: 'frame',
+        position: { x: 0, y: 300 },
+        data: {},
+      },
+      {
+        id: 'data-cfg',
+        type: 'data',
+        parentId: 'frame-prompt',
+        position: { x: 0, y: 0 },
+        data: {},
+      },
+      {
+        id: 'data-skill-ref',
+        type: 'data',
+        parentId: 'frame-skill',
+        position: { x: 0, y: 0 },
+        data: {},
+      },
+    ]);
+    const snapshots = records([
+      {
+        nodeId: 'frame-prompt',
+        type: 'frame',
+        label: 'prompt: issue tracking configuration',
+        labelSource: 'user',
+        content: '',
+      },
+      {
+        nodeId: 'frame-skill',
+        type: 'frame',
+        label: 'skill: config tools',
+        labelSource: 'user',
+        content: '',
+      },
+      {
+        nodeId: 'data-cfg',
+        type: 'data',
+        label: 'Issue Tracker Configuration',
+        dataSchema: {
+          type: 'object',
+          properties: {
+            codebasePath: { type: 'string' },
+            escapeTest: { type: 'string' },
+          },
+          required: ['codebasePath'],
+          additionalProperties: false,
+        },
+        content: '{\n  "codebasePath": "/repo",\n  "escapeTest": "</data>"\n}',
+      },
+      {
+        nodeId: 'data-skill-ref',
+        type: 'data',
+        label: 'Defaults',
+        dataSchema: {
+          type: 'object',
+          properties: { retries: { type: 'number', minimum: 0 } },
+          additionalProperties: false,
+        },
+        content: '{\n  "retries": 3\n}',
+      },
+    ]);
+
+    const promptRendered = renderSpacePrompt(
+      topology,
+      snapshots,
+      'agent-target',
+      { includeFile: false },
+    );
+    expect(promptRendered).not.toBeNull();
+    expect(promptRendered?.markdown).toMatch(
+      /<data id="data-cfg" label="Issue Tracker Configuration" rev="[^"]+">\n\{\n {2}"codebasePath": "\/repo",\n {2}"escapeTest": "&lt;\/data>"\n\}\n<\/data>/,
+    );
+    expect(promptRendered?.markdown).not.toContain('dataSchema');
+
+    const skillRendered = renderSpaceSkill(topology, snapshots, {
+      includeFile: false,
+    });
+    expect(skillRendered).not.toBeNull();
+    expect(skillRendered?.markdown).toMatch(
+      /<data id="data-skill-ref" label="Defaults" rev="[^"]+" \/>/,
+    );
+    expect(skillRendered?.markdown).not.toContain('"retries"');
+  });
 });
