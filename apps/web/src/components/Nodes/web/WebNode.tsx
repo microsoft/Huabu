@@ -10,6 +10,7 @@ import {
   DropdownMenuItem,
   DropdownMenuLink,
 } from '@/components/Common/DropdownMenu';
+import { openServerFileInDesktop } from '@/hooks/useElectron';
 import { useNodePresentation } from '@/hooks/useNodePresentation';
 import {
   canDownloadWebSource,
@@ -213,6 +214,10 @@ export const WebNode = memo(
               to={externalHref}
               target="_blank"
               rel="noopener noreferrer"
+              onClick={(event) => {
+                if (openServerFileInDesktop(externalHref))
+                  event.preventDefault();
+              }}
               icon={<ArrowUpRight />}
             >
               {t('toolbar.openOriginalUrl')}

@@ -957,6 +957,14 @@ describe('rendered conversation titles', () => {
       const dot = container.querySelector(
         `[data-acp-connection-status="${status}"]`,
       );
+      if (status === 'connected') {
+        // Working is the normal state and gets no mark anywhere.
+        expect(
+          container.querySelector('[data-acp-connection-status]'),
+        ).toBeNull();
+        expect(container.querySelector('[role="alert"]')).toBeNull();
+        return;
+      }
       assert(dot);
       expect(dot.closest('[role="tab"]')).not.toBeNull();
       expect(
@@ -987,7 +995,7 @@ describe('rendered conversation titles', () => {
     },
   );
 
-  it('removes an otherwise empty Question header after moving its status to the tab', async () => {
+  it('removes an otherwise empty Question header when the status is the normal one', async () => {
     const node = {
       id: 'question',
       type: 'question',
@@ -1016,15 +1024,13 @@ describe('rendered conversation titles', () => {
       vi.fn(),
       { hideDuplicateTitle: true },
     );
-    expect(
-      container.querySelector('[role="tab"] [data-acp-connection-status]'),
-    ).not.toBeNull();
+    expect(container.querySelector('[data-acp-connection-status]')).toBeNull();
     expect(container.querySelector('.h-7.shrink-0')).toBeNull();
     expect(container.querySelector('.overflow-visible.pt-3')).not.toBeNull();
     expect(container.querySelector('.overflow-visible.pt-1')).toBeNull();
   });
 
-  it('hides the duplicate title but retains connection and save controls, and waits for hydration before renaming', async () => {
+  it('hides the duplicate title but retains save controls, and waits for hydration before renaming', async () => {
     useChatStore.getState().setHistoryLoaded('thread', false);
     useChatStore.getState().setAgentBinding('thread', {
       kind: 'external',
@@ -1053,11 +1059,7 @@ describe('rendered conversation titles', () => {
     expect(saveButton?.classList.contains('[&_svg]:h-3.25')).toBe(true);
     expect(saveButton?.classList.contains('min-h-6')).toBe(true);
     expect(saveButton?.classList.contains('text-fg-muted')).toBe(true);
-    expect(
-      container.querySelector(
-        '[role="tab"] [data-acp-connection-status="connected"]',
-      ),
-    ).not.toBeNull();
+    expect(container.querySelector('[data-acp-connection-status]')).toBeNull();
     await act(async () =>
       useChatStore.getState().setHistoryLoaded('thread', true),
     );
@@ -1209,6 +1211,8 @@ describe('rendered conversation titles', () => {
       alias: 'Fixture',
     });
     await loadTitle('Long valid topic '.repeat(7).trim());
+    // A badge is only there while the status is not the normal one.
+    sessionMetaState.loading = true;
     await renderPanel();
     const button = header();
     const wrapper = button.parentElement;

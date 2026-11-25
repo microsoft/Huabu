@@ -22,6 +22,7 @@ import { useTranslation } from 'react-i18next';
 import { CANVAS_NODE_TYPES, OFFICE_FORMATS } from '@huabu/shared';
 
 import { getNodeIcon } from '@/config/nodeIcons';
+import { useConversationAttention } from '@/hooks/useConversationAttention';
 import useCanvasStore from '@/store/canvasStore';
 import {
   getConversationTitle,
@@ -29,6 +30,7 @@ import {
 } from '@/store/conversationTitleStore';
 import { deviceFileName } from '@/utils/deviceFile';
 
+import { AttentionDot } from '../../Common/AttentionDot';
 import { Button } from '../../Common/Button';
 import { cn } from '../../Common/cn';
 import { DropdownMenu, DropdownMenuItem } from '../../Common/DropdownMenu';
@@ -197,6 +199,13 @@ export function PreviewTab({
 }: PreviewTabProps) {
   const { t } = useTranslation();
   const connectionDescription = useAcpConnectionDescription(chatConnection);
+  const attention = useConversationAttention(
+    tab.target.kind === 'node'
+      ? { nodeId: tab.target.nodeId }
+      : tab.target.kind === 'chat' || tab.target.kind === 'conversation'
+        ? { threadId: tab.target.threadId }
+        : {},
+  );
   const [menuOpen, setMenuOpen] = useState(false);
   const renameLabel = t(
     tab.target.kind === 'chat' ? 'chat.renameTitle' : 'node.rename',
@@ -348,6 +357,12 @@ export function PreviewTab({
               {Icon && (
                 <span className="relative inline-flex shrink-0">
                   <Icon size={14} aria-hidden data-testid="preview-tab-icon" />
+                  {attention && (
+                    <AttentionDot
+                      kind={attention}
+                      className="ring-bg-default -top-0.5 -right-0.5 ring-2"
+                    />
+                  )}
                   {chatConnection && (
                     <AcpConnectionDot
                       status={chatConnection.status}

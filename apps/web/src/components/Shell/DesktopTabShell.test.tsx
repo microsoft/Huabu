@@ -51,7 +51,8 @@ describe('DesktopTabShell minimal Tab presentation', () => {
           title: 'Home',
           loading: false,
           running: false,
-          unread: false,
+          attention: null,
+          unseen: 0,
           error: null,
         },
         {
@@ -60,7 +61,8 @@ describe('DesktopTabShell minimal Tab presentation', () => {
           title: 'Space A',
           loading: true,
           running: true,
-          unread: true,
+          attention: 'approval',
+          unseen: 2,
           error: 'An earlier Agent task failed',
         },
       ],
@@ -131,7 +133,23 @@ describe('DesktopTabShell minimal Tab presentation', () => {
     return element;
   }
 
-  it('shows only a neutral title and close button regardless of activity/error metadata', async () => {
+  it('marks a Tab by what its Space holds unseen, in front or not', async () => {
+    await render();
+    const mark =
+      button('Space A').querySelector<HTMLElement>('[data-attention]');
+    expect(mark?.dataset.attention).toBe('approval');
+    expect(mark?.getAttribute('aria-label')).toBe('attention.approval');
+    expect(mark?.style.backgroundColor).toBe('var(--warning)');
+    expect(mark?.parentElement?.getAttribute('title')).toBe(
+      'desktopTabs.unseen',
+    );
+    expect(button('Space A').textContent).toBe('Space A');
+    expect(
+      button('navigation.home').querySelector('[data-attention]'),
+    ).toBeNull();
+  });
+
+  it('shows only a neutral title, the attention badge and a close button regardless of activity/error metadata', async () => {
     await render();
     const tab = button('Space A');
     expect(tab.textContent).toBe('Space A');

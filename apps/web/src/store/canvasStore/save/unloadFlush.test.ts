@@ -12,7 +12,6 @@ describe('createUnloadFlush', () => {
       flushPreviewWorkspace,
       events: { flushAllKeepalive: vi.fn() },
       nodeContent: { flushAllKeepalive: vi.fn() },
-      preprocess: { flushKeepalive: vi.fn() },
     } as unknown as UnloadFlushDeps;
 
     createUnloadFlush(deps)();
@@ -25,7 +24,6 @@ describe('createUnloadFlush', () => {
       flushPreviewWorkspace: vi.fn(),
       events: { flushAllKeepalive: vi.fn() },
       nodeContent: { flushAllKeepalive: vi.fn() },
-      preprocess: { flushKeepalive: vi.fn() },
       sendQueue: queue,
     } as unknown as UnloadFlushDeps;
   }

@@ -1,58 +1,88 @@
-import { Command } from 'commander'
-import { parseBootstrapEnv } from './bootstrap-env.js'
+import { Command } from 'commander';
+import { parseBootstrapEnv } from './bootstrap-env.js';
 
 export interface AgentletOptions {
-  server: string
-  token: string
-  reconnectMax: number
-  bufferLimit: number
-  heartbeat: number
-  allowInsecure: boolean
+  server: string;
+  token: string;
+  reconnectMax: number;
+  bufferLimit: number;
+  heartbeat: number;
+  allowInsecure: boolean;
 
-  logLevel: 'debug' | 'info' | 'warn' | 'error'
-  logFile?: string
+  logLevel: 'debug' | 'info' | 'warn' | 'error';
+  logFile?: string;
 
-  agentletId?: string
-  maxAgents: number
-  bootstrapEnv?: Readonly<Record<string, string>>
+  agentletId?: string;
+  maxAgents: number;
+  bootstrapEnv?: Readonly<Record<string, string>>;
 }
 
 /** Result of parsing the generic `agentlet daemon` command. */
-export type CliResult = { mode: 'daemon'; options: AgentletOptions }
+export type CliResult = { mode: 'daemon'; options: AgentletOptions };
 
 function positiveSafeInteger(value: string, option: string): number {
-  const parsed = Number(value)
+  const parsed = Number(value);
   if (!Number.isSafeInteger(parsed) || parsed < 1) {
-    throw new Error(`${option} must be a positive safe integer`)
+    throw new Error(`${option} must be a positive safe integer`);
   }
-  return parsed
+  return parsed;
 }
 
 export function parseCli(argv: string[]): CliResult {
-  const program = new Command()
+  const program = new Command();
 
-  let result: CliResult | undefined
+  let result: CliResult | undefined;
 
   program
     .name('agentlet')
-    .description('A network adapter that makes any local ACP agent remotely accessible over WebSocket')
+    .description(
+      'A network adapter that makes any local ACP agent remotely accessible over WebSocket',
+    );
 
   program
     .command('daemon')
-    .description('Run the agentlet daemon, bridging local ACP agents to a remote server over WebSocket')
+    .description(
+      'Run the agentlet daemon, bridging local ACP agents to a remote server over WebSocket',
+    )
     .requiredOption('--server <url>', 'Remote server bridge endpoint (WSS URL)')
-    .option('--token <token>', 'Authentication token (or set AGENTLET_TOKEN env var)')
-    .option('--reconnect-max <seconds>', 'Maximum reconnection backoff in seconds', '30')
-    .option('--buffer-limit <count>', 'Max messages buffered during disconnection', '1000')
+    .option(
+      '--token <token>',
+      'Authentication token (or set AGENTLET_TOKEN env var)',
+    )
+    .option(
+      '--reconnect-max <seconds>',
+      'Maximum reconnection backoff in seconds',
+      '30',
+    )
+    .option(
+      '--buffer-limit <count>',
+      'Max messages buffered during disconnection',
+      '1000',
+    )
     .option('--max-agents <count>', 'Maximum concurrent agents', '10')
     .option(
       '--agentlet-id <id>',
       'Device identity reported to the host (defaults to the persisted device UUID)',
     )
-    .option('--log-level <level>', 'Logging verbosity: debug, info, warn, error', 'info')
-    .option('--log-file <path>', 'Path to write structured log output (JSON lines)')
-    .option('--heartbeat <seconds>', 'WebSocket ping interval in seconds (0 to disable)', '30')
-    .option('--allow-insecure', 'Allow ws:// (non-TLS) connections (local development only)', false)
+    .option(
+      '--log-level <level>',
+      'Logging verbosity: debug, info, warn, error',
+      'info',
+    )
+    .option(
+      '--log-file <path>',
+      'Path to write structured log output (JSON lines)',
+    )
+    .option(
+      '--heartbeat <seconds>',
+      'WebSocket ping interval in seconds (0 to disable)',
+      '30',
+    )
+    .option(
+      '--allow-insecure',
+      'Allow ws:// (non-TLS) connections (local development only)',
+      false,
+    )
     .option(
       '--env-inject <KEY=VALUE>',
       'Opaque non-secret agent bootstrap value (repeatable)',
@@ -60,10 +90,12 @@ export function parseCli(argv: string[]): CliResult {
       [],
     )
     .action((opts) => {
-      const token = opts.token || process.env['AGENTLET_TOKEN']
+      const token = opts.token || process.env['AGENTLET_TOKEN'];
       if (!token) {
-        console.error('Error: --token is required (or set AGENTLET_TOKEN environment variable)')
-        process.exit(1)
+        console.error(
+          'Error: --token is required (or set AGENTLET_TOKEN environment variable)',
+        );
+        process.exit(1);
       }
 
       result = {
@@ -71,7 +103,10 @@ export function parseCli(argv: string[]): CliResult {
         options: {
           server: opts.server,
           token,
-          reconnectMax: positiveSafeInteger(opts.reconnectMax, '--reconnect-max'),
+          reconnectMax: positiveSafeInteger(
+            opts.reconnectMax,
+            '--reconnect-max',
+          ),
           bufferLimit: parseInt(opts.bufferLimit, 10),
           heartbeat: parseInt(opts.heartbeat, 10),
           allowInsecure: opts.allowInsecure,
@@ -81,15 +116,15 @@ export function parseCli(argv: string[]): CliResult {
           maxAgents: positiveSafeInteger(opts.maxAgents, '--max-agents'),
           bootstrapEnv: parseBootstrapEnv(opts.envInject),
         },
-      }
-    })
+      };
+    });
 
-  program.parse(argv)
+  program.parse(argv);
 
   if (!result) {
-    program.help()
-    process.exit(1)
+    program.help();
+    process.exit(1);
   }
 
-  return result
+  return result;
 }

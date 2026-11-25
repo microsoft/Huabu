@@ -68,8 +68,11 @@ import type { Node } from '@xyflow/react';
  *    `update` carries. Each node is fetched and shown unless this page has
  *    unsaved content of its own for it; the page's own saves are skipped.
  *
- * Received updates intentionally do NOT trigger preprocessing — that
- * stays with the originating side (the server, for headless `/execute`).
+ *  - `preprocess`: a preprocessing run the server started for a node
+ *    began or ended; shown as the node's ingestion state.
+ *
+ * No received event makes this page request preprocessing: the server
+ * starts it where a write is committed and stores the result itself.
  */
 
 interface CanvasSyncState {
@@ -366,11 +369,27 @@ export const useCanvasSyncStore = create<CanvasSyncState>((set, get) => ({
       }),
     };
     connection = current;
+    /** Nodes shown as pending for a run the server announced. */
+    const serverPreprocessing = new Set<string>();
     unsubscribe = subscribeCanvasSync(canvasId, (event) => {
       // Ignore late frames after a canvas switch / disconnect.
       if (get().canvasId !== canvasId) return;
       const canvasStore = useCanvasStore.getState();
       if (canvasStore.canvasId !== canvasId) return;
+      if (event.type === 'preprocess') {
+        // Preprocessing the server runs after a write: show it on the node
+        // until it ends. What it derived arrives as node content does.
+        const { nodeId, status } = event.data;
+        if (status === 'pending') {
+          serverPreprocessing.add(nodeId);
+          canvasStore.setNodeIngestion(nodeId, { status: 'pending' });
+        } else {
+          // Done or failed: either way the run is over.
+          serverPreprocessing.delete(nodeId);
+          canvasStore.clearNodeIngestion(nodeId);
+        }
+        return;
+      }
       if (event.type !== 'invalidate')
         current.streamVersion = Math.max(
           current.streamVersion ?? 0,
@@ -379,6 +398,11 @@ export const useCanvasSyncStore = create<CanvasSyncState>((set, get) => ({
 
       if (event.type === 'snapshot') {
         current.streamSeen = true;
+        // A (re)connection: the end of a run announced on the previous
+        // connection may have been missed, so nothing stays pending for it.
+        for (const nodeId of serverPreprocessing)
+          canvasStore.clearNodeIngestion(nodeId);
+        serverPreprocessing.clear();
         // Skip the catch-up reload while an initial/primary load is
         // still in flight. On fresh open the CanvasPage mount load
         // is already fetching the latest state, but it hasn't set
@@ -402,7 +426,13 @@ export const useCanvasSyncStore = create<CanvasSyncState>((set, get) => ({
       if (event.type === 'invalidate') {
         // A node-content save by another page. An event without node ids is
         // a read-model notice, and this page already shows its own saves.
-        const { nodeIds, originPageId } = event.data;
+        const { nodeIds, originPageId, reviewThreadId } = event.data;
+        // A review record kept or reverted on another page: the list this
+        // page holds for that conversation is out of date.
+        if (reviewThreadId)
+          void useAcpThreadChangesStore
+            .getState()
+            .load(canvasId, reviewThreadId);
         if (!nodeIds?.length || originPageId === CANVAS_PAGE_ID) return;
         if (canvasStore.isLoading) adoptAfterLoad(canvasId, nodeIds);
         else void adoptRemoteNodeContent(canvasId, nodeIds);

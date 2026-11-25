@@ -24,6 +24,7 @@ import { useTranslation } from 'react-i18next';
 import { getElectronBridge } from '@/hooks/useElectron';
 
 import { UpdateButton } from './UpdateButton';
+import { AttentionDot } from '../Common/AttentionDot';
 import { Button, type Tone } from '../Common/Button';
 import { cn } from '../Common/cn';
 import { TabPointerSensor } from '../Common/TabPointerSensor';
@@ -111,13 +112,26 @@ function DesktopTabItem({
         {tab.id === 'home' ? (
           <House aria-hidden />
         ) : (
+          // The wrapper carries the mark, so a truncated title cannot clip it.
           <span
-            className={cn(
-              'truncate',
-              active ? 'text-fg-default' : 'text-fg-muted',
-            )}
+            className="relative flex min-w-0"
+            // On the title, not the Button: a Button with a title wraps
+            // itself in a tooltip element and the Tab's layout changes.
+            title={
+              tab.unseen > 0
+                ? t('desktopTabs.unseen', { count: tab.unseen })
+                : undefined
+            }
           >
-            {title}
+            <span
+              className={cn(
+                'truncate',
+                active ? 'text-fg-default' : 'text-fg-muted',
+              )}
+            >
+              {title}
+            </span>
+            {tab.attention && <AttentionDot kind={tab.attention} />}
           </span>
         )}
       </Button>

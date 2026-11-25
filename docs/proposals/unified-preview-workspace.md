@@ -291,7 +291,7 @@ The workspace's outer maximum width must allow two useful groups while preservin
 | `expandMode`, `setExpandMode`                   | **Done.** Died with the retired replace / split mode.                                                                                       |
 | `expandedNodeFocusTick`                         | **Done.** Replaced by a runtime-only, one-shot `{ tabId, nonce }` request that is consumed after the addressed tab focuses.                 |
 | `openExpanded`, `closeExpanded`                 | **Done.** Replaced by `openPreviewTarget` and tab close, which still invoke the settle boundary.                                            |
-| `settleNodePreprocess`                          | Stays. Preprocessing is document work; the workspace calls into it at the settle boundary.                                                  |
+| `endNodeEditing` (was `settleNodePreprocess`)   | Stays. It marks the node's next content save as editing-ended; the workspace calls into it at the settle boundary.                          |
 | `nodes`, `edges`, `updateNodeData`, `tryRename` | Stay. A renderer reading node data from `canvasStore` is reading the document, not presentation.                                            |
 | `UiIntentResult.expandedNodeId`                 | **Done.** Moved. Renamed `openPreviewNode`; the intent carries a preview request instead of bypassing the pipeline with a direct state set. |
 
@@ -325,9 +325,9 @@ After a Canvas loads, target validation removes tabs for deleted local nodes and
 
 Deleting a Question node closes every tab targeting that presentation node but does not cancel an already-running server turn. Existing thread-history retention rules continue to decide whether its history remains available outside the Canvas UI.
 
-A node deleted elsewhere while its tab holds unsettled editable content runs that tab's settle boundary before the tab is removed, so the existing `settleNodePreprocess` contract is not bypassed by a remote deletion.
+A node deleted elsewhere while its tab holds unsettled editable content runs that tab's settle boundary before the tab is removed, so the existing `endNodeEditing` contract is not bypassed by a remote deletion.
 
-Closing or switching away from an editable Note or Text preview must preserve the current `settleNodePreprocess` boundary owned by `openExpanded` and `closeExpanded`.
+Closing or switching away from an editable Note or Text preview must preserve the current `endNodeEditing` boundary owned by `openExpanded` and `closeExpanded`.
 
 The persisted workspace schema carries a version and migration function. The initial migration seeds one unbound Canvas Chat tab from an existing `threadMap` entry when no newer workspace state exists; a legacy `questionReplayByCanvas` entry maps to a Question-node target. After migration, `threadMap` has no special "main Chat" role and is retired when all callers use workspace targets and `threadsById`.
 

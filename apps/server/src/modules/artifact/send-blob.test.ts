@@ -305,7 +305,7 @@ describe('sendBlob under per-Space access', () => {
     ).toEqual(['private, no-cache', 304, 'private, no-cache']);
   });
 
-  it('renders a stored document in an opaque origin only for restricted callers', async () => {
+  it('renders a stored document in an opaque origin for every caller', async () => {
     const scope = fakeScope({ 'page.html': Buffer.from('<script></script>') });
     const csp = async (access: ResourceAccess) => {
       const app = Fastify();
@@ -336,14 +336,15 @@ describe('sendBlob under per-Space access', () => {
         renderer.headers['content-security-policy'],
       ];
     };
-    // Local mode: unchanged.
-    expect(await csp(UNRESTRICTED_ACCESS)).toEqual([
-      undefined,
-      "connect-src 'none'",
-    ]);
-    // Bubble mode, even for a system owner; a route's own policy stays
-    // enforced beside the sandbox.
+    // A route's own policy stays enforced beside the sandbox.
     const sandbox = 'sandbox allow-scripts allow-forms allow-popups';
+    // Local mode: a framed remote page can redirect to a stored file, and
+    // the desktop app's launch token would then be its own.
+    expect(await csp(UNRESTRICTED_ACCESS)).toEqual([
+      sandbox,
+      ["connect-src 'none'", sandbox],
+    ]);
+    // Bubble mode, even for a system owner.
     expect(
       await csp({
         can: async () => true,

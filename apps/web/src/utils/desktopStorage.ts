@@ -11,6 +11,8 @@ const preferenceKeys = [
   'huabu.recentConversationAgentProfile.v1',
   'huabu:world-enabled',
   'huabu.minimapEnabled',
+  'huabu.notifyTurnDone',
+  'huabu.notifyNeedsYou',
 ];
 
 function isPreferenceKey(key: string): key is DesktopPreferenceKey {

@@ -67,7 +67,6 @@ async function seed(
   zoom: number,
   {
     missingSource = false,
-    emptyLabel = false,
     labelText = '',
     viewportY = 40,
     inputMode = 'pen',
@@ -152,7 +151,7 @@ async function seed(
         height: (type === 'video' ? 337.5 : 380) / zoom,
       }
     : { width: 400, height: 240 };
-  const label = emptyLabel ? '' : labelText || `Interactive ${type}`;
+  const label = labelText || `Interactive ${type}`;
   // The headless Canvas executor accepts user-created types too, unlike the
   // agent tool's narrower schema. Use actual required data, not renderer mocks.
   let data: NodeData;
@@ -228,17 +227,6 @@ async function seed(
     },
   });
   expect(inserted.ok(), await inserted.text()).toBe(true);
-  if (emptyLabel) {
-    // Creation supplies a fallback label; model a legacy empty-label load to
-    // exercise the production backfill/ingestion lifecycle without store writes.
-    await page.route(`**/api/canvas/${canvasId}`, async (route) => {
-      if (route.request().method() !== 'GET') return route.continue();
-      const response = await route.fetch();
-      const record = await response.json();
-      for (const node of record.state.nodes) node.data.label = '';
-      await route.fulfill({ response, json: record });
-    });
-  }
   await page.addInitScript(
     ({ canvasId, zoom, viewportY, inputMode }) => {
       if (window !== window.top) return;
@@ -1121,57 +1109,6 @@ test('Escape clears a mouse-selected node without requiring content focus', asyn
 });
 
 for (const type of ['text', 'note'] as const) {
-  test(`${type} current toolbar type retains native focus exit during ingestion`, async ({
-    page,
-  }) => {
-    test.setTimeout(90_000);
-    await page.routeWebSocket('**', (socket) => socket.close());
-    let release = () => {};
-    const pending = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    // Hold the real load-time backfill request, not the store or toolbar.
-    await page.route('**/nodes/*/preprocess', async (route) => {
-      await pending;
-      await route.continue();
-    });
-    try {
-      const { node, persisted } = await seed(page, type, 1, {
-        emptyLabel: true,
-      });
-      await node.click({ position: { x: 20, y: 12 } });
-      const toolbar = page.locator('.node-floating-toolbar');
-      const current = toolbar.locator('[data-node-drag-handle]');
-      await toolbar.getByRole('button', { name: 'More', exact: true }).click();
-      const alternate = page.getByRole('menuitem', { name: /Convert to/ });
-      await expect(current).toBeEnabled();
-      await expect(alternate).toBeDisabled();
-      await page.keyboard.press('Escape');
-      const before = await persisted();
-      for (const activation of ['click', 'Enter', 'Space']) {
-        await current.focus();
-        if (activation === 'click') await current.click();
-        else await page.keyboard.press(activation);
-        await expect(page.locator('[data-canvas-root]')).toBeFocused();
-        await expect(node).toHaveClass(/selected/);
-        await expect(page.locator('.react-flow__node.selected')).toHaveCount(1);
-        await expect(node).toContainText(
-          'Toolbar drag preserves this content.',
-        );
-        const after = await persisted();
-        expect(after.id).toBe(before.id);
-        expect(after.type).toBe(type);
-        expect(after.data.type).toBe(type);
-        expect(after.data.content).toEqual(before.data.content);
-        expect(after.position).toEqual(before.position);
-      }
-      await assertToolbarDragAndUndo(page, node, current, persisted, 1);
-    } finally {
-      release();
-      await page.unrouteAll({ behavior: 'wait' });
-    }
-  });
-
   test(`${type} toolbar buttons drag without conversion; click, Enter and Space activate`, async ({
     page,
   }, testInfo) => {

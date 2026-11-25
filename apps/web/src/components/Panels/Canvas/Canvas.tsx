@@ -97,6 +97,7 @@ import { getEdgeIdsBetweenSelectedNodes } from '@/utils/selection';
 import { isVisibleWorldNode } from '@/utils/spaceHierarchy';
 
 import { applyNodeGeometryPreviews } from './applyNodeGeometryPreview';
+import { UnseenNodeMarks } from './attention/UnseenNodeMarks.tsx';
 import { CanvasGrid } from './CanvasGrid';
 import {
   canStartRetainedSelectionMove,
@@ -1608,6 +1609,7 @@ const CanvasContent: React.FC<CanvasProps> = ({
             <MultiSelectResizer />
             <SelectionOutlines />
             <CanvasPresenceLayer />
+            <UnseenNodeMarks />
             {!isBoxSelecting && !hasLassoSelection && <MultiSelectToolbar />}
             {!isBoxSelecting && <StrokeSelectionRegion />}
             {!isBoxSelecting && <StrokeSelectionToolbar />}

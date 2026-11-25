@@ -938,11 +938,8 @@ try {
     'Pending upload waited beyond 15s and persisted before reload without dismissing progress',
   );
   await createdPage.evaluate(async () => {
-    const {
-      default: store,
-      saveCanvasForSubmission,
-      drainNodePreprocessing,
-    } = await import('/src/store/canvasStore.ts');
+    const { default: store, saveCanvasForSubmission } =
+      await import('/src/store/canvasStore.ts');
     store.getState().addNode({
       id: 'tabs-smoke-close-text',
       nodeType: 'text',
@@ -958,7 +955,6 @@ try {
       });
     }
     await saveCanvasForSubmission(store.getState().canvasId);
-    await drainNodePreprocessing();
     const { openPreviewNode } =
       await import('/src/store/previewWorkspace/actions.ts');
     const { usePreviewWorkspaceStore } =
@@ -983,19 +979,27 @@ try {
     '.react-flow__node[data-id="tabs-smoke-close-text"] textarea',
   );
   await textEditor.fill('Settled text before immediate close');
-  let releasePreprocess;
-  const preprocessingGate = new Promise((resolve) => {
-    releasePreprocess = resolve;
+  // Closing the tab leaves the Text editor: the page says so on a content
+  // save, which must reach the server before the renderer is destroyed.
+  let releaseEndedSave;
+  const endedSaveGate = new Promise((resolve) => {
+    releaseEndedSave = resolve;
   });
-  let observePreprocess;
-  const preprocessingStarted = new Promise((resolve) => {
-    observePreprocess = resolve;
+  let observeEndedSave;
+  const endedSaveStarted = new Promise((resolve) => {
+    observeEndedSave = resolve;
   });
   await createdPage.route(
-    '**/nodes/tabs-smoke-close-text/preprocess',
+    '**/nodes/tabs-smoke-close-text/content',
     async (route) => {
-      observePreprocess();
-      await preprocessingGate;
+      const request = route.request();
+      if (
+        request.method() !== 'PUT' ||
+        request.postDataJSON()?.editingEnded !== true
+      )
+        return route.continue();
+      observeEndedSave();
+      await endedSaveGate;
       await route.continue();
     },
   );
@@ -1005,10 +1009,10 @@ try {
   );
   try {
     await Promise.race([
-      preprocessingStarted,
+      endedSaveStarted,
       new Promise((_, reject) =>
         setTimeout(
-          () => reject(new Error('Close did not drain Text preprocessing')),
+          () => reject(new Error('Close did not send the editing-ended save')),
           10_000,
         ),
       ),
@@ -1016,10 +1020,10 @@ try {
     assert.equal(
       createdPage.isClosed(),
       false,
-      'Text preprocessing must finish before renderer destruction',
+      'The editing-ended save must finish before renderer destruction',
     );
   } finally {
-    releasePreprocess();
+    releaseEndedSave();
   }
   assert.equal(
     (await closeTextTab).ok,
@@ -1030,13 +1034,28 @@ try {
     `/canvas/${createdTab.canvasId}/nodes/tabs-smoke-close-text/content`,
   );
   assert.equal(settledText.content, 'Settled text before immediate close');
-  assert.equal(settledText.label, 'Settled text before immediate close');
+  // The server derives the titles once the saves have landed, with no page
+  // left open to ask for them.
+  const labelOf = async (nodeId) =>
+    (await request(`/canvas/${createdTab.canvasId}/nodes/${nodeId}/content`))
+      .label;
+  await waitFor(
+    async () =>
+      (await labelOf('tabs-smoke-close-text')) ===
+      'Settled text before immediate close',
+    'the server to title the Text node after its tab closed',
+  );
   for (const side of ['left', 'right']) {
     const note = await request(
       `/canvas/${createdTab.canvasId}/nodes/tabs-smoke-close-note-${side}/content`,
     );
     assert.equal(note.content, `# Settled ${side} on outer close`);
-    assert.equal(note.label, `Settled ${side} on outer close`);
+    await waitFor(
+      async () =>
+        (await labelOf(`tabs-smoke-close-note-${side}`)) ===
+        `Settled ${side} on outer close`,
+      `the server to title the ${side} Note after its tab closed`,
+    );
   }
   const deletionParent = await request('/canvas', 'POST', {
     title: 'Deletion parent',

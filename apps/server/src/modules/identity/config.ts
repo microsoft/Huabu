@@ -16,6 +16,8 @@ export type IdentityConfig =
       password?: string;
       /** Login explicitly disabled: every credential-free caller is the owner. */
       open?: boolean;
+      /** Set by the desktop app: only its own windows may call the Server. */
+      launchToken?: string;
     }
   | {
       provider: 'bubble';
@@ -44,6 +46,9 @@ export function resolveIdentityConfig(
       username: env.HUABU_BASIC_AUTH_USER,
       password: env.HUABU_BASIC_AUTH_PASS,
       ...(resolveAuthenticationMode(env) === 'none' ? { open: true } : {}),
+      ...(env.HUABU_DESKTOP_TOKEN
+        ? { launchToken: env.HUABU_DESKTOP_TOKEN }
+        : {}),
     };
   }
   if (provider !== 'bubble')

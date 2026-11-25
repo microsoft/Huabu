@@ -15,16 +15,21 @@ import { createEmptyWorkspace } from './previewWorkspace/model';
 import { readWorkspaceCollapsed } from './previewWorkspace/persistence';
 import { usePreviewWorkspaceStore } from './previewWorkspace/store';
 
-import type * as PreprocessQueueModule from './canvasStore/save/preprocessQueue';
+import type * as NodeContentQueueModule from './canvasStore/save/nodeContentQueue';
 
+// Leaving an editor is said on the node's content save; what is asserted
+// here is which nodes it is said for.
 const { schedule } = vi.hoisted(() => ({ schedule: vi.fn() }));
-vi.mock('./canvasStore/save/preprocessQueue', async (importOriginal) => {
-  const actual = await importOriginal<typeof PreprocessQueueModule>();
+vi.mock('./canvasStore/save/nodeContentQueue', async (importOriginal) => {
+  const actual = await importOriginal<typeof NodeContentQueueModule>();
   return {
     ...actual,
-    createPreprocessQueue: (
-      ...args: Parameters<typeof actual.createPreprocessQueue>
-    ) => ({ ...actual.createPreprocessQueue(...args), schedule }),
+    createNodeContentQueue: (
+      ...args: Parameters<typeof actual.createNodeContentQueue>
+    ) => ({
+      ...actual.createNodeContentQueue(...args),
+      markEditingEnded: schedule,
+    }),
   };
 });
 
@@ -35,7 +40,7 @@ const node = (id: string, type = 'note') => ({
   position: { x: 0, y: 0 },
   data: { content: '# Updated title', label: 'Old title' },
 });
-const scheduledIds = () => schedule.mock.calls.map(([value]) => value.id);
+const scheduledIds = () => schedule.mock.calls.map(([, nodeId]) => nodeId);
 
 beforeEach(() => {
   useCanvasStore.getState()._setStateRaw({

@@ -61,7 +61,24 @@
     "label": "Open Spaces",
     "newTab": "New tab",
     "noMatchingSpaces": "No matching Spaces.",
-    "closeTab": "Close Tab"
+    "closeTab": "Close Tab",
+    "unseen": "Conversations with something you have not seen: {{count}}"
+  },
+  "attention": {
+    "done": "Finished, not seen yet",
+    "error": "Failed",
+    "approval": "Waiting for your approval"
+  },
+  "unseenChanges": {
+    "create": "{{conversation}} · created",
+    "update": "{{conversation}} · changed",
+    "open": "Click to open the conversation"
+  },
+  "turnNotices": {
+    "done": "Finished",
+    "error": "Failed",
+    "approval": "Waiting for your approval",
+    "several": "{{count}} conversations have news"
   },
   "sigil": {
     "chooseResource": "Choose a resource",
@@ -454,6 +471,11 @@
     "showMiniMap": "Show MiniMap",
     "hideMiniMap": "Hide MiniMap",
     "miniMapDescription": "Display an overview of the Space in the bottom-right corner.",
+    "notifyTurnDone": "Notify when an Agent finishes",
+    "notifyTurnDoneDescription": "Show a system notification when a turn ends in a Space you are not looking at.",
+    "notifyNeedsYou": "Notify when an Agent needs you",
+    "notifyNeedsYouDescription": "Show a system notification when an Agent fails or waits for your approval in a Space you are not looking at.",
+    "turnNoticesBlocked": "The browser does not allow notifications from this page. Allow them in the browser settings first.",
     "worldCanvas": "World Canvas",
     "worldCanvasDescription": "Use World as the workspace landing page and show Space shortcuts.",
     "showWorldCanvas": "Show World Canvas",
@@ -1404,7 +1426,6 @@
     "partialStrokeCount_other": "{{count}} strokes"
   },
   "messages": {
-    "seeMore": "See more",
     "detailsLoading": "Loading details…",
     "detailsLoadFailed": "Could not load details.",
     "listLabel": "Conversation messages",

@@ -134,6 +134,11 @@ interface ElectronMenuApi {
  * minus the `'no-picker'` reason — Electron always has a GUI, so only
  * `'cancelled'` is possible on the non-`ok` branch.
  */
+/** Present only when the desktop app runs its own local Server. */
+interface ElectronFilesApi {
+  open: (url: string) => Promise<void>;
+}
+
 interface ElectronDialogApi {
   pickFolder: (
     title?: string,
@@ -227,6 +232,7 @@ interface ElectronBridge {
   window?: ElectronWindowApi;
   diagnostics?: ElectronDiagnosticsApi;
   dialog?: ElectronDialogApi;
+  files?: ElectronFilesApi;
   menu?: ElectronMenuApi;
   updater?: ElectronUpdaterApi;
   tabs?: DesktopTabsApi;
@@ -269,6 +275,46 @@ export function formatSystemInfo(info: ElectronSystemInfo): string {
     `Architecture: ${info.architecture}`,
     `Electron: ${info.electronVersion}`,
   ].join('\n');
+}
+
+/**
+ * Open a file this Server stores from a link that would otherwise leave for
+ * the system browser. The desktop app's local Server admits only the app's
+ * own windows, so the browser would be refused; the app shows an image in a
+ * window of its own and saves anything else. Returns whether the desktop app
+ * took the link, so a caller in a plain browser lets it proceed.
+ */
+export function openServerFileInDesktop(url: string): boolean {
+  const files = getElectronBridge()?.files;
+  if (!files) return false;
+  // Only what this Server serves. A link elsewhere, such as an image an
+  // Agent left at its remote address, still belongs to the browser.
+  let target: URL;
+  try {
+    target = new URL(url, window.location.href);
+  } catch {
+    return false;
+  }
+  if (
+    target.origin !== window.location.origin ||
+    !target.pathname.startsWith('/api/')
+  )
+    return false;
+  void files.open(target.href).catch((error: unknown) => {
+    console.error('[desktop] Could not open file:', error);
+  });
+  return true;
+}
+
+/**
+ * `window.open(href, '_blank')`, except that a file this Server stores is
+ * opened by the desktop app, which is the only thing its local Server admits.
+ */
+export function openInNewWindow(
+  href: string,
+  features = 'noopener,noreferrer',
+): void {
+  if (!openServerFileInDesktop(href)) window.open(href, '_blank', features);
 }
 
 function requireDiagnostics(): ElectronDiagnosticsApi {

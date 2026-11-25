@@ -17,6 +17,7 @@ import { useTranslation } from 'react-i18next';
 
 import { NodeRef } from '@/components/Nodes/NodeRef/NodeRef';
 import { useChatSession } from '@/hooks/useChatSession';
+import { openServerFileInDesktop } from '@/hooks/useElectron';
 
 import { partIsExecuting } from './helpers';
 import { resolveArtifactUrl } from '../../../../api/artifact';
@@ -130,6 +131,9 @@ export function SnapshotNodesCard({ part }: SnapshotNodesCardProps) {
                     href={url}
                     target="_blank"
                     rel="noopener noreferrer"
+                    onClick={(event) => {
+                      if (openServerFileInDesktop(url)) event.preventDefault();
+                    }}
                     title={t('messages.openSnapshot', { src: snap.src })}
                     className="border-edge-default bg-bg-default block h-24 overflow-hidden rounded-md border"
                   >

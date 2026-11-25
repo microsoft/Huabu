@@ -1,4 +1,4 @@
-import { defineCommandHarness } from './common/define-command-harness.js'
+import { defineCommandHarness } from './common/define-command-harness.js';
 
 export const qwenHarness = defineCommandHarness({
   id: 'qwen',
@@ -7,4 +7,4 @@ export const qwenHarness = defineCommandHarness({
   acpArgs: ['--acp'],
   autoApproveArgs: ['--approval-mode=yolo'],
   installHint: 'npm install -g @qwen-code/qwen-code',
-})
+});

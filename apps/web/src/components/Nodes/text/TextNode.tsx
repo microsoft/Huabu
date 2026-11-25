@@ -19,7 +19,7 @@ import {
 import { FloatingToolbar } from '@/components/Common/FloatingToolbar.tsx';
 import { useTextNodeSurface } from '@/hooks/useTextNodeSurface';
 import { canStartEditing } from '@/store/canvasPresence/editLock';
-import useCanvasStore, { settleNodePreprocess } from '@/store/canvasStore.ts';
+import useCanvasStore, { endNodeEditing } from '@/store/canvasStore.ts';
 import {
   FONT_FAMILY_CSS,
   getTextNodeFontOpts,
@@ -182,7 +182,7 @@ export const TextNode = memo(
       // filename) now that the user left the inline editor, instead of on
       // every keystroke pause. See
       // `docs/architecture/node-preprocessing.md` §4 (Triggers & state).
-      settleNodePreprocess(id);
+      endNodeEditing(id);
     }, [id]);
 
     const TextToolbar = (

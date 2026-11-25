@@ -143,7 +143,6 @@ import { measureMissingAutoHeights } from './canvasStore/height/measureMissingAu
 import { normalizeFrameHeaderInsets } from './canvasStore/load/normalizeFrameHeaderInsets';
 import { normalizeNodeHeights } from './canvasStore/load/normalizeNodeHeights';
 import { reconcileQuestionStatus } from './canvasStore/load/reconcileQuestionStatus';
-import { shouldBackfillNodeLabel } from './canvasStore/load/shouldBackfillNodeLabel';
 import { warmupNodeHeights } from './canvasStore/load/warmupNodeHeights';
 import {
   refusedGestureHint,
@@ -155,13 +154,11 @@ import {
   MD_BACKED_NODE_TYPES,
   NODE_CONTENT_KEYS,
   PROPERTY_CONTENT_KEYS,
-  SERVER_DERIVED_SIDECAR_NODE_TYPES,
 } from './canvasStore/save/nodeContentFields';
 import {
   createNodeContentQueue,
   type RemoteContentOutcome,
 } from './canvasStore/save/nodeContentQueue';
-import { createPreprocessQueue } from './canvasStore/save/preprocessQueue';
 import { createUnloadFlush } from './canvasStore/save/unloadFlush';
 import { replaySiblingOrder } from './canvasStore/siblingOrderReplay';
 import { createResizePreviewController } from './canvasStore/slices/resizePreview';
@@ -233,6 +230,7 @@ import {
 import { copyCanvasClipboard, copyToClipboard } from '../utils/io/clipboard';
 import { nodesToPlainText } from '../utils/io/nodeToPlainText';
 
+import type { NodeIngestionInfo } from './canvasStore/ingestion';
 import type { SendOutcome } from './canvasStore/sync/sendQueue';
 import type {
   FrameFitPreview,
@@ -240,7 +238,6 @@ import type {
   StructuredDropPreview,
 } from './gesturePreviewStore';
 import type { CanvasPreviewWorkspace } from './previewWorkspace/model';
-import type { NodeIngestionInfo } from '@/handler/canvasCommand/preprocess';
 import type {
   AgentChatContext,
   CanvasCommand,
@@ -259,7 +256,6 @@ import type {
   PutNodeContentRequest,
 } from '@huabu/shared';
 
-const PREPROCESS_DEBOUNCE_MS = 1000;
 const NODE_CONTENT_DEBOUNCE_MS = 500;
 let accessRefreshInFlight:
   | { canvasId: string; promise: Promise<void> }
@@ -1182,42 +1178,6 @@ function questionHasConversation(node: Node): boolean {
 const canvasEvents = createCanvasEventBuffer();
 
 /**
- * Preprocessing for a node an undo or redo brought back, once the server
- * holds it again.
- *
- * A PDF's extracted text and a video's cover exist only in the record the
- * deleting batch removed; the restoring batch writes back what the web
- * holds, which never included them. So those types are asked to be derived
- * again, whether or not work was pending at deletion, and at once rather
- * than debounced: leaving the Space cancels debounced work, and nothing
- * would ask for this repair again. Every other type only resumes work that
- * was waiting.
- */
-function resumePreprocessAfterRestore(canvasId: string, nodeId: string): void {
-  const state = useCanvasStore.getState();
-  const node =
-    state.canvasId === canvasId
-      ? state.nodes.find((candidate) => candidate.id === nodeId)
-      : undefined;
-  if (node && SERVER_DERIVED_SIDECAR_NODE_TYPES.has(node.type ?? ''))
-    preprocessQueue.schedule(node, { immediate: true });
-  else preprocessQueue.resumeRestored(canvasId, nodeId);
-}
-
-/**
- * Module-scoped per-node preprocessing queue. Each store mutation
- * that affects a markdown-backed node schedules a debounced
- * `preprocessNode` POST through this queue.
- */
-const preprocessQueue = createPreprocessQueue({
-  delayMs: PREPROCESS_DEBOUNCE_MS,
-  getState: () => useCanvasStore.getState(),
-  isBlocked: (nodeId) =>
-    nodeContentQueue.hasPendingRestoredContent(nodeId) ||
-    restoringNodeIds.has(nodeId),
-});
-
-/**
  * Module-scoped per-node markdown sidecar save queue. Coalesces rapid
  * editor edits into one PUT per node and serializes in-flight writes
  * so the server never sees two PUTs for the same node concurrently.
@@ -1227,8 +1187,6 @@ const nodeContentQueue = createNodeContentQueue({
   getState: () => useCanvasStore.getState(),
   waitForCreation: awaitQuestionCreation,
   retryCreation: (canvasId, nodeId) => retryFailedRestores(canvasId, nodeId),
-  onRestoredContentPersisted: (canvasId, nodeId) =>
-    resumePreprocessAfterRestore(canvasId, nodeId),
   onContentPersisted: (canvasId, nodeId) => {
     // A reload that was waiting for this text can run now.
     resumeHeldReload();
@@ -1711,7 +1669,6 @@ function scheduleMeasuredSizeCheck(
  * Nodes an undo is bringing back whose restoring batch is not answered yet.
  * Until it is, the server has no such node to preprocess.
  */
-const restoringNodeIds = new Set<string>();
 
 // ─── Legacy Frame-header migration ────────────────────────────────────────
 
@@ -2255,7 +2212,6 @@ function removeNodesDeletedElsewhere(nodeIds: readonly string[]): void {
   for (const node of state.nodes) {
     if (nodes.includes(node)) continue;
     nodeContentQueue.forgetNode(node.id);
-    preprocessQueue.forgetNode(node.id);
     const toastId = deletedElsewhere.get(node.id);
     if (toastId !== undefined) dismissToast(toastId);
     deletedElsewhere.delete(node.id);
@@ -2562,7 +2518,6 @@ async function reloadDiscardingUnsent(
   releaseHeldReload();
   browserSync.discard(canvasId);
   if (discardContent) {
-    preprocessQueue.cancelAll();
     const resumeContentSaves = nodeContentQueue.suspendCanvas(canvasId);
     try {
       // Requests already issued cannot be taken back; let them settle so
@@ -2726,7 +2681,6 @@ export function resetCanvasSyncForTests(): void {
   sizesAwaitingContent.clear();
   reportedSizes.clear();
   localSizes.clear();
-  restoringNodeIds.clear();
   failedRestores.clear();
   dismissSyncNotice();
   releaseHeldReload();
@@ -2750,10 +2704,7 @@ export function requestCanvasResync(
 
 /** Drain issued sidecar writers without promoting held/debounced writes. */
 async function waitForSidecarWrites(): Promise<void> {
-  await Promise.all([
-    nodeContentQueue.waitForIdle(),
-    preprocessQueue.waitForIdle(),
-  ]);
+  await nodeContentQueue.waitForIdle();
 }
 
 /** Agent Node creations and re-associations of `canvasId` still in flight. */
@@ -2864,7 +2815,6 @@ export async function discardPendingSaves(canvasId: string): Promise<void> {
   if (state.canvasId !== canvasId)
     throw new Error('Cannot discard edits from a different Space');
   state._setStateRaw({ isLoading: true });
-  preprocessQueue.cancelAll();
   browserSync.discard(canvasId);
   const resumeContentSaves = nodeContentQueue.suspendCanvas(canvasId);
   try {
@@ -2872,7 +2822,6 @@ export async function discardPendingSaves(canvasId: string): Promise<void> {
     await waitForSidecarWrites();
     if (useCanvasStore.getState().canvasId !== canvasId)
       throw new Error('Space changed while discarding edits');
-    preprocessQueue.cancelAll();
     nodeContentQueue.discardCanvas(canvasId);
     canvasHistoryManager.clearCanvas(canvasId);
     useCanvasStore.getState()._setStateRaw({
@@ -2919,7 +2868,6 @@ export async function savedBeforeLeaving(): Promise<boolean> {
     const { canvasId } = useCanvasStore.getState();
     if (canvasId) await canvasEvents.flush(canvasId);
     else await drainPendingSaves();
-    await preprocessQueue.flushAll();
     return true;
   } catch {
     return false;
@@ -3020,25 +2968,19 @@ export function flushNodeContent(nodeId: string): Promise<void> {
 }
 
 /**
- * Trigger preprocessing for a single node once the user has finished
- * editing it (exit-edit "settle").
+ * The person has left the editor of a `note` / `text` node (Preview
+ * Workspace departure for `note`, `TextNode`'s blur for `text`).
  *
- * Called for editor-authored nodes (`note` / `text`) from their exit-edit
- * boundaries — Preview Workspace departure for `note` and `TextNode`'s
- * blur handler for `text` — whose auto-derived label (the on-disk `.md`
- * filename) must be committed only when the heading is settled, never on
- * every keystroke pause, which churned the filename through every partial
- * heading (`Note 1.md` → `H.md` → `He.md` → …). Their per-keystroke content
- * edits are excluded from the `triggerPreprocessing` fan-out in
- * `runWebPostEffects` (only one-time create / duplicate / import mutations
- * still fan out there), so this exit-edit call is their sole preprocessing
- * trigger for content edits. The body itself keeps saving on the fast
- * per-node content cadence (`nodeContentQueue`) independently. See
- * `docs/architecture/node-preprocessing.md` §4 (Triggers & state).
+ * The node's title derives from its first heading, so the server derives it
+ * only now, not from every intermediate body saved while typing, which
+ * churned the on-disk filename through every partial heading (`Note 1.md` →
+ * `H.md` → `He.md` → …). The page says so on the node's content save, which
+ * already has the right order with everything else it saves; it starts no
+ * preprocessing itself. See `docs/architecture/node-preprocessing.md` §4.
  */
-export function settleNodePreprocess(nodeId: string): void {
-  const node = useCanvasStore.getState().nodes.find((n) => n.id === nodeId);
-  if (node) preprocessQueue.schedule(node);
+export function endNodeEditing(nodeId: string): void {
+  const { canvasId } = useCanvasStore.getState();
+  if (canvasId) nodeContentQueue.markEditingEnded(canvasId, nodeId);
 }
 
 function settleDepartingPreviewEditors(
@@ -3068,21 +3010,15 @@ function settleDepartingPreviewEditors(
       continue;
     const node = nodes.find((candidate) => candidate.id === target.nodeId);
     if (node?.type === 'note' || node?.type === 'text') {
-      settleNodePreprocess(node.id);
+      endNodeEditing(node.id);
     }
   }
-}
-
-function drainNodePreprocessing(): Promise<void> {
-  return preprocessQueue.flushAll();
 }
 
 pageLifecycle.register('canvas', {
   flush: async () => {
     const { canvasId } = useCanvasStore.getState();
     if (canvasId) {
-      await saveCanvasForSubmission(canvasId);
-      await drainNodePreprocessing();
       await saveCanvasForSubmission(canvasId);
     }
     flushCanvasViewState();
@@ -3117,7 +3053,6 @@ if (typeof window !== 'undefined') {
     createUnloadFlush({
       events: canvasEvents,
       nodeContent: nodeContentQueue,
-      preprocess: preprocessQueue,
       flushPreviewWorkspace: () => usePreviewWorkspaceStore.getState().flush(),
       sendQueue: {
         hasUnsent: () =>
@@ -3179,7 +3114,6 @@ const contentSaveMiddleware =
           for (const node of prev.nodes) {
             if (!nextIds.has(node.id)) {
               nodeContentQueue.forgetNode(node.id);
-              preprocessQueue.forgetNode(node.id);
             }
           }
           nodeContentQueue.scheduleChanges(
@@ -3375,24 +3309,6 @@ export async function awaitQuestionCreation(
   await questionCreations.get(`${canvasId}\0${nodeId}`)?.promise;
 }
 
-function scheduleAcknowledgedNodePreprocessing(node: Node): void {
-  const { canvasId } = useCanvasStore.getState();
-  const creation = questionCreations.get(`${canvasId}\0${node.id}`)?.promise;
-  if (!creation) {
-    preprocessQueue.schedule(node);
-    return;
-  }
-  void creation.then(
-    () => {
-      const current = useCanvasStore.getState();
-      if (current.canvasId !== canvasId) return;
-      const live = current.nodes.find((candidate) => candidate.id === node.id);
-      if (live) preprocessQueue.schedule(live);
-    },
-    () => {},
-  );
-}
-
 function rollbackFailedQuestions(canvasId: string, nodes: Node[]): void {
   const failedIds = new Set(nodes.map((node) => node.id));
   canvasHistoryManager.discardNodes(canvasId, failedIds);
@@ -3476,10 +3392,6 @@ function restoreQuestionAssociations(
           canvasId,
           new Map([[node.id, token]]),
         );
-      const live = useCanvasStore
-        .getState()
-        .nodes.find((item) => item.id === node.id);
-      if (live) preprocessQueue.schedule(live);
     });
     questionCreations.set(`${canvasId}\0${node.id}`, { promise: creation });
     void creation.catch((error) => {
@@ -3514,31 +3426,10 @@ function sendRestore(
   restoredNodes: readonly Node[],
   held: Pick<Parameters<typeof browserSync.submit>[0], 'prev' | 'next'>,
 ): Promise<unknown> {
-  for (const node of restoredNodes) restoringNodeIds.add(node.id);
   const restore = browserSync.submit({
     canvasId,
     commands,
     ...held,
-    onSettled: (outcome, edit) => {
-      // Answered either way: a refusal is followed by a reload.
-      const results =
-        outcome.kind === 'response'
-          ? outcome.response.edits[edit]?.results
-          : undefined;
-      const returned = new Set<string>();
-      commands.forEach((command, index) => {
-        if (command.type !== 'RESTORE_NODES' || !results?.[index]?.applied)
-          return;
-        for (const node of command.nodes) returned.add(node.id);
-      });
-      for (const node of restoredNodes) {
-        restoringNodeIds.delete(node.id);
-        // Only a node the server took back can have its text derived again.
-        if (returned.has(node.id))
-          resumePreprocessAfterRestore(canvasId, node.id);
-        else preprocessQueue.resumeRestored(canvasId, node.id);
-      }
-    },
   });
   if (restoredNodes.length > 0) {
     const returned = restore.entry.settled.then((outcome) => {
@@ -3700,7 +3591,6 @@ function restoreFromHistory(direction: 'undo' | 'redo'): void {
       });
     }
   }
-  preprocessQueue.reconcileHistory(nodes);
   canvasEvents.buffer(canvasId, action);
 
   // A node this undo removed leaves the server with the batch just queued.
@@ -4123,7 +4013,6 @@ const useCanvasStore = create<RFState>()(
         // A deferred Frame refit is this page's own layout around what its
         // renderer measured; the server lays out from the reported boxes.
         setNodes: (nodes) => set({ nodes }),
-        triggerPreprocessing: scheduleAcknowledgedNodePreprocessing,
         forgetNodeContent: nodeContentQueue.forgetNode,
         validatePreviewNodes: (liveNodeIds) =>
           usePreviewWorkspaceStore.getState().validate(liveNodeIds),
@@ -4354,7 +4243,6 @@ const useCanvasStore = create<RFState>()(
         getNodes: () => get().nodes,
         getEdges: () => get().edges,
         setNodes: (nodes) => get()._setStateRaw({ nodes }),
-        triggerPreprocessing: scheduleAcknowledgedNodePreprocessing,
         forgetNodeContent: nodeContentQueue.forgetNode,
         validatePreviewNodes: (liveNodeIds) =>
           usePreviewWorkspaceStore.getState().validate(liveNodeIds),
@@ -4474,7 +4362,7 @@ const useCanvasStore = create<RFState>()(
               previousNode?.type === 'note' ||
               previousNode?.type === 'text'
             ) {
-              settleNodePreprocess(previousId);
+              endNodeEditing(previousId);
             }
           }
           const previewTabId = usePreviewWorkspaceStore
@@ -4795,7 +4683,6 @@ const useCanvasStore = create<RFState>()(
         sizesAwaitingContent.clear();
         reportedSizes.clear();
         localSizes.clear();
-        restoringNodeIds.clear();
         failedRestores.clear();
         for (const node of loadedNodes) {
           const { hint } = readAutoHeightHint(node);
@@ -4851,14 +4738,6 @@ const useCanvasStore = create<RFState>()(
         );
         nodeContentQueue.clearUnsavedStatus(warmedNodes.map((node) => node.id));
 
-        // Backfill: any node with an empty label gets re-queued so the
-        // server can regenerate one. The server's preprocessing
-        // dispatcher decides per node profile whether there's any
-        // actual work to do, so we don't filter by type here.
-        for (const node of warmedNodes) {
-          if (!shouldBackfillNodeLabel(node)) continue;
-          preprocessQueue.schedule(node);
-        }
         return 'loaded';
       } catch (error) {
         console.error('Failed to load canvas:', error);
@@ -4889,9 +4768,6 @@ const useCanvasStore = create<RFState>()(
       // Keep the outgoing Space authoritative and editable until saving succeeds.
       await drainPendingSaves();
       set({ isLoading: true, canvasNotFound: false });
-
-      // Cancel all pending preprocessing timers
-      preprocessQueue.cancelAll();
 
       // Reset state for clean slate. `viewport` is cleared so the new
       // canvas's restore effect either applies its own saved viewport

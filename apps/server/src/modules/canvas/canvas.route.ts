@@ -20,11 +20,11 @@ import {
   postCanvasExecuteBodySchema,
   moveSelectionBodySchema,
   moveSelectionParamsSchema,
-  preprocessNodeBodySchema,
   acknowledgeAgentNodeResultBodySchema,
   associateAgentNodeBodySchema,
   associateAgentNodeParamsSchema,
   putNodeContentBodySchema,
+  querySpaceChangesBodySchema,
   stripLegacyPortalTopology,
   recentCanvasConversationParamsSchema,
   deleteNodeParamsSchema,
@@ -51,6 +51,7 @@ import {
 } from './canvas-executor.js';
 import { searchCanvas } from './canvas-search.js';
 import { publishCanvasUpdate } from './canvas-sync.js';
+import { commitReactions, type NodeContentSave } from './commit-follow-up.js';
 import { admitExecuteRequest } from './execute-admission.js';
 import { NodeCoverError } from './import-node-src.js';
 import { remapImportedSpace } from './import-space-identity.js';
@@ -88,16 +89,14 @@ import {
   arrivedWithAgentCredential,
   getRequestIdentity,
 } from '../identity/request.js';
-import { getPreprocessDispatcher, getProfile } from '../preprocessing/index.js';
+import { getProfile } from '../preprocessing/index.js';
 import { stripOfficeparserPreamble } from '../preprocessing/loaders/office-strip.js';
 import {
-  canReadCitedSpaces,
   canReadSpace,
   claimSpace,
   canManageSpace,
   getSpaceAccess,
   requireWorkspaceWrite,
-  isRestrictedRequest,
   readableSpaces,
 } from '../security/space-access.js';
 import {
@@ -134,6 +133,7 @@ import type {
   GetNodeContentResponse,
   GetSpacePreviewSceneResponse,
   GetThreadChangesResponse,
+  QuerySpaceChangesResponse,
   ImportCanvasResponse,
   ListCanvasesResponse,
   PostCanvasEventsRequest,
@@ -142,15 +142,13 @@ import type {
   PostCanvasExecuteResponse,
   MoveSelectionResponse,
   MoveSelectionParams,
-  PreprocessNodeBody,
-  PreprocessNodeRequest,
-  PreprocessNodeResponse,
   PutNodeContentRequest,
   PutNodeContentResponse,
   RevealNodesFolderResponse,
   RecentCanvasConversationParams,
   RecentCanvasConversationResponse,
 } from '@huabu/shared';
+import type { CanvasNode } from '@huabu/shared/canvas-engine';
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 
 /**
@@ -853,7 +851,9 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     // writer (another tab / device / agent / preprocess). See
     // `canvas/write-coordinator.ts`.
     let persisted: NodeContent | undefined;
+    let replaced: NodeContent | null = null;
     const apply = (existing: NodeContent | null): NodeContent => {
+      replaced = existing;
       persisted = resolveNodeContentUpdate(nodeId, parsed.data, existing);
       return persisted;
     };
@@ -886,6 +886,8 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     const hasPropertyPatch =
       properties !== undefined || propertyDisplayKeys !== undefined;
     const hasAuthoredTitle = carriesAuthoredTitle(parsed.data);
+    /** The title and properties written although the body was refused. */
+    let partial: { before: NodeContent; after: NodeContent } | undefined;
     let outcome: UpdateNodeOutcome;
     try {
       outcome = await updateNode(handle.nodes, nodeId, {
@@ -896,10 +898,14 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         apply,
         ...(hasPropertyPatch || hasAuthoredTitle
           ? {
-              applyUnversioned: (existing) =>
-                existing
-                  ? applyNodeUnversionedPatch(existing, parsed.data)
-                  : null,
+              applyUnversioned: (existing) => {
+                if (!existing) return null;
+                partial = {
+                  before: existing,
+                  after: applyNodeUnversionedPatch(existing, parsed.data),
+                };
+                return partial.after;
+              },
             }
           : {}),
         strictRename: labelSource === 'user',
@@ -934,6 +940,18 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
           },
           { principalId: callerPrincipalId(request) },
         );
+        // A rename that was written is a rename, whatever became of the
+        // body beside it: the node and the Frame holding it react to it.
+        // The body was refused, so nothing is said of its editor.
+        if (partial)
+          commitReactions()?.contentSave({
+            canvasId,
+            nodeId,
+            nodeType,
+            ...partial,
+            storedNodes: (canvas.state.nodes ??
+              []) as NodeContentSave['storedNodes'],
+          })?.();
       }
       return reply.code(409).send({
         code: 'NODE_CONTENT_CONFLICT',
@@ -1012,6 +1030,21 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       },
       { principalId: callerPrincipalId(request) },
     );
+    // A saved title or source may change what preprocessing would derive,
+    // for this node or for the Frame that holds it. Decided here, where the
+    // save is committed, and not by whichever pages are open.
+    const before = replaced as NodeContent | null;
+    if (before && persisted)
+      commitReactions()?.contentSave({
+        canvasId,
+        nodeId,
+        nodeType,
+        before,
+        after: persisted,
+        ...(parsed.data.editingEnded ? { editingEnded: true } : {}),
+        storedNodes: (canvas.state.nodes ??
+          []) as NodeContentSave['storedNodes'],
+      })?.();
     const response: PutNodeContentResponse = {
       nodeId,
       label: outcome.label,
@@ -1153,131 +1186,6 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     return reply.send(response);
   });
 
-  // --- Unified preprocessing endpoint ---
-  // Single route that handles all node types (note/text/web/pdf/image/frame/video).
-  // Replaces the split between PUT /:canvasId/nodes/:nodeId and POST /resolve-label.
-
-  fastify.post<{
-    Params: { canvasId: string; nodeId: string };
-    Body: PreprocessNodeBody;
-    Reply: ApiResult<PreprocessNodeResponse>;
-  }>('/:canvasId/nodes/:nodeId/preprocess', async function (request, reply) {
-    const params = deleteNodeParamsSchema.safeParse(request.params);
-    if (!params.success)
-      return reply.code(400).send({ message: 'Invalid canvas or node ID' });
-    const { canvasId, nodeId } = params.data;
-    const parsed = preprocessNodeBodySchema.safeParse(request.body);
-    if (!parsed.success) {
-      return reply.code(400).send({
-        message: parsed.error.issues[0]?.message ?? 'Invalid request body',
-      });
-    }
-
-    const { nodeType, trigger, snapshot, previousSnapshot, options } =
-      parsed.data;
-    // A snapshot may point at another Space's artifact, whose bytes the
-    // pipeline would read; that Space is as absent as a missing one.
-    if (
-      !(await canReadCitedSpaces(request, canvasId, [
-        snapshot,
-        previousSnapshot,
-      ]))
-    ) {
-      return reply.code(404).send({ message: 'Canvas not found' });
-    }
-    // Utility execution uses the caller's own Agent and credentials.
-    const restricted = isRestrictedRequest(request);
-    const dispatcher = getPreprocessDispatcher();
-    if (
-      MD_BACKED_NODE_TYPES.has(nodeType) &&
-      !(await space(canvasId).nodes.read(nodeId))
-    ) {
-      return reply.send({
-        nodeId,
-        success: false,
-        error: 'Node sidecar is missing',
-      });
-    }
-
-    try {
-      const ppRequest: PreprocessNodeRequest = {
-        canvasId,
-        nodeId,
-        nodeType,
-        trigger: trigger ?? 'node_updated',
-        snapshot,
-        previousSnapshot,
-        options: {
-          allowLLM: options?.allowLLM ?? true,
-          allowPersistence: options?.allowPersistence ?? true,
-          force: options?.force ?? false,
-          mode: options?.mode,
-        },
-        ...(restricted ? { publicNetworkOnly: true } : {}),
-      };
-
-      const result = await dispatcher.preprocess(ppRequest);
-
-      const response: PreprocessNodeResponse = {
-        nodeId,
-        success: result.success,
-        suggestedLabel:
-          typeof result.patch.label === 'string'
-            ? result.patch.label
-            : undefined,
-        // Surface the post-Persist canonical `src` only when the
-        // Project stage decided it diverged from the snapshot — see
-        // the `patch.src` branch in `stages/project.ts`. Reading from
-        // the patch (rather than `result.persistence`) means we
-        // automatically inherit the same "only when changed" gate so
-        // the client never receives a redundant src write.
-        src:
-          typeof result.patch.src === 'string' ? result.patch.src : undefined,
-        coverUrl:
-          typeof result.patch.coverUrl === 'string' ||
-          result.patch.coverUrl === null
-            ? result.patch.coverUrl
-            : undefined,
-        coverSourceSrc:
-          typeof result.patch.coverSourceSrc === 'string' ||
-          result.patch.coverSourceSrc === null
-            ? result.patch.coverSourceSrc
-            : undefined,
-        // For office nodes the in-canvas preview reads `data.content`
-        // directly, so ship the freshly-extracted body back so the
-        // client doesn't need a full canvas reload (or a follow-up
-        // GET /content) before the preview can render. The OfficeLoader
-        // already strips officeparser's auto-prepended YAML frontmatter
-        // and stray horizontal rule, so this value is preview-ready.
-        // Other text-bearing types (pdf / web / note) deliberately do
-        // NOT echo `content` here — their previews never read it and
-        // the extracted text can be hundreds of KB.
-        content:
-          nodeType === 'office' && typeof result.extracted?.content === 'string'
-            ? result.extracted.content
-            : undefined,
-        summary: result.enriched?.summary,
-        keywords: result.enriched?.keywords,
-        error:
-          result.diagnostics
-            .filter((d) => d.level === 'error')
-            .map((d) => `${d.code}: ${d.message}`)
-            .join('; ') || undefined,
-      };
-      return reply.send(response);
-    } catch (error) {
-      const message = toMessage(error);
-      request.log.error(
-        { nodeId, nodeType, error },
-        'Failed to preprocess node',
-      );
-      return reply.code(500).send({
-        message: 'Failed to preprocess node',
-        details: message,
-      });
-    }
-  });
-
   // Permission refresh must not hydrate or replace the caller's unsaved content.
   fastify.get<{ Params: { canvasId: string } }>(
     '/:canvasId/access',
@@ -1371,13 +1279,22 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
           .code(400)
           .send({ message: 'Invalid Agent Node association' });
       try {
-        return reply.send(
-          await associateAgentNode(
-            params.data.canvasId,
-            params.data.nodeId,
-            body.data,
-          ),
+        const associated = await associateAgentNode(
+          params.data.canvasId,
+          params.data.nodeId,
+          body.data,
         );
+        // The conversation of a node that came back is named again here,
+        // by the server that re-associated it, not by the page that asked.
+        if (
+          body.data.kind === 'restore' &&
+          associated.toVersion > associated.fromVersion
+        )
+          commitReactions()?.agentNodeRestored(
+            params.data.canvasId,
+            associated.node as CanvasNode,
+          )?.();
+        return reply.send(associated);
       } catch (error) {
         if (
           error instanceof AgentNodeAssociationError ||
@@ -1595,6 +1512,35 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     return reply.send({ changes: await handle.changes.read(threadId) });
   });
 
+  // The pending records of several conversations at once, so a page can mark
+  // what Agents changed across the whole Space without a request per thread.
+  fastify.post<{
+    Params: { canvasId: string };
+    Reply: ApiResult<QuerySpaceChangesResponse>;
+  }>(
+    '/:canvasId/changes/query',
+    // A read, sent as POST only because it carries a list.
+    { config: { spaceAccess: 'read' } },
+    async function (request, reply) {
+      const parsed = querySpaceChangesBodySchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.code(400).send({ message: parsed.error.message });
+      }
+      const handle = getStructuredStore().space(request.params.canvasId);
+      if (!(await handle.read())) {
+        return reply.code(404).send({ message: 'Canvas not found' });
+      }
+      const threads: QuerySpaceChangesResponse['threads'] = {};
+      await Promise.all(
+        [...new Set(parsed.data.threadIds)].map(async (threadId) => {
+          const changes = await handle.changes.read(threadId);
+          if (changes.length > 0) threads[threadId] = changes;
+        }),
+      );
+      return reply.send({ threads });
+    },
+  );
+
   fastify.delete<{
     Params: { canvasId: string; threadId: string; changeId: string };
     Reply: ApiResult<DeleteThreadChangeResponse>;
@@ -1607,6 +1553,13 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         return reply.code(404).send({ message: 'Canvas not found' });
       }
       const removed = await handle.changes.delete(threadId, changeId);
+      // Keeping writes nothing to the canvas, so no update tells the other
+      // pages that this record is gone.
+      if (removed)
+        publishCanvasUpdate(canvasId, {
+          type: 'invalidate',
+          data: { reviewThreadId: threadId },
+        });
       return reply.send({ removed: !!removed });
     },
   );
@@ -1670,6 +1623,11 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         return reply.code(500).send({ message: 'Failed to revert change' });
       }
       await handle.changes.delete(threadId, changeId);
+      // The update above carried the canvas change, not the record's removal.
+      publishCanvasUpdate(canvasId, {
+        type: 'invalidate',
+        data: { reviewThreadId: threadId },
+      });
       return reply.send({ removed: true });
     },
   );

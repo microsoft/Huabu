@@ -28,12 +28,10 @@
 
 import type { CanvasEventBuffer } from './eventBuffer';
 import type { NodeContentQueue } from './nodeContentQueue';
-import type { PreprocessQueue } from './preprocessQueue';
 
 export type UnloadFlushDeps = {
   events: CanvasEventBuffer;
   nodeContent: NodeContentQueue;
-  preprocess: PreprocessQueue;
   /** Persist the current Canvas's local Preview Workspace layout. */
   flushPreviewWorkspace: () => void;
   /** This page's queued structure edits (the execute send queue). */
@@ -64,7 +62,6 @@ export function createUnloadFlush(
     deps.flushPreviewWorkspace();
     deps.events.flushAllKeepalive();
     deps.nodeContent.flushAllKeepalive();
-    deps.preprocess.flushKeepalive();
     if (deps.sendQueue?.hasUnsent()) {
       deps.sendQueue.flushKeepalive();
       if (event && deps.sendQueue.warnBeforeLeaving()) {

@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 import { agentApi } from '@/api/agent';
 import { useChatStore } from '@/store/chatStore';
@@ -104,19 +104,29 @@ export function loadHistoryToolDetails(
   return request;
 }
 
+/**
+ * Loads the deferred details as soon as the placeholder mounts, which only
+ * happens once the user has expanded the tool row.
+ */
 export function useHistoryToolDetails(turnRef: string) {
   const { threadId, ownerCanvasId } = useChatSession();
-  const [status, setStatus] = useState<'idle' | 'loading' | 'error'>('idle');
-  const load = async () => {
-    if (status === 'loading') return;
+  const [status, setStatus] = useState<'loading' | 'error'>('loading');
+  const run = useCallback(
+    () =>
+      loadHistoryToolDetails(ownerCanvasId, threadId, turnRef).catch(
+        (error: unknown) => {
+          console.error('[history-details] Could not load tool details', error);
+          setStatus('error');
+        },
+      ),
+    [ownerCanvasId, threadId, turnRef],
+  );
+  useEffect(() => {
+    void run();
+  }, [run]);
+  const retry = () => {
     setStatus('loading');
-    try {
-      await loadHistoryToolDetails(ownerCanvasId, threadId, turnRef);
-      setStatus('idle');
-    } catch (error) {
-      console.error('[history-details] Could not load tool details', error);
-      setStatus('error');
-    }
+    void run();
   };
-  return { status, load };
+  return { status, retry };
 }

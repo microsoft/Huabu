@@ -1,4 +1,4 @@
-import { defineCommandHarness } from './common/define-command-harness.js'
+import { defineCommandHarness } from './common/define-command-harness.js';
 
 export const copilotHarness = defineCommandHarness({
   id: 'copilot',
@@ -7,4 +7,4 @@ export const copilotHarness = defineCommandHarness({
   acpArgs: ['--acp'],
   autoApproveArgs: ['--allow-all'],
   installHint: 'npm install -g @github/copilot',
-})
+});

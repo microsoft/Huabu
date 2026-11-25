@@ -346,7 +346,7 @@ The engine is shared, in `packages/shared/src/canvas-engine/`:
 - `postEffects.ts` — pure post-commit effects (edge reroute)
 - `interfaces.ts` — `CanvasReadState`, `CanvasWriteResult`; `delta.ts` / `diff.ts` — self-inverting delta types
 
-Web-only pieces stay in `apps/web/src/handler/canvasCommand/`: `uiIntent.ts`, `resolvers/`, `preprocess.ts`, `postEffects.web.ts` (transition cleanup, deferred frame-fit, history snapshot, preprocessing trigger).
+Web-only pieces stay in `apps/web/src/handler/canvasCommand/`: `uiIntent.ts`, `resolvers/`, `postEffects.web.ts` (transition cleanup, deferred frame-fit, history snapshot). A page starts no preprocessing ([node-preprocessing.md](./node-preprocessing.md) §4).
 
 ### Store Integration
 

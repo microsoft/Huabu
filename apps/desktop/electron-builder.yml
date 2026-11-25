@@ -118,10 +118,19 @@ afterPack: scripts/after-pack.mjs
 #
 # Builds and releases both live in this repository, so the feed points at
 # it directly.
+#
+# `publisherName` makes the installed Windows app check who signed an update,
+# not only that its hash matches the feed: the hash comes from the same
+# release as the installer, so replacing both would otherwise pass. The
+# installer is unsigned when electron-builder writes this file (ESRP signs it
+# afterwards), so the name cannot be read from a certificate and is stated
+# here. The release pipeline fails if the ESRP signer is anyone else.
 publish:
   provider: github
   owner: microsoft
   repo: Huabu
+  publisherName:
+    - Microsoft Corporation
 
 mac:
   target:
