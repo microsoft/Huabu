@@ -190,7 +190,7 @@ const Mark = memo(function Mark({
           <AttentionDot
             kind="done"
             className={cn(
-              'attention-halo top-1/2 right-auto left-1/2 size-[9px] -translate-1/2',
+              'attention-halo top-1/2 right-auto left-1/2 size-1.5 -translate-1/2',
               arriving && 'attention-arrive',
             )}
           />

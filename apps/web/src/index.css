@@ -362,12 +362,12 @@
 .attention-halo {
   box-shadow:
     0 0 0 2px var(--attention-gap, var(--bg-default)),
-    0 0 0 5px color-mix(in srgb, var(--attention-color) 24%, transparent);
+    0 0 0 4px color-mix(in srgb, var(--attention-color) 24%, transparent);
 }
 .attention-arrive::after {
   content: '';
   position: absolute;
-  inset: -9px;
+  inset: -6px;
   border-radius: 9999px;
   border: 2px solid color-mix(in srgb, var(--attention-color) 50%, transparent);
   opacity: 0;
