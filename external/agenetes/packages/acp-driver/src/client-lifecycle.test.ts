@@ -36,6 +36,69 @@ function createConnection(): {
 }
 
 describe('AcpAgentClient lifecycle cleanup', () => {
+  it.each(['idle', 'active'] as const)(
+    'cancels a permission request without an approval handler when %s',
+    async (state) => {
+      const { connection, emitLifecycle } = createConnection();
+      const logger = {
+        debug: vi.fn(),
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+      };
+      const client = new AcpAgentClient(connection, {
+        scopeName: 'test',
+        logger,
+      });
+      const prompt =
+        state === 'active'
+          ? client.prompt(
+              'session-1',
+              [{ type: 'text', text: 'work' }],
+              vi.fn(),
+            )
+          : undefined;
+      const rejected = prompt
+        ? expect(prompt).rejects.toBeDefined()
+        : undefined;
+      if (prompt)
+        await vi.waitFor(() => expect(connection.send).toHaveBeenCalled());
+      const receive = vi.mocked(connection.onMessage).mock.calls[0][0];
+      receive({
+        jsonrpc: '2.0',
+        id: 'approval-1',
+        method: 'session/request_permission',
+        params: {
+          sessionId: 'session-1',
+          toolCall: {
+            toolCallId: 'tool-1',
+            title: 'Write file',
+            kind: 'edit',
+            status: 'pending',
+          },
+          options: [
+            { optionId: 'always', name: 'Always allow', kind: 'allow_always' },
+            { optionId: 'allow', name: 'Allow', kind: 'allow_once' },
+          ],
+        },
+      });
+      await vi.waitFor(() =>
+        expect(connection.send).toHaveBeenCalledWith({
+          jsonrpc: '2.0',
+          id: 'approval-1',
+          result: { outcome: { outcome: 'cancelled' } },
+        }),
+      );
+      expect(client.hasPendingPermissions('session-1')).toBe(false);
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({ sessionId: 'session-1' }),
+        '[acp] session/request_permission cancelled: no approval handler',
+      );
+      emitLifecycle({ type: 'agent/disconnected', reason: 'websocket_closed' });
+      await rejected;
+    },
+  );
+
   it.each(['answer', 'disconnect'] as const)(
     'reports pending approval only for its session and clears it on %s',
     async (finish) => {
