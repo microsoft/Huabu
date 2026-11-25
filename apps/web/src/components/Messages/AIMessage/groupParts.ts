@@ -263,8 +263,6 @@ export function getActivityStatus(
 export function describeActivity(groups: SegmentGroup[]): {
   details: ActivityDetail[];
   summary: ActivitySummary;
-  /** Distinct changed paths in first-change order, behind the summary count. */
-  changedPaths: string[];
 } {
   const details: ActivityDetail[] = [];
   let visibleGroupCount = 0;
@@ -357,7 +355,6 @@ export function describeActivity(groups: SegmentGroup[]): {
       stepCount,
       changedFileCount: changedPaths.size,
     },
-    changedPaths: [...changedPaths],
   };
 }
 
