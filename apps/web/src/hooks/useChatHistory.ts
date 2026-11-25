@@ -17,6 +17,7 @@ import { settleInkInterpretation } from '@huabu/shared/ink-interpretation';
 
 import { ApiError } from '@/api/_client';
 import { agentApi } from '@/api/agent';
+import { i18n } from '@/i18n';
 import { useAcpThreadChangesStore } from '@/store/acpThreadChangesStore';
 import {
   HISTORY_PAGE_TURNS,
@@ -397,10 +398,11 @@ function applyLatestHistoryWindow(
 
 export interface ChatHistoryWindow {
   loadOlderHistory: () => void;
-  retryHistory: () => void;
   loadHistoryPage: (page: ChatHistoryPage) => void;
+  /** A failed page refill or completed-turn refresh; visible history is kept. */
   historyPageError?: string;
-  retryHistoryPage: () => void;
+  /** The single retry for every history read failure, whichever one is showing. */
+  retryHistory: () => void;
   updateHistoryViewport: (ids: string[]) => void;
   isCurrentOwnerHistory: boolean;
 }
@@ -445,7 +447,6 @@ export function useChatHistory(
     },
     [threadId],
   );
-  const [refreshNonce, setRefreshNonce] = useState(0);
   const [pageFailure, setPageFailure] = useState<{
     threadId: string;
     message: string;
@@ -510,9 +511,7 @@ export function useChatHistory(
       thread?.isPreparing ||
       hasUnreconciledAgentTurn(ownerCanvasId, threadId)
     ) {
-      setRefreshError(
-        'History changed. Finish the current turn before retrying the history reload.',
-      );
+      setRefreshError(i18n.t('chat.historyReloadBusy'));
       return;
     }
     resetOnHydration.current = true;
@@ -743,14 +742,16 @@ export function useChatHistory(
         if (error instanceof ApiError && error.status === 409) {
           staleCursor.current = threadId;
         }
+        console.warn('[useChatHistory] older history load failed', error);
         useChatStore.getState().setHistoryPageState(threadId, {
           before: requestedBefore,
           hasOlder: true,
           loadingOlder: false,
-          error:
-            error instanceof Error
-              ? error.message
-              : 'Failed to load earlier turns',
+          error: i18n.t(
+            staleCursor.current === threadId
+              ? 'chat.historyChanged'
+              : 'chat.olderHistoryFailed',
+          ),
         });
       });
   }, [ownerCanvasId, threadId, reloadHistory]);
@@ -783,9 +784,7 @@ export function useChatHistory(
           const ids = new Set(messages.map((message) => message.id));
           if (page.messageIds.some((id) => !ids.has(id))) {
             staleCursor.current = threadId;
-            throw new Error(
-              'History page changed. Reload the conversation to continue.',
-            );
+            throw new Error('History page changed');
           }
           useChatStore.getState().refillHistoryPage(threadId, page, messages);
         })
@@ -796,10 +795,11 @@ export function useChatHistory(
           console.warn('[useChatHistory] page refill failed', error);
           setPageFailure({
             threadId,
-            message:
-              error instanceof Error
-                ? error.message
-                : 'Failed to load history page',
+            message: i18n.t(
+              staleCursor.current === threadId
+                ? 'chat.historyChanged'
+                : 'chat.historyPageFailed',
+            ),
           });
         })
         .finally(() => pendingPages.current.delete(page));
@@ -875,9 +875,8 @@ export function useChatHistory(
             await waitForRetry(delay, controller.signal);
             continue;
           }
-          throw new Error(
-            'The completed turn is not available in history yet. Your messages are retained; retry to refresh.',
-          );
+          setRefreshError(i18n.t('chat.historyTurnNotSaved'));
+          return;
         }
         applyLatestHistoryWindow(window, ownerCanvasId);
         return;
@@ -888,11 +887,7 @@ export function useChatHistory(
           '[useChatHistory] completed history refresh failed',
           error,
         );
-        setRefreshError(
-          error instanceof Error
-            ? error.message
-            : 'Failed to refresh completed history',
-        );
+        setRefreshError(i18n.t('chat.historyRefreshFailed'));
       }
     });
     return () => {
@@ -905,7 +900,6 @@ export function useChatHistory(
     ownerCanvasId,
     threadId,
     isHistoryLoaded,
-    refreshNonce,
     setRefreshError,
     ownerUnavailable,
   ]);
@@ -1208,24 +1202,31 @@ export function useChatHistory(
     ownerUnavailable,
   ]);
 
-  const retryHistory = useCallback(() => {
-    useChatStore.getState().setHistoryError(threadId, null);
-  }, [threadId]);
-
   return {
     updateHistoryViewport,
     loadOlderHistory,
-    retryHistory,
     loadHistoryPage,
     historyPageError:
       pageFailure?.threadId === threadId ? pageFailure.message : refreshError,
-    retryHistoryPage: () => {
-      if (staleCursor.current === threadId) {
+    retryHistory: () => {
+      const state = useChatStore.getState();
+      // A failed initial load reruns once its error clears.
+      if (state.threadsById[threadId]?.historyError) {
+        state.setHistoryError(threadId, null);
+        return;
+      }
+      // Repeating a refresh that history rejected would be rejected again, so
+      // an explicit retry takes the server's history as it stands.
+      if (staleCursor.current === threadId || refreshError) {
         reloadHistory();
         return;
       }
-      setPageFailure(undefined);
-      if (refreshError) setRefreshNonce((nonce) => nonce + 1);
+      // A cleared page failure lets the visible page request itself again.
+      if (pageFailure?.threadId === threadId) {
+        setPageFailure(undefined);
+        return;
+      }
+      loadOlderHistory();
     },
     isCurrentOwnerHistory:
       isHistoryLoaded && !historyError && hydratedOwnerKey === ownerHistoryKey,

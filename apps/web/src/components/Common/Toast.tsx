@@ -12,7 +12,7 @@ import { getElectronBridge } from '../../hooks/useElectron';
 
 import './scrollbar.css';
 
-import type { ComponentType, SVGProps } from 'react';
+import type { ComponentType, HTMLAttributes, SVGProps } from 'react';
 
 /**
  * Toast color family. Re-exports the shared `Tone` vocabulary used by
@@ -119,8 +119,138 @@ function getToastDuration(item: ToastItem): number {
   return item.duration ?? (item.tone === 'danger' ? 0 : 3000);
 }
 
-function ToastEntry({ item }: { item: ToastItem }) {
+interface ToastCardProps extends Omit<
+  HTMLAttributes<HTMLDivElement>,
+  'children'
+> {
+  message: string;
+  tone?: ToastTone;
+  action?: ToastAction;
+  secondaryAction?: ToastAction;
+  /** Renders the × close button when provided. */
+  onDismiss?: () => void;
+}
+
+/**
+ * The toast surface on its own: status icon, message, text actions and an
+ * optional close button. `toast()` stacks these at the top of the window;
+ * render one directly for a message that belongs to a panel and lasts as
+ * long as the state it reports.
+ */
+export function ToastCard({
+  message,
+  tone = 'info',
+  action,
+  secondaryAction,
+  onDismiss,
+  className,
+  ...rest
+}: ToastCardProps) {
   const { t } = useTranslation();
+  const showClose = !!onDismiss;
+  const StatusIcon = toneIcons[tone];
+  const buttonClass =
+    'shrink-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-info';
+
+  const pairedActions = !!action && !!secondaryAction;
+  const actionClass = cn(
+    buttonClass,
+    'min-h-7 max-w-full px-2 text-[13px] leading-5 font-medium [overflow-wrap:anywhere]',
+    pairedActions
+      ? 'rounded-md'
+      : 'mb-2 ml-3 inline-flex max-w-[calc(100%-0.75rem)] align-top',
+  );
+
+  const statusIcon = (
+    <span
+      aria-hidden
+      className={cn(
+        'mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center',
+        toneIconClasses[tone],
+      )}
+    >
+      <StatusIcon className="h-4.5 w-4.5" />
+    </span>
+  );
+
+  const secondaryButton = secondaryAction && (
+    <Button
+      variant="ghost"
+      size="sm"
+      className={actionClass}
+      onClick={secondaryAction.onClick}
+    >
+      {secondaryAction.label}
+    </Button>
+  );
+
+  const actionButton = action && (
+    <Button
+      variant="ghost"
+      tone="info"
+      size="sm"
+      className={actionClass}
+      onClick={action.onClick}
+    >
+      {action.label}
+    </Button>
+  );
+
+  const closeButton = showClose && (
+    <Button
+      variant="ghost"
+      shape="pill"
+      size="sm"
+      iconOnly
+      className={cn(
+        buttonClass,
+        'text-fg-subtle enabled:hover:text-fg-default focus-visible:bg-hover absolute top-2.5 right-3 h-7 w-7 [&_svg]:h-3.5 [&_svg]:w-3.5',
+      )}
+      aria-label={t('actions.dismiss')}
+      onClick={onDismiss}
+    >
+      <X />
+    </Button>
+  );
+
+  return (
+    <div
+      role="status"
+      {...rest}
+      className={cn(
+        'border-edge-default bg-surface text-fg-default pointer-events-auto relative flex w-fit max-w-full shrink-0 flex-col gap-2 rounded-lg border px-3 py-2.5 text-sm leading-5 shadow-xs',
+        !showClose && 'pr-5',
+        className,
+      )}
+    >
+      <div className="flex min-h-7 min-w-0 items-start gap-2">
+        {statusIcon}
+        <div className="-mb-2 flow-root min-w-0 flex-1 text-right leading-none">
+          {/* Reserve dismiss space on the first line only, not beside wrapped actions. */}
+          {showClose && <span aria-hidden className="float-right h-7 w-10" />}
+          <span
+            className={cn(
+              'float-left mb-2 max-w-full pt-1 text-left leading-5 [overflow-wrap:anywhere]',
+              showClose && 'max-w-[calc(100%-2.5rem)]',
+            )}
+          >
+            {message}
+          </span>
+          {!pairedActions && (actionButton || secondaryButton)}
+        </div>
+      </div>
+      {pairedActions && (
+        <div className="flex min-w-0 flex-wrap items-center justify-end gap-2 pl-8">
+          {secondaryButton}
+          {actionButton}
+        </div>
+      )}
+      {closeButton}
+    </div>
+  );
+}
+
+function ToastEntry({ item }: { item: ToastItem }) {
   const [visible, setVisible] = useState(false);
   const duration = getToastDuration(item);
   const remaining = useRef(duration);
@@ -155,90 +285,28 @@ function ToastEntry({ item }: { item: ToastItem }) {
   const showClose =
     item.dismissible ??
     (isPersistent || !!item.action || !!item.secondaryAction);
-  // Hoist into a local so the click handler closes over a non-null
-  // reference (avoids the non-null assertion lint).
-  const action = item.action;
-  const secondaryAction = item.secondaryAction;
-  const tone = item.tone ?? 'info';
-  const StatusIcon = toneIcons[tone];
-  const buttonClass =
-    'shrink-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-info';
-
-  const pairedActions = !!action && !!secondaryAction;
-  const actionClass = cn(
-    buttonClass,
-    'min-h-7 max-w-full px-2 text-[13px] leading-5 font-medium [overflow-wrap:anywhere]',
-    pairedActions
-      ? 'rounded-md'
-      : 'mb-2 ml-3 inline-flex max-w-[calc(100%-0.75rem)] align-top',
-  );
-
-  const statusIcon = (
-    <span
-      aria-hidden
-      className={cn(
-        'mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center',
-        toneIconClasses[tone],
-      )}
-    >
-      <StatusIcon className="h-4.5 w-4.5" />
-    </span>
-  );
-
-  const secondaryButton = secondaryAction && (
-    <Button
-      variant="ghost"
-      size="sm"
-      className={actionClass}
-      onClick={() => {
-        secondaryAction.onClick();
-        dismissToast(item.id);
-      }}
-    >
-      {secondaryAction.label}
-    </Button>
-  );
-
-  const actionButton = action && (
-    <Button
-      variant="ghost"
-      tone="info"
-      size="sm"
-      className={actionClass}
-      onClick={() => {
+  const dismiss = () => dismissToast(item.id);
+  /** A toast's action also dismisses it. */
+  const dismissing = (action?: ToastAction): ToastAction | undefined =>
+    action && {
+      label: action.label,
+      onClick: () => {
         action.onClick();
-        dismissToast(item.id);
-      }}
-    >
-      {action.label}
-    </Button>
-  );
-
-  const closeButton = showClose && (
-    <Button
-      variant="ghost"
-      shape="pill"
-      size="sm"
-      iconOnly
-      className={cn(
-        buttonClass,
-        'text-fg-subtle enabled:hover:text-fg-default focus-visible:bg-hover absolute top-2.5 right-3 h-7 w-7 [&_svg]:h-3.5 [&_svg]:w-3.5',
-      )}
-      aria-label={t('actions.dismiss')}
-      onClick={() => dismissToast(item.id)}
-    >
-      <X />
-    </Button>
-  );
+        dismiss();
+      },
+    };
 
   return (
-    <div
+    <ToastCard
+      message={item.message}
+      tone={item.tone}
+      action={dismissing(item.action)}
+      secondaryAction={dismissing(item.secondaryAction)}
+      onDismiss={showClose ? dismiss : undefined}
       className={cn(
-        'border-edge-default bg-surface text-fg-default pointer-events-auto relative flex w-fit max-w-full shrink-0 flex-col gap-2 rounded-lg border px-3 py-2.5 text-sm leading-5 shadow-xs transition-[transform,opacity] duration-200 motion-reduce:transform-none motion-reduce:transition-none',
-        !showClose && 'pr-5',
+        'transition-[transform,opacity] duration-200 motion-reduce:transform-none motion-reduce:transition-none',
         visible ? 'translate-y-0 opacity-100' : '-translate-y-2 opacity-0',
       )}
-      role="status"
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       onFocus={() => setFocused(true)}
@@ -247,31 +315,7 @@ function ToastEntry({ item }: { item: ToastItem }) {
           setFocused(false);
         }
       }}
-    >
-      <div className="flex min-h-7 min-w-0 items-start gap-2">
-        {statusIcon}
-        <div className="-mb-2 flow-root min-w-0 flex-1 text-right leading-none">
-          {/* Reserve dismiss space on the first line only, not beside wrapped actions. */}
-          {showClose && <span aria-hidden className="float-right h-7 w-10" />}
-          <span
-            className={cn(
-              'mb-2 inline-block w-max max-w-full pt-1 text-left align-top leading-5 [overflow-wrap:anywhere]',
-              showClose && 'max-w-[calc(100%-2.5rem)]',
-            )}
-          >
-            {item.message}
-          </span>
-          {!pairedActions && (actionButton || secondaryButton)}
-        </div>
-      </div>
-      {pairedActions && (
-        <div className="flex min-w-0 flex-wrap items-center justify-end gap-2 pl-8">
-          {secondaryButton}
-          {actionButton}
-        </div>
-      )}
-      {closeButton}
-    </div>
+    />
   );
 }
 

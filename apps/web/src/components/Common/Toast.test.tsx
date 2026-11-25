@@ -240,7 +240,7 @@ describe('ToastContainer', () => {
       );
     });
     const entry = document.querySelector('[role="status"]');
-    const message = entry?.querySelector('span.inline-block');
+    const message = entry?.querySelector('span.float-left');
     const actionButton = message?.nextElementSibling;
     expect(entry?.classList.contains('w-fit')).toBe(true);
     expect(message?.parentElement?.classList.contains('flow-root')).toBe(true);

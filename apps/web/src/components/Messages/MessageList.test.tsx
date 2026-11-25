@@ -712,10 +712,12 @@ describe('manual virtual chat', () => {
 
   it('stops automatic retries on page errors and offers an explicit retry', () => {
     const load = vi.fn();
+    const retry = vi.fn();
     render({
       hasOlderHistory: true,
       olderHistoryError: 'Offline',
       onLoadOlderHistory: load,
+      onRetryHistory: retry,
     });
     act(() => (virtual.props.startReached as () => void)());
     expect(load).not.toHaveBeenCalled();
@@ -723,7 +725,8 @@ describe('manual virtual chat', () => {
       'Offline',
     );
     act(() => container.querySelector('button')?.click());
-    expect(load).toHaveBeenCalledOnce();
+    expect(retry).toHaveBeenCalledOnce();
+    expect(load).not.toHaveBeenCalled();
   });
 
   it('loads older turns on upward keyboard intent even when the list cannot scroll', () => {

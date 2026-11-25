@@ -153,7 +153,6 @@ function Harness({
   );
   latestHistory = history;
   latestLoadOlderHistory = history.loadOlderHistory;
-  latestRetryHistory = history.retryHistory;
   latestOwnerHistoryReady = history.isCurrentOwnerHistory;
   return null;
 }
@@ -161,7 +160,6 @@ function Harness({
 let root: Root | undefined;
 let container: HTMLDivElement | undefined;
 let latestLoadOlderHistory: (() => void) | undefined;
-let latestRetryHistory: (() => void) | undefined;
 let latestHistory: ChatHistoryWindow;
 let latestOwnerHistoryReady = false;
 
@@ -313,16 +311,20 @@ describe('bounded history refill and completion', () => {
     root = createRoot(container);
     await act(async () => root?.render(<VisiblePages />));
     expect(apiMocks.fetchHistoryPage).toHaveBeenCalledTimes(2);
-    expect(latestHistory.historyPageError).toBe('offline');
+    expect(latestHistory.historyPageError).toBe(
+      'Failed to load this part of the history',
+    );
     await act(async () => pages.forEach(latestHistory.loadHistoryPage));
     expect(apiMocks.fetchHistoryPage).toHaveBeenCalledTimes(2);
     expect(
       useChatStore.getState().threadsById[THREAD_ID]?.messages,
     ).toHaveLength(1);
 
-    await act(async () => latestHistory.retryHistoryPage());
+    await act(async () => latestHistory.retryHistory());
     expect(apiMocks.fetchHistoryPage).toHaveBeenCalledTimes(4);
-    expect(latestHistory.historyPageError).toBe('offline');
+    expect(latestHistory.historyPageError).toBe(
+      'Failed to load this part of the history',
+    );
     apiMocks.fetchHistoryPage.mockImplementation(
       async (_threadId, _canvasId, _limit, before) => ({
         threadId: THREAD_ID,
@@ -341,7 +343,7 @@ describe('bounded history refill and completion', () => {
         hasMore: false,
       }),
     );
-    await act(async () => latestHistory.retryHistoryPage());
+    await act(async () => latestHistory.retryHistory());
     expect(apiMocks.fetchHistoryPage).toHaveBeenCalledTimes(6);
     expect(latestHistory.historyPageError).toBeUndefined();
     expect(
@@ -402,7 +404,9 @@ describe('bounded history refill and completion', () => {
     );
     await renderHarness();
     await act(async () => latestHistory.loadHistoryPage(page));
-    expect(latestHistory.historyPageError).toBe('History changed');
+    expect(latestHistory.historyPageError).toBe(
+      'History changed. Reload the conversation to continue.',
+    );
     expect(
       useChatStore.getState().threadsById[THREAD_ID]?.messages[0]?.id,
     ).toBe('latest:1');
@@ -421,7 +425,7 @@ describe('bounded history refill and completion', () => {
       ],
       hasMore: false,
     });
-    await act(async () => latestHistory.retryHistoryPage());
+    await act(async () => latestHistory.retryHistory());
     expect(
       useChatStore.getState().threadsById[THREAD_ID]?.messages[0]?.id,
     ).toBe('replacement:0');
@@ -478,7 +482,7 @@ describe('bounded history refill and completion', () => {
         ],
         hasMore: false,
       });
-      await act(async () => latestHistory.retryHistoryPage());
+      await act(async () => latestHistory.retryHistory());
       expect(latestHistory.historyPageError).toBeUndefined();
       await act(async () => {
         if (outcome === 'failure') rejectLate(new Error('Old request failed'));
@@ -493,7 +497,7 @@ describe('bounded history refill and completion', () => {
         useChatStore.getState().threadsById[THREAD_ID]?.messages[0]?.id,
       ).toBe('replacement:0');
       apiMocks.fetchHistoryPage.mockClear();
-      await act(async () => latestHistory.retryHistoryPage());
+      await act(async () => latestHistory.retryHistory());
       expect(apiMocks.fetchHistoryPage).not.toHaveBeenCalled();
       const newPage = {
         before: 'fresh-older',
@@ -834,7 +838,7 @@ describe('bounded history refill and completion', () => {
       ],
       hasMore: false,
     });
-    await act(async () => latestHistory.retryHistoryPage());
+    await act(async () => latestHistory.retryHistory());
     expect(latestHistory.historyPageError).toBeUndefined();
     expect(
       useChatStore.getState().threadsById[THREAD_ID].messages.at(-1)?.id,
@@ -902,11 +906,188 @@ describe('bounded history refill and completion', () => {
       new Error('Network unavailable'),
     );
     await renderHarness();
-    expect(latestHistory.historyPageError).toBe('Network unavailable');
+    expect(latestHistory.historyPageError).toBe(
+      'Failed to refresh conversation history',
+    );
     expect(apiMocks.fetchHistoryPage).toHaveBeenCalledOnce();
     expect(
       useChatStore.getState().threadsById[THREAD_ID].messages.at(-1)?.id,
     ).toBe('stopped');
+  });
+
+  it('takes server history on an explicit retry that the server can never satisfy', async () => {
+    vi.useFakeTimers();
+    seedPages();
+    useChatStore.getState().addMessage(THREAD_ID, {
+      id: 'live-user',
+      role: 'user',
+      content: 'New question',
+    });
+    useChatStore.getState().addMessage(THREAD_ID, {
+      id: 'live-answer',
+      role: 'assistant',
+      segments: [{ kind: 'text', text: 'New answer' }],
+    });
+    apiMocks.fetchHistoryPage.mockResolvedValue({
+      threadId: THREAD_ID,
+      turns: [
+        {
+          id: 'latest',
+          messages: [
+            { role: 'user', content: 'Old question' },
+            {
+              role: 'assistant',
+              parts: [{ kind: 'text', text: 'Latest answer' }],
+            },
+          ],
+        },
+      ],
+      hasMore: false,
+    });
+    await renderHarness();
+    await act(async () =>
+      useChatStore.getState().markTurnCompleted(THREAD_ID, 'live-answer'),
+    );
+    // The automatic retries run out first; only then is Retry offered.
+    await act(async () => vi.advanceTimersByTimeAsync(3_500));
+    expect(latestHistory.historyPageError).toContain(
+      'not available in history',
+    );
+
+    await act(async () => latestHistory.retryHistory());
+
+    expect(latestHistory.historyPageError).toBeUndefined();
+    expect(
+      useChatStore
+        .getState()
+        .threadsById[THREAD_ID]?.messages.map((message) => message.id),
+    ).toEqual(['latest:0', 'latest:1']);
+  });
+
+  it('does not check a turn against history again after an explicit reload', async () => {
+    vi.useFakeTimers();
+    seedPages();
+    useChatStore.getState().addMessage(THREAD_ID, {
+      id: 'live-user',
+      role: 'user',
+      content: 'New question',
+    });
+    useChatStore.getState().addMessage(THREAD_ID, {
+      id: 'live-answer',
+      role: 'assistant',
+      segments: [{ kind: 'text', text: 'New answer' }],
+    });
+    const turn = {
+      id: 'completed',
+      messages: [
+        { role: 'user', content: 'New question' },
+        { role: 'assistant', parts: [{ kind: 'text', text: 'New answer' }] },
+      ],
+    };
+    // The server keeps reporting the turn as active, so the check never passes.
+    apiMocks.fetchHistoryPage.mockResolvedValue({
+      threadId: THREAD_ID,
+      turns: [{ ...turn, active: true }],
+      hasMore: false,
+    });
+    await renderHarness();
+    await act(async () =>
+      useChatStore.getState().markTurnCompleted(THREAD_ID, 'live-answer'),
+    );
+    await act(async () => vi.advanceTimersByTimeAsync(3_500));
+    expect(latestHistory.historyPageError).toContain(
+      'not available in history',
+    );
+
+    await act(async () => latestHistory.retryHistory());
+    await act(async () => vi.advanceTimersByTimeAsync(10_000));
+
+    expect(latestHistory.historyPageError).toBeUndefined();
+    expect(
+      useChatStore
+        .getState()
+        .threadsById[THREAD_ID]?.messages.map((message) => message.id),
+    ).toEqual(['completed:0', 'completed:1']);
+  });
+
+  it('does not re-check a reconciled turn when a later send fails before acceptance', async () => {
+    seedPages();
+    useChatStore.getState().addMessage(THREAD_ID, {
+      id: 'live-user',
+      role: 'user',
+      content: 'New question',
+    });
+    useChatStore.getState().addMessage(THREAD_ID, {
+      id: 'live-answer',
+      role: 'assistant',
+      segments: [{ kind: 'text', text: 'New answer' }],
+    });
+    apiMocks.fetchHistoryPage.mockResolvedValue({
+      threadId: THREAD_ID,
+      turns: [
+        {
+          id: 'latest',
+          messages: [
+            { role: 'user', content: 'Old question' },
+            {
+              role: 'assistant',
+              parts: [{ kind: 'text', text: 'Latest answer' }],
+            },
+          ],
+        },
+        {
+          id: 'completed',
+          messages: [
+            { role: 'user', content: 'New question' },
+            {
+              role: 'assistant',
+              parts: [{ kind: 'text', text: 'New answer' }],
+            },
+          ],
+        },
+      ],
+      hasMore: false,
+    });
+    await renderHarness();
+    await act(async () =>
+      useChatStore.getState().markTurnCompleted(THREAD_ID, 'live-answer'),
+    );
+    expect(latestHistory.historyPageError).toBeUndefined();
+    expect(
+      useChatStore.getState().threadsById[THREAD_ID]?.messages.at(-1)?.id,
+    ).toBe('completed:1');
+
+    // The next send never reaches the server: it leaves a local user message
+    // and an error row, and the stream flag flips on and off.
+    await act(async () => {
+      const state = useChatStore.getState();
+      state.setThreadLoading(THREAD_ID, true);
+      state.addMessage(THREAD_ID, {
+        id: 'failed-user',
+        role: 'user',
+        content: 'Follow-up',
+      });
+    });
+    const requests = apiMocks.fetchHistoryPage.mock.calls.length;
+    await act(async () => {
+      const state = useChatStore.getState();
+      state.addMessage(THREAD_ID, {
+        id: 'failed-status',
+        role: 'status',
+        status: 'error',
+        detail: 'Failed to fetch',
+      });
+      state.setThreadLoading(THREAD_ID, false);
+    });
+
+    expect(latestHistory.historyPageError).toBeUndefined();
+    expect(apiMocks.fetchHistoryPage.mock.calls.length).toBe(requests);
+    expect(
+      useChatStore
+        .getState()
+        .threadsById[THREAD_ID]?.messages.map((message) => message.id)
+        .slice(-2),
+    ).toEqual(['failed-user', 'failed-status']);
   });
 });
 
@@ -1670,7 +1851,7 @@ describe('useChatHistory paging', () => {
       hasMore: false,
     });
     await act(async () => {
-      latestRetryHistory?.();
+      latestHistory.retryHistory();
     });
     expect(selectThreadHistoryLoaded(useChatStore.getState(), THREAD_ID)).toBe(
       true,
@@ -1704,7 +1885,7 @@ describe('useChatHistory paging', () => {
       turns: [],
       hasMore: false,
     });
-    await act(async () => latestRetryHistory?.());
+    await act(async () => latestHistory.retryHistory());
     expect(apiMocks.fetchHistoryPage).toHaveBeenCalledTimes(2);
     expect(useChatStore.getState().threadsById[THREAD_ID]).toMatchObject({
       historyLoaded: true,
