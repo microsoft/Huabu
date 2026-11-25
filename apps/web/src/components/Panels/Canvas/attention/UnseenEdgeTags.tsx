@@ -8,6 +8,11 @@ import { useTranslation } from 'react-i18next';
 
 import { cn } from '@/components/Common/cn';
 import { Tooltip } from '@/components/Common/Tooltip';
+import {
+  getFilterKeyLabelKey,
+  type LayerFilterKey,
+  type LayerFilterLabelKey,
+} from '@/components/Panels/CanvasLayerPanel/layerFilterKey';
 import { markSeen, useUnseenMarks } from '@/hooks/useUnseenChanges';
 import useCanvasStore from '@/store/canvasStore';
 import { useChatStore } from '@/store/chatStore';
@@ -29,18 +34,6 @@ import { EDGE_TAG_CONFIG } from './edgeTagConfig';
 import type { Rect } from '@huabu/shared';
 import type { CSSProperties } from 'react';
 
-/** The name of each node type the layer panel already has a name for. */
-const TYPE_NAMES = {
-  note: 'layers.filterLabels.note',
-  text: 'layers.filterLabels.text',
-  image: 'layers.filterLabels.image',
-  pdf: 'layers.filterLabels.pdf',
-  video: 'layers.filterLabels.video',
-  audio: 'layers.filterLabels.audio',
-  web: 'layers.filterLabels.web',
-  frame: 'layers.filterLabels.frame',
-  sketch: 'layers.filterLabels.sketch',
-} as const;
 /** How far the halo of a dot reaches past it, in px: see `.attention-halo`. */
 const HALO = 5;
 /**
@@ -148,8 +141,14 @@ function useCanvasRoom(domNode: HTMLDivElement | null): {
       }
       const container = domNode.getBoundingClientRect();
       const box = found?.getBoundingClientRect();
+      // A toolbar the layout has hidden, because a panel covers it, still
+      // has its size, and takes no room.
+      const hidden =
+        found
+          ?.closest('[data-canvas-toolbar-layer]')
+          ?.getAttribute('data-hidden') === 'true';
       const toolbar =
-        box && box.width > 0
+        box && box.width > 0 && !hidden
           ? { from: box.left - container.left, to: box.right - container.left }
           : null;
       const area = getCanvasVisibleArea(domNode);
@@ -165,13 +164,20 @@ function useCanvasRoom(domNode: HTMLDivElement | null): {
       );
     };
     read();
-    // The panels' widths are custom properties on the layout's style.
+    // The panels' widths are custom properties on the layout's style, and
+    // the toolbar is hidden and shown by an attribute on its layer.
     const layout = domNode.closest('[data-overlay-layout]');
     const restyled = layout ? new MutationObserver(read) : undefined;
     if (layout)
       restyled?.observe(layout, {
         attributes: true,
         attributeFilter: ['style'],
+      });
+    const layer = layout?.querySelector('[data-canvas-toolbar-layer]');
+    if (layer)
+      restyled?.observe(layer, {
+        attributes: true,
+        attributeFilter: ['data-hidden'],
       });
     return () => {
       resized?.disconnect();
@@ -232,10 +238,10 @@ function Tag({ tag, onGo, onDismiss }: TagProps) {
   const { t } = useTranslation();
   /** A node as the tag's tooltip names it: its title and what happened. */
   const describe = (node: MarkedNode) => {
-    const typeName =
-      node.type && node.type in TYPE_NAMES
-        ? TYPE_NAMES[node.type as keyof typeof TYPE_NAMES]
-        : undefined;
+    // The layer panel's name for the type; none for a type it does not know.
+    const typeName: LayerFilterLabelKey | undefined = node.type
+      ? getFilterKeyLabelKey(node.type as LayerFilterKey)
+      : undefined;
     const type = typeName ? t(typeName) : '';
     const title = node.label?.trim() || type || t('unseenChanges.untitled');
     const what = node.attention
