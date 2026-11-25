@@ -36,6 +36,7 @@ import { resolveArtifactUrl } from '@/api/artifact';
 import { cn } from '@/components/Common/cn';
 import { Loading } from '@/components/Common/Loading';
 import { AudioNode } from '@/components/Nodes/audio/AudioNode';
+import { DataNode } from '@/components/Nodes/data/DataNode';
 import { FileReferenceNode } from '@/components/Nodes/fileReference/FileReferenceNode';
 import {
   FrameZoomController,
@@ -167,6 +168,7 @@ const mainToolbarPosition: React.CSSProperties = {
 
 const nodeTypes = {
   fileReference: FileReferenceNode,
+  data: DataNode,
   image: ImageNode,
   text: TextNode,
   note: NoteNode,

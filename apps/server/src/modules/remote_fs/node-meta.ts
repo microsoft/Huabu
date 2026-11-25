@@ -143,6 +143,9 @@ function serializeRfsNodeMarkdown(
   ) {
     fm.propertyDisplayKeys = sidecar.propertyDisplayKeys;
   }
+  if (sidecar?.dataSchema !== undefined) {
+    fm.dataSchema = sidecar.dataSchema;
+  }
   const content = typeof sidecar?.content === 'string' ? sidecar.content : '';
   return `${toFrontmatter(fm)}\n${content}`;
 }

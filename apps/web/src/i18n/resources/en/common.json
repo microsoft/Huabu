@@ -1185,6 +1185,7 @@
     "invalidReorderSelection": "These layers cannot be reordered together. Select unlocked layers in the same container.",
     "filterLabels": {
       "fileReference": "File Reference",
+      "data": "Data",
       "note": "Note",
       "text": "Text",
       "image": "Image",
@@ -1829,5 +1830,30 @@
       "editor": "Editor",
       "viewer": "Viewer"
     }
+  },
+  "dataNode": {
+    "defaultLabel": "Data",
+    "schemaBadge": "Schema",
+    "readOnlyBadge": "Read-only",
+    "invalidJson": "Invalid JSON",
+    "edit": "Edit JSON",
+    "cancel": "Cancel",
+    "save": "Save",
+    "saving": "Saving…",
+    "format": "Format",
+    "schemaTitle": "Validation schema",
+    "showSchema": "Show schema",
+    "hideSchema": "Hide schema",
+    "validationError": "Validation error: {{message}}",
+    "saveError": "Could not save Data Node: {{message}}",
+    "conflictTitle": "This Data Node was updated elsewhere while you were editing.",
+    "conflictHint": "Your draft is preserved below. Reload the latest server value or overwrite with your draft.",
+    "reloadLatest": "Reload latest",
+    "overwriteWithDraft": "Overwrite with my draft",
+    "discardModalTitle": "Discard unsaved JSON changes?",
+    "discardModalBody": "Your draft changes to this Data Node have not been saved yet.",
+    "keepEditing": "Keep editing",
+    "discardChanges": "Discard changes",
+    "emptyValue": "Empty JSON"
   }
 }

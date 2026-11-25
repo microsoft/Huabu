@@ -5,13 +5,17 @@ import { z } from 'zod';
 
 import {
   interactiveViewActionRequestSchema,
+  interactiveViewBindingParamsSchema,
   interactiveViewResourceParamsSchema,
+  replaceInteractiveViewDataNodeRequestSchema,
   replaceInteractiveViewStateRequestSchema,
   type ApiResult,
   type InteractiveViewActionRequest,
   type InteractiveViewActionResponse,
   type InteractiveViewResource,
   type InteractiveViewRuntimeSnapshot,
+  type ReplaceInteractiveViewDataNodeRequest,
+  type ReplaceInteractiveViewDataNodeResponse,
   type ReplaceInteractiveViewStateRequest,
 } from '@huabu/shared';
 
@@ -28,12 +32,15 @@ function statusFor(error: InteractiveViewServiceError): number {
   switch (error.code) {
     case 'canvas_not_found':
     case 'view_not_found':
+    case 'data_node_not_found':
       return 404;
     case 'view_conflict':
+    case 'data_node_conflict':
     case 'thread_busy':
       return 409;
     case 'invalid_definition':
     case 'invalid_state':
+    case 'invalid_data_value':
     case 'invalid_owner_thread':
     case 'renderer_not_found':
     case 'action_not_granted':
@@ -217,6 +224,57 @@ const interactiveViewRoutes: FastifyPluginAsync = async (app) => {
                 details: {
                   currentRevision: error.conflict.currentRevision,
                   currentState: error.conflict.currentState,
+                },
+              }
+            : {}),
+        });
+      }
+      throw error;
+    }
+  });
+
+  app.put<{
+    Params: { canvasId: string; nodeId: string; bindingId: string };
+    Body: ReplaceInteractiveViewDataNodeRequest;
+    Reply: ApiResult<ReplaceInteractiveViewDataNodeResponse>;
+  }>('/:canvasId/:nodeId/bindings/:bindingId', async (request, reply) => {
+    const params = interactiveViewBindingParamsSchema.safeParse(request.params);
+    const body = replaceInteractiveViewDataNodeRequestSchema.safeParse(
+      request.body,
+    );
+    if (!params.success || !body.success) {
+      return reply.code(400).send({
+        message:
+          (!params.success
+            ? params.error.issues[0]?.message
+            : body.success
+              ? undefined
+              : body.error.issues[0]?.message) ??
+          'Invalid Data Node binding replacement',
+        code: 'validation_failed',
+      });
+    }
+    try {
+      return reply.send(
+        await interactiveViewService.replaceDataNodeBinding(
+          params.data.canvasId,
+          params.data.nodeId,
+          params.data.bindingId,
+          body.data.revision,
+          body.data.value,
+          'host-bridge',
+        ),
+      );
+    } catch (error) {
+      if (error instanceof InteractiveViewServiceError) {
+        return reply.code(statusFor(error)).send({
+          message: error.message,
+          code: error.code,
+          ...(error.dataConflict
+            ? {
+                details: {
+                  currentRevision: error.dataConflict.currentRevision,
+                  currentValue: error.dataConflict.currentValue,
                 },
               }
             : {}),

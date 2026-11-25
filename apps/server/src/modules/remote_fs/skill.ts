@@ -19,7 +19,7 @@ const logger = getLogger('rfs-skill');
 
 const FOCUSED_SKILLS = {
   http: ['agents', 'interactive-views', 'layout', 'services', 'tasks'],
-  'rfs-cli': ['agents', 'layout', 'services'],
+  'rfs-cli': ['agents', 'interactive-views', 'layout', 'services'],
 } as const;
 
 function clientDirectory(client: RfsSkillClient) {

@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT license.
 
+import { DataPreview } from './data/DataPreview';
 import { FileReferencePreview } from './fileReference/FileReferencePreview';
 import { ImagePreview } from './image/ImagePreview';
 import { NotePreview } from './note/NotePreview';
@@ -17,6 +18,7 @@ export const NodePreviews: Record<
   React.ComponentType<PreviewComponentProps>
 > = {
   fileReference: FileReferencePreview,
+  data: DataPreview,
   note: NotePreview,
   web: WebPreview,
   pdf: PDFPreview,

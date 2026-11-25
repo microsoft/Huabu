@@ -51,7 +51,7 @@ function uiBodyWrite(command: CanvasCommand): string | null {
   if (command.type === 'MERGE_NODE_DATA') {
     for (const entry of command.patches) {
       for (const key of [...Object.keys(entry.patch), ...(entry.unset ?? [])])
-        if (BODY_KEYS.has(key)) return key;
+        if (BODY_KEYS.has(key) || key === 'dataSchema') return key;
     }
     return null;
   }

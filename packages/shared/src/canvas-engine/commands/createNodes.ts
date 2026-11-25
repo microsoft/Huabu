@@ -34,6 +34,7 @@ type Cmd = Extract<CanvasCommand, { type: 'CREATE_NODES' }>;
 const DEFAULT_ACCENT_BY_TYPE: Partial<Record<string, string | null>> = {
   frame: 'white',
   note: 'white',
+  data: 'white',
   text: null,
 };
 
@@ -95,7 +96,10 @@ const createNodes: CommandDefinition<Cmd> = {
         | undefined;
       if (!label || label.trim() === '') {
         const data = (input.data ?? {}) as Record<string, unknown>;
-        const content = typeof data.content === 'string' ? data.content : '';
+        const content =
+          nodeType !== 'data' && typeof data.content === 'string'
+            ? data.content
+            : '';
 
         if (content.trim()) {
           label =
@@ -133,8 +137,14 @@ const createNodes: CommandDefinition<Cmd> = {
         : getNodeDefaultSize(nodeType);
       const suppliedData: Record<string, unknown> = {
         ...input.data,
+        ...(nodeType === 'data' &&
+        typeof (input.data as Record<string, unknown> | undefined)?.content !==
+          'string'
+          ? { content: '{}' }
+          : {}),
         ...(autoHeight && nodeType === 'note' ? { heightMode: 'auto' } : {}),
       };
+      if (suppliedData.dataSchema === null) delete suppliedData.dataSchema;
       const geometryStyle = getNodeCreationStyle(nodeType, size, {
         data: suppliedData,
         heightIsExplicit: typeof explicitSize?.height === 'number',

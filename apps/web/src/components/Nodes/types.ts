@@ -3,6 +3,7 @@
 
 import type {
   CanvasNodeType,
+  DataNodeData as SharedDataNodeData,
   NodeData,
   NodeStyle,
   NoteNodeData as SharedNoteNodeData,
@@ -59,10 +60,14 @@ export type CanvasSketchNodeData = SharedSketchNodeData & {
 export type CanvasQuestionNodeData = SharedQuestionNodeData & {
   [key: string]: unknown;
 };
+export type CanvasDataNodeData = SharedDataNodeData & {
+  [key: string]: unknown;
+};
 
 /** Union type for all canvas node data */
 export type CanvasNodeData =
   | (FileReferenceNodeData & Record<string, unknown>)
+  | CanvasDataNodeData
   | CanvasNoteNodeData
   | CanvasTextNodeData
   | CanvasWebNodeData

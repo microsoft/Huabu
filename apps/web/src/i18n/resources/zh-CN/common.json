@@ -1185,6 +1185,7 @@
     "invalidReorderSelection": "无法调整这些图层的顺序。请只选择同一容器内、未被锁定的图层。",
     "filterLabels": {
       "fileReference": "文件引用",
+      "data": "数据",
       "note": "笔记",
       "text": "文本",
       "image": "图片",
@@ -1829,5 +1830,30 @@
       "editor": "编辑者",
       "viewer": "查看者"
     }
+  },
+  "dataNode": {
+    "defaultLabel": "数据",
+    "schemaBadge": "Schema",
+    "readOnlyBadge": "只读",
+    "invalidJson": "无效 JSON",
+    "edit": "编辑 JSON",
+    "cancel": "取消",
+    "save": "保存",
+    "saving": "保存中…",
+    "format": "格式化",
+    "schemaTitle": "校验 Schema",
+    "showSchema": "查看 Schema",
+    "hideSchema": "收起 Schema",
+    "validationError": "校验未通过：{{message}}",
+    "saveError": "无法保存数据节点：{{message}}",
+    "conflictTitle": "编辑期间该数据节点已在其他位置被更新。",
+    "conflictHint": "你的草稿已完整保留。你可以重新加载最新内容，或用当前草稿覆盖。",
+    "reloadLatest": "重新加载最新内容",
+    "overwriteWithDraft": "用我的草稿覆盖",
+    "discardModalTitle": "放弃未保存的 JSON 修改？",
+    "discardModalBody": "你对该数据节点的草稿修改尚未保存。",
+    "keepEditing": "继续编辑",
+    "discardChanges": "放弃修改",
+    "emptyValue": "空 JSON"
   }
 }

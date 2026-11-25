@@ -140,6 +140,9 @@ function revOfNode(node: Node): string {
       ? { content: data['content'] as string }
       : {}),
     ...(typeof data['src'] === 'string' ? { src: data['src'] as string } : {}),
+    ...(node.type === 'data' && data['dataSchema'] !== undefined
+      ? { dataSchema: data['dataSchema'] }
+      : {}),
   });
 }
 
@@ -200,6 +203,14 @@ function remoteContentPatch(
     if (remote !== undefined && !sameValue(data[key], remote))
       patch[key] = remote;
   }
+  if (
+    nodeType === 'data' &&
+    (res.dataSchema === undefined
+      ? data['dataSchema'] !== undefined
+      : !sameValue(data['dataSchema'], res.dataSchema))
+  ) {
+    patch['dataSchema'] = res.dataSchema;
+  }
   // The response always carries the node's whole property bag and display
   // order, so their absence means the other page removed the last of them:
   // the key is named with `undefined` and removed by the caller.
@@ -234,6 +245,8 @@ function showsServerContent(node: Node, res: GetNodeContentResponse): boolean {
     typeof data['content'] === 'string' &&
     data['content'] !== res.content
   )
+    return false;
+  if (node.type === 'data' && !sameValue(data['dataSchema'], res.dataSchema))
     return false;
   return !(typeof data['src'] === 'string' && data['src'] !== res.src);
 }
@@ -865,6 +878,10 @@ export function createNodeContentQueue(opts: {
 
     if (includes('provenance') && 'provenance' in data) {
       body.provenance = data['provenance'];
+    }
+    if (nodeType === 'data' && includes('dataSchema') && 'dataSchema' in data) {
+      body.dataSchema =
+        (data['dataSchema'] as PutNodeContentRequest['dataSchema']) ?? null;
     }
     // The per-key property patch. The server applies it to the properties
     // it holds, whatever revision the request quotes.

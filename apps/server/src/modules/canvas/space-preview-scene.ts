@@ -187,7 +187,7 @@ export async function getSpacePreviewScene(
     const defaults = getNodeDefaultSize(node.type);
     const content = contentByNodeId.get(node.id)?.record;
     const previewText =
-      node.type === 'note' || node.type === 'text'
+      node.type === 'note' || node.type === 'text' || node.type === 'data'
         ? boundedPreviewText(content?.content ?? node.data?.content)
         : undefined;
     const imageSrc =

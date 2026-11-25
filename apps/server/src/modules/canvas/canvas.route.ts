@@ -57,6 +57,7 @@ import { remapImportedSpace } from './import-space-identity.js';
 import {
   applyNodeUnversionedPatch,
   carriesAuthoredTitle,
+  DataNodeValidationError,
   isRevisionCheckedRequest,
   resolveNodeContentUpdate,
 } from './node-content-update.js';
@@ -246,6 +247,7 @@ const MD_BACKED_NODE_TYPES = new Set([
   'audio',
   'frame',
   'question',
+  'data',
   'sketch',
 ]);
 
@@ -279,6 +281,7 @@ const WIRE_INLINE_CONTENT_TYPES = new Set([
   'web',
   'office',
   'question',
+  'data',
 ]);
 
 /**
@@ -455,7 +458,7 @@ function hydrateOneNode(
   if (persistedProvenance !== undefined) {
     data['provenance'] = persistedProvenance;
   }
-  for (const key of ['properties', 'propertyDisplayKeys']) {
+  for (const key of ['properties', 'propertyDisplayKeys', 'dataSchema']) {
     if (nodeContent[key] !== undefined) data[key] = nodeContent[key];
     else delete data[key];
   }
@@ -905,6 +908,11 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
         strictRename: labelSource === 'user',
       });
     } catch (error) {
+      if (error instanceof DataNodeValidationError) {
+        return reply
+          .code(400)
+          .send({ code: 'invalid_data_node', message: error.message });
+      }
       // CanvasStoreIOError (ENOSPC, EACCES, EROFS, …) / any unexpected throw
       // — environmental, not client-actionable. Surface as 500 (web toasts).
       request.log.error(
@@ -1019,6 +1027,14 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       // refused-empty-clobber case), co-delivered with the write it confirms
       // as the client's new CAS baseline.
       rev: outcome.rev,
+      ...(persisted?.type === 'data'
+        ? {
+            content: persisted.content,
+            ...(persisted.dataSchema !== undefined
+              ? { dataSchema: persisted.dataSchema }
+              : {}),
+          }
+        : {}),
     };
     // `artifactMissing` is only meaningful for src-backed types and is
     // surfaced so the client can render the same placeholder UI it gets
@@ -1115,6 +1131,9 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
     };
     response.properties = existing.properties;
     response.propertyDisplayKeys = existing.propertyDisplayKeys;
+    if (existing.dataSchema !== undefined) {
+      response.dataSchema = existing.dataSchema;
+    }
     const ls = existing['labelSource'];
     if (ls === 'user' || ls === 'auto' || ls === 'agent') {
       response.labelSource = ls;
@@ -1564,7 +1583,11 @@ const canvasRoutes: FastifyPluginAsync = async (fastify) => {
       if (err instanceof AgentNodeBindingError) {
         return reply.code(409).send({ code: err.code, message: err.message });
       }
-      if (err instanceof AgentNodeEditError || err instanceof NodeCoverError) {
+      if (
+        err instanceof AgentNodeEditError ||
+        err instanceof NodeCoverError ||
+        err instanceof DataNodeValidationError
+      ) {
         return reply
           .code(400)
           .send({ code: 'INVALID_REQUEST', message: err.message });

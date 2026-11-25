@@ -221,6 +221,53 @@ export function buildSpaceMovePlan(input: {
       data.layoutOrder = remapLayoutOrder(layoutOrder, nodeIdMap);
     if (typeof data.noteNodeId === 'string')
       data.noteNodeId = nodeIdMap.get(data.noteNodeId);
+    if (
+      nodeType === 'web' &&
+      data.interactiveView &&
+      typeof data.interactiveView === 'object' &&
+      Array.isArray((data.interactiveView as { bindings?: unknown }).bindings)
+    ) {
+      const iv = data.interactiveView as {
+        bindings: Array<{
+          source?: {
+            kind?: string;
+            nodeId?: string;
+            nodeIds?: string[];
+          };
+          [key: string]: unknown;
+        }>;
+      };
+      iv.bindings = iv.bindings.map((binding) => {
+        if (
+          binding?.source?.kind === 'data-node' &&
+          typeof binding.source.nodeId === 'string'
+        ) {
+          return {
+            ...binding,
+            source: {
+              ...binding.source,
+              nodeId:
+                nodeIdMap.get(binding.source.nodeId) ?? binding.source.nodeId,
+            },
+          };
+        }
+        if (
+          binding?.source?.kind === 'canvas.nodes' &&
+          Array.isArray(binding.source.nodeIds)
+        ) {
+          return {
+            ...binding,
+            source: {
+              ...binding.source,
+              nodeIds: binding.source.nodeIds.map(
+                (id) => nodeIdMap.get(id) ?? id,
+              ),
+            },
+          };
+        }
+        return binding;
+      });
+    }
     if (nodeType === 'note') data.heightMode = resolveHeightMode(node);
     const originalLabel =
       typeof data.label === 'string' ? data.label.trim() : '';

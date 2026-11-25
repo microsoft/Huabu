@@ -107,9 +107,49 @@ describe('agentCanvasCommandSchema', () => {
     },
   );
 
-  it('keeps spacePreview and Frame as supported canvas node kinds', () => {
+  it('keeps spacePreview, Data, and Frame as supported canvas node kinds and accepts non-cyclic JSON Schema conversion', () => {
     expect(CANVAS_NODE_TYPES).toContain('spacePreview');
     expect(CANVAS_NODE_TYPES).toContain('frame');
+    expect(CANVAS_NODE_TYPES).toContain('data');
+
+    const createData = {
+      type: 'CREATE_NODES',
+      nodes: [
+        {
+          nodeType: 'data',
+          position: { x: 10, y: 20 },
+          data: {
+            label: 'Config',
+            content: '{"confirmed":true}',
+            dataSchema: {
+              type: 'object',
+              properties: { confirmed: { type: 'boolean' } },
+              required: ['confirmed'],
+              additionalProperties: false,
+            },
+          },
+        },
+      ],
+    };
+    expect(agentCanvasCommandSchema.safeParse(createData).success).toBe(true);
+    expect(
+      agentCanvasCommandSchema.safeParse({
+        type: 'CREATE_NODES',
+        nodes: [
+          {
+            nodeType: 'data',
+            position: { x: 0, y: 0 },
+            data: {
+              dataSchema: {
+                type: 'object',
+                properties: { apiToken: { type: 'string' } },
+                additionalProperties: false,
+              },
+            },
+          },
+        ],
+      }).success,
+    ).toBe(false);
   });
 
   it('keeps the schema registry aligned with the agent command catalogue', () => {

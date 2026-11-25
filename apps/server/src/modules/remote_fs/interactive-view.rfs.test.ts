@@ -285,4 +285,209 @@ describe('Interactive View RFS resources', () => {
       await app.close();
     }
   });
+
+  it('supports standalone Views bound to Data Nodes with CAS data.replace, schema checks, and missing-node resilience', async () => {
+    const app = await buildApp();
+    try {
+      // 1. Create a Data Node via RFS execute
+      const execRes = await app.inject({
+        method: 'POST',
+        url: '/rfs/c1/execute',
+        headers: { 'content-type': 'application/json' },
+        payload: {
+          commands: [
+            {
+              type: 'CREATE_NODES',
+              nodes: [
+                {
+                  nodeType: 'data',
+                  position: { x: 100, y: 100 },
+                  data: {
+                    label: 'Issue Tracker Configuration',
+                    content: '{"codebasePath":"/old","confirmedByUser":false}',
+                    dataSchema: {
+                      type: 'object',
+                      properties: {
+                        codebasePath: { type: 'string', minLength: 1 },
+                        confirmedByUser: { type: 'boolean' },
+                      },
+                      required: ['codebasePath', 'confirmedByUser'],
+                    },
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      });
+      expect(execRes.statusCode).toBe(200);
+      const dataNodeId = execRes.json<{
+        affected: { nodeIds: string[] };
+      }>().affected.nodeIds[0]!;
+      expect(dataNodeId).toMatch(/^node-/);
+
+      const downloaded = await app.inject({
+        method: 'GET',
+        url: `/rfs/c1/download/${dataNodeId}`,
+      });
+      expect(downloaded.statusCode).toBe(200);
+      expect(downloaded.body).toContain('type: data');
+      expect(downloaded.body).toContain('dataSchema:');
+      expect(downloaded.body).toContain('"codebasePath": "/old"');
+
+      // 2. Upload HTML form renderer & create standalone Interactive View (no ownerThreadId, no state)
+      const uploaded = await app.inject({
+        method: 'POST',
+        url: '/rfs/c1/upload/config-form.html',
+        headers: { 'content-type': 'text/html' },
+        payload: '<!doctype html><title>Config Form</title>',
+      });
+      expect(uploaded.statusCode).toBe(201);
+
+      const createdRes = await app.inject({
+        method: 'POST',
+        url: '/rfs/c1/interactive-views',
+        headers: { 'content-type': 'application/json' },
+        payload: {
+          rendererArtifact: uploaded.json<{ id: string }>().id,
+          viewKey: 'config-form',
+          label: 'Config Editor',
+          bindings: [
+            {
+              bindingId: 'cfg',
+              source: { kind: 'data-node', nodeId: dataNodeId },
+            },
+          ],
+          actions: [
+            {
+              actionId: 'save-cfg',
+              kind: 'data.replace',
+              bindingId: 'cfg',
+            },
+          ],
+          position: { x: 560, y: 100 },
+        },
+      });
+      expect(createdRes.statusCode).toBe(201);
+      const created = interactiveViewResourceSchema.parse(createdRes.json());
+      expect(created.definition.ownerThreadId).toBeUndefined();
+      expect(created.definition.state).toEqual({
+        schema: { type: 'null' },
+        value: null,
+      });
+
+      // 3. Read runtime snapshot: bootstrap.data.cfg carries status='ready', value, schema, and node rev
+      const runtimeRes = await app.inject({
+        method: 'GET',
+        url: `/interactive-views/c1/${created.nodeId}/runtime`,
+      });
+      expect(runtimeRes.statusCode).toBe(200);
+      const runtime = runtimeRes.json<{
+        data: Record<
+          string,
+          { revision: string; value: Record<string, unknown> }
+        >;
+      }>();
+      const cfgSnap = runtime.data['cfg'];
+      expect(cfgSnap?.value).toMatchObject({
+        status: 'ready',
+        nodeId: dataNodeId,
+        label: 'Issue Tracker Configuration',
+        value: { codebasePath: '/old', confirmedByUser: false },
+      });
+
+      // 4. CAS update via PUT /interactive-views/:canvasId/:nodeId/bindings/:bindingId
+      const updateRes = await app.inject({
+        method: 'PUT',
+        url: `/interactive-views/c1/${created.nodeId}/bindings/cfg`,
+        headers: { 'content-type': 'application/json' },
+        payload: {
+          revision: cfgSnap!.revision,
+          value: { codebasePath: '/new/repo', confirmedByUser: true },
+        },
+      });
+      expect(updateRes.statusCode).toBe(200);
+      const updated = updateRes.json<{
+        bindingId: string;
+        nodeId: string;
+        snapshot: { revision: string; value: Record<string, unknown> };
+      }>();
+      expect(updated.snapshot.revision).not.toBe(cfgSnap!.revision);
+      expect(updated.snapshot.value).toMatchObject({
+        status: 'ready',
+        value: { codebasePath: '/new/repo', confirmedByUser: true },
+      });
+
+      // Verify sidecar on disk has canonical 2-space formatted JSON
+      const sidecar = getCanvasStore('c1').readNode(dataNodeId);
+      expect(sidecar?.content).toBe(
+        '{\n  "codebasePath": "/new/repo",\n  "confirmedByUser": true\n}',
+      );
+
+      // 5. Stale revision -> 409 data_node_conflict with currentRevision & currentValue
+      const staleRes = await app.inject({
+        method: 'PUT',
+        url: `/interactive-views/c1/${created.nodeId}/bindings/cfg`,
+        payload: {
+          revision: cfgSnap!.revision,
+          value: { codebasePath: '/stale', confirmedByUser: false },
+        },
+      });
+      expect(staleRes.statusCode).toBe(409);
+      expect(staleRes.json()).toMatchObject({
+        code: 'data_node_conflict',
+        details: {
+          currentRevision: updated.snapshot.revision,
+          currentValue: { codebasePath: '/new/repo', confirmedByUser: true },
+        },
+      });
+
+      // 6. Schema violation -> 400 invalid_data_value
+      const badSchemaRes = await app.inject({
+        method: 'PUT',
+        url: `/interactive-views/c1/${created.nodeId}/bindings/cfg`,
+        payload: {
+          revision: updated.snapshot.revision,
+          value: { codebasePath: '', confirmedByUser: true },
+        },
+      });
+      expect(badSchemaRes.statusCode).toBe(400);
+      expect(badSchemaRes.json()).toMatchObject({ code: 'invalid_data_value' });
+
+      // 7. Delete bound Data Node -> runtime degrades to status='missing', PUT returns 404
+      await app.inject({
+        method: 'POST',
+        url: '/rfs/c1/execute',
+        payload: {
+          commands: [{ type: 'DELETE_NODES', nodeIds: [dataNodeId] }],
+        },
+      });
+
+      const missingRuntime = await app.inject({
+        method: 'GET',
+        url: `/interactive-views/c1/${created.nodeId}/runtime`,
+      });
+      expect(missingRuntime.statusCode).toBe(200);
+      expect(
+        missingRuntime.json<{ data: { cfg: { value: unknown } } }>().data.cfg
+          .value,
+      ).toMatchObject({
+        status: 'missing',
+        nodeId: dataNodeId,
+      });
+
+      const missingPut = await app.inject({
+        method: 'PUT',
+        url: `/interactive-views/c1/${created.nodeId}/bindings/cfg`,
+        payload: {
+          revision: updated.snapshot.revision,
+          value: { codebasePath: '/after-delete', confirmedByUser: true },
+        },
+      });
+      expect(missingPut.statusCode).toBe(404);
+      expect(missingPut.json()).toMatchObject({ code: 'data_node_not_found' });
+    } finally {
+      await app.close();
+    }
+  });
 });

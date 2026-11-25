@@ -1,6 +1,6 @@
 # Accessing this Huabu Space
 
-You are working with a **Huabu** Space, an infinite visual surface of notes, images, PDFs, sketches, questions, frames, and links. You do not see the Space directly. Use plain HTTP (`curl`, `wget`, `Invoke-RestMethod`, Python, or Node `fetch`) with the pre-injected environment, and prefer direct `query`, `download`, `upload`, and `execute` operations for deterministic reads and edits; they work without an internal model provider:
+You are working with a **Huabu** Space, an infinite visual surface of notes, JSON data nodes, images, PDFs, sketches, questions, frames, and links. You do not see the Space directly. Use plain HTTP (`curl`, `wget`, `Invoke-RestMethod`, Python, or Node `fetch`) with the pre-injected environment, and prefer direct `query`, `download`, `upload`, and `execute` operations for deterministic reads and edits; they work without an internal model provider:
 
 - `HUABU_RFS_URL` — Space base URL, with no trailing slash.
 - `HUABU_RFS_TOKEN` — bearer credential (`AUTH="Authorization: Bearer $HUABU_RFS_TOKEN"`).
@@ -54,7 +54,7 @@ curl -fsS -H "$AUTH" "$HUABU_RFS_URL/download/sketch-raster-abc123.png" -o /tmp/
 
 ### Download
 
-Pass a URL-encoded `<nodeId>` (from `<node id="...">`, `<note id="...">`, or `INSPECT_NODES`) or `<artifactKey>` (from `X-Huabu-Src`, snapshot `src`, or inline Note images) to `GET /download/<id>`. Downloading a `<nodeId>` fetches that node's text/Markdown record plus `X-Huabu-Node-*`, `X-Huabu-Src`, `X-Huabu-Basis`, and `ETag` headers (pass `X-Huabu-Src` to a second `download` when you need a PDF/media node's raw binary file). Always write bodies to a file rather than stdout, and send `If-None-Match` (using `ETag`, `INSPECT_NODES.rev`, or a Space Skill Note's `rev`) staged to a temporary file so `304 Not Modified` never overwrites a cached file:
+Pass a URL-encoded `<nodeId>` (from `<node id="...">`, `<note id="...">`, `<data id="...">`, or `INSPECT_NODES`) or `<artifactKey>` (from `X-Huabu-Src`, snapshot `src`, or inline Note images) to `GET /download/<id>`. Downloading a `<nodeId>` fetches that node's text/Markdown record (including `dataSchema` frontmatter and JSON body for `data` nodes) plus `X-Huabu-Node-*`, `X-Huabu-Src`, `X-Huabu-Basis`, and `ETag` headers (pass `X-Huabu-Src` to a second `download` when you need a PDF/media node's raw binary file). Always write bodies to a file rather than stdout, and send `If-None-Match` (using `ETag`, `INSPECT_NODES.rev`, or a Space Skill Note's `rev`) staged to a temporary file so `304 Not Modified` never overwrites a cached file:
 
 ```bash
 STATUS="$(curl -sS -H "$AUTH" -H 'If-None-Match: "3d7e"' \
@@ -84,9 +84,9 @@ curl -fsS -H "$AUTH" -H "Content-Type: application/json" \
   --data-binary @/tmp/huabu-execute.json "$HUABU_RFS_URL/execute"
 ```
 
-- `CREATE_NODES` — create nodes (`note`/`text`/`question` take authored body in `data.content` without YAML frontmatter; media nodes take `data.src`; `position` required).
+- `CREATE_NODES` — create nodes (`note`/`text`/`question` take authored body in `data.content` without YAML frontmatter; `data` takes JSON in `data.content` plus optional `data.dataSchema` without secrets; media nodes take `data.src`; `position` required).
 - `INITIALIZE_PDF_NOTE` — create or reuse a PDF's linked hidden Note (`results[].nodes[0].nodeId`), then read/edit that Note by its own ID.
-- `MERGE_NODE_DATA` — patch node fields (`patch.content` takes Markdown body only, stripped of downloaded `---` frontmatter, and requires unquoted `ETag` in `expectRev`; `properties` and `propertyDisplayKeys` need no `expectRev`—keep them in a separate patch entry from `content`).
+- `MERGE_NODE_DATA` — patch node fields (`patch.content` takes Markdown or JSON body only, stripped of downloaded `---` frontmatter, and requires unquoted `ETag` in `expectRev`; `patch.dataSchema` updates a Data Node's schema and requires `expectRev`; `properties` and `propertyDisplayKeys` need no `expectRev`—keep them in a separate patch entry from `content`).
 - `DELETE_NODES` — delete nodes by ID (incident edges are removed automatically).
 - `SET_NODE_GEOMETRY` — move or resize nodes in parent-local coordinates (`size.height: "auto"` fits a `note` to its text).
 - `SET_NODE_PARENT` — move nodes into a Frame, or to root with `parentId: null`.

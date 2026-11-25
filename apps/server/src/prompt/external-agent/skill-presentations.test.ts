@@ -35,6 +35,7 @@ describe('external Agent Skill presentations', () => {
     expect(cliFiles).toEqual([
       'access-huabu.md',
       'agents.md',
+      'interactive-views.md',
       'layout.md',
       'services.md',
     ]);

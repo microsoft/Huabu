@@ -121,6 +121,67 @@ export default function resolvePasteClipboard(
       clonedData.noteNodeId = mapped;
     }
     if (nodeType === 'note') clonedData.heightMode = resolveHeightMode(node);
+    if (nodeType === 'web') {
+      if (
+        typeof clonedData.viewKey === 'string' &&
+        nodes.some(
+          (existing) =>
+            (existing.data as { viewKey?: unknown } | undefined)?.viewKey ===
+            clonedData.viewKey,
+        )
+      ) {
+        delete clonedData.viewKey;
+      }
+      if (
+        clonedData.interactiveView &&
+        typeof clonedData.interactiveView === 'object'
+      ) {
+        const iv = clonedData.interactiveView as {
+          bindings?: Array<{
+            bindingId?: string;
+            source?: {
+              kind?: string;
+              nodeId?: string;
+              nodeIds?: string[];
+            };
+            refresh?: unknown;
+          }>;
+        };
+        if (Array.isArray(iv.bindings)) {
+          iv.bindings = iv.bindings.map((binding) => {
+            const source = binding?.source;
+            if (!source || typeof source !== 'object') return binding;
+            if (
+              source.kind === 'data-node' &&
+              typeof source.nodeId === 'string'
+            ) {
+              return {
+                ...binding,
+                source: {
+                  ...source,
+                  nodeId: idMap.get(source.nodeId) ?? source.nodeId,
+                },
+              };
+            }
+            if (
+              source.kind === 'canvas.nodes' &&
+              Array.isArray(source.nodeIds)
+            ) {
+              return {
+                ...binding,
+                source: {
+                  ...source,
+                  nodeIds: source.nodeIds.map((id) =>
+                    typeof id === 'string' ? (idMap.get(id) ?? id) : id,
+                  ),
+                },
+              };
+            }
+            return binding;
+          });
+        }
+      }
+    }
     clonedData.label = label;
     clonedData.origin = { type: 'user-pasted' };
     // Stroke ids identify individual ink entries across selection, move,

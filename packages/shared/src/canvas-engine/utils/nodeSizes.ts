@@ -34,6 +34,7 @@ import type { Node } from '@xyflow/react';
 const DEFAULT_SIZES: Record<string, NodeSize> = {
   text: { width: 400 },
   note: { width: 400, height: 300 },
+  data: { width: 400, height: 300 },
   web: { width: 400, height: 400 },
   pdf: { width: 400, height: 400 },
   office: { width: 400, height: 400 },

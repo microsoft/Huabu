@@ -67,11 +67,11 @@ export function prepareAgentCanvasCommands(
             entry.patch.content,
             entry.nodeId,
           );
-          // Only a body rewrite is checked against a revision. Custom
-          // properties are merged per key without one, so nothing is injected
-          // for a patch that leaves the body alone.
+          // Body or Data Node schema rewrites are checked against a revision.
+          // Custom properties are merged per key without one, so nothing is
+          // injected for a patch that leaves both alone.
           const injectedRev =
-            'content' in entry.patch
+            'content' in entry.patch || 'dataSchema' in entry.patch
               ? options.readSet?.get(entry.nodeId)
               : undefined;
           const revision =

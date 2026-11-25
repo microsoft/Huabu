@@ -138,6 +138,7 @@ import {
 import { sendBlob } from '../artifact/send-blob.js';
 import {
   CanvasNotFoundError,
+  DataNodeValidationError,
   ExecuteBasisError,
   ExecuteOutcomeUnknownError,
   ExecuteRequestReusedError,
@@ -206,13 +207,18 @@ function interactiveViewStatus(error: InteractiveViewServiceError): number {
   switch (error.code) {
     case 'canvas_not_found':
     case 'view_not_found':
+    case 'data_node_not_found':
       return 404;
     case 'view_conflict':
+    case 'data_node_conflict':
       return 409;
     case 'invalid_definition':
     case 'invalid_state':
+    case 'invalid_data_value':
     case 'invalid_owner_thread':
     case 'renderer_not_found':
+    case 'action_not_granted':
+    case 'action_not_available':
       return 400;
     default:
       return 500;
@@ -1010,7 +1016,10 @@ const rfsRoutes: FastifyPluginAsync = async (app) => {
               ),
             );
         }
-        if (error instanceof NodeCoverError) {
+        if (
+          error instanceof NodeCoverError ||
+          error instanceof DataNodeValidationError
+        ) {
           return reply
             .code(400)
             .send(rfsError(error.message, 'validation_failed'));

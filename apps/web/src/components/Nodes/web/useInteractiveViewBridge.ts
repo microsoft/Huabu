@@ -6,15 +6,19 @@ import { useCallback, useEffect, useRef } from 'react';
 import { ApiError } from '@/api/_client';
 import {
   getInteractiveViewRuntime,
+  replaceInteractiveViewDataNode,
   replaceInteractiveViewState,
   submitInteractiveViewAction,
 } from '@/api/interactiveView';
-import useCanvasStore from '@/store/canvasStore';
+import useCanvasStore, { adoptRemoteNodeContent } from '@/store/canvasStore';
+import { subscribeCanvasSync } from '@/store/canvasSyncSubscription';
 import { openPreviewNode } from '@/store/previewWorkspace/actions';
 import { revealNodesOnCanvas } from '@/utils/canvasViewport';
 
 import type {
+  CanvasSyncEvent,
   InteractiveViewBootstrapV1,
+  InteractiveViewDataBindingV1,
   InteractiveViewDataSnapshotV1,
   InteractiveViewDataUpdateV1,
   InteractiveViewIntentV1,
@@ -113,11 +117,50 @@ function bootstrapOf(
     revision: resource.revision,
     state: resource.definition.state.value,
     data,
-    actions: resource.definition.actions.map(({ actionId, kind }) => ({
-      actionId,
-      kind,
-    })),
+    actions: resource.definition.actions.map(
+      ({ actionId, kind, bindingId }) => ({
+        actionId,
+        kind,
+        ...(bindingId ? { bindingId } : {}),
+      }),
+    ),
   };
+}
+
+function watchedNodeIdsOf(
+  bindings: readonly InteractiveViewDataBindingV1[],
+): Set<string> {
+  const watched = new Set<string>();
+  for (const binding of bindings) {
+    if (binding.source.kind === 'data-node') {
+      watched.add(binding.source.nodeId);
+    } else if (binding.source.kind === 'canvas.nodes') {
+      for (const id of binding.source.nodeIds) {
+        watched.add(id);
+      }
+    }
+  }
+  return watched;
+}
+
+function syncEventTouchesWatchedNodes(
+  event: CanvasSyncEvent,
+  watched: ReadonlySet<string>,
+): boolean {
+  if (watched.size === 0) return false;
+  if (event.type === 'invalidate') {
+    if (!event.data.nodeIds || event.data.nodeIds.length === 0) return true;
+    return event.data.nodeIds.some((id) => watched.has(id));
+  }
+  if (event.type === 'update') {
+    const effects = event.data.pendingEffects;
+    return (
+      effects.mutatedNodeIds.some((id) => watched.has(id)) ||
+      effects.deletedNodeIds.some((id) => watched.has(id)) ||
+      effects.contentEditedNodeIds.some((id) => watched.has(id))
+    );
+  }
+  return false;
 }
 
 function postOutcome(port: MessagePort, outcome: InteractiveViewOutcomeV1) {
@@ -395,6 +438,121 @@ export function useInteractiveViewBridge(input: {
         });
         return;
       }
+      if (grant.kind === 'data.replace') {
+        if (!grant.bindingId) {
+          postOutcome(port, {
+            type: 'huabu.view.outcome',
+            requestId: intent.requestId,
+            status: 'unauthorized',
+            code: 'binding_not_granted',
+            message: 'data.replace requires a bound bindingId',
+          });
+          return;
+        }
+        const replaceInput = asRecord(intent.input);
+        const revision =
+          typeof replaceInput?.revision === 'string' &&
+          replaceInput.revision.length > 0
+            ? replaceInput.revision
+            : intent.bindingRevision;
+        const hasValueKey =
+          replaceInput !== null &&
+          Object.prototype.hasOwnProperty.call(replaceInput, 'value');
+        const nextValue = hasValueKey
+          ? (replaceInput.value as InteractiveViewJsonValue)
+          : intent.bindingRevision !== undefined && intent.input !== undefined
+            ? intent.input
+            : undefined;
+        if (
+          typeof revision !== 'string' ||
+          revision.length === 0 ||
+          (!hasValueKey &&
+            (intent.bindingRevision === undefined ||
+              intent.input === undefined))
+        ) {
+          postOutcome(port, {
+            type: 'huabu.view.outcome',
+            requestId: intent.requestId,
+            status: 'error',
+            code: 'invalid_input',
+            message: 'data.replace requires { revision, value }',
+          });
+          return;
+        }
+
+        postOutcome(port, {
+          type: 'huabu.view.outcome',
+          requestId: intent.requestId,
+          status: 'pending',
+        });
+        void replaceInteractiveViewDataNode(canvasId, nodeId, grant.bindingId, {
+          revision,
+          value: nextValue as InteractiveViewJsonValue,
+        })
+          .then((res) => {
+            if (portRef.current !== port) return;
+            const nextBindingMap = { [res.bindingId]: res.snapshot };
+            dataRef.current = { ...dataRef.current, ...nextBindingMap };
+            const update: InteractiveViewDataUpdateV1 = {
+              type: 'huabu.view.data',
+              protocolVersion: 1,
+              nodeId,
+              data: nextBindingMap,
+            };
+            port.postMessage(update);
+            void adoptRemoteNodeContent(canvasId, [res.nodeId]).catch(
+              () => undefined,
+            );
+            postOutcome(port, {
+              type: 'huabu.view.outcome',
+              requestId: intent.requestId,
+              status: 'success',
+              data: nextBindingMap,
+              result: {
+                bindingId: res.bindingId,
+                nodeId: res.nodeId,
+                revision: res.snapshot.revision,
+                value: res.snapshot.value,
+              },
+            });
+          })
+          .catch((error: unknown) => {
+            if (portRef.current !== port) return;
+            const conflict =
+              error instanceof ApiError && error.code === 'data_node_conflict';
+            const details =
+              error instanceof ApiError && isBoundedJsonValue(error.details)
+                ? error.details
+                : null;
+            const detailsRecord = asRecord(details);
+            postOutcome(port, {
+              type: 'huabu.view.outcome',
+              requestId: intent.requestId,
+              status: conflict ? 'conflict' : 'error',
+              code:
+                error instanceof ApiError
+                  ? (error.code ?? 'data_replace_failed')
+                  : 'data_replace_failed',
+              message:
+                error instanceof Error
+                  ? error.message
+                  : 'Failed to replace bound Data Node',
+              ...(typeof detailsRecord?.currentRevision === 'string'
+                ? { currentRevision: detailsRecord.currentRevision }
+                : {}),
+              ...(detailsRecord &&
+              Object.prototype.hasOwnProperty.call(
+                detailsRecord,
+                'currentValue',
+              ) &&
+              isBoundedJsonValue(detailsRecord.currentValue)
+                ? { currentValue: detailsRecord.currentValue }
+                : {}),
+              ...(details !== null ? { details } : {}),
+            });
+          });
+        return;
+      }
       if (grant.kind !== 'state.replace') {
         postOutcome(port, {
           type: 'huabu.view.outcome',
@@ -480,6 +638,16 @@ export function useInteractiveViewBridge(input: {
     port.postMessage(bootstrapOf(runtime.resource, runtime.data));
 
     const bindings = runtime.resource.definition.bindings;
+    const watchedNodeIds = watchedNodeIdsOf(bindings);
+    const unsubscribeSync =
+      watchedNodeIds.size > 0
+        ? subscribeCanvasSync(canvasId, (event) => {
+            if (!syncEventTouchesWatchedNodes(event, watchedNodeIds)) return;
+            void refreshData().catch((error) => {
+              console.error('[interactive-view] sync refresh failed', error);
+            });
+          })
+        : null;
     const pollInterval = bindings.reduce<number | null>((minimum, binding) => {
       const candidate = binding.refresh?.pollIntervalMs;
       if (candidate === undefined) return minimum;
@@ -506,6 +674,7 @@ export function useInteractiveViewBridge(input: {
             });
           }, pollInterval);
     runtimeCleanupRef.current = () => {
+      unsubscribeSync?.();
       window.removeEventListener('focus', onFocus);
       if (timer !== null) window.clearInterval(timer);
     };

@@ -36,8 +36,10 @@ import {
   encodeBasis,
   interactiveViewDefinitionV1Schema,
   interactiveViewRevision,
+  parseAndNormalizeDataNodeContent,
   type CanvasCommand,
   type CanvasCommandFailureReason,
+  type DataNodeSchemaV1,
   editsPerCommand,
   type CanvasExecuteEditRef,
   type PostCanvasExecuteResponse,
@@ -96,6 +98,10 @@ import {
   reclaimStagedUploads,
 } from './import-node-src.js';
 import {
+  DataNodeValidationError,
+  validateDataSchemaOrThrow,
+} from './node-content-update.js';
+import {
   pageKeyOf,
   resolveEdits,
   resolveReadVersion,
@@ -136,6 +142,8 @@ import {
   acquireWorkspaceOperationLease,
   getWorkspaceKey,
 } from '../workspace.js';
+
+export { DataNodeValidationError };
 
 /** Ordinary Spaces do not need World membership checks. */
 const EMPTY_CANVAS_IDS: ReadonlySet<string> = new Set<string>();
@@ -188,6 +196,7 @@ const MD_BACKED_NODE_TYPES = new Set([
   'audio',
   'frame',
   'question',
+  'data',
   'sketch',
 ]);
 
@@ -198,6 +207,7 @@ const TEXT_BEARING_NODE_TYPES = new Set([
   'pdf',
   'office',
   'question',
+  'data',
 ]);
 
 const NODE_CONTENT_KEYS = new Set([
@@ -210,6 +220,7 @@ const NODE_CONTENT_KEYS = new Set([
   'provenance',
   'properties',
   'propertyDisplayKeys',
+  'dataSchema',
 ]);
 
 function stripNodesForCanvas(nodes: readonly CanvasNode[]): CanvasNode[] {
@@ -251,7 +262,7 @@ export function hydrateCanvasNodes(
     if (content['keywords'] != null) data['keywords'] = content['keywords'];
     if (content['provenance'] != null)
       data['provenance'] = content['provenance'];
-    for (const key of ['properties', 'propertyDisplayKeys']) {
+    for (const key of ['properties', 'propertyDisplayKeys', 'dataSchema']) {
       if (content[key] !== undefined) data[key] = content[key];
       else delete data[key];
     }
@@ -294,9 +305,10 @@ function collectMergeConflicts(
     if (cmd.type !== 'MERGE_NODE_DATA') continue;
     for (const entry of cmd.patches) {
       const patch = entry.patch ?? {};
-      if (!('content' in patch)) continue;
       const node = byId.get(entry.nodeId);
       if (!node) continue; // missing node → engine emits 'not-found'
+      const guardsDataSchema = node.type === 'data' && 'dataSchema' in patch;
+      if (!('content' in patch) && !guardsDataSchema) continue;
       const currentRev = nodeRevision(node);
       const rawContent = (node.data as Record<string, unknown> | undefined)?.[
         'content'
@@ -360,6 +372,155 @@ function collectInteractiveViewConflicts(
   return conflicts;
 }
 
+function normalizeAndValidateDataCommands(
+  commands: readonly CanvasCommand[],
+  prestateNodes: readonly CanvasNode[],
+): CanvasCommand[] {
+  const stateById = new Map<
+    string,
+    { type: string; content: string; dataSchema?: DataNodeSchemaV1 }
+  >();
+  for (const node of prestateNodes) {
+    const data = (node.data ?? {}) as Record<string, unknown>;
+    stateById.set(node.id, {
+      type: node.type ?? '',
+      content: typeof data['content'] === 'string' ? data['content'] : '{}',
+      dataSchema:
+        data['dataSchema'] !== undefined
+          ? (data['dataSchema'] as DataNodeSchemaV1)
+          : undefined,
+    });
+  }
+
+  return commands.map((command) => {
+    if (command.type === 'CREATE_NODES') {
+      return {
+        ...command,
+        nodes: command.nodes.map((spec) => {
+          const rawData = (spec.data ?? {}) as Record<string, unknown>;
+          if (spec.nodeType !== 'data') {
+            if (rawData['dataSchema'] !== undefined) {
+              throw new DataNodeValidationError(
+                'dataSchema is only supported on data nodes.',
+              );
+            }
+            if (spec.id) {
+              stateById.set(spec.id, {
+                type: spec.nodeType,
+                content:
+                  typeof rawData['content'] === 'string'
+                    ? rawData['content']
+                    : '',
+              });
+            }
+            return spec;
+          }
+
+          const schema =
+            rawData['dataSchema'] !== undefined
+              ? validateDataSchemaOrThrow(rawData['dataSchema'])
+              : undefined;
+          const rawContent =
+            rawData['content'] !== undefined ? rawData['content'] : '{}';
+          if (typeof rawContent !== 'string') {
+            throw new DataNodeValidationError(
+              'Data node content must be a JSON string.',
+            );
+          }
+          const normalized = parseAndNormalizeDataNodeContent(
+            rawContent,
+            schema,
+          );
+          if (!normalized.ok) {
+            throw new DataNodeValidationError(normalized.message);
+          }
+          if (spec.id) {
+            stateById.set(spec.id, {
+              type: 'data',
+              content: normalized.formatted,
+              dataSchema: schema,
+            });
+          }
+          return {
+            ...spec,
+            data: {
+              ...spec.data,
+              content: normalized.formatted,
+              ...(schema !== undefined ? { dataSchema: schema } : {}),
+            },
+          };
+        }),
+      };
+    }
+
+    if (command.type === 'MERGE_NODE_DATA') {
+      return {
+        ...command,
+        patches: command.patches.map((entry) => {
+          const patchRecord = (entry.patch ?? {}) as Record<string, unknown>;
+          const current = stateById.get(entry.nodeId);
+          if (!current) {
+            if (
+              patchRecord['dataSchema'] !== undefined &&
+              patchRecord['dataSchema'] !== null
+            ) {
+              validateDataSchemaOrThrow(patchRecord['dataSchema']);
+            }
+            return entry;
+          }
+          if (current.type !== 'data') {
+            if (patchRecord['dataSchema'] !== undefined) {
+              throw new DataNodeValidationError(
+                'dataSchema is only supported on data nodes.',
+              );
+            }
+            return entry;
+          }
+          if (!('content' in patchRecord) && !('dataSchema' in patchRecord)) {
+            return entry;
+          }
+          const nextSchema =
+            patchRecord['dataSchema'] === null
+              ? undefined
+              : patchRecord['dataSchema'] !== undefined
+                ? validateDataSchemaOrThrow(patchRecord['dataSchema'])
+                : current.dataSchema !== undefined
+                  ? validateDataSchemaOrThrow(current.dataSchema)
+                  : undefined;
+          const rawContent =
+            'content' in patchRecord ? patchRecord['content'] : current.content;
+          if (typeof rawContent !== 'string') {
+            throw new DataNodeValidationError(
+              'Data node content must be a JSON string.',
+            );
+          }
+          const normalized = parseAndNormalizeDataNodeContent(
+            rawContent,
+            nextSchema,
+          );
+          if (!normalized.ok) {
+            throw new DataNodeValidationError(normalized.message);
+          }
+          stateById.set(entry.nodeId, {
+            type: 'data',
+            content: normalized.formatted,
+            dataSchema: nextSchema,
+          });
+          return {
+            ...entry,
+            patch: {
+              ...entry.patch,
+              content: normalized.formatted,
+            },
+          };
+        }),
+      };
+    }
+
+    return command;
+  });
+}
+
 function buildNodeContent(node: CanvasNode): NodeContent | null {
   const nodeId = typeof node.id === 'string' ? node.id : '';
   if (!nodeId) return null;
@@ -377,7 +538,11 @@ function buildNodeContent(node: CanvasNode): NodeContent | null {
   if (typeof data['summary'] === 'string') out['summary'] = data['summary'];
   if (Array.isArray(data['keywords'])) out['keywords'] = data['keywords'];
   if ('provenance' in data) out['provenance'] = data['provenance'];
-  for (const key of ['properties', 'propertyDisplayKeys'] as const) {
+  for (const key of [
+    'properties',
+    'propertyDisplayKeys',
+    'dataSchema',
+  ] as const) {
     if (data[key] !== undefined)
       (out as Record<string, unknown>)[key] = data[key];
   }
@@ -1824,6 +1989,13 @@ async function executePreparedOnServerAlreadyLocked(
       input.echoCommands === true,
     );
   }
+
+  const normalizedDataCommands = normalizeAndValidateDataCommands(
+    flatCommands(edits),
+    prestateNodes,
+  );
+  let dataCmdOffset = 0;
+  mapCommands(() => normalizedDataCommands[dataCmdOffset++] as CanvasCommand);
 
   const everyEditChecked = edits.every(
     (edit) => resolvedOf.get(edit)?.version !== undefined,

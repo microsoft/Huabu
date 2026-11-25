@@ -1,8 +1,8 @@
 # Building Interactive Views
 
-Use an Interactive View when the user needs a durable application-like surface inside the Huabu Canvas. The renderer is untrusted HTML; Huabu owns persistence, live data, navigation, and Agent delivery through a capability bridge.
+Use an Interactive View when the user needs a durable HTML form, control panel, or application-like surface inside the Huabu Space. The renderer is untrusted sandboxed HTML; Huabu owns persistence, live Data Node bindings, View-local state, navigation, and optional Agent delivery through a capability bridge.
 
-Do not embed `HUABU_RFS_TOKEN`, `HUABU_RFS_URL`, API routes, thread IDs, filesystem credentials, or secrets in HTML. Do not call Huabu APIs from the iframe. The iframe may invoke only actions declared when the View is created.
+Do not embed `HUABU_RFS_TOKEN`, `HUABU_RFS_URL`, API routes, thread IDs, filesystem credentials, or secrets in HTML, Data Nodes, or View state. Do not call Huabu APIs from the iframe. The iframe may invoke only actions declared when the View is created.
 
 ## 1. Discover an existing View
 
@@ -10,82 +10,99 @@ Give each logical View a stable `viewKey` and look it up before creating another
 
 ```bash
 curl -fsS -H "$AUTH" \
-  "$HUABU_RFS_URL/interactive-views?viewKey=issue-tracker"
+  "$HUABU_RFS_URL/interactive-views?viewKey=repo-config-form"
 ```
 
 The response is `{ "views": [...] }`. Reuse the returned `nodeId`; the Web Node is the View's identity and persistence resource.
 
-## 2. Upload the renderer
+## 2. Create Data Nodes and upload the renderer
 
-Create one self-contained HTML file. Inline CSS and JavaScript are supported; external network resources are not an implicit capability.
+When a form edits structured Space configuration or shared data, store the canonical JSON in one or more standalone Data Nodes (`nodeType: "data"`) first so the Space, Prompt/Skill Frames, Agents, and HTML Views all share one source of truth. Create the Data Node via `POST /execute` (`CREATE_NODES`) to obtain its assigned `nodeId` from `results[].nodes`, and upload one self-contained HTML renderer (`POST /upload/<filename>`):
 
 ```bash
+curl -fsS -H "$AUTH" -H "Content-Type: application/json" \
+  -H "X-Huabu-Host-Thread-Id: $HUABU_THREAD_ID" \
+  --data-binary '{
+    "commands": [{
+      "type": "CREATE_NODES",
+      "nodes": [{
+        "nodeType": "data",
+        "data": {
+          "label": "Repository Configuration",
+          "dataSchema": {
+            "type": "object",
+            "properties": {
+              "codebasePath": { "type": "string", "maxLength": 4096 },
+              "confirmedByUser": { "type": "boolean" }
+            },
+            "required": ["codebasePath", "confirmedByUser"],
+            "additionalProperties": false
+          },
+          "content": "{\"codebasePath\":\"\",\"confirmedByUser\":false}"
+        },
+        "position": { "x": 400, "y": 200 },
+        "size": { "width": 400, "height": 300 }
+      }]
+    }]
+  }' \
+  "$HUABU_RFS_URL/execute"
+
 curl -fsS -H "$AUTH" -H "Content-Type: text/html" \
-  --data-binary @./issue-tracker.html \
-  "$HUABU_RFS_URL/upload/issue-tracker.html"
+  --data-binary @./repo-config-form.html \
+  "$HUABU_RFS_URL/upload/repo-config-form.html"
 ```
 
-The response `{ "id": "<artifactKey>", "size": ... }` (for example `artifact-8f2a.html`) supplies the `rendererArtifact` key used in the create request.
+Data Nodes validate `data.content` as JSON against `data.dataSchema` (when present) on every write and reject secret-like keys (`password`, `passwd`, `secret`, `token`, `apiKey`, `privateKey`, `credential`, `credentials`). Inline CSS and JavaScript are supported in the uploaded HTML file; `POST /upload/<filename>` returns `{ "id": "<artifactKey>", "size": ... }` for `rendererArtifact`.
 
 ## 3. Create the View
 
-`ownerThreadId` fixes the Agent destination for the View lifetime. Use `HUABU_THREAD_ID` for a View owned by the current Agent.
+Standalone HTML forms bound to Data Nodes do not require an `ownerThreadId`, Task, or Run. Supply `ownerThreadId` (such as `$HUABU_THREAD_ID`) only when `actions` includes `agent.submit`, and supply `state` only when the View also needs private View-local UI state outside any Data Node:
 
 ```bash
-cat > /tmp/huabu-view.json <<JSON
+cat > /tmp/huabu-view.json <<'JSON'
 {
   "rendererArtifact": "artifact-8f2a.html",
-  "viewKey": "issue-tracker",
-  "label": "Issue Tracker",
-  "ownerThreadId": "$HUABU_THREAD_ID",
-  "state": {
-    "schema": {
-      "type": "object",
-      "properties": {
-        "codebasePath": { "type": "string", "maxLength": 4096 },
-        "worktreeRoot": { "type": "string", "maxLength": 4096 }
-      },
-      "required": ["codebasePath", "worktreeRoot"],
-      "additionalProperties": false
-    },
-    "value": { "codebasePath": "", "worktreeRoot": "" }
-  },
+  "viewKey": "repo-config-form",
+  "label": "Repository Configuration Form",
   "bindings": [
     {
-      "bindingId": "tasks",
-      "source": { "kind": "canvas.task-store", "recentRunLimit": 50 },
-      "refresh": {
-        "onMount": true,
-        "onFocus": true,
-        "pollIntervalMs": 5000
-      }
+      "bindingId": "config",
+      "source": { "kind": "data-node", "nodeId": "node-data-123" },
+      "refresh": { "onMount": true, "onFocus": true }
     }
   ],
   "actions": [
-    { "actionId": "save-configuration", "kind": "state.replace" },
-    { "actionId": "refresh-tasks", "kind": "data.refresh", "bindingId": "tasks" },
-    { "actionId": "open-run-node", "kind": "navigation.open-node", "bindingId": "tasks" },
-    { "actionId": "open-run-thread", "kind": "navigation.open-thread", "bindingId": "tasks" },
-    { "actionId": "approve-run", "kind": "agent.submit" }
+    { "actionId": "save-config", "kind": "data.replace", "bindingId": "config" },
+    { "actionId": "reload-config", "kind": "data.refresh", "bindingId": "config" },
+    { "actionId": "focus-config-node", "kind": "navigation.open-node", "bindingId": "config" }
   ],
-  "position": { "x": 400, "y": 200 },
-  "size": { "width": 720, "height": 520 }
+  "position": { "x": 860, "y": 200 },
+  "size": { "width": 520, "height": 440 }
 }
 JSON
 
 curl -fsS -H "$AUTH" -H "Content-Type: application/json" \
+  -H "X-Huabu-Host-Thread-Id: $HUABU_THREAD_ID" \
   --data-binary @/tmp/huabu-view.json \
   "$HUABU_RFS_URL/interactive-views"
 ```
 
-The state schema supports closed objects, arrays, strings, finite numbers, booleans, null, required properties, enum, and length/range limits. Bounds must be internally consistent, and every required property must be declared. Interactive View state is not a secret store.
+Available binding sources (`bindings[].source`) are:
 
-Available binding sources are:
+- `data-node`: `{ "kind": "data-node", "nodeId": "<dataNodeId>" }` — binds one specific Data Node as a whole JSON value. Runtime `data[bindingId].value` is `{ "status": "ready", "nodeId", "label", "value", "schema" }`, `{ "status": "missing", "nodeId" }` if deleted, or `{ "status": "invalid", "nodeId", "label", "error" }` if invalid, with `data[bindingId].revision` equal to that Data Node's current `rev`. Huabu automatically pushes live `huabu.view.data` updates while the View is mounted whenever a bound Data Node changes on the Space.
+- `canvas.task-store`: `{ "kind": "canvas.task-store", "recentRunLimit": 50 }` — delivers `{ tasks, runs }`.
+- `canvas.nodes`: `{ "kind": "canvas.nodes", "nodeIds": ["..."] }` — delivers summary metadata for the listed `nodeIds`.
 
-- `canvas.task-store`: `{ tasks, runs }`; `recentRunLimit` bounds the newest Runs returned.
-- `canvas.nodes`: an array of metadata for the explicitly listed `nodeIds`.
+Available action grants (`actions[]`) are:
 
-Refresh is Host-scheduled while the View is mounted and visible. `onFocus` refreshes after window focus; `pollIntervalMs` accepts 1000–60000 ms. HTML never supplies a query, URL, or polling callback.
+- `data.replace` (`bindingId` targeting a `data-node` binding): replaces the bound Data Node's complete JSON value using compare-and-swap against `data[bindingId].revision` and `dataSchema`.
+- `data.refresh` (optional `bindingId`): refreshes one binding or all bindings.
+- `state.replace`: replaces View-local `state` using compare-and-swap against `view.revision`.
+- `navigation.open-node` (`bindingId`): focuses a Node listed in that binding's `references.nodeIds`.
+- `navigation.open-thread` (`bindingId`): opens a conversation listed in that binding's `references.threadIds`.
+- `agent.submit`: delivers a durable structured `huabu.interactive-view` event to `ownerThreadId` (requires `ownerThreadId` at View creation).
+
+Both `dataSchema` and View `state.schema` support closed objects (`additionalProperties: false`), arrays, strings, finite numbers, booleans, null, required properties, `enum`, and length/range limits. Refresh (`onFocus`, `pollIntervalMs` 1000–60000 ms) is Host-scheduled while the View is mounted and visible.
 
 ## 4. Connect to the Host bridge
 
@@ -136,47 +153,61 @@ Huabu sends one global `huabu.view.connect` message with a transferred `MessageP
 </script>
 ```
 
-Bootstrap contains `{ nodeId, revision, state, data, actions }`. Each `data[bindingId]` contains `{ revision, value, references }`; `references.nodeIds` and `references.threadIds` are the exact Host-authorized navigation targets produced by that binding.
-
-Accepted asynchronous requests receive `pending` followed by `success` or a terminal error; validation and authorization failures may be terminal immediately. Generate a fresh `requestId` for every invocation; replayed IDs are rejected.
+Bootstrap contains `{ nodeId, revision, state, data, actions }`. Each `data[bindingId]` contains `{ revision, value, references }`; `references.nodeIds` and `references.threadIds` are the exact Host-authorized navigation targets produced by that binding. Generate a fresh `requestId` for every invocation; accepted asynchronous requests emit `pending` followed by `success` or a terminal error.
 
 ## 5. Invoke actions
 
-Replace the complete state using the last observed View revision:
+Replace a bound Data Node's complete JSON value using that binding's last observed `revision`:
 
 ```js
-invoke('save-configuration', {
-  revision: view.revision,
-  value: {
-    codebasePath: document.querySelector('#codebase').value,
-    worktreeRoot: document.querySelector('#worktrees').value,
-  },
-});
+const configBinding = view.data.config;
+if (configBinding?.value?.status === 'ready') {
+  invoke('save-config', {
+    revision: configBinding.revision,
+    value: {
+      ...configBinding.value.value,
+      codebasePath: document.querySelector('#codebase').value,
+      confirmedByUser: document.querySelector('#confirmed').checked,
+    },
+  });
+}
 ```
 
-On success, replace the local `view.revision` and `view.state` with the returned values. On `conflict`, reload the View state instead of silently overwriting a newer value.
+On `success`, merge `outcome.data` into `view.data` (updating `view.data.config.revision` and `value`). On `conflict`, `outcome.details` includes `currentRevision` and `currentValue` so the form can display a conflict prompt without losing the user's draft; if `configBinding.value.status === "missing"`, render a missing-data notice instead of crashing.
 
-Refresh one binding with `invoke("refresh-tasks")`.
-
-Open a bound Node with `invoke("open-run-node", { nodeId })`. Open a bound thread with `invoke("open-run-thread", { threadId })`. The target must appear in the granted binding's `references`; arbitrary IDs are rejected.
-
-Deliver a durable structured event to the fixed owner Agent with `invoke("approve-run", { runId, approved: true })`. Huabu persists the event as a `huabu.interactive-view` submission. If the Agent is busy, the current implementation waits for its turn lease for up to five seconds and then returns `thread_busy`.
+Use `invoke("reload-config")` for `data.refresh`, `invoke("focus-config-node", { nodeId })` for `navigation.open-node`, `invoke(stateActionId, { revision: view.revision, value })` for View-local `state.replace`, and `invoke(submitActionId, payload)` for `agent.submit`.
 
 ## 6. Read and update from the Agent
 
-Read the current definition, state, and revision:
+Read and update bound Data Nodes with ordinary RFS operations (`GET /download/<dataNodeId>` returns `dataSchema` in YAML frontmatter plus the JSON body and `ETag`; `POST /execute` `MERGE_NODE_DATA` writes updated JSON with unquoted `ETag` in `expectRev`):
 
 ```bash
-curl -fsS -H "$AUTH" \
-  "$HUABU_RFS_URL/interactive-views/$NODE_ID"
+curl -fsS -H "$AUTH" -D /tmp/data-headers.txt -o /tmp/config.md \
+  "$HUABU_RFS_URL/download/node-data-123"
+
+curl -fsS -H "$AUTH" -H "Content-Type: application/json" \
+  -H "X-Huabu-Host-Thread-Id: $HUABU_THREAD_ID" \
+  --data-binary '{
+    "commands": [{
+      "type": "MERGE_NODE_DATA",
+      "patches": [{
+        "nodeId": "node-data-123",
+        "expectRev": "3d7e",
+        "patch": { "content": "{\"codebasePath\":\"/repo\",\"confirmedByUser\":true}" }
+      }]
+    }]
+  }' \
+  "$HUABU_RFS_URL/execute"
 ```
 
-An Agent may replace state with compare-and-swap:
+Inspect an Interactive View's definition or replace its optional View-local `state`:
 
 ```bash
+curl -fsS -H "$AUTH" "$HUABU_RFS_URL/interactive-views/$NODE_ID"
+
 curl -fsS -X PUT -H "$AUTH" -H "Content-Type: application/json" \
   --data-binary "{\"revision\":\"$VIEW_REVISION\",\"value\":$COMPLETE_STATE_JSON}" \
   "$HUABU_RFS_URL/interactive-views/$NODE_ID/state"
 ```
 
-A stale revision returns HTTP 409 with `details.currentRevision` and `details.currentState`. Re-read, reconcile, and submit a new complete value.
+A stale revision returns HTTP 409 (`conflict`) with the latest revision and value. Re-read, reconcile, and submit a complete updated value.

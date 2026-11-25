@@ -38,11 +38,12 @@ import type { CanvasNodeType } from '@huabu/shared';
 import type { Node } from '@xyflow/react';
 
 function isExcludedFromPreprocessing(node: Node): boolean {
-  // Sketch has no preprocessable payload; Space Preview is view-only.
+  // Sketch and Data have no preprocessable payload; Space Preview is view-only.
   // Keep this boundary zod-free rather than duplicating server profiles.
   return (
     node.type === ('sketch' satisfies CanvasNodeType) ||
-    node.type === ('spacePreview' satisfies CanvasNodeType)
+    node.type === ('spacePreview' satisfies CanvasNodeType) ||
+    node.type === ('data' satisfies CanvasNodeType)
   );
 }
 

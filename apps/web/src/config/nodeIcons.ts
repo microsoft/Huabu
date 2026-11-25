@@ -10,6 +10,7 @@
  */
 
 import {
+  Braces,
   Film,
   FileType2,
   FileText,
@@ -41,6 +42,7 @@ import type { LucideIcon } from 'lucide-react';
  */
 export const NODE_ICON: Record<CanvasNodeType, LucideIcon> = {
   fileReference: FileText,
+  data: Braces,
   note: Clipboard,
   text: Type,
   image: ImageIcon,
@@ -83,6 +85,7 @@ export const OFFICE_FORMAT_ICON: Record<OfficeFormat, LucideIcon> = {
  */
 export const NODE_TYPE_LABEL: Record<CanvasNodeType, string> = {
   fileReference: 'File Reference',
+  data: 'Data',
   note: 'Note',
   text: 'Text',
   image: 'Image',

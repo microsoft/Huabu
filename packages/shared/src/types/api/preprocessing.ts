@@ -44,6 +44,7 @@ export type TriggerReason = z.infer<typeof triggerReasonSchema>;
 export const preprocessableNodeTypeSchema = z.enum([
   'note',
   'text',
+  'data',
   'web',
   'pdf',
   'office',

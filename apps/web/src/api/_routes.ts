@@ -142,6 +142,12 @@ export const routes = {
     `/interactive-views/${enc(canvasId)}/${enc(nodeId)}/runtime`,
   interactiveViewState: (canvasId: string, nodeId: string) =>
     `/interactive-views/${enc(canvasId)}/${enc(nodeId)}/state`,
+  interactiveViewBinding: (
+    canvasId: string,
+    nodeId: string,
+    bindingId: string,
+  ) =>
+    `/interactive-views/${enc(canvasId)}/${enc(nodeId)}/bindings/${enc(bindingId)}`,
   interactiveViewAction: (canvasId: string, nodeId: string, actionId: string) =>
     `/interactive-views/${enc(canvasId)}/${enc(nodeId)}/actions/${enc(actionId)}`,
 

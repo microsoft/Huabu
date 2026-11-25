@@ -15,6 +15,10 @@ import {
   canvasContentPositionSchema,
   canvasPageIdSchema,
 } from './canvas-sync.js';
+import {
+  dataNodeSchemaInputSchema,
+  type DataNodeSchemaV1,
+} from './interactive-view.js';
 
 import type { videoCoverPatchSchema } from './preprocessing.js';
 import type { SetSiblingOrderEvent } from '../../canvas-engine/siblingOrder.js';
@@ -112,10 +116,12 @@ export type DeleteNodeResponse = z.infer<typeof deleteNodeResponseSchema>;
  * pages).
  */
 export const putNodeContentBodySchema = z.object({
-  /** Node type (`note` / `text` / `web` / `pdf` / `image` / `video` / `frame` / `question` / `sketch`). */
+  /** Node type (`note` / `text` / `data` / `web` / `pdf` / `image` / `video` / `frame` / `question` / `sketch`). */
   nodeType: z.string().min(1),
-  /** Markdown body. Only meaningful for text-bearing types (note/text/web/pdf). */
+  /** Markdown body for text-bearing types or JSON string for `data` nodes. */
   content: z.string().optional(),
+  /** Optional bounded JSON schema for `data` nodes (`null` clears). */
+  dataSchema: dataNodeSchemaInputSchema.nullable().optional(),
   /** Display label / filename stem. `null` clears any explicit label. */
   label: z.string().nullable().optional(),
   /**
@@ -196,6 +202,13 @@ export interface PutNodeContentResponse {
   nodeId: string;
   label: string | null;
   /**
+   * Server-normalized body when canonicalization rewrites the submitted text
+   * (e.g. 2-space formatted JSON for `data` nodes).
+   */
+  content?: string;
+  /** Stored schema for `data` nodes when present. */
+  dataSchema?: DataNodeSchemaV1;
+  /**
    * The {@link nodeRevision} of the content the server actually persisted.
    * The client stores this as the node's new optimistic-concurrency
    * baseline (co-delivered with the write it confirms, so content and its
@@ -225,6 +238,8 @@ export interface GetNodeContentResponse extends z.infer<
   labelSource?: 'user' | 'auto' | 'agent';
   src?: string;
   content: string;
+  /** Optional bounded JSON schema stored on `data` nodes. */
+  dataSchema?: DataNodeSchemaV1;
   /**
    * The {@link nodeRevision} of the returned content. The client seeds this
    * as the node's optimistic-concurrency baseline on a single-node refresh

@@ -32,6 +32,7 @@ export type OfficeFilterKey = `office:${OfficeFormat}`;
 export type LayerFilterKey = CanvasNodeType | OfficeFilterKey;
 export type LayerFilterLabelKey =
   | 'layers.filterLabels.fileReference'
+  | 'layers.filterLabels.data'
   | 'layers.filterLabels.note'
   | 'layers.filterLabels.text'
   | 'layers.filterLabels.image'
@@ -84,6 +85,7 @@ export function getFilterKeyMeta(key: LayerFilterKey): {
 
 const FILTER_LABEL_KEY_BY_TYPE: Record<CanvasNodeType, LayerFilterLabelKey> = {
   fileReference: 'layers.filterLabels.fileReference',
+  data: 'layers.filterLabels.data',
   note: 'layers.filterLabels.note',
   text: 'layers.filterLabels.text',
   image: 'layers.filterLabels.image',

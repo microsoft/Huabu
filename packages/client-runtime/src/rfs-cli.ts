@@ -57,6 +57,13 @@ export interface RfsActions {
   serviceSkill: (id: string) => Promise<void>;
   serviceManifest: (id: string) => Promise<void>;
   serviceDownload: (id: string, folder: string) => Promise<void>;
+  interactiveViewList: (viewKey?: string) => Promise<void>;
+  interactiveViewGet: (nodeId: string) => Promise<void>;
+  interactiveViewCreate: (options: InputOptions) => Promise<void>;
+  interactiveViewReplaceState: (
+    nodeId: string,
+    options: InputOptions,
+  ) => Promise<void>;
 }
 
 export function segment(value: string | undefined): string {
@@ -303,6 +310,60 @@ export function createRfsProgram(
     actions.serviceDownload(
       id,
       serviceDownload.opts<{ outFolder: string }>().outFolder,
+    ),
+  );
+
+  const interactiveView = guide(
+    program
+      .command('interactive-view')
+      .description('Discover, create, and update Interactive Views'),
+    'interactive-views',
+  );
+  const interactiveViewList = guide(
+    interactiveView
+      .command('list')
+      .description('List Interactive Views in this Space')
+      .option('--view-key <key>', 'Filter by logical viewKey'),
+    'interactive-views',
+  );
+  interactiveViewList.action(() =>
+    actions.interactiveViewList(
+      interactiveViewList.opts<{ viewKey?: string }>().viewKey,
+    ),
+  );
+  guide(
+    interactiveView
+      .command('get <nodeId>')
+      .description('Read an Interactive View definition and current state'),
+    'interactive-views',
+  ).action(actions.interactiveViewGet);
+  const interactiveViewCreate = guide(
+    inputs(
+      interactiveView
+        .command('create')
+        .description(
+          'Create an Interactive View from an uploaded HTML artifact',
+        ),
+      false,
+    ),
+    'interactive-views',
+  );
+  interactiveViewCreate.action(() =>
+    actions.interactiveViewCreate(interactiveViewCreate.opts<InputOptions>()),
+  );
+  const interactiveViewReplaceState = guide(
+    inputs(
+      interactiveView
+        .command('replace-state <nodeId>')
+        .description('Replace View-local state with compare-and-swap'),
+      false,
+    ),
+    'interactive-views',
+  );
+  interactiveViewReplaceState.action((nodeId: string) =>
+    actions.interactiveViewReplaceState(
+      nodeId,
+      interactiveViewReplaceState.opts<InputOptions>(),
     ),
   );
 
