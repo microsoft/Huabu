@@ -325,7 +325,7 @@ describe('AcpAgentClient — orphan session/update replay', () => {
 });
 
 describe('AcpAgentClient — permission handshake', () => {
-  it('auto-allows when NO per-turn notifier is installed', async () => {
+  it('cancels when no per-turn approval notifier is installed', async () => {
     const conn = createFakeConnection();
     // Construct for its handler side-effects; no method is called directly.
     void new AcpAgentClient(conn, { logger: silentLogger });
@@ -349,8 +349,7 @@ describe('AcpAgentClient — permission handshake', () => {
       | { result?: { outcome?: unknown } }
       | undefined;
     expect(resp?.result?.outcome).toEqual({
-      outcome: 'selected',
-      optionId: 'allow',
+      outcome: 'cancelled',
     });
   });
 
