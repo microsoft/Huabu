@@ -1336,7 +1336,7 @@
     "resumeQueue": "Resume queue",
     "removeFromQueue": "Remove from queue",
     "queueSending": "Sending...",
-    "queueUncertain": "Delivery unconfirmed. Reopen this chat to reconnect, or use Stop before retrying.",
+    "sendNotDelivered": "The message was not sent. Check your connection and send it again.",
     "send": "Send",
     "aiContentDisclaimer": "AI Generated Content May Be Inaccurate.",
     "slashCommands": "Slash commands",

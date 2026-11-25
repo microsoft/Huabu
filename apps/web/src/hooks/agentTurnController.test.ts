@@ -13,7 +13,6 @@ import { useAcpThreadChangesStore } from '@/store/acpThreadChangesStore';
 import useCanvasStore from '@/store/canvasStore';
 import {
   selectThreadExcludeCanvasSelection,
-  selectThreadHistoryLoaded,
   selectThreadMessages,
   useChatStore,
 } from '@/store/chatStore';
@@ -36,7 +35,6 @@ import {
   observeAgentTurnAcceptance,
   prepareAgentTurn,
   prepareAgentTurnRetry,
-  reconcileAgentTurnAfterReconnect,
   holdAgentTurnQueue,
   resetAgentTurnAcceptanceObserversForTests,
   resumeAgentTurnQueue,
@@ -629,12 +627,12 @@ describe('queued composer turns', () => {
   });
 
   it.each(['error', 'eof'])(
-    'blocks ambiguous %s delivery retries until acceptance reconciliation',
+    'returns a queued send whose %s left it unconfirmed to the queue, paused, and resends it on resume',
     async (closure) => {
       act(() =>
         useChatStore.getState().setThreadLoading(session.threadId, true),
       );
-      await enqueue('Uncertain');
+      await enqueue('Unconfirmed');
       act(() =>
         useChatStore.getState().setThreadLoading(session.threadId, false),
       );
@@ -646,24 +644,30 @@ describe('queued composer turns', () => {
       );
       await act(async () => {
         settleAgentTurnQueue(session);
+        await vi.waitFor(() => expect(mocks.stream).toHaveBeenCalledTimes(1));
         await vi.waitFor(() =>
           expect(
-            useChatStore.getState().threadsById[session.threadId].queuedTurns[0]
-              .status,
-          ).toBe('uncertain'),
+            useChatStore.getState().threadsById[session.threadId],
+          ).toMatchObject({
+            queuePaused: true,
+            queuedTurns: [{ status: 'pending' }],
+          }),
         );
-        resumeAgentTurnQueue(session);
       });
-      expect(mocks.stream).toHaveBeenCalledTimes(1);
-      act(() =>
-        observeAgentTurnAcceptance(session.ownerCanvasId, {
-          threadId: session.threadId,
-          turnStartSeq: 5,
-        }),
+      // Nothing waits on the first attempt: resuming sends it again.
+      mocks.stream.mockImplementationOnce(
+        async (_content, _thread, _mode, callbacks: AgentStreamCallbacks) =>
+          finish(callbacks),
       );
-      expect(
-        useChatStore.getState().threadsById[session.threadId].queuedTurns,
-      ).toEqual([]);
+      await act(async () => {
+        resumeAgentTurnQueue(session);
+        await vi.waitFor(() =>
+          expect(
+            useChatStore.getState().threadsById[session.threadId].queuedTurns,
+          ).toEqual([]),
+        );
+      });
+      expect(mocks.stream).toHaveBeenCalledTimes(2);
     },
   );
 
@@ -754,97 +758,6 @@ describe('queued composer turns', () => {
     },
   );
 
-  it.each(
-    [true, false].flatMap((accepted) =>
-      ['eof', 'error'].map((closure) => ({ accepted, closure })),
-    ),
-  )(
-    'reconciles lost acceptance after reconnect (accepted=$accepted, closure=$closure) without advancing the queue',
-    async ({ accepted, closure }) => {
-      act(() =>
-        useChatStore.getState().setThreadLoading(session.threadId, true),
-      );
-      await enqueue('Uncertain');
-      await enqueue('Later');
-      act(() =>
-        useChatStore.getState().setThreadLoading(session.threadId, false),
-      );
-      mocks.stream.mockImplementationOnce(
-        async (_content, _thread, _mode, callbacks: AgentStreamCallbacks) =>
-          closure === 'eof'
-            ? callbacks.onComplete()
-            : callbacks.onError(new Error('Disconnected before acceptance')),
-      );
-      await act(async () => {
-        resumeAgentTurnQueue(session);
-        await vi.waitFor(() =>
-          expect(
-            useChatStore.getState().threadsById[session.threadId].queuedTurns[0]
-              .status,
-          ).toBe('uncertain'),
-        );
-      });
-      const requestId = mocks.stream.mock.calls[0][4].requestId;
-      act(() =>
-        useChatStore.getState().setHistoryLoaded(session.threadId, true),
-      );
-      if (closure === 'error') {
-        expect(
-          selectThreadMessages(useChatStore.getState(), session.threadId).at(
-            -1,
-          ),
-        ).toMatchObject({ role: 'status', status: 'error' });
-      }
-      mocks.stop.mockResolvedValueOnce({
-        stopped: false,
-        acceptance: null,
-        request: { id: requestId, accepted },
-      });
-      mocks.reconnect.mockImplementationOnce(
-        async (_thread, _canvas, callbacks: AgentStreamCallbacks) => {
-          callbacks.onEvent({ type: 'done', data: { message: 'Answer' } });
-          callbacks.onComplete();
-          return { status: 'completed' };
-        },
-      );
-      function ReconnectHarness() {
-        useChatHistory(session, useChatStore.getState().setThreadLoading);
-        return null;
-      }
-      await act(async () => {
-        root?.render(createElement(ReconnectHarness));
-      });
-      await vi.waitFor(() =>
-        expect(
-          hasAgentStreamClaim(session.ownerCanvasId, session.threadId),
-        ).toBe(false),
-      );
-      expect(mocks.reconnect).toHaveBeenCalledOnce();
-      expect(mocks.stop).toHaveBeenCalledWith(
-        session.threadId,
-        session.ownerCanvasId,
-        requestId,
-      );
-      expect(
-        useChatStore.getState().threadsById[session.threadId],
-      ).toMatchObject({
-        queuePaused: true,
-        queuedTurns: accepted
-          ? [{ status: 'pending', prepared: { content: 'Later' } }]
-          : [
-              { status: 'pending', prepared: { content: 'Uncertain' } },
-              { status: 'pending' },
-            ],
-      });
-      expect(mocks.stream).toHaveBeenCalledOnce();
-      await reconcileAgentTurnAfterReconnect(
-        session.ownerCanvasId,
-        session.threadId,
-      );
-      expect(mocks.stop).toHaveBeenCalledOnce();
-    },
-  );
-
   it.each(['draft', 'validate', 'save', 'flush'] as const)(
     'exposes Stop and queue actions in the actual composer during direct %s preparation',
     async (stage) => {
@@ -915,116 +828,6 @@ describe('queued composer turns', () => {
     },
   );
 
-  it.each(
-    [true, false].flatMap((accepted) =>
-      [true, false].map((anchored) => ({ accepted, anchored })),
-    ),
-  )(
-    'reconciles a cached direct-send error without a running owner (accepted=$accepted, anchored=$anchored)',
-    async ({ accepted, anchored }) => {
-      const owner = anchored ? questionSession : session;
-      if (anchored) {
-        useCanvasStore.getState()._setStateRaw({
-          nodes: [
-            {
-              id: 'question-1',
-              type: 'question',
-              position: { x: 0, y: 0 },
-              data: { threadId: session.threadId, status: 'idle' },
-            },
-          ],
-        });
-        vi.spyOn(
-          useAcpThreadChangesStore.getState(),
-          'load',
-        ).mockResolvedValue();
-      }
-      mocks.stream.mockImplementationOnce(
-        async (_content, _thread, _mode, callbacks: AgentStreamCallbacks) =>
-          callbacks.onError(new Error('Disconnected before acceptance')),
-      );
-      const onAccepted = vi.fn();
-      const onAcceptanceRejected = vi.fn();
-      await dispatchAgentTurn(request('text', owner), {
-        onAccepted,
-        onAcceptanceRejected,
-      });
-      useChatStore.getState().setHistoryLoaded(session.threadId, true);
-      expect(
-        selectThreadMessages(useChatStore.getState(), session.threadId).at(-1),
-      ).toMatchObject({ role: 'status', status: 'error' });
-      const requestId = mocks.stream.mock.calls[0][4].requestId;
-      mocks.stop.mockResolvedValueOnce({
-        stopped: false,
-        acceptance: null,
-        request: { id: requestId, accepted },
-      });
-      function Reopen() {
-        useChatHistory(owner, useChatStore.getState().setThreadLoading);
-        return null;
-      }
-      await act(async () => root?.render(createElement(Reopen)));
-      expect(mocks.reconnect).toHaveBeenCalledOnce();
-      expect(mocks.stop).toHaveBeenCalledWith(
-        session.threadId,
-        session.ownerCanvasId,
-        requestId,
-      );
-      expect(onAccepted).toHaveBeenCalledTimes(accepted ? 1 : 0);
-      expect(onAcceptanceRejected).toHaveBeenCalledTimes(accepted ? 0 : 1);
-      expect(hasAgentStreamClaim(session.ownerCanvasId, session.threadId)).toBe(
-        false,
-      );
-      expect(mocks.stream).toHaveBeenCalledOnce();
-    },
-  );
-
-  it.each(['offline', 'mismatched'] as const)(
-    'retains uncertain delivery when reconnect reconciliation is %s',
-    async (failure) => {
-      act(() =>
-        useChatStore.getState().setThreadLoading(session.threadId, true),
-      );
-      await enqueue('Uncertain');
-      act(() =>
-        useChatStore.getState().setThreadLoading(session.threadId, false),
-      );
-      mocks.stream.mockImplementationOnce(
-        async (_content, _thread, _mode, callbacks: AgentStreamCallbacks) =>
-          callbacks.onComplete(),
-      );
-      await act(async () => {
-        resumeAgentTurnQueue(session);
-        await vi.waitFor(() =>
-          expect(
-            useChatStore.getState().threadsById[session.threadId].queuedTurns[0]
-              .status,
-          ).toBe('uncertain'),
-        );
-      });
-      if (failure === 'offline')
-        mocks.stop.mockRejectedValueOnce(new Error('offline'));
-      else
-        mocks.stop.mockResolvedValueOnce({
-          stopped: false,
-          acceptance: null,
-          request: { id: 'another-request', accepted: true },
-        });
-      await expect(
-        reconcileAgentTurnAfterReconnect(
-          session.ownerCanvasId,
-          session.threadId,
-        ),
-      ).rejects.toThrow();
-      await act(async () => resumeAgentTurnQueue(session));
-      expect(
-        useChatStore.getState().threadsById[session.threadId].queuedTurns[0]
-          .status,
-      ).toBe('uncertain');
-      expect(mocks.stream).toHaveBeenCalledOnce();
-    },
-  );
-
   it.each(['save', 'transport'])(
     'routes transcript Retry through the original queue item after %s rejection',
     async (failure) => {
@@ -1064,64 +867,6 @@ describe('queued composer turns', () => {
       await waitForQueue();
       await act(async () => resumeAgentTurnQueue(session));
       expect(mocks.stream).toHaveBeenCalledTimes(failure === 'save' ? 1 : 2);
-    },
-  );
-
-  it.each([true, false])(
-    'reconciles uncertain delivery against persisted acceptance=%s when no run is active',
-    async (accepted) => {
-      act(() =>
-        useChatStore.getState().setThreadLoading(session.threadId, true),
-      );
-      await enqueue('Unknown');
-      act(() =>
-        useChatStore.getState().setThreadLoading(session.threadId, false),
-      );
-      mocks.stream.mockImplementationOnce(
-        async (_content, _tid, _mode, callbacks) =>
-          callbacks.onError(new Error('Connection lost')),
-      );
-      await act(async () => {
-        resumeAgentTurnQueue(session);
-        await vi.waitFor(() =>
-          expect(
-            useChatStore.getState().threadsById[session.threadId].queuedTurns[0]
-              .status,
-          ).toBe('uncertain'),
-        );
-      });
-      const requestId = mocks.stream.mock.calls[0][4].requestId;
-      mocks.stop.mockResolvedValueOnce({
-        stopped: false,
-        acceptance: null,
-        request: { id: requestId, accepted },
-      });
-      await act(async () => {
-        stopAgentTurn(session);
-        await vi.waitFor(() => {
-          const turns =
-            useChatStore.getState().threadsById[session.threadId].queuedTurns;
-          if (accepted) expect(turns).toEqual([]);
-          else expect(turns[0].status).toBe('pending');
-        });
-      });
-      expect(mocks.stop).toHaveBeenCalledWith(
-        session.threadId,
-        session.ownerCanvasId,
-        requestId,
-      );
-      expect(
-        useChatStore.getState().threadsById[session.threadId].queuePaused,
-      ).toBe(true);
-      expect(mocks.stream).toHaveBeenCalledOnce();
-      mocks.stream.mockImplementation(async (_content, tid, _mode, callbacks) =>
-        finish(callbacks, tid),
-      );
-      await act(async () => resumeAgentTurnQueue(session));
-      await waitForQueue();
-      expect(mocks.stream).toHaveBeenCalledTimes(accepted ? 1 : 2);
-      if (!accepted)
-        expect(mocks.stream.mock.calls[1][4].requestId).not.toBe(requestId);
     },
   );
 
@@ -1184,160 +929,6 @@ describe('queued composer turns', () => {
     });
     expect(mocks.history).not.toHaveBeenCalled();
     expect(historyError).toBeUndefined();
-  });
-
-  it('reloads history after inactive accepted Stop without remounting the composer', async () => {
-    const historyGate = deferred();
-    act(() => useChatStore.getState().setHistoryLoaded(session.threadId, true));
-    function MountedChat() {
-      hook = useAgentStream(session);
-      useChatHistory(session, useChatStore.getState().setThreadLoading);
-      const historyLoaded = useChatStore((state) =>
-        selectThreadHistoryLoaded(state, session.threadId),
-      );
-      return createElement(ChatSessionProvider, {
-        value: session,
-        children: createElement(ThreadChatInput, {
-          mode: 'operate',
-          isStreaming: hook.isLoading,
-          submitDisabled: !historyLoaded,
-          onStop: hook.stopStream,
-          onSubmit: (event, mode, draft) => {
-            event.preventDefault();
-            void hook.startStream(draft, mode);
-          },
-        }),
-      });
-    }
-    if (container) document.body.appendChild(container);
-    await act(async () => root?.render(createElement(MountedChat)));
-    expect(mocks.history).not.toHaveBeenCalled();
-    act(() => useChatStore.getState().setThreadLoading(session.threadId, true));
-    await enqueue('Unknown');
-    await enqueue('Later');
-    act(() =>
-      useChatStore.getState().setThreadLoading(session.threadId, false),
-    );
-    mocks.stream.mockImplementationOnce(
-      async (_content, _thread, _mode, callbacks: AgentStreamCallbacks) =>
-        callbacks.onError(new Error('Connection lost before acceptance')),
-    );
-    await act(async () => {
-      resumeAgentTurnQueue(session);
-      await vi.waitFor(() =>
-        expect(
-          useChatStore.getState().threadsById[session.threadId].queuedTurns[0]
-            .status,
-        ).toBe('uncertain'),
-      );
-    });
-    const requestId = mocks.stream.mock.calls[0][4].requestId;
-    mocks.stop.mockResolvedValueOnce({
-      stopped: false,
-      acceptance: null,
-      request: { id: requestId, accepted: true },
-    });
-    mocks.history.mockImplementationOnce(async () => {
-      await historyGate.promise;
-      return {
-        threadId: session.threadId,
-        turns: [
-          {
-            id: 'finished-turn',
-            messages: [
-              { role: 'user', content: 'Unknown' },
-              {
-                role: 'assistant',
-                parts: [{ kind: 'text', text: 'Persisted answer' }],
-              },
-            ],
-          },
-        ],
-        hasMore: false,
-      };
-    });
-    act(() =>
-      useChatStore.getState().setDraft(session.threadId, 'Unsent draft'),
-    );
-    try {
-      await act(async () => {
-        container
-          ?.querySelector<HTMLButtonElement>('[aria-label="chat.stop"]')
-          ?.click();
-      });
-      expect(mocks.stop).toHaveBeenCalledWith(
-        session.threadId,
-        session.ownerCanvasId,
-        requestId,
-      );
-      expect(mocks.history).toHaveBeenCalledOnce();
-      expect(
-        container?.querySelector<HTMLButtonElement>(
-          '[aria-label="chat.addToQueue"]',
-        )?.disabled,
-      ).toBe(true);
-      await act(async () => {
-        historyGate.resolve();
-        await historyGate.promise;
-      });
-      expect(
-        useChatStore.getState().threadsById[session.threadId],
-      ).toMatchObject({
-        historyLoaded: true,
-        draft: 'Unsent draft',
-        queuePaused: true,
-        queuedTurns: [{ status: 'pending', prepared: { content: 'Later' } }],
-        messages: [
-          { role: 'user', content: 'Unknown' },
-          {
-            role: 'assistant',
-            segments: [{ kind: 'text', text: 'Persisted answer' }],
-          },
-        ],
-      });
-      expect(
-        container?.querySelector<HTMLButtonElement>(
-          '[aria-label="chat.addToQueue"]',
-        )?.disabled,
-      ).toBe(false);
-      const resume = [...(container?.querySelectorAll('button') ?? [])].find(
-        (button) => button.textContent === 'chat.resumeQueue',
-      );
-      expect(resume?.disabled).toBe(false);
-      expect(mocks.stream).toHaveBeenCalledOnce();
-      expect(mocks.history).toHaveBeenCalledOnce();
-      expect(mocks.reconnect).not.toHaveBeenCalled();
-    } finally {
-      historyGate.resolve();
-    }
-  });
-
-  it('keeps an uncertain item blocked when Stop reconciliation fails', async () => {
-    act(() => useChatStore.getState().setThreadLoading(session.threadId, true));
-    await enqueue('Unknown');
-    act(() =>
-      useChatStore.getState().setThreadLoading(session.threadId, false),
-    );
-    mocks.stream.mockImplementationOnce(
-      async (_content, _tid, _mode, callbacks) =>
-        callbacks.onError(new Error('Connection lost')),
-    );
-    await act(async () => {
-      resumeAgentTurnQueue(session);
-      await vi.waitFor(() =>
-        expect(
-          useChatStore.getState().threadsById[session.threadId].queuedTurns[0]
-            .status,
-        ).toBe('uncertain'),
-      );
-    });
-    mocks.stop.mockRejectedValueOnce(new Error('Still offline'));
-    await act(async () => stopAgentTurn(session));
-    expect(
-      useChatStore.getState().threadsById[session.threadId].queuedTurns[0]
-        .status,
-    ).toBe('uncertain');
-    expect(mocks.stream).toHaveBeenCalledOnce();
   });
 
   it('does not overwrite rejection reconciliation when the failed transport finishes later', async () => {
@@ -2801,7 +2392,7 @@ describe('shared Agent turn input', () => {
     });
   });
 
-  it('retains the acceptance observer after an ambiguous transport failure', async () => {
+  it('forgets a send that ended unconfirmed, so a late acceptance is ignored', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     mocks.stream.mockRejectedValueOnce(new Error('Connection lost'));
     const accepted = vi.fn();
@@ -2809,105 +2400,26 @@ describe('shared Agent turn input', () => {
     await expect(
       dispatchAgentTurn(request('ink-intent'), { onAccepted: accepted }),
     ).resolves.toMatchObject({ status: 'unknown' });
-
-    const acceptance = { threadId: 'thread-1', turnStartSeq: 12 };
-    observeAgentTurnAcceptance('canvas-1', acceptance);
-    observeAgentTurnAcceptance('canvas-1', acceptance);
-    expect(accepted).toHaveBeenCalledExactlyOnceWith(acceptance);
-  });
-
-  it('blocks same-thread replacement until unknown acceptance is reconciled', async () => {
-    vi.spyOn(console, 'error').mockImplementation(() => {});
-    mocks.stream.mockRejectedValueOnce(new Error('Connection lost'));
-    const accepted = vi.fn();
-
-    await expect(
-      dispatchAgentTurn(request('ink-intent'), { onAccepted: accepted }),
-    ).resolves.toMatchObject({ status: 'unknown' });
-
-    await expect(
-      dispatchAgentTurn(request('ink-intent')),
-    ).resolves.toMatchObject({
-      status: 'busy',
-      error: {
-        message:
-          'The previous Agent turn is still awaiting acceptance reconciliation',
-      },
-    });
-    expect(mocks.stream).toHaveBeenCalledTimes(1);
 
     observeAgentTurnAcceptance('canvas-1', {
       threadId: 'thread-1',
       turnStartSeq: 12,
     });
-    expect(accepted).toHaveBeenCalledOnce();
+    expect(accepted).not.toHaveBeenCalled();
+  });
+
+  it('does not hold a later send behind one that ended unconfirmed', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    mocks.stream.mockRejectedValueOnce(new Error('Connection lost'));
+
+    await expect(
+      dispatchAgentTurn(request('ink-intent')),
+    ).resolves.toMatchObject({ status: 'unknown' });
 
     await expect(
       dispatchAgentTurn(request('ink-intent')),
     ).resolves.toMatchObject({ status: 'completed' });
     expect(mocks.stream).toHaveBeenCalledTimes(2);
-  });
-
-  it('ignores stale reconnect reconciliation and does not reconcile a live replacement', async () => {
-    mocks.stream.mockImplementationOnce(
-      async (_content, _thread, _mode, callbacks: AgentStreamCallbacks) =>
-        callbacks.onComplete(),
-    );
-    await dispatchAgentTurn(request());
-    const oldRequestId = mocks.stream.mock.calls[0][4].requestId;
-    const stopGate = deferred();
-    mocks.stop.mockImplementationOnce(async () => {
-      await stopGate.promise;
-      return {
-        stopped: false,
-        acceptance: null,
-        request: { id: oldRequestId, accepted: false },
-      };
-    });
-    const reconciliation = reconcileAgentTurnAfterReconnect(
-      session.ownerCanvasId,
-      session.threadId,
-    );
-    observeAgentTurnAcceptance(session.ownerCanvasId, {
-      threadId: session.threadId,
-      turnStartSeq: 5,
-      requestId: oldRequestId,
-    });
-    const streamGate = deferred();
-    mocks.stream.mockImplementationOnce(
-      async (_content, _thread, _mode, callbacks: AgentStreamCallbacks) => {
-        await streamGate.promise;
-        callbacks.onComplete();
-      },
-    );
-    const accepted = vi.fn();
-    const rejected = vi.fn();
-    const replacement = dispatchAgentTurn(request(), {
-      onAccepted: accepted,
-      onAcceptanceRejected: rejected,
-    });
-    try {
-      await vi.waitFor(() => expect(mocks.stream).toHaveBeenCalledTimes(2));
-      await reconcileAgentTurnAfterReconnect(
-        session.ownerCanvasId,
-        session.threadId,
-      );
-      expect(mocks.stop).toHaveBeenCalledOnce();
-      stopGate.resolve();
-      await reconciliation;
-      observeAgentTurnAcceptance(session.ownerCanvasId, {
-        threadId: session.threadId,
-        turnStartSeq: 6,
-        requestId: mocks.stream.mock.calls[1][4].requestId,
-      });
-      expect(accepted).toHaveBeenCalledOnce();
-      expect(rejected).not.toHaveBeenCalled();
-    } finally {
-      stopGate.resolve();
-      streamGate.resolve();
-      await reconciliation;
-      await replacement;
-    }
   });
 
   it('does not deliver a duplicate older acceptance to a newer turn', async () => {
@@ -2920,7 +2432,7 @@ describe('shared Agent turn input', () => {
     });
     const olderAcceptance = { threadId: 'thread-1', turnStartSeq: 20 };
     observeAgentTurnAcceptance('canvas-1', olderAcceptance);
-    expect(olderAccepted).toHaveBeenCalledExactlyOnceWith(olderAcceptance);
+    expect(olderAccepted).not.toHaveBeenCalled();
 
     const newerAccepted = vi.fn();
     mocks.stream.mockImplementationOnce(
@@ -2940,7 +2452,7 @@ describe('shared Agent turn input', () => {
       status: 'completed',
       accepted: { threadId: 'thread-1', turnStartSeq: 21 },
     });
-    expect(olderAccepted).toHaveBeenCalledOnce();
+    expect(olderAccepted).not.toHaveBeenCalled();
     expect(newerAccepted).toHaveBeenCalledExactlyOnceWith({
       threadId: 'thread-1',
       turnStartSeq: 21,
@@ -3628,40 +3140,24 @@ describe('shared Agent turn input', () => {
       expect(current.pendingQuotedComments).toEqual([]);
     });
 
-    it.each([true, false])(
-      'waits for ambiguous acceptance to reconcile before deciding restoration: %s',
-      async (accepted) => {
-        mocks.stream.mockRejectedValueOnce(new Error('Connection lost'));
-        await act(async () => hook.startStream('Hello', 'operate'));
-        expect(
-          useChatStore.getState().threadsById[session.threadId].draft,
-        ).toBe('');
-        expect(
-          useChatStore.getState().threadsById[session.threadId]
-            .pendingQuotedComments,
-        ).toEqual([]);
-        if (accepted) {
-          act(() =>
-            observeAgentTurnAcceptance('canvas-1', {
-              threadId: session.threadId,
-              turnStartSeq: 5,
-            }),
-          );
-        } else {
-          await act(async () => {
-            stopAgentTurn(session);
-            await vi.waitFor(() =>
-              expect(
-                useChatStore.getState().threadsById[session.threadId].draft,
-              ).toBe('Hello'),
-            );
-          });
-        }
-        const current = useChatStore.getState().threadsById[session.threadId];
-        expect(current.draft).toBe(accepted ? '' : 'Hello');
-        expect(current.pendingQuotedComments).toHaveLength(accepted ? 0 : 1);
-      },
-    );
+    it('leaves a send that ended unconfirmed in the transcript as a failed message', async () => {
+      mocks.stream.mockRejectedValueOnce(new Error('Connection lost'));
+      await act(async () => hook.startStream('Hello', 'operate'));
+      const current = useChatStore.getState().threadsById[session.threadId];
+      // Nothing is put back in the composer: the message stays where it can
+      // be resent, marked as not delivered.
+      expect(current.draft).toBe('');
+      expect(current.pendingQuotedComments).toEqual([]);
+      expect(current.messages.slice(-2)).toMatchObject([
+        { role: 'user', content: 'Hello' },
+        {
+          role: 'status',
+          status: 'error',
+          detail:
+            'The message was not sent. Check your connection and send it again.',
+        },
+      ]);
+    });
   });
 
   it('keeps a text run alive after Chat unmount and permits a new Chat to stop it', async () => {
@@ -3815,27 +3311,6 @@ describe('shared Agent turn input', () => {
     expect(mocks.stream.mock.calls[1][4].signal.aborted).toBe(false);
     secondGate.resolve();
     await second;
-  });
-
-  it('releases an unknown acceptance observer after a definitive pre-acceptance stop', async () => {
-    vi.spyOn(console, 'error').mockImplementation(() => {});
-    mocks.stream.mockRejectedValueOnce(new Error('Connection lost'));
-    const acceptanceRejected = vi.fn();
-
-    await expect(
-      dispatchAgentTurn(request('ink-intent'), {
-        onAcceptanceRejected: acceptanceRejected,
-      }),
-    ).resolves.toMatchObject({ status: 'unknown' });
-
-    mocks.stop.mockResolvedValueOnce({ stopped: true, acceptance: null });
-    stopAgentTurn(session);
-    await vi.waitFor(() => expect(acceptanceRejected).toHaveBeenCalledOnce());
-
-    await expect(
-      dispatchAgentTurn(request('ink-intent')),
-    ).resolves.toMatchObject({ status: 'completed' });
-    expect(mocks.stream).toHaveBeenCalledTimes(2);
   });
 
   it('keeps monitoring when the stop outcome is unknown', async () => {

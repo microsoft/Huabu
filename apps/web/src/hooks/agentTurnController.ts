@@ -23,6 +23,7 @@ import {
 
 import { AgentTurnFailedError, ApiError } from '@/api/_client';
 import { agentApi, type AgentStreamCallbacks } from '@/api/agent';
+import { i18n } from '@/i18n';
 import { useAcpThreadChangesStore } from '@/store/acpThreadChangesStore';
 import useCanvasStore, {
   saveCanvasForSubmission,
@@ -304,6 +305,20 @@ function updateHiddenInkReport(
   return true;
 }
 
+/**
+ * What to show for a failed send. When the connection gave out before the
+ * server answered, say what that means for the message instead of quoting the
+ * transport; any other failure carries its own explanation.
+ */
+function sendErrorDetail(error: unknown, accepted: boolean): string {
+  if (!(error instanceof Error)) return 'Unknown error';
+  const connectionLost =
+    !(error instanceof ApiError) && !(error instanceof AgentTurnFailedError);
+  return connectionLost && !accepted
+    ? i18n.t('chat.sendNotDelivered')
+    : error.message;
+}
+
 function turnKey(canvasId: string, threadId: string): string {
   return `${canvasId}\0${threadId}`;
 }
@@ -334,41 +349,6 @@ function rejectAgentTurnAcceptance(canvasId: string, threadId: string): void {
     sink.reject();
   } catch (error) {
     console.error('Agent acceptance rejection callback failed', error);
-  }
-}
-
-export function hasUnreconciledAgentTurn(
-  canvasId: string,
-  threadId: string,
-): boolean {
-  const key = turnKey(canvasId, threadId);
-  return turnAcceptanceSinks.has(key) && !activeTurnRequests.has(key);
-}
-
-export async function reconcileAgentTurnAfterReconnect(
-  canvasId: string,
-  threadId: string,
-): Promise<void> {
-  const key = turnKey(canvasId, threadId);
-  const sink = turnAcceptanceSinks.get(key);
-  if (!sink || activeTurnRequests.has(key)) return;
-  const response = await agentApi.stopThread(
-    threadId,
-    canvasId,
-    sink.requestId,
-  );
-  if (turnAcceptanceSinks.get(key) !== sink) return;
-  if (response.request?.id !== sink.requestId) {
-    throw new Error(
-      'Agent request reconciliation returned no matching request',
-    );
-  }
-  useChatStore.getState().setQueuePaused(threadId, true);
-  if (response.request.accepted) {
-    turnAcceptanceSinks.delete(key);
-    sink.accept({ requestId: sink.requestId });
-  } else {
-    rejectAgentTurnAcceptance(canvasId, threadId);
   }
 }
 
@@ -1219,13 +1199,6 @@ async function executePreparedAgentTurn(
     const { selectedStrokeIds: sentSelectedStrokeIds } =
       sourceMessageMetadata(canvasContext);
     const acceptanceKey = turnKey(requestScope.canvasId, threadId);
-    if (turnAcceptanceSinks.has(acceptanceKey)) {
-      result.status = 'busy';
-      result.error = new Error(
-        'The previous Agent turn is still awaiting acceptance reconciliation',
-      );
-      return;
-    }
     const streamClaim = claimAgentStream(
       requestScope.canvasId,
       threadId,
@@ -1477,7 +1450,7 @@ async function executePreparedAgentTurn(
               id: createId('status'),
               role: 'status',
               status: 'error',
-              detail: err.message,
+              detail: sendErrorDetail(err, !!result.accepted),
             });
           },
           onComplete: () => {
@@ -1533,7 +1506,7 @@ async function executePreparedAgentTurn(
         id: createId('status'),
         role: 'status',
         status: 'error',
-        detail: err instanceof Error ? err.message : 'Unknown error',
+        detail: sendErrorDetail(err, !!result.accepted),
       });
     } finally {
       settleTurnInkInterpretation(
@@ -1560,12 +1533,9 @@ async function executePreparedAgentTurn(
         useChatStore.getState().setThreadPreparing(threadId, false);
         activeTurnRequests.delete(acceptanceKey);
         clearHiddenIntentCalls(threadId);
-        const retainForReconciliation =
-          result.status === 'unknown' && !result.accepted;
-        if (
-          !retainForReconciliation &&
-          turnAcceptanceSinks.get(acceptanceKey) === acceptanceSink
-        ) {
+        // A send that ended without the server's answer is reported as
+        // failed and left for the user to resend; it never holds later sends.
+        if (turnAcceptanceSinks.get(acceptanceKey) === acceptanceSink) {
           turnAcceptanceSinks.delete(acceptanceKey);
         }
         setThreadLoading(threadId, false);
@@ -1712,14 +1682,12 @@ export function stopAgentTurn(session: ChatSession): void {
     return;
   }
   const sink = turnAcceptanceSinks.get(key);
-  const requestId = activeTurnRequests.get(key) ?? sink?.requestId;
+  const requestId = activeTurnRequests.get(key);
   void agentApi
     .stopThread(tid, scopedCanvasId, requestId)
     .then((response) => {
       // A late Stop response must never settle a replacement request.
-      const currentRequestId =
-        activeTurnRequests.get(key) ?? turnAcceptanceSinks.get(key)?.requestId;
-      if (requestId !== currentRequestId) return;
+      if (requestId !== activeTurnRequests.get(key)) return;
       const reconciled = !!requestId && response.request?.id === requestId;
       if (!response.stopped && !reconciled) return;
       if (response.acceptance) {
@@ -1892,18 +1860,12 @@ async function drainAgentTurnQueue(
       const thread = chat.threadsById[threadId];
       const next = thread?.queuedTurns[0];
       if (!next || thread.queuePaused) return;
-      if (next.status !== 'pending') {
-        // Delivery of this turn is ambiguous; never resend it automatically.
-        chat.setQueuePaused(threadId, true);
-        return;
-      }
       if (
         sendNotReady(next.prepared.session) ||
         // A turn is in progress, including a direct send waiting to go first.
         !!thread.isPreparing ||
         selectThreadIsLoading(chat, threadId) ||
-        hasAgentStreamClaim(ownerCanvasId, threadId) ||
-        turnAcceptanceSinks.has(key)
+        hasAgentStreamClaim(ownerCanvasId, threadId)
       ) {
         // Not ready yet: wait rather than making the user resume by hand.
         await waitForQueueChange(session);
@@ -1940,13 +1902,6 @@ async function drainAgentTurnQueue(
               setTimeout(resolve, THREAD_BUSY_RETRY_MS),
             );
             continue;
-          }
-          if (result.status === 'unknown') {
-            useChatStore
-              .getState()
-              .setQueuedTurnStatus(threadId, next.id, 'uncertain');
-            useChatStore.getState().setQueuePaused(threadId, true);
-            return;
           }
           if (!result.completedNormally) {
             reject();

@@ -49,10 +49,8 @@ import {
 } from './agentStreamCoordinator';
 import {
   clearInkInterpretationStream,
-  hasUnreconciledAgentTurn,
   inkTurnOutcome,
   observeAgentTurnAcceptance,
-  reconcileAgentTurnAfterReconnect,
   settleTurnInkInterpretation,
   pauseAgentTurnQueueAfterFailure,
   settleAgentTurnQueue,
@@ -505,11 +503,7 @@ export function useChatHistory(
   const reloadHistory = useCallback(() => {
     const state = useChatStore.getState();
     const thread = state.threadsById[threadId];
-    if (
-      thread?.isStreaming ||
-      thread?.isPreparing ||
-      hasUnreconciledAgentTurn(ownerCanvasId, threadId)
-    ) {
+    if (thread?.isStreaming || thread?.isPreparing) {
       setRefreshError(
         'History changed. Finish the current turn before retrying the history reload.',
       );
@@ -521,7 +515,7 @@ export function useChatHistory(
     setRefreshError(undefined);
     state.setHistoryError(threadId, null);
     state.setHistoryLoaded(threadId, false);
-  }, [threadId, ownerCanvasId, setRefreshError]);
+  }, [threadId, setRefreshError]);
   const ownerSource = useConversationOwnerSource(effectiveConversationView);
   const ownerStatus = ownerSource?.status;
   const ownerInvocationToken = ownerSource?.invocationToken;
@@ -921,16 +915,7 @@ export function useChatHistory(
     const lastMessage = msgs[msgs.length - 1];
     const historyLooksIncomplete =
       lastMessage?.role === 'user' || lastMessage?.historyTurnActive === true;
-    const hasOutstandingRequest = hasUnreconciledAgentTurn(
-      ownerCanvasId,
-      threadId,
-    );
-    if (
-      ownerStatus !== 'running' &&
-      !historyLooksIncomplete &&
-      !hasOutstandingRequest
-    )
-      return;
+    if (ownerStatus !== 'running' && !historyLooksIncomplete) return;
 
     let cancelled = false;
     const ownerThreadId = threadId;
@@ -1081,8 +1066,6 @@ export function useChatHistory(
         settleTurnInkInterpretation(streamContext, 'interrupted');
       }
       if (result.status !== 'aborted' && !cancelled) {
-        await reconcileAgentTurnAfterReconnect(ownerCanvasId, ownerThreadId);
-        if (cancelled) return;
         const finalHistory = await fetchLatestHistoryWindow(
           ownerThreadId,
           ownerCanvasId,
@@ -1104,11 +1087,7 @@ export function useChatHistory(
         if (cancelled || claim.signal.aborted) return;
         console.error('[useChatHistory] reconnect failed', error);
         const ownerStillRunning = ownerStatus === 'running';
-        if (
-          ownerStillRunning ||
-          historyLooksIncomplete ||
-          hasOutstandingRequest
-        ) {
+        if (ownerStillRunning || historyLooksIncomplete) {
           const delay =
             attachRetryDelayByThread.get(ownerThreadId) ??
             INITIAL_ATTACH_RETRY_MS;

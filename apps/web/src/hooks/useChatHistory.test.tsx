@@ -1523,66 +1523,6 @@ describe('useChatHistory paging', () => {
     ).toEqual(['old', 'new']);
     expect(latestOwnerHistoryReady).toBe(true);
   });
-  it.each(['completed', 'inactive'] as const)(
-    'awaits request reconciliation before history refresh and queue settlement after %s attach',
-    async (status) => {
-      seedStore(false);
-      let release!: () => void;
-      const pending = new Promise<void>((resolve) => {
-        release = resolve;
-      });
-      const reconcile = vi
-        .spyOn(turnController, 'reconcileAgentTurnAfterReconnect')
-        .mockReturnValueOnce(pending);
-      const settle = vi
-        .spyOn(turnController, 'settleAgentTurnQueue')
-        .mockImplementation(() => {
-          expect(hasAgentStreamClaim(CANVAS_ID, THREAD_ID)).toBe(false);
-        });
-      apiMocks.reconnectStream.mockImplementationOnce(
-        async (_thread, _canvas, callbacks) => {
-          if (status === 'completed') {
-            callbacks.onEvent({ type: 'done', data: { message: 'Answer' } });
-            callbacks.onComplete();
-          }
-          return { status };
-        },
-      );
-      try {
-        await renderHarness();
-        expect(reconcile).toHaveBeenCalledExactlyOnceWith(CANVAS_ID, THREAD_ID);
-        expect(hasAgentStreamClaim(CANVAS_ID, THREAD_ID)).toBe(true);
-        expect(settle).not.toHaveBeenCalled();
-        expect(apiMocks.fetchHistoryPage).toHaveBeenCalledOnce();
-        await act(async () => {
-          release();
-          await pending;
-        });
-        expect(apiMocks.fetchHistoryPage).toHaveBeenCalledTimes(2);
-        expect(settle).toHaveBeenCalledOnce();
-      } finally {
-        release();
-        reconcile.mockRestore();
-        settle.mockRestore();
-      }
-    },
-  );
-
-  it('does not reconcile a cancelled attach', async () => {
-    seedStore(false);
-    const reconcile = vi.spyOn(
-      turnController,
-      'reconcileAgentTurnAfterReconnect',
-    );
-    apiMocks.reconnectStream.mockResolvedValueOnce({ status: 'aborted' });
-    try {
-      await renderHarness();
-      expect(reconcile).not.toHaveBeenCalled();
-    } finally {
-      reconcile.mockRestore();
-    }
-  });
-
   it.each(['done', 'cancelled', 'error', 'close', 'aborted'])(
     'settles the queue only after releasing the reconnect claim: %s',
     async (terminal) => {

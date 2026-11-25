@@ -53,7 +53,7 @@ export type DraftQuotedComment = QuotedComment & { draftId: string };
 export interface QueuedAgentTurn {
   id: string;
   prepared: PreparedAgentTurn;
-  status: 'pending' | 'sending' | 'uncertain';
+  status: 'pending' | 'sending';
   /** Queued while a settings save was in flight; read them again at send. */
   settingsPending?: boolean;
 }
