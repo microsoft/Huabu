@@ -293,4 +293,44 @@ describe('routeOrthogonalEdge', () => {
       ...obstacles,
     ]);
   });
+
+  it('routes near-aligned fractional endpoints around obstacles while keeping every segment axis-aligned', () => {
+    const obstacles = [{ x: 100, y: -40, w: 80, h: 80 }];
+    const obstructed = routeOrthogonalEdge({
+      ...base,
+      source: { x: 0, y: 0 },
+      target: { x: 300, y: 0.0000005 },
+      obstacles,
+    });
+    expect(obstructed.status).toBe('routed');
+    expect(obstructed.points[0]).toEqual({ x: 0, y: 0 });
+    expect(obstructed.points[obstructed.points.length - 1]).toEqual({
+      x: 300,
+      y: 0.0000005,
+    });
+    expectClear(obstructed.points, obstacles);
+    expectClear(flattenEdgePath(obstructed.path), obstacles);
+    for (let i = 1; i < obstructed.points.length; i++) {
+      const a = obstructed.points[i - 1];
+      const b = obstructed.points[i];
+      expect(a.x === b.x || a.y === b.y).toBe(true);
+    }
+
+    const unobstructed = routeOrthogonalEdge({
+      ...base,
+      source: { x: 0, y: 0.25 },
+      target: { x: 300, y: 0.2500005 },
+    });
+    expect(unobstructed.status).toBe('routed');
+    expect(unobstructed.points[0]).toEqual({ x: 0, y: 0.25 });
+    expect(unobstructed.points[unobstructed.points.length - 1]).toEqual({
+      x: 300,
+      y: 0.2500005,
+    });
+    for (let i = 1; i < unobstructed.points.length; i++) {
+      const a = unobstructed.points[i - 1];
+      const b = unobstructed.points[i];
+      expect(a.x === b.x || a.y === b.y).toBe(true);
+    }
+  });
 });

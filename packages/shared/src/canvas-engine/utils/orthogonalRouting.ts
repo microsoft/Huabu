@@ -151,17 +151,16 @@ function outwardStub(
     exitDistance(point, side, rawRect) + length,
     exitDistance(point, side, inflatedRect),
   );
-  return {
-    x: point.x + NORMAL[side].x * span,
-    y: point.y + NORMAL[side].y * span,
-  };
+  return side === 'left' || side === 'right'
+    ? { x: point.x + NORMAL[side].x * span, y: point.y }
+    : { x: point.x, y: point.y + NORMAL[side].y * span };
 }
 
 function simplify(points: readonly OrthogonalPoint[]): OrthogonalPoint[] {
   const result: OrthogonalPoint[] = [];
   for (const point of points) {
-    if (result.length && distance(result[result.length - 1], point) < EPSILON)
-      continue;
+    const prev = result[result.length - 1];
+    if (prev && prev.x === point.x && prev.y === point.y) continue;
     const a = result[result.length - 2];
     const b = result[result.length - 1];
     // Preserve reversals: removing their bend would change endpoint direction.
@@ -205,16 +204,16 @@ function render(
     const a = points[i - 1];
     const b = points[i];
     const c = points[i + 1];
+    const r = c ? Math.min(radius, distance(a, b) / 2, distance(b, c) / 2) : 0;
     if (
       !c ||
-      !radius ||
+      r < EPSILON ||
       (a.x === b.x && b.x === c.x) ||
       (a.y === b.y && b.y === c.y)
     ) {
       path += ` L ${b.x} ${b.y}`;
       continue;
     }
-    const r = Math.min(radius, distance(a, b) / 2, distance(b, c) / 2);
     const before = {
       x: b.x + Math.sign(a.x - b.x) * r,
       y: b.y + Math.sign(a.y - b.y) * r,
@@ -334,7 +333,7 @@ export function routeOrthogonalEdge(
   if (
     DIRECTION[targetSide] === (DIRECTION[sourceSide] + 2) % 4 &&
     dx * sourceNormal.x + dy * sourceNormal.y > EPSILON &&
-    Math.abs(dx * sourceNormal.y - dy * sourceNormal.x) <= EPSILON &&
+    dx * sourceNormal.y - dy * sourceNormal.x === 0 &&
     !fullObstacles.some((rect) => hits(source, target, rect)) &&
     !(rawSourceRect && hits(source, target, rawSourceRect)) &&
     !(rawTargetRect && hits(source, target, rawTargetRect))
