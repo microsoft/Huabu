@@ -81,6 +81,8 @@ interface IsolatedPageProps {
   url: string;
   /** Reloads the page each time it changes. */
   reloadNonce?: number;
+  /** Told when the page starts and stops loading. */
+  onLoadingChange?: (loading: boolean) => void;
 }
 
 /**
@@ -91,7 +93,11 @@ interface IsolatedPageProps {
  * stands in, at the size it was taken. Resizing a panel is not such a case:
  * the page stays live and follows its edge.
  */
-export function IsolatedPage({ url, reloadNonce = 0 }: IsolatedPageProps) {
+export function IsolatedPage({
+  url,
+  reloadNonce = 0,
+  onLoadingChange,
+}: IsolatedPageProps) {
   const { t } = useTranslation();
   const bridge = getElectronBridge()?.pagePreview;
   const hostRef = useRef<HTMLDivElement>(null);
@@ -108,6 +114,8 @@ export function IsolatedPage({ url, reloadNonce = 0 }: IsolatedPageProps) {
   const [setAside, setSetAside] = useState(false);
   const errorRef = useRef(error);
   errorRef.current = error;
+  const onLoadingChangeRef = useRef(onLoadingChange);
+  onLoadingChangeRef.current = onLoadingChange;
 
   useEffect(() => {
     if (!bridge) return;
@@ -136,7 +144,9 @@ export function IsolatedPage({ url, reloadNonce = 0 }: IsolatedPageProps) {
   useEffect(() => {
     if (!bridge) return;
     const stopState = bridge.onState((state) => {
-      if (state.id === id) setError(state.error);
+      if (state.id !== id) return;
+      setError(state.error);
+      onLoadingChangeRef.current?.(state.loading);
     });
     const stopFocus = bridge.onFocus((focused) => {
       // The click went to the page. Tell this document as a click here
@@ -151,6 +161,7 @@ export function IsolatedPage({ url, reloadNonce = 0 }: IsolatedPageProps) {
     return () => {
       stopState();
       stopFocus();
+      onLoadingChangeRef.current?.(false);
     };
   }, [bridge, id]);
 

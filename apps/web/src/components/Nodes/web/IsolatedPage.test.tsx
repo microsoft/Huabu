@@ -245,6 +245,25 @@ describe('IsolatedPage', () => {
     expect(container.textContent).not.toContain('node.failedLoadPage');
   });
 
+  it('tells its owner when the page starts and stops loading', async () => {
+    const onLoadingChange = vi.fn();
+    await act(async () => {
+      root.render(
+        <IsolatedPage
+          url="https://example.com/page"
+          onLoadingChange={onLoadingChange}
+        />,
+      );
+    });
+    const id = bridge.show.mock.calls[0][0] as string;
+    act(() => reportState({ id, loading: true, error: null }));
+    expect(onLoadingChange).toHaveBeenLastCalledWith(true);
+    act(() => reportState({ id: 'another-page', loading: false, error: null }));
+    expect(onLoadingChange).toHaveBeenCalledOnce();
+    act(() => reportState({ id, loading: false, error: null }));
+    expect(onLoadingChange).toHaveBeenLastCalledWith(false);
+  });
+
   it('reports a click into the page as a press here', async () => {
     await render();
     const id = bridge.show.mock.calls[0][0] as string;

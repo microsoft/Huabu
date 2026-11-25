@@ -9,6 +9,7 @@ import { useTranslation } from 'react-i18next';
 import { resolveArtifactUrl } from '@/api/artifact';
 import { getWebPage, getWebReader } from '@/api/web';
 import { Button } from '@/components/Common/Button';
+import { Spinner } from '@/components/Common/Spinner';
 import { usePreviewScrollMemory } from '@/hooks/usePreviewScrollMemory';
 import {
   canDownloadWebSource,
@@ -33,13 +34,13 @@ type ViewMode = 'live' | 'reader';
 const REMOTE_URL_RE = /^https?:\/\//i;
 
 /**
- * How long the corner "Loading…" badge lingers before we dismiss it,
+ * How long the header shows a framed page as loading before we stop,
  * regardless of whether the iframe has fired `load`.
  *
  * SPAs commonly delay (or never fire) `load` because every outstanding
  * asset request blocks it. The iframe itself is mounted from the start,
- * so users see the page render progressively underneath the badge —
- * keeping the badge around past this point is just visual noise.
+ * so users see the page render progressively — a spinner past this point is
+ * just visual noise.
  */
 const IFRAME_SPINNER_DISMISS_MS = 1500;
 
@@ -85,6 +86,7 @@ export const WebPreview = ({
   const [pageError, setPageError] = useState<string | null>(null);
   const [readerError, setReaderError] = useState<string | null>(null);
   const [iframeReady, setIframeReady] = useState(false);
+  const [isolatedLoading, setIsolatedLoading] = useState(false);
   const [iframeBumpKey, setIframeBumpKey] = useState(0);
   const [bridgeFailed, setBridgeFailed] = useState(false);
   const onBootstrapError = useCallback(() => setBridgeFailed(true), []);
@@ -209,14 +211,14 @@ export const WebPreview = ({
     }
   }, [pageSrc, pageEmbeddable, isolated]);
 
-  // ── Manage the loading badge + auto-fall back to reader ────────────
+  // ── Manage the loading sign + auto-fall back to reader ─────────────
   //
   // SPAs are notorious for delaying (or never firing) `load` because every
   // outstanding asset request blocks it. We can't gate the iframe visibility
   // on `onLoad` — it would leave the user staring at a hidden iframe even
   // after the page has rendered. So we do two things:
   //
-  //   1. A short "spinner deadline": dismiss the corner badge regardless
+  //   1. A short "spinner deadline": stop the header's spinner regardless
   //      so it doesn't linger forever on slow-but-working pages.
   //   2. A longer "reader fallback deadline": when the iframe still
   //      hasn't fired `load` AND the reader view is ready, silently flip
@@ -351,6 +353,13 @@ export const WebPreview = ({
     appOrigin: window.location.origin,
   });
 
+  const pageLoading =
+    showLive &&
+    Boolean(pageSrc) &&
+    !pageError &&
+    !bridgeFailed &&
+    (isolatedUrl ? isolatedLoading : !iframeReady);
+
   const headerActions =
     pageSrc || externalHref || canDownload ? (
       <>
@@ -360,7 +369,9 @@ export const WebPreview = ({
             aria-label={t('node.reloadPage')}
             onClick={handleReload}
           >
-            <RotateCw />
+            {/* The one sign that a page is loading: nothing is drawn over the
+                page itself, which shows as it arrives. */}
+            {pageLoading ? <Spinner size="xs" /> : <RotateCw />}
           </PreviewHeaderButton>
         ) : null}
         {canDownload ? (
@@ -413,16 +424,20 @@ export const WebPreview = ({
               </Button>
             </div>
           ) : isolatedUrl ? (
-            <IsolatedPage url={isolatedUrl} reloadNonce={iframeBumpKey} />
+            <IsolatedPage
+              url={isolatedUrl}
+              reloadNonce={iframeBumpKey}
+              onLoadingChange={setIsolatedLoading}
+            />
           ) : pageSrc ? (
             <>
               {/* Iframe is ALWAYS mounted and visible — never hidden under an
                   overlay. SPA pages routinely take several seconds to fire
                   the `load` event (every async asset blocks it); hiding the
                   iframe until `load` would leave the user staring at a blank
-                  panel even after the page has fully rendered. Instead we
-                  show a tiny corner spinner that dismisses on `load` OR
-                  after the spinner deadline. */}
+                  panel even after the page has fully rendered. The header's
+                  reload button shows a spinner instead, until `load` OR the
+                  deadline. */}
               <iframe
                 key={`${pageSrc}-${iframeBumpKey}`}
                 ref={liveIframeRef}
@@ -440,14 +455,6 @@ export const WebPreview = ({
                   interactiveBridge.onLoad();
                 }}
               />
-              {!iframeReady ? (
-                <div className="bg-bg-default/90 pointer-events-none absolute top-2 left-2 z-10 flex items-center gap-1.5 rounded-full px-2 py-1 shadow-sm backdrop-blur">
-                  <span className="text-fg-subtle inline-block h-2 w-2 animate-pulse rounded-full bg-current" />
-                  <span className="text-fg-muted text-xs">
-                    {t('status.loadingProgress')}
-                  </span>
-                </div>
-              ) : null}
             </>
           ) : (
             <div className="text-fg-subtle flex h-full w-full items-center justify-center text-sm">
