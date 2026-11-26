@@ -69,7 +69,11 @@ vi.mock('./UserMessage', () => ({
   ),
 }));
 vi.mock('./StatusMessage', () => ({
-  StatusMessage: () => <div data-status />,
+  StatusMessage: ({ onRetry }: { onRetry?: () => void }) => (
+    <div data-status>
+      {onRetry ? <button data-status-retry onClick={onRetry} /> : null}
+    </div>
+  ),
 }));
 vi.mock('../Common/Button', () => ({
   Button: ({
@@ -708,6 +712,69 @@ describe('manual virtual chat', () => {
     act(() => (virtual.props.startReached as () => void)());
     expect(load).toHaveBeenCalledOnce();
     expect(container.textContent).not.toContain('chat.showEarlierTurns');
+  });
+
+  it('resends the message a failed row belongs to, not the latest one', () => {
+    const retry = vi.fn();
+    const failed = {
+      id: 'failed',
+      role: 'user' as const,
+      content: 'Failed earlier',
+    };
+    render({
+      messages: [
+        failed,
+        { id: 'failed-status', role: 'status', status: 'error' },
+        { id: 'later', role: 'user', content: 'Sent afterwards' },
+        {
+          id: 'later-answer',
+          role: 'assistant',
+          segments: [{ kind: 'text', text: 'Answer' }],
+        },
+      ],
+      onRetry: retry,
+    });
+    act(() =>
+      container
+        .querySelector<HTMLButtonElement>(
+          '[data-chat-message-id="failed-status"] button',
+        )
+        ?.click(),
+    );
+    expect(retry).toHaveBeenCalledExactlyOnceWith(failed);
+  });
+
+  it('offers a resend under an undelivered message and nothing under one being confirmed', () => {
+    const retry = vi.fn();
+    const undelivered = {
+      id: 'not-sent',
+      role: 'user' as const,
+      content: 'Never delivered',
+      delivery: 'undelivered' as const,
+    };
+    render({
+      messages: [
+        undelivered,
+        {
+          id: 'waiting',
+          role: 'user',
+          content: 'Did this arrive?',
+          delivery: 'confirming',
+        },
+      ],
+      onRetry: retry,
+    });
+    expect(
+      container.querySelector('[data-chat-message-id="waiting"] [data-status]'),
+    ).toBeNull();
+    act(() =>
+      container
+        .querySelector<HTMLButtonElement>(
+          '[data-chat-message-id="not-sent"] [data-status-retry]',
+        )
+        ?.click(),
+    );
+    expect(retry).toHaveBeenCalledExactlyOnceWith(undelivered);
   });
 
   it('stops automatic retries on page errors and offers an explicit retry', () => {

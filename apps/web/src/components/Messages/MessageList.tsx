@@ -51,7 +51,8 @@ interface MessageListProps {
   isHistoryLoading?: boolean;
   isHistoryReady?: boolean;
   hideAIActions?: boolean;
-  onRetry?: () => void;
+  /** Resend the user message the failed row belongs to. */
+  onRetry?: (message: Extract<ChatMessage, { role: 'user' }>) => void;
   hasOlderHistory?: boolean;
   isLoadingOlderHistory?: boolean;
   olderHistoryError?: string;
@@ -1011,17 +1012,26 @@ function VirtualMessageList({
         className={`flow-root pb-1 ${CONTENT_INSET}`}
       >
         {message.role === 'user' ? (
-          <UserMessage
-            content={message.content}
-            isFirst={id === ids[0]}
-            quotedComments={message.quotedComments}
-            inputKind={message.inputKind}
-            inkInterpretation={message.inkInterpretation}
-            attachments={message.attachments}
-            selectedNodeIds={message.selectedNodeIds}
-            selectedStrokeIds={message.selectedStrokeIds}
-            invokedSkills={message.invokedSkills}
-          />
+          <>
+            <UserMessage
+              content={message.content}
+              isFirst={id === ids[0]}
+              quotedComments={message.quotedComments}
+              inputKind={message.inputKind}
+              inkInterpretation={message.inkInterpretation}
+              attachments={message.attachments}
+              selectedNodeIds={message.selectedNodeIds}
+              selectedStrokeIds={message.selectedStrokeIds}
+              invokedSkills={message.invokedSkills}
+            />
+            {message.delivery === 'undelivered' ? (
+              <StatusMessage
+                status="error"
+                detail={t('chat.sendNotDelivered')}
+                onRetry={onRetry && (() => onRetry(message))}
+              />
+            ) : null}
+          </>
         ) : message.role === 'assistant' ? (
           <AIMessage
             messageId={id}
@@ -1035,7 +1045,17 @@ function VirtualMessageList({
           <StatusMessage
             status={message.status}
             detail={message.detail}
-            onRetry={onRetry}
+            onRetry={
+              onRetry &&
+              (() => {
+                // The row's own message, which is not always the latest one.
+                const sent = messages
+                  .slice(0, messages.indexOf(message))
+                  .filter((candidate) => candidate.role === 'user')
+                  .at(-1);
+                if (sent?.role === 'user') onRetry(sent);
+              })
+            }
           />
         )}
       </div>

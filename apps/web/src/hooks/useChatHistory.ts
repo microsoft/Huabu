@@ -21,6 +21,7 @@ import { i18n } from '@/i18n';
 import { useAcpThreadChangesStore } from '@/store/acpThreadChangesStore';
 import {
   HISTORY_PAGE_TURNS,
+  keepUnsentMessages,
   MAX_HISTORY_PAGES,
 } from '@/store/chatHistoryCache';
 import {
@@ -77,6 +78,8 @@ import type {
 const KNOWN_HISTORY_ROLES = new Set<string>(['user', 'assistant', 'status']);
 const INITIAL_ATTACH_RETRY_MS = 500;
 const MAX_ATTACH_RETRY_MS = 10_000;
+/** How long a retried load shows as loading even when it fails at once. */
+const RETRY_FEEDBACK_MS = 400;
 const HISTORY_SETTLE_RETRY_MS = [500, 1_000, 2_000];
 const attachRetryDelayByThread = new Map<string, number>();
 
@@ -196,7 +199,13 @@ function historyTurnsToMessages(
 function applyInitialHistoryPage(response: AgentHistoryPageResponse): void {
   const state = useChatStore.getState();
   const messages = historyTurnsToMessages(response.turns);
-  state.setMessages(response.threadId, messages);
+  state.setMessages(
+    response.threadId,
+    keepUnsentMessages(
+      selectThreadMessages(state, response.threadId),
+      messages,
+    ),
+  );
   state.setHistoryPages(response.threadId, [
     {
       limit: HISTORY_PAGE_TURNS,
@@ -503,15 +512,24 @@ export function useChatHistory(
     if (!threadId || !ownerCanvasId) return;
     return useChatStore.getState().retainHistoryView(threadId, historyViewId);
   }, [threadId, ownerCanvasId, historyViewId]);
+  const [attachAttempt, setAttachAttempt] = useState(0);
+  /** When the user last asked for a failed initial load to run again. */
+  const retriedAt = useRef(0);
   const reloadHistory = useCallback(() => {
     const state = useChatStore.getState();
     const thread = state.threadsById[threadId];
-    if (
-      thread?.isStreaming ||
-      thread?.isPreparing ||
-      hasUnreconciledAgentTurn(ownerCanvasId, threadId)
-    ) {
+    if (thread?.isStreaming || thread?.isPreparing) {
       setRefreshError(i18n.t('chat.historyReloadBusy'));
+      return;
+    }
+    if (hasUnreconciledAgentTurn(ownerCanvasId, threadId)) {
+      // A reload would drop a send whose delivery is still being confirmed.
+      // The attachment confirms it and then refreshes history, so start one;
+      // one already in flight is doing this, and restarting would cancel it.
+      setPageFailure(undefined);
+      setRefreshError(undefined);
+      if (!hasAgentStreamClaim(ownerCanvasId, threadId))
+        setAttachAttempt((attempt) => attempt + 1);
       return;
     }
     resetOnHydration.current = true;
@@ -533,7 +551,6 @@ export function useChatHistory(
       ])
     : null;
   const [hydratedOwnerKey, setHydratedOwnerKey] = useState<string | null>(null);
-  const [attachAttempt, setAttachAttempt] = useState(0);
   const isStreaming = useChatStore((state) =>
     selectThreadIsLoading(state, threadId),
   );
@@ -637,7 +654,12 @@ export function useChatHistory(
         );
         setHydratedOwnerKey(ownerHistoryKey);
       })
-      .catch((err: unknown) => {
+      .catch(async (err: unknown) => {
+        // An unreachable server refuses within a frame. A retry the user asked
+        // for stays visibly loading long enough to be seen as an attempt.
+        const shown = RETRY_FEEDBACK_MS - (Date.now() - retriedAt.current);
+        if (shown > 0)
+          await new Promise((resolve) => setTimeout(resolve, shown));
         if (cancelled) return;
         console.warn(`Could not load ${action} history:`, err);
         useChatStore
@@ -844,9 +866,16 @@ export function useChatHistory(
         current.messages.at(-1) === original.at(-1)
       );
     };
-    const localUser = [...original]
-      .reverse()
-      .find((message) => message.role === 'user' && !message.historyTurnId);
+    // A message marked with its delivery is local too, but this refresh is
+    // not waiting for its turn.
+    const localUser = original
+      .filter(
+        (message) =>
+          message.role === 'user' &&
+          !message.historyTurnId &&
+          !message.delivery,
+      )
+      .at(-1);
     const lastPersistedTurn = [...original]
       .reverse()
       .find((message) => message.historyTurnId)?.historyTurnId;
@@ -1158,6 +1187,47 @@ export function useChatHistory(
     ownerUnavailable,
   ]);
 
+  // A send that got no answer holds every later send until the server says
+  // whether it arrived. Only the attachment asks, and nothing else starts one
+  // in an open conversation, so start one when the send's stream is released,
+  // when the network returns, and again after a pause while it stays open.
+  useEffect(() => {
+    if (!threadId || !ownerCanvasId || ownerUnavailable) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const confirm = () => {
+      clearTimeout(timer);
+      if (!hasUnreconciledAgentTurn(ownerCanvasId, threadId)) return;
+      // Ask again later for as long as it stays unconfirmed.
+      timer = setTimeout(confirm, MAX_ATTACH_RETRY_MS);
+      // Offline the attempt can only fail. A claim in flight is a send that
+      // will report here when it ends, or an attachment already asking;
+      // restarting that one would release it and land back here without end.
+      if (!navigator.onLine || hasAgentStreamClaim(ownerCanvasId, threadId))
+        return;
+      const state = useChatStore.getState();
+      // A failed load holds the attachment back; reloading leads to it.
+      if (state.threadsById[threadId]?.historyError)
+        state.setHistoryError(threadId, null);
+      else setAttachAttempt((attempt) => attempt + 1);
+    };
+    // Only a send leaves a request unconfirmed. An attachment's own release
+    // must not start the next one.
+    const unsubscribe = subscribeAgentStreamRelease(
+      ownerCanvasId,
+      threadId,
+      (owner) => {
+        if (owner === 'post') confirm();
+      },
+    );
+    window.addEventListener('online', confirm);
+    confirm();
+    return () => {
+      clearTimeout(timer);
+      unsubscribe();
+      window.removeEventListener('online', confirm);
+    };
+  }, [threadId, ownerCanvasId, ownerUnavailable]);
+
   // An owner seen running that then reports an error has failed. Pause in the
   // same commit that releases the attachment, before a waiting queue can wake;
   // the token keeps a stale snapshot of an older run from pausing a newer one.
@@ -1212,6 +1282,7 @@ export function useChatHistory(
       const state = useChatStore.getState();
       // A failed initial load reruns once its error clears.
       if (state.threadsById[threadId]?.historyError) {
+        retriedAt.current = Date.now();
         state.setHistoryError(threadId, null);
         return;
       }

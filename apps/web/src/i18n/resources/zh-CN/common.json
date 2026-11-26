@@ -1344,7 +1344,7 @@
     "resumeQueue": "继续发送",
     "removeFromQueue": "从队列移除",
     "queueSending": "正在发送…",
-    "queueUncertain": "尚未确认是否送达。请重新打开对话以重连，或先停止再重试。",
+    "sendNotDelivered": "消息没有发出去，请检查网络后重新发送。",
     "send": "发送",
     "aiContentDisclaimer": "AI 生成的内容可能不准确。",
     "slashCommands": "斜杠命令",

@@ -18,19 +18,21 @@ interface ActiveClaim {
 }
 
 const claims = new Map<string, ActiveClaim>();
-const releaseListeners = new Map<string, Set<() => void>>();
+type ReleaseListener = (owner: StreamOwner) => void;
+const releaseListeners = new Map<string, Set<ReleaseListener>>();
 
 function claimKey(canvasId: string, threadId: string): string {
   return `${canvasId}\0${threadId}`;
 }
 
+/** Listeners are told which kind of claim was released. */
 export function subscribeAgentStreamRelease(
   canvasId: string,
   threadId: string,
-  listener: () => void,
+  listener: ReleaseListener,
 ): () => void {
   const key = claimKey(canvasId, threadId);
-  const listeners = releaseListeners.get(key) ?? new Set<() => void>();
+  const listeners = releaseListeners.get(key) ?? new Set<ReleaseListener>();
   listeners.add(listener);
   releaseListeners.set(key, listeners);
   return () => {
@@ -39,8 +41,8 @@ export function subscribeAgentStreamRelease(
   };
 }
 
-function notifyReleased(key: string): void {
-  for (const listener of releaseListeners.get(key) ?? []) listener();
+function notifyReleased(key: string, owner: StreamOwner): void {
+  for (const listener of releaseListeners.get(key) ?? []) listener(owner);
 }
 
 export function claimAgentStream(
@@ -68,7 +70,7 @@ export function claimAgentStream(
       if (claims.get(key) !== active) return;
       claims.delete(key);
       active.controller.abort();
-      notifyReleased(key);
+      notifyReleased(key, owner);
     },
   };
 }
@@ -88,5 +90,6 @@ export function abortAgentStreamClaim(
   if (!active) return;
   if (!active.holdUntilRelease) claims.delete(claimKey(canvasId, threadId));
   active.controller.abort();
-  if (!active.holdUntilRelease) notifyReleased(claimKey(canvasId, threadId));
+  if (!active.holdUntilRelease)
+    notifyReleased(claimKey(canvasId, threadId), active.owner);
 }

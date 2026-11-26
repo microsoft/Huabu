@@ -25,13 +25,75 @@ export function isProtectedHistoryMessage(message: ChatMessage): boolean {
   );
 }
 
+/**
+ * Carry the messages the page sent and has no turn for from `current` into
+ * `next`, a transcript rebuilt from server history. Each keeps its place:
+ * directly after the last persisted turn that preceded it, or first when that
+ * turn is no longer loaded. One whose delivery is still being confirmed gives
+ * way to a newer turn in history.
+ */
+export function keepUnsentMessages(
+  current: readonly ChatMessage[],
+  next: ChatMessage[],
+): ChatMessage[] {
+  const present = new Set(next.map((message) => message.id));
+  const kept: { after?: string; message: ChatMessage }[] = [];
+  let lastTurn: string | undefined;
+  for (const message of current) {
+    if (message.historyTurnId) lastTurn = message.historyTurnId;
+    if (message.role === 'user' && message.delivery && !present.has(message.id))
+      kept.push({ after: lastTurn, message });
+  }
+  if (kept.length === 0) return next;
+  const result = [...next];
+  // Later ones go in first so that earlier ones end up ahead of them.
+  for (const { after, message } of kept.reverse()) {
+    let anchor = result.length - 1;
+    while (
+      anchor >= 0 &&
+      (after === undefined || result[anchor]?.historyTurnId !== after)
+    )
+      anchor -= 1;
+    // A send still being confirmed that history now follows with a newer turn
+    // is taken to be that turn: showing both would repeat the message for as
+    // long as its answer streams.
+    if (
+      message.role === 'user' &&
+      message.delivery === 'confirming' &&
+      result.slice(anchor + 1).some((later) => later.historyTurnId)
+    )
+      continue;
+    result.splice(anchor + 1, 0, message);
+  }
+  return result;
+}
+
 export function historyMessageIds(
   pages: readonly ChatHistoryPage[],
   messages: readonly ChatMessage[],
 ): string[] {
-  const ids = new Set(pages.flatMap((page) => page.messageIds));
-  for (const message of messages) ids.add(message.id);
-  return [...ids];
+  const ids = [...new Set(pages.flatMap((page) => page.messageIds))];
+  const known = new Set(ids);
+  // A message outside every page is local. It sits where the transcript has
+  // it: after the message before it, or ahead of the first one that follows.
+  let previous: string | undefined;
+  let leading: string[] = [];
+  for (const message of messages) {
+    if (known.has(message.id)) {
+      if (leading.length > 0) {
+        ids.splice(ids.indexOf(message.id), 0, ...leading);
+        leading = [];
+      }
+    } else {
+      // Still ahead of every known message while the one before it is too.
+      const at = previous === undefined ? -1 : ids.indexOf(previous);
+      if (at < 0) leading.push(message.id);
+      else ids.splice(at + 1, 0, message.id);
+    }
+    known.add(message.id);
+    previous = message.id;
+  }
+  return [...ids, ...leading];
 }
 
 /** Keep the viewport and the mutable newest page, never evict live interactions. */

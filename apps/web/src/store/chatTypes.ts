@@ -59,6 +59,13 @@ export type ChatMessage =
       role: 'user';
       /** Runtime identity for routing an unaccepted queue item's retry. */
       queuedTurnId?: string;
+      /**
+       * Set on a message the page sent and has no turn for. `confirming`: no
+       * answer arrived and the server is being asked whether it has it.
+       * `undelivered`: it never reached the server and can be sent again.
+       * History has no turn for either, so a refresh keeps the message.
+       */
+      delivery?: 'confirming' | 'undelivered';
       content: string;
       quotedComments?: QuotedComment[];
       inputKind?: AgentRequest['inputKind'];

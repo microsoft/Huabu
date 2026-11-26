@@ -47,14 +47,26 @@ export function ThreadChatInput({
   const queuedTurns = useChatStore((state) =>
     selectThreadQueuedTurns(state, threadId),
   );
-  const queuedMessages = useMemo(
-    () =>
-      queuedTurns.map((turn) => ({
+  // A turn being sent is already in the conversation once it is prepared, and
+  // stays in the queue until the server accepts it. It is listed in one place.
+  const shownAbove = useChatStore((state) =>
+    (state.threadsById[threadId]?.messages ?? [])
+      .flatMap((message) =>
+        message.role === 'user' && message.queuedTurnId
+          ? [message.queuedTurnId]
+          : [],
+      )
+      .join('\n'),
+  );
+  const queuedMessages = useMemo(() => {
+    const above = new Set(shownAbove.split('\n'));
+    return queuedTurns
+      .filter((turn) => !above.has(turn.id))
+      .map((turn) => ({
         ...turn,
         message: createAgentTurnUserMessage(turn.prepared),
-      })),
-    [queuedTurns],
-  );
+      }));
+  }, [queuedTurns, shownAbove]);
   const paused = useChatStore(
     (state) => state.threadsById[threadId]?.queuePaused ?? false,
   );
@@ -74,7 +86,7 @@ export function ThreadChatInput({
 
   return (
     <>
-      {queuedTurns.length > 0 ? (
+      {queuedMessages.length > 0 ? (
         <section
           className="mb-2 min-w-0 text-xs"
           aria-label={t('chat.queuedMessages')}
@@ -82,7 +94,7 @@ export function ThreadChatInput({
           {paused ? (
             <div className="mb-1 flex items-center justify-between gap-2">
               <span className="text-fg-muted" role="status">
-                {t('chat.queuePaused', { count: queuedTurns.length })}
+                {t('chat.queuePaused', { count: queuedMessages.length })}
               </span>
               <Button
                 variant="ghost"
@@ -109,11 +121,7 @@ export function ThreadChatInput({
               <li key={turn.id} className="min-w-0">
                 {turn.status !== 'pending' ? (
                   <p className="text-fg-muted mb-2 text-right" role="status">
-                    {t(
-                      turn.status === 'uncertain'
-                        ? 'chat.queueUncertain'
-                        : 'chat.queueSending',
-                    )}
+                    {t('chat.queueSending')}
                   </p>
                 ) : null}
                 <div className="group/queued-message relative min-w-0">
