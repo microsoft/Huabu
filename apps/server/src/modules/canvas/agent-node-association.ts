@@ -8,9 +8,7 @@ import { initializeAgentNodeCreationAlreadyLocked } from './agent-node-edit.js';
 import {
   applyDeltasOnServerAlreadyLocked,
   hydrateCanvasNodes,
-  toWirePendingEffects,
 } from './canvas-executor.js';
-import { publishCanvasUpdate } from './canvas-sync.js';
 import { withCanvasMutex } from './write-coordinator.js';
 import { space } from '../storage/index.js';
 
@@ -108,19 +106,6 @@ export async function associateAgentNode(
         : [{ type: 'INSERT_NODE', node }],
       originator: { source: 'ui' },
       agentNodeProjection: true,
-    });
-    publishCanvasUpdate(canvasId, {
-      type: 'update',
-      data: {
-        fromVersion: output.fromVersion,
-        toVersion: output.toVersion,
-        deltas: output.deltas,
-        pendingEffects: toWirePendingEffects(output.pendingEffects),
-        ...(output.nodeContentRevisions
-          ? { nodeContentRevisions: output.nodeContentRevisions }
-          : {}),
-        agentNodeProjection: true,
-      },
     });
     return {
       node,

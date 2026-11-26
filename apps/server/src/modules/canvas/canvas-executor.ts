@@ -1303,7 +1303,7 @@ export class CanvasNotFoundError extends Error {
 }
 
 /** Pending effects as they travel: the mutated nodes by id. */
-export function toWirePendingEffects(effects: {
+function toWirePendingEffects(effects: {
   mutatedNodes: readonly CanvasNode[];
   deletedNodeIds: readonly string[];
   contentEditedNodeIds: readonly string[];
@@ -2331,9 +2331,10 @@ async function executePreparedOnServerAlreadyLocked(
  * Mirrors {@link executeOnServer}'s persistence (hydrate → apply →
  * persist content + topology → append delta-log → bump version) but
  * starts from deltas rather than commands, so revert needs no fragile
- * delta→command round-trip. Returns the structural deltas + pending
- * effects so the caller can broadcast them. No-op (empty diff) leaves
- * the version untouched.
+ * delta→command round-trip. Broadcasts the batch like the executor does,
+ * unless `publish` is `false`, and starts what follows from it
+ * ({@link commitReactions}). No-op (empty diff) leaves the version
+ * untouched and does neither.
  */
 export async function applyDeltasOnServer(input: {
   canvasId: string;
@@ -2341,6 +2342,8 @@ export async function applyDeltasOnServer(input: {
   originator: ExecuteOriginator;
   runId?: string;
   change?: CanvasChangeRecord;
+  /** As {@link applyDeltasOnServerAlreadyLocked}'s `publish`. */
+  publish?: boolean;
 }): Promise<{
   canvasId: string;
   fromVersion: number;
@@ -2382,6 +2385,11 @@ export async function applyDeltasOnServerAlreadyLocked(input: {
   agentNodeProjection?: boolean;
   /** Move compensation restores validated execution state after rehome-back. */
   agentNodeMoveState?: ReadonlyMap<string, Record<string, unknown>>;
+  /**
+   * `false` withholds the `update` event. A Space move publishes its writes
+   * only once it has succeeded, so undoing them is not published either.
+   */
+  publish?: boolean;
 }): Promise<{
   canvasId: string;
   fromVersion: number;
@@ -2698,17 +2706,44 @@ export async function applyDeltasOnServerAlreadyLocked(input: {
       canvasId,
       contentChangedNodeIds(deltas),
     );
+    const pendingEffects = {
+      mutatedNodes,
+      deletedNodeIds,
+      contentEditedNodeIds,
+      deferredFitFrameIds: [],
+    };
+    // As in the executor: what follows from the write is decided here. A
+    // replay only inserts a node that existed before (a reverted deletion,
+    // a move taken back, an Agent Node associated again), so every inserted
+    // node counts as restored. A projection takes part too: a conversation
+    // that is named changes what the Frame around it reads.
+    const startFollowUp = commitReactions()?.batch({
+      canvasId,
+      deltas,
+      prestateNodes,
+      finalNodes,
+      restoredNodeIds: [...insertedIds],
+    });
+    if (input.publish !== false) {
+      publishCanvasUpdate(canvasId, {
+        type: 'update',
+        data: {
+          fromVersion,
+          toVersion,
+          deltas,
+          pendingEffects: toWirePendingEffects(pendingEffects),
+          ...(nodeContentRevisions ? { nodeContentRevisions } : {}),
+          ...(input.agentNodeProjection ? { agentNodeProjection: true } : {}),
+        },
+      });
+    }
+    startFollowUp?.();
     return {
       canvasId,
       fromVersion,
       toVersion,
       deltas,
-      pendingEffects: {
-        mutatedNodes,
-        deletedNodeIds,
-        contentEditedNodeIds,
-        deferredFitFrameIds: [],
-      },
+      pendingEffects,
       ...(nodeContentRevisions ? { nodeContentRevisions } : {}),
     };
   } finally {

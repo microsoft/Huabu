@@ -15,20 +15,23 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import fastify from 'fastify';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { editsPerCommand } from '@huabu/shared';
-import { nodeRevisionOf } from '@huabu/shared/canvas-engine';
+import { invertDeltas, nodeRevisionOf } from '@huabu/shared/canvas-engine';
 
 import {
   applyDeltasOnServer,
+  applyDeltasOnServerAlreadyLocked,
   executeOnServer,
   type ExecuteOnServerInput,
   type ExecuteOnServerOutput,
 } from './canvas-executor.js';
 import { subscribeCanvasUpdates } from './canvas-sync.js';
 import canvasRoutes from './canvas.route.js';
+import { setCommitReactions, type CanvasCommit } from './commit-follow-up.js';
 import { expectReplayOf } from './execute-replay.test-support.js';
+import { withCanvasMutex } from './write-coordinator.js';
 import {
   closeStorage,
   createSpace,
@@ -358,6 +361,116 @@ describe.each([['disk'], ['sqlite']] as const)(
       expect(expected.note).toBe(
         nodeRevisionOf({ type: 'note', content: 'note body' }),
       );
+      // The replay publishes its own batch, as the executor does.
+      const published = updates().at(-1)?.data;
+      expect(updates()).toHaveLength(2);
+      expect(published).toMatchObject({
+        fromVersion: forward.toVersion,
+        toVersion: reverted.toVersion,
+        nodeContentRevisions: expected,
+      });
+      expect(published?.deltas).toEqual(reverted.deltas);
+      // A revert stays undoable on every page: it is not a person's edit.
+      expect(published).not.toHaveProperty('source');
+      expect(published).not.toHaveProperty('agentNodeProjection');
+    });
+
+    it('publishes nothing for a delta replay that changes nothing or is told not to publish', async () => {
+      const forward = await run([
+        {
+          type: 'MERGE_NODE_DATA',
+          patches: [{ nodeId: 'note', patch: { content: 'agent text' } }],
+        },
+      ]);
+      const inverse = forward.deltas
+        .filter(
+          (delta): delta is Extract<Delta, { type: 'REPLACE_NODE' }> =>
+            delta.type === 'REPLACE_NODE',
+        )
+        .map((delta) => ({ ...delta, prev: delta.next, next: delta.prev }));
+      const withheld = await applyDeltasOnServer({
+        canvasId: CANVAS,
+        deltas: inverse,
+        originator: { source: 'system' },
+        publish: false,
+      });
+      expect(withheld.toVersion).toBe(forward.toVersion + 1);
+      expect(updates()).toHaveLength(1);
+
+      // Already taken back: the same rows now change nothing.
+      const empty = await applyDeltasOnServer({
+        canvasId: CANVAS,
+        deltas: inverse,
+        originator: { source: 'system' },
+      });
+      expect(empty.toVersion).toBe(empty.fromVersion);
+      expect(updates()).toHaveLength(1);
+    });
+
+    it('starts what follows from a delta replay after publishing it, a projection included', async () => {
+      const forward = await run([
+        { type: 'DELETE_NODES', nodeIds: ['pdf'] },
+        {
+          type: 'MERGE_NODE_DATA',
+          patches: [{ nodeId: 'note', patch: { content: 'agent text' } }],
+        },
+      ]);
+      const publishedWhenStarted: number[] = [];
+      const batch = vi.fn((_commit: CanvasCommit) => () => {
+        publishedWhenStarted.push(updates().length);
+      });
+      setCommitReactions({
+        batch,
+        contentSave: () => undefined,
+        agentNodeRestored: () => undefined,
+      });
+      try {
+        const reverted = await applyDeltasOnServer({
+          canvasId: CANVAS,
+          deltas: invertDeltas(forward.deltas),
+          originator: { source: 'ui' },
+        });
+        expect(batch).toHaveBeenCalledOnce();
+        const [commit] = batch.mock.calls[0] as [CanvasCommit];
+        expect(commit.canvasId).toBe(CANVAS);
+        expect(commit.deltas).toEqual(reverted.deltas);
+        // The deleted PDF is back; its extracted text is derived again.
+        expect(commit.restoredNodeIds).toEqual(['pdf']);
+        expect(commit.prestateNodes.map((node) => node.id)).not.toContain(
+          'pdf',
+        );
+        expect(commit.finalNodes.map((node) => node.id)).toContain('pdf');
+        // Started once the pages have been told of the write.
+        expect(publishedWhenStarted).toEqual([2]);
+
+        batch.mockClear();
+        const note = commit.finalNodes.find((node) => node.id === 'note');
+        if (!note) throw new Error('The seeded note is missing');
+        const projected = await withCanvasMutex(CANVAS, () =>
+          applyDeltasOnServerAlreadyLocked({
+            canvasId: CANVAS,
+            deltas: [
+              {
+                type: 'REPLACE_NODE',
+                prev: note,
+                next: { ...note, data: { ...note.data, label: 'Projected' } },
+              },
+            ] as Delta[],
+            originator: { source: 'system' },
+            agentNodeProjection: true,
+          }),
+        );
+        expect(projected.toVersion).toBe(reverted.toVersion + 1);
+        // A title a projection wrote is what a Frame around the node reads.
+        expect(batch).toHaveBeenCalledOnce();
+        const [titled] = batch.mock.calls[0] as [CanvasCommit];
+        expect(titled.deltas).toMatchObject([
+          { type: 'REPLACE_NODE', next: { data: { label: 'Projected' } } },
+        ]);
+        expect(titled.restoredNodeIds).toEqual([]);
+      } finally {
+        setCommitReactions(undefined);
+      }
     });
   },
 );

@@ -116,7 +116,7 @@ export function selectNodesToPreprocess(input: {
   deltas: readonly Delta[];
   prestateNodes: readonly CanvasNode[];
   finalNodes: readonly CanvasNode[];
-  /** Nodes a `RESTORE_NODES` command put back (`CanvasCommit`). */
+  /** Nodes the batch put back (`CanvasCommit`). */
   restoredNodeIds?: readonly string[];
 }): PreprocessCandidate[] {
   const before = indexNodes(input.prestateNodes);

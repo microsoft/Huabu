@@ -11,6 +11,7 @@ import {
   type TestInfo,
 } from '@playwright/test';
 
+import { agentExecute, type AgentExecuteResponse } from './agent-execute';
 import { editsPerCommand } from './helpers';
 
 import type * as CanvasStore from '../src/store/canvasStore';
@@ -35,7 +36,8 @@ import type { CreateCanvasResponse } from '@huabu/shared';
  * Case (g) is the control: a headless execute request. Case (h) takes one
  * page offline while it edits. Case (i) undoes on one page after the other
  * page changed the same node. Case (j) opens two pages on a note whose
- * height neither has measured yet.
+ * height neither has measured yet. Case (k) runs several Agents writing at
+ * once while a person types and drags.
  *
  * Timing: a structure edit is sent at once and a body is autosaved shortly
  * after the last change, so every scenario waits on the server record rather
@@ -50,6 +52,9 @@ test.use({ hasTouch: false });
 
 const LIVE_WINDOW_MS = 2_000;
 const CONFLICT_TOAST = /This Space was modified elsewhere/;
+/** Every notice the sync layer raises for a refused or unsent change. */
+const SYNC_TROUBLE_TOAST =
+  /modified elsewhere|could not be applied|not synced yet|could not be sent|was reloaded/;
 
 const X = 'node-sync-x';
 const Y = 'node-sync-y';
@@ -87,7 +92,11 @@ interface Device {
 interface ServerNode {
   id: string;
   position: Point;
-  data: { content?: string; style?: { accent?: string } };
+  data: {
+    content?: string;
+    style?: { accent?: string };
+    properties?: Record<string, unknown>;
+  };
 }
 
 async function seedSpace(request: APIRequestContext, title: string) {
@@ -917,6 +926,121 @@ async function executeScenario(
   return result;
 }
 
+const AGENT_ROUNDS = 5;
+
+/**
+ * Three Agents write at once, each several times, while a person on page A
+ * types a body into the note one Agent is tagging and then drags another
+ * note. Every write names different nodes or different properties, so all of
+ * them must land whatever order they arrive in.
+ */
+async function parallelAgentsScenario(
+  browser: Browser,
+  request: APIRequestContext,
+  testInfo: TestInfo,
+) {
+  const { canvasId, a, b } = await openBoth(browser, request, 'Sync agents');
+  const versionBefore = (await serverRecord(request, canvasId)).version;
+  const zFinal = { x: 820 + 10 * AGENT_ROUNDS, y: 90 + 60 * AGENT_ROUNDS };
+  const rounds = Array.from({ length: AGENT_ROUNDS }, (_, index) => index + 1);
+  const writer = async (
+    threadId: string,
+    command: (round: number) => unknown,
+  ) => {
+    const outcomes: { status: number; applied: boolean[] }[] = [];
+    for (const round of rounds) {
+      const response = await agentExecute(request, canvasId, [command(round)], {
+        threadId,
+      });
+      const body = response.ok()
+        ? ((await response.json()) as AgentExecuteResponse)
+        : undefined;
+      outcomes.push({
+        status: response.status(),
+        applied: body?.results.map((result) => result.applied) ?? [],
+      });
+    }
+    return outcomes;
+  };
+  const agents = Promise.all([
+    writer('thread-e2e-agent-creates', (round) => ({
+      type: 'CREATE_NODES',
+      nodes: [
+        {
+          nodeType: 'note',
+          data: { label: `Agent note ${round}`, content: `Made in ${round}` },
+          position: { x: 1500, y: 90 + round * 260 },
+          size: { width: 300, height: 200 },
+        },
+      ],
+    })),
+    writer('thread-e2e-agent-moves', (round) => ({
+      type: 'SET_NODE_GEOMETRY',
+      items: [
+        { nodeId: Z, position: { x: 820 + 10 * round, y: 90 + 60 * round } },
+      ],
+    })),
+    writer('thread-e2e-agent-tags', (round) => ({
+      type: 'MERGE_NODE_DATA',
+      patches: [{ nodeId: X, patch: { properties: { Round: round } } }],
+    })),
+  ]);
+
+  // The person works while the Agents write.
+  const body = 'Body typed while three Agents were writing';
+  await editBody(a.page, X, body);
+  const yMoved = await dragNode(a.page, Y, 120, 60);
+  const agentOutcomes = await agents;
+
+  await waitForServerPosition(request, canvasId, Y, {
+    x: Math.round(yMoved.x),
+    y: Math.round(yMoved.y),
+  });
+  await expect
+    .poll(() => serverBody(request, canvasId, X), { message: 'body saved' })
+    .toBe(body);
+  // Both pages reach the server's version without a reload.
+  await expect(async () => {
+    const { version } = await serverRecord(request, canvasId);
+    expect((await storeState(a.page)).version, 'A version').toBe(version);
+    expect((await storeState(b.page)).version, 'B version').toBe(version);
+  }).toPass();
+  await expect
+    .poll(() => domBody(b.page, X), { message: 'B shows the body' })
+    .toBe(body);
+
+  const server = await serverRecord(request, canvasId);
+  const aState = await storeState(a.page);
+  const bState = await storeState(b.page);
+  const result = {
+    agentOutcomes,
+    versionBefore,
+    serverVersion: server.version,
+    zFinal,
+    serverZ: server.position(Z),
+    serverY: server.position(Y),
+    yMoved,
+    serverBodyX: await serverBody(request, canvasId, X),
+    serverRoundX: server.node(X)?.data.properties?.Round,
+    serverNodeCount: server.order.length,
+    aNodeCount: aState.order.length,
+    bNodeCount: bState.order.length,
+    aBodyX: aState.content[X]?.trim(),
+    bDomZ: await domPosition(b.page, Z),
+    aDomZ: await domPosition(a.page, Z),
+    aPendingContent: aState.pendingContent,
+    aFailedCalls: a.calls.filter((call) => (call.status ?? 0) >= 400),
+    bFailedCalls: b.calls.filter((call) => (call.status ?? 0) >= 400),
+    reloaded: [await wasReloaded(a.page), await wasReloaded(b.page)],
+    toasts:
+      (await a.page.getByText(SYNC_TROUBLE_TOAST).count()) +
+      (await b.page.getByText(SYNC_TROUBLE_TOAST).count()),
+  };
+  await evidence(testInfo, result);
+  await closeBoth(a, b);
+  return result;
+}
+
 // ─── (a) move ───────────────────────────────────────────────────────────────
 
 test('(a) a node dragged on page A moves on page B without a reload', async ({
@@ -1284,5 +1408,47 @@ test('current: (g) an execute request moves the node on both pages without a rel
   expect(result.reloaded).toEqual([false, false]);
   expect(result.bSelected).toEqual([Y]);
   expect(result.bViewportKept).toBe(true);
+  expect(result.toasts).toBe(0);
+});
+
+// ─── (k) several Agents at once ─────────────────────────────────────────────
+
+test('(k) three Agents writing at once while a person types and drags: every write lands and no page reloads or warns', async ({
+  browser,
+  request,
+}, testInfo) => {
+  const result = await parallelAgentsScenario(browser, request, testInfo);
+  // Every Agent write was accepted and applied.
+  for (const outcomes of result.agentOutcomes) {
+    expect(outcomes).toHaveLength(AGENT_ROUNDS);
+    for (const outcome of outcomes) {
+      expect(outcome.status).toBe(200);
+      expect(outcome.applied).toEqual([true]);
+    }
+  }
+  // Each Agent write and the person's drag made a version of their own.
+  expect(result.serverVersion).toBeGreaterThanOrEqual(
+    result.versionBefore + 3 * AGENT_ROUNDS + 1,
+  );
+  // Nothing was written over: the last value of each writer is stored.
+  expect(result.serverNodeCount).toBe(3 + AGENT_ROUNDS);
+  expect(result.serverZ).toEqual(result.zFinal);
+  expect(result.serverRoundX).toBe(AGENT_ROUNDS);
+  expect(result.serverBodyX).toBe('Body typed while three Agents were writing');
+  expect(result.serverY && Math.round(result.serverY.x)).toBe(
+    Math.round(result.yMoved.x),
+  );
+  // Both pages show it, live.
+  expect(result.aNodeCount).toBe(3 + AGENT_ROUNDS);
+  expect(result.bNodeCount).toBe(3 + AGENT_ROUNDS);
+  expect(result.aDomZ).toEqual(result.zFinal);
+  expect(result.bDomZ).toEqual(result.zFinal);
+  expect(result.aBodyX).toBe('Body typed while three Agents were writing');
+  expect(result.aPendingContent).toEqual([]);
+  // No request of either page was refused, no page reloaded, and no notice
+  // about a refused, unsent or discarded change was shown.
+  expect(result.aFailedCalls).toEqual([]);
+  expect(result.bFailedCalls).toEqual([]);
+  expect(result.reloaded).toEqual([false, false]);
   expect(result.toasts).toBe(0);
 });

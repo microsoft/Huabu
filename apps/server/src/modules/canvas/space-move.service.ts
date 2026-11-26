@@ -738,6 +738,7 @@ async function moveCanvasSelectionUnlocked(
                   canvasId: sourceCanvasId,
                   deltas: invertDeltas(sourceWrite.deltas),
                   originator: { source: 'system' },
+                  publish: false,
                   agentNodeMoveState: new Map(
                     movedNodes
                       .filter((node) => node.type === 'question')
@@ -750,6 +751,7 @@ async function moveCanvasSelectionUnlocked(
                 canvasId: destinationCanvasId,
                 deltas: invertDeltas(destinationWrite.deltas),
                 originator: { source: 'system' },
+                publish: false,
               });
               compensation = 'succeeded';
             } catch (compensationError) {

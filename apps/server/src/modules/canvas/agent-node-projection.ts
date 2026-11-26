@@ -10,9 +10,7 @@ import {
 import {
   applyDeltasOnServerAlreadyLocked,
   hydrateCanvasNodes,
-  toWirePendingEffects,
 } from './canvas-executor.js';
-import { publishCanvasUpdate } from './canvas-sync.js';
 import { withCanvasMutex } from './write-coordinator.js';
 import { space } from '../storage/index.js';
 import { acquireWorkspaceOperationLease } from '../workspace.js';
@@ -92,27 +90,12 @@ export async function projectAgentNodeStateAlreadyLocked(
   if (!node) return false;
   const data = projectAgentNodeTransition(node.data, parsed.data);
   if (!data) return false;
-  const output = await applyDeltasOnServerAlreadyLocked({
+  await applyDeltasOnServerAlreadyLocked({
     canvasId,
     deltas: [{ type: 'REPLACE_NODE', prev: node, next: { ...node, data } }],
     originator: { source: 'system' },
     agentNodeProjection: true,
   });
-  if (output.toVersion > output.fromVersion) {
-    publishCanvasUpdate(canvasId, {
-      type: 'update',
-      data: {
-        fromVersion: output.fromVersion,
-        toVersion: output.toVersion,
-        deltas: output.deltas,
-        pendingEffects: toWirePendingEffects(output.pendingEffects),
-        ...(output.nodeContentRevisions
-          ? { nodeContentRevisions: output.nodeContentRevisions }
-          : {}),
-        agentNodeProjection: true,
-      },
-    });
-  }
   return true;
 }
 
